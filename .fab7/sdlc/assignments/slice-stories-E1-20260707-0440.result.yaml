@@ -1,0 +1,53 @@
+assignment_id: "slice-stories-E1-20260707-0440"
+role: "planning_lead (Sol)"
+status: "completed"
+summary: >
+  Sliced epic E1 (provider-agnostic governance core) into 5 small, independently
+  verifiable stories with disjoint (path-prefix) write scopes, grounded in real
+  openbox-core/openbox-backend symbols via code-graph. Recommended first batch:
+  E1-S1 (normalized event contract) + E1-S2 (developer-agent registration) in
+  parallel — no deps, disjoint scopes, different repos. Backlog written to
+  .fab7/sdlc/stories/E1-backlog.md. No scope collisions; blast-radius check clean.
+artifacts:
+  created_or_updated:
+    - ".fab7/sdlc/stories/E1-backlog.md"
+  proposed_only:
+    - "5 stories E1-S1..E1-S5 (specs to be authored by draft-story; ledger by init-ledger)"
+write_scope_used:
+  - ".fab7/sdlc/stories/E1-backlog.md"
+  - ".fab7/sdlc/assignments/slice-stories-E1-20260707-0440.result.yaml"
+validation:
+  ran:
+    - command: "code-graph blast-radius on candidate scopes (core content/api, core services/datastore, backend agent, backend governance-event)"
+      result: "pass"
+      evidence: "no cross-scope collisions surfaced; path-prefix disjointness holds"
+    - command: "persistence-path grounding (openbox-core write path, backend read/registration)"
+      result: "pass"
+      evidence: "EvaluateGovernanceEvent→governance_workflow→datastore; GovernanceEventService read; content/governance.go event types"
+  not_run:
+    - command: "exact per-repo validation commands (npm scripts / go test targets + DB fixtures)"
+      reason: "must be confirmed and recorded in project memory validation-commands.yaml before stories are marked ready"
+findings:
+  - classification: "observation"
+    severity: "high"
+    target: "E1-S1 (event contract)"
+    detail: "The normalized event contract is the keystone; freeze it before core (S3) and backend implement against it"
+    recommendation: "Build E1-S1 first (with E1-S2 in parallel)"
+  - classification: "observation"
+    severity: "medium"
+    target: "sequencing"
+    detail: "S1→S3→S4 (core chain) and S2→S5 (backend chain); S1+S2 parallel first batch"
+    recommendation: "draft-story in that order; init-ledger for E1 story entries"
+  - classification: "observation"
+    severity: "medium"
+    target: "E1-S2, E1-S4"
+    detail: "Identity/credential (S2) and session-data persistence/privacy (S4) cross security boundaries"
+    recommendation: "Require security review (Sam) on S2 and S4"
+open_decisions:
+  - "Validation commands per repo (owner: brian/tech lead) — record in validation-commands.yaml before ready"
+  - "E1-S1 contract home: this repo contracts/ vs shared package (owner: brian/tech) — decide at draft-story, non-blocking"
+handoff:
+  next_phase: >
+    draft-story for E1-S1 and E1-S2 (first batch), then E1-S3→S4 and E1-S5; run
+    init-ledger to create E1 story entries. Confirm per-repo validation commands
+    and flag E1-S2/E1-S4 for security review.
