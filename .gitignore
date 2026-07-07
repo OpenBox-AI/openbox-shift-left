@@ -1,0 +1,15 @@
+# Claude Code tooling / fab7-sdlc skill install (local tooling, not project content)
+.claude/
+
+# OS / editor cruft
+.DS_Store
+Thumbs.db
+*.swp
+*~
+.idea/
+.vscode/
+
+# Env / secrets
+.env
+.env.*
+!.env.example

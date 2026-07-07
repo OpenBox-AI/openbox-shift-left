@@ -1,0 +1,63 @@
+assignment_id: "create-architecture-20260707-0345"
+role: "solution_architect (John)"
+status: "completed"
+summary: >
+  Authored the Phase-1 architecture of record for shift-left developer-runtime
+  governance, rewritten around the sponsor's guiding principle: maximal reuse,
+  mirroring the OpenBox agent-runtime SDK for the developer runtime. Discovered
+  that OpenBox already has the full lineage substrate (SessionEntity →
+  GovernanceEventEntity → SpanEntity, plus SessionMerkleLeafEntity for tamper
+  evidence) and a governance ingestion channel (POST /api/v1/governance/evaluate,
+  Bearer obx_ + AIP signing) that the shift-left adapters onboard onto directly.
+  The three prior open architecture decisions (OD-A host, OD-B OTLP intake, OD-C
+  lineage store) are resolved to reuse and recorded as decisions D1/D2/D3. Net-new
+  work is mostly client-side adapters + one additive event-type change.
+artifacts:
+  created_or_updated:
+    - ".fab7/sdlc/design/architecture.md"
+  proposed_only: []
+write_scope_used:
+  - ".fab7/sdlc/design/architecture.md"
+  - ".fab7/sdlc/assignments/create-architecture-20260707-0345.result.yaml"
+validation:
+  ran:
+    - command: "code-graph reuse verification (governance path, session/span entities, SDK auth)"
+      result: "pass"
+      evidence: "cited governance.go:28/273, hook_governance.py:171/381, span_processor.py, governance-event.entity.ts (SessionEntity/SpanEntity/SessionMerkleLeafEntity), agent.service.ts:652"
+    - command: "manual trace: FR/NFR → reuse decision → invariant"
+      result: "pass"
+      evidence: "architecture.md §1 mirror table, §2, §8"
+  not_run:
+    - command: "readiness-check"
+      reason: "runs next, after S3/S4 land"
+findings:
+  - classification: "decision_needed"
+    severity: "high"
+    target: "architecture.md §3 D1/D2/D3"
+    detail: "OD-A/OD-B/OD-C resolved to reuse per sponsor principle (reuse openbox-backend + openbox-core governance pipeline, existing OTLP/span path, and governance_events/SessionEntity — not new service/tables)"
+    recommendation: "Confirm the reuse resolution stands; if any diverges, raise an ADR"
+  - classification: "observation"
+    severity: "high"
+    target: "SessionMerkleLeafEntity"
+    detail: "Existing tamper-evident session merkle leaves give Phase-3 attested provenance substrate for free — no new crypto needed later"
+    recommendation: "Note for Phase-3 planning; nothing to build now"
+  - classification: "observation"
+    severity: "medium"
+    target: "openbox-core isValidGovernanceEventType (governance.go:273)"
+    detail: "Adding developer event types to a Temporal-oriented enum risks breaking consumers that switch on type (INV-8)"
+    recommendation: "Audit governance.evaluated consumers; add a conformance test before merge"
+  - classification: "observation"
+    severity: "medium"
+    target: "Cursor adapter"
+    detail: "Cursor has no OTel and non-interceptable Agent egress; needs an Admin-API poller path — event schema must not assume push-only"
+    recommendation: "Keep schema transport-agnostic; Cursor is fast-follow"
+open_decisions:
+  - "OD4 (owner: brian): privacy/content boundary default — gate on spike S4 before freezing event schema/content fields"
+  - "OD6 (owner: brian): Phase-2 enforcement hook handler type — gate on spike S2"
+  - "OD10 (owner: brian): name the pilot team/repo (mandate posture decided: opt-in)"
+handoff:
+  next_phase: >
+    Run spikes S3 (session→commit attribution) and S4 (privacy boundary) — S4
+    unblocks freezing the developer event schema. Then readiness-check → create-epic,
+    using the §1 reuse mirror as the epic-slicing spine. Phase-2 enforcement epic
+    blocked on spike S2.
