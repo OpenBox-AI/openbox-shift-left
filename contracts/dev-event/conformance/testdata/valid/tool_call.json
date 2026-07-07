@@ -1,0 +1,17 @@
+{
+  "schema_version": "1.0",
+  "event_id": "evt-0003",
+  "event_type": "ToolCall",
+  "openbox_session_id": "sess-abc123",
+  "developer_did": "did:aip:7f3c9b2e-0000-5000-a000-000000000001",
+  "timestamp": "2026-07-07T12:00:10Z",
+  "started_at": "2026-07-07T12:00:10Z",
+  "tool": { "name": "Edit", "kind": "file" },
+  "span": {
+    "semantic_type": "file_write",
+    "stage": "started",
+    "file_path": "cli/main.go",
+    "file_operation": "write"
+  },
+  "metadata": { "tool_name": "Edit" }
+}

@@ -1,0 +1,56 @@
+assignment_id: "draft-story-SL1-SL2-20260707-0525"
+role: "planning_lead (Sol)"
+status: "completed"
+summary: >
+  Drafted the two first-batch shift-left story contracts: STORY-SL-1 (normalized
+  developer event contract + Go conformance test, scope contracts/) and STORY-SL-2
+  (openbox CLI + dev init, scope cli/). Both are self-contained (design facts
+  inlined from S6/S1/S5/S3), disjoint-scoped, and pass the story-draft-checklist.
+  Pinned OD17 = Go for the client stack. SL-2 carries two G1_READY human gates
+  (default aivss_config profile, pilot org) and a G_SEC review — owners named,
+  drafts otherwise worker-ready.
+artifacts:
+  created_or_updated:
+    - ".fab7/sdlc/stories/STORY-SL-1.md"
+    - ".fab7/sdlc/stories/STORY-SL-2.md"
+    - ".fab7/sdlc/design/architecture.md"
+  proposed_only: []
+write_scope_used:
+  - ".fab7/sdlc/stories/STORY-SL-1.md"
+  - ".fab7/sdlc/stories/STORY-SL-2.md"
+  - ".fab7/sdlc/design/architecture.md"
+  - ".fab7/sdlc/assignments/draft-story-SL1-SL2-20260707-0525.result.yaml"
+validation:
+  ran:
+    - command: "story-draft-checklist (value/AC/scope/deps/self-contained/validation/invariants/stop/risk/human-gates)"
+      result: "pass"
+      evidence: "both stories: one-line value, observable AC, disjoint scopes (contracts/ vs cli/), inlined sources, Go validation cmds, invariants + stop conditions, risk set, human gates with owners"
+  not_run:
+    - command: "go build/test in contracts/ and cli/"
+      reason: "no code yet — these are the specs the build agent implements; validation cmds are specified for build time"
+findings:
+  - classification: "observation"
+    severity: "high"
+    target: "OD17 stack"
+    detail: "DECIDED Go — single binary, crypto/ed25519 for AIP signing, adapters as shims; recorded in architecture, pins validation commands"
+    recommendation: "SL-3 client + all adapters follow Go"
+  - classification: "decision_needed"
+    severity: "medium"
+    target: "STORY-SL-2 G1_READY gates"
+    detail: "Default aivss_config risk profile for a developer agent, and the pilot org/repo (OD10), are open human gates owned by brian"
+    recommendation: "Provide the default aivss_config profile before SL-2 build; pilot org can stay mock-only for unit tests"
+  - classification: "observation"
+    severity: "high"
+    target: "STORY-SL-2 security"
+    detail: "Mints/handles Ed25519 + obx_ credentials — high risk; requires Sam (security) review at G_SEC"
+    recommendation: "Route SL-2 through security review before/at build"
+open_decisions:
+  - "SL-2 G1: default aivss_config profile for developer agents (owner: brian)"
+  - "OD10: name pilot org/repo (owner: brian) — else SL-2 integration test is mock-only"
+  - "SL-1 G1: contract home contracts/ vs shared package (owner: brian/tech)"
+handoff:
+  next_phase: >
+    init-ledger to create STORY-SL-1 and STORY-SL-2 entries (G1_READY once the
+    SL-2 aivss_config default is provided). Both are buildable against mocks now;
+    SL-1's conformance and SL-2's end-to-end need EXT-core / EXT-signoff
+    (assumed-satisfied). Then build SL-1 + SL-2 (parallel), then SL-3.

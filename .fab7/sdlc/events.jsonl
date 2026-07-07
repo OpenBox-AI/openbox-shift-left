@@ -1,0 +1,1 @@
+{"actor":"core","event":"scan:completed","instance":"adhoc","outcome":{"degraded":[],"enabled":["code-graph","skills-discover"]},"run_id":"adhoc","subject":"scan:all","ts":"2026-07-07T07:40:18Z"}

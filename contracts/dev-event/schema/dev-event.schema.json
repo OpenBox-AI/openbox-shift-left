@@ -1,0 +1,253 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openbox.ai/schemas/dev-event/1.0/dev-event.schema.json",
+  "title": "OpenBox Developer-Runtime Normalized Event",
+  "description": "Tool-agnostic, versioned event contract for developer-runtime coding tools (Claude Code, Codex, Cursor). Every provider adapter maps its native payload onto this shape (SPI emit()), and the OpenBox client translates it verbatim onto openbox-core's GovernanceEventPayload (POST /api/v1/governance/evaluate). Adding a provider never changes the core or the wire format (PRD FR-4, architecture §1b). Verified against openbox-core internal/content/governance.go and internal/content/session.go (spike S6).",
+  "x-schema-version": "1.0",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "event_id",
+    "event_type",
+    "openbox_session_id",
+    "developer_did",
+    "timestamp",
+    "tool"
+  ],
+  "properties": {
+    "schema_version": {
+      "description": "Version of THIS event contract carried on the wire. Bumped on a breaking change to the normalized shape.",
+      "const": "1.0"
+    },
+    "event_id": {
+      "description": "Client-generated unique id for idempotent ingestion (INV-5). Retries/buffered flush reuse the same id so tokens/cost/lineage are never double-counted.",
+      "type": "string",
+      "minLength": 1
+    },
+    "event_type": {
+      "description": "Developer-runtime LIFECYCLE type. Maps 1:1 onto an openbox-core event_type string (added additively by EXT-core; INV-8). See MAPPING.md.",
+      "enum": [
+        "SessionStarted",
+        "PromptSubmitted",
+        "ToolCall",
+        "ToolResult",
+        "SessionEnded",
+        "CommitCreated",
+        "Deploy"
+      ]
+    },
+    "openbox_session_id": {
+      "description": "Opaque logical session id. The client synthesizes core's jointly-unique NOT-NULL (workflow_id, run_id) from it: run_id = openbox_session_id, workflow_id = a stable per-workspace/developer identity (e.g. developer_did or repo). Both required (S6 §4).",
+      "type": "string",
+      "minLength": 1
+    },
+    "developer_did": {
+      "description": "The developer/session agent DID. Shares the runtime-agent DID namespace (INV-7). Reuses agent/create identity (agent_type=developer, S6 §1).",
+      "type": "string",
+      "pattern": "^did:aip:"
+    },
+    "timestamp": {
+      "description": "Event time, RFC3339. Maps verbatim to core payload's string `timestamp`.",
+      "type": "string",
+      "format": "date-time"
+    },
+    "started_at": {
+      "description": "Optional start time for spanning events (ToolCall/session). RFC3339.",
+      "type": "string",
+      "format": "date-time"
+    },
+    "ended_at": {
+      "description": "Optional end time for spanning events (ToolResult/session). RFC3339.",
+      "type": "string",
+      "format": "date-time"
+    },
+    "tool": { "$ref": "#/$defs/tool" },
+    "tokens": { "$ref": "#/$defs/tokens" },
+    "cost": { "$ref": "#/$defs/cost" },
+    "span": { "$ref": "#/$defs/span" },
+    "content": { "$ref": "#/$defs/content" },
+    "metadata": {
+      "description": "Additive per-type key/values. Lands verbatim in core payload's `metadata` (json.RawMessage). Never carries credentials/secrets (INV-1) or raw content (INV-2 — content lives only under `content`).",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "oneOf": [
+    {
+      "title": "SessionStarted",
+      "required": ["event_type"],
+      "properties": { "event_type": { "const": "SessionStarted" } }
+    },
+    {
+      "title": "PromptSubmitted",
+      "required": ["event_type"],
+      "properties": { "event_type": { "const": "PromptSubmitted" } }
+    },
+    {
+      "title": "ToolCall",
+      "required": ["event_type", "span"],
+      "properties": { "event_type": { "const": "ToolCall" } }
+    },
+    {
+      "title": "ToolResult",
+      "required": ["event_type", "span"],
+      "properties": { "event_type": { "const": "ToolResult" } }
+    },
+    {
+      "title": "SessionEnded",
+      "required": ["event_type"],
+      "properties": { "event_type": { "const": "SessionEnded" } }
+    },
+    {
+      "title": "CommitCreated",
+      "required": ["event_type", "metadata"],
+      "properties": {
+        "event_type": { "const": "CommitCreated" },
+        "metadata": {
+          "type": "object",
+          "required": ["commit_sha", "repo"],
+          "properties": {
+            "commit_sha": { "type": "string", "minLength": 1 },
+            "repo": { "type": "string", "minLength": 1 },
+            "branch": { "type": "string" }
+          }
+        }
+      }
+    },
+    {
+      "title": "Deploy",
+      "required": ["event_type", "metadata"],
+      "properties": {
+        "event_type": { "const": "Deploy" },
+        "metadata": {
+          "type": "object",
+          "required": ["deploy_id", "commit_sha"],
+          "properties": {
+            "deploy_id": { "type": "string", "minLength": 1 },
+            "commit_sha": { "type": "string", "minLength": 1 },
+            "repo": { "type": "string" },
+            "environment": { "type": "string" },
+            "deploy_did": {
+              "description": "DID minted for the deploy = git hash + timestamp (FR-6).",
+              "type": "string"
+            }
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "tool": {
+      "description": "The developer tool/action that produced the event. `kind` is the provider-agnostic tool class; `mcp_server` is required when kind=mcp (enforced by the conformance harness).",
+      "type": "object",
+      "required": ["name", "kind"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "description": "Native tool name, e.g. 'Bash', 'Edit', 'mcp__github__create_issue'. Metadata only (INV-2).",
+          "type": "string",
+          "minLength": 1
+        },
+        "kind": {
+          "description": "Provider-agnostic tool class. shell=command execution; file=file read/write/open/delete; mcp=MCP tool call.",
+          "enum": ["shell", "file", "mcp"]
+        },
+        "mcp_server": {
+          "description": "MCP server name when kind=mcp (e.g. 'github').",
+          "type": "string"
+        }
+      }
+    },
+    "tokens": {
+      "description": "Token usage for the turn/tool (metadata only). Absent when unknown.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "input": { "type": "integer", "minimum": 0 },
+        "output": { "type": "integer", "minimum": 0 },
+        "total": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "cost": {
+      "description": "Monetary cost for the turn/tool (metadata only). Absent when unknown.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "amount": { "type": "number", "minimum": 0 },
+        "currency": { "type": "string" }
+      }
+    },
+    "span": {
+      "description": "One semantic span for a tool call/result. Mirrors the subset of openbox-core SpanData an adapter SETS; core COMPUTES `semantic_type` server-side from these source fields (S6 §2) — the value here is the intended target and a hint. Carried in the core payload's `spans[]`.",
+      "type": "object",
+      "required": ["semantic_type", "stage"],
+      "additionalProperties": false,
+      "properties": {
+        "semantic_type": {
+          "description": "Target openbox-core span semantic type. Subset relevant to developer tools; all values exist in core session.go (S6 §2, verified).",
+          "enum": [
+            "file_read",
+            "file_write",
+            "file_open",
+            "file_delete",
+            "mcp_tool_call",
+            "llm_tool_call",
+            "llm_completion",
+            "internal"
+          ]
+        },
+        "stage": {
+          "description": "Maps to core SpanData.stage. ToolCall emits 'started'; ToolResult emits 'completed'.",
+          "enum": ["started", "completed"]
+        },
+        "file_path": { "type": "string" },
+        "file_operation": { "type": "string" },
+        "bytes_read": { "type": "integer", "minimum": 0 },
+        "bytes_written": { "type": "integer", "minimum": 0 },
+        "lines_count": { "type": "integer", "minimum": 0 },
+        "function": { "type": "string" },
+        "module": { "type": "string" },
+        "mcp_server": { "type": "string" },
+        "request_body": {
+          "description": "Tool input content. GATED (INV-2): present only when content-capture is enabled for the org; Guardrail-redacted at source. Maps to core SpanData.request_body.",
+          "type": "string",
+          "x-content-gated": true
+        },
+        "response_body": {
+          "description": "Tool output content. GATED (INV-2). Maps to core SpanData.response_body.",
+          "type": "string",
+          "x-content-gated": true
+        }
+      }
+    },
+    "content": {
+      "description": "The ONLY location for raw prompt/output/file content. GATED (INV-2/OD4): absent by default; present only when an org opts in, and then Guardrail-redacted at source before egress. The conformance harness rejects any event carrying this when content-capture is disabled.",
+      "type": "object",
+      "x-content-gated": true,
+      "properties": {
+        "prompt": { "type": "string" },
+        "output": { "type": "string" },
+        "file_text": { "type": "string" }
+      }
+    },
+    "verdict": {
+      "description": "Canonical governance verdict for PARSING /evaluate responses. Priority: HALT > BLOCK > REQUIRE_APPROVAL > CONSTRAIN > ALLOW. NOTE: openbox-core serializes the response `verdict` field as the LOWERCASE wire strings in x-wire-mapping (verified S6, governance.go MarshalJSON), and also emits a legacy `action` field (x-legacy-action). Phase-1 observe treats every verdict as allow (D7/INV-3). CONSTRAIN is core's sandbox-enforcement tier (Verdict=1), beyond the story's 4-value set — see G3_REVIEW finding.",
+      "type": "string",
+      "enum": ["ALLOW", "CONSTRAIN", "REQUIRE_APPROVAL", "BLOCK", "HALT"],
+      "x-wire-mapping": {
+        "ALLOW": "allow",
+        "CONSTRAIN": "constrain",
+        "REQUIRE_APPROVAL": "require_approval",
+        "BLOCK": "block",
+        "HALT": "halt"
+      },
+      "x-legacy-action": {
+        "allow": "continue",
+        "constrain": "continue",
+        "require_approval": "require-approval",
+        "block": "stop",
+        "halt": "stop"
+      }
+    }
+  }
+}

@@ -1,0 +1,117 @@
+assignment_id: "build-story-SL1-20260707-0759"
+role: "build_engineer"
+story: "STORY-SL-1"
+status: "completed"
+summary: >
+  Built the normalized developer-runtime event contract (STORY-SL-1): a versioned,
+  tool-agnostic JSON Schema (7 lifecycle event types), a mapping doc onto openbox-core's
+  GovernanceEventPayload/SpanData, and a dependency-free Go conformance harness (OD17).
+  Cross-repo shapes were verified against LIVE openbox-core (via Explore), not only the
+  S6 spike notes. Validation green. Two human gates remain: G1_READY (contract home) and
+  G3_REVIEW (mapping approval) — both owned by brian.
+artifacts:
+  created_or_updated:
+    - "contracts/dev-event/README.md"
+    - "contracts/dev-event/schema/dev-event.schema.json"
+    - "contracts/dev-event/MAPPING.md (+ G3 review: session-lifecycle EXT-core dependency, downstream-consumer sweep, client signing/transport notes)"
+    - "contracts/dev-event/COVERAGE.md (provider coverage + mapping rules + bounded non-goals; from tool-docs review)"
+    - "contracts/dev-event/conformance/go.mod"
+    - "contracts/dev-event/conformance/schema.go"
+    - "contracts/dev-event/conformance/validator.go"
+    - "contracts/dev-event/conformance/conformance.go"
+    - "contracts/dev-event/conformance/conformance_test.go"
+    - "contracts/dev-event/conformance/testdata/valid/*.json (8: one per lifecycle type + an MCP ToolCall)"
+    - "contracts/dev-event/conformance/testdata/invalid/*.json (4: unknown-type, missing-required, bad-tool-kind, mcp-missing-server)"
+    - "contracts/dev-event/conformance/testdata/content/*.json (2: gated content + gated span body)"
+    - ".fab7/sdlc/status.yaml (STORY-SL-1 -> in-review; gates pending)"
+  proposed_only: []
+write_scope_used:
+  - "contracts/dev-event/"
+  - ".fab7/sdlc/status.yaml"
+  - ".fab7/sdlc/assignments/build-story-SL1-20260707-0759.result.yaml"
+cross_repo_reference:
+  method: "Explore agent (read-only) over ../openbox-core, per user directive"
+  verified:
+    - "GovernanceEventPayload — internal/content/governance.go:186 (timestamp is a string; metadata is json.RawMessage; span_count/spans[]; multi_agent_session_id/from_agent_did present)"
+    - "SpanData — internal/content/governance.go:266 (file_path/file_operation/bytes_*/lines_count, function/module/args/result, semantic_type COMPUTED server-side, stage)"
+    - "Semantic-type constants — internal/content/session.go:95 (file_read/write/open/delete, mcp_tool_call, llm_tool_call, llm_completion, internal, ...)"
+    - "isValidGovernanceEventType — internal/api/governance.go:273 (accepts 7 Temporal types today; dev types added by EXT-core, 3 additive edits)"
+    - "Verdict — internal/content/governance.go:24 enum + MarshalJSON emits lowercase action strings; GovernanceVerdictResponse governance.go:334"
+    - "Route — internal/api/main.go:123 POST /api/v1/governance/evaluate -> EvaluateGovernanceEvent (AIP-signed)"
+validation:
+  ran:
+    - command: "cd contracts/dev-event/conformance && go build ./... && go vet ./... && go test ./..."
+      result: "pass"
+      evidence: >
+        5 test groups PASS. TestValidSamples: one well-formed sample of EACH of the 7
+        lifecycle types validates (AC). TestInvalidSamplesRejected + TestUnknownTypeRejected:
+        malformed/unknown type rejected (AC a). TestContentGate: content rejected when
+        content-capture disabled, accepted when enabled (AC b, INV-2). TestSchemaEnumMatchesContract:
+        schema loads and declares exactly 7 lifecycle types.
+  not_run:
+    - command: "end-to-end POST to a live openbox-core /evaluate"
+      reason: "EXT-core (accept-list edit) is assumed-satisfied, not built here; contract is authored independently (story dependency note)"
+acceptance_criteria:
+  - id: "versioned schema, 7 lifecycle types"
+    met: true
+    evidence: "schema_version const 1.0 + event_type enum of the 7 types; TestSchemaEnumMatchesContract"
+  - id: "per-type: core event_type + carried span semantic type(s) + metadata fields"
+    met: true
+    evidence: "MAPPING.md §2 table; commit_sha/repo (CommitCreated) and deploy_id/commit_sha (Deploy) required in schema oneOf"
+  - id: "event fields: openbox_session_id->(workflow_id,run_id), developer_did, tool{name,kind,mcp_server?}, timestamps, tokens?, cost?, content? absent by default"
+    met: true
+    evidence: "schema properties + MAPPING.md §1; content under gated $defs.content only"
+  - id: "canonical verdict enum HALT|BLOCK|REQUIRE_APPROVAL|ALLOW for parsing responses"
+    met: true
+    evidence: "$defs.verdict; extended additively with CONSTRAIN + lowercase wire mapping to match live core (see finding)"
+  - id: "Go conformance test: validate each type; reject unknown type + content-when-disabled"
+    met: true
+    evidence: "conformance_test.go, all pass"
+  - id: "documented mapping table schema->GovernanceEventPayload"
+    met: true
+    evidence: "MAPPING.md"
+findings:
+  - classification: "decision_needed"
+    severity: "medium"
+    target: "G3_REVIEW / verdict vocab"
+    detail: >
+      Story pins the verdict vocab as the 4-value HALT|BLOCK|REQUIRE_APPROVAL|ALLOW (S6 §7).
+      Live openbox-core has a 5th tier CONSTRAIN (Verdict=1, sandbox-enforcement/future) and
+      serializes the response `verdict` field LOWERCASE (halt|block|require_approval|constrain|allow)
+      plus a legacy `action` field. The contract defines all 5 canonical values with the lowercase
+      wire mapping so a Phase-1 response parser is correct and forward-compatible.
+    recommendation: "Approve the additive 5th tier at G3_REVIEW; it requires no core change (INV-8 holds)."
+  - classification: "observation"
+    severity: "low"
+    target: "SpanData.semantic_type"
+    detail: >
+      Core COMPUTES semantic_type server-side from source fields (file_path/file_operation,
+      function/module, hook_type). The contract carries semantic_type as the intended target/hint;
+      the client/adapter must set the SOURCE fields (documented in MAPPING.md §3) for the target
+      to land reliably.
+    recommendation: "SL-3 sets source fields + hook_type; do not rely on inbound semantic_type being authoritative."
+gates_resolved:
+  method: "Cross-repo Explore (openbox-temporal-sdk-python/core/backend) + agentic-tool docs review (Claude Code hooks+OTel; Cursor hooks+Admin API; OpenAI Codex hooks+notify+Usage/Cost API), at brian's direction."
+  G1_READY:
+    decision: "confirm"
+    finding: >
+      No shared-contract mechanism exists across the OpenBox repos (no contracts//proto//shared
+      package; payload hand-transcribed per repo; core governance.go is de-facto SoT). contracts/dev-event/
+      in openbox-shift-left is the correct home — shift-left-owned, nothing to slot into, and the
+      ecosystem's first machine-checkable schema+conformance harness. Repo-local publish; SL-3 imports
+      the conformance pkg; EXT-core hand-adds the 7 strings against this spec.
+  G3_REVIEW:
+    decision: "approve"
+    findings:
+      - "INV-8 verified downstream: no core/backend consumer (metadata extractor, guardrails-eligibility, OPA, AGE, observability, webhooks, backend read + varchar(50)) errors/drops/crashes on a new event_type once accept-listed. R5 retired."
+      - "Envelope mapping matches live SDK (source/workflow_id/run_id/spans/metadata; multi_agent_session_id/from_agent_did are Handoff-only, never set by dev events)."
+      - "CAVEAT folded into MAPPING.md: session-row create fires only on WorkflowStarted (storage_session.go:41); SessionStarted->create / SessionEnded->terminal REQUIRES EXT-core edit #3 (lifecycle switch, S6 §3-scoped). Overloading WorkflowStarted rejected: triggers Workflow* OPA-bypass + guardrail-skip + semantic conflation."
+      - "Downstream behavior notes documented: OPA runs for dev types (harmless in observe, useful Phase-2); guardrails/AGE skip dev types (fine — content redaction is at-source per INV-2)."
+      - "Tool-docs coverage: Claude Code/Cursor/Codex in-scope session events map cleanly onto the 7 types + tool/span shape. Bounded non-goals (turn-end, subagent start/stop, compaction, assistant-thought, non-session telemetry) documented in COVERAGE.md as v1.1 candidates behind schema_version. Shell->internal, commit/deploy git-level, and optional tokens/cost confirmed correct-as-designed."
+      - "CONSTRAIN (5th verdict tier) + lowercase wire serialization accepted as additive (no core change)."
+handoff:
+  next_phase: >
+    STORY-SL-1 DONE (both gates resolved). Unblocks STORY-SL-3 (now ready): client library imports
+    contracts/dev-event/conformance to validate outbound events, builds GovernanceEventPayload per
+    MAPPING.md §1-3, signs per §6. EXT-core (assumed-satisfied) implements the 3 additive edits against
+    this contract incl. the lifecycle-switch case for SessionStarted/SessionEnded. No commit made (awaiting instruction).

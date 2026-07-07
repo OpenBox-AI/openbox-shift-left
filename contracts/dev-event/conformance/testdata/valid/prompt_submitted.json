@@ -1,0 +1,12 @@
+{
+  "schema_version": "1.0",
+  "event_id": "evt-0002",
+  "event_type": "PromptSubmitted",
+  "openbox_session_id": "sess-abc123",
+  "developer_did": "did:aip:7f3c9b2e-0000-5000-a000-000000000001",
+  "timestamp": "2026-07-07T12:00:05Z",
+  "tool": { "name": "claude-code", "kind": "shell" },
+  "tokens": { "input": 1200, "output": 340, "total": 1540 },
+  "cost": { "amount": 0.021, "currency": "USD" },
+  "metadata": { "model": "claude-opus-4-8" }
+}

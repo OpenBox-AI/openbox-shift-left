@@ -1,0 +1,16 @@
+{
+  "schema_version": "1.0",
+  "event_id": "evt-0008",
+  "event_type": "Deploy",
+  "openbox_session_id": "sess-abc123",
+  "developer_did": "did:aip:7f3c9b2e-0000-5000-a000-000000000001",
+  "timestamp": "2026-07-07T12:35:00Z",
+  "tool": { "name": "openbox-git-action", "kind": "shell" },
+  "metadata": {
+    "deploy_id": "deploy-2026-07-07-001",
+    "commit_sha": "37ec0a3f1c9b2e0000000000000000000000abcd",
+    "repo": "openbox-ai/openbox-shift-left",
+    "environment": "production",
+    "deploy_did": "did:aip:deploy-37ec0a3-1751890500"
+  }
+}

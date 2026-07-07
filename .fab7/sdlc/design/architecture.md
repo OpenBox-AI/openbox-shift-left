@@ -175,6 +175,7 @@ Former OD-A/OD-B/OD-C are **resolved to reuse** by the sponsor's guiding princip
 | **S6** | **DONE (2026-07-07):** deep-dive of openbox-core/backend/document. Reuse thesis holds; corrections applied (D2 no-OTLP, D4 3-edit precision, D5 agent_type). `.fab7/sdlc/discovery/spikes/S6-external-components-review.md`. | brian (owner) | Resolved. |
 | **OD16** | **DECIDED (2026-07-07): sign — reuse SDK.** The adapter implements AIP Ed25519 request signing on every `/evaluate` call (canonical `METHOD\npath\ntimestamp\nnonce\nbodySHA256` + `X-OpenBox-Agent-*` headers), reusing openbox-temporal-sdk-python's signing; matches the `signing_required=true` platform default. Adds an E2 adapter requirement: secure Ed25519 key handling on the dev machine. | brian (security) | E2 adapter (resolved). |
 | **OD15** (new) | Lineage storage: metadata JSONB (no migration, unindexed) vs indexed columns/lineage table (migration, queryable). The project's only real schema change. | brian (architecture/data) | E1-S5 / E3 / FR-7. External — deferrable. |
+| **OD17** | **DECIDED (2026-07-07): Go.** The `openbox` CLI, the AIP-signed `/evaluate` client, and adapter shims are Go — single static binary, `crypto/ed25519` stdlib for AIP signing, matches openbox-core; adapters are thin per-tool shims that shell out to the binary. | brian (tech) | SL-2/SL-3/adapters (resolved). |
 
 ---
 

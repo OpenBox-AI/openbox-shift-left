@@ -1,0 +1,9 @@
+aliases:
+  discover-seams: code-graph
+  explore: code-graph
+  find-skills: skills-discover
+  install-skill: skills-discover
+  map-code: code-graph
+evidence_grants:
+  blast-radius: code-graph
+version: 1

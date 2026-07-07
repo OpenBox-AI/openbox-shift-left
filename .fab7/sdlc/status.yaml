@@ -1,0 +1,261 @@
+version: 1
+updated_at: "2026-07-07T08:00:00Z"
+owner: "orchestrator"
+stories:
+  STORY-SL-1:
+    title: "Normalized developer event contract + conformance test"
+    status: "done"
+    epic: "E1"
+    sprint: null
+    priority: "P0"
+    dependencies: []
+    blocked_by: []
+    write_scope:
+      - "contracts/dev-event/"
+    validation_commands:
+      - "cd contracts/dev-event/conformance && go build ./... && go test ./..."
+    invariants:
+      - "INV-2: content fields optional and absent by default; schema rejects content-when-disabled"
+      - "INV-8: additive/compatible with openbox-core's accepted event types; no change to Temporal event semantics"
+    gates:
+      G1_READY:
+        decision: "confirm"
+        evidence: "Cross-repo review (SDK/core/backend): NO shared-contract mechanism exists anywhere (no contracts//proto//shared package; payload hand-transcribed per repo; core governance.go is de-facto SoT). So contracts/dev-event/ in openbox-shift-left is the correct home — nothing to slot into, shift-left-owned deliverable, and the ecosystem's first machine-checkable schema+conformance harness. Publish plan: repo-local single source consumed by SL-3 (imports conformance pkg) + adapters; serves as the spec EXT-core implements (hand-adds the 7 strings, as every other type is maintained). No relocation to a shared repo in Phase 1."
+        decided_by: "brian"
+        decided_at: "2026-07-07T08:00:00Z"
+      G3_REVIEW:
+        decision: "approve"
+        evidence: "All 7 lifecycle types map onto GovernanceEventPayload/SpanData with NO core wire change. Verified live: (1) no downstream consumer (metadata extractor, guardrails-eligibility, OPA, AGE, observability, webhooks, backend read + varchar(50) column) errors/drops/crashes on a new event_type once accept-listed — INV-8 holds, R5 retired. (2) Envelope mapping matches SDK (source/workflow_id/run_id/spans/metadata; multi_agent/from_agent Handoff-only). (3) Tool-docs review: Claude Code/Cursor/Codex events map cleanly; bounded non-goals documented in COVERAGE.md. Caveat folded into MAPPING.md: SessionStarted->create/SessionEnded->terminal requires EXT-core edit #3 (lifecycle switch, S6 §3-scoped); overloading WorkflowStarted rejected (OPA-bypass + guardrail-skip + semantic conflation). CONSTRAIN 5th verdict tier + lowercase wire accepted as additive."
+        decided_by: "brian"
+        decided_at: "2026-07-07T08:00:00Z"
+    audit:
+      commit: null
+      completed_at: "2026-07-07T08:00:00Z"
+      validation_artifact: ".fab7/sdlc/assignments/build-story-SL1-20260707-0759.result.yaml"
+      last_run_id: null
+      status_reason: "Built + validated (go build/vet/test green). Both human gates resolved via cross-repo + tool-docs review at brian's direction: G1_READY confirm (contract home), G3_REVIEW approve (clean additive mapping, INV-8 verified downstream). Unblocks STORY-SL-3."
+      blocked_reason: null
+  STORY-SL-2:
+    title: "openbox CLI + dev init --provider"
+    status: "ready"
+    epic: "E2"
+    sprint: null
+    priority: "P0"
+    dependencies: []
+    blocked_by: []
+    write_scope:
+      - "cli/"
+    validation_commands:
+      - "cd cli && go build ./... && go vet ./... && go test ./..."
+      - "openbox dev init --provider claude-code --dry-run  # no network/secret-store writes"
+    invariants:
+      - "INV-1: credentials via OS secret store or hash only; never cleartext in repo/logs/argv"
+      - "INV-4: all records organization_id-scoped"
+      - "INV-7: developer agents share the runtime-agent DID namespace"
+    gates:
+      G1_READY:
+        decision: "not-run"
+        evidence: "aivss_config default POSTURE accepted (brian 2026-07-07, STORY-SL-2); integers verified at build vs calc-aivss-score.ts. Remaining: G_SEC."
+        decided_by: null
+        decided_at: null
+      G_SEC:
+        decision: "not-run"
+        evidence: "Sam security review of cli/ credential-handling paths"
+        decided_by: null
+        decided_at: null
+    audit:
+      commit: null
+      completed_at: null
+      validation_artifact: null
+      last_run_id: null
+      status_reason: "first-batch; aivss_config posture accepted; pending G_SEC review + build-time integer verification"
+      blocked_reason: null
+  STORY-SL-3:
+    title: "OpenBox client library (AIP-signed /evaluate transport)"
+    status: "ready"
+    epic: "E2"
+    sprint: null
+    priority: "P0"
+    dependencies:
+      - "STORY-SL-1"
+    blocked_by: []
+    write_scope:
+      - "client/"
+    validation_commands:
+      - "cd client && go build ./... && go test ./...  # incl. Ed25519 signed-request test + fail-open test"
+    invariants:
+      - "INV-1: obx_ key + Ed25519 private key never logged/leaked"
+      - "INV-2: strips content when content-capture disabled"
+      - "INV-3: fail-open for observe; never blocks the caller"
+      - "INV-5: client event id for idempotent ingestion"
+    gates:
+      G1_READY:
+        decision: "not-run"
+        evidence: null
+        decided_by: null
+        decided_at: null
+      G_SEC:
+        decision: "not-run"
+        evidence: "Sam security review of AIP signing / key handling"
+        decided_by: null
+        decided_at: null
+    audit:
+      commit: null
+      completed_at: null
+      validation_artifact: null
+      last_run_id: null
+      status_reason: "unblocked — STORY-SL-1 done (contract + conformance pkg available to import; build payloads per contracts/dev-event/MAPPING.md §1-3, sign per §6)"
+      blocked_reason: null
+  STORY-SL-4:
+    title: "Claude Code adapter (observe-only)"
+    status: "blocked"
+    epic: "E2"
+    sprint: null
+    priority: "P0"
+    dependencies:
+      - "STORY-SL-1"
+      - "STORY-SL-3"
+    blocked_by:
+      - "STORY-SL-1"
+      - "STORY-SL-3"
+    write_scope:
+      - "adapters/claude-code/"
+    validation_commands:
+      - "cd adapters/claude-code && go build ./... && go test ./...  # + real Claude Code session smoke test"
+    invariants:
+      - "INV-2: metadata-only by default"
+      - "INV-3: observe-only; never denies or blocks a tool call in Phase 1"
+    gates:
+      G1_READY:
+        decision: "not-run"
+        evidence: null
+        decided_by: null
+        decided_at: null
+    audit:
+      commit: null
+      completed_at: null
+      validation_artifact: null
+      last_run_id: null
+      status_reason: null
+      blocked_reason: "awaiting STORY-SL-1, STORY-SL-3"
+  STORY-SL-5:
+    title: "Commit trailer stamping (session->commit binding)"
+    status: "blocked"
+    epic: "E2"
+    sprint: null
+    priority: "P1"
+    dependencies:
+      - "STORY-SL-2"
+    blocked_by:
+      - "STORY-SL-2"
+    write_scope:
+      - "adapters/common/git/"
+    validation_commands:
+      - "cd adapters/common/git && go test ./...  # commit/amend/rebase-squash/fixup matrix (S3)"
+    invariants:
+      - "INV-1: trailer carries only the opaque session id, never secrets"
+      - "INV-6: attribution write side (multiple lines = fan-in; idempotent)"
+    gates:
+      G1_READY:
+        decision: "not-run"
+        evidence: null
+        decided_by: null
+        decided_at: null
+    audit:
+      commit: null
+      completed_at: null
+      validation_artifact: null
+      last_run_id: null
+      status_reason: null
+      blocked_reason: "awaiting STORY-SL-2 (CLI installs the git hook)"
+  STORY-SL-6:
+    title: "OpenBox git action (deploy lineage)"
+    status: "blocked"
+    epic: "E3"
+    sprint: null
+    priority: "P1"
+    dependencies:
+      - "STORY-SL-1"
+      - "STORY-SL-3"
+      - "STORY-SL-5"
+    blocked_by:
+      - "STORY-SL-1"
+      - "STORY-SL-3"
+      - "STORY-SL-5"
+    write_scope:
+      - "actions/openbox-git-action/"
+    validation_commands:
+      - "cd actions/openbox-git-action && go build ./... && go test ./...  # simulated push incl. squash/fixup/force-push"
+    invariants:
+      - "INV-6: resolve at real pushed SHA; unattributed/inferred marker with reason; never silent wrong attribution"
+    gates:
+      G1_READY:
+        decision: "not-run"
+        evidence: null
+        decided_by: null
+        decided_at: null
+    audit:
+      commit: null
+      completed_at: null
+      validation_artifact: null
+      last_run_id: null
+      status_reason: null
+      blocked_reason: "awaiting STORY-SL-1, STORY-SL-3, STORY-SL-5"
+  STORY-SL-7:
+    title: "Codex adapter (fast-follow)"
+    status: "deferred"
+    epic: "E5"
+    sprint: null
+    priority: "P2"
+    dependencies:
+      - "STORY-SL-3"
+    blocked_by: []
+    write_scope:
+      - "adapters/codex/"
+    validation_commands:
+      - "cd adapters/codex && go build ./... && go test ./..."
+    invariants:
+      - "INV-2: metadata-only by default"
+      - "INV-3: observe-only in Phase 1"
+    gates:
+      G1_READY:
+        decision: "not-run"
+        evidence: null
+        decided_by: null
+        decided_at: null
+    audit:
+      commit: null
+      completed_at: null
+      validation_artifact: null
+      last_run_id: null
+      status_reason: "fast-follow after Claude Code (OD13: Codex before Cursor)"
+      blocked_reason: null
+  STORY-SL-8:
+    title: "Cursor adapter (fast-follow)"
+    status: "deferred"
+    epic: "E4"
+    sprint: null
+    priority: "P2"
+    dependencies:
+      - "STORY-SL-3"
+    blocked_by: []
+    write_scope:
+      - "adapters/cursor/"
+    validation_commands:
+      - "cd adapters/cursor && go build ./... && go test ./..."
+    invariants:
+      - "INV-2: metadata-only by default"
+      - "INV-3: observe-only in Phase 1; note Cursor hooks fail-open (S1 B1)"
+    gates:
+      G1_READY:
+        decision: "not-run"
+        evidence: null
+        decided_by: null
+        decided_at: null
+    audit:
+      commit: null
+      completed_at: null
+      validation_artifact: null
+      last_run_id: null
+      status_reason: "fast-follow after Codex (OD13)"
+      blocked_reason: null
