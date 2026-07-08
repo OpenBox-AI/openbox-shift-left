@@ -1,5 +1,5 @@
 version: 1
-updated_at: "2026-07-08T13:30:00Z"  # SL-3 DONE (G_SEC + G1_READY + G3_REVIEW resolved) → unblocks SL-4
+updated_at: "2026-07-08T14:30:00Z"  # SL-4 DONE (brian sign-off); SL4-WIRE-1/2 drafted (wired option); SL-5 drift fix → ready (SL-2 done)
 owner: "orchestrator"
 stories:
   STORY-SL-1:
@@ -118,7 +118,7 @@ stories:
       blocked_reason: null
   STORY-SL-4:
     title: "Claude Code adapter (observe-only)"
-    status: "blocked"
+    status: "done"
     epic: "E2"
     sprint: null
     priority: "P0"
@@ -129,33 +129,42 @@ stories:
     write_scope:
       - "adapters/claude-code/"
     validation_commands:
-      - "cd adapters/claude-code && go build ./... && go test ./...  # + real Claude Code session smoke test"
+      - "cd adapters/claude-code && go build ./... && go vet ./... && go test -race ./...  # 54 tests incl. SL-1 conformance + real-binary observe-only e2e"
     invariants:
       - "INV-2: metadata-only by default"
       - "INV-3: observe-only; never denies or blocks a tool call in Phase 1"
     gates:
       G1_READY:
-        decision: "not-run"
-        evidence: null
-        decided_by: null
-        decided_at: null
+        decision: "confirm"
+        evidence: "brian confirmed 2026-07-08: module home adapters/claude-code/ (own go.mod, replace→client); delivery model = spool-and-flush (hot path local-only for NFR-2, SessionEnd/`flush` delivers off-path); emits SL-1 dev types via client (400→fail-open until EXT-core, accepted)."
+        decided_by: "brian"
+        decided_at: "2026-07-08T14:15:00Z"
+      G_SEC:
+        decision: "approve-with-conditions"
+        evidence: "Sam (security_reviewer) independently traced every egress field + cross-referenced client stripContent. SL3-SEC-3 SATISFIED: no raw content (prompt/command/file/output) can reach OpenBox via metadata, tool.name, tool.mcp_server, or span.* — content fields have no struct field (discarded at unmarshal); tool_input read only for a structural file_path; Bash command never read; adapter does NOT rely on the client's metadata-blind stripper. INV-1/INV-2/INV-3 PASS; injection surfaces safe. 3 LOW conditions ADDRESSED in-code + tested: cap identifiers (maxIdentLen=512), enum-validate lifecycle fields (drop-unknown), reject leading-dash secret-store coordinates. Artifact: .fab7/sdlc/assignments/build-story-SL4-20260708-1400.result.yaml"
+        decided_by: "Sam (security_reviewer)"
+        decided_at: "2026-07-08T14:00:00Z"
+      G3_REVIEW:
+        decision: "approve"
+        evidence: "Independent correctness audit (Reva, review_auditor): safety contract (observe-only/never-block/exit-0/no-stdout/metadata-only/no-secret-I/O-on-hot-path) verified solid; decision REVISE on delivery-path defects. ALL must-fix FIXED + re-validated (54 tests green under -race, was 48): F1 ctx-cancel now persists the undelivered remainder to a recovery file (was silently dropped + doc lied) — TestSpoolCtxCancelPersistsRemainder; F2 orphan .flushing files re-drained — TestSpoolAdoptsOrphan; F3 32 MiB streaming parse (was 1 MiB whole-event drop); F4 workflow_id=DID (no cwd fragmentation); F5 malformed-mcp fallback; F7 content-capture env-overrides-config. F6 (unmeasured latency) → SL4-BENCH-1 follow-up. brian signed off 2026-07-08 (revisions confirmed). Artifact: .fab7/sdlc/assignments/build-story-SL4-20260708-1400.result.yaml"
+        decided_by: "brian"
+        decided_at: "2026-07-08T14:15:00Z"
     audit:
       commit: null
-      completed_at: null
-      validation_artifact: null
+      completed_at: "2026-07-08T14:15:00Z"
+      validation_artifact: ".fab7/sdlc/assignments/build-story-SL4-20260708-1400.result.yaml"
       last_run_id: null
-      status_reason: "unblocked — STORY-SL-1 + STORY-SL-3 done. Imports client/ to emit; maps Claude Code hooks (SessionStart/UserPromptSubmit/PreToolUse/PostToolUse/SessionEnd) → SL-1 events → client.Emit. NOTE before building spans: apply MAPPING-FIX (semantic_type is set via span name + attributes, per SL-3 classificationHints) — see backlog SL-3 review follow-ups."
+      status_reason: "DONE. Built + reviewed (correctness + G_SEC) + all must-fix FIXED + re-validated (54 tests green under -race); brian signed off G1_READY + G3_REVIEW 2026-07-08. New module adapters/claude-code/: hookevent/mapper/spool/adapter/creds/capabilities/installer + cmd/openbox-cc-hook + plugin bundle. Observe-only, metadata-only, fail-open — proven end-to-end (real binary: exit 0, empty stdout, no content leak) and every emitted event validated against the real SL-1 conformance schema. Cross-repo Explore confirmed: core recomputes semantic_type (client handles); dev types still 400 (EXT-core assumed-satisfied); CC hooks expose no tokens/cost (honest limitation). G_SEC = Sam approve-with-conditions (conditions folded in). Follow-ups: SL4-WIRE-1 (CLI registry wiring, cli-scoped — pending brian's wired-vs-self-contained decision), SL4-BENCH-1 (latency evidence), SL4-TOKENS (Phase-2)."
       blocked_reason: null
   STORY-SL-5:
     title: "Commit trailer stamping (session->commit binding)"
-    status: "blocked"
+    status: "ready"
     epic: "E2"
     sprint: null
     priority: "P1"
     dependencies:
       - "STORY-SL-2"
-    blocked_by:
-      - "STORY-SL-2"
+    blocked_by: []
     write_scope:
       - "adapters/common/git/"
     validation_commands:
@@ -174,8 +183,8 @@ stories:
       completed_at: null
       validation_artifact: null
       last_run_id: null
-      status_reason: null
-      blocked_reason: "awaiting STORY-SL-2 (CLI installs the git hook)"
+      status_reason: "READY — dep STORY-SL-2 is done (drift fix 2026-07-08: blocked_by cleared; SL-2 installs the git hook). Session id source is SL-4 (done)."
+      blocked_reason: null
   STORY-SL-6:
     title: "OpenBox git action (deploy lineage)"
     status: "blocked"
@@ -265,3 +274,77 @@ stories:
       last_run_id: null
       status_reason: "fast-follow after Codex (OD13)"
       blocked_reason: null
+  STORY-SL4-WIRE-1:
+    title: "Extract provider SPI to shared module + register Claude Code installer in CLI"
+    status: "ready"
+    epic: "E2"
+    sprint: null
+    priority: "P1"
+    dependencies:
+      - "STORY-SL-2"
+      - "STORY-SL-4"
+    blocked_by: []
+    write_scope:
+      - "provider/"
+      - "cli/"
+      - "adapters/claude-code/"
+    validation_commands:
+      - "cd provider && go build ./... && go test ./..."
+      - "cd cli && go build ./... && go test ./...  # + dev init --provider claude-code --dry-run and a temp-HOME install materializing bundle+config with NO secret in any file"
+    invariants:
+      - "INV-1: installer receives only CredentialRef coordinates (secret-store service/account + DID), never the obx_ key or seed value"
+      - "INV-7: developer agents share the runtime-agent DID namespace"
+    gates:
+      G1_READY:
+        decision: "not-run"
+        evidence: null
+        decided_by: null
+        decided_at: null
+      G_ADR:
+        decision: "not-run"
+        evidence: "ADR required: home of the shared provider SPI module (new `provider/` module vs alternative). Structural decision per CLAUDE.md."
+        decided_by: null
+        decided_at: null
+    audit:
+      commit: null
+      completed_at: null
+      validation_artifact: null
+      last_run_id: null
+      status_reason: "READY (deps SL-2 + SL-4 done). Wired option DECIDED (brian 2026-07-08). Lifts provider.Installer out of cli/internal/ into a shared module both cli + adapters import; cli registers claudecode.Installer replacing the SL-2 stub so `dev init --provider claude-code` installs the plugin for real. NOTE: revises SL-2's G3-approved provider package (relocation) — flag at G3. Opens G_ADR (SPI package home)."
+      blocked_reason: null
+  STORY-SL4-WIRE-2:
+    title: "Unify hook entrypoint into the openbox engine + end-to-end onboarding smoke test"
+    status: "blocked"
+    epic: "E2"
+    sprint: null
+    priority: "P1"
+    dependencies:
+      - "STORY-SL4-WIRE-1"
+      - "STORY-SL-2"
+    blocked_by:
+      - "STORY-SL4-WIRE-1"
+    write_scope:
+      - "cli/"
+      - "adapters/claude-code/"
+    validation_commands:
+      - "cd cli && go build ./... && go test ./...  # + subprocess test: `openbox hook claude-code PreToolUse` → exit 0, EMPTY stdout, event spooled"
+    invariants:
+      - "INV-3: observe-only; the `hook` subcommand on the multi-purpose binary must still ALWAYS exit 0 with empty stdout (no cobra/usage/banner text to stdout → would inject into Claude Code context)"
+    gates:
+      G1_READY:
+        decision: "not-run"
+        evidence: null
+        decided_by: null
+        decided_at: null
+      G_SEC:
+        decision: "not-run"
+        evidence: "Re-verify the observe-only exit-0/empty-stdout contract survives folding the hook into the multi-command `openbox` binary (the SL-4 contract was proven on a single-purpose binary)."
+        decided_by: null
+        decided_at: null
+    audit:
+      commit: null
+      completed_at: null
+      validation_artifact: null
+      last_run_id: null
+      status_reason: null
+      blocked_reason: "awaiting STORY-SL4-WIRE-1 (shared SPI + CLI registration must land first)"

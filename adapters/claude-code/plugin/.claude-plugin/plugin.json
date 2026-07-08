@@ -1,0 +1,8 @@
+{
+  "name": "openbox-observe",
+  "description": "OpenBox developer-runtime governance (observe-only): emits normalized session/tool telemetry to OpenBox. Metadata-only by default; never blocks a tool call (Phase-1).",
+  "version": "0.1.0",
+  "author": { "name": "OpenBox", "url": "https://openbox.ai" },
+  "homepage": "https://openbox.ai",
+  "hooks": "./hooks/hooks.json"
+}

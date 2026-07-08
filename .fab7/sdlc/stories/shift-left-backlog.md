@@ -120,6 +120,37 @@ SL-2 (CLI+init) ─┘  (SL-2 independent; installs SL-4 config + SL-5 hook)
 - **SL3-SEC-4 / F4** (low): worst-case `Emit` wall-clock ≈ (maxRetries+1)×timeout + backoff ≈ 90s. Fine for the async best-effort adapter path (NFR-2 `"async"`); inline callers should pass a bounded `ctx`.
 - **SL3-SEC-7 / F3** (low): top-level `Content.*` is not egressed even when content-capture is enabled (span `request_body`/`response_body` are). Privacy-safe; revisit with SL-4 if prompt/output capture is required.
 
+## Review follow-ups (from SL-4 build + G_SEC + G3_REVIEW, 2026-07-08)
+- **SL4-BENCH-1** (low; F6): add a hot-path (`Observe`) benchmark so the NFR-2 `<50ms p95` claim is evidenced, not just by-design. The dominant real cost (per-hook fork/exec of the Go binary) is outside the code — measure it too.
+- **SL4-TOKENS** (Phase-2): Claude Code hooks expose **no** token/cost usage, so the adapter emits none. Deriving finops requires parsing `transcript_path` (content — privacy-gated per INV-2/OD4). Blocked on a content-capture posture decision.
+- **SL4-SEC (folded)**: the three G_SEC LOW conditions (cap identifiers `maxIdentLen=512`; enum-validate lifecycle fields drop-unknown; reject leading-dash secret-store coordinates) were **addressed in-code + tested** during the build — no open item.
+
+## Wiring stories (SL-4 → CLI integration — DECIDED **wired**, brian 2026-07-08)
+Rationale: deliver the OD12 "one command onboards" front door for real (`openbox dev init --provider claude-code` currently still prints the SL-2 stub). The wiring's real content is the **generic provider-SPI seam** (architecture §1b) + the **single-engine packaging** (OD17/OD18/OD19) — designed once here so SL-7 (Codex) and SL-8 (Cursor) slot in with zero further core/CLI change. These supersede the earlier single "SL4-WIRE-1" follow-up.
+
+### SL4-WIRE-1 — Extract the provider SPI to a shared module + register the Claude Code installer in the CLI
+- **Goal:** make `openbox dev init --provider claude-code` actually install the plugin (bundle + non-secret dev config), replacing the SL-2 `stub`. Lift the `Installer` SPI (`register`/`emit`/`apply`/`capabilities` seam — here the install half) out of `cli/internal/provider` into a **shared importable module** both `cli` and every adapter depend on, so an adapter can implement it without crossing an `internal/` boundary.
+- **Source:** architecture §1b (the SPI is the generic seam), OD12/OD18/OD19, D5/D6; SL-2 provider.go ("adapter stories replace these stubs with real installers"); SL-4 `claudecode.Installer` (built, tested).
+- **Acceptance criteria:**
+  - New shared module (e.g. `provider/`, own `go.mod`) exposing the `Installer` interface + `CredentialRef` (non-secret coordinates only — INV-1). **An ADR records the SPI package home** (structural decision, per CLAUDE.md).
+  - `cli` requires the adapter module (`replace → ../adapters/claude-code`) and registers `claudecode.Installer` for `claude-code`; the SL-2 `stub` remains for still-unbuilt providers (codex/cursor).
+  - `openbox dev init --provider claude-code` performs registration (existing) → **installs the plugin** (materialize bundle + write dev config with secret-store coordinates, never secret values) → reports success; `--dry-run` prints the plan (reuse SL-2); re-init idempotent.
+  - No secret value ever passes through the installer (INV-1): it receives only the `CredentialRef` coordinates SL-2 stored.
+- **Write scope:** `provider/` (new), `cli/` (registry + dev-init wiring), `adapters/claude-code/` (implement the shared interface; drop the self-defined types). **Deps:** SL-2, SL-4 (both done). **Gates:** G2, G3, **G_ADR** (SPI package home). **Invariants:** INV-1, INV-7.
+- **Validation:** `cd cli && go build ./... && go test ./...`; `cd provider && go test ./...`; an integration test: `dev init --provider claude-code --dry-run` prints the plan and `dev init` (against a temp HOME + mock registry) materializes the bundle + config with no secret in any written file.
+- **Note:** revises SL-2's (G3-approved) `provider` package by relocating the interface — flag at G3.
+
+### SL4-WIRE-2 — Unify the hook entrypoint into the `openbox` engine + end-to-end onboarding smoke test
+- **Goal:** fold the standalone `openbox-cc-hook` into the single `openbox` engine binary as `openbox hook claude-code <event>` (OD17/OD18/OD19: the plugin bundles **`bin/openbox`** + hooks, not a per-adapter binary). The installer/plugin reference the unified binary. Prove the whole onboard→observe→deliver flow once.
+- **Source:** OD17 (single Go binary), OD18/OD19 (plugin bundles `bin/openbox`), architecture §1b; SL-4 `cmd/openbox-cc-hook` (to be absorbed).
+- **Acceptance criteria:**
+  - `openbox hook <provider> <event>` subcommand runs the adapter's observe/flush path; the standalone `cmd/openbox-cc-hook` is retired (or reduced to a thin alias).
+  - **The observe-only contract survives the move into the multi-purpose CLI binary (re-verify at G_SEC):** the `hook` subcommand ALWAYS exits 0 with **empty stdout** — no cobra/flag/usage/banner text may reach stdout (it would be injected into Claude Code context on SessionStart/UserPromptSubmit). All diagnostics to stderr only.
+  - `plugin/hooks/hooks.json` + the installer reference `${CLAUDE_PLUGIN_ROOT}/bin/openbox` (the unified engine); `dev init` places that binary in the bundle's `bin/`.
+  - **End-to-end smoke test:** register (mock) → `dev init` install → simulate the 5 hooks via the subcommand → assert normalized events spooled → flush to a mock `/evaluate` → assert received; latency budget + content-absent asserted.
+- **Write scope:** `cli/` (the `hook` subcommand), `adapters/claude-code/` (plugin/hooks.json + installer reference; absorb `cmd/`). **Deps:** SL4-WIRE-1, SL-2. **Gates:** G2, G3, **G_SEC** (re-verify observe-only exit-0/empty-stdout on the unified binary). **Invariants:** INV-3.
+- **Validation:** `cd cli && go build ./... && go test ./...`; a subprocess test that runs `openbox hook claude-code PreToolUse` and asserts exit 0 + empty stdout + a spooled event (the SL-4 real-binary test, moved to the unified binary).
+
 ## Flags
 - **OD10:** name the pilot repo before SL-6's squash-prevalence validation (S3 U-1) and pilot rollout.
 - **OD15 (external, deferred):** lineage storage metadata-JSONB vs indexed — SL-6 uses metadata (no external dep); FR-7 *queryable* read is deferred.

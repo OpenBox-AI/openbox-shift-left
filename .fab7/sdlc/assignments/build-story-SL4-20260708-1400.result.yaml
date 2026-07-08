@@ -1,0 +1,98 @@
+assignment_id: "build-story-SL4-20260708-1400"
+role: "build_engineer"
+story: "STORY-SL-4"
+status: "completed-pending-signoff"
+summary: >
+  Built the OpenBox Claude Code adapter (STORY-SL-4) — the first realization of the generic
+  Provider Adapter Contract (architecture §1b). Maps Claude Code's 5 hooks
+  (SessionStart/UserPromptSubmit/PreToolUse/PostToolUse/SessionEnd) → normalized SL-1 DevEvents →
+  emits via the SL-3 client. Observe-only, metadata-only, fail-open: nothing it does can block,
+  deny, delay (beyond local I/O), or fail a tool call. New Go module adapters/claude-code/
+  (stdlib-only, OD17) with a hook-entrypoint binary + a native CC plugin bundle + an installer
+  that replaces the SL-2 claude-code stub. Delivered off a local spool (hot path = local I/O only,
+  meets NFR-2 <50ms; flush at SessionEnd / via `flush`). 54 tests green under -race, incl. every
+  emitted event validated against the real SL-1 conformance schema + a real-binary end-to-end
+  observe-only assertion. Independently reviewed (correctness + G_SEC); all must-fix findings FIXED
+  and re-validated. Human gates remain: G1_READY + G3_REVIEW (brian sign-off).
+artifacts:
+  created_or_updated:
+    - "adapters/claude-code/go.mod (module …/adapters/claude-code, go 1.23; replace → ../../client + test-only ../../contracts/dev-event/conformance)"
+    - "adapters/claude-code/doc.go (package doc: SPI register/emit/apply/capabilities; apply=no-op in observe; INV-2/INV-3)"
+    - "adapters/claude-code/hookevent.go (HookName + HookEvent = STRUCTURAL fields only; streamed bounded parse; filePath extractor)"
+    - "adapters/claude-code/mapper.go (Map: hook→DevEvent; classifyTool file/shell/mcp incl mcp__server__tool; enum-validate + cap identifiers; no content)"
+    - "adapters/claude-code/spool.go (per-session append-only JSONL; rotate-and-drain; remainder-persistence + orphan adoption)"
+    - "adapters/claude-code/adapter.go (Adapter.Observe hot path / Flush+FlushAll off path; Emitter iface; verdict ignored)"
+    - "adapters/claude-code/creds.go (DID-only hot path resolve; full creds via secret store/env at flush; DevConfig; INV-1)"
+    - "adapters/claude-code/capabilities.go (§1b capability profile; verdict.apply=false, telemetry.tokens=false)"
+    - "adapters/claude-code/installer.go (go:embed plugin bundle; materialize + write non-secret DevConfig; force-enable snippet)"
+    - "adapters/claude-code/plugin/.claude-plugin/plugin.json + plugin/hooks/hooks.json (5 hooks → bin/openbox-cc-hook; async/best-effort)"
+    - "adapters/claude-code/cmd/openbox-cc-hook/main.go (entrypoint: ALWAYS exit 0, empty stdout; SessionEnd flush)"
+    - "adapters/claude-code/{mapper,hookevent,spool,adapter,creds,installer,capabilities,conformance}_test.go + cmd/openbox-cc-hook/main_test.go"
+    - "adapters/claude-code/README.md"
+    - ".fab7/sdlc/status.yaml (STORY-SL-4 → review; G_SEC recorded, G1_READY/G3_REVIEW pending brian)"
+  proposed_only:
+    - "cli/internal/provider wiring to register claudecode.Installer in place of the stub (SL4-WIRE-1 — cli-scoped, provider.Installer is under cli/internal/, not cross-module importable)"
+write_scope_used:
+  - "adapters/claude-code/"
+  - ".fab7/sdlc/status.yaml"
+  - ".fab7/sdlc/assignments/build-story-SL4-20260708-1400.result.yaml"
+cross_repo_reference:
+  method: "Three read-only Explore/guide agents (per user directive: always use explore for cross-repo reference) over ../openbox-core, ../openbox-temporal-sdk-python, and the Claude Code hook docs."
+  verified:
+    - "CORE semantic_type is RECOMPUTED server-side (governance_workflow.go:307-310 → ComputeSemanticTypeFromSpan, session.go:172-272) from span name + attributes; hook_type/file_operation/function IGNORED. Client's classificationHints already sets what core reads → adapter just sets Span.SemanticType + FilePath."
+    - "CORE accept-list (api/governance.go:273) still rejects the 7 dev lifecycle types → live POST 400s → fail-open drop until EXT-core's 3 additive edits. Tests run vs the client's mock (matches SL-3)."
+    - "CORE verdict response = GovernanceVerdictPublicResponse (lowercase verdict strings) — parsed by the SL-3 client; adapter ignores it (observe)."
+    - "SDK (worker.py/interceptors) maps everything onto the 7 Temporal types + sends spans via hook_trigger re-sends; shift-left DELIBERATELY chose distinct dev types (MAPPING §2 rejects overloading WorkflowStarted: OPA-bypass + guardrail-skip). Adapter emits SL-1 types via the client — the intended design."
+    - "SDK/core have NO first-class token/cost field → client carries them in metadata; but Claude Code hooks do not expose tokens/cost at all → adapter emits none (honest limitation, capabilities telemetry.tokens=false)."
+    - "CLAUDE CODE hooks: common fields session_id/cwd/hook_event_name/permission_mode; SessionStart source; SessionEnd reason; Pre/PostToolUse tool_name/tool_input; MCP tools named mcp__<server>__<tool>. Exit 0 + empty stdout = safe no-op; stdout on SessionStart/UserPromptSubmit is INJECTED into context (→ binary writes nothing to stdout). Plugin: .claude-plugin/plugin.json + hooks/hooks.json, ${CLAUDE_PLUGIN_ROOT}."
+validation:
+  ran:
+    - command: "cd adapters/claude-code && go build ./... && go vet ./... && go test -race -count=1 ./..."
+      result: "pass"
+      evidence: >
+        build + vet clean; 54 tests PASS under -race (0 fail). Highlights: TestEmittedEventsAreConformant
+        (every hook's event validated through the REAL SL-1 conformance.ValidateDevEvent + embedded schema,
+        content-capture disabled); TestMap_NoContentLeak + cmd TestHookBinary_ObserveOnlyContract
+        (real compiled binary: exit 0, EMPTY stdout, spool written, tool_input command NOT in spool);
+        TestFlushIsObserveOnly (BLOCK verdict + transport error both swallowed); TestSpoolCtxCancelPersistsRemainder
+        + TestSpoolAdoptsOrphan (F1/F2 delivery fixes); enum-drop / identifier-cap / malformed-mcp guards.
+  acceptance_criteria:
+    - ac: "Plugin bundles the 5 hooks; native→SL-1→SL-3; observe-only, never denies (INV-3)"
+      verdict: "PASS (plugin/hooks.json wires all 5; mapper maps each; verdict discarded; exit-0/empty-stdout proven end-to-end)"
+    - ac: "Normalized telemetry (tool names/MCP) arrives; metadata-only (NFR-1/INV-2)"
+      verdict: "PASS (conformance-validated; metadata-only by construction; delivery-path completeness fixed via F1/F2)"
+    - ac: "Async/best-effort; never blocks if OpenBox unreachable; <50ms p95 (NFR-2/3)"
+      verdict: "PASS never-block/fail-open; <50ms substantiated by design (hot path local-only, no secret I/O) — unmeasured (F6, follow-up)"
+    - ac: "Managed-settings force-enable verified, not activated (NFR-5)"
+      verdict: "PASS (installer Plan prints enabledPlugins snippet; Install does not touch managed settings)"
+reviews:
+  correctness_audit:
+    reviewer: "review_auditor (Reva)"
+    decision: "REVISE → all must-fix FIXED + re-validated"
+    findings:
+      - "F1 (MEDIUM, blocking): ctx-cancel drainFile deleted the undelivered remainder while the doc claimed it was kept → FIXED (drainRotated persists the undelivered tail to a recovery file; delivered lines never re-sent; doc corrected). Regression: TestSpoolCtxCancelPersistsRemainder."
+      - "F2 (LOW-MED): orphaned .flushing.<id> files never re-drained → FIXED (FlushAll re-claims + drains orphans). Regression: TestSpoolAdoptsOrphan."
+      - "F3 (LOW): 1 MiB stdin cap dropped whole event for large writes → FIXED (32 MiB bound + streaming decode; structural fields only). "
+      - "F4 (LOW): cwd-derived workflow_id could fragment a session → FIXED (WorkspaceID empty → client uses DID; stable per session). Regression: TestMap_WorkflowIDIsDIDNotCwd."
+      - "F5 (LOW): malformed mcp__ name → kind=mcp/empty server (non-conformant) → FIXED (fall back to shell/internal). Regression: TestClassifyTool_MalformedMCPFallsBack."
+      - "F6 (INFO): <50ms unmeasured — follow-up (add a hot-path benchmark)."
+      - "F7 (INFO): content-capture env/config precedence → FIXED (env-overrides-config both ways)."
+  security_review:
+    reviewer: "security_reviewer (Sam)"
+    decision: "approve-with-conditions"
+    gate: "G_SEC"
+    evidence: >
+      SL3-SEC-3 SATISFIED: no raw prompt/command/file/output content can reach OpenBox via metadata,
+      tool.name, tool.mcp_server, or span.* — content-bearing fields have NO struct field (discarded at
+      unmarshal); tool_input read only for a structural file_path; Bash command never read. Confirmed the
+      client's stripContent does NOT touch metadata/tool.name, and the adapter correctly does not rely on
+      it. INV-1/INV-2/INV-3 PASS; injection surfaces (sanitizeSessionID, splitMCPName, exec.Command argv,
+      1MiB caps) safe. Conditions (all LOW, ADDRESSED in-code): cap identifier/path fields (maxIdentLen=512),
+      enum-validate lifecycle fields (source/reason/permission_mode drop-unknown), reject leading-dash
+      secret-store coordinates. Artifact-of-record for G_SEC.
+follow_ups:
+  - "SL4-WIRE-1: register claudecode.Installer in the CLI provider registry (replace the SL-2 stub); needs moving provider.Installer out of cli/internal/ (cli-scoped)."
+  - "SL4-BENCH-1 (F6): add a hot-path (Observe) benchmark to substantiate the <50ms p95 claim with evidence."
+  - "SL4-TOKENS (Phase-2): token/cost via transcript_path parsing (content — privacy-gated), since CC hooks expose none."
+  - "MAPPING-FIX (SL-1 doc, pre-existing): MAPPING.md §3 still describes semantic_type as derived from file_operation/function/hook_type; core recomputes from name+attributes. Client already correct; doc fix routes to SL-1 owner (unchanged by SL-4)."
+  - "Durable retry: awaits a client Emit success signal (SL-3) so delivered-then-lost events can retry without double-send."
