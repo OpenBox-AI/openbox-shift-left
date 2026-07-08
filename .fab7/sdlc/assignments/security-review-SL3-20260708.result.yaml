@@ -1,0 +1,298 @@
+assignment_id: "security-review-SL3-20260708"
+role: "security_reviewer"
+reviewer: "Sam"
+story: "STORY-SL-3"
+gate: "G_SEC"
+status: "completed"
+scope: "review-only (no client/ code modified)"
+summary: >
+  G_SEC security review of the OpenBox developer-runtime client library
+  (STORY-SL-3 — the shared AIP-signed /evaluate transport every adapter and the
+  git action will consume). This is a security-boundary review: Ed25519 request
+  signing, obx_ + seed credential handling, and privacy (content stripping).
+
+  SIGNING IS CORRECT. I independently re-verified the Go signer against BOTH
+  openbox-core's server-side verifier (services/agent.go:93
+  BuildAgentIdentityCanonicalRequest + kms_verifier.go:38) AND the reference SDK
+  (openbox-temporal-sdk-python/openbox/request_signing.py:84-95) via read-only
+  Explore — not the builder's claims. Canonical string (UPPER(method) \n path \n
+  timestamp \n nonce \n bodySHA256, single LF, NO trailing newline, path only —
+  no query), Ed25519 over the raw UTF-8 canonical bytes with NO pre-hash,
+  std-base64 signature, body SHA-256 as lowercase hex over the EXACT transmitted
+  bytes (single marshal in buildPayload — body hashed == body sent), RFC3339Nano-
+  parseable timestamp with a +00:00 offset inside core's ±300s window, and a
+  24-byte crypto/rand nonce all match the verifier byte-for-byte. A core-mirror
+  test re-verifies every request exactly as core does; I re-ran build/vet/test
+  (green).
+
+  INV-1 HOLDS on every path traced. The obx_ key and the base64 Ed25519 seed
+  reach exactly one sink each (the Authorization header and ed25519.Sign
+  respectively) and appear in NO log line, error string, argv, or panic. The
+  base64-decode error does not echo the seed; net/url errors carry only the URL
+  (no secret); httpError echoes core's RESPONSE body (never the request auth
+  header). The INV-1 log-safety assertion is tested.
+
+  INV-3 (fail-open) HOLDS: Emit returns (VerdictUnknown, nil) on every marshal /
+  signing / network / non-2xx / exhausted-retry path; the only non-nil error is
+  the empty-EventID precondition. Response body is size-bounded (1 MiB
+  LimitReader). Nonce-generation failure fails open. Default TLS cert
+  verification is on.
+
+  Three conditions, no hard block. (1) NETWORK: the client does not enforce
+  HTTPS — a misconfigured http:// BaseURL to a non-loopback host would send the
+  obx_ bearer key in cleartext. (2) PRIVACY (INV-2): the content stripper covers
+  the explicit content fields correctly and with correct copy semantics, but does
+  NOT cover the free-form `metadata` map or `tool.name`/`span.name`, so INV-2's
+  "redacted at source" guarantee for those channels rests on adapter discipline
+  that is unenforced here. (3) IDEMPOTENCY (INV-5): the required EventID is NEVER
+  transmitted to core (no payload field, no header) and dev event_types carry no
+  activity_id, so — confirmed against core's ingestion path — a retry after a
+  lost response DOUBLE-COUNTS; the "met" AC and the test comment overstate the
+  guarantee. All three are acceptable for a Phase-1 observe pilot with the
+  conditions recorded. Decision: APPROVE-WITH-CONDITIONS.
+
+signing_correctness_verification:
+  method: >
+    Two read-only Explore agents (per standing directive) independently re-derived
+    the contract from the sibling repos; I did NOT rely on the builder's cross-repo
+    claims. Byte-matched the Go signer (client/signing.go) against both.
+  core_verifier:
+    source: "openbox-core internal/services/agent.go:93-101 (canonical), :150-199 (ts/nonce/body checks), did/kms_verifier.go:38-64 (Ed25519 verify)"
+    canonical: "strings.Join([ToUpper(method), path, timestamp, nonce, bodySHA256], \"\\n\") — single LF between the 5 fields, NO trailing newline. path = req.URL.Path (query EXCLUDED)."
+    signature: "base64.StdEncoding decode; KMS Verify MessageType=Raw over []byte(canonical) — i.e. Ed25519 over raw canonical bytes, NO application pre-hash."
+    body_hash: "sha256(body) → hex.EncodeToString (lowercase); subtle.ConstantTimeCompare vs X-OpenBox-Body-SHA256; server RECOMPUTES and uses its own value in the canonical, so header must equal it byte-for-byte."
+    timestamp: "time.Parse(time.RFC3339Nano); freshness symmetric ±identityReplayTTL (default 300s)."
+    nonce: "replay cache keyed agent_identity_nonce:<did>:<nonce>, TTL 300s; any non-empty value; NO entropy requirement enforced server-side."
+    did_binding: "did:aip:<uuid>; claimed uuid must equal uuidv5(OpenBoxAIPNamespace, agentID-of-the-authenticated-key); KMS alias = alias/openbox-agent/<uuid>. Verification is gated on agent.SigningRequired==true (OD16)."
+  reference_sdk:
+    source: "openbox-temporal-sdk-python request_signing.py:84-95 (canonical/sign/headers), config.py:175-207 (seed load)"
+    agreement: "Identical canonical/order/separator/method-casing/no-trailing-newline; Ed25519 over raw UTF-8 canonical; base64.b64encode (std, padded) signature; sha256 hexdigest (lowercase) over the exact transmitted bytes (content=body_bytes, single serialization); nonce=token_urlsafe(24); timestamp=datetime.now(utc).isoformat() → +00:00; seed = std-base64 raw 32-byte, from_private_bytes == ed25519.NewKeyFromSeed."
+  client_match:
+    verdict: "MATCH — the client would be ACCEPTED by core."
+    evidence:
+      - "canonicalString (signing.go:98-100): upper(method)+\\n+path+\\n+ts+\\n+nonce+\\n+bodySHA, no trailing newline — matches agent.go:93. TestCanonicalString_Shape confirms shape."
+      - "path component = evaluatePath \"/api/v1/governance/evaluate\" (client.go:15), the same literal signed and requested; equals core's req.URL.Path (no query). ✓"
+      - "Ed25519 over []byte(canonical), base64.StdEncoding (signing.go:90); seed via base64.StdEncoding + ed25519.NewKeyFromSeed, 32-byte check (signing.go:46-53). ✓"
+      - "bodySHA = hex.EncodeToString(sha256(body)) lowercase (signing.go:75-76); the SAME `body` slice is hashed in sign() and sent via bytes.NewReader(body) in attempt() (client.go:181,186) — single marshal in buildPayload (payload.go:87), never re-encoded. ✓"
+      - "timestamp = now.UTC().Format(\"2006-01-02T15:04:05.999999-07:00\") → +00:00 offset, RFC3339Nano-parseable (verified by time.Parse in signing_test.go:88 and by core's parser); the identical string is signed and placed in X-OpenBox-Agent-Timestamp. ✓"
+      - "nonce = base64.RawURLEncoding(24 crypto/rand bytes) = 32 chars = token_urlsafe(24); 192 bits entropy — ample against replay within the 300s window. ✓"
+      - "DID sent verbatim from Config in X-OpenBox-Agent-DID (client.go:196); core binds it to the authenticated agent — client cannot cross-bind (see SL3-SEC-5)."
+      - "Independently reproduced by the in-test core-mirror verifyLikeCore (signing_test.go:36-62) which rebuilds the canonical from headers + server-recomputed sha and ed25519.Verify's it; TestSign_VerifiesAgainstKnownKeypair passes."
+inv1_secret_flow_trace:
+  api_key:
+    source: "Config.APIKey (obx_) -> Client.apiKey (client.go:106)"
+    sink: "client.go:193 req.Header.Set(Authorization, \"Bearer \"+c.apiKey) — the ONLY sink"
+    other_references: "New() presence check (client.go:77-79); never logged/printed/argv"
+  seed:
+    source: "Config.SeedB64 -> newSigner base64-decode -> ed25519.NewKeyFromSeed -> signer.priv (signing.go:46-53)"
+    sink: "ed25519.Sign(s.priv, canonical) (signing.go:90) — the ONLY sink; seedB64 param is not retained"
+    other_references: "none; length/format errors report bytes-count and offset only, never the value"
+  verified_no_leak_in:
+    - "Both fail-open log lines (client.go:141,147) interpolate only ev.EventID, ev.EventType, and err — never c.apiKey or the seed. TestEmit_FailOpen_Unreachable asserts neither testAPIKey nor testSeedB64 appears in captured logs (client_test.go:189-191)."
+    - "newSigner errors (signing.go:48,51): base64.CorruptInputError reports only 'illegal base64 data at input byte N' (no data); length error reports only the byte count. The seed value cannot appear."
+    - "httpError.Error() (client.go:220-223) embeds truncate(core-RESPONSE-body,256). The secret is only ever in the request Authorization header; core does not echo it into a response body. Safe (same discipline as SL2-SEC-4)."
+    - "Network errors surface as net/url.Error → `Post \"<baseURL+path>\": <cause>`; the URL carries no userinfo/secret. Confirmed no credential in the URL."
+    - "No panics in the package; nonce-gen and id-gen rand failures are handled (return error / empty), not fatal."
+findings:
+  - id: "SL3-SEC-1"
+    classification: "correctness_of_named_invariant"
+    severity: "medium"
+    target: "client/client.go:127-128,257-278(test) + client/payload.go:20-29 + client/event.go:108 (EventID is `json:\"event_id\"` on DevEvent, which is NEVER marshaled to the wire)"
+    detail: >
+      INV-5 (idempotency: retries must not double-count) is NOT actually achieved
+      end-to-end, contrary to the "met" acceptance criterion. Two independently
+      confirmed facts: (a) the required EventID is never transmitted — the wire
+      type is governanceEventPayload (payload.go:20-29), which has NO event_id
+      field, and there is no X-OpenBox-Event-Id header; DevEvent.EventID's
+      `json:"event_id"` tag is inert because DevEvent itself is never marshaled.
+      (b) I verified core's ingestion path (via Explore): core has no event-level
+      idempotency key, no unique DB constraint, and no upsert; its only dedup
+      (CheckExistingEventActivity, validation.go:86-103) fires ONLY when the event
+      carries an activity_id and keys on (agent_id, workflow_id, run_id,
+      activity_id, event_type). The 7 developer event_types carry NO activity_id
+      (the client never sets one; the field does not exist in the payload), so they
+      fall into core's NON-idempotent bucket: a plain INSERT with a fresh UUID.
+      Consequence: when the client's retry loop (client.go:157-176) fires because a
+      response was LOST (the request actually reached and was processed by core),
+      the retry sends a byte-identical body with a fresh nonce/timestamp/signature
+      and core stores a SECOND GovernanceEventEntity row → double-count. The
+      test TestEmit_RetryReusesSameEventID only proves the body is byte-identical
+      across attempts (payloads seen == 2) and its comment ("core dedupes on the
+      same event's metadata/ids") is FALSE per core's code. In Phase-1 observe this
+      is telemetry/finops integrity (duplicate ToolCall/token/cost counts, dup
+      spans), not a confidentiality or authz breach — hence medium, not high.
+    recommendation: >
+      Do not claim INV-5 as satisfied on the current wire. Choose one: (a) Phase-1
+      accept-and-document — retries can double-count observe telemetry; correct the
+      AC wording and the misleading test comment, and note it as known skew; OR
+      (b) achieve real idempotency by transmitting the event id (add it to the
+      payload or an X-OpenBox-Event-Id header) AND extending core to dedupe dev
+      events on it with a backing unique constraint (EXT-core; note core's existing
+      activity dedup is itself a non-atomic check-then-insert with no unique index,
+      so a DB constraint is the durable fix). Track as a follow-up. Non-blocking
+      for the observe pilot once (a) is recorded.
+  - id: "SL3-SEC-2"
+    classification: "hardening"
+    severity: "medium"
+    target: "client/client.go:74-75,105 (New: BaseURL validated only for non-empty; no scheme check) + client.go:186 (baseURL used verbatim)"
+    detail: >
+      The client accepts any BaseURL scheme. If an operator configures
+      BaseURL=\"http://...\" pointing at a non-loopback core (misconfiguration, a
+      copy-paste, or a downgrade attack that rewrites config), every request —
+      including `Authorization: Bearer <obx_ live key>` and the AIP signature —
+      traverses the network in CLEARTEXT and is trivially captured. There is no
+      guardrail. This is INV-1-adjacent: the at-rest guarantee is intact, but the
+      in-transit protection of the bearer credential is left entirely to operator
+      configuration. Default usage (https://core.openbox.ai) is safe, and Go's
+      default http.Client verifies TLS certs (no InsecureSkipVerify), so the
+      exposure requires a plaintext-scheme misconfig — but the fix is a few lines.
+    recommendation: >
+      In New(), reject a non-https BaseURL unless the host is a loopback address
+      (127.0.0.0/8, ::1, localhost) — allowing local dev/core-mirror over http
+      while forbidding cleartext to any real host. This is a construction-time
+      error (consistent with the existing New() validation philosophy), not a
+      fail-open drop. Recommend fixing BEFORE the first non-loopback deployment.
+  - id: "SL3-SEC-3"
+    classification: "privacy_invariant_scope"
+    severity: "medium"
+    target: "client/payload.go:165-174 (stripContent) + payload.go:145-160 (buildMetadata) + payload.go:100 (span name = ev.Tool.Name)"
+    detail: >
+      INV-2 (content redacted at source when content-capture is disabled) is
+      correctly enforced for the EXPLICIT content fields — stripContent nils
+      top-level Content and clears span RequestBody/ResponseBody, on a COPY (Span
+      is deep-copied at payload.go:168; Content pointer is nilled on the local
+      copy), so the caller's event is not mutated (verified: DevEvent passed by
+      value, Span re-pointed). Two channels, however, bypass the stripper entirely:
+      (1) the free-form `metadata` map is copied verbatim to the wire
+      (buildMetadata, payload.go:147-149) and is NEVER scrubbed — an adapter that
+      places prompt/output/command text under a metadata key would egress it even
+      with content-capture disabled; (2) `tool.name` becomes span.name (payload.go:100)
+      and is always sent — per MAPPING §2, shell command detail is expected to ride
+      in tool.name, so a full command line (which may contain secrets/paths) egresses
+      unconditionally. The SL-3 client itself puts no content in these channels, so
+      the code under review does not violate INV-2 today; but as the SHARED chokepoint,
+      it provides no defense-in-depth and the guarantee rests on downstream-adapter
+      discipline (SL-4/7/8) that is unwritten and unreviewed here.
+    recommendation: >
+      (a) Gate each adapter's own G_SEC on an explicit check that no raw content
+      is placed in `metadata` or `tool.name` under metadata-only posture; and
+      (b) consider a defense-in-depth measure in the shared client — e.g. a
+      documented metadata key allowlist, or a size cap on tool.name/metadata string
+      values, so a single adapter mistake cannot silently defeat INV-2 for the whole
+      fleet. Also confirm the intended privacy posture for command strings
+      (metadata-tier vs gated) as a product decision (OD4). Non-blocking for SL-3
+      code; a required condition on the adapters that consume it.
+  - id: "SL3-SEC-4"
+    classification: "reliability"
+    severity: "low"
+    target: "client/client.go:20-24,86,155-176 (default 30s timeout × (1+2 retries) + linear backoff)"
+    detail: >
+      Fail-open guarantees Emit never ERRORS the caller, but the worst-case LATENCY
+      envelope against a black-hole network is ~30s + 150ms + ~30s + 300ms + ~30s ≈
+      90s (per-attempt http.Client timeout is 30s; three attempts). If an adapter
+      calls Emit synchronously on a tool/pre-commit hook's critical path, the
+      developer's tool can hang for up to ~90s — which, while not a hard block,
+      degrades the developer experience enough to read as a stall. INV-3's intent
+      ("never blocks the tool call") is met in the error sense but strained in the
+      latency sense with the shipped defaults.
+    recommendation: >
+      Document that adapters MUST emit off the critical path (async/fire-and-forget)
+      or pass a short ctx deadline; consider a lower default per-attempt timeout for
+      inline-hook contexts and/or an overall deadline cap across retries. Non-blocking.
+  - id: "SL3-SEC-5"
+    classification: "observation"
+    severity: "low"
+    target: "client/client.go:80 (newSigner) + client/signing.go:45-54 (DID not validated)"
+    detail: >
+      New()/newSigner validate the seed but NOT the DID (empty or non-`did:aip:`
+      DID constructs successfully). A client whose DID does not match its obx_
+      key's agent — or is empty — is accepted at construction; core then rejects
+      every request (401), which fail-open silently DROPS as a transport error. The
+      result is a client that emits nothing while appearing healthy — a
+      misconfiguration masked by fail-open. Not a confidentiality/authz breach
+      (core correctly refuses), but an operability trap.
+    recommendation: >
+      Validate the DID shape at New() (non-empty, `did:aip:` + parseable UUID) to
+      fail fast; optionally offer a one-shot signed self-check (e.g. GET
+      /api/v1/auth/validate) so an identity mismatch surfaces at startup rather than
+      as universal silent drops. Non-blocking.
+  - id: "SL3-SEC-6"
+    classification: "observation"
+    severity: "info"
+    target: "client/signing.go:46-53 (seed bytes) + signer.priv lifetime"
+    detail: >
+      The decoded seed and ed25519.PrivateKey live as non-zeroable Go values for
+      the Client's lifetime (standard Go limitation, identical to SL2-SEC-3). The
+      seed []byte from base64 decode is discarded to GC after NewKeyFromSeed. No
+      at-rest or log exposure; materially harder to exploit than any leak path
+      (all of which are prevented). No action for Phase-1.
+    recommendation: "Note only. A future hardening pass could zero the transient seed []byte after NewKeyFromSeed. Non-blocking."
+  - id: "SL3-SEC-7"
+    classification: "observation"
+    severity: "info"
+    target: "client/payload.go:59-88 (buildPayload never reads ev.Content)"
+    detail: >
+      Independent of stripping, buildPayload has no mapping for top-level Content
+      (Prompt/Output/FileText) — it is never placed on the wire even when
+      content-capture is ENABLED (only span request_body/response_body can carry
+      content). This is privacy-SAFE (less egress) and worth noting only as a
+      possible FUNCTIONAL gap in the content-capture feature: if product intends
+      prompt/output to be capturable, MAPPING §1's `content.* → spans[].*_body`
+      mapping is not implemented. Not a security concern.
+    recommendation: "Confirm with product whether top-level Content is meant to egress when capture is enabled; if so, that is a functional follow-up, not a G_SEC item. Non-blocking."
+positive_confirmations:
+  - "SIGNING byte-matches core's verifier (agent.go:93 + kms_verifier.go) AND the reference SDK (request_signing.py) — independently re-derived via Explore, not taken from the builder. Client would be ACCEPTED."
+  - "Single-marshal discipline: buildPayload marshals once (payload.go:87); the exact bytes are both hashed (signing.go:75) and sent (client.go:186). No re-encode between hashing and sending → signature always matches transmitted body."
+  - "INV-1: obx_ key and seed each reach exactly one sink (Authorization header / ed25519.Sign) and appear in no log/error/argv/panic; base64 and net/url errors carry no secret; log-safety asserted (client_test.go:189-191)."
+  - "INV-3 fail-open: Emit returns (VerdictUnknown, nil) on every marshal/sign/network/non-2xx/exhausted path; only empty-EventID is a caller error. Context cancellation and 4xx-terminal handled."
+  - "Response body bounded by io.LimitReader(resp.Body, 1<<20) (client.go:207) — no OOM from a hostile/huge response; parseVerdict operates on the bounded slice."
+  - "Nonce: 24 bytes crypto/rand, base64url-nopad; rand.Read failure returns an error → fail-open (never a weak/zero nonce). 192-bit entropy vs core's 300s replay window."
+  - "TLS cert verification on by default (no InsecureSkipVerify); a caller-injected HTTP client is the caller's responsibility."
+  - "DID cannot be cross-bound: core checks claimed did-uuid == uuidv5(namespace, authenticated agentID), so a stolen/guessed DID header cannot impersonate another agent without that agent's key."
+  - "stripContent copy semantics correct: caller's DevEvent/Span/Content are not mutated (value receiver + Span deep-copy at payload.go:168)."
+  - "No shell/exec, no filesystem writes, no dynamic code — the client is a pure in-process HTTP transport; attack surface is the single POST."
+validation:
+  ran:
+    - command: "cd client && go build ./... && go vet ./... && go test ./..."
+      result: "pass"
+      evidence: "build + vet clean; all tests pass (cached). Re-verified the signing (TestSign_VerifiesAgainstKnownKeypair via core-mirror verifyLikeCore), fail-open + INV-1 log-safety (TestEmit_FailOpen_Unreachable), retry/4xx/5xx paths, and canonical shape (TestCanonicalString_Shape)."
+    - command: "grep for activity_id / event_id / scheme validation in client/*.go (non-test)"
+      result: "confirmed"
+      evidence: "no activity_id anywhere; event_id only as an inert json tag on the never-marshaled DevEvent; no URL-scheme validation on BaseURL — grounding SL3-SEC-1 and SL3-SEC-2."
+  method: >
+    Read all client/ Go source + tests; enumerated both secret values source→sink
+    and every log/error/panic sink; verified INV-1/2/3/5 adversarially. Re-derived
+    the AIP signing contract from openbox-core and openbox-temporal-sdk-python via
+    two read-only Explore agents (did NOT rely on builder cross-repo claims) and
+    byte-matched the Go signer. Confirmed core's ingestion has no event-level dedup
+    for the developer event_types via a third Explore over openbox-core.
+G_SEC:
+  decision: "approve-with-conditions"
+  conditions:
+    - "SL3-SEC-2 (network, highest priority): enforce HTTPS in New() — reject non-https BaseURL unless the host is loopback — BEFORE the first non-loopback deployment, so the obx_ bearer key can never traverse cleartext. Cheap and clearly correct."
+    - "SL3-SEC-3 (privacy): gate each consuming adapter's G_SEC (SL-4/7/8) on an explicit no-raw-content-in-metadata / no-content-in-tool.name check, and record a decision on a defense-in-depth metadata scrub/allowlist in the shared client. The shared chokepoint currently offers no INV-2 defense for the metadata or name channels."
+    - "SL3-SEC-1 (idempotency): stop asserting INV-5 as satisfied on the current wire. For the Phase-1 observe pilot, accept-and-document that retries after a lost response can double-count telemetry, and correct the AC wording + the misleading TestEmit_RetryReusesSameEventID comment. Track real idempotency (transmit event id + core dedup with a unique constraint, EXT-core) as a follow-up required before any count/finops-authoritative use."
+  rationale: >
+    The security-critical core of this story is sound. The AIP signer is correct
+    and would be accepted by openbox-core — independently re-verified against both
+    the server verifier and the reference SDK, byte-for-byte, with a single-marshal
+    guarantee that the signed bytes equal the transmitted bytes. INV-1 holds on
+    every traced path: both secrets reach only their one legitimate sink and never
+    a log, error string, argv, or panic. Fail-open (INV-3) holds, the response is
+    size-bounded, the nonce is strong, and TLS verification is on by default. The
+    three residuals do not constitute an active exploit in the default
+    configuration: HTTPS exposure requires a plaintext-scheme misconfiguration
+    (SL3-SEC-2), the INV-2 metadata/name gap depends on not-yet-written adapters
+    and is a shared-chokepoint hardening matter (SL3-SEC-3), and the INV-5 gap is
+    observe-only telemetry integrity rather than confidentiality or authz
+    (SL3-SEC-1). All three are acceptable for a Phase-1 opt-in observe pilot with
+    the conditions recorded. No finding rises to a must-fix-now blocker on the
+    artifact; SL3-SEC-2 should be fixed before the first real (non-loopback)
+    deployment.
+route_to_orchestrator:
+  - "APPROVE-WITH-CONDITIONS G_SEC for STORY-SL-3 — safe to advance from in-review with the three conditions recorded. Signing correctness independently confirmed; INV-1/INV-3 hold."
+  - "Fix before first non-loopback deploy (SL3-SEC-2): add HTTPS enforcement in New() (loopback-http exception). Small, high-value; consider folding into SL-3 now rather than a follow-up."
+  - "Carry SL3-SEC-3 as a REQUIRED condition on the adapter stories (SL-4 Claude Code, SL-7 Codex, SL-8 Cursor): their G_SEC must verify no raw content in metadata/tool.name; evaluate a defense-in-depth metadata scrub in client/."
+  - "Correct the INV-5 record (SL3-SEC-1): the 'met' AC and the TestEmit_RetryReusesSameEventID comment overstate reality — dev events are NOT deduped by core (no event_id transmitted, no activity_id, no unique constraint). Open a follow-up for true idempotency (client event-id transmission + EXT-core dedup) before any finops/count-authoritative phase."
+  - "Non-blocking backlog: DID-shape validation + optional startup self-check (SL3-SEC-5); inline-hook latency guidance / lower default timeout (SL3-SEC-4); confirm whether top-level Content should egress when capture is enabled (SL3-SEC-7, product/functional)."
+  - "Untouched by G_SEC: G1_READY (module home + transport defaults + sdk_version tag) remains brian's confirm."

@@ -113,6 +113,13 @@ SL-2 (CLI+init) ─┘  (SL-2 independent; installs SL-4 config + SL-5 hook)
 - **SL2-SEC-2** (deferred; low): input validation / defense-in-depth on `--org` and agent-name before they reach the shelled-out `secret-tool`/`security` commands (no leak today — secret is on stdin).
 - **SL2-ROTATE** (idea): `openbox dev rotate` to re-mint creds (`POST :agentId/rotate-api-key`) for an agent whose once-shown key/seed were lost — the honest counterpart to the no-upsert idempotency reality.
 
+## Review follow-ups (from SL-3 G_SEC + G3_REVIEW, 2026-07-08)
+- **MAPPING-FIX** (contract; **do before SL-4 builds spans**): correct `contracts/dev-event/MAPPING.md` §3 — it says core derives `semantic_type` from `file_operation`/`function`/`hook_type`, but core (verified live) **recomputes** it at ingest (`governance_workflow.go:309`) from the span **`name`** + an **`attributes`** map and ignores those fields. SL-3's client already sets the fields core reads (`classificationHints`); the SL-1 doc must match. Routes to the SL-1/architecture owner (revises a G3-approved doc).
+- **SL3-IDEMPOTENCY** (external, EXT-core): key ingestion dedupe on `metadata.event_id` for the developer event types (core has no event_id field and no dev-event dedupe today → a retry after a lost 200 double-counts tokens/cost/lineage). SL-3 puts the key on the wire; core must consume it. Phase-1 observe impact = telemetry skew only.
+- **SL3-SEC-3** (defense-in-depth; **gate each adapter's G_SEC**): SL-4/7/8 must verify no raw content lands in the free-form `metadata` map or `tool.name` — these bypass SL-3's content stripper (which only clears the explicit content fields). SL-3's own code is clean; it is the shared chokepoint.
+- **SL3-SEC-4 / F4** (low): worst-case `Emit` wall-clock ≈ (maxRetries+1)×timeout + backoff ≈ 90s. Fine for the async best-effort adapter path (NFR-2 `"async"`); inline callers should pass a bounded `ctx`.
+- **SL3-SEC-7 / F3** (low): top-level `Content.*` is not egressed even when content-capture is enabled (span `request_body`/`response_body` are). Privacy-safe; revisit with SL-4 if prompt/output capture is required.
+
 ## Flags
 - **OD10:** name the pilot repo before SL-6's squash-prevalence validation (S3 U-1) and pilot rollout.
 - **OD15 (external, deferred):** lineage storage metadata-JSONB vs indexed — SL-6 uses metadata (no external dep); FR-7 *queryable* read is deferred.

@@ -1,5 +1,5 @@
 version: 1
-updated_at: "2026-07-08T12:00:00Z"
+updated_at: "2026-07-08T13:30:00Z"  # SL-3 DONE (G_SEC + G1_READY + G3_REVIEW resolved) → unblocks SL-4
 owner: "orchestrator"
 stories:
   STORY-SL-1:
@@ -77,7 +77,7 @@ stories:
       blocked_reason: null
   STORY-SL-3:
     title: "OpenBox client library (AIP-signed /evaluate transport)"
-    status: "ready"
+    status: "done"
     epic: "E2"
     sprint: null
     priority: "P0"
@@ -95,21 +95,26 @@ stories:
       - "INV-5: client event id for idempotent ingestion"
     gates:
       G1_READY:
-        decision: "not-run"
-        evidence: null
-        decided_by: null
-        decided_at: null
+        decision: "confirm"
+        evidence: "brian confirmed client/ module home + transport defaults (30s/2 retries/150ms) + sdk_version tag 'openbox-shift-left/0.1.0'."
+        decided_by: "brian"
+        decided_at: "2026-07-08T13:30:00Z"
       G_SEC:
-        decision: "not-run"
-        evidence: "Sam security review of AIP signing / key handling"
-        decided_by: null
-        decided_at: null
+        decision: "approve-with-conditions"
+        evidence: "Sam (security_reviewer) independently re-derived the AIP contract via Explore and byte-matched the Go signer to core's verifier (agent.go:93 + kms_verifier MessageType=Raw) — would be accepted; single-marshal → signed==transmitted bytes. INV-1 holds on every path (key only in Authorization header, seed only in ed25519.Sign; log-safety tested); INV-3 fail-open + 1 MiB response cap + crypto/rand nonce + TLS-verify-on. No hard blocker. CONDITIONS: SL3-SEC-2 (plaintext http to non-loopback leaks bearer) — FIXED in-code (checkBaseURL); SL3-SEC-1 (event_id never transmitted; core doesn't dedupe dev events) — ADDRESSED (event_id→metadata + honest docs); SL3-SEC-3 (metadata/tool.name bypass stripper) — routed to per-adapter G_SEC (SL-4/7/8). Artifact: .fab7/sdlc/assignments/security-review-SL3-20260708.result.yaml"
+        decided_by: "Sam (security_reviewer)"
+        decided_at: "2026-07-08T13:00:00Z"
+      G3_REVIEW:
+        decision: "approve"
+        evidence: "Independent correctness audit (review_auditor): transport core solid, all JSON tags/pointer types match core exactly, verdict parse safe, retry semantics correct, INV-1/2/3 hold; re-ran build/vet/test itself (18 green). Decision REVISE on 2 mediums: F1 (INV-5 event_id not transmitted / no core dedupe) + F2 (semantic_type recomputed server-side from Name+attributes, so client value + hookTypeFor were dead). BOTH FIXED + re-validated (22 tests green): event_id→metadata; classificationHints sets the fields core reads; plus F5 (SessionID/DID validation). Low/info F3/F4/F6 routed as follow-ups. brian signed off 2026-07-08 (revisions confirmed). Artifact: .fab7/sdlc/assignments/review-diff-SL3-20260708.result.yaml"
+        decided_by: "brian"
+        decided_at: "2026-07-08T13:30:00Z"
     audit:
       commit: null
-      completed_at: null
-      validation_artifact: null
+      completed_at: "2026-07-08T13:30:00Z"
+      validation_artifact: ".fab7/sdlc/assignments/build-story-SL3-20260708-1200.result.yaml"
       last_run_id: null
-      status_reason: "unblocked — STORY-SL-1 done (contract + conformance pkg available to import; build payloads per contracts/dev-event/MAPPING.md §1-3, sign per §6)"
+      status_reason: "DONE. Built + reviewed (G_SEC + G3) + must-fix findings FIXED + re-validated (22 tests green, was 18). Signing byte-verified vs SDK + core's server verifier by BOTH reviewers independently (Explore). Post-review fixes: event_id→metadata (INV-5 honest); semantic_type via classificationHints (core recomputes from Name+attributes — verified, MAPPING §3 doc-fix routed to SL-1); HTTPS enforcement (INV-1); SessionID/DID validation. G_SEC = Sam approve-with-conditions (conditions folded in/routed); G1_READY + G3_REVIEW = brian sign-off. Unblocks SL-4 (Claude Code adapter) + SL-6 (git action), both import client/. End-to-end still gated on EXT-core (assumed-satisfied)."
       blocked_reason: null
   STORY-SL-4:
     title: "Claude Code adapter (observe-only)"
@@ -120,9 +125,7 @@ stories:
     dependencies:
       - "STORY-SL-1"
       - "STORY-SL-3"
-    blocked_by:
-      - "STORY-SL-1"
-      - "STORY-SL-3"
+    blocked_by: []
     write_scope:
       - "adapters/claude-code/"
     validation_commands:
@@ -141,8 +144,8 @@ stories:
       completed_at: null
       validation_artifact: null
       last_run_id: null
-      status_reason: null
-      blocked_reason: "awaiting STORY-SL-1, STORY-SL-3"
+      status_reason: "unblocked — STORY-SL-1 + STORY-SL-3 done. Imports client/ to emit; maps Claude Code hooks (SessionStart/UserPromptSubmit/PreToolUse/PostToolUse/SessionEnd) → SL-1 events → client.Emit. NOTE before building spans: apply MAPPING-FIX (semantic_type is set via span name + attributes, per SL-3 classificationHints) — see backlog SL-3 review follow-ups."
+      blocked_reason: null
   STORY-SL-5:
     title: "Commit trailer stamping (session->commit binding)"
     status: "blocked"
@@ -184,8 +187,6 @@ stories:
       - "STORY-SL-3"
       - "STORY-SL-5"
     blocked_by:
-      - "STORY-SL-1"
-      - "STORY-SL-3"
       - "STORY-SL-5"
     write_scope:
       - "actions/openbox-git-action/"
@@ -205,7 +206,7 @@ stories:
       validation_artifact: null
       last_run_id: null
       status_reason: null
-      blocked_reason: "awaiting STORY-SL-1, STORY-SL-3, STORY-SL-5"
+      blocked_reason: "awaiting STORY-SL-5 (STORY-SL-1 + STORY-SL-3 now done)"
   STORY-SL-7:
     title: "Codex adapter (fast-follow)"
     status: "deferred"
