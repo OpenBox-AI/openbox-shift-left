@@ -1,0 +1,200 @@
+assignment_id: "build-story-SL2-20260708-1100"
+role: "build_engineer"
+story: "STORY-SL-2"
+status: "completed"
+summary: >
+  Built the `openbox` CLI + `dev init --provider <tool>` (STORY-SL-2, OD12/OD17):
+  registers a developer agent via the backend control-plane POST /agent/create
+  (agent_type=developer + a verified default AIVSS posture), captures the
+  once-shown obx_ key + Ed25519 seed into the OS secret store (INV-1), and
+  delegates provider config to the adapter installer seam (stubs until SL-4/7/8).
+  Dependency-free Go stdlib (matches SL-1). Cross-repo shapes were verified
+  against LIVE openbox-backend + openbox-temporal-sdk-python (via Explore, per
+  user directive), which corrected the story's inlined assumptions in six ways
+  (see cross_repo_reference). Validation green (build/vet/test; dry-run makes no
+  writes). Remaining: G_SEC (Sam, credential handling) + live-org integration AC
+  (ran against an httptest mock; pilot org deferred per OD10).
+artifacts:
+  created_or_updated:
+    - "cli/go.mod"
+    - "cli/README.md (usage + G_SEC security posture + verified cross-repo facts)"
+    - "cli/cmd/openbox/main.go (entrypoint, subcommand routing, env-only credential per INV-1)"
+    - "cli/internal/aivss/aivss.go (default developer posture; integers verified vs calc-aivss-score.ts)"
+    - "cli/internal/aivss/aivss_test.go"
+    - "cli/internal/backend/client.go (agent/create + agent/list; dual auth; APIError for HALT)"
+    - "cli/internal/backend/client_test.go"
+    - "cli/internal/secret/secret.go (Store interface + Detect + HALT-on-none)"
+    - "cli/internal/secret/backends.go (libsecret stdin path; macOS keychain w/ argv caveat)"
+    - "cli/internal/secret/mem.go (in-memory store for tests/dry-run)"
+    - "cli/internal/secret/secret_test.go"
+    - "cli/internal/provider/provider.go (installer seam; stubs print manual config, exit non-zero)"
+    - "cli/internal/provider/provider_test.go"
+    - "cli/internal/devinit/devinit.go (orchestration: dry-run/idempotent/partial-failure)"
+    - "cli/internal/devinit/devinit_test.go"
+    - "cli/internal/devinit/integration_test.go (real backend.Client vs httptest mock)"
+    - ".fab7/sdlc/status.yaml (STORY-SL-2 -> in-review; G_SEC pending)"
+  proposed_only: []
+write_scope_used:
+  - "cli/"
+  - ".fab7/sdlc/status.yaml"
+  - ".fab7/sdlc/assignments/build-story-SL2-20260708-1100.result.yaml"
+cross_repo_reference:
+  method: "Explore agents (read-only), per user directive: openbox-backend (agent/create DTO + AIVSS calc) and openbox-temporal-sdk-python (registration/credential/signing conventions)."
+  verified:
+    - "PATH: POST /agent/create — backend sets NO global prefix + NO versioning (main.ts), so there is NO /api/v1 here (unlike core's /api/v1/governance/evaluate). agent.controller.ts @Controller('agent')+@Post('create')."
+    - "AUTH: global JwtAuthGuard accepts EITHER a Keycloak Bearer JWT (also requires header x-openbox-client) OR an org control-plane key via X-API-Key (obx_key_...). organization_id derives from the caller identity, never the body (INV-4). Permission CreateAgent."
+    - "REQUIRED FIELDS: a minimal valid body = agent_name + icon + full aivss_config. `icon` is @IsNotEmpty on CreateAgentDto — this was ABSENT from the story's inlined context; the CLI now always sends it (default emoji)."
+    - "RESPONSE: {data:{agent, token, identity}} (global TransformInterceptor wraps in `data`). identity.privateKey IS returned exactly once = base64 raw 32-byte Ed25519 seed (matches the SDK's expected agent_private_key format). token = obx_(live|test)_+48hex, also once-only. Caveat: identity is returned by the runtime object but is NOT in the Swagger CreateAgentResponseDto — parsed defensively with a fallback to agent.did."
+    - "AIVSS DIRECTION (calc-aivss-score.ts): higher points => higher risk => LOWER aivss_score (a HIGH score is SAFE). Within ai_specific, data_sensitivity/ethical_impact/decision_criticality/adaptability DESCEND while model_robustness ASCENDS (the odd one out). The accepted posture computes to aivss_score ~= 52.74 (mid-band) and, with default behavioral=100/alignment=100, trust ~= 81 (Tier 2). NO 'moderate' tier enum exists (tiers are numeric: 90/75/50/25); the CLI pins only the 14 integers (all within @Min/@Max) and never asserts a tier locally."
+    - "IDEMPOTENCY: no upsert. Duplicate (org, agent_name) [case-insensitive app check] -> 400 'already exists'; create always mints a new agent. token + privateKey are shown once and unrecoverable. => local secret-store presence is the real idempotency key; remote-exists-without-local-creds is refused (no duplicate) unless --force."
+    - "SDK (openbox-temporal-sdk-python): does NOT mint — create_openbox_worker() only validates pre-provisioned creds via a signed GET /api/v1/auth/validate. Confirms the CLI is the mint step and the seed/key formats above. AIP canonical signing string captured for SL-3 (METHOD\\npath\\ntimestamp\\nnonce\\nbodySHA256_hex, no trailing newline; sig=std-base64; nonce=urlsafe-unpadded; ts=ISO-8601 +00:00)."
+validation:
+  ran:
+    - command: "cd cli && go build ./... && go vet ./... && go test ./..."
+      result: "pass"
+      evidence: >
+        All packages build, vet clean (post-review: 32 test funcs PASS + 1 SKIP,
+        0 FAIL — the original build's 23 included this same skip; see
+        post_review_revisions). devinit: dry-run makes
+        zero network + zero secret-store writes (TestDryRunMakesNoWrites); happy
+        path stores 3 secrets and NEVER prints their values (TestHappyPath...NeverPrintsThem,
+        INV-1); idempotent reuse skips the network (TestIdempotentReuseSkipsRegistration);
+        remote duplicate is refused without --force (TestRemoteDuplicateBlocksWithoutForce);
+        --force registers under a free name (TestForceRegistersUnderFreeName); a 4xx
+        from agent/create HALTs with the exact status (TestAPIErrorHalts); partial
+        failure after registration reports the agent id + resume path
+        (TestPartialFailureReportsAgentAndResume); missing signing key errors before
+        storing anything (TestMissingPrivateKeyErrors). backend: dual-auth header
+        selection, contract fields, APIError, list parsing. integration_test drives
+        the real backend.Client through devinit against an httptest mock.
+    - command: "openbox dev init --provider claude-code --dry-run --org acme"
+      result: "pass"
+      evidence: "exit 0; prints the full plan; no OPENBOX_CONTROL_TOKEN/backend/secret-store touched (verified by unsetting env). --provider validation + INV-1 no-token guard + unknown-provider all exit non-zero with clear messages."
+  not_run:
+    - command: "openbox dev init --provider claude-code against a LIVE OpenBox org"
+      reason: "EXT-signoff (a reachable org) is assumed-satisfied, not built here; integration AC covered via an httptest mock of agent/create + agent/list (OD10 pilot org still to be named)."
+    - command: "real OS-keychain round trip on macOS/Windows"
+      reason: "Build/test host is Linux; secret-tool contract test runs when a keyring is reachable, else skips. macOS `security` path implemented but not exercised here (argv caveat flagged for G_SEC). Windows returns ErrNoStore -> HALT in Phase 1."
+acceptance_criteria:
+  - id: "dev init --provider registers via POST agent/create with agent_type=developer + sane default aivss_config; captures obx_ key, DID, Ed25519 key"
+    met: true
+    evidence: "backend.Client.Create + aivss.DefaultDeveloperProfile; integration_test asserts agent_type=developer, icon present, aivss_config object, and captured token/privateKey/DID."
+  - id: "credentials to OS secret store, never plaintext in repo/config; config references the stored secret"
+    met: true
+    evidence: "internal/secret (libsecret stdin / macOS keychain); devinit stores 3 accounts; CredentialRef passes service+account to the installer, never the value; INV-1 no-print test."
+  - id: "delegates provider config to the adapter installer; for an unbuilt adapter prints manual config + exits non-zero"
+    met: true
+    evidence: "provider stubs Available()=false; applyConfig prints Plan and returns error; main exits code 2. AC satisfied for all three providers until SL-4/7/8."
+  - id: "--dry-run prints plan, makes NO network or filesystem writes"
+    met: true
+    evidence: "TestDryRunMakesNoWrites + live dry-run with env unset."
+  - id: "idempotent re-init (detect existing, reuse rather than duplicate)"
+    met: true
+    evidence: "local secret-store presence => reuse w/o network; remote dup refused (once-only creds are unrecoverable, so this is the correct honest semantics — see finding)."
+  - id: "records organization_id-scoped + shared DID namespace (INV-4/INV-7)"
+    met: true
+    evidence: "org derived server-side from caller cred; DID minted server-side via shared did:aip uuidv5 namespace; secret accounts namespaced by org."
+  - id: "exposes org force-enable substrate but Phase-1 default opt-in (NFR-5/OD10)"
+    met: true
+    evidence: "--managed-enable flag (default false) recorded into agent config as substrate; output states 'verified, not activated'."
+findings:
+  - classification: "decision_needed"
+    severity: "high"
+    target: "G_SEC / macOS keychain argv exposure"
+    detail: >
+      Linux (secret-tool) passes the secret on stdin — no argv exposure. macOS
+      `security add-generic-password -w <value>` transiently exposes the secret
+      via argv (`ps`); there is no no-cgo/no-argv path through that binary.
+      Documented on keychainStore + in cli/README.md. Options: (a) accept the
+      transient local-only window, or (b) ship a small keychain helper.
+    recommendation: "Sam to rule at G_SEC; Phase-1 build implements (a) and flags it. Persistent INV-1 guarantee (nothing at rest in repo/logs) holds regardless."
+  - classification: "observation"
+    severity: "medium"
+    target: "idempotency semantics vs the AC wording"
+    detail: >
+      The AC says 're-init reuses/updates rather than duplicating.' The backend
+      shows token+privateKey ONCE and has no upsert, so true remote reuse is
+      impossible. Implemented semantics: local secret-store presence => full
+      reuse (no network); remote-exists-without-local-creds => refuse to
+      duplicate + explain (delete+re-run or --force for a new distinctly-named
+      agent). This is the correct honest behavior given the platform constraint.
+    recommendation: "Confirm the semantics at review; consider a future `openbox dev rotate` to re-mint creds for an existing agent (POST :agentId/rotate-api-key)."
+  - classification: "observation"
+    severity: "low"
+    target: "story inlined-context gaps (now corrected in code)"
+    detail: >
+      Story omitted the required `icon` field and stated the path as bare
+      `agent/create` without ruling out a prefix; both corrected against live
+      backend. Recommend a doc-sync of STORY-SL-2 / architecture D5 to record the
+      no-prefix path, the X-API-Key auth alternative, the required icon, and that
+      identity.privateKey is returned once (not KMS-only).
+    recommendation: "learning-scribe doc-sync (non-blocking)."
+gates_resolved:
+  method: "Cross-repo Explore (openbox-backend, openbox-temporal-sdk-python) at user's directive; build-time AIVSS integer verification per the story's mandate."
+  G1_READY:
+    decision: "confirm (build-time verification of the accepted posture)"
+    finding: >
+      The accepted developer AIVSS posture was verified against calc-aivss-score.ts:
+      all 14 integers are within @Min/@Max; the inverted scoring direction was
+      confirmed (incl. model_robustness being the odd-one-out ascending field);
+      the posture computes to aivss_score ~= 52.74 (mid-band) / trust Tier 2. No
+      'moderate' enum exists, so the CLI pins integers only and lets the server
+      compute the tier. Pilot-org item (OD10) deferred: integration ran vs mock.
+  G_SEC:
+    decision: "not-run"
+    owner: "Sam (security reviewer)"
+    evidence_ready: >
+      cli/ credential paths for review: env-only control token (no argv), secret
+      store abstraction (stdin on Linux; macOS argv caveat flagged above), INV-1
+      no-print test, HALT-on-no-store, partial-failure resume messaging.
+post_review_revisions:
+  reviews:
+    - gate: "G_SEC"
+      reviewer: "Sam (security_reviewer)"
+      decision: "approve (with conditions)"
+      artifact: ".fab7/sdlc/assignments/security-review-SL2-20260708.result.yaml"
+      note: "No blockers. INV-1 secret flow traced end-to-end (3 Store.Set sinks; never printed/logged/argv). macOS security -w argv caveat accepted for Phase-1 opt-in pilot, CONDITIONED on a native-keychain/stdin helper before macOS GA / enforcement (follow-up SL2-SEC-1)."
+    - gate: "G3_REVIEW"
+      reviewer: "review_auditor"
+      decision: "revise"
+      artifact: ".fab7/sdlc/assignments/review-diff-SL2-20260708.result.yaml"
+      note: "CLI fundamentally correct; contract independently re-verified; 6/7 ACs met, AC5 partial. Two medium must-fix (F1,F2) + low F4/F5/F6; F3 routed to G_SEC (already ruled)."
+  fixes_applied:
+    - id: "F1 (medium)"
+      target: "internal/devinit/devinit.go remote-duplicate guard"
+      fix: "FindByName error no longer falls through to Create; it is surfaced ('agent/list failed') so idempotent detection is not silently bypassed. --force is the documented escape hatch. Test: TestRemoteLookupErrorDoesNotFallThroughToCreate. Resolves the AC5-partial."
+    - id: "F2 (medium)"
+      target: "cmd/openbox/main.go untested"
+      fix: "Refactored main into an injectable app{stdout,stderr,getenv,detectStore,newRegistrar} returning exit codes (0/1/2). Added cmd/openbox/main_test.go covering: INV-1 no-token guard, HALT-on-no-store, dry-run offline (seams panic if touched), unknown/missing provider, and the exit-2 config-manual partial-success contract (creds land in store)."
+    - id: "F4 (low)"
+      target: "freeName on lookup error"
+      fix: "freeName now returns (string,error); a lookup failure under --force surfaces instead of proceeding to a confusing 400. Test: TestForceLookupErrorSurfaced."
+    - id: "F5 (low)"
+      target: "byte-wise name truncation"
+      fix: "Added rune-safe truncate() (no split multibyte rune -> no invalid UTF-8 / 400). Test: TestTruncateIsRuneSafe."
+    - id: "F6 (low)"
+      target: "'23 pass' accuracy + DID fallback untested"
+      fix: "Corrected count to 32 pass + 1 skip; added TestCreateDIDFallsBackToAgentBody for the identity.did->agent.did fallback."
+    - id: "F3 (high, G_SEC-owned)"
+      target: "macOS security -w argv exposure"
+      fix: "No code change now — Sam ruled ACCEPT for Phase-1 opt-in; tracked as follow-up SL2-SEC-1 (native keychain/stdin helper before macOS GA)."
+  revalidation:
+    command: "cd cli && go build ./... && go vet ./... && go test ./..."
+    result: "pass"
+    evidence: "clean build/vet; 32 test funcs PASS + 1 SKIP (TestSecretToolContract, no reachable keyring), 0 FAIL. Live dry-run exits 0 with no writes."
+  follow_ups_opened:
+    - "SL2-SEC-1 (deferred, high-before-macOS-GA): native macOS Keychain / stdin credential-write helper to close the security -w argv window."
+    - "SL2-SEC-2 (deferred, low): input validation / defense-in-depth on --org and agent-name before they reach the shelled-out secret-tool/security commands."
+    - "SL2-ROTATE (idea): `openbox dev rotate` to re-mint creds (POST :agentId/rotate-api-key) for an agent whose once-shown creds were lost."
+handoff:
+  next_phase: >
+    STORY-SL-2 implementation complete + reviewed. G_SEC APPROVED (with a macOS
+    follow-up condition, SL2-SEC-1). G3_REVIEW returned REVISE; all findings
+    (F1,F2,F4,F5,F6) fixed with dedicated tests and re-validated green; F3 is the
+    G_SEC-owned item Sam already ruled on. Status -> in-review pending final G3
+    re-confirmation / human sign-off (blocking findings are resolved). No commit
+    made (awaiting instruction). SL-2 does NOT block SL-3 (independent); it DOES
+    unblock SL-5 once SL-4's installer replaces the claude-code stub. Remaining
+    externals: OD10 pilot org for the live-org integration AC (ran vs mock);
+    optional doc-sync of STORY-SL-2/architecture D5 for the corrected agent/create
+    facts (no-prefix path, X-API-Key auth, required icon, once-returned privateKey).

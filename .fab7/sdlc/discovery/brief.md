@@ -127,3 +127,54 @@ Route dev tools' model traffic through an OpenBox gateway (`ANTHROPIC_BASE_URL`-
 - **OD4 (owner: brian):** Privacy boundary default — metadata-only (tokens, tool names, hashes) vs content capture, and whether org-configurable. Gate on spike S4. Note: on Cursor, prompt/output content is available ONLY via client-side hooks (no server content logs).
 - **OD6 (owner: brian, technical):** Hook handler type — `http` direct to Core (Claude Code native) vs `command`→local OpenBox daemon/OPA sidecar. Gate on S2.
 - **OD7 (owner: brian, product):** Phase-1 telemetry content boundary (ties to OD4).
+
+---
+
+## Brainstorm 002 — shift-left as a native plugin (2026-07-08)
+
+**Topic (one sentence):** Should shift-left be delivered as a native per-tool **plugin** (bundling agents, skills, hooks, scripts, MCP, and the `bin/` Go binary), and how does that revise the unifying `openbox` CLI front door (OD12) and the Go-binary decision (OD17)?
+
+**Criteria:** C1 reuse each tool's native bundling/distribution/mandate; C2 cross-tool coverage; C3 developer install friction; C4 org mandate / enterprise force-enable; C5 single-source maintenance (no drift across packagings); C6 fit with the decided adapter model (§1b) + Go binary (OD17) + git action (which runs in CI, outside any tool).
+
+### Evidence (cited) vs assumption
+- **[E, S1 A2]** A Claude Code plugin bundles **skills, hooks, MCP servers, agents, commands, LSP servers, background monitors, `bin/` executables (added to Bash PATH), and settings** — distributed via official/community/**private marketplaces**, versioned, with org-wide **force-enable via managed settings `enabledPlugins`** (users can't disable) plus `allowManagedHooksOnly`/`strictPluginOnlyCustomization`. A first-class delivery + wiring + mandate vehicle.
+- **[E, S1 A2/A6, S5 §3]** Codex and Cursor do **not** have Claude Code's rich plugin bundle. Codex = `config.toml` + hooks (behind `features.hooks`) + **managed hooks via `requirements.toml`/MDM** (`allow_managed_hooks_only`, `managed_dir`). Cursor = `hooks.json` + **Team hooks (Enterprise dashboard)**; no bin/MCP/agent bundling in one artifact.
+- **[E, S1 A2]** `bin/` in a CC plugin is added to PATH → **the Go `openbox` binary (OD17) can ship *inside* the plugin**; hooks call `openbox emit …`. Directly unifies OD12 (CLI) + OD17 (Go bin) + plugin: plugin = *packaging*, Go binary = *engine*, hooks = *wiring*.
+- **[A]** A private marketplace + `enabledPlugins` gives Phase-1 org distribution + the (opt-in, OD10) mandate substrate nearly for free on Claude Code — confirm against the org's CC enterprise tier.
+- **[A]** Codex/Cursor "plugin" equivalents are really "managed config + hooks bundles" — the CLI (`openbox dev init`) still lays them down; only Claude Code has a true installable plugin.
+
+### Options (converged)
+- **A. Plugin-first** (native plugin is THE artifact). Max C1/C4 on Claude Code; but Codex/Cursor have no equal, so it's really CC-first with config-bundle fallbacks (weakens C2).
+- **B. CLI-first (status quo OD12).** Uniform across tools (C2), one install path, covers CI/git-action (C6); but reimplements distribution/mandate CC already gives (weaker C1/C4), and a hand-written CC hook config is more fragile than a versioned plugin.
+- **C. Hybrid — plugin as the vehicle, CLI as the engine (RECOMMENDED shape).** A Claude Code plugin bundles `bin/openbox` + hooks + (optional) MCP/skill, installed from a marketplace; `openbox dev init --provider claude-code` **installs that plugin** (or the plugin's install runs `openbox register`). For Codex/Cursor, `dev init` lays down the config+managed-hooks bundle. One Go engine + one contract underneath; per-tool packaging on top. Best C1/C4 AND C2/C6; slightly more packaging surface (C5) but bounded by the single binary/contract.
+- **D. Distribution/mandate channel** (orthogonal): private CC marketplace + managed `enabledPlugins` for the pilot; Codex `requirements.toml`/MDM; Cursor Team hooks.
+- **E. Bundle an OpenBox MCP server in the plugin** — governance/lineage/finops as in-tool MCP tools + a second interception surface. Complements hooks (MCP-only misses raw shell); more to build; maybe Phase-2.
+- **F. Bundle skills/agents** (governance-status skill, review subagent) — nice UX; not needed for Phase-1 observe; defer.
+
+### Tradeoffs vs criteria (no winner declared)
+| Option | C1 reuse | C2 cross-tool | C3 friction | C4 mandate | C5 maint. | C6 fit (§1b/OD17/CI) |
+|---|---|---|---|---|---|---|
+| A plugin-first | high (CC) | uneven | low (CC) | high (CC) | med | weak for CI/git-action |
+| B CLI-first (OD12) | med | uniform | low | med | high | strong |
+| C hybrid | high | uniform | low | high | med | strong |
+| D marketplace channel | high (CC) | uneven | low | high | n/a | n/a |
+| E MCP-in-plugin | med | MCP-wide | low | — | med | additive |
+| F skills/agents | n/a | CC/Cursor | low | — | med | defer |
+
+**Coherent reading:** C (hybrid) subsumes the strengths — the plugin is *how you ship + wire* per tool (native bundling+marketplace+mandate where it exists), the Go binary (OD17) is the shared engine that even rides in the CC plugin's `bin/`, and the `openbox` CLI (OD12) stays the uniform front door + the CI/git-action path no plugin covers. D = the channel; E/F = optional bundle enrichments (E maybe Phase-2, F later).
+
+### Discarded (with reasons)
+- **Pure-plugin, no CLI** — the git action runs in **CI, outside any coding tool** (no plugin governs it), and Codex/Cursor lack CC's bundle; an engine/CLI is still required.
+- **Reimplement bundling/distribution per tool from scratch** — throws away the marketplace + managed-settings C1/C4 that S1 confirms exist.
+- **Ship a heavy runtime in the plugin** — contradicts OD17 (single static Go binary); `bin/` carries exactly that binary.
+- **Treat "plugin" as uniform across all three tools** — only Claude Code has the rich bundle (S1/S5); Codex/Cursor are config+hooks bundles.
+
+### Direction decisions (owners; not decided here)
+- **OD18 (owner: brian) — delivery model:** plugin-first (A) vs CLI-first/status-quo OD12 (B) vs **hybrid (C)**. **Revises OD12**: does the CLI *install a plugin* or *write config directly*?
+- **OD19 (owner: brian) — CC plugin bundle contents (Phase 1):** hooks + `bin/openbox` only, vs also an OpenBox **MCP server** (E), vs also **skills/agents** (F).
+- **OD20 (owner: brian) — distribution channel:** private CC marketplace + managed `enabledPlugins` for pilot; Codex `requirements.toml`/MDM; Cursor Team hooks — confirm org enterprise tiers.
+
+### Decisions (elicited 2026-07-08, decided by brian)
+- **OD18 — DECIDED: hybrid (plugin vehicle + CLI engine).** Ship a Claude Code **plugin** that bundles `bin/openbox` (the Go engine, OD17) + the hook wiring, distributed via a marketplace; `openbox dev init --provider claude-code` **installs that plugin**. Codex/Cursor get config+managed-hooks bundles laid down by the same CLI. **This REVISES OD12:** the CLI is the engine + uniform front door + CI/git-action path, and *delivery/wiring* uses each tool's native bundle where it exists (a versioned plugin on Claude Code) rather than hand-writing config.
+- **OD19 — DECIDED: Phase-1 plugin bundles `bin/openbox` + hooks only.** The OpenBox **MCP server** (option E) and **skills/agents** (option F) are **deferred** (E likely Phase-2, F later) — keep the observe-first bundle minimal.
+- **OD20 — open:** distribution channel confirmation deferred to rollout (ties OD10 pilot).

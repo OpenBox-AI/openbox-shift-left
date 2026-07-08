@@ -1,5 +1,5 @@
 version: 1
-updated_at: "2026-07-07T08:00:00Z"
+updated_at: "2026-07-08T12:00:00Z"
 owner: "orchestrator"
 stories:
   STORY-SL-1:
@@ -37,7 +37,7 @@ stories:
       blocked_reason: null
   STORY-SL-2:
     title: "openbox CLI + dev init --provider"
-    status: "ready"
+    status: "done"
     epic: "E2"
     sprint: null
     priority: "P0"
@@ -54,21 +54,26 @@ stories:
       - "INV-7: developer agents share the runtime-agent DID namespace"
     gates:
       G1_READY:
-        decision: "not-run"
-        evidence: "aivss_config default POSTURE accepted (brian 2026-07-07, STORY-SL-2); integers verified at build vs calc-aivss-score.ts. Remaining: G_SEC."
-        decided_by: null
-        decided_at: null
+        decision: "confirm"
+        evidence: "aivss_config default POSTURE accepted (brian 2026-07-07). Build-time integer verification DONE vs openbox-backend calc-aivss-score.ts (Explore): all 14 within @Min/@Max; inverted direction confirmed (model_robustness is the odd-one-out ascending field); posture computes aivss_score~=52.74 (mid-band)/trust Tier 2; no 'moderate' enum so CLI pins integers only. Pilot-org item (OD10) deferred — integration ran vs httptest mock."
+        decided_by: "brian"
+        decided_at: "2026-07-07T08:00:00Z"
       G_SEC:
-        decision: "not-run"
-        evidence: "Sam security review of cli/ credential-handling paths"
-        decided_by: null
-        decided_at: null
+        decision: "approve"
+        evidence: "Sam approved (with conditions), 2026-07-08. INV-1 secret flow traced end-to-end: obx_ key + Ed25519 seed reach exactly 3 Store.Set sinks, never printed/logged/argv; control token env-only; Linux stdin path clean; HALT-on-no-store; partial-failure reports agent id w/o secret. No blockers. CONDITION: native macOS keychain/stdin helper before macOS GA / enforcement (macOS `security -w` argv caveat) — follow-up SL2-SEC-1. Artifact: .fab7/sdlc/assignments/security-review-SL2-20260708.result.yaml"
+        decided_by: "Sam (security_reviewer)"
+        decided_at: "2026-07-08T11:30:00Z"
+      G3_REVIEW:
+        decision: "approve"
+        evidence: "Independent audit: CLI fundamentally correct, contract re-verified vs live backend, 6/7 ACs met + AC5 partial. Decision REVISE with F1/F2 (medium) + F4/F5/F6 (low); F3 (high) routed to G_SEC (ruled). All findings FIXED with dedicated tests and re-validated (32 pass + 1 skip, 0 fail): F1 list-error no longer bypasses dedup; F2 main guards now tested (main_test.go); F4 freeName surfaces lookup errors; F5 rune-safe truncation; F6 count corrected + DID-fallback test. brian signed off 2026-07-08 (revisions confirmed). Artifact: .fab7/sdlc/assignments/review-diff-SL2-20260708.result.yaml"
+        decided_by: "brian"
+        decided_at: "2026-07-08T12:00:00Z"
     audit:
       commit: null
-      completed_at: null
-      validation_artifact: null
+      completed_at: "2026-07-08T12:00:00Z"
+      validation_artifact: ".fab7/sdlc/assignments/build-story-SL2-20260708-1100.result.yaml"
       last_run_id: null
-      status_reason: "first-batch; aivss_config posture accepted; pending G_SEC review + build-time integer verification"
+      status_reason: "DONE. Built + validated + reviewed + signed off. G_SEC APPROVED (with macOS follow-up SL2-SEC-1); G3_REVIEW REVISE->all findings fixed with tests + re-validated green (32 pass/1 skip); brian sign-off. Cross-repo Explore corrected 6 story assumptions (no /api/v1 prefix; dual auth incl. X-API-Key; icon required; identity.privateKey returned once; aivss_score~=52.74/no moderate enum; no-upsert idempotency). Unblocks SL-5 once SL-4's installer replaces the claude-code stub. Live-org integration AC still uses a mock (OD10 pilot org to be named); macOS keychain hardening tracked as SL2-SEC-1."
       blocked_reason: null
   STORY-SL-3:
     title: "OpenBox client library (AIP-signed /evaluate transport)"

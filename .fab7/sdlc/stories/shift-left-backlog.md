@@ -11,6 +11,9 @@
 - **Metadata-only** by default (OD4) — stricter than platform norm; strip content at source.
 - Verdict vocab canonical: `HALT > BLOCK > REQUIRE_APPROVAL > ALLOW`. Event schema respects both **lifecycle** types (SessionStarted…Deploy) and **semantic span** types (`file_write`/`mcp_tool_call`/`llm_call`, which already exist in core).
 
+## Delivery model (OD18/OD19, 2026-07-08 — brainstorm 002)
+Hybrid: **plugin vehicle + CLI engine.** The Claude Code adapter (SL-4) is packaged as a **native CC plugin that bundles `bin/openbox` (the Go engine) + the hook wiring**, distributed via a marketplace and force-enableable via managed `enabledPlugins`. SL-2's `openbox dev init --provider claude-code` **installs that plugin** (rather than hand-writing config); Codex/Cursor get config+managed-hooks bundles laid down by the CLI. Phase-1 plugin bundle = `bin/openbox` + hooks only (MCP server / skills deferred). Impact: **SL-2** = "install the plugin"; **SL-4** = "build the CC plugin bundling bin/openbox + hooks." No new stories; refines SL-2/SL-4 scope. The Go binary + event contract remain the single shared substrate (OD17/SL-1).
+
 ## External dependencies (assumed satisfied — NOT built here; lowest priority)
 - **[EXT-core]** 3 additive no-migration edits in openbox-core so `/evaluate` accepts developer event types (constants, `isValidGovernanceEventType`, session-lifecycle switch) — S6 §3. Required for emitted events to be *accepted*.
 - **[EXT-lineage]** git commit/deploy lineage storage + FR-7 read API (metadata-JSONB stopgap needs nothing; indexed/queryable = migration) — S6 §4, OD15.
@@ -104,6 +107,11 @@ SL-2 (CLI+init) ─┘  (SL-2 independent; installs SL-4 config + SL-5 hook)
 ## Fast-follow (shift-left, after Claude Code)
 - **SL-7 Codex adapter** (`adapters/codex/`) — reuses SL-3 client; hooks + rollout/OTel translate → events; requirements.toml/MDM mandate (S5). **Priority: next (OD13).**
 - **SL-8 Cursor adapter** (`adapters/cursor/`) — reuses SL-3; hooks + Admin-API poller; note fail-open caveat (S1). After Codex.
+
+## Review follow-ups (from SL-2 G_SEC + G3_REVIEW, 2026-07-08)
+- **SL2-SEC-1** (deferred; **required before macOS GA / Phase-2 enforcement**): native macOS Keychain / stdin credential-write helper to close the `security -w` argv-exposure window. G_SEC accepted the transient exposure only for the Phase-1 Linux-target opt-in pilot.
+- **SL2-SEC-2** (deferred; low): input validation / defense-in-depth on `--org` and agent-name before they reach the shelled-out `secret-tool`/`security` commands (no leak today — secret is on stdin).
+- **SL2-ROTATE** (idea): `openbox dev rotate` to re-mint creds (`POST :agentId/rotate-api-key`) for an agent whose once-shown key/seed were lost — the honest counterpart to the no-upsert idempotency reality.
 
 ## Flags
 - **OD10:** name the pilot repo before SL-6's squash-prevalence validation (S3 U-1) and pilot rollout.
