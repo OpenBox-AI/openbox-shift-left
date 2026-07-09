@@ -1,0 +1,46 @@
+assignment_id: "security-review-SL6-20260709"
+role: "security_reviewer"
+story: "STORY-SL-6"
+mode: "independent-gsec"
+verdict: "approve-with-conditions"   # no hard blocker; 2 MEDIUM must-fixes (both FIXED in-code), 2 LOW
+reviewed:
+  - "actions/openbox-git-action/{doc,git,resolve,ownership,deploy,action}.go + cmd/openbox-git-action/main.go + tests"
+  - "cross-ref: adapters/common/git/{doc,trailer,notes}.go; client/{client,payload,signing}.go"
+focus_results:
+  argv_flag_injection: "PASS (SEC-6-3) — all git via exec.Command (no shell); --end-of-options before every externally-influenced rev; only raw inputs (target/base) pass verifyCommit first, walkers see canonical SHAs; ^rev/.. rev-syntax valid after --end-of-options."
+  sl5_sec_1: "PASS (SEC-6-4) — per-claim verify; fail-closed on lookup error; honest NoopVerifier default; forged victim id never proven (ownership_test)."
+  inv1_secrets: "PASS (SEC-6-5) — OPENBOX_API_KEY/SEED only env→Config→headers, never argv/logged; signer errors leak no key/seed; git never receives a secret."
+  inv2_metadata: "PASS — no raw commit body reaches metadata or tool.name; only validated session ids + structural fields."
+  resolver_validation: "PASS w/ condition — validateSessionID solid; needed a claim-count + message-size bound (SEC-6-1)."
+findings:
+  - id: "SEC-6-1"
+    severity: "MEDIUM"
+    disposition: "must-fix — FIXED in-code"
+    title: "Unbounded session-claim accumulation + commit-message size → OOM / CI break (INV-3)"
+    detail: >
+      MaxCommits bounded commit COUNT only. bodySessions read `%B` into an unbounded buffer and
+      gatherClaims had no cap on distinct claims, so one hostile commit (e.g. a fork-PR that triggers
+      upstream CI) could drive arbitrary memory + an arbitrarily large metadata.sessions egress,
+      OOM the resolver and break CI.
+    fix: "MaxSessions cap (DefaultMaxSessions=4096) + 1MiB bounded reads (runLimited/io.LimitReader) + `-n` bounded rev-list; every cap disclosed in Resolution.Note (never silent). Test: TestResolve_MaxSessionsCapIsRecorded."
+  - id: "SEC-6-2"
+    severity: "MEDIUM"
+    disposition: "must-fix — FIXED in-code"
+    title: "Flat metadata.session_ids discarded the verified/status qualifier (SL5-SEC-1 footgun)"
+    detail: >
+      The flat session_ids list carried every id regardless of verified, next to a deploy-level
+      attribution_status=attributed set whenever ANY one session verified — re-introducing the
+      over-attribution risk the per-claim verified flag exists to prevent, in exactly the field a
+      future FR-7 JOIN would bind to.
+    fix: "Renamed to verified_session_ids and restricted to VERIFIED ids only (empty in Phase-1 under NoopVerifier); the fully-qualified sessions[] array (verified/source/reason) is retained as the authoritative record."
+  - id: "SEC-6-6"
+    severity: "LOW"
+    disposition: "accepted / deferred (joint SL-5+SL-6)"
+    title: "validateSessionID permits non-CRLF/NUL control characters"
+    detail: "Rejects empty/>512/CRLF-NUL/whitespace/obx_ (enough to stop trailer-injection, splitting, secret-shaping) but not other C0/C1 controls. Residual risk low: id not logged by this module, JSON-escaped on egress, bounded single-line verified=false claim. Intentionally identical to SL-5's write-side check; tighten both together."
+  - id: "SEC-6-7"
+    severity: "LOW"
+    disposition: "accepted — documented"
+    title: "--end-of-options requires git ≥ 2.24"
+    detail: "Older git → verifyCommit errors (fail-closed, precondition exit 2), no security downgrade. Minimum version now documented in README."
+non_security_note: "SessionID embedded wall-clock (non-idempotent run_id) — flagged for correctness review; FIXED there (P1)."

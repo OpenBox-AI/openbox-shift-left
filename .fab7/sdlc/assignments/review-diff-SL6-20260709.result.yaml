@@ -1,0 +1,53 @@
+assignment_id: "review-diff-SL6-20260709"
+role: "review_auditor"
+story: "STORY-SL-6"
+mode: "blind-correctness-edgecase"   # no builder reasoning seen; live probes with the built binary
+decision: "revise"                   # all must-address FIXED + re-validated; final human sign-off = brian
+overall: >
+  No crash / over-attribution bug found; the module upholds INV-6's 'never a silent WRONG
+  attribution'. Verified correct via read + live binary probes: merge reachable-originals (incl. a
+  3-parent octopus), base..target excludes base, root commit / base==target / empty range, dedup
+  across a range, secret/whitespace id rejection, flag-injection defense, amend/force-push resolving
+  the real pushed SHA, MaxCommits cap disclosed, fail-open-on-emit vs precondition-error-on-bad-SHA.
+findings:
+  - id: "C1"
+    severity: "MEDIUM (contract)"
+    class: "CONFIRMED"
+    disposition: "FIXED"
+    title: "`non-agent` reason declared + documented but UNREACHABLE server-side"
+    detail: "classify() only ever produces no-trailer or trailer-stripped; a bare commit can't distinguish human-no-trailer from agent-no-trailer. Fix: documented ReasonNonAgent as a RESERVED value (resolve.go + doc.go + README) — producible only when an external author-identity signal is wired."
+  - id: "C2"
+    severity: "LOW"
+    class: "CONFIRMED (proven with binary)"
+    disposition: "FIXED"
+    title: "A trailer-backed id mislabeled `body-scan` across commits"
+    detail: "seen-map was source-blind and scope newest-first, so a newer mid-body hit could claim an id that an older commit carried as a proper trailer. Fix: two-pass gather — ALL trailer blocks across the whole scope before any body-scan. Test: TestResolve_TrailerBeatsBodyScanAcrossCommits."
+  - id: "C3"
+    severity: "MEDIUM"
+    class: "CONFIRMED (proven with binary)"
+    disposition: "FIXED"
+    title: "Note-mirror recovery all-or-nothing across scope → silent lineage loss"
+    detail: "The note fallback fired only when the ENTIRE scope yielded zero claims, so a trailer-stripped sibling in a mixed range was silently dropped (against INV-6's 'never silent' spirit). Fix: per-commit note recovery for any commit that yielded nothing in passes 1-2. Test: TestResolve_MixedRangeRecoversStrippedSibling."
+  - id: "P1"
+    severity: "LOW/MEDIUM"
+    class: "PLAUSIBLE"
+    disposition: "FIXED"
+    title: "run_id (openbox_session_id) non-idempotent — embedded wall-clock"
+    detail: "SessionID=deployDID embedded ts.Unix(), so a retried deploy created a new core session (core keys on (workflow_id, run_id); no dev-event dedupe yet). Fix: run_id = the stable deploy_id; the timestamped deploy_did stays a metadata lineage label (FR-6)."
+  - id: "P2"
+    severity: "LOW"
+    class: "PLAUSIBLE"
+    disposition: "FIXED"
+    title: "7-char short SHA in the idempotency/dedup key → prefix collision"
+    detail: "Two commits sharing a 7-hex prefix would collide under one event_id. Fix: deployIDFor uses the FULL SHA (already available in res.CommitSHA)."
+  - id: "P3"
+    severity: "LOW"
+    class: "PLAUSIBLE"
+    disposition: "ACCEPTED"
+    title: "inferred-from-unverified-trailer carries no structured Reason"
+    detail: "The common Phase-1 outcome sets Status=inferred with an empty enum Reason (detail is in Note). Defensible — none of the 3 contract reasons fit 'found but unverified'; consumers must tolerate an absent attribution_reason on `inferred`."
+verified_correct_no_finding:
+  - "Emit preconditions (EventID+SessionID non-empty); event shape matches SL-1 deploy.json sample."
+  - "Merge scope `<merge> ^<merge>^1` correct for 2-parent AND octopus (3-parent) merges."
+  - "Root commit / base==target / empty range → tip-only with disclosed note; base..target excludes base."
+re_validation: "30 tests green under -race (was 27); go vet clean."

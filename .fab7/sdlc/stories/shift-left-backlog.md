@@ -140,6 +140,15 @@ SL-2 (CLI+init) ─┘  (SL-2 independent; installs SL-4 config + SL-5 hook)
 - **SL5-SEC-1 → SL-6 (mandatory carry):** the trailer is an UNTRUSTED claim; SL-6 must bind each value to a session owned by the **authenticated pusher** and mark others unattributed/inferred (mirror SL-3 DID cross-binding). Forgeability now documented in `adapters/common/git/doc.go`. Recorded on SL-6's status_reason.
 - **Accepted/noted (no code):** F2 (orphan mid-body line after heal — cosmetic; resolution correct), F7 (doc nit), F8 (dormant notes mirror — optional by S3 R5).
 
+## Review outcomes (SL-6 independent review, 2026-07-09)
+- **G_SEC = approve-with-conditions; G3 = REVISE → all fixed + re-validated** (30 tests under -race; go vet clean). No security blocker.
+- **SL5-SEC-1 DISCHARGED (as designed):** every trailer is a CLAIM verified against the authenticated pusher via `OwnershipVerifier` before it can be `attributed`; Phase-1 `NoopVerifier` ⇒ deploys resolve `inferred`/verified=false (ownership read API deferred). Forged/unverified ids excluded from `verified_session_ids`.
+- **Must-fixes FIXED:** SEC-6-1 (`MaxSessions`+1MiB bounded reads+`-n` rev-list, disclosed) · SEC-6-2 (`session_ids`→verified-only `verified_session_ids`) · C3 (per-commit note recovery, no silent sibling drop) · C1 (`non-agent` documented reserved) · C2 (two-pass gather; trailer beats body-scan across scope) · P1 (stable run_id) · P2 (full-SHA dedup key).
+- **SL6-OWNERSHIP (feeds Phase-1.5; needs EXT-lineage/FR-7):** wire a real `OwnershipVerifier` (backend session-ownership lookup keyed on the pusher's developer identity) so owned sessions become `attributed`. Until then every deploy is honestly `inferred`.
+- **SL6-SEC-6 (LOW, JOINT with SL-5):** tighten `validateSessionID` on **both** sides to reject all non-graphic runes (defense-in-depth for downstream terminal/log sinks).
+- **SL6-CI (packaging):** provide the GitHub Action wrapper (`action.yml`) once the pilot repo is named (OD10).
+- **Accepted (no code):** P3 (`inferred`-from-unverified-trailer carries no structured enum reason — detail is in the free-text note; none of the 3 contract reasons fit).
+
 ## Wiring stories (SL-4 → CLI integration — DECIDED **wired**, brian 2026-07-08)
 Rationale: deliver the OD12 "one command onboards" front door for real (`openbox dev init --provider claude-code` currently still prints the SL-2 stub). The wiring's real content is the **generic provider-SPI seam** (architecture §1b) + the **single-engine packaging** (OD17/OD18/OD19) — designed once here so SL-7 (Codex) and SL-8 (Cursor) slot in with zero further core/CLI change. These supersede the earlier single "SL4-WIRE-1" follow-up.
 

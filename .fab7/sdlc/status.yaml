@@ -1,5 +1,5 @@
 version: 1
-updated_at: "2026-07-09T14:45:00Z"  # SL-5 DONE — reviewed (G_SEC approve-w-conditions, G3 revise→fixed) + brian sign-off (G1_READY confirm, G3 approve); SL-6 now READY
+updated_at: "2026-07-09T16:45:00Z"  # SL-6 DONE — reviewed (G_SEC approve-w-conditions [all addressed in-code], G3 revise→all fixed+re-validated 30 tests -race) + brian sign-off (G1_READY confirm, G3_REVIEW approve). SL-5 DONE.
 owner: "orchestrator"
 stories:
   STORY-SL-1:
@@ -202,7 +202,7 @@ stories:
       blocked_reason: null
   STORY-SL-6:
     title: "OpenBox git action (deploy lineage)"
-    status: "ready"
+    status: "done"  # built + independently reviewed + must-fixes fixed + re-validated + brian sign-off (G1_READY confirm, G3_REVIEW approve) 2026-07-09
     epic: "E3"
     sprint: null
     priority: "P1"
@@ -214,22 +214,33 @@ stories:
     write_scope:
       - "actions/openbox-git-action/"
     validation_commands:
-      - "cd actions/openbox-git-action && go build ./... && go test ./...  # simulated push incl. squash/fixup/force-push"
+      - "cd actions/openbox-git-action && go build ./... && go vet ./... && go test -race ./...  # 30 tests: simulated push incl. squash/fixup/force-push/merge/octopus/range, real git 2.53.0"
     invariants:
       - "INV-6: resolve at real pushed SHA; unattributed/inferred marker with reason; never silent wrong attribution"
+      - "SL5-SEC-1: trailer is an untrusted claim — bind each value to a session owned by the authenticated pusher before it is proven attribution"
     gates:
       G1_READY:
-        decision: "not-run"
-        evidence: null
-        decided_by: null
-        decided_at: null
+        decision: "confirm"
+        evidence: "CONFIRMED by brian 2026-07-09 (by directing the commit). Accepts the Phase-1 posture: (a) NoopVerifier (ownership read API deferred EXT-lineage/FR-7) ⇒ trailer-backed deploys resolve `inferred`, never `attributed`, until a real verifier is wired (follow-up SL6-OWNERSHIP); (b) run_id = stable deploy_id + synthetic deploy_did-in-metadata design; (c) `Deploy` event ships despite core /evaluate 400 (EXT-core assumed-satisfied, fail-open drops it). Write scope actions/openbox-git-action/ was pre-approved (own go.mod, no ADR triggered)."
+        decided_by: "brian"
+        decided_at: "2026-07-09T16:45:00Z"
+      G_SEC:
+        decision: "approve-with-conditions"
+        evidence: "Independent security review (security_reviewer), 2026-07-09 — PASS WITH CONDITIONS, no hard blocker. CONFIRMED PASS: argv-only git + --end-of-options on every externally-influenced rev (no shell/flag injection; SEC-6-3); SL5-SEC-1 claim/verify separation correct + fail-closed on lookup error + honest NoopVerifier default (forged victim id never reported as proven — SEC-6-4); INV-1 secrets only env→Config→headers, never argv/logged, signer errors leak no key/seed (SEC-6-5); INV-2 no raw commit body reaches metadata (SEC-6). MUST-FIX (both FIXED in-code + tested): SEC-6-1 (MEDIUM) unbounded session-claim count + commit-message size → OOM/CI-break → FIXED: MaxSessions cap (4096) + 1MiB bounded message read (runLimited/io.LimitReader) + `-n` bounded rev-list, all disclosed in Resolution.Note (TestResolve_MaxSessionsCapIsRecorded). SEC-6-2 (MEDIUM) flat session_ids dropped the verified qualifier → FIXED: renamed to `verified_session_ids`, VERIFIED-only (empty in Phase-1), full qualified `sessions` array retained. ACCEPTED/DEFERRED: SEC-6-6 (LOW) validateSessionID permits non-CRLF/NUL control chars — deferred to a JOINT SL-5/SL-6 tightening (id not logged here, JSON-escaped on egress); SEC-6-7 (LOW) git≥2.24 for --end-of-options — documented in README. Artifact: .fab7/sdlc/assignments/security-review-SL6-20260709.result.yaml"
+        decided_by: "security_reviewer"
+        decided_at: "2026-07-09T16:00:00Z"
+      G3_REVIEW:
+        decision: "approve"  # brian sign-off 2026-07-09; reviewer decision was REVISE, all must-address FIXED + re-validated.
+        evidence: "brian sign-off 2026-07-09 (revisions confirmed, by directing the commit). Independent blind correctness/edge-case audit (review_auditor), 2026-07-09: read all sources + ran live probes with the built binary (octopus merge, range, force-push all independently re-verified); confirmed NO crash/over-attribution bug and 'never a silent WRONG attribution' holds. Decision REVISE on 3 items, ALL FIXED + re-validated (30 tests green under -race, was 27): C3 (MEDIUM) note-mirror recovery was all-or-nothing across the whole scope → a trailer-stripped SIBLING in a mixed range was silently dropped → FIXED (per-commit note recovery; TestResolve_MixedRangeRecoversStrippedSibling). C1 (MEDIUM, contract) `non-agent` reason was declared+documented but UNREACHABLE server-side → FIXED (documented as a RESERVED value in resolve.go + doc.go + README; a bare commit can't distinguish human-no-trailer from agent-no-trailer). C2 (LOW) a trailer-backed id was mislabeled body-scan when a newer commit carried it mid-body → FIXED (two-pass gather: all trailer blocks across the whole scope before any body-scan; TestResolve_TrailerBeatsBodyScanAcrossCommits). PLAUSIBLE→FIXED: P1 non-idempotent run_id (embedded wall-clock) → run_id now the stable deploy_id; P2 short-SHA collision in the dedup key → full SHA. ACCEPTED: P3 (inferred-from-unverified-trailer carries no structured reason — detail in Note; none of the 3 enum reasons fit). Artifact: .fab7/sdlc/assignments/review-diff-SL6-20260709.result.yaml"
+        decided_by: "brian"
+        decided_at: "2026-07-09T16:45:00Z"
     audit:
       commit: null
-      completed_at: null
-      validation_artifact: null
+      completed_at: "2026-07-09T16:45:00Z"
+      validation_artifact: ".fab7/sdlc/assignments/build-story-SL6-20260709-1500.result.yaml"
       last_run_id: null
-      status_reason: "CARRIES a mandatory security condition from SL-5 G_SEC (SL5-SEC-1): the commit trailer is an UNTRUSTED claim — anyone who can author a commit can name any session id (incl. a victim's, visible in pushed commits), and squash-healing hoists body lines. SL-6 MUST bind each trailer value to a session owned by the authenticated pusher and mark others unattributed/inferred (mirror SL-3 DID cross-binding); never treat a raw trailer as proven attribution. Also SL6-SCAN: prefer healed %(trailers) but MAY full-body-scan for pre-install commits."
-      blocked_reason: null  # SL-5 done 2026-07-09 → SL-6 READY (all deps met)
+      status_reason: "DONE — built + independently reviewed (G_SEC approve-with-conditions [all conditions addressed in-code]; G3 REVISE→all fixed+re-validated) + brian sign-off (G1_READY confirm, G3_REVIEW approve) 2026-07-09. New stdlib-only module actions/openbox-git-action/ (imports client [SL-3] + adapters/common/git [SL-5] via replace): git.go (bounded, argv-only server-side reader) + resolve.go (Resolver: real-pushed-SHA verify, scope walk single/range/merge-reachable-originals, 3-pass gather trailer→body-scan[SL6-SCAN]→per-commit note-mirror, classify attributed/inferred/unattributed + reason) + ownership.go (OwnershipVerifier / NoopVerifier — SL5-SEC-1 hook) + deploy.go (Resolution→Deploy DevEvent; run_id=stable deploy_id, deploy_did=did:aip:deploy-<short>-<unix> in metadata, verified-only session_ids) + action.go (fail-open orchestration) + cmd/openbox-git-action (CI entrypoint, --dry-run + env/flag config, exit 0 fail-open / 2 precondition). SL5-SEC-1 DISCHARGED as designed: every trailer is a CLAIM verified against the authenticated pusher via OwnershipVerifier before it can be `attributed`; Phase-1 NoopVerifier ⇒ everything resolves `inferred` verified=false (honest — ownership read API deferred EXT-lineage/FR-7). SL6-SCAN implemented (full-body scan recovers pre-install-squash mid-body ids). Cross-repo Explore CONFIRMED: core /evaluate accept-list (isValidGovernanceEventType) still 400s `Deploy` — documented EXT-core additive extension (arch D4/INV-8), assumed-satisfied, fail-open drops the 400 (never breaks CI); no deploy-DID primitive in core ⇒ deploy_did is a synthetic metadata label, signing DID stays the agent's real did:aip:<uuid>; metadata JSONB stores arbitrary keys (avoided core's reserved names). Proven end-to-end with the real binary (dry-run: squash fan-in resolved; forged-victim id ⇒ verified_session_ids empty). 30 tests green under -race + go vet clean."
+      blocked_reason: null
   STORY-SL-7:
     title: "Codex adapter (fast-follow)"
     status: "deferred"
