@@ -59,6 +59,114 @@ func TestHookBinary_ObserveOnlyContract(t *testing.T) {
 	}
 }
 
+// TestHookBinary_MaintainsSessionRegistry proves the SL-5 wiring: a hook touches
+// this session's liveness record (so the git prepare-commit-msg hook can attribute
+// a commit to it), carrying only structural fields (session_id + cwd, no content),
+// and SessionEnd removes it.
+func TestHookBinary_MaintainsSessionRegistry(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a binary; skipped in -short")
+	}
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "openbox-cc-hook")
+	if out, err := exec.Command("go", "build", "-o", bin, ".").CombinedOutput(); err != nil {
+		t.Fatalf("build: %v\n%s", err, out)
+	}
+	regDir := filepath.Join(dir, "sessions")
+	baseEnv := append(os.Environ(),
+		"OPENBOX_AGENT_DID=did:aip:7f3c9b2e-0000-5000-a000-000000000001",
+		"OPENBOX_SPOOL_DIR="+filepath.Join(dir, "spool"),
+		"OPENBOX_CONFIG="+filepath.Join(dir, "none.json"),
+		"OPENBOX_SESSION_DIR="+regDir,
+	)
+	run := func(hook, payload string) {
+		cmd := exec.Command(bin, hook)
+		cmd.Stdin = strings.NewReader(payload)
+		cmd.Env = baseEnv
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("%s must exit 0, got %v\n%s", hook, err, out)
+		}
+	}
+
+	secret := "SECRET-COMMAND"
+	run("PreToolUse", `{"hook_event_name":"PreToolUse","session_id":"sess-xyz","cwd":"/work/repo","tool_name":"Bash","tool_input":{"command":"`+secret+`"}}`)
+
+	entries, err := os.ReadDir(regDir)
+	if err != nil || len(entries) != 1 {
+		t.Fatalf("expected one session record, got %v (err %v)", entries, err)
+	}
+	rec, _ := os.ReadFile(filepath.Join(regDir, entries[0].Name()))
+	if !strings.Contains(string(rec), "sess-xyz") || !strings.Contains(string(rec), "/work/repo") {
+		t.Fatalf("record missing structural fields: %s", rec)
+	}
+	if strings.Contains(string(rec), secret) {
+		t.Fatalf("content leaked into session record: %s", rec)
+	}
+
+	// SessionEnd removes the record.
+	run("SessionEnd", `{"hook_event_name":"SessionEnd","session_id":"sess-xyz","cwd":"/work/repo","reason":"other"}`)
+	if entries, _ := os.ReadDir(regDir); len(entries) != 0 {
+		t.Fatalf("SessionEnd should remove the record, still have %v", entries)
+	}
+}
+
+// TestHookBinary_AmbientGitHookInstall proves the opt-in ambient install: on
+// SessionStart with OPENBOX_INSTALL_GIT_HOOK set, the adapter installs the
+// prepare-commit-msg hook into the session's repo (pointing at the sibling
+// openbox-git-hook); without the flag it does nothing (default-safe).
+func TestHookBinary_AmbientGitHookInstall(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a binary; skipped in -short")
+	}
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "openbox-cc-hook")
+	if out, err := exec.Command("go", "build", "-o", bin, ".").CombinedOutput(); err != nil {
+		t.Fatalf("build: %v\n%s", err, out)
+	}
+	repo := filepath.Join(dir, "repo")
+	os.MkdirAll(repo, 0o755)
+	if out, err := exec.Command("git", "-C", repo, "init", "-q").CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v\n%s", err, out)
+	}
+	hookPath := filepath.Join(repo, ".git", "hooks", "prepare-commit-msg")
+	payload := `{"hook_event_name":"SessionStart","session_id":"sess-1","cwd":"` + repo + `","source":"startup"}`
+	baseEnv := append(os.Environ(),
+		"OPENBOX_AGENT_DID=did:aip:7f3c9b2e-0000-5000-a000-000000000001",
+		"OPENBOX_SPOOL_DIR="+filepath.Join(dir, "spool"),
+		"OPENBOX_CONFIG="+filepath.Join(dir, "none.json"),
+		"OPENBOX_SESSION_DIR="+filepath.Join(dir, "sessions"),
+	)
+
+	// Default (flag unset): no hook installed.
+	c := exec.Command(bin, "SessionStart")
+	c.Stdin = strings.NewReader(payload)
+	c.Env = baseEnv
+	if out, err := c.CombinedOutput(); err != nil {
+		t.Fatalf("exit 0 expected: %v\n%s", err, out)
+	}
+	if _, err := os.Stat(hookPath); err == nil {
+		t.Fatal("hook installed without OPENBOX_INSTALL_GIT_HOOK (should be default-off)")
+	}
+
+	// Opt-in: hook installed, pointing at the sibling engine binary.
+	c = exec.Command(bin, "SessionStart")
+	c.Stdin = strings.NewReader(payload)
+	c.Env = append(baseEnv, "OPENBOX_INSTALL_GIT_HOOK=1")
+	if out, err := c.CombinedOutput(); err != nil {
+		t.Fatalf("exit 0 expected: %v\n%s", err, out)
+	}
+	body, err := os.ReadFile(hookPath)
+	if err != nil {
+		t.Fatalf("hook not installed with opt-in: %v", err)
+	}
+	if !strings.Contains(string(body), "openbox-git-hook") || !strings.Contains(string(body), "openbox-shift-left") {
+		t.Fatalf("installed hook does not reference the engine:\n%s", body)
+	}
+}
+
 // TestHookBinary_NoArgsIsSafe confirms a misinvocation still exits 0.
 func TestHookBinary_NoArgsIsSafe(t *testing.T) {
 	if testing.Short() {

@@ -47,14 +47,15 @@ type Registrar interface {
 
 // Options are the user-facing knobs for `dev init`.
 type Options struct {
-	Provider      string // claude-code|codex|cursor
-	Org           string // organization namespace for naming + secret accounts
-	AgentName     string // override; default derived from provider+user+host
-	Icon          string // non-empty string required by the backend DTO
-	Description   string
-	DryRun        bool
-	Force         bool // register a fresh agent even if one exists remotely
-	ManagedEnable bool // org-wide force-enable substrate (NFR-5); Phase-1 opt-in
+	Provider       string // claude-code|codex|cursor
+	Org            string // organization namespace for naming + secret accounts
+	AgentName      string // override; default derived from provider+user+host
+	Icon           string // non-empty string required by the backend DTO
+	Description    string
+	DryRun         bool
+	Force          bool // register a fresh agent even if one exists remotely
+	ManagedEnable  bool // org-wide force-enable substrate (NFR-5); Phase-1 opt-in
+	InstallGitHook bool // STORY-SL-5: enable ambient commit-trailer hook install (off by default)
 }
 
 // Deps are the injected collaborators (all faked in tests).
@@ -139,6 +140,7 @@ func Run(ctx context.Context, o Options, d Deps) (*Result, error) {
 		SecretService:     service,
 		APIKeyAccount:     apiKeyAcct,
 		PrivateKeyAccount: privKeyAcct,
+		InstallGitHook:    o.InstallGitHook,
 	}
 	res := &Result{AgentName: name}
 
@@ -280,6 +282,7 @@ func planDryRun(o Options, d Deps, name, icon string, profile aivss.Config, ref 
 	fmt.Fprintf(out, "  icon:        %s\n", icon)
 	fmt.Fprintf(out, "  aivss_config: base_security/ai_specific/impact (accepted developer posture; server computes score/tier)\n")
 	fmt.Fprintf(out, "  managed_enable: %t (substrate only; not activated in Phase 1)\n", o.ManagedEnable)
+	fmt.Fprintf(out, "  install_git_hook: %t (STORY-SL-5 ambient commit-trailer hook; off by default — modifies .git/hooks)\n", o.InstallGitHook)
 	svc, apiAcct, privAcct, didAcct := o.accounts()
 	fmt.Fprintf(out, "\nWould store credentials in the OS secret store (service %q):\n", svc)
 	fmt.Fprintf(out, "  %s  (obx_ API key)\n  %s  (Ed25519 seed)\n  %s  (DID)\n", apiAcct, privAcct, didAcct)

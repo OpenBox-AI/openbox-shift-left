@@ -37,6 +37,7 @@ const (
 	envAPIKeyAccount  = "OPENBOX_API_KEY_ACCOUNT"
 	envPrivKeyAccount = "OPENBOX_PRIVATE_KEY_ACCOUNT"
 	envContentCapture = "OPENBOX_CONTENT_CAPTURE"
+	envInstallGitHook = "OPENBOX_INSTALL_GIT_HOOK"
 	envAPIKeyDirect   = "OPENBOX_API_KEY"
 	envSeedDirect     = "OPENBOX_ED25519_SEED"
 	envConfigPath     = "OPENBOX_CONFIG"
@@ -54,6 +55,10 @@ type DevConfig struct {
 	APIKeyAccount     string `json:"api_key_account,omitempty"`
 	PrivateKeyAccount string `json:"private_key_account,omitempty"`
 	ContentCapture    bool   `json:"content_capture,omitempty"`
+	// InstallGitHook enables ambient install of the SL-5 prepare-commit-msg hook
+	// into the session's repo on SessionStart. Default false — it modifies a
+	// repo's .git/hooks. Set by `openbox dev init --install-git-hook`.
+	InstallGitHook bool `json:"install_git_hook,omitempty"`
 }
 
 // DefaultConfigPath is where the installer writes the dev config and the hook
@@ -142,6 +147,23 @@ func DefaultSpoolDir() string {
 		dir = filepath.Join(os.Getenv("HOME"), ".config")
 	}
 	return filepath.Join(dir, "openbox", "cc-spool")
+}
+
+// ResolveInstallGitHook reports whether the adapter should install the SL-5
+// prepare-commit-msg hook into the session's repo on SessionStart. Default false
+// (it modifies a repo's .git/hooks). The dev config's install_git_hook (written
+// by `openbox dev init --install-git-hook`) enables it; OPENBOX_INSTALL_GIT_HOOK
+// overrides either way. A missing/unreadable config is treated as false
+// (fail-safe) — this never blocks or fails a session.
+func ResolveInstallGitHook() bool {
+	enabled := false
+	if cfg, err := loadDevConfig(DefaultConfigPath()); err == nil {
+		enabled = cfg.InstallGitHook
+	}
+	if v, ok := os.LookupEnv(envInstallGitHook); ok {
+		enabled = isTruthy(v)
+	}
+	return enabled
 }
 
 // ResolveCredentials assembles Credentials from env + the OS secret store. It

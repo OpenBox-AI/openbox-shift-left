@@ -1,1 +1,2 @@
 {"actor":"core","event":"scan:completed","instance":"adhoc","outcome":{"degraded":[],"enabled":["code-graph","skills-discover"]},"run_id":"adhoc","subject":"scan:all","ts":"2026-07-07T07:40:18Z"}
+{"actor":"sam","event":"gate:evaluated","instance":"STORY-SL-5","outcome":{"blockers":"0","conditions":"4","decision":"approve-with-conditions","inv1":"pass","inv2":"pass","inv3":"pass"},"run_id":"adhoc","subject":"gate:G_SEC","ts":"2026-07-09T04:18:12Z"}

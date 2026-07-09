@@ -44,6 +44,7 @@ type CredentialRef struct {
 	APIKeyAccount     string // account holding the obx_ key
 	PrivateKeyAccount string // account holding the Ed25519 seed
 	DID               string // did:aip:... (not secret)
+	InstallGitHook    bool   // STORY-SL-5: persist the ambient commit-hook install preference
 }
 
 // Installer writes one tool's native config, delegated from `dev init`.
@@ -91,9 +92,9 @@ type stub struct {
 	manual func(ref CredentialRef) string
 }
 
-func (s stub) Name() Name        { return s.name }
-func (s stub) Available() bool   { return false }
-func (s stub) Plan(ref CredentialRef) string { return s.manual(ref) }
+func (s stub) Name() Name                      { return s.name }
+func (s stub) Available() bool                 { return false }
+func (s stub) Plan(ref CredentialRef) string   { return s.manual(ref) }
 func (s stub) Install(ref CredentialRef) error { return ErrNotBuilt }
 
 func claudeCodeManual(ref CredentialRef) string {
@@ -106,8 +107,11 @@ Manual config until the plugin ships (OD18/OD19 — plugin bundles bin/openbox +
       service = %q
       api key account     = %q
       private key account = %q
-      developer DID        = %s`,
-		ref.SecretService, ref.APIKeyAccount, ref.PrivateKeyAccount, ref.DID)
+      developer DID        = %s
+  - Commit-trailer hook (STORY-SL-5) ambient install: %t. When the plugin ships,
+    this is persisted to the dev config (install_git_hook); until then set
+    OPENBOX_INSTALL_GIT_HOOK=1, or run 'openbox-git-hook install' per repo.`,
+		ref.SecretService, ref.APIKeyAccount, ref.PrivateKeyAccount, ref.DID, ref.InstallGitHook)
 }
 
 func codexManual(ref CredentialRef) string {

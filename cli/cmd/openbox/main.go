@@ -99,6 +99,7 @@ func (a *app) runDevInit(args []string) int {
 	fs.BoolVar(&o.DryRun, "dry-run", false, "print the plan; make no network or secret-store writes")
 	fs.BoolVar(&o.Force, "force", false, "register a new distinctly-named agent even if one exists remotely")
 	fs.BoolVar(&o.ManagedEnable, "managed-enable", false, "record the org force-enable substrate (Phase-1: verified, not activated)")
+	fs.BoolVar(&o.InstallGitHook, "install-git-hook", false, "enable ambient install of the commit-trailer hook into repos on session start (STORY-SL-5; off by default — it modifies .git/hooks)")
 	fs.StringVar(&backendURL, "backend-url", a.env("OPENBOX_BACKEND_URL", ""), "openbox-backend control-plane base URL")
 	fs.StringVar(&clientID, "client-id", a.env("OPENBOX_CLIENT", "openbox-cli"), "value for the x-openbox-client header (Keycloak JWT path)")
 	if err := fs.Parse(args); err != nil {

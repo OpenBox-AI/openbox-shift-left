@@ -1,0 +1,285 @@
+assignment_id: "review-diff-SL5-20260709"
+role: "review_auditor"
+story: "STORY-SL-5"
+phase: "G3_REVIEW"
+status: "completed"
+summary: >
+  Independent BLIND correctness + acceptance audit of the STORY-SL-5 commit-trailer
+  write side (session->commit attribution): the new stdlib-only module
+  adapters/common/git/ (trailer/session/registry/hook/notes + cmd/openbox-git-hook)
+  and its SL5-WIRE-1 wiring into adapters/claude-code + cli. Read all source and tests
+  fresh (did not assume the builder's reasoning), re-ran build/vet/test -race uncached
+  in all three modules (ALL GREEN), and drove the compiled hook against REAL git 2.53.0
+  through scenarios the test suite does NOT cover: verbose commits (-v / commit.verbose),
+  the interactive-editor empty-message flow, real squash history, and diff-injection.
+  The engineering is sound and the core claims hold up under independent verification:
+  the exit-0/never-abort contract is real (script + binary both force exit 0; a missing
+  engine, bad args, unreadable message, and a panic all still exit 0 — verified with a
+  real commit under OPENBOX_GIT_HOOK=/nonexistent); INV-1 holds (validateSessionID drops
+  obx_-shaped, multi-line, NUL, over-long ids — never a secret in history); idempotency
+  under --amend and plain rebase is real; and SQUASH HEALING genuinely works end-to-end
+  (I reproduced a real `rebase -i` squash: %(trailers) resolves the full fan-in
+  sess-B|sess-A even with no session in scope for the squasher). The worktree-scoped
+  registry is exact across different worktrees (the parallel-safe core) and reads cleanly
+  under a rename-based atomic write. FOUR of four ACs are substantially MET. I am
+  recommending REVISE, not approve, on ONE finding the tests never exercise: in the
+  interactive-editor flow the hook stamps the EMPTY template, so a developer who saves an
+  empty message to ABORT a commit (which git normally rejects) instead gets a real commit
+  whose subject is the bare trailer line (F1) — a behavior change that contradicts the
+  package's own observe-only / never-interfere principle, and it is completely untested.
+  Everything else is LOW/INFO (a cosmetic duplicate line left in squashed messages, a
+  symlinked-cwd attribution miss that fails SAFE, second-granularity in the same-worktree
+  recency tiebreak, and a few narration/packaging nits). No safety or security defect was
+  found and no hook path can abort a commit. No code was modified.
+
+validation:
+  ran:
+    - command: "cd adapters/common/git && go build ./... && go vet ./... && go test -race -count=1 ./..."
+      result: "pass"
+      evidence: >
+        Build + vet clean. Both packages PASS under -race, uncached: the library package
+        (github.com/.../adapters/common/git) and cmd/openbox-git-hook. `go test -v`
+        enumerates 53 RUN entries (top-level + subtests), all PASS — the S3 rewrite matrix
+        driven against REAL git (plain commit, --amend idempotent, plain rebase preserves,
+        rebase -i squash fans-in, fixup drops-its-session as the documented loss, missing
+        binary does not break the commit, notes mirror, registry single + two-repo parallel,
+        core.hooksPath honored) plus unit coverage (StampMessageFile/heal, validateSessionID
+        injection cases, resolver env/file/registry/TTL/withinWorktree, InstallHook idempotent
+        + foreign-refusal, shellQuote, exit-0 binary matrix).
+    - command: "cd adapters/claude-code && go build ./... && go vet ./... && go test -race -count=1 ./..."
+      result: "pass"
+      evidence: >
+        Build + vet clean. Both packages PASS under -race (adapter + cmd/openbox-cc-hook).
+        The SL5 wiring tests pass: TestHookBinary_MaintainsSessionRegistry (real binary
+        writes {session_id,cwd} only, no content leak; SessionEnd removes it),
+        TestHookBinary_AmbientGitHookInstall (default-off; opt-in installs a hook referencing
+        the sibling engine), TestResolveInstallGitHook (config + env override matrix).
+    - command: "cd cli && go build ./... && go vet ./... && go test -count=1 ./..."
+      result: "pass"
+      evidence: >
+        Build + vet clean. All 6 packages PASS. TestDryRunDisclosesInstallGitHook asserts the
+        --install-git-hook plan disclosure; existing dev-init/provider/secret tests unaffected.
+  independent_real_git_probes:
+    method: "Compiled cmd/openbox-git-hook and drove it through real `git` 2.53.0 in throwaway repos, exercising flows the suite omits."
+    result: "Core claims VERIFIED; one behavior change FOUND (F1); one cosmetic residue confirmed (F2)."
+    detail: >
+      (VERIFIED) `git commit -v -m`, `git commit -v` with commit.verbose=true, and a diff
+      containing a column-0-looking `OpenBox-Session:` line: the trailer stamps correctly and
+      the scissors/diff region never injects a bogus session (git+interpret-trailers are
+      scissors-aware; diff lines carry +/-/space prefixes so scanSessionLines never matches
+      them). (VERIFIED) real `rebase -i` squash of base<-A<-B with NO session in scope for the
+      squasher heals to %(trailers)=sess-B|sess-A. (FOUND, F1) interactive editor + empty
+      message: baseline git aborts (exit 1, no commit); WITH the hook + a session in scope the
+      stamped trailer makes the buffer non-empty, so git creates a commit with subject
+      `OpenBox-Session: sess-real` (exit 0, 1 commit) — and %(trailers) can't even parse it
+      (the trailer became the subject). (CONFIRMED, F2) the healed squash commit retains the
+      orphaned mid-body `OpenBox-Session: sess-A` line in addition to the healed trailing
+      block, so sess-A appears twice in the stored message (resolution still correct).
+
+acceptance_criteria:
+  - id: "AC1: prepare-commit-msg stamps OpenBox-Session:<id> idempotently (--if-exists=addIfDifferent); multiple sessions -> multiple lines (fan-in); safe under --amend (no duplicate lines)"
+    met: true
+    evidence: >
+      StampMessageFile runs `interpret-trailers --if-missing=add --if-exists=addIfDifferent`
+      with one --trailer per validated id. Idempotency + fan-in proven by unit tests
+      (TestStamp_IdempotentOnReStamp, TestStamp_MultiSessionFanIn) AND real git
+      (TestE2E_AmendIsIdempotent -> [sess-A]; my own real `rebase -i` squash -> sess-B|sess-A).
+      CAVEAT: single non-squashed commit attributes to ONE session (registry tier); genuine
+      per-commit fan-in arises from squash healing or an explicit multi-id OPENBOX_SESSION.
+      This is correct (one commit = one git invocation = one session) and mirrors
+      Co-Authored-By fan-on-squash, so the AC is met in substance. See F1 for the one
+      interactive edge where stamping mutates commit behavior.
+  - id: "AC2: never writes secrets (opaque session id only, INV-1); safe under rewrites"
+    met: true
+    evidence: >
+      validateSessionID rejects empty/whitespace, >512 chars, any \n/\r/\x00 (trailer-injection
+      safe), and any obx_-prefixed value (credential-shaped). Proven by TestValidateSessionID,
+      TestStamp_DropsInvalidNeverWritesSecret, and the real-binary TestBinary_NeverStampsSecret
+      (OPENBOX_SESSION=obx_secret -> exit 0, no obx_ in the message). Rewrites: amend/plain-rebase
+      copy the trailer verbatim, squash heals, fixup drops (documented loss). The session RECORD
+      also carries only {session_id, cwd, updated_at} (0600/0700) — no content (INV-2), verified
+      by TestHookBinary_MaintainsSessionRegistry (a SECRET-COMMAND payload never reaches the file).
+  - id: "AC3: optional non-authoritative local refs/notes/openbox mirror"
+    met: true
+    evidence: >
+      notes.go WriteNoteMirror/ReadNoteMirror under refs/notes/openbox with `notes add -f`
+      (idempotent), reachable via the `post-commit` subcommand; TestE2E_NotesMirror proves
+      round-trip + clean empty read. It is genuinely OPTIONAL: only prepare-commit-msg is
+      auto-installed, so the mirror is a capability a user/CLI must opt into (F8, INFO).
+  - id: "AC4: validation matrix (commit/amend/rebase-squash/fixup) confirms trailer presence/idempotency; INV-3-analog: hook NEVER fails a commit -> always exit 0"
+    met: true
+    evidence: >
+      integration_test.go drives the full S3 matrix against real git and pins each outcome,
+      incl. TestE2E_MissingBinaryDoesNotBreakCommit (fail-open) and TestE2E_FixupDropsItsSession
+      (documented loss). Exit-0 is enforced at two layers: hookScript ends every path with
+      `... || true` + `exit 0`, and main.go has a deferred recover()+os.Exit(0). I independently
+      re-verified a real commit still succeeds with OPENBOX_GIT_HOOK pointed at a nonexistent
+      path. No path can abort a commit (F1 is the inverse: it can CREATE one that would abort).
+
+findings:
+  - id: F1
+    severity: medium
+    classification: correctness/behavior-change
+    target: "adapters/common/git/hook.go:28-60 (PrepareCommitMsg/RunPrepareCommitMsg) + trailer.go:78-107 (StampMessageFile stamps regardless of body content)"
+    detail: >
+      In the interactive-editor commit flow (developer runs `git commit` with no -m),
+      prepare-commit-msg fires while the message buffer is still the EMPTY template. The hook
+      stamps the OpenBox-Session trailer into it unconditionally. If the developer then saves an
+      empty message to ABORT the commit (a standard abort idiom — git normally rejects it with
+      "Aborting commit due to empty commit message", exit 1, no commit), the injected trailer has
+      made the buffer non-empty, so git instead CREATES a commit whose entire subject is the bare
+      `OpenBox-Session: <id>` line (exit 0). I reproduced this on real git 2.53.0: baseline =
+      exit 1 / 0 commits; with the hook + a session in scope = exit 0 / 1 commit / subject
+      "OpenBox-Session: sess-real". Worse, that commit is not even useful attribution — with the
+      trailer as the subject, %(trailers) returns empty, so SL-6 sees nothing. This contradicts
+      the package's own stated principle (doc.go: observe-only, "must never break `git commit`",
+      never interfere) — here it interferes in the opposite direction by manufacturing an unwanted
+      commit. It is entirely UNTESTED: every unit/E2E case supplies -m or a non-empty message.
+      FAILURE SCENARIO: agent session active (registry fresh); developer types `git commit`,
+      reconsiders, saves the empty editor to cancel -> a junk commit "OpenBox-Session: sess-xyz"
+      lands in history instead of the intended no-op.
+    recommendation: >
+      Decide the interactive-empty behavior deliberately and pin it with a test. Options:
+      (a) in the entrypoint, if the message body stripped of comments and blank lines is empty
+      BEFORE stamping, skip stamping so git's empty-commit guard still fires — accepting that a
+      pure-empty interactive template only gets stamped once the developer has typed a subject
+      (prepare-commit-msg cannot see that, so interactive commits may need a commit-msg-stage
+      stamp instead); or (b) explicitly accept and document the edge. Either way add a real-git
+      test for `git commit` (editor) with an empty save, and for a normal editor commit where the
+      user types a subject after the hook has stamped (I verified the latter resolves correctly).
+  - id: F2
+    severity: low
+    classification: correctness/cosmetic
+    target: "adapters/common/git/trailer.go:78-107 (StampMessageFile heal never removes the harvested mid-body line)"
+    detail: >
+      Squash healing harvests mid-body OpenBox-Session lines and RE-ASSERTS them into the trailing
+      block via addIfDifferent, but never removes the original mid-body occurrence. I confirmed on
+      a real squash that the stored commit message contains the orphaned `OpenBox-Session: sess-A`
+      mid-body AND sess-A again in the healed trailing block (sess-A appears twice). %(trailers)
+      resolution is correct (sess-B|sess-A) and it is idempotent on re-fire, so this is cosmetic —
+      but squashed commit messages carry a visibly duplicated session line, which a developer may
+      find confusing or edit out.
+    recommendation: >
+      Optional: strip mid-body OpenBox-Session lines during heal (rewrite the body, then re-stamp
+      the trailing block) so each session appears exactly once. Low priority; document if left.
+  - id: F3
+    severity: low
+    classification: correctness/robustness
+    target: "adapters/common/git/session.go:129-171 (resolveFromRegistry/withinWorktree) vs hook.go:72-78 (Worktree via rev-parse --show-toplevel)"
+    detail: >
+      The registry match compares the session record's cwd (from the tool's ev.Cwd, a literal path)
+      against `git rev-parse --show-toplevel`, which RESOLVES symlinks. On systems where the repo
+      lives under a symlinked path (macOS /tmp -> /private/tmp and /var -> /private/var; some
+      corp-managed home/worktree layouts), ev.Cwd="/tmp/repo/..." will not be withinWorktree of
+      top="/private/tmp/repo", so the commit is left UNATTRIBUTED. This FAILS SAFE (unattributed,
+      never mis-attributed) and is untested, but it silently drops attribution for an entire class
+      of environments.
+    recommendation: >
+      Resolve symlinks on both sides before comparing (filepath.EvalSymlinks on cwd, or compare
+      against `rev-parse --show-toplevel` computed from the record's cwd). Add a symlinked-worktree
+      test. Non-blocking given fail-safe behavior.
+  - id: F4
+    severity: low
+    classification: correctness/concurrency
+    target: "adapters/common/git/session.go:129-162 (recency tiebreak) + registry.go:44-49 (UpdatedAt unix SECONDS)"
+    detail: >
+      The same-worktree parallel-session claim rests on "the committing session refreshed its
+      record on the PreToolUse that fired ms before the commit". But UpdatedAt is unix SECONDS and
+      the tiebreak is strict `>` (first-in-readdir wins on a tie), so the disambiguation window is
+      ~1 full second, not milliseconds — two same-worktree sessions active in the same second can
+      resolve to the wrong one. Separately, the whole scheme assumes the committing session ALWAYS
+      emits a PreToolUse immediately before the commit; a commit made outside the agent's Bash tool
+      (git GUI, husky/lint-staged, a background script) has no such refresh and will be attributed
+      to whichever OTHER session is currently freshest in that worktree. Both are acknowledged
+      best-effort in the design and SL-6 is the authoritative server-side binding, so this is a
+      documented limitation, not a defect — but the "ms before" narrative overstates the actual
+      1s-granularity guarantee.
+    recommendation: >
+      Consider sub-second timestamps (UnixNano) to tighten the tiebreak, and reconcile the doc
+      narrative with the real granularity. Track the "commit not via the agent's tool" case as a
+      known limitation SL-6 resolves. Non-blocking.
+  - id: F5
+    severity: low
+    classification: correctness/edge
+    target: "adapters/common/git/trailer.go:135-148 (scanSessionLines) + 196-210 (validateSessionID allows spaces)"
+    detail: >
+      scanSessionLines promotes ANY column-0 `OpenBox-Session:` line found anywhere in the message
+      into the trailing trailer block, and validateSessionID does not reject internal spaces. So a
+      developer who legitimately writes a body line `OpenBox-Session: notes about the session model`
+      would have "notes about the session model" harvested and stamped as a resolvable trailer value
+      (a bogus session id). The diff region of `git commit -v` is safe (I verified diff lines carry
+      +/-/space prefixes so they never match column 0), so this only bites a genuine column-0 body
+      line — niche, but it can inject a garbage session id that SL-6 would treat as real.
+    recommendation: >
+      Tighten validateSessionID to a session-id character class (reject whitespace) so a prose line
+      is dropped, or only harvest lines that already look like a trailer value. Non-blocking.
+  - id: F6
+    severity: info
+    classification: robustness/concurrency
+    target: "adapters/common/git/registry.go:80-86 (WriteSessionRecord temp path is not process-unique)"
+    detail: >
+      The atomic write uses a FIXED temp name `<sanitized-id>.json.tmp` (not pid/random-suffixed).
+      Cross-session writers use distinct temp files (keyed by id) so the resolver is safe, and the
+      resolver correctly ignores `.json.tmp` (suffix check is exactly `.json`). But two hook
+      processes for the SAME session writing concurrently share one temp path and could interleave;
+      the payload is tiny and near-identical so corruption is unlikely, and it is best-effort, so
+      this is INFO. Note only.
+    recommendation: "Optional: suffix the temp with a pid/nonce for strict single-session concurrency safety."
+  - id: F7
+    severity: info
+    classification: accuracy/narration
+    target: "adapters/common/git/trailer.go:86-88 (comment: 'History (harvested) first ... order mirrors S3 R3')"
+    detail: >
+      When healing a message that already has a trailing OpenBox-Session block, interpret-trailers
+      appends the newly-asserted ids AFTER the existing trailing ones, so the resulting order is
+      existing-trailing-first (e.g. sess-B then sess-A in my squash probe), not the
+      harvested/history-first order the comment claims. SL-6 reads a SET, so ordering is immaterial —
+      the code comment just overstates the guarantee. INFO.
+    recommendation: "Correct the comment to describe the actual (existing-first) order, or normalize order explicitly if it matters."
+  - id: F8
+    severity: info
+    classification: completeness
+    target: "adapters/common/git/hook.go:104-131 (InstallHook installs prepare-commit-msg only); notes.go + cmd post-commit"
+    detail: >
+      The optional notes mirror (AC3) is implemented and tested but never auto-installed — only
+      prepare-commit-msg is written by InstallHook / the ambient installer. The post-commit path
+      that calls WriteNoteMirror exists in the binary but nothing installs a post-commit hook, so
+      the mirror is a capability a user/CLI must wire up. Consistent with "optional / best-effort /
+      non-authoritative", so the AC is met; noting that the mirror is dormant by default.
+    recommendation: "None required; document that the notes mirror is opt-in (no auto post-commit install)."
+
+G3_REVIEW:
+  decision: revise
+  blocking_findings: [F1]
+  gate_dependency: >
+    G_SEC (Sam) recommended by the SL-5 build follow-up (INV-1 touches secret-in-history);
+    validateSessionID is the relevant surface and is sound + tested, but the G_SEC pass is
+    still PENDING. G1_READY (brian) per the build artifact also still pending.
+  rationale: >
+    The write side is genuinely well-built and its headline claims survived independent
+    re-verification against real git 2.53.0: the never-abort/exit-0 contract is enforced at both
+    the shell-script and binary layers and holds under a missing engine, bad args, an unreadable
+    message, and panics; INV-1 is real (obx_-shaped, multi-line, NUL, and over-long ids are dropped,
+    never written — proven by the real-binary secret test); idempotency under --amend and plain
+    rebase is real; squash healing genuinely fans-in the full session set via %(trailers) even when
+    the squasher has no session; the worktree-scoped registry is exact across different worktrees
+    (the parallel-safe core) with a clean rename-based atomic write and TTL staleness cutoff; and the
+    opt-in ambient install is default-off, idempotent, and foreign-refusing. All three modules build,
+    vet, and test GREEN under -race, uncached. All four ACs are substantially MET. I am NOT approving
+    to done because of ONE finding the entire test suite misses (F1): in the interactive-editor flow
+    the hook stamps the empty template, so a developer who saves an empty message to ABORT a commit —
+    which git normally rejects — instead gets a junk commit whose subject is the bare trailer line,
+    exit 0. I reproduced this on real git. It is a behavior change that directly contradicts the
+    package's observe-only / never-interfere principle, it produces a commit that is not even
+    resolvable (%(trailers) empty), and it is untested. That is a must-fix-or-explicitly-accept
+    decision, hence REVISE. Everything else is LOW/INFO and non-blocking: a cosmetic duplicate
+    session line left in squashed messages (F2), a symlinked-cwd attribution miss that fails SAFE
+    (F3), second-granularity vs the "ms" narrative in the same-worktree recency tiebreak plus the
+    non-agent-commit case (F4), harvest promoting a column-0 prose line as a bogus id (F5), and three
+    INFO nits (temp-file naming, heal-order narration, dormant notes mirror). No safety or security
+    defect was found; no hook path can abort a commit. MUST-FIX before DONE: resolve F1 (decide +
+    test the interactive-empty behavior). Recommend also addressing F3/F5 (both can be fixed cheaply)
+    and clearing the recommended G_SEC pass on validateSessionID.
+  must_fix: [F1]
+  should_fix: [F3, F5]
+  no_code_modified: true

@@ -131,6 +131,37 @@ func TestResolveCredentials_EnvDisablesConfigContentCapture(t *testing.T) {
 	}
 }
 
+func TestResolveInstallGitHook(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "dev.json")
+	write := func(json string) { _ = os.WriteFile(cfgPath, []byte(json), 0o600) }
+	t.Setenv(envConfigPath, cfgPath)
+	os.Unsetenv(envInstallGitHook) // env genuinely absent → config decides
+
+	// Default: no config field, no env → false (fail-safe; does not modify repos).
+	write(`{"developer_did":"` + testDID + `"}`)
+	if ResolveInstallGitHook() {
+		t.Error("default should be false")
+	}
+
+	// Config enables it.
+	write(`{"developer_did":"` + testDID + `","install_git_hook":true}`)
+	if !ResolveInstallGitHook() {
+		t.Error("install_git_hook:true in config should enable")
+	}
+
+	// Env overrides config either way.
+	t.Setenv(envInstallGitHook, "false")
+	if ResolveInstallGitHook() {
+		t.Error("env false must override config true")
+	}
+	write(`{"developer_did":"` + testDID + `"}`)
+	t.Setenv(envInstallGitHook, "1")
+	if !ResolveInstallGitHook() {
+		t.Error("env 1 must override config absent/false")
+	}
+}
+
 func TestOsSecretLookup_RejectsDashCoordinates(t *testing.T) {
 	if _, err := osSecretLookup("-flag", "acct"); err == nil {
 		t.Error("leading-dash service should be rejected (arg-injection guard)")

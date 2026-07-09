@@ -1,5 +1,5 @@
 version: 1
-updated_at: "2026-07-08T14:30:00Z"  # SL-4 DONE (brian sign-off); SL4-WIRE-1/2 drafted (wired option); SL-5 drift fix → ready (SL-2 done)
+updated_at: "2026-07-09T14:45:00Z"  # SL-5 DONE — reviewed (G_SEC approve-w-conditions, G3 revise→fixed) + brian sign-off (G1_READY confirm, G3 approve); SL-6 now READY
 owner: "orchestrator"
 stories:
   STORY-SL-1:
@@ -158,7 +158,7 @@ stories:
       blocked_reason: null
   STORY-SL-5:
     title: "Commit trailer stamping (session->commit binding)"
-    status: "ready"
+    status: "done"
     epic: "E2"
     sprint: null
     priority: "P1"
@@ -167,27 +167,42 @@ stories:
     blocked_by: []
     write_scope:
       - "adapters/common/git/"
+      - "adapters/claude-code/  # SL5-WIRE-1 (brian-authorized 2026-07-09): adapter writes the session registry + opt-in ambient hook install + DevConfig.install_git_hook"
+      - "cli/  # SL5-WIRE-1 (brian-authorized 2026-07-09): `dev init --install-git-hook` flag threads to CredentialRef + disclosure"
     validation_commands:
-      - "cd adapters/common/git && go test ./...  # commit/amend/rebase-squash/fixup matrix (S3)"
+      - "cd adapters/common/git && go build ./... && go vet ./... && go test -race ./...  # commit/amend/rebase-squash/fixup + parallel-registry matrix (S3), real git"
+      - "cd adapters/claude-code && go build ./... && go vet ./... && go test -race ./...  # registry write/remove + opt-in ambient install + ResolveInstallGitHook, real binary"
+      - "cd cli && go build ./... && go vet ./... && go test ./...  # dev init --install-git-hook flag + dry-run disclosure"
     invariants:
       - "INV-1: trailer carries only the opaque session id, never secrets"
       - "INV-6: attribution write side (multiple lines = fan-in; idempotent)"
+      - "INV-2: session registry carries only structural fields (session_id + cwd), never content"
     gates:
       G1_READY:
-        decision: "not-run"
-        evidence: null
-        decided_by: null
-        decided_at: null
+        decision: "confirm"
+        decided_by: "brian"
+        decided_at: "2026-07-09T14:45:00Z"
+        evidence: "CONFIRMED by brian 2026-07-09. OD-SL5-A (module home adapters/common/git, own go.mod — within pre-approved write scope, no ADR triggered); OD-SL5-B (session-discovery — REDESIGNED for parallel sessions per brian 2026-07-09: worktree-scoped liveness registry written by the adapter + recency resolution, since Claude Code exposes NO session-id env/pid to the git subprocess — confirmed via docs; OPENBOX_SESSION env remains an explicit override); OD-SL5-C (ratify squash-healing beyond S3). OD-SL5-D (rollout posture) DECIDED by brian 2026-07-09 → `openbox dev init --install-git-hook` (opt-in flag → DevConfig.install_git_hook), OFF by default; ambient auto-install on SessionStart once enabled. OD17 binary unification left to SL4-WIRE-2 (brian 2026-07-09)."
+      G_SEC:
+        decision: "approve-with-conditions"
+        evidence: "Independent security review (security_reviewer), 2026-07-09. INV-1/INV-2/INV-3 all PASS with evidence: validateSessionID (trailer.go) rejects empty/>512/CRLF-NUL/obx_ before any id reaches git; all git calls argv-only (no shell), no flag/trailer injection; registry = {session_id,cwd,updated_at} only (0600/0700, atomic temp+rename); hook+binary exit 0 on every path (panic/bad-args/git-err/missing-engine). 109 subtests re-run green under -race. No hard blocker. FINDINGS: SL5-SEC-1 (MEDIUM, integrity not leak) forged attribution — squash-healing promotes ANY column-0 `OpenBox-Session:` body line into the authoritative trailer, so a commit author can forge a victim's session id; inherent to healing, authoritative fix is server-side. SL5-SEC-2 (LOW) ambient install honors repo-controlled core.hooksPath → could redirect the (benign, non-clobbering) hook write outside the repo. SL5-SEC-3 (LOW) WriteSessionRecord doesn't run validateSessionID before persisting (INV-1 still holds at the trailer sink). CONDITIONS: (1) PRIMARY→SL-6 (carried, see SL6 blocked_reason): treat the trailer as an UNTRUSTED claim, bind each value to a session owned by the authenticated pusher, reject/flag others (mirror SL-3 DID cross-binding) — forgeability now documented in doc.go. (2) ADDRESSED in-code: ambient (implicit) install bounded to <git-common-dir>/hooks via HooksDirDefault (ignores repo-controlled core.hooksPath; explicit `install` still honors it); TestE2E_HooksDirHonorsCoreHooksPath. (3) ADDRESSED in-code: validateSessionID now runs in WriteSessionRecord; TestRegistry_WriteRejectsInvalidID. Artifact: .fab7/sdlc/assignments/security-review-SL5-20260709.result.yaml"
+        decided_by: "security_reviewer"
+        decided_at: "2026-07-09T13:40:00Z"
+      G3_REVIEW:
+        decision: "approve"
+        decided_by: "brian"
+        decided_at: "2026-07-09T14:45:00Z"
+        evidence: "brian sign-off 2026-07-09 (revisions confirmed). Independent correctness audit (review_auditor), 2026-07-09: blind read + re-ran all 3 modules green under -race; exit-0/never-abort contract, INV-1, --amend/rebase idempotency, squash fan-in, and worktree-scoped registry all independently re-verified against real git 2.53.0. Decision REVISE on one MUST-FIX + lows. ALL FIXED + re-validated (git module 62 subtests, was 53; all 3 modules green): F1 (MEDIUM must-fix) empty/comment-only editor message was stamped → junk trailer-only commit instead of git's normal empty-abort → FIXED (hasCommitContent guard; StampMessageFile skips content-less messages; TestE2E_EmptyMessageStillAborts + TestStamp_EmptyMessageNotStamped + TestHasCommitContent). F5 (LOW) prose body line could be harvested → FIXED (validateSessionID rejects internal whitespace; TestValidSessionIDs_DropsProseAndSecrets). F3 (LOW) symlinked cwd went unattributed → FIXED (resolvePath EvalSymlinks both sides; TestRegistry_SymlinkedCwd). F4 (LOW) 1s recency window → FIXED (UpdatedAt now UnixNano; TestRegistry_SubSecondRecency). F6 (LOW) shared temp name → FIXED (os.CreateTemp unique temp). ACCEPTED/NOTED: F2 (orphan mid-body line, cosmetic; resolution correct), F7 (doc nit), F8 (dormant notes mirror, optional by design). Artifact: .fab7/sdlc/assignments/review-diff-SL5-20260709.result.yaml"
     audit:
       commit: null
-      completed_at: null
-      validation_artifact: null
+      completed_at: "2026-07-09T14:45:00Z"
+      validation_artifact: ".fab7/sdlc/assignments/build-story-SL5-20260709-1100.result.yaml"
       last_run_id: null
-      status_reason: "READY — dep STORY-SL-2 is done (drift fix 2026-07-08: blocked_by cleared; SL-2 installs the git hook). Session id source is SL-4 (done)."
+      status_reason: "DONE — built + wired + independently reviewed (G_SEC approve-with-conditions [2 conds addressed in-code, SL5-SEC-1 carried to SL-6]; G3 REVISE→all fixed+re-validated) + brian sign-off (G1_READY confirm, G3_REVIEW approve) 2026-07-09. All 3 modules green under -race (git module 62 subtests). BUILD SUMMARY: (1) New stdlib-only module adapters/common/git/: trailer/session/registry/hook/notes + cmd/openbox-git-hook.  Squash leaves earlier OpenBox-Session lines mid-body where %(trailers) can't see them → StampMessageFile HARVESTS + heals them into the trailing block (S3 R7). (2) PARALLEL-SAFE SESSION DISCOVERY (redesign, brian 2026-07-09): Claude Code exposes no session-id env/pid to git (confirmed via docs) → adapter writes a worktree-scoped liveness registry, hook attributes the commit to the most-recently-active session in the commit's worktree; different worktrees never collide, same-worktree resolves by recency, stale/crashed records TTL-expire. Proven end-to-end incl. two-repo parallel case. (3) WIRING (SL5-WIRE-1): the CC hook writes/refreshes/removes the registry (structural fields only, INV-2) + opt-in ambient prepare-commit-msg install (OFF by default, foreign-safe), gated by DevConfig.install_git_hook (ResolveInstallGitHook; OPENBOX_INSTALL_GIT_HOOK overrides). Rollout posture DECIDED (brian 2026-07-09): `openbox dev init --install-git-hook` — flag threads provider.CredentialRef→claudecode.CredentialRef→DevConfig, disclosed in --dry-run + manual output (verified via real CLI). Remaining wiring (NOT SL-5): OD17 binary unification (= SL4-WIRE-2); the flag PERSISTS to DevConfig only once SL4-WIRE-1 replaces the CLI's SL-2 claude-code stub with the real claudecode.Installer (today disclosed, not yet persisted). Original build 109 subtests → post-review 62 in the git module alone (net higher w/ regression tests). (1) New stdlib-only module adapters/common/git/: trailer/session/registry/hook/notes + cmd/openbox-git-hook. FINDING (beyond S3): squash leaves earlier OpenBox-Session lines mid-body where %(trailers) can't see them → StampMessageFile HARVESTS + heals them into the trailing block (S3 R7). (2) PARALLEL-SAFE SESSION DISCOVERY (redesign, brian 2026-07-09): Claude Code exposes no session-id env/pid to git (confirmed via docs) → adapter writes a worktree-scoped liveness registry, hook attributes the commit to the most-recently-active session in the commit's worktree; different worktrees never collide, same-worktree resolves by recency, stale/crashed records TTL-expire. Proven end-to-end incl. two-repo parallel case. (3) WIRING (SL5-WIRE-1): the CC hook writes/refreshes/removes the registry (structural fields only, INV-2) + opt-in ambient prepare-commit-msg install (OFF by default, foreign-safe), gated by DevConfig.install_git_hook (ResolveInstallGitHook; OPENBOX_INSTALL_GIT_HOOK overrides). Rollout posture DECIDED (brian 2026-07-09): `openbox dev init --install-git-hook` — flag threads provider.CredentialRef→claudecode.CredentialRef→DevConfig, disclosed in --dry-run + manual output (verified via real CLI). Human gates remain: G1_READY (OD-SL5-A/B/C) + G3_REVIEW (+ recommended G_SEC). Remaining wiring: OD17 binary unification (= SL4-WIRE-2, deferred by brian); the flag PERSISTS to DevConfig only once SL4-WIRE-1 replaces the CLI's SL-2 claude-code stub with the real claudecode.Installer (today it is disclosed, not yet persisted); SL6-SCAN (server-side full-body scan for pre-install commits)."
       blocked_reason: null
   STORY-SL-6:
     title: "OpenBox git action (deploy lineage)"
-    status: "blocked"
+    status: "ready"
     epic: "E3"
     sprint: null
     priority: "P1"
@@ -195,8 +210,7 @@ stories:
       - "STORY-SL-1"
       - "STORY-SL-3"
       - "STORY-SL-5"
-    blocked_by:
-      - "STORY-SL-5"
+    blocked_by: []
     write_scope:
       - "actions/openbox-git-action/"
     validation_commands:
@@ -214,8 +228,8 @@ stories:
       completed_at: null
       validation_artifact: null
       last_run_id: null
-      status_reason: null
-      blocked_reason: "awaiting STORY-SL-5 (STORY-SL-1 + STORY-SL-3 now done)"
+      status_reason: "CARRIES a mandatory security condition from SL-5 G_SEC (SL5-SEC-1): the commit trailer is an UNTRUSTED claim — anyone who can author a commit can name any session id (incl. a victim's, visible in pushed commits), and squash-healing hoists body lines. SL-6 MUST bind each trailer value to a session owned by the authenticated pusher and mark others unattributed/inferred (mirror SL-3 DID cross-binding); never treat a raw trailer as proven attribution. Also SL6-SCAN: prefer healed %(trailers) but MAY full-body-scan for pre-install commits."
+      blocked_reason: null  # SL-5 done 2026-07-09 → SL-6 READY (all deps met)
   STORY-SL-7:
     title: "Codex adapter (fast-follow)"
     status: "deferred"

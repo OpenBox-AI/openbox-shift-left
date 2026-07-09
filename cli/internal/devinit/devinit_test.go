@@ -48,8 +48,8 @@ type fakeInstaller struct {
 	gotRef     provider.CredentialRef
 }
 
-func (f *fakeInstaller) Name() provider.Name  { return provider.ClaudeCode }
-func (f *fakeInstaller) Available() bool       { return f.avail }
+func (f *fakeInstaller) Name() provider.Name                  { return provider.ClaudeCode }
+func (f *fakeInstaller) Available() bool                      { return f.avail }
 func (f *fakeInstaller) Plan(r provider.CredentialRef) string { return "MANUAL-CONFIG did=" + r.DID }
 func (f *fakeInstaller) Install(r provider.CredentialRef) error {
 	f.gotRef = r
@@ -107,6 +107,19 @@ func TestDryRunMakesNoWrites(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "DRY RUN") {
 		t.Errorf("dry-run output missing DRY RUN banner:\n%s", out.String())
+	}
+}
+
+func TestDryRunDisclosesInstallGitHook(t *testing.T) {
+	var out bytes.Buffer
+	_, err := Run(context.Background(),
+		Options{Provider: "claude-code", Org: "acme", DryRun: true, InstallGitHook: true},
+		Deps{Registrar: &fakeRegistrar{}, Store: secret.NewMemStore(), Installer: &fakeInstaller{avail: false}, Out: &out})
+	if err != nil {
+		t.Fatalf("dry-run err: %v", err)
+	}
+	if !strings.Contains(out.String(), "install_git_hook: true") {
+		t.Errorf("dry-run must disclose the ambient commit-hook install:\n%s", out.String())
 	}
 }
 

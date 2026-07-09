@@ -8,6 +8,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	obgit "github.com/openbox-ai/openbox-shift-left/adapters/common/git"
 )
 
 // pluginFS is the Claude Code plugin bundle shipped with this adapter (the
@@ -29,6 +31,7 @@ type CredentialRef struct {
 	DID               string
 	BaseURL           string // optional; defaults to the core base
 	ContentCapture    bool   // org content posture (default false = metadata-only)
+	InstallGitHook    bool   // STORY-SL-5: ambient prepare-commit-msg install (default false)
 }
 
 // Installer writes the Claude Code plugin bundle + the non-secret dev config,
@@ -60,6 +63,14 @@ func (i Installer) Plan(ref CredentialRef) string {
 		ref.SecretService, ref.APIKeyAccount, ref.PrivateKeyAccount)
 	fmt.Fprintf(&b, "      content_capture=%t (default false = metadata-only, INV-2)\n", ref.ContentCapture)
 	fmt.Fprintf(&b, "  - Credentials stay in the OS secret store; the hook reads them at runtime (INV-1).\n")
+	fmt.Fprintf(&b, "\nCommit-trailer stamping (STORY-SL-5, session→commit binding):\n")
+	fmt.Fprintf(&b, "  - The plugin bundles bin/openbox-git-hook and maintains a per-session liveness\n")
+	fmt.Fprintf(&b, "    registry (%s) so a git commit is attributed to the session that made it —\n", obgit.DefaultSessionDir())
+	fmt.Fprintf(&b, "    parallel-safe across concurrent sessions (worktree-scoped, INV-2 metadata-only).\n")
+	fmt.Fprintf(&b, "  - Ambient install of the prepare-commit-msg hook is %s (it modifies a repo's\n", onOff(ref.InstallGitHook))
+	fmt.Fprintf(&b, "    .git/hooks). Enable at onboarding with `openbox dev init --install-git-hook`\n")
+	fmt.Fprintf(&b, "    (persisted to dev config); OPENBOX_INSTALL_GIT_HOOK overrides either way; or install\n")
+	fmt.Fprintf(&b, "    per repo with `openbox-git-hook install`. Idempotent; never overwrites a foreign hook.\n")
 	fmt.Fprintf(&b, "\nOrg-wide force-enable (managed settings; VERIFIED, not activated for the pilot — NFR-5):\n")
 	fmt.Fprintf(&b, "  add to the managed settings.json: {\"enabledPlugins\": [\"openbox-observe\"]}\n")
 	return b.String()
@@ -112,6 +123,7 @@ func (i Installer) writeConfig(ref CredentialRef) error {
 		APIKeyAccount:     ref.APIKeyAccount,
 		PrivateKeyAccount: ref.PrivateKeyAccount,
 		ContentCapture:    ref.ContentCapture,
+		InstallGitHook:    ref.InstallGitHook,
 	}
 	raw, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
@@ -145,6 +157,13 @@ func (i Installer) configPath() string {
 // userPluginDir is the default local install location for the plugin bundle
 // (~/.claude/plugins/openbox-observe). Marketplace/managed installs use their
 // own path; this is the CLI-driven local install target.
+func onOff(b bool) string {
+	if b {
+		return "ON"
+	}
+	return "OFF by default"
+}
+
 func userPluginDir() string {
 	home, err := os.UserHomeDir()
 	if err != nil || home == "" {
