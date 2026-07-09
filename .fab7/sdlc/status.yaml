@@ -1,5 +1,5 @@
 version: 1
-updated_at: "2026-07-09T16:45:00Z"  # SL-6 DONE — reviewed (G_SEC approve-w-conditions [all addressed in-code], G3 revise→all fixed+re-validated 30 tests -race) + brian sign-off (G1_READY confirm, G3_REVIEW approve). SL-5 DONE.
+updated_at: "2026-07-09T17:30:00Z"  # SL4-WIRE-1 (de52ea9), SL2-FILEBACKEND (9ae113c), SL4-WIRE-2 (be033ca) all DONE — reviewed (G_SEC/G3 approve) + brian sign-off + committed. SL-1..SL-6 DONE. Remaining: SL-7 Codex / SL-8 Cursor (deferred) + backlog follow-ups.
 owner: "orchestrator"
 stories:
   STORY-SL-1:
@@ -301,7 +301,7 @@ stories:
       blocked_reason: null
   STORY-SL4-WIRE-1:
     title: "Extract provider SPI to shared module + register Claude Code installer in CLI"
-    status: "ready"
+    status: "done"  # committed de52ea9; brian sign-off (G1_READY confirm, G3 approve, G_ADR accept) 2026-07-09
     epic: "E2"
     sprint: null
     priority: "P1"
@@ -321,35 +321,35 @@ stories:
       - "INV-7: developer agents share the runtime-agent DID namespace"
     gates:
       G1_READY:
-        decision: "not-run"
-        evidence: null
-        decided_by: null
-        decided_at: null
+        decision: "confirm"
+        evidence: "brian 2026-07-09: accept the provider-SPI module split + coordinates-only install seam; accept relocating SL-2's provider interface into the shared provider/ module (interface unchanged)."
+        decided_by: "brian"
+        decided_at: "2026-07-09T17:30:00Z"
       G3_REVIEW:
-        decision: "not-run"
-        evidence: "Independent blind review APPROVE (.fab7/sdlc/assignments/review-diff-SL4-WIRE-1-20260709.result.yaml): module split correct, adapter genuinely implements provider.Installer, no import cycle, go.mod graph resolves, no dangling refs, all 3 modules green under -race. No must-fix; 2 LOW nits (F1 Stub nil-Manual panic, F2 idempotency/dry-run coverage) FIXED + re-validated. Awaiting brian's G3 sign-off. FLAG: relocates SL-2's G3-approved provider interface out of cli/internal/provider (interface unchanged; package moved)."
-        decided_by: null
-        decided_at: null
+        decision: "approve"
+        evidence: "brian sign-off 2026-07-09. Independent blind review APPROVE (.fab7/sdlc/assignments/review-diff-SL4-WIRE-1-20260709.result.yaml): module split correct, adapter genuinely implements provider.Installer, no import cycle, go.mod graph resolves, no dangling refs, all 3 modules green under -race. No must-fix; 2 LOW nits (F1 Stub nil-Manual panic, F2 idempotency/dry-run coverage) FIXED + re-validated. FLAG acknowledged: relocates SL-2's G3-approved provider interface out of cli/internal/provider (interface unchanged; package moved)."
+        decided_by: "brian"
+        decided_at: "2026-07-09T17:30:00Z"
       G_SEC:
-        decision: "not-run"
+        decision: "approve"
         evidence: "Independent security review APPROVE, no conditions (.fab7/sdlc/assignments/security-review-SL4-WIRE-1-20260709.result.yaml): INV-1 boundary traced end-to-end — no path lets a secret reach a config/bundle file, Plan/--dry-run output, error, log, or argv; CredentialRef is coordinates-only; config 0600/dir 0700; INV-7 namespace not forked. (Advisory — G_SEC not a declared WIRE-1 gate, run because the change touches INV-1.)"
-        decided_by: null
-        decided_at: null
+        decided_by: "Sam (security_reviewer)"
+        decided_at: "2026-07-09T17:30:00Z"
       G_ADR:
-        decision: "proposed"
-        evidence: "ADR-0001 (.fab7/sdlc/design/adr/ADR-0001-provider-spi-module-home.md) records the SPI package home: new dependency-free `provider/` module owning Installer/CredentialRef/Name/Stub; concrete registry stays in cli/internal/providers (composition root) to avoid the SPI↔adapter import cycle. Status: proposed — awaiting brian's G_ADR sign-off."
-        decided_by: null
-        decided_at: null
+        decision: "accept"
+        evidence: "brian accept 2026-07-09. ADR-0001 (.fab7/sdlc/design/adr/ADR-0001-provider-spi-module-home.md) records the SPI package home: new dependency-free `provider/` module owning Installer/CredentialRef/Name/Stub; concrete registry stays in cli/internal/providers (composition root) to avoid the SPI↔adapter import cycle."
+        decided_by: "brian"
+        decided_at: "2026-07-09T17:30:00Z"
     audit:
-      commit: null
-      completed_at: null
-      validation_artifact: null
+      commit: "de52ea9"
+      completed_at: "2026-07-09T17:30:00Z"
+      validation_artifact: ".fab7/sdlc/assignments/review-diff-SL4-WIRE-1-20260709.result.yaml"
       last_run_id: null
-      status_reason: "BUILT + INDEPENDENTLY REVIEWED (G3 APPROVE + G_SEC APPROVE); pending human G1_READY + G3 + G_ADR sign-off. Created dependency-free `provider/` module (Installer/CredentialRef superset with BaseURL+ContentCapture+InstallGitHook/Name/errors/Supported/Stub). adapters/claude-code now implements provider.Installer (Name() returns provider.ClaudeCode; claudecode.CredentialRef is a type alias of the shared type — self-defined type dropped). New cli/internal/providers registry (composition root) binds claude-code→real claudecode.Installer, codex/cursor→provider.Stub; deleted cli/internal/provider. cli+adapter go.mod add require+replace→../provider. `dev init --provider claude-code` now materializes the plugin bundle + non-secret dev config for real (verified via real binary --dry-run: renders the real installer's plan, exit 0). INV-1 held: installer receives only CredentialRef coordinates; integration test (temp-HOME install via mock backend) + CLI tests (redirected HOME) assert bundle+config materialized with NO secret value in any written file. REVIEW: both reviewers APPROVE; 2 LOW nits applied — F1 (provider.Stub nil-Manual fallback, TestStubPlanFallsBackWhenManualIsNil), F2 (TestInstaller_ReInstallIsByteIdentical + TestClaudeCodeDryRunWritesNothing). Re-validated: provider + adapters/claude-code + cli all green under -race; go vet clean. G_ADR opened via ADR-0001 (proposed). FOLLOW-UP (not blocking): thread org BaseURL/ContentCapture through devinit.Run (today empty/false — safe INV-2 default). NOTE for G3: relocates SL-2's G3-approved provider interface out of cli/internal/provider."
+      status_reason: "DONE — committed de52ea9; brian sign-off (G1_READY confirm, G3 approve, G_ADR accept) + G_SEC approve 2026-07-09. BUILT + INDEPENDENTLY REVIEWED (G3 APPROVE + G_SEC APPROVE). Created dependency-free `provider/` module (Installer/CredentialRef superset with BaseURL+ContentCapture+InstallGitHook/Name/errors/Supported/Stub). adapters/claude-code now implements provider.Installer (Name() returns provider.ClaudeCode; claudecode.CredentialRef is a type alias of the shared type — self-defined type dropped). New cli/internal/providers registry (composition root) binds claude-code→real claudecode.Installer, codex/cursor→provider.Stub; deleted cli/internal/provider. cli+adapter go.mod add require+replace→../provider. `dev init --provider claude-code` now materializes the plugin bundle + non-secret dev config for real (verified via real binary --dry-run: renders the real installer's plan, exit 0). INV-1 held: installer receives only CredentialRef coordinates; integration test (temp-HOME install via mock backend) + CLI tests (redirected HOME) assert bundle+config materialized with NO secret value in any written file. REVIEW: both reviewers APPROVE; 2 LOW nits applied — F1 (provider.Stub nil-Manual fallback, TestStubPlanFallsBackWhenManualIsNil), F2 (TestInstaller_ReInstallIsByteIdentical + TestClaudeCodeDryRunWritesNothing). Re-validated: provider + adapters/claude-code + cli all green under -race; go vet clean. G_ADR opened via ADR-0001 (proposed). FOLLOW-UP (not blocking): thread org BaseURL/ContentCapture through devinit.Run (today empty/false — safe INV-2 default). NOTE for G3: relocates SL-2's G3-approved provider interface out of cli/internal/provider."
       blocked_reason: null
   STORY-SL4-WIRE-2:
     title: "Unify hook entrypoint into the openbox engine + end-to-end onboarding smoke test"
-    status: "review"
+    status: "done"  # committed be033ca; brian sign-off (G1_READY confirm, G3 approve) 2026-07-09; incl. OD17 git-hook fold
     epic: "E2"
     sprint: null
     priority: "P1"
@@ -366,30 +366,30 @@ stories:
       - "INV-3: observe-only; the `hook` subcommand on the multi-purpose binary must still ALWAYS exit 0 with empty stdout (no cobra/usage/banner text to stdout → would inject into Claude Code context)"
     gates:
       G1_READY:
-        decision: "not-run"
-        evidence: null
-        decided_by: null
-        decided_at: null
+        decision: "confirm"
+        evidence: "brian 2026-07-09: accept the OD17 unified `openbox hook <provider> <event>` engine (cc-hook + git-hook folded to thin aliases; plugin invokes bin/openbox)."
+        decided_by: "brian"
+        decided_at: "2026-07-09T17:30:00Z"
       G3_REVIEW:
-        decision: "not-run"
-        evidence: "Independent blind review = REVISE (no correctness defect; INV-3 solid; RunHook a faithful lift) → all must-fix FIXED + re-validated (.fab7/sdlc/assignments/review-diff-SL4-WIRE-2-20260709.result.yaml). F1 (AC4): smoke now asserts the hot-path hooks cause ZERO egress + a wall-clock budget (async/no-network guarantee) AND a content canary is absent from the delivered /evaluate body. F2: reconciled placeEngineBinary fatal-when-set vs best-effort-resolution wording. F4: TestClaudeCodeInstallsForRealExitsZero now asserts bin/openbox placed via the real dev-init path. GSEC-INFO-1: restored belt-and-suspenders exit-0 recover on alias + runHook. F3 (git-hook sibling under dev init) DEFERRED to WIRE2-GITHOOK-UNIFICATION. Stale cc-hook refs in doc.go/README fixed. Awaiting brian's G3 sign-off."
-        decided_by: null
-        decided_at: null
+        decision: "approve"
+        evidence: "brian sign-off 2026-07-09. Independent blind review = REVISE (no correctness defect; INV-3 solid; RunHook a faithful lift) → all must-fix FIXED + re-validated (.fab7/sdlc/assignments/review-diff-SL4-WIRE-2-20260709.result.yaml). F1 (AC4): smoke now asserts the hot-path hooks cause ZERO egress + a wall-clock budget (async/no-network guarantee) AND a content canary is absent from the delivered /evaluate body. F2: reconciled placeEngineBinary fatal-when-set vs best-effort-resolution wording. F4: TestClaudeCodeInstallsForRealExitsZero now asserts bin/openbox placed via the real dev-init path. GSEC-INFO-1: restored belt-and-suspenders exit-0 recover on alias + runHook. F3 (git-hook sibling under dev init) RESOLVED via the git-hook fold (re-verified). Stale cc-hook refs in doc.go/README fixed."
+        decided_by: "brian"
+        decided_at: "2026-07-09T17:30:00Z"
       G_SEC:
         decision: "approve"
         evidence: "Independent G_SEC re-verify = APPROVE, no conditions (.fab7/sdlc/assignments/security-review-SL4-WIRE-2-20260709.result.yaml). Real binary driven across 10 hook paths — every one exit 0 / 0 stdout bytes; control paths (version→17 stdout bytes, no-args→exit 1) confirm the hook path is walled off from the multi-command binary's stdout/non-zero paths. run() dispatches `hook` before version/usage/errorf; runHook stderr-only + always exitOK; flag pkg never engaged; no os.Stdout/fmt.Print* in the hook+flush reach. Panic-safe. Metadata-only spool (content canary confirmed absent); EngineBinary copies a trusted path only, no secret in the bundle."
         decided_by: "Sam (security_reviewer)"
         decided_at: "2026-07-09T00:00:00Z"
     audit:
-      commit: null
-      completed_at: null
+      commit: "be033ca"
+      completed_at: "2026-07-09T17:30:00Z"
       validation_artifact: ".fab7/sdlc/assignments/build-story-SL4-WIRE-2-20260709.result.yaml"
       last_run_id: null
-      status_reason: "BUILT + INDEPENDENTLY REVIEWED (G_SEC APPROVE; G3 REVISE→all must-fix FIXED + re-validated); pending human G1_READY + G3 sign-off. Folded the hook engine into the unified `openbox` binary: extracted the observe-only path into claudecode.RunHook (one engine; writes nothing to stdout, swallows all failures incl. panics), added `openbox hook <provider> <event>` (runHook: routes before any stdout write, named-return exitOK + deferred recover, diagnostics to stderr). cmd/openbox-cc-hook reduced to a THIN ALIAS (defer os.Exit(0)); plugin/hooks/hooks.json invokes `${CLAUDE_PLUGIN_ROOT}/bin/openbox hook claude-code <event>`. Installer gained EngineBinary — `dev init` copies the running engine into bin/openbox (atomic, 0755, fatal-when-set); providers.Lookup resolves it best-effort via os.Executable(). REVIEW FIXES: smoke test now proves AC4 (hot-path zero-egress + wall-clock budget + content-canary-absent on the delivered /evaluate body); dev-init bin/openbox placement asserted through the real front door; doc.go/README de-referenced openbox-cc-hook. All modules green under -race; go vet clean; touched files gofmt-clean. Real-binary re-confirmed. GIT-HOOK FOLD (WIRE2-GITHOOK-UNIFICATION RESOLVED — brian 2026-07-09): openbox-git-hook is now folded into `openbox hook git <sub>` (shared git.RunHook engine; the standalone binary is a thin alias). Ambient + explicit installs bake `<engine> hook git prepare-commit-msg`, so bin/openbox is the only binary needed (resolves review F3). Proven end-to-end by cli TestUnifiedBinaryGitHookStampsCommit (install → real commit → OpenBox-Session trailer stamped). The fold was INDEPENDENTLY RE-VERIFIED (focused G3 + G_SEC, both APPROVE — .fab7/sdlc/assignments/review-gitfold-SL4-WIRE-2-20260709.result.yaml): faithful lift; never-abort/hooks-path(SL5-SEC-2)/INV-1/no-injection all confirmed on the real binary; 3 LOW/INFO nits applied (alias install→stamp test, cc-hook ambient-test note, maybeInstallGitHook assumption doc). Pending brian's G1_READY + G3 sign-off, then commit."
+      status_reason: "DONE — committed be033ca; brian sign-off (G1_READY confirm, G3 approve) + G_SEC approve 2026-07-09. BUILT + INDEPENDENTLY REVIEWED (G_SEC APPROVE; G3 REVISE→all must-fix FIXED + re-validated). Folded the hook engine into the unified `openbox` binary: extracted the observe-only path into claudecode.RunHook (one engine; writes nothing to stdout, swallows all failures incl. panics), added `openbox hook <provider> <event>` (runHook: routes before any stdout write, named-return exitOK + deferred recover, diagnostics to stderr). cmd/openbox-cc-hook reduced to a THIN ALIAS (defer os.Exit(0)); plugin/hooks/hooks.json invokes `${CLAUDE_PLUGIN_ROOT}/bin/openbox hook claude-code <event>`. Installer gained EngineBinary — `dev init` copies the running engine into bin/openbox (atomic, 0755, fatal-when-set); providers.Lookup resolves it best-effort via os.Executable(). REVIEW FIXES: smoke test now proves AC4 (hot-path zero-egress + wall-clock budget + content-canary-absent on the delivered /evaluate body); dev-init bin/openbox placement asserted through the real front door; doc.go/README de-referenced openbox-cc-hook. All modules green under -race; go vet clean; touched files gofmt-clean. Real-binary re-confirmed. GIT-HOOK FOLD (WIRE2-GITHOOK-UNIFICATION RESOLVED — brian 2026-07-09): openbox-git-hook is now folded into `openbox hook git <sub>` (shared git.RunHook engine; the standalone binary is a thin alias). Ambient + explicit installs bake `<engine> hook git prepare-commit-msg`, so bin/openbox is the only binary needed (resolves review F3). Proven end-to-end by cli TestUnifiedBinaryGitHookStampsCommit (install → real commit → OpenBox-Session trailer stamped). The fold was INDEPENDENTLY RE-VERIFIED (focused G3 + G_SEC, both APPROVE — .fab7/sdlc/assignments/review-gitfold-SL4-WIRE-2-20260709.result.yaml): faithful lift; never-abort/hooks-path(SL5-SEC-2)/INV-1/no-injection all confirmed on the real binary; 3 LOW/INFO nits applied (alias install→stamp test, cc-hook ambient-test note, maybeInstallGitHook assumption doc). Pending brian's G1_READY + G3 sign-off, then commit."
       blocked_reason: null
   STORY-SL2-FILEBACKEND:
     title: "Opt-in file secret backend for machines with no OS keyring"
-    status: "review"
+    status: "done"  # committed 9ae113c; brian sign-off (G1_READY confirm) + G_SEC approve; G3 waived (security-boundary change) 2026-07-09
     epic: "E2"
     sprint: null
     priority: "P1"
@@ -408,24 +408,24 @@ stories:
       - "INV-3: hook fails open — a missing/garbage secret file → error → exit 0, never blocks a tool call."
     gates:
       G1_READY:
-        decision: "not-run"
-        evidence: null
-        decided_by: null
-        decided_at: null
+        decision: "confirm"
+        evidence: "brian 2026-07-09: accept the opt-in 0600 file secret backend as the escape hatch for keyring-less machines (default posture unchanged: HALT, no auto-fallback to plaintext). Follow-ups SL2FB-INFO-1/LOW-1/LOW-2 tracked, non-blocking."
+        decided_by: "brian"
+        decided_at: "2026-07-09T17:30:00Z"
       G_SEC:
         decision: "approve"
         evidence: "Independent G_SEC APPROVE, no blockers (.fab7/sdlc/assignments/security-review-SL2-FILEBACKEND-20260709.result.yaml). Plaintext-at-rest is the only guarantee traded; never automatic (no auto→file fallback; unknown backend fails closed); warned every use; 0600 at write with no exposure window (CreateTemp+Chmod+atomic rename); no leak to argv/log/stdout/error/bundle; hook fails open; CLI-write == adapter-read format. Non-blocking: SL2FB-LOW-1 (warn/refuse on over-permissive perms on read), SL2FB-LOW-2 (cross-process flock), SL2FB-INFO-1 (wire secret_file into DevConfig so the hook auto-uses it — fail-safe gap, not a leak), SL2FB-INFO-2 (dir 0700 not tightened if pre-existing — file mode gates access)."
         decided_by: "Sam (security_reviewer)"
         decided_at: "2026-07-09T00:00:00Z"
       G3_REVIEW:
-        decision: "not-run"
-        evidence: "Scoped to G_SEC per request (security-boundary change). A correctness G3 pass is optional before final human sign-off."
-        decided_by: null
-        decided_at: null
+        decision: "waived"
+        evidence: "brian waived 2026-07-09: scoped to G_SEC per request (security-boundary change); G_SEC APPROVE sufficient. Correctness covered by cli+adapter unit tests (green under -race)."
+        decided_by: "brian"
+        decided_at: "2026-07-09T17:30:00Z"
     audit:
-      commit: null
-      completed_at: null
+      commit: "9ae113c"
+      completed_at: "2026-07-09T17:30:00Z"
       validation_artifact: ".fab7/sdlc/assignments/security-review-SL2-FILEBACKEND-20260709.result.yaml"
       last_run_id: null
-      status_reason: "IN REVIEW → landed. Opt-in 0600 file secret backend (SL-2 follow-up) for headless Linux / containers / WSL with no OS keyring — the explicit escape hatch that keeps the default HALT-don't-fall-back-to-plaintext posture (SL2-SEC-1 philosophy). CLI: `openbox dev init --secret-backend file` (or OPENBOX_SECRET_BACKEND=file) → secret.Open→NewFileStore; auto never falls back; PLAINTEXT warning every use. Adapter hook reads the same 0600 nested-JSON via OPENBOX_SECRET_FILE / dev.json secret_file (fileSecretLookup). G_SEC APPROVE (no blockers). Follow-ups tracked: SL2FB-LOW-1/LOW-2 + SL2FB-INFO-1 (wire secret_file into DevConfig) + INFO-2. Human G1_READY + final sign-off pending; committed separately from SL4-WIRE-1."
+      status_reason: "DONE — committed 9ae113c; brian sign-off (G1_READY confirm) + G_SEC approve; G3 waived (security-boundary change) 2026-07-09. Opt-in 0600 file secret backend (SL-2 follow-up) for headless Linux / containers / WSL with no OS keyring — the explicit escape hatch that keeps the default HALT-don't-fall-back-to-plaintext posture (SL2-SEC-1 philosophy). CLI: `openbox dev init --secret-backend file` (or OPENBOX_SECRET_BACKEND=file) → secret.Open→NewFileStore; auto never falls back; PLAINTEXT warning every use. Adapter hook reads the same 0600 nested-JSON via OPENBOX_SECRET_FILE / dev.json secret_file (fileSecretLookup). G_SEC APPROVE (no blockers). Follow-ups tracked: SL2FB-LOW-1/LOW-2 + SL2FB-INFO-1 (wire secret_file into DevConfig) + INFO-2. Human G1_READY + final sign-off pending; committed separately from SL4-WIRE-1."
       blocked_reason: null
