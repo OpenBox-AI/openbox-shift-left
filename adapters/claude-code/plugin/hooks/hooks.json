@@ -1,11 +1,11 @@
 {
-  "//": "OpenBox observe-only hooks (STORY-SL-4). Each hook shells out to the bundled Go engine, which maps the payload to a normalized OpenBox event and spools it locally (no network on the hot path). The hook always exits 0 with empty stdout, so it can NEVER block a tool call or inject context (INV-3 / D7). SessionEnd additionally flushes the spool to OpenBox. The event name is passed as the argv subcommand (deterministic, independent of the payload).",
+  "//": "OpenBox observe-only hooks (STORY-SL-4; unified engine STORY-SL4-WIRE-2). Each hook shells out to the bundled Go engine as `bin/openbox hook claude-code <event>`, which maps the payload to a normalized OpenBox event and spools it locally (no network on the hot path). The hook always exits 0 with empty stdout, so it can NEVER block a tool call or inject context (INV-3 / D7). SessionEnd additionally flushes the spool to OpenBox. The event name is passed as the argv subcommand (deterministic, independent of the payload).",
   "hooks": {
     "SessionStart": [
       {
         "matcher": "",
         "hooks": [
-          { "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/openbox-cc-hook\" SessionStart", "timeout": 5 }
+          { "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/openbox\" hook claude-code SessionStart", "timeout": 5 }
         ]
       }
     ],
@@ -13,7 +13,7 @@
       {
         "matcher": "",
         "hooks": [
-          { "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/openbox-cc-hook\" UserPromptSubmit", "timeout": 5 }
+          { "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/openbox\" hook claude-code UserPromptSubmit", "timeout": 5 }
         ]
       }
     ],
@@ -21,7 +21,7 @@
       {
         "matcher": "*",
         "hooks": [
-          { "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/openbox-cc-hook\" PreToolUse", "timeout": 5 }
+          { "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/openbox\" hook claude-code PreToolUse", "timeout": 5 }
         ]
       }
     ],
@@ -29,7 +29,7 @@
       {
         "matcher": "*",
         "hooks": [
-          { "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/openbox-cc-hook\" PostToolUse", "timeout": 5 }
+          { "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/openbox\" hook claude-code PostToolUse", "timeout": 5 }
         ]
       }
     ],
@@ -37,7 +37,7 @@
       {
         "matcher": "",
         "hooks": [
-          { "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/openbox-cc-hook\" SessionEnd", "timeout": 15 }
+          { "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/openbox\" hook claude-code SessionEnd", "timeout": 15 }
         ]
       }
     ]

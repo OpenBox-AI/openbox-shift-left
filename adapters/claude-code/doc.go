@@ -31,7 +31,9 @@
 //     metadata, not content, and are carried.
 //   - INV-3 observe-only + fail-open: nothing this adapter does can block, delay
 //     beyond a small local-I/O budget, or fail a Claude Code tool call. The hook
-//     binary always exits 0 with empty stdout (see cmd/openbox-cc-hook).
+//     path always exits 0 with empty stdout (the shared engine is claudecode.RunHook,
+//     invoked as `openbox hook claude-code <event>` — STORY-SL4-WIRE-2 — with a
+//     thin legacy alias at cmd/openbox-cc-hook).
 //
 // The single Go engine (this package + client/) is shared by every provider
 // adapter; adding Codex (SL-7) or Cursor (SL-8) is a new mapper + package, no

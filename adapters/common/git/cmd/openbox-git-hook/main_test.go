@@ -87,3 +87,63 @@ func TestBinary_NeverStampsSecret(t *testing.T) {
 }
 
 func sessEnv(id string) []string { return []string{"OPENBOX_SESSION=" + id} }
+
+// TestBinary_InstallStampsCommit proves the legacy alias's `install` bakes the
+// OLD `<self> prepare-commit-msg "$@"` form and that a real commit is stamped
+// through it — the alias counterpart to the unified `openbox hook git install`
+// end-to-end test (STORY-SL4-WIRE-2 F2). Guards against a regression to the
+// alias's baked installArgs.
+func TestBinary_InstallStampsCommit(t *testing.T) {
+	dir := t.TempDir()
+	repo := filepath.Join(dir, "repo")
+	if err := os.MkdirAll(repo, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	gitEnv := append(os.Environ(), "GIT_CONFIG_NOSYSTEM=1", "HOME="+dir)
+	git := func(env []string, args ...string) {
+		t.Helper()
+		c := exec.Command("git", append([]string{"-C", repo}, args...)...)
+		c.Env = env
+		if out, err := c.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	git(gitEnv, "init", "-q")
+	git(gitEnv, "config", "user.email", "t@example.com")
+	git(gitEnv, "config", "user.name", "t")
+
+	// Install via the alias binary (cwd = repo so it finds the hooks dir).
+	inst := exec.Command(bin, "install")
+	inst.Dir = repo
+	inst.Env = gitEnv
+	if out, err := inst.CombinedOutput(); err != nil {
+		t.Fatalf("install: %v\n%s", err, out)
+	}
+	body, err := os.ReadFile(filepath.Join(repo, ".git", "hooks", "prepare-commit-msg"))
+	if err != nil {
+		t.Fatalf("hook not installed: %v", err)
+	}
+	// Alias bakes the OLD form: `<self> prepare-commit-msg "$@"` (not `hook git …`).
+	if !strings.Contains(string(body), "'prepare-commit-msg'") || strings.Contains(string(body), "'hook' 'git'") {
+		t.Fatalf("alias install baked the wrong form:\n%s", body)
+	}
+
+	if err := os.WriteFile(filepath.Join(repo, "f.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git(gitEnv, "add", ".")
+	commit := exec.Command("git", "-C", repo, "commit", "-q", "-m", "subject")
+	commit.Env = append(gitEnv, "OPENBOX_SESSION=sess-alias")
+	if out, err := commit.CombinedOutput(); err != nil {
+		t.Fatalf("commit: %v\n%s", err, out)
+	}
+	msg := exec.Command("git", "-C", repo, "log", "-1", "--format=%B")
+	msg.Env = gitEnv
+	out, err := msg.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git log: %v\n%s", err, out)
+	}
+	if !strings.Contains(string(out), "OpenBox-Session: sess-alias") {
+		t.Fatalf("commit not stamped via alias install:\n%s", out)
+	}
+}

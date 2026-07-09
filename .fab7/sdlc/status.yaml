@@ -349,15 +349,14 @@ stories:
       blocked_reason: null
   STORY-SL4-WIRE-2:
     title: "Unify hook entrypoint into the openbox engine + end-to-end onboarding smoke test"
-    status: "blocked"
+    status: "review"
     epic: "E2"
     sprint: null
     priority: "P1"
     dependencies:
       - "STORY-SL4-WIRE-1"
       - "STORY-SL-2"
-    blocked_by:
-      - "STORY-SL4-WIRE-1"
+    blocked_by: []
     write_scope:
       - "cli/"
       - "adapters/claude-code/"
@@ -371,18 +370,23 @@ stories:
         evidence: null
         decided_by: null
         decided_at: null
-      G_SEC:
+      G3_REVIEW:
         decision: "not-run"
-        evidence: "Re-verify the observe-only exit-0/empty-stdout contract survives folding the hook into the multi-command `openbox` binary (the SL-4 contract was proven on a single-purpose binary)."
+        evidence: "Independent blind review = REVISE (no correctness defect; INV-3 solid; RunHook a faithful lift) → all must-fix FIXED + re-validated (.fab7/sdlc/assignments/review-diff-SL4-WIRE-2-20260709.result.yaml). F1 (AC4): smoke now asserts the hot-path hooks cause ZERO egress + a wall-clock budget (async/no-network guarantee) AND a content canary is absent from the delivered /evaluate body. F2: reconciled placeEngineBinary fatal-when-set vs best-effort-resolution wording. F4: TestClaudeCodeInstallsForRealExitsZero now asserts bin/openbox placed via the real dev-init path. GSEC-INFO-1: restored belt-and-suspenders exit-0 recover on alias + runHook. F3 (git-hook sibling under dev init) DEFERRED to WIRE2-GITHOOK-UNIFICATION. Stale cc-hook refs in doc.go/README fixed. Awaiting brian's G3 sign-off."
         decided_by: null
         decided_at: null
+      G_SEC:
+        decision: "approve"
+        evidence: "Independent G_SEC re-verify = APPROVE, no conditions (.fab7/sdlc/assignments/security-review-SL4-WIRE-2-20260709.result.yaml). Real binary driven across 10 hook paths — every one exit 0 / 0 stdout bytes; control paths (version→17 stdout bytes, no-args→exit 1) confirm the hook path is walled off from the multi-command binary's stdout/non-zero paths. run() dispatches `hook` before version/usage/errorf; runHook stderr-only + always exitOK; flag pkg never engaged; no os.Stdout/fmt.Print* in the hook+flush reach. Panic-safe. Metadata-only spool (content canary confirmed absent); EngineBinary copies a trusted path only, no secret in the bundle."
+        decided_by: "Sam (security_reviewer)"
+        decided_at: "2026-07-09T00:00:00Z"
     audit:
       commit: null
       completed_at: null
-      validation_artifact: null
+      validation_artifact: ".fab7/sdlc/assignments/build-story-SL4-WIRE-2-20260709.result.yaml"
       last_run_id: null
-      status_reason: null
-      blocked_reason: "awaiting STORY-SL4-WIRE-1 (shared SPI + CLI registration must land first)"
+      status_reason: "BUILT + INDEPENDENTLY REVIEWED (G_SEC APPROVE; G3 REVISE→all must-fix FIXED + re-validated); pending human G1_READY + G3 sign-off. Folded the hook engine into the unified `openbox` binary: extracted the observe-only path into claudecode.RunHook (one engine; writes nothing to stdout, swallows all failures incl. panics), added `openbox hook <provider> <event>` (runHook: routes before any stdout write, named-return exitOK + deferred recover, diagnostics to stderr). cmd/openbox-cc-hook reduced to a THIN ALIAS (defer os.Exit(0)); plugin/hooks/hooks.json invokes `${CLAUDE_PLUGIN_ROOT}/bin/openbox hook claude-code <event>`. Installer gained EngineBinary — `dev init` copies the running engine into bin/openbox (atomic, 0755, fatal-when-set); providers.Lookup resolves it best-effort via os.Executable(). REVIEW FIXES: smoke test now proves AC4 (hot-path zero-egress + wall-clock budget + content-canary-absent on the delivered /evaluate body); dev-init bin/openbox placement asserted through the real front door; doc.go/README de-referenced openbox-cc-hook. All modules green under -race; go vet clean; touched files gofmt-clean. Real-binary re-confirmed. GIT-HOOK FOLD (WIRE2-GITHOOK-UNIFICATION RESOLVED — brian 2026-07-09): openbox-git-hook is now folded into `openbox hook git <sub>` (shared git.RunHook engine; the standalone binary is a thin alias). Ambient + explicit installs bake `<engine> hook git prepare-commit-msg`, so bin/openbox is the only binary needed (resolves review F3). Proven end-to-end by cli TestUnifiedBinaryGitHookStampsCommit (install → real commit → OpenBox-Session trailer stamped). The fold was INDEPENDENTLY RE-VERIFIED (focused G3 + G_SEC, both APPROVE — .fab7/sdlc/assignments/review-gitfold-SL4-WIRE-2-20260709.result.yaml): faithful lift; never-abort/hooks-path(SL5-SEC-2)/INV-1/no-injection all confirmed on the real binary; 3 LOW/INFO nits applied (alias install→stamp test, cc-hook ambient-test note, maybeInstallGitHook assumption doc). Pending brian's G1_READY + G3 sign-off, then commit."
+      blocked_reason: null
   STORY-SL2-FILEBACKEND:
     title: "Opt-in file secret backend for machines with no OS keyring"
     status: "review"

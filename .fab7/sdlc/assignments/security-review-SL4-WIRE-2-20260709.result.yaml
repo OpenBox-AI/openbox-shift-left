@@ -1,0 +1,47 @@
+assignment_id: "security-review-SL4-WIRE-2-20260709"
+role: "security_reviewer"
+story: "STORY-SL4-WIRE-2"
+mode: "inv3-observe-only-reverify"   # exit-0/empty-stdout survives the fold into the multi-command binary
+status: "done"
+decision: "approve"
+summary: "G_SEC re-verify of SL4-WIRE-2: APPROVE. The observe-only contract (INV-3) survives folding the hook into the multi-command `openbox` binary — every hook path exits 0 with empty stdout; metadata-only; no secret on argv/logs/bundle."
+overall: >
+  Built the real binary and drove every enumerated hook path (valid events, unknown provider, missing
+  args, bad hook name, empty/garbage stdin, flush, empty event) capturing stdout/stderr/exit
+  separately: EVERY hook invocation exited 0 with exactly 0 stdout bytes. Control paths (version → 17
+  stdout bytes; no-args → exit 1) confirm the multi-command binary DOES write to stdout elsewhere and
+  the hook path is fully walled off. Structurally: run() matches `hook` before any version/usage/errorf
+  path; runHook logs to a.stderr only and returns exitOK unconditionally; the flag package is never
+  engaged on the hook path; no os.Stdout/fmt.Print* anywhere in the hook+flush reach.
+findings: []
+verified_correct_no_finding:
+  - "STDOUT discipline: 10/10 hook paths exit 0 / 0 stdout bytes on the real binary; run() dispatches `hook` before version(a.stdout)/usage/errorf; flag pkg never engaged."
+  - "Panic safety: RunHook defers recover() first statement; both callers force exit 0; a panic cannot reach a non-zero exit or a stdout write."
+  - "Content/secret (INV-2/INV-1): HookEvent decodes only structural fields; tool_input read only for a structural file_path, never emitted; Mapper carries metadata/enums only, caps identifiers to 512 runes; credentials resolved inside runFlush, never on argv/logs."
+  - "EngineBinary: copies only EngineBinary (from os.Executable(), a trusted path the developer invoked) into bin/openbox 0755 via atomic temp+rename; no secret placed in the bundle; hooks.json command is a fixed literal (no injection)."
+non_blocking_findings:
+  - id: "GSEC-INFO-1"
+    severity: "LOW/INFO"
+    disposition: "FIXED"
+    title: "alias/runHook lacked their own belt-and-suspenders recover (double-panic parity)"
+    detail: "Unreachable in production (the recover handler only logs to a non-nil stderr logger). Fixed for parity with the old single-purpose main: openbox-cc-hook alias now `defer os.Exit(0)`; runHook uses named-return exitOK + deferred recover."
+validation:
+  ran:
+    - command: "go build openbox; drive 10 hook paths capturing stdout/exit separately"
+      result: "pass"
+      evidence: "every hook path exit 0 / 0 stdout bytes; version=17 stdout bytes / no-args=exit1 confirm isolation"
+    - command: "PreToolUse w/ tool_input canary + UserPromptSubmit w/ prompt canary → spool scan"
+      result: "pass"
+      evidence: "no content leaked into the spool; events carry only structural metadata/enums"
+  not_run: []
+open_decisions: []
+handoff:
+  next_phase: "gate-check"
+  next_action: "G_SEC evidence recorded on STORY-SL4-WIRE-2; folds into brian's sign-off. No conditions."
+write_scope_used:
+  - ".fab7/sdlc/assignments/security-review-SL4-WIRE-2-20260709.result.yaml"
+artifacts:
+  created_or_updated:
+    - ".fab7/sdlc/assignments/security-review-SL4-WIRE-2-20260709.result.yaml"
+  proposed_only:
+    - "status.yaml STORY-SL4-WIRE-2: G_SEC approve evidence — proposed to Ada"

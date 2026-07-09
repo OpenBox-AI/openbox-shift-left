@@ -8,7 +8,7 @@ deny, or slow a Claude Code tool call (Phase-1 / INV-3 / D7).
 
 ```
 Claude Code hook (stdin JSON)
-   └─ openbox-cc-hook <HookName>           # the plugin wires each hook here
+   └─ openbox hook claude-code <event>     # the plugin wires each hook here (SL4-WIRE-2)
         ├─ map → normalized SL-1 DevEvent  # mapper.go (no content — INV-2)
         ├─ append → local spool            # spool.go (hot path: local I/O only)
         └─ exit 0, empty stdout            # can't block / inject (D7)
@@ -85,12 +85,18 @@ never logged/printed/argv'd. Non-secret coordinates live in a config file
 
 ## Packaging & install
 
-`Installer` materializes the plugin bundle (`plugin/`) + writes the dev config.
-The engine binary is built per-platform and placed at `bin/openbox-cc-hook`:
+`Installer` materializes the plugin bundle (`plugin/`) + writes the dev config,
+and (STORY-SL4-WIRE-2) copies the unified engine into `bin/openbox` when
+`Installer.EngineBinary` is set — `openbox dev init` sets it to its own
+executable. The hooks invoke `${CLAUDE_PLUGIN_ROOT}/bin/openbox hook claude-code
+<event>`. Packaging/marketplace builds place the per-platform binary instead:
 
 ```bash
-go build -o plugin/bin/openbox-cc-hook ./cmd/openbox-cc-hook
+go build -o plugin/bin/openbox ../../cli/cmd/openbox
 ```
+
+The standalone `cmd/openbox-cc-hook` remains as a thin backward-compat alias over
+the same engine (`claudecode.RunHook`); it is no longer referenced by the plugin.
 
 Org-wide force-enable via managed settings (`{"enabledPlugins":["openbox-observe"]}`)
 is **verified, not activated** for the Phase-1 opt-in pilot (NFR-5).

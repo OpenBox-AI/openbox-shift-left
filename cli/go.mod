@@ -9,10 +9,9 @@ require (
 	github.com/openbox-ai/openbox-shift-left/provider v0.0.0
 )
 
-require (
-	github.com/openbox-ai/openbox-shift-left/adapters/common/git v0.0.0 // indirect
-	github.com/openbox-ai/openbox-shift-left/client v0.0.0 // indirect
-)
+require github.com/openbox-ai/openbox-shift-left/adapters/common/git v0.0.0
+
+require github.com/openbox-ai/openbox-shift-left/client v0.0.0 // indirect
 
 // Sibling modules in this multi-module repo; no published version yet, so
 // consume them from source. The claude-code adapter transitively pulls in

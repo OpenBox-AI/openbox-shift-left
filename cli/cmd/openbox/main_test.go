@@ -4,10 +4,16 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/openbox-ai/openbox-shift-left/cli/internal/backend"
 	"github.com/openbox-ai/openbox-shift-left/cli/internal/devinit"
@@ -169,6 +175,15 @@ func TestClaudeCodeInstallsForRealExitsZero(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(home, ".claude", "plugins", "openbox-observe", ".claude-plugin", "plugin.json")); err != nil {
 		t.Errorf("plugin bundle not materialized: %v", err)
 	}
+	// STORY-SL4-WIRE-2 AC3, proven through the real `dev init` front door: the
+	// running engine is placed at bin/openbox (providers.Lookup → os.Executable()
+	// → Installer.EngineBinary), executable, so the hooks' ${…}/bin/openbox resolves.
+	enginePath := filepath.Join(home, ".claude", "plugins", "openbox-observe", "bin", "openbox")
+	if fi, err := os.Stat(enginePath); err != nil {
+		t.Errorf("engine not placed at bin/openbox via dev init: %v", err)
+	} else if fi.Mode().Perm()&0o100 == 0 {
+		t.Errorf("placed engine is not executable: %v", fi.Mode())
+	}
 	raw, err := os.ReadFile(cfgPath)
 	if err != nil {
 		t.Fatalf("read dev config: %v", err)
@@ -207,6 +222,270 @@ func TestClaudeCodeDryRunWritesNothing(t *testing.T) {
 	}
 	if _, err := os.Stat(cfgPath); !os.IsNotExist(err) {
 		t.Errorf("dry-run wrote the dev config (err=%v)", err)
+	}
+}
+
+// --- STORY-SL4-WIRE-2: unified `openbox hook claude-code <event>` -----------
+
+// setHookEnv points the (os.Getenv-based) hook engine at temp dirs so no real
+// spool/registry/config is touched. Returns the spool dir.
+func setHookEnv(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	spool := filepath.Join(dir, "spool")
+	t.Setenv("OPENBOX_AGENT_DID", "did:aip:7f3c9b2e-0000-5000-a000-000000000001")
+	t.Setenv("OPENBOX_SPOOL_DIR", spool)
+	t.Setenv("OPENBOX_SESSION_DIR", filepath.Join(dir, "sessions"))
+	t.Setenv("OPENBOX_CONFIG", filepath.Join(dir, "none.json"))
+	return spool
+}
+
+// TestHookIsObserveOnlyInProcess drives the unified subcommand in-process and
+// asserts the INV-3 contract: exit 0, EMPTY stdout, event spooled, no content
+// (tool_input) leaked into the spool.
+func TestHookIsObserveOnlyInProcess(t *testing.T) {
+	spool := setHookEnv(t)
+	a, out, errb := testApp(nil)
+	secret := "TOP-SECRET-do-not-egress"
+	a.stdin = strings.NewReader(`{"hook_event_name":"PreToolUse","session_id":"s1","cwd":"/r","tool_name":"Bash","tool_input":{"command":"` + secret + `"}}`)
+
+	code := a.run([]string{"hook", "claude-code", "PreToolUse"})
+	if code != exitOK {
+		t.Fatalf("hook exit = %d, want 0; stderr=%q", code, errb.String())
+	}
+	if out.Len() != 0 {
+		t.Fatalf("stdout must be empty (no context injection / no block), got %q", out.String())
+	}
+	entries, err := os.ReadDir(spool)
+	if err != nil || len(entries) != 1 {
+		t.Fatalf("expected one spool file, got %v (err %v)", entries, err)
+	}
+	raw, _ := os.ReadFile(filepath.Join(spool, entries[0].Name()))
+	if strings.Contains(string(raw), secret) {
+		t.Fatalf("command content leaked into the spool: %s", raw)
+	}
+}
+
+// TestHookMisuseIsSafe: a bad/missing provider or event still exits 0 with empty
+// stdout (never block, never inject). Diagnostics go to stderr.
+func TestHookMisuseIsSafe(t *testing.T) {
+	setHookEnv(t)
+	for _, args := range [][]string{
+		{"hook"},
+		{"hook", "claude-code"},
+		{"hook", "vim", "PreToolUse"},
+	} {
+		a, out, errb := testApp(nil)
+		a.stdin = strings.NewReader("")
+		if code := a.run(args); code != exitOK {
+			t.Errorf("%v exit = %d, want 0", args, code)
+		}
+		if out.Len() != 0 {
+			t.Errorf("%v wrote to stdout: %q", args, out.String())
+		}
+		_ = errb
+	}
+}
+
+// TestUnifiedBinaryHookObserveOnlyContract is the G_SEC re-verify: the SL-4
+// exit-0/empty-stdout contract must survive folding the hook into the
+// multi-command `openbox` binary. It builds and runs the REAL binary.
+func TestUnifiedBinaryHookObserveOnlyContract(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a binary; skipped in -short")
+	}
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "openbox")
+	if out, err := exec.Command("go", "build", "-o", bin, ".").CombinedOutput(); err != nil {
+		t.Fatalf("build openbox: %v\n%s", err, out)
+	}
+	spool := filepath.Join(dir, "spool")
+	secret := "TOP-SECRET-do-not-egress"
+	payload := `{"hook_event_name":"PreToolUse","session_id":"s","cwd":"/r","tool_name":"Bash","tool_input":{"command":"` + secret + `"}}`
+
+	cmd := exec.Command(bin, "hook", "claude-code", "PreToolUse")
+	cmd.Stdin = strings.NewReader(payload)
+	cmd.Env = append(os.Environ(),
+		"OPENBOX_AGENT_DID=did:aip:7f3c9b2e-0000-5000-a000-000000000001",
+		"OPENBOX_SPOOL_DIR="+spool,
+		"OPENBOX_CONFIG="+filepath.Join(dir, "none.json"),
+		"OPENBOX_SESSION_DIR="+filepath.Join(dir, "sessions"),
+	)
+	var stdout, stderr strings.Builder
+	cmd.Stdout, cmd.Stderr = &stdout, &stderr
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("`openbox hook` must exit 0 (observe-only), got %v\nstderr: %s", err, stderr.String())
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("stdout must be empty on the unified binary, got %q", stdout.String())
+	}
+	entries, err := os.ReadDir(spool)
+	if err != nil || len(entries) != 1 {
+		t.Fatalf("expected one spool file, got %v (err %v)", entries, err)
+	}
+	if raw, _ := os.ReadFile(filepath.Join(spool, entries[0].Name())); strings.Contains(string(raw), secret) {
+		t.Fatalf("content leaked into the spool: %s", raw)
+	}
+}
+
+// TestHookEndToEndSmoke drives all five hooks through the unified subcommand and
+// asserts the whole observe→deliver path on the unified binary (in-process):
+//   - the HOT-PATH hooks (SessionStart..PostToolUse) never block on the network
+//     — they spool locally and cause ZERO egress; delivery happens only at
+//     SessionEnd (AC4 latency budget: the async/no-network-on-hot-path guarantee);
+//   - each hot-path hook returns well within a coarse wall-clock budget;
+//   - SessionEnd flushes the spooled session to /evaluate and drains the spool;
+//   - CONTENT never reaches the wire: a canary planted in tool_input.command is
+//     absent from every body delivered to /evaluate (INV-2 on the egress bytes,
+//     not just the spool).
+func TestHookEndToEndSmoke(t *testing.T) {
+	const contentCanary = "SECRET-EGRESS-CANARY-do-not-send"
+	var mu sync.Mutex
+	got := 0
+	var bodies []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost && r.URL.Path == "/api/v1/governance/evaluate" {
+			b, _ := io.ReadAll(r.Body)
+			mu.Lock()
+			got++
+			bodies = append(bodies, string(b))
+			mu.Unlock()
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"governance_event_id":"ge","verdict":"allow","risk_score":0.1,"action":"continue","fallback_used":false}`))
+			return
+		}
+		t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+	}))
+	defer srv.Close()
+
+	dir := t.TempDir()
+	spool := filepath.Join(dir, "spool")
+	t.Setenv("OPENBOX_AGENT_DID", "did:aip:7f3c9b2e-0000-5000-a000-000000000001")
+	t.Setenv("OPENBOX_SPOOL_DIR", spool)
+	t.Setenv("OPENBOX_SESSION_DIR", filepath.Join(dir, "sessions"))
+	t.Setenv("OPENBOX_CONFIG", filepath.Join(dir, "none.json"))
+	t.Setenv("OPENBOX_BASE_URL", srv.URL)
+	t.Setenv("OPENBOX_API_KEY", "obx_test_"+strings.Repeat("a", 48))
+	t.Setenv("OPENBOX_ED25519_SEED", "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=")
+
+	events := []struct {
+		hook, payload string
+		hotPath       bool // hot-path hooks must NOT egress and must be fast
+	}{
+		{"SessionStart", `{"hook_event_name":"SessionStart","session_id":"s1","cwd":"/r","source":"startup"}`, true},
+		{"UserPromptSubmit", `{"hook_event_name":"UserPromptSubmit","session_id":"s1","cwd":"/r","prompt":"hi"}`, true},
+		{"PreToolUse", `{"hook_event_name":"PreToolUse","session_id":"s1","cwd":"/r","tool_name":"Bash","tool_input":{"command":"` + contentCanary + `"}}`, true},
+		{"PostToolUse", `{"hook_event_name":"PostToolUse","session_id":"s1","cwd":"/r","tool_name":"Bash","tool_response":{"ok":true}}`, true},
+		{"SessionEnd", `{"hook_event_name":"SessionEnd","session_id":"s1","cwd":"/r","reason":"other"}`, false},
+	}
+	// A generous hot-path budget: local spool only, so this catches a regression
+	// that introduces synchronous/network work on the hot path without CI flake.
+	const hotPathBudget = 2 * time.Second
+	for _, e := range events {
+		a, out, errb := testApp(nil)
+		a.stdin = strings.NewReader(e.payload)
+		start := time.Now()
+		code := a.run([]string{"hook", "claude-code", e.hook})
+		elapsed := time.Since(start)
+		if code != exitOK {
+			t.Fatalf("%s exit = %d; stderr=%q", e.hook, code, errb.String())
+		}
+		if out.Len() != 0 {
+			t.Fatalf("%s wrote to stdout: %q", e.hook, out.String())
+		}
+		if e.hotPath {
+			if elapsed > hotPathBudget {
+				t.Errorf("%s hot-path hook took %v (> budget %v) — is it blocking on the network?", e.hook, elapsed, hotPathBudget)
+			}
+			mu.Lock()
+			n := got
+			mu.Unlock()
+			if n != 0 {
+				t.Fatalf("hot-path hook %s caused egress (%d /evaluate calls) — the hot path must be async/no-network (NFR-2)", e.hook, n)
+			}
+		}
+	}
+
+	mu.Lock()
+	n := got
+	delivered := append([]string(nil), bodies...)
+	mu.Unlock()
+	if n == 0 {
+		t.Fatalf("mock /evaluate received no events — SessionEnd flush did not deliver through the unified binary")
+	}
+	// The session's spool must be drained after a successful flush.
+	if entries, _ := os.ReadDir(spool); len(entries) != 0 {
+		t.Errorf("spool not drained after SessionEnd flush: %v", entries)
+	}
+	// INV-2 on the wire: no delivered body may carry the tool_input content.
+	for i, b := range delivered {
+		if strings.Contains(b, contentCanary) {
+			t.Fatalf("content canary leaked to /evaluate in delivered body #%d:\n%s", i, b)
+		}
+	}
+}
+
+// TestUnifiedBinaryGitHookStampsCommit proves the OD17 git-hook fold end-to-end:
+// `openbox hook git install` writes a prepare-commit-msg hook that re-invokes the
+// unified binary as `openbox hook git prepare-commit-msg`, and a real commit gets
+// the OpenBox-Session trailer stamped — with no separate openbox-git-hook binary.
+func TestUnifiedBinaryGitHookStampsCommit(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a binary + runs git; skipped in -short")
+	}
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "openbox")
+	if out, err := exec.Command("go", "build", "-o", bin, ".").CombinedOutput(); err != nil {
+		t.Fatalf("build openbox: %v\n%s", err, out)
+	}
+	repo := filepath.Join(dir, "repo")
+	if err := os.MkdirAll(repo, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	gitEnv := append(os.Environ(), "GIT_CONFIG_NOSYSTEM=1", "HOME="+dir)
+	git := func(env []string, args ...string) string {
+		t.Helper()
+		c := exec.Command("git", append([]string{"-C", repo}, args...)...)
+		c.Env = env
+		out, err := c.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+		return string(out)
+	}
+	git(gitEnv, "init", "-q")
+	git(gitEnv, "config", "user.email", "t@example.com")
+	git(gitEnv, "config", "user.name", "t")
+
+	// Install the hook via the UNIFIED binary (openbox hook git install).
+	ic := exec.Command(bin, "hook", "git", "install")
+	ic.Dir = repo
+	if out, err := ic.CombinedOutput(); err != nil {
+		t.Fatalf("openbox hook git install: %v\n%s", err, out)
+	}
+	hookBody, err := os.ReadFile(filepath.Join(repo, ".git", "hooks", "prepare-commit-msg"))
+	if err != nil {
+		t.Fatalf("hook not installed: %v", err)
+	}
+	if !strings.Contains(string(hookBody), "'hook' 'git' 'prepare-commit-msg'") {
+		t.Fatalf("installed hook does not re-invoke `openbox hook git`:\n%s", hookBody)
+	}
+
+	// A real commit with a session in scope must be stamped by the unified engine.
+	if err := os.WriteFile(filepath.Join(repo, "f.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git(gitEnv, "add", ".")
+	commit := exec.Command("git", "-C", repo, "commit", "-q", "-m", "subject")
+	commit.Env = append(gitEnv, "OPENBOX_SESSION=sess-unified")
+	if out, err := commit.CombinedOutput(); err != nil {
+		t.Fatalf("commit: %v\n%s", err, out)
+	}
+	if body := git(gitEnv, "log", "-1", "--format=%B"); !strings.Contains(body, "OpenBox-Session: sess-unified") {
+		t.Fatalf("commit not stamped by `openbox hook git prepare-commit-msg`:\n%s", body)
 	}
 }
 

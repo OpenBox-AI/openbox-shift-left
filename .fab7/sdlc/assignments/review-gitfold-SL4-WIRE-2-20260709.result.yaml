@@ -1,0 +1,71 @@
+assignment_id: "review-gitfold-SL4-WIRE-2-20260709"
+role: "review_auditor"
+story: "STORY-SL4-WIRE-2"
+mode: "focused-delta-correctness+security"   # git-hook fold delta; both G3 and G_SEC lenses
+status: "done"
+decision: "approve"   # G3 APPROVE + G_SEC APPROVE on the fold delta; 3 LOW/INFO nits all applied
+summary: "Focused review of the OD17 git-hook fold (openbox-git-hook → `openbox hook git <sub>`): G3 APPROVE (faithful lift) + G_SEC APPROVE (never-abort/hooks-path/INV-1/injection all verified). 3 LOW/INFO nits applied."
+overall: >
+  Two independent focused reviewers judged the fold delta (added after the SL4-WIRE-2 pass). Both
+  APPROVE. G3: git.RunHook is a faithful, behavior-preserving lift of the old cmd body (all three
+  subcommands, order, semantics); msgfile lands as args[0] on both the unified and alias paths (proven
+  by real stamping); exit-0 split correct across all three entrypoints; shell-quoting sound. G_SEC:
+  empirically verified all four invariants on the real binary — NEVER-ABORT (missing/unreadable file,
+  bad args, unknown sub, missing/non-exec engine all → commit exit 0), SL5-SEC-2 hooks-path boundary
+  (probed a malicious core.hooksPath: ambient ignored it via HooksDirDefault, explicit honored it),
+  INV-1 (no secret in script/argv/logs; installArgs are fixed literals), and no shell/arg injection
+  (hostile command/arg payloads echoed literally under sh, no sentinel files created).
+findings:
+  - id: "GF-F1"
+    severity: "LOW (test quality)"
+    class: "CONFIRMED"
+    disposition: "FIXED"
+    title: "cc-hook ambient-install test asserts a non-functional config (arg-baking only)"
+    detail: "TestHookBinary_AmbientGitHookInstall builds the legacy cc-hook alias, which cannot parse `hook git …`, so the baked hook would no-op for THAT binary; the test only inspects script text. Fix: added a NOTE that it asserts baked-args only and the functional install→commit→stamp path is proven on the real unified binary by cli TestUnifiedBinaryGitHookStampsCommit."
+  - id: "GF-F2"
+    severity: "LOW (coverage)"
+    class: "CONFIRMED"
+    disposition: "FIXED"
+    title: "no test that the alias `openbox-git-hook install` bakes the OLD form + stamps"
+    detail: "Fix: added TestBinary_InstallStampsCommit (adapters/common/git/cmd/openbox-git-hook) — installs via the alias, asserts the baked form is `<self> prepare-commit-msg \"$@\"` (NOT `hook git …`), makes a real commit, asserts the OpenBox-Session trailer. Guards the alias installArgs against regression."
+  - id: "GF-F3"
+    severity: "INFO"
+    class: "CONFIRMED"
+    disposition: "FIXED"
+    title: "maybeInstallGitHook assumes os.Executable() is the unified engine"
+    detail: "Fix: documented the assumption in the func doc — production wires bin/openbox; a legacy-alias self would fail-open to a no-op (never aborts a commit)."
+verified_correct_no_finding:
+  - "git.RunHook == old cmd body (prepare-commit-msg/post-commit/install); exit-0 owned by callers (alias defer os.Exit(0); cli return exitOK + deferred recover); script itself `|| true` + `exit 0`."
+  - "NEVER-ABORT verified empirically across all failure paths incl. missing/non-executable engine → no-op commit."
+  - "SL5-SEC-2: ambient=HooksDirDefault (ignores core.hooksPath), explicit=HooksDir (honors it); probed with a malicious core.hooksPath."
+  - "INV-1: installArgs fixed literals; only the engine path is baked; trailer stamps only the validated opaque session id."
+  - "shellQuote is the canonical POSIX single-quote wrapper; hostile paths/args echoed literally, no injection."
+  - "Pre-existing/unchanged (noted, not fold defects): OPENBOX_GIT_HOOK env override + self-referencing engine path are inherent SL-5 trust boundaries."
+validation:
+  ran:
+    - command: "cd adapters/common/git && go test -race ./...  (+ new TestBinary_InstallStampsCommit)"
+      result: "pass"
+      evidence: "git pkg + alias green; alias install→commit→trailer proven"
+    - command: "cd adapters/claude-code && go vet ./... && go test -race ./..."
+      result: "pass"
+      evidence: "adapter + cc-hook green (ambient test note added)"
+    - command: "cd cli && go vet ./... && go test -race ./..."
+      result: "pass"
+      evidence: "TestUnifiedBinaryGitHookStampsCommit + all hook tests green"
+  not_run: []
+open_decisions: []
+handoff:
+  next_phase: "gate-check"
+  next_action: "Fold independently re-verified (G3 + G_SEC APPROVE, nits applied). Ready for brian's G1_READY + G3 sign-off on WIRE-2, then commit."
+write_scope_used:
+  - "adapters/claude-code/hookrun.go (GF-F3 doc)"
+  - "adapters/claude-code/cmd/openbox-cc-hook/main_test.go (GF-F1 note)"
+  - "adapters/common/git/cmd/openbox-git-hook/main_test.go (GF-F2 test)"
+  - ".fab7/sdlc/assignments/review-gitfold-SL4-WIRE-2-20260709.result.yaml"
+artifacts:
+  created_or_updated:
+    - ".fab7/sdlc/assignments/review-gitfold-SL4-WIRE-2-20260709.result.yaml"
+    - "adapters/common/git/cmd/openbox-git-hook/main_test.go (new alias install test)"
+    - "adapters/claude-code/{hookrun.go, cmd/openbox-cc-hook/main_test.go}"
+  proposed_only:
+    - "status.yaml STORY-SL4-WIRE-2: fold re-verified (G3+G_SEC APPROVE) — proposed to Ada"

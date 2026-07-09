@@ -162,8 +162,16 @@ func TestHookBinary_AmbientGitHookInstall(t *testing.T) {
 	if err != nil {
 		t.Fatalf("hook not installed with opt-in: %v", err)
 	}
-	if !strings.Contains(string(body), "openbox-git-hook") || !strings.Contains(string(body), "openbox-shift-left") {
-		t.Fatalf("installed hook does not reference the engine:\n%s", body)
+	// STORY-SL4-WIRE-2: the ambient install now points the prepare-commit-msg
+	// hook back at the unified engine as `<engine> hook git prepare-commit-msg`
+	// (no separate openbox-git-hook binary), tagged by the managed marker.
+	//
+	// NOTE: this asserts the baked ARGS only — the binary under test is the legacy
+	// cc-hook alias, which does not itself parse `hook git …` (it would no-op,
+	// fail-open). The FUNCTIONAL install→commit→stamp path is proven on the real
+	// unified binary by cli TestUnifiedBinaryGitHookStampsCommit.
+	if !strings.Contains(string(body), "'hook' 'git' 'prepare-commit-msg'") || !strings.Contains(string(body), "openbox-shift-left") {
+		t.Fatalf("installed hook does not re-invoke the unified engine:\n%s", body)
 	}
 }
 

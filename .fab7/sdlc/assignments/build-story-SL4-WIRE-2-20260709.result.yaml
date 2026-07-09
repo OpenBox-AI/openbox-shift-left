@@ -1,0 +1,65 @@
+assignment_id: "build-story-SL4-WIRE-2-20260709"
+role: "build_engineer"
+story: "STORY-SL4-WIRE-2"
+status: "review"
+summary: "Folded the Claude Code hook engine into the unified `openbox hook claude-code <event>` subcommand; retired cmd/openbox-cc-hook to a thin alias; plugin + installer reference bin/openbox; observe-only contract re-verified on the multi-command binary."
+overall: >
+  One engine, two entrypoints. The observe-only path moved into claudecode.RunHook (writes nothing to
+  stdout, swallows every failure incl. panics). The CLI gained `openbox hook <provider> <event>`
+  (runHook returns exitOK unconditionally and routes before any stdout write). cmd/openbox-cc-hook is
+  now a thin alias over RunHook (backward-compat). hooks.json invokes ${CLAUDE_PLUGIN_ROOT}/bin/openbox
+  hook claude-code <event>; the installer copies the running engine into bin/openbox (EngineBinary,
+  atomic). INV-3 re-verified on the REAL built binary.
+acceptance_criteria:
+  - id: "AC1 openbox hook <provider> <event> runs the observe/flush path; cmd retired-to-alias"
+    met: true
+    evidence: "cli runHook → claudecode.RunHook; cmd/openbox-cc-hook is a thin alias; both share one engine."
+  - id: "AC2 observe-only contract survives on the multi-command binary (exit 0, empty stdout)"
+    met: true
+    evidence: "TestUnifiedBinaryHookObserveOnlyContract (real binary) + TestHookIsObserveOnlyInProcess + TestHookMisuseIsSafe; real-binary manual re-confirm."
+  - id: "AC3 hooks.json + installer reference bin/openbox; dev init places that binary"
+    met: true
+    evidence: "hooks.json → `${CLAUDE_PLUGIN_ROOT}/bin/openbox hook claude-code <event>`; Installer.EngineBinary copy (TestInstaller_PlacesEngineBinary / _SkipsEngineBinaryWhenUnset); providers.Lookup sets os.Executable()."
+  - id: "AC4 end-to-end smoke (register→install→5 hooks→flush→mock /evaluate)"
+    met: partial
+    evidence: "TestHookEndToEndSmoke drives all 5 hooks via the subcommand → SessionEnd flush → mock /evaluate received + spool drained. Register+install legs covered by SL-2/WIRE-1 tests; not re-driven in one monolithic test."
+findings: []
+validation:
+  ran:
+    - command: "cd adapters/claude-code && go vet ./... && go test -race ./..."
+      result: "pass"
+      evidence: "adapter + cmd/openbox-cc-hook green (alias unchanged behavior; installer EngineBinary tests)"
+    - command: "cd cli && go vet ./... && go test -race ./..."
+      result: "pass"
+      evidence: "all packages green incl. hook observe-only + end-to-end smoke; gofmt clean"
+    - command: "built openbox; printf <PreToolUse payload> | openbox hook claude-code PreToolUse"
+      result: "pass"
+      evidence: "exit 0, 0 stdout bytes, 1 spool file, no tool_input content leaked"
+    - command: "openbox dev init --provider claude-code --dry-run"
+      result: "pass"
+      evidence: "plan advertises `bin/openbox hook claude-code <event>` + engine placement into bin/openbox"
+  not_run:
+    - "monolithic register→install→observe→deliver single test (legs covered separately; deferred to a review-time E2E if desired)"
+open_decisions:
+  - id: "WIRE2-GITHOOK-UNIFICATION"
+    decision: "Whether to also fold openbox-git-hook into `openbox hook git …` (OD17 full unification) or keep it a separate sibling binary. WIRE-2 kept it separate (out of the story's explicit ACs). Owner: brian."
+handoff:
+  next_phase: "review"
+  next_action: "Run the review stage: independent G3 correctness + a focused G_SEC re-verify of the observe-only contract on the unified binary. Then brian G1_READY + G3 + G_SEC sign-off."
+write_scope_used:
+  - "adapters/claude-code/hookrun.go (new — RunHook + maybeInstallGitHook + runFlush)"
+  - "adapters/claude-code/cmd/openbox-cc-hook/main.go (reduced to thin alias)"
+  - "adapters/claude-code/installer.go (EngineBinary placement + bin/openbox refs)"
+  - "adapters/claude-code/installer_test.go (EngineBinary tests)"
+  - "adapters/claude-code/plugin/hooks/hooks.json (bin/openbox hook claude-code)"
+  - "cli/cmd/openbox/main.go (hook subcommand + stdin seam)"
+  - "cli/cmd/openbox/main_test.go (hook observe-only + smoke tests)"
+  - "cli/internal/providers/providers.go (Lookup sets EngineBinary)"
+artifacts:
+  created_or_updated:
+    - ".fab7/sdlc/assignments/build-story-SL4-WIRE-2-20260709.result.yaml"
+    - "adapters/claude-code/hookrun.go"
+    - "cli/cmd/openbox/main.go"
+    - "adapters/claude-code/plugin/hooks/hooks.json"
+  proposed_only:
+    - "status.yaml STORY-SL4-WIRE-2: status blocked→review, G_SEC self-verified evidence — proposed to Ada"

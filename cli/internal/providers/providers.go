@@ -11,26 +11,37 @@ package providers
 
 import (
 	"fmt"
+	"os"
 	"strings"
 
 	claudecode "github.com/openbox-ai/openbox-shift-left/adapters/claude-code"
 	"github.com/openbox-ai/openbox-shift-left/provider"
 )
 
-// registry maps a provider name to its Installer. Built adapters register a real
-// installer; unbuilt ones a provider.Stub (Available()==false).
-var registry = map[provider.Name]provider.Installer{
-	provider.ClaudeCode: claudecode.Installer{}, // SL-4 real installer (default install paths)
-	provider.Codex:      provider.Stub{ProviderName: provider.Codex, Manual: codexManual},
-	provider.Cursor:     provider.Stub{ProviderName: provider.Cursor, Manual: cursorManual},
-}
-
-// Lookup returns the Installer for a provider name, or ErrUnknown.
+// Lookup returns the Installer for a provider name, or ErrUnknown. Built
+// adapters return a real installer; unbuilt ones a provider.Stub
+// (Available()==false).
 func Lookup(name string) (provider.Installer, error) {
-	if inst, ok := registry[provider.Name(name)]; ok {
+	switch provider.Name(name) {
+	case provider.ClaudeCode:
+		inst := claudecode.Installer{} // SL-4 real installer (default install paths)
+		// STORY-SL4-WIRE-2: place THIS running `openbox` engine into the bundle's
+		// bin/openbox so the plugin's hooks resolve to it. Best-effort RESOLUTION:
+		// if os.Executable() is unavailable we leave EngineBinary empty and Install
+		// skips the copy (packaging supplies the binary). Once EngineBinary is set,
+		// a copy failure surfaces as an install error rather than leaving a bundle
+		// with no engine — a loud failure beats a silently broken install.
+		if exe, err := os.Executable(); err == nil {
+			inst.EngineBinary = exe
+		}
 		return inst, nil
+	case provider.Codex:
+		return provider.Stub{ProviderName: provider.Codex, Manual: codexManual}, nil
+	case provider.Cursor:
+		return provider.Stub{ProviderName: provider.Cursor, Manual: cursorManual}, nil
+	default:
+		return nil, fmt.Errorf("%w: %q (supported: %s)", provider.ErrUnknown, name, strings.Join(provider.Supported(), ", "))
 	}
-	return nil, fmt.Errorf("%w: %q (supported: %s)", provider.ErrUnknown, name, strings.Join(provider.Supported(), ", "))
 }
 
 func codexManual(ref provider.CredentialRef) string {

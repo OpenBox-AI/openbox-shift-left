@@ -1,0 +1,162 @@
+package claudecode
+
+import (
+	"context"
+	"io"
+	"log"
+	"os"
+	"time"
+
+	obgit "github.com/openbox-ai/openbox-shift-left/adapters/common/git"
+)
+
+// flushBudget bounds SessionEnd/flush delivery so session teardown is never held
+// up (kept under the SessionEnd hook timeout in plugin/hooks.json).
+const flushBudget = 12 * time.Second
+
+// RunHook executes the observe-only path for ONE Claude Code hook invocation.
+// It is the single engine shared by the unified `openbox hook claude-code
+// <event>` subcommand (STORY-SL4-WIRE-2) and the retired-to-alias
+// openbox-cc-hook binary.
+//
+// SAFETY CONTRACT (INV-3 / D7 — observe-only, never block):
+//   - It writes NOTHING to stdout. On SessionStart/UserPromptSubmit, stdout from
+//     an exit-0 hook is injected into the model's context — so all diagnostics
+//     go to `logger` (stderr) only, terse and secret-free (INV-1).
+//   - It NEVER returns a blocking signal: any failure (bad payload, missing
+//     identity, unreachable OpenBox, even a panic) is logged and swallowed. The
+//     CALLER must exit 0 regardless.
+//
+// `sub` is the hook name (SessionStart/UserPromptSubmit/PreToolUse/PostToolUse/
+// SessionEnd) or "flush"; `stdin` carries the hook payload JSON.
+func RunHook(sub string, stdin io.Reader, logger *log.Logger) {
+	// Guarantee a panic never escapes into the caller's exit path.
+	defer func() {
+		if r := recover(); r != nil {
+			logger.Printf("recovered: %v", r)
+		}
+	}()
+
+	if sub == "" {
+		logger.Printf("usage: openbox hook claude-code <HookName|flush>")
+		return
+	}
+	if sub == "flush" {
+		runFlush(logger, "")
+		return
+	}
+
+	hook, err := ParseHookName(sub)
+	if err != nil {
+		logger.Printf("%v", err)
+		return
+	}
+
+	// Hot path: parse + spool. Only the DID is resolved here (no secret I/O).
+	id, err := ResolveIdentity()
+	if err != nil {
+		logger.Printf("no identity, dropping %s event: %v", hook, err)
+		return
+	}
+	ev, err := ParseHookEvent(stdin)
+	if err != nil {
+		logger.Printf("dropping %s event: %v", hook, err)
+		return
+	}
+
+	// STORY-SL-5: maintain this session's liveness record so the git
+	// prepare-commit-msg hook can attribute a commit to the session that made it
+	// (parallel-safe, worktree-scoped). Structural fields only (session_id +
+	// cwd), never content (INV-2). Best-effort: a failure is logged, never
+	// surfaced.
+	regDir := obgit.DefaultSessionDir()
+	if hook == HookSessionEnd {
+		if err := obgit.RemoveSessionRecord(regDir, ev.SessionID); err != nil {
+			logger.Printf("session registry cleanup: %v", err)
+		}
+	} else if err := obgit.WriteSessionRecord(regDir, ev.SessionID, ev.Cwd, time.Now()); err != nil {
+		logger.Printf("session registry touch: %v", err)
+	}
+
+	ad := New(id, DefaultSpoolDir())
+	if _, err := ad.Observe(hook, ev); err != nil {
+		logger.Printf("spool %s event: %v", hook, err)
+		// fall through — SessionEnd still tries to flush what is already spooled
+	}
+
+	// Opt-in ambient install (STORY-SL-5 wiring): make governance ambient by
+	// installing the commit-trailer hook into the repo this session opened.
+	if hook == HookSessionStart {
+		maybeInstallGitHook(logger, ev.Cwd)
+	}
+
+	// SessionEnd delivers the session's spooled events off the hot path.
+	if hook == HookSessionEnd {
+		runFlush(logger, ev.SessionID)
+	}
+}
+
+// maybeInstallGitHook installs the prepare-commit-msg hook into the repo at cwd,
+// pointing it back at THIS unified engine as `openbox hook git prepare-commit-msg`
+// (STORY-SL4-WIRE-2 / OD17 — the git hook is folded in, so no separate
+// openbox-git-hook binary need be bundled). It is gated behind
+// OPENBOX_INSTALL_GIT_HOOK (default off), a no-op outside a git repo, idempotent,
+// and refuses to overwrite a foreign hook (InstallHook).
+//
+// ASSUMPTION: os.Executable() is the unified `openbox` engine (which handles the
+// baked `hook git prepare-commit-msg` args). In production it is — the plugin
+// wires SessionStart to `bin/openbox hook claude-code SessionStart`. If this ever
+// runs under the legacy openbox-cc-hook alias (which cannot parse `hook git …`),
+// the installed hook fail-opens to a no-op (commit proceeds, unstamped) rather
+// than aborting the commit — an acceptable degradation for a deprecated path.
+func maybeInstallGitHook(logger *log.Logger, cwd string) {
+	if !ResolveInstallGitHook() {
+		return
+	}
+	self, err := os.Executable()
+	if err != nil || self == "" {
+		return
+	}
+	// SL5-SEC-2: the ambient (implicit) install is bounded to the repo's own
+	// <git-common-dir>/hooks and does NOT follow a repo-controlled core.hooksPath,
+	// which a malicious repo could point outside the tree. The explicit
+	// `openbox hook git install` command honors core.hooksPath.
+	hooksDir, err := obgit.Git{Dir: cwd}.HooksDirDefault()
+	if err != nil {
+		return // not a git repo / detached worktree — nothing to install into
+	}
+	cfg := obgit.HookConfig{Command: self, Args: []string{"hook", "git", "prepare-commit-msg"}}
+	if err := obgit.InstallHook(hooksDir, cfg); err != nil {
+		logger.Printf("git-hook install skipped: %v", err)
+	}
+}
+
+// runFlush drains the spool through the AIP-signed client. A missing/invalid
+// full credential set leaves events spooled for a later `flush` (fail-open).
+// sessionID=="" flushes every spooled session.
+func runFlush(logger *log.Logger, sessionID string) {
+	creds, err := ResolveCredentials()
+	if err != nil {
+		logger.Printf("flush skipped (events remain spooled): %v", err)
+		return
+	}
+	cl, err := creds.NewClient(logger)
+	if err != nil {
+		logger.Printf("flush skipped (client init): %v", err)
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), flushBudget)
+	defer cancel()
+
+	ad := New(creds.Identity(), DefaultSpoolDir())
+	var n int
+	if sessionID == "" {
+		n, err = ad.FlushAll(ctx, cl)
+	} else {
+		n, err = ad.Flush(ctx, sessionID, cl)
+	}
+	if err != nil {
+		logger.Printf("flush ended early after %d event(s): %v", n, err)
+	}
+}

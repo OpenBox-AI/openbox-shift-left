@@ -103,6 +103,51 @@ func TestInstaller_ReInstallIsByteIdentical(t *testing.T) {
 	}
 }
 
+// STORY-SL4-WIRE-2: when EngineBinary is set, Install copies the unified engine
+// into the bundle's bin/openbox (executable), idempotently. When it is empty the
+// copy is skipped (packaging supplies the binary).
+func TestInstaller_PlacesEngineBinary(t *testing.T) {
+	pluginDir := t.TempDir()
+	engine := filepath.Join(t.TempDir(), "openbox")
+	if err := os.WriteFile(engine, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	inst := Installer{
+		PluginDir:    pluginDir,
+		ConfigPath:   filepath.Join(t.TempDir(), "dev.json"),
+		EngineBinary: engine,
+	}
+	if err := inst.Install(CredentialRef{DID: testDID}); err != nil {
+		t.Fatalf("install: %v", err)
+	}
+	placed := filepath.Join(pluginDir, "bin", "openbox")
+	fi, err := os.Stat(placed)
+	if err != nil {
+		t.Fatalf("engine not placed at bin/openbox: %v", err)
+	}
+	if fi.Mode().Perm()&0o100 == 0 {
+		t.Errorf("placed engine is not executable: %v", fi.Mode())
+	}
+	if got, _ := os.ReadFile(placed); !strings.Contains(string(got), "exit 0") {
+		t.Errorf("placed engine content mismatch: %q", got)
+	}
+	// Idempotent: a second install re-copies without error.
+	if err := inst.Install(CredentialRef{DID: testDID}); err != nil {
+		t.Fatalf("re-install: %v", err)
+	}
+}
+
+func TestInstaller_SkipsEngineBinaryWhenUnset(t *testing.T) {
+	pluginDir := t.TempDir()
+	inst := Installer{PluginDir: pluginDir, ConfigPath: filepath.Join(t.TempDir(), "dev.json")}
+	if err := inst.Install(CredentialRef{DID: testDID}); err != nil {
+		t.Fatalf("install: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(pluginDir, "bin", "openbox")); !os.IsNotExist(err) {
+		t.Errorf("bin/openbox should not exist when EngineBinary is unset (err=%v)", err)
+	}
+}
+
 func TestInstaller_RequiresDID(t *testing.T) {
 	inst := Installer{PluginDir: t.TempDir(), ConfigPath: filepath.Join(t.TempDir(), "dev.json")}
 	if err := inst.Install(CredentialRef{}); err == nil {

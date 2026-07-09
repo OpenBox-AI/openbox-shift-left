@@ -15,8 +15,11 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"log"
 	"os"
 
+	claudecode "github.com/openbox-ai/openbox-shift-left/adapters/claude-code"
+	obgit "github.com/openbox-ai/openbox-shift-left/adapters/common/git"
 	"github.com/openbox-ai/openbox-shift-left/cli/internal/backend"
 	"github.com/openbox-ai/openbox-shift-left/cli/internal/devinit"
 	"github.com/openbox-ai/openbox-shift-left/cli/internal/providers"
@@ -38,6 +41,7 @@ const (
 // testable without touching the real environment, OS keychain, or network.
 type app struct {
 	stdout, stderr io.Writer
+	stdin          io.Reader
 	getenv         func(string) string
 	openStore      func(kind string) (secret.Store, error)
 	newRegistrar   func(baseURL, credential, clientID string) devinit.Registrar
@@ -47,6 +51,7 @@ func defaultApp() *app {
 	return &app{
 		stdout:       os.Stdout,
 		stderr:       os.Stderr,
+		stdin:        os.Stdin,
 		getenv:       os.Getenv,
 		openStore:    secret.Open,
 		newRegistrar: func(u, c, id string) devinit.Registrar { return backend.New(u, c, id) },
@@ -68,6 +73,8 @@ func (a *app) run(args []string) int {
 	switch args[0] {
 	case "dev":
 		return a.runDev(args[1:])
+	case "hook":
+		return a.runHook(args[1:])
 	case "version", "--version", "-v":
 		fmt.Fprintln(a.stdout, "openbox "+version)
 		return exitOK
@@ -85,6 +92,45 @@ func (a *app) runDev(args []string) int {
 		return a.errorf("usage: openbox dev init --provider <claude-code|codex|cursor> [flags]")
 	}
 	return a.runDevInit(args[1:])
+}
+
+// runHook is the unified observe-only hook entrypoint (STORY-SL4-WIRE-2):
+// `openbox hook <provider> <event>`. The plugin's hooks.json invokes it for
+// every Claude Code hook.
+//
+// INV-3 (the reason this does NOT go through errorf/usage): the hook path must
+// ALWAYS return exitOK and write NOTHING to stdout — on SessionStart/
+// UserPromptSubmit, an exit-0 hook's stdout is injected into the model's
+// context, and a non-zero exit blocks the tool call. So every diagnostic (bad
+// args, unknown provider, and everything inside RunHook) goes to stderr, and we
+// unconditionally return 0. Folding the hook into the multi-command binary must
+// not leak cobra/flag/usage/banner text to stdout.
+func (a *app) runHook(args []string) (code int) {
+	// Belt-and-suspenders for INV-3: default to exitOK and swallow any panic that
+	// escapes RunHook's own recover, so the hook path can NEVER return non-zero
+	// (which would block the tool call).
+	code = exitOK
+	defer func() { _ = recover() }()
+	logger := log.New(a.stderr, "openbox hook: ", 0)
+	if len(args) < 1 {
+		logger.Printf("usage: openbox hook <provider> <event...>  (providers: claude-code, git)")
+		return exitOK
+	}
+	switch args[0] {
+	case "claude-code":
+		if len(args) < 2 {
+			logger.Printf("usage: openbox hook claude-code <event>")
+			return exitOK
+		}
+		claudecode.RunHook(args[1], a.stdin, logger)
+	case "git":
+		// The git hook re-invokes THIS binary as `openbox hook git prepare-commit-msg`
+		// (STORY-SL4-WIRE-2 / OD17 — folds the standalone openbox-git-hook in).
+		obgit.RunHook(args[1:], []string{"hook", "git", "prepare-commit-msg"}, logger.Printf)
+	default:
+		logger.Printf("unknown hook provider %q (supported: claude-code, git)", args[0])
+	}
+	return exitOK
 }
 
 func (a *app) runDevInit(args []string) int {

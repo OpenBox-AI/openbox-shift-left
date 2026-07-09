@@ -4,6 +4,7 @@ import (
 	"embed"
 	"encoding/json"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -15,9 +16,10 @@ import (
 
 // pluginFS is the Claude Code plugin bundle shipped with this adapter (the
 // manifest + hook wiring). `all:` includes the dotted .claude-plugin directory,
-// which go:embed skips by default. The engine binary (bin/openbox-cc-hook) is
-// NOT embedded — it is built per-platform and placed into the bundle's bin/ at
-// package time (see README "Packaging").
+// which go:embed skips by default. The engine binary (bin/openbox) is NOT
+// embedded — `dev init` copies the running engine into the bundle's bin/ when
+// Installer.EngineBinary is set (STORY-SL4-WIRE-2); packaging/marketplace builds
+// place it per-platform otherwise (see README "Packaging").
 //
 //go:embed all:plugin
 var pluginFS embed.FS
@@ -37,6 +39,11 @@ type CredentialRef = providerspi.CredentialRef
 type Installer struct {
 	PluginDir  string // where the bundle is materialized (default: userPluginDir())
 	ConfigPath string // where the dev config is written (default: DefaultConfigPath())
+	// EngineBinary, when set, is the path to the unified `openbox` engine to copy
+	// into the bundle's bin/openbox (STORY-SL4-WIRE-2 — the hooks invoke
+	// ${CLAUDE_PLUGIN_ROOT}/bin/openbox). `openbox dev init` sets it to its own
+	// executable; empty ⇒ packaging places the binary and Install skips the copy.
+	EngineBinary string
 }
 
 // Name is the provider this installer serves.
@@ -52,7 +59,12 @@ func (i Installer) Plan(ref CredentialRef) string {
 	fmt.Fprintf(&b, "OpenBox Claude Code plugin (observe-only, STORY-SL-4):\n")
 	fmt.Fprintf(&b, "  - Materialize plugin bundle → %s\n", i.pluginDir())
 	fmt.Fprintf(&b, "      .claude-plugin/plugin.json + hooks/hooks.json (SessionStart, UserPromptSubmit,\n")
-	fmt.Fprintf(&b, "      PreToolUse, PostToolUse, SessionEnd → bin/openbox-cc-hook; async/best-effort)\n")
+	fmt.Fprintf(&b, "      PreToolUse, PostToolUse, SessionEnd → `bin/openbox hook claude-code <event>`; async/best-effort)\n")
+	if i.EngineBinary != "" {
+		fmt.Fprintf(&b, "  - Place the openbox engine → %s\n", filepath.Join(i.pluginDir(), "bin", "openbox"))
+	} else {
+		fmt.Fprintf(&b, "  - (packaging places the openbox engine into bin/openbox)\n")
+	}
 	fmt.Fprintf(&b, "  - Write dev config (non-secret coordinates) → %s\n", i.configPath())
 	fmt.Fprintf(&b, "      developer_did=%s\n", ref.DID)
 	fmt.Fprintf(&b, "      secret_service=%q api_key_account=%q private_key_account=%q\n",
@@ -60,13 +72,15 @@ func (i Installer) Plan(ref CredentialRef) string {
 	fmt.Fprintf(&b, "      content_capture=%t (default false = metadata-only, INV-2)\n", ref.ContentCapture)
 	fmt.Fprintf(&b, "  - Credentials stay in the OS secret store; the hook reads them at runtime (INV-1).\n")
 	fmt.Fprintf(&b, "\nCommit-trailer stamping (STORY-SL-5, session→commit binding):\n")
-	fmt.Fprintf(&b, "  - The plugin bundles bin/openbox-git-hook and maintains a per-session liveness\n")
-	fmt.Fprintf(&b, "    registry (%s) so a git commit is attributed to the session that made it —\n", obgit.DefaultSessionDir())
-	fmt.Fprintf(&b, "    parallel-safe across concurrent sessions (worktree-scoped, INV-2 metadata-only).\n")
-	fmt.Fprintf(&b, "  - Ambient install of the prepare-commit-msg hook is %s (it modifies a repo's\n", onOff(ref.InstallGitHook))
-	fmt.Fprintf(&b, "    .git/hooks). Enable at onboarding with `openbox dev init --install-git-hook`\n")
-	fmt.Fprintf(&b, "    (persisted to dev config); OPENBOX_INSTALL_GIT_HOOK overrides either way; or install\n")
-	fmt.Fprintf(&b, "    per repo with `openbox-git-hook install`. Idempotent; never overwrites a foreign hook.\n")
+	fmt.Fprintf(&b, "  - The session hook maintains a per-session liveness registry (%s) so a git\n", obgit.DefaultSessionDir())
+	fmt.Fprintf(&b, "    commit is attributed to the session that made it — parallel-safe across concurrent\n")
+	fmt.Fprintf(&b, "    sessions (worktree-scoped, INV-2 metadata-only).\n")
+	fmt.Fprintf(&b, "  - The prepare-commit-msg hook runs `bin/openbox hook git prepare-commit-msg` (the same\n")
+	fmt.Fprintf(&b, "    unified engine — STORY-SL4-WIRE-2; no separate git-hook binary).\n")
+	fmt.Fprintf(&b, "  - Ambient install of that hook is %s (it modifies a repo's .git/hooks). Enable at\n", onOff(ref.InstallGitHook))
+	fmt.Fprintf(&b, "    onboarding with `openbox dev init --install-git-hook` (persisted to dev config);\n")
+	fmt.Fprintf(&b, "    OPENBOX_INSTALL_GIT_HOOK overrides either way; or install per repo with\n")
+	fmt.Fprintf(&b, "    `openbox hook git install`. Idempotent; never overwrites a foreign hook.\n")
 	fmt.Fprintf(&b, "\nOrg-wide force-enable (managed settings; VERIFIED, not activated for the pilot — NFR-5):\n")
 	fmt.Fprintf(&b, "  add to the managed settings.json: {\"enabledPlugins\": [\"openbox-observe\"]}\n")
 	return b.String()
@@ -83,7 +97,57 @@ func (i Installer) Install(ref CredentialRef) error {
 	if err := i.materializeBundle(); err != nil {
 		return err
 	}
+	if err := i.placeEngineBinary(); err != nil {
+		return err
+	}
 	return i.writeConfig(ref)
+}
+
+// placeEngineBinary copies the unified `openbox` engine into the bundle's
+// bin/openbox (0755) so the hooks — which invoke ${CLAUDE_PLUGIN_ROOT}/bin/openbox
+// — resolve to it (STORY-SL4-WIRE-2). No-op when EngineBinary is empty (the
+// packaging/marketplace path places the per-platform binary instead). The copy
+// is atomic (temp + rename) so a re-init never leaves a half-written engine.
+//
+// When EngineBinary IS set, a copy failure is returned (fatal to Install) rather
+// than swallowed: a bundle whose hooks point at a missing bin/openbox is a
+// silently broken install, so we fail loudly. The CALLER decides whether to set
+// EngineBinary at all (cli resolves it best-effort from os.Executable()).
+func (i Installer) placeEngineBinary() error {
+	if i.EngineBinary == "" {
+		return nil
+	}
+	src, err := os.Open(i.EngineBinary)
+	if err != nil {
+		return fmt.Errorf("claude-code install: open engine binary: %w", err)
+	}
+	defer src.Close()
+
+	binDir := filepath.Join(i.pluginDir(), "bin")
+	if err := os.MkdirAll(binDir, 0o755); err != nil {
+		return fmt.Errorf("claude-code install: bin dir: %w", err)
+	}
+	tmp, err := os.CreateTemp(binDir, ".openbox-*.tmp")
+	if err != nil {
+		return fmt.Errorf("claude-code install: temp engine: %w", err)
+	}
+	tmpName := tmp.Name()
+	defer os.Remove(tmpName) // no-op after a successful rename
+	if _, err := io.Copy(tmp, src); err != nil {
+		tmp.Close()
+		return fmt.Errorf("claude-code install: copy engine: %w", err)
+	}
+	if err := tmp.Chmod(0o755); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(tmpName, filepath.Join(binDir, "openbox")); err != nil {
+		return fmt.Errorf("claude-code install: commit engine: %w", err)
+	}
+	return nil
 }
 
 func (i Installer) materializeBundle() error {
