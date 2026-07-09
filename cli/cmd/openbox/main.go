@@ -11,6 +11,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -38,7 +39,7 @@ const (
 type app struct {
 	stdout, stderr io.Writer
 	getenv         func(string) string
-	detectStore    func() (secret.Store, error)
+	openStore      func(kind string) (secret.Store, error)
 	newRegistrar   func(baseURL, credential, clientID string) devinit.Registrar
 }
 
@@ -47,7 +48,7 @@ func defaultApp() *app {
 		stdout:       os.Stdout,
 		stderr:       os.Stderr,
 		getenv:       os.Getenv,
-		detectStore:  secret.Detect,
+		openStore:    secret.Open,
 		newRegistrar: func(u, c, id string) devinit.Registrar { return backend.New(u, c, id) },
 	}
 }
@@ -90,7 +91,7 @@ func (a *app) runDevInit(args []string) int {
 	fs := flag.NewFlagSet("openbox dev init", flag.ContinueOnError)
 	fs.SetOutput(a.stderr)
 	var o devinit.Options
-	var backendURL, clientID string
+	var backendURL, clientID, secretBackend string
 	fs.StringVar(&o.Provider, "provider", "", "developer tool: claude-code|codex|cursor (required)")
 	fs.StringVar(&o.Org, "org", a.env("OPENBOX_ORG", ""), "organization namespace for credential storage")
 	fs.StringVar(&o.AgentName, "agent-name", "", "override the derived agent name")
@@ -102,6 +103,7 @@ func (a *app) runDevInit(args []string) int {
 	fs.BoolVar(&o.InstallGitHook, "install-git-hook", false, "enable ambient install of the commit-trailer hook into repos on session start (STORY-SL-5; off by default — it modifies .git/hooks)")
 	fs.StringVar(&backendURL, "backend-url", a.env("OPENBOX_BACKEND_URL", ""), "openbox-backend control-plane base URL")
 	fs.StringVar(&clientID, "client-id", a.env("OPENBOX_CLIENT", "openbox-cli"), "value for the x-openbox-client header (Keycloak JWT path)")
+	fs.StringVar(&secretBackend, "secret-backend", a.env("OPENBOX_SECRET_BACKEND", "auto"), "credential store: auto|os (OS keychain, default) or file (opt-in 0600 plaintext file, for machines with no OS keyring)")
 	if err := fs.Parse(args); err != nil {
 		return exitError
 	}
@@ -134,11 +136,29 @@ func (a *app) runDevInit(args []string) int {
 		return a.errorf("set --backend-url or OPENBOX_BACKEND_URL to the openbox-backend base URL")
 	}
 
-	store, err := a.detectStore()
+	store, err := a.openStore(secretBackend)
 	if err != nil {
-		// Stop condition: no OS secret store → HALT, never write plaintext (INV-1).
-		return a.errorf("HALT: %v — refusing to store credentials in plaintext. "+
-			"Install libsecret (secret-tool) on Linux or use macOS", err)
+		if errors.Is(err, secret.ErrNoStore) {
+			// Stop condition: no OS keychain and the operator did not opt into an
+			// alternative → HALT, never silently write plaintext (INV-1 / SL2-SEC-1).
+			return a.errorf("HALT: %v — refusing to store credentials in plaintext by default.\n"+
+				"  Fix by EITHER:\n"+
+				"  • installing an OS keyring — Linux: `secret-tool` (e.g. apt install libsecret-tools) with a running\n"+
+				"    keyring daemon (gnome-keyring/kwallet); macOS has one built in; then re-run; OR\n"+
+				"  • opting into the file backend for this machine (0600 plaintext, no keyring needed):\n"+
+				"      openbox dev init --provider %s --secret-backend file   (or OPENBOX_SECRET_BACKEND=file)",
+				err, o.Provider)
+		}
+		return a.errorf("%v", err)
+	}
+	// The file backend trades away at-rest encryption; make that explicit and
+	// tell the operator how to point the adapter hook at the same store.
+	if secretBackend == "file" {
+		fmt.Fprintf(a.stderr,
+			"warning: using the file secret backend — credentials are stored PLAINTEXT (0600) at %s.\n"+
+				"         Prefer an OS keyring where available. The Claude Code hook reads this store when you set\n"+
+				"         OPENBOX_SECRET_FILE=%s in its environment.\n",
+			secret.DefaultFilePath(), secret.DefaultFilePath())
 	}
 	d.Store = store
 	d.Registrar = a.newRegistrar(backendURL, credential, clientID)

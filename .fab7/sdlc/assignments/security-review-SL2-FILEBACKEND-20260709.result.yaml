@@ -1,0 +1,59 @@
+assignment_id: "security-review-SL2-FILEBACKEND-20260709"
+role: "security_reviewer"
+story: "STORY-SL2-FILEBACKEND"
+mode: "inv1-plaintext-backend-boundary"   # traced fileStore + adapter fileSecretLookup + the --secret-backend gate
+status: "done"
+decision: "approve"                       # non-blocking hardening only; plaintext-at-rest is the by-design opt-in tradeoff
+summary: "G_SEC of the opt-in file secret backend: APPROVE. Plaintext-at-rest is the only guarantee traded, it is never automatic, warned every use, 0600-permissioned at write, no leak beyond at-rest."
+overall: >
+  The boundary is sound. secret.Open maps ""|auto|os → Detect() (keychain; HALT on ErrNoStore) and only
+  the literal "file" → NewFileStore; there is NO auto→file fallback and an unknown backend fails CLOSED
+  (ErrUnknownBackend), never plaintext. The PLAINTEXT warning prints on every file-backend use (flag and
+  env). Writes go via os.CreateTemp (0600) + explicit Chmod(0600) + atomic rename — no world-readable
+  window; a crash leaves only a 0600 temp. No secret reaches an argv (unlike the macOS keychain path),
+  log, stdout, error, or the bundle. Hook path fails open (missing/garbage file → error → exit 0, no
+  crash; nil-map read is safe). CLI-written format == adapter-read format.
+findings: []
+verified_correct_no_finding:
+  - "Gating: secret.Open never selects file without explicit opt-in; auto never falls back to plaintext; unknown backend fails closed (secret.go:71-80, main.go:141-162)."
+  - "Write perms: MkdirAll 0700 → CreateTemp (0600) → Chmod 0600 → rename; no exposure window; crash leaves 0600 temp (file.go:81-111)."
+  - "No leak to argv/log/stdout/error/bundle: secret enters only the JSON file; Name()/errors carry path/account only (file.go, creds.go:248-261)."
+  - "Fail-open on the hook path (INV-3): fileSecretLookup error → ResolveCredentials error → caller exits 0; nil-map read is panic-safe."
+  - "Format consistency: CLI writes map[string]map[string]string; adapter reads identical shape/indexing."
+  - "Path/injection realistically bounded: OPENBOX_SECRET_FILE control implies prior env compromise; rename replaces (does not follow) a symlink at the target."
+non_blocking_findings:
+  - id: "SL2FB-LOW-1"
+    severity: "LOW"
+    title: "read path does not notice a pre-existing over-permissive secret file"
+    detail: "load() (file.go) and fileSecretLookup (creds.go) ReadFile regardless of mode. The CLI always creates 0600, but a secrets.json arriving 0644 by other means (restore/copy/external tool) is read silently. Recommend a stat-and-warn/refuse when perms are broader than 0600 (ssh-style). Confidentiality-adjacent; low probability."
+  - id: "SL2FB-LOW-2"
+    severity: "LOW"
+    title: "cross-process lost update on read-modify-write"
+    detail: "fileStore.Set does load→mutate→save guarded only by in-process mu; no file lock. Two concurrent writers can drop one update. Integrity/availability only (atomic rename prevents torn reads; confidentiality unaffected). dev init is a rare manual op → low priority; a flock closes it."
+informational:
+  - id: "SL2FB-INFO-1"
+    detail: "installer.writeConfig does not populate DevConfig.SecretFile, so after `dev init --secret-backend file` the hook defaults to the OS keychain and fails-open (no governance) unless the operator sets OPENBOX_SECRET_FILE (the warning instructs this). Usability gap, fail-SAFE (no plaintext, no crash), not a leak. Wire secret_file through in follow-up."
+  - id: "SL2FB-INFO-2"
+    detail: "MkdirAll(dir,0700) will not tighten an already-existing ~/.config/openbox (often 0755). Not a confidentiality break: the 0600 FILE mode gates read access, not the dir mode."
+validation:
+  ran:
+    - command: "cd cli && go test ./internal/secret/ ./cmd/openbox/"
+      result: "pass"
+      evidence: "secret + main packages green (incl. TestFileBackendSelectedByFlag)"
+    - command: "cd adapters/claude-code && go test ./..."
+      result: "pass"
+      evidence: "adapter green; fileSecretLookup format matches the CLI store byte-for-byte"
+  not_run: []
+open_decisions:
+  - id: "SL2FB-LOW-1-disposition"
+    decision: "Apply stat-and-warn/refuse on over-permissive secret-file perms, or accept as-is for the Phase-1 opt-in pilot. Owner: brian."
+handoff:
+  next_phase: "gate-check"
+  next_action: "Land the file backend (APPROVE). Track LOW-1/LOW-2/INFO-1/INFO-2 on STORY-SL2-FILEBACKEND. INFO-1 (wire secret_file into DevConfig) is the most user-visible follow-up."
+write_scope_used:
+  - ".fab7/sdlc/assignments/security-review-SL2-FILEBACKEND-20260709.result.yaml"
+artifacts:
+  created_or_updated:
+    - ".fab7/sdlc/assignments/security-review-SL2-FILEBACKEND-20260709.result.yaml"
+  proposed_only:
+    - "status.yaml STORY-SL2-FILEBACKEND: new follow-up story entry with G_SEC APPROVE evidence"

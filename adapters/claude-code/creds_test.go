@@ -6,6 +6,32 @@ import (
 	"testing"
 )
 
+// TestResolveCredentials_FileBackend proves the hook reads the CLI's opt-in
+// file secret backend (`dev init --secret-backend file`) when OPENBOX_SECRET_FILE
+// points at it — the fix for machines with no OS keyring.
+func TestResolveCredentials_FileBackend(t *testing.T) {
+	isolateConfig(t)
+	path := filepath.Join(t.TempDir(), "secrets.json")
+	// Same nested-JSON format the CLI's fileStore writes.
+	blob := `{"ai.openbox.dev":{"acme/claude-code/api_key":"obx_from_file","acme/claude-code/private_key":"c2VlZGZyb21maWxl"}}`
+	if err := os.WriteFile(path, []byte(blob), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(envDID, testDID)
+	t.Setenv(envSecretFile, path)
+	t.Setenv(envSecretService, "ai.openbox.dev")
+	t.Setenv(envAPIKeyAccount, "acme/claude-code/api_key")
+	t.Setenv(envPrivKeyAccount, "acme/claude-code/private_key")
+
+	c, err := ResolveCredentials()
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if c.APIKey != "obx_from_file" || c.SeedB64 != "c2VlZGZyb21maWxl" {
+		t.Errorf("creds from file backend = %+v", c)
+	}
+}
+
 // isolateConfig points OPENBOX_CONFIG at a nonexistent temp path so tests never
 // read the developer machine's real ~/.config/openbox/dev.json.
 func isolateConfig(t *testing.T) {

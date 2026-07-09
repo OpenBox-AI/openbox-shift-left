@@ -15,6 +15,7 @@ package secret
 
 import (
 	"errors"
+	"fmt"
 	"runtime"
 )
 
@@ -57,4 +58,23 @@ func Detect() (Store, error) {
 		}
 	}
 	return nil, ErrNoStore
+}
+
+// Open selects a secret backend by name:
+//
+//	"" | "auto" | "os" — the OS keychain (Detect); ErrNoStore if none. SAFE DEFAULT.
+//	"file"             — the opt-in 0600 file backend (plaintext at rest). The
+//	                     caller MUST warn the user before using it (SL2-SEC-1).
+//
+// Note "auto" never silently falls back to the file backend: falling back would
+// store plaintext without consent, which is exactly what the HALT prevents.
+func Open(kind string) (Store, error) {
+	switch kind {
+	case "", "auto", "os":
+		return Detect()
+	case "file":
+		return NewFileStore(DefaultFilePath()), nil
+	default:
+		return nil, fmt.Errorf("%w %q (use os|file)", ErrUnknownBackend, kind)
+	}
 }

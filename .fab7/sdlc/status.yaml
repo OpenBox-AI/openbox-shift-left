@@ -383,3 +383,45 @@ stories:
       last_run_id: null
       status_reason: null
       blocked_reason: "awaiting STORY-SL4-WIRE-1 (shared SPI + CLI registration must land first)"
+  STORY-SL2-FILEBACKEND:
+    title: "Opt-in file secret backend for machines with no OS keyring"
+    status: "review"
+    epic: "E2"
+    sprint: null
+    priority: "P1"
+    dependencies:
+      - "STORY-SL-2"
+    blocked_by: []
+    write_scope:
+      - "cli/internal/secret/  # file.go (new fileStore) + secret.go Open(kind)"
+      - "cli/cmd/openbox/       # --secret-backend flag + openStore seam + HALT/warning"
+      - "adapters/claude-code/  # creds.go: DevConfig.secret_file + fileSecretLookup"
+    validation_commands:
+      - "cd cli && go build ./... && go vet ./... && go test ./..."
+      - "cd adapters/claude-code && go test ./..."
+    invariants:
+      - "INV-1: obx_ key + Ed25519 seed never in repo history / on argv / in logs. The file backend trades ONLY encryption-at-rest, opt-in + warned; written 0600 (dir 0700)."
+      - "INV-3: hook fails open — a missing/garbage secret file → error → exit 0, never blocks a tool call."
+    gates:
+      G1_READY:
+        decision: "not-run"
+        evidence: null
+        decided_by: null
+        decided_at: null
+      G_SEC:
+        decision: "approve"
+        evidence: "Independent G_SEC APPROVE, no blockers (.fab7/sdlc/assignments/security-review-SL2-FILEBACKEND-20260709.result.yaml). Plaintext-at-rest is the only guarantee traded; never automatic (no auto→file fallback; unknown backend fails closed); warned every use; 0600 at write with no exposure window (CreateTemp+Chmod+atomic rename); no leak to argv/log/stdout/error/bundle; hook fails open; CLI-write == adapter-read format. Non-blocking: SL2FB-LOW-1 (warn/refuse on over-permissive perms on read), SL2FB-LOW-2 (cross-process flock), SL2FB-INFO-1 (wire secret_file into DevConfig so the hook auto-uses it — fail-safe gap, not a leak), SL2FB-INFO-2 (dir 0700 not tightened if pre-existing — file mode gates access)."
+        decided_by: "Sam (security_reviewer)"
+        decided_at: "2026-07-09T00:00:00Z"
+      G3_REVIEW:
+        decision: "not-run"
+        evidence: "Scoped to G_SEC per request (security-boundary change). A correctness G3 pass is optional before final human sign-off."
+        decided_by: null
+        decided_at: null
+    audit:
+      commit: null
+      completed_at: null
+      validation_artifact: ".fab7/sdlc/assignments/security-review-SL2-FILEBACKEND-20260709.result.yaml"
+      last_run_id: null
+      status_reason: "IN REVIEW → landed. Opt-in 0600 file secret backend (SL-2 follow-up) for headless Linux / containers / WSL with no OS keyring — the explicit escape hatch that keeps the default HALT-don't-fall-back-to-plaintext posture (SL2-SEC-1 philosophy). CLI: `openbox dev init --secret-backend file` (or OPENBOX_SECRET_BACKEND=file) → secret.Open→NewFileStore; auto never falls back; PLAINTEXT warning every use. Adapter hook reads the same 0600 nested-JSON via OPENBOX_SECRET_FILE / dev.json secret_file (fileSecretLookup). G_SEC APPROVE (no blockers). Follow-ups tracked: SL2FB-LOW-1/LOW-2 + SL2FB-INFO-1 (wire secret_file into DevConfig) + INFO-2. Human G1_READY + final sign-off pending; committed separately from SL4-WIRE-1."
+      blocked_reason: null

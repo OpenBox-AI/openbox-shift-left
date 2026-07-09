@@ -41,6 +41,7 @@ const (
 	envAPIKeyDirect   = "OPENBOX_API_KEY"
 	envSeedDirect     = "OPENBOX_ED25519_SEED"
 	envConfigPath     = "OPENBOX_CONFIG"
+	envSecretFile     = "OPENBOX_SECRET_FILE"
 
 	defaultBaseURL = "https://core.openbox.ai"
 )
@@ -59,6 +60,11 @@ type DevConfig struct {
 	// into the session's repo on SessionStart. Default false — it modifies a
 	// repo's .git/hooks. Set by `openbox dev init --install-git-hook`.
 	InstallGitHook bool `json:"install_git_hook,omitempty"`
+	// SecretFile, when set, points at the CLI's opt-in file secret backend
+	// (`openbox dev init --secret-backend file`) — a 0600 JSON store the hook
+	// reads instead of the OS keychain, for machines with no keyring. The
+	// OPENBOX_SECRET_FILE env overrides it. Empty ⇒ use the OS secret store.
+	SecretFile string `json:"secret_file,omitempty"`
 }
 
 // DefaultConfigPath is where the installer writes the dev config and the hook
@@ -195,11 +201,18 @@ func ResolveCredentials() (Credentials, error) {
 	apiKeyAccount := firstNonEmpty(os.Getenv(envAPIKeyAccount), cfg.APIKeyAccount)
 	privKeyAccount := firstNonEmpty(os.Getenv(envPrivKeyAccount), cfg.PrivateKeyAccount)
 
-	// obx_ key: direct override, else secret store.
+	// Secret source: the CLI's opt-in file backend (when a path is configured)
+	// or the OS secret store. The direct env overrides win over both.
+	lookup := secretLookup
+	if secretFile := firstNonEmpty(os.Getenv(envSecretFile), cfg.SecretFile); secretFile != "" {
+		lookup = func(svc, acct string) (string, error) { return fileSecretLookup(secretFile, svc, acct) }
+	}
+
+	// obx_ key: direct override, else secret source.
 	if v := os.Getenv(envAPIKeyDirect); v != "" {
 		c.APIKey = v
 	} else if service != "" && apiKeyAccount != "" {
-		v, err := secretLookup(service, apiKeyAccount)
+		v, err := lookup(service, apiKeyAccount)
 		if err != nil {
 			return Credentials{}, fmt.Errorf("read api key from secret store: %w", err)
 		}
@@ -209,11 +222,11 @@ func ResolveCredentials() (Credentials, error) {
 		return Credentials{}, fmt.Errorf("no obx_ API key available (env %s or secret store)", envAPIKeyDirect)
 	}
 
-	// Ed25519 seed: direct override, else secret store.
+	// Ed25519 seed: direct override, else secret source.
 	if v := os.Getenv(envSeedDirect); v != "" {
 		c.SeedB64 = v
 	} else if service != "" && privKeyAccount != "" {
-		v, err := secretLookup(service, privKeyAccount)
+		v, err := lookup(service, privKeyAccount)
 		if err != nil {
 			return Credentials{}, fmt.Errorf("read signing seed from secret store: %w", err)
 		}
@@ -224,6 +237,27 @@ func ResolveCredentials() (Credentials, error) {
 	}
 
 	return c, nil
+}
+
+// fileSecretLookup reads one secret by (service, account) from the CLI's opt-in
+// file backend — the same 0600 nested-JSON format the CLI writes
+// (cli/internal/secret/file.go): {"<service>":{"<account>":"<value>"}}. It is
+// used only when a secret-file path is explicitly configured; the default path
+// stays the OS keychain (osSecretLookup). A missing file/account is ErrNotFound-
+// shaped (an error), handled fail-open by the caller.
+func fileSecretLookup(path, service, account string) (string, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return "", fmt.Errorf("read secret file: %w", err)
+	}
+	var m map[string]map[string]string
+	if err := json.Unmarshal(raw, &m); err != nil {
+		return "", fmt.Errorf("parse secret file %s: %w", path, err)
+	}
+	if v, ok := m[service][account]; ok && v != "" {
+		return v, nil
+	}
+	return "", fmt.Errorf("secret file has no value for account %q", account)
 }
 
 // osSecretLookup reads one secret by (service, account) from the platform secret

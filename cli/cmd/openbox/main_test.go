@@ -36,8 +36,8 @@ func testApp(env map[string]string) (*app, *bytes.Buffer, *bytes.Buffer) {
 		stdout: &out,
 		stderr: &errb,
 		getenv: func(k string) string { return env[k] },
-		detectStore: func() (secret.Store, error) {
-			return nil, errors.New("detectStore should not be called in this path")
+		openStore: func(string) (secret.Store, error) {
+			return nil, errors.New("openStore should not be called in this path")
 		},
 		newRegistrar: func(_, _, _ string) devinit.Registrar {
 			panic("newRegistrar should not be called in this path")
@@ -80,7 +80,7 @@ func TestMissingTokenIsINV1Guard(t *testing.T) {
 
 func TestNoSecretStoreHalts(t *testing.T) {
 	a, _, errb := testApp(map[string]string{"OPENBOX_CONTROL_TOKEN": "obx_key_x", "OPENBOX_BACKEND_URL": "https://x"})
-	a.detectStore = func() (secret.Store, error) { return nil, secret.ErrNoStore }
+	a.openStore = func(string) (secret.Store, error) { return nil, secret.ErrNoStore }
 	code := a.run([]string{"dev", "init", "--provider", "claude-code"})
 	if code != exitError {
 		t.Fatalf("exit = %d, want %d", code, exitError)
@@ -88,12 +88,40 @@ func TestNoSecretStoreHalts(t *testing.T) {
 	if !strings.Contains(errb.String(), "HALT") {
 		t.Errorf("expected HALT on no secret store, got %q", errb.String())
 	}
+	// The HALT must name BOTH escape hatches (install a keyring, or --secret-backend file).
+	if !strings.Contains(errb.String(), "--secret-backend file") {
+		t.Errorf("HALT should point to the file backend escape hatch, got %q", errb.String())
+	}
+}
+
+func TestFileBackendSelectedByFlag(t *testing.T) {
+	// Opting into the file backend must NOT HALT — it resolves to a usable store.
+	// (Registration then fails on the fake network, but past the secret-store gate.)
+	a, _, errb := testApp(map[string]string{"OPENBOX_CONTROL_TOKEN": "obx_key_x", "OPENBOX_BACKEND_URL": "https://x"})
+	var gotKind string
+	store := secret.NewMemStore()
+	a.openStore = func(kind string) (secret.Store, error) { gotKind = kind; return store, nil }
+	a.newRegistrar = func(_, _, _ string) devinit.Registrar {
+		return &fakeReg{reg: &backend.Registration{AgentID: "a", DID: "did:aip:x", APIKey: "obx_test_k", PrivateKey: "seed"}}
+	}
+	// codex is still a stub (SL-7 unbuilt), so this exercises the file-backend
+	// gate without materializing the real claude-code bundle into $HOME.
+	code := a.run([]string{"dev", "init", "--provider", "codex", "--org", "acme", "--secret-backend", "file"})
+	if gotKind != "file" {
+		t.Fatalf("openStore kind = %q, want file", gotKind)
+	}
+	if code == exitError && strings.Contains(errb.String(), "HALT") {
+		t.Fatalf("file backend must not HALT: %q", errb.String())
+	}
+	if !strings.Contains(errb.String(), "PLAINTEXT") {
+		t.Errorf("expected a plaintext warning for the file backend, got %q", errb.String())
+	}
 }
 
 func TestConfigManualOnlyExitsTwo(t *testing.T) {
 	a, _, errb := testApp(map[string]string{"OPENBOX_CONTROL_TOKEN": "obx_key_x", "OPENBOX_BACKEND_URL": "https://x"})
 	store := secret.NewMemStore()
-	a.detectStore = func() (secret.Store, error) { return store, nil }
+	a.openStore = func(string) (secret.Store, error) { return store, nil }
 	a.newRegistrar = func(_, _, _ string) devinit.Registrar {
 		return &fakeReg{reg: &backend.Registration{AgentID: "a", DID: "did:aip:x", APIKey: "obx_test_k", PrivateKey: "seed"}}
 	}
@@ -124,7 +152,7 @@ func TestClaudeCodeInstallsForRealExitsZero(t *testing.T) {
 
 	a, out, errb := testApp(map[string]string{"OPENBOX_CONTROL_TOKEN": "obx_key_x", "OPENBOX_BACKEND_URL": "https://x"})
 	store := secret.NewMemStore()
-	a.detectStore = func() (secret.Store, error) { return store, nil }
+	a.openStore = func(string) (secret.Store, error) { return store, nil }
 	a.newRegistrar = func(_, _, _ string) devinit.Registrar {
 		return &fakeReg{reg: &backend.Registration{AgentID: "a", DID: "did:aip:x", APIKey: "obx_test_k", PrivateKey: "c2VlZA=="}}
 	}
