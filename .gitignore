@@ -9,6 +9,9 @@ Thumbs.db
 .idea/
 .vscode/
 
+# Build output (compiled Go binaries — built per-platform, never committed)
+bin/
+
 # Env / secrets
 .env
 .env.*

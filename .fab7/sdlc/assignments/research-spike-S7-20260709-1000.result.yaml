@@ -1,0 +1,42 @@
+assignment_id: "research-spike-S7-20260709-1000"
+role: "discovery_analyst (Mara)"
+status: "completed"
+summary: >
+  Deep-dive research on GitHub spec-kit (spec-driven development toolkit), captured
+  as spike S7 with primary-source citations and an opinionated adoption synthesis
+  (methodology / traceability / integration-mechanism / do-not-adopt buckets).
+  Decision OD21: DO NOT adopt — shift-left governs the runtime, not the authoring
+  method; spec-kit artifacts stay out of scope and lineage stays
+  session->commit->deploy. S7 retained as reference only; no change to backlog or
+  architecture.
+artifacts:
+  created_or_updated:
+    - ".fab7/sdlc/discovery/spikes/S7-spec-kit-adoption.md"
+  proposed_only: []
+write_scope_used:
+  - ".fab7/sdlc/discovery/spikes/S7-spec-kit-adoption.md"
+  - ".fab7/sdlc/assignments/research-spike-S7-20260709-1000.result.yaml"
+validation:
+  ran:
+    - command: "primary-source research (repo, docs, SDD blog, templates, CLI source) with URL citations"
+      result: "pass"
+      evidence: "S7 doc; version skew + unknowns flagged"
+  not_run: []
+findings:
+  - classification: "decision_needed"
+    severity: "medium"
+    target: "OD21 spec-kit adoption"
+    detail: "DECIDED: do not adopt. Shift-left governs runtime not authoring; spec-kit artifacts + intent-lineage out of scope; lineage stays session->commit->deploy"
+    recommendation: "Keep S7 as reference; no stories, no dependency on spec-kit"
+  - classification: "observation"
+    severity: "low"
+    target: "generic patterns (former OD22/OD23)"
+    detail: "Severity+stable-IDs vocab, a check/doctor command, canonical-source->N-renderings installer discipline, AGENTS.md — available as ordinary good practice for SL-2/SL-4 builders, not tracked as spec-kit adoption"
+    recommendation: "No gate; builders may apply on merit"
+open_decisions: []
+handoff:
+  next_phase: "plan"
+  next_action: >
+    No design/stack change — OD17 re-confirmed Go (spec-kit's Python + `uv tool`
+    distribution declined 2026-07-09). Adopt spec-kit's artifact schemas / prompt
+    patterns as advisory inputs only; resume the shift-left build.
