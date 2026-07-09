@@ -75,6 +75,34 @@ func TestInstaller_Plan(t *testing.T) {
 	}
 }
 
+// Re-init must be byte-identical: a second Install with the same ref overwrites
+// the bundle + config with the same content (idempotency, not just no-error).
+func TestInstaller_ReInstallIsByteIdentical(t *testing.T) {
+	pluginDir := t.TempDir()
+	cfgPath := filepath.Join(t.TempDir(), "dev.json")
+	inst := Installer{PluginDir: pluginDir, ConfigPath: cfgPath}
+	ref := CredentialRef{DID: testDID, SecretService: "svc", APIKeyAccount: "k", PrivateKeyAccount: "s"}
+
+	if err := inst.Install(ref); err != nil {
+		t.Fatalf("first install: %v", err)
+	}
+	cfg1, _ := os.ReadFile(cfgPath)
+	manifest1, _ := os.ReadFile(filepath.Join(pluginDir, ".claude-plugin", "plugin.json"))
+
+	if err := inst.Install(ref); err != nil {
+		t.Fatalf("re-install: %v", err)
+	}
+	cfg2, _ := os.ReadFile(cfgPath)
+	manifest2, _ := os.ReadFile(filepath.Join(pluginDir, ".claude-plugin", "plugin.json"))
+
+	if string(cfg1) != string(cfg2) {
+		t.Errorf("dev config not byte-identical across re-init:\n%s\n---\n%s", cfg1, cfg2)
+	}
+	if string(manifest1) != string(manifest2) {
+		t.Errorf("plugin manifest not byte-identical across re-init")
+	}
+}
+
 func TestInstaller_RequiresDID(t *testing.T) {
 	inst := Installer{PluginDir: t.TempDir(), ConfigPath: filepath.Join(t.TempDir(), "dev.json")}
 	if err := inst.Install(CredentialRef{}); err == nil {

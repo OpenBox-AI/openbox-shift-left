@@ -1,0 +1,75 @@
+assignment_id: "review-diff-SL4-WIRE-1-20260709"
+role: "review_auditor"
+story: "STORY-SL4-WIRE-1"
+mode: "blind-correctness-acceptance"   # story spec + diff only, no builder reasoning; live builds/tests
+status: "done"                         # review complete
+decision: "approve"                    # no must-fix; 2 LOW nits applied by the builder; final human sign-off = brian
+summary: "G3 blind correctness+acceptance review of SL4-WIRE-1: APPROVE, no must-fix; 2 LOW nits (F1/F2) fixed + re-validated."
+overall: >
+  Module split is correct and the acceptance criteria hold. The Claude Code adapter genuinely
+  implements the shared provider.Installer (Name() returns provider.ClaudeCode, compiler accepts
+  claudecode.Installer{} where provider.Installer is required); no import cycle (provider/ imports
+  nothing repo-local, composition root sits in cli/internal/providers); go.mod require/replace graph
+  resolves with no go.work; no dangling refs to the deleted cli/internal/provider. INV-1 upheld —
+  CredentialRef is coordinates-only (the type alias to the shared superset adds only non-secret
+  posture fields). All three modules build + test green under -race. The claude-code→codex swaps in
+  the CLI tests are legitimate (claude-code's old exit-2 stub behavior was intentionally removed and
+  is replaced by the real-install test), not masking a regression.
+findings:
+  - id: "F1"
+    severity: "LOW (robustness)"
+    class: "CONFIRMED"
+    disposition: "FIXED"
+    title: "provider.Stub panics on nil Manual func"
+    detail: "Stub is exported; Stub{ProviderName: X}.Plan(ref) with Manual unset would nil-panic on the --dry-run/manual path (not triggered today — registry sets Manual for codex/cursor). Fix: Plan falls back to a generic provider-named message when Manual==nil. Test: TestStubPlanFallsBackWhenManualIsNil."
+  - id: "F2"
+    severity: "LOW (coverage)"
+    class: "CONFIRMED"
+    disposition: "FIXED"
+    title: "no test exercised claude-code re-init idempotency or --dry-run write-freeness"
+    detail: "AC3 claims both; idempotency rested on overwrite semantics and dry-run purity on Plan() doing no I/O (both sound by inspection). Fix: added TestInstaller_ReInstallIsByteIdentical (bundle+config byte-identical across two installs) and TestClaudeCodeDryRunWritesNothing (real installer plan rendered, HOME/OPENBOX_CONFIG redirected, no bundle dir / no config written)."
+verified_correct_no_finding:
+  - "AC1: provider/ is its own zero-dep module; ADR-0001 records the home with a genuine import-cycle rationale + 4 rejected alternatives."
+  - "AC2: registry binds claude-code→real installer (Available()==true), codex/cursor→Stub (false)."
+  - "AC3: TestClaudeCodeInstallsForRealExitsZero drives the full CLI run to exit 0 + bundle/config materialized; dry-run routes to Plan() (pure strings.Builder)."
+  - "AC4/INV-1: no secret field exists on CredentialRef; secrets sink only to the store; assertNoSecretInTree walks the whole bundle."
+  - "INV-7: reg.DID passed verbatim; Name constants unchanged; namespace not forked."
+validation:
+  ran:
+    - command: "cd provider && go test -race ./..."
+      result: "pass"
+      evidence: "ok github.com/openbox-ai/openbox-shift-left/provider (incl. Stub nil-Manual fallback)"
+    - command: "cd adapters/claude-code && go test -race ./..."
+      result: "pass"
+      evidence: "ok adapter + cmd/openbox-cc-hook (incl. TestInstaller_ReInstallIsByteIdentical)"
+    - command: "cd cli && go vet ./... && go test -race ./..."
+      result: "pass"
+      evidence: "vet clean; all packages ok (incl. TestClaudeCodeInstallsForRealExitsZero, TestClaudeCodeDryRunWritesNothing, providers_test)"
+  not_run: []
+re_validation: "provider + adapters/claude-code + cli all green under -race; go vet clean."
+notes: >
+  ADR-0001 status is `proposed` — G_ADR is a human gate (owner: brian). BaseURL/ContentCapture are
+  not threaded from devinit.Run (empty base_url, content_capture=false) — safe defaults (INV-2
+  metadata-only), matches prior SL-4 behavior; out of scope for WIRE-1, worth a follow-up.
+open_decisions:
+  - id: "G_ADR"
+    decision: "Accept ADR-0001 (new dependency-free provider/ module as the SPI home). Human owner: brian."
+  - id: "G3_REVIEW"
+    decision: "G3 sign-off; acknowledge the relocation of SL-2's G3-approved provider interface. Human owner: brian."
+handoff:
+  next_phase: "gate-check"
+  next_action: "brian confirms G1_READY + G3_REVIEW + G_ADR; then release-manager can proceed. SL4-WIRE-2 unblocks once WIRE-1 is done."
+write_scope_used:
+  - "provider/provider.go  # F1 nil-Manual fallback"
+  - "provider/provider_test.go  # F1 test"
+  - "adapters/claude-code/installer_test.go  # F2 idempotency test"
+  - "cli/cmd/openbox/main_test.go  # F2 dry-run-writes-nothing test"
+  - ".fab7/sdlc/assignments/review-diff-SL4-WIRE-1-20260709.result.yaml"
+artifacts:
+  created_or_updated:
+    - ".fab7/sdlc/assignments/review-diff-SL4-WIRE-1-20260709.result.yaml"
+    - "provider/provider.go (F1) + provider/provider_test.go (F1)"
+    - "adapters/claude-code/installer_test.go (F2)"
+    - "cli/cmd/openbox/main_test.go (F2)"
+  proposed_only:
+    - "status.yaml STORY-SL4-WIRE-1: G3_REVIEW evidence (APPROVE), status_reason update — proposed to Ada, human sign-off pending"

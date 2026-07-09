@@ -9,8 +9,8 @@ import (
 	"unicode/utf8"
 
 	"github.com/openbox-ai/openbox-shift-left/cli/internal/backend"
-	"github.com/openbox-ai/openbox-shift-left/cli/internal/provider"
 	"github.com/openbox-ai/openbox-shift-left/cli/internal/secret"
+	"github.com/openbox-ai/openbox-shift-left/provider"
 )
 
 // --- fakes ------------------------------------------------------------------

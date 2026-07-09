@@ -18,7 +18,7 @@ import (
 
 	"github.com/openbox-ai/openbox-shift-left/cli/internal/backend"
 	"github.com/openbox-ai/openbox-shift-left/cli/internal/devinit"
-	"github.com/openbox-ai/openbox-shift-left/cli/internal/provider"
+	"github.com/openbox-ai/openbox-shift-left/cli/internal/providers"
 	"github.com/openbox-ai/openbox-shift-left/cli/internal/secret"
 )
 
@@ -109,7 +109,7 @@ func (a *app) runDevInit(args []string) int {
 		return a.errorf("--provider is required (one of: claude-code, codex, cursor)")
 	}
 
-	inst, err := provider.Lookup(o.Provider)
+	inst, err := providers.Lookup(o.Provider)
 	if err != nil {
 		return a.errorf("%v", err)
 	}

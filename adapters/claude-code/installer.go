@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	obgit "github.com/openbox-ai/openbox-shift-left/adapters/common/git"
+	providerspi "github.com/openbox-ai/openbox-shift-left/provider"
 )
 
 // pluginFS is the Claude Code plugin bundle shipped with this adapter (the
@@ -21,30 +22,25 @@ import (
 //go:embed all:plugin
 var pluginFS embed.FS
 
-// CredentialRef points the installer at where `openbox dev init` (STORY-SL-2)
-// stored the agent credentials. INV-1: it carries the non-secret DID + secret
-// store COORDINATES only — never the obx_ key or Ed25519 seed value.
-type CredentialRef struct {
-	SecretService     string
-	APIKeyAccount     string
-	PrivateKeyAccount string
-	DID               string
-	BaseURL           string // optional; defaults to the core base
-	ContentCapture    bool   // org content posture (default false = metadata-only)
-	InstallGitHook    bool   // STORY-SL-5: ambient prepare-commit-msg install (default false)
-}
+// CredentialRef is the SL-2 install-time seam's credential coordinate type. The
+// adapter no longer defines its own; SL4-WIRE-1 lifted it into the shared
+// provider module so `cli` and this adapter agree on one interface (INV-1: it
+// carries the non-secret DID + secret-store COORDINATES only — never the obx_
+// key or Ed25519 seed value).
+type CredentialRef = providerspi.CredentialRef
 
 // Installer writes the Claude Code plugin bundle + the non-secret dev config,
-// delegated from `openbox dev init` (the SL-2 provider seam). It replaces the
-// SL-2 "not built yet" stub for claude-code. Zero-value fields default to the
-// standard install locations; tests set them to temp dirs.
+// delegated from `openbox dev init` (the SL-2 provider seam). It implements
+// provider.Installer and replaces the SL-2 "not built yet" stub for claude-code.
+// Zero-value fields default to the standard install locations; tests set them to
+// temp dirs.
 type Installer struct {
 	PluginDir  string // where the bundle is materialized (default: userPluginDir())
 	ConfigPath string // where the dev config is written (default: DefaultConfigPath())
 }
 
 // Name is the provider this installer serves.
-func (Installer) Name() string { return provider }
+func (Installer) Name() providerspi.Name { return providerspi.ClaudeCode }
 
 // Available reports that the Claude Code adapter is built (unlike the SL-2 stub).
 func (Installer) Available() bool { return true }

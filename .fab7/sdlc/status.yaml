@@ -325,9 +325,19 @@ stories:
         evidence: null
         decided_by: null
         decided_at: null
-      G_ADR:
+      G3_REVIEW:
         decision: "not-run"
-        evidence: "ADR required: home of the shared provider SPI module (new `provider/` module vs alternative). Structural decision per CLAUDE.md."
+        evidence: "Independent blind review APPROVE (.fab7/sdlc/assignments/review-diff-SL4-WIRE-1-20260709.result.yaml): module split correct, adapter genuinely implements provider.Installer, no import cycle, go.mod graph resolves, no dangling refs, all 3 modules green under -race. No must-fix; 2 LOW nits (F1 Stub nil-Manual panic, F2 idempotency/dry-run coverage) FIXED + re-validated. Awaiting brian's G3 sign-off. FLAG: relocates SL-2's G3-approved provider interface out of cli/internal/provider (interface unchanged; package moved)."
+        decided_by: null
+        decided_at: null
+      G_SEC:
+        decision: "not-run"
+        evidence: "Independent security review APPROVE, no conditions (.fab7/sdlc/assignments/security-review-SL4-WIRE-1-20260709.result.yaml): INV-1 boundary traced end-to-end — no path lets a secret reach a config/bundle file, Plan/--dry-run output, error, log, or argv; CredentialRef is coordinates-only; config 0600/dir 0700; INV-7 namespace not forked. (Advisory — G_SEC not a declared WIRE-1 gate, run because the change touches INV-1.)"
+        decided_by: null
+        decided_at: null
+      G_ADR:
+        decision: "proposed"
+        evidence: "ADR-0001 (.fab7/sdlc/design/adr/ADR-0001-provider-spi-module-home.md) records the SPI package home: new dependency-free `provider/` module owning Installer/CredentialRef/Name/Stub; concrete registry stays in cli/internal/providers (composition root) to avoid the SPI↔adapter import cycle. Status: proposed — awaiting brian's G_ADR sign-off."
         decided_by: null
         decided_at: null
     audit:
@@ -335,7 +345,7 @@ stories:
       completed_at: null
       validation_artifact: null
       last_run_id: null
-      status_reason: "READY (deps SL-2 + SL-4 done). Wired option DECIDED (brian 2026-07-08). Lifts provider.Installer out of cli/internal/ into a shared module both cli + adapters import; cli registers claudecode.Installer replacing the SL-2 stub so `dev init --provider claude-code` installs the plugin for real. NOTE: revises SL-2's G3-approved provider package (relocation) — flag at G3. Opens G_ADR (SPI package home)."
+      status_reason: "BUILT + INDEPENDENTLY REVIEWED (G3 APPROVE + G_SEC APPROVE); pending human G1_READY + G3 + G_ADR sign-off. Created dependency-free `provider/` module (Installer/CredentialRef superset with BaseURL+ContentCapture+InstallGitHook/Name/errors/Supported/Stub). adapters/claude-code now implements provider.Installer (Name() returns provider.ClaudeCode; claudecode.CredentialRef is a type alias of the shared type — self-defined type dropped). New cli/internal/providers registry (composition root) binds claude-code→real claudecode.Installer, codex/cursor→provider.Stub; deleted cli/internal/provider. cli+adapter go.mod add require+replace→../provider. `dev init --provider claude-code` now materializes the plugin bundle + non-secret dev config for real (verified via real binary --dry-run: renders the real installer's plan, exit 0). INV-1 held: installer receives only CredentialRef coordinates; integration test (temp-HOME install via mock backend) + CLI tests (redirected HOME) assert bundle+config materialized with NO secret value in any written file. REVIEW: both reviewers APPROVE; 2 LOW nits applied — F1 (provider.Stub nil-Manual fallback, TestStubPlanFallsBackWhenManualIsNil), F2 (TestInstaller_ReInstallIsByteIdentical + TestClaudeCodeDryRunWritesNothing). Re-validated: provider + adapters/claude-code + cli all green under -race; go vet clean. G_ADR opened via ADR-0001 (proposed). FOLLOW-UP (not blocking): thread org BaseURL/ContentCapture through devinit.Run (today empty/false — safe INV-2 default). NOTE for G3: relocates SL-2's G3-approved provider interface out of cli/internal/provider."
       blocked_reason: null
   STORY-SL4-WIRE-2:
     title: "Unify hook entrypoint into the openbox engine + end-to-end onboarding smoke test"
