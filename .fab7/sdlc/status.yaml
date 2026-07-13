@@ -1,5 +1,5 @@
 version: 1
-updated_at: "2026-07-13T00:00:00Z"  # SL-1..SL-6 + WIRE-1/2 + FILEBACKEND + SL-9/SL-10 + SL-11 + SL-12 DONE (all committed; SL-11/SL-12 = b754d5f, brian G3 sign-off + live-verified). Bucket #2 "Advisory-tier SDK parity" COMPLETE. Enforcement (the `apply` leg) stays the deferred NEXT increment (spike S2 / OD9). SL-7 Codex / SL-8 Cursor still deferred (fast-follow). Phase-1 debt closure: SL-13 DONE (committed e261f8a, brian G3 sign-off + live-verified 2026-07-13 — EXT-core patch artifact + core-acceptance test). SL-14 DONE (brian G3 sign-off 2026-07-13 — deterministic collision-safe event_id + Idempotency-Key header + delivery-guarantee matrix; completing half = EXT-core server dedupe / SL3-IDEMPOTENCY). SL-16 DONE (opt-in transcript usage). Only SL-15 remains (real OwnershipVerifier vs FR-7). One human gate remains: OD-OWNER-API (SL-15).
+updated_at: "2026-07-13T00:00:00Z"  # SL-1..SL-6 + WIRE-1/2 + FILEBACKEND + SL-9/SL-10 + SL-11 + SL-12 DONE (all committed; SL-11/SL-12 = b754d5f, brian G3 sign-off + live-verified). Bucket #2 "Advisory-tier SDK parity" COMPLETE. Enforcement (the `apply` leg) stays the deferred NEXT increment (spike S2 / OD9). SL-7 Codex / SL-8 Cursor still deferred (fast-follow). Phase-1 debt closure: SL-13 DONE (committed e261f8a, brian G3 sign-off + live-verified 2026-07-13 — EXT-core patch artifact + core-acceptance test). SL-14 DONE (brian G3 sign-off 2026-07-13 — deterministic collision-safe event_id + Idempotency-Key header + delivery-guarantee matrix; completing half = EXT-core server dedupe / SL3-IDEMPOTENCY). SL-16 DONE (opt-in transcript usage). SL-15 DONE (committed e83b52e, brian G3 sign-off 2026-07-13 after observing the live E2E in the dashboard — real OwnershipVerifier reads openbox-backend /agent/<id>/sessions with an org X-API-Key; OD-OWNER-API resolved: target the real endpoint + supply OPENBOX_AGENT_ID, bound to DID via uuidv5). All planned shift-left stories are now DONE except the deferred fast-follows (SL-7 Codex / SL-8 Cursor) and the deferred enforcement `apply` leg (spike S2 / OD9). No open human gates.
 owner: "orchestrator"
 stories:
   STORY-SL-1:
@@ -675,8 +675,8 @@ stories:
       status_reason: "DONE (brian G3 sign-off 2026-07-13). Build: build-story-SL14-20260713. event_id now DERIVED deterministically (adapters/claude-code deriveID: 'cc-'+sha256 over session_id/event_type/tool/RFC3339Nano-ts/span-locator, 0x1f-delimited) — same event→same id (robust if recomputed from the spooled record), distinct events never collide (sub-second ts is the distinguisher). Client sends a standard Idempotency-Key header (==EventID==metadata.event_id), constant across retries, NOT in the AIP canonical string (signature-safe, verified via core Explore) and inert until EXT-core consumes it. Delivery-matrix tests added: determinism+collision-freedom (property), stability across spool→rotate→flush→recovery, recovery never re-sends an acked event, lost-200 retry re-sends same key. INV-3 preserved (no hot-path/fail-open/retry change; deriveID pure/O(1)). Neither stop condition triggered (ts is the distinguisher, so no random fallback; core does not reject the header). ts widened RFC3339→RFC3339Nano (byte-identical for whole seconds). Validation green: adapter+client build/vet/test -race pass, gofmt clean. NOT live-verified (in-process matrix exercises the behavior; optional E2E via RUNBOOK). Completing half = EXT-core server dedupe (SL3-IDEMPOTENCY)."
       blocked_reason: null
   STORY-SL-15:
-    title: "Real OwnershipVerifier against the FR-7 session-ownership read API"
-    status: "ready"
+    title: "Real OwnershipVerifier against the backend session-ownership read API"
+    status: "done"
     epic: "E3"
     sprint: null
     priority: "P2"
@@ -685,33 +685,33 @@ stories:
       - "STORY-SL-3"
     blocked_by: []
     write_scope:
-      - "actions/openbox-git-action/  # new apiVerifier + flag wiring; reuse SL-3 signer"
+      - "actions/openbox-git-action/  # apiVerifier + flag wiring (self-contained; client/ untouched)"
     validation_commands:
-      - "cd actions/openbox-git-action && go build ./... && go vet ./... && go test -race ./...  # mock FR-7: owned->attributed, not-owned->inferred, error->inferred (fail-closed); flag off == NoopVerifier"
+      - "cd actions/openbox-git-action && go build ./... && go vet ./... && go test -race ./...  # mock backend: owned->attributed, not-owned/forged->inferred, error->inferred (fail-closed); flag off == NoopVerifier"
     invariants:
       - "INV-6: never silent wrong attribution; unowned/indeterminate stays inferred"
       - "SL5-SEC-1: trailer is a claim, promoted only on positive ownership by the authenticated pusher"
-      - "INV-1: signed read, no secret leak; INV-4: cross-org sessions never promote"
+      - "INV-1: X-API-Key only in header, no secret leak; INV-4: cross-principal sessions never promote (uuidv5 agentId<->DID bind + per-row agent_id check)"
     gates:
       G1_READY:
-        decision: "not-run"
-        evidence: "NEEDS brian (OD-OWNER-API): confirm the FR-7 session-ownership read endpoint shape + auth model the verifier targets (else build against the assumed shape, flag OFF)."
-        decided_by: null
-        decided_at: null
+        decision: "confirm"
+        evidence: "OD-OWNER-API resolved by brian 2026-07-13 (two decisions): (a) target the REAL openbox-backend GET /agent/:agentId/sessions endpoint, NOT the assumed AIP-signed FR-7 shape (which FR-7 does not exist + a CI deploy agent can't present org/JWT auth — cross-repo Explore); (b) provide OPENBOX_AGENT_ID directly (no DID->agentId lookup exists; DID is one-way uuidv5). ENABLE-TIME note (non-blocking, G3 P2): live-verify aipNamespace vs one real (agentId,DID) pair before OPENBOX_OWNERSHIP_VERIFY=1 in prod — already byte-for-byte spot-confirmed by G_SEC."
+        decided_by: "brian"
+        decided_at: "2026-07-13T00:00:00Z"
       G_SEC:
-        decision: "not-run"
-        evidence: null
-        decided_by: null
-        decided_at: null
+        decision: "approve-with-conditions"
+        evidence: "Sam (security_reviewer) 2026-07-13, re-review of the revised real-endpoint design. No BLOCKER/HIGH. Fail-closed complete across every fault path (INV-6/SL5-SEC-1); INV-4 uuidv5 bind correct + cross-repo-verified byte-for-byte (Sam ran Python uuid5 vs the real AIP namespace) + non-bypassable; org key only in X-API-Key header; trailer value url.QueryEscape'd; agentId UUID-validated; org-key surface documented + scoped to read:agent_session (narrowest real perm, not list-all); flag-off byte-identical. C1 (LOW) cross-host redirect forwarded the custom X-API-Key -> ADDRESSED in-code (CheckRedirect=ErrUseLastResponse -> fail-closed) + regression test. INFORMATIONAL empty-agent_id tolerance ALSO tightened (per-row check now unconditional). Artifact: .fab7/sdlc/assignments/build-story-SL15-20260713.result.yaml"
+        decided_by: "Sam (security_reviewer)"
+        decided_at: "2026-07-13T00:00:00Z"
       G3_REVIEW:
-        decision: "not-run"
-        evidence: null
-        decided_by: null
-        decided_at: null
+        decision: "approve"
+        evidence: "brian sign-off 2026-07-13 after OBSERVING the live E2E in the dashboard governance feed (org openbox.ai). Independent blind review (review_auditor) = APPROVE, no must-fix: every AC proven by tests through the REAL resolver over real git (owned->attributed; forged->inferred + verified_session_ids empty; error->inferred); run_id-not-id + per-row agent_id + uuidv5 vector + guards + selectVerifier + error-not-cached cache all correct, -race clean, client baseline intact. Nits P3-a/b addressed in-code, P3-c tests added. Post-review envelope-parse fix (data.data[]) was live-caught, unit-pinned, and directly observed working by brian before sign-off."
+        decided_by: "brian"
+        decided_at: "2026-07-13T00:00:00Z"
     audit:
-      commit: null
-      completed_at: null
-      validation_artifact: null
+      commit: "e83b52e"
+      completed_at: "2026-07-13T00:00:00Z"
+      validation_artifact: ".fab7/sdlc/assignments/build-story-SL15-20260713.result.yaml"
       last_run_id: null
-      status_reason: "DRAFTED (STORY-SL-15.md). Phase-1 debt #3 — mostly EXTERNAL-gated. The seam exists (ownership.go: OwnershipVerifier + NoopVerifier + verifierFunc); the git-action holds the authenticated pusher's DID/creds. Implement apiVerifier = AIP-signed GET against the FR-7 read API (assumed shape GET /agent/<pusherDID>/sessions), fail-closed on any error/ambiguity (never over-attribute — SL5-SEC-1/INV-6), FLAGGED with NoopVerifier default. Owned sessions then promote inferred->attributed with NO resolver change. Buildable + unit-testable against a mock now; CANNOT live-verify until FR-7 exists -> ships flag-off. Awaiting OD-OWNER-API + build."
+      status_reason: "BUILT + INDEPENDENTLY REVIEWED (G_SEC approve-with-conditions [C1 addressed in-code]; G3 reviewer APPROVE) + LIVE-VERIFIED E2E 2026-07-13 against the running hybrid stack (org openbox.ai, real agent 4444083d/DID 966d7dd4), PENDING brian G3_REVIEW sign-off + commit. LIVE E2E: OWNED trailer (real session 606a02c8) -> status=attributed, verified_session_ids=['606a02c8...'], Deploy emitted+stored; FORGED trailer (dash-demo-..., a real session owned by a DIFFERENT agent) -> status=inferred, verified_session_ids=[], verified=false (SL5-SEC-1 discharged for real); both Deploy events in core governance_events + the openbox.ai governance feed. uuidv5 INV-4 bind confirmed byte-for-byte vs the real registered agent. LIVE-CAUGHT + FIXED a real integration bug the mocks couldn't: the backend wraps 2xx in a {status,data:{data:[...]}} envelope, so rows are at data.data[] not top-level data[] (the first parse would never have attributed); fixed + pinned by TestAPIVerifier_ParsesRealBackendEnvelope, mock bodies corrected to the real wire shape, docs updated. apiVerifier (verifier.go) reads openbox-backend GET /agent/<agentID>/sessions?search=<id> with an org X-API-Key and promotes a claim ONLY on exact run_id match + row agent_id==agentID; fail-closed on every fault (INV-6). OFF by default (NoopVerifier); OPENBOX_OWNERSHIP_VERIFY=1 opts in with OPENBOX_OWNERSHIP_API_URL/OPENBOX_AGENT_ID/OPENBOX_ORG_API_KEY. INV-4 anchored by a from-scratch reference-vector-tested uuidv5 binding OPENBOX_AGENT_ID to OPENBOX_DID at startup (mismatch -> degrade to Noop), so the read can only see the deploy principal's own sessions. NO resolver change; flag-off byte-identical (dry-run resolves inferred, verified_session_ids=[]). PIVOT NOTE: an earlier assumed-AIP-signed FR-7 build (also reviewed) was replaced per brian's OD-OWNER-API choice; the client/ SignedGet added for it was FULLY REVERTED (client diff empty, verifier self-contained + stdlib-only). git-action build/vet/test -race green (36 verifier subtests)."
       blocked_reason: null
