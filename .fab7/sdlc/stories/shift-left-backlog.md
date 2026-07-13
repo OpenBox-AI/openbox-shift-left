@@ -210,8 +210,37 @@ Synchronous `PreToolUse` deny/ask/rewrite + fail-closed + guardrail **redaction 
 
 ---
 
+## Phase-1 debt / hardening (SL-13/14/15/16, drafted 2026-07-13)
+
+Shift-left-owned closure of the four Phase-1 debt items surfaced in the Phase-1 review; the external openbox-core / openbox-backend pieces stay **assumed-satisfied** (OD14). Honest split: **SL-13 + SL-16 deliver real value now**; **SL-14 is thin** (most of the fix is EXT-core); **SL-15 lands ready-but-flag-off** (external-gated).
+
+### SL-13 — EXT-core dependency: patch artifact + core-acceptance contract test *(debt #1; highest leverage)*
+- **Goal:** capture the EXT-core 3-edit change (constants + `isValidGovernanceEventType` + lifecycle switch) as a versioned PR-ready artifact under `contracts/dev-event/ext-core/` (type list checked against the SL-1 enum) + a live acceptance test (7 types non-400, clean-skip offline). Makes the one hard Phase-2 blocker reproducible + verifiable.
+- **Write scope:** `contracts/dev-event/`. **Deps:** SL-1, SL-3. **Gates:** G3. **Invariants:** INV-8. **External:** the upstream merge.
+
+### SL-16 — Opt-in transcript usage extraction (tokens/cost, metadata-only) *(debt #4; fully closable)*
+- **Goal:** on flush, behind an off-by-default opt-in, read `transcript_path` for **usage NUMBERS ONLY** → populate the (existing, unused) `event.Tokens`/`event.Cost`. INV-2 is the load-bearing AC (sentinel-content-absent test). The one debt item shift-left can fully close alone.
+- **Write scope:** `adapters/claude-code/`. **Deps:** SL-4, SL-1. **Gates:** **G1_READY (OD-FINOPS)** + G_SEC + G3. **Invariants:** INV-1/2/3.
+
+### SL-14 — Idempotency hardening (deterministic event_id + delivery matrix) *(debt #2; thin)*
+- **Goal:** deterministic collision-safe `event_id` + explicit `Idempotency-Key` header + the crash/retry/recovery delivery-guarantee test matrix. Client is already at-most-once; server dedupe is the completing EXT-core piece.
+- **Write scope:** `adapters/claude-code/`, `client/`. **Deps:** SL-3, SL-4. **Gates:** G3. **Invariants:** INV-5/3/1.
+
+### SL-15 — Real OwnershipVerifier against the FR-7 read API *(debt #3; external-gated)*
+- **Goal:** implement `apiVerifier` (AIP-signed read of the pusher's owned sessions), fail-closed, flagged with `NoopVerifier` default; owned sessions promote `inferred → attributed` with no resolver change. Discharges SL5-SEC-1 for real where FR-7 exists.
+- **Write scope:** `actions/openbox-git-action/`. **Deps:** SL-6, SL-3. **Gates:** **G1_READY (OD-OWNER-API)** + G_SEC + G3. **Invariants:** INV-6, SL5-SEC-1, INV-1/4. **External (assumed):** [EXT-lineage/FR-7]; ships flag-off until confirmed.
+
+### Sequencing
+```
+SL-13 (unblocks ingestion + Phase-2)  ─►  SL-16 (pending OD-FINOPS)  ─►  SL-14 (prep+tests)  ─►  SL-15 (ready, flag-off; pending FR-7)
+```
+
+---
+
 ## Flags
-- **OD-ADV (new, needs brian):** bless the **Advisory tier** (SL-9) as an explicit Phase-1.5 increment and add a one-line acknowledgement to architecture §1b so the tier is design-blessed, not inferred (SL-9 G1_READY).
+- **OD-FINOPS (new, needs brian):** is reading `transcript_path` to extract usage **numbers only** (never content), behind an off-by-default opt-in, acceptable under OD4's metadata-only posture? Gates SL-16.
+- **OD-OWNER-API (new, needs brian):** confirm the FR-7 session-ownership read endpoint shape + auth model the SL-15 verifier targets (else build against the assumed shape, flag OFF).
+- **OD-ADV (RESOLVED 2026-07-13):** Advisory tier ADOPTED by brian (SL-9 G1_READY confirm) — kept for provenance.
 - **OD10:** name the pilot repo before SL-6's squash-prevalence validation (S3 U-1) and pilot rollout.
 - **OD15 (external, deferred):** lineage storage metadata-JSONB vs indexed — SL-6 uses metadata (no external dep); FR-7 *queryable* read is deferred.
 - **Validation commands:** record exact per-package test/build commands in project memory `validation-commands.yaml` at draft-story.

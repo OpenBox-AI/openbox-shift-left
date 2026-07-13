@@ -1,0 +1,122 @@
+assignment_id: "security-review-SL16-20260713"
+role: "security_reviewer"
+story: "STORY-SL-16"
+mode: "independent-gsec"
+verdict: "approve"   # G_SEC question answered YES on all three load-bearing axes; 3 LOW defense-in-depth notes, none blocking, none a content/secret leak
+human_gate: "G_SEC — Does the reader provably emit no content (INV-2), stay fail-open (INV-3), and leak no secret (INV-1)? Answer: YES."
+reviewed:
+  - "adapters/claude-code/usage.go (NEW) + usage_test.go (NEW) — projection-only transcript parser + sentinel-content-absent test"
+  - "adapters/claude-code/{creds.go (DevConfig.Finops + ResolveFinops), hookevent.go (transcript_path locator), mapper.go (Mapper.Finops attach, SessionEnd only), hookrun.go (SessionEnd read wiring)}"
+  - "cross-ref: client/{event.go (Tokens/Cost), payload.go (buildMetadata puts tokens/cost in metadata; stripContent)}; contracts/dev-event/schema/dev-event.schema.json (tokens/cost minimum:0)"
+validation_run:
+  - "go build ./... — clean"
+  - "go vet ./... — clean"
+  - "go test -race ./... (adapters/claude-code) — ok (incl. TestFinops_NoContentOnWire, TestFinops_OffByteIdentical, TestFinops_AttachesOnlyOnSessionEnd, TestAggregateUsage_*, TestReadTranscriptUsage_*)"
+focus_results:
+  inv2_metadata_only: >
+    PASS (load-bearing) — STRUCTURAL guarantee, not filtering. The transcript is json.Unmarshal'd into
+    transcriptLine{CostUSD *float64, Message{Usage *usageNumbers}} and usageNumbers{4x int}. encoding/json
+    silently drops unknown keys, so every content-bearing sibling (message.content, tool_input/tool_result
+    bodies, text, thinking, file snapshots, cwd, sessionId) has NOWHERE to land — content cannot enter memory
+    through this path, let alone an event/metadata/span/wire. Critically this defends the SL3-SEC-3 bypass:
+    the finops numbers reach the wire via buildMetadata (payload.go m["tokens"]/m["cost"]), i.e. through
+    metadata, which is NOT run through stripContent — so a filter would not have saved us here; only the
+    projection does. The sentinel test proves it end-to-end: it drives the REAL AIP-signing client with
+    ContentCaptureEnabled:true (stripper deliberately OFF — the adversarial worst case), asserts none of six
+    SENTINEL_* strings (prompt/output/cmd/tool_result/thinking/file) appear in either json.Marshal(ev) OR the
+    captured signed request body, and confirms the token total 2195 DID reach the wire. transcript_path itself
+    is decoded into HookEvent but is never mapped into any emitted event (Map reads only Cwd/ToolName/Reason/
+    Source/Model/PermissionMode/SessionID), so even the locator does not egress.
+  inv3_fail_open: >
+    PASS (with one LOW hardening note, SEC-16-1). Read is off the hot path — gated on hook==HookSessionEnd
+    (teardown, not Pre/PostToolUse, NFR-2). Go short-circuit ensures ResolveFinops() and readTranscriptUsage()
+    are only reached at SessionEnd, so with the flag off transcript_path is NEVER opened (dereferenced).
+    readTranscriptUsage returns an error (never panics) on empty/missing/non-regular/oversized/unreadable
+    paths; malformed or truncated JSONL lines are skipped, not fatal. Every error is logged to stderr and the
+    event simply carries no tokens/cost — it never fails the flush, blocks a tool call, or writes stdout.
+    RunHook also has a top-level recover(). Size cap (maxTranscriptBytes=64MiB) checked via os.Stat before
+    read; oversized transcript skipped whole (no undercount). Bounded-read caveat: see SEC-16-1.
+  inv1_secrets: >
+    PASS — no secret touches this path. The obx_ key and Ed25519 seed live only in the client (creds/signing);
+    usage.go does no credential I/O. Error messages wrap the transcript FILE PATH (e.g. "stat transcript: ...")
+    — a filesystem path is a structural locator, not a secret, and goes to stderr only (never stdout, never the
+    wire). Transcript CONTENT is never egressed (INV-2 projection). No key/seed is ever logged.
+  off_by_default: >
+    PASS — ResolveFinops() defaults false (config field first, OPENBOX_FINOPS env override, same precedence as
+    every other coordinate). Flag unset ⇒ transcript_path never opened, Mapper.Finops stays nil, SessionEnded
+    event carries no tokens/cost. TestFinops_OffByteIdentical asserts byte-identical-to-pre-SL-16 output; the
+    added HookEvent.transcript_path is inbound decode only and does not alter any outbound serialization.
+  gate_separation: >
+    PASS — OD-FINOPS sub-ruling honored: finops is a SEPARATE flag (DevConfig.Finops / OPENBOX_FINOPS), NOT
+    content_capture. Reading the file to extract integers is deliberately gated apart from the far broader
+    content_capture posture (which authorizes full prompt/output/file-text egress). Correct: the two grant
+    different things and must not be conflated.
+findings:
+  - id: "SEC-16-1"
+    severity: "LOW"
+    disposition: "accepted — recommended fast-follow hardening (not blocking)"
+    invariant: "INV-3"
+    title: "Size cap is TOCTOU-racy: os.Stat guard + os.ReadFile can be bypassed by a grow-after-stat / symlink-swap race"
+    detail: >
+      The bound is enforced as os.Stat().Size() > maxTranscriptBytes, THEN os.ReadFile(path). os.ReadFile
+      re-opens the path and reads to EOF (the stat size is only a buffer hint), so a transcript that grows —
+      or a symlink whose target is swapped — between the stat and the read can be read fully into memory past
+      the 64MiB cap, and os.Stat follows symlinks so the regular-file / size checks apply to the stat-time
+      target, not necessarily the read-time one. The AC claims the bounded read "can't OOM"; that guarantee is
+      technically incomplete. Realistic exploitability is low: transcript_path is a LOCAL file written by the
+      user's own Claude Code, the read is a single short-lived SessionEnd teardown process behind recover() +
+      fail-open, and any failure just skips finops. Mirrors SL-6 SEC-6-1 but with a far weaker (local,
+      self-authored, non-CI) threat model, hence LOW not MEDIUM.
+    fix_recommended: >
+      Open once, stat the HANDLE (f.Stat()), and read via io.LimitReader(f, maxTranscriptBytes+1) — reading
+      cap+1 lets you detect+skip oversize without ever buffering more than the cap. This closes both the
+      grow-after-stat and the symlink-swap windows and matches the io.LimitReader/runLimited pattern SL-6
+      already adopted. Optional: reject non-regular targets on the open handle.
+  - id: "SEC-16-2"
+    severity: "LOW"
+    disposition: "accepted — data-integrity, fail-open (no leak/block)"
+    invariant: "INV-3"
+    title: "Unbounded token/cost magnitude: int64 overflow or negative source values can produce numbers that violate the SL-1 schema (tokens/cost minimum:0)"
+    detail: >
+      aggregateUsage sums input_tokens+cache_read+cache_creation and output_tokens as Go int, and accumulates
+      *costUSD as float64, with no per-value or aggregate ceiling and no non-negativity check. A transcript
+      carrying huge or negative values (int overflow wrapping to negative across many turns, or a negative
+      input_tokens/costUSD) yields a total that violates the SL-1 schema constraint tokens.{input,output,total}
+      "integer, minimum:0" and cost.amount "number, minimum:0" (verified in dev-event.schema.json:166-177).
+      This is a data-integrity / conformance concern, NOT an egress or content leak: the numbers still carry no
+      content, and delivery is best-effort — a rejected event is logged and skipped, never blocking a tool call
+      (INV-3). costUSD cannot be NaN/Inf (JSON forbids those literals; such lines fail Unmarshal and are
+      skipped). Low realistic risk: a developer's own transcript won't hold negative/overflowing counts.
+    fix_recommended: >
+      Clamp at zero and (optionally) cap the aggregate; drop or floor negative per-line values. A saturating
+      add or an explicit >=0 guard before building the Tokens/Cost keeps emitted numbers schema-valid.
+  - id: "SEC-16-3"
+    severity: "LOW"
+    disposition: "accepted — bounded by the INV-2 projection; informational"
+    invariant: "INV-1 / INV-2"
+    title: "transcript_path is followed as given (symlinks resolved); no confinement to the Claude Code projects dir"
+    detail: >
+      readTranscriptUsage opens whatever transcript_path the hook payload supplies, following symlinks, with no
+      check that it lives under ~/.claude/projects (or any allowlist). If an attacker could feed a crafted hook
+      payload pointing at an arbitrary file, the reader would open it. Blast radius is tightly bounded by the
+      INV-2 projection: only JSON numbers named input_tokens/output_tokens/cache_*/costUSD can be extracted, and
+      a non-JSONL file yields (nil,nil,nil) — no content, no path, nothing egresses. Also, feeding arbitrary
+      hook stdin already implies local code execution as the user, and the process only reads files that uid can
+      already read. Net residual risk is minimal; noted for completeness and as a candidate for defense-in-depth.
+    fix_recommended: >
+      Optional: constrain transcript_path to the expected projects directory (or at least reject paths that
+      resolve outside $HOME) before opening. Not required for INV-2, which already holds unconditionally.
+non_security_note: >
+  Cache tokens (cache_read_input_tokens + cache_creation_input_tokens) are folded into Tokens.Input because the
+  SL-1 contract has no cache field — documented in usage.go and preserves total throughput, but means Input is
+  not "prompt tokens" strictly. Cosmetic/semantic, flagged for correctness review (G3), not a security issue.
+conditions: []   # verdict is a clean approve; the three LOWs are accepted with recommended (non-blocking) hardenings
+summary: >
+  G_SEC PASS. INV-2 is enforced structurally by a numbers-only json projection (not a filter), which is the
+  correct and sound design given finops numbers reach the wire through metadata and thus bypass the client's
+  content stripper (SL3-SEC-3). The sentinel-content-absent test proves it end-to-end against the real signed
+  wire body with content-capture ON. Fail-open (INV-3) and no-secret (INV-1) both hold; off-by-default is
+  byte-identical to pre-SL-16 and transcript_path is never opened unless the SEPARATE finops flag (correctly
+  not content_capture) is set. Three LOW defense-in-depth items remain — TOCTOU cap-bypass, unbounded/negative
+  number magnitude vs schema minimum:0, and unconfined symlink-followed path — all fail-open, none a content or
+  secret leak, none blocking. Recommend the io.LimitReader hardening (SEC-16-1) as a fast-follow.

@@ -602,7 +602,7 @@ stories:
       blocked_reason: null
   STORY-SL-16:
     title: "Opt-in transcript usage extraction (tokens/cost, metadata-only)"
-    status: "ready"
+    status: "done"
     epic: "E2"
     sprint: null
     priority: "P2"
@@ -620,26 +620,26 @@ stories:
       - "INV-1: transcript content never egressed; no secret"
     gates:
       G1_READY:
-        decision: "not-run"
-        evidence: "NEEDS brian (OD-FINOPS): is reading transcript_path to extract usage NUMBERS ONLY (never content), behind an off-by-default opt-in, acceptable under OD4's metadata-only posture?"
-        decided_by: null
-        decided_at: null
+        decision: "confirm"
+        evidence: "OD-FINOPS CONFIRMED by brian (2026-07-13): reading transcript_path to extract usage NUMBERS ONLY, behind an off-by-default opt-in, is acceptable under OD4. Ruling includes gate-design sub-decision: use a SEPARATE `finops` flag (DevConfig.finops / OPENBOX_FINOPS=1), NOT content_capture — because content_capture=ON authorizes FULL prompt/output/file-text egress, so reusing it would over-authorize and couple two unrelated postures. Numbers already egress freely (stripContent never touches Tokens/Cost); the real risk is (a) opening a content-bearing file and (b) content leaking into non-stripped fields (metadata/tool.name/span — the SL3-SEC-3 gap) — both guarded by the load-bearing sentinel-content-absent test."
+        decided_by: "brian"
+        decided_at: "2026-07-13"
       G_SEC:
-        decision: "not-run"
-        evidence: null
-        decided_by: null
-        decided_at: null
+        decision: "approve"
+        evidence: "Sam G_SEC = APPROVE, no blocker/must-fix (security-review-SL16-20260713.result.yaml). INV-2 PASSES as a STRUCTURAL guarantee (projection into numeric-only structs), which is load-bearing precisely because finops numbers reach the wire via buildMetadata (metadata.tokens/cost) and BYPASS the client stripContent (the SL3-SEC-3 gap) — a filter would not have saved it, only the projection does; sentinel test proven end-to-end vs the real signed wire body with content-capture ON (worst case). INV-3 fail-open (SessionEnd+ResolveFinops short-circuit, off hot path, errors log+skip, recover()), INV-1 (no secret; only the path — a locator — is logged), off-by-default byte-identical, and OD-FINOPS gate-separation all PASS. 3 LOW defense-in-depth notes: SEC-16-1 (stat/read TOCTOU cap) + SEC-16-2 (negative/overflow clamp vs SL-1 minimum:0) FIXED in-code post-review (io.LimitReader(f,cap+1) on the open fd per SL-6 pattern; nonNeg clamp + test); SEC-16-3 (symlink follow) ACCEPTED no-code — blast radius bounded to integers by the INV-2 projection. Re-validated green after fixes."
+        decided_by: "Sam"
+        decided_at: "2026-07-13"
       G3_REVIEW:
-        decision: "not-run"
-        evidence: null
-        decided_by: null
-        decided_at: null
+        decision: "approve"
+        evidence: "brian G3 = APPROVE (2026-07-13). Correct parsing confirmed (real-data run input=2096028/output=33122/total=2129150 == independent computation; iterations not double-counted; cost honestly nil). Off-by-default byte-identical confirmed (TestFinops_OffByteIdentical). brian also confirmed the cache-token rollup modeling: Tokens.Input folds input + cache_read + cache_creation (total throughput; SL-1 has no cache field) — kept as built. Noted follow-up (out of adapter scope): `dev init --finops` flag through the shared provider CredentialRef, mirroring --install-git-hook."
+        decided_by: "brian"
+        decided_at: "2026-07-13"
     audit:
-      commit: null
-      completed_at: null
-      validation_artifact: null
+      commit: "6c19dd1"
+      completed_at: "2026-07-13"
+      validation_artifact: ".fab7/sdlc/assignments/security-review-SL16-20260713.result.yaml"
       last_run_id: null
-      status_reason: "DRAFTED (STORY-SL-16.md). Phase-1 debt #4 — the ONE debt item shift-left can fully close alone. CC hooks expose no tokens/cost, but the hook payload's transcript_path (JSONL with per-turn usage) can yield NUMBERS ONLY. event.Tokens/event.Cost structs already exist unused (client/event.go). Off-by-default opt-in (extends DevConfig.content_capture); INV-2 is the load-bearing AC (sentinel-content-absent test). BLOCKED on human gate OD-FINOPS (reading a content-bearing file crosses the OD4 boundary even to extract integers). Read at flush (off the hot path). Awaiting OD-FINOPS + build."
+      status_reason: "DONE — build committed 6c19dd1; brian G1_READY(OD-FINOPS)/G3 + Sam G_SEC all sign-off; validated 2026-07-13. OD-FINOPS CONFIRMED (brian) with SEPARATE-flag sub-ruling. DELIVERED entirely within adapters/claude-code/ (write scope honored; shared provider/ module NOT touched — --finops CLI flag deferred as a follow-up like --install-git-hook). Files: (1) usage.go NEW — the projection-only parser: transcript decoded into transcriptLine/usageNumbers structs holding ONLY numeric fields, so json.Unmarshal STRUCTURALLY cannot bind any content (prompt/tool_input/tool_result/message.content/thinking/file text all dropped as unknown keys) — INV-2 enforced by construction, not filtering. Aggregates input(+cache read/creation folded in)/output/total across assistant turns; costUSD summed if present (absent in real CC → Cost nil, honest 'absent when unknown', never pricing-derived). Bounded: stat-cap 64 MiB, oversized skipped whole; malformed lines skipped (fault-tolerant). (2) creds.go — DevConfig.Finops + OPENBOX_FINOPS + ResolveFinops() (mirrors ResolveInstallGitHook; deliberately independent of content_capture per OD-FINOPS). (3) hookevent.go — transcript_path structural locator (opened ONLY on SessionEnd + ONLY when finops on). (4) mapper.go — Mapper.Finops precomputed rollup attached to SessionEnded ONLY (Map stays pure, no I/O). (5) hookrun.go — SessionEnd read wiring: off the hot path, best-effort (logged+skipped, never fails flush/blocks/stdout — INV-3). VERIFIED: go build/vet/test -race all green, gofmt clean; 9 SL-16 tests incl. the LOAD-BEARING sentinel test (poisoned transcript → real AIP-signed wire body with content-capture ON, adversarial-worst-case → tokens present, ZERO sentinel substrings anywhere in event/metadata/wire). REAL-DATA check: parsed a live 133-line transcript → input=2096028 output=33122 total=2129150 cost=nil (numbers-only extraction confirmed on real data, matches independent computation). Flag-OFF byte-identical asserted."
       blocked_reason: null
   STORY-SL-14:
     title: "Idempotency hardening (stable/deterministic event_id + delivery-guarantee matrix)"
