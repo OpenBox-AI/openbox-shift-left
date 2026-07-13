@@ -28,17 +28,60 @@ Each resolved id is passed through an `OwnershipVerifier` that must confirm it
 belongs to a session owned by the **authenticated pusher** before it is marked
 `verified` (→ `attributed`) — mirroring how SL-3 cross-binds the DID.
 
-Phase-1 default is `NoopVerifier` (verifies nothing) because the
-session-ownership read API is external/deferred (EXT-lineage / FR-7): a
-well-formed deploy resolves as `inferred` with every claim flagged
-`verified=false`. Wiring a real verifier promotes owned sessions to `attributed`
-with no change to this package.
+Phase-1 default is `NoopVerifier` (verifies nothing): a well-formed deploy
+resolves as `inferred` with every claim flagged `verified=false`. Enabling the
+real verifier promotes owned sessions to `attributed` with no change to the
+resolver.
+
+**The real verifier (STORY-SL-15).** `apiVerifier` (in `verifier.go`) reads
+openbox-backend's existing, org-scoped session endpoint and promotes a claim only
+when a returned session's **`run_id`** equals the trailer value (the field a
+trailer value maps to — *not* the backend session `id` PK):
+
+```
+GET <backend>/agent/<agentID>/sessions?search=<sessionID>
+    X-API-Key: <obx_key_… org key with read:agent_session>
+200 → { "status": 200, "data": { "data": [ { "run_id": "…", "agent_id": "<agentID>", … } ] } }
+```
+
+Rows are at `data.data[]` — the backend wraps every 2xx in a global
+`{status, data}` envelope around the `SessionListResponseDto` (verified live).
+The backend double-scopes the result by `agentID` **and** the key's
+`organization_id`, so a returned row genuinely belongs to that agent in that org.
+Every fault (transport error, non-2xx, malformed body, timeout, no matching row)
+fails **closed** — the claim is never promoted, so the worst case is honest
+under-attribution, never a silent wrong `attributed`.
+
+It is **OFF by default** and gated by:
+
+| Env | Meaning |
+|---|---|
+| `OPENBOX_OWNERSHIP_VERIFY=1` | enable verification (default: off ⇒ `NoopVerifier`) |
+| `OPENBOX_OWNERSHIP_API_URL`  | openbox-backend origin (https, or http on loopback); **bare, no path prefix** |
+| `OPENBOX_AGENT_ID`           | the deploy agent's UUID (from `POST /agent/create`) |
+| `OPENBOX_ORG_API_KEY`        | org `X-API-Key` (`obx_key_…`) holding `read:agent_session` |
+
+**INV-4 binding (OD-OWNER-API).** There is no DID→agentId lookup — an agent's DID
+is `did:aip:uuidv5(agentID, namespace)` (one-way). So CI supplies the agent's UUID
+directly, and at startup the verifier recomputes `uuidv5(OPENBOX_AGENT_ID)` and
+**requires it to equal `OPENBOX_DID`** (the deploy/attribution identity). A
+misconfigured id that names a *different* principal is rejected → degrades to
+`NoopVerifier`. Combined with the per-row `agent_id` check, the verifier can only
+ever read — and attribute — the deploy principal's own sessions. A
+missing/misconfigured/unreachable verifier — or `--dry-run` — degrades to
+`NoopVerifier`: it **never breaks CI and never over-attributes**.
+
+> **Security note.** `OPENBOX_ORG_API_KEY` is an org-scoped key that can read any
+> agent's sessions in the org; scope the CI secret to `read:agent_session` only.
+> The `uuidv5` namespace mirrors openbox-backend `src/modules/did/aip-namespace.ts`
+> (verified cross-repo 2026-07-13); if backend DID derivation ever changes, the
+> bind fails safe (verification disables, never over-attributes).
 
 The emitted `metadata` carries the full qualified `sessions` array (each with
 `verified`/`source`/`reason`) **and** a flat `verified_session_ids` list that
-contains **only verified** ids — the collision-free shape a future FR-7 lineage
-JOIN can bind to without ever trusting an unverified/forged claim (empty in
-Phase-1). Bounds: at most `MaxSessions` (default 4096) distinct claims and a
+contains **only verified** ids — the collision-free shape a lineage JOIN can bind
+to without ever trusting an unverified/forged claim. Bounds: at most
+`MaxSessions` (default 4096) distinct claims and a
 1 MiB per-message read; a hit is disclosed in the resolution note, never silent
 (SEC-6-1).
 

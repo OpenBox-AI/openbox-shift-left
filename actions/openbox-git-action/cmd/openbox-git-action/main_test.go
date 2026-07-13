@@ -3,11 +3,16 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"log"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	gitaction "github.com/openbox-ai/openbox-shift-left/actions/openbox-git-action"
 )
 
 func TestMain(m *testing.M) {
@@ -80,6 +85,64 @@ func TestCLI_MissingSHAisUsageError(t *testing.T) {
 	code := run([]string{"--dry-run"}, &out, &errb)
 	if code != 2 {
 		t.Fatalf("exit = %d, want 2 (usage)", code)
+	}
+}
+
+// discardLogger is a logger whose output goes nowhere (test noise control).
+func discardLogger() *log.Logger { return log.New(bytes.NewBuffer(nil), "", 0) }
+
+func TestSelectVerifier_FlagOffIsNoop(t *testing.T) {
+	// Default posture: no flag ⇒ NoopVerifier (byte-identical to today; every
+	// deploy resolves inferred). Even if a URL is set, the flag gates it.
+	t.Setenv("OPENBOX_OWNERSHIP_VERIFY", "")
+	t.Setenv("OPENBOX_OWNERSHIP_API_URL", "https://backend.example/")
+	if _, ok := selectVerifier(false, discardLogger()).(gitaction.NoopVerifier); !ok {
+		t.Fatal("flag off must select NoopVerifier")
+	}
+}
+
+func TestSelectVerifier_DryRunNeverVerifies(t *testing.T) {
+	// --dry-run carries no creds to sign the read, so verification is impossible;
+	// it must fall back to Noop even with the flag on.
+	t.Setenv("OPENBOX_OWNERSHIP_VERIFY", "1")
+	t.Setenv("OPENBOX_OWNERSHIP_API_URL", "https://backend.example/")
+	if _, ok := selectVerifier(true, discardLogger()).(gitaction.NoopVerifier); !ok {
+		t.Fatal("dry-run must select NoopVerifier")
+	}
+}
+
+func TestSelectVerifier_MisconfiguredDegradesToNoop(t *testing.T) {
+	// Flag on but no URL ⇒ construction fails ⇒ degrade to Noop, never break CI.
+	t.Setenv("OPENBOX_OWNERSHIP_VERIFY", "1")
+	t.Setenv("OPENBOX_OWNERSHIP_API_URL", "")
+	if _, ok := selectVerifier(false, discardLogger()).(gitaction.NoopVerifier); !ok {
+		t.Fatal("a misconfigured verifier must degrade to NoopVerifier")
+	}
+}
+
+func TestSelectVerifier_FlagOnBuildsRealVerifier(t *testing.T) {
+	// Flag on + a usable backend URL + a matching (agent id, DID) pair + org key ⇒
+	// the real apiVerifier (NOT Noop).
+	const agentID = "11111111-1111-1111-1111-111111111111"
+	did, err := gitaction.DIDForAgent(agentID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(200)
+		_, _ = w.Write([]byte(`{"data":[]}`))
+	}))
+	defer srv.Close()
+
+	t.Setenv("OPENBOX_OWNERSHIP_VERIFY", "1")
+	t.Setenv("OPENBOX_OWNERSHIP_API_URL", srv.URL) // loopback http allowed
+	t.Setenv("OPENBOX_AGENT_ID", agentID)
+	t.Setenv("OPENBOX_DID", did)
+	t.Setenv("OPENBOX_ORG_API_KEY", "obx_key_test")
+
+	v := selectVerifier(false, discardLogger())
+	if _, ok := v.(gitaction.NoopVerifier); ok {
+		t.Fatal("flag on with a usable config must build the real apiVerifier, not Noop")
 	}
 }
 

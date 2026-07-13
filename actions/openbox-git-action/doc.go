@@ -56,12 +56,19 @@
 // ids stay Inferred and are flagged verified=false in the Deploy metadata; they
 // are recorded, never trusted as attribution.
 //
-// Phase-1 posture: the session-ownership read API is external and deferred
-// (EXT-lineage / FR-7). The default NoopVerifier verifies nothing, so a
-// well-formed deploy resolves as Inferred with every claim flagged
-// verified=false — honest about what is proven. Wiring a real verifier
-// (backend session-ownership lookup keyed on the pusher's developer identity)
-// promotes owned sessions to Attributed with zero code change here.
+// Phase-1 default: the NoopVerifier verifies nothing, so a well-formed deploy
+// resolves as Inferred with every claim flagged verified=false — honest about
+// what is proven.
+//
+// STORY-SL-15 wires the real verifier (apiVerifier, verifier.go). OD-OWNER-API
+// (brian, 2026-07-13): it reads openbox-backend's existing, org-scoped endpoint
+// GET /agent/<agentID>/sessions?search=<id> with an org X-API-Key, and promotes a
+// claim to Attributed only when a returned session's run_id matches the trailer
+// value — fail-closed on every fault. The deploy agent's UUID is supplied
+// directly (OPENBOX_AGENT_ID) and bound to its DID via uuidv5 at startup (INV-4:
+// the read can only ever see the deploy principal's own sessions). It is OFF by
+// default (OPENBOX_OWNERSHIP_VERIFY=1 opts in); flipping it on promotes owned
+// sessions with zero change to this resolver — owned ids simply become Verified.
 //
 // # Emission and the EXT-core dependency
 //
