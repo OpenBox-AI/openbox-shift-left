@@ -46,10 +46,10 @@ OpenBox's verdict + guardrail signals for each dev-runtime event are captured an
 - **INV-1:** no secret in records.
 
 ## Human Gates
-| Gate | Question | Owner | Evidence Needed | Allowed Outcomes |
-|---|---|---|---|---|
-| G1_READY | Bless the **Advisory tier** as an explicit Phase-1.5 increment (record-not-block) + confirm the advisory sink location/format | brian (product) | this story + a one-line architecture §1b note | confirm / revise |
-| G3_REVIEW | Is the consumption strictly record-only (INV-3 intact) and the `Evaluation` parse forward-compatible? | brian | diff review + the BLOCK→exit-0 test | approve / revise |
+| Gate | Question | Owner | Evidence Needed | Allowed Outcomes | Outcome |
+|---|---|---|---|---|---|
+| G1_READY | Bless the **Advisory tier** as an explicit Phase-1.5 increment (record-not-block) + confirm the advisory sink location/format | brian (product) | this story + a one-line architecture §1b note | confirm / revise | **CONFIRM — Advisory tier ADOPTED (brian, 2026-07-13, OD-ADV resolved); sink = `os.UserConfigDir()/openbox/advisories.jsonl` confirmed** |
+| G3_REVIEW | Is the consumption strictly record-only (INV-3 intact) and the `Evaluation` parse forward-compatible? | brian | diff review + the BLOCK→exit-0 test | approve / revise | **APPROVE (fab7-sdlc review-auditor blind diff + brian, 2026-07-13); INV-3 verified adversarially, parse forward-compatible, live-verified** |
 
 ## Validation
 ```bash

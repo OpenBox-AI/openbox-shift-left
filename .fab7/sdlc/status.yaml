@@ -466,7 +466,7 @@ stories:
       blocked_reason: null
   STORY-SL-9:
     title: "Advisory-tier verdict & guardrail consumption (record, never block)"
-    status: "ready"
+    status: "done"  # committed 551e40a; brian sign-off (G1_READY confirm — Advisory tier ADOPTED / OD-ADV, G3_REVIEW approve) 2026-07-13
     epic: "E2"
     sprint: null
     priority: "P1"
@@ -487,21 +487,21 @@ stories:
       - "INV-1: no secret in records"
     gates:
       G1_READY:
-        decision: "not-run"
-        evidence: "NEEDS brian: bless the Advisory tier as an explicit Phase-1.5 increment (record-not-block) + confirm the advisory sink location/format. Recommend a one-line architecture §1b note so the tier is design-blessed, not inferred."
-        decided_by: null
-        decided_at: null
+        decision: "confirm"
+        evidence: "brian ADOPTED the Advisory tier 2026-07-13 (OD-ADV resolved): record-not-block is a deliberate Phase-1.5 increment, one flag short of Enforce. Sink location confirmed = os.UserConfigDir()/openbox/advisories.jsonl (~/.config/openbox on Linux, ~/Library/Application Support/openbox on macOS; OPENBOX_ADVISORY_FILE overrides), JSONL metadata-only format. Design-blessed via architecture §1b note (not inferred)."
+        decided_by: "brian"
+        decided_at: "2026-07-13"
       G3_REVIEW:
-        decision: "not-run"
-        evidence: null
-        decided_by: null
-        decided_at: null
+        decision: "approve"
+        evidence: "Independent fab7-sdlc review-auditor blind diff review = APPROVE, no must-fix (validation re-run green on all 3 modules). INV-3 verified adversarially (advisory write fully swallowed; delivery error dead-ends at runFlush log + RunHook recover; deploy exit code never depends on verdict); INV-2 (redacted_input/raw_logs never parsed; record = ids/scores/categories; stderr summary logs guardrail TYPES only); INV-1 clean; forward-compat parse never errors. Two LOW/by-design notes (guardrail reason free-text persisted — story line 18 sanctions {type,field,reason}; per-record local append not ctx-bounded — off hot path). Brian G3 sign-off 2026-07-13."
+        decided_by: "brian"
+        decided_at: "2026-07-13"
     audit:
-      commit: null
-      completed_at: null
+      commit: "551e40a"
+      completed_at: "2026-07-13"
       validation_artifact: null
       last_run_id: null
-      status_reason: "DRAFTED (STORY-SL-9.md). Bucket #2 centerpiece = the architecture's middle 'Advisory' governance tier. NOTE: the 5-tier verdict enum + wire parse ALREADY EXISTS (client/verdict.go) — this consumes the result + the rich sibling fields the current verdictResponse drops (trust_tier/risk_score/constraints/guardrails_result), records what WOULD be enforced (would_block label), and NEVER blocks (INV-3 is the load-bearing AC). Enforcement is explicitly OUT (deferred next increment). Awaiting build (sequence after SL-10 to avoid a client.go rebase)."
+      status_reason: "DONE — committed 551e40a; brian sign-off (G1_READY confirm — Advisory tier ADOPTED/OD-ADV; G3_REVIEW approve) 2026-07-13. BUILT + INDEPENDENTLY REVIEWED (G3 APPROVE) + LIVE-VERIFIED. client.Emit now returns a rich client.Evaluation (verdict + trust_tier/risk_score/alignment_score/constraints/policy_id/approval_id/behavioral_violations/guardrail); parseEvaluation is forward-compatible (verdict-only, legacy-action-only, unparseable all degrade, never error). New sinks adapters/claude-code/advisory.go + actions/openbox-git-action/advisory.go write metadata-only JSONL on the FLUSH path only (never Pre/PostToolUse hot path), best-effort, one stderr summary. Evaluation.WouldBlock() (BLOCK/HALT) is a record-only label per AC; IsAdvisory() gates recording (non-ALLOW OR guardrail hit OR constraint OR risk>=0.5; a fail-open VerdictUnknown records nothing). DEVIATIONS from the story's inlined field assumptions (SDK-driven via cross-repo Explore of openbox-temporal-sdk-python, G3-approved): constraints = []map[string]any (SDK List[Dict[str,Any]], NOT the inlined []string — a []string target would fail to unmarshal a real dict-shaped constraint and collapse the whole rich parse); trust_tier parsed as any then stringified (SDK Optional[str] vs inlined int — either wire shape degrades); guardrails_result.validation_passed as *bool defaulting TRUE when absent (SDK). redacted_input/raw_logs never parsed (INV-2). LIVE CHECK (running local stack): (A) real openbox-core :8086 → 4 events stored verdict=0/ALLOW, hooks exit-0/empty-stdout, NO advisory record (honest tier); (B) block-returning /evaluate sink → 4 advisory records (would_block=true, trust_tier=2, risk=0.91, pii guardrail, rate_limit constraint), exit-0/empty-stdout, no command content / api key / redacted_input in records OR on the wire. Follow-up (LOW, routed): drop guardrail reason free-text from the persisted record if a stricter INV-2 posture is later wanted. Enforcement (apply leg) stays the deferred NEXT increment (spike S2 / OD6 / OD9)."
       blocked_reason: null
   STORY-SL-11:
     title: "openbox dev verify (auth/validate + signing round-trip)"

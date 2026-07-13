@@ -82,7 +82,7 @@ An adapter declares which capabilities it supports; **OpenBox core is written ag
 
 Per provider/session, OpenBox derives a coverage tier from the declared capabilities and displays it — no false sense of coverage (matches S1's "no silent caps"):
 - **Observe** — `telemetry.*` + `session.lifecycle`/`tool.events` (metadata). Phase-1 target for every provider.
-- **Advisory** — + guardrail/policy signals recorded but not blocking. *Built as an explicit Phase-1.5 increment (STORY-SL-9, OD-ADV): `client.Emit` returns a rich `Evaluation` (verdict + trust/risk/alignment scores, constraints, guardrail categories) and the Claude Code adapter + git action RECORD what would be enforced (a `would_block` label + guardrail hits) to a local `advisories.jsonl` sink off the hot path — record-only, metadata-only, never blocking (INV-2/INV-3). One flag short of Enforce.*
+- **Advisory** — + guardrail/policy signals recorded but not blocking. ***ADOPTED** as an explicit Phase-1.5 increment (STORY-SL-9, OD-ADV — brian 2026-07-13): `client.Emit` returns a rich `Evaluation` (verdict + trust/risk/alignment scores, constraints, guardrail categories) and the Claude Code adapter + git action RECORD what would be enforced (a `would_block` label + guardrail hits) to a local `advisories.jsonl` sink off the hot path — record-only, metadata-only, never blocking (INV-2/INV-3). One flag short of Enforce.*
 - **Enforce** — + `enforce.decision`/`enforce.rewrite` honored, fail-closed (OD9). Phase 2, only where the capability exists (Claude Code strong; Cursor caveated by fail-open beta; Codex per S5).
 
 ### Graceful degradation / negotiation
