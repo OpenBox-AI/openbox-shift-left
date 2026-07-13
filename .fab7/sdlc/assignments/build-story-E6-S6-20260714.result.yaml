@@ -1,0 +1,96 @@
+assignment_id: "build-story-E6-S6-20260714"
+role: "build_engineer"
+story: "STORY-E6-S6"
+epic: "E6"
+status: "done"   # built + validated + live-verified + BOTH reviews APPROVE + brian G3 sign-off 2026-07-14; committed to main + pushed (no signature per brian)
+summary: >
+  Built STORY-E6-S6 — REQUIRE_APPROVAL → CC `ask` (interactive local HITL prompt). The
+  REQUIRE_APPROVAL→ask MAPPING already shipped in E6-S2; E6-S6 is the faithful HITL reason+audit
+  refinement layered on it (NOT new control flow), because Claude Code's `ask` permissionDecision IS
+  the interactive local prompt — the developer resolves allow/deny synchronously on this machine, so
+  the entire reference-SDK poll/expiry/retry apparatus collapses into CC's native `ask` UI and the
+  hook's ONLY lever is the reason string. Two surgical changes: (1) a dedicated approvalReason(e)
+  (replacing the generic govReason fallback on the REQUIRE_APPROVAL branch of mapVerdict) that
+  surfaces the full CONTENT-FREE approval context — the policy-authored reason (generic fallback when
+  absent), policy_id, and approval_id (the one approval-specific field on the evaluate response, SDK
+  types.py:142) — so an approver/auditor can tie the prompt to the governance approval record; (2)
+  approval_id added to the durable enforcements.jsonl audit (enforcementRecord.ApprovalID, omitempty).
+  The rest of the SDK cascade (HALT/BLOCK/guardrail-fail→deny; CONSTRAIN/ALLOW/UNKNOWN→proceed) is
+  BYTE-FOR-BYTE unchanged; the emitted permissionDecision for ask is still exactly "ask"; tighten-only
+  and fail-open preserved. NO server-side /approval polling (OD-HITL), NO new config/env, NO
+  sidecar/core/backend surface (approval_id already arrives on the parsed client.Evaluation).
+scope_boundary_confirmed_by_recon: >
+  Per the user directive ("always use explore for cross-repo reference"), a read-only Explore of
+  openbox-temporal-sdk-python recovered the reference HITL/approval path this story maps onto CC.
+  Findings: (1) verdict_handler.enforce_verdict RETURNS VerdictEnforcementResult(requires_hitl=True)
+  for REQUIRE_APPROVAL (verdict_handler.py:92-94) — it does not raise; the caller
+  (activity_interceptor.py:414-420) sets buffer.pending_approval=True and raises a RETRYABLE
+  ApplicationError(type="ApprovalPending") (hitl.py:114-125). (2) The OUTCOME is obtained by POLLING
+  POST /api/v1/governance/approval on each Temporal retry (client.poll_approval, client.py:150-198);
+  handle_approval_response (hitl.py:46-111) maps it to approved (Verdict.ALLOW→True) / rejected
+  (should_stop()→ApprovalRejected) / expired (approval_expiration_time→ApprovalExpired) /
+  still-pending (retry). Timeout is server-driven. (3) The reference flow is fundamentally ASYNC +
+  SERVER-SIDE — OD-HITL DELIBERATELY REJECTS it for the dev hot path ("too heavy"); CC's `ask`
+  resolves synchronously, so E6-S6 ports NONE of the poll/expiry/retry apparatus. (4) The ONLY
+  approval-specific field the SDK reads off the EVALUATE response is approval_id
+  (GovernanceVerdictResponse.approval_id, types.py:142, parsed :186) — a server correlation id (same
+  class as policy_id / governance_event_id), NOT content. openbox-shift-left/client/verdict.go
+  already parses it into Evaluation.ApprovalID but the adapter DROPPED it — E6-S6 surfaces it. There
+  is NO approver/approval_url/approvers/expiry field on the verdict response; the SDK never consumes
+  one, so E6-S6 surfaces exactly what exists. approval_id is server-minted (core registers the
+  approval record); a LOCAL rule bundle mints none, so E6-S6 surfaces it OPPORTUNISTICALLY (omitempty)
+  — the local-sidecar path omits it, the field is meaningful when a decision carries one.
+what_changed:
+  - "adapters/claude-code/enforce.go — new approvalReason(e) (govReason base + content-free approval_id append when present); mapVerdict REQUIRE_APPROVAL branch now calls approvalReason instead of the generic govReason fallback; enforcementRecord gained ApprovalID (json:approval_id,omitempty); recordEnforcement sets it from dec.Evaluation.ApprovalID; header + cascade doc comments refreshed (E6-S6 refines UX → implemented, and the deliberate no-polling rationale)."
+  - "adapters/claude-code/enforce_test.go — TestMapVerdict new REQUIRE_APPROVAL-surfaces-approval-id case; TestApprovalReason (surfaces reason/policy_id/approval_id; generic fallback; no dangling (approval: ) fragment); TestRecordEnforcement_ApprovalID (injected ApprovalID → ask reason + audit carry it, content-free); TestRunHook_EnforceApply_Approval (live sidecar: MCP→ask content-free reason, audit records ask, enforce-off byte-identical)."
+  - ".fab7/sdlc/stories/STORY-E6-S6.md — worker-ready story contract."
+files_out_of_scope_untouched:
+  - "sidecar/ (Rule has no ApprovalID field; a local bundle mints no approval id — INTENTIONAL, honors the story stop-condition 'no new sidecar surface'). client/ (ApprovalID already parsed). creds.go (no new config/env — no hitl toggle, a deferred fast-follow). E6-S2 mapVerdict/applyDecision cascade + E6-S3 failure policy (unchanged)."
+validation:
+  adapter: "go build/vet/test -race ./... — GREEN"
+  sidecar: "go build/test -race ./... — GREEN"
+  cli: "go build/vet/test ./... — GREEN"
+  live_e2e: >
+    Built the real `openbox` binary + ran `openbox sidecar serve` (bundle: shell rm-rf→block,
+    mcp→require_approval) over a Unix socket, drove the unified `openbox hook claude-code PreToolUse`:
+    (1) github MCP (enforce ON) → ask with content-free reason "OpenBox governance: external
+    repository mutation requires approval (policy: mcp-approval-1)" [approval_id absent — local bundle
+    mints none, omitempty verified]; (2) rm -rf (enforce ON) → deny (unchanged); (3) echo hi (enforce
+    ON) → nothing to stdout (proceed); (4) github MCP (enforce OFF) → nothing to stdout
+    (byte-identical to observe). enforcements.jsonl content-free (no MCP title 'secret-project-x', no
+    'rm -rf', no 'echo hi'); ask line records verdict=REQUIRE_APPROVAL/applied_decision=ask/policy_id.
+reviews:
+  G3_review_auditor:
+    verdict: "APPROVE"
+    notes: >
+      Cascade byte-for-byte unchanged + `ask` literal preserved; approvalReason correct (fallback +
+      no dangling fragment); tighten-only + fail-open intact; audit approval_id wired + omitempty;
+      tests non-vacuous; no stop-condition violated. OBS-1 (cosmetic): TestApprovalReason has no
+      in-function negative-content assertion — but approvalReason takes only client.Evaluation
+      (structurally cannot see tool content) and the negative is proven where content exists
+      (TestRecordEnforcement_ApprovalID + TestRunHook_EnforceApply_Approval). No fix required.
+  G_SEC_security_reviewer:
+    verdict: "APPROVE"
+    notes: >
+      INV-2: approval_id is a server correlation id parsed off the wire approval_id field only
+      (verdict.go:148/202), same content-free class as policy_id — cannot carry tool content; audit
+      records it id-only omitempty; tests assert tool input never appears. INV-1: no secret on the
+      path (approval id is a public correlation id, not a credential). INV-3b: synchronous /
+      pre-execution / bounded / tighten-only preserved; no poll/wait/unbounded path; fail-open intact.
+      Stop conditions clear (no poll_approval/pending_approval/expiry ported; no new egress). No
+      prompt-JSON injection — reason is JSON-encoded by applyDecision's json.Marshal, ids/reason
+      cannot break out of permissionDecisionReason or inject sibling keys. INFO-1 (pre-existing, not
+      widened): server-authored reason text is shown verbatim — identical trust posture to E6-S2's
+      govReason; a compromised core is already the governance authority. No blocker.
+human_gates:
+  G3_REVIEW:
+    owner: "brian"
+    state: "APPROVE"   # brian G3 sign-off 2026-07-14; committed to main + pushed
+  G_SEC:
+    owner: "Sam"
+    state: "APPROVE"   # backlog scoped E6-S6 to G3; ran G_SEC anyway (touches the stdout reason free-text surface) — APPROVE
+deferred_fast_follows:
+  - "Approval OUTCOME capture (approved/denied) via PostToolUse↔PreToolUse correlation — the PreToolUse hook returns before the developer decides; a distinct surface. Out of E6-S6 scope (noted)."
+  - "hitl_enabled on/off toggle (SDK config.hitl_enabled / skip_hitl_activity_types) — disabling approval is a new human decision (proceed? deny?) OD-HITL did not rule; the SDK's skip only breaks a governance-event recursion the dev runtime lacks. Out of scope."
+  - "A core-backed sidecar sync that carries a real (server-minted) approval_id would make the local ask surface it end-to-end; today only the /evaluate telemetry path or a future signed OPA bundle would ([EXT-opa-bundle], E6-S5)."
+next_step: "DONE — brian G3 sign-off + committed to main + pushed 2026-07-14. E6-S4 (guardrail redaction, gated on content posture) and E6-S7 (conformance + INV-3b evidence, incl. the E6-S3 INFO-1 unbundled-quadrant carry-forward) remain."

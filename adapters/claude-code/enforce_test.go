@@ -344,6 +344,8 @@ func TestMapVerdict(t *testing.T) {
 		{"halt denies", client.Evaluation{Verdict: client.VerdictHalt, Reason: "kill switch"}, ccDecisionDeny, true, "", "kill switch"},
 		{"block denies with policy id", client.Evaluation{Verdict: client.VerdictBlock, Reason: "no rm -rf", PolicyID: "p-1"}, ccDecisionDeny, true, "", "p-1"},
 		{"require_approval asks", client.Evaluation{Verdict: client.VerdictRequireApproval, Reason: "needs review"}, ccDecisionAsk, true, "", "needs review"},
+		// E6-S6: the approval id (server correlation id) is surfaced on the ask reason.
+		{"require_approval surfaces approval id", client.Evaluation{Verdict: client.VerdictRequireApproval, Reason: "needs review", ApprovalID: "appr-42"}, ccDecisionAsk, true, "", "appr-42"},
 		{"constrain proceeds", client.Evaluation{Verdict: client.VerdictConstrain, Reason: "scoped"}, "", false, "", ""},
 		{"allow proceeds", client.Evaluation{Verdict: client.VerdictAllow}, "", false, "", ""},
 		{"unknown (fail-open) proceeds", client.Evaluation{Verdict: client.VerdictUnknown}, "", false, "", ""},
@@ -651,5 +653,168 @@ func TestRecordEnforcement_GuardrailCategoryOnly(t *testing.T) {
 	_ = json.Unmarshal([]byte(strings.TrimSpace(string(data))), &rec)
 	if len(rec.GuardrailCategories) != 1 || rec.GuardrailCategories[0] != "pii" {
 		t.Errorf("guardrail_categories = %v, want [pii]", rec.GuardrailCategories)
+	}
+}
+
+// ── E6-S6: REQUIRE_APPROVAL → CC ask (interactive local HITL prompt) ──────────
+
+// TestApprovalReason guards AC-1 / INV-2: the ask reason surfaces the content-free
+// approval CONTEXT — the policy reason, the policy id, and the server approval id
+// (the one approval-specific evaluate field) — with a generic fallback when the
+// policy carried no reason, and never any tool-content free text.
+func TestApprovalReason(t *testing.T) {
+	t.Run("surfaces reason, policy id, and approval id", func(t *testing.T) {
+		r := approvalReason(client.Evaluation{
+			Verdict:    client.VerdictRequireApproval,
+			Reason:     "production database migration",
+			PolicyID:   "pol-db-1",
+			ApprovalID: "appr-77",
+		})
+		for _, want := range []string{"production database migration", "pol-db-1", "appr-77"} {
+			if !strings.Contains(r, want) {
+				t.Errorf("approval reason %q missing %q", r, want)
+			}
+		}
+	})
+
+	t.Run("falls back to a generic approval message with no policy reason", func(t *testing.T) {
+		r := approvalReason(client.Evaluation{Verdict: client.VerdictRequireApproval})
+		if !strings.Contains(strings.ToLower(r), "approval") {
+			t.Errorf("empty-reason approval must still say it requires approval, got %q", r)
+		}
+		// No approval/policy id → no dangling "(approval: )" / "(policy: )" fragments.
+		if strings.Contains(r, "(approval:") || strings.Contains(r, "(policy:") {
+			t.Errorf("no ids present, but reason has an id fragment: %q", r)
+		}
+	})
+
+	t.Run("omits the approval fragment when core sends no approval id", func(t *testing.T) {
+		r := approvalReason(client.Evaluation{Verdict: client.VerdictRequireApproval, Reason: "review needed", PolicyID: "p"})
+		if strings.Contains(r, "(approval:") {
+			t.Errorf("no approval id, but reason carries an approval fragment: %q", r)
+		}
+	})
+}
+
+// TestRecordEnforcement_ApprovalID guards the audit half of AC-1/AC-2: an ask
+// decision carrying a server approval id records approval_id (a correlation id, not
+// content) so the ask is tie-able to the governance approval — and the audit stays
+// content-free (INV-2). The approval id is injected on the Decision directly,
+// because a LOCAL rule bundle does not mint approval ids (they are server-minted by
+// core); the adapter surfaces one only when the decision carries it (omitempty).
+func TestRecordEnforcement_ApprovalID(t *testing.T) {
+	enfFile := filepath.Join(t.TempDir(), "enforcements.jsonl")
+	t.Setenv(envEnforcementFile, enfFile)
+	logger := log.New(&bytes.Buffer{}, "", 0)
+
+	dec := sidecar.Decision{Source: "local-bundle", Evaluation: client.Evaluation{
+		Verdict:    client.VerdictRequireApproval,
+		Reason:     "external repository mutation",
+		PolicyID:   "mcp-policy",
+		ApprovalID: "appr-77",
+	}}
+	var out bytes.Buffer
+	applied, _ := applyDecision(&out, dec)
+	if applied != ccDecisionAsk {
+		t.Fatalf("require_approval should ask, got %q", applied)
+	}
+	// The stdout ask reason surfaces the approval + policy ids.
+	if _, reason := parsePermissionDecision(t, out.Bytes()); !strings.Contains(reason, "appr-77") || !strings.Contains(reason, "mcp-policy") {
+		t.Errorf("ask reason should carry the approval + policy ids, got %q", reason)
+	}
+
+	ev := &HookEvent{SessionID: "s", ToolName: "mcp__github__create_issue", ToolInput: []byte(`{"title":"secret-project-x"}`)}
+	recordEnforcement(logger, ev, dec, applied)
+
+	data, err := os.ReadFile(enfFile)
+	if err != nil {
+		t.Fatalf("enforcement sink not written: %v", err)
+	}
+	if strings.Contains(string(data), "secret-project-x") {
+		t.Errorf("enforcement record leaked tool content (INV-2): %q", data)
+	}
+	var rec enforcementRecord
+	if err := json.Unmarshal([]byte(strings.TrimSpace(string(data))), &rec); err != nil {
+		t.Fatalf("enforcement record is not valid JSON: %v", err)
+	}
+	if rec.AppliedDecision != ccDecisionAsk || rec.Verdict != string(client.VerdictRequireApproval) {
+		t.Errorf("record = %+v, want REQUIRE_APPROVAL/ask", rec)
+	}
+	if rec.ApprovalID != "appr-77" {
+		t.Errorf("record approval_id = %q, want appr-77 (correlates the ask to the governance approval)", rec.ApprovalID)
+	}
+}
+
+// TestRunHook_EnforceApply_Approval is the E6-S6 end-to-end guard: enforce ON + a
+// live sidecar whose bundle requires approval for an MCP tool → a PreToolUse hook
+// writes an `ask` permissionDecision to stdout with a content-free reason (policy
+// reason + id), the durable audit records the ask, and enforce-OFF is byte-identical
+// (no ask even for the approval-required tool). The local bundle mints no approval
+// id, so the reason/audit gracefully omit it (see TestRecordEnforcement_ApprovalID
+// for the approval-id path).
+func TestRunHook_EnforceApply_Approval(t *testing.T) {
+	bundle := &sidecar.Bundle{
+		Version:         "test-appr",
+		DefaultDecision: "allow",
+		Rules: []sidecar.Rule{{
+			ID:       "gh-approval",
+			Match:    sidecar.RuleMatch{ToolKind: "mcp"},
+			Decision: "require_approval",
+			Reason:   "external repository mutation",
+			PolicyID: "mcp-policy",
+		}},
+	}
+	socket, _ := serveSidecar(t, bundle)
+	isolateConfig(t)
+	t.Setenv(envDID, testDID)
+	t.Setenv("OPENBOX_SPOOL_DIR", t.TempDir())
+	t.Setenv("OPENBOX_SESSION_DIR", t.TempDir())
+	t.Setenv(envSidecarSocket, socket)
+	enfFile := filepath.Join(t.TempDir(), "enforcements.jsonl")
+	t.Setenv(envEnforcementFile, enfFile)
+
+	payload := `{"hook_event_name":"PreToolUse","session_id":"s","cwd":"/tmp","tool_name":"mcp__github__create_issue","tool_input":{"title":"secret-project-x plans"}}`
+	run := func() string {
+		var stdout bytes.Buffer
+		RunHook("PreToolUse", strings.NewReader(payload), &stdout, log.New(&bytes.Buffer{}, "", 0))
+		return stdout.String()
+	}
+
+	// enforce ON → ask, with the policy reason + id surfaced (content-free).
+	t.Setenv(envEnforce, "1")
+	out := run()
+	d, reason := parsePermissionDecision(t, []byte(out))
+	if d != ccDecisionAsk {
+		t.Fatalf("approval-required tool: permissionDecision = %q, want ask (stdout=%q)", d, out)
+	}
+	for _, want := range []string{"mcp-policy", "external repository mutation"} {
+		if !strings.Contains(reason, want) {
+			t.Errorf("ask reason = %q, want it to carry %q", reason, want)
+		}
+	}
+	if strings.Contains(out, "secret-project-x") {
+		t.Errorf("stdout leaked the tool input (INV-2): %q", out)
+	}
+
+	// The durable audit records the ask, content-free.
+	data, err := os.ReadFile(enfFile)
+	if err != nil {
+		t.Fatalf("enforcement sink not written: %v", err)
+	}
+	if strings.Contains(string(data), "secret-project-x") {
+		t.Errorf("enforcement record leaked tool content (INV-2): %q", data)
+	}
+	var rec enforcementRecord
+	if err := json.Unmarshal([]byte(strings.TrimSpace(string(data))), &rec); err != nil {
+		t.Fatalf("enforcement record is not valid JSON: %v", err)
+	}
+	if rec.AppliedDecision != ccDecisionAsk || rec.Verdict != string(client.VerdictRequireApproval) {
+		t.Errorf("record = %+v, want REQUIRE_APPROVAL/ask", rec)
+	}
+
+	// enforce OFF → byte-identical to observe: no ask even for the approval tool.
+	t.Setenv(envEnforce, "0")
+	if out := run(); strings.TrimSpace(out) != "" {
+		t.Errorf("enforce-off must not ask; stdout=%q", out)
 	}
 }

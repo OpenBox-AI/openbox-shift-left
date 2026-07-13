@@ -262,7 +262,7 @@ func logEnforceDecision(logger *log.Logger, e *HookEvent, dec sidecar.Decision, 
 //	HALT  → GovernanceHaltError (terminate)    →  deny  (strongest CC signal)
 //	BLOCK → GovernanceBlockedError             →  deny
 //	guardrails validation_passed == false      →  deny  (checked BEFORE approval)
-//	REQUIRE_APPROVAL → requires_hitl            →  ask   (OD-HITL; E6-S6 refines UX)
+//	REQUIRE_APPROVAL → requires_hitl            →  ask   (OD-HITL; E6-S6 approval reason)
 //	CONSTRAIN        → logged allow             →  (nothing — proceed)
 //	ALLOW / UNKNOWN (fail-open)                 →  (nothing — proceed)
 //
@@ -334,8 +334,11 @@ func applyDecision(stdout io.Writer, dec sidecar.Decision) (applied string, emit
 //     approval and INDEPENDENT of the verdict value — exactly as the SDK, so a
 //     guardrail failure is never silently swallowed by an approval flow
 //     (verdict_handler.py:84-90).
-//   - REQUIRE_APPROVAL → ask (the SDK's requires_hitl → OD-HITL; E6-S6 refines the
-//     interactive prompt experience on top of this mapping).
+//   - REQUIRE_APPROVAL → ask (the SDK's requires_hitl → OD-HITL). The reason is the
+//     dedicated approvalReason (E6-S6): unlike the SDK, which registers a
+//     server-side approval and polls /governance/approval across Temporal retries,
+//     CC's `ask` IS the interactive local prompt — the developer resolves it
+//     synchronously here, so the hook's only lever is this content-free reason.
 //   - CONSTRAIN / ALLOW / UNKNOWN (fail-open) → nothing (the SDK logs CONSTRAIN and
 //     otherwise proceeds; guardrail redaction of the input is E6-S4, gated on
 //     content posture — deliberately not applied here).
@@ -350,9 +353,37 @@ func mapVerdict(e client.Evaluation) (decision, reason string) {
 		return ccDecisionDeny, guardrailReason(g)
 	}
 	if e.Verdict == client.VerdictRequireApproval {
-		return ccDecisionAsk, govReason(e, "action requires approval per OpenBox governance policy")
+		return ccDecisionAsk, approvalReason(e)
 	}
 	return "", ""
+}
+
+// approvalReason builds the LOCAL, content-free permissionDecisionReason shown on
+// the CC `ask` prompt for a REQUIRE_APPROVAL verdict (STORY-E6-S6, OD-HITL).
+//
+// The reference SDK treats REQUIRE_APPROVAL as an ASYNC, SERVER-SIDE flow: the
+// interceptor sets pending_approval and raises a retryable ApprovalPending, then
+// polls POST /governance/approval across Temporal retries until it resolves
+// (hitl.py). OD-HITL deliberately rejects that for the dev hot path — Claude
+// Code's `ask` permissionDecision makes CC show the developer a native allow/deny
+// prompt that resolves SYNCHRONOUSLY on this machine, so there is no poll, no
+// expiry, no retry loop. The hook's only lever on that prompt is this string.
+//
+// It therefore surfaces the full content-free approval CONTEXT the SDK reads off
+// the evaluate response: the policy-authored reason (mirroring the SDK's
+// "Approval required: {reason or 'Activity requires human approval'}",
+// activity_interceptor.py) via govReason, plus e.ApprovalID — the one
+// approval-specific field on GovernanceVerdictResponse (SDK types.py:142). The
+// approval id is a server correlation id (same class as policy_id /
+// governance_event_id, already surfaced by govReason), NOT tool content, so an
+// approver/auditor can tie this prompt to the governance approval record without
+// crossing INV-2. Shown on this machine only (stdout → Claude Code); never egressed.
+func approvalReason(e client.Evaluation) string {
+	msg := govReason(e, "this action requires human approval per OpenBox governance policy")
+	if e.ApprovalID != "" {
+		msg += " (approval: " + e.ApprovalID + ")"
+	}
+	return msg
 }
 
 // govReason builds the LOCAL, content-free permissionDecisionReason shown to the
@@ -400,6 +431,7 @@ type enforcementRecord struct {
 	FailOpen            bool             `json:"fail_open"`
 	Stale               bool             `json:"stale,omitempty"`
 	PolicyID            string           `json:"policy_id,omitempty"`
+	ApprovalID          string           `json:"approval_id,omitempty"` // server correlation id for a REQUIRE_APPROVAL→ask (E6-S6, INV-2 safe)
 	Constraints         []map[string]any `json:"constraints,omitempty"`
 	GuardrailCategories []string         `json:"guardrail_categories,omitempty"`
 }
@@ -436,6 +468,7 @@ func recordEnforcement(logger *log.Logger, e *HookEvent, dec sidecar.Decision, a
 		FailOpen:        dec.FailOpen,
 		Stale:           dec.Stale,
 		PolicyID:        dec.Evaluation.PolicyID,
+		ApprovalID:      dec.Evaluation.ApprovalID, // correlates an ask to the governance approval (E6-S6); id only, no content
 		Constraints:     dec.Evaluation.Constraints,
 	}
 	if g := dec.Evaluation.Guardrail; g != nil {
