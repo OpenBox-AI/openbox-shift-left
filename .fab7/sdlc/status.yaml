@@ -1,5 +1,5 @@
 version: 1
-updated_at: "2026-07-13T00:00:00Z"  # SL-1..SL-6 + WIRE-1/2 + FILEBACKEND + SL-9/SL-10 + SL-11 + SL-12 DONE (all committed; SL-11/SL-12 = b754d5f, brian G3 sign-off + live-verified). Bucket #2 "Advisory-tier SDK parity" COMPLETE. Enforcement (the `apply` leg) stays the deferred NEXT increment (spike S2 / OD9). SL-7 Codex / SL-8 Cursor still deferred (fast-follow) — the only remaining Phase-1 breadth.
+updated_at: "2026-07-13T00:00:00Z"  # SL-1..SL-6 + WIRE-1/2 + FILEBACKEND + SL-9/SL-10 + SL-11 + SL-12 DONE (all committed; SL-11/SL-12 = b754d5f, brian G3 sign-off + live-verified). Bucket #2 "Advisory-tier SDK parity" COMPLETE. Enforcement (the `apply` leg) stays the deferred NEXT increment (spike S2 / OD9). SL-7 Codex / SL-8 Cursor still deferred (fast-follow). Phase-1 debt closure: SL-13 DONE (committed e261f8a, brian G3 sign-off + live-verified 2026-07-13 — EXT-core patch artifact + core-acceptance test). SL-14/15/16 still drafted/ready (idempotency hardening / real OwnershipVerifier vs FR-7 / opt-in transcript usage). Two new human gates remain: OD-FINOPS (SL-16) + OD-OWNER-API (SL-15).
 owner: "orchestrator"
 stories:
   STORY-SL-1:
@@ -565,4 +565,153 @@ stories:
       validation_artifact: null
       last_run_id: null
       status_reason: "DONE — committed b754d5f; brian G3 sign-off + live-verified 2026-07-13. Fixes the live-pilot 'Activity: Unknown' the dashboard shows for developer-runtime events, WITHOUT touching openbox-fe/backend (brian's constraint). Cross-repo Explore (openbox-core + backend + fe) traced the cause: the shared Temporal UI reads event.activity_type||signal_name||workflow_type||operation||'Unknown' (verify/trust-tab.tsx:168-174); activity_type is a PASS-THROUGH column (openbox-core storage_event.go:264, stored verbatim for any accepted event_type) our client never set. FIX (client-only): buildPayload now emits activity_type via activityLabel(ev) — derived from PERSISTED fields (EventType + Tool.Name) so it survives the SL-4 spool round-trip (a json:\"-\" field would be lost between hot-path spool and flush Emit): tool events → the specific tool name (Edit/Bash/mcp__…), lifecycle + Deploy → the event_type string; ALWAYS non-empty. Identifier-class only, never content (INV-2); no control-flow change (INV-3). Input/Output stay empty by design (metadata-only, INV-2/OD4) — out of scope, documented RUNBOOK §6.4. Proven end-to-end: cli TestHookEndToEndSmoke asserts activity_type=Bash (tool, survives spool) + activity_type=SessionStarted (lifecycle) on the delivered /evaluate body; client unit tests cover the derivation + never-empty. All modules green (client under -race). G3_REVIEW (brian) pending + a live dashboard check that Activity shows real labels."
+      blocked_reason: null
+  # --- Phase-1 debt / hardening (drafted 2026-07-13) --------------------------------
+  # Shift-left-owned closure of Phase-1 debt items #1-#4 (external core/backend pieces
+  # stay assumed-satisfied per OD14). Leverage order: SL-13 (unblocks ingestion + Phase-2)
+  # > SL-16 (fully closable, privacy-gated) > SL-14 (thin, mostly EXT-core) > SL-15 (external-gated).
+  STORY-SL-13:
+    title: "EXT-core dependency: patch artifact + core-acceptance contract test"
+    status: "done"  # committed e261f8a; brian G3 sign-off + live-verified 2026-07-13
+    epic: "E1"
+    sprint: null
+    priority: "P1"
+    dependencies:
+      - "STORY-SL-1"
+      - "STORY-SL-3"
+    blocked_by: []
+    write_scope:
+      - "contracts/dev-event/  # new ext-core/ artifact + acceptance & drift tests"
+    validation_commands:
+      - "cd contracts/dev-event/conformance && go build ./... && go test ./...  # drift guard: artifact types == SL-1 enum"
+      - "OPENBOX_URL=http://localhost:8086 <creds> go test -run Acceptance ./...  # all 7 types non-400 (skips offline)"
+    invariants:
+      - "INV-8: artifact strictly additive; drift guard prevents a type shift-left emits that core won't accept-list"
+    gates:
+      G3_REVIEW:
+        decision: "approve"
+        evidence: "brian G3 sign-off 2026-07-13 ('signed'). Artifact reviewed + LIVE-VERIFIED against the running local stack: `openbox dev verify` ✓ (did:aip:966d7dd4…), then the acceptance test POSTed all 7 developer event types as one coherent session to the real core :8086 and every one was accepted (non-400) — 'EXT-core dependency satisfied'. Patch generated against openbox-core HEAD + reverse-apply verified faithful; drift guard proven to bite (injected bogus type → both tests FAIL, then revert green); offline httptest negative case confirms a stock-core 400 yields the actionable 'apply contracts/dev-event/ext-core/' + SL-10 message. Cross-repo Explore confirmed core's current accept-list shape matches S6 (stop condition NOT triggered). Committed e261f8a."
+        decided_by: "brian"
+        decided_at: "2026-07-13"
+    audit:
+      commit: "e261f8a"
+      completed_at: "2026-07-13"
+      validation_artifact: null
+      last_run_id: null
+      status_reason: "DONE — committed e261f8a; brian G3 sign-off + live-verified 2026-07-13 (Phase-1 debt #1). DELIVERED under contracts/dev-event/ (no change to client/ or adapters — INV honored): (1) ext-core/ ARTIFACT — openbox-core-dev-event-types.patch (git-apply-able unified diff of the exact 3 edits, generated against openbox-core HEAD; reverse-apply verified faithful) + dev-event-types.json (canonical 7-type SoT, each type w/ go_const + lifecycle create/terminal/lookup) + apply.sh (idempotent applier w/ already-applied + won't-apply detection, honoring the SL-13 stop condition) + README.md (scope additive/no-migration arch D4/INV-8, the 3 edits, how to apply/upstream/verify/regenerate). (2) conformance/extcore_drift_test.go DRIFT GUARD (dependency-free, offline): asserts the artifact's type set == the SL-1 schema event_type enum AND every type appears in the patch (const + wire string); negative-tested (injected bogus type → both tests FAIL as designed, then revert green). (3) acceptance/ NEW MODULE (own go.mod, replace→../../../client so conformance stays dependency-free; no client edit): env-gated live test POSTs a minimal valid event of each of the 7 types as ONE coherent session (SessionStarted→…→SessionEnded, shared session id) and asserts non-400 via the fail-open drop log (SL-10 diagnostic is the observation channel since Emit swallows status); SL-11 Validate() preflight isolates creds/stack faults from accept-list; clean t.Skip offline. Plus TestAcceptanceReportsMissingExtCore — an OFFLINE httptest stock-core (400 invalid event_type) proving the failure names 'apply contracts/dev-event/ext-core/' + SL-10, so the negative case is pinned without needing an un-patched core. CROSS-REPO Explore of openbox-core CONFIRMED the current shape (isValidGovernanceEventType switch @ internal/api/governance.go:273-294; EventType consts @ internal/content/governance.go:12-32; lifecycle switch @ storage_session.go:40-55; 400 'invalid event_type: X'; success 200) — matches S6, stop condition NOT triggered. LIVE RUN (local core :8086, patch already applied in that working tree, did:aip:966d7dd4…): openbox dev verify ✓ then all 7 types accepted (non-400) — 'EXT-core dependency satisfied'. FINDING surfaced + fixed: a bare out-of-session SessionEnded 500s in core's terminal handler → the probe now emits a coherent lifecycle (also exercises patch site C). Validation green: conformance go build/vet/test (SL-1 + drift) + acceptance go build/vet/test (offline skip+negative; live full). gofmt clean. Upstream merge into openbox-core itself stays external (artifact makes it PR-ready)."
+      blocked_reason: null
+  STORY-SL-16:
+    title: "Opt-in transcript usage extraction (tokens/cost, metadata-only)"
+    status: "ready"
+    epic: "E2"
+    sprint: null
+    priority: "P2"
+    dependencies:
+      - "STORY-SL-4"
+      - "STORY-SL-1"
+    blocked_by: []
+    write_scope:
+      - "adapters/claude-code/  # transcript reader + gate wiring + populate event.Tokens/event.Cost on flush"
+    validation_commands:
+      - "cd adapters/claude-code && go build ./... && go vet ./... && go test -race ./...  # flag ON: tokens/cost emitted + NO sentinel content on wire (INV-2); flag OFF: byte-identical to today"
+    invariants:
+      - "INV-2: only numeric usage/cost extracted; NO content in any event/metadata/span (sentinel test); content-capture gate governs access"
+      - "INV-3: best-effort on flush; never blocks/errors a tool call; no stdout"
+      - "INV-1: transcript content never egressed; no secret"
+    gates:
+      G1_READY:
+        decision: "not-run"
+        evidence: "NEEDS brian (OD-FINOPS): is reading transcript_path to extract usage NUMBERS ONLY (never content), behind an off-by-default opt-in, acceptable under OD4's metadata-only posture?"
+        decided_by: null
+        decided_at: null
+      G_SEC:
+        decision: "not-run"
+        evidence: null
+        decided_by: null
+        decided_at: null
+      G3_REVIEW:
+        decision: "not-run"
+        evidence: null
+        decided_by: null
+        decided_at: null
+    audit:
+      commit: null
+      completed_at: null
+      validation_artifact: null
+      last_run_id: null
+      status_reason: "DRAFTED (STORY-SL-16.md). Phase-1 debt #4 — the ONE debt item shift-left can fully close alone. CC hooks expose no tokens/cost, but the hook payload's transcript_path (JSONL with per-turn usage) can yield NUMBERS ONLY. event.Tokens/event.Cost structs already exist unused (client/event.go). Off-by-default opt-in (extends DevConfig.content_capture); INV-2 is the load-bearing AC (sentinel-content-absent test). BLOCKED on human gate OD-FINOPS (reading a content-bearing file crosses the OD4 boundary even to extract integers). Read at flush (off the hot path). Awaiting OD-FINOPS + build."
+      blocked_reason: null
+  STORY-SL-14:
+    title: "Idempotency hardening (stable/deterministic event_id + delivery-guarantee matrix)"
+    status: "ready"
+    epic: "E2"
+    sprint: null
+    priority: "P2"
+    dependencies:
+      - "STORY-SL-3"
+      - "STORY-SL-4"
+    blocked_by: []
+    write_scope:
+      - "adapters/claude-code/  # mapper.go newID() deterministic derivation + delivery-matrix tests"
+      - "client/                # Idempotency-Key header == metadata.event_id"
+    validation_commands:
+      - "cd adapters/claude-code && go build ./... && go vet ./... && go test -race ./...  # id determinism + collision-freedom; retry same id; recovery no re-send"
+      - "cd client && go test ./...  # Idempotency-Key header present + == metadata.event_id"
+    invariants:
+      - "INV-5: stable+unique client id per event; retries/recovery never double-count on shift-left's side"
+      - "INV-3: fail-open + hot-path budget unchanged"
+      - "INV-1: id derived only from non-secret structural fields"
+    gates:
+      G3_REVIEW:
+        decision: "not-run"
+        evidence: null
+        decided_by: null
+        decided_at: null
+    audit:
+      commit: null
+      completed_at: null
+      validation_artifact: null
+      last_run_id: null
+      status_reason: "DRAFTED (STORY-SL-14.md). Phase-1 debt #2 — THINNEST (most of the fix is EXT-core server-side dedupe, SL3-IDEMPOTENCY). Today event_id is random-but-stable (mapper.go:295 'cc-'+hex(random)); the client is already at-most-once (spool.go). Shift-left's half: deterministic collision-safe event_id (robust if ever regenerated) + explicit Idempotency-Key header (inert until core consumes it) + the crash/retry/recovery delivery-guarantee test matrix + honest docs that server dedupe is the completing piece. Awaiting build."
+      blocked_reason: null
+  STORY-SL-15:
+    title: "Real OwnershipVerifier against the FR-7 session-ownership read API"
+    status: "ready"
+    epic: "E3"
+    sprint: null
+    priority: "P2"
+    dependencies:
+      - "STORY-SL-6"
+      - "STORY-SL-3"
+    blocked_by: []
+    write_scope:
+      - "actions/openbox-git-action/  # new apiVerifier + flag wiring; reuse SL-3 signer"
+    validation_commands:
+      - "cd actions/openbox-git-action && go build ./... && go vet ./... && go test -race ./...  # mock FR-7: owned->attributed, not-owned->inferred, error->inferred (fail-closed); flag off == NoopVerifier"
+    invariants:
+      - "INV-6: never silent wrong attribution; unowned/indeterminate stays inferred"
+      - "SL5-SEC-1: trailer is a claim, promoted only on positive ownership by the authenticated pusher"
+      - "INV-1: signed read, no secret leak; INV-4: cross-org sessions never promote"
+    gates:
+      G1_READY:
+        decision: "not-run"
+        evidence: "NEEDS brian (OD-OWNER-API): confirm the FR-7 session-ownership read endpoint shape + auth model the verifier targets (else build against the assumed shape, flag OFF)."
+        decided_by: null
+        decided_at: null
+      G_SEC:
+        decision: "not-run"
+        evidence: null
+        decided_by: null
+        decided_at: null
+      G3_REVIEW:
+        decision: "not-run"
+        evidence: null
+        decided_by: null
+        decided_at: null
+    audit:
+      commit: null
+      completed_at: null
+      validation_artifact: null
+      last_run_id: null
+      status_reason: "DRAFTED (STORY-SL-15.md). Phase-1 debt #3 — mostly EXTERNAL-gated. The seam exists (ownership.go: OwnershipVerifier + NoopVerifier + verifierFunc); the git-action holds the authenticated pusher's DID/creds. Implement apiVerifier = AIP-signed GET against the FR-7 read API (assumed shape GET /agent/<pusherDID>/sessions), fail-closed on any error/ambiguity (never over-attribute — SL5-SEC-1/INV-6), FLAGGED with NoopVerifier default. Owned sessions then promote inferred->attributed with NO resolver change. Buildable + unit-testable against a mock now; CANNOT live-verify until FR-7 exists -> ships flag-off. Awaiting OD-OWNER-API + build."
       blocked_reason: null
