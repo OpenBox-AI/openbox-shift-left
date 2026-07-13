@@ -157,7 +157,11 @@ func (c *Client) Emit(ctx context.Context, ev DevEvent) (Verdict, error) {
 
 	respBody, err := c.post(ctx, body)
 	if err != nil {
-		c.log.Printf("openbox: dropping event %s (%s): %v", ev.EventID, ev.EventType, err)
+		// Fail-open (INV-3): log a single actionable diagnostic and drop. On a
+		// core HTTP rejection describeDrop maps the (bounded) response body to a
+		// reason-guidance line; a transport error is reported verbatim. Emitted
+		// only on the TERMINAL failure post returns, so no per-retry log spam.
+		c.log.Printf("openbox: dropping event %s (%s): %s", ev.EventID, ev.EventType, describeDrop(err))
 		return VerdictUnknown, nil
 	}
 	return parseVerdict(respBody), nil

@@ -1,0 +1,88 @@
+assignment_id: "build-story-SL10-20260713-1200"
+role: "build_engineer"
+story: "STORY-SL-10"
+status: "completed"
+summary: >
+  Built STORY-SL-10 (signing / response error diagnostics — reason-code mapping): the OpenBox
+  client now turns a silent fail-open drop on a non-2xx /evaluate into a single actionable
+  diagnostic line. Ports the reference SDK's map_signing_error (openbox-temporal-sdk-python/
+  openbox/errors.py) six-code map into Go and wires it into Emit's terminal-drop log. STAYS
+  fail-open (INV-3): Emit still returns (VerdictUnknown, nil) on every transport/4xx/5xx path;
+  no control-flow change, no stdout, no retry-classification change. Metadata/categories only
+  (INV-1/INV-2) — secrets are never in scope of the diagnostic. Validation green: client
+  go build/vet/test all pass; gofmt clean. One human gate remains: G3_REVIEW (brian).
+stop_condition_triggered: true
+key_design_decision: >
+  The story assumed core returns the machine reason code as a body field (reason/error/code).
+  Cross-repo Explore of openbox-core DISPROVED this for stock core: the reason codes
+  (signature_invalid, nonce_replayed, did_agent_mismatch, verifier_not_configured,
+  timestamp_outside_window/skew) live ONLY as server-side slog fields in
+  internal/services/agent.go and NEVER cross the HTTP boundary. The /evaluate handler collapses
+  every identity failure into 401 {"code":401,"message":"invalid token or agent identity"} and
+  returns 400 {"code":400,"message":"invalid event_type: X"} for un-accept-listed dev types, via
+  the uniform envelope pkg/httpx/response.go body{code,message,data} (code is an INTEGER echo of
+  the HTTP status, not a reason). Per the story stop condition (do NOT guess a schema), the build:
+  (1) maps on the fields that ARE present for stock core — status + message — including the real,
+  present, mappable "invalid event_type" 400 (the expected pre-EXT-core state) and the two 401
+  variants (identity rejected / missing authorization) and the transient 500; and (2) keeps the
+  full SDK six-code map behind a FORWARD-COMPATIBLE body probe (extractReason) that mirrors the
+  SDK's config.py _extract_reason_code key order (reason_code -> code -> string only), so the map
+  lights up automatically if EXT-core later enriches the envelope, without pretending stock core
+  does so today. Note routed to re-confirm the envelope key at EXT-core.
+artifacts:
+  created_or_updated:
+    - "client/signingerr.go (signingReasonGuidance six-code map + coreError envelope + diagnose(status,body) + extractReason forward-compat probe + describeDrop; INV-1/2/3)"
+    - "client/signingerr_test.go (forward-compat reason-code table, stock-core status/message mapping, bounded-message, extractReason int/non-object, and full Emit fail-open + one-line + log-safety integration table)"
+    - "client/client.go (Emit terminal-drop log now calls describeDrop(err) — one-line hook; httpError already carried status+body from SL-3, so attempt/post unchanged)"
+    - ".fab7/sdlc/status.yaml (STORY-SL-10 status_reason -> built + validated; awaiting G3_REVIEW)"
+  proposed_only: []
+write_scope_used:
+  - "client/"
+  - ".fab7/sdlc/status.yaml"
+  - ".fab7/sdlc/assignments/build-story-SL10-20260713-1200.result.yaml"
+cross_repo_reference:
+  method: "Two read-only Explore agents (per user directive: always use explore for cross-repo reference) over ../openbox-temporal-sdk-python and ../openbox-core"
+  verified:
+    - "SDK MAP (openbox-temporal-sdk-python/openbox/errors.py:92-119 _SIGNING_REASON_MESSAGES): exactly six keys — signature_invalid, nonce_replayed, did_agent_mismatch, verifier_not_configured, timestamp_outside_window (core canonical), timestamp_skew (alias). All raise OpenBoxSigningError(message, reason_code)."
+    - "SDK PARSE (config.py:231-249 _extract_reason_code): flat JSON object; reads reason_code || code || reason in that order; STRING values only (isinstance(code,str)); non-JSON/empty/non-dict -> None. Extraction gated on signer != None and HTTP 401/403 (config.py:302-313). Unknown code -> generic OpenBoxSigningError carrying (reason_code)."
+    - "CORE ENVELOPE (openbox-core pkg/httpx/response.go:13-29 body{code,message,data}; Abort -> {code,message}): every non-2xx /evaluate is {\"code\":N,\"message\":\"...\"}. code is an INT echo of HTTP status, NOT a reason code."
+    - "CORE SIGNATURE PATH (internal/api/governance.go:57-62): all identity failures -> 401 \"invalid token or agent identity\" (or 500 \"internal server error\" for verifier/replay-cache unavailable). Reason codes are slog fields in internal/services/agent.go only; never in the body. governance.go:64-65 comment confirms this is intentional (no probing accepted values via 400 vs 401)."
+    - "CORE EVENT-TYPE REJECT (governance.go:66-68, isValidGovernanceEventType :273-294): un-accept-listed event_type -> 400 {\"code\":400,\"message\":\"invalid event_type: <value>\"}, only AFTER auth passes. Accept-list now includes the dev types SessionStarted/PromptSubmitted/ToolCall/ToolResult/SessionEnded/CommitCreated/Deploy (EXT-core target)."
+    - "RUNBOOK cross-check: §3.2 documents signing_required=false + the local no-KMS-verifier note; troubleshooting table maps /evaluate 401 -> 'signing_required=true with no KMS verifier — set it false (§3.2)'. Guidance strings cite §3.2 accordingly."
+acceptance_criteria:
+  - id: "AC1 (non-2xx -> mapped actionable diagnostic)"
+    status: "met"
+    evidence: "diagnose() maps present fields for stock core (401 identity / missing-auth, 400 invalid event_type with the RUNBOOK/EXT-core guidance, 500 transient) and the six SDK codes via the forward-compat probe. describeDrop appends it to Emit's drop log."
+  - id: "AC2 (all reason codes mapped; unknown -> raw code + status, no crash/guess)"
+    status: "met"
+    evidence: "signingReasonGuidance has all six codes; unrecognized reason -> 'reason=<code> (status N): unrecognized reason code — re-confirm the core error envelope (EXT-core)'. TestDiagnose_ForwardCompatReasonCodes + unknown-reason assertion."
+  - id: "AC3 (logger/stderr only; no stdout; no secret)"
+    status: "met"
+    evidence: "Diagnostic is emitted only via c.log.Printf (the injected Logger; stderr on the CLI/hook path). diagnose derives output from static guidance + core's own status/message + a core-supplied reason code — never our key/seed/nonce/signature. TestEmit_MapsRejection_FailOpenAndLogSafe asserts no testAPIKey/testSeedB64 substring."
+  - id: "AC4 (Emit unchanged: fail-open + retry classification)"
+    status: "met"
+    evidence: "Emit still returns (VerdictUnknown, nil) on drop; attempt/post untouched (retry classification 5xx/429 retryable, 4xx terminal unchanged). Existing fail-open/retry tests still green; new integration test re-asserts (VerdictUnknown, nil)."
+  - id: "AC5 (bounded body read)"
+    status: "met"
+    evidence: "Reuses the existing 1 MiB io.LimitReader cap in attempt; per-line maxDiagMsg=200 trim on echoed message. TestDiagnose_BoundedMessage feeds a 10k message and asserts the line stays bounded + truncated."
+validation:
+  commands:
+    - "cd client && go build ./... && go vet ./... && go test ./...  -> ok (all pass)"
+    - "gofmt -l signingerr.go signingerr_test.go client.go -> clean"
+  new_tests:
+    - "TestDiagnose_ForwardCompatReasonCodes (6 codes + key order + string-code + unknown fallback)"
+    - "TestDiagnose_StockCoreStatusMapping (401 identity / missing-auth, 400 event_type + echo + handoff + empty, 500, non-JSON, empty, other-status-with-message)"
+    - "TestDiagnose_BoundedMessage"
+    - "TestExtractReason_IgnoresIntCode (int code / non-object / non-JSON / reason_code-wins)"
+    - "TestEmit_MapsRejection_FailOpenAndLogSafe (stock 401, 400 event_type, forward-compat reason: fail-open + exactly-one-line + event-id + no-secret)"
+invariants_enforced:
+  - "INV-1: no key/seed/nonce/signature in any diagnostic — secret lives only in the Authorization header, never in the request/response body diagnose reads."
+  - "INV-2: reason categories only, never content."
+  - "INV-3: fail-open preserved; no control-flow change; logger-only, no stdout on the hook path; exactly one diagnostic per dropped event (terminal failure only)."
+gates:
+  G3_REVIEW:
+    decision: "not-run"
+    note: "Human gate (brian). Independent blind review-auditor pass launched (review-diff-SL10). Awaiting reviewer findings + brian sign-off."
+follow_ups:
+  - "EXT-core: if/when core enriches the /evaluate error envelope with a string machine reason field, the forward-compat probe activates the full six-code map with no code change — re-confirm the envelope key at that point."
+  - "SL-9 / SL-11 reuse signingReasonGuidance (SL-11 dev verify maps its /auth/validate failure via the same map)."

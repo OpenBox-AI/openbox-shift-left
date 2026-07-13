@@ -1,5 +1,5 @@
 version: 1
-updated_at: "2026-07-09T17:30:00Z"  # SL4-WIRE-1 (de52ea9), SL2-FILEBACKEND (9ae113c), SL4-WIRE-2 (be033ca) all DONE — reviewed (G_SEC/G3 approve) + brian sign-off + committed. SL-1..SL-6 DONE. Remaining: SL-7 Codex / SL-8 Cursor (deferred) + backlog follow-ups.
+updated_at: "2026-07-13T00:00:00Z"  # SL-1..SL-6 + WIRE-1/2 + FILEBACKEND DONE. NEW: SL-9/SL-10/SL-11 drafted (status=ready) — "Advisory-tier SDK parity" (bucket #2 of the SDK↔shift-left gap analysis): consume the verdict/guardrail signals record-only (never block), signing-error diagnostics, and `openbox dev verify`. Enforcement (the `apply` leg) stays the deferred NEXT increment (gated on spike S2 / OD9). SL-7 Codex / SL-8 Cursor still deferred.
 owner: "orchestrator"
 stories:
   STORY-SL-1:
@@ -428,4 +428,110 @@ stories:
       validation_artifact: ".fab7/sdlc/assignments/security-review-SL2-FILEBACKEND-20260709.result.yaml"
       last_run_id: null
       status_reason: "DONE — committed 9ae113c; brian sign-off (G1_READY confirm) + G_SEC approve; G3 waived (security-boundary change) 2026-07-09. Opt-in 0600 file secret backend (SL-2 follow-up) for headless Linux / containers / WSL with no OS keyring — the explicit escape hatch that keeps the default HALT-don't-fall-back-to-plaintext posture (SL2-SEC-1 philosophy). CLI: `openbox dev init --secret-backend file` (or OPENBOX_SECRET_BACKEND=file) → secret.Open→NewFileStore; auto never falls back; PLAINTEXT warning every use. Adapter hook reads the same 0600 nested-JSON via OPENBOX_SECRET_FILE / dev.json secret_file (fileSecretLookup). G_SEC APPROVE (no blockers). Follow-ups tracked: SL2FB-LOW-1/LOW-2 + SL2FB-INFO-1 (wire secret_file into DevConfig) + INFO-2. Human G1_READY + final sign-off pending; committed separately from SL4-WIRE-1."
+      blocked_reason: null
+  # --- Advisory-tier SDK parity (bucket #2, drafted 2026-07-13) --------------------
+  # Formalizes the SDK↔shift-left gap analysis: replicate the SDK's verdict/guardrail
+  # CONSUMPTION semantics record-only (never block), plus signing diagnostics + a
+  # data-plane preflight. Enforcement (the `apply` leg) is the deferred NEXT increment.
+  # Sequence: SL-10 (reason map) -> SL-9 (Evaluation + advisory recording) -> SL-11 (dev verify).
+  STORY-SL-10:
+    title: "Signing / response error diagnostics (reason-code mapping)"
+    status: "done"
+    epic: "E2"
+    sprint: null
+    priority: "P1"
+    dependencies:
+      - "STORY-SL-3"
+    blocked_by: []
+    write_scope:
+      - "client/  # new signingerr.go + attempt/post/Emit capture the terminal 4xx body"
+    validation_commands:
+      - "cd client && go build ./... && go vet ./... && go test ./...  # reason-map table test; fail-open preserved; log-safety (no key/seed/nonce/sig)"
+    invariants:
+      - "INV-1: no secret (key/seed/signature/nonce) in any diagnostic"
+      - "INV-2: reason categories only, never content"
+      - "INV-3: fail-open preserved; no control-flow change; no stdout on the hook path"
+    gates:
+      G3_REVIEW:
+        decision: "approve"
+        decided_by: "brian"
+        decided_at: "2026-07-13T12:00:00Z"
+        evidence: "brian sign-off 2026-07-13. Independent blind review-auditor (review-diff-SL10-20260713.result.yaml) = APPROVE, no blockers. Re-ran client go build/vet/test itself (green). Verified against source (incl. spot-check of ../openbox-core): INV-3 fail-open preserved (only change is the drop-log format + describeDrop; Emit still returns (VerdictUnknown,nil); retry classification untouched; no stdout); INV-1/2 log-safety (diagnose derives only from status+core message+static guidance+reason code; secret never in body scope); bounded (1MiB + maxDiagMsg=200); exactly one line per drop; all 6 SDK codes match errors.py; extractReason order matches config.py:248; stop-condition handled (maps present fields for stock core, SDK map behind forward-compat probe). Findings: SL10-SHOULD-1 (extractReason doc claimed it 'mirrors config.py' but intentionally diverges from Python's or-chain short-circuit) -> FIXED (comment now documents the deliberate, strictly-better divergence; re-validated green). Nits SL10-NIT-1 (coreError.Code parsed-unused, harmless) + SL10-NIT-2 (raw body + interpreted diagnosis both in the line, bounded) accepted."
+    audit:
+      commit: null
+      completed_at: "2026-07-13T12:00:00Z"
+      validation_artifact: ".fab7/sdlc/assignments/build-story-SL10-20260713-1200.result.yaml"
+      last_run_id: null
+      status_reason: "DONE — built + validated (client go build/vet/test green; gofmt clean) + INDEPENDENTLY REVIEWED (G3 reviewer APPROVE; SL10-SHOULD-1 fixed) + brian G3 sign-off 2026-07-13. New client/signingerr.go: signingReasonGuidance (all six SDK codes) + diagnose(status,body) + extractReason + describeDrop; one-line hook in Emit's terminal-drop log (httpError already carried status+body from SL-3, so attempt/post untouched). STOP CONDITION TRIGGERED (documented, not guessed): cross-repo Explore of openbox-core disproved the story's body-reason-code assumption — stock core keeps reason codes as slog fields only (internal/services/agent.go) and collapses signature failures to 401 {code,message} via pkg/httpx/response.go body{code,message,data}; un-accept-listed dev types -> 400 'invalid event_type: X'. So the build maps on the fields that ARE present (status+message, incl. the real 400 event_type pre-EXT-core case + the 401 variants + transient 500) AND keeps the full six-code SDK map behind a forward-compat body probe (mirrors SDK config.py reason_code->code->reason, string-only, so core's INT code is not misread) that activates automatically if EXT-core enriches the envelope. Fail-open (INV-3) preserved: Emit still returns (VerdictUnknown, nil), retry classification unchanged, logger-only/no-stdout, exactly one diagnostic per dropped event. INV-1/INV-2: categories only, no key/seed/nonce/sig (log-safety tested). 5 new test funcs. Foundational: SL-9/SL-11 reuse signingReasonGuidance. G3_REVIEW (brian) pending."
+      blocked_reason: null
+  STORY-SL-9:
+    title: "Advisory-tier verdict & guardrail consumption (record, never block)"
+    status: "ready"
+    epic: "E2"
+    sprint: null
+    priority: "P1"
+    dependencies:
+      - "STORY-SL-3"
+      - "STORY-SL-4"
+    blocked_by: []
+    write_scope:
+      - "client/  # expand verdictResponse/add Evaluation; change Emit return"
+      - "adapters/claude-code/  # new advisory.go + wire into the flush path"
+      - "actions/openbox-git-action/  # update the Emit call site to the new return"
+    validation_commands:
+      - "cd client && go build ./... && go vet ./... && go test ./...  # Evaluation parse: full-field + verdict-only (degraded) fixtures"
+      - "cd adapters/claude-code && go build ./... && go vet ./... && go test -race ./...  # BLOCK response -> advisory record AND exit 0 / empty stdout (INV-3)"
+    invariants:
+      - "INV-2: advisory records are metadata/categories only (no content, no redacted_input)"
+      - "INV-3: record-only; never blocks/delays/errors a tool call; hook exits 0 / empty stdout"
+      - "INV-1: no secret in records"
+    gates:
+      G1_READY:
+        decision: "not-run"
+        evidence: "NEEDS brian: bless the Advisory tier as an explicit Phase-1.5 increment (record-not-block) + confirm the advisory sink location/format. Recommend a one-line architecture §1b note so the tier is design-blessed, not inferred."
+        decided_by: null
+        decided_at: null
+      G3_REVIEW:
+        decision: "not-run"
+        evidence: null
+        decided_by: null
+        decided_at: null
+    audit:
+      commit: null
+      completed_at: null
+      validation_artifact: null
+      last_run_id: null
+      status_reason: "DRAFTED (STORY-SL-9.md). Bucket #2 centerpiece = the architecture's middle 'Advisory' governance tier. NOTE: the 5-tier verdict enum + wire parse ALREADY EXISTS (client/verdict.go) — this consumes the result + the rich sibling fields the current verdictResponse drops (trust_tier/risk_score/constraints/guardrails_result), records what WOULD be enforced (would_block label), and NEVER blocks (INV-3 is the load-bearing AC). Enforcement is explicitly OUT (deferred next increment). Awaiting build (sequence after SL-10 to avoid a client.go rebase)."
+      blocked_reason: null
+  STORY-SL-11:
+    title: "openbox dev verify (auth/validate + signing round-trip)"
+    status: "ready"
+    epic: "E2"
+    sprint: null
+    priority: "P2"
+    dependencies:
+      - "STORY-SL-3"
+      - "STORY-SL-10"
+    blocked_by: []
+    write_scope:
+      - "client/  # add Validate(ctx): signed GET /api/v1/auth/validate"
+      - "cli/     # new `dev verify` subcommand + reuse creds/config resolvers"
+    validation_commands:
+      - "cd client && go build ./... && go vet ./... && go test ./...  # signed-GET unit test vs a known keypair; non-200 -> mapped error"
+      - "cd cli && go build ./... && go vet ./... && go test ./...  # `dev verify` ✓ vs local core, ✗ vs bad key, --dry-run no-network"
+    invariants:
+      - "INV-1: no secret in output/logs; TLS guard (checkBaseURL) enforced"
+      - "INV-7: validates the shared-namespace developer DID (no parallel identity)"
+    gates:
+      G3_REVIEW:
+        decision: "not-run"
+        evidence: null
+        decided_by: null
+        decided_at: null
+    audit:
+      commit: null
+      completed_at: null
+      validation_artifact: null
+      last_run_id: null
+      status_reason: "DRAFTED (STORY-SL-11.md). Bucket #2 item 'auth/validate at init'. Core exposes GET /api/v1/auth/validate (openbox-core internal/api/main.go:118); the SDK signs this GET so signing_required agents pass — reuse client/signing.go. Standalone read-only `dev verify` (not folded into dev init, because /auth/validate is on core whose base_url is set later in dev.json). Reuses SL-10's reason map for the failure hint. Awaiting build (last: uses SL-9/SL-10 groundwork)."
       blocked_reason: null
