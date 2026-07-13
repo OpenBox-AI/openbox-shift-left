@@ -182,7 +182,36 @@ Rationale: deliver the OD12 "one command onboards" front door for real (`openbox
 - **Write scope:** `cli/` (the `hook` subcommand), `adapters/claude-code/` (plugin/hooks.json + installer reference; absorb `cmd/`). **Deps:** SL4-WIRE-1, SL-2. **Gates:** G2, G3, **G_SEC** (re-verify observe-only exit-0/empty-stdout on the unified binary). **Invariants:** INV-3.
 - **Validation:** `cd cli && go build ./... && go test ./...`; a subprocess test that runs `openbox hook claude-code PreToolUse` and asserts exit 0 + empty stdout + a spooled event (the SL-4 real-binary test, moved to the unified binary).
 
+## Bucket #2 — Advisory-tier SDK parity (SL-9/10/11, drafted 2026-07-13)
+
+Formalizes the **SDK↔shift-left gap analysis** (2026-07-13): shift-left already replicates the Python SDK's client transport + AIP signing **byte-for-byte** (and exceeds it on onboarding, secret storage, async hot-path, and lineage). The remaining SDK functionality is the **enforcement half** — which the design defers to Phase-2 (D7/INV-3). Bucket #2 replicates the SDK's verdict/guardrail **consumption** semantics *record-only* (the architecture's middle **Advisory** tier, §1b), leaving the codebase one flag from Enforce. **Enforcement itself (the `apply` leg) is the deferred NEXT increment** — gated on spike **S2** (dev-machine evaluate latency / local sidecar) and **OD6/OD9**; it is NOT in this bucket.
+
+> **Correction baked in:** the 5-tier verdict enum + wire parsing **already exists** (`client/verdict.go`). Bucket #2 is about *consuming* the result + the rich sibling fields the client currently drops — not re-adding tiers.
+
+### SL-10 — Signing / response error diagnostics *(do first; foundational)*
+- **Goal:** port the SDK's `map_signing_error` (`errors.py`) — turn silent fail-open drops on a rejected `/evaluate` into one actionable diagnostic (`signature_invalid`/`nonce_replayed`/`did_agent_mismatch`/`verifier_not_configured`/`timestamp_skew`).
+- **Write scope:** `client/`. **Deps:** SL-3. **Gates:** G3. **Invariants:** INV-1/2/3 (stays fail-open; no secret; categories only).
+
+### SL-9 — Advisory-tier verdict & guardrail consumption *(centerpiece)*
+- **Goal:** `Emit` returns a rich `Evaluation` (trust_tier/risk_score/constraints/guardrails_result…); the adapter **records** what would be enforced (`would_block` label) to a local advisory sink and **never blocks** (INV-3 is the load-bearing AC). This is the **Advisory** governance tier.
+- **Write scope:** `client/`, `adapters/claude-code/`, `actions/openbox-git-action/`. **Deps:** SL-3, SL-4 (soft: SL-10 first, shared `client.go`). **Gates:** **G1_READY** (brian: bless the Advisory tier + sink) + G3. **Invariants:** INV-1/2/3.
+
+### SL-11 — `openbox dev verify` (auth/validate + signing round-trip)
+- **Goal:** a read-only preflight — signed `GET /api/v1/auth/validate` (endpoint exists: `openbox-core internal/api/main.go:118`) confirms the data-plane key + AIP signing work against the configured core; ✓ or an SL-10-mapped ✗ with a fix hint.
+- **Write scope:** `client/` (`Validate`), `cli/` (`dev verify`). **Deps:** SL-3, SL-10. **Gates:** G3. **Invariants:** INV-1 (no secret; TLS guard), INV-7.
+
+### Sequencing
+```
+SL-10 (reason map) ─► SL-9 (Evaluation + advisory record) ─► SL-11 (dev verify, reuses the map)
+```
+
+### Deferred NEXT increment — Enforcement (the `apply` leg)
+Synchronous `PreToolUse` deny/ask/rewrite + fail-closed + guardrail **redaction application** + a decision on whether HITL (`/approval`) fits a dev hot-path. **Crosses INV-3.** Prerequisite: **spike S2**; decisions **OD6** (hook handler type) / **OD9** (fail-closed). Would land as a Phase-2 epic (CLAUDE.md: "E6 Phase-2 enforcement blocked on spike S2").
+
+---
+
 ## Flags
+- **OD-ADV (new, needs brian):** bless the **Advisory tier** (SL-9) as an explicit Phase-1.5 increment and add a one-line acknowledgement to architecture §1b so the tier is design-blessed, not inferred (SL-9 G1_READY).
 - **OD10:** name the pilot repo before SL-6's squash-prevalence validation (S3 U-1) and pilot rollout.
 - **OD15 (external, deferred):** lineage storage metadata-JSONB vs indexed — SL-6 uses metadata (no external dep); FR-7 *queryable* read is deferred.
 - **Validation commands:** record exact per-package test/build commands in project memory `validation-commands.yaml` at draft-story.

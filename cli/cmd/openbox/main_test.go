@@ -3,6 +3,10 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/ed25519"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
 	"errors"
 	"io"
 	"net/http"
@@ -15,6 +19,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/openbox-ai/openbox-shift-left/client"
 	"github.com/openbox-ai/openbox-shift-left/cli/internal/backend"
 	"github.com/openbox-ai/openbox-shift-left/cli/internal/devinit"
 	"github.com/openbox-ai/openbox-shift-left/cli/internal/secret"
@@ -423,6 +428,16 @@ func TestHookEndToEndSmoke(t *testing.T) {
 			t.Fatalf("content canary leaked to /evaluate in delivered body #%d:\n%s", i, b)
 		}
 	}
+	// Activity label survives the spool round-trip to the wire: the Bash tool call
+	// lands activity_type="Bash" (not "Unknown"), and a lifecycle event lands its
+	// event_type. Derived client-side from persisted fields, so spooling keeps it.
+	all := strings.Join(delivered, "\n")
+	if !strings.Contains(all, `"activity_type":"Bash"`) {
+		t.Errorf("no delivered body carried activity_type=Bash (tool label lost across spool):\n%s", all)
+	}
+	if !strings.Contains(all, `"activity_type":"SessionStarted"`) {
+		t.Errorf("no delivered body carried activity_type=SessionStarted (lifecycle label):\n%s", all)
+	}
 }
 
 // TestUnifiedBinaryGitHookStampsCommit proves the OD17 git-hook fold end-to-end:
@@ -486,6 +501,154 @@ func TestUnifiedBinaryGitHookStampsCommit(t *testing.T) {
 	}
 	if body := git(gitEnv, "log", "-1", "--format=%B"); !strings.Contains(body, "OpenBox-Session: sess-unified") {
 		t.Fatalf("commit not stamped by `openbox hook git prepare-commit-msg`:\n%s", body)
+	}
+}
+
+// --- STORY-SL-11: `openbox dev verify` --------------------------------------
+
+// verifyTestSeed is a known base64 raw 32-byte Ed25519 seed (same fixture the
+// hook E2E test uses). The verify tests drive the real signer through the CLI and
+// check the signature server-side against the public key derived from it.
+const verifyTestSeed = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="
+
+const verifyTestDID = "did:aip:00000000-0000-0000-0000-000000000042"
+
+// coreValidateOK verifies the AIP-signed GET /api/v1/auth/validate exactly as
+// openbox-core would (empty-body SHA, canonical GET string, Ed25519 verify) and
+// answers 200; a bad signature → 401. It stands in for the real core.
+func coreValidateOK(t *testing.T, seedB64 string) *httptest.Server {
+	t.Helper()
+	seed, err := base64.StdEncoding.DecodeString(seedB64)
+	if err != nil {
+		t.Fatalf("decode seed: %v", err)
+	}
+	pub := ed25519.NewKeyFromSeed(seed).Public().(ed25519.PublicKey)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != client.AuthValidatePath {
+			t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
+		}
+		body, _ := io.ReadAll(r.Body)
+		sum := sha256.Sum256(body)
+		wantSHA := hex.EncodeToString(sum[:])
+		canonical := "GET\n" + r.URL.Path + "\n" +
+			r.Header.Get("X-OpenBox-Agent-Timestamp") + "\n" +
+			r.Header.Get("X-OpenBox-Agent-Nonce") + "\n" + wantSHA
+		sig, decErr := base64.StdEncoding.DecodeString(r.Header.Get("X-OpenBox-Agent-Signature"))
+		if r.Header.Get("X-OpenBox-Body-SHA256") != wantSHA || decErr != nil ||
+			!ed25519.Verify(pub, []byte(canonical), sig) {
+			w.WriteHeader(http.StatusUnauthorized)
+			_, _ = io.WriteString(w, `{"code":401,"message":"invalid token"}`)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"valid":true,"active":true,"agent_id":"a","environment":"test","message":"ok"}`)
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+// setVerifyCreds points the adapter resolvers at direct-env credentials + a temp
+// (nonexistent) config so no real keychain/config is touched.
+func setVerifyCreds(t *testing.T, baseURL string) {
+	t.Helper()
+	t.Setenv("OPENBOX_CONFIG", filepath.Join(t.TempDir(), "none.json"))
+	t.Setenv("OPENBOX_BASE_URL", baseURL)
+	t.Setenv("OPENBOX_AGENT_DID", verifyTestDID)
+	t.Setenv("OPENBOX_API_KEY", "obx_test_"+strings.Repeat("a", 48))
+	t.Setenv("OPENBOX_ED25519_SEED", verifyTestSeed)
+}
+
+// TestDevVerifyHappyPath: a valid key + signing round-trip against the mock core
+// prints a ✓ line naming the DID + base_url and exits 0.
+func TestDevVerifyHappyPath(t *testing.T) {
+	srv := coreValidateOK(t, verifyTestSeed)
+	setVerifyCreds(t, srv.URL)
+
+	a, out, errb := testApp(nil)
+	code := a.run([]string{"dev", "verify"})
+	if code != exitOK {
+		t.Fatalf("exit = %d, want 0; stderr=%q", code, errb.String())
+	}
+	if !strings.Contains(out.String(), "✓ verified:") ||
+		!strings.Contains(out.String(), verifyTestDID) ||
+		!strings.Contains(out.String(), srv.URL) {
+		t.Errorf("expected a ✓ line naming DID + base_url, got %q", out.String())
+	}
+	// INV-1: no secret in the success output.
+	if strings.Contains(out.String(), verifyTestSeed) || strings.Contains(out.String(), "obx_test_") {
+		t.Errorf("INV-1: secret leaked into ✓ output: %q", out.String())
+	}
+}
+
+// TestDevVerifyBadKeyIsMappedFailure: core rejects the identity (401) → a ✗ with
+// the mapped fix hint on stderr and a non-zero exit; no secret leaks.
+func TestDevVerifyBadKeyIsMappedFailure(t *testing.T) {
+	// A server that always 401s, regardless of the signature (simulates a wrong
+	// key / unprovisioned agent).
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = io.WriteString(w, `{"code":401,"message":"invalid token"}`)
+	}))
+	defer srv.Close()
+	setVerifyCreds(t, srv.URL)
+
+	a, out, errb := testApp(nil)
+	code := a.run([]string{"dev", "verify"})
+	if code == exitOK {
+		t.Fatalf("bad key must exit non-zero, got 0; stdout=%q", out.String())
+	}
+	if !strings.Contains(errb.String(), "✗") || !strings.Contains(errb.String(), "identity rejected") {
+		t.Errorf("expected a ✗ with a mapped reason, got %q", errb.String())
+	}
+	if strings.Contains(errb.String(), verifyTestSeed) {
+		t.Errorf("INV-1: secret leaked into ✗ output: %q", errb.String())
+	}
+}
+
+// TestDevVerifyDryRunIsOffline: --dry-run prints the plan (method, path,
+// base_url, DID) and makes NO network call — the registrar/store seams panic if
+// touched, and no creds are configured.
+func TestDevVerifyDryRunIsOffline(t *testing.T) {
+	t.Setenv("OPENBOX_CONFIG", filepath.Join(t.TempDir(), "none.json"))
+	t.Setenv("OPENBOX_BASE_URL", "https://core.example.test")
+	t.Setenv("OPENBOX_AGENT_DID", verifyTestDID)
+
+	a, out, _ := testApp(nil)
+	code := a.run([]string{"dev", "verify", "--dry-run"})
+	if code != exitOK {
+		t.Fatalf("dry-run exit = %d", code)
+	}
+	got := out.String()
+	for _, want := range []string{"DRY RUN", "GET ", client.AuthValidatePath, "https://core.example.test", verifyTestDID} {
+		if !strings.Contains(got, want) {
+			t.Errorf("dry-run plan missing %q; got %q", want, got)
+		}
+	}
+	// --print-plan is an accepted alias.
+	a2, out2, _ := testApp(nil)
+	if code := a2.run([]string{"dev", "verify", "--print-plan"}); code != exitOK {
+		t.Fatalf("--print-plan exit = %d", code)
+	}
+	if !strings.Contains(out2.String(), "DRY RUN") {
+		t.Errorf("--print-plan did not render the plan: %q", out2.String())
+	}
+}
+
+// TestDevVerifyNoCredsSaysInitFirst: with nothing configured, verify exits
+// non-zero and tells the operator to run `openbox dev init` (never half-proceeds).
+func TestDevVerifyNoCredsSaysInitFirst(t *testing.T) {
+	t.Setenv("OPENBOX_CONFIG", filepath.Join(t.TempDir(), "none.json"))
+	// Ensure no ambient creds bleed in from the developer's real environment.
+	for _, k := range []string{"OPENBOX_BASE_URL", "OPENBOX_AGENT_DID", "OPENBOX_API_KEY", "OPENBOX_ED25519_SEED", "OPENBOX_SECRET_FILE"} {
+		t.Setenv(k, "")
+	}
+	a, _, errb := testApp(nil)
+	code := a.run([]string{"dev", "verify"})
+	if code != exitError {
+		t.Fatalf("no-creds exit = %d, want %d", code, exitError)
+	}
+	if !strings.Contains(errb.String(), "openbox dev init") {
+		t.Errorf("expected a 'run openbox dev init' hint, got %q", errb.String())
 	}
 }
 

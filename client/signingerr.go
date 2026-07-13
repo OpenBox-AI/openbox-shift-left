@@ -87,6 +87,16 @@ func diagnose(status int, body string) string {
 		}
 		return "400 payload rejected (no message)"
 	case 500:
+		// On the identity paths core surfaces a MISSING KMS verifier as a 500, not
+		// a 401: /auth/validate returns {"code":500,"message":"internal server
+		// error: agent DID identity verifier unavailable"} (verified openbox-core
+		// api/agent.go + services/agent.go). That is a provisioning problem, not
+		// transient, so map it to the SL-10 verifier guidance (which names the fix:
+		// set signing_required=false). Any other 500 (replay-cache/verifier
+		// transport) stays transient.
+		if strings.Contains(msg, "verifier") {
+			return "500 " + signingReasonGuidance["verifier_not_configured"]
+		}
 		return "500 core-side verifier/replay-cache unavailable (transient); retried and still failed — safe to ignore unless persistent"
 	default:
 		if msg != "" {

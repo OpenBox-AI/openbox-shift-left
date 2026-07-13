@@ -220,7 +220,7 @@ func sessionStartMetadata(e *HookEvent) map[string]any {
 		"provider":        provider,
 		"source":          enumOr(e.Source, sourceValues), // startup|resume|clear|compact
 		"model":           capStr(e.Model),                // free-form model id → bounded
-		"cwd":             capStr(e.Cwd),                   // structural (blessed by SL-1 testdata); not content
+		"cwd":             capStr(e.Cwd),                  // structural (blessed by SL-1 testdata); not content
 		"permission_mode": enumOr(e.PermissionMode, permissionModes),
 	})
 }

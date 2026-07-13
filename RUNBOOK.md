@@ -6,10 +6,13 @@ Claude Code session events + git commit→deploy lineage, observe them stored in
 real openbox-core, and **view them in the openbox-fe developer dashboard**. Every
 step here was executed and verified on Linux.
 
-Two paths, pick your depth:
+Three paths, pick your depth:
 - **Path A — core only (§2–§4):** register → emit → verify with `psql`. No Keycloak/FE.
-- **Path B — full dashboard (§5):** adds the Keycloak auth + `openbox-fe` so you
+- **Path B — full dashboard (§5):** adds a **local** Keycloak + `openbox-fe` so you
   log in and see the data rendered. Builds on Path A.
+- **Path C — hybrid (§6):** local data plane (Postgres/backend/core) but **auth,
+  Guardrail, and OPA point at a shared UAT env over VPN**. Fastest inner loop —
+  no local Keycloak realm bootstrap, log in as your real UAT identity. Builds on A+B.
 
 > **Phase-1 posture:** observe-only, **metadata-only** (no prompt/command/file
 > content leaves the machine), fail-open (never blocks a tool call or a commit).
@@ -164,6 +167,7 @@ docker compose -f ../openbox-backend/docker-compose.yml exec -T postgres \
 
 cd ../openbox-core
 go run ./cmd/core governance-worker &      # MANDATORY — executes the governance workflow
+go run ./cmd/core attestation-worker &     # seals Merkle leaves; omit → "Merkle proof: Pending" forever
 go run ./cmd/core server --addr 0.0.0.0:8086 &
 # core auto-loads ./.env (DB=localhost:5432/openbox, REDIS, TEMPORAL_HOST=localhost:7233,
 # MODE=debug, KMS_PROVIDER=local). "ListenAndServe(debug): 0.0.0.0:8086" = ready.
@@ -171,6 +175,14 @@ go run ./cmd/core server --addr 0.0.0.0:8086 &
 
 > The worker logs `agent identity verifier: AWS_REGION not configured` — expected
 > and harmless locally (no KMS verifier; see §4 signing note).
+
+> **`attestation-worker` is required for tamper-evidence.** The server's scheduler
+> (`FinalizeTerminalSessionAttestations`, every `FINALIZE_TERMINAL_SESSION_INTERVAL_SEC`
+> ≈30s) finds terminal sessions without attestation and starts
+> `FinalizeSessionAttestationWorkflow` → `BuildEventMerkleNode` + `FinalizeSession`,
+> which writes one `session_merkle_leaves` row per event. Without this worker the
+> workflow is scheduled but never executes, and the dashboard shows **"Merkle proof:
+> Pending"** indefinitely. Start it and a completed session seals within ~30s.
 
 ---
 
@@ -493,12 +505,88 @@ curl -s "${A[@]}" http://localhost:3000/agent/<agentId>/sessions/<sessionUuid>/l
 
 ---
 
-## 6. Teardown
+## 6. Path C — hybrid: local data plane + UAT auth (fastest inner loop)
+
+Run **Postgres + backend + core locally**, but point **auth (Keycloak), Guardrail,
+and OPA at a shared UAT env** reached over VPN. This skips the entire local-Keycloak
+realm-bootstrap dance (§5.1–5.3) — you log in as your **real UAT identity** and your
+org already exists upstream. Verified 2026-07-13 (org `openbox.ai`).
+
+**Topology:** local = Postgres, Redis, Temporal, backend `:3000`, core `:8086` +
+governance-worker + attestation-worker, `openbox-fe :3233`, **KMS local**. UAT (via
+VPN) = Keycloak (`identity.node.lat`), Guardrail (`openbox-guardrails.node.lat`),
+OPA (`opa.node.lat`).
+
+### 6.1 Connect the VPN, then merge UAT endpoints into the active `.env` (not `.env.local`)
+
+> ⚠️ **Neither app reads `.env.local`.** core does bare `godotenv.Load()` (→ `.env`);
+> backend `ConfigModule.forRoot({isGlobal:true})` has no `envFilePath` (→ `.env`).
+> A staged `.env.local` is **inert** — you must merge its keys into the active `.env`,
+> and **selectively**: keep DB/Redis/Temporal/KMS **local**, only move the service
+> URLs to UAT. A blind `cp .env.local .env` on core drags its `DB_HOST` to a
+> shared/prod-ish ELB — don't.
+
+- **`openbox-backend/.env`** — set the Keycloak block to UAT (base URL
+  `https://identity.node.lat`, the UAT `KEYCLOAK_CLIENT_*` id/secret, redirect/web-origins
+  including `http://localhost:3233/*`); keep `SUPABASE_DB_URI` on `localhost`,
+  `KMS_PROVIDER=local`, `NODE_ENV=development`.
+- **`openbox-core/.env`** — set only `OPA_URL=https://opa.node.lat` and
+  `GUARDRAIL_URL=https://openbox-guardrails.node.lat`; keep `DB_HOST=localhost`,
+  `KMS_PROVIDER=local`, `WORKFLOW_ID_PREFIX`/task queues as-is (server & worker must match).
+
+Sanity after connecting: `getent hosts identity.node.lat && curl -sf https://identity.node.lat/realms/<org>/.well-known/openid-configuration` (the `.node.lat` hosts are Cloudflare-fronted; a 302/JSON = reachable).
+
+### 6.2 The admin-API constraint — two extra dev-gated backend patches
+
+UAT Keycloak's **admin REST API sits behind an RBAC gateway** (`/admin/*` → `403
+"RBAC: access denied"`) that a locally-running backend cannot pass — even a client-
+credentials token carrying every realm-management role is rejected at the edge.
+**Public OIDC works** (login = password grant on `/realms/<org>/…/token`; JWKS verify),
+so login and all DB-backed dashboard reads are fine — but any backend call using
+`kcAdminClient` fails. Apply [Appendix A.4](#a4-backend--getorganization-admin-api-fallback)
+and [Appendix A.5](#a5-backend--getuserteams-admin-api-fallback) (both `NODE_ENV`-gated).
+Without A.5 the dashboard 500s on *every* authenticated route (incl. `POST /auth/csrf`).
+
+### 6.3 Onboard + log in
+
+1. Do §2–§4 with `--org <your-uat-org>` (e.g. `openbox.ai`) so the dev agent's
+   `organization_id` matches your Keycloak realm/email-domain. Seed the control
+   token for that org (§2.2). Set `signing_required=false` (§3.2).
+2. `yarn build` the backend after the A.4/A.5 patches, (re)start it, and run
+   `openbox-fe` (§5.5) — deps are usually already installed, so
+   `node node_modules/vite/bin/vite.js --port 3233` works without pnpm.
+3. Log in at `http://localhost:3233`: realm/org = your UAT org, email = your UAT
+   user, password = your **real UAT password**. No realm registration needed.
+
+### 6.4 What the dashboard shows (dev-runtime Phase-1 expectations)
+
+- ToolCall/etc. render **metadata only** — `event_id, tool_name, event_type,
+  trust_tier, workflow_id`(=agent DID)`, permission_mode, age_fallback_used`. **No
+  Input/Output/file-path**: content is stripped at source (INV-2). The UI *has*
+  those fields because it's shared with the agent runtime; observe-only leaves them empty.
+- **Activity** column: shows the **tool name** for ToolCall/ToolResult (`Edit`/`Bash`/
+  `mcp__…`) and the **event type** for lifecycle/`Deploy` (`SessionStarted`…). The
+  client emits `activity_type` on the wire (SL-12) — a pass-through column the shared
+  UI reads; without it the column falls back to the literal **"Unknown"**. (The fix is
+  shift-left-only; openbox-fe/backend are untouched.)
+- `age_fallback_used: true` = core's goal-alignment/AGE couldn't get a real answer
+  from the UAT Guardrail/OPA routes → fail-open `ALLOW`. Cosmetic for observe-only;
+  for real scoring, point core at a Guardrail/OPA that serves the routes it calls.
+- **Merkle proof** seals within ~30s **only if `attestation-worker` is running** (§2.4).
+
+> **Env-load note for the snap toolchain:** if `node`/`yarn` are snap packages, the
+> backend and FE dev servers may be killed when launched from a wrapping shell, and
+> their logs land in snap's private `/tmp`. Run them in a **plain interactive
+> terminal** and log to a `$HOME` path. core (static Go binary) is unaffected.
+
+---
+
+## 7. Teardown
 
 ```sh
 # openbox-fe: stop the `pnpm dev` / vite process
-# core (find the two `go run ./cmd/core …` processes) — Ctrl-C or:
-pkill -f 'cmd/core (server|governance-worker)'
+# core (find the `go run ./cmd/core …` processes) — Ctrl-C or:
+pkill -f 'cmd/core (server|governance-worker|attestation-worker)'
 docker rm -f obx-temporal
 cd ../openbox-backend && docker compose down          # add -v to also drop volumes/data (incl. the Keycloak realm)
 # stop the backend `yarn start:dev` process
@@ -508,7 +596,7 @@ cd ../openbox-backend && docker compose down          # add -v to also drop volu
 
 ---
 
-## 7. EXT-core caveat (production reality)
+## 8. EXT-core caveat (production reality)
 
 Stock openbox-core's `/evaluate` accept-list does **not** include the
 developer-runtime event types — it 400s them. [Appendix A.2](#a2-openbox-core--ext-core-accept-list)
@@ -560,6 +648,35 @@ it on env so production still enforces:
   require a non-empty `recaptchaToken` string, so callers pass any placeholder
   (`"dev-bypass"`); the FE gets a real token from the reCAPTCHA **test** site key.
 
+### A.4 backend — `getOrganization` admin-API fallback
+
+*(Path C only.)* The public `GET /organization/:id` org-precheck calls
+`kcAdminClient.realms.findOne`. Against a UAT Keycloak whose admin API is
+gateway-gated (§6.2) this 403s and surfaces as `NotFoundException("Organization
+not found")`, blocking the FE org-entry screen. Make it dev-tolerant:
+
+- `src/modules/organization/organization.service.ts` `getOrganization` — wrap the
+  admin lookup in try/catch; on success return the realm profile; on failure (or
+  null) in non-production return `{ id: orgId, displayName: orgId }`; in production
+  re-throw / keep `throw new NotFoundException('Organization not found')`.
+
+### A.5 backend — `getUserTeams` admin-API fallback
+
+*(Path C only, and the critical one.)* `TeamAccessGuard` runs on **every protected
+route** (including `POST /auth/csrf` right after login) and calls
+`TeamService.getUserTeams`, which makes two admin-API calls
+(`AuthService.getUserGroups` + `getTeams`). Against a gated UAT admin API both throw,
+500-ing the entire authenticated surface. Make it dev-tolerant:
+
+- `src/modules/team/team.service.ts` `getUserTeams` — wrap the `Promise.all` in
+  try/catch; on failure in non-production return `{ userTeams: [], allTeams: [] }`
+  (org admins still get org-wide scope via `teamIds=undefined` in the guard, so data
+  stays visible); in production re-throw.
+
+> These join the KMS-provider (A.1) and reCAPTCHA (A.3) patches as **uncommitted,
+> `NODE_ENV`-gated, production-safe** local-dev enablement. Rebuild with `yarn build`
+> (note: `tsc` strips comments, so grep `dist/` for the fallback **code**, not the comment).
+
 ---
 
 ## Troubleshooting
@@ -580,3 +697,6 @@ it on env so production still enforces:
 | FE loads but calls fail with CORS | Backend `ALLOWED_ORIGINS` must include `http://localhost:3233` (it's the `.env.example` default). |
 | Dashboard is empty after login | The logged-in realm/org must equal the data's `agents.organization_id`. Register the org and run `dev init --org <same>` (§5.3–5.4). |
 | Logs endpoint 500 `invalid input syntax for type uuid` | Use the **session UUID** (`id` from `/sessions`), not the `run_id`, in `/sessions/<id>/logs`. |
+| Dashboard shows **"Merkle proof: Pending"** forever | `attestation-worker` not running — start `go run ./cmd/core attestation-worker` (§2.4); a terminal session seals within ~30s. |
+| (Path C) `GET /admin/...` `403 "RBAC: access denied"`; login OK but dashboard 500s on `POST /auth/csrf`; `/organization/:id` → "Organization not found" | UAT Keycloak's **admin API is gateway-gated** and unreachable from a local backend (§6.2). Apply A.4 (`getOrganization`) + A.5 (`getUserTeams`) fallbacks; `yarn build` + restart. Public OIDC (login) is unaffected. |
+| (Path C) backend/FE process dies silently, empty logs | Snap `node`/`yarn`: private `/tmp` hides logs and the wrapping shell may reap the server. Run in a plain terminal, log to `$HOME` (§6.4). |

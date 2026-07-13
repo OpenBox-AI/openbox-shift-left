@@ -142,6 +142,20 @@ func ResolveIdentity() (Identity, error) {
 	return Identity{DeveloperDID: did}, nil
 }
 
+// ResolveCoordinates resolves the NON-SECRET target coordinates — the core base
+// URL and the developer DID — from env then the dev config, applying the same
+// precedence and default as ResolveCredentials but with ZERO secret-store access
+// (INV-1). It backs read-only previews such as `openbox dev verify --dry-run`,
+// which must show what WOULD be called without reading the obx_ key or seed. A
+// missing/unreadable config degrades to env + defaults (best-effort display);
+// did is "" when nothing configures it (the caller shows "not configured").
+func ResolveCoordinates() (baseURL, did string) {
+	cfg, _ := loadDevConfig(DefaultConfigPath())
+	baseURL = firstNonEmpty(os.Getenv(envBaseURL), cfg.BaseURL, defaultBaseURL)
+	did = firstNonEmpty(os.Getenv(envDID), cfg.DID)
+	return baseURL, did
+}
+
 // DefaultSpoolDir is where hot-path events are spooled before flush. Override
 // with OPENBOX_SPOOL_DIR (tests use a temp dir).
 func DefaultSpoolDir() string {

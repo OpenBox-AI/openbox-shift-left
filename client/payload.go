@@ -18,14 +18,19 @@ const source = "developer-runtime"
 // (activity/signal/workflow-specific) are intentionally omitted — they stay
 // absent (omitempty), which is additive and INV-8-safe.
 type governanceEventPayload struct {
-	Source     string          `json:"source"`
-	EventType  string          `json:"event_type"`
-	WorkflowID string          `json:"workflow_id"`
-	RunID      string          `json:"run_id"`
-	Timestamp  string          `json:"timestamp"`
-	SpanCount  int             `json:"span_count,omitempty"`
-	Spans      []spanData      `json:"spans,omitempty"`
-	Metadata   json.RawMessage `json:"metadata,omitempty"`
+	Source    string `json:"source"`
+	EventType string `json:"event_type"`
+	// ActivityType is core's pass-through activity_type column (verified stored
+	// verbatim for any accepted event_type — openbox-core storage_event.go), which
+	// the openbox-fe dashboard's "Activity" column reads first. Always set (see
+	// activityLabel) so the UI never falls back to "Unknown".
+	ActivityType string          `json:"activity_type,omitempty"`
+	WorkflowID   string          `json:"workflow_id"`
+	RunID        string          `json:"run_id"`
+	Timestamp    string          `json:"timestamp"`
+	SpanCount    int             `json:"span_count,omitempty"`
+	Spans        []spanData      `json:"spans,omitempty"`
+	Metadata     json.RawMessage `json:"metadata,omitempty"`
 }
 
 // spanData mirrors the subset of openbox-core's SpanData
@@ -63,11 +68,12 @@ func buildPayload(ev DevEvent) ([]byte, error) {
 	}
 
 	p := governanceEventPayload{
-		Source:     source,
-		EventType:  string(ev.EventType),
-		WorkflowID: workflowID,
-		RunID:      ev.SessionID,
-		Timestamp:  ev.Timestamp,
+		Source:       source,
+		EventType:    string(ev.EventType),
+		ActivityType: activityLabel(ev),
+		WorkflowID:   workflowID,
+		RunID:        ev.SessionID,
+		Timestamp:    ev.Timestamp,
 	}
 
 	if sp := buildSpan(ev); sp != nil {
@@ -85,6 +91,27 @@ func buildPayload(ev DevEvent) ([]byte, error) {
 	// returned here are BOTH hashed for the signature AND sent as the body, so
 	// they must be produced exactly once (client.go never re-marshals).
 	return json.Marshal(p)
+}
+
+// activityLabel resolves the human-readable action label emitted as core's
+// pass-through `activity_type` column (openbox-fe's "Activity" column reads it
+// first and shows the literal "Unknown" when absent — verified verify/
+// trust-tab.tsx). It is derived ONLY from fields that survive the adapter's spool
+// round-trip (EventType + Tool.Name are persisted; a `json:"-"` field would not),
+// so a spooled tool call still lands its specific tool name:
+//   - a tool event (ToolCall/ToolResult) → the specific tool name ("Edit"/
+//     "Bash"/"mcp__…"), the most useful Activity label;
+//   - everything else (lifecycle, Deploy) → the event_type string.
+//
+// Always non-empty (EventType always set). Identifier-class only — a tool name or
+// an event type — never content (INV-2).
+func activityLabel(ev DevEvent) string {
+	if ev.EventType == EventToolCall || ev.EventType == EventToolResult {
+		if ev.Tool.Name != "" {
+			return ev.Tool.Name
+		}
+	}
+	return string(ev.EventType)
 }
 
 // buildSpan produces the single carried span, or nil when the event has none.

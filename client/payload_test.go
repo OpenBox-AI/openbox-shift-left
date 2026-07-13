@@ -32,6 +32,48 @@ func rawMeta(t *testing.T, p governanceEventPayload) map[string]any {
 	return m
 }
 
+// TestBuildPayload_ActivityType asserts the pass-through activity_type the
+// openbox-fe dashboard's "Activity" column reads. It is derived from persisted
+// fields (EventType + Tool.Name) so it survives the adapter's spool round-trip: a
+// tool event carries the specific tool name; everything else carries the
+// event_type — never empty (empty would render Activity="Unknown").
+func TestBuildPayload_ActivityType(t *testing.T) {
+	// Tool events → the specific tool name (survives spooling; tool.name is on the
+	// wire, unlike any json:"-" field).
+	for _, et := range []EventType{EventToolCall, EventToolResult} {
+		p := decodePayload(t, DevEvent{
+			EventID: "e1", EventType: et, SessionID: "s1", DeveloperDID: "did:aip:abc",
+			Tool: Tool{Name: "Edit", Kind: ToolFile},
+		})
+		if p.ActivityType != "Edit" {
+			t.Errorf("%s activity_type = %q, want %q", et, p.ActivityType, "Edit")
+		}
+	}
+	// Lifecycle → the event_type string (NOT the "claude-code" tool name), never empty.
+	life := decodePayload(t, DevEvent{
+		EventID: "e2", EventType: EventSessionStarted, SessionID: "s1", DeveloperDID: "did:aip:abc",
+		Tool: Tool{Name: "claude-code", Kind: ToolShell},
+	})
+	if life.ActivityType != string(EventSessionStarted) {
+		t.Errorf("lifecycle activity_type = %q, want %q", life.ActivityType, EventSessionStarted)
+	}
+	// Deploy (git action, no tool-name label) → "Deploy".
+	dep := decodePayload(t, DevEvent{
+		EventID: "e3", EventType: EventDeploy, SessionID: "s1", DeveloperDID: "did:aip:abc",
+		Tool: Tool{Name: "openbox-git-action", Kind: ToolShell},
+	})
+	if dep.ActivityType != string(EventDeploy) {
+		t.Errorf("deploy activity_type = %q, want %q", dep.ActivityType, EventDeploy)
+	}
+	// A tool event with no tool name falls back to the event_type (never empty).
+	nameless := decodePayload(t, DevEvent{
+		EventID: "e4", EventType: EventToolCall, SessionID: "s1", DeveloperDID: "did:aip:abc",
+	})
+	if nameless.ActivityType != string(EventToolCall) {
+		t.Errorf("nameless tool activity_type = %q, want %q", nameless.ActivityType, EventToolCall)
+	}
+}
+
 func TestBuildPayload_Envelope(t *testing.T) {
 	ev := DevEvent{
 		EventID:      "e1",

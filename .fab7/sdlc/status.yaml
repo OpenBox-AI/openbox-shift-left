@@ -1,5 +1,5 @@
 version: 1
-updated_at: "2026-07-13T00:00:00Z"  # SL-1..SL-6 + WIRE-1/2 + FILEBACKEND DONE. NEW: SL-9/SL-10/SL-11 drafted (status=ready) — "Advisory-tier SDK parity" (bucket #2 of the SDK↔shift-left gap analysis): consume the verdict/guardrail signals record-only (never block), signing-error diagnostics, and `openbox dev verify`. Enforcement (the `apply` leg) stays the deferred NEXT increment (gated on spike S2 / OD9). SL-7 Codex / SL-8 Cursor still deferred.
+updated_at: "2026-07-13T00:00:00Z"  # SL-1..SL-6 + WIRE-1/2 + FILEBACKEND + SL-9/SL-10 DONE. SL-11 (`openbox dev verify`) BUILT + validated — awaiting G3 (live ✓/✗ against local core). SL-12 (dashboard `activity_type` label — fixes Activity="Unknown", shift-left-only) BUILT + validated — awaiting G3. Bucket #2 = "Advisory-tier SDK parity". Enforcement (the `apply` leg) stays the deferred NEXT increment (spike S2 / OD9). SL-7 Codex / SL-8 Cursor still deferred (fast-follow).
 owner: "orchestrator"
 stories:
   STORY-SL-1:
@@ -505,7 +505,7 @@ stories:
       blocked_reason: null
   STORY-SL-11:
     title: "openbox dev verify (auth/validate + signing round-trip)"
-    status: "ready"
+    status: "built"  # built + validated 2026-07-13; awaiting G3_REVIEW (brian: diff + live ✓/✗)
     epic: "E2"
     sprint: null
     priority: "P2"
@@ -533,5 +533,36 @@ stories:
       completed_at: null
       validation_artifact: null
       last_run_id: null
-      status_reason: "DRAFTED (STORY-SL-11.md). Bucket #2 item 'auth/validate at init'. Core exposes GET /api/v1/auth/validate (openbox-core internal/api/main.go:118); the SDK signs this GET so signing_required agents pass — reuse client/signing.go. Standalone read-only `dev verify` (not folded into dev init, because /auth/validate is on core whose base_url is set later in dev.json). Reuses SL-10's reason map for the failure hint. Awaiting build (last: uses SL-9/SL-10 groundwork)."
+      status_reason: "BUILT + VALIDATED 2026-07-13 — awaiting G3_REVIEW (brian: diff + a live ✓ against local core + a ✗ against a bad key). client/validate.go: Client.Validate(ctx) signs an empty-body GET /api/v1/auth/validate (reuses signer.sign, method-agnostic; canonical GET\\n<path>\\n<ts>\\n<nonce>\\n<sha256(\"\")>), same auth headers as Emit; NOT fail-open (returns a *ValidateError with the SL-10 mapped diagnostic on non-2xx, a clear wrapped error on transport failure). Exported AuthValidatePath + AsValidateError. cli `dev verify`: reuses claudecode.ResolveCredentials (+ new ResolveCoordinates for --dry-run non-secret preview); prints `✓ verified: <did> @ <base_url>` or `✗ <mapped reason+fix>`; exit 0/non-zero; --dry-run/--print-plan offline; TLS guard via client.New; no-creds → 'run openbox dev init first'. Cross-repo Explore (openbox-core + SDK) CONFIRMED the wire contract; NUANCE: verifier_not_configured collapses to HTTP 500 with 'verifier' in the message (not 401) → diagnose 500-branch enhanced to map it to the verifier_not_configured fix hint (existing SL-10 test unaffected). Minor scope note: added ResolveCoordinates to adapters/claude-code/creds.go (non-secret resolver reuse) alongside the client/+cli/ scope. All modules green (client+cli under -race); real-binary checked (dry-run, no-creds, TLS-guard). G3_REVIEW (brian) pending."
+      blocked_reason: null
+  STORY-SL-12:
+    title: "Dashboard Activity label (emit activity_type)"
+    status: "built"  # built + validated 2026-07-13; awaiting G3_REVIEW (brian: diff + live dashboard shows real labels)
+    epic: "E2"
+    sprint: null
+    priority: "P2"
+    dependencies:
+      - "STORY-SL-3"
+    blocked_by: []
+    write_scope:
+      - "client/  # event.go payload struct + payload.go activityLabel() derivation"
+    validation_commands:
+      - "cd client && go build ./... && go vet ./... && go test ./...  # activity_type derivation: tool→name, lifecycle/Deploy→event_type, never empty"
+      - "cd cli && go test ./...  # TestHookEndToEndSmoke asserts activity_type on the delivered wire body (spool→flush)"
+    invariants:
+      - "INV-1: no secret on the wire"
+      - "INV-2: identifier/enum only (tool name or event type), never content"
+      - "INV-3: no control-flow change; additive to SL-1/SL-3 payload"
+    gates:
+      G3_REVIEW:
+        decision: "not-run"
+        evidence: null
+        decided_by: null
+        decided_at: null
+    audit:
+      commit: null
+      completed_at: null
+      validation_artifact: null
+      last_run_id: null
+      status_reason: "BUILT + VALIDATED 2026-07-13 — awaiting G3_REVIEW. Fixes the live-pilot 'Activity: Unknown' the dashboard shows for developer-runtime events, WITHOUT touching openbox-fe/backend (brian's constraint). Cross-repo Explore (openbox-core + backend + fe) traced the cause: the shared Temporal UI reads event.activity_type||signal_name||workflow_type||operation||'Unknown' (verify/trust-tab.tsx:168-174); activity_type is a PASS-THROUGH column (openbox-core storage_event.go:264, stored verbatim for any accepted event_type) our client never set. FIX (client-only): buildPayload now emits activity_type via activityLabel(ev) — derived from PERSISTED fields (EventType + Tool.Name) so it survives the SL-4 spool round-trip (a json:\"-\" field would be lost between hot-path spool and flush Emit): tool events → the specific tool name (Edit/Bash/mcp__…), lifecycle + Deploy → the event_type string; ALWAYS non-empty. Identifier-class only, never content (INV-2); no control-flow change (INV-3). Input/Output stay empty by design (metadata-only, INV-2/OD4) — out of scope, documented RUNBOOK §6.4. Proven end-to-end: cli TestHookEndToEndSmoke asserts activity_type=Bash (tool, survives spool) + activity_type=SessionStarted (lifecycle) on the delivered /evaluate body; client unit tests cover the derivation + never-empty. All modules green (client under -race). G3_REVIEW (brian) pending + a live dashboard check that Activity shows real labels."
       blocked_reason: null

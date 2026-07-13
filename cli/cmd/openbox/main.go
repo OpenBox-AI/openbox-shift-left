@@ -20,6 +20,7 @@ import (
 
 	claudecode "github.com/openbox-ai/openbox-shift-left/adapters/claude-code"
 	obgit "github.com/openbox-ai/openbox-shift-left/adapters/common/git"
+	"github.com/openbox-ai/openbox-shift-left/client"
 	"github.com/openbox-ai/openbox-shift-left/cli/internal/backend"
 	"github.com/openbox-ai/openbox-shift-left/cli/internal/devinit"
 	"github.com/openbox-ai/openbox-shift-left/cli/internal/providers"
@@ -88,10 +89,85 @@ func (a *app) run(args []string) int {
 }
 
 func (a *app) runDev(args []string) int {
-	if len(args) == 0 || args[0] != "init" {
-		return a.errorf("usage: openbox dev init --provider <claude-code|codex|cursor> [flags]")
+	if len(args) == 0 {
+		return a.errorf("usage: openbox dev <init|verify> [flags]")
 	}
-	return a.runDevInit(args[1:])
+	switch args[0] {
+	case "init":
+		return a.runDevInit(args[1:])
+	case "verify":
+		return a.runDevVerify(args[1:])
+	default:
+		return a.errorf("usage: openbox dev <init|verify> [flags]")
+	}
+}
+
+// runDevVerify is the read-only data-plane preflight (STORY-SL-11):
+// `openbox dev verify` resolves the finished dev.json + creds (reusing the
+// adapter's resolvers), then a SIGNED GET /api/v1/auth/validate against the
+// ACTUAL core it emits to confirms the obx_ key + Ed25519 signing round-trip
+// work. It is strictly read-only — no mint, no config write, no secret printed
+// (INV-1) — and prints one ✓ line or a ✗ with the SL-10 mapped fix hint.
+func (a *app) runDevVerify(args []string) int {
+	fs := flag.NewFlagSet("openbox dev verify", flag.ContinueOnError)
+	fs.SetOutput(a.stderr)
+	var dryRun bool
+	fs.BoolVar(&dryRun, "dry-run", false, "print the plan (method, path, base_url, DID); make no network call")
+	fs.BoolVar(&dryRun, "print-plan", false, "alias for --dry-run")
+	if err := fs.Parse(args); err != nil {
+		return exitError
+	}
+
+	// --dry-run is fully offline: resolve only the NON-SECRET coordinates (no
+	// keychain read, no network) and print what the real run would call.
+	if dryRun {
+		baseURL, did := claudecode.ResolveCoordinates()
+		fmt.Fprintln(a.stdout, "DRY RUN — openbox dev verify would call (no network, no secret access):")
+		fmt.Fprintf(a.stdout, "  request:  GET %s%s\n", baseURL, client.AuthValidatePath)
+		fmt.Fprintf(a.stdout, "  base_url: %s\n", baseURL)
+		fmt.Fprintf(a.stdout, "  did:      %s\n", displayOrUnset(did))
+		return exitOK
+	}
+
+	// Reuse the adapter's resolvers (dev.json + OS keychain / file backend / env).
+	// A missing identity means onboarding hasn't run — say so, don't half-proceed.
+	creds, err := claudecode.ResolveCredentials()
+	if err != nil {
+		return a.errorf("cannot verify — %v.\n"+
+			"  Run `openbox dev init --provider <claude-code|codex|cursor>` first, then retry.", err)
+	}
+
+	// client.New enforces the INV-1 TLS guard (refuses plaintext http:// to a
+	// non-loopback core) and validates the identity shape before any network I/O.
+	c, err := client.New(client.Config{
+		BaseURL: creds.BaseURL,
+		APIKey:  creds.APIKey,
+		DID:     creds.DID,
+		SeedB64: creds.SeedB64,
+		// No Logger: Validate returns its diagnostic directly (not fail-open).
+	})
+	if err != nil {
+		return a.errorf("%v", err)
+	}
+
+	if err := c.Validate(context.Background()); err != nil {
+		// ✗ to stderr; the message is the SL-10 mapped reason + fix hint. It never
+		// contains the key/seed/nonce/signature (INV-1) — only status + guidance.
+		fmt.Fprintf(a.stderr, "✗ %v\n", err)
+		return exitError
+	}
+	// ✓ names only the DID + base_url (INV-1: no secret in output).
+	fmt.Fprintf(a.stdout, "✓ verified: %s @ %s\n", creds.DID, creds.BaseURL)
+	return exitOK
+}
+
+// displayOrUnset renders an empty coordinate as an actionable placeholder for the
+// dry-run plan rather than a blank line.
+func displayOrUnset(s string) string {
+	if s == "" {
+		return "(not configured — run `openbox dev init`)"
+	}
+	return s
 }
 
 // runHook is the unified observe-only hook entrypoint (STORY-SL4-WIRE-2):
@@ -234,6 +310,7 @@ func (a *app) usage() {
 
 Usage:
   openbox dev init --provider <claude-code|codex|cursor> [flags]
+  openbox dev verify [--dry-run]
   openbox version
 
 Environment:
