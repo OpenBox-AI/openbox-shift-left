@@ -24,6 +24,16 @@ const (
 	headerAgentNonce    = "X-OpenBox-Agent-Nonce"
 	headerAgentSig      = "X-OpenBox-Agent-Signature"
 	headerBodySHA256    = "X-OpenBox-Body-SHA256"
+
+	// headerIdempotencyKey carries the event's idempotency key (== DevEvent.EventID
+	// == metadata.event_id) as a standard request header (INV-5). It is NOT part of
+	// the AIP canonical string (which is only METHOD\nPATH\nTIMESTAMP\nNONCE\n
+	// BODY_SHA256 — verified against openbox-core services/agent.go), so adding it
+	// never affects signature verification. It is INERT until EXT-core dedupes on it
+	// (SL3-IDEMPOTENCY): core accepts and ignores unknown headers today (verified —
+	// no header allow-list on /evaluate). It makes the dedupe contract explicit and
+	// header-standard; the body still carries the same id in metadata.event_id.
+	headerIdempotencyKey = "Idempotency-Key"
 )
 
 // sdkVersion is advertised via X-OpenBox-SDK-Version / User-Agent. core reads

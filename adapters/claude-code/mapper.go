@@ -2,6 +2,7 @@ package claudecode
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"strings"
 	"time"
@@ -32,7 +33,12 @@ type Identity struct {
 type Mapper struct {
 	Identity Identity
 	Now      func() time.Time // injectable clock; defaults to time.Now
-	NewID    func() string    // injectable idempotency-id source (INV-5); defaults to a random hex id
+	// NewID, when non-nil, OVERRIDES the idempotency-id source (INV-5) — used by
+	// tests to pin ids. When nil (the production default), the id is DERIVED
+	// deterministically from the event's own structural fields (deriveID): the
+	// same event always yields the same id (robust if ever recomputed from the
+	// spooled record) and two distinct events never collide.
+	NewID func() string
 	// Finops, when non-nil, carries the usage NUMBERS ONLY the finops reader
 	// extracted from the SessionEnd transcript (STORY-SL-16 / OD-FINOPS). Map
 	// copies them onto the SessionEnded event only. nil (the default) ⇒ events
@@ -52,9 +58,11 @@ type FinopsUsage struct {
 	Cost   *client.Cost
 }
 
-// NewMapper returns a Mapper with production defaults.
+// NewMapper returns a Mapper with production defaults. NewID is left nil so the
+// event_id is derived deterministically from each event's structural fields
+// (deriveID / INV-5); the clock defaults to time.Now.
 func NewMapper(id Identity) Mapper {
-	return Mapper{Identity: id, Now: time.Now, NewID: randomID}
+	return Mapper{Identity: id, Now: time.Now}
 }
 
 // Map converts one hook payload into a normalized DevEvent. The bool reports
@@ -74,7 +82,12 @@ func (m Mapper) Map(hook HookName, e *HookEvent) (client.DevEvent, bool) {
 	}
 
 	now := m.clock()
-	ts := now.UTC().Format(time.RFC3339)
+	// RFC3339Nano (not RFC3339): the sub-second precision is the per-event
+	// distinguisher deriveID folds into the id so two same-tool events in the same
+	// wall-clock second never collide. It is byte-identical to RFC3339 for a
+	// whole-second instant (Go omits an all-zero fraction) and core parses it with
+	// RFC3339Nano (payload.go rfc3339Nanos), so nothing downstream changes.
+	ts := now.UTC().Format(time.RFC3339Nano)
 
 	// WorkspaceID is left empty so the client uses the developer DID as core's
 	// workflow_id. The DID is present on every event, so (workflow_id, run_id) is
@@ -84,7 +97,6 @@ func (m Mapper) Map(hook HookName, e *HookEvent) (client.DevEvent, bool) {
 	// blessed workflow_id).
 	ev := client.DevEvent{
 		SchemaVersion: client.SchemaVersion,
-		EventID:       m.newID(),
 		SessionID:     e.SessionID,
 		DeveloperDID:  m.Identity.DeveloperDID,
 		Timestamp:     ts,
@@ -133,6 +145,11 @@ func (m Mapper) Map(hook HookName, e *HookEvent) (client.DevEvent, bool) {
 		return client.DevEvent{}, false
 	}
 
+	// Derive the idempotency id LAST, from the now fully-populated structural
+	// fields (INV-5). Done here rather than at struct-literal time so the
+	// distinguishers set inside the switch (event_type, tool, span locator) all
+	// feed the derivation.
+	ev.EventID = m.eventID(ev)
 	return ev, true
 }
 
@@ -301,20 +318,72 @@ func (m Mapper) clock() time.Time {
 	return time.Now()
 }
 
-func (m Mapper) newID() string {
+// eventID resolves the event's idempotency id (INV-5): the injected NewID when a
+// caller/test pins one, otherwise the deterministic derivation from the event's
+// own structural fields.
+func (m Mapper) eventID(ev client.DevEvent) string {
 	if m.NewID != nil {
 		return m.NewID()
 	}
-	return randomID()
+	return deriveID(ev)
 }
 
-// randomID is the default idempotency-id source (INV-5): 16 random bytes hex.
+// deriveID computes the deterministic, collision-safe idempotency id (INV-5) for
+// an event as "cc-" + sha256 over its structural fields. It is a PURE function of
+// the event, so:
+//   - the SAME logical event always yields the SAME id — robust even if the id is
+//     ever recomputed from the spooled/persisted record (the fields it hashes all
+//     survive the spool round-trip), and
+//   - two DISTINCT events never collide: the high-resolution timestamp
+//     (RFC3339Nano) is the per-event distinguisher, reinforced by the structural
+//     separators (session, type, tool name, file/function locator).
+//
+// INV-1: only non-secret structural fields feed the hash — never the obx_ key or
+// the Ed25519 seed (neither reaches the Mapper). INV-2: the span file_path is a
+// structural locator, not content; no prompt/command/output text is ever hashed.
+// INV-3: the hot-path cost is one SHA-256 over a short string — no I/O, no secret,
+// allocation-cheap — so the fail-open budget is unchanged.
+//
+// NOTE (EXT-core / SL3-IDEMPOTENCY): a stable+unique client id is only HALF the
+// idempotency contract. The completing half is server-side dedupe on this id
+// (carried in metadata.event_id and the Idempotency-Key header); openbox-core does
+// not dedupe developer events on it today (verified). Until it does, a client
+// retry after a lost 200 can still be stored twice server-side — the client
+// guarantees the id is stable so that eventual dedupe is trivially correct.
+func deriveID(ev client.DevEvent) string {
+	// 0x1f (unit separator) delimits fields so no concatenation of two events'
+	// values can alias a third ("a"+"bc" hashes differently from "ab"+"c").
+	const sep = 0x1f
+	var b strings.Builder
+	b.WriteString(ev.SessionID)
+	b.WriteByte(sep)
+	b.WriteString(string(ev.EventType))
+	b.WriteByte(sep)
+	b.WriteString(ev.Tool.Name)
+	b.WriteByte(sep)
+	b.WriteString(ev.Timestamp) // RFC3339Nano — the per-event distinguisher
+	if ev.Span != nil {
+		// The file locator / MCP function further separate two same-instant tool
+		// events (structural identifiers only — INV-2).
+		b.WriteByte(sep)
+		b.WriteString(ev.Span.FilePath)
+		b.WriteByte(sep)
+		b.WriteString(ev.Span.Function)
+	}
+	sum := sha256.Sum256([]byte(b.String()))
+	return "cc-" + hex.EncodeToString(sum[:])
+}
+
+// randomID is a source of filesystem-unique suffixes for the spool (rotate /
+// recovery / reclaim file names). It is NOT the event idempotency id (that is
+// deriveID); it must stay random so concurrent drains never collide on a name.
 func randomID() string {
 	var b [16]byte
 	if _, err := rand.Read(b[:]); err != nil {
-		// Non-fatal: fall back to a fixed marker; the client only requires a
-		// non-empty id, and a crypto/rand failure is astronomically unlikely.
-		return "cc-evt-fallback"
+		// Non-fatal: fall back to a fixed marker (a crypto/rand failure is
+		// astronomically unlikely); a colliding suffix only risks losing the race
+		// for one orphaned spool file, never a tool call.
+		return "sfx-fallback"
 	}
-	return "cc-" + hex.EncodeToString(b[:])
+	return hex.EncodeToString(b[:])
 }

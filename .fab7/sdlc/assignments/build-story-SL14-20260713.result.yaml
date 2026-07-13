@@ -1,0 +1,107 @@
+assignment_id: "build-story-SL14-20260713"
+role: "build_engineer"
+story: "STORY-SL-14"
+status: "completed"
+summary: >
+  Built STORY-SL-14 (idempotency hardening — deterministic event_id + delivery-guarantee
+  matrix). The Claude Code adapter's event_id is now DERIVED deterministically from the
+  event's own structural fields (adapters/claude-code deriveID: "cc-" + sha256 over
+  session_id, event_type, tool.name, RFC3339Nano timestamp, and the span file_path/function
+  locator, 0x1f-delimited) instead of "cc-"+hex(random). Same logical event → same id (robust
+  if ever recomputed from the spooled record); two distinct events never collide (sub-second
+  timestamp is the per-event distinguisher). The client now also sends a standard
+  Idempotency-Key request header (== EventID == metadata.event_id), constant across retries,
+  NOT part of the AIP canonical string (signature-safe) and inert until EXT-core consumes it.
+  Delivery-guarantee test matrix added (the real deliverable): determinism + collision-freedom
+  (property), id stability across spool→rotate→flush→recovery, recovery-drain never re-sends an
+  acked event, and lost-200 retry re-sends the SAME key. STAYS fail-open (INV-3): no change to
+  Emit's return, retry classification, or the Pre/PostToolUse hot path; deriveID is one pure
+  allocation-cheap SHA-256, no I/O, no secret. Validation green: adapter + client
+  build/vet/test -race all pass; gofmt clean. One human gate remains: G3_REVIEW (brian).
+stop_condition_triggered: false
+key_design_decision: >
+  Two design cruxes, both resolved without triggering the story's stop conditions.
+  (1) DETERMINISM SOURCE. The CC hook payload carries NO timestamp and no per-event
+  distinguisher for repeated event types (prompt text / command strings are content, INV-2, so
+  they cannot feed the id). Rather than fall back to random ids for those types (stop condition
+  #1), the id derives from the event's own high-resolution timestamp — exactly the distinguisher
+  the story suggested ("tool + high-resolution timestamp"). To make "robust if ever regenerated"
+  literally true, the event Timestamp was widened from RFC3339 to RFC3339Nano and the id derives
+  purely from the PERSISTED event fields — so re-deriving from the spooled record reproduces the
+  id byte-for-byte. RFC3339Nano is byte-identical to RFC3339 for a whole-second instant (Go omits
+  an all-zero fraction) and core parses it with RFC3339Nano (payload.go rfc3339Nanos), so nothing
+  downstream changes and all existing whole-second-clock tests stay green. (2) HEADER SAFETY. A
+  read-only cross-repo Explore of openbox-core (per user directive) confirmed the Idempotency-Key
+  header is inert (no header allow-list on /evaluate; unknown headers ignored) and NOT covered by
+  the AIP canonical string (METHOD\nPATH\nTIMESTAMP\nNONCE\nBODY_SHA256 only — services/agent.go
+  BuildAgentIdentityCanonicalRequest), so adding it cannot break signature verification. Stop
+  condition #2 (drop header if core rejects) therefore NOT triggered. The git-action deploy id
+  (deploy-<env>-<full-sha>) is already deterministic and was left untouched (out of write scope).
+artifacts:
+  created_or_updated:
+    - "adapters/claude-code/mapper.go (deriveID: deterministic cc- + sha256 over structural fields; eventID() seam; NewMapper leaves NewID nil so deriveID is the default; ts -> RFC3339Nano; randomID demoted to spool-filename-suffix only; INV-1/2/3/5)"
+    - "adapters/claude-code/idempotency_test.go (NEW — delivery-guarantee matrix: determinism incl. recompute-from-spooled-record, collision-freedom property incl. same-second-different-nanosecond + 0x1f separator forgery, no-content-in-id, id stability across spool→rotate→flush, recovery-drain never re-sends acked)"
+    - "client/signing.go (headerIdempotencyKey const + rationale: not signed, inert until EXT-core)"
+    - "client/client.go (attempt/post thread the event id; set Idempotency-Key header == EventID, guarded non-empty; retry/fail-open path otherwise unchanged)"
+    - "client/client_test.go (NEW TestEmit_IdempotencyKeyHeader = header==EventID==metadata.event_id; TestEmit_IdempotencyKeyStableAcrossRetries = lost-200 retry re-sends same key)"
+    - "client/README.md (Idempotency INV-5 section + table row rewritten: client owns stable+unique key & at-most-once; server-side dedupe is the EXT-core completing half)"
+    - "adapters/claude-code/README.md (deriveID note + EXT-core completing-half pointer)"
+    - ".fab7/sdlc/status.yaml (STORY-SL-14 status_reason -> built + validated; awaiting G3_REVIEW)"
+  proposed_only: []
+write_scope_used:
+  - "adapters/claude-code/"
+  - "client/"
+  - ".fab7/sdlc/status.yaml"
+  - ".fab7/sdlc/assignments/build-story-SL14-20260713.result.yaml"
+cross_repo_reference:
+  method: "Read-only Explore agent (per user directive: always use explore for cross-repo reference) over ../openbox-core"
+  verified:
+    - "HEADER HANDLING: /api/v1/governance/evaluate (internal/api/main.go:123) has no request-header allow-list. The only middleware is Logger/Recover + CORS (main.go:82-114); Echo CORS AllowHeaders only populates the preflight response header, never rejects a real POST's headers. Handler EvaluateGovernanceEvent (governance.go:28-203) reads headers only by name. => Idempotency-Key is inert (ignored, non-fatal)."
+    - "SIGNATURE SCOPE: BuildAgentIdentityCanonicalRequest (internal/services/agent.go:93-101) = UPPER(METHOD)\\nPATH\\nTIMESTAMP\\nNONCE\\nBODY_SHA256; verifier reads exactly the 5 AIP headers (identity.go:36-59). No full-header-set hashing => adding Idempotency-Key does not change the signed string. Body integrity via X-OpenBox-Body-SHA256 (agent.go:167), so the key must ride in a header (it does), not the body."
+    - "NO DEDUPE ON event_id/Idempotency-Key today: no Idempotency-Key handling in non-test core source; GovernanceEventPayload (internal/content/governance.go) has no inbound event_id field. Existing suppression keys on the tuple (agent_id, workflow_id, run_id, activity_id, event_type) + span_id for hook events (governance_workflow.go:193-233, validation.go:75-96) — dev events don't populate activity_id, so they are not deduped. Confirms the EXT-core completing half (SL3-IDEMPOTENCY)."
+acceptance_criteria:
+  - id: "AC1 (deterministic, collision-safe event_id)"
+    status: "met"
+    evidence: "deriveID is a pure fn of structural fields; keeps cc- prefix. TestDeriveID_Deterministic (same event → same id, incl. recompute from JSON-round-tripped spooled record). TestDeriveID_DistinctEventsNeverCollide (single-field mutations incl. same-second/diff-nanosecond and 0x1f-separator forgery all hash uniquely). Git-action id left as-is (deterministic)."
+  - id: "AC2 (explicit Idempotency-Key header == event_id)"
+    status: "met"
+    evidence: "client.attempt sets Idempotency-Key = EventID. TestEmit_IdempotencyKeyHeader asserts header == EventID == metadata.event_id in the signed body. Documented as EXT-core completing piece (signing.go const + READMEs). Not part of canonical string (verified) => signature-safe; existing signature tests green."
+  - id: "AC3 (delivery-guarantee test matrix)"
+    status: "met"
+    evidence: "lost-200 retry re-sends same id: TestEmit_IdempotencyKeyStableAcrossRetries (+ existing TestEmit_RetryReusesSameEventID). crash-then-recovery never re-sends acked: TestEventID_RecoveryNeverReSendsAcked. distinct never reuses: TestDeriveID_DistinctEventsNeverCollide. stable across spool→rotate→flush→recovery: TestEventID_StableAcrossSpoolLifecycle."
+  - id: "AC4 (INV-3 preserved — no hot-path / fail-open / retry change)"
+    status: "met"
+    evidence: "Emit still returns (VerdictUnknown, nil) on any error; post/attempt retry classification (5xx/429 retryable, 4xx terminal) unchanged apart from setting one header. deriveID is one SHA-256 over a short string — no I/O, no secret, allocation-cheap. All prior fail-open/retry tests green."
+  - id: "AC5 (honest docs — server dedupe is the completing half)"
+    status: "met"
+    evidence: "client/README.md Idempotency section + INV-5 table row; adapters/claude-code/README.md deriveID note; deriveID + headerIdempotencyKey doc comments all state server-side dedupe on the id (EXT-core / SL3-IDEMPOTENCY) is the completing half."
+nonfunctional:
+  - id: "correctness (deterministic + collision-free)"
+    status: "met"
+    evidence: "property-style mutation test + recompute-from-record determinism test."
+  - id: "performance (hot-path id O(1)/cheap)"
+    status: "met"
+    evidence: "deriveID = one sha256.Sum256 over a short strings.Builder string; no I/O, no secret, no map alloc."
+  - id: "compatibility (old random-id spooled events still flush)"
+    status: "met"
+    evidence: "the id is never re-derived on the delivery path — drainRotated unmarshals the DevEvent and delivers its stored EventID verbatim; deriveID runs only at Map time. Old cc-<random> spooled lines flush unchanged (id is opaque downstream)."
+invariants_enforced:
+  - "INV-5: stable+unique client id per event; retries/recovery never double-count on shift-left's side (client at-most-once; server dedupe = EXT-core)."
+  - "INV-3: fail-open + hot-path budget unchanged; deriveID pure/allocation-cheap; header add guarded and non-blocking."
+  - "INV-1: id derives only from non-secret structural fields; the obx_ key and Ed25519 seed never reach the Mapper and are never hashed."
+  - "INV-2: only structural locators (file_path/function) feed the id; no prompt/command/output content is hashed (TestDeriveID_NoContentInID)."
+validation:
+  commands:
+    - "cd adapters/claude-code && go build ./... && go vet ./... && go test -race ./...  -> ok (all pass)"
+    - "cd client && go build ./... && go vet ./... && go test -race ./...  -> ok (all pass)"
+    - "gofmt -l (changed files) -> clean"
+  new_tests:
+    - "adapters/claude-code: TestDeriveID_Deterministic, TestDeriveID_DistinctEventsNeverCollide, TestDeriveID_NoContentInID, TestEventID_StableAcrossSpoolLifecycle, TestEventID_RecoveryNeverReSendsAcked"
+    - "client: TestEmit_IdempotencyKeyHeader, TestEmit_IdempotencyKeyStableAcrossRetries"
+gates:
+  G3_REVIEW:
+    decision: "not-run"
+    note: "Human gate (brian). Awaiting diff review + the delivery-matrix tests, then brian sign-off. Not live-verified (no change strictly needs the running stack; the in-process spool→flush→recovery + retry matrix exercises the behavior end-to-end). Optional live E2E available via local RUNBOOK if brian wants it."
+follow_ups:
+  - "EXT-core (SL3-IDEMPOTENCY): implement server-side dedupe on the event_id / Idempotency-Key the client now sends — the completing half. Today core dedupes only on (agent_id, workflow_id, run_id, activity_id, event_type)+span_id, which dev events don't populate."
+  - "SL-7 Codex / SL-8 Cursor adapters should adopt the same deriveID pattern for their event_id when built."

@@ -161,7 +161,7 @@ func (c *Client) Emit(ctx context.Context, ev DevEvent) (Evaluation, error) {
 		return Evaluation{}, nil
 	}
 
-	respBody, err := c.post(ctx, body)
+	respBody, err := c.post(ctx, body, ev.EventID)
 	if err != nil {
 		// Fail-open (INV-3): log a single actionable diagnostic and drop. On a
 		// core HTTP rejection describeDrop maps the (bounded) response body to a
@@ -174,8 +174,10 @@ func (c *Client) Emit(ctx context.Context, ev DevEvent) (Evaluation, error) {
 }
 
 // post signs and sends the body with bounded retries. It returns the response
-// body on a 2xx, or an error (which Emit converts to a fail-open drop).
-func (c *Client) post(ctx context.Context, body []byte) ([]byte, error) {
+// body on a 2xx, or an error (which Emit converts to a fail-open drop). idemKey
+// is the event's idempotency id — identical across every attempt (INV-5), so a
+// retry after a lost 200 re-sends the SAME key, never a new one.
+func (c *Client) post(ctx context.Context, body []byte, idemKey string) ([]byte, error) {
 	var lastErr error
 	for attempt := 0; attempt <= c.maxRetries; attempt++ {
 		if attempt > 0 {
@@ -186,7 +188,7 @@ func (c *Client) post(ctx context.Context, body []byte) ([]byte, error) {
 			case <-time.After(time.Duration(attempt) * c.retryBase):
 			}
 		}
-		respBody, retryable, err := c.attempt(ctx, body)
+		respBody, retryable, err := c.attempt(ctx, body, idemKey)
 		if err == nil {
 			return respBody, nil
 		}
@@ -200,7 +202,7 @@ func (c *Client) post(ctx context.Context, body []byte) ([]byte, error) {
 
 // attempt performs one signed POST. retryable reports whether a retry could
 // plausibly succeed (network error or 5xx / 429); a 4xx is terminal.
-func (c *Client) attempt(ctx context.Context, body []byte) (respBody []byte, retryable bool, err error) {
+func (c *Client) attempt(ctx context.Context, body []byte, idemKey string) (respBody []byte, retryable bool, err error) {
 	sig, err := c.signer.sign(http.MethodPost, evaluatePath, body, c.now())
 	if err != nil {
 		return nil, false, err // signing failure is not retryable
@@ -221,6 +223,13 @@ func (c *Client) attempt(ctx context.Context, body []byte) (respBody []byte, ret
 	req.Header.Set(headerAgentNonce, sig.nonce)
 	req.Header.Set(headerAgentSig, sig.sig)
 	req.Header.Set(headerBodySHA256, sig.bodySHA)
+	// Explicit idempotency key (INV-5). Constant across retries; not part of the
+	// signed canonical string, so it never perturbs verification. Inert until
+	// EXT-core dedupes on it (SL3-IDEMPOTENCY); the body carries the same id in
+	// metadata.event_id regardless. Empty only if a caller bypassed Emit's guard.
+	if idemKey != "" {
+		req.Header.Set(headerIdempotencyKey, idemKey)
+	}
 
 	resp, err := c.http.Do(req)
 	if err != nil {

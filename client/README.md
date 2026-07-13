@@ -50,7 +50,7 @@ verdict, err := c.Emit(ctx, client.DevEvent{
 | **INV-1** obx_ key + Ed25519 seed never logged/leaked | `signing.go` (seed stays in `signer`); `client.go` logs only ids/types/errors; plaintext `http://` to a non-loopback host is refused (`checkBaseURL`) so the bearer key can't travel in the clear |
 | **INV-2** strip content when content-capture disabled | `payload.go:stripContent`, gated in `client.go:Emit` (default off) |
 | **INV-3** fail-open; never block the caller | `client.go:Emit` returns `(VerdictUnknown, nil)` on any transport error |
-| **INV-5** client event id for idempotent ingestion | `DevEvent.EventID` required; carried in `metadata.event_id` (core has no first-class field); retries reuse the identical body. **End-to-end dedupe needs an EXT-core change** — see below |
+| **INV-5** client event id for idempotent ingestion | `DevEvent.EventID` required (deterministic + collision-safe — adapter `deriveID`); carried in `metadata.event_id` (core has no first-class field) **and** the `Idempotency-Key` header; retries reuse the identical key/body. **End-to-end dedupe needs an EXT-core change** — see below |
 
 ## semantic_type is set indirectly (verified core behavior)
 
@@ -67,12 +67,27 @@ tracked as a contract doc fix.)
 
 ## Idempotency (INV-5) is best-effort until EXT-core
 
-`event_id` is transmitted in `metadata`, but core does **not** currently dedupe
-the developer event types (its dedupe paths need `activity_id` / a span unique
-constraint, which dev events don't have). So a retry after an ambiguous success
-(committed, but the 200 was lost) can double-count. This is telemetry skew in
-Phase-1 observe, not a safety issue, and closes when EXT-core keys dedupe on
-`metadata.event_id`.
+The client owns **half** the idempotency contract and guarantees it (STORY-SL-14):
+
+- **Stable + unique key.** The CC `event_id` is derived deterministically from the
+  event's own structural fields (adapters/claude-code `deriveID`), so the same
+  logical event always hashes to the same id and two distinct events never
+  collide — robust even if the id is ever recomputed from the spooled record.
+- **On the wire twice.** It rides in `metadata.event_id` **and** in a standard
+  `Idempotency-Key` request header (`== EventID`), constant across every retry.
+  The header is inert until core consumes it and is not part of the AIP canonical
+  string, so it never perturbs signature verification (verified against
+  openbox-core `BuildAgentIdentityCanonicalRequest`).
+- **Client at-most-once.** A retry re-sends the identical key (never a fresh one);
+  the spool never re-sends an acked event across rotate/flush/recovery.
+
+The **completing half is server-side** and not built here: core does **not**
+currently dedupe the developer event types (its dedupe paths key on
+`activity_id` / a span unique constraint, which dev events don't have — verified).
+So a retry after an ambiguous success (stored, but the 200 was lost) can still be
+counted twice *server-side*. This is telemetry skew in Phase-1 observe, not a
+safety issue, and closes when **EXT-core** keys dedupe on the `event_id` /
+`Idempotency-Key` value (SL3-IDEMPOTENCY).
 
 ## Cross-repo alignment (verified via Explore, 2026-07-08)
 

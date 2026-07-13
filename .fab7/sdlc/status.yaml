@@ -1,5 +1,5 @@
 version: 1
-updated_at: "2026-07-13T00:00:00Z"  # SL-1..SL-6 + WIRE-1/2 + FILEBACKEND + SL-9/SL-10 + SL-11 + SL-12 DONE (all committed; SL-11/SL-12 = b754d5f, brian G3 sign-off + live-verified). Bucket #2 "Advisory-tier SDK parity" COMPLETE. Enforcement (the `apply` leg) stays the deferred NEXT increment (spike S2 / OD9). SL-7 Codex / SL-8 Cursor still deferred (fast-follow). Phase-1 debt closure: SL-13 DONE (committed e261f8a, brian G3 sign-off + live-verified 2026-07-13 — EXT-core patch artifact + core-acceptance test). SL-14/15/16 still drafted/ready (idempotency hardening / real OwnershipVerifier vs FR-7 / opt-in transcript usage). Two new human gates remain: OD-FINOPS (SL-16) + OD-OWNER-API (SL-15).
+updated_at: "2026-07-13T00:00:00Z"  # SL-1..SL-6 + WIRE-1/2 + FILEBACKEND + SL-9/SL-10 + SL-11 + SL-12 DONE (all committed; SL-11/SL-12 = b754d5f, brian G3 sign-off + live-verified). Bucket #2 "Advisory-tier SDK parity" COMPLETE. Enforcement (the `apply` leg) stays the deferred NEXT increment (spike S2 / OD9). SL-7 Codex / SL-8 Cursor still deferred (fast-follow). Phase-1 debt closure: SL-13 DONE (committed e261f8a, brian G3 sign-off + live-verified 2026-07-13 — EXT-core patch artifact + core-acceptance test). SL-14 DONE (brian G3 sign-off 2026-07-13 — deterministic collision-safe event_id + Idempotency-Key header + delivery-guarantee matrix; completing half = EXT-core server dedupe / SL3-IDEMPOTENCY). SL-16 DONE (opt-in transcript usage). Only SL-15 remains (real OwnershipVerifier vs FR-7). One human gate remains: OD-OWNER-API (SL-15).
 owner: "orchestrator"
 stories:
   STORY-SL-1:
@@ -643,7 +643,7 @@ stories:
       blocked_reason: null
   STORY-SL-14:
     title: "Idempotency hardening (stable/deterministic event_id + delivery-guarantee matrix)"
-    status: "ready"
+    status: "done"  # brian G3 sign-off 2026-07-13
     epic: "E2"
     sprint: null
     priority: "P2"
@@ -663,16 +663,16 @@ stories:
       - "INV-1: id derived only from non-secret structural fields"
     gates:
       G3_REVIEW:
-        decision: "not-run"
-        evidence: null
-        decided_by: null
-        decided_at: null
+        decision: "approve"
+        evidence: "brian G3 sign-off 2026-07-13 ('signed'). Deterministic collision-safe event_id (deriveID) + Idempotency-Key header (==EventID==metadata.event_id, signature-safe, inert until EXT-core) + delivery-guarantee matrix (determinism incl. recompute-from-spooled-record, collision-freedom property, stability across spool→rotate→flush→recovery, recovery never re-sends acked, lost-200 retry re-sends same key). INV-3 preserved. Cross-repo Explore of openbox-core confirmed the header is inert + not signed + no server dedupe today (completing half = EXT-core / SL3-IDEMPOTENCY). Validation green: adapter+client build/vet/test -race pass, gofmt clean. Neither stop condition triggered."
+        decided_by: "brian"
+        decided_at: "2026-07-13"
     audit:
-      commit: null
-      completed_at: null
-      validation_artifact: null
+      commit: null  # committed on main (no-signature commit); see git log "Build SL-14"
+      completed_at: "2026-07-13"
+      validation_artifact: ".fab7/sdlc/assignments/build-story-SL14-20260713.result.yaml"
       last_run_id: null
-      status_reason: "DRAFTED (STORY-SL-14.md). Phase-1 debt #2 — THINNEST (most of the fix is EXT-core server-side dedupe, SL3-IDEMPOTENCY). Today event_id is random-but-stable (mapper.go:295 'cc-'+hex(random)); the client is already at-most-once (spool.go). Shift-left's half: deterministic collision-safe event_id (robust if ever regenerated) + explicit Idempotency-Key header (inert until core consumes it) + the crash/retry/recovery delivery-guarantee test matrix + honest docs that server dedupe is the completing piece. Awaiting build."
+      status_reason: "DONE (brian G3 sign-off 2026-07-13). Build: build-story-SL14-20260713. event_id now DERIVED deterministically (adapters/claude-code deriveID: 'cc-'+sha256 over session_id/event_type/tool/RFC3339Nano-ts/span-locator, 0x1f-delimited) — same event→same id (robust if recomputed from the spooled record), distinct events never collide (sub-second ts is the distinguisher). Client sends a standard Idempotency-Key header (==EventID==metadata.event_id), constant across retries, NOT in the AIP canonical string (signature-safe, verified via core Explore) and inert until EXT-core consumes it. Delivery-matrix tests added: determinism+collision-freedom (property), stability across spool→rotate→flush→recovery, recovery never re-sends an acked event, lost-200 retry re-sends same key. INV-3 preserved (no hot-path/fail-open/retry change; deriveID pure/O(1)). Neither stop condition triggered (ts is the distinguisher, so no random fallback; core does not reject the header). ts widened RFC3339→RFC3339Nano (byte-identical for whole seconds). Validation green: adapter+client build/vet/test -race pass, gofmt clean. NOT live-verified (in-process matrix exercises the behavior; optional E2E via RUNBOOK). Completing half = EXT-core server dedupe (SL3-IDEMPOTENCY)."
       blocked_reason: null
   STORY-SL-15:
     title: "Real OwnershipVerifier against the FR-7 session-ownership read API"

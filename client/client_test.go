@@ -308,3 +308,89 @@ func TestEmit_RetryReusesSameEventID(t *testing.T) {
 		t.Error("retry body differed from original — idempotency broken")
 	}
 }
+
+// TestEmit_IdempotencyKeyHeader (STORY-SL-14): every POST carries an
+// Idempotency-Key request header equal to the event's EventID and to the
+// metadata.event_id in the signed body — the explicit, header-standard half of
+// the dedupe contract (inert until EXT-core consumes it).
+func TestEmit_IdempotencyKeyHeader(t *testing.T) {
+	var mu sync.Mutex
+	var headers []string
+	var bodies [][]byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		mu.Lock()
+		headers = append(headers, r.Header.Get("Idempotency-Key"))
+		bodies = append(bodies, body)
+		mu.Unlock()
+		w.WriteHeader(200)
+		_, _ = w.Write([]byte(`{"verdict":"allow"}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	c, _ := newTestClient(t, srv.URL, false)
+	ev := sampleEvent()
+	ev.EventID = "cc-abc123"
+	if _, err := c.Emit(context.Background(), ev); err != nil {
+		t.Fatalf("Emit: %v", err)
+	}
+	if len(headers) != 1 {
+		t.Fatalf("calls = %d, want 1", len(headers))
+	}
+	if headers[0] != ev.EventID {
+		t.Errorf("Idempotency-Key = %q, want %q (== EventID)", headers[0], ev.EventID)
+	}
+	// And it must equal metadata.event_id in the signed body.
+	var p governanceEventPayload
+	if err := json.Unmarshal(bodies[0], &p); err != nil {
+		t.Fatalf("unmarshal body: %v", err)
+	}
+	var meta map[string]any
+	if err := json.Unmarshal(p.Metadata, &meta); err != nil {
+		t.Fatalf("unmarshal metadata: %v", err)
+	}
+	if meta["event_id"] != ev.EventID {
+		t.Errorf("metadata.event_id = %v, want %q", meta["event_id"], ev.EventID)
+	}
+	if headers[0] != meta["event_id"] {
+		t.Errorf("Idempotency-Key %q != metadata.event_id %v", headers[0], meta["event_id"])
+	}
+}
+
+// TestEmit_IdempotencyKeyStableAcrossRetries (STORY-SL-14): a retry after a lost
+// 200 (modeled as a 500 then 200) re-sends the SAME Idempotency-Key — never a
+// freshly generated one — so an eventual server-side dedupe collapses the two
+// stored copies. This is the client half of the lost-200 delivery guarantee.
+func TestEmit_IdempotencyKeyStableAcrossRetries(t *testing.T) {
+	var mu sync.Mutex
+	var headers []string
+	calls := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		calls++
+		n := calls
+		headers = append(headers, r.Header.Get("Idempotency-Key"))
+		mu.Unlock()
+		if n < 2 {
+			w.WriteHeader(500) // lost-200 stand-in: server stored it, client saw failure
+			return
+		}
+		w.WriteHeader(200)
+		_, _ = w.Write([]byte(`{"verdict":"allow"}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	c, _ := newTestClient(t, srv.URL, false)
+	ev := sampleEvent()
+	ev.EventID = "cc-retry-me"
+	if _, err := c.Emit(context.Background(), ev); err != nil {
+		t.Fatalf("Emit: %v", err)
+	}
+	if len(headers) != 2 {
+		t.Fatalf("calls = %d, want 2 (1 + 1 retry)", len(headers))
+	}
+	if headers[0] != ev.EventID || headers[1] != ev.EventID {
+		t.Errorf("Idempotency-Key not stable across retry: %q then %q, want %q both",
+			headers[0], headers[1], ev.EventID)
+	}
+}

@@ -29,6 +29,14 @@ budget persists the **undelivered remainder** to a recovery file that the next
 `flush`/`FlushAll` completes — the tail is not dropped, and delivered events are
 never re-sent.
 
+Each event's `event_id` is derived deterministically from its structural fields
+(`deriveID` in `mapper.go`): the same logical event always hashes to the same id
+and two distinct events never collide, so the id is stable through the whole
+spool → rotate → flush → recovery lifecycle (INV-5). That is the client half of
+idempotency; **server-side dedupe on that id is the completing half** and is not
+built here — it lands as an EXT-core change (SL3-IDEMPOTENCY), keyed on the
+`event_id` / `Idempotency-Key` the client already sends. See `client/README.md`.
+
 ## Event mapping (SL-1 contract)
 
 | Claude Code hook | SL-1 `event_type` | Span (`semantic_type`) |
