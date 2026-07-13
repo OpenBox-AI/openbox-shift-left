@@ -62,10 +62,97 @@ func EnforceDecision(ctx context.Context, cl *sidecar.Client, id Identity, e *Ho
 
 // newSidecarClient builds the fail-open enforce-hook client for the configured
 // socket. It never fails: an empty/absent socket path simply means every Decide
-// fails open (the daemon is treated as absent). The timeout defaults to
+// fails open (the daemon is treated as absent). The timeout is the configured
+// hard per-call budget (E6-S3, ResolveEnforceTimeout); 0 ⇒
 // sidecar.DefaultDecisionTimeout (~50 ms, ADR-0002).
 func newSidecarClient() *sidecar.Client {
-	return sidecar.NewClient(sidecar.ClientConfig{SocketPath: ResolveSidecarSocket()})
+	return sidecar.NewClient(sidecar.ClientConfig{
+		SocketPath: ResolveSidecarSocket(),
+		Timeout:    ResolveEnforceTimeout(),
+	})
+}
+
+// ── E6-S3: fail-open / fail-closed failure policy ────────────────────────────
+//
+// The failure policy decides what the enforce gate does when the local sidecar
+// could NOT deliver a real verdict (absent, dial refused, timeout, malformed
+// reply — i.e. sidecar.Decision.FailOpen==true). It is the Go port of the
+// reference SDK's governance_policy / _handle_api_error (client.py:204-208): on an
+// evaluate failure the SDK returns either None (fail-open → no verdict → the
+// action proceeds) or a SYNTHESIZED Verdict.HALT (fail-closed → the SAME
+// enforce_verdict cascade runs → the action is blocked). We mirror that shape
+// exactly so the E6-S2 apply cascade (mapVerdict/applyDecision) stays entirely
+// policy-agnostic — a fail-closed deny travels the identical path as a real BLOCK.
+
+// FailurePolicy is the per-org enforce failure posture (OD9). FailOpen is the
+// zero value and the default: an OpenBox outage degrades to observe (proceed).
+type FailurePolicy int
+
+const (
+	// FailOpen degrades to observe on an evaluation failure — the tool proceeds
+	// (OD9 default). An infra outage never blocks the developer.
+	FailOpen FailurePolicy = iota
+	// FailClosed denies the tool call on an evaluation failure (explicit per-org
+	// opt-in). An OpenBox outage blocks work rather than letting it through
+	// ungoverned.
+	FailClosed
+)
+
+func (p FailurePolicy) String() string {
+	if p == FailClosed {
+		return "fail_closed"
+	}
+	return "fail_open"
+}
+
+// resolveFailurePolicy reads the configured failure posture (ResolveFailClosed).
+func resolveFailurePolicy() FailurePolicy {
+	if ResolveFailClosed() {
+		return FailClosed
+	}
+	return FailOpen
+}
+
+// applyFailurePolicy is the Go analog of the SDK's _handle_api_error, applied
+// between OBTAIN (E6-S1) and APPLY (E6-S2). It touches a decision ONLY when the
+// sidecar failed to deliver a real verdict (dec.FailOpen) AND the org opted into
+// fail-closed: it then synthesizes a HALT verdict (exactly as the SDK returns a
+// synthetic Verdict.HALT) carrying a content-free reason, so the unchanged,
+// policy-agnostic mapVerdict cascade denies the call via its normal HALT path.
+//
+// In every other case it returns the decision UNCHANGED:
+//   - fail-open (default): a fail-open decision stays VerdictUnknown → mapVerdict
+//     emits nothing → proceed (byte-identical to E6-S2 / observe).
+//   - a REAL verdict (dec.FailOpen==false) under either policy: the failure policy
+//     governs ONLY the evaluation-unavailable case, never a real ALLOW/CONSTRAIN/
+//     BLOCK answer — a reachable sidecar's allow still proceeds under fail-closed.
+//
+// This only ever converts a would-be PROCEED into a DENY, so it upholds the
+// tighten-only invariant (E6-S2) and INV-3b (the block is still synchronous,
+// pre-execution, and bounded by the E6-S1 timeout).
+func applyFailurePolicy(dec sidecar.Decision, policy FailurePolicy) sidecar.Decision {
+	if !dec.FailOpen || policy != FailClosed {
+		return dec
+	}
+	// Synthesize the SDK's fail-closed HALT. WouldBlock() becomes true, so the
+	// durable audit records a HALT with FailOpen==true — the unambiguous signature
+	// of a fail-closed deny (a real HALT never carries FailOpen==true).
+	dec.Evaluation.Verdict = client.VerdictHalt
+	dec.Evaluation.Reason = failClosedReason(dec.Evaluation.Reason)
+	return dec
+}
+
+// failClosedReason builds the content-free deny reason for a fail-closed outage.
+// govReason (E6-S2) prepends "OpenBox governance: ". The cause is the fail-open
+// fallback's internal diagnostic (allowFailOpen: "sidecar unavailable", "sidecar
+// read failed or timed out", …) — a fixed, content-free string, never tool
+// content (INV-2).
+func failClosedReason(cause string) string {
+	r := "request denied — no governance decision could be obtained and this session is fail-closed"
+	if cause != "" {
+		r += " (" + cause + ")"
+	}
+	return r
 }
 
 // buildDecisionRequest assembles the local decision request from a PreToolUse
@@ -149,13 +236,16 @@ func compactAny(m map[string]any) map[string]any {
 // observable evidence for E6-S1 (and E6-S7 conformance) that the sync gate ran; it
 // goes to stderr (never stdout — INV-3) and never blocks. E6-S2 adds the actual
 // apply (stdout permissionDecision) on top of this same Decision.
-func logEnforceDecision(logger *log.Logger, e *HookEvent, dec sidecar.Decision) {
+func logEnforceDecision(logger *log.Logger, e *HookEvent, dec sidecar.Decision, policy FailurePolicy) {
 	verdict := string(dec.Evaluation.Verdict)
 	if verdict == "" {
 		verdict = "UNKNOWN" // VerdictUnknown ("") — a fail-open / unevaluated decision
 	}
-	logger.Printf("enforce decision: tool=%s verdict=%s would_block=%t source=%s fail_open=%t stale=%t",
-		capStr(e.ToolName), verdict, dec.Evaluation.WouldBlock(), orDash(dec.Source), dec.FailOpen, dec.Stale)
+	// policy is logged so a fail-closed deny (a synthesized HALT with fail_open=true)
+	// is legible in the diagnostic — otherwise "would_block=true fail_open=true" looks
+	// contradictory. See applyFailurePolicy (E6-S3).
+	logger.Printf("enforce decision: tool=%s verdict=%s would_block=%t source=%s fail_open=%t stale=%t policy=%s",
+		capStr(e.ToolName), verdict, dec.Evaluation.WouldBlock(), orDash(dec.Source), dec.FailOpen, dec.Stale, policy)
 }
 
 // ── E6-S2: apply(verdict) — the enforce leg's teeth ──────────────────────────

@@ -129,7 +129,14 @@ func RunHook(sub string, stdin io.Reader, stdout io.Writer, logger *log.Logger) 
 	// decision, off the blocking path, best-effort (never blocks — INV-3).
 	if hook == HookPreToolUse && ResolveEnforce() {
 		dec := EnforceDecision(context.Background(), newSidecarClient(), id, ev)
-		logEnforceDecision(logger, ev, dec)
+		// STORY-E6-S3: apply the per-org FAILURE POLICY (fail-open default / opt-in
+		// fail-closed, OD9). On an evaluation outage (dec.FailOpen) under fail-closed
+		// this synthesizes a HALT so the unchanged apply cascade denies; otherwise the
+		// decision passes through untouched (fail-open → proceed; a real verdict is
+		// never overridden). The mapVerdict/applyDecision cascade stays policy-agnostic.
+		policy := resolveFailurePolicy()
+		dec = applyFailurePolicy(dec, policy)
+		logEnforceDecision(logger, ev, dec, policy)
 		applied, _ := applyDecision(stdout, dec)
 		recordEnforcement(logger, ev, dec, applied)
 	}

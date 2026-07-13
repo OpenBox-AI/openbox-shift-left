@@ -7,7 +7,9 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/openbox-ai/openbox-shift-left/client"
 )
@@ -41,6 +43,8 @@ const (
 	envFinops          = "OPENBOX_FINOPS"
 	envInstallGitHook  = "OPENBOX_INSTALL_GIT_HOOK"
 	envEnforce         = "OPENBOX_ENFORCE"
+	envFailClosed      = "OPENBOX_FAIL_CLOSED"
+	envEnforceTimeout  = "OPENBOX_ENFORCE_TIMEOUT_MS"
 	envSidecarSocket   = "OPENBOX_SIDECAR_SOCKET"
 	envEnforcementFile = "OPENBOX_ENFORCEMENT_FILE"
 	envAPIKeyDirect    = "OPENBOX_API_KEY"
@@ -87,6 +91,24 @@ type DevConfig struct {
 	// the decision; turning a BLOCK/HALT verdict into an actual CC `deny`/`ask` is
 	// E6-S2's apply. OPENBOX_ENFORCE overrides this either way (ResolveEnforce).
 	Enforce bool `json:"enforce,omitempty"`
+	// FailClosed selects the per-org FAILURE POLICY for enforce mode (STORY-E6-S3,
+	// OD9). Default false = FAIL-OPEN: when the local sidecar cannot deliver a real
+	// verdict (absent, timeout, malformed) the tool PROCEEDS (degrade to observe) —
+	// an OpenBox outage never blocks a developer. Set true to opt into FAIL-CLOSED:
+	// the same outage DENIES the tool call. This mirrors the reference SDK's
+	// governance_policy (fail_open|fail_closed, on_api_error). It ONLY changes the
+	// evaluation-UNAVAILABLE case — a real ALLOW/CONSTRAIN verdict from a reachable
+	// sidecar still proceeds under either policy. OPENBOX_FAIL_CLOSED overrides it.
+	FailClosed bool `json:"fail_closed,omitempty"`
+	// EnforceTimeoutMS overrides the hard per-call decision budget (milliseconds)
+	// the enforce hook allows the sidecar before it gives up (STORY-E6-S3; from
+	// spike S2). 0/absent ⇒ sidecar.DefaultDecisionTimeout (~50 ms, ADR-0002). It is
+	// CLAMPED to maxEnforceTimeout (2 s) so the whole PreToolUse hook stays well
+	// under Claude Code's 5 s hook kill — past that, CC kills the hook and the tool
+	// proceeds (a CC-layer fail-OPEN), which would silently defeat a fail-CLOSED org.
+	// A fail-closed org may raise it to ride out transient sidecar slowness without
+	// spuriously blocking. OPENBOX_ENFORCE_TIMEOUT_MS overrides it.
+	EnforceTimeoutMS int `json:"enforce_timeout_ms,omitempty"`
 	// SidecarSocket overrides the Unix socket the enforce hook dials (default:
 	// sidecar.DefaultSocketPath()). The OPENBOX_SIDECAR_SOCKET env overrides it —
 	// the SAME env `openbox sidecar serve` reads, so the daemon and the hook agree.
@@ -252,6 +274,65 @@ func ResolveEnforce() bool {
 		enabled = isTruthy(v)
 	}
 	return enabled
+}
+
+// maxEnforceTimeout caps the configurable enforce decision budget. It is a
+// CORRECTNESS bound, not a nicety: Claude Code kills the PreToolUse hook at 5 s
+// (plugin/hooks/hooks.json), and a hook-kill lets the tool proceed — a CC-layer
+// fail-OPEN that would silently defeat a fail-CLOSED org. Clamping the whole
+// enforce wait to 2 s keeps the full hook (config read + gate + spool) under that
+// kill so a fail-closed deny is actually delivered, and keeps INV-3b bounded.
+const maxEnforceTimeout = 2 * time.Second
+
+// ResolveFailClosed reports the enforce FAILURE POLICY (STORY-E6-S3, OD9): config
+// field first, then the OPENBOX_FAIL_CLOSED env override (env wins), same
+// precedence as every other coordinate. Default FALSE = fail-OPEN (OD9): an
+// OpenBox outage degrades to observe and the tool proceeds. True = fail-CLOSED:
+// the same outage denies. A missing/unreadable config is false (fail-safe — an org
+// never becomes fail-closed by accident, and a config read error never turns
+// enforcement's teeth ON). Cheap config+env read, no secret I/O; safe on the hot
+// path. Only meaningful in enforce mode (ResolveEnforce).
+func ResolveFailClosed() bool {
+	enabled := false
+	if cfg, err := loadDevConfig(DefaultConfigPath()); err == nil {
+		enabled = cfg.FailClosed
+	}
+	if v, ok := os.LookupEnv(envFailClosed); ok {
+		enabled = isTruthy(v)
+	}
+	return enabled
+}
+
+// ResolveEnforceTimeout resolves the hard per-call decision budget the enforce
+// hook allows the local sidecar (STORY-E6-S3; the S2 timeout made a knob):
+// enforce_timeout_ms config first, then OPENBOX_ENFORCE_TIMEOUT_MS (env wins when
+// present AND parseable — a garbage env value is ignored and the config value
+// stands, so a fat-fingered env never silently wipes a valid config). A resolved
+// value <=0 yields 0; the caller passes 0 to sidecar.NewClient, which substitutes
+// sidecar.DefaultDecisionTimeout (~50 ms, ADR-0002), so the default behavior is
+// byte-identical to E6-S1. A positive value over maxEnforceTimeout is clamped
+// (INV-3b bounded + keeps the hook under CC's 5 s kill). No secret I/O; a
+// missing/unreadable config degrades to env-or-default.
+func ResolveEnforceTimeout() time.Duration {
+	ms := 0
+	if cfg, err := loadDevConfig(DefaultConfigPath()); err == nil {
+		ms = cfg.EnforceTimeoutMS
+	}
+	if v, ok := os.LookupEnv(envEnforceTimeout); ok {
+		if n, err := strconv.Atoi(strings.TrimSpace(v)); err == nil {
+			ms = n
+		}
+	}
+	if ms <= 0 {
+		return 0 // ⇒ sidecar.DefaultDecisionTimeout
+	}
+	// Clamp in MILLISECONDS before the multiply so a near-max-int64 value can never
+	// overflow time.Duration (which would wrap to a negative/huge duration). Bounded
+	// by construction, not by accident (G_SEC INFO-2).
+	if maxMS := int64(maxEnforceTimeout / time.Millisecond); int64(ms) > maxMS {
+		return maxEnforceTimeout
+	}
+	return time.Duration(ms) * time.Millisecond
 }
 
 // ResolveSidecarSocket resolves the Unix socket path the enforce hook dials: the

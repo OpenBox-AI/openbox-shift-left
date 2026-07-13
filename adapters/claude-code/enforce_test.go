@@ -493,6 +493,125 @@ func TestRunHook_EnforceApply_Block(t *testing.T) {
 	}
 }
 
+// ── E6-S3: fail-open / fail-closed failure policy ────────────────────────────
+
+// TestApplyFailurePolicy guards AC-2/AC-3/AC-4: the transform synthesizes a HALT
+// ONLY on a fail-open decision under fail-closed; every other case is a no-op
+// (fail-open proceeds; a real verdict is never overridden under either policy).
+func TestApplyFailurePolicy(t *testing.T) {
+	failOpenDec := sidecar.Decision{
+		Evaluation: client.Evaluation{Verdict: client.VerdictUnknown, Reason: "sidecar unavailable"},
+		FailOpen:   true,
+		Source:     "fail-open-client",
+	}
+
+	t.Run("fail-open policy is a no-op even on an outage", func(t *testing.T) {
+		got := applyFailurePolicy(failOpenDec, FailOpen)
+		if got.Evaluation.Verdict != client.VerdictUnknown || got.Evaluation.WouldBlock() {
+			t.Errorf("fail-open must leave the outage as UNKNOWN/proceed, got %+v", got.Evaluation)
+		}
+	})
+
+	t.Run("fail-closed synthesizes HALT on an outage", func(t *testing.T) {
+		got := applyFailurePolicy(failOpenDec, FailClosed)
+		if got.Evaluation.Verdict != client.VerdictHalt || !got.Evaluation.WouldBlock() {
+			t.Errorf("fail-closed must synthesize a blocking HALT, got %+v", got.Evaluation)
+		}
+		if !strings.Contains(got.Evaluation.Reason, "fail-closed") {
+			t.Errorf("reason should mark fail-closed, got %q", got.Evaluation.Reason)
+		}
+		if !strings.Contains(got.Evaluation.Reason, "sidecar unavailable") {
+			t.Errorf("reason should carry the content-free cause, got %q", got.Evaluation.Reason)
+		}
+		// The audit signature of a fail-closed deny: a HALT that is ALSO FailOpen
+		// (a real HALT never carries FailOpen==true).
+		if !got.FailOpen {
+			t.Error("fail-closed synthetic HALT must retain FailOpen==true for the audit")
+		}
+	})
+
+	// A REAL verdict from a reachable sidecar is never overridden — the policy
+	// governs the evaluation-unavailable case only.
+	for _, v := range []client.Verdict{client.VerdictAllow, client.VerdictConstrain, client.VerdictBlock} {
+		t.Run("real "+string(v)+" untouched under fail-closed", func(t *testing.T) {
+			real := sidecar.Decision{Evaluation: client.Evaluation{Verdict: v}, FailOpen: false}
+			if got := applyFailurePolicy(real, FailClosed); got.Evaluation.Verdict != v {
+				t.Errorf("real %s verdict must pass through fail-closed unchanged, got %q", v, got.Evaluation.Verdict)
+			}
+		})
+	}
+}
+
+// TestLogEnforceDecision_PolicyLegible makes a fail-closed deny legible in the
+// stderr diagnostic: a synthesized HALT (would_block=true) that is ALSO fail_open
+// would look contradictory without the policy label.
+func TestLogEnforceDecision_PolicyLegible(t *testing.T) {
+	if FailOpen.String() != "fail_open" || FailClosed.String() != "fail_closed" {
+		t.Fatalf("policy String() = %q/%q", FailOpen, FailClosed)
+	}
+	var buf bytes.Buffer
+	dec := applyFailurePolicy(sidecar.Decision{
+		Evaluation: client.Evaluation{Verdict: client.VerdictUnknown, Reason: "sidecar unavailable"},
+		FailOpen:   true,
+	}, FailClosed)
+	logEnforceDecision(log.New(&buf, "", 0), &HookEvent{ToolName: "Bash"}, dec, FailClosed)
+	out := buf.String()
+	if !strings.Contains(out, "policy=fail_closed") || !strings.Contains(out, "fail_open=true") {
+		t.Errorf("diagnostic should mark the fail-closed policy + fail_open cause; got %q", out)
+	}
+}
+
+// TestRunHook_EnforceFailClosed is the AC-4 end-to-end guard: with enforce ON and
+// fail_closed ON, an UNREACHABLE sidecar → a `deny` on stdout (a fail-closed deny),
+// while a reachable sidecar's real ALLOW still PROCEEDS (the policy governs outages
+// only). AC-7: enforce-OFF is byte-identical even under fail_closed=1. INV-2: the
+// fail-closed reason carries no tool content.
+func TestRunHook_EnforceFailClosed(t *testing.T) {
+	isolateConfig(t)
+	t.Setenv(envDID, testDID)
+	t.Setenv("OPENBOX_SPOOL_DIR", t.TempDir())
+	t.Setenv("OPENBOX_SESSION_DIR", t.TempDir())
+	t.Setenv(envEnforcementFile, filepath.Join(t.TempDir(), "enf.jsonl"))
+
+	payload := `{"hook_event_name":"PreToolUse","session_id":"s","cwd":"/tmp","tool_name":"Bash","tool_input":{"command":"echo hi"}}`
+	run := func() string {
+		var stdout bytes.Buffer
+		RunHook("PreToolUse", strings.NewReader(payload), &stdout, log.New(&bytes.Buffer{}, "", 0))
+		return stdout.String()
+	}
+
+	// enforce ON + fail_closed ON + NO sidecar reachable → deny.
+	t.Setenv(envEnforce, "1")
+	t.Setenv(envFailClosed, "1")
+	t.Setenv(envSidecarSocket, filepath.Join(t.TempDir(), "absent.sock"))
+	out := run()
+	d, reason := parsePermissionDecision(t, []byte(out))
+	if d != ccDecisionDeny {
+		t.Fatalf("fail-closed + outage: permissionDecision = %q, want deny (stdout=%q)", d, out)
+	}
+	if !strings.Contains(reason, "fail-closed") {
+		t.Errorf("fail-closed deny reason = %q, want it to explain the fail-closed outage", reason)
+	}
+	if strings.Contains(out, "echo hi") {
+		t.Errorf("fail-closed reason leaked the shell command (INV-2): %q", out)
+	}
+
+	// A reachable sidecar with a benign command → real ALLOW → PROCEED even under
+	// fail-closed (the policy does not touch a real allow verdict).
+	socket, _ := serveSidecar(t, &sidecar.Bundle{Version: "t", DefaultDecision: "allow"})
+	t.Setenv(envSidecarSocket, socket)
+	if out := run(); strings.TrimSpace(out) != "" {
+		t.Errorf("fail-closed must NOT block a real allow; stdout=%q", out)
+	}
+
+	// enforce OFF (still fail_closed=1) → byte-identical to observe: nothing to stdout.
+	t.Setenv(envEnforce, "0")
+	t.Setenv(envSidecarSocket, filepath.Join(t.TempDir(), "absent.sock"))
+	if out := run(); strings.TrimSpace(out) != "" {
+		t.Errorf("enforce-off must not deny even under fail_closed=1; stdout=%q", out)
+	}
+}
+
 // TestRecordEnforcement_GuardrailCategoryOnly guards the durable-audit half of AC-6
 // / INV-2 (G3 LOW-2, G_SEC LOW-1): a guardrail-failure decision records the CATEGORY
 // type only — never the guardrail reason free text (which can describe detected

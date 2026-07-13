@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 // TestResolveCredentials_FileBackend proves the hook reads the CLI's opt-in
@@ -185,6 +186,94 @@ func TestResolveInstallGitHook(t *testing.T) {
 	t.Setenv(envInstallGitHook, "1")
 	if !ResolveInstallGitHook() {
 		t.Error("env 1 must override config absent/false")
+	}
+}
+
+// TestResolveFailClosed guards E6-S3 AC-1: fail-open is the default (an org never
+// becomes fail-closed by accident); config enables it; the env overrides either way.
+func TestResolveFailClosed(t *testing.T) {
+	cfgPath := filepath.Join(t.TempDir(), "dev.json")
+	write := func(json string) { _ = os.WriteFile(cfgPath, []byte(json), 0o600) }
+	t.Setenv(envConfigPath, cfgPath)
+	os.Unsetenv(envFailClosed) // env genuinely absent → config decides
+
+	// Default: no config field, no env → false (fail-OPEN, OD9).
+	write(`{"developer_did":"` + testDID + `"}`)
+	if ResolveFailClosed() {
+		t.Error("default must be fail-open (false) — never fail-closed by accident")
+	}
+
+	// Config opts into fail-closed.
+	write(`{"developer_did":"` + testDID + `","fail_closed":true}`)
+	if !ResolveFailClosed() {
+		t.Error("fail_closed:true in config should enable fail-closed")
+	}
+
+	// Env overrides config either way.
+	t.Setenv(envFailClosed, "false")
+	if ResolveFailClosed() {
+		t.Error("env false must override config true")
+	}
+	write(`{"developer_did":"` + testDID + `"}`)
+	t.Setenv(envFailClosed, "1")
+	if !ResolveFailClosed() {
+		t.Error("env 1 must override config absent/false")
+	}
+}
+
+// TestResolveEnforceTimeout guards E6-S3 AC-5: default 0 (⇒ sidecar default), env
+// wins over config, and a value over maxEnforceTimeout is clamped so the wait
+// stays under Claude Code's 5 s hook kill.
+func TestResolveEnforceTimeout(t *testing.T) {
+	cfgPath := filepath.Join(t.TempDir(), "dev.json")
+	write := func(json string) { _ = os.WriteFile(cfgPath, []byte(json), 0o600) }
+	t.Setenv(envConfigPath, cfgPath)
+	os.Unsetenv(envEnforceTimeout)
+
+	// Default: unset → 0 (caller lets sidecar.NewClient use DefaultDecisionTimeout).
+	write(`{"developer_did":"` + testDID + `"}`)
+	if d := ResolveEnforceTimeout(); d != 0 {
+		t.Errorf("unset timeout = %v, want 0 (⇒ sidecar default)", d)
+	}
+
+	// Config value honored.
+	write(`{"developer_did":"` + testDID + `","enforce_timeout_ms":250}`)
+	if d := ResolveEnforceTimeout(); d != 250*time.Millisecond {
+		t.Errorf("config timeout = %v, want 250ms", d)
+	}
+
+	// Env overrides config.
+	t.Setenv(envEnforceTimeout, "500")
+	if d := ResolveEnforceTimeout(); d != 500*time.Millisecond {
+		t.Errorf("env timeout = %v, want 500ms", d)
+	}
+
+	// Non-positive / unparseable env → 0 (fall back to the sidecar default).
+	t.Setenv(envEnforceTimeout, "0")
+	if d := ResolveEnforceTimeout(); d != 0 {
+		t.Errorf("zero env timeout = %v, want 0", d)
+	}
+	t.Setenv(envEnforceTimeout, "not-a-number")
+	if d := ResolveEnforceTimeout(); d != 250*time.Millisecond {
+		t.Errorf("unparseable env should fall back to config 250ms, got %v", d)
+	}
+
+	// Negative env → 0 (<=0 falls back to the sidecar default).
+	t.Setenv(envEnforceTimeout, "-1")
+	if d := ResolveEnforceTimeout(); d != 0 {
+		t.Errorf("negative env timeout = %v, want 0", d)
+	}
+
+	// Over the ceiling → clamped (INV-3b bounded; stays under CC's 5 s kill).
+	t.Setenv(envEnforceTimeout, "600000") // 600 s
+	if d := ResolveEnforceTimeout(); d != maxEnforceTimeout {
+		t.Errorf("oversized timeout = %v, want clamp to %v", d, maxEnforceTimeout)
+	}
+
+	// Near-max-int64 must NOT overflow into a negative/huge duration — clamp holds.
+	t.Setenv(envEnforceTimeout, "9223372036854775807")
+	if d := ResolveEnforceTimeout(); d != maxEnforceTimeout {
+		t.Errorf("overflow-range timeout = %v, want clamp to %v", d, maxEnforceTimeout)
 	}
 }
 
