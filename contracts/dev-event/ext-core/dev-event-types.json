@@ -1,0 +1,15 @@
+{
+  "$comment": "Canonical machine-readable spec of the EXT-core dependency (STORY-SL-13). It is the SINGLE SOURCE OF TRUTH the artifact is checked against: the drift guard (contracts/dev-event/conformance/extcore_drift_test.go) asserts (1) this event_type set == the SL-1 contract enum in ../schema/dev-event.schema.json, and (2) every event_type here appears in openbox-core-dev-event-types.patch. Editing this file without updating the schema and the patch fails CI. Adding a type is strictly additive (INV-8).",
+  "schema_version": "1.0",
+  "core_baseline": "openbox-core HEAD — the 7 developer-runtime event types are ABSENT; a POST /api/v1/governance/evaluate with any of them returns 400 \"invalid event_type: <T>\". After applying openbox-core-dev-event-types.patch they are accept-listed (HTTP 200).",
+  "patch": "openbox-core-dev-event-types.patch",
+  "types": [
+    { "event_type": "SessionStarted",  "go_const": "EventTypeSessionStarted",  "lifecycle": "create",   "note": "creates the session (handleSessionCreate), alongside WorkflowStarted" },
+    { "event_type": "PromptSubmitted", "go_const": "EventTypePromptSubmitted", "lifecycle": "lookup",   "note": "resolves within an existing session" },
+    { "event_type": "ToolCall",        "go_const": "EventTypeToolCall",        "lifecycle": "lookup",   "note": "resolves within an existing session" },
+    { "event_type": "ToolResult",      "go_const": "EventTypeToolResult",      "lifecycle": "lookup",   "note": "resolves within an existing session" },
+    { "event_type": "SessionEnded",    "go_const": "EventTypeSessionEnded",    "lifecycle": "terminal", "note": "marks the session terminal (handleSessionTerminal), alongside WorkflowCompleted/Failed" },
+    { "event_type": "CommitCreated",   "go_const": "EventTypeCommitCreated",   "lifecycle": "lookup",   "note": "resolves within an existing session" },
+    { "event_type": "Deploy",          "go_const": "EventTypeDeploy",          "lifecycle": "lookup",   "note": "resolves within an existing session" }
+  ]
+}
