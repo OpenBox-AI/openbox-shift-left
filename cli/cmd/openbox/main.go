@@ -23,11 +23,11 @@ import (
 
 	claudecode "github.com/openbox-ai/openbox-shift-left/adapters/claude-code"
 	obgit "github.com/openbox-ai/openbox-shift-left/adapters/common/git"
-	"github.com/openbox-ai/openbox-shift-left/client"
 	"github.com/openbox-ai/openbox-shift-left/cli/internal/backend"
 	"github.com/openbox-ai/openbox-shift-left/cli/internal/devinit"
 	"github.com/openbox-ai/openbox-shift-left/cli/internal/providers"
 	"github.com/openbox-ai/openbox-shift-left/cli/internal/secret"
+	"github.com/openbox-ai/openbox-shift-left/client"
 	"github.com/openbox-ai/openbox-shift-left/sidecar"
 )
 
@@ -181,12 +181,17 @@ func displayOrUnset(s string) string {
 // every Claude Code hook.
 //
 // INV-3 (the reason this does NOT go through errorf/usage): the hook path must
-// ALWAYS return exitOK and write NOTHING to stdout — on SessionStart/
-// UserPromptSubmit, an exit-0 hook's stdout is injected into the model's
-// context, and a non-zero exit blocks the tool call. So every diagnostic (bad
+// ALWAYS return exitOK — a non-zero exit blocks the tool call. In OBSERVE mode it
+// also writes NOTHING to stdout (on SessionStart/UserPromptSubmit an exit-0
+// hook's stdout is injected into the model's context). So every diagnostic (bad
 // args, unknown provider, and everything inside RunHook) goes to stderr, and we
 // unconditionally return 0. Folding the hook into the multi-command binary must
 // not leak cobra/flag/usage/banner text to stdout.
+//
+// ENFORCE mode (E6-S2, opt-in) is the sole stdout writer: RunHook may emit a
+// Claude Code PreToolUse permissionDecision (deny/ask) to a.stdout — still exit 0
+// (the decision travels in the JSON, not the exit code), still tighten-only. The
+// permissionDecision JSON is the ONLY structured stdout this path ever produces.
 func (a *app) runHook(args []string) (code int) {
 	// Belt-and-suspenders for INV-3: default to exitOK and swallow any panic that
 	// escapes RunHook's own recover, so the hook path can NEVER return non-zero
@@ -204,7 +209,7 @@ func (a *app) runHook(args []string) (code int) {
 			logger.Printf("usage: openbox hook claude-code <event>")
 			return exitOK
 		}
-		claudecode.RunHook(args[1], a.stdin, logger)
+		claudecode.RunHook(args[1], a.stdin, a.stdout, logger)
 	case "git":
 		// The git hook re-invokes THIS binary as `openbox hook git prepare-commit-msg`
 		// (STORY-SL4-WIRE-2 / OD17 — folds the standalone openbox-git-hook in).

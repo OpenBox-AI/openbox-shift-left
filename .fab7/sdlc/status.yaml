@@ -801,3 +801,49 @@ stories:
       last_run_id: null
       status_reason: "DONE — brian G3_REVIEW sign-off + Sam G_SEC APPROVE 2026-07-14; committed to main (build + ledger together, no push). Enforce-mode synchronous pre-execution gate: in ENFORCE mode (ResolveEnforce; DevConfig.enforce + OPENBOX_ENFORCE, default OFF=observe) the PreToolUse hook builds a sidecar.DecisionRequest from the payload (reusing the Mapper's classifyTool/filePath so the gate and the observe event classify identically) and calls sidecar.Client.Decide (E6-S5) SYNCHRONOUSLY before the tool runs, bounded ~50ms, fail-open on any fault (OD9). Cross-repo recon (openbox-temporal-sdk-python) confirmed the split: the SDK's pre-execution gate AWAITS evaluate_event then runs enforce_verdict BEFORE the activity — E6-S1 is the *obtain-the-verdict* half; the enforce_verdict cascade (HALT>BLOCK>guardrails>REQUIRE_APPROVAL>CONSTRAIN>ALLOW -> CC permissionDecision deny/ask/allow) is E6-S2's apply. So E6-S1 OBTAINS+records only (terse secret/content-free stderr diagnostic) and writes NOTHING to stdout — INV-3 holds verbatim; zero risk of a wrong deny. Observe/advisory path byte-identical when enforce off (sidecar never dialed; test asserts 0 dials). INV-2: the shell command is carried on the DecisionRequest for LOCAL matching only (never egressed — the SDK sends full activity_input to its gate; we are strictly more private, local socket only); Mapper egress unchanged. Story: STORY-E6-S1.md. Next: E6-S2 (apply) consumes the surfaced sidecar.Decision. BOTH INDEPENDENT REVIEWS RAN 2026-07-14: G3 (review_auditor Reva) APPROVE-WITH-MINOR-REVISIONS + G_SEC (Sam) APPROVE. All actionable findings addressed in-code/in-doc: G_SEC LOW-1 (rune vs byte command bound) FIXED (8KiB byte bound + rune-safe truncation + test); G3 F1 (AC-5 self-contradiction) RESOLVED (durable record deferred to E6-S2); F2/F3 deferred/accepted with rationale. Re-validated: adapter/sidecar/cli -race GREEN + comprehensive live E2E 25/25 (BLOCK/ALLOW/CONSTRAIN/REQUIRE_APPROVAL from the local bundle, fail-open absent, hung-sidecar fail-open in ~70ms within bound, observe-off 0-dial, all exit 0/empty stdout). DONE: brian G3_REVIEW sign-off + Sam G_SEC APPROVE 2026-07-14; committed to main."
       blocked_reason: null
+
+  STORY-E6-S2:
+    title: "apply(verdict) on the Claude Code adapter — map the governance verdict onto a CC PreToolUse permissionDecision (deny/ask), tighten-only"
+    status: "done"
+    epic: "E6"
+    sprint: null
+    priority: "P0"
+    dependencies:
+      - "STORY-E6-S1"
+    blocked_by: []
+    write_scope:
+      - "adapters/claude-code/enforce.go  # +apply: preToolUseOutput contract; applyDecision (writes deny/ask, fail-open); mapVerdict (SDK cascade port); govReason/guardrailReason (content-free); enforcementRecord + DefaultEnforcementPath + recordEnforcement (durable, category-only)"
+      - "adapters/claude-code/enforce_test.go  # TestMapVerdict / TestApplyDecision / TestRunHook_EnforceApply_Block / TestRecordEnforcement_GuardrailCategoryOnly"
+      - "adapters/claude-code/hookrun.go  # RunHook gains stdout io.Writer; gated PreToolUse enforce branch calls applyDecision + recordEnforcement"
+      - "adapters/claude-code/advisory.go  # factored appendJSONL (shared perms routine) + reasonTypeCategories"
+      - "adapters/claude-code/creds.go  # OPENBOX_ENFORCEMENT_FILE env constant"
+      - "cli/cmd/openbox/main.go  # runHook passes a.stdout into RunHook"
+      - "adapters/claude-code/cmd/openbox-cc-hook/main.go  # passes os.Stdout into RunHook"
+    validation_commands:
+      - "cd adapters/claude-code && go build ./... && go vet ./... && go test -race ./...  # GREEN: cascade mapping; deny/ask stdout; allow/unknown/nil-stdout write nothing; E2E block+audit; guardrail category-only record"
+      - "cd sidecar && go build ./... && go test -race ./...  # GREEN"
+      - "cd cli && go build ./... && go vet ./... && go test ./...  # GREEN"
+      - "LIVE E2E vs real `openbox` + `openbox sidecar serve --bundle examples/policy-bundle.example.json`: rm -rf -> permissionDecision=deny (+policy reason, NO command leak); github MCP -> ask; .env(CONSTRAIN)/echo(ALLOW) -> empty stdout; enforce OFF -> empty stdout even for rm -rf; enforcements.jsonl records all 4 content-free"
+    invariants:
+      - "INV-3b: the block is synchronous, pre-execution (a PreToolUse deny/ask), bounded by E6-S1's inherited ~50ms sidecar.Client timeout, fail-open by default (nil stdout / marshal / write fault all proceed)"
+      - "INV-2: command/file metadata never egresses; the stdout permissionDecisionReason carries POLICY-authored text + guardrail CATEGORY types only (local, no egress); the durable enforcements.jsonl audit is STRICTLY category-only — no tool content, no guardrail free text"
+      - "INV-1: no secret on the hot path, in the record (SessionID only), or on stdout"
+      - "TIGHTEN-ONLY: only deny/ask ever reach stdout; CONSTRAIN/ALLOW/UNKNOWN(fail-open)/enforce-off write nothing — byte-identical to observe mode; core cannot induce an `allow` that suppresses CC's built-in prompt"
+    gates:
+      G3_REVIEW:
+        decision: "approve"
+        evidence: "brian G3 sign-off 2026-07-14 (accepting APPROVE-WITH-MINOR with both LOW findings fixed). Independent blind-diff + acceptance audit (review_auditor) 2026-07-14 = APPROVE-WITH-MINOR. Verified all six correctness dimensions: cascade fidelity vs SDK verdict_handler.py (HALT/BLOCK first; guardrail-fail AFTER HALT/BLOCK and BEFORE approval, verdict-independent; REQUIRE_APPROVAL only for VerdictRequireApproval), tighten-only (no `allow` construct; mapVerdict has no allow return; unknown verdict -> nothing), fail-open on nil/marshal/write (three distinct returns, all tested), observe byte-identical when off (branch gated hook==HookPreToolUse && ResolveEnforce), content-free stdout reason. No blocking defects. Findings: LOW-1 (durable audit serialized guardrail free text, contradicting category-only) FIXED (GuardrailCategories []string via reasonTypeCategories); LOW-2 (no guardrail durable-record test) FIXED (TestRecordEnforcement_GuardrailCategoryOnly); INFO-1 (HALT->deny, no CC terminate primitive) accepted; INFO-2/3 noted. -race GREEN."
+        decided_by: "brian"
+        decided_at: "2026-07-14T00:00:00Z"
+      G_SEC:
+        decision: "approve"
+        evidence: "Sam (security_reviewer) 2026-07-14 = APPROVE. Traced both new sink surfaces to their exact serialized fields. INV-2: stdout permissionDecisionReason carries only policy-authored Evaluation.Reason + policy id (local — stdout->Claude Code same machine, NOT egress; same posture as the SDK's GovernanceBlockedError message), guardrail free text stripped from stdout (category types only); live E2E confirms `rm -rf` never on stdout. INV-1: enforcementRecord carries SessionID (not even the DID) + verdict/ids/flags — no secret; hot path DID-only. INV-3b: block is pre-execution, bounded by E6-S1's inherited ~50ms timeout, three distinct fail-open returns all tested; enforce mode cannot hard-fail a call. Tighten-only structurally impossible to loosen (only deny/ask constants). Redaction correctly DEFERRED to E6-S4 (no updatedInput field; no input mutation). appendJSONL perms 0700/0600/O_APPEND correct; symlink/env threat out of scope for a local dev tool + metadata-only payload. LOW-1 (durable audit not strictly category-only) recorded + FIXED in-code (category-only projection for the enforcement sink; projecting SL-9's advisoryRecord too flagged as a fast-follow, out of E6-S2 scope). No CRITICAL/HIGH/MEDIUM; APPROVE."
+        decided_by: "Sam (security_reviewer)"
+        decided_at: "2026-07-14T00:00:00Z"
+    audit:
+      commit: null
+      completed_at: "2026-07-14T00:00:00Z"
+      validation_artifact: ".fab7/sdlc/assignments/build-story-E6-S2-20260714.result.yaml"
+      last_run_id: null
+      status_reason: "DONE — brian G3_REVIEW sign-off + Sam G_SEC APPROVE 2026-07-14; committed to main (build + ledger together, no push, no signature per brian). The apply(verdict) leg — the enforce path's teeth. E6-S1 OBTAINS a sidecar.Decision synchronously before the tool runs; E6-S2 APPLIES it: mapVerdict ports the SDK enforce_verdict cascade (verdict_handler.py:50-103, OD-ENF-SCOPE) — HALT/BLOCK->deny, failed guardrail validation->deny (checked after HALT/BLOCK & before approval, independent of verdict), REQUIRE_APPROVAL->ask (OD-HITL; E6-S6 refines UX), CONSTRAIN/ALLOW/UNKNOWN(fail-open)->nothing (proceed). applyDecision writes the CC PreToolUse permissionDecision JSON (exit 0), fail-open on nil stdout/marshal/write. THE RULE — governance only TIGHTENS: only deny/ask ever reach stdout, so a non-blocking verdict and enforce-off are byte-identical (empty) and CC's own permission flow is untouched. Also lands the DURABLE enforcement-decision audit E6-S1 deferred here (enforcements.jsonl, OPENBOX_ENFORCEMENT_FILE), STRICTLY content-free (category-only guardrail projection — the LOW-1 fix). RunHook gained a stdout io.Writer (both prod callers pass real stdout); advisory.go factored a shared appendJSONL. Cross-repo Explore (openbox-temporal-sdk-python) recovered the exact cascade + confirmed guardrail redaction/updatedInput is a SEPARATE caller step -> DEFERRED to E6-S4. DEFERRED: E6-S3 fail-closed (E6-S2 inherits fail-open/OD9), E6-S4 redaction, E6-S6 HITL UX, E6-S7 conformance. adapter/sidecar/cli build/vet/test -race GREEN + live E2E vs the real binary (deny/ask/proceed/enforce-off + content-free audit, no command leak). BOTH REVIEWS RAN: G3 (review_auditor) APPROVE-WITH-MINOR + G_SEC (Sam) APPROVE; shared LOW-1 FIXED + LOW-2 test added. Story: STORY-E6-S2.md. Artifact: assignments/build-story-E6-S2-20260714.result.yaml. DONE: brian G3_REVIEW sign-off + Sam G_SEC APPROVE 2026-07-14; committed to main. Next natural story: E6-S3 (fail-closed per-org policy)."
+      blocked_reason: null

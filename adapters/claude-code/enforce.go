@@ -2,7 +2,11 @@ package claudecode
 
 import (
 	"context"
+	"encoding/json"
+	"io"
 	"log"
+	"os"
+	"path/filepath"
 	"unicode/utf8"
 
 	"github.com/openbox-ai/openbox-shift-left/client"
@@ -152,4 +156,207 @@ func logEnforceDecision(logger *log.Logger, e *HookEvent, dec sidecar.Decision) 
 	}
 	logger.Printf("enforce decision: tool=%s verdict=%s would_block=%t source=%s fail_open=%t stale=%t",
 		capStr(e.ToolName), verdict, dec.Evaluation.WouldBlock(), orDash(dec.Source), dec.FailOpen, dec.Stale)
+}
+
+// ── E6-S2: apply(verdict) — the enforce leg's teeth ──────────────────────────
+//
+// E6-S1 OBTAINS a sidecar.Decision; E6-S2 APPLIES it — mapping the governance
+// verdict onto a Claude Code PreToolUse `permissionDecision` written to stdout,
+// the moment WouldBlock() becomes a real block. This ports the reference SDK's
+// enforce_verdict cascade (openbox-temporal-sdk-python verdict_handler.py) — the
+// full priority set HALT > BLOCK > guardrails > REQUIRE_APPROVAL > CONSTRAIN >
+// ALLOW (OD-ENF-SCOPE) — onto Claude Code's hook contract:
+//
+//	SDK enforce_verdict                        →  CC PreToolUse permissionDecision
+//	───────────────────────────────────────      ────────────────────────────────
+//	HALT  → GovernanceHaltError (terminate)    →  deny  (strongest CC signal)
+//	BLOCK → GovernanceBlockedError             →  deny
+//	guardrails validation_passed == false      →  deny  (checked BEFORE approval)
+//	REQUIRE_APPROVAL → requires_hitl            →  ask   (OD-HITL; E6-S6 refines UX)
+//	CONSTRAIN        → logged allow             →  (nothing — proceed)
+//	ALLOW / UNKNOWN (fail-open)                 →  (nothing — proceed)
+//
+// INVARIANT — governance only TIGHTENS. A non-blocking verdict writes NOTHING to
+// stdout, so Claude Code's own permission flow is left untouched and behaves
+// exactly as in observe mode. Only `deny`/`ask` are ever emitted — enforcement
+// can add a restriction, never remove one of Claude Code's built-in prompts.
+// This upholds INV-3b (blocks only pre-execution, within the E6-S1 timeout bound)
+// and keeps the observe/advisory path byte-identical when nothing is blocked.
+
+// Claude Code PreToolUse permissionDecision values (the hook stdout contract).
+// Only deny/ask are emitted; allow is intentionally never written (tighten-only).
+const (
+	ccDecisionDeny = "deny"
+	ccDecisionAsk  = "ask"
+)
+
+// preToolUseOutput is the Claude Code PreToolUse hook stdout contract: an exit-0
+// hook that prints this JSON has its permissionDecision honored — `deny` blocks
+// the tool call (Claude sees the reason), `ask` shows the user a permission
+// prompt. permissionDecisionReason is shown LOCALLY (stdout → Claude Code on the
+// same machine, no egress) and carries the POLICY-authored reason, never the tool
+// command/file/output content (INV-2).
+type preToolUseOutput struct {
+	HookSpecificOutput hookSpecificOutput `json:"hookSpecificOutput"`
+}
+
+type hookSpecificOutput struct {
+	HookEventName            string `json:"hookEventName"`
+	PermissionDecision       string `json:"permissionDecision"`
+	PermissionDecisionReason string `json:"permissionDecisionReason,omitempty"`
+}
+
+// applyDecision maps an obtained enforce decision onto a Claude Code PreToolUse
+// permissionDecision and writes it to stdout — the E6-S2 apply. It returns the
+// applied CC decision (`deny`/`ask`) and whether anything was emitted; a
+// non-blocking verdict (CONSTRAIN/ALLOW/UNKNOWN) emits nothing and returns
+// ("", false), so Claude Code's own permission flow proceeds unchanged.
+//
+// It NEVER wedges the tool call: a nil stdout or any marshal/write fault degrades
+// to "proceed" (fail-open, OD9) — enforcement can only ADD a deny/ask, never hang
+// or fail a call on an apply-side error (INV-3b fail-open).
+func applyDecision(stdout io.Writer, dec sidecar.Decision) (applied string, emitted bool) {
+	decision, reason := mapVerdict(dec.Evaluation)
+	if decision == "" || stdout == nil {
+		return "", false
+	}
+	out := preToolUseOutput{HookSpecificOutput: hookSpecificOutput{
+		HookEventName:            string(HookPreToolUse),
+		PermissionDecision:       decision,
+		PermissionDecisionReason: reason,
+	}}
+	line, err := json.Marshal(out)
+	if err != nil {
+		return "", false // fail-open: never wedge a tool call on a marshal fault
+	}
+	if _, err := stdout.Write(append(line, '\n')); err != nil {
+		return "", false // fail-open: a write fault degrades to proceed
+	}
+	return decision, true
+}
+
+// mapVerdict is the SDK enforce_verdict cascade (verdict_handler.py:50-103) ported
+// to Claude Code decisions, in the SAME priority order. It returns the CC decision
+// and a content-free reason, or ("","") meaning "emit nothing — proceed".
+//
+//   - HALT / BLOCK → deny (the SDK terminates / raises a non-retryable block).
+//   - A failed guardrail validation → deny, checked AFTER HALT/BLOCK but BEFORE
+//     approval and INDEPENDENT of the verdict value — exactly as the SDK, so a
+//     guardrail failure is never silently swallowed by an approval flow
+//     (verdict_handler.py:84-90).
+//   - REQUIRE_APPROVAL → ask (the SDK's requires_hitl → OD-HITL; E6-S6 refines the
+//     interactive prompt experience on top of this mapping).
+//   - CONSTRAIN / ALLOW / UNKNOWN (fail-open) → nothing (the SDK logs CONSTRAIN and
+//     otherwise proceeds; guardrail redaction of the input is E6-S4, gated on
+//     content posture — deliberately not applied here).
+func mapVerdict(e client.Evaluation) (decision, reason string) {
+	switch e.Verdict {
+	case client.VerdictHalt:
+		return ccDecisionDeny, govReason(e, "action halted by OpenBox governance policy")
+	case client.VerdictBlock:
+		return ccDecisionDeny, govReason(e, "action blocked by OpenBox governance policy")
+	}
+	if g := e.Guardrail; g != nil && !g.Passed {
+		return ccDecisionDeny, guardrailReason(g)
+	}
+	if e.Verdict == client.VerdictRequireApproval {
+		return ccDecisionAsk, govReason(e, "action requires approval per OpenBox governance policy")
+	}
+	return "", ""
+}
+
+// govReason builds the LOCAL, content-free permissionDecisionReason shown to the
+// developer for a deny/ask. It surfaces the POLICY-authored reason (the bundle/OPA
+// rule's own text, e.g. "destructive recursive delete") and the policy id — text
+// authored in the policy, not derived from the tool command/file/output content
+// (INV-2). It is shown on this machine only (stdout → Claude Code) and is never
+// egressed. Falls back to a generic message when the policy carried no reason.
+func govReason(e client.Evaluation, fallback string) string {
+	reason := e.Reason
+	if reason == "" {
+		reason = fallback
+	}
+	msg := "OpenBox governance: " + reason
+	if e.PolicyID != "" {
+		msg += " (policy: " + e.PolicyID + ")"
+	}
+	return msg
+}
+
+// guardrailReason renders a guardrail-failure deny reason from the CATEGORY types
+// only (e.g. "[pii,secrets]") — never the guardrail reason free text, which can
+// describe detected content (INV-2). Mirrors advisory.reasonTypes.
+func guardrailReason(g *client.GuardrailResult) string {
+	return "OpenBox guardrails validation failed " + reasonTypes(g.Reasons)
+}
+
+// enforcementRecord is one line in the enforcement audit sink (E6-S2): the
+// governance decision that was ACTUALLY APPLIED to a tool call — distinct from an
+// Advisory record, which captures what OpenBox WOULD enforce on the observe/flush
+// path (SL-9). It is STRICTLY content-free (INV-1/INV-2): verdict/ids/flags plus
+// the guardrail CATEGORY types only — never the tool content, the policy reason
+// free text, or the guardrail reason free text. (This is deliberately stricter
+// than SL-9's advisoryRecord, which serializes the full guardrail reason struct;
+// projecting that sink to categories too is a noted fast-follow, out of E6-S2's
+// write scope.) Being category-only keeps the sink safe even if a later story
+// egresses it (e.g. to the dashboard) — no free text to leak.
+type enforcementRecord struct {
+	SessionID           string           `json:"session_id"`
+	ToolKind            string           `json:"tool_kind,omitempty"`
+	Verdict             string           `json:"verdict"`
+	WouldBlock          bool             `json:"would_block"`
+	AppliedDecision     string           `json:"applied_decision,omitempty"` // deny|ask|"" (proceed)
+	Source              string           `json:"source,omitempty"`
+	FailOpen            bool             `json:"fail_open"`
+	Stale               bool             `json:"stale,omitempty"`
+	PolicyID            string           `json:"policy_id,omitempty"`
+	Constraints         []map[string]any `json:"constraints,omitempty"`
+	GuardrailCategories []string         `json:"guardrail_categories,omitempty"`
+}
+
+// DefaultEnforcementPath is the enforcement audit sink, a sibling of the advisory
+// sink (~/.config/openbox/enforcements.jsonl), overridable via
+// OPENBOX_ENFORCEMENT_FILE (tests point it at a temp file).
+func DefaultEnforcementPath() string {
+	if p := os.Getenv(envEnforcementFile); p != "" {
+		return p
+	}
+	dir, err := os.UserConfigDir()
+	if err != nil || dir == "" {
+		dir = filepath.Join(os.Getenv("HOME"), ".config")
+	}
+	return filepath.Join(dir, "openbox", "enforcements.jsonl")
+}
+
+// recordEnforcement appends one enforcement-decision audit line for an applied
+// decision. It is the DURABLE enforcement record E6-S1 deferred here (STORY-E6-S1
+// AC-5) — a same-machine, owner-only trail of what governance actually did. It is
+// best-effort and OFF the blocking path: it runs after the stdout decision is
+// already written, and any failure (marshal / mkdir / open / write) is logged to
+// stderr and swallowed, never surfaced (INV-3). Content-free (INV-1/INV-2).
+func recordEnforcement(logger *log.Logger, e *HookEvent, dec sidecar.Decision, applied string) {
+	kind, _, _, _, _ := classifyTool(e.ToolName)
+	rec := enforcementRecord{
+		SessionID:       e.SessionID,
+		ToolKind:        string(kind),
+		Verdict:         string(dec.Evaluation.Verdict),
+		WouldBlock:      dec.Evaluation.WouldBlock(),
+		AppliedDecision: applied,
+		Source:          dec.Source,
+		FailOpen:        dec.FailOpen,
+		Stale:           dec.Stale,
+		PolicyID:        dec.Evaluation.PolicyID,
+		Constraints:     dec.Evaluation.Constraints,
+	}
+	if g := dec.Evaluation.Guardrail; g != nil {
+		rec.GuardrailCategories = reasonTypeCategories(g.Reasons) // category types only (INV-2)
+	}
+	line, err := json.Marshal(rec)
+	if err != nil {
+		logger.Printf("enforcement record skipped (marshal): %v", err)
+		return
+	}
+	if err := appendJSONL(DefaultEnforcementPath(), line); err != nil {
+		logger.Printf("enforcement record skipped: %v", err)
+	}
 }

@@ -20,16 +20,25 @@ const flushBudget = 12 * time.Second
 // openbox-cc-hook binary.
 //
 // SAFETY CONTRACT (INV-3 / D7 — observe-only, never block):
-//   - It writes NOTHING to stdout. On SessionStart/UserPromptSubmit, stdout from
-//     an exit-0 hook is injected into the model's context — so all diagnostics
-//     go to `logger` (stderr) only, terse and secret-free (INV-1).
-//   - It NEVER returns a blocking signal: any failure (bad payload, missing
-//     identity, unreachable OpenBox, even a panic) is logged and swallowed. The
-//     CALLER must exit 0 regardless.
+//   - In OBSERVE mode (the default) it writes NOTHING to stdout. On SessionStart/
+//     UserPromptSubmit, stdout from an exit-0 hook is injected into the model's
+//     context — so all diagnostics go to `logger` (stderr) only, terse and
+//     secret-free (INV-1).
+//   - It NEVER returns a blocking signal in observe mode: any failure (bad
+//     payload, missing identity, unreachable OpenBox, even a panic) is logged and
+//     swallowed. The CALLER must exit 0 regardless.
+//
+// ENFORCE mode (E6, opt-in via ResolveEnforce, default OFF) is the sole exception
+// to "nothing to stdout": on a PreToolUse hook it may write a Claude Code
+// permissionDecision (deny/ask) to `stdout` — the INV-3b carve-out. It still only
+// ever TIGHTENS (deny/ask, never allow) and still exits 0, so a non-blocking
+// verdict is byte-identical to observe mode. Every other hook, and observe mode,
+// write nothing to stdout.
 //
 // `sub` is the hook name (SessionStart/UserPromptSubmit/PreToolUse/PostToolUse/
-// SessionEnd) or "flush"; `stdin` carries the hook payload JSON.
-func RunHook(sub string, stdin io.Reader, logger *log.Logger) {
+// SessionEnd) or "flush"; `stdin` carries the hook payload JSON; `stdout` is where
+// the enforce apply writes the permissionDecision (unused in observe mode).
+func RunHook(sub string, stdin io.Reader, stdout io.Writer, logger *log.Logger) {
 	// Guarantee a panic never escapes into the caller's exit path.
 	defer func() {
 		if r := recover(); r != nil {
@@ -111,14 +120,18 @@ func RunHook(sub string, stdin io.Reader, logger *log.Logger) {
 	// inert — so the observe/advisory path is byte-identical to Phase-1 (AC-4).
 	// Only PreToolUse gates (the pre-execution concept); other hooks keep observing.
 	//
-	// E6-S1 OBTAINS + records the decision only — it writes nothing to stdout and
-	// never blocks (the tool always proceeds, exactly as observe mode does). E6-S2
-	// consumes this same Decision to turn a BLOCK/HALT verdict into an actual
-	// Claude Code `deny`/`ask` permissionDecision.
+	// E6-S1 OBTAINS the decision (bounded, fail-open); E6-S2 APPLIES it — mapping
+	// the verdict onto a Claude Code `deny`/`ask` permissionDecision on stdout, the
+	// moment WouldBlock() becomes a real block. applyDecision emits ONLY deny/ask
+	// (tighten-only); a CONSTRAIN/ALLOW/UNKNOWN(fail-open) verdict writes nothing
+	// and the tool proceeds via Claude Code's own permission flow — byte-identical
+	// to observe mode. The durable enforcement record runs AFTER the stdout
+	// decision, off the blocking path, best-effort (never blocks — INV-3).
 	if hook == HookPreToolUse && ResolveEnforce() {
 		dec := EnforceDecision(context.Background(), newSidecarClient(), id, ev)
 		logEnforceDecision(logger, ev, dec)
-		// E6-S2 apply seam: map dec.Evaluation → CC permissionDecision here.
+		applied, _ := applyDecision(stdout, dec)
+		recordEnforcement(logger, ev, dec, applied)
 	}
 
 	// Opt-in ambient install (STORY-SL-5 wiring): make governance ambient by

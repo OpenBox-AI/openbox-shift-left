@@ -5,8 +5,11 @@
 // kept only for backward compatibility. Both share exactly one engine, so the
 // observe-only safety contract is defined in one place (see RunHook).
 //
-// SAFETY CONTRACT (INV-3): always exits 0, writes NOTHING to stdout; all
-// diagnostics go to stderr. RunHook swallows every failure (incl. panics).
+// SAFETY CONTRACT (INV-3): always exits 0; all diagnostics go to stderr; RunHook
+// swallows every failure (incl. panics). In OBSERVE mode (the default) it writes
+// NOTHING to stdout. It shares the one engine, so if OPENBOX_ENFORCE is set it
+// honors enforce mode too — a PreToolUse may then emit a Claude Code
+// permissionDecision (deny/ask) to stdout (E6-S2), still exiting 0.
 package main
 
 import (
@@ -26,5 +29,5 @@ func main() {
 	if len(os.Args) >= 2 {
 		sub = os.Args[1]
 	}
-	claudecode.RunHook(sub, os.Stdin, logger)
+	claudecode.RunHook(sub, os.Stdin, os.Stdout, logger)
 }

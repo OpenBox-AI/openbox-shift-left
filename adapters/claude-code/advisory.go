@@ -96,22 +96,27 @@ func (a *Advisory) write(rec advisoryRecord) {
 	if path == "" {
 		path = DefaultAdvisoryPath()
 	}
-	// Mirror the spool's perms posture: dir 0700, file 0600, O_APPEND (a single
-	// small line is atomic under POSIX append). Advisory content is metadata-only,
-	// but keep it same-machine and owner-only.
+	if err := appendJSONL(path, line); err != nil {
+		a.logf("advisory write failed for %s: %v", rec.EventID, err)
+	}
+}
+
+// appendJSONL appends one JSON line to a same-machine, owner-only JSONL sink,
+// creating the directory (0700) and file (0600) as needed. A single small
+// O_APPEND write is atomic under POSIX. Shared by the Advisory sink (SL-9) and the
+// enforcement audit sink (E6-S2, enforce.go) so the on-disk perms posture
+// (INV-1/INV-2: same-machine, owner-only, metadata-only) lives in ONE routine.
+func appendJSONL(path string, line []byte) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		a.logf("advisory mkdir failed: %v", err)
-		return
+		return err
 	}
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
-		a.logf("advisory open failed: %v", err)
-		return
+		return err
 	}
 	defer f.Close()
-	if _, err := f.Write(append(line, '\n')); err != nil {
-		a.logf("advisory write failed for %s: %v", rec.EventID, err)
-	}
+	_, err = f.Write(append(line, '\n'))
+	return err
 }
 
 // summary logs one line describing the recorded advisory. It carries only
@@ -134,13 +139,17 @@ func (a *Advisory) logf(format string, args ...any) {
 	}
 }
 
-// reasonTypes renders the guardrail reason CATEGORIES (the `type` field, e.g.
-// "pii", "validation") as "[pii,validation]" — never the reason free text.
-func reasonTypes(reasons []client.GuardrailReason) string {
+// reasonTypeCategories returns the guardrail reason CATEGORY types (the `type`
+// field, e.g. "pii", "validation") — NEVER the reason free text or field name,
+// which can describe detected content (INV-2). An absent type renders as "?".
+// Shared by the stderr/stdout diagnostics (reasonTypes) and the enforcement audit
+// record (enforce.go recordEnforcement), so both surface guardrail findings at the
+// same provably content-free granularity.
+func reasonTypeCategories(reasons []client.GuardrailReason) []string {
 	if len(reasons) == 0 {
-		return "[]"
+		return nil
 	}
-	var types []string
+	types := make([]string, 0, len(reasons))
 	for _, r := range reasons {
 		t := r.Type
 		if t == "" {
@@ -148,7 +157,17 @@ func reasonTypes(reasons []client.GuardrailReason) string {
 		}
 		types = append(types, t)
 	}
-	return "[" + strings.Join(types, ",") + "]"
+	return types
+}
+
+// reasonTypes renders the guardrail reason CATEGORIES as "[pii,validation]" for a
+// one-line diagnostic — never the reason free text.
+func reasonTypes(reasons []client.GuardrailReason) string {
+	cats := reasonTypeCategories(reasons)
+	if len(cats) == 0 {
+		return "[]"
+	}
+	return "[" + strings.Join(cats, ",") + "]"
 }
 
 func orDash(s string) string {
