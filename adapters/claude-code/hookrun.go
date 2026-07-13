@@ -79,6 +79,25 @@ func RunHook(sub string, stdin io.Reader, logger *log.Logger) {
 	}
 
 	ad := New(id, DefaultSpoolDir())
+
+	// STORY-SL-16 (OD-FINOPS): on SessionEnd, behind the off-by-default finops
+	// opt-in, read the session transcript for usage NUMBERS ONLY and hand them to
+	// the Mapper, which attaches them to the SessionEnded event. This is the ONLY
+	// place transcript_path is opened, and ONLY when ResolveFinops() is set — with
+	// finops off it is never dereferenced (byte-identical to pre-SL-16 output).
+	// SessionEnd is teardown (off the Pre/PostToolUse hot path, NFR-2). Best-effort
+	// (INV-3): any error — missing/oversized/malformed transcript — is logged to
+	// stderr and skipped; it never fails the flush, blocks, or writes stdout. Only
+	// the projection-only parser (usage.go) touches the file, so no content can
+	// enter the event (INV-2).
+	if hook == HookSessionEnd && ResolveFinops() {
+		if tokens, cost, err := readTranscriptUsage(ev.TranscriptPath); err != nil {
+			logger.Printf("finops: transcript usage skipped: %v", err)
+		} else if tokens != nil || cost != nil {
+			ad.Mapper.Finops = &FinopsUsage{Tokens: tokens, Cost: cost}
+		}
+	}
+
 	if _, err := ad.Observe(hook, ev); err != nil {
 		logger.Printf("spool %s event: %v", hook, err)
 		// fall through — SessionEnd still tries to flush what is already spooled

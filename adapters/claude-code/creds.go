@@ -28,6 +28,7 @@ import (
 //	OPENBOX_API_KEY_ACCOUNT    account holding the obx_ key
 //	OPENBOX_PRIVATE_KEY_ACCOUNT account holding the base64 Ed25519 seed
 //	OPENBOX_CONTENT_CAPTURE    "1"/"true" to opt into content (default: metadata-only)
+//	OPENBOX_FINOPS             "1"/"true" to opt into transcript usage extraction (default: off)
 //	OPENBOX_API_KEY            direct obx_ key override (CI/tests; discouraged in prod)
 //	OPENBOX_ED25519_SEED       direct base64 seed override (CI/tests)
 const (
@@ -37,6 +38,7 @@ const (
 	envAPIKeyAccount  = "OPENBOX_API_KEY_ACCOUNT"
 	envPrivKeyAccount = "OPENBOX_PRIVATE_KEY_ACCOUNT"
 	envContentCapture = "OPENBOX_CONTENT_CAPTURE"
+	envFinops         = "OPENBOX_FINOPS"
 	envInstallGitHook = "OPENBOX_INSTALL_GIT_HOOK"
 	envAPIKeyDirect   = "OPENBOX_API_KEY"
 	envSeedDirect     = "OPENBOX_ED25519_SEED"
@@ -56,6 +58,20 @@ type DevConfig struct {
 	APIKeyAccount     string `json:"api_key_account,omitempty"`
 	PrivateKeyAccount string `json:"private_key_account,omitempty"`
 	ContentCapture    bool   `json:"content_capture,omitempty"`
+	// Finops enables opt-in transcript usage extraction (STORY-SL-16, OD-FINOPS):
+	// on SessionEnd flush the hook reads the session's transcript_path and pulls
+	// usage NUMBERS ONLY (tokens; cost when the transcript carries it) onto the
+	// SessionEnded event's Tokens/Cost. Default false — opening transcript_path is
+	// a content-bearing read, so it is gated behind an EXPLICIT opt-in that is
+	// DELIBERATELY SEPARATE from ContentCapture: content_capture authorizes full
+	// prompt/output/file-text egress, a far broader posture than "read the file to
+	// extract integers" (OD-FINOPS gate-design ruling). INV-2 is preserved by a
+	// projection-only parser (numbers cannot carry content); no content is ever
+	// egressed regardless of this flag. Phase-1: set via this config field or the
+	// OPENBOX_FINOPS env (ResolveFinops). Threading a `dev init --finops` flag
+	// through the shared provider CredentialRef is a follow-up (mirrors how
+	// --install-git-hook was wired post-SL-5), out of SL-16's adapter-only scope.
+	Finops bool `json:"finops,omitempty"`
 	// InstallGitHook enables ambient install of the SL-5 prepare-commit-msg hook
 	// into the session's repo on SessionStart. Default false — it modifies a
 	// repo's .git/hooks. Set by `openbox dev init --install-git-hook`.
@@ -181,6 +197,24 @@ func ResolveInstallGitHook() bool {
 		enabled = cfg.InstallGitHook
 	}
 	if v, ok := os.LookupEnv(envInstallGitHook); ok {
+		enabled = isTruthy(v)
+	}
+	return enabled
+}
+
+// ResolveFinops reports whether opt-in transcript usage extraction is enabled
+// (STORY-SL-16, OD-FINOPS): config field first, then the OPENBOX_FINOPS env
+// override (env wins), same precedence as every other coordinate. Default false:
+// with it unset, transcript_path is NEVER opened and events carry no tokens/cost
+// (byte-identical to pre-SL-16 output). No secret I/O — a cheap config+env read
+// safe on the flush path. It is deliberately independent of ContentCapture (see
+// DevConfig.Finops).
+func ResolveFinops() bool {
+	enabled := false
+	if cfg, err := loadDevConfig(DefaultConfigPath()); err == nil {
+		enabled = cfg.Finops
+	}
+	if v, ok := os.LookupEnv(envFinops); ok {
 		enabled = isTruthy(v)
 	}
 	return enabled

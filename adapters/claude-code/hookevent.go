@@ -52,6 +52,14 @@ type HookEvent struct {
 	Cwd            string `json:"cwd"`
 	PermissionMode string `json:"permission_mode"`
 
+	// TranscriptPath is the filesystem path to this session's JSONL transcript.
+	// It is a structural LOCATOR (like Cwd), not content — INV-2 permits it. The
+	// file it points at IS content-bearing, so it is opened ONLY on SessionEnd and
+	// ONLY when the opt-in finops gate is set (ResolveFinops), and even then only a
+	// projection-only parser touches it, extracting usage NUMBERS ONLY (STORY-SL-16
+	// / OD-FINOPS). With finops off this field is decoded but never dereferenced.
+	TranscriptPath string `json:"transcript_path"`
+
 	// SessionStart.
 	Source string `json:"source"` // startup|resume|clear|compact
 	Model  string `json:"model"`

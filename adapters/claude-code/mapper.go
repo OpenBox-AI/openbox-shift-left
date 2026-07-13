@@ -33,6 +33,23 @@ type Mapper struct {
 	Identity Identity
 	Now      func() time.Time // injectable clock; defaults to time.Now
 	NewID    func() string    // injectable idempotency-id source (INV-5); defaults to a random hex id
+	// Finops, when non-nil, carries the usage NUMBERS ONLY the finops reader
+	// extracted from the SessionEnd transcript (STORY-SL-16 / OD-FINOPS). Map
+	// copies them onto the SessionEnded event only. nil (the default) ⇒ events
+	// carry no tokens/cost — byte-identical to pre-SL-16 output. The Mapper itself
+	// does NO file I/O: the content-bearing transcript read + fail-open logging
+	// happen in RunHook (which owns the logger), so this stays a pure mapping of
+	// its inputs (like the injected Now / NewID), preserving the INV-2 guarantee
+	// that Map never touches content.
+	Finops *FinopsUsage
+}
+
+// FinopsUsage is the numbers-only usage rollup the finops reader produces from a
+// transcript (STORY-SL-16). It carries only the SL-1 Tokens/Cost value structs —
+// no content, by construction (see usage.go).
+type FinopsUsage struct {
+	Tokens *client.Tokens
+	Cost   *client.Cost
 }
 
 // NewMapper returns a Mapper with production defaults.
@@ -104,6 +121,13 @@ func (m Mapper) Map(hook HookName, e *HookEvent) (client.DevEvent, bool) {
 		ev.EndedAt = ts
 		ev.Tool = client.Tool{Name: agentToolName, Kind: client.ToolShell}
 		ev.Metadata = compact(map[string]any{"reason": enumOr(e.Reason, reasonValues)})
+		// STORY-SL-16 (OD-FINOPS): attach the opt-in transcript usage rollup, if
+		// the finops reader extracted any. Numbers only — Tokens/Cost carry no
+		// content (usage.go). nil ⇒ nothing attached (finops off or empty session).
+		if m.Finops != nil {
+			ev.Tokens = m.Finops.Tokens
+			ev.Cost = m.Finops.Cost
+		}
 
 	default:
 		return client.DevEvent{}, false
