@@ -1,13 +1,23 @@
 # ADR-0002: Enforcement may block a tool call — the bounded carve-out to INV-3
 
 ## Status
-proposed
+accepted — G_ADR ratified by brian 2026-07-13 (S2 supplied the timeout; blocker cleared).
 
 <!-- G_ADR gate (Epic E6, enforcement). Decision owner: brian. Records the
 structural/invariant change Phase-2 forces: INV-3 ("observation never blocks")
 is a Phase-1 invariant; enforcement deliberately blocks. This ADR defines the
 scoped, bounded carve-out so "blocks by design" never becomes "hangs the dev
-loop on an outage". Depends on spike S2 for the concrete timeout number. -->
+loop on an outage".
+
+RATIFICATION (brian, 2026-07-13): the one open dependency — the concrete hook
+timeout, which the "proposed" version deferred to spike S2 — is now supplied.
+Spike S2 (DONE 2026-07-13) measured direct sync HTTP to /evaluate at ~0.8–1.6 s
+(Temporal workflow, loopback floor) → NO-GO, and set the hook budget at ≈ 50 ms
+(local sidecar target <10 ms), fail-open. With that number in hand INV-3b is
+fully specified, so this ADR moves proposed → accepted. Ratified jointly with
+ADR-0003 (the sidecar module the bounded wait depends on — OD6). E6-S7 remains
+the conformance target that provides the evidence, but the carve-out is no longer
+blocked on it. -->
 
 ## Context
 
@@ -73,14 +83,18 @@ Costs / new constraints:
 - **Two safety postures now coexist** — observe/advisory (INV-3) and enforce
   (INV-3b). Every enforcement story must state which it runs under; the adapter
   must make the mode explicit (config flag, arch D7) and default to observe.
-- The timeout value is a hard dependency on **spike S2** — this ADR is not
-  final until S2 supplies it.
+- The timeout value was a hard dependency on **spike S2**; S2 (DONE 2026-07-13)
+  supplied it (≈ 50 ms hook budget, sidecar target <10 ms), so this dependency is
+  now discharged and the ADR is ratified.
 - Fail-closed (the org override) is a genuinely different risk profile (an outage
   *does* block the dev loop) — gated separately (E6-S3) with its own review, not
   enabled by this ADR.
 
 Follow-on:
-- Spike **S2** supplies the timeout + the sidecar-vs-HTTP decision (OD6).
+- Spike **S2** (DONE 2026-07-13) supplied the timeout + the sidecar-vs-HTTP
+  decision (OD6): direct HTTP is a ~1.6 s NO-GO, a local sidecar is mandatory.
+  The sidecar this carve-out's bounded wait depends on is recorded in **ADR-0003**
+  (ratified jointly with this ADR).
 - **OD-ENF-SCOPE** (which verdicts/tools enforce first) and **OD-HITL** (does
   `REQUIRE_APPROVAL`/`ask` fit the hot path) are separate human decisions layered
   on top of this carve-out.
