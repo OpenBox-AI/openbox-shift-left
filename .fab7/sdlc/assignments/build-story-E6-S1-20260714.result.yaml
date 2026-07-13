@@ -1,0 +1,122 @@
+assignment_id: "build-story-E6-S1-20260714"
+role: "build_engineer"
+story: "STORY-E6-S1"
+epic: "E6"
+status: "completed"
+summary: >
+  Built STORY-E6-S1 — the enforce-mode SYNCHRONOUS pre-execution gate. In ENFORCE mode
+  (ResolveEnforce; default OFF = observe) the Claude Code `PreToolUse` hook now obtains a
+  governance decision from the LOCAL sidecar (E6-S5's sidecar.Client) BEFORE the tool runs —
+  the INV-3b carve-out: an enforce path MAY block, but only pre-execution, only within a hard
+  ~50ms timeout, fail-open by default (OD9). It builds a sidecar.DecisionRequest from the hook
+  payload by REUSING the Mapper's classifyTool/filePath (so the gate and the observe event
+  classify a tool identically), calls sidecar.Client.Decide, and surfaces the resulting
+  client.Evaluation (via sidecar.Decision) through a seam E6-S2's apply consumes. It reads NO
+  secret on the hot path (DID only) and takes NO network I/O (only the local per-user socket).
+  Fail-open is inherited from the sidecar.Client primitive: socket absent / dial refused /
+  timeout / malformed reply -> VerdictUnknown allow, tool proceeds. The Phase-1 observe/advisory
+  path is byte-identical when enforce is off — the sidecar is never dialed (a test asserts 0
+  dials). Validation green: adapter/sidecar/cli build/vet/test -race all pass; live-verified
+  against the real `openbox` + `openbox sidecar serve` binary. Remaining: brian G3 + Sam G_SEC.
+scope_boundary_confirmed_by_recon: >
+  The user directive ("always use explore for cross-repo reference") drove a read-only Explore
+  of the sibling openbox-temporal-sdk-python to fix the E6-S1/E6-S2 boundary faithfully. Finding:
+  the SDK's pre-execution gate (activity_interceptor.py execute_activity, ~199-274) AWAITS
+  GovernanceClient.evaluate_event (POST /evaluate) on ActivityStarted, THEN runs enforce_verdict
+  BEFORE the activity executes. There are TWO halves: (1) OBTAIN the verdict synchronously; (2)
+  the enforce_verdict cascade (verdict_handler.py:50-103 — HALT>BLOCK>guardrails>REQUIRE_APPROVAL
+  >CONSTRAIN>ALLOW, ordered early-returns/raises) that turns it into an action. **E6-S1 is half
+  (1) only** — obtain + record. Half (2) -> Claude Code permissionDecision (deny/ask/allow +
+  updatedInput) is **E6-S2's apply**. So E6-S1 deliberately writes NOTHING to stdout and never
+  blocks: INV-3 (exit 0, no stdout) holds verbatim, and there is zero risk of a wrong deny while
+  the sync path + latency bound + fail-open are landed and validated. Cross-repo recon also
+  confirmed OD9 fidelity: the SDK's fail-open/closed knob is `on_api_error` (default "fail_open";
+  client.py:204-213 -> None verdict -> proceed), exactly the sidecar.Client's fail-open ALLOW.
+key_design_decision: >
+  INV-2 AND THE SHELL COMMAND. For a meaningful local decision (the canonical "block rm -rf"
+  rule) the DecisionRequest must carry the axis a policy matches on — the shell command. This is
+  faithful and MORE private than the SDK, which sends the full activity_input (args) to a REMOTE
+  core over the network. Our DecisionRequest goes ONLY over the local Unix socket to the resident
+  daemon and is evaluated ON-MACHINE (no decision-mirror Emit exists; verified). The sidecar
+  protocol already classifies `command`/`file_path` as matchable METADATA AXES (protocol.go /
+  socketpath.go:62), not gated Content. So a dedicated LOCAL-ONLY HookEvent.command() feeds the
+  request's Attributes; it is never egressed and never logged as content, and the Mapper's
+  observe/telemetry EGRESS path is byte-unchanged and still never decodes the command. Content
+  (prompt/output/file_text) stays nil — E6-S4 populates it, gated on content posture, for local
+  redaction only. The command is rune-bounded (16 KiB) at the untrusted boundary; truncation can
+  only ever cause a policy MISS (-> allow), never a wrong block (consistent with OD9 fail-open).
+what_was_built:
+  module: "adapters/claude-code (existing module; + require/replace -> ../../sidecar)"
+  files:
+    - "enforce.go — NEW. EnforceDecision(ctx, *sidecar.Client, Identity, *HookEvent) sidecar.Decision (the sync gate; never errors/blocks); newSidecarClient() (ResolveSidecarSocket, ~50ms default); buildDecisionRequest (reuses classifyTool/filePath; attrs = permission_mode + {file_path,file_operation} | {mcp_function} | {command LOCAL-ONLY}); capCommand (16KiB bound); compactAny (drops empty axes); logEnforceDecision (secret/content-free stderr diagnostic: tool/verdict/would_block/source/fail_open/stale)"
+    - "enforce_test.go — NEW. ResolveEnforce precedence; buildDecisionRequest (bash cmd / file path+op / mcp server+fn / Content stays nil); fail-open when sidecar absent (FailOpen+VerdictUnknown+prompt); live BLOCK/ALLOW round-trip vs a real sidecar.Server; RunHook enforce-off=0 dials + no diagnostic vs enforce-on=1 dial + diagnostic; PostToolUse never dials even in enforce mode"
+    - "hookrun.go — additive, GATED enforce branch: `if hook == HookPreToolUse && ResolveEnforce() { dec := EnforceDecision(...); logEnforceDecision(...) }` after Observe. Enforce off -> branch inert -> observe path byte-identical. E6-S2 apply seam marked in-code."
+    - "creds.go — DevConfig.Enforce + DevConfig.SidecarSocket (json fields); OPENBOX_ENFORCE + OPENBOX_SIDECAR_SOCKET env consts; ResolveEnforce() (config+env, default false, fail-safe, mirrors ResolveFinops); ResolveSidecarSocket() (env>config>\"\" -> sidecar.DefaultSocketPath)"
+    - "hookevent.go — HookEvent.command(): local-only Bash command accessor, documented never-egressed (INV-2). filePath() unchanged."
+    - "go.mod — require + replace github.com/openbox-ai/openbox-shift-left/sidecar => ../../sidecar"
+  not_touched:
+    - "mapper.go / spool.go / advisory.go — observe + Advisory-tier egress paths byte-unchanged (INV-2/INV-3)"
+    - "sidecar/ — imported (Client, DecisionRequest, Bundle types), NOT modified"
+    - "plugin/hooks.json — unchanged; the same `openbox hook claude-code PreToolUse` invocation now honors enforce mode when the flag is set"
+    - "stdout on every path — E6-S1 writes NOTHING to stdout in any mode (the apply/deny is E6-S2)"
+validation:
+  commands:
+    - "cd adapters/claude-code && go build ./... && go vet ./... && go test -race ./...  # PASS"
+    - "cd sidecar && go build ./... && go test -race ./...  # PASS"
+    - "cd cli && go build ./... && go vet ./... && go test ./...  # PASS"
+  live_e2e: >
+    Built the real `openbox` binary and ran `openbox sidecar serve --bundle <local bundle blocking
+    a shell command containing 'rm -rf'>` on a self-owned 0700 socket dir. With OPENBOX_ENFORCE=1
+    and a configured DID, piping a PreToolUse payload to `openbox hook claude-code PreToolUse`:
+    (a) `rm -rf /tmp/x` -> stderr "enforce decision: tool=Bash verdict=BLOCK would_block=true
+    source=local-bundle fail_open=false", exit 0, EMPTY stdout; (b) `echo hi` -> verdict=ALLOW
+    would_block=false source=local-bundle; (c) sidecar ABSENT (bogus socket) -> verdict=UNKNOWN
+    would_block=false source=fail-open:client fail_open=true, exit 0, empty stdout. Confirms the
+    synchronous pre-execution gate obtains the verdict locally, fails open when the daemon is
+    absent, and never emits a blocking signal (INV-3) in E6-S1.
+invariants_upheld:
+  INV-3b: "decision synchronous + pre-execution + bounded by sidecar.Client's hard ~50ms timeout + fail-open default (OD9); NO network on the decision path — only the local per-user Unix socket dial (verified: EnforceDecision -> Client.Decide -> unix dial only)."
+  INV-3: "verbatim for E6-S1 — exit 0, NOTHING to stdout in any mode; enforce off -> sidecar never dialed -> observe/advisory path byte-identical (test: 0 dials + no diagnostic)."
+  INV-1: "no secret on the PreToolUse hot path (DID only, as Phase-1); the stderr diagnostic carries tool/verdict/source/flags only — no secret."
+  INV-2: "shell command carried on the DecisionRequest is LOCAL-ONLY (local socket, on-machine eval, never egressed, never logged as content); Mapper egress path unchanged and still never decodes the command; DecisionRequest.Content left nil."
+reviews_run:
+  G3_review_auditor:
+    reviewer: "review_auditor (Reva)"
+    date: "2026-07-14"
+    verdict: "approve-with-minor-revisions"
+    summary: >
+      Verified every G3 clause in code (not from builder narrative): synchronous pre-execution obtain,
+      50ms-bounded fail-open, INV-3b network-free (unix dial only), INV-3 verbatim (grep: no
+      stdout/Print/Exit in the new code; double recover; caller returns exitOK — no path can deny),
+      AC-4 observe byte-identical (&& short-circuit; 0 dials tested), AC-6 PreToolUse-only (0 dials for
+      PostToolUse tested), INV-2 command local-only (Mapper egress unchanged). -race GREEN.
+  G_SEC_security_reviewer:
+    reviewer: "security_reviewer (Sam)"
+    date: "2026-07-14"
+    verdict: "approve"
+    summary: >
+      All three invariants hold. Decision path network-free (dial 'unix' only, hard bound, fail-open on
+      SetDeadline error); hot path secret-free (Identity=DID; diagnostic prints verdict/flags only);
+      command/file LOCAL-ONLY (command() reaches only the local-socket request; Mapper unchanged;
+      diagnostic prints neither command/file_path/reason). Enforce-off never dials. Untrusted input
+      robust (json.Marshal escaping blocks socket-protocol injection; no panic/hang). No CRIT/HIGH/MED.
+review_findings_addressed:
+  G_SEC_LOW1: "command bound was by RUNES but the server read-limit is by BYTES -> an adversarial multibyte/control-heavy command could push the marshaled DecisionRequest over the 64KiB byte LimitReader (harmless in E6-S1 — fails safe to allow — but ambiguous once E6-S3 fail-closed inherits it). FIXED IN-CODE: maxCommandLen is now an 8 KiB BYTE budget; capCommand truncates at a UTF-8 rune boundary (utf8.RuneStart) so a rune is never split; comment corrected. Test TestCapCommand_ByteBoundedRuneSafe added. adapter -race GREEN + e2e 25/25 re-run clean."
+  G_SEC_INFO1: "client-side socket trust in the non-XDG $TMPDIR/openbox-<uid> fallback (the hook dials whatever DefaultSocketPath returns; the ownership guard is server-side in the E6-S5 module). ACKNOWLEDGED as an E6-S5-boundary/E6-S2 hardening follow-up: non-exploitable in E6-S1 (verdict not applied; XDG_RUNTIME_DIR is the default, 0700 by systemd; only same-user-adjacent metadata exposure under the fallback). Flagged to confirm coverage in the E6-S5 G_SEC record and to add client-side socket ownership verification BEFORE E6-S2 applies attacker-influenceable verdicts."
+  G_SEC_INFO2: "no durable content sink in E6-S1 — noted by Sam as security-FAVORABLE (no extra command/file leak surface). Aligns with the G3 F1 resolution (durable record deferred to E6-S2)."
+  G3_F1_MEDIUM: "AC-5 mandated a durable enforcement-decision record while the write scope marked it optional — a self-contradiction. RESOLVED by amending STORY-E6-S1.md AC-5: E6-S1's record IS the stderr diagnostic; the DURABLE record is deferred to E6-S2 (where the decision is applied), avoiding conflation with SL-9's Advisory-on-flush sink and adding no content-egress surface. Surfaced for brian's G3 adjudication."
+  G3_F2_LOW: "dev config file read up to 3x per PreToolUse in enforce mode (ResolveIdentity + ResolveEnforce + ResolveSidecarSocket each loadDevConfig). DEFERRED to E6-S2 per the reviewer — within AC-4's sanctioned 'one cheap ResolveEnforce gate' cost and far under the 50ms budget; thread the loaded DevConfig through when the path grows teeth."
+  G3_F3_LOW: "TestResolveEnforce uses os.Unsetenv (not restored by t.Cleanup). ACCEPTED as-is — identical to the existing TestResolveInstallGitHook convention (creds_test.go); harmless (CI does not set OPENBOX_ENFORCE; later t.Setenv re-establishes tracking)."
+gates:
+  G3_REVIEW: "APPROVE (brian, 2026-07-14) — accepting the F1 resolution (durable record deferred to E6-S2). Independent review_auditor (Reva) = APPROVE-WITH-MINOR-REVISIONS."
+  G_SEC: "APPROVE (Sam, security_reviewer, 2026-07-14) — LOW-1 fixed in-code + test; INFO-1/INFO-2 flagged. See reviews_run/review_findings_addressed."
+human_gates_pending: []
+committed:
+  branch: "main"
+  note: "Committed with build + ledger together, no Co-Authored-By trailer (per brian), local only (no push)."
+follow_ups:
+  - "E6-S2 (apply) — map the surfaced sidecar.Decision.Evaluation -> Claude Code permissionDecision (BLOCK/HALT -> deny+reason; REQUIRE_APPROVAL -> ask; CONSTRAIN -> allow-logged; ALLOW/Unknown -> allow), porting verdict_handler.enforce_verdict's ordering. This is where WouldBlock() becomes a real block and where E6-S1 writes stdout for the first time."
+  - "E6-S3 (fail-closed policy) — layer per-org fail-closed on top of the fail-open Client; the hard timeout is already the sidecar.Client default."
+  - "E6-S4 (redaction) — populate DecisionRequest.Content (gated on content posture) for LOCAL redaction in the sidecar."
+  - "E6-S7 (conformance) — assert the sync gate denies pre-execution (post E6-S2), fails open in-bound, and observe sessions uphold INV-3 verbatim; finalize ADR-0002 evidence. The enforce-decision stderr diagnostic is the observable hook."
+  - "A durable enforcement-decision sink (beyond the stderr diagnostic) can be added with E6-S2/S7 if audit needs it; kept out of E6-S1 to not conflate with SL-9's Advisory-on-flush sink."

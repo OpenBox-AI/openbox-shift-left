@@ -103,6 +103,24 @@ func RunHook(sub string, stdin io.Reader, logger *log.Logger) {
 		// fall through — SessionEnd still tries to flush what is already spooled
 	}
 
+	// STORY-E6-S1 (Phase-2 enforcement): in ENFORCE mode the PreToolUse hook is a
+	// SYNCHRONOUS pre-execution gate — obtain the governance decision from the
+	// LOCAL sidecar BEFORE the tool runs (INV-3b: bounded by the Client's hard
+	// ~50ms timeout, fail-open on any fault). Default OFF (observe): with enforce
+	// off ResolveEnforce is false, the sidecar is NEVER dialed, and this block is
+	// inert — so the observe/advisory path is byte-identical to Phase-1 (AC-4).
+	// Only PreToolUse gates (the pre-execution concept); other hooks keep observing.
+	//
+	// E6-S1 OBTAINS + records the decision only — it writes nothing to stdout and
+	// never blocks (the tool always proceeds, exactly as observe mode does). E6-S2
+	// consumes this same Decision to turn a BLOCK/HALT verdict into an actual
+	// Claude Code `deny`/`ask` permissionDecision.
+	if hook == HookPreToolUse && ResolveEnforce() {
+		dec := EnforceDecision(context.Background(), newSidecarClient(), id, ev)
+		logEnforceDecision(logger, ev, dec)
+		// E6-S2 apply seam: map dec.Evaluation → CC permissionDecision here.
+	}
+
 	// Opt-in ambient install (STORY-SL-5 wiring): make governance ambient by
 	// installing the commit-trailer hook into the repo this session opened.
 	if hook == HookSessionStart {

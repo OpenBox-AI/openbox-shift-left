@@ -118,3 +118,27 @@ func (e *HookEvent) filePath() string {
 	}
 	return in.NotebookPath
 }
+
+// command extracts the shell command string from a Bash tool_input.
+//
+// LOCAL-ONLY (INV-2): this is used SOLELY to populate the enforce-mode
+// sidecar.DecisionRequest, which is sent over the local Unix socket to the
+// resident daemon and evaluated ON THIS MACHINE — it never egresses to core and
+// is never logged. It is the axis a local policy matches a dangerous command on
+// (the canonical `rm -rf …` rule), analogous to the SDK sending activity_input to
+// its own governance gate. The OBSERVE/telemetry egress path (Mapper) still never
+// decodes the command, so the metadata-only-on-the-wire posture is unchanged; the
+// command is read here only for the never-egressed local decision. Returns "" for
+// a non-Bash tool or an absent/unparsable command.
+func (e *HookEvent) command() string {
+	if len(e.ToolInput) == 0 {
+		return ""
+	}
+	var in struct {
+		Command string `json:"command"`
+	}
+	if err := json.Unmarshal(e.ToolInput, &in); err != nil {
+		return ""
+	}
+	return in.Command
+}

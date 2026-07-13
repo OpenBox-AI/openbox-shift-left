@@ -40,6 +40,8 @@ const (
 	envContentCapture = "OPENBOX_CONTENT_CAPTURE"
 	envFinops         = "OPENBOX_FINOPS"
 	envInstallGitHook = "OPENBOX_INSTALL_GIT_HOOK"
+	envEnforce        = "OPENBOX_ENFORCE"
+	envSidecarSocket  = "OPENBOX_SIDECAR_SOCKET"
 	envAPIKeyDirect   = "OPENBOX_API_KEY"
 	envSeedDirect     = "OPENBOX_ED25519_SEED"
 	envConfigPath     = "OPENBOX_CONFIG"
@@ -76,6 +78,18 @@ type DevConfig struct {
 	// into the session's repo on SessionStart. Default false — it modifies a
 	// repo's .git/hooks. Set by `openbox dev init --install-git-hook`.
 	InstallGitHook bool `json:"install_git_hook,omitempty"`
+	// Enforce flips the developer runtime from observe/advisory to ENFORCE
+	// (STORY-E6-S1, Phase-2). Default false — the whole of Phase-1 stays observe.
+	// When true, the PreToolUse hook SYNCHRONOUSLY obtains a governance decision
+	// from the local sidecar (sidecar.Client) BEFORE the tool runs (the INV-3b
+	// pre-execution gate, bounded ~50ms, fail-open). E6-S1 only OBTAINS + records
+	// the decision; turning a BLOCK/HALT verdict into an actual CC `deny`/`ask` is
+	// E6-S2's apply. OPENBOX_ENFORCE overrides this either way (ResolveEnforce).
+	Enforce bool `json:"enforce,omitempty"`
+	// SidecarSocket overrides the Unix socket the enforce hook dials (default:
+	// sidecar.DefaultSocketPath()). The OPENBOX_SIDECAR_SOCKET env overrides it —
+	// the SAME env `openbox sidecar serve` reads, so the daemon and the hook agree.
+	SidecarSocket string `json:"sidecar_socket,omitempty"`
 	// SecretFile, when set, points at the CLI's opt-in file secret backend
 	// (`openbox dev init --secret-backend file`) — a 0600 JSON store the hook
 	// reads instead of the OS keychain, for machines with no keyring. The
@@ -218,6 +232,35 @@ func ResolveFinops() bool {
 		enabled = isTruthy(v)
 	}
 	return enabled
+}
+
+// ResolveEnforce reports whether the developer runtime is in ENFORCE mode
+// (STORY-E6-S1 / Phase-2): config field first, then the OPENBOX_ENFORCE env
+// override (env wins), same precedence as every other coordinate. Default false
+// — with it unset the runtime stays observe/advisory and the PreToolUse hot path
+// NEVER dials the sidecar (byte-identical to Phase-1). No secret I/O: a cheap
+// config+env read safe to call on the PreToolUse hot path. A missing/unreadable
+// config is treated as false (fail-safe) — enforcement never turns itself on by
+// accident, and a config read error never blocks a tool call (INV-3).
+func ResolveEnforce() bool {
+	enabled := false
+	if cfg, err := loadDevConfig(DefaultConfigPath()); err == nil {
+		enabled = cfg.Enforce
+	}
+	if v, ok := os.LookupEnv(envEnforce); ok {
+		enabled = isTruthy(v)
+	}
+	return enabled
+}
+
+// ResolveSidecarSocket resolves the Unix socket path the enforce hook dials: the
+// OPENBOX_SIDECAR_SOCKET env first, then the dev config's sidecar_socket, else ""
+// (the caller lets sidecar.DefaultSocketPath() decide, so the daemon and the hook
+// agree without configuration). No secret I/O; a missing/unreadable config
+// degrades to env-or-empty. Empty is the normal case (use the default path).
+func ResolveSidecarSocket() string {
+	cfg, _ := loadDevConfig(DefaultConfigPath())
+	return firstNonEmpty(os.Getenv(envSidecarSocket), cfg.SidecarSocket)
 }
 
 // ResolveCredentials assembles Credentials from env + the OS secret store. It
