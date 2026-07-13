@@ -17,6 +17,9 @@ import (
 	"io"
 	"log"
 	"os"
+	"os/signal"
+	"syscall"
+	"time"
 
 	claudecode "github.com/openbox-ai/openbox-shift-left/adapters/claude-code"
 	obgit "github.com/openbox-ai/openbox-shift-left/adapters/common/git"
@@ -25,6 +28,7 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/cli/internal/devinit"
 	"github.com/openbox-ai/openbox-shift-left/cli/internal/providers"
 	"github.com/openbox-ai/openbox-shift-left/cli/internal/secret"
+	"github.com/openbox-ai/openbox-shift-left/sidecar"
 )
 
 // version is overridable at build time via -ldflags "-X main.version=...".
@@ -76,6 +80,8 @@ func (a *app) run(args []string) int {
 		return a.runDev(args[1:])
 	case "hook":
 		return a.runHook(args[1:])
+	case "sidecar":
+		return a.runSidecar(args[1:])
 	case "version", "--version", "-v":
 		fmt.Fprintln(a.stdout, "openbox "+version)
 		return exitOK
@@ -209,6 +215,52 @@ func (a *app) runHook(args []string) (code int) {
 	return exitOK
 }
 
+// runSidecar runs the local enforcement decision daemon (STORY-E6-S5, ADR-0003):
+// `openbox sidecar serve`. Unlike the hook path this is a long-lived FOREGROUND
+// process with ordinary CLI semantics (diagnostics to stderr, non-zero on a bind
+// failure) — it is NOT a hook, so the INV-3 exit-0/no-stdout discipline does not
+// apply here.
+//
+// It is folded into the one `openbox` binary (WIRE-2): no second shipped
+// artifact, just a mode of the tool developers already installed via `dev init`.
+func (a *app) runSidecar(args []string) int {
+	if len(args) == 0 || args[0] != "serve" {
+		return a.errorf("usage: openbox sidecar serve [--socket <path>] [--bundle <path>] [--sync-interval <dur>] [--freshness <dur>]")
+	}
+	fs := flag.NewFlagSet("openbox sidecar serve", flag.ContinueOnError)
+	fs.SetOutput(a.stderr)
+	var socketPath, bundlePath string
+	var syncInterval, freshness time.Duration
+	fs.StringVar(&socketPath, "socket", a.env("OPENBOX_SIDECAR_SOCKET", ""), "Unix socket path (default: $XDG_RUNTIME_DIR/openbox/sidecar.sock)")
+	fs.StringVar(&bundlePath, "bundle", a.env("OPENBOX_SIDECAR_BUNDLE", ""), "local policy bundle file (default: $XDG_CONFIG_HOME/openbox/policy-bundle.json)")
+	fs.DurationVar(&syncInterval, "sync-interval", 0, "out-of-band bundle refresh interval (default 60s)")
+	fs.DurationVar(&freshness, "freshness", 0, "mark decisions Stale past this bundle age (default 5m)")
+	if err := fs.Parse(args[1:]); err != nil {
+		// `--help` is a successful, intentional request for usage, not an error.
+		if errors.Is(err, flag.ErrHelp) {
+			return exitOK
+		}
+		return exitError
+	}
+
+	// The daemon shuts down gracefully on SIGINT/SIGTERM: the cancelled context
+	// stops the accept loop and drains in-flight decisions (sidecar.Serve).
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	err := sidecar.Serve(ctx, sidecar.Config{
+		SocketPath:   socketPath,
+		BundlePath:   bundlePath,
+		SyncInterval: syncInterval,
+		Freshness:    freshness,
+		Logger:       log.New(a.stderr, "", log.LstdFlags),
+	})
+	if err != nil {
+		return a.errorf("%v", err)
+	}
+	return exitOK
+}
+
 func (a *app) runDevInit(args []string) int {
 	fs := flag.NewFlagSet("openbox dev init", flag.ContinueOnError)
 	fs.SetOutput(a.stderr)
@@ -311,6 +363,7 @@ func (a *app) usage() {
 Usage:
   openbox dev init --provider <claude-code|codex|cursor> [flags]
   openbox dev verify [--dry-run]
+  openbox sidecar serve [--socket <path>] [--bundle <path>]
   openbox version
 
 Environment:

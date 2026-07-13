@@ -13,6 +13,10 @@ require github.com/openbox-ai/openbox-shift-left/adapters/common/git v0.0.0
 
 require github.com/openbox-ai/openbox-shift-left/client v0.0.0
 
+// E6-S5: the local decision sidecar the `openbox sidecar serve` subcommand runs
+// (ADR-0003 — one binary, WIRE-2; cli imports sidecar, never the reverse).
+require github.com/openbox-ai/openbox-shift-left/sidecar v0.0.0
+
 // Sibling modules in this multi-module repo; no published version yet, so
 // consume them from source. The claude-code adapter transitively pulls in
 // client, common/git, and the dev-event conformance module.
@@ -25,3 +29,5 @@ replace github.com/openbox-ai/openbox-shift-left/adapters/common/git => ../adapt
 replace github.com/openbox-ai/openbox-shift-left/client => ../client
 
 replace github.com/openbox-ai/openbox-shift-left/contracts/dev-event/conformance => ../contracts/dev-event/conformance
+
+replace github.com/openbox-ai/openbox-shift-left/sidecar => ../sidecar
