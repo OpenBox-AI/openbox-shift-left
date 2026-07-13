@@ -147,8 +147,8 @@ func TestEmit_MapsRejection_FailOpenAndLogSafe(t *testing.T) {
 			if err != nil {
 				t.Fatalf("fail-open violated: Emit returned error %v", err)
 			}
-			if v != VerdictUnknown {
-				t.Errorf("verdict = %q, want unknown on drop", v)
+			if v.Verdict != VerdictUnknown {
+				t.Errorf("verdict = %q, want unknown on drop", v.Verdict)
 			}
 
 			log.mu.Lock()

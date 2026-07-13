@@ -9,9 +9,10 @@ import (
 
 // Emitter is the transport the action uses to send the Deploy event. The
 // SL-3 *client.Client satisfies it directly (same Emit signature); tests inject
-// a fake so resolution/build can be exercised without a network.
+// a fake so resolution/build can be exercised without a network. It returns the
+// rich Evaluation (STORY-SL-9) — the action records it, never acts on it.
 type Emitter interface {
-	Emit(ctx context.Context, ev client.DevEvent) (client.Verdict, error)
+	Emit(ctx context.Context, ev client.DevEvent) (client.Evaluation, error)
 }
 
 // Logger is the minimal diagnostics sink (INV-1/INV-2: ids/types/errors only,
@@ -32,6 +33,10 @@ type Action struct {
 	Meta     DeployMeta
 	Now      func() time.Time // nil => time.Now
 	Log      Logger           // nil => discard
+	// Advisory records the Advisory-tier verdict/guardrail signals for the Deploy
+	// event (STORY-SL-9). nil ⇒ default sink (DefaultAdvisoryPath). Record-only:
+	// it never gates the deploy (INV-3).
+	Advisory *Advisory
 }
 
 // Result is the outcome of a single run — returned for logging and tests
@@ -76,7 +81,7 @@ func (a *Action) Run(ctx context.Context, target, base string) (Result, error) {
 	if a.Emitter == nil {
 		return out, nil
 	}
-	verdict, emitErr := a.Emitter.Emit(ctx, ev)
+	eval, emitErr := a.Emitter.Emit(ctx, ev)
 	if emitErr != nil {
 		// Emit only returns a non-nil error for an unbuildable event (a caller
 		// precondition), never a transport failure — but stay fail-open here so
@@ -84,9 +89,22 @@ func (a *Action) Run(ctx context.Context, target, base string) (Result, error) {
 		a.log().Printf("openbox-git-action: emit dropped for %v: %v", ev.EventID, emitErr)
 		return out, nil
 	}
-	out.Verdict = verdict
+	out.Verdict = eval.Verdict
 	out.Emitted = true
+
+	// Advisory tier (STORY-SL-9): record what would be enforced for this deploy
+	// (would_block label + guardrail/constraint/risk signals). Record-only —
+	// never gates the deploy (INV-3). Best-effort; a sink failure is swallowed.
+	a.advisory().Record(ev, eval)
 	return out, nil
+}
+
+// advisory returns the configured Advisory sink or a default one.
+func (a *Action) advisory() *Advisory {
+	if a.Advisory != nil {
+		return a.Advisory
+	}
+	return &Advisory{Log: a.Log}
 }
 
 func reasonSuffix(res Resolution) string {

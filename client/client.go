@@ -121,24 +121,30 @@ func New(cfg Config) (*Client, error) {
 
 // Emit builds the core payload from a normalized dev event, signs it, and POSTs
 // it to /evaluate. It is FAIL-OPEN (INV-3): on any error (marshal, signing,
-// network, non-2xx, exhausted retries) it logs and returns
-// (VerdictUnknown, nil) — it NEVER returns a transport error to the caller and
-// NEVER blocks a tool call. Phase-1 observe callers ignore the returned verdict.
+// network, non-2xx, exhausted retries) it logs and returns a zero-valued
+// Evaluation (Verdict VerdictUnknown), nil — it NEVER returns a transport error
+// to the caller and NEVER blocks a tool call.
+//
+// It returns the rich Evaluation (verdict + trust/risk/guardrail signals, when
+// core supplies them — STORY-SL-9). Phase-1 observe callers ignore the verdict
+// for control flow; the Advisory tier RECORDS it off the hot path but still
+// never blocks. A Phase-1 core that returns only `verdict` yields a
+// zero-valued rest (forward compatible), never an error.
 //
 // The returned error is reserved for a programming/precondition fault the
 // caller MUST fix (an event that cannot even be built — e.g. empty EventID),
 // never a transport failure.
-func (c *Client) Emit(ctx context.Context, ev DevEvent) (Verdict, error) {
+func (c *Client) Emit(ctx context.Context, ev DevEvent) (Evaluation, error) {
 	// Preconditions the caller MUST fix — not transport failures, so they are
 	// surfaced rather than fail-open dropped. EventID is the idempotency key
 	// (INV-5); SessionID becomes core's run_id, half of the NOT-NULL session key
 	// (workflow_id, run_id) — an empty one would silently corrupt session
 	// grouping rather than fail cleanly.
 	if ev.EventID == "" {
-		return VerdictUnknown, errors.New("client: DevEvent.EventID is required (INV-5 idempotency key)")
+		return Evaluation{}, errors.New("client: DevEvent.EventID is required (INV-5 idempotency key)")
 	}
 	if ev.SessionID == "" {
-		return VerdictUnknown, errors.New("client: DevEvent.SessionID is required (maps to core run_id)")
+		return Evaluation{}, errors.New("client: DevEvent.SessionID is required (maps to core run_id)")
 	}
 
 	// INV-2: strip content unless the org opted in. Done on a copy so the
@@ -152,7 +158,7 @@ func (c *Client) Emit(ctx context.Context, ev DevEvent) (Verdict, error) {
 		// A build failure is a data problem, not a transport one; fail-open —
 		// log and drop, do not block the caller (INV-3).
 		c.log.Printf("openbox: dropping event %s (%s): build payload: %v", ev.EventID, ev.EventType, err)
-		return VerdictUnknown, nil
+		return Evaluation{}, nil
 	}
 
 	respBody, err := c.post(ctx, body)
@@ -162,9 +168,9 @@ func (c *Client) Emit(ctx context.Context, ev DevEvent) (Verdict, error) {
 		// reason-guidance line; a transport error is reported verbatim. Emitted
 		// only on the TERMINAL failure post returns, so no per-retry log spam.
 		c.log.Printf("openbox: dropping event %s (%s): %s", ev.EventID, ev.EventType, describeDrop(err))
-		return VerdictUnknown, nil
+		return Evaluation{}, nil
 	}
-	return parseVerdict(respBody), nil
+	return parseEvaluation(respBody), nil
 }
 
 // post signs and sends the body with bounded retries. It returns the response

@@ -130,8 +130,8 @@ func TestEmit_HappyPath_SignedAndParsed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Emit returned error (should be fail-open): %v", err)
 	}
-	if v != VerdictAllow {
-		t.Errorf("verdict = %q, want ALLOW", v)
+	if v.Verdict != VerdictAllow {
+		t.Errorf("verdict = %q, want ALLOW", v.Verdict)
 	}
 	if *calls != 1 {
 		t.Errorf("calls = %d, want 1", *calls)
@@ -166,8 +166,8 @@ func TestEmit_VerdictParsing(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Emit(%s): %v", wire, err)
 		}
-		if got != want {
-			t.Errorf("verdict %q → %q, want %q", wire, got, want)
+		if got.Verdict != want {
+			t.Errorf("verdict %q → %q, want %q", wire, got.Verdict, want)
 		}
 	}
 }
@@ -179,8 +179,8 @@ func TestEmit_FailOpen_Unreachable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("fail-open violated: Emit returned error %v", err)
 	}
-	if v != VerdictUnknown {
-		t.Errorf("verdict = %q, want unknown on drop", v)
+	if v.Verdict != VerdictUnknown {
+		t.Errorf("verdict = %q, want unknown on drop", v.Verdict)
 	}
 	if !strings.Contains(log.all(), "evt-1") {
 		t.Errorf("expected a drop log mentioning the event id; got %q", log.all())
@@ -204,8 +204,8 @@ func TestEmit_RetriesThenSucceeds(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Emit: %v", err)
 	}
-	if v != VerdictAllow {
-		t.Errorf("verdict = %q, want ALLOW after retries", v)
+	if v.Verdict != VerdictAllow {
+		t.Errorf("verdict = %q, want ALLOW after retries", v.Verdict)
 	}
 	if *calls != 3 {
 		t.Errorf("calls = %d, want 3 (1 + 2 retries)", *calls)
@@ -219,8 +219,8 @@ func TestEmit_5xxExhausted_FailsOpen(t *testing.T) {
 	if err != nil {
 		t.Fatalf("fail-open violated: %v", err)
 	}
-	if v != VerdictUnknown {
-		t.Errorf("verdict = %q, want unknown", v)
+	if v.Verdict != VerdictUnknown {
+		t.Errorf("verdict = %q, want unknown", v.Verdict)
 	}
 	if *calls != 3 {
 		t.Errorf("calls = %d, want 3 (retries exhausted)", *calls)
@@ -234,8 +234,8 @@ func TestEmit_4xxNotRetried(t *testing.T) {
 	if err != nil {
 		t.Fatalf("fail-open violated: %v", err)
 	}
-	if v != VerdictUnknown {
-		t.Errorf("verdict = %q, want unknown", v)
+	if v.Verdict != VerdictUnknown {
+		t.Errorf("verdict = %q, want unknown", v.Verdict)
 	}
 	// A 400 is terminal (e.g. today's un-accept-listed dev event_type — EXT-core).
 	if *calls != 1 {

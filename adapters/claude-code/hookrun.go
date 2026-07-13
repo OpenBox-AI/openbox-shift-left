@@ -150,6 +150,10 @@ func runFlush(logger *log.Logger, sessionID string) {
 	defer cancel()
 
 	ad := New(creds.Identity(), DefaultSpoolDir())
+	// Advisory-tier recording (STORY-SL-9): route the per-record stderr summary
+	// through the hook's logger. Diagnostics only — stderr, never stdout, so a
+	// SessionStart/UserPromptSubmit exit-0 hook still injects nothing (INV-3).
+	ad.Advisory.Log = logger
 	var n int
 	if sessionID == "" {
 		n, err = ad.FlushAll(ctx, cl)

@@ -1,6 +1,9 @@
 package main
 
 import (
+	"encoding/base64"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -172,6 +175,80 @@ func TestHookBinary_AmbientGitHookInstall(t *testing.T) {
 	// unified binary by cli TestUnifiedBinaryGitHookStampsCommit.
 	if !strings.Contains(string(body), "'hook' 'git' 'prepare-commit-msg'") || !strings.Contains(string(body), "openbox-shift-left") {
 		t.Fatalf("installed hook does not re-invoke the unified engine:\n%s", body)
+	}
+}
+
+// TestHookBinary_BlockVerdictRecordsAdvisoryExitsZero is the load-bearing
+// STORY-SL-9 acceptance test (INV-3): a /evaluate response that returns a BLOCK
+// verdict + a guardrail hit produces an advisory record (would_block=true, the
+// guardrail category) AND the hook STILL exits 0 with EMPTY stdout — nothing is
+// denied, delayed, or errored. The record carries no tool content (INV-2).
+func TestHookBinary_BlockVerdictRecordsAdvisoryExitsZero(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a binary; skipped in -short")
+	}
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "openbox-cc-hook")
+	if out, err := exec.Command("go", "build", "-o", bin, ".").CombinedOutput(); err != nil {
+		t.Fatalf("build: %v\n%s", err, out)
+	}
+
+	// A core that would BLOCK, with a guardrail hit (categories only).
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"verdict":"block","risk_score":0.91,"trust_tier":2,` +
+			`"guardrails_result":{"validation_passed":false,` +
+			`"reasons":[{"type":"pii","field":"email","reason":"Contains PII"}]}}`))
+	}))
+	defer srv.Close()
+
+	advPath := filepath.Join(dir, "advisories.jsonl")
+	seed := base64.StdEncoding.EncodeToString(make([]byte, 32)) // valid 32-byte Ed25519 seed
+	secret := "SECRET-COMMAND-do-not-egress"
+	baseEnv := append(os.Environ(),
+		"OPENBOX_AGENT_DID=did:aip:7f3c9b2e-0000-5000-a000-000000000001",
+		"OPENBOX_BASE_URL="+srv.URL, // loopback http is allowed (INV-1 check)
+		"OPENBOX_API_KEY=obx_test_key",
+		"OPENBOX_ED25519_SEED="+seed,
+		"OPENBOX_SPOOL_DIR="+filepath.Join(dir, "spool"),
+		"OPENBOX_ADVISORY_FILE="+advPath,
+		"OPENBOX_SESSION_DIR="+filepath.Join(dir, "sessions"),
+		"OPENBOX_CONFIG="+filepath.Join(dir, "none.json"),
+	)
+
+	run := func(hook, payload string) {
+		cmd := exec.Command(bin, hook)
+		cmd.Stdin = strings.NewReader(payload)
+		cmd.Env = baseEnv
+		var stdout, stderr strings.Builder
+		cmd.Stdout = &stdout
+		cmd.Stderr = &stderr
+		if err := cmd.Run(); err != nil {
+			t.Fatalf("%s must exit 0 despite a BLOCK verdict (INV-3), got %v\nstderr: %s", hook, err, stderr.String())
+		}
+		if stdout.Len() != 0 {
+			t.Fatalf("%s stdout must be EMPTY (no block / no injection), got %q", hook, stdout.String())
+		}
+	}
+
+	// Spool a tool call (content in tool_input), then SessionEnd flushes it.
+	run("PreToolUse", `{"hook_event_name":"PreToolUse","session_id":"sess-xyz","cwd":"/r","tool_name":"Bash","tool_input":{"command":"`+secret+`"}}`)
+	run("SessionEnd", `{"hook_event_name":"SessionEnd","session_id":"sess-xyz","cwd":"/r","reason":"logout"}`)
+
+	raw, err := os.ReadFile(advPath)
+	if err != nil {
+		t.Fatalf("advisory sink not written on BLOCK: %v", err)
+	}
+	body := string(raw)
+	if !strings.Contains(body, `"would_block":true`) {
+		t.Errorf("advisory missing would_block=true:\n%s", body)
+	}
+	if !strings.Contains(body, `"type":"pii"`) {
+		t.Errorf("advisory missing the guardrail category:\n%s", body)
+	}
+	// INV-1/INV-2: no tool content, no secret in the record.
+	if strings.Contains(body, secret) {
+		t.Fatalf("content leaked into advisory sink: %s", body)
 	}
 }
 

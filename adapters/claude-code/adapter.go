@@ -8,9 +8,10 @@ import (
 
 // Emitter is the transport the adapter delivers events through — satisfied by
 // *client.Client (STORY-SL-3). Abstracted so the flush path is unit-testable
-// with a fake that records what would be emitted.
+// with a fake that records what would be emitted. It returns the rich
+// Evaluation (STORY-SL-9); observe-only callers still ignore it for control flow.
 type Emitter interface {
-	Emit(ctx context.Context, ev client.DevEvent) (client.Verdict, error)
+	Emit(ctx context.Context, ev client.DevEvent) (client.Evaluation, error)
 }
 
 // Adapter is the Claude Code realization of the Provider Adapter Contract
@@ -20,11 +21,20 @@ type Emitter interface {
 type Adapter struct {
 	Mapper Mapper
 	Spool  Spool
+	// Advisory records the Advisory-tier verdict/guardrail signals on flush
+	// (STORY-SL-9). Record-only, off the hot path, never blocks (INV-3). nil ⇒
+	// no advisory recording (still delivers, still never blocks).
+	Advisory *Advisory
 }
 
-// New builds an Adapter for a developer identity, spooling under dir.
+// New builds an Adapter for a developer identity, spooling under dir and writing
+// Advisory records to the default sink (DefaultAdvisoryPath).
 func New(id Identity, spoolDir string) *Adapter {
-	return &Adapter{Mapper: NewMapper(id), Spool: Spool{Dir: spoolDir}}
+	return &Adapter{
+		Mapper:   NewMapper(id),
+		Spool:    Spool{Dir: spoolDir},
+		Advisory: &Advisory{Path: DefaultAdvisoryPath()},
+	}
 }
 
 // Observe is the hot path: map one hook payload to a normalized event and append
@@ -47,20 +57,29 @@ func (a *Adapter) Observe(hook HookName, e *HookEvent) (spooled bool, err error)
 
 // Flush drains the given session's spooled events through the Emitter. It is
 // bounded by ctx (the binary caps SessionEnd flush so session teardown is never
-// delayed unduly). Observe-only: the verdict from each Emit is ignored (D7).
+// delayed unduly). Observe-only: the verdict from each Emit never blocks (D7);
+// it is RECORDED to the Advisory sink off the hot path (STORY-SL-9).
 func (a *Adapter) Flush(ctx context.Context, sessionID string, em Emitter) (int, error) {
-	return a.Spool.FlushSession(ctx, sessionID, emitFunc(em))
+	return a.Spool.FlushSession(ctx, sessionID, a.emitFunc(em))
 }
 
 // FlushAll drains every spooled session (the `flush` subcommand / CLI catch-up).
 func (a *Adapter) FlushAll(ctx context.Context, em Emitter) (int, error) {
-	return a.Spool.FlushAll(ctx, emitFunc(em))
+	return a.Spool.FlushAll(ctx, a.emitFunc(em))
 }
 
-// emitFunc adapts an Emitter to a FlushFunc, discarding the (ignored) verdict.
-func emitFunc(em Emitter) FlushFunc {
+// emitFunc adapts an Emitter to a FlushFunc. It emits the event and then RECORDS
+// the returned Evaluation to the Advisory sink (Advisory-tier consumption,
+// STORY-SL-9) — record-only, never blocking. The delivery error is returned for
+// the drain's fail-open logging; the advisory write itself never fails the drain.
+func (a *Adapter) emitFunc(em Emitter) FlushFunc {
 	return func(ctx context.Context, ev client.DevEvent) error {
-		_, err := em.Emit(ctx, ev)
+		eval, err := em.Emit(ctx, ev)
+		// Record even alongside a delivery error: Emit is fail-open, so err here
+		// is a caller precondition (unbuildable event), and eval is then the zero
+		// Evaluation (IsAdvisory false ⇒ nothing recorded). On success, a real
+		// verdict is recorded. Either way this cannot block the tool call.
+		a.Advisory.Record(ev, eval)
 		return err
 	}
 }
