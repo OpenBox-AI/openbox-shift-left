@@ -237,9 +237,18 @@ SL-13 (unblocks ingestion + Phase-2)  ─►  SL-16 (pending OD-FINOPS)  ─► 
 
 ---
 
+## Phase-2 / Epic E6 — Enforcement (drafted 2026-07-13)
+The `apply` leg — honor the verdict (deny/ask/rewrite). Artifacts: spike `.fab7/sdlc/discovery/spikes/S2-enforcement-latency.md`, epic `.fab7/sdlc/stories/E6-backlog.md`, `.fab7/sdlc/design/adr/ADR-0002-enforcement-blocking-invariant.md`. **Inverts INV-3** → the scoped, bounded, fail-open-by-default carve-out **INV-3b** (ADR-0002). Mechanism: `PreToolUse` (pre-execution, synchronous) `permissionDecision` deny/ask + `updatedInput` rewrite — **no revert; the decision is made before the side effect.** **BLOCKED** on spike S2 + OD-ENF-SCOPE + OD-HITL + the real EXT-core upstream merge. See E6-backlog for stories E6-S0..S7.
+
 ## Flags
-- **OD-FINOPS (new, needs brian):** is reading `transcript_path` to extract usage **numbers only** (never content), behind an off-by-default opt-in, acceptable under OD4's metadata-only posture? Gates SL-16.
-- **OD-OWNER-API (new, needs brian):** confirm the FR-7 session-ownership read endpoint shape + auth model the SL-15 verifier targets (else build against the assumed shape, flag OFF).
+- **OD9 (DECIDED 2026-07-13, brian): fail-open at first.** Enforcement degrades to allow on core/sidecar unavailability or timeout; per-org fail-closed is a later opt-in (E6-S3).
+- **OD6 (CONFIRMED by spike S2, 2026-07-13): command → local sidecar.** S2 measured `POST /evaluate` at **~0.8–1.6 s** (Temporal workflow, loopback floor) — ~16–33× budget → **direct HTTP is NO-GO**. The decision must be a local sidecar (single-digit ms; fork/exec 1.5 ms, signed transport 3.6 ms). `/evaluate` stays async telemetry only. Sidecar (E6-S5) promoted to a REQUIRED prerequisite.
+- **OD-ENF-SCOPE (DECIDED 2026-07-13, brian): replicate the full SDK verdict scope** — HALT>BLOCK>guardrails>REQUIRE_APPROVAL>CONSTRAIN>ALLOW (port `verdict_handler.enforce_verdict`) across all tools. No reduced first-scope.
+- **OD-HITL (DECIDED 2026-07-13, brian): map REQUIRE_APPROVAL → CC `ask`** (interactive local prompt, not server-side `/approval` polling). E6-S6 in scope.
+- **spike S2 (DONE 2026-07-13):** direct-HTTP infeasible, local sidecar mandatory, hook timeout ≈ 50 ms, fail-open on timeout — see `S2-enforcement-latency.md`.
+- **ADR-0002 (proposed):** INV-3b enforcement carve-out — ratify at E6-S7 once spike S2 supplies the hard timeout.
+- **OD-FINOPS (RESOLVED 2026-07-13):** brian confirmed reading `transcript_path` for numbers-only, behind an off-by-default opt-in (separate-flag sub-ruling) — SL-16 done.
+- **OD-OWNER-API (RESOLVED 2026-07-13):** target the real openbox-backend `/agent/<id>/sessions` read with an org X-API-Key + `OPENBOX_AGENT_ID` (uuidv5-bound to the DID) — SL-15 done.
 - **OD-ADV (RESOLVED 2026-07-13):** Advisory tier ADOPTED by brian (SL-9 G1_READY confirm) — kept for provenance.
 - **OD10:** name the pilot repo before SL-6's squash-prevalence validation (S3 U-1) and pilot rollout.
 - **OD15 (external, deferred):** lineage storage metadata-JSONB vs indexed — SL-6 uses metadata (no external dep); FR-7 *queryable* read is deferred.
