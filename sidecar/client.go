@@ -60,9 +60,24 @@ func NewClient(cfg ClientConfig) *Client {
 // allow — the caller (E6-S1/E6-S2) treats it as "proceed, degrade to observe".
 type Decision struct {
 	Evaluation client.Evaluation
-	// FailOpen reports that this decision is the fail-open fallback (no real
-	// daemon verdict), so telemetry/conformance (E6-S7) can distinguish an actual
-	// ALLOW from a degraded allow.
+	// FailOpen reports that NO real daemon verdict was obtained for this call, so
+	// telemetry/conformance (E6-S7) — and the E6-S3 failure policy — can distinguish
+	// an actual evaluated ALLOW from a degraded allow. It is true in TWO cases,
+	// both "OpenBox did not govern this call":
+	//   - the Client could not reach/parse the daemon (socket absent, dial refused,
+	//     timeout, malformed reply) — see allowFailOpen, Source=sourceFailOpenClient;
+	//   - the daemon WAS reached but produced no real verdict (no bundle synced yet,
+	//     bad protocol, missing session) — Source=sourceFailOpenNoBundle.
+	// Both are the same class to the failure policy: fail-open (default) proceeds,
+	// fail-closed (opt-in, E6-S3) denies. Only a resident-evaluator verdict
+	// (Source=sourceLocalBundle) is FailOpen=false — see isRealVerdictSource.
+	//
+	// This is a DELIBERATE shift-left deviation from the reference SDK, which has no
+	// "reachable-but-no-verdict" state (an empty/unbundled evaluation there proceeds
+	// as ALLOW). The local sidecar CAN be up-but-unbundled ([EXT-opa-bundle]); a
+	// fail-closed org must not be silently ungoverned in that state. It is consistent
+	// with E6-S3, which already fails a fail-closed org closed on a malformed reply
+	// (the adjacent "reachable, no usable verdict" axis).
 	FailOpen bool
 	// Source echoes the daemon's DecisionResponse.Source, or sourceFailOpenClient
 	// when the Client synthesized the allow.
@@ -140,13 +155,31 @@ func (c *Client) Decide(ctx context.Context, req DecisionRequest) Decision {
 	if err := json.Unmarshal(line, &resp); err != nil {
 		return allowFailOpen("sidecar response malformed")
 	}
+	// A WELL-FORMED reply is not necessarily a real verdict: the daemon reports a
+	// no-verdict outcome (cold start / no bundle, bad protocol, missing session)
+	// with Source=sourceFailOpenNoBundle. Mark those FailOpen so the E6-S3 failure
+	// policy engages (fail-open proceeds; fail-closed denies) — closing the E6-S3
+	// G_SEC INFO-1 hole where a reachable-but-unbundled daemon left a fail-closed
+	// org silently ungoverned. Only sourceLocalBundle is a real verdict.
 	return Decision{
 		Evaluation:    resp.Evaluation,
-		FailOpen:      false,
+		FailOpen:      !isRealVerdictSource(resp.Source),
 		Source:        resp.Source,
 		Stale:         resp.Stale,
 		RedactedInput: resp.RedactedInput, // LOCAL-only; applied via CC updatedInput (E6-S4)
 	}
+}
+
+// isRealVerdictSource reports whether a well-formed DecisionResponse.Source
+// denotes a REAL evaluated verdict (as opposed to a degraded no-verdict reply the
+// failure policy must handle). The server tags EVERY resident-evaluator decision
+// — the Phase-1 rule bundle today and the embedded-OPA evaluator later (ADR-0003)
+// — sourceLocalBundle, so this stays correct as evaluators evolve. Any other
+// source (sourceFailOpenNoBundle, or an unknown/empty string from a stale/foreign
+// peer) is treated as "no real verdict" → FailOpen — the safe direction, routing
+// the decision to the failure policy rather than mistaking it for an allow.
+func isRealVerdictSource(source string) bool {
+	return source == sourceLocalBundle
 }
 
 // readBounded reads up to a newline or max bytes, whichever first. It caps the

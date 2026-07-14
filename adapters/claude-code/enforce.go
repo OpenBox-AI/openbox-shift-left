@@ -47,6 +47,16 @@ import (
 // INV-2).
 const maxCommandLen = 8 << 10 // 8 KiB (bytes)
 
+// maxJSONCompareBytes bounds the jsonEqual double-parse (E6-S4 G_SEC INFO-2). The
+// redacted input is already capped by the sidecar Client's bounded read (≤64 KiB),
+// but the original tool_input comes from the hook payload; this defends the
+// LOCAL-only equality check from an oversized document forcing a large re-parse.
+// Over the cap, jsonEqual returns not-equal — the SAFE direction: a differing
+// redaction is applied, so we only ever forgo suppressing an identical-but-huge
+// rewrite (a harmless no-op), never corrupt or drop a real redaction. 256 KiB is
+// ample for any real tool_input.
+const maxJSONCompareBytes = 256 << 10 // 256 KiB (bytes)
+
 // EnforceDecision is the PreToolUse enforce gate: it SYNCHRONOUSLY obtains a
 // governance decision from the local sidecar for the tool that is about to run,
 // bounded by cl's hard timeout (~50 ms, INV-3b). It NEVER errors and NEVER blocks
@@ -131,6 +141,16 @@ func resolveFailurePolicy() FailurePolicy {
 // This only ever converts a would-be PROCEED into a DENY, so it upholds the
 // tighten-only invariant (E6-S2) and INV-3b (the block is still synchronous,
 // pre-execution, and bounded by the E6-S1 timeout).
+//
+// E6-S7 note — the set of "no real verdict" cases (dec.FailOpen) is now complete:
+// besides an unreachable/timed-out/malformed daemon, it INCLUDES a reachable but
+// UNBUNDLED daemon (Source=fail-open:no-bundle → FailOpen=true, sidecar.Client /
+// isRealVerdictSource). So a fail-closed org denies whenever OpenBox obtained no
+// real verdict, however that happened — closing the E6-S3 G_SEC INFO-1 hole. This
+// is a DELIBERATE deviation from the reference SDK, which has no reachable-but-
+// unbundled state and would proceed; it is consistent with E6-S3 already failing
+// closed on a malformed reply (the adjacent axis). This transform is UNCHANGED —
+// the reconciliation is entirely upstream, in how sidecar.Decision.FailOpen is set.
 func applyFailurePolicy(dec sidecar.Decision, policy FailurePolicy) sidecar.Decision {
 	if !dec.FailOpen || policy != FailClosed {
 		return dec
@@ -427,6 +447,9 @@ func applyInputRedaction(dec sidecar.Decision, contentCapture bool, origInput js
 func jsonEqual(a, b json.RawMessage) bool {
 	if len(a) == 0 || len(b) == 0 {
 		return false
+	}
+	if len(a) > maxJSONCompareBytes || len(b) > maxJSONCompareBytes {
+		return false // oversized → not-equal (apply the redaction); bound the re-parse (E6-S4 INFO-2)
 	}
 	ca, err1 := canonicalJSON(a)
 	cb, err2 := canonicalJSON(b)

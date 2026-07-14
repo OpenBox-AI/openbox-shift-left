@@ -165,10 +165,14 @@ func (s *Server) handleConn(conn net.Conn) {
 	var req DecisionRequest
 	dec := json.NewDecoder(io.LimitReader(conn, s.maxReq))
 	if err := dec.Decode(&req); err != nil {
+		// No real verdict → VerdictUnknown (set explicitly for parity with the decide
+		// paths, though VerdictUnknown is the zero value) + sourceFailOpenNoBundle so
+		// the client marks the Decision FailOpen (E6-S7).
 		s.writeResponse(conn, DecisionResponse{
-			Protocol: ProtocolVersion,
-			Source:   sourceFailOpenNoBundle,
-			Error:    "malformed request",
+			Protocol:   ProtocolVersion,
+			Evaluation: client.Evaluation{Verdict: client.VerdictUnknown},
+			Source:     sourceFailOpenNoBundle,
+			Error:      "malformed request",
 		})
 		return
 	}
@@ -178,14 +182,19 @@ func (s *Server) handleConn(conn net.Conn) {
 // decide is the pure decision function: no I/O, no network. Exposed for tests.
 func (s *Server) decide(req DecisionRequest) DecisionResponse {
 	if req.Protocol != 0 && req.Protocol != ProtocolVersion {
-		// Unknown protocol → fail-open allow, never mis-decode a request we don't
-		// understand into a block.
-		return DecisionResponse{Protocol: ProtocolVersion, Source: sourceFailOpenNoBundle,
-			Error: "unsupported protocol version"}
+		// Unknown protocol → no real verdict, never mis-decode a request we don't
+		// understand into a block. VerdictUnknown (honest: "not evaluated") +
+		// sourceFailOpenNoBundle lets the client mark this FailOpen (E6-S7).
+		return DecisionResponse{Protocol: ProtocolVersion,
+			Evaluation: client.Evaluation{Verdict: client.VerdictUnknown},
+			Source:     sourceFailOpenNoBundle,
+			Error:      "unsupported protocol version"}
 	}
 	if req.SessionID == "" {
-		return DecisionResponse{Protocol: ProtocolVersion, Source: sourceFailOpenNoBundle,
-			Error: "missing openbox_session_id"}
+		return DecisionResponse{Protocol: ProtocolVersion,
+			Evaluation: client.Evaluation{Verdict: client.VerdictUnknown},
+			Source:     sourceFailOpenNoBundle,
+			Error:      "missing openbox_session_id"}
 	}
 
 	s.mu.RLock()
@@ -194,11 +203,16 @@ func (s *Server) decide(req DecisionRequest) DecisionResponse {
 	s.mu.RUnlock()
 
 	if eval == nil {
-		// Cold start: no policy synced yet → fail-open allow (OD9). Never deny before
-		// the sidecar knows the policy.
+		// Cold start: no policy synced yet → NO real verdict. VerdictUnknown records
+		// honestly that OpenBox did not evaluate this call (matching the client's own
+		// allowFailOpen), and sourceFailOpenNoBundle lets the client mark the Decision
+		// FailOpen so the failure policy engages (E6-S7 / E6-S3 INFO-1): fail-open
+		// (OD9 default) proceeds; fail-closed denies. Never deny HERE — the daemon
+		// does not know the policy, so the block decision belongs to the client-side
+		// failure policy, not this fail-open primitive.
 		return DecisionResponse{
 			Protocol:   ProtocolVersion,
-			Evaluation: client.Evaluation{Verdict: client.VerdictAllow},
+			Evaluation: client.Evaluation{Verdict: client.VerdictUnknown},
 			Source:     sourceFailOpenNoBundle,
 		}
 	}

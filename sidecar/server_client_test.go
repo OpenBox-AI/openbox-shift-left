@@ -157,17 +157,45 @@ func TestFailOpen_HungServerWithinBound(t *testing.T) {
 }
 
 func TestColdStart_FailOpenNoBundle(t *testing.T) {
-	// A running daemon that has not yet synced a bundle → fail-open allow, and it
-	// says so via Source (not a fabricated real verdict).
+	// A running daemon that has not yet synced a bundle → NO real verdict (E6-S7,
+	// closing E6-S3 INFO-1). The daemon is reachable and answers cleanly, but it
+	// produced no policy verdict, so the Client marks the Decision FailOpen (so the
+	// E6-S3 failure policy engages: fail-open proceeds; fail-closed denies). The
+	// server signals this honestly: VerdictUnknown ("not evaluated") + Source
+	// sourceFailOpenNoBundle. This distinguishes a server-side degrade from a
+	// client-side one (sourceFailOpenClient) while treating both as FailOpen.
 	srv := NewServer(ServerConfig{})
 	path := startServer(t, srv)
 	c := NewClient(ClientConfig{SocketPath: path, Timeout: time.Second})
 	d := c.Decide(context.Background(), toolCall("Bash", client.ToolShell, nil))
-	if d.FailOpen {
-		t.Fatalf("cold start is a real (server) response, not a client fail-open: %+v", d)
+	if !d.FailOpen {
+		t.Fatalf("cold start obtained no real verdict → want FailOpen: %+v", d)
 	}
-	if d.Evaluation.Verdict != client.VerdictAllow || d.Source != sourceFailOpenNoBundle {
-		t.Fatalf("cold start: verdict=%q source=%q, want ALLOW/%s", d.Evaluation.Verdict, d.Source, sourceFailOpenNoBundle)
+	if d.Source != sourceFailOpenNoBundle {
+		t.Fatalf("cold start source=%q, want %s (server-side degrade)", d.Source, sourceFailOpenNoBundle)
+	}
+	if d.Evaluation.Verdict != client.VerdictUnknown {
+		t.Fatalf("cold start verdict=%q, want UNKNOWN (honest: not evaluated)", d.Evaluation.Verdict)
+	}
+	if d.Evaluation.WouldBlock() {
+		t.Fatal("cold start must never block at the server (fail-open primitive; the failure policy decides)")
+	}
+}
+
+func TestIsRealVerdictSource(t *testing.T) {
+	// Only a resident-evaluator verdict is a real verdict; every degrade / unknown
+	// source routes to the failure policy (FailOpen). Guards the E6-S7 mapping.
+	cases := map[string]bool{
+		sourceLocalBundle:      true,
+		sourceFailOpenNoBundle: false,
+		sourceFailOpenClient:   false,
+		"":                     false, // a stale/foreign peer with no source → safe direction
+		"something-new":        false, // an unrecognized source is NOT assumed to be a real verdict
+	}
+	for src, want := range cases {
+		if got := isRealVerdictSource(src); got != want {
+			t.Errorf("isRealVerdictSource(%q) = %v, want %v", src, got, want)
+		}
 	}
 }
 
