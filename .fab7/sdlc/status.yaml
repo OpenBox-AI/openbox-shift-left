@@ -1094,7 +1094,7 @@ stories:
     gates:
       G3_REVIEW: {decision: "approve", reviewer: "review-auditor (blind, review-diff) APPROVE-WITH-NITS + brian sign-off 2026-07-14", must_fix: 0}
     audit:
-      commit: "PENDING_HASH"
+      commit: "b4866bb"
       completed_at: "2026-07-14"
       validation_artifact: ".fab7/sdlc/assignments/build-story-E7-S3-20260714.result.yaml"
       last_run_id: null
