@@ -1039,7 +1039,7 @@ stories:
         decided_by: null
         decided_at: null
     audit:
-      commit: "shift-left main (client/hookspan.go + docs; hash recorded in the follow-up ledger commit)"
+      commit: "fd53097 (shift-left main; client/hookspan.go + tests + docs)"
       completed_at: "2026-07-14T00:00:00Z"
       validation_artifact: ".fab7/sdlc/assignments/build-story-E7-S1-20260714.result.yaml"
       last_run_id: null
