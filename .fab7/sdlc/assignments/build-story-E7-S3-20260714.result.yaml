@@ -1,0 +1,123 @@
+story: STORY-E7-S3
+title: "shift-left: Go flat SpanData builder (no OTel) — per-session trace context, 16/32-hex ids, started/completed staging, common+family root fields; wire-shape conformance test"
+epic: E7
+built_at: "2026-07-14"
+repo: "openbox-shift-left (this repo — client/ module). openbox-sdk-python is a READ-ONLY reference, NOT edited."
+status: done  # built + independently reviewed (G3 APPROVE-WITH-NITS, 0 must-fix) + brian G3 sign-off 2026-07-14; committed to shift-left main (no push)
+
+summary: >
+  The flat-SpanData BUILDER promised by the E7-S1 scope split: a shift-left-owned Go
+  primitive that turns an adapter's knowledge of a tool call into the flat Core SpanData
+  map the base SDK puts on the wire — the exact shape client/hookspan.go's AssertHookWireShape
+  (the E7-S1 conformance gate) checks. No OpenTelemetry dependency: the wire is flat SpanData,
+  so the dict is built directly (migration-doc §3). Grounded in ADR-0004, the S8 spike
+  (E7-S0 GO), and byte-faithful to the base SDK's from_otel_span construction.
+
+scope:
+  in_scope: "The BUILDER PRIMITIVE + per-session trace/span-id machinery + a wire-shape conformance test."
+  deferred:
+    E7-S4: "event->wire MAPPING (which DevEvent becomes ActivityStarted vs ActivityCompleted; ToolResult<->ToolCall pairing) + shell_command/body content-gating + max_body_size truncation."
+    E7-S5: "lifecycle -> Workflow*/SignalReceived mapping."
+  boundary_note: >
+    Same contract-vs-consumer split E7-S1 used. This story delivers the primitive only; it
+    does NOT rewire client/payload.go / client/event.go / the adapter. The hand-built
+    client/event.go Span + buildPayload stay LIVE and untouched, so the adapter and the
+    enforce path remain green until E7-S4 rewires them onto this builder and retires Span.
+
+write_scope_deviation:
+  planned: "client/event.go (replace Span), client/payload.go (emit flat SpanData + span_count), client/*_test.go."
+  actual: "client/spanbuilder.go (NEW), client/spanbuilder_test.go (NEW) — purely additive."
+  why: >
+    Rewiring event.go/payload.go is the event->wire MAPPING, explicitly E7-S4/S5 (their write
+    scope names those same two files). Editing them now would either (a) do S4/S5's job early or
+    (b) leave the live adapter/enforce path half-migrated and red. Delivering the builder as a
+    new file keeps the tree fully green and the story independently reviewable. Blind reviewer
+    confirmed this is acceptable/expected for the primitive-only scope.
+
+deliverable:
+  - "client/spanbuilder.go:"
+  - "  TraceContext — a session's stable 32-hex trace_id + 16-hex span_id minting; NewTraceContext,"
+  - "    TraceContextFrom (rehydrate a persisted trace_id so the SL-4 spool round-trips correlation;"
+  - "    rejects non-32-hex and mints fresh), TraceID(), NewSpanID(). Immutable trace_id → reuse-safe."
+  - "  HookSpan — the semantic input (HookType, Name, Kind, Stage, SpanID, ParentSpanID, StartTime,"
+  - "    EndTime ns, Attributes, Status, Fields). Family/body values + gated content go in Fields."
+  - "  BuildHookSpan(tc, in) map[string]any — flat Core SpanData faithful to from_otel_span:"
+  - "    all 14 common root fields present; full family tuple present-but-null (FamilyRootFields);"
+  - "    16/32-hex ids; started stage → end_time:null + duration_ns:null; completed → real end_time"
+  - "    + duration_ns=end-start (clamped ≥0); attributes shallow-copied; status default"
+  - "    {code:UNSET,description:null}; events []; error null; Fields merged (non-nil) then family setdefault(null)."
+  - "  BuildHookEvent(activity_id, activity_type, spans...) — the ActivityStarted hook envelope"
+  - "    (hook_trigger=true, span_count, spans as []any so AssertHookWireShape reads it in-memory)."
+  - "  newHexID(nBytes) — crypto/rand → lowercase hex; all-zeros width-correct sentinel on the"
+  - "    (Linux-impossible) rand failure, exactly the base SDK's '0'*16/'0'*32 unknown-id fallback."
+  - "client/spanbuilder_test.go — 14 tests (see validation)."
+
+reference_fidelity: >
+  Byte-faithful (by discipline + doc-comment file:line citations) to
+  openbox-sdk-python/openbox_core/contracts/otel_spans.py (from_otel_span construction order,
+  _DEFAULT_KIND_BY_HOOK via client/hookspan.go KindFor, _ROOT_FIELDS_BY_HOOK_TYPE via
+  FamilyRootFields) and openbox_core/otel/trace_context.py (format_span_id=016x /
+  format_trace_id=032x). Produces payloads that PASS client/hookspan.go AssertHookWireShape
+  (the E7-S1 Go mirror of fake_core.assert_hook_wire_shape).
+  ONE DELIBERATE DEVIATION: from_otel_span emits duration_ns=end-start unclamped (its inputs are
+  monotonic OTel clock ints, so start≤end always); shift-left derives times from RFC3339
+  timestamps that can arrive skewed/out-of-order, so BuildHookSpan clamps end up to start rather
+  than emit a negative duration. Wire-shape-safe (the assertion does not check the sign). Documented inline.
+
+reference_correction_for_E7-S4: >
+  The E7-S0 cross-repo read corrected migration-doc §3's ambiguous "set parent_span_id to link
+  ToolResult→ToolCall": the base SDK actually pairs the two stages by SHARED span identity — the
+  SAME OTel span object is passed to both the started and completed hooks (openbox_core/hooks/
+  wrappers.py), so the paired spans share span_id/trace_id/parent_span_id and differ ONLY in
+  stage/end_time/duration_ns. parent_span_id points at the enclosing activity/root span, not the
+  started hook span. The builder supports BOTH: reuse the started span's id as the completed
+  HookSpan.SpanID (base-faithful staged pairing) OR set ParentSpanID for genuine nesting. E7-S4
+  should implement the shared-span-id pairing. Docstrings on TraceContext/NewSpanID record this.
+
+validation:
+  command: "cd client && go build ./... && go vet ./... && go test -race ./..."
+  result: "GREEN (client module; 14 new spanbuilder tests + full existing suite; -race clean)."
+  tests:
+    - "TestBuildHookSpan_ConformsToWireShape — every family (file/shell/mcp/tool) × stage (started/completed) PASSES AssertHookWireShape, in-memory AND after a JSON round-trip (the realistic decode path)."
+    - "TestBuildHookSpan_StartedStageEmitsNulls / _CompletedStageDuration / _CompletedStageClampsNegativeDuration — staging + the clamp deviation."
+    - "TestBuildHookSpan_IDFormatsAndTraceStability — 16/32-hex; trace_id stable across a session's spans + distinct per session; distinct span_ids; root parent present-but-null."
+    - "TestBuildHookSpan_SharedSpanPairing — base-faithful pairing: reuse SpanID → same span_id/trace_id, only stage differs."
+    - "TestBuildHookSpan_ParentLinkage — explicit nesting via ParentSpanID stays conformant."
+    - "TestBuildHookSpan_FamilyFieldsPresentNullOrCarried / _Defaults — present-but-null family tuple; supplied fields carried; name/kind/status/events/attributes defaults + overrides."
+    - "TestBuildHookSpan_INV2_ContentPlacementAndForbiddenKeys — content only at the span root (never in attributes); no semantic_type/otel/openbox/data keys."
+    - "TestTraceContextFrom_ReusesValidRejectsInvalid — rehydrate valid, reject non-32-hex (incl. uppercase)."
+    - "TestNewHexID_Widths / TestBuildHookEvent_EnvelopeShape / TestTraceContext_ConcurrentReuse — id widths; envelope shape incl. multi-span + omitted empty activity fields; concurrent reuse under -race (shared trace, distinct ids, all conformant)."
+
+reviews:
+  G3_REVIEW:
+    reviewer: "review-auditor (independent, blind — review-diff mode, no builder reasoning)"
+    decision: "APPROVE-WITH-NITS — 0 must-fix"
+    evidence: >
+      Verified BuildHookSpan conforms for all 4 dev families × 2 stages (in-memory + round-trip);
+      construction order/defaults match from_otel_span; id hex widths correct; started nulls marshal
+      to JSON null and survive the round-trip; present-but-null family + parent semantics correct;
+      INV-2 holds structurally (content only via Fields at the span root; attributes never populated
+      from Fields). Ran go test -race + go vet clean.
+    nits_applied:
+      - "Shallow-copy Attributes (mirror from_otel_span's dict(...)) → removes a caller-mutation aliasing footgun."
+      - "Sharpen the negative-duration clamp comment as a DELIBERATE, documented deviation (RFC3339 vs monotonic clocks)."
+      - "Rename TestNewHexID_WidthAndFallback → TestNewHexID_Widths (the rand-failure branch is not injectable; name no longer over-promises)."
+      - "Add TestTraceContext_ConcurrentReuse to back the 'safe to reuse across a session' claim under -race."
+    nits_noted_not_changed:
+      - "Empty/invalid Stage falls into the completed branch and emits stage:'' — but AssertHookWireShape rejects it loudly and the MAPPING layer (E7-S4) always sets stage; trusting the caller is correct at the primitive boundary."
+      - "Status is stored by reference (matches from_otel_span, which does NOT copy a supplied status — only attributes)."
+  G_SEC:
+    decision: "n/a for this story's diff"
+    rationale: >
+      The builder emits nothing (no egress) and gates nothing — it PLACES caller-provided fields.
+      It structurally keeps content at the span root only (INV-2), but the security-relevant
+      decisions — shell_command content-gating + max_body_size truncation on the opt-in
+      content-capture path (the prior G_SEC SEC-1) — live in the E7-S4 emitter, carried there.
+
+invariants_verified:
+  INV-2: "Builder places Fields (family/body/content) at the span ROOT only; attributes defaults to a fresh {} and is never populated from Fields; no metadata surface exists here. Test: TestBuildHookSpan_INV2_ContentPlacementAndForbiddenKeys."
+
+carried_followups:
+  - "E7-S4: consume BuildHookSpan/BuildHookEvent to map ToolCall->ActivityStarted+hook / ToolResult->ActivityCompleted; implement SHARED span_id pairing (per the reference correction above); own shell_command content-gating + body truncation (G_SEC SEC-1); rewire client/payload.go + adapters/claude-code/mapper.go and retire client/event.go Span."
+  - "E7-S5: lifecycle -> Workflow*/SignalReceived, also consuming this builder/TraceContext."
+  - "E7-S2 (openbox-core): classifier edit for shell/mcp (sibling change, local commit only) — independent of this story."

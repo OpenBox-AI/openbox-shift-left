@@ -1076,30 +1076,29 @@ stories:
       blocked_reason: null
   STORY-E7-S3:
     title: "shift-left: Go flat SpanData builder (no OTel) — 16/32-hex ids, started/completed staging, common+family root fields; wire-shape conformance test"
-    status: "planned"
+    status: "done"
     epic: "E7"
     sprint: null
     priority: "P1"
     dependencies:
       - "STORY-E7-S1"
-    blocked_by:
-      - "STORY-E7-S1"
+    blocked_by: []
     write_scope:
-      - "client/event.go  # replace the hand-built Span with a flat Core SpanData builder"
-      - "client/payload.go  # emit flat SpanData + span_count"
-      - "client/*_test.go  # unit + a wire-shape test mirroring assert_hook_wire_shape"
+      - "client/spanbuilder.go  # NEW — flat Core SpanData builder + per-session TraceContext + hook-event envelope (purely additive)"
+      - "client/spanbuilder_test.go  # NEW — wire-shape conformance (in-memory + JSON round-trip) + staging/ids/pairing/INV-2/defaults"
+    write_scope_deviation: "Planned client/event.go + client/payload.go REWIRE deferred to E7-S4/S5 (the event->wire MAPPING that consumes this primitive). E7-S3 is scoped to the BUILDER PRIMITIVE only (matches E7-S1's contract-only split); the hand-built client/event.go Span + buildPayload stay live and untouched so the adapter/enforce path stays green until S4 rewires them. Delivered as a new file rather than editing the two named files — reviewer confirmed acceptable/expected."
     validation_commands:
       - "cd client && go build ./... && go vet ./... && go test -race ./...  # GREEN"
     invariants:
-      - "INV-2: content only ever in the gated span request_body/response_body."
+      - "INV-2: content only ever in the gated span request_body/response_body (builder places Fields at the span ROOT only; never in attributes/metadata; verified by TestBuildHookSpan_INV2_ContentPlacementAndForbiddenKeys)."
     gates:
-      G3_REVIEW: {decision: "pending"}
+      G3_REVIEW: {decision: "approve", reviewer: "review-auditor (blind, review-diff) APPROVE-WITH-NITS + brian sign-off 2026-07-14", must_fix: 0}
     audit:
-      commit: null
-      completed_at: null
-      validation_artifact: null
+      commit: "PENDING_HASH"
+      completed_at: "2026-07-14"
+      validation_artifact: ".fab7/sdlc/assignments/build-story-E7-S3-20260714.result.yaml"
       last_run_id: null
-      status_reason: "PLANNED. A Go builder emitting the flat Core SpanData (16-hex span_id, 32-hex trace_id, parent_span_id, int-ns start_time, started-stage end_time:null/duration_ns:null, common + family root fields, attributes) + per-session trace-id/parent linkage. No OTel dependency — build the flat dict directly (the wire is flat SpanData, not OTel). Replaces client/event.go Span. Blocked by E7-S1 (needs the new hook types)."
+      status_reason: "DONE 2026-07-14 (brian G3 sign-off; independent blind review APPROVE-WITH-NITS, 0 must-fix, 4 non-blocking nits applied; committed to shift-left main, no push per sibling/local convention). DELIVERABLE (shift-left-owned, no OTel): client/spanbuilder.go — TraceContext (stable per-session 32-hex trace_id + 16-hex span_id minting + TraceContextFrom rehydration for the spool); HookSpan input + BuildHookSpan (flat Core SpanData: all 14 common root fields present, full family tuple present-but-null, 16/32-hex ids, started end_time:null/duration_ns:null, completed duration=end-start clamped >=0, attributes shallow-copied, status/events/error defaults); BuildHookEvent (ActivityStarted hook envelope, spans as []any so AssertHookWireShape reads it in-memory). Byte-faithful to from_otel_span/format_span_id/format_trace_id (READ-ONLY openbox-sdk-python ref), one documented deviation (clamp negative duration — shift-left times come from RFC3339, not monotonic OTel clocks). REFERENCE CORRECTION surfaced for E7-S4: base SDK pairs ToolResult->ToolCall by SHARED span_id (same span, stage differs), NOT parent_span_id child-linkage as migration-doc §3 implied — HookSpan.SpanID reuse supports the faithful mechanism, ParentSpanID covers genuine nesting. VALIDATION: client module go build/vet/test -race GREEN (14 new tests incl. conformance-over-families x stages in-memory + round-trip, concurrency under -race). Produces payloads that PASS E7-S1's AssertHookWireShape. PENDING: brian G3 sign-off + commit. Unblocks E7-S4 (event->wire mapping consumes this builder)."
       blocked_reason: null
   STORY-E7-S4:
     title: "shift-left: ToolCall/ToolResult → ActivityStarted+hook / ActivityCompleted (file/mcp/shell); enforce path stays green"
