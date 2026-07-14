@@ -7,6 +7,14 @@ accepted — G_ADR ratified by brian 2026-07-14 ("§4 do (b) to unify sdk and sh
 
 The E7-S0 spike still runs first to **verify** the technical assumptions (Core OPA-bypass, semantic-type derivation, flat-span attribute space) with evidence before the upstream PRs are cut — it validates execution, it no longer gates the decision.
 
+### Amendment 2026-07-14 (brian) — do NOT edit `openbox-sdk-python`; mirror into shift-left instead
+
+Sub-decision #1's phrase "extend the base SDK" is **refined**: shift-left must **not modify the `openbox-sdk-python` repo**. Instead it carries a **hand-maintained Go mirror** of the base SDK's hook-span contract (HookType + family root fields + `assert_hook_wire_shape`), treating `openbox-sdk-python` as a **read-only reference**. This is closer to option (C)/B-shiftleft for the *SDK half*. Practical trigger: that repo is not ours to push to (the session key lacks collaborator access — see memory `sibling-repo-push-access`), and mirroring avoids a cross-team upstream PR.
+
+**What is unchanged:** the **openbox-core classifier edit (E7-S2) still proceeds** — "only sdk-python is off-limits" (brian). So `shell`/`mcp` still become first-class server-side via Core's `ComputeSemanticTypeFromSpan`; the difference is purely *where the SDK-side contract lives* (shift-left `client/hookspan.go`, not `openbox_core`).
+
+**Trade-offs accepted** (the ones this ADR originally weighed for B-core): the base SDK's own `assert_hook_wire_shape` will not know the dev-runtime families — shift-left validates against its **own** mirrored copy (`client.AssertHookWireShape`), which it keeps byte-faithful to the reference by discipline + a drift-guard test. Consequence: E7-S1 is re-scoped from an upstream base-SDK edit to a shift-left-owned mirror; E7-S2 is unaffected.
+
 <!-- G_ADR gate. Decision owner: brian. Supersedes the SL-1 posture (keep a
 separate developer-runtime event vocabulary + patch core's accept-list) for the
 telemetry wire shape. Triggered by the reference SDK's refactor into the base

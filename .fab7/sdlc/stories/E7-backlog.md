@@ -14,7 +14,7 @@
 The base SDK blesses only `Workflow*/Activity*/Signal/Handoff` wire types; a tool call is `ActivityStarted` + `hook_trigger=true` + non-empty flat `SpanData` (`events.py:365-401`; `assert_hook_wire_shape` `conformance/fake_core.py:132-170`). Core computes `semantic_type` server-side from span source fields (`session.go:204`). Unification = shift-left emits that shape (no OTel dependency — build the flat `SpanData` dict directly), and the base SDK/Core gain `shell`/`mcp` first-class so those tool kinds aren't lossy.
 
 ## Cross-repo note
-E7-S1 (`openbox-sdk-python`) and E7-S2 (`openbox-core`) are sibling-repo changes — committed **locally**, no push/PR until brian asks (`sibling-repo-changes-stay-local`).
+**E7-S1 is NOT a sibling change** (re-scoped 2026-07-14): `openbox-sdk-python` is off-limits — E7-S1 mirrors the contract into shift-left's own `client/` (ADR-0004 Amendment). Only **E7-S2 (`openbox-core`)** remains a sibling-repo change — committed **locally**, no push/PR until brian asks (`sibling-repo-changes-stay-local`). Note the session key also can't push `openbox-sdk-python` (`sibling-repo-push-access`).
 
 ---
 
@@ -23,9 +23,10 @@ E7-S1 (`openbox-sdk-python`) and E7-S2 (`openbox-core`) are sibling-repo changes
 ### E7-S0 — Spike: verify the unified wire shape on live Core  *(gate 0 — blocks the epic)*
 - **Goal:** with a live local stack (RUNBOOK / `local-openbox-run`), verify: (a) a dev `ActivityStarted`+hook span classifies to the intended `semantic_type` (file today; confirm the shell/mcp gap E7-S1/S2 must close); (b) the `Workflow*` OPA-bypass (`opa.go:205`) does NOT disable enforcement (enforcement is on `ToolCall`=`Activity`); (c) the flat-`SpanData` attribute space holds shell/mcp specifics; (d) `SignalReceived` carries commit/deploy lineage keys usably (FR-5/6/7); (e) content-capture (INV-2) still gated on the new `ActivityStarted` shape (Activity is guardrails-eligible). **Artifact:** `.fab7/sdlc/discovery/spikes/S8-unified-wire-shape.md`. **Deps:** ADR-0004. **Gates:** — (spike). **Blocks:** all of E7.
 
-### E7-S1 — Base SDK: first-class `shell`/`mcp`/`tool` hook types  *(UPSTREAM, critical path)*
-- **Goal:** add `shell`/`mcp`/(optional `tool`) members to `openbox_core.contracts.otel_spans.HookType` + their family root fields (`_ROOT_FIELDS_BY_HOOK_TYPE`, `conformance/fake_core._FAMILY_ROOT_FIELDS`); extend `assert_hook_wire_shape` to accept them; base SDK tests green.
-- **Write scope:** `openbox-sdk-python/openbox_core/contracts/otel_spans.py`, `conformance/fake_core.py`, `tests/`. **Deps:** E7-S0. **Gates:** G3, **G_SEC** (contract change). **Repo:** sibling — local commit only.
+### E7-S1 — shift-left MIRROR of the base hook-span contract: `shell`/`mcp`/`tool`  *(critical path)*
+- **RE-SCOPED 2026-07-14 (brian):** do **NOT** edit `openbox-sdk-python`. Mirror the contract into shift-left instead (ADR-0004 Amendment 2026-07-14). The upstream base-SDK edit was built then reverted (sdk-python restored untouched).
+- **Goal:** a shift-left-owned Go mirror of the base SDK's hook-span wire contract — `HookType` (`file_operation`/`shell`/`mcp`/`tool`) + `CommonRootFields` + `FamilyRootFields` + `DefaultKind` + `AssertHookWireShape` (the Go port of `conformance/fake_core.assert_hook_wire_shape`). Byte-faithful to the READ-ONLY reference `openbox_core/contracts/otel_spans.py` + `fake_core.py`, with the dev-runtime `shell`/`mcp`/`tool` additions. This is the contract+conformance half; the flat-`SpanData` builder that produces conforming payloads is E7-S3.
+- **Write scope:** `client/hookspan.go`, `client/hookspan_test.go`. **Deps:** E7-S0. **Gates:** G3 (contract shape already brian-signed; Go mirror independently reviewed). **G_SEC:** n/a here — no egress/content sink in a contract-definition file; the shell_command content-gating/truncation decision lands in the E7-S4 emitter. **Repo:** shift-left (not a sibling).
 
 ### E7-S2 — Core: classify `shell`/`mcp` spans first-class + retire EXT-core  *(UPSTREAM, critical path)*
 - **Goal:** extend `ComputeSemanticTypeFromSpan` (`openbox-core internal/content/session.go:204`) to classify a `shell` span (e.g. `shell_command`) and an `mcp` span (`mcp_tool_call`) from their root/attribute fields; retire the SL-13 EXT-core dev-type accept-list patch (`contracts/dev-event/ext-core/`) now that every dev event maps to a stock accept-listed wire type. Live-verify the classifier.
