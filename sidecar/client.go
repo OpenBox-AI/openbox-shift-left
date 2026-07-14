@@ -69,6 +69,11 @@ type Decision struct {
 	Source string
 	// Stale echoes the daemon's staleness flag (false on a fail-open fallback).
 	Stale bool
+	// RedactedInput echoes the daemon's guardrail-redacted tool_input (STORY-E6-S4),
+	// which the enforce hook applies via Claude Code's `updatedInput`. It is nil on
+	// a fail-open fallback and empty unless a redaction-capable evaluator produced
+	// one. INV-2: content-bearing, LOCAL-only — see DecisionResponse.RedactedInput.
+	RedactedInput json.RawMessage
 }
 
 // allowFailOpen is the synthesized degrade-to-observe result. VerdictUnknown (not
@@ -136,10 +141,11 @@ func (c *Client) Decide(ctx context.Context, req DecisionRequest) Decision {
 		return allowFailOpen("sidecar response malformed")
 	}
 	return Decision{
-		Evaluation: resp.Evaluation,
-		FailOpen:   false,
-		Source:     resp.Source,
-		Stale:      resp.Stale,
+		Evaluation:    resp.Evaluation,
+		FailOpen:      false,
+		Source:        resp.Source,
+		Stale:         resp.Stale,
+		RedactedInput: resp.RedactedInput, // LOCAL-only; applied via CC updatedInput (E6-S4)
 	}
 }
 

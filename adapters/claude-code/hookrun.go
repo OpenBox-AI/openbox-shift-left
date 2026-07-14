@@ -128,7 +128,12 @@ func RunHook(sub string, stdin io.Reader, stdout io.Writer, logger *log.Logger) 
 	// to observe mode. The durable enforcement record runs AFTER the stdout
 	// decision, off the blocking path, best-effort (never blocks — INV-3).
 	if hook == HookPreToolUse && ResolveEnforce() {
-		dec := EnforceDecision(context.Background(), newSidecarClient(), id, ev)
+		// STORY-E6-S4: content capture (OD4 opt-in, default OFF) gates BOTH the tool
+		// content handed to the local sidecar for redaction AND the applied
+		// updatedInput. Resolved once here (cheap config+env, no secret I/O). With it
+		// off, Content stays nil and no redaction is emitted — byte-identical to E6-S3.
+		contentCapture := ResolveContentCapture()
+		dec := EnforceDecision(context.Background(), newSidecarClient(), id, ev, contentCapture)
 		// STORY-E6-S3: apply the per-org FAILURE POLICY (fail-open default / opt-in
 		// fail-closed, OD9). On an evaluation outage (dec.FailOpen) under fail-closed
 		// this synthesizes a HALT so the unchanged apply cascade denies; otherwise the
@@ -137,7 +142,10 @@ func RunHook(sub string, stdin io.Reader, stdout io.Writer, logger *log.Logger) 
 		policy := resolveFailurePolicy()
 		dec = applyFailurePolicy(dec, policy)
 		logEnforceDecision(logger, ev, dec, policy)
-		applied, _ := applyDecision(stdout, dec)
+		// E6-S2 apply (deny/ask) + E6-S4 apply (updatedInput redaction on the proceed
+		// path, gated on contentCapture). origInput = the raw tool_input, used only to
+		// suppress a rewrite that equals the original (never egressed).
+		applied, _ := applyDecision(stdout, dec, contentCapture, ev.ToolInput)
 		recordEnforcement(logger, ev, dec, applied)
 	}
 

@@ -1,6 +1,7 @@
 package claudecode
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"io"
@@ -56,8 +57,8 @@ const maxCommandLen = 8 << 10 // 8 KiB (bytes)
 //
 // It reads NO secret (identity is the DID only, already resolved on the hot path
 // — INV-1) and takes NO network I/O (only the local per-user socket — INV-3b).
-func EnforceDecision(ctx context.Context, cl *sidecar.Client, id Identity, e *HookEvent) sidecar.Decision {
-	return cl.Decide(ctx, buildDecisionRequest(id, e))
+func EnforceDecision(ctx context.Context, cl *sidecar.Client, id Identity, e *HookEvent, contentCapture bool) sidecar.Decision {
+	return cl.Decide(ctx, buildDecisionRequest(id, e, contentCapture))
 }
 
 // newSidecarClient builds the fail-open enforce-hook client for the configured
@@ -160,9 +161,15 @@ func failClosedReason(cause string) string {
 // the enforce gate and the observe event classify a tool identically. It carries
 // the metadata axes a local policy matches on — tool name/kind, MCP server, file
 // path/operation, permission mode, and (LOCAL-ONLY, never egressed) the shell
-// command. Content (INV-2) is left nil: E6-S4 populates it, gated on content
-// posture, for local redaction only.
-func buildDecisionRequest(id Identity, e *HookEvent) sidecar.DecisionRequest {
+// command.
+//
+// Content (INV-2) is populated ONLY when contentCapture is true (the org's OD4
+// opt-in): a redaction-capable local evaluator ([EXT-guardrail-redaction]) needs
+// the tool's body to redact, the analog of the reference SDK sending the full
+// activity_input to its gate. Like the command axis it goes ONLY to the local
+// Unix socket and is NEVER egressed. With content capture OFF (the default) Content
+// stays nil and the request is byte-identical to E6-S3.
+func buildDecisionRequest(id Identity, e *HookEvent, contentCapture bool) sidecar.DecisionRequest {
 	kind, sem, fileOp, mcpServer, function := classifyTool(e.ToolName)
 
 	tool := client.Tool{Name: capStr(e.ToolName), Kind: kind}
@@ -188,7 +195,7 @@ func buildDecisionRequest(id Identity, e *HookEvent) sidecar.DecisionRequest {
 		attrs["command"] = capCommand(e.command())
 	}
 
-	return sidecar.DecisionRequest{
+	req := sidecar.DecisionRequest{
 		Protocol:     sidecar.ProtocolVersion,
 		SessionID:    e.SessionID,
 		DeveloperDID: id.DeveloperDID,
@@ -196,6 +203,17 @@ func buildDecisionRequest(id Identity, e *HookEvent) sidecar.DecisionRequest {
 		Tool:         tool,
 		Attributes:   compactAny(attrs),
 	}
+
+	// Content is GATED on the OD4 opt-in and LOCAL-only (INV-2). Only the file
+	// BODY is carried today (the primary content-bearing, redactable tool input);
+	// it is what a future redaction evaluator would sanitize. Left nil for a
+	// non-file tool or an empty body so the request carries no empty content field.
+	if contentCapture && isFileSemantic(sem) {
+		if body := e.fileText(); body != "" {
+			req.Content = &client.Content{FileText: body}
+		}
+	}
+	return req
 }
 
 // capCommand bounds the local-only command to maxCommandLen BYTES, truncating at
@@ -292,30 +310,57 @@ type preToolUseOutput struct {
 
 type hookSpecificOutput struct {
 	HookEventName            string `json:"hookEventName"`
-	PermissionDecision       string `json:"permissionDecision"`
+	PermissionDecision       string `json:"permissionDecision,omitempty"`
 	PermissionDecisionReason string `json:"permissionDecisionReason,omitempty"`
+	// UpdatedInput is the guardrail-redacted replacement tool_input (STORY-E6-S4).
+	// Claude Code treats it as a FULL replacement of tool_input (missing fields are
+	// dropped), applied before the tool runs. Emitted verbatim from the sidecar
+	// Decision, ALONE on the proceed path (no permissionDecision) so CC's own
+	// permission flow still applies. omitempty ⇒ absent on the deny/ask paths and
+	// whenever there is no redaction. Content-bearing but LOCAL (stdout → CC on this
+	// machine, never egressed — INV-2).
+	UpdatedInput json.RawMessage `json:"updatedInput,omitempty"`
 }
 
 // applyDecision maps an obtained enforce decision onto a Claude Code PreToolUse
-// permissionDecision and writes it to stdout — the E6-S2 apply. It returns the
-// applied CC decision (`deny`/`ask`) and whether anything was emitted; a
-// non-blocking verdict (CONSTRAIN/ALLOW/UNKNOWN) emits nothing and returns
-// ("", false), so Claude Code's own permission flow proceeds unchanged.
+// hook output and writes it to stdout — the E6-S2 apply, extended by E6-S4. It
+// returns the applied CC decision (`deny`/`ask`, or "" on proceed) and whether
+// anything was emitted.
+//
+// Two levers, in the SDK's own order:
+//   - mapVerdict yields deny/ask (the E6-S2 cascade) → emit permissionDecision.
+//   - ELSE (the proceed path — CONSTRAIN/ALLOW/UNKNOWN) → apply guardrail input
+//     redaction (E6-S4): emit `updatedInput` ALONE (no permissionDecision), so
+//     Claude Code's own permission flow still applies. This mirrors the SDK, which
+//     runs _apply_input_redaction ONLY after enforce_verdict returns without
+//     raising. On deny the tool never runs; on ask the SDK raises before redaction,
+//     so neither rewrites (ask-path redaction is a deferred consideration).
+//
+// TIGHTEN-ONLY is preserved: stdout carries only deny/ask OR a content-STRIPPING
+// updatedInput — never permissionDecision:allow. When nothing applies (no deny/ask
+// AND no redaction — the content-capture-off default) it writes NOTHING, byte-
+// identical to observe / E6-S3.
 //
 // It NEVER wedges the tool call: a nil stdout or any marshal/write fault degrades
-// to "proceed" (fail-open, OD9) — enforcement can only ADD a deny/ask, never hang
-// or fail a call on an apply-side error (INV-3b fail-open).
-func applyDecision(stdout io.Writer, dec sidecar.Decision) (applied string, emitted bool) {
-	decision, reason := mapVerdict(dec.Evaluation)
-	if decision == "" || stdout == nil {
-		return "", false
+// to "proceed" (fail-open, OD9) — enforcement can only ADD a deny/ask/redaction,
+// never hang or fail a call on an apply-side error (INV-3b fail-open).
+func applyDecision(stdout io.Writer, dec sidecar.Decision, contentCapture bool, origInput json.RawMessage) (applied string, emitted bool) {
+	if stdout == nil {
+		return "", false // fail-open: nowhere to write
 	}
-	out := preToolUseOutput{HookSpecificOutput: hookSpecificOutput{
+	decision, reason := mapVerdict(dec.Evaluation)
+	hso := hookSpecificOutput{
 		HookEventName:            string(HookPreToolUse),
 		PermissionDecision:       decision,
 		PermissionDecisionReason: reason,
-	}}
-	line, err := json.Marshal(out)
+	}
+	if decision == "" {
+		hso.UpdatedInput = applyInputRedaction(dec, contentCapture, origInput)
+	}
+	if hso.PermissionDecision == "" && len(hso.UpdatedInput) == 0 {
+		return "", false // proceed, nothing to say → write nothing (E6-S3 identical)
+	}
+	line, err := json.Marshal(preToolUseOutput{HookSpecificOutput: hso})
 	if err != nil {
 		return "", false // fail-open: never wedge a tool call on a marshal fault
 	}
@@ -323,6 +368,80 @@ func applyDecision(stdout io.Writer, dec sidecar.Decision) (applied string, emit
 		return "", false // fail-open: a write fault degrades to proceed
 	}
 	return decision, true
+}
+
+// applyInputRedaction ports the reference SDK's _apply_input_redaction
+// (openbox-temporal-sdk-python activity_interceptor.py:441-478) to Claude Code. It
+// returns the guardrail-redacted tool_input to emit as `updatedInput`, or nil to
+// emit nothing. The caller invokes it ONLY on the proceed path (no deny/ask) —
+// exactly as the SDK applies redaction only after enforce_verdict returns without
+// raising.
+//
+// It returns nil (no rewrite) unless ALL hold:
+//   - content capture is on (the OD4 opt-in). Without it, no tool content ever
+//     reached the sidecar, so there is nothing to redact and the path MUST be
+//     byte-identical to E6-S3 — this is the load-bearing INV-2 gate.
+//   - the Decision carries a non-empty RedactedInput that parses as a JSON OBJECT
+//     (a tool_input is an object). A non-object / garbage value is skipped rather
+//     than corrupting the tool call — the analog of the SDK's "unexpected
+//     redacted_input type → warn + return the original unchanged".
+//   - the redacted input DIFFERS from the original tool_input. Never rewrite a tool
+//     call to an identical input (a pointless, noisy no-op).
+//
+// The returned bytes are Claude Code's FULL tool_input replacement, emitted
+// verbatim. Content-bearing but LOCAL: it travels stdout → Claude Code on this
+// machine and is NEVER egressed (INV-2) — see DecisionResponse.RedactedInput.
+//
+// [EXT-guardrail-redaction]: the Phase-1 bundleEvaluator is metadata-only and
+// produces NO RedactedInput, so this returns nil in the field until a
+// redaction-capable evaluator (embed the server-side Guardrail API, or a content-on
+// /evaluate mirror) lands. The seam + gate + apply are built and tested here.
+func applyInputRedaction(dec sidecar.Decision, contentCapture bool, origInput json.RawMessage) json.RawMessage {
+	if !contentCapture {
+		return nil
+	}
+	red := dec.RedactedInput
+	if len(red) == 0 {
+		return nil
+	}
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal(red, &obj); err != nil || len(obj) == 0 {
+		// Skip unless it is a NON-EMPTY JSON object. err rejects an array/scalar/
+		// garbage; len(obj)==0 rejects BOTH a JSON `null` (unmarshals to a nil map
+		// with no error) AND an empty `{}` — either would rewrite tool_input to
+		// null/empty and corrupt the call (the story stop condition + the SDK's
+		// warn-and-skip on a non-dict/non-list redacted_input). A real redaction
+		// sanitizes values within the object; it never empties the whole input.
+		return nil
+	}
+	if jsonEqual(red, origInput) {
+		return nil // present but unchanged → nothing to apply
+	}
+	return red
+}
+
+// jsonEqual reports whether two JSON documents are semantically equal, ignoring
+// key order and insignificant whitespace (Go's json.Marshal emits map keys sorted,
+// giving a canonical form). Either side unparseable ⇒ not-equal (so a redaction is
+// applied rather than suppressed on an unparsable original).
+func jsonEqual(a, b json.RawMessage) bool {
+	if len(a) == 0 || len(b) == 0 {
+		return false
+	}
+	ca, err1 := canonicalJSON(a)
+	cb, err2 := canonicalJSON(b)
+	if err1 != nil || err2 != nil {
+		return false
+	}
+	return bytes.Equal(ca, cb)
+}
+
+func canonicalJSON(raw json.RawMessage) ([]byte, error) {
+	var v any
+	if err := json.Unmarshal(raw, &v); err != nil {
+		return nil, err
+	}
+	return json.Marshal(v)
 }
 
 // mapVerdict is the SDK enforce_verdict cascade (verdict_handler.py:50-103) ported
@@ -340,8 +459,9 @@ func applyDecision(stdout io.Writer, dec sidecar.Decision) (applied string, emit
 //     CC's `ask` IS the interactive local prompt — the developer resolves it
 //     synchronously here, so the hook's only lever is this content-free reason.
 //   - CONSTRAIN / ALLOW / UNKNOWN (fail-open) → nothing (the SDK logs CONSTRAIN and
-//     otherwise proceeds; guardrail redaction of the input is E6-S4, gated on
-//     content posture — deliberately not applied here).
+//     otherwise proceeds). On this proceed path applyDecision then applies guardrail
+//     input redaction (E6-S4, applyInputRedaction → updatedInput) when content
+//     capture is on — mapVerdict itself never rewrites the input.
 func mapVerdict(e client.Evaluation) (decision, reason string) {
 	switch e.Verdict {
 	case client.VerdictHalt:

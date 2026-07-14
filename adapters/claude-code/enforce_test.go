@@ -95,7 +95,7 @@ func TestBuildDecisionRequest(t *testing.T) {
 			ToolName:       "Bash",
 			ToolInput:      []byte(`{"command":"rm -rf /tmp/x"}`),
 		}
-		req := buildDecisionRequest(id, ev)
+		req := buildDecisionRequest(id, ev, false)
 		if req.SessionID != "sess-1" || req.DeveloperDID != testDID {
 			t.Fatalf("identity not carried: %+v", req)
 		}
@@ -119,7 +119,7 @@ func TestBuildDecisionRequest(t *testing.T) {
 			ToolName:  "Write",
 			ToolInput: []byte(`{"file_path":"/etc/passwd","content":"secret"}`),
 		}
-		req := buildDecisionRequest(id, ev)
+		req := buildDecisionRequest(id, ev, false)
 		if req.Tool.Kind != client.ToolFile {
 			t.Errorf("kind = %q, want file", req.Tool.Kind)
 		}
@@ -139,7 +139,7 @@ func TestBuildDecisionRequest(t *testing.T) {
 			SessionID: "sess-3",
 			ToolName:  "mcp__github__create_issue",
 		}
-		req := buildDecisionRequest(id, ev)
+		req := buildDecisionRequest(id, ev, false)
 		if req.Tool.Kind != client.ToolMCP || req.Tool.MCPServer != "github" {
 			t.Errorf("tool = %+v, want mcp/github", req.Tool)
 		}
@@ -148,10 +148,51 @@ func TestBuildDecisionRequest(t *testing.T) {
 		}
 	})
 
-	t.Run("no content field is ever set (INV-2)", func(t *testing.T) {
-		ev := &HookEvent{SessionID: "s", ToolName: "Bash", ToolInput: []byte(`{"command":"ls"}`)}
-		if req := buildDecisionRequest(id, ev); req.Content != nil {
-			t.Error("Content must stay nil in E6-S1 (E6-S4 populates it, gated)")
+	t.Run("content is nil when content-capture is off (INV-2 default)", func(t *testing.T) {
+		// The OD4 default: even a file-write body is never carried when capture is off.
+		ev := &HookEvent{SessionID: "s", ToolName: "Write", ToolInput: []byte(`{"file_path":"/x","content":"secret"}`)}
+		if req := buildDecisionRequest(id, ev, false); req.Content != nil {
+			t.Errorf("Content must stay nil with content-capture off, got %+v", req.Content)
+		}
+	})
+}
+
+// TestBuildDecisionRequest_ContentGating covers E6-S4 AC-5: the file BODY is carried
+// on the LOCAL DecisionRequest ONLY when content-capture is on, and ONLY for a file
+// tool; it is never carried for a non-file tool and never with capture off.
+func TestBuildDecisionRequest_ContentGating(t *testing.T) {
+	id := Identity{DeveloperDID: testDID}
+
+	t.Run("file write body carried when capture on", func(t *testing.T) {
+		ev := &HookEvent{SessionID: "s", ToolName: "Write", ToolInput: []byte(`{"file_path":"/x","content":"api_key=SECRET"}`)}
+		req := buildDecisionRequest(id, ev, true)
+		if req.Content == nil || req.Content.FileText != "api_key=SECRET" {
+			t.Fatalf("Content = %+v, want the file body carried locally", req.Content)
+		}
+		if req.Content.Prompt != "" || req.Content.Output != "" {
+			t.Errorf("only the file body should be set, got %+v", req.Content)
+		}
+	})
+
+	t.Run("Edit new_string carried when capture on", func(t *testing.T) {
+		ev := &HookEvent{SessionID: "s", ToolName: "Edit", ToolInput: []byte(`{"file_path":"/x","old_string":"a","new_string":"b-with-token"}`)}
+		req := buildDecisionRequest(id, ev, true)
+		if req.Content == nil || req.Content.FileText != "b-with-token" {
+			t.Fatalf("Content = %+v, want the new_string carried", req.Content)
+		}
+	})
+
+	t.Run("non-file tool carries no content even with capture on", func(t *testing.T) {
+		ev := &HookEvent{SessionID: "s", ToolName: "Bash", ToolInput: []byte(`{"command":"echo hi"}`)}
+		if req := buildDecisionRequest(id, ev, true); req.Content != nil {
+			t.Errorf("a Bash tool must carry no Content, got %+v", req.Content)
+		}
+	})
+
+	t.Run("empty body carries no content", func(t *testing.T) {
+		ev := &HookEvent{SessionID: "s", ToolName: "Write", ToolInput: []byte(`{"file_path":"/x"}`)}
+		if req := buildDecisionRequest(id, ev, true); req.Content != nil {
+			t.Errorf("an absent body must carry no Content, got %+v", req.Content)
 		}
 	})
 }
@@ -183,7 +224,7 @@ func TestEnforceDecision_FailOpenWhenSidecarAbsent(t *testing.T) {
 	ev := &HookEvent{SessionID: "s", ToolName: "Bash", ToolInput: []byte(`{"command":"rm -rf /"}`)}
 
 	start := time.Now()
-	dec := EnforceDecision(context.Background(), cl, Identity{DeveloperDID: testDID}, ev)
+	dec := EnforceDecision(context.Background(), cl, Identity{DeveloperDID: testDID}, ev, false)
 	elapsed := time.Since(start)
 
 	if !dec.FailOpen {
@@ -220,7 +261,7 @@ func TestEnforceDecision_LiveBlock(t *testing.T) {
 
 	// A dangerous command → the local policy returns BLOCK (obtained synchronously).
 	danger := &HookEvent{SessionID: "s", ToolName: "Bash", ToolInput: []byte(`{"command":"rm -rf /tmp/x"}`)}
-	dec := EnforceDecision(context.Background(), cl, Identity{DeveloperDID: testDID}, danger)
+	dec := EnforceDecision(context.Background(), cl, Identity{DeveloperDID: testDID}, danger, false)
 	if dec.FailOpen {
 		t.Fatalf("live sidecar should not fail open: %+v", dec)
 	}
@@ -230,7 +271,7 @@ func TestEnforceDecision_LiveBlock(t *testing.T) {
 
 	// A benign command → default allow.
 	benign := &HookEvent{SessionID: "s", ToolName: "Bash", ToolInput: []byte(`{"command":"echo hi"}`)}
-	if d := EnforceDecision(context.Background(), cl, Identity{DeveloperDID: testDID}, benign); d.Evaluation.WouldBlock() {
+	if d := EnforceDecision(context.Background(), cl, Identity{DeveloperDID: testDID}, benign, false); d.Evaluation.WouldBlock() {
 		t.Errorf("benign command should not block: %+v", d)
 	}
 
@@ -377,7 +418,7 @@ func TestApplyDecision(t *testing.T) {
 	t.Run("block writes a deny permissionDecision", func(t *testing.T) {
 		var out bytes.Buffer
 		dec := sidecar.Decision{Evaluation: client.Evaluation{Verdict: client.VerdictBlock, Reason: "destructive"}}
-		applied, emitted := applyDecision(&out, dec)
+		applied, emitted := applyDecision(&out, dec, false, nil)
 		if !emitted || applied != ccDecisionDeny {
 			t.Fatalf("applied=%q emitted=%t, want deny/true", applied, emitted)
 		}
@@ -393,7 +434,7 @@ func TestApplyDecision(t *testing.T) {
 	t.Run("allow writes nothing (tighten-only)", func(t *testing.T) {
 		var out bytes.Buffer
 		dec := sidecar.Decision{Evaluation: client.Evaluation{Verdict: client.VerdictAllow}}
-		if applied, emitted := applyDecision(&out, dec); emitted || applied != "" {
+		if applied, emitted := applyDecision(&out, dec, false, nil); emitted || applied != "" {
 			t.Errorf("allow must emit nothing, got applied=%q emitted=%t", applied, emitted)
 		}
 		if out.Len() != 0 {
@@ -404,17 +445,163 @@ func TestApplyDecision(t *testing.T) {
 	t.Run("fail-open (unknown) writes nothing", func(t *testing.T) {
 		var out bytes.Buffer
 		dec := sidecar.Decision{Evaluation: client.Evaluation{Verdict: client.VerdictUnknown}, FailOpen: true}
-		if _, emitted := applyDecision(&out, dec); emitted || out.Len() != 0 {
+		if _, emitted := applyDecision(&out, dec, false, nil); emitted || out.Len() != 0 {
 			t.Errorf("fail-open must not write a decision; stdout=%q", out.String())
 		}
 	})
 
 	t.Run("nil stdout never panics and reports not-emitted", func(t *testing.T) {
 		dec := sidecar.Decision{Evaluation: client.Evaluation{Verdict: client.VerdictBlock}}
-		if _, emitted := applyDecision(nil, dec); emitted {
+		if _, emitted := applyDecision(nil, dec, false, nil); emitted {
 			t.Error("a nil stdout must degrade to not-emitted (fail-open)")
 		}
 	})
+}
+
+// ── E6-S4: guardrail redaction application (updatedInput) ────────────────────
+
+// TestApplyInputRedaction covers the port of the SDK's _apply_input_redaction and
+// its gates (AC-1/AC-2/AC-6): returns the redacted object only when content capture
+// is on, the Decision carries a non-empty JSON OBJECT, and it DIFFERS from the
+// original; otherwise nil (no rewrite).
+func TestApplyInputRedaction(t *testing.T) {
+	orig := json.RawMessage(`{"file_path":"/x","content":"api_key=SECRET"}`)
+	red := json.RawMessage(`{"file_path":"/x","content":"api_key=***REDACTED***"}`)
+
+	cases := []struct {
+		name           string
+		contentCapture bool
+		redacted       json.RawMessage
+		orig           json.RawMessage
+		want           string // "" ⇒ nil (no rewrite); else the JSON to emit
+	}{
+		{"applies when on + present + different", true, red, orig, string(red)},
+		{"inert when content-capture off", false, red, orig, ""},
+		{"nil when no redacted input", true, nil, orig, ""},
+		{"nil when redacted equals original (reordered keys)", true,
+			json.RawMessage(`{"content":"api_key=SECRET","file_path":"/x"}`), orig, ""},
+		{"nil when redacted is not a JSON object (array)", true, json.RawMessage(`["a","b"]`), orig, ""},
+		{"nil when redacted is not a JSON object (scalar)", true, json.RawMessage(`"just a string"`), orig, ""},
+		{"nil when redacted is JSON null (never rewrite to null)", true, json.RawMessage(`null`), orig, ""},
+		{"nil when redacted is an empty object (never empty the input)", true, json.RawMessage(`{}`), orig, ""},
+		{"nil when redacted is invalid JSON", true, json.RawMessage(`{not json`), orig, ""},
+		{"applies against an unparsable original", true, red, json.RawMessage(`{bad`), string(red)},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := applyInputRedaction(sidecar.Decision{RedactedInput: c.redacted}, c.contentCapture, c.orig)
+			if c.want == "" {
+				if got != nil {
+					t.Errorf("want nil (no rewrite), got %s", got)
+				}
+				return
+			}
+			if string(got) != c.want {
+				t.Errorf("got %s, want %s", got, c.want)
+			}
+		})
+	}
+}
+
+// TestApplyDecision_Redaction covers AC-1/AC-2/AC-3: on the proceed path a redaction
+// is emitted as updatedInput ALONE (no permissionDecision); a deny/ask carries no
+// updatedInput; and with content-capture off the proceed path writes nothing
+// (byte-identical to E6-S3).
+func TestApplyDecision_Redaction(t *testing.T) {
+	orig := json.RawMessage(`{"file_path":"/x","content":"api_key=SECRET"}`)
+	red := json.RawMessage(`{"file_path":"/x","content":"api_key=***REDACTED***"}`)
+
+	t.Run("proceed + capture on → updatedInput alone", func(t *testing.T) {
+		var out bytes.Buffer
+		dec := sidecar.Decision{Evaluation: client.Evaluation{Verdict: client.VerdictAllow}, RedactedInput: red}
+		applied, emitted := applyDecision(&out, dec, true, orig)
+		if applied != "" || !emitted {
+			t.Fatalf("applied=%q emitted=%t, want proceed(\"\")/emitted(true)", applied, emitted)
+		}
+		var got preToolUseOutput
+		if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+			t.Fatalf("stdout not valid JSON: %v (%q)", err, out.String())
+		}
+		if got.HookSpecificOutput.PermissionDecision != "" {
+			t.Errorf("permissionDecision must be absent on a redaction-only output, got %q", got.HookSpecificOutput.PermissionDecision)
+		}
+		if !jsonEqual(got.HookSpecificOutput.UpdatedInput, red) {
+			t.Errorf("updatedInput = %s, want the redacted object", got.HookSpecificOutput.UpdatedInput)
+		}
+		// Tighten-only: the raw JSON never carries permissionDecision:"allow".
+		if strings.Contains(out.String(), `"permissionDecision":"allow"`) {
+			t.Errorf("must never emit permissionDecision:allow (tighten-only): %q", out.String())
+		}
+	})
+
+	t.Run("proceed + capture OFF → nothing (E6-S3 identical)", func(t *testing.T) {
+		var out bytes.Buffer
+		dec := sidecar.Decision{Evaluation: client.Evaluation{Verdict: client.VerdictAllow}, RedactedInput: red}
+		if _, emitted := applyDecision(&out, dec, false, orig); emitted || out.Len() != 0 {
+			t.Errorf("capture off must write nothing, got %q", out.String())
+		}
+	})
+
+	t.Run("deny carries no updatedInput even with a redaction present", func(t *testing.T) {
+		var out bytes.Buffer
+		dec := sidecar.Decision{Evaluation: client.Evaluation{Verdict: client.VerdictBlock, Reason: "nope"}, RedactedInput: red}
+		applied, _ := applyDecision(&out, dec, true, orig)
+		if applied != ccDecisionDeny {
+			t.Fatalf("want deny, got %q", applied)
+		}
+		var got preToolUseOutput
+		_ = json.Unmarshal(out.Bytes(), &got)
+		if len(got.HookSpecificOutput.UpdatedInput) != 0 {
+			t.Errorf("a deny must not rewrite the input, got updatedInput=%s", got.HookSpecificOutput.UpdatedInput)
+		}
+	})
+
+	t.Run("ask carries no updatedInput (faithful to the SDK)", func(t *testing.T) {
+		var out bytes.Buffer
+		dec := sidecar.Decision{Evaluation: client.Evaluation{Verdict: client.VerdictRequireApproval}, RedactedInput: red}
+		applied, _ := applyDecision(&out, dec, true, orig)
+		if applied != ccDecisionAsk {
+			t.Fatalf("want ask, got %q", applied)
+		}
+		var got preToolUseOutput
+		_ = json.Unmarshal(out.Bytes(), &got)
+		if len(got.HookSpecificOutput.UpdatedInput) != 0 {
+			t.Errorf("ask must not rewrite the input, got updatedInput=%s", got.HookSpecificOutput.UpdatedInput)
+		}
+	})
+}
+
+// TestRecordEnforcement_NoRedactionLeak covers AC-4: the redacted tool_input lives
+// on the sidecar Decision (LOCAL-only) and must NEVER be serialized into the durable
+// enforcement audit — the audit stays content-free even for a proceed+redaction.
+func TestRecordEnforcement_NoRedactionLeak(t *testing.T) {
+	enfFile := filepath.Join(t.TempDir(), "enforcements.jsonl")
+	t.Setenv(envEnforcementFile, enfFile)
+	logger := log.New(&bytes.Buffer{}, "", 0)
+
+	// The redacted body still contains a sentinel we assert never reaches the sink.
+	red := json.RawMessage(`{"file_path":"/x","content":"REDACTION_SENTINEL"}`)
+	dec := sidecar.Decision{Source: "local-bundle", RedactedInput: red,
+		Evaluation: client.Evaluation{Verdict: client.VerdictAllow}}
+	ev := &HookEvent{SessionID: "s", ToolName: "Write", ToolInput: []byte(`{"file_path":"/x","content":"ORIGINAL_SENTINEL"}`)}
+
+	var out bytes.Buffer
+	applied, _ := applyDecision(&out, dec, true, ev.ToolInput)
+	recordEnforcement(logger, ev, dec, applied)
+
+	data, err := os.ReadFile(enfFile)
+	if err != nil {
+		t.Fatalf("enforcement sink not written: %v", err)
+	}
+	for _, sentinel := range []string{"REDACTION_SENTINEL", "ORIGINAL_SENTINEL"} {
+		if strings.Contains(string(data), sentinel) {
+			t.Errorf("enforcement audit leaked content %q (INV-2): %s", sentinel, data)
+		}
+	}
+	// The redacted body IS applied locally via updatedInput (stdout → CC, on-machine).
+	if !strings.Contains(out.String(), "REDACTION_SENTINEL") {
+		t.Errorf("expected the redacted body to be applied via updatedInput, stdout=%q", out.String())
+	}
 }
 
 // TestRunHook_EnforceApply_Block is the E6-S2 end-to-end guard: enforce ON + a
@@ -630,7 +817,7 @@ func TestRecordEnforcement_GuardrailCategoryOnly(t *testing.T) {
 		}},
 	}}
 	// …but a failed guardrail denies (mapVerdict) and the record captures it.
-	applied, _ := applyDecision(&bytes.Buffer{}, dec)
+	applied, _ := applyDecision(&bytes.Buffer{}, dec, false, nil)
 	if applied != ccDecisionDeny {
 		t.Fatalf("guardrail failure should deny, got %q", applied)
 	}
@@ -714,7 +901,7 @@ func TestRecordEnforcement_ApprovalID(t *testing.T) {
 		ApprovalID: "appr-77",
 	}}
 	var out bytes.Buffer
-	applied, _ := applyDecision(&out, dec)
+	applied, _ := applyDecision(&out, dec, false, nil)
 	if applied != ccDecisionAsk {
 		t.Fatalf("require_approval should ask, got %q", applied)
 	}

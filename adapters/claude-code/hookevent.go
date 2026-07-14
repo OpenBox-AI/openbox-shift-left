@@ -142,3 +142,35 @@ func (e *HookEvent) command() string {
 	}
 	return in.Command
 }
+
+// fileText extracts the file BODY a file-write tool carries — Claude Code's Write
+// uses "content", Edit uses "new_string". This is content, not a structural
+// locator. (MultiEdit nests bodies under edits[].new_string; extracting those is
+// deferred to the redaction-engine story — under-capturing is the INV-2-safe
+// direction, since a missing body just means nothing local to redact.)
+//
+// LOCAL-ONLY (INV-2), and STRICTER than command(): it is read SOLELY to populate
+// the enforce-mode sidecar.DecisionRequest.Content when the org opted into content
+// capture (ResolveContentCapture / OD4), so a redaction-capable local evaluator has
+// the body to redact (STORY-E6-S4) — the analog of the reference SDK sending the
+// full activity_input to its gate. It is sent ONLY over the local Unix socket to
+// the resident daemon and is NEVER egressed to core and NEVER logged; the
+// OBSERVE/telemetry egress path (Mapper) still never decodes it, so the
+// metadata-only-on-the-wire posture is unchanged. Returns "" for a non-file tool,
+// an absent/unparsable body, or (via the caller's gate) when content capture is off.
+func (e *HookEvent) fileText() string {
+	if len(e.ToolInput) == 0 {
+		return ""
+	}
+	var in struct {
+		Content   string `json:"content"`    // Write
+		NewString string `json:"new_string"` // Edit / MultiEdit
+	}
+	if err := json.Unmarshal(e.ToolInput, &in); err != nil {
+		return ""
+	}
+	if in.Content != "" {
+		return in.Content
+	}
+	return in.NewString
+}

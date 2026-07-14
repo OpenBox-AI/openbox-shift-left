@@ -1,7 +1,9 @@
 package sidecar
 
 import (
+	"bufio"
 	"context"
+	"encoding/json"
 	"net"
 	"path/filepath"
 	"testing"
@@ -60,6 +62,46 @@ func TestRoundTrip_BlockAndAllow(t *testing.T) {
 	d = c.Decide(context.Background(), toolCall("Bash", client.ToolShell, map[string]any{"command": "ls"}))
 	if d.FailOpen || d.Evaluation.Verdict != client.VerdictAllow {
 		t.Fatalf("non-matching: got failopen=%v verdict=%q, want ALLOW", d.FailOpen, d.Evaluation.Verdict)
+	}
+}
+
+// TestDecide_RedactedInputRoundTrips guards STORY-E6-S4's carrier: a
+// DecisionResponse carrying redacted_input is surfaced verbatim on
+// Decision.RedactedInput (LOCAL-only) for the enforce hook to apply via
+// updatedInput. It uses a raw fake server because the metadata-only bundleEvaluator
+// produces no redaction today ([EXT-guardrail-redaction]). A fail-open fallback
+// carries no RedactedInput (nil), which the enforce hook treats as "no rewrite".
+func TestDecide_RedactedInputRoundTrips(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "s.sock")
+	ln, err := net.Listen("unix", path)
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	t.Cleanup(func() { _ = ln.Close() })
+	redacted := `{"content":"api_key=***REDACTED***","file_path":"/x"}`
+	go func() {
+		conn, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		_, _ = bufio.NewReader(conn).ReadBytes('\n') // drain the request line
+		b, _ := json.Marshal(DecisionResponse{
+			Protocol:      ProtocolVersion,
+			Evaluation:    client.Evaluation{Verdict: client.VerdictAllow},
+			Source:        sourceLocalBundle,
+			RedactedInput: json.RawMessage(redacted),
+		})
+		_, _ = conn.Write(append(b, '\n'))
+	}()
+
+	c := NewClient(ClientConfig{SocketPath: path, Timeout: time.Second})
+	d := c.Decide(context.Background(), toolCall("Write", client.ToolFile, nil))
+	if d.FailOpen {
+		t.Fatalf("expected a real response, got fail-open (%s)", d.Source)
+	}
+	if string(d.RedactedInput) != redacted {
+		t.Errorf("RedactedInput = %s, want %s", d.RedactedInput, redacted)
 	}
 }
 

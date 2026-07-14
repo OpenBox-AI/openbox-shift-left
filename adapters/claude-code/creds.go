@@ -257,6 +257,26 @@ func ResolveFinops() bool {
 	return enabled
 }
 
+// ResolveContentCapture reports whether the org opted into content capture
+// (OD4): config `content_capture` first, then the OPENBOX_CONTENT_CAPTURE env
+// override (env wins either way, so env can disable what config enabled), same
+// precedence as every other coordinate. Default FALSE — the OD4 metadata-only
+// posture: with it unset NO tool content ever reaches even the local sidecar and
+// the enforce hook applies no `updatedInput` redaction (STORY-E6-S4 is inert,
+// byte-identical to E6-S3). Cheap config+env read, no secret I/O; safe on the
+// PreToolUse hot path. It mirrors the ContentCaptureEnabled that ResolveCredentials
+// derives, without the secret-store work (which the enforce gate does not need).
+func ResolveContentCapture() bool {
+	enabled := false
+	if cfg, err := loadDevConfig(DefaultConfigPath()); err == nil {
+		enabled = cfg.ContentCapture
+	}
+	if v, ok := os.LookupEnv(envContentCapture); ok {
+		enabled = isTruthy(v)
+	}
+	return enabled
+}
+
 // ResolveEnforce reports whether the developer runtime is in ENFORCE mode
 // (STORY-E6-S1 / Phase-2): config field first, then the OPENBOX_ENFORCE env
 // override (env wins), same precedence as every other coordinate. Default false
