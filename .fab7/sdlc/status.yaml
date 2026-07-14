@@ -987,3 +987,196 @@ stories:
       last_run_id: null
       status_reason: "DONE — brian G3 sign-off + Sam G_SEC APPROVE 2026-07-14; committed to main (build + ledger together, no push, no signature per brian). The enforcement CONFORMANCE suite (executable INV-3b evidence) + the reconciliation of the E6-S3 G_SEC INFO-1 'sidecar up but UNBUNDLED' quadrant. PART A: a new adapter test TestEnforcementConformance drives the REAL RunHook PreToolUse path end-to-end against a REAL sidecar.Server (or absent socket) across C1-C9 and asserts the exact CC stdout per quadrant — enforced BLOCK denies pre-execution (C1, both policies); fail-open + outage/unbundled/slow-timeout proceeds within the bound (C2/C3/C8, OD9); fail-closed + outage denies (C4); fail-closed never denies a REAL allow (C5) nor a STALE real verdict (C9); observe mode never blocks even for a BLOCK-worthy tool (C7, INV-3 verbatim); and the INFO-1 quadrant fail-closed + unbundled DENIES (C6). PART B: previously a reachable-but-UNBUNDLED daemon returned a well-formed Source=fail-open:no-bundle reply that the client marked Decision.FailOpen=false, so applyFailurePolicy treated it as a real verdict and a fail-closed org was SILENTLY UNGOVERNED while the daemon was up but unbundled (plausible LIVE state — core ships no real OPA bundle yet, [EXT-opa-bundle]). The fix makes Decision.FailOpen mean what its doc always claimed ('no real daemon verdict'): (1) the server returns client.VerdictUnknown (honest 'not evaluated'), not VerdictAllow, on every no-real-verdict path; (2) the client sets FailOpen = !isRealVerdictSource(resp.Source), where the ONLY real-verdict source is sourceLocalBundle (the server tags EVERY resident-evaluator decision sourceLocalBundle — rule bundle today, embedded-OPA later per ADR-0003). So a fail-closed org now denies whenever OpenBox obtained NO real verdict, however that happened; the fail-OPEN default is behaviorally unchanged. mapVerdict/applyDecision/applyFailurePolicy LOGIC UNTOUCHED — the reconciliation is entirely upstream. CROSS-REPO RECON (Explore, openbox-temporal-sdk-python, per the user's directive): the reference has NO reachable-but-no-verdict state — _handle_api_error (client.py:204-208) synthesizes fail-closed HALT ONLY on exception/HTTP>=400; a successful-but-empty 200 -> ALLOW (types.py:39-54; NO VerdictUnknown in the SDK); an unparseable 200 -> None -> proceeds even under fail-closed. So the SDK would let an unbundled evaluation PROCEED. E6-S7 DELIBERATELY DEVIATES because (a) the SDK's core always has resident rego so 'reachable-but-unbundled' cannot occur there — a shift-left-only state ([EXT-opa-bundle]); (b) E6-S3 ALREADY ships the deviation on the adjacent axis (a malformed reply -> FailOpen=true -> fail-closed denies), so the unbundled case is the SAME class ('reachable, no usable verdict') missed only because the reply is well-formed. Closing it makes E6-S3's fail-closed posture internally consistent. Deviation documented in code (client.go Decision.FailOpen doc + enforce.go applyFailurePolicy note); posture acceptance is brian's G3 gate. Also folded in the E6-S4 G_SEC INFO-2 hardening (jsonEqual size-guard). DEFERRED (re-flagged for the redaction-engine story, no live surface today): E6-S4 INFO-1 (constrain updatedInput to content-only fields) + INFO-3 (fileText under-captures MultiEdit's nested edits) — both need a redaction ENGINE to exist first ([EXT-guardrail-redaction]). adapter/sidecar/cli build/vet/test -race GREEN + conformance C1-C9 PASS + load-bearing check (C6 fails pre-fix) + live E2E across 4 quadrants (audit content-free). BOTH INDEPENDENT REVIEWS APPROVE: G3 (review_auditor) APPROVE + G_SEC (Sam) APPROVE; all non-blocking findings FOLDED IN (C1 both policies, C9 stale case, explicit VerdictUnknown in handleConn). Story: STORY-E6-S7.md. Artifact: assignments/build-story-E6-S7-20260714.result.yaml. PENDING: brian G3 sign-off + commit."
       blocked_reason: null
+  STORY-E7-S0:
+    title: "Spike — verify the unified Activity/hook wire shape on live Core (semantic-type, Workflow* OPA-bypass, flat-span attr space, Signal lineage, content gate)"
+    status: "ready"   # ADR-0004 accepted; spike is the gate-0 that blocks the rest of E7
+    epic: "E7"
+    sprint: null
+    priority: "P1"
+    dependencies: []
+    blocked_by: []
+    write_scope:
+      - ".fab7/sdlc/discovery/spikes/S8-unified-wire-shape.md  # spike findings only (no product code)"
+    validation_commands:
+      - "Live local stack (RUNBOOK / local-openbox-run): emit a dev ActivityStarted+hook span, observe core-computed semantic_type; confirm Workflow* OPA-bypass does not disable enforcement on ToolCall=Activity; confirm SignalReceived carries commit/deploy lineage; confirm content gate holds on the Activity shape."
+    invariants:
+      - "INV-2 content gate must still hold on the new ActivityStarted shape (Activity is guardrails-eligible at core — verify the gate)."
+      - "INV-3b enforcement stays on ToolCall=Activity (OPA runs); Workflow* lifecycle OPA-bypass must be harmless."
+    gates: {}
+    audit:
+      commit: null
+      completed_at: null
+      validation_artifact: null
+      last_run_id: null
+      status_reason: "READY — gate-0 spike for Epic E7 (ADR-0004 option B-core). Verify on a live local stack: (a) a dev ActivityStarted+hook span classifies to the intended semantic_type (file today; confirms the shell/mcp gap E7-S1/S2 close); (b) core's Workflow* OPA-bypass (opa.go:205) does NOT disable enforcement (enforce is on ToolCall=Activity); (c) the flat-SpanData attribute space holds shell/mcp; (d) SignalReceived carries commit/deploy lineage keys (FR-5/6/7); (e) content-capture (INV-2) still gated on the ActivityStarted shape. Produces the evidence the upstream contract additions (E7-S1/S2) need. Design: ADR-0004 + sdk-python-remap-migration.md §9. Blocks all of E7."
+      blocked_reason: null
+  STORY-E7-S1:
+    title: "Base SDK (openbox-sdk-python): first-class shell/mcp/tool HookType + family root fields + assert_hook_wire_shape [UPSTREAM, critical path]"
+    status: "planned"
+    epic: "E7"
+    sprint: null
+    priority: "P1"
+    dependencies:
+      - "STORY-E7-S0"
+    blocked_by:
+      - "STORY-E7-S0"
+    write_scope:
+      - "openbox-sdk-python/openbox_core/contracts/otel_spans.py  # add shell/mcp/(tool) to HookType + _ROOT_FIELDS_BY_HOOK_TYPE"
+      - "openbox-sdk-python/openbox_core/conformance/fake_core.py  # _FAMILY_ROOT_FIELDS + assert_hook_wire_shape accept new families"
+      - "openbox-sdk-python/tests/  # contract + conformance tests"
+    validation_commands:
+      - "openbox-sdk-python: uv run pytest tests/contracts tests/wire tests/conformance  # GREEN"
+    invariants:
+      - "Additive to the base contract (existing families unchanged)."
+    gates:
+      G3_REVIEW: {decision: "pending"}
+      G_SEC: {decision: "pending"}
+    audit:
+      commit: null
+      completed_at: null
+      validation_artifact: null
+      last_run_id: null
+      status_reason: "PLANNED (UPSTREAM, sibling repo — local commit only, no push/PR until brian asks). Add shell/mcp/(optional tool) members to openbox_core HookType (otel_spans.py:36-43) + their family root fields, and extend conformance assert_hook_wire_shape to accept them, so dev-runtime tool calls are a first-class shared concept (guide instructions.md:369-371 sanctions a base change for a shared gap; Codex/Cursor hit it too). Critical path: gates the shift-left mirror (E7-S3+). Blocked by the E7-S0 spike evidence."
+      blocked_reason: null
+  STORY-E7-S2:
+    title: "Core (openbox-core): classify shell/mcp spans first-class in ComputeSemanticTypeFromSpan + retire the SL-13 EXT-core accept-list [UPSTREAM, critical path]"
+    status: "planned"
+    epic: "E7"
+    sprint: null
+    priority: "P1"
+    dependencies:
+      - "STORY-E7-S0"
+      - "STORY-E7-S1"
+    blocked_by:
+      - "STORY-E7-S1"
+    write_scope:
+      - "openbox-core internal/content/session.go  # ComputeSemanticTypeFromSpan: shell -> shell_command, mcp -> mcp_tool_call from root/attr fields (+ tests)"
+      - "contracts/dev-event/ext-core/  # retire the SL-13 dev-type accept-list patch (every dev event now maps to a stock accept-listed wire type)"
+    validation_commands:
+      - "openbox-core: go build ./... && go test ./internal/content/...  # GREEN"
+      - "Live: a shell/mcp dev ActivityStarted span yields shell_command/mcp_tool_call server-side."
+    invariants:
+      - "INV-8: additive classifier change (no wire break); retiring the EXT-core accept-list is a net simplification."
+    gates:
+      G3_REVIEW: {decision: "pending"}
+      G_SEC: {decision: "pending"}
+    audit:
+      commit: null
+      completed_at: null
+      validation_artifact: null
+      last_run_id: null
+      status_reason: "PLANNED (UPSTREAM, sibling repo — local commit only). Extend core's ComputeSemanticTypeFromSpan (session.go:204) to classify shell (shell_command) and mcp (mcp_tool_call) spans first-class from root/attribute fields, and retire the SL-13 EXT-core dev-type accept-list patch now that every dev event maps to a stock accept-listed wire type (Workflow*/Activity*/SignalReceived). Critical path with E7-S1; gates the shift-left mirror."
+      blocked_reason: null
+  STORY-E7-S3:
+    title: "shift-left: Go flat SpanData builder (no OTel) — 16/32-hex ids, started/completed staging, common+family root fields; wire-shape conformance test"
+    status: "planned"
+    epic: "E7"
+    sprint: null
+    priority: "P1"
+    dependencies:
+      - "STORY-E7-S1"
+    blocked_by:
+      - "STORY-E7-S1"
+    write_scope:
+      - "client/event.go  # replace the hand-built Span with a flat Core SpanData builder"
+      - "client/payload.go  # emit flat SpanData + span_count"
+      - "client/*_test.go  # unit + a wire-shape test mirroring assert_hook_wire_shape"
+    validation_commands:
+      - "cd client && go build ./... && go vet ./... && go test -race ./...  # GREEN"
+    invariants:
+      - "INV-2: content only ever in the gated span request_body/response_body."
+    gates:
+      G3_REVIEW: {decision: "pending"}
+    audit:
+      commit: null
+      completed_at: null
+      validation_artifact: null
+      last_run_id: null
+      status_reason: "PLANNED. A Go builder emitting the flat Core SpanData (16-hex span_id, 32-hex trace_id, parent_span_id, int-ns start_time, started-stage end_time:null/duration_ns:null, common + family root fields, attributes) + per-session trace-id/parent linkage. No OTel dependency — build the flat dict directly (the wire is flat SpanData, not OTel). Replaces client/event.go Span. Blocked by E7-S1 (needs the new hook types)."
+      blocked_reason: null
+  STORY-E7-S4:
+    title: "shift-left: ToolCall/ToolResult → ActivityStarted+hook / ActivityCompleted (file/mcp/shell); enforce path stays green"
+    status: "planned"
+    epic: "E7"
+    sprint: null
+    priority: "P1"
+    dependencies:
+      - "STORY-E7-S3"
+    blocked_by:
+      - "STORY-E7-S3"
+    write_scope:
+      - "client/payload.go  # ToolCall -> ActivityStarted+hook_trigger+spans; ToolResult -> ActivityCompleted (paired activity_id)"
+      - "adapters/claude-code/mapper.go  # hook -> the new wire mapping"
+      - "*_test.go + live E2E + enforce regression"
+    validation_commands:
+      - "cd adapters/claude-code && go test -race ./... ; cd ../../client && go test -race ./...  # GREEN"
+      - "Enforce regression: E6 enforce_conformance C1-C9 still green (observe-shape change must not touch enforce)."
+    invariants:
+      - "INV-3/INV-3b: enforce path (enforce.go/sidecar) UNTOUCHED — this is an observe/egress-shape change only."
+      - "INV-2 content gate preserved."
+    gates:
+      G3_REVIEW: {decision: "pending"}
+    audit:
+      commit: null
+      completed_at: null
+      validation_artifact: null
+      last_run_id: null
+      status_reason: "PLANNED. Map the tool events (file/mcp/shell) onto the base hook shape (migration doc §2 rows 3-6): ToolCall -> ActivityStarted+hook_trigger+spans, ToolResult -> ActivityCompleted paired by activity_id (fixes the dashboard timeline pairing). The enforce path stays green (only the async egress shape changes). Blocked by E7-S3."
+      blocked_reason: null
+  STORY-E7-S5:
+    title: "shift-left: lifecycle -> Workflow* / SignalReceived (session=workflow; PromptSubmitted/CommitCreated/Deploy -> Signal with lineage in metadata)"
+    status: "planned"
+    epic: "E7"
+    sprint: null
+    priority: "P1"
+    dependencies:
+      - "STORY-E7-S3"
+      - "STORY-E7-S2"
+    blocked_by:
+      - "STORY-E7-S3"
+    write_scope:
+      - "client/payload.go  # SessionStarted->WorkflowStarted, SessionEnded->WorkflowCompleted; Prompt/Commit/Deploy->SignalReceived(signal_name)"
+      - "adapters/claude-code/mapper.go ; adapters/common/git  # lineage keys into Signal metadata"
+      - "*_test.go + live E2E"
+    validation_commands:
+      - "cd adapters/claude-code && go test -race ./...  # GREEN"
+      - "Live: session creates/closes a workflow row on stock core; commit/deploy Signal carries commit_sha/deploy_id/deploy_did (FR-5/6/7)."
+    invariants:
+      - "INV-8: session=workflow uses stock core lifecycle (storage_session.go:41); no dev-type accept-list needed."
+    gates:
+      G3_REVIEW: {decision: "pending"}
+    audit:
+      commit: null
+      completed_at: null
+      validation_artifact: null
+      last_run_id: null
+      status_reason: "PLANNED. SessionStarted->WorkflowStarted / SessionEnded->WorkflowCompleted (session=workflow: session_id->run_id, stable id->workflow_id, workflow_type); PromptSubmitted/CommitCreated/Deploy->SignalReceived(signal_name=...) with lineage keys in metadata (migration doc §2 rows 1,2,7,8,9). Reverses SL-1's session-separation (ADR-0004, accepted). Verify commit/deploy lineage (FR-5/6/7) survives the Signal mapping. Blocked by E7-S3; needs E7-S2's core changes live."
+      blocked_reason: null
+  STORY-E7-S6:
+    title: "shift-left: unify MAPPING.md + dev-event schema; adopt base conformance parity matrix; dashboard E2E (fix Unknown/empty timeline)"
+    status: "planned"
+    epic: "E7"
+    sprint: null
+    priority: "P2"
+    dependencies:
+      - "STORY-E7-S4"
+      - "STORY-E7-S5"
+    blocked_by:
+      - "STORY-E7-S4"
+      - "STORY-E7-S5"
+    write_scope:
+      - "contracts/dev-event/MAPPING.md ; contracts/dev-event/schema/dev-event.schema.json  # unified shape"
+      - "adapters/claude-code/*conformance*  # map E6-S7 C1-C9 <-> base tests/conformance/test_required_cases.py"
+    validation_commands:
+      - "Full live E2E in the shared dashboard: dev tool calls pair as ActivityStarted/Completed (dashboard-devruntime-display-gaps fixed); all INV re-verified."
+    invariants:
+      - "All INV re-verified end-to-end on the unified shape."
+    gates:
+      G3_REVIEW: {decision: "pending"}
+    audit:
+      commit: null
+      completed_at: null
+      validation_artifact: null
+      last_run_id: null
+      status_reason: "PLANNED. Update MAPPING.md + dev-event JSON schema to the unified shape; adopt the base conformance parity matrix (map E6-S7 C1-C9 <-> base test_required_cases.py); full live E2E in the shared dashboard confirming dev tool calls pair as ActivityStarted/Completed (fixes dashboard-devruntime-display-gaps). Blocked by E7-S4 + E7-S5."
+      blocked_reason: null
