@@ -989,7 +989,7 @@ stories:
       blocked_reason: null
   STORY-E7-S0:
     title: "Spike — verify the unified Activity/hook wire shape on live Core (semantic-type, Workflow* OPA-bypass, flat-span attr space, Signal lineage, content gate)"
-    status: "ready"   # ADR-0004 accepted; spike is the gate-0 that blocks the rest of E7
+    status: "done"   # spike RUN 2026-07-14 on live local stack (Path A) — GO, all ADR-0004 assumptions hold
     epic: "E7"
     sprint: null
     priority: "P1"
@@ -1006,37 +1006,48 @@ stories:
     audit:
       commit: null
       completed_at: null
-      validation_artifact: null
+      validation_artifact: ".fab7/sdlc/discovery/spikes/S8-unified-wire-shape.md"
       last_run_id: null
-      status_reason: "READY — gate-0 spike for Epic E7 (ADR-0004 option B-core). Verify on a live local stack: (a) a dev ActivityStarted+hook span classifies to the intended semantic_type (file today; confirms the shell/mcp gap E7-S1/S2 close); (b) core's Workflow* OPA-bypass (opa.go:205) does NOT disable enforcement (enforce is on ToolCall=Activity); (c) the flat-SpanData attribute space holds shell/mcp; (d) SignalReceived carries commit/deploy lineage keys (FR-5/6/7); (e) content-capture (INV-2) still gated on the ActivityStarted shape. Produces the evidence the upstream contract additions (E7-S1/S2) need. Design: ADR-0004 + sdk-python-remap-migration.md §9. Blocks all of E7."
+      status_reason: "DONE — spike RUN 2026-07-14 on the live local stack (RUNBOOK Path A: infra + Temporal + core :8086 + workers; backend bypassed via SQL agent insert since core auths by Bearer token + skips sig when signing_required=false). VERDICT: GO — every ADR-0004-critical assumption holds. (1) All base wire types (WorkflowStarted/ActivityStarted+hook/SignalReceived/WorkflowCompleted) accepted HTTP 200 by STOCK core → the SL-13 EXT-core accept-list can be fully retired. (2) opa.go:204-212 bypasses OPA (auto-allow) ONLY for Workflow* lifecycle; ActivityStarted (=ToolCall, the enforce point) + SignalReceived go through real OPA (worker log confirms AGECheck/OPA ran) → session=workflow does NOT disable enforcement. (3) Session lifecycle works on stock core (WorkflowStarted→create, WorkflowCompleted→completed). (4) SignalReceived carries commit/deploy lineage (commit_sha/deploy_id/repo in metadata, FR-5/6/7) → confirms sub-decision #2. (5) Content gate holds (0 bodies stored, metadata-only). (6) Response carries the new EvaluationResult shape (verdict+action+fallback_used). ENV CAVEAT (not a wire issue, re-confirm in E7-S2): OPA/Guardrail point at a disconnected UAT VPN → 404 fail-open ALLOW verdicts; and semantic_type readback wasn't observable live (started hooks are decision-only + not persisted as session spans; completed-without-started had a local persistence quirk) — semantic_type derivation is E7-S2's classifier work, unit-testable directly (file→file_*, mcp→mcp_tool_call, shell→internal today per session.go:204/288). Artifact: spikes/S8-unified-wire-shape.md. E7 unblocked to build; next = E7-S1 (base-SDK shell/mcp/tool hook types)."
       blocked_reason: null
   STORY-E7-S1:
     title: "Base SDK (openbox-sdk-python): first-class shell/mcp/tool HookType + family root fields + assert_hook_wire_shape [UPSTREAM, critical path]"
-    status: "planned"
+    status: "review"
     epic: "E7"
     sprint: null
     priority: "P1"
     dependencies:
       - "STORY-E7-S0"
-    blocked_by:
-      - "STORY-E7-S0"
+    blocked_by: []
     write_scope:
-      - "openbox-sdk-python/openbox_core/contracts/otel_spans.py  # add shell/mcp/(tool) to HookType + _ROOT_FIELDS_BY_HOOK_TYPE"
-      - "openbox-sdk-python/openbox_core/conformance/fake_core.py  # _FAMILY_ROOT_FIELDS + assert_hook_wire_shape accept new families"
-      - "openbox-sdk-python/tests/  # contract + conformance tests"
+      - "openbox-sdk-python/openbox_core/contracts/otel_spans.py  # add shell/mcp/(tool) to HookType + _ROOT_FIELDS_BY_HOOK_TYPE + _DEFAULT_KIND_BY_HOOK + _SEMANTIC_ATTR_MAP(mcp.*)"
+      - "openbox-sdk-python/openbox_core/conformance/fake_core.py  # _FAMILY_ROOT_FIELDS mirror (assert_hook_wire_shape accepts new families via data, no body change)"
+      - "openbox-sdk-python/openbox_core/validation/span_normalization.py  # SEMANTIC_FIELDS_BY_HOOK_TYPE (mcp/tool; shell omitted per INV-2)"
+      - "openbox-sdk-python/openbox_core/wire/core_span.py  # _TRUNCATABLE_FIELDS += shell_command (G_SEC SEC-1 fix)"
+      - "openbox-sdk-python/tests/  # contract + conformance + diagnostics tests"
     validation_commands:
-      - "openbox-sdk-python: uv run pytest tests/contracts tests/wire tests/conformance  # GREEN"
+      - "openbox-sdk-python: uv run --extra http --extra db pytest -q  # 415 passed"
+      - "openbox-sdk-python: uv run ruff check .  # clean (CI gate)"
     invariants:
-      - "Additive to the base contract (existing families unchanged)."
+      - "Additive to the base contract (existing http/db/file/function families unchanged) — INV-8."
+      - "INV-2: shell_command content-gated (null by default; not auto-surfaced from attributes; truncated under content-capture)."
     gates:
-      G3_REVIEW: {decision: "pending"}
-      G_SEC: {decision: "pending"}
+      G3_REVIEW:
+        decision: "pending"  # independent review_auditor = APPROVE (no must-fix); awaiting brian sign-off
+        evidence: "Independent blind review_auditor APPROVE: additive-only, scope-faithful, family tuples byte-identical across all 3 sites, assert_hook_wire_shape has teeth, no missed enumeration site, tests meaningful (FakeSpan(kind=None) correctly exercises default-kind fallback). 413 passed + ruff clean at review time. Non-blocking notes actioned: triplication-sync test ADDED (LOW); mcp_method-not-in-SEMANTIC_FIELDS carried (INFO)."
+        decided_by: null
+        decided_at: null
+      G_SEC:
+        decision: "pass-with-conditions"
+        evidence: "Independent security_reviewer PASS-WITH-CONDITIONS: default-path INV-2 holds (shell_command null by default, not in _SEMANTIC_ATTR_MAP; mcp_*/tool_name structural identifiers, no content sink; diagnostics emit field name not value; purely additive INV-8; shell-omission rationale sound). SEC-1 (LOW, content-capture path): shell_command bypassed max_body_size → FIXED in-code (core_span.py _TRUNCATABLE_FIELDS += shell_command + truncation test), condition cleared. SEC-1 cond#2 (doc the base-SDK privacy boundary for the Go mirror: redact_keys=attributes-only, root content fields size-capped only if _TRUNCATABLE) carried to E7-S4."
+        decided_by: "security_reviewer"
+        decided_at: "2026-07-14T00:00:00Z"
     audit:
       commit: null
       completed_at: null
-      validation_artifact: null
+      validation_artifact: ".fab7/sdlc/assignments/build-story-E7-S1-20260714.result.yaml"
       last_run_id: null
-      status_reason: "PLANNED (UPSTREAM, sibling repo — local commit only, no push/PR until brian asks). Add shell/mcp/(optional tool) members to openbox_core HookType (otel_spans.py:36-43) + their family root fields, and extend conformance assert_hook_wire_shape to accept them, so dev-runtime tool calls are a first-class shared concept (guide instructions.md:369-371 sanctions a base change for a shared gap; Codex/Cursor hit it too). Critical path: gates the shift-left mirror (E7-S3+). Blocked by the E7-S0 spike evidence."
+      status_reason: "BUILT 2026-07-14 (status=review, NOT committed). UPSTREAM sibling repo openbox-sdk-python (local commit only, no push/PR until brian asks). Added HookType.SHELL/MCP/TOOL + family root fields (shell=[shell_command,shell_exit_code]; mcp=[mcp_server,mcp_tool,mcp_method]; tool=[tool_name]) to _ROOT_FIELDS_BY_HOOK_TYPE + _DEFAULT_KIND_BY_HOOK (shell/tool→INTERNAL, mcp→CLIENT) + _SEMANTIC_ATTR_MAP (mcp.* OTel attrs→root fields). assert_hook_wire_shape extends by DATA (accepts any truthy hook_type, checks family fields via _FAMILY_ROOT_FIELDS.get — no body change). SEMANTIC_FIELDS gains mcp/tool; shell OMITTED (only source field shell_command is content-gated per INV-2 → no gap-noise, llm_call precedent). Field tuples TRIPLICATED (otel_spans/fake_core/test) byte-identically + a sync-guard test. NO instrumentation wrappers (out of scope — shift-left is Go, emits flat SpanData directly). Grounded: ADR-0004 sub-decision #1 (B-core) + S8 spike GO + migration doc §2/§3. VALIDATION: 415 passed (uv run --extra http --extra db pytest -q; +2 vs baseline for shell truncation + triplication sync) + ruff clean. BOTH REVIEWS DONE: G3 review_auditor APPROVE (no must-fix); G_SEC PASS-WITH-CONDITIONS (SEC-1 LOW fixed in-code, cond#2 doc carried to E7-S4). PENDING: brian G3 sign-off, then local commit on a feature branch. Unblocks E7-S3 (shift-left mirrors the extended contract) — but E7-S2 (Core classifier) is the sibling critical-path partner. Artifact: .fab7/sdlc/assignments/build-story-E7-S1-20260714.result.yaml."
       blocked_reason: null
   STORY-E7-S2:
     title: "Core (openbox-core): classify shell/mcp spans first-class in ComputeSemanticTypeFromSpan + retire the SL-13 EXT-core accept-list [UPSTREAM, critical path]"

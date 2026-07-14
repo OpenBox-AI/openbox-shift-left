@@ -1,0 +1,75 @@
+story: STORY-E7-S1
+title: "Base SDK (openbox-sdk-python): first-class shell/mcp/tool HookType + family root fields + assert_hook_wire_shape"
+epic: E7
+built_at: "2026-07-14"
+repo: "openbox-sdk-python (SIBLING — local commit only, no push/PR until brian asks; per sibling-repo-changes-stay-local)"
+status: review  # built + both independent reviews complete (conditions fixed in-code); pending brian G3 sign-off
+
+summary: >
+  Added first-class developer-runtime tool-call hook types (shell / mcp / tool) to the
+  base SDK's flat SpanData / hook-wire contract, so a coding-agent tool call is a first-class
+  hook span instead of falling to Core's `internal` semantic type. This is ADR-0004
+  sub-decision #1 (B-core / true unification): extend the base SDK + Core classifier, then
+  shift-left (Go) mirrors the extended contract. Upstream critical-path story — gates E7-S3+.
+  Purely additive (existing http/db/file/function families unchanged).
+
+design_basis:
+  - ".fab7/sdlc/design/adr/ADR-0004-unify-dev-events-onto-base-wire-model.md (sub-decision #1 = B-core, accepted brian 2026-07-14)"
+  - ".fab7/sdlc/design/sdk-python-remap-migration.md §2 (event→wire mapping) + §3 (flat SpanData / default kinds)"
+  - ".fab7/sdlc/discovery/spikes/S8-unified-wire-shape.md (E7-S0 GO verdict — every ADR-0004 assumption holds on live Core)"
+
+changes:
+  - "openbox_core/contracts/otel_spans.py: HookType.SHELL/MCP/TOOL enum members; _ROOT_FIELDS_BY_HOOK_TYPE family tuples; _DEFAULT_KIND_BY_HOOK (shell/tool→INTERNAL, mcp→CLIENT, per migration §3); _SEMANTIC_ATTR_MAP maps mcp.server/mcp.tool/mcp.method OTel attributes → flat root fields (Core reads mcp.method==callTool)."
+  - "openbox_core/conformance/fake_core.py: _FAMILY_ROOT_FIELDS mirrored (byte-identical). assert_hook_wire_shape needs no body change — it accepts any truthy hook_type and checks family fields via _FAMILY_ROOT_FIELDS.get(...), so adding the data is what extends it."
+  - "openbox_core/validation/span_normalization.py: SEMANTIC_FIELDS_BY_HOOK_TYPE gains mcp=(mcp_server,mcp_tool) + tool=(tool_name,). shell deliberately OMITTED — its only source field (shell_command) is content-gated (INV-2, null by default), so listing it would emit INFO gap-noise on every metadata-only span (llm_call precedent)."
+  - "openbox_core/wire/core_span.py: _TRUNCATABLE_FIELDS += shell_command (SEC-1 fix — inherits max_body_size cap like request/response bodies on the opt-in content-capture path)."
+  - "tests/wire/test_flat_hook_contract.py: 3 new families auto-join the parametrized matrix via _ALL_HOOK_TYPES; TestShell/Mcp/ToolFields (fields present/null-by-default, mcp attr→root surfacing, default-kind fallback via FakeSpan(kind=None), shell_command truncation); triplication-sync guard test."
+  - "tests/gate/test_diagnostics.py: mcp missing-fields→INFO; shell content-gated→no diagnostics."
+
+family_root_fields:
+  shell: [shell_command, shell_exit_code]   # shell_command content-gated (null by default)
+  mcp:   [mcp_server, mcp_tool, mcp_method]  # structural identifiers (safe metadata)
+  tool:  [tool_name]                          # generic bucket (WebFetch/Grep/future Codex/Cursor)
+
+validation:
+  command: "cd openbox-sdk-python && uv run --extra http --extra db pytest -q"
+  result: "415 passed (was 413 pre-story baseline; +2 for shell truncation + triplication sync)"
+  lint: "uv run ruff check . — All checks passed (the CI gate; ruff + pytest only)"
+  note: "5 pre-existing pytest collection errors without the http/db extras (requests/sqlalchemy) — environmental, unrelated; CI installs extras. 14 mypy errors are all pre-existing in untouched files (approvals/instrumentation/hook_preflight) and mypy is NOT a CI gate."
+
+reviews:
+  G3_REVIEW:
+    reviewer: "review_auditor (independent, blind)"
+    decision: "APPROVE — no must-fix"
+    evidence: >
+      Additive-only, scope-faithful. Family tuples byte-identical across all 3 sites verified.
+      assert_hook_wire_shape genuinely enforces the new families (has teeth). No missed
+      enumeration site (instrumentation wrappers correctly untouched — shift-left is Go/flat
+      SpanData; core_span.py auto-covered via the imported _ROOT_FIELDS_BY_HOOK_TYPE). Tests
+      meaningful not tautological; confirmed FakeSpan(kind=None) is necessary to exercise the
+      default-kind fallback (fixture hardcodes kind=CLIENT). 413 passed, ruff clean.
+      Non-blocking: (LOW) add a triplication-sync test — DONE in-code; (INFO) mcp_method absent
+      from SEMANTIC_FIELDS — deliberate noise-reduction, carried.
+  G_SEC:
+    reviewer: "security_reviewer (independent)"
+    decision: "PASS-WITH-CONDITIONS"
+    evidence: >
+      Default-path INV-2 holds: shell_command null by default (not in _SEMANTIC_ATTR_MAP, only
+      populated by explicit wrapper fields under content-capture). mcp_*/tool_name are structural
+      identifiers, no content/secret sink (no mcp_args/tool_input/mcp_result added). mcp.* attr→root
+      copy (not move) is benign for identifiers; the root-copy redact escape is pre-existing for all
+      _SEMANTIC_ATTR_MAP fields. Diagnostics emit field NAME only, never value. Purely additive (INV-8).
+      Shell-omission-from-SEMANTIC_FIELDS rationale confirmed sound (controls diagnostics only, not egress).
+    findings:
+      - "SEC-1 (LOW, content-capture path only): shell_command was not in _TRUNCATABLE_FIELDS → captured command could egress without the max_body_size cap request_body gets. FIXED in-code (core_span.py) + test test_captured_command_is_truncated_like_a_body. CONDITION CLEARED."
+    carried_conditions:
+      - "SEC-1 cond#2 (doc): the ADR-0004 mirror contract shift-left (Go) implements MUST document the base-SDK privacy boundary — redact_keys covers `attributes` only; root content fields are size-capped only if in _TRUNCATABLE_FIELDS. The Go adapter owns truncation/secret-scrubbing of shell_command before emit under content-capture. → carried to E7-S4 (ToolCall/Result mapping) + note in migration doc."
+
+carried_followups:
+  - "E7-S4: document the privacy boundary for the Go mirror (G_SEC SEC-1 cond#2)."
+  - "E7-S2 (Core): ComputeSemanticTypeFromSpan must classify shell (shell_command) + mcp (mcp_tool_call) from these root/attribute fields; retire SL-13 EXT-core accept-list."
+  - "(INFO) mcp_method not in SEMANTIC_FIELDS_BY_HOOK_TYPE['mcp'] — Core's classifier discriminator emits no gap diagnostic; revisit if it causes confusion."
+
+human_gates_remaining:
+  - "brian G3 sign-off (independent review = APPROVE; both SEC conditions cleared/carried)"
+  - "then: local commit on a feature branch in openbox-sdk-python (no push/PR until brian asks)"
