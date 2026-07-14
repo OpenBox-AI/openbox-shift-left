@@ -1012,7 +1012,7 @@ stories:
       blocked_reason: null
   STORY-E7-S1:
     title: "Base SDK (openbox-sdk-python): first-class shell/mcp/tool HookType + family root fields + assert_hook_wire_shape [UPSTREAM, critical path]"
-    status: "review"
+    status: "done"
     epic: "E7"
     sprint: null
     priority: "P1"
@@ -1033,21 +1033,21 @@ stories:
       - "INV-2: shell_command content-gated (null by default; not auto-surfaced from attributes; truncated under content-capture)."
     gates:
       G3_REVIEW:
-        decision: "pending"  # independent review_auditor = APPROVE (no must-fix); awaiting brian sign-off
-        evidence: "Independent blind review_auditor APPROVE: additive-only, scope-faithful, family tuples byte-identical across all 3 sites, assert_hook_wire_shape has teeth, no missed enumeration site, tests meaningful (FakeSpan(kind=None) correctly exercises default-kind fallback). 413 passed + ruff clean at review time. Non-blocking notes actioned: triplication-sync test ADDED (LOW); mcp_method-not-in-SEMANTIC_FIELDS carried (INFO)."
-        decided_by: null
-        decided_at: null
+        decision: "approve"
+        evidence: "brian sign-off 2026-07-14. Independent blind review_auditor APPROVE (no must-fix): additive-only, scope-faithful, family tuples byte-identical across all 3 sites, assert_hook_wire_shape has teeth, no missed enumeration site, tests meaningful (FakeSpan(kind=None) correctly exercises default-kind fallback). 413 passed + ruff clean at review time. Non-blocking notes actioned: triplication-sync test ADDED (LOW); mcp_method-not-in-SEMANTIC_FIELDS carried (INFO)."
+        decided_by: "brian"
+        decided_at: "2026-07-14T00:00:00Z"
       G_SEC:
         decision: "pass-with-conditions"
         evidence: "Independent security_reviewer PASS-WITH-CONDITIONS: default-path INV-2 holds (shell_command null by default, not in _SEMANTIC_ATTR_MAP; mcp_*/tool_name structural identifiers, no content sink; diagnostics emit field name not value; purely additive INV-8; shell-omission rationale sound). SEC-1 (LOW, content-capture path): shell_command bypassed max_body_size → FIXED in-code (core_span.py _TRUNCATABLE_FIELDS += shell_command + truncation test), condition cleared. SEC-1 cond#2 (doc the base-SDK privacy boundary for the Go mirror: redact_keys=attributes-only, root content fields size-capped only if _TRUNCATABLE) carried to E7-S4."
         decided_by: "security_reviewer"
         decided_at: "2026-07-14T00:00:00Z"
     audit:
-      commit: null
-      completed_at: null
+      commit: "openbox-sdk-python@c3aa8c7 (sibling repo; local main + feat/dev-runtime-hook-types)"
+      completed_at: "2026-07-14T00:00:00Z"
       validation_artifact: ".fab7/sdlc/assignments/build-story-E7-S1-20260714.result.yaml"
       last_run_id: null
-      status_reason: "BUILT 2026-07-14 (status=review, NOT committed). UPSTREAM sibling repo openbox-sdk-python (local commit only, no push/PR until brian asks). Added HookType.SHELL/MCP/TOOL + family root fields (shell=[shell_command,shell_exit_code]; mcp=[mcp_server,mcp_tool,mcp_method]; tool=[tool_name]) to _ROOT_FIELDS_BY_HOOK_TYPE + _DEFAULT_KIND_BY_HOOK (shell/tool→INTERNAL, mcp→CLIENT) + _SEMANTIC_ATTR_MAP (mcp.* OTel attrs→root fields). assert_hook_wire_shape extends by DATA (accepts any truthy hook_type, checks family fields via _FAMILY_ROOT_FIELDS.get — no body change). SEMANTIC_FIELDS gains mcp/tool; shell OMITTED (only source field shell_command is content-gated per INV-2 → no gap-noise, llm_call precedent). Field tuples TRIPLICATED (otel_spans/fake_core/test) byte-identically + a sync-guard test. NO instrumentation wrappers (out of scope — shift-left is Go, emits flat SpanData directly). Grounded: ADR-0004 sub-decision #1 (B-core) + S8 spike GO + migration doc §2/§3. VALIDATION: 415 passed (uv run --extra http --extra db pytest -q; +2 vs baseline for shell truncation + triplication sync) + ruff clean. BOTH REVIEWS DONE: G3 review_auditor APPROVE (no must-fix); G_SEC PASS-WITH-CONDITIONS (SEC-1 LOW fixed in-code, cond#2 doc carried to E7-S4). PENDING: brian G3 sign-off, then local commit on a feature branch. Unblocks E7-S3 (shift-left mirrors the extended contract) — but E7-S2 (Core classifier) is the sibling critical-path partner. Artifact: .fab7/sdlc/assignments/build-story-E7-S1-20260714.result.yaml."
+      status_reason: "DONE 2026-07-14 (brian G3 sign-off + committed). PENDING REMOTE PUSH: openbox-sdk-python commit c3aa8c7 sits on local main (ff-merged from feat/dev-runtime-hook-types) but the push to origin is BLOCKED — the session SSH key authenticates as GitHub user brianthebox, which is NOT a collaborator on OpenBox-AI/openbox-sdk-python (Permission denied). shift-left origin push works (same key IS a collaborator here). RESOLUTION NEEDED (brian): grant brianthebox push access to openbox-sdk-python, or push c3aa8c7 (branch + main) with a credentialed account. BUILT 2026-07-14 (was status=review). UPSTREAM sibling repo openbox-sdk-python (local commit only, no push/PR until brian asks). Added HookType.SHELL/MCP/TOOL + family root fields (shell=[shell_command,shell_exit_code]; mcp=[mcp_server,mcp_tool,mcp_method]; tool=[tool_name]) to _ROOT_FIELDS_BY_HOOK_TYPE + _DEFAULT_KIND_BY_HOOK (shell/tool→INTERNAL, mcp→CLIENT) + _SEMANTIC_ATTR_MAP (mcp.* OTel attrs→root fields). assert_hook_wire_shape extends by DATA (accepts any truthy hook_type, checks family fields via _FAMILY_ROOT_FIELDS.get — no body change). SEMANTIC_FIELDS gains mcp/tool; shell OMITTED (only source field shell_command is content-gated per INV-2 → no gap-noise, llm_call precedent). Field tuples TRIPLICATED (otel_spans/fake_core/test) byte-identically + a sync-guard test. NO instrumentation wrappers (out of scope — shift-left is Go, emits flat SpanData directly). Grounded: ADR-0004 sub-decision #1 (B-core) + S8 spike GO + migration doc §2/§3. VALIDATION: 415 passed (uv run --extra http --extra db pytest -q; +2 vs baseline for shell truncation + triplication sync) + ruff clean. BOTH REVIEWS DONE: G3 review_auditor APPROVE (no must-fix); G_SEC PASS-WITH-CONDITIONS (SEC-1 LOW fixed in-code, cond#2 doc carried to E7-S4). PENDING: brian G3 sign-off, then local commit on a feature branch. Unblocks E7-S3 (shift-left mirrors the extended contract) — but E7-S2 (Core classifier) is the sibling critical-path partner. Artifact: .fab7/sdlc/assignments/build-story-E7-S1-20260714.result.yaml."
       blocked_reason: null
   STORY-E7-S2:
     title: "Core (openbox-core): classify shell/mcp spans first-class in ComputeSemanticTypeFromSpan + retire the SL-13 EXT-core accept-list [UPSTREAM, critical path]"
