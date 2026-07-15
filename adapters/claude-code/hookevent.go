@@ -39,12 +39,14 @@ func ParseHookName(s string) (HookName, error) {
 
 // HookEvent is the subset of a Claude Code hook's stdin JSON this adapter reads.
 //
-// It deliberately captures ONLY non-content, structural fields (INV-2): the
-// session id, the working directory, the tool identity, and lifecycle enums.
-// Content-bearing fields — the prompt text, a Bash command string, file
-// contents, tool output — are intentionally NOT decoded here, so they cannot
-// leak into an emitted event even by accident (SL3-SEC-3). Unknown/extra fields
-// are ignored (forward-compatible with Claude Code schema drift).
+// It captures ONLY non-content, structural fields (INV-2) — session id, working
+// directory, tool identity, lifecycle enums — with ONE deliberate, gated exception:
+// Prompt (the UserPromptSubmit text). Command strings, file contents, and tool
+// output remain intentionally NOT decoded, so they cannot leak into an emitted
+// event even by accident (SL3-SEC-3). Prompt is decoded but is copied onto an
+// event ONLY under the content-capture opt-in (Mapper.CaptureContent; E7-S7/OD4) —
+// with capture off it is inert, exactly like the structural-only fields.
+// Unknown/extra fields are ignored (forward-compatible with Claude Code drift).
 type HookEvent struct {
 	// Common (present on every hook payload).
 	HookEventName  string `json:"hook_event_name"`
@@ -70,6 +72,13 @@ type HookEvent struct {
 
 	// SessionEnd.
 	Reason string `json:"reason"`
+
+	// Prompt is the UserPromptSubmit prompt text — CONTENT (INV-2), not structural.
+	// It is decoded here but is consumed ONLY by the mapper when content-capture is
+	// opted in (Mapper.CaptureContent); with capture off it is never copied onto an
+	// emitted event, so it cannot egress by accident (E7-S7 / OD4). Redaction at
+	// source is a separate layer ([EXT-guardrail-redaction]).
+	Prompt string `json:"prompt"`
 }
 
 // maxHookPayload bounds the stdin read so a pathological payload can't exhaust

@@ -165,6 +165,43 @@ func TestMap_NoContentLeak(t *testing.T) {
 	}
 }
 
+// STORY-E7-S7 (OD4): the prompt is CONTENT — carried onto the PromptSubmitted
+// event ONLY when content-capture is opted in, never by default.
+func TestMap_PromptCaptureGatedOnContentCapture(t *testing.T) {
+	const prompt = "refactor the auth module"
+	e := &HookEvent{SessionID: "s1", PermissionMode: "default", Prompt: prompt}
+
+	// Default (capture off): the prompt must NOT reach the event.
+	off := testMapper()
+	got, ok := off.Map(HookUserPromptSubmit, e)
+	if !ok {
+		t.Fatal("Map ok=false")
+	}
+	if got.Content != nil {
+		t.Fatalf("content-capture off: prompt must not be captured, got %+v", got.Content)
+	}
+	if raw, _ := json.Marshal(got); strings.Contains(string(raw), prompt) {
+		t.Fatalf("content-capture off: prompt leaked into emitted event: %s", raw)
+	}
+
+	// Capture on: the prompt is carried on ev.Content.Prompt (→ signal_args downstream).
+	on := testMapper()
+	on.CaptureContent = true
+	got, ok = on.Map(HookUserPromptSubmit, e)
+	if !ok {
+		t.Fatal("Map ok=false")
+	}
+	if got.Content == nil || got.Content.Prompt != prompt {
+		t.Fatalf("content-capture on: prompt must be captured, got %+v", got.Content)
+	}
+
+	// Capture on but empty prompt ⇒ no Content (nothing to carry).
+	got, _ = on.Map(HookUserPromptSubmit, &HookEvent{SessionID: "s1", PermissionMode: "default"})
+	if got.Content != nil {
+		t.Fatalf("empty prompt must not set Content, got %+v", got.Content)
+	}
+}
+
 func TestMap_MetadataStructuralOnly(t *testing.T) {
 	m := testMapper()
 	got, _ := m.Map(HookSessionStart, &HookEvent{

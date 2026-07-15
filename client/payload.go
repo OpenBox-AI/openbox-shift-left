@@ -39,7 +39,15 @@ type governanceEventPayload struct {
 	// SignalName is REQUIRED on a SignalReceived event (event_rules.py raises
 	// ENVELOPE_MISSING_FIELDS / "missing signal_name" otherwise; core stores it in
 	// the SignalName column). Empty (omitted) on Workflow*/hook events.
-	SignalName string          `json:"signal_name,omitempty"`
+	SignalName string `json:"signal_name,omitempty"`
+	// SignalArgs carries a SignalReceived event's arguments (core stores it in the
+	// signal_args column; the openbox-fe Verify-tab "Input" detail reads
+	// log.signal_args). E7-S7: commit/deploy signals carry STRUCTURAL lineage
+	// identifiers (commit_sha/repo/deploy_id/…); a prompt_submitted signal carries
+	// the prompt only under content-capture (it is content — INV-2 — gated exactly
+	// like a tool request_body, capped, absent by default). Never a commit-message
+	// body or session context. Empty (omitted) on non-signal events. See buildSignalArgs.
+	SignalArgs json.RawMessage `json:"signal_args,omitempty"`
 	Timestamp  string          `json:"timestamp"`
 	SpanCount  int             `json:"span_count,omitempty"`
 	Spans      []spanData      `json:"spans,omitempty"`
@@ -138,6 +146,9 @@ func buildLifecyclePayload(ev DevEvent) ([]byte, error) {
 		SignalName:   signalName, // "" (omitted) unless this is a SignalReceived
 		Timestamp:    ev.Timestamp,
 	}
+	if signalName != "" {
+		p.SignalArgs = buildSignalArgs(ev) // nil (omitted) when there is nothing to show
+	}
 
 	meta, err := buildMetadata(ev)
 	if err != nil {
@@ -204,6 +215,16 @@ func buildHookPayload(ev DevEvent) ([]byte, error) {
 	body["run_id"] = ev.SessionID
 	if ev.Timestamp != "" {
 		body["timestamp"] = ev.Timestamp
+	}
+	// activity_input rides the STARTED (ToolCall) event, which creates the Core
+	// governance_event row (setOptionalPayloadFields → input column). A ToolResult
+	// re-enters the existing event via the hook/span path and does not rewrite the
+	// event fields, so setting it there would be ignored — put it only on started.
+	// STRUCTURAL only (INV-2): tool/file/mcp identifiers, never command/file content.
+	if ev.EventType == EventToolCall {
+		if in := structuralActivityInput(ev); in != nil {
+			body["activity_input"] = in
+		}
 	}
 
 	meta, err := buildMetadata(ev)
@@ -468,6 +489,96 @@ func buildMetadata(ev DevEvent) (json.RawMessage, error) {
 		m["cost"] = ev.Cost
 	}
 	return json.Marshal(m)
+}
+
+// structuralActivityInput builds the INV-2-safe `activity_input` for a tool call
+// — the identifiers the openbox-fe Verify-tab "Input" detail renders (log.input),
+// which were previously empty (dashboard-devruntime-display-gaps). It carries ONLY
+// structural fields: the tool name/kind and the file/mcp locators. It NEVER carries
+// content — the shell command, file text, request body, or tool arguments — which
+// stay gated on the span request_body/response_body (content-capture path). Returns
+// nil (field omitted) when nothing structural is known.
+func structuralActivityInput(ev DevEvent) json.RawMessage {
+	m := map[string]any{}
+	if ev.Tool.Name != "" {
+		m["tool_name"] = ev.Tool.Name
+	}
+	if ev.Tool.Kind != "" {
+		m["kind"] = string(ev.Tool.Kind)
+	}
+	if s := ev.Span; s != nil {
+		if s.FilePath != "" {
+			m["file_path"] = s.FilePath
+		}
+		if s.FileOp != "" {
+			m["file_operation"] = s.FileOp
+		}
+		if ev.Tool.Kind == ToolMCP {
+			if server := firstNonEmpty(s.MCPServer, ev.Tool.MCPServer); server != "" {
+				m["mcp_server"] = server
+			}
+			if s.Function != "" {
+				m["mcp_tool"] = s.Function
+			}
+		}
+	}
+	if len(m) == 0 {
+		return nil
+	}
+	b, err := json.Marshal(m)
+	if err != nil {
+		return nil
+	}
+	return b
+}
+
+// buildSignalArgs builds the `signal_args` for a SignalReceived event — what the
+// Verify-tab "Input" detail renders (log.signal_args). The right "input" for a
+// signal depends on the signal:
+//   - prompt_submitted: the prompt IS the argument, and it is CONTENT (INV-2), so
+//     it is gated exactly like a tool's request_body — carried (capped) only when
+//     content-capture is enabled (ev.Content survives stripContent; nil by default),
+//     never structural session context. permission_mode is NOT the prompt's input —
+//     it is session context that already rides metadata (shown in the Overview tab),
+//     so it is deliberately absent here.
+//   - commit_created / deploy: the arguments are STRUCTURAL lineage identifiers
+//     (commit_sha/repo/deploy_id/…), always safe to surface (they also ride metadata).
+//
+// Returns nil (field omitted) when there is nothing to show — which, for a prompt
+// under the default metadata-only posture, is the correct/honest state.
+func buildSignalArgs(ev DevEvent) json.RawMessage {
+	m := map[string]any{}
+	switch ev.EventType {
+	case EventPromptSubmitted:
+		// Content-gated: present only when content-capture kept ev.Content (Emit's
+		// stripContent nulls it by default — INV-2). Capped before egress like any
+		// body (capBody / G_SEC SEC-1). Redaction is applied at source, not here.
+		if ev.Content != nil && ev.Content.Prompt != "" {
+			m["prompt"] = capBody(ev.Content.Prompt)
+		}
+	case EventCommitCreated:
+		copyMetaKeys(m, ev.Metadata, "commit_sha", "repo", "branch")
+	case EventDeploy:
+		copyMetaKeys(m, ev.Metadata, "deploy_id", "commit_sha", "repo", "environment", "deploy_did")
+	}
+	if len(m) == 0 {
+		return nil
+	}
+	b, err := json.Marshal(m)
+	if err != nil {
+		return nil
+	}
+	return b
+}
+
+// copyMetaKeys copies the named keys from src into dst when present. Used to lift
+// the STRUCTURAL lineage identifiers into signal_args (they also stay in metadata).
+func copyMetaKeys(dst, src map[string]any, keys ...string) {
+	for _, k := range keys {
+		if v, ok := src[k]; ok {
+			dst[k] = v
+		}
+	}
 }
 
 // stripContent returns a copy of ev with every gated content field removed

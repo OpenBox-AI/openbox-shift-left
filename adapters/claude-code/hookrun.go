@@ -88,6 +88,11 @@ func RunHook(sub string, stdin io.Reader, stdout io.Writer, logger *log.Logger) 
 	}
 
 	ad := New(id, DefaultSpoolDir())
+	// STORY-E7-S7 (OD4): authorize prompt capture on the observe/egress path ONLY
+	// under the content-capture opt-in (default off = metadata-only, INV-2). This is
+	// the SAME flag the flush client's Emit uses to strip content, so capture and
+	// egress agree. Resolved once (cheap config+env, no secret I/O).
+	ad.Mapper.CaptureContent = ResolveContentCapture()
 
 	// STORY-SL-16 (OD-FINOPS): on SessionEnd, behind the off-by-default finops
 	// opt-in, read the session transcript for usage NUMBERS ONLY and hand them to

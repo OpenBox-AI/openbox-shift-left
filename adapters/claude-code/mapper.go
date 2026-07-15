@@ -48,6 +48,15 @@ type Mapper struct {
 	// its inputs (like the injected Now / NewID), preserving the INV-2 guarantee
 	// that Map never touches content.
 	Finops *FinopsUsage
+	// CaptureContent authorizes copying the (content) prompt text onto the emitted
+	// PromptSubmitted event (STORY-E7-S7 / OD4). Default false = metadata-only (INV-2):
+	// the prompt is never egressed. Set from ResolveContentCapture() in RunHook, the
+	// SAME opt-in the client's Emit uses to decide whether to strip content — so
+	// capture and egress always agree. Redaction at source is a separate layer
+	// ([EXT-guardrail-redaction], inert locally); the prompt is capped before egress
+	// (capBody, buildSignalArgs). Only the prompt is gated here — command/file/output
+	// content is still never decoded (SL3-SEC-3).
+	CaptureContent bool
 }
 
 // FinopsUsage is the numbers-only usage rollup the finops reader produces from a
@@ -111,10 +120,18 @@ func (m Mapper) Map(hook HookName, e *HookEvent) (client.DevEvent, bool) {
 	case HookUserPromptSubmit:
 		ev.EventType = client.EventPromptSubmitted
 		ev.Tool = client.Tool{Name: agentToolName, Kind: client.ToolShell}
-		// Metadata-only: the prompt text is NEVER carried (INV-2). Token/cost are
-		// not exposed to Claude Code hooks (verified), so they are absent here —
-		// see README "known limitations".
+		// Metadata-only by default (INV-2): permission_mode is session context (shown
+		// in the dashboard Overview, not as the prompt's Input). Token/cost are not
+		// exposed to Claude Code hooks (verified), so they are absent — see README.
 		ev.Metadata = compact(map[string]any{"permission_mode": enumOr(e.PermissionMode, permissionModes)})
+		// STORY-E7-S7 (OD4): the prompt IS the signal's input and it is CONTENT, so it
+		// is carried on ev.Content.Prompt ONLY under the content-capture opt-in — where
+		// it becomes the SignalReceived signal_args (buildSignalArgs, capped). Default
+		// off ⇒ Content stays nil and the prompt never egresses (byte-identical to the
+		// metadata-only path; Emit would strip it anyway).
+		if m.CaptureContent && e.Prompt != "" {
+			ev.Content = &client.Content{Prompt: e.Prompt}
+		}
 
 	case HookPreToolUse:
 		ev.EventType = client.EventToolCall
