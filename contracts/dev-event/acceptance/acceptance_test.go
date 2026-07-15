@@ -1,20 +1,23 @@
-// Package acceptance holds the STORY-SL-13 core-acceptance contract test.
+// Package acceptance holds the core-acceptance contract test.
 //
-// It proves the EXT-core dependency (contracts/dev-event/ext-core/) is actually
-// satisfied instead of assumed: given a running core + dev creds, it POSTs a
-// minimal valid event of EACH of the 7 developer-runtime types to
-// /api/v1/governance/evaluate and asserts a non-400 (accepted) outcome. Against
-// stock core (patch NOT applied) every type is rejected 400 "invalid event_type"
-// and the failure names the fix ("apply contracts/dev-event/ext-core/").
+// HISTORY: this test began (STORY-SL-13) as proof that the EXT-core accept-list
+// patch was applied — it POSTed the 7 developer-runtime event types and expected
+// a 400 "invalid event_type" on stock (un-patched) core. ADR-0004 / E7 RETIRED
+// that patch: the client no longer emits developer-specific event_type strings;
+// it maps every dev event onto a base wire type openbox-core already accept-lists
+// (Workflow*/SignalReceived/ActivityStarted+hook). See ../ext-core/README.md.
+//
+// The test is now the INVERSE guarantee: shift-left emits ONLY stock base wire
+// types, so a STOCK core accepts every event with NO 400 — no external patch
+// required. That is E7-S2's retirement, made executable.
 //
 // It lives in its own module (not conformance/, which is deliberately
 // dependency-free and offline) so it can reuse the SL-3 client's AIP signing via
 // a local `replace` — no new external dependency, no change to client/ egress.
 //
 // The LIVE test skips cleanly when OPENBOX_URL / creds are absent, so
-// `go test ./...` stays green offline and never blocks unit CI. The negative
-// case (stock core → 400 → "apply ext-core") is pinned as a self-contained
-// httptest so it runs offline every time, without needing an un-patched core.
+// `go test ./...` stays green offline. The offline case pins the emit-only-stock-
+// types guarantee against a fake stock core with no un-patched core required.
 package acceptance
 
 import (
@@ -35,14 +38,9 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/client"
 )
 
-// the 7 developer-runtime event types that EXT-core must accept-list, in a
-// COHERENT LIFECYCLE order: SessionStarted first (the patch's site C maps it to
-// create the session), the in-session events next, SessionEnded last (mapped to
-// terminal). Emitting them as one real session — sharing a single session id —
-// exercises not just the 400 accept-list gate but the lifecycle mapping too, and
-// avoids the orphan-terminal 500 a bare out-of-session SessionEnded would hit.
-// The set (order-independent) is enforced == the SL-1 enum by the conformance
-// drift guard, so this slice only needs one minimal valid event per type.
+// The 7 normalized developer-runtime event types, emitted as one coherent session
+// (shared session id). The client maps each onto a base wire type; this slice
+// exercises the whole lifecycle, not just one event.
 var devEventTypes = []client.EventType{
 	client.EventSessionStarted,
 	client.EventPromptSubmitted,
@@ -53,10 +51,22 @@ var devEventTypes = []client.EventType{
 	client.EventSessionEnded,
 }
 
+// stockWireTypes is exactly the base SDK's accept-listed set — what a STOCK core
+// admits with no EXT-core patch. The client must emit only these.
+var stockWireTypes = map[string]bool{
+	"WorkflowStarted":   true,
+	"WorkflowCompleted": true,
+	"WorkflowFailed":    true,
+	"SignalReceived":    true,
+	"ActivityStarted":   true,
+	"ActivityCompleted": true,
+	"Handoff":           true,
+}
+
 // captureLogger records every fail-open drop line Emit writes. Emit logs ONLY on
 // a drop (a non-2xx or transport failure); a clean 2xx logs nothing. That is our
 // observation channel: Emit is fail-open and swallows the HTTP status, so the
-// SL-10 drop diagnostic is how we tell "accepted" from "400 invalid event_type".
+// SL-10 drop diagnostic is how we tell "accepted" from "rejected".
 type captureLogger struct {
 	mu    sync.Mutex
 	lines []string
@@ -88,7 +98,7 @@ func minimalEvent(et client.EventType, did, sessionID string) client.DevEvent {
 		SessionID:     sessionID,
 		DeveloperDID:  did,
 		Timestamp:     now,
-		Tool:          client.Tool{Name: "sl13-acceptance", Kind: client.ToolShell},
+		Tool:          client.Tool{Name: "acceptance", Kind: client.ToolShell},
 	}
 	switch et {
 	case client.EventSessionStarted:
@@ -100,37 +110,32 @@ func minimalEvent(et client.EventType, did, sessionID string) client.DevEvent {
 	case client.EventToolResult:
 		ev.Span = &client.Span{SemanticType: "internal", Stage: "completed"}
 	case client.EventCommitCreated:
-		ev.Metadata = map[string]any{"commit_sha": "0000000000000000000000000000000000000000", "repo": "openbox-ai/sl13-acceptance"}
+		ev.Metadata = map[string]any{"commit_sha": "0000000000000000000000000000000000000000", "repo": "openbox-ai/acceptance"}
 	case client.EventDeploy:
-		ev.Metadata = map[string]any{"deploy_id": "sl13-accept-deploy", "commit_sha": "0000000000000000000000000000000000000000"}
+		ev.Metadata = map[string]any{"deploy_id": "accept-deploy", "commit_sha": "0000000000000000000000000000000000000000"}
 	}
 	return ev
 }
 
 // probeTypes emits one minimal event per type as a single coherent session and
 // classifies each outcome from the fail-open drop log: no drop ⇒ accepted (2xx);
-// "HTTP 400 … invalid event_type" ⇒ EXT-core not applied; any other drop ⇒
-// inconclusive (a stack/creds problem to resolve before acceptance can be proven).
+// "HTTP 400 … invalid event_type" ⇒ core rejected the emitted wire type; any
+// other drop ⇒ inconclusive (a stack/creds problem to resolve first).
 func probeTypes(t *testing.T, ctx context.Context, c *client.Client, log *captureLogger, did string) (rejected, inconclusive []string) {
 	t.Helper()
-	// One shared session id for the whole lifecycle, unique per run so re-runs
-	// never collide with a prior session row.
-	sessionID := fmt.Sprintf("sl13-acceptance-%d", time.Now().UnixNano())
+	sessionID := fmt.Sprintf("acceptance-%d", time.Now().UnixNano())
 
 	for _, et := range devEventTypes {
 		log.drain() // isolate this event's drop lines
 		ev := minimalEvent(et, did, sessionID)
 
 		if _, err := c.Emit(ctx, ev); err != nil {
-			// Emit only returns an error for an un-buildable event (a test bug), never
-			// a transport failure (fail-open). Surface it — it means the minimal event
-			// is malformed, not that core rejected it.
 			t.Fatalf("Emit(%s) returned a build error (test-side): %v", et, err)
 		}
 
 		drops := log.drain()
 		if len(drops) == 0 {
-			continue // no drop logged ⇒ 2xx accepted ⇒ this type is accept-listed ✓
+			continue // no drop logged ⇒ 2xx accepted ⇒ this event's wire type is accept-listed ✓
 		}
 		line := strings.Join(drops, " | ")
 		switch {
@@ -143,19 +148,11 @@ func probeTypes(t *testing.T, ctx context.Context, c *client.Client, log *captur
 	return rejected, inconclusive
 }
 
-// missingExtCoreMessage is the actionable failure a stock core produces: it names
-// the artifact to apply and cross-refs the SL-10 reason map, so a 400 reads as a
-// task, not a mystery.
-func missingExtCoreMessage(rejected []string) string {
-	return fmt.Sprintf("core rejected %d/%d developer event types with 400 \"invalid event_type\" (%s) — "+
-		"the EXT-core dependency is NOT satisfied. Apply contracts/dev-event/ext-core/ "+
-		"(./apply.sh /path/to/openbox-core) and rebuild core; see the SL-10 reason map "+
-		"(client/signingerr.go: \"core has not accept-listed the dev event types yet … EXT-core\").",
-		len(rejected), len(devEventTypes), strings.Join(rejected, ", "))
-}
-
-// TestAcceptanceCoreAcceptsDevEventTypes is the env-gated LIVE probe.
-func TestAcceptanceCoreAcceptsDevEventTypes(t *testing.T) {
+// TestAcceptanceStockCoreAcceptsEmittedEvents is the env-gated LIVE probe: against
+// a running STOCK core (no EXT-core patch), every emitted dev event must be
+// accepted (non-400) because the client maps them onto stock base wire types.
+// This is E7-S2's retirement proven end-to-end.
+func TestAcceptanceStockCoreAcceptsEmittedEvents(t *testing.T) {
 	baseURL := firstEnv("OPENBOX_URL", "OPENBOX_BASE_URL")
 	apiKey := os.Getenv("OPENBOX_API_KEY")
 	did := os.Getenv("OPENBOX_AGENT_DID")
@@ -175,14 +172,11 @@ func TestAcceptanceCoreAcceptsDevEventTypes(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	// Preflight: a signed GET /auth/validate (SL-11). This isolates a
-	// creds/signing/stack problem (401/500/unreachable) from the thing we are
-	// actually testing (event_type accept-listing → 400). If auth itself is
-	// broken, every /evaluate POST would 401 and the probe below could not prove
-	// anything — so fail loudly here with the mapped reason instead.
+	// Preflight: a signed GET /auth/validate (SL-11) isolates a creds/signing/stack
+	// problem (401/500/unreachable) from the thing under test (wire-type acceptance).
 	if err := c.Validate(ctx); err != nil {
 		if ve, ok := client.AsValidateError(err); ok {
-			t.Fatalf("preflight auth/validate failed (fix creds/core BEFORE this can prove event-type acceptance): HTTP %d — %s", ve.Status, ve.Diagnostic)
+			t.Fatalf("preflight auth/validate failed (fix creds/core first): HTTP %d — %s", ve.Status, ve.Diagnostic)
 		}
 		t.Fatalf("preflight auth/validate could not reach core (fix the stack first): %v", err)
 	}
@@ -190,36 +184,45 @@ func TestAcceptanceCoreAcceptsDevEventTypes(t *testing.T) {
 	rejected, inconclusive := probeTypes(t, ctx, c, log, did)
 
 	if len(rejected) > 0 {
-		t.Error(missingExtCoreMessage(rejected))
+		t.Errorf("stock core rejected %d/%d emitted events with 400 \"invalid event_type\" (%s) — "+
+			"the client is emitting a NON-stock wire type; the base-wire mapping (MAPPING.md §2) is broken. "+
+			"Every dev event must map to a stock base type (Workflow*/SignalReceived/ActivityStarted).",
+			len(rejected), len(devEventTypes), strings.Join(rejected, ", "))
 	}
 	if len(inconclusive) > 0 {
-		t.Errorf("%d event type(s) dropped for a reason other than 400 event_type — "+
-			"acceptance could not be proven; resolve these first:\n  - %s",
-			len(inconclusive), strings.Join(inconclusive, "\n  - "))
+		t.Errorf("%d event(s) dropped for a reason other than 400 event_type — acceptance could not be "+
+			"proven; resolve these first:\n  - %s", len(inconclusive), strings.Join(inconclusive, "\n  - "))
 	}
 	if len(rejected) == 0 && len(inconclusive) == 0 {
-		t.Logf("✓ all %d developer event types accepted (non-400) by core at %s — EXT-core dependency satisfied", len(devEventTypes), baseURL)
+		t.Logf("✓ all %d dev events accepted (non-400) by STOCK core at %s — EXT-core retired, base-wire mapping holds", len(devEventTypes), baseURL)
 	}
 }
 
-// TestAcceptanceReportsMissingExtCore pins the negative case offline: a fake
-// stock core that rejects every dev event_type with 400 "invalid event_type"
-// must make the probe report all 7 as rejected AND produce the actionable
-// "apply contracts/dev-event/ext-core/" message. No un-patched core required.
-func TestAcceptanceReportsMissingExtCore(t *testing.T) {
+// TestAcceptanceEmitsOnlyStockWireTypes pins the retirement offline: a fake STOCK
+// core that accept-lists ONLY the base wire types (and 400s anything else) must
+// see NO rejection — proving the client emits no developer-specific event_type
+// (the EXT-core accept-list is genuinely unnecessary). No live core required.
+func TestAcceptanceEmitsOnlyStockWireTypes(t *testing.T) {
+	var seenTypes sync.Map // event_type -> struct{}: what the client actually put on the wire
+
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == client.AuthValidatePath:
-			// Preflight succeeds — auth/signing is fine; only the accept-list is missing.
 			w.WriteHeader(http.StatusOK)
 			_, _ = w.Write([]byte(`{"code":200,"message":"ok"}`))
 		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/governance/evaluate":
-			// Stock core: reject the un-accept-listed dev type exactly as
-			// internal/api/governance.go does (Abort(c, 400, "invalid event_type: X")).
 			var payload struct {
 				EventType string `json:"event_type"`
 			}
 			_ = json.NewDecoder(r.Body).Decode(&payload)
+			seenTypes.Store(payload.EventType, struct{}{})
+			// Stock core: accept-list the base types exactly as
+			// internal/api/governance.go's isValidGovernanceEventType does.
+			if stockWireTypes[payload.EventType] {
+				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write([]byte(`{"verdict":"allow","action":"continue"}`))
+				return
+			}
 			w.WriteHeader(http.StatusBadRequest)
 			_, _ = w.Write([]byte(fmt.Sprintf(`{"code":400,"message":"invalid event_type: %s"}`, payload.EventType)))
 		default:
@@ -238,28 +241,28 @@ func TestAcceptanceReportsMissingExtCore(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	// Preflight must pass against the fake (auth OK) — proving the probe below
-	// attributes the failure to the accept-list, not to signing.
 	if err := c.Validate(ctx); err != nil {
 		t.Fatalf("fake-core preflight should succeed: %v", err)
 	}
 
 	rejected, inconclusive := probeTypes(t, ctx, c, log, did)
 
-	if len(rejected) != len(devEventTypes) {
-		t.Fatalf("expected all %d types reported rejected on stock core, got %d %v (inconclusive: %v)",
-			len(devEventTypes), len(rejected), rejected, inconclusive)
+	if len(rejected) != 0 {
+		t.Fatalf("stock-core fake rejected %v — the client emitted a non-stock wire type (EXT-core would still be needed). "+
+			"Every dev event must map to a base type in stockWireTypes.", rejected)
 	}
 	if len(inconclusive) != 0 {
-		t.Fatalf("expected no inconclusive drops against the fake stock core, got %v", inconclusive)
+		t.Fatalf("unexpected inconclusive drops against the fake stock core: %v", inconclusive)
 	}
 
-	msg := missingExtCoreMessage(rejected)
-	for _, want := range []string{"contracts/dev-event/ext-core/", "apply.sh", "invalid event_type", "SL-10", "EXT-core"} {
-		if !strings.Contains(msg, want) {
-			t.Errorf("failure message must name %q so a 400 is actionable; got:\n%s", want, msg)
+	// Every wire type the client emitted must be a stock base type.
+	seenTypes.Range(func(k, _ any) bool {
+		et := k.(string)
+		if !stockWireTypes[et] {
+			t.Errorf("client emitted non-stock wire event_type %q — must be one of the base accept-listed types", et)
 		}
-	}
+		return true
+	})
 }
 
 // ephemeralSeedB64 mints a throwaway base64 Ed25519 seed for the fake-core test

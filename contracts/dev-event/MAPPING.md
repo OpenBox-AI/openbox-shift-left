@@ -1,75 +1,97 @@
-# Mapping — normalized dev event → openbox-core `GovernanceEventPayload`
+# Mapping — normalized dev event → base-SDK unified wire model (openbox-core `/evaluate`)
 
-**Story:** STORY-SL-1 · **Contract:** [`schema/dev-event.schema.json`](schema/dev-event.schema.json) v1.0
-**Target (verified, spike S6 + live code):** `POST /api/v1/governance/evaluate` on **openbox-core**, body `GovernanceEventPayload` (`internal/content/governance.go:186`), spans `SpanData` (`:266`), semantic-type constants (`internal/content/session.go:95`), accept-list `isValidGovernanceEventType` (`internal/api/governance.go:273`).
+**Contract:** [`schema/dev-event.schema.json`](schema/dev-event.schema.json) v1.0 (the tool-agnostic **adapter-facing** shape; unchanged).
+**Wire model (as built, E7):** the **base SDK's** `EventType` set — `WorkflowStarted / WorkflowCompleted / SignalReceived / ActivityStarted`+`hook_trigger` — serialized by `client/payload.go` onto `POST /api/v1/governance/evaluate` (openbox-core). Ratified in [`ADR-0004`](../../.fab7/sdlc/design/adr/ADR-0004-unify-dev-events-onto-base-wire-model.md); built by **E7-S3** (span builder), **E7-S4** (tool→hook), **E7-S5** (lifecycle→Workflow*/Signal).
 
-This doc lets **SL-3** (the OpenBox client) build a `GovernanceEventPayload` from a normalized dev event **without guessing**. The mapping is additive to core (INV-8): it introduces new `event_type` strings and reuses the existing span/metadata shape — **no core wire change**.
+> **What changed vs SL-1 (read this first).** SL-1 kept a *parallel* developer vocabulary (`SessionStarted`/`ToolCall`/…) and passed each `event_type` **verbatim** to core, which required patching core's accept-list (SL-13 EXT-core). **ADR-0004 reversed that:** shift-left now re-expresses the *same* normalized dev events onto the base SDK's blessed wire types, so (a) telemetry conforms to `assert_hook_wire_shape` (mirrored as `client.AssertHookWireShape`, E7-S1), (b) the EXT-core accept-list is **retired** (E7-S2), and (c) dev tool calls pair on the shared dashboard timeline. The normalized contract (this schema) is **unchanged** — adapters still emit `ToolCall`/`SessionStarted`/…; only the **client→core wire serialization** moved.
+
+**Two layers.** The *adapter-facing* contract ([schema](schema/dev-event.schema.json)) is what a provider adapter produces via SPI `emit()` — its `event_type` enum is still the 7 dev-runtime lifecycle names. The *wire* layer below is what the shared `client/` translates that into. Adding a provider never touches either layer (PRD FR-4, architecture §1b).
 
 ---
 
 ## 1. Envelope field mapping (every event)
 
-| Normalized dev event | → `GovernanceEventPayload` field | Notes |
+Source-cited to `client/payload.go` (`governanceEventPayload`, the marshaled body) and the base contract `openbox-sdk-python/openbox_core/contracts/events.py` (READ-ONLY reference).
+
+| Normalized dev event | → wire `governanceEventPayload` field | Notes |
 |---|---|---|
-| — (constant) | `source` = `"developer-runtime"` | Analogue of the SDK's `"workflow-telemetry"`. |
-| `event_type` | `event_type` | **Identity.** The 7 lifecycle names below are added to core's accept-list by EXT-core (S6 §3). |
-| `openbox_session_id` | `run_id` | Session keyed by `(workflow_id, run_id)`, both NOT-NULL + jointly unique (S6 §4). |
+| — (constant) | `source` = `"developer-runtime"` | Free-form in core; distinguishes dev traffic from the SDK's `"workflow-telemetry"`. |
+| `event_type` | `event_type` | **Re-mapped**, not passed through — see §2. Resolves to a base wire type (`WorkflowStarted`/`WorkflowCompleted`/`SignalReceived`/`ActivityStarted`). |
+| `openbox_session_id` | `run_id` | Session keyed by `(workflow_id, run_id, workflow_type)`. |
 | `developer_did` (or workspace/repo id) | `workflow_id` | Stable per-workspace identity so `(workflow_id, run_id)` is unique per session. |
+| — (constant) | `workflow_type` = `"developer-session"` | **Required** by the base contract on **both** `Workflow*` **and** `SignalReceived` events (`event_rules.py` `_REQUIRED_WORKFLOW_FIELDS`; core reads it into a dedicated column, `storage_event.go`). The *constant* value keeps a session's `WorkflowStarted` + its `SignalReceived`s + `WorkflowCompleted` on one `(workflow_id, run_id, workflow_type)` identity so core resolves them to **one** session row. Omitted (`omitempty`) on the `ActivityStarted` hook path (which builds its own envelope). |
+| — (per signal) | `signal_name` | Set **only** on `SignalReceived` (`prompt_submitted`/`commit_created`/`deploy`); required there (`event_rules.py` raises `ENVELOPE_MISSING_FIELDS` otherwise). |
 | `timestamp` | `timestamp` | Core field is a **string** (RFC3339) — pass through verbatim. |
-| `span` (when present) | `spans[0]`, and set `span_count` = len(`spans`) | See §3. |
-| `metadata` | `metadata` (`json.RawMessage`) | Merge the per-type keys below; JSON object. |
-| `tokens`, `cost` | `metadata.tokens`, `metadata.cost` | No first-class payload fields; carried in `metadata` (finops). |
-| `developer_did` | — | Auth/identity is via the signed AIP headers + Bearer key, **not** a body field. `from_agent_did`/`multi_agent_session_id` stay empty (Handoff-only). |
-| `content.*`, `span.request_body/response_body` | `spans[].request_body` / `response_body` **only when content-capture enabled** | Stripped at the client when disabled (INV-2). Never a first-class payload field. |
+| `span` (tool events only) | `spans[0]` + `span_count` = len(`spans`) | Flat base `SpanData`; see §3. Lifecycle/signal events are **span-less** (the base contract rejects span-bearing non-hook events). |
+| `metadata` | `metadata` (`json.RawMessage`) | Merged per-type keys below; JSON object. Carries commit/deploy lineage (§2). |
+| `tokens`, `cost` | `metadata.tokens`, `metadata.cost` | No first-class payload fields; carried in `metadata` (finops, SL-16). |
+| `developer_did` | — | Identity is via the signed AIP headers + Bearer key, **not** a body field. `from_agent_did`/`multi_agent_session_id` stay empty (Handoff-only). |
+| `content.*`, `span.request_body/response_body` | `spans[].request_body` / `response_body` **only when content-capture enabled**, **capped to 65536 chars** before egress (`capBody`, G_SEC SEC-1) | Stripped at the client when disabled (INV-2). Never a first-class payload field, never on the local enforce `DecisionRequest`. |
 
-`schema_version` and `event_id` are contract/idempotency fields — `event_id` is the client's idempotency key (INV-5); it is not a core payload field and is used client-side for dedupe.
-
----
-
-## 2. Per-lifecycle-type mapping
-
-| Dev `event_type` | core `event_type` | Carried span `semantic_type` | Key `metadata` fields | Core lifecycle effect (S6 §3, `storage_session.go:40`) |
-|---|---|---|---|---|
-| `SessionStarted` | `SessionStarted` | *(none)* | `provider` (claude-code\|codex\|cursor), `tool_version`, `repo`, `cwd` | **create** session `(workflow_id, run_id)` |
-| `PromptSubmitted` | `PromptSubmitted` | `llm_completion` *(optional; only if turn tokens known)* | `tokens`, `cost`, `model` | mid-session lookup |
-| `ToolCall` | `ToolCall` | by `tool.kind`: file→`file_read`/`file_write`/`file_open`/`file_delete`; mcp→`mcp_tool_call`; shell→`internal` | `tool_name` | mid-session; span `stage="started"` |
-| `ToolResult` | `ToolResult` | same span type as its `ToolCall` | `tool_name`, `exit_code`? | mid-session; span `stage="completed"` (carries `bytes_*`, `lines_count`) |
-| `SessionEnded` | `SessionEnded` | *(none)* | `total_tokens`, `total_cost`, `duration_ms` | **terminal** — closes the session |
-| `CommitCreated` | `CommitCreated` | *(none)* | `commit_sha`, `repo`, `branch` | mid-session (or standalone); commit→session binding (FR-5) |
-| `Deploy` | `Deploy` | *(none)* | `deploy_id`, `commit_sha`, `repo`, `environment`, `deploy_did` (= git hash + timestamp, FR-6) | standalone; deploy lineage (FR-6/FR-7) |
-
-**Two axes (S6 §7).** The rows above are the **lifecycle** axis (this contract, new to core). The `semantic_type` column is the **semantic-span** axis, which **already exists** in core — the contract carries it, it does not define it.
-
-**`semantic_type` is computed server-side.** Core derives `SpanData.semantic_type` from the span's source fields (`file_path`/`file_operation`, `function`/`module`, `hook_type`) via `ComputeSemanticTypeFromSpan` (`session.go:204`). The adapter/client should set those **source** fields; the `semantic_type` in this contract is the intended target/hint. To land the target reliably, also set `SpanData.hook_type` (`"file_operation"` | `"function_call"`). Shell/command tool calls (`tool.kind=shell`) have **no** shell semantic type in core — they resolve to `internal` (core's fallback); command detail rides in `tool.name` + `metadata` (+ gated `request_body`).
-
-> **Session lifecycle — EXT-core dependency (verified live, G3_REVIEW).** Core creates a session row **only** on `WorkflowStarted` and closes it only on `WorkflowCompleted`/`WorkflowFailed` (`internal/services/activities/governance/storage_session.go:41`); every other `event_type` falls through to `handleSessionLookup` (benign — logs a warn if not found, `Action:"none"`, no error). Therefore `SessionStarted→create` / `SessionEnded→terminal` **requires EXT-core's 3rd additive edit**: extend `handleSessionCreate`/the lifecycle switch to map these two (this is edit #3 of the 3 S6 §3 scoped — constants, accept-list, lifecycle switch). **Do NOT** shortcut by mapping developer sessions onto the existing `WorkflowStarted`/`WorkflowCompleted` strings: those trigger the `Workflow*` OPA-bypass (`opa.go:205`) and the guardrails-ineligible path (`governance_workflow.go:429`), and conflate developer sessions with Temporal workflows — a semantic break, not additive. Distinct types + edit #3 is the correct, INV-8-preserving choice.
+`schema_version` and `event_id` are contract/idempotency fields — `event_id` is the client's idempotency key (INV-5), used client-side for dedupe; neither is a core payload field.
 
 ---
 
-## 3. Building a `SpanData` from `span`
+## 2. Per-type mapping (dev event → base wire event)
 
-| Contract `span.*` | → `SpanData` field (`governance.go:266`) |
-|---|---|
-| `semantic_type` | `semantic_type` (also drives `hook_type`; see above) |
-| `stage` | `stage` (`"started"`/`"completed"`) |
-| `file_path` | `file_path` |
-| `file_operation` | `file_operation` |
-| `bytes_read` / `bytes_written` | `bytes_read` / `bytes_written` |
-| `lines_count` | `lines_count` |
-| `function` | `function` (Go field `FuncName`) |
-| `module` | `module` |
-| `request_body` / `response_body` | `request_body` / `response_body` **(gated, INV-2)** |
-| — (client-generated) | `span_id`, `trace_id`, `name`, `start_time`, `end_time` (int64 epoch) |
+Built by `lifecycleWireType` (lifecycle/signal, `client/payload.go`) and `buildPayload`'s tool dispatch (E7-S4).
 
-The client fills the required transport fields (`span_id`, `trace_id`, `name`, `start_time`, `end_time`) that are not part of the tool-agnostic contract.
+| Dev `event_type` | Base wire `event_type` | `signal_name` | Span | Key `metadata` | Core effect |
+|---|---|---|---|---|---|
+| `SessionStarted` | `WorkflowStarted` | — | — | `provider`, `tool_version`, `repo`, `cwd` | **create** session `(workflow_id, run_id, workflow_type)` (`storage_session.go`) |
+| `SessionEnded` | `WorkflowCompleted` | — | — | `total_tokens`, `total_cost`, `duration_ms` | **terminal** — closes the session |
+| `PromptSubmitted` | `SignalReceived` | `prompt_submitted` | — | `tokens`, `cost`, `model` | mid-session signal |
+| `CommitCreated` | `SignalReceived` | `commit_created` | — | `commit_sha`, `repo`, `branch` (FR-5) | mid-session signal; commit lineage |
+| `Deploy` | `SignalReceived` | `deploy` | — | `deploy_id`, `commit_sha`, `repo`, `environment`, `deploy_did` (FR-6/7) | signal; deploy lineage |
+| `ToolCall` | `ActivityStarted`+`hook_trigger` | — | stage=`started` | `tool_name` | pre-exec decision (OPA runs; the enforce point) |
+| `ToolResult` | `ActivityStarted`+`hook_trigger` | — | stage=`completed` | `tool_name`, `exit_code`? | **same** hook envelope; carries `bytes_*`/`lines_count` |
+
+### The `ToolCall`/`ToolResult` pair — key correction (E7-S4)
+
+Both stages serialize as **`event_type = ActivityStarted`** with `hook_trigger = true`. A `ToolResult` is **not** `ActivityCompleted`:
+
+- The base SDK's `wire_event_type()` forces `ActivityStarted` for **any** `hook_trigger` event, regardless of stage (`events.py` `hook(...)` → `EventKind.HOOK` serializes as `ActivityStarted`).
+- `ActivityCompleted` is a **hook-less lifecycle** type that must **not** carry spans (`assert_hook_wire_shape` asserts `ActivityStarted` unconditionally and accepts span `stage ∈ {started, completed}`). Emitting `ActivityCompleted` would **fail our own** `client.AssertHookWireShape`.
+- The two stages are **paired by a shared `span_id` (+ deterministic `activity_id`, `trace_id`)**, not by parent linkage. `client/spanbuilder.go` derives these from `session/tool/locator` with **no** stage or timestamp input, so the two separate hook processes (and the SL-4 spool) mint the **same** ids without threading state. Core/the dashboard pair them onto one timeline row.
+
+> **Supersedes** ADR-0004's baseline table (row `ToolResult → ActivityCompleted`) and Consequences bullet: the accurate, self-consistent mechanism is *both stages = `ActivityStarted`+hook, paired by span_id*. See E7-S4 result artifact for the cross-repo derivation. The dashboard-pairing behavior this produces is re-verified live in §7.
+
+### `semantic_type` is computed server-side
+
+Core derives `SpanData.semantic_type` from the span's **source** fields via `ComputeSemanticTypeFromSpan` (`internal/content/session.go`). The client sets the source fields + `hook_type`; it does **not** send `semantic_type` (the wire assertion forbids it).
+
+| `tool.kind` | Span shape the client sets (`hookSpanShape`, E7-S4) | Core-computed `semantic_type` |
+|---|---|---|
+| `file` | `hook_type=file_operation`; name `file.read`/`file.write`/`file.open`/`file.delete`; root `file_path`, `file_operation`, `bytes_*` | `file_read`/`file_write`/`file_open`/`file_delete` (`session.go` file classifier) |
+| `mcp` | `hook_type=mcp` (kind=CLIENT); `attributes["mcp.method"]="callTool"` + `mcp_server`/`mcp_tool`; `mcp_*` family roots | `mcp_tool_call` — **first-class via E7-S2** (`session.go` mcp classifier) |
+| `shell` | `hook_type=shell`; `shell_command` present-but-**null** on egress (INV-2: read only for LOCAL enforce) | `shell_command` — **first-class via E7-S2** (was `internal` fallback pre-E7-S2) |
+
+> **E7-S2 dependency (server-side, pending).** Making `shell`→`shell_command` and `mcp`→`mcp_tool_call` first-class is the openbox-core classifier edit **E7-S2** (extend `ComputeSemanticTypeFromSpan`; retire the SL-13 EXT-core accept-list). Until E7-S2 lands, `shell` resolves to core's `internal` fallback and `mcp` to `mcp_tool_call` (already recognized pre-E7-S2 per `session.go` mcp attribute path). The wire shape does not depend on E7-S2 — E7-S0 confirmed stock core accepts every base type at HTTP 200.
+
+---
+
+## 3. Building a flat `SpanData` (tool events)
+
+Built by `client/spanbuilder.go` (`BuildHookSpan`), the no-OTel Go port of the base SDK's `from_otel_span`. Every span is a **flat** dict (no nested `otel`/`openbox` envelope, no `data` blob, no `semantic_type`) with all 14 common root fields present + the family tuple:
+
+| Field group | Fields | Notes |
+|---|---|---|
+| Common roots (always present) | `span_id`, `trace_id`, `parent_span_id`, `name`, `kind`, `stage`, `start_time`, `end_time`, `duration_ns`, `attributes`, `status`, `events`, `hook_type`, `error` | `span_id` = 16-hex, `trace_id` = 32-hex (regex-checked by the assertion). `stage="started"` ⇒ `end_time=null`, `duration_ns=null`. |
+| `file_operation` family | `file_path`, `file_mode`, `file_operation`, `bytes_read`, `bytes_written` | Present-but-null when not applicable. |
+| `mcp` family | `mcp_server`, `mcp_tool`, `mcp_method` | Inert until E7-S2 recognizes them server-side. |
+| `shell` family | `shell_command`, `shell_exit_code` | `shell_command` **never egressed** (INV-2). |
+| `tool` family | `tool_name` | |
+| Gated content | `request_body`, `response_body` | INV-2 gated + `capBody`-truncated (§1). |
+
+The started+completed pair reuse the **same** `span_id` (base pairing mechanism; `HookSpan.SpanID` reuse). `trace_id` derives from the authenticated `SessionID`. See `client/hookspan.go` for the mirrored contract and `AssertHookWireShape` for the conformance assertion.
 
 ---
 
 ## 4. Verdict (parsing the response)
 
-The `/evaluate` response envelope is `GovernanceVerdictResponse` (`governance.go:334`). The canonical enum (`$defs.verdict`) is `HALT > BLOCK > REQUIRE_APPROVAL > CONSTRAIN > ALLOW`, but the wire is **lowercase**:
+The `/evaluate` response is core's `EvaluationResult` — `verdict` + legacy `action` + `fallback_used` (confirmed live, E7-S0 spike). The canonical enum is `HALT > BLOCK > REQUIRE_APPROVAL > CONSTRAIN > ALLOW`; the wire is **lowercase**:
 
-| Canonical (contract) | Wire `verdict` field | Legacy `action` field |
+| Canonical | Wire `verdict` | Legacy `action` |
 |---|---|---|
 | `ALLOW` | `allow` | `continue` |
 | `CONSTRAIN` | `constrain` | `continue` |
@@ -77,33 +99,43 @@ The `/evaluate` response envelope is `GovernanceVerdictResponse` (`governance.go
 | `BLOCK` | `block` | `stop` |
 | `HALT` | `halt` | `stop` |
 
-Phase-1 observe (**D7/INV-3**) treats **every** verdict as allow and never blocks the tool call.
-
-> **G3_REVIEW note.** The story's stated vocab is the 4-value `HALT|BLOCK|REQUIRE_APPROVAL|ALLOW`. Live core has a **5th tier `CONSTRAIN`** (Verdict=1, sandbox-enforcement, future) and serializes lowercase. The contract defines all 5 so a parser is forward-compatible; this is additive and requires **no** core change (INV-8 holds).
+`fallback_used=true` marks a fail-open verdict (core's OPA/Guardrail unreachable → default ALLOW). Phase-1 **observe** (D7/INV-3) treats every async-egress verdict as advisory and never blocks the tool call. Enforcement (Phase-2, E6) is a **separate, local** decision on the sidecar `DecisionRequest` — it does **not** read this response (INV-3b; enforce path untouched by the E7 wire reshape).
 
 ---
 
-## 5. INV-8 compatibility statement
+## 5. INV-8 / conformance statement
 
-Every mapping above is **additive**: 7 new `event_type` strings (accept-listed by EXT-core's 3-edit change, S6 §3) reusing the **existing** `GovernanceEventPayload`/`SpanData`/`metadata` shape and the **existing** `/evaluate` route. No field is removed or repurposed; existing Temporal event semantics are untouched. If any future lifecycle type cannot map without a non-additive wire change → **HALT** and route to architecture (story stop condition).
+The wire model is now the base SDK's **stock** vocabulary — no dev-specific `event_type` strings, so **no core accept-list patch is needed** (E7-S0: all base types → HTTP 200 on stock core). This is a **net simplification** vs SL-1's EXT-core patch, which E7-S2 retires.
 
-**Verified downstream (G3_REVIEW, live openbox-core + openbox-backend).** Once `isValidGovernanceEventType` (`api/governance.go:273`) accepts the 7 types, **no** consumer errors, drops, or crashes — each defaults to a benign path. Behaviors to know (not blockers for Phase-1 observe):
+**Downstream-consumer behavior on the unified shape** (verified E7-S0 live + cross-repo Explore):
 
-| Consumer | Behavior on the new dev types |
+| Consumer | Behavior |
 |---|---|
-| Metadata/attestation extractor (`governance_metadata.go`) | base metadata + `payload.Metadata` hashed; safe |
-| Guardrails eligibility (`governance_workflow.go:429`) | **skipped** for dev types (not Activity/Signal). Fine in Phase 1 — content is redacted at-source (INV-2), not at core ingest. |
-| OPA policy eval (`opa.go:205`) | **runs** for dev types (only `Workflow*` bypass). Harmless in Phase-1 observe (verdict ignored, INV-3); useful for Phase-2. |
-| AGE / AIVSS goal-drift (`age.go`) | no per-type scoring for dev types; safe |
-| Observability per-type counter (`invocation.go`) | generic counters fire; no per-type counter; safe |
-| Backend store/read (`GovernanceEventService`, entity `varchar(50)`) | stores + reads fine; no enum guard. All 7 names < 50 chars. |
-| Backend activity-timeline UI (`run.provider.ts:563`) | pairs only `ActivityStarted/Completed`, so dev events don't appear in **that** view. Developer session logs use the generic `getSessionLogs`. UI note, not a contract issue. |
-| Webhooks (`webhook.go`) | key off the **verdict**, not input `event_type`; unaffected. |
+| Session store (`storage_session.go`) | `WorkflowStarted`→create, `WorkflowCompleted`→terminal — **native**, no EXT-core lifecycle edit. |
+| OPA policy eval (`opa.go`) | Bypassed (auto-allow) **only** for `Workflow*` (latency); `ActivityStarted` (the tool call = enforce point) **and** `SignalReceived` go through **real** OPA. Session=workflow does **not** weaken enforcement (E7-S0 #2). |
+| Guardrails eligibility | `ActivityStarted` is guardrails-**eligible** at core (unlike the old dev types) — useful for content-capture redaction (E6-S4). Metadata-only by default (INV-2). |
+| `signal_name` / `workflow_type` | Stored in dedicated columns (`storage_event.go`); commit/deploy lineage rides `metadata` (core has no `commit_sha`/`deploy_id` columns) and **survives** the Signal mapping. |
+| Dashboard activity timeline (`run.provider.ts`) | Pairs `ActivityStarted`/`Completed`. Dev tool calls now emit `ActivityStarted`+hook (both stages) → expected to appear (vs SL-1's `Unknown`). **Re-verified live in §7.** |
 
-## 6. Client transport notes (for SL-3)
+If any future lifecycle type cannot map without a non-additive wire change → **HALT** and route to architecture.
 
-Verified against the SDK's `request_signing.py` — the client must match core exactly:
-- **Body:** compact JSON, `separators=(",",":")` equivalent; the **signed bytes must equal the transmitted bytes** (serialize once, send raw; never re-encode).
-- **AIP signature (Ed25519):** canonical string = `UPPER(METHOD)\nPATH\nTIMESTAMP\nNONCE\nBODY_SHA256_HEX`; headers `X-OpenBox-Agent-DID`, `X-OpenBox-Agent-Timestamp`, `X-OpenBox-Agent-Nonce`, `X-OpenBox-Agent-Signature`, `X-OpenBox-Body-SHA256`, plus `Authorization: Bearer <obx_>` and `X-OpenBox-SDK-Version`.
-- **`source`:** this contract uses `"developer-runtime"` (vs the SDK's `"workflow-telemetry"`). `source` is free-form/unvalidated in core — additive, distinguishes developer traffic.
-- **`sdk_version`:** set **server-side** from the `X-OpenBox-SDK-Version` header — do not put it in the body.
+---
+
+## 6. Client transport notes
+
+Verified against the SDK's `request_signing.py` — the client matches core exactly:
+- **Body:** compact JSON; the **signed bytes must equal the transmitted bytes** (serialize once, send raw). `capBody` truncation happens **before** marshal = before signing.
+- **AIP signature (Ed25519):** canonical string `UPPER(METHOD)\nPATH\nTIMESTAMP\nNONCE\nBODY_SHA256_HEX`; headers `X-OpenBox-Agent-DID/Timestamp/Nonce/Signature`, `X-OpenBox-Body-SHA256`, `Authorization: Bearer <obx_>`, `X-OpenBox-SDK-Version`.
+- **`sdk_version`:** set server-side from the header — not in the body.
+
+---
+
+## 7. Live E2E verification (dashboard pairing + INV re-check)
+
+The unified shape's user-visible payoff is the dashboard fix. This section records the live E2E: boot the shared stack (RUNBOOK Path A: infra + Temporal + openbox-core + workers + openbox-fe dashboard), run a real Claude Code session (`SessionStarted` → file/shell/mcp `ToolCall`+`ToolResult` → `PromptSubmitted` → `SessionEnded`), and confirm on the dashboard timeline:
+
+1. **Pairing:** a tool call renders as one paired started/completed row (not `Unknown`), fixing `dashboard-devruntime-display-gaps`. **Open risk to confirm:** the dashboard pairs by `event_type` — our shape emits **two `ActivityStarted`** events (paired by `span_id`), not `ActivityStarted`+`ActivityCompleted`; verify the timeline pairs on `span_id`/`activity_id` and not on the `Started`/`Completed` type suffix. If it pairs only by type suffix, that is a dashboard-side follow-up, not a wire defect.
+2. **Semantic type:** file spans classify (`file_*`); shell/mcp classify first-class **once E7-S2 is live** (else shell→`internal`).
+3. **INV re-check on the wire shape:** INV-2 (0 bodies stored, metadata-only), INV-1 (no secrets), INV-3/3b (enforce local, observe never blocks), INV-8 (stock core, no accept-list).
+
+_Status: see the E7-S6 ledger entry / result artifact for the run evidence._
