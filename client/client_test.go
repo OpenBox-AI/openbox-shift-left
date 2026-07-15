@@ -140,14 +140,21 @@ func TestEmit_HappyPath_SignedAndParsed(t *testing.T) {
 		t.Fatalf("payloads = %d, want 1", len(*payloads))
 	}
 	p := (*payloads)[0]
-	if p.Source != source || p.EventType != "ToolCall" || p.RunID != "sess-1" {
+	// E7-S4: a ToolCall serializes as an ActivityStarted hook (NOT event_type
+	// "ToolCall") — the base SDK's flat hook wire shape.
+	if p.Source != source || p.EventType != "ActivityStarted" || p.RunID != "sess-1" {
 		t.Errorf("envelope mismap: %+v", p)
 	}
 	if p.WorkflowID != testDID {
 		t.Errorf("workflow_id = %q, want DID fallback %q", p.WorkflowID, testDID)
 	}
-	if p.SpanCount != 1 || len(p.Spans) != 1 || p.Spans[0].SemanticType != "file_write" {
-		t.Errorf("span mismap: %+v", p.Spans)
+	// One flat span, stage=started, Core-classifiable file name + path; the client
+	// no longer sends semantic_type (Core computes it).
+	if p.SpanCount != 1 || len(p.Spans) != 1 {
+		t.Fatalf("span mismap: %+v", p.Spans)
+	}
+	if s := p.Spans[0]; s.Stage != "started" || s.Name != "file.write" || s.SemanticType != "" {
+		t.Errorf("hook span mismap: %+v", s)
 	}
 }
 

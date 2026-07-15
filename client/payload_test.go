@@ -122,6 +122,11 @@ func TestBuildPayload_TokensAndCostToMetadata(t *testing.T) {
 	}
 }
 
+// TestBuildPayload_SpanTransportFieldsFilled checks the transport fields the
+// client fills on a tool span. Post-E7-S4 this exercises the flat HOOK path; it
+// decodes into the legacy spanData struct because the span_id/trace_id/name/
+// start/end/bytes_read field names overlap the flat span, so the assertions are
+// non-vacuous. The full flat-hook shape is covered by payload_hook_test.go.
 func TestBuildPayload_SpanTransportFieldsFilled(t *testing.T) {
 	br := 2048
 	ev := DevEvent{
@@ -159,6 +164,10 @@ func TestBuildPayload_SpanTransportFieldsFilled(t *testing.T) {
 	}
 }
 
+// TestBuildPayload_MCPSpanClassificationAttribute checks the mcp classifier
+// attribute on a tool span. Post-E7-S4 this exercises the flat HOOK path (decoded
+// via the overlapping legacy spanData struct); the full mcp family shape is
+// covered by TestHookPayload_MCPClassificationFields.
 func TestBuildPayload_MCPSpanClassificationAttribute(t *testing.T) {
 	ev := DevEvent{
 		EventID: "e1", EventType: EventToolCall, SessionID: "s", DeveloperDID: "did:aip:x",
@@ -174,8 +183,11 @@ func TestBuildPayload_MCPSpanClassificationAttribute(t *testing.T) {
 	if s.Name != "mcp__x__y" {
 		t.Errorf("mcp span name = %q, want tool name", s.Name)
 	}
-	if s.FuncName == nil || *s.FuncName != "y" {
-		t.Errorf(`function tag mismap: %v`, s.FuncName)
+	// E7-S4: the mcp tool rides as attributes["mcp.tool"] (+ root mcp_tool), not the
+	// function-family "function" field — the flat hook model carries mcp identifiers
+	// under the mcp family, verified by the hook conformance tests (payload_hook_test.go).
+	if s.Attributes["mcp.tool"] != "y" {
+		t.Errorf(`attributes["mcp.tool"] = %v, want y`, s.Attributes["mcp.tool"])
 	}
 }
 
