@@ -4,6 +4,7 @@
 **Author:** John (Solution Architect) — 2026-07-07
 **Sources:** `.fab7/sdlc/design/prd.md`, `.fab7/sdlc/discovery/brief.md`, `.fab7/sdlc/discovery/spikes/S1-dev-runtime-surfaces.md`; code-graph evidence over `openbox-backend`, `openbox-core`, `openbox-temporal-sdk-python`.
 **Scope:** Phase 1 observe-first only. Enforcement (Phase 2) is designed-for, not built.
+> **SUPERSEDED for status (2026-07-15):** enforcement is now BUILT — **Epic E6 (S1–S11)** shipped the enforce path (opt-in) and **Epic E7 (S0–S8)** unified dev telemetry onto the base SDK wire model. This doc's "designed-for, not built" reflects its original Phase-1 authoring; live status is the ledger + `CLAUDE.md`. §"invariants" (INV-2/INV-3b) and ADRs 0002–0005 carry the enforcement design that shipped.
 
 > **Guiding principle (from the sponsor):** *Maximal reuse of existing OpenBox components. Shift-left governs the developer's agentic CLI/IDE with the **same philosophy and the same machinery** the OpenBox SDK uses to govern an agent's runtime.* The shift-left adapter is to Claude Code/Cursor what `create_openbox_worker()` is to a Temporal worker. **No new governance pipeline is built — the developer runtime is onboarded onto the existing one.**
 

@@ -4,6 +4,7 @@
 **Author:** Paul (Product Manager) — 2026-07-07
 **Sources:** `.fab7/sdlc/discovery/brief.md`, `.fab7/sdlc/discovery/spikes/S1-dev-runtime-surfaces.md`, `docs/diagram/{openbox,shift-left,diagram}.png`
 **Phase scope:** Phase 1 (observe-first). Enforcement is Phase 2, explicitly out of scope here.
+> **SUPERSEDED for status (2026-07-15):** this PRD's Phase-1 scoping is its historical framing. **Phase 2 enforcement (Epic E6, S1–S11) and E7 SDK wire-unification (S0–S8) have since SHIPPED** (opt-in enforce). Live status is the ledger `.fab7/sdlc/status.yaml` + `CLAUDE.md`; this doc is kept for design context, not current scope.
 
 ---
 

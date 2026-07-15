@@ -25,7 +25,7 @@ The architecture is **provider-agnostic at the core, provider-specific only at t
 
 Developers onboard through a single front door — `openbox dev init --provider <tool>` — after which governance is **ambient** (no new day-to-day UI); admins use the existing OpenBox dashboard.
 
-### Phase 1 (current): observe-first
+### Status: observe-first shipped; enforcement (Phase 2) shipped as opt-in
 
 **Content capture is ON by default** (as of 2026-07-15): a session's **prompt** text is captured onto the emitted event and egressed so governance can act on it. **Opt out** with `content_capture:false` in `~/.config/openbox/dev.json`, or `OPENBOX_CONTENT_CAPTURE=0` — which restores the **metadata-only** projection (tokens, cost, tool/MCP names, session/commit ids, model, decisions).
 

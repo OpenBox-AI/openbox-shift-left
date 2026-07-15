@@ -1358,3 +1358,85 @@ stories:
       last_run_id: null
       status_reason: "DONE 2026-07-15 (brian G3 sign-off by directing the commit + Sam G_SEC APPROVE; committed to main 812feba, build + ledger together, no push, no signature per convention). Tier-1 local secret/entropy detection + redact-and-continue makes the E6-S4 updatedInput seam LIVE with the first real, LOCAL redaction source, and closes the E6-S4/S7 carry-forward (constrain updatedInput to content-only fields). DESIGN: sidecar-policy-sync.md sec7 (verdict tiering, brian 2026-07-14) + OD-SYNC-10 (secret detection on-by-default, local-only, decoupled from content-capture-for-egress). CROSS-REPO RECON (Explore): secret detection is genuinely NET-NEW (no openbox detector to mirror); the reference SDK confirms a per-arg PARTIAL PATCH redaction shape (validates content-field reconstruction over full-object replacement); OpenBox redaction precedent is typed placeholder / *xlen mask, NO env-var-ref (design sec7 deliberately ratified env-var-ref as the right nudge for a SECRET). TWO DESIGN CRUXES: (1) content-field RECONSTRUCTION (not full-object) -> the adapter sources structural fields from the ORIGINAL and swaps only the content field, making content-only a STRUCTURAL guarantee; (2) on-by-default + egress-DECOUPLED (body -> local socket only; INV-2 is egress-only). Detector: named high-confidence patterns + assignment-gated conservative entropy fallback (excludes hex/UUID/git-SHA; blob-safe). BOTH INDEPENDENT REVIEWS RAN: G3 (review_auditor) REVISE (Finding 1 MEDIUM + Finding 2 MINOR) -> BOTH FIXED + re-validated; G_SEC (Sam) APPROVE (LOW-1=Finding1 + INFO-1/INFO-2 all FIXED). adapter/sidecar/cli build/vet/test -race GREEN (conformance C1-C11) + live E2E vs real openbox + sidecar serve (normal redaction, Finding-1 degenerate, Finding-2 blob, opt-out, no-egress) all PASS. NOTED FOLLOW-UPS (out of scope): MultiEdit edits[].new_string[] under-capture (INV-2-safe); larger-body scanning past maxRedactBody/1MiB (fail-open miss); a redaction-capable GUARDRAIL evaluator ([EXT-guardrail-redaction], still the other RedactedContent producer). This is the first tiering follow-on from sidecar-policy-sync.md sec7/sec8 (E6-S8 rego evaluator/policy sync + E6-S10 Tier-2 sync-evaluate + E6-S11 findings loop remain unsliced). Story: STORY-E6-S9.md; memory e6-s9-secret-redaction."
       blocked_reason: null
+  STORY-E6-S6:
+    title: "REQUIRE_APPROVAL -> Claude Code `ask` (interactive local HITL reason + content-free audit refinement)"
+    status: "done"   # reconciled into the ledger 2026-07-15 (retro E6-E7 discrepancy: built/reviewed/committed but ledger entry was missing)
+    epic: "E6"
+    sprint: null
+    priority: "P1"
+    dependencies:
+      - "STORY-E6-S2"
+    blocked_by: []
+    write_scope:
+      - "adapters/claude-code/enforce.go  # approvalReason(e) content-free ask reason (policy reason + policy_id + approval_id); mapVerdict REQUIRE_APPROVAL branch; enforcementRecord.ApprovalID"
+      - "adapters/claude-code/enforce_test.go"
+    validation_commands:
+      - "cd adapters/claude-code && go build ./... && go vet ./... && go test -race ./...  # GREEN"
+      - "LIVE E2E: MCP tool -> ask w/ content-free reason; rm -rf -> deny unchanged; echo -> proceed; enforce-off -> nothing; audit content-free"
+    invariants:
+      - "INV-2: ask reason surfaces only server correlation ids (policy_id/approval_id) + policy reason text, never tool content."
+      - "Tighten-only: emitted permissionDecision is exactly 'ask'; the rest of the cascade byte-for-byte unchanged."
+    gates:
+      G3_REVIEW: {decision: "approve", decided_by: "brian", decided_at: "2026-07-14T00:00:00Z"}
+      G_SEC: {decision: "approve", decided_by: "Sam (security_reviewer)", decided_at: "2026-07-14T00:00:00Z"}
+    audit:
+      commit: "65edafb"
+      completed_at: "2026-07-14T00:00:00Z"
+      validation_artifact: ".fab7/sdlc/assignments/build-story-E6-S6-20260714.result.yaml"
+      last_run_id: null
+      status_reason: "DONE (brian G3 + Sam G_SEC APPROVE; committed 65edafb + pushed). The REQUIRE_APPROVAL->ask mapping already shipped in E6-S2; E6-S6 is the faithful HITL reason+audit refinement: CC's `ask` IS the interactive local prompt (OD-HITL rejects the SDK's server-side poll/expiry/retry), so the hook's only lever is a content-free reason (policy reason + policy_id + approval_id, the one approval-specific evaluate field). approval_id also added to enforcements.jsonl (omitempty; a local bundle mints none). No server polling, no new config/sidecar/core surface. Reconciled into the ledger 2026-07-15 during the E6-E7 retro (was built/reviewed/committed but the ledger entry was missing)."
+      blocked_reason: null
+  STORY-E6-S10:
+    title: "Tier-2: synchronous /evaluate escalation for high-risk tool classes (Bash/MCP)"
+    status: "done"   # reconciled into the ledger 2026-07-15 (retro E6-E7 discrepancy)
+    epic: "E6"
+    sprint: null
+    priority: "P1"
+    dependencies:
+      - "STORY-E6-S1"
+      - "STORY-E6-S2"
+    blocked_by: []
+    write_scope:
+      - "adapters/claude-code/  # Tier-2 escalation: on a high-risk class, synchronously call core /evaluate within an in-binary timeout, fold the richer verdict into the enforce decision"
+    validation_commands:
+      - "cd adapters/claude-code && go build ./... && go vet ./... && go test -race ./...  # GREEN"
+      - "cd sidecar && go test -race ./...  # GREEN ; cd cli && go test ./...  # GREEN"
+    invariants:
+      - "INV-3b: the Tier-2 sync call is bounded by an in-binary timeout and fails open; the whole hook stays under CC's 5s kill."
+      - "INV-2: content escalation gated by content posture; metadata classes only otherwise."
+    gates:
+      G3_REVIEW: {decision: "approve", decided_by: "brian", decided_at: "2026-07-15T00:00:00Z"}
+      G_SEC: {decision: "approve", decided_by: "Sam (security_reviewer)", decided_at: "2026-07-15T00:00:00Z"}
+    audit:
+      commit: "fc11bfb"
+      completed_at: "2026-07-15T00:00:00Z"
+      validation_artifact: ".fab7/sdlc/assignments/build-story-E6-S10-20260715.result.yaml"
+      last_run_id: null
+      status_reason: "DONE (brian G3 + Sam G_SEC APPROVE; committed fc11bfb). Tier-2 synchronous /evaluate escalation for high-risk tool classes (Bash/MCP): when the local Tier-1 sidecar decision warrants it, the enforce gate synchronously consults core /evaluate for the richer verdict, bounded by an in-binary timeout, fail-open. Surfaced OD-SYNC-11/12 (latency budget + which classes escalate). Reconciled into the ledger 2026-07-15 during the E6-E7 retro."
+      blocked_reason: null
+  STORY-E6-S11:
+    title: "Tier-3: surface async guardrail/drift findings back into the Claude Code session"
+    status: "done"   # reconciled into the ledger 2026-07-15 (retro E6-E7 discrepancy)
+    epic: "E6"
+    sprint: null
+    priority: "P1"
+    dependencies:
+      - "STORY-SL-9"
+    blocked_by: []
+    write_scope:
+      - "adapters/claude-code/  # tail advisories.jsonl and inject async guardrail/drift findings into the session via UserPromptSubmit/PostToolUse (CC discards SessionEnd stdout)"
+    validation_commands:
+      - "cd adapters/claude-code && go build ./... && go vet ./... && go test -race ./...  # GREEN"
+    invariants:
+      - "INV-3: injection is best-effort, off the hot path, never blocks; findings are content-free category signals."
+      - "Reuse-not-rebuild: consumes the existing advisories.jsonl sink (SL-9), no new egress."
+    gates:
+      G3_REVIEW: {decision: "approve", decided_by: "brian", decided_at: "2026-07-15T00:00:00Z"}
+      G_SEC: {decision: "approve", decided_by: "Sam (security_reviewer)", decided_at: "2026-07-15T00:00:00Z"}
+    audit:
+      commit: "a2d3e65"
+      completed_at: "2026-07-15T00:00:00Z"
+      validation_artifact: ".fab7/sdlc/assignments/build-story-E6-S11-20260715.result.yaml"
+      last_run_id: null
+      status_reason: "DONE (brian G3 + Sam G_SEC APPROVE; committed a2d3e65, no push/signature). Tier-3 findings loop: surface asynchronous guardrail/drift findings into the live CC session by tailing the advisories.jsonl sink (reuse-not-rebuild). CC discards SessionEnd hook output, so findings are injected via UserPromptSubmit/PostToolUse instead. Reconciled into the ledger 2026-07-15 during the E6-E7 retro."
+      blocked_reason: null

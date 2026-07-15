@@ -38,4 +38,11 @@ Provider-agnostic core + one thin adapter per tool (SPI: `register` / `emit` / `
 
 ## Status / next step
 
-Design is readiness-checked and ready to plan. Next: slice epics **E1 → E2 → E3** into worker-ready stories (E5 Codex / E4 Cursor fast-follow; E6 Phase-2 enforcement blocked on spike S2).
+**Phase-1 (observe) + Phase-2 (enforce) + SDK-unification are SHIPPED** (as of 2026-07-15, all committed to `main`; sibling `openbox-core` work on branch `feat/ext-core-dev-runtime-event-types`):
+- **Phase-1** SL-1…SL-16 (+ WIRE/FILEBACKEND) — observe-first, dev-init onboarding, commit→deploy lineage, Advisory tier — DONE.
+- **E6 enforcement** (S1–S11) — local sidecar decision daemon, obtain→apply verdict cascade, fail-open/closed policy, redaction apply, REQUIRE_APPROVAL→ask, conformance, native policy evaluator + bundle sync (ADR-0005), Tier-1 secret redaction, Tier-2 sync escalation, Tier-3 findings loop. Enforce is **opt-in** (`OPENBOX_ENFORCE=1`; default observe). Spike S2 / OD6 / OD9 resolved; ADR-0002/0003 (INV-3b carve-out, sidecar module).
+- **E7 SDK unification** (S0–S8) — dev telemetry re-expressed onto the base SDK (`openbox_core`) Activity/hook + flat `SpanData` wire model; core classifier extended; EXT-core accept-list retired. Per **ADR-0004** (amended for the pivot): the base-SDK `shell`/`mcp`/`tool` hook types are carried as a **Go mirror** in shift-left (`client/hookspan.go`) because upstreaming to `openbox-sdk-python` is push-blocked.
+
+**Next:** SL-7 (Codex) / SL-8 (Cursor) adapters (deferred fast-follows — the next feature increment). Open follow-ups: open the `openbox-core` PR; upstream the `shell`/`mcp`/`tool` hook types to `openbox-sdk-python` (needs push access) to complete true unification and retire the Go mirror; full server-side Guardrail redaction (`[EXT-guardrail-redaction]`) for the content-ON posture. See `.fab7/sdlc/retros/E6-E7.md` and the ledger `.fab7/sdlc/status.yaml`.
+
+> **Doc note:** the design docs (`prd.md`, `architecture.md`) scope themselves to "Phase 1 observe-first"; that is their **historical** framing — Phase-2/E6/E7 shipped later (dated supersessions recorded inline, e.g. INV-2/OD4/NFR-1). Treat the ledger + this section as the live status.
