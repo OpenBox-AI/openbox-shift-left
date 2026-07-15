@@ -204,6 +204,22 @@ func RunHook(sub string, stdin io.Reader, stdout io.Writer, logger *log.Logger) 
 		recordEnforcement(logger, ev, dec, applied)
 	}
 
+	// STORY-E6-S11 (Tier-3 findings loop): surface governance findings recorded on the
+	// flush path (the SL-9 advisories.jsonl sink) back INTO the session as a
+	// content-free summary — on UserPromptSubmit (turn-start, the delivered form of the
+	// design's "SessionEnd summary", since CC discards SessionEnd output) and
+	// PostToolUse (near-real-time). Gated behind ResolveFindings (default OFF): with it
+	// off this is inert and both hooks write NOTHING (byte-identical to Phase-1). It
+	// emits ONLY additionalContext (→ model) + systemMessage (→ user), never a blocking
+	// field, so it can never block a tool call (INV-3); it surfaces only categories/
+	// counts, never content (INV-2); and PostToolUse is stat-guarded (NFR-2). Orthogonal
+	// to enforce — findings are advisory feedback in both observe and enforce sessions.
+	if hook == HookPostToolUse || hook == HookUserPromptSubmit {
+		if ResolveFindings() {
+			surfaceFindings(hook, stdout, logger)
+		}
+	}
+
 	// Opt-in ambient install (STORY-SL-5 wiring): make governance ambient by
 	// installing the commit-trailer hook into the repo this session opened.
 	if hook == HookSessionStart {

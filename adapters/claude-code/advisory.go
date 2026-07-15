@@ -42,7 +42,13 @@ type advisoryRecord struct {
 	RiskScore        float64                  `json:"risk_score,omitempty"`
 	Constraints      []map[string]any         `json:"constraints,omitempty"`
 	GuardrailReasons []client.GuardrailReason `json:"guardrail_reasons,omitempty"`
-	Timestamp        string                   `json:"ts,omitempty"`
+	// DriftDetected / DriftViolations are the CONTENT-FREE goal-drift signals
+	// (STORY-E6-S11): whether the AGE classifier saw goal drift and how many
+	// behavioral violations — a boolean + a count, never the violation free text
+	// (INV-2). Sourced from client.Evaluation.Drift (age_result).
+	DriftDetected   bool `json:"drift_detected,omitempty"`
+	DriftViolations int  `json:"drift_violations,omitempty"`
+	Timestamp       string `json:"ts,omitempty"`
 }
 
 // DefaultAdvisoryPath is where advisory records are written when no explicit
@@ -81,6 +87,10 @@ func (a *Advisory) Record(ev client.DevEvent, eval client.Evaluation) {
 	}
 	if eval.Guardrail != nil {
 		rec.GuardrailReasons = eval.Guardrail.Reasons
+	}
+	if eval.Drift.Detected() {
+		rec.DriftDetected = true
+		rec.DriftViolations = eval.Drift.ViolationsCount
 	}
 	a.write(rec)
 	a.summary(rec)
@@ -128,9 +138,10 @@ func (a *Advisory) summary(rec advisoryRecord) {
 	if verdict == "" {
 		verdict = string(client.VerdictUnknown)
 	}
-	a.logf("advisory recorded: event=%s type=%s verdict=%s would_block=%t risk=%.2f trust_tier=%s guardrails=%s constraints=%d",
+	a.logf("advisory recorded: event=%s type=%s verdict=%s would_block=%t risk=%.2f trust_tier=%s guardrails=%s constraints=%d drift=%t violations=%d",
 		rec.EventID, rec.EventType, verdict, rec.WouldBlock, rec.RiskScore,
-		orDash(rec.TrustTier), reasonTypes(rec.GuardrailReasons), len(rec.Constraints))
+		orDash(rec.TrustTier), reasonTypes(rec.GuardrailReasons), len(rec.Constraints),
+		rec.DriftDetected, rec.DriftViolations)
 }
 
 func (a *Advisory) logf(format string, args ...any) {

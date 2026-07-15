@@ -121,6 +121,62 @@ func TestParseEvaluation_GuardrailAbsentDefaultsPassed(t *testing.T) {
 	}
 }
 
+// TestParseEvaluation_Drift parses core's age_result into the CONTENT-FREE
+// DriftResult (STORY-E6-S11): only the boolean/count signals, never the free-text
+// reason / final_trust_score / span_results detail.
+func TestParseEvaluation_Drift(t *testing.T) {
+	body := []byte(`{
+		"verdict": "allow",
+		"age_result": {
+			"goal_alignment_checked": true,
+			"goal_drifted": true,
+			"violations_count": 2,
+			"reason": "SECRET-DRIFT-DETAIL-SHOULD-NOT-BE-PARSED",
+			"final_trust_score": {"trust_tier": "low"},
+			"span_results": [{"behavioral_result": "SHOULD-NOT-BE-PARSED"}]
+		}
+	}`)
+	e := parseEvaluation(body)
+	if e.Drift == nil {
+		t.Fatal("drift = nil, want present")
+	}
+	if !e.Drift.GoalDrifted || !e.Drift.GoalAlignmentChecked || e.Drift.ViolationsCount != 2 {
+		t.Errorf("drift signals mismapped: %+v", e.Drift)
+	}
+	// INV-2: DriftResult has NO free-text field, so the "SHOULD-NOT-BE-PARSED" detail
+	// is structurally undecodable (proven by the type + this parse succeeding without it).
+	// A drift-only ALLOW is advisory (the "surface a finding without blocking" case).
+	if !e.IsAdvisory() {
+		t.Error("ALLOW with goal drift should be advisory")
+	}
+}
+
+// TestParseEvaluation_DriftAbsent: no age_result → nil Drift, byte-identical parse.
+func TestParseEvaluation_DriftAbsent(t *testing.T) {
+	e := parseEvaluation([]byte(`{"verdict":"allow"}`))
+	if e.Drift != nil {
+		t.Errorf("drift = %+v, want nil when age_result absent", e.Drift)
+	}
+	if e.Drift.Detected() {
+		t.Error("nil drift must report Detected()=false")
+	}
+	if e.IsAdvisory() {
+		t.Error("plain ALLOW with no signals should not be advisory")
+	}
+}
+
+// TestDriftDetected_NotCheckedIsNotAFinding: goal_drifted with the classifier NOT
+// run is not a real finding (the signal is meaningless).
+func TestDriftDetected_NotCheckedIsNotAFinding(t *testing.T) {
+	d := &DriftResult{GoalDrifted: true, GoalAlignmentChecked: false, ViolationsCount: 3}
+	if d.Detected() {
+		t.Error("goal_drifted without goal_alignment_checked must not be Detected()")
+	}
+	if (Evaluation{Verdict: VerdictAllow, Drift: d}).IsAdvisory() {
+		t.Error("unchecked drift must not make an ALLOW advisory")
+	}
+}
+
 // TestParseEvaluation_TrustTierInt proves the ambiguous trust_tier wire type: an
 // integer tier renders to a plain string (no ".0") without erroring.
 func TestParseEvaluation_TrustTierInt(t *testing.T) {

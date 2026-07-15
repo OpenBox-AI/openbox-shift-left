@@ -74,6 +74,33 @@ type GuardrailResult struct {
 	Reasons []GuardrailReason
 }
 
+// DriftResult is the CONTENT-FREE subset of core's age_result (AGE = behavior and
+// goal-alignment; the LLamaFirewall goal-drift / behavioral checks) — STORY-E6-S11.
+// Core computes goal-drift INLINE in /evaluate and returns it under `age_result`
+// (openbox-core content/governance.go AGEResult); the top-level `behavioral_violations`
+// the reference SDK models is NEVER populated by core (recon 2026-07-15) — drift
+// lives here. Only the boolean/count SIGNALS are parsed: the free-text `reason`,
+// `final_trust_score`, and per-span `span_results` detail are DELIBERATELY DROPPED
+// (they can describe content — the SAME INV-2 discipline GuardrailResult applies to
+// redacted_input/raw_logs). A drift finding is thus surfaced as "goal drift detected,
+// N violations", never the substance of the drift.
+type DriftResult struct {
+	// GoalDrifted mirrors age_result.goal_drifted — goal misalignment detected.
+	GoalDrifted bool
+	// GoalAlignmentChecked mirrors age_result.goal_alignment_checked — whether the
+	// alignment classifier actually ran (false ⇒ the drift signal is not meaningful).
+	GoalAlignmentChecked bool
+	// ViolationsCount mirrors age_result.violations_count — the number of behavioral
+	// violations, a COUNT only (never the violation strings, which are free text).
+	ViolationsCount int
+}
+
+// Detected reports whether this drift result carries a real finding worth
+// surfacing: the classifier ran AND it saw drift or a behavioral violation.
+func (d *DriftResult) Detected() bool {
+	return d != nil && d.GoalAlignmentChecked && (d.GoalDrifted || d.ViolationsCount > 0)
+}
+
 // Evaluation is the rich, forward-compatible result of one /evaluate call — the
 // Advisory-tier value (STORY-SL-9): the resolved Verdict plus the sibling
 // signals core returns alongside it (trust/risk/alignment scores, constraints,
@@ -96,6 +123,7 @@ type Evaluation struct {
 	ApprovalID           string
 	GovernanceEventID    string
 	Guardrail            *GuardrailResult // nil when core sends no guardrails_result
+	Drift                *DriftResult     // nil when core sends no age_result (STORY-E6-S11)
 }
 
 // WouldBlock is the Advisory label: whether this verdict WOULD have blocked the
@@ -127,6 +155,13 @@ func (e Evaluation) IsAdvisory() bool {
 	if e.Guardrail != nil && (!e.Guardrail.Passed || len(e.Guardrail.Reasons) > 0) {
 		return true
 	}
+	// STORY-E6-S11: goal-drift / behavioral violations are advisory-worthy even when
+	// the verdict is ALLOW (core can return goal_drifted=true without escalating the
+	// verdict — exactly the "surface a finding without blocking" case the findings
+	// loop exists for). Content-free (a boolean + a count drove this; Detected()).
+	if e.Drift.Detected() {
+		return true
+	}
 	return false
 }
 
@@ -148,6 +183,7 @@ type verdictResponse struct {
 	ApprovalID           string           `json:"approval_id"`
 	GovernanceEventID    string           `json:"governance_event_id"`
 	GuardrailsResult     *guardrailsWire  `json:"guardrails_result"`
+	AGEResult            *ageWire         `json:"age_result"`
 }
 
 // guardrailsWire is the wire shape of guardrails_result. validation_passed is a
@@ -156,6 +192,16 @@ type verdictResponse struct {
 type guardrailsWire struct {
 	ValidationPassed *bool             `json:"validation_passed"`
 	Reasons          []GuardrailReason `json:"reasons"`
+}
+
+// ageWire is the CONTENT-FREE subset of the wire age_result (STORY-E6-S11): only
+// the boolean/count drift signals. The free-text `reason`, `final_trust_score`,
+// and per-span `span_results` fields are intentionally absent here (INV-2), so the
+// decoder scans past them without ever binding drift substance.
+type ageWire struct {
+	GoalAlignmentChecked bool `json:"goal_alignment_checked"`
+	GoalDrifted          bool `json:"goal_drifted"`
+	ViolationsCount      int  `json:"violations_count"`
 }
 
 // resolveVerdict maps the wire `verdict` (preferred) then legacy `action` to the
@@ -206,6 +252,13 @@ func parseEvaluation(body []byte) Evaluation {
 		ev.Guardrail = &GuardrailResult{
 			Passed:  g.ValidationPassed == nil || *g.ValidationPassed, // absent ⇒ passed
 			Reasons: g.Reasons,
+		}
+	}
+	if a := r.AGEResult; a != nil {
+		ev.Drift = &DriftResult{
+			GoalDrifted:          a.GoalDrifted,
+			GoalAlignmentChecked: a.GoalAlignmentChecked,
+			ViolationsCount:      a.ViolationsCount,
 		}
 	}
 	return ev

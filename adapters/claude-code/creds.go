@@ -50,6 +50,8 @@ const (
 	envTier2Timeout    = "OPENBOX_TIER2_TIMEOUT_MS"
 	envSidecarSocket   = "OPENBOX_SIDECAR_SOCKET"
 	envSecretDetection = "OPENBOX_SECRET_DETECTION"
+	envFindings        = "OPENBOX_FINDINGS"
+	envFindingsCursor  = "OPENBOX_FINDINGS_CURSOR"
 	envEnforcementFile = "OPENBOX_ENFORCEMENT_FILE"
 	envAPIKeyDirect    = "OPENBOX_API_KEY"
 	envSeedDirect      = "OPENBOX_ED25519_SEED"
@@ -155,6 +157,19 @@ type DevConfig struct {
 	// governs EGRESS. Set false to disable. OPENBOX_SECRET_DETECTION overrides it.
 	// Only meaningful in enforce mode.
 	SecretDetection *bool `json:"secret_detection,omitempty"`
+	// Findings enables the Tier-3 FINDINGS LOOP (STORY-E6-S11, design §7 T3): surface
+	// async governance findings (guardrail categories, goal-drift, risk, would-block)
+	// recorded on the flush path (the SL-9 advisories.jsonl sink) back INTO the session
+	// as a content-free summary — on UserPromptSubmit + PostToolUse via
+	// hookSpecificOutput.additionalContext (→ model) + systemMessage (→ user). It is a
+	// *bool so an ABSENT field means the DEFAULT (OFF): findings is opt-in because it is
+	// the FIRST time the observe path writes to a hook's stdout, so it must be chosen
+	// explicitly; with it off, UserPromptSubmit/PostToolUse write NOTHING (byte-identical
+	// to Phase-1). It NEVER blocks (only additionalContext/systemMessage, no decision —
+	// INV-3) and surfaces only CATEGORIES/COUNTS, never content (INV-2). Orthogonal to
+	// enforce — the findings loop is advisory feedback in BOTH observe and enforce
+	// sessions. Set true (config `findings:true` or OPENBOX_FINDINGS). Env overrides.
+	Findings *bool `json:"findings,omitempty"`
 	// AgentID is the backend agent id used to fetch this agent's current policy
 	// (STORY-E6-S8, ADR-0005): `openbox dev sync` and the session-start staleness
 	// check read it to call GET /agent/<id>/policies/current. Non-secret (INV-1),
@@ -352,6 +367,40 @@ func ResolveSecretDetection() bool {
 		enabled = isTruthy(v)
 	}
 	return enabled
+}
+
+// ResolveFindings reports whether the Tier-3 findings loop is on (STORY-E6-S11):
+// config `findings` (*bool) first, then the OPENBOX_FINDINGS env override (env wins).
+// DEFAULT FALSE — opt-in, because it is the first observe-path stdout writer: with it
+// unset, UserPromptSubmit/PostToolUse write NOTHING and the surface path is
+// byte-identical to Phase-1. A missing/unreadable config leaves it OFF (fail-safe — a
+// surface that injects into the model/user context never turns itself on by accident).
+// Cheap config+env read, no secret I/O; safe on the PostToolUse hot path. Independent
+// of enforce (advisory feedback works in observe and enforce sessions alike).
+func ResolveFindings() bool {
+	enabled := false
+	if cfg, err := loadDevConfig(DefaultConfigPath()); err == nil && cfg.Findings != nil {
+		enabled = *cfg.Findings
+	}
+	if v, ok := os.LookupEnv(envFindings); ok {
+		enabled = isTruthy(v)
+	}
+	return enabled
+}
+
+// ResolveFindingsCursor resolves the path of the findings-loop cursor state file
+// (STORY-E6-S11): the OPENBOX_FINDINGS_CURSOR env override, else a fixed file next to
+// the advisory sink under the user config dir. It stores only a byte offset into
+// advisories.jsonl (structural, content-free — INV-2). No secret I/O.
+func ResolveFindingsCursor() string {
+	if p := os.Getenv(envFindingsCursor); p != "" {
+		return p
+	}
+	dir, err := os.UserConfigDir()
+	if err != nil || dir == "" {
+		dir = filepath.Join(os.Getenv("HOME"), ".config")
+	}
+	return filepath.Join(dir, "openbox", "findings.cursor")
 }
 
 // ResolveEnforce reports whether the developer runtime is in ENFORCE mode
