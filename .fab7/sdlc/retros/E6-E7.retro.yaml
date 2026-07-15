@@ -1,0 +1,235 @@
+scope: "E6-E7"
+type: "epic"
+generated_at: "2026-07-15T14:45:00Z"
+generated_by: "lena (learning-scribe)"
+source_of_truth: ".fab7/sdlc/status.yaml (ledger) cross-checked against per-story assignments + git log + memory"
+
+summary: >
+  Two completed epics. E6 (Phase-2 enforcement) delivered the full local-sidecar
+  enforce path: decision daemon (S5), obtain->apply verdict cascade (S1/S2),
+  fail-open/closed failure policy (S3), guardrail redaction-apply seam (S4),
+  REQUIRE_APPROVAL->CC ask (S6), conformance suite + the INFO-1 unbundled
+  fail-closed fix (S7), native pure-Go policy evaluator + bundle sync (S8),
+  Tier-1 local secret redaction (S9), Tier-2 sync escalation (S10), Tier-3
+  findings loop (S11). E7 (SDK wire-model unification) re-expressed dev telemetry
+  onto the base openbox_core Activity/hook + flat SpanData wire model: live spike
+  (S0), Go hook-contract mirror (S1), core classifier + EXT-core retirement (S2),
+  spanbuilder (S3), ToolCall/Result->ActivityStarted hook (S4), lifecycle->
+  Workflow*/Signal (S5), doc unification (S6), dashboard payload (S7), tool-call
+  duration (S8). Every enforce story carried dual independent gates (G3 + G_SEC).
+
+completed:
+  # E6 — ledger entries present, status done, gates approved, backing artifacts on disk
+  - id: "STORY-E6-S5"
+    what: "Local decision sidecar daemon (openbox sidecar serve), Unix-socket, fail-open ~50ms, no network on decision path (INV-3b)"
+    evidence: "ledger done; G3 approve (brian) + G_SEC approve (Sam); committed 0d4c30e; assignments/build-story-E6-S5-20260713.result.yaml"
+  - id: "STORY-E6-S1"
+    what: "Enforce-mode synchronous PreToolUse gate — obtain the verdict (writes nothing to stdout; INV-3 verbatim)"
+    evidence: "ledger done; G3 approve (brian) + G_SEC approve (Sam); committed 268fbfb; assignments/build-story-E6-S1-20260714.result.yaml"
+  - id: "STORY-E6-S2"
+    what: "apply(verdict): enforce_verdict cascade -> CC deny/ask, tighten-only, content-free enforcements.jsonl audit"
+    evidence: "ledger done; G3 approve (brian) + G_SEC approve (Sam); committed ccb7e93; assignments/build-story-E6-S2-20260714.result.yaml"
+  - id: "STORY-E6-S3"
+    what: "Enforce failure policy: fail-open default + per-org opt-in fail-closed + clamped 2s timeout under CC's 5s kill"
+    evidence: "ledger done; G3 approve (brian) + G_SEC approve (Sam); committed to main; assignments/build-story-E6-S3-20260714.result.yaml. INFO-1 carried to S7."
+  - id: "STORY-E6-S4"
+    what: "Guardrail redaction-apply leg -> CC updatedInput on PROCEED path; content on LOCAL sidecar.Decision only (INV-2 structural); inert seam [EXT-guardrail-redaction]"
+    evidence: "ledger done; G3 approve (brian) + G_SEC approve (Sam); committed to main; assignments/build-story-E6-S4-20260714.result.yaml"
+  - id: "STORY-E6-S7"
+    what: "Enforcement conformance suite C1-C9 + fix INFO-1 (reachable-but-unbundled sidecar silently ungoverned under fail-closed)"
+    evidence: "ledger done; G3 approve (brian) + G_SEC approve (Sam); committed to main; assignments/build-story-E6-S7-20260714.result.yaml"
+  - id: "STORY-E6-S8"
+    what: "Pure-Go native policy evaluator (no OPA/cgo, reverses embed-rego via ADR-0005) + pull-at-init bundle sync + session-start staleness; closes [EXT-opa-bundle]"
+    evidence: "ledger done; G3 pass (brian) + G_SEC approve (Sam); committed 67029e9; assignments/build-story-E6-S8-20260715.result.yaml; ADR-0005"
+  - id: "STORY-E6-S9"
+    what: "Tier-1 local secret/entropy detection + redact-and-continue; first live source for E6-S4 updatedInput; on-by-default, egress-decoupled"
+    evidence: "ledger done; G3 approve (brian) + G_SEC approve (Sam); committed 812feba; assignments/build-story-E6-S9-20260715.result.yaml"
+  - id: "STORY-E6-S6"
+    what: "REQUIRE_APPROVAL -> CC ask HITL (reason/audit refinement; approval_id opportunistic)"
+    evidence: "NO LEDGER ENTRY (drift). Backing: assignments/build-story-E6-S6-*.result.yaml status done, G3 APPROVE + G_SEC APPROVE (brian sign-off 2026-07-14). See failed_or_blocked discrepancy D1."
+  - id: "STORY-E6-S10"
+    what: "Tier-2 synchronous /evaluate escalation for high-risk classes (Bash/MCP); tighten-only; same failure policy"
+    evidence: "NO LEDGER ENTRY (drift). Backing: assignments/build-story-E6-S10-20260715.result.yaml status done, G3 APPROVE-WITH-MINOR + G_SEC; git fc11bfb. See discrepancy D1."
+  - id: "STORY-E6-S11"
+    what: "Tier-3 findings loop — surface async guardrail/drift findings into CC via UserPromptSubmit/PostToolUse (CC discards SessionEnd output)"
+    evidence: "NO LEDGER ENTRY (drift). Backing: assignments/build-story-E6-S11-20260715.result.yaml status done, G3 APPROVE + G_SEC APPROVE-WITH-CONDITIONS; git a2d3e65. See discrepancy D1."
+  # E7 — ledger entries present, status done, commits recorded
+  - id: "STORY-E7-S0"
+    what: "Spike: verify unified Activity/hook wire shape on live local Core — GO, all ADR-0004 assumptions hold; stock core accepts base wire types (EXT-core accept-list retirable)"
+    evidence: "ledger done; spike run 2026-07-14 Path A; git d0b79f7; spikes/S8-unified-wire-shape.md"
+  - id: "STORY-E7-S1"
+    what: "Shift-left-owned Go MIRROR of base SDK hook-span contract (client/hookspan.go); base openbox-sdk-python NOT edited (pivot); ADR-0004 amended"
+    evidence: "ledger done; G3 approve (brian); G_SEC n/a (contract-definition, no egress sink); committed fd53097; assignments/build-story-E7-S1-20260714.result.yaml"
+  - id: "STORY-E7-S2"
+    what: "openbox-core classifier: shell->shell_command / mcp->mcp_tool_call; retire SL-13 EXT-core accept-list (net simplification)"
+    evidence: "ledger done; G3 approved; G_SEC deferred (advisory); openbox-core commit 99f1c86 (feature branch, pushed)"
+  - id: "STORY-E7-S3"
+    what: "Flat Core SpanData builder (Go, no OTel) producing payloads that pass AssertHookWireShape"
+    evidence: "ledger done; G3 approve (blind review APPROVE-WITH-NITS, 0 must-fix, brian sign-off); committed b4866bb"
+  - id: "STORY-E7-S4"
+    what: "ToolCall/ToolResult -> flat ActivityStarted hook wire mapping (both stages ActivityStarted; shared trace/span/activity ids)"
+    evidence: "ledger done; G3 approve (0 must-fix); G_SEC pass (SEC-1 max_body_size truncation fixed); committed b6bc282"
+  - id: "STORY-E7-S5"
+    what: "Lifecycle -> Workflow*/SignalReceived wire mapping (session=workflow); lineage as metadata pass-through"
+    evidence: "ledger done; G3 approve (0 must-fix/0 should-fix); committed 5abcf11"
+  - id: "STORY-E7-S6"
+    what: "Unify dev-event docs onto base wire model; conformance parity; retire EXT-core artifact"
+    evidence: "ledger done; G3 approved; committed b20b0ba"
+  - id: "STORY-E7-S7"
+    what: "Enrich dev-event payload for dashboard: structural tool activity_input + content-capture-gated prompt signal_args"
+    evidence: "ledger done; G3 approved; G_SEC deferred (advisory); committed e8f552c"
+  - id: "STORY-E7-S8"
+    what: "Tool-call DURATION via cross-process start-time stash + core completed-hook duration_ms update"
+    evidence: "ledger done; G3 approved; G_SEC pass; committed 9483e20 (shift-left) / 60bf08d (openbox-core, pushed)"
+
+failed_or_blocked:
+  - id: "D1"
+    kind: "discrepancy"
+    what: "Ledger drift: E6-S6, E6-S10, E6-S11 are absent from status.yaml even though each was built, dual-reviewed (G3 + G_SEC), brian-signed, and committed (S10=fc11bfb, S11=a2d3e65; S6 committed+pushed) with a build-assignment result artifact on disk. The authoritative ledger fell behind reality."
+    disposition: >
+      NOT a build failure — the stories completed with strong backing evidence
+      (assignments + git). It is a ledger-vs-reality reconciliation gap. Per the
+      retro HALT rule this is a discrepancy to reconcile; because the evidence
+      supports done (rather than being missing), the retro proceeds and routes a
+      reconcile follow-up rather than hard-blocking. Do NOT invent ledger entries
+      here — the reconcile is a status/resume action, run separately.
+    route: "status / resume (orchestrator) — add the 3 missing E6 story entries from their assignment artifacts + commits"
+  - id: "D2"
+    kind: "note"
+    what: "E7-S2 and E7-S7 recorded G_SEC decision: deferred (advisory, not a declared gate for those stories). E7-S1 G_SEC n/a (contract-definition file, no egress sink; the content-gating decision lives in E7-S4 where G_SEC ran and passed)."
+    disposition: "Acceptable — the security-bearing surfaces (E7-S4 emitter content-gating/max_body_size) were G_SEC-reviewed. No open security debt from the deferrals."
+    route: "none"
+
+lessons:
+  - id: "L1"
+    mistake: >
+      A resumed session acted on a working narrative that had diverged from
+      on-disk reality — the repo was far ahead of the mental model. The residue
+      is visible now: the authoritative ledger (status.yaml) is missing E6-S6,
+      E6-S10 and E6-S11 even though all three were built, reviewed, signed and
+      committed. State drifted between the ledger and reality with nothing to
+      catch it.
+    lesson: >
+      The status ledger is authoritative only if it is reconciled against reality
+      before it is trusted. On any resumed run, reconcile the ledger against git
+      log + on-disk assignment/result artifacts BEFORE acting — a story committed
+      with an approved assignment but no ledger entry (or vice versa) is a drift
+      signal that must be closed first, not built on.
+    followup: >
+      Enforce a reconcile guard at resume: the fab7-sdlc `resume` task should diff
+      every done/committed story against its ledger entry (and each ledger entry
+      against a backing assignment + commit), and block build until drift is
+      reconciled. Immediate action: run status/resume to add the 3 missing E6
+      entries from their assignment artifacts + commits. Recurring class ->
+      candidate for tune-skill (a ledger-vs-evidence drift check hardened into the
+      resume/build gate).
+    followup_phase: "build"
+    owner: "orchestrator"
+    routed_to: "resume / status; tune-skill (G_SKILL_EVOLUTION) for the durable guard"
+  - id: "L2"
+    mistake: >
+      E7-S1 was first built by editing the sibling repo openbox-sdk-python
+      (commit c3aa8c7, independently reviewed and signed) before it was
+      discovered that the session SSH key (brianthebox) is DENIED push to
+      OpenBox-AI/openbox-sdk-python. The reviewed work had to be reverted
+      (git reset --hard origin/main) and re-expressed as a shift-left-owned Go
+      mirror (client/hookspan.go), amending ADR-0004. openbox-core, by contrast,
+      is NOT walled (push confirmed 2026-07-15).
+    lesson: >
+      Cross-repo write/push access is uneven and per-repo, and it is a design
+      input, not a deploy detail. Verify push access to each target repo BEFORE
+      building a cross-repo change — a walled repo turns an upstream edit into a
+      locally-carried mirror (with a standing drift risk against the base
+      contract), which is a different design.
+    followup: >
+      Route the upstream shell/mcp/tool hook-types PR to openbox-sdk-python as a
+      HUMAN-OWNED blocker (needs someone with push access; gh is unauthenticated
+      here). Track that the Go mirror in client/hookspan.go WILL drift from the
+      base SDK — the intra-repo TestFamilyRootFieldsMirror guard is the only drift
+      check today; consider a scheduled base-SDK diff. Recorded in open_decisions.
+    followup_phase: "release"
+    owner: "brian"
+    routed_to: "open_decisions (OD-E6E7-PUSH)"
+  - id: "L3"
+    mistake: >
+      Content capture was flipped ON by default (commit e83d925, 2026-07-15),
+      reversing the OD4/INV-2/NFR-1 metadata-only-by-default posture, while the
+      compensating control — server-side Guardrail redaction-at-source
+      [EXT-guardrail-redaction] — is still inert. Net effect: prompt text
+      egresses UNREDACTED on UserPromptSubmit -> SignalReceived (tool commands
+      and file bodies still never egress; E6-S9 Tier-1 detection only covers
+      Write/Edit bodies in enforce mode).
+    lesson: >
+      Flipping a default on a privacy invariant must be paired with either the
+      compensating control live, or an explicit, documented risk-acceptance that
+      keeps the residual gap visible. Here brian accepted it as an org-level
+      opt-OUT posture (2026-07-15) with docs-hardening only (no code) — a valid
+      decision, but the unredacted-egress gap must not silently fade from view.
+    followup: >
+      Full server-side Guardrail redaction ([EXT-guardrail-redaction]) plus an
+      optional local prompt secret-scrub (reuse E6-S9 secretDetector.Redact)
+      remain OPEN and unprioritized. This is a human prioritization/privacy
+      decision, not something to resolve here.
+    followup_phase: "design"
+    owner: "brian"
+    routed_to: "open_decisions (OD-E6E7-REDACT)"
+  - id: "L4"
+    mistake: >
+      Enforcement shipped tested-but-inert seams flagged by external dependency
+      ([EXT-opa-bundle], [EXT-guardrail-redaction]). One such seam hid a real
+      hole: a reachable-but-UNBUNDLED sidecar returned a well-formed reply that
+      the client treated as a real verdict, so a fail-closed org was SILENTLY
+      ungoverned while the daemon was up but unbundled (E6-S3 INFO-1) — a live
+      state because core ships no real bundle yet.
+    lesson: >
+      An inert/flagged seam needs a conformance quadrant for the "seam absent in
+      the field" state, not just the happy path. E6-S7 closed INFO-1 by making
+      Decision.FailOpen mean "no real daemon verdict" and adding conformance case
+      C6 (fail-closed + unbundled DENIES) — a load-bearing test that fails
+      pre-fix. That pattern (assert the inert/degraded state, not only the
+      wired-up one) is what caught it.
+    lesson_polarity: "gate-hardening"
+    followup: >
+      Keep the enforcement conformance suite covering the unbundled/inert/stale
+      quadrants (C6/C8/C9) as [EXT-opa-bundle] and [EXT-guardrail-redaction] land;
+      every future inert seam must add its "seam absent" conformance case before
+      the seam is called done.
+    followup_phase: "review"
+    owner: "orchestrator"
+    routed_to: "review / validate (conformance suite as standing evidence)"
+  - id: "L5"
+    mistake: "none observed"
+    lesson: >
+      What kept E6/E7 clean: (1) cross-repo Explore recon before every build
+      repeatedly caught aspirational assumptions before they shipped — core
+      distributes no OPA bundle (E6-S5), CC discards SessionEnd hook output
+      (E6-S11), the SL-13 EXT-core accept-list is retirable on stock core
+      (E7-S0/S2), CC exposes no session-id to git (SL-5). (2) Every enforce story
+      ran dual independent gates (G3 correctness + G_SEC) with must-fix findings
+      fixed and re-validated before done. Keep both practices.
+    followup: "keep-doing — recon-before-build + dual G3/G_SEC gating on any security/enforcement-touching story"
+    followup_phase: "build"
+    owner: "orchestrator"
+    routed_to: "none (keep-doing)"
+
+open_decisions:
+  - id: "OD-E6E7-PUSH"
+    decision: >
+      Upstream the shell/mcp/tool hook types to OpenBox-AI/openbox-sdk-python to
+      complete true base-SDK unification and retire the shift-left Go mirror's
+      drift risk. Blocked: the session key is denied push to sdk-python; needs
+      someone with access (or brian to grant brianthebox access / push himself).
+    owner: "brian"
+    source_lesson: "L2"
+  - id: "OD-E6E7-REDACT"
+    decision: >
+      Prioritize (or explicitly defer) full server-side Guardrail redaction
+      [EXT-guardrail-redaction] and/or a local prompt secret-scrub, given content
+      capture is ON by default and prompt text egresses unredacted. Current
+      posture: accepted opt-OUT, docs-hardening only, no code (brian 2026-07-15).
+    owner: "brian"
+    source_lesson: "L3"
+
+notes:
+  - "Historical spec text was NOT rewritten (that is doc-sync, run separately). The stale content-capture wording in some docs was already reconciled at e83d925 per memory; any remaining sweep is a doc-sync task."
+  - "This retro's completed list treats E6-S6/S10/S11 as done on assignment+commit evidence; the authoritative fix is to add their ledger entries (D1 / L1), not to trust this retro as the record."

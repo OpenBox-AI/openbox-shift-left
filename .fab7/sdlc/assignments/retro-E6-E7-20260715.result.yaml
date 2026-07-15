@@ -1,0 +1,135 @@
+assignment_id: "retro-E6-E7-20260715"
+role: "learning_scribe"
+persona: "Lena (Learning Scribe)"
+phase: "learn"
+command: "retro"
+scope: "E6-E7 (E6 enforcement S1-S11 + E7 wire-model unification S0-S8)"
+status: "done"
+
+summary: >
+  Retrospective for two completed epics, derived from the status ledger as source
+  of truth and cross-checked against per-story build-assignment artifacts, git log,
+  and session memory. E6 (Phase-2 enforcement) and E7 (SDK wire-model unification)
+  both completed with dual G3+G_SEC gating on every enforce story. Extracted 5
+  lessons (4 substantive + 1 keep-doing), all routed. Surfaced ONE material
+  discrepancy: E6-S6/S10/S11 are absent from the authoritative ledger despite being
+  built, reviewed, signed and committed (with assignment artifacts) — a ledger drift
+  handled as a routed reconcile follow-up (not a hard block, since evidence supports
+  done and hard-blocking would strand a well-evidenced retro). Two human-only items
+  parked in open_decisions. No historical specs rewritten (that is doc-sync).
+
+artifacts:
+  created_or_updated:
+    - ".fab7/sdlc/retros/E6-E7.retro.yaml"      # validator-clean, 5 lessons
+    - ".fab7/sdlc/retros/E6-E7.md"              # human narrative
+    - ".fab7/sdlc/memory/lessons.yaml"          # 5 persisted lessons
+    - ".fab7/sdlc/assignments/retro-E6-E7-20260715.result.yaml"  # this contract
+  proposed_only: []
+
+write_scope_used:
+  - ".fab7/sdlc/retros/"
+  - ".fab7/sdlc/memory/"
+  - ".fab7/sdlc/assignments/"
+
+validation:
+  ran:
+    - "python3 .claude/skills/fab7-sdlc/scripts/validate_artifacts.py --type retro .fab7/sdlc/retros/E6-E7.retro.yaml  # OK, exit 0"
+    - "python3 .claude/skills/fab7-sdlc/scripts/events.py emit --event status:changed --subject retro:E6-E7 ...  # telemetry appended"
+    - "Cross-checked each done story against gates/audit + assignment artifact + git commit"
+  not_run:
+    - "validate_artifacts.py --type ledger  # script requires .claude/skills path; ledger was read + parsed directly, not re-validated structurally this run"
+
+findings:
+  - id: "L1"
+    severity: "high"
+    kind: "lesson"
+    finding: >
+      State drift / reconcile-before-acting. The authoritative ledger is missing
+      E6-S6, E6-S10, E6-S11 though all three were built, dual-reviewed, signed and
+      committed (S10 fc11bfb, S11 a2d3e65; S6 pushed) with assignment artifacts.
+      Lesson: reconcile ledger vs git+assignments before acting on a resumed run.
+    followup: "Enforce a reconcile guard in the resume task (block build on drift); immediate: status/resume to add the 3 entries; recurring -> tune-skill."
+    followup_phase: "build"
+    owner: "orchestrator"
+  - id: "L2"
+    severity: "medium"
+    kind: "lesson"
+    finding: >
+      Uneven cross-repo push access forced the E7-S1 pivot: sdk-python is WALLED
+      (key denied) so the reviewed upstream build (c3aa8c7) was reverted and
+      re-expressed as a shift-left Go mirror (client/hookspan.go), amending
+      ADR-0004; openbox-core is NOT walled (confirmed). Verify push access before
+      building cross-repo work.
+    followup: "Route the upstream hook-types PR to openbox-sdk-python as a human blocker; track mirror drift (only TestFamilyRootFieldsMirror guards it)."
+    followup_phase: "release"
+    owner: "brian"
+  - id: "L3"
+    severity: "medium"
+    kind: "lesson"
+    finding: >
+      Content-capture default flipped ON (e83d925) while redaction-at-source is
+      inert ([EXT-guardrail-redaction]) -> prompt text egresses UNREDACTED on
+      UserPromptSubmit->SignalReceived. Accepted as opt-OUT posture (brian
+      2026-07-15), docs-only. A default flip on a privacy invariant needs the
+      control live or an explicit documented risk-acceptance.
+    followup: "Prioritize/defer full server-side Guardrail redaction + optional local prompt secret-scrub (reuse E6-S9 detector) — human decision."
+    followup_phase: "design"
+    owner: "brian"
+  - id: "L4"
+    severity: "medium"
+    kind: "lesson"
+    finding: >
+      Inert/flagged seams need a "seam absent in the field" conformance quadrant.
+      A reachable-but-unbundled sidecar silently left a fail-closed org ungoverned
+      (E6-S3 INFO-1, a live state); E6-S7 closed it with load-bearing case C6.
+    followup: "Keep conformance covering unbundled/inert/stale quadrants; every future inert seam adds its degraded-state case before done."
+    followup_phase: "review"
+    owner: "orchestrator"
+  - id: "L5"
+    severity: "info"
+    kind: "keep-doing"
+    finding: >
+      Cross-repo Explore recon before every build caught aspirational assumptions
+      (no OPA bundle, CC discards SessionEnd output, EXT-core accept-list
+      retirable, no session-id to git); dual G3/G_SEC gating held on every enforce
+      story. Keep both.
+    followup: "keep-doing"
+    followup_phase: "build"
+    owner: "orchestrator"
+  - id: "D1"
+    severity: "high"
+    kind: "discrepancy"
+    finding: >
+      Ledger drift (see L1): E6-S6/S10/S11 absent from status.yaml despite complete
+      backing evidence. Do NOT invent ledger entries in the retro; reconcile via
+      status/resume separately.
+    followup: "Add the 3 missing E6 story entries from their assignment artifacts + commits."
+    followup_phase: "plan"
+    owner: "orchestrator"
+
+open_decisions:
+  - id: "OD-E6E7-PUSH"
+    decision: "Upstream shell/mcp/tool hook types to openbox-sdk-python (blocked on push access) to retire the Go mirror's drift risk."
+    owner: "brian"
+    elicit: true
+    source_lesson: "L2"
+  - id: "OD-E6E7-REDACT"
+    decision: "Prioritize or explicitly defer server-side Guardrail redaction / local prompt secret-scrub, given content capture is ON by default and prompts egress unredacted."
+    owner: "brian"
+    elicit: true
+    source_lesson: "L3"
+
+handoff:
+  next_phase: "plan"
+  next_action: >
+    Run status/resume (orchestrator) to reconcile the ledger: add STORY-E6-S6,
+    STORY-E6-S10, STORY-E6-S11 from their build-assignment artifacts + commits
+    (fc11bfb / a2d3e65 / pushed). Then consider a tune-skill proposal (L1) to
+    harden the resume gate with a ledger-vs-evidence drift check. Human decisions
+    OD-E6E7-PUSH and OD-E6E7-REDACT await brian. doc-sync (brian will run
+    separately) owns any historical-spec reconciliation. Do NOT commit — brian
+    will commit.
+
+notes:
+  - "Retro type recorded as 'epic' (multi-epic scope). Lessons persisted to .fab7/sdlc/memory/lessons.yaml for route replay."
+  - "No commit performed, per instruction."
