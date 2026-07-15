@@ -14,8 +14,13 @@ Three paths, pick your depth:
   Guardrail, and OPA point at a shared UAT env over VPN**. Fastest inner loop —
   no local Keycloak realm bootstrap, log in as your real UAT identity. Builds on A+B.
 
-> **Phase-1 posture:** observe-only, **metadata-only** (no prompt/command/file
-> content leaves the machine), fail-open (never blocks a tool call or a commit).
+> **Posture:** observe-first + opt-in enforce (Epic E6, `OPENBOX_ENFORCE=1`;
+> default observe, fail-open — never blocks a tool call or a commit). **Content
+> capture is ON by default as of 2026-07-15**: the session **prompt** is captured
+> and egressed **unredacted** (redaction-at-source is inert, `[EXT-guardrail-redaction]`).
+> Opt out with `content_capture:false` in `dev.json` or `OPENBOX_CONTENT_CAPTURE=0`
+> to restore metadata-only. Tool commands, file bodies, and output are **never**
+> egressed on observe regardless (SL3-SEC-3).
 
 ---
 
@@ -339,8 +344,10 @@ printf "{$C,\"hook_event_name\":\"SessionEnd\",\"reason\":\"logout\"}"     | "$B
 # then query governance_events WHERE run_id='$SID'
 ```
 
-Contract checks: the hook must **exit 0 with empty stdout** (observe-only), and no
-prompt/command/file content may appear in any payload (metadata-only, INV-2).
+Contract checks: the hook must **exit 0 with empty stdout** (observe mode), and no
+**command/file/output** content may appear in any payload (SL3-SEC-3, unconditional).
+The **prompt** appears only when content-capture is on (the default as of 2026-07-15);
+set `OPENBOX_CONTENT_CAPTURE=0` for a metadata-only payload (INV-2).
 
 ### 4.4 Commit → deploy lineage reaches core
 

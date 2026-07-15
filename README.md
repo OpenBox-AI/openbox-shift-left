@@ -27,7 +27,11 @@ Developers onboard through a single front door — `openbox dev init --provider 
 
 ### Phase 1 (current): observe-first
 
-Metadata-only by default (tokens, cost, tool/MCP names, session/commit ids, decisions) — content capture is strictly opt-in per org and, when enabled, redacted at-source via the existing Guardrail API. Claude Code is the first adapter; Codex and Cursor are fast-follows. Policy **enforcement** (deny/ask/rewrite, fail-closed) is Phase 2.
+**Content capture is ON by default** (as of 2026-07-15): a session's **prompt** text is captured onto the emitted event and egressed so governance can act on it. **Opt out** with `content_capture:false` in `~/.config/openbox/dev.json`, or `OPENBOX_CONTENT_CAPTURE=0` — which restores the **metadata-only** projection (tokens, cost, tool/MCP names, session/commit ids, model, decisions).
+
+> ⚠️ **Privacy note:** when capture is on, redaction-at-source (the Guardrail API) is **not yet wired** (`[EXT-guardrail-redaction]`), so **prompt content egresses unredacted**. Opt out if that is not acceptable for your org. Regardless of the toggle, tool **commands**, file **bodies**, and tool **output** are **never** egressed on observe events (SL3-SEC-3, asserted by `TestMap_NoContentLeak`) — only the prompt is gated by content-capture.
+
+Claude Code is the first adapter; Codex and Cursor are fast-follows. Policy **enforcement** (deny/ask/rewrite, fail-closed) is built as opt-in Phase-2 (Epic E6; `OPENBOX_ENFORCE=1`, default observe).
 
 ## Provider support
 

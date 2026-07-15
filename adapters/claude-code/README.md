@@ -60,11 +60,18 @@ core reads (file ops → `file.*` name + `file_path`; MCP → `mcp.method=callTo
 
 ## Privacy (INV-2 / SL3-SEC-3)
 
-Metadata-only by default. The adapter carries **only structural** data — tool
-identifiers, file paths, and lifecycle enums (`source`, `reason`,
-`permission_mode`, `model`, `cwd`). It **never** copies prompt text, Bash command
-strings, file contents, or tool output into an event — not into `content`, not
-into `metadata`, not into `tool.name`. This is asserted end-to-end by
+**Content capture is ON by default (2026-07-15).** With it on, the developer's
+**prompt** text IS copied onto the emitted event and egressed — capped, but
+**unredacted** (redaction-at-source, `[EXT-guardrail-redaction]`, is inert).
+**Opt out** with `content_capture:false` in `~/.config/openbox/dev.json` or
+`OPENBOX_CONTENT_CAPTURE=0` to restore the metadata-only projection. The prompt
+is the **only** field gated by content-capture (`TestMap_PromptCaptureGatedOnContentCapture`).
+
+Regardless of the toggle, the adapter carries **only structural** data for tool
+events — tool identifiers, file paths, and lifecycle enums (`source`, `reason`,
+`permission_mode`, `model`, `cwd`) — and **never** copies Bash command strings,
+file contents, or tool output into an event (not `content`, not `metadata`, not
+`tool.name`). This unconditional SL3-SEC-3 guarantee is asserted end-to-end by
 `TestMap_NoContentLeak` and the binary subprocess test.
 
 ## Known Phase-1 limitations (honest, no silent caps)
