@@ -31,7 +31,7 @@ Provider-agnostic core + one thin adapter per tool (SPI: `register` / `emit` / `
 
 ## Working conventions
 
-- This is a governance product: treat privacy and security as first-class. Phase-1 is **metadata-only by default**; content capture is opt-in per org and Guardrail-redacted at-source (see PRD NFR-1 / architecture INV-2).
+- This is a governance product: treat privacy and security as first-class. **Content capture is ON by default as of 2026-07-15** (brian; reverses OD4's original metadata-only-by-default posture) — prompt content is captured and egressed unless an org opts OUT (`content_capture:false` or `OPENBOX_CONTENT_CAPTURE=0`). When on, content is meant to be Guardrail-redacted at source, but that layer is currently inert (`[EXT-guardrail-redaction]`), so prompt content egresses **unredacted**; tool commands and file bodies still never egress on observe events (SL3-SEC-3), and Tier-1 local secret detection (E6-S9) only redacts Write/Edit bodies in enforce mode. See PRD NFR-1 / architecture INV-2.
 - Decisions only a human can make (scope, privacy posture, priority) are recorded as `OD*` in the design docs — never infer them; surface them.
 - Keep design docs source-cited: cite the repo symbol/path or spike/doc URL behind each claim.
 - Sibling repos (reuse targets): **openbox-backend** (NestJS control plane), **openbox-core** (Go data plane), **openbox-temporal-sdk-python** (agent-runtime SDK).

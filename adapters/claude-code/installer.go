@@ -69,7 +69,7 @@ func (i Installer) Plan(ref CredentialRef) string {
 	fmt.Fprintf(&b, "      developer_did=%s\n", ref.DID)
 	fmt.Fprintf(&b, "      secret_service=%q api_key_account=%q private_key_account=%q\n",
 		ref.SecretService, ref.APIKeyAccount, ref.PrivateKeyAccount)
-	fmt.Fprintf(&b, "      content_capture=%t (default false = metadata-only, INV-2)\n", ref.ContentCapture)
+	fmt.Fprintf(&b, "      content_capture=%s (default ON as of 2026-07-15; set false to restore metadata-only)\n", contentCaptureLabel(ref.ContentCapture))
 	fmt.Fprintf(&b, "  - Credentials stay in the OS secret store; the hook reads them at runtime (INV-1).\n")
 	fmt.Fprintf(&b, "\nCommit-trailer stamping (STORY-SL-5, session→commit binding):\n")
 	fmt.Fprintf(&b, "  - The session hook maintains a per-session liveness registry (%s) so a git\n", obgit.DefaultSessionDir())
@@ -238,6 +238,19 @@ func onOff(b bool) string {
 		return "ON"
 	}
 	return "OFF by default"
+}
+
+// contentCaptureLabel renders the *bool org content posture for the install
+// preview: nil ⇒ the adapter default (ON as of 2026-07-15), else the pinned value.
+func contentCaptureLabel(b *bool) string {
+	switch {
+	case b == nil:
+		return "on (default)"
+	case *b:
+		return "on"
+	default:
+		return "off"
+	}
 }
 
 func userPluginDir() string {

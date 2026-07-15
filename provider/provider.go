@@ -56,7 +56,7 @@ type CredentialRef struct {
 	PrivateKeyAccount string // account holding the Ed25519 seed
 	DID               string // did:aip:... (not secret)
 	BaseURL           string // optional core base URL; empty ⇒ adapter default
-	ContentCapture    bool   // org content posture (default false = metadata-only, INV-2)
+	ContentCapture    *bool  // org content posture; nil ⇒ the adapter default (ON as of 2026-07-15). Set to &false to pin metadata-only.
 	InstallGitHook    bool   // STORY-SL-5: persist the ambient commit-hook install preference
 	// AgentID is the backend PolicyEntity subject — the agent id `openbox dev sync`
 	// and the session-start staleness check read to fetch this agent's current

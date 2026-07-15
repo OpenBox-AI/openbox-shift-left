@@ -158,6 +158,38 @@ func TestResolveCredentials_EnvDisablesConfigContentCapture(t *testing.T) {
 	}
 }
 
+func TestResolveContentCapture_DefaultOn(t *testing.T) {
+	// DEFAULT ON (brian 2026-07-15): an absent config field + no env → content
+	// capture is ENABLED. An explicit config false / env 0 opts back out.
+	isolateConfig(t) // empty config, no OPENBOX_CONTENT_CAPTURE
+	if !ResolveContentCapture() {
+		t.Error("ResolveContentCapture default must be ON (absent config)")
+	}
+	// ResolveCredentials derives the same default.
+	t.Setenv(envDID, testDID)
+	t.Setenv(envAPIKeyDirect, "obx_k")
+	t.Setenv(envSeedDirect, "c2VlZA==")
+	c, err := ResolveCredentials()
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if !c.ContentCaptureEnabled {
+		t.Error("ResolveCredentials ContentCaptureEnabled default must be ON")
+	}
+	// Explicit config opt-out is honored (absent vs explicit-false distinguished via *bool).
+	cfgPath := filepath.Join(t.TempDir(), "dev.json")
+	_ = os.WriteFile(cfgPath, []byte(`{"developer_did":"`+testDID+`","content_capture":false}`), 0o600)
+	t.Setenv(envConfigPath, cfgPath)
+	if ResolveContentCapture() {
+		t.Error("explicit content_capture:false must opt out")
+	}
+	// Env wins over both.
+	t.Setenv(envContentCapture, "0")
+	if ResolveContentCapture() {
+		t.Error("OPENBOX_CONTENT_CAPTURE=0 must force OFF")
+	}
+}
+
 func TestResolveInstallGitHook(t *testing.T) {
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "dev.json")

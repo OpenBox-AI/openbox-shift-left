@@ -47,7 +47,7 @@ Each NFR has an owner and a test strategy.
 
 | ID | NFR | Owner | Test strategy |
 |---|---|---|---|
-| **NFR-1 Privacy** | Phase-1 ingestion default is metadata-only (tokens, tool names, model, hashes); prompt/output **content** capture is off by default and org-configurable. | Security owner (brian) | Assert default config emits no content fields; config flag toggles content on; verify against Claude Code OTel content flags (`OTEL_LOG_USER_PROMPTS` off by default). **Gated on OD4/spike S4.** |
+| **NFR-1 Privacy** | **Default REVERSED 2026-07-15 (brian):** content capture is now **ON by default** (opt-OUT per org via `content_capture:false` / `OPENBOX_CONTENT_CAPTURE=0`); the metadata-only projection (tokens, tool names, model, hashes) is what opting out yields. Reverses the original metadata-only-by-default. | Security owner (brian) | Assert default config now emits content fields (prompt); `content_capture:false` / env=0 strips them back to metadata-only. Redaction-at-source still inert (`[EXT-guardrail-redaction]`) → content egresses unredacted with capture on. |
 | **NFR-2 Low friction / latency** | Observe-only hooks must not perceptibly slow sessions; telemetry emission is async/non-blocking. | Tech lead | Measure added per-tool-call latency with the OpenBox hook installed; target < 50 ms overhead p95; use Claude Code async hooks (`"async": true`). |
 | **NFR-3 Ingestion reliability** | Telemetry/hook delivery tolerates transient OpenBox outages without breaking the developer's session (fail-open **for observation**; distinct from Phase-2 enforcement fail-closed). | Tech lead | Kill the collector mid-session; confirm session continues and events buffer/drop-with-log, no developer-visible error. |
 | **NFR-4 Attribution integrity** | Session→commit binding is correct under squash/rebase/fork and multi-session commits. | Tech lead | Test matrix over rebase/squash/`--fork-session`; each commit resolves to ≥1 correct session or a logged "unattributed" (spike S3 defines rules). |
@@ -85,7 +85,7 @@ Each NFR has an owner and a test strategy.
 
 | ID | Decision | Owner | Blocks |
 |---|---|---|---|
-| **OD4** | **DECIDED (2026-07-07, spike S4): metadata-only default; content strictly opt-in per org; Guardrail-redacted at-source async when enabled.** Resolves NFR-1; ingestion schema frozen metadata-only. | brian (product/security) | Resolved. |
+| **OD4** | **DECIDED (2026-07-07, spike S4): metadata-only default; content opt-in per org; Guardrail-redacted at-source async when enabled.** **SUPERSEDED (2026-07-15, brian): default REVERSED to content-capture ON (opt-OUT per org)** — see NFR-1 / architecture INV-2. Mechanism + at-source-redaction intent retained (redaction still inert); schema content fields unchanged, only the default toggle flipped. | brian (product/security) | Resolved; default reversed 2026-07-15. |
 | **OD6** | Hook handler type — `http` direct to OpenBox Core vs `command`→local OpenBox daemon/OPA sidecar. | brian (technical) | Adapter architecture (affects Phase 2 more than Phase 1). Gate on spike S2. |
 | **OD7** | Whether Phase-1 telemetry includes any content or is strictly metadata (ties to OD4). | brian (product) | Ingestion scope. |
 | **OD10** | **DECIDED (2026-07-07): opt-in during pilot.** Managed-settings mandate is verified but not activated for the pilot team; flip on after friction/coverage metrics. Specific pilot team/repo still to be named. | brian (product) | Rollout plan (pilot team TBD). |
@@ -110,18 +110,18 @@ Sliced by coherent outcome, aligned to the architecture §1b provider-agnostic-c
 **Acceptance themes:**
 - A developer/tool-install registers as an agent (`kind=developer`) reusing `POST agent/create`; sessions persist as child `SessionEntity` under its DID; credential stored only as hash (NFR-6).
 - A versioned, tool-agnostic developer event schema exists; adding developer event types does not break existing Temporal governance consumers (INV-8 conformance test passes).
-- Ingested events store as `GovernanceEventEntity`/`SpanEntity` scoped to `organization_id` (INV-4); ingestion is idempotent (INV-5) and metadata-only by default, stripping content when disabled (NFR-1/INV-2).
+- Ingested events store as `GovernanceEventEntity`/`SpanEntity` scoped to `organization_id` (INV-4); ingestion is idempotent (INV-5); content capture is ON by default as of 2026-07-15 (opt-OUT strips content back to metadata-only) (NFR-1/INV-2).
 - The lineage read surface returns, for a commit or deploy DID, the originating session(s), tools/MCP used, prompt count, and total tokens/cost (FR-7); retention is configurable (NFR-7).
 **NFR themes:** NFR-1, NFR-4 (store side), NFR-5 (registration side), NFR-6, NFR-7.
 
 ### E2 — `openbox` CLI + Claude Code adapter (observe-only)
-**Goal:** A Claude Code developer is onboarded in one command and their session emits governed, metadata-only telemetry and is bound to the commits it produces — the first realization of the adapter contract.
+**Goal:** A Claude Code developer is onboarded in one command and their session emits governed telemetry (content-capture ON by default as of 2026-07-15; opt-OUT restores metadata-only) and is bound to the commits it produces — the first realization of the adapter contract.
 **Covers:** FR-2 (ingest Claude Code native OTel end-to-end), FR-3 (per-tool/per-prompt session events, observe-only), FR-5 (session→commit trailer).
 **Acceptance themes:**
 - `openbox dev init --provider claude-code` (OD12) detects the tool, writes its native config (plugin hooks + settings + OTel export), and registers the session-as-agent against E1.
 - A running Claude Code session's token/cost/tool-decision telemetry and per-tool/per-prompt events (`SessionStart`/`UserPromptSubmit`/`PreToolUse`/`PostToolUse`/`SessionEnd`) arrive at OpenBox as normalized events (FR-2/FR-3); Phase-1 is **observe-only** — no verdict is enforced (INV-3).
 - Emission is async/best-effort: adds <50 ms p95 per-tool-call overhead and never blocks or errors a tool call if OpenBox is unreachable (NFR-2/NFR-3).
-- Content is metadata-only by default; content capture is off unless the org opts in, and when on is Guardrail-redacted at-source async (NFR-1/OD4).
+- Content capture is ON by default as of 2026-07-15 (opt-OUT per org restores metadata-only); when on it is meant to be Guardrail-redacted at-source async, though that layer is currently inert (NFR-1/OD4).
 - Commits are stamped with an idempotent `OpenBox-Session:` trailer (multiple lines = fan-in) via `prepare-commit-msg` (FR-5, per S3 rules).
 - The Claude Code adapter supports org-wide force-enable via managed settings; **Phase-1 pilot is opt-in** — mandate path verified, not activated (NFR-5/OD10).
 **NFR themes:** NFR-1, NFR-2, NFR-3, NFR-5.

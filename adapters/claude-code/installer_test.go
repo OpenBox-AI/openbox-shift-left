@@ -25,7 +25,6 @@ func TestInstaller_MaterializesBundleAndConfig(t *testing.T) {
 		APIKeyAccount:     "apikey",
 		PrivateKeyAccount: "seed",
 		DID:               testDID,
-		ContentCapture:    false,
 	}
 	if err := inst.Install(ref); err != nil {
 		t.Fatalf("install: %v", err)

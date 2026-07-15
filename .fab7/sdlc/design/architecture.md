@@ -109,7 +109,7 @@ Onboarding a new coding agent is: (1) run an S1-style **surface spike** to fill 
 - FR-7 lineage read (session→commit→deploy + finops) → **reuse** `getSessionLogs` + spans; add a lineage query joining commit/deploy events.
 - FR-8 reuse DID namespace + trust → same registry, same `add-trust-lifecycle-schema` records; developer events feed trust scoring exactly like agent events (`GovernanceEventService` injected at `agent.service.ts:253`).
 
-**Nonfunctional (PRD §3):** NFR-1 privacy metadata-default (content off, gated OD4/S4); NFR-2 <50 ms via Claude Code async hooks + fast Go binary invocation; NFR-3 observe fail-open; NFR-4 attribution (S3); NFR-5 org mandate via managed settings, pilot opt-in (OD10); NFR-6 reuse `AgentEntity.createHash`; NFR-7 retention (OD4).
+**Nonfunctional (PRD §3):** NFR-1 privacy posture (content-capture ON by default as of 2026-07-15, opt-OUT per org — reverses the original metadata-default; OD4); NFR-2 <50 ms via Claude Code async hooks + fast Go binary invocation; NFR-3 observe fail-open; NFR-4 attribution (S3); NFR-5 org mandate via managed settings, pilot opt-in (OD10); NFR-6 reuse `AgentEntity.createHash`; NFR-7 retention (OD4).
 
 ---
 
@@ -128,7 +128,7 @@ Onboarding a new coding agent is: (1) run an S1-style **surface spike** to fill 
 ## 4. Invariants
 
 - **INV-1 (credential secrecy, NFR-6):** session `obx_` key stored/compared only as hash (`AgentEntity.createHash`); never in logs, spans, or event bodies.
-- **INV-2 (privacy default, NFR-1; DECIDED OD4):** **metadata-only by default** (session/commit ids, DID, timestamps, tool/MCP names, model, tokens, cost, allow/deny). No prompt/output/file **content** leaves the machine unless an org explicitly opts in. When content IS enabled, it is redacted **at source, asynchronously, via the existing Guardrail API** (PII/NSFW/regex) before egress — never blocking the tool call (INV-3). Ingestion rejects/strips content fields when disabled. (Every Phase-1 goal is met by metadata alone — spike S4.)
+- **INV-2 (privacy default, NFR-1; OD4 — default REVERSED 2026-07-15):** **Content capture is ON by default as of 2026-07-15** (brian; supersedes OD4's original metadata-only-by-default). Prompt content is captured onto emitted events and egressed unless an org opts OUT (`content_capture:false` / `OPENBOX_CONTENT_CAPTURE=0`, which restores the metadata-only projection: session/commit ids, DID, timestamps, tool/MCP names, model, tokens, cost, allow/deny). When content IS enabled it is meant to be redacted **at source via the existing Guardrail API** (PII/NSFW/regex) before egress, never blocking the tool call (INV-3) — but that layer is currently **inert** (`[EXT-guardrail-redaction]`), so with capture on, prompt content egresses **unredacted**. Structural guarantees that survive the default flip: tool **commands** and file **bodies** are still never carried on observe/T2 events (SL3-SEC-3 — the Mapper is metadata-only for tool events); Tier-1 local secret detection (E6-S9) redacts Write/Edit bodies but only in enforce mode and only on the LOCAL sidecar path. Ingestion still strips content fields when capture is disabled.
 - **INV-3 (observation never blocks, NFR-3):** no Phase-1 dev-runtime path denies, delays past budget, or errors a developer tool call.
 - **INV-4 (tenancy):** every session/event/span scoped to `organization_id`, as `AgentEntity`/`GovernanceEventEntity` already enforce; no cross-org read.
 - **INV-5 (idempotent ingestion):** events carry a client id; retries/buffered flush never double-count tokens/cost or duplicate lineage links.
@@ -145,7 +145,7 @@ Onboarding a new coding agent is: (1) run an S1-style **surface spike** to fill 
 - **Adapters depend on the event schema, never the reverse (FR-4):** author/version the developer event types first; both adapters run a shared conformance test.
 - **Async/best-effort on the hot path (NFR-2/3):** adapters emit asynchronously (Claude Code `"async": true`); the Go `bin/openbox` invocation is fast (single-digit-ms cold start); no synchronous dependency on OpenBox for a tool call to proceed in Phase 1.
 - **Secrets:** adapters read the `obx_` key + signer from the tool's secure config/env; the commit trailer carries only the opaque `session_id`, never the key.
-- **Config flags default privacy-safe:** content-capture (INV-2) and retention (NFR-7) explicit, defaulting off/short; frozen only after S4.
+- **Config flags explicit:** content-capture (INV-2) and retention (NFR-7) are explicit toggles. Content-capture now defaults **ON** (opt-OUT per org, 2026-07-15 — reverses the original privacy-safe-off default); retention still defaults short.
 - **Disjoint write scopes for planning:** (a) core: developer event types in `content.EventType*` + `isValidGovernanceEventType`; (b) backend: `kind=developer` registration + developer-session read/lineage query in `GovernanceEventService`; (c) shared event-schema/conformance package; (d) Claude Code adapter (plugin); (e) OpenBox git action `Deploy` event. openbox-core touched only for (a).
 
 ---
@@ -167,7 +167,7 @@ Former OD-A/OD-B/OD-C are **resolved to reuse** by the sponsor's guiding princip
 
 | ID | Decision | Owner | Blocks |
 |---|---|---|---|
-| **OD4** | **DECIDED (2026-07-07, spike S4): metadata-only default; content strictly opt-in per org; when enabled, Guardrail-redacted at-source async.** Folded into INV-2/INV-3. Event schema can now be frozen metadata-only. Retention (NFR-7) + residency remain orthogonal knobs; legal follow-up (WP29/EDPB currency, DPIA trigger) with counsel. | brian (product/security) | Resolved. |
+| **OD4** | **DECIDED (2026-07-07, spike S4): metadata-only default; content strictly opt-in per org; when enabled, Guardrail-redacted at-source async.** Folded into INV-2/INV-3. **SUPERSEDED (2026-07-15, brian): default REVERSED to content-capture ON (opt-OUT per org)** — see INV-2. The opt-out mechanism + the at-source-redaction intent are retained (redaction still inert, `[EXT-guardrail-redaction]`); the event schema's content fields are unchanged (only the default toggle flipped). Retention (NFR-7) + residency remain orthogonal knobs; legal follow-up (WP29/EDPB currency, DPIA trigger) with counsel — now more salient with content on by default. | brian (product/security) | Resolved; default reversed 2026-07-15. |
 | **OD6** (carried) | Phase-2 hook handler type for enforcement (http vs command→local sidecar). | brian (technical) | Phase-2 only. Gate on **S2**. |
 | **OD10** (carried) | Name the pilot team/repo (mandate posture already decided: opt-in; validate GitHub-squash prevalence per S3 U-1). | brian (product) | Rollout/measurement. |
 | **OD12** | **DECIDED (2026-07-07), REVISED by OD18 (2026-07-08):** unifying `openbox` CLI front door — delivery/wiring uses each tool's native bundle: on Claude Code the CLI installs a **plugin bundling `bin/openbox` + hooks** (marketplace + managed `enabledPlugins`), on Codex/Cursor it lays down the config+managed-hooks bundle. | brian (product/UX) | Resolved (see OD18). |

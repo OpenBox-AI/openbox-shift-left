@@ -71,7 +71,15 @@ type DevConfig struct {
 	SecretService     string `json:"secret_service,omitempty"`
 	APIKeyAccount     string `json:"api_key_account,omitempty"`
 	PrivateKeyAccount string `json:"private_key_account,omitempty"`
-	ContentCapture    bool   `json:"content_capture,omitempty"`
+	// ContentCapture is the org content posture (OD4). It is a *bool so an ABSENT
+	// field means the DEFAULT, which is now ON (brian 2026-07-15 — reverses the
+	// original metadata-only-by-default INV-2/OD4/NFR-1 posture): prompts/file
+	// bodies/outputs are captured onto emitted events and egressed unless an org
+	// opts OUT. Set false (`content_capture:false` or OPENBOX_CONTENT_CAPTURE=0) to
+	// restore metadata-only. Guardrail redaction at source ([EXT-guardrail-redaction])
+	// is still inert, and Tier-1 local secret detection (E6-S9, enforce mode) only
+	// covers Write/Edit bodies — so with capture ON, other content egresses UNREDACTED.
+	ContentCapture    *bool  `json:"content_capture,omitempty"`
 	// Finops enables opt-in transcript usage extraction (STORY-SL-16, OD-FINOPS):
 	// on SessionEnd flush the hook reads the session's transcript_path and pulls
 	// usage NUMBERS ONLY (tokens; cost when the transcript carries it) onto the
@@ -283,19 +291,23 @@ func ResolveFinops() bool {
 	return enabled
 }
 
-// ResolveContentCapture reports whether the org opted into content capture
-// (OD4): config `content_capture` first, then the OPENBOX_CONTENT_CAPTURE env
-// override (env wins either way, so env can disable what config enabled), same
-// precedence as every other coordinate. Default FALSE — the OD4 metadata-only
-// posture: with it unset NO tool content ever reaches even the local sidecar and
-// the enforce hook applies no `updatedInput` redaction (STORY-E6-S4 is inert,
-// byte-identical to E6-S3). Cheap config+env read, no secret I/O; safe on the
-// PreToolUse hot path. It mirrors the ContentCaptureEnabled that ResolveCredentials
-// derives, without the secret-store work (which the enforce gate does not need).
+// ResolveContentCapture reports the org content posture (OD4): config
+// `content_capture` first, then the OPENBOX_CONTENT_CAPTURE env override (env wins
+// either way, so env can disable what config enabled), same precedence as every
+// other coordinate. DEFAULT ON as of brian 2026-07-15 (reverses the original
+// metadata-only-by-default INV-2/OD4/NFR-1 posture) — an ABSENT config field (the
+// normal case, since `dev init` writes no content_capture) yields ON: tool content
+// reaches the local sidecar AND egresses on emitted events, and the enforce hook
+// applies `updatedInput` redaction. Set `content_capture:false` or
+// OPENBOX_CONTENT_CAPTURE=0 to opt back to metadata-only. Modeled as *bool (like
+// SecretDetection) so absent (default ON) is distinguishable from an explicit
+// false (opt-out). A missing/unreadable config leaves the default ON. Cheap
+// config+env read, no secret I/O; safe on the PreToolUse hot path. It mirrors the
+// ContentCaptureEnabled that ResolveCredentials derives, without the secret-store work.
 func ResolveContentCapture() bool {
-	enabled := false
-	if cfg, err := loadDevConfig(DefaultConfigPath()); err == nil {
-		enabled = cfg.ContentCapture
+	enabled := true
+	if cfg, err := loadDevConfig(DefaultConfigPath()); err == nil && cfg.ContentCapture != nil {
+		enabled = *cfg.ContentCapture
 	}
 	if v, ok := os.LookupEnv(envContentCapture); ok {
 		enabled = isTruthy(v)
@@ -464,9 +476,11 @@ func ResolveCredentials() (Credentials, error) {
 	c := Credentials{
 		BaseURL: firstNonEmpty(os.Getenv(envBaseURL), cfg.BaseURL, defaultBaseURL),
 		DID:     firstNonEmpty(os.Getenv(envDID), cfg.DID),
-		// Content capture: config default, overridable EITHER way by env (so env
-		// can disable what config enabled — consistent with the other coordinates).
-		ContentCaptureEnabled: cfg.ContentCapture,
+		// Content capture (OD4): DEFAULT ON (brian 2026-07-15) — an absent config
+		// field means ON; an explicit `content_capture:false` opts out. Overridable
+		// EITHER way by env (so env can disable what config enabled — consistent with
+		// the other coordinates). Mirrors ResolveContentCapture.
+		ContentCaptureEnabled: cfg.ContentCapture == nil || *cfg.ContentCapture,
 	}
 	if v, ok := os.LookupEnv(envContentCapture); ok {
 		c.ContentCaptureEnabled = isTruthy(v)
