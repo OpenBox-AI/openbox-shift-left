@@ -1124,7 +1124,7 @@ stories:
       G3_REVIEW: {decision: "approve", note: "brian G3 sign-off 2026-07-15; blind diff review APPROVE-WITH-NITS (0 must-fix), F1/F3 nits resolved"}
       G_SEC: {decision: "pass", note: "brian sign-off 2026-07-15; security review CONCERNS -> SEC-1 (max_body_size truncation) FIXED; rest PASS"}
     audit:
-      commit: null
+      commit: "b6bc282"
       completed_at: "2026-07-15"
       validation_artifact: ".fab7/sdlc/assignments/build-story-E7-S4-20260714.result.yaml"
       last_run_id: null
