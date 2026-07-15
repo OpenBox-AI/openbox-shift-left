@@ -58,7 +58,7 @@ core **recomputes** every span's `semantic_type` at ingest
 (`governance_workflow.go:309` → `ComputeSemanticTypeFromSpan`) from the span
 **`name`** + an **`attributes`** map, and **ignores** the inbound `semantic_type`,
 `hook_type`, `file_operation`, and `function`. So the client sets the fields core
-actually reads (`payload.go:classificationHints`): file ops get a
+actually reads (`payload.go:hookSpanShape`): file ops get a
 `name` of `file.write`/`file.read`/… plus a non-nil `file_path`; MCP calls get
 `attributes["mcp.method"]="callTool"`. The real tool name is preserved in
 `metadata.tool_name`. (This corrects contracts/dev-event/MAPPING.md §3, which

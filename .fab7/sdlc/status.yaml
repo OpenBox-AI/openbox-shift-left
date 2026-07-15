@@ -1132,7 +1132,7 @@ stories:
       blocked_reason: null
   STORY-E7-S5:
     title: "shift-left: lifecycle -> Workflow* / SignalReceived (session=workflow; PromptSubmitted/CommitCreated/Deploy -> Signal with lineage in metadata)"
-    status: "planned"
+    status: "done"
     epic: "E7"
     sprint: null
     priority: "P1"
@@ -1145,19 +1145,21 @@ stories:
       - "client/payload.go  # SessionStarted->WorkflowStarted, SessionEnded->WorkflowCompleted; Prompt/Commit/Deploy->SignalReceived(signal_name)"
       - "adapters/claude-code/mapper.go ; adapters/common/git  # lineage keys into Signal metadata"
       - "*_test.go + live E2E"
+    write_scope_deviation: "adapters/claude-code/mapper.go + adapters/common/git NOT changed (same refinement as E7-S4): the event->wire mapping is provider-agnostic and lives in the shared client/ layer; no code emits CommitCreated/Deploy DevEvents today (SL-6 attribution is server-side), and buildMetadata already passes ev.Metadata through, so commit/deploy lineage survives the Signal mapping with no adapter change. Added client/payload_lifecycle_test.go (new) + a client/README.md doc-ref nit fix."
     validation_commands:
-      - "cd adapters/claude-code && go test -race ./...  # GREEN"
-      - "Live: session creates/closes a workflow row on stock core; commit/deploy Signal carries commit_sha/deploy_id/deploy_did (FR-5/6/7)."
+      - "cd client && go build ./... && go vet ./... && go test -race ./...  # GREEN"
+      - "cd adapters/claude-code && go test -race ./...  # GREEN (incl. enforce conformance C1-C9)"
+      - "Live: session creates/closes a workflow row on stock core; commit/deploy Signal carries commit_sha/deploy_id/deploy_did (FR-5/6/7).  # deferred to E7-S6 (needs E7-S2 live), per E7-S4 pattern"
     invariants:
       - "INV-8: session=workflow uses stock core lifecycle (storage_session.go:41); no dev-type accept-list needed."
     gates:
-      G3_REVIEW: {decision: "pending"}
+      G3_REVIEW: {decision: "approve", note: "brian G3 sign-off 2026-07-15; blind diff review APPROVE (0 must-fix / 0 should-fix; 3 nits, 2 resolved)."}
     audit:
       commit: null
-      completed_at: null
-      validation_artifact: null
+      completed_at: "2026-07-15"
+      validation_artifact: ".fab7/sdlc/assignments/build-story-E7-S5-20260715.result.yaml"
       last_run_id: null
-      status_reason: "PLANNED. SessionStarted->WorkflowStarted / SessionEnded->WorkflowCompleted (session=workflow: session_id->run_id, stable id->workflow_id, workflow_type); PromptSubmitted/CommitCreated/Deploy->SignalReceived(signal_name=...) with lineage keys in metadata (migration doc §2 rows 1,2,7,8,9). Reverses SL-1's session-separation (ADR-0004, accepted). Verify commit/deploy lineage (FR-5/6/7) survives the Signal mapping. Blocked by E7-S3; needs E7-S2's core changes live."
+      status_reason: "DONE 2026-07-15 (brian G3 sign-off; committed to shift-left main, no signature trailer per brian). DELIVERABLE (client/ module, shift-left-owned): the non-tool path of buildPayload now serializes onto the base SDK lifecycle wire model (ADR-0004 session=workflow; commit/deploy=signal), completing the E7 event->wire migration begun by E7-S3/S4. buildLegacyPayload -> buildLifecyclePayload: lifecycleWireType maps SessionStarted->WorkflowStarted, SessionEnded->WorkflowCompleted, PromptSubmitted/CommitCreated/Deploy->SignalReceived(signal_name=prompt_submitted/commit_created/deploy). governanceEventPayload gains workflow_type + signal_name (both omitempty; never set on the ActivityStarted hook path -> hook payloads byte-identical to E7-S4). Every lifecycle event sets workflow_type=const 'developer-session' (the base contract REQUIRES workflow_id/run_id/workflow_type on BOTH workflow AND signal events per openbox-sdk-python validation/event_rules.go _REQUIRED_WORKFLOW_FIELDS; core reads workflow_type + signal_name into DEDICATED columns per storage_event.go, verified by cross-repo Explore). The constant workflow_type keeps a session's WorkflowStarted + its SignalReceived events + WorkflowCompleted on one (workflow_id,run_id,workflow_type) identity so core resolves them to one session row (storage_session.go create->lookup->terminal). Path is deliberately SPAN-LESS (base contract rejects span-bearing non-hook lifecycle events; no lifecycle DevEvent sets ev.Span). COMMIT/DEPLOY LINEAGE (FR-5/6/7): core has NO commit_sha/deploy_id columns, so lineage rides the pass-through metadata blob via buildMetadata (already the case) -> survives the Signal mapping; proven by TestLifecycle_Commit/DeployLineageSurvivesSignal. WRITE-SCOPE REFINEMENT: adapters/claude-code/mapper.go + adapters/common/git unchanged (provider-agnostic mapping in the client layer; no producer of Commit/Deploy DevEvents today). DEAD-CODE REMOVAL: buildSpan/classificationHints/randomID/strPtr/int64Ptr (the legacy single-span builder the lifecycle path used) + crypto/rand import removed; fileSpanName kept (used by hookSpanShape), spanData struct kept as the decode-side test view (net -115/+83 in payload.go). INV-3 enforce path UNTOUCHED. VALIDATION: client + adapters/claude-code (incl cmd/openbox-cc-hook + enforce C1-C9) + git modules go build/vet/test -race GREEN, gofmt clean; 8 new lifecycle tests. Live stock-core E2E deferred to E7-S6 (also wants E7-S2 live), matching E7-S4; E7-S0 spike already confirmed the three wire types accept HTTP 200 on stock core + Signal carries lineage. Result artifact: .fab7/sdlc/assignments/build-story-E7-S5-20260715.result.yaml. Unblocks E7-S6."
       blocked_reason: null
   STORY-E7-S6:
     title: "shift-left: unify MAPPING.md + dev-event schema; adopt base conformance parity matrix; dashboard E2E (fix Unknown/empty timeline)"
