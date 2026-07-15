@@ -23,7 +23,12 @@ type Config struct {
 	// (The signed core/management fetch — [EXT-opa-bundle] — plugs in here.)
 	Source BundleSource
 
-	// SyncInterval is the out-of-band bundle refresh period. Zero → 60s.
+	// SyncInterval is the LOCAL bundle re-poll period (back-compat only). Zero
+	// (default) → PRIME-ONCE: the daemon loads the local bundle at startup and does
+	// NO background re-poll and NO network I/O (STORY-E6-S8 / ADR-0005 §Decision-3 —
+	// freshness is the client-side session-start staleness check, not a daemon
+	// poll). A positive value re-loads the LOCAL file on that interval (never the
+	// network) for an operator who wants mid-session bundle edits picked up.
 	SyncInterval time.Duration
 
 	// Freshness marks a bundle Stale past this age. Zero → 5m.

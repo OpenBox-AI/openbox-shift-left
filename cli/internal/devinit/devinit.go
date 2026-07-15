@@ -48,6 +48,7 @@ type Registrar interface {
 // Options are the user-facing knobs for `dev init`.
 type Options struct {
 	Provider       string // claude-code|codex|cursor
+	BackendURL     string // openbox-backend control-plane base (persisted for `dev sync`/staleness, STORY-E6-S8)
 	Org            string // organization namespace for naming + secret accounts
 	AgentName      string // override; default derived from provider+user+host
 	Icon           string // non-empty string required by the backend DTO
@@ -141,6 +142,11 @@ func Run(ctx context.Context, o Options, d Deps) (*Result, error) {
 		APIKeyAccount:     apiKeyAcct,
 		PrivateKeyAccount: privKeyAcct,
 		InstallGitHook:    o.InstallGitHook,
+		// STORY-E6-S8: persist the control-plane base so `dev sync`/staleness can
+		// reach the policy read without re-supplying OPENBOX_BACKEND_URL. The agent id
+		// is set below on the register path (the reuse path preserves a prior value —
+		// installer.writeConfig).
+		BackendURL: o.BackendURL,
 	}
 	res := &Result{AgentName: name}
 
@@ -222,6 +228,7 @@ func Run(ctx context.Context, o Options, d Deps) (*Result, error) {
 	}
 	res.AgentID, res.DID, res.Registered = reg.AgentID, reg.DID, true
 	ref.DID = reg.DID
+	ref.AgentID = reg.AgentID // STORY-E6-S8: persisted to dev.json for `dev sync`/staleness
 
 	if reg.APIKey == "" || reg.PrivateKey == "" {
 		return res, fmt.Errorf(

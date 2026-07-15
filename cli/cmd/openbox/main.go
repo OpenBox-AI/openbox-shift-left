@@ -11,6 +11,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -18,6 +19,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -50,16 +52,24 @@ type app struct {
 	getenv         func(string) string
 	openStore      func(kind string) (secret.Store, error)
 	newRegistrar   func(baseURL, credential, clientID string) devinit.Registrar
+	newPolicyReader func(baseURL, credential, clientID string) policyReader
+}
+
+// policyReader is the control-plane read `dev sync` + the `dev init` last-step
+// need (STORY-E6-S8). backend.Client implements it; a fake injects in tests.
+type policyReader interface {
+	GetCurrentPolicy(ctx context.Context, agentID string) (*backend.Policy, error)
 }
 
 func defaultApp() *app {
 	return &app{
-		stdout:       os.Stdout,
-		stderr:       os.Stderr,
-		stdin:        os.Stdin,
-		getenv:       os.Getenv,
-		openStore:    secret.Open,
-		newRegistrar: func(u, c, id string) devinit.Registrar { return backend.New(u, c, id) },
+		stdout:          os.Stdout,
+		stderr:          os.Stderr,
+		stdin:           os.Stdin,
+		getenv:          os.Getenv,
+		openStore:       secret.Open,
+		newRegistrar:    func(u, c, id string) devinit.Registrar { return backend.New(u, c, id) },
+		newPolicyReader: func(u, c, id string) policyReader { return backend.New(u, c, id) },
 	}
 }
 
@@ -103,9 +113,194 @@ func (a *app) runDev(args []string) int {
 		return a.runDevInit(args[1:])
 	case "verify":
 		return a.runDevVerify(args[1:])
+	case "sync":
+		return a.runDevSync(args[1:])
 	default:
-		return a.errorf("usage: openbox dev <init|verify> [flags]")
+		return a.errorf("usage: openbox dev <init|verify|sync> [flags]")
 	}
+}
+
+// runDevSync fetches this agent's CURRENT org policy from the control plane and
+// writes it as the LOCAL sidecar bundle + PIN (STORY-E6-S8, ADR-0005): the pull
+// half of the pull-at-init + session-start-staleness distribution model. It reads
+// the ORG control-plane credential from OPENBOX_CONTROL_TOKEN (never a flag —
+// INV-1), resolves the agent id + backend URL persisted by `dev init` (env
+// overrides), fetches, translates config.policy_builder into a builder bundle
+// (or a fail-open-local bundle for raw rego / a no-policy allow bundle), writes it
+// 0600, and clears any fail-closed stale markers so the enforce gate proceeds.
+// It NEVER prints the org key or rego text (INV-1). On any auth/fetch failure it
+// exits non-zero with a mapped hint and leaves the last-good bundle untouched.
+func (a *app) runDevSync(args []string) int {
+	fs := flag.NewFlagSet("openbox dev sync", flag.ContinueOnError)
+	fs.SetOutput(a.stderr)
+	var bundlePath, clientID string
+	fs.StringVar(&bundlePath, "bundle", a.env("OPENBOX_SIDECAR_BUNDLE", ""), "local policy bundle to write (default: $XDG_CONFIG_HOME/openbox/policy-bundle.json)")
+	fs.StringVar(&clientID, "client-id", a.env("OPENBOX_CLIENT", "openbox-cli"), "value for the x-openbox-client header (Keycloak JWT path)")
+	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return exitOK
+		}
+		return exitError
+	}
+
+	token := a.getenv("OPENBOX_CONTROL_TOKEN")
+	if token == "" {
+		return a.errorf("set OPENBOX_CONTROL_TOKEN (Keycloak JWT or obx_key_ org key) in the environment; " +
+			"it is never accepted as a flag so it cannot leak via argv/shell history (INV-1)")
+	}
+	backendURL := claudecode.ResolveBackendURL()
+	if backendURL == "" {
+		return a.errorf("no backend URL configured — set OPENBOX_BACKEND_URL or re-run `openbox dev init --backend-url <url>`")
+	}
+	agentID := claudecode.ResolveAgentID()
+	if agentID == "" {
+		return a.errorf("no agent id configured — run `openbox dev init --provider <tool>` first (it persists the agent id), or set OPENBOX_AGENT_ID")
+	}
+	if bundlePath == "" {
+		bundlePath = claudecode.ResolveBundlePath()
+	}
+
+	if err := a.syncPolicyBundle(context.Background(), backendURL, token, clientID, agentID, bundlePath, a.stdout); err != nil {
+		return a.errorf("%v", err)
+	}
+	return exitOK
+}
+
+// syncPolicyBundle performs the fetch → translate → write → clear-markers flow,
+// shared by `dev sync` and the `dev init` last step. It returns a mapped error on
+// failure (the caller decides exit code / warn); it never prints a secret.
+func (a *app) syncPolicyBundle(ctx context.Context, backendURL, token, clientID, agentID, bundlePath string, out io.Writer) error {
+	reader := a.newPolicyReader(backendURL, token, clientID)
+	pol, err := reader.GetCurrentPolicy(ctx, agentID)
+	if err != nil {
+		return mapPolicyReadError(err)
+	}
+
+	bundle, note, err := translateBundle(pol)
+	if err != nil {
+		return err
+	}
+	if err := writeBundleFile(bundlePath, bundle); err != nil {
+		return fmt.Errorf("write policy bundle: %w", err)
+	}
+	// A fresh, re-pinned bundle clears any fail-closed staleness block so the
+	// PreToolUse enforce gate proceeds again (STORY-E6-S8).
+	_ = claudecode.ClearAllStaleMarkers()
+
+	// Non-secret summary only: the policy id + pin, never the rego or org key (INV-1).
+	if pol == nil {
+		fmt.Fprintf(out, "Synced policy bundle → %s (no current policy for this agent — allow/no-policy bundle).\n", bundlePath)
+	} else {
+		fmt.Fprintf(out, "Synced policy bundle → %s (policy %s, updated_at %s).\n", bundlePath, pol.ID, orUnset(pol.UpdatedAt))
+	}
+	if note != "" {
+		fmt.Fprintln(out, note)
+	}
+	return nil
+}
+
+// translateBundle maps a fetched *backend.Policy into a *sidecar.Bundle + an
+// optional non-secret note to print. nil policy → an empty allow bundle;
+// config.policy_builder → a builder bundle; raw rego with no builder → a
+// fail-open-local bundle + a warning (ADR-0005 §Decision-2).
+func translateBundle(pol *backend.Policy) (*sidecar.Bundle, string, error) {
+	if pol == nil {
+		return &sidecar.Bundle{Version: "no-policy"}, "", nil
+	}
+	pin := pol.ID + "@" + pol.UpdatedAt
+	if len(pol.PolicyBuilder) > 0 {
+		var cfg sidecar.PolicyBuilderConfig
+		if err := json.Unmarshal(pol.PolicyBuilder, &cfg); err != nil {
+			return nil, "", fmt.Errorf("parse policy_builder config: %w", err)
+		}
+		return &sidecar.Bundle{
+			Version:       pin,
+			PolicyID:      pol.ID,
+			UpdatedAt:     pol.UpdatedAt,
+			PolicyBuilder: &cfg,
+		}, "", nil
+	}
+	if pol.HasRawRego {
+		note := "warning: this policy is hand-written raw rego with no builder config — it cannot be evaluated locally " +
+			"and the sidecar will serve it fail-open (allow) locally; enforcement for it relies on the async /evaluate audit (ADR-0005)."
+		return &sidecar.Bundle{
+			Version:            pin,
+			PolicyID:           pol.ID,
+			UpdatedAt:          pol.UpdatedAt,
+			RawRegoUnlocalized: true,
+		}, note, nil
+	}
+	// A policy with neither builder config nor rego → treat as no-op allow, pinned.
+	return &sidecar.Bundle{Version: pin, PolicyID: pol.ID, UpdatedAt: pol.UpdatedAt}, "", nil
+}
+
+// writeBundleFile marshals the bundle and writes it 0600 (owner-only), creating
+// the parent dir 0700. It round-trips through sidecar.ParseBundle first so a
+// malformed/deny-by-default bundle is rejected BEFORE it replaces the last-good
+// file (never write a bundle the daemon would refuse to load).
+//
+// The write is ATOMIC (G3-F4 / G_SEC-INFO-2): a temp file in the SAME dir (so
+// rename is atomic on one filesystem) written 0600, then os.Rename over the
+// target. A crash mid-write can never leave the daemon (or the session-start
+// staleness read) a truncated/half-parsed bundle — it sees either the old file
+// or the whole new one.
+func writeBundleFile(path string, b *sidecar.Bundle) error {
+	raw, err := json.MarshalIndent(b, "", "  ")
+	if err != nil {
+		return err
+	}
+	if _, err := sidecar.ParseBundle(raw); err != nil {
+		return fmt.Errorf("refusing to write an invalid bundle: %w", err)
+	}
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(dir, ".policy-bundle-*.tmp")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	defer os.Remove(tmpName) // no-op after a successful rename
+	if err := tmp.Chmod(0o600); err != nil {
+		tmp.Close()
+		return err
+	}
+	if _, err := tmp.Write(append(raw, '\n')); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmpName, path)
+}
+
+// mapPolicyReadError turns a control-plane read failure into an actionable,
+// secret-free hint (SL-10 style). It surfaces the exact 4xx cause without echoing
+// any credential.
+func mapPolicyReadError(err error) error {
+	var apiErr *backend.APIError
+	if errors.As(err, &apiErr) {
+		switch apiErr.StatusCode {
+		case 401:
+			return fmt.Errorf("policy read rejected (HTTP 401): the control-plane credential is invalid or expired — check OPENBOX_CONTROL_TOKEN")
+		case 403:
+			return fmt.Errorf("policy read forbidden (HTTP 403): the credential lacks the read:agent_policy permission for this org")
+		case 404:
+			return fmt.Errorf("policy read not found (HTTP 404): the agent id may be wrong for this org — re-check `openbox dev init`")
+		default:
+			return fmt.Errorf("policy read failed (HTTP %d)", apiErr.StatusCode)
+		}
+	}
+	return fmt.Errorf("policy read failed: %w", err)
+}
+
+func orUnset(s string) string {
+	if s == "" {
+		return "(unset)"
+	}
+	return s
 }
 
 // runDevVerify is the read-only data-plane preflight (STORY-SL-11):
@@ -238,7 +433,7 @@ func (a *app) runSidecar(args []string) int {
 	var syncInterval, freshness time.Duration
 	fs.StringVar(&socketPath, "socket", a.env("OPENBOX_SIDECAR_SOCKET", ""), "Unix socket path (default: $XDG_RUNTIME_DIR/openbox/sidecar.sock)")
 	fs.StringVar(&bundlePath, "bundle", a.env("OPENBOX_SIDECAR_BUNDLE", ""), "local policy bundle file (default: $XDG_CONFIG_HOME/openbox/policy-bundle.json)")
-	fs.DurationVar(&syncInterval, "sync-interval", 0, "out-of-band bundle refresh interval (default 60s)")
+	fs.DurationVar(&syncInterval, "sync-interval", 0, "LOCAL bundle re-poll interval; 0 (default) = prime-once at startup, no re-poll, no network I/O (freshness is the client-side session-start staleness check); a positive value re-loads the LOCAL file on that interval for back-compat")
 	fs.DurationVar(&freshness, "freshness", 0, "mark decisions Stale past this bundle age (default 5m)")
 	if err := fs.Parse(args[1:]); err != nil {
 		// `--help` is a successful, intentional request for usage, not an error.
@@ -289,6 +484,7 @@ func (a *app) runDevInit(args []string) int {
 	if o.Provider == "" {
 		return a.errorf("--provider is required (one of: claude-code, codex, cursor)")
 	}
+	o.BackendURL = backendURL // STORY-E6-S8: persist the control-plane base for `dev sync`/staleness
 
 	inst, err := providers.Lookup(o.Provider)
 	if err != nil {
@@ -352,6 +548,18 @@ func (a *app) runDevInit(args []string) int {
 	if runErr != nil {
 		return a.errorf("%v", runErr)
 	}
+
+	// STORY-E6-S8: `dev init`'s last step best-effort pulls the agent's current
+	// policy into the local bundle so enforce mode has a policy on first run. It is
+	// BEST-EFFORT — a fetch failure warns (stderr) and does NOT fail init (the agent
+	// is already registered and configured; the user can re-run `openbox dev sync`).
+	// The agent id was persisted by the installer; resolve it back out.
+	if agentID := claudecode.ResolveAgentID(); agentID != "" && a.newPolicyReader != nil {
+		bundlePath := claudecode.ResolveBundlePath()
+		if err := a.syncPolicyBundle(context.Background(), backendURL, credential, clientID, agentID, bundlePath, a.stdout); err != nil {
+			fmt.Fprintf(a.stderr, "note: initial policy sync skipped (%v); run `openbox dev sync` when ready.\n", err)
+		}
+	}
 	return exitOK
 }
 
@@ -368,6 +576,7 @@ func (a *app) usage() {
 Usage:
   openbox dev init --provider <claude-code|codex|cursor> [flags]
   openbox dev verify [--dry-run]
+  openbox dev sync [--bundle <path>]
   openbox sidecar serve [--socket <path>] [--bundle <path>]
   openbox version
 

@@ -106,8 +106,21 @@ func (s *Server) SetBundle(b *Bundle) {
 	var e Evaluator
 	var version string
 	if b != nil {
-		e = newBundleEvaluator(b)
 		version = b.Version
+		switch {
+		case b.PolicyBuilder != nil:
+			// A builder-authored policy: FIRST-MATCH native evaluator (STORY-E6-S8,
+			// ADR-0005). Distinct from the legacy Rules max-severity path so its
+			// rule-order precedence is preserved.
+			e = newBuilderEvaluator(b.PolicyBuilder, b.PolicyID)
+		default:
+			// Legacy hand-authored Rules bundle, an empty no-policy bundle
+			// (data==null → allow), or a raw-rego-unlocalized bundle (no rules → allow):
+			// the max-severity bundleEvaluator. An empty/rules-less bundle yields a REAL
+			// local ALLOW (sourceLocalBundle), so it proceeds under BOTH fail-open and
+			// fail-closed — honest under-blocking, never over-blocking (OD9).
+			e = newBundleEvaluator(b)
+		}
 	}
 	s.SetEvaluator(e, version)
 }

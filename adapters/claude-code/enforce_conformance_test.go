@@ -353,3 +353,125 @@ func TestEnforcementConformance(t *testing.T) {
 		assertNoEgress(t)
 	})
 }
+
+// ── STORY-E6-S8 conformance: native builder policy + fail-closed stale gate ──
+
+// builderBlockBundle blocks a `rm -rf` shell command via a native policy_builder
+// config (FIRST-MATCH), the E6-S8 analog of blockRuleBundle.
+func builderBlockBundle(decision string) *sidecar.Bundle {
+	return &sidecar.Bundle{
+		Version:  "conf-builder",
+		PolicyID: "conf-builder-policy",
+		PolicyBuilder: &sidecar.PolicyBuilderConfig{Version: 1, Rules: []sidecar.PolicyBuilderRule{{
+			Decision: decision, Reason: "destructive recursive delete", MatchMode: "all",
+			Conditions: []sidecar.PolicyBuilderCondition{{
+				Field: "spans[_].attributes.command", Operator: "contains",
+				Transform: "value", Value: "rm -rf", ValueType: "string",
+			}},
+		}}},
+	}
+}
+
+// TestEnforcementConformance_BuilderPolicy drives the REAL RunHook PreToolUse
+// path against a REAL sidecar serving a native builder policy: BLOCK→deny,
+// no-match→proceed, REQUIRE_APPROVAL→ask (STORY-E6-S8 AC-1/AC-8 end-to-end).
+func TestEnforcementConformance_BuilderPolicy(t *testing.T) {
+	isolateConfig(t)
+	t.Setenv(envDID, testDID)
+	t.Setenv("OPENBOX_SPOOL_DIR", t.TempDir())
+	t.Setenv("OPENBOX_SESSION_DIR", t.TempDir())
+	t.Setenv(envEnforcementFile, filepath.Join(t.TempDir(), "enf.jsonl"))
+	t.Setenv(envContentCapture, "0")
+	t.Setenv(envEnforce, "1")
+	t.Setenv(envFailClosed, "0")
+
+	run := func(payload string) string {
+		var stdout bytes.Buffer
+		RunHook("PreToolUse", strings.NewReader(payload), &stdout, log.New(&bytes.Buffer{}, "", 0))
+		return stdout.String()
+	}
+	danger := `{"hook_event_name":"PreToolUse","session_id":"s","cwd":"/tmp","tool_name":"Bash","tool_input":{"command":"rm -rf /tmp/x"}}`
+	benign := `{"hook_event_name":"PreToolUse","session_id":"s","cwd":"/tmp","tool_name":"Bash","tool_input":{"command":"echo hi"}}`
+
+	t.Run("builder BLOCK denies", func(t *testing.T) {
+		socket, _ := serveSidecar(t, builderBlockBundle("BLOCK"))
+		t.Setenv(envSidecarSocket, socket)
+		d, reason := parsePermissionDecision(t, []byte(run(danger)))
+		if d != ccDecisionDeny {
+			t.Fatalf("builder BLOCK: decision = %q, want deny", d)
+		}
+		if !strings.Contains(reason, "destructive recursive delete") || !strings.Contains(reason, "conf-builder-policy") {
+			t.Errorf("reason = %q, want the builder rule reason + policy id", reason)
+		}
+		if strings.Contains(run(danger), "rm -rf") {
+			t.Errorf("command leaked to stdout (INV-2)")
+		}
+	})
+
+	t.Run("builder no-match proceeds", func(t *testing.T) {
+		socket, _ := serveSidecar(t, builderBlockBundle("BLOCK"))
+		t.Setenv(envSidecarSocket, socket)
+		if out := run(benign); strings.TrimSpace(out) != "" {
+			t.Errorf("no-match builder rule must proceed (empty stdout); got %q", out)
+		}
+	})
+
+	t.Run("builder REQUIRE_APPROVAL asks", func(t *testing.T) {
+		socket, _ := serveSidecar(t, builderBlockBundle("REQUIRE_APPROVAL"))
+		t.Setenv(envSidecarSocket, socket)
+		d, _ := parsePermissionDecision(t, []byte(run(danger)))
+		if d != ccDecisionAsk {
+			t.Fatalf("builder REQUIRE_APPROVAL: decision = %q, want ask", d)
+		}
+	})
+}
+
+// TestEnforcementConformance_StaleGate drives AC-5 end-to-end: under fail-closed a
+// stale-marked session DENIES at the PreToolUse gate with a content-free reason,
+// and `dev sync` clearing the marker restores proceed — all with a reachable ALLOW
+// sidecar (so the deny is attributable to staleness, not policy).
+func TestEnforcementConformance_StaleGate(t *testing.T) {
+	isolateConfig(t)
+	t.Setenv(envDID, testDID)
+	t.Setenv("OPENBOX_SPOOL_DIR", t.TempDir())
+	t.Setenv("OPENBOX_SESSION_DIR", t.TempDir())
+	t.Setenv(envEnforcementFile, filepath.Join(t.TempDir(), "enf.jsonl"))
+	t.Setenv(envStaleDir, filepath.Join(t.TempDir(), "stale"))
+	t.Setenv(envContentCapture, "0")
+	t.Setenv(envEnforce, "1")
+	t.Setenv(envFailClosed, "1")
+
+	socket, _ := serveSidecar(t, &sidecar.Bundle{Version: "allow", DefaultDecision: "allow"})
+	t.Setenv(envSidecarSocket, socket)
+
+	run := func() string {
+		var stdout bytes.Buffer
+		RunHook("PreToolUse", strings.NewReader(
+			`{"hook_event_name":"PreToolUse","session_id":"stale-sess","cwd":"/tmp","tool_name":"Bash","tool_input":{"command":"echo hi"}}`),
+			&stdout, log.New(&bytes.Buffer{}, "", 0))
+		return stdout.String()
+	}
+
+	// No marker yet → the reachable ALLOW sidecar proceeds.
+	if out := run(); strings.TrimSpace(out) != "" {
+		t.Fatalf("pre-marker: fail-closed + reachable allow must proceed; got %q", out)
+	}
+	// Mark the session stale (what a fail-closed SessionStart would do) → deny.
+	if err := writeStaleMarker("stale-sess"); err != nil {
+		t.Fatal(err)
+	}
+	d, reason := parsePermissionDecision(t, []byte(run()))
+	if d != ccDecisionDeny {
+		t.Fatalf("stale + fail-closed: decision = %q, want deny", d)
+	}
+	if !strings.Contains(reason, "dev sync") {
+		t.Errorf("stale deny reason = %q, want the run-`dev sync` nudge", reason)
+	}
+	// `dev sync` clears the marker → proceed again.
+	if err := ClearAllStaleMarkers(); err != nil {
+		t.Fatal(err)
+	}
+	if out := run(); strings.TrimSpace(out) != "" {
+		t.Errorf("after clearing the marker the tool must proceed; got %q", out)
+	}
+}

@@ -36,22 +36,32 @@ type BundleSource interface {
 	Fetch(ctx context.Context) (*Bundle, error)
 }
 
-// syncLoop refreshes the server's bundle from src on an interval until ctx is
-// cancelled. A fetch/parse failure is logged and the CURRENT bundle is KEPT —
-// sync failure never clears policy and never blocks an in-flight decision (the
-// SetBundle swap is atomic). This is the whole point of "out-of-band": the hot
-// path is untouched by sync outcomes.
+// syncLoop primes the server's bundle from src once, then (only when interval>0)
+// keeps re-loading it from the LOCAL file on that interval. A fetch/parse failure
+// is logged and the CURRENT bundle is KEPT — a bad reload never clears policy and
+// never blocks an in-flight decision (the SetBundle swap is atomic).
+//
+// STORY-E6-S8 / ADR-0005 §Decision-3 — the daemon does ZERO network I/O and the
+// 60 s background poll is RETIRED as the freshness mechanism. Freshness is now a
+// CLIENT-SIDE session-start staleness check (adapter) that pulls the org policy
+// and re-runs `dev sync`; the daemon merely loads whatever `dev sync` wrote via
+// the local FileBundleSource. So the default (interval<=0) is PRIME-ONCE with NO
+// background ticker. A positive --sync-interval is still accepted (back-compat):
+// it re-polls the LOCAL bundle file — never the network — for an operator who
+// wants the running daemon to pick up an out-of-band bundle edit mid-session; the
+// mtime gate keeps an unchanged file from being re-loaded needlessly.
 func syncLoop(ctx context.Context, s *Server, src BundleSource, interval time.Duration, log client.Logger) {
-	if interval <= 0 {
-		interval = defaultSyncInterval
-	}
 	if log == nil {
 		log = nopLogger{}
 	}
-	// Prime once immediately so a freshly started daemon loads policy without
-	// waiting a full interval (still off the hot path — the server serves fail-open
-	// until this returns).
+	// Prime once immediately so a freshly started daemon loads the local policy
+	// without waiting (still off the hot path — the server serves fail-open until
+	// this returns).
 	syncOnce(ctx, s, src, log)
+
+	if interval <= 0 {
+		return // prime-once: no background loop, no re-poll (the E6-S8 default)
+	}
 
 	t := time.NewTicker(interval)
 	defer t.Stop()

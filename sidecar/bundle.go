@@ -39,6 +39,30 @@ type Bundle struct {
 	// content hash, or monotonic revision). Opaque.
 	Version string `json:"version"`
 
+	// PolicyID and UpdatedAt are the PIN (STORY-E6-S8, ADR-0005 §Decision-3): the
+	// backend PolicyEntity.id + its updated_at, written by `openbox dev sync`. They
+	// are OPAQUE staleness coordinates — the session-start check compares the
+	// backend's current (id, updated_at) to this pin and warns / marks-stale on a
+	// mismatch. PolicyID also stamps the resolved Evaluation for audit parity with
+	// core. Neither is a secret (INV-1).
+	PolicyID  string `json:"policy_id,omitempty"`
+	UpdatedAt string `json:"updated_at,omitempty"`
+
+	// PolicyBuilder, when set, is the parsed backend config.policy_builder — a
+	// builder-authored policy `dev sync` fetched and translated. SetBundle selects
+	// the FIRST-MATCH builderEvaluator for it (NOT the max-severity bundleEvaluator,
+	// which is for the legacy hand-authored Rules format only — reusing Rules would
+	// change precedence, story §3). Mutually exclusive with Rules in practice.
+	PolicyBuilder *PolicyBuilderConfig `json:"policy_builder,omitempty"`
+
+	// RawRegoUnlocalized flags a backend policy authored as hand-written raw rego
+	// with NO config.policy_builder: it cannot be evaluated locally without a rego
+	// engine (ADR-0005 §Decision-2), so `dev sync` writes a bundle with this flag
+	// set and NO rules/builder. The daemon then serves a REAL local ALLOW (honest
+	// under-blocking, never over-blocking — OD9; the residual is surfaced by a
+	// non-secret `dev sync` warning). It is informational/telemetry only.
+	RawRegoUnlocalized bool `json:"raw_rego_unlocalized,omitempty"`
+
 	// DefaultDecision is returned when no rule matches. It MUST be an allow-class
 	// decision for a fail-open posture (OD9): an empty or "allow"/"continue" value
 	// yields ALLOW. A bundle that set this to a blocking decision would make the
@@ -138,6 +162,23 @@ func (b *Bundle) validate() error {
 		}
 		if _, ok := recognizedDecisions[strings.ToLower(strings.TrimSpace(r.Decision))]; !ok {
 			return fmt.Errorf("bundle rule[%d] (%s): unrecognized decision %q", i, r.ID, r.Decision)
+		}
+	}
+	// Validate PolicyBuilder rule decisions too (G_SEC-INFO-3): decisionToVerdict
+	// maps an unrecognized string to ALLOW (fail-open), so a typo'd decision like
+	// "BLOKC" would SILENTLY DROP a BLOCK. Reject it at load/translate time, exactly
+	// as the Rules[] path does, so a malformed builder policy keeps the last-good
+	// bundle rather than under-blocking (the FileBundleSource/dev-sync callers both
+	// go through validate).
+	if b.PolicyBuilder != nil {
+		for i, r := range b.PolicyBuilder.Rules {
+			if strings.TrimSpace(r.Decision) == "" {
+				return fmt.Errorf("policy_builder rule[%d] (%s): empty decision", i, r.ID)
+			}
+			if _, ok := recognizedDecisions[strings.ToLower(strings.TrimSpace(r.Decision))]; !ok {
+				return fmt.Errorf("policy_builder rule[%d] (%s): unrecognized decision %q "+
+					"(expected ALLOW/REQUIRE_APPROVAL/BLOCK/HALT)", i, r.ID, r.Decision)
+			}
 		}
 	}
 	return nil

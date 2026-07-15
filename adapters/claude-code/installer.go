@@ -184,6 +184,22 @@ func (i Installer) writeConfig(ref CredentialRef) error {
 		PrivateKeyAccount: ref.PrivateKeyAccount,
 		ContentCapture:    ref.ContentCapture,
 		InstallGitHook:    ref.InstallGitHook,
+		AgentID:           ref.AgentID,    // STORY-E6-S8: for `dev sync` / staleness
+		BackendURL:        ref.BackendURL, // control-plane base for the policy read
+	}
+	// Preserve a previously-persisted agent_id / backend_url on a re-init that does
+	// not carry them (the idempotent "already initialized, reusing creds" path
+	// resolves the DID from the store but not the agent id): re-running `dev init`
+	// must not silently drop the E6-S8 sync coordinates.
+	if cfg.AgentID == "" || cfg.BackendURL == "" {
+		if prior, err := loadDevConfig(i.configPath()); err == nil {
+			if cfg.AgentID == "" {
+				cfg.AgentID = prior.AgentID
+			}
+			if cfg.BackendURL == "" {
+				cfg.BackendURL = prior.BackendURL
+			}
+		}
 	}
 	raw, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {

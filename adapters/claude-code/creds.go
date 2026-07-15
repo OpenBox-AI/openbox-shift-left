@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/openbox-ai/openbox-shift-left/client"
+	"github.com/openbox-ai/openbox-shift-left/sidecar"
 )
 
 // Credential resolution for the hook binary. Identity is minted by
@@ -52,6 +53,11 @@ const (
 	envSeedDirect      = "OPENBOX_ED25519_SEED"
 	envConfigPath      = "OPENBOX_CONFIG"
 	envSecretFile      = "OPENBOX_SECRET_FILE"
+	envAgentID         = "OPENBOX_AGENT_ID"
+	envBackendURL      = "OPENBOX_BACKEND_URL"
+	envControlToken    = "OPENBOX_CONTROL_TOKEN"
+	envSidecarBundle   = "OPENBOX_SIDECAR_BUNDLE"
+	envStaleDir        = "OPENBOX_STALE_DIR"
 
 	defaultBaseURL = "https://core.openbox.ai"
 )
@@ -123,6 +129,16 @@ type DevConfig struct {
 	// governs EGRESS. Set false to disable. OPENBOX_SECRET_DETECTION overrides it.
 	// Only meaningful in enforce mode.
 	SecretDetection *bool `json:"secret_detection,omitempty"`
+	// AgentID is the backend agent id used to fetch this agent's current policy
+	// (STORY-E6-S8, ADR-0005): `openbox dev sync` and the session-start staleness
+	// check read it to call GET /agent/<id>/policies/current. Non-secret (INV-1),
+	// persisted by `dev init`. OPENBOX_AGENT_ID overrides (ResolveAgentID).
+	AgentID string `json:"agent_id,omitempty"`
+	// BackendURL is the openbox-backend CONTROL-PLANE base (distinct from BaseURL,
+	// the core data-plane base) used for the policy read. Persisted by `dev init`
+	// so `dev sync`/staleness need not re-supply it. OPENBOX_BACKEND_URL overrides
+	// (ResolveBackendURL). Non-secret.
+	BackendURL string `json:"backend_url,omitempty"`
 	// SecretFile, when set, points at the CLI's opt-in file secret backend
 	// (`openbox dev init --secret-backend file`) — a 0600 JSON store the hook
 	// reads instead of the OS keychain, for machines with no keyring. The
@@ -394,6 +410,44 @@ func ResolveEnforceTimeout() time.Duration {
 func ResolveSidecarSocket() string {
 	cfg, _ := loadDevConfig(DefaultConfigPath())
 	return firstNonEmpty(os.Getenv(envSidecarSocket), cfg.SidecarSocket)
+}
+
+// ResolveAgentID resolves the backend agent id for policy sync/staleness
+// (STORY-E6-S8): OPENBOX_AGENT_ID env first, then the dev config's agent_id
+// (persisted by `dev init`). Empty when nothing configures it (the caller then
+// skips the staleness check — never blocks). No secret I/O.
+func ResolveAgentID() string {
+	cfg, _ := loadDevConfig(DefaultConfigPath())
+	return firstNonEmpty(os.Getenv(envAgentID), cfg.AgentID)
+}
+
+// ResolveBackendURL resolves the openbox-backend CONTROL-PLANE base URL for the
+// policy read: OPENBOX_BACKEND_URL env first, then the dev config's backend_url.
+// Empty when unconfigured (staleness is then skipped — proceed). No secret I/O.
+func ResolveBackendURL() string {
+	cfg, _ := loadDevConfig(DefaultConfigPath())
+	return firstNonEmpty(os.Getenv(envBackendURL), cfg.BackendURL)
+}
+
+// ResolveControlToken resolves the ORG control-plane credential for the policy
+// read (OD-SYNC-4): the OPENBOX_CONTROL_TOKEN env ONLY. It is deliberately NOT a
+// config field and NEVER read from the runtime secret store — it is a
+// control-plane credential (an obx_key_ org key or Keycloak JWT), distinct from
+// the agent runtime obx_ key, supplied via env only so it cannot leak via a
+// config file or argv (INV-1). Empty when absent (staleness/sync then proceed on
+// the last-good bundle — never deny at fetch time).
+func ResolveControlToken() string {
+	return os.Getenv(envControlToken)
+}
+
+// ResolveBundlePath resolves the local policy-bundle path the daemon serves and
+// `dev sync`/staleness read: OPENBOX_SIDECAR_BUNDLE env, else the sidecar default.
+// The daemon reads the SAME env, so hook and daemon agree.
+func ResolveBundlePath() string {
+	if p := os.Getenv(envSidecarBundle); p != "" {
+		return p
+	}
+	return sidecar.DefaultBundlePath()
 }
 
 // ResolveCredentials assembles Credentials from env + the OS secret store. It

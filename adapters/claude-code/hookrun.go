@@ -133,6 +133,17 @@ func RunHook(sub string, stdin io.Reader, stdout io.Writer, logger *log.Logger) 
 	// to observe mode. The durable enforcement record runs AFTER the stdout
 	// decision, off the blocking path, best-effort (never blocks — INV-3).
 	if hook == HookPreToolUse && ResolveEnforce() {
+		// STORY-E6-S8: the fail-closed session-start staleness block is realized HERE
+		// (CC has no SessionStart "deny session" primitive). If this session was marked
+		// stale under fail-closed, deny every tool call — reusing the unchanged apply
+		// cascade (a synthesized HALT → mapVerdict deny) — until `openbox dev sync`
+		// clears the marker. The check is a local file stat (network-free — INV-3b).
+		if dec, blocked := staleGateDecision(ev.SessionID); blocked {
+			logEnforceDecision(logger, ev, dec, resolveFailurePolicy())
+			applied, _ := applyDecision(stdout, dec, false, ev.ToolInput)
+			recordEnforcement(logger, ev, dec, applied)
+			return
+		}
 		// Local redaction gate (STORY-E6-S9 / E6-S4): hand the tool body to the LOCAL
 		// sidecar and apply any content-only redaction it returns. Enabled when EITHER
 		// Tier-1 secret detection (OD-SYNC-10, default ON) OR content capture (OD4,
@@ -160,6 +171,14 @@ func RunHook(sub string, stdin io.Reader, stdout io.Writer, logger *log.Logger) 
 	// Opt-in ambient install (STORY-SL-5 wiring): make governance ambient by
 	// installing the commit-trailer hook into the repo this session opened.
 	if hook == HookSessionStart {
+		// STORY-E6-S8: best-effort session-start policy staleness check. Enforce-gated
+		// so Phase-1 observe stays byte-identical (no network, no stdout on
+		// SessionStart when enforce is off). Off the tool hot path; fully fail-safe —
+		// it warns (fail-open) or marks the session stale (fail-closed) but NEVER blocks
+		// the session and never denies at fetch time.
+		if ResolveEnforce() {
+			checkPolicyStaleness(logger, ev.SessionID, stdout)
+		}
 		maybeInstallGitHook(logger, ev.Cwd)
 	}
 

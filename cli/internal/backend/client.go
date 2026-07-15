@@ -198,6 +198,81 @@ func parseAgentList(raw json.RawMessage) []AgentSummary {
 	return nil
 }
 
+// Policy is the current per-agent policy read from the control plane
+// (STORY-E6-S8, ADR-0005). It is the subset of openbox-backend's PolicyEntity
+// the CLI needs to translate into a local sidecar bundle: the PIN (ID +
+// UpdatedAt), the structured config.policy_builder (when the policy was authored
+// in the builder UI), and whether raw rego is present (the fidelity-residual
+// case). RegoCode is INTENTIONALLY not exposed as a field beyond a presence
+// signal — it is never printed/logged (INV-1) and cannot be localized (ADR-0005
+// §Decision-2).
+type Policy struct {
+	ID            string
+	UpdatedAt     string
+	PolicyBuilder json.RawMessage // config.policy_builder, or nil when absent
+	HasRawRego    bool            // rego_code present but no policy_builder → unlocalized
+}
+
+// policyEnvelope decodes {status, data: PolicyEntity|null}. The global
+// TransformInterceptor wraps every response as {status, data}; a no-current-policy
+// read is HTTP 200 with data:null (not 404) — see recon A.
+type policyEnvelope struct {
+	Data *policyEntity `json:"data"`
+}
+
+type policyEntity struct {
+	ID        string          `json:"id"`
+	RegoCode  string          `json:"rego_code"`
+	Config    json.RawMessage `json:"config"`
+	UpdatedAt string          `json:"updated_at"`
+}
+
+// GetCurrentPolicy fetches GET /agent/<agentID>/policies/current with the ORG
+// control-plane credential (recon A: read:agent_policy is org-scoped;
+// OD-SYNC-4 = the org key, not the agent runtime obx_ key). It returns
+// (nil, nil) when the agent has no current policy (data:null → an allow /
+// no-policy state), so the caller writes a no-policy (allow) bundle. On a non-2xx
+// it returns *APIError so the caller can map an auth/permission failure to a hint.
+// The org key and the fetched rego are never logged (INV-1).
+func (c *Client) GetCurrentPolicy(ctx context.Context, agentID string) (*Policy, error) {
+	if strings.TrimSpace(agentID) == "" {
+		return nil, fmt.Errorf("agent id is required to read the current policy")
+	}
+	var env policyEnvelope
+	if err := c.do(ctx, http.MethodGet, "/agent/"+agentID+"/policies/current", nil, &env); err != nil {
+		return nil, err
+	}
+	if env.Data == nil {
+		return nil, nil // no current policy → allow / no-policy bundle
+	}
+	p := &Policy{ID: env.Data.ID, UpdatedAt: env.Data.UpdatedAt}
+	if pb := extractPolicyBuilder(env.Data.Config); pb != nil {
+		p.PolicyBuilder = pb
+	} else if strings.TrimSpace(env.Data.RegoCode) != "" {
+		p.HasRawRego = true // raw rego with no builder config → unlocalized residual
+	}
+	return p, nil
+}
+
+// extractPolicyBuilder pulls config.policy_builder out of the PolicyEntity.config
+// jsonb, returning nil when absent/empty. It parses only the ONE key it needs;
+// the rest of config (including config.path) is ignored.
+func extractPolicyBuilder(config json.RawMessage) json.RawMessage {
+	if len(config) == 0 {
+		return nil
+	}
+	var wrapper struct {
+		PolicyBuilder json.RawMessage `json:"policy_builder"`
+	}
+	if err := json.Unmarshal(config, &wrapper); err != nil {
+		return nil
+	}
+	if len(wrapper.PolicyBuilder) == 0 || string(wrapper.PolicyBuilder) == "null" {
+		return nil
+	}
+	return wrapper.PolicyBuilder
+}
+
 // do performs one request, applying auth headers and decoding the JSON body.
 func (c *Client) do(ctx context.Context, method, path string, body, out any) error {
 	var rdr io.Reader

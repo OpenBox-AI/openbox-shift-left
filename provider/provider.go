@@ -58,6 +58,14 @@ type CredentialRef struct {
 	BaseURL           string // optional core base URL; empty ⇒ adapter default
 	ContentCapture    bool   // org content posture (default false = metadata-only, INV-2)
 	InstallGitHook    bool   // STORY-SL-5: persist the ambient commit-hook install preference
+	// AgentID is the backend PolicyEntity subject — the agent id `openbox dev sync`
+	// and the session-start staleness check read to fetch this agent's current
+	// policy (STORY-E6-S8, ADR-0005). Non-secret (INV-1), persisted to dev.json.
+	AgentID string
+	// BackendURL is the openbox-backend CONTROL-PLANE base (distinct from BaseURL,
+	// the core data-plane base). Persisted so `dev sync` / staleness can reach the
+	// policy read endpoint without re-supplying OPENBOX_BACKEND_URL. Non-secret.
+	BackendURL string
 }
 
 // Installer writes one tool's native config, delegated from `dev init`.

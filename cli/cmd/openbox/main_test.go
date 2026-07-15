@@ -19,10 +19,12 @@ import (
 	"testing"
 	"time"
 
+	claudecode "github.com/openbox-ai/openbox-shift-left/adapters/claude-code"
 	"github.com/openbox-ai/openbox-shift-left/client"
 	"github.com/openbox-ai/openbox-shift-left/cli/internal/backend"
 	"github.com/openbox-ai/openbox-shift-left/cli/internal/devinit"
 	"github.com/openbox-ai/openbox-shift-left/cli/internal/secret"
+	"github.com/openbox-ai/openbox-shift-left/sidecar"
 )
 
 // fakeReg implements devinit.Registrar for the command-wiring tests.
@@ -682,4 +684,201 @@ func TestUnknownProviderAndMissingProvider(t *testing.T) {
 	if code := a.run([]string{"dev", "init", "--dry-run"}); code != exitError {
 		t.Errorf("missing provider exit = %d", code)
 	}
+}
+
+// ── STORY-E6-S8: `openbox dev sync` ──────────────────────────────────────────
+
+type fakePolicyReader struct {
+	pol *backend.Policy
+	err error
+}
+
+func (f *fakePolicyReader) GetCurrentPolicy(context.Context, string) (*backend.Policy, error) {
+	return f.pol, f.err
+}
+
+// syncApp builds an app whose env + policy reader are controllable, with getenv
+// wired to os.Getenv so the adapter resolvers (ResolveBackendURL/AgentID/Bundle)
+// and runDevSync's token read see the same t.Setenv values.
+func syncApp(reader policyReader) (*app, *bytes.Buffer, *bytes.Buffer) {
+	var out, errb bytes.Buffer
+	a := &app{
+		stdout:          &out,
+		stderr:          &errb,
+		getenv:          os.Getenv,
+		newPolicyReader: func(_, _, _ string) policyReader { return reader },
+	}
+	return a, &out, &errb
+}
+
+func TestDevSync_BuilderPolicyWritesPinnedBundle(t *testing.T) {
+	dir := t.TempDir()
+	bundlePath := filepath.Join(dir, "bundle.json")
+	t.Setenv("OPENBOX_CONFIG", filepath.Join(dir, "none.json"))
+	t.Setenv("OPENBOX_CONTROL_TOKEN", "obx_key_secretorgkey")
+	t.Setenv("OPENBOX_BACKEND_URL", "https://backend.example")
+	t.Setenv("OPENBOX_AGENT_ID", "agent-9")
+	t.Setenv("OPENBOX_SIDECAR_BUNDLE", bundlePath)
+	t.Setenv("OPENBOX_STALE_DIR", filepath.Join(dir, "stale"))
+
+	reader := &fakePolicyReader{pol: &backend.Policy{
+		ID:            "pol-42",
+		UpdatedAt:     "2026-07-15T12:00:00Z",
+		PolicyBuilder: []byte(`{"version":1,"rules":[{"decision":"BLOCK","reason":"no rm","matchMode":"all","conditions":[{"field":"spans[_].attributes.command","operator":"contains","transform":"value","value":"rm -rf","valueType":"string"}]}]}`),
+	}}
+	a, out, errb := syncApp(reader)
+
+	if code := a.run([]string{"dev", "sync"}); code != exitOK {
+		t.Fatalf("dev sync exit = %d, want 0 (stderr=%s)", code, errb.String())
+	}
+	raw, err := os.ReadFile(bundlePath)
+	if err != nil {
+		t.Fatalf("bundle not written: %v", err)
+	}
+	// The written bundle carries the PIN + the builder config, and is loadable.
+	b, err := sidecar.ParseBundle(raw)
+	if err != nil {
+		t.Fatalf("written bundle invalid: %v", err)
+	}
+	if b.PolicyID != "pol-42" || b.UpdatedAt != "2026-07-15T12:00:00Z" || b.PolicyBuilder == nil {
+		t.Errorf("bundle pin/config wrong: %+v", b)
+	}
+	// INV-1: the org key must never appear in stdout/stderr.
+	if strings.Contains(out.String(), "obx_key_") || strings.Contains(errb.String(), "obx_key_") {
+		t.Errorf("org key leaked to output")
+	}
+	// 0600 owner-only.
+	if fi, _ := os.Stat(bundlePath); fi != nil && fi.Mode().Perm() != 0o600 {
+		t.Errorf("bundle perm = %v, want 0600", fi.Mode().Perm())
+	}
+}
+
+func TestDevSync_NullPolicyWritesAllowBundle(t *testing.T) {
+	dir := t.TempDir()
+	bundlePath := filepath.Join(dir, "bundle.json")
+	t.Setenv("OPENBOX_CONFIG", filepath.Join(dir, "none.json"))
+	t.Setenv("OPENBOX_CONTROL_TOKEN", "obx_key_x")
+	t.Setenv("OPENBOX_BACKEND_URL", "https://b.example")
+	t.Setenv("OPENBOX_AGENT_ID", "a")
+	t.Setenv("OPENBOX_SIDECAR_BUNDLE", bundlePath)
+
+	a, _, errb := syncApp(&fakePolicyReader{pol: nil}) // data==null
+	if code := a.run([]string{"dev", "sync"}); code != exitOK {
+		t.Fatalf("dev sync (null policy) exit = %d (stderr=%s)", code, errb.String())
+	}
+	if _, err := os.Stat(bundlePath); err != nil {
+		t.Fatalf("allow/no-policy bundle not written: %v", err)
+	}
+}
+
+func TestDevSync_RawRegoWarnsAndProceeds(t *testing.T) {
+	dir := t.TempDir()
+	bundlePath := filepath.Join(dir, "bundle.json")
+	t.Setenv("OPENBOX_CONFIG", filepath.Join(dir, "none.json"))
+	t.Setenv("OPENBOX_CONTROL_TOKEN", "obx_key_x")
+	t.Setenv("OPENBOX_BACKEND_URL", "https://b.example")
+	t.Setenv("OPENBOX_AGENT_ID", "a")
+	t.Setenv("OPENBOX_SIDECAR_BUNDLE", bundlePath)
+
+	a, out, _ := syncApp(&fakePolicyReader{pol: &backend.Policy{ID: "pol-raw", UpdatedAt: "t", HasRawRego: true}})
+	if code := a.run([]string{"dev", "sync"}); code != exitOK {
+		t.Fatalf("dev sync raw-rego exit non-zero")
+	}
+	if !strings.Contains(out.String(), "raw rego") && !strings.Contains(out.String(), "fail-open") {
+		t.Errorf("expected a non-secret raw-rego warning, got %q", out.String())
+	}
+}
+
+func TestDevSync_FetchErrorNonZeroWithHint(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("OPENBOX_CONFIG", filepath.Join(dir, "none.json"))
+	t.Setenv("OPENBOX_CONTROL_TOKEN", "obx_key_x")
+	t.Setenv("OPENBOX_BACKEND_URL", "https://b.example")
+	t.Setenv("OPENBOX_AGENT_ID", "a")
+	t.Setenv("OPENBOX_SIDECAR_BUNDLE", filepath.Join(dir, "bundle.json"))
+
+	a, _, errb := syncApp(&fakePolicyReader{err: &backend.APIError{StatusCode: 403, Body: "forbidden"}})
+	if code := a.run([]string{"dev", "sync"}); code != exitError {
+		t.Fatalf("dev sync fetch error exit = %d, want %d", code, exitError)
+	}
+	if !strings.Contains(errb.String(), "read:agent_policy") {
+		t.Errorf("expected a mapped 403 hint, got %q", errb.String())
+	}
+}
+
+func TestDevSync_MissingTokenIsINV1Guard(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("OPENBOX_CONFIG", filepath.Join(dir, "none.json"))
+	os.Unsetenv("OPENBOX_CONTROL_TOKEN")
+	a, _, errb := syncApp(&fakePolicyReader{})
+	if code := a.run([]string{"dev", "sync"}); code != exitError {
+		t.Fatalf("missing token exit = %d, want error", code)
+	}
+	if !strings.Contains(errb.String(), "OPENBOX_CONTROL_TOKEN") {
+		t.Errorf("expected the INV-1 token guard, got %q", errb.String())
+	}
+}
+
+// TestDevInit_PersistsAgentIDAndBackendURL pins §6 / G3-F5: `dev init` persists
+// the backend agent_id + backend_url to dev.json (non-secret), they are preserved
+// across an idempotent re-init, and ResolveAgentID()/ResolveBackendURL() return
+// them with the env unset.
+func TestDevInit_PersistsAgentIDAndBackendURL(t *testing.T) {
+	home := t.TempDir()
+	cfgPath := filepath.Join(t.TempDir(), "openbox", "dev.json")
+	t.Setenv("HOME", home)
+	t.Setenv("OPENBOX_CONFIG", cfgPath)
+	// Env-unset for the resolvers so we prove the CONFIG fallback carries them.
+	t.Setenv("OPENBOX_AGENT_ID", "")
+	t.Setenv("OPENBOX_BACKEND_URL", "")
+
+	newApp := func() (*app, *bytes.Buffer) {
+		a, _, errb := testApp(map[string]string{
+			"OPENBOX_CONTROL_TOKEN": "obx_key_x",
+			"OPENBOX_BACKEND_URL":   "https://backend.acme",
+		})
+		store := secret.NewMemStore()
+		a.openStore = func(string) (secret.Store, error) { return store, nil }
+		a.newRegistrar = func(_, _, _ string) devinit.Registrar {
+			return &fakeReg{reg: &backend.Registration{AgentID: "agent-123", DID: "did:aip:x", APIKey: "obx_test_k", PrivateKey: "c2VlZA=="}}
+		}
+		// newPolicyReader left nil → the last-step sync is skipped (this test is about
+		// persistence, not the fetch).
+		return a, errb
+	}
+
+	a, errb := newApp()
+	if code := a.run([]string{"dev", "init", "--provider", "claude-code", "--org", "acme"}); code != exitOK {
+		t.Fatalf("init exit = %d; stderr=%q", code, errb.String())
+	}
+
+	assertPersisted := func(when string) {
+		raw, err := os.ReadFile(cfgPath)
+		if err != nil {
+			t.Fatalf("%s: read dev config: %v", when, err)
+		}
+		if !strings.Contains(string(raw), `"agent_id": "agent-123"`) {
+			t.Errorf("%s: dev.json missing agent_id:\n%s", when, raw)
+		}
+		if !strings.Contains(string(raw), `"backend_url": "https://backend.acme"`) {
+			t.Errorf("%s: dev.json missing backend_url:\n%s", when, raw)
+		}
+		// Resolvers read it back with env unset (config fallback).
+		if got := claudecode.ResolveAgentID(); got != "agent-123" {
+			t.Errorf("%s: ResolveAgentID() = %q, want agent-123", when, got)
+		}
+		if got := claudecode.ResolveBackendURL(); got != "https://backend.acme" {
+			t.Errorf("%s: ResolveBackendURL() = %q, want https://backend.acme", when, got)
+		}
+	}
+	assertPersisted("after init")
+
+	// Idempotent re-init (creds already in a fresh store won't be reused, but the
+	// installer must PRESERVE the prior agent_id/backend_url even when the ref does
+	// not carry them). Re-run and re-assert.
+	a2, errb2 := newApp()
+	if code := a2.run([]string{"dev", "init", "--provider", "claude-code", "--org", "acme"}); code != exitOK {
+		t.Fatalf("re-init exit = %d; stderr=%q", code, errb2.String())
+	}
+	assertPersisted("after re-init")
 }

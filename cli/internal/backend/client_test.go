@@ -166,3 +166,74 @@ func repeat(s string, n int) string {
 	}
 	return string(out)
 }
+
+// STORY-E6-S8: GetCurrentPolicy parses the {status,data:PolicyEntity|null}
+// envelope, sends the org key on X-API-Key with the read:agent_policy path, and
+// extracts config.policy_builder / raw-rego presence.
+func TestGetCurrentPolicy_BuilderConfig(t *testing.T) {
+	var gotPath, gotAuth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath, gotAuth = r.URL.Path, r.Header.Get("X-API-Key")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"status":200,"data":{"id":"pol-1","updated_at":"2026-07-15T00:00:00Z","rego_code":"package x","config":{"path":"org/o/policy_1","policy_builder":{"version":1,"rules":[]}}}}`)
+	}))
+	defer srv.Close()
+
+	c := New(srv.URL, "obx_key_"+repeat("f", 48), "openbox-cli")
+	p, err := c.GetCurrentPolicy(context.Background(), "agent-1")
+	if err != nil {
+		t.Fatalf("GetCurrentPolicy: %v", err)
+	}
+	if gotPath != "/agent/agent-1/policies/current" {
+		t.Errorf("path = %q", gotPath)
+	}
+	if gotAuth == "" {
+		t.Error("org key must go on X-API-Key")
+	}
+	if p == nil || p.ID != "pol-1" || p.UpdatedAt != "2026-07-15T00:00:00Z" {
+		t.Fatalf("policy pin not parsed: %+v", p)
+	}
+	if len(p.PolicyBuilder) == 0 {
+		t.Errorf("policy_builder not extracted: %+v", p)
+	}
+	if p.HasRawRego {
+		t.Errorf("HasRawRego must be false when policy_builder is present")
+	}
+}
+
+func TestGetCurrentPolicy_NullDataAndRawRego(t *testing.T) {
+	// data:null → (nil,nil): no current policy.
+	nullSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, `{"status":200,"data":null}`)
+	}))
+	defer nullSrv.Close()
+	if p, err := New(nullSrv.URL, "obx_key_x", "").GetCurrentPolicy(context.Background(), "a"); err != nil || p != nil {
+		t.Fatalf("null data = (%+v,%v), want (nil,nil)", p, err)
+	}
+
+	// raw rego, no policy_builder → HasRawRego true.
+	rawSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, `{"status":200,"data":{"id":"pol-2","updated_at":"t","rego_code":"package x\nallow { true }","config":{"path":"p"}}}`)
+	}))
+	defer rawSrv.Close()
+	p, err := New(rawSrv.URL, "obx_key_x", "").GetCurrentPolicy(context.Background(), "a")
+	if err != nil {
+		t.Fatalf("raw rego: %v", err)
+	}
+	if p == nil || !p.HasRawRego || len(p.PolicyBuilder) != 0 {
+		t.Fatalf("raw-rego policy = %+v, want HasRawRego=true, no builder", p)
+	}
+}
+
+func TestGetCurrentPolicy_APIErrorPropagates(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = io.WriteString(w, `forbidden`)
+	}))
+	defer srv.Close()
+	_, err := New(srv.URL, "obx_key_x", "").GetCurrentPolicy(context.Background(), "a")
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) || apiErr.StatusCode != http.StatusForbidden {
+		t.Fatalf("want *APIError 403, got %v", err)
+	}
+}
