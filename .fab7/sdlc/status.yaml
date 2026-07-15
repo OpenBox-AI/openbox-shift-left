@@ -1047,7 +1047,7 @@ stories:
       blocked_reason: null
   STORY-E7-S2:
     title: "Core (openbox-core): classify shell/mcp spans first-class in ComputeSemanticTypeFromSpan + retire the SL-13 EXT-core accept-list [UPSTREAM, critical path]"
-    status: "planned"
+    status: "done"
     epic: "E7"
     sprint: null
     priority: "P1"
@@ -1065,14 +1065,14 @@ stories:
     invariants:
       - "INV-8: additive classifier change (no wire break); retiring the EXT-core accept-list is a net simplification."
     gates:
-      G3_REVIEW: {decision: "pending"}
-      G_SEC: {decision: "pending"}
+      G3_REVIEW: {decision: "approved"}
+      G_SEC: {decision: "deferred"}
     audit:
-      commit: null
-      completed_at: null
+      commit: "99f1c86"
+      completed_at: "2026-07-15"
       validation_artifact: null
       last_run_id: null
-      status_reason: "PLANNED (UPSTREAM, sibling repo — local commit only). Extend core's ComputeSemanticTypeFromSpan (session.go:204) to classify shell (shell_command) and mcp (mcp_tool_call) spans first-class from root/attribute fields, and retire the SL-13 EXT-core dev-type accept-list patch now that every dev event maps to a stock accept-listed wire type (Workflow*/Activity*/SignalReceived). Critical path with E7-S1; gates the shift-left mirror."
+      status_reason: "DONE 2026-07-15 (brian directed local commit 99f1c86 to openbox-core; no push, no signature — sibling convention). BUILT: (1) ComputeSemanticTypeFromSpan (internal/content/session.go) now classifies dev hook families from the ROOT hook_type in the root-field fallback — shell -> shell_command (NEW SemanticTypeShellCommand const; the command text is never egressed, so hook_type is the only wire signal), mcp -> mcp_tool_call (belt-and-suspenders to the existing attrs['mcp.method']=='callTool' path). Additive: fires only after attribute/http/db/file classification returns internal (proven by a no-signal-stays-internal + file-precedes-hooktype test). (2) SL-13 EXT-core RETIRED (ADR-0004): removed the 7 dev-type constants (governance.go), their isValidGovernanceEventType cases (api/governance.go), and the SessionStarted/SessionEnded lifecycle special-cases (storage_session.go — native WorkflowStarted->create / WorkflowCompleted->terminal remain). shift-left emits stock base wire types core already accept-lists (E7-S0 HTTP 200), so no patch needed; net simplification, no wire break (INV-8). VALIDATION: full openbox-core suite green (30 pkgs); 6 new classifier tests. LIVE E2E on stock core: Bash->shell_command, mcp__github__create_issue->mcp_tool_call, file.write->file_write in spans.span_type. G_SEC DEFERRED (additive/INV-8, surface-reducing; no independent security review ran this session — brian to decide if one is needed). Memory: e7-s2-core-classifier-extcore-retire."
       blocked_reason: null
   STORY-E7-S3:
     title: "shift-left: Go flat SpanData builder (no OTel) — 16/32-hex ids, started/completed staging, common+family root fields; wire-shape conformance test"
@@ -1163,7 +1163,7 @@ stories:
       blocked_reason: null
   STORY-E7-S6:
     title: "shift-left: unify MAPPING.md + dev-event schema; adopt base conformance parity matrix; dashboard E2E (fix Unknown/empty timeline)"
-    status: "planned"
+    status: "done"
     epic: "E7"
     sprint: null
     priority: "P2"
@@ -1181,11 +1181,66 @@ stories:
     invariants:
       - "All INV re-verified end-to-end on the unified shape."
     gates:
+      G3_REVIEW: {decision: "approved"}
+    audit:
+      commit: "b20b0ba"
+      completed_at: "2026-07-15"
+      validation_artifact: null
+      last_run_id: null
+      status_reason: "DONE 2026-07-15 (brian directed local commit b20b0ba to shift-left; no push, no signature). BUILT: (1) MAPPING.md rewritten from the pre-E7 verbatim/EXT-core model to the base-SDK unified wire model (SessionStarted->WorkflowStarted, SessionEnded->WorkflowCompleted, Prompt/Commit/Deploy->SignalReceived, ToolCall/ToolResult->ActivityStarted+hook paired by SHARED span_id — records the E7-S4 correction that BOTH stages are ActivityStarted, superseding ADR-0004's ToolResult->ActivityCompleted table row) + a live-E2E section (§7). (2) dev-event.schema.json: corrected the stale 'emits verbatim / 1:1 via EXT-core' prose (frozen structure/enums untouched); noted the 65536 egress cap. (3) conformance_parity_test.go: executable C1-C9 <-> base tests/conformance/test_required_cases.py matrix (parity/go-extension/base-unmapped + a completeness guard test). (4) EXT-core artifact RETIRED (ADR-0004/E7-S2): deleted the patch/dev-event-types.json/apply.sh + the SL-13 drift guard; tombstoned ext-core/README + contracts README; repurposed acceptance/acceptance_test.go to prove the client emits ONLY stock wire types (offline). VALIDATION: all 9 shift-left modules + openbox-core green; gofmt clean. LIVE E2E on stock core (RUNBOOK Path A, real hook-binary session): Workflow*/Signal/ActivityStarted mapping + session lifecycle + shell->shell_command/mcp->mcp_tool_call (E7-S2) + INV-2 (0 bodies) all confirmed via DB. KEY FINDING (from openbox-backend run.provider.ts + core, authoritative): the dashboard reads EVENT-level columns (input/output/signal_args/duration_ms), which core writes only on the event-CREATING path; the completed hook stores the span but not the event row. 'Unknown' activity is FIXED (activities show Bash/Edit/mcp); the remaining empty Input/Duration spawned E7-S7 (input/signal_args enrichment — DONE e8f552c) and E7-S8 (duration — unbuilt). Memory: e7-s6-s7-dashboard-gaps."
+      blocked_reason: null
+
+  STORY-E7-S7:
+    title: "shift-left: enrich dev-event payload for the dashboard — structural activity_input + content-capture-gated prompt signal_args"
+    status: "done"
+    epic: "E7"
+    sprint: null
+    priority: "P2"
+    dependencies:
+      - "STORY-E7-S6"
+    blocked_by: []
+    write_scope:
+      - "client/payload.go  # activity_input (tool started) + signal_args (signals); buildSignalArgs"
+      - "adapters/claude-code/{mapper,hookrun,hookevent}.go  # Mapper.CaptureContent gates prompt capture on content-capture"
+    validation_commands:
+      - "client + adapters/claude-code go test ./...  # GREEN"
+      - "Live: capture off -> signal_args empty; capture on -> {\"prompt\":...}; tool activity_input structural + INV-2 (no command/path content)."
+    invariants:
+      - "INV-2: activity_input STRUCTURAL only (never command/file body); prompt egresses ONLY under content-capture opt-in, capped."
+    gates:
+      G3_REVIEW: {decision: "approved"}
+      G_SEC: {decision: "deferred"}
+    audit:
+      commit: "e8f552c"
+      completed_at: "2026-07-15"
+      validation_artifact: null
+      last_run_id: null
+      status_reason: "DONE 2026-07-15 (brian directed local commit e8f552c to shift-left; no push, no signature). Spawned by the E7-S6 live-E2E finding: the openbox-fe Verify tab renders EVENT-level input/output/signal_args, which were empty for dev events. BUILT: (1) tool ActivityStarted -> activity_input (Core input column) with STRUCTURAL metadata only (tool_name/kind/file_path/file_operation/mcp_server/mcp_tool), on the STARTED event that creates the row; never command/file body (INV-2). (2) SignalReceived -> signal_args: commit/deploy carry structural lineage; prompt_submitted carries the prompt ONLY under the content-capture opt-in (Mapper.CaptureContent = ResolveContentCapture(), the same flag Emit strips on), capped via capBody. permission_mode is session context -> stays in metadata (Overview), NOT Input. (3) HookEvent decodes 'prompt' but the mapper copies it to ev.Content.Prompt only when CaptureContent (default off = metadata-only, prompt never egresses; command/file/output content still never decoded, SL3-SEC-3). Redaction at source = the inert [EXT-guardrail-redaction] seam (brian: 'redaction as seam'). OUTPUT: correctly empty by design (Claude Code PostToolUse exposes no structural output; result body is gated content) — not a bug. VALIDATION: client + adapter modules green; conformance suite green (default path stays content-free). LIVE-VERIFIED both gate states. Memory: e7-s6-s7-dashboard-gaps."
+      blocked_reason: null
+
+  STORY-E7-S8:
+    title: "Dashboard tool-call DURATION — land event-level duration_ms while keeping the classified completed span"
+    status: "planned"
+    epic: "E7"
+    sprint: null
+    priority: "P3"
+    dependencies:
+      - "STORY-E7-S7"
+    blocked_by: []
+    write_scope:
+      - "openbox-core internal/services/.../governance_workflow.go (+ storage)  # OPTION C: completed-hook path updates the event row's duration_ms/end_time/output"
+      - "adapters/claude-code (spool)  # thread the started-stage timestamp so the completed span computes a real cross-process duration"
+    validation_commands:
+      - "Live: a timed tool call shows a non-zero DURATION on the Verify-tab Event Log Timeline."
+    invariants:
+      - "INV-2/INV-3 preserved; additive core change (no wire break)."
+    gates:
       G3_REVIEW: {decision: "pending"}
+      G_SEC: {decision: "pending"}
     audit:
       commit: null
       completed_at: null
       validation_artifact: null
       last_run_id: null
-      status_reason: "PLANNED. Update MAPPING.md + dev-event JSON schema to the unified shape; adopt the base conformance parity matrix (map E6-S7 C1-C9 <-> base test_required_cases.py); full live E2E in the shared dashboard confirming dev tool calls pair as ActivityStarted/Completed (fixes dashboard-devruntime-display-gaps). Blocked by E7-S4 + E7-S5."
+      status_reason: "PLANNED. The Verify-tab DURATION column reads event.duration_ms; a tool call is ONE ActivityStarted (started+completed merged by activity_id), and core writes duration/output/end_time only on the event-CREATING (started) path — the completed hook stores the span but does not update the event row, and duration is completed-stage timing. Two ways to land it: (C) additive core change — the completed-hook path updates the event's duration_ms/end_time (and output) from the completed payload, PLUS thread the started-stage timestamp through the SL-4 spool for a real cross-process value (keeps the classified completed span = the E7-S2 win); or (B) emit an ActivityStarted+ActivityCompleted lifecycle pair per tool call (ADR-0004 amendment; also fixes the multiagent-timeline parent-row pairing) — but the completed lifecycle event can't carry the classification span, so C is preferred to keep span_type. Touches the sensitive governance workflow -> needs G_SEC. Deferred from E7-S7. Memory: e7-s6-s7-dashboard-gaps."
       blocked_reason: null
