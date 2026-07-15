@@ -36,16 +36,26 @@ import (
 // exercised and validated.
 
 // maxCommandLen bounds the shell command carried on the LOCAL decision request,
-// measured in BYTES (not runes) so the marshaled DecisionRequest stays under the
-// sidecar server's 64 KiB byte read-limit (server.go defaultMaxRequestBytes) even
+// measured in BYTES (not runes) so the marshaled DecisionRequest stays small even
 // after JSON escaping expands control bytes (up to ×6) — a rune cap would let an
-// adversarial multibyte/control-heavy command overrun that limit (G_SEC LOW-1).
-// 8 KiB leaves ample headroom for escaping + the request's other fields; Bash
-// commands are far smaller in practice. Truncation can only ever cause a policy
-// to MISS a match (→ allow), never a wrong block — consistent with fail-open
+// adversarial multibyte/control-heavy command overrun the intended bound (G_SEC
+// LOW-1). 8 KiB is ample: the command is only a policy MATCH axis (not redacted),
+// and Bash commands are far smaller in practice. Truncation can only ever cause a
+// policy to MISS a match (→ allow), never a wrong block — consistent with fail-open
 // (OD9). The command is local-only and never egressed (see HookEvent.command /
 // INV-2).
 const maxCommandLen = 8 << 10 // 8 KiB (bytes)
+
+// maxRedactBody bounds the file BODY handed to the LOCAL sidecar for secret
+// redaction (STORY-E6-S9). A body over this cap is NOT sent (Content stays nil), so
+// the tool proceeds UNREDACTED (fail-open, OD9) rather than risk (a) a request over
+// the server's read limit (server.go defaultMaxRequestBytes = 1 MiB) or (b) a slow
+// scan on the ~50 ms hot path. The cap is a SKIP threshold, never a truncation: a
+// truncated body reconstructed into updatedInput would DROP the file's tail and
+// corrupt the write, so we send the whole body or none. 512 KiB comfortably covers
+// the .env/config/key pastes that are the real secret-leak surface; larger-body
+// scanning is a noted follow-up (bigger local request cap or streaming scan).
+const maxRedactBody = 512 << 10 // 512 KiB (bytes)
 
 // maxJSONCompareBytes bounds the jsonEqual double-parse (E6-S4 G_SEC INFO-2). The
 // redacted input is already capped by the sidecar Client's bounded read (≤64 KiB),
@@ -67,8 +77,8 @@ const maxJSONCompareBytes = 256 << 10 // 256 KiB (bytes)
 //
 // It reads NO secret (identity is the DID only, already resolved on the hot path
 // — INV-1) and takes NO network I/O (only the local per-user socket — INV-3b).
-func EnforceDecision(ctx context.Context, cl *sidecar.Client, id Identity, e *HookEvent, contentCapture bool) sidecar.Decision {
-	return cl.Decide(ctx, buildDecisionRequest(id, e, contentCapture))
+func EnforceDecision(ctx context.Context, cl *sidecar.Client, id Identity, e *HookEvent, localRedaction bool) sidecar.Decision {
+	return cl.Decide(ctx, buildDecisionRequest(id, e, localRedaction))
 }
 
 // newSidecarClient builds the fail-open enforce-hook client for the configured
@@ -183,13 +193,14 @@ func failClosedReason(cause string) string {
 // path/operation, permission mode, and (LOCAL-ONLY, never egressed) the shell
 // command.
 //
-// Content (INV-2) is populated ONLY when contentCapture is true (the org's OD4
-// opt-in): a redaction-capable local evaluator ([EXT-guardrail-redaction]) needs
-// the tool's body to redact, the analog of the reference SDK sending the full
-// activity_input to its gate. Like the command axis it goes ONLY to the local
-// Unix socket and is NEVER egressed. With content capture OFF (the default) Content
-// stays nil and the request is byte-identical to E6-S3.
-func buildDecisionRequest(id Identity, e *HookEvent, contentCapture bool) sidecar.DecisionRequest {
+// Content (INV-2) is populated when localRedaction is true — i.e. Tier-1 secret
+// detection (STORY-E6-S9, OD-SYNC-10, default ON) OR content capture (OD4) is on.
+// The local sidecar needs the tool's body to scan/redact, the analog of the
+// reference SDK sending the full activity_input to its gate. Like the command axis
+// it goes ONLY to the local Unix socket and is NEVER egressed (the observe Mapper
+// egress path is unchanged, still metadata-only unless content capture is on). With
+// BOTH off, Content stays nil and the request is byte-identical to E6-S3.
+func buildDecisionRequest(id Identity, e *HookEvent, localRedaction bool) sidecar.DecisionRequest {
 	kind, sem, fileOp, mcpServer, function := classifyTool(e.ToolName)
 
 	tool := client.Tool{Name: capStr(e.ToolName), Kind: kind}
@@ -224,12 +235,13 @@ func buildDecisionRequest(id Identity, e *HookEvent, contentCapture bool) sideca
 		Attributes:   compactAny(attrs),
 	}
 
-	// Content is GATED on the OD4 opt-in and LOCAL-only (INV-2). Only the file
-	// BODY is carried today (the primary content-bearing, redactable tool input);
-	// it is what a future redaction evaluator would sanitize. Left nil for a
-	// non-file tool or an empty body so the request carries no empty content field.
-	if contentCapture && isFileSemantic(sem) {
-		if body := e.fileText(); body != "" {
+	// Content is GATED on localRedaction and LOCAL-only (INV-2). Only the file BODY
+	// is carried (the redactable tool input the secret detector scans). A body over
+	// maxRedactBody is NOT sent — the tool proceeds unredacted (fail-open) rather
+	// than be truncated (a truncated reconstruction would corrupt the write). Left
+	// nil for a non-file tool, an empty body, or an oversized body.
+	if localRedaction && isFileSemantic(sem) {
+		if body := e.fileText(); body != "" && len(body) <= maxRedactBody {
 			req.Content = &client.Content{FileText: body}
 		}
 	}
@@ -332,11 +344,12 @@ type hookSpecificOutput struct {
 	HookEventName            string `json:"hookEventName"`
 	PermissionDecision       string `json:"permissionDecision,omitempty"`
 	PermissionDecisionReason string `json:"permissionDecisionReason,omitempty"`
-	// UpdatedInput is the guardrail-redacted replacement tool_input (STORY-E6-S4).
-	// Claude Code treats it as a FULL replacement of tool_input (missing fields are
-	// dropped), applied before the tool runs. Emitted verbatim from the sidecar
-	// Decision, ALONE on the proceed path (no permissionDecision) so CC's own
-	// permission flow still applies. omitempty ⇒ absent on the deny/ask paths and
+	// UpdatedInput is the redacted replacement tool_input (STORY-E6-S4 plumbing,
+	// E6-S9 source). Claude Code treats it as a FULL replacement of tool_input,
+	// applied before the tool runs. RECONSTRUCTED from the original tool_input with
+	// only the content field swapped (redactToolInput) — never sourced whole from
+	// the sidecar. Emitted ALONE on the proceed path (no permissionDecision) so CC's
+	// own permission flow still applies. omitempty ⇒ absent on the deny/ask paths and
 	// whenever there is no redaction. Content-bearing but LOCAL (stdout → CC on this
 	// machine, never egressed — INV-2).
 	UpdatedInput json.RawMessage `json:"updatedInput,omitempty"`
@@ -349,22 +362,23 @@ type hookSpecificOutput struct {
 //
 // Two levers, in the SDK's own order:
 //   - mapVerdict yields deny/ask (the E6-S2 cascade) → emit permissionDecision.
-//   - ELSE (the proceed path — CONSTRAIN/ALLOW/UNKNOWN) → apply guardrail input
-//     redaction (E6-S4): emit `updatedInput` ALONE (no permissionDecision), so
-//     Claude Code's own permission flow still applies. This mirrors the SDK, which
-//     runs _apply_input_redaction ONLY after enforce_verdict returns without
-//     raising. On deny the tool never runs; on ask the SDK raises before redaction,
-//     so neither rewrites (ask-path redaction is a deferred consideration).
+//   - ELSE (the proceed path — CONSTRAIN/ALLOW/UNKNOWN) → apply input redaction
+//     (E6-S4 plumbing, E6-S9 source): emit `updatedInput` ALONE (no
+//     permissionDecision), so Claude Code's own permission flow still applies. This
+//     mirrors the SDK, which runs _apply_input_redaction ONLY after enforce_verdict
+//     returns without raising. On deny the tool never runs; on ask the SDK raises
+//     before redaction, so neither rewrites (ask-path redaction is a deferred
+//     consideration).
 //
 // TIGHTEN-ONLY is preserved: stdout carries only deny/ask OR a content-STRIPPING
 // updatedInput — never permissionDecision:allow. When nothing applies (no deny/ask
-// AND no redaction — the content-capture-off default) it writes NOTHING, byte-
-// identical to observe / E6-S3.
+// AND no redaction — e.g. both secret detection and content capture off) it writes
+// NOTHING, byte-identical to observe / E6-S3.
 //
 // It NEVER wedges the tool call: a nil stdout or any marshal/write fault degrades
 // to "proceed" (fail-open, OD9) — enforcement can only ADD a deny/ask/redaction,
 // never hang or fail a call on an apply-side error (INV-3b fail-open).
-func applyDecision(stdout io.Writer, dec sidecar.Decision, contentCapture bool, origInput json.RawMessage) (applied string, emitted bool) {
+func applyDecision(stdout io.Writer, dec sidecar.Decision, localRedaction bool, origInput json.RawMessage) (applied string, emitted bool) {
 	if stdout == nil {
 		return "", false // fail-open: nowhere to write
 	}
@@ -375,7 +389,7 @@ func applyDecision(stdout io.Writer, dec sidecar.Decision, contentCapture bool, 
 		PermissionDecisionReason: reason,
 	}
 	if decision == "" {
-		hso.UpdatedInput = applyInputRedaction(dec, contentCapture, origInput)
+		hso.UpdatedInput = applyInputRedaction(dec, localRedaction, origInput)
 	}
 	if hso.PermissionDecision == "" && len(hso.UpdatedInput) == 0 {
 		return "", false // proceed, nothing to say → write nothing (E6-S3 identical)
@@ -390,54 +404,103 @@ func applyDecision(stdout io.Writer, dec sidecar.Decision, contentCapture bool, 
 	return decision, true
 }
 
-// applyInputRedaction ports the reference SDK's _apply_input_redaction
-// (openbox-temporal-sdk-python activity_interceptor.py:441-478) to Claude Code. It
-// returns the guardrail-redacted tool_input to emit as `updatedInput`, or nil to
-// emit nothing. The caller invokes it ONLY on the proceed path (no deny/ask) —
-// exactly as the SDK applies redaction only after enforce_verdict returns without
-// raising.
+// applyInputRedaction turns a LOCAL redaction (STORY-E6-S9 secret detection) into
+// the Claude Code `updatedInput` to emit, or nil to emit nothing. The caller invokes
+// it ONLY on the proceed path (no deny/ask) — exactly as the reference SDK applies
+// _apply_input_redaction (activity_interceptor.py:441-478) only after enforce_verdict
+// returns without raising.
 //
 // It returns nil (no rewrite) unless ALL hold:
-//   - content capture is on (the OD4 opt-in). Without it, no tool content ever
-//     reached the sidecar, so there is nothing to redact and the path MUST be
-//     byte-identical to E6-S3 — this is the load-bearing INV-2 gate.
-//   - the Decision carries a non-empty RedactedInput that parses as a JSON OBJECT
-//     (a tool_input is an object). A non-object / garbage value is skipped rather
-//     than corrupting the tool call — the analog of the SDK's "unexpected
-//     redacted_input type → warn + return the original unchanged".
-//   - the redacted input DIFFERS from the original tool_input. Never rewrite a tool
-//     call to an identical input (a pointless, noisy no-op).
+//   - local redaction is on (secret detection [OD-SYNC-10, default ON] or content
+//     capture [OD4]). Without it no tool body ever reached the sidecar → nothing to
+//     redact and the path MUST be byte-identical to E6-S3 (the INV-2 gate).
+//   - the Decision carries a non-empty RedactedContent.FileText.
+//   - reconstructing the ORIGINAL tool_input with ONLY the content field replaced
+//     produces a valid object that DIFFERS from the original. A no-op / unparseable
+//     original is skipped, never rewritten to garbage — the analog of the SDK's
+//     "unexpected redacted_input → warn + return original unchanged".
 //
-// The returned bytes are Claude Code's FULL tool_input replacement, emitted
-// verbatim. Content-bearing but LOCAL: it travels stdout → Claude Code on this
-// machine and is NEVER egressed (INV-2) — see DecisionResponse.RedactedInput.
+// THE STRUCTURAL GUARANTEE (E6-S4/S7 carry-forward, closed here): the emitted object
+// is the ORIGINAL tool_input with the single recognized content field swapped for
+// the redacted body — every structural locator (file_path, …) is carried over from
+// the original VERBATIM, never from the sidecar. A buggy/compromised sidecar can
+// only change a content VALUE; it can never add/drop/alter a structural field. So
+// "content-only fields, never structural" is a structural property, not a promise.
 //
-// [EXT-guardrail-redaction]: the Phase-1 bundleEvaluator is metadata-only and
-// produces NO RedactedInput, so this returns nil in the field until a
-// redaction-capable evaluator (embed the server-side Guardrail API, or a content-on
-// /evaluate mirror) lands. The seam + gate + apply are built and tested here.
-func applyInputRedaction(dec sidecar.Decision, contentCapture bool, origInput json.RawMessage) json.RawMessage {
-	if !contentCapture {
+// The returned bytes are Claude Code's FULL tool_input replacement. Content-bearing
+// but LOCAL: it travels stdout → Claude Code on this machine and is NEVER egressed
+// (INV-2) — see DecisionResponse.RedactedContent.
+func applyInputRedaction(dec sidecar.Decision, localRedaction bool, origInput json.RawMessage) json.RawMessage {
+	if !localRedaction {
 		return nil
 	}
-	red := dec.RedactedInput
-	if len(red) == 0 {
+	red := dec.RedactedContent
+	if red == nil || red.FileText == "" {
+		return nil
+	}
+	rebuilt := redactToolInput(origInput, red.FileText)
+	if len(rebuilt) == 0 {
+		return nil // no recognized content field / unparseable original → skip
+	}
+	if jsonEqual(rebuilt, origInput) {
+		return nil // redaction changed nothing after reconstruction → no-op
+	}
+	return rebuilt
+}
+
+// contentFieldKeys are the tool_input keys that carry a redactable BODY, in the same
+// precedence HookEvent.fileText() reads them: Write's "content", then Edit's
+// "new_string". redactToolInput swaps ONLY the first key holding a NON-EMPTY string
+// (mirroring fileText() exactly, so the field written back is the field that was
+// scanned — G_SEC LOW-1); every other key (file_path and any structural locator) is
+// preserved verbatim. Extending this to MultiEdit's edits[].new_string[] is a noted
+// follow-up (under-capture is INV-2-safe — nothing extra to redact).
+var contentFieldKeys = []string{"content", "new_string"}
+
+// redactToolInput rebuilds a tool_input object with ONLY the recognized content
+// field replaced by redactedBody, preserving every other field byte-for-byte. It
+// returns nil when the original is not a JSON object or carries no recognized
+// non-empty content field (nothing safe to rewrite). This is where the content-only
+// guarantee is enforced: structural fields are copied from the ORIGINAL as opaque
+// json.RawMessage and are never sourced from the sidecar.
+func redactToolInput(origInput json.RawMessage, redactedBody string) json.RawMessage {
+	if len(origInput) == 0 {
 		return nil
 	}
 	var obj map[string]json.RawMessage
-	if err := json.Unmarshal(red, &obj); err != nil || len(obj) == 0 {
-		// Skip unless it is a NON-EMPTY JSON object. err rejects an array/scalar/
-		// garbage; len(obj)==0 rejects BOTH a JSON `null` (unmarshals to a nil map
-		// with no error) AND an empty `{}` — either would rewrite tool_input to
-		// null/empty and corrupt the call (the story stop condition + the SDK's
-		// warn-and-skip on a non-dict/non-list redacted_input). A real redaction
-		// sanitizes values within the object; it never empties the whole input.
+	if err := json.Unmarshal(origInput, &obj); err != nil || len(obj) == 0 {
+		return nil // not a (non-empty) object → nothing safe to reconstruct
+	}
+	// Target the field fileText() actually read: the first content key holding a
+	// NON-EMPTY string. This keeps the write-back field == the scanned field, so a
+	// degenerate {"content":"","new_string":"<secret>"} redacts new_string (where the
+	// secret is) rather than the empty content (which would leave the secret in place).
+	key := ""
+	for _, k := range contentFieldKeys {
+		raw, ok := obj[k]
+		if !ok {
+			continue
+		}
+		var s string
+		if err := json.Unmarshal(raw, &s); err != nil || s == "" {
+			continue // absent / non-string / empty → not what fileText() would read
+		}
+		key = k
+		break
+	}
+	if key == "" {
+		return nil // no recognized non-empty content field to redact
+	}
+	val, err := json.Marshal(redactedBody)
+	if err != nil {
 		return nil
 	}
-	if jsonEqual(red, origInput) {
-		return nil // present but unchanged → nothing to apply
+	obj[key] = val
+	out, err := json.Marshal(obj)
+	if err != nil {
+		return nil
 	}
-	return red
+	return out
 }
 
 // jsonEqual reports whether two JSON documents are semantically equal, ignoring
@@ -577,6 +640,12 @@ type enforcementRecord struct {
 	ApprovalID          string           `json:"approval_id,omitempty"` // server correlation id for a REQUIRE_APPROVAL→ask (E6-S6, INV-2 safe)
 	Constraints         []map[string]any `json:"constraints,omitempty"`
 	GuardrailCategories []string         `json:"guardrail_categories,omitempty"`
+	// Redacted / RedactionCategories record a Tier-1 redact-and-continue (E6-S9):
+	// whether the tool body was rewritten and which secret CATEGORIES fired
+	// (aws_key, entropy, …) — CONTENT-FREE (INV-2): category names only, never the
+	// secret or the body.
+	Redacted            bool     `json:"redacted,omitempty"`
+	RedactionCategories []string `json:"redaction_categories,omitempty"`
 }
 
 // DefaultEnforcementPath is the enforcement audit sink, a sibling of the advisory
@@ -616,6 +685,16 @@ func recordEnforcement(logger *log.Logger, e *HookEvent, dec sidecar.Decision, a
 	}
 	if g := dec.Evaluation.Guardrail; g != nil {
 		rec.GuardrailCategories = reasonTypeCategories(g.Reasons) // category types only (INV-2)
+	}
+	// Record the redaction signal only when a rewrite was ACTUALLY applied to CC —
+	// i.e. the proceed path (applied=="") produced a non-nil reconstruction — so the
+	// audit's `redacted` bool never over-reports a category-hit that did not reach
+	// updatedInput (G_SEC INFO-2). redactToolInput is the same pure function
+	// applyDecision used, so this stays consistent with what was emitted.
+	if applied == "" && dec.RedactedContent != nil &&
+		len(redactToolInput(e.ToolInput, dec.RedactedContent.FileText)) > 0 {
+		rec.Redacted = true
+		rec.RedactionCategories = dec.RedactionCategories // category names only (INV-2)
 	}
 	line, err := json.Marshal(rec)
 	if err != nil {

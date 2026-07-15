@@ -458,62 +458,139 @@ func TestApplyDecision(t *testing.T) {
 	})
 }
 
-// ── E6-S4: guardrail redaction application (updatedInput) ────────────────────
+// ── E6-S4/E6-S9: input redaction application (updatedInput) ──────────────────
 
-// TestApplyInputRedaction covers the port of the SDK's _apply_input_redaction and
-// its gates (AC-1/AC-2/AC-6): returns the redacted object only when content capture
-// is on, the Decision carries a non-empty JSON OBJECT, and it DIFFERS from the
-// original; otherwise nil (no rewrite).
+// contentField extracts a tool_input's content field (content|new_string) for a
+// test assertion.
+func contentField(t *testing.T, raw json.RawMessage) string {
+	t.Helper()
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &m); err != nil {
+		t.Fatalf("not an object: %s", raw)
+	}
+	for _, k := range []string{"content", "new_string"} {
+		if v, ok := m[k]; ok {
+			var s string
+			_ = json.Unmarshal(v, &s)
+			return s
+		}
+	}
+	return ""
+}
+
+// TestApplyInputRedaction covers the E6-S9 content-field reconstruction and its
+// gates (AC-1/AC-3/AC-5): it rebuilds the ORIGINAL tool_input with ONLY the content
+// field replaced by the redacted body, when local redaction is on and the result
+// differs; otherwise nil (no rewrite).
 func TestApplyInputRedaction(t *testing.T) {
-	orig := json.RawMessage(`{"file_path":"/x","content":"api_key=SECRET"}`)
-	red := json.RawMessage(`{"file_path":"/x","content":"api_key=***REDACTED***"}`)
+	writeOrig := json.RawMessage(`{"file_path":"/x","content":"api_key=SECRET"}`)
+	editOrig := json.RawMessage(`{"file_path":"/y","old_string":"a","new_string":"tok=SECRET"}`)
+	redactedBody := "api_key=${OPENBOX_REDACTED_SECRET_ASSIGNMENT}"
+
+	rc := func(body string) *client.Content { return &client.Content{FileText: body} }
 
 	cases := []struct {
 		name           string
-		contentCapture bool
-		redacted       json.RawMessage
+		localRedaction bool
+		redacted       *client.Content
 		orig           json.RawMessage
-		want           string // "" ⇒ nil (no rewrite); else the JSON to emit
+		wantContent    string // "" ⇒ expect nil (no rewrite); else expected content-field value
 	}{
-		{"applies when on + present + different", true, red, orig, string(red)},
-		{"inert when content-capture off", false, red, orig, ""},
-		{"nil when no redacted input", true, nil, orig, ""},
-		{"nil when redacted equals original (reordered keys)", true,
-			json.RawMessage(`{"content":"api_key=SECRET","file_path":"/x"}`), orig, ""},
-		{"nil when redacted is not a JSON object (array)", true, json.RawMessage(`["a","b"]`), orig, ""},
-		{"nil when redacted is not a JSON object (scalar)", true, json.RawMessage(`"just a string"`), orig, ""},
-		{"nil when redacted is JSON null (never rewrite to null)", true, json.RawMessage(`null`), orig, ""},
-		{"nil when redacted is an empty object (never empty the input)", true, json.RawMessage(`{}`), orig, ""},
-		{"nil when redacted is invalid JSON", true, json.RawMessage(`{not json`), orig, ""},
-		{"applies against an unparsable original", true, red, json.RawMessage(`{bad`), string(red)},
+		{"applies to Write.content", true, rc(redactedBody), writeOrig, redactedBody},
+		{"applies to Edit.new_string", true, rc("tok=${OPENBOX_REDACTED_SECRET_ASSIGNMENT}"), editOrig, "tok=${OPENBOX_REDACTED_SECRET_ASSIGNMENT}"},
+		{"inert when local redaction off", false, rc(redactedBody), writeOrig, ""},
+		{"nil when no RedactedContent", true, nil, writeOrig, ""},
+		{"nil when empty RedactedContent body", true, rc(""), writeOrig, ""},
+		{"nil when redacted body equals original", true, rc("api_key=SECRET"), writeOrig, ""},
+		{"nil when original has no content field", true, rc(redactedBody), json.RawMessage(`{"file_path":"/x"}`), ""},
+		{"nil when original unparseable", true, rc(redactedBody), json.RawMessage(`{bad`), ""},
+		{"nil when original is an empty object", true, rc(redactedBody), json.RawMessage(`{}`), ""},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			got := applyInputRedaction(sidecar.Decision{RedactedInput: c.redacted}, c.contentCapture, c.orig)
-			if c.want == "" {
+			got := applyInputRedaction(sidecar.Decision{RedactedContent: c.redacted}, c.localRedaction, c.orig)
+			if c.wantContent == "" {
 				if got != nil {
 					t.Errorf("want nil (no rewrite), got %s", got)
 				}
 				return
 			}
-			if string(got) != c.want {
-				t.Errorf("got %s, want %s", got, c.want)
+			if cf := contentField(t, got); cf != c.wantContent {
+				t.Errorf("content field = %q, want %q (out=%s)", cf, c.wantContent, got)
 			}
 		})
 	}
 }
 
-// TestApplyDecision_Redaction covers AC-1/AC-2/AC-3: on the proceed path a redaction
+// TestApplyInputRedaction_StructuralFieldsInviolable covers AC-2 (the E6-S7
+// carry-forward): the emitted updatedInput differs from the original ONLY in the
+// content field; structural locators are carried over verbatim and can never be
+// altered by the sidecar's returned body (the body is a plain string; only the
+// content field can change).
+func TestApplyInputRedaction_StructuralFieldsInviolable(t *testing.T) {
+	orig := json.RawMessage(`{"file_path":"/etc/app.conf","content":"password=hunter2secret9999","mode":"0644"}`)
+	got := applyInputRedaction(
+		sidecar.Decision{RedactedContent: &client.Content{FileText: "password=${OPENBOX_REDACTED_SECRET_ASSIGNMENT}"}},
+		true, orig)
+	if got == nil {
+		t.Fatal("expected a rewrite")
+	}
+	var o, g map[string]json.RawMessage
+	_ = json.Unmarshal(orig, &o)
+	_ = json.Unmarshal(got, &g)
+	for _, k := range []string{"file_path", "mode"} {
+		if string(o[k]) != string(g[k]) {
+			t.Errorf("structural field %q changed: %s → %s", k, o[k], g[k])
+		}
+	}
+	if string(o["content"]) == string(g["content"]) {
+		t.Error("content field was not redacted")
+	}
+	if strings.Contains(string(got), "hunter2secret9999") {
+		t.Errorf("secret survived: %s", got)
+	}
+}
+
+// TestApplyInputRedaction_NonEmptyFieldSelection covers G3 Finding 1 / G_SEC LOW-1:
+// redactToolInput must write the redacted body into the SAME field fileText() reads
+// — the first NON-EMPTY content key. On a degenerate {"content":"","new_string":
+// "<secret>"} (or content:null), the redaction must land on new_string (where the
+// secret is), never into the empty content (which would leave the secret in place
+// AND corrupt the call). This is the field the scanner scanned.
+func TestApplyInputRedaction_NonEmptyFieldSelection(t *testing.T) {
+	redactedBody := "tok=${OPENBOX_REDACTED_SECRET_ASSIGNMENT}"
+	for _, orig := range []json.RawMessage{
+		json.RawMessage(`{"file_path":"/x","content":"","new_string":"tok=AKIAIOSFODNN7EXAMPLE"}`),
+		json.RawMessage(`{"file_path":"/x","content":null,"new_string":"tok=AKIAIOSFODNN7EXAMPLE"}`),
+	} {
+		got := applyInputRedaction(sidecar.Decision{RedactedContent: &client.Content{FileText: redactedBody}}, true, orig)
+		if got == nil {
+			t.Fatalf("expected a rewrite for %s", orig)
+		}
+		if strings.Contains(string(got), "AKIAIOSFODNN7EXAMPLE") {
+			t.Errorf("secret survived (redacted the wrong field): %s → %s", orig, got)
+		}
+		var m map[string]json.RawMessage
+		_ = json.Unmarshal(got, &m)
+		var ns string
+		_ = json.Unmarshal(m["new_string"], &ns)
+		if ns != redactedBody {
+			t.Errorf("new_string not redacted: %s", got)
+		}
+	}
+}
+
+// TestApplyDecision_Redaction covers AC-1/AC-4/AC-5: on the proceed path a redaction
 // is emitted as updatedInput ALONE (no permissionDecision); a deny/ask carries no
-// updatedInput; and with content-capture off the proceed path writes nothing
+// updatedInput; and with local redaction off the proceed path writes nothing
 // (byte-identical to E6-S3).
 func TestApplyDecision_Redaction(t *testing.T) {
 	orig := json.RawMessage(`{"file_path":"/x","content":"api_key=SECRET"}`)
-	red := json.RawMessage(`{"file_path":"/x","content":"api_key=***REDACTED***"}`)
+	rc := &client.Content{FileText: "api_key=${OPENBOX_REDACTED_SECRET_ASSIGNMENT}"}
 
-	t.Run("proceed + capture on → updatedInput alone", func(t *testing.T) {
+	t.Run("proceed + redaction on → updatedInput alone", func(t *testing.T) {
 		var out bytes.Buffer
-		dec := sidecar.Decision{Evaluation: client.Evaluation{Verdict: client.VerdictAllow}, RedactedInput: red}
+		dec := sidecar.Decision{Evaluation: client.Evaluation{Verdict: client.VerdictAllow}, RedactedContent: rc}
 		applied, emitted := applyDecision(&out, dec, true, orig)
 		if applied != "" || !emitted {
 			t.Fatalf("applied=%q emitted=%t, want proceed(\"\")/emitted(true)", applied, emitted)
@@ -525,26 +602,25 @@ func TestApplyDecision_Redaction(t *testing.T) {
 		if got.HookSpecificOutput.PermissionDecision != "" {
 			t.Errorf("permissionDecision must be absent on a redaction-only output, got %q", got.HookSpecificOutput.PermissionDecision)
 		}
-		if !jsonEqual(got.HookSpecificOutput.UpdatedInput, red) {
-			t.Errorf("updatedInput = %s, want the redacted object", got.HookSpecificOutput.UpdatedInput)
+		if cf := contentField(t, got.HookSpecificOutput.UpdatedInput); cf != rc.FileText {
+			t.Errorf("updatedInput content = %q, want redacted", cf)
 		}
-		// Tighten-only: the raw JSON never carries permissionDecision:"allow".
 		if strings.Contains(out.String(), `"permissionDecision":"allow"`) {
 			t.Errorf("must never emit permissionDecision:allow (tighten-only): %q", out.String())
 		}
 	})
 
-	t.Run("proceed + capture OFF → nothing (E6-S3 identical)", func(t *testing.T) {
+	t.Run("proceed + redaction OFF → nothing (E6-S3 identical)", func(t *testing.T) {
 		var out bytes.Buffer
-		dec := sidecar.Decision{Evaluation: client.Evaluation{Verdict: client.VerdictAllow}, RedactedInput: red}
+		dec := sidecar.Decision{Evaluation: client.Evaluation{Verdict: client.VerdictAllow}, RedactedContent: rc}
 		if _, emitted := applyDecision(&out, dec, false, orig); emitted || out.Len() != 0 {
-			t.Errorf("capture off must write nothing, got %q", out.String())
+			t.Errorf("redaction off must write nothing, got %q", out.String())
 		}
 	})
 
 	t.Run("deny carries no updatedInput even with a redaction present", func(t *testing.T) {
 		var out bytes.Buffer
-		dec := sidecar.Decision{Evaluation: client.Evaluation{Verdict: client.VerdictBlock, Reason: "nope"}, RedactedInput: red}
+		dec := sidecar.Decision{Evaluation: client.Evaluation{Verdict: client.VerdictBlock, Reason: "nope"}, RedactedContent: rc}
 		applied, _ := applyDecision(&out, dec, true, orig)
 		if applied != ccDecisionDeny {
 			t.Fatalf("want deny, got %q", applied)
@@ -558,7 +634,7 @@ func TestApplyDecision_Redaction(t *testing.T) {
 
 	t.Run("ask carries no updatedInput (faithful to the SDK)", func(t *testing.T) {
 		var out bytes.Buffer
-		dec := sidecar.Decision{Evaluation: client.Evaluation{Verdict: client.VerdictRequireApproval}, RedactedInput: red}
+		dec := sidecar.Decision{Evaluation: client.Evaluation{Verdict: client.VerdictRequireApproval}, RedactedContent: rc}
 		applied, _ := applyDecision(&out, dec, true, orig)
 		if applied != ccDecisionAsk {
 			t.Fatalf("want ask, got %q", applied)
@@ -571,19 +647,20 @@ func TestApplyDecision_Redaction(t *testing.T) {
 	})
 }
 
-// TestRecordEnforcement_NoRedactionLeak covers AC-4: the redacted tool_input lives
-// on the sidecar Decision (LOCAL-only) and must NEVER be serialized into the durable
-// enforcement audit — the audit stays content-free even for a proceed+redaction.
+// TestRecordEnforcement_NoRedactionLeak covers AC-3: the redacted content lives on
+// the sidecar Decision (LOCAL-only) and must NEVER be serialized into the durable
+// enforcement audit — the audit stays content-free even for a proceed+redaction,
+// carrying only the category NAMES.
 func TestRecordEnforcement_NoRedactionLeak(t *testing.T) {
 	enfFile := filepath.Join(t.TempDir(), "enforcements.jsonl")
 	t.Setenv(envEnforcementFile, enfFile)
 	logger := log.New(&bytes.Buffer{}, "", 0)
 
-	// The redacted body still contains a sentinel we assert never reaches the sink.
-	red := json.RawMessage(`{"file_path":"/x","content":"REDACTION_SENTINEL"}`)
-	dec := sidecar.Decision{Source: "local-bundle", RedactedInput: red,
-		Evaluation: client.Evaluation{Verdict: client.VerdictAllow}}
-	ev := &HookEvent{SessionID: "s", ToolName: "Write", ToolInput: []byte(`{"file_path":"/x","content":"ORIGINAL_SENTINEL"}`)}
+	dec := sidecar.Decision{Source: "local-bundle",
+		RedactedContent:     &client.Content{FileText: "api_key=REDACTION_SENTINEL"},
+		RedactionCategories: []string{"secret_assignment"},
+		Evaluation:          client.Evaluation{Verdict: client.VerdictAllow}}
+	ev := &HookEvent{SessionID: "s", ToolName: "Write", ToolInput: []byte(`{"file_path":"/x","content":"api_key=ORIGINAL_SENTINEL"}`)}
 
 	var out bytes.Buffer
 	applied, _ := applyDecision(&out, dec, true, ev.ToolInput)
@@ -597,6 +674,10 @@ func TestRecordEnforcement_NoRedactionLeak(t *testing.T) {
 		if strings.Contains(string(data), sentinel) {
 			t.Errorf("enforcement audit leaked content %q (INV-2): %s", sentinel, data)
 		}
+	}
+	// The content-free category signal IS recorded.
+	if !strings.Contains(string(data), "secret_assignment") || !strings.Contains(string(data), `"redacted":true`) {
+		t.Errorf("expected content-free redaction signal in audit, got %s", data)
 	}
 	// The redacted body IS applied locally via updatedInput (stdout → CC, on-machine).
 	if !strings.Contains(out.String(), "REDACTION_SENTINEL") {

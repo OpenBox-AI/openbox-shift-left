@@ -65,20 +65,19 @@ func TestRoundTrip_BlockAndAllow(t *testing.T) {
 	}
 }
 
-// TestDecide_RedactedInputRoundTrips guards STORY-E6-S4's carrier: a
-// DecisionResponse carrying redacted_input is surfaced verbatim on
-// Decision.RedactedInput (LOCAL-only) for the enforce hook to apply via
-// updatedInput. It uses a raw fake server because the metadata-only bundleEvaluator
-// produces no redaction today ([EXT-guardrail-redaction]). A fail-open fallback
-// carries no RedactedInput (nil), which the enforce hook treats as "no rewrite".
-func TestDecide_RedactedInputRoundTrips(t *testing.T) {
+// TestDecide_RedactedContentRoundTrips guards STORY-E6-S9's carrier: a
+// DecisionResponse carrying redacted_content + redaction_categories is surfaced
+// verbatim on Decision.RedactedContent / .RedactionCategories (LOCAL-only) for the
+// enforce hook to reconstruct into updatedInput. A fail-open fallback carries no
+// RedactedContent (nil), which the enforce hook treats as "no rewrite".
+func TestDecide_RedactedContentRoundTrips(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "s.sock")
 	ln, err := net.Listen("unix", path)
 	if err != nil {
 		t.Fatalf("listen: %v", err)
 	}
 	t.Cleanup(func() { _ = ln.Close() })
-	redacted := `{"content":"api_key=***REDACTED***","file_path":"/x"}`
+	redacted := "api_key=${OPENBOX_REDACTED_SECRET_ASSIGNMENT}"
 	go func() {
 		conn, err := ln.Accept()
 		if err != nil {
@@ -87,10 +86,11 @@ func TestDecide_RedactedInputRoundTrips(t *testing.T) {
 		defer conn.Close()
 		_, _ = bufio.NewReader(conn).ReadBytes('\n') // drain the request line
 		b, _ := json.Marshal(DecisionResponse{
-			Protocol:      ProtocolVersion,
-			Evaluation:    client.Evaluation{Verdict: client.VerdictAllow},
-			Source:        sourceLocalBundle,
-			RedactedInput: json.RawMessage(redacted),
+			Protocol:            ProtocolVersion,
+			Evaluation:          client.Evaluation{Verdict: client.VerdictAllow},
+			Source:              sourceLocalBundle,
+			RedactedContent:     &client.Content{FileText: redacted},
+			RedactionCategories: []string{"secret_assignment"},
 		})
 		_, _ = conn.Write(append(b, '\n'))
 	}()
@@ -100,8 +100,11 @@ func TestDecide_RedactedInputRoundTrips(t *testing.T) {
 	if d.FailOpen {
 		t.Fatalf("expected a real response, got fail-open (%s)", d.Source)
 	}
-	if string(d.RedactedInput) != redacted {
-		t.Errorf("RedactedInput = %s, want %s", d.RedactedInput, redacted)
+	if d.RedactedContent == nil || d.RedactedContent.FileText != redacted {
+		t.Errorf("RedactedContent = %+v, want FileText=%s", d.RedactedContent, redacted)
+	}
+	if len(d.RedactionCategories) != 1 || d.RedactionCategories[0] != "secret_assignment" {
+		t.Errorf("RedactionCategories = %v, want [secret_assignment]", d.RedactionCategories)
 	}
 }
 

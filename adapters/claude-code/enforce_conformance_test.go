@@ -3,8 +3,11 @@ package claudecode
 import (
 	"bytes"
 	"context"
+	"encoding/json"
+	"io/fs"
 	"log"
 	"net"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -35,6 +38,8 @@ import (
 // | C7| off     | —           | up + BLOCK rule    | proceed| INV-3 verbatim (observe)        |
 // | C8| on      | fail-open   | slow > timeout     | proceed| timeout fails open within bound |
 // | C9| on      | fail-closed | up + STALE verdict | proceed| staleness never denies          |
+// |C10| on      | fail-open   | up + secret in Write| redact | Tier-1 redact-and-continue (E6-S9)|
+// |C11| on      | fail-open   | up, detection OFF  | proceed| opt-out → no redaction (E6-S9)  |
 
 // blockRuleBundle blocks a `rm -rf` shell command; the canonical enforce BLOCK.
 func blockRuleBundle() *sidecar.Bundle {
@@ -264,5 +269,87 @@ func TestEnforcementConformance(t *testing.T) {
 		if elapsed > 3*time.Second {
 			t.Errorf("enforce wait %v exceeds the INV-3b bound (CC kills the hook at 5s)", elapsed)
 		}
+	})
+
+	// A Write whose body contains a real-shaped AWS key. The secret string must never
+	// survive on stdout / in any egress or audit sink; the placeholder must appear.
+	const awsSecret = "AKIAIOSFODNN7EXAMPLE"
+	secretWrite := `{"hook_event_name":"PreToolUse","session_id":"s","cwd":"/tmp","tool_name":"Write","tool_input":{"file_path":"/tmp/app.env","content":"AWS_ACCESS_KEY_ID=` + awsSecret + `"}}`
+
+	// assertNoEgress walks the spool + session dirs and the enforcement audit and
+	// asserts the raw secret never reached any egress/audit surface (INV-2).
+	assertNoEgress := func(t *testing.T) {
+		t.Helper()
+		for _, dir := range []string{os.Getenv("OPENBOX_SPOOL_DIR"), os.Getenv("OPENBOX_SESSION_DIR"), filepath.Dir(os.Getenv(envEnforcementFile))} {
+			if dir == "" {
+				continue
+			}
+			_ = filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
+				if err != nil || d.IsDir() {
+					return nil
+				}
+				b, _ := os.ReadFile(p)
+				if strings.Contains(string(b), awsSecret) {
+					t.Errorf("secret egressed/persisted to %s (INV-2): %s", p, b)
+				}
+				return nil
+			})
+		}
+	}
+
+	t.Run("C10 secret in Write body → redact-and-continue (E6-S9)", func(t *testing.T) {
+		// A reachable, BUNDLED allow sidecar. Secret detection is DEFAULT ON and
+		// DECOUPLED from content_capture (which stays OFF): the file body reaches only
+		// the local socket, the scanner redacts it, and the hook emits an updatedInput
+		// with the content field sanitized and NO permissionDecision (proceed).
+		socket, _ := serveSidecar(t, &sidecar.Bundle{Version: "conf-allow", DefaultDecision: "allow"})
+		t.Setenv(envSidecarSocket, socket)
+		t.Setenv(envEnforce, "1")
+		t.Setenv(envFailClosed, "0")
+		t.Setenv(envContentCapture, "0")     // egress stays metadata-only
+		os.Unsetenv(envSecretDetection)      // default ON
+		out := run(t, secretWrite)
+
+		var got preToolUseOutput
+		if err := json.Unmarshal([]byte(out), &got); err != nil {
+			t.Fatalf("stdout not valid JSON: %v (%q)", err, out)
+		}
+		if got.HookSpecificOutput.PermissionDecision != "" {
+			t.Errorf("redaction must proceed (no permissionDecision), got %q", got.HookSpecificOutput.PermissionDecision)
+		}
+		if len(got.HookSpecificOutput.UpdatedInput) == 0 {
+			t.Fatalf("expected an updatedInput redaction; stdout=%q", out)
+		}
+		if strings.Contains(out, awsSecret) {
+			t.Errorf("the raw secret must be redacted, not present on stdout: %q", out)
+		}
+		if !strings.Contains(out, "OPENBOX_REDACTED") {
+			t.Errorf("expected the env-var redaction placeholder; got %q", out)
+		}
+		// Structural field preserved.
+		var ui map[string]any
+		_ = json.Unmarshal(got.HookSpecificOutput.UpdatedInput, &ui)
+		if ui["file_path"] != "/tmp/app.env" {
+			t.Errorf("file_path must survive reconstruction verbatim, got %v", ui["file_path"])
+		}
+		// Content-free audit signal recorded; raw secret never egressed/persisted.
+		data, _ := os.ReadFile(os.Getenv(envEnforcementFile))
+		if !strings.Contains(string(data), `"redacted":true`) {
+			t.Errorf("expected redacted:true in the enforcement audit; got %s", data)
+		}
+		assertNoEgress(t)
+	})
+
+	t.Run("C11 secret detection OFF → no redaction (opt-out, E6-S9)", func(t *testing.T) {
+		socket, _ := serveSidecar(t, &sidecar.Bundle{Version: "conf-allow", DefaultDecision: "allow"})
+		t.Setenv(envSidecarSocket, socket)
+		t.Setenv(envEnforce, "1")
+		t.Setenv(envFailClosed, "0")
+		t.Setenv(envContentCapture, "0")
+		t.Setenv(envSecretDetection, "0") // explicit opt-out
+		if out := run(t, secretWrite); strings.TrimSpace(out) != "" {
+			t.Errorf("with detection off + content-capture off the proceed path must write nothing (E6-S3 identical); got %q", out)
+		}
+		assertNoEgress(t)
 	})
 }

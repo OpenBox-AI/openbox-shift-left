@@ -46,6 +46,7 @@ const (
 	envFailClosed      = "OPENBOX_FAIL_CLOSED"
 	envEnforceTimeout  = "OPENBOX_ENFORCE_TIMEOUT_MS"
 	envSidecarSocket   = "OPENBOX_SIDECAR_SOCKET"
+	envSecretDetection = "OPENBOX_SECRET_DETECTION"
 	envEnforcementFile = "OPENBOX_ENFORCEMENT_FILE"
 	envAPIKeyDirect    = "OPENBOX_API_KEY"
 	envSeedDirect      = "OPENBOX_ED25519_SEED"
@@ -113,6 +114,15 @@ type DevConfig struct {
 	// sidecar.DefaultSocketPath()). The OPENBOX_SIDECAR_SOCKET env overrides it —
 	// the SAME env `openbox sidecar serve` reads, so the daemon and the hook agree.
 	SidecarSocket string `json:"sidecar_socket,omitempty"`
+	// SecretDetection enables Tier-1 local secret/entropy detection + redact-and-
+	// continue (STORY-E6-S9, OD-SYNC-10). It is a *bool so an ABSENT field means the
+	// DEFAULT (ON): the protection is opt-OUT, not opt-in, because the detected
+	// secret/redaction stays strictly LOCAL (the file body reaches only the Unix
+	// socket; the redaction rides sidecar.Decision, never client.Evaluation) — so it
+	// honors INV-2 (egress-only) WITHOUT the OD4 content-capture opt-in, which
+	// governs EGRESS. Set false to disable. OPENBOX_SECRET_DETECTION overrides it.
+	// Only meaningful in enforce mode.
+	SecretDetection *bool `json:"secret_detection,omitempty"`
 	// SecretFile, when set, points at the CLI's opt-in file secret backend
 	// (`openbox dev init --secret-backend file`) — a 0600 JSON store the hook
 	// reads instead of the OS keychain, for machines with no keyring. The
@@ -272,6 +282,27 @@ func ResolveContentCapture() bool {
 		enabled = cfg.ContentCapture
 	}
 	if v, ok := os.LookupEnv(envContentCapture); ok {
+		enabled = isTruthy(v)
+	}
+	return enabled
+}
+
+// ResolveSecretDetection reports whether Tier-1 local secret/entropy detection is
+// on (STORY-E6-S9, OD-SYNC-10). DEFAULT TRUE — opt-OUT, not opt-in: an absent
+// config field keeps it on; config `secret_detection:false` disables it; the
+// OPENBOX_SECRET_DETECTION env overrides either way (env wins). Unlike
+// ResolveContentCapture (which defaults FALSE and governs EGRESS), this is on by
+// default because the file body it acts on reaches ONLY the local sidecar and the
+// redaction stays LOCAL — never egressed (INV-2 is egress-only). A
+// missing/unreadable config leaves the default ON (the protection never turns
+// itself off by accident). Cheap config+env read, no secret I/O; safe on the hot
+// path. Only meaningful in enforce mode (ResolveEnforce).
+func ResolveSecretDetection() bool {
+	enabled := true
+	if cfg, err := loadDevConfig(DefaultConfigPath()); err == nil && cfg.SecretDetection != nil {
+		enabled = *cfg.SecretDetection
+	}
+	if v, ok := os.LookupEnv(envSecretDetection); ok {
 		enabled = isTruthy(v)
 	}
 	return enabled

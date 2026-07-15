@@ -133,12 +133,15 @@ func RunHook(sub string, stdin io.Reader, stdout io.Writer, logger *log.Logger) 
 	// to observe mode. The durable enforcement record runs AFTER the stdout
 	// decision, off the blocking path, best-effort (never blocks — INV-3).
 	if hook == HookPreToolUse && ResolveEnforce() {
-		// STORY-E6-S4: content capture (OD4 opt-in, default OFF) gates BOTH the tool
-		// content handed to the local sidecar for redaction AND the applied
-		// updatedInput. Resolved once here (cheap config+env, no secret I/O). With it
-		// off, Content stays nil and no redaction is emitted — byte-identical to E6-S3.
-		contentCapture := ResolveContentCapture()
-		dec := EnforceDecision(context.Background(), newSidecarClient(), id, ev, contentCapture)
+		// Local redaction gate (STORY-E6-S9 / E6-S4): hand the tool body to the LOCAL
+		// sidecar and apply any content-only redaction it returns. Enabled when EITHER
+		// Tier-1 secret detection (OD-SYNC-10, default ON) OR content capture (OD4,
+		// default OFF) is on. Resolved once here (cheap config+env, no secret I/O). The
+		// body + redaction are LOCAL-only (never egressed — INV-2); the observe Mapper
+		// egress path stays metadata-only unless content capture is on. With BOTH off,
+		// Content stays nil and no redaction is emitted — byte-identical to E6-S3.
+		localRedaction := ResolveSecretDetection() || ResolveContentCapture()
+		dec := EnforceDecision(context.Background(), newSidecarClient(), id, ev, localRedaction)
 		// STORY-E6-S3: apply the per-org FAILURE POLICY (fail-open default / opt-in
 		// fail-closed, OD9). On an evaluation outage (dec.FailOpen) under fail-closed
 		// this synthesizes a HALT so the unchanged apply cascade denies; otherwise the
@@ -147,10 +150,10 @@ func RunHook(sub string, stdin io.Reader, stdout io.Writer, logger *log.Logger) 
 		policy := resolveFailurePolicy()
 		dec = applyFailurePolicy(dec, policy)
 		logEnforceDecision(logger, ev, dec, policy)
-		// E6-S2 apply (deny/ask) + E6-S4 apply (updatedInput redaction on the proceed
-		// path, gated on contentCapture). origInput = the raw tool_input, used only to
-		// suppress a rewrite that equals the original (never egressed).
-		applied, _ := applyDecision(stdout, dec, contentCapture, ev.ToolInput)
+		// E6-S2 apply (deny/ask) + E6-S4/E6-S9 apply (updatedInput redaction on the
+		// proceed path, gated on localRedaction). origInput = the raw tool_input,
+		// reconstructed with only the content field redacted (never egressed).
+		applied, _ := applyDecision(stdout, dec, localRedaction, ev.ToolInput)
 		recordEnforcement(logger, ev, dec, applied)
 	}
 

@@ -84,11 +84,15 @@ type Decision struct {
 	Source string
 	// Stale echoes the daemon's staleness flag (false on a fail-open fallback).
 	Stale bool
-	// RedactedInput echoes the daemon's guardrail-redacted tool_input (STORY-E6-S4),
-	// which the enforce hook applies via Claude Code's `updatedInput`. It is nil on
-	// a fail-open fallback and empty unless a redaction-capable evaluator produced
-	// one. INV-2: content-bearing, LOCAL-only — see DecisionResponse.RedactedInput.
-	RedactedInput json.RawMessage
+	// RedactedContent echoes the daemon's LOCAL secret-redaction of the tool content
+	// (STORY-E6-S9); the enforce hook reconstructs the tool_input from it (content
+	// field only) and applies it via Claude Code's `updatedInput`. nil on a fail-open
+	// fallback and when nothing was redacted. INV-2: content-bearing, LOCAL-only —
+	// see DecisionResponse.RedactedContent.
+	RedactedContent *client.Content
+	// RedactionCategories echoes the content-free category names that fired (INV-2),
+	// for the durable enforcement audit. Never the secret text.
+	RedactionCategories []string
 }
 
 // allowFailOpen is the synthesized degrade-to-observe result. VerdictUnknown (not
@@ -162,11 +166,12 @@ func (c *Client) Decide(ctx context.Context, req DecisionRequest) Decision {
 	// G_SEC INFO-1 hole where a reachable-but-unbundled daemon left a fail-closed
 	// org silently ungoverned. Only sourceLocalBundle is a real verdict.
 	return Decision{
-		Evaluation:    resp.Evaluation,
-		FailOpen:      !isRealVerdictSource(resp.Source),
-		Source:        resp.Source,
-		Stale:         resp.Stale,
-		RedactedInput: resp.RedactedInput, // LOCAL-only; applied via CC updatedInput (E6-S4)
+		Evaluation:          resp.Evaluation,
+		FailOpen:            !isRealVerdictSource(resp.Source),
+		Source:              resp.Source,
+		Stale:               resp.Stale,
+		RedactedContent:     resp.RedactedContent,     // LOCAL-only; reconstructed → CC updatedInput (E6-S9)
+		RedactionCategories: resp.RedactionCategories, // content-free audit signal (INV-2)
 	}
 }
 

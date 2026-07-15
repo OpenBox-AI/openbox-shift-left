@@ -12,11 +12,15 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/client"
 )
 
-// defaultMaxRequestBytes bounds a single decision request. Requests are
-// metadata-only (INV-2) and tiny; the cap defends the daemon against a
-// malformed/oversized peer without ever touching the decision path (INV-1 —
-// bounded read, no crash).
-const defaultMaxRequestBytes = 64 << 10 // 64 KiB
+// defaultMaxRequestBytes bounds a single decision request (and, symmetrically, the
+// response the Client reads back). The verdict axes are metadata-only (INV-2) and
+// tiny, but the OPTIONAL Content field carries a bounded tool body for LOCAL
+// redaction (E6-S4 / E6-S9 secret detection); the enforce hook caps that body
+// (adapters/claude-code maxRedactBody) so a real request stays well under this. The
+// cap defends the daemon against a malformed/oversized peer without ever touching
+// the decision path (INV-1 — bounded read, no crash). The 0600 socket restricts
+// peers to the owning user, so the only DoS this bounds is a same-user self-DoS.
+const defaultMaxRequestBytes = 1 << 20 // 1 MiB
 
 // defaultFreshness is how long a synced bundle is considered current. Past it,
 // decisions are still served (fail-open never denies on staleness) but flagged
@@ -39,6 +43,12 @@ type Server struct {
 	loadedAt  time.Time
 	freshness time.Duration
 
+	// scanner is the Tier-1 local secret detector (STORY-E6-S9). It runs on every
+	// decision that carries content, DECOUPLED from the policy verdict/bundle
+	// (OD-SYNC-10) — set to defaultSecretDetector by NewServer. Immutable + safe for
+	// concurrent use; nil disables local redaction (tests).
+	scanner *secretDetector
+
 	maxReq      int64
 	maxInFlight int
 	now         func() time.Time
@@ -60,6 +70,7 @@ type ServerConfig struct {
 func NewServer(cfg ServerConfig) *Server {
 	s := &Server{
 		freshness:   cfg.Freshness,
+		scanner:     defaultSecretDetector,
 		maxReq:      cfg.MaxRequestBytes,
 		maxInFlight: cfg.MaxInFlight,
 		now:         cfg.now,
@@ -202,6 +213,7 @@ func (s *Server) decide(req DecisionRequest) DecisionResponse {
 	loadedAt := s.loadedAt
 	s.mu.RUnlock()
 
+	var resp DecisionResponse
 	if eval == nil {
 		// Cold start: no policy synced yet → NO real verdict. VerdictUnknown records
 		// honestly that OpenBox did not evaluate this call (matching the client's own
@@ -210,22 +222,45 @@ func (s *Server) decide(req DecisionRequest) DecisionResponse {
 		// (OD9 default) proceeds; fail-closed denies. Never deny HERE — the daemon
 		// does not know the policy, so the block decision belongs to the client-side
 		// failure policy, not this fail-open primitive.
-		return DecisionResponse{
+		resp = DecisionResponse{
 			Protocol:   ProtocolVersion,
 			Evaluation: client.Evaluation{Verdict: client.VerdictUnknown},
 			Source:     sourceFailOpenNoBundle,
 		}
+	} else {
+		resp = DecisionResponse{
+			Protocol:   ProtocolVersion,
+			Evaluation: eval.Evaluate(req),
+			Source:     sourceLocalBundle,
+		}
+		if !loadedAt.IsZero() && s.now().Sub(loadedAt) > s.freshness {
+			resp.Stale = true
+		}
 	}
 
-	resp := DecisionResponse{
-		Protocol:   ProtocolVersion,
-		Evaluation: eval.Evaluate(req),
-		Source:     sourceLocalBundle,
-	}
-	if !loadedAt.IsZero() && s.now().Sub(loadedAt) > s.freshness {
-		resp.Stale = true
-	}
+	// Tier-1 secret redaction (STORY-E6-S9) runs DECOUPLED from the policy verdict
+	// and bundle (OD-SYNC-10): it fires here in the cold-start branch too, and never
+	// alters resp.Evaluation — redact-and-continue is a proceed-path rewrite,
+	// orthogonal to the deny/ask verdict. On a BLOCK verdict the tool never runs, so
+	// the enforce hook simply ignores the attached redaction.
+	s.applySecretRedaction(req, &resp)
 	return resp
+}
+
+// applySecretRedaction runs the local secret detector over the request's content
+// (when present) and attaches any redaction to resp. It is the ONLY producer of
+// RedactedContent today. Pure/local (INV-1/INV-2/INV-3b): no I/O, no logging of the
+// content or the secret; the result rides only the LOCAL response.
+func (s *Server) applySecretRedaction(req DecisionRequest, resp *DecisionResponse) {
+	if s.scanner == nil || req.Content == nil || req.Content.FileText == "" {
+		return
+	}
+	red, cats, changed := s.scanner.Redact(req.Content.FileText)
+	if !changed {
+		return
+	}
+	resp.RedactedContent = &client.Content{FileText: red}
+	resp.RedactionCategories = cats
 }
 
 // writeResponse marshals and writes one response. A write failure is logged

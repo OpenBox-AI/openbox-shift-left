@@ -1,8 +1,6 @@
 package sidecar
 
 import (
-	"encoding/json"
-
 	"github.com/openbox-ai/openbox-shift-left/client"
 )
 
@@ -81,23 +79,28 @@ type DecisionResponse struct {
 	// fail-open zero value. Never carries a secret or content (INV-1/INV-2).
 	Error string `json:"error,omitempty"`
 
-	// RedactedInput is the guardrail-redacted tool input the enforce hook applies
-	// via Claude Code's `updatedInput` before the tool runs (STORY-E6-S4, the Go
-	// analog of the reference SDK's guardrails_result.redacted_input +
-	// _apply_input_redaction). It is a full replacement tool_input OBJECT, emitted
-	// verbatim, present ONLY when the org's content posture is on (OD4) AND a
-	// redaction-capable evaluator produced one.
+	// RedactedContent is the LOCAL redaction result: the tool's content field(s)
+	// (a file body) with detected secrets replaced by an env-var-ref placeholder
+	// (STORY-E6-S9 Tier-1 secret detection; a future guardrail-redaction evaluator
+	// uses the same carrier). The enforce hook does NOT emit this object as-is;
+	// instead it RECONSTRUCTS the tool_input, replacing ONLY the recognized content
+	// field with RedactedContent.FileText and leaving every structural locator
+	// (file_path, …) byte-identical (E6-S9, closing the E6-S4/S7 "content-only
+	// fields, never structural" carry-forward). It replaces the E6-S4
+	// `redacted_input` full-object carrier for exactly that reason.
 	//
 	// INV-2: this is the ONE content-bearing field on the sidecar protocol. It is
 	// carried here — NOT on Evaluation — deliberately: Evaluation flows into the
 	// advisory sink, the enforcement audit, and core egress, none of which must
 	// ever see content; this field stays confined to the LOCAL Unix socket ↔ hook
 	// ↔ Claude Code stdout channel (same machine, never egressed, never logged).
-	//
-	// The Phase-1 default bundleEvaluator is metadata-only and produces NONE, so
-	// this is empty in the field until a redaction-capable evaluator lands
-	// ([EXT-guardrail-redaction]).
-	RedactedInput json.RawMessage `json:"redacted_input,omitempty"`
+	RedactedContent *client.Content `json:"redacted_content,omitempty"`
+
+	// RedactionCategories are the secret-category names that fired (e.g.
+	// ["aws_key","entropy"]) — the CONTENT-FREE (INV-2) signal the enforce hook
+	// records in its durable audit so an operator can see redact-and-continue
+	// happened without ever seeing the secret. Never the secret text.
+	RedactionCategories []string `json:"redaction_categories,omitempty"`
 }
 
 // decisionSource values — how a DecisionResponse.Evaluation was reached.
