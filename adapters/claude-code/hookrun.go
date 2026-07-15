@@ -93,6 +93,17 @@ func RunHook(sub string, stdin io.Reader, stdout io.Writer, logger *log.Logger) 
 	// the SAME flag the flush client's Emit uses to strip content, so capture and
 	// egress agree. Resolved once (cheap config+env, no secret I/O).
 	ad.Mapper.CaptureContent = ResolveContentCapture()
+	// STORY-E6-S10 (MINOR-1): PIN the Mapper clock to one instant for this hook
+	// invocation. RunHook maps the PreToolUse event twice in enforce+Tier-2 mode —
+	// once here via Observe (the spool copy, flushed on SessionEnd) and once inside
+	// escalateTier2 (the synchronous /evaluate copy). A fresh time.Now() on each Map
+	// would fold a different RFC3339Nano timestamp into deriveID and yield DIFFERENT
+	// event_ids, so the two would NOT collapse under one Idempotency-Key even after
+	// server-side dedupe lands (SL3-IDEMPOTENCY / OD-SYNC-11). Pinning makes the T2
+	// send a true idempotency-ready re-send of the spooled event. The offset (hook
+	// entry vs mid-Map) is microseconds and semantically irrelevant.
+	pinnedNow := time.Now()
+	ad.Mapper.Now = func() time.Time { return pinnedNow }
 
 	// STORY-SL-16 (OD-FINOPS): on SessionEnd, behind the off-by-default finops
 	// opt-in, read the session transcript for usage NUMBERS ONLY and hand them to
@@ -133,6 +144,10 @@ func RunHook(sub string, stdin io.Reader, stdout io.Writer, logger *log.Logger) 
 	// to observe mode. The durable enforcement record runs AFTER the stdout
 	// decision, off the blocking path, best-effort (never blocks — INV-3).
 	if hook == HookPreToolUse && ResolveEnforce() {
+		// STORY-E6-S10 (MINOR-2): the whole enforce gate (T1 + a possible T2) is
+		// bounded by one wall clock so the sequential per-tier budgets can never
+		// JOINTLY exceed CC's 5 s hook timeout (see maxEnforceHookBudget / tier2Budget).
+		enforceStart := time.Now()
 		// STORY-E6-S8: the fail-closed session-start staleness block is realized HERE
 		// (CC has no SessionStart "deny session" primitive). If this session was marked
 		// stale under fail-closed, deny every tool call — reusing the unchanged apply
@@ -160,6 +175,27 @@ func RunHook(sub string, stdin io.Reader, stdout io.Writer, logger *log.Logger) 
 		// never overridden). The mapVerdict/applyDecision cascade stays policy-agnostic.
 		policy := resolveFailurePolicy()
 		dec = applyFailurePolicy(dec, policy)
+		// STORY-E6-S10 (Tier-2): for HIGH-RISK classes (Bash / MCP execution), when
+		// Tier-2 is enabled AND T1 did NOT already tighten (deny/ask), escalate to the
+		// AUTHORITATIVE full server verdict via a SYNCHRONOUS /evaluate before the tool
+		// runs — closing the §2a policy-only floor exactly where arbitrary execution is
+		// dangerous, and nowhere else (frequent edits stay T1-only, no /evaluate
+		// latency — OD-SYNC-9). The T2 budget is OWNED IN-BINARY (ResolveTier2Timeout,
+		// clamped under CC's 5 s hook timeout, which fails OPEN — OD-SYNC-8), and the T2
+		// decision runs the SAME failure policy (fail-open proceed / fail-closed deny on
+		// a T2 outage) + apply cascade. Default OFF: with T2 off this is inert and the
+		// T1-only path is byte-identical to E6-S9 ("v1 minus T2", §7 Option C).
+		if ResolveTier2() && isHighRiskClass(ev.ToolName) && !decisionTightens(dec) {
+			t2 := escalateTier2(context.Background(), logger, ad.Mapper, ev, tier2Budget(enforceStart))
+			// Carry the LOCAL T1 secret redaction (E6-S9) onto the T2 decision so a
+			// redact-and-continue still applies on the T2 proceed path. (High-risk
+			// classes are non-file today, so T1 carries no RedactedContent — this is
+			// defensive: it keeps the LOCAL redaction orthogonal to the T2 server verdict
+			// if the class sets ever overlap. Redaction is applied on proceed only.)
+			t2.RedactedContent = dec.RedactedContent
+			t2.RedactionCategories = dec.RedactionCategories
+			dec = applyFailurePolicy(t2, policy)
+		}
 		logEnforceDecision(logger, ev, dec, policy)
 		// E6-S2 apply (deny/ask) + E6-S4/E6-S9 apply (updatedInput redaction on the
 		// proceed path, gated on localRedaction). origInput = the raw tool_input,

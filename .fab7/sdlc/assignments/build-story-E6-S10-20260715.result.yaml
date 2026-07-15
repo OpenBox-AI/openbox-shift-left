@@ -1,0 +1,109 @@
+story: STORY-E6-S10
+title: "Tier-2 synchronous /evaluate escalation for high-risk classes"
+epic: E6
+status: done          # built + validations + live E2E; BOTH reviews ran + all findings FIXED + re-validated; brian G3 sign-off 2026-07-15; committed to main (no push, no signature)
+built_at: "2026-07-15"
+builder: build-engineer
+
+summary: >
+  Closes the §2a policy-only floor for arbitrary EXECUTION. In enforce mode, for
+  HIGH-RISK classes (Bash / MCP execution) — and nowhere else — after a T1
+  local-sidecar allow that does not already tighten, the PreToolUse gate escalates
+  to a SYNCHRONOUS /evaluate call for the AUTHORITATIVE full server verdict (policy
+  + guardrail classifiers) BEFORE the tool runs. The T2 verdict runs the SAME
+  failure policy (E6-S3) + apply cascade (E6-S2), UNCHANGED. Frequent edits stay
+  T1-only, so they never pay the ~1.6 s latency (OD-SYNC-9). Default OFF (opt-in);
+  reuses /evaluate (NO core/backend/sidecar surface); NO shipped hooks.json change.
+
+design_cruxes:
+  - "Escalate on the PROCEED path only: fires iff ResolveTier2() && isHighRiskClass && !decisionTightens(T1). Governance only TIGHTENS — a T1 deny/ask (incl. a fail-closed synthesized HALT) short-circuits T2 (nothing to add to a block); T2 can upgrade a T1 allow to a deny, never loosen a T1 block."
+  - "In-binary timeout ownership (OD-SYNC-8, a CORRECTNESS bound): CC FAILS OPEN on a PreToolUse hook timeout (verified), which would silently defeat a fail-closed org. The T2 budget (default 3.5s, clamp maxTier2Timeout=4s) stays under the shipped 5s hook timeout with margin, so OUR fail-open/closed verdict is emitted before CC's timeout fires. hooks.json UNCHANGED."
+  - "T2 outage → the SAME failure policy: Emit is fail-open (folds transport failure/timeout/empty into VerdictUnknown); tier2Decision maps VerdictUnknown → a FailOpen decision, so applyFailurePolicy proceeds (fail-open) or synthesizes HALT (fail-closed) exactly as for a T1 outage. A REAL allow (VerdictAllow) stays FailOpen=false → never overridden by fail-closed (the E6-S3 crux, preserved)."
+  - "Reuse the observe Mapper: the T2 event is byte-for-byte the observe tool-call event (same deterministic event_id → idempotency-ready re-send, SL-14), so T2 introduces NO new egress posture — metadata-only unless content capture is on (the /evaluate client strips content when off)."
+
+cross_repo_recon:
+  repo: "../openbox-temporal-sdk-python (Explore)"
+  findings:
+    - "SDK pre-exec order (activity_interceptor.py:227-266): build event -> await evaluate_event (SYNC) -> enforce_verdict (raise/terminate) -> redact -> run activity. E6-S10 ports this order for high-risk classes."
+    - "SDK has NO risk-class tiering: EVERY activity gets the full synchronous evaluate_event; skips are coarse (skip_activity_types / send_activity_start_event / enforce_task_queues), none risk-based. => T2's 'high-risk classes only' is a DELIBERATE shift-left addition (design §7: a gating hook runs on every tool call; a ~1.6s wait on every Edit makes the developer remove the hook)."
+    - "SDK timeout is a single instance-level self._timeout (client.py:68/111, default 30s), no per-class override. => E6-S10 supplies the per-tier budget the SDK lacks (OD-SYNC-8; CC's host fails open, the SDK's Temporal host does not)."
+    - "SDK fail behavior _handle_api_error (client.py:204-208): fail_open->None->proceed, fail_closed->synthesized HALT == the reused Go applyFailurePolicy (E6-S3), verbatim."
+    - "GovernanceVerdictResponse (types.py:127-188) matches the Go client.Evaluation already (verdict/reason/policy_id/guardrails_result/approval_id/constraints) — no parsing change."
+
+new_surface:
+  file_new: adapters/claude-code/enforce_tier2.go
+  symbols:
+    - "isHighRiskClass(toolName): exact 'Bash' OR classifyTool kind==ToolMCP. Edit/Write/Read/WebFetch/Task/TodoWrite are T1-only."
+    - "decisionTightens(dec): whether the UNCHANGED mapVerdict yields deny/ask."
+    - "escalateTier2(ctx,logger,Mapper,ev,budget): reuse Mapper.Map -> ResolveCredentials (first hot-path secret I/O, high-risk+T2-on only) -> NewClient -> Emit under context.WithTimeout(budget); every fault -> tier2FailOpen."
+    - "tier2Decision / tier2FailOpen: wrap Evaluation into a sidecar.Decision (real -> Source=tier2:evaluate, FailOpen=false; unknown -> Source=tier2:fail-open, FailOpen=true)."
+    - "constants: bashToolName, sourceTier2, sourceTier2FailOpen, defaultTier2Timeout=3.5s, maxTier2Timeout=4s."
+  creds_go:
+    - "ResolveTier2(): default OFF (opt-in), OPENBOX_TIER2 / DevConfig.Tier2 *bool."
+    - "ResolveTier2Timeout(): OPENBOX_TIER2_TIMEOUT_MS / DevConfig.Tier2TimeoutMS, overflow-proof clamp to maxTier2Timeout, default defaultTier2Timeout."
+  hookrun_go: "escalation wired AFTER T1 + applyFailurePolicy; carries the LOCAL T1 RedactedContent/RedactionCategories forward; then the SAME applyFailurePolicy + applyDecision + recordEnforcement."
+  unchanged: [mapVerdict, applyFailurePolicy, applyDecision, recordEnforcement, sidecar.Client, "core/backend/sidecar source", "plugin/hooks/hooks.json"]
+
+od_sync_8_realization: >
+  The literal OD-SYNC-8 'split the * PreToolUse matcher into a Bash/MCP block (10s
+  hook timeout) + a tight block' is INFEASIBLE: CC runs ALL matching hook blocks and
+  its matcher is an RE2 regex (no negative lookahead), so a * catch-all cannot
+  EXCLUDE Bash/MCP — keeping both blocks would double-fire the hook for Bash (double
+  spool + double enforce). The invariant OD-SYNC-8 actually mandates (binary-owned
+  budget < hook timeout, with margin) is upheld more robustly by a SINGLE * matcher
+  + a per-tier in-binary budget (T1 <= ~50ms, T2 <= 4s, both under the 5s hook). An
+  org needing a bigger T2 budget raises BOTH the hook timeout (it owns that) and
+  OPENBOX_TIER2_TIMEOUT_MS, lifting the 4s clamp in lock-step (noted follow-on).
+
+validation:
+  build_vet_test_race: "GREEN — adapters/claude-code + sidecar + cli"
+  unit_tests:
+    - TestIsHighRiskClass
+    - TestDecisionTightens
+    - TestTier2Decision
+    - TestTier2FailOpen
+    - TestResolveTier2
+    - TestResolveTier2Timeout (default / env / clamp / garbage-ignored / margin-invariant)
+    - "TestEscalateTier2_{RealVerdict,Outage,NoCredentials,BudgetBound}"
+  conformance:
+    file: adapters/claude-code/enforce_tier2_test.go (TestEnforcementConformance_Tier2)
+    cases:
+      C12: "T1 allow + T2 BLOCK on Bash -> deny (floor closed), reason=T2 policy, /evaluate hits=1"
+      C13: "T1 allow + T2 ALLOW on Bash -> proceed, hits=1"
+      C14: "T2 on + Edit (non-high-risk) -> proceed, /evaluate NOT called (hits=0)"
+      C15: "T2 outage (500) + fail-open -> proceed; + fail-closed -> deny within bound (<4.5s, before CC's 5s hook timeout)"
+      C16: "T2 off + high-risk Bash -> proceed, /evaluate NOT called (byte-identical to E6-S9)"
+      C17: "T1 BLOCK bundle denies high-risk Bash -> T2 short-circuited (hits=0), T1 policy reason"
+  live_e2e: >
+    Real openbox binary + a fake /evaluate core (BLOCK) + an ABSENT sidecar (T1
+    fail-open -> escalates): T2-on Bash+BLOCK -> deny with the T2 policy reason
+    (audit source=tier2:evaluate, fail_open=false); T2-on Edit -> empty (T1-only);
+    T2-off Bash -> empty (proceed); /evaluate hits = exactly 1; enforcement audit
+    content-free, no 'rm -rf' leak in stdout/audit/spool.
+
+reviews:
+  G3_review_auditor:
+    decision: APPROVE-WITH-MINOR
+    verified: "all 9 ACs traced to code + a conformance test; decisive flip-the-guard experiment made C17 fail (tighten-only short-circuit is load-bearing + covered); enforce.go/sidecar/core/hooks.json untouched (diff-verified); build/vet/test -race GREEN."
+    findings_fixed:
+      - "MINOR-1: escalateTier2 re-Mapped with a fresh time.Now() -> the T2-sent event_id differed from the spooled copy, so OD-SYNC-11's 'collapse under one Idempotency-Key' was FALSE. FIXED: pin the Mapper clock per RunHook invocation (hookrun.go) so both Maps derive the SAME event_id. Live-verified: T2-sent id + Idempotency-Key == spooled ToolCall event_id (cc-fa3ae38f...). Test: TestPinnedClockStableEventID."
+      - "MINOR-2: T1 (<=2s) and T2 (<=4s) budgets were independent/sequential -> worst case ~6s > the 5s hook (CC fails OPEN -> a fail-closed org silently ungoverned) if an org raised enforce_timeout_ms AND enabled T2 AND T1 returned a real allow slowly. FIXED: maxEnforceHookBudget=4s caps the WHOLE enforce hook wall-clock; tier2Budget = min(configured, cap - T1-elapsed), non-positive -> immediate fail-open. Test: TestTier2Budget."
+    accepted_no_change: ["INFO-3 (AC-7 wire-egress content-freeness sound by construction — mapTool metadata-only), INFO-4a (dec.Stale always false at that point), INFO-4b (one extra cheap loadDevConfig when T2 off — output byte-identical)"]
+  G_SEC_security_reviewer:
+    reviewer: Sam
+    decision: APPROVE   # conditional on the MEDIUM, now FIXED
+    invariants: "INV-1 HOLDS (creds live only in the client; degrade logs carry no secret). INV-2 HOLDS (Mapper metadata-only; command never egressed even with capture on; audit/diag category-only). INV-3b HOLDS for the network wait; the MEDIUM was the one bounded-ness gap, now closed."
+    findings_fixed:
+      - "MEDIUM: credential/secret-store resolution ran OUTSIDE the T2 budget (before context.WithTimeout) -> a hung OS keychain could push the hook past CC's 5s timeout -> CC fails OPEN -> a fail-closed org's high-risk call silently ungoverned (the exact INV-3b class this tier prevents). FIXED: escalateTier2 now runs the WHOLE body (Map + ResolveCredentials + NewClient + Emit) in a goroutine bounded by the budget via select; on expiry -> tier2FailOpen (fail-closed denies), the in-flight goroutine abandoned + reaped on process exit; buffered channel prevents a send-block."
+    confirmed:
+      - "Malicious/compromised core cannot rewrite structural input on the T2 path: the T2 Decision is built purely from Evaluation; RedactedContent/RedactionCategories are overwritten with LOCAL T1 values (server can't set them); mapVerdict yields only deny/ask/proceed; T2 fires only when T1 proceeded, so it can't loosen a T1 block."
+      - "Fail-closed correctness under a T2 outage: VerdictUnknown -> tier2FailOpen (FailOpen) -> applyFailurePolicy synthesizes HALT under fail-closed -> deny; the high-risk call is NOT silently ungoverned."
+    accepted_no_change: ["INFO (OPENBOX_BASE_URL SSRF/key-egress pre-existing, not widened — same NewClient/BaseURL as flush)", "INFO (server-authored deny reason reaches model context — same trust boundary as E6-S2/S6; guardrail path already category-only)", "INFO (double-send no security escalation)"]
+
+surfaced_ods_for_brian:
+  - "OD-SYNC-8 realization: single * matcher + 4s in-binary clamp, hooks.json UNCHANGED (vs raising the hook timeout + lifting the clamp for a slower-core org). CONFIRM."
+  - "OD-SYNC-11 (NEW): T2 double-send (same event_id) collapses under one Idempotency-Key once server dedupe lands (SL3-IDEMPOTENCY/EXT-core); a transient duplicate of the accepted no-dedupe kind. RECOMMEND ACCEPT. CONFIRM."
+  - "OD-SYNC-12 (NEW): T2 fidelity vs content posture. T2 reuses the observe Mapper -> metadata-only unless content capture on (INV-2), so with content OFF the server guardrail/drift classifiers (the §2a floor T2 exists to close) have no content -> T2 closes only the POLICY dimension; full floor-closing needs content ON. Question: egress command/body for high-risk T2 even under content-off (narrow high-risk-only egress, decoupled) or keep strict INV-2? RECOMMEND keep strict INV-2 for v1. CONFIRM."
+  - "ADR-0006 candidate (verdict tiering & latency model): design §7/§8 flag that the three-tier model may warrant its own ADR. E6-S10 completes the T2 tier; recommend brian ratify ADR-0006 to record the tiering + the OD-SYNC-8 in-binary-budget invariant as load-bearing enforcement architecture."
+
+done: "brian G3 sign-off 2026-07-15 + Sam G_SEC APPROVE (all findings fixed); committed to main (no push, no signature). Completes the E6 verdict tiering through Tier-2 (E6-S11 Tier-3 findings loop remains)."

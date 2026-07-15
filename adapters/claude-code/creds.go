@@ -46,6 +46,8 @@ const (
 	envEnforce         = "OPENBOX_ENFORCE"
 	envFailClosed      = "OPENBOX_FAIL_CLOSED"
 	envEnforceTimeout  = "OPENBOX_ENFORCE_TIMEOUT_MS"
+	envTier2           = "OPENBOX_TIER2"
+	envTier2Timeout    = "OPENBOX_TIER2_TIMEOUT_MS"
 	envSidecarSocket   = "OPENBOX_SIDECAR_SOCKET"
 	envSecretDetection = "OPENBOX_SECRET_DETECTION"
 	envEnforcementFile = "OPENBOX_ENFORCEMENT_FILE"
@@ -124,6 +126,22 @@ type DevConfig struct {
 	// A fail-closed org may raise it to ride out transient sidecar slowness without
 	// spuriously blocking. OPENBOX_ENFORCE_TIMEOUT_MS overrides it.
 	EnforceTimeoutMS int `json:"enforce_timeout_ms,omitempty"`
+	// Tier2 enables the Tier-2 synchronous /evaluate escalation for high-risk
+	// classes (Bash / MCP execution) in enforce mode (STORY-E6-S10, design §7). It
+	// is a *bool so an ABSENT field means the DEFAULT (OFF): T2 is opt-in because it
+	// adds hot-path secret I/O + a ~1.6 s network round-trip on high-risk calls, and
+	// because T1-only enforce ("v1 minus T2", design §7 Option C) is a valid honest
+	// posture. With it off the enforce path is byte-identical to E6-S9 (T1-only). Set
+	// true (config `tier2:true` or OPENBOX_TIER2) to close the §2a policy-only floor
+	// for arbitrary execution. Only meaningful in enforce mode (ResolveEnforce).
+	Tier2 *bool `json:"tier2,omitempty"`
+	// Tier2TimeoutMS overrides the in-binary budget (milliseconds) one T2 /evaluate
+	// escalation may take (STORY-E6-S10). 0/absent ⇒ defaultTier2Timeout (3.5 s). It
+	// is CLAMPED to maxTier2Timeout (4 s) so the whole PreToolUse hook stays under
+	// Claude Code's 5 s hook timeout (CC fails OPEN on a hook timeout — the same
+	// correctness bound as EnforceTimeoutMS, scaled for the network round-trip).
+	// OPENBOX_TIER2_TIMEOUT_MS overrides it.
+	Tier2TimeoutMS int `json:"tier2_timeout_ms,omitempty"`
 	// SidecarSocket overrides the Unix socket the enforce hook dials (default:
 	// sidecar.DefaultSocketPath()). The OPENBOX_SIDECAR_SOCKET env overrides it —
 	// the SAME env `openbox sidecar serve` reads, so the daemon and the hook agree.
@@ -410,6 +428,52 @@ func ResolveEnforceTimeout() time.Duration {
 	// by construction, not by accident (G_SEC INFO-2).
 	if maxMS := int64(maxEnforceTimeout / time.Millisecond); int64(ms) > maxMS {
 		return maxEnforceTimeout
+	}
+	return time.Duration(ms) * time.Millisecond
+}
+
+// ResolveTier2 reports whether the Tier-2 synchronous /evaluate escalation is on
+// (STORY-E6-S10, design §7). DEFAULT FALSE — opt-in, UNLIKE secret detection: T2
+// adds hot-path secret I/O + a network round-trip on high-risk calls, so it must be
+// chosen explicitly. Config `tier2` first, then the OPENBOX_TIER2 env override (env
+// wins either way). A missing/unreadable config leaves it OFF (fail-safe — the
+// latency-adding tier never turns itself on by accident). Cheap config+env read, no
+// secret I/O; safe on the PreToolUse hot path. Only meaningful in enforce mode.
+func ResolveTier2() bool {
+	enabled := false
+	if cfg, err := loadDevConfig(DefaultConfigPath()); err == nil && cfg.Tier2 != nil {
+		enabled = *cfg.Tier2
+	}
+	if v, ok := os.LookupEnv(envTier2); ok {
+		enabled = isTruthy(v)
+	}
+	return enabled
+}
+
+// ResolveTier2Timeout resolves the in-binary budget for one Tier-2 /evaluate
+// escalation (STORY-E6-S10): tier2_timeout_ms config first, then
+// OPENBOX_TIER2_TIMEOUT_MS (env wins when present AND parseable — a garbage env
+// value is ignored so it never silently wipes a valid config). A resolved value
+// <=0 yields defaultTier2Timeout; a positive value over maxTier2Timeout is clamped
+// (the correctness bound: the hook must return before CC's 5 s hook timeout, which
+// fails OPEN). No secret I/O; a missing/unreadable config degrades to env-or-default.
+func ResolveTier2Timeout() time.Duration {
+	ms := 0
+	if cfg, err := loadDevConfig(DefaultConfigPath()); err == nil {
+		ms = cfg.Tier2TimeoutMS
+	}
+	if v, ok := os.LookupEnv(envTier2Timeout); ok {
+		if n, err := strconv.Atoi(strings.TrimSpace(v)); err == nil {
+			ms = n
+		}
+	}
+	if ms <= 0 {
+		return defaultTier2Timeout
+	}
+	// Clamp in MILLISECONDS before the multiply so a near-max-int64 value can never
+	// overflow time.Duration (mirrors ResolveEnforceTimeout's overflow-proof clamp).
+	if maxMS := int64(maxTier2Timeout / time.Millisecond); int64(ms) > maxMS {
+		return maxTier2Timeout
 	}
 	return time.Duration(ms) * time.Millisecond
 }
