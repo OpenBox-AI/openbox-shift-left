@@ -323,12 +323,15 @@ func TestHookPayload_ContentBodyTruncated(t *testing.T) {
 	}
 }
 
-// TestHookPayload_RealPostShape_StatelessDuration exercises the PRODUCTION
-// ToolResult shape the mapper actually emits (only EndedAt set; StartedAt empty),
-// which the other pairing tests do not. It documents F1: the completed span
-// conforms and pairs with its ToolCall (shared span_id), but because PostToolUse
-// exposes no start time the completed span's duration_ns is 0 and its start_time
-// is its own timestamp — a known stateless-pairing limitation, not a wire break.
+// TestHookPayload_RealPostShape_StatelessDuration exercises the ToolResult shape
+// with ONLY EndedAt set (StartedAt empty). Since E7-S8 the adapter threads the
+// PreToolUse start time onto the completed event, so this is now the stash-MISS
+// FALLBACK (an unpaired PostToolUse, or a lost started record), NOT the normal
+// path — see TestHookPayload_ThreadedStart_RealDuration for the threaded case. It
+// documents F1: the completed span still conforms and pairs with its ToolCall
+// (shared span_id), but with no start time its duration_ns is 0 and its
+// start_time is its own timestamp — a known limitation of the miss path, not a
+// wire break.
 func TestHookPayload_RealPostShape_StatelessDuration(t *testing.T) {
 	// The started half (PreToolUse: StartedAt set, EndedAt empty).
 	started := DevEvent{
@@ -361,5 +364,47 @@ func TestHookPayload_RealPostShape_StatelessDuration(t *testing.T) {
 	sp := firstSpan(t, decodeHookPayload(t, started))
 	if sp["span_id"] != cs["span_id"] {
 		t.Errorf("real pair must still share span_id: %v vs %v", sp["span_id"], cs["span_id"])
+	}
+}
+
+// TestHookPayload_ThreadedStart_RealDuration is the E7-S8 payoff: once the adapter
+// threads the PreToolUse start time onto the completed ToolResult (StartedAt set),
+// buildHookSpan computes a REAL duration_ns = end-start on the completed span and
+// its start_time equals the started span's — so core's completed-hook path lands a
+// non-zero event-level duration_ms. It also proves the pair shares span_id and
+// start_time, exactly as the base SDK's single-span-object pairing does.
+func TestHookPayload_ThreadedStart_RealDuration(t *testing.T) {
+	started := DevEvent{
+		EventID: "pre", EventType: EventToolCall, SessionID: "sess-1", DeveloperDID: "did:aip:abc",
+		Timestamp: "2026-07-08T00:00:00Z", StartedAt: "2026-07-08T00:00:00Z",
+		Tool: Tool{Name: "Read", Kind: ToolFile},
+		Span: &Span{SemanticType: "file_read", Stage: "started", FilePath: "/a.go", FileOp: "read"},
+	}
+	// The threaded completed half: StartedAt recovered from the paired PreToolUse
+	// (durationStash), EndedAt from PostToolUse — a 2s tool call.
+	completed := DevEvent{
+		EventID: "post", EventType: EventToolResult, SessionID: "sess-1", DeveloperDID: "did:aip:abc",
+		Timestamp: "2026-07-08T00:00:02Z", StartedAt: "2026-07-08T00:00:00Z", EndedAt: "2026-07-08T00:00:02Z",
+		Tool: Tool{Name: "Read", Kind: ToolFile},
+		Span: &Span{SemanticType: "file_read", Stage: "completed", FilePath: "/a.go", FileOp: "read"},
+	}
+
+	cp := decodeHookPayload(t, completed)
+	if err := AssertHookWireShape(cp); err != nil {
+		t.Fatalf("threaded completed payload violates wire shape: %v", err)
+	}
+	cs := firstSpan(t, cp)
+	sp := firstSpan(t, decodeHookPayload(t, started))
+
+	// Real duration: 2s = 2e9 ns.
+	if d, _ := cs["duration_ns"].(float64); d != 2e9 {
+		t.Errorf("duration_ns = %v, want 2e9 (2s) from the threaded start", cs["duration_ns"])
+	}
+	// start_time shared with the started span (both derived from the same start).
+	if cs["start_time"] != sp["start_time"] {
+		t.Errorf("threaded completed start_time %v must equal started %v", cs["start_time"], sp["start_time"])
+	}
+	if cs["span_id"] != sp["span_id"] {
+		t.Errorf("pair must share span_id: %v vs %v", cs["span_id"], sp["span_id"])
 	}
 }

@@ -2,6 +2,7 @@ package claudecode
 
 import (
 	"context"
+	"path/filepath"
 
 	"github.com/openbox-ai/openbox-shift-left/client"
 )
@@ -25,6 +26,10 @@ type Adapter struct {
 	// (STORY-SL-9). Record-only, off the hot path, never blocks (INV-3). nil ⇒
 	// no advisory recording (still delivers, still never blocks).
 	Advisory *Advisory
+	// Durations bridges the PreToolUse start time to the paired PostToolUse so a
+	// completed span computes a real cross-process duration (E7-S8). Best-effort;
+	// an empty Dir disables it (Observe threads nothing, byte-identical to before).
+	Durations durationStash
 }
 
 // New builds an Adapter for a developer identity, spooling under dir and writing
@@ -34,6 +39,10 @@ func New(id Identity, spoolDir string) *Adapter {
 		Mapper:   NewMapper(id),
 		Spool:    Spool{Dir: spoolDir},
 		Advisory: &Advisory{Path: DefaultAdvisoryPath()},
+		// A subdir of the spool root: keeps everything under one configurable dir
+		// (OPENBOX_SPOOL_DIR → auto-isolated in tests), and the spool's FlushAll
+		// skips subdirectories, so it never mistakes a stash for a spool file.
+		Durations: durationStash{Dir: filepath.Join(spoolDir, "durations")},
 	}
 }
 
@@ -49,10 +58,34 @@ func (a *Adapter) Observe(hook HookName, e *HookEvent) (spooled bool, err error)
 	if !ok {
 		return false, nil
 	}
+	// E7-S8: bridge the PreToolUse start time to the paired PostToolUse so the
+	// completed span computes a real cross-process duration. Runs before Append so
+	// the spooled completed DevEvent is self-contained (survives spool splitting).
+	a.threadDuration(&ev)
 	if err := a.Spool.Append(ev); err != nil {
 		return false, err
 	}
 	return true, nil
+}
+
+// threadDuration records/recovers a tool call's start time across the separate
+// Pre/PostToolUse hook processes (durationStash), mutating only ev.StartedAt on
+// the completed (ToolResult) event — which buildHookSpan turns into the completed
+// span's start_time (and thus a non-zero duration_ns). Structural only (INV-2)
+// and best-effort (INV-3): a stash fault only costs duration accuracy. SessionEnd
+// sweeps the session's stash so records from tool calls whose PostToolUse never
+// fired do not accumulate.
+func (a *Adapter) threadDuration(ev *client.DevEvent) {
+	switch ev.EventType {
+	case client.EventToolCall:
+		_ = a.Durations.putStart(ev.SessionID, toolCallStartKey(*ev), ev.StartedAt)
+	case client.EventToolResult:
+		if start := a.Durations.takeStart(ev.SessionID, toolCallStartKey(*ev)); start != "" {
+			ev.StartedAt = start
+		}
+	case client.EventSessionEnded:
+		a.Durations.clearSession(ev.SessionID)
+	}
 }
 
 // Flush drains the given session's spooled events through the Emitter. It is

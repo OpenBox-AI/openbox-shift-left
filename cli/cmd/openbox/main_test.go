@@ -261,11 +261,7 @@ func TestHookIsObserveOnlyInProcess(t *testing.T) {
 	if out.Len() != 0 {
 		t.Fatalf("stdout must be empty (no context injection / no block), got %q", out.String())
 	}
-	entries, err := os.ReadDir(spool)
-	if err != nil || len(entries) != 1 {
-		t.Fatalf("expected one spool file, got %v (err %v)", entries, err)
-	}
-	raw, _ := os.ReadFile(filepath.Join(spool, entries[0].Name()))
+	raw, _ := os.ReadFile(filepath.Join(spool, onlySpoolFile(t, spool)))
 	if strings.Contains(string(raw), secret) {
 		t.Fatalf("command content leaked into the spool: %s", raw)
 	}
@@ -324,13 +320,34 @@ func TestUnifiedBinaryHookObserveOnlyContract(t *testing.T) {
 	if stdout.Len() != 0 {
 		t.Fatalf("stdout must be empty on the unified binary, got %q", stdout.String())
 	}
-	entries, err := os.ReadDir(spool)
-	if err != nil || len(entries) != 1 {
-		t.Fatalf("expected one spool file, got %v (err %v)", entries, err)
-	}
-	if raw, _ := os.ReadFile(filepath.Join(spool, entries[0].Name())); strings.Contains(string(raw), secret) {
+	spoolFile := onlySpoolFile(t, spool)
+	if raw, _ := os.ReadFile(filepath.Join(spool, spoolFile)); strings.Contains(string(raw), secret) {
 		t.Fatalf("content leaked into the spool: %s", raw)
 	}
+}
+
+// onlySpoolFile returns the single session .jsonl spool file under dir, ignoring
+// the companion "durations/" subdir (the E7-S8 start-time stash).
+func onlySpoolFile(t *testing.T, dir string) string {
+	t.Helper()
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("read spool dir: %v", err)
+	}
+	var found string
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".jsonl") {
+			continue
+		}
+		if found != "" {
+			t.Fatalf("expected one spool file, got a second: %s", e.Name())
+		}
+		found = e.Name()
+	}
+	if found == "" {
+		t.Fatalf("no session spool file written, entries=%v", entries)
+	}
+	return found
 }
 
 // TestHookEndToEndSmoke drives all five hooks through the unified subcommand and
@@ -418,9 +435,14 @@ func TestHookEndToEndSmoke(t *testing.T) {
 	if n == 0 {
 		t.Fatalf("mock /evaluate received no events — SessionEnd flush did not deliver through the unified binary")
 	}
-	// The session's spool must be drained after a successful flush.
-	if entries, _ := os.ReadDir(spool); len(entries) != 0 {
-		t.Errorf("spool not drained after SessionEnd flush: %v", entries)
+	// The session's spool FILES must be drained after a successful flush (the
+	// "durations/" subdir — the E7-S8 stash, swept per-session at SessionEnd — is
+	// not a spool file).
+	drained, _ := os.ReadDir(spool)
+	for _, e := range drained {
+		if !e.IsDir() && strings.HasSuffix(e.Name(), ".jsonl") {
+			t.Errorf("spool not drained after SessionEnd flush: %s", e.Name())
+		}
 	}
 	// INV-2 on the wire: no delivered body may carry the tool_input content.
 	for i, b := range delivered {

@@ -48,12 +48,25 @@ func TestHookBinary_ObserveOnlyContract(t *testing.T) {
 		t.Fatalf("stdout must be empty (no context injection / no block), got %q", stdout.String())
 	}
 
-	// A spool file was written for the session.
+	// A spool file was written for the session (the sibling "durations/" subdir —
+	// the E7-S8 start-time stash — is skipped: we want the session's .jsonl).
 	entries, err := os.ReadDir(spoolDir)
-	if err != nil || len(entries) != 1 {
-		t.Fatalf("expected one spool file, got %v (err %v)", entries, err)
+	if err != nil {
+		t.Fatalf("read spool dir: %v", err)
 	}
-	raw, _ := os.ReadFile(filepath.Join(spoolDir, entries[0].Name()))
+	var spoolFile string
+	for _, e := range entries {
+		if !e.IsDir() && strings.HasSuffix(e.Name(), ".jsonl") {
+			if spoolFile != "" {
+				t.Fatalf("expected one spool file, got a second: %s", e.Name())
+			}
+			spoolFile = e.Name()
+		}
+	}
+	if spoolFile == "" {
+		t.Fatalf("no session spool file written, entries=%v", entries)
+	}
+	raw, _ := os.ReadFile(filepath.Join(spoolDir, spoolFile))
 	if !strings.Contains(string(raw), "ToolCall") {
 		t.Errorf("spooled event should be a ToolCall: %s", raw)
 	}
