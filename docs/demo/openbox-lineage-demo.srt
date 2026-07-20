@@ -1,0 +1,39 @@
+1
+00:00:00,000 --> 00:00:08,000
+OpenBox Shift-Left — commit → session → runtime lineage
+
+2
+00:00:08,000 --> 00:00:20,000
+A governed Claude Code session, emitting as the developer's OpenBox agent
+
+3
+00:00:20,000 --> 00:00:36,000
+Prompt: add a line to README, commit "lineage test", then push
+
+4
+00:00:36,000 --> 00:00:58,000
+SL-5 stamps the commit — OpenBox-Session: <run-id> — binding it to the session that made it
+
+5
+00:00:58,000 --> 00:01:08,000
+Pushed to the GitHub-App-connected repo → OpenBox parses the trailer
+
+6
+00:01:08,000 --> 00:01:32,000
+Dashboard: the push is attributed to the repository agent (Lifecycle events)
+
+7
+00:01:32,000 --> 00:01:58,000
+Registered runtime "commit-derived" — OpenBox derives the runtime from commit → session
+
+8
+00:01:58,000 --> 00:02:22,000
+The governed session's execution evidence — the Write activity, Merkle-sealed
+
+9
+00:02:22,000 --> 00:02:40,000
+…and the prompt that drove it — commit → session → runtime, tamper-evident
+
+10
+00:02:40,000 --> 00:02:44,000
+Shift-left lineage: every commit traces back to the governed session behind it

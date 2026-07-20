@@ -1,0 +1,51 @@
+1
+00:00:00,000 --> 00:00:08,000
+OpenBox Shift-Left — governing Claude Code, live against UAT
+
+2
+00:00:08,000 --> 00:00:16,000
+Enforcement is ambient: creds, hooks and policy came from `openbox dev init` + `dev sync`
+
+3
+00:00:16,000 --> 00:00:46,000
+A throwaway repo, then Claude Code launches — the local sidecar holds the synced policy
+
+4
+00:00:46,000 --> 00:01:14,000
+From here it's a normal coding session; governance runs inside the hooks, invisibly
+
+5
+00:01:14,000 --> 00:01:50,000
+Every prompt and tool call is evaluated before it runs
+
+6
+00:01:52,000 --> 00:02:16,000
+TIER 1 · local secret redaction — Claude is asked to write AWS + GitHub credentials
+
+7
+00:02:16,000 --> 00:02:40,000
+The keys are rewritten to ${OPENBOX_REDACTED_…} at the sidecar — real values never leave the machine
+
+8
+00:02:40,000 --> 00:03:06,000
+TIER 3 · a content-free finding is surfaced back into the chat; ending the session flushes to OpenBox
+
+9
+00:03:12,000 --> 00:03:40,000
+The OpenBox dashboard — high-risk Bash calls wait here as pending approvals (TIER 2)
+
+10
+00:03:40,000 --> 00:03:56,000
+Honest limit: the hook runs on the dev's machine — this is advisory + audited, not a hard block
+
+11
+00:03:58,000 --> 00:04:28,000
+A fresh session — governance carries across sessions
+
+12
+00:04:30,000 --> 00:04:58,000
+TIER 3 · "what did OpenBox flag?" — the async guardrail findings come back into context
+
+13
+00:04:58,000 --> 00:05:06,000
+Default-on governance with a tamper-evident trail — shifted left into how the code gets written
