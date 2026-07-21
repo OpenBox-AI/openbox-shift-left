@@ -24,7 +24,7 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/cli/internal/backend"
 	"github.com/openbox-ai/openbox-shift-left/cli/internal/devinit"
 	"github.com/openbox-ai/openbox-shift-left/cli/internal/secret"
-	"github.com/openbox-ai/openbox-shift-left/sidecar"
+	"github.com/openbox-ai/openbox-shift-left/decision"
 )
 
 // fakeReg implements devinit.Registrar for the command-wiring tests.
@@ -736,7 +736,7 @@ func TestDevSync_BuilderPolicyWritesPinnedBundle(t *testing.T) {
 		t.Fatalf("bundle not written: %v", err)
 	}
 	// The written bundle carries the PIN + the builder config, and is loadable.
-	b, err := sidecar.ParseBundle(raw)
+	b, err := decision.ParseBundle(raw)
 	if err != nil {
 		t.Fatalf("written bundle invalid: %v", err)
 	}

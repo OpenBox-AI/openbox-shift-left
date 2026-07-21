@@ -200,7 +200,7 @@ func parseAgentList(raw json.RawMessage) []AgentSummary {
 
 // Policy is the current per-agent policy read from the control plane
 // (STORY-E6-S8, ADR-0005). It is the subset of openbox-backend's PolicyEntity
-// the CLI needs to translate into a local sidecar bundle: the PIN (ID +
+// the CLI needs to translate into a local policy bundle: the PIN (ID +
 // UpdatedAt), the structured config.policy_builder (when the policy was authored
 // in the builder UI), and whether raw rego is present (the fidelity-residual
 // case). RegoCode is INTENTIONALLY not exposed as a field beyond a presence

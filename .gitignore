@@ -11,6 +11,7 @@ Thumbs.db
 
 # Build output (compiled Go binaries — built per-platform, never committed)
 bin/
+/openbox
 
 # Env / secrets
 .env

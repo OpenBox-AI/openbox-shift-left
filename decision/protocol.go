@@ -1,20 +1,20 @@
-package sidecar
+package decision
 
 import (
 	"github.com/openbox-ai/openbox-shift-left/client"
 )
 
-// ProtocolVersion is the Unix-socket wire contract version. Bumped on any
-// breaking change to DecisionRequest/DecisionResponse. Both the daemon (server)
-// and the enforce hook (Client) are shipped in the SAME binary (WIRE-2), so this
-// is defense-in-depth against a stale hook talking to a newer daemon, not a
-// cross-release negotiation.
+// ProtocolVersion tags the DecisionRequest/DecisionResponse contract version. It
+// is retained as defense-in-depth (the decide path rejects a version it does not
+// understand rather than mis-decode); with the in-process decider (ADR-0006) the
+// request and the evaluator are always the same binary, so this never negotiates
+// across releases.
 const ProtocolVersion = 1
 
-// DecisionRequest is what the enforce-mode PreToolUse hook (E6-S1) sends over the
-// Unix socket, one request per connection. It carries only what a LOCAL decision
-// needs — the same axes core's rego input is built from (see BuildOPAInput):
-// which developer/session, which tool, what action, and the metadata attributes.
+// DecisionRequest is what the enforce-mode PreToolUse hook (E6-S1) builds and hands
+// to the in-process decider. It carries only what a LOCAL decision needs — the same
+// axes core's rego input is built from (see BuildOPAInput): which developer/session,
+// which tool, what action, and the metadata attributes.
 //
 // INV-2: Content is OPTIONAL and only populated when the org's content posture is
 // on (for E6-S4 local redaction). It never leaves the machine and is never logged.
@@ -52,16 +52,16 @@ type DecisionRequest struct {
 	Content *client.Content `json:"content,omitempty"`
 }
 
-// DecisionResponse is the daemon's answer: the resolved governance Evaluation
+// DecisionResponse is the decider's answer: the resolved governance Evaluation
 // (the SAME client.Evaluation the Advisory tier records and E6-S2's apply acts
 // on — no parallel verdict type), plus how it was reached.
 type DecisionResponse struct {
 	Protocol int `json:"protocol"`
 
-	// Evaluation is the local verdict + reason + policy id + constraints. On any
-	// server-side fault it is zero-valued (VerdictUnknown), which the enforce hook
-	// treats as allow (fail-open) — but the Client also fails open BEFORE this,
-	// without a response, when the socket is absent/slow.
+	// Evaluation is the local verdict + reason + policy id + constraints. When no
+	// policy is loaded it is zero-valued (VerdictUnknown) with sourceFailOpenNoBundle,
+	// which the enforce hook treats as allow under fail-open (or denies under the
+	// opt-in fail-closed policy).
 	Evaluation client.Evaluation `json:"evaluation"`
 
 	// Source records how the decision was made, for the async telemetry mirror and
@@ -89,11 +89,11 @@ type DecisionResponse struct {
 	// fields, never structural" carry-forward). It replaces the E6-S4
 	// `redacted_input` full-object carrier for exactly that reason.
 	//
-	// INV-2: this is the ONE content-bearing field on the sidecar protocol. It is
+	// INV-2: this is the ONE content-bearing field on the decision contract. It is
 	// carried here — NOT on Evaluation — deliberately: Evaluation flows into the
 	// advisory sink, the enforcement audit, and core egress, none of which must
-	// ever see content; this field stays confined to the LOCAL Unix socket ↔ hook
-	// ↔ Claude Code stdout channel (same machine, never egressed, never logged).
+	// ever see content; this field stays confined to the LOCAL in-process decider ↔
+	// hook ↔ Claude Code stdout channel (same machine, never egressed, never logged).
 	RedactedContent *client.Content `json:"redacted_content,omitempty"`
 
 	// RedactionCategories are the secret-category names that fired (e.g.
@@ -108,9 +108,7 @@ const (
 	// sourceLocalBundle: decided locally from the synced policy bundle (the normal
 	// enforce path).
 	sourceLocalBundle = "local-bundle"
-	// sourceFailOpenNoBundle: no bundle loaded yet (cold start) → fail-open allow.
+	// sourceFailOpenNoBundle: no bundle loaded yet (cold start), or the request was
+	// unusable (missing session / bad protocol) → fail-open allow.
 	sourceFailOpenNoBundle = "fail-open:no-bundle"
-	// sourceFailOpenClient: set by the Client (not the server) when the socket is
-	// absent, the dial/decision timed out, or the response was unusable → allow.
-	sourceFailOpenClient = "fail-open:client"
 )

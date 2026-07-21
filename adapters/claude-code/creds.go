@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"github.com/openbox-ai/openbox-shift-left/client"
-	"github.com/openbox-ai/openbox-shift-left/sidecar"
+	"github.com/openbox-ai/openbox-shift-left/decision"
 )
 
 // Credential resolution for the hook binary. Identity is minted by
@@ -48,7 +48,6 @@ const (
 	envEnforceTimeout  = "OPENBOX_ENFORCE_TIMEOUT_MS"
 	envTier2           = "OPENBOX_TIER2"
 	envTier2Timeout    = "OPENBOX_TIER2_TIMEOUT_MS"
-	envSidecarSocket   = "OPENBOX_SIDECAR_SOCKET"
 	envSecretDetection = "OPENBOX_SECRET_DETECTION"
 	envFindings        = "OPENBOX_FINDINGS"
 	envFindingsCursor  = "OPENBOX_FINDINGS_CURSOR"
@@ -105,28 +104,26 @@ type DevConfig struct {
 	// Enforce flips the developer runtime from observe/advisory to ENFORCE
 	// (STORY-E6-S1, Phase-2). Default false — the whole of Phase-1 stays observe.
 	// When true, the PreToolUse hook SYNCHRONOUSLY obtains a governance decision
-	// from the local sidecar (sidecar.Client) BEFORE the tool runs (the INV-3b
-	// pre-execution gate, bounded ~50ms, fail-open). E6-S1 only OBTAINS + records
-	// the decision; turning a BLOCK/HALT verdict into an actual CC `deny`/`ask` is
+	// from the in-process decider BEFORE the tool runs (the INV-3b pre-execution
+	// gate, evaluated in-memory, fail-open). E6-S1 only OBTAINS + records the
+	// decision; turning a BLOCK/HALT verdict into an actual CC `deny`/`ask` is
 	// E6-S2's apply. OPENBOX_ENFORCE overrides this either way (ResolveEnforce).
 	Enforce bool `json:"enforce,omitempty"`
 	// FailClosed selects the per-org FAILURE POLICY for enforce mode (STORY-E6-S3,
-	// OD9). Default false = FAIL-OPEN: when the local sidecar cannot deliver a real
-	// verdict (absent, timeout, malformed) the tool PROCEEDS (degrade to observe) —
-	// an OpenBox outage never blocks a developer. Set true to opt into FAIL-CLOSED:
-	// the same outage DENIES the tool call. This mirrors the reference SDK's
-	// governance_policy (fail_open|fail_closed, on_api_error). It ONLY changes the
-	// evaluation-UNAVAILABLE case — a real ALLOW/CONSTRAIN verdict from a reachable
-	// sidecar still proceeds under either policy. OPENBOX_FAIL_CLOSED overrides it.
+	// OD9). Default false = FAIL-OPEN: when the decider cannot deliver a real verdict
+	// (no policy bundle loaded, unusable request) the tool PROCEEDS (degrade to
+	// observe) — an OpenBox outage never blocks a developer. Set true to opt into
+	// FAIL-CLOSED: the same no-verdict case DENIES the tool call. This mirrors the
+	// reference SDK's governance_policy (fail_open|fail_closed, on_api_error). It ONLY
+	// changes the no-verdict case — a real ALLOW/CONSTRAIN verdict still proceeds under
+	// either policy. OPENBOX_FAIL_CLOSED overrides it.
 	FailClosed bool `json:"fail_closed,omitempty"`
-	// EnforceTimeoutMS overrides the hard per-call decision budget (milliseconds)
-	// the enforce hook allows the sidecar before it gives up (STORY-E6-S3; from
-	// spike S2). 0/absent ⇒ sidecar.DefaultDecisionTimeout (~50 ms, ADR-0002). It is
-	// CLAMPED to maxEnforceTimeout (2 s) so the whole PreToolUse hook stays well
-	// under Claude Code's 5 s hook kill — past that, CC kills the hook and the tool
-	// proceeds (a CC-layer fail-OPEN), which would silently defeat a fail-CLOSED org.
-	// A fail-closed org may raise it to ride out transient sidecar slowness without
-	// spuriously blocking. OPENBOX_ENFORCE_TIMEOUT_MS overrides it.
+	// EnforceTimeoutMS is INERT under the in-process decider (ADR-0006): the decision
+	// is computed in-memory with no per-call network/IPC budget, so there is no
+	// timeout to configure. Retained (config field + OPENBOX_ENFORCE_TIMEOUT_MS +
+	// ResolveEnforceTimeout) for back-compat parsing and possible future use; it does
+	// NOT affect the enforce path today. (The separate Tier-2 /evaluate escalation
+	// keeps its own budget — Tier2TimeoutMS.)
 	EnforceTimeoutMS int `json:"enforce_timeout_ms,omitempty"`
 	// Tier2 enables the Tier-2 synchronous /evaluate escalation for high-risk
 	// classes (Bash / MCP execution) in enforce mode (STORY-E6-S10, design §7). It
@@ -144,15 +141,11 @@ type DevConfig struct {
 	// correctness bound as EnforceTimeoutMS, scaled for the network round-trip).
 	// OPENBOX_TIER2_TIMEOUT_MS overrides it.
 	Tier2TimeoutMS int `json:"tier2_timeout_ms,omitempty"`
-	// SidecarSocket overrides the Unix socket the enforce hook dials (default:
-	// sidecar.DefaultSocketPath()). The OPENBOX_SIDECAR_SOCKET env overrides it —
-	// the SAME env `openbox sidecar serve` reads, so the daemon and the hook agree.
-	SidecarSocket string `json:"sidecar_socket,omitempty"`
 	// SecretDetection enables Tier-1 local secret/entropy detection + redact-and-
 	// continue (STORY-E6-S9, OD-SYNC-10). It is a *bool so an ABSENT field means the
 	// DEFAULT (ON): the protection is opt-OUT, not opt-in, because the detected
 	// secret/redaction stays strictly LOCAL (the file body reaches only the Unix
-	// socket; the redaction rides sidecar.Decision, never client.Evaluation) — so it
+	// socket; the redaction rides decision.Decision, never client.Evaluation) — so it
 	// honors INV-2 (egress-only) WITHOUT the OD4 content-capture opt-in, which
 	// governs EGRESS. Set false to disable. OPENBOX_SECRET_DETECTION overrides it.
 	// Only meaningful in enforce mode.
@@ -330,7 +323,7 @@ func ResolveFinops() bool {
 // other coordinate. DEFAULT ON as of brian 2026-07-15 (reverses the original
 // metadata-only-by-default INV-2/OD4/NFR-1 posture) — an ABSENT config field (the
 // normal case, since `dev init` writes no content_capture) yields ON: tool content
-// reaches the local sidecar AND egresses on emitted events, and the enforce hook
+// reaches the local decider AND egresses on emitted events, and the enforce hook
 // applies `updatedInput` redaction. Set `content_capture:false` or
 // OPENBOX_CONTENT_CAPTURE=0 to opt back to metadata-only. Modeled as *bool (like
 // SecretDetection) so absent (default ON) is distinguishable from an explicit
@@ -353,7 +346,7 @@ func ResolveContentCapture() bool {
 // config field keeps it on; config `secret_detection:false` disables it; the
 // OPENBOX_SECRET_DETECTION env overrides either way (env wins). Unlike
 // ResolveContentCapture (which defaults FALSE and governs EGRESS), this is on by
-// default because the file body it acts on reaches ONLY the local sidecar and the
+// default because the file body it acts on reaches ONLY the local decider and the
 // redaction stays LOCAL — never egressed (INV-2 is egress-only). A
 // missing/unreadable config leaves the default ON (the protection never turns
 // itself off by accident). Cheap config+env read, no secret I/O; safe on the hot
@@ -407,7 +400,7 @@ func ResolveFindingsCursor() string {
 // (STORY-E6-S1 / Phase-2): config field first, then the OPENBOX_ENFORCE env
 // override (env wins), same precedence as every other coordinate. Default false
 // — with it unset the runtime stays observe/advisory and the PreToolUse hot path
-// NEVER dials the sidecar (byte-identical to Phase-1). No secret I/O: a cheap
+// NEVER invokes the decider (byte-identical to Phase-1). No secret I/O: a cheap
 // config+env read safe to call on the PreToolUse hot path. A missing/unreadable
 // config is treated as false (fail-safe) — enforcement never turns itself on by
 // accident, and a config read error never blocks a tool call (INV-3).
@@ -450,12 +443,12 @@ func ResolveFailClosed() bool {
 }
 
 // ResolveEnforceTimeout resolves the hard per-call decision budget the enforce
-// hook allows the local sidecar (STORY-E6-S3; the S2 timeout made a knob):
+// hook allows the local decider (STORY-E6-S3; the S2 timeout made a knob):
 // enforce_timeout_ms config first, then OPENBOX_ENFORCE_TIMEOUT_MS (env wins when
 // present AND parseable — a garbage env value is ignored and the config value
 // stands, so a fat-fingered env never silently wipes a valid config). A resolved
-// value <=0 yields 0; the caller passes 0 to sidecar.NewClient, which substitutes
-// sidecar.DefaultDecisionTimeout (~50 ms, ADR-0002), so the default behavior is
+// value <=0 yields 0; the caller passes 0 to decision.NewClient, which substitutes
+// decision.DefaultDecisionTimeout (~50 ms, ADR-0002), so the default behavior is
 // byte-identical to E6-S1. A positive value over maxEnforceTimeout is clamped
 // (INV-3b bounded + keeps the hook under CC's 5 s kill). No secret I/O; a
 // missing/unreadable config degrades to env-or-default.
@@ -470,7 +463,7 @@ func ResolveEnforceTimeout() time.Duration {
 		}
 	}
 	if ms <= 0 {
-		return 0 // ⇒ sidecar.DefaultDecisionTimeout
+		return 0 // ⇒ decision.DefaultDecisionTimeout
 	}
 	// Clamp in MILLISECONDS before the multiply so a near-max-int64 value can never
 	// overflow time.Duration (which would wrap to a negative/huge duration). Bounded
@@ -527,16 +520,6 @@ func ResolveTier2Timeout() time.Duration {
 	return time.Duration(ms) * time.Millisecond
 }
 
-// ResolveSidecarSocket resolves the Unix socket path the enforce hook dials: the
-// OPENBOX_SIDECAR_SOCKET env first, then the dev config's sidecar_socket, else ""
-// (the caller lets sidecar.DefaultSocketPath() decide, so the daemon and the hook
-// agree without configuration). No secret I/O; a missing/unreadable config
-// degrades to env-or-empty. Empty is the normal case (use the default path).
-func ResolveSidecarSocket() string {
-	cfg, _ := loadDevConfig(DefaultConfigPath())
-	return firstNonEmpty(os.Getenv(envSidecarSocket), cfg.SidecarSocket)
-}
-
 // ResolveAgentID resolves the backend agent id for policy sync/staleness
 // (STORY-E6-S8): OPENBOX_AGENT_ID env first, then the dev config's agent_id
 // (persisted by `dev init`). Empty when nothing configures it (the caller then
@@ -565,14 +548,15 @@ func ResolveControlToken() string {
 	return os.Getenv(envControlToken)
 }
 
-// ResolveBundlePath resolves the local policy-bundle path the daemon serves and
-// `dev sync`/staleness read: OPENBOX_SIDECAR_BUNDLE env, else the sidecar default.
-// The daemon reads the SAME env, so hook and daemon agree.
+// ResolveBundlePath resolves the local policy-bundle path the in-process decider
+// evaluates and `dev sync`/staleness read: OPENBOX_SIDECAR_BUNDLE env, else the
+// default bundle path (decision.DefaultBundlePath). `dev sync` writes the SAME
+// path, so the writer and the decider agree.
 func ResolveBundlePath() string {
 	if p := os.Getenv(envSidecarBundle); p != "" {
 		return p
 	}
-	return sidecar.DefaultBundlePath()
+	return decision.DefaultBundlePath()
 }
 
 // ResolveCredentials assembles Credentials from env + the OS secret store. It

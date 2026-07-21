@@ -1,4 +1,4 @@
-package sidecar
+package decision
 
 import (
 	"encoding/json"
@@ -9,7 +9,20 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/client"
 )
 
-// Bundle is the LOCAL policy the sidecar evaluates a tool call against, in the
+// DefaultBundlePath is where the in-process decider loads its local policy bundle
+// when no path is configured — the same file `openbox dev sync` writes. Per-user
+// under XDG on Linux / the standard config dir elsewhere.
+func DefaultBundlePath() string {
+	if dir := os.Getenv("XDG_CONFIG_HOME"); dir != "" {
+		return dir + "/openbox/policy-bundle.json"
+	}
+	if home, err := os.UserHomeDir(); err == nil && home != "" {
+		return home + "/.config/openbox/policy-bundle.json"
+	}
+	return "policy-bundle.json"
+}
+
+// Bundle is the LOCAL policy the decision engine evaluates a tool call against, in the
 // single-digit-ms band, with NO network I/O (INV-3b). It is the local
 // representation of the governance policy core would evaluate on an external OPA
 // server.
@@ -33,7 +46,7 @@ import (
 // [EXT-opa-bundle] — the real OPA-bundle distribution (a core endpoint that
 // serves the compiled per-agent rego, or a management-plane bundle) is the
 // external follow-up that lets Sync pull a live policy. Until it exists the
-// sidecar loads a local bundle file and the decision is honestly local-policy.
+// the decider loads a local bundle file and the decision is honestly local-policy.
 type Bundle struct {
 	// Version identifies the bundle content for staleness/telemetry (an etag,
 	// content hash, or monotonic revision). Opaque.
@@ -66,7 +79,7 @@ type Bundle struct {
 	// DefaultDecision is returned when no rule matches. It MUST be an allow-class
 	// decision for a fail-open posture (OD9): an empty or "allow"/"continue" value
 	// yields ALLOW. A bundle that set this to a blocking decision would make the
-	// sidecar deny-by-default — rejected at load time (see validate) unless the
+	// decider deny-by-default — rejected at load time (see validate) unless the
 	// org has explicitly opted into that posture (a fail-closed *policy* is E6-S3,
 	// not a bundle default).
 	DefaultDecision string `json:"default_decision,omitempty"`

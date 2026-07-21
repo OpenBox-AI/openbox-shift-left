@@ -6,21 +6,19 @@ import (
 	"encoding/json"
 	"io/fs"
 	"log"
-	"net"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/openbox-ai/openbox-shift-left/client"
-	"github.com/openbox-ai/openbox-shift-left/sidecar"
+	"github.com/openbox-ai/openbox-shift-left/decision"
 )
 
 // Enforcement conformance suite (STORY-E6-S7) — executable INV-3b evidence.
 //
 // This drives the REAL RunHook PreToolUse path end-to-end against a REAL
-// sidecar.Server (or a deliberately-absent socket) and asserts the exact Claude
+// decision.Server (or a deliberately-absent socket) and asserts the exact Claude
 // Code stdout contract per quadrant of the enforcement carve-out (ADR-0002 /
 // INV-3b). It is the durable proof the carve-out holds: a regression to enforce
 // mode, the failure policy, or the fail-open default breaks HERE rather than
@@ -36,19 +34,19 @@ import (
 // | C5| on      | fail-closed | up + ALLOW default | proceed| fail-closed never denies allow  |
 // | C6| on      | fail-closed | up, NO bundle      | deny   | INFO-1: the closed hole         |
 // | C7| off     | —           | up + BLOCK rule    | proceed| INV-3 verbatim (observe)        |
-// | C8| on      | fail-open   | slow > timeout     | proceed| timeout fails open within bound |
-// | C9| on      | fail-closed | up + STALE verdict | proceed| staleness never denies          |
+// | C8| — (removed: in-process decision has no network timeout — ADR-0006)          |
+// | C9| on      | fail-closed | STALE real verdict | proceed| staleness never denies          |
 // |C10| on      | fail-open   | up + secret in Write| redact | Tier-1 redact-and-continue (E6-S9)|
 // |C11| on      | fail-open   | up, detection OFF  | proceed| opt-out → no redaction (E6-S9)  |
 
 // blockRuleBundle blocks a `rm -rf` shell command; the canonical enforce BLOCK.
-func blockRuleBundle() *sidecar.Bundle {
-	return &sidecar.Bundle{
+func blockRuleBundle() *decision.Bundle {
+	return &decision.Bundle{
 		Version:         "conf-block",
 		DefaultDecision: "allow",
-		Rules: []sidecar.Rule{{
+		Rules: []decision.Rule{{
 			ID:       "no-rm-rf",
-			Match:    sidecar.RuleMatch{ToolKind: "shell", AttributeContains: map[string]string{"command": "rm -rf"}},
+			Match:    decision.RuleMatch{ToolKind: "shell", AttributeContains: map[string]string{"command": "rm -rf"}},
 			Decision: "block",
 			Reason:   "destructive recursive delete",
 			PolicyID: "conf-policy",
@@ -56,45 +54,11 @@ func blockRuleBundle() *sidecar.Bundle {
 	}
 }
 
-// slowEvaluator sleeps before answering, so the enforce Client's hard timeout
-// trips and it fails open — exercising the INV-3b latency bound end-to-end.
-type slowEvaluator struct{ delay time.Duration }
-
-func (s slowEvaluator) Evaluate(sidecar.DecisionRequest) client.Evaluation {
-	time.Sleep(s.delay)
-	return client.Evaluation{Verdict: client.VerdictBlock, Reason: "would block but answered too late"}
-}
-
-// serveConfiguredSidecar starts a real sidecar.Server with the given config and a
-// configure hook (to set a bundle or evaluator) and returns its socket path. Torn
-// down on cleanup. serveSidecarEval / serveStaleSidecar are thin wrappers.
-func serveConfiguredSidecar(t *testing.T, cfg sidecar.ServerConfig, configure func(*sidecar.Server)) string {
-	t.Helper()
-	socket := filepath.Join(t.TempDir(), "s.sock")
-	ln, err := net.Listen("unix", socket)
-	if err != nil {
-		t.Fatalf("listen unix: %v", err)
-	}
-	srv := sidecar.NewServer(cfg)
-	configure(srv)
-	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan struct{})
-	go func() { _ = srv.Serve(ctx, ln); close(done) }()
-	t.Cleanup(func() { cancel(); <-done })
-	return socket
-}
-
-// serveSidecarEval serves a custom Evaluator (used for the slow-decision case).
-func serveSidecarEval(t *testing.T, eval sidecar.Evaluator) string {
-	return serveConfiguredSidecar(t, sidecar.ServerConfig{}, func(s *sidecar.Server) { s.SetEvaluator(eval, "conf-eval") })
-}
-
-// serveStaleSidecar serves a bundle with a sub-nanosecond freshness window so every
-// decision is immediately Stale — a REAL verdict that is merely old (sourceLocalBundle,
-// Stale=true), used to prove staleness never triggers fail-closed.
-func serveStaleSidecar(t *testing.T, b *sidecar.Bundle) string {
-	return serveConfiguredSidecar(t, sidecar.ServerConfig{Freshness: time.Nanosecond}, func(s *sidecar.Server) { s.SetBundle(b) })
-}
+// removed: slowEvaluator + serveConfiguredSidecar/serveSidecarEval/serveStaleSidecar —
+// the socket-served sidecar and its network-timeout path are gone (ADR-0006
+// in-process decider). The slow-decision C8 case is dropped (no network timeout to
+// exercise); C9 staleness is re-expressed at the in-process decider level (a tiny
+// Freshness marks a real verdict Stale) rather than via a served socket.
 
 func TestEnforcementConformance(t *testing.T) {
 	// Base isolation shared by every case (identity + spool/session/enforcement
@@ -116,8 +80,6 @@ func TestEnforcementConformance(t *testing.T) {
 		RunHook("PreToolUse", strings.NewReader(payload), &stdout, log.New(&bytes.Buffer{}, "", 0))
 		return stdout.String()
 	}
-	// absentSocket points the enforce client at a path with no daemon behind it.
-	absentSocket := func(t *testing.T) string { return filepath.Join(t.TempDir(), "absent.sock") }
 	// assertNoLeak guards INV-2 across every case: no asserted output carries the
 	// shell command that was gated.
 	assertNoLeak := func(t *testing.T, out string) {
@@ -132,8 +94,7 @@ func TestEnforcementConformance(t *testing.T) {
 		// identical: a real verdict is FailOpen=false → applyFailurePolicy is a no-op),
 		// and with the POLICY reason — never the fail-closed outage reason (fail-closed
 		// engages on no-verdict only; the Q1-vs-Q4 distinction).
-		socket, _ := serveSidecar(t, blockRuleBundle())
-		t.Setenv(envSidecarSocket, socket)
+		setBundleEnv(t, blockRuleBundle())
 		t.Setenv(envEnforce, "1")
 		for _, fc := range []string{"0", "1"} {
 			t.Setenv(envFailClosed, fc)
@@ -153,7 +114,7 @@ func TestEnforcementConformance(t *testing.T) {
 	})
 
 	t.Run("C2 fail-open + outage proceeds within bound (OD9)", func(t *testing.T) {
-		t.Setenv(envSidecarSocket, absentSocket(t))
+		setBundleEnv(t, nil) // no bundle loaded → cold-start fail-open (the outage analog)
 		t.Setenv(envEnforce, "1")
 		t.Setenv(envFailClosed, "0")
 		start := time.Now()
@@ -167,8 +128,7 @@ func TestEnforcementConformance(t *testing.T) {
 	})
 
 	t.Run("C3 fail-open + unbundled proceeds (fix leaves default unchanged)", func(t *testing.T) {
-		socket, _ := serveSidecar(t, nil) // reachable daemon, NO bundle
-		t.Setenv(envSidecarSocket, socket)
+		setBundleEnv(t, nil) // NO bundle loaded → cold-start fail-open
 		t.Setenv(envEnforce, "1")
 		t.Setenv(envFailClosed, "0")
 		if out := run(t, dangerPayload); strings.TrimSpace(out) != "" {
@@ -177,7 +137,7 @@ func TestEnforcementConformance(t *testing.T) {
 	})
 
 	t.Run("C4 fail-closed + outage denies", func(t *testing.T) {
-		t.Setenv(envSidecarSocket, absentSocket(t))
+		setBundleEnv(t, nil) // no bundle loaded → cold-start fail-open → fail-closed denies
 		t.Setenv(envEnforce, "1")
 		t.Setenv(envFailClosed, "1")
 		out := run(t, dangerPayload)
@@ -194,8 +154,7 @@ func TestEnforcementConformance(t *testing.T) {
 	t.Run("C5 fail-closed never denies a REAL allow", func(t *testing.T) {
 		// A reachable, BUNDLED sidecar whose default is allow → sourceLocalBundle →
 		// a real verdict → PROCEEDS even under fail-closed (the crux clause).
-		socket, _ := serveSidecar(t, &sidecar.Bundle{Version: "conf-allow", DefaultDecision: "allow"})
-		t.Setenv(envSidecarSocket, socket)
+		setBundleEnv(t, &decision.Bundle{Version: "conf-allow", DefaultDecision: "allow"})
 		t.Setenv(envEnforce, "1")
 		t.Setenv(envFailClosed, "1")
 		benign := `{"hook_event_name":"PreToolUse","session_id":"s","cwd":"/tmp","tool_name":"Bash","tool_input":{"command":"echo hi"}}`
@@ -205,12 +164,10 @@ func TestEnforcementConformance(t *testing.T) {
 	})
 
 	t.Run("C6 fail-closed + unbundled denies (E6-S3 INFO-1 closed)", func(t *testing.T) {
-		// The regression guard for the reconciliation: a reachable-but-UNBUNDLED
-		// daemon returns no real verdict (Source=fail-open:no-bundle → FailOpen), so
-		// a fail-closed org DENIES rather than being silently ungoverned. Pre-fix this
-		// proceeded (the hole).
-		socket, _ := serveSidecar(t, nil) // reachable daemon, NO bundle
-		t.Setenv(envSidecarSocket, socket)
+		// The regression guard for the reconciliation: no real verdict (no bundle
+		// loaded → Source=fail-open:no-bundle → FailOpen), so a fail-closed org DENIES
+		// rather than being silently ungoverned. Pre-fix this proceeded (the hole).
+		setBundleEnv(t, nil) // NO bundle loaded → cold-start fail-open
 		t.Setenv(envEnforce, "1")
 		t.Setenv(envFailClosed, "1")
 		out := run(t, dangerPayload)
@@ -227,8 +184,7 @@ func TestEnforcementConformance(t *testing.T) {
 	t.Run("C7 observe mode never blocks (INV-3 verbatim)", func(t *testing.T) {
 		// Even with a live BLOCK bundle, enforce OFF is the observe path: nothing to
 		// stdout, ever. This is the un-carved-out INV-3.
-		socket, _ := serveSidecar(t, blockRuleBundle())
-		t.Setenv(envSidecarSocket, socket)
+		setBundleEnv(t, blockRuleBundle())
 		t.Setenv(envEnforce, "0")
 		t.Setenv(envFailClosed, "1") // even fail_closed=1 must not matter with enforce off
 		if out := run(t, dangerPayload); strings.TrimSpace(out) != "" {
@@ -237,39 +193,33 @@ func TestEnforcementConformance(t *testing.T) {
 	})
 
 	t.Run("C9 fail-closed + STALE real verdict proceeds (staleness never denies)", func(t *testing.T) {
-		// A reachable, bundled sidecar whose decision is immediately Stale is still a
-		// REAL verdict (sourceLocalBundle, Stale=true → FailOpen=false), so it PROCEEDS
-		// even under fail-closed. Pins stop-condition #5: staleness never triggers
-		// fail-closed (isRealVerdictSource keys on source, not Stale).
-		socket := serveStaleSidecar(t, &sidecar.Bundle{Version: "conf-stale", DefaultDecision: "allow"})
-		t.Setenv(envSidecarSocket, socket)
-		t.Setenv(envEnforce, "1")
-		t.Setenv(envFailClosed, "1")
-		benign := `{"hook_event_name":"PreToolUse","session_id":"s","cwd":"/tmp","tool_name":"Bash","tool_input":{"command":"echo hi"}}`
-		if out := run(t, benign); strings.TrimSpace(out) != "" {
-			t.Errorf("a STALE but real allow (sourceLocalBundle) must NOT trigger fail-closed; got %q", out)
+		// A bundled allow decider whose bundle is immediately Stale (tiny Freshness) is
+		// still a REAL verdict (sourceLocalBundle, Stale=true → FailOpen=false), so the
+		// fail-closed policy is a NO-OP on it. Pins stop-condition #5: staleness never
+		// triggers fail-closed (isRealVerdictSource keys on source, not Stale). Since the
+		// full-hook decider uses the default freshness, this is exercised at the
+		// in-process decider level (ADR-0006: there is no served-socket freshness knob).
+		dec := decision.NewInProcessDecider(decision.InProcessConfig{
+			BundlePath: writeBundleFile(t, &decision.Bundle{Version: "conf-stale", DefaultDecision: "allow"}),
+			Freshness:  time.Nanosecond,
+		}).Decide(context.Background(), buildDecisionRequest(
+			Identity{DeveloperDID: testDID},
+			&HookEvent{SessionID: "s", ToolName: "Bash", ToolInput: []byte(`{"command":"echo hi"}`)},
+			false))
+		if !dec.Stale {
+			t.Fatalf("expected a Stale decision (tiny freshness), got %+v", dec)
+		}
+		if dec.FailOpen || dec.Source != "local-bundle" {
+			t.Fatalf("a STALE but real verdict must stay FailOpen=false/local-bundle, got %+v", dec)
+		}
+		if got := applyFailurePolicy(dec, FailClosed); got.Evaluation.WouldBlock() {
+			t.Errorf("a STALE but real allow must NOT trigger fail-closed; got %+v", got.Evaluation)
 		}
 	})
 
-	t.Run("C8 slow decision fails open within the bound", func(t *testing.T) {
-		// A daemon that answers well past the hard timeout → the Client times out and
-		// fails open. Under fail-open (default) the tool proceeds, and the whole hook
-		// stays far under CC's 5s kill (INV-3b bound).
-		socket := serveSidecarEval(t, slowEvaluator{delay: 500 * time.Millisecond})
-		t.Setenv(envSidecarSocket, socket)
-		t.Setenv(envEnforce, "1")
-		t.Setenv(envFailClosed, "0")
-		t.Setenv(envEnforceTimeout, "30") // 30ms hard budget << the 500ms server delay
-		start := time.Now()
-		out := run(t, dangerPayload)
-		elapsed := time.Since(start)
-		if strings.TrimSpace(out) != "" {
-			t.Errorf("a slow decision must fail open (proceed); got %q", out)
-		}
-		if elapsed > 3*time.Second {
-			t.Errorf("enforce wait %v exceeds the INV-3b bound (CC kills the hook at 5s)", elapsed)
-		}
-	})
+	// C8 removed: in-process decision has no network timeout (ADR-0006). The old case
+	// exercised the socket Client's hard timeout tripping and failing open; with the
+	// synchronous in-memory decider there is no latency path to bound.
 
 	// A Write whose body contains a real-shaped AWS key. The secret string must never
 	// survive on stdout / in any egress or audit sink; the placeholder must appear.
@@ -298,16 +248,15 @@ func TestEnforcementConformance(t *testing.T) {
 	}
 
 	t.Run("C10 secret in Write body → redact-and-continue (E6-S9)", func(t *testing.T) {
-		// A reachable, BUNDLED allow sidecar. Secret detection is DEFAULT ON and
+		// A reachable, BUNDLED allow decision. Secret detection is DEFAULT ON and
 		// DECOUPLED from content_capture (which stays OFF): the file body reaches only
 		// the local socket, the scanner redacts it, and the hook emits an updatedInput
 		// with the content field sanitized and NO permissionDecision (proceed).
-		socket, _ := serveSidecar(t, &sidecar.Bundle{Version: "conf-allow", DefaultDecision: "allow"})
-		t.Setenv(envSidecarSocket, socket)
+		setBundleEnv(t, &decision.Bundle{Version: "conf-allow", DefaultDecision: "allow"})
 		t.Setenv(envEnforce, "1")
 		t.Setenv(envFailClosed, "0")
-		t.Setenv(envContentCapture, "0")     // egress stays metadata-only
-		os.Unsetenv(envSecretDetection)      // default ON
+		t.Setenv(envContentCapture, "0") // egress stays metadata-only
+		os.Unsetenv(envSecretDetection)  // default ON
 		out := run(t, secretWrite)
 
 		var got preToolUseOutput
@@ -341,8 +290,7 @@ func TestEnforcementConformance(t *testing.T) {
 	})
 
 	t.Run("C11 secret detection OFF → no redaction (opt-out, E6-S9)", func(t *testing.T) {
-		socket, _ := serveSidecar(t, &sidecar.Bundle{Version: "conf-allow", DefaultDecision: "allow"})
-		t.Setenv(envSidecarSocket, socket)
+		setBundleEnv(t, &decision.Bundle{Version: "conf-allow", DefaultDecision: "allow"})
 		t.Setenv(envEnforce, "1")
 		t.Setenv(envFailClosed, "0")
 		t.Setenv(envContentCapture, "0")
@@ -358,13 +306,13 @@ func TestEnforcementConformance(t *testing.T) {
 
 // builderBlockBundle blocks a `rm -rf` shell command via a native policy_builder
 // config (FIRST-MATCH), the E6-S8 analog of blockRuleBundle.
-func builderBlockBundle(decision string) *sidecar.Bundle {
-	return &sidecar.Bundle{
+func builderBlockBundle(verdict string) *decision.Bundle {
+	return &decision.Bundle{
 		Version:  "conf-builder",
 		PolicyID: "conf-builder-policy",
-		PolicyBuilder: &sidecar.PolicyBuilderConfig{Version: 1, Rules: []sidecar.PolicyBuilderRule{{
-			Decision: decision, Reason: "destructive recursive delete", MatchMode: "all",
-			Conditions: []sidecar.PolicyBuilderCondition{{
+		PolicyBuilder: &decision.PolicyBuilderConfig{Version: 1, Rules: []decision.PolicyBuilderRule{{
+			Decision: verdict, Reason: "destructive recursive delete", MatchMode: "all",
+			Conditions: []decision.PolicyBuilderCondition{{
 				Field: "spans[_].attributes.command", Operator: "contains",
 				Transform: "value", Value: "rm -rf", ValueType: "string",
 			}},
@@ -394,8 +342,7 @@ func TestEnforcementConformance_BuilderPolicy(t *testing.T) {
 	benign := `{"hook_event_name":"PreToolUse","session_id":"s","cwd":"/tmp","tool_name":"Bash","tool_input":{"command":"echo hi"}}`
 
 	t.Run("builder BLOCK denies", func(t *testing.T) {
-		socket, _ := serveSidecar(t, builderBlockBundle("BLOCK"))
-		t.Setenv(envSidecarSocket, socket)
+		setBundleEnv(t, builderBlockBundle("BLOCK"))
 		d, reason := parsePermissionDecision(t, []byte(run(danger)))
 		if d != ccDecisionDeny {
 			t.Fatalf("builder BLOCK: decision = %q, want deny", d)
@@ -409,16 +356,14 @@ func TestEnforcementConformance_BuilderPolicy(t *testing.T) {
 	})
 
 	t.Run("builder no-match proceeds", func(t *testing.T) {
-		socket, _ := serveSidecar(t, builderBlockBundle("BLOCK"))
-		t.Setenv(envSidecarSocket, socket)
+		setBundleEnv(t, builderBlockBundle("BLOCK"))
 		if out := run(benign); strings.TrimSpace(out) != "" {
 			t.Errorf("no-match builder rule must proceed (empty stdout); got %q", out)
 		}
 	})
 
 	t.Run("builder REQUIRE_APPROVAL asks", func(t *testing.T) {
-		socket, _ := serveSidecar(t, builderBlockBundle("REQUIRE_APPROVAL"))
-		t.Setenv(envSidecarSocket, socket)
+		setBundleEnv(t, builderBlockBundle("REQUIRE_APPROVAL"))
 		d, _ := parsePermissionDecision(t, []byte(run(danger)))
 		if d != ccDecisionAsk {
 			t.Fatalf("builder REQUIRE_APPROVAL: decision = %q, want ask", d)
@@ -441,8 +386,7 @@ func TestEnforcementConformance_StaleGate(t *testing.T) {
 	t.Setenv(envEnforce, "1")
 	t.Setenv(envFailClosed, "1")
 
-	socket, _ := serveSidecar(t, &sidecar.Bundle{Version: "allow", DefaultDecision: "allow"})
-	t.Setenv(envSidecarSocket, socket)
+	setBundleEnv(t, &decision.Bundle{Version: "allow", DefaultDecision: "allow"})
 
 	run := func() string {
 		var stdout bytes.Buffer

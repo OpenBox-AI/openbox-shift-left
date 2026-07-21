@@ -18,10 +18,7 @@ import (
 	"io"
 	"log"
 	"os"
-	"os/signal"
 	"path/filepath"
-	"syscall"
-	"time"
 
 	claudecode "github.com/openbox-ai/openbox-shift-left/adapters/claude-code"
 	obgit "github.com/openbox-ai/openbox-shift-left/adapters/common/git"
@@ -30,7 +27,7 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/cli/internal/providers"
 	"github.com/openbox-ai/openbox-shift-left/cli/internal/secret"
 	"github.com/openbox-ai/openbox-shift-left/client"
-	"github.com/openbox-ai/openbox-shift-left/sidecar"
+	"github.com/openbox-ai/openbox-shift-left/decision"
 )
 
 // version is overridable at build time via -ldflags "-X main.version=...".
@@ -90,8 +87,6 @@ func (a *app) run(args []string) int {
 		return a.runDev(args[1:])
 	case "hook":
 		return a.runHook(args[1:])
-	case "sidecar":
-		return a.runSidecar(args[1:])
 	case "version", "--version", "-v":
 		fmt.Fprintln(a.stdout, "openbox "+version)
 		return exitOK
@@ -121,7 +116,7 @@ func (a *app) runDev(args []string) int {
 }
 
 // runDevSync fetches this agent's CURRENT org policy from the control plane and
-// writes it as the LOCAL sidecar bundle + PIN (STORY-E6-S8, ADR-0005): the pull
+// writes it as the LOCAL policy bundle + PIN (STORY-E6-S8, ADR-0005): the pull
 // half of the pull-at-init + session-start-staleness distribution model. It reads
 // the ORG control-plane credential from OPENBOX_CONTROL_TOKEN (never a flag —
 // INV-1), resolves the agent id + backend URL persisted by `dev init` (env
@@ -199,21 +194,21 @@ func (a *app) syncPolicyBundle(ctx context.Context, backendURL, token, clientID,
 	return nil
 }
 
-// translateBundle maps a fetched *backend.Policy into a *sidecar.Bundle + an
+// translateBundle maps a fetched *backend.Policy into a *decision.Bundle + an
 // optional non-secret note to print. nil policy → an empty allow bundle;
 // config.policy_builder → a builder bundle; raw rego with no builder → a
 // fail-open-local bundle + a warning (ADR-0005 §Decision-2).
-func translateBundle(pol *backend.Policy) (*sidecar.Bundle, string, error) {
+func translateBundle(pol *backend.Policy) (*decision.Bundle, string, error) {
 	if pol == nil {
-		return &sidecar.Bundle{Version: "no-policy"}, "", nil
+		return &decision.Bundle{Version: "no-policy"}, "", nil
 	}
 	pin := pol.ID + "@" + pol.UpdatedAt
 	if len(pol.PolicyBuilder) > 0 {
-		var cfg sidecar.PolicyBuilderConfig
+		var cfg decision.PolicyBuilderConfig
 		if err := json.Unmarshal(pol.PolicyBuilder, &cfg); err != nil {
 			return nil, "", fmt.Errorf("parse policy_builder config: %w", err)
 		}
-		return &sidecar.Bundle{
+		return &decision.Bundle{
 			Version:       pin,
 			PolicyID:      pol.ID,
 			UpdatedAt:     pol.UpdatedAt,
@@ -222,8 +217,8 @@ func translateBundle(pol *backend.Policy) (*sidecar.Bundle, string, error) {
 	}
 	if pol.HasRawRego {
 		note := "warning: this policy is hand-written raw rego with no builder config — it cannot be evaluated locally " +
-			"and the sidecar will serve it fail-open (allow) locally; enforcement for it relies on the async /evaluate audit (ADR-0005)."
-		return &sidecar.Bundle{
+			"and the decider will serve it fail-open (allow) locally; enforcement for it relies on the async /evaluate audit (ADR-0005)."
+		return &decision.Bundle{
 			Version:            pin,
 			PolicyID:           pol.ID,
 			UpdatedAt:          pol.UpdatedAt,
@@ -231,11 +226,11 @@ func translateBundle(pol *backend.Policy) (*sidecar.Bundle, string, error) {
 		}, note, nil
 	}
 	// A policy with neither builder config nor rego → treat as no-op allow, pinned.
-	return &sidecar.Bundle{Version: pin, PolicyID: pol.ID, UpdatedAt: pol.UpdatedAt}, "", nil
+	return &decision.Bundle{Version: pin, PolicyID: pol.ID, UpdatedAt: pol.UpdatedAt}, "", nil
 }
 
 // writeBundleFile marshals the bundle and writes it 0600 (owner-only), creating
-// the parent dir 0700. It round-trips through sidecar.ParseBundle first so a
+// the parent dir 0700. It round-trips through decision.ParseBundle first so a
 // malformed/deny-by-default bundle is rejected BEFORE it replaces the last-good
 // file (never write a bundle the daemon would refuse to load).
 //
@@ -244,12 +239,12 @@ func translateBundle(pol *backend.Policy) (*sidecar.Bundle, string, error) {
 // target. A crash mid-write can never leave the daemon (or the session-start
 // staleness read) a truncated/half-parsed bundle — it sees either the old file
 // or the whole new one.
-func writeBundleFile(path string, b *sidecar.Bundle) error {
+func writeBundleFile(path string, b *decision.Bundle) error {
 	raw, err := json.MarshalIndent(b, "", "  ")
 	if err != nil {
 		return err
 	}
-	if _, err := sidecar.ParseBundle(raw); err != nil {
+	if _, err := decision.ParseBundle(raw); err != nil {
 		return fmt.Errorf("refusing to write an invalid bundle: %w", err)
 	}
 	dir := filepath.Dir(path)
@@ -415,52 +410,6 @@ func (a *app) runHook(args []string) (code int) {
 	return exitOK
 }
 
-// runSidecar runs the local enforcement decision daemon (STORY-E6-S5, ADR-0003):
-// `openbox sidecar serve`. Unlike the hook path this is a long-lived FOREGROUND
-// process with ordinary CLI semantics (diagnostics to stderr, non-zero on a bind
-// failure) — it is NOT a hook, so the INV-3 exit-0/no-stdout discipline does not
-// apply here.
-//
-// It is folded into the one `openbox` binary (WIRE-2): no second shipped
-// artifact, just a mode of the tool developers already installed via `dev init`.
-func (a *app) runSidecar(args []string) int {
-	if len(args) == 0 || args[0] != "serve" {
-		return a.errorf("usage: openbox sidecar serve [--socket <path>] [--bundle <path>] [--sync-interval <dur>] [--freshness <dur>]")
-	}
-	fs := flag.NewFlagSet("openbox sidecar serve", flag.ContinueOnError)
-	fs.SetOutput(a.stderr)
-	var socketPath, bundlePath string
-	var syncInterval, freshness time.Duration
-	fs.StringVar(&socketPath, "socket", a.env("OPENBOX_SIDECAR_SOCKET", ""), "Unix socket path (default: $XDG_RUNTIME_DIR/openbox/sidecar.sock)")
-	fs.StringVar(&bundlePath, "bundle", a.env("OPENBOX_SIDECAR_BUNDLE", ""), "local policy bundle file (default: $XDG_CONFIG_HOME/openbox/policy-bundle.json)")
-	fs.DurationVar(&syncInterval, "sync-interval", 0, "LOCAL bundle re-poll interval; 0 (default) = prime-once at startup, no re-poll, no network I/O (freshness is the client-side session-start staleness check); a positive value re-loads the LOCAL file on that interval for back-compat")
-	fs.DurationVar(&freshness, "freshness", 0, "mark decisions Stale past this bundle age (default 5m)")
-	if err := fs.Parse(args[1:]); err != nil {
-		// `--help` is a successful, intentional request for usage, not an error.
-		if errors.Is(err, flag.ErrHelp) {
-			return exitOK
-		}
-		return exitError
-	}
-
-	// The daemon shuts down gracefully on SIGINT/SIGTERM: the cancelled context
-	// stops the accept loop and drains in-flight decisions (sidecar.Serve).
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-
-	err := sidecar.Serve(ctx, sidecar.Config{
-		SocketPath:   socketPath,
-		BundlePath:   bundlePath,
-		SyncInterval: syncInterval,
-		Freshness:    freshness,
-		Logger:       log.New(a.stderr, "", log.LstdFlags),
-	})
-	if err != nil {
-		return a.errorf("%v", err)
-	}
-	return exitOK
-}
-
 func (a *app) runDevInit(args []string) int {
 	fs := flag.NewFlagSet("openbox dev init", flag.ContinueOnError)
 	fs.SetOutput(a.stderr)
@@ -475,6 +424,8 @@ func (a *app) runDevInit(args []string) int {
 	fs.BoolVar(&o.Force, "force", false, "register a new distinctly-named agent even if one exists remotely")
 	fs.BoolVar(&o.ManagedEnable, "managed-enable", false, "record the org force-enable substrate (Phase-1: verified, not activated)")
 	fs.BoolVar(&o.InstallGitHook, "install-git-hook", false, "enable ambient install of the commit-trailer hook into repos on session start (STORY-SL-5; off by default — it modifies .git/hooks)")
+	var enforce bool
+	fs.BoolVar(&enforce, "enforce", false, "turn on ENFORCE mode and persist it to dev.json (ADR-0006): the PreToolUse hook blocks/asks/redacts in-process — no daemon, no runtime env. Also enables Tier-2 sync escalation + the Tier-3 findings loop. Off by default = observe-only.")
 	fs.StringVar(&backendURL, "backend-url", a.env("OPENBOX_BACKEND_URL", ""), "openbox-backend control-plane base URL")
 	fs.StringVar(&clientID, "client-id", a.env("OPENBOX_CLIENT", "openbox-cli"), "value for the x-openbox-client header (Keycloak JWT path)")
 	fs.StringVar(&secretBackend, "secret-backend", a.env("OPENBOX_SECRET_BACKEND", "auto"), "credential store: auto|os (OS keychain, default) or file (opt-in 0600 plaintext file, for machines with no OS keyring)")
@@ -485,6 +436,18 @@ func (a *app) runDevInit(args []string) int {
 		return a.errorf("--provider is required (one of: claude-code, codex, cursor)")
 	}
 	o.BackendURL = backendURL // STORY-E6-S8: persist the control-plane base for `dev sync`/staleness
+	// ADR-0006: `--enforce` is the one-flag enforce posture. It turns on enforce and
+	// its sensible companions (Tier-2 sync escalation + the Tier-3 findings loop) and
+	// persists all three to dev.json, so the runtime hook needs NO env var. Granular
+	// per-toggle tuning remains available via the dev.json fields / OPENBOX_* env
+	// overrides. Fail-open stays the default failure policy (OD9) — enforce never
+	// implies fail-closed.
+	if enforce {
+		t := true
+		o.Enforce = true
+		o.Tier2 = &t
+		o.Findings = &t
+	}
 
 	inst, err := providers.Lookup(o.Provider)
 	if err != nil {
@@ -574,17 +537,17 @@ func (a *app) usage() {
 	fmt.Fprint(a.stderr, `openbox — OpenBox developer-runtime governance CLI
 
 Usage:
-  openbox dev init --provider <claude-code|codex|cursor> [flags]
+  openbox dev init --provider <claude-code|codex|cursor> [--enforce] [flags]
   openbox dev verify [--dry-run]
   openbox dev sync [--bundle <path>]
-  openbox sidecar serve [--socket <path>] [--bundle <path>]
   openbox version
 
-Environment:
+Environment (needed only at 'dev init' time):
   OPENBOX_CONTROL_TOKEN   control-plane credential (Keycloak JWT or obx_key_ org key)
-  OPENBOX_BACKEND_URL     openbox-backend base URL
+  OPENBOX_BACKEND_URL     openbox-backend base URL (or --backend-url)
   OPENBOX_ORG             organization namespace for credential storage
 
+After 'dev init' governance is ambient — no daemon to run and no runtime env to set.
 Run 'openbox dev init -h' for flags.
 `)
 }

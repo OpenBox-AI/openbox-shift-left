@@ -262,7 +262,7 @@ func TestResolveEnforceTimeout(t *testing.T) {
 	t.Setenv(envConfigPath, cfgPath)
 	os.Unsetenv(envEnforceTimeout)
 
-	// Default: unset → 0 (caller lets sidecar.NewClient use DefaultDecisionTimeout).
+	// Default: unset → 0 (the enforce hook falls back to the sidecar default budget).
 	write(`{"developer_did":"` + testDID + `"}`)
 	if d := ResolveEnforceTimeout(); d != 0 {
 		t.Errorf("unset timeout = %v, want 0 (⇒ sidecar default)", d)

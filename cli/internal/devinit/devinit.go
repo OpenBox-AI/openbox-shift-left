@@ -57,6 +57,15 @@ type Options struct {
 	Force          bool // register a fresh agent even if one exists remotely
 	ManagedEnable  bool // org-wide force-enable substrate (NFR-5); Phase-1 opt-in
 	InstallGitHook bool // STORY-SL-5: enable ambient commit-trailer hook install (off by default)
+	// Enforce turns on ENFORCE mode and persists it (plus its sensible companions,
+	// Tier2 + Findings) into the dev config, so no runtime env var is needed
+	// (ADR-0006). Off by default — enforcement stays opt-in. Tier2/Findings are
+	// *bool so `--enforce` can set them while a plain `dev init` leaves them at the
+	// adapter default; the CLI wires --enforce to also enable both unless a granular
+	// flag overrides.
+	Enforce  bool
+	Tier2    *bool
+	Findings *bool
 }
 
 // Deps are the injected collaborators (all faked in tests).
@@ -147,6 +156,11 @@ func Run(ctx context.Context, o Options, d Deps) (*Result, error) {
 		// is set below on the register path (the reuse path preserves a prior value —
 		// installer.writeConfig).
 		BackendURL: o.BackendURL,
+		// ADR-0006: persist the enforce posture into dev.json so the runtime hook needs
+		// no env var. All off by default (observe-only).
+		Enforce:  o.Enforce,
+		Tier2:    o.Tier2,
+		Findings: o.Findings,
 	}
 	res := &Result{AgentName: name}
 
@@ -290,6 +304,7 @@ func planDryRun(o Options, d Deps, name, icon string, profile aivss.Config, ref 
 	fmt.Fprintf(out, "  aivss_config: base_security/ai_specific/impact (accepted developer posture; server computes score/tier)\n")
 	fmt.Fprintf(out, "  managed_enable: %t (substrate only; not activated in Phase 1)\n", o.ManagedEnable)
 	fmt.Fprintf(out, "  install_git_hook: %t (STORY-SL-5 ambient commit-trailer hook; off by default — modifies .git/hooks)\n", o.InstallGitHook)
+	fmt.Fprintf(out, "  enforce: %t (ADR-0006; off by default = observe-only. --enforce also enables tier2 + findings, all persisted to dev.json — no runtime env)\n", o.Enforce)
 	svc, apiAcct, privAcct, didAcct := o.accounts()
 	fmt.Fprintf(out, "\nWould store credentials in the OS secret store (service %q):\n", svc)
 	fmt.Fprintf(out, "  %s  (obx_ API key)\n  %s  (Ed25519 seed)\n  %s  (DID)\n", apiAcct, privAcct, didAcct)

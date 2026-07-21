@@ -130,9 +130,9 @@ func RunHook(sub string, stdin io.Reader, stdout io.Writer, logger *log.Logger) 
 
 	// STORY-E6-S1 (Phase-2 enforcement): in ENFORCE mode the PreToolUse hook is a
 	// SYNCHRONOUS pre-execution gate — obtain the governance decision from the
-	// LOCAL sidecar BEFORE the tool runs (INV-3b: bounded by the Client's hard
-	// ~50ms timeout, fail-open on any fault). Default OFF (observe): with enforce
-	// off ResolveEnforce is false, the sidecar is NEVER dialed, and this block is
+	// in-process decider BEFORE the tool runs (INV-3b: evaluated in-memory, no
+	// network/IPC, fail-open on any fault). Default OFF (observe): with enforce
+	// off ResolveEnforce is false, the decider is NEVER invoked, and this block is
 	// inert — so the observe/advisory path is byte-identical to Phase-1 (AC-4).
 	// Only PreToolUse gates (the pre-execution concept); other hooks keep observing.
 	//
@@ -160,14 +160,14 @@ func RunHook(sub string, stdin io.Reader, stdout io.Writer, logger *log.Logger) 
 			return
 		}
 		// Local redaction gate (STORY-E6-S9 / E6-S4): hand the tool body to the LOCAL
-		// sidecar and apply any content-only redaction it returns. Enabled when EITHER
+		// decider and apply any content-only redaction it returns. Enabled when EITHER
 		// Tier-1 secret detection (OD-SYNC-10, default ON) OR content capture (OD4,
 		// default OFF) is on. Resolved once here (cheap config+env, no secret I/O). The
 		// body + redaction are LOCAL-only (never egressed — INV-2); the observe Mapper
 		// egress path stays metadata-only unless content capture is on. With BOTH off,
 		// Content stays nil and no redaction is emitted — byte-identical to E6-S3.
 		localRedaction := ResolveSecretDetection() || ResolveContentCapture()
-		dec := EnforceDecision(context.Background(), newSidecarClient(), id, ev, localRedaction)
+		dec := EnforceDecision(context.Background(), newDecider(), id, ev, localRedaction)
 		// STORY-E6-S3: apply the per-org FAILURE POLICY (fail-open default / opt-in
 		// fail-closed, OD9). On an evaluation outage (dec.FailOpen) under fail-closed
 		// this synthesizes a HALT so the unchanged apply cascade denies; otherwise the

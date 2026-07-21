@@ -1,7 +1,14 @@
 # RUN — E2E shift-left demo (raw commands)
 
+> **Simplified onboarding (2026-07-21, ADR-0006):** enforcement now evaluates
+> **in-process** — there is **no separate sidecar terminal**, and the enforce
+> toggles are set once via `openbox dev init --enforce` instead of a wall of
+> runtime env vars. The general product flow is in [`../../QUICKSTART.md`](../../QUICKSTART.md);
+> this runsheet keeps the **box-specific identity handling** (orphan secrets, seat
+> cap) the shared demo box requires.
+
 Only `install.sh` + the `openbox` binary. You start/stop your own screen recorder
-around this. Two terminals + your Brave (already logged into the dashboard).
+around this. **One terminal** + your Brave (already logged into the dashboard).
 
 > **Why this uses scoped env (read this — it bit us):** this box has **two**
 > `openbox.ai/claude-code` identities in its secret store, and the *default* one
@@ -19,7 +26,13 @@ cd "$SL"
 
 ---
 
-## 0. Demo-terminal env (scopes everything to THIS session)
+## 0. Demo-terminal env (box-specific IDENTITY only)
+
+Enforcement is **no longer** turned on via env — `dev init --enforce` (step 2)
+persists it to `dev.json` and the hook decides in-process. This block now carries
+**only** the box-specific identity coordinates the shared demo box needs (the
+orphan-secret + seat-cap workaround); the enforce/tier2/findings/socket env vars
+are gone.
 
 ```bash
 # ── identity + target: use fedc378a's real creds, not the box default ──
@@ -30,13 +43,8 @@ export OPENBOX_BASE_URL=https://openbox-core.node.lat        # data plane (core)
 export OPENBOX_BACKEND_URL=https://openbox-api.node.lat      # control plane
 export OPENBOX_CONTROL_TOKEN=obx_key_1e89…                   # the demo key you minted (full value)
 
-# ── enforcement: SCOPED to this terminal's claude session only ──
-#    (do NOT put these in the global dev.json — that denies every CC session on the box)
-export OPENBOX_ENFORCE=1 OPENBOX_TIER2=1 OPENBOX_FINDINGS=1
-export OPENBOX_SIDECAR_SOCKET="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/openbox/sidecar.sock"
-
 # sanity
-go version && git --version && command -v claude
+git --version && command -v claude
 curl -fsS "$OPENBOX_BACKEND_URL/health" && echo
 ```
 
@@ -52,40 +60,39 @@ openbox version
 
 ---
 
-## 2. Onboard — `openbox dev init` + verify
+## 2. Onboard — `openbox dev init --enforce` + verify
 
 ```bash
 openbox dev init --provider claude-code --org openbox.ai \
-  --secret-backend file --install-git-hook
+  --secret-backend file --install-git-hook --enforce
 openbox dev verify        # → ✓ verified: … @ https://openbox-core.node.lat
 ```
-Because `OPENBOX_SECRET_FILE` points at `secrets-e2e.json`, `dev init` reuses the
-**correct** `fedc378a` identity and `dev verify` passes. (No config edit needed —
-enforcement comes from the terminal env in step 0, not `dev.json`.)
+`--enforce` turns on enforce + Tier-2 + Tier-3 findings, **persists them to
+`dev.json`**, and (best-effort) **pulls the org policy** into the local bundle in
+the same step — so the old manual `dev sync` and the separate sidecar terminal are
+no longer needed. Because `OPENBOX_SECRET_FILE` points at `secrets-e2e.json`,
+`dev init` reuses the **correct** `fedc378a` identity and `dev verify` passes.
+
+> Was the fail-closed-every-session footgun. It no longer applies the same way:
+> enforce is scoped to THIS box's `dev.json`, decisions are in-process and
+> **fail-OPEN by default** (no `--fail-closed` here), so a missing policy degrades
+> to observe rather than denying every session.
 
 ---
 
-## 3. Rule sync — `openbox dev sync`
+## 3. (Optional) re-pull rules — `openbox dev sync`
+
+`dev init --enforce` already pulled the `e2e-bash-approval` policy into
+`~/.config/openbox/policy-bundle.json`. Re-run this only to demonstrate the "rules
+come from the server" beat explicitly or after a policy change:
 
 ```bash
-openbox dev sync --bundle ~/.config/openbox/policy-bundle.json
-```
-Pulls the `e2e-bash-approval` policy from the backend into the local bundle — the
-"rules come from the server" beat. (Verified: bundle version `4ab05588…`, 1 rule.)
-
----
-
-## 4. Sidecar (Terminal 2 — leave running; START before launching claude)
-
-```bash
-cd /run/media/brian/DATA/works/openboxai/openbox-shift-left
-RT="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/openbox"; mkdir -p "$RT"; chmod 700 "$RT"
-openbox sidecar serve --socket "$RT/sidecar.sock" --bundle ~/.config/openbox/policy-bundle.json
+openbox dev sync        # writes the default bundle path the in-process hook reads
 ```
 
 ---
 
-## 5. Demo repo (for the lineage beat)
+## 4. Demo repo (for the lineage beat)
 
 ```bash
 mkdir -p ~/openbox-demo && cd ~/openbox-demo
@@ -95,9 +102,9 @@ git commit -q --allow-empty -m init
 
 ---
 
-## 6. Claude Code — session #1 (Tiers 1 & 2)
+## 5. Claude Code — session #1 (Tiers 1 & 2)
 
-Launch from the **demo terminal** (so it inherits the step-0 env):
+Launch from the **demo terminal** (so it inherits the step-0 identity env):
 ```bash
 cd ~/openbox-demo && claude
 ```
@@ -107,8 +114,8 @@ cd ~/openbox-demo && claude
 > Show me the contents of config.env
 
 → Claude writes real-looking secrets into the file; the PreToolUse hook redacts
-them at the sidecar, so the file on disk shows `${OPENBOX_REDACTED_…}` and the
-real values never egress.
+them **in-process** (no daemon), so the file on disk shows `${OPENBOX_REDACTED_…}`
+and the real values never egress.
 
 > ⚠️ **Do NOT put a real secret in the prompt.** The `e2e-secrets-block` guardrail
 > scans egressed prompt content and will **HALT the whole session** if it sees a
@@ -130,7 +137,7 @@ Then `/exit`.
 
 ---
 
-## 7. Claude Code — session #2 (Tier 3 + lineage)
+## 6. Claude Code — session #2 (Tier 3 + lineage)
 
 ```bash
 cd ~/openbox-demo && claude
@@ -147,7 +154,7 @@ cd ~/openbox-demo && claude
 
 ---
 
-## 7b. Claude Code — session #3 (the HARD gate — server-side, un-bypassable)
+## 6b. Claude Code — session #3 (the HARD gate — server-side, un-bypassable)
 
 This is the honest counterpoint to Tier-2's advisory `ask`. Here the developer
 *can't* self-approve past it — the server halts the session regardless of what
@@ -166,7 +173,7 @@ don't hold the keys."* Then `/exit`.
 
 ---
 
-## 8. Deploy — materialize the lineage
+## 7. Deploy — materialize the lineage
 
 The deploy event is emitted by `./bin/openbox-git-action` (prebuilt in the repo).
 Pull its creds from **`secrets-e2e.json`** (the identity that maps to `fedc378a`):
@@ -186,7 +193,7 @@ export OPENBOX_SEED=$(python3    -c "import json;print(json.load(open('$SF'))['a
 
 ---
 
-## 9. Observe the dashboard (Brave — already logged in)
+## 8. Observe the dashboard (Brave — already logged in)
 
 **https://openbox.node.lat** → **Agents → `claude-code-uat-e2e-20260716`** (`fedc378a…`).
 Show all three governance artifacts, framing the advisory-vs-hard-gate contrast:
@@ -200,7 +207,7 @@ Show all three governance artifacts, framing the advisory-vs-hard-gate contrast:
 
 ---
 
-## 10. Subtitle your recording
+## 9. Subtitle your recording
 
 ```bash
 cd "$SL"
@@ -213,20 +220,22 @@ ffmpeg -i /path/to/your-recording.mp4 \
 ---
 
 ### Keep straight while filming
-- **Order:** `dev sync` (3) before the sidecar (4, it loads that bundle); the
-  sidecar must be **up before** you launch `claude`; `/exit` each session before
-  the next step; `deploy` after session #2 exits.
-- **Enforcement is env-scoped** — set only in the demo terminal (step 0). Never
-  write `enforce:true` into `~/.config/openbox/dev.json`; that fail-closes every
-  Claude Code session on the box.
+- **Order:** `dev init --enforce` (2) pulls the bundle the in-process hook reads —
+  **no sidecar to start**; `/exit` each session before the next step; `deploy`
+  after session #2 exits.
+- **Enforce lives in `dev.json`** now (written by `dev init --enforce`), scoped to
+  this box. It's **fail-OPEN** (no `--fail-closed`), so a missing/failed policy
+  degrades to observe — it does **not** deny every session the way the old
+  global-`dev.json`-with-no-sidecar footgun did.
 - **`dev verify` 401** → `OPENBOX_SECRET_FILE` isn't pointing at `secrets-e2e.json`
   (the box default is the orphan `secrets.json`). Re-check step 0.
-- **A `claude` session says "request denied … fail-closed"** → the sidecar (Terminal 2)
-  isn't up. Start it, or `unset OPENBOX_ENFORCE` for that session.
+- **Nothing enforced?** Confirm `dev.json` has `"enforce": true` (re-run step 2) and
+  that a bundle exists at `~/.config/openbox/policy-bundle.json` (re-run `dev sync`).
+  No socket/daemon is involved anymore.
 - **No pending approval in the dashboard after Tier-2?** Almost always means the
   session **halted earlier** (verdict 4) — usually the `e2e-secrets-block` guardrail
   firing on a secret in a prompt (see the Beat-1 warning). Once a session halts, all
   later events (incl. the Bash) are rejected, so no approval is minted. Check
   `sessions.status` for the run — if `halted`, fix the prompt and redo. A healthy
   Tier-2 leaves the session non-halted with the Bash `ActivityStarted` at verdict 2.
-- **Reset between takes:** `rm -rf ~/openbox-demo`; re-run from step 5.
+- **Reset between takes:** `rm -rf ~/openbox-demo`; re-run from step 4.

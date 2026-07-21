@@ -5,54 +5,54 @@ import (
 	"context"
 	"encoding/json"
 	"log"
-	"net"
 	"os"
 	"path/filepath"
 	"strings"
-	"sync/atomic"
 	"testing"
 	"time"
 	"unicode/utf8"
 
 	"github.com/openbox-ai/openbox-shift-left/client"
-	"github.com/openbox-ai/openbox-shift-left/sidecar"
+	"github.com/openbox-ai/openbox-shift-left/decision"
 )
 
-// countingListener wraps a net.Listener and counts accepted connections, so a
-// test can assert whether the enforce hook actually DIALED the sidecar.
-type countingListener struct {
-	net.Listener
-	n *int32
-}
-
-func (l *countingListener) Accept() (net.Conn, error) {
-	c, err := l.Listener.Accept()
-	if err == nil {
-		atomic.AddInt32(l.n, 1)
-	}
-	return c, err
-}
-
-// serveSidecar starts a real sidecar.Server on a temp Unix socket (optionally with
-// bundle b) and returns the socket path plus an accept counter. The daemon is
-// torn down on test cleanup.
-func serveSidecar(t *testing.T, b *sidecar.Bundle) (socket string, accepts *int32) {
+// writeBundleFile marshals b to a temp bundle file and returns its path. A nil b
+// returns a path to a file that does NOT exist, which the in-process decider treats
+// as cold-start fail-open (VerdictUnknown / "fail-open:no-bundle") — the in-process
+// analog of the old "absent socket"/"reachable daemon, no bundle" cases (ADR-0006).
+func writeBundleFile(t *testing.T, b *decision.Bundle) string {
 	t.Helper()
-	socket = filepath.Join(t.TempDir(), "s.sock")
-	ln, err := net.Listen("unix", socket)
+	path := filepath.Join(t.TempDir(), "policy-bundle.json")
+	if b == nil {
+		return path // nonexistent → cold-start fail-open
+	}
+	raw, err := json.Marshal(b)
 	if err != nil {
-		t.Fatalf("listen unix: %v", err)
+		t.Fatalf("marshal bundle: %v", err)
 	}
-	var n int32
-	srv := sidecar.NewServer(sidecar.ServerConfig{})
-	if b != nil {
-		srv.SetBundle(b)
+	if err := os.WriteFile(path, raw, 0o600); err != nil {
+		t.Fatalf("write bundle: %v", err)
 	}
-	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan struct{})
-	go func() { _ = srv.Serve(ctx, &countingListener{Listener: ln, n: &n}); close(done) }()
-	t.Cleanup(func() { cancel(); <-done })
-	return socket, &n
+	return path
+}
+
+// setBundleEnv points the full-hook decider (RunHook → newDecider → ResolveBundlePath)
+// at a bundle file for b (or a nonexistent path when b==nil → cold-start fail-open),
+// and returns the path. Use this for full-hook (RunHook) tests. Replaces the old
+// socket-serving helper (ADR-0006: the decision is evaluated in-process from a file).
+func setBundleEnv(t *testing.T, b *decision.Bundle) string {
+	t.Helper()
+	path := writeBundleFile(t, b)
+	t.Setenv(envSidecarBundle, path)
+	return path
+}
+
+// newTestDecider builds an in-process decider over a bundle file for b (nil →
+// cold-start fail-open). It is the in-process replacement for the old socket
+// decision.NewClient(...) handed to EnforceDecision (ADR-0006).
+func newTestDecider(t *testing.T, b *decision.Bundle) decision.Decider {
+	t.Helper()
+	return decision.NewInProcessDecider(decision.InProcessConfig{BundlePath: writeBundleFile(t, b)})
 }
 
 func TestResolveEnforce(t *testing.T) {
@@ -216,11 +216,9 @@ func TestCapCommand_ByteBoundedRuneSafe(t *testing.T) {
 }
 
 func TestEnforceDecision_FailOpenWhenSidecarAbsent(t *testing.T) {
-	// Point the client at a socket that does not exist → every fault fails open.
-	cl := sidecar.NewClient(sidecar.ClientConfig{
-		SocketPath: filepath.Join(t.TempDir(), "nope.sock"),
-		Timeout:    50 * time.Millisecond,
-	})
+	// No bundle file loaded → cold-start fail-open (the in-process analog of an
+	// absent socket): every fault fails open (ADR-0006).
+	cl := newTestDecider(t, nil)
 	ev := &HookEvent{SessionID: "s", ToolName: "Bash", ToolInput: []byte(`{"command":"rm -rf /"}`)}
 
 	start := time.Now()
@@ -242,12 +240,12 @@ func TestEnforceDecision_FailOpenWhenSidecarAbsent(t *testing.T) {
 }
 
 func TestEnforceDecision_LiveBlock(t *testing.T) {
-	bundle := &sidecar.Bundle{
+	bundle := &decision.Bundle{
 		Version:         "test-1",
 		DefaultDecision: "allow",
-		Rules: []sidecar.Rule{{
+		Rules: []decision.Rule{{
 			ID: "no-rm-rf",
-			Match: sidecar.RuleMatch{
+			Match: decision.RuleMatch{
 				ToolKind:          "shell",
 				AttributeContains: map[string]string{"command": "rm -rf"},
 			},
@@ -256,8 +254,7 @@ func TestEnforceDecision_LiveBlock(t *testing.T) {
 			PolicyID: "test-policy",
 		}},
 	}
-	socket, accepts := serveSidecar(t, bundle)
-	cl := sidecar.NewClient(sidecar.ClientConfig{SocketPath: socket})
+	cl := newTestDecider(t, bundle)
 
 	// A dangerous command → the local policy returns BLOCK (obtained synchronously).
 	danger := &HookEvent{SessionID: "s", ToolName: "Bash", ToolInput: []byte(`{"command":"rm -rf /tmp/x"}`)}
@@ -274,10 +271,6 @@ func TestEnforceDecision_LiveBlock(t *testing.T) {
 	if d := EnforceDecision(context.Background(), cl, Identity{DeveloperDID: testDID}, benign, false); d.Evaluation.WouldBlock() {
 		t.Errorf("benign command should not block: %+v", d)
 	}
-
-	if atomic.LoadInt32(accepts) < 2 {
-		t.Errorf("expected the sidecar to be dialed for each decision, got %d accepts", *accepts)
-	}
 }
 
 // TestRunHook_EnforceGate is the AC-2/AC-4 guard: with enforce OFF the sidecar is
@@ -285,12 +278,11 @@ func TestEnforceDecision_LiveBlock(t *testing.T) {
 // it exactly once and logs the decision — and NOTHING is written to stdout in
 // either mode (INV-3 holds verbatim for E6-S1).
 func TestRunHook_EnforceGate(t *testing.T) {
-	socket, accepts := serveSidecar(t, nil) // cold-start server → fail-open ALLOW
+	setBundleEnv(t, nil) // no bundle loaded → in-process cold-start fail-open ALLOW
 	isolateConfig(t)
 	t.Setenv(envDID, testDID)
 	t.Setenv("OPENBOX_SPOOL_DIR", t.TempDir())
 	t.Setenv("OPENBOX_SESSION_DIR", t.TempDir())
-	t.Setenv(envSidecarSocket, socket)
 
 	payload := `{"hook_event_name":"PreToolUse","session_id":"sess-1","cwd":"/tmp","tool_name":"Bash","tool_input":{"command":"echo hi"}}`
 
@@ -306,43 +298,38 @@ func TestRunHook_EnforceGate(t *testing.T) {
 		return stderr.String()
 	}
 
-	// Enforce OFF → the sidecar is not contacted; no enforce diagnostic emitted.
+	// Enforce OFF → the gate does not run; no enforce diagnostic emitted (the
+	// in-process behavioral analog of "the sidecar was never dialed").
 	t.Setenv(envEnforce, "0")
 	if out := run(); strings.Contains(out, "enforce decision:") {
 		t.Errorf("enforce-off must not run the gate; stderr=%q", out)
 	}
-	if n := atomic.LoadInt32(accepts); n != 0 {
-		t.Fatalf("enforce-off dialed the sidecar %d time(s) — observe path must not touch it", n)
-	}
 
-	// Enforce ON → the PreToolUse hook synchronously dials the sidecar once.
+	// Enforce ON → the PreToolUse hook synchronously obtains + logs a decision.
 	t.Setenv(envEnforce, "1")
-	out := run()
-	if !strings.Contains(out, "enforce decision:") {
+	if out := run(); !strings.Contains(out, "enforce decision:") {
 		t.Errorf("enforce-on must obtain + log a decision; stderr=%q", out)
-	}
-	if n := atomic.LoadInt32(accepts); n != 1 {
-		t.Errorf("enforce-on should dial the sidecar exactly once, got %d", n)
 	}
 }
 
 // TestRunHook_EnforceOnlyPreToolUse guards AC-6: even in enforce mode, a
 // non-PreToolUse hook never dials the sidecar (the gate is a pre-execution concept).
 func TestRunHook_EnforceOnlyPreToolUse(t *testing.T) {
-	socket, accepts := serveSidecar(t, nil)
+	setBundleEnv(t, nil)
 	isolateConfig(t)
 	t.Setenv(envDID, testDID)
 	t.Setenv("OPENBOX_SPOOL_DIR", t.TempDir())
 	t.Setenv("OPENBOX_SESSION_DIR", t.TempDir())
-	t.Setenv(envSidecarSocket, socket)
 	t.Setenv(envEnforce, "1")
 
-	// PostToolUse in enforce mode must still only observe.
+	// PostToolUse in enforce mode must still only observe: the gate never runs, so no
+	// "enforce decision:" diagnostic is emitted (the in-process analog of "never dialed").
 	payload := `{"hook_event_name":"PostToolUse","session_id":"sess-1","cwd":"/tmp","tool_name":"Bash","tool_input":{"command":"echo hi"}}`
-	logger := log.New(&bytes.Buffer{}, "", 0)
+	var stderr bytes.Buffer
+	logger := log.New(&stderr, "", 0)
 	RunHook("PostToolUse", strings.NewReader(payload), &bytes.Buffer{}, logger)
-	if n := atomic.LoadInt32(accepts); n != 0 {
-		t.Errorf("PostToolUse must not dial the sidecar even in enforce mode, got %d", n)
+	if strings.Contains(stderr.String(), "enforce decision:") {
+		t.Errorf("PostToolUse must not run the enforce gate even in enforce mode; stderr=%q", stderr.String())
 	}
 }
 
@@ -417,7 +404,7 @@ func TestMapVerdict(t *testing.T) {
 func TestApplyDecision(t *testing.T) {
 	t.Run("block writes a deny permissionDecision", func(t *testing.T) {
 		var out bytes.Buffer
-		dec := sidecar.Decision{Evaluation: client.Evaluation{Verdict: client.VerdictBlock, Reason: "destructive"}}
+		dec := decision.Decision{Evaluation: client.Evaluation{Verdict: client.VerdictBlock, Reason: "destructive"}}
 		applied, emitted := applyDecision(&out, dec, false, nil)
 		if !emitted || applied != ccDecisionDeny {
 			t.Fatalf("applied=%q emitted=%t, want deny/true", applied, emitted)
@@ -433,7 +420,7 @@ func TestApplyDecision(t *testing.T) {
 
 	t.Run("allow writes nothing (tighten-only)", func(t *testing.T) {
 		var out bytes.Buffer
-		dec := sidecar.Decision{Evaluation: client.Evaluation{Verdict: client.VerdictAllow}}
+		dec := decision.Decision{Evaluation: client.Evaluation{Verdict: client.VerdictAllow}}
 		if applied, emitted := applyDecision(&out, dec, false, nil); emitted || applied != "" {
 			t.Errorf("allow must emit nothing, got applied=%q emitted=%t", applied, emitted)
 		}
@@ -444,14 +431,14 @@ func TestApplyDecision(t *testing.T) {
 
 	t.Run("fail-open (unknown) writes nothing", func(t *testing.T) {
 		var out bytes.Buffer
-		dec := sidecar.Decision{Evaluation: client.Evaluation{Verdict: client.VerdictUnknown}, FailOpen: true}
+		dec := decision.Decision{Evaluation: client.Evaluation{Verdict: client.VerdictUnknown}, FailOpen: true}
 		if _, emitted := applyDecision(&out, dec, false, nil); emitted || out.Len() != 0 {
 			t.Errorf("fail-open must not write a decision; stdout=%q", out.String())
 		}
 	})
 
 	t.Run("nil stdout never panics and reports not-emitted", func(t *testing.T) {
-		dec := sidecar.Decision{Evaluation: client.Evaluation{Verdict: client.VerdictBlock}}
+		dec := decision.Decision{Evaluation: client.Evaluation{Verdict: client.VerdictBlock}}
 		if _, emitted := applyDecision(nil, dec, false, nil); emitted {
 			t.Error("a nil stdout must degrade to not-emitted (fail-open)")
 		}
@@ -508,7 +495,7 @@ func TestApplyInputRedaction(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			got := applyInputRedaction(sidecar.Decision{RedactedContent: c.redacted}, c.localRedaction, c.orig)
+			got := applyInputRedaction(decision.Decision{RedactedContent: c.redacted}, c.localRedaction, c.orig)
 			if c.wantContent == "" {
 				if got != nil {
 					t.Errorf("want nil (no rewrite), got %s", got)
@@ -530,7 +517,7 @@ func TestApplyInputRedaction(t *testing.T) {
 func TestApplyInputRedaction_StructuralFieldsInviolable(t *testing.T) {
 	orig := json.RawMessage(`{"file_path":"/etc/app.conf","content":"password=hunter2secret9999","mode":"0644"}`)
 	got := applyInputRedaction(
-		sidecar.Decision{RedactedContent: &client.Content{FileText: "password=${OPENBOX_REDACTED_SECRET_ASSIGNMENT}"}},
+		decision.Decision{RedactedContent: &client.Content{FileText: "password=${OPENBOX_REDACTED_SECRET_ASSIGNMENT}"}},
 		true, orig)
 	if got == nil {
 		t.Fatal("expected a rewrite")
@@ -563,7 +550,7 @@ func TestApplyInputRedaction_NonEmptyFieldSelection(t *testing.T) {
 		json.RawMessage(`{"file_path":"/x","content":"","new_string":"tok=AKIAIOSFODNN7EXAMPLE"}`),
 		json.RawMessage(`{"file_path":"/x","content":null,"new_string":"tok=AKIAIOSFODNN7EXAMPLE"}`),
 	} {
-		got := applyInputRedaction(sidecar.Decision{RedactedContent: &client.Content{FileText: redactedBody}}, true, orig)
+		got := applyInputRedaction(decision.Decision{RedactedContent: &client.Content{FileText: redactedBody}}, true, orig)
 		if got == nil {
 			t.Fatalf("expected a rewrite for %s", orig)
 		}
@@ -590,7 +577,7 @@ func TestApplyDecision_Redaction(t *testing.T) {
 
 	t.Run("proceed + redaction on → updatedInput alone", func(t *testing.T) {
 		var out bytes.Buffer
-		dec := sidecar.Decision{Evaluation: client.Evaluation{Verdict: client.VerdictAllow}, RedactedContent: rc}
+		dec := decision.Decision{Evaluation: client.Evaluation{Verdict: client.VerdictAllow}, RedactedContent: rc}
 		applied, emitted := applyDecision(&out, dec, true, orig)
 		if applied != "" || !emitted {
 			t.Fatalf("applied=%q emitted=%t, want proceed(\"\")/emitted(true)", applied, emitted)
@@ -612,7 +599,7 @@ func TestApplyDecision_Redaction(t *testing.T) {
 
 	t.Run("proceed + redaction OFF → nothing (E6-S3 identical)", func(t *testing.T) {
 		var out bytes.Buffer
-		dec := sidecar.Decision{Evaluation: client.Evaluation{Verdict: client.VerdictAllow}, RedactedContent: rc}
+		dec := decision.Decision{Evaluation: client.Evaluation{Verdict: client.VerdictAllow}, RedactedContent: rc}
 		if _, emitted := applyDecision(&out, dec, false, orig); emitted || out.Len() != 0 {
 			t.Errorf("redaction off must write nothing, got %q", out.String())
 		}
@@ -620,7 +607,7 @@ func TestApplyDecision_Redaction(t *testing.T) {
 
 	t.Run("deny carries no updatedInput even with a redaction present", func(t *testing.T) {
 		var out bytes.Buffer
-		dec := sidecar.Decision{Evaluation: client.Evaluation{Verdict: client.VerdictBlock, Reason: "nope"}, RedactedContent: rc}
+		dec := decision.Decision{Evaluation: client.Evaluation{Verdict: client.VerdictBlock, Reason: "nope"}, RedactedContent: rc}
 		applied, _ := applyDecision(&out, dec, true, orig)
 		if applied != ccDecisionDeny {
 			t.Fatalf("want deny, got %q", applied)
@@ -634,7 +621,7 @@ func TestApplyDecision_Redaction(t *testing.T) {
 
 	t.Run("ask carries no updatedInput (faithful to the SDK)", func(t *testing.T) {
 		var out bytes.Buffer
-		dec := sidecar.Decision{Evaluation: client.Evaluation{Verdict: client.VerdictRequireApproval}, RedactedContent: rc}
+		dec := decision.Decision{Evaluation: client.Evaluation{Verdict: client.VerdictRequireApproval}, RedactedContent: rc}
 		applied, _ := applyDecision(&out, dec, true, orig)
 		if applied != ccDecisionAsk {
 			t.Fatalf("want ask, got %q", applied)
@@ -656,7 +643,7 @@ func TestRecordEnforcement_NoRedactionLeak(t *testing.T) {
 	t.Setenv(envEnforcementFile, enfFile)
 	logger := log.New(&bytes.Buffer{}, "", 0)
 
-	dec := sidecar.Decision{Source: "local-bundle",
+	dec := decision.Decision{Source: "local-bundle",
 		RedactedContent:     &client.Content{FileText: "api_key=REDACTION_SENTINEL"},
 		RedactionCategories: []string{"secret_assignment"},
 		Evaluation:          client.Evaluation{Verdict: client.VerdictAllow}}
@@ -691,23 +678,22 @@ func TestRecordEnforcement_NoRedactionLeak(t *testing.T) {
 // record. A benign command in the same session writes nothing (tighten-only) and
 // records a proceed. INV-2: neither surface carries the shell command.
 func TestRunHook_EnforceApply_Block(t *testing.T) {
-	bundle := &sidecar.Bundle{
+	bundle := &decision.Bundle{
 		Version:         "test-1",
 		DefaultDecision: "allow",
-		Rules: []sidecar.Rule{{
+		Rules: []decision.Rule{{
 			ID:       "no-rm-rf",
-			Match:    sidecar.RuleMatch{ToolKind: "shell", AttributeContains: map[string]string{"command": "rm -rf"}},
+			Match:    decision.RuleMatch{ToolKind: "shell", AttributeContains: map[string]string{"command": "rm -rf"}},
 			Decision: "block",
 			Reason:   "destructive recursive delete",
 			PolicyID: "test-policy",
 		}},
 	}
-	socket, _ := serveSidecar(t, bundle)
+	setBundleEnv(t, bundle)
 	isolateConfig(t)
 	t.Setenv(envDID, testDID)
 	t.Setenv("OPENBOX_SPOOL_DIR", t.TempDir())
 	t.Setenv("OPENBOX_SESSION_DIR", t.TempDir())
-	t.Setenv(envSidecarSocket, socket)
 	t.Setenv(envEnforce, "1")
 	enfFile := filepath.Join(t.TempDir(), "enforcements.jsonl")
 	t.Setenv(envEnforcementFile, enfFile)
@@ -769,10 +755,10 @@ func TestRunHook_EnforceApply_Block(t *testing.T) {
 // ONLY on a fail-open decision under fail-closed; every other case is a no-op
 // (fail-open proceeds; a real verdict is never overridden under either policy).
 func TestApplyFailurePolicy(t *testing.T) {
-	failOpenDec := sidecar.Decision{
+	failOpenDec := decision.Decision{
 		Evaluation: client.Evaluation{Verdict: client.VerdictUnknown, Reason: "sidecar unavailable"},
 		FailOpen:   true,
-		Source:     "fail-open-client",
+		Source:     "fail-open:no-bundle",
 	}
 
 	t.Run("fail-open policy is a no-op even on an outage", func(t *testing.T) {
@@ -804,7 +790,7 @@ func TestApplyFailurePolicy(t *testing.T) {
 	// governs the evaluation-unavailable case only.
 	for _, v := range []client.Verdict{client.VerdictAllow, client.VerdictConstrain, client.VerdictBlock} {
 		t.Run("real "+string(v)+" untouched under fail-closed", func(t *testing.T) {
-			real := sidecar.Decision{Evaluation: client.Evaluation{Verdict: v}, FailOpen: false}
+			real := decision.Decision{Evaluation: client.Evaluation{Verdict: v}, FailOpen: false}
 			if got := applyFailurePolicy(real, FailClosed); got.Evaluation.Verdict != v {
 				t.Errorf("real %s verdict must pass through fail-closed unchanged, got %q", v, got.Evaluation.Verdict)
 			}
@@ -820,7 +806,7 @@ func TestLogEnforceDecision_PolicyLegible(t *testing.T) {
 		t.Fatalf("policy String() = %q/%q", FailOpen, FailClosed)
 	}
 	var buf bytes.Buffer
-	dec := applyFailurePolicy(sidecar.Decision{
+	dec := applyFailurePolicy(decision.Decision{
 		Evaluation: client.Evaluation{Verdict: client.VerdictUnknown, Reason: "sidecar unavailable"},
 		FailOpen:   true,
 	}, FailClosed)
@@ -850,10 +836,10 @@ func TestRunHook_EnforceFailClosed(t *testing.T) {
 		return stdout.String()
 	}
 
-	// enforce ON + fail_closed ON + NO sidecar reachable → deny.
+	// enforce ON + fail_closed ON + NO bundle loaded (cold-start fail-open) → deny.
 	t.Setenv(envEnforce, "1")
 	t.Setenv(envFailClosed, "1")
-	t.Setenv(envSidecarSocket, filepath.Join(t.TempDir(), "absent.sock"))
+	setBundleEnv(t, nil)
 	out := run()
 	d, reason := parsePermissionDecision(t, []byte(out))
 	if d != ccDecisionDeny {
@@ -866,17 +852,16 @@ func TestRunHook_EnforceFailClosed(t *testing.T) {
 		t.Errorf("fail-closed reason leaked the shell command (INV-2): %q", out)
 	}
 
-	// A reachable sidecar with a benign command → real ALLOW → PROCEED even under
+	// A loaded allow bundle with a benign command → real ALLOW → PROCEED even under
 	// fail-closed (the policy does not touch a real allow verdict).
-	socket, _ := serveSidecar(t, &sidecar.Bundle{Version: "t", DefaultDecision: "allow"})
-	t.Setenv(envSidecarSocket, socket)
+	setBundleEnv(t, &decision.Bundle{Version: "t", DefaultDecision: "allow"})
 	if out := run(); strings.TrimSpace(out) != "" {
 		t.Errorf("fail-closed must NOT block a real allow; stdout=%q", out)
 	}
 
 	// enforce OFF (still fail_closed=1) → byte-identical to observe: nothing to stdout.
 	t.Setenv(envEnforce, "0")
-	t.Setenv(envSidecarSocket, filepath.Join(t.TempDir(), "absent.sock"))
+	setBundleEnv(t, nil)
 	if out := run(); strings.TrimSpace(out) != "" {
 		t.Errorf("enforce-off must not deny even under fail_closed=1; stdout=%q", out)
 	}
@@ -891,7 +876,7 @@ func TestRecordEnforcement_GuardrailCategoryOnly(t *testing.T) {
 	t.Setenv(envEnforcementFile, enfFile)
 	logger := log.New(&bytes.Buffer{}, "", 0)
 
-	dec := sidecar.Decision{Source: "local-bundle", Evaluation: client.Evaluation{
+	dec := decision.Decision{Source: "local-bundle", Evaluation: client.Evaluation{
 		Verdict: client.VerdictAllow, // verdict alone would proceed…
 		Guardrail: &client.GuardrailResult{Passed: false, Reasons: []client.GuardrailReason{
 			{Type: "pii", Field: "ssn", Reason: "detected 123-45-6789 in the argument"},
@@ -975,7 +960,7 @@ func TestRecordEnforcement_ApprovalID(t *testing.T) {
 	t.Setenv(envEnforcementFile, enfFile)
 	logger := log.New(&bytes.Buffer{}, "", 0)
 
-	dec := sidecar.Decision{Source: "local-bundle", Evaluation: client.Evaluation{
+	dec := decision.Decision{Source: "local-bundle", Evaluation: client.Evaluation{
 		Verdict:    client.VerdictRequireApproval,
 		Reason:     "external repository mutation",
 		PolicyID:   "mcp-policy",
@@ -1021,23 +1006,22 @@ func TestRecordEnforcement_ApprovalID(t *testing.T) {
 // id, so the reason/audit gracefully omit it (see TestRecordEnforcement_ApprovalID
 // for the approval-id path).
 func TestRunHook_EnforceApply_Approval(t *testing.T) {
-	bundle := &sidecar.Bundle{
+	bundle := &decision.Bundle{
 		Version:         "test-appr",
 		DefaultDecision: "allow",
-		Rules: []sidecar.Rule{{
+		Rules: []decision.Rule{{
 			ID:       "gh-approval",
-			Match:    sidecar.RuleMatch{ToolKind: "mcp"},
+			Match:    decision.RuleMatch{ToolKind: "mcp"},
 			Decision: "require_approval",
 			Reason:   "external repository mutation",
 			PolicyID: "mcp-policy",
 		}},
 	}
-	socket, _ := serveSidecar(t, bundle)
+	setBundleEnv(t, bundle)
 	isolateConfig(t)
 	t.Setenv(envDID, testDID)
 	t.Setenv("OPENBOX_SPOOL_DIR", t.TempDir())
 	t.Setenv("OPENBOX_SESSION_DIR", t.TempDir())
-	t.Setenv(envSidecarSocket, socket)
 	enfFile := filepath.Join(t.TempDir(), "enforcements.jsonl")
 	t.Setenv(envEnforcementFile, enfFile)
 

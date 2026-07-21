@@ -186,6 +186,11 @@ func (i Installer) writeConfig(ref CredentialRef) error {
 		InstallGitHook:    ref.InstallGitHook,
 		AgentID:           ref.AgentID,    // STORY-E6-S8: for `dev sync` / staleness
 		BackendURL:        ref.BackendURL, // control-plane base for the policy read
+		// ADR-0006: persist the enforce posture so the runtime hook reads it from
+		// dev.json (no OPENBOX_ENFORCE / OPENBOX_TIER2 / OPENBOX_FINDINGS needed).
+		Enforce:  ref.Enforce,
+		Tier2:    ref.Tier2,
+		Findings: ref.Findings,
 	}
 	// Preserve a previously-persisted agent_id / backend_url on a re-init that does
 	// not carry them (the idempotent "already initialized, reusing creds" path

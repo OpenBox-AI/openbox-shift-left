@@ -1,4 +1,4 @@
-package sidecar
+package decision
 
 import "github.com/openbox-ai/openbox-shift-left/client"
 

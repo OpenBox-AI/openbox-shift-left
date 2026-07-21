@@ -11,24 +11,24 @@ import (
 	"unicode/utf8"
 
 	"github.com/openbox-ai/openbox-shift-left/client"
-	"github.com/openbox-ai/openbox-shift-left/sidecar"
+	"github.com/openbox-ai/openbox-shift-left/decision"
 )
 
 // Enforcement — the synchronous pre-execution gate (STORY-E6-S1, Phase-2).
 //
 // In ENFORCE mode (ResolveEnforce), a PreToolUse hook must obtain a governance
-// decision from the local sidecar BEFORE the tool runs — the INV-3b carve-out to
-// INV-3 ("observation never blocks"): an enforce path MAY block, but only
-// pre-execution, only within a hard timeout, and fail-open by default (OD9). This
-// mirrors the reference SDK's activity-boundary gate, which awaits
-// GovernanceClient.evaluate_event on ActivityStarted and then runs enforce_verdict
-// BEFORE the activity executes (activity_interceptor.py). The decisive difference:
-// spike S2 proved a synchronous round-trip to core's /evaluate is ~0.8–1.6 s (a
-// Temporal workflow) — 16–33× over budget — so the decision is served by the
-// resident LOCAL sidecar (Unix socket, single-digit ms), never a network call.
+// decision from the local decision engine BEFORE the tool runs — the INV-3b
+// carve-out to INV-3 ("observation never blocks"): an enforce path MAY block, but
+// only pre-execution and fail-open by default (OD9). This mirrors the reference
+// SDK's activity-boundary gate, which awaits GovernanceClient.evaluate_event on
+// ActivityStarted and then runs enforce_verdict BEFORE the activity executes
+// (activity_interceptor.py). The decisive difference: spike S2 proved a synchronous
+// round-trip to core's /evaluate is ~0.8–1.6 s (a Temporal workflow) — 16–33× over
+// budget — so the decision is computed IN-PROCESS from a synced local policy bundle
+// (microseconds, no socket, no daemon; ADR-0006), never a network call.
 //
 // SCOPE OF THIS FILE (E6-S1): OBTAIN + record the decision only. It returns the
-// sidecar.Decision (carrying the client.Evaluation) and NEVER writes a blocking
+// decision.Decision (carrying the client.Evaluation) and NEVER writes a blocking
 // signal — turning a BLOCK/HALT verdict into an actual Claude Code `deny`/`ask`
 // (the enforce_verdict cascade) is E6-S2's `apply`, which consumes this Decision.
 // So enforce mode here is safe by construction: the tool always proceeds, exactly
@@ -46,11 +46,10 @@ import (
 // INV-2).
 const maxCommandLen = 8 << 10 // 8 KiB (bytes)
 
-// maxRedactBody bounds the file BODY handed to the LOCAL sidecar for secret
-// redaction (STORY-E6-S9). A body over this cap is NOT sent (Content stays nil), so
-// the tool proceeds UNREDACTED (fail-open, OD9) rather than risk (a) a request over
-// the server's read limit (server.go defaultMaxRequestBytes = 1 MiB) or (b) a slow
-// scan on the ~50 ms hot path. The cap is a SKIP threshold, never a truncation: a
+// maxRedactBody bounds the file BODY handed to the in-process secret detector for
+// redaction (STORY-E6-S9). A body over this cap is NOT scanned (Content stays nil),
+// so the tool proceeds UNREDACTED (fail-open, OD9) rather than risk a slow scan on
+// the hot path. The cap is a SKIP threshold, never a truncation: a
 // truncated body reconstructed into updatedInput would DROP the file's tail and
 // corrupt the write, so we send the whole body or none. 512 KiB comfortably covers
 // the .env/config/key pastes that are the real secret-leak surface; larger-body
@@ -58,9 +57,9 @@ const maxCommandLen = 8 << 10 // 8 KiB (bytes)
 const maxRedactBody = 512 << 10 // 512 KiB (bytes)
 
 // maxJSONCompareBytes bounds the jsonEqual double-parse (E6-S4 G_SEC INFO-2). The
-// redacted input is already capped by the sidecar Client's bounded read (≤64 KiB),
-// but the original tool_input comes from the hook payload; this defends the
-// LOCAL-only equality check from an oversized document forcing a large re-parse.
+// redacted input is produced in-process (bounded by maxRedactBody), but the original
+// tool_input comes from the hook payload; this defends the LOCAL-only equality check
+// from an oversized document forcing a large re-parse.
 // Over the cap, jsonEqual returns not-equal — the SAFE direction: a differing
 // redaction is applied, so we only ever forgo suppressing an identical-but-huge
 // rewrite (a harmless no-op), never corrupt or drop a real redaction. 256 KiB is
@@ -68,36 +67,37 @@ const maxRedactBody = 512 << 10 // 512 KiB (bytes)
 const maxJSONCompareBytes = 256 << 10 // 256 KiB (bytes)
 
 // EnforceDecision is the PreToolUse enforce gate: it SYNCHRONOUSLY obtains a
-// governance decision from the local sidecar for the tool that is about to run,
-// bounded by cl's hard timeout (~50 ms, INV-3b). It NEVER errors and NEVER blocks
-// — the sidecar.Client fails open (VerdictUnknown/allow) on every fault (socket
-// absent, dial refused, timeout, malformed reply), so the returned Decision is
-// always safe to proceed on. The returned Decision is the seam E6-S2 consumes to
+// governance decision from the in-process decider for the tool that is about to
+// run. It NEVER errors and NEVER blocks — the decider fails open (VerdictUnknown/
+// allow) on any fault (no bundle loaded, unusable request), so the returned Decision
+// is always safe to proceed on. The returned Decision is the seam E6-S2 consumes to
 // map the verdict onto a Claude Code permissionDecision.
 //
 // It reads NO secret (identity is the DID only, already resolved on the hot path
-// — INV-1) and takes NO network I/O (only the local per-user socket — INV-3b).
-func EnforceDecision(ctx context.Context, cl *sidecar.Client, id Identity, e *HookEvent, localRedaction bool) sidecar.Decision {
+// — INV-1) and takes NO network I/O and NO IPC (evaluated in-memory — INV-3b).
+func EnforceDecision(ctx context.Context, cl decision.Decider, id Identity, e *HookEvent, localRedaction bool) decision.Decision {
 	return cl.Decide(ctx, buildDecisionRequest(id, e, localRedaction))
 }
 
-// newSidecarClient builds the fail-open enforce-hook client for the configured
-// socket. It never fails: an empty/absent socket path simply means every Decide
-// fails open (the daemon is treated as absent). The timeout is the configured
-// hard per-call budget (E6-S3, ResolveEnforceTimeout); 0 ⇒
-// sidecar.DefaultDecisionTimeout (~50 ms, ADR-0002).
-func newSidecarClient() *sidecar.Client {
-	return sidecar.NewClient(sidecar.ClientConfig{
-		SocketPath: ResolveSidecarSocket(),
-		Timeout:    ResolveEnforceTimeout(),
+// newDecider builds the enforce-hook decision transport. There is exactly one
+// (ADR-0006): the local bundle is evaluated IN-PROCESS — no resident daemon, no
+// socket, nothing for the developer to start. Since E6-S8 the evaluator is pure-Go
+// and in-memory, so the hook (a short-lived per-tool-call process) loads the same
+// bundle `openbox dev sync` wrote and decides directly. It fails open on any fault
+// (absent/unreadable bundle → cold-start fail-open), so an infra failure never
+// blocks the developer (OD9 / INV-3b). This is what makes enforcement ambient after
+// `openbox dev init` with zero runtime setup.
+func newDecider() decision.Decider {
+	return decision.NewInProcessDecider(decision.InProcessConfig{
+		BundlePath: ResolveBundlePath(),
 	})
 }
 
 // ── E6-S3: fail-open / fail-closed failure policy ────────────────────────────
 //
-// The failure policy decides what the enforce gate does when the local sidecar
-// could NOT deliver a real verdict (absent, dial refused, timeout, malformed
-// reply — i.e. sidecar.Decision.FailOpen==true). It is the Go port of the
+// The failure policy decides what the enforce gate does when the in-process decider
+// could NOT deliver a real verdict (no policy bundle loaded, or an unusable request
+// — i.e. decision.Decision.FailOpen==true). It is the Go port of the
 // reference SDK's governance_policy / _handle_api_error (client.py:204-208): on an
 // evaluate failure the SDK returns either None (fail-open → no verdict → the
 // action proceeds) or a SYNTHESIZED Verdict.HALT (fail-closed → the SAME
@@ -136,7 +136,7 @@ func resolveFailurePolicy() FailurePolicy {
 
 // applyFailurePolicy is the Go analog of the SDK's _handle_api_error, applied
 // between OBTAIN (E6-S1) and APPLY (E6-S2). It touches a decision ONLY when the
-// sidecar failed to deliver a real verdict (dec.FailOpen) AND the org opted into
+// decider failed to deliver a real verdict (dec.FailOpen) AND the org opted into
 // fail-closed: it then synthesizes a HALT verdict (exactly as the SDK returns a
 // synthetic Verdict.HALT) carrying a content-free reason, so the unchanged,
 // policy-agnostic mapVerdict cascade denies the call via its normal HALT path.
@@ -146,22 +146,20 @@ func resolveFailurePolicy() FailurePolicy {
 //     emits nothing → proceed (byte-identical to E6-S2 / observe).
 //   - a REAL verdict (dec.FailOpen==false) under either policy: the failure policy
 //     governs ONLY the evaluation-unavailable case, never a real ALLOW/CONSTRAIN/
-//     BLOCK answer — a reachable sidecar's allow still proceeds under fail-closed.
+//     BLOCK answer — a loaded-bundle decider's allow still proceeds under fail-closed.
 //
 // This only ever converts a would-be PROCEED into a DENY, so it upholds the
-// tighten-only invariant (E6-S2) and INV-3b (the block is still synchronous,
-// pre-execution, and bounded by the E6-S1 timeout).
+// tighten-only invariant (E6-S2) and INV-3b (the block is still synchronous and
+// pre-execution).
 //
-// E6-S7 note — the set of "no real verdict" cases (dec.FailOpen) is now complete:
-// besides an unreachable/timed-out/malformed daemon, it INCLUDES a reachable but
-// UNBUNDLED daemon (Source=fail-open:no-bundle → FailOpen=true, sidecar.Client /
+// E6-S7 note — the "no real verdict" case (dec.FailOpen) is the cold-start /
+// no-policy-loaded state (Source=fail-open:no-bundle → FailOpen=true, via
 // isRealVerdictSource). So a fail-closed org denies whenever OpenBox obtained no
-// real verdict, however that happened — closing the E6-S3 G_SEC INFO-1 hole. This
-// is a DELIBERATE deviation from the reference SDK, which has no reachable-but-
-// unbundled state and would proceed; it is consistent with E6-S3 already failing
-// closed on a malformed reply (the adjacent axis). This transform is UNCHANGED —
-// the reconciliation is entirely upstream, in how sidecar.Decision.FailOpen is set.
-func applyFailurePolicy(dec sidecar.Decision, policy FailurePolicy) sidecar.Decision {
+// real verdict — closing the E6-S3 G_SEC INFO-1 hole. This is a DELIBERATE deviation
+// from the reference SDK, which has no unbundled state and would proceed. This
+// transform is UNCHANGED — the reconciliation is entirely upstream, in how
+// decision.Decision.FailOpen is set.
+func applyFailurePolicy(dec decision.Decision, policy FailurePolicy) decision.Decision {
 	if !dec.FailOpen || policy != FailClosed {
 		return dec
 	}
@@ -173,11 +171,10 @@ func applyFailurePolicy(dec sidecar.Decision, policy FailurePolicy) sidecar.Deci
 	return dec
 }
 
-// failClosedReason builds the content-free deny reason for a fail-closed outage.
-// govReason (E6-S2) prepends "OpenBox governance: ". The cause is the fail-open
-// fallback's internal diagnostic (allowFailOpen: "sidecar unavailable", "sidecar
-// read failed or timed out", …) — a fixed, content-free string, never tool
-// content (INV-2).
+// failClosedReason builds the content-free deny reason for a fail-closed no-verdict
+// case. govReason (E6-S2) prepends "OpenBox governance: ". The cause is the decider's
+// internal diagnostic (empty on a cold-start fail-open today) — a fixed, content-free
+// string, never tool content (INV-2).
 func failClosedReason(cause string) string {
 	r := "request denied — no governance decision could be obtained and this session is fail-closed"
 	if cause != "" {
@@ -195,12 +192,12 @@ func failClosedReason(cause string) string {
 //
 // Content (INV-2) is populated when localRedaction is true — i.e. Tier-1 secret
 // detection (STORY-E6-S9, OD-SYNC-10, default ON) OR content capture (OD4) is on.
-// The local sidecar needs the tool's body to scan/redact, the analog of the
+// The local decider needs the tool's body to scan/redact, the analog of the
 // reference SDK sending the full activity_input to its gate. Like the command axis
-// it goes ONLY to the local Unix socket and is NEVER egressed (the observe Mapper
+// it stays in-process and is NEVER egressed (the observe Mapper
 // egress path is unchanged, still metadata-only unless content capture is on). With
 // BOTH off, Content stays nil and the request is byte-identical to E6-S3.
-func buildDecisionRequest(id Identity, e *HookEvent, localRedaction bool) sidecar.DecisionRequest {
+func buildDecisionRequest(id Identity, e *HookEvent, localRedaction bool) decision.DecisionRequest {
 	kind, sem, fileOp, mcpServer, function := classifyTool(e.ToolName)
 
 	tool := client.Tool{Name: capStr(e.ToolName), Kind: kind}
@@ -221,13 +218,13 @@ func buildDecisionRequest(id Identity, e *HookEvent, localRedaction bool) sideca
 		attrs["mcp_function"] = capStr(function)
 	case kind == client.ToolShell:
 		// Local-only: the command is the axis a policy matches a dangerous shell
-		// action on. It goes ONLY to the local sidecar and is never egressed/logged
+		// action on. It goes ONLY to the in-process decider and is never egressed/logged
 		// (HookEvent.command). Bounded to keep the local request small.
 		attrs["command"] = capCommand(e.command())
 	}
 
-	req := sidecar.DecisionRequest{
-		Protocol:     sidecar.ProtocolVersion,
+	req := decision.DecisionRequest{
+		Protocol:     decision.ProtocolVersion,
 		SessionID:    e.SessionID,
 		DeveloperDID: id.DeveloperDID,
 		EventType:    client.EventToolCall, // the pre-execution gate is a ToolCall decision
@@ -286,7 +283,7 @@ func compactAny(m map[string]any) map[string]any {
 // observable evidence for E6-S1 (and E6-S7 conformance) that the sync gate ran; it
 // goes to stderr (never stdout — INV-3) and never blocks. E6-S2 adds the actual
 // apply (stdout permissionDecision) on top of this same Decision.
-func logEnforceDecision(logger *log.Logger, e *HookEvent, dec sidecar.Decision, policy FailurePolicy) {
+func logEnforceDecision(logger *log.Logger, e *HookEvent, dec decision.Decision, policy FailurePolicy) {
 	verdict := string(dec.Evaluation.Verdict)
 	if verdict == "" {
 		verdict = "UNKNOWN" // VerdictUnknown ("") — a fail-open / unevaluated decision
@@ -300,7 +297,7 @@ func logEnforceDecision(logger *log.Logger, e *HookEvent, dec sidecar.Decision, 
 
 // ── E6-S2: apply(verdict) — the enforce leg's teeth ──────────────────────────
 //
-// E6-S1 OBTAINS a sidecar.Decision; E6-S2 APPLIES it — mapping the governance
+// E6-S1 OBTAINS a decision.Decision; E6-S2 APPLIES it — mapping the governance
 // verdict onto a Claude Code PreToolUse `permissionDecision` written to stdout,
 // the moment WouldBlock() becomes a real block. This ports the reference SDK's
 // enforce_verdict cascade (openbox-temporal-sdk-python verdict_handler.py) — the
@@ -348,7 +345,7 @@ type hookSpecificOutput struct {
 	// E6-S9 source). Claude Code treats it as a FULL replacement of tool_input,
 	// applied before the tool runs. RECONSTRUCTED from the original tool_input with
 	// only the content field swapped (redactToolInput) — never sourced whole from
-	// the sidecar. Emitted ALONE on the proceed path (no permissionDecision) so CC's
+	// the decision. Emitted ALONE on the proceed path (no permissionDecision) so CC's
 	// own permission flow still applies. omitempty ⇒ absent on the deny/ask paths and
 	// whenever there is no redaction. Content-bearing but LOCAL (stdout → CC on this
 	// machine, never egressed — INV-2).
@@ -378,7 +375,7 @@ type hookSpecificOutput struct {
 // It NEVER wedges the tool call: a nil stdout or any marshal/write fault degrades
 // to "proceed" (fail-open, OD9) — enforcement can only ADD a deny/ask/redaction,
 // never hang or fail a call on an apply-side error (INV-3b fail-open).
-func applyDecision(stdout io.Writer, dec sidecar.Decision, localRedaction bool, origInput json.RawMessage) (applied string, emitted bool) {
+func applyDecision(stdout io.Writer, dec decision.Decision, localRedaction bool, origInput json.RawMessage) (applied string, emitted bool) {
 	if stdout == nil {
 		return "", false // fail-open: nowhere to write
 	}
@@ -412,7 +409,7 @@ func applyDecision(stdout io.Writer, dec sidecar.Decision, localRedaction bool, 
 //
 // It returns nil (no rewrite) unless ALL hold:
 //   - local redaction is on (secret detection [OD-SYNC-10, default ON] or content
-//     capture [OD4]). Without it no tool body ever reached the sidecar → nothing to
+//     capture [OD4]). Without it no tool body was ever scanned → nothing to
 //     redact and the path MUST be byte-identical to E6-S3 (the INV-2 gate).
 //   - the Decision carries a non-empty RedactedContent.FileText.
 //   - reconstructing the ORIGINAL tool_input with ONLY the content field replaced
@@ -423,14 +420,14 @@ func applyDecision(stdout io.Writer, dec sidecar.Decision, localRedaction bool, 
 // THE STRUCTURAL GUARANTEE (E6-S4/S7 carry-forward, closed here): the emitted object
 // is the ORIGINAL tool_input with the single recognized content field swapped for
 // the redacted body — every structural locator (file_path, …) is carried over from
-// the original VERBATIM, never from the sidecar. A buggy/compromised sidecar can
+// the original VERBATIM, never from the decision. A buggy/compromised detector can
 // only change a content VALUE; it can never add/drop/alter a structural field. So
 // "content-only fields, never structural" is a structural property, not a promise.
 //
 // The returned bytes are Claude Code's FULL tool_input replacement. Content-bearing
 // but LOCAL: it travels stdout → Claude Code on this machine and is NEVER egressed
 // (INV-2) — see DecisionResponse.RedactedContent.
-func applyInputRedaction(dec sidecar.Decision, localRedaction bool, origInput json.RawMessage) json.RawMessage {
+func applyInputRedaction(dec decision.Decision, localRedaction bool, origInput json.RawMessage) json.RawMessage {
 	if !localRedaction {
 		return nil
 	}
@@ -462,7 +459,7 @@ var contentFieldKeys = []string{"content", "new_string"}
 // returns nil when the original is not a JSON object or carries no recognized
 // non-empty content field (nothing safe to rewrite). This is where the content-only
 // guarantee is enforced: structural fields are copied from the ORIGINAL as opaque
-// json.RawMessage and are never sourced from the sidecar.
+// json.RawMessage and are never sourced from the decision.
 func redactToolInput(origInput json.RawMessage, redactedBody string) json.RawMessage {
 	if len(origInput) == 0 {
 		return nil
@@ -668,7 +665,7 @@ func DefaultEnforcementPath() string {
 // best-effort and OFF the blocking path: it runs after the stdout decision is
 // already written, and any failure (marshal / mkdir / open / write) is logged to
 // stderr and swallowed, never surfaced (INV-3). Content-free (INV-1/INV-2).
-func recordEnforcement(logger *log.Logger, e *HookEvent, dec sidecar.Decision, applied string) {
+func recordEnforcement(logger *log.Logger, e *HookEvent, dec decision.Decision, applied string) {
 	kind, _, _, _, _ := classifyTool(e.ToolName)
 	rec := enforcementRecord{
 		SessionID:       e.SessionID,

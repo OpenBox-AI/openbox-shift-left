@@ -1,7 +1,15 @@
 # ADR-0003: Home of the local enforcement decision sidecar
 
 ## Status
-accepted — G_ADR ratified by brian 2026-07-13 (jointly with ADR-0002).
+**superseded by [ADR-0006](ADR-0006-in-process-decision-default.md)** (brian
+2026-07-22). Originally accepted — G_ADR ratified by brian 2026-07-13 (jointly with
+ADR-0002). The Unix-socket decision daemon this ADR introduced has been removed
+entirely: the enforcement decision is now computed in-process (ADR-0006), since the
+E6-S8/ADR-0005 evaluator is pure-Go and needs no resident process. The rationale
+below (spike S2: a synchronous /evaluate is too slow, so the decision must be LOCAL)
+still holds and is inherited by ADR-0006; only the *transport* — a socket daemon vs.
+in-process evaluation — changed. Preserved as the historical record of why the
+decision is local at all.
 
 <!-- G_ADR gate (Epic E6, story E6-S5). Decision owner: brian. CLAUDE.md: "a new
 table/endpoint/service requires an ADR" — E6-S5 introduces a NEW resident

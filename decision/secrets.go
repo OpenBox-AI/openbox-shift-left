@@ -1,4 +1,4 @@
-package sidecar
+package decision
 
 import (
 	"math"
@@ -19,7 +19,7 @@ import (
 //     at package init; Redact reads no shared mutable state, so the server can call
 //     it from parallel connection handlers with no lock (INV-3b: no I/O either).
 //   - LOCAL-ONLY (INV-1/INV-2): it never logs the content or the secret, never
-//     performs I/O. Its output rides ONLY the LOCAL sidecar.Decision.RedactedContent
+//     performs I/O. Its output rides ONLY the LOCAL Decision.RedactedContent
 //     (never client.Evaluation → never egress); category names (never the secret)
 //     are the only thing that reaches the durable audit.
 //   - PLACEHOLDER = env-var ref (design §7): a secret → `${OPENBOX_REDACTED_<CAT>}`.

@@ -1,6 +1,8 @@
-package sidecar
+package decision
 
 import (
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"testing"
@@ -88,7 +90,7 @@ func TestLoadBundleFile_MissingIsNotExist(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for missing file")
 	}
-	if !isNotExist(err) {
-		t.Errorf("expected isNotExist to detect wrapped ErrNotExist, got %v", err)
+	if !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("expected LoadBundleFile to wrap fs.ErrNotExist, got %v", err)
 	}
 }

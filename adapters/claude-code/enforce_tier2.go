@@ -6,14 +6,14 @@ import (
 	"time"
 
 	"github.com/openbox-ai/openbox-shift-left/client"
-	"github.com/openbox-ai/openbox-shift-left/sidecar"
+	"github.com/openbox-ai/openbox-shift-left/decision"
 )
 
 // Tier-2 synchronous /evaluate escalation (STORY-E6-S10, Phase-2, design §7).
 //
 // The enforce gate is TIERED by risk class (design §7, ratified brian 2026-07-14):
 //
-//   - Tier 1 — the LOCAL sidecar (E6-S1..S9): in-process, ~50 ms, the only tier
+//   - Tier 1 — the LOCAL decider (E6-S1..S9): in-process, ~50 ms, the only tier
 //     allowed to block frequent low-risk edits. It enforces ONLY the policy/OPA
 //     dimension (the §2a "fidelity floor": Guardrail PII/NSFW + LLamaFirewall drift
 //     are model-backed and server-side, so a local verdict is a FLOOR — it can be
@@ -46,7 +46,7 @@ import (
 //
 // FAILURE SEMANTICS reuse E6-S3 verbatim. A T2 call that yields no real verdict
 // (transport failure, timeout, an empty/unmapped response — all folded by Emit's
-// fail-open into a VerdictUnknown Evaluation) becomes a FailOpen sidecar.Decision,
+// fail-open into a VerdictUnknown Evaluation) becomes a FailOpen decision.Decision,
 // so the UNCHANGED applyFailurePolicy proceeds (fail-open, OD9) or synthesizes a
 // HALT (fail-closed) exactly as it does for a T1 outage. This mirrors the SDK's
 // _handle_api_error (fail_open → None → proceed; fail_closed → synthetic HALT),
@@ -87,7 +87,7 @@ const defaultTier2Timeout = 3500 * time.Millisecond
 const maxTier2Timeout = 4 * time.Second
 
 // maxEnforceHookBudget caps the WHOLE enforce PreToolUse hook's wall clock (T1
-// sidecar + T2 /evaluate, which run SEQUENTIALLY) so their independently-clamped
+// decider + T2 /evaluate, which run SEQUENTIALLY) so their independently-clamped
 // budgets can never JOINTLY exceed CC's 5 s hook timeout (G3 MINOR-2). Without this,
 // an org that raises OPENBOX_ENFORCE_TIMEOUT_MS toward the 2 s T1 clamp AND enables
 // T2 could see T1(≤2 s) + T2(≤4 s) ≈ 6 s > 5 s → CC fails OPEN → a fail-closed
@@ -99,7 +99,7 @@ const maxEnforceHookBudget = 4 * time.Second
 // budget, but never more than the time REMAINING in the whole-hook wall-clock cap
 // (maxEnforceHookBudget) after the T1 gate already ran. enforceStart is the instant
 // the enforce block began. A non-positive remainder (T1 already consumed the cap —
-// only reachable with a very slow sidecar under a raised T1 clamp) yields a
+// only reachable with a very slow decider under a raised T1 clamp) yields a
 // non-positive budget, so escalateTier2 fail-opens IMMEDIATELY (fail-closed denies,
 // fail-open proceeds) rather than push the hook past the CC timeout — the safe
 // direction, by construction.
@@ -132,7 +132,7 @@ func isHighRiskClass(toolName string) bool {
 // HALT — there is nothing for T2 to add (governance only tightens; T2 cannot make
 // a block MORE restrictive), so the escalation is skipped and the T1 decision
 // stands. T2 fires ONLY when T1 would otherwise PROCEED.
-func decisionTightens(dec sidecar.Decision) bool {
+func decisionTightens(dec decision.Decision) bool {
 	d, _ := mapVerdict(dec.Evaluation)
 	return d != ""
 }
@@ -143,15 +143,15 @@ func decisionTightens(dec sidecar.Decision) bool {
 // applyFailurePolicy proceeds (fail-open, OD9) or denies (fail-closed) exactly as
 // for a T1 outage. cause is a fixed, content-free diagnostic string (INV-2), never
 // tool content — it feeds failClosedReason on the fail-closed path.
-func tier2FailOpen(cause string) sidecar.Decision {
-	return sidecar.Decision{
+func tier2FailOpen(cause string) decision.Decision {
+	return decision.Decision{
 		Evaluation: client.Evaluation{Verdict: client.VerdictUnknown, Reason: cause},
 		FailOpen:   true,
 		Source:     sourceTier2FailOpen,
 	}
 }
 
-// tier2Decision wraps a /evaluate Evaluation into a sidecar.Decision the E6-S3
+// tier2Decision wraps a /evaluate Evaluation into a decision.Decision the E6-S3
 // failure policy + E6-S2 apply cascade consume unchanged. A VerdictUnknown means
 // no real server verdict was obtained (Emit folds every transport failure/timeout/
 // empty response into VerdictUnknown, fail-open) → a fail-open decision; any real
@@ -160,11 +160,11 @@ func tier2FailOpen(cause string) sidecar.Decision {
 // (the E6-S3 crux: fail-closed engages on no-verdict only). This mirrors the local
 // Client's isRealVerdictSource discipline: an unknown verdict is "OpenBox did not
 // govern this call", not a real allow.
-func tier2Decision(eval client.Evaluation) sidecar.Decision {
+func tier2Decision(eval client.Evaluation) decision.Decision {
 	if eval.Verdict == client.VerdictUnknown {
 		return tier2FailOpen("tier-2 /evaluate returned no verdict")
 	}
-	return sidecar.Decision{Evaluation: eval, Source: sourceTier2}
+	return decision.Decision{Evaluation: eval, Source: sourceTier2}
 }
 
 // escalateTier2 performs one synchronous /evaluate escalation for a high-risk tool
@@ -186,12 +186,12 @@ func tier2Decision(eval client.Evaluation) sidecar.Decision {
 // shortly after, reaping it; the result channel is buffered so it never blocks on
 // send). The SAFE direction — a hang becomes a bounded deny (fail-closed) or a
 // bounded proceed (fail-open), never a CC-timeout fail-open.
-func escalateTier2(ctx context.Context, logger *log.Logger, m Mapper, ev *HookEvent, budget time.Duration) sidecar.Decision {
+func escalateTier2(ctx context.Context, logger *log.Logger, m Mapper, ev *HookEvent, budget time.Duration) decision.Decision {
 	cctx, cancel := context.WithTimeout(ctx, budget)
 	defer cancel()
 
 	// Buffered so an abandoned goroutine (budget-expired path) never blocks on send.
-	resultCh := make(chan sidecar.Decision, 1)
+	resultCh := make(chan decision.Decision, 1)
 	go func() { resultCh <- runTier2(cctx, logger, m, ev) }()
 
 	select {
@@ -213,7 +213,7 @@ func escalateTier2(ctx context.Context, logger *log.Logger, m Mapper, ev *HookEv
 // — Tier-2 introduces NO new egress surface (the /evaluate client strips content
 // when capture is off, exactly as on flush). The obx_ key + Ed25519 seed live only
 // inside the client (INV-1); the returned Decision carries the verdict alone.
-func runTier2(cctx context.Context, logger *log.Logger, m Mapper, ev *HookEvent) sidecar.Decision {
+func runTier2(cctx context.Context, logger *log.Logger, m Mapper, ev *HookEvent) decision.Decision {
 	devEv, ok := m.Map(HookPreToolUse, ev)
 	if !ok {
 		// Same drop condition as the observe path (missing session/DID). Nothing to

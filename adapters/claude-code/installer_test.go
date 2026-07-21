@@ -60,6 +60,69 @@ func TestInstaller_MaterializesBundleAndConfig(t *testing.T) {
 	}
 }
 
+// TestInstaller_PersistsEnforcePosture proves the ADR-0006 onboarding change: the
+// enforce posture chosen at `dev init` time (ref.Enforce/Tier2/Findings, set by
+// --enforce) is written to dev.json, so the runtime hook reads it with NO env var.
+func TestInstaller_PersistsEnforcePosture(t *testing.T) {
+	pluginDir := t.TempDir()
+	cfgPath := filepath.Join(t.TempDir(), "openbox", "dev.json")
+	inst := Installer{PluginDir: pluginDir, ConfigPath: cfgPath}
+
+	tru := true
+	ref := CredentialRef{
+		DID:               testDID,
+		SecretService:     "svc",
+		APIKeyAccount:     "k",
+		PrivateKeyAccount: "s",
+		Enforce:           true,
+		Tier2:             &tru,
+		Findings:          &tru,
+	}
+	if err := inst.Install(ref); err != nil {
+		t.Fatalf("install: %v", err)
+	}
+
+	raw, err := os.ReadFile(cfgPath)
+	if err != nil {
+		t.Fatalf("read config: %v", err)
+	}
+	var cfg DevConfig
+	if err := json.Unmarshal(raw, &cfg); err != nil {
+		t.Fatalf("parse config: %v", err)
+	}
+	if !cfg.Enforce {
+		t.Error("enforce not persisted to dev.json")
+	}
+	if cfg.Tier2 == nil || !*cfg.Tier2 {
+		t.Errorf("tier2 not persisted: %+v", cfg.Tier2)
+	}
+	if cfg.Findings == nil || !*cfg.Findings {
+		t.Errorf("findings not persisted: %+v", cfg.Findings)
+	}
+
+	// The runtime resolvers must read the persisted posture with NO env override
+	// (OPENBOX_ENFORCE etc. unset) — the whole point of ADR-0006. Point the config
+	// loader at the file just written and ensure the env overrides are truly absent
+	// (LookupEnv must report !ok, so config wins).
+	t.Setenv(envConfigPath, cfgPath)
+	for _, k := range []string{envEnforce, envTier2, envFindings} {
+		if _, ok := os.LookupEnv(k); ok {
+			orig := os.Getenv(k)
+			os.Unsetenv(k)
+			t.Cleanup(func() { os.Setenv(k, orig) })
+		}
+	}
+	if !ResolveEnforce() {
+		t.Error("ResolveEnforce() = false; expected the persisted enforce posture to win with no env override")
+	}
+	if !ResolveTier2() {
+		t.Error("ResolveTier2() = false; expected persisted tier2")
+	}
+	if !ResolveFindings() {
+		t.Error("ResolveFindings() = false; expected persisted findings")
+	}
+}
+
 func TestInstaller_Plan(t *testing.T) {
 	inst := Installer{PluginDir: "/x/plugins", ConfigPath: "/x/dev.json"}
 	plan := inst.Plan(CredentialRef{DID: testDID, SecretService: "svc", APIKeyAccount: "k", PrivateKeyAccount: "s"})

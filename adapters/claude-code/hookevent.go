@@ -131,9 +131,9 @@ func (e *HookEvent) filePath() string {
 // command extracts the shell command string from a Bash tool_input.
 //
 // LOCAL-ONLY (INV-2): this is used SOLELY to populate the enforce-mode
-// sidecar.DecisionRequest, which is sent over the local Unix socket to the
-// resident daemon and evaluated ON THIS MACHINE — it never egresses to core and
-// is never logged. It is the axis a local policy matches a dangerous command on
+// decision.DecisionRequest, which is evaluated IN-PROCESS ON THIS MACHINE — it
+// never egresses to core and is never logged. It is the axis a local policy
+// matches a dangerous command on
 // (the canonical `rm -rf …` rule), analogous to the SDK sending activity_input to
 // its own governance gate. The OBSERVE/telemetry egress path (Mapper) still never
 // decodes the command, so the metadata-only-on-the-wire posture is unchanged; the
@@ -159,11 +159,11 @@ func (e *HookEvent) command() string {
 // direction, since a missing body just means nothing local to redact.)
 //
 // LOCAL-ONLY (INV-2), and STRICTER than command(): it is read SOLELY to populate
-// the enforce-mode sidecar.DecisionRequest.Content when the org opted into content
+// the enforce-mode decision.DecisionRequest.Content when the org opted into content
 // capture (ResolveContentCapture / OD4), so a redaction-capable local evaluator has
 // the body to redact (STORY-E6-S4) — the analog of the reference SDK sending the
-// full activity_input to its gate. It is sent ONLY over the local Unix socket to
-// the resident daemon and is NEVER egressed to core and NEVER logged; the
+// full activity_input to its gate. It is passed IN-PROCESS to the decider and is
+// NEVER egressed to core and NEVER logged; the
 // OBSERVE/telemetry egress path (Mapper) still never decodes it, so the
 // metadata-only-on-the-wire posture is unchanged. Returns "" for a non-file tool,
 // an absent/unparsable body, or (via the caller's gate) when content capture is off.

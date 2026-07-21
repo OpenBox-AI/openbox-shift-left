@@ -66,6 +66,19 @@ type CredentialRef struct {
 	// the core data-plane base). Persisted so `dev sync` / staleness can reach the
 	// policy read endpoint without re-supplying OPENBOX_BACKEND_URL. Non-secret.
 	BackendURL string
+	// Enforce / Tier2 / Findings persist the enforce-mode posture chosen at
+	// `openbox dev init` time (via --enforce and its granular siblings) INTO the
+	// dev config, so the runtime hook reads them from dev.json and needs NO runtime
+	// environment variable (ADR-0006 onboarding simplification). All default false
+	// (observe-only) — enforcement stays opt-in (unchanged posture). *bool where an
+	// absent field must mean "adapter default" rather than "off":
+	//   - Enforce: plain bool — absent ⇒ observe (the whole product default).
+	//   - Tier2 / Findings: *bool — nil ⇒ their own adapter defaults (both OFF), so
+	//     `dev init` without --enforce does not pin them and override a future
+	//     default change.
+	Enforce  bool
+	Tier2    *bool
+	Findings *bool
 }
 
 // Installer writes one tool's native config, delegated from `dev init`.

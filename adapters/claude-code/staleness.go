@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"github.com/openbox-ai/openbox-shift-left/client"
-	"github.com/openbox-ai/openbox-shift-left/sidecar"
+	"github.com/openbox-ai/openbox-shift-left/decision"
 )
 
 // Session-start policy staleness (STORY-E6-S8, ADR-0005 §Decision-3).
@@ -93,7 +93,7 @@ func checkPolicyStaleness(logger *log.Logger, sessionID string, stdout interface
 // file. A missing/malformed/pinless bundle yields havePin=false (can't
 // determine → proceed). No secret I/O.
 func localBundlePin() (policyID, updatedAt string, havePin bool) {
-	b, err := sidecar.LoadBundleFile(ResolveBundlePath())
+	b, err := decision.LoadBundleFile(ResolveBundlePath())
 	if err != nil || b == nil {
 		return "", "", false
 	}
@@ -270,11 +270,11 @@ func ClearAllStaleMarkers() error {
 // It denies ONLY under fail-closed: fail-open never denies on staleness (it warned
 // at SessionStart and proceeds stale). Returns (_, false) → the normal enforce
 // path runs.
-func staleGateDecision(sessionID string) (sidecar.Decision, bool) {
+func staleGateDecision(sessionID string) (decision.Decision, bool) {
 	if resolveFailurePolicy() != FailClosed || !sessionIsStale(sessionID) {
-		return sidecar.Decision{}, false
+		return decision.Decision{}, false
 	}
-	return sidecar.Decision{
+	return decision.Decision{
 		Evaluation: client.Evaluation{
 			Verdict: client.VerdictHalt,
 			Reason:  "stale policy — run `openbox dev sync` to refresh the enforcement bundle",

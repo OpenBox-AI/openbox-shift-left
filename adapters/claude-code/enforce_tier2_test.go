@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"github.com/openbox-ai/openbox-shift-left/client"
-	"github.com/openbox-ai/openbox-shift-left/sidecar"
+	"github.com/openbox-ai/openbox-shift-left/decision"
 )
 
 // testTier2Key is an obx_ runtime key shape the client accepts (non-empty); the
@@ -42,18 +42,18 @@ func TestIsHighRiskClass(t *testing.T) {
 func TestDecisionTightens(t *testing.T) {
 	tighten := []client.Verdict{client.VerdictHalt, client.VerdictBlock, client.VerdictRequireApproval}
 	for _, v := range tighten {
-		if !decisionTightens(sidecar.Decision{Evaluation: client.Evaluation{Verdict: v}}) {
+		if !decisionTightens(decision.Decision{Evaluation: client.Evaluation{Verdict: v}}) {
 			t.Errorf("decisionTightens(%s) = false, want true", v)
 		}
 	}
 	proceed := []client.Verdict{client.VerdictAllow, client.VerdictConstrain, client.VerdictUnknown}
 	for _, v := range proceed {
-		if decisionTightens(sidecar.Decision{Evaluation: client.Evaluation{Verdict: v}}) {
+		if decisionTightens(decision.Decision{Evaluation: client.Evaluation{Verdict: v}}) {
 			t.Errorf("decisionTightens(%s) = true, want false", v)
 		}
 	}
 	// A failed guardrail tightens (deny) regardless of a non-block verdict.
-	gf := sidecar.Decision{Evaluation: client.Evaluation{
+	gf := decision.Decision{Evaluation: client.Evaluation{
 		Verdict:   client.VerdictAllow,
 		Guardrail: &client.GuardrailResult{Passed: false, Reasons: []client.GuardrailReason{{Type: "pii"}}},
 	}}
@@ -338,8 +338,7 @@ func TestEnforcementConformance_Tier2(t *testing.T) {
 	// allowT1 serves a reachable, bundled sidecar whose default is allow, so T1 always
 	// proceeds and the escalation decision is entirely T2's.
 	allowT1 := func(t *testing.T) {
-		socket, _ := serveSidecar(t, &sidecar.Bundle{Version: "t2-allow", DefaultDecision: "allow"})
-		t.Setenv(envSidecarSocket, socket)
+		setBundleEnv(t, &decision.Bundle{Version: "t2-allow", DefaultDecision: "allow"})
 	}
 
 	t.Run("C12 T1 allow + T2 BLOCK on Bash → deny (floor closed)", func(t *testing.T) {
@@ -441,8 +440,7 @@ func TestEnforcementConformance_Tier2(t *testing.T) {
 	t.Run("C17 T1 already denies → T2 short-circuited (no /evaluate)", func(t *testing.T) {
 		// A T1 BLOCK bundle denies the rm -rf; T2 must not fire (governance only
 		// tightens — there is nothing for T2 to add to a block).
-		socket, _ := serveSidecar(t, blockRuleBundle())
-		t.Setenv(envSidecarSocket, socket)
+		setBundleEnv(t, blockRuleBundle())
 		url, hits := serveEvaluate(t, `{"verdict":"allow"}`, 200, 0)
 		tier2Creds(t, url)
 		t.Setenv(envTier2, "1")

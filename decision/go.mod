@@ -1,4 +1,4 @@
-module github.com/openbox-ai/openbox-shift-left/sidecar
+module github.com/openbox-ai/openbox-shift-left/decision
 
 go 1.23
 

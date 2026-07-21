@@ -27,27 +27,26 @@ Developers onboard through a single front door — `openbox dev init --provider 
 
 ## Install
 
-Two steps: get the `openbox` engine on your PATH, then wire it into your coding tool.
+Two steps, then it's ambient. Full walkthrough in **[QUICKSTART.md](QUICKSTART.md)**.
 
-**1. Install the binary** (builds the single static, no-cgo engine from source):
+**1. Install the binary** (prebuilt; no toolchain needed):
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/OpenBox-AI/openbox-shift-left/main/install.sh | bash
 ```
 
-The [`install.sh`](install.sh) bootstrap checks for a Go 1.23+ toolchain and `git`, clones the source, builds `openbox` from `cli/cmd/openbox`, and installs it to `~/.local/bin` (override with `OPENBOX_INSTALL_DIR`). Building from source is required because the `cli` module uses relative `replace` directives that `go install …@latest` cannot resolve. It does **not** touch your OpenBox account. Tunables: `OPENBOX_INSTALL_DIR`, `OPENBOX_REF`, `OPENBOX_REPO_URL`, `OPENBOX_SRC` (build from an existing checkout instead of cloning).
+The [`install.sh`](install.sh) bootstrap detects your OS/CPU (linux/macOS, amd64/arm64), downloads the matching prebuilt `openbox` engine from GitHub Releases, verifies its sha256 against the release `checksums.txt`, and installs it to `~/.local/bin` (override with `OPENBOX_INSTALL_DIR`). No Go toolchain required. If no prebuilt asset matches your platform (or you set `OPENBOX_FROM_SOURCE=1`), it **falls back** to building the single static, no-cgo engine from source, which then needs Go 1.23+ and `git`. It does **not** touch your OpenBox account. Tunables: `OPENBOX_INSTALL_DIR`, `OPENBOX_VERSION`, `OPENBOX_FROM_SOURCE`, `OPENBOX_SRC` (build from an existing checkout).
 
 > Prefer not to pipe to a shell? Clone the repo and run `bash install.sh`, or build directly with `cd cli && go build -o openbox ./cmd/openbox`.
 
-**2. Wire OpenBox into Claude Code** (the interactive step — mints credentials and installs the plugin):
+**2. Wire OpenBox into Claude Code** (one command — mints credentials, installs the plugin, pulls policy):
 
 ```bash
-export OPENBOX_BACKEND_URL=https://<your-openbox-backend>
 export OPENBOX_CONTROL_TOKEN=<keycloak-jwt-or-obx_key_…>   # never a flag (INV-1)
-openbox dev init --provider claude-code
+openbox dev init --provider claude-code --backend-url https://<your-openbox-backend> --enforce
 ```
 
-This registers a `developer` agent, stores its `obx_` key + Ed25519 seed in your OS secret store, and materializes the Claude Code plugin into `~/.claude/plugins/openbox-observe` (copying this same engine into its `bin/`). Governance is ambient thereafter. Preview it first with `--dry-run`; confirm the data-plane round-trip with `openbox dev verify`.
+This registers a `developer` agent, stores its `obx_` key + Ed25519 seed in your OS secret store, materializes the Claude Code plugin into `~/.claude/plugins/openbox-observe` (copying this same engine into its `bin/`), and pulls your org policy. Governance is **ambient** thereafter — **no daemon to run and no runtime environment variables to set**. Drop `--enforce` for observe-only; with it, the PreToolUse hook blocks/asks/redacts **in-process** (ADR-0006), so there is nothing extra to start. `OPENBOX_CONTROL_TOKEN` + the backend URL are needed only at this step. Preview first with `--dry-run`; confirm the data-plane round-trip with `openbox dev verify`.
 
 ### Status: observe-first shipped; enforcement (Phase 2) shipped as opt-in
 
@@ -55,7 +54,7 @@ This registers a `developer` agent, stores its `obx_` key + Ed25519 seed in your
 
 > ⚠️ **Privacy note:** when capture is on, redaction-at-source (the Guardrail API) is **not yet wired** (`[EXT-guardrail-redaction]`), so **prompt content egresses unredacted**. Opt out if that is not acceptable for your org. Regardless of the toggle, tool **commands**, file **bodies**, and tool **output** are **never** egressed on observe events (SL3-SEC-3, asserted by `TestMap_NoContentLeak`) — only the prompt is gated by content-capture.
 
-Claude Code is the first adapter; Codex and Cursor are fast-follows. Policy **enforcement** (deny/ask/rewrite, fail-closed) is built as opt-in Phase-2 (Epic E6; `OPENBOX_ENFORCE=1`, default observe).
+Claude Code is the first adapter; Codex and Cursor are fast-follows. Policy **enforcement** (deny/ask/rewrite, fail-closed) is opt-in Phase-2 (Epic E6): enable it at onboarding with `openbox dev init … --enforce` (persisted to `dev.json`; default observe). Enforcement decisions are evaluated **in-process** by the hook — there is **no sidecar daemon and no socket** (ADR-0006 removed them entirely). `OPENBOX_ENFORCE=1` still works as a per-session override.
 
 ## Provider support
 
