@@ -40,3 +40,7 @@ This drops the prebuilt `openbox` engine on your PATH. Then onboard with a singl
 | **Cursor** | poll (Admin API) + hooks | beta, fail-open | ❌ Agent egress not interceptable | Team hooks |
 
 Two capabilities are provider-independent and always available — OpenBox registration and git-trailer commit-binding — so session → commit → deploy lineage and finops work for any tool.
+
+## License
+
+[Apache License 2.0](LICENSE).
