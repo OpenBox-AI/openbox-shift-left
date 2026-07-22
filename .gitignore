@@ -17,3 +17,6 @@ bin/
 .env
 .env.*
 !.env.example
+
+# Dev
+.fab7/

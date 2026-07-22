@@ -53,15 +53,13 @@ openbox dev verify        # → ✓ verified: did:aip:… @ https://…
 
 ---
 
-### What you do NOT need (vs. the old flow)
+### No moving parts
 
-| Old step | Now |
-|---|---|
-| Start `openbox sidecar serve` in a second terminal | **Gone** — there is no sidecar; the hook decides in-process (ADR-0006) |
-| `export OPENBOX_ENFORCE=1 OPENBOX_TIER2=1 OPENBOX_FINDINGS=1 …` | **Gone** — persisted by `dev init --enforce` |
-| `export OPENBOX_SIDECAR_SOCKET=…` | **Gone** — no socket exists |
-| `openbox dev sync` before running | **Gone** — `dev init` pulls policy; sessions re-check staleness |
-| Install a Go toolchain to `curl \| bash` | **Gone** — prebuilt binary (source build only as a fallback) |
+After `dev init` there is nothing to keep running or exporting:
+
+- **No daemon** — enforcement is evaluated in-process by the hook (ADR-0006).
+- **No runtime env vars** — your posture lives in `~/.config/openbox/dev.json`.
+- **No manual policy sync** — `dev init` pulls the policy; each session re-checks staleness.
 
 ### Turning enforcement off / on later
 

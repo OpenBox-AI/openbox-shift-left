@@ -6,6 +6,11 @@ Claude Code session events + git commit→deploy lineage, observe them stored in
 real openbox-core, and **view them in the openbox-fe developer dashboard**. Every
 step here was executed and verified on Linux.
 
+> **This is the contributor runbook** for standing up the whole stack from source
+> against a local (or hybrid) backend. If you just want to govern your own Claude
+> Code sessions against an existing OpenBox, use **[QUICKSTART.md](QUICKSTART.md)**
+> instead (`curl | bash` → `openbox dev init`).
+
 Three paths, pick your depth:
 - **Path A — core only (§2–§4):** register → emit → verify with `psql`. No Keycloak/FE.
 - **Path B — full dashboard (§5):** adds a **local** Keycloak + `openbox-fe` so you
@@ -14,9 +19,12 @@ Three paths, pick your depth:
   Guardrail, and OPA point at a shared UAT env over VPN**. Fastest inner loop —
   no local Keycloak realm bootstrap, log in as your real UAT identity. Builds on A+B.
 
-> **Posture:** observe-first + opt-in enforce (Epic E6, `OPENBOX_ENFORCE=1`;
-> default observe, fail-open — never blocks a tool call or a commit). **Content
-> capture is ON by default as of 2026-07-15**: the session **prompt** is captured
+> **Posture:** observe-first + opt-in enforce (Epic E6). Enable enforce at onboarding
+> with `openbox dev init … --enforce` (persisted to `dev.json`) or per-session with
+> `OPENBOX_ENFORCE=1`; default is observe, fail-open — never blocks a tool call or a
+> commit. Enforcement is evaluated **in-process** by the hook — no daemon, no socket
+> (ADR-0006). **Content capture is ON by default as of 2026-07-15**: the session
+> **prompt** is captured
 > and egressed **unredacted** (redaction-at-source is inert, `[EXT-guardrail-redaction]`).
 > Opt out with `content_capture:false` in `dev.json` or `OPENBOX_CONTENT_CAPTURE=0`
 > to restore metadata-only. Tool commands, file bodies, and output are **never**
