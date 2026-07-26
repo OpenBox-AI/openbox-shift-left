@@ -27,6 +27,15 @@ import (
 const (
 	EnvSession     = "OPENBOX_SESSION"
 	EnvSessionFile = "OPENBOX_SESSION_FILE"
+
+	// EnvCodexThreadID is the session (≡ thread) id Codex itself injects into
+	// EVERY tool/shell exec environment (codex-rs core/src/exec_env.rs @
+	// rust-v0.145.0; spike S5 2026-07-23 addendum #2) — so a Codex-run
+	// `git commit` sees it in the git-hook env with no liveness registry at
+	// all. STORY-SL7-A AC-8: it is the HIGHEST-precedence source — the tool
+	// itself asserting "this exec belongs to session X" outranks both the
+	// operator override and registry recency. There is no CODEX_SESSION_ID.
+	EnvCodexThreadID = "CODEX_THREAD_ID"
 )
 
 // SessionResolver reads the session id(s) in scope for a commit. Every external
@@ -90,8 +99,32 @@ func (r SessionResolver) ttl() time.Duration {
 
 // Resolve returns the session id(s) to attribute a commit in worktree to.
 // worktree is the commit's git top-level ("" if it could not be determined —
-// then only the explicit-override tier applies).
+// then only the env-based tiers apply).
 func (r SessionResolver) Resolve(worktree string) []string {
+	// Tier 0 (STORY-SL7-A, additive): the provider-injected CODEX_THREAD_ID.
+	// Codex stamps it into the exec env of the very process running `git
+	// commit`, so it is authoritative for THIS commit — highest precedence.
+	// Validation (length/newline/secret-shape) still happens at the trailer
+	// sink (validateSessionID), same as every other tier. A Claude Code
+	// session never SETS this var, so the CC resolution below is untouched.
+	//
+	// Known, ACCEPTED edges (G3 SL7-A F-3 — documented for SL7-A, revisit at
+	// SL7-B), both consequences of "highest precedence" being env-carried:
+	//   - INHERITANCE: any process LAUNCHED FROM WITHIN a Codex exec (a nested
+	//     agent session, a long-lived shell) inherits the var, so its commits
+	//     attribute to the enclosing Codex thread rather than to the inner
+	//     session / registry tier — and Tier-0 outranks even an explicit
+	//     OPENBOX_SESSION set inside that environment. Arguably transitively
+	//     correct; the SL-15 OwnershipVerifier still downgrades a claim the
+	//     server can't bind to the caller.
+	//   - SUPPRESSION: a present-but-garbage value wins Tier-0 here and is then
+	//     dropped by the sink's validation, with NO fallback to the remaining
+	//     tiers — the commit lands unattributed rather than mis-guessed
+	//     (INV-6-safe, but an env-writing process can exploit it to suppress
+	//     attribution; G_SEC SL7-A F5).
+	if id := strings.TrimSpace(r.getenv(EnvCodexThreadID)); id != "" {
+		return []string{id}
+	}
 	// Tier 1: explicit override (env / file). Wins outright, supports fan-in.
 	if env := r.envSessions(); len(env) > 0 {
 		return env

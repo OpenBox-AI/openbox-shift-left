@@ -21,6 +21,7 @@ import (
 	"path/filepath"
 
 	claudecode "github.com/openbox-ai/openbox-shift-left/adapters/claude-code"
+	codex "github.com/openbox-ai/openbox-shift-left/adapters/codex"
 	obgit "github.com/openbox-ai/openbox-shift-left/adapters/common/git"
 	"github.com/openbox-ai/openbox-shift-left/cli/internal/backend"
 	"github.com/openbox-ai/openbox-shift-left/cli/internal/devinit"
@@ -390,7 +391,7 @@ func (a *app) runHook(args []string) (code int) {
 	defer func() { _ = recover() }()
 	logger := log.New(a.stderr, "openbox hook: ", 0)
 	if len(args) < 1 {
-		logger.Printf("usage: openbox hook <provider> <event...>  (providers: claude-code, git)")
+		logger.Printf("usage: openbox hook <provider> <event...>  (providers: claude-code, codex, git)")
 		return exitOK
 	}
 	switch args[0] {
@@ -400,12 +401,21 @@ func (a *app) runHook(args []string) (code int) {
 			return exitOK
 		}
 		claudecode.RunHook(args[1], a.stdin, a.stdout, logger)
+	case "codex":
+		// STORY-SL7-A: the Codex observe engine — identical safety contract
+		// (recover-all, diagnostics to stderr, caller exits 0 always; this leg
+		// never writes stdout — Codex parses hook stdout as output JSON).
+		if len(args) < 2 {
+			logger.Printf("usage: openbox hook codex <event>")
+			return exitOK
+		}
+		codex.RunHook(args[1], a.stdin, a.stdout, logger)
 	case "git":
 		// The git hook re-invokes THIS binary as `openbox hook git prepare-commit-msg`
 		// (STORY-SL4-WIRE-2 / OD17 — folds the standalone openbox-git-hook in).
 		obgit.RunHook(args[1:], []string{"hook", "git", "prepare-commit-msg"}, logger.Printf)
 	default:
-		logger.Printf("unknown hook provider %q (supported: claude-code, git)", args[0])
+		logger.Printf("unknown hook provider %q (supported: claude-code, codex, git)", args[0])
 	}
 	return exitOK
 }
@@ -510,6 +520,14 @@ func (a *app) runDevInit(args []string) int {
 	}
 	if runErr != nil {
 		return a.errorf("%v", runErr)
+	}
+
+	// STORY-SL7-A (AC-2): Codex hash-trusts non-managed hooks — until the user
+	// trusts the freshly-written entries via /hooks inside Codex, they do not
+	// run. Surface that as the explicit next step (re-install re-hashes, so it
+	// applies to re-inits too).
+	if o.Provider == "codex" && res != nil && res.ConfigApplied {
+		fmt.Fprintln(a.stdout, "Next step: open Codex and run /hooks to review and TRUST the new OpenBox hooks — they do not run until trusted (Codex hash-trusts non-managed hooks; re-running dev init re-hashes them).")
 	}
 
 	// STORY-E6-S8: `dev init`'s last step best-effort pulls the agent's current

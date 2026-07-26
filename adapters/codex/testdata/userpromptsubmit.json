@@ -1,0 +1,10 @@
+{
+  "hook_event_name": "UserPromptSubmit",
+  "session_id": "0195c7e4-1111-7000-8000-000000000001",
+  "turn_id": "turn-1",
+  "cwd": "/work/repo",
+  "model": "gpt-5.3-codex",
+  "permission_mode": "default",
+  "prompt": "add a health endpoint to the api service",
+  "transcript_path": null
+}

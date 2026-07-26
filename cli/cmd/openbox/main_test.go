@@ -117,9 +117,9 @@ func TestFileBackendSelectedByFlag(t *testing.T) {
 	a.newRegistrar = func(_, _, _ string) devinit.Registrar {
 		return &fakeReg{reg: &backend.Registration{AgentID: "a", DID: "did:aip:x", APIKey: "obx_test_k", PrivateKey: "seed"}}
 	}
-	// codex is still a stub (SL-7 unbuilt), so this exercises the file-backend
-	// gate without materializing the real claude-code bundle into $HOME.
-	code := a.run([]string{"dev", "init", "--provider", "codex", "--org", "acme", "--secret-backend", "file"})
+	// cursor is still a stub (SL-8 unbuilt), so this exercises the file-backend
+	// gate without materializing a real adapter's config into $HOME.
+	code := a.run([]string{"dev", "init", "--provider", "cursor", "--org", "acme", "--secret-backend", "file"})
 	if gotKind != "file" {
 		t.Fatalf("openStore kind = %q, want file", gotKind)
 	}
@@ -138,8 +138,8 @@ func TestConfigManualOnlyExitsTwo(t *testing.T) {
 	a.newRegistrar = func(_, _, _ string) devinit.Registrar {
 		return &fakeReg{reg: &backend.Registration{AgentID: "a", DID: "did:aip:x", APIKey: "obx_test_k", PrivateKey: "seed"}}
 	}
-	// codex adapter is not built -> registered but config-manual -> exit 2.
-	code := a.run([]string{"dev", "init", "--provider", "codex", "--org", "acme"})
+	// cursor adapter is not built -> registered but config-manual -> exit 2.
+	code := a.run([]string{"dev", "init", "--provider", "cursor", "--org", "acme"})
 	if code != exitConfigOnly {
 		t.Fatalf("exit = %d, want %d", code, exitConfigOnly)
 	}
@@ -881,4 +881,219 @@ func TestDevInit_PersistsAgentIDAndBackendURL(t *testing.T) {
 		t.Fatalf("re-init exit = %d; stderr=%q", code, errb2.String())
 	}
 	assertPersisted("after re-init")
+}
+
+// --- STORY-SL7-A: unified `openbox hook codex <event>` + real codex installer ---
+
+// setCodexHookEnv isolates the codex hook engine from the real machine —
+// spool, dev.json, CODEX_HOME, and every default-real-path sink (G_SEC SL7-A
+// F3: hermeticity must be structural, never dependent on a mock's verdict
+// values keeping a sink un-written). Returns the spool dir.
+func setCodexHookEnv(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	spool := filepath.Join(dir, "spool")
+	t.Setenv("OPENBOX_AGENT_DID", "did:aip:7f3c9b2e-0000-5000-a000-000000000001")
+	t.Setenv("OPENBOX_SPOOL_DIR", spool)
+	t.Setenv("OPENBOX_CONFIG", filepath.Join(dir, "none.json"))
+	t.Setenv("CODEX_HOME", filepath.Join(dir, "codex-home"))
+	t.Setenv("OPENBOX_ADVISORY_FILE", filepath.Join(dir, "advisories.jsonl"))
+	t.Setenv("OPENBOX_FINDINGS_CURSOR", filepath.Join(dir, "findings.cursor"))
+	t.Setenv("OPENBOX_ENFORCEMENT_FILE", filepath.Join(dir, "enforcements.jsonl"))
+	return spool
+}
+
+// TestCodexHookIsObserveOnlyInProcess mirrors the claude-code routing test for
+// the new provider: exit 0, EMPTY stdout (Codex parses hook stdout as output
+// JSON), event spooled, no tool_input content in the spool (SL3-SEC-3).
+func TestCodexHookIsObserveOnlyInProcess(t *testing.T) {
+	spool := setCodexHookEnv(t)
+	a, out, errb := testApp(nil)
+	secret := "TOP-SECRET-do-not-egress"
+	a.stdin = strings.NewReader(`{"hook_event_name":"PreToolUse","session_id":"th-1","cwd":"/r","tool_name":"Bash","tool_use_id":"call-1","tool_input":{"command":"` + secret + `"}}`)
+
+	code := a.run([]string{"hook", "codex", "PreToolUse"})
+	if code != exitOK {
+		t.Fatalf("hook exit = %d, want 0; stderr=%q", code, errb.String())
+	}
+	if out.Len() != 0 {
+		t.Fatalf("stdout must be empty (Codex hook-output parser / no block), got %q", out.String())
+	}
+	raw, _ := os.ReadFile(filepath.Join(spool, onlySpoolFile(t, spool)))
+	if !strings.Contains(string(raw), "ToolCall") {
+		t.Errorf("spooled event should be a ToolCall: %s", raw)
+	}
+	if strings.Contains(string(raw), secret) {
+		t.Fatalf("command content leaked into the spool: %s", raw)
+	}
+}
+
+// TestCodexHookMisuseIsSafe: bad/missing event still exits 0 with empty stdout.
+func TestCodexHookMisuseIsSafe(t *testing.T) {
+	setCodexHookEnv(t)
+	for _, args := range [][]string{
+		{"hook", "codex"},
+		{"hook", "codex", "Stop"}, // real Codex event, deliberately unwired
+	} {
+		a, out, _ := testApp(nil)
+		a.stdin = strings.NewReader("")
+		if code := a.run(args); code != exitOK {
+			t.Errorf("%v exit = %d, want 0", args, code)
+		}
+		if out.Len() != 0 {
+			t.Errorf("%v wrote to stdout: %q", args, out.String())
+		}
+	}
+}
+
+// TestCodexUnifiedBinaryObserveE2E is the story's real-binary observe E2E
+// (AC-10): build the actual `openbox` binary and drive ALL FIVE wired events
+// through `openbox hook codex <event>` with the v0.145.0-shaped fixture
+// payloads from adapters/codex/testdata. Every invocation must exit 0 with
+// EMPTY stdout; the tool hooks spool; no tool content ever reaches the spool;
+// SessionEnd attempts the flush fail-open (no core configured → events remain
+// spooled, exit still 0).
+func TestCodexUnifiedBinaryObserveE2E(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a binary; skipped in -short")
+	}
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "openbox")
+	if out, err := exec.Command("go", "build", "-o", bin, ".").CombinedOutput(); err != nil {
+		t.Fatalf("build openbox: %v\n%s", err, out)
+	}
+	spool := filepath.Join(dir, "spool")
+	fixtures := filepath.Join("..", "..", "..", "adapters", "codex", "testdata")
+	env := append(os.Environ(),
+		"OPENBOX_AGENT_DID=did:aip:7f3c9b2e-0000-5000-a000-000000000001",
+		"OPENBOX_SPOOL_DIR="+spool,
+		"OPENBOX_CONFIG="+filepath.Join(dir, "none.json"),
+		"CODEX_HOME="+filepath.Join(dir, "codex-home"),
+		// G_SEC SL7-A F3: pin every default-real-path sink for the subprocess too.
+		"OPENBOX_ADVISORY_FILE="+filepath.Join(dir, "advisories.jsonl"),
+		"OPENBOX_FINDINGS_CURSOR="+filepath.Join(dir, "findings.cursor"),
+		"OPENBOX_ENFORCEMENT_FILE="+filepath.Join(dir, "enforcements.jsonl"),
+	)
+
+	for _, e := range []struct{ hook, fixture string }{
+		{"SessionStart", "sessionstart.json"},
+		{"UserPromptSubmit", "userpromptsubmit.json"},
+		{"PreToolUse", "pretooluse.json"},
+		{"PostToolUse", "posttooluse.json"},
+		{"SessionEnd", "sessionend.json"},
+	} {
+		payload, err := os.ReadFile(filepath.Join(fixtures, e.fixture))
+		if err != nil {
+			t.Fatalf("fixture %s: %v", e.fixture, err)
+		}
+		cmd := exec.Command(bin, "hook", "codex", e.hook)
+		cmd.Stdin = bytes.NewReader(payload)
+		cmd.Env = env
+		var stdout, stderr strings.Builder
+		cmd.Stdout, cmd.Stderr = &stdout, &stderr
+		if err := cmd.Run(); err != nil {
+			t.Fatalf("%s must exit 0 (observe-only), got %v\nstderr: %s", e.hook, err, stderr.String())
+		}
+		if stdout.Len() != 0 {
+			t.Fatalf("%s stdout must be EMPTY, got %q", e.hook, stdout.String())
+		}
+	}
+
+	// All five events spooled (offline flush is fail-open, so they remain), and
+	// the fixtures' tool command / tool output never reached the spool.
+	spoolFile := onlySpoolFile(t, spool)
+	raw, _ := os.ReadFile(filepath.Join(spool, spoolFile))
+	for _, wantType := range []string{"SessionStarted", "PromptSubmitted", "ToolCall", "ToolResult", "SessionEnded"} {
+		if !strings.Contains(string(raw), wantType) {
+			t.Errorf("spool missing a %s event:\n%s", wantType, raw)
+		}
+	}
+	for _, secret := range []string{"go test ./...", "0.412s"} {
+		if strings.Contains(string(raw), secret) {
+			t.Fatalf("tool content leaked into the spool: %s", raw)
+		}
+	}
+}
+
+// TestCodexInstallsForRealExitsZero proves the STORY-SL7-A registry swap
+// through the real `dev init` front door: the CLI registers the real
+// codex.Installer, so `dev init --provider codex` writes hooks.json (under the
+// redirected CODEX_HOME) + the dev config, surfaces the /hooks trust step, and
+// exits 0. INV-1: neither file carries a secret; hooks.json carries the engine
+// path + event names only.
+func TestCodexInstallsForRealExitsZero(t *testing.T) {
+	codexHome := filepath.Join(t.TempDir(), "codex-home")
+	cfgPath := filepath.Join(t.TempDir(), "openbox", "dev.json")
+	t.Setenv("CODEX_HOME", codexHome)
+	t.Setenv("OPENBOX_CONFIG", cfgPath)
+
+	a, out, errb := testApp(map[string]string{"OPENBOX_CONTROL_TOKEN": "obx_key_x", "OPENBOX_BACKEND_URL": "https://x"})
+	store := secret.NewMemStore()
+	a.openStore = func(string) (secret.Store, error) { return store, nil }
+	a.newRegistrar = func(_, _, _ string) devinit.Registrar {
+		return &fakeReg{reg: &backend.Registration{AgentID: "a", DID: "did:aip:x", APIKey: "obx_test_k", PrivateKey: "c2VlZA=="}}
+	}
+
+	code := a.run([]string{"dev", "init", "--provider", "codex", "--org", "acme"})
+	if code != exitOK {
+		t.Fatalf("exit = %d, want %d; stderr=%q", code, exitOK, errb.String())
+	}
+	if !strings.Contains(out.String(), "Wrote codex native config") {
+		t.Errorf("expected a config-applied message, got %q", out.String())
+	}
+	// AC-2: the output tells the user to trust the hooks via /hooks in Codex.
+	if !strings.Contains(out.String(), "/hooks") {
+		t.Errorf("expected the /hooks trust step in the output, got %q", out.String())
+	}
+
+	rawHooks, err := os.ReadFile(filepath.Join(codexHome, "hooks.json"))
+	if err != nil {
+		t.Fatalf("hooks.json not written under CODEX_HOME: %v", err)
+	}
+	// The five wired events, invoking THIS engine (os.Executable() → the test
+	// binary path) as `hook codex <event>`.
+	for _, ev := range []string{"SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "SessionEnd"} {
+		if !strings.Contains(string(rawHooks), "hook codex "+ev) {
+			t.Errorf("hooks.json missing the %s entry:\n%s", ev, rawHooks)
+		}
+	}
+	// INV-1: hooks.json carries no secret, DID, or URL.
+	for _, banned := range []string{"obx_", "did:aip:x", "https://x"} {
+		if strings.Contains(string(rawHooks), banned) {
+			t.Errorf("hooks.json must not carry %q:\n%s", banned, rawHooks)
+		}
+	}
+	rawCfg, _ := os.ReadFile(cfgPath)
+	if strings.Contains(string(rawCfg), "obx_test_k") || strings.Contains(string(rawCfg), "c2VlZA==") {
+		t.Errorf("dev config leaked a secret value:\n%s", rawCfg)
+	}
+	if store.Len() != 3 {
+		t.Errorf("stored %d secrets, want 3", store.Len())
+	}
+}
+
+// A codex --dry-run renders the real installer's plan (incl. the trust step)
+// but writes NOTHING — no hooks.json under CODEX_HOME, no dev config.
+func TestCodexDryRunWritesNothing(t *testing.T) {
+	codexHome := filepath.Join(t.TempDir(), "codex-home")
+	cfgPath := filepath.Join(t.TempDir(), "openbox", "dev.json")
+	t.Setenv("CODEX_HOME", codexHome)
+	t.Setenv("OPENBOX_CONFIG", cfgPath)
+
+	a, out, _ := testApp(nil) // no token/store/registrar: dry-run must stay offline
+	code := a.run([]string{"dev", "init", "--provider", "codex", "--dry-run", "--org", "acme"})
+	if code != exitOK {
+		t.Fatalf("dry-run exit = %d", code)
+	}
+	for _, want := range []string{"OpenBox Codex hooks", "/hooks", "hook codex"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("dry-run plan missing %q:\n%s", want, out.String())
+		}
+	}
+	if _, err := os.Stat(codexHome); !os.IsNotExist(err) {
+		t.Errorf("dry-run created CODEX_HOME content (err=%v)", err)
+	}
+	if _, err := os.Stat(cfgPath); !os.IsNotExist(err) {
+		t.Errorf("dry-run wrote the dev config (err=%v)", err)
+	}
 }

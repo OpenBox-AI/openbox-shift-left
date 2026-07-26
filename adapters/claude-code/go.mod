@@ -11,6 +11,9 @@ require (
 	github.com/openbox-ai/openbox-shift-left/provider v0.0.0
 	// E6-S1: the local decision sidecar's fail-open Client + wire types (E6-S5).
 	github.com/openbox-ai/openbox-shift-left/decision v0.0.0
+	// STORY-SL7-A (OD-SL7-SHARE): the shared provider-neutral dev.json/credential
+	// resolution this adapter's creds.go is now a thin facade over.
+	github.com/openbox-ai/openbox-shift-left/adapters/common/devconfig v0.0.0
 )
 
 // Sibling modules in this multi-module repo; no published version yet, so
@@ -26,3 +29,5 @@ replace github.com/openbox-ai/openbox-shift-left/provider => ../../provider
 
 // E6-S1: enforce-mode PreToolUse dials the resident daemon via sidecar.Client.
 replace github.com/openbox-ai/openbox-shift-left/decision => ../../decision
+
+replace github.com/openbox-ai/openbox-shift-left/adapters/common/devconfig => ../common/devconfig

@@ -2,6 +2,7 @@ package claudecode
 
 import (
 	"regexp"
+	"strings"
 	"testing"
 )
 
@@ -195,6 +196,81 @@ func TestConformanceParityMatrix(t *testing.T) {
 		}
 		if n != 1 {
 			t.Errorf("enforcement case %s appears %d times in the parity matrix, want exactly 1", id, n)
+		}
+	}
+}
+
+// ── STORY-SL7-B: cross-ADAPTER parity (Claude Code ↔ Codex) ──────────────────
+//
+// SL7-B ports the E6 enforce cascade onto a SECOND provider (Codex,
+// adapters/codex/enforce_conformance_test.go, cases CDX-C1..CDX-C12). This matrix
+// is the durable record that both adapters assert the SAME invariant set, and
+// where Codex's contract forces a documented DELTA. It is data-only (no import of
+// the codex module — a separate Go module); TestCrossAdapterParityMatrix_SL7B guards
+// it from drifting out of date. goCase = the Codex case; baseCase = the Claude Code
+// case it mirrors ("" when Codex-only).
+var codexConformanceParity = []parityRow{
+	{goCase: "CDX-C1 enforced BLOCK denies pre-execution", baseCase: "C1 enforced BLOCK denies pre-execution", status: statusParity,
+		note: "Identical invariant; Codex emits permissionDecision:deny + permissionDecisionReason (schema.rs PreToolUsePermissionDecisionWire) vs CC's deny. Real block carries the policy reason, not the fail-closed reason."},
+	{goCase: "CDX-C2 fail-open + outage proceeds (OD9)", baseCase: "C2 fail-open + outage proceeds (OD9)", status: statusParity,
+		note: "Cold-start/no-bundle fail-open proceeds under both; bounded by the derived whole-hook budget (probe P1: Codex fails open past the installed hook timeout)."},
+	{goCase: "CDX-C3 fail-open + unbundled/no-match proceeds", baseCase: "C3 fail-open + unbundled proceeds (default unchanged)", status: statusParity,
+		note: "Same fail-open default; both evaluate a local bundle in-process (ADR-0006)."},
+	{goCase: "CDX-C4 fail-closed + outage denies", baseCase: "C4 fail-closed + outage denies", status: statusParity,
+		note: "Synthesized HALT → deny under fail-closed on a no-verdict outage; content-free fail-closed reason."},
+	{goCase: "CDX-C5 fail-closed never denies a REAL allow", baseCase: "C5 fail-closed never denies a REAL allow", status: statusParity,
+		note: "Fail-closed engages on no-verdict ONLY (isRealVerdictSource), never a real allow — identical to CC."},
+	{goCase: "CDX-C6 fail-closed + unbundled denies", baseCase: "C6 fail-closed + unbundled denies (INFO-1 hole closed)", status: statusParity,
+		note: "Reachable-but-unbundled degraded state (LESSON-E6E7-04): fail-closed denies rather than being silently ungoverned."},
+	{goCase: "CDX-C7 observe mode never blocks (byte-parity)", baseCase: "C7 observe mode never blocks (INV-3 verbatim)", status: statusParity,
+		note: "Enforce off ⇒ empty stdout even for a BLOCK-worthy tool, regardless of fail_closed. Codex parses hook stdout as output JSON, so the empty-stdout guarantee is load-bearing."},
+	{goCase: "CDX-C8 hook-timeout fail-open bound (probe P1)", baseCase: "C8 slow decision fails open within the bound", status: statusParity,
+		note: "Degraded state (LESSON-E6E7-04): both providers FAIL OPEN on a hook timeout (CC 5s kill; Codex kills at the installed `timeout` — probe P1, live). CC bounds a network wait; Codex has no in-process network path (ADR-0006), so the case asserts the static invariant that the derived whole-hook budget lands before Codex's kill."},
+	{goCase: "CDX-C9 fail-closed + STALE real verdict proceeds", baseCase: "C9 fail-closed + STALE real verdict proceeds", status: statusParity,
+		note: "Staleness never triggers fail-closed (keys on source, not Stale) — identical to CC."},
+	{goCase: "CDX-C10 secret in apply_patch body → redact-and-continue", baseCase: "C10 secret in Write body → redact-and-continue (E6-S9)", status: statusParity,
+		note: "DELTA: the redactable body rides tool_input[\"command\"] (apply_patch patch text) not content/new_string, and Codex requires permissionDecision:allow + updatedInput to carry a rewrite (CC emits updatedInput alone). Same structural guarantee: content-only field swap, raw secret never egresses (INV-2)."},
+	{goCase: "CDX-C11 secret detection OFF → no redaction", baseCase: "C11 secret detection OFF → no redaction (opt-out, E6-S9)", status: statusParity,
+		note: "Opt-out + capture off ⇒ proceed path writes nothing — identical to CC."},
+	{goCase: "CDX-C12 REQUIRE_APPROVAL → deny (OD-SL7-ASK)", baseCase: "", status: statusGoExtension,
+		note: "Codex-only DELTA: CC maps REQUIRE_APPROVAL→ask (native prompt). Codex's runtime REJECTS permissionDecision:ask (output_parser.rs 'unsupported permissionDecision:ask') and a no-decision under approval_policy=never auto-runs (probe P3), so per the ruled OD-SL7-ASK every REQUIRE_APPROVAL quadrant DENIES with a content-free reason — strictly tighter. This is the base-unmapped 'require_approval' row the CC matrix noted, now covered on Codex."},
+	{goCase: "CDX tighten-only: allow never bare", baseCase: "", status: statusGoExtension,
+		note: "Codex-only structural invariant: permissionDecision:allow is emitted ONLY bundled with a redacting updatedInput (never a grant — OD-SL7-ALLOW-REWRITE); a plain allow writes NOTHING. Codex itself rejects a bare allow ('unsupported permissionDecision:allow'), and any-deny-wins + no approval-bypass lever means allow+updatedInput cannot loosen."},
+}
+
+// TestCrossAdapterParityMatrix_SL7B guards the CC↔Codex parity record: every row
+// well-formed, every Codex enforcement case CDX-C1..CDX-C12 present exactly once,
+// and each parity row names its CC analog. Breaks HERE if a Codex conformance case
+// is renamed/dropped, rather than leaving a stale cross-repo claim.
+func TestCrossAdapterParityMatrix_SL7B(t *testing.T) {
+	validStatus := map[parityStatus]bool{statusParity: true, statusGoExtension: true, statusBaseUnmapped: true}
+	for i, r := range codexConformanceParity {
+		if !validStatus[r.status] {
+			t.Errorf("codex row %d: invalid status %q", i, r.status)
+		}
+		if !hexNote.MatchString(r.note) {
+			t.Errorf("codex row %d (%q): empty note", i, r.goCase)
+		}
+		switch r.status {
+		case statusParity:
+			if r.goCase == "" || r.baseCase == "" {
+				t.Errorf("codex row %d: status=parity requires BOTH a goCase and a baseCase", i)
+			}
+		case statusGoExtension:
+			if r.goCase == "" {
+				t.Errorf("codex row %d: status=go-extension requires a goCase", i)
+			}
+		}
+	}
+	for _, id := range []string{"CDX-C1 ", "CDX-C2 ", "CDX-C3 ", "CDX-C4 ", "CDX-C5 ", "CDX-C6 ", "CDX-C7 ", "CDX-C8 ", "CDX-C9 ", "CDX-C10 ", "CDX-C11 ", "CDX-C12 "} {
+		n := 0
+		for _, r := range codexConformanceParity {
+			if strings.HasPrefix(r.goCase, id) {
+				n++
+			}
+		}
+		if n != 1 {
+			t.Errorf("codex enforcement case %q appears %d times, want exactly 1", strings.TrimSpace(id), n)
 		}
 	}
 }

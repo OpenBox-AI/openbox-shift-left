@@ -1,0 +1,7 @@
+{
+  "hook_event_name": "SessionEnd",
+  "session_id": "0195c7e4-1111-7000-8000-000000000001",
+  "cwd": "/work/repo",
+  "reason": "other",
+  "transcript_path": null
+}

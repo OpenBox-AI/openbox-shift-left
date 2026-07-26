@@ -1,0 +1,12 @@
+{
+  "hook_event_name": "PreToolUse",
+  "session_id": "0195c7e4-1111-7000-8000-000000000001",
+  "turn_id": "turn-1",
+  "cwd": "/work/repo",
+  "model": "gpt-5.3-codex",
+  "permission_mode": "default",
+  "tool_name": "Bash",
+  "tool_use_id": "call_5f1e2d3c",
+  "tool_input": { "command": "go test ./..." },
+  "transcript_path": null
+}
