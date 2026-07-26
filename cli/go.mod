@@ -6,12 +6,16 @@ require (
 	// SL4-WIRE-1: the CLI registers the real Claude Code installer and depends
 	// on the shared install-time SPI both it and the adapter implement.
 	github.com/openbox-ai/openbox-shift-left/adapters/claude-code v0.0.0
+	// STORY-SL7-A: the real Codex installer + hook engine.
+	github.com/openbox-ai/openbox-shift-left/adapters/codex v0.0.0
 	github.com/openbox-ai/openbox-shift-left/provider v0.0.0
 )
 
 require github.com/openbox-ai/openbox-shift-left/adapters/common/git v0.0.0
 
 require github.com/openbox-ai/openbox-shift-left/client v0.0.0
+
+require github.com/openbox-ai/openbox-shift-left/adapters/common/devconfig v0.0.0 // indirect
 
 // E6-S5: the local decision sidecar the `openbox sidecar serve` subcommand runs
 // (ADR-0003 — one binary, WIRE-2; cli imports sidecar, never the reverse).
@@ -24,7 +28,11 @@ replace github.com/openbox-ai/openbox-shift-left/provider => ../provider
 
 replace github.com/openbox-ai/openbox-shift-left/adapters/claude-code => ../adapters/claude-code
 
+replace github.com/openbox-ai/openbox-shift-left/adapters/codex => ../adapters/codex
+
 replace github.com/openbox-ai/openbox-shift-left/adapters/common/git => ../adapters/common/git
+
+replace github.com/openbox-ai/openbox-shift-left/adapters/common/devconfig => ../adapters/common/devconfig
 
 replace github.com/openbox-ai/openbox-shift-left/client => ../client
 

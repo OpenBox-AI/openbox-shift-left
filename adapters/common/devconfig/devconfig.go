@@ -1,0 +1,470 @@
+// Package devconfig is the provider-NEUTRAL developer-runtime configuration and
+// credential resolution shared by every tool adapter (SL-4 Claude Code, SL-7
+// Codex, SL-8 Cursor). It owns the `~/.config/openbox/dev.json` contract the
+// installers write and the hook binaries read, plus the OS/file secret-store
+// readers (STORY-SL7-A, OD-SL7-SHARE ruling (a); module home recorded in
+// ADR-0007).
+//
+// It was EXTRACTED, behavior-preserving, from adapters/claude-code/creds.go —
+// that adapter keeps thin aliases so its public API and tests are unchanged.
+// Like adapters/common/git, this module is dependency-free: it never imports
+// the client, an adapter, or the CLI.
+//
+// INV-1 is load-bearing throughout: dev.json and the env carry only NON-SECRET
+// coordinates (where the secrets live, never the secret values); the obx_ key
+// and Ed25519 seed are read from the secret store only at flush time and are
+// never logged, printed, or placed on an argv.
+package devconfig
+
+import (
+	"encoding/json"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
+	"strconv"
+	"strings"
+)
+
+// Env vars: non-secret coordinates + optional direct overrides for CI/tests.
+// The names are the cross-adapter contract (the same dev.json serves every
+// provider), so they are exported here and aliased by the adapters.
+const (
+	EnvBaseURL         = "OPENBOX_BASE_URL"
+	EnvDID             = "OPENBOX_AGENT_DID"
+	EnvSecretService   = "OPENBOX_SECRET_SERVICE"
+	EnvAPIKeyAccount   = "OPENBOX_API_KEY_ACCOUNT"
+	EnvPrivKeyAccount  = "OPENBOX_PRIVATE_KEY_ACCOUNT"
+	EnvContentCapture  = "OPENBOX_CONTENT_CAPTURE"
+	EnvFinops          = "OPENBOX_FINOPS"
+	EnvInstallGitHook  = "OPENBOX_INSTALL_GIT_HOOK"
+	EnvEnforce         = "OPENBOX_ENFORCE"
+	EnvFailClosed      = "OPENBOX_FAIL_CLOSED"
+	EnvEnforceTimeout  = "OPENBOX_ENFORCE_TIMEOUT_MS"
+	EnvTier2           = "OPENBOX_TIER2"
+	EnvTier2Timeout    = "OPENBOX_TIER2_TIMEOUT_MS"
+	EnvSecretDetection = "OPENBOX_SECRET_DETECTION"
+	EnvFindings        = "OPENBOX_FINDINGS"
+	EnvFindingsCursor  = "OPENBOX_FINDINGS_CURSOR"
+	EnvEnforcementFile = "OPENBOX_ENFORCEMENT_FILE"
+	EnvAPIKeyDirect    = "OPENBOX_API_KEY"
+	EnvSeedDirect      = "OPENBOX_ED25519_SEED"
+	EnvConfigPath      = "OPENBOX_CONFIG"
+	EnvSecretFile      = "OPENBOX_SECRET_FILE"
+	EnvAgentID         = "OPENBOX_AGENT_ID"
+	EnvBackendURL      = "OPENBOX_BACKEND_URL"
+	EnvControlToken    = "OPENBOX_CONTROL_TOKEN"
+	EnvSpoolDir        = "OPENBOX_SPOOL_DIR"
+
+	// DefaultBaseURL is the core data-plane base used when nothing configures one.
+	DefaultBaseURL = "https://core.openbox.ai"
+)
+
+// DevConfig is the non-secret coordinate file the installers write and the
+// hooks read (INV-1: it holds where the secrets live, never the secret values).
+// Env vars of the same meaning override any field. One file serves every
+// provider — the coordinates, content posture, and ADR-0006 enforce posture are
+// org/developer-scoped, not tool-scoped.
+//
+// Field semantics (defaults, opt-in/out rationale) are documented on the
+// resolver functions below; the *bool fields distinguish "absent = adapter
+// default" from an explicit false.
+type DevConfig struct {
+	BaseURL           string `json:"base_url,omitempty"`
+	DID               string `json:"developer_did,omitempty"`
+	SecretService     string `json:"secret_service,omitempty"`
+	APIKeyAccount     string `json:"api_key_account,omitempty"`
+	PrivateKeyAccount string `json:"private_key_account,omitempty"`
+	// ContentCapture is the org content posture (OD4). Absent means the DEFAULT,
+	// which is ON as of 2026-07-15 (brian; reverses metadata-only-by-default).
+	ContentCapture *bool `json:"content_capture,omitempty"`
+	// Finops enables opt-in transcript usage extraction (STORY-SL-16). Default
+	// false; deliberately SEPARATE from ContentCapture (numbers-only projection).
+	Finops bool `json:"finops,omitempty"`
+	// InstallGitHook enables ambient install of the SL-5 prepare-commit-msg hook
+	// on SessionStart. Default false — it modifies a repo's .git/hooks.
+	InstallGitHook bool `json:"install_git_hook,omitempty"`
+	// Enforce flips the developer runtime from observe/advisory to ENFORCE
+	// (E6/ADR-0006, persisted by `dev init --enforce`). Default false.
+	Enforce bool `json:"enforce,omitempty"`
+	// FailClosed selects the enforce failure policy (E6-S3, OD9). Default false
+	// = fail-open: an OpenBox outage never blocks a developer.
+	FailClosed bool `json:"fail_closed,omitempty"`
+	// EnforceTimeoutMS is inert under the in-process decider (ADR-0006);
+	// retained for back-compat parsing. Clamping is adapter-owned.
+	EnforceTimeoutMS int `json:"enforce_timeout_ms,omitempty"`
+	// Tier2 enables the Tier-2 synchronous /evaluate escalation for high-risk
+	// classes in enforce mode (E6-S10). Absent = default OFF (opt-in).
+	Tier2 *bool `json:"tier2,omitempty"`
+	// Tier2TimeoutMS bounds one Tier-2 escalation (ms). Clamping is adapter-owned.
+	Tier2TimeoutMS int `json:"tier2_timeout_ms,omitempty"`
+	// SecretDetection enables Tier-1 local secret/entropy detection (E6-S9).
+	// Absent = default ON (opt-OUT): the detection stays strictly local.
+	SecretDetection *bool `json:"secret_detection,omitempty"`
+	// Findings enables the Tier-3 findings loop (E6-S11). Absent = default OFF
+	// (opt-in: it is the first observe-path stdout writer).
+	Findings *bool `json:"findings,omitempty"`
+	// AgentID is the backend agent id for the policy read (E6-S8). Non-secret.
+	AgentID string `json:"agent_id,omitempty"`
+	// BackendURL is the openbox-backend CONTROL-PLANE base (distinct from
+	// BaseURL, the core data-plane base). Non-secret.
+	BackendURL string `json:"backend_url,omitempty"`
+	// SecretFile, when set, points at the CLI's opt-in file secret backend
+	// (0600 JSON) read instead of the OS keychain. EnvSecretFile overrides.
+	SecretFile string `json:"secret_file,omitempty"`
+}
+
+// DefaultConfigPath is where the installer writes the dev config and the hook
+// looks for it when OPENBOX_CONFIG is unset. Under XDG on Linux / the standard
+// config dir elsewhere.
+func DefaultConfigPath() string {
+	if p := os.Getenv(EnvConfigPath); p != "" {
+		return p
+	}
+	dir, err := os.UserConfigDir()
+	if err != nil || dir == "" {
+		dir = filepath.Join(os.Getenv("HOME"), ".config")
+	}
+	return filepath.Join(dir, "openbox", "dev.json")
+}
+
+// Load reads the dev config at path if present. A missing file is not an error
+// (env may supply everything); a malformed file is an error surfaced fail-open.
+func Load(path string) (DevConfig, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return DevConfig{}, nil
+		}
+		return DevConfig{}, fmt.Errorf("read dev config: %w", err)
+	}
+	var c DevConfig
+	if err := json.Unmarshal(raw, &c); err != nil {
+		return DevConfig{}, fmt.Errorf("parse dev config %s: %w", path, err)
+	}
+	return c, nil
+}
+
+// load reads the default-path config, swallowing the not-exist case.
+func load() (DevConfig, error) { return Load(DefaultConfigPath()) }
+
+// Credentials is the resolved runtime identity for a hook binary. It carries
+// the secret VALUES (read straight from the secret store) — it exists only in
+// process memory on the flush path and must never be logged or persisted.
+type Credentials struct {
+	BaseURL               string
+	APIKey                string
+	DID                   string
+	SeedB64               string
+	ContentCaptureEnabled bool
+}
+
+// SecretLookup reads one secret by (service, account). OSSecretLookup is the
+// production implementation; adapters keep an injectable var for tests.
+type SecretLookup func(service, account string) (string, error)
+
+// ResolveDID resolves ONLY the developer DID (env, then config file) — no
+// secret-store access. This is the hot path: observe/spool needs the DID to
+// attribute events but never the obx_ key or seed, so a tool-use hook does
+// zero secret I/O (INV-1 + NFR-2 latency).
+func ResolveDID() (string, error) {
+	cfg, err := load()
+	if err != nil {
+		return "", err
+	}
+	did := FirstNonEmpty(os.Getenv(EnvDID), cfg.DID)
+	if did == "" {
+		return "", fmt.Errorf("no developer DID configured (run `openbox dev init`)")
+	}
+	return did, nil
+}
+
+// ResolveCoordinates resolves the NON-SECRET target coordinates — the core base
+// URL and the developer DID — from env then the dev config, with ZERO
+// secret-store access (INV-1). Backs read-only previews (`dev verify --dry-run`).
+// A missing/unreadable config degrades to env + defaults; did is "" when
+// nothing configures it.
+func ResolveCoordinates() (baseURL, did string) {
+	cfg, _ := load()
+	baseURL = FirstNonEmpty(os.Getenv(EnvBaseURL), cfg.BaseURL, DefaultBaseURL)
+	did = FirstNonEmpty(os.Getenv(EnvDID), cfg.DID)
+	return baseURL, did
+}
+
+// SpoolDir is where hot-path events are spooled before flush: the
+// OPENBOX_SPOOL_DIR override when set, else `<user-config>/openbox/<subdir>`.
+// Each adapter passes its own subdir (cc-spool, codex-spool, …) so concurrent
+// tools never share a spool by accident, while the env override still lets
+// tests (and operators) pin one location.
+func SpoolDir(subdir string) string {
+	if p := os.Getenv(EnvSpoolDir); p != "" {
+		return p
+	}
+	dir, err := os.UserConfigDir()
+	if err != nil || dir == "" {
+		dir = filepath.Join(os.Getenv("HOME"), ".config")
+	}
+	return filepath.Join(dir, "openbox", subdir)
+}
+
+// ResolveInstallGitHook reports whether the adapter should install the SL-5
+// prepare-commit-msg hook into the session's repo on SessionStart. Default
+// false (it modifies a repo's .git/hooks); config enables; env overrides either
+// way. A missing/unreadable config is false (fail-safe).
+func ResolveInstallGitHook() bool {
+	return resolveBool(func(c DevConfig) *bool { b := c.InstallGitHook; return &b }, false, EnvInstallGitHook)
+}
+
+// ResolveFinops reports whether opt-in transcript usage extraction is enabled
+// (STORY-SL-16). Default false: transcript_path is never opened with it unset.
+func ResolveFinops() bool {
+	return resolveBool(func(c DevConfig) *bool { b := c.Finops; return &b }, false, EnvFinops)
+}
+
+// ResolveContentCapture reports the org content posture (OD4): config
+// `content_capture` first, then the env override (env wins either way).
+// DEFAULT ON as of 2026-07-15 — an ABSENT config field yields ON; set
+// `content_capture:false` or OPENBOX_CONTENT_CAPTURE=0 to opt back to
+// metadata-only. A missing/unreadable config leaves the default ON. Cheap
+// config+env read, no secret I/O; safe on the hot path.
+func ResolveContentCapture() bool {
+	return resolveBool(func(c DevConfig) *bool { return c.ContentCapture }, true, EnvContentCapture)
+}
+
+// ResolveSecretDetection reports whether Tier-1 local secret/entropy detection
+// is on (E6-S9). DEFAULT TRUE — opt-OUT: the body it acts on reaches only the
+// local decider and the redaction stays local (INV-2 is egress-only).
+func ResolveSecretDetection() bool {
+	return resolveBool(func(c DevConfig) *bool { return c.SecretDetection }, true, EnvSecretDetection)
+}
+
+// ResolveFindings reports whether the Tier-3 findings loop is on (E6-S11).
+// DEFAULT FALSE — opt-in, because it is the first observe-path stdout writer.
+func ResolveFindings() bool {
+	return resolveBool(func(c DevConfig) *bool { return c.Findings }, false, EnvFindings)
+}
+
+// ResolveFindingsCursor resolves the findings-loop cursor state file (E6-S11):
+// the env override, else a fixed file next to the advisory sink. It stores only
+// a byte offset (structural, content-free — INV-2).
+func ResolveFindingsCursor() string {
+	if p := os.Getenv(EnvFindingsCursor); p != "" {
+		return p
+	}
+	dir, err := os.UserConfigDir()
+	if err != nil || dir == "" {
+		dir = filepath.Join(os.Getenv("HOME"), ".config")
+	}
+	return filepath.Join(dir, "openbox", "findings.cursor")
+}
+
+// ResolveEnforce reports whether the developer runtime is in ENFORCE mode
+// (E6-S1/ADR-0006): config field first, then the env override. Default false —
+// observe/advisory; a config read error never turns enforcement on (INV-3).
+func ResolveEnforce() bool {
+	return resolveBool(func(c DevConfig) *bool { b := c.Enforce; return &b }, false, EnvEnforce)
+}
+
+// ResolveFailClosed reports the enforce FAILURE POLICY (E6-S3, OD9). Default
+// FALSE = fail-open; an org never becomes fail-closed by accident.
+func ResolveFailClosed() bool {
+	return resolveBool(func(c DevConfig) *bool { b := c.FailClosed; return &b }, false, EnvFailClosed)
+}
+
+// ResolveTier2 reports whether the Tier-2 synchronous escalation is on
+// (E6-S10). DEFAULT FALSE — opt-in (it adds hot-path secret I/O + latency).
+func ResolveTier2() bool {
+	return resolveBool(func(c DevConfig) *bool { return c.Tier2 }, false, EnvTier2)
+}
+
+// ResolveTimeoutMS resolves a millisecond budget knob: the config field first
+// (via cfgMS), then the env override when present AND parseable — a garbage env
+// value is ignored and the config value stands, so a fat-fingered env never
+// silently wipes a valid config. CLAMPING is deliberately the caller's job:
+// each adapter owns its correctness bound (e.g. Claude Code's 5 s hook kill).
+func ResolveTimeoutMS(cfgMS func(DevConfig) int, envKey string) int {
+	ms := 0
+	if cfg, err := load(); err == nil {
+		ms = cfgMS(cfg)
+	}
+	if v, ok := os.LookupEnv(envKey); ok {
+		if n, err := strconv.Atoi(strings.TrimSpace(v)); err == nil {
+			ms = n
+		}
+	}
+	return ms
+}
+
+// ResolveAgentID resolves the backend agent id for policy sync/staleness
+// (E6-S8): env first, then the dev config. Empty when unconfigured.
+func ResolveAgentID() string {
+	cfg, _ := load()
+	return FirstNonEmpty(os.Getenv(EnvAgentID), cfg.AgentID)
+}
+
+// ResolveBackendURL resolves the openbox-backend CONTROL-PLANE base URL:
+// env first, then the dev config. Empty when unconfigured.
+func ResolveBackendURL() string {
+	cfg, _ := load()
+	return FirstNonEmpty(os.Getenv(EnvBackendURL), cfg.BackendURL)
+}
+
+// ResolveControlToken resolves the ORG control-plane credential (OD-SYNC-4):
+// the OPENBOX_CONTROL_TOKEN env ONLY. Deliberately NOT a config field and never
+// read from the runtime secret store — supplied via env only so it cannot leak
+// via a config file or argv (INV-1).
+func ResolveControlToken() string {
+	return os.Getenv(EnvControlToken)
+}
+
+// ResolveCredentials assembles Credentials from env + the dev config + the
+// given secret source. It returns an error (never a panic) when identity is
+// incomplete; the caller logs it fail-open and exits 0 (INV-3). No secret value
+// is ever included in a returned error. When the config/env points at the
+// opt-in file secret backend, it is used instead of lookup; the direct env
+// overrides win over both.
+func ResolveCredentials(lookup SecretLookup) (Credentials, error) {
+	cfg, err := load()
+	if err != nil {
+		return Credentials{}, err
+	}
+
+	c := Credentials{
+		BaseURL: FirstNonEmpty(os.Getenv(EnvBaseURL), cfg.BaseURL, DefaultBaseURL),
+		DID:     FirstNonEmpty(os.Getenv(EnvDID), cfg.DID),
+		// Content capture (OD4): DEFAULT ON — an absent config field means ON; an
+		// explicit false opts out; env overrides either way (mirrors ResolveContentCapture).
+		ContentCaptureEnabled: cfg.ContentCapture == nil || *cfg.ContentCapture,
+	}
+	if v, ok := os.LookupEnv(EnvContentCapture); ok {
+		c.ContentCaptureEnabled = IsTruthy(v)
+	}
+	if c.DID == "" {
+		return Credentials{}, fmt.Errorf("no developer DID configured (run `openbox dev init`)")
+	}
+
+	service := FirstNonEmpty(os.Getenv(EnvSecretService), cfg.SecretService)
+	apiKeyAccount := FirstNonEmpty(os.Getenv(EnvAPIKeyAccount), cfg.APIKeyAccount)
+	privKeyAccount := FirstNonEmpty(os.Getenv(EnvPrivKeyAccount), cfg.PrivateKeyAccount)
+
+	// Secret source: the CLI's opt-in file backend (when a path is configured)
+	// or the given lookup (normally the OS secret store). Direct env overrides win.
+	if lookup == nil {
+		lookup = OSSecretLookup
+	}
+	if secretFile := FirstNonEmpty(os.Getenv(EnvSecretFile), cfg.SecretFile); secretFile != "" {
+		lookup = func(svc, acct string) (string, error) { return FileSecretLookup(secretFile, svc, acct) }
+	}
+
+	// obx_ key: direct override, else secret source.
+	if v := os.Getenv(EnvAPIKeyDirect); v != "" {
+		c.APIKey = v
+	} else if service != "" && apiKeyAccount != "" {
+		v, err := lookup(service, apiKeyAccount)
+		if err != nil {
+			return Credentials{}, fmt.Errorf("read api key from secret store: %w", err)
+		}
+		c.APIKey = v
+	}
+	if c.APIKey == "" {
+		return Credentials{}, fmt.Errorf("no obx_ API key available (env %s or secret store)", EnvAPIKeyDirect)
+	}
+
+	// Ed25519 seed: direct override, else secret source.
+	if v := os.Getenv(EnvSeedDirect); v != "" {
+		c.SeedB64 = v
+	} else if service != "" && privKeyAccount != "" {
+		v, err := lookup(service, privKeyAccount)
+		if err != nil {
+			return Credentials{}, fmt.Errorf("read signing seed from secret store: %w", err)
+		}
+		c.SeedB64 = v
+	}
+	if c.SeedB64 == "" {
+		return Credentials{}, fmt.Errorf("no Ed25519 seed available (env %s or secret store)", EnvSeedDirect)
+	}
+
+	return c, nil
+}
+
+// FileSecretLookup reads one secret by (service, account) from the CLI's opt-in
+// file backend — the 0600 nested-JSON format the CLI writes
+// (cli/internal/secret/file.go): {"<service>":{"<account>":"<value>"}}.
+func FileSecretLookup(path, service, account string) (string, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return "", fmt.Errorf("read secret file: %w", err)
+	}
+	var m map[string]map[string]string
+	if err := json.Unmarshal(raw, &m); err != nil {
+		return "", fmt.Errorf("parse secret file %s: %w", path, err)
+	}
+	if v, ok := m[service][account]; ok && v != "" {
+		return v, nil
+	}
+	return "", fmt.Errorf("secret file has no value for account %q", account)
+}
+
+// OSSecretLookup reads one secret by (service, account) from the platform
+// secret store, matching what STORY-SL-2 wrote: libsecret (secret-tool) on
+// Linux, the login keychain (security) on macOS. The value returns on the
+// child's stdout; it is never logged.
+func OSSecretLookup(service, account string) (string, error) {
+	// Reject leading-dash coordinates so a crafted config/env value can't be
+	// reparsed as a flag by the backend CLI (G_SEC F3). argv (not a shell) is
+	// used, so there is no shell-injection surface; this closes arg-injection.
+	if strings.HasPrefix(service, "-") || strings.HasPrefix(account, "-") {
+		return "", fmt.Errorf("secret-store coordinate must not start with '-'")
+	}
+	var cmd *exec.Cmd
+	switch runtime.GOOS {
+	case "darwin":
+		cmd = exec.Command("security", "find-generic-password", "-s", service, "-a", account, "-w")
+	case "linux":
+		cmd = exec.Command("secret-tool", "lookup", "service", service, "account", account)
+	default:
+		return "", fmt.Errorf("no secret-store backend for %s", runtime.GOOS)
+	}
+	out, err := cmd.Output()
+	if err != nil {
+		// Do not wrap stderr (it could echo the account); keep the error opaque.
+		return "", fmt.Errorf("secret-store lookup failed for account %q", account)
+	}
+	return strings.TrimRight(string(out), "\r\n"), nil
+}
+
+// resolveBool applies the shared precedence for boolean posture flags: the
+// config field (def when absent/nil or the config is unreadable), then the env
+// override (env wins either way, so env can disable what config enabled).
+func resolveBool(field func(DevConfig) *bool, def bool, envKey string) bool {
+	enabled := def
+	if cfg, err := load(); err == nil {
+		if v := field(cfg); v != nil {
+			enabled = *v
+		}
+	}
+	if v, ok := os.LookupEnv(envKey); ok {
+		enabled = IsTruthy(v)
+	}
+	return enabled
+}
+
+// FirstNonEmpty returns the first non-empty string.
+func FirstNonEmpty(vals ...string) string {
+	for _, v := range vals {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
+// IsTruthy interprets an env toggle value: 1/true/yes/on (case-insensitive).
+func IsTruthy(s string) bool {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "1", "true", "yes", "on":
+		return true
+	}
+	return false
+}

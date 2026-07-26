@@ -39,8 +39,10 @@ func mockCreateServer(t *testing.T, createBody *map[string]any) *httptest.Server
 // TestEndToEndAgainstMockBackend drives the real backend.Client (not a fake)
 // through devinit against an httptest server, covering the SL-2 integration AC
 // ("a dev init against a test OpenBox registers an agent") with a mock. It uses
-// codex — still a Stub (SL-7 unbuilt) — so the config-manual-only partial path
-// stays exercised now that claude-code is a real installer (SL4-WIRE-1).
+// cursor — still a Stub (SL-8 unbuilt) — so the config-manual-only partial path
+// stays exercised now that claude-code (SL4-WIRE-1) AND codex (STORY-SL7-A) are
+// real installers. (It previously used codex; a real installer here would write
+// the developer's ACTUAL default install paths from a unit test.)
 func TestEndToEndAgainstMockBackend(t *testing.T) {
 	var createBody map[string]any
 	srv := mockCreateServer(t, &createBody)
@@ -48,14 +50,14 @@ func TestEndToEndAgainstMockBackend(t *testing.T) {
 
 	reg := backend.New(srv.URL, "obx_key_"+strings.Repeat("f", 48), "openbox-cli")
 	store := secret.NewMemStore()
-	inst, _ := providers.Lookup("codex") // stub: SL-7 adapter not built
+	inst, _ := providers.Lookup("cursor") // stub: SL-8 adapter not built
 	var out bytes.Buffer
 
 	res, err := Run(context.Background(),
-		Options{Provider: "codex", Org: "acme", AgentName: "dev-x"},
+		Options{Provider: "cursor", Org: "acme", AgentName: "dev-x"},
 		Deps{Registrar: reg, Store: store, Installer: inst, Out: &out})
 
-	// The codex adapter isn't built, so config is manual-only (expected error),
+	// The cursor adapter isn't built, so config is manual-only (expected error),
 	// but registration + credential capture must have fully succeeded.
 	if err == nil || !res.ConfigManualOnly {
 		t.Fatalf("expected manual-config outcome, got err=%v res=%+v", err, res)
@@ -74,7 +76,7 @@ func TestEndToEndAgainstMockBackend(t *testing.T) {
 		t.Error("aivss_config must be an object")
 	}
 	// Credentials landed in the store, keyed by org/provider.
-	svc, apiAcct, privAcct, didAcct := Options{Provider: "codex", Org: "acme"}.accounts()
+	svc, apiAcct, privAcct, didAcct := Options{Provider: "cursor", Org: "acme"}.accounts()
 	if v, _ := store.Get(svc, apiAcct); !strings.HasPrefix(v, "obx_test_") {
 		t.Errorf("api key not stored: %q", v)
 	}

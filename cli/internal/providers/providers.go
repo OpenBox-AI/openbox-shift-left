@@ -4,9 +4,8 @@
 // the adapter modules; keeping it in `cli` (not in the shared module) is what
 // breaks the would-be import cycle between the SPI and its adapters (ADR-0001).
 //
-// SL4-WIRE-1: claude-code is now a REAL installer (claudecode.Installer) that
-// materializes the plugin bundle + non-secret dev config, replacing the SL-2
-// stub. Codex/Cursor stay stubs until SL-7/SL-8 build their adapters.
+// SL4-WIRE-1 made claude-code a REAL installer; STORY-SL7-A does the same for
+// codex (hooks.json + dev.json, no bundle). Cursor stays a stub until SL-8.
 package providers
 
 import (
@@ -15,6 +14,7 @@ import (
 	"strings"
 
 	claudecode "github.com/openbox-ai/openbox-shift-left/adapters/claude-code"
+	codex "github.com/openbox-ai/openbox-shift-left/adapters/codex"
 	"github.com/openbox-ai/openbox-shift-left/provider"
 )
 
@@ -36,20 +36,21 @@ func Lookup(name string) (provider.Installer, error) {
 		}
 		return inst, nil
 	case provider.Codex:
-		return provider.Stub{ProviderName: provider.Codex, Manual: codexManual}, nil
+		inst := codex.Installer{} // STORY-SL7-A real installer (default install paths)
+		// Same EngineBinary discipline as claude-code, with a different mechanic:
+		// Codex has no plugin bundle to copy into, so the ABSOLUTE path of this
+		// running engine is baked directly into each hooks.json command. If
+		// os.Executable() is unavailable the installer falls back to `openbox`
+		// on PATH (hookCommand).
+		if exe, err := os.Executable(); err == nil {
+			inst.EngineBinary = exe
+		}
+		return inst, nil
 	case provider.Cursor:
 		return provider.Stub{ProviderName: provider.Cursor, Manual: cursorManual}, nil
 	default:
 		return nil, fmt.Errorf("%w: %q (supported: %s)", provider.ErrUnknown, name, strings.Join(provider.Supported(), ", "))
 	}
-}
-
-func codexManual(ref provider.CredentialRef) string {
-	return fmt.Sprintf(`Codex adapter (STORY-SL-7) is not built yet.
-Manual config until the bundle ships:
-  - Lay down requirements.toml / MDM-managed hooks that invoke 'openbox'.
-  - Credentials come from the OS secret store (service %q, DID %s), never inline.`,
-		ref.SecretService, ref.DID)
 }
 
 func cursorManual(ref provider.CredentialRef) string {
