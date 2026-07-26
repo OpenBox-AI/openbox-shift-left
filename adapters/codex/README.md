@@ -127,12 +127,68 @@ bypass vectors — acceptable for the observe posture (NFR-5 parity with CC's
 opt-in pilot); requirements.toml-managed hooks and the Codex plugin channel are
 the recorded hardening/distribution options (OD-SL7-DIST).
 
+## Finops / token usage (STORY-SL7-C, SL-16 parity)
+
+Codex hooks expose no usage, but the session's **rollout JSONL** — the file the
+SessionEnd payload's `transcript_path` points at, flushed by Codex *before* the
+SessionEnd hook runs (spike S5 addendum #10) — carries running token counts.
+Behind an **off-by-default, opt-in** flag (`finops` in `dev.json` /
+`OPENBOX_FINOPS=1` — a **separate** flag from `content_capture`), the adapter
+reads it on SessionEnd (off the hot path, after the spool flush) and attaches
+`client.Tokens` to the `SessionEnded` event. `Capabilities()` →
+`telemetry.tokens=true`. `usage.go` / `usage_test.go`.
+
+**Grounded token shape** (codex-rs @ `rust-v0.145.0`, recorded in
+`testdata/rollout-poisoned.jsonl` — pinned from the shipped structs + the
+0.145.0 binary, *not* guessed; this box carried no live rollout to sample):
+
+```
+rollout line   = {"timestamp":…,"type":"event_msg","payload":<EventMsg>}
+EventMsg        = {"type":"token_count","info":<TokenUsageInfo>,"rate_limits":…}
+TokenUsageInfo  = {"total_token_usage":<TokenUsage>,"last_token_usage":<TokenUsage>,"model_context_window":int|null}
+TokenUsage      = {"input_tokens","cached_input_tokens","cache_write_input_tokens",
+                   "output_tokens","reasoning_output_tokens","total_tokens"}  (all i64)
+```
+
+Two **deliberate divergences from the CC reader**, both source-verified:
+
+- **Aggregation = last snapshot, NOT sum.** `total_token_usage` is a *cumulative
+  running session total* (`TokenUsageInfo::append_last_usage` →
+  `total_token_usage.add_assign(last)`), so multiple `token_count` lines each
+  carry a larger cumulative — the rollup is the **last valid** snapshot. Summing
+  (as CC does over per-turn usages) would multiply-count every prior turn.
+- **Cache/reasoning counts are subsets, NOT additive.** `cached_input_tokens` /
+  `cache_write_input_tokens` / `reasoning_output_tokens` are already *inside*
+  `input_tokens` / `output_tokens` (`non_cached_input == input_tokens −
+  cached_input_tokens`; `total_tokens == input + output`), so `Input`/`Output`
+  are carried **directly** and the sub-counts are never added. CC's cache tokens
+  are additive and folded into Input.
+
+**Cost is always nil / `telemetry.cost` stays false** — the Codex token path
+carries **no cost field** (`TokenCountEvent = {info, rate_limits}`); cost is
+never derived from a pricing table (that would be a fabricated number).
+
+**Invariants.** INV-2 is structural: the rollout is decoded into projection
+structs with **only numeric fields** (nested), so every content-bearing key
+(prompt, agent message, shell command, apply_patch body, tool output, cwd, …)
+has nowhere to land — proven by `TestFinops_NoContentOnWire` (sentinel content
+in a fixture rollout, asserted absent from the real signed wire body with
+content-capture ON). INV-3: bounded read (`maxRolloutBytes`, 64 MiB — oversized
+skipped whole), fail-open (missing/null/malformed/partial rollout → logged to
+stderr, skipped; never fails the flush, blocks, or writes stdout). Finops-off is
+byte-identical to the pre-SL7-C path.
+
+> **Fallback (OD-SL7C-FALLBACK):** when `transcript_path` is absent/null the read
+> is skipped fail-open — the adapter does **not** reconstruct a
+> `~/.codex/sessions/…` path from `session_id`. A real SessionEnd always carries
+> `transcript_path` (`session_end.rs` @ `rust-v0.145.0`), and a HOME-derived scan
+> would fight the read-only / hermeticity posture.
+
 ## Known limitations (honest, no silent caps)
 
-- **No tokens/cost.** Codex hooks expose no usage. The rollout transcript
-  (flushed before the SessionEnd hook runs) carries `token_count` — extraction
-  is the noted SL-16-parity follow-up. `Capabilities()` →
-  `telemetry.tokens=false`.
+- **No per-turn cost.** Rollout token counts are extracted (opt-in, above), but
+  Codex records **no cost/price** in the token path, so `client.Cost` is always
+  nil and `telemetry.cost` stays false.
 - **At-most-once delivery** — same contract and caveats as the CC adapter.
 
 ## Enforce leg (STORY-SL7-B)

@@ -12,15 +12,15 @@ type Capability struct {
 
 // Capabilities returns the Codex adapter's capability profile, grounded in spike
 // S5's v0.145.0 addendum and architecture §1b's Codex column. verdict.apply and
-// enforce.rewrite flip true with the SL7-B enforce leg; telemetry.tokens stays
-// false until the rollout-JSONL finops follow-up.
+// enforce.rewrite flipped true with the SL7-B enforce leg; telemetry.tokens
+// flipped true with the SL7-C rollout-JSONL finops leg (SL-16 parity).
 func Capabilities() []Capability {
 	return []Capability{
 		{Key: "identity.register", Supported: true, How: "agent/create via `openbox dev init` (STORY-SL-2); provider-independent"},
 		{Key: "telemetry.hook", Supported: true, How: "SessionStart/UserPromptSubmit/Pre+PostToolUse/SessionEnd (hooks stable + ON by default >=0.145.0) → normalized events"},
 		{Key: "tool.events", Supported: true, How: "PreToolUse/PostToolUse over Bash/apply_patch/mcp__* (matcher \"*\"), paired by tool_use_id"},
 		{Key: "commit.binding", Supported: true, How: "OpenBox-Session git trailer stamped from the CODEX_THREAD_ID exec env (no liveness registry needed for agent-made commits)"},
-		{Key: "telemetry.tokens", Supported: false, How: "hooks expose no usage; rollout-JSONL token_count extraction is the noted finops follow-up (SL-16 parity)"},
+		{Key: "telemetry.tokens", Supported: true, How: "STORY-SL7-C: opt-in (ResolveFinops, default off) rollout-JSONL total_token_usage extraction at SessionEnd → client.Tokens on SessionEnded; numbers-only (INV-2), off the hot path. Cost stays unreported — the Codex token path carries no cost field"},
 		{Key: "verdict.apply", Supported: true, How: "STORY-SL7-B enforce leg: PreToolUse in-process decision → permissionDecision:deny (opt-in, default observe); tighten-only; REQUIRE_APPROVAL→deny (Codex rejects 'ask', OD-SL7-ASK)"},
 		{Key: "enforce.rewrite", Supported: true, How: "Tier-1 secret redaction → permissionDecision:allow + updatedInput on the proceed path (apply_patch tool_input[\"command\"]); allow rides ONLY a redacting rewrite, never a grant (OD-SL7-ALLOW-REWRITE); gated on content posture"},
 	}

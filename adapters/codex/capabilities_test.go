@@ -3,16 +3,16 @@ package codex
 import "testing"
 
 // The declared capability profile is the §1b coverage contract for this
-// provider: pin the keys and the truth (no tokens yet; verdict.apply +
-// enforce.rewrite true as of the SL7-B enforce leg) so a silent flip fails
-// loudly here.
+// provider: pin the keys and the truth (telemetry.tokens true as of the SL7-C
+// finops leg; verdict.apply + enforce.rewrite true as of the SL7-B enforce leg)
+// so a silent flip fails loudly here.
 func TestCapabilitiesProfile(t *testing.T) {
 	want := map[string]bool{
 		"identity.register": true,
 		"telemetry.hook":    true,
 		"tool.events":       true,
 		"commit.binding":    true,
-		"telemetry.tokens":  false,
+		"telemetry.tokens":  true, // STORY-SL7-C: opt-in rollout-JSONL finops extraction
 		"verdict.apply":     true, // STORY-SL7-B: PreToolUse deny gate (opt-in)
 		"enforce.rewrite":   true, // STORY-SL7-B: Tier-1 secret redaction via allow+updatedInput
 	}

@@ -106,6 +106,13 @@ func ResolveContentCapture() bool { return devconfig.ResolveContentCapture() }
 // prepare-commit-msg hook on SessionStart (default false; env overrides).
 func ResolveInstallGitHook() bool { return devconfig.ResolveInstallGitHook() }
 
+// ResolveFinops reports whether opt-in rollout usage extraction is enabled
+// (STORY-SL7-C / SL-16 parity). Default false: the SessionEnd transcript_path is
+// never opened for usage with it unset (byte-identical to the pre-SL7-C path). A
+// SEPARATE flag from content_capture — finops on does NOT imply content egress
+// (numbers only, INV-2).
+func ResolveFinops() bool { return devconfig.ResolveFinops() }
+
 // ResolveCoordinates resolves the NON-SECRET target coordinates (base URL + DID)
 // with zero secret-store access — used by read-only previews.
 func ResolveCoordinates() (baseURL, did string) { return devconfig.ResolveCoordinates() }

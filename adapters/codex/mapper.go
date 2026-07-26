@@ -45,6 +45,24 @@ type Mapper struct {
 	// and egress agree. Only the prompt is gated here — command strings, patch
 	// bodies, and tool output are never decoded at all (SL3-SEC-3).
 	CaptureContent bool
+	// Finops, when non-nil, carries the usage NUMBERS ONLY the finops reader
+	// extracted from the SessionEnd rollout JSONL (STORY-SL7-C / SL-16 parity).
+	// Map copies them onto the SessionEnded event only. nil (the default) ⇒ events
+	// carry no tokens/cost — byte-identical to the pre-SL7-C output. The Mapper
+	// itself does NO file I/O: the content-bearing rollout read + fail-open logging
+	// happen in RunHook (which owns the logger), so this stays a pure mapping of
+	// its inputs (like Now / NewID), preserving the INV-2 guarantee that Map never
+	// touches content.
+	Finops *FinopsUsage
+}
+
+// FinopsUsage is the numbers-only usage rollup the finops reader produces from a
+// rollout (STORY-SL7-C). It carries only the SL-1 Tokens/Cost value structs — no
+// content, by construction (see usage.go). Cost is always nil for Codex (its
+// token path carries no cost field).
+type FinopsUsage struct {
+	Tokens *client.Tokens
+	Cost   *client.Cost
 }
 
 // NewMapper returns a Mapper with production defaults (deterministic deriveID,
@@ -122,6 +140,14 @@ func (m Mapper) Map(hook HookName, e *HookEvent) (client.DevEvent, bool) {
 		// Codex's SessionEnd payload carries reason (pinned to "other" by the
 		// 0.145.0 schema) and neither model nor permission_mode — leaner than CC's.
 		ev.Metadata = compact(map[string]any{"reason": enumOr(e.Reason, reasonValues)})
+		// STORY-SL7-C (SL-16 parity): attach the opt-in rollout usage rollup, if the
+		// finops reader extracted any. Numbers only — Tokens carry no content
+		// (usage.go); Cost is always nil for Codex. nil ⇒ nothing attached (finops
+		// off or a session with no recorded token counts).
+		if m.Finops != nil {
+			ev.Tokens = m.Finops.Tokens
+			ev.Cost = m.Finops.Cost
+		}
 
 	default:
 		return client.DevEvent{}, false

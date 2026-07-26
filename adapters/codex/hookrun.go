@@ -101,6 +101,29 @@ func RunHook(sub string, stdin io.Reader, stdout io.Writer, logger *log.Logger) 
 	pinnedNow := time.Now()
 	ad.Mapper.Now = func() time.Time { return pinnedNow }
 
+	// STORY-SL7-C (SL-16 parity): on SessionEnd, behind the off-by-default finops
+	// opt-in, read the session's ROLLOUT JSONL for usage NUMBERS ONLY and hand them
+	// to the Mapper, which attaches them to the SessionEnded event. This is the ONLY
+	// place transcript_path is opened, and ONLY when ResolveFinops() is set — with
+	// finops off it is never dereferenced (byte-identical to the pre-SL7-C output).
+	// SessionEnd is teardown (off the Pre/PostToolUse hot path, NFR-2), and Codex
+	// flushes the transcript BEFORE the SessionEnd hook runs (spike S5 addendum #10),
+	// so the counts are complete. Best-effort (INV-3): any error — missing/null/
+	// oversized/malformed rollout — is logged to stderr and skipped; it never fails
+	// the flush, blocks, or writes stdout. Only the projection-only parser (usage.go)
+	// touches the file, so no content can enter the event (INV-2). When
+	// transcript_path is absent/null the read simply errors and is skipped — the
+	// adapter does NOT reconstruct a ~/.codex/sessions path (a real SessionEnd always
+	// carries transcript_path — session_end.rs @ rust-v0.145.0 — and a HOME-derived
+	// scan would fight the read-only/hermeticity posture; see OD-SL7C-FALLBACK).
+	if hook == HookSessionEnd && ResolveFinops() {
+		if tokens, cost, err := readRolloutUsage(ev.TranscriptPath); err != nil {
+			logger.Printf("finops: rollout usage skipped: %v", err)
+		} else if tokens != nil || cost != nil {
+			ad.Mapper.Finops = &FinopsUsage{Tokens: tokens, Cost: cost}
+		}
+	}
+
 	if _, err := ad.Observe(hook, ev); err != nil {
 		logger.Printf("spool %s event: %v", hook, err)
 		// fall through — SessionEnd still tries to flush what is already spooled
