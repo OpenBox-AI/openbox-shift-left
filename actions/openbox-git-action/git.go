@@ -11,20 +11,22 @@ import (
 	obgit "github.com/openbox-ai/openbox-shift-left/adapters/common/git"
 )
 
-// trailerKey is the commit-message trailer that binds a commit to its OpenBox
-// session(s). Reused from the SL-5 write side so both sides agree by
-// construction (there is exactly one authoritative key).
+// trailerKey is the commit-message trailer that binds a commit to its
+// OpenBox session(s). Reused from the write side (adapters/common/git) so
+// both sides agree by construction (there is exactly one authoritative key).
 const trailerKey = obgit.TrailerKey
 
-// maxMessageBytes bounds how much of a single commit message the resolver reads
-// (SEC-6-1). Real messages are tiny; a hostile committer could otherwise author
-// a multi-hundred-MB body to OOM the resolver and break CI (INV-3). A body that
-// exceeds this is truncated and the truncation is surfaced (never silent).
+// maxMessageBytes bounds how much of a single commit message the resolver
+// reads. Real messages are tiny; a hostile committer could otherwise author
+// a multi-hundred-MB body to OOM the resolver and break CI (INV-3). A body
+// that exceeds this is truncated and the truncation is surfaced (never
+// silent).
 const maxMessageBytes = 1 << 20 // 1 MiB
 
-// Repo is a read-only view of a git repository for server-side resolution. All
-// git invocations are argv-only (no shell), so a hostile ref name, SHA, or
-// trailer value can never inject a flag or a command (mirrors SL-5's Git.run).
+// Repo is a read-only view of a git repository for server-side resolution.
+// All git invocations are argv-only (no shell), so a hostile ref name, SHA,
+// or trailer value can never inject a flag or a command (mirrors the write
+// side's Git.run).
 type Repo struct {
 	Bin string // git binary; "" => "git"
 	Dir string // repo working dir passed via `-C`; "" => current dir
@@ -122,10 +124,10 @@ func (r Repo) parents(sha string) ([]string, error) {
 	return fields[1:], nil
 }
 
-// rangeCommits lists the commits in base..target (target-side, excluding base
-// and its ancestors), newest first, reading at most limit commits (SEC-6-1: a
-// huge range must not be buffered whole). The caller passes maxCommits+1 so it
-// can detect and disclose a cap.
+// rangeCommits lists the commits in base..target (target-side, excluding
+// base and its ancestors), newest first, reading at most limit commits (a
+// huge range must not be buffered whole). The caller passes maxCommits+1 so
+// it can detect and disclose a cap.
 func (r Repo) rangeCommits(base, target string, limit int) ([]string, error) {
 	out, err := r.run("rev-list", "--max-count", strconv.Itoa(limit), "--end-of-options", base+".."+target)
 	if err != nil {
@@ -136,10 +138,11 @@ func (r Repo) rangeCommits(base, target string, limit int) ([]string, error) {
 
 // mergeIntroduced lists the commits a merge commit brings in that were not
 // already on its first-parent line: `rev-list <merge> ^<merge>^1`. The merge
-// commit itself is included (it is reachable from itself but not from its first
-// parent). This is the "reachable originals" set for a merge (the story). The
-// `^rev` exclude form is used (not `--not`) so ordering after --end-of-options
-// is unambiguous. Bounded by limit (== maxCommits+1) like rangeCommits.
+// commit itself is included (it is reachable from itself but not from its
+// first parent). This is the "reachable originals" set for a merge. The
+// `^rev` exclude form is used (not `--not`) so ordering after
+// --end-of-options is unambiguous. Bounded by limit (== maxCommits+1) like
+// rangeCommits.
 func (r Repo) mergeIntroduced(merge string, limit int) ([]string, error) {
 	out, err := r.run("rev-list", "--max-count", strconv.Itoa(limit), "--end-of-options", merge, "^"+merge+"^1")
 	if err != nil {
@@ -148,10 +151,11 @@ func (r Repo) mergeIntroduced(merge string, limit int) ([]string, error) {
 	return nonEmptyLines(out), nil
 }
 
-// trailerBlockSessions returns the OpenBox-Session values in a commit's trailing
-// trailer block — the authoritative read (S3 R7). This is byte-for-byte the
-// command SL-5's own tests assert against, so the write and read sides agree.
-// The read is size-bounded (SEC-6-1); truncated reports if the block was cut.
+// trailerBlockSessions returns the OpenBox-Session values in a commit's
+// trailing trailer block — the authoritative read. This is byte-for-byte
+// the command the write side's own tests assert against, so the write and
+// read sides agree. The read is size-bounded; truncated reports if the
+// block was cut.
 func (r Repo) trailerBlockSessions(sha string) (ids []string, truncated bool, err error) {
 	out, truncated, err := r.runLimited(maxMessageBytes, "show", "-s",
 		"--format=%(trailers:key="+trailerKey+",valueonly,separator=%x0A)",
@@ -162,11 +166,12 @@ func (r Repo) trailerBlockSessions(sha string) (ids []string, truncated bool, er
 	return nonEmptyLines(out), truncated, nil
 }
 
-// bodySessions full-body-scans a commit message for column-0 `OpenBox-Session:`
-// lines (SL6-SCAN). It recovers ids left mid-body by a squash performed before
-// SL-5's hook (its healing) was in place — where the trailer parser cannot see
-// them. Comment/indented lines are ignored (a real trailer is unindented). The
-// read is size-bounded (SEC-6-1); truncated reports if the body was cut.
+// bodySessions full-body-scans a commit message for column-0
+// `OpenBox-Session:` lines. It recovers ids left mid-body by a squash
+// performed before the write-side hook (its healing) was in place — where
+// the trailer parser cannot see them. Comment/indented lines are ignored (a
+// real trailer is unindented). The read is size-bounded; truncated reports
+// if the body was cut.
 func (r Repo) bodySessions(sha string) (ids []string, truncated bool, err error) {
 	out, truncated, err := r.runLimited(maxMessageBytes, "show", "-s", "--format=%B", "--end-of-options", sha)
 	if err != nil {
@@ -175,9 +180,10 @@ func (r Repo) bodySessions(sha string) (ids []string, truncated bool, err error)
 	return scanSessionLines(out), truncated, nil
 }
 
-// scanSessionLines finds `OpenBox-Session: <value>` lines at column 0 anywhere
-// in the message (mirrors SL-5's scanSessionLines; kept local because the read
-// side is a separate module and the write-side helper is unexported).
+// scanSessionLines finds `OpenBox-Session: <value>` lines at column 0
+// anywhere in the message (mirrors the write side's scanSessionLines; kept
+// local because the read side is a separate module and the write-side
+// helper is unexported).
 func scanSessionLines(msg string) []string {
 	var out []string
 	prefix := trailerKey + ":"

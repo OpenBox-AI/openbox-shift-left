@@ -60,13 +60,13 @@ func (s *secretToolStore) Delete(service, account string) error {
 
 // --- macOS: keychain via `security` -----------------------------------------
 //
-// CAVEAT (routed to G_SEC / Sam): the `security add-generic-password` CLI takes
-// the secret with `-w <value>` on argv, so the value is briefly visible via
-// `ps` during the call — unlike the Linux stdin path. macOS has no no-cgo,
-// no-argv path through the `security` binary. Options for the security review:
-// (a) accept the transient local-only exposure, or (b) ship a small keychain
-// helper. Phase-1 build implements (a) and flags it. INV-1's persistent
-// guarantee (never at rest in repo/logs) still holds.
+// Caveat: the `security add-generic-password` CLI takes the secret with
+// `-w <value>` on argv, so the value is briefly visible via `ps` during the
+// call — unlike the Linux stdin path. macOS has no cgo-free, argv-free path
+// through the `security` binary. Options: (a) accept the transient
+// local-only exposure, or (b) ship a small keychain helper. This
+// implements (a). INV-1's persistent guarantee (never at rest in
+// repo/logs) still holds.
 
 type keychainStore struct{ bin string }
 

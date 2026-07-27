@@ -1,26 +1,26 @@
 // Package provider is the shared install-time SPI between `openbox dev init`
-// (STORY-SL-2) and the per-tool adapter installers (SL-4 Claude Code, SL-7
-// Codex, SL-8 Cursor). It is the "install half" of the generic adapter seam
-// (architecture §1b: register / emit / apply / capabilities).
+// and the per-tool adapter installers (Claude Code, Codex, Cursor): register /
+// emit / apply / capabilities.
 //
-// It lives in its OWN module — importable by both the `cli` module and every
-// adapter module — so an adapter can implement the Installer interface without
+// It lives in its own module, importable by both the CLI module and every
+// adapter module, so an adapter can implement the Installer interface without
 // crossing the CLI's `internal/` boundary, and the CLI can register an adapter
-// without depending on adapter internals leaking the other way. The concrete
-// registry (which names map to which installers) is the CLI's composition root,
-// NOT this module: putting it here would force this module to import the
-// adapters, and the adapters import this module — an import cycle. See
-// ADR-0001. This module therefore has zero dependencies.
+// without adapter internals leaking the other way. The concrete registry
+// (which names map to which installers) lives in the CLI's composition root,
+// not here: putting it in this package would force it to import the adapters,
+// while the adapters import this package — an import cycle. This module
+// therefore has zero dependencies.
 //
-// SL-2 owns identity + credentials; it does NOT own provider config *content*.
-// Each adapter story registers an Installer that writes its tool's native
-// config. Until an adapter is built, its slot is a Stub: Available()==false,
-// Plan() only PRINTS the manual config the user must apply, and Install()
-// returns ErrNotBuilt so `dev init` exits non-zero for that provider.
+// `dev init` owns identity + credentials; it does not own provider config
+// *content*. Each adapter registers an Installer that writes its tool's
+// native config. Until an adapter is built, its slot is a Stub:
+// Available()==false, Plan() only prints the manual config the user must
+// apply, and Install() returns ErrNotBuilt so `dev init` exits non-zero for
+// that provider.
 //
-// INV-1: an Installer references the credential in the OS secret store
-// (service + account coordinates + the non-secret DID); it MUST NOT receive or
-// embed the secret value itself.
+// An Installer references the credential in the OS secret store (service +
+// account coordinates + the non-secret DID); it must not receive or embed the
+// secret value itself.
 package provider
 
 import (
@@ -56,26 +56,29 @@ type CredentialRef struct {
 	PrivateKeyAccount string // account holding the Ed25519 seed
 	DID               string // did:aip:... (not secret)
 	BaseURL           string // optional core base URL; empty ⇒ adapter default
-	ContentCapture    *bool  // org content posture; nil ⇒ the adapter default (ON as of 2026-07-15). Set to &false to pin metadata-only.
-	InstallGitHook    bool   // STORY-SL-5: persist the ambient commit-hook install preference
-	// AgentID is the backend PolicyEntity subject — the agent id `openbox dev sync`
-	// and the session-start staleness check read to fetch this agent's current
-	// policy (STORY-E6-S8, ADR-0005). Non-secret (INV-1), persisted to dev.json.
+	ContentCapture    *bool  // org content posture; nil ⇒ the adapter default (content capture ON). Set to &false to pin metadata-only.
+	InstallGitHook    bool   // persist the ambient commit-hook install preference
+
+	// AgentID is the backend PolicyEntity subject — the agent id `openbox dev
+	// sync` and the session-start staleness check read to fetch this agent's
+	// current policy. Non-secret, persisted to dev.json.
 	AgentID string
-	// BackendURL is the openbox-backend CONTROL-PLANE base (distinct from BaseURL,
-	// the core data-plane base). Persisted so `dev sync` / staleness can reach the
-	// policy read endpoint without re-supplying OPENBOX_BACKEND_URL. Non-secret.
+	// BackendURL is the openbox-backend control-plane base (distinct from
+	// BaseURL, the core data-plane base). Persisted so `dev sync` / staleness
+	// can reach the policy read endpoint without re-supplying
+	// OPENBOX_BACKEND_URL. Non-secret.
 	BackendURL string
+
 	// Enforce / Tier2 / Findings persist the enforce-mode posture chosen at
-	// `openbox dev init` time (via --enforce and its granular siblings) INTO the
-	// dev config, so the runtime hook reads them from dev.json and needs NO runtime
-	// environment variable (ADR-0006 onboarding simplification). All default false
-	// (observe-only) — enforcement stays opt-in (unchanged posture). *bool where an
-	// absent field must mean "adapter default" rather than "off":
+	// `openbox dev init` time (via --enforce and its granular siblings) into
+	// the dev config, so the runtime hook reads them from dev.json and needs
+	// no runtime environment variable. All default false (observe-only) —
+	// enforcement stays opt-in. *bool where an absent field must mean
+	// "adapter default" rather than "off":
 	//   - Enforce: plain bool — absent ⇒ observe (the whole product default).
-	//   - Tier2 / Findings: *bool — nil ⇒ their own adapter defaults (both OFF), so
-	//     `dev init` without --enforce does not pin them and override a future
-	//     default change.
+	//   - Tier2 / Findings: *bool — nil ⇒ their own adapter defaults (both
+	//     OFF), so `dev init` without --enforce does not pin them and
+	//     override a future default change.
 	Enforce  bool
 	Tier2    *bool
 	Findings *bool
@@ -101,9 +104,9 @@ func Supported() []string {
 }
 
 // Stub is the Installer for a recognized provider whose adapter is not built
-// yet. It is Available()==false and only describes the manual config. Adapter
-// stories (SL-4/SL-7/SL-8) replace their Stub with a real installer in the CLI
-// registry. The Manual func renders provider-specific manual-config guidance.
+// yet. It is Available()==false and only describes the manual config. A real
+// adapter replaces its Stub with a real installer in the CLI registry. The
+// Manual func renders provider-specific manual-config guidance.
 type Stub struct {
 	ProviderName Name
 	Manual       func(ref CredentialRef) string

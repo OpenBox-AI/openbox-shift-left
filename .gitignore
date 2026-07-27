@@ -1,4 +1,4 @@
-# Claude Code tooling / fab7-sdlc skill install (local tooling, not project content)
+# Claude Code tooling (local tooling, not project content)
 .claude/
 
 # OS / editor cruft
@@ -17,6 +17,3 @@ bin/
 .env
 .env.*
 !.env.example
-
-# Dev
-.fab7/

@@ -7,32 +7,34 @@ import (
 	"strings"
 )
 
-// Tier-1 local secret/entropy detection (STORY-E6-S9, design sidecar-policy-sync.md
-// §7 + OD-SYNC-10). Given a content string (a file body carried on the LOCAL
-// DecisionRequest.Content), the detector returns a redacted copy in which each
-// detected secret is replaced by an env-var-style placeholder, plus the category
-// names that fired. It is the redaction SOURCE the E6-S4 `updatedInput` apply path
-// was built to consume — the "fourth verdict" (design §7 T1: redact-and-continue).
+// Tier-1 local secret/entropy detection. Given a content string (a file
+// body carried on the local DecisionRequest.Content), the detector returns
+// a redacted copy in which each detected secret is replaced by an
+// env-var-style placeholder, plus the category names that fired. It's the
+// redaction source the apply path's `updatedInput` was built to consume —
+// the "fourth verdict": redact-and-continue.
 //
-// PROPERTIES (all load-bearing):
-//   - DETERMINISTIC + STATELESS + CONCURRENCY-SAFE: the pattern set is compiled once
-//     at package init; Redact reads no shared mutable state, so the server can call
-//     it from parallel connection handlers with no lock (INV-3b: no I/O either).
-//   - LOCAL-ONLY (INV-1/INV-2): it never logs the content or the secret, never
-//     performs I/O. Its output rides ONLY the LOCAL Decision.RedactedContent
-//     (never client.Evaluation → never egress); category names (never the secret)
-//     are the only thing that reaches the durable audit.
-//   - PLACEHOLDER = env-var ref (design §7): a secret → `${OPENBOX_REDACTED_<CAT>}`.
-//     This deliberately deviates from the guardrails-api PII/ban-list masking styles
-//     (`<ENTITY_TYPE>` / `*`×len): for a *secret*, the right nudge is to externalize
-//     the value into an env var, not to blank it — the redacted body is what the
-//     tool then actually writes (redact-and-continue), so an env-var ref keeps it
-//     legible and points the developer at the fix.
+// Properties (all load-bearing):
+//   - Deterministic + stateless + concurrency-safe: the pattern set is
+//     compiled once at package init; Redact reads no shared mutable state,
+//     so the server can call it from parallel connection handlers with no
+//     lock (INV-3b: no I/O either).
+//   - Local-only (INV-1/INV-2): it never logs the content or the secret,
+//     never performs I/O. Its output rides only the local
+//     Decision.RedactedContent (never client.Evaluation → never egress);
+//     category names (never the secret) are the only thing that reaches
+//     the durable audit.
+//   - Placeholder = env-var ref: a secret → `${OPENBOX_REDACTED_<CAT>}`.
+//     This deliberately deviates from PII/ban-list masking styles
+//     (`<ENTITY_TYPE>` / `*`×len): for a secret, the right nudge is to
+//     externalize the value into an env var, not to blank it — the
+//     redacted body is what the tool then actually writes, so an env-var
+//     ref keeps it legible and points the developer at the fix.
 //
-// The pattern set is intentionally CONSERVATIVE (high-confidence named formats +
-// a high-entropy base64-class fallback) to keep false positives low — a false
-// positive silently rewrites a developer's file, so the detector errs toward
-// missing a secret over corrupting a legitimate write (AC-6).
+// The pattern set is intentionally conservative (high-confidence named
+// formats + a high-entropy base64-class fallback) to keep false positives
+// low — a false positive silently rewrites a developer's file, so the
+// detector errs toward missing a secret over corrupting a legitimate write.
 
 // Redaction placeholders and thresholds.
 const (
@@ -138,14 +140,15 @@ func (d *secretDetector) Redact(text string) (redacted string, categories []stri
 	return out, sortedCategories(catSet), true
 }
 
-// redactEntropy is the generic fallback: it replaces long, high-entropy base64-class
-// tokens no named pattern matched, but ONLY when the token sits in a VALUE POSITION
-// — immediately after an `=` or `:` (through any quoting) — i.e. it looks assigned
-// (`ANYKEY=<random>`, `X-Token: <random>`), not embedded blob data. This assignment
-// gate is the "err toward missing over corrupting" guarantee for the entropy pass
-// (G3 Finding 2): free-floating base64 — data: URIs, PEM certificate lines, minified
-// bundles, test fixtures — is NOT preceded by an assignment delimiter, so it is left
-// intact. It walks the string once; placeholders already inserted are skipped.
+// redactEntropy is the generic fallback: it replaces long, high-entropy
+// base64-class tokens no named pattern matched, but only when the token
+// sits in a value position — immediately after an `=` or `:` (through any
+// quoting) — i.e. it looks assigned (`ANYKEY=<random>`, `X-Token: <random>`),
+// not embedded blob data. This assignment gate is the "err toward missing
+// over corrupting" guarantee for the entropy pass: free-floating base64 —
+// data: URIs, PEM certificate lines, minified bundles, test fixtures — is
+// not preceded by an assignment delimiter, so it is left intact. It walks
+// the string once; placeholders already inserted are skipped.
 func (d *secretDetector) redactEntropy(text string, catSet map[string]struct{}) string {
 	var b strings.Builder
 	b.Grow(len(text))

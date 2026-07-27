@@ -20,11 +20,12 @@ const managedMarker = "managed-by: openbox-shift-left (STORY-SL-5)"
 // entrypoint) must still exit 0 (see RunPrepareCommitMsg / cmd). A stamping
 // failure must never abort the developer's commit.
 //
-// It does NOT special-case the commit source: `--amend` (source "commit") and
-// rebase squash (source "squash") re-fire the hook, and addIfDifferent keeps
-// those idempotent/additive. Merge nodes (source "merge") get the current
-// session too, harmlessly — SL-6 attributes the reachable originals, not the
-// merge node (S3 R9), so an extra merge-node line changes nothing downstream.
+// It does not special-case the commit source: `--amend` (source "commit")
+// and rebase squash (source "squash") re-fire the hook, and
+// addIfDifferent keeps those idempotent/additive. Merge nodes (source
+// "merge") get the current session too, harmlessly — the git action
+// attributes the reachable originals, not the merge node, so an extra
+// merge-node line changes nothing downstream.
 func (g Git) PrepareCommitMsg(msgFile string, sessions []string) error {
 	return g.StampMessageFile(msgFile, sessions)
 }
@@ -51,7 +52,8 @@ func (g Git) RunPrepareCommitMsg(args []string, r SessionResolver, logf func(str
 	// lines a squash left mid-body and heals them into the trailing block, so a
 	// human squashing agent commits does not drop their attribution. With no
 	// session in scope AND nothing to harvest, StampMessageFile is a no-op —
-	// the commit stays unattributed (SL-6 records the reason), never guessed.
+	// the commit stays unattributed (the git action records the reason),
+	// never guessed.
 	sessions := g.ResolveSessions(r)
 	if err := g.StampMessageFile(msgFile, sessions); err != nil {
 		return len(sessions), fmt.Errorf("stamp %s: %w", msgFile, err)

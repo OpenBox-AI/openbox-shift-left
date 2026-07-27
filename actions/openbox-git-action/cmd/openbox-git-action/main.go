@@ -1,6 +1,6 @@
-// Command openbox-git-action is the CI entrypoint for STORY-SL-6: at
-// push/deploy it resolves the OpenBox session(s) that produced the pushed
-// commit and emits a Deploy governance event linked to them.
+// Command openbox-git-action is the CI entrypoint: at push/deploy it
+// resolves the OpenBox session(s) that produced the pushed commit and
+// emits a Deploy governance event linked to them.
 //
 // It is designed to run as a CI step (GitHub Actions and equivalents). Config
 // comes from flags with CI-env fallbacks:
@@ -19,11 +19,11 @@
 //	OPENBOX_DID        the agent's did:aip:<uuid>
 //	OPENBOX_SEED       base64 raw 32-byte Ed25519 seed (INV-1: never logged)
 //
-// Ownership verification (STORY-SL-15 — OFF by default; SL5-SEC-1). With it off,
-// every trailer stays an unverified claim and deploys resolve `inferred`
-// (byte-identical to the NoopVerifier default). With it on, each trailer session
-// id is verified as OWNED BY the deploy agent before it can be `attributed`; a
-// forged/other id stays out of verified_session_ids.
+// Ownership verification (off by default). With it off, every trailer stays
+// an unverified claim and deploys resolve `inferred` (the NoopVerifier
+// default). With it on, each trailer session id is verified as owned by the
+// deploy agent before it can be `attributed`; a forged/other id stays out
+// of verified_session_ids.
 //
 //	OPENBOX_OWNERSHIP_VERIFY=1     enable ownership verification (default: off)
 //	OPENBOX_OWNERSHIP_API_URL      openbox-backend control-plane origin (https; bare, no path)
@@ -80,12 +80,12 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 
-	// SL5-SEC-1 verifier selection. Default: NoopVerifier — the session-ownership
-	// read API is external/deferred (EXT-lineage / FR-7), so resolved trailers stay
-	// unverified claims and deploys resolve `inferred`. STORY-SL-15: when the
-	// operator opts in AND we have creds to sign the read (i.e. not --dry-run), wire
-	// the real apiVerifier so OWNED sessions become `attributed`. Any config fault
-	// degrades to Noop — never break CI, never over-attribute over telemetry.
+	// Verifier selection. Default: NoopVerifier — resolved trailers stay
+	// unverified claims and deploys resolve `inferred`. When the operator
+	// opts in and we have creds to sign the read (i.e. not --dry-run), wire
+	// the real apiVerifier so owned sessions become `attributed`. Any
+	// config fault degrades to Noop — never break CI, never over-attribute
+	// over telemetry.
 	resolver := gitaction.NewResolver(*dir, selectVerifier(*dryRun, logger))
 
 	act := &gitaction.Action{
@@ -146,12 +146,12 @@ func envOr(key, def string) string {
 	return def
 }
 
-// selectVerifier picks the SL5-SEC-1 OwnershipVerifier (STORY-SL-15). It returns
-// the real apiVerifier ONLY when the operator explicitly opted in
-// (OPENBOX_OWNERSHIP_VERIFY=1), a read-API base URL is set, and we are not in
-// --dry-run (which carries no creds to sign the read). In every other case — flag
-// off, no URL, dry-run, or a construction fault — it returns NoopVerifier, so the
-// default behavior is byte-identical to today (everything `inferred`) and a
+// selectVerifier picks the OwnershipVerifier. It returns the real
+// apiVerifier only when the operator explicitly opted in
+// (OPENBOX_OWNERSHIP_VERIFY=1), a read-API base URL is set, and we are not
+// in --dry-run (which carries no creds to sign the read). In every other
+// case — flag off, no URL, dry-run, or a construction fault — it returns
+// NoopVerifier, so the default behavior is everything `inferred` and a
 // misconfigured verifier can never break the deploy or over-attribute.
 func selectVerifier(dryRun bool, logger *log.Logger) gitaction.OwnershipVerifier {
 	if dryRun || os.Getenv("OPENBOX_OWNERSHIP_VERIFY") != "1" {

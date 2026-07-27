@@ -16,25 +16,26 @@ type DeployMeta struct {
 }
 
 // BuildDeployEvent maps a Resolution + deploy context onto the normalized
-// DevEvent the SL-3 client emits (contract event_type = Deploy). The resolved
-// session set and the attribution outcome ride in metadata (the S6 §4
-// metadata-JSONB stopgap): no external schema is needed to WRITE the link; the
-// queryable session->commit->deploy JOIN is FR-7 (external/deferred).
+// DevEvent the client emits (contract event_type = Deploy). The resolved
+// session set and the attribution outcome ride in metadata: no external
+// schema is needed to write the link; a queryable session->commit->deploy
+// JOIN is external/deferred.
 //
 // Identity/lineage:
-//   - The SIGNING identity (client.Config.DID) is the agent's real did:aip:<uuid>
-//     — core validates it. DeveloperDID here is that same value.
-//   - deploy_did is a SYNTHETIC lineage label (`did:aip:deploy-<shortsha>-<unix>`)
-//     carried only in metadata; core has no deploy-DID primitive (verified
-//     cross-repo), so it is never sent as the signing DID.
+//   - The signing identity (client.Config.DID) is the agent's real
+//     did:aip:<uuid> — core validates it. DeveloperDID here is that same
+//     value.
+//   - deploy_did is a synthetic lineage label
+//     (`did:aip:deploy-<shortsha>-<unix>`) carried only in metadata; core
+//     has no deploy-DID primitive, so it is never sent as the signing DID.
 //
 // Idempotency (INV-5): event_id == deploy_id == `deploy-<env>-<full-sha>` is
-// stable across CI re-runs of the same artifact (full SHA, so two commits with
-// a shared short prefix never collide — P2), and run_id == deploy_id is stable
-// too, so a retried deploy of the same commit to the same environment resolves
-// to the same core session rather than a new one and is not double-counted once
-// core dedupes on metadata.event_id (SL3-IDEMPOTENCY / EXT-core). deploy_did
-// (metadata) carries the wall-clock timestamp as the FR-6 lineage label and so
+// stable across CI re-runs of the same artifact (full SHA, so two commits
+// with a shared short prefix never collide), and run_id == deploy_id is
+// stable too, so a retried deploy of the same commit to the same
+// environment resolves to the same core session rather than a new one and
+// is not double-counted once core dedupes on metadata.event_id. deploy_did
+// (metadata) carries the wall-clock timestamp as the lineage label and so
 // legitimately varies per run.
 func BuildDeployEvent(res Resolution, meta DeployMeta, now time.Time) client.DevEvent {
 	ts := now.UTC()
@@ -68,10 +69,10 @@ func BuildDeployEvent(res Resolution, meta DeployMeta, now time.Time) client.Dev
 		// Fully-qualified claims (each with verified/source/reason). This is the
 		// authoritative session record — consumers MUST read `verified` here.
 		"sessions": sessions,
-		// VERIFIED ids only (SEC-6-2): the flat convenience list a future FR-7
-		// lineage JOIN would bind to must never carry an unverified/forged claim
-		// stripped of its qualifier. Empty in Phase-1 (NoopVerifier verifies
-		// nothing) — honestly reflecting that nothing is proven yet.
+		// Verified ids only: the flat convenience list a future lineage JOIN
+		// would bind to must never carry an unverified/forged claim
+		// stripped of its qualifier. Empty with the default NoopVerifier —
+		// honestly reflecting that nothing is proven yet.
 		"verified_session_ids": verifiedIDs,
 		"scope_walked":         res.ScopeWalked,
 		"scope_total":          res.ScopeTotal,
@@ -93,12 +94,12 @@ func BuildDeployEvent(res Resolution, meta DeployMeta, now time.Time) client.Dev
 		SchemaVersion: client.SchemaVersion,
 		EventID:       deployID, // INV-5 idempotency key
 		EventType:     client.EventDeploy,
-		// run_id: the STABLE deploy id (deploy-<env>-<full-sha>) — a Deploy is
-		// not itself inside one developer session, and a multi-session fan-in
-		// must not be collapsed into one run_id. Being stable across re-runs
-		// (unlike the timestamped deploy_did) makes (workflow_id, run_id)
-		// idempotent per artifact (P1). The resolved developer sessions live in
-		// metadata.
+		// run_id: the stable deploy id (deploy-<env>-<full-sha>) — a Deploy is
+		// not itself inside one developer session, and a multi-session
+		// fan-in must not be collapsed into one run_id. Being stable across
+		// re-runs (unlike the timestamped deploy_did) makes (workflow_id,
+		// run_id) idempotent per artifact. The resolved developer sessions
+		// live in metadata.
 		SessionID:    deployID,
 		DeveloperDID: meta.DeveloperDID,
 		WorkspaceID:  meta.Repo, // workflow_id groups deploys by repo ("" => DID fallback)
@@ -108,9 +109,9 @@ func BuildDeployEvent(res Resolution, meta DeployMeta, now time.Time) client.Dev
 	}
 }
 
-// deployIDFor builds the stable, idempotent, collision-free deploy id. It uses
-// the FULL commit SHA (P2): a 7-hex prefix would let two distinct commits share
-// one event_id and be merged by a future event_id dedupe.
+// deployIDFor builds the stable, idempotent, collision-free deploy id. It
+// uses the full commit SHA: a 7-hex prefix would let two distinct commits
+// share one event_id and be merged by a future event_id dedupe.
 func deployIDFor(environment, sha string) string {
 	env := environment
 	if env == "" {

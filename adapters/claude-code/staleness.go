@@ -15,22 +15,23 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/decision"
 )
 
-// Session-start policy staleness (STORY-E6-S8, ADR-0005 §Decision-3).
+// Session-start policy staleness (ADR-0005).
 //
-// The daemon does ZERO network I/O; freshness is a best-effort CLIENT-SIDE
-// compare here, on SessionStart (off the tool hot path). It pulls the agent's
-// current backend policy PIN (id, updated_at) and compares it to the local
-// bundle PIN:
+// The daemon does zero network I/O; freshness is a best-effort client-side
+// compare here, on SessionStart (off the tool hot path). It pulls the
+// agent's current backend policy pin (id, updated_at) and compares it to
+// the local bundle pin:
 //
-//   - all-present + match, OR can't-determine (no org key in the hook env,
-//     offline, fetch error, no local pin) → PROCEED on the last-good bundle;
-//     NEVER deny at fetch time.
+//   - all-present + match, or can't-determine (no org key in the hook env,
+//     offline, fetch error, no local pin) → proceed on the last-good
+//     bundle; never deny at fetch time.
 //   - mismatch + fail-open (default) → warn (stderr + SessionStart
-//     additionalContext) and proceed on the STALE bundle.
-//   - mismatch + fail-closed → write a content-free per-session STALE MARKER; the
-//     PreToolUse enforce gate denies until `openbox dev sync` clears it (CC has no
-//     "deny a session" primitive at SessionStart, so the block is realized where
-//     enforce already has teeth — the tool-call gate).
+//     additionalContext) and proceed on the stale bundle.
+//   - mismatch + fail-closed → write a content-free per-session stale
+//     marker; the PreToolUse enforce gate denies until `openbox dev sync`
+//     clears it (CC has no "deny a session" primitive at SessionStart, so
+//     the block is realized where enforce already has teeth — the
+//     tool-call gate).
 //
 // It is fully fail-safe: any error proceeds, and it never writes a
 // non-additionalContext stdout in fail-open, and never blocks a session.
@@ -59,7 +60,7 @@ func checkPolicyStaleness(logger *log.Logger, sessionID string, stdout interface
 
 	backendID, backendUpdated, err := fetchPolicyPin(backendURL, token, agentID)
 	if err != nil {
-		// Offline / fetch error → proceed on the last-good bundle (ADR-0005 §Decision-3).
+		// Offline / fetch error → proceed on the last-good bundle.
 		logger.Printf("staleness check inconclusive (proceeding on last-good bundle): %v", err)
 		return
 	}
@@ -71,10 +72,11 @@ func checkPolicyStaleness(logger *log.Logger, sessionID string, stdout interface
 	// Mismatch. Fail-open warns and proceeds; fail-closed marks the session stale.
 	if resolveFailurePolicy() == FailClosed {
 		if err := writeStaleMarker(sessionID); err != nil {
-			// Even the marker is best-effort: a write failure must not block the
-			// session. It degrades to "no marker" → the PreToolUse gate proceeds
-			// (fail-open on the marker write itself), consistent with never
-			// over-blocking on an infra fault (OD9).
+			// Even the marker is best-effort: a write failure must not
+			// block the session. It degrades to "no marker" → the
+			// PreToolUse gate proceeds (fail-open on the marker write
+			// itself), consistent with never over-blocking on an infra
+			// fault.
 			logger.Printf("staleness: could not write stale marker (session proceeds): %v", err)
 		} else {
 			logger.Printf("staleness: policy changed and session is fail-closed — marked stale; run `openbox dev sync`")
@@ -260,8 +262,8 @@ func ClearAllStaleMarkers() error {
 }
 
 // staleGateDecision returns a synthesized deny Decision when the session is
-// marked stale AND the org is fail-closed — the PreToolUse realization of the
-// SessionStart fail-closed staleness block (ADR-0005 §Decision-3). It reuses the
+// marked stale and the org is fail-closed — the PreToolUse realization of
+// the SessionStart fail-closed staleness block (ADR-0005). It reuses the
 // unchanged apply cascade: a HALT verdict → mapVerdict deny. FailOpen is false
 // (this is an intentional, real deny, not an outage fallback) and the Source is
 // sourceLocalBundle-equivalent so telemetry reads it as a governed decision. The

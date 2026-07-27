@@ -22,14 +22,15 @@ import (
 // Why this is parallel-safe (the multiple-concurrent-sessions requirement):
 //   - Sessions in DIFFERENT worktrees never collide — the worktree filter is
 //     exact, so each commit resolves to its own repo's session.
-//   - Sessions in the SAME worktree resolve by recency: the committing session
-//     refreshed its record on the PreToolUse that fired ms before the commit, so
-//     it is the freshest. This is best-effort (a tight interleaving race is
-//     possible) — acceptable because Phase-1 is observe-only and SL-6 makes the
-//     authoritative binding server-side at push (S3 R7).
+//   - Sessions in the same worktree resolve by recency: the committing
+//     session refreshed its record on the PreToolUse that fired ms before
+//     the commit, so it is the freshest. This is best-effort (a tight
+//     interleaving race is possible) — acceptable because the git action
+//     makes the authoritative binding server-side at push.
 //
-// Records carry ONLY structural fields (session id, cwd, timestamp) — never
-// content (INV-2); cwd is already a blessed structural field in the SL-1 schema.
+// Records carry only structural fields (session id, cwd, timestamp) —
+// never content (INV-2); cwd is already a blessed structural field in
+// the contract's schema.
 const (
 	EnvSessionDir = "OPENBOX_SESSION_DIR" // overrides the registry location
 	EnvSessionTTL = "OPENBOX_SESSION_TTL" // staleness cutoff, in seconds
@@ -45,7 +46,7 @@ const defaultSessionTTL = 8 * time.Hour
 type SessionRecord struct {
 	SessionID string `json:"session_id"`
 	Cwd       string `json:"cwd"`
-	UpdatedAt int64  `json:"updated_at"` // unix NANOseconds (sub-second recency tiebreak, F4)
+	UpdatedAt int64  `json:"updated_at"` // unix nanoseconds (sub-second recency tiebreak)
 }
 
 // DefaultSessionDir is the shared registry location used by both the adapter
@@ -67,9 +68,10 @@ func DefaultSessionDir() string {
 // is atomic (temp + rename) so a concurrent resolver never reads a partial file.
 // Best-effort: the caller logs an error fail-open (never blocks a tool call).
 func WriteSessionRecord(dir, sessionID, cwd string, now time.Time) error {
-	// Validate at the source too (SL5-SEC-3): the trailer sink already gates every
-	// id, but a malformed/secret-shaped id should never even be persisted to the
-	// registry. Invalid → skip silently (best-effort; never blocks a hook).
+	// Validate at the source too: the trailer sink already gates every
+	// id, but a malformed/secret-shaped id should never even be
+	// persisted to the registry. Invalid → skip silently (best-effort;
+	// never blocks a hook).
 	if err := validateSessionID(sessionID); err != nil {
 		return nil
 	}
@@ -80,9 +82,10 @@ func WriteSessionRecord(dir, sessionID, cwd string, now time.Time) error {
 	if err != nil {
 		return err
 	}
-	// Unique temp name (F6): two hooks for the SAME session firing concurrently
-	// must not clobber a shared "<id>.tmp". CreateTemp yields "<id>-<rand>.tmp"
-	// (0600); the resolver ignores non-.json files. Rename is atomic.
+	// Unique temp name: two hooks for the same session firing concurrently
+	// must not clobber a shared "<id>.tmp". CreateTemp yields
+	// "<id>-<rand>.tmp" (0600); the resolver ignores non-.json files.
+	// Rename is atomic.
 	f, err := os.CreateTemp(dir, sanitizeForFile(sessionID)+"-*.tmp")
 	if err != nil {
 		return err

@@ -6,30 +6,31 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/client"
 )
 
-// Evaluator is the local decision seam. Given a DecisionRequest it returns the
-// governance Evaluation — synchronously, with NO network I/O (INV-3b). This is
-// the extension point ADR-0003 describes: the Phase-1 default is bundleEvaluator
-// (a local rule bundle); a future embedded-OPA evaluator that loads core's rego
-// and queries data.org.<org>.policy_<id> (feeding it BuildOPAInput) implements
-// the SAME interface and drops in with zero change to the server or protocol.
+// Evaluator is the local decision seam. Given a DecisionRequest it returns
+// the governance Evaluation — synchronously, with no network I/O (INV-3b).
+// The default is bundleEvaluator (a local rule bundle); a future
+// embedded-OPA evaluator that loads core's rego and queries
+// data.org.<org>.policy_<id> (feeding it BuildOPAInput) implements the same
+// interface and drops in with zero change to the server or protocol.
 //
-// An Evaluator MUST be safe for concurrent use (the server serves connections in
-// parallel) and MUST NOT block on I/O — it answers from already-resident policy.
+// An Evaluator must be safe for concurrent use (the server serves
+// connections in parallel) and must not block on I/O — it answers from
+// already-resident policy.
 type Evaluator interface {
 	Evaluate(req DecisionRequest) client.Evaluation
 }
 
-// bundleEvaluator is the default local Evaluator: it matches the request against
-// the rules of an in-memory Bundle and yields a client.Evaluation.
+// bundleEvaluator is the default local Evaluator: it matches the request
+// against the rules of an in-memory Bundle and yields a client.Evaluation.
 //
-// Aggregation is MAX-SEVERITY across all matching rules, mirroring core's
-// HighestPriorityVerdict (openbox-core internal/content/governance.go:117-131,
-// priority ALLOW<CONSTRAIN<REQUIRE_APPROVAL<BLOCK<HALT). This is deliberately
-// safer than first-match-wins: overlapping rules can never *under*-block. The
-// SDK's full enforce cascade (HALT>BLOCK>guardrails>REQUIRE_APPROVAL>CONSTRAIN>
-// ALLOW, verdict_handler.enforce_verdict) is applied by E6-S2 when it turns this
-// Evaluation into a Claude Code permissionDecision; here we produce the verdict
-// the cascade acts on.
+// Aggregation is max-severity across all matching rules, mirroring core's
+// HighestPriorityVerdict (priority
+// ALLOW<CONSTRAIN<REQUIRE_APPROVAL<BLOCK<HALT). This is deliberately safer
+// than first-match-wins: overlapping rules can never under-block. The SDK's
+// full enforce cascade (HALT>BLOCK>guardrails>REQUIRE_APPROVAL>CONSTRAIN>
+// ALLOW) is applied by the apply path when it turns this Evaluation into a
+// Claude Code permissionDecision; here we produce the verdict the cascade
+// acts on.
 type bundleEvaluator struct {
 	bundle *Bundle
 }
@@ -39,12 +40,12 @@ func newBundleEvaluator(b *Bundle) *bundleEvaluator { return &bundleEvaluator{bu
 func (e *bundleEvaluator) Evaluate(req DecisionRequest) client.Evaluation {
 	b := e.bundle
 	if b == nil {
-		// No policy loaded → allow (the server handles cold-start fail-open; this is
-		// belt-and-suspenders so a nil bundle can never deny).
+		// No policy loaded → allow (the server handles cold-start fail-open;
+		// this is belt-and-suspenders so a nil bundle can never deny).
 		return client.Evaluation{Verdict: client.VerdictAllow}
 	}
 
-	// Start from the bundle default (validated to be allow-class; OD9 fail-open).
+	// Start from the bundle default (validated to be allow-class).
 	best := client.Evaluation{
 		Verdict:  decisionToVerdict(b.DefaultDecision),
 		PolicyID: "",
@@ -70,8 +71,8 @@ func (e *bundleEvaluator) Evaluate(req DecisionRequest) client.Evaluation {
 }
 
 // verdictPriority orders verdicts by severity, matching core's
-// HighestPriorityVerdict (governance.go:38-44). VerdictUnknown is treated as the
-// lowest (allow-class) so a stray unknown never wins over a real allow.
+// HighestPriorityVerdict. VerdictUnknown is treated as the lowest
+// (allow-class) so a stray unknown never wins over a real allow.
 func verdictPriority(v client.Verdict) int {
 	switch v {
 	case client.VerdictHalt:

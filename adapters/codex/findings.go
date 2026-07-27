@@ -14,38 +14,39 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/client"
 )
 
-// Tier-3 findings loop for the Codex adapter (STORY-SL7-B, the port of E6-S11;
-// design §7 T3). Byte-for-byte the Claude Code semantics; the ONLY delta is the
-// surfacing channel, which probe P2 resolved.
+// Tier-3 findings loop for the Codex adapter, ported from the Claude Code
+// adapter. Byte-for-byte the same semantics; the only delta is the
+// surfacing channel.
 //
-// Governance findings (guardrail categories, goal-drift, risk, would-block) are
-// computed by /evaluate and recorded — content-free — on the FLUSH path by the
-// SL-9 Advisory sink (advisories.jsonl, shared with the CC adapter by design).
-// This file is the CONSUMER that closes the loop: it tails advisories.jsonl from a
-// byte-offset CURSOR and, on UserPromptSubmit + PostToolUse, surfaces a
-// CONTENT-FREE summary back INTO the session.
+// Governance findings (guardrail categories, goal-drift, risk, would-block)
+// are computed by /evaluate and recorded — content-free — on the flush
+// path by the Advisory sink (advisories.jsonl, shared with the CC adapter
+// by design). This file is the consumer that closes the loop: it tails
+// advisories.jsonl from a byte-offset cursor and, on UserPromptSubmit +
+// PostToolUse, surfaces a content-free summary back into the session.
 //
-// CHANNEL (OD-SL7-FINDINGS, resolved by probe P2 — NOT the degraded mode): the
-// binary-embedded output schemas (pre/post-tool-use, session-start,
-// user-prompt-submit .command.output) all define hookSpecificOutput.additionalContext
-// (string), and discovery.rs confirms these events "can emit additionalContext";
-// other events warn "this event cannot emit additionalContext". So Codex accepts
-// the SAME additionalContext (→ model) + systemMessage (→ user) channel Claude
-// Code uses on UserPromptSubmit + PostToolUse — full parity, no systemMessage-only
-// degraded fallback needed.
+// Channel: the binary-embedded output schemas (pre/post-tool-use,
+// session-start, user-prompt-submit .command.output) all define
+// hookSpecificOutput.additionalContext (string), and discovery.rs confirms
+// these events "can emit additionalContext"; other events warn "this
+// event cannot emit additionalContext". So Codex accepts the same
+// additionalContext (→ model) + systemMessage (→ user) channel Claude Code
+// uses on UserPromptSubmit + PostToolUse — full parity, no
+// systemMessage-only degraded fallback needed.
 //
-// It adds NO new sink and NO new producer (reuse, don't rebuild) and is gated
-// behind ResolveFindings (default OFF): with findings off it is never called.
+// It adds no new sink and no new producer (reuse, don't rebuild) and is
+// gated behind ResolveFindings (default off): with findings off it is
+// never called.
 //
-// SAFETY:
-//   - INV-2: the summary is built ONLY from content-free advisoryRecord fields
-//     (verdict/would_block/risk/constraint COUNT, guardrail reason CATEGORIES,
-//     drift boolean + COUNT). It NEVER emits free text, command, or patch body. The
-//     cursor holds a byte offset only.
-//   - INV-3: it emits ONLY additionalContext + systemMessage — never a decision/
+// Safety:
+//   - INV-2: the summary is built only from content-free advisoryRecord
+//     fields (verdict/would_block/risk/constraint count, guardrail reason
+//     categories, drift boolean + count). It never emits free text,
+//     command, or patch body. The cursor holds a byte offset only.
+//   - INV-3: it emits only additionalContext + systemMessage — never a decision/
 //     permissionDecision/blocking field. Every fault is swallowed; the hook still
 //     exits 0. It can never block, delay, or fail a tool call.
-//   - NFR-2: the hot path (PostToolUse) is stat-guarded — with no new findings it
+//   - The hot path (PostToolUse) is stat-guarded — with no new findings it
 //     does one stat (+ a tiny cursor read) and no advisory-body read.
 
 // surfaceFindings surfaces the content-free summary of any advisory findings

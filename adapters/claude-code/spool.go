@@ -12,10 +12,11 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/client"
 )
 
-// Spool decouples the tool-call hot path from the network. Mapped events are
-// appended to a per-session append-only JSONL file (local I/O, well under the
-// NFR-2 <50 ms budget); a bounded Flush drains them to /evaluate off the hot
-// path (at SessionEnd, or via the `flush` subcommand / a CLI-driven drain).
+// Spool decouples the tool-call hot path from the network. Mapped events
+// are appended to a per-session append-only JSONL file (local I/O, well
+// under a <50ms budget); a bounded Flush drains them to /evaluate off the
+// hot path (at SessionEnd, or via the `flush` subcommand / a CLI-driven
+// drain).
 //
 // This is how observe-only stays truly non-blocking with synchronous hooks:
 // nothing on the PreToolUse/PostToolUse path touches OpenBox. Delivery is
@@ -91,8 +92,8 @@ func (s Spool) FlushAll(ctx context.Context, fn FlushFunc) (int, error) {
 		switch {
 		case strings.Contains(name, ".flushing."):
 			// Orphan from a killed drain: re-claim it atomically, then drain.
-			// (Re-delivering its already-sent prefix is possible on this rare
-			// path; event_id dedupe handles it once EXT-core lands.)
+			// (Re-delivering its already-sent prefix is possible on this
+			// rare path; event_id dedupe handles it once core supports it.)
 			claimed := filepath.Join(s.Dir, name) + ".reclaim." + randomID()
 			if os.Rename(filepath.Join(s.Dir, name), claimed) != nil {
 				continue // lost the race to another drain, or already gone

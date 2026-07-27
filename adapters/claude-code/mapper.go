@@ -13,74 +13,78 @@ import (
 // provider is the constant provider tag carried in metadata (MAPPING.md §2).
 const provider = "claude-code"
 
-// agentToolName is the tool.name used for session-lifecycle events, which are
-// produced by the coding agent itself rather than a discrete tool — matching the
-// SL-1 conformance testdata convention ({name:"claude-code", kind:"shell"}).
+// agentToolName is the tool.name used for session-lifecycle events, which
+// are produced by the coding agent itself rather than a discrete tool —
+// matching the conformance testdata convention ({name:"claude-code",
+// kind:"shell"}).
 const agentToolName = provider
 
-// Identity is the developer-agent identity the adapter emits under. It is minted
-// by `openbox dev init` (STORY-SL-2) and read from the OS secret store by the
-// hook binary (creds.go). Only the DID is needed to build events; the obx_ key
-// and Ed25519 seed live in the client, never here (INV-1).
+// Identity is the developer-agent identity the adapter emits under. It is
+// minted by `openbox dev init` and read from the OS secret store by the
+// hook binary (creds.go). Only the DID is needed to build events; the
+// obx_ key and Ed25519 seed live in the client, never here (INV-1).
 type Identity struct {
 	DeveloperDID string // did:aip:<uuid>
 }
 
-// Mapper translates Claude Code hook payloads into normalized SL-1 DevEvents.
-// It is a pure function of (hook, payload, identity, clock, id source) — no I/O —
-// so the whole acceptance surface (INV-2 metadata-only, tool classification,
-// semantic-type hints) is unit-testable.
+// Mapper translates Claude Code hook payloads into normalized DevEvents.
+// It is a pure function of (hook, payload, identity, clock, id source) — no
+// I/O — so the whole acceptance surface (INV-2 metadata-only, tool
+// classification, semantic-type hints) is unit-testable.
 type Mapper struct {
 	Identity Identity
 	Now      func() time.Time // injectable clock; defaults to time.Now
-	// NewID, when non-nil, OVERRIDES the idempotency-id source (INV-5) — used by
-	// tests to pin ids. When nil (the production default), the id is DERIVED
-	// deterministically from the event's own structural fields (deriveID): the
-	// same event always yields the same id (robust if ever recomputed from the
-	// spooled record) and two distinct events never collide.
+	// NewID, when non-nil, overrides the idempotency-id source (INV-5) —
+	// used by tests to pin ids. When nil (the production default), the id
+	// is derived deterministically from the event's own structural fields
+	// (deriveID): the same event always yields the same id (robust if ever
+	// recomputed from the spooled record) and two distinct events never
+	// collide.
 	NewID func() string
-	// Finops, when non-nil, carries the usage NUMBERS ONLY the finops reader
-	// extracted from the SessionEnd transcript (STORY-SL-16 / OD-FINOPS). Map
-	// copies them onto the SessionEnded event only. nil (the default) ⇒ events
-	// carry no tokens/cost — byte-identical to pre-SL-16 output. The Mapper itself
-	// does NO file I/O: the content-bearing transcript read + fail-open logging
-	// happen in RunHook (which owns the logger), so this stays a pure mapping of
-	// its inputs (like the injected Now / NewID), preserving the INV-2 guarantee
-	// that Map never touches content.
+	// Finops, when non-nil, carries the usage numbers only the finops
+	// reader extracted from the SessionEnd transcript. Map copies them
+	// onto the SessionEnded event only. nil (the default) ⇒ events carry
+	// no tokens/cost. The Mapper itself does no file I/O: the
+	// content-bearing transcript read + fail-open logging happen in
+	// RunHook (which owns the logger), so this stays a pure mapping of its
+	// inputs (like the injected Now / NewID), preserving the INV-2
+	// guarantee that Map never touches content.
 	Finops *FinopsUsage
-	// CaptureContent authorizes copying the (content) prompt text onto the emitted
-	// PromptSubmitted event (STORY-E7-S7 / OD4). Default false = metadata-only (INV-2):
-	// the prompt is never egressed. Set from ResolveContentCapture() in RunHook, the
-	// SAME opt-in the client's Emit uses to decide whether to strip content — so
-	// capture and egress always agree. Redaction at source is a separate layer
-	// ([EXT-guardrail-redaction], inert locally); the prompt is capped before egress
-	// (capBody, buildSignalArgs). Only the prompt is gated here — command/file/output
-	// content is still never decoded (SL3-SEC-3).
+	// CaptureContent authorizes copying the (content) prompt text onto the
+	// emitted PromptSubmitted event. Default false = metadata-only
+	// (INV-2): the prompt is never egressed. Set from
+	// ResolveContentCapture() in RunHook, the same opt-in the client's
+	// Emit uses to decide whether to strip content — so capture and
+	// egress always agree. Redaction at source is a separate layer
+	// ([EXT-guardrail-redaction], inert locally); the prompt is capped
+	// before egress (capBody, buildSignalArgs). Only the prompt is gated
+	// here — command/file/output content is still never decoded.
 	CaptureContent bool
 }
 
-// FinopsUsage is the numbers-only usage rollup the finops reader produces from a
-// transcript (STORY-SL-16). It carries only the SL-1 Tokens/Cost value structs —
-// no content, by construction (see usage.go).
+// FinopsUsage is the numbers-only usage rollup the finops reader produces
+// from a transcript. It carries only Tokens/Cost value structs — no
+// content, by construction (see usage.go).
 type FinopsUsage struct {
 	Tokens *client.Tokens
 	Cost   *client.Cost
 }
 
-// NewMapper returns a Mapper with production defaults. NewID is left nil so the
-// event_id is derived deterministically from each event's structural fields
-// (deriveID / INV-5); the clock defaults to time.Now.
+// NewMapper returns a Mapper with production defaults. NewID is left nil so
+// the event_id is derived deterministically from each event's structural
+// fields (deriveID / INV-5); the clock defaults to time.Now.
 func NewMapper(id Identity) Mapper {
 	return Mapper{Identity: id, Now: time.Now}
 }
 
-// Map converts one hook payload into a normalized DevEvent. The bool reports
-// whether an event should be emitted at all: it is false when the payload is
-// unusable (no session id, or no valid developer DID) — in which case the caller
-// drops it fail-open (INV-3), never blocking the tool call.
+// Map converts one hook payload into a normalized DevEvent. The bool
+// reports whether an event should be emitted at all: it is false when the
+// payload is unusable (no session id, or no valid developer DID) — in
+// which case the caller drops it fail-open (INV-3), never blocking the
+// tool call.
 //
-// Map NEVER copies content (prompt text, command strings, file bodies, tool
-// output) into the event (INV-2 / SL3-SEC-3). It carries only structural
+// Map never copies content (prompt text, command strings, file bodies,
+// tool output) into the event (INV-2). It carries only structural
 // metadata: the tool identity, file paths, and lifecycle enums.
 func (m Mapper) Map(hook HookName, e *HookEvent) (client.DevEvent, bool) {
 	if e == nil || e.SessionID == "" {
@@ -92,18 +96,20 @@ func (m Mapper) Map(hook HookName, e *HookEvent) (client.DevEvent, bool) {
 
 	now := m.clock()
 	// RFC3339Nano (not RFC3339): the sub-second precision is the per-event
-	// distinguisher deriveID folds into the id so two same-tool events in the same
-	// wall-clock second never collide. It is byte-identical to RFC3339 for a
-	// whole-second instant (Go omits an all-zero fraction) and core parses it with
-	// RFC3339Nano (payload.go rfc3339Nanos), so nothing downstream changes.
+	// distinguisher deriveID folds into the id so two same-tool events in
+	// the same wall-clock second never collide. It is byte-identical to
+	// RFC3339 for a whole-second instant (Go omits an all-zero fraction)
+	// and core parses it with RFC3339Nano (payload.go rfc3339Nanos), so
+	// nothing downstream changes.
 	ts := now.UTC().Format(time.RFC3339Nano)
 
-	// WorkspaceID is left empty so the client uses the developer DID as core's
-	// workflow_id. The DID is present on every event, so (workflow_id, run_id) is
-	// stable per session regardless of which hook fires — a cwd-derived id would
-	// fragment a session if any hook omitted cwd. Per-workspace grouping is still
-	// available via metadata.cwd on SessionStarted (MAPPING.md §1: DID is a
-	// blessed workflow_id).
+	// WorkspaceID is left empty so the client uses the developer DID as
+	// core's workflow_id. The DID is present on every event, so
+	// (workflow_id, run_id) is stable per session regardless of which hook
+	// fires — a cwd-derived id would fragment a session if any hook
+	// omitted cwd. Per-workspace grouping is still available via
+	// metadata.cwd on SessionStarted (MAPPING.md §1: DID is a blessed
+	// workflow_id).
 	ev := client.DevEvent{
 		SchemaVersion: client.SchemaVersion,
 		SessionID:     e.SessionID,
@@ -120,15 +126,16 @@ func (m Mapper) Map(hook HookName, e *HookEvent) (client.DevEvent, bool) {
 	case HookUserPromptSubmit:
 		ev.EventType = client.EventPromptSubmitted
 		ev.Tool = client.Tool{Name: agentToolName, Kind: client.ToolShell}
-		// Metadata-only by default (INV-2): permission_mode is session context (shown
-		// in the dashboard Overview, not as the prompt's Input). Token/cost are not
-		// exposed to Claude Code hooks (verified), so they are absent — see README.
+		// Metadata-only by default (INV-2): permission_mode is session
+		// context (shown in the dashboard Overview, not as the prompt's
+		// Input). Token/cost are not exposed to Claude Code hooks, so they
+		// are absent.
 		ev.Metadata = compact(map[string]any{"permission_mode": enumOr(e.PermissionMode, permissionModes)})
-		// STORY-E7-S7 (OD4): the prompt IS the signal's input and it is CONTENT, so it
-		// is carried on ev.Content.Prompt ONLY under the content-capture opt-in — where
-		// it becomes the SignalReceived signal_args (buildSignalArgs, capped). Default
-		// off ⇒ Content stays nil and the prompt never egresses (byte-identical to the
-		// metadata-only path; Emit would strip it anyway).
+		// The prompt is the signal's input and it is content, so it is
+		// carried on ev.Content.Prompt only under the content-capture
+		// opt-in — where it becomes the SignalReceived signal_args
+		// (buildSignalArgs, capped). Default off ⇒ Content stays nil and
+		// the prompt never egresses (Emit would strip it anyway).
 		if m.CaptureContent && e.Prompt != "" {
 			ev.Content = &client.Content{Prompt: e.Prompt}
 		}
@@ -150,9 +157,9 @@ func (m Mapper) Map(hook HookName, e *HookEvent) (client.DevEvent, bool) {
 		ev.EndedAt = ts
 		ev.Tool = client.Tool{Name: agentToolName, Kind: client.ToolShell}
 		ev.Metadata = compact(map[string]any{"reason": enumOr(e.Reason, reasonValues)})
-		// STORY-SL-16 (OD-FINOPS): attach the opt-in transcript usage rollup, if
-		// the finops reader extracted any. Numbers only — Tokens/Cost carry no
-		// content (usage.go). nil ⇒ nothing attached (finops off or empty session).
+		// Attach the opt-in transcript usage rollup, if the finops reader
+		// extracted any. Numbers only — Tokens/Cost carry no content
+		// (usage.go). nil ⇒ nothing attached (finops off or empty session).
 		if m.Finops != nil {
 			ev.Tokens = m.Finops.Tokens
 			ev.Cost = m.Finops.Cost
@@ -192,13 +199,13 @@ func mapTool(e *HookEvent, stage string) (client.Tool, *client.Span) {
 	return tool, span
 }
 
-// classifyTool maps a Claude Code tool name to the provider-agnostic tool class
-// and the intended openbox-core span semantic type. Only three kinds exist in
-// the SL-1 contract (shell|file|mcp); "shell" is the catch-all for command-like
-// agent tools that are neither a file operation nor an MCP call (WebFetch, Task,
-// TodoWrite, …). The true tool name is always preserved on tool.name +
-// metadata.tool_name, so no identity is lost by the coarse kind (SL3-SEC-3-safe:
-// a tool name is an identifier, not content).
+// classifyTool maps a Claude Code tool name to the provider-agnostic tool
+// class and the intended openbox-core span semantic type. Only three kinds
+// exist in the contract (shell|file|mcp); "shell" is the catch-all for
+// command-like agent tools that are neither a file operation nor an MCP
+// call (WebFetch, Task, TodoWrite, …). The true tool name is always
+// preserved on tool.name + metadata.tool_name, so no identity is lost by
+// the coarse kind (a tool name is an identifier, not content).
 //
 // The semantic type is an INTENT/hint: openbox-core recomputes it server-side
 // from the span name + attributes (verified — governance_workflow.go:309), and
@@ -283,15 +290,16 @@ func sessionStartMetadata(e *HookEvent) map[string]any {
 	})
 }
 
-// maxIdentLen bounds every externally-influenced identifier/path field before
-// egress (G_SEC F1): a crafted payload or a malicious MCP server's tool name
-// can't push an unbounded / content-shaped string into tool.name, span.function,
-// span.mcp_server, or file_path. These remain identifier-class values, never
-// content (INV-2), but they should still be bounded at the untrusted boundary.
+// maxIdentLen bounds every externally-influenced identifier/path field
+// before egress: a crafted payload or a malicious MCP server's tool name
+// can't push an unbounded / content-shaped string into tool.name,
+// span.function, span.mcp_server, or file_path. These remain
+// identifier-class values, never content (INV-2), but they should still be
+// bounded at the untrusted boundary.
 const maxIdentLen = 512
 
-// Known Claude Code lifecycle enum values. A value outside its set is dropped
-// (G_SEC F2) rather than egressed verbatim, keeping metadata clean.
+// Known Claude Code lifecycle enum values. A value outside its set is
+// dropped rather than egressed verbatim, keeping metadata clean.
 var (
 	sourceValues    = map[string]bool{"startup": true, "resume": true, "clear": true, "compact": true}
 	reasonValues    = map[string]bool{"clear": true, "resume": true, "logout": true, "prompt_input_exit": true, "bypass_permissions_disabled": true, "other": true}
@@ -345,28 +353,30 @@ func (m Mapper) eventID(ev client.DevEvent) string {
 	return deriveID(ev)
 }
 
-// deriveID computes the deterministic, collision-safe idempotency id (INV-5) for
-// an event as "cc-" + sha256 over its structural fields. It is a PURE function of
-// the event, so:
-//   - the SAME logical event always yields the SAME id — robust even if the id is
-//     ever recomputed from the spooled/persisted record (the fields it hashes all
-//     survive the spool round-trip), and
-//   - two DISTINCT events never collide: the high-resolution timestamp
-//     (RFC3339Nano) is the per-event distinguisher, reinforced by the structural
-//     separators (session, type, tool name, file/function locator).
+// deriveID computes the deterministic, collision-safe idempotency id
+// (INV-5) for an event as "cc-" + sha256 over its structural fields. It is
+// a pure function of the event, so:
+//   - the same logical event always yields the same id — robust even if
+//     the id is ever recomputed from the spooled/persisted record (the
+//     fields it hashes all survive the spool round-trip), and
+//   - two distinct events never collide: the high-resolution timestamp
+//     (RFC3339Nano) is the per-event distinguisher, reinforced by the
+//     structural separators (session, type, tool name, file/function
+//     locator).
 //
-// INV-1: only non-secret structural fields feed the hash — never the obx_ key or
-// the Ed25519 seed (neither reaches the Mapper). INV-2: the span file_path is a
-// structural locator, not content; no prompt/command/output text is ever hashed.
-// INV-3: the hot-path cost is one SHA-256 over a short string — no I/O, no secret,
-// allocation-cheap — so the fail-open budget is unchanged.
+// INV-1: only non-secret structural fields feed the hash — never the obx_
+// key or the Ed25519 seed (neither reaches the Mapper). INV-2: the span
+// file_path is a structural locator, not content; no prompt/command/output
+// text is ever hashed. INV-3: the hot-path cost is one SHA-256 over a short
+// string — no I/O, no secret, allocation-cheap — so the fail-open budget is
+// unchanged.
 //
-// NOTE (EXT-core / SL3-IDEMPOTENCY): a stable+unique client id is only HALF the
-// idempotency contract. The completing half is server-side dedupe on this id
-// (carried in metadata.event_id and the Idempotency-Key header); openbox-core does
-// not dedupe developer events on it today (verified). Until it does, a client
-// retry after a lost 200 can still be stored twice server-side — the client
-// guarantees the id is stable so that eventual dedupe is trivially correct.
+// Note: a stable+unique client id is only half the idempotency contract.
+// The completing half is server-side dedupe on this id (carried in
+// metadata.event_id and the Idempotency-Key header); openbox-core does not
+// dedupe developer events on it today. Until it does, a client retry after
+// a lost 200 can still be stored twice server-side — the client guarantees
+// the id is stable so that eventual dedupe is trivially correct.
 func deriveID(ev client.DevEvent) string {
 	// 0x1f (unit separator) delimits fields so no concatenation of two events'
 	// values can alias a third ("a"+"bc" hashes differently from "ab"+"c").

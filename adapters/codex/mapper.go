@@ -13,53 +13,55 @@ import (
 // provider is the constant provider tag carried in metadata (MAPPING.md §2).
 const provider = "codex"
 
-// agentToolName is the tool.name used for session-lifecycle events, which are
-// produced by the coding agent itself rather than a discrete tool — matching
-// the SL-1 conformance testdata convention and the CC adapter's precedent.
+// agentToolName is the tool.name used for session-lifecycle events, which
+// are produced by the coding agent itself rather than a discrete tool —
+// matching the conformance testdata convention and the CC adapter's
+// precedent.
 const agentToolName = provider
 
 // Identity is the developer-agent identity the adapter emits under. It is
-// minted by `openbox dev init` (STORY-SL-2) and resolved from the shared
-// dev.json contract (creds.go / devconfig). Only the DID is needed to build
-// events; the obx_ key and Ed25519 seed live in the client, never here (INV-1).
+// minted by `openbox dev init` and resolved from the shared dev.json
+// contract (creds.go / devconfig). Only the DID is needed to build events;
+// the obx_ key and Ed25519 seed live in the client, never here (INV-1).
 type Identity struct {
 	DeveloperDID string // did:aip:<uuid>
 }
 
-// Mapper translates Codex hook payloads into normalized SL-1 DevEvents. It is a
-// pure function of (hook, payload, identity, clock, id source) — no I/O — so
-// the whole acceptance surface (SL3-SEC-3 no-content, tool classification,
+// Mapper translates Codex hook payloads into normalized DevEvents. It is a
+// pure function of (hook, payload, identity, clock, id source) — no I/O —
+// so the whole acceptance surface (no-content, tool classification,
 // tool_use_id pairing) is unit-testable. Structure mirrors the Claude Code
 // mapper 1:1; deviations are Codex-surface-driven and commented inline.
 type Mapper struct {
 	Identity Identity
 	Now      func() time.Time // injectable clock; defaults to time.Now
-	// NewID, when non-nil, OVERRIDES the idempotency-id source (INV-5) — used by
-	// tests to pin ids. When nil (the production default), the id is DERIVED
-	// deterministically from the event's own structural fields (deriveID).
+	// NewID, when non-nil, overrides the idempotency-id source (INV-5) —
+	// used by tests to pin ids. When nil (the production default), the id
+	// is derived deterministically from the event's own structural fields
+	// (deriveID).
 	NewID func() string
-	// CaptureContent authorizes copying the (content) prompt text onto the
-	// emitted PromptSubmitted event (E7-S7 / OD4; ON by default as of
-	// 2026-07-15, opt-out honored). Set from ResolveContentCapture() in RunHook —
-	// the SAME flag the flush client's Emit uses to strip content, so capture
-	// and egress agree. Only the prompt is gated here — command strings, patch
-	// bodies, and tool output are never decoded at all (SL3-SEC-3).
+	// CaptureContent authorizes copying the (content) prompt text onto
+	// the emitted PromptSubmitted event (on by default, opt-out honored).
+	// Set from ResolveContentCapture() in RunHook — the same flag the
+	// flush client's Emit uses to strip content, so capture and egress
+	// agree. Only the prompt is gated here — command strings, patch
+	// bodies, and tool output are never decoded at all.
 	CaptureContent bool
-	// Finops, when non-nil, carries the usage NUMBERS ONLY the finops reader
-	// extracted from the SessionEnd rollout JSONL (STORY-SL7-C / SL-16 parity).
-	// Map copies them onto the SessionEnded event only. nil (the default) ⇒ events
-	// carry no tokens/cost — byte-identical to the pre-SL7-C output. The Mapper
-	// itself does NO file I/O: the content-bearing rollout read + fail-open logging
-	// happen in RunHook (which owns the logger), so this stays a pure mapping of
-	// its inputs (like Now / NewID), preserving the INV-2 guarantee that Map never
+	// Finops, when non-nil, carries the usage numbers only the finops
+	// reader extracted from the SessionEnd rollout JSONL. Map copies them
+	// onto the SessionEnded event only. nil (the default) ⇒ events carry
+	// no tokens/cost. The Mapper itself does no file I/O: the
+	// content-bearing rollout read + fail-open logging happen in RunHook
+	// (which owns the logger), so this stays a pure mapping of its inputs
+	// (like Now / NewID), preserving the INV-2 guarantee that Map never
 	// touches content.
 	Finops *FinopsUsage
 }
 
-// FinopsUsage is the numbers-only usage rollup the finops reader produces from a
-// rollout (STORY-SL7-C). It carries only the SL-1 Tokens/Cost value structs — no
-// content, by construction (see usage.go). Cost is always nil for Codex (its
-// token path carries no cost field).
+// FinopsUsage is the numbers-only usage rollup the finops reader produces
+// from a rollout. It carries only Tokens/Cost value structs — no content,
+// by construction (see usage.go). Cost is always nil for Codex (its token
+// path carries no cost field).
 type FinopsUsage struct {
 	Tokens *client.Tokens
 	Cost   *client.Cost
@@ -76,9 +78,9 @@ func NewMapper(id Identity) Mapper {
 // (no session id, or no valid developer DID) — the caller drops it fail-open
 // (INV-3), never blocking the tool call.
 //
-// Map NEVER copies content (prompt text under the default gate, command
-// strings, patch bodies, tool output) into the event (INV-2 / SL3-SEC-3). It
-// carries only structural metadata: tool identity, pairing ids, and lifecycle
+// Map never copies content (prompt text under the default gate, command
+// strings, patch bodies, tool output) into the event (INV-2). It carries
+// only structural metadata: tool identity, pairing ids, and lifecycle
 // enums.
 func (m Mapper) Map(hook HookName, e *HookEvent) (client.DevEvent, bool) {
 	if e == nil || e.SessionID == "" {
@@ -93,9 +95,9 @@ func (m Mapper) Map(hook HookName, e *HookEvent) (client.DevEvent, bool) {
 	// deriveID folds into the id (CC-adapter precedent; core parses it).
 	ts := now.UTC().Format(time.RFC3339Nano)
 
-	// WorkspaceID is left empty so the client uses the developer DID as core's
-	// workflow_id — stable per session regardless of which hook fires (the CC
-	// adapter's F4 rationale applies unchanged).
+	// WorkspaceID is left empty so the client uses the developer DID as
+	// core's workflow_id — stable per session regardless of which hook
+	// fires (the CC adapter's rationale applies unchanged).
 	ev := client.DevEvent{
 		SchemaVersion: client.SchemaVersion,
 		SessionID:     e.SessionID, // Codex session ≡ thread (addendum #2)
@@ -113,10 +115,11 @@ func (m Mapper) Map(hook HookName, e *HookEvent) (client.DevEvent, bool) {
 		ev.EventType = client.EventPromptSubmitted
 		ev.Tool = client.Tool{Name: agentToolName, Kind: client.ToolShell}
 		ev.Metadata = compact(map[string]any{"permission_mode": enumOr(e.PermissionMode, permissionModes)})
-		// E7-S7 / OD4: the prompt IS the signal's input and it is CONTENT, so it is
-		// carried on ev.Content.Prompt ONLY under content-capture (→ SignalReceived
-		// signal_args downstream, capped). Off ⇒ Content stays nil and the prompt
-		// never egresses (Emit would strip it anyway).
+		// The prompt is the signal's input and it is content, so it is
+		// carried on ev.Content.Prompt only under content-capture (→
+		// SignalReceived signal_args downstream, capped). Off ⇒ Content
+		// stays nil and the prompt never egresses (Emit would strip it
+		// anyway).
 		if m.CaptureContent && e.Prompt != "" {
 			ev.Content = &client.Content{Prompt: e.Prompt}
 		}
@@ -140,10 +143,10 @@ func (m Mapper) Map(hook HookName, e *HookEvent) (client.DevEvent, bool) {
 		// Codex's SessionEnd payload carries reason (pinned to "other" by the
 		// 0.145.0 schema) and neither model nor permission_mode — leaner than CC's.
 		ev.Metadata = compact(map[string]any{"reason": enumOr(e.Reason, reasonValues)})
-		// STORY-SL7-C (SL-16 parity): attach the opt-in rollout usage rollup, if the
-		// finops reader extracted any. Numbers only — Tokens carry no content
-		// (usage.go); Cost is always nil for Codex. nil ⇒ nothing attached (finops
-		// off or a session with no recorded token counts).
+		// Attach the opt-in rollout usage rollup, if the finops reader
+		// extracted any. Numbers only — Tokens carry no content (usage.go);
+		// Cost is always nil for Codex. nil ⇒ nothing attached (finops off
+		// or a session with no recorded token counts).
 		if m.Finops != nil {
 			ev.Tokens = m.Finops.Tokens
 			ev.Cost = m.Finops.Cost
@@ -171,22 +174,24 @@ func toolMetadata(e *HookEvent) map[string]any {
 	})
 }
 
-// mapTool builds the Tool identity and the semantic Span for a Pre/PostToolUse
-// event. stage is "started" (ToolCall) or "completed" (ToolResult).
+// mapTool builds the Tool identity and the semantic Span for a
+// Pre/PostToolUse event. stage is "started" (ToolCall) or "completed"
+// (ToolResult).
 //
-// tool_use_id pairing (AC-5): the client derives the wire span_id/activity_id
+// tool_use_id pairing: the client derives the wire span_id/activity_id
 // shared by a call's started+completed spans from (session, tool.name,
-// span.file_path, span.function) — client/payload.go activityPairKey. Codex
-// gives us the per-invocation tool_use_id CC lacks, so for NON-MCP tools we
-// carry it on span.function: that field feeds the pair key (making the derived
-// ids exact per invocation — two identical sequential Bash calls no longer
-// collide), feeds the E7-S8 duration-stash key, and — verified against
-// client/payload.go — is NOT emitted on the wire for shell/file/tool hook
-// types (hookSpanShape and structuralActivityInput read span.function for MCP
-// only). For MCP tools span.function must stay the real MCP function name
-// (it IS wire data: mcp_tool), so MCP pairing keeps the CC-parity fallback
-// derivation; tool_use_id still rides metadata for audit. A structural
-// identifier either way — never content (INV-2).
+// span.file_path, span.function) — client/payload.go activityPairKey.
+// Codex gives us the per-invocation tool_use_id CC lacks, so for non-MCP
+// tools we carry it on span.function: that field feeds the pair key
+// (making the derived ids exact per invocation — two identical sequential
+// Bash calls no longer collide), feeds the duration-stash key, and —
+// verified against client/payload.go — is not emitted on the wire for
+// shell/file/tool hook types (hookSpanShape and structuralActivityInput
+// read span.function for MCP only). For MCP tools span.function must stay
+// the real MCP function name (it is wire data: mcp_tool), so MCP pairing
+// keeps the CC-parity fallback derivation; tool_use_id still rides
+// metadata for audit. A structural identifier either way — never content
+// (INV-2).
 func mapTool(e *HookEvent, stage string) (client.Tool, *client.Span) {
 	kind, sem, fileOp, mcpServer, function := classifyTool(e.ToolName)
 
@@ -235,7 +240,8 @@ func classifyTool(name string) (kind client.ToolKind, sem, fileOp, mcpServer, fu
 		server, fn := splitMCPName(name)
 		if server == "" {
 			// Malformed MCP name: kind=mcp with an empty mcp_server is
-			// non-conformant (SL-1 requires it), so fall back to the catch-all.
+			// non-conformant (the contract requires it), so fall back to
+			// the catch-all.
 			return client.ToolShell, "internal", "", "", ""
 		}
 		return client.ToolMCP, "mcp_tool_call", "", server, fn
@@ -282,13 +288,13 @@ func sessionStartMetadata(e *HookEvent) map[string]any {
 		"provider":        provider,
 		"source":          enumOr(e.Source, sourceValues), // startup|resume|clear|compact
 		"model":           capStr(e.Model),                // free-form model id → bounded
-		"cwd":             capStr(e.Cwd),                  // structural (blessed by SL-1 testdata); not content
+		"cwd":             capStr(e.Cwd),                  // structural (blessed by conformance testdata); not content
 		"permission_mode": enumOr(e.PermissionMode, permissionModes),
 	})
 }
 
-// maxIdentLen bounds every externally-influenced identifier field before egress
-// (the CC adapter's G_SEC F1 posture): a crafted payload or a malicious MCP
+// maxIdentLen bounds every externally-influenced identifier field before
+// egress (the CC adapter's posture): a crafted payload or a malicious MCP
 // server's tool name can't push an unbounded / content-shaped string into
 // tool.name, span.function, span.mcp_server, or metadata ids.
 const maxIdentLen = 512

@@ -15,26 +15,29 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/decision"
 )
 
-// Session-start policy staleness for the Codex adapter (STORY-SL7-B, the port of
-// E6-S8; ADR-0005 §Decision-3). Byte-for-byte the Claude Code semantics.
+// Session-start policy staleness for the Codex adapter (ported from the
+// Claude Code adapter; ADR-0005). Byte-for-byte the same semantics.
 //
-// The in-process decider does ZERO network I/O; freshness is a best-effort
-// CLIENT-SIDE compare here, on SessionStart (off the tool hot path). It pulls the
-// agent's current backend policy PIN (id, updated_at) and compares it to the local
-// bundle PIN:
+// The in-process decider does zero network I/O; freshness is a best-effort
+// client-side compare here, on SessionStart (off the tool hot path). It
+// pulls the agent's current backend policy pin (id, updated_at) and
+// compares it to the local bundle pin:
 //
-//   - all-present + match, OR can't-determine (no org key in the env, offline,
-//     fetch error, no local pin) → PROCEED on the last-good bundle; NEVER deny at
-//     fetch time.
-//   - mismatch + fail-open (default) → warn (stderr + SessionStart additionalContext,
-//     which Codex accepts — probe P2) and proceed on the STALE bundle.
-//   - mismatch + fail-closed → write a content-free per-session STALE MARKER; the
-//     PreToolUse enforce gate denies until `openbox dev sync` clears it (Codex, like
-//     Claude Code, has no "deny a session" primitive at SessionStart, so the block
-//     is realized where enforce has teeth — the tool-call gate).
+//   - all-present + match, or can't-determine (no org key in the env,
+//     offline, fetch error, no local pin) → proceed on the last-good
+//     bundle; never deny at fetch time.
+//   - mismatch + fail-open (default) → warn (stderr + SessionStart
+//     additionalContext, which Codex accepts) and proceed on the stale
+//     bundle.
+//   - mismatch + fail-closed → write a content-free per-session stale
+//     marker; the PreToolUse enforce gate denies until `openbox dev sync`
+//     clears it (Codex, like Claude Code, has no "deny a session"
+//     primitive at SessionStart, so the block is realized where enforce
+//     has teeth — the tool-call gate).
 //
-// Fully fail-safe: any error proceeds, it never writes a non-additionalContext
-// SessionStart stdout in fail-open, and it never blocks a session.
+// Fully fail-safe: any error proceeds, it never writes a
+// non-additionalContext SessionStart stdout in fail-open, and it never
+// blocks a session.
 
 // staleTimeout bounds the session-start policy read. Off the tool hot path but
 // still snappy: a slow/unreachable backend trips this and proceeds on the last-good
@@ -69,8 +72,9 @@ func checkPolicyStaleness(logger *log.Logger, sessionID string, stdout interface
 
 	if resolveFailurePolicy() == FailClosed {
 		if err := writeStaleMarker(sessionID); err != nil {
-			// Even the marker is best-effort: a write failure must not block the
-			// session; it degrades to "no marker" → the PreToolUse gate proceeds (OD9).
+			// Even the marker is best-effort: a write failure must not
+			// block the session; it degrades to "no marker" → the
+			// PreToolUse gate proceeds.
 			logger.Printf("staleness: could not write stale marker (session proceeds): %v", err)
 		} else {
 			logger.Printf("staleness: policy changed and session is fail-closed — marked stale; run `openbox dev sync`")
@@ -199,9 +203,10 @@ func writeStaleMarker(sessionID string) error {
 	return os.WriteFile(p, nil, 0o600)
 }
 
-// sessionIsStale reports whether a fail-closed stale marker exists for the session.
-// A stat error other than not-exist is treated as "not stale" (fail-open on the
-// marker read — never fabricate a block from an unrelated I/O fault; OD9).
+// sessionIsStale reports whether a fail-closed stale marker exists for the
+// session. A stat error other than not-exist is treated as "not stale"
+// (fail-open on the marker read — never fabricate a block from an
+// unrelated I/O fault).
 func sessionIsStale(sessionID string) bool {
 	p := staleMarkerPath(sessionID)
 	if p == "" {

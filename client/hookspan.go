@@ -5,25 +5,22 @@ import (
 	"regexp"
 )
 
-// This file is shift-left's hand-maintained MIRROR of the base SDK's hook-span
-// wire contract. shift-left is Go and cannot import openbox_core, so it
-// re-expresses the contract here and emits it (the flat-SpanData builder is
-// E7-S3; the event→wire mapping is E7-S4). Per ADR-0004 (SDK half, brian
-// 2026-07-14) shift-left does NOT edit the base SDK — openbox-sdk-python is a
-// READ-ONLY reference. Keep these definitions byte-faithful to:
+// This file is shift-left's hand-maintained mirror of the base SDK's
+// hook-span wire contract. shift-left is Go and cannot import openbox_core,
+// so it re-expresses the contract here. Per ADR-0004, shift-left does not
+// edit the base SDK — openbox-sdk-python is a read-only reference. Keep these
+// definitions byte-faithful to:
 //   - openbox-sdk-python/openbox_core/contracts/otel_spans.py
 //       HookType, _ROOT_FIELDS_BY_HOOK_TYPE, _DEFAULT_KIND_BY_HOOK
 //   - openbox-sdk-python/openbox_core/conformance/fake_core.py
 //       _COMMON_ROOT_FIELDS, _FAMILY_ROOT_FIELDS, assert_hook_wire_shape
 //
-// shell/mcp/tool are the developer-runtime additions to the base families
-// (ADR-0004 sub-decision #1 = first-class dev-runtime tool calls). The base
-// SDK also defines http_request/db_query/function_call/llm_call families; the
-// developer runtime does not emit those, so they are intentionally not mirrored
-// here (an unmirrored hook_type is simply not family-checked, matching the base
-// SDK's `_FAMILY_ROOT_FIELDS.get(hook_type, ())` fall-through). Core's semantic
-// classifier (openbox-core session.go, extended first-class for shell/mcp by
-// E7-S2) reads the source fields declared below.
+// shell/mcp/tool are the developer-runtime additions to the base families.
+// The base SDK also defines http_request/db_query/function_call/llm_call
+// families; the developer runtime doesn't emit those, so they're
+// intentionally not mirrored here (an unmirrored hook_type is simply not
+// family-checked, matching the base SDK's
+// `_FAMILY_ROOT_FIELDS.get(hook_type, ())` fall-through).
 
 // HookType is the operation category of a hook (tool-call) span — the Core
 // root field `hook_type`. Mirrors otel_spans.py HookType (relevant subset).
@@ -36,9 +33,8 @@ const (
 	HookTool          HookType = "tool"           // generic tool call (dev-runtime add)
 )
 
-// CommonRootFields are the flat SpanData keys every hook span carries, present
-// even when null. Mirrors fake_core._COMMON_ROOT_FIELDS (order-independent here;
-// membership is what the wire contract asserts).
+// CommonRootFields are the flat SpanData keys every hook span carries,
+// present even when null. Mirrors fake_core._COMMON_ROOT_FIELDS.
 var CommonRootFields = []string{
 	"span_id",
 	"trace_id",
@@ -58,11 +54,11 @@ var CommonRootFields = []string{
 
 // FamilyRootFields are the per-family flat SpanData keys that must exist
 // (present even when null) for a given hook_type. Mirrors byte-for-byte
-// otel_spans._ROOT_FIELDS_BY_HOOK_TYPE / fake_core._FAMILY_ROOT_FIELDS for the
-// families the developer runtime emits.
+// otel_spans._ROOT_FIELDS_BY_HOOK_TYPE / fake_core._FAMILY_ROOT_FIELDS for
+// the families the developer runtime emits.
 //
-//   - shell_command is CONTENT (INV-2): carried only under content-capture and,
-//     like request/response bodies, size-capped before egress; null by default.
+//   - shell_command is content (INV-2): carried only under content-capture,
+//     size-capped before egress; null by default.
 //   - mcp_*/tool_name are structural identifiers (safe metadata).
 var FamilyRootFields = map[HookType][]string{
 	HookFileOperation: {"file_path", "file_mode", "file_operation", "bytes_read", "bytes_written"},
@@ -96,10 +92,9 @@ var (
 )
 
 // AssertHookWireShape checks that a decoded evaluate payload matches the base
-// SDK's flat hook-span wire contract. It is the Go mirror of
-// fake_core.assert_hook_wire_shape and is the conformance gate the E7-S3
-// flat-SpanData builder targets. Returns nil when the payload conforms, else a
-// descriptive error (never panics — callers do `if err != nil { t.Fatal(err) }`).
+// SDK's flat hook-span wire contract. It's the Go mirror of
+// fake_core.assert_hook_wire_shape. Returns nil when the payload conforms,
+// else a descriptive error (never panics).
 //
 // The payload must be the JSON-decoded map (not the typed struct) so stray
 // nested shapes (`otel`/`openbox`/`data`) and an SDK-set `semantic_type` are

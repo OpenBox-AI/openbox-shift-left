@@ -1,10 +1,10 @@
-// Package codex is the OpenAI Codex CLI realization of the Provider Adapter
-// Contract (architecture §1b) — STORY-SL7-A, the observe leg. It maps Codex's
-// native hooks (v0.145.0+, hooks stable and on by default) onto the normalized
-// developer event contract (STORY-SL-1) and emits them through the shared
-// AIP-signed transport (STORY-SL-3) on the E7 flat hook wire. Observe-only,
-// fail-open — it never blocks, denies, or slows a Codex tool call (INV-3;
-// the enforce leg is STORY-SL7-B). See README.md.
+// Package codex is the OpenAI Codex CLI realization of the Provider
+// Adapter Contract — the observe leg. It maps Codex's native hooks
+// (v0.145.0+, hooks stable and on by default) onto the normalized
+// developer event contract and emits them through the shared AIP-signed
+// transport on the flat hook wire. Observe-only, fail-open — it never
+// blocks, denies, or slows a Codex tool call (INV-3; the enforce leg is in
+// enforce.go). See README.md.
 package codex
 
 import (
@@ -14,26 +14,26 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/client"
 )
 
-// Emitter is the transport the adapter delivers events through — satisfied by
-// *client.Client (STORY-SL-3). Abstracted so the flush path is unit-testable
-// with a fake that records what would be emitted.
+// Emitter is the transport the adapter delivers events through — satisfied
+// by *client.Client. Abstracted so the flush path is unit-testable with a
+// fake that records what would be emitted.
 type Emitter interface {
 	Emit(ctx context.Context, ev client.DevEvent) (client.Evaluation, error)
 }
 
-// Adapter owns the hot-path mapping+spool (Observe) and the off-path delivery
-// (Flush). It holds no secrets — identity is a DID only; the obx_ key +
-// Ed25519 seed live in the Emitter's client (INV-1).
+// Adapter owns the hot-path mapping+spool (Observe) and the off-path
+// delivery (Flush). It holds no secrets — identity is a DID only; the
+// obx_ key + Ed25519 seed live in the Emitter's client (INV-1).
 type Adapter struct {
 	Mapper Mapper
 	Spool  Spool
-	// Advisory records the Advisory-tier verdict/guardrail signals on flush
-	// (STORY-SL-9 parity). Record-only, off the hot path, never blocks (INV-3).
-	// nil ⇒ no advisory recording (still delivers, still never blocks).
+	// Advisory records the Advisory-tier verdict/guardrail signals on
+	// flush. Record-only, off the hot path, never blocks (INV-3). nil ⇒
+	// no advisory recording (still delivers, still never blocks).
 	Advisory *Advisory
-	// Durations bridges the PreToolUse start time to the paired PostToolUse so a
-	// completed span computes a real cross-process duration (E7-S8 pattern,
-	// keyed by tool_use_id). Best-effort; an empty Dir disables it.
+	// Durations bridges the PreToolUse start time to the paired PostToolUse
+	// so a completed span computes a real cross-process duration (keyed
+	// by tool_use_id). Best-effort; an empty Dir disables it.
 	Durations durationStash
 }
 
@@ -62,10 +62,10 @@ func (a *Adapter) Observe(hook HookName, e *HookEvent) (spooled bool, err error)
 	if !ok {
 		return false, nil
 	}
-	// E7-S8: bridge the PreToolUse start time to the paired PostToolUse so the
-	// completed span computes a real cross-process duration. Runs before Append
-	// so the spooled completed DevEvent is self-contained (survives spool
-	// splitting).
+	// Bridge the PreToolUse start time to the paired PostToolUse so the
+	// completed span computes a real cross-process duration. Runs before
+	// Append so the spooled completed DevEvent is self-contained (survives
+	// spool splitting).
 	a.threadDuration(&ev)
 	if err := a.Spool.Append(ev); err != nil {
 		return false, err

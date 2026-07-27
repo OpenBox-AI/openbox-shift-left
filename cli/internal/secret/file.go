@@ -11,17 +11,17 @@ import (
 
 // --- Opt-in file backend (plaintext-at-rest, 0600) --------------------------
 //
-// SECURITY POSTURE (SL2-SEC-1): the default backend is the OS keychain and the
-// CLI HALTs rather than fall back to plaintext (Detect → ErrNoStore). This file
-// backend is the EXPLICIT escape hatch for machines with no OS keyring (headless
-// Linux, containers, WSL without a running keyring daemon). It is:
+// Security posture: the default backend is the OS keychain and the CLI
+// halts rather than fall back to plaintext (Detect → ErrNoStore). This file
+// backend is the explicit escape hatch for machines with no OS keyring
+// (headless Linux, containers, WSL without a running keyring daemon). It is:
 //   - never selected automatically — the operator must ask for it
-//     (`--secret-backend file` / OPENBOX_SECRET_BACKEND=file), and the CLI prints
-//     a warning when it is used;
-//   - written 0600 under the user config dir (0700), NEVER inside a repo, never
-//     on an argv, never logged — so INV-1's "not in repo history / not on argv /
-//     not in logs" guarantees still hold;
-//   - plaintext AT REST, which is the one guarantee it trades away vs. the
+//     (`--secret-backend file` / OPENBOX_SECRET_BACKEND=file), and the CLI
+//     prints a warning when it is used;
+//   - written 0600 under the user config dir (0700), never inside a repo,
+//     never on an argv, never logged — so INV-1's "not in repo history /
+//     not on argv / not in logs" guarantees still hold;
+//   - plaintext at rest, which is the one guarantee it trades away vs. the
 //     keychain. That is the conscious, warned tradeoff — hence opt-in only.
 //
 // On-disk format is a nested JSON object keyed by service then account:

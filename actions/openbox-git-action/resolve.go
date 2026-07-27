@@ -15,20 +15,22 @@ import (
 const DefaultMaxCommits = 2000
 
 // DefaultMaxSessions bounds how many distinct session claims a single
-// resolution accumulates (SEC-6-1). A hostile committer could otherwise author
-// one commit whose body contains an unbounded number of distinct
-// `OpenBox-Session:` lines, inflating memory and the egress payload. Far above
-// any real fan-in; a hit is disclosed in the Resolution note, never silent.
+// resolution accumulates. A hostile committer could otherwise author one
+// commit whose body contains an unbounded number of distinct
+// `OpenBox-Session:` lines, inflating memory and the egress payload. Far
+// above any real fan-in; a hit is disclosed in the Resolution note, never
+// silent.
 const DefaultMaxSessions = 4096
 
 // Source is where a resolved session id came from, in descending trust order.
 type Source string
 
 const (
-	// SourceTrailer is the authoritative trailing trailer block (S3 R7).
+	// SourceTrailer is the authoritative trailing trailer block.
 	SourceTrailer Source = "trailer"
-	// SourceBodyScan is a mid-body OpenBox-Session line recovered by SL6-SCAN
-	// (a pre-install squash left it where the trailer parser can't see it).
+	// SourceBodyScan is a mid-body OpenBox-Session line recovered by the
+	// body scan (a pre-install squash left it where the trailer parser
+	// can't see it).
 	SourceBodyScan Source = "body-scan"
 	// SourceNote is the git-notes mirror (refs/notes/openbox) — recovered only
 	// when the commit's own trailer is gone, i.e. the trailer was stripped.
@@ -68,7 +70,7 @@ type SessionClaim struct {
 	SessionID string `json:"session_id"`
 	Source    Source `json:"source"`
 	Commit    string `json:"commit"`           // the commit the id was resolved from
-	Verified  bool   `json:"verified"`         // owned by the authenticated pusher (SL5-SEC-1)
+	Verified  bool   `json:"verified"`         // owned by the authenticated pusher
 	Reason    string `json:"reason,omitempty"` // verification note when not Verified
 }
 
@@ -96,11 +98,12 @@ func (r Resolution) SessionIDs() []string {
 // Resolver turns a pushed rev into a Resolution.
 type Resolver struct {
 	Repo        Repo
-	Verifier    OwnershipVerifier // SL5-SEC-1; nil => NoopVerifier (verifies nothing)
+	Verifier    OwnershipVerifier // nil => NoopVerifier (verifies nothing)
 	MaxCommits  int               // 0 => DefaultMaxCommits
 	MaxSessions int               // 0 => DefaultMaxSessions
-	// notes reads the SL-5 git-notes mirror (refs/notes/openbox) for
-	// trailer-stripped recovery. Reuses the SL-5 reader by construction.
+	// notes reads the git-notes mirror (refs/notes/openbox) for
+	// trailer-stripped recovery. Reuses the write side's reader by
+	// construction.
 	notes obgit.Git
 }
 
@@ -161,11 +164,11 @@ func (r *Resolver) Resolve(ctx context.Context, target, base string) (Resolution
 		Note:        note,
 	}
 
-	// Gather claims across the whole scope: trailers (authoritative) first, then
-	// body-scan (SL6-SCAN), then a per-commit notes-mirror fallback for any
-	// commit that yielded neither. Deduped, order-stable; a trailer source is
-	// never downgraded by a later body-scan hit for the same id, ANYWHERE in the
-	// scope (C2). Bounded by MaxSessions (SEC-6-1).
+	// Gather claims across the whole scope: trailers (authoritative) first,
+	// then body-scan, then a per-commit notes-mirror fallback for any
+	// commit that yielded neither. Deduped, order-stable; a trailer source
+	// is never downgraded by a later body-scan hit for the same id,
+	// anywhere in the scope. Bounded by MaxSessions.
 	claims, capped, truncated, err := r.gatherClaims(scope)
 	if err != nil {
 		return Resolution{}, err
@@ -179,8 +182,8 @@ func (r *Resolver) Resolve(ctx context.Context, target, base string) (Resolution
 			"one or more commit messages exceeded the read bound and were truncated; some claims may be missing")
 	}
 
-	// SL5-SEC-1: bind each claim to the authenticated pusher. Only positively
-	// owned ids become Verified; the rest stay claims.
+	// Bind each claim to the authenticated pusher. Only positively owned
+	// ids become Verified; the rest stay claims.
 	r.verify(ctx, claims)
 	res.Sessions = claims
 
@@ -188,10 +191,10 @@ func (r *Resolver) Resolve(ctx context.Context, target, base string) (Resolution
 	return res, nil
 }
 
-// scope computes the commits to consider, the total before any MaxCommits cap,
-// and a human note describing how. The rev-list reads are bounded to
-// maxCommits+1 (SEC-6-1) so a huge range is never buffered whole; a cap is
-// disclosed in the note (never silent).
+// scope computes the commits to consider, the total before any MaxCommits
+// cap, and a human note describing how. The rev-list reads are bounded to
+// maxCommits+1 so a huge range is never buffered whole; a cap is disclosed
+// in the note (never silent).
 func (r *Resolver) scope(sha, base string) (commits []string, total int, note string, err error) {
 	limit := r.maxCommits() + 1
 	cap := func(list []string, how string) ([]string, int, string, error) {
@@ -242,18 +245,18 @@ func (r *Resolver) scope(sha, base string) (commits []string, total int, note st
 
 // gatherClaims collects session ids across the whole scope in trust order:
 //
-//	pass 1 — authoritative trailer blocks (S3 R7), across ALL commits;
-//	pass 2 — body-scan recovery (SL6-SCAN), skipping ids already trailer-claimed;
-//	pass 3 — per-commit notes-mirror recovery, but ONLY for commits that yielded
-//	         nothing in passes 1-2 (C3: a trailer-stripped sibling in a mixed
-//	         range is recovered, not silently dropped).
+//	pass 1 — authoritative trailer blocks, across all commits;
+//	pass 2 — body-scan recovery, skipping ids already trailer-claimed;
+//	pass 3 — per-commit notes-mirror recovery, but only for commits that
+//	         yielded nothing in passes 1-2 (a trailer-stripped sibling in a
+//	         mixed range is recovered, not silently dropped).
 //
-// Deduped by id (first occurrence wins) and order-stable. Running the trailer
-// pass over the entire scope BEFORE the body pass guarantees an id that appears
-// as a proper trailer anywhere is credited as SourceTrailer, never mislabeled
-// SourceBodyScan by a later commit (C2). Bounded by MaxSessions (SEC-6-1):
-// capped reports whether distinct claims were dropped; truncated whether a
-// commit message was cut by the read bound.
+// Deduped by id (first occurrence wins) and order-stable. Running the
+// trailer pass over the entire scope before the body pass guarantees an id
+// that appears as a proper trailer anywhere is credited as SourceTrailer,
+// never mislabeled SourceBodyScan by a later commit. Bounded by
+// MaxSessions: capped reports whether distinct claims were dropped;
+// truncated whether a commit message was cut by the read bound.
 func (r *Resolver) gatherClaims(scope []string) (claims []SessionClaim, capped, truncated bool, err error) {
 	seen := map[string]bool{}
 	contributed := map[string]bool{} // commit -> had >=1 valid trailer/body id (pre-dedupe)
@@ -325,8 +328,8 @@ func (r *Resolver) gatherClaims(scope []string) (claims []SessionClaim, capped, 
 	return claims, capped, truncated, nil
 }
 
-// verify runs the ownership check for each claim (SL5-SEC-1). A lookup error is
-// treated as "not verified" — never over-attribute on a failure.
+// verify runs the ownership check for each claim. A lookup error is treated
+// as "not verified" — never over-attribute on a failure.
 func (r *Resolver) verify(ctx context.Context, claims []SessionClaim) {
 	v := r.verifier()
 	for i := range claims {
@@ -343,11 +346,11 @@ func (r *Resolver) verify(ctx context.Context, claims []SessionClaim) {
 	}
 }
 
-// classify sets Status/Reason from the resolved, verified claims (INV-6). The
-// reason for an inferred outcome is derived from the claim sources: an all-notes
-// recovery means the trailer was stripped; a mix (or unverified trailers) is
-// left reason-free with the detail in Note (none of the three enum reasons fit
-// "found but not ownership-verified"; see P3 in the SL-6 review).
+// classify sets Status/Reason from the resolved, verified claims (INV-6).
+// The reason for an inferred outcome is derived from the claim sources: an
+// all-notes recovery means the trailer was stripped; a mix (or unverified
+// trailers) is left reason-free with the detail in Note (none of the three
+// enum reasons fit "found but not ownership-verified").
 func (r *Resolver) classify(res *Resolution) {
 	if len(res.Sessions) == 0 {
 		res.Status = StatusUnattributed
@@ -380,8 +383,7 @@ func (r *Resolver) classify(res *Resolution) {
 		return
 	}
 	res.Note = appendNote(res.Note, fmt.Sprintf(
-		"%d unverified session claim(s); ownership not verified (SL5-SEC-1; ownership API deferred/EXT)",
-		len(res.Sessions)))
+		"%d unverified session claim(s); ownership not verified", len(res.Sessions)))
 }
 
 // allFromNotes reports whether every claim was recovered from the notes mirror
@@ -396,11 +398,12 @@ func allFromNotes(claims []SessionClaim) bool {
 	return len(claims) > 0
 }
 
-// validateSessionID enforces that a resolved id is opaque, single-line, and not
-// secret-shaped before it can enter a governance record. This is the read-side
-// mirror of SL-5's validateSessionID: the write side stops bad ids being
-// STAMPED; the read side stops a hostile commit's bad id being RESOLVED and
-// attributed. Untrusted input, so the same rules apply.
+// validateSessionID enforces that a resolved id is opaque, single-line, and
+// not secret-shaped before it can enter a governance record. This is the
+// read-side mirror of the write side's validateSessionID: the write side
+// stops bad ids being stamped; the read side stops a hostile commit's bad
+// id being resolved and attributed. Untrusted input, so the same rules
+// apply.
 func validateSessionID(id string) error {
 	if strings.TrimSpace(id) == "" {
 		return fmt.Errorf("empty session id")
@@ -420,8 +423,8 @@ func validateSessionID(id string) error {
 	return nil
 }
 
-// maxSessionIDLen mirrors SL-5's bound (UUIDs are 36 chars; anything far larger
-// is malformed, never resolved).
+// maxSessionIDLen mirrors the write side's bound (UUIDs are 36 chars;
+// anything far larger is malformed, never resolved).
 const maxSessionIDLen = 512
 
 func appendNote(existing, add string) string {

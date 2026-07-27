@@ -37,16 +37,18 @@ func ParseHookName(s string) (HookName, error) {
 	return h, nil
 }
 
-// HookEvent is the subset of a Claude Code hook's stdin JSON this adapter reads.
+// HookEvent is the subset of a Claude Code hook's stdin JSON this adapter
+// reads.
 //
-// It captures ONLY non-content, structural fields (INV-2) — session id, working
-// directory, tool identity, lifecycle enums — with ONE deliberate, gated exception:
-// Prompt (the UserPromptSubmit text). Command strings, file contents, and tool
-// output remain intentionally NOT decoded, so they cannot leak into an emitted
-// event even by accident (SL3-SEC-3). Prompt is decoded but is copied onto an
-// event ONLY under the content-capture opt-in (Mapper.CaptureContent; E7-S7/OD4) —
-// with capture off it is inert, exactly like the structural-only fields.
-// Unknown/extra fields are ignored (forward-compatible with Claude Code drift).
+// It captures only non-content, structural fields (INV-2) — session id,
+// working directory, tool identity, lifecycle enums — with one deliberate,
+// gated exception: Prompt (the UserPromptSubmit text). Command strings,
+// file contents, and tool output remain intentionally not decoded, so they
+// cannot leak into an emitted event even by accident. Prompt is decoded but
+// is copied onto an event only under the content-capture opt-in
+// (Mapper.CaptureContent) — with capture off it is inert, exactly like the
+// structural-only fields. Unknown/extra fields are ignored
+// (forward-compatible with Claude Code drift).
 type HookEvent struct {
 	// Common (present on every hook payload).
 	HookEventName  string `json:"hook_event_name"`
@@ -54,12 +56,13 @@ type HookEvent struct {
 	Cwd            string `json:"cwd"`
 	PermissionMode string `json:"permission_mode"`
 
-	// TranscriptPath is the filesystem path to this session's JSONL transcript.
-	// It is a structural LOCATOR (like Cwd), not content — INV-2 permits it. The
-	// file it points at IS content-bearing, so it is opened ONLY on SessionEnd and
-	// ONLY when the opt-in finops gate is set (ResolveFinops), and even then only a
-	// projection-only parser touches it, extracting usage NUMBERS ONLY (STORY-SL-16
-	// / OD-FINOPS). With finops off this field is decoded but never dereferenced.
+	// TranscriptPath is the filesystem path to this session's JSONL
+	// transcript. It is a structural locator (like Cwd), not content —
+	// INV-2 permits it. The file it points at is content-bearing, so it is
+	// opened only on SessionEnd and only when the opt-in finops gate is set
+	// (ResolveFinops), and even then only a projection-only parser touches
+	// it, extracting usage numbers only. With finops off this field is
+	// decoded but never dereferenced.
 	TranscriptPath string `json:"transcript_path"`
 
 	// SessionStart.
@@ -73,11 +76,12 @@ type HookEvent struct {
 	// SessionEnd.
 	Reason string `json:"reason"`
 
-	// Prompt is the UserPromptSubmit prompt text — CONTENT (INV-2), not structural.
-	// It is decoded here but is consumed ONLY by the mapper when content-capture is
-	// opted in (Mapper.CaptureContent); with capture off it is never copied onto an
-	// emitted event, so it cannot egress by accident (E7-S7 / OD4). Redaction at
-	// source is a separate layer ([EXT-guardrail-redaction]).
+	// Prompt is the UserPromptSubmit prompt text — content (INV-2), not
+	// structural. It is decoded here but is consumed only by the mapper
+	// when content-capture is opted in (Mapper.CaptureContent); with
+	// capture off it is never copied onto an emitted event, so it cannot
+	// egress by accident. Redaction at source is a separate layer
+	// ([EXT-guardrail-redaction]).
 	Prompt string `json:"prompt"`
 }
 
@@ -130,15 +134,15 @@ func (e *HookEvent) filePath() string {
 
 // command extracts the shell command string from a Bash tool_input.
 //
-// LOCAL-ONLY (INV-2): this is used SOLELY to populate the enforce-mode
-// decision.DecisionRequest, which is evaluated IN-PROCESS ON THIS MACHINE — it
-// never egresses to core and is never logged. It is the axis a local policy
-// matches a dangerous command on
-// (the canonical `rm -rf …` rule), analogous to the SDK sending activity_input to
-// its own governance gate. The OBSERVE/telemetry egress path (Mapper) still never
-// decodes the command, so the metadata-only-on-the-wire posture is unchanged; the
-// command is read here only for the never-egressed local decision. Returns "" for
-// a non-Bash tool or an absent/unparsable command.
+// Local-only (INV-2): this is used solely to populate the enforce-mode
+// decision.DecisionRequest, which is evaluated in-process on this machine —
+// it never egresses to core and is never logged. It is the axis a local
+// policy matches a dangerous command on (the canonical `rm -rf …` rule),
+// analogous to the SDK sending activity_input to its own governance gate.
+// The observe/telemetry egress path (Mapper) still never decodes the
+// command, so the metadata-only-on-the-wire posture is unchanged; the
+// command is read here only for the never-egressed local decision. Returns
+// "" for a non-Bash tool or an absent/unparsable command.
 func (e *HookEvent) command() string {
 	if len(e.ToolInput) == 0 {
 		return ""
@@ -152,21 +156,23 @@ func (e *HookEvent) command() string {
 	return in.Command
 }
 
-// fileText extracts the file BODY a file-write tool carries — Claude Code's Write
-// uses "content", Edit uses "new_string". This is content, not a structural
-// locator. (MultiEdit nests bodies under edits[].new_string; extracting those is
-// deferred to the redaction-engine story — under-capturing is the INV-2-safe
-// direction, since a missing body just means nothing local to redact.)
+// fileText extracts the file body a file-write tool carries — Claude
+// Code's Write uses "content", Edit uses "new_string". This is content,
+// not a structural locator. (MultiEdit nests bodies under
+// edits[].new_string; extracting those is deferred — under-capturing is
+// the INV-2-safe direction, since a missing body just means nothing local
+// to redact.)
 //
-// LOCAL-ONLY (INV-2), and STRICTER than command(): it is read SOLELY to populate
-// the enforce-mode decision.DecisionRequest.Content when the org opted into content
-// capture (ResolveContentCapture / OD4), so a redaction-capable local evaluator has
-// the body to redact (STORY-E6-S4) — the analog of the reference SDK sending the
-// full activity_input to its gate. It is passed IN-PROCESS to the decider and is
-// NEVER egressed to core and NEVER logged; the
-// OBSERVE/telemetry egress path (Mapper) still never decodes it, so the
-// metadata-only-on-the-wire posture is unchanged. Returns "" for a non-file tool,
-// an absent/unparsable body, or (via the caller's gate) when content capture is off.
+// Local-only (INV-2), and stricter than command(): it is read solely to
+// populate the enforce-mode decision.DecisionRequest.Content when the org
+// opted into content capture (ResolveContentCapture), so a
+// redaction-capable local evaluator has the body to redact — the analog of
+// the reference SDK sending the full activity_input to its gate. It is
+// passed in-process to the decider and is never egressed to core and never
+// logged; the observe/telemetry egress path (Mapper) still never decodes
+// it, so the metadata-only-on-the-wire posture is unchanged. Returns "" for
+// a non-file tool, an absent/unparsable body, or (via the caller's gate)
+// when content capture is off.
 func (e *HookEvent) fileText() string {
 	if len(e.ToolInput) == 0 {
 		return ""

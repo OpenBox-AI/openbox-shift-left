@@ -7,10 +7,10 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/client"
 )
 
-// Emitter is the transport the action uses to send the Deploy event. The
-// SL-3 *client.Client satisfies it directly (same Emit signature); tests inject
-// a fake so resolution/build can be exercised without a network. It returns the
-// rich Evaluation (STORY-SL-9) — the action records it, never acts on it.
+// Emitter is the transport the action uses to send the Deploy event.
+// *client.Client satisfies it directly (same Emit signature); tests inject
+// a fake so resolution/build can be exercised without a network. It returns
+// the rich Evaluation — the action records it, never acts on it.
 type Emitter interface {
 	Emit(ctx context.Context, ev client.DevEvent) (client.Evaluation, error)
 }
@@ -25,7 +25,7 @@ type nopLogger struct{}
 
 func (nopLogger) Printf(string, ...any) {}
 
-// Action wires the server-side resolver to the SL-3 emitter. Construct it with
+// Action wires the server-side resolver to the emitter. Construct it with
 // a Resolver, an Emitter (or nil for dry-run/observe), and the deploy context.
 type Action struct {
 	Resolver *Resolver
@@ -33,8 +33,8 @@ type Action struct {
 	Meta     DeployMeta
 	Now      func() time.Time // nil => time.Now
 	Log      Logger           // nil => discard
-	// Advisory records the Advisory-tier verdict/guardrail signals for the Deploy
-	// event (STORY-SL-9). nil ⇒ default sink (DefaultAdvisoryPath). Record-only:
+	// Advisory records the Advisory-tier verdict/guardrail signals for the
+	// Deploy event. nil ⇒ default sink (DefaultAdvisoryPath). Record-only:
 	// it never gates the deploy (INV-3).
 	Advisory *Advisory
 }
@@ -92,7 +92,7 @@ func (a *Action) Run(ctx context.Context, target, base string) (Result, error) {
 	out.Verdict = eval.Verdict
 	out.Emitted = true
 
-	// Advisory tier (STORY-SL-9): record what would be enforced for this deploy
+	// Advisory tier: record what would be enforced for this deploy
 	// (would_block label + guardrail/constraint/risk signals). Record-only —
 	// never gates the deploy (INV-3). Best-effort; a sink failure is swallowed.
 	a.advisory().Record(ev, eval)

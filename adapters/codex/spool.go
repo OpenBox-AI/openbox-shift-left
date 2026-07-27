@@ -12,13 +12,13 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/client"
 )
 
-// Spool decouples the tool-call hot path from the network — a verbatim port of
-// the Claude Code adapter's spool (its README documents the design; the spool
-// contract is provider-independent but the code stays adapter-local per
-// OD-SL7-SHARE, which ruled only devconfig into a shared module). Mapped events
-// are appended to a per-session append-only JSONL file (local I/O, well under
-// the NFR-2 <50 ms budget); a bounded Flush drains them to /evaluate off the
-// hot path (at SessionEnd, or via `openbox hook codex flush`).
+// Spool decouples the tool-call hot path from the network — a verbatim
+// port of the Claude Code adapter's spool (its README documents the
+// design; the spool contract is provider-independent but the code stays
+// adapter-local — only devconfig was ruled into a shared module). Mapped
+// events are appended to a per-session append-only JSONL file (local I/O,
+// well under a <50ms budget); a bounded Flush drains them to /evaluate off
+// the hot path (at SessionEnd, or via `openbox hook codex flush`).
 //
 // Delivery is at-most-once best-effort (fail-open, INV-3) — a hard outage loses
 // telemetry, never a tool call. When a flush is cut short (time budget / ctx

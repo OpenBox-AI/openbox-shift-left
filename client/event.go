@@ -1,33 +1,30 @@
-// Package client is the OpenBox developer-runtime data-plane client
-// (STORY-SL-3). It is the single, shared transport every adapter (SL-4 Claude
-// Code, SL-7 Codex, SL-8 Cursor) and the git action (SL-6) use to emit a
-// normalized developer event to OpenBox: build the openbox-core
-// GovernanceEventPayload, AIP Ed25519-sign the request, POST it to
-// /api/v1/governance/evaluate, and parse the verdict.
+// Package client is the OpenBox developer-runtime data-plane client: the
+// shared transport every adapter and the git action use to emit a normalized
+// developer event to OpenBox — build the openbox-core GovernanceEventPayload,
+// AIP Ed25519-sign the request, POST it to /api/v1/governance/evaluate, and
+// parse the verdict.
 //
-// Design constraints baked in (from the SL-3 story + contracts/dev-event):
-//   - INV-1: the obx_ API key and the Ed25519 signing seed are never logged or
-//     placed on an argv; they live only in the Client and the request headers.
-//   - INV-2: content (prompt/output/file/tool bodies) is stripped before egress
-//     unless content-capture is explicitly enabled for the org.
+// Design constraints:
+//   - INV-1: the obx_ API key and the Ed25519 signing seed are never logged
+//     or placed on an argv; they live only in the Client and request headers.
+//   - INV-2: content (prompt/output/file/tool bodies) is stripped before
+//     egress unless content-capture is explicitly enabled for the org.
 //   - INV-3: fail-open. A transport failure logs and drops (or buffers) the
-//     event; Emit never blocks or errors the caller in Phase-1 observe mode.
-//   - INV-5: each event carries a client-generated idempotency id (EventID) so
-//     retries and buffered flushes are never double-counted by core.
+//     event; Emit never blocks or errors the caller in observe mode.
+//   - INV-5: each event carries a client-generated idempotency id (EventID)
+//     so retries and buffered flushes are never double-counted by core.
 //
-// This package deliberately mirrors the normalized event contract owned by
-// STORY-SL-1 (contracts/dev-event/schema/dev-event.schema.json v1.0) as Go
-// types, and maps them onto the core wire shape per contracts/dev-event/
-// MAPPING.md — so payloads are built without guessing.
+// This package mirrors the normalized event contract
+// (contracts/dev-event/schema/dev-event.schema.json v1.0) as Go types, and
+// maps them onto the core wire shape per contracts/dev-event/MAPPING.md.
 package client
 
-// SchemaVersion is the dev-event contract version this client speaks. It must
-// track contracts/dev-event/schema/dev-event.schema.json's x-schema-version.
+// SchemaVersion is the dev-event contract version this client speaks. Track
+// contracts/dev-event/schema/dev-event.schema.json's x-schema-version.
 const SchemaVersion = "1.0"
 
-// EventType is a developer-runtime lifecycle event type (the SL-1 contract's
-// `event_type` axis). Each maps 1:1 onto an openbox-core event_type string
-// (added additively by EXT-core; INV-8) — see MAPPING.md §2.
+// EventType is a developer-runtime lifecycle event type. Each maps 1:1 onto
+// an openbox-core event_type string (INV-8) — see MAPPING.md §2.
 type EventType string
 
 const (
@@ -40,7 +37,7 @@ const (
 	EventDeploy          EventType = "Deploy"
 )
 
-// ToolKind is the provider-agnostic tool class (SL-1 contract $defs.tool.kind).
+// ToolKind is the provider-agnostic tool class ($defs.tool.kind).
 type ToolKind string
 
 const (
@@ -70,9 +67,8 @@ type Cost struct {
 }
 
 // Span is one semantic span for a tool call/result. It mirrors the subset of
-// openbox-core SpanData an adapter SETS; core computes semantic_type
-// server-side from these source fields (the value here is the intended target
-// and a hint — MAPPING.md §3).
+// openbox-core SpanData an adapter sets; core computes semantic_type
+// server-side from these source fields (MAPPING.md §3).
 type Span struct {
 	SemanticType string `json:"semantic_type"`
 	Stage        string `json:"stage"` // "started" (ToolCall) | "completed" (ToolResult)
@@ -85,24 +81,23 @@ type Span struct {
 	Module       string `json:"module,omitempty"`
 	MCPServer    string `json:"mcp_server,omitempty"`
 
-	// RequestBody/ResponseBody are GATED content (INV-2): the client strips them
-	// before egress unless content-capture is enabled for the org.
+	// RequestBody/ResponseBody are gated content (INV-2): stripped before
+	// egress unless content-capture is enabled for the org.
 	RequestBody  string `json:"request_body,omitempty"`
 	ResponseBody string `json:"response_body,omitempty"`
 }
 
-// Content is the only structured location for raw prompt/output/file content.
-// GATED (INV-2/OD4): the client strips it before egress unless content-capture
-// is enabled.
+// Content is the only structured location for raw prompt/output/file
+// content. Gated (INV-2): stripped before egress unless content-capture is
+// enabled.
 type Content struct {
 	Prompt   string `json:"prompt,omitempty"`
 	Output   string `json:"output,omitempty"`
 	FileText string `json:"file_text,omitempty"`
 }
 
-// DevEvent is the normalized developer-runtime event a caller hands to Emit.
-// It is the Go realization of the SL-1 contract (dev-event.schema.json v1.0);
-// callers build it from a provider's native payload (the adapter's SPI emit()).
+// DevEvent is the normalized developer-runtime event a caller hands to Emit,
+// built from a provider's native payload via the adapter's SPI emit().
 type DevEvent struct {
 	SchemaVersion string    `json:"schema_version"`
 	EventID       string    `json:"event_id"` // client idempotency key (INV-5)
@@ -119,8 +114,8 @@ type DevEvent struct {
 	Content       *Content  `json:"content,omitempty"`
 
 	// WorkspaceID is a stable per-workspace/developer identity used as core's
-	// workflow_id so (workflow_id, run_id) is unique per session (MAPPING.md §1).
-	// Optional: defaults to DeveloperDID when empty.
+	// workflow_id so (workflow_id, run_id) is unique per session (MAPPING.md
+	// §1). Defaults to DeveloperDID when empty.
 	WorkspaceID string `json:"-"`
 
 	// Metadata carries additive per-type keys (provider, repo, commit_sha, …).

@@ -1,7 +1,7 @@
-// Package devinit orchestrates `openbox dev init --provider <tool>`
-// (STORY-SL-2): register a developer agent, capture its once-shown credentials
-// into the OS secret store, and delegate the tool's native config to the
-// provider installer. Governance is ambient thereafter.
+// Package devinit orchestrates `openbox dev init --provider <tool>`:
+// register a developer agent, capture its once-shown credentials into the
+// OS secret store, and delegate the tool's native config to the provider
+// installer. Governance is ambient thereafter.
 //
 // Invariants enforced here:
 //   - INV-1: the obx_ key and Ed25519 seed go only to the secret store; they
@@ -36,7 +36,7 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/provider"
 )
 
-const developerAgentType = "developer" // free-form agent_type (S6; no migration)
+const developerAgentType = "developer" // free-form agent_type; no migration
 
 // Registrar is the control-plane surface devinit needs (backend.Client
 // implements it). Kept minimal so tests inject a fake.
@@ -48,21 +48,21 @@ type Registrar interface {
 // Options are the user-facing knobs for `dev init`.
 type Options struct {
 	Provider       string // claude-code|codex|cursor
-	BackendURL     string // openbox-backend control-plane base (persisted for `dev sync`/staleness, STORY-E6-S8)
+	BackendURL     string // openbox-backend control-plane base (persisted for `dev sync`/staleness)
 	Org            string // organization namespace for naming + secret accounts
 	AgentName      string // override; default derived from provider+user+host
 	Icon           string // non-empty string required by the backend DTO
 	Description    string
 	DryRun         bool
 	Force          bool // register a fresh agent even if one exists remotely
-	ManagedEnable  bool // org-wide force-enable substrate (NFR-5); Phase-1 opt-in
-	InstallGitHook bool // STORY-SL-5: enable ambient commit-trailer hook install (off by default)
-	// Enforce turns on ENFORCE mode and persists it (plus its sensible companions,
-	// Tier2 + Findings) into the dev config, so no runtime env var is needed
-	// (ADR-0006). Off by default — enforcement stays opt-in. Tier2/Findings are
-	// *bool so `--enforce` can set them while a plain `dev init` leaves them at the
-	// adapter default; the CLI wires --enforce to also enable both unless a granular
-	// flag overrides.
+	ManagedEnable  bool // org-wide force-enable substrate; opt-in
+	InstallGitHook bool // enable ambient commit-trailer hook install (off by default)
+	// Enforce turns on enforce mode and persists it (plus its sensible
+	// companions, Tier2 + Findings) into the dev config, so no runtime env
+	// var is needed (ADR-0006). Off by default — enforcement stays opt-in.
+	// Tier2/Findings are *bool so `--enforce` can set them while a plain
+	// `dev init` leaves them at the adapter default; the CLI wires
+	// --enforce to also enable both unless a granular flag overrides.
 	Enforce  bool
 	Tier2    *bool
 	Findings *bool
@@ -151,13 +151,13 @@ func Run(ctx context.Context, o Options, d Deps) (*Result, error) {
 		APIKeyAccount:     apiKeyAcct,
 		PrivateKeyAccount: privKeyAcct,
 		InstallGitHook:    o.InstallGitHook,
-		// STORY-E6-S8: persist the control-plane base so `dev sync`/staleness can
-		// reach the policy read without re-supplying OPENBOX_BACKEND_URL. The agent id
-		// is set below on the register path (the reuse path preserves a prior value —
-		// installer.writeConfig).
+		// Persist the control-plane base so `dev sync`/staleness can reach
+		// the policy read without re-supplying OPENBOX_BACKEND_URL. The
+		// agent id is set below on the register path (the reuse path
+		// preserves a prior value — installer.writeConfig).
 		BackendURL: o.BackendURL,
-		// ADR-0006: persist the enforce posture into dev.json so the runtime hook needs
-		// no env var. All off by default (observe-only).
+		// ADR-0006: persist the enforce posture into dev.json so the
+		// runtime hook needs no env var. All off by default (observe-only).
 		Enforce:  o.Enforce,
 		Tier2:    o.Tier2,
 		Findings: o.Findings,
@@ -242,7 +242,7 @@ func Run(ctx context.Context, o Options, d Deps) (*Result, error) {
 	}
 	res.AgentID, res.DID, res.Registered = reg.AgentID, reg.DID, true
 	ref.DID = reg.DID
-	ref.AgentID = reg.AgentID // STORY-E6-S8: persisted to dev.json for `dev sync`/staleness
+	ref.AgentID = reg.AgentID // persisted to dev.json for `dev sync`/staleness
 
 	if reg.APIKey == "" || reg.PrivateKey == "" {
 		return res, fmt.Errorf(
@@ -303,7 +303,7 @@ func planDryRun(o Options, d Deps, name, icon string, profile aivss.Config, ref 
 	fmt.Fprintf(out, "  icon:        %s\n", icon)
 	fmt.Fprintf(out, "  aivss_config: base_security/ai_specific/impact (accepted developer posture; server computes score/tier)\n")
 	fmt.Fprintf(out, "  managed_enable: %t (substrate only; not activated in Phase 1)\n", o.ManagedEnable)
-	fmt.Fprintf(out, "  install_git_hook: %t (STORY-SL-5 ambient commit-trailer hook; off by default — modifies .git/hooks)\n", o.InstallGitHook)
+	fmt.Fprintf(out, "  install_git_hook: %t (ambient commit-trailer hook; off by default — modifies .git/hooks)\n", o.InstallGitHook)
 	fmt.Fprintf(out, "  enforce: %t (ADR-0006; off by default = observe-only. --enforce also enables tier2 + findings, all persisted to dev.json — no runtime env)\n", o.Enforce)
 	svc, apiAcct, privAcct, didAcct := o.accounts()
 	fmt.Fprintf(out, "\nWould store credentials in the OS secret store (service %q):\n", svc)

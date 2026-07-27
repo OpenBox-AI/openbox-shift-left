@@ -25,14 +25,13 @@ const (
 	headerAgentSig      = "X-OpenBox-Agent-Signature"
 	headerBodySHA256    = "X-OpenBox-Body-SHA256"
 
-	// headerIdempotencyKey carries the event's idempotency key (== DevEvent.EventID
-	// == metadata.event_id) as a standard request header (INV-5). It is NOT part of
-	// the AIP canonical string (which is only METHOD\nPATH\nTIMESTAMP\nNONCE\n
-	// BODY_SHA256 — verified against openbox-core services/agent.go), so adding it
-	// never affects signature verification. It is INERT until EXT-core dedupes on it
-	// (SL3-IDEMPOTENCY): core accepts and ignores unknown headers today (verified —
-	// no header allow-list on /evaluate). It makes the dedupe contract explicit and
-	// header-standard; the body still carries the same id in metadata.event_id.
+	// headerIdempotencyKey carries the event's idempotency key (==
+	// DevEvent.EventID == metadata.event_id) as a standard request header
+	// (INV-5). It is not part of the AIP canonical string (only
+	// METHOD\nPATH\nTIMESTAMP\nNONCE\nBODY_SHA256), so adding it never
+	// affects signature verification. Inert until core dedupes on it — core
+	// accepts and ignores unknown headers today; the body still carries the
+	// same id in metadata.event_id.
 	headerIdempotencyKey = "Idempotency-Key"
 )
 
@@ -51,8 +50,8 @@ type signer struct {
 
 // newSigner builds a signer from a base64-encoded raw 32-byte Ed25519 seed —
 // the exact form openbox-backend returns as identity.privateKey and the CLI
-// stores (STORY-SL-2). Mirrors config.py:190-203: std-base64 decode, require 32
-// bytes, ed25519.NewKeyFromSeed (== Ed25519PrivateKey.from_private_bytes).
+// stores. Mirrors config.py:190-203: std-base64 decode, require 32 bytes,
+// ed25519.NewKeyFromSeed (== Ed25519PrivateKey.from_private_bytes).
 func newSigner(did, seedB64 string) (*signer, error) {
 	// A malformed DID makes core reject (or fail to key) every signed request,
 	// which — under fail-open — would silently drop all telemetry. Catch it at

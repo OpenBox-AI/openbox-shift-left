@@ -8,31 +8,32 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/client"
 )
 
-// builderEvaluator (STORY-E6-S8, ADR-0005) is the pure-Go native evaluator for a
-// backend policy_builder config. It replicates — WITHOUT a rego engine, no cgo,
-// no OPA dependency — the verdict the backend's builder→rego compilation
-// (openbox-backend policy-builder.util.ts) would yield when run by core's
-// external OPA against the SAME input document (BuildOPAInput, shaped to core's
-// buildSpanMap in input.go).
+// builderEvaluator (ADR-0005) is the pure-Go native evaluator for a backend
+// policy_builder config. It replicates — without a rego engine, no cgo, no
+// OPA dependency — the verdict the backend's builder→rego compilation would
+// yield when run by core's external OPA against the same input document
+// (BuildOPAInput, shaped to core's buildSpanMap in input.go).
 //
-// It is DISTINCT from bundleEvaluator on purpose (story §3 translation choice):
-//   - bundleEvaluator = MAX-SEVERITY across the legacy hand-authored local Rules
-//     format (a BLOCK rule wins over a CONSTRAIN rule regardless of order).
-//   - builderEvaluator = FIRST-MATCH by rule order (generatePolicyBuilderRego
-//     emits `not rule_0_match … not rule_{i-1}_match` guard clauses so an earlier
-//     rule always wins), with the default `ALLOW`.
+// It is distinct from bundleEvaluator on purpose:
+//   - bundleEvaluator = max-severity across the legacy hand-authored local
+//     Rules format (a BLOCK rule wins over a CONSTRAIN rule regardless of
+//     order).
+//   - builderEvaluator = first-match by rule order (generatePolicyBuilderRego
+//     emits `not rule_0_match … not rule_{i-1}_match` guard clauses so an
+//     earlier rule always wins), with the default `ALLOW`.
 //
-// Reusing Rules for a builder policy would silently change its precedence, so
-// SetBundle selects builderEvaluator when Bundle.PolicyBuilder != nil and keeps
-// bundleEvaluator for the legacy Rules format.
+// Reusing Rules for a builder policy would silently change its precedence,
+// so SetBundle selects builderEvaluator when Bundle.PolicyBuilder != nil and
+// keeps bundleEvaluator for the legacy Rules format.
 //
-// Pure, no I/O, concurrency-safe (matches the Evaluator contract): it reads only
-// the immutable parsed config + the per-request input.
+// Pure, no I/O, concurrency-safe (matches the Evaluator contract): it reads
+// only the immutable parsed config + the per-request input.
 type builderEvaluator struct {
 	cfg *PolicyBuilderConfig
-	// policyID stamps the resolved Evaluation for audit/telemetry parity with core
-	// (the generated rego's `result` object carries only {decision, reason}; the
-	// policy identity is the enclosing PolicyEntity.id, carried on the bundle PIN).
+	// policyID stamps the resolved Evaluation for audit/telemetry parity
+	// with core (the generated rego's `result` object carries only
+	// {decision, reason}; the policy identity is the enclosing
+	// PolicyEntity.id, carried on the bundle pin).
 	policyID string
 }
 
@@ -222,11 +223,12 @@ func regoCount(v any) (int, bool) {
 // string (and any other) → the raw string. The bool reports a recognized operator
 // (always true here; unknown operators are filtered by compareOp).
 //
-// count→number coercion (G3-F1): the backend parser forces valueType="number"
-// whenever transform=="count". We mirror that defensively so a count condition
-// whose stored valueType is (wrongly) "string" still compares its numeric count
-// target against a NUMERIC literal — never a float vs a quoted string (which
-// regoCompare would rank cross-type and silently never match).
+// count→number coercion: the backend parser forces valueType="number"
+// whenever transform=="count". We mirror that defensively so a count
+// condition whose stored valueType is (wrongly) "string" still compares its
+// numeric count target against a numeric literal — never a float vs a
+// quoted string (which regoCompare would rank cross-type and silently never
+// match).
 func valueLiteral(c *PolicyBuilderCondition) (any, bool) {
 	valueType := c.ValueType
 	if c.Transform == "count" && countTransformSupported(c.Operator) {

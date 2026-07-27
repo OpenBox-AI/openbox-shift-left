@@ -1,11 +1,12 @@
-// Package providers is the CLI's composition root for the install-time SPI: it
-// binds each recognized provider name (from the shared `provider` module) to a
-// concrete Installer. This is the one place that imports both the shared SPI and
-// the adapter modules; keeping it in `cli` (not in the shared module) is what
-// breaks the would-be import cycle between the SPI and its adapters (ADR-0001).
+// Package providers is the CLI's composition root for the install-time SPI:
+// it binds each recognized provider name (from the shared `provider`
+// module) to a concrete Installer. This is the one place that imports both
+// the shared SPI and the adapter modules; keeping it in `cli` (not in the
+// shared module) is what breaks the would-be import cycle between the SPI
+// and its adapters (ADR-0001).
 //
-// SL4-WIRE-1 made claude-code a REAL installer; STORY-SL7-A does the same for
-// codex (hooks.json + dev.json, no bundle). Cursor stays a stub until SL-8.
+// claude-code and codex are real installers (hooks.json/dev.json, no
+// bundle); Cursor stays a stub until it ships.
 package providers
 
 import (
@@ -24,24 +25,25 @@ import (
 func Lookup(name string) (provider.Installer, error) {
 	switch provider.Name(name) {
 	case provider.ClaudeCode:
-		inst := claudecode.Installer{} // SL-4 real installer (default install paths)
-		// STORY-SL4-WIRE-2: place THIS running `openbox` engine into the bundle's
-		// bin/openbox so the plugin's hooks resolve to it. Best-effort RESOLUTION:
-		// if os.Executable() is unavailable we leave EngineBinary empty and Install
-		// skips the copy (packaging supplies the binary). Once EngineBinary is set,
-		// a copy failure surfaces as an install error rather than leaving a bundle
-		// with no engine — a loud failure beats a silently broken install.
+		inst := claudecode.Installer{} // real installer (default install paths)
+		// Place this running `openbox` engine into the bundle's bin/openbox
+		// so the plugin's hooks resolve to it. Best-effort resolution: if
+		// os.Executable() is unavailable we leave EngineBinary empty and
+		// Install skips the copy (packaging supplies the binary). Once
+		// EngineBinary is set, a copy failure surfaces as an install error
+		// rather than leaving a bundle with no engine — a loud failure
+		// beats a silently broken install.
 		if exe, err := os.Executable(); err == nil {
 			inst.EngineBinary = exe
 		}
 		return inst, nil
 	case provider.Codex:
-		inst := codex.Installer{} // STORY-SL7-A real installer (default install paths)
-		// Same EngineBinary discipline as claude-code, with a different mechanic:
-		// Codex has no plugin bundle to copy into, so the ABSOLUTE path of this
-		// running engine is baked directly into each hooks.json command. If
-		// os.Executable() is unavailable the installer falls back to `openbox`
-		// on PATH (hookCommand).
+		inst := codex.Installer{} // real installer (default install paths)
+		// Same EngineBinary discipline as claude-code, with a different
+		// mechanic: Codex has no plugin bundle to copy into, so the
+		// absolute path of this running engine is baked directly into each
+		// hooks.json command. If os.Executable() is unavailable the
+		// installer falls back to `openbox` on PATH (hookCommand).
 		if exe, err := os.Executable(); err == nil {
 			inst.EngineBinary = exe
 		}
@@ -54,7 +56,7 @@ func Lookup(name string) (provider.Installer, error) {
 }
 
 func cursorManual(ref provider.CredentialRef) string {
-	return fmt.Sprintf(`Cursor adapter (STORY-SL-8) is not built yet.
+	return fmt.Sprintf(`Cursor adapter is not built yet.
 Manual config until the bundle ships:
   - Add hooks.json / Team hooks over beforeSubmitPrompt, beforeMCPExecution,
     afterFileEdit that invoke 'openbox' (note: Cursor hooks fail-open).
