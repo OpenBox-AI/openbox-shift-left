@@ -10,28 +10,32 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/client"
 )
 
-// STORY-SL-16 — opt-in transcript usage extraction (OD-FINOPS).
+// Opt-in transcript usage extraction.
 //
-// Claude Code hooks expose NO token/cost usage (capabilities.go / README known
-// limitations), but the session's `transcript_path` — a JSONL file, one turn per
-// line — carries a per-assistant-turn `message.usage` object with token counts.
-// Behind the off-by-default finops opt-in (ResolveFinops), the adapter reads it
-// on SessionEnd (off the hot path) to populate the otherwise-unused
-// client.Tokens / client.Cost on the SessionEnded event.
+// Claude Code hooks expose no token/cost usage (capabilities.go / README
+// known limitations), but the session's `transcript_path` — a JSONL file,
+// one turn per line — carries a per-assistant-turn `message.usage` object
+// with token counts. Behind the off-by-default finops opt-in
+// (ResolveFinops), the adapter reads it on SessionEnd (off the hot path)
+// to populate the otherwise-unused client.Tokens / client.Cost on the
+// SessionEnded event.
 //
-// INV-2 (the load-bearing invariant) is enforced STRUCTURALLY, not by filtering:
-// the transcript is decoded into `transcriptLine` / `usageNumbers` — structs that
-// contain ONLY numeric fields. Because encoding/json silently ignores unknown
-// keys, every content-bearing field in the transcript (prompt text, tool inputs,
-// tool_result bodies, file contents, the assistant's message `content`, thinking
-// blocks, …) has NOWHERE to land — it is impossible for content to enter memory
-// through this path, let alone reach an event, metadata, span, or the wire. The
-// sentinel-content-absent test (usage_test.go) proves this end-to-end.
+// INV-2 (the load-bearing invariant) is enforced structurally, not by
+// filtering: the transcript is decoded into `transcriptLine` /
+// `usageNumbers` — structs that contain only numeric fields. Because
+// encoding/json silently ignores unknown keys, every content-bearing
+// field in the transcript (prompt text, tool inputs, tool_result bodies,
+// file contents, the assistant's message `content`, thinking blocks, …)
+// has nowhere to land — it is impossible for content to enter memory
+// through this path, let alone reach an event, metadata, span, or the
+// wire. The sentinel-content-absent test (usage_test.go) proves this
+// end-to-end.
 //
-// INV-3: best-effort. A missing / oversized / malformed / partially-written
-// transcript yields an error the caller logs and skips; it never fails the flush,
-// blocks a tool call, or writes stdout. The read is bounded (maxTranscriptBytes)
-// so a giant transcript cannot exhaust memory.
+// INV-3: best-effort. A missing / oversized / malformed /
+// partially-written transcript yields an error the caller logs and skips;
+// it never fails the flush, blocks a tool call, or writes stdout. The read
+// is bounded (maxTranscriptBytes) so a giant transcript cannot exhaust
+// memory.
 
 // maxTranscriptBytes bounds the transcript read so a pathological/huge transcript
 // cannot exhaust memory (INV-3). A transcript larger than this is skipped whole
@@ -80,10 +84,10 @@ func readTranscriptUsage(path string) (*client.Tokens, *client.Cost, error) {
 		return nil, nil, fmt.Errorf("open transcript: %w", err)
 	}
 	defer f.Close()
-	// Stat the OPEN fd (not the path) so the regular-file check and the size
-	// bound below both refer to the same object we actually read — no stat/read
-	// TOCTOU where a symlink swap or post-stat growth could bypass the cap
-	// (SEC-16-1; mirrors SL-6's bounded-read pattern).
+	// Stat the open fd (not the path) so the regular-file check and the
+	// size bound below both refer to the same object we actually read —
+	// no stat/read TOCTOU where a symlink swap or post-stat growth could
+	// bypass the cap (mirrors the git action's bounded-read pattern).
 	if fi, err := f.Stat(); err != nil {
 		return nil, nil, fmt.Errorf("stat transcript: %w", err)
 	} else if !fi.Mode().IsRegular() {
@@ -124,11 +128,12 @@ func aggregateUsage(raw []byte) (*client.Tokens, *client.Cost, error) {
 		}
 		if tl.Message != nil && tl.Message.Usage != nil {
 			u := tl.Message.Usage
-			// Input-side = prompt tokens plus cache tokens consumed. The SL-1
-			// Tokens contract has no cache field, so cache read/creation fold into
-			// Input (documented rollup; total token throughput is preserved).
-			// nonNeg clamps any negative source value to 0 so the emitted numbers
-			// always satisfy the SL-1 schema `minimum: 0` (SEC-16-2, data-integrity).
+			// Input-side = prompt tokens plus cache tokens consumed. The
+			// Tokens contract has no cache field, so cache read/creation
+			// fold into Input (documented rollup; total token throughput
+			// is preserved). nonNeg clamps any negative source value to 0
+			// so the emitted numbers always satisfy the schema `minimum:
+			// 0`.
 			in += nonNeg(u.InputTokens) + nonNeg(u.CacheReadInputTokens) + nonNeg(u.CacheCreationInputTokens)
 			out += nonNeg(u.OutputTokens)
 			sawUsage = true
@@ -157,8 +162,8 @@ func aggregateUsage(raw []byte) (*client.Tokens, *client.Cost, error) {
 
 func intPtr(v int) *int { return &v }
 
-// nonNeg clamps a token count to >= 0 (SEC-16-2): a malformed/negative source
-// value must never produce a number that violates the SL-1 schema `minimum: 0`.
+// nonNeg clamps a token count to >= 0: a malformed/negative source value
+// must never produce a number that violates the schema `minimum: 0`.
 func nonNeg(v int) int {
 	if v < 0 {
 		return 0

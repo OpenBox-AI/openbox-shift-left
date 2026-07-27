@@ -9,20 +9,20 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/decision"
 )
 
-// Credential resolution for the hook binary. As of STORY-SL7-A (OD-SL7-SHARE
-// ruling (a), ADR-0007) the provider-NEUTRAL config/credential machinery —
-// the dev.json `DevConfig` contract, the Resolve* precedence rules, and the
-// OS/file secret-store readers — lives in the shared module
-// adapters/common/devconfig, consumed by every adapter (SL-4 Claude Code,
-// SL-7 Codex). This file is the Claude Code adapter's THIN, behavior-preserving
-// facade over it: every symbol below keeps its pre-extraction name, signature,
-// and semantics (the full original documentation now lives on the devconfig
-// definitions). Only the enforce-budget CLAMPS stay here — they encode Claude
-// Code's OWN correctness bound (the 5 s hook kill), which is provider-specific.
+// Credential resolution for the hook binary. The provider-neutral
+// config/credential machinery — the dev.json `DevConfig` contract, the
+// Resolve* precedence rules, and the OS/file secret-store readers — lives
+// in the shared module adapters/common/devconfig, consumed by every
+// adapter (ADR-0007). This file is the Claude Code adapter's thin,
+// behavior-preserving facade over it: every symbol below keeps its
+// pre-extraction name, signature, and semantics (the full original
+// documentation now lives on the devconfig definitions). Only the
+// enforce-budget clamps stay here — they encode Claude Code's own
+// correctness bound (the 5s hook kill), which is provider-specific.
 //
-// Identity is minted by `openbox dev init` (STORY-SL-2) and stored in the OS
-// secret store; the hook reads it here. INV-1: the obx_ key and Ed25519 seed
-// are read straight into the client and NEVER logged, printed, or placed on an
+// Identity is minted by `openbox dev init` and stored in the OS secret
+// store; the hook reads it here. INV-1: the obx_ key and Ed25519 seed are
+// read straight into the client and never logged, printed, or placed on an
 // argv. See devconfig for the full env/config contract.
 const (
 	envBaseURL         = devconfig.EnvBaseURL
@@ -91,8 +91,8 @@ func (c Credentials) NewClient(logger client.Logger) (*client.Client, error) {
 	})
 }
 
-// secretLookup is the OS secret-store reader; overridable in tests. It mirrors
-// the backends `openbox dev init` (STORY-SL-2) wrote with.
+// secretLookup is the OS secret-store reader; overridable in tests. It
+// mirrors the backends `openbox dev init` wrote with.
 var secretLookup devconfig.SecretLookup = devconfig.OSSecretLookup
 
 // ResolveIdentity resolves ONLY the developer DID (env, then config file) — no
@@ -113,93 +113,95 @@ func ResolveCoordinates() (baseURL, did string) { return devconfig.ResolveCoordi
 // with OPENBOX_SPOOL_DIR (tests use a temp dir).
 func DefaultSpoolDir() string { return devconfig.SpoolDir("cc-spool") }
 
-// ResolveInstallGitHook reports whether to install the SL-5 prepare-commit-msg
+// ResolveInstallGitHook reports whether to install the prepare-commit-msg
 // hook on SessionStart (default false; env overrides config).
 func ResolveInstallGitHook() bool { return devconfig.ResolveInstallGitHook() }
 
-// ResolveFinops reports whether opt-in transcript usage extraction is enabled
-// (STORY-SL-16, OD-FINOPS; default false).
+// ResolveFinops reports whether opt-in transcript usage extraction is
+// enabled (default false).
 func ResolveFinops() bool { return devconfig.ResolveFinops() }
 
-// ResolveContentCapture reports the org content posture (OD4; DEFAULT ON as of
-// 2026-07-15, opt-out via config false / env 0).
+// ResolveContentCapture reports the org content posture (default on,
+// opt-out via config false / env 0).
 func ResolveContentCapture() bool { return devconfig.ResolveContentCapture() }
 
-// ResolveSecretDetection reports whether Tier-1 local secret detection is on
-// (STORY-E6-S9, OD-SYNC-10; DEFAULT TRUE, opt-out).
+// ResolveSecretDetection reports whether Tier-1 local secret detection is
+// on (default true, opt-out).
 func ResolveSecretDetection() bool { return devconfig.ResolveSecretDetection() }
 
-// ResolveFindings reports whether the Tier-3 findings loop is on
-// (STORY-E6-S11; DEFAULT FALSE, opt-in).
+// ResolveFindings reports whether the Tier-3 findings loop is on (default
+// false, opt-in).
 func ResolveFindings() bool { return devconfig.ResolveFindings() }
 
 // ResolveFindingsCursor resolves the findings-loop cursor state file path.
 func ResolveFindingsCursor() string { return devconfig.ResolveFindingsCursor() }
 
-// ResolveEnforce reports whether the developer runtime is in ENFORCE mode
-// (STORY-E6-S1 / ADR-0006; default false = observe).
+// ResolveEnforce reports whether the developer runtime is in enforce mode
+// (ADR-0006; default false = observe).
 func ResolveEnforce() bool { return devconfig.ResolveEnforce() }
 
 // maxEnforceTimeout caps the configurable enforce decision budget. It is a
-// CORRECTNESS bound, not a nicety: Claude Code kills the PreToolUse hook at 5 s
-// (plugin/hooks/hooks.json), and a hook-kill lets the tool proceed — a CC-layer
-// fail-OPEN that would silently defeat a fail-CLOSED org. Clamping the whole
-// enforce wait to 2 s keeps the full hook (config read + gate + spool) under
-// that kill so a fail-closed deny is actually delivered, and keeps INV-3b
-// bounded. Provider-specific — deliberately NOT moved into devconfig.
+// correctness bound, not a nicety: Claude Code kills the PreToolUse hook at
+// 5s, and a hook-kill lets the tool proceed — a CC-layer fail-open that
+// would silently defeat a fail-closed org. Clamping the whole enforce wait
+// to 2s keeps the full hook (config read + gate + spool) under that kill
+// so a fail-closed deny is actually delivered, and keeps INV-3b bounded.
+// Provider-specific — deliberately not moved into devconfig.
 const maxEnforceTimeout = 2 * time.Second
 
-// ResolveFailClosed reports the enforce FAILURE POLICY (STORY-E6-S3, OD9;
-// default FALSE = fail-open).
+// ResolveFailClosed reports the enforce failure policy (default false =
+// fail-open).
 func ResolveFailClosed() bool { return devconfig.ResolveFailClosed() }
 
-// ResolveEnforceTimeout resolves the hard per-call decision budget the enforce
-// hook allows the local decider (STORY-E6-S3): config first, env-if-parseable
-// wins; <=0 yields 0 (⇒ decision.DefaultDecisionTimeout); a positive value over
-// maxEnforceTimeout is clamped (INV-3b bounded + under CC's 5 s kill).
+// ResolveEnforceTimeout resolves the hard per-call decision budget the
+// enforce hook allows the local decider: config first, env-if-parseable
+// wins; <=0 yields 0 (⇒ decision.DefaultDecisionTimeout); a positive value
+// over maxEnforceTimeout is clamped (INV-3b bounded + under CC's 5s kill).
 func ResolveEnforceTimeout() time.Duration {
 	ms := devconfig.ResolveTimeoutMS(func(c DevConfig) int { return c.EnforceTimeoutMS }, envEnforceTimeout)
 	if ms <= 0 {
 		return 0 // ⇒ decision.DefaultDecisionTimeout
 	}
-	// Clamp in MILLISECONDS before the multiply so a near-max-int64 value can never
-	// overflow time.Duration (which would wrap to a negative/huge duration). Bounded
-	// by construction, not by accident (G_SEC INFO-2).
+	// Clamp in milliseconds before the multiply so a near-max-int64 value
+	// can never overflow time.Duration (which would wrap to a
+	// negative/huge duration). Bounded by construction, not by accident.
 	if maxMS := int64(maxEnforceTimeout / time.Millisecond); int64(ms) > maxMS {
 		return maxEnforceTimeout
 	}
 	return time.Duration(ms) * time.Millisecond
 }
 
-// ResolveTier2 reports whether the Tier-2 synchronous /evaluate escalation is
-// on (STORY-E6-S10; DEFAULT FALSE, opt-in).
+// ResolveTier2 reports whether the Tier-2 synchronous /evaluate escalation
+// is on (default false, opt-in).
 func ResolveTier2() bool { return devconfig.ResolveTier2() }
 
-// ResolveTier2Timeout resolves the in-binary budget for one Tier-2 /evaluate
-// escalation (STORY-E6-S10): config first, env-if-parseable wins; <=0 yields
-// defaultTier2Timeout; clamped to maxTier2Timeout (the CC 5 s-hook-kill bound).
+// ResolveTier2Timeout resolves the in-binary budget for one Tier-2
+// /evaluate escalation: config first, env-if-parseable wins; <=0 yields
+// defaultTier2Timeout; clamped to maxTier2Timeout (the CC 5s-hook-kill
+// bound).
 func ResolveTier2Timeout() time.Duration {
 	ms := devconfig.ResolveTimeoutMS(func(c DevConfig) int { return c.Tier2TimeoutMS }, envTier2Timeout)
 	if ms <= 0 {
 		return defaultTier2Timeout
 	}
-	// Clamp in MILLISECONDS before the multiply so a near-max-int64 value can never
-	// overflow time.Duration (mirrors ResolveEnforceTimeout's overflow-proof clamp).
+	// Clamp in milliseconds before the multiply so a near-max-int64 value
+	// can never overflow time.Duration (mirrors ResolveEnforceTimeout's
+	// overflow-proof clamp).
 	if maxMS := int64(maxTier2Timeout / time.Millisecond); int64(ms) > maxMS {
 		return maxTier2Timeout
 	}
 	return time.Duration(ms) * time.Millisecond
 }
 
-// ResolveAgentID resolves the backend agent id for policy sync/staleness
-// (STORY-E6-S8). Empty when unconfigured.
+// ResolveAgentID resolves the backend agent id for policy sync/staleness.
+// Empty when unconfigured.
 func ResolveAgentID() string { return devconfig.ResolveAgentID() }
 
-// ResolveBackendURL resolves the openbox-backend CONTROL-PLANE base URL.
+// ResolveBackendURL resolves the openbox-backend control-plane base URL.
 func ResolveBackendURL() string { return devconfig.ResolveBackendURL() }
 
-// ResolveControlToken resolves the ORG control-plane credential (OD-SYNC-4):
-// the OPENBOX_CONTROL_TOKEN env ONLY (never config, never the secret store).
+// ResolveControlToken resolves the org control-plane credential: the
+// OPENBOX_CONTROL_TOKEN env only (never config, never the secret store).
 func ResolveControlToken() string { return devconfig.ResolveControlToken() }
 
 // ResolveBundlePath resolves the local policy-bundle path the in-process
@@ -213,11 +215,11 @@ func ResolveBundlePath() string {
 	return decision.DefaultBundlePath()
 }
 
-// ResolveCredentials assembles Credentials from env + the secret store via the
-// shared resolver, threading this adapter's injectable secretLookup (the test
-// seam). It returns an error (never a panic) when identity is incomplete; the
-// caller logs it fail-open and exits 0 (INV-3). No secret value is ever
-// included in a returned error.
+// ResolveCredentials assembles Credentials from env + the secret store via
+// the shared resolver, threading this adapter's injectable secretLookup
+// (the test seam). It returns an error (never a panic) when identity is
+// incomplete; the caller logs it fail-open and exits 0 (INV-3). No secret
+// value is ever included in a returned error.
 func ResolveCredentials() (Credentials, error) {
 	dc, err := devconfig.ResolveCredentials(secretLookup)
 	if err != nil {

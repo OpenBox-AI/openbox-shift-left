@@ -12,7 +12,7 @@ import (
 	providerspi "github.com/openbox-ai/openbox-shift-left/provider"
 )
 
-// CredentialRef is the SL-2 install-time seam's credential coordinate type
+// CredentialRef is the install-time seam's credential coordinate type
 // (shared provider SPI — INV-1: it carries coordinates + the non-secret DID
 // only, never the obx_ key or Ed25519 seed value).
 type CredentialRef = providerspi.CredentialRef
@@ -23,7 +23,7 @@ type CredentialRef = providerspi.CredentialRef
 // else. This is the idempotency key (the Codex HooksFile schema is
 // deny_unknown_fields at the top level, so a custom marker field is not an
 // option): re-install replaces exactly these entries in place and NEVER
-// touches a foreign handler. The match is ANCHORED (G_SEC SL7-A F1): a user's
+// touches a foreign handler. The match is anchored: a user's
 // compound/wrapper handler that merely EMBEDS an openbox invocation (e.g.
 // `my-audit-log && "/usr/bin/openbox" hook codex PreToolUse`) is foreign — its
 // added functionality must survive re-install — so a substring test is not
@@ -48,17 +48,18 @@ const (
 // hooks.json (the HooksFile schema's only free-text field).
 const hooksDescription = "OpenBox observe hooks (STORY-SL7-A) — managed by `openbox dev init --provider codex`; re-running updates the openbox entries in place and never touches foreign hooks."
 
-// Installer writes the OpenBox hook entries into Codex's hooks.json and the
-// non-secret dev config, delegated from `openbox dev init` (the SL-2 provider
-// seam). It implements provider.Installer and replaces the SL-2 stub for codex.
-// Zero-value fields default to the standard install locations; tests set them
-// to temp paths.
+// Installer writes the OpenBox hook entries into Codex's hooks.json and
+// the non-secret dev config, delegated from `openbox dev init` (the
+// provider seam). It implements provider.Installer and replaces the stub
+// for codex. Zero-value fields default to the standard install
+// locations; tests set them to temp paths.
 //
-// Unlike the Claude Code installer there is no plugin bundle and no engine
-// copy: Codex hooks invoke the engine by ABSOLUTE PATH (EngineBinary — the CC
-// EngineBinary precedent, resolved from os.Executable() by the CLI registry),
-// so `dev init` is the whole install. The Codex plugin channel is a recorded
-// future distribution option (OD-SL7-DIST).
+// Unlike the Claude Code installer there is no plugin bundle and no
+// engine copy: Codex hooks invoke the engine by absolute path
+// (EngineBinary — the CC EngineBinary precedent, resolved from
+// os.Executable() by the CLI registry), so `dev init` is the whole
+// install. The Codex plugin channel is a recorded future distribution
+// option.
 type Installer struct {
 	HooksPath    string // where hooks.json lives (default: defaultHooksPath())
 	ConfigPath   string // where the dev config is written (default: DefaultConfigPath())
@@ -68,7 +69,7 @@ type Installer struct {
 // Name is the provider this installer serves.
 func (Installer) Name() providerspi.Name { return providerspi.Codex }
 
-// Available reports that the Codex adapter is built (not the SL-2 stub).
+// Available reports that the Codex adapter is built (not the stub).
 func (Installer) Available() bool { return true }
 
 // Plan describes what Install would write, without writing anything (--dry-run
@@ -174,9 +175,9 @@ func (i Installer) writeHooks() error {
 	if err != nil {
 		return err
 	}
-	// 0700 (G_SEC SL7-A F2): when `dev init` runs before Codex ever has, this
-	// creates ~/.codex itself — the directory Codex later drops auth.json
-	// (OpenAI credentials) into — so it gets the same owner-only posture as the
+	// 0700: when `dev init` runs before Codex ever has, this creates
+	// ~/.codex itself — the directory Codex later drops auth.json (OpenAI
+	// credentials) into — so it gets the same owner-only posture as the
 	// config dir, spool, and stash.
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return fmt.Errorf("codex install: hooks dir: %w", err)
@@ -314,10 +315,11 @@ func timeoutFor(ev HookName) int {
 	return hotHookTimeoutSec
 }
 
-// writeConfig writes the shared non-secret dev config (same dev.json contract
-// as every provider, incl. the ADR-0006 enforce/tier2/findings posture from
-// ref — so the SL7-B enforce leg needs no new install surface). Ported from
-// the CC installer, including the preserve-prior-sync-coordinates behavior.
+// writeConfig writes the shared non-secret dev config (same dev.json
+// contract as every provider, incl. the ADR-0006 enforce/tier2/findings
+// posture from ref — so the enforce leg needs no new install surface).
+// Ported from the CC installer, including the preserve-prior-sync-
+// coordinates behavior.
 func (i Installer) writeConfig(ref CredentialRef) error {
 	cfg := DevConfig{
 		BaseURL:           ref.BaseURL,
@@ -327,7 +329,7 @@ func (i Installer) writeConfig(ref CredentialRef) error {
 		PrivateKeyAccount: ref.PrivateKeyAccount,
 		ContentCapture:    ref.ContentCapture,
 		InstallGitHook:    ref.InstallGitHook,
-		AgentID:           ref.AgentID,    // E6-S8: for `dev sync` / staleness
+		AgentID:           ref.AgentID,    // for `dev sync` / staleness
 		BackendURL:        ref.BackendURL, // control-plane base for the policy read
 		// ADR-0006: persist the enforce posture so the runtime hook reads it from
 		// dev.json (no OPENBOX_ENFORCE / OPENBOX_TIER2 / OPENBOX_FINDINGS needed).

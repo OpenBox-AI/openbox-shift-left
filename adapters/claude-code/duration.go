@@ -10,30 +10,23 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/client"
 )
 
-// durationStash is the cross-process bridge that lets a PostToolUse (completed)
-// hook recover the wall-clock START time recorded by the paired PreToolUse
-// (started) hook, so the completed span carries a REAL cross-process duration
-// instead of 0 (E7-S8).
+// durationStash is the cross-process bridge that lets a PostToolUse
+// (completed) hook recover the wall-clock start time recorded by the paired
+// PreToolUse (started) hook, so the completed span carries a real duration
+// instead of 0. Claude Code fires PreToolUse/PostToolUse as separate
+// short-lived processes, so without shared state the completed span's
+// start_time would be its own timestamp.
 //
-// The problem (documented in client/payload.go buildHookSpan): Claude Code fires
-// PreToolUse and PostToolUse as SEPARATE short-lived processes, and PostToolUse
-// exposes no start time. Without shared state the completed span's start_time is
-// its own timestamp, so duration_ns is 0 and the dashboard Event-Log DURATION
-// column is blank (the E7-S6 finding; dashboard-devruntime-display-gaps).
+// Mirrors the session registry (adapters/common/git/registry.go): the
+// started hook writes a tiny record keyed by the tool call's pairing key; the
+// completed hook reads+deletes it and stamps ev.StartedAt before the event is
+// spooled, so pairing survives the spool's rotation/recovery-file splitting.
+// buildHookSpan (client/payload.go) then computes duration_ns = end - start.
 //
-// The fix mirrors the SL-5 session registry (adapters/common/git/registry.go):
-// the started hook writes a tiny record keyed by the tool call's pairing key;
-// the completed hook reads+deletes it and stamps ev.StartedAt BEFORE the event
-// is spooled — so the completed DevEvent is self-contained by spool time and the
-// pairing is robust to the SL-4 spool's rotation/recovery-file splitting (it is
-// done before the network, not at flush). buildHookSpan then computes
-// duration_ns = end - start for the completed span, and the core completed-hook
-// path (StoreHookSpanActivity, E7-S8) projects it onto the event's duration_ms.
-//
-// Records carry ONLY a structural RFC3339 timestamp (INV-2: no content); the
-// filename is a hash of structural locators (session, tool name, file/function),
-// never content. Best-effort throughout (INV-3): any fault only costs duration
-// accuracy — never a tool call, never the event itself.
+// Records carry only a structural RFC3339 timestamp (INV-2: no content); the
+// filename is a hash of structural locators (session, tool name, file/
+// function), never content. Best-effort throughout (INV-3): any fault only
+// costs duration accuracy — never a tool call, never the event itself.
 type durationStash struct {
 	Dir string // stash root; per-session subdirs live under it
 }

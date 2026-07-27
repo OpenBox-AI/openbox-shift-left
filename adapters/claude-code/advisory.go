@@ -9,11 +9,12 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/client"
 )
 
-// Advisory is the local sink for the Advisory governance tier (STORY-SL-9): it
-// RECORDS what OpenBox would enforce for a dev-runtime event — the verdict, a
-// would_block label, and the trust/risk/guardrail/constraint signals — without
-// ever blocking, delaying, or erroring the tool call (INV-3). It sits on the
-// FLUSH path only (SessionEnd / `flush`), never the Pre/PostToolUse hot path.
+// Advisory is the local sink for the Advisory governance tier: it records
+// what OpenBox would enforce for a dev-runtime event — the verdict, a
+// would_block label, and the trust/risk/guardrail/constraint signals —
+// without ever blocking, delaying, or erroring the tool call (INV-3). It
+// sits on the flush path only (SessionEnd / `flush`), never the
+// Pre/PostToolUse hot path.
 //
 // Records are metadata/categories only (INV-2): no prompt/command/file/output
 // content and never the guardrail `redacted_input`. Writes are best-effort — a
@@ -30,8 +31,8 @@ type advisoryLogger interface {
 	Printf(format string, args ...any)
 }
 
-// advisoryRecord is one line in the advisories sink. Its field set is exactly
-// the STORY-SL-9 schema — all categories/ids/scores, no content (INV-2).
+// advisoryRecord is one line in the advisories sink — all categories/ids/
+// scores, no content (INV-2).
 type advisoryRecord struct {
 	EventID          string                   `json:"event_id"`
 	SessionID        string                   `json:"session_id"`
@@ -42,10 +43,10 @@ type advisoryRecord struct {
 	RiskScore        float64                  `json:"risk_score,omitempty"`
 	Constraints      []map[string]any         `json:"constraints,omitempty"`
 	GuardrailReasons []client.GuardrailReason `json:"guardrail_reasons,omitempty"`
-	// DriftDetected / DriftViolations are the CONTENT-FREE goal-drift signals
-	// (STORY-E6-S11): whether the AGE classifier saw goal drift and how many
-	// behavioral violations — a boolean + a count, never the violation free text
-	// (INV-2). Sourced from client.Evaluation.Drift (age_result).
+	// DriftDetected / DriftViolations are the content-free goal-drift
+	// signals: whether the AGE classifier saw goal drift and how many
+	// behavioral violations — a boolean + a count, never the violation
+	// free text (INV-2). Sourced from client.Evaluation.Drift (age_result).
 	DriftDetected   bool `json:"drift_detected,omitempty"`
 	DriftViolations int  `json:"drift_violations,omitempty"`
 	Timestamp       string `json:"ts,omitempty"`
@@ -111,11 +112,12 @@ func (a *Advisory) write(rec advisoryRecord) {
 	}
 }
 
-// appendJSONL appends one JSON line to a same-machine, owner-only JSONL sink,
-// creating the directory (0700) and file (0600) as needed. A single small
-// O_APPEND write is atomic under POSIX. Shared by the Advisory sink (SL-9) and the
-// enforcement audit sink (E6-S2, enforce.go) so the on-disk perms posture
-// (INV-1/INV-2: same-machine, owner-only, metadata-only) lives in ONE routine.
+// appendJSONL appends one JSON line to a same-machine, owner-only JSONL
+// sink, creating the directory (0700) and file (0600) as needed. A single
+// small O_APPEND write is atomic under POSIX. Shared by the Advisory sink
+// and the enforcement audit sink (enforce.go) so the on-disk perms posture
+// (INV-1/INV-2: same-machine, owner-only, metadata-only) lives in one
+// routine.
 func appendJSONL(path string, line []byte) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
@@ -150,12 +152,12 @@ func (a *Advisory) logf(format string, args ...any) {
 	}
 }
 
-// reasonTypeCategories returns the guardrail reason CATEGORY types (the `type`
-// field, e.g. "pii", "validation") — NEVER the reason free text or field name,
-// which can describe detected content (INV-2). An absent type renders as "?".
-// Shared by the stderr/stdout diagnostics (reasonTypes) and the enforcement audit
-// record (enforce.go recordEnforcement), so both surface guardrail findings at the
-// same provably content-free granularity.
+// reasonTypeCategories returns the guardrail reason category types (the
+// `type` field, e.g. "pii", "validation") — never the reason free text or
+// field name, which can describe detected content (INV-2). An absent type
+// renders as "?". Shared by the stderr/stdout diagnostics (reasonTypes) and
+// the enforcement audit record (enforce.go recordEnforcement), so both
+// surface guardrail findings at the same provably content-free granularity.
 func reasonTypeCategories(reasons []client.GuardrailReason) []string {
 	if len(reasons) == 0 {
 		return nil

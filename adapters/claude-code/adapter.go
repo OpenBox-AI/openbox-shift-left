@@ -7,28 +7,28 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/client"
 )
 
-// Emitter is the transport the adapter delivers events through — satisfied by
-// *client.Client (STORY-SL-3). Abstracted so the flush path is unit-testable
-// with a fake that records what would be emitted. It returns the rich
-// Evaluation (STORY-SL-9); observe-only callers still ignore it for control flow.
+// Emitter is the transport the adapter delivers events through — satisfied
+// by *client.Client. Abstracted so the flush path is unit-testable with a
+// fake that records what would be emitted. It returns the rich Evaluation;
+// observe-only callers still ignore it for control flow.
 type Emitter interface {
 	Emit(ctx context.Context, ev client.DevEvent) (client.Evaluation, error)
 }
 
-// Adapter is the Claude Code realization of the Provider Adapter Contract
-// (§1b). It owns the hot-path mapping+spool (Observe) and the off-path delivery
-// (Flush). It holds no secrets — identity is a DID only; the obx_ key + Ed25519
-// seed live in the Emitter's client (INV-1).
+// Adapter is the Claude Code realization of the Provider Adapter Contract.
+// It owns the hot-path mapping+spool (Observe) and the off-path delivery
+// (Flush). It holds no secrets — identity is a DID only; the obx_ key +
+// Ed25519 seed live in the Emitter's client (INV-1).
 type Adapter struct {
 	Mapper Mapper
 	Spool  Spool
-	// Advisory records the Advisory-tier verdict/guardrail signals on flush
-	// (STORY-SL-9). Record-only, off the hot path, never blocks (INV-3). nil ⇒
-	// no advisory recording (still delivers, still never blocks).
+	// Advisory records the Advisory-tier verdict/guardrail signals on
+	// flush. Record-only, off the hot path, never blocks (INV-3). nil ⇒ no
+	// advisory recording (still delivers, still never blocks).
 	Advisory *Advisory
-	// Durations bridges the PreToolUse start time to the paired PostToolUse so a
-	// completed span computes a real cross-process duration (E7-S8). Best-effort;
-	// an empty Dir disables it (Observe threads nothing, byte-identical to before).
+	// Durations bridges the PreToolUse start time to the paired PostToolUse
+	// so a completed span computes a real cross-process duration.
+	// Best-effort; an empty Dir disables it (Observe threads nothing).
 	Durations durationStash
 }
 
@@ -58,9 +58,10 @@ func (a *Adapter) Observe(hook HookName, e *HookEvent) (spooled bool, err error)
 	if !ok {
 		return false, nil
 	}
-	// E7-S8: bridge the PreToolUse start time to the paired PostToolUse so the
-	// completed span computes a real cross-process duration. Runs before Append so
-	// the spooled completed DevEvent is self-contained (survives spool splitting).
+	// Bridge the PreToolUse start time to the paired PostToolUse so the
+	// completed span computes a real cross-process duration. Runs before
+	// Append so the spooled completed DevEvent is self-contained (survives
+	// spool splitting).
 	a.threadDuration(&ev)
 	if err := a.Spool.Append(ev); err != nil {
 		return false, err
@@ -88,10 +89,10 @@ func (a *Adapter) threadDuration(ev *client.DevEvent) {
 	}
 }
 
-// Flush drains the given session's spooled events through the Emitter. It is
-// bounded by ctx (the binary caps SessionEnd flush so session teardown is never
-// delayed unduly). Observe-only: the verdict from each Emit never blocks (D7);
-// it is RECORDED to the Advisory sink off the hot path (STORY-SL-9).
+// Flush drains the given session's spooled events through the Emitter. It
+// is bounded by ctx (the binary caps SessionEnd flush so session teardown
+// is never delayed unduly). Observe-only: the verdict from each Emit never
+// blocks; it is recorded to the Advisory sink off the hot path.
 func (a *Adapter) Flush(ctx context.Context, sessionID string, em Emitter) (int, error) {
 	return a.Spool.FlushSession(ctx, sessionID, a.emitFunc(em))
 }
@@ -101,10 +102,10 @@ func (a *Adapter) FlushAll(ctx context.Context, em Emitter) (int, error) {
 	return a.Spool.FlushAll(ctx, a.emitFunc(em))
 }
 
-// emitFunc adapts an Emitter to a FlushFunc. It emits the event and then RECORDS
-// the returned Evaluation to the Advisory sink (Advisory-tier consumption,
-// STORY-SL-9) — record-only, never blocking. The delivery error is returned for
-// the drain's fail-open logging; the advisory write itself never fails the drain.
+// emitFunc adapts an Emitter to a FlushFunc. It emits the event and then
+// records the returned Evaluation to the Advisory sink — record-only,
+// never blocking. The delivery error is returned for the drain's fail-open
+// logging; the advisory write itself never fails the drain.
 func (a *Adapter) emitFunc(em Emitter) FlushFunc {
 	return func(ctx context.Context, ev client.DevEvent) error {
 		eval, err := em.Emit(ctx, ev)

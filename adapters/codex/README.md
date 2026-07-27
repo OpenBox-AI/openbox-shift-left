@@ -282,9 +282,8 @@ call through Codex's own approval/sandbox flow — it never grants approval and 
 overrides another hook's `deny`. Confirmed at the tag in `output_parser.rs`
 (`PreToolUseHookResult = Continue{updated_input} | Blocked`; `should_block = should_block
 && invalid_reason.is_none()`) and `pre_tool_use.rs::run` (any-deny-wins aggregation;
-a blocked result zeroes `updated_input`), and independently by the OD-SL7-ASK spike
-(`spike-SL7-ask-20260724`, `.fab7/sdlc/discovery/spikes/S5-codex-surfaces.md` →
-"2026-07-24 OD-SL7-ASK resolution"): Codex approval is resolved solely by the local
+a blocked result zeroes `updated_input`), and independently by the OD-SL7-ASK
+surface review of the Codex source (2026-07-24): Codex approval is resolved solely by the local
 actor via `Op::ExecApproval`/`PatchApproval`, and a hook `allow` is not an approval
 verb. So no live interactive probe is required to close this — the earlier
 "harness-unproven" caveat is retired. **Blast radius is still bounded in code to

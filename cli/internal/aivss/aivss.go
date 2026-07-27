@@ -1,22 +1,22 @@
 // Package aivss holds the default AIVSS risk posture the CLI supplies when
-// registering a developer agent via POST /agent/create (STORY-SL-2).
+// registering a developer agent via POST /agent/create.
 //
-// The posture was ACCEPTED by brian (2026-07-07) and the integers were verified
-// at build time against openbox-backend's calc-aivss-score.ts (via cross-repo
-// explore). Verified facts that shaped this file:
+// The integers were verified at build time against openbox-backend's
+// calc-aivss-score.ts. Verified facts that shaped this file:
 //
-//   - Scoring direction is INVERTED: higher points => higher risk => LOWER final
-//     aivss_score. A HIGH aivss_score is the SAFE end.
+//   - Scoring direction is inverted: higher points => higher risk => lower
+//     final aivss_score. A high aivss_score is the safe end.
 //   - Within ai_specific, four fields (data_sensitivity, ethical_impact,
-//     decision_criticality, adaptability) DESCEND (1 = highest risk) while
-//     model_robustness ASCENDS (5 = highest risk) — it is the odd one out. The
-//     values below were chosen with that per-field direction in mind.
-//   - This exact posture computes to aivss_score ~= 52.74 (mid-band) and, with
-//     the server's default behavioral=100 / alignment=100, a blended trust
-//     score ~= 81 (Tier 2). There is NO "moderate" tier enum in the backend;
-//     the trust tiers are numeric (Tier1>=90, Tier2>=75, Tier3>=50, Tier4>=25,
-//     Untrusted<25) and are computed SERVER-SIDE. The CLI therefore pins only
-//     the 14 integers and never asserts a tier locally.
+//     decision_criticality, adaptability) descend (1 = highest risk) while
+//     model_robustness ascends (5 = highest risk) — it is the odd one out.
+//     The values below were chosen with that per-field direction in mind.
+//   - This exact posture computes to aivss_score ~= 52.74 (mid-band) and,
+//     with the server's default behavioral=100 / alignment=100, a blended
+//     trust score ~= 81 (Tier 2). There is no "moderate" tier enum in the
+//     backend; the trust tiers are numeric (Tier1>=90, Tier2>=75,
+//     Tier3>=50, Tier4>=25, Untrusted<25) and are computed server-side. The
+//     CLI therefore pins only the 14 integers and never asserts a tier
+//     locally.
 //   - All 14 integers validate within the DTO's @Min/@Max bounds.
 package aivss
 
@@ -52,11 +52,11 @@ type Config struct {
 	Impact       Impact     `json:"impact"`
 }
 
-// DefaultDeveloperProfile is the accepted risk posture for a developer coding
-// agent: capable (shell/file/MCP, code that ships) but human-supervised and
-// observe-only in Phase 1. Do not edit these integers without re-verifying the
-// resulting score against calc-aivss-score.ts and re-confirming the posture
-// with product/security (G1_READY).
+// DefaultDeveloperProfile is the accepted risk posture for a developer
+// coding agent: capable (shell/file/MCP, code that ships) but
+// human-supervised and observe-only by default. Do not edit these integers
+// without re-verifying the resulting score against calc-aivss-score.ts and
+// re-confirming the posture with product/security.
 func DefaultDeveloperProfile() Config {
 	return Config{
 		BaseSecurity: Base{

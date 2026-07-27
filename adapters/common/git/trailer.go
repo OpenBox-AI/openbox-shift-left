@@ -8,13 +8,14 @@ import (
 	"strings"
 )
 
-// TrailerKey is the commit-message trailer that binds a commit to its OpenBox
-// session(s). One line per distinct session (S3 R3, like Co-Authored-By).
+// TrailerKey is the commit-message trailer that binds a commit to its
+// OpenBox session(s). One line per distinct session, like Co-Authored-By.
 const TrailerKey = "OpenBox-Session"
 
-// maxSessionIDLen bounds a stamped id (defense-in-depth, mirrors SL-4's
-// maxIdentLen). Claude Code session ids are UUIDs (36 chars); a value far larger
-// than any real id is treated as malformed and skipped, never stamped.
+// maxSessionIDLen bounds a stamped id (defense-in-depth, mirrors the
+// adapters' maxIdentLen). Claude Code session ids are UUIDs (36 chars); a
+// value far larger than any real id is treated as malformed and skipped,
+// never stamped.
 const maxSessionIDLen = 512
 
 // Git runs the git binary against a working tree. The zero value uses the
@@ -53,28 +54,30 @@ func (g Git) run(args ...string) ([]byte, error) {
 	return out.Bytes(), nil
 }
 
-// StampMessageFile stamps an `OpenBox-Session:` trailer for each session id onto
-// the commit message at msgFile, idempotently and additively (S3 R1/R2/R3):
+// StampMessageFile stamps an `OpenBox-Session:` trailer for each session
+// id onto the commit message at msgFile, idempotently and additively:
 //
 //   - `--if-missing=add`        first session id creates the trailer block.
-//   - `--if-exists=addIfDifferent` a distinct id is appended as a NEW line
-//     (multi-session fan-in); an id already present is NOT duplicated — this is
-//     what makes re-fire and `git commit --amend` safe (S3 R2).
+//   - `--if-exists=addIfDifferent` a distinct id is appended as a new line
+//     (multi-session fan-in); an id already present is not duplicated —
+//     this is what makes re-fire and `git commit --amend` safe.
 //
-// Ids are validated (validateSessionID) before reaching git: empty, over-long,
-// multi-line, and secret-shaped values are dropped, never stamped (INV-1). If no
-// id survives validation the message is left untouched (a human/unattributed
-// commit stays unstamped; SL-6 marks it). Order is preserved (S3 R3).
+// Ids are validated (validateSessionID) before reaching git: empty,
+// over-long, multi-line, and secret-shaped values are dropped, never
+// stamped (INV-1). If no id survives validation the message is left
+// untouched (a human/unattributed commit stays unstamped; the git action
+// marks it). Order is preserved.
 //
-// Squash healing: a squash concatenates each source message, so an earlier
-// commit's `OpenBox-Session:` line ends up MID-BODY — where git's trailer parser
-// (and S3 R7's %(trailers) resolve) does NOT see it. We therefore harvest every
-// OpenBox-Session line from the WHOLE message and re-assert it into the trailing
-// trailer block (addIfDifferent => no duplication). This makes the multi-session
-// fan-in actually resolvable as trailers regardless of who ran the squash — even
-// a human with no session of their own still heals the agent sessions they
-// squashed together (so the union, not just the in-scope current session, is
-// stamped).
+// Squash healing: a squash concatenates each source message, so an
+// earlier commit's `OpenBox-Session:` line ends up mid-body — where
+// git's trailer parser (and the git action's %(trailers) resolve) does
+// not see it. We therefore harvest every OpenBox-Session line from the
+// whole message and re-assert it into the trailing trailer block
+// (addIfDifferent => no duplication). This makes the multi-session
+// fan-in actually resolvable as trailers regardless of who ran the
+// squash — even a human with no session of their own still heals the
+// agent sessions they squashed together (so the union, not just the
+// in-scope current session, is stamped).
 func (g Git) StampMessageFile(msgFile string, sessions []string) error {
 	if msgFile == "" {
 		return fmt.Errorf("stamp: empty message file path")
@@ -83,17 +86,18 @@ func (g Git) StampMessageFile(msgFile string, sessions []string) error {
 	if err != nil {
 		return fmt.Errorf("stamp: read %s: %w", msgFile, err)
 	}
-	// F1 (never interfere): do NOT stamp a commit message that has no real content
-	// (only git comment lines / whitespace). Stamping it would turn a would-be
-	// EMPTY commit — which git aborts/rejects — into a junk commit whose sole
-	// content is the trailer. Leaving it untouched preserves git's own
-	// empty-message handling. (interpret-trailers on an empty body would also
-	// produce an unresolvable leading-trailer, not a real message.)
+	// Never interfere: do not stamp a commit message that has no real
+	// content (only git comment lines / whitespace). Stamping it would
+	// turn a would-be empty commit — which git aborts/rejects — into a
+	// junk commit whose sole content is the trailer. Leaving it untouched
+	// preserves git's own empty-message handling. (interpret-trailers on
+	// an empty body would also produce an unresolvable leading-trailer,
+	// not a real message.)
 	if !hasCommitContent(data, g.commentChar()) {
 		return nil
 	}
-	// History (harvested from anywhere in the message) first, then the in-scope
-	// current session(s) — first occurrence wins on dedupe, so order mirrors S3 R3.
+	// History (harvested from anywhere in the message) first, then the
+	// in-scope current session(s) — first occurrence wins on dedupe.
 	ids := validSessionIDs(append(scanSessionLines(data), sessions...))
 	if len(ids) == 0 {
 		return nil // nothing to attribute — leave the message untouched
@@ -115,9 +119,10 @@ func (g Git) StampMessageFile(msgFile string, sessions []string) error {
 	return err
 }
 
-// ReadTrailers returns the deduped set of OpenBox-Session values on a message
-// file, in order. Used by tests and by callers that want to inspect what is
-// already stamped (the same read SL-6 performs server-side, S3 R7).
+// ReadTrailers returns the deduped set of OpenBox-Session values on a
+// message file, in order. Used by tests and by callers that want to
+// inspect what is already stamped (the same read the git action performs
+// server-side).
 func (g Git) ReadTrailers(msgFile string) ([]string, error) {
 	out, err := g.run("interpret-trailers", "--parse", msgFile)
 	if err != nil {
@@ -203,8 +208,8 @@ func parseTrailerValues(parsed []byte) []string {
 	return out
 }
 
-// validSessionIDs filters + dedupes session ids for stamping, preserving first
-// occurrence order (S3 R3).
+// validSessionIDs filters + dedupes session ids for stamping, preserving
+// first occurrence order.
 func validSessionIDs(sessions []string) []string {
 	var out []string
 	seen := map[string]bool{}
@@ -221,14 +226,15 @@ func validSessionIDs(sessions []string) []string {
 	return out
 }
 
-// validateSessionID enforces that only an opaque, single-line, non-secret id is
-// ever written into a commit (INV-1 + trailer-injection safety). It rejects:
+// validateSessionID enforces that only an opaque, single-line, non-secret
+// id is ever written into a commit (INV-1 + trailer-injection safety). It
+// rejects:
 //   - empty / whitespace-only,
 //   - anything over maxSessionIDLen,
-//   - a value containing a newline, carriage return, or NUL — which could inject
-//     extra trailer lines or split the message,
-//   - a value shaped like an OpenBox API key (`obx_` prefix): the trailer is the
-//     opaque session id ONLY, never a credential (S3 R4 / INV-1).
+//   - a value containing a newline, carriage return, or NUL — which
+//     could inject extra trailer lines or split the message,
+//   - a value shaped like an OpenBox API key (`obx_` prefix): the
+//     trailer is the opaque session id only, never a credential (INV-1).
 func validateSessionID(id string) error {
 	if strings.TrimSpace(id) == "" {
 		return fmt.Errorf("empty session id")
@@ -239,10 +245,10 @@ func validateSessionID(id string) error {
 	if strings.ContainsAny(id, "\n\r\x00") {
 		return fmt.Errorf("session id contains a line break or NUL")
 	}
-	// A session id is an opaque token (UUID-like) with no internal whitespace.
-	// Rejecting spaces/tabs stops a prose body line ("OpenBox-Session: my great
-	// feature") from being harvested into a bogus resolvable trailer (F5), and
-	// keeps the trailer value a single word.
+	// A session id is an opaque token (UUID-like) with no internal
+	// whitespace. Rejecting spaces/tabs stops a prose body line
+	// ("OpenBox-Session: my great feature") from being harvested into a
+	// bogus resolvable trailer, and keeps the trailer value a single word.
 	if strings.ContainsAny(id, " \t\v\f") {
 		return fmt.Errorf("session id contains whitespace")
 	}

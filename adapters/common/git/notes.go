@@ -9,14 +9,14 @@ import (
 // deliberately namespaced so it never collides with the default commit notes.
 const NotesRef = "refs/notes/openbox"
 
-// WriteNoteMirror records the session id(s) for a commit as a git note under
-// NotesRef (S3 R5). This is an OPTIONAL, explicitly NON-AUTHORITATIVE local
-// breadcrumb: notes are keyed by SHA and are orphaned by any history rewrite
-// (which mints a new SHA), and are not pushed/fetched by default — so they never
-// survive a PR->GitHub-squash. The commit-message trailer remains the single
-// source of truth (see doc.go); the note is only a convenience for local
-// inspection. Best-effort: a failure is returned for the caller to log, never to
-// break anything.
+// WriteNoteMirror records the session id(s) for a commit as a git note
+// under NotesRef. This is an optional, explicitly non-authoritative local
+// breadcrumb: notes are keyed by SHA and are orphaned by any history
+// rewrite (which mints a new SHA), and are not pushed/fetched by default
+// — so they never survive a PR->GitHub-squash. The commit-message
+// trailer remains the single source of truth (see doc.go); the note is
+// only a convenience for local inspection. Best-effort: a failure is
+// returned for the caller to log, never to break anything.
 //
 // It runs in a `post-commit` context (the SHA exists only after the commit),
 // unlike trailer stamping which runs pre-commit in `prepare-commit-msg`.

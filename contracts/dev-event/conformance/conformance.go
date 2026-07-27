@@ -8,11 +8,11 @@ import (
 )
 
 // ErrContentDisabled is returned when an event carries content (a populated
-// x-content-gated field) while content-capture is disabled (INV-2 / OD4).
+// x-content-gated field) while content-capture is disabled (INV-2).
 var ErrContentDisabled = errors.New("event carries content while content-capture is disabled (INV-2)")
 
-// ValidateDevEvent validates a raw normalized developer-runtime event against
-// the dev-event contract (STORY-SL-1).
+// ValidateDevEvent validates a raw normalized developer-runtime event
+// against the dev-event contract.
 //
 // contentCaptureEnabled reflects the org's content posture. When false (the
 // default), any event carrying content is rejected with ErrContentDisabled.

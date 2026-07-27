@@ -2,30 +2,32 @@ package decision
 
 import "github.com/openbox-ai/openbox-shift-left/client"
 
-// BuildOPAInput assembles the `input` document a DecisionRequest is evaluated
-// against — shaped to match openbox-core's buildOPAInput + buildSpanMap
-// (openbox-core internal/services/opa.go:459-719) EXACTLY, so a builder policy
-// authored to run against core (whose field paths resolve directly against this
-// tree — e.g. `spans[_].file_path`, `spans[_].semantic_type`,
-// `spans[_].attributes.command`) fires identically here (STORY-E6-S8 AC-2,
-// ADR-0005 §Decision-4). This is the load-bearing correctness crux: a field-NAME
-// mismatch silently no-fires a rule.
+// BuildOPAInput assembles the `input` document a DecisionRequest is
+// evaluated against — shaped to match openbox-core's buildOPAInput +
+// buildSpanMap exactly, so a builder policy authored to run against core
+// (whose field paths resolve directly against this tree — e.g.
+// `spans[_].file_path`, `spans[_].semantic_type`,
+// `spans[_].attributes.command`) fires identically here (ADR-0005). This is
+// the load-bearing correctness crux: a field-name mismatch silently
+// no-fires a rule.
 //
 // It is consumed by the native builderEvaluator (builder.go); the legacy
 // bundleEvaluator matches the request directly and does not use it.
 //
-// Fidelity to core (cross-repo recon 2026-07-15):
+// Fidelity to core:
 //   - Top-level keys align to buildOPAInput: event_type, source, run_id,
-//     workflow_id, agent_id, span_count, spans. There is NO top-level `org` (core
-//     carries org only in the OPA query path, never in the input document).
-//   - Span keys align to buildSpanMap: span_id, trace_id, name, semantic_type,
-//     start_time, end_time, attributes are ALWAYS present (matching core, which
-//     sets them unconditionally); file_path / file_operation / function are
-//     promoted to TOP-LEVEL span keys ONLY when set (core promotes span.FilePath,
-//     span.FileOperation, span.FuncName). Every other metadata axis — the shell
-//     `command`, permission_mode, mcp_* — lives under the per-span `attributes`
-//     map, since core has NO top-level span key for them. There is deliberately
-//     NO top-level `tool_kind` span key (core never emits one).
+//     workflow_id, agent_id, span_count, spans. There is no top-level `org`
+//     (core carries org only in the OPA query path, never in the input
+//     document).
+//   - Span keys align to buildSpanMap: span_id, trace_id, name,
+//     semantic_type, start_time, end_time, attributes are always present
+//     (matching core, which sets them unconditionally); file_path /
+//     file_operation / function are promoted to top-level span keys only
+//     when set (core promotes span.FilePath, span.FileOperation,
+//     span.FuncName). Every other metadata axis — the shell `command`,
+//     permission_mode, mcp_* — lives under the per-span `attributes` map,
+//     since core has no top-level span key for them. There is deliberately
+//     no top-level `tool_kind` span key (core never emits one).
 func BuildOPAInput(req DecisionRequest) map[string]any {
 	// run_id / workflow_id / agent_id mirror the dev-event → core mapping
 	// (MAPPING.md §1): SessionID → run_id, WorkspaceID (or DID) → workflow_id,

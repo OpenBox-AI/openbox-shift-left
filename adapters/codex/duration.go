@@ -10,18 +10,19 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/client"
 )
 
-// durationStash is the cross-process bridge that lets a PostToolUse (completed)
-// hook recover the wall-clock START time recorded by the paired PreToolUse
-// (started) hook, so the completed span carries a REAL cross-process duration
-// instead of 0 — the E7-S8 pattern, ported from the Claude Code adapter (its
-// duration.go documents the full rationale).
+// durationStash is the cross-process bridge that lets a PostToolUse
+// (completed) hook recover the wall-clock start time recorded by the
+// paired PreToolUse (started) hook, so the completed span carries a real
+// cross-process duration instead of 0 — ported from the Claude Code
+// adapter (its duration.go documents the full rationale).
 //
-// The Codex twist (AC-5): the stash key is derived from the same field set as
-// the client's activityPairKey — (session, tool name, file/function locator) —
-// and for non-MCP tools the mapper places the per-invocation `tool_use_id` in
-// the function slot, so the stash is effectively KEYED BY tool_use_id: two
-// identical concurrent tool calls can no longer swap start times. A stash miss
-// (record lost, unpaired completed) yields duration 0, never an error (INV-3).
+// The Codex twist: the stash key is derived from the same field set as
+// the client's activityPairKey — (session, tool name, file/function
+// locator) — and for non-MCP tools the mapper places the per-invocation
+// `tool_use_id` in the function slot, so the stash is effectively keyed
+// by tool_use_id: two identical concurrent tool calls can no longer swap
+// start times. A stash miss (record lost, unpaired completed) yields
+// duration 0, never an error (INV-3).
 //
 // Records carry ONLY a structural RFC3339 timestamp (INV-2); the filename is a
 // hash of structural identifiers, never content.

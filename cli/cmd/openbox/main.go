@@ -1,4 +1,4 @@
-// Command openbox is the developer-runtime governance CLI (STORY-SL-2).
+// Command openbox is the developer-runtime governance CLI.
 //
 // The front door is `openbox dev init --provider <tool>`: it registers a
 // developer agent with OpenBox, captures the agent's credentials into the OS
@@ -53,8 +53,8 @@ type app struct {
 	newPolicyReader func(baseURL, credential, clientID string) policyReader
 }
 
-// policyReader is the control-plane read `dev sync` + the `dev init` last-step
-// need (STORY-E6-S8). backend.Client implements it; a fake injects in tests.
+// policyReader is the control-plane read `dev sync` + the `dev init`
+// last-step need. backend.Client implements it; a fake injects in tests.
 type policyReader interface {
 	GetCurrentPolicy(ctx context.Context, agentID string) (*backend.Policy, error)
 }
@@ -116,16 +116,17 @@ func (a *app) runDev(args []string) int {
 	}
 }
 
-// runDevSync fetches this agent's CURRENT org policy from the control plane and
-// writes it as the LOCAL policy bundle + PIN (STORY-E6-S8, ADR-0005): the pull
-// half of the pull-at-init + session-start-staleness distribution model. It reads
-// the ORG control-plane credential from OPENBOX_CONTROL_TOKEN (never a flag —
-// INV-1), resolves the agent id + backend URL persisted by `dev init` (env
-// overrides), fetches, translates config.policy_builder into a builder bundle
-// (or a fail-open-local bundle for raw rego / a no-policy allow bundle), writes it
-// 0600, and clears any fail-closed stale markers so the enforce gate proceeds.
-// It NEVER prints the org key or rego text (INV-1). On any auth/fetch failure it
-// exits non-zero with a mapped hint and leaves the last-good bundle untouched.
+// runDevSync fetches this agent's current org policy from the control plane
+// and writes it as the local policy bundle + pin (ADR-0005): the pull half
+// of the pull-at-init + session-start-staleness distribution model. It reads
+// the org control-plane credential from OPENBOX_CONTROL_TOKEN (never a
+// flag — INV-1), resolves the agent id + backend URL persisted by `dev
+// init` (env overrides), fetches, translates config.policy_builder into a
+// builder bundle (or a fail-open-local bundle for raw rego / a no-policy
+// allow bundle), writes it 0600, and clears any fail-closed stale markers so
+// the enforce gate proceeds. It never prints the org key or rego text
+// (INV-1). On any auth/fetch failure it exits non-zero with a mapped hint
+// and leaves the last-good bundle untouched.
 func (a *app) runDevSync(args []string) int {
 	fs := flag.NewFlagSet("openbox dev sync", flag.ContinueOnError)
 	fs.SetOutput(a.stderr)
@@ -179,8 +180,8 @@ func (a *app) syncPolicyBundle(ctx context.Context, backendURL, token, clientID,
 	if err := writeBundleFile(bundlePath, bundle); err != nil {
 		return fmt.Errorf("write policy bundle: %w", err)
 	}
-	// A fresh, re-pinned bundle clears any fail-closed staleness block so the
-	// PreToolUse enforce gate proceeds again (STORY-E6-S8).
+	// A fresh, re-pinned bundle clears any fail-closed staleness block so
+	// the PreToolUse enforce gate proceeds again.
 	_ = claudecode.ClearAllStaleMarkers()
 
 	// Non-secret summary only: the policy id + pin, never the rego or org key (INV-1).
@@ -230,16 +231,17 @@ func translateBundle(pol *backend.Policy) (*decision.Bundle, string, error) {
 	return &decision.Bundle{Version: pin, PolicyID: pol.ID, UpdatedAt: pol.UpdatedAt}, "", nil
 }
 
-// writeBundleFile marshals the bundle and writes it 0600 (owner-only), creating
-// the parent dir 0700. It round-trips through decision.ParseBundle first so a
-// malformed/deny-by-default bundle is rejected BEFORE it replaces the last-good
-// file (never write a bundle the daemon would refuse to load).
+// writeBundleFile marshals the bundle and writes it 0600 (owner-only),
+// creating the parent dir 0700. It round-trips through decision.ParseBundle
+// first so a malformed/deny-by-default bundle is rejected before it
+// replaces the last-good file (never write a bundle the daemon would refuse
+// to load).
 //
-// The write is ATOMIC (G3-F4 / G_SEC-INFO-2): a temp file in the SAME dir (so
-// rename is atomic on one filesystem) written 0600, then os.Rename over the
-// target. A crash mid-write can never leave the daemon (or the session-start
-// staleness read) a truncated/half-parsed bundle — it sees either the old file
-// or the whole new one.
+// The write is atomic: a temp file in the same dir (so rename is atomic on
+// one filesystem) written 0600, then os.Rename over the target. A crash
+// mid-write can never leave the daemon (or the session-start staleness
+// read) a truncated/half-parsed bundle — it sees either the old file or the
+// whole new one.
 func writeBundleFile(path string, b *decision.Bundle) error {
 	raw, err := json.MarshalIndent(b, "", "  ")
 	if err != nil {
@@ -273,8 +275,8 @@ func writeBundleFile(path string, b *decision.Bundle) error {
 }
 
 // mapPolicyReadError turns a control-plane read failure into an actionable,
-// secret-free hint (SL-10 style). It surfaces the exact 4xx cause without echoing
-// any credential.
+// secret-free hint. It surfaces the exact 4xx cause without echoing any
+// credential.
 func mapPolicyReadError(err error) error {
 	var apiErr *backend.APIError
 	if errors.As(err, &apiErr) {
@@ -299,12 +301,12 @@ func orUnset(s string) string {
 	return s
 }
 
-// runDevVerify is the read-only data-plane preflight (STORY-SL-11):
-// `openbox dev verify` resolves the finished dev.json + creds (reusing the
-// adapter's resolvers), then a SIGNED GET /api/v1/auth/validate against the
-// ACTUAL core it emits to confirms the obx_ key + Ed25519 signing round-trip
-// work. It is strictly read-only — no mint, no config write, no secret printed
-// (INV-1) — and prints one ✓ line or a ✗ with the SL-10 mapped fix hint.
+// runDevVerify is the read-only data-plane preflight: `openbox dev verify`
+// resolves the finished dev.json + creds (reusing the adapter's resolvers),
+// then a signed GET /api/v1/auth/validate against the actual core it emits
+// to confirms the obx_ key + Ed25519 signing round-trip work. It is
+// strictly read-only — no mint, no config write, no secret printed (INV-1)
+// — and prints one ✓ line or a ✗ with the mapped fix hint.
 func (a *app) runDevVerify(args []string) int {
 	fs := flag.NewFlagSet("openbox dev verify", flag.ContinueOnError)
 	fs.SetOutput(a.stderr)
@@ -348,7 +350,7 @@ func (a *app) runDevVerify(args []string) int {
 	}
 
 	if err := c.Validate(context.Background()); err != nil {
-		// ✗ to stderr; the message is the SL-10 mapped reason + fix hint. It never
+		// ✗ to stderr; the message is the mapped reason + fix hint. It never
 		// contains the key/seed/nonce/signature (INV-1) — only status + guidance.
 		fmt.Fprintf(a.stderr, "✗ %v\n", err)
 		return exitError
@@ -367,22 +369,24 @@ func displayOrUnset(s string) string {
 	return s
 }
 
-// runHook is the unified observe-only hook entrypoint (STORY-SL4-WIRE-2):
-// `openbox hook <provider> <event>`. The plugin's hooks.json invokes it for
-// every Claude Code hook.
+// runHook is the unified observe-only hook entrypoint: `openbox hook
+// <provider> <event>`. The plugin's hooks.json invokes it for every Claude
+// Code hook.
 //
-// INV-3 (the reason this does NOT go through errorf/usage): the hook path must
-// ALWAYS return exitOK — a non-zero exit blocks the tool call. In OBSERVE mode it
-// also writes NOTHING to stdout (on SessionStart/UserPromptSubmit an exit-0
-// hook's stdout is injected into the model's context). So every diagnostic (bad
-// args, unknown provider, and everything inside RunHook) goes to stderr, and we
-// unconditionally return 0. Folding the hook into the multi-command binary must
-// not leak cobra/flag/usage/banner text to stdout.
+// INV-3 (the reason this does not go through errorf/usage): the hook path
+// must always return exitOK — a non-zero exit blocks the tool call. In
+// observe mode it also writes nothing to stdout (on
+// SessionStart/UserPromptSubmit an exit-0 hook's stdout is injected into the
+// model's context). So every diagnostic (bad args, unknown provider, and
+// everything inside RunHook) goes to stderr, and we unconditionally return
+// 0. Folding the hook into the multi-command binary must not leak
+// cobra/flag/usage/banner text to stdout.
 //
-// ENFORCE mode (E6-S2, opt-in) is the sole stdout writer: RunHook may emit a
-// Claude Code PreToolUse permissionDecision (deny/ask) to a.stdout — still exit 0
-// (the decision travels in the JSON, not the exit code), still tighten-only. The
-// permissionDecision JSON is the ONLY structured stdout this path ever produces.
+// Enforce mode (opt-in) is the sole stdout writer: RunHook may emit a
+// Claude Code PreToolUse permissionDecision (deny/ask) to a.stdout — still
+// exit 0 (the decision travels in the JSON, not the exit code), still
+// tighten-only. The permissionDecision JSON is the only structured stdout
+// this path ever produces.
 func (a *app) runHook(args []string) (code int) {
 	// Belt-and-suspenders for INV-3: default to exitOK and swallow any panic that
 	// escapes RunHook's own recover, so the hook path can NEVER return non-zero
@@ -402,17 +406,18 @@ func (a *app) runHook(args []string) (code int) {
 		}
 		claudecode.RunHook(args[1], a.stdin, a.stdout, logger)
 	case "codex":
-		// STORY-SL7-A: the Codex observe engine — identical safety contract
-		// (recover-all, diagnostics to stderr, caller exits 0 always; this leg
-		// never writes stdout — Codex parses hook stdout as output JSON).
+		// The Codex observe engine — identical safety contract (recover-all,
+		// diagnostics to stderr, caller exits 0 always; this leg never
+		// writes stdout — Codex parses hook stdout as output JSON).
 		if len(args) < 2 {
 			logger.Printf("usage: openbox hook codex <event>")
 			return exitOK
 		}
 		codex.RunHook(args[1], a.stdin, a.stdout, logger)
 	case "git":
-		// The git hook re-invokes THIS binary as `openbox hook git prepare-commit-msg`
-		// (STORY-SL4-WIRE-2 / OD17 — folds the standalone openbox-git-hook in).
+		// The git hook re-invokes this binary as `openbox hook git
+		// prepare-commit-msg` (OD17 — folds the standalone openbox-git-hook
+		// in).
 		obgit.RunHook(args[1:], []string{"hook", "git", "prepare-commit-msg"}, logger.Printf)
 	default:
 		logger.Printf("unknown hook provider %q (supported: claude-code, codex, git)", args[0])
@@ -433,7 +438,7 @@ func (a *app) runDevInit(args []string) int {
 	fs.BoolVar(&o.DryRun, "dry-run", false, "print the plan; make no network or secret-store writes")
 	fs.BoolVar(&o.Force, "force", false, "register a new distinctly-named agent even if one exists remotely")
 	fs.BoolVar(&o.ManagedEnable, "managed-enable", false, "record the org force-enable substrate (Phase-1: verified, not activated)")
-	fs.BoolVar(&o.InstallGitHook, "install-git-hook", false, "enable ambient install of the commit-trailer hook into repos on session start (STORY-SL-5; off by default — it modifies .git/hooks)")
+	fs.BoolVar(&o.InstallGitHook, "install-git-hook", false, "enable ambient install of the commit-trailer hook into repos on session start (off by default — it modifies .git/hooks)")
 	var enforce bool
 	fs.BoolVar(&enforce, "enforce", false, "turn on ENFORCE mode and persist it to dev.json (ADR-0006): the PreToolUse hook blocks/asks/redacts in-process — no daemon, no runtime env. Also enables Tier-2 sync escalation + the Tier-3 findings loop. Off by default = observe-only.")
 	fs.StringVar(&backendURL, "backend-url", a.env("OPENBOX_BACKEND_URL", ""), "openbox-backend control-plane base URL")
@@ -445,13 +450,14 @@ func (a *app) runDevInit(args []string) int {
 	if o.Provider == "" {
 		return a.errorf("--provider is required (one of: claude-code, codex, cursor)")
 	}
-	o.BackendURL = backendURL // STORY-E6-S8: persist the control-plane base for `dev sync`/staleness
-	// ADR-0006: `--enforce` is the one-flag enforce posture. It turns on enforce and
-	// its sensible companions (Tier-2 sync escalation + the Tier-3 findings loop) and
-	// persists all three to dev.json, so the runtime hook needs NO env var. Granular
-	// per-toggle tuning remains available via the dev.json fields / OPENBOX_* env
-	// overrides. Fail-open stays the default failure policy (OD9) — enforce never
-	// implies fail-closed.
+	o.BackendURL = backendURL // persist the control-plane base for `dev sync`/staleness
+	// ADR-0006: `--enforce` is the one-flag enforce posture. It turns on
+	// enforce and its sensible companions (Tier-2 sync escalation + the
+	// Tier-3 findings loop) and persists all three to dev.json, so the
+	// runtime hook needs no env var. Granular per-toggle tuning remains
+	// available via the dev.json fields / OPENBOX_* env overrides.
+	// Fail-open stays the default failure policy — enforce never implies
+	// fail-closed.
 	if enforce {
 		t := true
 		o.Enforce = true
@@ -487,8 +493,9 @@ func (a *app) runDevInit(args []string) int {
 	store, err := a.openStore(secretBackend)
 	if err != nil {
 		if errors.Is(err, secret.ErrNoStore) {
-			// Stop condition: no OS keychain and the operator did not opt into an
-			// alternative → HALT, never silently write plaintext (INV-1 / SL2-SEC-1).
+			// Stop condition: no OS keychain and the operator did not opt
+			// into an alternative → HALT, never silently write plaintext
+			// (INV-1).
 			return a.errorf("HALT: %v — refusing to store credentials in plaintext by default.\n"+
 				"  Fix by EITHER:\n"+
 				"  • installing an OS keyring — Linux: `secret-tool` (e.g. apt install libsecret-tools) with a running\n"+
@@ -522,19 +529,20 @@ func (a *app) runDevInit(args []string) int {
 		return a.errorf("%v", runErr)
 	}
 
-	// STORY-SL7-A (AC-2): Codex hash-trusts non-managed hooks — until the user
-	// trusts the freshly-written entries via /hooks inside Codex, they do not
-	// run. Surface that as the explicit next step (re-install re-hashes, so it
+	// Codex hash-trusts non-managed hooks — until the user trusts the
+	// freshly-written entries via /hooks inside Codex, they do not run.
+	// Surface that as the explicit next step (re-install re-hashes, so it
 	// applies to re-inits too).
 	if o.Provider == "codex" && res != nil && res.ConfigApplied {
 		fmt.Fprintln(a.stdout, "Next step: open Codex and run /hooks to review and TRUST the new OpenBox hooks — they do not run until trusted (Codex hash-trusts non-managed hooks; re-running dev init re-hashes them).")
 	}
 
-	// STORY-E6-S8: `dev init`'s last step best-effort pulls the agent's current
-	// policy into the local bundle so enforce mode has a policy on first run. It is
-	// BEST-EFFORT — a fetch failure warns (stderr) and does NOT fail init (the agent
-	// is already registered and configured; the user can re-run `openbox dev sync`).
-	// The agent id was persisted by the installer; resolve it back out.
+	// `dev init`'s last step best-effort pulls the agent's current policy
+	// into the local bundle so enforce mode has a policy on first run. It
+	// is best-effort — a fetch failure warns (stderr) and does not fail
+	// init (the agent is already registered and configured; the user can
+	// re-run `openbox dev sync`). The agent id was persisted by the
+	// installer; resolve it back out.
 	if agentID := claudecode.ResolveAgentID(); agentID != "" && a.newPolicyReader != nil {
 		bundlePath := claudecode.ResolveBundlePath()
 		if err := a.syncPolicyBundle(context.Background(), backendURL, credential, clientID, agentID, bundlePath, a.stdout); err != nil {

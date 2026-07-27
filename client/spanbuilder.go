@@ -6,39 +6,30 @@ import (
 	"strings"
 )
 
-// This file is the E7-S3 flat-SpanData BUILDER: the primitive that turns an
+// This file is the flat-SpanData builder: the primitive that turns an
 // adapter's knowledge of a tool call into the flat Core SpanData map the base
-// SDK puts on the wire — the shape client/hookspan.go's AssertHookWireShape (the
-// E7-S1 conformance gate) checks. It is byte-faithful to the base SDK's
-// construction in
+// SDK puts on the wire — the shape client/hookspan.go's AssertHookWireShape
+// checks. It is byte-faithful to the base SDK's construction in
 //   openbox-sdk-python/openbox_core/contracts/otel_spans.py  (from_otel_span)
 //   openbox-sdk-python/openbox_core/otel/trace_context.py    (format_span_id/format_trace_id)
 // re-expressed in Go with no OpenTelemetry dependency (the wire is flat
-// SpanData, not OTel — build the dict directly, per migration-doc §3).
+// SpanData, not OTel — build the dict directly).
 //
-// Scope boundary: this story delivers the builder + trace/parent-linkage
-// machinery + the wire-shape conformance test only. The event→wire MAPPING
-// (which DevEvent becomes ActivityStarted vs ActivityCompleted vs Workflow*/
-// Signal, and the content-gating/truncation of shell_command & request/response
-// bodies) is E7-S4/E7-S5; those stories rewire buildPayload/the adapter onto
-// this primitive and retire the hand-built client/event.go Span. Nothing here
-// gates content: the builder places whatever family/body fields the caller
-// hands it (post content-gate) at the span ROOT only, never in attributes or
-// metadata (INV-2 — content lives only in gated span bodies).
+// Nothing here gates content: the builder places whatever family/body fields
+// the caller hands it (post content-gate) at the span root only, never in
+// attributes or metadata (INV-2 — content lives only in gated span bodies).
 
 // TraceContext holds a developer session's stable 32-hex trace_id and mints
 // fresh 16-hex span ids under it. One session (one Core run) owns one
 // TraceContext so every span it emits shares the trace and correlates. It
 // carries no content and is safe to reuse across a session's events.
 //
-// Pairing a ToolResult's completed span to its ToolCall's started span follows
-// the base SDK, where both stages are the SAME OTel span: the emitter reuses
-// the started span's id as the completed HookSpan.SpanID (same span_id/trace_id/
-// parent_span_id, differing only in stage/end_time/duration_ns — verified
-// against openbox_core/hooks/wrappers.py, which passes one span object to both
-// the started and completed hooks). ParentSpanID is the distinct case of
-// nesting a span under an enclosing activity/root span. The event→wire pairing
-// itself is wired in E7-S4; this primitive supplies both mechanisms.
+// Pairing a ToolResult's completed span to its ToolCall's started span
+// follows the base SDK, where both stages are the same OTel span: the
+// emitter reuses the started span's id as the completed HookSpan.SpanID
+// (same span_id/trace_id/parent_span_id, differing only in
+// stage/end_time/duration_ns). ParentSpanID is the distinct case of nesting
+// a span under an enclosing activity/root span.
 type TraceContext struct {
 	traceID string // 32 lowercase hex, stable for the session
 }
@@ -49,11 +40,10 @@ func NewTraceContext() *TraceContext {
 	return &TraceContext{traceID: newHexID(traceIDBytes)}
 }
 
-// TraceContextFrom rebuilds a TraceContext from a persisted 32-hex trace_id, so
-// a spooled/rehydrated session keeps its trace correlation across process
-// restarts (the SL-4 spool round-trips events). A trace_id that is not 32
-// lowercase hex is rejected and a fresh one minted, so the returned context
-// always yields wire-valid ids.
+// TraceContextFrom rebuilds a TraceContext from a persisted 32-hex trace_id,
+// so a spooled/rehydrated session keeps its trace correlation across process
+// restarts. A trace_id that is not 32 lowercase hex is rejected and a fresh
+// one minted, so the returned context always yields wire-valid ids.
 func TraceContextFrom(traceID string) *TraceContext {
 	if traceIDRe.MatchString(traceID) {
 		return &TraceContext{traceID: traceID}

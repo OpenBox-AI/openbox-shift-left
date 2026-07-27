@@ -4,14 +4,14 @@ import (
 	"os"
 )
 
-// RunHook is the shared fail-open git-hook engine (STORY-SL4-WIRE-2 / OD17): the
-// single implementation behind BOTH `openbox hook git <sub>` (the unified engine)
-// and the legacy standalone `openbox-git-hook` alias.
+// RunHook is the shared fail-open git-hook engine (OD17): the single
+// implementation behind both `openbox hook git <sub>` (the unified
+// engine) and the legacy standalone `openbox-git-hook` alias.
 //
-// SAFETY (the git analog of SL-4's INV-3): it NEVER aborts a commit. Every
-// failure — bad args, git error, unreadable message file, even a panic — is
-// logged via logf and swallowed; nothing goes to stdout. The CALLER still owns
-// the exit code and must exit 0.
+// Safety (the git analog of the adapters' INV-3): it never aborts a
+// commit. Every failure — bad args, git error, unreadable message file,
+// even a panic — is logged via logf and swallowed; nothing goes to
+// stdout. The caller still owns the exit code and must exit 0.
 //
 // args[0] is the subcommand (prepare-commit-msg | post-commit | install); the
 // rest are that subcommand's args (git passes the message file to
@@ -44,7 +44,7 @@ func RunHook(args []string, installArgs []string, logf func(string, ...any)) {
 			logf("%v", err) // logged only — the caller still exits 0
 		}
 	case "post-commit":
-		// Optional, non-authoritative local notes mirror (S3 R5).
+		// Optional, non-authoritative local notes mirror.
 		if err := g.WriteNoteMirror("HEAD", g.ResolveSessions(resolver)); err != nil {
 			logf("note mirror skipped: %v", err)
 		}
@@ -55,10 +55,10 @@ func RunHook(args []string, installArgs []string, logf func(string, ...any)) {
 	}
 }
 
-// runInstall writes the prepare-commit-msg hook into the current repo's hooks
-// dir, pointing it back at THIS engine (os.Executable()) with the installArgs
-// prefix. Convenience for local/dev use; the CLI (SL-2 wiring) and the ambient
-// SessionStart install are the production paths.
+// runInstall writes the prepare-commit-msg hook into the current repo's
+// hooks dir, pointing it back at this engine (os.Executable()) with the
+// installArgs prefix. Convenience for local/dev use; the CLI and the
+// ambient SessionStart install are the production paths.
 func runInstall(g Git, installArgs []string, logf func(string, ...any)) {
 	hooksDir, err := g.HooksDir()
 	if err != nil {

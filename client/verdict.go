@@ -8,11 +8,10 @@ import (
 // Verdict is the canonical governance verdict, priority-ordered
 // HALT > BLOCK > REQUIRE_APPROVAL > CONSTRAIN > ALLOW (contract $defs.verdict).
 //
-// openbox-core serializes the response `verdict` field as LOWERCASE wire
-// strings and also emits a legacy `action` field (MAPPING.md §4, verified vs
-// core governance.go). Phase-1 observe (D7/INV-3) treats every verdict as
-// allow and never blocks the caller — callers parse it only for finops/audit
-// and Phase-2 readiness.
+// openbox-core serializes the response `verdict` field as lowercase wire
+// strings and also emits a legacy `action` field (MAPPING.md §4). Observe
+// mode (INV-3) treats every verdict as allow and never blocks the caller —
+// callers parse it only for finops/audit and enforcement readiness.
 type Verdict string
 
 const (
@@ -44,11 +43,11 @@ var legacyActionToVerdict = map[string]Verdict{
 	"stop":             VerdictBlock,
 }
 
-// AdvisoryRiskThreshold is the risk_score at/above which an evaluation is worth
-// recording even when the verdict is ALLOW and no guardrail/constraint fired
-// (the "non-trivial risk" clause of the Advisory-tier recording rule, STORY-SL-9).
-// risk_score is a 0..1 float (SDK types.py); 0.5 is a tunable mid-band heuristic,
-// not an enforcement threshold (Advisory records, never blocks — INV-3).
+// AdvisoryRiskThreshold is the risk_score at/above which an evaluation is
+// worth recording even when the verdict is ALLOW and no guardrail/constraint
+// fired (the "non-trivial risk" clause of the Advisory-tier recording rule).
+// risk_score is a 0..1 float; 0.5 is a tunable mid-band heuristic, not an
+// enforcement threshold (Advisory records, never blocks — INV-3).
 const AdvisoryRiskThreshold = 0.5
 
 // GuardrailReason is one structured guardrail finding — a CATEGORY, never
@@ -62,10 +61,10 @@ type GuardrailReason struct {
 	Reason string `json:"reason,omitempty"`
 }
 
-// GuardrailResult is the parsed subset of core's guardrails_result an Advisory
-// record consumes: whether validation passed and the category reasons. The
-// SDK's `redacted_input` and `raw_logs` are DELIBERATELY NOT parsed — they carry
-// content and would cross INV-2 (STORY-SL-9 scope note).
+// GuardrailResult is the parsed subset of core's guardrails_result an
+// Advisory record consumes: whether validation passed and the category
+// reasons. The SDK's `redacted_input` and `raw_logs` are deliberately not
+// parsed — they carry content and would cross INV-2.
 type GuardrailResult struct {
 	// Passed mirrors the wire `validation_passed`, which DEFAULTS TRUE when the
 	// field is absent (SDK GuardrailsCheckResult) — modeled via *bool on the wire
@@ -74,16 +73,16 @@ type GuardrailResult struct {
 	Reasons []GuardrailReason
 }
 
-// DriftResult is the CONTENT-FREE subset of core's age_result (AGE = behavior and
-// goal-alignment; the LLamaFirewall goal-drift / behavioral checks) — STORY-E6-S11.
-// Core computes goal-drift INLINE in /evaluate and returns it under `age_result`
-// (openbox-core content/governance.go AGEResult); the top-level `behavioral_violations`
-// the reference SDK models is NEVER populated by core (recon 2026-07-15) — drift
-// lives here. Only the boolean/count SIGNALS are parsed: the free-text `reason`,
-// `final_trust_score`, and per-span `span_results` detail are DELIBERATELY DROPPED
-// (they can describe content — the SAME INV-2 discipline GuardrailResult applies to
-// redacted_input/raw_logs). A drift finding is thus surfaced as "goal drift detected,
-// N violations", never the substance of the drift.
+// DriftResult is the content-free subset of core's age_result (AGE =
+// behavior and goal-alignment; the goal-drift / behavioral checks). Core
+// computes goal-drift inline in /evaluate and returns it under `age_result`;
+// the top-level `behavioral_violations` the reference SDK models is never
+// populated by core — drift lives here. Only the boolean/count signals are
+// parsed: the free-text `reason`, `final_trust_score`, and per-span
+// `span_results` detail are deliberately dropped (they can describe content —
+// the same INV-2 discipline GuardrailResult applies to redacted_input/
+// raw_logs). A drift finding is thus surfaced as "goal drift detected, N
+// violations", never the substance of the drift.
 type DriftResult struct {
 	// GoalDrifted mirrors age_result.goal_drifted — goal misalignment detected.
 	GoalDrifted bool
@@ -101,12 +100,12 @@ func (d *DriftResult) Detected() bool {
 	return d != nil && d.GoalAlignmentChecked && (d.GoalDrifted || d.ViolationsCount > 0)
 }
 
-// Evaluation is the rich, forward-compatible result of one /evaluate call — the
-// Advisory-tier value (STORY-SL-9): the resolved Verdict plus the sibling
-// signals core returns alongside it (trust/risk/alignment scores, constraints,
-// guardrail findings, policy/approval ids). It mirrors the reference SDK's
-// GovernanceVerdictResponse (openbox-temporal-sdk-python types.py) so the
-// developer runtime can RECORD what the agent runtime would ENFORCE.
+// Evaluation is the rich, forward-compatible result of one /evaluate call —
+// the Advisory-tier value: the resolved Verdict plus the sibling signals core
+// returns alongside it (trust/risk/alignment scores, constraints, guardrail
+// findings, policy/approval ids). It mirrors the reference SDK's
+// GovernanceVerdictResponse so the developer runtime can record what the
+// agent runtime would enforce.
 //
 // Every field beyond Verdict is best-effort: a Phase-1 core that returns only
 // `verdict` yields a zero-valued rest, never a parse error (the load-bearing
@@ -123,12 +122,12 @@ type Evaluation struct {
 	ApprovalID           string
 	GovernanceEventID    string
 	Guardrail            *GuardrailResult // nil when core sends no guardrails_result
-	Drift                *DriftResult     // nil when core sends no age_result (STORY-E6-S11)
+	Drift                *DriftResult     // nil when core sends no age_result
 }
 
-// WouldBlock is the Advisory label: whether this verdict WOULD have blocked the
-// tool call had enforcement been switched on. Per STORY-SL-9 it is computed
-// purely from the verdict (BLOCK/HALT → true) and drives NO control flow.
+// WouldBlock is the Advisory label: whether this verdict would have blocked
+// the tool call had enforcement been switched on. Computed purely from the
+// verdict (BLOCK/HALT → true) and drives no control flow.
 //
 // Note: the reference SDK's enforce_verdict (verdict_handler.py) ALSO treats a
 // failed guardrail validation as a block; that signal is not folded into this
@@ -138,9 +137,9 @@ func (e Evaluation) WouldBlock() bool {
 }
 
 // IsAdvisory reports whether an evaluation is worth recording: a non-ALLOW
-// verdict, OR any guardrail hit / constraint / non-trivial risk (STORY-SL-9
-// recording rule). A VerdictUnknown (a fail-open transport drop) with no other
-// signal is NOT advisory — there is nothing OpenBox actually evaluated.
+// verdict, or any guardrail hit / constraint / non-trivial risk. A
+// VerdictUnknown (a fail-open transport drop) with no other signal is not
+// advisory — there is nothing OpenBox actually evaluated.
 func (e Evaluation) IsAdvisory() bool {
 	switch e.Verdict {
 	case VerdictConstrain, VerdictRequireApproval, VerdictBlock, VerdictHalt:
@@ -155,10 +154,11 @@ func (e Evaluation) IsAdvisory() bool {
 	if e.Guardrail != nil && (!e.Guardrail.Passed || len(e.Guardrail.Reasons) > 0) {
 		return true
 	}
-	// STORY-E6-S11: goal-drift / behavioral violations are advisory-worthy even when
-	// the verdict is ALLOW (core can return goal_drifted=true without escalating the
-	// verdict — exactly the "surface a finding without blocking" case the findings
-	// loop exists for). Content-free (a boolean + a count drove this; Detected()).
+	// Goal-drift / behavioral violations are advisory-worthy even when the
+	// verdict is ALLOW (core can return goal_drifted=true without escalating
+	// the verdict — the "surface a finding without blocking" case the
+	// findings loop exists for). Content-free: Detected() is a boolean + a
+	// count.
 	if e.Drift.Detected() {
 		return true
 	}
@@ -194,10 +194,10 @@ type guardrailsWire struct {
 	Reasons          []GuardrailReason `json:"reasons"`
 }
 
-// ageWire is the CONTENT-FREE subset of the wire age_result (STORY-E6-S11): only
-// the boolean/count drift signals. The free-text `reason`, `final_trust_score`,
-// and per-span `span_results` fields are intentionally absent here (INV-2), so the
-// decoder scans past them without ever binding drift substance.
+// ageWire is the content-free subset of the wire age_result: only the
+// boolean/count drift signals. The free-text `reason`, `final_trust_score`,
+// and per-span `span_results` fields are intentionally absent here (INV-2),
+// so the decoder scans past them without ever binding drift substance.
 type ageWire struct {
 	GoalAlignmentChecked bool `json:"goal_alignment_checked"`
 	GoalDrifted          bool `json:"goal_drifted"`

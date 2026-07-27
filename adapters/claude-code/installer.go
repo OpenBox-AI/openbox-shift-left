@@ -15,41 +15,43 @@ import (
 )
 
 // pluginFS is the Claude Code plugin bundle shipped with this adapter (the
-// manifest + hook wiring). `all:` includes the dotted .claude-plugin directory,
-// which go:embed skips by default. The engine binary (bin/openbox) is NOT
-// embedded — `dev init` copies the running engine into the bundle's bin/ when
-// Installer.EngineBinary is set (STORY-SL4-WIRE-2); packaging/marketplace builds
-// place it per-platform otherwise (see README "Packaging").
+// manifest + hook wiring). `all:` includes the dotted .claude-plugin
+// directory, which go:embed skips by default. The engine binary
+// (bin/openbox) is not embedded — `dev init` copies the running engine
+// into the bundle's bin/ when Installer.EngineBinary is set;
+// packaging/marketplace builds place it per-platform otherwise (see
+// README "Packaging").
 //
 //go:embed all:plugin
 var pluginFS embed.FS
 
-// CredentialRef is the SL-2 install-time seam's credential coordinate type. The
-// adapter no longer defines its own; SL4-WIRE-1 lifted it into the shared
-// provider module so `cli` and this adapter agree on one interface (INV-1: it
-// carries the non-secret DID + secret-store COORDINATES only — never the obx_
-// key or Ed25519 seed value).
+// CredentialRef is the install-time seam's credential coordinate type. The
+// adapter doesn't define its own; it's lifted into the shared provider
+// module so `cli` and this adapter agree on one interface (INV-1: it
+// carries the non-secret DID + secret-store coordinates only — never the
+// obx_ key or Ed25519 seed value).
 type CredentialRef = providerspi.CredentialRef
 
-// Installer writes the Claude Code plugin bundle + the non-secret dev config,
-// delegated from `openbox dev init` (the SL-2 provider seam). It implements
-// provider.Installer and replaces the SL-2 "not built yet" stub for claude-code.
-// Zero-value fields default to the standard install locations; tests set them to
-// temp dirs.
+// Installer writes the Claude Code plugin bundle + the non-secret dev
+// config, delegated from `openbox dev init` (the provider seam). It
+// implements provider.Installer and replaces the "not built yet" stub for
+// claude-code. Zero-value fields default to the standard install
+// locations; tests set them to temp dirs.
 type Installer struct {
 	PluginDir  string // where the bundle is materialized (default: userPluginDir())
 	ConfigPath string // where the dev config is written (default: DefaultConfigPath())
-	// EngineBinary, when set, is the path to the unified `openbox` engine to copy
-	// into the bundle's bin/openbox (STORY-SL4-WIRE-2 — the hooks invoke
-	// ${CLAUDE_PLUGIN_ROOT}/bin/openbox). `openbox dev init` sets it to its own
-	// executable; empty ⇒ packaging places the binary and Install skips the copy.
+	// EngineBinary, when set, is the path to the unified `openbox` engine
+	// to copy into the bundle's bin/openbox (the hooks invoke
+	// ${CLAUDE_PLUGIN_ROOT}/bin/openbox). `openbox dev init` sets it to
+	// its own executable; empty ⇒ packaging places the binary and Install
+	// skips the copy.
 	EngineBinary string
 }
 
 // Name is the provider this installer serves.
 func (Installer) Name() providerspi.Name { return providerspi.ClaudeCode }
 
-// Available reports that the Claude Code adapter is built (unlike the SL-2 stub).
+// Available reports that the Claude Code adapter is built.
 func (Installer) Available() bool { return true }
 
 // Plan describes what Install would write, without writing anything (--dry-run
@@ -104,15 +106,17 @@ func (i Installer) Install(ref CredentialRef) error {
 }
 
 // placeEngineBinary copies the unified `openbox` engine into the bundle's
-// bin/openbox (0755) so the hooks — which invoke ${CLAUDE_PLUGIN_ROOT}/bin/openbox
-// — resolve to it (STORY-SL4-WIRE-2). No-op when EngineBinary is empty (the
-// packaging/marketplace path places the per-platform binary instead). The copy
-// is atomic (temp + rename) so a re-init never leaves a half-written engine.
+// bin/openbox (0755) so the hooks — which invoke
+// ${CLAUDE_PLUGIN_ROOT}/bin/openbox — resolve to it. No-op when
+// EngineBinary is empty (the packaging/marketplace path places the
+// per-platform binary instead). The copy is atomic (temp + rename) so a
+// re-init never leaves a half-written engine.
 //
-// When EngineBinary IS set, a copy failure is returned (fatal to Install) rather
-// than swallowed: a bundle whose hooks point at a missing bin/openbox is a
-// silently broken install, so we fail loudly. The CALLER decides whether to set
-// EngineBinary at all (cli resolves it best-effort from os.Executable()).
+// When EngineBinary is set, a copy failure is returned (fatal to Install)
+// rather than swallowed: a bundle whose hooks point at a missing
+// bin/openbox is a silently broken install, so we fail loudly. The caller
+// decides whether to set EngineBinary at all (cli resolves it best-effort
+// from os.Executable()).
 func (i Installer) placeEngineBinary() error {
 	if i.EngineBinary == "" {
 		return nil
@@ -184,18 +188,20 @@ func (i Installer) writeConfig(ref CredentialRef) error {
 		PrivateKeyAccount: ref.PrivateKeyAccount,
 		ContentCapture:    ref.ContentCapture,
 		InstallGitHook:    ref.InstallGitHook,
-		AgentID:           ref.AgentID,    // STORY-E6-S8: for `dev sync` / staleness
+		AgentID:           ref.AgentID,    // for `dev sync` / staleness
 		BackendURL:        ref.BackendURL, // control-plane base for the policy read
-		// ADR-0006: persist the enforce posture so the runtime hook reads it from
-		// dev.json (no OPENBOX_ENFORCE / OPENBOX_TIER2 / OPENBOX_FINDINGS needed).
+		// ADR-0006: persist the enforce posture so the runtime hook reads
+		// it from dev.json (no OPENBOX_ENFORCE / OPENBOX_TIER2 /
+		// OPENBOX_FINDINGS needed).
 		Enforce:  ref.Enforce,
 		Tier2:    ref.Tier2,
 		Findings: ref.Findings,
 	}
-	// Preserve a previously-persisted agent_id / backend_url on a re-init that does
-	// not carry them (the idempotent "already initialized, reusing creds" path
-	// resolves the DID from the store but not the agent id): re-running `dev init`
-	// must not silently drop the E6-S8 sync coordinates.
+	// Preserve a previously-persisted agent_id / backend_url on a re-init
+	// that does not carry them (the idempotent "already initialized,
+	// reusing creds" path resolves the DID from the store but not the
+	// agent id): re-running `dev init` must not silently drop the sync
+	// coordinates.
 	if cfg.AgentID == "" || cfg.BackendURL == "" {
 		if prior, err := loadDevConfig(i.configPath()); err == nil {
 			if cfg.AgentID == "" {

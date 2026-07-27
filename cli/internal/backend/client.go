@@ -1,30 +1,31 @@
 // Package backend is the OpenBox control-plane client used only during
-// onboarding (STORY-SL-2). It calls the openbox-backend NestJS API to register
-// a developer agent and to look one up for idempotent re-init.
+// onboarding. It calls the openbox-backend NestJS API to register a
+// developer agent and to look one up for idempotent re-init.
 //
-// This is NOT the runtime data-plane client — that is the AIP-signed
-// /api/v1/governance/evaluate transport owned by STORY-SL-3 (client/). The two
-// are deliberately separate:
+// This is not the runtime data-plane client — that is the AIP-signed
+// /api/v1/governance/evaluate transport owned by client/. The two are
+// deliberately separate:
 //
 //	backend (here):  POST /agent/create        auth = human/org control-plane
 //	                                            credential (Keycloak JWT or org
 //	                                            API key). Mints agent identity.
-//	client (SL-3):   POST /api/v1/governance/   auth = the AGENT's obx_ key +
+//	client:          POST /api/v1/governance/   auth = the agent's obx_ key +
 //	                 evaluate                    Ed25519 AIP signature minted here.
 //
-// Verified against openbox-backend (cross-repo explore, 2026-07-08):
-//   - Path is POST /agent/create — the backend sets NO global prefix and NO
-//     versioning, so there is no /api/v1 here (unlike the core /evaluate path).
+// Verified against openbox-backend:
+//   - Path is POST /agent/create — the backend sets no global prefix and no
+//     versioning, so there is no /api/v1 here (unlike the core /evaluate
+//     path).
 //   - Auth is a global JwtAuthGuard accepting either a Keycloak Bearer JWT
-//     (which also requires the x-openbox-client header) or an org control-plane
-//     key via X-API-Key (obx_key_...). organization_id is derived from the
-//     caller identity, never from the body (INV-4).
-//   - A minimal valid body is agent_name + icon + full aivss_config; icon is
-//     @IsNotEmpty on the DTO.
-//   - Success returns {data:{agent, token, identity}} (global TransformInterceptor
-//     wraps in `data`). identity.privateKey is the base64 raw 32-byte Ed25519
-//     seed, returned exactly once; token is the obx_(live|test)_+48hex runtime
-//     key, also once-only.
+//     (which also requires the x-openbox-client header) or an org
+//     control-plane key via X-API-Key (obx_key_...). organization_id is
+//     derived from the caller identity, never from the body (INV-4).
+//   - A minimal valid body is agent_name + icon + full aivss_config; icon
+//     is @IsNotEmpty on the DTO.
+//   - Success returns {data:{agent, token, identity}} (global
+//     TransformInterceptor wraps in `data`). identity.privateKey is the
+//     base64 raw 32-byte Ed25519 seed, returned exactly once; token is the
+//     obx_(live|test)_+48hex runtime key, also once-only.
 package backend
 
 import (
@@ -40,9 +41,9 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/cli/internal/aivss"
 )
 
-// APIError is a non-2xx response from the backend. The exact status + body are
-// preserved so callers can HALT with the precise 4xx (e.g. an agent_type or
-// aivss_config rejection — a STORY-SL-2 stop condition).
+// APIError is a non-2xx response from the backend. The exact status + body
+// are preserved so callers can HALT with the precise 4xx (e.g. an
+// agent_type or aivss_config rejection).
 type APIError struct {
 	StatusCode int
 	Body       string
@@ -199,13 +200,12 @@ func parseAgentList(raw json.RawMessage) []AgentSummary {
 }
 
 // Policy is the current per-agent policy read from the control plane
-// (STORY-E6-S8, ADR-0005). It is the subset of openbox-backend's PolicyEntity
-// the CLI needs to translate into a local policy bundle: the PIN (ID +
-// UpdatedAt), the structured config.policy_builder (when the policy was authored
-// in the builder UI), and whether raw rego is present (the fidelity-residual
-// case). RegoCode is INTENTIONALLY not exposed as a field beyond a presence
-// signal — it is never printed/logged (INV-1) and cannot be localized (ADR-0005
-// §Decision-2).
+// (ADR-0005). It is the subset of openbox-backend's PolicyEntity the CLI
+// needs to translate into a local policy bundle: the pin (ID + UpdatedAt),
+// the structured config.policy_builder (when the policy was authored in the
+// builder UI), and whether raw rego is present (the fidelity-residual
+// case). RegoCode is intentionally not exposed as a field beyond a presence
+// signal — it is never printed/logged (INV-1) and cannot be localized.
 type Policy struct {
 	ID            string
 	UpdatedAt     string
@@ -214,8 +214,8 @@ type Policy struct {
 }
 
 // policyEnvelope decodes {status, data: PolicyEntity|null}. The global
-// TransformInterceptor wraps every response as {status, data}; a no-current-policy
-// read is HTTP 200 with data:null (not 404) — see recon A.
+// TransformInterceptor wraps every response as {status, data}; a
+// no-current-policy read is HTTP 200 with data:null (not 404).
 type policyEnvelope struct {
 	Data *policyEntity `json:"data"`
 }
@@ -227,13 +227,13 @@ type policyEntity struct {
 	UpdatedAt string          `json:"updated_at"`
 }
 
-// GetCurrentPolicy fetches GET /agent/<agentID>/policies/current with the ORG
-// control-plane credential (recon A: read:agent_policy is org-scoped;
-// OD-SYNC-4 = the org key, not the agent runtime obx_ key). It returns
-// (nil, nil) when the agent has no current policy (data:null → an allow /
-// no-policy state), so the caller writes a no-policy (allow) bundle. On a non-2xx
-// it returns *APIError so the caller can map an auth/permission failure to a hint.
-// The org key and the fetched rego are never logged (INV-1).
+// GetCurrentPolicy fetches GET /agent/<agentID>/policies/current with the
+// org control-plane credential (read:agent_policy is org-scoped — the org
+// key, not the agent runtime obx_ key). It returns (nil, nil) when the
+// agent has no current policy (data:null → an allow / no-policy state), so
+// the caller writes a no-policy (allow) bundle. On a non-2xx it returns
+// *APIError so the caller can map an auth/permission failure to a hint. The
+// org key and the fetched rego are never logged (INV-1).
 func (c *Client) GetCurrentPolicy(ctx context.Context, agentID string) (*Policy, error) {
 	if strings.TrimSpace(agentID) == "" {
 		return nil, fmt.Errorf("agent id is required to read the current policy")

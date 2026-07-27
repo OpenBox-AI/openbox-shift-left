@@ -9,17 +9,18 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/client"
 )
 
-// Advisory is the local sink for the Advisory governance tier (STORY-SL-9),
-// ported unchanged from the Claude Code adapter: it RECORDS what OpenBox would
-// enforce for a dev-runtime event — verdict, would_block, trust/risk/guardrail
-// signals — without ever blocking, delaying, or erroring the tool call (INV-3).
-// It sits on the FLUSH path only, never the Pre/PostToolUse hot path.
+// Advisory is the local sink for the Advisory governance tier, ported
+// unchanged from the Claude Code adapter: it records what OpenBox would
+// enforce for a dev-runtime event — verdict, would_block, trust/risk/
+// guardrail signals — without ever blocking, delaying, or erroring the
+// tool call (INV-3). It sits on the flush path only, never the
+// Pre/PostToolUse hot path.
 //
-// It writes the SAME default sink as the CC adapter (advisories.jsonl under the
-// user config dir) BY DESIGN: the sink is developer-scoped, not tool-scoped,
-// and the Tier-3 findings loop (E6-S11; SL7-B for Codex) tails one file.
-// Records are metadata/categories only (INV-2): no prompt/command/patch/output
-// content and never the guardrail redacted_input. Writes are best-effort.
+// It writes the same default sink as the CC adapter (advisories.jsonl
+// under the user config dir) by design: the sink is developer-scoped, not
+// tool-scoped, and the Tier-3 findings loop tails one file. Records are
+// metadata/categories only (INV-2): no prompt/command/patch/output content
+// and never the guardrail redacted_input. Writes are best-effort.
 type Advisory struct {
 	// Path is the JSONL sink. Empty ⇒ DefaultAdvisoryPath().
 	Path string
@@ -32,8 +33,8 @@ type advisoryLogger interface {
 	Printf(format string, args ...any)
 }
 
-// advisoryRecord is one line in the advisories sink — the STORY-SL-9 schema,
-// all categories/ids/scores, no content (INV-2).
+// advisoryRecord is one line in the advisories sink — all categories/ids/
+// scores, no content (INV-2).
 type advisoryRecord struct {
 	EventID          string                   `json:"event_id"`
 	SessionID        string                   `json:"session_id"`

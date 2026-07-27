@@ -1,6 +1,6 @@
-// Package secret is the OpenBox CLI's OS-backed secret store (STORY-SL-2,
-// INV-1). Developer-agent credentials — the obx_ API key and the Ed25519
-// signing key — are written here, never to plaintext files in a repo, to shell
+// Package secret is the OpenBox CLI's OS-backed secret store (INV-1).
+// Developer-agent credentials — the obx_ API key and the Ed25519 signing
+// key — are written here, never to plaintext files in a repo, to shell
 // history, or onto a process argv (visible via `ps`).
 //
 // The store is a minimal (service, account) -> opaque-string map. Callers keep
@@ -62,9 +62,9 @@ func Detect() (Store, error) {
 
 // Open selects a secret backend by name:
 //
-//	"" | "auto" | "os" — the OS keychain (Detect); ErrNoStore if none. SAFE DEFAULT.
+//	"" | "auto" | "os" — the OS keychain (Detect); ErrNoStore if none. Safe default.
 //	"file"             — the opt-in 0600 file backend (plaintext at rest). The
-//	                     caller MUST warn the user before using it (SL2-SEC-1).
+//	                     caller must warn the user before using it.
 //
 // Note "auto" never silently falls back to the file backend: falling back would
 // store plaintext without consent, which is exactly what the HALT prevents.

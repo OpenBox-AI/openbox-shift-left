@@ -9,9 +9,9 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/client"
 )
 
-// Advisory is the local sink for the Advisory governance tier (STORY-SL-9) on
-// the deploy path: it RECORDS what OpenBox would enforce for a Deploy event —
-// the verdict, a would_block label, and the trust/risk/guardrail/constraint
+// Advisory is the local sink for the Advisory governance tier on the deploy
+// path: it records what OpenBox would enforce for a Deploy event — the
+// verdict, a would_block label, and the trust/risk/guardrail/constraint
 // signals — without ever gating the deploy (INV-3). Records are
 // metadata/categories only (INV-2) and never carry a secret (INV-1).
 //
@@ -25,9 +25,9 @@ type Advisory struct {
 	Log Logger
 }
 
-// advisoryRecord is one line in the advisories sink — the STORY-SL-9 schema,
-// with deploy_id/commit_sha standing in for a single session id (a deploy binds
-// a SET of sessions, carried in the Deploy event's metadata, not one).
+// advisoryRecord is one line in the advisories sink, with deploy_id/
+// commit_sha standing in for a single session id (a deploy binds a set of
+// sessions, carried in the Deploy event's metadata, not one).
 type advisoryRecord struct {
 	EventID          string                   `json:"event_id"`
 	DeployID         string                   `json:"deploy_id,omitempty"`

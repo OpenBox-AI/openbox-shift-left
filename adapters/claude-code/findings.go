@@ -14,32 +14,36 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/client"
 )
 
-// Tier-3 findings loop (STORY-E6-S11, design §7 T3).
+// Tier-3 findings loop.
 //
-// Governance findings (guardrail categories, goal-drift, risk, would-block) are
-// computed by /evaluate and recorded — content-free — on the FLUSH path by the SL-9
-// Advisory sink (advisories.jsonl). They land in the dashboard today but never in
-// the developer's session. This file is the CONSUMER that closes that loop: it tails
-// advisories.jsonl from a byte-offset CURSOR and, on UserPromptSubmit + PostToolUse,
-// surfaces a CONTENT-FREE summary of the new findings back INTO the session via
-// hookSpecificOutput.additionalContext (→ the model) + systemMessage (→ the user).
+// Governance findings (guardrail categories, goal-drift, risk, would-block)
+// are computed by /evaluate and recorded — content-free — on the flush
+// path by the Advisory sink (advisories.jsonl). They land in the dashboard
+// today but never in the developer's session. This file is the consumer
+// that closes that loop: it tails advisories.jsonl from a byte-offset
+// cursor and, on UserPromptSubmit + PostToolUse, surfaces a content-free
+// summary of the new findings back into the session via
+// hookSpecificOutput.additionalContext (→ the model) + systemMessage (→
+// the user).
 //
-// It adds NO new sink and NO new producer — it reuses the existing advisory record
-// (the "reuse, don't rebuild" principle). It is gated behind ResolveFindings (default
-// OFF): with findings off it is never called and the hooks write nothing.
+// It adds no new sink and no new producer — it reuses the existing
+// advisory record (reuse, don't rebuild). It is gated behind
+// ResolveFindings (default off): with findings off it is never called and
+// the hooks write nothing.
 //
-// SAFETY:
-//   - INV-2: the summary is built ONLY from content-free advisoryRecord fields
-//     (verdict/would_block/risk/constraint COUNT, guardrail reason CATEGORIES via
-//     reasonTypeCategories, drift boolean + COUNT). It NEVER emits guardrail/drift
-//     free text, tool content, command, or file body. The cursor holds a byte offset
-//     only (structural).
-//   - INV-3: it emits ONLY additionalContext + systemMessage — never a decision /
-//     permissionDecision / blocking field. Every fault (missing/corrupt file,
-//     unwritable cursor, bad record) is swallowed; the hook still exits 0. It can
-//     never block, delay, or fail a tool call.
-//   - NFR-2: the hot path (PostToolUse) is stat-guarded — with no new findings it does
-//     one stat (+ a tiny cursor read) and no advisory-body read.
+// Safety:
+//   - INV-2: the summary is built only from content-free advisoryRecord
+//     fields (verdict/would_block/risk/constraint count, guardrail reason
+//     categories via reasonTypeCategories, drift boolean + count). It
+//     never emits guardrail/drift free text, tool content, command, or
+//     file body. The cursor holds a byte offset only (structural).
+//   - INV-3: it emits only additionalContext + systemMessage — never a
+//     decision / permissionDecision / blocking field. Every fault
+//     (missing/corrupt file, unwritable cursor, bad record) is swallowed;
+//     the hook still exits 0. It can never block, delay, or fail a tool
+//     call.
+//   - The hot path (PostToolUse) is stat-guarded — with no new findings it
+//     does one stat (+ a tiny cursor read) and no advisory-body read.
 
 // surfaceFindings surfaces the content-free summary of any advisory findings recorded
 // since the last surface, then advances the cursor. It is best-effort and swallows
@@ -271,11 +275,12 @@ func readFrom(path string, offset int64) ([]byte, error) {
 // advances by what was read). advisoryRecords are tiny, so this holds many thousands.
 const maxFindingsDelta = 4 << 20 // 4 MiB
 
-// maxCategoryLen / maxCategoriesShown bound the guardrail categories rendered into
-// the model-context summary (G_SEC LOW-1 / INFO-1). The guardrail `type` is a
-// server-controlled vocabulary, but it is remote-sourced free-form text and E6-S11 is
-// the first place it is injected into Claude's context — so it is defensively bounded
-// in both length (per category) and cardinality (per summary) before it lands there.
+// maxCategoryLen / maxCategoriesShown bound the guardrail categories
+// rendered into the model-context summary. The guardrail `type` is a
+// server-controlled vocabulary, but it is remote-sourced free-form text
+// and this is the first place it is injected into Claude's context — so
+// it is defensively bounded in both length (per category) and cardinality
+// (per summary) before it lands there.
 const (
 	maxCategoryLen     = 40
 	maxCategoriesShown = 12

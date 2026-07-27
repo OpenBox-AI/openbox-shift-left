@@ -1,9 +1,9 @@
 // Package conformance validates OpenBox normalized developer-runtime events
-// (STORY-SL-1) against the versioned JSON Schema at ../schema/dev-event.schema.json.
+// against the versioned JSON Schema at ../schema/dev-event.schema.json.
 //
-// It is intentionally dependency-free: it ships a minimal JSON Schema validator
-// covering exactly the keywords the contract uses, so `go build ./... && go test
-// ./...` runs offline with no module downloads.
+// It is intentionally dependency-free: it ships a minimal JSON Schema
+// validator covering exactly the keywords the contract uses, so `go build
+// ./... && go test ./...` runs offline with no module downloads.
 package conformance
 
 import (

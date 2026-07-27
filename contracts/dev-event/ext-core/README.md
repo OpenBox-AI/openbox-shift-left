@@ -5,7 +5,7 @@
 > accept-list to admit shift-left's 7 developer-runtime `event_type` strings
 > (`SessionStarted`/`PromptSubmitted`/`ToolCall`/`ToolResult`/`SessionEnded`/`CommitCreated`/`Deploy`).
 
-**Why it's gone.** [ADR-0004](../../../.fab7/sdlc/design/adr/ADR-0004-unify-dev-events-onto-base-wire-model.md)
+**Why it's gone.** **ADR-0004** (unify dev events onto the base wire model)
 unified shift-left telemetry onto the base SDK's **stock** wire vocabulary, and
 epic **E7** built it (E7-S3/S4/S5). The OpenBox client no longer emits a
 developer-specific `event_type`; it now maps every dev event onto a wire type

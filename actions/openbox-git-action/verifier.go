@@ -15,72 +15,69 @@ import (
 	"time"
 )
 
-// STORY-SL-15 — the real OwnershipVerifier.
+// apiVerifier is the real OwnershipVerifier: it asks openbox-backend (the
+// control plane) which sessions the pusher's agent owns, and promotes a
+// claim only when the trailer value names one of them.
 //
-// SL-6 built the seam (OwnershipVerifier / NoopVerifier) and discharged SL5-SEC-1
-// as a design: a commit trailer is an untrusted CLAIM, promoted to a proven
-// (Verified → Attributed) attribution only when a verifier confirms the pusher
-// OWNS the named session. Phase-1 shipped NoopVerifier (everything Inferred)
-// because the session-ownership read API was treated as external/deferred.
+// # The read
 //
-// apiVerifier is that real verifier. It asks openbox-backend (the control plane)
-// which sessions the pusher's agent owns, and promotes a claim only when the
-// trailer value names one of them.
-//
-// # The read (confirmed cross-repo, OD-OWNER-API resolved by brian 2026-07-13)
-//
-// There is no DID-keyed session-ownership endpoint, and a DID cannot be reversed
-// to an agent id (did:aip:<uuidv5(agentID, namespace)> is one-way). So the deploy
-// agent's own agent UUID is supplied directly to CI (OPENBOX_AGENT_ID — known at
-// agent-create time), and the verifier reads the EXISTING, org-scoped endpoint:
+// There is no DID-keyed session-ownership endpoint, and a DID cannot be
+// reversed to an agent id (did:aip:<uuidv5(agentID, namespace)> is
+// one-way). So the deploy agent's own agent UUID is supplied directly to CI
+// (OPENBOX_AGENT_ID — known at agent-create time), and the verifier reads
+// the existing, org-scoped endpoint:
 //
 //	GET <backend>/agent/<agentID>/sessions?search=<sessionID>
 //	    X-API-Key: <obx_key_… org key with read:agent_session>
 //	200 → { "data": [ { "run_id": "<session id>", "agent_id": "<agentID>", … } ] }
 //
-// The endpoint double-scopes by agentID AND the key's organization_id server-side,
-// so a 200 row genuinely belongs to that agent in that org (verified cross-repo:
-// session.service.ts getSessionList). The trailer value is owned iff a row's
-// run_id equals it.
+// The endpoint double-scopes by agentID and the key's organization_id
+// server-side, so a 200 row genuinely belongs to that agent in that org.
+// The trailer value is owned iff a row's run_id equals it.
 //
 // # Matching on run_id, not id
 //
-// The `OpenBox-Session:` trailer value is the tool's session UUID, which the
-// shift-left client writes to core's run_id (client/payload.go: RunID =
-// ev.SessionID), NOT the backend SessionEntity `id` PK. So ownership matches on
-// run_id. Matching `id` would silently never attribute — the load-bearing detail.
+// The `OpenBox-Session:` trailer value is the tool's session UUID, which
+// the shift-left client writes to core's run_id (client/payload.go: RunID =
+// ev.SessionID), not the backend SessionEntity `id` PK. So ownership
+// matches on run_id. Matching `id` would silently never attribute — the
+// load-bearing detail.
 //
-// # SL5-SEC-1 / INV-4, discharged for real
+// # INV-4, discharged for real
 //
 //   - agentID↔DID binding: at construction the verifier recomputes
-//     did:aip:<uuidv5(agentID, namespace)> and requires it to equal the deploy
-//     agent's DID (OPENBOX_DID). A misconfigured agent id that names a DIFFERENT
-//     principal than the deploy DID is rejected — the sessions it reads always
-//     belong to the same identity the deploy is attributed to.
-//   - per-row agent_id check: a row is accepted only when its agent_id equals the
-//     queried agentID, so a stray/other-agent row can never enter the owned set.
-//   - a forged trailer naming a victim's session id (visible in the victim's
-//     pushed commits) is not returned for the pusher's agent → stays Inferred.
+//     did:aip:<uuidv5(agentID, namespace)> and requires it to equal the
+//     deploy agent's DID (OPENBOX_DID). A misconfigured agent id that
+//     names a different principal than the deploy DID is rejected — the
+//     sessions it reads always belong to the same identity the deploy is
+//     attributed to.
+//   - per-row agent_id check: a row is accepted only when its agent_id
+//     equals the queried agentID, so a stray/other-agent row can never
+//     enter the owned set.
+//   - a forged trailer naming a victim's session id (visible in the
+//     victim's pushed commits) is not returned for the pusher's agent →
+//     stays Inferred.
 //
 // # Fail-closed (INV-6)
 //
-// EVERY fault path — transport error, non-2xx, malformed/ambiguous body, timeout,
-// no matching row — resolves to (false, err) or (false, nil): the claim is NOT
-// promoted. A lookup failure never over-attributes; the worst case is honest
-// under-attribution (Inferred), never a silent wrong Attributed.
+// Every fault path — transport error, non-2xx, malformed/ambiguous body,
+// timeout, no matching row — resolves to (false, err) or (false, nil): the
+// claim is not promoted. A lookup failure never over-attributes; the worst
+// case is honest under-attribution (Inferred), never a silent wrong
+// Attributed.
 //
 // # Rollout
 //
-// OFF by default (NoopVerifier). Enabled by OPENBOX_OWNERSHIP_VERIFY=1 plus the
-// backend URL, agent id, and org key. A misconfigured/unreachable verifier
-// degrades to Noop — it never breaks CI and never over-attributes.
+// Off by default (NoopVerifier). Enabled by OPENBOX_OWNERSHIP_VERIFY=1 plus
+// the backend URL, agent id, and org key. A misconfigured/unreachable
+// verifier degrades to Noop — it never breaks CI and never over-attributes.
 
-// aipNamespace mirrors openbox-backend's OPENBOX_AIP_NAMESPACE
-// (src/modules/did/aip-namespace.ts, verified cross-repo 2026-07-13); the backend
-// derives an agent's DID as did:aip:<uuidv5(agentID, aipNamespace)>. It is used
-// ONLY to bind a supplied agent id to the deploy DID (see NewAPIVerifier). If the
-// backend ever changes this derivation the bind fails → the verifier degrades to
-// Noop (fail-safe: it never over-attributes on a mismatch).
+// aipNamespace mirrors openbox-backend's OPENBOX_AIP_NAMESPACE; the backend
+// derives an agent's DID as did:aip:<uuidv5(agentID, aipNamespace)>. It is
+// used only to bind a supplied agent id to the deploy DID (see
+// NewAPIVerifier). If the backend ever changes this derivation the bind
+// fails → the verifier degrades to Noop (fail-safe: it never
+// over-attributes on a mismatch).
 const aipNamespace = "b6e4a1d3-7c02-4e8a-9d1f-5a3b7c2d8e0f"
 
 // defaultOwnershipTimeout bounds the ownership read so a slow/absent API degrades
@@ -103,7 +100,7 @@ type apiVerifier struct {
 	cache map[string]bool // sessionID -> owned; only definitive answers cached (never errors)
 }
 
-// APIVerifierConfig configures the real OwnershipVerifier (STORY-SL-15).
+// APIVerifierConfig configures the real OwnershipVerifier.
 type APIVerifierConfig struct {
 	// BaseURL is the openbox-backend control-plane origin (e.g.
 	// https://backend.openbox.ai). It MUST be a bare origin — no path prefix — and
@@ -162,11 +159,12 @@ func NewAPIVerifier(cfg APIVerifierConfig) (OwnershipVerifier, error) {
 		timeout = defaultOwnershipTimeout
 	}
 	return &apiVerifier{
-		// Never follow a redirect: this is a plain JSON GET with no legitimate 3xx,
-		// and Go forwards CUSTOM headers (our X-API-Key) across a cross-host redirect
-		// (it only strips Authorization/Cookie). A 302 → http://evil would otherwise
-		// leak the broad org key past checkOwnershipBaseURL's origin/scheme guard
-		// (G_SEC C1). ErrUseLastResponse surfaces the 3xx as a non-2xx → fail-closed.
+		// Never follow a redirect: this is a plain JSON GET with no legitimate
+		// 3xx, and Go forwards custom headers (our X-API-Key) across a
+		// cross-host redirect (it only strips Authorization/Cookie). A 302
+		// → http://evil would otherwise leak the broad org key past
+		// checkOwnershipBaseURL's origin/scheme guard. ErrUseLastResponse
+		// surfaces the 3xx as a non-2xx → fail-closed.
 		http: &http.Client{
 			Timeout:       timeout,
 			CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
@@ -180,11 +178,11 @@ func NewAPIVerifier(cfg APIVerifierConfig) (OwnershipVerifier, error) {
 	}, nil
 }
 
-// OwnsSession reports whether the pusher's agent owns the session named by a
-// trailer claim (SL5-SEC-1). It returns (true, nil) ONLY on positively-established
-// ownership; (false, nil) when provably not owned; and (false, err) on any lookup
-// fault — the resolver treats the latter two identically (never promoted), so a
-// fault can never over-attribute.
+// OwnsSession reports whether the pusher's agent owns the session named by
+// a trailer claim. It returns (true, nil) only on positively-established
+// ownership; (false, nil) when provably not owned; and (false, err) on any
+// lookup fault — the resolver treats the latter two identically (never
+// promoted), so a fault can never over-attribute.
 func (v *apiVerifier) OwnsSession(ctx context.Context, sessionID string) (bool, error) {
 	v.mu.Lock()
 	if owned, ok := v.cache[sessionID]; ok {
@@ -238,11 +236,11 @@ func (v *apiVerifier) query(ctx context.Context, sessionID string) (bool, error)
 		return false, fmt.Errorf("ownership read: HTTP %d", resp.StatusCode)
 	}
 
-	// openbox-backend wraps every 2xx in a global envelope {status, data:<payload>};
-	// the sessions payload is itself {data:[…], …pagination} (SessionListResponseDto).
-	// So the session rows live at .data.data[] (verified live against the running
-	// backend 2026-07-13). Parse run_id + agent_id only (INV-2: no content read;
-	// unknown fields ignored).
+	// openbox-backend wraps every 2xx in a global envelope
+	// {status, data:<payload>}; the sessions payload is itself
+	// {data:[…], …pagination} (SessionListResponseDto). So the session rows
+	// live at .data.data[]. Parse run_id + agent_id only (INV-2: no content
+	// read; unknown fields ignored).
 	var env struct {
 		Data struct {
 			Data []struct {
