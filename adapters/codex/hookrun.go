@@ -91,6 +91,11 @@ func RunHook(sub string, stdin io.Reader, stdout io.Writer, logger *log.Logger) 
 	// flag the flush client's Emit uses to strip content, so capture and
 	// egress agree. Resolved once (cheap config+env, no secret I/O).
 	ad.Mapper.CaptureContent = ResolveContentCapture()
+	// The current thread's id, which the hook payload does not carry. Recorded
+	// only when it differs from the payload's session id, i.e. under a forked
+	// thread (E8-S4) — the Mapper decides, this just supplies the ambient
+	// value so Map stays I/O-free.
+	ad.Mapper.ThreadID = os.Getenv(obgit.EnvCodexThreadID)
 	// Pin the Mapper clock to one instant for this hook invocation. In
 	// enforce+Tier-2 mode RunHook maps the PreToolUse event twice — once
 	// here via Observe (the spooled copy, flushed on SessionEnd) and once

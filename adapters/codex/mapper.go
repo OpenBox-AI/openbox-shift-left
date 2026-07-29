@@ -56,6 +56,19 @@ type Mapper struct {
 	// (like Now / NewID), preserving the INV-2 guarantee that Map never
 	// touches content.
 	Finops *FinopsUsage
+	// ThreadID is the ambient CODEX_THREAD_ID the hook process inherited —
+	// the id of the thread this event came from, which the hook payload does
+	// not carry (see HookEvent's doc comment). RunHook reads the env and
+	// passes it in so Map stays a pure function of its inputs, exactly as
+	// Finops does for the rollout read.
+	//
+	// It is only *recorded* when it differs from the payload's session id,
+	// i.e. under a forked thread: then the event stream is keyed by the root
+	// session while the git trailer attributes commits by this thread id, and
+	// metadata.thread_id/root_session_id is the join between them. For an
+	// unforked run the two are equal and nothing is emitted, so today's wire
+	// output is unchanged. Structural identifiers, never content (INV-2).
+	ThreadID string
 }
 
 // FinopsUsage is the numbers-only usage rollup the finops reader produces
@@ -100,7 +113,7 @@ func (m Mapper) Map(hook HookName, e *HookEvent) (client.DevEvent, bool) {
 	// fires (the CC adapter's rationale applies unchanged).
 	ev := client.DevEvent{
 		SchemaVersion: client.SchemaVersion,
-		SessionID:     e.SessionID, // Codex session ≡ thread (addendum #2)
+		SessionID:     e.SessionID, // the root/continuity id — correct under forks too (E8-S4)
 		DeveloperDID:  m.Identity.DeveloperDID,
 		Timestamp:     ts,
 	}
@@ -156,11 +169,46 @@ func (m Mapper) Map(hook HookName, e *HookEvent) (client.DevEvent, bool) {
 		return client.DevEvent{}, false
 	}
 
+	// Record the session-tree linkage on every event of a forked thread, before
+	// the id derivation so a fork's events cannot collide with the root's.
+	ev.Metadata = mergeMetadata(ev.Metadata, m.sessionTreeMetadata(e))
+
 	// Derive the idempotency id LAST, from the fully-populated structural fields
 	// (INV-5) — the switch's distinguishers (event_type, tool, pairing id) all
 	// feed the derivation.
 	ev.EventID = m.eventID(ev)
 	return ev, true
+}
+
+// sessionTreeMetadata returns the fork linkage, or nil for the common case.
+// Empty when the ambient thread id is absent (not a Codex-launched process) or
+// equal to the session id (an unforked root thread) — so unforked runs emit
+// byte-identical metadata to before this story.
+func (m Mapper) sessionTreeMetadata(e *HookEvent) map[string]any {
+	if m.ThreadID == "" || m.ThreadID == e.SessionID {
+		return nil
+	}
+	return map[string]any{
+		"thread_id":       capStr(m.ThreadID),
+		"root_session_id": capStr(e.SessionID),
+	}
+}
+
+// mergeMetadata folds src into dst (dst wins on collision), allocating only if
+// there is something to add. Returns dst so it can be assigned in place.
+func mergeMetadata(dst, src map[string]any) map[string]any {
+	if len(src) == 0 {
+		return dst
+	}
+	if dst == nil {
+		dst = make(map[string]any, len(src))
+	}
+	for k, v := range src {
+		if _, exists := dst[k]; !exists {
+			dst[k] = v
+		}
+	}
+	return dst
 }
 
 // toolMetadata builds the Pre/PostToolUse metadata: the permission mode plus
@@ -384,6 +432,13 @@ func deriveID(ev client.DevEvent) string {
 		b.WriteString(ev.Span.FilePath)
 		b.WriteByte(sep)
 		b.WriteString(ev.Span.Function) // tool_use_id (non-MCP) / MCP function
+	}
+	// Forked threads share the root's session id (E8-S4), so two threads can
+	// otherwise produce identical structural fields. Present only under a fork,
+	// so unforked ids are unchanged.
+	if tid, ok := ev.Metadata["thread_id"].(string); ok && tid != "" {
+		b.WriteByte(sep)
+		b.WriteString(tid)
 	}
 	sum := sha256.Sum256([]byte(b.String()))
 	return "cdx-" + hex.EncodeToString(sum[:])

@@ -126,6 +126,14 @@ func (r SessionResolver) Resolve(worktree string) []string {
 	//     remaining tiers — the commit lands unattributed rather than
 	//     mis-guessed (INV-6-safe, but an env-writing process can exploit
 	//     it to suppress attribution).
+	//   - Forked threads: this is a THREAD id, while the Codex event stream is
+	//     keyed by the root SESSION id (a fork keeps the root's session id —
+	//     see adapters/codex/hookevent.go). Under a fork the trailer therefore
+	//     names the thread and no session row shares that id. Deliberately
+	//     unchanged here: the id is still the most precise true statement about
+	//     which thread made the commit, and the Codex adapter emits
+	//     metadata.thread_id/root_session_id on that fork's events so the
+	//     server can join the two (E8-S4).
 	if id := strings.TrimSpace(r.getenv(EnvCodexThreadID)); id != "" {
 		return []string{id}
 	}

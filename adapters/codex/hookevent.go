@@ -44,8 +44,25 @@ func ParseHookName(s string) (HookName, error) {
 // HookEvent is the subset of a Codex hook's stdin JSON this adapter reads.
 // Field names are grounded in the per-event JSON Schemas embedded in the
 // codex-cli 0.145.0 binary (titles `<event>.command.input`) and
-// `codex-rs/hooks/src/events/*.rs` @ tag rust-v0.145.0. Codex session ≡
-// thread: `session_id` is the OpenBox session id.
+// `codex-rs/hooks/src/events/*.rs` @ tag rust-v0.145.0.
+//
+// Session identity under forks (E8-S4). The app-server rule is: a root
+// thread uses its own thread id as the session id, and a **forked thread
+// keeps the root's session id** (read `thread.sessionId` rather than
+// deriving it from the thread id). The hook payload therefore already hands
+// us the root/continuity id in `session_id`, which is the correct OpenBox
+// session identity in both cases — the earlier "session ≡ thread" shorthand
+// was right for unforked CLI runs and misleading in general.
+//
+// There is no `thread_id` to parse here: verified against the schemas
+// embedded in codex-cli 0.145.0, every hook input lists `session_id` only
+// and sets `additionalProperties: false`. The current thread's id is instead
+// available to the hook *process* as the ambient `CODEX_THREAD_ID` exec-env
+// var (codex-rs core/src/exec_env.rs), so the fork case is detected by
+// comparing that env value with this payload's `session_id` — see
+// Mapper.ThreadID. That comparison matters because the git trailer attributes
+// commits by the ambient thread id while the event stream is keyed by the
+// root session id; under a fork those differ, and metadata carries the join.
 //
 // It captures only non-content, structural fields (INV-2) — session/turn/
 // tool identifiers, working directory, lifecycle enums — with one
