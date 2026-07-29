@@ -343,3 +343,76 @@ Enterprise framing: `ask` = accountability control (who accepted the risk, tampe
 
 - **E8-S11 (candidate, not yet scheduled) — deny-and-retry approval loop.** Size M. Shift-left: REQUIRE_APPROVAL→deny-with-approval-reference on both adapters (CC keeps `ask` for the Account tier); approval-granted advisory into the E6-S11 findings channel. Backend: none expected (decide endpoint + WS exist); core: none expected (fingerprint cache exists) — verify the approval-cache fingerprint matches across retried hook invocations (same span shape) early, it's the one technical risk. Gate: G3 + G_SEC. Depends on OD-E8-3's risk-class split for which classes route to Prevent.
 - **OD-E8-5 — approver model + SLA.** Who may approve (org role? team lead? security only?), the approval TTL/expiry, and whether pre-approved recurring patterns are org-configurable. Product/priority call — brian's, not inferred. The §5 deferred-item framing is corrected accordingly: the broker is *not* blocked on Codex ask-support; ask-support would only improve the Account tier.
+
+## 9. Implementation record (2026-07-29)
+
+All ten stories implemented. Shift-left committed to `main`; sibling work committed
+locally per convention (**not pushed**). Full suite green across all 11 shift-left
+modules plus openbox-core.
+
+| Story | Status | Commit(s) |
+|---|---|---|
+| E8-S1 test isolation | done | `8fd887e` |
+| E8-S2 doc truth | done | `6721e7f` |
+| E8-S3 CC correlation fields | done | `3916881` |
+| E8-S4 Codex session tree | done | `eb8755a` |
+| E8-S5 posture | done | `69be2e2` |
+| E8-S7 dedupe + receipts | done | core `05172fc`, shift-left `d63af7f` |
+| E8-S6 signed bundles | **client side done**, backend signing not built | `f751f91` + ADR-0008 |
+| E8-S8/S9 managed tier | done | `c638946` |
+| E8-S10 attestation | done | shift-left `ef0ff5f`, core `73f6b28` + ADR-0010 |
+
+### Plan assumptions that turned out to be wrong
+
+Worth recording, because each was discovered only by trying to build the thing:
+
+1. **E8-S4 could not parse `thread_id` from the hook payload.** Every hook input
+   schema embedded in codex-cli 0.145.0 lists `session_id` only and sets
+   `additionalProperties: false`. The thread id is available as the ambient
+   `CODEX_THREAD_ID` exec-env var instead. The *real* gap was narrower and more
+   interesting than the plan thought: the payload's `session_id` is already the
+   correct root identity, but the git trailer attributes by thread id, so under a
+   fork the two never joined up.
+2. **E8-S7's spool retry would have been inert.** `client.Emit` logged the drop and
+   returned nil, so the spool could not tell "delivered" from "lost". The fix had
+   to start one layer lower — an advisory `ErrDelivery` — which the plan did not
+   anticipate.
+3. **The `schema_version` bump in E8-S3/S4 was wrong to do.** `metadata` is a
+   deliberately free-form object and the version `const` marks breaking changes;
+   bumping it for additive metadata keys would break every consumer validating
+   against 1.0. Documented as well-known keys in MAPPING.md instead.
+4. **E8-S5's optional core lift was skipped.** The evidence is already complete on
+   the event row, and openbox-core is now pushed to origin, so a local-only commit
+   there for a dashboard convenience was the wrong trade.
+
+### Bugs the tests caught (not the code review)
+
+- Recovery filenames accumulated a `.recN-<id>` segment per carry-over, so the
+  retry counter always read the first one, the bound never engaged, and the name
+  eventually exceeded the filesystem limit. Found by writing the bounded-retry test.
+- Posture provenance reported `user` for fields nobody had set, because `Enforce`
+  and `FailClosed` are plain bools whose accessors always return a pointer to
+  false. Found by the managed-layer precedence test.
+- Strict decoding of the managed config rejected the `//` documentation keys the
+  shipped ops template uses, which would have made a documented mandate silently
+  unmanaged. Found by testing the template itself rather than a fixture.
+- Every attestation skip path was silent, so "why is my lineage still inferred"
+  had no answer. Found by running a real commit end to end.
+
+### Still open
+
+- **E8-S6 backend half** — org signing key, `SignCommand`, `policy_epoch`,
+  `expires_at`, public-key route. Contract pinned in ADR-0008 §"Backend work still
+  required". The client side is deployable now and treats unsigned as unsigned.
+- **OD-E8-1** (content-capture default) — implemented as the recorded compromise:
+  product default stays ON, the enterprise template defaults it off and leaves it
+  unlocked. Not ratified.
+- **OD-E8-2** (managed tier vs Cursor priority) — managed tier is now built, which
+  removes the sequencing question but not the Cursor decision.
+- **OD-E8-3** (deny high-risk classes on an unverifiable bundle) — mechanism in
+  place, posture recorded; the behaviour change is deliberately not wired.
+- **OD-E8-4** (agent-key lifetime) — untouched.
+- **E8-S11** (deny-and-retry approval loop, §8) — not started.
+- **Sibling repos**: `openbox-core` has two local commits (`05172fc`, `73f6b28`)
+  awaiting brian's push decision. openbox-backend is untouched — its
+  `local-identity-provider.ts` is still wired-but-untracked.
