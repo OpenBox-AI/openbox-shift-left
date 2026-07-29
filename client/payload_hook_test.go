@@ -1,6 +1,7 @@
 package client
 
 import (
+	"bytes"
 	"encoding/json"
 	"testing"
 )
@@ -406,5 +407,50 @@ func TestHookPayload_ThreadedStart_RealDuration(t *testing.T) {
 	}
 	if cs["span_id"] != sp["span_id"] {
 		t.Errorf("pair must share span_id: %v vs %v", cs["span_id"], sp["span_id"])
+	}
+}
+
+// TestHookPayload_SpanFunctionIsNotWireDataForNonMCP pins the guarantee both
+// adapters rely on to use span.function as a local pairing channel: for shell,
+// file, and generic tool hook types the field feeds only the derived
+// activity_id/span_id and must never appear in the emitted payload. Only the
+// MCP branch reads it as wire data (mcp.tool / mcp_tool). If this ever changes,
+// the provider tool_use_id — an identifier, but one we promise not to egress on
+// observe events — starts leaking, so fail loudly here rather than in review.
+func TestHookPayload_SpanFunctionIsNotWireDataForNonMCP(t *testing.T) {
+	const marker = "toolu_pairing_marker"
+
+	shell := DevEvent{
+		EventID: "e-shell", EventType: EventToolCall, SessionID: "sess-1", DeveloperDID: "did:aip:abc",
+		Timestamp: "2026-07-08T00:00:00Z", StartedAt: "2026-07-08T00:00:00Z",
+		Tool: Tool{Name: "Bash", Kind: ToolShell},
+		Span: &Span{SemanticType: "shell_command", Stage: "started", Function: marker},
+	}
+	file := fileToolEvent(EventToolCall, "started")
+	file.Span.Function = marker
+
+	for name, ev := range map[string]DevEvent{"shell": shell, "file": file} {
+		b, err := buildPayload(ev)
+		if err != nil {
+			t.Fatalf("%s: buildPayload: %v", name, err)
+		}
+		if bytes.Contains(b, []byte(marker)) {
+			t.Errorf("%s: span.function leaked to the wire: %s", name, b)
+		}
+	}
+
+	// The MCP branch is the deliberate exception — there it is wire data.
+	mcp := DevEvent{
+		EventID: "e-mcp", EventType: EventToolCall, SessionID: "sess-1", DeveloperDID: "did:aip:abc",
+		Timestamp: "2026-07-08T00:00:00Z", StartedAt: "2026-07-08T00:00:00Z",
+		Tool: Tool{Name: "mcp__srv__do", Kind: ToolMCP, MCPServer: "srv"},
+		Span: &Span{SemanticType: "mcp_tool_call", Stage: "started", MCPServer: "srv", Function: "do"},
+	}
+	b, err := buildPayload(mcp)
+	if err != nil {
+		t.Fatalf("mcp: buildPayload: %v", err)
+	}
+	if !bytes.Contains(b, []byte(`"mcp_tool":"do"`)) && !bytes.Contains(b, []byte(`"mcp.tool":"do"`)) {
+		t.Errorf("mcp: function should be wire data for MCP, payload: %s", b)
 	}
 }

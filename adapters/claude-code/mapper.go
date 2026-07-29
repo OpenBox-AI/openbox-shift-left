@@ -130,7 +130,9 @@ func (m Mapper) Map(hook HookName, e *HookEvent) (client.DevEvent, bool) {
 		// context (shown in the dashboard Overview, not as the prompt's
 		// Input). Token/cost are not exposed to Claude Code hooks, so they
 		// are absent.
-		ev.Metadata = compact(map[string]any{"permission_mode": enumOr(e.PermissionMode, permissionModes)})
+		ev.Metadata = mergeMetadata(
+			compact(map[string]any{"permission_mode": enumOr(e.PermissionMode, permissionModes)}),
+			subagentMetadata(e))
 		// The prompt is the signal's input and it is content, so it is
 		// carried on ev.Content.Prompt only under the content-capture
 		// opt-in — where it becomes the SignalReceived signal_args
@@ -144,13 +146,13 @@ func (m Mapper) Map(hook HookName, e *HookEvent) (client.DevEvent, bool) {
 		ev.EventType = client.EventToolCall
 		ev.StartedAt = ts
 		ev.Tool, ev.Span = mapTool(e, "started")
-		ev.Metadata = compact(map[string]any{"permission_mode": enumOr(e.PermissionMode, permissionModes)})
+		ev.Metadata = toolMetadata(e)
 
 	case HookPostToolUse:
 		ev.EventType = client.EventToolResult
 		ev.EndedAt = ts
 		ev.Tool, ev.Span = mapTool(e, "completed")
-		ev.Metadata = compact(map[string]any{"permission_mode": enumOr(e.PermissionMode, permissionModes)})
+		ev.Metadata = toolMetadata(e)
 
 	case HookSessionEnd:
 		ev.EventType = client.EventSessionEnded
@@ -179,6 +181,20 @@ func (m Mapper) Map(hook HookName, e *HookEvent) (client.DevEvent, bool) {
 
 // mapTool builds the Tool identity and the semantic Span for a Pre/PostToolUse
 // event. stage is "started" (ToolCall) or "completed" (ToolResult).
+//
+// tool_use_id pairing (mirrors the Codex adapter): the client derives the wire
+// span_id/activity_id shared by a call's started+completed spans from
+// (session, tool.name, span.file_path, span.function) — client.activityPairKey
+// — and the duration stash keys off the same fields (duration.toolCallStartKey).
+// Carrying tool_use_id on span.function therefore makes both exact per
+// invocation, replacing the documented "two identical sequential calls share a
+// pair key" limitation. Verified against client/payload.go: span.function is
+// read for the wire only under the MCP branch (hookSpanShape's HookMCP case and
+// structuralActivityInput's ToolMCP guard), so for shell/file/tool hook types
+// this slot is a local pairing channel that never egresses. MCP tools keep the
+// real function name there because it *is* wire data (mcp_tool), so they retain
+// the fallback derivation and carry tool_use_id in metadata for audit only.
+// A structural identifier either way — never content (INV-2).
 func mapTool(e *HookEvent, stage string) (client.Tool, *client.Span) {
 	kind, sem, fileOp, mcpServer, function := classifyTool(e.ToolName)
 
@@ -196,7 +212,44 @@ func mapTool(e *HookEvent, stage string) (client.Tool, *client.Span) {
 		span.MCPServer = capStr(mcpServer)
 		span.Function = capStr(function)
 	}
+	if kind != client.ToolMCP && e.ToolUseID != "" {
+		span.Function = capStr(e.ToolUseID) // pairing id channel — see doc comment
+	}
 	return tool, span
+}
+
+// toolMetadata builds the Pre/PostToolUse metadata: the permission mode plus
+// the structural correlation ids. Identifiers only, never content (INV-2) —
+// tool_input and tool_response are not represented.
+func toolMetadata(e *HookEvent) map[string]any {
+	return compact(map[string]any{
+		"permission_mode": enumOr(e.PermissionMode, permissionModes),
+		"tool_use_id":     capStr(e.ToolUseID),
+		"agent_id":        capStr(e.AgentID),
+		"agent_type":      capStr(e.AgentType),
+	})
+}
+
+// subagentMetadata returns the subagent correlation ids for a lifecycle event.
+// They ride every payload fired inside a subagent, so carrying them on the
+// non-tool events too keeps a session's tree complete without inventing a
+// lifecycle type for the Subagent* boundary markers (see COVERAGE.md §3.2).
+func subagentMetadata(e *HookEvent) map[string]any {
+	return compact(map[string]any{
+		"agent_id":   capStr(e.AgentID),
+		"agent_type": capStr(e.AgentType),
+	})
+}
+
+// mergeMetadata folds src into dst (dst wins on collision) and returns dst.
+// Both maps come from compact(), so only known-present keys are copied.
+func mergeMetadata(dst, src map[string]any) map[string]any {
+	for k, v := range src {
+		if _, exists := dst[k]; !exists {
+			dst[k] = v
+		}
+	}
+	return dst
 }
 
 // classifyTool maps a Claude Code tool name to the provider-agnostic tool

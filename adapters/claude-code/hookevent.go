@@ -73,6 +73,32 @@ type HookEvent struct {
 	ToolName  string          `json:"tool_name"`
 	ToolInput json.RawMessage `json:"tool_input"` // decoded only for a structural file_path
 
+	// ToolUseID pairs a PreToolUse with its PostToolUse. Claude Code carries
+	// it on both, so it replaces the heuristic (session, tool, locator)
+	// pairing for non-MCP tools — two identical sequential Bash calls no
+	// longer collide onto one span (see mapper.mapTool). Structural
+	// identifier, never content (INV-2). Absent on older Claude Code
+	// versions, which fall back to the heuristic derivation.
+	ToolUseID string `json:"tool_use_id"`
+
+	// AgentID / AgentType identify the subagent an event occurred inside.
+	// They ride *every* hook payload fired within a subagent (not only the
+	// Subagent* hooks), so a session's subagent tree is reconstructable from
+	// the tool events alone: events sharing an AgentID belong to one subagent
+	// and AgentType names its kind. Empty on the main agent's own events.
+	// Structural identifiers, never content (INV-2).
+	//
+	// Verified against the installed claude 2.1.220 binary, which documents
+	// agent_id as: "Subagent identifier. Present only when the hook fires
+	// from within a subagent (e.g., a tool called by an AgentTool worker).
+	// Absent for the main thread, even in --agent sessions. Use this field
+	// (not agent_type) to distinguish subagent calls from main-thread calls."
+	// Note parent_agent_id is deliberately absent here: it exists only as an
+	// OTel span attribute on claude_code.subagent.spawn, not as a hook
+	// payload field, so the tree is flat-by-agent_id rather than parented.
+	AgentID   string `json:"agent_id"`
+	AgentType string `json:"agent_type"`
+
 	// SessionEnd.
 	Reason string `json:"reason"`
 

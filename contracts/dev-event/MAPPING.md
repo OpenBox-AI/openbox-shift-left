@@ -43,8 +43,22 @@ Built by `lifecycleWireType` (lifecycle/signal, `client/payload.go`) and `buildP
 | `PromptSubmitted` | `SignalReceived` | `prompt_submitted` | — | `tokens`, `cost`, `model` | mid-session signal |
 | `CommitCreated` | `SignalReceived` | `commit_created` | — | `commit_sha`, `repo`, `branch` (FR-5) | mid-session signal; commit lineage |
 | `Deploy` | `SignalReceived` | `deploy` | — | `deploy_id`, `commit_sha`, `repo`, `environment`, `deploy_did` (FR-6/7) | signal; deploy lineage |
-| `ToolCall` | `ActivityStarted`+`hook_trigger` | — | stage=`started` | `tool_name` | pre-exec decision (OPA runs; the enforce point) |
-| `ToolResult` | `ActivityStarted`+`hook_trigger` | — | stage=`completed` | `tool_name`, `exit_code`? | **same** hook envelope; carries `bytes_*`/`lines_count` |
+| `ToolCall` | `ActivityStarted`+`hook_trigger` | — | stage=`started` | `tool_name`, `tool_use_id`?, `agent_id`?, `agent_type`? | pre-exec decision (OPA runs; the enforce point) |
+| `ToolResult` | `ActivityStarted`+`hook_trigger` | — | stage=`completed` | `tool_name`, `exit_code`?, `tool_use_id`?, `agent_id`?, `agent_type`? | **same** hook envelope; carries `bytes_*`/`lines_count` |
+
+### Correlation metadata keys (E8-S3/S4)
+
+`metadata` is deliberately a free-form object, so these are **well-known keys rather than schema
+fields** — no `schema_version` bump, because the normalized shape is unchanged and the version
+`const` marks breaking changes only. All are structural identifiers (INV-2 permits them; INV-1
+still forbids secrets) and all are optional — a provider that does not expose one simply omits it.
+
+| Key | Providers | Meaning |
+|---|---|---|
+| `tool_use_id` | Claude Code, Codex | Per-invocation id pairing a `ToolCall` with its `ToolResult`. For non-MCP tools it also rides `span.function` as a *local* pairing channel (feeds the derived `activity_id`/`span_id` and the duration stash) and is not emitted in the span; for MCP tools `span.function` stays the MCP function name and this key is audit metadata only. |
+| `agent_id`, `agent_type` | Claude Code | Identify the subagent an event occurred inside. Present on *every* payload fired within a subagent, so the subagent tree is reconstructable from tool events alone — which is why the `SubagentStart`/`SubagentStop` boundary markers need no lifecycle type of their own (COVERAGE.md §3.2). |
+| `turn_id` | Codex | Per-turn correlation id. |
+| `thread_id`, `root_session_id` | Codex | Emitted only when a forked thread's id differs from the session id it continues (E8-S4). |
 
 ### The `ToolCall`/`ToolResult` pair — key correction (E7-S4)
 
