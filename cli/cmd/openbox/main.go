@@ -488,6 +488,12 @@ func (a *app) runHook(args []string) (code int) {
 		// The git hook re-invokes this binary as `openbox hook git
 		// prepare-commit-msg` (OD17 — folds the standalone openbox-git-hook
 		// in).
+		//
+		// Supply the attestation signing context (E8-S10). The git module never
+		// touches the secret store itself, so the engine injects a resolver;
+		// returning ok=false leaves the commit unattested and the lineage
+		// inferred, which is the pre-E8 behaviour.
+		obgit.SetAttestContext(attestContext)
 		obgit.RunHook(args[1:], []string{"hook", "git", "prepare-commit-msg"}, logger.Printf)
 	default:
 		logger.Printf("unknown hook provider %q (supported: claude-code, codex, git)", args[0])

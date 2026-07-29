@@ -44,10 +44,16 @@ func RunHook(args []string, installArgs []string, logf func(string, ...any)) {
 			logf("%v", err) // logged only — the caller still exits 0
 		}
 	case "post-commit":
+		sessions := g.ResolveSessions(resolver)
 		// Optional, non-authoritative local notes mirror.
-		if err := g.WriteNoteMirror("HEAD", g.ResolveSessions(resolver)); err != nil {
+		if err := g.WriteNoteMirror("HEAD", sessions); err != nil {
 			logf("note mirror skipped: %v", err)
 		}
+		// Signed attestation (E8-S10): upgrades the trailer from a claim anyone
+		// could write to a statement the session keyholder signed. Best-effort
+		// and entirely optional — the commit already happened, and a machine
+		// with no credentials simply leaves the lineage at "inferred".
+		writeAttestation(g, sessions, logf)
 	case "install":
 		runInstall(g, installArgs, logf)
 	default:
@@ -69,7 +75,14 @@ func runInstall(g Git, installArgs []string, logf func(string, ...any)) {
 	if err != nil || self == "" {
 		self = "openbox-git-hook"
 	}
-	if err := InstallHook(hooksDir, HookConfig{Command: self, Args: installArgs}); err != nil {
+	cfg := HookConfig{Command: self, Args: installArgs}
+	// The post-commit hook carries the notes mirror and the signed attestation
+	// (E8-S10). Additive and best-effort: the trailer works without it, so a
+	// failure here is logged rather than failing the install.
+	if err := InstallPostCommitHook(hooksDir, cfg); err != nil {
+		logf("post-commit hook not installed (trailer still works): %v", err)
+	}
+	if err := InstallHook(hooksDir, cfg); err != nil {
 		logf("install: %v", err)
 		return
 	}

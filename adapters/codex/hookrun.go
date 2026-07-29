@@ -286,6 +286,11 @@ func maybeInstallGitHook(logger *log.Logger, cwd string) {
 		return // not a git repo / detached worktree — nothing to install into
 	}
 	cfg := obgit.HookConfig{Command: self, Args: []string{"hook", "git", "prepare-commit-msg"}}
+	// The post-commit hook carries the notes mirror and the signed attestation
+	// (E8-S10). Additive and best-effort: the trailer works without it.
+	if err := obgit.InstallPostCommitHook(hooksDir, cfg); err != nil {
+		logger.Printf("post-commit hook not installed (trailer still works): %v", err)
+	}
 	if err := obgit.InstallHook(hooksDir, cfg); err != nil {
 		logger.Printf("git-hook install skipped: %v", err)
 	}

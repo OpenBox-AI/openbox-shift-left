@@ -72,6 +72,20 @@ type SessionClaim struct {
 	Commit    string `json:"commit"`           // the commit the id was resolved from
 	Verified  bool   `json:"verified"`         // owned by the authenticated pusher
 	Reason    string `json:"reason,omitempty"` // verification note when not Verified
+	// Attestation, when present, is the signed statement read from the commit's
+	// git note (E8-S10): the session keyholder asserting that this exact commit
+	// came from this session, together with the policy that was in force.
+	//
+	// It is carried VERBATIM and is deliberately not verified here. The signing
+	// key's public half lives in KMS under the agent's DID alias, which this
+	// action cannot reach, so a local check could only ever be decorative.
+	// Verification — and with it the upgrade from `attributed` to `verified`
+	// lineage — belongs server-side, where the key is resolvable.
+	//
+	// Absent is the normal case: git notes are not pushed by default, and a
+	// pipeline that does not fetch refs/notes/openbox-attest sees none. That
+	// degrades to today's inferred/attributed claim rather than to an error.
+	Attestation *obgit.Attestation `json:"attestation,omitempty"`
 }
 
 // Resolution is the full server-side attribution of a pushed commit (INV-6).
@@ -185,6 +199,9 @@ func (r *Resolver) Resolve(ctx context.Context, target, base string) (Resolution
 	// Bind each claim to the authenticated pusher. Only positively owned
 	// ids become Verified; the rest stay claims.
 	r.verify(ctx, claims)
+	// Attach any signed attestation for the commit each claim came from. Purely
+	// additive: a claim without one is unchanged.
+	r.attachAttestations(claims)
 	res.Sessions = claims
 
 	r.classify(&res)
@@ -439,4 +456,49 @@ func short(sha string) string {
 		return sha[:7]
 	}
 	return sha
+}
+
+// attachAttestations reads the signed attestation note for each claim's commit.
+//
+// Best-effort throughout: a missing note is the common case, and a malformed one
+// is skipped rather than failing the deploy — telemetry and lineage must never
+// break a release. Notes are read per distinct commit and cached, since several
+// claims routinely come from the same commit.
+func (r *Resolver) attachAttestations(claims []SessionClaim) {
+	seen := map[string]*obgit.Attestation{}
+	for i := range claims {
+		commit := claims[i].Commit
+		if commit == "" {
+			continue
+		}
+		att, cached := seen[commit]
+		if !cached {
+			att, _ = r.notes.ReadAttestation(commit) // nil on absent/malformed
+			seen[commit] = att
+		}
+		if att == nil {
+			continue
+		}
+		// Bind the attestation to the commit it is attached to and to the session
+		// it names. A note is keyed by sha so it cannot be moved between commits,
+		// but it CAN name sessions other than this claim's, so check before
+		// presenting it as evidence for this one.
+		payload, err := att.Payload()
+		if err != nil || payload.CommitSHA != commit {
+			continue
+		}
+		if !containsString(payload.SessionIDs, claims[i].SessionID) {
+			continue
+		}
+		claims[i].Attestation = att
+	}
+}
+
+func containsString(list []string, want string) bool {
+	for _, v := range list {
+		if v == want {
+			return true
+		}
+	}
+	return false
 }

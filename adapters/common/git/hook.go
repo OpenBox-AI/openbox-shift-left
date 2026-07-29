@@ -115,7 +115,35 @@ func InstallHook(hooksDir string, cfg HookConfig) error {
 	if err := os.MkdirAll(hooksDir, 0o755); err != nil {
 		return fmt.Errorf("install hook: mkdir %s: %w", hooksDir, err)
 	}
-	path := filepath.Join(hooksDir, "prepare-commit-msg")
+	return writeHookScript(hooksDir, "prepare-commit-msg", cfg)
+}
+
+// InstallPostCommitHook installs the `post-commit` hook, which runs after a
+// commit exists and writes the two artifacts that need its sha: the
+// non-authoritative notes mirror and the signed attestation (E8-S10).
+//
+// Separate from InstallHook because the two hooks are independently useful and
+// have different failure consequences: without prepare-commit-msg a commit
+// carries no trailer at all, whereas without post-commit the trailer still works
+// and only the cryptographic upgrade is missing. Installing it is additive — the
+// same never-overwrite-a-foreign-hook rule applies.
+func InstallPostCommitHook(hooksDir string, cfg HookConfig) error {
+	if hooksDir == "" {
+		return fmt.Errorf("install hook: empty hooks dir")
+	}
+	if err := os.MkdirAll(hooksDir, 0o755); err != nil {
+		return fmt.Errorf("install hook: mkdir %s: %w", hooksDir, err)
+	}
+	post := cfg
+	post.Args = []string{"hook", "git", "post-commit"}
+	return writeHookScript(hooksDir, "post-commit", post)
+}
+
+// writeHookScript writes one hook, refusing to clobber a script OpenBox did not
+// write. A developer's existing hook is theirs; silently replacing it would be a
+// worse failure than not installing.
+func writeHookScript(hooksDir, name string, cfg HookConfig) error {
+	path := filepath.Join(hooksDir, name)
 
 	if existing, err := os.ReadFile(path); err == nil {
 		if !strings.Contains(string(existing), managedMarker) {
