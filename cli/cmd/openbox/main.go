@@ -90,6 +90,10 @@ func (a *app) run(args []string) int {
 		return a.runDev(args[1:])
 	case "hook":
 		return a.runHook(args[1:])
+	case "managed":
+		return a.runManaged(args[1:])
+	case "doctor":
+		return a.runDoctor(args[1:])
 	case "version", "--version", "-v":
 		fmt.Fprintln(a.stdout, "openbox "+version)
 		return exitOK
@@ -632,6 +636,8 @@ Usage:
   openbox dev init --provider <claude-code|codex|cursor> [--enforce] [flags]
   openbox dev verify [--dry-run]
   openbox dev sync [--bundle <path>]
+  openbox managed install --provider <claude-code,codex> [--dry-run] [--force]
+  openbox doctor
   openbox version
 
 Environment (needed only at 'dev init' time):

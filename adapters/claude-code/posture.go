@@ -33,6 +33,7 @@ func effectivePosture(staleness devconfig.Staleness) devconfig.Posture {
 	p.Staleness = staleness
 	p.BundleVersion, p.BundlePolicyID, p.BundleSHA256 = bundleCoordinates()
 	p.BundleIntegrity = string(bundleIntegrity())
+	p.ProviderManaged = providerManaged()
 	return p
 }
 
@@ -107,4 +108,35 @@ func bundleIntegrity() decision.Integrity {
 		MinEpoch:  decision.ReadEpochPin(path),
 	})
 	return integrity
+}
+
+// providerManaged reports whether this provider's own managed configuration is
+// deployed and names the OpenBox hook (E8-S8). Without it, enforcement is a hook
+// in the developer's own config and a local edit removes the gate — so this is
+// the field that separates "enforcing" from "enforcing with assurance".
+//
+// It answers a deliberately narrow question: does a managed file exist at a known
+// path and does it invoke us. It cannot confirm the file is root-owned or that the
+// provider parsed it, so "true" here is evidence, not proof — hence the tri-state
+// (an unreadable path is "unknown", never a quiet "false").
+func providerManaged() string {
+	paths := []string{"/etc/claude-code/managed-settings.json", "/Library/Application Support/ClaudeCode/managed-settings.json"}
+	sawPath := false
+	for _, path := range paths {
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			if !os.IsNotExist(err) {
+				sawPath = true // exists but unreadable by this user
+			}
+			continue
+		}
+		if strings.Contains(string(raw), "hook claude-code") {
+			return "true"
+		}
+		return "false" // managed, but not by us
+	}
+	if sawPath {
+		return "unknown"
+	}
+	return "false"
 }

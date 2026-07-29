@@ -1,0 +1,20 @@
+# OpenBox managed defaults for Codex CLI (E8-S8).
+#
+# Deploy to /etc/codex/managed_config.toml. This sets the DEFAULTS a session starts
+# with; requirements.toml is what constrains them. Both are needed: defaults without
+# requirements can be overridden locally, requirements without defaults leave the
+# developer to choose from the allowed set.
+
+approval_policy = "on-request"
+sandbox_mode = "workspace-write"
+
+# Network access off by default. Enable per-org by uncommenting and listing the
+# domains your developers genuinely need — an allowlist is only meaningful if it is
+# shorter than "everything". This is the provider's egress control, not OpenBox's:
+# OpenBox records the posture, it does not proxy traffic.
+# [experimental_network]
+# enabled = true
+# allowed_domains = ["registry.npmjs.org", "pypi.org", "github.com"]
+
+[features]
+hooks = true

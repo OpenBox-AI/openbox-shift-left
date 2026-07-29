@@ -82,20 +82,62 @@ type Posture struct {
 	// state, not a failure — but it is also not assurance, which is why it is
 	// recorded rather than assumed.
 	BundleIntegrity string
+	// ConfigSource names where each posture flag came from (E8-S9): default,
+	// user, env, managed_default, or managed. This is what lets the control
+	// plane distinguish "the org requires enforce" from "this developer happens
+	// to have it on" — without it, a machine with no managed config looks
+	// identical to a compliant one.
+	ConfigSource map[string]string
+	// ProviderManaged reports whether the provider's own managed configuration
+	// is deployed (E8-S8): "true", "false", or "unknown" when it cannot be
+	// determined. A string rather than a bool so unknown is not silently false.
+	ProviderManaged string
 }
 
 // EffectivePosture resolves the posture fields that come from config and env,
 // using the same resolvers the runtime itself calls — so the recorded posture
 // cannot drift from the behaviour it describes. The adapter fills in the rest.
 func EffectivePosture() Posture {
-	return Posture{
-		Enforce:         ResolveEnforce(),
-		FailClosed:      ResolveFailClosed(),
-		Tier2:           ResolveTier2(),
-		SecretDetection: ResolveSecretDetection(),
-		ContentCapture:  ResolveContentCapture(),
-		Findings:        ResolveFindings(),
-		Finops:          ResolveFinops(),
+	p := Posture{ConfigSource: map[string]string{}}
+	// Resolve value and provenance together so the two cannot disagree.
+	for _, f := range postureFields() {
+		v, src := resolveBoolWithSource(f.name, f.field, f.def, f.env)
+		*f.into(&p) = v
+		p.ConfigSource[f.name] = string(src)
+	}
+	return p
+}
+
+// postureFields is the single list the posture and its provenance are built
+// from, so a new flag cannot be reported without its source (or vice versa).
+func postureFields() []struct {
+	name  string
+	field func(DevConfig) *bool
+	def   bool
+	env   string
+	into  func(*Posture) *bool
+} {
+	return []struct {
+		name  string
+		field func(DevConfig) *bool
+		def   bool
+		env   string
+		into  func(*Posture) *bool
+	}{
+		{"enforce", func(c DevConfig) *bool { b := c.Enforce; return &b }, false, EnvEnforce,
+			func(p *Posture) *bool { return &p.Enforce }},
+		{"fail_closed", func(c DevConfig) *bool { b := c.FailClosed; return &b }, false, EnvFailClosed,
+			func(p *Posture) *bool { return &p.FailClosed }},
+		{"tier2", func(c DevConfig) *bool { return c.Tier2 }, false, EnvTier2,
+			func(p *Posture) *bool { return &p.Tier2 }},
+		{"secret_detection", func(c DevConfig) *bool { return c.SecretDetection }, true, EnvSecretDetection,
+			func(p *Posture) *bool { return &p.SecretDetection }},
+		{"content_capture", func(c DevConfig) *bool { return c.ContentCapture }, true, EnvContentCapture,
+			func(p *Posture) *bool { return &p.ContentCapture }},
+		{"findings", func(c DevConfig) *bool { return c.Findings }, false, EnvFindings,
+			func(p *Posture) *bool { return &p.Findings }},
+		{"finops", func(c DevConfig) *bool { b := c.Finops; return &b }, false, EnvFinops,
+			func(p *Posture) *bool { return &p.Finops }},
 	}
 }
 
@@ -126,11 +168,19 @@ func (p Posture) Metadata() map[string]any {
 		"bundle_sha256":    p.BundleSHA256,
 		"staleness":        string(p.Staleness),
 		"bundle_integrity": p.BundleIntegrity,
+		"provider_managed": p.ProviderManaged,
 	} {
 		if v == "" || looksLikeSecret(v) {
 			continue // unknown, or refused — see looksLikeSecret
 		}
 		m[k] = truncate(v, maxPostureValueLen)
+	}
+	if len(p.ConfigSource) > 0 {
+		src := make(map[string]any, len(p.ConfigSource))
+		for k, v := range p.ConfigSource {
+			src[k] = v
+		}
+		m["config_source"] = src
 	}
 	return m
 }

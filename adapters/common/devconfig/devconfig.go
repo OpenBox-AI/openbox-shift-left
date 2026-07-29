@@ -17,6 +17,7 @@
 package devconfig
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -228,13 +229,13 @@ func SpoolDir(subdir string) string {
 // Default false (it modifies a repo's .git/hooks); config enables; env
 // overrides either way. A missing/unreadable config is false (fail-safe).
 func ResolveInstallGitHook() bool {
-	return resolveBool(func(c DevConfig) *bool { b := c.InstallGitHook; return &b }, false, EnvInstallGitHook)
+	return resolveBool("install_git_hook", func(c DevConfig) *bool { b := c.InstallGitHook; return &b }, false, EnvInstallGitHook)
 }
 
 // ResolveFinops reports whether opt-in transcript usage extraction is
 // enabled. Default false: transcript_path is never opened with it unset.
 func ResolveFinops() bool {
-	return resolveBool(func(c DevConfig) *bool { b := c.Finops; return &b }, false, EnvFinops)
+	return resolveBool("finops", func(c DevConfig) *bool { b := c.Finops; return &b }, false, EnvFinops)
 }
 
 // ResolveContentCapture reports the org content posture: config
@@ -244,7 +245,7 @@ func ResolveFinops() bool {
 // metadata-only. A missing/unreadable config leaves the default ON. Cheap
 // config+env read, no secret I/O; safe on the hot path.
 func ResolveContentCapture() bool {
-	return resolveBool(func(c DevConfig) *bool { return c.ContentCapture }, true, EnvContentCapture)
+	return resolveBool("content_capture", func(c DevConfig) *bool { return c.ContentCapture }, true, EnvContentCapture)
 }
 
 // ResolveSecretDetection reports whether Tier-1 local secret/entropy
@@ -252,13 +253,13 @@ func ResolveContentCapture() bool {
 // only the local decider and the redaction stays local (INV-2 is
 // egress-only).
 func ResolveSecretDetection() bool {
-	return resolveBool(func(c DevConfig) *bool { return c.SecretDetection }, true, EnvSecretDetection)
+	return resolveBool("secret_detection", func(c DevConfig) *bool { return c.SecretDetection }, true, EnvSecretDetection)
 }
 
 // ResolveFindings reports whether the Tier-3 findings loop is on. Default
 // false — opt-in, because it is the first observe-path stdout writer.
 func ResolveFindings() bool {
-	return resolveBool(func(c DevConfig) *bool { return c.Findings }, false, EnvFindings)
+	return resolveBool("findings", func(c DevConfig) *bool { return c.Findings }, false, EnvFindings)
 }
 
 // ResolveFindingsCursor resolves the findings-loop cursor state file: the
@@ -280,19 +281,19 @@ func ResolveFindingsCursor() string {
 // observe/advisory; a config read error never turns enforcement on
 // (INV-3).
 func ResolveEnforce() bool {
-	return resolveBool(func(c DevConfig) *bool { b := c.Enforce; return &b }, false, EnvEnforce)
+	return resolveBool("enforce", func(c DevConfig) *bool { b := c.Enforce; return &b }, false, EnvEnforce)
 }
 
 // ResolveFailClosed reports the enforce failure policy. Default false =
 // fail-open; an org never becomes fail-closed by accident.
 func ResolveFailClosed() bool {
-	return resolveBool(func(c DevConfig) *bool { b := c.FailClosed; return &b }, false, EnvFailClosed)
+	return resolveBool("fail_closed", func(c DevConfig) *bool { b := c.FailClosed; return &b }, false, EnvFailClosed)
 }
 
 // ResolveTier2 reports whether the Tier-2 synchronous escalation is on.
 // Default false — opt-in (it adds hot-path secret I/O + latency).
 func ResolveTier2() bool {
-	return resolveBool(func(c DevConfig) *bool { return c.Tier2 }, false, EnvTier2)
+	return resolveBool("tier2", func(c DevConfig) *bool { return c.Tier2 }, false, EnvTier2)
 }
 
 // ResolveTimeoutMS resolves a millisecond budget knob: the config field
@@ -471,17 +472,43 @@ func OSSecretLookup(service, account string) (string, error) {
 // resolveBool applies the shared precedence for boolean posture flags: the
 // config field (def when absent/nil or the config is unreadable), then the env
 // override (env wins either way, so env can disable what config enabled).
-func resolveBool(field func(DevConfig) *bool, def bool, envKey string) bool {
-	enabled := def
-	if cfg, err := load(); err == nil {
-		if v := field(cfg); v != nil {
-			enabled = *v
+// resolveBool resolves one boolean posture field through the full precedence
+// chain. The managed layer (E8-S9) can outrank both the user config and the
+// environment for fields an org locks; see managed.go for why that inversion is
+// necessary rather than merely convenient.
+//
+// fieldName is the JSON name the managed file's "locked" list refers to.
+func resolveBool(fieldName string, field func(DevConfig) *bool, def bool, envKey string) bool {
+	v, _ := resolveBoolWithSource(fieldName, field, def, envKey)
+	return v
+}
+
+// unmarshalStrict decodes config JSON, rejecting unknown fields so a typo in a
+// managed file surfaces as unreadable rather than as a silently-ignored mandate —
+// `{"enfoce": true}` must not look like a file that simply governs nothing.
+//
+// Keys beginning with "//" are allowed through as documentation. JSON has no
+// comments, and an ops file that mandates security settings needs to explain
+// itself where the operator will actually read it; this is the same convention
+// Claude Code's own managed-settings.json uses. Only that prefix is exempt, so a
+// misspelled real field is still caught.
+func unmarshalStrict(raw []byte, v any) error {
+	var all map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &all); err != nil {
+		return err
+	}
+	for k := range all {
+		if strings.HasPrefix(k, "//") {
+			delete(all, k)
 		}
 	}
-	if v, ok := os.LookupEnv(envKey); ok {
-		enabled = IsTruthy(v)
+	stripped, err := json.Marshal(all)
+	if err != nil {
+		return err
 	}
-	return enabled
+	dec := json.NewDecoder(bytes.NewReader(stripped))
+	dec.DisallowUnknownFields()
+	return dec.Decode(v)
 }
 
 // FirstNonEmpty returns the first non-empty string.

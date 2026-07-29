@@ -1,0 +1,31 @@
+# OpenBox managed requirements for Codex CLI (E8-S8).
+#
+# Deploy root-owned and user-unwritable to /etc/codex/requirements.toml. Requirements
+# are the mandate layer: they pin what a local config is allowed to select. See
+# ../README.md for what each key does and does not guarantee.
+
+# The OpenBox hook, defined by the admin. The binary path is absolute because a
+# managed hook cannot depend on the provider's working directory; `openbox managed
+# install` fills it in.
+[hooks]
+SessionStart     = [{ type = "command", command = "OPENBOX_BIN hook codex SessionStart", timeout = 5 }]
+UserPromptSubmit = [{ type = "command", command = "OPENBOX_BIN hook codex UserPromptSubmit", timeout = 5 }]
+PreToolUse       = [{ type = "command", command = "OPENBOX_BIN hook codex PreToolUse", timeout = 5 }]
+PostToolUse      = [{ type = "command", command = "OPENBOX_BIN hook codex PostToolUse", timeout = 5 }]
+SessionEnd       = [{ type = "command", command = "OPENBOX_BIN hook codex SessionEnd", timeout = 15 }]
+
+# Without this, a user-level hook config coexists with the managed one and the gate
+# can be bypassed by adding a competing config rather than by editing this file.
+allow_managed_hooks_only = true
+
+# The load-bearing pin: approval_policy = "never" would let tool calls auto-run, so
+# the enforce gate's deny would be the only thing standing in the way — and a local
+# config could otherwise select it. "never" is deliberately excluded.
+allowed_approval_policies = ["untrusted", "on-request", "on-failure"]
+
+# Sandboxing cannot be opted out of locally. danger-full-access is excluded.
+allowed_sandbox_modes = ["read-only", "workspace-write"]
+
+# Hooks cannot be feature-flagged off on this machine.
+[features]
+hooks = true

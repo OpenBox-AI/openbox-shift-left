@@ -1,0 +1,18 @@
+{
+  "//": "Managed OpenBox posture (E8-S9). Deploy root-owned, mode 0644, to /etc/openbox/dev.json. Fields listed in `locked` override BOTH the user's ~/.config/openbox/dev.json AND the environment — without that inversion, OPENBOX_ENFORCE=0 would still disable the gate. Fields present but NOT locked act as org defaults the developer may still override.",
+
+  "//enforce": "The mandate. Locked, so a developer can neither edit it away nor override it with an env var. Pair this with the provider managed config (../claude-code, ../codex) — this file governs OpenBox's own posture, that one stops the hook itself being removed.",
+  "enforce": true,
+  "fail_closed": false,
+
+  "//content_capture": "OD-E8-1, recorded compromise: the PRODUCT default stays ON (brian's 2026-07-15 decision), while this ENTERPRISE profile defaults it off so prompt content is not egressed unless an org opts in. It is deliberately NOT in `locked`, so a team with a business reason can still turn it on. Change to true, or lock it, per your privacy review. NOTE: this decision is not yet ratified — see docs/e8-implementation-plan.md OD-E8-1.",
+  "content_capture": false,
+
+  "//secret_detection": "Locked on: Tier-1 local secret redaction is cheap, stays local, and the incident record shows credential access dominates blocked coding-agent activity.",
+  "secret_detection": true,
+
+  "//tier2": "Synchronous escalation for high-risk classes. An org default rather than a mandate — it adds hot-path latency, which is a local performance trade-off a team should be able to make.",
+  "tier2": true,
+
+  "locked": ["enforce", "fail_closed", "secret_detection"]
+}

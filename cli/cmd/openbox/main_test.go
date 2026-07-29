@@ -20,10 +20,10 @@ import (
 	"time"
 
 	claudecode "github.com/openbox-ai/openbox-shift-left/adapters/claude-code"
-	"github.com/openbox-ai/openbox-shift-left/client"
 	"github.com/openbox-ai/openbox-shift-left/cli/internal/backend"
 	"github.com/openbox-ai/openbox-shift-left/cli/internal/devinit"
 	"github.com/openbox-ai/openbox-shift-left/cli/internal/secret"
+	"github.com/openbox-ai/openbox-shift-left/client"
 	"github.com/openbox-ai/openbox-shift-left/decision"
 )
 
