@@ -2,6 +2,7 @@ package client
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -124,9 +125,11 @@ func fixedRespServer(t *testing.T, status int, body string) *httptest.Server {
 }
 
 // TestEmit_MapsRejection_FailOpenAndLogSafe drives the full client path: a 401
-// core rejection must (a) still fail-open (VerdictUnknown, nil), (b) produce
-// exactly one drop line carrying the mapped guidance + event id, and (c) never
-// leak the obx_ key or Ed25519 seed (INV-1).
+// core rejection must (a) still fail-open on the VERDICT (VerdictUnknown, which
+// no caller reads as a block) while reporting the advisory ErrDelivery so a
+// durable caller can retry (E8-S7), (b) produce exactly one log line carrying
+// the mapped guidance + event id, and (c) never leak the obx_ key or Ed25519
+// seed (INV-1).
 func TestEmit_MapsRejection_FailOpenAndLogSafe(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -144,11 +147,11 @@ func TestEmit_MapsRejection_FailOpenAndLogSafe(t *testing.T) {
 			c, log := newTestClient(t, srv.URL, false)
 
 			v, err := c.Emit(context.Background(), sampleEvent())
-			if err != nil {
-				t.Fatalf("fail-open violated: Emit returned error %v", err)
+			if !errors.Is(err, ErrDelivery) {
+				t.Fatalf("want ErrDelivery so the spool can retry, got %v", err)
 			}
 			if v.Verdict != VerdictUnknown {
-				t.Errorf("verdict = %q, want unknown on drop", v.Verdict)
+				t.Errorf("fail-open violated: verdict = %q, want unknown on drop", v.Verdict)
 			}
 
 			log.mu.Lock()

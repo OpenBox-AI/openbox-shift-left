@@ -58,7 +58,7 @@ func fileToolEvent(et EventType, stage string) DevEvent {
 // one assertion, and completed payloads are ActivityStarted too).
 func TestHookPayload_ConformsToBaseWireShape(t *testing.T) {
 	cases := map[string]DevEvent{
-		"file/started": fileToolEvent(EventToolCall, "started"),
+		"file/started":   fileToolEvent(EventToolCall, "started"),
 		"file/completed": fileToolEvent(EventToolResult, "completed"),
 		"mcp/started": {
 			EventID: "m1", EventType: EventToolCall, SessionID: "sess-1", DeveloperDID: "did:aip:abc",

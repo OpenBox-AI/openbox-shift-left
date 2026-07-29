@@ -71,11 +71,12 @@ func TestSpool_BudgetCutPersistsRemainderForRecovery(t *testing.T) {
 		t.Fatalf("cut flush = (%d, %v), want (1, ctx err)", n, err)
 	}
 
-	// The undelivered tail landed in a .rec-*.jsonl recovery file.
+	// The undelivered tail landed in a .rec<N>-*.jsonl recovery file (the
+	// attempt counter bounds how many times a line may be carried over).
 	entries, _ := os.ReadDir(dir)
 	rec := ""
 	for _, e := range entries {
-		if strings.Contains(e.Name(), ".rec-") {
+		if strings.Contains(e.Name(), ".rec") {
 			rec = e.Name()
 		}
 	}

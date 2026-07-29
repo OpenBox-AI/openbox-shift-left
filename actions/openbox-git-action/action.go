@@ -83,9 +83,10 @@ func (a *Action) Run(ctx context.Context, target, base string) (Result, error) {
 	}
 	eval, emitErr := a.Emitter.Emit(ctx, ev)
 	if emitErr != nil {
-		// Emit only returns a non-nil error for an unbuildable event (a caller
-		// precondition), never a transport failure — but stay fail-open here so
-		// the git action can never break a deploy over telemetry.
+		// Emit's error is advisory and covers both an unbuildable event and a
+		// delivery failure (client.ErrDelivery). Neither is actionable here: the
+		// action holds no spool to retry from, and telemetry must never break a
+		// deploy — so log and proceed fail-open either way.
 		a.log().Printf("openbox-git-action: emit dropped for %v: %v", ev.EventID, emitErr)
 		return out, nil
 	}

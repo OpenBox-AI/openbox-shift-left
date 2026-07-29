@@ -127,6 +127,14 @@ func RunHook(sub string, stdin io.Reader, stdout io.Writer, logger *log.Logger) 
 		}
 	}
 
+	// SessionEnd prelude: record how much of this session's telemetry is still
+	// sitting in carry-over files, before the final flush runs (E8-S7). Counted
+	// here so the SessionEnded event carries it; RunHook does the I/O so Map
+	// stays pure.
+	if hook == HookSessionEnd {
+		ad.Mapper.Evidence = &EvidenceState{Undelivered: ad.Spool.UndeliveredCount()}
+	}
+
 	// SessionStart prelude: run the freshness check and resolve the effective
 	// posture BEFORE mapping, so both ride the SessionStarted event as evidence
 	// (E8-S5). The check is enforce-gated exactly as before — with enforce off

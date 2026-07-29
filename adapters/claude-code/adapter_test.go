@@ -85,17 +85,25 @@ func TestFlushIsObserveOnly(t *testing.T) {
 		t.Fatalf("observe: %v", err)
 	}
 
-	// A BLOCK verdict + a transport error must both be swallowed.
+	// A BLOCK verdict + a transport error must both be swallowed: neither may
+	// surface as an error the caller could turn into a block (INV-3).
 	em := &fakeEmitter{eval: client.Evaluation{Verdict: client.VerdictBlock}, err: errors.New("network down")}
 	n, err := ad.Flush(context.Background(), "s1", em)
 	if err != nil {
 		t.Fatalf("flush must not surface the emitter error (fail-open), got %v", err)
 	}
-	if n != 1 {
-		t.Fatalf("expected 1 event attempted, got %d", n)
-	}
 	if len(em.got) != 1 {
 		t.Fatalf("emitter should have been called once, got %d", len(em.got))
+	}
+	// The count is DELIVERED, not attempted (E8-S7): an undelivered event is
+	// carried over to a recovery file for a later flush instead of being
+	// silently dropped, so it must not be counted as delivered here.
+	if n != 0 {
+		t.Fatalf("undelivered event counted as delivered: n=%d, want 0", n)
+	}
+	recs, _ := filepath.Glob(filepath.Join(dir, "*.rec*.jsonl"))
+	if len(recs) != 1 {
+		t.Fatalf("undelivered event should be carried over to one recovery file, got %v", recs)
 	}
 }
 

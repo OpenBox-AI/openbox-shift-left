@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -180,14 +181,17 @@ func TestEmit_VerdictParsing(t *testing.T) {
 }
 
 func TestEmit_FailOpen_Unreachable(t *testing.T) {
-	// A closed port: Do() errors on every attempt. Emit must NOT error/block.
+	// A closed port: Do() errors on every attempt. The fail-open invariant is
+	// about the VERDICT, not the error: a transport failure must yield a verdict
+	// no caller can read as a block. Emit also reports ErrDelivery so a durable
+	// caller can retry instead of losing the event (E8-S7) — advisory only.
 	c, log := newTestClient(t, "http://127.0.0.1:1", false)
 	v, err := c.Emit(context.Background(), sampleEvent())
-	if err != nil {
-		t.Fatalf("fail-open violated: Emit returned error %v", err)
+	if !errors.Is(err, ErrDelivery) {
+		t.Fatalf("want ErrDelivery so the spool can retry, got %v", err)
 	}
 	if v.Verdict != VerdictUnknown {
-		t.Errorf("verdict = %q, want unknown on drop", v.Verdict)
+		t.Errorf("fail-open violated: verdict = %q, want unknown on a delivery failure", v.Verdict)
 	}
 	if !strings.Contains(log.all(), "evt-1") {
 		t.Errorf("expected a drop log mentioning the event id; got %q", log.all())
@@ -223,11 +227,11 @@ func TestEmit_5xxExhausted_FailsOpen(t *testing.T) {
 	srv, _, calls := coreMirrorServer(t, pub(t), func(int) (int, string) { return 503, "" })
 	c, _ := newTestClient(t, srv.URL, false)
 	v, err := c.Emit(context.Background(), sampleEvent())
-	if err != nil {
-		t.Fatalf("fail-open violated: %v", err)
+	if !errors.Is(err, ErrDelivery) {
+		t.Fatalf("want ErrDelivery so the spool can retry, got %v", err)
 	}
 	if v.Verdict != VerdictUnknown {
-		t.Errorf("verdict = %q, want unknown", v.Verdict)
+		t.Errorf("fail-open violated: verdict = %q, want unknown", v.Verdict)
 	}
 	if *calls != 3 {
 		t.Errorf("calls = %d, want 3 (retries exhausted)", *calls)
@@ -238,11 +242,11 @@ func TestEmit_4xxNotRetried(t *testing.T) {
 	srv, _, calls := coreMirrorServer(t, pub(t), func(int) (int, string) { return 400, "" })
 	c, _ := newTestClient(t, srv.URL, false)
 	v, err := c.Emit(context.Background(), sampleEvent())
-	if err != nil {
-		t.Fatalf("fail-open violated: %v", err)
+	if !errors.Is(err, ErrDelivery) {
+		t.Fatalf("want ErrDelivery so the spool can retry, got %v", err)
 	}
 	if v.Verdict != VerdictUnknown {
-		t.Errorf("verdict = %q, want unknown", v.Verdict)
+		t.Errorf("fail-open violated: verdict = %q, want unknown", v.Verdict)
 	}
 	// A 400 is terminal (e.g. today's un-accept-listed dev event_type — EXT-core).
 	if *calls != 1 {

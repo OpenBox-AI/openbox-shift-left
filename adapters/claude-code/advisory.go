@@ -47,8 +47,8 @@ type advisoryRecord struct {
 	// signals: whether the AGE classifier saw goal drift and how many
 	// behavioral violations — a boolean + a count, never the violation
 	// free text (INV-2). Sourced from client.Evaluation.Drift (age_result).
-	DriftDetected   bool `json:"drift_detected,omitempty"`
-	DriftViolations int  `json:"drift_violations,omitempty"`
+	DriftDetected   bool   `json:"drift_detected,omitempty"`
+	DriftViolations int    `json:"drift_violations,omitempty"`
 	Timestamp       string `json:"ts,omitempty"`
 }
 

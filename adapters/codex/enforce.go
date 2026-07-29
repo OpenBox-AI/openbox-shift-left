@@ -370,7 +370,7 @@ type hookSpecificOutput struct {
 //     → emit permissionDecision:deny + a content-free reason.
 //   - else (the proceed path — CONSTRAIN/ALLOW/UNKNOWN) → apply input
 //     redaction. On Codex a rewrite must ride permissionDecision:"allow"
-//     + updatedInput (delta 1/4) — so when a non-empty redaction exists
+//   - updatedInput (delta 1/4) — so when a non-empty redaction exists
 //     we emit allow+updatedInput; otherwise we write nothing (silent
 //     proceed via Codex's own flow, byte-identical to observe).
 //

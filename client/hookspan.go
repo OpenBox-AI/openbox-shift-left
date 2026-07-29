@@ -29,7 +29,7 @@ type HookType string
 const (
 	HookFileOperation HookType = "file_operation" // file read/write/open/delete
 	HookShell         HookType = "shell"          // command execution (dev-runtime add)
-	HookMCP           HookType = "mcp"             // MCP tool call (dev-runtime add)
+	HookMCP           HookType = "mcp"            // MCP tool call (dev-runtime add)
 	HookTool          HookType = "tool"           // generic tool call (dev-runtime add)
 )
 

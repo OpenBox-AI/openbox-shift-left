@@ -119,14 +119,14 @@ func surfaceFindings(hook HookName, stdout io.Writer, logger interface{ Printf(s
 // records. Aggregate (counts/sets) so the emitted message is bounded regardless of
 // how many findings the delta holds.
 type findingsSummary struct {
-	total          int
-	wouldBlock     int
-	verdicts       map[string]bool
-	guardrailCats  map[string]bool
-	driftFindings  int
+	total           int
+	wouldBlock      int
+	verdicts        map[string]bool
+	guardrailCats   map[string]bool
+	driftFindings   int
 	driftViolations int
-	constraints    int
-	maxRisk        float64
+	constraints     int
+	maxRisk         float64
 }
 
 // summarizeFindings parses the JSONL delta of advisoryRecords and renders ONE

@@ -192,8 +192,12 @@ func runTier2(cctx context.Context, logger *log.Logger, m Mapper, ev *HookEvent)
 	}
 	eval, err := cl.Emit(cctx, devEv)
 	if err != nil {
+		// Covers both an unbuildable event and a delivery failure
+		// (client.ErrDelivery). A synchronous escalation has nothing to retry
+		// from — the spooled copy is the durable one — so either way this
+		// degrades fail-open rather than guessing a verdict.
 		logger.Printf("tier-2 escalation degrading (emit): %v", err)
-		return tier2FailOpen("tier-2 event build failed")
+		return tier2FailOpen("tier-2 escalation undelivered")
 	}
 	return tier2Decision(eval)
 }

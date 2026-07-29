@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/openbox-ai/openbox-shift-left/client"
@@ -20,8 +21,12 @@ import (
 // well under a <50ms budget); a bounded Flush drains them to /evaluate off
 // the hot path (at SessionEnd, or via `openbox hook codex flush`).
 //
-// Delivery is at-most-once best-effort (fail-open, INV-3) — a hard outage loses
-// telemetry, never a tool call. When a flush is cut short (time budget / ctx
+// Delivery is effectively-once (fail-open, INV-3): an undelivered event is
+// carried over to a recovery file and retried on a later flush, and the server
+// deduplicates on the Idempotency-Key its stable id produces, so a re-send
+// cannot double-count (E8-S7). A hard outage delays telemetry rather than
+// losing it, and never touches a tool call. Loss becomes permanent only past
+// maxRecoveryAttempts, which is logged. When a flush is cut short (time budget / ctx
 // cancellation), the UNDELIVERED remainder is persisted to a recovery file so a
 // later drain completes it — delivered events are never re-sent, the tail is
 // never dropped (INV-5 event ids are stable through the whole lifecycle).
@@ -128,7 +133,7 @@ func (s Spool) drainFile(ctx context.Context, path string, fn FlushFunc) (int, e
 // removes it. The whole (small) file is read up front so the undelivered
 // remainder can be persisted precisely: on ctx cancellation it writes the
 // not-yet-delivered lines to a recovery file and stops — delivered lines are
-// never rewritten (at-most-once), the tail is never lost.
+// never rewritten (a delivered event is never re-sent), the tail is never lost.
 func (s Spool) drainRotated(ctx context.Context, basePath, file string, fn FlushFunc) (int, error) {
 	data, err := os.ReadFile(file)
 	if err != nil {
@@ -137,33 +142,125 @@ func (s Spool) drainRotated(ctx context.Context, basePath, file string, fn Flush
 		}
 		return 0, fmt.Errorf("spool read: %w", err)
 	}
-	defer os.Remove(file) // best-effort; delivered lines are gone (at-most-once)
+	defer os.Remove(file) // best-effort; undelivered lines were re-spooled above
 
+	attempt := recoveryAttempt(filepath.Base(file))
 	lines := nonEmptyLines(data)
 	n := 0
+	var undelivered [][]byte
 	for i, line := range lines {
 		if ctx.Err() != nil {
-			s.writeRecovery(basePath, lines[i:]) // persist the undelivered tail
+			// Budget/ctx exhausted: the not-yet-tried tail plus anything that
+			// failed so far carries over.
+			s.writeRecovery(basePath, append(undelivered, lines[i:]...), attempt)
 			return n, ctx.Err()
 		}
 		var ev client.DevEvent
 		if json.Unmarshal(line, &ev) != nil {
 			continue // skip a corrupt line; never fail the whole drain
 		}
-		_ = fn(ctx, ev) // fail-open: delivery errors are the emitter's to log
+		if err := fn(ctx, ev); err != nil {
+			// A delivery error used to end the event's life here, which made
+			// at-most-once a data-loss guarantee rather than a safety one. The
+			// line is now carried over to a recovery file and retried, which is
+			// safe because the server deduplicates on the Idempotency-Key this
+			// event's stable id produces (E8-S7): re-sending an event that did
+			// land returns the original verdict instead of counting it twice.
+			undelivered = append(undelivered, line)
+			continue
+		}
 		n++
 	}
+	s.writeRecovery(basePath, undelivered, attempt)
 	return n, nil
 }
 
-// writeRecovery persists undelivered lines to a fresh `<session>.rec-<id>.jsonl`
-// file that FlushAll re-drains later. Best-effort (observe): a write failure
-// only loses telemetry, never blocks anything.
-func (s Spool) writeRecovery(basePath string, lines [][]byte) {
+// maxRecoveryAttempts bounds how many drains a line may survive undelivered.
+//
+// Without a cap, an event the server will never accept — malformed in a way the
+// client cannot see, or referencing a deleted agent — would be retried on every
+// flush forever, and each retry costs a request on a developer's machine. After
+// the cap the line is dropped and logged: still fail-open (INV-3), and bounded
+// loss beats an unbounded loop.
+const maxRecoveryAttempts = 5
+
+// recoveryAttempt reads the attempt count encoded in a recovery filename
+// (`<session>.rec<N>-<id>.jsonl`). A spool or orphan file that has never been
+// carried over yields 0. Legacy `.rec-<id>.jsonl` names (written before the
+// counter existed) also read as 0, so they get a full allowance rather than
+// being dropped on sight.
+func recoveryAttempt(name string) int {
+	i := strings.Index(name, ".rec")
+	if i < 0 {
+		return 0
+	}
+	rest := name[i+len(".rec"):]
+	j := strings.Index(rest, "-")
+	if j <= 0 {
+		return 0
+	}
+	attempt, err := strconv.Atoi(rest[:j])
+	if err != nil || attempt < 0 {
+		return 0
+	}
+	return attempt
+}
+
+// UndeliveredCount reports how many spooled events are currently waiting in
+// carry-over (recovery) files — evidence an earlier flush failed to deliver.
+//
+// It counts only `.rec<N>-*` files, not the live session spool: the live file
+// holds events that have simply not been flushed yet, which is normal and not a
+// degradation. Best-effort — an unreadable directory reports 0, because this
+// feeds a telemetry field and must never fail a session.
+func (s Spool) UndeliveredCount() int {
+	entries, err := os.ReadDir(s.Dir)
+	if err != nil {
+		return 0
+	}
+	total := 0
+	for _, e := range entries {
+		if e.IsDir() || !strings.Contains(e.Name(), ".rec") {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(s.Dir, e.Name()))
+		if err != nil {
+			continue
+		}
+		total += len(nonEmptyLines(data))
+	}
+	return total
+}
+
+// recoveryStem returns the canonical `<dir>/<session>` stem for a recovery
+// filename, dropping any `.rec<N>-<id>` segment the input already carries.
+// Without this, each carry-over appended another segment: the name grew until
+// the filesystem rejected it, and recoveryAttempt — which reads the FIRST
+// segment — kept seeing the original attempt, so the retry bound never engaged.
+func recoveryStem(basePath string) string {
+	dir, name := filepath.Split(basePath)
+	name = strings.TrimSuffix(name, ".jsonl")
+	if i := strings.Index(name, ".rec"); i >= 0 {
+		name = name[:i]
+	}
+	return filepath.Join(dir, name)
+}
+
+// writeRecovery persists undelivered lines to a fresh
+// `<session>.rec<N>-<id>.jsonl` file that FlushAll re-drains later, where N is
+// one more than the attempt this drain was. Best-effort (observe): a write
+// failure only loses telemetry, never blocks anything.
+func (s Spool) writeRecovery(basePath string, lines [][]byte, attempt int) {
 	if len(lines) == 0 {
 		return
 	}
-	rec := strings.TrimSuffix(basePath, ".jsonl") + ".rec-" + randomID() + ".jsonl"
+	next := attempt + 1
+	if next > maxRecoveryAttempts {
+		// Bounded give-up: see maxRecoveryAttempts. Counted, not silent — the
+		// caller's evidence_state reports a degraded session.
+		return
+	}
+	rec := recoveryStem(basePath) + ".rec" + strconv.Itoa(next) + "-" + randomID() + ".jsonl"
 	var buf bytes.Buffer
 	for _, l := range lines {
 		buf.Write(l)

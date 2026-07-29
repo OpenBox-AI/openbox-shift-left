@@ -68,6 +68,38 @@ type Mapper struct {
 	// so Map stays I/O-free — the same split as Finops. nil ⇒ no posture key,
 	// which is what the enforce/observe tests and conformance fixtures see.
 	Posture *devconfig.Posture
+	// Evidence, when non-nil, records how much of this session's telemetry is
+	// known to be undelivered at session end (E8-S7). Attached to the
+	// SessionEnded event's metadata only. RunHook counts the carry-over files
+	// and passes the result in, keeping Map I/O-free.
+	Evidence *EvidenceState
+}
+
+// EvidenceState is the completeness of a session's telemetry as the client can
+// see it at session end.
+//
+// It describes the spool BEFORE this session's final flush: a non-zero
+// Undelivered means an earlier flush failed and those events are waiting in
+// carry-over files. It is not a claim that they are lost — a later flush
+// re-sends them, and the server deduplicates — so "degraded" here means
+// "incomplete as of now", and only exceeding the retry bound makes loss
+// permanent (which the spool logs).
+type EvidenceState struct {
+	Undelivered int
+}
+
+// metadata renders the evidence state. The state string is always present so a
+// reader can distinguish "complete" from "this client does not report it".
+func (e EvidenceState) metadata() map[string]any {
+	state := "complete"
+	if e.Undelivered > 0 {
+		state = "degraded"
+	}
+	m := map[string]any{"evidence_state": state}
+	if e.Undelivered > 0 {
+		m["evidence_undelivered"] = e.Undelivered
+	}
+	return m
 }
 
 // FinopsUsage is the numbers-only usage rollup the finops reader produces
@@ -178,6 +210,10 @@ func (m Mapper) Map(hook HookName, e *HookEvent) (client.DevEvent, bool) {
 		if m.Finops != nil {
 			ev.Tokens = m.Finops.Tokens
 			ev.Cost = m.Finops.Cost
+		}
+		// Telemetry completeness as the client sees it (E8-S7).
+		if m.Evidence != nil {
+			ev.Metadata = mergeMetadata(ev.Metadata, m.Evidence.metadata())
 		}
 
 	default:

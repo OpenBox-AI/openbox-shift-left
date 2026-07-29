@@ -116,12 +116,31 @@ func New(cfg Config) (*Client, error) {
 	}, nil
 }
 
+// ErrDelivery reports that an event could not be delivered after retries. It is
+// advisory (see Emit): the caller is never obliged to act on it, but a caller
+// holding a durable copy should keep the event and retry rather than drop it.
+var ErrDelivery = errors.New("client: event delivery failed")
+
 // Emit builds the core payload from a normalized dev event, signs it, and POSTs
-// it to /evaluate. It is FAIL-OPEN (INV-3): on any error it logs and returns
-// a zero-valued Evaluation, nil — never a transport error, never a block.
+// it to /evaluate. It is FAIL-OPEN (INV-3): the Evaluation it returns on any
+// failure is the zero value, which every caller treats as allow, so a failure
+// here can never block a tool call.
 //
-// The returned error is reserved for a precondition the caller must fix
-// (e.g. empty EventID), never a transport failure.
+// The returned error is ADVISORY — it reports what happened, it does not ask
+// the caller to stop. Two kinds:
+//
+//   - a caller precondition (empty EventID/SessionID), which is a bug to fix;
+//   - ErrDelivery, wrapping a transport failure after retries.
+//
+// ErrDelivery exists so a durable caller can retry. Emit used to log the drop
+// and return nil, which meant the spool could not tell "delivered" from "lost"
+// and had to treat every event as delivered — at-most-once as a data-loss
+// guarantee rather than a safety one. Retrying is safe because the payload
+// carries a stable Idempotency-Key: the server returns the original verdict for
+// a key it has already seen instead of counting the event twice (E8-S7).
+//
+// Callers that cannot retry (the git action, the Tier-2 escalation) must keep
+// ignoring the error and proceed fail-open.
 func (c *Client) Emit(ctx context.Context, ev DevEvent) (Evaluation, error) {
 	// EventID is the idempotency key (INV-5); SessionID becomes core's run_id.
 	// Both must be surfaced, not fail-open dropped — an empty one would
@@ -147,8 +166,11 @@ func (c *Client) Emit(ctx context.Context, ev DevEvent) (Evaluation, error) {
 
 	respBody, err := c.post(ctx, body, ev.EventID)
 	if err != nil {
-		c.log.Printf("openbox: dropping event %s (%s): %s", ev.EventID, ev.EventType, describeDrop(err))
-		return Evaluation{}, nil
+		// Advisory, not a block: the zero Evaluation below is allow. Surfacing
+		// ErrDelivery lets a durable caller re-spool the event instead of
+		// losing it; callers that cannot retry ignore it (see the doc comment).
+		c.log.Printf("openbox: delivery failed for event %s (%s): %s", ev.EventID, ev.EventType, describeDrop(err))
+		return Evaluation{}, fmt.Errorf("%w: %s", ErrDelivery, describeDrop(err))
 	}
 	return parseEvaluation(respBody), nil
 }
