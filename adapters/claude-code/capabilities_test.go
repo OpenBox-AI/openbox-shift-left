@@ -1,6 +1,9 @@
 package claudecode
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestCapabilities(t *testing.T) {
 	caps := Capabilities()
@@ -15,17 +18,22 @@ func TestCapabilities(t *testing.T) {
 		byKey[c.Key] = c
 	}
 
-	// Provider-independent floors + the Claude Code surfaces are supported.
-	for _, k := range []string{"identity.register", "telemetry.hook", "tool.events", "commit.binding"} {
+	// Provider-independent floors, the Claude Code surfaces, and the shipped
+	// opt-in legs (E6 enforce, SL-16 finops) are all supported.
+	for _, k := range []string{
+		"identity.register", "telemetry.hook", "tool.events", "commit.binding",
+		"telemetry.tokens", "verdict.apply", "enforce.rewrite",
+	} {
 		if !byKey[k].Supported {
 			t.Errorf("capability %q should be supported", k)
 		}
 	}
-	// Phase-1 observe: enforcement is declared-but-inactive; tokens unavailable.
-	if byKey["verdict.apply"].Supported {
-		t.Error("verdict.apply must be false in Phase-1 observe (D7/INV-3)")
-	}
-	if byKey["telemetry.tokens"].Supported {
-		t.Error("telemetry.tokens is not available from Claude Code hooks")
+	// The opt-in legs must say so: "supported" is about the mechanism existing,
+	// and a reader of the profile has to be able to tell that an unconfigured
+	// session still only observes (INV-3, report SL-07).
+	for _, k := range []string{"telemetry.tokens", "verdict.apply"} {
+		if !strings.Contains(byKey[k].How, "opt-in") {
+			t.Errorf("capability %q is opt-in; its How note must say so, got %q", k, byKey[k].How)
+		}
 	}
 }

@@ -74,3 +74,12 @@ governance can act on it. Opt out with `content_capture:false` in `dev.json` (or
 `OPENBOX_CONTENT_CAPTURE=0`) for metadata-only. Tool commands, file bodies, and tool
 output are **never** egressed on observe events regardless. See the README privacy
 note.
+
+### What this setup does and doesn't guarantee
+
+Enforcement here is a hook in **your own** config, so it prevents mistakes but does not
+withstand someone deliberately removing it — org-wide assurance needs the provider's
+managed configuration (`allowManagedHooksOnly` / `allow_managed_hooks_only`). Likewise the
+`OpenBox-Session` commit trailer is an *inferred* claim about which session was live, not
+proof that the session produced the diff. The README's **Assurance** section spells out
+each guarantee and its current limit.

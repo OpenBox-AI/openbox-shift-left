@@ -33,13 +33,37 @@ This drops the prebuilt `openbox` engine on your PATH. Then onboard with a singl
 
 ## Provider support
 
-| Provider | Telemetry | Enforce | Egress proxy | Org mandate |
-|---|---|---|---|---|
-| **Claude Code** | native OTel push | strong | ✅ base-URL | managed settings |
-| **Codex** | native OTel + rollout | strong (beta) | ✅ base-URL | requirements.toml / MDM |
-| **Cursor** | poll (Admin API) + hooks | beta, fail-open | ❌ Agent egress not interceptable | Team hooks |
+| Provider | Adapter | Telemetry | Enforce (opt-in) | Telemetry base-URL | Org mandate |
+|---|---|---|---|---|---|
+| **Claude Code** | shipped | hooks + durable spool | deny / ask | ✅ configurable | managed settings |
+| **Codex** | shipped | hooks + durable spool | deny (no `ask` surface) | ✅ configurable | requirements.toml / MDM |
+| **Cursor** | not built (SL-8) | hooks available since v3.11 | — | — | Team hooks |
 
 Two capabilities are provider-independent and always available — OpenBox registration and git-trailer commit-binding — so session → commit → deploy lineage and finops work for any tool.
+
+**What the columns do and don't claim.** *Telemetry base-URL* is where OpenBox sends **its own** governance events; it is not egress control over the coding tool. OpenBox does not proxy, intercept, or allow-list the tool's traffic to its model provider — that is the provider's own plane (Claude Code sandbox network allow-lists, Codex network policy) plus your enterprise network controls. OpenBox's job is to **record** that posture as evidence, not to enforce it. *Enforce* is opt-in per install and, until the managed provider config is deployed, is enforced by a user-local hook the developer can remove — prevention without assurance. See the assurance note below.
+
+## Assurance — what the evidence proves today
+
+Being precise about this is part of the product; a governance tool that overstates its own
+guarantees is the failure mode it exists to prevent.
+
+- **Commit attribution is an *inferred* claim.** The `OpenBox-Session` git trailer records which
+  session was live when a commit was made. It is not proof that the session produced the diff, and
+  a trailer can be hand-written. Server-side ownership verification upgrades a claim to
+  `attributed`; cryptographic `verified` provenance is E8-S10.
+- **Enforcement assurance depends on managed deployment.** The enforce gate runs as a hook in the
+  developer's own config. Until the provider's managed configuration is deployed
+  (`allowManagedHooksOnly` for Claude Code, `allow_managed_hooks_only` for Codex — E8-S8/S9), a
+  developer can remove the hook or flip the local setting, so local enforcement prevents mistakes
+  but does not withstand a motivated bypass.
+- **Egress is recorded, not controlled** — see the note under the provider table.
+- **Policy integrity**: the local policy bundle is currently unsigned, so a user-local edit is not
+  yet detectable end-to-end (E8-S6 adds signing, expiry, and rollback protection).
+
+Each session's *effective* posture — enforce on/off, fail-open/closed, bundle state, content
+capture, staleness — is emitted as evidence on session start, so the control plane can tell the
+tiers apart without trusting the endpoint's word for it.
 
 ## License
 

@@ -38,8 +38,8 @@ while content-capture is disabled**.
 
 Canonical (priority): `HALT > BLOCK > REQUIRE_APPROVAL > CONSTRAIN > ALLOW`. openbox-core
 serializes the response `verdict` field as lowercase (`halt|block|require_approval|constrain|allow`)
-plus a legacy `action` field — see `$defs.verdict` and MAPPING.md §4. Phase-1 observe treats
-every verdict as allow (INV-3).
+plus a legacy `action` field — see `$defs.verdict` and MAPPING.md §4. Observe mode treats every
+verdict as allow (INV-3); the opt-in enforce mode acts on them, tighten-only — see COVERAGE.md §4.
 
 ## Validate
 
