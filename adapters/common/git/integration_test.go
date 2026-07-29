@@ -18,6 +18,10 @@ func TestMain(m *testing.M) {
 		// No git → the real-git matrix can't run; skip the whole package cleanly.
 		os.Exit(0)
 	}
+	// Before anything reads the environment: drop the ambient agent context
+	// (see envscrub_test.go) so neither the in-process resolver nor the hook
+	// child inherits the session of whoever is running the suite.
+	unscrub := scrubAmbientSessionEnv()
 	dir, err := os.MkdirTemp("", "obgit-bin")
 	if err != nil {
 		panic(err)
@@ -30,6 +34,7 @@ func TestMain(m *testing.M) {
 	}
 	code := m.Run()
 	os.RemoveAll(dir)
+	unscrub()
 	os.Exit(code)
 }
 

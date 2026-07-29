@@ -10,9 +10,24 @@ import (
 
 var bin string
 
+// ambientSessionEnv is the agent context that must not reach these tests: the
+// hook resolves a session from it (Tier-0/Tier-1 in git.SessionResolver), and
+// every case here spawns the binary with os.Environ(), so a suite run from
+// inside a live Codex session would stamp that session instead of the fixture's
+// (report SL-11). Unsetting before m.Run keeps it out of the child env too.
+var ambientSessionEnv = []string{
+	"CODEX_THREAD_ID",
+	"OPENBOX_SESSION",
+	"OPENBOX_SESSION_FILE",
+	"OPENBOX_SESSION_TTL",
+}
+
 func TestMain(m *testing.M) {
 	if _, err := exec.LookPath("git"); err != nil {
 		os.Exit(0) // interpret-trailers unavailable; skip
+	}
+	for _, k := range ambientSessionEnv {
+		os.Unsetenv(k)
 	}
 	dir, err := os.MkdirTemp("", "obgh")
 	if err != nil {
