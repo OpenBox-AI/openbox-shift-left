@@ -8,6 +8,8 @@ import (
 	"time"
 
 	obgit "github.com/openbox-ai/openbox-shift-left/adapters/common/git"
+
+	"github.com/openbox-ai/openbox-shift-left/adapters/common/devconfig"
 )
 
 // flushBudget bounds SessionEnd/flush delivery so session teardown is never
@@ -134,6 +136,21 @@ func RunHook(sub string, stdin io.Reader, stdout io.Writer, logger *log.Logger) 
 		}
 	}
 
+	// SessionStart prelude: run the freshness check and resolve the effective
+	// posture BEFORE mapping, so both ride the SessionStarted event as evidence
+	// (E8-S5). The check is enforce-gated exactly as before — with enforce off
+	// it makes no network call and the posture honestly records "not_checked".
+	// It is the only SessionStart stdout writer, so running it earlier does not
+	// reorder anything the provider sees.
+	if hook == HookSessionStart {
+		staleness := devconfig.StalenessNotChecked
+		if ResolveEnforce() {
+			staleness = checkPolicyStaleness(logger, ev.SessionID, stdout)
+		}
+		posture := effectivePosture(staleness)
+		ad.Mapper.Posture = &posture
+	}
+
 	if _, err := ad.Observe(hook, ev); err != nil {
 		logger.Printf("spool %s event: %v", hook, err)
 		// fall through — SessionEnd still tries to flush what is already spooled
@@ -225,14 +242,8 @@ func RunHook(sub string, stdin io.Reader, stdout io.Writer, logger *log.Logger) 
 	// installing the commit-trailer hook into the repo this session
 	// opened.
 	if hook == HookSessionStart {
-		// Best-effort session-start policy staleness check.
-		// Enforce-gated so the observe path stays byte-identical (no
-		// network, no SessionStart stdout when enforce is off). Off the
-		// tool hot path; fully fail-safe — it warns (fail-open) or marks
-		// the session stale (fail-closed) but never blocks the session.
-		if ResolveEnforce() {
-			checkPolicyStaleness(logger, ev.SessionID, stdout)
-		}
+		// The staleness check itself now runs in the prelude above (its
+		// outcome is posture evidence); only the git-hook install remains here.
 		maybeInstallGitHook(logger, ev.Cwd)
 	}
 

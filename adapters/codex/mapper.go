@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/openbox-ai/openbox-shift-left/client"
+
+	"github.com/openbox-ai/openbox-shift-left/adapters/common/devconfig"
 )
 
 // provider is the constant provider tag carried in metadata (MAPPING.md §2).
@@ -69,6 +71,12 @@ type Mapper struct {
 	// unforked run the two are equal and nothing is emitted, so today's wire
 	// output is unchanged. Structural identifiers, never content (INV-2).
 	ThreadID string
+	// Posture, when non-nil, is the session's effective posture (E8-S5),
+	// attached to the SessionStarted event's metadata only. RunHook resolves
+	// it (config reads, a bundle hash, the freshness check) and passes it in,
+	// so Map stays I/O-free — the same split as Finops. nil ⇒ no posture key,
+	// which is what the enforce/observe tests and the conformance fixtures see.
+	Posture *devconfig.Posture
 }
 
 // FinopsUsage is the numbers-only usage rollup the finops reader produces
@@ -123,6 +131,11 @@ func (m Mapper) Map(hook HookName, e *HookEvent) (client.DevEvent, bool) {
 		ev.EventType = client.EventSessionStarted
 		ev.Tool = client.Tool{Name: agentToolName, Kind: client.ToolShell}
 		ev.Metadata = sessionStartMetadata(e)
+		// Effective posture as evidence (E8-S5): structural booleans and
+		// opaque ids only, so it is INV-1/INV-2 safe to egress.
+		if m.Posture != nil {
+			ev.Metadata["posture"] = m.Posture.Metadata()
+		}
 
 	case HookUserPromptSubmit:
 		ev.EventType = client.EventPromptSubmitted

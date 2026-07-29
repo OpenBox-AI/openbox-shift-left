@@ -13,6 +13,8 @@ import (
 
 	"github.com/openbox-ai/openbox-shift-left/client"
 	"github.com/openbox-ai/openbox-shift-left/decision"
+
+	"github.com/openbox-ai/openbox-shift-left/adapters/common/devconfig"
 )
 
 // Session-start policy staleness for the Codex adapter (ported from the
@@ -47,7 +49,12 @@ const staleTimeout = 3 * time.Second
 // checkPolicyStaleness runs the session-start compare. stdout is the SessionStart
 // additionalContext channel (fail-open warning only). Best-effort; swallows every
 // error.
-func checkPolicyStaleness(logger *log.Logger, sessionID string, stdout interface{ Write([]byte) (int, error) }) {
+//
+// It returns its outcome so the session's posture can record it (E8-S5). The
+// skip paths used to be stderr-only, which meant a session running policy of
+// unknown freshness was indistinguishable from a verified-fresh one (report
+// SL-03); naming which skip occurred is the whole point of the return value.
+func checkPolicyStaleness(logger *log.Logger, sessionID string, stdout interface{ Write([]byte) (int, error) }) devconfig.Staleness {
 	defer func() { _ = recover() }() // a fault here must never fail a session
 
 	token := ResolveControlToken()
@@ -55,36 +62,42 @@ func checkPolicyStaleness(logger *log.Logger, sessionID string, stdout interface
 	agentID := ResolveAgentID()
 	localID, localUpdated, havePin := localBundlePin()
 
-	if token == "" || backendURL == "" || agentID == "" || !havePin {
-		logger.Printf("staleness check skipped (missing control token, backend url, agent id, or local pin)")
-		return
+	if token == "" || backendURL == "" || agentID == "" {
+		logger.Printf("staleness check skipped (missing control token, backend url, or agent id)")
+		return devconfig.StalenessSkippedNoToken
+	}
+	if !havePin {
+		logger.Printf("staleness check skipped (no local bundle pin — run `openbox dev sync`)")
+		return devconfig.StalenessSkippedNoPin
 	}
 
 	backendID, backendUpdated, err := fetchPolicyPin(backendURL, token, agentID)
 	if err != nil {
 		logger.Printf("staleness check inconclusive (proceeding on last-good bundle): %v", err)
-		return
+		return devconfig.StalenessError
 	}
 
 	if backendID == localID && backendUpdated == localUpdated {
-		return // in sync
+		return devconfig.StalenessFresh
 	}
 
 	if resolveFailurePolicy() == FailClosed {
 		if err := writeStaleMarker(sessionID); err != nil {
 			// Even the marker is best-effort: a write failure must not
 			// block the session; it degrades to "no marker" → the
-			// PreToolUse gate proceeds.
+			// PreToolUse gate proceeds. Report the honest outcome: policy
+			// is stale and this session is NOT blocked.
 			logger.Printf("staleness: could not write stale marker (session proceeds): %v", err)
-		} else {
-			logger.Printf("staleness: policy changed and session is fail-closed — marked stale; run `openbox dev sync`")
+			return devconfig.StalenessStaleWarned
 		}
-		return
+		logger.Printf("staleness: policy changed and session is fail-closed — marked stale; run `openbox dev sync`")
+		return devconfig.StalenessStaleBlocked
 	}
 
 	const msg = "OpenBox policy changed since last sync — run `openbox dev sync` to refresh the local enforcement bundle."
 	logger.Printf("staleness: %s", msg)
 	emitAdditionalContext(stdout, msg)
+	return devconfig.StalenessStaleWarned
 }
 
 // localBundlePin reads the PIN (policy_id, updated_at) from the local bundle file.
