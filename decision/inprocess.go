@@ -2,6 +2,7 @@ package decision
 
 import (
 	"context"
+	"crypto/ed25519"
 	"time"
 
 	"github.com/openbox-ai/openbox-shift-left/client"
@@ -77,7 +78,9 @@ func isRealVerdictSource(source string) bool {
 //   - the tool body handed in for redaction stays in-process — it never
 //     crosses any boundary (INV-2).
 type InProcessDecider struct {
-	srv *Server
+	// integrity records how the loaded bundle verified, for posture reporting.
+	integrity Integrity
+	srv       *Server
 }
 
 // InProcessConfig configures an InProcessDecider. All fields are optional.
@@ -90,6 +93,10 @@ type InProcessConfig struct {
 	Freshness time.Duration
 	// Logger receives non-secret diagnostics (INV-1). Nil discards.
 	Logger client.Logger
+	// SigningPubKey is the org's pinned policy-bundle signing key (E8-S6).
+	// Nil means no key is pinned: a signed bundle then reports IntegrityNoKey
+	// and is not trusted, while an unsigned bundle keeps working as before.
+	SigningPubKey ed25519.PublicKey
 }
 
 // NewInProcessDecider builds an in-process decider that has already loaded
@@ -109,13 +116,39 @@ func NewInProcessDecider(cfg InProcessConfig) *InProcessDecider {
 	if bp == "" {
 		bp = DefaultBundlePath()
 	}
-	if b, err := LoadBundleFile(bp); err != nil {
-		log.Printf("openbox enforce: no local policy bundle at %s (%v) — decisions fail-open until `openbox dev sync` runs", bp, err)
-	} else {
-		srv.SetBundle(b)
+	// Integrity gate (E8-S6). A verified bundle is evaluated as re-derived from
+	// its signed bytes; an unsigned one is evaluated as before (the
+	// compatibility path); anything that fails verification is NOT loaded, so
+	// the decider stays at cold-start fail-open.
+	//
+	// Not loading is detection, not prevention: if the tamper made policy MORE
+	// permissive, fail-open lands where the attacker wanted anyway. What this
+	// buys is that the outcome is recorded in session posture instead of passing
+	// silently. Turning an unverifiable bundle into a deny for high-risk tool
+	// classes is the posture change OD-E8-3 gates.
+	trusted, integrity := VerifyBundleFile(bp, VerifyOptions{
+		PublicKey: cfg.SigningPubKey,
+		MinEpoch:  ReadEpochPin(bp),
+	})
+	switch {
+	case trusted != nil:
+		srv.SetBundle(trusted)
+		if integrity == IntegrityVerified {
+			WriteEpochPin(bp, trusted.Epoch())
+		}
+	case integrity == IntegrityMalformed && cfg.SigningPubKey == nil:
+		// Indistinguishable from the pre-signing "no bundle" case, so keep the
+		// long-standing message operators already recognize.
+		log.Printf("openbox enforce: no local policy bundle at %s — decisions fail-open until `openbox dev sync` runs", bp)
+	default:
+		log.Printf("openbox enforce: local policy bundle at %s is not trusted (%s) — decisions fail-open; run `openbox dev sync`", bp, integrity)
 	}
-	return &InProcessDecider{srv: srv}
+	return &InProcessDecider{srv: srv, integrity: integrity}
 }
+
+// Integrity reports how the loaded bundle verified, so a caller can record it
+// in session posture (E8-S5) rather than having to re-read and re-verify.
+func (d *InProcessDecider) Integrity() Integrity { return d.integrity }
 
 // Decide evaluates req against the loaded bundle in-process and returns a
 // Decision. ctx is accepted for interface parity; the evaluation is

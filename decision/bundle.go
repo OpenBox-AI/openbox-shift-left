@@ -78,6 +78,15 @@ type Bundle struct {
 	// telemetry only.
 	RawRegoUnlocalized bool `json:"raw_rego_unlocalized,omitempty"`
 
+	// Signed, when present, is the backend's signature over the authoritative
+	// policy (E8-S6 / ADR-0008). It is optional: an unsigned bundle loads
+	// exactly as before, so a backend that does not sign yet is unaffected.
+	//
+	// When it IS present, the fields above become a debugging view — the policy
+	// actually evaluated is re-derived from the signed bytes by VerifyIntegrity,
+	// so editing PolicyBuilder or Rules in this file cannot change a decision.
+	Signed *SignedPolicy `json:"signed,omitempty"`
+
 	// DefaultDecision is returned when no rule matches. It must be an
 	// allow-class decision for a fail-open posture: an empty or
 	// "allow"/"continue" value yields ALLOW. A bundle that set this to a
@@ -202,7 +211,7 @@ func (b *Bundle) validate() error {
 // recognizedDecisions is the accepted set of core-style decision strings.
 var recognizedDecisions = map[string]struct{}{
 	"continue": {}, "allow": {},
-	"constrain": {},
+	"constrain":        {},
 	"require_approval": {}, "require-approval": {},
 	"block": {},
 	"stop":  {}, "halt": {},

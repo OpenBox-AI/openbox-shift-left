@@ -76,6 +76,12 @@ type Posture struct {
 	BundlePolicyID  string
 	BundleSHA256    string
 	Staleness       Staleness
+	// BundleIntegrity is the signature-verification outcome for the local
+	// policy bundle (E8-S6): unsigned / verified / no_key / bad_signature /
+	// expired / epoch_rollback / malformed. "unsigned" is the compatibility
+	// state, not a failure — but it is also not assurance, which is why it is
+	// recorded rather than assumed.
+	BundleIntegrity string
 }
 
 // EffectivePosture resolves the posture fields that come from config and env,
@@ -119,6 +125,7 @@ func (p Posture) Metadata() map[string]any {
 		"bundle_policy_id": p.BundlePolicyID,
 		"bundle_sha256":    p.BundleSHA256,
 		"staleness":        string(p.Staleness),
+		"bundle_integrity": p.BundleIntegrity,
 	} {
 		if v == "" || looksLikeSecret(v) {
 			continue // unknown, or refused — see looksLikeSecret

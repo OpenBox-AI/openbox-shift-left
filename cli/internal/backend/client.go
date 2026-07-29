@@ -83,13 +83,13 @@ func New(baseURL, credential, clientID string) *Client {
 // CreateAgentRequest is the subset of CreateAgentDto the CLI populates. Fields
 // the backend defaults (team_ids, attestation_mode=kms) are omitted.
 type CreateAgentRequest struct {
-	AgentName   string        `json:"agent_name"`
-	AgentType   string        `json:"agent_type"`
-	Icon        string        `json:"icon"`
-	Description string        `json:"description,omitempty"`
-	ModelName   string        `json:"model_name,omitempty"`
-	Tags        []string      `json:"tags,omitempty"`
-	AivssConfig aivss.Config  `json:"aivss_config"`
+	AgentName   string         `json:"agent_name"`
+	AgentType   string         `json:"agent_type"`
+	Icon        string         `json:"icon"`
+	Description string         `json:"description,omitempty"`
+	ModelName   string         `json:"model_name,omitempty"`
+	Tags        []string       `json:"tags,omitempty"`
+	AivssConfig aivss.Config   `json:"aivss_config"`
 	Config      map[string]any `json:"config,omitempty"`
 }
 
@@ -211,6 +211,20 @@ type Policy struct {
 	UpdatedAt     string
 	PolicyBuilder json.RawMessage // config.policy_builder, or nil when absent
 	HasRawRego    bool            // rego_code present but no policy_builder → unlocalized
+	// Signed is the backend's signature over the authoritative policy, when it
+	// serves one (E8-S6 / ADR-0008). nil from a backend that does not sign yet,
+	// which `dev sync` treats as the compatibility path rather than an error.
+	Signed *SignedPolicy
+}
+
+// SignedPolicy mirrors the response's signature block. It is carried verbatim to
+// the decision module for verification — the CLI does not interpret it, so the
+// bytes that get verified are the bytes the backend signed.
+type SignedPolicy struct {
+	KeyID        string `json:"key_id"`
+	Algorithm    string `json:"algorithm"`
+	CanonicalB64 string `json:"canonical_b64"`
+	SigB64       string `json:"sig_b64"`
 }
 
 // policyEnvelope decodes {status, data: PolicyEntity|null}. The global
@@ -225,6 +239,7 @@ type policyEntity struct {
 	RegoCode  string          `json:"rego_code"`
 	Config    json.RawMessage `json:"config"`
 	UpdatedAt string          `json:"updated_at"`
+	Signed    *SignedPolicy   `json:"signed"`
 }
 
 // GetCurrentPolicy fetches GET /agent/<agentID>/policies/current with the
@@ -245,7 +260,7 @@ func (c *Client) GetCurrentPolicy(ctx context.Context, agentID string) (*Policy,
 	if env.Data == nil {
 		return nil, nil // no current policy → allow / no-policy bundle
 	}
-	p := &Policy{ID: env.Data.ID, UpdatedAt: env.Data.UpdatedAt}
+	p := &Policy{ID: env.Data.ID, UpdatedAt: env.Data.UpdatedAt, Signed: env.Data.Signed}
 	if pb := extractPolicyBuilder(env.Data.Config); pb != nil {
 		p.PolicyBuilder = pb
 	} else if strings.TrimSpace(env.Data.RegoCode) != "" {

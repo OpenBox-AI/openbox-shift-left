@@ -29,6 +29,8 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/cli/internal/secret"
 	"github.com/openbox-ai/openbox-shift-left/client"
 	"github.com/openbox-ai/openbox-shift-left/decision"
+
+	"github.com/openbox-ai/openbox-shift-left/adapters/common/devconfig"
 )
 
 // version is overridable at build time via -ldflags "-X main.version=...".
@@ -45,11 +47,11 @@ const (
 // — including the INV-1 credential guards and the HALT-on-no-store path — is
 // testable without touching the real environment, OS keychain, or network.
 type app struct {
-	stdout, stderr io.Writer
-	stdin          io.Reader
-	getenv         func(string) string
-	openStore      func(kind string) (secret.Store, error)
-	newRegistrar   func(baseURL, credential, clientID string) devinit.Registrar
+	stdout, stderr  io.Writer
+	stdin           io.Reader
+	getenv          func(string) string
+	openStore       func(kind string) (secret.Store, error)
+	newRegistrar    func(baseURL, credential, clientID string) devinit.Registrar
 	newPolicyReader func(baseURL, credential, clientID string) policyReader
 }
 
@@ -177,8 +179,19 @@ func (a *app) syncPolicyBundle(ctx context.Context, backendURL, token, clientID,
 	if err != nil {
 		return err
 	}
+	// Verify before replacing the last-good bundle (E8-S6). A bundle that fails
+	// verification is refused outright rather than written and then distrusted at
+	// load: writing it would discard a policy that DID verify in favour of one
+	// that did not, which is the wrong direction on every axis.
+	integrityNote, err := verifySyncedBundle(bundlePath, bundle)
+	if err != nil {
+		return err
+	}
 	if err := writeBundleFile(bundlePath, bundle); err != nil {
 		return fmt.Errorf("write policy bundle: %w", err)
+	}
+	if epoch := bundle.Epoch(); epoch > 0 {
+		decision.WriteEpochPin(bundlePath, epoch)
 	}
 	// A fresh, re-pinned bundle clears any fail-closed staleness block so
 	// the PreToolUse enforce gate proceeds again.
@@ -193,7 +206,41 @@ func (a *app) syncPolicyBundle(ctx context.Context, backendURL, token, clientID,
 	if note != "" {
 		fmt.Fprintln(out, note)
 	}
+	if integrityNote != "" {
+		fmt.Fprintln(out, integrityNote)
+	}
 	return nil
+}
+
+// verifySyncedBundle checks a freshly fetched bundle's signature before it is
+// allowed to replace the last-good one. It returns a non-secret note to print,
+// or an error that aborts the sync.
+//
+// An unsigned bundle is accepted with a note, not an error: backends that do not
+// sign yet must keep working, and pretending otherwise would make the feature
+// undeployable. A bundle that carries a signature and fails to verify is a
+// different matter — that is either tampering in transit or a key mismatch, and
+// continuing would mean trusting content we just proved untrustworthy.
+func verifySyncedBundle(bundlePath string, b *decision.Bundle) (string, error) {
+	if b == nil || b.Signed == nil {
+		return "note: this policy is unsigned — the local bundle cannot be integrity-checked " +
+			"(a local edit would not be detectable). Signing is served by newer backends (E8-S6).", nil
+	}
+	pubKeyB64, keyID := devconfig.ResolveOrgSigningKey()
+	pub := decision.DecodePublicKey(pubKeyB64)
+	if pub == nil {
+		return "note: this policy is signed but no org signing key is pinned, so the signature " +
+			"could not be checked. Pin org_signing_pubkey in dev.json to enable verification.", nil
+	}
+	_, integrity := b.VerifyIntegrity(decision.VerifyOptions{
+		PublicKey: pub,
+		MinEpoch:  decision.ReadEpochPin(bundlePath),
+	})
+	if integrity == decision.IntegrityVerified {
+		return fmt.Sprintf("Policy signature verified (key %s, epoch %d).", orUnset(keyID), b.Epoch()), nil
+	}
+	return "", fmt.Errorf("refusing to install policy bundle: signature check failed (%s); "+
+		"the previous bundle is unchanged", integrity)
 }
 
 // translateBundle maps a fetched *backend.Policy into a *decision.Bundle + an
@@ -205,6 +252,7 @@ func translateBundle(pol *backend.Policy) (*decision.Bundle, string, error) {
 		return &decision.Bundle{Version: "no-policy"}, "", nil
 	}
 	pin := pol.ID + "@" + pol.UpdatedAt
+	signed := signatureBlock(pol)
 	if len(pol.PolicyBuilder) > 0 {
 		var cfg decision.PolicyBuilderConfig
 		if err := json.Unmarshal(pol.PolicyBuilder, &cfg); err != nil {
@@ -215,6 +263,7 @@ func translateBundle(pol *backend.Policy) (*decision.Bundle, string, error) {
 			PolicyID:      pol.ID,
 			UpdatedAt:     pol.UpdatedAt,
 			PolicyBuilder: &cfg,
+			Signed:        signed,
 		}, "", nil
 	}
 	if pol.HasRawRego {
@@ -225,10 +274,27 @@ func translateBundle(pol *backend.Policy) (*decision.Bundle, string, error) {
 			PolicyID:           pol.ID,
 			UpdatedAt:          pol.UpdatedAt,
 			RawRegoUnlocalized: true,
+			Signed:             signed,
 		}, note, nil
 	}
 	// A policy with neither builder config nor rego → treat as no-op allow, pinned.
-	return &decision.Bundle{Version: pin, PolicyID: pol.ID, UpdatedAt: pol.UpdatedAt}, "", nil
+	return &decision.Bundle{Version: pin, PolicyID: pol.ID, UpdatedAt: pol.UpdatedAt, Signed: signed}, "", nil
+}
+
+// signatureBlock converts the backend's signature block for the bundle file. The
+// signed bytes are carried verbatim: re-serializing them here would risk not
+// reproducing what the backend signed, and the whole point is that the decider
+// verifies the signer's own bytes.
+func signatureBlock(pol *backend.Policy) *decision.SignedPolicy {
+	if pol == nil || pol.Signed == nil {
+		return nil
+	}
+	return &decision.SignedPolicy{
+		KeyID:        pol.Signed.KeyID,
+		Algorithm:    pol.Signed.Algorithm,
+		CanonicalB64: pol.Signed.CanonicalB64,
+		SigB64:       pol.Signed.SigB64,
+	}
 }
 
 // writeBundleFile marshals the bundle and writes it 0600 (owner-only),

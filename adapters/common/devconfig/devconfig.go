@@ -51,11 +51,14 @@ const (
 	EnvAPIKeyDirect    = "OPENBOX_API_KEY"
 	EnvSeedDirect      = "OPENBOX_ED25519_SEED"
 	EnvConfigPath      = "OPENBOX_CONFIG"
-	EnvSecretFile      = "OPENBOX_SECRET_FILE"
-	EnvAgentID         = "OPENBOX_AGENT_ID"
-	EnvBackendURL      = "OPENBOX_BACKEND_URL"
-	EnvControlToken    = "OPENBOX_CONTROL_TOKEN"
-	EnvSpoolDir        = "OPENBOX_SPOOL_DIR"
+	// Policy-bundle signing key pins (E8-S6). Non-secret; env overrides config.
+	EnvOrgSigningPubKey = "OPENBOX_ORG_SIGNING_PUBKEY"
+	EnvOrgSigningKeyID  = "OPENBOX_ORG_SIGNING_KEY_ID"
+	EnvSecretFile       = "OPENBOX_SECRET_FILE"
+	EnvAgentID          = "OPENBOX_AGENT_ID"
+	EnvBackendURL       = "OPENBOX_BACKEND_URL"
+	EnvControlToken     = "OPENBOX_CONTROL_TOKEN"
+	EnvSpoolDir         = "OPENBOX_SPOOL_DIR"
 
 	// DefaultBaseURL is the core data-plane base used when nothing configures one.
 	DefaultBaseURL = "https://core.openbox.ai"
@@ -115,6 +118,16 @@ type DevConfig struct {
 	// SecretFile, when set, points at the CLI's opt-in file secret backend
 	// (0600 JSON) read instead of the OS keychain. EnvSecretFile overrides.
 	SecretFile string `json:"secret_file,omitempty"`
+	// OrgSigningKeyID and OrgSigningPubKey pin the org's policy-bundle signing
+	// key (E8-S6 / ADR-0008). Both are non-secret — a public key and its id —
+	// so they live in plain config alongside the other coordinates rather than
+	// in the secret store (INV-1 concerns private material only).
+	//
+	// Absent means unverifiable rather than untrusted: a signed bundle with no
+	// pinned key reports integrity "no_key", which reads as an incomplete
+	// deployment. `openbox dev init` pins these once the backend serves them.
+	OrgSigningKeyID  string `json:"org_signing_key_id,omitempty"`
+	OrgSigningPubKey string `json:"org_signing_pubkey,omitempty"` // base64 raw Ed25519
 }
 
 // DefaultConfigPath is where the installer writes the dev config and the hook
@@ -303,6 +316,21 @@ func ResolveTimeoutMS(cfgMS func(DevConfig) int, envKey string) int {
 
 // ResolveAgentID resolves the backend agent id for policy sync/staleness:
 // env first, then the dev config. Empty when unconfigured.
+// ResolveOrgSigningKey returns the pinned policy-bundle signing key (base64 raw
+// Ed25519) and its id. Env overrides config, matching every other coordinate.
+// Both empty ⇒ no key pinned, which verification reports as "no_key".
+func ResolveOrgSigningKey() (pubKeyB64, keyID string) {
+	c, _ := load()
+	pubKeyB64, keyID = c.OrgSigningPubKey, c.OrgSigningKeyID
+	if v := strings.TrimSpace(os.Getenv(EnvOrgSigningPubKey)); v != "" {
+		pubKeyB64 = v
+	}
+	if v := strings.TrimSpace(os.Getenv(EnvOrgSigningKeyID)); v != "" {
+		keyID = v
+	}
+	return pubKeyB64, keyID
+}
+
 func ResolveAgentID() string {
 	cfg, _ := load()
 	return FirstNonEmpty(os.Getenv(EnvAgentID), cfg.AgentID)

@@ -204,6 +204,10 @@ func ResolveBackendURL() string { return devconfig.ResolveBackendURL() }
 // OPENBOX_CONTROL_TOKEN env only (never config, never the secret store).
 func ResolveControlToken() string { return devconfig.ResolveControlToken() }
 
+// ResolveOrgSigningKey returns the org's pinned policy-bundle signing key
+// (base64 raw Ed25519) and its id, from the shared dev config (E8-S6).
+func ResolveOrgSigningKey() (pubKeyB64, keyID string) { return devconfig.ResolveOrgSigningKey() }
+
 // ResolveBundlePath resolves the local policy-bundle path the in-process
 // decider evaluates and `dev sync`/staleness read: OPENBOX_SIDECAR_BUNDLE env,
 // else decision.DefaultBundlePath(). Enforce-specific (imports decision), so it

@@ -117,8 +117,12 @@ func EnforceDecision(ctx context.Context, cl decision.Decider, id Identity, e *H
 // cold-start fail-open), so an infra failure never blocks the developer
 // (INV-3b).
 func newDecider() decision.Decider {
+	pubKeyB64, _ := ResolveOrgSigningKey()
 	return decision.NewInProcessDecider(decision.InProcessConfig{
 		BundlePath: ResolveBundlePath(),
+		// The org's pinned policy-signing key (E8-S6). Unset ⇒ a signed bundle
+		// is not trusted and an unsigned one behaves as before.
+		SigningPubKey: decision.DecodePublicKey(pubKeyB64),
 	})
 }
 

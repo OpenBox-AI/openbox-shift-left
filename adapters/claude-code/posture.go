@@ -32,6 +32,7 @@ func effectivePosture(staleness devconfig.Staleness) devconfig.Posture {
 	p.ProviderVersion = providerVersion()
 	p.Staleness = staleness
 	p.BundleVersion, p.BundlePolicyID, p.BundleSHA256 = bundleCoordinates()
+	p.BundleIntegrity = string(bundleIntegrity())
 	return p
 }
 
@@ -92,4 +93,18 @@ func runWithTimeout(d time.Duration, name string, args ...string) ([]byte, error
 		}
 		return nil, os.ErrDeadlineExceeded
 	}
+}
+
+// bundleIntegrity verifies the local bundle's signature so the session records
+// whether its policy was authenticated, rolled back, expired or simply unsigned
+// (E8-S6). Read-only and local — the same verification the enforce gate does, so
+// the recorded value describes the policy that would actually be evaluated.
+func bundleIntegrity() decision.Integrity {
+	path := ResolveBundlePath()
+	pubKeyB64, _ := ResolveOrgSigningKey()
+	_, integrity := decision.VerifyBundleFile(path, decision.VerifyOptions{
+		PublicKey: decision.DecodePublicKey(pubKeyB64),
+		MinEpoch:  decision.ReadEpochPin(path),
+	})
+	return integrity
 }
