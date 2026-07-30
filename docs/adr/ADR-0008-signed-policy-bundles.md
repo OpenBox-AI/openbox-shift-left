@@ -110,17 +110,18 @@ Client pins the key as non-secret config in `dev.json`:
 `decision.Integrity`, recorded per session in posture (E8-S5) as
 `posture.bundle_integrity`:
 
-| Outcome | Meaning |
-|---|---|
-| `unsigned` | No signature block. Compatibility path. |
-| `verified` | Signature, epoch and expiry all good; policy re-derived from signed bytes. |
-| `no_key` | Signed, but no key pinned — an *incomplete deployment*, not suspect content. |
-| `bad_signature` | Content altered, or signed by an untrusted key. |
-| `expired` | Valid signature, past `expires_at`. |
-| `epoch_rollback` | Valid signature, epoch below the pinned floor. |
-| `malformed` | Undecodable block or payload. Untrusted, never treated as absent. |
+| Outcome | Meaning | Policy loaded? |
+|---|---|---|
+| `unsigned` | No signature block. Compatibility path. | yes, the file's own |
+| `verified` | Signature, epoch and expiry all good; policy re-derived from signed bytes. | yes, re-derived |
+| `no_key` | Signed, but no key pinned — an *incomplete deployment*, not suspect content. | yes, the file's own |
+| `bad_signature` | Content altered, or signed by an untrusted key. | no |
+| `expired` | Valid signature, past `expires_at`. | no |
+| `epoch_rollback` | Valid signature, epoch below the pinned floor. | no |
+| `malformed` | Undecodable block or payload. Untrusted, never treated as absent. | no |
 
-Only `verified` is `Trusted()`. `unsigned` is explicitly **not** assurance.
+Only `verified` is `Trusted()`. `unsigned` and `no_key` are explicitly **not**
+assurance — they are *unverifiable*, which is a different thing from *untrusted*.
 
 ## Behaviour
 
@@ -129,9 +130,22 @@ Only `verified` is `Trusted()`. `unsigned` is explicitly **not** assurance.
   place — installing it and distrusting it later would trade a policy that did
   verify for one that did not. Unsigned, and signed-with-no-pinned-key, install
   with an explanatory note.
-- **The enforce gate** loads the verified bundle; an unverifiable one is **not
-  loaded at all**, leaving the decider at cold-start fail-open.
-- **Posture** records the outcome either way.
+- **The enforce gate** loads policy for the three outcomes above where
+  verification did not *fail*; a bundle that failed verification is **not loaded
+  at all**, leaving the decider at cold-start fail-open.
+- **The epoch pin** advances only on `verified`. `Bundle.Epoch()` reads the payload
+  without checking the signature, so pinning from any other outcome would let
+  whoever answered the fetch set the floor — a claimed `MaxInt64` makes every later
+  genuine bundle read as `epoch_rollback`, and the floor never lowers.
+- **Posture** records the outcome in every case.
+
+`unsigned` and `no_key` must stay symmetric here, and the reason is operational:
+they are the same epistemic state (this client cannot check the content) and differ
+only in whose deployment is incomplete. Loading one and refusing the other meant
+that the day a backend began signing, every install without `org_signing_pubkey`
+pinned — all of them, the key being new — silently stopped enforcing while
+`dev sync` reported success; under the opt-in fail-closed policy it denied every
+tool call instead. Neither is a security trade, per the honest limit below.
 
 ### Honest limit
 

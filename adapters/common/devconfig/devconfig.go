@@ -126,7 +126,11 @@ type DevConfig struct {
 	//
 	// Absent means unverifiable rather than untrusted: a signed bundle with no
 	// pinned key reports integrity "no_key", which reads as an incomplete
-	// deployment. `openbox dev init` pins these once the backend serves them.
+	// deployment. Its policy is still loaded and enforced — the same treatment an
+	// unsigned bundle gets, since both mean "this client cannot check the
+	// content" — but Trusted() is false and the session posture says so, so the
+	// control plane can tell an unpinned fleet from a verified one.
+	// `openbox dev init` pins these once the backend serves them.
 	OrgSigningKeyID  string `json:"org_signing_key_id,omitempty"`
 	OrgSigningPubKey string `json:"org_signing_pubkey,omitempty"` // base64 raw Ed25519
 }

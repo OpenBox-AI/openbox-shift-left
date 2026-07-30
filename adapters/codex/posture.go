@@ -111,14 +111,21 @@ func bundleIntegrity() decision.Integrity {
 }
 
 // providerManaged reports whether this provider's own managed configuration is
-// deployed and names the OpenBox hook (E8-S8). Without it, enforcement is a hook
-// in the developer's own config and a local edit removes the gate — so this is
-// the field that separates "enforcing" from "enforcing with assurance".
+// deployed and actually constrains the session (E8-S8). Without it, enforcement is
+// a hook in the developer's own config and a local edit removes the gate — so this
+// is the field that separates "enforcing" from "enforcing with assurance".
 //
 // It answers a deliberately narrow question: does a managed file exist at a known
-// path and does it invoke us. It cannot confirm the file is root-owned or that the
-// provider parsed it, so "true" here is evidence, not proof — hence the tri-state
-// (an unreadable path is "unknown", never a quiet "false").
+// path and does it carry a mandate Codex will apply. It cannot confirm the file is
+// root-owned or that the provider parsed it, so "true" here is evidence, not proof
+// — hence the tri-state (an unreadable path is "unknown", never a quiet "false").
+//
+// The mandate is identified by a TOP-LEVEL requirement key, not by a substring.
+// Substring matching is what let the earlier mis-nested template (mandate keys
+// written below a `[hooks]` header, hence bound as `hooks.*` and ignored) report
+// this machine as managed while nothing was in effect. `hook codex` is
+// deliberately NOT the marker: hook definitions are not a requirements key at
+// all, so a file naming our hook there proves nothing about the mandate.
 func providerManaged() string {
 	paths := []string{"/etc/codex/requirements.toml"}
 	sawPath := false
@@ -130,13 +137,34 @@ func providerManaged() string {
 			}
 			continue
 		}
-		if strings.Contains(string(raw), "hook codex") {
+		if codexMandated(raw) {
 			return "true"
 		}
-		return "false" // managed, but not by us
+		return "false" // a managed file, but it constrains nothing we rely on
 	}
 	if sawPath {
 		return "unknown"
 	}
 	return "false"
+}
+
+// codexRequirementKeys are the requirements.toml keys whose presence means this
+// machine is genuinely constrained: hook exclusivity, or a pin on the approval /
+// sandbox modes a local config may select. Any one of them is a mandate.
+var codexRequirementKeys = []string{
+	"allow_managed_hooks_only",
+	"allowed_approval_policies",
+	"allowed_sandbox_modes",
+}
+
+// codexMandated reports whether a requirements.toml body defines at least one
+// mandate key at the top level (where Codex reads it).
+func codexMandated(raw []byte) bool {
+	keys := devconfig.TopLevelTOMLKeys(raw)
+	for _, k := range codexRequirementKeys {
+		if keys[k] {
+			return true
+		}
+	}
+	return false
 }

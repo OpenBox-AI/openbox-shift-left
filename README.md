@@ -56,7 +56,9 @@ guarantees is the failure mode it exists to prevent.
   developer's own config. Until the provider's managed configuration is deployed
   (`allowManagedHooksOnly` for Claude Code, `allow_managed_hooks_only` for Codex — E8-S8/S9), a
   developer can remove the hook or flip the local setting, so local enforcement prevents mistakes
-  but does not withstand a motivated bypass.
+  but does not withstand a motivated bypass. **For Codex the hook itself is not yet mandated**: a
+  `requirements.toml` cannot define a hook, so the shipped mandate pins approval and sandbox modes
+  while the hook stays user-level and removable — see `deploy/managed/README.md` § Remaining gap.
 - **Egress is recorded, not controlled** — see the note under the provider table.
 - **Policy integrity**: the local policy bundle is currently unsigned, so a user-local edit is not
   yet detectable end-to-end (E8-S6 adds signing, expiry, and rollback protection).

@@ -222,9 +222,15 @@ func (p SignedPayload) bundle() (*Bundle, error) {
 	return out, nil
 }
 
-// Epoch returns the signed epoch, or 0 when the bundle is unsigned. Callers
-// persist it as the floor for the next load, which is what makes rollback
-// detectable across restarts.
+// Epoch returns the signed epoch, or 0 when the bundle is unsigned.
+//
+// It DOES NOT VERIFY the signature — it decodes the payload and reads a field. So
+// persist it as the epoch floor only after VerifyIntegrity returned
+// IntegrityVerified for this bundle. Pinning an unauthenticated epoch hands the
+// floor to whoever answered the fetch: a payload claiming MaxInt64 makes every
+// genuinely-signed bundle afterwards read as IntegrityEpochRollback, and since
+// WriteEpochPin only ever advances the floor, enforcement stays fail-open with no
+// way back short of deleting the pin file.
 func (b *Bundle) Epoch() int64 {
 	if b == nil || b.Signed == nil {
 		return 0
@@ -246,9 +252,28 @@ func (b *Bundle) Epoch() int64 {
 // step, returning the bundle whose policy may be evaluated plus the outcome.
 //
 // The returned bundle is the re-derived, trusted one for IntegrityVerified, the
-// file's own bundle for IntegrityUnsigned (the compatibility path), and nil for
-// every failure — so a caller can never accidentally evaluate policy that did
-// not verify. A missing or unparsable file yields (nil, IntegrityMalformed).
+// file's own bundle for the two UNVERIFIABLE outcomes — IntegrityUnsigned and
+// IntegrityNoKey — and nil for every outcome where verification actually FAILED,
+// so a caller can never evaluate policy that was proven bad. A missing or
+// unparsable file yields (nil, IntegrityMalformed).
+//
+// IntegrityNoKey returns a bundle for the same reason IntegrityUnsigned does, and
+// this is the load-bearing distinction in the whole file. "No signature" and "a
+// signature I have no key for" are the same epistemic state — this client cannot
+// check the content — and they differ only in whose deployment is incomplete.
+// Returning nil for one and a bundle for the other meant that the day a backend
+// started signing, every install without org_signing_pubkey pinned (i.e. all of
+// them, since the key is new) silently stopped enforcing: `dev sync` reported
+// success, the decider declined to load, and the session fell back to cold-start
+// fail-open — or, under the opt-in fail-closed policy, denied every tool call.
+//
+// It is not a security regression, because refusing to load was never prevention:
+// an unloaded bundle means fail-open, which is where an attacker who made policy
+// more permissive wanted to land anyway (see NewInProcessDecider). What the
+// distinction buys is that Integrity.Trusted() stays false and the outcome is
+// recorded in session posture, so the control plane can see which sessions ran
+// unverified policy and require better. An org that needs the integrity guarantee
+// pins a key; nothing here can manufacture one.
 func VerifyBundleFile(path string, opts VerifyOptions) (*Bundle, Integrity) {
 	b, err := LoadBundleFile(path)
 	if err != nil || b == nil {
@@ -258,7 +283,7 @@ func VerifyBundleFile(path string, opts VerifyOptions) (*Bundle, Integrity) {
 	switch integrity {
 	case IntegrityVerified:
 		return trusted, integrity
-	case IntegrityUnsigned:
+	case IntegrityUnsigned, IntegrityNoKey:
 		return b, integrity
 	default:
 		return nil, integrity

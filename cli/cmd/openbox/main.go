@@ -187,15 +187,27 @@ func (a *app) syncPolicyBundle(ctx context.Context, backendURL, token, clientID,
 	// verification is refused outright rather than written and then distrusted at
 	// load: writing it would discard a policy that DID verify in favour of one
 	// that did not, which is the wrong direction on every axis.
-	integrityNote, err := verifySyncedBundle(bundlePath, bundle)
+	integrity, integrityNote, err := verifySyncedBundle(bundlePath, bundle)
 	if err != nil {
 		return err
 	}
 	if err := writeBundleFile(bundlePath, bundle); err != nil {
 		return fmt.Errorf("write policy bundle: %w", err)
 	}
-	if epoch := bundle.Epoch(); epoch > 0 {
-		decision.WriteEpochPin(bundlePath, epoch)
+	// Pin the epoch ONLY from a verified signature — the same gate
+	// NewInProcessDecider applies. Bundle.Epoch() reads the signed payload without
+	// checking the signature, so pinning from it unconditionally would let anyone
+	// who can answer the policy fetch set the floor: a bundle claiming
+	// policy_epoch = MaxInt64 makes every genuinely-signed bundle afterwards verify
+	// as IntegrityEpochRollback, the decider then refuses to load any of them, and
+	// enforcement is fail-open from then on. The floor only ever advances
+	// (WriteEpochPin), so there is no way back short of deleting the pin file.
+	// Reachable today via the no-key path, which is the default until
+	// org_signing_pubkey is populated.
+	if integrity == decision.IntegrityVerified {
+		if epoch := bundle.Epoch(); epoch > 0 {
+			decision.WriteEpochPin(bundlePath, epoch)
+		}
 	}
 	// A fresh, re-pinned bundle clears any fail-closed staleness block so
 	// the PreToolUse enforce gate proceeds again.
@@ -217,33 +229,38 @@ func (a *app) syncPolicyBundle(ctx context.Context, backendURL, token, clientID,
 }
 
 // verifySyncedBundle checks a freshly fetched bundle's signature before it is
-// allowed to replace the last-good one. It returns a non-secret note to print,
-// or an error that aborts the sync.
+// allowed to replace the last-good one. It returns the verification outcome plus a
+// non-secret note to print, or an error that aborts the sync.
+//
+// The outcome is returned rather than collapsed to ok/not-ok because the caller
+// needs it: only IntegrityVerified may advance the epoch pin, since every other
+// outcome means the payload carrying that epoch was never authenticated.
 //
 // An unsigned bundle is accepted with a note, not an error: backends that do not
 // sign yet must keep working, and pretending otherwise would make the feature
 // undeployable. A bundle that carries a signature and fails to verify is a
 // different matter — that is either tampering in transit or a key mismatch, and
 // continuing would mean trusting content we just proved untrustworthy.
-func verifySyncedBundle(bundlePath string, b *decision.Bundle) (string, error) {
+func verifySyncedBundle(bundlePath string, b *decision.Bundle) (decision.Integrity, string, error) {
 	if b == nil || b.Signed == nil {
-		return "note: this policy is unsigned — the local bundle cannot be integrity-checked " +
+		return decision.IntegrityUnsigned, "note: this policy is unsigned — the local bundle cannot be integrity-checked " +
 			"(a local edit would not be detectable). Signing is served by newer backends (E8-S6).", nil
 	}
 	pubKeyB64, keyID := devconfig.ResolveOrgSigningKey()
 	pub := decision.DecodePublicKey(pubKeyB64)
 	if pub == nil {
-		return "note: this policy is signed but no org signing key is pinned, so the signature " +
-			"could not be checked. Pin org_signing_pubkey in dev.json to enable verification.", nil
+		return decision.IntegrityNoKey, "note: this policy is signed but no org signing key is pinned, so the signature " +
+			"could not be checked and its epoch is not pinned. It is installed and will be ENFORCED UNVERIFIED " +
+			"(a local edit would not be detectable). Pin org_signing_pubkey in dev.json to enable verification.", nil
 	}
 	_, integrity := b.VerifyIntegrity(decision.VerifyOptions{
 		PublicKey: pub,
 		MinEpoch:  decision.ReadEpochPin(bundlePath),
 	})
 	if integrity == decision.IntegrityVerified {
-		return fmt.Sprintf("Policy signature verified (key %s, epoch %d).", orUnset(keyID), b.Epoch()), nil
+		return integrity, fmt.Sprintf("Policy signature verified (key %s, epoch %d).", orUnset(keyID), b.Epoch()), nil
 	}
-	return "", fmt.Errorf("refusing to install policy bundle: signature check failed (%s); "+
+	return integrity, "", fmt.Errorf("refusing to install policy bundle: signature check failed (%s); "+
 		"the previous bundle is unchanged", integrity)
 }
 

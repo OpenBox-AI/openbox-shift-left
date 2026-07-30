@@ -92,13 +92,31 @@ func (a *Adapter) threadDuration(ev *client.DevEvent) {
 	}
 }
 
-// Flush drains the given session's spooled events through the Emitter. It is
+// Flush drains the given session's spooled events through the Emitter, then
+// sweeps carry-over (recovery) files left undelivered by earlier flushes. It is
 // bounded by ctx (the hook caps SessionEnd flush so session teardown is never
 // delayed unduly — Codex clamps SessionEnd hook timeouts, addendum #8).
 // Observe-only: the verdict from each Emit never blocks; it is RECORDED to the
 // Advisory sink off the hot path.
+//
+// The sweep is not limited to this session: a recovery file belongs to a session
+// that has already ended, so it has no trigger of its own, and SessionEnd is the
+// only ambient point where retry can happen at all (E8-S7). This session's own
+// spool is drained first, and its own carry-over before other sessions', so the
+// ctx budget goes to the ending session's telemetry before anyone's backlog.
+// Both counts are returned as one total.
 func (a *Adapter) Flush(ctx context.Context, sessionID string, em Emitter) (int, error) {
-	return a.Spool.FlushSession(ctx, sessionID, a.emitFunc(em))
+	fn := a.emitFunc(em)
+	// Snapshot the carry-over set BEFORE draining, so files this flush itself
+	// writes are left for the next session rather than consuming their whole
+	// retry allowance in one pass.
+	carried := a.Spool.recoveryFiles()
+	n, err := a.Spool.FlushSession(ctx, sessionID, fn)
+	swept, sweepErr := a.Spool.sweepRecovery(ctx, carried, sessionID, fn)
+	if err == nil {
+		err = sweepErr
+	}
+	return n + swept, err
 }
 
 // FlushAll drains every spooled session (the `flush` subcommand / catch-up).

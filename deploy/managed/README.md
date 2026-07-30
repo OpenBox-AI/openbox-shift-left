@@ -54,13 +54,44 @@ fails closed at startup.
 
 ### Codex — `codex/requirements.toml` and `codex/managed_config.toml`
 
-| Setting | Guarantee |
-|---|---|
-| `[hooks]` in requirements | The OpenBox hook is mandated by the admin. |
-| `allow_managed_hooks_only = true` | User hook config is ignored. |
-| `allowed_approval_policies` | Pins which approval modes are selectable — the important one, since `never` would let tool calls auto-run. |
-| `allowed_sandbox_modes` | Pins sandboxing so a session cannot opt out. |
-| `[features] hooks = true` | Hooks cannot be feature-flagged off locally. |
+| Setting | Where | Guarantee |
+|---|---|---|
+| `allowed_approval_policies` | requirements, top level | Pins which approval modes are selectable — the important one, since `never` would let tool calls auto-run. |
+| `allowed_sandbox_modes` | requirements, top level | Pins sandboxing so a session cannot opt out. `danger-full-access` is excluded. |
+| `approval_policy`, `sandbox_mode` | managed_config | The defaults a session starts with, inside the allowed sets above. |
+| `[features] hooks = true` | managed_config | Hooks are on by default. A *default*, not a pin — see the gap below. |
+
+**Every requirement key must be top level.** TOML binds a bare key written after a
+table header to that table, so keys listed below a `[hooks]` header are loaded as
+`hooks.allow_managed_hooks_only` and silently ignored. An earlier revision of this
+template did exactly that: the mandate was inert while `openbox doctor` and session
+posture both reported `managed`. `openbox doctor` now decides from top-level keys
+(`devconfig.TopLevelTOMLKeys`), so a mis-nested file reports *"present but imposes
+no OpenBox mandate"* instead of claiming assurance it does not have.
+
+#### Remaining gap — the hook itself is not yet mandated
+
+`allow_managed_hooks_only = true` is shipped **commented out**, and this is the honest
+state of the Codex mandate rather than an oversight:
+
+- `hooks` is **not** a `requirements.toml` key. The accepted top-level set in Codex
+  0.145.0 is `allowed_approval_policies`, `allowed_approvals_reviewers`,
+  `allowed_sandbox_modes`, `allowed_permission_profiles`, `default_permissions`,
+  `remote_sandbox_config`, `allowed_web_search_modes`, `allow_managed_hooks_only`,
+  `allow_appshots`, `allow_remote_control`, `computer_use`, `windows`,
+  `feature_requirements`, `mcp_servers`, `plugins`, `marketplaces`, `rules`,
+  `enforce_residency`, `experimental_network`, `permissions`, `models`,
+  `guardian_policy_config`. Hook *definitions* live in a config layer
+  (`hooks.managed_dir` → a managed hooks file in codex-rs `HooksFile` shape) or in a
+  cloud requirements bundle.
+- So enabling hook exclusivity today would make Codex ignore the
+  `~/.codex/hooks.json` that `openbox dev init --provider codex` writes and run **no
+  OpenBox hook at all** — governance off, with posture still reporting a mandate.
+  Strictly worse than not mandating.
+
+Until a managed hook definition ships, the Codex mandate constrains **approval and
+sandbox modes**, and the hook remains user-level and removable. Claude Code has no
+equivalent gap: its `managed-settings.json` defines the hook directly.
 
 Target paths:
 
@@ -92,7 +123,10 @@ The installer is deliberately conservative:
   before being replaced.
 - **Refuses to weaken** — if the file already present has a stricter setting than the
   template (managed-hooks-only already on, sandbox already required), the install
-  aborts rather than relaxing it. Overriding that is a deliberate `--force`.
+  aborts rather than relaxing it. Overriding that is a deliberate `--force`. A marker
+  that appears only as a *comment* in the template does not count as strict, so
+  shipping `allow_managed_hooks_only` commented out cannot silently replace an
+  operator's live setting.
 - **Unprivileged is not a failure** — without permission to write, it prints the exact
   paths and contents for the MDM team and exits 0.
 

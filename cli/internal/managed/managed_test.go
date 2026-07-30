@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/openbox-ai/openbox-shift-left/adapters/common/devconfig"
 )
 
 func fixedClock() func() time.Time {
@@ -34,9 +36,7 @@ func TestPlanInstall_SubstitutesBinaryPath(t *testing.T) {
 		t.Fatalf("expected files for both providers, got %d", len(plan.Files))
 	}
 	// No file may keep the placeholder — a leftover would render a hook that
-	// cannot execute. Not every file invokes the binary, though: Codex's
-	// managed_config.toml sets approval/sandbox DEFAULTS and carries no hook, so
-	// the requirement is per-provider rather than per-file.
+	// cannot execute.
 	invokes := map[string]bool{}
 	for _, f := range plan.Files {
 		body := string(f.Contents)
@@ -44,11 +44,84 @@ func TestPlanInstall_SubstitutesBinaryPath(t *testing.T) {
 			t.Errorf("%s still contains the %s placeholder", f.Path, binPlaceholder)
 		}
 		if strings.Contains(body, "/opt/openbox/bin/openbox") {
-			invokes[filepath.Dir(f.Path)] = true
+			invokes[filepath.Base(f.Path)] = true
 		}
 	}
-	if len(invokes) < 2 {
-		t.Errorf("each provider needs at least one file invoking the binary, got %v", invokes)
+	// Claude Code's managed settings DEFINE the hook, so they must name the
+	// deployed binary. Codex's managed files cannot: `hooks` is not a
+	// requirements.toml key, and managed_config.toml carries defaults only — the
+	// Codex hook is installed by `openbox dev init --provider codex`. What the
+	// Codex mandate contributes is asserted in
+	// TestPlanInstall_CodexMandatesAreTopLevel instead.
+	if !invokes["managed-settings.json"] {
+		t.Errorf("claude-code managed settings must invoke the deployed binary, got %v", invokes)
+	}
+}
+
+// TestPlanInstall_CodexMandatesAreTopLevel is the E8-S8 regression guard. TOML
+// binds a bare key written after a table header to that table, so an earlier
+// revision of requirements.toml — which listed the mandate keys below `[hooks]` —
+// shipped them as `hooks.allowed_sandbox_modes` and friends: parsed by Codex,
+// ignored, and silently not in effect while `openbox doctor` and session posture
+// both reported "managed". Assert on the parsed structure, not on the text.
+func TestPlanInstall_CodexMandatesAreTopLevel(t *testing.T) {
+	plan, err := PlanInstall([]Provider{ProviderCodex}, "/opt/openbox/bin/openbox")
+	if err != nil {
+		t.Fatalf("plan: %v", err)
+	}
+	var req []byte
+	for _, f := range plan.Files {
+		if filepath.Base(f.Path) == "requirements.toml" {
+			req = f.Contents
+		}
+	}
+	if req == nil {
+		t.Fatal("codex plan has no requirements.toml")
+	}
+	keys := devconfig.TopLevelTOMLKeys(req)
+	for _, want := range []string{"allowed_approval_policies", "allowed_sandbox_modes"} {
+		if !keys[want] {
+			t.Errorf("%s is not a TOP-LEVEL key in requirements.toml (nested keys are ignored by Codex); top-level keys = %v", want, keys)
+		}
+	}
+	// The pins must exclude the escapes they exist to block.
+	body := string(req)
+	for _, forbidden := range []string{`"never"`, `"danger-full-access"`} {
+		for _, line := range strings.Split(body, "\n") {
+			line = strings.TrimSpace(line)
+			if strings.HasPrefix(line, "#") {
+				continue
+			}
+			if strings.Contains(line, forbidden) {
+				t.Errorf("requirements.toml allows %s: %q", forbidden, line)
+			}
+		}
+	}
+	// Hook exclusivity must not be live while no managed hook definition ships:
+	// Codex would then ignore the user-level hooks.json `dev init` writes and run
+	// no OpenBox hook at all.
+	if keys["allow_managed_hooks_only"] {
+		t.Error("allow_managed_hooks_only is enabled but this template ships no managed hook definition — " +
+			"Codex would ignore the user-level hooks.json and run no OpenBox hook (see the template comment)")
+	}
+}
+
+// A mandate must be recognized from a TOP-LEVEL key only. A file whose keys are
+// nested under a table imposes nothing, and reporting it as managed is the false
+// assurance E8-S8 shipped.
+func TestMandates_CodexRejectsNestedKeys(t *testing.T) {
+	nested := []byte("[hooks]\nallow_managed_hooks_only = true\nallowed_sandbox_modes = [\"read-only\"]\n")
+	if mandates(ProviderCodex, nested) {
+		t.Error("keys nested under [hooks] are ignored by Codex and must not count as a mandate")
+	}
+	top := []byte("allowed_sandbox_modes = [\"read-only\"]\n\n[experimental_network]\nenabled = true\n")
+	if !mandates(ProviderCodex, top) {
+		t.Error("a top-level mandate key must be recognized")
+	}
+	// `hook codex` in requirements.toml proves nothing: hooks are not a
+	// requirements key, so a file naming our hook imposes no mandate.
+	if mandates(ProviderCodex, []byte("[hooks]\nPreToolUse = \"openbox hook codex PreToolUse\"\n")) {
+		t.Error("naming our hook in requirements.toml is not a mandate")
 	}
 }
 
@@ -96,6 +169,36 @@ func TestApply_IdempotentAndBacksUp(t *testing.T) {
 
 // The property that matters most: never quietly downgrade a mandate. A visible
 // failure is recoverable; a silent downgrade is what an attacker would want.
+// A strictness marker that survives only as a COMMENT in the incoming file is not
+// in effect, so replacing a live mandate with it is a downgrade and must be
+// refused. Without this, the Codex template — which ships
+// `allow_managed_hooks_only` commented out, because enabling it without a managed
+// hook definition would disable the OpenBox hook entirely — would silently replace
+// an operator's live hook-exclusivity setting.
+func TestApply_CommentedMarkerIsNotStrictness(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "requirements.toml")
+	strict := "allow_managed_hooks_only = true\nallowed_sandbox_modes = [\"read-only\"]\n"
+	if err := os.WriteFile(target, []byte(strict), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	commented := Plan{Files: []File{{
+		Path:     target,
+		Contents: []byte("# allow_managed_hooks_only = true\nallowed_sandbox_modes = [\"read-only\"]\n"),
+		Mode:     0o644,
+	}}}
+	out, err := Apply(commented, false, fixedClock())
+	if err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	if out[0].Action != "skipped" {
+		t.Fatalf("action = %q, want skipped (the incoming marker is only a comment)", out[0].Action)
+	}
+	if body, _ := os.ReadFile(target); string(body) != strict {
+		t.Error("the live mandate must be left in place")
+	}
+}
+
 func TestApply_RefusesToWeaken(t *testing.T) {
 	dir := t.TempDir()
 	target := filepath.Join(dir, "managed-settings.json")

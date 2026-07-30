@@ -1,9 +1,11 @@
 package main
 
 import (
+	"context"
 	"crypto/ed25519"
 	"encoding/base64"
 	"encoding/json"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -58,7 +60,7 @@ func TestSyncBundle_SignedVerifiesAndPinsEpoch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("translate: %v", err)
 	}
-	note, err := verifySyncedBundle(bundlePath, b)
+	_, note, err := verifySyncedBundle(bundlePath, b)
 	if err != nil {
 		t.Fatalf("a correctly signed policy must install: %v", err)
 	}
@@ -122,7 +124,7 @@ func TestSyncBundle_TamperedSignatureRefusedAndLastGoodKept(t *testing.T) {
 	bad.Signed.CanonicalB64 = base64.StdEncoding.EncodeToString(raw)
 
 	bb, _, _ := translateBundle(bad)
-	if _, err := verifySyncedBundle(bundlePath, bb); err == nil {
+	if _, _, err := verifySyncedBundle(bundlePath, bb); err == nil {
 		t.Fatal("a tampered signature must abort the sync")
 	}
 
@@ -152,7 +154,7 @@ func TestSyncBundle_EpochRollbackRefused(t *testing.T) {
 		Signed:        signPolicy(t, priv, 4, testBuilder),
 	}
 	ob, _, _ := translateBundle(old)
-	_, err := verifySyncedBundle(bundlePath, ob)
+	_, _, err := verifySyncedBundle(bundlePath, ob)
 	if err == nil || !strings.Contains(err.Error(), string(decision.IntegrityEpochRollback)) {
 		t.Fatalf("want an epoch_rollback refusal, got %v", err)
 	}
@@ -166,7 +168,7 @@ func TestSyncBundle_UnsignedAcceptedWithNote(t *testing.T) {
 	pol := &backend.Policy{ID: "pol-1", UpdatedAt: "2026-07-01T00:00:00Z",
 		PolicyBuilder: json.RawMessage(testBuilder)}
 	b, _, _ := translateBundle(pol)
-	note, err := verifySyncedBundle(filepath.Join(dir, "policy-bundle.json"), b)
+	_, note, err := verifySyncedBundle(filepath.Join(dir, "policy-bundle.json"), b)
 	if err != nil {
 		t.Fatalf("an unsigned policy must still install: %v", err)
 	}
@@ -185,11 +187,78 @@ func TestSyncBundle_SignedButNoPinnedKey(t *testing.T) {
 	pol := &backend.Policy{ID: "pol-1", UpdatedAt: "2026-07-01T00:00:00Z",
 		PolicyBuilder: json.RawMessage(testBuilder), Signed: signPolicy(t, priv, 5, testBuilder)}
 	b, _, _ := translateBundle(pol)
-	note, err := verifySyncedBundle(filepath.Join(dir, "policy-bundle.json"), b)
+	_, note, err := verifySyncedBundle(filepath.Join(dir, "policy-bundle.json"), b)
 	if err != nil {
 		t.Fatalf("want install-with-note when no key is pinned, got %v", err)
 	}
 	if !strings.Contains(note, "no org signing key") {
 		t.Errorf("note should explain the missing pin, got %q", note)
+	}
+}
+
+// TestSyncBundle_UnverifiedEpochIsNotPinned is the E8-S6 regression guard: the
+// epoch floor may only advance from a payload whose signature verified.
+//
+// Bundle.Epoch() decodes the signed payload without checking the signature, so
+// pinning from it unconditionally let anyone able to answer the policy fetch set
+// the floor. With no org key pinned — the default until org_signing_pubkey is
+// populated — a bundle claiming policy_epoch = MaxInt64 pinned that value; every
+// genuinely-signed bundle afterwards then verified as IntegrityEpochRollback, the
+// decider refused to load any of them, and enforcement was permanently fail-open
+// with no way back, since the floor only ever advances.
+func TestSyncBundle_UnverifiedEpochIsNotPinned(t *testing.T) {
+	_, priv, _ := ed25519.GenerateKey(nil)
+	dir := t.TempDir()
+	bundlePath := filepath.Join(dir, "policy-bundle.json")
+	t.Setenv("OPENBOX_CONFIG", filepath.Join(dir, "dev.json"))
+	t.Setenv("OPENBOX_ORG_SIGNING_PUBKEY", "") // no key pinned → IntegrityNoKey
+
+	hostile := &backend.Policy{
+		ID: "pol-1", UpdatedAt: "2026-07-01T00:00:00Z",
+		PolicyBuilder: json.RawMessage(testBuilder),
+		Signed:        signPolicy(t, priv, math.MaxInt64, testBuilder),
+	}
+	a, out, _ := syncApp(&fakePolicyReader{pol: hostile})
+	if err := a.syncPolicyBundle(context.Background(), "https://backend.example",
+		"obx_key_x", "openbox-cli", "agent-1", bundlePath, out); err != nil {
+		t.Fatalf("an unverifiable-but-parsable bundle still installs (no_key): %v", err)
+	}
+	if got := decision.ReadEpochPin(bundlePath); got != 0 {
+		t.Fatalf("epoch pin = %d, want 0 — an unverified payload must never set the floor", got)
+	}
+
+	// Proof the floor is still usable: a real signed bundle verifies afterwards.
+	pub2, priv2, _ := ed25519.GenerateKey(nil)
+	t.Setenv("OPENBOX_ORG_SIGNING_PUBKEY", base64.StdEncoding.EncodeToString(pub2))
+	real := &backend.Policy{
+		ID: "pol-1", UpdatedAt: "2026-07-02T00:00:00Z",
+		PolicyBuilder: json.RawMessage(testBuilder),
+		Signed:        signPolicy(t, priv2, 7, testBuilder),
+	}
+	a2, out2, _ := syncApp(&fakePolicyReader{pol: real})
+	if err := a2.syncPolicyBundle(context.Background(), "https://backend.example",
+		"obx_key_x", "openbox-cli", "agent-1", bundlePath, out2); err != nil {
+		t.Fatalf("a genuinely signed bundle must install after a no-key sync: %v", err)
+	}
+	if got := decision.ReadEpochPin(bundlePath); got != 7 {
+		t.Errorf("epoch pin = %d, want 7 (a VERIFIED bundle does advance the floor)", got)
+	}
+}
+
+// The pin is not advanced for an unsigned bundle either — Epoch() is 0 there, but
+// assert it so the gate cannot be relaxed to "any non-zero epoch".
+func TestSyncBundle_UnsignedDoesNotPin(t *testing.T) {
+	dir := t.TempDir()
+	bundlePath := filepath.Join(dir, "policy-bundle.json")
+	t.Setenv("OPENBOX_CONFIG", filepath.Join(dir, "dev.json"))
+	pol := &backend.Policy{ID: "pol-1", UpdatedAt: "2026-07-01T00:00:00Z",
+		PolicyBuilder: json.RawMessage(testBuilder)}
+	a, out, _ := syncApp(&fakePolicyReader{pol: pol})
+	if err := a.syncPolicyBundle(context.Background(), "https://backend.example",
+		"obx_key_x", "openbox-cli", "agent-1", bundlePath, out); err != nil {
+		t.Fatalf("sync: %v", err)
+	}
+	if got := decision.ReadEpochPin(bundlePath); got != 0 {
+		t.Errorf("epoch pin = %d, want 0 for an unsigned bundle", got)
 	}
 }

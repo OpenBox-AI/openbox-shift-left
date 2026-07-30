@@ -117,9 +117,10 @@ func NewInProcessDecider(cfg InProcessConfig) *InProcessDecider {
 		bp = DefaultBundlePath()
 	}
 	// Integrity gate (E8-S6). A verified bundle is evaluated as re-derived from
-	// its signed bytes; an unsigned one is evaluated as before (the
-	// compatibility path); anything that fails verification is NOT loaded, so
-	// the decider stays at cold-start fail-open.
+	// its signed bytes; an UNVERIFIABLE one — unsigned, or signed with no org key
+	// pinned — is evaluated as before (the compatibility path); anything that
+	// actually FAILS verification is NOT loaded, so the decider stays at
+	// cold-start fail-open.
 	//
 	// Not loading is detection, not prevention: if the tamper made policy MORE
 	// permissive, fail-open lands where the attacker wanted anyway. What this
@@ -135,6 +136,13 @@ func NewInProcessDecider(cfg InProcessConfig) *InProcessDecider {
 		srv.SetBundle(trusted)
 		if integrity == IntegrityVerified {
 			WriteEpochPin(bp, trusted.Epoch())
+		}
+		if integrity == IntegrityNoKey {
+			// Enforcement continues, but say plainly that it is unverified — the
+			// operator's deployment is one step short, and silence here is what
+			// makes an unpinned fleet look identical to a verified one.
+			log.Printf("openbox enforce: local policy bundle at %s is signed but no org signing key is pinned — "+
+				"enforcing it UNVERIFIED (a local edit would not be detectable); pin org_signing_pubkey in dev.json", bp)
 		}
 	case integrity == IntegrityMalformed && cfg.SigningPubKey == nil:
 		// Indistinguishable from the pre-signing "no bundle" case, so keep the

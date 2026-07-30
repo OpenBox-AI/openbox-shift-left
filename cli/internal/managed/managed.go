@@ -21,6 +21,8 @@ import (
 	"runtime"
 	"strings"
 	"time"
+
+	"github.com/openbox-ai/openbox-shift-left/adapters/common/devconfig"
 )
 
 // templates carries the reference configuration into the binary so `managed
@@ -288,14 +290,41 @@ var strictnessMarkers = []struct {
 
 // wouldWeaken reports whether replacing existing with incoming would drop a
 // strictness marker.
+//
+// The two sides are matched asymmetrically, and deliberately so. The EXISTING file
+// is matched raw: any mention at all is treated as possibly-in-effect, because
+// wrongly believing the operator's file is strict only costs a refusal. The
+// INCOMING file is matched with comment lines removed: a marker that survives only
+// as commented-out documentation is not in effect, and counting it would let a
+// template silently replace a live mandate with a suggestion. Both choices push
+// toward refusing, which is the safe direction for a tool that overwrites security
+// configuration — and `--force` remains the way through.
 func wouldWeaken(existing, incoming []byte) (bool, string) {
-	have, want := string(existing), string(incoming)
+	have, want := string(existing), uncommented(incoming)
 	for _, m := range strictnessMarkers {
 		if strings.Contains(have, m.marker) && !strings.Contains(want, m.marker) {
 			return true, m.why
 		}
 	}
 	return false, ""
+}
+
+// uncommented drops whole-line comments so a setting that exists only as
+// documentation is not mistaken for one that is in effect. It covers TOML `#` and
+// `//` line comments; a JSON `"//"` documentation KEY is left in place, since that
+// is a value in the document rather than a comment, and leaving it can only make
+// wouldWeaken more willing to refuse.
+func uncommented(raw []byte) string {
+	var b strings.Builder
+	for _, line := range strings.Split(string(raw), "\n") {
+		t := strings.TrimSpace(line)
+		if strings.HasPrefix(t, "#") || strings.HasPrefix(t, "//") {
+			continue
+		}
+		b.WriteString(line)
+		b.WriteByte('\n')
+	}
+	return b.String()
 }
 
 // Privileged reports whether this process can write the planned paths, so the CLI
@@ -322,10 +351,18 @@ func Privileged(plan Plan) bool {
 // this machine, for `openbox doctor` and for posture.provider_managed (E8-S8).
 //
 // It answers a deliberately narrow question — does a managed file exist at the
-// expected path and does it name our hook — because that is what can be checked
+// expected path and does it carry a mandate — because that is what can be checked
 // without the provider's cooperation. It cannot confirm the file is root-owned, or
 // that the provider actually parsed it, so a "managed" answer here is evidence
 // rather than proof.
+//
+// What counts as "carries a mandate" is provider-shaped. Claude Code's
+// managed-settings.json defines the hook itself, so naming our hook is the
+// signal. Codex's requirements.toml cannot define a hook at all — `hooks` is not a
+// requirements key — so the signal is a TOP-LEVEL requirement key. Checking for a
+// substring there is what let a mis-nested template (mandate keys written under a
+// `[hooks]` header, hence bound as `hooks.*` and ignored by Codex) report a machine
+// as managed while no mandate was in effect.
 func ProviderState(p Provider) string {
 	var dir string
 	var files []string
@@ -343,14 +380,38 @@ func ProviderState(p Provider) string {
 		return "unknown (no managed path known for this OS)"
 	}
 	for _, name := range files {
-		raw, err := os.ReadFile(filepath.Join(dir, name))
+		path := filepath.Join(dir, name)
+		raw, err := os.ReadFile(path)
 		if err != nil {
 			continue
 		}
-		if strings.Contains(string(raw), "hook "+string(p)) {
-			return "managed (" + filepath.Join(dir, name) + ")"
+		if mandates(p, raw) {
+			return "managed (" + path + ")"
 		}
-		return "present but does not invoke OpenBox (" + filepath.Join(dir, name) + ")"
+		return "present but imposes no OpenBox mandate (" + path + ")"
 	}
 	return "not managed (no " + filepath.Join(dir, files[0]) + ")"
+}
+
+// codexRequirementKeys are the requirements.toml keys whose presence at the top
+// level means the machine is genuinely constrained: hook exclusivity, or a pin on
+// the approval / sandbox modes a local config may select.
+var codexRequirementKeys = []string{
+	"allow_managed_hooks_only",
+	"allowed_approval_policies",
+	"allowed_sandbox_modes",
+}
+
+// mandates reports whether a managed file body actually imposes something.
+func mandates(p Provider, raw []byte) bool {
+	if p == ProviderCodex {
+		keys := devconfig.TopLevelTOMLKeys(raw)
+		for _, k := range codexRequirementKeys {
+			if keys[k] {
+				return true
+			}
+		}
+		return false
+	}
+	return strings.Contains(string(raw), "hook "+string(p))
 }

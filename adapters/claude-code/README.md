@@ -23,11 +23,15 @@ Doing network I/O on `PreToolUse`/`PostToolUse` would blow the NFR-2 `<50 ms`
 budget and couple the tool call to OpenBox reachability. So the hot path only
 maps + appends one JSON line to a per-session spool file (local, sub-millisecond),
 and delivery happens off the hot path at `SessionEnd` (bounded to 12 s) or via
-the `flush` subcommand. Delivery is **at-most-once best-effort** (fail-open): a
-hard outage loses telemetry, never a tool call. A flush cut short by its time
+the `flush` subcommand. Delivery is **best-effort and fail-open**: an outage
+delays telemetry, never a tool call, and an undelivered event is retried on a
+later flush rather than dropped (E8-S7) — up to `maxRecoveryAttempts`, after
+which loss becomes permanent. A flush cut short by its time
 budget persists the **undelivered remainder** to a recovery file that the next
-`flush`/`FlushAll` completes — the tail is not dropped, and delivered events are
-never re-sent.
+`SessionEnd` re-drains (`SweepRecovery`, or an explicit `flush`/`FlushAll`) — the
+tail is not dropped, and delivered events are never re-sent. The sweep is not
+scoped to the ending session: a recovery file belongs to a session that has
+already finished, so nothing else would ever retry it.
 
 Each event's `event_id` is derived deterministically from its structural fields
 (`deriveID` in `mapper.go`): the same logical event always hashes to the same id

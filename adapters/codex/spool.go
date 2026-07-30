@@ -26,10 +26,11 @@ import (
 // deduplicates on the Idempotency-Key its stable id produces, so a re-send
 // cannot double-count (E8-S7). A hard outage delays telemetry rather than
 // losing it, and never touches a tool call. Loss becomes permanent only past
-// maxRecoveryAttempts, which is logged. When a flush is cut short (time budget / ctx
-// cancellation), the UNDELIVERED remainder is persisted to a recovery file so a
-// later drain completes it — delivered events are never re-sent, the tail is
-// never dropped (INV-5 event ids are stable through the whole lifecycle).
+// maxRecoveryAttempts. When a flush is cut short (time budget / ctx
+// cancellation), the UNDELIVERED remainder is persisted to a recovery file,
+// which the next SessionEnd re-drains via SweepRecovery (or an explicit `flush`
+// / FlushAll) — delivered events are never re-sent, the tail is never dropped
+// (INV-5 event ids are stable through the whole lifecycle).
 type Spool struct {
 	Dir string
 }
@@ -66,9 +67,115 @@ type FlushFunc func(context.Context, client.DevEvent) error
 // FlushSession drains one session's spool through fn and returns the number of
 // events delivered. It rotates the spool file first (atomic rename) so late
 // appends land in a fresh file. If ctx ends the drain early, the undelivered
-// remainder is persisted to a recovery file (picked up by a later FlushAll).
+// remainder is persisted to a recovery file, which SweepRecovery re-drains.
 func (s Spool) FlushSession(ctx context.Context, sessionID string, fn FlushFunc) (int, error) {
 	return s.drainFile(ctx, s.sessionPath(sessionID), fn)
+}
+
+// SweepRecovery re-drains carry-over (recovery) files left by earlier flushes —
+// any session's, not just the caller's — and returns the number of events
+// delivered.
+//
+// This is what makes E8-S7's retry real rather than notional. A recovery file is
+// written by a session that has already ended, so that session has no later
+// trigger of its own: without an unowned sweep, `FlushSession` would only ever
+// touch `<session>.jsonl` and every carry-over would sit on disk forever (a
+// developer offline for an afternoon would accumulate one per session and report
+// a degraded evidence state from then on). Sweeping by session would not fix it
+// either — each new thread has a new id.
+//
+// Only BARE `.rec<N>-<id>.jsonl` files are claimed, never a live `<session>.jsonl`
+// (which may belong to a session still running, and whose events are merely
+// un-flushed rather than undelivered) and never an in-flight `.flushing.`
+// rotation. That restriction is what makes an unowned sweep safe: nobody holds a
+// bare recovery file open, and drainFile claims it by atomic rename, so a
+// concurrent sweep from another session's teardown loses the race cleanly
+// instead of double-delivering.
+//
+// The directory is listed once up front, so recovery files this sweep itself
+// writes are not re-drained in the same pass — otherwise a single offline flush
+// would burn every remaining attempt (maxRecoveryAttempts) at once and turn a
+// bounded retry into immediate loss.
+func (s Spool) SweepRecovery(ctx context.Context, fn FlushFunc) (int, error) {
+	return s.sweepRecovery(ctx, s.recoveryFiles(), "", fn)
+}
+
+// recoveryFiles snapshots the carry-over files currently in the spool directory.
+// An unreadable directory yields none: a sweep is best-effort catch-up (observe,
+// INV-3), never a reason to fail a caller.
+func (s Spool) recoveryFiles() []string {
+	entries, err := os.ReadDir(s.Dir)
+	if err != nil {
+		return nil
+	}
+	var out []string
+	for _, e := range entries {
+		if !e.IsDir() && isRecoveryFile(e.Name()) {
+			out = append(out, e.Name())
+		}
+	}
+	return out
+}
+
+// sweepRecovery drains the named carry-over files, those belonging to
+// ownSession (if any) first so the ending session's own telemetry gets the
+// budget before other sessions' backlog does. It continues past a single file's
+// error and stops on ctx expiry, leaving the rest for a later sweep.
+func (s Spool) sweepRecovery(ctx context.Context, names []string, ownSession string, fn FlushFunc) (int, error) {
+	if ownSession != "" {
+		own := sanitizeSessionID(ownSession) + ".rec"
+		mine, theirs := make([]string, 0, len(names)), make([]string, 0, len(names))
+		for _, n := range names {
+			if strings.HasPrefix(n, own) {
+				mine = append(mine, n)
+			} else {
+				theirs = append(theirs, n)
+			}
+		}
+		names = append(mine, theirs...)
+	}
+	total := 0
+	var firstErr error
+	for _, name := range names {
+		if ctx.Err() != nil {
+			return total, ctx.Err()
+		}
+		n, err := s.drainFile(ctx, filepath.Join(s.Dir, name), fn)
+		total += n
+		if err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	return total, firstErr
+}
+
+// isRecoveryFile reports whether name is a carry-over file —
+// `<session>.rec<N>-<id>.jsonl`, or the legacy `<session>.rec-<id>.jsonl` written
+// before the attempt counter existed.
+//
+// The match is on the segment's shape rather than a `.rec` substring, because
+// `.reclaim.<id>` (a claimed orphan, i.e. a drain in flight) contains `.rec`
+// too. Counting or claiming one of those would inflate the undelivered count
+// with a file that is being actively delivered.
+func isRecoveryFile(name string) bool {
+	if !strings.HasSuffix(name, ".jsonl") || strings.Contains(name, ".flushing.") {
+		return false
+	}
+	i := strings.Index(name, ".rec")
+	if i < 0 {
+		return false
+	}
+	rest := name[i+len(".rec"):]
+	j := strings.Index(rest, "-")
+	if j < 0 {
+		return false
+	}
+	for _, r := range rest[:j] {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 // FlushAll drains every session spool in the directory — the `flush`
@@ -220,7 +327,7 @@ func (s Spool) UndeliveredCount() int {
 	}
 	total := 0
 	for _, e := range entries {
-		if e.IsDir() || !strings.Contains(e.Name(), ".rec") {
+		if e.IsDir() || !isRecoveryFile(e.Name()) {
 			continue
 		}
 		data, err := os.ReadFile(filepath.Join(s.Dir, e.Name()))
