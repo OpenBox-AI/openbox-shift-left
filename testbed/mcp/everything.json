@@ -1,0 +1,9 @@
+{
+  "//": "The MCP reference server (modelcontextprotocol/servers, src/everything), stdio. Pinned: the tool roster IS the fixture, so a drifting version must fail the run rather than silently change what was tested. Used with --strict-mcp-config so a session sees this server and nothing the developer happens to have configured.",
+  "mcpServers": {
+    "everything": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-everything@2026.7.4"]
+    }
+  }
+}

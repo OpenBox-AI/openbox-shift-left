@@ -1,0 +1,50 @@
+{
+  "activity_id": "cc-act-15a86e08eb686830d76de8c2b61dfdd9",
+  "activity_input": {
+    "kind": "mcp",
+    "mcp_server": "github",
+    "mcp_tool": "search_issues",
+    "tool_name": "search_issues"
+  },
+  "activity_type": "search_issues",
+  "event_type": "ActivityStarted",
+  "hook_trigger": true,
+  "metadata": {
+    "event_id": "ev-7",
+    "provider": "claude-code",
+    "tool_name": "search_issues"
+  },
+  "run_id": "sess-golden-0001",
+  "source": "developer-runtime",
+  "span_count": 1,
+  "spans": [
+    {
+      "attributes": {
+        "mcp.method": "callTool",
+        "mcp.server": "github",
+        "mcp.tool": "search_issues"
+      },
+      "duration_ns": null,
+      "end_time": null,
+      "error": null,
+      "events": [],
+      "hook_type": "mcp",
+      "kind": "CLIENT",
+      "mcp_method": "callTool",
+      "mcp_server": "github",
+      "mcp_tool": "search_issues",
+      "name": "search_issues",
+      "parent_span_id": null,
+      "span_id": "55366449828fe29f",
+      "stage": "started",
+      "start_time": 1785488400000000000,
+      "status": {
+        "code": "UNSET",
+        "description": null
+      },
+      "trace_id": "d80f747122049f16ef9fe23371ff5814"
+    }
+  ],
+  "timestamp": "2026-07-31T09:00:00Z",
+  "workflow_id": "openbox-ai/openbox-shift-left"
+}

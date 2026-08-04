@@ -1,0 +1,17 @@
+{
+  "source": "developer-runtime",
+  "event_type": "SignalReceived",
+  "activity_type": "PromptSubmitted",
+  "workflow_id": "openbox-ai/openbox-shift-left",
+  "run_id": "sess-golden-0001",
+  "workflow_type": "developer-session",
+  "signal_name": "prompt_submitted",
+  "signal_args": {
+    "prompt": "refactor the spool"
+  },
+  "timestamp": "2026-07-31T09:00:00Z",
+  "metadata": {
+    "event_id": "ev-3",
+    "provider": "claude-code"
+  }
+}

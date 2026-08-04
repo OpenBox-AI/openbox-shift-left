@@ -1,0 +1,15 @@
+{
+  "schema_version": "1.0",
+  "event_id": "evt-content-2",
+  "event_type": "ToolResult",
+  "openbox_session_id": "sess-abc123",
+  "developer_did": "did:aip:7f3c9b2e-0000-5000-a000-000000000001",
+  "timestamp": "2026-07-07T12:00:11Z",
+  "tool": { "name": "Read", "kind": "file" },
+  "span": {
+    "semantic_type": "file_read",
+    "stage": "completed",
+    "file_path": "cli/secrets.go",
+    "response_body": "package cli\n// ... file contents ..."
+  }
+}

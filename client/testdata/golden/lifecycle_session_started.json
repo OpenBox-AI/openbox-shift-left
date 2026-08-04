@@ -1,0 +1,13 @@
+{
+  "source": "developer-runtime",
+  "event_type": "WorkflowStarted",
+  "activity_type": "SessionStarted",
+  "workflow_id": "openbox-ai/openbox-shift-left",
+  "run_id": "sess-golden-0001",
+  "workflow_type": "developer-session",
+  "timestamp": "2026-07-31T09:00:00Z",
+  "metadata": {
+    "event_id": "ev-1",
+    "provider": "claude-code"
+  }
+}

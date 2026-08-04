@@ -1,0 +1,51 @@
+{
+  "//": "OpenBox managed settings for Claude Code (E8-S8). Deploy root-owned and user-unwritable to /etc/claude-code/managed-settings.json (Linux), /Library/Application Support/ClaudeCode/ (macOS), or C:\\ProgramData\\ClaudeCode\\ (Windows). See ../README.md for what each key does and does not guarantee.",
+
+  "//hooks": "Admin-defined OpenBox hooks. The binary path below is absolute because a managed hook cannot depend on the provider's working directory; `openbox managed install` fills it in.",
+  "hooks": {
+    "SessionStart": [
+      { "matcher": "", "hooks": [ { "type": "command", "command": "OPENBOX_BIN hook claude-code SessionStart", "timeout": 5 } ] }
+    ],
+    "UserPromptSubmit": [
+      { "matcher": "", "hooks": [ { "type": "command", "command": "OPENBOX_BIN hook claude-code UserPromptSubmit", "timeout": 5 } ] }
+    ],
+    "PreToolUse": [
+      { "matcher": "*", "hooks": [ { "type": "command", "command": "OPENBOX_BIN hook claude-code PreToolUse", "timeout": 5 } ] }
+    ],
+    "PostToolUse": [
+      { "matcher": "*", "hooks": [ { "type": "command", "command": "OPENBOX_BIN hook claude-code PostToolUse", "timeout": 5 } ] }
+    ],
+    "SessionEnd": [
+      { "matcher": "", "hooks": [ { "type": "command", "command": "OPENBOX_BIN hook claude-code SessionEnd", "timeout": 15 } ] }
+    ]
+  },
+
+  "//mandate": "Without allowManagedHooksOnly a user hook config coexists with this one, so the gate can be bypassed by adding a competing config rather than by editing this file.",
+  "allowManagedHooksOnly": true,
+  "allowManagedPermissionRulesOnly": true,
+  "disableBypassPermissionsMode": "disable",
+  "disableSideloadFlags": true,
+  "strictPluginOnlyCustomization": true,
+
+  "//sandbox": "failIfUnavailable makes the tool refuse to run rather than silently degrade to unsandboxed; allowUnsandboxedCommands:false makes the per-command escape a no-op.",
+  "sandbox": {
+    "enabled": true,
+    "failIfUnavailable": true,
+    "allowUnsandboxedCommands": false
+  },
+
+  "//permissions": "Deny rules that do not depend on OpenBox policy being fresh — defence in depth for the classes the incident record shows matter most (credential exfiltration, remote-piped shell).",
+  "permissions": {
+    "deny": [
+      "Read(./.env)",
+      "Read(./.env.*)",
+      "Read(./**/id_rsa)",
+      "Read(./**/id_ed25519)",
+      "Read(~/.aws/credentials)",
+      "Read(~/.ssh/**)"
+    ]
+  },
+
+  "//version-floor": "Present as hygiene only. Version floors FAIL OPEN upstream (an unmet value is stripped, not enforced) — never rely on this as a control.",
+  "minimumVersion": "2.1.220"
+}

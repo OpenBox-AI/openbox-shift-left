@@ -1,0 +1,15 @@
+{
+  "schema_version": "1.0",
+  "event_id": "evt-0005",
+  "event_type": "ToolCall",
+  "openbox_session_id": "sess-abc123",
+  "developer_did": "did:aip:7f3c9b2e-0000-5000-a000-000000000001",
+  "timestamp": "2026-07-07T12:00:12Z",
+  "tool": { "name": "mcp__github__create_issue", "kind": "mcp", "mcp_server": "github" },
+  "span": {
+    "semantic_type": "mcp_tool_call",
+    "stage": "started",
+    "function": "create_issue",
+    "mcp_server": "github"
+  }
+}

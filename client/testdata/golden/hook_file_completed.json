@@ -1,0 +1,42 @@
+{
+  "activity_id": "cc-act-210c9b44fe54bf46969d3183061aeb4f",
+  "activity_type": "Write",
+  "event_type": "ActivityStarted",
+  "hook_trigger": true,
+  "metadata": {
+    "event_id": "ev-5",
+    "provider": "claude-code",
+    "tool_name": "Write"
+  },
+  "run_id": "sess-golden-0001",
+  "source": "developer-runtime",
+  "span_count": 1,
+  "spans": [
+    {
+      "attributes": {},
+      "bytes_read": null,
+      "bytes_written": 128,
+      "duration_ns": 2500000000,
+      "end_time": 1785488402500000000,
+      "error": null,
+      "events": [],
+      "file_mode": null,
+      "file_operation": "write",
+      "file_path": "cli/cmd/openbox/main.go",
+      "hook_type": "file_operation",
+      "kind": "INTERNAL",
+      "name": "file.write",
+      "parent_span_id": null,
+      "span_id": "a42f2832e565755c",
+      "stage": "completed",
+      "start_time": 1785488400000000000,
+      "status": {
+        "code": "UNSET",
+        "description": null
+      },
+      "trace_id": "d80f747122049f16ef9fe23371ff5814"
+    }
+  ],
+  "timestamp": "2026-07-31T09:00:02.5Z",
+  "workflow_id": "openbox-ai/openbox-shift-left"
+}

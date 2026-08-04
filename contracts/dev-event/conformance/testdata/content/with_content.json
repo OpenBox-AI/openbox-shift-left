@@ -1,0 +1,10 @@
+{
+  "schema_version": "1.0",
+  "event_id": "evt-content-1",
+  "event_type": "PromptSubmitted",
+  "openbox_session_id": "sess-abc123",
+  "developer_did": "did:aip:7f3c9b2e-0000-5000-a000-000000000001",
+  "timestamp": "2026-07-07T12:00:05Z",
+  "tool": { "name": "claude-code", "kind": "shell" },
+  "content": { "prompt": "refactor the auth module" }
+}

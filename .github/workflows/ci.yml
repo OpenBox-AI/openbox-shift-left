@@ -1,0 +1,79 @@
+name: ci
+
+# Build, vet and test every module in the workspace on every change.
+#
+# Modules are discovered from go.work rather than listed here, so a new module
+# is covered the moment it joins the workspace — the previous state of this repo
+# (11 modules, no CI at all) is the failure mode worth engineering against.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.23"
+
+      - name: Check formatting
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "::error::these files are not gofmt'd:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: Check go.work covers every module
+        # Discovery below reads go.work, so a module missing from it would be
+        # silently unverified — the exact hole this workflow exists to close.
+        run: |
+          on_disk=$(find . -name go.mod -not -path './.git/*' | wc -l)
+          in_workspace=$(go list -m | wc -l)
+          if [ "$on_disk" -ne "$in_workspace" ]; then
+            echo "::error::$on_disk go.mod files on disk but $in_workspace modules in go.work — add the new module to go.work"
+            exit 1
+          fi
+
+      - name: Resolve workspace modules
+        # The repo root is not itself a module, so `./...` matches nothing;
+        # every module's package pattern has to be named explicitly.
+        run: echo "MODS=$(go list -m -f '{{.Dir}}/...' | tr '\n' ' ')" >> "$GITHUB_ENV"
+
+      - name: Build
+        run: go build $MODS
+
+      - name: Vet
+        run: go vet $MODS
+
+      - name: Test
+        # -race matters here: the spool, the liveness registry and the findings
+        # cursor are all concurrently-written files with existing race tests.
+        # No -short: the tests that exec the real built binary are the ones
+        # that pin the INV-3 hook contract (exit 0, empty stdout).
+        run: go test -race $MODS
+
+      - name: Fuzz (short)
+        # The rego-path parser and the secret redactor read attacker-adjacent
+        # strings on the enforce path, where a panic is a crashed hook. A short
+        # budget per target catches the shallow cases on every change; the
+        # corpus persists in testdata for anything found.
+        run: |
+          cd decision
+          for target in FuzzTokenizePath FuzzResolvePath FuzzRedact; do
+            go test -run XXX -fuzz "$target" -fuzztime 20s ./
+          done

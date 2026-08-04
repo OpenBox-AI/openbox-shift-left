@@ -1,0 +1,14 @@
+{
+  "schema_version": "1.0",
+  "event_id": "evt-0007",
+  "event_type": "CommitCreated",
+  "openbox_session_id": "sess-abc123",
+  "developer_did": "did:aip:7f3c9b2e-0000-5000-a000-000000000001",
+  "timestamp": "2026-07-07T12:31:00Z",
+  "tool": { "name": "git", "kind": "shell" },
+  "metadata": {
+    "commit_sha": "37ec0a3f1c9b2e0000000000000000000000abcd",
+    "repo": "openbox-ai/openbox-shift-left",
+    "branch": "main"
+  }
+}

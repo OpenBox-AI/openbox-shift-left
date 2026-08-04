@@ -1,0 +1,26 @@
+# Claude Code tooling (local tooling, not project content)
+.claude/
+
+# OS / editor cruft
+.DS_Store
+Thumbs.db
+*.swp
+*~
+.idea/
+.vscode/
+
+# Build output (compiled Go binaries — built per-platform, never committed)
+bin/
+/openbox
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+
+# Testbed local state (config isolation, minted credentials, session output)
+testbed/.state/
+testbed/env.local.sh
+
+# Local agent tooling state (never project content)
+.fab7/

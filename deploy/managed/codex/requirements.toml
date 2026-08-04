@@ -1,0 +1,57 @@
+# OpenBox managed requirements for Codex CLI (E8-S8).
+#
+# Deploy root-owned and user-unwritable to /etc/codex/requirements.toml. Requirements
+# are the mandate layer: they pin what a local config is allowed to select. See
+# ../README.md for what each key does and does not guarantee.
+#
+# EVERY MANDATE KEY HERE IS TOP-LEVEL, AND THAT IS LOAD-BEARING. In TOML a bare key
+# written after a table header belongs to that table, so an earlier revision of this
+# file — which listed these below a `[hooks]` header — shipped them as
+# `hooks.allowed_approval_policies` and friends: parsed, ignored, and silently not in
+# effect, while `openbox doctor` and session posture still reported "managed". Keep
+# mandate keys above every table header.
+
+# The load-bearing pin: approval_policy = "never" would let tool calls auto-run, so
+# the enforce gate's deny would be the only thing standing in the way — and a local
+# config could otherwise select it. "never" is deliberately excluded.
+allowed_approval_policies = ["untrusted", "on-request", "on-failure"]
+
+# Sandboxing cannot be opted out of locally. danger-full-access is excluded.
+allowed_sandbox_modes = ["read-only", "workspace-write"]
+
+# ── hook exclusivity: deliberately NOT enabled yet ─────────────────────────────
+#
+# `allow_managed_hooks_only = true` makes Codex ignore user- and project-level hook
+# config. That is the key an enterprise claim really rests on — but it only helps if a
+# MANAGED hook definition exists to take its place, and this template does not ship
+# one. Enabling it as-is would make Codex ignore the `~/.codex/hooks.json` that
+# `openbox dev init --provider codex` writes and run NO OpenBox hook at all: governance
+# silently off across the fleet, with posture still reporting a mandate.
+#
+# It cannot simply be defined here either. `hooks` is not a requirements key — the
+# accepted top-level set in Codex 0.145.0 is allowed_approval_policies,
+# allowed_approvals_reviewers, allowed_sandbox_modes, allowed_permission_profiles,
+# default_permissions, remote_sandbox_config, allowed_web_search_modes,
+# allow_managed_hooks_only, allow_appshots, allow_remote_control, computer_use,
+# windows, feature_requirements, mcp_servers, plugins, marketplaces, rules,
+# enforce_residency, experimental_network, permissions, models,
+# guardian_policy_config. Hook definitions live in a config layer
+# (`hooks.managed_dir` → a managed hooks file in codex-rs `HooksFile` shape) or in a
+# cloud requirements bundle, neither of which is verified here.
+#
+# Uncomment ONLY together with a deployed managed hook definition, and confirm with
+# `openbox doctor` that the hook still runs. See ../README.md § "Remaining gap".
+# allow_managed_hooks_only = true
+
+# A feature-flag pin is likewise not shipped: the requirements analogue is
+# `feature_requirements`, whose shape is not verified against 0.145.0, so it is
+# omitted rather than shipped wrong. `features.hooks = true` in managed_config.toml
+# supplies the default; pinning it against a local override is part of the same gap.
+
+# Network egress allowlist. Off unless your org opts in — an allowlist is only
+# meaningful if it is shorter than "everything". This is the provider's egress
+# control, not OpenBox's: OpenBox records the posture, it does not proxy traffic.
+# Being a table, it must stay BELOW every bare key above.
+# [experimental_network]
+# enabled = true
+# allowed_domains = ["registry.npmjs.org", "pypi.org", "github.com"]

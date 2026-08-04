@@ -1,0 +1,12 @@
+{
+  "schema_version": "1.0",
+  "event_id": "evt-0009",
+  "event_type": "SessionStarted",
+  "openbox_session_id": "sess-abc123",
+  "developer_did": "did:aip:7f3c9b2e-0000-5000-a000-000000000001",
+  "timestamp": "07/07/2026 12:00:00",
+  "tool": { "name": "claude-code", "kind": "shell" },
+  "metadata": {
+    "provider": "claude-code"
+  }
+}

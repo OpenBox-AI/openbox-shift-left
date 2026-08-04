@@ -1,0 +1,15 @@
+{
+  "schema_version": "1.0",
+  "event_id": "evt-0001",
+  "event_type": "SessionStarted",
+  "openbox_session_id": "sess-abc123",
+  "developer_did": "did:aip:7f3c9b2e-0000-5000-a000-000000000001",
+  "timestamp": "2026-07-07T12:00:00Z",
+  "tool": { "name": "claude-code", "kind": "shell" },
+  "metadata": {
+    "provider": "claude-code",
+    "tool_version": "2.1.200",
+    "repo": "openbox-ai/openbox-shift-left",
+    "cwd": "/home/dev/openbox-shift-left"
+  }
+}

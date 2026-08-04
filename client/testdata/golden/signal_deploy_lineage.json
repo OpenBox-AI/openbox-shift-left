@@ -1,0 +1,22 @@
+{
+  "source": "developer-runtime",
+  "event_type": "SignalReceived",
+  "activity_type": "Deploy",
+  "workflow_id": "openbox-ai/openbox-shift-left",
+  "run_id": "sess-golden-0001",
+  "workflow_type": "developer-session",
+  "signal_name": "deploy",
+  "signal_args": {
+    "commit_sha": "37ec0a3f1c9b2e0000000000000000000000abcd",
+    "deploy_id": "deploy-production-37ec0a3f",
+    "repo": "openbox-ai/openbox-shift-left"
+  },
+  "timestamp": "2026-07-31T09:00:00Z",
+  "metadata": {
+    "commit_sha": "37ec0a3f1c9b2e0000000000000000000000abcd",
+    "deploy_id": "deploy-production-37ec0a3f",
+    "event_id": "deploy-production-37ec0a3f",
+    "repo": "openbox-ai/openbox-shift-left",
+    "tool_name": "openbox-git-action"
+  }
+}
