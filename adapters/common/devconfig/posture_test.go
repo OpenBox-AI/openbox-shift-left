@@ -2,6 +2,7 @@ package devconfig
 
 import (
 	"encoding/json"
+	"reflect"
 	"regexp"
 	"strings"
 	"testing"
@@ -23,6 +24,41 @@ func TestPostureMetadata_BooleansAlwaysPresent(t *testing.T) {
 		}
 		if _, isBool := v.(bool); !isBool {
 			t.Errorf("%s should be a bool, got %T", f.name, v)
+		}
+	}
+}
+
+// Every governance control in DevConfig must be reported in the posture.
+//
+// TestPostureMetadata_BooleansAlwaysPresent checks the field table against
+// ITSELF, so it cannot catch the failure that actually happened twice: a
+// control added to DevConfig with a resolver, and never added to the table.
+// This walks the config struct instead, so the next boolean control forces a
+// decision — report it, or name it here as deliberately not a posture control.
+func TestPostureFields_CoverEveryConfigControl(t *testing.T) {
+	// install_git_hook is local convenience (whether we wrote a hook into this
+	// repo's .git), not a governance posture an org would attest to.
+	notPosture := map[string]bool{"install_git_hook": true}
+
+	reported := map[string]bool{}
+	for _, f := range postureFields() {
+		reported[f.name] = true
+	}
+	typ := reflect.TypeOf(DevConfig{})
+	for i := 0; i < typ.NumField(); i++ {
+		fld := typ.Field(i)
+		if fld.Type.Kind() != reflect.Bool &&
+			!(fld.Type.Kind() == reflect.Ptr && fld.Type.Elem().Kind() == reflect.Bool) {
+			continue
+		}
+		name := strings.Split(fld.Tag.Get("json"), ",")[0]
+		if name == "" || notPosture[name] {
+			continue
+		}
+		if !reported[name] {
+			t.Errorf("DevConfig.%s (%q) is a boolean control but is not in postureFields() — "+
+				"add it so `openbox doctor` and the session posture can report it, "+
+				"or add it to notPosture here with the reason", fld.Name, name)
 		}
 	}
 }

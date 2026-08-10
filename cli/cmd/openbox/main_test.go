@@ -391,6 +391,12 @@ func TestHookEndToEndSmoke(t *testing.T) {
 	t.Setenv("OPENBOX_BASE_URL", srv.URL)
 	t.Setenv("OPENBOX_API_KEY", "obx_test_"+strings.Repeat("a", 48))
 	t.Setenv("OPENBOX_ED25519_SEED", "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=")
+	// Pin the realtime opt-out: this test's contract is the LEGACY delivery
+	// shape (zero egress before SessionEnd), which is exactly what
+	// OPENBOX_REALTIME=0 must restore. Realtime-on delivery has its own
+	// binary-driven test (TestHookRealtimeDelivery) — it cannot be exercised
+	// in-process, because the trigger refuses to spawn a `*.test` binary.
+	t.Setenv("OPENBOX_REALTIME", "0")
 
 	events := []struct {
 		hook, payload string
@@ -461,6 +467,120 @@ func TestHookEndToEndSmoke(t *testing.T) {
 	}
 	if !strings.Contains(all, `"activity_type":"SessionStarted"`) {
 		t.Errorf("no delivered body carried activity_type=SessionStarted (lifecycle label):\n%s", all)
+	}
+}
+
+// TestHookRealtimeDelivery proves the near-real-time path end-to-end on the
+// REAL binary (the trigger refuses to spawn a `*.test` binary, so this cannot
+// run in-process): a hook spools its event and a detached, debounced flusher
+// delivers it to /evaluate mid-session — no SessionEnd involved — and the
+// SessionEnd that follows delivers exactly the remainder (no loss, no
+// duplicate Idempotency-Keys when realtime and teardown flushes overlap).
+func TestHookRealtimeDelivery(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a binary + spawns detached flushers; skipped in -short")
+	}
+	var mu sync.Mutex
+	var keys []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost && r.URL.Path == "/api/v1/governance/evaluate" {
+			_, _ = io.Copy(io.Discard, r.Body)
+			mu.Lock()
+			keys = append(keys, r.Header.Get("Idempotency-Key"))
+			mu.Unlock()
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"governance_event_id":"ge","verdict":"allow","risk_score":0.1,"action":"continue","fallback_used":false}`))
+			return
+		}
+		t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+	}))
+	defer srv.Close()
+
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "openbox")
+	if out, err := exec.Command("go", "build", "-o", bin, ".").CombinedOutput(); err != nil {
+		t.Fatalf("build openbox: %v\n%s", err, out)
+	}
+	spool := filepath.Join(dir, "spool")
+	env := append(os.Environ(),
+		"OPENBOX_AGENT_DID=did:aip:7f3c9b2e-0000-5000-a000-000000000001",
+		"OPENBOX_SPOOL_DIR="+spool,
+		"OPENBOX_CONFIG="+filepath.Join(dir, "none.json"),
+		"OPENBOX_SESSION_DIR="+filepath.Join(dir, "sessions"),
+		"OPENBOX_BASE_URL="+srv.URL,
+		"OPENBOX_API_KEY=obx_test_"+strings.Repeat("a", 48),
+		"OPENBOX_ED25519_SEED=AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=",
+		// No OPENBOX_REALTIME: the default-on posture is under test.
+	)
+	runHook := func(hook, payload string) {
+		t.Helper()
+		cmd := exec.Command(bin, "hook", "claude-code", hook)
+		cmd.Stdin = strings.NewReader(payload)
+		cmd.Env = env
+		var stdout, stderr strings.Builder
+		cmd.Stdout, cmd.Stderr = &stdout, &stderr
+		if err := cmd.Run(); err != nil {
+			t.Fatalf("%s exit != 0: %v\nstderr: %s", hook, err, stderr.String())
+		}
+		if stdout.Len() != 0 {
+			t.Fatalf("%s wrote to stdout: %q", hook, stdout.String())
+		}
+	}
+	received := func() int { mu.Lock(); defer mu.Unlock(); return len(keys) }
+	waitFor := func(desc string, cond func() bool) {
+		t.Helper()
+		deadline := time.Now().Add(15 * time.Second)
+		for !cond() {
+			if time.Now().After(deadline) {
+				t.Fatalf("timed out waiting for %s (received %d)", desc, received())
+			}
+			time.Sleep(50 * time.Millisecond)
+		}
+	}
+
+	// A single hot-path hook must get its event to core with no further hook
+	// activity and no SessionEnd: this IS the real-time property.
+	runHook("PreToolUse", `{"hook_event_name":"PreToolUse","session_id":"rt","cwd":"/r","tool_name":"Bash","tool_input":{"command":"ls"}}`)
+	waitFor("mid-session delivery of the first event", func() bool { return received() >= 1 })
+
+	// The flusher releases the debounce lock when its drain finishes; the next
+	// spooled event then triggers a fresh flusher immediately. Waiting on the
+	// release (instead of sleeping out the window) keeps this deterministic.
+	lock := filepath.Join(spool, "rt.flushlock")
+	waitFor("debounce lock release", func() bool { _, err := os.Stat(lock); return os.IsNotExist(err) })
+	runHook("PostToolUse", `{"hook_event_name":"PostToolUse","session_id":"rt","cwd":"/r","tool_name":"Bash","tool_response":{"ok":true}}`)
+	waitFor("mid-session delivery of the second event", func() bool { return received() >= 2 })
+
+	// SessionEnd delivers exactly the remainder (its own event): total is
+	// exact, nothing lost to the realtime drains, nothing double-sent.
+	runHook("SessionEnd", `{"hook_event_name":"SessionEnd","session_id":"rt","cwd":"/r","reason":"other"}`)
+	waitFor("SessionEnd delivery", func() bool { return received() >= 3 })
+	waitFor("spool drained", func() bool {
+		entries, err := os.ReadDir(spool)
+		if err != nil {
+			return false
+		}
+		for _, e := range entries {
+			if !e.IsDir() && strings.HasSuffix(e.Name(), ".jsonl") {
+				return false
+			}
+		}
+		return true
+	})
+	mu.Lock()
+	defer mu.Unlock()
+	if len(keys) != 3 {
+		t.Errorf("want exactly 3 deliveries (Pre, Post, SessionEnd), got %d", len(keys))
+	}
+	seen := map[string]bool{}
+	for _, k := range keys {
+		if k == "" {
+			t.Error("a delivery carried no Idempotency-Key")
+		}
+		if seen[k] {
+			t.Errorf("duplicate Idempotency-Key %q — an event was double-sent", k)
+		}
+		seen[k] = true
 	}
 }
 

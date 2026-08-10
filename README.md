@@ -46,8 +46,10 @@ Then just use `claude` as normal. → **[Getting started](docs/getting-started.m
 A single static binary is the whole runtime: it is the CLI, the hook engine, the
 git hook and the policy evaluator. Enforcement decides **in-process** in
 microseconds ([ADR-0006](docs/adr/ADR-0006-in-process-decider.md)); telemetry is
-spooled and flushed off the hot path, so a slow or absent OpenBox never slows a
-tool call and never blocks one.
+spooled and delivered off the hot path in near-real-time (a detached, debounced
+flusher drains the spool within ~2s of each tool call; SessionEnd remains the
+completeness safety net), so a slow or absent OpenBox never slows a tool call
+and never blocks one.
 
 Everything provider-agnostic lives in one engine; each tool adds only a thin
 adapter behind one SPI. Adding a tool is an adapter, not a fork.

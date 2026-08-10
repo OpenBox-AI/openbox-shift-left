@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/openbox-ai/openbox-shift-left/client"
 )
@@ -17,7 +18,8 @@ import (
 // Spool decouples the tool-call hot path from the network. Mapped events
 // are appended to a per-session append-only JSONL file (local I/O, well
 // under a <50ms budget); a bounded Flush drains them to /evaluate off the
-// hot path (at SessionEnd, or via the `flush` subcommand / a CLI-driven
+// hot path (near-real-time via the detached flusher a RealtimeTrigger
+// spawns, at SessionEnd, or via the `flush` subcommand / a CLI-driven
 // drain).
 //
 // This is how observe-only stays truly non-blocking with synchronous hooks:
@@ -406,6 +408,40 @@ func orphanBasePath(dir, name string) string {
 // SessionPath is the spool file for a session id, sanitized for the filesystem.
 func (s Spool) SessionPath(sessionID string) string {
 	return filepath.Join(s.Dir, sanitizeSessionID(sessionID)+".jsonl")
+}
+
+// FlushLockPath is the per-session debounce lockfile the RealtimeTrigger and
+// the spawned flusher coordinate through. It carries no event data — its
+// existence plus mtime are the whole protocol. The `.flushlock` suffix keeps
+// it invisible to every drain: FlushAll processes only `.jsonl` and
+// `.flushing.` names, and IsRecoveryFile requires a `.jsonl` suffix.
+func (s Spool) FlushLockPath(sessionID string) string {
+	return filepath.Join(s.Dir, sanitizeSessionID(sessionID)+".flushlock")
+}
+
+// TouchFlushLock refreshes (creating if needed) the session's flush lock, so
+// the debounce window covers a running drain, not just its spawn. Best-effort:
+// a failure only widens the race to a redundant — idempotent — flush.
+func (s Spool) TouchFlushLock(sessionID string) {
+	lock := s.FlushLockPath(sessionID)
+	now := time.Now()
+	if os.Chtimes(lock, now, now) == nil {
+		return
+	}
+	if err := os.MkdirAll(s.Dir, 0o700); err != nil {
+		return
+	}
+	if f, err := os.OpenFile(lock, os.O_CREATE|os.O_WRONLY, 0o600); err == nil {
+		f.Close()
+	}
+}
+
+// ReleaseFlushLock removes the session's flush lock when a drain finishes, so
+// the next spooled event can trigger a fresh flusher immediately instead of
+// waiting out the debounce window. Best-effort: a leaked lock goes stale after
+// the window and is taken over.
+func (s Spool) ReleaseFlushLock(sessionID string) {
+	_ = os.Remove(s.FlushLockPath(sessionID))
 }
 
 // sanitizeSessionID reduces a session id to a safe filename component. Claude

@@ -38,6 +38,15 @@ Two paths, deliberately separate:
   There is no daemon and no socket.
 - **Telemetry is spooled and flushed off the hot path.** A slow or absent OpenBox
   cannot slow a tool call or block one; undelivered events are retried, not dropped.
+  Delivery is near-real-time by default: after an event is spooled, the hook nudges a
+  detached, debounced flusher for its session (`hookflow.RealtimeTrigger`, ~2s
+  window), so events are queryable in core while the session is still running. The
+  hook process itself still performs zero network I/O — its worst case is one
+  lockfile check plus, at most once per window, spawning the flusher. SessionEnd's
+  flush remains the completeness safety net, and `realtime_flush:false` /
+  `OPENBOX_REALTIME=0` restores batch-at-session-end. Overlapping drains cannot
+  double-count: spool rotation is an atomic rename and core deduplicates on each
+  event's Idempotency-Key.
 
 ## Modules
 

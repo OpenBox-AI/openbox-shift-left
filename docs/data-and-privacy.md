@@ -19,6 +19,13 @@ new field cannot start egressing by accident. Structural identifiers (paths, too
 names, MCP server names) are metadata and always flow; bodies are content and do
 not.
 
+*When* it leaves: events are delivered in near-real-time by default — a detached
+flusher drains the local spool within ~2 seconds of each tool call
+(`hookflow.RealtimeTrigger`), with a final drain at session end.
+`realtime_flush: false` (or `OPENBOX_REALTIME=0`) delays delivery to session end
+instead. Either way this changes only *timing*: what egresses is governed solely
+by the table above and the content-capture posture below.
+
 ## Content capture
 
 Content capture is **on by default**. Prompt text is sent so that governance can act

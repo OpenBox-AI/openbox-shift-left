@@ -161,6 +161,31 @@ func TestResolveContentCapture_DefaultOn(t *testing.T) {
 	}
 }
 
+func TestResolveRealtime_DefaultOn(t *testing.T) {
+	// Default ON: absent config field + no env → real-time delivery enabled.
+	isolateConfig(t)
+	if !ResolveRealtime() {
+		t.Error("ResolveRealtime default must be ON (absent config)")
+	}
+	// Explicit config opt-out honored (absent vs explicit-false via *bool).
+	cfgPath := filepath.Join(t.TempDir(), "dev.json")
+	_ = os.WriteFile(cfgPath, []byte(`{"developer_did":"`+testDID+`","realtime_flush":false}`), 0o600)
+	t.Setenv(EnvConfigPath, cfgPath)
+	if ResolveRealtime() {
+		t.Error("explicit realtime_flush:false must opt out")
+	}
+	// Env wins over config in both directions.
+	t.Setenv(EnvRealtime, "1")
+	if !ResolveRealtime() {
+		t.Error("OPENBOX_REALTIME=1 must override config false")
+	}
+	_ = os.WriteFile(cfgPath, []byte(`{"developer_did":"`+testDID+`","realtime_flush":true}`), 0o600)
+	t.Setenv(EnvRealtime, "0")
+	if ResolveRealtime() {
+		t.Error("OPENBOX_REALTIME=0 must force OFF")
+	}
+}
+
 func TestBoolFlagPrecedence(t *testing.T) {
 	cfgPath := filepath.Join(t.TempDir(), "dev.json")
 	write := func(json string) { _ = os.WriteFile(cfgPath, []byte(json), 0o600) }

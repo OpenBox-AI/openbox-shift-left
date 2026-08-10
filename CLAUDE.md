@@ -97,6 +97,12 @@ approval loop with hold + rewake, the autonomous approver (ADR-0012), lineage
 the managed-config posture layer, and `openbox init` as the single onboarding front
 door with `--role approver` and `--base-url`.
 
+Near-real-time delivery (`hookflow.RealtimeTrigger`: debounced detached flusher per
+session, default on, `OPENBOX_REALTIME=0` opt-out) is implemented and verified at
+the binary level (`TestHookRealtimeDelivery` drives the real binary against a mock
+core); its testbed phase (`testbed/25-realtime.sh`) exists but has not yet run
+against a live local stack.
+
 Known limits, documented in
 `docs/architecture.md#assurance--what-the-evidence-proves`: the backend does not sign
 policy bundles yet (so `require_verified_bundle` defaults off), Codex's hook cannot be
