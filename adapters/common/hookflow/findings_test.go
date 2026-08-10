@@ -76,6 +76,20 @@ func findingsEnv(t *testing.T, on bool) (string, string) {
 	return adv, cur
 }
 
+// isolateUserConfigDir points os.UserConfigDir at a temp dir on every
+// platform. XDG_CONFIG_HOME alone only covers Linux — darwin resolves
+// $HOME/Library/Application Support and ignores XDG, so without pinning HOME
+// these tests would read AND WRITE the developer's real
+// ~/Library/Application Support/openbox cursors: first run green, every later
+// run red (and real state clobbered).
+func isolateUserConfigDir(t *testing.T) {
+	t.Helper()
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+	t.Setenv("HOME", dir)    // darwin: $HOME/Library/Application Support
+	t.Setenv("AppData", dir) // windows: %AppData%
+}
+
 // seedAdvisories appends raw JSONL advisory records (as core+Advisory.Record would
 // have written them) so the consumer parses realistic input.
 func seedAdvisories(t *testing.T, path string, recs ...AdvisoryRecord) {
@@ -306,7 +320,7 @@ func TestSurfaceFindings_EachProviderSeesEveryFinding(t *testing.T) {
 	// The env override pins one cursor path for the whole process, which is
 	// exactly what we must NOT be relying on here.
 	t.Setenv(devconfig.EnvFindingsCursor, "")
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	isolateUserConfigDir(t)
 
 	seedAdvisories(t, adv, AdvisoryRecord{
 		EventType: "ToolCall", Verdict: "BLOCK", WouldBlock: true, RiskScore: 0.9,
@@ -330,7 +344,7 @@ func TestSurfaceFindings_EachProviderSeesEveryFinding(t *testing.T) {
 func TestSurfaceFindings_SameProviderStillAdvancesOnce(t *testing.T) {
 	adv, _ := findingsEnv(t, true)
 	t.Setenv(devconfig.EnvFindingsCursor, "")
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	isolateUserConfigDir(t)
 
 	seedAdvisories(t, adv, AdvisoryRecord{
 		EventType: "ToolCall", Verdict: "BLOCK", WouldBlock: true,
