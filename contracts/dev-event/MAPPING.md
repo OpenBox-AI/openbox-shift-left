@@ -1,11 +1,17 @@
 # Mapping — normalized dev event → base-SDK unified wire model (openbox-core `/evaluate`)
 
 **Contract:** [`schema/dev-event.schema.json`](schema/dev-event.schema.json) v1.0 (the tool-agnostic **adapter-facing** shape; unchanged).
-**Wire model (as built, E7):** the **base SDK's** `EventType` set — `WorkflowStarted / WorkflowCompleted / SignalReceived / ActivityStarted`+`hook_trigger` — serialized by `client/payload.go` onto `POST /api/v1/governance/evaluate` (openbox-core). Ratified in **ADR-0004** (unify dev events onto the base wire model); built by **E7-S3** (span builder), **E7-S4** (tool→hook), **E7-S5** (lifecycle→Workflow*/Signal).
+**Wire model:** the **base SDK's** `EventType` set — `WorkflowStarted / WorkflowCompleted / SignalReceived / ActivityStarted / ActivityCompleted` — serialized by `client/payload.go` (`buildPayload`) onto `POST /api/v1/governance/evaluate` (openbox-core). Every payload is span-less and hook-less.
 
-> **What changed vs SL-1 (read this first).** SL-1 kept a *parallel* developer vocabulary (`SessionStarted`/`ToolCall`/…) and passed each `event_type` **verbatim** to core, which required patching core's accept-list (SL-13 EXT-core). **ADR-0004 reversed that:** shift-left now re-expresses the *same* normalized dev events onto the base SDK's blessed wire types, so (a) telemetry conforms to `assert_hook_wire_shape` (mirrored as `client.AssertHookWireShape`, E7-S1), (b) the EXT-core accept-list is **retired** (E7-S2), and (c) dev tool calls pair on the shared dashboard timeline. The normalized contract (this schema) is **unchanged** — adapters still emit `ToolCall`/`SessionStarted`/…; only the **client→core wire serialization** moved.
+> **What changed, read this first.** Two reshapes brought the wire here.
+>
+> **ADR-0004** retired SL-1's parallel developer vocabulary (`SessionStarted`/`ToolCall`/… passed verbatim, requiring a core accept-list patch) and re-expressed the same normalized dev events onto the base SDK's blessed wire types.
+>
+> **[ADR-0013](../../docs/adr/ADR-0013-tool-call-as-activity.md)** then moved tool calls off the hook-span envelope: `ToolCall` → `ActivityStarted`, `ToolResult` → `ActivityCompleted`, both span-less. A hook process has no in-process OTel, so the span shift-left used to send was fabricated by hand to satisfy a shape rather than to record a measurement. Retiring it also dissolved ADR-0004's standing obligation to hand-maintain a Go mirror of the base hook contract. **Cost, stated plainly:** dev sessions produce zero `spans` rows, so there are no span-level Merkle leaves and no server-side `semantic_type` for them.
+>
+> The normalized contract (this schema) is **unchanged** through both — adapters still emit `ToolCall`/`SessionStarted`/…; only the **client→core wire serialization** moved.
 
-**Two layers.** The *adapter-facing* contract ([schema](schema/dev-event.schema.json)) is what a provider adapter produces via SPI `emit()` — its `event_type` enum is still the 7 dev-runtime lifecycle names. The *wire* layer below is what the shared `client/` translates that into. Adding a provider never touches either layer (PRD FR-4, architecture §1b).
+**Two layers.** The *adapter-facing* contract ([schema](schema/dev-event.schema.json)) is what a provider adapter produces via SPI `emit()` — its `event_type` enum is still the 7 dev-runtime lifecycle names. The *wire* layer below is what the shared `client/` translates that into. Adding a provider never touches either layer (PRD FR-4, architecture §1b). That the span retirement required **zero** edits under `contracts/dev-event/` is the split working as designed.
 
 ---
 
@@ -16,17 +22,24 @@ Source-cited to `client/payload.go` (`governanceEventPayload`, the marshaled bod
 | Normalized dev event | → wire `governanceEventPayload` field | Notes |
 |---|---|---|
 | — (constant) | `source` = `"developer-runtime"` | Free-form in core; distinguishes dev traffic from the SDK's `"workflow-telemetry"`. |
-| `event_type` | `event_type` | **Re-mapped**, not passed through — see §2. Resolves to a base wire type (`WorkflowStarted`/`WorkflowCompleted`/`SignalReceived`/`ActivityStarted`). |
+| `event_type` | `event_type` | **Re-mapped**, not passed through — see §2. Resolves to one of the five base wire types. |
 | `openbox_session_id` | `run_id` | Session keyed by `(workflow_id, run_id, workflow_type)`. |
-| `developer_did` (or workspace/repo id) | `workflow_id` | Stable per-workspace identity so `(workflow_id, run_id)` is unique per session. |
-| — (constant) | `workflow_type` = `"developer-session"` | **Required** by the base contract on **both** `Workflow*` **and** `SignalReceived` events (`event_rules.py` `_REQUIRED_WORKFLOW_FIELDS`; core reads it into a dedicated column, `storage_event.go`). The *constant* value keeps a session's `WorkflowStarted` + its `SignalReceived`s + `WorkflowCompleted` on one `(workflow_id, run_id, workflow_type)` identity so core resolves them to **one** session row. Omitted (`omitempty`) on the `ActivityStarted` hook path (which builds its own envelope). |
+| `developer_did` (or workspace/repo id) | `workflow_id` | Stable per-workspace identity so `(workflow_id, run_id)` is unique per session. One derivation, `workflowIDFor` — shared with `ApprovalKeyFor` (§2). |
+| — (constant) | `workflow_type` = `"developer-session"` | **Required** by the base contract on `Workflow*` and `SignalReceived` events (`event_rules.py` `_REQUIRED_WORKFLOW_FIELDS`; core reads it into a dedicated column, `storage_event.go`). The *constant* value keeps a session's whole tree on one `(workflow_id, run_id, workflow_type)` identity so core resolves it to **one** session row. Now present on **tool events too** — the old hook envelope omitted it, diverging from the base SDK's `ActivityContext.to_payload_fields()`; routing tool events through the same struct fixed that at no cost. |
 | — (per signal) | `signal_name` | Set **only** on `SignalReceived` (`prompt_submitted`/`commit_created`/`deploy`); required there (`event_rules.py` raises `ENVELOPE_MISSING_FIELDS` otherwise). |
+| — (tool events) | `activity_id` | Set on **both** halves of a tool call. Pairs them onto one row and is the approval key — see §2 "Operation vs invocation identity". |
+| `tool.name` | `activity_type` | The dashboard's "Activity" column. Lifecycle events carry their `event_type` string instead, so the column is never empty. |
+| `tool.*`, `span.*` (started) | `activity_input` | Structural locators only; see §3. Core stores it as the row's `input` and runs Guardrails **stage 0** over it (`internal/services/guardrail.go:180`). |
+| `span.*` (completed) | `activity_output` | Counts and an exit code only; see §3. Core stores it as the row's `output` and runs Guardrails **stage 1** over it (`guardrail.go:192`). |
+| `started_at` → `ended_at` | `duration_ms` | **Client-computed**, in float milliseconds. Core used to derive the row's duration from the stored span; with no span, the client is the only thing that can. Core copies it onto the row verbatim (`storage_event.go:292-294`) and the dashboard reads `event.duration_ms` directly. **Omitted, never zero**, when unknown — see §3. |
 | `timestamp` | `timestamp` | Core field is a **string** (RFC3339) — pass through verbatim. |
-| `span` (tool events only) | `spans[0]` + `span_count` = len(`spans`) | Flat base `SpanData`; see §3. Lifecycle/signal events are **span-less** (the base contract rejects span-bearing non-hook events). |
 | `metadata` | `metadata` (`json.RawMessage`) | Merged per-type keys below; JSON object. Carries commit/deploy lineage (§2). |
 | `tokens`, `cost` | `metadata.tokens`, `metadata.cost` | No first-class payload fields; carried in `metadata` (finops, SL-16). |
 | `developer_did` | — | Identity is via the signed AIP headers + Bearer key, **not** a body field. `from_agent_did`/`multi_agent_session_id` stay empty (Handoff-only). |
-| `content.*`, `span.request_body/response_body` | `spans[].request_body` / `response_body` **only when content-capture enabled**, **capped to 65536 chars** before egress (`capBody`, G_SEC SEC-1) | Stripped at the client when disabled (INV-2). Never a first-class payload field, never on the local enforce `DecisionRequest`. |
+| `span` | — | **No longer serialized.** No payload carries `spans`, `span_count` or `hook_trigger` (ADR-0013). The struct survives in the frozen adapter contract as the carrier the client reads locators and counts *from* — see §3. |
+| `content.prompt` | `signal_args.prompt` **only when content-capture enabled**, capped to 65536 chars (`capBody`) | Stripped at the client when disabled (INV-2). |
+| `content.tool_input` | `activity_input.command` / `.arguments` **only when content-capture enabled**, capped | Tier-2 **escalation only**, never the observe path (OD-E9-7). |
+| `span.request_body/response_body` | — | **No longer an egress channel.** They rode the span; with no span the serializer does not read them at all, so they cannot egress even with capture on. This removed nothing that worked: no adapter has ever populated either, and both mappers assert they stay empty (`adapters/claude-code/mapper_test.go:169`, `adapters/codex/mapper_test.go:207`). |
 
 `schema_version` and `event_id` are contract/idempotency fields — `event_id` is the client's idempotency key (INV-5), used client-side for dedupe; neither is a core payload field.
 
@@ -34,17 +47,19 @@ Source-cited to `client/payload.go` (`governanceEventPayload`, the marshaled bod
 
 ## 2. Per-type mapping (dev event → base wire event)
 
-Built by `lifecycleWireType` (lifecycle/signal, `client/payload.go`) and `buildPayload`'s tool dispatch (E7-S4).
+Built by `wireTypeFor` in `client/payload.go` — one table for every event type, feeding one serializer.
 
-| Dev `event_type` | Base wire `event_type` | `signal_name` | Span | Key `metadata` | Core effect |
+| Dev `event_type` | Base wire `event_type` | `signal_name` | Activity fields | Key `metadata` | Core effect |
 |---|---|---|---|---|---|
 | `SessionStarted` | `WorkflowStarted` | — | — | `provider`, `tool_version`, `repo`, `cwd` | **create** session `(workflow_id, run_id, workflow_type)` (`storage_session.go`) |
 | `SessionEnded` | `WorkflowCompleted` | — | — | `total_tokens`, `total_cost`, `duration_ms` | **terminal** — closes the session |
 | `PromptSubmitted` | `SignalReceived` | `prompt_submitted` | — | `tokens`, `cost`, `model` | mid-session signal |
 | `CommitCreated` | `SignalReceived` | `commit_created` | — | `commit_sha`, `repo`, `branch` (FR-5) | mid-session signal; commit lineage |
 | `Deploy` | `SignalReceived` | `deploy` | — | `deploy_id`, `commit_sha`, `repo`, `environment`, `deploy_did` (FR-6/7) | signal; deploy lineage |
-| `ToolCall` | `ActivityStarted`+`hook_trigger` | — | stage=`started` | `tool_name`, `tool_use_id`?, `agent_id`?, `agent_type`? | pre-exec decision (OPA runs; the enforce point) |
-| `ToolResult` | `ActivityStarted`+`hook_trigger` | — | stage=`completed` | `tool_name`, `exit_code`?, `tool_use_id`?, `agent_id`?, `agent_type`? | **same** hook envelope; carries `bytes_*`/`lines_count` |
+| `ToolCall` | `ActivityStarted` | — | `activity_id`, `activity_type`, `activity_input` | `tool_name`, `tool_use_id`?, `agent_id`?, `agent_type`? | one `governance_events` row; pre-exec decision (OPA + Guardrails stage 0) |
+| `ToolResult` | `ActivityCompleted` | — | `activity_id`, `activity_type`, `activity_output`, `duration_ms` | `tool_name`, `exit_code`?, `tool_use_id`?, `agent_id`?, `agent_type`? | its **own** row, sharing the `activity_id`; independently evaluated (OPA + Guardrails stage 1) |
+
+Two POSTs per tool call, as before — the count did not change, only the shape.
 
 ### Correlation metadata keys (E8-S3/S4)
 
@@ -55,7 +70,7 @@ still forbids secrets) and all are optional — a provider that does not expose 
 
 | Key | Providers | Meaning |
 |---|---|---|
-| `tool_use_id` | Claude Code, Codex | Per-invocation id pairing a `ToolCall` with its `ToolResult`. It rides `span.invocation_id`, a *local* field (spooled, never emitted in the span) that feeds the derived `span_id` and the duration stash. `span.function` is the MCP function name only. |
+| `tool_use_id` | Claude Code, Codex | Per-invocation id for a `ToolCall`/`ToolResult` pair. It rides `span.invocation_id`, a *local* field (spooled, never emitted) that keys the cross-process duration stash. The wire pairing itself is `activity_id`. `span.function` is the MCP function name only. |
 
 ### Operation vs invocation identity
 
@@ -63,7 +78,7 @@ A tool call has two identities, and the normalized event keeps them apart:
 
 | Field | Means | Derives | Stable across a retry? |
 |---|---|---|---|
-| `span.invocation_id` | THIS attempt (`tool_use_id`) | `span_id`, the duration-stash key, and `event_id`'s per-call distinguisher | No — by design |
+| `span.invocation_id` | THIS attempt (`tool_use_id`) | the duration-stash key, and `event_id`'s per-call distinguisher | No — by design |
 | `span.operation_id` | WHAT is being done | `activity_id` | **Yes — load-bearing** |
 
 `activity_id` is the approval key (`POST /governance/approval`) and the scope of
@@ -87,44 +102,93 @@ id, never content fields (INV-2).
 | `turn_id` | Codex | Per-turn correlation id. |
 | `thread_id`, `root_session_id` | Codex | Emitted only when a forked thread's id differs from the session id it continues (E8-S4). |
 
-### The `ToolCall`/`ToolResult` pair — key correction (E7-S4)
+### Why a `ToolResult` is an `ActivityCompleted` (ADR-0013)
 
-Both stages serialize as **`event_type = ActivityStarted`** with `hook_trigger = true`. A `ToolResult` is **not** `ActivityCompleted`:
+This reverses what E7-S4 concluded, so the reasoning is worth stating rather than
+just the table row.
 
-- The base SDK's `wire_event_type()` forces `ActivityStarted` for **any** `hook_trigger` event, regardless of stage (`events.py` `hook(...)` → `EventKind.HOOK` serializes as `ActivityStarted`).
-- `ActivityCompleted` is a **hook-less lifecycle** type that must **not** carry spans (`assert_hook_wire_shape` asserts `ActivityStarted` unconditionally and accepts span `stage ∈ {started, completed}`). Emitting `ActivityCompleted` would **fail our own** `client.AssertHookWireShape`.
-- The two stages are **paired by a shared `span_id` (+ deterministic `activity_id`, `trace_id`)**, not by parent linkage. `client/spanbuilder.go` derives these from `session/tool/locator` with **no** stage or timestamp input, so the two separate hook processes (and the SL-4 spool) mint the **same** ids without threading state. Core/the dashboard pair them onto one timeline row.
+E7-S4 was right about the base SDK: `wire_event_type()` forces `ActivityStarted`
+for **any** `hook_trigger` event regardless of stage, and `assert_hook_wire_shape`
+asserts `ActivityStarted` unconditionally. Emitting `ActivityCompleted` *with a
+hook envelope* would violate that contract.
 
-> **Supersedes** ADR-0004's baseline table (row `ToolResult → ActivityCompleted`) and Consequences bullet: the accurate, self-consistent mechanism is *both stages = `ActivityStarted`+hook, paired by span_id*. See E7-S4 result artifact for the cross-repo derivation. The dashboard-pairing behavior this produces is re-verified live in §7.
+What changed is the premise, not the rule. **That rule binds hook events, and
+shift-left no longer emits any.** The base SDK's hook path exists for runtimes
+with in-process OpenTelemetry, where a hook fires mid-activity and has a real
+span to attach. A Claude Code or Codex hook is a short-lived separate process
+with no OTel at all: the span was hand-fabricated by `client/spanbuilder.go` to
+satisfy a shape. Once you stop fabricating it, the tool call is not a hook on an
+activity — it *is* the activity, and it takes the ordinary hook-less lifecycle
+types.
 
-### `semantic_type` is computed server-side
+The two halves pair on **`activity_id` alone** now (there is no `span_id`). It is
+derived from `session/tool/locator/operation` with no stage, timestamp or
+attempt input, so the two separate hook processes — and a rehydrated spool flush
+— mint the same id without threading any state.
 
-Core derives `SpanData.semantic_type` from the span's **source** fields via `ComputeSemanticTypeFromSpan` (`internal/content/session.go`). The client sets the source fields + `hook_type`; it does **not** send `semantic_type` (the wire assertion forbids it).
+> **Supersedes** ADR-0004's `ToolCall`/`ToolResult` rows and E7-S4's correction
+> above. ADR-0004 remains the true record of why the first answer was chosen;
+> [ADR-0013](../../docs/adr/ADR-0013-tool-call-as-activity.md) carries the change
+> in premise and the full trade-off.
 
-| `tool.kind` | Span shape the client sets (`hookSpanShape`, E7-S4) | Core-computed `semantic_type` |
-|---|---|---|
-| `file` | `hook_type=file_operation`; name `file.read`/`file.write`/`file.open`/`file.delete`; root `file_path`, `file_operation`, `bytes_*` | `file_read`/`file_write`/`file_open`/`file_delete` (`session.go` file classifier) |
-| `mcp` | `hook_type=mcp` (kind=CLIENT); `attributes["mcp.method"]="callTool"` + `mcp_server`/`mcp_tool`; `mcp_*` family roots | `mcp_tool_call` — **first-class via E7-S2** (`session.go` mcp classifier) |
-| `shell` | `hook_type=shell`; `shell_command` present-but-**null** on egress (INV-2: read only for LOCAL enforce) | `shell_command` — **first-class via E7-S2** (was `internal` fallback pre-E7-S2) |
+### `semantic_type`: none, for dev sessions
 
-> **E7-S2 dependency (server-side, pending).** Making `shell`→`shell_command` and `mcp`→`mcp_tool_call` first-class is the openbox-core classifier edit **E7-S2** (extend `ComputeSemanticTypeFromSpan`; retire the SL-13 EXT-core accept-list). Until E7-S2 lands, `shell` resolves to core's `internal` fallback and `mcp` to `mcp_tool_call` (already recognized pre-E7-S2 per `session.go` mcp attribute path). The wire shape does not depend on E7-S2 — E7-S0 confirmed stock core accepts every base type at HTTP 200.
+Core derives `SpanData.semantic_type` from a span's source fields
+(`ComputeSemanticTypeFromSpan`, `internal/content/session.go:204`). **Dev sessions
+send no spans, so no `semantic_type` is computed for them.** This is a real loss
+and is recorded as such in ADR-0013's consequences — `tool.kind` and the
+`activity_input` locators are what a consumer classifies on instead.
+
+MAPPING.md previously carried an "E7-S2 dependency (server-side, pending)" claim
+that `shell`→`shell_command` and `mcp`→`mcp_tool_call` classification was
+awaiting a core edit. **That claim is deleted, not restated.** It was already
+contradicted by observed data (a live span carried `semantic_type:
+"shell_command"` while the openbox-core checkout defines `mcp_tool_call`
+(`session.go:111`) and no `shell_command` constant), it named no owner, and it is
+now moot: with no span there is nothing to classify. An unowned claim in a
+governance product is worse than an acknowledged gap.
 
 ---
 
-## 3. Building a flat `SpanData` (tool events)
+## 3. Field homes — where every `DevEvent.Span` field goes
 
-Built by `client/spanbuilder.go` (`BuildHookSpan`), the no-OTel Go port of the base SDK's `from_otel_span`. Every span is a **flat** dict (no nested `otel`/`openbox` envelope, no `data` blob, no `semantic_type`) with all 14 common root fields present + the family tuple:
+**This table is the authority on what the serializer reads.** The adapter-facing
+`span` object is frozen at schema v1.0 and adapters still populate it; what
+changed is that `client/payload.go` now reads locators and counts *out* of it
+into `activity_input`/`activity_output` instead of serializing it as a span.
 
-| Field group | Fields | Notes |
-|---|---|---|
-| Common roots (always present) | `span_id`, `trace_id`, `parent_span_id`, `name`, `kind`, `stage`, `start_time`, `end_time`, `duration_ns`, `attributes`, `status`, `events`, `hook_type`, `error` | `span_id` = 16-hex, `trace_id` = 32-hex (regex-checked by the assertion). `stage="started"` ⇒ `end_time=null`, `duration_ns=null`. |
-| `file_operation` family | `file_path`, `file_mode`, `file_operation`, `bytes_read`, `bytes_written` | Present-but-null when not applicable. |
-| `mcp` family | `mcp_server`, `mcp_tool`, `mcp_method` | Inert until E7-S2 recognizes them server-side. |
-| `shell` family | `shell_command`, `shell_exit_code` | `shell_command` **never egressed** (INV-2). |
-| `tool` family | `tool_name` | |
-| Gated content | `request_body`, `response_body` | INV-2 gated + `capBody`-truncated (§1). |
+| `DevEvent` field | Wire home | Read on | Notes |
+|---|---|---|---|
+| `tool.name` | `activity_input.tool_name`, `activity_type`, `metadata.tool_name` | started (+`activity_type` on both) | |
+| `tool.kind` | `activity_input.kind` | started | `shell`/`file`/`mcp` — the classification that replaces `semantic_type` |
+| `tool.mcp_server` | `activity_input.mcp_server` | started | falls back from `span.mcp_server` |
+| `span.file_path` | `activity_input.file_path` | started | |
+| `span.file_operation` | `activity_input.file_operation` | started | |
+| `span.mcp_server` | `activity_input.mcp_server` | started | mcp kind only |
+| `span.function` | `activity_input.mcp_tool` | started | mcp kind only; for other kinds it is a local pairing input, never wire data |
+| `span.bytes_read` | `activity_output.bytes_read` | completed | |
+| `span.bytes_written` | `activity_output.bytes_written` | completed | |
+| `span.lines_count` | `activity_output.lines_count` | completed | |
+| `metadata.exit_code` | `activity_output.exit_code` | completed | promoted from the free-form blob; **no adapter supplies one today**, so it is absent in practice. Kept because the promotion is live the moment one does |
+| `started_at`, `ended_at` | `duration_ms` | completed | float ms; **omitted, not zero**, when the stash missed, a timestamp does not parse, or the result is not positive. Zero would claim the call took no time |
+| `content.tool_input` | `activity_input.command` / `.arguments` | started | Tier-2 escalation only, content-gated, `capBody`-capped |
+| `span.invocation_id` | — (local) | — | feeds the duration-stash key; never a wire field |
+| `span.operation_id` | — (local) | — | feeds `activity_id`; never a wire field |
+| `span.semantic_type` | — | — | the client has never sent it; core computed it from the span, and there is no span |
+| `span.stage` | — | — | **retained, read by nothing.** Kept deliberately: the adapter contract is frozen, adapters still set it, and a future span-bearing shape would need it back without an adapter change |
+| `span.module` | — | — | never had a wire home |
+| `span.request_body`, `span.response_body` | — | — | **dropped as an egress channel** (§1). Measured, not assumed: no adapter has ever set either |
 
-The started+completed pair reuse the **same** `span_id` (base pairing mechanism; `HookSpan.SpanID` reuse). `trace_id` derives from the authenticated `SessionID`. See `client/hookspan.go` for the mirrored contract and `AssertHookWireShape` for the conformance assertion.
+Retired with the span layer: `span_id`, `trace_id`, `parent_span_id`, `kind`,
+`hook_type`, `duration_ns`, `attributes`, `status`, `events`, the family root
+tuples (`file_mode`, `shell_command`, `shell_exit_code`, `mcp_method`, …) and the
+16-/32-hex id derivations. `client/hookspan.go` and `client/spanbuilder.go` —
+along with `AssertHookWireShape`, the hand-maintained mirror ADR-0004 flagged as
+a standing unverifiable obligation — are deleted.
+
+The golden fixtures in `client/testdata/golden/activity_*.json` pin this table
+byte-exactly, one per tool kind per stage. If a fixture carries a field this
+table does not list, one of the two is wrong.
 
 ---
 
@@ -152,11 +216,15 @@ The wire model is now the base SDK's **stock** vocabulary — no dev-specific `e
 
 | Consumer | Behavior |
 |---|---|
-| Session store (`storage_session.go`) | `WorkflowStarted`→create, `WorkflowCompleted`→terminal — **native**, no EXT-core lifecycle edit. |
-| OPA policy eval (`opa.go`) | Bypassed (auto-allow) **only** for `Workflow*` (latency); `ActivityStarted` (the tool call = enforce point) **and** `SignalReceived` go through **real** OPA. Session=workflow does **not** weaken enforcement (E7-S0 #2). |
-| Guardrails eligibility | `ActivityStarted` is guardrails-**eligible** at core (unlike the old dev types) — useful for content-capture redaction (E6-S4). Metadata-only by default (INV-2). |
-| `signal_name` / `workflow_type` | Stored in dedicated columns (`storage_event.go`); commit/deploy lineage rides `metadata` (core has no `commit_sha`/`deploy_id` columns) and **survives** the Signal mapping. |
-| Dashboard activity timeline (`run.provider.ts`) | Pairs `ActivityStarted`/`Completed`. Dev tool calls now emit `ActivityStarted`+hook (both stages) → expected to appear (vs SL-1's `Unknown`). **Re-verified live in §7.** |
+| Session store (`storage_session.go`) | `WorkflowStarted`→create, `WorkflowCompleted`→terminal — **native**, no EXT-core lifecycle edit. Unchanged by ADR-0013. |
+| Accept-list (`internal/api/governance.go:273-286`) | All five types we emit are accept-listed, `ActivityCompleted` included — no core patch. |
+| Idempotency / dedupe (`activities/governance/validation.go:96`) | Keyed on `(agent_id, workflow_id, run_id, activity_id, event_type)`. Because `event_type` is in the key, a tool call's two halves are now **distinct** events. Under the hook shape they matched on all five — same `activity_id`, both `ActivityStarted` — so the `ToolResult` POST hit the existing-event branch (`governance_workflow.go:228-231`) and was substantially a no-op. A **retry** of the same half still dedupes correctly, which is the behavior you want. |
+| OPA policy eval (`opa.go`) | Bypassed (auto-allow) **only** for `Workflow*` (latency). `ActivityStarted`, **`ActivityCompleted`** and `SignalReceived` all go through **real** OPA — so the completed half is now independently evaluated, where the dedupe collision above meant it previously returned the started half's cached verdict. |
+| Guardrails eligibility (`governance_workflow.go:429-431`) | Both activity types are guardrails-**eligible**: stage 0 reads `activity_input` (`guardrail.go:180`), stage 1 reads `activity_output` (`guardrail.go:192`). Structural fields only by default (INV-2). |
+| Row fields (`storage_event.go:258-294`) | `activity_id`/`activity_type`/`attempt`/`activity_input`→`input`/`activity_output`→`output`/`duration_ms` are set **event-type-agnostically**, so the completed half's duration and output land with no core change. Note `payload.Error` is read **only** for `WorkflowFailed`, which is why the client sends none — see §3. |
+| `signal_name` / `workflow_type` | Stored in dedicated columns; commit/deploy lineage rides `metadata` (core has no `commit_sha`/`deploy_id` columns) and **survives** the Signal mapping. |
+| Spans table | **No rows for dev sessions.** The accepted trade-off (ADR-0013): no span-level Merkle leaves, no `semantic_type`. Event-level Merkle leaves are unaffected. |
+| Dashboard activity timeline (`run.provider.ts`) | Pairs `ActivityStarted`/`ActivityCompleted`, which is now literally what a tool call emits. §7 records whether that renders as expected — **not yet run live**. |
 
 If any future lifecycle type cannot map without a non-additive wire change → **HALT** and route to architecture.
 
@@ -171,12 +239,47 @@ Verified against the SDK's `request_signing.py` — the client matches core exac
 
 ---
 
-## 7. Live E2E verification (dashboard pairing + INV re-check)
+## 7. Live E2E verification
 
-The unified shape's user-visible payoff is the dashboard fix. This section records the live E2E: boot the shared stack (RUNBOOK Path A: infra + Temporal + openbox-core + workers + openbox-fe dashboard), run a real Claude Code session (`SessionStarted` → file/shell/mcp `ToolCall`+`ToolResult` → `PromptSubmitted` → `SessionEnded`), and confirm on the dashboard timeline:
+**Status: NOT YET RUN for the ADR-0013 shape.** Everything above about core's
+ingest was established by reading openbox-core, and reading is not running. The
+claims below are what `testbed/run-all.sh` must confirm against a live local
+stack before any of them is asserted as fact.
 
-1. **Pairing:** a tool call renders as one paired started/completed row (not `Unknown`), fixing `dashboard-devruntime-display-gaps`. **Open risk to confirm:** the dashboard pairs by `event_type` — our shape emits **two `ActivityStarted`** events (paired by `span_id`), not `ActivityStarted`+`ActivityCompleted`; verify the timeline pairs on `span_id`/`activity_id` and not on the `Started`/`Completed` type suffix. If it pairs only by type suffix, that is a dashboard-side follow-up, not a wire defect.
-2. **Semantic type:** file spans classify (`file_*`); shell/mcp classify first-class **once E7-S2 is live** (else shell→`internal`).
-3. **INV re-check on the wire shape:** INV-2 (0 bodies stored, metadata-only), INV-1 (no secrets), INV-3/3b (enforce local, observe never blocks), INV-8 (stock core, no accept-list).
+The suite's assertions are in place (`testbed/20-capture.sh`, `25-realtime.sh`);
+what is missing is a run. Until then, treat §5's row behavior as *derived from
+core's source*, not as observed.
 
-_Status: see the E7-S6 ledger entry / result artifact for the run evidence._
+1. **Two rows, one activity.** One tool call ⇒ exactly one `ActivityStarted` and
+   one `ActivityCompleted` sharing an `activity_id`. This is the load-bearing
+   unverified assumption: that core stores the completed event as its own row
+   rather than merging, deduping or rejecting it.
+2. **Duration renders.** `duration_ms` present and plausible on the completed
+   row, and visible on the dashboard — the field has exactly one consumer and a
+   visible failure mode.
+3. **Zero span rows.** `select count(*) from spans where session_id=…` is 0,
+   asserted deliberately so a future reader does not "fix" it.
+4. **Merkle.** Event leaves for both rows; no span leaves.
+5. **The approval loop is intact.** Hold → escalate → grant → rewake → consume,
+   with `40-approvals.sh` and `70-approver-auto.sh` unmodified. `activity_id` is
+   unchanged by design (pinned in `client/approval_key_pin_test.go`), but core's
+   span-based approval bypass can no longer fire, so the grant must be consumed
+   through the poll path.
+6. **The retry-after-completion path, specifically.** Core's approval-status
+   query filters on `(workflow_id, run_id, activity_id)` with no `event_type` and
+   no ordering (`datastore/governance_event_pgx.go:74-87`, via
+   `services/governance.go:291`). That key used to be unique per tool call;
+   two activity rows now share it. Drive an operation to completion, then retry
+   the **same** operation so it escalates again, and confirm the poll still
+   resolves the started row and consumes the grant. If it resolves the completed
+   row instead, its NULL `approval_expiration_time` reads as undecided and the
+   hold waits out its budget — a core-side fix (scope by `event_type`, or order
+   by `approval_expired_at IS NOT NULL DESC, created_at DESC`), not a wire
+   change. Found in review; see ADR-0013 Consequences.
+6. **INV re-check:** INV-2 (no command text, file body or tool output on the
+   observe path), INV-1 (no secrets), INV-3/3b (enforce local, observe never
+   blocks), INV-8 (stock core, no accept-list patch).
+
+_When the run happens, record the artifact under
+`plans/260811-0245-tool-activity-event-shape/reports/` and replace this status
+line with what was observed._

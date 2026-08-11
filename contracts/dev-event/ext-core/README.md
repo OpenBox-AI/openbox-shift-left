@@ -15,7 +15,7 @@ openbox-core **already** accept-lists:
 |---|---|
 | `SessionStarted` / `SessionEnded` | `WorkflowStarted` / `WorkflowCompleted` |
 | `PromptSubmitted` / `CommitCreated` / `Deploy` | `SignalReceived` (`signal_name`) |
-| `ToolCall` / `ToolResult` | `ActivityStarted` + `hook_trigger` (span stage started/completed) |
+| `ToolCall` / `ToolResult` | `ActivityStarted` / `ActivityCompleted`, span-less (ADR-0013; was `ActivityStarted`+`hook_trigger` with a span) |
 
 Because these are stock types, **no accept-list patch is needed** — E7-S0 (spike
 S8) confirmed every one returns HTTP 200 on stock core, and **E7-S2** removed the

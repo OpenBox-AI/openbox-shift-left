@@ -39,7 +39,7 @@ Then just use `claude` as normal. → **[Getting started](docs/getting-started.m
                                  │                    │
                                  │                    └─▶ allow · deny · ask · redact
                                  ▼
-                        spool ──▶ openbox-core /evaluate ──▶ sessions · spans · lineage
+                        spool ──▶ openbox-core /evaluate ──▶ sessions · events · lineage
                                         (AIP-signed, same endpoint as agent runtime)
 ```
 
