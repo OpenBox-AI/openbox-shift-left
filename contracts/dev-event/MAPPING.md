@@ -1,6 +1,6 @@
 # Mapping — normalized dev event → base-SDK unified wire model (openbox-core `/evaluate`)
 
-**Contract:** [`schema/dev-event.schema.json`](schema/dev-event.schema.json) v1.0 (the tool-agnostic **adapter-facing** shape; unchanged).
+**Contract:** [`schema/dev-event.schema.json`](schema/dev-event.schema.json) **v1.1** (the tool-agnostic **adapter-facing** shape).
 **Wire model:** the **base SDK's** `EventType` set — `WorkflowStarted / WorkflowCompleted / SignalReceived / ActivityStarted / ActivityCompleted` — serialized by `client/payload.go` (`buildPayload`) onto `POST /api/v1/governance/evaluate` (openbox-core). Every payload is span-less and hook-less.
 
 > **What changed, read this first.** Two reshapes brought the wire here.
@@ -9,9 +9,11 @@
 >
 > **[ADR-0013](../../docs/adr/ADR-0013-tool-call-as-activity.md)** then moved tool calls off the hook-span envelope: `ToolCall` → `ActivityStarted`, `ToolResult` → `ActivityCompleted`, both span-less. A hook process has no in-process OTel, so the span shift-left used to send was fabricated by hand to satisfy a shape rather than to record a measurement. Retiring it also dissolved ADR-0004's standing obligation to hand-maintain a Go mirror of the base hook contract. **Cost, stated plainly:** dev sessions produce zero `spans` rows, so there are no span-level Merkle leaves and no server-side `semantic_type` for them.
 >
-> The normalized contract (this schema) is **unchanged** through both — adapters still emit `ToolCall`/`SessionStarted`/…; only the **client→core wire serialization** moved.
+> The normalized contract (this schema) was **unchanged** through both — adapters still emit `ToolCall`/`SessionStarted`/…; only the **client→core wire serialization** moved.
+>
+> **[ADR-0014](../../docs/adr/ADR-0014-turn-as-activity-and-identifier-allowlist.md)** is the first change that DID touch this contract, which is why it is v1.1: it adds the model-turn pair (`TurnStarted`/`TurnCompleted`, riding the same two activity wire types with `activity_type: llm_completion`) and the fields it needs (`model`, `turn_index`, `agent_id`), and it **re-defines `tokens.input` as pure input** — v1.0's Claude Code rollup folded both cache counts into it. Everything else is additive; that one semantic is what makes it a version bump rather than a silent edit. **Cost, stated plainly:** the transcript projection's INV-2 guarantee is now a curated allowlist enforced by a test, not a structural impossibility, because the model id is a bound string.
 
-**Two layers.** The *adapter-facing* contract ([schema](schema/dev-event.schema.json)) is what a provider adapter produces via SPI `emit()` — its `event_type` enum is still the 7 dev-runtime lifecycle names. The *wire* layer below is what the shared `client/` translates that into. Adding a provider never touches either layer (PRD FR-4, architecture §1b). That the span retirement required **zero** edits under `contracts/dev-event/` is the split working as designed.
+**Two layers.** The *adapter-facing* contract ([schema](schema/dev-event.schema.json)) is what a provider adapter produces via SPI `emit()` — its `event_type` enum is the 9 dev-runtime lifecycle names. The *wire* layer below is what the shared `client/` translates that into. Adding a provider never touches either layer (PRD FR-4, architecture §1b). That the span retirement required **zero** edits under `contracts/dev-event/` is the split working as designed — and that the turn pair DID require edits here is the same split saying, correctly, that this one is a contract change.
 
 ---
 
@@ -27,14 +29,14 @@ Source-cited to `client/payload.go` (`governanceEventPayload`, the marshaled bod
 | `developer_did` (or workspace/repo id) | `workflow_id` | Stable per-workspace identity so `(workflow_id, run_id)` is unique per session. One derivation, `workflowIDFor` — shared with `ApprovalKeyFor` (§2). |
 | — (constant) | `workflow_type` = `"developer-session"` | **Required** by the base contract on `Workflow*` and `SignalReceived` events (`event_rules.py` `_REQUIRED_WORKFLOW_FIELDS`; core reads it into a dedicated column, `storage_event.go`). The *constant* value keeps a session's whole tree on one `(workflow_id, run_id, workflow_type)` identity so core resolves it to **one** session row. Now present on **tool events too** — the old hook envelope omitted it, diverging from the base SDK's `ActivityContext.to_payload_fields()`; routing tool events through the same struct fixed that at no cost. |
 | — (per signal) | `signal_name` | Set **only** on `SignalReceived` (`prompt_submitted`/`commit_created`/`deploy`); required there (`event_rules.py` raises `ENVELOPE_MISSING_FIELDS` otherwise). |
-| — (tool events) | `activity_id` | Set on **both** halves of a tool call. Pairs them onto one row and is the approval key — see §2 "Operation vs invocation identity". |
+| — (activity events) | `activity_id` | Set on **both** halves of a tool call and of a turn. Pairs them onto one row; for a tool call it is additionally the approval key — see §2 "Operation vs invocation identity" and "The turn pair". |
 | `tool.name` | `activity_type` | The dashboard's "Activity" column. Lifecycle events carry their `event_type` string instead, so the column is never empty. |
 | `tool.*`, `span.*` (started) | `activity_input` | Structural locators only; see §3. Core stores it as the row's `input` and runs Guardrails **stage 0** over it (`internal/services/guardrail.go:180`). |
 | `span.*` (completed) | `activity_output` | Counts and an exit code only; see §3. Core stores it as the row's `output` and runs Guardrails **stage 1** over it (`guardrail.go:192`). |
 | `started_at` → `ended_at` | `duration_ms` | **Client-computed**, in float milliseconds. Core used to derive the row's duration from the stored span; with no span, the client is the only thing that can. Core copies it onto the row verbatim (`storage_event.go:292-294`) and the dashboard reads `event.duration_ms` directly. **Omitted, never zero**, when unknown — see §3. |
 | `timestamp` | `timestamp` | Core field is a **string** (RFC3339) — pass through verbatim. |
 | `metadata` | `metadata` (`json.RawMessage`) | Merged per-type keys below; JSON object. Carries commit/deploy lineage (§2). |
-| `tokens`, `cost` | `metadata.tokens`, `metadata.cost` | No first-class payload fields; carried in `metadata` (finops, SL-16). |
+| `tokens`, `cost`, `model` | `metadata.tokens`, `metadata.cost`, `metadata.model` | No first-class payload fields; carried in `metadata`. On a turn's `ActivityCompleted` the same model + counts ALSO ride `activity_output`, so they are policy-visible — see §2 "The turn pair". |
 | `developer_did` | — | Identity is via the signed AIP headers + Bearer key, **not** a body field. `from_agent_did`/`multi_agent_session_id` stay empty (Handoff-only). |
 | `span` | — | **No longer serialized.** No payload carries `spans`, `span_count` or `hook_trigger` (ADR-0013). The struct survives in the frozen adapter contract as the carrier the client reads locators and counts *from* — see §3. |
 | `content.prompt` | `signal_args.prompt` **only when content-capture enabled**, capped to 65536 chars (`capBody`) | Stripped at the client when disabled (INV-2). |
@@ -58,8 +60,11 @@ Built by `wireTypeFor` in `client/payload.go` — one table for every event type
 | `Deploy` | `SignalReceived` | `deploy` | — | `deploy_id`, `commit_sha`, `repo`, `environment`, `deploy_did` (FR-6/7) | signal; deploy lineage |
 | `ToolCall` | `ActivityStarted` | — | `activity_id`, `activity_type`, `activity_input` | `tool_name`, `tool_use_id`?, `agent_id`?, `agent_type`? | one `governance_events` row; pre-exec decision (OPA + Guardrails stage 0) |
 | `ToolResult` | `ActivityCompleted` | — | `activity_id`, `activity_type`, `activity_output`, `duration_ms` | `tool_name`, `exit_code`?, `tool_use_id`?, `agent_id`?, `agent_type`? | its **own** row, sharing the `activity_id`; independently evaluated (OPA + Guardrails stage 1) |
+| `TurnStarted` | `ActivityStarted` | — | `activity_id`, `activity_type` (`llm_completion`) | `turn_index`, `agent_id`?, `agent_type`? | one row opening the turn; no `activity_input` (a turn's input is the prompt, which rides the `prompt_submitted` signal under the content gate) |
+| `TurnCompleted` | `ActivityCompleted` | — | `activity_id`, `activity_type` (`llm_completion`), `activity_output`, `duration_ms` | `tokens`, `model`, `turn_index`, `agent_id`?, `agent_type`? | its **own** row, sharing the `activity_id`; carries the turn's model + four token counts |
 
 Two POSTs per tool call, as before — the count did not change, only the shape.
+Two more per model turn, when usage capture is on.
 
 ### Correlation metadata keys (E8-S3/S4)
 
@@ -130,6 +135,58 @@ attempt input, so the two separate hook processes — and a rehydrated spool flu
 > above. ADR-0004 remains the true record of why the first answer was chosen;
 > [ADR-0013](../../docs/adr/ADR-0013-tool-call-as-activity.md) carries the change
 > in premise and the full trade-off.
+
+### The turn pair: `llm_completion` as an `activity_type` (ADR-0014)
+
+A model turn is the unit a coding agent spends tokens in, and it rides the same
+activity carrier a tool call does — `ActivityStarted`/`ActivityCompleted`, both
+already accept-listed, so INV-8 needs nothing new.
+
+The shape the AI-Agent runtime uses for this signal is an `llm_completion`
+**span** whose `response_body` is `{model, usage{…}}`. Dev sessions write no
+spans (ADR-0013), and core's span-based usage aggregation is gated on
+`detectLLMProvider` reading `span.GetHTTPURL()` — which a hook process has none
+of. So the turn takes the activity shape and mirrors the span's `response_body`
+inside `activity_output`:
+
+```json
+{"model": "claude-opus-4-8",
+ "usage": {"input_tokens": 1204, "output_tokens": 318,
+           "cache_creation_input_tokens": 4096, "cache_read_input_tokens": 58210}}
+```
+
+Four numbers and one bounded identifier — nothing else may enter this object.
+Core runs Guardrails stage 1 and OPA over `activity_output`, so token spend is
+policy-visible (intended), and the schema staying numbers-plus-one-identifier is
+what keeps that safe.
+
+`activity_type` is the literal `llm_completion` on **both** halves. The name is
+core's own (`internal/content/session.go:105` `SemanticTypeLLMCompletion`), so one
+vocabulary spans both runtimes and the core-side extractor keys on a name core
+already knows.
+
+**`activity_id` is `<session_id>:turn:<index>`**, or
+`<session_id>:agent:<agent_id>:turn:<index>` for a subagent's turn. Not a hash,
+unlike the tool-call id: a turn has no operation to key on, is never approved (so
+the id is not an approval key), and a readable id is worth having in stored rows.
+It cannot collide with `cc-act-<32 hex>` by construction, and
+`client/turn_key_pin_test.go` pins the bytes and the separation.
+
+**Both halves are emitted from one hook firing** (Claude Code's `Stop`), so the
+pair is atomic — no orphan half, no cross-hook turn index to race, and queued
+prompts fold into one turn. The Started half's timestamp is the locally-parsed
+turn-open time, used only to compute `duration_ms`; it is consumer-invisible
+either way, since core derives duration from `duration_ms` on the Completed half
+alone. The timestamp *string* never reaches the wire.
+
+Codex reaches the same signal at session granularity: one pair at SessionEnd with
+`activity_id <session_id>:usage:rollup`. Its `Stop` hook exists but is
+deliberately unwired — scope, not impossibility.
+
+> [ADR-0014](../../docs/adr/ADR-0014-turn-as-activity-and-identifier-allowlist.md)
+> carries the full trade-off, including the one that matters: the transcript
+> projection's INV-2 guarantee is now a **curated allowlist enforced by a test**
+> rather than a structural impossibility, because `message.model` is bound.
 
 ### `semantic_type`: none, for dev sessions
 
@@ -241,14 +298,14 @@ Verified against the SDK's `request_signing.py` — the client matches core exac
 
 ## 7. Live E2E verification
 
-**Status: NOT YET RUN for the ADR-0013 shape.** Everything above about core's
-ingest was established by reading openbox-core, and reading is not running. The
-claims below are what `testbed/run-all.sh` must confirm against a live local
-stack before any of them is asserted as fact.
+**Status: NOT YET RUN for the ADR-0013 shape, nor for the ADR-0014 turn pair.**
+Everything above about core's ingest was established by reading openbox-core, and
+reading is not running. The claims below are what `testbed/run-all.sh` must
+confirm against a live local stack before any of them is asserted as fact.
 
-The suite's assertions are in place (`testbed/20-capture.sh`, `25-realtime.sh`);
-what is missing is a run. Until then, treat §5's row behavior as *derived from
-core's source*, not as observed.
+The suite's assertions are in place (`testbed/20-capture.sh`, `25-realtime.sh`,
+`28-usage.sh`); what is missing is a run. Until then, treat §5's row behavior as
+*derived from core's source*, not as observed.
 
 1. **Two rows, one activity.** One tool call ⇒ exactly one `ActivityStarted` and
    one `ActivityCompleted` sharing an `activity_id`. This is the load-bearing
@@ -276,10 +333,44 @@ core's source*, not as observed.
    hold waits out its budget — a core-side fix (scope by `event_type`, or order
    by `approval_expired_at IS NOT NULL DESC, created_at DESC`), not a wire
    change. Found in review; see ADR-0013 Consequences.
-6. **INV re-check:** INV-2 (no command text, file body or tool output on the
+7. **INV re-check:** INV-2 (no command text, file body or tool output on the
    observe path), INV-1 (no secrets), INV-3/3b (enforce local, observe never
    blocks), INV-8 (stock core, no accept-list patch).
 
+### Additionally, for the ADR-0014 turn pair
+
+8. **T turns ⇒ T pairs, counted not merely present.** Every
+   `<session>:turn:<n>` id has exactly one `ActivityStarted` and one
+   `ActivityCompleted`, and the indexes are contiguous from 0. An existence check
+   is worthless here: the Tier-2 duplicate-`ActivityStarted` bug shipped because
+   the only assertion that would have caught it was an existence check.
+9. **A colon-shaped `activity_id` survives ingest.** Core treats the column as an
+   opaque string (`activities/governance/validation.go:96`) and the wire field is
+   free-form, but no dev event has ever carried a non-hex id. Confirm the row
+   stores it verbatim.
+10. **Σ per-turn == the SessionEnd rollup, field by field** — input, output,
+    cache-creation, cache-read. Two independent derivations of one quantity, and
+    they are only comparable now that both un-fold the cache counts (v1.1).
+11. **Subagent tokens counted exactly once.** A session that spawns a subagent
+    must show separate `:agent:<id>:turn:<n>` records, attributed by `agent_id`,
+    with the global sum still equal to the rollup — the double-count this design's
+    sidechain partition exists to prevent.
+12. **Tool-metric pollution is present and expected.**
+    `ExtractToolMetric` accepts any non-empty `activity_type`
+    (`observability/errors.go:301-323`), so until openbox-core ships the
+    exclusion, `llm_completion` appears under tool metrics with call counts and
+    latency percentiles. Record it against the core-side issue; it is not a
+    shift-left defect. Once core ships, flip the check to asserting absence.
+13. **The narrowed INV-2, end to end.** Sentinel strings seeded into the
+    transcript's `content`, `thinking`, `tool_input` and `tool_result` are absent
+    from the stored rows, while `model` is present. Unit-level absence is
+    necessary, not sufficient — this is the assertion a privacy reviewer should
+    be pointed at, because ADR-0014 replaced a structural impossibility with an
+    allowlist.
+14. **The documented opt-out is real.** With usage capture disabled: zero
+    `llm_completion` rows and no model anywhere beyond `SessionStarted`.
+
 _When the run happens, record the artifact under
-`plans/260811-0245-tool-activity-event-shape/reports/` and replace this status
-line with what was observed._
+`plans/260811-0245-tool-activity-event-shape/reports/` (ADR-0013 claims) and
+`plans/260811-1640-coding-agent-token-usage/reports/` (ADR-0014 claims), and
+replace this status line with what was observed._

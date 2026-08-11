@@ -6,7 +6,8 @@ What leaves the machine, what never does, and the one setting that changes it.
 
 | | Sent to OpenBox | Notes |
 |---|---|---|
-| Session, tool and MCP **metadata** | always | tool name, kind (`shell`/`file`/`mcp`), file path, MCP server + tool name, timing, token counts and cost |
+| Session, tool and MCP **metadata** | always | tool name, kind (`shell`/`file`/`mcp`), file path, MCP server + tool name, timing |
+| **Token counts and the model id** | yes, by default | per model turn. `finops: false` turns it off — see [Usage capture](#usage-capture) |
 | **Prompt text** | yes, by default | the one content field on ordinary telemetry. `content_capture: false` turns it off |
 | **Shell command text** | **never** on telemetry | only on an approval request, and only with content capture on |
 | **File contents** (read or written) | **never** | a Write/Edit body is scanned *locally* for secrets and rewritten in place; the body itself is not sent |
@@ -42,6 +43,65 @@ flusher drains the local spool within ~2 seconds of each tool call
 instead. Either way this changes only *timing*: what egresses is governed solely
 by the table above and the content-capture posture below.
 
+## Usage capture
+
+Usage capture is **on by default**. It answers "which model spent how many tokens,
+when" for a coding session — the same finops question the agent runtime already
+answers — and it is what makes a dev session visible in the cost dashboards.
+
+**Exactly what is sent, per model turn:**
+
+| | |
+|---|---|
+| four integers | input tokens, output tokens, cache-creation tokens, cache-read tokens |
+| one string | the model id, e.g. `claude-opus-5`, `gpt-5.6-sol` |
+| the turn's index and duration | `<session>:turn:3`, `duration_ms` |
+| the subagent id, when a subagent ran the turn | so per-agent spend is attributable |
+
+**Exactly what is not sent, on this path:** no prompt, no completion, no thinking
+block, no stop reason, no assistant message, no tool command, no tool output, no
+file body — **and no cost.** Cost is derived server-side from a model-keyed pricing
+table; deriving it here would mean inventing a number from a table this client does
+not own.
+
+*When*: per model turn for Claude Code (its `Stop` hook), and once per session for
+Codex — Codex's per-turn hook exists but is deliberately not wired, so its usage
+arrives as a single session rollup. The numbers are a **sum over the turn**: a turn
+usually contains several model calls, and hooks do not fire per call, so per-call
+attribution is not available from either tool.
+
+Turn it off per install:
+
+```jsonc
+// ~/.config/openbox/dev.json
+{ "finops": false }
+```
+
+or per session with `OPENBOX_FINOPS=0`. The env setting wins either way, and an org
+can pin it through the managed config. With it off, **nothing** on this path is
+sent: no counts, no model id, no turn events — and the session transcript is never
+opened at all.
+
+Every session records which state was in effect, in the posture block on its
+`SessionStarted` event. That is deliberate: a default that sends new data is only
+defensible if you can tell afterwards which sessions it applied to.
+
+> **How this reads the transcript, stated precisely.** The token counts are not
+> available from any hook — the session transcript file is the only source, so the
+> engine parses it. It binds four numeric fields, plus the model id, plus a line
+> timestamp (used to compute the turn's duration and then discarded) and a boolean
+> marking subagent lines. Nothing else in that file — prompts, completions,
+> thinking blocks, tool inputs, tool results, file snapshots — is bound, so it has
+> nowhere to land and cannot reach an event.
+>
+> This used to be a structural guarantee: the parser held only numbers, so content
+> was *impossible* to capture. It is now an **allowlist**, because the model id is a
+> string. The allowlist is enforced by a test that seeds the transcript with marker
+> strings in four content field classes and asserts they are absent from the actual
+> signed request body while the model id is present. See
+> [ADR-0014](adr/ADR-0014-turn-as-activity-and-identifier-allowlist.md), which
+> records the narrowing rather than leaving the older, stronger claim standing.
+
 ## Content capture
 
 Content capture is **on by default**. Prompt text is sent so that governance can act
@@ -55,8 +115,10 @@ Turn it off per install:
 ```
 
 or per session with `OPENBOX_CONTENT_CAPTURE=0`. With it off, sessions still produce
-full metadata, lineage and cost — you lose prompt visibility and any policy that
-depends on it.
+full metadata, lineage and token usage — you lose prompt visibility and any policy
+that depends on it. Content capture and usage capture are separate settings on
+purpose: usage capture sends no content, so turning content off does not turn usage
+off, and vice versa.
 
 An org can pin the setting so a developer cannot change it, via the managed config
 (`deploy/managed/`). `openbox doctor` always reports the effective value and where it
@@ -90,6 +152,7 @@ Everything the engine writes lives under `~/.config/openbox/` (or
 | `enforcements.jsonl` | what enforcement did: verdict, source, whether it blocked, redaction *categories* — never the secret, never the body |
 | `advisories.jsonl` | advisory verdicts and guardrail findings |
 | `cc-spool/` | events awaiting flush |
+| `cc-spool/turns/` | how far each turn window has been read: a byte offset and a turn index, nothing else |
 | `pending-approvals/`, `stale/` | content-free markers keyed by session id |
 | `approvals-auto.jsonl` | an autonomous approver's decisions, if you run one |
 

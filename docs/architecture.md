@@ -155,6 +155,28 @@ Being precise here is part of the product.
   layer of evidence that was never measuring anything, but it is a removal, and
   anyone reasoning about dev-session assurance should know the tree is shallower
   than an agent-runtime session's.
+- **Token usage is write-only until openbox-core ships its extractor.** Per-turn
+  model + usage is emitted as an `llm_completion` activity pair
+  ([ADR-0014](adr/ADR-0014-turn-as-activity-and-identifier-allowlist.md)) and is
+  stored and queryable — but every usage-aggregation path in core reads spans, and
+  a dev session has none, so nothing surfaces in a dashboard until the core-side
+  activity extractor lands (filed as a cross-repo issue; the spec is in
+  `plans/260811-1640-coding-agent-token-usage/reports/`). Until then two things are
+  true and worth stating rather than discovering: the numbers are in
+  `governance_events` and nowhere else, and `llm_completion` additionally appears
+  under core's **tool** metrics, because `ExtractToolMetric` accepts any non-empty
+  `activity_type`. Neither is a shift-left defect; both disappear when the
+  extractor and its exclusion ship.
+- **Codex reports usage per session, not per turn.** Its `Stop` hook exists in
+  v0.145.0 and this adapter deliberately does not wire it, so its usage arrives as
+  one `<session>:usage:rollup` activity. Scope, not a provider limit — the upgrade
+  path is to subscribe `Stop` and delta the cumulative total.
+- **The transcript projection's INV-2 guarantee is now an allowlist.** It used to
+  be structural: the parser bound only numeric fields, so content could not enter
+  memory. Binding the model id — required, because the model is the backend's
+  aggregation key — replaced that with a curated allowlist enforced by a test.
+  The test is load-bearing, and ADR-0014 says so rather than leaving the older,
+  stronger claim in place.
 
 ## Verification
 
