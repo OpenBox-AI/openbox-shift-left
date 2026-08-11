@@ -111,13 +111,17 @@ func (e EvidenceState) metadata() map[string]any {
 	return m
 }
 
-// FinopsUsage is the numbers-only usage rollup the finops reader produces
-// from a rollout. It carries only Tokens/Cost value structs — no content,
-// by construction (see usage.go). Cost is always nil for Codex (its token
-// path carries no cost field).
+// FinopsUsage is the usage rollup the finops reader produces from a rollout:
+// the four token counts, plus the model id — the ONE string the projection
+// egresses (see usage.go's INV-2 note). No cost field at all: Codex's token path
+// carries none, and cost is never derived here.
 type FinopsUsage struct {
 	Tokens *client.Tokens
-	Cost   *client.Cost
+	// Model is the last non-empty `turn_context.payload.model` in the rollout —
+	// the model in effect when the session ended. Empty when the rollout named
+	// none; capStr-bounded at the mapper boundary like every other
+	// provider-controlled identifier.
+	Model string
 }
 
 // NewMapper returns a Mapper with production defaults (deterministic deriveID,
@@ -201,13 +205,13 @@ func (m Mapper) Map(hook HookName, e *HookEvent) (client.DevEvent, bool) {
 		// Codex's SessionEnd payload carries reason (pinned to "other" by the
 		// 0.145.0 schema) and neither model nor permission_mode — leaner than CC's.
 		ev.Metadata = compact(map[string]any{"reason": enumOr(e.Reason, reasonValues)})
-		// Attach the opt-in rollout usage rollup, if the finops reader
-		// extracted any. Numbers only — Tokens carry no content (usage.go);
-		// Cost is always nil for Codex. nil ⇒ nothing attached (finops off
-		// or a session with no recorded token counts).
+		// Attach the rollout usage rollup, if the finops reader extracted any.
+		// Numbers plus the bounded model id — no content (usage.go); cost is
+		// never carried for Codex. nil ⇒ nothing attached (finops off, or a
+		// session with no recorded token counts).
 		if m.Finops != nil {
 			ev.Tokens = m.Finops.Tokens
-			ev.Cost = m.Finops.Cost
+			ev.Model = capStr(m.Finops.Model)
 		}
 		// Telemetry completeness as the client sees it (E8-S7).
 		if m.Evidence != nil {
@@ -227,6 +231,70 @@ func (m Mapper) Map(hook HookName, e *HookEvent) (client.DevEvent, bool) {
 	// feed the derivation.
 	ev.EventID = m.eventID(ev)
 	return ev, true
+}
+
+// MapUsageRollup builds Codex's session-rollup `llm_completion` activity pair
+// (ADR-0014): the same wire carrier and the same activity_output shape Claude
+// Code's per-turn pairs use, at the granularity Codex's wired hook surface
+// offers.
+//
+// **Why session granularity, precisely.** Codex v0.145.0 exposes a `Stop` hook
+// and this adapter deliberately does not wire it — that is scope, not
+// impossibility, and `capabilities.go` says so in those words. Wiring it later is
+// a bounded change with a known shape: subscribe `Stop`, and take the per-turn
+// delta from `last_token_usage` (or successive `total_token_usage` snapshots)
+// instead of the final cumulative one.
+//
+// No cursor is needed and none is used: SessionEnd fires once, so there is no
+// window to advance and no Codex-local fork of hookflow.TurnCursor.
+//
+// The pair is emitted alongside — not instead of — the SessionEnded event's
+// metadata.tokens rollup. Both derive from the same read, so they agree by
+// construction, and keeping both preserves the reconciliation parity Claude Code
+// has (per-turn vs rollup).
+//
+// Returns ok=false when there is no usage to report, so an empty session emits no
+// pair rather than a zero-filled one.
+func (m Mapper) MapUsageRollup(e *HookEvent) (started, completed client.DevEvent, ok bool) {
+	if e == nil || e.SessionID == "" || m.Finops == nil || m.Finops.Tokens == nil {
+		return client.DevEvent{}, client.DevEvent{}, false
+	}
+	if !strings.HasPrefix(m.Identity.DeveloperDID, "did:aip:") {
+		return client.DevEvent{}, client.DevEvent{}, false
+	}
+
+	ts := m.clock().UTC().Format(time.RFC3339Nano)
+	base := client.DevEvent{
+		SchemaVersion: client.SchemaVersion,
+		SessionID:     e.SessionID,
+		DeveloperDID:  m.Identity.DeveloperDID,
+		Tool:          client.Tool{Name: agentToolName, Kind: client.ToolShell},
+		// The flag, not an absent turn index, is what makes the activity_id
+		// <session>:usage:rollup — see client.DevEvent.SessionRollup for why the
+		// distinction is load-bearing.
+		SessionRollup: true,
+	}
+
+	started = base
+	started.EventType = client.EventTurnStarted
+	started.Timestamp = ts
+	started.Metadata = compact(map[string]any{"usage_scope": "session"})
+	started.EventID = m.eventID(started)
+
+	completed = base
+	completed.EventType = client.EventTurnCompleted
+	completed.Timestamp = ts
+	completed.EndedAt = ts
+	// No StartedAt: a session rollup has no measured model-call duration, and the
+	// session's own wall-clock span is what the SessionStarted/SessionEnded pair
+	// already reports. Leaving it empty makes the client omit duration_ms rather
+	// than claim a fabricated one.
+	completed.Tokens = m.Finops.Tokens
+	completed.Model = capStr(m.Finops.Model)
+	completed.Metadata = compact(map[string]any{"usage_scope": "session"})
+	completed.EventID = m.eventID(completed)
+
+	return started, completed, true
 }
 
 // sessionTreeMetadata returns the fork linkage, or nil for the common case.

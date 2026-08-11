@@ -11,6 +11,7 @@ import (
 
 	"github.com/openbox-ai/openbox-shift-left/adapters/common/devconfig"
 	"github.com/openbox-ai/openbox-shift-left/adapters/common/hookflow"
+	"github.com/openbox-ai/openbox-shift-left/client"
 	"github.com/openbox-ai/openbox-shift-left/decision"
 )
 
@@ -120,7 +121,7 @@ func RunHook(sub string, stdin io.Reader, stdout io.Writer, logger *log.Logger) 
 	pinnedNow := time.Now()
 	ad.Mapper.Now = func() time.Time { return pinnedNow }
 
-	// On SessionEnd, behind the off-by-default finops opt-in, read the
+	// On SessionEnd, behind the finops gate (default ON, opt-out), read the
 	// session's rollout JSONL for usage numbers only and hand them to the
 	// Mapper, which attaches them to the SessionEnded event. This is the
 	// only place transcript_path is opened, and only when
@@ -137,11 +138,17 @@ func RunHook(sub string, stdin io.Reader, stdout io.Writer, logger *log.Logger) 
 	// always carries transcript_path — session_end.rs @ rust-v0.145.0 —
 	// and a HOME-derived scan would fight the read-only/hermeticity
 	// posture).
+	//
+	// Since ADR-0014 the same read also feeds the session-rollup `llm_completion`
+	// activity pair (emitted after the SessionEnded event is spooled, below) and
+	// binds the model id from `turn_context.payload.model`. Cost is not read at
+	// all: Codex's token path carries no cost field, and cost is never derived
+	// from a pricing table here.
 	if hook == HookSessionEnd && ResolveFinops() {
-		if tokens, cost, err := readRolloutUsage(ev.TranscriptPath); err != nil {
+		if tokens, model, err := readRolloutUsage(ev.TranscriptPath); err != nil {
 			logger.Printf("finops: rollout usage skipped: %v", err)
-		} else if tokens != nil || cost != nil {
-			ad.Mapper.Finops = &FinopsUsage{Tokens: tokens, Cost: cost}
+		} else if tokens != nil {
+			ad.Mapper.Finops = &FinopsUsage{Tokens: tokens, Model: model}
 		}
 	}
 
@@ -257,6 +264,26 @@ func RunHook(sub string, stdin io.Reader, stdout io.Writer, logger *log.Logger) 
 		// The staleness check itself now runs in the prelude above (its
 		// outcome is posture evidence); only the git-hook install remains here.
 		maybeInstallGitHook(logger, ev.Cwd)
+	}
+
+	// SessionEnd additionally emits the session-rollup `llm_completion` activity
+	// pair (ADR-0014) — Codex's granularity for the model+usage signal, since its
+	// per-turn Stop hook is deliberately unwired. Spooled BEFORE the flush below,
+	// so the pair rides the same drain as the SessionEnded event rather than
+	// waiting for a later session's flush. Best-effort: a spool failure is logged
+	// and the flush proceeds with whatever is there.
+	//
+	// It rides the same Finops read that populated the SessionEnded rollup, so the
+	// two agree by construction; nothing is read twice.
+	if hook == HookSessionEnd {
+		if started, completed, ok := ad.Mapper.MapUsageRollup(ev); ok {
+			for _, usageEv := range []client.DevEvent{started, completed} {
+				if err := ad.Record(usageEv); err != nil {
+					logger.Printf("finops: spool %s event: %v", usageEv.EventType, err)
+					break
+				}
+			}
+		}
 	}
 
 	// SessionEnd delivers the session's spooled events off the hot path.

@@ -107,7 +107,7 @@ func ResolveContentCapture() bool { return devconfig.ResolveContentCapture() }
 // prepare-commit-msg hook on SessionStart (default false; env overrides).
 func ResolveInstallGitHook() bool { return devconfig.ResolveInstallGitHook() }
 
-// ResolveFinops reports whether opt-in rollout usage extraction is
+// ResolveFinops reports whether rollout usage extraction is
 // enabled. Default false: the SessionEnd transcript_path is never opened
 // for usage with it unset. A separate flag from content_capture — finops
 // on does not imply content egress (numbers only, INV-2).

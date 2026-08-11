@@ -135,11 +135,27 @@ the recorded hardening/distribution options (OD-SL7-DIST).
 Codex hooks expose no usage, but the session's **rollout JSONL** — the file the
 SessionEnd payload's `transcript_path` points at, flushed by Codex *before* the
 SessionEnd hook runs (spike S5 addendum #10) — carries running token counts.
-Behind an **off-by-default, opt-in** flag (`finops` in `dev.json` /
-`OPENBOX_FINOPS=1` — a **separate** flag from `content_capture`), the adapter
-reads it on SessionEnd (off the hot path, after the spool flush) and attaches
-`client.Tokens` to the `SessionEnded` event. `Capabilities()` →
-`telemetry.tokens=true`. `usage.go` / `usage_test.go`.
+Behind the **default-on** `finops` flag (`dev.json` / `OPENBOX_FINOPS=0` to opt
+out — a **separate** flag from `content_capture`), the adapter reads it on
+SessionEnd (off the hot path, after the spool flush) and emits two things: the
+`client.Tokens` rollup on the `SessionEnded` event, and a session-rollup
+`llm_completion` activity pair (`activity_id <session>:usage:rollup`,
+[ADR-0014](../../docs/adr/ADR-0014-turn-as-activity-and-identifier-allowlist.md))
+carrying the four counts plus the model id read from `turn_context.payload.model`.
+
+**Session, not per turn — by choice.** Codex v0.145.0 exposes a `Stop` hook and
+this adapter does not wire it, so usage arrives once per session. That is scope,
+not a provider limit: the upgrade path is to subscribe `Stop` and take the
+per-turn delta from `last_token_usage`. Claude Code, whose `Stop` *is* wired, gets
+per-turn pairs.
+
+**Cache counts are sub-counts here, not siblings.** `cached_input_tokens` and
+`cache_write_input_tokens` are already inside `input_tokens` (evidence:
+`total_tokens == input_tokens + output_tokens` in both the fixture and 12 real
+rollouts), so the reader SUBTRACTS them to report pure input — the inverse of
+Claude Code, whose cache counts are additive. Adding them would double-count the
+cache on every session. `Capabilities()` → `telemetry.tokens=true`,
+`telemetry.model=true`. `usage.go` / `usage_test.go`.
 
 **Grounded token shape** (codex-rs @ `rust-v0.145.0`, recorded in
 `testdata/rollout-poisoned.jsonl` — pinned from the shipped structs + the
