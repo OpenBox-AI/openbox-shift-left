@@ -68,7 +68,12 @@ tb_note "status at first sighting: ${status_now:-<none>}"
 
 # Tool activity streams too: the Read/Bash events land while the session idles
 # in its sleep, not just the turn-start burst.
-mid_activity() { tb_count "governance_events where run_id='$sid' and event_type='ActivityStarted'"; }
+#
+# Counts BOTH activity types. A tool call is an ActivityStarted plus an
+# ActivityCompleted (ADR-0013), and the completed half is often what arrives on
+# the debounced flush — counting only starts would under-report the progress
+# signal this phase exists to observe.
+mid_activity() { tb_count "governance_events where run_id='$sid' and event_type like 'Activity%'"; }
 i=0
 while [ "$i" -lt 30 ] && [ "$(mid_activity)" -lt 1 ]; do
 	kill -0 "$TB_SESSION_PID" 2>/dev/null || break
@@ -88,5 +93,12 @@ assert_eq "session sealed as completed" completed "$(tb_val "select status from 
 assert_eq "exactly one WorkflowStarted (realtime + teardown drains never double-send)" 1 "$(tb_count "governance_events where run_id='$sid' and event_type='WorkflowStarted'")"
 assert_eq "exactly one WorkflowCompleted" 1 "$(tb_count "governance_events where run_id='$sid' and event_type='WorkflowCompleted'")"
 assert_ge "tool activity stored" 1 "$(tb_count "governance_events where run_id='$sid' and event_type='ActivityStarted'")"
+assert_ge "completed halves stored too" 1 "$(tb_count "governance_events where run_id='$sid' and event_type='ActivityCompleted'")"
+# The realtime path must not duplicate a half: a mid-session flush and the
+# teardown drain both touching one tool call would show up as more completed
+# rows than started ones.
+assert_eq "no half double-sent across realtime + teardown drains" \
+	"$(tb_count "governance_events where run_id='$sid' and event_type='ActivityStarted'")" \
+	"$(tb_count "governance_events where run_id='$sid' and event_type='ActivityCompleted'")"
 
 tb_finish

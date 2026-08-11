@@ -132,10 +132,22 @@ One headless session that uses **Read, Grep, Bash, Edit, and the `everything` MC
 server**. Asserts:
 
 - `sessions` +1, `WorkflowStarted` → `WorkflowCompleted` present;
-- `spans` gains `file_read`, `file_write`, `shell_command`, **and an MCP span** —
-  today's 1942 spans are `file_write` 1201, `internal` 452, `llm_completion` 226,
-  `file_open` 32, `file_read` 26, `shell_command` 5, with **no MCP type at all**,
-  so this assertion is the point of P3;
+- **tool calls are activity pairs** (ADR-0013): every tool call is an
+  `ActivityStarted` **and** an `ActivityCompleted` sharing one `activity_id`,
+  counts equal, no unpaired completed row. Under the old hook shape both halves
+  were `ActivityStarted` with the same `activity_id`, which matched core's whole
+  dedupe key, so the completed half never became a row — this assertion is what
+  proves it does now;
+- `activity_type` is the tool name; at least one completed row carries a real
+  `duration_ms` (> 0) and an `activity_output`;
+- **`spans` is empty, asserted deliberately.** Dev sessions write zero span rows.
+  This is the accepted trade-off, not a regression, and the assertion exists so a
+  future reader does not "fix" it;
+- Merkle: event leaves for both halves, and **no** span leaves;
+- tool classes reach core through `activity_input` rather than a server-computed
+  span type — `kind` covers file/shell, and an MCP call carries its `mcp_server`
+  + `mcp_tool`. That MCP assertion is the point of P3: before this suite no MCP
+  call had ever reached the local stack;
 - one `policy_evaluations` / `guardrails_evaluations` / `age_evaluations` row per
   evaluation;
 - spool drains at SessionEnd inside the flush budget;
@@ -370,8 +382,11 @@ The harness earned its keep before it was finished. What it established, and wha
 it exposed:
 
 **Now proven end to end for the first time**
-- MCP capture: a real `mcp__everything__echo` call produces an `mcp_tool_call`
-  span in core. Before this there were no MCP spans on the stack at all.
+- MCP capture: a real `mcp__everything__echo` call reaches core. Before this
+  there were no MCP calls on the stack at all. (This originally asserted an
+  `mcp_tool_call` **span**; since ADR-0013 there are no spans, and the assertion
+  moved to `activity_input.mcp_server`/`mcp_tool`. The finding stands — what is
+  captured did not change, only where it is carried.)
 - INV-2 / SL3-SEC-3 in the observe posture: the prompt egresses, the shell
   command text and the file body do not — asserted against every row the session
   wrote, not just unit-tested.
