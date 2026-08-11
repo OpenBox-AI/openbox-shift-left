@@ -1,0 +1,16 @@
+{
+  "source": "developer-runtime",
+  "event_type": "ActivityCompleted",
+  "activity_type": "Bash",
+  "activity_id": "cc-act-b432560819ad36f40e8919d7f76c9cf3",
+  "workflow_id": "openbox-ai/openbox-shift-left",
+  "run_id": "sess-golden-0001",
+  "workflow_type": "developer-session",
+  "duration_ms": 1000,
+  "timestamp": "2026-07-31T09:00:01Z",
+  "metadata": {
+    "event_id": "ev-8",
+    "provider": "claude-code",
+    "tool_name": "Bash"
+  }
+}

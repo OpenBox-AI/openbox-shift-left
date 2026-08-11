@@ -21,7 +21,8 @@ import (
 // started hook writes a tiny record keyed by the tool call's pairing key; the
 // completed hook reads+deletes it and stamps ev.StartedAt before the event is
 // spooled, so pairing survives the spool's rotation/recovery-file splitting.
-// buildHookSpan (client/payload.go) then computes duration_ns = end - start.
+// The client (client/payload.go durationMs) then computes duration_ms =
+// end - start, and OMITS the field when this recovery missed.
 //
 // Records carry only a structural RFC3339 timestamp (INV-2: no content); the
 // filename is a hash of structural locators (session, tool name, file/
@@ -104,12 +105,12 @@ func keyHash(key string) string {
 }
 
 // ToolCallStartKey is the string IDENTICAL for a tool call's started (ToolCall)
-// and completed (ToolResult) events and distinct across calls. It mirrors the
-// field set of client.spanPairKey — the same fields that pair the two spans onto
-// one span_id — so the recovered start time lands on the right completed span.
+// and completed (ToolResult) events and distinct across calls. It is the
+// activity pair key plus the invocation id, so the recovered start time lands on
+// the right completed event.
 //
 // It follows the INVOCATION, not the operation: two attempts at the same
-// operation are one activity but two spans with two durations, and keying this
+// operation are one activity but two executions with two durations, and keying this
 // on the operation would make the second attempt recover the first's start time
 // and report a wildly inflated duration.
 //

@@ -1,9 +1,16 @@
 package claudecode
 
 import (
+	"context"
+	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/openbox-ai/openbox-shift-left/client"
 )
 
 // Base-SDK conformance parity matrix (STORY-E7-S6).
@@ -26,10 +33,19 @@ import (
 //
 // Our Go coverage, by file:
 //   - enforce_conformance_test.go  — C1..C9, the enforcement carve-out (INV-3b).
-//   - client.AssertHookWireShape (client/hookspan.go) — the Go MIRROR of
-//     assert_hook_wire_shape; exercised by client/payload_hook_test.go.
+//   - TestWire_ToolEventsAreActivityPairs (this file) — the activity envelope
+//     every tool event must satisfy on the wire, plus the client's golden
+//     fixtures which pin it byte-exactly.
 //   - conformance_test.go (TestEmittedEventsAreConformant) — the shift-left-only
 //     adapter-facing dev-event schema check (no base analog).
+//
+// NOTE (tool-call-as-activity): shift-left used to carry a Go mirror of the base
+// SDK's assert_hook_wire_shape in client/hookspan.go. It is gone, because the
+// shape it guarded is gone: a tool call is now an Activity
+// (ToolCall→ActivityStarted, ToolResult→ActivityCompleted) and no shift-left
+// payload carries a hook envelope or a span. The rows below record that as a
+// base case we no longer mirror, rather than quietly leaving a parity claim that
+// stopped being true.
 //
 // status values:
 //   parity        — a base required-case (or fail-mode case) asserts the same behavior.
@@ -110,12 +126,18 @@ var conformanceParity = []parityRow{
 		note:     "Base has no verdict-staleness/TTL concept. C9 pins that a stale-but-real bundle verdict (sourceLocalBundle) proceeds under fail-closed — staleness never triggers fail-closed.",
 	},
 
-	// --- wire shape (client/hookspan.go mirror + client/payload_hook_test.go) ---
+	// --- wire shape (activity envelope; the hook mirror is retired) ---
 	{
-		goCase:   "client.AssertHookWireShape + payload_hook_test.go (started/completed pair)",
+		goCase:   "TestWire_ToolEventsAreActivityPairs (+ client/testdata/golden/activity_*.json)",
+		baseCase: "",
+		status:   statusGoExtension,
+		note:     "The activity envelope for a tool call: ToolCall->ActivityStarted, ToolResult->ActivityCompleted sharing one activity_id, workflow_type set, no spans/span_count/hook_trigger, no client-set semantic_type. No base analog — the base SDK reserves ActivityCompleted for hook-LESS lifecycle events, so this shape is a deliberate shift-left divergence (see the tool-call-as-activity ADR). adapters/codex/wire_test.go asserts the identical contract; the two are independent copies so a drift in one adapter cannot pass by moving a shared helper.",
+	},
+	{
+		goCase:   "",
 		baseCase: "assert_hook_wire_shape (fake_core.py); test_started_and_completed_wire_shape",
-		status:   statusParity,
-		note:     "Direct mirror: ActivityStarted + hook_trigger, flat SpanData, 16/32-hex ids, no otel/openbox/data/semantic_type, started -> end_time/duration_ns null, family root fields per hook_type. Our payloads pass the mirrored assertion for every ToolCall/ToolResult stage.",
+		status:   statusBaseUnmapped,
+		note:     "No longer mirrored, by design. The base assertion checks a flat hook SpanData under ActivityStarted+hook_trigger. shift-left emits no hook events and no spans: a hook process has no in-process OTel, so the span it used to send was fabricated to satisfy a shape rather than to record a measurement. Retiring it also dissolved ADR-0004's standing obligation to hand-maintain the mirror against upstream. Cost: no span rows, no span-level Merkle leaves, no server-side semantic_type for dev sessions.",
 	},
 
 	// --- shift-left-only (no base analog) ---
@@ -149,7 +171,7 @@ var conformanceParity = []parityRow{
 		goCase:   "",
 		baseCase: "TestContextCases (bind before hooks / reset after / trace lookup / executor thread)",
 		status:   statusBaseUnmapped,
-		note:     "N/A by design. The base SDK threads an in-process ActivityContext across hooks; shift-left hooks are stateless separate processes that derive ids deterministically (spanbuilder.go) + share state via the SL-4 spool — there is no per-activity context store to bind/reset.",
+		note:     "N/A by design. The base SDK threads an in-process ActivityContext across hooks; shift-left hooks are stateless separate processes that derive ids deterministically (client/payload.go activityIDFor) + share state via the SL-4 spool — there is no per-activity context store to bind/reset.",
 	},
 }
 
@@ -197,6 +219,104 @@ func TestConformanceParityMatrix(t *testing.T) {
 		if n != 1 {
 			t.Errorf("enforcement case %s appears %d times in the parity matrix, want exactly 1", id, n)
 		}
+	}
+}
+
+// assertActivityWireShape is the envelope contract every tool event must satisfy
+// on the wire. It replaces client.AssertHookWireShape, which checked the flat
+// hook-span shape this repo no longer emits.
+//
+// Its twin lives in adapters/codex/wire_test.go and asserts the identical
+// contract. The two are deliberate copies rather than a shared helper: the
+// adapters are separate Go modules, and the property under test is that both
+// produce the SAME shape independently — a shared helper they both called could
+// drift with them and still pass.
+func assertActivityWireShape(t *testing.T, payload map[string]any, wantType string) {
+	t.Helper()
+	if payload["event_type"] != wantType {
+		t.Errorf("event_type = %v, want %s", payload["event_type"], wantType)
+	}
+	// The retired hook envelope. A key here means the span layer grew a caller.
+	for _, k := range []string{"spans", "span_count", "hook_trigger"} {
+		if v, present := payload[k]; present {
+			t.Errorf("payload carries retired key %q = %v", k, v)
+		}
+	}
+	for _, k := range []string{"source", "event_type", "workflow_id", "run_id", "workflow_type", "activity_id", "activity_type", "timestamp"} {
+		if v, _ := payload[k].(string); v == "" {
+			t.Errorf("missing required envelope field %q", k)
+		}
+	}
+	if payload["workflow_type"] != "developer-session" {
+		t.Errorf("workflow_type = %v, want developer-session", payload["workflow_type"])
+	}
+	// semantic_type was computed by core from the span. With no span there is no
+	// classification, and the client must not invent one — an unowned field would
+	// be a claim nothing verifies.
+	if _, present := payload["semantic_type"]; present {
+		t.Error("client must not set semantic_type")
+	}
+}
+
+// TestWire_ToolEventsAreActivityPairs drives the REAL client and asserts the
+// activity envelope end to end: a PreToolUse becomes an ActivityStarted, its
+// PostToolUse an ActivityCompleted, and the pair shares one activity_id — which
+// is what puts them on one dashboard row and what makes one approval cover both
+// halves and any retry.
+func TestWire_ToolEventsAreActivityPairs(t *testing.T) {
+	var bodies [][]byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		bodies = append(bodies, raw)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"verdict":"allow"}`))
+	}))
+	defer srv.Close()
+
+	cl, err := client.New(client.Config{
+		BaseURL: srv.URL,
+		APIKey:  "obx_test_0123456789abcdef0123456789abcdef0123456789abcdef",
+		DID:     testDID,
+		SeedB64: testSeedB64,
+	})
+	if err != nil {
+		t.Fatalf("client.New: %v", err)
+	}
+
+	m := testMapper()
+	hook := &HookEvent{SessionID: "sess-parity", ToolName: "Write", ToolUseID: "toolu_1",
+		ToolInput: json.RawMessage(`{"file_path":"/repo/a.go","content":"x"}`)}
+	pre, ok := m.Map(HookPreToolUse, hook)
+	if !ok {
+		t.Fatal("PreToolUse did not map")
+	}
+	post, ok := m.Map(HookPostToolUse, hook)
+	if !ok {
+		t.Fatal("PostToolUse did not map")
+	}
+	for _, ev := range []client.DevEvent{pre, post} {
+		if _, err := cl.Emit(context.Background(), ev); err != nil {
+			t.Fatalf("Emit: %v", err)
+		}
+	}
+	if len(bodies) != 2 {
+		t.Fatalf("expected 2 wire bodies, got %d", len(bodies))
+	}
+
+	activityID := func(raw []byte, wantType string) string {
+		var payload map[string]any
+		if err := json.Unmarshal(raw, &payload); err != nil {
+			t.Fatalf("decode wire body: %v\n%s", err, raw)
+		}
+		assertActivityWireShape(t, payload, wantType)
+		id, _ := payload["activity_id"].(string)
+		return id
+	}
+
+	started := activityID(bodies[0], "ActivityStarted")
+	completed := activityID(bodies[1], "ActivityCompleted")
+	if started != completed {
+		t.Errorf("the two halves of one tool call must share activity_id: %s vs %s", started, completed)
 	}
 }
 

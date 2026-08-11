@@ -145,21 +145,22 @@ func TestEmit_HappyPath_SignedAndParsed(t *testing.T) {
 		t.Fatalf("payloads = %d, want 1", len(*payloads))
 	}
 	p := (*payloads)[0]
-	// E7-S4: a ToolCall serializes as an ActivityStarted hook (NOT event_type
-	// "ToolCall") — the base SDK's flat hook wire shape.
+	// A ToolCall serializes as an ActivityStarted (NOT event_type "ToolCall"):
+	// a tool execution is an activity, so it rides the activity lifecycle.
 	if p.Source != source || p.EventType != "ActivityStarted" || p.RunID != "sess-1" {
 		t.Errorf("envelope mismap: %+v", p)
 	}
 	if p.WorkflowID != testDID {
 		t.Errorf("workflow_id = %q, want DID fallback %q", p.WorkflowID, testDID)
 	}
-	// One flat span, stage=started, Core-classifiable file name + path; the client
-	// no longer sends semantic_type (Core computes it).
-	if p.SpanCount != 1 || len(p.Spans) != 1 {
-		t.Fatalf("span mismap: %+v", p.Spans)
+	if p.ActivityID == "" || p.ActivityType != "Edit" {
+		t.Errorf("activity identity mismap: id=%q type=%q", p.ActivityID, p.ActivityType)
 	}
-	if s := p.Spans[0]; s.Stage != "started" || s.Name != "file.write" || s.SemanticType != "" {
-		t.Errorf("hook span mismap: %+v", s)
+	if p.WorkflowType != workflowType {
+		t.Errorf("workflow_type = %q, want %q", p.WorkflowType, workflowType)
+	}
+	if len(p.ActivityInput) == 0 {
+		t.Error("ActivityStarted must carry activity_input (core's Guardrails stage 0 reads it)")
 	}
 }
 

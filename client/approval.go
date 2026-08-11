@@ -44,16 +44,19 @@ func (k ApprovalKey) Valid() bool {
 }
 
 // ApprovalKeyFor derives the poll key for a dev event from the SAME
-// derivations buildHookPayload writes onto the wire — workflow_id, run_id and
+// derivations buildPayload writes onto the wire — workflow_id, run_id and
 // activity_id. Sharing the derivation rather than re-deriving it is the point:
 // a poll built from independently-computed ids would silently address a
 // different row (or none), and the hold would report "never decided" for an
 // approval that was in fact granted.
+//
+// client/approval_key_pin_test.go pins the output. These three ids are the only
+// identity in the package a refactor must not move.
 func ApprovalKeyFor(ev DevEvent) ApprovalKey {
 	return ApprovalKey{
-		WorkflowID: hookWorkflowID(ev),
+		WorkflowID: workflowIDFor(ev),
 		RunID:      ev.SessionID,
-		ActivityID: hookActivityID(ev),
+		ActivityID: activityIDFor(ev),
 	}
 }
 

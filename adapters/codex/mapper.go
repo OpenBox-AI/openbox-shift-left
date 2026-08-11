@@ -278,8 +278,8 @@ func toolMetadata(e *HookEvent) map[string]any {
 // Two identities, deliberately separate — the same split the Claude Code
 // adapter documents at length on its own mapTool, and for the same reason:
 //
-//   - Span.InvocationID = tool_use_id. Pairs one call's started and
-//     completed spans onto a span_id; keys the duration stash.
+//   - Span.InvocationID = tool_use_id. Keys the cross-process duration
+//     stash, so the completed hook recovers when the started one fired.
 //   - Span.OperationID = what is being done, identical across a retry.
 //     activity_id derives from it, and activity_id is the approval key
 //     plus the scope of both of core's bypass grants.

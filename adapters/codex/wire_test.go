@@ -56,13 +56,48 @@ func decodeBody(t *testing.T, raw []byte) map[string]any {
 	return m
 }
 
-// TestWire_ToolEventsPassHookShapeAndPairByToolUseID proves the E7 parity core
-// of AC-5 end-to-end through the REAL client: ToolCall AND ToolResult are both
-// event_type=ActivityStarted hook payloads that pass client.AssertHookWireShape,
-// and the started+completed pair derived from ONE tool_use_id share span_id +
-// activity_id, while a second invocation of the SAME tool gets DIFFERENT ids —
-// the exact-pairing improvement Codex's tool_use_id buys over the CC adapter.
-func TestWire_ToolEventsPassHookShapeAndPairByToolUseID(t *testing.T) {
+// assertActivityWireShape is the envelope contract every tool event must satisfy
+// on the wire. It replaces client.AssertHookWireShape, which checked the flat
+// hook-span shape this repo no longer emits.
+//
+// Its twin lives in adapters/claude-code/conformance_parity_test.go and asserts
+// the identical contract. The two are deliberate copies rather than a shared
+// helper: the adapters are separate Go modules, and the property under test is
+// that both produce the SAME shape independently — a shared helper they both
+// called could drift with them and still pass.
+func assertActivityWireShape(t *testing.T, payload map[string]any, wantType string) {
+	t.Helper()
+	if payload["event_type"] != wantType {
+		t.Errorf("event_type = %v, want %s", payload["event_type"], wantType)
+	}
+	// The retired hook envelope. A key here means the span layer grew a caller.
+	for _, k := range []string{"spans", "span_count", "hook_trigger"} {
+		if v, present := payload[k]; present {
+			t.Errorf("payload carries retired key %q = %v", k, v)
+		}
+	}
+	for _, k := range []string{"source", "event_type", "workflow_id", "run_id", "workflow_type", "activity_id", "activity_type", "timestamp"} {
+		if v, _ := payload[k].(string); v == "" {
+			t.Errorf("missing required envelope field %q", k)
+		}
+	}
+	if payload["workflow_type"] != "developer-session" {
+		t.Errorf("workflow_type = %v, want developer-session", payload["workflow_type"])
+	}
+	// semantic_type was computed by core from the span. With no span there is no
+	// classification, and the client must not invent one — an unowned field would
+	// be a claim nothing verifies.
+	if _, present := payload["semantic_type"]; present {
+		t.Error("client must not set semantic_type")
+	}
+}
+
+// TestWire_ToolEventsAreActivityPairs proves the activity lifecycle end-to-end
+// through the REAL client: a ToolCall is an ActivityStarted and its ToolResult
+// an ActivityCompleted, the pair shares one activity_id, and a second invocation
+// of the same tool gets its own — the exact-pairing property Codex's tool_use_id
+// buys, now carried by activity_id alone since there is no span_id.
+func TestWire_ToolEventsAreActivityPairs(t *testing.T) {
 	cl, bodies := newWireCapture(t)
 	m := testMapper()
 	m.NewID = nil
@@ -77,46 +112,36 @@ func TestWire_ToolEventsPassHookShapeAndPairByToolUseID(t *testing.T) {
 		t.Fatalf("expected 3 wire bodies, got %d", len(*bodies))
 	}
 
-	type ids struct{ span, trace, activity, stage string }
-	extract := func(raw []byte) ids {
+	activityID := func(raw []byte, wantType string) string {
 		payload := decodeBody(t, raw)
-		if err := client.AssertHookWireShape(payload); err != nil {
-			t.Fatalf("hook wire shape (E7 parity): %v\n%s", err, raw)
-		}
-		span := payload["spans"].([]any)[0].(map[string]any)
-		act, _ := payload["activity_id"].(string)
-		return ids{
-			span:     span["span_id"].(string),
-			trace:    span["trace_id"].(string),
-			activity: act,
-			stage:    span["stage"].(string),
-		}
+		assertActivityWireShape(t, payload, wantType)
+		id, _ := payload["activity_id"].(string)
+		return id
 	}
 
-	i1, i2, i3 := extract((*bodies)[0]), extract((*bodies)[1]), extract((*bodies)[2])
-	if i1.stage != "started" || i2.stage != "completed" {
-		t.Errorf("stages = %q/%q, want started/completed", i1.stage, i2.stage)
+	started := activityID((*bodies)[0], "ActivityStarted")
+	completed := activityID((*bodies)[1], "ActivityCompleted")
+	second := activityID((*bodies)[2], "ActivityStarted")
+
+	// Both halves of one call address one row — and one approval.
+	if started != completed {
+		t.Errorf("pre/post of one tool_use_id must share activity_id: %s vs %s", started, completed)
 	}
-	// Same tool_use_id ⇒ shared span/activity ids (base-SDK shared-span pairing).
-	if i1.span != i2.span || i1.activity != i2.activity {
-		t.Errorf("pre/post of one tool_use_id must share ids: span %s/%s activity %s/%s",
-			i1.span, i2.span, i1.activity, i2.activity)
-	}
-	// Different tool_use_id, same tool ⇒ DISTINCT ids (exact per-invocation pairing).
-	if i1.span == i3.span || i1.activity == i3.activity {
-		t.Errorf("two Bash invocations with distinct tool_use_ids must not share ids")
-	}
-	// One session ⇒ one trace.
-	if i1.trace != i2.trace || i1.trace != i3.trace {
-		t.Errorf("session events must share the trace: %s/%s/%s", i1.trace, i2.trace, i3.trace)
+	// A distinct invocation is a distinct operation here (a bare Bash call has no
+	// structural discriminator, so the operation id falls back to the tool_use_id).
+	if started == second {
+		t.Error("two Bash invocations with distinct tool_use_ids must not share activity_id")
 	}
 }
 
 // TestWire_ToolUseIDNeverRidesTheWire pins the pairing-channel invariant the
-// mapper's mapTool doc comment claims: the tool_use_id shapes the DERIVED ids
-// but never appears as a wire FIELD on a shell span (span.function is not a
-// shell/tool family field, and activity_input carries file/mcp locators only).
-// The metadata blob is the one deliberate carrier (structural identifier).
+// mapper's mapTool doc comment claims: the tool_use_id shapes the DERIVED
+// activity_id but never appears as a wire FIELD outside metadata, which is the
+// one deliberate carrier (a structural identifier, and the audit channel).
+//
+// The old span root fields it used to check are gone, so this now scans the
+// whole payload with metadata removed — a stricter test than the field list it
+// replaces, since it catches a leak into any field, including one added later.
 func TestWire_ToolUseIDNeverRidesTheWire(t *testing.T) {
 	cl, bodies := newWireCapture(t)
 	m := testMapper()
@@ -126,28 +151,23 @@ func TestWire_ToolUseIDNeverRidesTheWire(t *testing.T) {
 	emit(t, cl, pre)
 	payload := decodeBody(t, (*bodies)[0])
 
-	span := payload["spans"].([]any)[0].(map[string]any)
-	for _, k := range []string{"function", "file_path", "shell_command"} {
-		if v, present := span[k]; present && v != nil {
-			if s, _ := v.(string); strings.Contains(s, "call-sentinel-xyz") {
-				t.Errorf("tool_use_id leaked onto wire span field %q: %v", k, v)
-			}
-		}
-	}
-	if in, present := payload["activity_input"]; present {
-		if raw, _ := json.Marshal(in); strings.Contains(string(raw), "call-sentinel-xyz") {
-			t.Errorf("tool_use_id leaked into activity_input: %s", raw)
-		}
-	}
 	meta, _ := payload["metadata"].(map[string]any)
 	if meta == nil || meta["tool_use_id"] != "call-sentinel-xyz" {
 		t.Errorf("metadata should carry tool_use_id (the deliberate audit channel): %v", meta)
 	}
+	delete(payload, "metadata")
+	rest, _ := json.Marshal(payload)
+	if strings.Contains(string(rest), "call-sentinel-xyz") {
+		t.Errorf("tool_use_id leaked outside metadata: %s", rest)
+	}
 }
 
-// TestWire_MCPKeepsFunctionAsWireData: for MCP tools span.function IS wire data
-// (mcp_tool), so the mapper must NOT overwrite it with tool_use_id.
-func TestWire_MCPKeepsFunctionAsWireData(t *testing.T) {
+// TestWire_MCPIdentifiersRideActivityInput: the mcp server/tool identifiers used
+// to ride the span's mcp family fields. With the span retired, activity_input is
+// their only home — so an mcp call must still be distinguishable from a shell
+// one on the wire, and the mapper must not overwrite the function with the
+// tool_use_id.
+func TestWire_MCPIdentifiersRideActivityInput(t *testing.T) {
 	cl, bodies := newWireCapture(t)
 	m := testMapper()
 	m.NewID = nil
@@ -155,13 +175,15 @@ func TestWire_MCPKeepsFunctionAsWireData(t *testing.T) {
 	pre, _ := m.Map(HookPreToolUse, &HookEvent{SessionID: "th-1", ToolName: "mcp__github__create_issue", ToolUseID: "call-9"})
 	emit(t, cl, pre)
 	payload := decodeBody(t, (*bodies)[0])
-	if err := client.AssertHookWireShape(payload); err != nil {
-		t.Fatalf("hook wire shape: %v", err)
+	assertActivityWireShape(t, payload, "ActivityStarted")
+
+	in, _ := payload["activity_input"].(map[string]any)
+	if in == nil {
+		t.Fatalf("mcp ActivityStarted must carry activity_input: %v", payload)
 	}
-	span := payload["spans"].([]any)[0].(map[string]any)
-	if span["hook_type"] != "mcp" || span["mcp_server"] != "github" || span["mcp_tool"] != "create_issue" {
-		t.Errorf("mcp family fields wrong: hook_type=%v mcp_server=%v mcp_tool=%v",
-			span["hook_type"], span["mcp_server"], span["mcp_tool"])
+	if in["kind"] != "mcp" || in["mcp_server"] != "github" || in["mcp_tool"] != "create_issue" {
+		t.Errorf("mcp identifiers wrong: kind=%v mcp_server=%v mcp_tool=%v",
+			in["kind"], in["mcp_server"], in["mcp_tool"])
 	}
 }
 

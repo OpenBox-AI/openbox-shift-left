@@ -117,6 +117,24 @@ func goldenCases() []goldenCase {
 		"repo":       ws,
 	}
 
+	// completed derives the ActivityCompleted half of a tool call from its
+	// started half, so a fixture pair cannot drift apart in the fields that must
+	// match. The activity_id is derived from the same operation, so the pair
+	// shares it — that pairing is what puts both rows on one timeline entry and
+	// what makes one approval cover both.
+	completed := func(call DevEvent, eventID, endedAt string) DevEvent {
+		res := call
+		res.EventID = eventID
+		res.EventType = EventToolResult
+		res.StartedAt = call.Timestamp
+		res.EndedAt = endedAt
+		res.Timestamp = endedAt
+		span := *call.Span
+		span.Stage = "completed"
+		res.Span = &span
+		return res
+	}
+
 	fileCall := base(EventToolCall, "ev-4")
 	fileCall.Tool = Tool{Name: "Write", Kind: ToolFile}
 	fileCall.Span = &Span{
@@ -126,29 +144,18 @@ func goldenCases() []goldenCase {
 		FileOp:       "write",
 		BytesWritten: &bytesWritten,
 	}
+	// 2.5s later: pins duration_ms as a real number, which nothing but the
+	// client can produce now that there is no span for core to derive it from.
+	fileResult := completed(fileCall, "ev-5", "2026-07-31T09:00:02.5Z")
 
-	// The completed half of the same call: it must share the activity_id and
-	// span_id of fileCall (that pairing is the whole point) and carry a real
-	// end_time/duration_ns where the started half emits nulls.
-	fileResult := fileCall
-	fileResult.EventID = "ev-5"
-	fileResult.EventType = EventToolResult
-	fileResult.StartedAt = ts
-	fileResult.EndedAt = "2026-07-31T09:00:02.5Z"
-	fileResult.Timestamp = "2026-07-31T09:00:02.5Z"
-	fileResult.Span = &Span{
-		SemanticType: "file_write",
-		Stage:        "completed",
-		FilePath:     "cli/cmd/openbox/main.go",
-		FileOp:       "write",
-		BytesWritten: &bytesWritten,
-	}
-
-	// Shell: shell_command must stay present-but-null. The command is read for
-	// the local enforce decision and never egresses (SL3-SEC-3).
+	// Shell: the command is read for the local enforce decision and never
+	// egresses (SL3-SEC-3), so neither half carries it. The completed half has
+	// no counts either — the providers expose none for a shell call — so its
+	// activity_output is absent rather than an empty object.
 	shellCall := base(EventToolCall, "ev-6")
 	shellCall.Tool = Tool{Name: "Bash", Kind: ToolShell}
 	shellCall.Span = &Span{SemanticType: "shell_command", Stage: "started"}
+	shellResult := completed(shellCall, "ev-8", "2026-07-31T09:00:01Z")
 
 	mcpCall := base(EventToolCall, "ev-7")
 	mcpCall.Tool = Tool{Name: "search_issues", Kind: ToolMCP, MCPServer: "github"}
@@ -158,15 +165,18 @@ func goldenCases() []goldenCase {
 		MCPServer:    "github",
 		Function:     "search_issues",
 	}
+	mcpResult := completed(mcpCall, "ev-9", "2026-07-31T09:00:00.75Z")
 
 	return []goldenCase{
 		{"lifecycle_session_started", sessionStarted},
 		{"lifecycle_session_ended", sessionEnded},
 		{"signal_prompt_submitted", promptSubmitted},
 		{"signal_deploy_lineage", deploy},
-		{"hook_file_started", fileCall},
-		{"hook_file_completed", fileResult},
-		{"hook_shell_started", shellCall},
-		{"hook_mcp_started", mcpCall},
+		{"activity_file_started", fileCall},
+		{"activity_file_completed", fileResult},
+		{"activity_shell_started", shellCall},
+		{"activity_shell_completed", shellResult},
+		{"activity_mcp_started", mcpCall},
+		{"activity_mcp_completed", mcpResult},
 	}
 }
