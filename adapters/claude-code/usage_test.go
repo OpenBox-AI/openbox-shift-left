@@ -8,10 +8,12 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/openbox-ai/openbox-shift-left/adapters/common/hookflow"
 	"github.com/openbox-ai/openbox-shift-left/client"
 )
 
@@ -21,23 +23,33 @@ import (
 const testSeedB64 = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="
 
 // poisonedTranscript is a JSONL transcript shaped like a real Claude Code
-// transcript (verified against ~/.claude/projects/*.jsonl): assistant turns carry
-// message.usage; every content-bearing location is seeded with a unique SENTINEL_*
-// string. Real usage numbers are interleaved. The finops parser must extract the
-// numbers and NONE of the sentinels.
+// transcript (verified against ~/.claude/projects/*.jsonl — including the
+// `cache_creation` sub-object and `iterations[]` breakdown, both of which are
+// deliberately unbound because summing them alongside the top-level counts would
+// double-count): assistant turns carry message.usage; every content-bearing
+// location is seeded with a unique SENTINEL_* string. Real usage numbers are
+// interleaved. The parser must extract the numbers and NONE of the sentinels.
 //
-// Expected rollup: input = (100+2000+50) + 10 = 2160; output = 30 + 5 = 35;
-// total = 2195; cost = 0.0123 USD.
-const poisonedTranscript = `{"type":"user","message":{"role":"user","content":"SENTINEL_PROMPT top secret prompt"},"cwd":"/x","sessionId":"s1"}
-{"type":"assistant","message":{"model":"claude-opus-4-8","content":[{"type":"text","text":"SENTINEL_OUTPUT assistant reply"},{"type":"tool_use","name":"Bash","input":{"command":"SENTINEL_CMD dangerous"}}],"usage":{"input_tokens":100,"cache_read_input_tokens":2000,"cache_creation_input_tokens":50,"output_tokens":30,"service_tier":"standard","iterations":[{"input_tokens":100,"output_tokens":30}]}},"costUSD":0.0123}
-{"type":"user","message":{"role":"user","content":[{"type":"tool_result","content":"SENTINEL_TOOLRESULT captured file body"}]}}
-{"type":"assistant","message":{"content":[{"type":"thinking","thinking":"SENTINEL_THINKING private chain of thought"}],"usage":{"input_tokens":10,"output_tokens":5}}}
-{"type":"file-history-snapshot","snapshot":{"content":"SENTINEL_FILE entire file contents"}}
+// Expected rollup (contract v1.1 — the four counts are separate, `input` is
+// pure): input = 100+10 = 110; output = 30+5 = 35; cache_creation = 50;
+// cache_read = 2000; total = 2195; cost = 0.0123 USD.
+//
+// The sidechain line is the partition case: its 7000/700 must appear in NEITHER
+// the main-thread window NOR anywhere on a main-thread turn's wire bytes.
+const poisonedTranscript = `{"type":"user","isSidechain":false,"timestamp":"2026-08-11T09:00:00.000Z","message":{"role":"user","content":"SENTINEL_PROMPT top secret prompt"},"cwd":"/x","sessionId":"s1"}
+{"type":"assistant","isSidechain":false,"timestamp":"2026-08-11T09:00:01.500Z","message":{"model":"claude-opus-4-8","content":[{"type":"text","text":"SENTINEL_OUTPUT assistant reply"},{"type":"tool_use","name":"Bash","input":{"command":"SENTINEL_CMD dangerous"}}],"usage":{"input_tokens":100,"cache_read_input_tokens":2000,"cache_creation_input_tokens":50,"output_tokens":30,"service_tier":"standard","cache_creation":{"ephemeral_1h_input_tokens":50,"ephemeral_5m_input_tokens":0},"iterations":[{"input_tokens":100,"output_tokens":30}]}},"costUSD":0.0123}
+{"type":"user","isSidechain":false,"message":{"role":"user","content":[{"type":"tool_result","content":"SENTINEL_TOOLRESULT captured file body"}]}}
+{"type":"assistant","isSidechain":true,"timestamp":"2026-08-11T09:00:02.000Z","message":{"model":"SENTINEL_SIDEMODEL-sonnet","content":[{"type":"text","text":"SENTINEL_SIDETEXT subagent reply"}],"usage":{"input_tokens":7000,"output_tokens":700}}}
+{"type":"assistant","isSidechain":false,"timestamp":"2026-08-11T09:00:03.000Z","message":{"content":[{"type":"thinking","thinking":"SENTINEL_THINKING private chain of thought"}],"usage":{"input_tokens":10,"output_tokens":5}}}
+{"type":"file-history-snapshot","isSidechain":false,"snapshot":{"content":"SENTINEL_FILE entire file contents"}}
 `
 
 var sentinels = []string{
 	"SENTINEL_PROMPT", "SENTINEL_OUTPUT", "SENTINEL_CMD",
 	"SENTINEL_TOOLRESULT", "SENTINEL_THINKING", "SENTINEL_FILE",
+	// The sidechain line's model and text: a main-thread turn must carry neither,
+	// which proves the partition holds on the wire and not merely in the sums.
+	"SENTINEL_SIDEMODEL", "SENTINEL_SIDETEXT",
 }
 
 func writeTranscript(t *testing.T, body string) string {
@@ -49,6 +61,12 @@ func writeTranscript(t *testing.T, body string) string {
 	return p
 }
 
+// The SessionEnd rollup sums EVERY usage line — sidechain included — because it
+// is the whole-session total, and it is the independent second derivation the
+// live reconciliation compares Σ(per-turn) against. Contract v1.1 stopped folding
+// the cache counts into Input, so each count is asserted in its own field; the
+// old fold-in made this rollup and the per-turn records sum different quantities
+// under the same field name.
 func TestAggregateUsage_SumsTokensAndCost(t *testing.T) {
 	tokens, cost, err := aggregateUsage([]byte(poisonedTranscript))
 	if err != nil {
@@ -57,14 +75,23 @@ func TestAggregateUsage_SumsTokensAndCost(t *testing.T) {
 	if tokens == nil {
 		t.Fatal("tokens nil, want a rollup")
 	}
-	if got := *tokens.Input; got != 2160 {
-		t.Errorf("Input = %d, want 2160 (prompt+cache tokens folded in)", got)
+	// 100 + 10 main + 7000 sidechain: the rollup is the whole session.
+	if got := *tokens.Input; got != 7110 {
+		t.Errorf("Input = %d, want 7110 (pure input, every line)", got)
 	}
-	if got := *tokens.Output; got != 35 {
-		t.Errorf("Output = %d, want 35", got)
+	if got := *tokens.Output; got != 735 {
+		t.Errorf("Output = %d, want 735", got)
 	}
-	if got := *tokens.Total; got != 2195 {
-		t.Errorf("Total = %d, want 2195", got)
+	if tokens.CacheCreationInput == nil || *tokens.CacheCreationInput != 50 {
+		t.Errorf("CacheCreationInput = %v, want 50 in its own field (not folded into Input)", tokens.CacheCreationInput)
+	}
+	if tokens.CacheRead == nil || *tokens.CacheRead != 2000 {
+		t.Errorf("CacheRead = %v, want 2000 in its own field", tokens.CacheRead)
+	}
+	// Total is whole throughput, so it is unchanged by the un-folding: a consumer
+	// reading only `total` sees the same number the old rollup produced.
+	if got := *tokens.Total; got != 7110+735+50+2000 {
+		t.Errorf("Total = %d, want %d (input+output+both caches)", got, 7110+735+50+2000)
 	}
 	if cost == nil {
 		t.Fatal("cost nil, want 0.0123 (transcript carried costUSD)")
@@ -74,49 +101,398 @@ func TestAggregateUsage_SumsTokensAndCost(t *testing.T) {
 	}
 }
 
-// TestFinops_NoContentOnWire is the LOAD-BEARING INV-2 test (SL-16 acceptance):
-// a transcript seeded with sentinel content strings must yield usage numbers with
-// NONE of the sentinels reaching the emitted event, its metadata/span, or the
-// actual signed wire body. It drives the real AIP-signing client with
-// content-capture ON — the adversarial worst case (the client's content stripper
-// is disabled), so any leak would pass straight through to the wire.
-func TestFinops_NoContentOnWire(t *testing.T) {
-	path := writeTranscript(t, poisonedTranscript)
-	tokens, cost, err := readTranscriptUsage(path)
+// The main-thread window excludes sidechain lines exactly. This is the
+// double-count guard: if a subagent's lines land in the parent transcript, the
+// parent must not claim their tokens, because SubagentStop's own record carries
+// them.
+func TestTurnWindow_PartitionsSidechainOut(t *testing.T) {
+	main := aggregateTurnWindow([]byte(poisonedTranscript), false)
+	if !main.HasUsage {
+		t.Fatal("main window reports no usage")
+	}
+	if main.Input != 110 || main.Output != 35 {
+		t.Errorf("main window = in %d/out %d, want 110/35 (sidechain excluded)", main.Input, main.Output)
+	}
+	if main.CacheCreationInput != 50 || main.CacheRead != 2000 {
+		t.Errorf("main window caches = %d/%d, want 50/2000", main.CacheCreationInput, main.CacheRead)
+	}
+	if main.Model != "claude-opus-4-8" {
+		t.Errorf("main window model = %q, want claude-opus-4-8 (never the sidechain's)", main.Model)
+	}
+
+	side := aggregateTurnWindow([]byte(poisonedTranscript), true)
+	if !side.HasUsage {
+		t.Fatal("sidechain window reports no usage")
+	}
+	if side.Input != 7000 || side.Output != 700 {
+		t.Errorf("sidechain window = in %d/out %d, want 7000/700", side.Input, side.Output)
+	}
+
+	// The partitions are exhaustive: together they equal the rollup, field by
+	// field. This is the invariant that makes the live reconciliation assertion
+	// meaningful — if it did not hold here it could not hold against a stack.
+	rollup, _, err := aggregateUsage([]byte(poisonedTranscript))
 	if err != nil {
-		t.Fatalf("readTranscriptUsage: %v", err)
+		t.Fatalf("aggregateUsage: %v", err)
 	}
-
-	// Build the SessionEnded event exactly as the flush path does.
-	m := NewMapper(Identity{DeveloperDID: testDID})
-	m.NewID = func() string { return "evt-1" }
-	m.Finops = &FinopsUsage{Tokens: tokens, Cost: cost}
-	ev, ok := m.Map(HookSessionEnd, &HookEvent{SessionID: "s1", TranscriptPath: path, Reason: "other"})
-	if !ok {
-		t.Fatal("Map(SessionEnd) not ok")
-	}
-	if ev.Tokens == nil || *ev.Tokens.Total != 2195 {
-		t.Fatalf("SessionEnded event missing token rollup: %+v", ev.Tokens)
-	}
-
-	// (a) The normalized event itself carries no sentinel anywhere.
-	evJSON, _ := json.Marshal(ev)
-	for _, s := range sentinels {
-		if strings.Contains(string(evJSON), s) {
-			t.Fatalf("INV-2 breach: sentinel %q present in emitted event: %s", s, evJSON)
+	for _, c := range []struct {
+		name       string
+		part, want int
+	}{
+		{"input", main.Input + side.Input, *rollup.Input},
+		{"output", main.Output + side.Output, *rollup.Output},
+		{"cache_creation", main.CacheCreationInput + side.CacheCreationInput, *rollup.CacheCreationInput},
+		{"cache_read", main.CacheRead + side.CacheRead, *rollup.CacheRead},
+	} {
+		if c.part != c.want {
+			t.Errorf("Σ(main,sidechain) %s = %d, rollup = %d — the partitions are not exhaustive", c.name, c.part, c.want)
 		}
 	}
+}
 
-	// (b) The exact SIGNED WIRE BODY carries no sentinel — content-capture ON so
-	// the stripper cannot be what saves us; only the projection-only parser can.
-	var body []byte
+// The window's open time is the FIRST parsable line timestamp, and it arrives as
+// a time.Time — never as the transcript's string.
+func TestTurnWindow_OpenTimeIsFirstParsableTimestamp(t *testing.T) {
+	w := aggregateTurnWindow([]byte(poisonedTranscript), false)
+	want := time.Date(2026, 8, 11, 9, 0, 0, 0, time.UTC)
+	if !w.Open.Equal(want) {
+		t.Errorf("window open = %v, want %v (first parsable line)", w.Open, want)
+	}
+
+	// No parsable timestamp ⇒ zero, which is the caller's signal to fall back to
+	// hook wall time and OMIT duration_ms rather than report a fabricated one.
+	noTS := aggregateTurnWindow([]byte(
+		`{"type":"assistant","isSidechain":false,"timestamp":"not-a-time","message":{"usage":{"input_tokens":1,"output_tokens":1}}}`+"\n"), false)
+	if !noTS.Open.IsZero() {
+		t.Errorf("unparsable timestamp yielded open = %v, want zero", noTS.Open)
+	}
+	if !noTS.HasUsage {
+		t.Error("an unparsable timestamp must not discard the line's usage")
+	}
+}
+
+// Model is last-non-empty WITHIN the window and is never carried across windows
+// or back-filled: attributing tokens to a model that may not have spent them is a
+// fabricated number.
+func TestTurnWindow_ModelIsLastNonEmptyInWindow(t *testing.T) {
+	body := `{"isSidechain":false,"message":{"model":"claude-opus-4-8","usage":{"input_tokens":5,"output_tokens":1}}}
+{"isSidechain":false,"message":{"usage":{"input_tokens":5,"output_tokens":1}}}
+{"isSidechain":false,"message":{"model":"claude-sonnet-4-8","usage":{"input_tokens":5,"output_tokens":1}}}
+`
+	if got := aggregateTurnWindow([]byte(body), false).Model; got != "claude-sonnet-4-8" {
+		t.Errorf("model = %q, want claude-sonnet-4-8 (last non-empty)", got)
+	}
+
+	// A window whose lines name no model emits none. The core-side extractor
+	// buckets those tokens under `unknown` rather than under a guess.
+	noModel := aggregateTurnWindow([]byte(`{"isSidechain":false,"message":{"usage":{"input_tokens":9,"output_tokens":2}}}`+"\n"), false)
+	if noModel.Model != "" {
+		t.Errorf("model = %q, want empty", noModel.Model)
+	}
+	if !noModel.HasUsage || noModel.Input != 9 {
+		t.Errorf("a model-less window must still report its usage: %+v", noModel)
+	}
+}
+
+// Two successive reads over a GROWING transcript must yield disjoint windows:
+// this is the property that stops an N-turn session reporting O(N²) tokens.
+func TestReadTurnUsage_SuccessiveWindowsAreDisjoint(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "transcript.jsonl")
+	line := func(in, out int) string {
+		return `{"isSidechain":false,"timestamp":"2026-08-11T09:00:00Z","message":{"model":"m1","usage":{"input_tokens":` +
+			strconv.Itoa(in) + `,"output_tokens":` + strconv.Itoa(out) + `}}}` + "\n"
+	}
+	if err := os.WriteFile(path, []byte(line(10, 1)+line(20, 2)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	w1, pos1, err := readTurnUsage(path, hookflow.TurnPos{}, false)
+	if err != nil {
+		t.Fatalf("first read: %v", err)
+	}
+	if w1.Input != 30 || w1.Output != 3 {
+		t.Errorf("first window = %d/%d, want 30/3", w1.Input, w1.Output)
+	}
+
+	// The transcript grows; the second read must see ONLY the new lines.
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.WriteString(line(5, 7)); err != nil {
+		t.Fatal(err)
+	}
+	f.Close()
+
+	w2, pos2, err := readTurnUsage(path, pos1, false)
+	if err != nil {
+		t.Fatalf("second read: %v", err)
+	}
+	if w2.Input != 5 || w2.Output != 7 {
+		t.Errorf("second window = %d/%d, want 5/7 — the cursor did not isolate the window", w2.Input, w2.Output)
+	}
+	if pos2.Offset <= pos1.Offset {
+		t.Errorf("cursor did not advance: %d → %d", pos1.Offset, pos2.Offset)
+	}
+
+	// A third read with nothing new reports nothing at all — idempotent locally,
+	// so a Stop that fires twice does not emit a second empty pair.
+	w3, pos3, err := readTurnUsage(path, pos2, false)
+	if err != nil {
+		t.Fatalf("third read: %v", err)
+	}
+	if w3.HasUsage {
+		t.Errorf("third window reported usage %+v, want none", w3)
+	}
+	if pos3 != pos2 {
+		t.Errorf("cursor moved with nothing to read: %+v → %+v", pos2, pos3)
+	}
+}
+
+// A partially-written final line must be left for the next read, never parsed
+// half-way and never skipped: the cursor advances only over complete lines.
+func TestReadTurnUsage_PartialFinalLineIsNotConsumed(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "transcript.jsonl")
+	complete := `{"isSidechain":false,"message":{"model":"m1","usage":{"input_tokens":10,"output_tokens":1}}}` + "\n"
+	partial := `{"isSidechain":false,"message":{"model":"m1","usage":{"input_tokens":99`
+	if err := os.WriteFile(path, []byte(complete+partial), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	w, pos, err := readTurnUsage(path, hookflow.TurnPos{}, false)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if w.Input != 10 {
+		t.Errorf("window input = %d, want 10 (the partial line must not contribute)", w.Input)
+	}
+	if pos.Offset != int64(len(complete)) {
+		t.Errorf("cursor = %d, want %d (must stop at the last newline)", pos.Offset, len(complete))
+	}
+
+	// Once the line is completed, the next read picks it up whole.
+	if err := os.WriteFile(path, []byte(complete+partial+`,"output_tokens":3}}}`+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	w2, _, err := readTurnUsage(path, pos, false)
+	if err != nil {
+		t.Fatalf("second read: %v", err)
+	}
+	if w2.Input != 99 || w2.Output != 3 {
+		t.Errorf("completed line read as %d/%d, want 99/3", w2.Input, w2.Output)
+	}
+}
+
+// A window LARGER than one read chunk must be aggregated whole, in one window —
+// not truncated at the chunk boundary with the remainder folded into the next
+// turn. Cross-chunk truncation would conserve total tokens while making two turns
+// carry each other's numbers, and per-turn attribution is the whole point.
+//
+// This is not a hypothetical size. A cursor that has never been written reads from
+// offset 0, so the first firing after usage capture is enabled mid-session sees
+// the entire transcript to date as one window.
+func TestReadTurnUsage_WindowSpanningManyChunksIsAggregatedWhole(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "transcript.jsonl")
+
+	// Enough lines to cross turnChunkBytes several times, each padded so the byte
+	// count is what forces the chunking rather than the line count.
+	pad := strings.Repeat("x", 4096)
+	const lines = 4000
+	var b strings.Builder
+	for i := 0; i < lines; i++ {
+		model := "claude-opus-4-8"
+		if i == lines-1 {
+			model = "claude-sonnet-4-8" // last non-empty must win ACROSS chunks
+		}
+		b.WriteString(`{"isSidechain":false,"timestamp":"2026-08-11T09:00:0` +
+			strconv.Itoa(i%10) + `.000Z","pad":"` + pad + `","message":{"model":"` + model +
+			`","usage":{"input_tokens":1,"output_tokens":2,"cache_read_input_tokens":3,"cache_creation_input_tokens":4}}}` + "\n")
+	}
+	body := b.String()
+	if len(body) <= turnChunkBytes {
+		t.Fatalf("test body is %d bytes, needs to exceed turnChunkBytes (%d) to exercise chunking", len(body), turnChunkBytes)
+	}
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	w, pos, err := readTurnUsage(path, hookflow.TurnPos{}, false)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if w.Input != lines || w.Output != 2*lines || w.CacheRead != 3*lines || w.CacheCreationInput != 4*lines {
+		t.Errorf("window = %d/%d/%d/%d, want %d/%d/%d/%d — the window was split at a chunk boundary",
+			w.Input, w.Output, w.CacheRead, w.CacheCreationInput, lines, 2*lines, 3*lines, 4*lines)
+	}
+	// The whole window was consumed: the cursor is at EOF, so the next firing sees
+	// nothing rather than the tail of this turn.
+	if pos.Offset != int64(len(body)) {
+		t.Errorf("cursor = %d, want %d (EOF) — part of the window was left unread", pos.Offset, len(body))
+	}
+	// Order-dependent aggregation survives chunking.
+	if w.Model != "claude-sonnet-4-8" {
+		t.Errorf("model = %q, want the LAST non-empty across chunks", w.Model)
+	}
+	if w.Open.IsZero() || !w.Open.Equal(time.Date(2026, 8, 11, 9, 0, 0, 0, time.UTC)) {
+		t.Errorf("open = %v, want the FIRST line's timestamp across chunks", w.Open)
+	}
+
+	// And a second firing over the unchanged file reports nothing.
+	w2, pos2, err := readTurnUsage(path, pos, false)
+	if err != nil {
+		t.Fatalf("second read: %v", err)
+	}
+	if w2.HasUsage {
+		t.Errorf("second read reported usage %+v; the first should have consumed the whole window", w2)
+	}
+	if pos2 != pos {
+		t.Errorf("cursor moved with nothing to read: %+v → %+v", pos, pos2)
+	}
+}
+
+// A line boundary that falls INSIDE a chunk read must not split the line: the
+// carry-over is what keeps a record whole across two reads.
+func TestReadTurnUsage_LineStraddlingAChunkBoundaryIsIntact(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "transcript.jsonl")
+
+	// One big line that pushes past the chunk size, then a small line whose numbers
+	// would be lost if the carry-over dropped the fragment.
+	pad := strings.Repeat("y", turnChunkBytes+1024)
+	body := `{"isSidechain":false,"pad":"` + pad + `","message":{"model":"m1","usage":{"input_tokens":11,"output_tokens":0}}}` + "\n" +
+		`{"isSidechain":false,"message":{"model":"m2","usage":{"input_tokens":7,"output_tokens":5}}}` + "\n"
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	w, pos, err := readTurnUsage(path, hookflow.TurnPos{}, false)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if w.Input != 18 || w.Output != 5 {
+		t.Errorf("window = %d/%d, want 18/5 — a line straddling the chunk boundary was lost or split", w.Input, w.Output)
+	}
+	if w.Model != "m2" {
+		t.Errorf("model = %q, want m2", w.Model)
+	}
+	if pos.Offset != int64(len(body)) {
+		t.Errorf("cursor = %d, want %d (EOF)", pos.Offset, len(body))
+	}
+}
+
+// A single line with no newline that grows past the whole-transcript cap is the
+// one thing streaming cannot absorb. It must error rather than buffer without
+// bound, and it must NOT advance the cursor — a later firing retries once the
+// line is terminated.
+func TestReadTurnUsage_UnboundedSingleLineIsRefused(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "transcript.jsonl")
+	// No trailing newline anywhere: the reader can never consume a complete line.
+	if err := os.WriteFile(path, []byte(strings.Repeat("z", maxTranscriptBytes+1)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	w, pos, err := readTurnUsage(path, hookflow.TurnPos{Offset: 0, Index: 2}, false)
+	if err == nil {
+		t.Error("a newline-less line past the cap must error rather than buffer without bound")
+	}
+	if w.HasUsage {
+		t.Errorf("window reported usage %+v", w)
+	}
+	if pos.Offset != 0 || pos.Index != 2 {
+		t.Errorf("cursor advanced to %+v on a refused read; it must stay put", pos)
+	}
+}
+
+// A transcript that shrank below the cursor was truncated or rotated. Re-read
+// from the start: the turn ids are re-minted deterministically and the server
+// dedupes them, whereas seeking past EOF would report nothing forever.
+func TestReadTurnUsage_TruncatedTranscriptRereadsFromStart(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "transcript.jsonl")
+	body := `{"isSidechain":false,"message":{"model":"m1","usage":{"input_tokens":4,"output_tokens":2}}}` + "\n"
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	w, _, err := readTurnUsage(path, hookflow.TurnPos{Offset: 999999, Index: 7}, false)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if w.Input != 4 {
+		t.Errorf("window input = %d, want 4 (re-read from zero after truncation)", w.Input)
+	}
+}
+
+func TestReadTurnUsage_MissingPathIsAnError(t *testing.T) {
+	if _, _, err := readTurnUsage("", hookflow.TurnPos{}, false); err == nil {
+		t.Error("empty transcript_path should error (best-effort skip)")
+	}
+	if _, _, err := readTurnUsage(filepath.Join(t.TempDir(), "nope.jsonl"), hookflow.TurnPos{}, false); err == nil {
+		t.Error("missing transcript should error")
+	}
+	// A directory is not a regular file: must error rather than be read.
+	if _, _, err := readTurnUsage(t.TempDir(), hookflow.TurnPos{}, false); err == nil {
+		t.Error("a directory should error")
+	}
+}
+
+// Malformed lines are skipped, never fatal, and never stop the aggregation.
+func TestTurnWindow_MalformedLinesSkipped(t *testing.T) {
+	body := `{"isSidechain":false,"message":{"model":"m1","usage":{"input_tokens":10,"output_tokens":1}}}
+not json at all
+{"isSidechain":false,"message":{"usage":"a string where an object belongs"}}
+{"isSidechain":false,"message":{"model":"m1","usage":{"input_tokens":5,"output_tokens":1}}}
+`
+	w := aggregateTurnWindow([]byte(body), false)
+	if w.Input != 15 || w.Output != 2 {
+		t.Errorf("window = %d/%d, want 15/2 (bad lines skipped, good ones kept)", w.Input, w.Output)
+	}
+}
+
+// Negative source counts are clamped so emitted numbers always satisfy the
+// schema's `minimum: 0`.
+func TestTurnWindow_NegativeCountsClamped(t *testing.T) {
+	body := `{"isSidechain":false,"message":{"model":"m1","usage":{"input_tokens":-5,"output_tokens":-1,"cache_read_input_tokens":-9,"cache_creation_input_tokens":-2}}}` + "\n"
+	w := aggregateTurnWindow([]byte(body), false)
+	if w.Input != 0 || w.Output != 0 || w.CacheRead != 0 || w.CacheCreationInput != 0 {
+		t.Errorf("negative counts not clamped: %+v", w)
+	}
+	tok := w.tokens()
+	if tok == nil || *tok.Total != 0 {
+		t.Errorf("tokens = %+v, want an all-zero rollup", tok)
+	}
+}
+
+// TestFinops_NoContentOnWire is the LOAD-BEARING INV-2 test, and ADR-0014
+// NARROWED what it proves. It used to assert "no content anywhere", which the
+// projection guaranteed structurally: the structs held only numbers, so content
+// had nowhere to land. The projection now binds three non-numeric fields, so the
+// claim this test must prove is the exact allowlist:
+//
+//	sentinel content        → ABSENT from the signed wire body (4 field classes)
+//	message.model           → PRESENT (the one string authorised to egress)
+//	the raw timestamp string→ ABSENT (bound, parsed to a time, discarded)
+//	sidechain sums + model  → ABSENT from a main-thread turn (the partition)
+//
+// It drives the real AIP-signing client with content-capture ON — the adversarial
+// worst case, because the client's stripper is then disabled and only the
+// projection can be what keeps content off the wire.
+//
+// A change that makes this test pass trivially is a defect: the guarantee no
+// longer defends itself structurally, so this is the thing defending it.
+func TestFinops_NoContentOnWire(t *testing.T) {
+	path := writeTranscript(t, poisonedTranscript)
+
+	var bodies [][]byte
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		body, _ = io.ReadAll(r.Body)
+		b, _ := io.ReadAll(r.Body)
+		bodies = append(bodies, b)
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{}`))
 	}))
 	defer srv.Close()
-
 	cl, err := client.New(client.Config{
 		BaseURL:               srv.URL,
 		APIKey:                "obx_test_0123456789abcdef0123456789abcdef0123456789abcdef",
@@ -127,20 +503,125 @@ func TestFinops_NoContentOnWire(t *testing.T) {
 	if err != nil {
 		t.Fatalf("client.New: %v", err)
 	}
-	if _, err := cl.Emit(context.Background(), ev); err != nil {
-		t.Fatalf("Emit: %v", err)
+
+	m := NewMapper(Identity{DeveloperDID: testDID})
+	m.NewID = func() string { return "evt-1" }
+
+	// --- the SessionEnd rollup path ---
+	tokens, cost, err := readTranscriptUsage(path)
+	if err != nil {
+		t.Fatalf("readTranscriptUsage: %v", err)
 	}
-	if len(body) == 0 {
-		t.Fatal("no request body captured")
+	m.Finops = &FinopsUsage{Tokens: tokens, Cost: cost}
+	sessionEnd, ok := m.Map(HookSessionEnd, &HookEvent{SessionID: "s1", TranscriptPath: path, Reason: "other"})
+	if !ok {
+		t.Fatal("Map(SessionEnd) not ok")
 	}
-	for _, s := range sentinels {
-		if strings.Contains(string(body), s) {
-			t.Fatalf("INV-2 breach: sentinel %q on the wire: %s", s, body)
+	wantTotal := 7110 + 735 + 50 + 2000
+	if sessionEnd.Tokens == nil || *sessionEnd.Tokens.Total != wantTotal {
+		t.Fatalf("SessionEnded event missing token rollup: %+v", sessionEnd.Tokens)
+	}
+
+	// --- the per-turn path (a main-thread Stop) ---
+	window, _, err := readTurnUsage(path, hookflow.TurnPos{}, false)
+	if err != nil {
+		t.Fatalf("readTurnUsage: %v", err)
+	}
+	turnStarted, turnCompleted, ok := m.MapTurn(&HookEvent{SessionID: "s1", TranscriptPath: path}, window, 0)
+	if !ok {
+		t.Fatal("MapTurn not ok")
+	}
+
+	events := []struct {
+		name string
+		ev   client.DevEvent
+	}{
+		{"SessionEnded", sessionEnd},
+		{"TurnStarted", turnStarted},
+		{"TurnCompleted", turnCompleted},
+	}
+
+	// (a) No sentinel in any normalized event.
+	for _, e := range events {
+		evJSON, _ := json.Marshal(e.ev)
+		for _, s := range sentinels {
+			if strings.Contains(string(evJSON), s) {
+				t.Fatalf("INV-2 breach: sentinel %q present in %s event: %s", s, e.name, evJSON)
+			}
 		}
 	}
-	// Sanity: the numbers DID make it to the wire (feature actually works).
-	if !strings.Contains(string(body), "2195") {
-		t.Errorf("expected token total 2195 on the wire, got: %s", body)
+
+	// (b) No sentinel in the exact SIGNED WIRE BODY of any of them.
+	for _, e := range events {
+		if _, err := cl.Emit(context.Background(), e.ev); err != nil {
+			t.Fatalf("Emit(%s): %v", e.name, err)
+		}
+	}
+	if len(bodies) != len(events) {
+		t.Fatalf("captured %d request bodies, want %d", len(bodies), len(events))
+	}
+	for i, body := range bodies {
+		if len(body) == 0 {
+			t.Fatalf("%s: empty request body", events[i].name)
+		}
+		for _, s := range sentinels {
+			if strings.Contains(string(body), s) {
+				t.Fatalf("INV-2 breach: sentinel %q on the wire for %s: %s", s, events[i].name, body)
+			}
+		}
+		// The raw transcript timestamp string is BOUND by the projection now, so
+		// its absence is no longer structural and must be asserted. Every
+		// transcript line's timestamp ends in the millis+Z form below; the
+		// timestamps that legitimately appear on the wire are the mapper's own
+		// RFC3339Nano stamps, which never carry these exact values.
+		for _, ts := range []string{"2026-08-11T09:00:00.000Z", "2026-08-11T09:00:01.500Z", "2026-08-11T09:00:03.000Z"} {
+			if strings.Contains(string(body), ts) {
+				t.Fatalf("INV-2 breach: raw transcript timestamp %q on the wire for %s: %s", ts, events[i].name, body)
+			}
+		}
+	}
+
+	// (c) The ONE authorised string DID reach the wire — otherwise the allowlist
+	// costs its privacy narrowing and buys nothing.
+	completedBody := string(bodies[2])
+	if !strings.Contains(completedBody, `"model":"claude-opus-4-8"`) {
+		t.Errorf("the model id did not reach the wire: %s", completedBody)
+	}
+
+	// (d) The numbers reached the wire, in their own fields, and the sidechain's
+	// did not — the partition holds on the wire, not just in the sums.
+	for _, want := range []string{
+		`"input_tokens":110`, `"output_tokens":35`,
+		`"cache_creation_input_tokens":50`, `"cache_read_input_tokens":2000`,
+	} {
+		if !strings.Contains(completedBody, want) {
+			t.Errorf("expected %s in the turn's activity_output: %s", want, completedBody)
+		}
+	}
+	for _, forbidden := range []string{`"input_tokens":7000`, `"output_tokens":700`, "7110"} {
+		if strings.Contains(completedBody, forbidden) {
+			t.Errorf("a main-thread turn carried sidechain numbers (%s): %s", forbidden, completedBody)
+		}
+	}
+
+	// (e) Sanity on the rollup body: the session total is there.
+	if !strings.Contains(string(bodies[0]), strconv.Itoa(wantTotal)) {
+		t.Errorf("expected token total %d on the SessionEnded wire body, got: %s", wantTotal, bodies[0])
+	}
+}
+
+// Cost must never be derived. The transcript is the only source; a transcript
+// without costUSD yields nil, and no pricing table is ever consulted.
+func TestTurnUsage_CostIsNeverDerived(t *testing.T) {
+	m := NewMapper(Identity{DeveloperDID: testDID})
+	m.NewID = func() string { return "evt-1" }
+	w := aggregateTurnWindow([]byte(poisonedTranscript), false)
+	_, completed, ok := m.MapTurn(&HookEvent{SessionID: "s1"}, w, 0)
+	if !ok {
+		t.Fatal("MapTurn not ok")
+	}
+	if completed.Cost != nil {
+		t.Errorf("a turn event carried cost %+v; cost is derived server-side, never here", completed.Cost)
 	}
 }
 

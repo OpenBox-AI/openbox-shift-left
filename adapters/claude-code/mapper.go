@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
+	"strconv"
 	"strings"
 	"time"
 
@@ -204,7 +205,7 @@ func (m Mapper) Map(hook HookName, e *HookEvent) (client.DevEvent, bool) {
 		ev.EndedAt = ts
 		ev.Tool = client.Tool{Name: agentToolName, Kind: client.ToolShell}
 		ev.Metadata = compact(map[string]any{"reason": enumOr(e.Reason, reasonValues)})
-		// Attach the opt-in transcript usage rollup, if the finops reader
+		// Attach the transcript usage rollup, if the finops reader
 		// extracted any. Numbers only — Tokens/Cost carry no content
 		// (usage.go). nil ⇒ nothing attached (finops off or empty session).
 		if m.Finops != nil {
@@ -216,6 +217,14 @@ func (m Mapper) Map(hook HookName, e *HookEvent) (client.DevEvent, bool) {
 			ev.Metadata = mergeMetadata(ev.Metadata, m.Evidence.metadata())
 		}
 
+	case HookStop, HookSubagentStop:
+		// Deliberately no single event. A turn is a PAIR, and both halves come
+		// from MapTurn, which additionally needs the transcript window RunHook
+		// read. Returning false here is the correct answer to "map this one hook
+		// payload to one event" — not a gap. RunHook routes these hooks to
+		// MapTurn instead of Observe.
+		return client.DevEvent{}, false
+
 	default:
 		return client.DevEvent{}, false
 	}
@@ -226,6 +235,98 @@ func (m Mapper) Map(hook HookName, e *HookEvent) (client.DevEvent, bool) {
 	// feed the derivation.
 	ev.EventID = m.eventID(ev)
 	return ev, true
+}
+
+// MapTurn builds one model turn's ActivityStarted/ActivityCompleted pair from a
+// Stop/SubagentStop firing and the transcript window it delimits (ADR-0014).
+//
+// BOTH halves come from this one call, because both come from one hook firing.
+// Stop fires at turn *end*, so the alternative was to open the pair from
+// UserPromptSubmit and close it here — which would need two processes to agree on
+// a turn index, would orphan a Completed when no prompt preceded the turn, and
+// would open a turn per queued prompt. Deriving the pair atomically here avoids
+// all three, and costs nothing observable: core takes the turn's duration from
+// `duration_ms` on the Completed half and never reads the Started timestamp.
+//
+// The Started half's timestamp is the window's real open time when the transcript
+// gave one, falling back to hook wall time. `duration_ms` is emitted only in the
+// former case — a fabricated duration from a fallback start would be a made-up
+// measurement, and the client omits the field rather than claiming zero.
+//
+// Returns ok=false when the payload is unusable or the window carried no usage:
+// a Stop that opened no new tokens is not a turn, and emitting an empty pair
+// would inflate the pair count Phase 06 asserts against the real turn count.
+//
+// Like Map, this is pure: RunHook does the transcript I/O and hands the result
+// in, so the mapper still cannot touch content.
+func (m Mapper) MapTurn(e *HookEvent, w turnWindow, index int) (started, completed client.DevEvent, ok bool) {
+	if e == nil || e.SessionID == "" || !w.HasUsage {
+		return client.DevEvent{}, client.DevEvent{}, false
+	}
+	if !strings.HasPrefix(m.Identity.DeveloperDID, "did:aip:") {
+		return client.DevEvent{}, client.DevEvent{}, false
+	}
+
+	now := m.clock()
+	closeTS := now.UTC().Format(time.RFC3339Nano)
+	// The open timestamp is derived from a time.Time, never copied from the
+	// transcript's string — so the raw transcript timestamp cannot reach the wire
+	// even by accident (asserted in usage_test.go).
+	openTS := closeTS
+	haveRealOpen := false
+	if !w.Open.IsZero() {
+		openTS = w.Open.UTC().Format(time.RFC3339Nano)
+		haveRealOpen = true
+	}
+
+	turnIndex := index
+	base := client.DevEvent{
+		SchemaVersion: client.SchemaVersion,
+		SessionID:     e.SessionID,
+		DeveloperDID:  m.Identity.DeveloperDID,
+		Tool:          client.Tool{Name: agentToolName, Kind: client.ToolShell},
+		TurnIndex:     &turnIndex,
+		AgentID:       capStr(e.AgentID),
+	}
+
+	started = base
+	started.EventType = client.EventTurnStarted
+	started.Timestamp = openTS
+	started.StartedAt = openTS
+	started.Metadata = turnMetadata(e, turnIndex)
+	started.EventID = m.eventID(started)
+
+	completed = base
+	completed.EventType = client.EventTurnCompleted
+	completed.Timestamp = closeTS
+	completed.EndedAt = closeTS
+	// StartedAt drives durationMs in the client. Set it only when the open time
+	// was really observed; otherwise leave it empty so the client omits the field
+	// rather than reporting a duration of zero.
+	if haveRealOpen {
+		completed.StartedAt = openTS
+	}
+	completed.Tokens = w.tokens()
+	// The one egressing string, bounded here at the untrusted boundary exactly as
+	// metadata.model is (sessionStartMetadata).
+	completed.Model = capStr(w.Model)
+	completed.Metadata = turnMetadata(e, turnIndex)
+	completed.EventID = m.eventID(completed)
+
+	return started, completed, true
+}
+
+// turnMetadata builds a turn event's metadata: the turn index plus the subagent
+// correlation ids. Identifiers and one integer, never content (INV-2). The model
+// is not put here — the client promotes it from DevEvent.Model, so it lands on
+// metadata and in activity_output from one source rather than two.
+func turnMetadata(e *HookEvent, index int) map[string]any {
+	m := compact(map[string]any{
+		"agent_id":   capStr(e.AgentID),
+		"agent_type": capStr(e.AgentType),
+	})
+	m["turn_index"] = index
+	return m
 }
 
 // mapTool builds the Tool identity and the semantic Span for a Pre/PostToolUse
@@ -551,6 +652,21 @@ func deriveID(ev client.DevEvent) string {
 		// second away as a replay of the first.
 		b.WriteByte(sep)
 		b.WriteString(ev.Span.InvocationID)
+	}
+	// Turn events carry no Span, so the separators above cannot distinguish them.
+	// Without these two, a main-thread turn and a subagent's turn closing in the
+	// same nanosecond would derive ONE event_id — the idempotency key — and a
+	// server that dedupes on it would drop one of the two as a replay.
+	//
+	// Appended only when set, so every existing event's id is byte-identical to
+	// what it was before turn events existed (the golden fixtures pin it).
+	if ev.TurnIndex != nil {
+		b.WriteByte(sep)
+		b.WriteString(strconv.Itoa(*ev.TurnIndex))
+	}
+	if ev.AgentID != "" {
+		b.WriteByte(sep)
+		b.WriteString(ev.AgentID)
 	}
 	sum := sha256.Sum256([]byte(b.String()))
 	return "cc-" + hex.EncodeToString(sum[:])

@@ -11,6 +11,7 @@ import (
 
 	"github.com/openbox-ai/openbox-shift-left/adapters/common/devconfig"
 	"github.com/openbox-ai/openbox-shift-left/adapters/common/hookflow"
+	"github.com/openbox-ai/openbox-shift-left/client"
 	"github.com/openbox-ai/openbox-shift-left/decision"
 )
 
@@ -100,10 +101,11 @@ func RunHook(sub string, stdin io.Reader, stdout io.Writer, logger *log.Logger) 
 
 	ad := New(id, DefaultSpoolDir())
 	// Authorize prompt capture on the observe/egress path only under the
-	// content-capture opt-in (default off = metadata-only, INV-2). This is
-	// the same flag the flush client's Emit uses to strip content, so
-	// capture and egress agree. Resolved once (cheap config+env, no secret
-	// I/O).
+	// content-capture posture (on by default since 2026-07-15, opt-out
+	// honored — this comment said "default off = metadata-only" long after
+	// that stopped being true). This is the same flag the flush client's
+	// Emit uses to strip content, so capture and egress agree. Resolved once
+	// (cheap config+env, no secret I/O).
 	ad.Mapper.CaptureContent = ResolveContentCapture()
 	// Pin the Mapper clock to one instant for this hook invocation. RunHook
 	// maps the PreToolUse event twice in enforce+Tier-2 mode — once here
@@ -118,7 +120,7 @@ func RunHook(sub string, stdin io.Reader, stdout io.Writer, logger *log.Logger) 
 	pinnedNow := time.Now()
 	ad.Mapper.Now = func() time.Time { return pinnedNow }
 
-	// On SessionEnd, behind the off-by-default finops opt-in, read the
+	// On SessionEnd, behind the finops gate (default ON, opt-out), read the
 	// session transcript for usage numbers only and hand them to the
 	// Mapper, which attaches them to the SessionEnded event. This is the
 	// only place transcript_path is opened, and only when ResolveFinops()
@@ -169,6 +171,20 @@ func RunHook(sub string, stdin io.Reader, stdout io.Writer, logger *log.Logger) 
 	// below is local and bounded (INV-3/INV-3b).
 	nudgeFlush := func() {
 		hookflow.RealtimeTrigger{Spool: ad.Spool, Provider: "claude-code"}.Maybe(logger, ev.SessionID)
+	}
+
+	// Turn boundary (ADR-0014): Stop closes a main-thread turn, SubagentStop a
+	// subagent's. Both emit the TurnStarted/TurnCompleted pair for the transcript
+	// window that has appeared since this window's cursor last advanced, then
+	// return — neither hook observes a lifecycle event of its own (Map returns
+	// false for them by design) and neither may ever write stdout, because both
+	// can block a session via `decision: "block"`.
+	if hook == HookStop || hook == HookSubagentStop {
+		if ResolveFinops() {
+			emitTurn(ad, logger, hook, ev)
+			nudgeFlush()
+		}
+		return
 	}
 
 	// Resolved ONCE and reused by the gate below. The two must agree: deciding
@@ -254,6 +270,80 @@ func RunHook(sub string, stdin io.Reader, stdout io.Writer, logger *log.Logger) 
 	// SessionEnd delivers the session's spooled events off the hot path.
 	if hook == HookSessionEnd {
 		runFlush(logger, ev.SessionID)
+	}
+}
+
+// emitTurn reads the transcript window this turn-boundary hook delimits and
+// spools the TurnStarted/TurnCompleted pair for it (ADR-0014).
+//
+// The step order is the correctness argument, not a style choice:
+//
+//  1. read the cursor for THIS window — (session, agent), so a subagent's
+//     window and the main thread's never consume each other's bytes;
+//  2. read the transcript from that offset, taking this side of the sidechain
+//     partition only;
+//  3. spool both halves;
+//  4. advance the cursor — LAST.
+//
+// A crash between 3 and 4 re-reads one window on the next firing, which re-mints
+// the same `<session>:turn:<n>` activity_id; core's dedupe key includes
+// activity_id and event_type, so the server returns the cached verdict instead of
+// storing a second row. The reverse order would lose a turn's tokens with nothing
+// to recover them from. Over-report into a server that deduplicates; never
+// under-report into nothing.
+//
+// Best-effort throughout (INV-3): every fault is logged to stderr and swallowed.
+// It writes nothing to stdout on any path — Stop and SubagentStop can block a
+// session, so a stray write is a defect, not a degradation.
+func emitTurn(ad *Adapter, logger *log.Logger, hook HookName, ev *HookEvent) {
+	// Subagent turns are keyed and partitioned by agent. A SubagentStop without
+	// an agent_id (older Claude Code, or a payload that omitted it) would
+	// otherwise share the main thread's cursor and consume its window: skip it
+	// rather than corrupt the main thread's accounting.
+	agentID := ev.AgentID
+	sidechain := hook == HookSubagentStop
+	if sidechain && agentID == "" {
+		logger.Printf("finops: SubagentStop without agent_id, skipping turn (would share the main-thread cursor)")
+		return
+	}
+
+	pos := ad.Turns.Read(ev.SessionID, agentID)
+	window, next, err := readTurnUsage(ev.TranscriptPath, pos, sidechain)
+	if err != nil {
+		logger.Printf("finops: turn usage skipped: %v", err)
+		return
+	}
+	if !window.HasUsage {
+		// A firing with no new usage is not a turn. Still advance the cursor over
+		// the bytes that were consumed, so the same lines are not re-scanned on
+		// every subsequent firing for the rest of the session.
+		if next != pos {
+			if err := ad.Turns.Write(ev.SessionID, agentID, next); err != nil {
+				logger.Printf("finops: turn cursor write failed: %v", err)
+			}
+		}
+		return
+	}
+
+	started, completed, ok := ad.Mapper.MapTurn(ev, window, pos.Index)
+	if !ok {
+		return
+	}
+	// Spool both halves before the cursor moves. If the second append fails the
+	// cursor stays put and the whole window is re-read next time — the pair is
+	// re-derived with the same ids and the server absorbs the duplicate.
+	for _, turnEv := range []client.DevEvent{started, completed} {
+		if err := ad.Record(turnEv); err != nil {
+			logger.Printf("finops: spool %s event: %v", turnEv.EventType, err)
+			return
+		}
+	}
+
+	next.Index = pos.Index + 1
+	if err := ad.Turns.Write(ev.SessionID, agentID, next); err != nil {
+		// The events are spooled; only the cursor is behind. The next firing
+		// re-reads this window and re-mints the same ids, which core dedupes.
+		logger.Printf("finops: turn cursor write failed (window may be re-read): %v", err)
 	}
 }
 

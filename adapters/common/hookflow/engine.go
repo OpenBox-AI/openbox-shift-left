@@ -35,6 +35,11 @@ type Engine struct {
 	// completed span computes a real cross-process duration. Best-effort; an
 	// empty Dir disables it.
 	Durations DurationStash
+	// Turns records how far each (session, agent) transcript window has been
+	// consumed for per-turn usage extraction, so repeated turn-boundary hook
+	// firings never re-report the same turn's tokens. Best-effort; an empty Dir
+	// disables it.
+	Turns TurnCursor
 }
 
 // NewEngine builds an Engine spooling under dir and writing Advisory records to
@@ -47,6 +52,7 @@ func NewEngine(spoolDir string) *Engine {
 		// (OPENBOX_SPOOL_DIR → auto-isolated in tests), and the spool's FlushAll
 		// skips subdirectories, so it never mistakes a stash for a spool file.
 		Durations: DurationStash{Dir: filepath.Join(spoolDir, "durations")},
+		Turns:     TurnCursor{Dir: filepath.Join(spoolDir, "turns")},
 	}
 }
 
@@ -88,8 +94,9 @@ func (e *Engine) RecordDeferred(ev client.DevEvent) func() error {
 // the completed (ToolResult) event — which the client turns into the completed
 // span's start_time, and thus a non-zero duration_ns. Structural only (INV-2)
 // and best-effort (INV-3): a stash fault only costs duration accuracy. The
-// session-ended event sweeps the session's stash so records from tool calls
-// whose completion never fired do not accumulate.
+// session-ended event sweeps the session's cross-process state so records from
+// tool calls whose completion never fired, and turn cursors for a session that
+// is over, do not accumulate.
 func (e *Engine) ThreadDuration(ev *client.DevEvent) {
 	switch ev.EventType {
 	case client.EventToolCall:
@@ -100,6 +107,10 @@ func (e *Engine) ThreadDuration(ev *client.DevEvent) {
 		}
 	case client.EventSessionEnded:
 		e.Durations.ClearSession(ev.SessionID)
+		// The turn cursors go with it: one subdir per session holding the main
+		// thread's cursor and one per subagent. Swept here rather than on each
+		// turn because a cursor is only dead once the session is.
+		e.Turns.ClearSession(ev.SessionID)
 	}
 }
 

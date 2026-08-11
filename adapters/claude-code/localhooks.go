@@ -12,7 +12,7 @@ import (
 // Production activates the plugin's hooks org-wide via managed settings (or
 // the user enabling the plugin globally). For local testing you often want
 // shift-left to govern ONE project only. When `init --local-hooks <dir>`
-// is passed, Install additionally merges the five hook entries into
+// is passed, Install additionally merges the hook entries into
 // <dir>/.claude/settings.local.json — the per-developer, git-ignored Claude
 // Code settings layer — pointing at the plugin's engine binary. Sessions
 // started in any other directory stay ungoverned.
@@ -24,7 +24,8 @@ import (
 // localHookEvents maps hook event → (matcher, timeoutSeconds, statusMessage).
 // Mirrors the plugin bundle's hooks/hooks.json — including PreToolUse's raised
 // ceiling, so a locally-scoped install gates and holds exactly as the plugin
-// does rather than killing the hook mid-hold.
+// does rather than killing the hook mid-hold. TestLocalHooksMirrorPluginBundle
+// pins the two lists together, so a hook added to one and not the other fails.
 var localHookEvents = []struct {
 	Event         string
 	Matcher       string
@@ -35,6 +36,8 @@ var localHookEvents = []struct {
 	{Event: "UserPromptSubmit", Timeout: 5},
 	{Event: "PreToolUse", Matcher: "*", Timeout: preToolUseHookTimeoutSec, StatusMessage: "OpenBox governance…"},
 	{Event: "PostToolUse", Matcher: "*", Timeout: 5},
+	{Event: "Stop", Timeout: 5},
+	{Event: "SubagentStop", Timeout: 5},
 	{Event: "SessionEnd", Timeout: 15},
 }
 

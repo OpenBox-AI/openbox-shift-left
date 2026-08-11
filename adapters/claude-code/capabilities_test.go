@@ -21,7 +21,7 @@ func TestCapabilities(t *testing.T) {
 	}
 
 	// Provider-independent floors, the Claude Code surfaces, and the shipped
-	// opt-in legs (E6 enforce, SL-16 finops) are all supported.
+	// gated legs (E6 enforce opt-in, ADR-0014 usage capture opt-out) are supported.
 	for _, k := range []string{
 		"identity.register", "telemetry.hook", "tool.events", "commit.binding",
 		"telemetry.tokens", "verdict.apply", "enforce.rewrite",
@@ -30,12 +30,25 @@ func TestCapabilities(t *testing.T) {
 			t.Errorf("capability %q should be supported", k)
 		}
 	}
-	// The opt-in legs must say so: "supported" is about the mechanism existing,
-	// and a reader of the profile has to be able to tell that an unconfigured
-	// session still only observes (INV-3, report SL-07).
-	for _, k := range []string{"telemetry.tokens", "verdict.apply"} {
+	// Every gated leg must state which way it is gated: "supported" is about the
+	// mechanism existing, and a reader of the profile has to be able to tell what
+	// an unconfigured session actually does (INV-3, report SL-07).
+	//
+	// The two are gated in OPPOSITE directions, and conflating them is exactly the
+	// misreading this asserts against: enforcement is opt-IN (an unconfigured
+	// session only observes and can never block), while usage capture is opt-OUT
+	// as of ADR-0014 / the finops default flip (an unconfigured session DOES emit
+	// token counts and a model id).
+	for _, k := range []string{"verdict.apply"} {
 		if !strings.Contains(byKey[k].How, "opt-in") {
 			t.Errorf("capability %q is opt-in; its How note must say so, got %q", k, byKey[k].How)
 		}
+	}
+	if how := byKey["telemetry.tokens"].How; !strings.Contains(how, "default on") {
+		t.Errorf("telemetry.tokens is on by default; its How note must say so (a reader who assumes opt-in "+
+			"would not know data egresses unconfigured), got %q", how)
+	}
+	if how := byKey["telemetry.tokens"].How; strings.Contains(how, "opt-in") {
+		t.Errorf("telemetry.tokens is no longer opt-in; the How note still claims it is: %q", how)
 	}
 }
