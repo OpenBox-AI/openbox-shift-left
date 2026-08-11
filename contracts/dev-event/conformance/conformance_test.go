@@ -17,16 +17,19 @@ func read(t *testing.T, rel string) []byte {
 	return raw
 }
 
-// AC: a well-formed sample of EACH of the 7 lifecycle event types validates.
+// AC: a well-formed sample of EACH lifecycle event type validates.
 // (tool_call_mcp.json additionally exercises the kind=mcp -> mcp_server rule.)
+// The count is derived from contractEventTypes rather than written as a literal,
+// so adding a type to the vocabulary without a sample fails here instead of
+// silently leaving the type unexercised.
 func TestValidSamples(t *testing.T) {
 	dir := "testdata/valid"
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		t.Fatalf("read dir: %v", err)
 	}
-	if len(entries) < 7 {
-		t.Fatalf("expected >=7 valid samples (one per lifecycle type), got %d", len(entries))
+	if len(entries) < len(contractEventTypes) {
+		t.Fatalf("expected >=%d valid samples (one per lifecycle type), got %d", len(contractEventTypes), len(entries))
 	}
 
 	seen := map[string]bool{}

@@ -48,6 +48,8 @@ var devEventTypes = []client.EventType{
 	client.EventPromptSubmitted,
 	client.EventToolCall,
 	client.EventToolResult,
+	client.EventTurnStarted,
+	client.EventTurnCompleted,
 	client.EventCommitCreated,
 	client.EventDeploy,
 	client.EventSessionEnded,

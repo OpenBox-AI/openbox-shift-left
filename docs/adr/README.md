@@ -12,7 +12,7 @@ as reconstructed and states what evidence it was rebuilt from. They record what
 was decided and why, as accurately as the surviving evidence supports; where the
 original reasoning is not recoverable, they say so rather than inventing it.
 
-ADR-0008, 0010, 0011, 0012 and 0013 are originals.
+ADR-0008, 0010, 0011, 0012, 0013 and 0014 are originals.
 
 | ADR | Title | Status |
 |-----|-------|--------|
@@ -29,3 +29,4 @@ ADR-0008, 0010, 0011, 0012 and 0013 are originals.
 | [0011](ADR-0011-multi-module-layout.md) | Keep the multi-module layout, with a workspace | Accepted |
 | [0012](ADR-0012-autonomous-approver.md) | Autonomous approver: envelope-bounded, host-pluggable, narrowing-only | Accepted |
 | [0013](ADR-0013-tool-call-as-activity.md) | A tool call is an Activity; retire the hook-span layer | Accepted |
+| [0014](ADR-0014-turn-as-activity-and-identifier-allowlist.md) | A model turn is an Activity; INV-2's usage path becomes an allowlist | Accepted |

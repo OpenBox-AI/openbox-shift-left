@@ -18,6 +18,7 @@ import (
 var contractEventTypes = []string{
 	"SessionStarted", "PromptSubmitted", "ToolCall", "ToolResult",
 	"SessionEnded", "CommitCreated", "Deploy",
+	"TurnStarted", "TurnCompleted",
 }
 
 // The previous version of this test asserted len(enum) == 7. That passes
@@ -60,6 +61,10 @@ var annotationKeywords = map[string]bool{
 	"$schema": true, "$id": true, "title": true, "description": true,
 	"examples": true, "default": true, "deprecated": true, "comment": true, "$comment": true,
 	"x-schema-version": true, "x-legacy-action": true, "x-wire-mapping": true,
+	// x-changelog records what each contract version changed and why. Prose, so
+	// it constrains nothing — but it is where a reader learns that v1.1
+	// re-defined tokens.input, which no keyword can express.
+	"x-changelog": true,
 	// x-local-only marks a field that exists on the normalized event and the
 	// spool but is never a field on the core wire payload (invocation_id,
 	// operation_id). Like the others here it is documentation: what actually

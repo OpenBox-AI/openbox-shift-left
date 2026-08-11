@@ -1,0 +1,16 @@
+{
+  "source": "developer-runtime",
+  "event_type": "ActivityStarted",
+  "activity_type": "llm_completion",
+  "activity_id": "sess-golden-0001:usage:rollup",
+  "workflow_id": "openbox-ai/openbox-shift-left",
+  "run_id": "sess-golden-0001",
+  "workflow_type": "developer-session",
+  "timestamp": "2026-07-31T09:00:00Z",
+  "metadata": {
+    "event_id": "ev-13",
+    "provider": "codex",
+    "tool_name": "codex",
+    "usage_scope": "session"
+  }
+}

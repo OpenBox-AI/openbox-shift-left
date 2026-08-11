@@ -1,0 +1,21 @@
+{
+  "schema_version": "1.1",
+  "event_id": "evt-0011",
+  "event_type": "TurnCompleted",
+  "openbox_session_id": "sess-abc123",
+  "developer_did": "did:aip:7f3c9b2e-0000-5000-a000-000000000001",
+  "timestamp": "2026-07-07T12:00:21Z",
+  "started_at": "2026-07-07T12:00:04Z",
+  "ended_at": "2026-07-07T12:00:21Z",
+  "tool": { "name": "claude-code", "kind": "shell" },
+  "turn_index": 0,
+  "model": "claude-opus-4-8",
+  "tokens": {
+    "input": 1204,
+    "output": 318,
+    "cache_creation_input": 4096,
+    "cache_read": 58210,
+    "total": 63828
+  },
+  "metadata": { "provider": "claude-code", "turn_index": 0 }
+}

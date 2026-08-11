@@ -167,6 +167,79 @@ func goldenCases() []goldenCase {
 	}
 	mcpResult := completed(mcpCall, "ev-9", "2026-07-31T09:00:00.75Z")
 
+	// A turn: the same activity carrier as a tool call, with an id derived from
+	// the turn index instead of hashed from an operation, and usage rather than
+	// byte counts in activity_output. Both halves are emitted from one hook
+	// firing, so the fixture pair is what one Stop produces.
+	turnIndex := 0
+	turnStarted := base(EventTurnStarted, "ev-10")
+	turnStarted.Tool = Tool{Name: "claude-code", Kind: ToolShell}
+	turnStarted.TurnIndex = &turnIndex
+	turnStarted.Metadata = map[string]any{"provider": "claude-code", "turn_index": turnIndex}
+
+	turnCompleted := base(EventTurnCompleted, "ev-11")
+	turnCompleted.Tool = Tool{Name: "claude-code", Kind: ToolShell}
+	turnCompleted.TurnIndex = &turnIndex
+	turnCompleted.Timestamp = "2026-07-31T09:00:12Z"
+	turnCompleted.StartedAt = ts
+	turnCompleted.EndedAt = "2026-07-31T09:00:12Z"
+	turnCompleted.Model = "claude-opus-4-8"
+	turnCompleted.Tokens = &Tokens{
+		Input:              intPtrGolden(1204),
+		Output:             intPtrGolden(318),
+		CacheCreationInput: intPtrGolden(4096),
+		CacheRead:          intPtrGolden(58210),
+		Total:              intPtrGolden(63828),
+	}
+	turnCompleted.Metadata = map[string]any{"provider": "claude-code", "turn_index": turnIndex}
+
+	// A subagent's turn: same shape, partitioned id, attributed by agent.
+	subIndex := 1
+	subagentTurn := turnCompleted
+	subagentTurn.EventID = "ev-12"
+	subagentTurn.TurnIndex = &subIndex
+	subagentTurn.AgentID = "agt-code-reviewer-01"
+	subagentTurn.Model = "claude-sonnet-4-8"
+	subagentTurn.Tokens = &Tokens{
+		Input:     intPtrGolden(88),
+		Output:    intPtrGolden(1902),
+		CacheRead: intPtrGolden(12000),
+		Total:     intPtrGolden(13990),
+	}
+	subagentTurn.Metadata = map[string]any{
+		"provider":   "claude-code",
+		"turn_index": subIndex,
+		"agent_type": "code-reviewer",
+	}
+
+	// Codex's granularity: ONE llm_completion pair per session, id
+	// <session>:usage:rollup. Same carrier, same activity_type, same
+	// activity_output shape as the per-turn pairs above — which is the parity
+	// claim, pinned here rather than asserted in prose. The two adapters are
+	// separate modules and cannot import each other, so the client's fixtures are
+	// the only place the two shapes can be compared byte for byte.
+	rollupStarted := base(EventTurnStarted, "ev-13")
+	rollupStarted.Tool = Tool{Name: "codex", Kind: ToolShell}
+	rollupStarted.SessionRollup = true
+	rollupStarted.Metadata = map[string]any{"provider": "codex", "usage_scope": "session"}
+
+	rollupCompleted := base(EventTurnCompleted, "ev-14")
+	rollupCompleted.Tool = Tool{Name: "codex", Kind: ToolShell}
+	rollupCompleted.SessionRollup = true
+	rollupCompleted.Timestamp = "2026-07-31T09:30:00Z"
+	rollupCompleted.EndedAt = "2026-07-31T09:30:00Z"
+	rollupCompleted.Model = "gpt-5.6-sol"
+	// Codex's cache counts are sub-counts of input_tokens, so Input here is
+	// already net of them (14718 − 9984 = 4734) and Total is its own reported
+	// figure. The invariant Total == Input+Output+caches holds either way.
+	rollupCompleted.Tokens = &Tokens{
+		Input:     intPtrGolden(4734),
+		Output:    intPtrGolden(232),
+		CacheRead: intPtrGolden(9984),
+		Total:     intPtrGolden(14950),
+	}
+	rollupCompleted.Metadata = map[string]any{"provider": "codex", "usage_scope": "session"}
+
 	return []goldenCase{
 		{"lifecycle_session_started", sessionStarted},
 		{"lifecycle_session_ended", sessionEnded},
@@ -178,5 +251,12 @@ func goldenCases() []goldenCase {
 		{"activity_shell_completed", shellResult},
 		{"activity_mcp_started", mcpCall},
 		{"activity_mcp_completed", mcpResult},
+		{"activity_turn_started", turnStarted},
+		{"activity_turn_completed", turnCompleted},
+		{"activity_turn_subagent_completed", subagentTurn},
+		{"activity_usage_rollup_started", rollupStarted},
+		{"activity_usage_rollup_completed", rollupCompleted},
 	}
 }
+
+func intPtrGolden(v int) *int { return &v }

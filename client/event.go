@@ -21,7 +21,11 @@ package client
 
 // SchemaVersion is the dev-event contract version this client speaks. Track
 // contracts/dev-event/schema/dev-event.schema.json's x-schema-version.
-const SchemaVersion = "1.0"
+//
+// 1.1 added the turn pair (ADR-0014) and widened Tokens, re-defining Input as
+// pure input. The schema's x-changelog records what changed and why the Tokens
+// semantic made it a bump rather than a silent edit.
+const SchemaVersion = "1.1"
 
 // EventType is a developer-runtime lifecycle event type. Each maps 1:1 onto
 // an openbox-core event_type string (INV-8) — see MAPPING.md §2.
@@ -38,6 +42,21 @@ const (
 	// Deploy event's metadata.
 	EventCommitCreated EventType = "CommitCreated"
 	EventDeploy        EventType = "Deploy"
+
+	// EventTurnStarted / EventTurnCompleted are one model turn's boundaries:
+	// the unit a coding agent spends tokens in. They ride the same activity
+	// carrier as a tool call (ActivityStarted/ActivityCompleted with
+	// activity_type "llm_completion"), because a dev session writes no spans
+	// (ADR-0013) and the AI-Agent runtime's equivalent signal lives in an
+	// llm_completion span's response_body. Same shape, different carrier — see
+	// ADR-0014.
+	//
+	// Both halves are emitted from ONE provider hook firing (Claude Code's
+	// Stop), so the pair is atomic: there is no cross-hook index to race and no
+	// orphan half. They share one activity_id derived from TurnIndex
+	// (turnActivityIDFor), which is what pairs them onto one row.
+	EventTurnStarted   EventType = "TurnStarted"
+	EventTurnCompleted EventType = "TurnCompleted"
 )
 
 // AllEventTypes is the complete vocabulary, so callers that need to enumerate it
@@ -53,6 +72,8 @@ var AllEventTypes = []EventType{
 	EventSessionEnded,
 	EventCommitCreated,
 	EventDeploy,
+	EventTurnStarted,
+	EventTurnCompleted,
 }
 
 // ToolKind is the provider-agnostic tool class ($defs.tool.kind).
@@ -71,11 +92,30 @@ type Tool struct {
 	MCPServer string   `json:"mcp_server,omitempty"` // required when Kind==ToolMCP
 }
 
-// Tokens is per-turn/per-tool token usage (metadata only; absent when unknown).
+// Tokens is per-turn/per-session token usage (metadata only; absent when
+// unknown).
+//
+// Input is PURE input: prompt tokens that were neither served from nor written
+// to the provider's prompt cache. The two cache counts ride their own fields.
+// This is a change of semantic — the Claude Code SessionEnd rollup used to fold
+// both cache counts into Input because there was nowhere else to put them, which
+// made a cached-heavy session look like it had spent its whole context on fresh
+// input and made cache efficiency unmeasurable. Total keeps its old meaning:
+// whole throughput, Input + Output + both cache counts.
+//
+// Every field is a pointer so "absent" and "zero" stay distinguishable: a
+// provider that does not report cache tokens omits them rather than claiming
+// zero.
 type Tokens struct {
 	Input  *int `json:"input,omitempty"`
 	Output *int `json:"output,omitempty"`
 	Total  *int `json:"total,omitempty"`
+	// CacheCreationInput is input tokens WRITTEN to the prompt cache
+	// (Anthropic cache_creation_input_tokens; Codex cache_write_input_tokens).
+	CacheCreationInput *int `json:"cache_creation_input,omitempty"`
+	// CacheRead is input tokens SERVED from the prompt cache (Anthropic
+	// cache_read_input_tokens; Codex cached_input_tokens).
+	CacheRead *int `json:"cache_read,omitempty"`
 }
 
 // Cost is per-turn/per-tool monetary cost (metadata only; absent when unknown).
@@ -174,6 +214,51 @@ type DevEvent struct {
 	Cost          *Cost     `json:"cost,omitempty"`
 	Span          *Span     `json:"span,omitempty"`
 	Content       *Content  `json:"content,omitempty"`
+
+	// Model is the provider model id that spent this event's tokens
+	// ("claude-opus-4-8", "gpt-5-codex", …). It is the ONE free-form string the
+	// transcript/rollout projections egress, and it is load-bearing rather than
+	// decorative: the backend aggregates token rollups under model-keyed
+	// composite metric keys, so a turn without a model is invisible to the
+	// dashboards it is meant to feed.
+	//
+	// Identifier-class, not content: bounded at the adapter boundary (capStr)
+	// because it is provider-controlled text. It feeds both the
+	// llm_completion activity_output and metadata.model. Absent when the
+	// projection found none — never back-filled from a session-level model,
+	// which would attribute tokens to a model that may not have spent them.
+	Model string `json:"model,omitempty"`
+
+	// TurnIndex is the zero-based index of the turn this event belongs to
+	// within its session (or within its subagent). Both halves of a turn pair
+	// carry the same value, which is what makes turnActivityIDFor derive one
+	// activity_id for the pair.
+	//
+	// A pointer so index 0 — the first turn of every session — is
+	// distinguishable from "not a turn event". It survives the spool round-trip
+	// (an exported, JSON-tagged field), so a rehydrated flush derives the same
+	// id the enforce path would have.
+	TurnIndex *int `json:"turn_index,omitempty"`
+
+	// AgentID scopes a turn to a subagent. It is set only on turn events fired
+	// by SubagentStop, and it partitions the activity id
+	// (<session>:agent:<id>:turn:<n>) so a subagent's turns never collide with
+	// the main thread's. Empty on the main thread. Structural identifier
+	// (INV-2); the same value also rides metadata.agent_id.
+	AgentID string `json:"agent_id,omitempty"`
+
+	// SessionRollup marks a turn activity that covers the WHOLE SESSION rather
+	// than one turn, giving it activity_id <session_id>:usage:rollup. It is
+	// Codex's granularity: its per-turn hook exists but is deliberately unwired
+	// (ADR-0014), so its usage arrives once, at SessionEnd.
+	//
+	// It is an explicit flag rather than "a turn event with no TurnIndex"
+	// deliberately. Inferring it from an absent index would turn a Claude Code
+	// bug — an index that failed to be set — into a silent collapse of every
+	// turn in the session onto one activity_id, which core would then dedupe
+	// down to a single row. An indexless, non-rollup turn stays what it is: a
+	// defect, caught by the pin test.
+	SessionRollup bool `json:"session_rollup,omitempty"`
 
 	// WorkspaceID is a stable per-workspace/developer identity used as core's
 	// workflow_id so (workflow_id, run_id) is unique per session (MAPPING.md
