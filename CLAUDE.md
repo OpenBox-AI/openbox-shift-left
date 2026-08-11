@@ -127,11 +127,11 @@ one non-additive change, which is why the contract is **v1.1**. `Finops` became
 `*bool` before the default could flip: as a plain bool an absent config field and
 an explicit `false` were indistinguishable, so the flip would have been a silent
 no-op. **Status: implemented, unit-verified, reviewed, NOT yet run against a live
-stack** — and **write-only until openbox-core ships the activity-usage extractor**
-(spec: `plans/260811-1640-coding-agent-token-usage/reports/core-issue-activity-usage-extractor.md`,
-not yet filed — this checkout's `gh` cannot see that repo). Until it ships,
-`llm_completion` also shows up under core's *tool* metrics, because
-`ExtractToolMetric` accepts any non-empty `activity_type`.
+stack** — and write-only until the core-side extractor **merges**: it is implemented and
+green in [openbox-core#125](https://github.com/OpenBox-AI/openbox-core/pull/125)
+(PROD-296) but not yet merged to `develop`. Until it does, `llm_completion` also
+shows up under core's *tool* metrics, because `ExtractToolMetric` accepts any
+non-empty `activity_type` — the same PR fixes that.
 
 **Tool events are Activities** (ADR-0013, 2026-08-11): `ToolCall` →
 `ActivityStarted`, `ToolResult` → `ActivityCompleted`, both span-less and

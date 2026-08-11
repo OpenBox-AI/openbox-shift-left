@@ -80,18 +80,24 @@ confirm.
 
 ## Open, and whose call it is
 
-1. **The openbox-core issue is written but NOT filed.** `gh` in this checkout
-   cannot resolve the private `OpenBox-AI/openbox-core`; filing on another repo is
-   outward-facing, so it is left to someone with access. Body ready to paste
-   verbatim: [core-issue-activity-usage-extractor.md](core-issue-activity-usage-extractor.md).
-   **Until it ships the feature is write-only** — the numbers are stored and
-   queryable but reach no dashboard, and `llm_completion` additionally shows up
-   under core's *tool* metrics.
+1. ~~The openbox-core issue is written but NOT filed.~~ **Resolved 2026-08-11**
+   once `gh` access was fixed: [PROD-296](https://krnl-labs.atlassian.net/browse/PROD-296)
+   filed under the Shift-left epic, and all five asks implemented in
+   [openbox-core#125](https://github.com/OpenBox-AI/openbox-core/pull/125) →
+   `develop` with every CI check green. **Until that PR merges the feature is still
+   write-only** — the numbers are stored and queryable but reach no dashboard, and
+   `llm_completion` additionally shows up under core's *tool* metrics (the same PR
+   fixes that). Note also a correction: unpriced models do not price at 0 uniformly
+   — core falls back to a default rate, while the backend drops the model from the
+   cost breakdown entirely.
 2. **Phase 06 needs a live stack.** Not substitutable with unit tests.
 3. **Both cost tables** (core's Go one and the backend's TS one) disagree on key
-   style and list none of the current Claude Code models, so dev turns will price at
-   0 until updated. Flagged in the core issue; the client posture (never derive cost)
-   is unaffected.
+   style and list none of the current Claude Code or Codex models — and they fail
+   *differently*, which the original wording got wrong: core falls back to a default
+   1.00/3.00 per M (an estimate, not 0), while the backend skips an unpriced model
+   entirely, so it contributes nothing to `total_cost` and does not appear in the
+   cost breakdown at all. Recorded on PROD-296; changing prices is a business
+   decision. The client posture (never derive cost) is unaffected.
 4. `<synthetic>` appears as a real `message.model` value with real usage. Passed
    through unchanged — filtering would drop real tokens, rewriting would fabricate
    an attribution — so it becomes its own model key server-side.

@@ -1,14 +1,27 @@
 # openbox-core issue — activity-based usage extractor for `llm_completion`
 
-**Status: NOT FILED.** The `gh` token in this environment cannot resolve
-`OpenBox-AI/openbox-core` (private; no access), so this is the issue body ready to
-file verbatim. Filing is an outward-facing action on another repo and is left to a
-human with access. Once filed, link it from
-`docs/adr/ADR-0014-turn-as-activity-and-identifier-allowlist.md` ("Not yet
-proven") and `docs/architecture.md#assurance--what-the-evidence-proves`.
+**Status: FILED AND IMPLEMENTED — 2026-08-11.**
+
+- Ticket: [PROD-296](https://krnl-labs.atlassian.net/browse/PROD-296), under the
+  Shift-left epic PROD-156. (openbox-core's CI hard-gates on a `PROD-\d+` key in
+  the PR title and commit messages, so the tracking ticket had to exist first.)
+- PR: [openbox-core#125](https://github.com/OpenBox-AI/openbox-core/pull/125)
+  → `develop`, all checks green (Jira lint, unit tests + coverage, Datadog
+  static/secret/SBOM/PR-gates).
+
+All five asks are implemented — `ExtractModelMetricsFromActivity` feeding
+`ModelMetric`, provider derived from the model id, the two cache composite keys,
+the `ExtractToolMetric` exclusion sharing one predicate with the select, and the
+`unknown` bucket. **One correction to the note below:** the two pricing tables miss
+differently, and neither prices at 0 in the way this doc originally claimed —
+core falls back to `DefaultPricing` (1.00/3.00 per M, wrong but non-zero), while
+the backend's `calculateLLMCosts` `continue`s past an unknown model so it
+contributes nothing to `total_cost` *and is absent from `model_costs` entirely*.
+Recorded on the ticket; changing prices is a business decision.
+
+The body below is what was filed, kept for the record.
 
 Target repo: `OpenBox-AI/openbox-core`
-Suggested labels: `observability`, `finops`, `shift-left`
 
 ---
 
@@ -125,10 +138,17 @@ silently is the failure mode to avoid.
 Cost is derived at read time from (model, input, output) — backend
 `src/common/utils/calc-llm-cost.ts`, plus a second Go table in
 `internal/content/const.go`. The two disagree on key style (`claude-sonnet-4` vs
-`claude-sonnet-4.5`) and **neither lists the current Claude Code default models**,
-so dev-session turns will likely price at 0 until the tables are updated. Flagged
-here because this feature is the first thing to surface it at volume. shift-left
-deliberately never derives cost client-side, so nothing on that side changes.
+`claude-sonnet-4.5`) and **neither lists the current Claude Code or Codex model
+ids**. Verified during implementation, the two miss *differently*:
+
+- **core** `GetModelPricing` falls back to `DefaultPricing` (1.00/3.00 per M) — a
+  wrong but non-zero estimate;
+- **backend** `calculateLLMCosts` `continue`s on an unknown model, so it
+  contributes nothing to `total_cost` **and is absent from `model_costs`
+  entirely** — the model disappears from the breakdown rather than showing as 0.
+
+Flagged because this feature is the first thing to surface it at volume.
+shift-left deliberately never derives cost client-side, so nothing there changes.
 
 ### Cross-repo scope
 

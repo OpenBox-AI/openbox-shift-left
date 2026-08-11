@@ -136,7 +136,7 @@ policy-visible, which is intended; the schema must stay numbers + model id.
 
 **Implemented 2026-08-11.** All contract items landed: both event types + `AllEventTypes`, `wireTypeFor`/`activityLabel`, widened `Tokens` (with `Input` re-defined as pure), `Model`/`TurnIndex`/`AgentID`/`SessionRollup` on `DevEvent`, `turnActivityIDFor` + `turnActivityOutput`, schema **v1.1** (+ `x-changelog`) and `SchemaVersion` bumped, `MAPPING.md` §2 turn-pair section and §7 checklist items 8–14, five golden fixtures, byte-identity pins in `client/turn_key_pin_test.go`, and ADR-0014. Conformance + client green; existing golden bytes unchanged, so the wire change is purely additive apart from the deliberate `Tokens` semantic.
 
-**The one item NOT done: the openbox-core issue is written but NOT FILED.** This checkout's `gh` cannot resolve `OpenBox-AI/openbox-core` (private, no token access), so the full issue body is at `reports/core-issue-activity-usage-extractor.md`, ready to file verbatim by someone with access. Filing is an outward-facing action on another repo and was left for a human.
+**The core issue is filed AND implemented** (2026-08-11, after `gh` access was fixed): [PROD-296](https://krnl-labs.atlassian.net/browse/PROD-296) under the Shift-left epic PROD-156, with all five asks shipped in [openbox-core#125](https://github.com/OpenBox-AI/openbox-core/pull/125) → `develop`, CI green, awaiting merge. openbox-core's CI hard-gates on a `PROD-\d+` key in the PR title and commits, so the ticket had to exist before the PR could pass.
 
 ## Todo list
 

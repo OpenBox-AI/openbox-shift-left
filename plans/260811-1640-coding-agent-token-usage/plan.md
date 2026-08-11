@@ -64,7 +64,7 @@ model call.
 
 | # | Phase | Effort | Status | Depends on |
 |---|---|---|---|---|
-| 01 | [Contract: turn-as-activity and the ADR](phase-01-decisions-and-contract.md) | 2h | **complete** (core issue written, not filed) | — |
+| 01 | [Contract: turn-as-activity and the ADR](phase-01-decisions-and-contract.md) | 2h | **complete** (core issue filed + implemented) | — |
 | 02 | [Turn boundary: Stop + SubagentStop](phase-02-turn-boundary-stop-hook.md) | 3h | **complete** | 01 |
 | 03 | [Per-turn usage and model extraction](phase-03-usage-and-model-extraction.md) | 3.5h | **complete** | 01, 02 |
 | 04 | [Codex: session-rollup activity](phase-04-codex-parity.md) | 2h | **complete** | 03 |
@@ -90,7 +90,7 @@ the feature is implemented, not verified.**
 | Codex at session granularity; per-turn limit documented as scope | **done.** `<session>:usage:rollup` pair; the capabilities test now fails on the words "cannot"/"impossible" |
 | No content on the wire via the usage path; cost absent, not fabricated | **done.** Sentinel test rewritten to the narrowed claim and run against the real signed body with content-capture ON; cost asserted absent in both adapters |
 | `Tokens` expresses every number; `Input` pure everywhere | **done.** Four counts in both the per-turn records and the rollup, so Σ-per-turn vs rollup compares like quantities. Contract v1.1 |
-| The openbox-core consumer issue is filed | **written, NOT filed** — `gh` here cannot resolve the private `openbox-core`. Body ready at `reports/core-issue-activity-usage-extractor.md` |
+| The openbox-core consumer issue is filed | **done, and implemented.** [PROD-296](https://krnl-labs.atlassian.net/browse/PROD-296) under the Shift-left epic; all five asks shipped in [openbox-core#125](https://github.com/OpenBox-AI/openbox-core/pull/125) → `develop`, CI green, awaiting merge |
 | Verified by a live testbed run | **NOT DONE.** No local stack in this session |
 
 ### What changed from the plan as written
@@ -354,9 +354,9 @@ could not decide. All round-1 citations re-confirmed at their stated locations.
       worst case is a subagent reporting nothing; a live run settles which world we
       are in. *(reports/measure-260811-transcript-turn-surface.md; Phase 06 step E
       surfaces the answer as a skip rather than a silent pass.)*
-- [~] **WRITTEN BUT NOT FILED** — `gh` in this checkout cannot resolve the private
-      `OpenBox-AI/openbox-core`, and filing on another repo is an outward-facing
-      action left to a human with access. Full body ready to paste:
+- [x] **FILED AND IMPLEMENTED** — [PROD-296](https://krnl-labs.atlassian.net/browse/PROD-296)
+      (Shift-left epic PROD-156) → [openbox-core#125](https://github.com/OpenBox-AI/openbox-core/pull/125),
+      all five asks shipped, CI green, awaiting merge to `develop`. Spec kept at
       [reports/core-issue-activity-usage-extractor.md](reports/core-issue-activity-usage-extractor.md).
       openbox-core issue (single, core-only): activity-based extractor for
       `activity_type == "llm_completion"` reading `activity_output` → **feed

@@ -199,11 +199,14 @@ against them. The load-bearing assumptions are that core stores an
 the model-keyed composite metrics the backend sums are reachable from an
 activity. `testbed/` against a live stack is what settles it; until that run,
 MAPPING.md §7 carries the claims as underived. Separately, the aggregation is
-**write-only until openbox-core ships the extractor** — `ExtractToolMetric`
-currently accepts any non-empty `activity_type`
-(`observability/errors.go:301-323`), so until the exclusion lands,
-`llm_completion` will additionally appear in the dashboards as a tool with call
-counts and latency percentiles. Expected, recorded, and linked from the testbed
+**write-only until the core-side extractor merges** — implemented and CI-green in
+[openbox-core#125](https://github.com/OpenBox-AI/openbox-core/pull/125)
+(PROD-296), which adds `ExtractModelMetricsFromActivity`, the two cache composite
+keys, the `unknown` bucket, and the `ExtractToolMetric` exclusion. Until it
+merges, `ExtractToolMetric` still accepts any non-empty `activity_type`
+(`observability/errors.go:301-323`), so `llm_completion` will additionally appear
+in the dashboards as a tool with call counts and latency percentiles. Expected,
+recorded, and linked from the testbed
 phase — not a shift-left defect.
 
 ## Alternatives rejected
