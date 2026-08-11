@@ -92,13 +92,15 @@ testbed/
   00-preflight.sh
   10-onboard.sh
   20-capture.sh
+  25-realtime.sh
+  28-usage.sh
   30-enforce.sh
   40-approvals.sh
   50-lineage.sh
   60-visibility.sh
   70-approver-auto.sh
   99-teardown.sh
-  run-all.sh          # tags: capture, enforce, approvals, lineage, visibility, auto
+  run-all.sh          # tags: capture, realtime, usage, enforce, approvals, lineage, visibility, auto
 ```
 
 Scripts are numbered because they share state deliberately: `50-lineage` needs the
@@ -155,6 +157,64 @@ server**. Asserts:
   `prompt_submitted` signal under content-capture-on, and the shell command text
   and file bodies appear **nowhere** in any observe-path row. This is the one
   behaviour that is currently only unit-tested (`client/leakscan_test.go`).
+
+Its activity counts are scoped to **tool** activities
+(`activity_type is distinct from 'llm_completion'`). A session also emits model-turn
+activities on the same two wire types, so an unscoped count would let "4 tool calls
+captured" pass on two tool calls plus two turns. Turn pairing lives in `28-usage`.
+
+### 28-usage
+Per-turn model + token usage (ADR-0014), and the arithmetic that makes it worth
+having. **Counting is the assertion here, not existence** — every failure mode that
+matters (a double-counted turn, an off-by-one cursor, a missed turn, a subagent
+whose tokens are claimed twice) passes an existence check and fails a count. The
+standing lesson is the Tier-2 duplicate-`ActivityStarted` bug, which shipped
+because the only assertion that would have caught it ran in a mode where the bug
+could not occur.
+
+One session with a deterministic step sequence and one subagent task, at the
+default posture (`OPENBOX_FINOPS` deliberately unset, so the phase also proves the
+default). Asserts:
+
+- **pairing**: `llm_completion` Started count == Completed count; no unpaired
+  Completed; no `activity_id` duplicated within a half;
+- **id shape**: ids carry the `<session>:turn:<n>` form, stored verbatim by core —
+  a colon-shaped `activity_id` is new for a dev event, every earlier one was
+  `cc-act-<hex>` — and none collides with the tool-call shape;
+- **contiguity**: main-thread turn indexes run `0..n-1` with no gaps. A gap is a
+  window that was read and whose events never stored: a silently lost turn;
+- **payload**: every Completed half carries `activity_output` with a non-empty
+  `model` and all four counts, none negative; the Started half carries **no**
+  `activity_input` (a turn's input is the prompt, which rides the
+  `prompt_submitted` signal under the content gate); **no cost** anywhere, because
+  the client never derives one;
+- **reconciliation**: Σ per-turn == the `SessionEnd` rollup, **field by field**
+  across all four counts. Two independent derivations of one quantity, comparable
+  only because contract v1.1 stopped folding the cache counts into `input`. This is
+  the assertion that catches double-counting;
+- **subagent**: separate `<session>:agent:<id>:turn:<n>` records, attributed via
+  `agent_id`, complete pairs. Reported as an honest **skip** when no such records
+  appear — which is itself the answer to the one question static analysis could not
+  settle (whether `SubagentStop`'s window carries `isSidechain` lines; see
+  `plans/260811-1640-coding-agent-token-usage/reports/measure-260811-transcript-turn-surface.md`);
+- **INV-2, end to end**: the shell, file and prompt markers appear on **no** turn
+  row, and no raw transcript timestamp does either. This is the only end-to-end
+  proof that INV-2 holds after ADR-0014 replaced the projection's structural
+  impossibility with an allowlist — the unit sentinel test is necessary, not
+  sufficient, and this is the assertion a privacy reviewer should be pointed at;
+- **tool-metric pollution**: recorded, not asserted away. core's
+  `ExtractToolMetric` accepts any non-empty `activity_type`, so until the
+  core-side exclusion ships, `llm_completion` also appears in the dashboards **as a
+  tool**, with call counts and latency percentiles. The phase names the cause and
+  links the core issue so nobody reads it as a shift-left defect; when core ships,
+  the step flips to asserting absence;
+- **the opt-out is real**: a second session with `OPENBOX_FINOPS=0` produces zero
+  `llm_completion` rows, no token rollup, and no `model` beyond `SessionStarted`'s
+  own hook field — while still capturing ordinary tool telemetry. A security
+  assertion, not a feature test;
+- **posture evidence**: `SessionStarted` records `finops` true for the default
+  session and false for the opt-out one. This is what makes a default-on egress
+  defensible after the fact.
 
 ### 30-enforce
 Real deny rule in the local bundle; a file containing a synthetic `AKIA…` and

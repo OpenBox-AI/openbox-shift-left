@@ -229,6 +229,28 @@ if [ "${dupes:-0}" != "0" ]; then
 		group by activity_id, event_type having count(*) > 1 limit 5;" | tr '\n' ' ')"
 fi
 
+# Since ADR-0014 a session carries TWO kinds of activity: tool calls (activity_type
+# = the tool name) and model turns (activity_type = llm_completion). The check
+# above is deliberately global, so it still covers both — but a single aggregate
+# number cannot say WHICH kind duplicated, and the two have entirely different
+# causes: a tool-call duplicate means the escalation and the observe copy both
+# stored a row, while a turn duplicate means the transcript cursor advanced
+# without its events being spooled. Splitting the count keeps the diagnosis in the
+# failure message rather than in someone's later investigation.
+for kind in tool turn; do
+	case "$kind" in
+	tool) pred="activity_type <> 'llm_completion'" ;;
+	turn) pred="activity_type = 'llm_completion'" ;;
+	esac
+	kind_dupes="$(tb_val "select count(*) from (
+		select activity_id, event_type from governance_events
+		where activity_id is not null and event_type like 'Activity%' and $pred
+		group by activity_id, event_type having count(*) > 1) d;")"
+	assert_eq "no duplicated $kind activity half" 0 "$kind_dupes"
+done
+tb_note "activity kinds seen: $(tb_sql "select coalesce(activity_type,'(null)')||' x'||count(*)
+	from governance_events where event_type like 'Activity%' group by 1 order by 1;" | tr '\n' ' ')"
+
 # ── restore ───────────────────────────────────────────────────────────────────
 tb_step "leave the agent ungated for the later phases"
 # Deactivating alone leaves the compiled bundle in place, so publish an

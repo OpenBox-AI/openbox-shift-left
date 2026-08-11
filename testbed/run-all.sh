@@ -15,6 +15,7 @@ phases=(
 	"onboard:10-onboard.sh"
 	"capture:20-capture.sh"
 	"realtime:25-realtime.sh"
+	"usage:28-usage.sh"
 	"enforce:30-enforce.sh"
 	"approvals:40-approvals.sh"
 	"lineage:50-lineage.sh"

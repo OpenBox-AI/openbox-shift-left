@@ -68,9 +68,16 @@ assert_eq "WorkflowCompleted stored" 1 "$(tb_count "governance_events where run_
 # (agent_id, workflow_id, run_id, activity_id, event_type) — so the completed
 # half never became a row at all. This step is what proves it does now.
 tb_step "tool calls are activity pairs"
-started="$(tb_count "governance_events where run_id='$sid' and event_type='ActivityStarted'")"
-completed="$(tb_count "governance_events where run_id='$sid' and event_type='ActivityCompleted'")"
-tb_note "ActivityStarted $started · ActivityCompleted $completed"
+# Scoped to TOOL activities. Since ADR-0014 a session also emits model-turn
+# activities (activity_type = llm_completion), which ride the same two wire types
+# — so an unscoped count here would silently include turns and let "4 tool calls
+# captured" pass on two tool calls plus two turns. Turn pairing is asserted in
+# 28-usage.sh; this phase is about tool calls.
+tool_pred="activity_type is distinct from 'llm_completion'"
+started="$(tb_count "governance_events where run_id='$sid' and event_type='ActivityStarted' and $tool_pred")"
+completed="$(tb_count "governance_events where run_id='$sid' and event_type='ActivityCompleted' and $tool_pred")"
+tb_note "tool ActivityStarted $started · ActivityCompleted $completed"
+tb_note "turn activities in this session: $(tb_count "governance_events where run_id='$sid' and activity_type='llm_completion'")"
 assert_ge "tool calls captured" 4 "$started"
 # Equality, not >=: every started half must have its completed half. The scripted
 # session is deterministic enough to assert this, and a mismatch is exactly the
@@ -85,10 +92,12 @@ orphans="$(tb_val "select count(*) from governance_events c
 	and not exists (select 1 from governance_events s
 		where s.run_id=c.run_id and s.event_type='ActivityStarted'
 		and s.activity_id=c.activity_id);")"
+# Unscoped on purpose: an unpaired completed half is wrong for EITHER activity
+# kind, and this is the cheapest place to notice it.
 assert_eq "no unpaired ActivityCompleted" 0 "$orphans"
 
 assert_nonempty "activity_type is the tool name" \
-	"$(tb_val "select activity_type from governance_events where run_id='$sid' and event_type='ActivityStarted' and activity_type is not null limit 1;")"
+	"$(tb_val "select activity_type from governance_events where run_id='$sid' and event_type='ActivityStarted' and $tool_pred and activity_type is not null limit 1;")"
 tb_note "activity types: $(tb_sql "select distinct activity_type from governance_events where run_id='$sid' and event_type like 'Activity%' order by 1;" | tr '\n' ' ')"
 
 # duration_ms is client-computed now — with no span there is nothing server-side
@@ -96,20 +105,20 @@ tb_note "activity types: $(tb_sql "select distinct activity_type from governance
 # client OMITS it rather than sending zero when the cross-process start-time
 # stash misses, so assert at least one real duration rather than requiring all.
 assert_ge "a completed row carries a real duration" 1 \
-	"$(tb_count "governance_events where run_id='$sid' and event_type='ActivityCompleted' and duration_ms > 0")"
+	"$(tb_count "governance_events where run_id='$sid' and event_type='ActivityCompleted' and $tool_pred and duration_ms > 0")"
 tb_note "durations: $(tb_sql "select coalesce(duration_ms::text,'(absent)') from governance_events where run_id='$sid' and event_type='ActivityCompleted' order by created_at limit 6;" | tr '\n' ' ')"
 
 # activity_output carries structural counts only — never tool output text
 # (INV-2). Its presence is what core runs Guardrails stage 1 over.
 assert_ge "a completed row carries activity_output" 1 \
-	"$(tb_count "governance_events where run_id='$sid' and event_type='ActivityCompleted' and output is not null")"
+	"$(tb_count "governance_events where run_id='$sid' and event_type='ActivityCompleted' and $tool_pred and output is not null")"
 
 tb_step "tool classes reached core"
 # These used to be asserted as span_type values, which core computed from the
 # span. With no span there is no server-side semantic_type, so the classes are
 # now asserted where they actually live: activity_type (the tool name) and
 # activity_input.kind / the file+mcp locators the client puts there.
-kinds="$(tb_sql "select distinct input->>'kind' from governance_events where run_id='$sid' and event_type='ActivityStarted' and input is not null order by 1;" | tr '\n' ' ')"
+kinds="$(tb_sql "select distinct input->>'kind' from governance_events where run_id='$sid' and event_type='ActivityStarted' and $tool_pred and input is not null order by 1;" | tr '\n' ' ')"
 tb_note "activity_input kinds: $kinds"
 assert_contains "file tool captured" "$kinds" "file"
 assert_contains "shell tool captured" "$kinds" "shell"
