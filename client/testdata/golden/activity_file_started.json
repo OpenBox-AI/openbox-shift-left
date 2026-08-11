@@ -1,0 +1,21 @@
+{
+  "source": "developer-runtime",
+  "event_type": "ActivityStarted",
+  "activity_type": "Write",
+  "activity_id": "cc-act-210c9b44fe54bf46969d3183061aeb4f",
+  "workflow_id": "openbox-ai/openbox-shift-left",
+  "run_id": "sess-golden-0001",
+  "workflow_type": "developer-session",
+  "activity_input": {
+    "file_operation": "write",
+    "file_path": "cli/cmd/openbox/main.go",
+    "kind": "file",
+    "tool_name": "Write"
+  },
+  "timestamp": "2026-07-31T09:00:00Z",
+  "metadata": {
+    "event_id": "ev-4",
+    "provider": "claude-code",
+    "tool_name": "Write"
+  }
+}

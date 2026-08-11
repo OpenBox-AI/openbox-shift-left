@@ -60,20 +60,86 @@ tb_state_set session_uuid "$uuid"
 assert_eq "session sealed as completed" completed "$(tb_val "select status from sessions where run_id='$sid';")"
 assert_eq "WorkflowStarted stored" 1 "$(tb_count "governance_events where run_id='$sid' and event_type='WorkflowStarted'")"
 assert_eq "WorkflowCompleted stored" 1 "$(tb_count "governance_events where run_id='$sid' and event_type='WorkflowCompleted'")"
-assert_ge "tool activity stored" 4 "$(tb_count "governance_events where run_id='$sid' and event_type='ActivityStarted'")"
 
-tb_step "spans, by class"
-types="$(tb_sql "select distinct span_type from spans where session_id='$uuid' order by 1;" | tr '\n' ' ')"
-tb_note "span types: $types"
-assert_contains "file read captured" "$types" "file_"
-assert_contains "shell command captured" "$types" "shell_command"
-assert_ge "file write captured" 1 "$(tb_count "spans where session_id='$uuid' and span_type='file_write'")"
-# The MCP assertion is why the everything server exists here: before this, no
-# MCP span had ever reached the local stack, so the mapper's mcp_server /
-# mcp_tool extraction and core's classification of it were untested end to end.
-mcp_spans="$(tb_count "spans where session_id='$uuid' and (name ilike '%mcp%' or attributes::text ilike '%mcp%')")"
-assert_ge "MCP call captured" 1 "$mcp_spans"
-tb_note "MCP span types: $(tb_sql "select distinct span_type from spans where session_id='$uuid' and (name ilike '%mcp%' or attributes::text ilike '%mcp%');" | tr '\n' ' ')"
+# A tool call is TWO events sharing one activity_id (ADR-0013): ActivityStarted
+# then ActivityCompleted, each its own row and each independently evaluated.
+# Under the old hook shape both halves were ActivityStarted with the same
+# activity_id, which matched core's whole dedupe key
+# (agent_id, workflow_id, run_id, activity_id, event_type) — so the completed
+# half never became a row at all. This step is what proves it does now.
+tb_step "tool calls are activity pairs"
+started="$(tb_count "governance_events where run_id='$sid' and event_type='ActivityStarted'")"
+completed="$(tb_count "governance_events where run_id='$sid' and event_type='ActivityCompleted'")"
+tb_note "ActivityStarted $started · ActivityCompleted $completed"
+assert_ge "tool calls captured" 4 "$started"
+# Equality, not >=: every started half must have its completed half. The scripted
+# session is deterministic enough to assert this, and a mismatch is exactly the
+# failure mode worth catching (a dropped result, or a merged row).
+assert_eq "every started half has a completed half" "$started" "$completed"
+
+# The pairing invariant itself: no ActivityCompleted may exist without an
+# ActivityStarted carrying the same activity_id. This is what puts the two rows
+# on one dashboard row and what makes ONE approval cover both.
+orphans="$(tb_val "select count(*) from governance_events c
+	where c.run_id='$sid' and c.event_type='ActivityCompleted'
+	and not exists (select 1 from governance_events s
+		where s.run_id=c.run_id and s.event_type='ActivityStarted'
+		and s.activity_id=c.activity_id);")"
+assert_eq "no unpaired ActivityCompleted" 0 "$orphans"
+
+assert_nonempty "activity_type is the tool name" \
+	"$(tb_val "select activity_type from governance_events where run_id='$sid' and event_type='ActivityStarted' and activity_type is not null limit 1;")"
+tb_note "activity types: $(tb_sql "select distinct activity_type from governance_events where run_id='$sid' and event_type like 'Activity%' order by 1;" | tr '\n' ' ')"
+
+# duration_ms is client-computed now — with no span there is nothing server-side
+# to derive it from, and the dashboard reads event.duration_ms directly. The
+# client OMITS it rather than sending zero when the cross-process start-time
+# stash misses, so assert at least one real duration rather than requiring all.
+assert_ge "a completed row carries a real duration" 1 \
+	"$(tb_count "governance_events where run_id='$sid' and event_type='ActivityCompleted' and duration_ms > 0")"
+tb_note "durations: $(tb_sql "select coalesce(duration_ms::text,'(absent)') from governance_events where run_id='$sid' and event_type='ActivityCompleted' order by created_at limit 6;" | tr '\n' ' ')"
+
+# activity_output carries structural counts only — never tool output text
+# (INV-2). Its presence is what core runs Guardrails stage 1 over.
+assert_ge "a completed row carries activity_output" 1 \
+	"$(tb_count "governance_events where run_id='$sid' and event_type='ActivityCompleted' and output is not null")"
+
+tb_step "tool classes reached core"
+# These used to be asserted as span_type values, which core computed from the
+# span. With no span there is no server-side semantic_type, so the classes are
+# now asserted where they actually live: activity_type (the tool name) and
+# activity_input.kind / the file+mcp locators the client puts there.
+kinds="$(tb_sql "select distinct input->>'kind' from governance_events where run_id='$sid' and event_type='ActivityStarted' and input is not null order by 1;" | tr '\n' ' ')"
+tb_note "activity_input kinds: $kinds"
+assert_contains "file tool captured" "$kinds" "file"
+assert_contains "shell tool captured" "$kinds" "shell"
+assert_ge "a file locator reached core" 1 \
+	"$(tb_count "governance_events where run_id='$sid' and event_type='ActivityStarted' and input->>'file_path' is not null")"
+# The MCP assertion is why the everything server exists in this suite: before it,
+# no MCP call had ever reached the local stack, so the mapper's mcp_server /
+# mcp_tool extraction was untested end to end. It used to be checked against the
+# span's mcp family fields; activity_input is their only home now.
+assert_ge "MCP call captured with its server+tool" 1 \
+	"$(tb_count "governance_events where run_id='$sid' and event_type='ActivityStarted' and input->>'mcp_server' is not null and input->>'mcp_tool' is not null")"
+
+tb_step "zero spans — the accepted trade-off, asserted on purpose"
+# NOT a bug and NOT something to "fix" by re-adding a span. A hook process has no
+# in-process OpenTelemetry, so the spans shift-left used to send were fabricated
+# by hand to satisfy a wire shape. ADR-0013 retired them. The cost is real and is
+# recorded there: no span-level Merkle leaves and no server-side semantic_type
+# for developer sessions. If this assertion ever fails, the span layer grew a
+# caller again — read the ADR before changing it.
+assert_eq "no spans rows for a dev session (ADR-0013)" 0 "$(tb_count "spans where session_id='$uuid'")"
+
+tb_step "merkle — event leaves, no span leaves"
+assert_ge "event leaves written" 2 \
+	"$(tb_count "session_merkle_leaves where session_id='$uuid' and governance_event_id is not null")"
+assert_eq "no span leaves" 0 "$(tb_count "session_merkle_leaves where session_id='$uuid' and span_id is not null")"
+# Both halves of a tool call are attested, not just the start.
+assert_ge "completed halves are attested too" 1 \
+	"$(tb_val "select count(*) from session_merkle_leaves l
+		join governance_events e on e.id = l.governance_event_id
+		where l.session_id='$uuid' and e.event_type='ActivityCompleted';")"
 
 tb_step "evaluation fan-out"
 # Policy and guardrails only produce a row when the org has attached one to
@@ -99,7 +165,10 @@ spool="$XDG_CONFIG_HOME/openbox/cc-spool"
 assert_eq "no events left spooled for this session" 0 "$(find "$spool" -name "*$sid*" 2>/dev/null | wc -l)"
 
 tb_step "privacy posture (INV-2 / SL3-SEC-3)"
-# Everything the runtime egressed for this session, as text.
+# Everything the runtime egressed for this session, as text. The spans query is
+# kept deliberately: it returns nothing now (asserted above), and if a span ever
+# reappears its contents are scanned for leaked content rather than silently
+# skipped.
 egress="$(tb_sql "select row_to_json(e)::text from governance_events e where run_id='$sid';")
 $(tb_sql "select row_to_json(s)::text from spans s where session_id='$uuid';")"
 assert_nonempty "egress captured for inspection" "$egress"

@@ -11,10 +11,10 @@ import (
 // signal_args on a signal (log.signal_args) — with STRUCTURAL metadata only, never
 // content (INV-2). These tests pin both the population and the content gate.
 
-// activityInput decodes the activity_input object from a tool-call hook payload.
+// activityInput decodes the activity_input object from a tool-call payload.
 func activityInput(t *testing.T, ev DevEvent) map[string]any {
 	t.Helper()
-	p := decodeHookPayload(t, ev)
+	p := decodeRaw(t, ev)
 	ai, ok := p["activity_input"]
 	if !ok {
 		return nil
@@ -110,8 +110,46 @@ func TestActivityInput_OnlyOnStarted(t *testing.T) {
 	completed := base
 	completed.EventType = EventToolResult
 	completed.Span.Stage = "completed"
-	if _, ok := decodeHookPayload(t, completed)["activity_input"]; ok {
+	if _, ok := decodeRaw(t, completed)["activity_input"]; ok {
 		t.Errorf("completed ToolResult must NOT carry activity_input")
+	}
+}
+
+// TestActivityInput_EscalationContextIsTruncated pins the size cap on the one
+// content field that still reaches the wire from a tool call: the Tier-2
+// escalation context an approver decides on (Content.ToolInput). The cap is
+// applied here, on the bytes that get signed, so a runaway command cannot
+// produce an unbounded signed body.
+//
+// It used to be pinned through the span's request_body, which no longer
+// egresses; without this the cap would be untested on both of its remaining
+// call sites.
+func TestActivityInput_EscalationContextIsTruncated(t *testing.T) {
+	huge := strings.Repeat("x", maxBodySize+5000)
+	ev := DevEvent{
+		EventID: "e1", EventType: EventToolCall, SessionID: "s", DeveloperDID: "did:aip:x",
+		Timestamp: "2026-07-15T00:00:00Z", Tool: Tool{Name: "Bash", Kind: ToolShell},
+		Span:    &Span{SemanticType: "shell_command", Stage: "started"},
+		Content: &Content{ToolInput: huge},
+	}
+	cmd, _ := activityInput(t, ev)["command"].(string)
+	if len([]rune(cmd)) != maxBodySize {
+		t.Errorf("activity_input.command = %d runes, want capped to %d", len([]rune(cmd)), maxBodySize)
+	}
+}
+
+// TestSignalArgs_PromptIsTruncated pins the same cap on the other surviving
+// content field — the prompt carried under content capture.
+func TestSignalArgs_PromptIsTruncated(t *testing.T) {
+	huge := strings.Repeat("y", maxBodySize+5000)
+	ev := DevEvent{
+		EventID: "e1", EventType: EventPromptSubmitted, SessionID: "s", DeveloperDID: "did:aip:x",
+		Timestamp: "2026-07-15T00:00:00Z", Tool: Tool{Name: "claude-code", Kind: ToolShell},
+		Content: &Content{Prompt: huge},
+	}
+	prompt, _ := signalArgs(t, ev)["prompt"].(string)
+	if len([]rune(prompt)) != maxBodySize {
+		t.Errorf("signal_args.prompt = %d runes, want capped to %d", len([]rune(prompt)), maxBodySize)
 	}
 }
 

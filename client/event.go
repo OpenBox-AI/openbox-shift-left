@@ -102,10 +102,12 @@ type Span struct {
 	// InvocationID and OperationID separate the two identities a tool call has.
 	// Both are LOCAL: they are persisted in the spool (so the enforce path and
 	// the later flush derive the same ids) but are never emitted as wire fields
-	// — they exist only to feed the opaque activity_id / span_id hashes.
+	// — they exist only to feed the opaque activity_id hash and the duration
+	// stash key.
 	//
-	// InvocationID is THIS attempt (the provider's tool_use_id). It pairs a
-	// call's started and completed spans onto one span_id.
+	// InvocationID is THIS attempt (the provider's tool_use_id). It keys the
+	// cross-process duration stash, so a PostToolUse hook can recover when its
+	// PreToolUse fired. The two halves pair on the wire by activity_id.
 	//
 	// OperationID is WHAT is being done, and must be identical across a retry
 	// of the same operation. It is the load-bearing one: activity_id is derived

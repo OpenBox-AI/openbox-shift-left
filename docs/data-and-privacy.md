@@ -19,6 +19,29 @@ new field cannot start egressing by accident. Structural identifiers (paths, too
 names, MCP server names) are metadata and always flow; bodies are content and do
 not.
 
+Two of those "never" rows got stronger rather than merely staying true. A tool
+call used to be reported as a hand-built telemetry span, and that span had two
+fields — a request body and a response body — which *could* have carried a tool's
+input or output text with content capture on. Nothing ever put anything in them:
+no adapter has ever set either field, and both adapters have tests asserting they
+stay empty. The span is now gone entirely
+([ADR-0013](adr/ADR-0013-tool-call-as-activity.md)), so the fields are not read at
+all and the channel cannot be re-opened by an adapter mistake plus a
+content-capture opt-in. What a completed tool call reports instead is counts —
+bytes read, bytes written, lines changed, and an exit code if the tool provides
+one. Never the output itself.
+
+This is a narrowing of what *could* egress, not of what did. It is worth stating
+precisely because the opposite claim — "we improved your privacy" — would be the
+kind of overstatement this page exists to avoid.
+
+*When* it leaves: events are delivered in near-real-time by default — a detached
+flusher drains the local spool within ~2 seconds of each tool call
+(`hookflow.RealtimeTrigger`), with a final drain at session end.
+`realtime_flush: false` (or `OPENBOX_REALTIME=0`) delays delivery to session end
+instead. Either way this changes only *timing*: what egresses is governed solely
+by the table above and the content-capture posture below.
+
 ## Content capture
 
 Content capture is **on by default**. Prompt text is sent so that governance can act

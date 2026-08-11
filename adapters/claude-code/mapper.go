@@ -234,9 +234,9 @@ func (m Mapper) Map(hook HookName, e *HookEvent) (client.DevEvent, bool) {
 // Two identities, deliberately separate (client.Span.InvocationID /
 // OperationID):
 //
-//   - InvocationID = tool_use_id, which Claude Code mints per call. It pairs
-//     the started and completed spans of ONE call onto one span_id, and keys
-//     the duration stash.
+//   - InvocationID = tool_use_id, which Claude Code mints per call. It keys
+//     the cross-process duration stash, so the completed hook recovers when
+//     the started one fired.
 //   - OperationID = what is being done, identical across a retry. activity_id
 //     derives from it, and activity_id is the approval key.
 //

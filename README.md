@@ -13,8 +13,26 @@ One command to onboard. No daemon, no proxy, no second dashboard.
 ```bash
 curl -fsSL https://raw.githubusercontent.com/OpenBox-AI/openbox-shift-left/main/install.sh | bash
 export OPENBOX_CONTROL_TOKEN=obx_key_…          # your org key, from the dashboard
-openbox init --provider claude-code --backend-url https://<your-openbox> --enforce
+openbox init --provider claude-code --enforce \
+  --backend-url https://<your-openbox-backend> \
+  --base-url    https://<your-openbox-core> \
+  --local-hooks .
 ```
+
+**Two planes.** `--backend-url` is the control plane (agents, policy, approvals);
+`--base-url` is the data plane (where events are sent). The control plane cannot
+tell the CLI where your core is, so omit `--base-url` only on the hosted core —
+self-hosted, it silently points your events at `core.openbox.ai` and surfaces
+later as a 401 that looks like a broken install.
+
+**`--local-hooks .` governs this project only**, and is how to try OpenBox out.
+Without it, `init` installs the plugin but does not activate it: the hooks turn
+on when your org pushes managed settings (`deploy/managed/`) or you enable the
+plugin globally yourself — so a plain `init` leaves sessions ungoverned until one
+of those happens. `--local-hooks .` writes the hook entries straight into this
+project's `.claude/settings.local.json`, which takes effect immediately. Use
+managed settings for a real rollout; sessions outside this directory stay
+ungoverned.
 
 Then just use `claude` as normal. → **[Getting started](docs/getting-started.md)**
 (five minutes, including self-hosted and troubleshooting).
@@ -39,15 +57,17 @@ Then just use `claude` as normal. → **[Getting started](docs/getting-started.m
                                  │                    │
                                  │                    └─▶ allow · deny · ask · redact
                                  ▼
-                        spool ──▶ openbox-core /evaluate ──▶ sessions · spans · lineage
+                        spool ──▶ openbox-core /evaluate ──▶ sessions · events · lineage
                                         (AIP-signed, same endpoint as agent runtime)
 ```
 
 A single static binary is the whole runtime: it is the CLI, the hook engine, the
 git hook and the policy evaluator. Enforcement decides **in-process** in
 microseconds ([ADR-0006](docs/adr/ADR-0006-in-process-decider.md)); telemetry is
-spooled and flushed off the hot path, so a slow or absent OpenBox never slows a
-tool call and never blocks one.
+spooled and delivered off the hot path in near-real-time (a detached, debounced
+flusher drains the spool within ~2s of each tool call; SessionEnd remains the
+completeness safety net), so a slow or absent OpenBox never slows a tool call
+and never blocks one.
 
 Everything provider-agnostic lives in one engine; each tool adds only a thin
 adapter behind one SPI. Adding a tool is an adapter, not a fork.

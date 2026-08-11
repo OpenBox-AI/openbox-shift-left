@@ -50,22 +50,24 @@ verdict, err := c.Emit(ctx, client.DevEvent{
 | **INV-1** obx_ key + Ed25519 seed never logged/leaked | `signing.go` (seed stays in `signer`); `client.go` logs only ids/types/errors; plaintext `http://` to a non-loopback host is refused (`checkBaseURL`) so the bearer key can't travel in the clear |
 | **INV-2** strip content when content-capture disabled | `payload.go:stripContent`, gated in `client.go:Emit` (default off) |
 | **INV-3** fail-open; never block the caller | `client.go:Emit` returns `(VerdictUnknown, nil)` on any transport error |
-| **INV-5** client event id for idempotent ingestion | `DevEvent.EventID` required (deterministic + collision-safe — adapter `deriveID`); carried in `metadata.event_id` (core has no first-class field) **and** the `Idempotency-Key` header; retries reuse the identical key/body. **End-to-end dedupe needs an EXT-core change** — see below |
+| **INV-5** client event id for idempotent ingestion | `DevEvent.EventID` required (deterministic + collision-safe — adapter `deriveID`); carried in `metadata.event_id` (core has no first-class field) **and** the `Idempotency-Key` header; retries reuse the identical key/body. **Server-side dedupe is partial** — see below |
 
-## semantic_type is set indirectly (verified core behavior)
+## No spans, so no semantic_type
 
-core **recomputes** every span's `semantic_type` at ingest
-(`governance_workflow.go:309` → `ComputeSemanticTypeFromSpan`) from the span
-**`name`** + an **`attributes`** map, and **ignores** the inbound `semantic_type`,
-`hook_type`, `file_operation`, and `function`. So the client sets the fields core
-actually reads (`payload.go:hookSpanShape`): file ops get a
-`name` of `file.write`/`file.read`/… plus a non-nil `file_path`; MCP calls get
-`attributes["mcp.method"]="callTool"`. The real tool name is preserved in
-`metadata.tool_name`. (This corrects contracts/dev-event/MAPPING.md §3, which
-described the mechanism as reading `file_operation`/`function`/`hook_type` —
-tracked as a contract doc fix.)
+The client sends **no spans** ([ADR-0013](../docs/adr/ADR-0013-tool-call-as-activity.md)).
+A tool call is two activity events — `ToolCall` → `ActivityStarted`, `ToolResult`
+→ `ActivityCompleted` — sharing an `activity_id`, and neither carries `spans`,
+`span_count` or `hook_trigger`.
 
-## Idempotency (INV-5) is best-effort until EXT-core
+core computes `semantic_type` from a span (`ComputeSemanticTypeFromSpan`), so for
+developer sessions it computes none. `tool.kind` and the `activity_input`
+locators carry that distinction instead. The `DevEvent.Span` struct still exists
+— the adapter contract is frozen at schema v1.0 and adapters still populate it —
+but the client now reads locators and counts *out* of it into
+`activity_input`/`activity_output` rather than serializing it.
+`contracts/dev-event/MAPPING.md` §3 is the authority on which fields it reads.
+
+## Idempotency (INV-5): the client half is guaranteed
 
 The client owns **half** the idempotency contract and guarantees it (STORY-SL-14):
 
@@ -81,13 +83,16 @@ The client owns **half** the idempotency contract and guarantees it (STORY-SL-14
 - **Client at-most-once.** A retry re-sends the identical key (never a fresh one);
   the spool never re-sends an acked event across rotate/flush/recovery.
 
-The **completing half is server-side** and not built here: core does **not**
-currently dedupe the developer event types (its dedupe paths key on
-`activity_id` / a span unique constraint, which dev events don't have — verified).
-So a retry after an ambiguous success (stored, but the 200 was lost) can still be
-counted twice *server-side*. This is telemetry skew in Phase-1 observe, not a
-safety issue, and closes when **EXT-core** keys dedupe on the `event_id` /
-`Idempotency-Key` value (SL3-IDEMPOTENCY).
+The **server-side half** is partial and not built here. core dedupes on
+`(agent_id, workflow_id, run_id, activity_id, event_type)`
+(`activities/governance/validation.go:96`), so a retried **tool** event does match
+an existing row and returns its cached verdict — tool events carry an
+`activity_id`. Lifecycle and signal events carry none, and
+`CheckExistingEventActivity` skips the duplicate check entirely without one
+(`validation.go:86-89`), so a retry of a `SessionStarted`/`SignalReceived` after
+an ambiguous success (stored, but the 200 was lost) can still be counted twice.
+That is telemetry skew in observe, not a safety issue, and closes when core keys
+dedupe on the `event_id` / `Idempotency-Key` value.
 
 ## Cross-repo alignment (verified via Explore, 2026-07-08)
 
@@ -98,21 +103,26 @@ safety issue, and closes when **EXT-core** keys dedupe on the `event_id` /
   openbox-core's server-side verifier `BuildAgentIdentityCanonicalRequest`
   (`services/agent.go:93`). The `client_test.go` mock **re-verifies every request
   exactly as core does** (`verifyLikeCore` mirrors `agent.go:165-184`).
-- **Payload** mirrors core `GovernanceEventPayload` / `SpanData`
-  (`internal/content/governance.go:186/266`): `source="developer-runtime"`,
-  `run_id`=session, `workflow_id`=workspace/DID, span times are **int64 epoch
-  nanoseconds**, `metadata` is `json.RawMessage`. See `contracts/dev-event/MAPPING.md`.
+- **Payload** mirrors the subset of core's `GovernanceEventPayload`
+  (`internal/content/governance.go:186`) the client sets:
+  `source="developer-runtime"`, `run_id`=session, `workflow_id`=workspace/DID,
+  `duration_ms` as float milliseconds, `metadata` as `json.RawMessage`. Fields
+  core populates for Temporal events (`task_queue`, `parent_workflow_id`,
+  `attempt`) are deliberately omitted. See `contracts/dev-event/MAPPING.md`.
 - **Response** is core's public `GovernanceVerdictPublicResponse`: `verdict` is a
   plain lowercase string (`allow|constrain|require_approval|block|halt`) with a
   legacy `action` fallback — parsed in `verdict.go`.
 
-## [EXT-core] dependency
+## No core accept-list patch (INV-8)
 
-The 7 developer lifecycle `event_type` strings are **not yet** in core's
-`isValidGovernanceEventType` accept-list (`internal/api/governance.go:273`), so a
-real POST today returns HTTP 400 → a fail-open drop (logged). Integration tests
-therefore run against the in-process core-mirror server. Once EXT-core's 3
-additive edits land (S6 §3), the same client emits end-to-end unchanged.
+The client never sends a developer `event_type` string. Every event maps onto one
+of five stock base wire types — `WorkflowStarted`, `WorkflowCompleted`,
+`SignalReceived`, `ActivityStarted`, `ActivityCompleted` — all of which are on
+core's accept-list (`internal/api/governance.go:273-286`), so a stock core
+accepts everything with no patch. `wireTypeFor` returns an error rather than
+falling back to the dev string, because emitting a non-accept-listed type
+produced a 400 that the fail-open path then swallowed: a new event type would
+have gone silently undelivered.
 
 ## Test / validate
 

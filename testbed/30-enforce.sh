@@ -80,8 +80,12 @@ else
 fi
 if [ -n "$sid" ]; then
 	uuid="$(tb_session_uuid "$sid")"
+	# governance_events is the substantive half — dev sessions write no spans
+	# (ADR-0013), so the spans query returns nothing. It is kept so that if a span
+	# ever reappears its contents are scanned rather than silently skipped.
 	egress="$(tb_sql "select row_to_json(e)::text from governance_events e where run_id='$sid';")
 $(tb_sql "select row_to_json(s)::text from spans s where session_id='${uuid:-none}';")"
+	assert_nonempty "egress captured for inspection" "$egress"
 	assert_absent "the secret never egressed" "$egress" "$AWS_KEY"
 fi
 

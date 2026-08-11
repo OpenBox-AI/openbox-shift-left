@@ -5,7 +5,8 @@
 // a 400 "invalid event_type" on stock (un-patched) core. ADR-0004 / E7 RETIRED
 // that patch: the client no longer emits developer-specific event_type strings;
 // it maps every dev event onto a base wire type openbox-core already accept-lists
-// (Workflow*/SignalReceived/ActivityStarted+hook). See ../ext-core/README.md.
+// (Workflow*/SignalReceived/ActivityStarted/ActivityCompleted, all span-less).
+// See ../../contracts/dev-event/ext-core/README.md.
 //
 // The test is now the INVERSE guarantee: shift-left emits ONLY stock base wire
 // types, so a STOCK core accepts every event with NO 400 — no external patch

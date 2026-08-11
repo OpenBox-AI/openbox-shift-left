@@ -20,8 +20,9 @@ than a parallel one:
   child record — `POST agent/create` → runtime key + DID;
 - emit events through the **same** `/api/v1/governance/evaluate` with the **same**
   auth (`Bearer obx_` + AIP signing);
-- store in the **same** tables (`sessions` → `governance_events` → `spans`, plus
-  Merkle leaves) and read through the **same** services.
+- store in the **same** tables (`sessions` → `governance_events`, plus Merkle
+  leaves) and read through the **same** services. Dev sessions write no `spans`
+  rows — see ADR-0013.
 
 **Rule:** prefer reusing an existing table/endpoint/service over adding one. A new
 table, endpoint or service requires an ADR in `docs/adr/`.
@@ -50,7 +51,7 @@ reintroduce that: if something is provider-agnostic it goes in `hookflow` or
 | `adapters/common/hookflow/` | the engine every adapter runs on |
 | `adapters/common/devconfig/`, `adapters/common/git/` | shared config/posture; trailer, notes, attestation |
 | `adapters/claude-code/`, `adapters/codex/` | one thin adapter each |
-| `client/` | core client: payload, hook spans, AIP signing, verdicts |
+| `client/` | core client: payload, AIP signing, verdicts |
 | `decision/` | in-process enforcement: bundle, evaluator, secret detection, redaction |
 | `cli/` | the `openbox` CLI, incl. `cli/internal/approver` (ADR-0012) |
 | `actions/openbox-git-action/` | commit→deploy lineage for CI |
@@ -97,14 +98,36 @@ approval loop with hold + rewake, the autonomous approver (ADR-0012), lineage
 the managed-config posture layer, and `openbox init` as the single onboarding front
 door with `--role approver` and `--base-url`.
 
+Near-real-time delivery (`hookflow.RealtimeTrigger`: debounced detached flusher per
+session, default on, `OPENBOX_REALTIME=0` opt-out) is implemented and verified at
+the binary level (`TestHookRealtimeDelivery` drives the real binary against a mock
+core); its testbed phase (`testbed/25-realtime.sh`) exists but has not yet run
+against a live local stack.
+
+**Tool events are Activities** (ADR-0013, 2026-08-11): `ToolCall` →
+`ActivityStarted`, `ToolResult` → `ActivityCompleted`, both span-less and
+hook-less. `client/hookspan.go` and `client/spanbuilder.go` are deleted, and with
+them ADR-0004's standing mirror obligation. The adapter-facing schema did not
+change. **Status: implemented and unit-verified, NOT yet run against a live
+stack.** `activity_id` is byte-identical to the old shape (pinned in
+`client/approval_key_pin_test.go`), the golden fixtures pin the new wire bytes,
+and all 11 modules are green — but core's ingest behavior was established by
+reading openbox-core, and this repo's own rule is that reading is not evidence.
+The load-bearing unverified claim is that core stores the `ActivityCompleted` as
+its own row; its dedupe key includes `event_type`
+(`activities/governance/validation.go:96`), which says it should. The testbed
+assertions are updated and waiting for a run; `MAPPING.md` §7 lists exactly what
+that run must confirm.
+
 Known limits, documented in
 `docs/architecture.md#assurance--what-the-evidence-proves`: the backend does not sign
 policy bundles yet (so `require_verified_bundle` defaults off), Codex's hook cannot be
 mandated by `requirements.toml`, Guardrail redaction at source is not wired, and the
 production-runtime lineage hop is not joined.
 
-Next: the Cursor adapter; upstream the `shell`/`mcp`/`tool` hook types to
-`openbox-sdk-python` to retire the Go mirror; policy template packs.
+Next: the Cursor adapter; policy template packs. (Upstreaming the
+`shell`/`mcp`/`tool` hook types to `openbox-sdk-python` is no longer needed —
+ADR-0013 retired the Go mirror by deleting the span layer it mirrored.)
 
 The epic-by-epic history is in git, not in the tree: read commit messages and the
 ADRs for *why*, and the code for *what is true now*.

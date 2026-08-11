@@ -68,6 +68,18 @@ func safePrefix(token string) string {
 // config looks right, and then every signed request goes somewhere else, which
 // surfaces as `dev verify` → 401 "identity rejected". The backend's registration
 // reply carries no data-plane URL, so nothing but the operator can supply it.
+// It keys on the DEFAULT data plane, not on what a self-hosted host looks like.
+// The earlier version asked "does the backend look private?" — localhost,
+// RFC1918, .local/.internal, single-label — which silently passed the most
+// ordinary self-hosted deployment of all: a public domain. A control plane at
+// openbox-api.example.com is not private by any of those tests, so the warning
+// never fired and the install proceeded to sign every request against
+// core.openbox.ai.
+//
+// The question that actually matters is simpler and has no false-negative shape:
+// the data plane is about to default to DefaultBaseURL, so unless the control
+// plane belongs to that same deployment, it is the wrong data plane. Anything
+// not on the default core's domain warns — public, private or loopback alike.
 func selfHostedWithoutDataPlane(backendURL, baseURL string) bool {
 	if strings.TrimSpace(baseURL) != "" {
 		return false
@@ -76,31 +88,37 @@ func selfHostedWithoutDataPlane(backendURL, baseURL string) bool {
 	if err != nil || u.Host == "" {
 		return false
 	}
-	return isPrivateHost(u.Hostname())
+	def, err := url.Parse(devconfig.DefaultBaseURL)
+	if err != nil {
+		return false
+	}
+	return !sameDeployment(u.Hostname(), def.Hostname())
 }
 
-// isPrivateHost is a deliberately shallow check: localhost, RFC1918-looking
-// addresses, and single-label or .local/.internal names. It only decides whether
-// to print a warning, so a false negative costs a warning and a false positive
-// costs one line of noise.
-func isPrivateHost(host string) bool {
-	h := strings.ToLower(host)
-	switch {
-	case h == "localhost" || h == "127.0.0.1" || h == "::1" || h == "0.0.0.0":
-		return true
-	case strings.HasPrefix(h, "10.") || strings.HasPrefix(h, "192.168."):
-		return true
-	case strings.HasPrefix(h, "172."):
-		// 172.16.0.0/12 — close enough for a warning.
-		var second int
-		if _, err := fmt.Sscanf(h, "172.%d.", &second); err == nil && second >= 16 && second <= 31 {
-			return true
-		}
+// sameDeployment reports whether two hosts plausibly belong to one OpenBox
+// deployment, by comparing their registrable domain — so api.openbox.ai and
+// core.openbox.ai match while openbox-api.example.com does not.
+//
+// It is deliberately shallow: it decides whether to print a warning, so being
+// wrong costs one line of output either way. It does not consult the public
+// suffix list, which would make a co.uk-style hosted domain compare one label
+// too short — that direction only ever produces a warning that is already
+// correct advice.
+func sameDeployment(host, defaultHost string) bool {
+	h, d := strings.ToLower(strings.TrimSpace(host)), strings.ToLower(defaultHost)
+	if h == "" || d == "" {
 		return false
-	case strings.HasSuffix(h, ".local") || strings.HasSuffix(h, ".internal") || strings.HasSuffix(h, ".lan"):
-		return true
-	case !strings.Contains(h, "."):
-		return true // a single-label host is somebody's internal name
 	}
-	return false
+	return h == d || registrableDomain(h) == registrableDomain(d)
+}
+
+// registrableDomain returns the last two dot-separated labels of a host, or the
+// host itself when it has fewer. An IP address or a single-label name therefore
+// compares as itself, which is what we want: neither is the hosted deployment.
+func registrableDomain(host string) string {
+	parts := strings.Split(host, ".")
+	if len(parts) < 2 {
+		return host
+	}
+	return strings.Join(parts[len(parts)-2:], ".")
 }

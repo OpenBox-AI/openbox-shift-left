@@ -74,10 +74,15 @@ func TestNoGatedContentEgressesWhenCaptureIsOff(t *testing.T) {
 
 // SL3-SEC-3 is stronger than the content gate: a shell command is read for the
 // local enforce decision and must never egress, content-capture on or off. It
-// holds structurally today because hookSpanShape never populates shell_command
-// (the golden fixture pins it present-but-null), so this guards the property
-// from the input side — an adapter stuffing the command into a body field must
-// not get it onto the wire by turning capture on.
+// holds structurally today because the serializer has no field that carries a
+// command on the observe path — activity_input takes structural locators only,
+// and the shell fixtures pin that. So this guards the property from the input
+// side: an adapter stuffing the command into a Span field must not get it onto
+// the wire by turning capture on.
+//
+// The one deliberate exception is the Tier-2 escalation's Content.ToolInput,
+// which is not the observe path and is content-gated — see
+// structuralActivityInput.
 func TestShellCommandNeverEgressesEvenWithCaptureOn(t *testing.T) {
 	ev := DevEvent{
 		SchemaVersion: SchemaVersion, EventID: "ev-4", EventType: EventToolCall,

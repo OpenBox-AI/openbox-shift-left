@@ -14,6 +14,7 @@ TB_DIR="$(cd "$(dirname "$0")" && pwd)"
 phases=(
 	"onboard:10-onboard.sh"
 	"capture:20-capture.sh"
+	"realtime:25-realtime.sh"
 	"enforce:30-enforce.sh"
 	"approvals:40-approvals.sh"
 	"lineage:50-lineage.sh"

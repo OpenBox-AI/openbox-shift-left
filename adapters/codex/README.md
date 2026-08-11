@@ -65,7 +65,7 @@ The mapper threads it through the client's deterministic id derivation (the
 `span.function` pairing slot for non-MCP tools — wire-neutral, verified by
 `TestWire_ToolUseIDNeverRidesTheWire`), so:
 
-- a call's started+completed spans share **exact** `span_id`/`activity_id`
+- a call's started+completed halves share an **exact** `activity_id`
   (two identical sequential Bash calls no longer collide — the CC adapter's
   documented limitation);
 - the E7-S8 duration stash is keyed per invocation (concurrent same-tool calls

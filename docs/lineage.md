@@ -7,7 +7,7 @@ produced it, with which agent, under which policy — and how sure are we?*
 
 ```mermaid
 flowchart LR
-  S["dev session<br/>(sessions · spans · Merkle-sealed)"]
+  S["dev session<br/>(sessions · events · Merkle-sealed)"]
   C(["commit"])
   N["signed attestation<br/>refs/notes/openbox-attest"]
   D["Deploy event<br/>run_id = deploy-&lt;env&gt;-&lt;sha&gt;"]

@@ -56,6 +56,16 @@ func TestSelfHostedWithoutDataPlaneWarns(t *testing.T) {
 		"https://172.16.4.4",
 		"https://192.168.1.10:3000",
 		"http://openbox-backend:3000", // single-label service name
+
+		// Self-hosted on a PUBLIC domain — the case this check used to miss
+		// entirely. It asked "does the backend look private?", and none of
+		// these do, so the warning never fired and the install went on to sign
+		// every request against the hosted core. Reported from a real install
+		// at openbox-api.node.lat.
+		"https://openbox-api.node.lat/",
+		"https://openbox.example.com",
+		"https://api.acme.io",
+		"https://openbox-backend.fly.dev",
 	}
 	for _, u := range warn {
 		if !selfHostedWithoutDataPlane(u, "") {
@@ -65,7 +75,17 @@ func TestSelfHostedWithoutDataPlaneWarns(t *testing.T) {
 			t.Errorf("warned even though --base-url was given (%q)", u)
 		}
 	}
-	for _, u := range []string{"https://api.openbox.ai", "https://openbox.example.com", "", "not a url"} {
+
+	// The hosted deployment shares a registrable domain with the default data
+	// plane, so it needs no --base-url and must stay quiet. An unparseable or
+	// empty backend has nothing to say about the data plane either.
+	for _, u := range []string{
+		"https://api.openbox.ai",
+		"https://core.openbox.ai",
+		"https://openbox.ai",
+		"",
+		"not a url",
+	} {
 		if selfHostedWithoutDataPlane(u, "") {
 			t.Errorf("warned for a hosted or unparseable backend %q", u)
 		}

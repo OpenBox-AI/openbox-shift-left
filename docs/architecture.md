@@ -17,7 +17,7 @@ flowchart LR
   subgraph OPENBOX["OpenBox"]
     CORE["openbox-core<br/>/api/v1/governance/evaluate"]
     BE["openbox-backend<br/>agents · policy · approvals"]
-    DB[("sessions · spans<br/>governance_events<br/>deploy_session_links")]
+    DB[("sessions · governance_events<br/>deploy_session_links")]
   end
   CC -- "hook event" --> ENG
   ENG --> DEC
@@ -38,6 +38,15 @@ Two paths, deliberately separate:
   There is no daemon and no socket.
 - **Telemetry is spooled and flushed off the hot path.** A slow or absent OpenBox
   cannot slow a tool call or block one; undelivered events are retried, not dropped.
+  Delivery is near-real-time by default: after an event is spooled, the hook nudges a
+  detached, debounced flusher for its session (`hookflow.RealtimeTrigger`, ~2s
+  window), so events are queryable in core while the session is still running. The
+  hook process itself still performs zero network I/O — its worst case is one
+  lockfile check plus, at most once per window, spawning the flusher. SessionEnd's
+  flush remains the completeness safety net, and `realtime_flush:false` /
+  `OPENBOX_REALTIME=0` restores batch-at-session-end. Overlapping drains cannot
+  double-count: spool rotation is an atomic rename and core deduplicates on each
+  event's Idempotency-Key.
 
 ## Modules
 
@@ -47,7 +56,7 @@ Two paths, deliberately separate:
 | `adapters/common/hookflow/` | **the engine** — spool, duration stash, advisory sink, findings loop, staleness gate, the enforce cascade, Tier-2 escalation, approval hold, rewake |
 | `adapters/claude-code/`, `adapters/codex/` | one thin adapter each: native event shape, mapper, `OutputContract`, installer |
 | `adapters/common/devconfig/`, `adapters/common/git/` | shared config/posture resolution; commit trailer, notes and attestation |
-| `client/` | the openbox-core client: wire payload, hook-span shape, AIP signing, verdict parsing |
+| `client/` | the openbox-core client: wire payload, AIP signing, verdict parsing |
 | `decision/` | in-process enforcement: policy bundle, evaluator, secret detection, redaction |
 | `cli/` | the `openbox` CLI — `init`, `dev verify/sync`, `hook`, `approve`, `doctor`, `managed` |
 | `actions/openbox-git-action/` | commit → deploy lineage for CI |
@@ -133,6 +142,19 @@ Being precise here is part of the product.
   reported in the posture. `require_verified_bundle` refuses to enforce what did not
   verify; it defaults **off**, because turning it on before the backend signs leaves
   a fleet with no bundle at all.
+- **Telemetry evidence is event-level, not span-level.** A developer session
+  produces `governance_events` rows and their Merkle leaves, and **no `spans`
+  rows at all** ([ADR-0013](adr/ADR-0013-tool-call-as-activity.md)). A tool call
+  is two events — `ActivityStarted` then `ActivityCompleted`, sharing an
+  `activity_id` — each independently evaluated and each with its own leaf. An
+  auditor reading the Merkle tree for a dev session therefore sees event leaves
+  only: there is no span-level attestation to check, and no server-side
+  `semantic_type` classification, because core computes both from spans and a
+  hook process has no OpenTelemetry to produce one. The spans shift-left used to
+  send were fabricated by hand to satisfy a wire shape; removing them removes a
+  layer of evidence that was never measuring anything, but it is a removal, and
+  anyone reasoning about dev-session assurance should know the tree is shallower
+  than an agent-runtime session's.
 
 ## Verification
 

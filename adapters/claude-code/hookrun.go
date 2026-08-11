@@ -59,7 +59,10 @@ func RunHook(sub string, stdin io.Reader, stdout io.Writer, logger *log.Logger) 
 		return
 	}
 	if sub == "flush" {
-		runFlush(logger, "")
+		// A realtime-trigger spawn scopes the drain to its session via
+		// OPENBOX_FLUSH_SESSION; the manual `flush` subcommand leaves it unset
+		// and drains everything, exactly as before.
+		runFlush(logger, os.Getenv(hookflow.EnvFlushSession))
 		return
 	}
 
@@ -159,6 +162,18 @@ func RunHook(sub string, stdin io.Reader, stdout io.Writer, logger *log.Logger) 
 	if _, err := ad.Observe(hook, ev); err != nil {
 		logger.Printf("spool %s event: %v", hook, err)
 		// fall through — SessionEnd still tries to flush what is already spooled
+	}
+
+	// Near-real-time delivery: with the event spooled, nudge a detached,
+	// debounced flusher for this session so telemetry reaches core mid-session
+	// instead of waiting for SessionEnd (which stays the completeness safety
+	// net, so this runs on every other hook). Gated inside Maybe
+	// (ResolveRealtime, default on). It costs a lockfile check and, at most
+	// once per debounce window, a fork+exec — no network I/O in this process
+	// and no wait on the child, so the delay it can add to the PreToolUse gate
+	// below is local and bounded (INV-3/INV-3b).
+	if hook != HookSessionEnd {
+		hookflow.RealtimeTrigger{Spool: ad.Spool, Provider: "claude-code"}.Maybe(logger, ev.SessionID)
 	}
 
 	// In enforce mode the PreToolUse hook is a synchronous pre-execution gate:
@@ -283,6 +298,12 @@ func runFlush(logger *log.Logger, sessionID string) {
 	if sessionID == "" {
 		n, err = ad.FlushAll(ctx, cl)
 	} else {
+		// Hold the session's realtime debounce lock for the whole drain and
+		// release it after, so the next spooled event can trigger a fresh
+		// flusher immediately. Also runs on SessionEnd, clearing the session's
+		// last marker.
+		ad.Spool.TouchFlushLock(sessionID)
+		defer ad.Spool.ReleaseFlushLock(sessionID)
 		n, err = ad.Flush(ctx, sessionID, cl)
 	}
 	if err != nil {

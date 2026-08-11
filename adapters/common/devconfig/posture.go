@@ -66,6 +66,9 @@ type Posture struct {
 	ContentCapture  bool
 	Findings        bool
 	Finops          bool
+	// RealtimeFlush reports whether telemetry is delivered mid-session
+	// (debounced background flush) or batched to session end.
+	RealtimeFlush bool
 	// RequireVerifiedBundle refuses an unverified policy bundle (OD-RF-3).
 	RequireVerifiedBundle bool
 
@@ -161,6 +164,11 @@ func postureFields() []struct {
 			func(p *Posture) *bool { return &p.RequireVerifiedBundle }},
 		{"finops", func(c DevConfig) *bool { b := c.Finops; return &b }, false, EnvFinops,
 			func(p *Posture) *bool { return &p.Finops }},
+		// Reported because it decides WHEN a session's evidence exists at all:
+		// off, nothing about a running session is queryable until it ends, so a
+		// fleet that looks silent is indistinguishable from one that is batching.
+		{"realtime_flush", func(c DevConfig) *bool { return c.RealtimeFlush }, true, EnvRealtime,
+			func(p *Posture) *bool { return &p.RealtimeFlush }},
 	}
 }
 

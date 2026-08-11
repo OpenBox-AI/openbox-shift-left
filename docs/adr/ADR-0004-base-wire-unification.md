@@ -1,6 +1,14 @@
 # ADR-0004 — Unify dev telemetry onto the base SDK wire model
 
-Status: Accepted — **reconstructed 2026-07-31**, and amended (see below).
+> **Superseded in part by [ADR-0013](ADR-0013-tool-call-as-activity.md)
+> (2026-08-11):** the `ToolCall`/`ToolResult` rows below and the §Amendment
+> mirror obligation. Tool calls are now `ActivityStarted`/`ActivityCompleted`,
+> span-less, and `client/hookspan.go` is deleted. Everything else here stands,
+> and the reasoning below is left intact — it is the true record of why the
+> hook shape was the right answer under the premises that then held.
+
+Status: Accepted — **reconstructed 2026-07-31**, amended, and superseded in part
+(see the note above).
 Reconstructed from: `contracts/dev-event/MAPPING.md`, `client/payload.go`,
 `client/hookspan.go`, `client/acceptancetest/acceptance_test.go`.
 

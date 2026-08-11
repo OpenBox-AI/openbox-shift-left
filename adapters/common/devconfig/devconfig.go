@@ -49,6 +49,7 @@ const (
 	EnvSecretDetection = "OPENBOX_SECRET_DETECTION"
 	EnvRequireVerified = "OPENBOX_REQUIRE_VERIFIED_BUNDLE"
 	EnvFindings        = "OPENBOX_FINDINGS"
+	EnvRealtime        = "OPENBOX_REALTIME"
 	EnvFindingsCursor  = "OPENBOX_FINDINGS_CURSOR"
 	EnvEnforcementFile = "OPENBOX_ENFORCEMENT_FILE"
 	// EnvPendingApprovalDir relocates the filed-approval markers the gate and
@@ -126,6 +127,11 @@ type DevConfig struct {
 	// Findings enables the Tier-3 findings loop. Absent = default off
 	// (opt-in: it is the first observe-path stdout writer).
 	Findings *bool `json:"findings,omitempty"`
+	// RealtimeFlush enables the debounced background flush that delivers
+	// spooled events to core mid-session instead of only at SessionEnd.
+	// Absent = default on (opt-out): it changes only delivery timing, never
+	// what egresses, and the hook hot path stays free of network I/O.
+	RealtimeFlush *bool `json:"realtime_flush,omitempty"`
 	// AgentID is the backend agent id for the policy read. Non-secret.
 	AgentID string `json:"agent_id,omitempty"`
 	// BackendURL is the openbox-backend control-plane base (distinct from
@@ -285,6 +291,16 @@ func ResolveRequireVerifiedBundle() bool {
 // false — opt-in, because it is the first observe-path stdout writer.
 func ResolveFindings() bool {
 	return resolveBool("findings", func(c DevConfig) *bool { return c.Findings }, false, EnvFindings)
+}
+
+// ResolveRealtime reports whether the debounced background flush is on —
+// spooled events are delivered to core within a debounce window of each hook
+// instead of waiting for SessionEnd. Default on; set `realtime_flush:false`
+// or OPENBOX_REALTIME=0 to restore batch-at-session-end. Timing-only: the
+// content posture (ResolveContentCapture) is untouched, and with it off the
+// trigger performs zero I/O.
+func ResolveRealtime() bool {
+	return resolveBool("realtime_flush", func(c DevConfig) *bool { return c.RealtimeFlush }, true, EnvRealtime)
 }
 
 // ResolveFindingsCursor resolves the findings-loop cursor state file: the

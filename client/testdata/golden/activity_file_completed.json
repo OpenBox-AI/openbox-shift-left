@@ -1,0 +1,19 @@
+{
+  "source": "developer-runtime",
+  "event_type": "ActivityCompleted",
+  "activity_type": "Write",
+  "activity_id": "cc-act-210c9b44fe54bf46969d3183061aeb4f",
+  "workflow_id": "openbox-ai/openbox-shift-left",
+  "run_id": "sess-golden-0001",
+  "workflow_type": "developer-session",
+  "activity_output": {
+    "bytes_written": 128
+  },
+  "duration_ms": 2500,
+  "timestamp": "2026-07-31T09:00:02.5Z",
+  "metadata": {
+    "event_id": "ev-5",
+    "provider": "claude-code",
+    "tool_name": "Write"
+  }
+}
