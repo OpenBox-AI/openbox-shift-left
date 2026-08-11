@@ -1,9 +1,13 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://openbox.ai/schemas/dev-event/1.0/dev-event.schema.json",
+  "$id": "https://openbox.ai/schemas/dev-event/1.1/dev-event.schema.json",
   "title": "OpenBox Developer-Runtime Normalized Event",
   "description": "Tool-agnostic, versioned ADAPTER-FACING event contract for developer-runtime coding tools (Claude Code, Codex, Cursor). Every provider adapter maps its native payload onto this shape (SPI emit()). The OpenBox client then RE-EXPRESSES it onto the base SDK's unified wire model — WorkflowStarted/WorkflowCompleted/SignalReceived/ActivityStarted+hook_trigger — on POST /api/v1/governance/evaluate (see MAPPING.md; ADR-0004). This is NOT a verbatim event_type pass-through: the SL-1 EXT-core accept-list is retired (E7-S2). Adding a provider never changes this contract or the wire model (PRD FR-4, architecture §1b). Verified against openbox-core internal/content/{governance,session}.go and the base contract openbox-sdk-python/openbox_core/contracts/events.py (spikes S6, S8/E7-S0).",
-  "x-schema-version": "1.0",
+  "x-schema-version": "1.1",
+  "x-changelog": {
+    "1.1": "Adds the turn pair (TurnStarted/TurnCompleted → ActivityStarted/ActivityCompleted with activity_type llm_completion, ADR-0014) and the fields it needs: model, turn_index, agent_id. Widens $defs.tokens with cache_creation_input/cache_read and RE-DEFINES `input` as PURE input — the Claude Code SessionEnd rollup used to fold both cache counts into it. Additive except for that one semantic, which is why this is a version bump and not a silent edit.",
+    "1.0": "Initial contract (ADR-0004 base wire unification; ADR-0013 retired the span layer without changing this shape)."
+  },
   "type": "object",
   "required": [
     "schema_version",
@@ -17,7 +21,7 @@
   "properties": {
     "schema_version": {
       "description": "Version of THIS event contract carried on the wire. Bumped on a breaking change to the normalized shape.",
-      "const": "1.0"
+      "const": "1.1"
     },
     "event_id": {
       "description": "Client-generated unique id for idempotent ingestion (INV-5). Retries/buffered flush reuse the same id so tokens/cost/lineage are never double-counted.",
@@ -25,7 +29,7 @@
       "minLength": 1
     },
     "event_type": {
-      "description": "Developer-runtime LIFECYCLE type (adapter-facing; the enum below is unchanged). NOTE: CommitCreated is RESERVED — the schema branch and wire mapping exist but no adapter produces it; commit lineage flows through the git trailer and notes into the Deploy event's metadata instead. The client re-maps it onto a base-SDK wire type: SessionStarted->WorkflowStarted, SessionEnded->WorkflowCompleted, PromptSubmitted/CommitCreated/Deploy->SignalReceived(signal_name), ToolCall/ToolResult->ActivityStarted+hook_trigger (paired by shared span_id, stage started/completed). NOT a verbatim core event_type; the EXT-core accept-list is retired (E7-S2). See MAPPING.md §2.",
+      "description": "Developer-runtime LIFECYCLE type (adapter-facing). NOTE: CommitCreated is RESERVED — the schema branch and wire mapping exist but no adapter produces it; commit lineage flows through the git trailer and notes into the Deploy event's metadata instead. The client re-maps each onto a base-SDK wire type: SessionStarted->WorkflowStarted, SessionEnded->WorkflowCompleted, PromptSubmitted/CommitCreated/Deploy->SignalReceived(signal_name), ToolCall/ToolResult->ActivityStarted/ActivityCompleted (paired by a shared activity_id; ADR-0013 retired the span layer), TurnStarted/TurnCompleted->ActivityStarted/ActivityCompleted with activity_type llm_completion (paired by activity_id <session>:turn:<index>; ADR-0014). NOT a verbatim core event_type; the EXT-core accept-list is retired (E7-S2). See MAPPING.md §2.",
       "enum": [
         "SessionStarted",
         "PromptSubmitted",
@@ -33,7 +37,9 @@
         "ToolResult",
         "SessionEnded",
         "CommitCreated",
-        "Deploy"
+        "Deploy",
+        "TurnStarted",
+        "TurnCompleted"
       ]
     },
     "openbox_session_id": {
@@ -66,6 +72,19 @@
     "cost": { "$ref": "#/$defs/cost" },
     "span": { "$ref": "#/$defs/span" },
     "content": { "$ref": "#/$defs/content" },
+    "model": {
+      "description": "Provider model id that spent this event's tokens ('claude-opus-4-8', 'gpt-5-codex'). Identifier-class metadata, NOT content (INV-2) — it is the one free-form string the transcript/rollout usage projections egress, and it is bounded at the adapter boundary. Load-bearing: the backend aggregates token rollups under model-keyed composite metric keys, so a turn with no model is invisible to the dashboards it feeds. Absent when the projection found none — never back-filled from the session's model, which would attribute tokens to a model that may not have spent them.",
+      "type": "string"
+    },
+    "turn_index": {
+      "description": "Zero-based index of the model turn this event belongs to, within its session (or within its subagent). Both halves of a turn pair carry the same value; the client derives activity_id = <session>[:agent:<agent_id>]:turn:<index> from it, which is what pairs them onto one row. Set on TurnStarted/TurnCompleted only.",
+      "type": "integer",
+      "minimum": 0
+    },
+    "agent_id": {
+      "description": "Subagent this event occurred inside. On turn events it partitions the activity_id so a subagent's turns never collide with the main thread's. Empty/absent on the main thread. Structural identifier (INV-2).",
+      "type": "string"
+    },
     "metadata": {
       "description": "Additive per-type key/values. Lands verbatim in core payload's `metadata` (json.RawMessage). Never carries credentials/secrets (INV-1) or raw content (INV-2 — content lives only under `content`).",
       "type": "object"
@@ -134,6 +153,18 @@
           }
         }
       }
+    },
+    {
+      "title": "TurnStarted",
+      "description": "Opens one model turn. turn_index is required because the client derives the pair's activity_id from it; without it the pair cannot correlate. Carries no usage — the numbers are known only at the close.",
+      "required": ["event_type", "turn_index"],
+      "properties": { "event_type": { "const": "TurnStarted" } }
+    },
+    {
+      "title": "TurnCompleted",
+      "description": "Closes one model turn and carries what it spent: tokens (all four counts the provider reports) and the model that spent them. Both are optional — a turn the projection could not measure is still a real turn, and zero-filling would claim it spent nothing.",
+      "required": ["event_type", "turn_index"],
+      "properties": { "event_type": { "const": "TurnCompleted" } }
     }
   ],
   "$defs": {
@@ -159,13 +190,31 @@
       }
     },
     "tokens": {
-      "description": "Token usage for the turn/tool (metadata only). Absent when unknown.",
+      "description": "Token usage for the turn or the session rollup (metadata only). Absent when unknown; each count absent rather than zero when the provider does not report it. Since v1.1 `input` is PURE input and the two cache counts have their own fields — v1.0's Claude Code rollup folded both into `input`, which made cache efficiency unmeasurable and a cache-heavy session look like it had spent its whole context on fresh input.",
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "input": { "type": "integer", "minimum": 0 },
+        "input": {
+          "description": "Prompt tokens that were neither served from nor written to the prompt cache.",
+          "type": "integer",
+          "minimum": 0
+        },
         "output": { "type": "integer", "minimum": 0 },
-        "total": { "type": "integer", "minimum": 0 }
+        "cache_creation_input": {
+          "description": "Input tokens WRITTEN to the prompt cache (Anthropic cache_creation_input_tokens; Codex cache_write_input_tokens).",
+          "type": "integer",
+          "minimum": 0
+        },
+        "cache_read": {
+          "description": "Input tokens SERVED from the prompt cache (Anthropic cache_read_input_tokens; Codex cached_input_tokens).",
+          "type": "integer",
+          "minimum": 0
+        },
+        "total": {
+          "description": "Whole throughput: input + output + both cache counts.",
+          "type": "integer",
+          "minimum": 0
+        }
       }
     },
     "cost": {

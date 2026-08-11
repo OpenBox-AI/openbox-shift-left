@@ -205,6 +205,52 @@ fi
 tb_session_wait 90 || { release_pending; tb_session_wait 30; }
 settle
 
+# ── G · an escalated call is still ONE activity ───────────────────────────────
+# The gap this closes: 20-capture asserts started == completed, but it runs in
+# observe mode, where nothing escalates. On the enforce path a gated PreToolUse
+# reaches core twice — the Tier-2 escalation POSTs the event synchronously and the
+# observe copy is spooled and flushed — carrying ONE event_id both times. Core
+# does not dedupe developer events on that id, so for a while every escalated
+# call stored two ActivityStarted rows and two Merkle leaves, and no assertion
+# anywhere looked. 20-capture's orphan check runs one way only (a completed half
+# without a started one), so a DUPLICATED started half passed it unseen.
+#
+# Scoped to this file because this is where real escalations happen (the sessions
+# above produced tier2:evaluate verdicts and filed approvals).
+tb_step "G · no activity_id is stored more than once per half"
+dupes="$(tb_val "select count(*) from (
+	select activity_id, event_type from governance_events
+	where activity_id is not null and event_type like 'Activity%'
+	group by activity_id, event_type having count(*) > 1) d;")"
+assert_eq "no duplicated activity half" 0 "$dupes"
+if [ "${dupes:-0}" != "0" ]; then
+	tb_note "duplicated: $(tb_sql "select activity_id||' '||event_type||' x'||count(*)
+		from governance_events where activity_id is not null and event_type like 'Activity%'
+		group by activity_id, event_type having count(*) > 1 limit 5;" | tr '\n' ' ')"
+fi
+
+# Since ADR-0014 a session carries TWO kinds of activity: tool calls (activity_type
+# = the tool name) and model turns (activity_type = llm_completion). The check
+# above is deliberately global, so it still covers both — but a single aggregate
+# number cannot say WHICH kind duplicated, and the two have entirely different
+# causes: a tool-call duplicate means the escalation and the observe copy both
+# stored a row, while a turn duplicate means the transcript cursor advanced
+# without its events being spooled. Splitting the count keeps the diagnosis in the
+# failure message rather than in someone's later investigation.
+for kind in tool turn; do
+	case "$kind" in
+	tool) pred="activity_type <> 'llm_completion'" ;;
+	turn) pred="activity_type = 'llm_completion'" ;;
+	esac
+	kind_dupes="$(tb_val "select count(*) from (
+		select activity_id, event_type from governance_events
+		where activity_id is not null and event_type like 'Activity%' and $pred
+		group by activity_id, event_type having count(*) > 1) d;")"
+	assert_eq "no duplicated $kind activity half" 0 "$kind_dupes"
+done
+tb_note "activity kinds seen: $(tb_sql "select coalesce(activity_type,'(null)')||' x'||count(*)
+	from governance_events where event_type like 'Activity%' group by 1 order by 1;" | tr '\n' ' ')"
+
 # ── restore ───────────────────────────────────────────────────────────────────
 tb_step "leave the agent ungated for the later phases"
 # Deactivating alone leaves the compiled bundle in place, so publish an

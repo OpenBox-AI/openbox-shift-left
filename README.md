@@ -43,7 +43,8 @@ Then just use `claude` as normal. → **[Getting started](docs/getting-started.m
 
 | | |
 |---|---|
-| **Session telemetry** | every session, prompt, tool call and MCP call as normalized governance events — with token cost |
+| **Session telemetry** | every session, prompt, tool call and MCP call as normalized governance events |
+| **Per-turn finops** | which model spent how many tokens, per turn — the same signal the agent runtime reports, on by default ([ADR-0014](docs/adr/ADR-0014-turn-as-activity-and-identifier-allowlist.md)) |
 | **Enforcement** | block, ask-for-approval, or redact secrets *before* a tool runs, from your org policy |
 | **Human approval** | a risky call pauses the session; an approver answers from the dashboard or `openbox approve` |
 | **Autonomous approval** | a bounded approver answers inside the pause, so routine work never waits ([ADR-0012](docs/adr/ADR-0012-autonomous-approver.md)) |

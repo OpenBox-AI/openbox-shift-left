@@ -1,0 +1,31 @@
+{
+  "source": "developer-runtime",
+  "event_type": "ActivityCompleted",
+  "activity_type": "llm_completion",
+  "activity_id": "sess-golden-0001:usage:rollup",
+  "workflow_id": "openbox-ai/openbox-shift-left",
+  "run_id": "sess-golden-0001",
+  "workflow_type": "developer-session",
+  "activity_output": {
+    "model": "gpt-5.6-sol",
+    "usage": {
+      "cache_read_input_tokens": 9984,
+      "input_tokens": 4734,
+      "output_tokens": 232
+    }
+  },
+  "timestamp": "2026-07-31T09:30:00Z",
+  "metadata": {
+    "event_id": "ev-14",
+    "model": "gpt-5.6-sol",
+    "provider": "codex",
+    "tokens": {
+      "input": 4734,
+      "output": 232,
+      "total": 14950,
+      "cache_read": 9984
+    },
+    "tool_name": "codex",
+    "usage_scope": "session"
+  }
+}

@@ -61,7 +61,8 @@ func (i Installer) Plan(ref CredentialRef) string {
 	fmt.Fprintf(&b, "OpenBox Claude Code plugin (observe-only, STORY-SL-4):\n")
 	fmt.Fprintf(&b, "  - Materialize plugin bundle → %s\n", i.pluginDir())
 	fmt.Fprintf(&b, "      .claude-plugin/plugin.json + hooks/hooks.json (SessionStart, UserPromptSubmit,\n")
-	fmt.Fprintf(&b, "      PreToolUse, PostToolUse, SessionEnd → `bin/openbox hook claude-code <event>`; async/best-effort)\n")
+	fmt.Fprintf(&b, "      PreToolUse, PostToolUse, Stop, SubagentStop, SessionEnd →\n")
+	fmt.Fprintf(&b, "      `bin/openbox hook claude-code <event>`; async/best-effort)\n")
 	if i.EngineBinary != "" {
 		fmt.Fprintf(&b, "  - Place the openbox engine → %s\n", filepath.Join(i.pluginDir(), "bin", "openbox"))
 	} else {

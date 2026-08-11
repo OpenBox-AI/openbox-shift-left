@@ -44,9 +44,18 @@ const DefaultRealtimeWindow = 2 * time.Second
 // release waits for the next hook (or SessionEnd) — bounded staleness, never
 // loss.
 //
-// Redundant flushes are harmless by construction: spool rotation is an atomic
-// rename (a losing drain delivers zero events) and the server deduplicates on
-// the Idempotency-Key each event's stable id produces (E8-S7).
+// Redundant flushes are harmless because spool rotation is an atomic rename: a
+// losing drain claims nothing and delivers zero events, so two flushers can
+// never both send one spooled event.
+//
+// That rename is the WHOLE guarantee, and it only covers events that go through
+// the spool. Server-side dedupe on the Idempotency-Key is NOT a second line of
+// defence: core does not dedupe developer events on their id today (E8-S7 is the
+// client half only — a stable, unique id so that eventual dedupe is trivially
+// correct). Anything that reaches core outside the spool therefore has to avoid
+// duplicating itself on its own. The Tier-2 escalation is exactly that case, and
+// assuming a dedupe that did not exist is how it came to store every escalated
+// ActivityStarted twice — see EnforceGate.SpoolObserve.
 type RealtimeTrigger struct {
 	Spool    Spool
 	Provider string // adapter name as the hook subcommand spells it, e.g. "claude-code"

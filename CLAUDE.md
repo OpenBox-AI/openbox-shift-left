@@ -66,11 +66,20 @@ reintroduce that: if something is provider-agnostic it goes in `hookflow` or
 - **Privacy and security are first-class.** Content capture is **ON by default**
   (2026-07-15, reversing the original metadata-only posture): prompt text egresses
   unless an org opts out (`content_capture:false` / `OPENBOX_CONTENT_CAPTURE=0`).
+  Usage capture is **also ON by default** (2026-08-11, ADR-0014): four token counts
+  plus a model id per turn, opt out with `finops:false` / `OPENBOX_FINOPS=0`.
   Guardrail redaction at source is **not wired yet**, so prompt text egresses
   unredacted. Tool commands and file bodies never egress on observe events; an
   approval escalation is the one exception and is content-gated. Tier-1 secret
   detection redacts Write/Edit bodies locally, in enforce mode. Keep
   `docs/data-and-privacy.md` true.
+- **`usage.go`'s INV-2 guarantee is an allowlist now, not an impossibility.** It
+  used to hold structurally — the transcript projection bound only numeric fields,
+  so content had nowhere to land. Binding `message.model` (required: the model id is
+  the backend's aggregation key) replaced that with a curated allowlist enforced by
+  the sentinel test. **That test is load-bearing.** A change that makes it pass
+  trivially is a defect, and a second bound string needs an ADR amendment, not a
+  commit.
 - **Decisions only a human can make** (scope, privacy posture, priority) are `OD*`
   decisions: surface them, never infer them.
 - **Cite sources in docs** — the repo symbol/path or upstream doc URL behind each
@@ -104,6 +113,26 @@ the binary level (`TestHookRealtimeDelivery` drives the real binary against a mo
 core); its testbed phase (`testbed/25-realtime.sh`) exists but has not yet run
 against a live local stack.
 
+**Model turns are Activities too** (ADR-0014, 2026-08-11): `TurnStarted`/
+`TurnCompleted` → `ActivityStarted`/`ActivityCompleted` with
+`activity_type: "llm_completion"` and `{model, usage{4 counts}}` in
+`activity_output` — the AI-Agent `llm_completion` span's `response_body` shape on
+the activity carrier, since dev sessions write no spans. Claude Code emits one pair
+per turn from new `Stop`/`SubagentStop` hooks over a byte-offset cursor
+(`hookflow.TurnCursor`, agent-scoped, spool-then-cursor ordering so a crash
+over-reports into core's dedupe rather than losing a turn); Codex emits one
+`<session>:usage:rollup` pair at SessionEnd, its `Stop` deliberately unwired.
+`client.Tokens` gained both cache counts and **`Input` is now pure input** — the
+one non-additive change, which is why the contract is **v1.1**. `Finops` became
+`*bool` before the default could flip: as a plain bool an absent config field and
+an explicit `false` were indistinguishable, so the flip would have been a silent
+no-op. **Status: implemented, unit-verified, reviewed, NOT yet run against a live
+stack** — and write-only until the core-side extractor **merges**: it is implemented and
+green in [openbox-core#125](https://github.com/OpenBox-AI/openbox-core/pull/125)
+(PROD-296) but not yet merged to `develop`. Until it does, `llm_completion` also
+shows up under core's *tool* metrics, because `ExtractToolMetric` accepts any
+non-empty `activity_type` — the same PR fixes that.
+
 **Tool events are Activities** (ADR-0013, 2026-08-11): `ToolCall` →
 `ActivityStarted`, `ToolResult` → `ActivityCompleted`, both span-less and
 hook-less. `client/hookspan.go` and `client/spanbuilder.go` are deleted, and with
@@ -122,8 +151,17 @@ that run must confirm.
 Known limits, documented in
 `docs/architecture.md#assurance--what-the-evidence-proves`: the backend does not sign
 policy bundles yet (so `require_verified_bundle` defaults off), Codex's hook cannot be
-mandated by `requirements.toml`, Guardrail redaction at source is not wired, and the
-production-runtime lineage hop is not joined.
+mandated by `requirements.toml`, Guardrail redaction at source is not wired, the
+production-runtime lineage hop is not joined, token usage is write-only until core
+ships its extractor, and Codex reports usage per session rather than per turn.
+
+Two things about the turn feature stay empirically open until the testbed runs, and
+both are pre-decided either way rather than blocking: whether `Stop` fires on a
+tool-only turn (window sums are exact regardless of cadence), and whether
+`SubagentStop`'s transcript window carries `isSidechain` lines (the partition cannot
+double-count in any case; its worst case is a subagent reporting nothing). The
+static measurement behind both is in
+`plans/260811-1640-coding-agent-token-usage/reports/measure-260811-transcript-turn-surface.md`.
 
 Next: the Cursor adapter; policy template packs. (Upstreaming the
 `shell`/`mcp`/`tool` hook types to `openbox-sdk-python` is no longer needed —

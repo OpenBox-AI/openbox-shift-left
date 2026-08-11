@@ -11,6 +11,7 @@ import (
 
 	"github.com/openbox-ai/openbox-shift-left/adapters/common/devconfig"
 	"github.com/openbox-ai/openbox-shift-left/adapters/common/hookflow"
+	"github.com/openbox-ai/openbox-shift-left/client"
 	"github.com/openbox-ai/openbox-shift-left/decision"
 )
 
@@ -120,7 +121,7 @@ func RunHook(sub string, stdin io.Reader, stdout io.Writer, logger *log.Logger) 
 	pinnedNow := time.Now()
 	ad.Mapper.Now = func() time.Time { return pinnedNow }
 
-	// On SessionEnd, behind the off-by-default finops opt-in, read the
+	// On SessionEnd, behind the finops gate (default ON, opt-out), read the
 	// session's rollout JSONL for usage numbers only and hand them to the
 	// Mapper, which attaches them to the SessionEnded event. This is the
 	// only place transcript_path is opened, and only when
@@ -137,11 +138,17 @@ func RunHook(sub string, stdin io.Reader, stdout io.Writer, logger *log.Logger) 
 	// always carries transcript_path — session_end.rs @ rust-v0.145.0 —
 	// and a HOME-derived scan would fight the read-only/hermeticity
 	// posture).
+	//
+	// Since ADR-0014 the same read also feeds the session-rollup `llm_completion`
+	// activity pair (emitted after the SessionEnded event is spooled, below) and
+	// binds the model id from `turn_context.payload.model`. Cost is not read at
+	// all: Codex's token path carries no cost field, and cost is never derived
+	// from a pricing table here.
 	if hook == HookSessionEnd && ResolveFinops() {
-		if tokens, cost, err := readRolloutUsage(ev.TranscriptPath); err != nil {
+		if tokens, model, err := readRolloutUsage(ev.TranscriptPath); err != nil {
 			logger.Printf("finops: rollout usage skipped: %v", err)
-		} else if tokens != nil || cost != nil {
-			ad.Mapper.Finops = &FinopsUsage{Tokens: tokens, Cost: cost}
+		} else if tokens != nil {
+			ad.Mapper.Finops = &FinopsUsage{Tokens: tokens, Model: model}
 		}
 	}
 
@@ -168,11 +175,6 @@ func RunHook(sub string, stdin io.Reader, stdout io.Writer, logger *log.Logger) 
 		ad.Mapper.Posture = &posture
 	}
 
-	if _, err := ad.Observe(hook, ev); err != nil {
-		logger.Printf("spool %s event: %v", hook, err)
-		// fall through — SessionEnd still tries to flush what is already spooled
-	}
-
 	// Near-real-time delivery: with the event spooled, nudge a detached,
 	// debounced flusher for this session so telemetry reaches core mid-session
 	// instead of waiting for SessionEnd (which stays the completeness safety
@@ -181,8 +183,41 @@ func RunHook(sub string, stdin io.Reader, stdout io.Writer, logger *log.Logger) 
 	// once per debounce window, a fork+exec — no network I/O in this process
 	// and no wait on the child, so the delay it can add to the PreToolUse gate
 	// below is local and bounded (INV-3/INV-3b).
-	if hook != HookSessionEnd {
+	nudgeFlush := func() {
 		hookflow.RealtimeTrigger{Spool: ad.Spool, Provider: "codex"}.Maybe(logger, ev.SessionID)
+	}
+
+	// Resolved ONCE and reused by the gate below. The two must agree: deciding
+	// to defer the observe copy here and then not running the gate would drop
+	// the event.
+	gated := hook == HookPreToolUse && ResolveEnforce()
+
+	// The observe copy. On a gated hook it is DEFERRED into the gate below,
+	// which spools it only if the Tier-2 escalation did not already deliver the
+	// identical event — see EnforceGate.SpoolObserve for why writing it here
+	// stored every escalated ActivityStarted twice. The duration stash is still
+	// threaded now (RecordDeferred): it has to be written before the tool runs,
+	// and suppressing a redundant spool copy must not cost the call its
+	// duration_ms.
+	var spoolObserve func()
+	if gated {
+		if devEv, ok := ad.Mapper.Map(hook, ev); ok {
+			appendObserve := ad.RecordDeferred(devEv)
+			spoolObserve = func() {
+				if err := appendObserve(); err != nil {
+					logger.Printf("spool %s event: %v", hook, err)
+				}
+				nudgeFlush()
+			}
+		}
+	} else {
+		if _, err := ad.Observe(hook, ev); err != nil {
+			logger.Printf("spool %s event: %v", hook, err)
+			// fall through — SessionEnd still tries to flush what is already spooled
+		}
+		if hook != HookSessionEnd {
+			nudgeFlush()
+		}
 	}
 
 	// In enforce mode the PreToolUse hook is a synchronous pre-execution gate:
@@ -196,11 +231,12 @@ func RunHook(sub string, stdin io.Reader, stdout io.Writer, logger *log.Logger) 
 	// every provider. What this adapter supplies is how to read its own hook
 	// event (enforceTarget), how it spells a response (contract), and its hook
 	// budget (tier2).
-	if hook == HookPreToolUse && ResolveEnforce() {
+	if gated {
 		g := hookflow.EnforceGate{
-			Contract: contract,
-			Tier2:    tier2,
-			Record:   func(dec decision.Decision, res hookflow.ApplyResult) { recordEnforcement(logger, ev, dec, res) },
+			Contract:     contract,
+			Tier2:        tier2,
+			Record:       func(dec decision.Decision, res hookflow.ApplyResult) { recordEnforcement(logger, ev, dec, res) },
+			SpoolObserve: spoolObserve,
 		}
 		g.Run(context.Background(), logger, stdout, enforceTarget{id: id, mapper: ad.Mapper, ev: ev})
 		return
@@ -228,6 +264,26 @@ func RunHook(sub string, stdin io.Reader, stdout io.Writer, logger *log.Logger) 
 		// The staleness check itself now runs in the prelude above (its
 		// outcome is posture evidence); only the git-hook install remains here.
 		maybeInstallGitHook(logger, ev.Cwd)
+	}
+
+	// SessionEnd additionally emits the session-rollup `llm_completion` activity
+	// pair (ADR-0014) — Codex's granularity for the model+usage signal, since its
+	// per-turn Stop hook is deliberately unwired. Spooled BEFORE the flush below,
+	// so the pair rides the same drain as the SessionEnded event rather than
+	// waiting for a later session's flush. Best-effort: a spool failure is logged
+	// and the flush proceeds with whatever is there.
+	//
+	// It rides the same Finops read that populated the SessionEnded rollup, so the
+	// two agree by construction; nothing is read twice.
+	if hook == HookSessionEnd {
+		if started, completed, ok := ad.Mapper.MapUsageRollup(ev); ok {
+			for _, usageEv := range []client.DevEvent{started, completed} {
+				if err := ad.Record(usageEv); err != nil {
+					logger.Printf("finops: spool %s event: %v", usageEv.EventType, err)
+					break
+				}
+			}
+		}
 	}
 
 	// SessionEnd delivers the session's spooled events off the hot path.

@@ -17,6 +17,16 @@ const (
 	HookPreToolUse       HookName = "PreToolUse"
 	HookPostToolUse      HookName = "PostToolUse"
 	HookSessionEnd       HookName = "SessionEnd"
+	// HookStop / HookSubagentStop are the turn boundaries (ADR-0014). They are
+	// the only per-turn signal the hook surface offers, and their value is
+	// purely that they FIRE: the token numbers come from the transcript, not
+	// from the payload, which carries only content fields this adapter refuses
+	// to bind.
+	//
+	// Both can block a session via `decision: "block"`, so both are treated as
+	// stdout-forbidden on every path (INV-3) — see RunHook.
+	HookStop         HookName = "Stop"
+	HookSubagentStop HookName = "SubagentStop"
 )
 
 // hookNames is the set the plugin wires (capabilities.go / plugin/hooks.json).
@@ -26,6 +36,8 @@ var hookNames = map[HookName]bool{
 	HookPreToolUse:       true,
 	HookPostToolUse:      true,
 	HookSessionEnd:       true,
+	HookStop:             true,
+	HookSubagentStop:     true,
 }
 
 // ParseHookName validates a raw argv value as a known hook name.
@@ -59,10 +71,12 @@ type HookEvent struct {
 	// TranscriptPath is the filesystem path to this session's JSONL
 	// transcript. It is a structural locator (like Cwd), not content —
 	// INV-2 permits it. The file it points at is content-bearing, so it is
-	// opened only on SessionEnd and only when the opt-in finops gate is set
-	// (ResolveFinops), and even then only a projection-only parser touches
-	// it, extracting usage numbers only. With finops off this field is
-	// decoded but never dereferenced.
+	// opened only on the turn boundaries (Stop/SubagentStop) and SessionEnd,
+	// only when the finops gate is set (ResolveFinops — default ON as of
+	// ADR-0014, opt-OUT via finops:false / OPENBOX_FINOPS=0), and even then
+	// only an allowlist projection touches it, extracting the four token
+	// counts plus the model id. With finops off this field is decoded but
+	// never dereferenced.
 	TranscriptPath string `json:"transcript_path"`
 
 	// SessionStart.
@@ -101,6 +115,17 @@ type HookEvent struct {
 
 	// SessionEnd.
 	Reason string `json:"reason"`
+
+	// Stop / SubagentStop deliberately bind NOTHING of their own.
+	//
+	// Their payload carries `last_assistant_message` and `stop_reason` — both
+	// content, and neither needed: the hook's value is that it fired, and the
+	// numbers come from the transcript. Adding either field here would put
+	// assistant text one careless capStr away from the wire, so the absence is
+	// the safeguard (INV-2, the same structural argument usage.go makes).
+	//
+	// What these hooks do use is already above: SessionID, TranscriptPath, and
+	// AgentID/AgentType for the subagent attribution.
 
 	// Prompt is the UserPromptSubmit prompt text — content (INV-2), not
 	// structural. It is decoded here but is consumed only by the mapper

@@ -10,15 +10,17 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/client"
 )
 
-// Opt-in Codex finops / token-usage extraction.
+// Codex finops / token-usage extraction (default ON; opt out with
+// finops:false or OPENBOX_FINOPS=0).
 //
 // Codex hooks expose no token/cost usage (capabilities.go), but the
 // session's on-disk rollout JSONL — the file `transcript_path` points at
-// on SessionEnd — carries running token counts. Behind the off-by-default
-// finops opt-in (ResolveFinops — the same separate flag Claude Code uses,
-// not content_capture), the adapter reads it on SessionEnd (off the hot
-// path, after Codex has flushed the transcript) to populate the
-// otherwise-unused client.Tokens on the SessionEnded event.
+// on SessionEnd — carries running token counts. Behind the finops gate
+// (ResolveFinops — the same separate flag Claude Code uses, not
+// content_capture; default ON as of ADR-0014), the adapter reads it on
+// SessionEnd (off the hot path, after Codex has flushed the transcript) to
+// populate client.Tokens on the SessionEnded event AND the session-rollup
+// llm_completion activity pair.
 //
 // Grounded wire shape (real source, codex-rs @ rust-v0.145.0 — recorded in
 // the testdata fixture, not guessed; the box carried no live rollout to
@@ -96,6 +98,17 @@ type rolloutTokenUsage struct {
 	InputTokens  int `json:"input_tokens"`
 	OutputTokens int `json:"output_tokens"`
 	TotalTokens  int `json:"total_tokens"`
+	// CachedInputTokens / CacheWriteInputTokens are SUB-COUNTS of InputTokens,
+	// unlike Claude Code's cache counts which are additive siblings. Bound as of
+	// contract v1.1 so they can be reported in their own fields — which means
+	// Input must have them SUBTRACTED out to be pure input, not added to it.
+	// See aggregateRolloutUsage for the arithmetic and the evidence.
+	//
+	// ReasoningOutputTokens stays unbound: it is a sub-count of OutputTokens with
+	// no field in the contract, and binding a number we cannot report would
+	// invite someone to add it to Output and double-count.
+	CachedInputTokens     int `json:"cached_input_tokens"`
+	CacheWriteInputTokens int `json:"cache_write_input_tokens"`
 }
 
 // rolloutTokenInfo is the numbers-only projection of `TokenUsageInfo`. Only the
@@ -106,62 +119,81 @@ type rolloutTokenInfo struct {
 	TotalTokenUsage *rolloutTokenUsage `json:"total_token_usage"`
 }
 
-// rolloutPayload is the numbers-only projection of an EventMsg payload. Only the
-// token `info` object is bound — the `type` discriminator string ("token_count",
-// "agent_message", …) and every content sibling (message, delta, …) are dropped.
-// A non-token event_msg line simply has no `info.total_token_usage`, so it
-// contributes nothing (no discriminator read is needed — presence of the numeric
-// path IS the classifier, matching the CC reader's projection-only discipline).
+// rolloutPayload is the projection of a rollout line's payload: the token `info`
+// object, plus the model id. The `type` discriminator string ("token_count",
+// "agent_message", …) and every content sibling (message, delta, command,
+// stdout, instructions, developer_instructions, …) are dropped. A non-token
+// event_msg line simply has no `info.total_token_usage`, so it contributes
+// nothing — presence of the numeric path IS the classifier, matching the CC
+// reader's projection-only discipline.
 type rolloutPayload struct {
 	Info *rolloutTokenInfo `json:"info"`
+	// Model is the ONE string this projection egresses, and it appears at exactly
+	// this path: `turn_context.payload.model`. Verified against 12 real rollouts
+	// (~/.codex/sessions, codex 0.145.x): `payload.model` occurs 363 times, which
+	// is exactly the number of `turn_context` lines — so no other line type puts a
+	// model at the top level of its payload.
+	//
+	// The nested siblings that also spell "model" —
+	// `payload.collaboration_mode.settings.model` and
+	// `payload.thread_settings.model` — are unreachable from here, which is the
+	// point: `turn_context.payload` is a CONTENT-RICH object (it carries
+	// `developer_instructions`, `cwd`, `workspace_roots`, `personality`), and this
+	// struct can bind exactly one field of it.
+	Model string `json:"model"`
 }
 
-// rolloutLine is the numbers-only projection of one JSONL rollout line. Only the
-// nested numeric token path (payload.info.total_token_usage) is reachable; the
-// line's `type`/`timestamp`/`ordinal` and every other RolloutItem shape
-// (session_meta, response_item, turn_context, world_state, …) are dropped on
-// decode — none of them can bind content into this struct.
+// rolloutLine is the projection of one JSONL rollout line. Only the nested
+// numeric token path (payload.info.total_token_usage) and payload.model are
+// reachable; the line's `type`/`timestamp`/`ordinal` and every other RolloutItem
+// shape (session_meta, response_item, turn_context, world_state, compacted, …)
+// are dropped on decode — none of them can bind content into this struct.
 type rolloutLine struct {
 	Payload *rolloutPayload `json:"payload"`
 }
 
 // readRolloutUsage reads a Codex rollout JSONL and returns the session's final
-// cumulative usage NUMBERS ONLY. It is the production reader wired into the
-// SessionEnd flush path (hookrun.go), fed the SessionEnd payload's transcript_path.
+// cumulative usage numbers plus the model that ran it. It is the production
+// reader wired into the SessionEnd flush path (hookrun.go), fed the SessionEnd
+// payload's transcript_path.
 //
-// Returns (nil, nil, nil) when the rollout carries no token counts at all (a
+// Returns (nil, "", nil) when the rollout carries no token counts at all (a
 // valid session that never recorded usage — the caller then attaches nothing,
 // same as finops-off). Returns an error (best-effort skip, INV-3) when the path
-// is empty/null, missing, oversized, or unreadable. Cost is always nil (Codex's
-// token path carries no cost field — see file doc).
-func readRolloutUsage(path string) (*client.Tokens, *client.Cost, error) {
+// is empty/null, missing, oversized, or unreadable.
+//
+// Cost is not returned at all, because Codex's token path carries no cost field
+// (TokenCountEvent is only {info, rate_limits} — protocol.rs) and cost is never
+// derived from a pricing table here.
+func readRolloutUsage(path string) (*client.Tokens, string, error) {
 	if path == "" {
-		return nil, nil, fmt.Errorf("no transcript_path")
+		return nil, "", fmt.Errorf("no transcript_path")
 	}
 	f, err := os.Open(path)
 	if err != nil {
-		return nil, nil, fmt.Errorf("open rollout: %w", err)
+		return nil, "", fmt.Errorf("open rollout: %w", err)
 	}
 	defer f.Close()
 	// Stat the OPEN fd (not the path) so the regular-file check and the size bound
 	// both refer to the same object we actually read — no stat/read TOCTOU where a
 	// symlink swap or post-stat growth could bypass the cap (mirrors the CC reader).
 	if fi, err := f.Stat(); err != nil {
-		return nil, nil, fmt.Errorf("stat rollout: %w", err)
+		return nil, "", fmt.Errorf("stat rollout: %w", err)
 	} else if !fi.Mode().IsRegular() {
-		return nil, nil, fmt.Errorf("rollout is not a regular file")
+		return nil, "", fmt.Errorf("rollout is not a regular file")
 	}
 	// Read at most cap+1 bytes: reaching cap+1 means the file exceeds the cap, so
 	// it is skipped WHOLE (honest — no truncated/undercounted parse) rather than
 	// partially aggregated (INV-3, bounded so a giant rollout can't OOM).
 	raw, err := io.ReadAll(io.LimitReader(f, maxRolloutBytes+1))
 	if err != nil {
-		return nil, nil, fmt.Errorf("read rollout: %w", err)
+		return nil, "", fmt.Errorf("read rollout: %w", err)
 	}
 	if len(raw) > maxRolloutBytes {
-		return nil, nil, fmt.Errorf("rollout exceeds %d-byte cap", maxRolloutBytes)
+		return nil, "", fmt.Errorf("rollout exceeds %d-byte cap", maxRolloutBytes)
 	}
-	return aggregateRolloutUsage(raw)
+	tokens, model := aggregateRolloutUsage(raw)
+	return tokens, model, nil
 }
 
 // aggregateRolloutUsage parses rollout JSONL bytes into a token rollup using the
@@ -174,9 +206,15 @@ func readRolloutUsage(path string) (*client.Tokens, *client.Cost, error) {
 // order and keeping the last snapshot that decodes cleanly yields the session's
 // final cumulative total; a truncated/partial final line is skipped, honestly
 // falling back to the previous complete cumulative rather than undercounting.
-func aggregateRolloutUsage(raw []byte) (*client.Tokens, *client.Cost, error) {
+// It also returns the session's model id — the last non-empty
+// `turn_context.payload.model` in the rollout, which is the model in effect when
+// the session ended. Empty when the rollout names none, in which case the pair is
+// still emitted and the core-side extractor buckets it as unknown; never
+// substituted from anywhere else.
+func aggregateRolloutUsage(raw []byte) (*client.Tokens, string) {
 	var latest rolloutTokenUsage
 	var seen bool
+	var model string
 
 	for _, line := range bytes.Split(raw, []byte{'\n'}) {
 		line = bytes.TrimSpace(line)
@@ -189,33 +227,68 @@ func aggregateRolloutUsage(raw []byte) (*client.Tokens, *client.Cost, error) {
 			// last good snapshot (fault-tolerant, INV-3).
 			continue
 		}
-		if rl.Payload != nil && rl.Payload.Info != nil && rl.Payload.Info.TotalTokenUsage != nil {
+		if rl.Payload == nil {
+			continue
+		}
+		if rl.Payload.Model != "" {
+			model = rl.Payload.Model // last non-empty turn_context wins
+		}
+		if rl.Payload.Info != nil && rl.Payload.Info.TotalTokenUsage != nil {
 			latest = *rl.Payload.Info.TotalTokenUsage // last cumulative snapshot wins
 			seen = true
 		}
 	}
 
 	if !seen {
-		return nil, nil, nil // valid, but nothing to report
+		return nil, model // valid, but nothing to report
 	}
 
-	// input_tokens / output_tokens / total_tokens are carried directly:
-	// cached / cache_write / reasoning are subsets already inside them
-	// (see file doc), so they must not be added. nonNegRollout clamps any
-	// negative source value to 0 so emitted numbers satisfy the schema
-	// `minimum: 0`.
-	in := nonNegRollout(latest.InputTokens)
+	// The four counts, and why Codex's arithmetic is the INVERSE of Claude Code's.
+	//
+	// Claude Code's cache counts are additive siblings of input_tokens, so its
+	// pure input is input_tokens as given. Codex's are SUB-COUNTS already inside
+	// input_tokens, so pure input is input_tokens MINUS them. Adding them here —
+	// the shape of the Claude Code reader — would double-count the cache on every
+	// Codex session.
+	//
+	// Evidence, from 12 real rollouts (~/.codex/sessions, codex 0.145.x) and the
+	// pinned fixture:
+	//
+	//	input 14718, cached 9984, output 232, total 14950 → 14718 + 232 == 14950
+	//	input   160, cached   40, cache_write 5, output 35, total 195 → 160 + 35 == 195
+	//
+	// total_tokens == input_tokens + output_tokens exactly, with cached and
+	// cache_write contributing nothing on top — so both are inside input_tokens.
+	// (`TokenUsage::non_cached_input == input_tokens - cached_input_tokens`,
+	// protocol.rs @ rust-v0.145.0, states it for cached; the arithmetic above is
+	// what establishes it for cache_write, which that formula does not mention and
+	// which is ABSENT from every real rollout sampled — only the fixture carries
+	// it.) reasoning_output_tokens is likewise a sub-count of output_tokens and is
+	// not bound at all.
+	//
+	// nonNegRollout clamps any negative source value to 0 so emitted numbers
+	// satisfy the schema `minimum: 0`; the subtraction is clamped for the same
+	// reason, since a malformed snapshot could report caches exceeding input.
+	rawIn := nonNegRollout(latest.InputTokens)
+	cacheRead := nonNegRollout(latest.CachedInputTokens)
+	cacheWrite := nonNegRollout(latest.CacheWriteInputTokens)
+	in := nonNegRollout(rawIn - cacheRead - cacheWrite)
 	out := nonNegRollout(latest.OutputTokens)
 	total := nonNegRollout(latest.TotalTokens)
-	// total_tokens should equal input+output (source: total_tokens == in + out),
-	// but if a snapshot omitted it (0) fall back to the derived sum so Total is
-	// never a spurious 0 while Input/Output are non-zero.
+	// total_tokens is Codex's own independently-summed field and is carried
+	// verbatim, not recomputed. If a snapshot omitted it (0), fall back to the
+	// derived sum so Total is never a spurious 0 while the parts are non-zero.
 	if total == 0 {
-		total = in + out
+		total = in + out + cacheRead + cacheWrite
 	}
-	tokens := &client.Tokens{Input: intPtrRollout(in), Output: intPtrRollout(out), Total: intPtrRollout(total)}
-	// Cost is ALWAYS nil: the Codex token path carries no cost field (file doc).
-	return tokens, nil, nil
+	tokens := &client.Tokens{
+		Input:              intPtrRollout(in),
+		Output:             intPtrRollout(out),
+		CacheCreationInput: intPtrRollout(cacheWrite),
+		CacheRead:          intPtrRollout(cacheRead),
+		Total:              intPtrRollout(total),
+	}
+	return tokens, model
 }
 
 func intPtrRollout(v int) *int { return &v }

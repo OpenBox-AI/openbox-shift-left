@@ -55,7 +55,7 @@ type Rewaker interface {
 // coverage tier can be derived and displayed, with no false sense of coverage.
 //
 // "Supported" means the adapter implements the mechanism, not that it is active
-// in a given session: the enforce and finops capabilities are opt-in and
+// in a given session: the enforce capability is opt-in and
 // default off, so an unconfigured session still observes only (INV-3).
 type Capability struct {
 	Key       string // stable capability id

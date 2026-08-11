@@ -47,11 +47,43 @@ type EnforceGate struct {
 	// Record writes the durable audit line. Off the blocking path,
 	// best-effort, never fails a tool call.
 	Record func(dec decision.Decision, res ApplyResult)
+	// SpoolObserve appends the gated call's observe copy to the local spool.
+	//
+	// The gate owns the timing because only the gate knows whether the Tier-2
+	// escalation delivered this very event first. The adapter used to spool it
+	// before running the gate, which stored the ActivityStarted TWICE for every
+	// escalated call — the escalation POSTs the identical event, the pinned
+	// mapper clock makes both derive one event_id, and core does not dedupe on
+	// it. Two rows, two Merkle leaves, one real tool call.
+	//
+	// Called on exactly one path per Run: every exit where the escalation did
+	// not deliver, including the stale-gate early return and every fail-open
+	// degradation. Nil means the caller spooled its own copy already (the
+	// non-gated hooks do).
+	SpoolObserve func()
 }
 
 // Run gates one tool call. It is fail-open throughout (INV-3b): every fault
 // degrades to proceed, and the gate can only ever add a deny/ask/redaction.
 func (g EnforceGate) Run(ctx context.Context, logger *log.Logger, stdout io.Writer, t EnforceTarget) {
+	// The observe copy rides whichever exit this gate takes: spooled unless the
+	// escalation delivered the identical event. Deferred, and the flag is set
+	// from inside the escalation's transport, so neither the early returns below
+	// nor a degraded escalation can get this wrong — the default is to spool,
+	// which is the direction that loses no telemetry.
+	//
+	// g is a value receiver, so wiring OnDelivered here mutates only this
+	// invocation's copy: no shared state between concurrent hook processes.
+	if g.SpoolObserve != nil {
+		delivered := false
+		g.Tier2.OnDelivered = func() { delivered = true }
+		defer func() {
+			if !delivered {
+				g.SpoolObserve()
+			}
+		}()
+	}
+
 	// One wall clock for the whole gate (Tier-1 plus a possible Tier-2), so the
 	// sequential per-tier budgets can never jointly exceed the provider's hook
 	// timeout — which would fail open and defeat a fail-closed org.

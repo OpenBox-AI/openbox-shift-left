@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -144,6 +145,18 @@ func buildPayload(ev DevEvent) ([]byte, error) {
 		p.ActivityID = activityIDFor(ev)
 		p.ActivityOutput = structuralActivityOutput(ev)
 		p.DurationMs = durationMs(ev)
+	// A turn is an activity too (ADR-0014). Its id is derived from the turn
+	// index rather than hashed from an operation, because a turn has no
+	// operation to key on and a readable id is worth having in stored rows.
+	// The Started half carries no activity_input: the input to a turn is the
+	// prompt, which is content, and the PromptSubmitted signal already carries
+	// it under the content gate.
+	case EventTurnStarted:
+		p.ActivityID = turnActivityIDFor(ev)
+	case EventTurnCompleted:
+		p.ActivityID = turnActivityIDFor(ev)
+		p.ActivityOutput = turnActivityOutput(ev)
+		p.DurationMs = durationMs(ev)
 	}
 
 	meta, err := buildMetadata(ev)
@@ -179,9 +192,9 @@ func wireTypeFor(et EventType) (wireType, signalName string, err error) {
 		return wireSignalReceived, "commit_created", nil
 	case EventDeploy:
 		return wireSignalReceived, "deploy", nil
-	case EventToolCall:
+	case EventToolCall, EventTurnStarted:
 		return wireActivityStarted, "", nil
-	case EventToolResult:
+	case EventToolResult, EventTurnCompleted:
 		return wireActivityCompleted, "", nil
 	}
 	// Emitting the DevEvent's own string here produced a non-accept-listed
@@ -249,6 +262,113 @@ func activityIDFor(ev DevEvent) string {
 	return "cc-act-" + hex.EncodeToString(sum[:16])
 }
 
+// turnActivityIDFor is the wire activity_id shared by a turn's ActivityStarted
+// and ActivityCompleted: "<session_id>:turn:<index>", or
+// "<session_id>:agent:<agent_id>:turn:<index>" for a subagent's turn.
+//
+// It is a DIFFERENT derivation from activityIDFor deliberately, on three counts:
+//
+//   - There is nothing to hash. A tool call's id hashes an operation so that a
+//     retry of the same operation addresses the approval already granted for it.
+//     A turn is not retried and is never approved, so a hash would only make the
+//     id unreadable in stored rows for no gain.
+//   - It must be derivable from fields that survive the spool (SessionID,
+//     TurnIndex, AgentID are all persisted), because a flush can happen long
+//     after the hook process that built the event exited.
+//   - It cannot collide with a tool-call id by construction: those are
+//     "cc-act-" + 32 hex chars, and this shape contains ':' and a decimal index.
+//
+// Core treats activity_id as an opaque string and its dedupe key is
+// (agent_id, workflow_id, run_id, activity_id, event_type) — so re-emitting a
+// turn after a crash re-mints this exact id and the server absorbs it rather
+// than storing a second row. That is what makes the cursor's
+// over-report-on-crash direction safe.
+//
+// A SessionRollup turn — Codex's granularity, one usage activity per session —
+// takes "<session_id>:usage:rollup" instead, which cannot collide with an indexed
+// turn because "rollup" is not a decimal number.
+//
+// Returns "" when TurnIndex is unset on a non-rollup turn, which keeps the field
+// omitted rather than minting "<session>:turn:" for something that is not a turn.
+// TestTurnActivityIDIsPinned holds these bytes.
+func turnActivityIDFor(ev DevEvent) string {
+	if ev.SessionRollup {
+		return ev.SessionID + ":usage:rollup"
+	}
+	if ev.TurnIndex == nil {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString(ev.SessionID)
+	if ev.AgentID != "" {
+		b.WriteString(":agent:")
+		b.WriteString(ev.AgentID)
+	}
+	b.WriteString(":turn:")
+	b.WriteString(strconv.Itoa(*ev.TurnIndex))
+	return b.String()
+}
+
+// activityTypeLLMCompletion is the activity_type both turn halves carry. The
+// name is not invented here: core already uses "llm_completion" as a semantic
+// type for the AI-Agent runtime's model-call spans
+// (openbox-core internal/content/session.go:105), so one vocabulary spans both
+// runtimes and the core-side extractor keys on a name it already knows.
+const activityTypeLLMCompletion = "llm_completion"
+
+// turnActivityOutput builds the `activity_output` for a turn's
+// ActivityCompleted: the model that ran and the four token counts it spent.
+//
+// The shape mirrors the AI-Agent llm_completion span's response_body
+// ({model, usage{…}}) so a consumer reads one shape regardless of which runtime
+// produced it — which is the whole point of routing the turn through an activity
+// instead of reviving the span layer ADR-0013 retired.
+//
+// INV-2, stated exactly: this object carries FOUR NUMBERS AND ONE IDENTIFIER.
+// No prompt, no completion, no thinking block, no stop reason, no tool content.
+// The model id is the single free-form string, already capStr-bounded by the
+// adapter. Core runs Guardrails stage "1" and OPA over this field, so token
+// spend becomes policy-visible — an intended upside, and a second reason the
+// schema must stay numbers plus one bounded identifier.
+//
+// Cost is deliberately absent. Core and the backend each derive it server-side
+// from a model-keyed pricing table; deriving it here would fabricate a number
+// from a table this client has no business owning.
+//
+// Returns nil (field omitted) when the turn carried neither usage nor a model.
+func turnActivityOutput(ev DevEvent) json.RawMessage {
+	m := map[string]any{}
+	if ev.Model != "" {
+		m["model"] = ev.Model
+	}
+	if t := ev.Tokens; t != nil {
+		usage := map[string]any{}
+		if t.Input != nil {
+			usage["input_tokens"] = *t.Input
+		}
+		if t.Output != nil {
+			usage["output_tokens"] = *t.Output
+		}
+		if t.CacheCreationInput != nil {
+			usage["cache_creation_input_tokens"] = *t.CacheCreationInput
+		}
+		if t.CacheRead != nil {
+			usage["cache_read_input_tokens"] = *t.CacheRead
+		}
+		if len(usage) > 0 {
+			m["usage"] = usage
+		}
+	}
+	if len(m) == 0 {
+		return nil
+	}
+	b, err := json.Marshal(m)
+	if err != nil {
+		return nil
+	}
+	return b
+}
+
 // activityLabel resolves the human-readable action label emitted as core's
 // pass-through `activity_type` column (openbox-fe's "Activity" column reads
 // it first and shows "Unknown" when absent). It's derived only from fields
@@ -257,15 +377,21 @@ func activityIDFor(ev DevEvent) string {
 // lands its specific tool name:
 //   - a tool event (ToolCall/ToolResult) → the specific tool name ("Edit"/
 //     "Bash"/"mcp__…"), the most useful Activity label;
+//   - a turn event → "llm_completion", the same label on BOTH halves, so the
+//     core-side usage extractor has one key to select on and the two runtimes
+//     share one vocabulary;
 //   - everything else (lifecycle, Deploy) → the event_type string.
 //
-// Always non-empty. Identifier-class only — a tool name or an event type —
-// never content (INV-2).
+// Always non-empty. Identifier-class only — a tool name, a fixed label, or an
+// event type — never content (INV-2).
 func activityLabel(ev DevEvent) string {
-	if ev.EventType == EventToolCall || ev.EventType == EventToolResult {
+	switch ev.EventType {
+	case EventToolCall, EventToolResult:
 		if ev.Tool.Name != "" {
 			return ev.Tool.Name
 		}
+	case EventTurnStarted, EventTurnCompleted:
+		return activityTypeLLMCompletion
 	}
 	return string(ev.EventType)
 }
@@ -326,6 +452,27 @@ func buildMetadata(ev DevEvent) (json.RawMessage, error) {
 	}
 	if ev.Cost != nil {
 		m["cost"] = ev.Cost
+	}
+	// The model that spent the tokens, carried here as well as in the turn's
+	// activity_output for the same reason tool_name is: metadata is the one blob
+	// every event type keeps, so a consumer grouping a session's spend by model
+	// does not have to know which wire shape a row came from. Identifier-class,
+	// bounded at the adapter (INV-2). SessionStarted already sets its own
+	// metadata.model from the hook payload, so an adapter-supplied key wins —
+	// the two agree by construction, since both are the provider's model id.
+	if ev.Model != "" {
+		if _, exists := m["model"]; !exists {
+			m["model"] = ev.Model
+		}
+	}
+	// The subagent a turn belongs to, so per-agent spend is attributable without
+	// parsing the activity_id. Tool events already carry it via the adapter's
+	// toolMetadata; this covers the turn events, whose metadata the mapper builds
+	// from the hook payload's agent fields.
+	if ev.AgentID != "" {
+		if _, exists := m["agent_id"]; !exists {
+			m["agent_id"] = ev.AgentID
+		}
 	}
 	return json.Marshal(m)
 }

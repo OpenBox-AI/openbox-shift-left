@@ -118,7 +118,7 @@ func DefaultSpoolDir() string { return devconfig.SpoolDir("cc-spool") }
 // hook on SessionStart (default false; env overrides config).
 func ResolveInstallGitHook() bool { return devconfig.ResolveInstallGitHook() }
 
-// ResolveFinops reports whether opt-in transcript usage extraction is
+// ResolveFinops reports whether transcript usage extraction is
 // enabled (default false).
 func ResolveFinops() bool { return devconfig.ResolveFinops() }
 
