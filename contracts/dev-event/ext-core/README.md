@@ -26,9 +26,11 @@ guard (`../conformance/extcore_drift_test.go`) and patch artifacts
 (`openbox-core-dev-event-types.patch`, `dev-event-types.json`, `apply.sh`) were
 deleted with this retirement.
 
-The one *additive* openbox-core change that E7 keeps is the semantic classifier:
-`ComputeSemanticTypeFromSpan` now first-classes `shell`→`shell_command` and
-`mcp`→`mcp_tool_call` (E7-S2). That is a classification enrichment, not an
-accept-list — it needs no external patch dependency.
+No openbox-core change of any kind is required today. E7 once tracked an
+additive classifier enrichment here (`ComputeSemanticTypeFromSpan` first-classing
+`shell`→`shell_command`); that claim named no owner, could not be verified
+against the openbox-core checkout, and is moot since
+[ADR-0013](../../../docs/adr/ADR-0013-tool-call-as-activity.md) — developer
+sessions send no spans, so nothing classifies them.
 
 See [`../MAPPING.md`](../MAPPING.md) for the live wire mapping.

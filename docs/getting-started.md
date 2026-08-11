@@ -62,7 +62,8 @@ through your shell history or `ps`.
 ```bash
 openbox init --provider claude-code \
   --backend-url https://<your-openbox-backend> \
-  --enforce
+  --enforce \
+  --local-hooks .
 ```
 
 That single command:
@@ -70,9 +71,28 @@ That single command:
 - registers a `developer` agent and stores its runtime key + signing seed in your OS
   keychain — never printed, never in a config file;
 - installs the Claude Code plugin into `~/.claude/plugins/openbox-observe` and copies
-  the engine into it, so every `claude` session is governed;
+  the engine into it;
+- with `--local-hooks .`, activates it for **this project** by merging the five hook
+  entries into `./.claude/settings.local.json` (see below);
 - pulls your org policy into a local bundle;
 - writes your posture to `~/.config/openbox/dev.json`.
+
+### Which sessions are actually governed
+
+Installing the plugin does not activate it. Its hooks turn on when your org pushes
+managed settings (`deploy/managed/`) or you enable the plugin globally yourself, so
+`init` **without** `--local-hooks` leaves sessions ungoverned until one of those
+happens — a working install that governs nothing, which is easy to mistake for a
+broken one.
+
+`--local-hooks <dir>` is the way to try it out: it writes the hook entries directly
+into `<dir>/.claude/settings.local.json` (per-developer, git-ignored) pointing at the
+plugin's engine, and takes effect on the next `claude` session in that directory.
+Sessions started anywhere else stay ungoverned — which is also the point, when you
+are testing.
+
+For a real rollout use managed settings, so removing the hook is not a developer's
+own decision.
 
 Drop `--enforce` for **observe-only** (telemetry and lineage, never blocks). With
 `--enforce` the session also blocks, asks or redacts per your org policy, decided

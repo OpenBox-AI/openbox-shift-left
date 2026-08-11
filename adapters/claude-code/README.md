@@ -37,9 +37,9 @@ Each event's `event_id` is derived deterministically from its structural fields
 (`deriveID` in `mapper.go`): the same logical event always hashes to the same id
 and two distinct events never collide, so the id is stable through the whole
 spool → rotate → flush → recovery lifecycle (INV-5). That is the client half of
-idempotency; **server-side dedupe on that id is the completing half** and is not
-built here — it lands as an EXT-core change (SL3-IDEMPOTENCY), keyed on the
-`event_id` / `Idempotency-Key` the client already sends. See `client/README.md`.
+idempotency. The server-side half is partial and lives outside this adapter —
+[`client/README.md`](../../client/README.md) owns which events core deduplicates
+and which it does not.
 
 ## Event mapping (SL-1 contract)
 
@@ -58,9 +58,13 @@ else (`Glob`, `Grep`, `WebFetch`, `Task`, …) → the coarse catch-all
 `shell`/`internal`. The real tool name always rides on `tool.name` +
 `metadata.tool_name`, so nothing is lost to the 3-value `kind` enum.
 
-`semantic_type` is an **intent/hint**: openbox-core recomputes it server-side
-from the span name + attributes, and the SL-3 client already sets the fields
-core reads (file ops → `file.*` name + `file_path`; MCP → `mcp.method=callTool`).
+`semantic_type` is now **adapter-local**. It used to be a hint core recomputed
+server-side from the span it received; since [ADR-0013](../../docs/adr/ADR-0013-tool-call-as-activity.md)
+no span is sent, so nothing classifies it and the field never reaches the wire.
+`tool.kind` is what carries the distinction downstream. The mapper still sets
+`semantic_type` because the adapter contract is frozen at schema v1.0 — see
+[MAPPING.md](../../contracts/dev-event/MAPPING.md) §3 for which `span` fields the
+client still reads and which are inert.
 
 ## Privacy (INV-2 / SL3-SEC-3)
 

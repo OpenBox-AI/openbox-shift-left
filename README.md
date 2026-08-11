@@ -13,8 +13,26 @@ One command to onboard. No daemon, no proxy, no second dashboard.
 ```bash
 curl -fsSL https://raw.githubusercontent.com/OpenBox-AI/openbox-shift-left/main/install.sh | bash
 export OPENBOX_CONTROL_TOKEN=obx_key_…          # your org key, from the dashboard
-openbox init --provider claude-code --backend-url https://<your-openbox> --enforce
+openbox init --provider claude-code --enforce \
+  --backend-url https://<your-openbox-backend> \
+  --base-url    https://<your-openbox-core> \
+  --local-hooks .
 ```
+
+**Two planes.** `--backend-url` is the control plane (agents, policy, approvals);
+`--base-url` is the data plane (where events are sent). The control plane cannot
+tell the CLI where your core is, so omit `--base-url` only on the hosted core —
+self-hosted, it silently points your events at `core.openbox.ai` and surfaces
+later as a 401 that looks like a broken install.
+
+**`--local-hooks .` governs this project only**, and is how to try OpenBox out.
+Without it, `init` installs the plugin but does not activate it: the hooks turn
+on when your org pushes managed settings (`deploy/managed/`) or you enable the
+plugin globally yourself — so a plain `init` leaves sessions ungoverned until one
+of those happens. `--local-hooks .` writes the hook entries straight into this
+project's `.claude/settings.local.json`, which takes effect immediately. Use
+managed settings for a real rollout; sessions outside this directory stay
+ungoverned.
 
 Then just use `claude` as normal. → **[Getting started](docs/getting-started.md)**
 (five minutes, including self-hosted and troubleshooting).
