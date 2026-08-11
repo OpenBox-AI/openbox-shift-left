@@ -1307,3 +1307,69 @@ func TestUnknownFlagExitsNonZero(t *testing.T) {
 		t.Error("an unknown flag must not exit 0")
 	}
 }
+
+// An install that reports success and governs nothing is the worst outcome
+// available to an onboarding flow: the config is correct, the exit code is 0,
+// and the first evidence of the gap is an empty dashboard, which reads as a
+// broken product rather than an unfinished rollout.
+//
+// Installing the Claude Code plugin does not activate it — its hooks turn on
+// through managed settings or the user enabling the plugin — so `init` has to
+// say which sessions it actually governs. Reported from a real install where
+// global activation appeared to do nothing.
+func TestInit_SaysWhichSessionsAreGoverned(t *testing.T) {
+	run := func(t *testing.T, extra ...string) string {
+		t.Helper()
+		home := t.TempDir()
+		t.Setenv("HOME", home)
+		t.Setenv("OPENBOX_CONFIG", filepath.Join(t.TempDir(), "openbox", "dev.json"))
+		t.Setenv("OPENBOX_AGENT_ID", "")
+		t.Setenv("OPENBOX_BACKEND_URL", "")
+
+		a, out, errb := testApp(map[string]string{
+			"OPENBOX_CONTROL_TOKEN": "obx_key_x",
+			"OPENBOX_BACKEND_URL":   "https://backend.acme",
+		})
+		store := secret.NewMemStore()
+		a.openStore = func(string) (secret.Store, error) { return store, nil }
+		a.newRegistrar = func(_, _, _ string) devinit.Registrar {
+			return &fakeReg{reg: &backend.Registration{AgentID: "agent-123", DID: "did:aip:x", APIKey: "obx_test_k", PrivateKey: "c2VlZA=="}}
+		}
+		args := append([]string{"init", "--provider", "claude-code", "--org", "acme"}, extra...)
+		if code := a.run(args); code != exitOK {
+			t.Fatalf("init exit = %d; stderr=%q", code, errb.String())
+		}
+		return out.String()
+	}
+
+	t.Run("without --local-hooks, says nothing is governed yet", func(t *testing.T) {
+		got := run(t)
+		if !strings.Contains(got, "NO SESSIONS ARE GOVERNED YET") {
+			t.Errorf("a plain init must say it governs nothing yet; got:\n%s", got)
+		}
+		// And it must name both ways out, not just leave the user stuck.
+		for _, want := range []string{"managed settings", "--local-hooks ."} {
+			if !strings.Contains(got, want) {
+				t.Errorf("missing the remedy %q; got:\n%s", want, got)
+			}
+		}
+	})
+
+	t.Run("with --local-hooks, names the scope and its limit", func(t *testing.T) {
+		got := run(t, "--local-hooks", ".")
+		if !strings.Contains(got, "governed now") {
+			t.Errorf("--local-hooks must confirm this project is governed; got:\n%s", got)
+		}
+		if !strings.Contains(got, "settings.local.json") {
+			t.Errorf("say WHERE the hooks were written so it can be checked; got:\n%s", got)
+		}
+		// The limit matters as much as the scope: a developer who thinks this
+		// covers every project has a false picture of their own coverage.
+		if !strings.Contains(got, "Sessions elsewhere are NOT governed") {
+			t.Errorf("--local-hooks must state what it does NOT cover; got:\n%s", got)
+		}
+		if strings.Contains(got, "NO SESSIONS ARE GOVERNED YET") {
+			t.Errorf("contradictory output: claims both governed and ungoverned:\n%s", got)
+		}
+	})
+}

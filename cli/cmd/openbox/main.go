@@ -13,6 +13,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
+
 	"github.com/openbox-ai/openbox-shift-left/adapters/common/devconfig"
 	obgit "github.com/openbox-ai/openbox-shift-left/adapters/common/git"
 	"github.com/openbox-ai/openbox-shift-left/adapters/common/hookflow"
@@ -417,6 +419,9 @@ func (a *app) runDevInit(args []string) int {
 		if _, err := devinit.Run(context.Background(), o, d); err != nil {
 			return a.errorf("%v", err)
 		}
+		// Whether the plan governs anything is part of the plan, and dry-run is
+		// where a careful operator looks before committing to it.
+		a.printGovernedScope(o)
 		return exitOK
 	}
 
@@ -505,7 +510,41 @@ func (a *app) runDevInit(args []string) int {
 	if o.Enforce == nil || !*o.Enforce {
 		fmt.Fprintf(a.stdout, "  mode: OBSERVE — telemetry and lineage only. Re-run with --enforce to gate tool calls.\n")
 	}
+	a.printGovernedScope(o)
 	return exitOK
+}
+
+// printGovernedScope closes init by saying which sessions this install actually
+// governs.
+//
+// Installing a plugin is not activating it. The Claude Code plugin's hooks turn
+// on through managed settings or the user enabling the plugin globally, so a
+// plain `init` writes a correct config, reports success, and gates nothing until
+// someone takes that separate step. Silence there is the worst available
+// outcome: the install looks finished, no session is governed, and the first
+// evidence is an empty dashboard that reads as a broken product rather than an
+// unfinished rollout.
+//
+// Only the Claude Code adapter implements --local-hooks. Codex activation is a
+// trust step inside Codex itself and already has its own note above; Cursor has
+// no adapter yet.
+func (a *app) printGovernedScope(o devinit.Options) {
+	if o.Provider != "claude-code" {
+		return
+	}
+	if o.LocalHooksDir != "" {
+		settings := filepath.Join(o.LocalHooksDir, ".claude", "settings.local.json")
+		if abs, err := filepath.Abs(settings); err == nil {
+			settings = abs
+		}
+		fmt.Fprintf(a.stdout, "  scope: sessions started in this project are governed now, via %s\n", settings)
+		fmt.Fprintf(a.stdout, "         Sessions elsewhere are NOT governed. Use managed settings for a real rollout.\n")
+		return
+	}
+	fmt.Fprintf(a.stdout, "  scope: NO SESSIONS ARE GOVERNED YET — the plugin is installed but not activated.\n")
+	fmt.Fprintf(a.stdout, "         Activate it org-wide with managed settings (deploy/managed/), or enable the\n")
+	fmt.Fprintf(a.stdout, "         plugin in Claude Code. To govern just this project now, re-run init with\n")
+	fmt.Fprintf(a.stdout, "         --local-hooks .\n")
 }
 
 func (a *app) env(key, def string) string {
