@@ -40,6 +40,20 @@ type Tier2 struct {
 	// NewClient builds the control-plane transport for the escalation and for
 	// the approval hold that can follow it.
 	NewClient func(*log.Logger) (Governor, error)
+
+	// OnDelivered, when set, is called once the escalation's POST has returned
+	// without a transport error — the point at which core has STORED this
+	// event. A caller holding an observe copy of the same event uses it to drop
+	// that copy: the two derive one event_id by design, core does not dedupe
+	// developer events on it, so a second copy is a second stored row and a
+	// second Merkle leaf for one real tool call.
+	//
+	// It is keyed on transport success, deliberately, NOT on the verdict. An
+	// evaluation that came back unusable (Tier2FailOpen "no verdict") or one
+	// that came back REQUIRE_APPROVAL and led to a hold was still delivered and
+	// still stored, so the observe copy is redundant in those cases too. Keying
+	// it on the decision instead would miss both.
+	OnDelivered func()
 }
 
 // Governor is the control-plane transport the enforce path needs: escalate an
@@ -104,6 +118,12 @@ func (t Tier2) run(cctx context.Context, logger *log.Logger, ev client.DevEvent)
 	if err != nil {
 		logger.Printf("tier-2 escalation degrading (emit): %v", err)
 		return Tier2FailOpen("tier-2 escalation undelivered")
+	}
+	// The event is now stored server-side, whatever the verdict turns out to be.
+	// Announce that before mapping the verdict, so no return path below can skip
+	// it and leave a caller holding a duplicate observe copy.
+	if t.OnDelivered != nil {
+		t.OnDelivered()
 	}
 	return Tier2Decision(eval)
 }

@@ -205,6 +205,30 @@ fi
 tb_session_wait 90 || { release_pending; tb_session_wait 30; }
 settle
 
+# ── G · an escalated call is still ONE activity ───────────────────────────────
+# The gap this closes: 20-capture asserts started == completed, but it runs in
+# observe mode, where nothing escalates. On the enforce path a gated PreToolUse
+# reaches core twice — the Tier-2 escalation POSTs the event synchronously and the
+# observe copy is spooled and flushed — carrying ONE event_id both times. Core
+# does not dedupe developer events on that id, so for a while every escalated
+# call stored two ActivityStarted rows and two Merkle leaves, and no assertion
+# anywhere looked. 20-capture's orphan check runs one way only (a completed half
+# without a started one), so a DUPLICATED started half passed it unseen.
+#
+# Scoped to this file because this is where real escalations happen (the sessions
+# above produced tier2:evaluate verdicts and filed approvals).
+tb_step "G · no activity_id is stored more than once per half"
+dupes="$(tb_val "select count(*) from (
+	select activity_id, event_type from governance_events
+	where activity_id is not null and event_type like 'Activity%'
+	group by activity_id, event_type having count(*) > 1) d;")"
+assert_eq "no duplicated activity half" 0 "$dupes"
+if [ "${dupes:-0}" != "0" ]; then
+	tb_note "duplicated: $(tb_sql "select activity_id||' '||event_type||' x'||count(*)
+		from governance_events where activity_id is not null and event_type like 'Activity%'
+		group by activity_id, event_type having count(*) > 1 limit 5;" | tr '\n' ' ')"
+fi
+
 # ── restore ───────────────────────────────────────────────────────────────────
 tb_step "leave the agent ungated for the later phases"
 # Deactivating alone leaves the compiled bundle in place, so publish an

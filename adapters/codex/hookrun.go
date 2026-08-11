@@ -168,11 +168,6 @@ func RunHook(sub string, stdin io.Reader, stdout io.Writer, logger *log.Logger) 
 		ad.Mapper.Posture = &posture
 	}
 
-	if _, err := ad.Observe(hook, ev); err != nil {
-		logger.Printf("spool %s event: %v", hook, err)
-		// fall through — SessionEnd still tries to flush what is already spooled
-	}
-
 	// Near-real-time delivery: with the event spooled, nudge a detached,
 	// debounced flusher for this session so telemetry reaches core mid-session
 	// instead of waiting for SessionEnd (which stays the completeness safety
@@ -181,8 +176,41 @@ func RunHook(sub string, stdin io.Reader, stdout io.Writer, logger *log.Logger) 
 	// once per debounce window, a fork+exec — no network I/O in this process
 	// and no wait on the child, so the delay it can add to the PreToolUse gate
 	// below is local and bounded (INV-3/INV-3b).
-	if hook != HookSessionEnd {
+	nudgeFlush := func() {
 		hookflow.RealtimeTrigger{Spool: ad.Spool, Provider: "codex"}.Maybe(logger, ev.SessionID)
+	}
+
+	// Resolved ONCE and reused by the gate below. The two must agree: deciding
+	// to defer the observe copy here and then not running the gate would drop
+	// the event.
+	gated := hook == HookPreToolUse && ResolveEnforce()
+
+	// The observe copy. On a gated hook it is DEFERRED into the gate below,
+	// which spools it only if the Tier-2 escalation did not already deliver the
+	// identical event — see EnforceGate.SpoolObserve for why writing it here
+	// stored every escalated ActivityStarted twice. The duration stash is still
+	// threaded now (RecordDeferred): it has to be written before the tool runs,
+	// and suppressing a redundant spool copy must not cost the call its
+	// duration_ms.
+	var spoolObserve func()
+	if gated {
+		if devEv, ok := ad.Mapper.Map(hook, ev); ok {
+			appendObserve := ad.RecordDeferred(devEv)
+			spoolObserve = func() {
+				if err := appendObserve(); err != nil {
+					logger.Printf("spool %s event: %v", hook, err)
+				}
+				nudgeFlush()
+			}
+		}
+	} else {
+		if _, err := ad.Observe(hook, ev); err != nil {
+			logger.Printf("spool %s event: %v", hook, err)
+			// fall through — SessionEnd still tries to flush what is already spooled
+		}
+		if hook != HookSessionEnd {
+			nudgeFlush()
+		}
 	}
 
 	// In enforce mode the PreToolUse hook is a synchronous pre-execution gate:
@@ -196,11 +224,12 @@ func RunHook(sub string, stdin io.Reader, stdout io.Writer, logger *log.Logger) 
 	// every provider. What this adapter supplies is how to read its own hook
 	// event (enforceTarget), how it spells a response (contract), and its hook
 	// budget (tier2).
-	if hook == HookPreToolUse && ResolveEnforce() {
+	if gated {
 		g := hookflow.EnforceGate{
-			Contract: contract,
-			Tier2:    tier2,
-			Record:   func(dec decision.Decision, res hookflow.ApplyResult) { recordEnforcement(logger, ev, dec, res) },
+			Contract:     contract,
+			Tier2:        tier2,
+			Record:       func(dec decision.Decision, res hookflow.ApplyResult) { recordEnforcement(logger, ev, dec, res) },
+			SpoolObserve: spoolObserve,
 		}
 		g.Run(context.Background(), logger, stdout, enforceTarget{id: id, mapper: ad.Mapper, ev: ev})
 		return

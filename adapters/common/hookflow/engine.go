@@ -62,6 +62,27 @@ func (e *Engine) Record(ev client.DevEvent) error {
 	return e.Spool.Append(ev)
 }
 
+// RecordDeferred is Record split at the point where delivery matters: it threads
+// the duration NOW and returns the spool write as a closure, for a caller that
+// does not yet know whether this same event is about to be delivered
+// synchronously.
+//
+// The split is not arbitrary. The two halves have different dependencies:
+//
+//	duration stash — must be written before the tool runs, and says nothing
+//	                 about delivery. Always runs.
+//	spool append   — is a SECOND copy of the event once the Tier-2 escalation
+//	                 has POSTed the identical one, because core does not dedupe
+//	                 developer events on their id. Runs only if T2 did not.
+//
+// Threading the stash unconditionally is what keeps duration_ms working for
+// escalated calls: the PostToolUse half recovers the start time from the stash,
+// so suppressing the spool copy must not suppress the stash write with it.
+func (e *Engine) RecordDeferred(ev client.DevEvent) func() error {
+	e.ThreadDuration(&ev)
+	return func() error { return e.Spool.Append(ev) }
+}
+
 // ThreadDuration records/recovers a tool call's start time across the separate
 // Pre/PostToolUse hook processes (DurationStash), mutating only ev.StartedAt on
 // the completed (ToolResult) event — which the client turns into the completed
