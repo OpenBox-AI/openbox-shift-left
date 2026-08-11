@@ -116,7 +116,7 @@ func TestWriteConfig_KeepsFieldsTheUpdateCannotExpress(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "dev.json")
 	seed := DevConfig{
 		DID:              "did:aip:x",
-		Finops:           true,
+		Finops:           boolPtr(true),
 		FailClosed:       true,
 		Tier2TimeoutMS:   2500,
 		SecretFile:       "secrets-e2e.json",
@@ -136,7 +136,7 @@ func TestWriteConfig_KeepsFieldsTheUpdateCannotExpress(t *testing.T) {
 	}
 
 	cfg := mustLoad(t, path)
-	if !cfg.Finops || !cfg.FailClosed || cfg.Tier2TimeoutMS != 2500 ||
+	if cfg.Finops == nil || !*cfg.Finops || !cfg.FailClosed || cfg.Tier2TimeoutMS != 2500 ||
 		cfg.SecretFile != "secrets-e2e.json" || cfg.OrgSigningPubKey != "Zm9vYmFy" ||
 		cfg.SecretDetection == nil || *cfg.SecretDetection {
 		t.Errorf("hand-tuned settings did not survive a re-init: %+v", cfg)

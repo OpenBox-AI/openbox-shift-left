@@ -162,7 +162,13 @@ func postureFields() []struct {
 		// endpoint is not assurance — it is a setting the org hopes is on.
 		{"require_verified_bundle", func(c DevConfig) *bool { return c.RequireVerifiedBundle }, false, EnvRequireVerified,
 			func(p *Posture) *bool { return &p.RequireVerifiedBundle }},
-		{"finops", func(c DevConfig) *bool { b := c.Finops; return &b }, false, EnvFinops,
+		// Reported because it is an EGRESS posture, and default-on since ADR-0014:
+		// with it on, four token counts and a model id leave the machine per turn.
+		// The posture record is what lets an auditor tell, after the fact, whether a
+		// given session captured — which is what makes the default defensible.
+		// Pass-through (not `&b`) so an absent field resolves to the default; see
+		// DevConfig.Finops for why the plain-bool version made the flip a no-op.
+		{"finops", func(c DevConfig) *bool { return c.Finops }, true, EnvFinops,
 			func(p *Posture) *bool { return &p.Finops }},
 		// Reported because it decides WHEN a session's evidence exists at all:
 		// off, nothing about a running session is queryable until it ends, so a

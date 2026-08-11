@@ -161,6 +161,87 @@ func TestResolveContentCapture_DefaultOn(t *testing.T) {
 	}
 }
 
+// TestResolveFinops_DefaultOn pins the ADR-0014 posture flip, and it pins the
+// ABSENT-FIELD case specifically — which is the case the old implementation could
+// not express. `Finops` was a plain bool whose resolver returned `&b`
+// unconditionally, so resolveBool never reached its default: an absent `finops`
+// key and an explicit `finops:false` were the same input, and moving the default
+// would have changed nothing for every config file that already existed while
+// pinning every absent field to false forever.
+//
+// So the first assertion here is not a formality. It is the one that would have
+// failed before `Finops` became a *bool, and the reason a future flip in either
+// direction has to be a deliberate edit to this test.
+func TestResolveFinops_DefaultOn(t *testing.T) {
+	// Absent config field + no env → ON. Usage capture is an egress posture, so
+	// this is the assertion that says "an unconfigured developer machine sends
+	// token counts and a model id" out loud.
+	isolateConfig(t)
+	if !ResolveFinops() {
+		t.Error("ResolveFinops default must be ON (absent config field)")
+	}
+
+	// A config file that exists but says nothing about finops is still the absent
+	// case — the distinction the *bool exists to draw.
+	cfgPath := filepath.Join(t.TempDir(), "dev.json")
+	_ = os.WriteFile(cfgPath, []byte(`{"developer_did":"`+testDID+`"}`), 0o600)
+	t.Setenv(EnvConfigPath, cfgPath)
+	if !ResolveFinops() {
+		t.Error("a config file with no finops key must resolve to the default (ON), not to false")
+	}
+
+	// Explicit managed-config opt-out.
+	_ = os.WriteFile(cfgPath, []byte(`{"developer_did":"`+testDID+`","finops":false}`), 0o600)
+	if ResolveFinops() {
+		t.Error("explicit finops:false must opt out")
+	}
+
+	// Env wins over config, in both directions.
+	t.Setenv(EnvFinops, "1")
+	if !ResolveFinops() {
+		t.Error("OPENBOX_FINOPS=1 must override config false")
+	}
+	_ = os.WriteFile(cfgPath, []byte(`{"developer_did":"`+testDID+`","finops":true}`), 0o600)
+	t.Setenv(EnvFinops, "0")
+	if ResolveFinops() {
+		t.Error("OPENBOX_FINOPS=0 must force OFF")
+	}
+}
+
+// The posture record must report the SAME state the resolver does, or the
+// evidence an auditor reads contradicts what the session actually did — which is
+// worse than having no evidence, because it is trusted.
+func TestPostureReportsEffectiveFinopsState(t *testing.T) {
+	isolateConfig(t)
+	if got := EffectivePosture().Finops; got != ResolveFinops() {
+		t.Errorf("posture finops = %t but ResolveFinops() = %t (absent config)", got, ResolveFinops())
+	}
+	if !EffectivePosture().Finops {
+		t.Error("posture must record finops ON at the default posture")
+	}
+
+	cfgPath := filepath.Join(t.TempDir(), "dev.json")
+	_ = os.WriteFile(cfgPath, []byte(`{"developer_did":"`+testDID+`","finops":false}`), 0o600)
+	t.Setenv(EnvConfigPath, cfgPath)
+	p := EffectivePosture()
+	if p.Finops {
+		t.Error("posture must record finops OFF when the config opts out")
+	}
+	if p.Finops != ResolveFinops() {
+		t.Errorf("posture finops = %t but ResolveFinops() = %t (config opt-out)", p.Finops, ResolveFinops())
+	}
+	// And the flag is reported in the generic map the endpoint/doctor read, not
+	// only on the struct.
+	if got, ok := p.Flags()["finops"]; !ok || got {
+		t.Errorf("Flags()[finops] = (%t, present=%t), want (false, true)", got, ok)
+	}
+
+	t.Setenv(EnvFinops, "1")
+	if !EffectivePosture().Finops {
+		t.Error("posture must follow the env override")
+	}
+}
+
 func TestResolveRealtime_DefaultOn(t *testing.T) {
 	// Default ON: absent config field + no env → real-time delivery enabled.
 	isolateConfig(t)

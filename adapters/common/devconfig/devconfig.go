@@ -89,9 +89,22 @@ type DevConfig struct {
 	// ContentCapture is the org content posture. Absent means the default,
 	// which is on (reverses metadata-only-by-default).
 	ContentCapture *bool `json:"content_capture,omitempty"`
-	// Finops enables opt-in transcript usage extraction. Default false;
-	// deliberately separate from ContentCapture (numbers-only projection).
-	Finops bool `json:"finops,omitempty"`
+	// Finops gates per-turn usage capture: token counts AND the model id that
+	// spent them (ADR-0014 — the name predates the model binding and is kept
+	// because renaming a config key is a user-visible break; read it as "usage
+	// and model capture", not "token counts only").
+	//
+	// A POINTER, and that is load-bearing rather than stylistic. It was a plain
+	// bool whose resolver returned `&b` unconditionally, so `resolveBool` never
+	// reached its default and an absent `finops` field was indistinguishable from
+	// an explicit `false`. Flipping the default with a plain bool would have
+	// produced a flip that silently did nothing for every existing config file —
+	// and worse, pinned every absent field to false forever. Tri-state is what
+	// makes "absent means the default" true. Compare ContentCapture above.
+	//
+	// Default ON, as of the same reasoning that flipped content capture: absent
+	// means on; `finops:false` or OPENBOX_FINOPS=0 opts out.
+	Finops *bool `json:"finops,omitempty"`
 	// InstallGitHook enables ambient install of the prepare-commit-msg
 	// hook on SessionStart. Default false — it modifies a repo's
 	// .git/hooks.
@@ -257,10 +270,25 @@ func ResolveInstallGitHook() bool {
 	return resolveBool("install_git_hook", func(c DevConfig) *bool { b := c.InstallGitHook; return &b }, false, EnvInstallGitHook)
 }
 
-// ResolveFinops reports whether opt-in transcript usage extraction is
-// enabled. Default false: transcript_path is never opened with it unset.
+// ResolveFinops reports whether usage capture is enabled — per-turn token counts
+// and the model id that spent them (ADR-0014).
+//
+// **Default ON.** An absent `finops` field resolves to on, mirroring the
+// 2026-07-15 content-capture reversal; `finops:false` in managed config or
+// OPENBOX_FINOPS=0 opts out, and the env wins either way. With it off,
+// transcript_path is never opened, no turn event is emitted, and no model id
+// reaches the wire beyond the one SessionStarted already carried.
+//
+// The default is an EGRESS-POSTURE decision, not a convenience: four integers and
+// a model id per turn now leave developer machines for orgs that never asked. It
+// gets what content capture got — a documented default, two opt-outs, and the
+// effective state recorded on SessionStarted as posture evidence, so an auditor
+// can tell after the fact which sessions captured. See docs/data-and-privacy.md.
+//
+// Before this was a *bool the flip was impossible to make correctly — see the
+// Finops field comment.
 func ResolveFinops() bool {
-	return resolveBool("finops", func(c DevConfig) *bool { b := c.Finops; return &b }, false, EnvFinops)
+	return resolveBool("finops", func(c DevConfig) *bool { return c.Finops }, true, EnvFinops)
 }
 
 // ResolveContentCapture reports the org content posture: config
