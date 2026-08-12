@@ -23,7 +23,7 @@ if [ "${pending:-0}" -gt 0 ] && [ -n "${OPENBOX_CONTROL_TOKEN:-}" ]; then
 	done
 fi
 assert_eq "no request is left undecided" 0 "$(tb_val "select count(*) from governance_events where approval_expired_at is not null and decided_at is null and agent_id='${AGENT:-none}';")"
-rm -f "$XDG_CONFIG_HOME/openbox/pending-approvals/"*.json 2>/dev/null
+rm -f "$OPENBOX_PENDING_APPROVAL_DIR/"*.json 2>/dev/null
 # A watcher from the last session may still be inside its grace window; that is
 # not a leak, so give it a moment before calling it one.
 #

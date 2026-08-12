@@ -81,7 +81,7 @@ func TestValidate_MapsNon200(t *testing.T) {
 				t.Errorf("ValidateError.Status = %d, want %d", ve.Status, tc.status)
 			}
 			// INV-1: the key/seed must never appear in the diagnostic.
-			if strings.Contains(err.Error(), testAPIKey) || strings.Contains(err.Error(), testSeedB64) {
+			if strings.Contains(err.Error(), testAPIKey) || strings.Contains(err.Error(), testPrivateKeyB64) {
 				t.Error("INV-1 violation: secret material leaked into the validate diagnostic")
 			}
 		})

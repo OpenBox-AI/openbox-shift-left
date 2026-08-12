@@ -153,10 +153,21 @@ func TestEffectivePosture_MatchesResolvers(t *testing.T) {
 	if p.Flags()["require_verified_bundle"] != p.RequireVerifiedBundle {
 		t.Error("Flags disagrees with the resolved posture — doctor would report a control that is not in force")
 	}
-	// The documented defaults: observe, with secret detection and content
-	// capture on (content capture default-ON is brian's 2026-07-15 decision).
-	if p.Enforce {
-		t.Error("enforce must default off — enforcement never turns on by omission (INV-3)")
+	// The documented defaults: ENFORCE (ADR-0016), with secret detection and
+	// content capture on (content capture default-ON is the 2026-07-15 decision).
+	//
+	// This assertion used to read "enforce must default off — enforcement never
+	// turns on by omission (INV-3)". ADR-0016 reversed the default deliberately,
+	// and the INV-3 property it cited is preserved elsewhere and unchanged: a
+	// FAILURE never blocks a tool call, because fail_closed defaults off and the
+	// gate fails open on error. "Never enforce by omission" was a default, not an
+	// invariant; "never BLOCK by failure" is the invariant, and it still holds —
+	// see the fail_closed assertion below.
+	if !p.Enforce {
+		t.Error("enforce must default ON (ADR-0016)")
+	}
+	if p.FailClosed {
+		t.Error("fail_closed must stay off — enforce-by-default is only defensible while an outage cannot block a developer")
 	}
 	if !p.SecretDetection || !p.ContentCapture {
 		t.Errorf("secret_detection and content_capture default on, got %+v", p)

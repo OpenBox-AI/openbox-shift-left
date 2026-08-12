@@ -19,15 +19,15 @@ import (
 // the commit stays unattested, which is exactly the pre-E8 behaviour rather than
 // an error a developer has to deal with.
 func attestContext() (obgit.AttestContext, bool) {
-	creds, err := devconfig.ResolveCredentials(devconfig.OSSecretLookup)
-	if err != nil || creds.DID == "" || creds.SeedB64 == "" {
+	creds, err := devconfig.ResolveCredentials()
+	if err != nil || creds.DID == "" || creds.PrivateKeyB64 == "" {
 		return obgit.AttestContext{}, false
 	}
 
 	ctx := obgit.AttestContext{
-		DID:     creds.DID,
-		SeedB64: creds.SeedB64,
-		Adapter: "openbox-cli",
+		DID:           creds.DID,
+		PrivateKeyB64: creds.PrivateKeyB64,
+		Adapter:       "openbox-cli",
 		// The ambient Codex thread id, so a commit made in a forked thread can
 		// still be joined to the root session's events (E8-S4).
 		ThreadID: os.Getenv(obgit.EnvCodexThreadID),

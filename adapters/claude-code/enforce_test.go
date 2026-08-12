@@ -62,10 +62,17 @@ func TestResolveEnforce(t *testing.T) {
 	t.Setenv(envConfigPath, cfgPath)
 	os.Unsetenv(envEnforce) // env genuinely absent → config decides
 
-	// Default: no config field, no env → false (Phase-1 observe; never enforce by accident).
+	// Default: no config field, no env → TRUE (ADR-0016 reversed the observe
+	// default). The adapter resolves through devconfig, so this pins that the
+	// facade did not keep a stale default of its own.
 	write(`{"developer_did":"` + testDID + `"}`)
+	if !ResolveEnforce() {
+		t.Error("an absent enforce field must resolve to ON (ADR-0016)")
+	}
+	// An explicit false still opts out.
+	write(`{"developer_did":"` + testDID + `","enforce":false}`)
 	if ResolveEnforce() {
-		t.Error("default should be false (observe)")
+		t.Error("enforce:false in config must opt out")
 	}
 
 	// Config enables enforce mode.

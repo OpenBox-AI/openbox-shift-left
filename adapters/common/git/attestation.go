@@ -100,11 +100,11 @@ type AttestationInput struct {
 	BundleSHA256   string
 	Adapter        string
 	DID            string
-	// SeedB64 is the agent's Ed25519 seed (32 bytes, base64) — the same seed AIP
+	// PrivateKeyB64 is the agent's Ed25519 seed (32 bytes, base64) — the same seed AIP
 	// request signing uses, so no new key material is introduced and the public
 	// half is already KMS-resident under the DID alias.
-	SeedB64 string
-	Now     func() time.Time
+	PrivateKeyB64 string
+	Now           func() time.Time
 }
 
 // Attest builds and signs an attestation.
@@ -125,7 +125,7 @@ func Attest(in AttestationInput) (*Attestation, error) {
 	if !strings.HasPrefix(in.DID, "did:aip:") {
 		return nil, fmt.Errorf("attestation needs the agent DID")
 	}
-	seed, err := base64.StdEncoding.DecodeString(strings.TrimSpace(in.SeedB64))
+	seed, err := base64.StdEncoding.DecodeString(strings.TrimSpace(in.PrivateKeyB64))
 	if err != nil || len(seed) != ed25519.SeedSize {
 		return nil, fmt.Errorf("attestation needs a %d-byte Ed25519 seed", ed25519.SeedSize)
 	}

@@ -30,12 +30,13 @@ TB_DIR="$(cd "$(dirname "$0")" && pwd)"
 [ -x "$TB_BIN" ] || tb_fatal "no binary at $TB_BIN — run 10-onboard.sh first"
 [ -n "${OPENBOX_CONTROL_TOKEN:-}" ] || tb_fatal "no control token — run ./testbed/env.sh mint"
 
-AUDIT="$XDG_CONFIG_HOME/openbox/enforcements.jsonl"
+AUDIT="$OPENBOX_ENFORCEMENT_FILE"
 tb_audit_size() { [ -r "$AUDIT" ] && wc -c <"$AUDIT" | tr -d ' ' || echo 0; }
 tb_audit_since() { tail -c "+$(($1 + 1))" "$AUDIT" 2>/dev/null; }
 
-DEV_CONFIG="$XDG_CONFIG_HOME/openbox/dev.json"
-APPROVER_CONFIG="$XDG_CONFIG_HOME/openbox/approver.json"
+# Both configs live under OPENBOX_HOME since ADR-0015.
+DEV_CONFIG="$OPENBOX_HOME/dev.json"
+APPROVER_CONFIG="$OPENBOX_HOME/approver.json"
 
 tb_step "install an approver (no agent, no hooks)"
 rm -f "$APPROVER_CONFIG"
@@ -46,8 +47,8 @@ agents_before="$(tb_count "agents where organization_id='$OPENBOX_ORG_ID'")"
 	--org "$OPENBOX_ORG_ID" \
 	--backend-url "$OPENBOX_BACKEND_URL" \
 	--host claude-code \
-	--envelope "$XDG_CONFIG_HOME/openbox/approver-envelope.json" \
-	--secret-backend file >"$TB_STATE/approver-init.out" 2>&1
+	--envelope "$TB_STATE/state/approver-envelope.json" \
+	>"$TB_STATE/approver-init.out" 2>&1
 assert_eq "approver init succeeded" 0 "$?"
 out="$(cat "$TB_STATE/approver-init.out")"
 assert_contains "it verified the credential can read the queue" "$out" "reads the approval queue"
@@ -61,8 +62,16 @@ assert_eq "the queue is recorded" "$OPENBOX_ORG_ID" "$(tb_json "$cfg" org_id)"
 assert_eq "the backend is recorded" "$OPENBOX_BACKEND_URL" "$(tb_json "$cfg" backend_url)"
 assert_eq "the host is recorded" "claude-code" "$(tb_json "$cfg" host)"
 assert_eq "it decides nothing until told to" true "$(tb_json "$cfg" shadow)"
-assert_nonempty "the credential is referenced, not inlined" "$(tb_json "$cfg" control_token_account)"
-assert_absent "the token itself is not in the file (INV-1)" "$cfg" "${OPENBOX_CONTROL_TOKEN:0:16}"
+# The token no longer has a coordinate to reference: ADR-0015 deleted the secret
+# store, so it is written to ~/.openbox/.env and approver.json stays
+# credential-free. Both halves are asserted, because "no coordinate" must not
+# quietly become "no credential anywhere".
+assert_absent "the token itself is not in approver.json (INV-1)" "$cfg" "${OPENBOX_CONTROL_TOKEN:0:16}"
+assert_contains "the token went to the credential file" "$(cat "$TB_ENV_FILE" 2>/dev/null)" "OPENBOX_CONTROL_TOKEN="
+# It is an ORGANIZATION key with fleet-wide create/rotate authority, in plaintext.
+# The install must say so, because it is a strictly larger exposure than the agent
+# signing key and easy to miss (ADR-0015).
+assert_contains "the install warns about the org key's blast radius" "$out" "ORGANIZATION key"
 assert_eq "the config is not world-readable" 600 "$(stat -c '%a' "$APPROVER_CONFIG")"
 
 # An approver is not a governed runtime: it registers nothing and touches no
@@ -88,8 +97,8 @@ tb_step "the same-agent guard (the default refusal)"
 # with one pass over a queue, before anything is given authority.
 TB_AGENT="$(tb_state_get agent_id)"
 [ -n "$TB_AGENT" ] || tb_fatal "no developer agent in state — run 10-onboard.sh first"
-ENVELOPE="$XDG_CONFIG_HOME/openbox/approver-envelope.json"
-EVIDENCE="$XDG_CONFIG_HOME/openbox/approvals-auto.jsonl"
+ENVELOPE="$TB_STATE/state/approver-envelope.json"
+EVIDENCE="$OPENBOX_HOME/approvals-auto.jsonl"
 run="$(date +%s)"
 
 cat >"$ENVELOPE" <<JSON

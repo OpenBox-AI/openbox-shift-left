@@ -101,9 +101,17 @@ func TestResolveEnforce_Codex(t *testing.T) {
 	t.Setenv(devconfig.EnvConfigPath, cfgPath)
 	os.Unsetenv(devconfig.EnvEnforce)
 
+	// Default ON (ADR-0016 reversed the observe default). This adapter resolves
+	// through devconfig, so the assertion pins that its facade kept no stale
+	// default of its own.
 	write(`{"developer_did":"` + testDID + `"}`)
+	if !ResolveEnforce() {
+		t.Error("an absent enforce field must resolve to ON (ADR-0016)")
+	}
+	// An explicit false still opts out — the property the *bool change bought.
+	write(`{"developer_did":"` + testDID + `","enforce":false}`)
 	if ResolveEnforce() {
-		t.Error("default should be false (observe)")
+		t.Error("enforce:false in config must opt out")
 	}
 	write(`{"developer_did":"` + testDID + `","enforce":true}`)
 	if !ResolveEnforce() {

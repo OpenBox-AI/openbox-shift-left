@@ -17,17 +17,14 @@ import "github.com/openbox-ai/openbox-shift-left/adapters/common/devconfig"
 func ConfigUpdate(ref CredentialRef) devconfig.Update {
 	installGitHook := ref.InstallGitHook
 	return devconfig.Update{
-		BaseURL:           ref.BaseURL,
-		DID:               ref.DID,
-		SecretService:     ref.SecretService,
-		APIKeyAccount:     ref.APIKeyAccount,
-		PrivateKeyAccount: ref.PrivateKeyAccount,
-		AgentID:           ref.AgentID,    // for `dev sync` / staleness
-		BackendURL:        ref.BackendURL, // control-plane base for the policy read
-		ContentCapture:    ref.ContentCapture,
-		InstallGitHook:    &installGitHook,
-		Enforce:           ref.Enforce,
-		Tier2:             ref.Tier2,
-		Findings:          ref.Findings,
+		BaseURL:        ref.BaseURL,
+		DID:            ref.DID,
+		AgentID:        ref.AgentID,    // for `dev sync` / staleness
+		BackendURL:     ref.BackendURL, // control-plane base for the policy read
+		ContentCapture: ref.ContentCapture,
+		InstallGitHook: &installGitHook,
+		Enforce:        ref.Enforce,
+		Tier2:          ref.Tier2,
+		Findings:       ref.Findings,
 	}
 }

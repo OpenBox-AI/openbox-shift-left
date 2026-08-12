@@ -25,7 +25,9 @@ tb_session() { # <prompt> [allowed-tools] [extra claude args…]
 		args+=(--mcp-config "$TB_MCP_CONFIG" --strict-mcp-config)
 	fi
 	local out
-	out="$(cd "$TB_PROJECT" && claude "${args[@]}" "$@" 2>"$TB_STATE/last-session.err")" || {
+	# TB_SESSION_DIR lets a phase drive a session from somewhere other than the
+	# governed project — which is how the ungoverned-directory assertion works.
+	out="$(cd "${TB_SESSION_DIR:-$TB_PROJECT}" && claude "${args[@]}" "$@" 2>"$TB_STATE/last-session.err")" || {
 		printf ''
 		return 0
 	}

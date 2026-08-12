@@ -67,6 +67,23 @@ jobs:
         # that pin the INV-3 hook contract (exit 0, empty stdout).
         run: go test -race $MODS
 
+      - name: Cross-compile for Windows
+        # ADR-0015 made Windows a supported target for the first time: credentials
+        # are a plaintext file, so there is no platform secret-store subprocess to
+        # port. Nothing in CI RUNS on Windows, and a cross-compile is not runtime
+        # verification — but it catches the most likely regression class by far, a
+        # stray unix-only call (syscall.Umask, /dev/null, os/exec of `security`),
+        # and it costs one step with no extra runner.
+        #
+        # Everything about Windows beyond "it compiles" is in phase 8's manual
+        # checklist and stated as unverified in the docs. Do not let this step be
+        # read as more than it is.
+        run: GOOS=windows GOARCH=amd64 go build $MODS
+
+      - name: Cross-compile for Linux arm64
+        # The other target a macOS/amd64-centric dev loop can silently break.
+        run: GOOS=linux GOARCH=arm64 go build $MODS
+
       - name: Fuzz (short)
         # The rego-path parser and the secret redactor read attacker-adjacent
         # strings on the enforce path, where a panic is a crashed hook. A short

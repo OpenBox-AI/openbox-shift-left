@@ -32,9 +32,9 @@ AGENT="$TB_AGENT"
 [ -n "$AGENT" ] || tb_fatal "no agent id in state — run 10-onboard.sh first"
 
 export OPENBOX_ENFORCE=1
-BUNDLE="$XDG_CONFIG_HOME/openbox/policy-bundle.json"
-AUDIT="$XDG_CONFIG_HOME/openbox/enforcements.jsonl"
-PENDING_DIR="$XDG_CONFIG_HOME/openbox/pending-approvals"
+BUNDLE="$OPENBOX_SIDECAR_BUNDLE"
+AUDIT="$OPENBOX_ENFORCEMENT_FILE"
+PENDING_DIR="$OPENBOX_PENDING_APPROVAL_DIR"
 
 # The escalation must come from the SERVER's verdict, so the local bundle stays
 # permissive: Tier-1 proceeds, Tier-2 escalates, core's policy gates.

@@ -118,7 +118,7 @@ answers 401 rather than connection-refused; core reachable; `governance-worker` 
 run on a half-dead stack is worse than no run.
 
 ### 10-onboard
-Real `openbox init --provider claude-code --enforce` against `http://localhost:3000`
+Real `openbox auth` then `openbox init --provider claude-code` (default scope, enforce by default) against `http://localhost:3000`
 (the only onboarding spelling — §8). Asserts: `agents` row with
 `agent_type=developer` and `signing_required=t`; config written; hooks installed
 **scoped to the testbed project only**; `openbox dev verify` succeeds;
@@ -332,7 +332,7 @@ smaller half of the autonomous-approver work.
 > dev` keeps only the commands that operate on an install that already exists,
 > `verify` and `sync`),
 > `--role approver` → `approver.json`, `devconfig.ConfigPathFor`, the install-time
-> permission probe, the credential in the secret store so `openbox approve` needs
+> permission probe, the credential in `~/.openbox/.env` so `openbox approve` needs
 > no environment, and `doctor`'s Identity section. Guarded by
 > `TestAdaptersNeverReadApproverConfig` (no adapter may name the approver config)
 > and exercised end to end by `70-approver-auto.sh`. What is **not** built is the
@@ -350,7 +350,7 @@ openbox init --role approver [--org …]                   # role=approver
 
 | Role | File | Read by |
 |---|---|---|
-| `dev` (default) | `~/.config/openbox/dev.json` (`adapters/common/devconfig/devconfig.go:164`) | every hook, every adapter, `doctor`, `dev sync` |
+| `dev` (default) | `~/.openbox/dev.json` (`adapters/common/devconfig/paths.go`) | every hook, every adapter, `doctor`, `dev sync` |
 | `approver` | `~/.config/openbox/approver.json` | `openbox approve` only |
 
 **Rules that keep this safe and cheap**
@@ -372,7 +372,7 @@ openbox init --role approver [--org …]                   # role=approver
    actually carries `manage:agent_session` — failing at init rather than at the first
    decision.
 4. **The control token stays out of argv** (INV-1). `openbox init --role approver` should put
-   it in the OS secret store the way `openbox init` does for the runtime key, so
+   it in `~/.openbox/.env` the way `openbox auth` does for the runtime key, so
    `openbox approve` stops requiring `OPENBOX_CONTROL_TOKEN` in every shell — env
    still overrides.
 5. **`approver.json` carries the approver's operating envelope**, so

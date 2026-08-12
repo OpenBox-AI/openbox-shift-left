@@ -34,13 +34,13 @@ type nopLogger struct{}
 
 func (nopLogger) Printf(string, ...any) {}
 
-// Config configures a Client. BaseURL, APIKey, DID, and SeedB64 are required;
+// Config configures a Client. BaseURL, APIKey, DID, and PrivateKeyB64 are required;
 // the rest default.
 type Config struct {
-	BaseURL string // openbox-core base, e.g. https://core.openbox.ai
-	APIKey  string // obx_(live|test)_… runtime key (INV-1)
-	DID     string // did:aip:… — the developer agent's DID (INV-7)
-	SeedB64 string // base64 raw 32-byte Ed25519 seed (INV-1)
+	BaseURL       string // openbox-core base, e.g. https://core.openbox.ai
+	APIKey        string // obx_(live|test)_… runtime key (INV-1)
+	DID           string // did:aip:… — the developer agent's DID (INV-7)
+	PrivateKeyB64 string // base64 raw 32-byte Ed25519 seed (INV-1)
 
 	// ContentCaptureEnabled is the org's content posture; default false
 	// strips content before egress (INV-2).
@@ -87,7 +87,7 @@ func New(cfg Config) (*Client, error) {
 	if cfg.APIKey == "" {
 		return nil, errors.New("client: APIKey (obx_ runtime key) is required")
 	}
-	sg, err := newSigner(cfg.DID, cfg.SeedB64)
+	sg, err := newSigner(cfg.DID, cfg.PrivateKeyB64)
 	if err != nil {
 		return nil, err
 	}

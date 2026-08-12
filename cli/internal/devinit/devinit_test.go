@@ -4,12 +4,15 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"unicode/utf8"
 
+	"github.com/openbox-ai/openbox-shift-left/adapters/common/devconfig"
 	"github.com/openbox-ai/openbox-shift-left/cli/internal/backend"
-	"github.com/openbox-ai/openbox-shift-left/cli/internal/secret"
 	"github.com/openbox-ai/openbox-shift-left/provider"
 )
 
@@ -60,18 +63,33 @@ func (f *fakeInstaller) Install(r provider.CredentialRef) error {
 	return nil
 }
 
-// failStore fails Set for accounts containing failAcct; everything else defers
-// to the embedded MemStore.
-type failStore struct {
-	*secret.MemStore
-	failAcct string
+// isolateHome points OPENBOX_HOME at a temp dir so a test writes its credential
+// file there instead of the developer's real ~/.openbox.
+//
+// This replaced an injected secret.Store. With credentials in a plaintext file
+// the test can exercise the production write path rather than a stand-in for it
+// (ADR-0015), which is why there is no MemStore any more.
+func isolateHome(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	t.Setenv(devconfig.EnvHome, dir)
+	t.Setenv(devconfig.EnvConfigPath, filepath.Join(dir, "dev.json"))
+	t.Setenv(devconfig.EnvDID, "")
+	return dir
 }
 
-func (s *failStore) Set(service, account, value string) error {
-	if strings.Contains(account, s.failAcct) {
-		return errors.New("keyring locked")
+// readCredentialFile reads what the run wrote, for assertions.
+func readCredentialFile(t *testing.T) map[string]string {
+	t.Helper()
+	path, err := devconfig.EnvFilePath()
+	if err != nil {
+		t.Fatal(err)
 	}
-	return s.MemStore.Set(service, account, value)
+	kv, err := devconfig.ParseEnvFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return kv
 }
 
 func validReg() *backend.Registration {
@@ -89,21 +107,21 @@ func validReg() *backend.Registration {
 // --- tests ------------------------------------------------------------------
 
 func TestDryRunMakesNoWrites(t *testing.T) {
+	home := isolateHome(t)
 	reg := &fakeRegistrar{}
-	store := secret.NewMemStore()
 	inst := &fakeInstaller{avail: false}
 	var out bytes.Buffer
 
 	_, err := Run(context.Background(), Options{Provider: "claude-code", Org: "acme", DryRun: true},
-		Deps{Registrar: reg, Store: store, Installer: inst, Out: &out})
+		Deps{Registrar: reg, Installer: inst, Out: &out})
 	if err != nil {
 		t.Fatalf("dry-run err: %v", err)
 	}
 	if reg.createCalls != 0 || reg.findCalls != 0 {
 		t.Errorf("dry-run touched the network: create=%d find=%d", reg.createCalls, reg.findCalls)
 	}
-	if store.Len() != 0 {
-		t.Errorf("dry-run wrote %d secrets, want 0", store.Len())
+	if entries, err := os.ReadDir(home); err == nil && len(entries) != 0 {
+		t.Errorf("dry-run wrote %v; it must touch no file at all", entries)
 	}
 	if !strings.Contains(out.String(), "DRY RUN") {
 		t.Errorf("dry-run output missing DRY RUN banner:\n%s", out.String())
@@ -111,10 +129,11 @@ func TestDryRunMakesNoWrites(t *testing.T) {
 }
 
 func TestDryRunDisclosesInstallGitHook(t *testing.T) {
+	isolateHome(t)
 	var out bytes.Buffer
 	_, err := Run(context.Background(),
 		Options{Provider: "claude-code", Org: "acme", DryRun: true, InstallGitHook: true},
-		Deps{Registrar: &fakeRegistrar{}, Store: secret.NewMemStore(), Installer: &fakeInstaller{avail: false}, Out: &out})
+		Deps{Registrar: &fakeRegistrar{}, Installer: &fakeInstaller{avail: false}, Out: &out})
 	if err != nil {
 		t.Fatalf("dry-run err: %v", err)
 	}
@@ -124,13 +143,13 @@ func TestDryRunDisclosesInstallGitHook(t *testing.T) {
 }
 
 func TestHappyPathStoresCredsNeverPrintsThem(t *testing.T) {
+	isolateHome(t)
 	reg := &fakeRegistrar{reg: validReg()}
-	store := secret.NewMemStore()
 	inst := &fakeInstaller{avail: false} // Claude Code adapter (SL-4) not built
 	var out bytes.Buffer
 
 	res, err := Run(context.Background(), Options{Provider: "claude-code", Org: "acme"},
-		Deps{Registrar: reg, Store: store, Installer: inst, Out: &out})
+		Deps{Registrar: reg, Installer: inst, Out: &out})
 
 	// Registration + credential capture succeed; config is manual-only → error.
 	if err == nil || !res.ConfigManualOnly {
@@ -139,19 +158,22 @@ func TestHappyPathStoresCredsNeverPrintsThem(t *testing.T) {
 	if !res.Registered || res.AgentID != "agent-1" {
 		t.Errorf("res = %+v", res)
 	}
-	// Three secrets stored.
-	if store.Len() != 3 {
-		t.Fatalf("stored %d secrets, want 3", store.Len())
+	// Exactly the two secrets, under the platform's documented names.
+	kv := readCredentialFile(t)
+	if got := kv[devconfig.EnvAPIKeyDirect]; got != "obx_test_SECRETKEYVALUE" {
+		t.Errorf("api key not written, got %q", got)
 	}
-	svc, apiAcct, privAcct, didAcct := Options{Provider: "claude-code", Org: "acme"}.accounts()
-	if v, _ := store.Get(svc, apiAcct); v != "obx_test_SECRETKEYVALUE" {
-		t.Errorf("api key not stored, got %q", v)
+	if got := kv[devconfig.EnvAgentPrivateKey]; got != "PRIVATESEEDVALUE" {
+		t.Errorf("private key not written, got %q", got)
 	}
-	if v, _ := store.Get(svc, privAcct); v != "PRIVATESEEDVALUE" {
-		t.Errorf("private key not stored, got %q", v)
+	// The DID is a COORDINATE and must not be in the credential file. Writing it
+	// there would recreate the two-store bug ADR-0015 removed: a stale copy
+	// beside the secrets that reverts a corrected DID on the next install.
+	if got, ok := kv[devconfig.EnvDID]; ok {
+		t.Errorf("credential file carries the DID (%q); secrets and coordinates must not share a file", got)
 	}
-	if v, _ := store.Get(svc, didAcct); v != "did:aip:abc" {
-		t.Errorf("did not stored, got %q", v)
+	if len(kv) != 2 {
+		t.Errorf("credential file holds %d keys, want exactly the 2 secrets: %v", len(kv), kv)
 	}
 	// INV-1: secret values must never appear in output.
 	if strings.Contains(out.String(), "obx_test_SECRETKEYVALUE") || strings.Contains(out.String(), "PRIVATESEEDVALUE") {
@@ -168,32 +190,41 @@ func TestHappyPathStoresCredsNeverPrintsThem(t *testing.T) {
 }
 
 func TestConfigAppliedWhenInstallerAvailable(t *testing.T) {
+	isolateHome(t)
 	reg := &fakeRegistrar{reg: validReg()}
 	inst := &fakeInstaller{avail: true}
 	res, err := Run(context.Background(), Options{Provider: "claude-code", Org: "acme"},
-		Deps{Registrar: reg, Store: secret.NewMemStore(), Installer: inst, Out: &bytes.Buffer{}})
+		Deps{Registrar: reg, Installer: inst, Out: &bytes.Buffer{}})
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
 	if !res.ConfigApplied || !inst.installed {
 		t.Errorf("config not applied: res=%+v installed=%v", res, inst.installed)
 	}
-	if inst.gotRef.DID != "did:aip:abc" || inst.gotRef.APIKeyAccount == "" {
+	if inst.gotRef.DID != "did:aip:abc" {
 		t.Errorf("installer got bad ref: %+v", inst.gotRef)
 	}
 }
 
 func TestIdempotentReuseSkipsRegistration(t *testing.T) {
-	store := secret.NewMemStore()
-	svc, apiAcct, privAcct, didAcct := Options{Provider: "claude-code", Org: "acme"}.accounts()
-	_ = store.Set(svc, apiAcct, "obx_test_existing")
-	_ = store.Set(svc, privAcct, "existingseed")
-	_ = store.Set(svc, didAcct, "did:aip:existing")
+	dir := isolateHome(t)
+	if err := devconfig.WriteEnvFile(filepath.Join(dir, ".env"), map[string]string{
+		devconfig.EnvAPIKeyDirect:    "obx_test_existing",
+		devconfig.EnvAgentPrivateKey: "existingseed",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// The DID is a coordinate and lives in dev.json, never beside the secrets —
+	// that split is what stopped a stale credential store from reverting a
+	// corrected DID on every re-init (ADR-0015).
+	if err := devconfig.WriteConfig(filepath.Join(dir, "dev.json"), devconfig.Update{DID: "did:aip:existing"}); err != nil {
+		t.Fatal(err)
+	}
 
 	reg := &fakeRegistrar{reg: validReg()}
 	inst := &fakeInstaller{avail: true}
 	res, err := Run(context.Background(), Options{Provider: "claude-code", Org: "acme"},
-		Deps{Registrar: reg, Store: store, Installer: inst, Out: &bytes.Buffer{}})
+		Deps{Registrar: reg, Installer: inst, Out: &bytes.Buffer{}})
 	if err != nil {
 		t.Fatalf("reuse err: %v", err)
 	}
@@ -206,12 +237,13 @@ func TestIdempotentReuseSkipsRegistration(t *testing.T) {
 }
 
 func TestRemoteDuplicateBlocksWithoutForce(t *testing.T) {
+	isolateHome(t)
 	reg := &fakeRegistrar{
 		reg:    validReg(),
 		byName: map[string]*backend.AgentSummary{"dev-x": {ID: "old-9", DID: "did:aip:old"}},
 	}
 	res, err := Run(context.Background(), Options{Provider: "claude-code", Org: "acme", AgentName: "dev-x"},
-		Deps{Registrar: reg, Store: secret.NewMemStore(), Installer: &fakeInstaller{avail: true}, Out: &bytes.Buffer{}})
+		Deps{Registrar: reg, Installer: &fakeInstaller{avail: true}, Out: &bytes.Buffer{}})
 	if err == nil || !strings.Contains(err.Error(), "already exists") {
 		t.Fatalf("expected duplicate error, got %v", err)
 	}
@@ -224,11 +256,12 @@ func TestRemoteDuplicateBlocksWithoutForce(t *testing.T) {
 }
 
 func TestRemoteLookupErrorDoesNotFallThroughToCreate(t *testing.T) {
+	isolateHome(t)
 	// F1: a failed agent/list must NOT silently proceed to Create (which would
 	// bypass idempotent detection). It must surface and stop.
 	reg := &fakeRegistrar{reg: validReg(), findErr: errors.New("connection refused")}
 	res, err := Run(context.Background(), Options{Provider: "claude-code", Org: "acme", AgentName: "dev-x"},
-		Deps{Registrar: reg, Store: secret.NewMemStore(), Installer: &fakeInstaller{avail: true}, Out: &bytes.Buffer{}})
+		Deps{Registrar: reg, Installer: &fakeInstaller{avail: true}, Out: &bytes.Buffer{}})
 	if err == nil || !strings.Contains(err.Error(), "agent/list failed") {
 		t.Fatalf("expected surfaced list error, got %v", err)
 	}
@@ -241,11 +274,12 @@ func TestRemoteLookupErrorDoesNotFallThroughToCreate(t *testing.T) {
 }
 
 func TestForceLookupErrorSurfaced(t *testing.T) {
+	isolateHome(t)
 	// F4: under --force, a failed lookup must surface rather than proceed to a
 	// confusing 400 with a name that may be taken.
 	reg := &fakeRegistrar{reg: validReg(), findErr: errors.New("connection refused")}
 	_, err := Run(context.Background(), Options{Provider: "claude-code", Org: "acme", AgentName: "dev-x", Force: true},
-		Deps{Registrar: reg, Store: secret.NewMemStore(), Installer: &fakeInstaller{avail: true}, Out: &bytes.Buffer{}})
+		Deps{Registrar: reg, Installer: &fakeInstaller{avail: true}, Out: &bytes.Buffer{}})
 	if err == nil || !strings.Contains(err.Error(), "free agent name") {
 		t.Fatalf("expected free-name lookup error, got %v", err)
 	}
@@ -255,13 +289,14 @@ func TestForceLookupErrorSurfaced(t *testing.T) {
 }
 
 func TestForceRegistersUnderFreeName(t *testing.T) {
+	isolateHome(t)
 	reg := &fakeRegistrar{
 		reg:    validReg(),
 		byName: map[string]*backend.AgentSummary{"dev-x": {ID: "old-9"}}, // dev-x-2 is free
 	}
 	inst := &fakeInstaller{avail: true}
 	_, err := Run(context.Background(), Options{Provider: "claude-code", Org: "acme", AgentName: "dev-x", Force: true},
-		Deps{Registrar: reg, Store: secret.NewMemStore(), Installer: inst, Out: &bytes.Buffer{}})
+		Deps{Registrar: reg, Installer: inst, Out: &bytes.Buffer{}})
 	if err != nil {
 		t.Fatalf("force err: %v", err)
 	}
@@ -274,9 +309,10 @@ func TestForceRegistersUnderFreeName(t *testing.T) {
 }
 
 func TestAPIErrorHalts(t *testing.T) {
+	isolateHome(t)
 	reg := &fakeRegistrar{createErr: &backend.APIError{StatusCode: 400, Body: "AIVSS config is required"}}
 	res, err := Run(context.Background(), Options{Provider: "claude-code", Org: "acme", AgentName: "dev-x"},
-		Deps{Registrar: reg, Store: secret.NewMemStore(), Installer: &fakeInstaller{avail: true}, Out: &bytes.Buffer{}})
+		Deps{Registrar: reg, Installer: &fakeInstaller{avail: true}, Out: &bytes.Buffer{}})
 	if err == nil || !strings.Contains(err.Error(), "HALT") || !strings.Contains(err.Error(), "400") {
 		t.Fatalf("expected HALT with 400, got %v", err)
 	}
@@ -285,39 +321,55 @@ func TestAPIErrorHalts(t *testing.T) {
 	}
 }
 
+// A credential write that fails AFTER the agent exists must name the registered
+// agent and how to resume: its API key and signing key were shown exactly once
+// and are now unreachable, so a bare I/O error would strand the user.
 func TestPartialFailureReportsAgentAndResume(t *testing.T) {
-	store := &failStore{MemStore: secret.NewMemStore(), failAcct: "private_key"}
+	if runtime.GOOS == "windows" {
+		t.Skip("mode bits do not deny writes on Windows")
+	}
+	if os.Geteuid() == 0 {
+		t.Skip("running as root: mode bits do not deny writes")
+	}
+	// An unwritable parent makes the REAL write fail, where the deleted fake
+	// store could only report that it would have.
+	base := t.TempDir()
+	locked := filepath.Join(base, "locked")
+	if err := os.MkdirAll(locked, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(locked, 0o700) })
+	t.Setenv(devconfig.EnvHome, filepath.Join(locked, "openbox"))
+	t.Setenv(devconfig.EnvConfigPath, filepath.Join(base, "dev.json"))
+
 	reg := &fakeRegistrar{reg: validReg()}
 	res, err := Run(context.Background(), Options{Provider: "claude-code", Org: "acme", AgentName: "dev-x"},
-		Deps{Registrar: reg, Store: store, Installer: &fakeInstaller{avail: true}, Out: &bytes.Buffer{}})
+		Deps{Registrar: reg, Installer: &fakeInstaller{avail: true}, Out: &bytes.Buffer{}})
 	if err == nil || !strings.Contains(err.Error(), "agent-1") || !strings.Contains(err.Error(), "rotate") {
 		t.Fatalf("expected resume guidance naming agent-1, got %v", err)
 	}
 	if !res.Registered {
 		t.Error("agent was registered; res.Registered should be true")
 	}
-	// API key stored before the failing private-key write.
-	svc, apiAcct, privAcct, _ := Options{Provider: "claude-code", Org: "acme"}.accounts()
-	if v, _ := store.Get(svc, apiAcct); v == "" {
-		t.Error("api key should have been stored before the failure")
-	}
-	if _, err := store.Get(svc, privAcct); err != secret.ErrNotFound {
-		t.Error("private key should not be stored after the failed Set")
+	// Nothing printed may leak the credential itself.
+	if strings.Contains(err.Error(), "obx_test_SECRETKEYVALUE") || strings.Contains(err.Error(), "PRIVATESEEDVALUE") {
+		t.Errorf("error leaked a credential value: %v", err)
 	}
 }
 
 func TestMissingPrivateKeyErrors(t *testing.T) {
+	isolateHome(t)
 	r := validReg()
 	r.PrivateKey = ""
-	store := secret.NewMemStore()
 	reg := &fakeRegistrar{reg: r}
 	_, err := Run(context.Background(), Options{Provider: "claude-code", Org: "acme", AgentName: "dev-x"},
-		Deps{Registrar: reg, Store: store, Installer: &fakeInstaller{avail: true}, Out: &bytes.Buffer{}})
+		Deps{Registrar: reg, Installer: &fakeInstaller{avail: true}, Out: &bytes.Buffer{}})
 	if err == nil || !strings.Contains(err.Error(), "signing key") {
 		t.Fatalf("expected signing-key error, got %v", err)
 	}
-	if store.Len() != 0 {
-		t.Errorf("no creds should be stored when the key is missing, got %d", store.Len())
+	// A half-usable credential pair must never reach disk.
+	if kv := readCredentialFile(t); len(kv) != 0 {
+		t.Errorf("no credentials should be written when the key is missing, got %v", kv)
 	}
 }
 
@@ -337,9 +389,58 @@ func TestTruncateIsRuneSafe(t *testing.T) {
 }
 
 func TestUnknownProviderRejected(t *testing.T) {
+	isolateHome(t)
 	_, err := Run(context.Background(), Options{Provider: ""},
-		Deps{Registrar: &fakeRegistrar{}, Store: secret.NewMemStore(), Installer: &fakeInstaller{}, Out: &bytes.Buffer{}})
+		Deps{Registrar: &fakeRegistrar{}, Installer: &fakeInstaller{}, Out: &bytes.Buffer{}})
 	if err == nil {
 		t.Fatal("expected error for empty provider")
+	}
+}
+
+// `--env-file` must reach the REGISTER path, which is the one place credentials are
+// minted. It used to be threaded into the direct-write and rotate paths only, so
+// `openbox auth --env-file /custom` with a blank agent id created a real agent and
+// wrote its once-shown key to the DEFAULT location while reporting the custom one.
+// A once-shown credential written somewhere the user was not told about is
+// unrecoverable by definition.
+func TestRegisterHonoursTheCredentialFileOverride(t *testing.T) {
+	isolateHome(t)
+	custom := filepath.Join(t.TempDir(), "custom-creds.env")
+	reg := &fakeRegistrar{reg: validReg()}
+
+	_, _, err := Register(context.Background(), Options{
+		Provider: "claude-code", Org: "acme", EnvFile: custom,
+	}, Deps{Registrar: reg, Installer: &fakeInstaller{avail: true}, Out: &bytes.Buffer{}})
+	if err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+
+	kv, readErr := devconfig.ParseEnvFile(custom)
+	if readErr != nil {
+		t.Fatalf("read the override path: %v", readErr)
+	}
+	if kv[devconfig.EnvAPIKeyDirect] != "obx_test_SECRETKEYVALUE" {
+		t.Errorf("credentials did not land in the override path: %v", kv)
+	}
+	// And nothing went to the default location.
+	if def := readCredentialFile(t); len(def) != 0 {
+		t.Errorf("credentials also written to the default path: %v", def)
+	}
+}
+
+// A relative override would resolve against the process working directory, so
+// running this inside a repo would drop a plaintext API key and signing key into
+// the source tree. Refused, like OPENBOX_HOME.
+func TestRegisterRefusesARelativeCredentialFileOverride(t *testing.T) {
+	isolateHome(t)
+	reg := &fakeRegistrar{reg: validReg()}
+	_, _, err := Register(context.Background(), Options{
+		Provider: "claude-code", Org: "acme", EnvFile: "creds.env",
+	}, Deps{Registrar: reg, Installer: &fakeInstaller{avail: true}, Out: &bytes.Buffer{}})
+	if err == nil {
+		t.Fatal("a relative --env-file was accepted")
+	}
+	if !strings.Contains(err.Error(), "absolute") {
+		t.Errorf("error should explain the absolute-path requirement: %v", err)
 	}
 }

@@ -47,7 +47,7 @@ func newTestClient(t *testing.T, baseURL string, contentOn bool) (*Client, *capt
 		BaseURL:               baseURL,
 		APIKey:                testAPIKey,
 		DID:                   testDID,
-		SeedB64:               testSeedB64,
+		PrivateKeyB64:         testPrivateKeyB64,
 		ContentCaptureEnabled: contentOn,
 		RetryBase:             durPtr(time.Millisecond), // keep retry tests fast
 		Logger:                log,
@@ -202,7 +202,7 @@ func TestEmit_FailOpen_Unreachable(t *testing.T) {
 		t.Errorf("expected a drop log mentioning the event id; got %q", log.all())
 	}
 	// INV-1: the secret key must never appear in logs.
-	if strings.Contains(log.all(), testAPIKey) || strings.Contains(log.all(), testSeedB64) {
+	if strings.Contains(log.all(), testAPIKey) || strings.Contains(log.all(), testPrivateKeyB64) {
 		t.Error("INV-1 violation: secret material leaked into logs")
 	}
 }
@@ -281,7 +281,7 @@ func TestEmit_EmptySessionID_IsCallerError(t *testing.T) {
 }
 
 func TestNew_RejectsPlaintextNonLoopback(t *testing.T) {
-	base := Config{APIKey: testAPIKey, DID: testDID, SeedB64: testSeedB64}
+	base := Config{APIKey: testAPIKey, DID: testDID, PrivateKeyB64: testPrivateKeyB64}
 	// Plaintext to a real host would leak the bearer key (INV-1).
 	base.BaseURL = "http://core.openbox.ai"
 	if _, err := New(base); err == nil {
@@ -297,7 +297,7 @@ func TestNew_RejectsPlaintextNonLoopback(t *testing.T) {
 }
 
 func TestNew_RejectsMalformedDID(t *testing.T) {
-	if _, err := New(Config{BaseURL: "https://c", APIKey: testAPIKey, DID: "urn:bogus:1", SeedB64: testSeedB64}); err == nil {
+	if _, err := New(Config{BaseURL: "https://c", APIKey: testAPIKey, DID: "urn:bogus:1", PrivateKeyB64: testPrivateKeyB64}); err == nil {
 		t.Error("expected New to reject a non-did:aip: DID")
 	}
 }

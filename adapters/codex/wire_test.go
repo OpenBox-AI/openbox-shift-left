@@ -29,10 +29,10 @@ func newWireCapture(t *testing.T) (*client.Client, *[][]byte) {
 
 	seed := base64.StdEncoding.EncodeToString(make([]byte, 32))
 	cl, err := client.New(client.Config{
-		BaseURL: srv.URL, // loopback http is allowed by the INV-1 TLS guard
-		APIKey:  "obx_test_key",
-		DID:     testDID,
-		SeedB64: seed,
+		BaseURL:       srv.URL, // loopback http is allowed by the INV-1 TLS guard
+		APIKey:        "obx_test_key",
+		DID:           testDID,
+		PrivateKeyB64: seed,
 	})
 	if err != nil {
 		t.Fatalf("client.New: %v", err)

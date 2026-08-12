@@ -7,14 +7,18 @@
 #
 # Two things make this harness safe to run on a working machine:
 #
-#   XDG_CONFIG_HOME is redirected into testbed/.state, so `openbox init` writes
-#   its dev.json, spool, bundle, enforcements and pending-approvals THERE and
-#   never touches ~/.config/openbox. A global enforce posture fail-closed-denies
-#   every Claude Code session on the box; this makes that
-#   impossible rather than merely discouraged.
+#   Every path openbox writes is pinned into testbed/.state — the credential file
+#   and dev.json via OPENBOX_HOME, and each runtime-state file via its own
+#   override (see below; XDG_CONFIG_HOME alone does NOT isolate them on macOS).
+#   Nothing touches the developer's real ~/.openbox or OS config dir. Enforcement
+#   is now ON by default (ADR-0016), which makes this load-bearing rather than
+#   tidy: a testbed posture leaking into the real config would govern every
+#   Claude Code session on the box.
 #
-#   Hooks are installed into one scratch project only (`--local-hooks`), so
-#   sessions started anywhere else stay ungoverned.
+#   Hooks are installed into one scratch project only, which since ADR-0016 is
+#   simply `init`'s default scope — the phase runs it from inside $TB_PROJECT.
+#   Sessions started anywhere else stay ungoverned, and 10-onboard.sh asserts
+#   that rather than assuming it.
 #
 # Secrets are never written here. `mint` stores the control token in
 # testbed/.state/control-token (git-ignored, 0600) and sourcing picks it up.
@@ -35,14 +39,45 @@ export TB_PG_DB="${TB_PG_DB:-openbox}"
 export OPENBOX_ORG_ID="${OPENBOX_ORG_ID:-openbox.ai}"
 export OPENBOX_ORG="${OPENBOX_ORG:-$OPENBOX_ORG_ID}"
 
-# Isolation (see the header). Everything openbox writes lands under here.
+# Isolation (see the header). Runtime state — spool, bundle, audit logs — still
+# resolves through XDG_CONFIG_HOME; configuration and credentials resolve through
+# OPENBOX_HOME (ADR-0015).
 export XDG_CONFIG_HOME="${XDG_CONFIG_HOME_OVERRIDE:-$TB_STATE/config}"
 mkdir -p "$XDG_CONFIG_HOME"
 
-# Credentials live in the isolated config dir too. The harness uses the file
-# backend rather than the OS keyring: a headless run must never block on a
-# keyring unlock prompt.
-export OPENBOX_SECRET_FILE="${OPENBOX_SECRET_FILE:-$XDG_CONFIG_HOME/openbox/secrets.json}"
+# XDG_CONFIG_HOME ALONE IS NOT ENOUGH ON macOS. Go's os.UserConfigDir() returns
+# $HOME/Library/Application Support on darwin and does not consult
+# XDG_CONFIG_HOME at all, so on a Mac the runtime-state paths derived from it —
+# spool, bundle, enforcement log, advisories, findings cursor, pending approvals,
+# stale markers, the session registry — resolved to the developer's REAL config
+# directory while this file claimed they were isolated. A stray hook run during
+# development is enough to write there, which is how this was found.
+#
+# Every one of those paths has an explicit override, so they are all pinned here
+# rather than trusted to derive correctly. Cheaper than reasoning about
+# os.UserConfigDir() per platform, and it fails visibly if a new state file
+# appears without an override.
+export OPENBOX_SPOOL_DIR="${OPENBOX_SPOOL_DIR:-$TB_STATE/state/spool}"
+export OPENBOX_SIDECAR_BUNDLE="${OPENBOX_SIDECAR_BUNDLE:-$TB_STATE/state/policy-bundle.json}"
+export OPENBOX_ENFORCEMENT_FILE="${OPENBOX_ENFORCEMENT_FILE:-$TB_STATE/state/enforcements.jsonl}"
+export OPENBOX_ADVISORY_FILE="${OPENBOX_ADVISORY_FILE:-$TB_STATE/state/advisories.jsonl}"
+export OPENBOX_FINDINGS_CURSOR="${OPENBOX_FINDINGS_CURSOR:-$TB_STATE/state/findings.cursor}"
+export OPENBOX_PENDING_APPROVAL_DIR="${OPENBOX_PENDING_APPROVAL_DIR:-$TB_STATE/state/pending-approvals}"
+export OPENBOX_STALE_DIR="${OPENBOX_STALE_DIR:-$TB_STATE/state/stale}"
+mkdir -p "$TB_STATE/state"
+
+# ~/.openbox, relocated: dev.json, approver.json and the .env credential file.
+# It must be ABSOLUTE — devconfig rejects a relative OPENBOX_HOME, because a
+# hook's working directory is whatever project the tool happens to be in.
+export OPENBOX_HOME="${OPENBOX_HOME_OVERRIDE:-$TB_STATE/openbox-home}"
+mkdir -p "$OPENBOX_HOME"
+chmod 700 "$OPENBOX_HOME" 2>/dev/null || true
+
+# Credentials are a plaintext 0600 file inside OPENBOX_HOME (ADR-0015). There is
+# no keyring to unlock and no backend to select any more, which is what makes a
+# headless run possible without a prompt — the old harness had to opt into a file
+# backend explicitly to get here.
+export TB_ENV_FILE="$OPENBOX_HOME/.env"
 
 # The governed scratch project, the binary under test, and the driver's model.
 export TB_PROJECT="${TB_PROJECT:-/tmp/openbox-testbed-project}"

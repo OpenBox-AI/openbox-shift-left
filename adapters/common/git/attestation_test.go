@@ -28,7 +28,7 @@ func sampleInput(seedB64 string) AttestationInput {
 		BundleSHA256:   strings.Repeat("d", 64),
 		Adapter:        "openbox-cli",
 		DID:            "did:aip:7f3c9b2e-0000-5000-a000-000000000001",
-		SeedB64:        seedB64,
+		PrivateKeyB64:  seedB64,
 		Now:            func() time.Time { return time.Date(2026, 7, 29, 12, 0, 0, 0, time.UTC) },
 	}
 }
@@ -128,9 +128,9 @@ func TestAttest_RefusesIncompleteInput(t *testing.T) {
 		},
 		"no did":      func(i *AttestationInput) { i.DID = "" },
 		"bad did":     func(i *AttestationInput) { i.DID = "not-a-did" },
-		"no seed":     func(i *AttestationInput) { i.SeedB64 = "" },
-		"short seed":  func(i *AttestationInput) { i.SeedB64 = base64.StdEncoding.EncodeToString([]byte("short")) },
-		"broken seed": func(i *AttestationInput) { i.SeedB64 = "!!!" },
+		"no seed":     func(i *AttestationInput) { i.PrivateKeyB64 = "" },
+		"short seed":  func(i *AttestationInput) { i.PrivateKeyB64 = base64.StdEncoding.EncodeToString([]byte("short")) },
+		"broken seed": func(i *AttestationInput) { i.PrivateKeyB64 = "!!!" },
 	}
 	for name, mutate := range cases {
 		in := sampleInput(seed)

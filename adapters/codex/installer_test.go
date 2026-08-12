@@ -40,10 +40,7 @@ func TestInstaller_WritesHooksAndConfig(t *testing.T) {
 	}
 
 	ref := CredentialRef{
-		SecretService:     "openbox-dev",
-		APIKeyAccount:     "apikey",
-		PrivateKeyAccount: "seed",
-		DID:               testDID,
+		DID: testDID,
 	}
 	if err := inst.Install(ref); err != nil {
 		t.Fatalf("install: %v", err)
@@ -95,7 +92,7 @@ func TestInstaller_WritesHooksAndConfig(t *testing.T) {
 
 	// Dev config written with coordinates (shared contract).
 	cfg, err := devconfig.Load(cfgPath)
-	if err != nil || cfg.DID != testDID || cfg.SecretService != "openbox-dev" {
+	if err != nil || cfg.DID != testDID {
 		t.Errorf("dev config wrong: %+v (err %v)", cfg, err)
 	}
 }
@@ -106,11 +103,8 @@ func TestInstaller_WritesHooksAndConfig(t *testing.T) {
 func TestInstaller_NoSecretInWrittenFiles(t *testing.T) {
 	inst, hooksPath, cfgPath := testInstaller(t)
 	ref := CredentialRef{
-		SecretService:     "openbox-dev",
-		APIKeyAccount:     "acme/codex/api_key",
-		PrivateKeyAccount: "acme/codex/private_key",
-		DID:               testDID,
-		BaseURL:           "https://core.example.ai",
+		DID:     testDID,
+		BaseURL: "https://core.example.ai",
 	}
 	if err := inst.Install(ref); err != nil {
 		t.Fatalf("install: %v", err)
@@ -158,7 +152,7 @@ func TestInstaller_IdempotentAndPreservesForeignEntries(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	ref := CredentialRef{DID: testDID, SecretService: "svc", APIKeyAccount: "k", PrivateKeyAccount: "s"}
+	ref := CredentialRef{DID: testDID}
 	if err := inst.Install(ref); err != nil {
 		t.Fatalf("install: %v", err)
 	}
@@ -307,7 +301,7 @@ func TestInstaller_PersistsEnforcePosture(t *testing.T) {
 	inst, _, cfgPath := testInstaller(t)
 	tru := true
 	ref := CredentialRef{
-		DID: testDID, SecretService: "svc", APIKeyAccount: "k", PrivateKeyAccount: "s",
+		DID:     testDID,
 		Enforce: &tru, Tier2: &tru, Findings: &tru,
 	}
 	if err := inst.Install(ref); err != nil {
@@ -317,7 +311,7 @@ func TestInstaller_PersistsEnforcePosture(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !cfg.Enforce || cfg.Tier2 == nil || !*cfg.Tier2 || cfg.Findings == nil || !*cfg.Findings {
+	if cfg.Enforce == nil || !*cfg.Enforce || cfg.Tier2 == nil || !*cfg.Tier2 || cfg.Findings == nil || !*cfg.Findings {
 		t.Errorf("enforce posture not persisted: %+v", cfg)
 	}
 }
@@ -340,7 +334,7 @@ func TestInstaller_PreservesPriorSyncCoordinates(t *testing.T) {
 
 func TestInstaller_Plan(t *testing.T) {
 	inst := Installer{HooksPath: "/x/hooks.json", ConfigPath: "/x/dev.json", EngineBinary: "/x/openbox"}
-	plan := inst.Plan(CredentialRef{DID: testDID, SecretService: "svc", APIKeyAccount: "k", PrivateKeyAccount: "s"})
+	plan := inst.Plan(CredentialRef{DID: testDID})
 	for _, want := range []string{"/hooks", "trust", testDID, "0.145.0", "CODEX_THREAD_ID", "hook codex"} {
 		if !strings.Contains(plan, want) {
 			t.Errorf("plan missing %q:\n%s", want, plan)
@@ -379,14 +373,14 @@ func TestInstaller_ReInitKeepsEnforcePosture(t *testing.T) {
 	tru := true
 
 	if err := inst.Install(CredentialRef{
-		DID: testDID, SecretService: "svc", APIKeyAccount: "k", PrivateKeyAccount: "s",
+		DID:     testDID,
 		AgentID: "agent-1", BackendURL: "https://backend.example",
 		Enforce: &tru, Tier2: &tru, Findings: &tru,
 	}); err != nil {
 		t.Fatalf("install: %v", err)
 	}
 	if err := inst.Install(CredentialRef{
-		DID: testDID, SecretService: "svc", APIKeyAccount: "k", PrivateKeyAccount: "s",
+		DID: testDID,
 	}); err != nil {
 		t.Fatalf("re-install: %v", err)
 	}
@@ -395,7 +389,7 @@ func TestInstaller_ReInitKeepsEnforcePosture(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !cfg.Enforce || cfg.Tier2 == nil || !*cfg.Tier2 || cfg.Findings == nil || !*cfg.Findings {
+	if cfg.Enforce == nil || !*cfg.Enforce || cfg.Tier2 == nil || !*cfg.Tier2 || cfg.Findings == nil || !*cfg.Findings {
 		t.Errorf("re-init downgraded the enforce posture: %+v", cfg)
 	}
 	if cfg.AgentID != "agent-1" || cfg.BackendURL != "https://backend.example" {

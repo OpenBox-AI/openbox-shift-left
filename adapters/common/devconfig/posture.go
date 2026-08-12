@@ -146,7 +146,7 @@ func postureFields() []struct {
 		env   string
 		into  func(*Posture) *bool
 	}{
-		{"enforce", func(c DevConfig) *bool { b := c.Enforce; return &b }, false, EnvEnforce,
+		{"enforce", func(c DevConfig) *bool { return c.Enforce }, true, EnvEnforce,
 			func(p *Posture) *bool { return &p.Enforce }},
 		{"fail_closed", func(c DevConfig) *bool { b := c.FailClosed; return &b }, false, EnvFailClosed,
 			func(p *Posture) *bool { return &p.FailClosed }},

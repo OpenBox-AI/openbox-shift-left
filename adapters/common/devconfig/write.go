@@ -17,13 +17,10 @@ type Update struct {
 	// Coordinates. Empty ⇒ not supplied by this run, so a re-init that
 	// resolves credentials from the store without re-deriving the coordinates
 	// keeps the ones already on disk.
-	BaseURL           string
-	DID               string
-	SecretService     string
-	APIKeyAccount     string
-	PrivateKeyAccount string
-	AgentID           string
-	BackendURL        string
+	BaseURL    string
+	DID        string
+	AgentID    string
+	BackendURL string
 
 	// Posture and preferences. nil ⇒ leave whatever is on disk (or the product
 	// default on a first install); non-nil ⇒ this run chose it explicitly,
@@ -58,13 +55,10 @@ func WriteConfig(path string, u Update) error {
 
 	setString(&cfg.BaseURL, u.BaseURL)
 	setString(&cfg.DID, u.DID)
-	setString(&cfg.SecretService, u.SecretService)
-	setString(&cfg.APIKeyAccount, u.APIKeyAccount)
-	setString(&cfg.PrivateKeyAccount, u.PrivateKeyAccount)
 	setString(&cfg.AgentID, u.AgentID)
 	setString(&cfg.BackendURL, u.BackendURL)
 
-	setBool(&cfg.Enforce, u.Enforce)
+	setBoolPtr(&cfg.Enforce, u.Enforce)
 	setBool(&cfg.InstallGitHook, u.InstallGitHook)
 	setBoolPtr(&cfg.ContentCapture, u.ContentCapture)
 	setBoolPtr(&cfg.Tier2, u.Tier2)
@@ -88,12 +82,23 @@ func WriteConfig(path string, u Update) error {
 // enforcement off, so the caller can say so out loud rather than let a posture
 // change happen quietly. next is the tri-state Update.Enforce: nil never
 // downgrades, which is the point.
+//
+// It compares RESOLVED postures, not the raw field. Under enforce-by-default
+// (ADR-0016) the field is absent on exactly the configs most people have, so
+// reading prior.Enforce directly would see "not enforcing" and report no
+// downgrade — going silent in the common case, which is the one case this
+// message exists for. Absent means enforcing, so turning it off IS a downgrade.
 func WouldDowngradeEnforce(path string, next *bool) bool {
-	prior, err := Load(path)
-	if err != nil {
+	if next == nil || *next {
 		return false
 	}
-	return prior.Enforce && next != nil && !*next
+	prior, err := Load(path)
+	if err != nil {
+		// An unreadable prior config resolves to the default, which is on, so
+		// writing false still weakens the effective posture.
+		return true
+	}
+	return prior.Enforce == nil || *prior.Enforce
 }
 
 func setString(dst *string, v string) {

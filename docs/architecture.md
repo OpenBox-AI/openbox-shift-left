@@ -126,11 +126,35 @@ Being precise here is part of the product.
   envelope into `refs/notes/openbox-attest`, the deploy action carries it, and core
   marks `verified` only when ownership **and** an accepted attestation both hold. CI
   must fetch that ref, which is not the default.
+- **The signing key is readable by anything running as the developer.** It sits in
+  plaintext at `~/.openbox/.env` — `0600` on macOS/Linux, and on Windows `0600` is
+  a no-op so other local accounts can read it too
+  ([ADR-0015](adr/ADR-0015-plaintext-credential-file.md)). The coding agent under
+  governance runs arbitrary commands as that user, so it can read the key it is
+  being attested with. Attestation therefore proves **origin-of-config** — a
+  machine holding this agent's key produced this event or commit — and **not**
+  tamper-resistance against the developer or against the agent they run. The OS
+  keychain this replaced did not actually change that (it was unlocked for the
+  desktop session and readable by the same processes); the plaintext file makes it
+  legible. On an approver install the same file also holds an org key that can
+  create and rotate agents fleet-wide, which is a strictly larger blast radius
+  than one agent's seed.
 - **Enforcement.** The gate is a hook in the developer's own config. Until the
   provider's managed configuration is deployed (`deploy/managed/`), a developer can
   remove it: prevention without assurance. For Codex the hook itself cannot yet be
   mandated — a `requirements.toml` cannot define one — so the shipped mandate pins
   approval and sandbox modes instead.
+- **Absence of events is not evidence of absence of activity.** A bare
+  `openbox init` governs the current directory only
+  ([ADR-0016](adr/ADR-0016-default-install-posture.md)), because that is the only
+  scope the CLI can actually activate by itself — global activation is a
+  managed-settings deployment an administrator performs. Sessions started anywhere
+  else produce **no rows at all**, so an auditor cannot distinguish an
+  uninitialized project from an idle week, and enforcement applies only where
+  `init` ran. Fleet coverage requires `--scope global` plus managed settings;
+  Codex is user-scoped either way. `printGovernedScope` names the governed
+  directory at install time so the gap is visible at the moment it is created
+  rather than discovered from an empty dashboard.
 - **Egress.** OpenBox chooses where *its own* telemetry goes. It does not proxy,
   intercept or allow-list the coding tool's traffic to its model provider — that is
   the provider's plane plus your network controls. OpenBox records that posture as

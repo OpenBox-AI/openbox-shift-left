@@ -23,10 +23,7 @@ func TestInstaller_MaterializesBundleAndConfig(t *testing.T) {
 	}
 
 	ref := CredentialRef{
-		SecretService:     "openbox-dev",
-		APIKeyAccount:     "apikey",
-		PrivateKeyAccount: "seed",
-		DID:               testDID,
+		DID: testDID,
 	}
 	if err := inst.Install(ref); err != nil {
 		t.Fatalf("install: %v", err)
@@ -48,7 +45,7 @@ func TestInstaller_MaterializesBundleAndConfig(t *testing.T) {
 	if err := json.Unmarshal(raw, &cfg); err != nil {
 		t.Fatalf("parse config: %v", err)
 	}
-	if cfg.DID != testDID || cfg.SecretService != "openbox-dev" || cfg.APIKeyAccount != "apikey" {
+	if cfg.DID != testDID {
 		t.Errorf("config coordinates wrong: %+v", cfg)
 	}
 	// The written file must never contain an obx_ key or a seed value.
@@ -72,13 +69,10 @@ func TestInstaller_PersistsEnforcePosture(t *testing.T) {
 
 	tru := true
 	ref := CredentialRef{
-		DID:               testDID,
-		SecretService:     "svc",
-		APIKeyAccount:     "k",
-		PrivateKeyAccount: "s",
-		Enforce:           &tru,
-		Tier2:             &tru,
-		Findings:          &tru,
+		DID:      testDID,
+		Enforce:  &tru,
+		Tier2:    &tru,
+		Findings: &tru,
 	}
 	if err := inst.Install(ref); err != nil {
 		t.Fatalf("install: %v", err)
@@ -92,7 +86,7 @@ func TestInstaller_PersistsEnforcePosture(t *testing.T) {
 	if err := json.Unmarshal(raw, &cfg); err != nil {
 		t.Fatalf("parse config: %v", err)
 	}
-	if !cfg.Enforce {
+	if cfg.Enforce == nil || !*cfg.Enforce {
 		t.Error("enforce not persisted to dev.json")
 	}
 	if cfg.Tier2 == nil || !*cfg.Tier2 {
@@ -127,7 +121,7 @@ func TestInstaller_PersistsEnforcePosture(t *testing.T) {
 
 func TestInstaller_Plan(t *testing.T) {
 	inst := Installer{PluginDir: "/x/plugins", ConfigPath: "/x/dev.json"}
-	plan := inst.Plan(CredentialRef{DID: testDID, SecretService: "svc", APIKeyAccount: "k", PrivateKeyAccount: "s"})
+	plan := inst.Plan(CredentialRef{DID: testDID})
 	for _, want := range []string{"enabledPlugins", "openbox-observe", testDID, "metadata-only"} {
 		if !strings.Contains(plan, want) {
 			t.Errorf("plan missing %q:\n%s", want, plan)
@@ -145,7 +139,7 @@ func TestInstaller_ReInstallIsByteIdentical(t *testing.T) {
 	pluginDir := t.TempDir()
 	cfgPath := filepath.Join(t.TempDir(), "dev.json")
 	inst := Installer{PluginDir: pluginDir, ConfigPath: cfgPath}
-	ref := CredentialRef{DID: testDID, SecretService: "svc", APIKeyAccount: "k", PrivateKeyAccount: "s"}
+	ref := CredentialRef{DID: testDID}
 
 	if err := inst.Install(ref); err != nil {
 		t.Fatalf("first install: %v", err)
@@ -230,7 +224,7 @@ func TestInstaller_ReInitKeepsEnforcePosture(t *testing.T) {
 	tru := true
 
 	if err := inst.Install(CredentialRef{
-		DID: testDID, SecretService: "svc", APIKeyAccount: "k", PrivateKeyAccount: "s",
+		DID:     testDID,
 		AgentID: "agent-1", BackendURL: "https://backend.example",
 		Enforce: &tru, Tier2: &tru, Findings: &tru,
 	}); err != nil {
@@ -239,7 +233,7 @@ func TestInstaller_ReInitKeepsEnforcePosture(t *testing.T) {
 
 	// Plain re-init: no --enforce, so ref carries nil posture.
 	if err := inst.Install(CredentialRef{
-		DID: testDID, SecretService: "svc", APIKeyAccount: "k", PrivateKeyAccount: "s",
+		DID: testDID,
 	}); err != nil {
 		t.Fatalf("re-install: %v", err)
 	}
@@ -248,7 +242,7 @@ func TestInstaller_ReInitKeepsEnforcePosture(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !cfg.Enforce || cfg.Tier2 == nil || !*cfg.Tier2 || cfg.Findings == nil || !*cfg.Findings {
+	if cfg.Enforce == nil || !*cfg.Enforce || cfg.Tier2 == nil || !*cfg.Tier2 || cfg.Findings == nil || !*cfg.Findings {
 		t.Errorf("re-init downgraded the enforce posture: %+v", cfg)
 	}
 	if cfg.AgentID != "agent-1" || cfg.BackendURL != "https://backend.example" {

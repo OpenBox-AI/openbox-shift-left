@@ -4,39 +4,55 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/openbox-ai/openbox-shift-left/adapters/common/devconfig"
 )
 
-// TestResolveCredentials_FileBackend proves the hook reads the CLI's opt-in
-// file secret backend (`init --secret-backend file`) when OPENBOX_SECRET_FILE
-// points at it — the fix for machines with no OS keyring.
-func TestResolveCredentials_FileBackend(t *testing.T) {
+// TestResolveCredentials_FromCredentialFile proves the hook reads
+// ~/.openbox/.env, which is where `openbox auth` writes credentials (ADR-0015)
+// and the position the deleted OS secret store used to hold.
+func TestResolveCredentials_FromCredentialFile(t *testing.T) {
 	isolateConfig(t)
-	path := filepath.Join(t.TempDir(), "secrets.json")
-	// Same nested-JSON format the CLI's fileStore writes.
-	blob := `{"ai.openbox.dev":{"acme/claude-code/api_key":"obx_from_file","acme/claude-code/private_key":"c2VlZGZyb21maWxl"}}`
-	if err := os.WriteFile(path, []byte(blob), 0o600); err != nil {
-		t.Fatal(err)
-	}
 	t.Setenv(envDID, testDID)
-	t.Setenv(envSecretFile, path)
-	t.Setenv(envSecretService, "ai.openbox.dev")
-	t.Setenv(envAPIKeyAccount, "acme/claude-code/api_key")
-	t.Setenv(envPrivKeyAccount, "acme/claude-code/private_key")
+	writeCredentialFile(t, map[string]string{
+		envAPIKeyDirect:    "obx_from_file",
+		envAgentPrivateKey: "c2VlZGZyb21maWxl",
+	})
 
 	c, err := ResolveCredentials()
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
-	if c.APIKey != "obx_from_file" || c.SeedB64 != "c2VlZGZyb21maWxl" {
-		t.Errorf("creds from file backend = %+v", c)
+	if c.APIKey != "obx_from_file" || c.PrivateKeyB64 != "c2VlZGZyb21maWxl" {
+		t.Errorf("creds from credential file = %+v", c)
 	}
 }
 
-// isolateConfig points OPENBOX_CONFIG at a nonexistent temp path so tests never
-// read the developer machine's real ~/.config/openbox/dev.json.
+// isolateConfig points the dev config AND the credential file at empty temp
+// locations, so no test reads the developer machine's real ~/.openbox.
+//
+// This replaced an injectable secretLookup seam: with credentials in a plaintext
+// file, a test can drive the same code path production does instead of
+// substituting a function for it (ADR-0015).
 func isolateConfig(t *testing.T) {
 	t.Helper()
 	t.Setenv(envConfigPath, filepath.Join(t.TempDir(), "none.json"))
+	t.Setenv(devconfig.EnvHome, t.TempDir())
+	for _, name := range []string{envAPIKeyDirect, envAgentPrivateKey, "OPENBOX_ED25519_SEED", "OPENBOX_SEED"} {
+		t.Setenv(name, "")
+	}
+}
+
+// writeCredentialFile writes ~/.openbox/.env under the isolated OPENBOX_HOME.
+func writeCredentialFile(t *testing.T, kv map[string]string) {
+	t.Helper()
+	path, err := devconfig.EnvFilePath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := devconfig.WriteEnvFile(path, kv); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestResolveIdentity(t *testing.T) {
@@ -80,7 +96,7 @@ func TestResolveCredentials_DirectEnvOverride(t *testing.T) {
 	isolateConfig(t)
 	t.Setenv(envDID, testDID)
 	t.Setenv(envAPIKeyDirect, "obx_test_key")
-	t.Setenv(envSeedDirect, "c2VlZA==")
+	t.Setenv(envAgentPrivateKey, "c2VlZA==")
 	t.Setenv(envBaseURL, "https://core.example.ai")
 	t.Setenv(envContentCapture, "true")
 
@@ -88,7 +104,7 @@ func TestResolveCredentials_DirectEnvOverride(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
-	if c.APIKey != "obx_test_key" || c.SeedB64 != "c2VlZA==" {
+	if c.APIKey != "obx_test_key" || c.PrivateKeyB64 != "c2VlZA==" {
 		t.Errorf("creds = %+v", c)
 	}
 	if c.BaseURL != "https://core.example.ai" {
@@ -102,35 +118,24 @@ func TestResolveCredentials_DirectEnvOverride(t *testing.T) {
 	}
 }
 
-func TestResolveCredentials_SecretStore(t *testing.T) {
+// A real environment variable beats the credential file, so CI can override
+// without writing to disk.
+func TestResolveCredentials_RealEnvBeatsCredentialFile(t *testing.T) {
 	isolateConfig(t)
 	t.Setenv(envDID, testDID)
-	t.Setenv(envSecretService, "openbox-dev")
-	t.Setenv(envAPIKeyAccount, "apikey")
-	t.Setenv(envPrivKeyAccount, "seed")
-
-	// Inject a fake secret store.
-	orig := secretLookup
-	t.Cleanup(func() { secretLookup = orig })
-	secretLookup = func(service, account string) (string, error) {
-		if service != "openbox-dev" {
-			t.Errorf("unexpected service %q", service)
-		}
-		switch account {
-		case "apikey":
-			return "obx_from_store", nil
-		case "seed":
-			return "c2VlZGZyb21zdG9yZQ==", nil
-		}
-		return "", os.ErrNotExist
-	}
+	writeCredentialFile(t, map[string]string{
+		envAPIKeyDirect:    "obx_from_file",
+		envAgentPrivateKey: "ZmlsZQ==",
+	})
+	t.Setenv(envAPIKeyDirect, "obx_from_env")
+	t.Setenv(envAgentPrivateKey, "ZW52")
 
 	c, err := ResolveCredentials()
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
-	if c.APIKey != "obx_from_store" || c.SeedB64 != "c2VlZGZyb21zdG9yZQ==" {
-		t.Errorf("creds from store = %+v", c)
+	if c.APIKey != "obx_from_env" || c.PrivateKeyB64 != "ZW52" {
+		t.Errorf("creds = %+v, want the environment to win", c)
 	}
 	if c.BaseURL != defaultBaseURL {
 		t.Errorf("base url default = %q, want %q", c.BaseURL, defaultBaseURL)
@@ -145,7 +150,7 @@ func TestResolveCredentials_EnvDisablesConfigContentCapture(t *testing.T) {
 	t.Setenv(envConfigPath, cfgPath)
 	t.Setenv(envDID, "")
 	t.Setenv(envAPIKeyDirect, "obx_k")
-	t.Setenv(envSeedDirect, "c2VlZA==")
+	t.Setenv(envAgentPrivateKey, "c2VlZA==")
 	t.Setenv(envContentCapture, "false")
 
 	c, err := ResolveCredentials()
@@ -167,7 +172,7 @@ func TestResolveContentCapture_DefaultOn(t *testing.T) {
 	// ResolveCredentials derives the same default.
 	t.Setenv(envDID, testDID)
 	t.Setenv(envAPIKeyDirect, "obx_k")
-	t.Setenv(envSeedDirect, "c2VlZA==")
+	t.Setenv(envAgentPrivateKey, "c2VlZA==")
 	c, err := ResolveCredentials()
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
@@ -252,22 +257,10 @@ func TestResolveFailClosed(t *testing.T) {
 	}
 }
 
-func TestOsSecretLookup_RejectsDashCoordinates(t *testing.T) {
-	if _, err := osSecretLookup("-flag", "acct"); err == nil {
-		t.Error("leading-dash service should be rejected (arg-injection guard)")
-	}
-	if _, err := osSecretLookup("svc", "-flag"); err == nil {
-		t.Error("leading-dash account should be rejected")
-	}
-}
-
 func TestResolveCredentials_MissingSecret(t *testing.T) {
 	isolateConfig(t)
 	t.Setenv(envDID, testDID)
 	// No API key source at all → error (fail-open at the caller, but resolve errs).
-	t.Setenv(envAPIKeyDirect, "")
-	t.Setenv(envSeedDirect, "")
-	t.Setenv(envSecretService, "")
 	if _, err := ResolveCredentials(); err == nil {
 		t.Error("expected error when no api key source is configured")
 	}

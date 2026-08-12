@@ -3,6 +3,7 @@ package devconfig
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -10,9 +11,27 @@ const testDID = "did:aip:7f3c9b2e-0000-5000-a000-000000000001"
 
 // isolateConfig points OPENBOX_CONFIG at a nonexistent temp path so tests never
 // read the developer machine's real ~/.config/openbox/dev.json.
+// isolateConfig points both the dev config and the credential file at empty temp
+// locations, so no test reads (or writes) the developer's real ~/.openbox.
 func isolateConfig(t *testing.T) {
 	t.Helper()
 	t.Setenv(EnvConfigPath, filepath.Join(t.TempDir(), "none.json"))
+	t.Setenv(EnvHome, t.TempDir())
+	for _, name := range append([]string{EnvAPIKeyDirect, EnvAgentPrivateKey}, deprecatedPrivateKeyEnvNames...) {
+		t.Setenv(name, "")
+	}
+}
+
+// writeEnvFileForTest writes a credential file under the isolated OPENBOX_HOME.
+func writeEnvFileForTest(t *testing.T, kv map[string]string) {
+	t.Helper()
+	path, err := EnvFilePath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteEnvFile(path, kv); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestResolveDID(t *testing.T) {
@@ -48,20 +67,26 @@ func TestResolveDIDFromConfigFile(t *testing.T) {
 	}
 }
 
-func TestResolveCredentials_DirectEnvOverride(t *testing.T) {
+// The real environment variable beats the credential file — that is what lets CI
+// supply credentials without writing anything to disk.
+func TestResolveCredentials_RealEnvBeatsFile(t *testing.T) {
 	isolateConfig(t)
 	t.Setenv(EnvDID, testDID)
-	t.Setenv(EnvAPIKeyDirect, "obx_test_key")
-	t.Setenv(EnvSeedDirect, "c2VlZA==")
+	writeEnvFileForTest(t, map[string]string{
+		EnvAPIKeyDirect:    "obx_from_file",
+		EnvAgentPrivateKey: "ZmlsZQ==",
+	})
+	t.Setenv(EnvAPIKeyDirect, "obx_from_env")
+	t.Setenv(EnvAgentPrivateKey, "ZW52")
 	t.Setenv(EnvBaseURL, "https://core.example.ai")
 	t.Setenv(EnvContentCapture, "true")
 
-	c, err := ResolveCredentials(nil)
+	c, err := ResolveCredentials()
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
-	if c.APIKey != "obx_test_key" || c.SeedB64 != "c2VlZA==" {
-		t.Errorf("creds = %+v", c)
+	if c.APIKey != "obx_from_env" || c.PrivateKeyB64 != "ZW52" {
+		t.Errorf("creds = %+v, want the environment to win over the file", c)
 	}
 	if c.BaseURL != "https://core.example.ai" {
 		t.Errorf("base url = %q", c.BaseURL)
@@ -71,73 +96,187 @@ func TestResolveCredentials_DirectEnvOverride(t *testing.T) {
 	}
 }
 
-func TestResolveCredentials_InjectedLookup(t *testing.T) {
+// With no environment override, both secrets come from ~/.openbox/.env — the
+// position the deleted OS secret store used to hold.
+func TestResolveCredentials_FromCredentialFile(t *testing.T) {
 	isolateConfig(t)
 	t.Setenv(EnvDID, testDID)
-	t.Setenv(EnvSecretService, "openbox-dev")
-	t.Setenv(EnvAPIKeyAccount, "apikey")
-	t.Setenv(EnvPrivKeyAccount, "seed")
+	writeEnvFileForTest(t, map[string]string{
+		EnvAPIKeyDirect:    "obx_from_file",
+		EnvAgentPrivateKey: "ZmlsZQ==",
+	})
 
-	lookup := func(service, account string) (string, error) {
-		if service != "openbox-dev" {
-			t.Errorf("unexpected service %q", service)
-		}
-		switch account {
-		case "apikey":
-			return "obx_from_store", nil
-		case "seed":
-			return "c2VlZGZyb21zdG9yZQ==", nil
-		}
-		return "", os.ErrNotExist
-	}
-
-	c, err := ResolveCredentials(lookup)
+	c, err := ResolveCredentials()
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
-	if c.APIKey != "obx_from_store" || c.SeedB64 != "c2VlZGZyb21zdG9yZQ==" {
-		t.Errorf("creds from store = %+v", c)
+	if c.APIKey != "obx_from_file" || c.PrivateKeyB64 != "ZmlsZQ==" {
+		t.Errorf("creds from file = %+v", c)
 	}
 	if c.BaseURL != DefaultBaseURL {
 		t.Errorf("base url default = %q, want %q", c.BaseURL, DefaultBaseURL)
 	}
 }
 
-// The file secret backend (OPENBOX_SECRET_FILE) overrides the injected lookup —
-// the same nested-JSON format the CLI's fileStore writes.
-func TestResolveCredentials_FileBackend(t *testing.T) {
+// THE TRIPWIRE for the second-store bug (ADR-0015, D2). The credential file is
+// for secrets only: a coordinate written into it must be ignored, while the same
+// coordinate as a real environment variable is honoured. Before ADR-0015 the DID
+// lived in two stores and a stale copy silently reverted a corrected one.
+//
+// If this test is ever deleted or relaxed, that bug class is back. Adding
+// coordinates to .env is a decision to reopen, not a commit to make.
+func TestEnvFileIsNotACoordinateSource(t *testing.T) {
 	isolateConfig(t)
-	path := filepath.Join(t.TempDir(), "secrets.json")
-	blob := `{"ai.openbox.dev":{"acme/codex/api_key":"obx_from_file","acme/codex/private_key":"c2VlZGZyb21maWxl"}}`
-	if err := os.WriteFile(path, []byte(blob), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv(EnvDID, testDID)
-	t.Setenv(EnvSecretFile, path)
-	t.Setenv(EnvSecretService, "ai.openbox.dev")
-	t.Setenv(EnvAPIKeyAccount, "acme/codex/api_key")
-	t.Setenv(EnvPrivKeyAccount, "acme/codex/private_key")
-
-	c, err := ResolveCredentials(func(string, string) (string, error) {
-		t.Fatal("OS lookup must not be consulted when a secret file is configured")
-		return "", nil
+	writeEnvFileForTest(t, map[string]string{
+		EnvAPIKeyDirect:    "obx_k",
+		EnvAgentPrivateKey: "ZmlsZQ==",
+		EnvDID:             "did:aip:from-the-env-file",
+		EnvBaseURL:         "https://wrong.example",
 	})
+
+	// No DID anywhere else ⇒ the one in .env must NOT rescue it.
+	t.Setenv(EnvDID, "")
+	if _, err := ResolveCredentials(); err == nil {
+		t.Fatal("a DID in .env was treated as a coordinate source; that is the two-store bug ADR-0015 removed")
+	}
+
+	// The same DID as a real environment variable IS honoured.
+	t.Setenv(EnvDID, testDID)
+	c, err := ResolveCredentials()
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
-	if c.APIKey != "obx_from_file" || c.SeedB64 != "c2VlZGZyb21maWxl" {
-		t.Errorf("creds from file backend = %+v", c)
+	if c.DID != testDID {
+		t.Errorf("DID = %q, want the environment value %q", c.DID, testDID)
+	}
+	if c.BaseURL != DefaultBaseURL {
+		t.Errorf("base URL = %q, want the built-in default — .env must not supply a coordinate", c.BaseURL)
+	}
+}
+
+// A .env alone is deliberately NOT enough to run: it carries no DID, so the
+// failure is the clear no-DID error rather than something obscure later.
+func TestCredentialFileAloneIsNotSufficient(t *testing.T) {
+	isolateConfig(t)
+	t.Setenv(EnvDID, "")
+	writeEnvFileForTest(t, map[string]string{
+		EnvAPIKeyDirect:    "obx_k",
+		EnvAgentPrivateKey: "ZmlsZQ==",
+	})
+	_, err := ResolveCredentials()
+	if err == nil {
+		t.Fatal("expected the no-DID error")
+	}
+	if !strings.Contains(err.Error(), "DID") {
+		t.Errorf("error = %q, want it to name the missing DID", err)
+	}
+}
+
+// A CRLF-authored .env must not leave \r on a base64 signing key: it fails
+// signature verification with an error naming neither the file nor the character.
+func TestResolveCredentials_CRLFStrippedFromCredentialFile(t *testing.T) {
+	isolateConfig(t)
+	t.Setenv(EnvDID, testDID)
+	path, err := EnvFilePath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	body := EnvAPIKeyDirect + "=obx_k\r\n" + EnvAgentPrivateKey + "=YmFzZTY0\r\n"
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	c, err := ResolveCredentials()
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if c.PrivateKeyB64 != "YmFzZTY0" {
+		t.Errorf("private key = %q, want no trailing carriage return", c.PrivateKeyB64)
+	}
+}
+
+// The deprecated names keep working so nobody's CI breaks on upgrade. Three names
+// existed for one value and only OPENBOX_AGENT_PRIVATE_KEY was ever documented.
+func TestResolveCredentials_DeprecatedPrivateKeyNames(t *testing.T) {
+	for _, alias := range deprecatedPrivateKeyEnvNames {
+		t.Run(alias+"/env", func(t *testing.T) {
+			isolateConfig(t)
+			t.Setenv(EnvDID, testDID)
+			t.Setenv(EnvAPIKeyDirect, "obx_k")
+			t.Setenv(alias, "YWxpYXM=")
+			c, err := ResolveCredentials()
+			if err != nil {
+				t.Fatalf("resolve: %v", err)
+			}
+			if c.PrivateKeyB64 != "YWxpYXM=" {
+				t.Errorf("private key = %q, want the deprecated %s to still be read", c.PrivateKeyB64, alias)
+			}
+		})
+		t.Run(alias+"/file", func(t *testing.T) {
+			isolateConfig(t)
+			t.Setenv(EnvDID, testDID)
+			writeEnvFileForTest(t, map[string]string{EnvAPIKeyDirect: "obx_k", alias: "YWxpYXM="})
+			c, err := ResolveCredentials()
+			if err != nil {
+				t.Fatalf("resolve: %v", err)
+			}
+			if c.PrivateKeyB64 != "YWxpYXM=" {
+				t.Errorf("private key = %q, want the deprecated %s to still be read from the file", c.PrivateKeyB64, alias)
+			}
+		})
+	}
+}
+
+// The documented name wins over a deprecated alias when both are set.
+func TestResolveCredentials_DocumentedNameBeatsAlias(t *testing.T) {
+	isolateConfig(t)
+	t.Setenv(EnvDID, testDID)
+	t.Setenv(EnvAPIKeyDirect, "obx_k")
+	t.Setenv(EnvAgentPrivateKey, "Y3VycmVudA==")
+	t.Setenv("OPENBOX_ED25519_SEED", "b2xk")
+	c, err := ResolveCredentials()
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if c.PrivateKeyB64 != "Y3VycmVudA==" {
+		t.Errorf("private key = %q, want the documented name to win", c.PrivateKeyB64)
 	}
 }
 
 func TestResolveCredentials_MissingSecret(t *testing.T) {
 	isolateConfig(t)
 	t.Setenv(EnvDID, testDID)
-	t.Setenv(EnvAPIKeyDirect, "")
-	t.Setenv(EnvSeedDirect, "")
-	t.Setenv(EnvSecretService, "")
-	if _, err := ResolveCredentials(nil); err == nil {
-		t.Error("expected error when no api key source is configured")
+	_, err := ResolveCredentials()
+	if err == nil {
+		t.Fatal("expected an error when no api key source is configured")
+	}
+	// The error is where a user upgrading an existing install meets the
+	// no-keychain-migration decision, so it must name the way out.
+	if !strings.Contains(err.Error(), "openbox auth") {
+		t.Errorf("error = %q, want it to name `openbox auth`", err)
+	}
+}
+
+// An unparseable credential file must not read as "no credentials": that would
+// send a user hunting for a registration problem they do not have.
+func TestResolveCredentials_UnparseableFileIsAnError(t *testing.T) {
+	isolateConfig(t)
+	t.Setenv(EnvDID, testDID)
+	path, err := EnvFilePath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	dup := EnvAPIKeyDirect + "=obx_one\n" + EnvAPIKeyDirect + "=obx_two\n"
+	if err := os.WriteFile(path, []byte(dup), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ResolveCredentials(); err == nil {
+		t.Fatal("a duplicate-key credential file resolved as if it were empty")
 	}
 }
 
@@ -273,10 +412,18 @@ func TestBoolFlagPrecedence(t *testing.T) {
 	t.Setenv(EnvConfigPath, cfgPath)
 	os.Unsetenv(EnvEnforce)
 
-	// Default: no config field, no env → false (observe-only, fail-safe).
+	// Default: no config field, no env → TRUE (ADR-0016 reversed the observe
+	// default). Safe because enforcement is inert without an org policy and
+	// fail_closed stays off, so an outage never blocks a tool call.
 	write(`{"developer_did":"` + testDID + `"}`)
+	if !ResolveEnforce() {
+		t.Error("an absent enforce field must resolve to ON (ADR-0016)")
+	}
+	// And an explicit false must still be honoured, which is the property the
+	// *bool type change bought: as a plain bool it marshalled to nothing.
+	write(`{"developer_did":"` + testDID + `","enforce":false}`)
 	if ResolveEnforce() {
-		t.Error("default should be false")
+		t.Error("enforce:false in config must opt out")
 	}
 	// Config enables it.
 	write(`{"developer_did":"` + testDID + `","enforce":true}`)
@@ -323,14 +470,10 @@ func TestResolveTimeoutMS(t *testing.T) {
 	}
 }
 
-func TestOSSecretLookup_RejectsDashCoordinates(t *testing.T) {
-	if _, err := OSSecretLookup("-flag", "acct"); err == nil {
-		t.Error("leading-dash service should be rejected (arg-injection guard)")
-	}
-	if _, err := OSSecretLookup("svc", "-flag"); err == nil {
-		t.Error("leading-dash account should be rejected")
-	}
-}
+// The arg-injection guard this used to test is gone with its subject: credential
+// resolution no longer shells out to `security`/`secret-tool` with coordinates
+// taken from config, so there is no argv for a crafted value to be reparsed into
+// (ADR-0015). One fewer attack surface, not one fewer check.
 
 func TestSpoolDir(t *testing.T) {
 	t.Setenv(EnvSpoolDir, "/pinned/spool")

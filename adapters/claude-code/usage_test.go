@@ -20,7 +20,7 @@ import (
 // A fixed, well-formed Ed25519 seed (matches the client's own test vector) so the
 // sentinel test can drive the REAL AIP-signing client and inspect the exact bytes
 // that would go on the wire.
-const testSeedB64 = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="
+const testPrivateKeyB64 = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="
 
 // poisonedTranscript is a JSONL transcript shaped like a real Claude Code
 // transcript (verified against ~/.claude/projects/*.jsonl — including the
@@ -497,7 +497,7 @@ func TestFinops_NoContentOnWire(t *testing.T) {
 		BaseURL:               srv.URL,
 		APIKey:                "obx_test_0123456789abcdef0123456789abcdef0123456789abcdef",
 		DID:                   testDID,
-		SeedB64:               testSeedB64,
+		PrivateKeyB64:         testPrivateKeyB64,
 		ContentCaptureEnabled: true, // adversarial: stripper OFF
 	})
 	if err != nil {

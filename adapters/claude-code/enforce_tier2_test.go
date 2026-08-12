@@ -297,7 +297,7 @@ func tier2Creds(t *testing.T, baseURL string) {
 	t.Helper()
 	t.Setenv(envBaseURL, baseURL)
 	t.Setenv(envAPIKeyDirect, testTier2Key)
-	t.Setenv(envSeedDirect, testSeedB64)
+	t.Setenv(envAgentPrivateKey, testPrivateKeyB64)
 	t.Setenv(envContentCapture, "0")
 }
 

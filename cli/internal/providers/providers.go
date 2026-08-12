@@ -77,6 +77,6 @@ func cursorManual(ref provider.CredentialRef) string {
 Manual config until the bundle ships:
   - Add hooks.json / Team hooks over beforeSubmitPrompt, beforeMCPExecution,
     afterFileEdit that invoke 'openbox' (note: Cursor hooks fail-open).
-  - Credentials come from the OS secret store (service %q, DID %s), never inline.`,
-		ref.SecretService, ref.DID)
+  - Credentials come from ~/.openbox/.env (written by 'openbox auth'), never
+    inline. This install governs DID %s.`, ref.DID)
 }

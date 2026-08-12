@@ -27,12 +27,12 @@ func TestWriteConfig_ReInitKeepsEnforcePosture(t *testing.T) {
 	}
 
 	// A re-init that says nothing about posture.
-	if err := WriteConfig(path, Update{DID: "did:aip:x", SecretService: "svc"}); err != nil {
+	if err := WriteConfig(path, Update{DID: "did:aip:x", BaseURL: "https://core.example"}); err != nil {
 		t.Fatalf("re-init write: %v", err)
 	}
 
 	cfg := mustLoad(t, path)
-	if !cfg.Enforce {
+	if cfg.Enforce == nil || !*cfg.Enforce {
 		t.Error("re-init turned enforcement off; a run that never mentioned it must leave it alone")
 	}
 	if cfg.Tier2 == nil || !*cfg.Tier2 {
@@ -41,8 +41,8 @@ func TestWriteConfig_ReInitKeepsEnforcePosture(t *testing.T) {
 	if cfg.Findings == nil || !*cfg.Findings {
 		t.Error("re-init dropped findings")
 	}
-	if cfg.SecretService != "svc" {
-		t.Errorf("re-init did not apply the new value: secret_service = %q", cfg.SecretService)
+	if cfg.BaseURL != "https://core.example" {
+		t.Errorf("re-init did not apply the new value: base_url = %q", cfg.BaseURL)
 	}
 }
 
@@ -61,7 +61,13 @@ func TestWriteConfig_ExplicitDowngradeApplies(t *testing.T) {
 	if err := WriteConfig(path, u); err != nil {
 		t.Fatal(err)
 	}
-	if mustLoad(t, path).Enforce {
+	// The opt-out must be PRESENT and false, not absent — under enforce-by-default
+	// an absent field reads as ON, so a dropped field is a silent re-enable.
+	got := mustLoad(t, path).Enforce
+	if got == nil {
+		t.Fatal("the opt-out was dropped from the file; an absent enforce now means ON")
+	}
+	if *got {
 		t.Error("--no-enforce did not turn enforcement off")
 	}
 }
@@ -91,7 +97,7 @@ func TestWriteConfig_KeepsCoordinatesItWasNotGiven(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := WriteConfig(path, Update{SecretService: "svc"}); err != nil {
+	if err := WriteConfig(path, Update{BaseURL: "https://core.example"}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -119,7 +125,6 @@ func TestWriteConfig_KeepsFieldsTheUpdateCannotExpress(t *testing.T) {
 		Finops:           boolPtr(true),
 		FailClosed:       true,
 		Tier2TimeoutMS:   2500,
-		SecretFile:       "secrets-e2e.json",
 		OrgSigningPubKey: "Zm9vYmFy",
 		SecretDetection:  boolPtr(false),
 	}
@@ -137,7 +142,7 @@ func TestWriteConfig_KeepsFieldsTheUpdateCannotExpress(t *testing.T) {
 
 	cfg := mustLoad(t, path)
 	if cfg.Finops == nil || !*cfg.Finops || !cfg.FailClosed || cfg.Tier2TimeoutMS != 2500 ||
-		cfg.SecretFile != "secrets-e2e.json" || cfg.OrgSigningPubKey != "Zm9vYmFy" ||
+		cfg.OrgSigningPubKey != "Zm9vYmFy" ||
 		cfg.SecretDetection == nil || *cfg.SecretDetection {
 		t.Errorf("hand-tuned settings did not survive a re-init: %+v", cfg)
 	}
@@ -154,7 +159,7 @@ func TestWriteConfig_OverwritesUnparseablePriorConfig(t *testing.T) {
 		t.Fatalf("write over a corrupt config: %v", err)
 	}
 	cfg := mustLoad(t, path)
-	if cfg.DID != "did:aip:x" || !cfg.Enforce {
+	if cfg.DID != "did:aip:x" || cfg.Enforce == nil || !*cfg.Enforce {
 		t.Errorf("recovery write did not take: %+v", cfg)
 	}
 }

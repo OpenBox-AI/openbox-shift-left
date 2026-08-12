@@ -16,9 +16,9 @@ TB_DIR="$(cd "$(dirname "$0")" && pwd)"
 [ -d "$TB_PROJECT/.claude" ] || tb_fatal "project not governed — run 10-onboard.sh first"
 
 export OPENBOX_ENFORCE=1
-BUNDLE="$XDG_CONFIG_HOME/openbox/policy-bundle.json"
-AUDIT="$XDG_CONFIG_HOME/openbox/enforcements.jsonl"
-STALE_DIR="$XDG_CONFIG_HOME/openbox/stale"
+BUNDLE="$OPENBOX_SIDECAR_BUNDLE"
+AUDIT="$OPENBOX_ENFORCEMENT_FILE"
+STALE_DIR="$OPENBOX_STALE_DIR"
 CORE_CTR="${TB_CORE_CTR:-openbox-local-openbox-core-1}"
 run="$(date +%s)"
 
@@ -140,7 +140,7 @@ assert_eq "sync cleared the stale markers" 0 "$(find "$STALE_DIR" -type f 2>/dev
 
 # ── E. findings channel ───────────────────────────────────────────────────────
 tb_step "E · findings loop"
-ADVISORIES="$XDG_CONFIG_HOME/openbox/advisories.jsonl"
+ADVISORIES="$OPENBOX_ADVISORY_FILE"
 if [ -s "$ADVISORIES" ]; then
 	before_lines="$(wc -l <"$ADVISORIES")"
 	OPENBOX_FINDINGS=1 tb_session "Read README.md and summarise it in one line." "Read" >/dev/null

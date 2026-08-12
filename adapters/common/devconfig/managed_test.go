@@ -30,7 +30,7 @@ func TestManaged_LockedFieldBeatsEnvAndUser(t *testing.T) {
 	t.Setenv(EnvEnforce, "0") // the developer's escape hatch
 
 	got, src := resolveBoolWithSource("enforce",
-		func(c DevConfig) *bool { b := c.Enforce; return &b }, false, EnvEnforce)
+		func(c DevConfig) *bool { return c.Enforce }, false, EnvEnforce)
 	if !got {
 		t.Error("a locked managed field must override both the user config and the env")
 	}
@@ -95,7 +95,7 @@ func TestManaged_NoManagedFileIsUnchangedBehaviour(t *testing.T) {
 	t.Setenv(EnvConfigPath, userPath)
 
 	got, src := resolveBoolWithSource("enforce",
-		func(c DevConfig) *bool { b := c.Enforce; return &b }, false, EnvEnforce)
+		func(c DevConfig) *bool { return c.Enforce }, false, EnvEnforce)
 	if !got || src != SourceUser {
 		t.Errorf("enforce = (%v, %q), want (true, user)", got, src)
 	}
@@ -116,7 +116,7 @@ func TestManaged_MalformedFileDegradesButIsReported(t *testing.T) {
 	t.Setenv(EnvConfigPath, filepath.Join(dir, "absent.json"))
 
 	got, src := resolveBoolWithSource("enforce",
-		func(c DevConfig) *bool { b := c.Enforce; return &b }, false, EnvEnforce)
+		func(c DevConfig) *bool { return c.Enforce }, false, EnvEnforce)
 	if got || src != SourceDefault {
 		t.Errorf("a malformed managed file must not fabricate a value, got (%v, %q)", got, src)
 	}
@@ -216,7 +216,7 @@ func TestManaged_ShippedTemplateLoadsAndLocks(t *testing.T) {
 	// env override.
 	t.Setenv(EnvEnforce, "0")
 	got, src := resolveBoolWithSource("enforce",
-		func(c DevConfig) *bool { b := c.Enforce; return &b }, false, EnvEnforce)
+		func(c DevConfig) *bool { return c.Enforce }, false, EnvEnforce)
 	if !got || src != SourceManaged {
 		t.Errorf("template enforce = (%v, %q), want (true, managed)", got, src)
 	}
@@ -239,7 +239,7 @@ func TestManaged_DocKeyIsNotASetting(t *testing.T) {
 	t.Setenv(EnvConfigPath, filepath.Join(dir, "absent.json"))
 
 	got, src := resolveBoolWithSource("enforce",
-		func(c DevConfig) *bool { b := c.Enforce; return &b }, false, EnvEnforce)
+		func(c DevConfig) *bool { return c.Enforce }, false, EnvEnforce)
 	if got || src != SourceDefault {
 		t.Errorf("a comment about enforce must not enforce anything, got (%v, %q)", got, src)
 	}

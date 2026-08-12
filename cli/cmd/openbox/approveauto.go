@@ -65,7 +65,15 @@ func (a *app) runApproveAuto(cl *backend.Client, orgID string, f autoFlags) int 
 	// --allow-decide. An absent approver.json means shadow: an approver that
 	// starts deciding because nothing said not to is the failure this mode
 	// exists to prevent.
-	installedMayDecide := installed.ControlTokenAccount != "" && !installed.Shadow
+	//
+	// OrgID is the "an install actually happened" marker. It used to be
+	// ControlTokenAccount, which ADR-0015 removed along with the secret-store
+	// coordinates; OrgID replaces it exactly, because `init --role approver`
+	// requires --org and so never writes a config without one. The load-bearing
+	// part is that SOME required field is checked: a zero-value ApproverConfig
+	// from an absent file has Shadow == false, so testing !Shadow alone would
+	// grant decide authority to an approver nobody installed.
+	installedMayDecide := installed.OrgID != "" && !installed.Shadow
 	shadow := !(f.decide || installedMayDecide)
 
 	env, err := approver.LoadEnvelope(envelopePath)

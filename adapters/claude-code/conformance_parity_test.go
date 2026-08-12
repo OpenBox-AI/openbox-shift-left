@@ -274,10 +274,10 @@ func TestWire_ToolEventsAreActivityPairs(t *testing.T) {
 	defer srv.Close()
 
 	cl, err := client.New(client.Config{
-		BaseURL: srv.URL,
-		APIKey:  "obx_test_0123456789abcdef0123456789abcdef0123456789abcdef",
-		DID:     testDID,
-		SeedB64: testSeedB64,
+		BaseURL:       srv.URL,
+		APIKey:        "obx_test_0123456789abcdef0123456789abcdef0123456789abcdef",
+		DID:           testDID,
+		PrivateKeyB64: testPrivateKeyB64,
 	})
 	if err != nil {
 		t.Fatalf("client.New: %v", err)

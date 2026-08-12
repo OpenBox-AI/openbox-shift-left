@@ -9,7 +9,6 @@ import (
 
 	"github.com/openbox-ai/openbox-shift-left/adapters/common/devconfig"
 	"github.com/openbox-ai/openbox-shift-left/cli/internal/backend"
-	"github.com/openbox-ai/openbox-shift-left/cli/internal/secret"
 )
 
 // `openbox approve` — the terminal half of the human approval tier (E9 §2.3).
@@ -66,7 +65,7 @@ func (a *app) approveClient(orgID, clientID string) (*backend.Client, string, in
 
 	token := a.getenv(devconfig.EnvControlToken)
 	if token == "" {
-		token = a.approverToken(cfg)
+		token = a.approverToken()
 	}
 	if token == "" {
 		return nil, "", a.errorf("no approver credential — run `openbox init --role approver --org <id>`, "+
@@ -89,33 +88,22 @@ func (a *app) approveClient(orgID, clientID string) (*backend.Client, string, in
 	return backend.New(backendURL, token, clientID), orgID, exitOK
 }
 
-// approverToken reads the credential `init --role approver` stored, by the
-// coordinates the config carries. A missing store or entry is not an error
-// here: the caller reports the one honest message for "no credential at all".
-func (a *app) approverToken(cfg devconfig.ApproverConfig) string {
-	if cfg.ControlTokenAccount == "" {
-		return ""
-	}
-	service := cfg.SecretService
-	if service == "" {
-		service = secret.Service
-	}
-	var (
-		store secret.Store
-		err   error
-	)
-	if cfg.SecretFile != "" {
-		// Named at install time, so it is read from where it was written
-		// rather than from wherever the default resolves today.
-		store = secret.NewFileStore(cfg.SecretFile)
-	} else if store, err = a.openStore("auto"); err != nil {
-		return ""
-	}
-	v, err := store.Get(service, cfg.ControlTokenAccount)
+// approverToken reads the credential `init --role approver` wrote to
+// ~/.openbox/.env. An absent file or key is not an error here: the caller
+// reports the one honest message for "no credential at all".
+//
+// The environment still wins over this (see approveClient), which is why the
+// order there is env-then-file rather than the reverse.
+func (a *app) approverToken() string {
+	path, err := devconfig.EnvFilePath()
 	if err != nil {
 		return ""
 	}
-	return v
+	kv, err := devconfig.ParseEnvFile(path)
+	if err != nil {
+		return ""
+	}
+	return kv[devconfig.EnvControlToken]
 }
 
 func (a *app) runApproveList(args []string) int {
