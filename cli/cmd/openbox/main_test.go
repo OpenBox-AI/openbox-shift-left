@@ -349,6 +349,14 @@ func TestUnifiedBinaryHookObserveOnlyContract(t *testing.T) {
 		"OPENBOX_AGENT_DID=did:aip:7f3c9b2e-0000-5000-a000-000000000001",
 		"OPENBOX_SPOOL_DIR="+spool,
 		"OPENBOX_CONFIG="+filepath.Join(dir, "none.json"),
+		// OPENBOX_HOME too, or the subprocess reads the DEVELOPER'S real
+		// ~/.openbox/dev.json (ADR-0015 moved config there). Pinning
+		// OPENBOX_CONFIG alone is not enough: a base_url resolved from the real
+		// file changes what the hook does, and these assertions then depend on
+		// whether whoever runs them has ever run `openbox auth`. CI has no
+		// ~/.openbox, so this fails only on a real developer's machine — which
+		// is the worst place for a test to start disagreeing with CI.
+		"OPENBOX_HOME="+dir,
 		"OPENBOX_SESSION_DIR="+filepath.Join(dir, "sessions"),
 	)
 	var stdout, stderr strings.Builder
@@ -571,6 +579,14 @@ func TestHookRealtimeDelivery(t *testing.T) {
 		"OPENBOX_AGENT_DID=did:aip:7f3c9b2e-0000-5000-a000-000000000001",
 		"OPENBOX_SPOOL_DIR="+spool,
 		"OPENBOX_CONFIG="+filepath.Join(dir, "none.json"),
+		// OPENBOX_HOME too, or the subprocess reads the DEVELOPER'S real
+		// ~/.openbox/dev.json (ADR-0015 moved config there). Pinning
+		// OPENBOX_CONFIG alone is not enough: a base_url resolved from the real
+		// file changes what the hook does, and these assertions then depend on
+		// whether whoever runs them has ever run `openbox auth`. CI has no
+		// ~/.openbox, so this fails only on a real developer's machine — which
+		// is the worst place for a test to start disagreeing with CI.
+		"OPENBOX_HOME="+dir,
 		"OPENBOX_SESSION_DIR="+filepath.Join(dir, "sessions"),
 		"OPENBOX_BASE_URL="+srv.URL,
 		"OPENBOX_API_KEY=obx_test_"+strings.Repeat("a", 48),
@@ -1064,6 +1080,14 @@ func TestCodexUnifiedBinaryObserveE2E(t *testing.T) {
 		"OPENBOX_AGENT_DID=did:aip:7f3c9b2e-0000-5000-a000-000000000001",
 		"OPENBOX_SPOOL_DIR="+spool,
 		"OPENBOX_CONFIG="+filepath.Join(dir, "none.json"),
+		// OPENBOX_HOME too, or the subprocess reads the DEVELOPER'S real
+		// ~/.openbox/dev.json (ADR-0015 moved config there). Pinning
+		// OPENBOX_CONFIG alone is not enough: a base_url resolved from the real
+		// file changes what the hook does, and these assertions then depend on
+		// whether whoever runs them has ever run `openbox auth`. CI has no
+		// ~/.openbox, so this fails only on a real developer's machine — which
+		// is the worst place for a test to start disagreeing with CI.
+		"OPENBOX_HOME="+dir,
 		"CODEX_HOME="+filepath.Join(dir, "codex-home"),
 		// G_SEC SL7-A F3: pin every default-real-path sink for the subprocess too.
 		"OPENBOX_ADVISORY_FILE="+filepath.Join(dir, "advisories.jsonl"),
