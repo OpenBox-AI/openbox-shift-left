@@ -8,6 +8,7 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/adapters/common/hookflow"
 	"github.com/openbox-ai/openbox-shift-left/client"
 	"github.com/openbox-ai/openbox-shift-left/decision"
+	providerspi "github.com/openbox-ai/openbox-shift-left/provider"
 )
 
 const bashToolName = "Bash"
@@ -29,23 +30,28 @@ const maxTier2Timeout = 4 * time.Second
 // only an escalation can hold.
 const preToolUseHookTimeoutSec = 30
 
-// hookBudgetMargin is the slack reserved under the installed timeout for the
-// non-gate work bracketing the gate (config reads, classify, apply, spool,
-// audit), so our verdict is written well before Claude Code's kill.
-const hookBudgetMargin = 1 * time.Second
+// otherHookTimeoutSec is the `timeout` installed on every non-gating hook. The
+// tightest of them, declared as the ceiling for all: SessionEnd gets 15s, but a
+// budget derived from the shortest is the one that holds everywhere.
+const otherHookTimeoutSec = 5
 
-// maxEnforceHookBudget caps the whole enforce PreToolUse hook's wall clock (T1
-// decider + T2 /evaluate + a possible approval hold, which run sequentially) so
-// their independently-clamped budgets can never jointly exceed Claude Code's
-// hook timeout — which would fail open and let a fail-closed org's high-risk
-// call run ungoverned.
-const maxEnforceHookBudget = time.Duration(preToolUseHookTimeoutSec)*time.Second - hookBudgetMargin
+// HookCeilings declares what Claude Code kills a hook at, so hookflow derives
+// its own budget (EnforceBudget subtracts the engine's margin). The values are
+// the ones our own installer writes — localhooks.go for a project-scope install,
+// the plugin bundle's hooks/hooks.json for the plugin — because the installed
+// timeout, not the tool's default, is what actually kills the hook.
+func (Engine) HookCeilings() providerspi.HookCeiling {
+	return providerspi.HookCeiling{
+		Gating: time.Duration(preToolUseHookTimeoutSec) * time.Second,
+		Other:  otherHookTimeoutSec * time.Second,
+	}
+}
 
-// tier2 binds the shared escalation to this provider's hook budget and
+// tier2 binds the shared escalation to this provider's declared ceiling and
 // transport. The escalation itself — bounded run, degrade-on-timeout, verdict
 // mapping — is provider-independent and lives in hookflow.
 var tier2 = hookflow.Tier2{
-	HookBudget: maxEnforceHookBudget,
+	Ceiling:    Engine{}.HookCeilings(),
 	MaxTimeout: maxTier2Timeout,
 	NewClient: func(logger *log.Logger) (hookflow.Governor, error) {
 		creds, err := ResolveCredentials()

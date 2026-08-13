@@ -328,16 +328,16 @@ func TestEnforceDecision_ObtainsRealVerdict(t *testing.T) {
 // The adapter-owned clamps are DERIVED from the installed gate-hook timeout, not
 // copied from Claude Code's constants (OD-SL7-T2-TIMEOUT).
 func TestClampsDerivedFromInstalledTimeout(t *testing.T) {
-	if installedGateHookTimeout != time.Duration(preToolUseHookTimeoutSec)*time.Second {
-		t.Errorf("installedGateHookTimeout must derive from the installer's preToolUseHookTimeoutSec")
+	if (Engine{}).HookCeilings().Gating != time.Duration(preToolUseHookTimeoutSec)*time.Second {
+		t.Errorf("(Engine{}).HookCeilings().Gating must derive from the installer's preToolUseHookTimeoutSec")
 	}
-	if maxEnforceHookBudget != installedGateHookTimeout-hookBudgetMargin {
-		t.Errorf("maxEnforceHookBudget must be the installed timeout minus the margin")
+	if hookflow.EnforceBudget((Engine{}).HookCeilings()) != (Engine{}).HookCeilings().Gating-hookflow.HookBudgetMargin {
+		t.Errorf("hookflow.EnforceBudget((Engine{}).HookCeilings()) must be the installed timeout minus the margin")
 	}
-	if maxEnforceHookBudget >= installedGateHookTimeout {
+	if hookflow.EnforceBudget((Engine{}).HookCeilings()) >= (Engine{}).HookCeilings().Gating {
 		t.Errorf("the whole-hook budget must land strictly before Codex's hook kill (probe P1 fail-open)")
 	}
-	if maxTier2Timeout > maxEnforceHookBudget {
+	if maxTier2Timeout > hookflow.EnforceBudget((Engine{}).HookCeilings()) {
 		t.Errorf("the T2 clamp must stay within the whole-hook budget")
 	}
 }

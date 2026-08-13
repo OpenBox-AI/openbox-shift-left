@@ -52,13 +52,13 @@ func TestTier2Decision_Codex(t *testing.T) {
 
 func TestTier2Budget_ClampsUnderWholeHookBudget(t *testing.T) {
 	// A T1 gate that already consumed most of the budget leaves T2 a smaller slice.
-	start := time.Now().Add(-(maxEnforceHookBudget - 200*time.Millisecond))
+	start := time.Now().Add(-(hookflow.EnforceBudget((Engine{}).HookCeilings()) - 200*time.Millisecond))
 	if b := tier2Budget(start); b > 300*time.Millisecond {
 		t.Errorf("tier2Budget = %v, want it clamped to the remaining whole-hook budget", b)
 	}
 	// A T1 gate that overran the whole budget yields a non-positive T2 budget →
 	// escalateTier2 fail-opens immediately (safe direction).
-	over := time.Now().Add(-2 * maxEnforceHookBudget)
+	over := time.Now().Add(-2 * hookflow.EnforceBudget((Engine{}).HookCeilings()))
 	if b := tier2Budget(over); b > 0 {
 		t.Errorf("tier2Budget after overrun = %v, want non-positive (immediate fail-open)", b)
 	}

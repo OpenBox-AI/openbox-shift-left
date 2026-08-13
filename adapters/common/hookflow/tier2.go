@@ -8,6 +8,7 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/adapters/common/devconfig"
 	"github.com/openbox-ai/openbox-shift-left/client"
 	"github.com/openbox-ai/openbox-shift-left/decision"
+	"github.com/openbox-ai/openbox-shift-left/provider"
 )
 
 // Decision sources for a Tier-2 escalation, distinct from the local bundle's so
@@ -22,19 +23,45 @@ const (
 // provider's hook kill.
 const DefaultTier2Timeout = 3500 * time.Millisecond
 
+// HookBudgetMargin is the slack reserved under the provider's declared gating
+// ceiling for the non-gate work that brackets the gate: config reads, classify,
+// apply, spool, audit. 1s is generous for in-process work plus one bounded
+// stdout write.
+//
+// It lives here rather than in each adapter because it describes what the ENGINE
+// does around the gate, which is the same work whatever the provider. Both
+// adapters previously declared their own identical copy next to their own
+// hardcoded ceiling.
+const HookBudgetMargin = 1 * time.Second
+
+// EnforceBudget is the whole-hook wall clock the gate may spend: the provider's
+// declared gating ceiling less the margin. The T1 gate, the evaluation and any
+// approval hold run sequentially inside it, so their individually-clamped
+// budgets can never jointly push the hook past the provider's kill.
+//
+// A ceiling at or below the margin yields a non-positive budget, which makes
+// every evaluation fail open immediately rather than risk a killed hook. That is
+// the safe direction by construction, and it is why this returns a duration
+// instead of erroring: a misdeclared ceiling degrades to "do not block", never
+// to "block past the kill".
+func EnforceBudget(c provider.HookCeiling) time.Duration {
+	return c.Gating - HookBudgetMargin
+}
+
 // Tier2 is the synchronous escalation to the control plane for high-risk tool
 // classes, used when the local Tier-1 decision would otherwise proceed.
 //
-// The two providers differ in exactly one value — the wall-clock ceiling for the
-// whole hook, which Claude Code fixes at 4s under its 5s kill while Codex
-// derives it from its installed hook timeout. That is now a field rather than a
-// reason to carry a second copy of the escalation.
+// The two providers differ in exactly one value — the wall-clock ceiling the
+// tool kills the hook at. That is now declared through the SPI
+// (provider.HookCeiling) rather than hardcoded per adapter, so the engine
+// derives its own budget and no adapter carries a timeout the engine cannot see.
 type Tier2 struct {
-	// HookBudget is the whole-hook wall-clock ceiling: the T1 gate and a
-	// possible T2 run sequentially, and their independently-clamped budgets
-	// must never jointly push the hook past the provider's kill (which would
-	// fail open and defeat a fail-closed org).
-	HookBudget time.Duration
+	// Ceiling is the provider's declared hook-kill limit. The whole-hook
+	// budget derives from it via EnforceBudget: the T1 gate, the evaluation
+	// and any approval hold run sequentially, and their independently-clamped
+	// budgets must never jointly push the hook past the kill (which would fail
+	// open and defeat a fail-closed org).
+	Ceiling provider.HookCeiling
 	// MaxTimeout clamps the configured per-escalation budget.
 	MaxTimeout time.Duration
 	// NewClient builds the control-plane transport for the escalation and for
@@ -88,11 +115,11 @@ func (t Tier2) Budget(enforceStart time.Time, configured time.Duration) time.Dur
 	return budget
 }
 
-// remaining is what is left of the whole-hook ceiling. Every budget the gate
-// hands out is clamped by it, so the tiers can never jointly overrun the
-// provider's hook timeout however they are configured individually.
+// remaining is what is left of the whole-hook budget. Every budget the gate
+// hands out is clamped by it, so the sequential steps can never jointly overrun
+// the provider's hook timeout however they are configured individually.
 func (t Tier2) remaining(enforceStart time.Time) time.Duration {
-	return t.HookBudget - time.Since(enforceStart)
+	return EnforceBudget(t.Ceiling) - time.Since(enforceStart)
 }
 
 // Escalate runs one bounded Tier-2 evaluation for an already-mapped event.

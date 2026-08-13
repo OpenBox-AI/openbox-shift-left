@@ -107,8 +107,8 @@ func TestEnforcementConformance_Codex(t *testing.T) {
 		if out := run(t, dangerPayload); strings.TrimSpace(out) != "" {
 			t.Errorf("fail-open outage must proceed (empty stdout); got %q", out)
 		}
-		if elapsed := time.Since(start); elapsed > maxEnforceHookBudget {
-			t.Errorf("enforce wait %v exceeds the derived whole-hook budget %v (probe P1: Codex fails open past it)", elapsed, maxEnforceHookBudget)
+		if elapsed := time.Since(start); elapsed > hookflow.EnforceBudget((Engine{}).HookCeilings()) {
+			t.Errorf("enforce wait %v exceeds the derived whole-hook budget %v (probe P1: Codex fails open past it)", elapsed, hookflow.EnforceBudget((Engine{}).HookCeilings()))
 		}
 	})
 
@@ -176,12 +176,12 @@ func TestEnforcementConformance_Codex(t *testing.T) {
 		// no network path to time out in-process (ADR-0006), so the conformance
 		// obligation is the static invariant that our verdict LANDS before Codex's kill:
 		// the whole-hook budget is strictly under the installed gate-hook timeout.
-		if maxEnforceHookBudget >= installedGateHookTimeout {
+		if hookflow.EnforceBudget((Engine{}).HookCeilings()) >= (Engine{}).HookCeilings().Gating {
 			t.Fatalf("whole-hook budget %v must be < installed gate-hook timeout %v (else Codex's fail-open kill defeats fail-closed)",
-				maxEnforceHookBudget, installedGateHookTimeout)
+				hookflow.EnforceBudget((Engine{}).HookCeilings()), (Engine{}).HookCeilings().Gating)
 		}
-		if maxTier2Timeout > maxEnforceHookBudget {
-			t.Errorf("T2 clamp %v must stay within the whole-hook budget %v", maxTier2Timeout, maxEnforceHookBudget)
+		if maxTier2Timeout > hookflow.EnforceBudget((Engine{}).HookCeilings()) {
+			t.Errorf("T2 clamp %v must stay within the whole-hook budget %v", maxTier2Timeout, hookflow.EnforceBudget((Engine{}).HookCeilings()))
 		}
 	})
 

@@ -14,6 +14,7 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/adapters/common/devconfig"
 	"github.com/openbox-ai/openbox-shift-left/client"
 	"github.com/openbox-ai/openbox-shift-left/decision"
+	"github.com/openbox-ai/openbox-shift-left/provider"
 )
 
 // shellTarget is a high-risk (shell) tool call, the class the gate escalates.
@@ -67,7 +68,7 @@ func runGate(t *testing.T, g *fakeGovernor, holdMS string) (string, decision.Dec
 	gate := EnforceGate{
 		Contract: testContract{approval: "ask"},
 		Tier2: Tier2{
-			HookBudget: 29 * time.Second,
+			Ceiling:    provider.HookCeiling{Gating: 30 * time.Second},
 			MaxTimeout: 4 * time.Second,
 			NewClient:  func(*log.Logger) (Governor, error) { return approvalGovernor{fakeGovernor: g}, nil },
 		},
@@ -202,7 +203,7 @@ func TestGate_DoesNotHoldForAnUnfiledApproval(t *testing.T) {
 	gate := EnforceGate{
 		Contract: testContract{approval: "ask"},
 		Tier2: Tier2{
-			HookBudget: 29 * time.Second,
+			Ceiling:    provider.HookCeiling{Gating: 30 * time.Second},
 			MaxTimeout: 100 * time.Millisecond,
 			NewClient:  func(*log.Logger) (Governor, error) { return degradedGovernor{fakeGovernor: g}, nil },
 		},

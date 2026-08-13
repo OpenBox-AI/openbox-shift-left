@@ -185,18 +185,38 @@ func TestTier2Budget(t *testing.T) {
 	}
 	// T1 already consumed the whole-hook cap → the remainder (and thus the budget) is
 	// non-positive, so escalateTier2 fail-opens immediately rather than overrun the hook.
-	if got := tier2Budget(time.Now().Add(-maxEnforceHookBudget - time.Second)); got > 0 {
+	if got := tier2Budget(time.Now().Add(-hookflow.EnforceBudget(Engine{}.HookCeilings()) - time.Second)); got > 0 {
 		t.Errorf("exhausted-cap budget = %v, want <= 0 (immediate fail-open)", got)
 	}
-	// The whole-hook cap must land strictly before Claude Code's kill — derived
-	// from the timeout the plugin actually installs, not a literal, so raising
-	// one raises the other.
+}
+
+// The verdict-before-ceiling pin. Since ADR-0017 every gated call waits on a
+// network verdict, so this is a security control rather than arithmetic
+// hygiene: a hook killed before it writes lets the tool run, and no org setting
+// — not even fail_closed — can stop it, because there is no hook left to deny
+// with.
+//
+// It is stated against the SPI-declared ceiling and the timeout the installer
+// actually writes, never a literal, so raising one raises the other and the two
+// cannot drift apart silently.
+func TestEnforceBudgetStaysUnderTheDeclaredCeiling(t *testing.T) {
+	ceiling := Engine{}.HookCeilings()
 	installed := time.Duration(preToolUseHookTimeoutSec) * time.Second
-	if maxEnforceHookBudget >= installed {
-		t.Errorf("maxEnforceHookBudget %v must stay under the installed PreToolUse timeout %v", maxEnforceHookBudget, installed)
+	if ceiling.Gating != installed {
+		t.Errorf("declared gating ceiling %v must equal the installed PreToolUse timeout %v",
+			ceiling.Gating, installed)
 	}
-	if maxTier2Timeout > maxEnforceHookBudget {
-		t.Errorf("the T2 clamp %v must stay within the whole-hook budget %v", maxTier2Timeout, maxEnforceHookBudget)
+	budget := hookflow.EnforceBudget(ceiling)
+	if budget >= ceiling.Gating {
+		t.Errorf("whole-hook budget %v must stay strictly under the ceiling %v; "+
+			"a hook killed mid-gate lets the tool run ungoverned", budget, ceiling.Gating)
+	}
+	if maxTier2Timeout > budget {
+		t.Errorf("the evaluation clamp %v must stay within the whole-hook budget %v",
+			maxTier2Timeout, budget)
+	}
+	if ceiling.Other <= 0 {
+		t.Error("a non-gating ceiling of zero would make every non-gate hook budget negative")
 	}
 }
 

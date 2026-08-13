@@ -12,6 +12,7 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/adapters/common/devconfig"
 	"github.com/openbox-ai/openbox-shift-left/client"
 	"github.com/openbox-ai/openbox-shift-left/decision"
+	"github.com/openbox-ai/openbox-shift-left/provider"
 )
 
 // fakeGovernor answers polls from a scripted sequence, so a test can express
@@ -56,7 +57,7 @@ func holdTier2(t *testing.T, g *fakeGovernor, holdMS string) Tier2 {
 	isolateConfig(t)
 	t.Setenv(devconfig.EnvApprovalHold, holdMS)
 	return Tier2{
-		HookBudget: 29 * time.Second,
+		Ceiling:    provider.HookCeiling{Gating: 30 * time.Second},
 		MaxTimeout: 4 * time.Second,
 		NewClient:  func(*log.Logger) (Governor, error) { return g, nil },
 	}
@@ -140,7 +141,7 @@ func TestAwaitApproval_UndecidedWithinBudget(t *testing.T) {
 // none left there is no room to hold, so the caller denies immediately rather
 // than overrun the hook and be killed (which fails open).
 func TestHoldBudget_ClampedByTheHookCeiling(t *testing.T) {
-	tr := Tier2{HookBudget: 29 * time.Second}
+	tr := Tier2{Ceiling: provider.HookCeiling{Gating: 30 * time.Second}}
 	if got := tr.HoldBudget(time.Now(), 20*time.Second); got != 20*time.Second {
 		t.Errorf("fresh hold budget = %v, want the configured 20s", got)
 	}

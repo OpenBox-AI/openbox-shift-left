@@ -8,20 +8,32 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/adapters/common/hookflow"
 	"github.com/openbox-ai/openbox-shift-left/client"
 	"github.com/openbox-ai/openbox-shift-left/decision"
+	providerspi "github.com/openbox-ai/openbox-shift-left/provider"
 )
 
 const bashToolName = "Bash"
 
-// maxTier2Timeout caps the configurable T2 budget at the whole-hook ceiling;
-// unlike Claude Code's fixed 5s kill, Codex's is derived from the timeout this
-// installer wrote into hooks.json.
-const maxTier2Timeout = maxEnforceHookBudget
+// HookCeilings declares what Codex kills a hook at. Codex's own default is 600s,
+// but the ceiling that matters is the `timeout` this installer writes on each
+// handler — that is the value Codex enforces, and it is what an org changes if
+// it wants more headroom. Declaring the installed value keeps the engine's
+// budget correct without a second edit when it moves.
+func (Engine) HookCeilings() providerspi.HookCeiling {
+	return providerspi.HookCeiling{
+		Gating: time.Duration(preToolUseHookTimeoutSec) * time.Second,
+		Other:  time.Duration(hotHookTimeoutSec) * time.Second,
+	}
+}
 
-// tier2 binds the shared escalation to this provider's hook budget and
+// maxTier2Timeout caps the configurable evaluation budget at the whole-hook
+// budget derived from the declared ceiling.
+var maxTier2Timeout = hookflow.EnforceBudget(Engine{}.HookCeilings())
+
+// tier2 binds the shared escalation to this provider's declared ceiling and
 // transport. The escalation itself — bounded run, degrade-on-timeout, verdict
 // mapping — is provider-independent and lives in hookflow.
 var tier2 = hookflow.Tier2{
-	HookBudget: maxEnforceHookBudget,
+	Ceiling:    Engine{}.HookCeilings(),
 	MaxTimeout: maxTier2Timeout,
 	NewClient: func(logger *log.Logger) (hookflow.Governor, error) {
 		creds, err := ResolveCredentials()

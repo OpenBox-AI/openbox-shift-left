@@ -11,6 +11,7 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/adapters/common/devconfig"
 	"github.com/openbox-ai/openbox-shift-left/client"
 	"github.com/openbox-ai/openbox-shift-left/decision"
+	"github.com/openbox-ai/openbox-shift-left/provider"
 )
 
 // The invariant these tests pin: ONE gated tool call puts exactly ONE
@@ -44,7 +45,7 @@ func deliveringGate(t *testing.T, gov Governor, tier2Enabled string) (spooled bo
 	gate := EnforceGate{
 		Contract: testContract{approval: "ask"},
 		Tier2: Tier2{
-			HookBudget: 29 * time.Second,
+			Ceiling:    provider.HookCeiling{Gating: 30 * time.Second},
 			MaxTimeout: 4 * time.Second,
 			NewClient:  func(*log.Logger) (Governor, error) { return gov, nil },
 		},
@@ -146,7 +147,7 @@ func TestGate_ObserveCopySpooledWhenEscalationOutlivesItsBudget(t *testing.T) {
 	gate := EnforceGate{
 		Contract: testContract{approval: "ask"},
 		Tier2: Tier2{
-			HookBudget: 29 * time.Second,
+			Ceiling:    provider.HookCeiling{Gating: 30 * time.Second},
 			MaxTimeout: 4 * time.Second,
 			NewClient:  func(*log.Logger) (Governor, error) { return gov, nil },
 		},
@@ -185,7 +186,7 @@ func TestGate_ObserveCopySpooledOnStaleGateEarlyReturn(t *testing.T) {
 	gate := EnforceGate{
 		Contract: testContract{approval: "ask"},
 		Tier2: Tier2{
-			HookBudget: 29 * time.Second,
+			Ceiling:    provider.HookCeiling{Gating: 30 * time.Second},
 			MaxTimeout: 4 * time.Second,
 			NewClient: func(*log.Logger) (Governor, error) {
 				t.Error("stale gate must deny before any escalation")
@@ -215,7 +216,7 @@ func TestGate_NilSpoolObserveIsInert(t *testing.T) {
 	var out bytes.Buffer
 	gate := EnforceGate{
 		Contract: testContract{approval: "ask"},
-		Tier2:    Tier2{HookBudget: 29 * time.Second},
+		Tier2:    Tier2{Ceiling: provider.HookCeiling{Gating: 30 * time.Second}},
 		Record:   func(decision.Decision, ApplyResult) {},
 	}
 	gate.Run(context.Background(), discard(), &out, shellTarget{})
