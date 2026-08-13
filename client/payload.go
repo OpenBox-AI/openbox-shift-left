@@ -75,6 +75,21 @@ type governanceEventPayload struct {
 	DurationMs *float64        `json:"duration_ms,omitempty"`
 	Timestamp  string          `json:"timestamp"`
 	Metadata   json.RawMessage `json:"metadata,omitempty"`
+	// Status is the tool call's outcome, and the single field core's per-tool
+	// success metric reads:
+	//
+	//	metric.IsSuccess = payload.Status != nil && *payload.Status == "completed"
+	//	  — openbox-core internal/services/activities/observability/errors.go:333
+	//
+	// It went unwritten by every producer for this field's whole existence, while
+	// `.total` incremented on every ActivityStarted — so each completion scored
+	// as tool.<name>.failed and SUCCESS read 0.0% by construction (ADR-0018).
+	//
+	// APPENDED LAST deliberately. Key order on the wire is this struct's
+	// declaration order and the golden fixtures pin it byte-exactly; adding the
+	// field anywhere else would rewrite every fixture and obscure the one-key
+	// diff that shows this change is additive.
+	Status string `json:"status,omitempty"`
 }
 
 // Base wire event types (INV-8: every dev event maps onto one of these stock
@@ -145,6 +160,7 @@ func buildPayload(ev DevEvent) ([]byte, error) {
 		p.ActivityID = activityIDFor(ev)
 		p.ActivityOutput = structuralActivityOutput(ev)
 		p.DurationMs = durationMs(ev)
+		p.Status = statusFor(ev)
 	// A turn is an activity too (ADR-0014). Its id is derived from the turn
 	// index rather than hashed from an operation, because a turn has no
 	// operation to key on and a readable id is worth having in stored rows.
@@ -367,6 +383,37 @@ func turnActivityOutput(ev DevEvent) json.RawMessage {
 		return nil
 	}
 	return b
+}
+
+// toolStatuses is the closed wire vocabulary for `status` (ADR-0018).
+var toolStatuses = map[string]bool{
+	StatusCompleted: true,
+	StatusFailed:    true,
+}
+
+// statusFor resolves the wire `status` for an event, enforcing BOTH halves of
+// the field's contract at the one boundary every event crosses:
+//
+//   - event-type scope — tool results only. A turn already fails core's tool
+//     metric by exclusion (errors.go:320-322), but a lifecycle event would land
+//     its value in governance_events.workflow_status, a column that means
+//     something else. That is the binding reason, and it is why this is checked
+//     here rather than trusted to each adapter.
+//   - vocabulary — anything but the two literals is DROPPED, not forwarded.
+//     Core scores every non-"completed" value as a failure, so shipping a typo
+//     would report 0% success just as convincingly as shipping nothing, while
+//     looking correct in the payload. Omitting says "unknown", which is true.
+//
+// Returns "" (the field is omitted) for every other event and every unknown
+// value.
+func statusFor(ev DevEvent) string {
+	if ev.EventType != EventToolResult {
+		return ""
+	}
+	if !toolStatuses[ev.Status] {
+		return ""
+	}
+	return ev.Status
 }
 
 // activityLabel resolves the human-readable action label emitted as core's

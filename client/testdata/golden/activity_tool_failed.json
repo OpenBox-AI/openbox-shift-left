@@ -6,12 +6,13 @@
   "workflow_id": "openbox-ai/openbox-shift-left",
   "run_id": "sess-golden-0001",
   "workflow_type": "developer-session",
-  "duration_ms": 1000,
-  "timestamp": "2026-07-31T09:00:01Z",
+  "duration_ms": 3250,
+  "timestamp": "2026-07-31T09:00:03.25Z",
   "metadata": {
-    "event_id": "ev-8",
+    "event_id": "ev-16",
+    "is_interrupt": false,
     "provider": "claude-code",
     "tool_name": "Bash"
   },
-  "status": "completed"
+  "status": "failed"
 }

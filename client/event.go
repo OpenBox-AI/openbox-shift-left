@@ -25,7 +25,10 @@ package client
 // 1.1 added the turn pair (ADR-0014) and widened Tokens, re-defining Input as
 // pure input. The schema's x-changelog records what changed and why the Tokens
 // semantic made it a bump rather than a silent edit.
-const SchemaVersion = "1.1"
+//
+// 1.2 added Status on tool results and the failure/lifecycle event types
+// (ADR-0018). Purely additive — every 1.1 event is a valid 1.2 event.
+const SchemaVersion = "1.2"
 
 // EventType is a developer-runtime lifecycle event type. Each maps 1:1 onto
 // an openbox-core event_type string (INV-8) — see MAPPING.md §2.
@@ -75,6 +78,20 @@ var AllEventTypes = []EventType{
 	EventTurnStarted,
 	EventTurnCompleted,
 }
+
+// Tool-result outcome vocabulary (ADR-0018 Decision 1). Two literals, closed.
+//
+// The strings are not ours to choose: core compares the wire value against the
+// literal "completed" and nothing else
+// (openbox-core internal/services/activities/observability/errors.go:333). A
+// near-miss — "success", "COMPLETED", "complete" — does not degrade the metric,
+// it pins it at 0%, which is exactly the state this field exists to fix. So the
+// vocabulary is closed and statusFor drops anything outside it rather than
+// forwarding a value core will silently score as a failure.
+const (
+	StatusCompleted = "completed"
+	StatusFailed    = "failed"
+)
 
 // ToolKind is the provider-agnostic tool class ($defs.tool.kind).
 type ToolKind string
@@ -214,6 +231,21 @@ type DevEvent struct {
 	Cost          *Cost     `json:"cost,omitempty"`
 	Span          *Span     `json:"span,omitempty"`
 	Content       *Content  `json:"content,omitempty"`
+
+	// Status is a tool call's outcome — StatusCompleted or StatusFailed — and
+	// is the only thing core reads to decide whether a completed call succeeded.
+	// Set on ToolResult and nowhere else: payload.Status also writes the row's
+	// workflow_status column for ANY event type
+	// (openbox-core .../governance/storage_event.go:417), so putting a tool
+	// outcome on a lifecycle event would overwrite a genuinely workflow-scoped
+	// field. statusFor enforces both the vocabulary and the event-type scope at
+	// the wire boundary, so an adapter mistake cannot widen either.
+	//
+	// Structural, NOT content (INV-2): it is derived from which hook fired, or
+	// from a bound bool/int — never parsed out of tool output. It is therefore
+	// not content-gated and ships identically with content_capture off. A
+	// two-literal enum has no room to encode anything.
+	Status string `json:"status,omitempty"`
 
 	// Model is the provider model id that spent this event's tokens
 	// ("claude-opus-4-8", "gpt-5-codex", …). It is the ONE free-form string the

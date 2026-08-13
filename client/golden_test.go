@@ -132,6 +132,11 @@ func goldenCases() []goldenCase {
 		span := *call.Span
 		span.Stage = "completed"
 		res.Span = &span
+		// The outcome (ADR-0018). It rides the completed half only, and these
+		// three fixtures are what pins the literal core compares against — a
+		// rename to "success" or "COMPLETED" shows up here as a wire diff rather
+		// than as a dashboard that quietly reads 0%.
+		res.Status = StatusCompleted
 		return res
 	}
 
@@ -156,6 +161,19 @@ func goldenCases() []goldenCase {
 	shellCall.Tool = Tool{Name: "Bash", Kind: ToolShell}
 	shellCall.Span = &Span{SemanticType: "shell_command", Stage: "started"}
 	shellResult := completed(shellCall, "ev-8", "2026-07-31T09:00:01Z")
+
+	// The failure half of the same shape: a shell call that failed. Everything
+	// but `status` is identical to the successful one, which is the point —
+	// nothing else on the wire distinguishes a failed call, so the enum is
+	// load-bearing rather than decorative. `duration_ms` is present because a
+	// failed call still took time, and the failure hook is paired by the same
+	// duration stash as the success one.
+	shellFailedCall := base(EventToolCall, "ev-15")
+	shellFailedCall.Tool = Tool{Name: "Bash", Kind: ToolShell}
+	shellFailedCall.Span = &Span{SemanticType: "shell_command", Stage: "started", InvocationID: "toolu_fail01"}
+	shellFailed := completed(shellFailedCall, "ev-16", "2026-07-31T09:00:03.25Z")
+	shellFailed.Status = StatusFailed
+	shellFailed.Metadata = map[string]any{"provider": "claude-code", "is_interrupt": false}
 
 	mcpCall := base(EventToolCall, "ev-7")
 	mcpCall.Tool = Tool{Name: "search_issues", Kind: ToolMCP, MCPServer: "github"}
@@ -249,6 +267,7 @@ func goldenCases() []goldenCase {
 		{"activity_file_completed", fileResult},
 		{"activity_shell_started", shellCall},
 		{"activity_shell_completed", shellResult},
+		{"activity_tool_failed", shellFailed},
 		{"activity_mcp_started", mcpCall},
 		{"activity_mcp_completed", mcpResult},
 		{"activity_turn_started", turnStarted},

@@ -15,5 +15,6 @@
     "event_id": "ev-5",
     "provider": "claude-code",
     "tool_name": "Write"
-  }
+  },
+  "status": "completed"
 }
