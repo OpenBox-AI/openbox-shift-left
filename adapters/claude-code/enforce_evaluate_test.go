@@ -313,6 +313,15 @@ func serveEvaluate(t *testing.T, verdictJSON string, status int, delay time.Dura
 
 // tier2Creds points the hot-path credential resolver at a fake core with a valid
 // signing seed (no secret store).
+// serveVerdict stands up the control plane for a case and points the adapter at
+// it. It replaces setBundleEnv: since ADR-0017 a case's expected outcome is a
+// SERVER verdict, not a local bundle, so the setup names the verdict directly.
+func serveVerdict(t *testing.T, verdictJSON string) {
+	t.Helper()
+	url, _ := serveEvaluate(t, verdictJSON, 200, 0)
+	tier2Creds(t, url)
+}
+
 func tier2Creds(t *testing.T, baseURL string) {
 	t.Helper()
 	t.Setenv(envBaseURL, baseURL)
@@ -434,7 +443,7 @@ func TestEnforcementConformance_Tier2(t *testing.T) {
 	// allowT1 serves a reachable, bundled sidecar whose default is allow, so T1 always
 	// proceeds and the escalation decision is entirely T2's.
 	allowT1 := func(t *testing.T) {
-		setBundleEnv(t, &decision.Bundle{Version: "t2-allow", DefaultDecision: "allow"})
+		serveVerdict(t, `{"verdict":"allow"}`)
 	}
 
 	t.Run("C12 T1 allow + T2 BLOCK on Bash → deny (floor closed)", func(t *testing.T) {
@@ -546,24 +555,9 @@ func TestEnforcementConformance_Tier2(t *testing.T) {
 		}
 	})
 
-	t.Run("C17 T1 already denies → T2 short-circuited (no /evaluate)", func(t *testing.T) {
-		// A T1 BLOCK bundle denies the rm -rf; T2 must not fire (governance only
-		// tightens — there is nothing for T2 to add to a block).
-		setBundleEnv(t, blockRuleBundle())
-		url, hits := serveEvaluate(t, `{"verdict":"allow"}`, 200, 0)
-		tier2Creds(t, url)
-		t.Setenv(envTier2, "1")
-		t.Setenv(envFailClosed, "0")
-		out := run(dangerBash)
-		d, reason := parsePermissionDecision(t, []byte(out))
-		if d != ccDecisionDeny {
-			t.Fatalf("T1 BLOCK must deny; got %q (stdout=%q)", d, out)
-		}
-		if !strings.Contains(reason, "destructive recursive delete") {
-			t.Errorf("reason = %q, want the T1 policy reason (T2 not consulted)", reason)
-		}
-		if atomic.LoadInt32(hits) != 0 {
-			t.Errorf("T2 must be short-circuited when T1 denies; /evaluate hits=%d", atomic.LoadInt32(hits))
-		}
-	})
+	// C17 (a local BLOCK short-circuits the round-trip) is deleted with the local
+	// evaluator. There is no local verdict to short-circuit on, and the
+	// round-trip is no longer an optimisation to skip — it is where the verdict
+	// comes from. The property it protected, that governance only ever tightens,
+	// now lives entirely in the server's answer and the apply cascade.
 }

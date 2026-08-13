@@ -153,10 +153,23 @@ type DevConfig struct {
 	// EnforceTimeoutMS is inert under the in-process decider (ADR-0006);
 	// retained for back-compat parsing. Clamping is adapter-owned.
 	EnforceTimeoutMS int `json:"enforce_timeout_ms,omitempty"`
-	// Tier2 enables the Tier-2 synchronous /evaluate escalation for
-	// high-risk classes in enforce mode. Absent = default off (opt-in).
+	// Tier2 is DEPRECATED and inert (ADR-0017). It gated the synchronous
+	// /evaluate escalation for high-risk classes, back when the rest was decided
+	// locally; every gated call is evaluated now, so there are no tiers to switch
+	// between.
+	//
+	// Parsed so an existing dev.json does not become an error, and deliberately
+	// NOT honoured: an org that set `tier2:false` under the old design would
+	// otherwise stay silently ungoverned after upgrading, which is the failure
+	// this whole change exists to close. ResolveTier2 warns once to stderr when
+	// the key is present — including when it is false, which is exactly the case
+	// worth warning about.
 	Tier2 *bool `json:"tier2,omitempty"`
-	// Tier2TimeoutMS bounds one Tier-2 escalation (ms). Clamping is adapter-owned.
+	// Tier2TimeoutMS is DEPRECATED and inert (ADR-0017). The per-evaluation
+	// budget derives from the provider's declared hook ceiling now
+	// (provider.HookCeiling → hookflow.EnforceBudget), which is a correctness
+	// bound rather than a tuning knob: latency and capacity are the platform's
+	// scope, not something tuned per developer machine.
 	Tier2TimeoutMS int `json:"tier2_timeout_ms,omitempty"`
 	// ApprovalHoldMS bounds how long the gate holds a tool call while a filed
 	// approval is decided (ms, OD-E9-1). Absent = the engine default. Clamping
@@ -165,11 +178,12 @@ type DevConfig struct {
 	// SecretDetection enables Tier-1 local secret/entropy detection.
 	// Absent = default on (opt-out): the detection stays strictly local.
 	SecretDetection *bool `json:"secret_detection,omitempty"`
-	// RequireVerifiedBundle refuses to load a policy bundle whose signature did
-	// not verify (OD-RF-3), turning the signature from detection into
-	// prevention. Absent = false, because the backend does not sign yet and
-	// requiring it today would leave every install bundle-less. Lockable, so an
-	// org that has deployed signing can mandate it.
+	// RequireVerifiedBundle is DEPRECATED and inert (ADR-0017). It refused to
+	// load a policy bundle whose signature did not verify; there is no bundle,
+	// so there is nothing to verify or refuse. Parsed so an existing dev.json
+	// does not become an error, and deliberately absent from the reported
+	// posture — a control that cannot engage must not appear as one, or an org
+	// reading `true` would believe a signature check was protecting it.
 	RequireVerifiedBundle *bool `json:"require_verified_bundle,omitempty"`
 	// Findings enables the Tier-3 findings loop. Absent = default off
 	// (opt-in: it is the first observe-path stdout writer).

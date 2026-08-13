@@ -153,11 +153,7 @@ func RunHook(sub string, stdin io.Reader, stdout io.Writer, logger *log.Logger) 
 	// It is the only SessionStart stdout writer, so running it earlier does not
 	// reorder anything the provider sees.
 	if hook == HookSessionStart {
-		staleness := devconfig.StalenessNotChecked
-		if ResolveEnforce() {
-			staleness = hookflow.CheckPolicyStaleness(logger, ev.SessionID, stdout)
-		}
-		posture := effectivePosture(staleness)
+		posture := effectivePosture()
 		ad.Mapper.Posture = &posture
 	}
 

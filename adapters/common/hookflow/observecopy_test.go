@@ -144,7 +144,6 @@ func TestGate_ObserveCopySpooledWhenEscalationOutlivesItsBudget(t *testing.T) {
 	isolateConfig(t)
 	isolateMarkers(t)
 	t.Setenv(devconfig.EnvTier2, "1")
-	t.Setenv(devconfig.EnvTier2Timeout, "20") // expires long before Emit returns
 	t.Setenv(devconfig.EnvApprovalHold, "50")
 	t.Setenv(devconfig.EnvEnforcementFile, t.TempDir()+"/enforcements.jsonl")
 	defer devconfig.Pin()()
@@ -155,8 +154,11 @@ func TestGate_ObserveCopySpooledWhenEscalationOutlivesItsBudget(t *testing.T) {
 	gate := EnforceGate{
 		Contract: testContract{approval: "ask"},
 		Evaluator: Evaluator{
-			Ceiling:    provider.HookCeiling{Gating: 30 * time.Second},
-			MaxTimeout: 4 * time.Second,
+			Ceiling: provider.HookCeiling{Gating: 30 * time.Second},
+			// The clamp, not a config knob: the per-evaluation budget stopped
+			// reading tier2_timeout_ms with ADR-0017, so this is now the only
+			// way to reach the timeout branch deliberately.
+			MaxTimeout: 20 * time.Millisecond,
 			NewClient:  func(*log.Logger) (Governor, error) { return gov, nil },
 		},
 		Record:       func(decision.Decision, ApplyResult) {},
@@ -174,43 +176,14 @@ func TestGate_ObserveCopySpooledWhenEscalationOutlivesItsBudget(t *testing.T) {
 	}
 }
 
-// The stale gate returns before the escalation is even reached. Deferring the
-// spool write must not let an early return swallow it — every exit path owes the
-// spool a copy unless delivery actually happened.
-func TestGate_ObserveCopySpooledOnStaleGateEarlyReturn(t *testing.T) {
-	isolateConfig(t)
-	isolateMarkers(t)
-	t.Setenv(devconfig.EnvTier2, "1")
-	t.Setenv(devconfig.EnvFailClosed, "1")
-	t.Setenv(devconfig.EnvEnforcementFile, t.TempDir()+"/enforcements.jsonl")
-	t.Setenv(EnvStaleDir, t.TempDir())
-	if err := WriteStaleMarker(shellTarget{}.SessionID()); err != nil {
-		t.Fatalf("write stale marker: %v", err)
-	}
-	defer devconfig.Pin()()
-
-	spooled := false
-	var out bytes.Buffer
-	gate := EnforceGate{
-		Contract: testContract{approval: "ask"},
-		Evaluator: Evaluator{
-			Ceiling:    provider.HookCeiling{Gating: 30 * time.Second},
-			MaxTimeout: 4 * time.Second,
-			NewClient: func(*log.Logger) (Governor, error) {
-				t.Error("stale gate must deny before any escalation")
-				return &fakeGovernor{}, nil
-			},
-		},
-		Record:       func(decision.Decision, ApplyResult) {},
-		SpoolObserve: func() { spooled = true },
-	}
-	gate.Run(context.Background(), discard(), &out, shellTarget{})
-
-	if !spooled {
-		t.Error("the stale-gate early return skipped the observe copy; a denied call is " +
-			"still a call that happened and still owes telemetry")
-	}
-}
+// TestGate_ObserveCopySpooledOnStaleGateEarlyReturn is deleted with the stale
+// gate (ADR-0017): there is no local bundle to be stale, so no early return
+// before the evaluation.
+//
+// What it covered — that a path returning BEFORE the escalation still spools
+// its observe copy — is a property of the deferred write itself, which is
+// exercised by every undelivered case above. The direction is unchanged: the
+// default is to spool, and only a confirmed delivery suppresses.
 
 // A nil SpoolObserve is the non-gated caller's shape (it spooled its own copy).
 // The gate must not panic on it.

@@ -3,6 +3,7 @@ package claudecode
 import (
 	"context"
 	"encoding/json"
+
 	"github.com/openbox-ai/openbox-shift-left/adapters/common/hookflow"
 	"github.com/openbox-ai/openbox-shift-left/client"
 	"github.com/openbox-ai/openbox-shift-left/decision"
@@ -100,7 +101,6 @@ func buildDecisionRequest(id Identity, e *HookEvent, localRedaction bool) decisi
 	}
 
 	req := decision.DecisionRequest{
-		Protocol:     decision.ProtocolVersion,
 		SessionID:    e.SessionID,
 		DeveloperDID: id.DeveloperDID,
 		EventType:    client.EventToolCall, // the pre-execution gate is a ToolCall decision

@@ -30,10 +30,8 @@ import (
 
 	"github.com/openbox-ai/openbox-shift-left/adapters/common/devconfig"
 	obgit "github.com/openbox-ai/openbox-shift-left/adapters/common/git"
-	"github.com/openbox-ai/openbox-shift-left/adapters/common/hookflow"
 	"github.com/openbox-ai/openbox-shift-left/cli/internal/backend"
 	"github.com/openbox-ai/openbox-shift-left/cli/internal/devinit"
-	"github.com/openbox-ai/openbox-shift-left/cli/internal/policysync"
 	"github.com/openbox-ai/openbox-shift-left/cli/internal/providers"
 	"github.com/openbox-ai/openbox-shift-left/client"
 	"github.com/openbox-ai/openbox-shift-left/provider"
@@ -61,27 +59,19 @@ const (
 // (ADR-0015), so a test points OPENBOX_HOME at a temp dir and exercises the same
 // code production runs.
 type app struct {
-	stdout, stderr  io.Writer
-	stdin           io.Reader
-	getenv          func(string) string
-	newRegistrar    func(baseURL, credential, clientID string) devinit.Registrar
-	newPolicyReader func(baseURL, credential, clientID string) policyReader
-}
-
-// policyReader is the control-plane read `dev sync` + the `init`
-// last-step need. backend.Client implements it; a fake injects in tests.
-type policyReader interface {
-	GetCurrentPolicy(ctx context.Context, agentID string) (*backend.Policy, error)
+	stdout, stderr io.Writer
+	stdin          io.Reader
+	getenv         func(string) string
+	newRegistrar   func(baseURL, credential, clientID string) devinit.Registrar
 }
 
 func defaultApp() *app {
 	return &app{
-		stdout:          os.Stdout,
-		stderr:          os.Stderr,
-		stdin:           os.Stdin,
-		getenv:          os.Getenv,
-		newRegistrar:    func(u, c, id string) devinit.Registrar { return backend.New(u, c, id) },
-		newPolicyReader: func(u, c, id string) policyReader { return backend.New(u, c, id) },
+		stdout:       os.Stdout,
+		stderr:       os.Stderr,
+		stdin:        os.Stdin,
+		getenv:       os.Getenv,
+		newRegistrar: func(u, c, id string) devinit.Registrar { return backend.New(u, c, id) },
 	}
 }
 
@@ -128,7 +118,7 @@ func (a *app) run(args []string) int {
 
 func (a *app) runDev(args []string) int {
 	if len(args) == 0 {
-		return a.errorf("usage: openbox dev <verify|sync> [flags]")
+		return a.errorf("usage: openbox dev verify [flags]")
 	}
 	switch args[0] {
 	case "init":
@@ -140,56 +130,15 @@ func (a *app) runDev(args []string) int {
 	case "verify":
 		return a.runDevVerify(args[1:])
 	case "sync":
-		return a.runDevSync(args[1:])
+		// ADR-0017 deleted the local policy bundle, and with it the pull half
+		// of the distribution model this command was. Saying so is an error
+		// message, not an alias — there is nothing left for it to do.
+		return a.errorf("`openbox dev sync` no longer exists — policy is evaluated by OpenBox " +
+			"on every gated tool call (ADR-0017), so there is no local bundle to fetch. " +
+			"Any leftover policy-bundle.json on this machine is inert and can be deleted.")
 	default:
-		return a.errorf("usage: openbox dev <verify|sync> [flags]")
+		return a.errorf("usage: openbox dev verify [flags]")
 	}
-}
-
-// runDevSync fetches this agent's current org policy from the control plane
-// and writes it as the local policy bundle + pin (ADR-0005): the pull half
-// of the pull-at-init + session-start-staleness distribution model. It reads
-// the org control-plane credential from OPENBOX_CONTROL_TOKEN (never a
-// flag — INV-1), resolves the agent id + backend URL persisted by
-// `openbox init` (env overrides), fetches, translates config.policy_builder into a
-// builder bundle (or a fail-open-local bundle for raw rego / a no-policy
-// allow bundle), writes it 0600, and clears any fail-closed stale markers so
-// the enforce gate proceeds. It never prints the org key or rego text
-// (INV-1). On any auth/fetch failure it exits non-zero with a mapped hint
-// and leaves the last-good bundle untouched.
-func (a *app) runDevSync(args []string) int {
-	fs := a.newFlagSet("openbox dev sync")
-	var bundlePath, clientID string
-	fs.StringVar(&bundlePath, "bundle", a.env("OPENBOX_SIDECAR_BUNDLE", ""), "local policy bundle to write (default: <os-config-dir>/openbox/policy-bundle.json — ~/.config on Linux, ~/Library/Application Support on macOS)")
-	fs.StringVar(&clientID, "client-id", a.env("OPENBOX_CLIENT", "openbox-cli"), "value for the x-openbox-client header (Keycloak JWT path)")
-	if code, ok := parseFlags(fs, args); !ok {
-		return code
-	}
-
-	token := a.getenv("OPENBOX_CONTROL_TOKEN")
-	if token == "" {
-		return a.errorf("set OPENBOX_CONTROL_TOKEN (an obx_key_ organization key, or a Keycloak JWT) in the " +
-			"environment; it is never accepted as a flag so it cannot leak via argv/shell history (INV-1)")
-	}
-	if problem := controlTokenProblem(token); problem != "" {
-		return a.errorf("%s", problem)
-	}
-	backendURL := devconfig.ResolveBackendURL()
-	if backendURL == "" {
-		return a.errorf("no backend URL configured — set OPENBOX_BACKEND_URL or re-run `openbox init --backend-url <url>`")
-	}
-	agentID := devconfig.ResolveAgentID()
-	if agentID == "" {
-		return a.errorf("no agent id configured — run `openbox init --provider <tool>` first (it persists the agent id), or set OPENBOX_AGENT_ID")
-	}
-	if bundlePath == "" {
-		bundlePath = hookflow.ResolveBundlePath()
-	}
-
-	if err := policysync.Run(context.Background(), a.newPolicyReader(backendURL, token, clientID), agentID, bundlePath, a.stdout); err != nil {
-		return a.errorf("%v", err)
-	}
-	return exitOK
 }
 
 // runDevVerify is the read-only data-plane preflight: `openbox dev verify`
@@ -563,14 +512,6 @@ func (a *app) runDevInit(args []string) int {
 	// that enforce is the default (ADR-0016): without a bundle, enforcement is
 	// inert, which is safe but also means a fresh install gates nothing.
 	//
-	// Strictly best-effort — a fetch failure warns to stderr and does not fail the
-	// install, because the hooks and posture are already in place and
-	// `openbox dev sync` can complete it later. The coordinates come from
-	// config/env rather than from this command's flags: `init` takes no
-	// credential (ADR-0015), so if none is exported there is simply nothing to
-	// sync with, and that is a note rather than a problem.
-	a.syncInitialPolicy()
-
 	// One closing block so a first-time user knows what to do next and how to
 	// check it. Onboarding that ends in a wall of notes reads as "did that
 	// work?", and the answer is one command away.
@@ -592,27 +533,6 @@ func (a *app) runDevInit(args []string) int {
 	return exitOK
 }
 
-// syncInitialPolicy best-effort fetches this agent's policy bundle at the end of
-// an install. Silent when there is no credential to fetch with — `init` does not
-// take one.
-func (a *app) syncInitialPolicy() {
-	agentID := devconfig.ResolveAgentID()
-	if agentID == "" || a.newPolicyReader == nil {
-		return
-	}
-	credential := a.getenv(devconfig.EnvControlToken)
-	backendURL := devconfig.ResolveBackendURL()
-	if credential == "" || backendURL == "" {
-		fmt.Fprintf(a.stdout, "  note: no initial policy fetched (no %s exported). Enforcement is inert until a\n", devconfig.EnvControlToken)
-		fmt.Fprintf(a.stdout, "        policy is present; run `openbox dev sync` with an org key when ready.\n")
-		return
-	}
-	if err := policysync.Run(context.Background(), a.newPolicyReader(backendURL, credential, "openbox-cli"),
-		agentID, hookflow.ResolveBundlePath(), a.stdout); err != nil {
-		fmt.Fprintf(a.stderr, "note: initial policy sync skipped (%v); run `openbox dev sync` when ready.\n", err)
-	}
-}
-
 func (a *app) env(key, def string) string {
 	if v := a.getenv(key); v != "" {
 		return v
@@ -632,7 +552,6 @@ Usage:
   openbox init --provider <claude-code|codex|cursor> [--scope local|global] [flags]
   openbox init --role approver --org <id> [--host claude-code] [flags]
   openbox dev verify [--dry-run]
-  openbox dev sync [--bundle <path>]
   openbox managed install --provider <claude-code,codex> [--dry-run] [--force]
   openbox approve list [--org <id>] [--watch]
   openbox approve <allow|deny> <event-id> [--org <id>]

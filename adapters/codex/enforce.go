@@ -3,10 +3,11 @@ package codex
 import (
 	"context"
 	"encoding/json"
+	"time"
+
 	"github.com/openbox-ai/openbox-shift-left/adapters/common/hookflow"
 	"github.com/openbox-ai/openbox-shift-left/client"
 	"github.com/openbox-ai/openbox-shift-left/decision"
-	"time"
 )
 
 // Enforcement — the synchronous pre-execution gate for the Codex adapter,
@@ -137,7 +138,6 @@ func buildDecisionRequest(id Identity, e *HookEvent, localRedaction bool) decisi
 	}
 
 	req := decision.DecisionRequest{
-		Protocol:     decision.ProtocolVersion,
 		SessionID:    e.SessionID,
 		DeveloperDID: id.DeveloperDID,
 		EventType:    client.EventToolCall, // the pre-execution gate is a ToolCall decision

@@ -69,8 +69,6 @@ type Posture struct {
 	// RealtimeFlush reports whether telemetry is delivered mid-session
 	// (debounced background flush) or batched to session end.
 	RealtimeFlush bool
-	// RequireVerifiedBundle refuses an unverified policy bundle (OD-RF-3).
-	RequireVerifiedBundle bool
 
 	// Adapter-supplied. Bundle* are opaque staleness/integrity coordinates
 	// (a policy id, an opaque version, a content hash) — never policy text.
@@ -202,10 +200,10 @@ func postureFields() []struct {
 			func(p *Posture) *bool { return &p.ContentCapture }},
 		{"findings", func(c DevConfig) *bool { return c.Findings }, false, EnvFindings,
 			func(p *Posture) *bool { return &p.Findings }},
-		// OD-RF-3. Reported because a control an org cannot verify from the
-		// endpoint is not assurance — it is a setting the org hopes is on.
-		{"require_verified_bundle", func(c DevConfig) *bool { return c.RequireVerifiedBundle }, false, EnvRequireVerified,
-			func(p *Posture) *bool { return &p.RequireVerifiedBundle }},
+		// require_verified_bundle is gone from this table with the bundle it
+		// guarded (ADR-0017). Reporting it would be reporting a control that
+		// cannot engage: there is nothing to verify, so an org reading `true`
+		// would believe a signature check was protecting it.
 		// Reported because it is an EGRESS posture, and default-on since ADR-0014:
 		// with it on, four token counts and a model id leave the machine per turn.
 		// The posture record is what lets an auditor tell, after the fact, whether a

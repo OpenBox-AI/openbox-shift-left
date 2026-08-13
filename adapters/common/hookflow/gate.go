@@ -113,66 +113,47 @@ func (g EnforceGate) Run(ctx context.Context, logger *log.Logger, stdout io.Writ
 	// timeout — which would fail open and defeat a fail-closed org.
 	enforceStart := time.Now()
 
-	// The fail-closed session-start staleness block is realized here, because
-	// no provider has a "deny this session" primitive at session start. If the
-	// session was marked stale under fail-closed, deny every tool call —
-	// reusing the ordinary apply cascade via a synthesized HALT — until
-	// `openbox dev sync` clears the marker. A local file stat; no network
-	// (INV-3b).
-	if dec, blocked := StaleGateDecision(t.SessionID()); blocked {
-		policy := ResolveFailurePolicy()
-		LogEnforceDecision(logger, t.ToolName(), dec, policy)
-		g.Record(dec, ApplyDecision(stdout, dec, false, t.ToolInput(), g.Contract))
-		return
-	}
-
 	// Local redaction gate: the tool body reaches the in-process detector only
 	// under secret detection (default on) or content capture. With both off,
 	// no body is scanned and no redaction is emitted — byte-identical to the
 	// observe baseline.
 	localRedaction := devconfig.ResolveSecretDetection() || devconfig.ResolveContentCapture()
 
-	dec := NewDecider().Decide(ctx, t.DecisionRequest(localRedaction))
+	// The local step redacts; it does not decide (ADR-0017).
+	local := NewDecider().Decide(ctx, t.DecisionRequest(localRedaction))
 
-	// The per-org failure policy sits between obtain and apply: on an
-	// evaluation outage under fail-closed it synthesizes a HALT so the
-	// unchanged apply cascade denies. Otherwise the decision passes through
-	// untouched — a real verdict is never overridden.
+	// Evaluate. Unconditional, because there is no local verdict that could
+	// make a round-trip pointless: every gated call is the server's to decide.
+	//
+	// The failure policy runs strictly AFTER this, and that ordering is now
+	// load-bearing rather than stylistic. It used to sit between the local
+	// verdict and the escalation, which was harmless while the local step
+	// produced real verdicts — but a local step that always reports "no verdict"
+	// turns an early ApplyFailurePolicy into an immediate synthesized HALT under
+	// fail_closed, which then reads as "already tightened" and suppresses the
+	// evaluation entirely. A fail-closed org would deny every gated call without
+	// ever asking. C1 caught exactly that.
+	dec, key := g.escalate(ctx, logger, t, local.RedactedContent, enforceStart)
+
+	// Carry the local redaction onto the decision so a redact-and-continue still
+	// applies on the proceed path.
+	dec.RedactedContent = local.RedactedContent
+	dec.RedactionCategories = local.RedactionCategories
+
+	// On an evaluation outage under fail-closed this synthesizes a HALT so the
+	// unchanged apply cascade denies. A real verdict passes through untouched.
 	policy := ResolveFailurePolicy()
 	dec = ApplyFailurePolicy(dec, policy)
 
-	// Evaluate inline whenever a server round-trip can still change the outcome
-	// (ADR-0017). Every gated class, unconditionally: risk is a property of the
-	// POLICY, and deciding here which calls deserve a real verdict was the engine
-	// second-guessing the policy that is supposed to decide.
+	// A server REQUIRE_APPROVAL is a filed request, not a final answer, so hold
+	// for whoever is going to decide it. The hook blocks the tool call while it
+	// runs either way — the only question is whether it spends that time asking.
 	//
-	// The narrowing this replaces — enabled && high-risk-only — is what left
-	// raw-rego orgs ungoverned on everything else, because the local evaluator
-	// that handled the rest could not evaluate their policy at all.
-	if ShouldEscalate(dec, g.Contract) {
-		// dec.RedactedContent is the local scan's result, computed above and
-		// carried in rather than re-derived: what this call attaches for the
-		// server to judge is the same body the tool call is rewritten to.
-		t2, key := g.escalate(ctx, logger, t, dec.RedactedContent, enforceStart)
-		// Carry the local Tier-1 redaction onto the evaluated decision so a
-		// redact-and-continue still applies on the Tier-2 proceed path.
-		t2.RedactedContent = dec.RedactedContent
-		t2.RedactionCategories = dec.RedactionCategories
-		dec = ApplyFailurePolicy(KeepTighter(dec, t2, g.Contract), policy)
-
-		// A server REQUIRE_APPROVAL is a filed request, not a final answer, so
-		// hold for whoever is going to decide it. The hook blocks the tool call
-		// while it runs either way — the only question is whether it spends that
-		// time asking.
-		//
-		// Only a SERVER verdict is held for. A local REQUIRE_APPROVAL that
-		// survived a degraded escalation (KeepTighter) was never sent, so there
-		// is no record to poll: holding on it would spend the entire budget on
-		// not-founds and then deny. That case keeps the provider's own approval
-		// prompt, which is exactly what it had before.
-		if dec.Evaluation.Verdict == client.VerdictRequireApproval && dec.Source == SourceEvaluate {
-			dec = g.awaitApproval(ctx, logger, t, dec, key, enforceStart)
-		}
+	// Only a SERVER verdict is held for: a degraded evaluation has filed no
+	// record, so holding on it would spend the whole budget on not-founds and
+	// then deny.
+	if dec.Evaluation.Verdict == client.VerdictRequireApproval && dec.Source == SourceEvaluate {
+		dec = g.awaitApproval(ctx, logger, t, dec, key, enforceStart)
 	}
 
 	LogEnforceDecision(logger, t.ToolName(), dec, policy)

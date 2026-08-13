@@ -5,7 +5,6 @@ import (
 	"log"
 	"time"
 
-	"github.com/openbox-ai/openbox-shift-left/adapters/common/devconfig"
 	"github.com/openbox-ai/openbox-shift-left/client"
 	"github.com/openbox-ai/openbox-shift-left/decision"
 	"github.com/openbox-ai/openbox-shift-left/provider"
@@ -216,39 +215,12 @@ func ShouldEscalate(dec decision.Decision, c OutputContract) bool {
 	return !DecisionTightens(dec, c)
 }
 
-// KeepTighter picks between the local and the evaluated decision: the server's
-// answer wins, unless the evaluation failed to deliver a real verdict and the
-// local step had already tightened — in which case the local decision stands.
+// resolveEvaluationTimeout is the per-evaluation budget.
 //
-// It is on borrowed time. Once local policy evaluation is deleted the local side
-// carries only redaction, so there is nothing left to compare and this collapses
-// to "take the server's answer". It stays until then because removing it in the
-// same change that widened the gate would conflate two failure modes.
-//
-// This became load-bearing with ShouldEscalate. While evaluation ran only over
-// a would-proceed local decision there was nothing to lose; now that a local
-// REQUIRE_APPROVAL escalates, a degraded round-trip would otherwise replace a
-// deny/ask with VerdictUnknown and let the call through — enforcement loosening
-// itself on an outage, which is exactly what the tighten-only invariant forbids.
-func KeepTighter(t1, t2 decision.Decision, c OutputContract) decision.Decision {
-	if t2.FailOpen && DecisionTightens(t1, c) {
-		return t1
-	}
-	return t2
-}
-
-// resolveEvaluationTimeout reads the configured per-evaluation budget. It is clamped
-// only against overflow here; the real ceiling is Evaluator.MaxTimeout, which is
-// provider-derived and applied in Budget.
-func resolveEvaluationTimeout() time.Duration {
-	ms := devconfig.ResolveTimeoutMS(func(c devconfig.DevConfig) int { return c.Tier2TimeoutMS }, devconfig.EnvTier2Timeout)
-	if ms <= 0 {
-		return DefaultEvaluationTimeout
-	}
-	// Clamp in milliseconds before the multiply so a near-max-int64 value can
-	// never overflow time.Duration.
-	if const1h := int64(time.Hour / time.Millisecond); int64(ms) > const1h {
-		return time.Hour
-	}
-	return time.Duration(ms) * time.Millisecond
-}
+// It reads no config. `tier2_timeout_ms` is deprecated and inert (ADR-0017):
+// the real bound is the provider's declared hook ceiling, applied in Budget,
+// and that is a correctness boundary rather than a tuning knob — latency and
+// capacity are the platform's scope, not something tuned per machine. Honouring
+// a per-machine override would let a developer shorten their own enforcement
+// window.
+func resolveEvaluationTimeout() time.Duration { return DefaultEvaluationTimeout }

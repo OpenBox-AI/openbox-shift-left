@@ -51,22 +51,12 @@ func TestShouldEscalate(t *testing.T) {
 	}
 }
 
-func TestKeepTighterHoldsTheTier1Floor(t *testing.T) {
-	c := testContract{approval: "ask"}
-	t1 := verdictDecision(client.VerdictRequireApproval)
-
-	// A degraded escalation must not loosen a Tier-1 deny/ask.
-	if got := KeepTighter(t1, EvaluationFailOpen("undelivered"), c); got.Evaluation.Verdict != client.VerdictRequireApproval {
-		t.Errorf("fail-open Tier-2 replaced the Tier-1 floor with %q", got.Evaluation.Verdict)
-	}
-	// A real Tier-2 answer wins, including a looser one — the server is
-	// authoritative once it actually answers.
-	allow := decision.Decision{Evaluation: client.Evaluation{Verdict: client.VerdictAllow}, Source: SourceEvaluate}
-	if got := KeepTighter(t1, allow, c); got.Evaluation.Verdict != client.VerdictAllow {
-		t.Errorf("real Tier-2 verdict was discarded: got %q", got.Evaluation.Verdict)
-	}
-	// Nothing to protect when Tier-1 would have proceeded anyway.
-	if got := KeepTighter(verdictDecision(client.VerdictAllow), EvaluationFailOpen("undelivered"), c); !got.FailOpen {
-		t.Error("a would-proceed Tier-1 must not be preferred over the fail-open Tier-2 marker")
-	}
-}
+// TestKeepTighterHoldsTheTier1Floor is deleted with KeepTighter (ADR-0017).
+//
+// It covered the one thing that function existed for: a degraded evaluation
+// must not replace a LOCAL deny/ask with VerdictUnknown and let the call
+// through — enforcement loosening itself on an outage. That cannot happen now,
+// because the local step produces no verdict to loosen. What protects the same
+// direction today is ApplyFailurePolicy: a degraded evaluation carries
+// FailOpen, and a fail-closed org denies on it. TestApplyFailurePolicy covers
+// that, and the C15 conformance case covers it end to end.

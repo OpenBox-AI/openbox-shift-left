@@ -2,7 +2,6 @@ package claudecode
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"io"
 	"io/fs"
@@ -16,23 +15,20 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/openbox-ai/openbox-shift-left/adapters/common/hookflow"
 	"time"
-
-	"github.com/openbox-ai/openbox-shift-left/decision"
 )
 
 // Enforcement conformance suite (STORY-E6-S7) — executable INV-3b evidence.
 //
 // This drives the REAL RunHook PreToolUse path end-to-end against a REAL
-// decision.Server (or a deliberately-absent socket) and asserts the exact Claude
+// /evaluate stub (or a deliberately-unreachable one) and asserts the exact Claude
 // Code stdout contract per quadrant of the enforcement carve-out (ADR-0002 /
 // INV-3b). It is the durable proof the carve-out holds: a regression to enforce
 // mode, the failure policy, or the fail-open default breaks HERE rather than
 // silently in the field. Each case is content-free (INV-1/INV-2): no asserted
 // reason may carry the shell command / file body / tool output.
 //
-// | # | Enforce | Policy      | Sidecar            | Expect | Proves                          |
+// | # | Enforce | Policy      | Control plane      | Expect | Proves                          |
 // |---|---------|-------------|--------------------|--------|---------------------------------|
 // | C1| on      | both        | up + BLOCK rule    | deny   | enforced BLOCK denies pre-exec  |
 // | C2| on      | fail-open   | absent socket      | proceed| outage fails open (OD9)         |
@@ -41,31 +37,15 @@ import (
 // | C5| on      | fail-closed | up + ALLOW default | proceed| fail-closed never denies allow  |
 // | C6| on      | fail-closed | up, NO bundle      | deny   | INFO-1: the closed hole         |
 // | C7| off     | —           | up + BLOCK rule    | proceed| INV-3 verbatim (observe)        |
-// | C8| — (removed: in-process decision has no network timeout — ADR-0006)          |
-// | C9| on      | fail-closed | STALE real verdict | proceed| staleness never denies          |
+// | C8| — (removed: in-process decision had no network timeout — ADR-0006)          |
+// | C9| — (removed: nothing local can be stale — ADR-0017)                          |
 // |C10| on      | fail-open   | up + secret in Write| redact | Tier-1 redact-and-continue (E6-S9)|
 // |C11| on      | fail-open   | up, detection OFF  | proceed| opt-out → no redaction (E6-S9)  |
 
-// blockRuleBundle blocks a `rm -rf` shell command; the canonical enforce BLOCK.
-func blockRuleBundle() *decision.Bundle {
-	return &decision.Bundle{
-		Version:         "conf-block",
-		DefaultDecision: "allow",
-		Rules: []decision.Rule{{
-			ID:       "no-rm-rf",
-			Match:    decision.RuleMatch{ToolKind: "shell", AttributeContains: map[string]string{"command": "rm -rf"}},
-			Decision: "block",
-			Reason:   "destructive recursive delete",
-			PolicyID: "conf-policy",
-		}},
-	}
-}
-
-// removed: slowEvaluator + serveConfiguredSidecar/serveSidecarEval/serveStaleSidecar —
-// the socket-served sidecar and its network-timeout path are gone (ADR-0006
-// in-process decider). The slow-decision C8 case is dropped (no network timeout to
-// exercise); C9 staleness is re-expressed at the in-process decider level (a tiny
-// Freshness marks a real verdict Stale) rather than via a served socket.
+// The local bundle helpers are gone with the evaluator they fed (ADR-0017). A
+// case's expected outcome is a SERVER verdict now, so setup names the verdict
+// directly through serveVerdict rather than building a rule the client would
+// have evaluated itself.
 
 func TestEnforcementConformance(t *testing.T) {
 	// Base isolation shared by every case (identity + spool/session/enforcement
@@ -101,11 +81,15 @@ func TestEnforcementConformance(t *testing.T) {
 		// identical: a real verdict is hookflow.FailOpen=false → applyFailurePolicy is a no-op),
 		// and with the POLICY reason — never the fail-closed outage reason (fail-closed
 		// engages on no-verdict only; the Q1-vs-Q4 distinction).
-		setBundleEnv(t, blockRuleBundle())
+		serveVerdict(t, `{"verdict":"block","reason":"destructive recursive delete","policy_id":"conf-policy"}`)
 		t.Setenv(envEnforce, "1")
 		for _, fc := range []string{"0", "1"} {
 			t.Setenv(envFailClosed, fc)
-			out := run(t, dangerPayload)
+			// A DISTINCT command per iteration. The event id is derived from the
+			// call, so replaying the identical payload in one process collapses
+			// onto one idempotency key and the second POST is suppressed — the
+			// client behaving correctly, and a real session never does it.
+			out := run(t, `{"hook_event_name":"PreToolUse","session_id":"s","cwd":"/tmp","tool_name":"Bash","tool_input":{"command":"rm -rf /tmp/x`+fc+`"}}`)
 			d, reason := parsePermissionDecision(t, []byte(out))
 			if d != ccDecisionDeny {
 				t.Fatalf("fail_closed=%s: permissionDecision = %q, want deny (stdout=%q)", fc, d, out)
@@ -121,7 +105,6 @@ func TestEnforcementConformance(t *testing.T) {
 	})
 
 	t.Run("C2 fail-open + outage proceeds within bound (OD9)", func(t *testing.T) {
-		setBundleEnv(t, nil) // no bundle loaded → cold-start fail-open (the outage analog)
 		t.Setenv(envEnforce, "1")
 		t.Setenv(envFailClosed, "0")
 		start := time.Now()
@@ -135,7 +118,6 @@ func TestEnforcementConformance(t *testing.T) {
 	})
 
 	t.Run("C3 fail-open + unbundled proceeds (fix leaves default unchanged)", func(t *testing.T) {
-		setBundleEnv(t, nil) // NO bundle loaded → cold-start fail-open
 		t.Setenv(envEnforce, "1")
 		t.Setenv(envFailClosed, "0")
 		if out := run(t, dangerPayload); strings.TrimSpace(out) != "" {
@@ -144,7 +126,6 @@ func TestEnforcementConformance(t *testing.T) {
 	})
 
 	t.Run("C4 fail-closed + outage denies", func(t *testing.T) {
-		setBundleEnv(t, nil) // no bundle loaded → cold-start fail-open → fail-closed denies
 		t.Setenv(envEnforce, "1")
 		t.Setenv(envFailClosed, "1")
 		out := run(t, dangerPayload)
@@ -167,7 +148,7 @@ func TestEnforcementConformance(t *testing.T) {
 		// allow is what has to proceed. A local allow with the server
 		// unreachable is no longer a real verdict — it is an outage, and C4/C6
 		// cover that it denies.
-		setBundleEnv(t, &decision.Bundle{Version: "conf-allow", DefaultDecision: "allow"})
+		serveVerdict(t, `{"verdict":"allow"}`)
 		url, hits := serveEvaluate(t, `{"verdict":"allow"}`, 200, 0)
 		tier2Creds(t, url)
 		t.Setenv(envEnforce, "1")
@@ -185,7 +166,6 @@ func TestEnforcementConformance(t *testing.T) {
 		// The regression guard for the reconciliation: no real verdict (no bundle
 		// loaded → Source=fail-open:no-bundle → hookflow.FailOpen), so a fail-closed org DENIES
 		// rather than being silently ungoverned. Pre-fix this proceeded (the hole).
-		setBundleEnv(t, nil) // NO bundle loaded → cold-start fail-open
 		t.Setenv(envEnforce, "1")
 		t.Setenv(envFailClosed, "1")
 		out := run(t, dangerPayload)
@@ -202,7 +182,7 @@ func TestEnforcementConformance(t *testing.T) {
 	t.Run("C7 observe mode never blocks (INV-3 verbatim)", func(t *testing.T) {
 		// Even with a live BLOCK bundle, enforce OFF is the observe path: nothing to
 		// stdout, ever. This is the un-carved-out INV-3.
-		setBundleEnv(t, blockRuleBundle())
+		serveVerdict(t, `{"verdict":"block","reason":"destructive recursive delete","policy_id":"conf-policy"}`)
 		t.Setenv(envEnforce, "0")
 		t.Setenv(envFailClosed, "1") // even fail_closed=1 must not matter with enforce off
 		if out := run(t, dangerPayload); strings.TrimSpace(out) != "" {
@@ -210,30 +190,10 @@ func TestEnforcementConformance(t *testing.T) {
 		}
 	})
 
-	t.Run("C9 fail-closed + STALE real verdict proceeds (staleness never denies)", func(t *testing.T) {
-		// A bundled allow decider whose bundle is immediately Stale (tiny Freshness) is
-		// still a REAL verdict (sourceLocalBundle, Stale=true → hookflow.FailOpen=false), so the
-		// fail-closed policy is a NO-OP on it. Pins stop-condition #5: staleness never
-		// triggers fail-closed (isRealVerdictSource keys on source, not Stale). Since the
-		// full-hook decider uses the default freshness, this is exercised at the
-		// in-process decider level (ADR-0006: there is no served-socket freshness knob).
-		dec := decision.NewInProcessDecider(decision.InProcessConfig{
-			BundlePath: writeBundleFile(t, &decision.Bundle{Version: "conf-stale", DefaultDecision: "allow"}),
-			Freshness:  time.Nanosecond,
-		}).Decide(context.Background(), buildDecisionRequest(
-			Identity{DeveloperDID: testDID},
-			&HookEvent{SessionID: "s", ToolName: "Bash", ToolInput: []byte(`{"command":"echo hi"}`)},
-			false))
-		if !dec.Stale {
-			t.Fatalf("expected a Stale decision (tiny freshness), got %+v", dec)
-		}
-		if dec.FailOpen || dec.Source != "local-bundle" {
-			t.Fatalf("a STALE but real verdict must stay hookflow.FailOpen=false/local-bundle, got %+v", dec)
-		}
-		if got := hookflow.ApplyFailurePolicy(dec, hookflow.FailClosed); got.Evaluation.WouldBlock() {
-			t.Errorf("a STALE but real allow must NOT trigger fail-closed; got %+v", got.Evaluation)
-		}
-	})
+	// C9 (a STALE local verdict must not trigger fail-closed) is deleted with the
+	// bundle it read. Staleness described a local artifact falling behind the
+	// control plane; every verdict comes from the control plane now, so there is
+	// nothing that can be stale. Nothing replaces it — the condition cannot arise.
 
 	// C8 removed: in-process decision has no network timeout (ADR-0006). The old case
 	// exercised the socket Client's hard timeout tripping and failing open; with the
@@ -294,7 +254,7 @@ func TestEnforcementConformance(t *testing.T) {
 	// body is sent for evaluation would satisfy every other test in this file
 	// and still leak. Never weaken this to a substring check on a decision.
 	t.Run("C18 a secret in a Write body never reaches /evaluate (E8)", func(t *testing.T) {
-		setBundleEnv(t, &decision.Bundle{Version: "conf-allow", DefaultDecision: "allow"})
+		serveVerdict(t, `{"verdict":"allow"}`)
 		bodies := serveCapturing(t, `{"verdict":"allow"}`)
 		t.Setenv(envEnforce, "1")
 		t.Setenv(envFailClosed, "0")
@@ -324,7 +284,7 @@ func TestEnforcementConformance(t *testing.T) {
 	// With it off, no class attaches anything and the server decides on the
 	// structural axes alone — coarser enforcement, which is the honest trade.
 	t.Run("C19 content_capture:false attaches no content, any class", func(t *testing.T) {
-		setBundleEnv(t, &decision.Bundle{Version: "conf-allow", DefaultDecision: "allow"})
+		serveVerdict(t, `{"verdict":"allow"}`)
 		bodies := serveCapturing(t, `{"verdict":"allow"}`)
 		t.Setenv(envEnforce, "1")
 		t.Setenv(envFailClosed, "0")
@@ -363,7 +323,7 @@ func TestEnforcementConformance(t *testing.T) {
 		// DECOUPLED from content_capture (which stays OFF): the file body reaches only
 		// the local socket, the scanner redacts it, and the hook emits an updatedInput
 		// with the content field sanitized and NO permissionDecision (proceed).
-		setBundleEnv(t, &decision.Bundle{Version: "conf-allow", DefaultDecision: "allow"})
+		serveVerdict(t, `{"verdict":"allow"}`)
 		t.Setenv(envEnforce, "1")
 		t.Setenv(envFailClosed, "0")
 		t.Setenv(envContentCapture, "0") // egress stays metadata-only
@@ -401,7 +361,7 @@ func TestEnforcementConformance(t *testing.T) {
 	})
 
 	t.Run("C11 secret detection OFF → no redaction (opt-out, E6-S9)", func(t *testing.T) {
-		setBundleEnv(t, &decision.Bundle{Version: "conf-allow", DefaultDecision: "allow"})
+		serveVerdict(t, `{"verdict":"allow"}`)
 		t.Setenv(envEnforce, "1")
 		t.Setenv(envFailClosed, "0")
 		t.Setenv(envContentCapture, "0")
@@ -413,126 +373,17 @@ func TestEnforcementConformance(t *testing.T) {
 	})
 }
 
-// ── STORY-E6-S8 conformance: native builder policy + fail-closed stale gate ──
-
-// builderBlockBundle blocks a `rm -rf` shell command via a native policy_builder
-// config (FIRST-MATCH), the E6-S8 analog of blockRuleBundle.
-func builderBlockBundle(verdict string) *decision.Bundle {
-	return &decision.Bundle{
-		Version:  "conf-builder",
-		PolicyID: "conf-builder-policy",
-		PolicyBuilder: &decision.PolicyBuilderConfig{Version: 1, Rules: []decision.PolicyBuilderRule{{
-			Decision: verdict, Reason: "destructive recursive delete", MatchMode: "all",
-			Conditions: []decision.PolicyBuilderCondition{{
-				Field: "spans[_].attributes.command", Operator: "contains",
-				Transform: "value", Value: "rm -rf", ValueType: "string",
-			}},
-		}}},
-	}
-}
-
-// TestEnforcementConformance_BuilderPolicy drives the REAL RunHook PreToolUse
-// path against a REAL sidecar serving a native builder policy: BLOCK→deny,
-// no-match→proceed, REQUIRE_APPROVAL→ask (STORY-E6-S8 AC-1/AC-8 end-to-end).
-func TestEnforcementConformance_BuilderPolicy(t *testing.T) {
-	isolateConfig(t)
-	t.Setenv(envDID, testDID)
-	t.Setenv("OPENBOX_SPOOL_DIR", t.TempDir())
-	t.Setenv("OPENBOX_SESSION_DIR", t.TempDir())
-	t.Setenv(envEnforcementFile, filepath.Join(t.TempDir(), "enf.jsonl"))
-	t.Setenv(envContentCapture, "0")
-	t.Setenv(envEnforce, "1")
-	t.Setenv(envFailClosed, "0")
-
-	run := func(payload string) string {
-		var stdout bytes.Buffer
-		RunHook("PreToolUse", strings.NewReader(payload), &stdout, log.New(&bytes.Buffer{}, "", 0))
-		return stdout.String()
-	}
-	danger := `{"hook_event_name":"PreToolUse","session_id":"s","cwd":"/tmp","tool_name":"Bash","tool_input":{"command":"rm -rf /tmp/x"}}`
-	benign := `{"hook_event_name":"PreToolUse","session_id":"s","cwd":"/tmp","tool_name":"Bash","tool_input":{"command":"echo hi"}}`
-
-	t.Run("builder BLOCK denies", func(t *testing.T) {
-		setBundleEnv(t, builderBlockBundle("BLOCK"))
-		d, reason := parsePermissionDecision(t, []byte(run(danger)))
-		if d != ccDecisionDeny {
-			t.Fatalf("builder BLOCK: decision = %q, want deny", d)
-		}
-		if !strings.Contains(reason, "destructive recursive delete") || !strings.Contains(reason, "conf-builder-policy") {
-			t.Errorf("reason = %q, want the builder rule reason + policy id", reason)
-		}
-		if strings.Contains(run(danger), "rm -rf") {
-			t.Errorf("command leaked to stdout (INV-2)")
-		}
-	})
-
-	t.Run("builder no-match proceeds", func(t *testing.T) {
-		setBundleEnv(t, builderBlockBundle("BLOCK"))
-		if out := run(benign); strings.TrimSpace(out) != "" {
-			t.Errorf("no-match builder rule must proceed (empty stdout); got %q", out)
-		}
-	})
-
-	t.Run("builder REQUIRE_APPROVAL asks", func(t *testing.T) {
-		setBundleEnv(t, builderBlockBundle("REQUIRE_APPROVAL"))
-		d, _ := parsePermissionDecision(t, []byte(run(danger)))
-		if d != ccDecisionAsk {
-			t.Fatalf("builder REQUIRE_APPROVAL: decision = %q, want ask", d)
-		}
-	})
-}
-
-// TestEnforcementConformance_StaleGate drives AC-5 end-to-end: under fail-closed a
-// stale-marked session DENIES at the PreToolUse gate with a content-free reason,
-// and `dev sync` clearing the marker restores proceed — all with a reachable ALLOW
-// sidecar (so the deny is attributable to staleness, not policy).
-func TestEnforcementConformance_StaleGate(t *testing.T) {
-	isolateConfig(t)
-	t.Setenv(envDID, testDID)
-	t.Setenv("OPENBOX_SPOOL_DIR", t.TempDir())
-	t.Setenv("OPENBOX_SESSION_DIR", t.TempDir())
-	t.Setenv(envEnforcementFile, filepath.Join(t.TempDir(), "enf.jsonl"))
-	t.Setenv(envStaleDir, filepath.Join(t.TempDir(), "stale"))
-	t.Setenv(envContentCapture, "0")
-	t.Setenv(envEnforce, "1")
-	t.Setenv(envFailClosed, "1")
-
-	setBundleEnv(t, &decision.Bundle{Version: "allow", DefaultDecision: "allow"})
-	// The verdict comes from the server since ADR-0017, so a reachable allow is
-	// what makes the pre-marker case proceed. The stale gate must still cut in
-	// ahead of it once the marker exists — that is the property under test, and
-	// it is a local file stat that no network state can influence.
-	evalURL, _ := serveEvaluate(t, `{"verdict":"allow"}`, 200, 0)
-	tier2Creds(t, evalURL)
-
-	run := func() string {
-		var stdout bytes.Buffer
-		RunHook("PreToolUse", strings.NewReader(
-			`{"hook_event_name":"PreToolUse","session_id":"stale-sess","cwd":"/tmp","tool_name":"Bash","tool_input":{"command":"echo hi"}}`),
-			&stdout, log.New(&bytes.Buffer{}, "", 0))
-		return stdout.String()
-	}
-
-	// No marker yet → the reachable ALLOW sidecar proceeds.
-	if out := run(); strings.TrimSpace(out) != "" {
-		t.Fatalf("pre-marker: fail-closed + reachable allow must proceed; got %q", out)
-	}
-	// Mark the session stale (what a fail-closed SessionStart would do) → deny.
-	if err := hookflow.WriteStaleMarker("stale-sess"); err != nil {
-		t.Fatal(err)
-	}
-	d, reason := parsePermissionDecision(t, []byte(run()))
-	if d != ccDecisionDeny {
-		t.Fatalf("stale + fail-closed: decision = %q, want deny", d)
-	}
-	if !strings.Contains(reason, "dev sync") {
-		t.Errorf("stale deny reason = %q, want the run-`dev sync` nudge", reason)
-	}
-	// `dev sync` clears the marker → proceed again.
-	if err := hookflow.ClearAllStaleMarkers(); err != nil {
-		t.Fatal(err)
-	}
-	if out := run(); strings.TrimSpace(out) != "" {
-		t.Errorf("after clearing the marker the tool must proceed; got %q", out)
-	}
-}
+// ── Deleted with the local evaluator (ADR-0017) ──────────────────────────────
+//
+// TestEnforcementConformance_BuilderPolicy drove BLOCK / no-match /
+// REQUIRE_APPROVAL through the LOCAL implementation of the backend's
+// policy_builder semantics — the reimplementation whose permanent parity
+// obligation is ADR-0017's central argument. Those three outcomes belong to the
+// server now, and C12 / C13 / C14 assert them end to end against a real
+// /evaluate.
+//
+// TestEnforcementConformance_StaleGate asserted that a stale-marked session
+// denies under fail-closed and that clearing the marker restores proceed. Both
+// are properties of a local bundle's freshness; there is no local bundle, so
+// nothing can be stale. `openbox dev sync`, which cleared the marker, is retired
+// in the same change.

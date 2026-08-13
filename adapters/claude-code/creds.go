@@ -1,13 +1,11 @@
 package claudecode
 
 import (
-	"os"
 	"time"
 
 	"github.com/openbox-ai/openbox-shift-left/adapters/common/devconfig"
 	"github.com/openbox-ai/openbox-shift-left/adapters/common/hookflow"
 	"github.com/openbox-ai/openbox-shift-left/client"
-	"github.com/openbox-ai/openbox-shift-left/decision"
 )
 
 // Credential resolution for the hook binary. The provider-neutral
@@ -184,17 +182,6 @@ func ResolveControlToken() string { return devconfig.ResolveControlToken() }
 // ResolveOrgSigningKey returns the org's pinned policy-bundle signing key
 // (base64 raw Ed25519) and its id, from the shared dev config (E8-S6).
 func ResolveOrgSigningKey() (pubKeyB64, keyID string) { return devconfig.ResolveOrgSigningKey() }
-
-// ResolveBundlePath resolves the local policy-bundle path the in-process
-// decider evaluates and `dev sync`/staleness read: OPENBOX_SIDECAR_BUNDLE env,
-// else decision.DefaultBundlePath(). Enforce-specific (imports decision), so it
-// stays in this adapter rather than the shared devconfig module.
-func ResolveBundlePath() string {
-	if p := os.Getenv(envSidecarBundle); p != "" {
-		return p
-	}
-	return decision.DefaultBundlePath()
-}
 
 // ResolveCredentials assembles Credentials through the shared resolver: secrets
 // from the environment then ~/.openbox/.env, coordinates from the environment

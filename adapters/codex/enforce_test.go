@@ -2,8 +2,10 @@ package codex
 
 import (
 	"bytes"
-	"context"
+	"encoding/base64"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -26,41 +28,6 @@ func isolateConfig(t *testing.T) {
 	t.Setenv(devconfig.EnvConfigPath, filepath.Join(t.TempDir(), "none.json"))
 }
 
-// writeBundleFile marshals b to a temp bundle file and returns its path. A nil b
-// returns a path to a file that does NOT exist, which the in-process decider treats
-// as cold-start fail-open (VerdictUnknown / "fail-open:no-bundle").
-func writeBundleFile(t *testing.T, b *decision.Bundle) string {
-	t.Helper()
-	path := filepath.Join(t.TempDir(), "policy-bundle.json")
-	if b == nil {
-		return path
-	}
-	raw, err := json.Marshal(b)
-	if err != nil {
-		t.Fatalf("marshal bundle: %v", err)
-	}
-	if err := os.WriteFile(path, raw, 0o600); err != nil {
-		t.Fatalf("write bundle: %v", err)
-	}
-	return path
-}
-
-// setBundleEnv points the full-hook decider (RunHook → newDecider → ResolveBundlePath)
-// at a bundle file for b (nil → cold-start fail-open) and returns the path.
-func setBundleEnv(t *testing.T, b *decision.Bundle) string {
-	t.Helper()
-	path := writeBundleFile(t, b)
-	t.Setenv(envSidecarBundle, path)
-	return path
-}
-
-// newTestDecider builds an in-process decider over a bundle file for b (nil →
-// cold-start fail-open).
-func newTestDecider(t *testing.T, b *decision.Bundle) decision.Decider {
-	t.Helper()
-	return decision.NewInProcessDecider(decision.InProcessConfig{BundlePath: writeBundleFile(t, b)})
-}
-
 // parsePreToolUse parses a Codex PreToolUse hook stdout line into its decision,
 // reason, and raw updatedInput. Empty stdout → ("","",nil).
 func parsePreToolUse(t *testing.T, out []byte) (decisionVal, reason string, updatedInput json.RawMessage) {
@@ -78,22 +45,22 @@ func parsePreToolUse(t *testing.T, out []byte) (decisionVal, reason string, upda
 	return o.HookSpecificOutput.PermissionDecision, o.HookSpecificOutput.PermissionDecisionReason, o.HookSpecificOutput.UpdatedInput
 }
 
-// blockRuleBundle blocks a `rm -rf` shell command — the canonical enforce BLOCK.
-func blockRuleBundle() *decision.Bundle {
-	return &decision.Bundle{
-		Version:         "conf-block",
-		DefaultDecision: "allow",
-		Rules: []decision.Rule{{
-			ID:       "no-rm-rf",
-			Match:    decision.RuleMatch{ToolKind: "shell", AttributeContains: map[string]string{"command": "rm -rf"}},
-			Decision: "block",
-			Reason:   "destructive recursive delete",
-			PolicyID: "conf-policy",
-		}},
-	}
-}
-
 // ── unit tests ──
+
+// serveVerdict stands up the control plane for a case and points the adapter at
+// it. It replaces setBundleEnv: since ADR-0017 a case's expected outcome is a
+// SERVER verdict, not a local bundle, so the setup names the verdict directly.
+func serveVerdict(t *testing.T, verdictJSON string) {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(verdictJSON))
+	}))
+	t.Cleanup(srv.Close)
+	t.Setenv("OPENBOX_BASE_URL", srv.URL) // loopback http allowed (INV-1 guard)
+	t.Setenv("OPENBOX_API_KEY", "obx_test_key")
+	t.Setenv("OPENBOX_ED25519_SEED", base64.StdEncoding.EncodeToString(make([]byte, 32)))
+}
 
 func TestResolveEnforce_Codex(t *testing.T) {
 	cfgPath := filepath.Join(t.TempDir(), "dev.json")
@@ -312,18 +279,10 @@ func TestApplyFailurePolicy_Codex(t *testing.T) {
 	}
 }
 
-// EnforceDecision obtains a real deny from a bundled decider (no network).
-func TestEnforceDecision_ObtainsRealVerdict(t *testing.T) {
-	dec := EnforceDecision(context.Background(), newTestDecider(t, blockRuleBundle()),
-		Identity{DeveloperDID: testDID},
-		&HookEvent{SessionID: "s", ToolName: "Bash", ToolInput: []byte(`{"command":"rm -rf /"}`)}, false)
-	if !dec.Evaluation.WouldBlock() {
-		t.Fatalf("expected a real BLOCK verdict, got %+v", dec)
-	}
-	if dec.FailOpen {
-		t.Errorf("a real verdict must be hookflow.FailOpen=false, got %+v", dec)
-	}
-}
+// TestEnforceDecision_ObtainsRealVerdict is deleted with the local evaluator
+// (ADR-0017): EnforceDecision now runs secret redaction and produces no
+// verdict at all, so "obtains a real BLOCK" has no local meaning. CDX-C1
+// asserts the same outcome end to end against a real /evaluate.
 
 // The adapter-owned clamps are DERIVED from the installed gate-hook timeout, not
 // copied from Claude Code's constants (OD-SL7-T2-TIMEOUT).

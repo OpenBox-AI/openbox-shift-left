@@ -38,7 +38,15 @@ func TestPostureMetadata_BooleansAlwaysPresent(t *testing.T) {
 func TestPostureFields_CoverEveryConfigControl(t *testing.T) {
 	// install_git_hook is local convenience (whether we wrote a hook into this
 	// repo's .git), not a governance posture an org would attest to.
-	notPosture := map[string]bool{"install_git_hook": true}
+	//
+	// require_verified_bundle is parsed for back-compat and reports nothing: it
+	// guarded a local policy bundle, and ADR-0017 deleted the bundle. A control
+	// that cannot engage must not appear in the posture, or an org reading
+	// `true` would believe a signature check was protecting it.
+	notPosture := map[string]bool{
+		"install_git_hook":        true,
+		"require_verified_bundle": true,
+	}
 
 	reported := map[string]bool{}
 	for _, f := range postureFields() {
@@ -144,14 +152,19 @@ func TestEffectivePosture_MatchesResolvers(t *testing.T) {
 		p.SecretDetection != ResolveSecretDetection() ||
 		p.ContentCapture != ResolveContentCapture() ||
 		p.Findings != ResolveFindings() ||
-		p.Finops != ResolveFinops() ||
-		p.RequireVerifiedBundle != ResolveRequireVerifiedBundle() {
+		p.Finops != ResolveFinops() {
 		t.Errorf("EffectivePosture drifted from the resolvers: %+v", p)
 	}
 	// Flags is what `openbox doctor` and the session record both read, so it
 	// must agree with the struct field for every control.
-	if p.Flags()["require_verified_bundle"] != p.RequireVerifiedBundle {
+	if p.Flags()["content_capture"] != p.ContentCapture {
 		t.Error("Flags disagrees with the resolved posture — doctor would report a control that is not in force")
+	}
+	// require_verified_bundle must NOT be reported: it guarded a local bundle
+	// that no longer exists (ADR-0017), so an org reading `true` would believe a
+	// signature check was protecting it.
+	if _, reported := p.Flags()["require_verified_bundle"]; reported {
+		t.Error("require_verified_bundle is still reported — it cannot engage, so reporting it overstates")
 	}
 	// The documented defaults: ENFORCE (ADR-0016), with secret detection and
 	// content capture on (content capture default-ON is the 2026-07-15 decision).

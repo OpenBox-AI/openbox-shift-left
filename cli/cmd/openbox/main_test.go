@@ -22,7 +22,6 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/cli/internal/backend"
 	"github.com/openbox-ai/openbox-shift-left/cli/internal/devinit"
 	"github.com/openbox-ai/openbox-shift-left/client"
-	"github.com/openbox-ai/openbox-shift-left/decision"
 )
 
 // fakeReg implements devinit.Registrar for the command-wiring tests.
@@ -872,138 +871,15 @@ func TestUnknownProviderAndMissingProvider(t *testing.T) {
 	}
 }
 
-// ── STORY-E6-S8: `openbox dev sync` ──────────────────────────────────────────
-
-type fakePolicyReader struct {
-	pol *backend.Policy
-	err error
-}
-
-func (f *fakePolicyReader) GetCurrentPolicy(context.Context, string) (*backend.Policy, error) {
-	return f.pol, f.err
-}
-
-// syncApp builds an app whose env + policy reader are controllable, with getenv
-// wired to os.Getenv so the adapter resolvers (ResolveBackendURL/AgentID/Bundle)
-// and runDevSync's token read see the same t.Setenv values.
-func syncApp(reader policyReader) (*app, *bytes.Buffer, *bytes.Buffer) {
-	var out, errb bytes.Buffer
-	a := &app{
-		stdout:          &out,
-		stderr:          &errb,
-		getenv:          os.Getenv,
-		newPolicyReader: func(_, _, _ string) policyReader { return reader },
-	}
-	return a, &out, &errb
-}
-
-func TestDevSync_BuilderPolicyWritesPinnedBundle(t *testing.T) {
-	dir := t.TempDir()
-	bundlePath := filepath.Join(dir, "bundle.json")
-	t.Setenv("OPENBOX_CONFIG", filepath.Join(dir, "none.json"))
-	t.Setenv("OPENBOX_CONTROL_TOKEN", "obx_key_secretorgkey")
-	t.Setenv("OPENBOX_BACKEND_URL", "https://backend.example")
-	t.Setenv("OPENBOX_AGENT_ID", "agent-9")
-	t.Setenv("OPENBOX_SIDECAR_BUNDLE", bundlePath)
-	t.Setenv("OPENBOX_STALE_DIR", filepath.Join(dir, "stale"))
-
-	reader := &fakePolicyReader{pol: &backend.Policy{
-		ID:            "pol-42",
-		UpdatedAt:     "2026-07-15T12:00:00Z",
-		PolicyBuilder: []byte(`{"version":1,"rules":[{"decision":"BLOCK","reason":"no rm","matchMode":"all","conditions":[{"field":"spans[_].attributes.command","operator":"contains","transform":"value","value":"rm -rf","valueType":"string"}]}]}`),
-	}}
-	a, out, errb := syncApp(reader)
-
-	if code := a.run([]string{"dev", "sync"}); code != exitOK {
-		t.Fatalf("dev sync exit = %d, want 0 (stderr=%s)", code, errb.String())
-	}
-	raw, err := os.ReadFile(bundlePath)
-	if err != nil {
-		t.Fatalf("bundle not written: %v", err)
-	}
-	// The written bundle carries the PIN + the builder config, and is loadable.
-	b, err := decision.ParseBundle(raw)
-	if err != nil {
-		t.Fatalf("written bundle invalid: %v", err)
-	}
-	if b.PolicyID != "pol-42" || b.UpdatedAt != "2026-07-15T12:00:00Z" || b.PolicyBuilder == nil {
-		t.Errorf("bundle pin/config wrong: %+v", b)
-	}
-	// INV-1: the org key must never appear in stdout/stderr.
-	if strings.Contains(out.String(), "obx_key_") || strings.Contains(errb.String(), "obx_key_") {
-		t.Errorf("org key leaked to output")
-	}
-	// 0600 owner-only.
-	if fi, _ := os.Stat(bundlePath); fi != nil && fi.Mode().Perm() != 0o600 {
-		t.Errorf("bundle perm = %v, want 0600", fi.Mode().Perm())
-	}
-}
-
-func TestDevSync_NullPolicyWritesAllowBundle(t *testing.T) {
-	dir := t.TempDir()
-	bundlePath := filepath.Join(dir, "bundle.json")
-	t.Setenv("OPENBOX_CONFIG", filepath.Join(dir, "none.json"))
-	t.Setenv("OPENBOX_CONTROL_TOKEN", "obx_key_x")
-	t.Setenv("OPENBOX_BACKEND_URL", "https://b.example")
-	t.Setenv("OPENBOX_AGENT_ID", "a")
-	t.Setenv("OPENBOX_SIDECAR_BUNDLE", bundlePath)
-
-	a, _, errb := syncApp(&fakePolicyReader{pol: nil}) // data==null
-	if code := a.run([]string{"dev", "sync"}); code != exitOK {
-		t.Fatalf("dev sync (null policy) exit = %d (stderr=%s)", code, errb.String())
-	}
-	if _, err := os.Stat(bundlePath); err != nil {
-		t.Fatalf("allow/no-policy bundle not written: %v", err)
-	}
-}
-
-func TestDevSync_RawRegoWarnsAndProceeds(t *testing.T) {
-	dir := t.TempDir()
-	bundlePath := filepath.Join(dir, "bundle.json")
-	t.Setenv("OPENBOX_CONFIG", filepath.Join(dir, "none.json"))
-	t.Setenv("OPENBOX_CONTROL_TOKEN", "obx_key_x")
-	t.Setenv("OPENBOX_BACKEND_URL", "https://b.example")
-	t.Setenv("OPENBOX_AGENT_ID", "a")
-	t.Setenv("OPENBOX_SIDECAR_BUNDLE", bundlePath)
-
-	a, out, _ := syncApp(&fakePolicyReader{pol: &backend.Policy{ID: "pol-raw", UpdatedAt: "t", HasRawRego: true}})
-	if code := a.run([]string{"dev", "sync"}); code != exitOK {
-		t.Fatalf("dev sync raw-rego exit non-zero")
-	}
-	if !strings.Contains(out.String(), "raw rego") && !strings.Contains(out.String(), "fail-open") {
-		t.Errorf("expected a non-secret raw-rego warning, got %q", out.String())
-	}
-}
-
-func TestDevSync_FetchErrorNonZeroWithHint(t *testing.T) {
-	dir := t.TempDir()
-	t.Setenv("OPENBOX_CONFIG", filepath.Join(dir, "none.json"))
-	t.Setenv("OPENBOX_CONTROL_TOKEN", "obx_key_x")
-	t.Setenv("OPENBOX_BACKEND_URL", "https://b.example")
-	t.Setenv("OPENBOX_AGENT_ID", "a")
-	t.Setenv("OPENBOX_SIDECAR_BUNDLE", filepath.Join(dir, "bundle.json"))
-
-	a, _, errb := syncApp(&fakePolicyReader{err: &backend.APIError{StatusCode: 403, Body: "forbidden"}})
-	if code := a.run([]string{"dev", "sync"}); code != exitError {
-		t.Fatalf("dev sync fetch error exit = %d, want %d", code, exitError)
-	}
-	if !strings.Contains(errb.String(), "read:agent_policy") {
-		t.Errorf("expected a mapped 403 hint, got %q", errb.String())
-	}
-}
-
-func TestDevSync_MissingTokenIsINV1Guard(t *testing.T) {
-	dir := t.TempDir()
-	t.Setenv("OPENBOX_CONFIG", filepath.Join(dir, "none.json"))
-	os.Unsetenv("OPENBOX_CONTROL_TOKEN")
-	a, _, errb := syncApp(&fakePolicyReader{})
-	if code := a.run([]string{"dev", "sync"}); code != exitError {
-		t.Fatalf("missing token exit = %d, want error", code)
-	}
-	if !strings.Contains(errb.String(), "OPENBOX_CONTROL_TOKEN") {
-		t.Errorf("expected the INV-1 token guard, got %q", errb.String())
-	}
-}
+// `openbox dev sync` and its tests are gone with ADR-0017: the local policy
+// bundle it fetched no longer exists, so there is nothing to sync. The deleted
+// cases covered properties OF THAT FETCH — a successful sync writing a bundle
+// and pin, a null policy becoming an empty allow bundle, raw rego degrading to
+// a fail-open local bundle with a warning, a mapped 403 hint, and the INV-1
+// guard refusing the control token as a flag. Only the last outlives the
+// command, and it still holds wherever a control token is read.
+//
+// TestDevSyncIsRetired pins that the command now reports its own removal.
 
 // Coordinate persistence moved from `init` to `auth` (ADR-0015): `auth` writes
 // agent_id / backend_url / base_url to dev.json, they survive a re-run, and the
@@ -1324,10 +1200,25 @@ func TestCodexDryRunWritesNothing(t *testing.T) {
 // Asking for help is not an error. `openbox dev sync -h` exited 0 while
 // `openbox init -h` exited 1, purely because only one call site checked for
 // flag.ErrHelp — the kind of inconsistency scripts and CI trip over.
+// A removed command must SAY it was removed. Falling through to the usage line
+// would leave an operator with a sync script that "works" — exit 0, no output —
+// while enforcement quietly depends on something else entirely.
+func TestDevSyncIsRetired(t *testing.T) {
+	a, _, errb := testApp(nil)
+	if code := a.run([]string{"dev", "sync"}); code == exitOK {
+		t.Error("`dev sync` exited 0 — a retired command must fail, not no-op")
+	}
+	for _, want := range []string{"no longer exists", "ADR-0017", "inert"} {
+		if !strings.Contains(errb.String(), want) {
+			t.Errorf("stderr %q must mention %q, so an operator learns what replaced it and "+
+				"that the leftover bundle file on disk is harmless", errb.String(), want)
+		}
+	}
+}
+
 func TestHelpFlagExitsZeroForEverySubcommand(t *testing.T) {
 	for _, args := range [][]string{
 		{"init", "-h"},
-		{"dev", "sync", "-h"},
 		{"dev", "verify", "-h"},
 		{"doctor", "-h"},
 		{"managed", "-h"},
@@ -1342,7 +1233,7 @@ func TestHelpFlagExitsZeroForEverySubcommand(t *testing.T) {
 // A parse error is still an error.
 func TestUnknownFlagExitsNonZero(t *testing.T) {
 	a, _, _ := testApp(nil)
-	if got := a.run([]string{"dev", "sync", "--no-such-flag"}); got == exitOK {
+	if got := a.run([]string{"dev", "verify", "--no-such-flag"}); got == exitOK {
 		t.Error("an unknown flag must not exit 0")
 	}
 }
