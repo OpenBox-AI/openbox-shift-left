@@ -310,6 +310,94 @@ func TestSplitMCPName(t *testing.T) {
 	}
 }
 
+// The assistant-turn content attach (ADR-0018 Decision 2). Three conditions,
+// all required; this asserts each one alone is enough to withhold the text.
+func TestMapTurn_AssistantTextIsGatedOnContentCapture(t *testing.T) {
+	const answer = "I refactored the spool."
+	window := turnWindow{HasUsage: true, Model: "claude-opus-4-8"}
+
+	for _, tc := range []struct {
+		name    string
+		capture bool
+		message string
+		want    string // "" = expect no Content at all
+	}{
+		{"capture off", false, answer, ""},
+		{"capture on, hook carried nothing", true, "", ""},
+		{"capture on, message present", true, answer, answer},
+	} {
+		m := testMapper()
+		m.CaptureContent = tc.capture
+		_, completed, ok := m.MapTurn(&HookEvent{SessionID: "s", LastAssistantMessage: tc.message}, window, 0)
+		if !ok {
+			t.Fatalf("%s: MapTurn not ok", tc.name)
+		}
+		switch {
+		case tc.want == "":
+			if completed.Content != nil {
+				t.Errorf("%s: content attached anyway: %+v", tc.name, completed.Content)
+			}
+			if blob, _ := json.Marshal(completed); strings.Contains(string(blob), answer) {
+				t.Errorf("%s: assistant text present in the event: %s", tc.name, blob)
+			}
+		default:
+			if completed.Content == nil || completed.Content.Output != tc.want {
+				t.Errorf("%s: content = %+v, want Output %q", tc.name, completed.Content, tc.want)
+			}
+		}
+	}
+}
+
+// The text rides the COMPLETED half only. The started half's input is the
+// prompt, which already rides PromptSubmitted under the same gate — attaching it
+// twice would double the egress for no reader.
+func TestMapTurn_StartedHalfNeverCarriesText(t *testing.T) {
+	m := testMapper()
+	m.CaptureContent = true
+	started, _, ok := m.MapTurn(&HookEvent{SessionID: "s", LastAssistantMessage: "the answer"},
+		turnWindow{HasUsage: true}, 0)
+	if !ok {
+		t.Fatal("MapTurn not ok")
+	}
+	if started.Content != nil {
+		t.Errorf("the started half carries content: %+v", started.Content)
+	}
+}
+
+// Redaction is a COLLABORATOR, so every attach path goes through it by
+// construction rather than by remembering to call it. A nil redactor is the
+// secret_detection:false case: the text egresses unredacted, which ADR-0018
+// states rather than hides.
+func TestMapTurn_RedactionIsStructural(t *testing.T) {
+	const secret = "${OPENBOX_REDACTED_AWS_KEY}"
+	window := turnWindow{HasUsage: true}
+
+	redacting := testMapper()
+	redacting.CaptureContent = true
+	redacting.RedactContent = func(s string) string { return strings.ReplaceAll(s, secret, "[REDACTED]") }
+	_, completed, ok := redacting.MapTurn(&HookEvent{
+		SessionID: "s", LastAssistantMessage: "your key is " + secret,
+	}, window, 0)
+	if !ok {
+		t.Fatal("MapTurn not ok")
+	}
+	if strings.Contains(completed.Content.Output, secret) {
+		t.Errorf("the redactor did not run before attachment: %q", completed.Content.Output)
+	}
+	if !strings.Contains(completed.Content.Output, "[REDACTED]") {
+		t.Errorf("expected the redaction placeholder, got %q", completed.Content.Output)
+	}
+
+	// Detection off: unredacted, deliberately and documented.
+	off := testMapper()
+	off.CaptureContent = true
+	_, plain, _ := off.MapTurn(&HookEvent{SessionID: "s", LastAssistantMessage: "your key is " + secret}, window, 0)
+	if !strings.Contains(plain.Content.Output, secret) {
+		t.Error("with no redactor wired the text must pass through unchanged — a silent " +
+			"partial redaction would be worse than the documented opt-out")
+	}
+}
+
 // The outcome derivation (ADR-0018 Decision 1). It is structural: which hook
 // fired IS the answer, so these tests assert the mapping and — more importantly
 // — that nothing was read out of the tool's own output to get there.

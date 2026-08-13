@@ -187,16 +187,39 @@ type HookEvent struct {
 	// StopFailure's `error_details` and `last_assistant_message` are NOT bound.
 	ErrorType string `json:"error"`
 
-	// Stop / SubagentStop deliberately bind NOTHING of their own.
+	// LastAssistantMessage is the text of the assistant message that closed this
+	// turn (Stop / SubagentStop). It is CONTENT, and it is the one field of
+	// these payloads this adapter binds.
 	//
-	// Their payload carries `last_assistant_message` and `stop_reason` — both
-	// content, and neither needed: the hook's value is that it fired, and the
-	// numbers come from the transcript. Adding either field here would put
-	// assistant text one careless capStr away from the wire, so the absence is
-	// the safeguard (INV-2, the same structural argument usage.go makes).
+	// This comment used to say the opposite — that Stop and SubagentStop
+	// "deliberately bind NOTHING of their own", and that the absence was the
+	// safeguard. ADR-0018 changed that for this ONE field, and the honest
+	// version of the argument is:
 	//
-	// What these hooks do use is already above: SessionID, TranscriptPath, and
+	//   - It is decoded here and copied onto an event only under
+	//     Mapper.CaptureContent, then redacted for secrets BEFORE attachment,
+	//     then capped at 64KB by the client. With capture off it is inert,
+	//     exactly like Prompt.
+	//   - The safeguard is no longer structural for this field. It is a gate
+	//     plus a redaction plus a cap, each of which can be got wrong, which is
+	//     why each is asserted on the outbound bytes rather than trusted.
+	//   - With `secret_detection:false` the text egresses UNREDACTED. Stated,
+	//     not mitigated.
+	//
+	// Why this field and not the transcript: the provider itself recommends it
+	// ("Avoids the need to read and parse the transcript file" — 2.1.229 schema
+	// description), the transcript is written asynchronously and lags, and
+	// sourcing it here leaves usage.go's transcript allowlist and its sentinel
+	// TestFinops_NoContentOnWire completely untouched.
+	//
+	// Still unbound, deliberately: `error_details`, `background_tasks`,
+	// `session_crons`. And `stop_reason` is not "deferred" — it does not exist
+	// on this payload in 2.1.229 (verified: absent empirically and absent from
+	// the binary's own input schema).
+	//
+	// What these hooks also use is above: SessionID, TranscriptPath, and
 	// AgentID/AgentType for the subagent attribution.
+	LastAssistantMessage string `json:"last_assistant_message"`
 
 	// Prompt is the UserPromptSubmit prompt text — content (INV-2), not
 	// structural. It is decoded here but is consumed only by the mapper

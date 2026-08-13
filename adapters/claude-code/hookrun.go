@@ -107,6 +107,14 @@ func RunHook(sub string, stdin io.Reader, stdout io.Writer, logger *log.Logger) 
 	// Emit uses to strip content, so capture and egress agree. Resolved once
 	// (cheap config+env, no secret I/O).
 	ad.Mapper.CaptureContent = ResolveContentCapture()
+	// Secret redaction for any content the mapper attaches (ADR-0018). Wired as
+	// a collaborator so it cannot be forgotten by a future attach path; left nil
+	// when the org opted out, which means that content egresses unredacted —
+	// the documented, deliberate degradation, not an oversight.
+	if ResolveSecretDetection() {
+		redactor := decision.NewRedactor()
+		ad.Mapper.RedactContent = func(s string) string { return hookflow.RedactText(redactor, s) }
+	}
 	// Pin the Mapper clock to one instant for this hook invocation. RunHook
 	// maps the PreToolUse event twice on a gated call — once here
 	// via Observe (the spool copy, flushed on SessionEnd) and once inside

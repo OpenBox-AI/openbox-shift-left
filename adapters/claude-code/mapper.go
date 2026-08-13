@@ -63,6 +63,19 @@ type Mapper struct {
 	// before egress (capBody, buildSignalArgs). Only the prompt is gated
 	// here — command/file/output content is still never decoded.
 	CaptureContent bool
+	// RedactContent redacts a content body for secrets before it is attached to
+	// an event. nil ⇒ identity, which is the honest `secret_detection:false`
+	// case: the text egresses unredacted (ADR-0018 says so rather than hiding
+	// it).
+	//
+	// It is a COLLABORATOR rather than something MapTurn remembers to call,
+	// which is the point: with the redactor on the Mapper, every path that
+	// attaches text goes through it by construction. A function the mapper had
+	// to remember to invoke would be one refactor away from a path that
+	// forgot, and the failure would be a secret at the control plane — the
+	// hardest place to purge anything from. Same idiom as Now / NewID / Finops
+	// / Posture; wired in RunHook from ResolveSecretDetection().
+	RedactContent func(string) string
 	// Posture, when non-nil, is the session's effective posture (E8-S5),
 	// attached to the SessionStarted event's metadata only. RunHook resolves
 	// it (config reads, a bundle hash, the freshness check) and passes it in,
@@ -369,6 +382,21 @@ func (m Mapper) MapTurn(e *HookEvent, w turnWindow, index int) (started, complet
 	// The one egressing string, bounded here at the untrusted boundary exactly as
 	// metadata.model is (sessionStartMetadata).
 	completed.Model = capStr(w.Model)
+	// The assistant's answer, on the COMPLETED half only (ADR-0018 Decision 2).
+	// Three conditions, all required: the org opted into content capture, the
+	// hook actually carried the field, and the redactor has run over it. The
+	// client then wraps it into the one span core's alignment extractor reads,
+	// caps it at 64KB, and — independently — drops it entirely if capture is off
+	// at flush time.
+	//
+	// Deliberately NOT on the started half: a turn's input is the prompt, which
+	// already rides PromptSubmitted under the same gate. Duplicating it here
+	// would double the egress for no reader.
+	if m.CaptureContent && e.LastAssistantMessage != "" {
+		if text := m.redact(e.LastAssistantMessage); text != "" {
+			completed.Content = &client.Content{Output: text}
+		}
+	}
 	completed.Metadata = turnMetadata(e, turnIndex)
 	completed.EventID = m.eventID(completed)
 
@@ -686,6 +714,15 @@ func (m Mapper) clock() time.Time {
 		return m.Now()
 	}
 	return time.Now()
+}
+
+// redact applies the injected content redactor, or returns the text unchanged
+// when none is wired (secret detection off — the honest degradation, ADR-0018).
+func (m Mapper) redact(s string) string {
+	if m.RedactContent == nil {
+		return s
+	}
+	return m.RedactContent(s)
 }
 
 // eventID resolves the event's idempotency id (INV-5): the injected NewID when a

@@ -608,6 +608,49 @@ func TestFinops_NoContentOnWire(t *testing.T) {
 	if !strings.Contains(string(bodies[0]), strconv.Itoa(wantTotal)) {
 		t.Errorf("expected token total %d on the SessionEnded wire body, got: %s", wantTotal, bodies[0])
 	}
+
+	// (f) ADR-0018 made a turn able to carry assistant text. That widening MUST
+	// NOT widen this projection, and everything above ran with capture off — so
+	// without this section the strongest new failure mode is untested and the
+	// test would pass trivially for the change that introduced it.
+	//
+	// The adversarial setup: content capture ON, the same poisoned transcript,
+	// and a hook payload carrying its own assistant message. What must hold is
+	// the exact ADR-0018 claim — the text comes from the HOOK FIELD, so the
+	// transcript stays as unreadable as it was, including SENTINEL_THINKING,
+	// which is the field ADR-0019 P3 would have to amend this allowlist to get.
+	const hookMessage = "the hook-supplied assistant answer"
+	capturing := NewMapper(Identity{DeveloperDID: testDID})
+	capturing.NewID = func() string { return "evt-2" }
+	capturing.CaptureContent = true
+	_, capturedTurn, ok := capturing.MapTurn(&HookEvent{
+		SessionID: "s1", TranscriptPath: path, LastAssistantMessage: hookMessage,
+	}, window, 0)
+	if !ok {
+		t.Fatal("MapTurn(capture on) not ok")
+	}
+	bodies = nil
+	if _, err := cl.Emit(context.Background(), capturedTurn); err != nil {
+		t.Fatalf("Emit(captured turn): %v", err)
+	}
+	if len(bodies) != 1 {
+		t.Fatalf("captured %d bodies for the content turn, want 1", len(bodies))
+	}
+	capturedBody := string(bodies[0])
+	for _, s := range sentinels {
+		if strings.Contains(capturedBody, s) {
+			t.Fatalf("INV-2 breach: transcript sentinel %q reached the wire on a "+
+				"content-capturing turn — ADR-0018 sources assistant text from the HOOK "+
+				"payload, and binding it must not have widened the transcript "+
+				"projection: %s", s, capturedBody)
+		}
+	}
+	// And the hook-supplied text DID reach the wire, so the absence above is a
+	// real result and not "content capture quietly did nothing".
+	if !strings.Contains(capturedBody, hookMessage) {
+		t.Fatalf("the hook-supplied assistant message did not reach the wire; every "+
+			"assertion in this section would then be vacuous: %s", capturedBody)
+	}
 }
 
 // Cost must never be derived. The transcript is the only source; a transcript
