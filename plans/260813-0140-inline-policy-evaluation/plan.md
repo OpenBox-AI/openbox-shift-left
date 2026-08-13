@@ -1,7 +1,7 @@
 ---
 title: "Inline policy evaluation — one decision path, no tiers"
 description: "OpenBox becomes the single decision authority: every gated tool call is evaluated inline. Deletes the local policy evaluator, bundle sync, staleness and signing; keeps local secret redaction."
-status: pending
+status: complete — testbed run outstanding
 priority: P1
 effort: 28h
 branch: feat/inline-policy-evaluation — branched off feat/dev-runtime-auth-and-init, must land after it
@@ -58,7 +58,7 @@ consumed, and the sync/staleness/signing machinery around it are deleted. Local
 | 5 | [Evidence: verdict `policy_id` into posture](phase-05-policy-identity-evidence.md) | done | 2h | 3 |
 | 6 | [Delete the local policy path](phase-06-delete-local-policy.md) | done | 5h | 4, 5 |
 | 7 | [Rename to three named features; rewrite the privacy docs](phase-07-rename-and-docs-rewrite.md) | done | 4h | 6 |
-| 8 | [Verify against the real thing](phase-08-verification.md) | pending | 3h | 7 |
+| 8 | [Verify against the real thing](phase-08-verification.md) | done — stack run waived | 3h | 7 |
 
 Phase 1 is a **blocking investigation** — it can invalidate the approach, so it runs
 before the ADR. 4 ‖ 5 after 3. Everything else is sequential.
@@ -88,7 +88,7 @@ before the ADR. 4 ‖ 5 after 3. Everything else is sequential.
 - Exactly one `ActivityStarted` per gated call, with every class escalating.
 - Session posture carries the deciding `policy_id`.
 - `grep -ric "tier"` over `*.go`/`*.md` outside ADR history returns 0.
-- All 11 modules: build, vet, `-race` green; testbed green against a live stack.
+- All 11 modules: build, vet, `-race` green ✅ (+ Windows and linux/arm64 cross-compile). Testbed against a live stack: **NOT RUN** — waived by the operator; see reports/verification-260813-inline-evaluation.md.
 
 ## Out of scope
 

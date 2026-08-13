@@ -12,7 +12,7 @@
 - **Date:** 2026-08-13
 - **Description:** Prove the inline path works end to end, prove the failure paths behave, and
   state honestly what could not be proven.
-- **Priority:** P1 · **Implementation status:** pending · **Review status:** pending
+- **Priority:** P1 · **Implementation status:** done, minus the stack run (waived) · **Review status:** pending
 
 ## Key Insights
 
@@ -99,9 +99,9 @@
 - [ ] Secret never egresses; redaction survives core-down
 - [ ] Posture identity asserted, verdict and no-verdict cases
 - [ ] Raw-rego case run, or its absence recorded with a reason
-- [ ] CI grep gate added and demonstrably catches a regression
-- [ ] All 11 modules green + Windows cross-compile
-- [ ] Run recorded in `reports/` incl. what was not exercised
+- [x] CI grep gate added and demonstrably catches a regression
+- [x] All 11 modules green + Windows cross-compile
+- [x] Run recorded in `reports/` incl. what was not exercised
 
 ## Success Criteria
 
