@@ -12,7 +12,7 @@ as reconstructed and states what evidence it was rebuilt from. They record what
 was decided and why, as accurately as the surviving evidence supports; where the
 original reasoning is not recoverable, they say so rather than inventing it.
 
-ADR-0008, 0010, 0011, 0012, 0013, 0014, 0015, 0016, 0017 and 0018 are originals.
+Every ADR not marked "reconstructed" in the table below is an original.
 
 | ADR | Title | Status |
 |-----|-------|--------|

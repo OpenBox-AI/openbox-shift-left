@@ -266,4 +266,6 @@ Being precise here is part of the product.
 
 `testbed/` is a mock-free end-to-end suite: it drives real headless sessions against
 a real local OpenBox and asserts what arrived — including that tool commands and
-file bodies never egress. See [end-to-end tests](testbed/e2e.md).
+file bodies never egress on an **observe** event. (On a gated call they do, under
+content capture and redacted first — ADR-0017.) See
+[end-to-end tests](testbed/e2e.md).

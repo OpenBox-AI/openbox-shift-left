@@ -44,7 +44,7 @@ Source-cited to `client/payload.go` (`governanceEventPayload`, the marshaled bod
 | `span` | — | **Not serialized.** The adapter-facing `span` object is the carrier the client reads locators and counts *out of* (§3); it is never itself emitted, on any event (ADR-0013). Do not confuse it with the wire span below, which shares no code and no fields. |
 | `content.output` (turn) | `spans[0].response_body` + `span_count` | **`TurnCompleted` only, content-gated** (ADR-0018). ONE span, carrying the assistant turn's text wrapped as `{"choices":[{"message":{"content":…}}]}` — the exact shape core's goal-alignment extractor unmarshals (`goal_alignment_session.go:64-88`), which reads `payload.Spans` and nothing else. Secret-redacted **before** attachment, then `capBody`-capped at 64KB. Both keys **absent** with capture off. `hook_trigger` is still never sent, on any event: true alongside spans routes the payload into core's approval-bypass fingerprint path (`governance_workflow.go:310-330`). See `client/turnspan.go`. |
 | `content.prompt` | `signal_args.prompt` **only when content-capture enabled**, capped to 65536 chars (`capBody`) | Stripped at the client when disabled (INV-2). |
-| `content.tool_input` | `activity_input.command` / `.arguments` **only when content-capture enabled**, capped | Tier-2 **escalation only**, never the observe path (OD-E9-7). |
+| `content.tool_input` | `activity_input.command` / `.arguments` **only when content-capture enabled**, capped | **Gated calls only** — never the observe path (OD-E9-7). ADR-0017 retired the tier vocabulary this row used to name. |
 | `span.request_body/response_body` (adapter-facing) | — | **Not an egress channel.** These are fields of the frozen ADAPTER-FACING `span` object, which the serializer does not read: no adapter has ever populated either, and both mappers assert they stay empty (`adapters/claude-code/mapper_test.go:169`, `adapters/codex/mapper_test.go:207`). The wire span's `response_body` in the row above is a different field on a different struct (`client.wireSpan`), built only from `content.output`. |
 
 `schema_version` and `event_id` are contract/idempotency fields — `event_id` is the client's idempotency key (INV-5), used client-side for dedupe; neither is a core payload field.
@@ -290,7 +290,7 @@ into `activity_input`/`activity_output` instead of serializing it as a span.
 | `span.lines_count` | `activity_output.lines_count` | completed | |
 | `metadata.exit_code` | `activity_output.exit_code` | completed | promoted from the free-form blob; **no adapter supplies one today**, so it is absent in practice. Kept because the promotion is live the moment one does |
 | `started_at`, `ended_at` | `duration_ms` | completed | float ms; **omitted, not zero**, when the stash missed, a timestamp does not parse, or the result is not positive. Zero would claim the call took no time |
-| `content.tool_input` | `activity_input.command` / `.arguments` | started | Tier-2 escalation only, content-gated, `capBody`-capped |
+| `content.tool_input` | `activity_input.command` / `.arguments` | started | Gated calls only, content-gated, `capBody`-capped |
 | `span.invocation_id` | — (local) | — | feeds the duration-stash key; never a wire field |
 | `span.operation_id` | — (local) | — | feeds `activity_id`; never a wire field |
 | `span.semantic_type` | — | — | the client has never sent this field; the wire span's own `semantic_type` is built independently and is recomputed by core anyway (§2) |
