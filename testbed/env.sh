@@ -58,7 +58,9 @@ mkdir -p "$XDG_CONFIG_HOME"
 # os.UserConfigDir() per platform, and it fails visibly if a new state file
 # appears without an override.
 export OPENBOX_SPOOL_DIR="${OPENBOX_SPOOL_DIR:-$TB_STATE/state/spool}"
-export OPENBOX_SIDECAR_BUNDLE="${OPENBOX_SIDECAR_BUNDLE:-$TB_STATE/state/policy-bundle.json}"
+# The local policy bundle is gone (ADR-0017). The path is left unset rather
+# than pinned: nothing reads it, and pinning a dead path invites a future reader
+# to assume it still matters.
 export OPENBOX_ENFORCEMENT_FILE="${OPENBOX_ENFORCEMENT_FILE:-$TB_STATE/state/enforcements.jsonl}"
 export OPENBOX_ADVISORY_FILE="${OPENBOX_ADVISORY_FILE:-$TB_STATE/state/advisories.jsonl}"
 export OPENBOX_FINDINGS_CURSOR="${OPENBOX_FINDINGS_CURSOR:-$TB_STATE/state/findings.cursor}"

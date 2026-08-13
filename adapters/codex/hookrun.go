@@ -42,7 +42,7 @@ const flushBudget = 12 * time.Second
 // to `stdout` — the INV-3b carve-out. It still only ever tightens (deny /
 // content-stripping rewrite, never a grant) and still exits 0, so a
 // non-blocking verdict is byte-identical to observe mode. Every other
-// hook, and observe mode, write nothing to stdout (except the Tier-3
+// hook, and observe mode, write nothing to stdout (except the
 // findings additionalContext/systemMessage).
 //
 // `sub` is the hook name (SessionStart/UserPromptSubmit/PreToolUse/PostToolUse/
@@ -50,7 +50,7 @@ const flushBudget = 12 * time.Second
 // the enforce apply writes the permissionDecision (unused in observe mode).
 func RunHook(sub string, stdin io.Reader, stdout io.Writer, logger *log.Logger) {
 	// Freeze config reads for this hook run: everything the gate decides —
-	// enforce, the failure policy, tier-2 — must come from one version of
+	// enforce, the failure policy — must come from one version of
 	// dev.json, not one read per flag.
 	defer devconfig.Pin()()
 	// Guarantee a panic never escapes into the caller's exit path.
@@ -109,7 +109,7 @@ func RunHook(sub string, stdin io.Reader, stdout io.Writer, logger *log.Logger) 
 	// value so Map stays I/O-free.
 	ad.Mapper.ThreadID = os.Getenv(obgit.EnvCodexThreadID)
 	// Pin the Mapper clock to one instant for this hook invocation. In
-	// enforce+Tier-2 mode RunHook maps the PreToolUse event twice — once
+	// on a gated call RunHook maps the PreToolUse event twice — once
 	// here via Observe (the spooled copy, flushed on SessionEnd) and once
 	// inside escalateEvaluation → runTier2 (the synchronous /evaluate copy). A
 	// fresh time.Now() on each Map would fold a different RFC3339Nano

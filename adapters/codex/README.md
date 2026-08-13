@@ -224,8 +224,8 @@ The cascade is the shipped Claude Code E6 stack (`decision/` consumed unchanged,
 ADR-0006 in-process decider — no socket, no daemon, microseconds, no network on
 the T1 path): **obtain** → **failure policy** (fail-open default / opt-in
 fail-closed on outage only) → **apply** onto Codex's PreToolUse contract, plus
-Tier-2 sync `/evaluate` escalation for high-risk classes (Bash / `mcp__*`) and the
-Tier-3 findings loop. Only the two provider EDGES differ from CC; the middle is
+inline `/evaluate` evaluation of every gated call (ADR-0017) and the findings
+loop. Only the two provider EDGES differ from CC; the middle is
 shared.
 
 ### Codex-shaped deltas (each grounded @ `rust-v0.145.0` + the binary output schemas, recorded in the SL7-B probes)
@@ -252,7 +252,7 @@ shared.
   `new_string`). `apply_patch`'s PreToolUse `tool_input` is
   `{"command":<raw patch text>}` and `updatedInput` is re-parsed via
   `updated_hook_command` → `updated_input["command"]` (core `ApplyPatchHandler` +
-  `handlers/mod.rs`). Tier-1 secret detection scans the patch body and rewrites the
+  `handlers/mod.rs`). Local secret detection scans the patch body and rewrites the
   `"command"` field only; every structural field is carried over verbatim.
 - **Tighten-only preserved (OD-SL7-ALLOW-REWRITE).** `permissionDecision:"allow"`
   is emitted **only** bundled with a non-empty redacting `updatedInput`; a bare
@@ -272,7 +272,7 @@ shared.
   conservative (T1 ≤ 2 s, T2 ≤ the CC value) per the ruling; only the E9 approval
   hold spends the extra headroom, and only for a request core actually filed.
 
-### Tier-3 findings channel (OD-SL7-FINDINGS, resolved by probe **P2**)
+### Findings channel (OD-SL7-FINDINGS, resolved by probe **P2**)
 
 `additionalContext` (→ model) + `systemMessage` (→ user) on UserPromptSubmit +
 PostToolUse — **full CC parity, not the degraded systemMessage-only mode**. The

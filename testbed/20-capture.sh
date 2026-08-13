@@ -21,7 +21,7 @@ TB_DIR="$(cd "$(dirname "$0")" && pwd)"
 . "$TB_DIR/lib/session.sh"
 
 export TB_MCP_CONFIG="$TB_MCP"
-# Observe posture, deliberately. A Tier-2 escalation is allowed to carry the
+# Observe posture, deliberately. A gated call is allowed to carry the
 # command so an approver can decide (OD-E9-7, client.Content.ToolInput) — that
 # copy is 40-approvals' business. What must hold HERE is the observe rule:
 # ordinary telemetry never gains a command or a file body.

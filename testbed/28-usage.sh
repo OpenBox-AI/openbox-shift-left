@@ -6,7 +6,7 @@
 # "Usage arrived" is nearly worthless here: every interesting failure mode —
 # a double-counted turn, an off-by-one cursor, a missed turn, a subagent whose
 # tokens are claimed twice — passes an existence check and fails a count. The
-# standing lesson is the Tier-2 duplicate-ActivityStarted bug, which shipped
+# standing lesson is the duplicate-ActivityStarted bug on the escalation path, which shipped
 # because the only assertion that would have caught it ran in a mode where the
 # bug could not occur.
 #

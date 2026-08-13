@@ -161,6 +161,13 @@ Being precise here is part of the product.
   remove it: prevention without assurance. For Codex the hook itself cannot yet be
   mandated — a `requirements.toml` cannot define one — so the shipped mandate pins
   approval and sandbox modes instead.
+- **The inline-evaluation path has not been exercised against a live stack.**
+  Every claim below about enforcement rests on tests that drive the real hook
+  against a local `/evaluate` stub — which is real HTTP and the real gate, but not
+  a real control plane. In particular, **that a raw-rego org is now enforced is
+  unproven**, and that is the headline argument for the change
+  ([ADR-0017](adr/ADR-0017-inline-policy-evaluation.md)). The testbed phase that
+  would prove it exists and has not run.
 - **Enforcement depends on reaching the control plane, and under the default it
   is bypassable.** Every gated tool call is decided by a synchronous `/evaluate`
   call ([ADR-0017](adr/ADR-0017-inline-policy-evaluation.md)); there is no local

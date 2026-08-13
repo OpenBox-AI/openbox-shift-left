@@ -32,13 +32,12 @@ AGENT="$TB_AGENT"
 [ -n "$AGENT" ] || tb_fatal "no agent id in state — run 10-onboard.sh first"
 
 export OPENBOX_ENFORCE=1
-BUNDLE="$OPENBOX_SIDECAR_BUNDLE"
 AUDIT="$OPENBOX_ENFORCEMENT_FILE"
 PENDING_DIR="$OPENBOX_PENDING_APPROVAL_DIR"
 
-# The escalation must come from the SERVER's verdict, so the local bundle stays
-# permissive: Tier-1 proceeds, Tier-2 escalates, core's policy gates.
-printf '{"version":"testbed-approvals","default_decision":"allow","rules":[]}\n' >"$BUNDLE"
+# No local bundle to keep permissive any more (ADR-0017): the server is the only
+# decider, so core's policy is the only thing that can gate — which is what this
+# phase was always really testing.
 
 tb_audit_size() { [ -r "$AUDIT" ] && wc -c <"$AUDIT" | tr -d ' ' || echo 0; }
 tb_audit_since() { tail -c "+$(($1 + 1))" "$AUDIT" 2>/dev/null; }
@@ -208,7 +207,7 @@ settle
 # ── G · an escalated call is still ONE activity ───────────────────────────────
 # The gap this closes: 20-capture asserts started == completed, but it runs in
 # observe mode, where nothing escalates. On the enforce path a gated PreToolUse
-# reaches core twice — the Tier-2 escalation POSTs the event synchronously and the
+# reaches core twice — the inline evaluation POSTs the event synchronously and the
 # observe copy is spooled and flushed — carrying ONE event_id both times. Core
 # does not dedupe developer events on that id, so for a while every escalated
 # call stored two ActivityStarted rows and two Merkle leaves, and no assertion

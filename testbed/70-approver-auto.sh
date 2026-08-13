@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 70-approver-auto.sh — the approver as its own install, and the autonomous tier.
+# 70-approver-auto.sh — the approver as its own install, and the autonomous one.
 #
 # Two halves, both real now:
 #

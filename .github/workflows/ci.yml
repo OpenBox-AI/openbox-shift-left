@@ -85,12 +85,38 @@ jobs:
         run: GOOS=linux GOARCH=arm64 go build $MODS
 
       - name: Fuzz (short)
-        # The rego-path parser and the secret redactor read attacker-adjacent
-        # strings on the enforce path, where a panic is a crashed hook. A short
-        # budget per target catches the shallow cases on every change; the
-        # corpus persists in testdata for anything found.
+        # The secret redactor reads attacker-adjacent strings on the enforce
+        # path, where a panic is a crashed hook. A short budget catches the
+        # shallow cases on every change; the corpus persists in testdata for
+        # anything found.
+        #
+        # The two rego-path fuzzers went with the local evaluator (ADR-0017).
+        # FuzzRedact was defined in the same file and had to be deliberately
+        # kept: it covers code that still runs on every gated call with a body.
         run: |
           cd decision
-          for target in FuzzTokenizePath FuzzResolvePath FuzzRedact; do
-            go test -run XXX -fuzz "$target" -fuzztime 20s ./
-          done
+          go test -run XXX -fuzz FuzzRedact -fuzztime 20s ./
+
+      - name: No tier vocabulary in user-facing docs
+        # ADR-0017 replaced the tier model with three named features. This gate
+        # covers the documents a USER reads, where "Tier 2" would describe a
+        # layering the product does not have.
+        #
+        # It is deliberately NOT repo-wide. The `tier2` config key still parses
+        # (deprecated and inert), so code has to keep spelling it, and comments
+        # explaining what the tiers WERE are how a reader understands why a
+        # deprecated key exists at all. A gate failing on those would be pressure
+        # to delete the explanation, which is the opposite of what is wanted.
+        #
+        # ADRs are records and keep their own words; the upgrade note names the
+        # deprecated keys on purpose.
+        run: |
+          hits=$(grep -rniE '\btier[- ]?[123]\b' docs README.md \
+            | grep -v '^docs/adr/' \
+            | grep -v '^docs/upgrading-to-inline-evaluation.md' \
+            || true)
+          if [ -n "$hits" ]; then
+            echo "tier vocabulary in user-facing docs (ADR-0017 retired it):"
+            echo "$hits"
+            exit 1
+          fi

@@ -45,7 +45,7 @@ const flushBudget = 12 * time.Second
 // the enforce apply writes the permissionDecision (unused in observe mode).
 func RunHook(sub string, stdin io.Reader, stdout io.Writer, logger *log.Logger) {
 	// Freeze config reads for this hook run: everything the gate decides —
-	// enforce, the failure policy, tier-2 — must come from one version of
+	// enforce, the failure policy — must come from one version of
 	// dev.json, not one read per flag.
 	defer devconfig.Pin()()
 	// Guarantee a panic never escapes into the caller's exit path.
@@ -108,7 +108,7 @@ func RunHook(sub string, stdin io.Reader, stdout io.Writer, logger *log.Logger) 
 	// (cheap config+env, no secret I/O).
 	ad.Mapper.CaptureContent = ResolveContentCapture()
 	// Pin the Mapper clock to one instant for this hook invocation. RunHook
-	// maps the PreToolUse event twice in enforce+Tier-2 mode — once here
+	// maps the PreToolUse event twice on a gated call — once here
 	// via Observe (the spool copy, flushed on SessionEnd) and once inside
 	// escalateEvaluation (the synchronous /evaluate copy). A fresh time.Now() on
 	// each Map would fold a different RFC3339Nano timestamp into deriveID
