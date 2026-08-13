@@ -5,8 +5,9 @@
 The single, versioned, **tool-agnostic** event schema that every coding-tool adapter
 maps its native payload onto (SPI `emit()`). The OpenBox client then re-expresses it onto
 the base SDK's unified wire model (`Workflow*` / `SignalReceived` / `ActivityStarted` /
-`ActivityCompleted`, all span-less) for openbox-core — see MAPPING.md; **ADR-0004** and
-**ADR-0013**. Adding a provider (Claude Code, Codex, Cursor, …) never changes this contract
+`ActivityCompleted`; span-less apart from the one content-gated turn span of
+**ADR-0018**) for openbox-core — see MAPPING.md; **ADR-0004**, **ADR-0013** and
+**ADR-0018**. Adding a provider (Claude Code, Codex, Cursor, …) never changes this contract
 or the wire model (PRD **FR-4**, architecture **§1b**).
 
 ## Layout
@@ -15,7 +16,7 @@ or the wire model (PRD **FR-4**, architecture **§1b**).
 |---|---|
 | [`schema/dev-event.schema.json`](schema/dev-event.schema.json) | The contract — JSON Schema (draft 2020-12), language-neutral. 7 lifecycle event types, common envelope, `tool{}`, `span`, gated `content`, canonical `verdict` enum. |
 | [`MAPPING.md`](MAPPING.md) | How the contract maps onto the base-SDK unified wire model on openbox-core (ADR-0004, ADR-0013). SL-3 builds payloads from this without guessing. §3's field-home table is the authority on what the serializer reads; also carries the downstream-consumer sweep (INV-8) and client signing/transport notes. |
-| [`COVERAGE.md`](COVERAGE.md) | How Claude Code / Cursor / Codex real event surfaces map onto the 7 types, field-derivation rules, and the bounded Phase-1 non-goals (v1.1 candidates). The reference for adapter authors (SL-4/7/8). |
+| [`COVERAGE.md`](COVERAGE.md) | How Claude Code / Cursor / Codex real event surfaces map onto the 12 types, field-derivation rules, and the bounded non-goals. The reference for adapter authors (SL-4/7/8). |
 | [`conformance/`](conformance/) | Go conformance harness (OD17). Dependency-free; validates samples against the schema and enforces the INV-2 content gate. |
 
 ## The 7 lifecycle event types

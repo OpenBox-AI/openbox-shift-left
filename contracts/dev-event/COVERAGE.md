@@ -1,6 +1,6 @@
 # Provider coverage & mapping rules
 
-How the three target coding tools' real event surfaces map onto this contract's 7 lifecycle
+How the three target coding tools' real event surfaces map onto this contract's 12 lifecycle
 types, plus the **bounded non-goals**. Sourced from a G3_REVIEW pass over the tools' official
 docs (Claude Code hooks + OTel; Cursor hooks + Admin API; OpenAI Codex hooks + `notify` + Usage/Cost API).
 This is the reference an adapter author (SL-4 Claude Code, SL-7 Codex, SL-8 Cursor) implements `emit()` against.
@@ -9,7 +9,7 @@ This is the reference an adapter author (SL-4 Claude Code, SL-7 Codex, SL-8 Curs
 and Codex adapters are **shipped**, observe + opt-in enforce + default-on usage capture; each adapter's
 `Capabilities()` is the authoritative per-provider profile and this document must agree with it.
 The **Cursor** column below is a *surface survey*, not shipped support — SL-8 is unbuilt. Last
-reconciled 2026-07-29 (E8-S2) against `adapters/claude-code/capabilities.go` and
+reconciled 2026-08-13 (ADR-0018) against `adapters/claude-code/capabilities.go` and
 `adapters/codex/capabilities.go`.
 
 ## 1. Lifecycle coverage matrix
@@ -23,6 +23,9 @@ reconciled 2026-07-29 (E8-S2) against `adapters/claude-code/capabilities.go` and
 | `SessionEnded` | `SessionEnd` hook | `sessionEnd` | `SessionEnd` hook (real, ≥ 0.145.0 — no longer synthesized) |
 | `CommitCreated` | *(git-level)* | *(git-level)* | *(git-level)* |
 | `Deploy` | *(git-level)* | *(git-level)* | *(git-level)* |
+| `SubagentStarted` *(v1.2)* | `SubagentStart` hook | *(unsurveyed)* | **none** |
+| `PermissionDenied` *(v1.2)* | `PermissionDenied` hook — **auto-mode classifier denials only**; a static `permissions.deny` rule denies without firing it (verified), so absence is not evidence that nothing was denied | `permissionRequest`? *(unsurveyed)* | **none** |
+| `APIError` *(v1.2)* | `StopFailure` hook | *(unsurveyed)* | **none** |
 
 ## 2. Field-derivation rules
 
@@ -31,6 +34,9 @@ reconciled 2026-07-29 (E8-S2) against `adapters/claude-code/capabilities.go` and
 - **`span.file_path`**: Claude Code — `tool_input.file_path` (nested, not root). Cursor — `file_path` on file hooks. Codex — from `apply_patch` input.
 - **`span.lines_count`/`bytes_*`**: derive from `edits[]` (Cursor) / tool response; often only available `PostToolUse`/`ToolResult`.
 - **`tokens`/`model`**: gated by `ResolveFinops` (**default on** since ADR-0014, opt out with `finops:false` / `OPENBOX_FINOPS=0`), off the hot path. **Claude Code is per turn**: `Stop`/`SubagentStop` → a `TurnStarted`/`TurnCompleted` pair with `activity_type: llm_completion` carrying all four counts plus the model id, plus the retained `SessionEnded` rollup. **Codex is per session**: one rollup pair at `SessionEnd` (`activity_id <session>:usage:rollup`) — its `Stop` hook exists but is deliberately unwired, which is scope, not impossibility. Both read a local file (CC's transcript, Codex's rollout JSONL), never the providers' OTel/Usage APIs, through an allowlist projection whose one egressing string is the model id (INV-2, ADR-0014). `cost` is never **derived** here — the server derives it from a model-keyed pricing table — and the turn pair never carries it at all. The only way a `cost` can appear is if a transcript itself supplies one: CC's reader still reads `costUSD` onto the `SessionEnded` rollup, and current Claude Code transcripts do not carry that field (empirical, not structural). Codex's token path has no cost field at all. Cursor (unbuilt) has no per-turn source known: its Admin API is per-user hourly/daily, so a future adapter rolls up at agent/day granularity. `tokens?`/`model?` stay optional for exactly this reason.
+- **`status`** (v1.2, ADR-0018): derived **structurally** — from which hook fired, never parsed from tool output. **Claude Code**: `PostToolUse` → `completed`, `PostToolUseFailure` → `failed`. The two are mutually exclusive per call (documented by the provider, verified empirically on 2.1.229), which is what makes an unconditional `completed` on the success hook truthful. `metadata.is_interrupt` (tri-state `*bool`) separates a user cancellation from a real tool failure — both are `failed`. **Codex**: NOT reported. One `PostToolUse`, no failure hook, no exit code, no error flag; sending `completed` unconditionally would report SUCCESS 100% for a session whose calls failed, which is worse than the honest 0% it replaces. Not content-gated on either provider.
+- **Assistant turn text → `spans[0].response_body`** (v1.2, ADR-0018): **Claude Code only**, from the `Stop`/`SubagentStop` payload field `last_assistant_message` — the provider's own recommended source, and the choice that leaves the transcript projection's allowlist untouched. Gate chain, all required: `finops` (turn events exist at all) ∧ the window carried usage ∧ `content_capture` (checked twice — once by the mapper, once independently by the client's `stripContent`). Secret-redacted **before** attachment, then capped at 64KB. With `secret_detection:false` it egresses unredacted. **Codex**: no assistant-text field on its hook surface; its `Stop` is deliberately unwired, and its SessionEnd rollup shares a flush with `WorkflowCompleted`, which DELETES the goal session — wrong granularity and racy ordering. So Codex sessions do not feed Goal Alignment.
+- **`error_type`** (v1.2): passed through an `enumOr` allowlist of the provider's own ten values. This is not decoration: `error` is the same JSON key on `StopFailure` (a closed enum) and `PostToolUseFailure` (free text a tool wrote), so one binding decodes both and the allowlist is what keeps the free text off the wire.
 - **`ToolCall`↔`ToolResult` correlation**: carry the provider's `tool_use_id` in `metadata` (all three expose it) and set `span.invocation_id` from it — a local field that never egresses and keys the cross-process duration stash. The two halves pair on the wire by a shared `activity_id` (there is no `span_id` any more; ADR-0013). Both shipped adapters correlate by id rather than by heuristic. A new adapter must also supply `span.operation_id` for any class it lets the gate escalate, or an approval cannot survive a retry — `activity_id` derives from it, and an approval granted against one activity cannot be consumed by a retry that addresses another; see MAPPING.md "Operation vs invocation identity".
 
 ## 3. Bounded non-goals (Phase-1 v1.0) — documented, not gaps
@@ -38,13 +44,18 @@ reconciled 2026-07-29 (E8-S2) against `adapters/claude-code/capabilities.go` and
 The contract is honest about what it does **not** model in v1.0. None is required for the Phase-1 goals (observe / finops / session→commit→deploy lineage):
 
 1. **Turn boundaries** (Cursor `stop`, Codex `Stop`) are **not** `SessionEnded` — they fire per agent-loop turn, and a session has many turns. Adapters must **not** map turn-stop → `SessionEnded`. (Historical note: Codex once had no session-end hook and its adapter synthesized one; `SessionEnd` is real as of 0.145.0 and the synthesis is gone.)
-2. **Subagent lifecycle** (`SubagentStart`/`SubagentStop`) — the start/stop markers get no lifecycle type of their own. A subagent is a nested actor, **not** a `tool.kind` — no new kind is needed. As of **E8-S3** the Claude Code adapter carries `metadata.agent_id`/`agent_type`, which Claude Code puts on *every* payload fired inside a subagent — so the tree (which events belong to which subagent, and of what kind) is reconstructable from the tool events alone, and the boundary hooks stay unwired rather than being bent onto a prompt-shaped `SignalReceived`. Wire them only if explicit boundaries are needed for something the ids cannot answer.
+2. ~~**Subagent lifecycle**~~ — **retired as a non-goal in v1.2.** `SubagentStart` is wired and maps to `SubagentStarted` → `SignalReceived(subagent_started)` (ADR-0018). The old reasoning — the tree is reconstructable from `agent_id` on tool events — held for a subagent that *does* something; a subagent that spawns and calls no tool left no trace at all. `SubagentStop` stays unwired as a lifecycle marker, because it already has a job: it closes a turn (ADR-0014). Still not a `tool.kind`.
 3. **Compaction** (`PreCompact`/`PostCompact`) — context-window infra; dropped in Phase 1.
-4. **Assistant message/thought** (Cursor `afterAgentResponse`/`afterAgentThought`; Codex `notify` `agent-turn-complete`) — completion **metrics** (tokens/cost) ride on `PromptSubmitted`; the completion **text** is gated `content`. A dedicated `CompletionReceived` type is a **v1.1** candidate.
+4. **Assistant message/thought** — **partly retired in v1.2.** The completion TEXT now egresses for Claude Code, on the turn's span, under content capture (ADR-0018; derivation rules above). What is still out of scope, and each for its own reason:
+   - **thinking blocks** — transcript-only, and capturing them means amending ADR-0014's allowlist and evolving a load-bearing sentinel. Deferred to **ADR-0019 P3**, not foreclosed.
+   - **tool output** (`tool_response`) — the "Tool output: never" row in `docs/data-and-privacy.md` is still true. **ADR-0019 P1** is the decision that would change it.
+   - **free-text failure detail** — `PostToolUseFailure.error`, `PermissionDenied.reason`, `StopFailure.error_details`. All three exist on payloads this adapter now reads, and all three are deliberately unbound.
+   - **Cursor and Codex** have no equivalent wired at all.
+   A dedicated `CompletionReceived` type was the v1.1 candidate here; it was not built, because the alignment reader that needs the text keys on a span rather than an event type.
 5. **Non-session telemetry** (Cursor Tab hooks, `workspaceOpen`, cloud-agent sessions that never emit `sessionStart`) — the contract requires `openbox_session_id`, so events with no resolvable session are **not emittable** (adapter drops or synthesizes a session). Honest degradation — the architecture's "no false coverage" rule.
 6. **`PermissionRequest` vs generic `preToolUse`/`PreToolUse` overlap** — adapters emit **one** `ToolCall` per tool invocation (prefer the specific pre-tool hook); `event_id` idempotency (INV-5) also guards double-counting.
 
-Items 1, 2, and 4 are the candidate scope for a **v1.1** `schema_version` bump (`TurnEnded`, subagent nesting, `CompletionReceived`) if Phase-2 needs them. The `schema_version` field exists precisely so that bump is non-breaking.
+Items 1 and 2 were the candidate scope for a `schema_version` bump, and both have since landed — turn boundaries in v1.1 (ADR-0014), subagent start in v1.2 (ADR-0018). What remains open in item 4 is a **posture** question rather than a schema one, and ADR-0019 is where it is decided. The `schema_version` field exists precisely so each bump stays non-breaking; v1.2 is purely additive.
 
 ## 4. Enforcement posture
 

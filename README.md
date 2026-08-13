@@ -198,11 +198,14 @@ still apply where no adapter exists.
 
 Two things are **on by default**, and both are opt-out:
 
-- **prompt content** — your prompts are sent (`content_capture: false` to stop);
+- **prompt content** — your prompts are sent, and so is **the assistant's reply
+  text**, one message per turn, scanned for secrets and redacted locally first
+  (`content_capture: false` to stop);
 - **token usage** — four token counts and the model id per turn
   (`finops: false` to stop).
 
-Tool commands and file bodies are **never** sent on ordinary telemetry. They ARE
+The assistant's **thinking** is not captured. Tool commands and file bodies are
+**never** sent on ordinary telemetry. They ARE
 sent on a **gated** call under enforcement — OpenBox decides every gated call now
 ([ADR-0017](docs/adr/ADR-0017-inline-policy-evaluation.md)), and it cannot decide on
 content it cannot see. That is gated on `content_capture`, the body is scanned for

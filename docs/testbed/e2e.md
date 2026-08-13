@@ -448,7 +448,7 @@ it exposed:
 **Now proven end to end for the first time**
 - MCP capture: a real `mcp__everything__echo` call reaches core. Before this
   there were no MCP calls on the stack at all. (This originally asserted an
-  `mcp_tool_call` **span**; since ADR-0013 there are no spans, and the assertion
+  `mcp_tool_call` **span**; since ADR-0013 tool calls carry no span, and the assertion
   moved to `activity_input.mcp_server`/`mcp_tool`. The finding stands — what is
   captured did not change, only where it is carried.)
 - INV-2 / SL3-SEC-3 in the observe posture: the prompt egresses, the shell

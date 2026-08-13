@@ -22,7 +22,9 @@ than a parallel one:
   auth (`Bearer obx_` + AIP signing);
 - store in the **same** tables (`sessions` → `governance_events`, plus Merkle
   leaves) and read through the **same** services. Dev sessions write no `spans`
-  rows — see ADR-0013.
+  rows for tool calls (ADR-0013) — with exactly ONE exception: a content-capturing
+  model turn carries one span, because core's alignment reader accepts no other
+  shape (ADR-0018).
 
 **Rule:** prefer reusing an existing table/endpoint/service over adding one. A new
 table, endpoint or service requires an ADR in `docs/adr/`.
@@ -230,7 +232,9 @@ against a live local stack.
 `TurnCompleted` → `ActivityStarted`/`ActivityCompleted` with
 `activity_type: "llm_completion"` and `{model, usage{4 counts}}` in
 `activity_output` — the AI-Agent `llm_completion` span's `response_body` shape on
-the activity carrier, since dev sessions write no spans. Claude Code emits one pair
+the activity carrier, because dev sessions wrote no spans at the time (ADR-0018
+later added one to this same event, for the assistant TEXT; the usage numbers
+stayed on `activity_output`). Claude Code emits one pair
 per turn from new `Stop`/`SubagentStop` hooks over a byte-offset cursor
 (`hookflow.TurnCursor`, agent-scoped, spool-then-cursor ordering so a crash
 over-reports into core's dedupe rather than losing a turn); Codex emits one
@@ -240,15 +244,16 @@ one non-additive change, which is why the contract is **v1.1**. `Finops` became
 `*bool` before the default could flip: as a plain bool an absent config field and
 an explicit `false` were indistinguishable, so the flip would have been a silent
 no-op. **Status: implemented, unit-verified, reviewed, NOT yet run against a live
-stack** — and write-only until the core-side extractor **merges**: it is implemented and
-green in [openbox-core#125](https://github.com/OpenBox-AI/openbox-core/pull/125)
-(PROD-296) but not yet merged to `develop`. Until it does, `llm_completion` also
-shows up under core's *tool* metrics, because `ExtractToolMetric` accepts any
-non-empty `activity_type` — the same PR fixes that.
+stack.** The core-side extractor has since **merged** — `ExtractModelMetricsFromActivity`
+is on `develop` (PR #125 / PROD-296, merged as `0643ad3`, verified at 68f0398), and
+the same change excludes `llm_completion` from core's *tool* metrics. This
+paragraph used to say "write-only, awaiting merge" and that the tool-metric
+pollution was live; both are retired.
 
 **Tool events are Activities** (ADR-0013, 2026-08-11): `ToolCall` →
 `ActivityStarted`, `ToolResult` → `ActivityCompleted`, both span-less and
-hook-less. `client/hookspan.go` and `client/spanbuilder.go` are deleted, and with
+hook-less — still true for TOOL events after ADR-0018, which added a span to one
+turn carrier only. `client/hookspan.go` and `client/spanbuilder.go` are deleted, and with
 them ADR-0004's standing mirror obligation. The adapter-facing schema did not
 change. **Status: implemented and unit-verified, NOT yet run against a live
 stack.** `activity_id` is byte-identical to the old shape (pinned in
@@ -269,9 +274,11 @@ enforcement depends on reaching the control plane and under the default
 `fail_closed:false` is disabled by blocking one hostname, content-based policy sees
 at most the first 64KB of a write, Codex's hook
 cannot be mandated by `requirements.toml`, Guardrail redaction at source is not
-wired, the production-runtime lineage hop is not joined, token usage is write-only
-until core ships its extractor, Codex reports usage per session rather than per turn,
-and Windows is build-verified only.
+wired, the production-runtime lineage hop is not joined, Codex reports usage per
+session rather than per turn and reports no tool success at all, goal alignment
+additionally requires `finops` ∧ `content_capture` (both default-ON, a user
+constraint) plus a reachable LlamaFirewall and Redis — without those the widgets
+stay empty with a perfect client — and Windows is build-verified only.
 
 Two things about the turn feature stay empirically open until the testbed runs, and
 both are pre-decided either way rather than blocking: whether `Stop` fires on a
@@ -280,6 +287,50 @@ tool-only turn (window sums are exact regardless of cadence), and whether
 double-count in any case; its worst case is a subagent reporting nothing). The
 static measurement behind both is in
 `plans/260811-1640-coding-agent-token-usage/reports/measure-260811-transcript-turn-surface.md`.
+
+**Tool outcome, failure signals, and one content-bearing span** (ADR-0018,
+2026-08-13, contract **v1.2**): `status` (`completed`|`failed`) on tool
+`ActivityCompleted`; `PostToolUseFailure`/`SubagentStart`/`PermissionDenied`/
+`StopFailure` wired; and ONE span on a `TurnCompleted` carrying the assistant's
+reply. Five things are worth not re-litigating:
+
+- **`status` is ungated and tool-only.** Ungated because a two-literal enum
+  derived from which hook fired cannot encode content, and Tool Health must not
+  depend on a privacy setting. Tool-only because `payload.status` also writes
+  `governance_events.workflow_status` for *any* event type, where on a lifecycle
+  event it means something else. `client.statusFor` enforces both.
+- **The turn span's `http.*` attributes are synthesized and must stay.** Core
+  RECOMPUTES `semantic_type` per span, and `isLLMCall` is the only path to
+  `llm_completion`. Deleting them does not error — the span still stores,
+  classifies as something else, and alignment silently dies. They retire when
+  [openbox-core#130](https://github.com/OpenBox-AI/openbox-core/issues/130) lands
+  and the text moves to `activity_output.message`.
+- **The three new signals must carry NO `signal_args`.** Core reads any
+  `SignalReceived` with non-empty `signal_args` as a NEW USER GOAL and overwrites
+  the alignment session's goal with it (`age.go:112-137`). Surfacing the denied
+  tool there — the field the Verify tab renders as "Input" — would replace the
+  developer's prompt as the thing every later turn is scored against.
+  `TestNewSignalsCarryNoSignalArgs` holds it.
+- **INV-2's transcript line did NOT move.** The assistant text comes from the
+  `Stop`/`SubagentStop` hook field, so `usage.go`'s allowlist and its sentinel are
+  untouched — and the sentinel gained an adversarial section proving exactly that
+  (capture ON + a poisoned transcript ⇒ transcript sentinels still absent). What
+  is no longer structural is the guarantee for that ONE field: gate + redaction +
+  cap, each asserted on outbound bytes. `secret_detection:false` ⇒ unredacted.
+- **The new hooks need a re-init.** They are registered by the installer, so an
+  existing install emits none of them until `openbox init` re-runs. An older
+  Claude Code silently ignores unknown hook keys (verified), so registering them
+  is safe.
+
+Three of the plan's assumptions did not survive the probe against the installed
+2.1.229 and should not be re-introduced: `classifier_verdict` does not exist on
+`PermissionDenied` (its free-text field is `reason`), `Stop` carries no
+`stop_reason`, and `PostToolUseFailure` does carry a structural `is_interrupt`.
+**Status: implemented, unit- and conformance-verified (C20–C26 assert on the real
+outbound bytes), all 11 modules green under `-race` plus both cross-compiles — the
+testbed has NOT run.** `plans/260813-2314-dev-telemetry-and-content-posture/manual-test-guide.md`
+is the stack-free walkthrough; `plans/reports/probe-260813-2329-claude-code-hook-surface.md`
+is the hook-surface evidence.
 
 Next: the Cursor adapter; policy template packs. The one dependency this repo now
 has is `golang.org/x/term v0.34.0`, **pinned** — v0.35.0+ declares `go 1.24.0` and

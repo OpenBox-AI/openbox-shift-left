@@ -206,31 +206,43 @@ Being precise here is part of the product.
   `require_verified_bundle` still parses and does nothing; it is deliberately absent
   from the reported posture, because a control that cannot engage must not appear as
   one.
-- **Telemetry evidence is event-level, not span-level.** A developer session
-  produces `governance_events` rows and their Merkle leaves, and **no `spans`
-  rows at all** ([ADR-0013](adr/ADR-0013-tool-call-as-activity.md)). A tool call
-  is two events — `ActivityStarted` then `ActivityCompleted`, sharing an
-  `activity_id` — each independently evaluated and each with its own leaf. An
-  auditor reading the Merkle tree for a dev session therefore sees event leaves
-  only: there is no span-level attestation to check, and no server-side
-  `semantic_type` classification, because core computes both from spans and a
-  hook process has no OpenTelemetry to produce one. The spans shift-left used to
-  send were fabricated by hand to satisfy a wire shape; removing them removes a
-  layer of evidence that was never measuring anything, but it is a removal, and
-  anyone reasoning about dev-session assurance should know the tree is shallower
-  than an agent-runtime session's.
-- **Token usage is write-only until the core-side extractor merges.** Per-turn
-  model + usage is emitted as an `llm_completion` activity pair
-  ([ADR-0014](adr/ADR-0014-turn-as-activity-and-identifier-allowlist.md)) and is
-  stored and queryable — but every usage-aggregation path in core reads spans, and
-  a dev session has none, so nothing surfaces in a dashboard until core aggregates
-  activities. That work is implemented and CI-green in
-  [openbox-core#125](https://github.com/OpenBox-AI/openbox-core/pull/125)
-  (PROD-296) and awaiting merge. Until it merges, two things are true and worth
-  stating rather than discovering: the numbers are in `governance_events` and
-  nowhere else, and `llm_completion` additionally appears under core's **tool**
-  metrics, because `ExtractToolMetric` accepts any non-empty `activity_type`.
-  Neither is a shift-left defect; the same PR closes both.
+- **Telemetry evidence is event-level, plus one span per captured model turn.** A
+  developer session produces `governance_events` rows and their Merkle leaves. A
+  tool call is two events — `ActivityStarted` then `ActivityCompleted`, sharing an
+  `activity_id` — each independently evaluated and each with its own leaf, and
+  **no `spans` row** ([ADR-0013](adr/ADR-0013-tool-call-as-activity.md)). The
+  spans shift-left used to send for tool calls were fabricated by hand to satisfy
+  a wire shape; removing them removed a layer of evidence that was never measuring
+  anything, but it is a removal, and the tree is shallower than an agent-runtime
+  session's.
+
+  One exception, added deliberately
+  ([ADR-0018](adr/ADR-0018-dev-turn-content-carrier.md)): with content capture on,
+  a model turn carries **one** span whose response body is the assistant's reply,
+  because core's goal-alignment engine reads assistant text from `payload.Spans`
+  and from no other field. Those spans get span-level Merkle leaves and
+  server-side `semantic_type` classification, and their text is retained
+  server-side. Two honesty notes on that span: its classification attributes are
+  **synthesized** — they describe an HTTP request the client never made, because
+  that is the only input core's classifier accepts, and every such span carries
+  `openbox.span_synthetic: true` so an auditor can tell — and it is a stopgap,
+  retired by [openbox-core#130](https://github.com/OpenBox-AI/openbox-core/issues/130).
+  With `content_capture: false` there are no span rows at all.
+- **Token usage is stored, aggregated and queryable.** Per-turn model + usage is
+  emitted as an `llm_completion` activity pair
+  ([ADR-0014](adr/ADR-0014-turn-as-activity-and-identifier-allowlist.md)), and the
+  core-side extractor that aggregates activities has **merged**
+  (`ExtractModelMetricsFromActivity`, verified at `develop` 68f0398; PR #125
+  merged as `0643ad3`). The same change excludes `llm_completion` from core's
+  **tool** metrics, so turn events no longer appear as a fictional tool. This
+  paragraph previously said the work was "awaiting merge" and that the pollution
+  was live; both statements are retired.
+- **Tool success is reported.** An `ActivityCompleted` carries `status`
+  (`completed`/`failed`), derived from which provider hook fired and not gated on
+  content — it is the field core's per-tool success metric reads, and no producer
+  had ever written it. Claude Code only: Codex exposes no failure hook and no exit
+  code, so its tool success stays unknown rather than assumed
+  (ADR-0018).
 - **Neither cost table prices the current models, and they fail differently.**
   `claude-opus-5`, `claude-fable-5`, `claude-opus-4-8`, `gpt-5.6-sol` and
   `gpt-5.5` are absent from core's Go table and the backend's TS one. core falls

@@ -31,6 +31,10 @@ additive classifier enrichment here (`ComputeSemanticTypeFromSpan` first-classin
 `shell`→`shell_command`); that claim named no owner, could not be verified
 against the openbox-core checkout, and is moot since
 [ADR-0013](../../../docs/adr/ADR-0013-tool-call-as-activity.md) — developer
-sessions send no spans, so nothing classifies them.
+sessions send no spans for tool calls, so nothing classifies them. The one span
+[ADR-0018](../../../docs/adr/ADR-0018-dev-turn-content-carrier.md) added IS
+classified server-side, which is precisely why it has to carry synthesized
+`http.*` attributes: the client cannot assert a `semantic_type`, only feed the
+classifier that computes one.
 
 See [`../MAPPING.md`](../MAPPING.md) for the live wire mapping.
