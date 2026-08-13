@@ -25,6 +25,10 @@ func TestCapabilities(t *testing.T) {
 	for _, k := range []string{
 		"identity.register", "telemetry.hook", "tool.events", "commit.binding",
 		"telemetry.tokens", "verdict.apply", "enforce.rewrite",
+		// ADR-0018. Pinned TRUE here and FALSE in the Codex profile: the two
+		// providers genuinely diverge, and the divergence must be declared on
+		// both sides rather than discovered from an empty dashboard panel.
+		"tool.status",
 	} {
 		if !byKey[k].Supported {
 			t.Errorf("capability %q should be supported", k)

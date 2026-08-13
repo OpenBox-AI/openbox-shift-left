@@ -41,8 +41,12 @@ var localHookEvents = []struct {
 	{Event: "UserPromptSubmit", Timeout: 5},
 	{Event: "PreToolUse", Matcher: "*", Timeout: preToolUseHookTimeoutSec, StatusMessage: "OpenBox governance…"},
 	{Event: "PostToolUse", Matcher: "*", Timeout: 5},
+	{Event: "PostToolUseFailure", Matcher: "*", Timeout: 5},
 	{Event: "Stop", Timeout: 5},
 	{Event: "SubagentStop", Timeout: 5},
+	{Event: "SubagentStart", Timeout: 5},
+	{Event: "PermissionDenied", Matcher: "*", Timeout: 5},
+	{Event: "StopFailure", Timeout: 5},
 	{Event: "SessionEnd", Timeout: 15},
 }
 

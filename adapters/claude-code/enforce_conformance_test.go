@@ -385,6 +385,92 @@ func TestEnforcementConformance(t *testing.T) {
 		}
 	})
 
+	// observeSeqThenFlush drives several observe hooks in order (so a PreToolUse
+	// can leave its duration stash for the failure hook that follows) and then
+	// the SessionEnd flush that delivers them.
+	observeSeqThenFlush := func(t *testing.T, session string, steps ...[2]string) []string {
+		t.Helper()
+		bodies := serveCapturing(t, `{"verdict":"allow"}`)
+		t.Setenv(envRealtime, "0")
+		t.Setenv(envEnforce, "0")
+		var out bytes.Buffer
+		for _, s := range steps {
+			RunHook(s[0], strings.NewReader(s[1]), &out, log.New(&bytes.Buffer{}, "", 0))
+		}
+		RunHook("SessionEnd", strings.NewReader(
+			`{"hook_event_name":"SessionEnd","session_id":"`+session+`","cwd":"/tmp","reason":"other"}`),
+			&out, log.New(&bytes.Buffer{}, "", 0))
+		return *bodies
+	}
+
+	t.Run("C22 a failed tool call reports status \"failed\" with a real duration", func(t *testing.T) {
+		bodies := observeSeqThenFlush(t, "s-fail",
+			[2]string{"PreToolUse", `{"hook_event_name":"PreToolUse","session_id":"s-fail","cwd":"/tmp","tool_name":"Bash","tool_use_id":"toolu_c22","tool_input":{"command":"exit 3"}}`},
+			[2]string{"PostToolUseFailure", `{"hook_event_name":"PostToolUseFailure","session_id":"s-fail","cwd":"/tmp","tool_name":"Bash","tool_use_id":"toolu_c22","tool_input":{"command":"exit 3"},"error":"Error: exit code 3","is_interrupt":false,"duration_ms":562}`},
+		)
+
+		var failed string
+		for _, b := range bodies {
+			if strings.Contains(b, `"event_type":"ActivityCompleted"`) {
+				failed = b
+			}
+		}
+		if failed == "" {
+			t.Fatalf("a failed tool call produced no ActivityCompleted; bodies=%v", bodies)
+		}
+		if !strings.Contains(failed, `"status":"failed"`) {
+			t.Errorf("failed call does not report status \"failed\": %s", failed)
+		}
+		// The duration stash must pair across the two DIFFERENT hooks, or a
+		// failed call reports no duration and the latency percentiles quietly
+		// exclude every failure.
+		if !strings.Contains(failed, `"duration_ms"`) {
+			t.Errorf("failed call carries no duration_ms — the stash did not pair "+
+				"PreToolUse with PostToolUseFailure: %s", failed)
+		}
+		// The provider's free-text error must not have ridden along.
+		if strings.Contains(failed, "exit code 3") {
+			t.Errorf("the tool's free-text error egressed (ADR-0019 owns it): %s", failed)
+		}
+	})
+
+	t.Run("C23 lifecycle signals carry their signal_name and no free text", func(t *testing.T) {
+		const denialReason = "DENIAL-REASON-must-not-egress"
+		bodies := observeSeqThenFlush(t, "s-signals",
+			[2]string{"SubagentStart", `{"hook_event_name":"SubagentStart","session_id":"s-signals","cwd":"/tmp","agent_id":"agt-1","agent_type":"code-reviewer"}`},
+			[2]string{"PermissionDenied", `{"hook_event_name":"PermissionDenied","session_id":"s-signals","cwd":"/tmp","tool_name":"Bash","tool_use_id":"toolu_c23","tool_input":{"command":"rm -rf /"},"reason":"` + denialReason + `"}`},
+			[2]string{"StopFailure", `{"hook_event_name":"StopFailure","session_id":"s-signals","cwd":"/tmp","error":"rate_limit","error_details":"` + denialReason + `"}`},
+		)
+
+		joined := strings.Join(bodies, "\n")
+		for _, name := range []string{"subagent_started", "permission_denied", "api_error"} {
+			if !strings.Contains(joined, `"signal_name":"`+name+`"`) {
+				t.Errorf("no %s signal reached /evaluate: %s", name, joined)
+			}
+		}
+		// Free text from either payload must be nowhere on the wire.
+		if strings.Contains(joined, denialReason) {
+			t.Errorf("free-text reason/error_details egressed: %s", joined)
+		}
+		// The structural detail that makes the events useful must be there, or
+		// the assertion above would pass for events carrying nothing.
+		for _, want := range []string{`"agent_type":"code-reviewer"`, `"error_type":"rate_limit"`, `"tool_use_id":"toolu_c23"`} {
+			if !strings.Contains(joined, want) {
+				t.Errorf("missing structural detail %s: %s", want, joined)
+			}
+		}
+		// And NO signal_args on any of the three — core reads those as a new
+		// user goal and overwrites the alignment session's goal with them
+		// (age.go:112-137).
+		for _, b := range bodies {
+			for _, name := range []string{"subagent_started", "permission_denied", "api_error"} {
+				if strings.Contains(b, `"signal_name":"`+name+`"`) && strings.Contains(b, `"signal_args"`) {
+					t.Errorf("%s carries signal_args; core would overwrite the alignment goal with it: %s", name, b)
+				}
+			}
+		}
+	})
+
 	t.Run("C10 secret in Write body → redact-and-continue (E6-S9)", func(t *testing.T) {
 		// A reachable, BUNDLED allow decision. Secret detection is DEFAULT ON and
 		// DECOUPLED from content_capture (which stays OFF): the file body reaches only

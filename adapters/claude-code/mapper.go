@@ -214,6 +214,51 @@ func (m Mapper) Map(hook HookName, e *HookEvent) (client.DevEvent, bool) {
 		// pairing is re-checked whenever the hook surface changes.
 		ev.Status = client.StatusCompleted
 
+	case HookPostToolUseFailure:
+		// The failure half of PostToolUse, and the same event on the wire: a
+		// call that failed is still a completed ACTIVITY — it started, it
+		// finished, it took time. Only the outcome differs, which is exactly
+		// what `status` is for. Routing it to its own event type instead would
+		// leave the started half unpaired and the failure invisible to every
+		// consumer that reads ActivityCompleted.
+		ev.EventType = client.EventToolResult
+		ev.EndedAt = ts
+		ev.Tool, ev.Span = mapTool(e, "completed")
+		ev.Metadata = toolMetadata(e)
+		ev.Status = client.StatusFailed
+		// A cancelled call is not a broken tool. Both are failures, but an
+		// operator staring at a red Tool Health panel needs to tell them apart.
+		// Absent stays absent (see HookEvent.IsInterrupt).
+		if e.IsInterrupt != nil {
+			ev.Metadata["is_interrupt"] = *e.IsInterrupt
+		}
+
+	case HookSubagentStart:
+		ev.EventType = client.EventSubagentStarted
+		ev.Tool = client.Tool{Name: agentToolName, Kind: client.ToolShell}
+		ev.Metadata = subagentMetadata(e)
+
+	case HookPermissionDenied:
+		// That a denial happened, and which tool it was about. NOT why: the
+		// payload's `reason` is free text a classifier wrote and is not bound
+		// (ADR-0019 owns it). The tool identity and locators come from the same
+		// mapTool the call itself used, so the denial correlates with the
+		// PreToolUse that preceded it by tool_use_id.
+		ev.EventType = client.EventPermissionDenied
+		ev.Tool, ev.Span = mapTool(e, "completed")
+		ev.Metadata = toolMetadata(e)
+
+	case HookStopFailure:
+		// The model could not answer. error_type is the provider's own closed
+		// enum, passed through enumOr — anything outside the ten known values is
+		// dropped rather than egressed, which is also what keeps
+		// PostToolUseFailure's free-text `error` (same JSON key) off the wire.
+		ev.EventType = client.EventAPIError
+		ev.Tool = client.Tool{Name: agentToolName, Kind: client.ToolShell}
+		ev.Metadata = mergeMetadata(
+			compact(map[string]any{"error_type": enumOr(e.ErrorType, apiErrorTypes)}),
+			subagentMetadata(e))
+
 	case HookSessionEnd:
 		ev.EventType = client.EventSessionEnded
 		ev.EndedAt = ts
@@ -443,12 +488,19 @@ func operationID(kind client.ToolKind, e *HookEvent) string {
 // toolMetadata builds the Pre/PostToolUse metadata: the permission mode plus
 // the structural correlation ids. Identifiers only, never content (INV-2) —
 // tool_input and tool_response are not represented.
+//
+// The one exception is subagent_type on a Task call, which is an identifier
+// naming WHICH agent kind was spawned. Without it every subagent spawn reads
+// `tool_name: Task` and the whole delegation tree is anonymous until the
+// subagent's own events start arriving with an agent_id. The Task input's other
+// fields — `prompt` and `description` — are free text and stay unread.
 func toolMetadata(e *HookEvent) map[string]any {
 	return compact(map[string]any{
 		"permission_mode": enumOr(e.PermissionMode, permissionModes),
 		"tool_use_id":     capStr(e.ToolUseID),
 		"agent_id":        capStr(e.AgentID),
 		"agent_type":      capStr(e.AgentType),
+		"subagent_type":   capStr(e.subagentType()),
 	})
 }
 
@@ -575,6 +627,24 @@ const maxIdentLen = 512
 
 // Known Claude Code lifecycle enum values. A value outside its set is
 // dropped rather than egressed verbatim, keeping metadata clean.
+// apiErrorTypes is Claude Code's own StopFailure error enum, verified verbatim
+// against the input schema embedded in the installed 2.1.229 binary (probe
+// report §Q2). It is an allowlist, not a hint: enumOr drops anything outside it,
+// which is what keeps PostToolUseFailure's free-text `error` — the same JSON key
+// — from ever reaching an event.
+var apiErrorTypes = map[string]bool{
+	"authentication_failed": true,
+	"oauth_org_not_allowed": true,
+	"billing_error":         true,
+	"rate_limit":            true,
+	"overloaded":            true,
+	"invalid_request":       true,
+	"model_not_found":       true,
+	"server_error":          true,
+	"max_output_tokens":     true,
+	"unknown":               true,
+}
+
 var (
 	sourceValues    = map[string]bool{"startup": true, "resume": true, "clear": true, "compact": true}
 	reasonValues    = map[string]bool{"clear": true, "resume": true, "logout": true, "prompt_input_exit": true, "bypass_permissions_disabled": true, "other": true}

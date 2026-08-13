@@ -27,17 +27,56 @@ const (
 	// stdout-forbidden on every path (INV-3) — see RunHook.
 	HookStop         HookName = "Stop"
 	HookSubagentStop HookName = "SubagentStop"
+
+	// HookPostToolUseFailure is the other half of PostToolUse. Claude Code
+	// documents the pair as mutually exclusive — "Run after successful tool" vs
+	// "Run after tool fails" — and a probe of 2.1.229 confirmed it: a failing
+	// Bash fired this hook and no PostToolUse at all
+	// (plans/reports/probe-260813-2329-claude-code-hook-surface.md).
+	//
+	// That exclusivity is what makes the outcome structural rather than inferred,
+	// and it is the whole basis for status on a tool result (ADR-0018). If a
+	// future version fired both, one failed call would produce two completed-side
+	// events sharing an activity_id — a success and a failure counted against one
+	// total — and SUCCESS% would be corrupt rather than merely wrong. That is a
+	// stop-and-replan signal, not something to paper over.
+	HookPostToolUseFailure HookName = "PostToolUseFailure"
+
+	// HookSubagentStart is the opening boundary SubagentStop already had a close
+	// for. Until now a subagent was visible only indirectly, through the agent_id
+	// riding its tool events, so a subagent that spawned and did nothing left no
+	// trace at all.
+	HookSubagentStart HookName = "SubagentStart"
+
+	// HookPermissionDenied fires "after auto mode classifier denies a tool call"
+	// (2.1.229). Note the narrowness: a `permissions.deny` rule denies WITHOUT
+	// firing it (verified — the probe's deny-rule run produced PreToolUse only),
+	// so absence of this event is not evidence that nothing was denied.
+	HookPermissionDenied HookName = "PermissionDenied"
+
+	// HookStopFailure fires when a turn ends in a provider-side error instead of
+	// an assistant message — rate limits, billing, auth, overload. Its payload is
+	// the only structural surface for "the model could not answer", which is
+	// otherwise indistinguishable from a quiet session.
+	//
+	// Claude Code ignores this hook's output and exit code entirely; the
+	// stdout-forbidden discipline still applies uniformly (INV-3).
+	HookStopFailure HookName = "StopFailure"
 )
 
 // hookNames is the set the plugin wires (capabilities.go / plugin/hooks.json).
 var hookNames = map[HookName]bool{
-	HookSessionStart:     true,
-	HookUserPromptSubmit: true,
-	HookPreToolUse:       true,
-	HookPostToolUse:      true,
-	HookSessionEnd:       true,
-	HookStop:             true,
-	HookSubagentStop:     true,
+	HookSessionStart:       true,
+	HookUserPromptSubmit:   true,
+	HookPreToolUse:         true,
+	HookPostToolUse:        true,
+	HookPostToolUseFailure: true,
+	HookSessionEnd:         true,
+	HookStop:               true,
+	HookSubagentStop:       true,
+	HookSubagentStart:      true,
+	HookPermissionDenied:   true,
+	HookStopFailure:        true,
 }
 
 // ParseHookName validates a raw argv value as a known hook name.
@@ -116,6 +155,38 @@ type HookEvent struct {
 	// SessionEnd.
 	Reason string `json:"reason"`
 
+	// IsInterrupt separates "the user cancelled this" from "the tool failed"
+	// on PostToolUseFailure. Both are status:"failed" — the call did not
+	// complete either way — but without this an interrupted session reads as a
+	// session full of broken tools, which is the wrong story to tell an
+	// operator looking at a red Tool Health panel.
+	//
+	// A *bool, so absent stays absent: older versions and the ordinary hooks
+	// omit the key, and false ("a real failure") is a different statement from
+	// "not reported". Same lesson as Enforce in ADR-0016.
+	//
+	// PostToolUseFailure's OTHER field, `error`, is free text a tool wrote and
+	// is deliberately unbound here — ADR-0019 P1 owns it.
+	IsInterrupt *bool `json:"is_interrupt"`
+
+	// ErrorType is StopFailure's error class — a closed provider enum, verified
+	// against the 2.1.229 schema: authentication_failed, oauth_org_not_allowed,
+	// billing_error, rate_limit, overloaded, invalid_request, model_not_found,
+	// server_error, max_output_tokens, unknown.
+	//
+	// CAUTION, and the reason this field is named for its type rather than its
+	// JSON key: `error` is ALSO the key PostToolUseFailure uses for free-text
+	// tool error output, so this binding decodes that string too. It is safe
+	// only because of how it is consumed — the sole reader is
+	// enumOr(e.ErrorType, apiErrorTypes) on the StopFailure arm, and enumOr
+	// returns "" for anything outside the ten values, so a free-text error has
+	// no path to an emitted event. That is an allowlist, not an impossibility
+	// (the ADR-0014 distinction), so it is pinned by a test rather than left to
+	// this comment: TestMap_FreeTextErrorNeverEgresses.
+	//
+	// StopFailure's `error_details` and `last_assistant_message` are NOT bound.
+	ErrorType string `json:"error"`
+
 	// Stop / SubagentStop deliberately bind NOTHING of their own.
 	//
 	// Their payload carries `last_assistant_message` and `stop_reason` — both
@@ -181,6 +252,33 @@ func (e *HookEvent) filePath() string {
 		return in.FilePath
 	}
 	return in.NotebookPath
+}
+
+// subagentType extracts the agent kind a Task call spawns
+// (tool_input.subagent_type: "code-reviewer", "general-purpose", …).
+//
+// Unlike command() and fileText(), this one DOES egress — which is why it is an
+// identifier and not content. It names a configured agent kind, chosen from the
+// installed set; it is not written by the model and carries nothing about the
+// work. It is bounded by capStr at the call site like every other
+// externally-influenced identifier.
+//
+// What is deliberately NOT read from the same tool_input: `prompt` and
+// `description`, which are free text the model composed. Extracting those is
+// ADR-0019 P1 territory, not a side effect of naming the agent.
+//
+// Returns "" for any other tool, or an absent/unparsable field.
+func (e *HookEvent) subagentType() string {
+	if len(e.ToolInput) == 0 {
+		return ""
+	}
+	var in struct {
+		SubagentType string `json:"subagent_type"`
+	}
+	if err := json.Unmarshal(e.ToolInput, &in); err != nil {
+		return ""
+	}
+	return in.SubagentType
 }
 
 // command extracts the shell command string from a Bash tool_input.

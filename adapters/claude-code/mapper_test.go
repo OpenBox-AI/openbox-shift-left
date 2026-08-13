@@ -383,3 +383,171 @@ func TestMap_StatusDerivationReadsNoToolOutput(t *testing.T) {
 		t.Errorf("status = %q, want %q", ev.Status, client.StatusCompleted)
 	}
 }
+
+// A failed call is the SAME wire event as a successful one — a completed
+// activity with a different outcome — so it pairs with its ActivityStarted and
+// is visible to every consumer that reads ActivityCompleted.
+func TestMap_PostToolUseFailureIsACompletedActivityThatFailed(t *testing.T) {
+	m := testMapper()
+	ev, ok := m.Map(HookPostToolUseFailure, &HookEvent{
+		SessionID: "s", ToolName: "Bash", ToolUseID: "toolu_f1",
+		ToolInput: json.RawMessage(`{"command":"exit 3"}`),
+		ErrorType: "Error: exit code 3",
+	})
+	if !ok {
+		t.Fatal("PostToolUseFailure must map")
+	}
+	if ev.EventType != client.EventToolResult {
+		t.Errorf("event type = %q, want %q — a failed call still completed",
+			ev.EventType, client.EventToolResult)
+	}
+	if ev.Status != client.StatusFailed {
+		t.Errorf("status = %q, want %q", ev.Status, client.StatusFailed)
+	}
+	if ev.EndedAt == "" {
+		t.Error("ended_at unset; without it the completed half reports no duration")
+	}
+	// The pairing input the duration stash and activity_id key on.
+	if ev.Span == nil || ev.Span.InvocationID != "toolu_f1" {
+		t.Errorf("invocation id not carried: %+v", ev.Span)
+	}
+}
+
+// is_interrupt is tri-state on purpose: a cancelled call and a broken tool are
+// both `failed`, and "the provider did not say" is a third answer.
+func TestMap_IsInterruptIsTriState(t *testing.T) {
+	m := testMapper()
+	yes, no := true, false
+	for _, tc := range []struct {
+		name        string
+		in          *bool
+		want        any
+		wantPresent bool
+	}{
+		{"absent", nil, nil, false},
+		{"false", &no, false, true},
+		{"true", &yes, true, true},
+	} {
+		ev, ok := m.Map(HookPostToolUseFailure, &HookEvent{
+			SessionID: "s", ToolName: "Bash", ToolUseID: "toolu_i", IsInterrupt: tc.in,
+		})
+		if !ok {
+			t.Fatalf("%s: must map", tc.name)
+		}
+		got, present := ev.Metadata["is_interrupt"]
+		if present != tc.wantPresent {
+			t.Errorf("%s: is_interrupt present = %t, want %t", tc.name, present, tc.wantPresent)
+		}
+		if present && got != tc.want {
+			t.Errorf("%s: is_interrupt = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}
+
+func TestMap_LifecycleSignals(t *testing.T) {
+	m := testMapper()
+
+	sub, ok := m.Map(HookSubagentStart, &HookEvent{
+		SessionID: "s", AgentID: "agt-1", AgentType: "code-reviewer",
+	})
+	if !ok {
+		t.Fatal("SubagentStart must map")
+	}
+	if sub.EventType != client.EventSubagentStarted {
+		t.Errorf("event type = %q, want %q", sub.EventType, client.EventSubagentStarted)
+	}
+	if sub.Metadata["agent_type"] != "code-reviewer" {
+		t.Errorf("agent_type not carried: %v", sub.Metadata)
+	}
+
+	den, ok := m.Map(HookPermissionDenied, &HookEvent{
+		SessionID: "s", ToolName: "Bash", ToolUseID: "toolu_d1",
+		ToolInput: json.RawMessage(`{"command":"rm -rf /"}`),
+	})
+	if !ok {
+		t.Fatal("PermissionDenied must map")
+	}
+	if den.EventType != client.EventPermissionDenied {
+		t.Errorf("event type = %q, want %q", den.EventType, client.EventPermissionDenied)
+	}
+	if den.Metadata["tool_use_id"] != "toolu_d1" {
+		t.Errorf("tool_use_id not carried — the denial cannot be correlated with its call: %v", den.Metadata)
+	}
+
+	// The error class is the provider's own enum, allowlisted.
+	for _, in := range []string{"rate_limit", "billing_error", "max_output_tokens", "unknown"} {
+		ev, ok := m.Map(HookStopFailure, &HookEvent{SessionID: "s", ErrorType: in})
+		if !ok {
+			t.Fatalf("StopFailure(%s) must map", in)
+		}
+		if ev.EventType != client.EventAPIError {
+			t.Errorf("event type = %q, want %q", ev.EventType, client.EventAPIError)
+		}
+		if ev.Metadata["error_type"] != in {
+			t.Errorf("error_type = %v, want %q", ev.Metadata["error_type"], in)
+		}
+	}
+}
+
+// `error` is the same JSON key on TWO hooks: a closed enum on StopFailure, and
+// free text a tool wrote on PostToolUseFailure. One binding decodes both, so
+// what keeps the free text off the wire is the allowlist — an allowlist, not an
+// impossibility (the ADR-0014 distinction), which is why it is pinned here
+// rather than left to a comment.
+func TestMap_FreeTextErrorNeverEgresses(t *testing.T) {
+	m := testMapper()
+	const leaky = "ENOENT: no such file /home/dev/.ssh/id_rsa"
+
+	// On the failure hook the field is never read at all.
+	failed, ok := m.Map(HookPostToolUseFailure, &HookEvent{
+		SessionID: "s", ToolName: "Read", ToolUseID: "toolu_e1", ErrorType: leaky,
+	})
+	if !ok {
+		t.Fatal("must map")
+	}
+	if blob, _ := json.Marshal(failed); strings.Contains(string(blob), leaky) {
+		t.Errorf("PostToolUseFailure's free-text error reached the event: %s", blob)
+	}
+
+	// And on StopFailure, where it IS read, anything outside the enum is dropped.
+	apiErr, ok := m.Map(HookStopFailure, &HookEvent{SessionID: "s", ErrorType: leaky})
+	if !ok {
+		t.Fatal("must map")
+	}
+	if v, present := apiErr.Metadata["error_type"]; present {
+		t.Errorf("error_type = %v; a value outside the provider enum must be dropped", v)
+	}
+	if blob, _ := json.Marshal(apiErr); strings.Contains(string(blob), leaky) {
+		t.Errorf("free text reached the APIError event: %s", blob)
+	}
+}
+
+// subagent_type names WHICH agent kind was spawned — an identifier chosen from
+// the installed set, not text the model wrote. Its neighbours in the same
+// tool_input, `prompt` and `description`, are free text and must stay unread.
+func TestMap_TaskSubagentTypeIsCarriedButNotItsPrompt(t *testing.T) {
+	m := testMapper()
+	const secretPrompt = "SUBAGENT-PROMPT-must-not-egress"
+	ev, ok := m.Map(HookPreToolUse, &HookEvent{
+		SessionID: "s", ToolName: "Task", ToolUseID: "toolu_t1",
+		ToolInput: json.RawMessage(`{"subagent_type":"code-reviewer","description":"review","prompt":"` + secretPrompt + `"}`),
+	})
+	if !ok {
+		t.Fatal("Task call must map")
+	}
+	if ev.Metadata["subagent_type"] != "code-reviewer" {
+		t.Errorf("subagent_type not carried — every Task call reads as an anonymous "+
+			"`tool_name: Task`: %v", ev.Metadata)
+	}
+	if blob, _ := json.Marshal(ev); strings.Contains(string(blob), secretPrompt) {
+		t.Errorf("the subagent prompt egressed: %s", blob)
+	}
+	// A non-Task tool carrying an unrelated input must not grow the key.
+	other, _ := m.Map(HookPreToolUse, &HookEvent{
+		SessionID: "s", ToolName: "Read", ToolUseID: "toolu_t2",
+		ToolInput: json.RawMessage(`{"file_path":"/tmp/a"}`),
+	})
+	if _, present := other.Metadata["subagent_type"]; present {
+		t.Errorf("non-Task call carries subagent_type: %v", other.Metadata)
+	}
+}
