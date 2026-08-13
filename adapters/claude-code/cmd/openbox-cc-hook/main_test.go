@@ -227,6 +227,12 @@ func TestHookBinary_BlockVerdictRecordsAdvisoryExitsZero(t *testing.T) {
 		"OPENBOX_ADVISORY_FILE="+advPath,
 		"OPENBOX_SESSION_DIR="+filepath.Join(dir, "sessions"),
 		"OPENBOX_CONFIG="+filepath.Join(dir, "none.json"),
+		// Observe mode, stated rather than inherited. This case is about a BLOCK
+		// verdict staying ADVISORY, which is only true with enforce off — and
+		// enforce defaults ON (ADR-0016). It passed on the default before only
+		// because the gate also needed the tier-2 toggle, which defaulted off;
+		// ADR-0017 removed that toggle, so the mode has to be explicit.
+		"OPENBOX_ENFORCE=0",
 	)
 
 	run := func(hook, payload string) {

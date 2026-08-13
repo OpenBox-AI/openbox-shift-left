@@ -94,12 +94,20 @@ func TestGate_ObserveCopySkippedWhenApprovalWasFiled(t *testing.T) {
 	}
 }
 
-// With Tier-2 off there is no second path, so the gate owes the spool a copy.
-// This is the default posture, and it must behave exactly like observe-only.
-func TestGate_ObserveCopySpooledWhenTier2Disabled(t *testing.T) {
+// The deprecated tier2 toggle no longer suppresses evaluation (ADR-0017): it is
+// still parsed for back-compat but must not change behaviour. So the escalation
+// runs, delivers, and the observe copy is suppressed exactly as with the toggle
+// on — the assertion is that this test reads identically to the delivered case
+// above.
+//
+// It previously asserted the opposite, and that is the point: a config key that
+// silently kept disabling enforcement would be the same silently-ungoverned
+// failure the ADR exists to close.
+func TestGate_DeprecatedTier2ToggleNoLongerSuppressesEvaluation(t *testing.T) {
 	gov := &fakeGovernor{}
-	if !deliveringGate(t, gov, "0") {
-		t.Error("no escalation ran; the observe copy is the only copy and must be spooled")
+	if deliveringGate(t, gov, "0") {
+		t.Error("tier2=0 suppressed the escalation; the key is parsed-but-ignored now, " +
+			"and an org that set it once must not stay ungoverned")
 	}
 }
 

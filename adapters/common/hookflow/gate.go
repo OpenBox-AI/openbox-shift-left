@@ -133,11 +133,15 @@ func (g EnforceGate) Run(ctx context.Context, logger *log.Logger, stdout io.Writ
 	policy := ResolveFailurePolicy()
 	dec = ApplyFailurePolicy(dec, policy)
 
-	// For high-risk classes, when Tier-2 is enabled and a server round-trip can
-	// still change the outcome, escalate to the authoritative verdict before the
-	// tool runs — closing the policy-only floor exactly where arbitrary execution
-	// is dangerous, and nowhere else. Default off; inert when off.
-	if devconfig.ResolveTier2() && t.HighRisk() && ShouldEscalate(dec, g.Contract) {
+	// Evaluate inline whenever a server round-trip can still change the outcome
+	// (ADR-0017). Every gated class, unconditionally: risk is a property of the
+	// POLICY, and deciding here which calls deserve a real verdict was the engine
+	// second-guessing the policy that is supposed to decide.
+	//
+	// The narrowing this replaces — enabled && high-risk-only — is what left
+	// raw-rego orgs ungoverned on everything else, because the local evaluator
+	// that handled the rest could not evaluate their policy at all.
+	if ShouldEscalate(dec, g.Contract) {
 		t2, key := g.escalate(ctx, logger, t, enforceStart)
 		// Carry the local Tier-1 redaction onto the Tier-2 decision so a
 		// redact-and-continue still applies on the Tier-2 proceed path.

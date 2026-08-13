@@ -473,17 +473,25 @@ func TestEnforcementConformance_Tier2(t *testing.T) {
 		}
 	})
 
-	t.Run("C14 T2 NOT escalated for a non-high-risk class (Edit)", func(t *testing.T) {
+	t.Run("C14 every gated class evaluates inline, incl. Edit (ADR-0017)", func(t *testing.T) {
+		// The inverse of what this asserted before. Edit used to be decided
+		// locally and never reached the server, which is precisely how a
+		// raw-rego org — whose policy cannot be evaluated locally at all — was
+		// left ungoverned on everything but shell and MCP.
 		allowT1(t)
-		url, hits := serveEvaluate(t, `{"verdict":"block","reason":"should not fire"}`, 200, 0)
+		url, hits := serveEvaluate(t, `{"verdict":"block","reason":"edit policy","policy_id":"e-pol"}`, 200, 0)
 		tier2Creds(t, url)
-		t.Setenv(envTier2, "1")
 		t.Setenv(envFailClosed, "0")
-		if out := run(editCall); strings.TrimSpace(out) != "" {
-			t.Errorf("Edit is T1-only; must not be blocked by T2; got %q", out)
+		out := run(editCall)
+		d, reason := parsePermissionDecision(t, []byte(out))
+		if d != ccDecisionDeny {
+			t.Fatalf("Edit must be decided by /evaluate; permissionDecision = %q, want deny (stdout=%q)", d, out)
 		}
-		if atomic.LoadInt32(hits) != 0 {
-			t.Errorf("/evaluate must NOT be called for Edit; hits=%d", atomic.LoadInt32(hits))
+		if !strings.Contains(reason, "edit policy") {
+			t.Errorf("reason = %q, want the server's policy reason", reason)
+		}
+		if atomic.LoadInt32(hits) != 1 {
+			t.Errorf("/evaluate hits = %d, want exactly 1 for Edit", atomic.LoadInt32(hits))
 		}
 	})
 
@@ -519,17 +527,22 @@ func TestEnforcementConformance_Tier2(t *testing.T) {
 		}
 	})
 
-	t.Run("C16 T2 OFF → high-risk Bash never calls /evaluate (T1-only)", func(t *testing.T) {
+	t.Run("C16 the deprecated tier2=0 opt-out no longer disables evaluation", func(t *testing.T) {
+		// Back-compat with teeth: the key still parses, but an org that set it
+		// under the old design must not silently keep its gates open. Honouring
+		// it would leave exactly the population most likely to have set it —
+		// early adopters of enforcement — ungoverned after upgrading.
 		allowT1(t)
-		url, hits := serveEvaluate(t, `{"verdict":"block"}`, 200, 0)
+		url, hits := serveEvaluate(t, `{"verdict":"block","reason":"still governed"}`, 200, 0)
 		tier2Creds(t, url)
-		t.Setenv(envTier2, "0") // opt-out
+		t.Setenv(envTier2, "0") // deprecated: parsed, ignored
 		t.Setenv(envFailClosed, "0")
-		if out := run(dangerBash); strings.TrimSpace(out) != "" {
-			t.Errorf("T2 off must be byte-identical to T1-only (proceed); got %q", out)
+		out := run(dangerBash)
+		if d, _ := parsePermissionDecision(t, []byte(out)); d != ccDecisionDeny {
+			t.Fatalf("tier2=0 must not suppress the verdict; permissionDecision = %q, want deny (stdout=%q)", d, out)
 		}
-		if atomic.LoadInt32(hits) != 0 {
-			t.Errorf("T2 off must never call /evaluate; hits=%d", atomic.LoadInt32(hits))
+		if atomic.LoadInt32(hits) != 1 {
+			t.Errorf("/evaluate hits = %d, want 1 — the opt-out is ignored", atomic.LoadInt32(hits))
 		}
 	})
 

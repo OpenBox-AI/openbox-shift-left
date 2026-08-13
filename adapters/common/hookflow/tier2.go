@@ -141,6 +141,16 @@ func (t Tier2) Escalate(ctx context.Context, logger *log.Logger, ev client.DevEv
 }
 
 func (t Tier2) run(cctx context.Context, logger *log.Logger, ev client.DevEvent) decision.Decision {
+	// A missing transport is a misconfiguration, but it must degrade like any
+	// other fault rather than panic: this runs on every gated tool call since
+	// ADR-0017, so a nil here would be a guaranteed crash on the enforce path
+	// instead of the latent one it was when only shell and MCP escalated.
+	// RunHook would recover it, but recovering a panic per tool call is not the
+	// same as failing open.
+	if t.NewClient == nil {
+		logger.Print("evaluation degrading: no control-plane transport configured")
+		return Tier2FailOpen("tier-2 client unavailable")
+	}
 	cl, err := t.NewClient(logger)
 	if err != nil {
 		logger.Printf("tier-2 escalation degrading (client init): %v", err)

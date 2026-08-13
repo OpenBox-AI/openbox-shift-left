@@ -860,9 +860,13 @@ func TestRunHook_EnforceFailClosed(t *testing.T) {
 		t.Errorf("fail-closed reason leaked the shell command (INV-2): %q", out)
 	}
 
-	// A loaded allow bundle with a benign command → real ALLOW → PROCEED even under
-	// fail-closed (the policy does not touch a real allow verdict).
+	// A reachable /evaluate answering ALLOW → a real verdict → PROCEED even under
+	// fail-closed (the policy does not touch a real allow verdict). The verdict
+	// has to come from the server since ADR-0017; a local allow with nothing
+	// reachable is the outage case asserted just above.
 	setBundleEnv(t, &decision.Bundle{Version: "t", DefaultDecision: "allow"})
+	allowURL, _ := serveEvaluate(t, `{"verdict":"allow"}`, 200, 0)
+	tier2Creds(t, allowURL)
 	if out := run(); strings.TrimSpace(out) != "" {
 		t.Errorf("fail-closed must NOT block a real allow; stdout=%q", out)
 	}

@@ -356,11 +356,23 @@ func turnMetadata(e *HookEvent, index int) map[string]any {
 //   - MCP   → the argument shape, hashed, beside the real function name.
 //     Core states the rule outright: "same tool with different arguments must
 //     require fresh approval".
-//   - anything else → the invocation. Those classes expose no structural
-//     discriminator, are never escalated (isHighRiskClass), and so can never
-//     hold an approval; falling back keeps their one-event-per-call
-//     granularity exactly as it was. TestHighRiskClassesHaveAStableOperationID
-//     fails if a class becomes gated without gaining a real discriminator.
+//   - anything else → the invocation, because those classes expose no
+//     structural discriminator to key on.
+//
+// That fallback used to be free: those classes were never escalated, so they
+// could never hold an approval, and one event per call was the whole
+// requirement. ADR-0017 gates every class, so they CAN hold one now, and an
+// invocation-scoped key means an approval does not survive a retry — the
+// developer re-runs the tool, the id moves, and a fresh request is filed rather
+// than the granted one being found.
+//
+// That is a real limitation, and it is left standing deliberately: the fix is to
+// give these classes a stable discriminator, which changes activity_id, which is
+// this product's event identity — pinned byte-for-byte in
+// client/approval_key_pin_test.go and load-bearing for core's dedupe and every
+// stored row. Changing it is its own decision, not a side effect of widening the
+// gate. The failure direction meanwhile is safe: an unmatched approval
+// over-ASKS, and can never over-grant.
 //
 // Both fields are local: they are spooled so the enforce path and a later flush
 // derive identical ids, and neither is emitted as a wire field — they only feed

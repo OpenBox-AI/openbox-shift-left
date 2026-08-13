@@ -43,9 +43,9 @@ func RunRewake(stdin io.Reader, wake io.Writer, logger *log.Logger) int {
 		}
 	}()
 
-	// Inert unless the session is actually gating: without enforce + Tier-2 no
-	// approval can be filed, so there is nothing to watch for.
-	if !ResolveEnforce() || !devconfig.ResolveTier2() {
+	// Inert unless the session is actually gating: without enforce, no approval
+	// can be filed, so there is nothing to watch for.
+	if !ResolveEnforce() {
 		return 0
 	}
 	id, err := ResolveIdentity()
@@ -56,10 +56,10 @@ func RunRewake(stdin io.Reader, wake io.Writer, logger *log.Logger) int {
 	if err != nil {
 		return 0
 	}
-	// Only the classes the gate escalates can have filed anything.
-	if !isHighRiskClass(ev.ToolName) {
-		return 0
-	}
+	// Every gated class evaluates inline since ADR-0017, so any of them can have
+	// filed an approval. The high-risk narrowing that used to stand here would
+	// now silently drop the watcher for exactly the classes that newly gained
+	// approval holds — a call held, denied at the budget, and then never woken.
 	devEv, ok := New(id, DefaultSpoolDir()).Mapper.Map(HookPreToolUse, ev)
 	if !ok {
 		return 0

@@ -435,16 +435,36 @@ func TestHookEndToEndSmoke(t *testing.T) {
 	// binary-driven test (TestHookRealtimeDelivery) — it cannot be exercised
 	// in-process, because the trigger refuses to spawn a `*.test` binary.
 	t.Setenv("OPENBOX_REALTIME", "0")
+	// Content capture OFF, so the canary below means what it says.
+	//
+	// The canary proves no tool content reaches the wire. That used to hold on
+	// the default posture because nothing on this path egressed synchronously
+	// and the spooled copy is metadata-only. ADR-0017 gates every tool call
+	// inline, and a gated escalation DOES attach content when capture is on
+	// (E7) — so on the default the canary would now be asserting the absence of
+	// something the design deliberately sends, and would fail for the right
+	// reason at the wrong test. With capture off, no content egresses on ANY
+	// path, which is the property this test is here to pin.
+	t.Setenv("OPENBOX_CONTENT_CAPTURE", "0")
 
+	// gating separates the two properties that used to be one. Every hot-path
+	// hook must be FAST; only the non-gating ones must be SILENT.
+	//
+	// PreToolUse egresses synchronously now, by design (ADR-0017): it is the
+	// gate, and its whole purpose is to obtain a verdict before the tool runs.
+	// Asserting no-egress on it would be asserting that enforcement does not
+	// work. The bound that replaced it is the provider's hook ceiling, pinned
+	// per adapter — see TestEnforceBudgetStaysUnderTheDeclaredCeiling.
 	events := []struct {
 		hook, payload string
-		hotPath       bool // hot-path hooks must NOT egress and must be fast
+		hotPath       bool // must be fast
+		gating        bool // egresses synchronously by design
 	}{
-		{"SessionStart", `{"hook_event_name":"SessionStart","session_id":"s1","cwd":"/r","source":"startup"}`, true},
-		{"UserPromptSubmit", `{"hook_event_name":"UserPromptSubmit","session_id":"s1","cwd":"/r","prompt":"hi"}`, true},
-		{"PreToolUse", `{"hook_event_name":"PreToolUse","session_id":"s1","cwd":"/r","tool_name":"Bash","tool_input":{"command":"` + contentCanary + `"}}`, true},
-		{"PostToolUse", `{"hook_event_name":"PostToolUse","session_id":"s1","cwd":"/r","tool_name":"Bash","tool_response":{"ok":true}}`, true},
-		{"SessionEnd", `{"hook_event_name":"SessionEnd","session_id":"s1","cwd":"/r","reason":"other"}`, false},
+		{"SessionStart", `{"hook_event_name":"SessionStart","session_id":"s1","cwd":"/r","source":"startup"}`, true, false},
+		{"UserPromptSubmit", `{"hook_event_name":"UserPromptSubmit","session_id":"s1","cwd":"/r","prompt":"hi"}`, true, false},
+		{"PreToolUse", `{"hook_event_name":"PreToolUse","session_id":"s1","cwd":"/r","tool_name":"Bash","tool_input":{"command":"` + contentCanary + `"}}`, true, true},
+		{"PostToolUse", `{"hook_event_name":"PostToolUse","session_id":"s1","cwd":"/r","tool_name":"Bash","tool_response":{"ok":true}}`, true, false},
+		{"SessionEnd", `{"hook_event_name":"SessionEnd","session_id":"s1","cwd":"/r","reason":"other"}`, false, false},
 	}
 	// A generous hot-path budget: local spool only, so this catches a regression
 	// that introduces synchronous/network work on the hot path without CI flake.
@@ -452,6 +472,11 @@ func TestHookEndToEndSmoke(t *testing.T) {
 	for _, e := range events {
 		a, out, errb := testApp(nil)
 		a.stdin = strings.NewReader(e.payload)
+		// Per-hook delta: the gate legitimately egresses now, and a cumulative
+		// counter would charge its call to the next hook in the table.
+		mu.Lock()
+		before := got
+		mu.Unlock()
 		start := time.Now()
 		code := a.run([]string{"hook", "claude-code", e.hook})
 		elapsed := time.Since(start)
@@ -465,11 +490,14 @@ func TestHookEndToEndSmoke(t *testing.T) {
 			if elapsed > hotPathBudget {
 				t.Errorf("%s hot-path hook took %v (> budget %v) — is it blocking on the network?", e.hook, elapsed, hotPathBudget)
 			}
-			mu.Lock()
-			n := got
-			mu.Unlock()
-			if n != 0 {
-				t.Fatalf("hot-path hook %s caused egress (%d /evaluate calls) — the hot path must be async/no-network (NFR-2)", e.hook, n)
+			if !e.gating {
+				mu.Lock()
+				n := got - before
+				mu.Unlock()
+				if n != 0 {
+					t.Fatalf("non-gating hot-path hook %s caused egress (%d /evaluate calls) — "+
+						"only the gate may block on the network (NFR-2)", e.hook, n)
+				}
 			}
 		}
 	}

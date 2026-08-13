@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/openbox-ai/openbox-shift-left/adapters/common/hookflow"
@@ -154,14 +155,25 @@ func TestEnforcementConformance(t *testing.T) {
 	})
 
 	t.Run("C5 fail-closed never denies a REAL allow", func(t *testing.T) {
-		// A reachable, BUNDLED sidecar whose default is allow → sourceLocalBundle →
-		// a real verdict → PROCEEDS even under fail-closed (the crux clause).
+		// The crux clause: fail-closed denies only when no real verdict could be
+		// obtained, never a verdict that says allow.
+		//
+		// "Real" moved with ADR-0017. It used to mean a local bundle's allow;
+		// the decider is the server now, so a reachable /evaluate returning
+		// allow is what has to proceed. A local allow with the server
+		// unreachable is no longer a real verdict — it is an outage, and C4/C6
+		// cover that it denies.
 		setBundleEnv(t, &decision.Bundle{Version: "conf-allow", DefaultDecision: "allow"})
+		url, hits := serveEvaluate(t, `{"verdict":"allow"}`, 200, 0)
+		tier2Creds(t, url)
 		t.Setenv(envEnforce, "1")
 		t.Setenv(envFailClosed, "1")
 		benign := `{"hook_event_name":"PreToolUse","session_id":"s","cwd":"/tmp","tool_name":"Bash","tool_input":{"command":"echo hi"}}`
 		if out := run(t, benign); strings.TrimSpace(out) != "" {
 			t.Errorf("fail-closed must NOT block a real allow; got %q", out)
+		}
+		if atomic.LoadInt32(hits) != 1 {
+			t.Errorf("/evaluate hits = %d, want 1 — the allow must come from the server", atomic.LoadInt32(hits))
 		}
 	})
 
@@ -389,6 +401,12 @@ func TestEnforcementConformance_StaleGate(t *testing.T) {
 	t.Setenv(envFailClosed, "1")
 
 	setBundleEnv(t, &decision.Bundle{Version: "allow", DefaultDecision: "allow"})
+	// The verdict comes from the server since ADR-0017, so a reachable allow is
+	// what makes the pre-marker case proceed. The stale gate must still cut in
+	// ahead of it once the marker exists — that is the property under test, and
+	// it is a local file stat that no network state can influence.
+	evalURL, _ := serveEvaluate(t, `{"verdict":"allow"}`, 200, 0)
+	tier2Creds(t, evalURL)
 
 	run := func() string {
 		var stdout bytes.Buffer

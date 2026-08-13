@@ -3,15 +3,19 @@ package codex
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"io/fs"
 	"log"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
-	"github.com/openbox-ai/openbox-shift-left/adapters/common/hookflow"
 	"time"
+
+	"github.com/openbox-ai/openbox-shift-left/adapters/common/hookflow"
 
 	"github.com/openbox-ai/openbox-shift-left/adapters/common/devconfig"
 	"github.com/openbox-ai/openbox-shift-left/decision"
@@ -137,7 +141,18 @@ func TestEnforcementConformance_Codex(t *testing.T) {
 	})
 
 	t.Run("CDX-C5 fail-closed never denies a REAL allow", func(t *testing.T) {
+		// "Real" means a SERVER allow since ADR-0017 — the local bundle is no
+		// longer the decider, so a local allow with nothing reachable is the
+		// outage CDX-C4 asserts denies, not an allow.
 		setBundleEnv(t, &decision.Bundle{Version: "conf-allow", DefaultDecision: "allow"})
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"verdict":"allow"}`))
+		}))
+		defer srv.Close()
+		t.Setenv("OPENBOX_BASE_URL", srv.URL) // loopback http allowed (INV-1 guard)
+		t.Setenv("OPENBOX_API_KEY", "obx_test_key")
+		t.Setenv("OPENBOX_ED25519_SEED", base64.StdEncoding.EncodeToString(make([]byte, 32)))
 		t.Setenv(devconfig.EnvEnforce, "1")
 		t.Setenv(devconfig.EnvFailClosed, "1")
 		benign := `{"hook_event_name":"PreToolUse","session_id":"s","cwd":"/tmp","tool_name":"Bash","tool_input":{"command":"echo hi"}}`
@@ -372,6 +387,18 @@ func TestEnforcementConformance_StaleGate_Codex(t *testing.T) {
 	t.Setenv(devconfig.EnvEnforce, "1")
 	t.Setenv(devconfig.EnvFailClosed, "1")
 	setBundleEnv(t, &decision.Bundle{Version: "allow", DefaultDecision: "allow"})
+	// A reachable server allow, because that is what "proceed" requires since
+	// ADR-0017. The property under test is unaffected: the stale gate is a local
+	// file stat that runs BEFORE any evaluation, so it must still cut in ahead of
+	// a server that would have allowed.
+	staleSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"verdict":"allow"}`))
+	}))
+	defer staleSrv.Close()
+	t.Setenv("OPENBOX_BASE_URL", staleSrv.URL)
+	t.Setenv("OPENBOX_API_KEY", "obx_test_key")
+	t.Setenv("OPENBOX_ED25519_SEED", base64.StdEncoding.EncodeToString(make([]byte, 32)))
 
 	run := func() string {
 		var stdout bytes.Buffer
