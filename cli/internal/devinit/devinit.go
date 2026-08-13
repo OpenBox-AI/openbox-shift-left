@@ -258,6 +258,16 @@ func register(ctx context.Context, o Options, d Deps) (*Result, provider.Credent
 		ref.DID = did
 		res.Reused = true
 		res.DID = did
+		// The agent id comes back from dev.json for the same reason the DID does:
+		// this path registers nothing, so the only copy is the local one, and the
+		// caller writes whatever it gets here straight back to dev.json.
+		//
+		// Returning it empty would ERASE it, and it is not decorative —
+		// ResolveAgentID feeds SelfAgentID in the autonomous approver, which is
+		// how a machine refuses to approve its own request (ADR-0012). Losing it
+		// disables that check silently.
+		res.AgentID = devconfig.ResolveAgentID()
+		ref.AgentID = res.AgentID
 		fmt.Fprintf(d.Out, "This machine already has credentials in %s — reusing them (DID %s).\n",
 			credentialFileLabel(o.EnvFile), didOrNone(did))
 		fmt.Fprintf(d.Out, "  Nothing was registered. A machine holds ONE agent identity: if these belong to a\n")

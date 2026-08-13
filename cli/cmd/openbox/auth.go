@@ -219,14 +219,6 @@ func (a *app) runAuth(args []string) int {
 
 // collectAuthFields prompts for every field in the documented order.
 //
-// isRegisterSentinel reports whether the agent-id answer asks for a new agent.
-// Empty covers a first run (no default to accept); `new` covers a machine that
-// has an id on file and wants a different one.
-func isRegisterSentinel(agentID string) bool {
-	v := strings.TrimSpace(agentID)
-	return v == "" || strings.EqualFold(v, "new")
-}
-
 // The AGENT ID is the registration trigger, and it SHORT-CIRCUITS: a blank agent
 // id means "I have no agent", so auth registers one and never asks for the DID,
 // API key or signing key — registration returns all three. Prompting for values
@@ -240,21 +232,25 @@ func collectAuthFields(p prompt.Prompter, f authFields, rotate bool) (authFields
 	if f.baseURL, err = p.Line("Core URL (data plane)", f.baseURL); err != nil {
 		return f, err
 	}
-	// `new` is the register trigger, and it exists because "blank" was not
-	// expressible. Line() returns its DEFAULT on empty input, so on any machine
-	// that already had an agent id in dev.json, pressing Enter at a prompt
-	// reading "blank registers a new agent" kept the OLD id and dropped the user
-	// into collect mode — demanding an API key they did not have precisely
-	// because they were trying to register. The prompt documented an action it
-	// could not accept.
+	// NOTHING is pre-filled here, deliberately, and that is the whole fix.
 	//
-	// Blank still means register when there is no default, which is the
-	// first-run case and the common one.
-	if f.agentID, err = p.Line("Agent id (`new` registers a new agent)", f.agentID); err != nil {
+	// Line() returns its DEFAULT on empty input. While this prompt offered the id
+	// from dev.json, pressing Enter at text reading "blank registers a new agent"
+	// kept the OLD id and dropped the user into collect mode — demanding an API
+	// key they did not have, precisely because they were trying to register. No
+	// input could express blank either: readLine trims only \r\n, so even a space
+	// came back as a non-empty id. The prompt documented an action it could not
+	// accept.
+	//
+	// With no default, Enter means blank means register, which is what the text
+	// has always said. Reusing a specific agent is now the deliberate act — type
+	// its id, or pass --agent-id on a non-interactive run.
+	answered, err := p.Line("Agent id (blank registers a new agent)", "")
+	if err != nil {
 		return f, err
 	}
-	if isRegisterSentinel(f.agentID) && !rotate {
-		f.agentID = ""
+	f.agentID = strings.TrimSpace(answered)
+	if f.agentID == "" && !rotate {
 		f.register = true
 		return f, nil
 	}
