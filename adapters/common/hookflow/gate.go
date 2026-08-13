@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io"
 	"log"
+	"sync/atomic"
 	"time"
 
 	"github.com/openbox-ai/openbox-shift-left/adapters/common/devconfig"
@@ -74,11 +75,26 @@ func (g EnforceGate) Run(ctx context.Context, logger *log.Logger, stdout io.Writ
 	//
 	// g is a value receiver, so wiring OnDelivered here mutates only this
 	// invocation's copy: no shared state between concurrent hook processes.
+	//
+	// The flag is atomic because the two accesses can genuinely be concurrent.
+	// Escalate runs the transport in its own goroutine and abandons it when the
+	// budget expires; only its result-channel path carries a happens-before edge
+	// back here, so on a budget-exceeded escalation the abandoned goroutine can
+	// still be running — and calling OnDelivered — while this defer reads. A plain
+	// bool made that a data race that -race reports, and left the read free to
+	// observe a stale value.
+	//
+	// Reading "not delivered" while a POST is still in flight is not itself the
+	// bug: an escalation we gave up on may or may not have been stored, and the
+	// direction of failure is settled — spool, because a redundant copy is a bug
+	// and a missing one is lost telemetry. What remains is the lost-200 window
+	// (core committed the row, our client saw only the cancellation), which no
+	// client-side change can close; server-side dedupe is still absent.
 	if g.SpoolObserve != nil {
-		delivered := false
-		g.Tier2.OnDelivered = func() { delivered = true }
+		var delivered atomic.Bool
+		g.Tier2.OnDelivered = func() { delivered.Store(true) }
 		defer func() {
-			if !delivered {
+			if !delivered.Load() {
 				g.SpoolObserve()
 			}
 		}()

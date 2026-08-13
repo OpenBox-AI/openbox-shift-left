@@ -102,6 +102,69 @@ func TestGate_ObserveCopySpooledWhenTier2Disabled(t *testing.T) {
 	}
 }
 
+// slowGovernor's Emit outlives the escalation budget and only then reports
+// success. It deliberately ignores cancellation, which is the one shape a real
+// transport cannot be asked to have on demand: core committed the row a moment
+// after we stopped waiting, and our cancellation arrived too late to matter.
+type slowGovernor struct {
+	*fakeGovernor
+	emitted chan struct{}
+}
+
+func (s slowGovernor) Emit(context.Context, client.DevEvent) (client.Evaluation, error) {
+	time.Sleep(60 * time.Millisecond)
+	close(s.emitted)
+	return client.Evaluation{Verdict: client.VerdictAllow}, nil
+}
+
+// The budget-exceeded escalation: Escalate gives up on the transport and returns
+// through its timeout branch, abandoning the goroutine that is still running.
+// Only the result-channel branch carries a happens-before edge back to the gate,
+// so on this path the abandoned goroutine's OnDelivered call and the gate's defer
+// touch the same flag concurrently.
+//
+// Every other test here drives the escalation to completion, which is why the
+// suite stayed green under -race while this path was a live data race. It is
+// reachable today on any Bash or MCP call whose escalation runs out of budget.
+//
+// Two things are pinned: the flag is safe to read (the -race run is the
+// assertion), and a late delivery does not flip the direction of failure — the
+// gate still spools, because an escalation we abandoned may never have been
+// stored and a missing copy loses the event outright.
+func TestGate_ObserveCopySpooledWhenEscalationOutlivesItsBudget(t *testing.T) {
+	isolateConfig(t)
+	isolateMarkers(t)
+	t.Setenv(devconfig.EnvTier2, "1")
+	t.Setenv(devconfig.EnvTier2Timeout, "20") // expires long before Emit returns
+	t.Setenv(devconfig.EnvApprovalHold, "50")
+	t.Setenv(devconfig.EnvEnforcementFile, t.TempDir()+"/enforcements.jsonl")
+	defer devconfig.Pin()()
+
+	gov := slowGovernor{fakeGovernor: &fakeGovernor{}, emitted: make(chan struct{})}
+	spooled := false
+	var out bytes.Buffer
+	gate := EnforceGate{
+		Contract: testContract{approval: "ask"},
+		Tier2: Tier2{
+			HookBudget: 29 * time.Second,
+			MaxTimeout: 4 * time.Second,
+			NewClient:  func(*log.Logger) (Governor, error) { return gov, nil },
+		},
+		Record:       func(decision.Decision, ApplyResult) {},
+		SpoolObserve: func() { spooled = true },
+	}
+	gate.Run(context.Background(), discard(), &out, shellTarget{})
+
+	// Let the abandoned transport finish, which is where the concurrent write
+	// lands. Without this the test can exit before the race is even possible.
+	<-gov.emitted
+
+	if !spooled {
+		t.Error("the escalation was abandoned at its budget, so delivery is unknown; " +
+			"dropping the observe copy risks losing the event entirely")
+	}
+}
+
 // The stale gate returns before the escalation is even reached. Deferring the
 // spool write must not let an early return swallow it — every exit path owes the
 // spool a copy unless delivery actually happened.

@@ -53,6 +53,11 @@ type Tier2 struct {
 	// that came back REQUIRE_APPROVAL and led to a hold was still delivered and
 	// still stored, so the observe copy is redundant in those cases too. Keying
 	// it on the decision instead would miss both.
+	//
+	// It may run AFTER Escalate has already returned. A budget-exceeded
+	// escalation abandons the goroutine running the transport rather than
+	// waiting for it, so the callback races the caller's own teardown and must
+	// be safe to invoke concurrently with whatever reads what it sets.
 	OnDelivered func()
 }
 
