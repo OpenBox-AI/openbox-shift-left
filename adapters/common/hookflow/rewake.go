@@ -15,7 +15,7 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/client"
 )
 
-// The rewake channel (E9 §2.2 Tier 2).
+// The rewake channel (E9 §2.2).
 //
 // The bounded hold covers approvers that answer in seconds. A human who does
 // not is the tail the hold deliberately refuses to wait for: the call is denied

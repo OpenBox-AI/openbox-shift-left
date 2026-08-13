@@ -17,7 +17,7 @@ import (
 // local decision, apply the per-org failure policy, then apply the
 // verdict onto Codex's PreToolUse hook output contract. The middle —
 // decision.InProcessDecider (ADR-0006, no socket/daemon, fail-open on
-// every fault), the native policy evaluator (ADR-0005) and the Tier-1
+// every fault), the native policy evaluator (ADR-0005) and the local detection
 // secret detector — is consumed unchanged from decision/. This file adds
 // nothing to decision/; it only maps its Decision onto Codex's wire shape.
 //
@@ -101,7 +101,7 @@ func EnforceDecision(ctx context.Context, cl decision.Decider, id Identity, e *H
 // on — tool name/kind, MCP server, file operation, permission mode, and
 // (local-only, never egressed) the shell command.
 //
-// Content (INV-2) is populated when localRedaction is true — i.e. Tier-1
+// Content (INV-2) is populated when localRedaction is true — i.e. local detection
 // secret detection (default on) or content capture. For the file class
 // (apply_patch) the redactable body is the patch text, which Codex
 // carries in tool_input["command"] (delta 3). Like the command axis it

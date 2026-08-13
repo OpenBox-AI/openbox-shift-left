@@ -116,11 +116,11 @@ func ResolveFinops() bool { return devconfig.ResolveFinops() }
 // opt-out via config false / env 0).
 func ResolveContentCapture() bool { return devconfig.ResolveContentCapture() }
 
-// ResolveSecretDetection reports whether Tier-1 local secret detection is
+// ResolveSecretDetection reports whether local secret detection is
 // on (default true, opt-out).
 func ResolveSecretDetection() bool { return devconfig.ResolveSecretDetection() }
 
-// ResolveFindings reports whether the Tier-3 findings loop is on. As with tier2,
+// ResolveFindings reports whether the findings loop is on. As with the other posture flags,
 // the resolver default is false but `openbox init` couples it to enforce, which
 // now defaults on — so a bare install writes findings: true.
 func ResolveFindings() bool { return devconfig.ResolveFindings() }
@@ -145,17 +145,20 @@ const maxEnforceTimeout = 2 * time.Second
 // fail-open).
 func ResolveFailClosed() bool { return devconfig.ResolveFailClosed() }
 
-// ResolveTier2 reports whether the Tier-2 synchronous /evaluate escalation is on.
-// The RESOLVER default is still false, but `openbox init` couples tier2 to the
+// ResolveTier2 reads the DEPRECATED, inert `tier2` key (ADR-0017).
+// It changes nothing: every gated call is evaluated. It is retained so an
+// existing dev.json parses, and it warns once to stderr when present. See
+// devconfig.ResolveTier2 for why an explicit false is deliberately not honoured.
+// Historic note: `openbox init` used to couple tier2 to the
 // enforce posture and enforce now defaults on — so a bare install writes
 // tier2: true. There is no standalone flag; it follows enforce.
 func ResolveTier2() bool { return devconfig.ResolveTier2() }
 
-// ResolveTier2Timeout resolves the in-binary budget for one Tier-2
+// ResolveEvaluationTimeout resolves the in-binary budget for one
 // /evaluate escalation: config first, env-if-parseable wins; <=0 yields
-// defaultTier2Timeout; clamped to maxEvaluationTimeout (the CC 5s-hook-kill
+// defaultEvaluationTimeout; clamped to maxEvaluationTimeout (the CC 5s-hook-kill
 // bound).
-func ResolveTier2Timeout() time.Duration {
+func ResolveEvaluationTimeout() time.Duration {
 	ms := devconfig.ResolveTimeoutMS(func(c DevConfig) int { return c.Tier2TimeoutMS }, envTier2Timeout)
 	if ms <= 0 {
 		return hookflow.DefaultEvaluationTimeout

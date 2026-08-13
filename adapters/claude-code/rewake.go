@@ -23,7 +23,7 @@ const RewakeExitCode = 2
 const rewakeHookTimeoutSec = 2700
 
 // RunRewake is the background half of the PreToolUse registration (E9 §2.2
-// Tier 2). It runs alongside the gate on every tool call, waits to learn
+// the background half). It runs alongside the gate on every tool call, waits to learn
 // whether this call filed an approval, and — if one did and it is decided after
 // the gate already denied — writes the outcome to `wake` and returns
 // RewakeExitCode so Claude Code injects it as a system reminder.

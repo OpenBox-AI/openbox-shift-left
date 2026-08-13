@@ -47,7 +47,7 @@ var evaluator = hookflow.Evaluator{
 // evaluationBudget is the effective budget for an escalation given when the enforce
 // block began.
 func evaluationBudget(enforceStart time.Time) time.Duration {
-	return evaluator.Budget(enforceStart, ResolveTier2Timeout())
+	return evaluator.Budget(enforceStart, ResolveEvaluationTimeout())
 }
 
 // isHighRiskClass selects the tool classes worth a synchronous round-trip:

@@ -18,7 +18,7 @@ func TestCapabilitiesProfile(t *testing.T) {
 		"telemetry.tokens":  true, // rollout-JSONL finops extraction; per SESSION (ADR-0014)
 		"telemetry.model":   true, // session-level model id from turn_context (ADR-0014)
 		"verdict.apply":     true, // STORY-SL7-B: PreToolUse deny gate (opt-in)
-		"enforce.rewrite":   true, // STORY-SL7-B: Tier-1 secret redaction via allow+updatedInput
+		"enforce.rewrite":   true, // STORY-SL7-B: local secret redaction via allow+updatedInput
 	}
 	got := Capabilities()
 	if len(got) != len(want) {

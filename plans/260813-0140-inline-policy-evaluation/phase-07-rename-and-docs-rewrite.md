@@ -12,7 +12,7 @@
 - **Date:** 2026-08-13
 - **Description:** Replace tier numbers with three plain-language features, rewrite the
   privacy documentation for content-on-enforcement, and fix the claims that are now false.
-- **Priority:** P1 · **Implementation status:** pending · **Review status:** pending
+- **Priority:** P1 · **Implementation status:** done · **Review status:** pending
 
 ## Key Insights
 
@@ -100,15 +100,15 @@ truth, README owns the summary and the limits, getting-started owns the flow.
 
 ## Todo list
 
-- [ ] Tier-vocabulary hit list produced, then cleared
-- [ ] `architecture.md` rewritten; findings-orthogonality bug fixed
-- [ ] `data-and-privacy.md` content section rewritten
-- [ ] 64KB cap disclosed; detection-off combination disclosed
-- [ ] README "never sent" claim fixed; limits list truthful
-- [ ] getting-started drops `dev sync`; failure policy explained
-- [ ] ADR-0008 marked superseded-in-part
-- [ ] Release note written (content egress, `dev sync`, deprecated fields, inert files)
-- [ ] ADR-0017 reconciled with shipped behaviour
+- [x] Tier-vocabulary hit list produced, then cleared
+- [x] `architecture.md` rewritten; findings-orthogonality bug fixed
+- [x] `data-and-privacy.md` content section rewritten
+- [x] 64KB cap disclosed; detection-off combination disclosed
+- [x] README "never sent" claim fixed; limits list truthful
+- [x] getting-started drops `dev sync`; failure policy explained
+- [x] ADR-0008 marked superseded-in-part
+- [x] Release note written (content egress, `dev sync`, deprecated fields, inert files)
+- [x] ADR-0017 reconciled with shipped behaviour
 
 ## Success Criteria
 

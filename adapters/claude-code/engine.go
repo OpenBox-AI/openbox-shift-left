@@ -22,7 +22,7 @@ func (Engine) RunHook(event string, stdin io.Reader, stdout io.Writer, logger *l
 // Capabilities declares what this adapter supports.
 func (Engine) Capabilities() []providerspi.Capability { return Capabilities() }
 
-// RunRewake is the optional background approval watcher (E9 §2.2 Tier 2).
+// RunRewake is the optional background approval watcher (E9 §2.2).
 // Unlike RunHook it reports an exit code, because that is how Claude Code's
 // `asyncRewake` handler learns there is something to tell the session.
 func (Engine) RunRewake(stdin io.Reader, wake io.Writer, logger *log.Logger) int {

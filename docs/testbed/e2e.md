@@ -168,7 +168,7 @@ Per-turn model + token usage (ADR-0014), and the arithmetic that makes it worth
 having. **Counting is the assertion here, not existence** — every failure mode that
 matters (a double-counted turn, an off-by-one cursor, a missed turn, a subagent
 whose tokens are claimed twice) passes an existence check and fails a count. The
-standing lesson is the Tier-2 duplicate-`ActivityStarted` bug, which shipped
+standing lesson is the duplicate-`ActivityStarted` bug on the escalation path, which shipped
 because the only assertion that would have caught it ran in a mode where the bug
 could not occur.
 
@@ -219,7 +219,7 @@ default). Asserts:
 ### 30-enforce
 Real deny rule in the local bundle; a file containing a synthetic `AKIA…` and
 `sk-ant-…`; core killed for the fail-closed path; findings channel on. Asserts:
-`enforcements.jsonl` rows with `source=tier1`; the written file contains
+`enforcements.jsonl` rows with a local-redaction source; the written file contains
 `OPENBOX_REDACTED` and the secret never egresses; a synthesized HALT plus the stale
 marker, and recovery after `dev sync`; findings surface in-session.
 

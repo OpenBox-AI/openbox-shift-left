@@ -1,14 +1,10 @@
 package main
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
-	"github.com/openbox-ai/openbox-shift-left/adapters/common/hookflow"
 	"os"
 
 	"github.com/openbox-ai/openbox-shift-left/adapters/common/devconfig"
 	obgit "github.com/openbox-ai/openbox-shift-left/adapters/common/git"
-	"github.com/openbox-ai/openbox-shift-left/decision"
 )
 
 // attestContext resolves what a commit attestation needs to be signed (E8-S10).
@@ -33,29 +29,11 @@ func attestContext() (obgit.AttestContext, bool) {
 		ThreadID: os.Getenv(obgit.EnvCodexThreadID),
 	}
 
-	// Record which policy was in force. This is what makes the attestation worth
-	// more than provenance alone: a deploy gate can ask whether the code was
-	// written under current policy, not just who wrote it.
-	bundlePath := hookflow.ResolveBundlePath()
-	if raw, err := os.ReadFile(bundlePath); err == nil {
-		sum := sha256.Sum256(raw)
-		ctx.BundleSHA256 = hex.EncodeToString(sum[:])
-	}
-	if b, err := decodeBundlePin(bundlePath); err == nil {
-		ctx.BundlePolicyID = b
-	}
+	// The bundle pin and hash that used to ride here are gone with the local
+	// bundle (ADR-0017). They recorded which policy was in force, which the
+	// endpoint could only answer while it was the decider; the control plane is
+	// the decider now and holds its own record of the policy it applied, per
+	// call. Carrying a stale local id would be attesting to something this
+	// process no longer knows.
 	return ctx, true
-}
-
-// decodeBundlePin reads just the policy id from the local bundle. It deliberately
-// does not verify the signature: the attestation records which policy was in
-// force, and the separate bundle_integrity posture field (E8-S6) records whether
-// that policy was trustworthy. Conflating them would let an unverifiable bundle
-// erase the provenance record too.
-func decodeBundlePin(path string) (string, error) {
-	b, err := decision.LoadBundleFile(path)
-	if err != nil || b == nil {
-		return "", err
-	}
-	return b.PolicyID, nil
 }

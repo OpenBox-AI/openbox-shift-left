@@ -622,7 +622,7 @@ func TestRunHook_EnforceApply_Block(t *testing.T) {
 		_, _ = w.Write([]byte(`{"verdict":"allow"}`))
 	}))
 	defer blockRmRf.Close()
-	tier2Creds(t, blockRmRf.URL)
+	evalCreds(t, blockRmRf.URL)
 	t.Setenv(envContentCapture, "1")
 
 	run := func(payload string) string {
@@ -784,7 +784,7 @@ func TestRunHook_EnforceFailClosed(t *testing.T) {
 	// reachable is the outage case asserted just above.
 	serveVerdict(t, `{"verdict":"allow"}`)
 	allowURL, _ := serveEvaluate(t, `{"verdict":"allow"}`, 200, 0)
-	tier2Creds(t, allowURL)
+	evalCreds(t, allowURL)
 	if out := run(); strings.TrimSpace(out) != "" {
 		t.Errorf("fail-closed must NOT block a real allow; stdout=%q", out)
 	}

@@ -34,14 +34,20 @@ func TestCapabilities(t *testing.T) {
 	// mechanism existing, and a reader of the profile has to be able to tell what
 	// an unconfigured session actually does (INV-3, report SL-07).
 	//
-	// The two are gated in OPPOSITE directions, and conflating them is exactly the
-	// misreading this asserts against: enforcement is opt-IN (an unconfigured
-	// session only observes and can never block), while usage capture is opt-OUT
-	// as of ADR-0014 / the finops default flip (an unconfigured session DOES emit
-	// token counts and a model id).
+	// Both are opt-OUT now, and the profile has to say so. verdict.apply read
+	// "opt-in, default observe" long after ADR-0016 flipped enforce ON — a note
+	// telling a reader an unconfigured session cannot block, when it can. That is
+	// the exact failure this check exists to catch, so it now asserts the
+	// direction rather than a fixed word.
 	for _, k := range []string{"verdict.apply"} {
-		if !strings.Contains(byKey[k].How, "opt-in") {
-			t.Errorf("capability %q is opt-in; its How note must say so, got %q", k, byKey[k].How)
+		if !strings.Contains(byKey[k].How, "default") {
+			t.Errorf("capability %q must state its default, so a reader knows what an "+
+				"unconfigured session does; got %q", k, byKey[k].How)
+		}
+		if strings.Contains(byKey[k].How, "opt-in") {
+			t.Errorf("capability %q claims opt-in; enforce is ON by default (ADR-0016), and a "+
+				"profile that understates what a session does is as misleading as one that "+
+				"oversells it; got %q", k, byKey[k].How)
 		}
 	}
 	if how := byKey["telemetry.tokens"].How; !strings.Contains(how, "default on") {

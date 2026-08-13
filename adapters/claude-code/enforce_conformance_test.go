@@ -150,7 +150,7 @@ func TestEnforcementConformance(t *testing.T) {
 		// cover that it denies.
 		serveVerdict(t, `{"verdict":"allow"}`)
 		url, hits := serveEvaluate(t, `{"verdict":"allow"}`, 200, 0)
-		tier2Creds(t, url)
+		evalCreds(t, url)
 		t.Setenv(envEnforce, "1")
 		t.Setenv(envFailClosed, "1")
 		benign := `{"hook_event_name":"PreToolUse","session_id":"s","cwd":"/tmp","tool_name":"Bash","tool_input":{"command":"echo hi"}}`
@@ -240,7 +240,7 @@ func TestEnforcementConformance(t *testing.T) {
 			_, _ = w.Write([]byte(verdict))
 		}))
 		t.Cleanup(srv.Close)
-		tier2Creds(t, srv.URL)
+		evalCreds(t, srv.URL)
 		return &bodies
 	}
 

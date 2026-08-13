@@ -126,17 +126,20 @@ func ResolveEnforce() bool { return devconfig.ResolveEnforce() }
 // fail-open — an org never becomes fail-closed by accident).
 func ResolveFailClosed() bool { return devconfig.ResolveFailClosed() }
 
-// ResolveTier2 reports whether the Tier-2 synchronous /evaluate escalation is on.
-// The RESOLVER default is still false, but `openbox init` couples tier2 to the
+// ResolveTier2 reads the DEPRECATED, inert `tier2` key (ADR-0017).
+// It changes nothing: every gated call is evaluated. It is retained so an
+// existing dev.json parses, and it warns once to stderr when present. See
+// devconfig.ResolveTier2 for why an explicit false is deliberately not honoured.
+// Historic note: `openbox init` used to couple tier2 to the
 // enforce posture and enforce now defaults on — so a bare install writes
 // tier2: true. There is no standalone flag; it follows enforce.
 func ResolveTier2() bool { return devconfig.ResolveTier2() }
 
-// ResolveSecretDetection reports whether Tier-1 local secret detection is
+// ResolveSecretDetection reports whether local secret detection is
 // on (default true, opt-out — the detection stays strictly local).
 func ResolveSecretDetection() bool { return devconfig.ResolveSecretDetection() }
 
-// ResolveFindings reports whether the Tier-3 findings loop is on (default
+// ResolveFindings reports whether the findings loop is on (default
 // false, opt-in — it is the first observe-path stdout writer).
 func ResolveFindings() bool { return devconfig.ResolveFindings() }
 
@@ -157,11 +160,11 @@ func ResolveControlToken() string { return devconfig.ResolveControlToken() }
 // (base64 raw Ed25519) and its id, from the shared dev config (E8-S6).
 func ResolveOrgSigningKey() (pubKeyB64, keyID string) { return devconfig.ResolveOrgSigningKey() }
 
-// ResolveTier2Timeout resolves the in-binary budget for one Tier-2
+// ResolveEvaluationTimeout resolves the in-binary budget for one
 // escalation: config first, env-if-parseable wins; <=0 yields
-// defaultTier2Timeout; clamped to maxEvaluationTimeout (the Codex whole-hook
+// defaultEvaluationTimeout; clamped to maxEvaluationTimeout (the Codex whole-hook
 // wall-clock bound — see enforce_tier2.go).
-func ResolveTier2Timeout() time.Duration {
+func ResolveEvaluationTimeout() time.Duration {
 	ms := devconfig.ResolveTimeoutMS(func(c DevConfig) int { return c.Tier2TimeoutMS }, envTier2Timeout)
 	if ms <= 0 {
 		return hookflow.DefaultEvaluationTimeout

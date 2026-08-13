@@ -62,7 +62,7 @@ Permissions to grant the key, by what you intend to run:
 |---|---|
 | `openbox auth` (registering a new agent) | `create:agent`, `read:agent` |
 | `openbox auth --rotate` | `update:agent` |
-| `openbox dev sync`, session-start staleness checks | `read:agent_policy` |
+| policy reads (server-side, on every gated call) | `read:agent_policy` |
 | `openbox approve …` (human or autonomous) | `read:agent_session`, `manage:agent_session` |
 
 ```bash
@@ -172,6 +172,23 @@ openbox init --provider claude-code --enforce=false
 Both defaults are recorded in
 [ADR-0016](adr/ADR-0016-default-install-posture.md), including what each one costs.
 
+**What happens when OpenBox is unreachable** is one setting, and it is worth knowing
+before you need it. Every gated tool call is decided by OpenBox
+([ADR-0017](adr/ADR-0017-inline-policy-evaluation.md)) — there is no local policy to
+fall back on — so `fail_closed` decides what an unreachable control plane means:
+
+```jsonc
+// ~/.openbox/dev.json
+{ "fail_closed": true }   // deny gated calls when OpenBox cannot be reached
+```
+
+It defaults to **false**: gated calls proceed, and an outage never blocks work. That
+also means enforcement depends on reachability — blocking one hostname disables it.
+An org that needs enforcement to survive a developer who does not want it sets
+`fail_closed: true` and accepts that an outage then blocks work. Either way an org
+can pin the choice through the managed config so a developer cannot change it, and
+`openbox doctor` always prints the effective value.
+
 ### Governing everything (the fleet rollout)
 
 ```bash
@@ -226,7 +243,7 @@ lineage, and risky tool calls are gated locally. There is nothing to keep runnin
 
 ## Approvals
 
-With enforce and Tier-2 on, a call your policy marks approval-required is filed with
+With enforce on, a call your policy marks approval-required is filed with
 OpenBox and the session pauses briefly (~20s, with a status message) while an
 approver decides. Answer inside the pause — from the dashboard or
 `openbox approve allow <id>` — and the tool call simply proceeds. If nobody
@@ -305,7 +322,7 @@ Two more things to clean up:
   or `init`, from `~/Library/Application Support/openbox/` (macOS),
   `~/.config/openbox/` (Linux) or `%AppData%\openbox\` (Windows) into `~/.openbox/`.
   The originals are left in place, so rolling back to an older binary still works.
-  Runtime state — the spool, policy bundle and audit logs — stays where it is.
+  Runtime state — the spool and audit logs — stays where it is.
 - **If you used `--secret-backend file`, delete its `secrets.json`** from the old
   config directory. Nothing reads it any more, and it is a stale plaintext copy of
   live credentials — worse than a current one, because nobody rotates it.
@@ -324,7 +341,6 @@ and enforcement is on by default.
 | Govern another project | `cd` there and `openbox init --provider <tool>` |
 | Stop sending prompt text | `"content_capture": false` (see [Data and privacy](data-and-privacy.md)) |
 | Stop sending token counts | `"finops": false` |
-| Refresh policy by hand | `openbox dev sync` |
 | Uninstall | remove `~/.claude/plugins/openbox-observe`, `~/.openbox/`, `~/.config/openbox/`, each project's `.claude/settings.local.json`, and the `openbox` binary |
 
 A plain re-run of `init` never downgrades your posture silently: turning enforcement
@@ -365,7 +381,7 @@ events" has not been re-confirmed against a live stack since the flow changed.
 | `openbox auth needs a terminal` | Non-interactive with no `--*-stdin` flags. Use the automation form in step 3, or export the `OPENBOX_*` variables. |
 | Hooks never fire | The session was started before `init`, or you are in a directory where `init` was not run (project scope is the default). Restart the tool; for Codex run `/hooks` and trust them. |
 | No events at all, and `doctor` looks fine | Almost always scope: `init` governs one directory. Check which one it named, or use `--scope global` plus managed settings. |
-| Everything is denied | Fail-closed with no usable verdict. `openbox doctor` shows `fail_closed` and the bundle state; `openbox dev sync` refreshes a stale bundle. |
+| Everything is denied | `fail_closed` is on and OpenBox cannot be reached, so every gated call denies. `openbox doctor` shows the failure policy and the last decision. Restore connectivity, or set `fail_closed:false` to proceed ungoverned instead. |
 | A session hangs on a tool call | An approval is filed and undecided. `openbox approve list` shows it; deciding it releases the session. |
 | `OPENBOX_ED25519_SEED is deprecated` | Harmless, and it still works. Rename it to `OPENBOX_AGENT_PRIVATE_KEY` — the name OpenBox documents. |
 

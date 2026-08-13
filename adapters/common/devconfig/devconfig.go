@@ -185,7 +185,7 @@ type DevConfig struct {
 	// posture — a control that cannot engage must not appear as one, or an org
 	// reading `true` would believe a signature check was protecting it.
 	RequireVerifiedBundle *bool `json:"require_verified_bundle,omitempty"`
-	// Findings enables the Tier-3 findings loop. Absent = default off
+	// Findings enables the findings loop. Absent = default off
 	// (opt-in: it is the first observe-path stdout writer).
 	Findings *bool `json:"findings,omitempty"`
 	// RealtimeFlush enables the debounced background flush that delivers
@@ -374,7 +374,7 @@ func ResolveRequireVerifiedBundle() bool {
 	return resolveBool("require_verified_bundle", func(c DevConfig) *bool { return c.RequireVerifiedBundle }, false, EnvRequireVerified)
 }
 
-// ResolveFindings reports whether the Tier-3 findings loop is on. Default
+// ResolveFindings reports whether the findings loop is on. Default
 // false — opt-in, because it is the first observe-path stdout writer.
 func ResolveFindings() bool {
 	return resolveBool("findings", func(c DevConfig) *bool { return c.Findings }, false, EnvFindings)

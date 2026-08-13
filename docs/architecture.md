@@ -10,7 +10,7 @@ flowchart LR
   subgraph TOOL["the developer's machine"]
     CC["claude / codex<br/>(native hooks)"]
     ENG["openbox engine<br/>hookflow"]
-    DEC["local policy bundle<br/>decision/ · µs, no network"]
+    RED["secret redaction<br/>decision/ · µs, local"]
     SPOOL[("spool")]
     GIT["git prepare-commit-msg<br/>trailer + signed note"]
   end
@@ -20,22 +20,34 @@ flowchart LR
     DB[("sessions · governance_events<br/>deploy_session_links")]
   end
   CC -- "hook event" --> ENG
-  ENG --> DEC
-  DEC -- "allow · deny · ask · redact" --> CC
+  ENG --> RED
+  ENG -- "evaluate (gated call, blocking)" --> CORE
+  CORE -- "allow · deny · ask · redact" --> CC
   ENG --> SPOOL --> CORE --> DB
-  ENG -- "escalate (Tier 2)" --> CORE
   ENG -- "poll approval" --> CORE
   GIT --> CORE
-  BE -- "policy bundle" --> DEC
+  BE -- "policy" --> CORE
   BE -- "approval queue" --> CLI["openbox approve"]
 ```
 
 Two paths, deliberately separate:
 
-- **The hot path never waits on a network.** A tool call is decided against a local
-  signed policy bundle, in microseconds, in-process
-  ([ADR-0006](adr/ADR-0006-in-process-decider.md), [ADR-0005](adr/ADR-0005-native-policy-evaluator.md)).
-  There is no daemon and no socket.
+- **A gated tool call waits for OpenBox to decide it.** Every gated PreToolUse call
+  is evaluated by `/evaluate` before the tool runs
+  ([ADR-0017](adr/ADR-0017-inline-policy-evaluation.md)). One policy
+  implementation, on the server. There is still no daemon and no socket
+  ([ADR-0006](adr/ADR-0006-in-process-decider.md) is untouched — a bounded outbound
+  call is not a resident process).
+
+  This is the trade the ADR argues: enforcement now depends on reaching the control
+  plane, and under the default `fail_closed:false` a gated call PROCEEDS when it
+  cannot be reached. What it buys is that an org whose policy is hand-written rego
+  is actually enforced — the local evaluator could never evaluate that at all, so
+  those gates simply opened.
+
+  The one thing that stays local is **secret redaction**: it must run before content
+  leaves the machine, and it sees the whole body where the server sees at most the
+  first 64KB.
 - **Telemetry is spooled and flushed off the hot path.** A slow or absent OpenBox
   cannot slow a tool call or block one; undelivered events are retried, not dropped.
   Delivery is near-real-time by default: after an event is spooled, the hook nudges a
@@ -53,12 +65,12 @@ Two paths, deliberately separate:
 | Module | What it owns |
 |---|---|
 | `provider/` | the SPI: `Installer` (install time) and `HookEngine` (runtime + capabilities) |
-| `adapters/common/hookflow/` | **the engine** — spool, duration stash, advisory sink, findings loop, staleness gate, the enforce cascade, Tier-2 escalation, approval hold, rewake |
+| `adapters/common/hookflow/` | **the engine** — spool, duration stash, advisory sink, findings loop, the enforce cascade, inline evaluation, approval hold, rewake |
 | `adapters/claude-code/`, `adapters/codex/` | one thin adapter each: native event shape, mapper, `OutputContract`, installer |
 | `adapters/common/devconfig/`, `adapters/common/git/` | shared config/posture resolution; commit trailer, notes and attestation |
 | `client/` | the openbox-core client: wire payload, AIP signing, verdict parsing |
-| `decision/` | in-process enforcement: policy bundle, evaluator, secret detection, redaction |
-| `cli/` | the `openbox` CLI — `init`, `dev verify/sync`, `hook`, `approve`, `doctor`, `managed` |
+| `decision/` | local secret detection and redaction (all that survives [ADR-0017](adr/ADR-0017-inline-policy-evaluation.md)) |
+| `cli/` | the `openbox` CLI — `auth`, `init`, `dev verify`, `hook`, `approve`, `doctor`, `managed` |
 | `actions/openbox-git-action/` | commit → deploy lineage for CI |
 | `contracts/dev-event/` | the normalized event contract + wire mapping + conformance suite |
 
@@ -77,21 +89,26 @@ Each install runs at exactly one level, and reports which:
 |---|---|---|
 | **Observe** (default) | normalized telemetry, lineage, cost. Never blocks. | none — spooled |
 | **Advisory** | verdicts and guardrail findings are recorded and surfaced back into the session, never applied | none |
-| **Enforce** (`--enforce`) | the PreToolUse gate applies the verdict: deny, ask, or redact | one local policy evaluation |
+| **Enforce** (default since [ADR-0016](adr/ADR-0016-default-install-posture.md)) | the PreToolUse gate applies the verdict: deny, ask, or redact | one round-trip to `/evaluate`, bounded by the provider's hook ceiling |
 
-Within enforce there are three tiers:
+Enforce is three named things, not three tiers. They are independent — any one can
+be on without the others:
 
-- **Tier 1 — local.** The signed bundle decides. Secret detection rewrites a
-  Write/Edit body rather than blocking it (redact-and-continue).
-- **Tier 2 — escalation.** High-risk classes (shell, MCP) are escalated
-  synchronously to core, which brings guardrails, drift and org policy to bear. A
-  degraded escalation follows the org's failure policy: fail-open proceeds,
-  fail-closed denies.
-- **Tier 3 — findings.** Asynchronous guardrail/drift findings are surfaced into the
-  session after the fact.
+- **Local secret redaction.** A Write/Edit body is scanned before anything leaves
+  the machine; a detected secret is replaced and the call proceeds with the redacted
+  body (redact-and-continue) rather than being blocked. On by default
+  (`secret_detection`).
+- **Inline evaluation.** The gated call is sent to `/evaluate` and the verdict is
+  applied before the tool runs. Every gated class, not a risk-selected subset —
+  risk is a property of the policy. If the control plane cannot be reached, the
+  org's `fail_closed` decides: fail-open proceeds (the default), fail-closed denies.
+  No retry: one hiccup must not become a client-side amplifier across every tool
+  call of every session.
+- **Findings.** Asynchronous guardrail and drift findings surfaced back into the
+  session after the fact. Off by default (`findings`).
 
-`REQUIRE_APPROVAL` is the one verdict that is a *question*, not an answer, so it
-escalates rather than being answered locally.
+`REQUIRE_APPROVAL` is the one verdict that is a *question* rather than an answer:
+the server files it as a real record and the hook holds briefly for a decision.
 
 ## Approvals
 
@@ -109,9 +126,9 @@ filed the request is refused by default.
 ## Posture as evidence
 
 Every session start reports its own effective posture — enforce on/off,
-fail-open/closed, bundle integrity and freshness, content capture, provider-managed
-config, staleness — so the control plane can tell the tiers apart without trusting
-the endpoint's word for it. `openbox doctor` prints the same thing locally, with the
+fail-open/closed, who decides and what happens when they are unreachable, content
+capture, provider-managed config — so the control plane can tell a governed machine
+from an ungoverned one without trusting the endpoint's word for it. `openbox doctor` prints the same thing locally, with the
 provenance of each value (default, your config, environment, or org mandate).
 
 ## Assurance — what the evidence proves
@@ -175,13 +192,13 @@ Being precise here is part of the product.
   intercept or allow-list the coding tool's traffic to its model provider — that is
   the provider's plane plus your network controls. OpenBox records that posture as
   evidence.
-- **Policy integrity.** The client verifies a signed bundle at load — Ed25519, with
-  expiry and an epoch floor against rollback
-  ([ADR-0008](adr/ADR-0008-signed-policy-bundles.md)) — but the backend does not
-  sign yet, so bundles load `unsigned` and are enforced anyway, with the state
-  reported in the posture. `require_verified_bundle` refuses to enforce what did not
-  verify; it defaults **off**, because turning it on before the backend signs leaves
-  a fleet with no bundle at all.
+- **Policy integrity is no longer a client-side claim.** There is no local bundle to
+  sign, hash or verify ([ADR-0017](adr/ADR-0017-inline-policy-evaluation.md)), so
+  the client makes no integrity claim about policy at all — the control plane holds
+  the policy it applied and its own record of applying it.
+  `require_verified_bundle` still parses and does nothing; it is deliberately absent
+  from the reported posture, because a control that cannot engage must not appear as
+  one.
 - **Telemetry evidence is event-level, not span-level.** A developer session
   produces `governance_events` rows and their Merkle leaves, and **no `spans`
   rows at all** ([ADR-0013](adr/ADR-0013-tool-call-as-activity.md)). A tool call

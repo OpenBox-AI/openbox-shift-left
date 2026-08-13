@@ -108,11 +108,11 @@ Codex is **user-scoped only** — its hooks live at `~/.codex/hooks.json`, so
 ```
 ~/.openbox/
   .env          your credentials — API key, signing key (0600, never commit)
-  dev.json      posture (enforce, tiers, capture) + coordinates (DID, agent id, URLs)
+  dev.json      posture (enforce, capture, fail_closed) + coordinates (DID, agent id, URLs)
   approver.json approver config, if you are one
 <project>/.claude/settings.local.json    which hooks fire here  (init --scope local)
 ~/.claude/plugins/openbox-observe/       the plugin bundle + engine copy
-<os-config-dir>/openbox/                 runtime state: spool, policy bundle, audit logs
+<os-config-dir>/openbox/                 runtime state: spool, audit logs
                                          (~/.config on Linux, ~/Library/Application Support
                                           on macOS, %AppData% on Windows — NOT relocated
                                           by OPENBOX_HOME; OPENBOX_SPOOL_DIR moves the spool)
@@ -186,9 +186,12 @@ Two things are **on by default**, and both are opt-out:
 - **token usage** — four token counts and the model id per turn
   (`finops: false` to stop).
 
-Tool commands and file bodies are **never** sent on ordinary telemetry — only on an
-approval request, because a request an approver cannot read is a gate they cannot
-exercise. Credentials are never transmitted.
+Tool commands and file bodies are **never** sent on ordinary telemetry. They ARE
+sent on a **gated** call under enforcement — OpenBox decides every gated call now
+([ADR-0017](docs/adr/ADR-0017-inline-policy-evaluation.md)), and it cannot decide on
+content it cannot see. That is gated on `content_capture`, the body is scanned for
+secrets and redacted locally first, and the server sees at most its first 64KB.
+Credentials are never transmitted.
 
 The exact field list is in **[Data and privacy](docs/data-and-privacy.md)**.
 
@@ -209,13 +212,19 @@ prevent, so the limits are documented as first-class:
   ([ADR-0016](docs/adr/ADR-0016-default-install-posture.md)).
 - **Commit attribution is an inferred claim** unless the pipeline fetches the
   signed attestation note — then it is cryptographically verified.
-- **Local enforcement prevents mistakes, not motivated bypass**, until the
-  provider's managed configuration is deployed (`deploy/managed/`).
+- **Enforcement prevents mistakes, not motivated bypass**, for two independent
+  reasons. The hook lives in the developer's own config until the provider's managed
+  configuration is deployed (`deploy/managed/`) — and every gated call now asks the
+  control plane, so under the default `fail_closed:false` blocking one hostname
+  disables enforcement for that machine. An org that needs enforcement to survive a
+  developer who does not want it must set `fail_closed`, and accept that a
+  control-plane outage then blocks work
+  ([ADR-0017](docs/adr/ADR-0017-inline-policy-evaluation.md)).
 - **Egress is recorded, not controlled.** OpenBox does not proxy or allow-list the
   coding tool's traffic to its model provider; it records that posture as evidence.
-- **Policy-bundle signatures are verified but not yet issued** — the backend does
-  not sign yet, so bundles load as `unsigned` and the state is reported in the
-  session's posture.
+- **Content-based policy sees at most the first 64KB of a write.** Bodies are
+  truncated before egress, so a rule that would match past that offset does not
+  fire. Local secret detection is not subject to the cap.
 - **Windows is build-verified, not runtime-verified.** CI cross-compiles it on
   every change; no automated suite exercises it, and `install.sh` is bash.
 
@@ -227,9 +236,8 @@ Details and current status: **[Assurance](docs/architecture.md#assurance--what-t
 |---|---|
 | `openbox auth` | credentials for this machine. `--rotate` re-issues them for an agent that already exists |
 | `openbox init` | install hooks + posture. `--scope`, `--enforce=false`, `--install-git-hook`, `--role approver` |
-| `openbox doctor` | the posture actually in effect, plus policy-bundle version and integrity |
+| `openbox doctor` | the posture actually in effect, who decides, and what happens when they are unreachable |
 | `openbox dev verify` | can this machine reach and authenticate to core? |
-| `openbox dev sync` | fetch the org policy bundle now |
 | `openbox approve` | `list`, `allow`, `deny`, or `--watch --auto` for the autonomous approver |
 | `openbox managed install` | write the managed-settings files for a fleet rollout |
 
@@ -238,8 +246,9 @@ Details and current status: **[Assurance](docs/architecture.md#assurance--what-t
 | | |
 |---|---|
 | [Getting started](docs/getting-started.md) | install → onboard → verify, with troubleshooting |
-| [Architecture](docs/architecture.md) | engine, adapters, enforcement tiers, approvals, assurance |
+| [Architecture](docs/architecture.md) | engine, adapters, enforcement, approvals, assurance |
 | [Data and privacy](docs/data-and-privacy.md) | exactly what is captured and sent |
+| [Upgrading to inline evaluation](docs/upgrading-to-inline-evaluation.md) | what changes for an existing install, incl. file bodies now egressing |
 | [Lineage](docs/lineage.md) | `session → commit → deploy` and how it is verified |
 | [ADRs](docs/adr/) | the decisions, and why |
 | [Event contract](contracts/dev-event/) | the normalized event schema and its wire mapping |

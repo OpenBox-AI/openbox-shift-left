@@ -1,8 +1,6 @@
 package main
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"github.com/openbox-ai/openbox-shift-left/adapters/common/hookflow"
@@ -12,7 +10,6 @@ import (
 
 	"github.com/openbox-ai/openbox-shift-left/adapters/common/devconfig"
 	"github.com/openbox-ai/openbox-shift-left/cli/internal/managed"
-	"github.com/openbox-ai/openbox-shift-left/decision"
 )
 
 // runDoctor prints the effective posture and, for each flag, where the value came
@@ -30,23 +27,6 @@ func (a *app) runDoctor(args []string) int {
 	}
 
 	p := devconfig.EffectivePosture()
-	// Bundle coordinates are provider-independent (one shared bundle), so doctor
-	// resolves them directly rather than through an adapter.
-	bundlePath := hookflow.ResolveBundlePath()
-	pubKeyB64, _ := devconfig.ResolveOrgSigningKey()
-	if b, integrity := decision.VerifyBundleFile(bundlePath, decision.VerifyOptions{
-		PublicKey: decision.DecodePublicKey(pubKeyB64),
-		MinEpoch:  decision.ReadEpochPin(bundlePath),
-	}); b != nil {
-		p.BundlePolicyID, p.BundleIntegrity = b.PolicyID, string(integrity)
-		p.BundleVersion = b.Version
-	} else {
-		p.BundleIntegrity = string(integrity)
-	}
-	if raw, err := os.ReadFile(bundlePath); err == nil {
-		sum := sha256.Sum256(raw)
-		p.BundleSHA256 = hex.EncodeToString(sum[:])
-	}
 	fmt.Fprintf(a.stdout, "OpenBox developer-runtime posture\n\n")
 
 	// Which identities this machine holds, and which file each posture below
@@ -138,21 +118,6 @@ func (a *app) runDoctor(args []string) int {
 	fmt.Fprintf(a.stdout, "  command, so they are not assurance. Only `managed` values, and only with the\n")
 	fmt.Fprintf(a.stdout, "  provider config deployed, survive a developer who does not want them.\n")
 	return exitOK
-}
-
-func integrityNote(integrity string) string {
-	switch integrity {
-	case "verified":
-		return "  (signature, epoch and expiry all checked)"
-	case "unsigned":
-		return "  (no signature — a local edit would not be detectable)"
-	case "no_key":
-		return "  (signed, but no org key pinned — pin org_signing_pubkey to check it)"
-	case "":
-		return ""
-	default:
-		return "  (NOT TRUSTED — run `openbox dev sync`)"
-	}
 }
 
 func orUnset(s string) string {

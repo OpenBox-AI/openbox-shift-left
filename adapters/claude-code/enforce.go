@@ -66,7 +66,7 @@ func EnforceDecision(ctx context.Context, cl decision.Decider, id Identity, e *H
 // policy matches on — tool name/kind, MCP server, file path/operation,
 // permission mode, and (local-only, never egressed) the shell command.
 //
-// Content (INV-2) is populated when localRedaction is true — i.e. Tier-1
+// Content (INV-2) is populated when localRedaction is true — i.e. local detection
 // secret detection (default on) or content capture is on. The local
 // decider needs the tool's body to scan/redact, the analog of the
 // reference SDK sending the full activity_input to its gate. Like the

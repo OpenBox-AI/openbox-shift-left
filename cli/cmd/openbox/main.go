@@ -273,7 +273,7 @@ func (a *app) runHook(args []string) (code int) {
 	return exitOK
 }
 
-// runRewake is the background approval watcher (E9 §2.2 Tier 2), invoked by an
+// runRewake is the background approval watcher (E9 §2.2), invoked by an
 // `asyncRewake` hook handler alongside the gate.
 //
 // It is deliberately NOT under `openbox hook`: that path is contractually
@@ -419,11 +419,14 @@ func (a *app) runDevInit(args []string) int {
 		return a.errorf("--enforce and --no-enforce are mutually exclusive")
 	case noEnforce:
 		f := false
-		o.Enforce, o.Tier2, o.Findings = &f, &f, &f
+		o.Enforce, o.Findings = &f, &f
 	case enforceGiven:
 		v := enforce // honours --enforce=false as well as --enforce
-		o.Enforce, o.Tier2, o.Findings = &v, &v, &v
+		o.Enforce, o.Findings = &v, &v
 	}
+	// tier2 is deliberately no longer written. It is deprecated and inert
+	// (ADR-0017), and writing it would put a key into every fresh dev.json that
+	// exists only to be ignored and warned about.
 
 	// A posture change is never silent, in either direction. Under enforce-by-
 	// default this compares RESOLVED postures, so it still fires for a config

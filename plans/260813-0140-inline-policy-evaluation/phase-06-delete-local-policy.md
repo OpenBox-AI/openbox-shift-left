@@ -14,7 +14,7 @@
 - **Description:** Remove the local policy evaluator, the bundle it consumed, the sync that
   fetched it, the staleness gate that policed it, and the signing/pinning machinery around
   it. Keep local secret detection.
-- **Priority:** P1 · **Implementation status:** pending · **Review status:** pending
+- **Priority:** P1 · **Implementation status:** done · **Review status:** pending
 
 ## Key Insights
 
@@ -98,14 +98,14 @@ responsibility — secret redaction — and it runs before the call.
 
 ## Todo list
 
-- [ ] `secrets.go` dependency map written before any deletion
-- [ ] `policysync` + `dev sync` deleted, incl. usage/help
-- [ ] `staleness.go` and its gate call deleted
-- [ ] `KeepTighter` and the local-verdict path deleted
-- [ ] Evaluator cluster deleted; `secrets.go` and its tests still green
-- [ ] Bundle/signing/tier2 config parsed-but-ignored with one stderr warning
-- [ ] Every removed test accounted for in a commit message
-- [ ] All 11 modules build, vet, `-race` green
+- [x] `secrets.go` dependency map written before any deletion
+- [x] `policysync` + `dev sync` deleted, incl. usage/help
+- [x] `staleness.go` and its gate call deleted
+- [x] `KeepTighter` and the local-verdict path deleted
+- [x] Evaluator cluster deleted; `secrets.go` and its tests still green
+- [x] Bundle/signing/tier2 config parsed-but-ignored with one stderr warning
+- [x] Every removed test accounted for in a commit message
+- [x] All 11 modules build, vet, `-race` green
 
 ## Success Criteria
 

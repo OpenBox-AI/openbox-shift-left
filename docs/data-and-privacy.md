@@ -9,11 +9,12 @@ What leaves the machine, what never does, and the one setting that changes it.
 | Session, tool and MCP **metadata** | always | tool name, kind (`shell`/`file`/`mcp`), file path, MCP server + tool name, timing |
 | **Token counts and the model id** | yes, by default | per model turn. `finops: false` turns it off — see [Usage capture](#usage-capture) |
 | **Prompt text** | yes, by default | the one content field on ordinary telemetry. `content_capture: false` turns it off |
-| **Shell command text** | **never** on telemetry | only on an approval request, and only with content capture on |
-| **File contents** (read or written) | **never** | a Write/Edit body is scanned *locally* for secrets and rewritten in place; the body itself is not sent |
+| **Shell command text** | on a **gated** call, with capture on | never on ordinary telemetry — see [What an enforced call sends](#what-an-enforced-call-sends) |
+| **File contents** (a Write/Edit body) | on a **gated** call, with capture on | **this changed** — see below. Scanned locally for secrets and REDACTED before it is sent, and truncated at 64KB |
+| **File contents** (a file you read) | **never** | |
 | **Tool output** | **never** | |
 | **Credentials** | **never** | they stay on your machine — in a plaintext file readable by you, see [Where credentials live](#where-credentials-live) |
-| Git **commit trailer** and signed attestation | yes | commit sha, tree sha, session id, policy bundle id — no diff, no file content |
+| Git **commit trailer** and signed attestation | yes | commit sha, tree sha, session id — no diff, no file content |
 
 The rule behind the table: content is gated at one choke point in the client, so a
 new field cannot start egressing by accident. Structural identifiers (paths, tool
@@ -128,17 +129,39 @@ came from.
 > sent as-is; the server-side Guardrail redaction layer is not wired. If that matters
 > for your data, run with capture off until it is.
 
-## The one exception: approval requests
+## What an enforced call sends
 
-An approval request carries what the call is asking to *do* — the command for a
-shell call, the arguments for an MCP call — because a request that reads `tool=Bash`
-and nothing else is a gate no approver can exercise. It is:
+**This section describes a change in what leaves your machine.** Until
+[ADR-0017](adr/ADR-0017-inline-policy-evaluation.md), only shell and MCP calls were
+sent for a decision, and a file body never was. Every gated call is now decided by
+OpenBox, so a **Write or Edit body is sent** — when content capture is on.
 
-- **escalation-only.** The observe copy of the same tool call is mapped separately
-  and never carries it, so ordinary telemetry is unaffected.
-- **content-gated.** With capture off, the field is dropped at the client choke
-  point and the approval queue shows `(not captured)` rather than something that
-  looks decidable.
+An enforced call sends, in this order:
+
+1. **Structural fields, always.** Tool name and kind, file path and operation, MCP
+   server and tool name. These are metadata and flow whatever the capture setting.
+2. **Secret detection runs locally, on the whole body.** Anything it recognizes is
+   replaced with a placeholder before the payload is built.
+3. **The content, only if `content_capture` is on** — and it is the **redacted**
+   body, the same bytes your tool call is rewritten to. The command for a shell
+   call, the arguments for an MCP call, the file body for a write.
+
+Three limits, stated rather than implied:
+
+- **The server sees at most the first 64KB** of a body (`capBody`). Content-based
+  policy is therefore not a complete check on a large file: a rule that would match
+  at byte 70,000 does not fire. Local secret detection is *not* subject to this —
+  it runs before the cap and sees everything.
+- **`content_capture: false` means structural-only enforcement.** No body is sent
+  for any class, and policy decides on the metadata axes alone. That is coarser, not
+  broken — and it is the honest trade: fidelity scales with what you let leave the
+  machine.
+- **`secret_detection: false` with capture on sends bodies unredacted.** Turning off
+  the local detector removes the only in-transit protection there is; guardrail
+  redaction at source is still not wired.
+
+The observe copy of the same call is mapped separately and never carries content, so
+ordinary telemetry is unaffected either way.
 
 ## Local files
 
@@ -147,7 +170,7 @@ Two directories, and the split is worth knowing.
 **Configuration** lives under `~/.openbox/` — relocate the whole directory with
 `OPENBOX_HOME`.
 
-**Runtime state** — spool, policy bundle, audit logs — lives under the OS config
+**Runtime state** — spool and audit logs — lives under the OS config
 directory instead, and `OPENBOX_HOME` does **not** move it:
 `~/.config/openbox/` on Linux (or `$XDG_CONFIG_HOME`),
 `~/Library/Application Support/openbox/` on macOS, `%AppData%\openbox\` on
@@ -163,7 +186,7 @@ Both are readable only by you.
 
 | File | What it holds |
 |---|---|
-| `policy-bundle.json` | the policy bundle pulled from your org, `0600` |
+| `policy-bundle.json` | **inert leftover.** There is no local policy bundle since [ADR-0017](adr/ADR-0017-inline-policy-evaluation.md); nothing reads this file and it can be deleted |
 | `enforcements.jsonl` | what enforcement did: verdict, source, whether it blocked, redaction *categories* — never the secret, never the body |
 | `advisories.jsonl` | advisory verdicts and guardrail findings |
 | `cc-spool/` | events awaiting flush |

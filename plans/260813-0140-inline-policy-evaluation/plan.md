@@ -56,8 +56,8 @@ consumed, and the sync/staleness/signing machinery around it are deleted. Local
 | 3 | [Hook-ceiling capability in the SPI; widen the gate to all classes](phase-03-ceiling-spi-and-widen-gate.md) | done | 5h | 2 |
 | 4 | [Content: redact locally, then send](phase-04-redact-then-send.md) | done | 3h | 3 |
 | 5 | [Evidence: verdict `policy_id` into posture](phase-05-policy-identity-evidence.md) | done | 2h | 3 |
-| 6 | [Delete the local policy path](phase-06-delete-local-policy.md) | pending | 5h | 4, 5 |
-| 7 | [Rename to three named features; rewrite the privacy docs](phase-07-rename-and-docs-rewrite.md) | pending | 4h | 6 |
+| 6 | [Delete the local policy path](phase-06-delete-local-policy.md) | done | 5h | 4, 5 |
+| 7 | [Rename to three named features; rewrite the privacy docs](phase-07-rename-and-docs-rewrite.md) | done | 4h | 6 |
 | 8 | [Verify against the real thing](phase-08-verification.md) | pending | 3h | 7 |
 
 Phase 1 is a **blocking investigation** — it can invalidate the approach, so it runs

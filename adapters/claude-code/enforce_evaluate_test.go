@@ -18,9 +18,9 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/decision"
 )
 
-// testTier2Key is an obx_ runtime key shape the client accepts (non-empty); the
+// testEvalKey is an obx_ runtime key shape the client accepts (non-empty); the
 // fake /evaluate server never verifies it.
-const testTier2Key = "obx_test_tier2000000000000000000000000000000"
+const testEvalKey = "obx_test_tier2000000000000000000000000000000"
 
 func TestIsHighRiskClass(t *testing.T) {
 	cases := map[string]bool{
@@ -92,7 +92,7 @@ func TestEvaluationDecision(t *testing.T) {
 }
 
 func TestEvaluationFailOpen(t *testing.T) {
-	d := hookflow.EvaluationFailOpen("tier-2 credentials unavailable")
+	d := hookflow.EvaluationFailOpen("evaluation credentials unavailable")
 	if !d.FailOpen || d.Source != hookflow.SourceEvaluateFailOpen {
 		t.Errorf("tier2FailOpen must be hookflow.FailOpen + fail-open source, got %+v", d)
 	}
@@ -100,7 +100,7 @@ func TestEvaluationFailOpen(t *testing.T) {
 		t.Errorf("verdict = %q, want UNKNOWN", d.Evaluation.Verdict)
 	}
 	// The cause becomes the fail-closed reason via failClosedReason — content-free.
-	if d.Evaluation.Reason != "tier-2 credentials unavailable" {
+	if d.Evaluation.Reason != "evaluation credentials unavailable" {
 		t.Errorf("reason = %q, want the content-free cause", d.Evaluation.Reason)
 	}
 }
@@ -120,23 +120,23 @@ func TestResolveTier2(t *testing.T) {
 	}
 }
 
-func TestResolveTier2Timeout(t *testing.T) {
+func TestResolveEvaluationTimeout(t *testing.T) {
 	isolateConfig(t)
-	if got := ResolveTier2Timeout(); got != hookflow.DefaultEvaluationTimeout {
+	if got := ResolveEvaluationTimeout(); got != hookflow.DefaultEvaluationTimeout {
 		t.Errorf("default = %v, want %v", got, hookflow.DefaultEvaluationTimeout)
 	}
 	t.Setenv(envTier2Timeout, "1000")
-	if got := ResolveTier2Timeout(); got != time.Second {
+	if got := ResolveEvaluationTimeout(); got != time.Second {
 		t.Errorf("1000ms env = %v, want 1s", got)
 	}
 	// Over the clamp → maxEvaluationTimeout (correctness bound under the 5s hook timeout).
 	t.Setenv(envTier2Timeout, "60000")
-	if got := ResolveTier2Timeout(); got != maxEvaluationTimeout {
+	if got := ResolveEvaluationTimeout(); got != maxEvaluationTimeout {
 		t.Errorf("60000ms env = %v, want the %v clamp", got, maxEvaluationTimeout)
 	}
 	// Garbage env is ignored → default (never wipes a valid config silently).
 	t.Setenv(envTier2Timeout, "notanumber")
-	if got := ResolveTier2Timeout(); got != hookflow.DefaultEvaluationTimeout {
+	if got := ResolveEvaluationTimeout(); got != hookflow.DefaultEvaluationTimeout {
 		t.Errorf("garbage env = %v, want default %v", got, hookflow.DefaultEvaluationTimeout)
 	}
 	// A margin invariant: the max T2 budget must stay under the shipped hook timeout.
@@ -311,7 +311,7 @@ func serveEvaluate(t *testing.T, verdictJSON string, status int, delay time.Dura
 	return srv.URL, &n
 }
 
-// tier2Creds points the hot-path credential resolver at a fake core with a valid
+// evalCreds points the hot-path credential resolver at a fake core with a valid
 // signing seed (no secret store).
 // serveVerdict stands up the control plane for a case and points the adapter at
 // it. It replaces setBundleEnv: since ADR-0017 a case's expected outcome is a
@@ -319,13 +319,13 @@ func serveEvaluate(t *testing.T, verdictJSON string, status int, delay time.Dura
 func serveVerdict(t *testing.T, verdictJSON string) {
 	t.Helper()
 	url, _ := serveEvaluate(t, verdictJSON, 200, 0)
-	tier2Creds(t, url)
+	evalCreds(t, url)
 }
 
-func tier2Creds(t *testing.T, baseURL string) {
+func evalCreds(t *testing.T, baseURL string) {
 	t.Helper()
 	t.Setenv(envBaseURL, baseURL)
-	t.Setenv(envAPIKeyDirect, testTier2Key)
+	t.Setenv(envAPIKeyDirect, testEvalKey)
 	t.Setenv(envAgentPrivateKey, testPrivateKeyB64)
 	t.Setenv(envContentCapture, "0")
 }
@@ -334,7 +334,7 @@ func TestEscalateTier2_RealVerdict(t *testing.T) {
 	isolateConfig(t)
 	t.Setenv(envDID, testDID)
 	url, hits := serveEvaluate(t, `{"verdict":"block","reason":"tier2 exec policy","policy_id":"t2-pol"}`, 200, 0)
-	tier2Creds(t, url)
+	evalCreds(t, url)
 
 	m := NewMapper(Identity{DeveloperDID: testDID})
 	ev := &HookEvent{HookEventName: "PreToolUse", SessionID: "s", Cwd: "/tmp", ToolName: "Bash",
@@ -360,7 +360,7 @@ func TestEscalateTier2_Outage(t *testing.T) {
 	t.Setenv(envDID, testDID)
 	// A 500 exhausts the client's retries and Emit fails open → no verdict.
 	url, _ := serveEvaluate(t, `boom`, 500, 0)
-	tier2Creds(t, url)
+	evalCreds(t, url)
 
 	m := NewMapper(Identity{DeveloperDID: testDID})
 	ev := &HookEvent{HookEventName: "PreToolUse", SessionID: "s", Cwd: "/tmp", ToolName: "Bash",
@@ -398,7 +398,7 @@ func TestEscalateTier2_BudgetBound(t *testing.T) {
 	// A server slower than the budget: escalateEvaluation must return within ~budget
 	// (the ctx cancels Emit), not wait for the server.
 	url, _ := serveEvaluate(t, `{"verdict":"allow"}`, 200, 2*time.Second)
-	tier2Creds(t, url)
+	evalCreds(t, url)
 	m := NewMapper(Identity{DeveloperDID: testDID})
 	ev := &HookEvent{HookEventName: "PreToolUse", SessionID: "s", Cwd: "/tmp", ToolName: "Bash",
 		ToolInput: []byte(`{"command":"echo hi"}`)}
@@ -449,7 +449,7 @@ func TestEnforcementConformance_Tier2(t *testing.T) {
 	t.Run("C12 T1 allow + T2 BLOCK on Bash → deny (floor closed)", func(t *testing.T) {
 		allowT1(t)
 		url, hits := serveEvaluate(t, `{"verdict":"block","reason":"tier2 exec policy","policy_id":"t2-pol"}`, 200, 0)
-		tier2Creds(t, url)
+		evalCreds(t, url)
 		t.Setenv(envTier2, "1")
 		t.Setenv(envFailClosed, "0")
 		out := run(dangerBash)
@@ -471,7 +471,7 @@ func TestEnforcementConformance_Tier2(t *testing.T) {
 	t.Run("C13 T1 allow + T2 ALLOW on Bash → proceed", func(t *testing.T) {
 		allowT1(t)
 		url, hits := serveEvaluate(t, `{"verdict":"allow"}`, 200, 0)
-		tier2Creds(t, url)
+		evalCreds(t, url)
 		t.Setenv(envTier2, "1")
 		t.Setenv(envFailClosed, "0")
 		if out := run(benignBash); strings.TrimSpace(out) != "" {
@@ -489,7 +489,7 @@ func TestEnforcementConformance_Tier2(t *testing.T) {
 		// left ungoverned on everything but shell and MCP.
 		allowT1(t)
 		url, hits := serveEvaluate(t, `{"verdict":"block","reason":"edit policy","policy_id":"e-pol"}`, 200, 0)
-		tier2Creds(t, url)
+		evalCreds(t, url)
 		t.Setenv(envFailClosed, "0")
 		out := run(editCall)
 		d, reason := parsePermissionDecision(t, []byte(out))
@@ -507,7 +507,7 @@ func TestEnforcementConformance_Tier2(t *testing.T) {
 	t.Run("C15 T2 outage: fail-open proceeds / fail-closed denies within bound", func(t *testing.T) {
 		allowT1(t)
 		url, _ := serveEvaluate(t, `boom`, 500, 0) // exhausts retries → Emit fails open
-		tier2Creds(t, url)
+		evalCreds(t, url)
 		t.Setenv(envTier2, "1")
 
 		t.Setenv(envFailClosed, "0")
@@ -543,7 +543,7 @@ func TestEnforcementConformance_Tier2(t *testing.T) {
 		// early adopters of enforcement — ungoverned after upgrading.
 		allowT1(t)
 		url, hits := serveEvaluate(t, `{"verdict":"block","reason":"still governed"}`, 200, 0)
-		tier2Creds(t, url)
+		evalCreds(t, url)
 		t.Setenv(envTier2, "0") // deprecated: parsed, ignored
 		t.Setenv(envFailClosed, "0")
 		out := run(dangerBash)

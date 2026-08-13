@@ -82,7 +82,7 @@ type Options struct {
 	// still installed, but activation waits on a managed-settings deployment.
 	ProjectDir string
 	// Enforce turns enforce mode on or off and persists it (plus its companions,
-	// Tier2 + Findings) into the dev config, so no runtime env var is needed
+	// Findings) into the dev config, so no runtime env var is needed
 	// (ADR-0006 for the mechanism). Enforce now defaults ON (ADR-0016) — it is
 	// resolved from the ABSENCE of the field, not written by every run.
 	//
@@ -91,7 +91,6 @@ type Options struct {
 	// re-run must not drop a developer out of enforce mode, AND must not silently
 	// re-enable it for someone who chose --enforce=false.
 	Enforce  *bool
-	Tier2    *bool
 	Findings *bool
 }
 
@@ -209,7 +208,6 @@ func register(ctx context.Context, o Options, d Deps) (*Result, provider.Credent
 		// Persist the enforce posture into dev.json so the runtime hook needs no
 		// env var. Enforce defaults ON (ADR-0016).
 		Enforce:  o.Enforce,
-		Tier2:    o.Tier2,
 		Findings: o.Findings,
 	}
 	res := &Result{AgentName: name}
