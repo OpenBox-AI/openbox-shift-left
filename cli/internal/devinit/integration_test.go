@@ -56,7 +56,7 @@ func TestEndToEndAgainstMockBackend(t *testing.T) {
 	var out bytes.Buffer
 
 	res, err := Run(context.Background(),
-		Options{Provider: "cursor", Org: "acme", AgentName: "dev-x"},
+		Options{Provider: "cursor", AgentName: "dev-x"},
 		Deps{Registrar: reg, Installer: inst, Out: &out})
 
 	// The cursor adapter isn't built, so config is manual-only (expected error),
@@ -111,7 +111,7 @@ func TestEndToEndClaudeCodeRealInstall(t *testing.T) {
 	var out bytes.Buffer
 
 	res, err := Run(context.Background(),
-		Options{Provider: "claude-code", Org: "acme", AgentName: "dev-x"},
+		Options{Provider: "claude-code", AgentName: "dev-x"},
 		Deps{Registrar: reg, Installer: inst, Out: &out})
 	if err != nil {
 		t.Fatalf("expected a clean install, got err=%v", err)

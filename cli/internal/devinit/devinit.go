@@ -61,8 +61,7 @@ type Options struct {
 	// signs every request at core.openbox.ai (a 401 that reads as a broken
 	// install).
 	BaseURL     string
-	Org         string // organization namespace for naming + secret accounts
-	AgentName   string // override; default derived from provider+user+host
+	AgentName   string // override; default derived from user+host
 	Icon        string // non-empty string required by the backend DTO
 	Description string
 	DryRun      bool
@@ -112,9 +111,20 @@ type Result struct {
 	ConfigManualOnly bool // adapter not built; manual config was printed
 }
 
-// defaultAgentName derives a stable, per-developer name so re-init finds the
+// defaultAgentName derives a stable, per-developer name so a re-run finds the
 // same agent and different developers in one org do not collide.
-func defaultAgentName(provider string) string {
+//
+// It no longer carries the provider. The agent is a MACHINE identity — one per
+// machine, whatever tools are installed on it — so naming it after a single tool
+// was wrong twice over: it made `init --provider codex` on a claude-code-authed
+// machine label the agent with the wrong tool, and it forced `openbox auth` to
+// take a per-tool flag to create a machine-scoped record. Which adapter a
+// session ran under is per-session data, and the session posture reports it.
+//
+// This CHANGES the derived name, and the name is the FindByName idempotency key:
+// a machine that registered under the old scheme will not match and would
+// register again. --agent-name pins the old value for anyone who needs it.
+func defaultAgentName() string {
 	u := "user"
 	if cu, err := user.Current(); err == nil && cu.Username != "" {
 		u = cu.Username
@@ -123,7 +133,7 @@ func defaultAgentName(provider string) string {
 	if err != nil || h == "" {
 		h = "host"
 	}
-	name := fmt.Sprintf("openbox-dev-%s-%s@%s", provider, u, h)
+	name := fmt.Sprintf("openbox-dev-%s@%s", u, h)
 	return truncate(name, 255)
 }
 
@@ -162,6 +172,12 @@ func Register(ctx context.Context, o Options, d Deps) (*Result, provider.Credent
 // should exit non-zero; Result is still populated for reporting on partial
 // success (e.g. registered but config-manual-only).
 func Run(ctx context.Context, o Options, d Deps) (*Result, error) {
+	// The install step is what needs a provider — it writes one tool's native
+	// config. Checked before registration so a missing flag fails immediately
+	// rather than after creating an agent that then cannot be installed for.
+	if o.Provider == "" {
+		return nil, errors.New("--provider is required (one of: " + strings.Join(provider.Supported(), ", ") + ")")
+	}
 	res, ref, err := register(ctx, o, d)
 	if err != nil || res == nil {
 		return res, err
@@ -176,16 +192,16 @@ func Run(ctx context.Context, o Options, d Deps) (*Result, error) {
 
 // register is Run without the install step. See Register.
 func register(ctx context.Context, o Options, d Deps) (*Result, provider.CredentialRef, error) {
-	if o.Provider == "" {
-		return nil, provider.CredentialRef{}, errors.New("--provider is required (one of: " + strings.Join(provider.Supported(), ", ") + ")")
-	}
+	// No provider guard here any more. Registration creates a MACHINE identity
+	// and does not need to know which tool will be installed on it; `Run` checks
+	// for one before the install step, which is the step that actually needs it.
 	profile := aivss.DefaultDeveloperProfile()
 	if field, ok := profile.Validate(); !ok {
 		return nil, provider.CredentialRef{}, fmt.Errorf("default aivss profile field %s out of range (build bug)", field)
 	}
 	name := o.AgentName
 	if name == "" {
-		name = defaultAgentName(o.Provider)
+		name = defaultAgentName()
 	}
 	icon := o.Icon
 	if icon == "" {
@@ -287,10 +303,12 @@ func register(ctx context.Context, o Options, d Deps) (*Result, provider.Credent
 		AgentType:   developerAgentType,
 		Icon:        icon,
 		Description: o.Description,
-		Tags:        []string{"openbox-shift-left", "developer-runtime", o.Provider},
+		Tags:        []string{"openbox-shift-left", "developer-runtime"},
 		AivssConfig: profile,
 		Config: map[string]any{
-			"provider":       o.Provider,
+			// No "provider" key: a machine can hold several tools, and the agent
+			// record naming one of them was a claim this command cannot make.
+			// Per-session posture carries the adapter that actually ran.
 			"managed_enable": o.ManagedEnable, // substrate only; not activated in Phase 1
 		},
 	}

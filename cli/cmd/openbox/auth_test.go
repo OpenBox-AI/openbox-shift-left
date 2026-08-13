@@ -38,12 +38,12 @@ func readDevJSON(t *testing.T, home string) devconfig.DevConfig {
 // --- collectAuthFields: the prompt order and the short-circuit ---------------
 
 // The DX target: a first run with an org key exported completes with three
-// Enters and one y. Fields 5-7 (DID, api key, signing key) must never be shown
-// on the register path — registration returns all three, so asking for them
-// first is pure friction.
+// Enters and one y. The DID, api key and signing key must never be shown on the
+// register path — registration returns all three, so asking for them first is
+// pure friction.
 func TestBlankAgentIDShortCircuitsTheCredentialPrompts(t *testing.T) {
-	// org, backend URL, core URL, agent id — then nothing.
-	p := &prompt.Scripted{Answers: []string{"", "", "", "", "SHOULD-NOT-BE-READ", "SHOULD-NOT-BE-READ"}}
+	// backend URL, core URL, agent id — then nothing.
+	p := &prompt.Scripted{Answers: []string{"", "", "", "SHOULD-NOT-BE-READ", "SHOULD-NOT-BE-READ"}}
 	got, err := collectAuthFields(p, authFields{
 		backendURL: devconfig.DefaultBackendURL,
 		baseURL:    devconfig.DefaultBaseURL,
@@ -61,7 +61,7 @@ func TestBlankAgentIDShortCircuitsTheCredentialPrompts(t *testing.T) {
 		t.Errorf("Remaining = %d, want 2 — the DID and secret prompts must not be shown", p.Remaining())
 	}
 	// The prompt ORDER is the UX contract.
-	want := []string{"Organization", "Backend URL (control plane)", "Core URL (data plane)", "Agent id (blank registers a new agent)"}
+	want := []string{"Backend URL (control plane)", "Core URL (data plane)", "Agent id (`new` registers a new agent)"}
 	if len(p.Prompts) != len(want) {
 		t.Fatalf("prompts = %v, want %v", p.Prompts, want)
 	}
@@ -75,7 +75,7 @@ func TestBlankAgentIDShortCircuitsTheCredentialPrompts(t *testing.T) {
 // Both URL prompts prefill with the hosted defaults, and accepting them writes
 // those values rather than an empty string.
 func TestURLPromptsPrefillTheHostedDefaults(t *testing.T) {
-	p := &prompt.Scripted{Answers: []string{"acme", "", "", "agent-1", "did:aip:3f2504e0-4f89-11d3-9a0c-0305e82c3301", "obx_k", testSeedB64}}
+	p := &prompt.Scripted{Answers: []string{"", "", "agent-1", "did:aip:3f2504e0-4f89-11d3-9a0c-0305e82c3301", "obx_k", testSeedB64}}
 	got, err := collectAuthFields(p, authFields{
 		backendURL: devconfig.DefaultBackendURL,
 		baseURL:    devconfig.DefaultBaseURL,
@@ -99,7 +99,7 @@ func TestURLPromptsPrefillTheHostedDefaults(t *testing.T) {
 
 // A self-hosted user must be able to override either URL.
 func TestURLPromptsAcceptOverrides(t *testing.T) {
-	p := &prompt.Scripted{Answers: []string{"acme", "https://api.internal", "https://core.internal", "agent-1", "did:aip:3f2504e0-4f89-11d3-9a0c-0305e82c3301", "obx_k", testSeedB64}}
+	p := &prompt.Scripted{Answers: []string{"https://api.internal", "https://core.internal", "agent-1", "did:aip:3f2504e0-4f89-11d3-9a0c-0305e82c3301", "obx_k", testSeedB64}}
 	got, err := collectAuthFields(p, authFields{backendURL: devconfig.DefaultBackendURL, baseURL: devconfig.DefaultBaseURL}, false)
 	if err != nil {
 		t.Fatal(err)
@@ -112,8 +112,7 @@ func TestURLPromptsAcceptOverrides(t *testing.T) {
 // Blank input keeps the current value, which is what makes a re-run safe: pressing
 // Enter through every field must not erase a credential.
 func TestBlankKeepsCurrentValues(t *testing.T) {
-	current := authFields{
-		org: "acme", backendURL: "https://api.internal", baseURL: "https://core.internal",
+	current := authFields{backendURL: "https://api.internal", baseURL: "https://core.internal",
 		agentID: "agent-1", did: "did:aip:3f2504e0-4f89-11d3-9a0c-0305e82c3301",
 		apiKey: "obx_existing", privateKey: testSeedB64,
 	}
@@ -605,7 +604,7 @@ func TestAuthSuccessNamesInitAsTheNextStep(t *testing.T) {
 func TestRegisterWithoutAnOrgKeyExplainsWhatIsNeeded(t *testing.T) {
 	isolateHome(t)
 	a, _, errb := testApp(nil)
-	_, _, code := a.registerForAuth(authFields{backendURL: "https://api.internal"}, "claude-code", "", "", "", "", false)
+	_, _, code := a.registerForAuth(authFields{backendURL: "https://api.internal"}, "", "", "", false)
 	if code != exitError {
 		t.Fatalf("exit = %d, want an error with no control token", code)
 	}
@@ -639,7 +638,7 @@ func TestRegisterWritesCredentialsButInstallsNothing(t *testing.T) {
 	}
 	res, ref, code := a.registerForAuth(authFields{
 		backendURL: "https://api.internal", baseURL: "https://core.internal",
-	}, "claude-code", "dev-x", "", "desc", "", false)
+	}, "", "desc", "", false)
 	if code != exitOK {
 		t.Fatalf("exit = %d; stderr=%q", code, errb.String())
 	}
@@ -656,5 +655,52 @@ func TestRegisterWritesCredentialsButInstallsNothing(t *testing.T) {
 	}
 	if strings.Contains(out.String(), "obx_minted") || strings.Contains(out.String(), testSeedB64) {
 		t.Errorf("a minted secret reached stdout:\n%s", out.String())
+	}
+}
+
+// The trap this replaced: Line() returns its DEFAULT on empty input, so on a
+// machine that already had an agent id in dev.json, pressing Enter at a prompt
+// reading "blank registers a new agent" KEPT the old id and fell through to
+// collect mode — demanding an API key the user did not have, precisely because
+// they were trying to register one. The prompt documented an action it could not
+// accept, and there was no input that could express it: readLine trims only
+// \r\n, so even a space came back as a non-empty id.
+//
+// Found by a real first-run, not by a test, which is why this one exists.
+func TestRegisterIsExpressibleWhenAnAgentIDIsAlreadyOnFile(t *testing.T) {
+	const onFile = "83bb12af-1a76-4ebd-9e9a-989afc40720a"
+
+	t.Run("Enter keeps the existing agent — the safe default", func(t *testing.T) {
+		p := &prompt.Scripted{Answers: []string{"", "", "", "", "obx_k", testSeedB64}}
+		got, err := collectAuthFields(p, authFields{agentID: onFile, did: "did:aip:x"}, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.register {
+			t.Error("Enter on a prefilled agent id must NOT register — it accepts the default")
+		}
+		if got.agentID != onFile {
+			t.Errorf("agentID = %q, want the value on file", got.agentID)
+		}
+	})
+
+	// The escape hatch. Without it, a machine with an id on file cannot register
+	// a new agent through the prompts at all.
+	for _, answer := range []string{"new", "NEW", " new "} {
+		t.Run("`"+answer+"` registers", func(t *testing.T) {
+			p := &prompt.Scripted{Answers: []string{"", "", answer, "SHOULD-NOT-BE-READ"}}
+			got, err := collectAuthFields(p, authFields{agentID: onFile, did: "did:aip:x"}, false)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !got.register {
+				t.Fatalf("%q must set register", answer)
+			}
+			// The sentinel must not survive as an agent id: it is an instruction,
+			// not a value, and registration is about to mint the real one.
+			if got.agentID != "" {
+				t.Errorf("agentID = %q, want it cleared before registration", got.agentID)
+			}
+		})
 	}
 }

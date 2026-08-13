@@ -16,7 +16,6 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/adapters/common/devconfig"
 	"github.com/openbox-ai/openbox-shift-left/cli/internal/devinit"
 	"github.com/openbox-ai/openbox-shift-left/cli/internal/prompt"
-	"github.com/openbox-ai/openbox-shift-left/cli/internal/providers"
 	"github.com/openbox-ai/openbox-shift-left/provider"
 )
 
@@ -46,7 +45,6 @@ import (
 // A first-run user with an org key exported completes this by pressing Enter
 // three times and typing y.
 type authFields struct {
-	org        string
 	backendURL string
 	baseURL    string
 	agentID    string
@@ -64,8 +62,7 @@ var didPattern = regexp.MustCompile(`^did:aip:[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9
 func (a *app) runAuth(args []string) int {
 	fs := a.newFlagSet("openbox auth")
 	var (
-		providerName, org            string
-		agentName, icon, description string
+		icon, description            string
 		baseURL, backendURL          string
 		did, agentID                 string
 		envFile                      string
@@ -73,8 +70,6 @@ func (a *app) runAuth(args []string) int {
 		apiKeyStdin, privateKeyStdin bool
 		controlTokenStdin            bool
 	)
-	fs.StringVar(&providerName, "provider", "claude-code", "developer tool this machine's agent represents: claude-code|codex|cursor")
-	fs.StringVar(&org, "org", a.env("OPENBOX_ORG", ""), "organization namespace, for agent naming")
 	fs.BoolVar(&rotate, "rotate", false, "re-issue credentials for an agent that already exists remotely, preserving its id and DID")
 	fs.BoolVar(&yes, "yes", false, "skip the confirmation prompt (for automation)")
 	fs.BoolVar(&apiKeyStdin, "api-key-stdin", false, "read the obx_ API key from the FIRST line of stdin (never a flag value — INV-1)")
@@ -84,7 +79,17 @@ func (a *app) runAuth(args []string) int {
 	// Registration flags, moved here from `init` when auth took ownership of
 	// authentication (ADR-0015). They configure the agent that gets created; none
 	// of them is a secret.
-	fs.StringVar(&agentName, "agent-name", "", "override the derived agent name")
+	//
+	// --provider, --org and --agent-name are gone. The agent this command creates
+	// is a MACHINE identity — auth says so itself ("a machine holds ONE agent
+	// identity") — so a per-TOOL flag on it was a contradiction: `init --provider
+	// codex` on a machine that authed as claude-code produced an agent labelled
+	// with the wrong tool. Which adapter a session ran under is per-session data
+	// and the session posture already reports it. --provider now belongs to
+	// `init`, which installs one tool's hooks and is the command that knows.
+	//
+	// --org was already dead: nothing ever read devinit.Options.Org. Its doc
+	// mentioned "secret accounts", which was the OS keychain ADR-0015 deleted.
 	fs.StringVar(&icon, "icon", "", "agent icon string (defaults to an emoji; the backend requires non-empty)")
 	fs.StringVar(&description, "description", "OpenBox developer-runtime agent", "agent description")
 	fs.BoolVar(&force, "force", false, "register a new distinctly-named agent even if one exists remotely")
@@ -97,9 +102,6 @@ func (a *app) runAuth(args []string) int {
 	fs.StringVar(&agentID, "agent-id", a.env(devconfig.EnvAgentID, ""), "this agent's backend id — non-secret; blank on an interactive run registers a new agent")
 	if code, ok := parseFlags(fs, args); !ok {
 		return code
-	}
-	if _, err := providers.Lookup(providerName); err != nil {
-		return a.errorf("%v", err)
 	}
 
 	// Carry a pre-ADR-0015 config forward BEFORE writing, so the dev.json write
@@ -126,11 +128,6 @@ func (a *app) runAuth(args []string) int {
 	}
 
 	f := authFields{
-		// org is not persisted: dev.json has no org field, and adding one would
-		// change a documented config contract for a value used only to derive an
-		// agent name at registration time. `--org` / OPENBOX_ORG supply it per run,
-		// which is what `init` did before this command existed.
-		org:        org,
 		backendURL: firstNonEmptyStr(backendURL, cfg.BackendURL, devconfig.DefaultBackendURL),
 		baseURL:    firstNonEmptyStr(baseURL, cfg.BaseURL, devconfig.DefaultBaseURL),
 		agentID:    firstNonEmptyStr(agentID, cfg.AgentID),
@@ -183,7 +180,7 @@ func (a *app) runAuth(args []string) int {
 
 	// --- register, when the user has no agent --------------------------------
 	if f.register {
-		res, ref, code := a.registerForAuth(f, providerName, agentName, icon, description, envFile, force)
+		res, ref, code := a.registerForAuth(f, icon, description, envFile, force)
 		if code != exitOK {
 			return code
 		}
@@ -216,12 +213,20 @@ func (a *app) runAuth(args []string) int {
 		return code
 	}
 	a.warnShadowedByEnv(f, envPath)
-	a.printAuthNextSteps(providerName)
+	a.printAuthNextSteps()
 	return exitOK
 }
 
 // collectAuthFields prompts for every field in the documented order.
 //
+// isRegisterSentinel reports whether the agent-id answer asks for a new agent.
+// Empty covers a first run (no default to accept); `new` covers a machine that
+// has an id on file and wants a different one.
+func isRegisterSentinel(agentID string) bool {
+	v := strings.TrimSpace(agentID)
+	return v == "" || strings.EqualFold(v, "new")
+}
+
 // The AGENT ID is the registration trigger, and it SHORT-CIRCUITS: a blank agent
 // id means "I have no agent", so auth registers one and never asks for the DID,
 // API key or signing key — registration returns all three. Prompting for values
@@ -229,19 +234,27 @@ func (a *app) runAuth(args []string) int {
 // to remove.
 func collectAuthFields(p prompt.Prompter, f authFields, rotate bool) (authFields, error) {
 	var err error
-	if f.org, err = p.Line("Organization", orDefault(f.org, "local")); err != nil {
-		return f, err
-	}
 	if f.backendURL, err = p.Line("Backend URL (control plane)", f.backendURL); err != nil {
 		return f, err
 	}
 	if f.baseURL, err = p.Line("Core URL (data plane)", f.baseURL); err != nil {
 		return f, err
 	}
-	if f.agentID, err = p.Line("Agent id (blank registers a new agent)", f.agentID); err != nil {
+	// `new` is the register trigger, and it exists because "blank" was not
+	// expressible. Line() returns its DEFAULT on empty input, so on any machine
+	// that already had an agent id in dev.json, pressing Enter at a prompt
+	// reading "blank registers a new agent" kept the OLD id and dropped the user
+	// into collect mode — demanding an API key they did not have precisely
+	// because they were trying to register. The prompt documented an action it
+	// could not accept.
+	//
+	// Blank still means register when there is no default, which is the
+	// first-run case and the common one.
+	if f.agentID, err = p.Line("Agent id (`new` registers a new agent)", f.agentID); err != nil {
 		return f, err
 	}
-	if f.agentID == "" && !rotate {
+	if isRegisterSentinel(f.agentID) && !rotate {
+		f.agentID = ""
 		f.register = true
 		return f, nil
 	}
@@ -489,7 +502,7 @@ func (a *app) readStdinSecrets(apiKey, privateKey, controlToken bool) (map[strin
 // registration keeps the behaviours `init` already proved — remote duplicate
 // detection, --force's free-name search, the HALT-on-4xx stop condition, the
 // once-only-credential guard, and the resume error naming the registered agent.
-func (a *app) registerForAuth(f authFields, providerName, agentName, icon, description, envFileOverride string, force bool) (*devinit.Result, provider.CredentialRef, int) {
+func (a *app) registerForAuth(f authFields, icon, description, envFileOverride string, force bool) (*devinit.Result, provider.CredentialRef, int) {
 	token := a.getenv(devconfig.EnvControlToken)
 	if token == "" {
 		return nil, provider.CredentialRef{}, a.errorf(
@@ -516,11 +529,8 @@ func (a *app) registerForAuth(f authFields, providerName, agentName, icon, descr
 	}
 
 	res, ref, err := devinit.Register(context.Background(), devinit.Options{
-		Provider:    providerName,
 		BackendURL:  f.backendURL,
 		BaseURL:     f.baseURL,
-		Org:         f.org,
-		AgentName:   agentName,
 		Icon:        icon,
 		Description: description,
 		Force:       force,
@@ -604,8 +614,11 @@ func (a *app) stdinFile() *os.File {
 
 // printAuthNextSteps closes by naming the command that actually installs
 // governance, because auth on its own governs nothing.
-func (a *app) printAuthNextSteps(providerName string) {
-	fmt.Fprintf(a.stdout, "\nNext: openbox init --provider %s\n", providerName)
+func (a *app) printAuthNextSteps() {
+	// The tool is named HERE rather than assumed, because auth no longer knows
+	// it: this command authenticates a MACHINE and `init` is what installs one
+	// tool's hooks.
+	fmt.Fprintf(a.stdout, "\nNext: openbox init --provider <claude-code|codex|cursor>\n")
 	fmt.Fprintf(a.stdout, "  That installs the hooks. By default it governs THIS DIRECTORY only —\n")
 	fmt.Fprintf(a.stdout, "  run it in each project you want governed, or use --scope global for a\n")
 	fmt.Fprintf(a.stdout, "  fleet rollout (see ADR-0016).\n")

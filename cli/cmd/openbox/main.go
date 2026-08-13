@@ -551,7 +551,7 @@ Setup is two commands, in this order:
   openbox init --provider <claude-code|codex|cursor>  install hooks + posture
 
 Usage:
-  openbox auth [--provider <tool>] [--org <id>] [--rotate] [flags]
+  openbox auth [--rotate] [flags]
   openbox init --provider <claude-code|codex|cursor> [--scope local|global] [flags]
   openbox init --role approver --org <id> [--host claude-code] [flags]
   openbox dev verify [--dry-run]

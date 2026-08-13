@@ -371,7 +371,7 @@ events" has not been re-confirmed against a live stack since the flow changed.
 | `no credentials on this machine` from `init` | Run `openbox auth` first. `init` never writes a credential. |
 | `set OPENBOX_CONTROL_TOKEN …` from `auth` | You left the agent id blank, so it is registering — that needs an org key. Give an existing agent id instead if you have one. |
 | `looks like an AGENT RUNTIME key` | You pasted the key from the Agent page into the API-key field, or an `obx_key_` org key where the runtime key belongs. See step 2. |
-| `--org moved to openbox auth` | `init` no longer registers agents. Run `openbox auth --org …`, then `openbox init`. |
+| `--org moved to openbox auth` | Both are gone. `init` no longer registers agents; run `openbox auth`, then `openbox init --provider <tool>`. `--org` did nothing even on auth — nothing read it. |
 | `--secret-backend was removed` | There is no secret store to choose. Credentials are `~/.openbox/.env`; run `openbox auth`. |
 | `no obx_ API key available` | No credential in the environment or `~/.openbox/.env`. Upgrading from an older install? See [Upgrading](#upgrading-an-existing-install) — keychain credentials are not migrated. |
 | `the signing key is not valid base64` / `decodes to N bytes` | The pasted value is truncated. It is ~44 characters and usually ends in `=`. |

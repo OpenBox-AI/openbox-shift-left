@@ -234,7 +234,7 @@ Details and current status: **[Assurance](docs/architecture.md#assurance--what-t
 
 | | |
 |---|---|
-| `openbox auth` | credentials for this machine. `--rotate` re-issues them for an agent that already exists |
+| `openbox auth` | credentials for this machine — it asks for everything authentication needs and nothing else. `--rotate` re-issues them for an agent that already exists |
 | `openbox init` | install hooks + posture. `--scope`, `--enforce=false`, `--install-git-hook`, `--role approver` |
 | `openbox doctor` | the posture actually in effect, who decides, and what happens when they are unreachable |
 | `openbox dev verify` | can this machine reach and authenticate to core? |
