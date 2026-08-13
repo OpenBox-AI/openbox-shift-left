@@ -3,10 +3,11 @@ package codex
 import (
 	"context"
 	"encoding/json"
+	"time"
+
 	"github.com/openbox-ai/openbox-shift-left/adapters/common/hookflow"
 	"github.com/openbox-ai/openbox-shift-left/client"
 	"github.com/openbox-ai/openbox-shift-left/decision"
-	"time"
 )
 
 // Enforcement — the synchronous pre-execution gate for the Codex adapter,
@@ -16,7 +17,7 @@ import (
 // local decision, apply the per-org failure policy, then apply the
 // verdict onto Codex's PreToolUse hook output contract. The middle —
 // decision.InProcessDecider (ADR-0006, no socket/daemon, fail-open on
-// every fault), the native policy evaluator (ADR-0005) and the Tier-1
+// every fault), the native policy evaluator (ADR-0005) and the local detection
 // secret detector — is consumed unchanged from decision/. This file adds
 // nothing to decision/; it only maps its Decision onto Codex's wire shape.
 //
@@ -100,7 +101,7 @@ func EnforceDecision(ctx context.Context, cl decision.Decider, id Identity, e *H
 // on — tool name/kind, MCP server, file operation, permission mode, and
 // (local-only, never egressed) the shell command.
 //
-// Content (INV-2) is populated when localRedaction is true — i.e. Tier-1
+// Content (INV-2) is populated when localRedaction is true — i.e. local detection
 // secret detection (default on) or content capture. For the file class
 // (apply_patch) the redactable body is the patch text, which Codex
 // carries in tool_input["command"] (delta 3). Like the command axis it
@@ -137,7 +138,6 @@ func buildDecisionRequest(id Identity, e *HookEvent, localRedaction bool) decisi
 	}
 
 	req := decision.DecisionRequest{
-		Protocol:     decision.ProtocolVersion,
 		SessionID:    e.SessionID,
 		DeveloperDID: id.DeveloperDID,
 		EventType:    client.EventToolCall, // the pre-execution gate is a ToolCall decision
@@ -197,47 +197,25 @@ type hookSpecificOutput struct {
 	UpdatedInput json.RawMessage `json:"updatedInput,omitempty"`
 }
 
-// ── Enforce timeout clamps — adapter-owned, derived from the installed
-//    Codex hook timeout, not copied from Claude Code's magic numbers ────
+// ── Enforce timeout clamps ────────────────────────────────────────────
 //
-// Derivation: when a PreToolUse hook exceeds its configured `timeout`,
-// Codex kills it and fails open — the tool runs (marker written; log
-// "hook: PreToolUse Failed" then "exec … succeeded"; wall ≈ the timeout).
-// That is the same correctness hazard as Claude Code's 5s kill: for a
-// fail-closed org, a hook that overruns its timeout silently lets the
-// call through. So our verdict must land before Codex kills the hook.
+// The whole-hook budget is derived by the engine from this adapter's
+// declared ceiling (HookCeilings in enforce_tier2.go → hookflow.EnforceBudget),
+// so the margin arithmetic lives in one place for both providers rather
+// than being copied per adapter.
 //
-// The ceiling is therefore a function of the timeout we install, not
-// Codex's 600s default: the installer writes hotHookTimeoutSec on every
-// PreToolUse handler (installer.go). We derive the whole-hook budget from
-// that value minus a margin for the config reads + apply + audit that
-// bracket the gate. If an org raises the installed hot-hook timeout,
-// these clamps scale with it automatically (they read the same constant)
-// — no second edit, no drift. Codex's 600s default is the headroom
-// available (far more than Claude Code's 5s), but the default budgets
-// stay conservative until there's reason for more; more headroom is an
-// optimization, not a requirement.
+// Why the ceiling is what it is, since the evidence belongs with the
+// number: when a PreToolUse hook exceeds its configured `timeout`, Codex
+// kills it and fails open — the tool runs (marker written; log "hook:
+// PreToolUse Failed" then "exec … succeeded"; wall ≈ the timeout). For a
+// fail-closed org that is a silently ungoverned call, so our verdict must
+// land first. The ceiling is therefore a function of the timeout WE
+// install, not Codex's 600s default: raise the installed timeout and the
+// budget scales with it, because both read the same constant. That 600s
+// default is headroom available rather than headroom taken — the defaults
+// stay conservative until there is a reason for more.
 
-// installedGateHookTimeout is the per-hook `timeout` the installer writes
-// on the PreToolUse handler (installer.go preToolUseHookTimeoutSec). The
-// enforce budgets are derived from this, so raising it raises them in
-// lock-step.
-const installedGateHookTimeout = time.Duration(preToolUseHookTimeoutSec) * time.Second
-
-// hookBudgetMargin is the slack reserved under installedGateHookTimeout
-// for the non-gate work in the hook (config reads, classify, apply,
-// spool, audit) so our verdict is written well before Codex's kill. 1s is
-// generous for microsecond in-process work + one bounded stdout write.
-const hookBudgetMargin = 1 * time.Second
-
-// maxEnforceHookBudget caps the whole enforce PreToolUse hook's wall
-// clock (T1 decider + a possible T2 /evaluate + a possible approval hold,
-// run sequentially) so the per-tier budgets can never jointly push the
-// hook past Codex's kill (→ fail-open, which would defeat a fail-closed
-// org). Derived: installed timeout − margin.
-const maxEnforceHookBudget = installedGateHookTimeout - hookBudgetMargin
-
-// in-process decider is microseconds (no network — ADR-0006), so this is
-// a defensive bound, kept conservative and well under
-// maxEnforceHookBudget.
+// maxEnforceTimeout bounds the local decision step. It is microseconds of
+// in-process work, so this is a defensive bound kept well under the
+// whole-hook budget.
 const maxEnforceTimeout = 2 * time.Second

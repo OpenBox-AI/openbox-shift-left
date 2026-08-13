@@ -178,7 +178,7 @@ type Content struct {
 	// call, the arguments for an MCP one — carried so an approver can see what
 	// they are deciding about.
 	//
-	// It is set ONLY on a Tier-2 escalation, and only for a class that can
+	// It is set ONLY on an inline evaluation, and only for a class that can
 	// require approval. It is never set on the observe path, so SL3-SEC-3
 	// ("tool commands and file bodies never egress on observe events") is
 	// unchanged: no ordinary telemetry gains a command.

@@ -208,7 +208,7 @@ func TestFinops_NoContentOnWire(t *testing.T) {
 		BaseURL:               srv.URL,
 		APIKey:                "obx_test_0123456789abcdef0123456789abcdef0123456789abcdef",
 		DID:                   testDID,
-		SeedB64:               finopsTestSeed,
+		PrivateKeyB64:         finopsTestSeed,
 		ContentCaptureEnabled: true, // adversarial: stripper OFF
 	})
 	if err != nil {

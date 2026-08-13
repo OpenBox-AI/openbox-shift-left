@@ -13,9 +13,9 @@ import (
 	"testing"
 
 	claudecode "github.com/openbox-ai/openbox-shift-left/adapters/claude-code"
+	"github.com/openbox-ai/openbox-shift-left/adapters/common/devconfig"
 	"github.com/openbox-ai/openbox-shift-left/cli/internal/backend"
 	"github.com/openbox-ai/openbox-shift-left/cli/internal/providers"
-	"github.com/openbox-ai/openbox-shift-left/cli/internal/secret"
 )
 
 // mockCreateServer is an httptest backend that reports no existing agent and
@@ -48,14 +48,16 @@ func TestEndToEndAgainstMockBackend(t *testing.T) {
 	srv := mockCreateServer(t, &createBody)
 	defer srv.Close()
 
+	home := t.TempDir()
+	t.Setenv(devconfig.EnvHome, home)
+	t.Setenv(devconfig.EnvConfigPath, filepath.Join(t.TempDir(), "dev.json"))
 	reg := backend.New(srv.URL, "obx_key_"+strings.Repeat("f", 48), "openbox-cli")
-	store := secret.NewMemStore()
 	inst, _ := providers.Lookup("cursor") // stub: SL-8 adapter not built
 	var out bytes.Buffer
 
 	res, err := Run(context.Background(),
-		Options{Provider: "cursor", Org: "acme", AgentName: "dev-x"},
-		Deps{Registrar: reg, Store: store, Installer: inst, Out: &out})
+		Options{Provider: "cursor", AgentName: "dev-x"},
+		Deps{Registrar: reg, Installer: inst, Out: &out})
 
 	// The cursor adapter isn't built, so config is manual-only (expected error),
 	// but registration + credential capture must have fully succeeded.
@@ -75,16 +77,17 @@ func TestEndToEndAgainstMockBackend(t *testing.T) {
 	if _, ok := createBody["aivss_config"].(map[string]any); !ok {
 		t.Error("aivss_config must be an object")
 	}
-	// Credentials landed in the store, keyed by org/provider.
-	svc, apiAcct, privAcct, didAcct := Options{Provider: "cursor", Org: "acme"}.accounts()
-	if v, _ := store.Get(svc, apiAcct); !strings.HasPrefix(v, "obx_test_") {
-		t.Errorf("api key not stored: %q", v)
+	// Credentials landed in ~/.openbox/.env under the documented names.
+	kv := readCredentialFile(t)
+	if v := kv[devconfig.EnvAPIKeyDirect]; !strings.HasPrefix(v, "obx_test_") {
+		t.Errorf("api key not written: %q", v)
 	}
-	if v, _ := store.Get(svc, privAcct); v != "c2VlZA==" {
-		t.Errorf("private key not stored: %q", v)
+	if v := kv[devconfig.EnvAgentPrivateKey]; v != "c2VlZA==" {
+		t.Errorf("private key not written: %q", v)
 	}
-	if v, _ := store.Get(svc, didAcct); v != "did:aip:server" {
-		t.Errorf("did not stored: %q", v)
+	// The DID is a coordinate; it must not share the file with the secrets.
+	if v, ok := kv[devconfig.EnvDID]; ok {
+		t.Errorf("credential file carries the DID (%q); secrets and coordinates must not share a file", v)
 	}
 }
 
@@ -102,13 +105,14 @@ func TestEndToEndClaudeCodeRealInstall(t *testing.T) {
 	cfgPath := filepath.Join(t.TempDir(), "openbox", "dev.json")
 	inst := claudecode.Installer{PluginDir: pluginDir, ConfigPath: cfgPath}
 
+	home := t.TempDir()
+	t.Setenv(devconfig.EnvHome, home)
 	reg := backend.New(srv.URL, "obx_key_"+strings.Repeat("f", 48), "openbox-cli")
-	store := secret.NewMemStore()
 	var out bytes.Buffer
 
 	res, err := Run(context.Background(),
-		Options{Provider: "claude-code", Org: "acme", AgentName: "dev-x"},
-		Deps{Registrar: reg, Store: store, Installer: inst, Out: &out})
+		Options{Provider: "claude-code", AgentName: "dev-x"},
+		Deps{Registrar: reg, Installer: inst, Out: &out})
 	if err != nil {
 		t.Fatalf("expected a clean install, got err=%v", err)
 	}
@@ -123,7 +127,7 @@ func TestEndToEndClaudeCodeRealInstall(t *testing.T) {
 		}
 	}
 
-	// Dev config written with the secret-store coordinates, not the values.
+	// Dev config carries the DID coordinate, never a credential value.
 	raw, err := os.ReadFile(cfgPath)
 	if err != nil {
 		t.Fatalf("read dev config: %v", err)
@@ -137,17 +141,17 @@ func TestEndToEndClaudeCodeRealInstall(t *testing.T) {
 	}
 
 	// INV-1: no file written under the plugin dir or the config path may contain
-	// a secret value. The obx_ key and the base64 seed both landed in the store.
+	// a secret value. Both credentials landed in ~/.openbox/.env instead.
 	assertNoSecretInTree(t, pluginDir)
 	if strings.Contains(string(raw), "obx_") || strings.Contains(string(raw), "c2VlZA==") {
 		t.Errorf("dev config leaked a secret value:\n%s", raw)
 	}
-	svc, apiAcct, privAcct, _ := Options{Provider: "claude-code", Org: "acme"}.accounts()
-	if v, _ := store.Get(svc, apiAcct); !strings.HasPrefix(v, "obx_test_") {
-		t.Errorf("api key not stored: %q", v)
+	kv := readCredentialFile(t)
+	if v := kv[devconfig.EnvAPIKeyDirect]; !strings.HasPrefix(v, "obx_test_") {
+		t.Errorf("api key not written: %q", v)
 	}
-	if v, _ := store.Get(svc, privAcct); v != "c2VlZA==" {
-		t.Errorf("private key not stored: %q", v)
+	if v := kv[devconfig.EnvAgentPrivateKey]; v != "c2VlZA==" {
+		t.Errorf("private key not written: %q", v)
 	}
 }
 

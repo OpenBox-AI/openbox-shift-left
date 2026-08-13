@@ -24,3 +24,9 @@ testbed/env.local.sh
 
 # Local agent tooling state (never project content)
 .fab7/
+
+# Supplied API dumps used as one-off probe evidence. Real governance data:
+# agent, session and run identifiers from a live org. They belong in a report,
+# never in the tree of a PUBLIC repo — f6690e7 committed them by accident,
+# against a decision already written down in plans/reports/.
+.probe-evidence/

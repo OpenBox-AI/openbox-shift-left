@@ -71,10 +71,9 @@ func (i Installer) Plan(ref CredentialRef) string {
 	fmt.Fprintf(&b, "  - Write dev config (non-secret coordinates) → %s\n", i.configPath())
 	fmt.Fprintf(&b, "      developer_did=%s\n", ref.DID)
 	fmt.Fprintf(&b, "      base_url=%s\n", devconfig.BaseURLLabel(ref.BaseURL))
-	fmt.Fprintf(&b, "      secret_service=%q api_key_account=%q private_key_account=%q\n",
-		ref.SecretService, ref.APIKeyAccount, ref.PrivateKeyAccount)
 	fmt.Fprintf(&b, "      content_capture=%s (default ON as of 2026-07-15; set false to restore metadata-only)\n", contentCaptureLabel(ref.ContentCapture))
-	fmt.Fprintf(&b, "  - Credentials stay in the OS secret store; the hook reads them at runtime (INV-1).\n")
+	fmt.Fprintf(&b, "  - Credentials are NOT touched here: `openbox auth` wrote them to ~/.openbox/.env and\n")
+	fmt.Fprintf(&b, "    the hook reads them at runtime (ADR-0015). This command cannot read or write a secret.\n")
 	fmt.Fprintf(&b, "\nCommit-trailer stamping (STORY-SL-5, session→commit binding):\n")
 	fmt.Fprintf(&b, "  - The session hook maintains a per-session liveness registry (%s) so a git\n", obgit.DefaultSessionDir())
 	fmt.Fprintf(&b, "    commit is attributed to the session that made it — parallel-safe across concurrent\n")
@@ -85,10 +84,14 @@ func (i Installer) Plan(ref CredentialRef) string {
 	fmt.Fprintf(&b, "    onboarding with `openbox init --install-git-hook` (persisted to dev config);\n")
 	fmt.Fprintf(&b, "    OPENBOX_INSTALL_GIT_HOOK overrides either way; or install per repo with\n")
 	fmt.Fprintf(&b, "    `openbox hook git install`. Idempotent; never overwrites a foreign hook.\n")
-	if ref.LocalHooksDir != "" {
-		fmt.Fprintf(&b, "\nLOCAL-TESTING hook scope (--local-hooks, opt-in):\n")
-		fmt.Fprintf(&b, "  - Merge the five hook entries into %s\n", filepath.Join(ref.LocalHooksDir, ".claude", "settings.local.json"))
-		fmt.Fprintf(&b, "    so ONLY sessions in that project are governed (production = managed/global, never project files).\n")
+	if ref.ProjectDir != "" {
+		fmt.Fprintf(&b, "\nPROJECT hook scope (--scope local, the default):\n")
+		fmt.Fprintf(&b, "  - Merge the hook entries into %s\n", filepath.Join(ref.ProjectDir, ".claude", "settings.local.json"))
+		fmt.Fprintf(&b, "    so sessions in THAT project are governed and sessions elsewhere are not (ADR-0016).\n")
+	} else {
+		fmt.Fprintf(&b, "\nGLOBAL hook scope (--scope global):\n")
+		fmt.Fprintf(&b, "  - Touch no project file. Activation awaits the managed-settings step below,\n")
+		fmt.Fprintf(&b, "    which this command cannot perform, so nothing is governed until it lands.\n")
 	}
 	fmt.Fprintf(&b, "\nOrg-wide force-enable (managed settings; VERIFIED, not activated for the pilot — NFR-5):\n")
 	fmt.Fprintf(&b, "  add to the managed settings.json: {\"enabledPlugins\": [\"openbox-observe\"]}\n")
@@ -115,9 +118,9 @@ func (i Installer) Install(ref CredentialRef) error {
 	// Opt-in LOCAL-TESTING scope: additionally activate the hooks for ONE
 	// project via its .claude/settings.local.json (see localhooks.go).
 	// Production posture (empty LocalHooksDir) never touches project files.
-	if ref.LocalHooksDir != "" {
+	if ref.ProjectDir != "" {
 		engine := filepath.Join(i.pluginDir(), "bin", "openbox")
-		if err := writeLocalHooks(ref.LocalHooksDir, engine); err != nil {
+		if err := writeLocalHooks(ref.ProjectDir, engine); err != nil {
 			return err
 		}
 	}
@@ -218,6 +221,17 @@ func (i Installer) pluginDir() string {
 func (i Installer) configPath() string {
 	if i.ConfigPath != "" {
 		return i.ConfigPath
+	}
+	// The WRITE target, deliberately — not DefaultConfigPath(), which is
+	// read-resolved and prefers an existing LEGACY file over a not-yet-created new
+	// one (devconfig.resolveConfigPath). Writing through the read path would let an
+	// install land in the pre-ADR-0015 directory whenever migration had not yet
+	// created the new file — and migration is explicitly non-fatal, so that is
+	// reachable, not theoretical. It happens to work today only because
+	// migrateLegacyConfig usually runs first; relying on that ordering is what this
+	// avoids.
+	if p, err := devconfig.DevConfigWritePath(); err == nil {
+		return p
 	}
 	return DefaultConfigPath()
 }

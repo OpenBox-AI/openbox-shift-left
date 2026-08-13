@@ -4,6 +4,12 @@ Status: Accepted — **reconstructed 2026-07-31**. Superseded in part by ADR-000
 Reconstructed from: `decision/go.mod`'s dependency-direction note, `decision/doc.go`,
 and CLAUDE.md's "ADR-0002/0003 (INV-3b carve-out, sidecar module)".
 
+**Scope narrowed by [ADR-0017](ADR-0017-inline-policy-evaluation.md)
+(2026-08-13):** policy is no longer evaluated locally, so this module keeps only
+secret detection and redaction. The no-network-I/O property below still holds for
+what remains, but it is now a property of content protection rather than the
+INV-3b clause it was justified by — that clause is retired.
+
 ## Context
 
 E6 needed somewhere to evaluate policy locally for the enforce gate. It had to be

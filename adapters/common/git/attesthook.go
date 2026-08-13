@@ -8,7 +8,7 @@ import "time"
 // touches the secret store — the engine that owns credentials injects a provider.
 type AttestContext struct {
 	DID            string
-	SeedB64        string
+	PrivateKeyB64  string
 	ThreadID       string
 	BundlePolicyID string
 	BundleSHA256   string
@@ -74,7 +74,7 @@ func writeAttestation(g Git, sessions []string, logf func(string, ...any)) {
 		BundleSHA256:   ctx.BundleSHA256,
 		Adapter:        ctx.Adapter,
 		DID:            ctx.DID,
-		SeedB64:        ctx.SeedB64,
+		PrivateKeyB64:  ctx.PrivateKeyB64,
 		Now:            time.Now,
 	})
 	if err != nil {

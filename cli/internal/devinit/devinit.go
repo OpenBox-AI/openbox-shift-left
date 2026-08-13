@@ -1,21 +1,25 @@
-// Package devinit orchestrates `openbox init --provider <tool>`:
-// register a developer agent, capture its once-shown credentials into the
-// OS secret store, and delegate the tool's native config to the provider
-// installer. Governance is ambient thereafter.
+// Package devinit registers a developer agent, captures its once-shown
+// credentials into ~/.openbox/.env, and delegates the tool's native config to
+// the provider installer.
+//
+// Nothing needs to run afterwards — but "ambient" describes the MECHANISM, not the
+// COVERAGE: a default install governs one project directory (ADR-0016, and see
+// Options.ProjectDir). Conflating the two is the overstatement this product exists
+// to prevent.
 //
 // Invariants enforced here:
-//   - INV-1: the obx_ key and Ed25519 seed go only to the secret store; they
-//     are never printed, logged, or written to a config file. Output shows the
-//     secret-store *reference* (service+account), never the value.
+//   - INV-1: the obx_ key and signing key are written only to the credential
+//     file and never printed, logged, or placed on an argv. Output shows the
+//     file path, never a value. ADR-0015 narrowed what INV-1 claims — that file
+//     is plaintext — but not the no-print/no-argv part enforced here.
 //   - INV-4: agents are organization-scoped (the backend derives the org from
-//     the caller credential; the secret-store accounts are namespaced by org).
+//     the caller credential).
 //   - INV-7: developer agents use the shared did:aip namespace (the backend
 //     mints the DID via the same uuidv5 scheme as runtime agents).
 //
 // Safety properties:
-//   - --dry-run performs NO network and NO filesystem/secret-store writes.
-//   - re-init is idempotent: if credentials already exist locally for this
-//     (org, provider), registration is skipped entirely.
+//   - --dry-run performs NO network and NO filesystem writes.
+//   - re-registration is skipped when credentials already exist locally.
 //   - partial failure is reported: if a step fails after the agent is created,
 //     the output names the registered agent id and how to resume.
 package devinit
@@ -30,9 +34,9 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/openbox-ai/openbox-shift-left/adapters/common/devconfig"
 	"github.com/openbox-ai/openbox-shift-left/cli/internal/aivss"
 	"github.com/openbox-ai/openbox-shift-left/cli/internal/backend"
-	"github.com/openbox-ai/openbox-shift-left/cli/internal/secret"
 	"github.com/openbox-ai/openbox-shift-left/provider"
 )
 
@@ -56,37 +60,42 @@ type Options struct {
 	// URL, so without this a local deployment onboards successfully and then
 	// signs every request at core.openbox.ai (a 401 that reads as a broken
 	// install).
-	BaseURL        string
-	Org            string // organization namespace for naming + secret accounts
-	AgentName      string // override; default derived from provider+user+host
-	Icon           string // non-empty string required by the backend DTO
-	Description    string
-	DryRun         bool
-	Force          bool // register a fresh agent even if one exists remotely
+	BaseURL     string
+	AgentName   string // override; default derived from user+host
+	Icon        string // non-empty string required by the backend DTO
+	Description string
+	DryRun      bool
+	Force       bool // register a fresh agent even if one exists remotely
+	// EnvFile overrides where credentials are written (`auth --env-file`). Empty
+	// uses devconfig.EnvFilePath(). It is threaded through rather than resolved at
+	// the write site because registration is the ONE path that mints credentials:
+	// ignoring the override here wrote a newly-created agent's once-shown key to
+	// the default location while reporting the custom one.
+	EnvFile        string
 	ManagedEnable  bool // org-wide force-enable substrate; opt-in
 	InstallGitHook bool // enable ambient commit-trailer hook install (off by default)
-	// LocalHooksDir opts into the LOCAL-TESTING hook scope: the adapter
-	// merges its hook block into <dir>/.claude/settings.local.json so only
-	// sessions in that project are governed. Empty (default) = production
-	// posture (activation via managed settings / global only).
-	LocalHooksDir string
-	// Enforce turns on enforce mode and persists it (plus its sensible
-	// companions, Tier2 + Findings) into the dev config, so no runtime env
-	// var is needed (ADR-0006). Off by default — enforcement stays opt-in.
+	// ProjectDir selects PROJECT hook scope, which is `openbox init`'s default
+	// (ADR-0016): the adapter merges its hook block into
+	// <dir>/.claude/settings.local.json, so sessions in that project are governed
+	// and sessions elsewhere are not. Empty means GLOBAL scope — the bundle is
+	// still installed, but activation waits on a managed-settings deployment.
+	ProjectDir string
+	// Enforce turns enforce mode on or off and persists it (plus its companions,
+	// Findings) into the dev config, so no runtime env var is needed
+	// (ADR-0006 for the mechanism). Enforce now defaults ON (ADR-0016) — it is
+	// resolved from the ABSENCE of the field, not written by every run.
 	//
-	// All three are *bool so nil means "this run did not say", leaving any
-	// posture already on disk untouched. A plain `init` re-run (to repair
-	// hooks, say) must not be able to drop a developer out of enforce mode;
-	// turning it off takes an explicit --no-enforce.
+	// All three are *bool so nil means "this run did not say", leaving whatever is
+	// on disk untouched. That is load-bearing in both directions: a plain `init`
+	// re-run must not drop a developer out of enforce mode, AND must not silently
+	// re-enable it for someone who chose --enforce=false.
 	Enforce  *bool
-	Tier2    *bool
 	Findings *bool
 }
 
 // Deps are the injected collaborators (all faked in tests).
 type Deps struct {
 	Registrar Registrar
-	Store     secret.Store
 	Installer provider.Installer
 	Out       io.Writer
 }
@@ -102,19 +111,20 @@ type Result struct {
 	ConfigManualOnly bool // adapter not built; manual config was printed
 }
 
-// secret-store account layout, namespaced by org (INV-4) then provider.
-func (o Options) accounts() (service, apiKey, privKey, did string) {
-	ns := o.Org
-	if ns == "" {
-		ns = "local"
-	}
-	base := ns + "/" + o.Provider + "/"
-	return secret.Service, base + "api_key", base + "private_key", base + "did"
-}
-
-// defaultAgentName derives a stable, per-developer name so re-init finds the
+// defaultAgentName derives a stable, per-developer name so a re-run finds the
 // same agent and different developers in one org do not collide.
-func defaultAgentName(provider string) string {
+//
+// It no longer carries the provider. The agent is a MACHINE identity — one per
+// machine, whatever tools are installed on it — so naming it after a single tool
+// was wrong twice over: it made `init --provider codex` on a claude-code-authed
+// machine label the agent with the wrong tool, and it forced `openbox auth` to
+// take a per-tool flag to create a machine-scoped record. Which adapter a
+// session ran under is per-session data, and the session posture reports it.
+//
+// This CHANGES the derived name, and the name is the FindByName idempotency key:
+// a machine that registered under the old scheme will not match and would
+// register again. --agent-name pins the old value for anyone who needs it.
+func defaultAgentName() string {
 	u := "user"
 	if cu, err := user.Current(); err == nil && cu.Username != "" {
 		u = cu.Username
@@ -123,7 +133,7 @@ func defaultAgentName(provider string) string {
 	if err != nil || h == "" {
 		h = "host"
 	}
-	name := fmt.Sprintf("openbox-dev-%s-%s@%s", provider, u, h)
+	name := fmt.Sprintf("openbox-dev-%s@%s", u, h)
 	return truncate(name, 255)
 }
 
@@ -141,31 +151,64 @@ func truncate(s string, maxBytes int) string {
 	return s[:cut]
 }
 
+// Register is the credential half: register a developer agent (or recognize that
+// this machine already has credentials) and write the two secrets to
+// ~/.openbox/.env. It installs nothing and touches no tool config.
+//
+// It exists as its own entry point because `openbox auth` owns authentication
+// while `openbox init` owns setup (ADR-0015/ADR-0016). auth needs exactly the
+// behaviour proven here — remote duplicate detection, the HALT-on-4xx stop
+// condition, the once-only-credential guard, and the resume error that names the
+// registered agent — with no installer running.
+//
+// The returned CredentialRef carries the coordinates the caller should persist:
+// DID and AgentID are set on the register path. Run wraps this and adds the
+// provider install.
+func Register(ctx context.Context, o Options, d Deps) (*Result, provider.CredentialRef, error) {
+	return register(ctx, o, d)
+}
+
 // Run executes the onboarding flow. It returns a non-nil error when the command
 // should exit non-zero; Result is still populated for reporting on partial
 // success (e.g. registered but config-manual-only).
 func Run(ctx context.Context, o Options, d Deps) (*Result, error) {
+	// The install step is what needs a provider — it writes one tool's native
+	// config. Checked before registration so a missing flag fails immediately
+	// rather than after creating an agent that then cannot be installed for.
 	if o.Provider == "" {
 		return nil, errors.New("--provider is required (one of: " + strings.Join(provider.Supported(), ", ") + ")")
 	}
+	res, ref, err := register(ctx, o, d)
+	if err != nil || res == nil {
+		return res, err
+	}
+	if o.DryRun {
+		// planDryRun already printed the plan, including the installer's own
+		// section; there is nothing to apply.
+		return res, nil
+	}
+	return res, applyConfig(o, d, ref, res)
+}
+
+// register is Run without the install step. See Register.
+func register(ctx context.Context, o Options, d Deps) (*Result, provider.CredentialRef, error) {
+	// No provider guard here any more. Registration creates a MACHINE identity
+	// and does not need to know which tool will be installed on it; `Run` checks
+	// for one before the install step, which is the step that actually needs it.
 	profile := aivss.DefaultDeveloperProfile()
 	if field, ok := profile.Validate(); !ok {
-		return nil, fmt.Errorf("default aivss profile field %s out of range (build bug)", field)
+		return nil, provider.CredentialRef{}, fmt.Errorf("default aivss profile field %s out of range (build bug)", field)
 	}
 	name := o.AgentName
 	if name == "" {
-		name = defaultAgentName(o.Provider)
+		name = defaultAgentName()
 	}
 	icon := o.Icon
 	if icon == "" {
 		icon = "🧑‍💻"
 	}
-	service, apiKeyAcct, privKeyAcct, didAcct := o.accounts()
 	ref := provider.CredentialRef{
-		SecretService:     service,
-		APIKeyAccount:     apiKeyAcct,
-		PrivateKeyAccount: privKeyAcct,
-		InstallGitHook:    o.InstallGitHook,
+		InstallGitHook: o.InstallGitHook,
 		// Persist the control-plane base so `dev sync`/staleness can reach
 		// the policy read without re-supplying OPENBOX_BACKEND_URL. The
 		// agent id is set below on the register path (the reuse path
@@ -174,37 +217,63 @@ func Run(ctx context.Context, o Options, d Deps) (*Result, error) {
 		// The data-plane base, persisted so the hook and `dev verify` reach the
 		// core this install belongs to. Empty ⇒ the adapter default (SaaS).
 		BaseURL: o.BaseURL,
-		// Opt-in LOCAL-TESTING hook scope: govern one project via its
-		// .claude/settings.local.json instead of the production
-		// managed/global activation (empty = production posture).
-		LocalHooksDir: o.LocalHooksDir,
-		// ADR-0006: persist the enforce posture into dev.json so the
-		// runtime hook needs no env var. All off by default (observe-only).
+		// Project hook scope: govern one project via its
+		// .claude/settings.local.json. Empty = global scope, whose activation is
+		// a managed-settings deployment this command cannot perform.
+		ProjectDir: o.ProjectDir,
+		// Persist the enforce posture into dev.json so the runtime hook needs no
+		// env var. Enforce defaults ON (ADR-0016).
 		Enforce:  o.Enforce,
-		Tier2:    o.Tier2,
 		Findings: o.Findings,
 	}
 	res := &Result{AgentName: name}
 
 	// --- dry-run: describe, write nothing, touch no network ------------------
 	if o.DryRun {
-		return res, planDryRun(o, d, name, icon, profile, ref)
+		return res, ref, planDryRun(o, d, name, icon, profile, ref)
 	}
 
-	// --- idempotency: local secret store is the source of truth --------------
-	// The obx_ key and Ed25519 seed are shown by agent/create exactly once, so a
-	// prior successful init is only recoverable locally. If both are present, we
-	// reuse them and skip registration entirely.
-	if existingKey, err := d.Store.Get(service, apiKeyAcct); err == nil && existingKey != "" {
-		if _, err := d.Store.Get(service, privKeyAcct); err == nil {
-			did, _ := d.Store.Get(service, didAcct)
-			ref.DID = did
-			res.Reused = true
-			res.DID = did
-			fmt.Fprintf(d.Out, "Already initialized for org=%s provider=%s — reusing stored credentials (DID %s).\n",
-				nsOrLocal(o.Org), o.Provider, did)
-			return res, applyConfig(o, d, ref, res)
-		}
+	// --- idempotency: the local credential file is the source of truth -------
+	// The obx_ key and signing key are shown by agent/create exactly once, so a
+	// prior successful registration is only recoverable locally. If both are
+	// present, reuse them and skip registration entirely.
+	//
+	// The DID comes from dev.json rather than from beside the credentials, which
+	// is the ADR-0015 split doing its job: before it, the DID lived in the
+	// keychain too and this reuse path read the keychain's copy and wrote it into
+	// dev.json — so a stale keychain entry silently reverted a corrected DID on
+	// every re-init. With one store per field there is nothing to revert from.
+	//
+	// ONE IDENTITY PER MACHINE, and the message must not pretend otherwise. The
+	// deleted keychain namespaced credentials by `<org>/<provider>`, so this check
+	// could ask "are there credentials for THIS org and provider". `.env` holds a
+	// single key pair with no namespace, so all this can honestly report is that
+	// *some* identity is already configured — it cannot know whether it belongs to
+	// the org and provider this run named. Saying "already initialized for
+	// org=beta provider=codex" while describing acme/claude-code's credentials
+	// would be a false statement about identity in a governance tool, which is
+	// worse than the friction of a vaguer message.
+	if existing, err := readLocalCredentials(o.EnvFile); err == nil && existing.apiKey != "" && existing.privateKey != "" {
+		did := devconfig.ResolveDIDOrEmpty()
+		ref.DID = did
+		res.Reused = true
+		res.DID = did
+		// The agent id comes back from dev.json for the same reason the DID does:
+		// this path registers nothing, so the only copy is the local one, and the
+		// caller writes whatever it gets here straight back to dev.json.
+		//
+		// Returning it empty would ERASE it, and it is not decorative —
+		// ResolveAgentID feeds SelfAgentID in the autonomous approver, which is
+		// how a machine refuses to approve its own request (ADR-0012). Losing it
+		// disables that check silently.
+		res.AgentID = devconfig.ResolveAgentID()
+		ref.AgentID = res.AgentID
+		fmt.Fprintf(d.Out, "This machine already has credentials in %s — reusing them (DID %s).\n",
+			credentialFileLabel(o.EnvFile), didOrNone(did))
+		fmt.Fprintf(d.Out, "  Nothing was registered. A machine holds ONE agent identity: if these belong to a\n")
+		fmt.Fprintf(d.Out, "  different org or tool than you intended, `openbox auth` overwrites them, and\n")
+		fmt.Fprintf(d.Out, "  `openbox doctor` shows which identity is in effect.\n")
+		return res, ref, nil
 	}
 
 	// --- remote duplicate detection (avoid a 400, never duplicate silently) --
@@ -214,14 +283,14 @@ func Run(ctx context.Context, o Options, d Deps) (*Result, error) {
 	if !o.Force {
 		existing, err := d.Registrar.FindByName(ctx, name)
 		if err != nil {
-			return res, fmt.Errorf(
+			return res, ref, fmt.Errorf(
 				"could not check for an existing agent named %q (agent/list failed: %w); "+
 					"re-run when the OpenBox org is reachable, or pass --force to skip the check",
 				name, err)
 		}
 		if existing != nil {
 			res.AgentID, res.DID = existing.ID, existing.DID
-			return res, fmt.Errorf(
+			return res, ref, fmt.Errorf(
 				"a developer agent named %q already exists in this org (id %s, DID %s) but no local credentials are stored. "+
 					"Its API key and signing key are shown only once and cannot be re-retrieved. "+
 					"Delete that agent and re-run, or pass --force to register a new distinctly-named agent.",
@@ -232,7 +301,7 @@ func Run(ctx context.Context, o Options, d Deps) (*Result, error) {
 		// here is surfaced rather than proceeding to a confusing 400 (F4).
 		free, err := freeName(ctx, d, name)
 		if err != nil {
-			return res, fmt.Errorf("could not find a free agent name for --force (agent/list failed: %w)", err)
+			return res, ref, fmt.Errorf("could not find a free agent name for --force (agent/list failed: %w)", err)
 		}
 		name = free
 		res.AgentName = name
@@ -244,10 +313,12 @@ func Run(ctx context.Context, o Options, d Deps) (*Result, error) {
 		AgentType:   developerAgentType,
 		Icon:        icon,
 		Description: o.Description,
-		Tags:        []string{"openbox-shift-left", "developer-runtime", o.Provider},
+		Tags:        []string{"openbox-shift-left", "developer-runtime"},
 		AivssConfig: profile,
 		Config: map[string]any{
-			"provider":       o.Provider,
+			// No "provider" key: a machine can hold several tools, and the agent
+			// record naming one of them was a claim this command cannot make.
+			// Per-session posture carries the adapter that actually ran.
 			"managed_enable": o.ManagedEnable, // substrate only; not activated in Phase 1
 		},
 	}
@@ -256,45 +327,42 @@ func Run(ctx context.Context, o Options, d Deps) (*Result, error) {
 		var apiErr *backend.APIError
 		if errors.As(err, &apiErr) {
 			// Stop condition: exact 4xx (agent_type / aivss_config rejection) → HALT.
-			return res, fmt.Errorf("HALT: agent/create rejected registration (%w). "+
+			return res, ref, fmt.Errorf("HALT: agent/create rejected registration (%w). "+
 				"Verify agent_type=%q and the default aivss_config are accepted by this OpenBox org",
 				apiErr, developerAgentType)
 		}
-		return res, fmt.Errorf("agent/create failed: %w", err)
+		return res, ref, fmt.Errorf("agent/create failed: %w", err)
 	}
 	res.AgentID, res.DID, res.Registered = reg.AgentID, reg.DID, true
 	ref.DID = reg.DID
 	ref.AgentID = reg.AgentID // persisted to dev.json for `dev sync`/staleness
 
 	if reg.APIKey == "" || reg.PrivateKey == "" {
-		return res, fmt.Errorf(
+		return res, ref, fmt.Errorf(
 			"agent registered (id %s, DID %s) but the response did not include %s — "+
 				"cannot store runtime credentials; rotate the key or re-provision the identity",
 			reg.AgentID, reg.DID, missingCreds(reg))
 	}
 
-	// --- capture credentials into the OS secret store (INV-1) ----------------
-	// Order: secrets first, DID last. On any failure after the agent exists, the
-	// error names the registered agent id so the operator can resume.
-	if err := d.Store.Set(service, apiKeyAcct, reg.APIKey); err != nil {
-		return res, resumeErr(reg, "store API key", err)
-	}
-	if err := d.Store.Set(service, privKeyAcct, reg.PrivateKey); err != nil {
-		return res, resumeErr(reg, "store private key", err)
-	}
-	if err := d.Store.Set(service, didAcct, reg.DID); err != nil {
-		return res, resumeErr(reg, "store DID", err)
+	// --- capture credentials into ~/.openbox/.env (INV-1) --------------------
+	// One atomic write for both secrets, so there is no half-written credential
+	// pair to reason about. The DID is not written here — it is a coordinate and
+	// goes to dev.json via the installer (ADR-0015's one-store-per-field split).
+	// On failure after the agent exists, the error names the registered agent id
+	// so the operator can resume.
+	if err := writeLocalCredentials(o.EnvFile, reg.APIKey, reg.PrivateKey); err != nil {
+		return res, ref, resumeErr(reg, "write credentials to "+credentialFileLabel(o.EnvFile), err)
 	}
 
 	fmt.Fprintf(d.Out, "Registered developer agent %q\n  id:    %s\n  DID:   %s\n  tier:  %s (trust %s)\n",
 		reg.AgentName, reg.AgentID, reg.DID, reg.Tier, reg.TrustScore)
-	fmt.Fprintf(d.Out, "Credentials stored in %s (service %q); values are not printed (INV-1).\n",
-		d.Store.Name(), service)
+	fmt.Fprintf(d.Out, "Credentials written to %s (0600); values are not printed (INV-1).\n",
+		credentialFileLabel(o.EnvFile))
 	if o.ManagedEnable {
 		fmt.Fprintln(d.Out, "Managed force-enable substrate recorded (verified, not activated — Phase-1 pilot is opt-in).")
 	}
 
-	return res, applyConfig(o, d, ref, res)
+	return res, ref, nil
 }
 
 // applyConfig delegates provider config writing. When the adapter isn't built,
@@ -310,7 +378,8 @@ func applyConfig(o Options, d Deps, ref provider.CredentialRef, res *Result) err
 		return fmt.Errorf("agent ready but writing %s config failed: %w", o.Provider, err)
 	}
 	res.ConfigApplied = true
-	fmt.Fprintf(d.Out, "Wrote %s native config (references the secret store, no secrets inline).\n", o.Provider)
+	fmt.Fprintf(d.Out, "Wrote %s native config (no secrets inline — the hook reads %s at runtime).\n",
+		o.Provider, credentialFileLabel(o.EnvFile))
 	return nil
 }
 
@@ -339,10 +408,11 @@ func planDryRun(o Options, d Deps, name, icon string, profile aivss.Config, ref 
 	fmt.Fprintf(out, "  aivss_config: base_security/ai_specific/impact (accepted developer posture; server computes score/tier)\n")
 	fmt.Fprintf(out, "  managed_enable: %t (substrate only; not activated in Phase 1)\n", o.ManagedEnable)
 	fmt.Fprintf(out, "  install_git_hook: %t (ambient commit-trailer hook; off by default — modifies .git/hooks)\n", o.InstallGitHook)
-	fmt.Fprintf(out, "  enforce: %s (ADR-0006; off by default = observe-only. --enforce also enables tier2 + findings, all persisted to dev.json — no runtime env)\n", describePosture(o.Enforce))
-	svc, apiAcct, privAcct, didAcct := o.accounts()
-	fmt.Fprintf(out, "\nWould store credentials in the OS secret store (service %q):\n", svc)
-	fmt.Fprintf(out, "  %s  (obx_ API key)\n  %s  (Ed25519 seed)\n  %s  (DID)\n", apiAcct, privAcct, didAcct)
+	fmt.Fprintf(out, "  enforce: %s (ADR-0016: ON by default — inert until your org publishes a policy, and\n", describePosture(o.Enforce))
+	fmt.Fprintf(out, "           fail-open regardless. --enforce=false opts out and persists. Enforce also\n")
+	fmt.Fprintf(out, "           carries tier2 + findings, all persisted to dev.json — no runtime env)\n")
+	fmt.Fprintf(out, "\nWould write credentials to %s (0600, plaintext — ADR-0015):\n", credentialFileLabel(o.EnvFile))
+	fmt.Fprintf(out, "  %s  (obx_ API key)\n  %s  (Ed25519 signing key)\n", devconfig.EnvAPIKeyDirect, devconfig.EnvAgentPrivateKey)
 	fmt.Fprintf(out, "\nProvider config:\n%s\n", d.Installer.Plan(ref))
 	return nil
 }

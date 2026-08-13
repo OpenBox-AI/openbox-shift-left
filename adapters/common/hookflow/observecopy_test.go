@@ -11,6 +11,7 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/adapters/common/devconfig"
 	"github.com/openbox-ai/openbox-shift-left/client"
 	"github.com/openbox-ai/openbox-shift-left/decision"
+	"github.com/openbox-ai/openbox-shift-left/provider"
 )
 
 // The invariant these tests pin: ONE gated tool call puts exactly ONE
@@ -18,7 +19,7 @@ import (
 //
 // A gated PreToolUse has two ways to reach core, and they carry the SAME event
 // (one event_id, because the mapper clock is pinned for the hook invocation):
-// the Tier-2 escalation POSTs it synchronously, and the observe copy is spooled
+// the inline evaluation POSTs it synchronously, and the observe copy is spooled
 // and flushed. Core does not dedupe developer events on their id, so whichever
 // of the two runs, the other must not — otherwise one tool call becomes two
 // stored rows and two Merkle leaves. Both halves used to run, so every escalated
@@ -43,8 +44,8 @@ func deliveringGate(t *testing.T, gov Governor, tier2Enabled string) (spooled bo
 	var out bytes.Buffer
 	gate := EnforceGate{
 		Contract: testContract{approval: "ask"},
-		Tier2: Tier2{
-			HookBudget: 29 * time.Second,
+		Evaluator: Evaluator{
+			Ceiling:    provider.HookCeiling{Gating: 30 * time.Second},
 			MaxTimeout: 4 * time.Second,
 			NewClient:  func(*log.Logger) (Governor, error) { return gov, nil },
 		},
@@ -61,7 +62,7 @@ func deliveringGate(t *testing.T, gov Governor, tier2Enabled string) (spooled bo
 // fakeGovernor's Emit succeeds but returns an EMPTY evaluation — delivered, yet
 // no usable verdict, so the escalation still degrades to fail-open. That is the
 // case a check on the resulting decision would get wrong: the decision reads
-// "tier-2 returned no verdict" while the event is already stored. Delivery is a
+// "/evaluate returned no verdict" while the event is already stored. Delivery is a
 // property of the transport, not of the answer.
 func TestGate_ObserveCopySkippedWhenEscalationDelivered(t *testing.T) {
 	gov := &fakeGovernor{}
@@ -93,52 +94,96 @@ func TestGate_ObserveCopySkippedWhenApprovalWasFiled(t *testing.T) {
 	}
 }
 
-// With Tier-2 off there is no second path, so the gate owes the spool a copy.
-// This is the default posture, and it must behave exactly like observe-only.
-func TestGate_ObserveCopySpooledWhenTier2Disabled(t *testing.T) {
+// The deprecated tier2 toggle no longer suppresses evaluation (ADR-0017): it is
+// still parsed for back-compat but must not change behaviour. So the escalation
+// runs, delivers, and the observe copy is suppressed exactly as with the toggle
+// on — the assertion is that this test reads identically to the delivered case
+// above.
+//
+// It previously asserted the opposite, and that is the point: a config key that
+// silently kept disabling enforcement would be the same silently-ungoverned
+// failure the ADR exists to close.
+func TestGate_DeprecatedTier2ToggleNoLongerSuppressesEvaluation(t *testing.T) {
 	gov := &fakeGovernor{}
-	if !deliveringGate(t, gov, "0") {
-		t.Error("no escalation ran; the observe copy is the only copy and must be spooled")
+	if deliveringGate(t, gov, "0") {
+		t.Error("tier2=0 suppressed the escalation; the key is parsed-but-ignored now, " +
+			"and an org that set it once must not stay ungoverned")
 	}
 }
 
-// The stale gate returns before the escalation is even reached. Deferring the
-// spool write must not let an early return swallow it — every exit path owes the
-// spool a copy unless delivery actually happened.
-func TestGate_ObserveCopySpooledOnStaleGateEarlyReturn(t *testing.T) {
+// slowGovernor's Emit outlives the escalation budget and only then reports
+// success. It deliberately ignores cancellation, which is the one shape a real
+// transport cannot be asked to have on demand: core committed the row a moment
+// after we stopped waiting, and our cancellation arrived too late to matter.
+type slowGovernor struct {
+	*fakeGovernor
+	emitted chan struct{}
+}
+
+func (s slowGovernor) Emit(context.Context, client.DevEvent) (client.Evaluation, error) {
+	time.Sleep(60 * time.Millisecond)
+	close(s.emitted)
+	return client.Evaluation{Verdict: client.VerdictAllow}, nil
+}
+
+// The budget-exceeded escalation: Escalate gives up on the transport and returns
+// through its timeout branch, abandoning the goroutine that is still running.
+// Only the result-channel branch carries a happens-before edge back to the gate,
+// so on this path the abandoned goroutine's OnDelivered call and the gate's defer
+// touch the same flag concurrently.
+//
+// Every other test here drives the escalation to completion, which is why the
+// suite stayed green under -race while this path was a live data race. It is
+// reachable today on any Bash or MCP call whose escalation runs out of budget.
+//
+// Two things are pinned: the flag is safe to read (the -race run is the
+// assertion), and a late delivery does not flip the direction of failure — the
+// gate still spools, because an escalation we abandoned may never have been
+// stored and a missing copy loses the event outright.
+func TestGate_ObserveCopySpooledWhenEscalationOutlivesItsBudget(t *testing.T) {
 	isolateConfig(t)
 	isolateMarkers(t)
 	t.Setenv(devconfig.EnvTier2, "1")
-	t.Setenv(devconfig.EnvFailClosed, "1")
+	t.Setenv(devconfig.EnvApprovalHold, "50")
 	t.Setenv(devconfig.EnvEnforcementFile, t.TempDir()+"/enforcements.jsonl")
-	t.Setenv(EnvStaleDir, t.TempDir())
-	if err := WriteStaleMarker(shellTarget{}.SessionID()); err != nil {
-		t.Fatalf("write stale marker: %v", err)
-	}
 	defer devconfig.Pin()()
 
+	gov := slowGovernor{fakeGovernor: &fakeGovernor{}, emitted: make(chan struct{})}
 	spooled := false
 	var out bytes.Buffer
 	gate := EnforceGate{
 		Contract: testContract{approval: "ask"},
-		Tier2: Tier2{
-			HookBudget: 29 * time.Second,
-			MaxTimeout: 4 * time.Second,
-			NewClient: func(*log.Logger) (Governor, error) {
-				t.Error("stale gate must deny before any escalation")
-				return &fakeGovernor{}, nil
-			},
+		Evaluator: Evaluator{
+			Ceiling: provider.HookCeiling{Gating: 30 * time.Second},
+			// The clamp, not a config knob: the per-evaluation budget stopped
+			// reading tier2_timeout_ms with ADR-0017, so this is now the only
+			// way to reach the timeout branch deliberately.
+			MaxTimeout: 20 * time.Millisecond,
+			NewClient:  func(*log.Logger) (Governor, error) { return gov, nil },
 		},
 		Record:       func(decision.Decision, ApplyResult) {},
 		SpoolObserve: func() { spooled = true },
 	}
 	gate.Run(context.Background(), discard(), &out, shellTarget{})
 
+	// Let the abandoned transport finish, which is where the concurrent write
+	// lands. Without this the test can exit before the race is even possible.
+	<-gov.emitted
+
 	if !spooled {
-		t.Error("the stale-gate early return skipped the observe copy; a denied call is " +
-			"still a call that happened and still owes telemetry")
+		t.Error("the escalation was abandoned at its budget, so delivery is unknown; " +
+			"dropping the observe copy risks losing the event entirely")
 	}
 }
+
+// TestGate_ObserveCopySpooledOnStaleGateEarlyReturn is deleted with the stale
+// gate (ADR-0017): there is no local bundle to be stale, so no early return
+// before the evaluation.
+//
+// What it covered — that a path returning BEFORE the escalation still spools
+// its observe copy — is a property of the deferred write itself, which is
+// exercised by every undelivered case above. The direction is unchanged: the
+// default is to spool, and only a confirmed delivery suppresses.
 
 // A nil SpoolObserve is the non-gated caller's shape (it spooled its own copy).
 // The gate must not panic on it.
@@ -151,9 +196,9 @@ func TestGate_NilSpoolObserveIsInert(t *testing.T) {
 
 	var out bytes.Buffer
 	gate := EnforceGate{
-		Contract: testContract{approval: "ask"},
-		Tier2:    Tier2{HookBudget: 29 * time.Second},
-		Record:   func(decision.Decision, ApplyResult) {},
+		Contract:  testContract{approval: "ask"},
+		Evaluator: Evaluator{Ceiling: provider.HookCeiling{Gating: 30 * time.Second}},
+		Record:    func(decision.Decision, ApplyResult) {},
 	}
 	gate.Run(context.Background(), discard(), &out, shellTarget{})
 }

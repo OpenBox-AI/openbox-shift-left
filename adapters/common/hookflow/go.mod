@@ -17,8 +17,11 @@ replace github.com/openbox-ai/openbox-shift-left/client => ../../../client
 require (
 	github.com/openbox-ai/openbox-shift-left/adapters/common/devconfig v0.0.0
 	github.com/openbox-ai/openbox-shift-left/decision v0.0.0
+	github.com/openbox-ai/openbox-shift-left/provider v0.0.0
 )
 
 replace github.com/openbox-ai/openbox-shift-left/adapters/common/devconfig => ../devconfig
 
 replace github.com/openbox-ai/openbox-shift-left/decision => ../../../decision
+
+replace github.com/openbox-ai/openbox-shift-left/provider => ../../../provider

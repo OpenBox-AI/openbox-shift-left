@@ -2,6 +2,7 @@ package provider
 
 import (
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -15,16 +16,11 @@ func TestSupportedIsSortedAndComplete(t *testing.T) {
 }
 
 func TestStubIsUnavailableAndDescribesManualConfig(t *testing.T) {
-	ref := CredentialRef{
-		SecretService:     "ai.openbox.dev",
-		APIKeyAccount:     "acme/codex/api_key",
-		PrivateKeyAccount: "acme/codex/private_key",
-		DID:               "did:aip:abc",
-	}
+	ref := CredentialRef{DID: "did:aip:abc"}
 	s := Stub{
 		ProviderName: Codex,
 		Manual: func(r CredentialRef) string {
-			return "manual: service=" + r.SecretService + " did=" + r.DID
+			return "manual: did=" + r.DID
 		},
 	}
 
@@ -38,18 +34,40 @@ func TestStubIsUnavailableAndDescribesManualConfig(t *testing.T) {
 		t.Fatalf("Install = %v, want ErrNotBuilt", err)
 	}
 	plan := s.Plan(ref)
-	// Plan must point at the secret store, never carry a secret value (INV-1).
-	if !strings.Contains(plan, "ai.openbox.dev") || !strings.Contains(plan, "did:aip:abc") {
-		t.Errorf("plan missing secret-store reference:\n%s", plan)
+	// Plan names the identity it would install for, never a secret value (INV-1).
+	// It no longer names a secret-store location: there is no store to name, and
+	// credentials are written by `openbox auth` (ADR-0015).
+	if !strings.Contains(plan, "did:aip:abc") {
+		t.Errorf("plan does not name the DID it would install for:\n%s", plan)
 	}
 }
 
-// A CredentialRef must never be able to carry a raw secret; it only has
-// coordinate fields. This compile-time-ish check documents the INV-1 shape.
-func TestCredentialRefCarriesOnlyCoordinates(t *testing.T) {
-	ref := CredentialRef{DID: "did:aip:x"}
-	if ref.DID == "" {
-		t.Fatal("unreachable")
+// A CredentialRef must never be able to carry a raw secret value (INV-1). It
+// used to name secret-store coordinates; ADR-0015 removed those, so what is left
+// is identity, URLs and posture — and this asserts it stays that way by walking
+// the struct rather than by asserting a non-empty DID, which proved nothing.
+//
+// An installer runs at install time and writes tool config files. A credential
+// field here would mean a secret flowing into that code path, which is the shape
+// ADR-0015's `init`-writes-no-secrets property depends on.
+func TestCredentialRefCarriesOnlySafeFields(t *testing.T) {
+	allowed := map[string]bool{
+		"DID": true, "BaseURL": true, "ContentCapture": true, "InstallGitHook": true,
+		"AgentID": true, "BackendURL": true, "ProjectDir": true,
+		"Enforce": true, "Tier2": true, "Findings": true,
+	}
+	rt := reflect.TypeOf(CredentialRef{})
+	for i := 0; i < rt.NumField(); i++ {
+		name := rt.Field(i).Name
+		if !allowed[name] {
+			t.Errorf("CredentialRef gained field %q — if it carries a credential value it breaks INV-1; "+
+				"if it is genuinely non-secret, add it to this allowlist deliberately", name)
+		}
+		for _, banned := range []string{"APIKey", "PrivateKey", "Secret", "Token", "Password", "Seed"} {
+			if strings.Contains(name, banned) {
+				t.Errorf("CredentialRef field %q looks like a credential; installers must never receive one", name)
+			}
+		}
 	}
 }
 

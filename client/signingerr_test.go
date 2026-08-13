@@ -169,7 +169,7 @@ func TestEmit_MapsRejection_FailOpenAndLogSafe(t *testing.T) {
 				t.Errorf("diagnostic missing event id: %q", all)
 			}
 			// INV-1: no secret material in the diagnostic, ever.
-			if strings.Contains(all, testAPIKey) || strings.Contains(all, testSeedB64) {
+			if strings.Contains(all, testAPIKey) || strings.Contains(all, testPrivateKeyB64) {
 				t.Error("INV-1 violation: secret material leaked into the diagnostic")
 			}
 		})

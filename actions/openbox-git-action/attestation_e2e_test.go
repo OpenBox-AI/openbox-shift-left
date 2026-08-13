@@ -31,13 +31,13 @@ func TestAttestation_EndToEndThroughRepo(t *testing.T) {
 		t.Fatalf("commit identity: %v", err)
 	}
 	att, err := obgit.Attest(obgit.AttestationInput{
-		Repo:       "github.com/acme/app",
-		CommitSHA:  sha,
-		TreeSHA:    tree,
-		ParentSHAs: parents,
-		SessionIDs: []string{session},
-		DID:        "did:aip:7f3c9b2e-0000-5000-a000-000000000001",
-		SeedB64:    base64.StdEncoding.EncodeToString(priv.Seed()),
+		Repo:          "github.com/acme/app",
+		CommitSHA:     sha,
+		TreeSHA:       tree,
+		ParentSHAs:    parents,
+		SessionIDs:    []string{session},
+		DID:           "did:aip:7f3c9b2e-0000-5000-a000-000000000001",
+		PrivateKeyB64: base64.StdEncoding.EncodeToString(priv.Seed()),
 	})
 	if err != nil {
 		t.Fatalf("attest: %v", err)
@@ -110,10 +110,10 @@ func TestAttestation_ForeignSessionNotAttached(t *testing.T) {
 	sha := r.commit(trailerMsg("feat: work", "sess-mine"))
 
 	att, err := obgit.Attest(obgit.AttestationInput{
-		CommitSHA:  sha,
-		SessionIDs: []string{"sess-someone-else"},
-		DID:        "did:aip:7f3c9b2e-0000-5000-a000-000000000001",
-		SeedB64:    base64.StdEncoding.EncodeToString(priv.Seed()),
+		CommitSHA:     sha,
+		SessionIDs:    []string{"sess-someone-else"},
+		DID:           "did:aip:7f3c9b2e-0000-5000-a000-000000000001",
+		PrivateKeyB64: base64.StdEncoding.EncodeToString(priv.Seed()),
 	})
 	if err != nil {
 		t.Fatal(err)

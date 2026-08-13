@@ -7,7 +7,6 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
-	"errors"
 	"github.com/openbox-ai/openbox-shift-left/adapters/common/devconfig"
 	"io"
 	"net/http"
@@ -22,9 +21,7 @@ import (
 
 	"github.com/openbox-ai/openbox-shift-left/cli/internal/backend"
 	"github.com/openbox-ai/openbox-shift-left/cli/internal/devinit"
-	"github.com/openbox-ai/openbox-shift-left/cli/internal/secret"
 	"github.com/openbox-ai/openbox-shift-left/client"
-	"github.com/openbox-ai/openbox-shift-left/decision"
 )
 
 // fakeReg implements devinit.Registrar for the command-wiring tests.
@@ -41,22 +38,34 @@ func (f *fakeReg) FindByName(context.Context, string) (*backend.AgentSummary, er
 	return nil, nil
 }
 
-// testApp builds an app with in-memory writers and seams that fail loudly if a
-// path touches the environment/keychain/network when it should not.
+// testApp builds an app with in-memory writers and a seam that fails loudly if a
+// path touches the network when it should not.
+//
+// There is no secret-store seam to fake any more (ADR-0015). Tests that write
+// credentials call isolateHome so the real write lands in a temp dir.
 func testApp(env map[string]string) (*app, *bytes.Buffer, *bytes.Buffer) {
 	var out, errb bytes.Buffer
 	a := &app{
 		stdout: &out,
 		stderr: &errb,
 		getenv: func(k string) string { return env[k] },
-		openStore: func(string) (secret.Store, error) {
-			return nil, errors.New("openStore should not be called in this path")
-		},
 		newRegistrar: func(_, _, _ string) devinit.Registrar {
 			panic("newRegistrar should not be called in this path")
 		},
 	}
 	return a, &out, &errb
+}
+
+// isolateHome points OPENBOX_HOME and OPENBOX_CONFIG at temp dirs so a command
+// under test writes its credential file and dev.json there, never into the
+// developer's real ~/.openbox.
+func isolateHome(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	t.Setenv(devconfig.EnvHome, dir)
+	t.Setenv(devconfig.EnvConfigPath, filepath.Join(dir, "dev.json"))
+	t.Setenv(devconfig.EnvApproverConfigPath, filepath.Join(dir, "approver.json"))
+	return dir
 }
 
 func TestVersion(t *testing.T) {
@@ -70,8 +79,9 @@ func TestVersion(t *testing.T) {
 }
 
 func TestDryRunIsOfflineAndNeedsNoToken(t *testing.T) {
-	a, out, _ := testApp(nil) // empty env; detect/registrar seams panic if touched
-	code := a.run([]string{"init", "--provider", "claude-code", "--dry-run", "--org", "acme"})
+	isolateHome(t)
+	a, out, _ := testApp(nil) // empty env; the registrar seam panics if touched
+	code := a.run([]string{"init", "--provider", "claude-code", "--dry-run"})
 	if code != exitOK {
 		t.Fatalf("dry-run exit = %d", code)
 	}
@@ -80,75 +90,96 @@ func TestDryRunIsOfflineAndNeedsNoToken(t *testing.T) {
 	}
 }
 
-func TestMissingTokenIsINV1Guard(t *testing.T) {
+// `init` no longer needs a control token at all — it makes no control-plane call
+// (ADR-0015). What it needs is credentials already on the machine, and when they
+// are absent it must exit non-zero naming `auth` and install NOTHING. A
+// half-install would leave hooks that fire, fail to resolve an identity, and fail
+// open silently: an install that looks finished and governs nothing.
+func TestInitWithoutCredentialsRefusesAndInstallsNothing(t *testing.T) {
+	home := isolateHome(t)
 	a, _, errb := testApp(nil)
-	code := a.run([]string{"init", "--provider", "claude-code", "--backend-url", "https://x"})
-	if code != exitError {
-		t.Fatalf("exit = %d, want %d", code, exitError)
-	}
-	if !strings.Contains(errb.String(), "OPENBOX_CONTROL_TOKEN") || !strings.Contains(errb.String(), "INV-1") {
-		t.Errorf("expected INV-1 token guard, got %q", errb.String())
-	}
-}
-
-func TestNoSecretStoreHalts(t *testing.T) {
-	a, _, errb := testApp(map[string]string{"OPENBOX_CONTROL_TOKEN": "obx_key_x", "OPENBOX_BACKEND_URL": "https://x"})
-	a.openStore = func(string) (secret.Store, error) { return nil, secret.ErrNoStore }
 	code := a.run([]string{"init", "--provider", "claude-code"})
 	if code != exitError {
 		t.Fatalf("exit = %d, want %d", code, exitError)
 	}
-	if !strings.Contains(errb.String(), "HALT") {
-		t.Errorf("expected HALT on no secret store, got %q", errb.String())
+	if !strings.Contains(errb.String(), "openbox auth") {
+		t.Errorf("error should point at `openbox auth`, got %q", errb.String())
 	}
-	// The HALT must name BOTH escape hatches (install a keyring, or --secret-backend file).
-	if !strings.Contains(errb.String(), "--secret-backend file") {
-		t.Errorf("HALT should point to the file backend escape hatch, got %q", errb.String())
+	if !strings.Contains(errb.String(), "Nothing was installed") {
+		t.Errorf("error should state that nothing was installed, got %q", errb.String())
+	}
+	// And nothing may have been written.
+	if entries, err := os.ReadDir(home); err == nil {
+		for _, e := range entries {
+			if e.Name() == ".env" {
+				t.Error("init created a credential file; it must never write one")
+			}
+		}
 	}
 }
 
-func TestFileBackendSelectedByFlag(t *testing.T) {
-	// Opting into the file backend must NOT HALT — it resolves to a usable store.
-	// (Registration then fails on the fake network, but past the secret-store gate.)
-	a, _, errb := testApp(map[string]string{"OPENBOX_CONTROL_TOKEN": "obx_key_x", "OPENBOX_BACKEND_URL": "https://x"})
-	var gotKind string
-	store := secret.NewMemStore()
-	a.openStore = func(kind string) (secret.Store, error) { gotKind = kind; return store, nil }
+// `init` must not accept a control token as a way to register, either: the
+// registration path is gone from it entirely.
+func TestInitDoesNotRegisterEvenWithAnOrgKey(t *testing.T) {
+	isolateHome(t)
+	a, _, errb := testApp(map[string]string{"OPENBOX_CONTROL_TOKEN": "obx_key_x"})
 	a.newRegistrar = func(_, _, _ string) devinit.Registrar {
-		return &fakeReg{reg: &backend.Registration{AgentID: "a", DID: "did:aip:x", APIKey: "obx_test_k", PrivateKey: "seed"}}
+		t.Error("init reached the registrar; registration belongs to `openbox auth`")
+		return &fakeReg{}
 	}
-	// cursor is still a stub (SL-8 unbuilt), so this exercises the file-backend
-	// gate without materializing a real adapter's config into $HOME.
-	code := a.run([]string{"init", "--provider", "cursor", "--org", "acme", "--secret-backend", "file"})
-	if gotKind != "file" {
-		t.Fatalf("openStore kind = %q, want file", gotKind)
-	}
-	if code == exitError && strings.Contains(errb.String(), "HALT") {
-		t.Fatalf("file backend must not HALT: %q", errb.String())
-	}
-	if !strings.Contains(errb.String(), "PLAINTEXT") {
-		t.Errorf("expected a plaintext warning for the file backend, got %q", errb.String())
+	if code := a.run([]string{"init", "--provider", "claude-code"}); code != exitError {
+		t.Fatalf("exit = %d, want an error (no credentials); stderr=%q", code, errb.String())
 	}
 }
 
+// The HALT-on-no-secret-store path is gone with the store (ADR-0015): there is
+// nothing left to detect and nothing to refuse. What replaces it is the contract
+// below — the flag that selected a backend must FAIL rather than be ignored.
+
+// A removed flag that is silently accepted is worse than one that errors: a
+// script passing --secret-backend would keep exiting 0 while storing credentials
+// somewhere it did not choose.
+func TestRemovedSecretBackendFlagFailsLoudly(t *testing.T) {
+	for _, args := range [][]string{
+		{"init", "--provider", "claude-code", "--secret-backend", "file"},
+		{"init", "--provider", "claude-code", "--secret-backend", "os"},
+		{"init", "--role", "approver", "--org", "acme", "--backend-url", "https://x", "--secret-backend", "file"}, // approver still takes --org/--backend-url
+	} {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			isolateHome(t)
+			a, _, errb := testApp(map[string]string{"OPENBOX_CONTROL_TOKEN": "obx_key_x", "OPENBOX_BACKEND_URL": "https://x"})
+			if code := a.run(args); code != exitError {
+				t.Fatalf("exit = %d, want %d — a removed flag must not be silently accepted", code, exitError)
+			}
+			if !strings.Contains(errb.String(), "openbox auth") {
+				t.Errorf("error should point at `openbox auth`, got %q", errb.String())
+			}
+		})
+	}
+}
+
+// A provider whose adapter is not built is a partial success worth its own exit
+// code, so a script can tell it apart from a hard failure.
 func TestConfigManualOnlyExitsTwo(t *testing.T) {
-	a, _, errb := testApp(map[string]string{"OPENBOX_CONTROL_TOKEN": "obx_key_x", "OPENBOX_BACKEND_URL": "https://x"})
-	store := secret.NewMemStore()
-	a.openStore = func(string) (secret.Store, error) { return store, nil }
-	a.newRegistrar = func(_, _, _ string) devinit.Registrar {
-		return &fakeReg{reg: &backend.Registration{AgentID: "a", DID: "did:aip:x", APIKey: "obx_test_k", PrivateKey: "seed"}}
-	}
-	// cursor adapter is not built -> registered but config-manual -> exit 2.
-	code := a.run([]string{"init", "--provider", "cursor", "--org", "acme"})
+	home := isolateHome(t)
+	seedCredentials(t)
+	a, _, errb := testApp(nil)
+	// cursor's adapter is not built -> config-manual -> exit 2.
+	code := a.run([]string{"init", "--provider", "cursor"})
 	if code != exitConfigOnly {
-		t.Fatalf("exit = %d, want %d", code, exitConfigOnly)
+		t.Fatalf("exit = %d, want %d; stderr=%q", code, exitConfigOnly, errb.String())
 	}
 	if !strings.Contains(errb.String(), "note:") {
 		t.Errorf("expected a note on partial success, got %q", errb.String())
 	}
-	// Credentials must have landed in the store.
-	if store.Len() != 3 {
-		t.Errorf("stored %d secrets, want 3", store.Len())
+	// The credentials seeded above are untouched: `init` reads them to verify the
+	// precondition and never rewrites them.
+	kv, err := devconfig.ParseEnvFile(filepath.Join(home, ".env"))
+	if err != nil {
+		t.Fatalf("read credential file: %v", err)
+	}
+	if kv[devconfig.EnvAPIKeyDirect] != "obx_test_k" || kv[devconfig.EnvAgentPrivateKey] != testSeedB64 {
+		t.Errorf("init modified the credential file: %v", kv)
 	}
 }
 
@@ -163,14 +194,10 @@ func TestClaudeCodeInstallsForRealExitsZero(t *testing.T) {
 	t.Setenv("HOME", home)
 	t.Setenv("OPENBOX_CONFIG", cfgPath)
 
-	a, out, errb := testApp(map[string]string{"OPENBOX_CONTROL_TOKEN": "obx_key_x", "OPENBOX_BACKEND_URL": "https://x"})
-	store := secret.NewMemStore()
-	a.openStore = func(string) (secret.Store, error) { return store, nil }
-	a.newRegistrar = func(_, _, _ string) devinit.Registrar {
-		return &fakeReg{reg: &backend.Registration{AgentID: "a", DID: "did:aip:x", APIKey: "obx_test_k", PrivateKey: "c2VlZA=="}}
-	}
+	seedCredentials(t)
+	a, out, errb := testApp(nil)
 
-	code := a.run([]string{"init", "--provider", "claude-code", "--org", "acme"})
+	code := a.run([]string{"init", "--provider", "claude-code"})
 	if code != exitOK {
 		t.Fatalf("exit = %d, want %d; stderr=%q", code, exitOK, errb.String())
 	}
@@ -199,8 +226,18 @@ func TestClaudeCodeInstallsForRealExitsZero(t *testing.T) {
 	if strings.Contains(string(raw), "obx_test_k") || strings.Contains(string(raw), "c2VlZA==") {
 		t.Errorf("dev config leaked a secret value:\n%s", raw)
 	}
-	if store.Len() != 3 {
-		t.Errorf("stored %d secrets, want 3", store.Len())
+	// The credentials seeded before the run are untouched: `init` reads them to
+	// check its precondition and never writes one (ADR-0015).
+	envPath, err := devconfig.EnvFilePath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	kv, err := devconfig.ParseEnvFile(envPath)
+	if err != nil {
+		t.Fatalf("read credential file: %v", err)
+	}
+	if kv[devconfig.EnvAPIKeyDirect] != "obx_test_k" || kv[devconfig.EnvAgentPrivateKey] != testSeedB64 {
+		t.Errorf("init modified the credential file: %v", kv)
 	}
 }
 
@@ -215,7 +252,7 @@ func TestClaudeCodeDryRunWritesNothing(t *testing.T) {
 	t.Setenv("OPENBOX_CONFIG", cfgPath)
 
 	a, out, _ := testApp(nil) // no token/store/registrar: dry-run must stay offline
-	code := a.run([]string{"init", "--provider", "claude-code", "--dry-run", "--org", "acme"})
+	code := a.run([]string{"init", "--provider", "claude-code", "--dry-run"})
 	if code != exitOK {
 		t.Fatalf("dry-run exit = %d", code)
 	}
@@ -312,6 +349,14 @@ func TestUnifiedBinaryHookObserveOnlyContract(t *testing.T) {
 		"OPENBOX_AGENT_DID=did:aip:7f3c9b2e-0000-5000-a000-000000000001",
 		"OPENBOX_SPOOL_DIR="+spool,
 		"OPENBOX_CONFIG="+filepath.Join(dir, "none.json"),
+		// OPENBOX_HOME too, or the subprocess reads the DEVELOPER'S real
+		// ~/.openbox/dev.json (ADR-0015 moved config there). Pinning
+		// OPENBOX_CONFIG alone is not enough: a base_url resolved from the real
+		// file changes what the hook does, and these assertions then depend on
+		// whether whoever runs them has ever run `openbox auth`. CI has no
+		// ~/.openbox, so this fails only on a real developer's machine — which
+		// is the worst place for a test to start disagreeing with CI.
+		"OPENBOX_HOME="+dir,
 		"OPENBOX_SESSION_DIR="+filepath.Join(dir, "sessions"),
 	)
 	var stdout, stderr strings.Builder
@@ -397,16 +442,36 @@ func TestHookEndToEndSmoke(t *testing.T) {
 	// binary-driven test (TestHookRealtimeDelivery) — it cannot be exercised
 	// in-process, because the trigger refuses to spawn a `*.test` binary.
 	t.Setenv("OPENBOX_REALTIME", "0")
+	// Content capture OFF, so the canary below means what it says.
+	//
+	// The canary proves no tool content reaches the wire. That used to hold on
+	// the default posture because nothing on this path egressed synchronously
+	// and the spooled copy is metadata-only. ADR-0017 gates every tool call
+	// inline, and a gated escalation DOES attach content when capture is on
+	// (E7) — so on the default the canary would now be asserting the absence of
+	// something the design deliberately sends, and would fail for the right
+	// reason at the wrong test. With capture off, no content egresses on ANY
+	// path, which is the property this test is here to pin.
+	t.Setenv("OPENBOX_CONTENT_CAPTURE", "0")
 
+	// gating separates the two properties that used to be one. Every hot-path
+	// hook must be FAST; only the non-gating ones must be SILENT.
+	//
+	// PreToolUse egresses synchronously now, by design (ADR-0017): it is the
+	// gate, and its whole purpose is to obtain a verdict before the tool runs.
+	// Asserting no-egress on it would be asserting that enforcement does not
+	// work. The bound that replaced it is the provider's hook ceiling, pinned
+	// per adapter — see TestEnforceBudgetStaysUnderTheDeclaredCeiling.
 	events := []struct {
 		hook, payload string
-		hotPath       bool // hot-path hooks must NOT egress and must be fast
+		hotPath       bool // must be fast
+		gating        bool // egresses synchronously by design
 	}{
-		{"SessionStart", `{"hook_event_name":"SessionStart","session_id":"s1","cwd":"/r","source":"startup"}`, true},
-		{"UserPromptSubmit", `{"hook_event_name":"UserPromptSubmit","session_id":"s1","cwd":"/r","prompt":"hi"}`, true},
-		{"PreToolUse", `{"hook_event_name":"PreToolUse","session_id":"s1","cwd":"/r","tool_name":"Bash","tool_input":{"command":"` + contentCanary + `"}}`, true},
-		{"PostToolUse", `{"hook_event_name":"PostToolUse","session_id":"s1","cwd":"/r","tool_name":"Bash","tool_response":{"ok":true}}`, true},
-		{"SessionEnd", `{"hook_event_name":"SessionEnd","session_id":"s1","cwd":"/r","reason":"other"}`, false},
+		{"SessionStart", `{"hook_event_name":"SessionStart","session_id":"s1","cwd":"/r","source":"startup"}`, true, false},
+		{"UserPromptSubmit", `{"hook_event_name":"UserPromptSubmit","session_id":"s1","cwd":"/r","prompt":"hi"}`, true, false},
+		{"PreToolUse", `{"hook_event_name":"PreToolUse","session_id":"s1","cwd":"/r","tool_name":"Bash","tool_input":{"command":"` + contentCanary + `"}}`, true, true},
+		{"PostToolUse", `{"hook_event_name":"PostToolUse","session_id":"s1","cwd":"/r","tool_name":"Bash","tool_response":{"ok":true}}`, true, false},
+		{"SessionEnd", `{"hook_event_name":"SessionEnd","session_id":"s1","cwd":"/r","reason":"other"}`, false, false},
 	}
 	// A generous hot-path budget: local spool only, so this catches a regression
 	// that introduces synchronous/network work on the hot path without CI flake.
@@ -414,6 +479,11 @@ func TestHookEndToEndSmoke(t *testing.T) {
 	for _, e := range events {
 		a, out, errb := testApp(nil)
 		a.stdin = strings.NewReader(e.payload)
+		// Per-hook delta: the gate legitimately egresses now, and a cumulative
+		// counter would charge its call to the next hook in the table.
+		mu.Lock()
+		before := got
+		mu.Unlock()
 		start := time.Now()
 		code := a.run([]string{"hook", "claude-code", e.hook})
 		elapsed := time.Since(start)
@@ -427,11 +497,14 @@ func TestHookEndToEndSmoke(t *testing.T) {
 			if elapsed > hotPathBudget {
 				t.Errorf("%s hot-path hook took %v (> budget %v) — is it blocking on the network?", e.hook, elapsed, hotPathBudget)
 			}
-			mu.Lock()
-			n := got
-			mu.Unlock()
-			if n != 0 {
-				t.Fatalf("hot-path hook %s caused egress (%d /evaluate calls) — the hot path must be async/no-network (NFR-2)", e.hook, n)
+			if !e.gating {
+				mu.Lock()
+				n := got - before
+				mu.Unlock()
+				if n != 0 {
+					t.Fatalf("non-gating hot-path hook %s caused egress (%d /evaluate calls) — "+
+						"only the gate may block on the network (NFR-2)", e.hook, n)
+				}
 			}
 		}
 	}
@@ -506,6 +579,14 @@ func TestHookRealtimeDelivery(t *testing.T) {
 		"OPENBOX_AGENT_DID=did:aip:7f3c9b2e-0000-5000-a000-000000000001",
 		"OPENBOX_SPOOL_DIR="+spool,
 		"OPENBOX_CONFIG="+filepath.Join(dir, "none.json"),
+		// OPENBOX_HOME too, or the subprocess reads the DEVELOPER'S real
+		// ~/.openbox/dev.json (ADR-0015 moved config there). Pinning
+		// OPENBOX_CONFIG alone is not enough: a base_url resolved from the real
+		// file changes what the hook does, and these assertions then depend on
+		// whether whoever runs them has ever run `openbox auth`. CI has no
+		// ~/.openbox, so this fails only on a real developer's machine — which
+		// is the worst place for a test to start disagreeing with CI.
+		"OPENBOX_HOME="+dir,
 		"OPENBOX_SESSION_DIR="+filepath.Join(dir, "sessions"),
 		"OPENBOX_BASE_URL="+srv.URL,
 		"OPENBOX_API_KEY=obx_test_"+strings.Repeat("a", 48),
@@ -806,174 +887,40 @@ func TestUnknownProviderAndMissingProvider(t *testing.T) {
 	}
 }
 
-// ── STORY-E6-S8: `openbox dev sync` ──────────────────────────────────────────
+// `openbox dev sync` and its tests are gone with ADR-0017: the local policy
+// bundle it fetched no longer exists, so there is nothing to sync. The deleted
+// cases covered properties OF THAT FETCH — a successful sync writing a bundle
+// and pin, a null policy becoming an empty allow bundle, raw rego degrading to
+// a fail-open local bundle with a warning, a mapped 403 hint, and the INV-1
+// guard refusing the control token as a flag. Only the last outlives the
+// command, and it still holds wherever a control token is read.
+//
+// TestDevSyncIsRetired pins that the command now reports its own removal.
 
-type fakePolicyReader struct {
-	pol *backend.Policy
-	err error
-}
-
-func (f *fakePolicyReader) GetCurrentPolicy(context.Context, string) (*backend.Policy, error) {
-	return f.pol, f.err
-}
-
-// syncApp builds an app whose env + policy reader are controllable, with getenv
-// wired to os.Getenv so the adapter resolvers (ResolveBackendURL/AgentID/Bundle)
-// and runDevSync's token read see the same t.Setenv values.
-func syncApp(reader policyReader) (*app, *bytes.Buffer, *bytes.Buffer) {
-	var out, errb bytes.Buffer
-	a := &app{
-		stdout:          &out,
-		stderr:          &errb,
-		getenv:          os.Getenv,
-		newPolicyReader: func(_, _, _ string) policyReader { return reader },
-	}
-	return a, &out, &errb
-}
-
-func TestDevSync_BuilderPolicyWritesPinnedBundle(t *testing.T) {
-	dir := t.TempDir()
-	bundlePath := filepath.Join(dir, "bundle.json")
-	t.Setenv("OPENBOX_CONFIG", filepath.Join(dir, "none.json"))
-	t.Setenv("OPENBOX_CONTROL_TOKEN", "obx_key_secretorgkey")
-	t.Setenv("OPENBOX_BACKEND_URL", "https://backend.example")
-	t.Setenv("OPENBOX_AGENT_ID", "agent-9")
-	t.Setenv("OPENBOX_SIDECAR_BUNDLE", bundlePath)
-	t.Setenv("OPENBOX_STALE_DIR", filepath.Join(dir, "stale"))
-
-	reader := &fakePolicyReader{pol: &backend.Policy{
-		ID:            "pol-42",
-		UpdatedAt:     "2026-07-15T12:00:00Z",
-		PolicyBuilder: []byte(`{"version":1,"rules":[{"decision":"BLOCK","reason":"no rm","matchMode":"all","conditions":[{"field":"spans[_].attributes.command","operator":"contains","transform":"value","value":"rm -rf","valueType":"string"}]}]}`),
-	}}
-	a, out, errb := syncApp(reader)
-
-	if code := a.run([]string{"dev", "sync"}); code != exitOK {
-		t.Fatalf("dev sync exit = %d, want 0 (stderr=%s)", code, errb.String())
-	}
-	raw, err := os.ReadFile(bundlePath)
-	if err != nil {
-		t.Fatalf("bundle not written: %v", err)
-	}
-	// The written bundle carries the PIN + the builder config, and is loadable.
-	b, err := decision.ParseBundle(raw)
-	if err != nil {
-		t.Fatalf("written bundle invalid: %v", err)
-	}
-	if b.PolicyID != "pol-42" || b.UpdatedAt != "2026-07-15T12:00:00Z" || b.PolicyBuilder == nil {
-		t.Errorf("bundle pin/config wrong: %+v", b)
-	}
-	// INV-1: the org key must never appear in stdout/stderr.
-	if strings.Contains(out.String(), "obx_key_") || strings.Contains(errb.String(), "obx_key_") {
-		t.Errorf("org key leaked to output")
-	}
-	// 0600 owner-only.
-	if fi, _ := os.Stat(bundlePath); fi != nil && fi.Mode().Perm() != 0o600 {
-		t.Errorf("bundle perm = %v, want 0600", fi.Mode().Perm())
-	}
-}
-
-func TestDevSync_NullPolicyWritesAllowBundle(t *testing.T) {
-	dir := t.TempDir()
-	bundlePath := filepath.Join(dir, "bundle.json")
-	t.Setenv("OPENBOX_CONFIG", filepath.Join(dir, "none.json"))
-	t.Setenv("OPENBOX_CONTROL_TOKEN", "obx_key_x")
-	t.Setenv("OPENBOX_BACKEND_URL", "https://b.example")
-	t.Setenv("OPENBOX_AGENT_ID", "a")
-	t.Setenv("OPENBOX_SIDECAR_BUNDLE", bundlePath)
-
-	a, _, errb := syncApp(&fakePolicyReader{pol: nil}) // data==null
-	if code := a.run([]string{"dev", "sync"}); code != exitOK {
-		t.Fatalf("dev sync (null policy) exit = %d (stderr=%s)", code, errb.String())
-	}
-	if _, err := os.Stat(bundlePath); err != nil {
-		t.Fatalf("allow/no-policy bundle not written: %v", err)
-	}
-}
-
-func TestDevSync_RawRegoWarnsAndProceeds(t *testing.T) {
-	dir := t.TempDir()
-	bundlePath := filepath.Join(dir, "bundle.json")
-	t.Setenv("OPENBOX_CONFIG", filepath.Join(dir, "none.json"))
-	t.Setenv("OPENBOX_CONTROL_TOKEN", "obx_key_x")
-	t.Setenv("OPENBOX_BACKEND_URL", "https://b.example")
-	t.Setenv("OPENBOX_AGENT_ID", "a")
-	t.Setenv("OPENBOX_SIDECAR_BUNDLE", bundlePath)
-
-	a, out, _ := syncApp(&fakePolicyReader{pol: &backend.Policy{ID: "pol-raw", UpdatedAt: "t", HasRawRego: true}})
-	if code := a.run([]string{"dev", "sync"}); code != exitOK {
-		t.Fatalf("dev sync raw-rego exit non-zero")
-	}
-	if !strings.Contains(out.String(), "raw rego") && !strings.Contains(out.String(), "fail-open") {
-		t.Errorf("expected a non-secret raw-rego warning, got %q", out.String())
-	}
-}
-
-func TestDevSync_FetchErrorNonZeroWithHint(t *testing.T) {
-	dir := t.TempDir()
-	t.Setenv("OPENBOX_CONFIG", filepath.Join(dir, "none.json"))
-	t.Setenv("OPENBOX_CONTROL_TOKEN", "obx_key_x")
-	t.Setenv("OPENBOX_BACKEND_URL", "https://b.example")
-	t.Setenv("OPENBOX_AGENT_ID", "a")
-	t.Setenv("OPENBOX_SIDECAR_BUNDLE", filepath.Join(dir, "bundle.json"))
-
-	a, _, errb := syncApp(&fakePolicyReader{err: &backend.APIError{StatusCode: 403, Body: "forbidden"}})
-	if code := a.run([]string{"dev", "sync"}); code != exitError {
-		t.Fatalf("dev sync fetch error exit = %d, want %d", code, exitError)
-	}
-	if !strings.Contains(errb.String(), "read:agent_policy") {
-		t.Errorf("expected a mapped 403 hint, got %q", errb.String())
-	}
-}
-
-func TestDevSync_MissingTokenIsINV1Guard(t *testing.T) {
-	dir := t.TempDir()
-	t.Setenv("OPENBOX_CONFIG", filepath.Join(dir, "none.json"))
-	os.Unsetenv("OPENBOX_CONTROL_TOKEN")
-	a, _, errb := syncApp(&fakePolicyReader{})
-	if code := a.run([]string{"dev", "sync"}); code != exitError {
-		t.Fatalf("missing token exit = %d, want error", code)
-	}
-	if !strings.Contains(errb.String(), "OPENBOX_CONTROL_TOKEN") {
-		t.Errorf("expected the INV-1 token guard, got %q", errb.String())
-	}
-}
-
-// TestDevInit_PersistsAgentIDAndBackendURL pins §6 / G3-F5: `init` persists
-// the backend agent_id + backend_url to dev.json (non-secret), they are preserved
-// across an idempotent re-init, and ResolveAgentID()/ResolveBackendURL() return
-// them with the env unset.
-func TestDevInit_PersistsAgentIDAndBackendURL(t *testing.T) {
-	home := t.TempDir()
-	cfgPath := filepath.Join(t.TempDir(), "openbox", "dev.json")
-	t.Setenv("HOME", home)
-	t.Setenv("OPENBOX_CONFIG", cfgPath)
-	// Env-unset for the resolvers so we prove the CONFIG fallback carries them.
+// Coordinate persistence moved from `init` to `auth` (ADR-0015): `auth` writes
+// agent_id / backend_url / base_url to dev.json, they survive a re-run, and the
+// resolvers read them back with the environment unset.
+//
+// This used to drive `init`, which registered the agent and persisted what
+// registration returned. `init` no longer registers anything, so the same
+// behaviour is asserted where it now lives.
+func TestAuth_PersistsAgentIDAndBackendURL(t *testing.T) {
+	home := isolateHome(t)
+	// Env-unset for the resolvers, so this proves the CONFIG fallback carries them.
 	t.Setenv("OPENBOX_AGENT_ID", "")
 	t.Setenv("OPENBOX_BACKEND_URL", "")
 
-	newApp := func() (*app, *bytes.Buffer) {
-		a, _, errb := testApp(map[string]string{
-			"OPENBOX_CONTROL_TOKEN": "obx_key_x",
-			"OPENBOX_BACKEND_URL":   "https://backend.acme",
-		})
-		store := secret.NewMemStore()
-		a.openStore = func(string) (secret.Store, error) { return store, nil }
-		a.newRegistrar = func(_, _, _ string) devinit.Registrar {
-			return &fakeReg{reg: &backend.Registration{AgentID: "agent-123", DID: "did:aip:x", APIKey: "obx_test_k", PrivateKey: "c2VlZA=="}}
+	run := func(when string) {
+		t.Helper()
+		a, _, errb := testApp(nil)
+		a.stdin = strings.NewReader("obx_test_k\n" + testSeedB64 + "\n")
+		code := a.run([]string{"auth", "--api-key-stdin", "--private-key-stdin", "--yes",
+			"--agent-id", "agent-123", "--did", "did:aip:3f2504e0-4f89-11d3-9a0c-0305e82c3301",
+			"--backend-url", "https://backend.acme"})
+		if code != exitOK {
+			t.Fatalf("%s: auth exit = %d; stderr=%q", when, code, errb.String())
 		}
-		// newPolicyReader left nil → the last-step sync is skipped (this test is about
-		// persistence, not the fetch).
-		return a, errb
-	}
-
-	a, errb := newApp()
-	if code := a.run([]string{"init", "--provider", "claude-code", "--org", "acme"}); code != exitOK {
-		t.Fatalf("init exit = %d; stderr=%q", code, errb.String())
-	}
-
-	assertPersisted := func(when string) {
-		raw, err := os.ReadFile(cfgPath)
+		raw, err := os.ReadFile(filepath.Join(home, "dev.json"))
 		if err != nil {
 			t.Fatalf("%s: read dev config: %v", when, err)
 		}
@@ -983,7 +930,6 @@ func TestDevInit_PersistsAgentIDAndBackendURL(t *testing.T) {
 		if !strings.Contains(string(raw), `"backend_url": "https://backend.acme"`) {
 			t.Errorf("%s: dev.json missing backend_url:\n%s", when, raw)
 		}
-		// Resolvers read it back with env unset (config fallback).
 		if got := devconfig.ResolveAgentID(); got != "agent-123" {
 			t.Errorf("%s: ResolveAgentID() = %q, want agent-123", when, got)
 		}
@@ -991,58 +937,40 @@ func TestDevInit_PersistsAgentIDAndBackendURL(t *testing.T) {
 			t.Errorf("%s: ResolveBackendURL() = %q, want https://backend.acme", when, got)
 		}
 	}
-	assertPersisted("after init")
-
-	// Idempotent re-init (creds already in a fresh store won't be reused, but the
-	// installer must PRESERVE the prior agent_id/backend_url even when the ref does
-	// not carry them). Re-run and re-assert.
-	a2, errb2 := newApp()
-	if code := a2.run([]string{"init", "--provider", "claude-code", "--org", "acme"}); code != exitOK {
-		t.Fatalf("re-init exit = %d; stderr=%q", code, errb2.String())
-	}
-	assertPersisted("after re-init")
+	run("after auth")
+	// A re-run must preserve them rather than blank them — a command that cannot
+	// update is the exact failure `auth` exists to fix.
+	run("after re-auth")
 }
 
 // A self-hosted install has to be able to name its own core. The backend's
-// registration reply carries no data-plane URL, so without --base-url an
-// on-prem install onboards happily and then signs every request at
+// registration reply carries no data-plane URL, so without an explicit core URL
+// an on-prem install configures happily and then signs every request at
 // core.openbox.ai — a 401 that reads as a broken install rather than a missing
 // setting. This pins the flag, the env fallback, and the default.
-func TestDevInit_PersistsBaseURLForASelfHostedCore(t *testing.T) {
-	newApp := func(env map[string]string) *app {
-		a, _, errb := testApp(env)
-		store := secret.NewMemStore()
-		a.openStore = func(string) (secret.Store, error) { return store, nil }
-		a.newRegistrar = func(_, _, _ string) devinit.Registrar {
-			return &fakeReg{reg: &backend.Registration{AgentID: "agent-1", DID: "did:aip:x", APIKey: "obx_test_k", PrivateKey: "c2VlZA=="}}
-		}
-		_ = errb
-		return a
-	}
+func TestAuth_PersistsBaseURLForASelfHostedCore(t *testing.T) {
 	run := func(t *testing.T, env map[string]string, args ...string) string {
 		t.Helper()
-		home := t.TempDir()
-		cfgPath := filepath.Join(t.TempDir(), "openbox", "dev.json")
-		t.Setenv("HOME", home)
-		t.Setenv("OPENBOX_CONFIG", cfgPath)
+		home := isolateHome(t)
 		t.Setenv("OPENBOX_BASE_URL", "")
 		for k, v := range env {
 			t.Setenv(k, v)
 		}
-		base := append([]string{"init", "--provider", "claude-code", "--org", "acme"}, args...)
-		if code := newApp(env).run(base); code != exitOK {
-			t.Fatalf("init exit = %d", code)
+		a, _, errb := testApp(env)
+		a.stdin = strings.NewReader("obx_test_k\n" + testSeedB64 + "\n")
+		base := append([]string{"auth", "--api-key-stdin", "--private-key-stdin", "--yes",
+			"--did", "did:aip:3f2504e0-4f89-11d3-9a0c-0305e82c3301"}, args...)
+		if code := a.run(base); code != exitOK {
+			t.Fatalf("auth exit = %d; stderr=%q", code, errb.String())
 		}
-		raw, err := os.ReadFile(cfgPath)
+		raw, err := os.ReadFile(filepath.Join(home, "dev.json"))
 		if err != nil {
 			t.Fatalf("read dev config: %v", err)
 		}
 		return string(raw)
 	}
 
-	env := map[string]string{"OPENBOX_CONTROL_TOKEN": "obx_key_x", "OPENBOX_BACKEND_URL": "https://backend.acme"}
-
-	cfg := run(t, env, "--base-url", "http://localhost:8086")
+	cfg := run(t, nil, "--base-url", "http://localhost:8086")
 	if !strings.Contains(cfg, `"base_url": "http://localhost:8086"`) {
 		t.Errorf("--base-url was not persisted:\n%s", cfg)
 	}
@@ -1050,20 +978,20 @@ func TestDevInit_PersistsBaseURLForASelfHostedCore(t *testing.T) {
 		t.Errorf("ResolveCoordinates() base = %q, want the self-hosted core", got)
 	}
 
-	// The env supplies it too, so an operator who already exports it for the
-	// hooks does not have to pass it twice.
-	envWithBase := map[string]string{"OPENBOX_CONTROL_TOKEN": "obx_key_x", "OPENBOX_BACKEND_URL": "https://backend.acme", "OPENBOX_BASE_URL": "http://core.internal:8086"}
-	if cfg := run(t, envWithBase, ""); !strings.Contains(cfg, `"base_url": "http://core.internal:8086"`) {
+	// The env supplies it too, so an operator who already exports it for the hooks
+	// does not have to pass it twice.
+	if cfg := run(t, map[string]string{"OPENBOX_BASE_URL": "http://core.internal:8086"}); !strings.Contains(cfg, `"base_url": "http://core.internal:8086"`) {
 		t.Errorf("OPENBOX_BASE_URL was not persisted:\n%s", cfg)
 	}
 
-	// Saying nothing keeps the SaaS default — a SaaS install must not have to
-	// pass a flag — and the plan says so out loud.
-	if cfg := run(t, env); strings.Contains(cfg, `"base_url"`) {
-		t.Errorf("a base_url was invented with none supplied:\n%s", cfg)
+	// Saying nothing takes the hosted defaults — a SaaS install must not have to
+	// pass a flag. Before ADR-0015 there was no backend default at all.
+	cfg = run(t, nil)
+	if !strings.Contains(cfg, `"base_url": "`+devconfig.DefaultBaseURL+`"`) {
+		t.Errorf("the hosted core default was not persisted:\n%s", cfg)
 	}
-	if label := devconfig.BaseURLLabel(""); !strings.Contains(label, devconfig.DefaultBaseURL) || !strings.Contains(label, "--base-url") {
-		t.Errorf("the plan label does not name the default and the escape hatch: %q", label)
+	if !strings.Contains(cfg, `"backend_url": "`+devconfig.DefaultBackendURL+`"`) {
+		t.Errorf("the hosted backend default was not persisted:\n%s", cfg)
 	}
 }
 
@@ -1152,6 +1080,14 @@ func TestCodexUnifiedBinaryObserveE2E(t *testing.T) {
 		"OPENBOX_AGENT_DID=did:aip:7f3c9b2e-0000-5000-a000-000000000001",
 		"OPENBOX_SPOOL_DIR="+spool,
 		"OPENBOX_CONFIG="+filepath.Join(dir, "none.json"),
+		// OPENBOX_HOME too, or the subprocess reads the DEVELOPER'S real
+		// ~/.openbox/dev.json (ADR-0015 moved config there). Pinning
+		// OPENBOX_CONFIG alone is not enough: a base_url resolved from the real
+		// file changes what the hook does, and these assertions then depend on
+		// whether whoever runs them has ever run `openbox auth`. CI has no
+		// ~/.openbox, so this fails only on a real developer's machine — which
+		// is the worst place for a test to start disagreeing with CI.
+		"OPENBOX_HOME="+dir,
 		"CODEX_HOME="+filepath.Join(dir, "codex-home"),
 		// G_SEC SL7-A F3: pin every default-real-path sink for the subprocess too.
 		"OPENBOX_ADVISORY_FILE="+filepath.Join(dir, "advisories.jsonl"),
@@ -1206,19 +1142,16 @@ func TestCodexUnifiedBinaryObserveE2E(t *testing.T) {
 // exits 0. INV-1: neither file carries a secret; hooks.json carries the engine
 // path + event names only.
 func TestCodexInstallsForRealExitsZero(t *testing.T) {
+	openboxHome := isolateHome(t)
 	codexHome := filepath.Join(t.TempDir(), "codex-home")
 	cfgPath := filepath.Join(t.TempDir(), "openbox", "dev.json")
 	t.Setenv("CODEX_HOME", codexHome)
 	t.Setenv("OPENBOX_CONFIG", cfgPath)
 
-	a, out, errb := testApp(map[string]string{"OPENBOX_CONTROL_TOKEN": "obx_key_x", "OPENBOX_BACKEND_URL": "https://x"})
-	store := secret.NewMemStore()
-	a.openStore = func(string) (secret.Store, error) { return store, nil }
-	a.newRegistrar = func(_, _, _ string) devinit.Registrar {
-		return &fakeReg{reg: &backend.Registration{AgentID: "a", DID: "did:aip:x", APIKey: "obx_test_k", PrivateKey: "c2VlZA=="}}
-	}
+	seedCredentials(t)
+	a, out, errb := testApp(nil)
 
-	code := a.run([]string{"init", "--provider", "codex", "--org", "acme"})
+	code := a.run([]string{"init", "--provider", "codex"})
 	if code != exitOK {
 		t.Fatalf("exit = %d, want %d; stderr=%q", code, exitOK, errb.String())
 	}
@@ -1251,8 +1184,14 @@ func TestCodexInstallsForRealExitsZero(t *testing.T) {
 	if strings.Contains(string(rawCfg), "obx_test_k") || strings.Contains(string(rawCfg), "c2VlZA==") {
 		t.Errorf("dev config leaked a secret value:\n%s", rawCfg)
 	}
-	if store.Len() != 3 {
-		t.Errorf("stored %d secrets, want 3", store.Len())
+	// Seeded before the run and untouched by it: `init` reads credentials to check
+	// its precondition and never writes one (ADR-0015).
+	kv, err := devconfig.ParseEnvFile(filepath.Join(openboxHome, ".env"))
+	if err != nil {
+		t.Fatalf("read credential file: %v", err)
+	}
+	if kv[devconfig.EnvAPIKeyDirect] != "obx_test_k" || kv[devconfig.EnvAgentPrivateKey] != testSeedB64 {
+		t.Errorf("init modified the credential file: %v", kv)
 	}
 }
 
@@ -1265,7 +1204,7 @@ func TestCodexDryRunWritesNothing(t *testing.T) {
 	t.Setenv("OPENBOX_CONFIG", cfgPath)
 
 	a, out, _ := testApp(nil) // no token/store/registrar: dry-run must stay offline
-	code := a.run([]string{"init", "--provider", "codex", "--dry-run", "--org", "acme"})
+	code := a.run([]string{"init", "--provider", "codex", "--dry-run"})
 	if code != exitOK {
 		t.Fatalf("dry-run exit = %d", code)
 	}
@@ -1285,10 +1224,25 @@ func TestCodexDryRunWritesNothing(t *testing.T) {
 // Asking for help is not an error. `openbox dev sync -h` exited 0 while
 // `openbox init -h` exited 1, purely because only one call site checked for
 // flag.ErrHelp — the kind of inconsistency scripts and CI trip over.
+// A removed command must SAY it was removed. Falling through to the usage line
+// would leave an operator with a sync script that "works" — exit 0, no output —
+// while enforcement quietly depends on something else entirely.
+func TestDevSyncIsRetired(t *testing.T) {
+	a, _, errb := testApp(nil)
+	if code := a.run([]string{"dev", "sync"}); code == exitOK {
+		t.Error("`dev sync` exited 0 — a retired command must fail, not no-op")
+	}
+	for _, want := range []string{"no longer exists", "ADR-0017", "inert"} {
+		if !strings.Contains(errb.String(), want) {
+			t.Errorf("stderr %q must mention %q, so an operator learns what replaced it and "+
+				"that the leftover bundle file on disk is harmless", errb.String(), want)
+		}
+	}
+}
+
 func TestHelpFlagExitsZeroForEverySubcommand(t *testing.T) {
 	for _, args := range [][]string{
 		{"init", "-h"},
-		{"dev", "sync", "-h"},
 		{"dev", "verify", "-h"},
 		{"doctor", "-h"},
 		{"managed", "-h"},
@@ -1303,7 +1257,7 @@ func TestHelpFlagExitsZeroForEverySubcommand(t *testing.T) {
 // A parse error is still an error.
 func TestUnknownFlagExitsNonZero(t *testing.T) {
 	a, _, _ := testApp(nil)
-	if got := a.run([]string{"dev", "sync", "--no-such-flag"}); got == exitOK {
+	if got := a.run([]string{"dev", "verify", "--no-such-flag"}); got == exitOK {
 		t.Error("an unknown flag must not exit 0")
 	}
 }
@@ -1320,56 +1274,91 @@ func TestUnknownFlagExitsNonZero(t *testing.T) {
 func TestInit_SaysWhichSessionsAreGoverned(t *testing.T) {
 	run := func(t *testing.T, extra ...string) string {
 		t.Helper()
-		home := t.TempDir()
-		t.Setenv("HOME", home)
-		t.Setenv("OPENBOX_CONFIG", filepath.Join(t.TempDir(), "openbox", "dev.json"))
+		isolateHome(t)
+		seedCredentials(t)
 		t.Setenv("OPENBOX_AGENT_ID", "")
-		t.Setenv("OPENBOX_BACKEND_URL", "")
 
-		a, out, errb := testApp(map[string]string{
-			"OPENBOX_CONTROL_TOKEN": "obx_key_x",
-			"OPENBOX_BACKEND_URL":   "https://backend.acme",
-		})
-		store := secret.NewMemStore()
-		a.openStore = func(string) (secret.Store, error) { return store, nil }
-		a.newRegistrar = func(_, _, _ string) devinit.Registrar {
-			return &fakeReg{reg: &backend.Registration{AgentID: "agent-123", DID: "did:aip:x", APIKey: "obx_test_k", PrivateKey: "c2VlZA=="}}
-		}
-		args := append([]string{"init", "--provider", "claude-code", "--org", "acme"}, extra...)
+		a, out, errb := testApp(nil)
+		args := append([]string{"init", "--provider", "claude-code"}, extra...)
 		if code := a.run(args); code != exitOK {
 			t.Fatalf("init exit = %d; stderr=%q", code, errb.String())
 		}
 		return out.String()
 	}
 
-	t.Run("without --local-hooks, says nothing is governed yet", func(t *testing.T) {
+	t.Run("the default governs this project and states the gap", func(t *testing.T) {
 		got := run(t)
-		if !strings.Contains(got, "NO SESSIONS ARE GOVERNED YET") {
-			t.Errorf("a plain init must say it governs nothing yet; got:\n%s", got)
-		}
-		// And it must name both ways out, not just leave the user stuck.
-		for _, want := range []string{"managed settings", "--local-hooks ."} {
-			if !strings.Contains(got, want) {
-				t.Errorf("missing the remedy %q; got:\n%s", want, got)
-			}
-		}
-	})
-
-	t.Run("with --local-hooks, names the scope and its limit", func(t *testing.T) {
-		got := run(t, "--local-hooks", ".")
-		if !strings.Contains(got, "governed now") {
-			t.Errorf("--local-hooks must confirm this project is governed; got:\n%s", got)
+		if !strings.Contains(got, "THIS PROJECT ONLY") {
+			t.Errorf("a bare init governs the current directory and must say so; got:\n%s", got)
 		}
 		if !strings.Contains(got, "settings.local.json") {
 			t.Errorf("say WHERE the hooks were written so it can be checked; got:\n%s", got)
 		}
-		// The limit matters as much as the scope: a developer who thinks this
-		// covers every project has a false picture of their own coverage.
-		if !strings.Contains(got, "Sessions elsewhere are NOT governed") {
-			t.Errorf("--local-hooks must state what it does NOT cover; got:\n%s", got)
+		// The limit matters as much as the scope: a developer who thinks this covers
+		// every project has a false picture of their own coverage, and an auditor
+		// reading the events has a false picture of the developer's.
+		if !strings.Contains(got, "ANY OTHER directory are not governed") {
+			t.Errorf("the default must state what it does NOT cover; got:\n%s", got)
 		}
-		if strings.Contains(got, "NO SESSIONS ARE GOVERNED YET") {
+		if !strings.Contains(got, "absence of events is not evidence") {
+			t.Errorf("the coverage gap must be stated in the terms an auditor needs; got:\n%s", got)
+		}
+		if strings.Contains(got, "NOTHING YET") {
 			t.Errorf("contradictory output: claims both governed and ungoverned:\n%s", got)
 		}
 	})
+
+	t.Run("global scope says activation is pending and touches no project file", func(t *testing.T) {
+		dir := t.TempDir()
+		wd, err := os.Getwd()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chdir(dir); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = os.Chdir(wd) })
+
+		got := run(t, "--scope", "global")
+		if !strings.Contains(got, "NOTHING YET") {
+			t.Errorf("global scope must say it governs nothing yet; got:\n%s", got)
+		}
+		for _, want := range []string{"managed settings", "enabledPlugins", "--scope local"} {
+			if !strings.Contains(got, want) {
+				t.Errorf("missing the remedy %q; got:\n%s", want, got)
+			}
+		}
+		// It must not have written into the project tree at all.
+		if _, err := os.Stat(filepath.Join(dir, ".claude", "settings.local.json")); !os.IsNotExist(err) {
+			t.Errorf("--scope global wrote a project settings file: %v", err)
+		}
+	})
+}
+
+// seedCredentials writes what `openbox auth` would have written, since `init`
+// now requires credentials and never creates them.
+//
+// It resolves both paths through devconfig rather than taking a directory, so it
+// lands correctly whether a test pinned OPENBOX_HOME, OPENBOX_CONFIG, or just HOME.
+func seedCredentials(t *testing.T) {
+	t.Helper()
+	envPath, err := devconfig.EnvFilePath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := devconfig.WriteEnvFile(envPath, map[string]string{
+		devconfig.EnvAPIKeyDirect:    "obx_test_k",
+		devconfig.EnvAgentPrivateKey: testSeedB64,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	devPath, err := devconfig.DevConfigWritePath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := devconfig.WriteConfig(devPath, devconfig.Update{
+		DID: "did:aip:3f2504e0-4f89-11d3-9a0c-0305e82c3301",
+	}); err != nil {
+		t.Fatal(err)
+	}
 }

@@ -12,16 +12,16 @@ import (
 	"time"
 )
 
-// testSeedB64 is a known, fixed base64 raw 32-byte Ed25519 seed (the exact form
+// testPrivateKeyB64 is a known, fixed base64 raw 32-byte Ed25519 seed (the exact form
 // openbox-backend returns as identity.privateKey). Reused across tests so the
 // signer is deterministic apart from its per-request timestamp/nonce.
-const testSeedB64 = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="
+const testPrivateKeyB64 = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="
 
 const testDID = "did:aip:00000000-0000-0000-0000-000000000001"
 
 func mustSigner(t *testing.T) *signer {
 	t.Helper()
-	s, err := newSigner(testDID, testSeedB64)
+	s, err := newSigner(testDID, testPrivateKeyB64)
 	if err != nil {
 		t.Fatalf("newSigner: %v", err)
 	}

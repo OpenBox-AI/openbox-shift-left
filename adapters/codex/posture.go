@@ -1,15 +1,12 @@
 package codex
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"os"
 	"os/exec"
 	"strings"
 	"time"
 
 	"github.com/openbox-ai/openbox-shift-left/adapters/common/devconfig"
-	"github.com/openbox-ai/openbox-shift-left/decision"
 )
 
 // adapterVersion identifies this adapter build in the recorded posture. It is
@@ -25,34 +22,13 @@ const adapterVersion = "codex/1"
 // Best-effort by construction: every lookup that can fail degrades to an empty
 // field, which reads downstream as "unknown" rather than as a false claim. It
 // runs once per session on SessionStart, off the tool hot path.
-func effectivePosture(staleness devconfig.Staleness) devconfig.Posture {
+func effectivePosture() devconfig.Posture {
 	p := devconfig.EffectivePosture()
 	p.Adapter = adapterVersion
 	p.AdapterVersion = adapterVersion
 	p.ProviderVersion = providerVersion()
-	p.Staleness = staleness
-	p.BundleVersion, p.BundlePolicyID, p.BundleSHA256 = bundleCoordinates()
-	p.BundleIntegrity = string(bundleIntegrity())
 	p.ProviderManaged = providerManaged()
 	return p
-}
-
-// bundleCoordinates reads the local policy bundle's opaque identity: its
-// version and policy id (already the staleness pin) plus a hash of the file as
-// it sits on disk. The hash is what makes a local edit visible: E8-S6 gives the
-// bundle a signature to verify, but even before that, a recorded digest lets
-// the control plane see that two sessions claiming the same policy id ran
-// different bytes. Never the policy text itself.
-func bundleCoordinates() (version, policyID, sha string) {
-	path := ResolveBundlePath()
-	if b, err := decision.LoadBundleFile(path); err == nil && b != nil {
-		version, policyID = b.Version, b.PolicyID
-	}
-	if raw, err := os.ReadFile(path); err == nil {
-		sum := sha256.Sum256(raw)
-		sha = hex.EncodeToString(sum[:])
-	}
-	return version, policyID, sha
 }
 
 // providerVersion asks the Codex CLI for its version. Bounded and best-effort:
@@ -94,20 +70,6 @@ func runWithTimeout(d time.Duration, name string, args ...string) ([]byte, error
 		}
 		return nil, os.ErrDeadlineExceeded
 	}
-}
-
-// bundleIntegrity verifies the local bundle's signature so the session records
-// whether its policy was authenticated, rolled back, expired or simply unsigned
-// (E8-S6). Read-only and local — the same verification the enforce gate does, so
-// the recorded value describes the policy that would actually be evaluated.
-func bundleIntegrity() decision.Integrity {
-	path := ResolveBundlePath()
-	pubKeyB64, _ := ResolveOrgSigningKey()
-	_, integrity := decision.VerifyBundleFile(path, decision.VerifyOptions{
-		PublicKey: decision.DecodePublicKey(pubKeyB64),
-		MinEpoch:  decision.ReadEpochPin(path),
-	})
-	return integrity
 }
 
 // providerManaged reports whether this provider's own managed configuration is

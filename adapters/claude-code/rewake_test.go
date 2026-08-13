@@ -42,13 +42,17 @@ func TestRunRewake_InertWhenNothingCanFileAnApproval(t *testing.T) {
 		env  map[string]string
 		tool string
 	}{
-		{"enforce off — no gate, so no approval", map[string]string{}, "Bash"},
-		{"tier-2 off — nothing reaches the server", map[string]string{devconfig.EnvEnforce: "1"}, "Bash"},
-		{
-			"not a high-risk class — the gate never escalates it",
-			map[string]string{devconfig.EnvEnforce: "1", devconfig.EnvTier2: "1"},
-			"Read",
-		},
+		// Enforce must be turned off EXPLICITLY. It defaults on (ADR-0016), and
+		// this case used to pass on an empty env only because the tier-2 toggle
+		// it also depended on defaulted off — so it was asserting the inertness
+		// of a gate that was in fact enabled. ADR-0017 removed that toggle and
+		// exposed it.
+		{"enforce off — no gate, so no approval", map[string]string{devconfig.EnvEnforce: "0"}, "Bash"},
+		// Enforce-off is the ONLY inert case left. The two that stood beside it
+		// — tier-2 off, and a non-high-risk class — are deleted rather than
+		// fixed, because neither is inert any more: every class evaluates
+		// inline, so every class can hold an approval and every one deserves a
+		// watcher. What bounds that cost is rewakeMarkerGrace, not a class test.
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			isolateConfig(t)

@@ -46,20 +46,17 @@ func TestLookupUnknown(t *testing.T) {
 	}
 }
 
-func TestStubPlanReferencesSecretStoreNeverASecret(t *testing.T) {
+func TestStubPlanNamesTheIdentityNeverASecret(t *testing.T) {
 	inst, _ := Lookup("cursor")
-	ref := provider.CredentialRef{
-		SecretService:     "ai.openbox.dev",
-		APIKeyAccount:     "acme/cursor/api_key",
-		PrivateKeyAccount: "acme/cursor/private_key",
-		DID:               "did:aip:abc",
-	}
+	ref := provider.CredentialRef{DID: "did:aip:abc"}
 	if err := inst.Install(ref); !errors.Is(err, provider.ErrNotBuilt) {
 		t.Fatalf("Install = %v, want ErrNotBuilt", err)
 	}
 	plan := inst.Plan(ref)
-	if !strings.Contains(plan, "ai.openbox.dev") || !strings.Contains(plan, "did:aip:abc") {
-		t.Errorf("plan missing secret-store reference:\n%s", plan)
+	// The plan names the identity and where credentials come from — never a
+	// secret-store location, since ADR-0015 deleted the store.
+	if !strings.Contains(plan, "did:aip:abc") || !strings.Contains(plan, ".env") {
+		t.Errorf("plan should name the DID and the credential file:\n%s", plan)
 	}
 	if strings.Contains(plan, "obx_") {
 		t.Errorf("stub plan leaked a credential value:\n%s", plan)
@@ -73,7 +70,7 @@ func TestCodexInstallerPlanSurfacesTrustStep(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	plan := inst.Plan(provider.CredentialRef{DID: "did:aip:abc", SecretService: "ai.openbox.dev"})
+	plan := inst.Plan(provider.CredentialRef{DID: "did:aip:abc"})
 	for _, want := range []string{"/hooks", "hook codex", "did:aip:abc"} {
 		if !strings.Contains(plan, want) {
 			t.Errorf("codex plan missing %q:\n%s", want, plan)

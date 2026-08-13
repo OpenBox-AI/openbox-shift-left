@@ -62,12 +62,12 @@ func TestCorrelation_ToolUseIDRidesTheInvocationSlot(t *testing.T) {
 // can hold an approval, and an approval is keyed on activity_id — so every such
 // class must have an operation identity that survives a retry.
 //
-// Classes that are not gated deliberately fall back to the invocation, which
-// preserves their one-event-per-call granularity. This test is what stops that
-// fallback silently becoming wrong the day a class is added to
-// isHighRiskClass: gate a tool without giving it a discriminator and the
-// approval loop breaks in a way only a live session would reveal — which is
-// exactly how it was found the first time.
+// Since ADR-0017 the gate escalates EVERY class, so the name no longer means
+// "the only classes that can hold an approval". These two are the classes with a
+// real structural discriminator, and they are the ones that must stay
+// retry-stable; the rest are pinned by
+// TestUngatedClassesKeepInvocationScopedIdentity below, which records a known
+// limitation rather than an invariant.
 func TestHighRiskClassesHaveAStableOperationID(t *testing.T) {
 	m := testMapper()
 	gated := []struct {
@@ -79,7 +79,7 @@ func TestHighRiskClassesHaveAStableOperationID(t *testing.T) {
 	}
 	for _, g := range gated {
 		if !isHighRiskClass(g.tool) {
-			t.Fatalf("%s is no longer gated — update this table to match isHighRiskClass", g.tool)
+			t.Fatalf("%s lost its structural discriminator — update this table to match operationID", g.tool)
 		}
 		first, ok := m.Map(HookPreToolUse, &HookEvent{
 			SessionID: "s1", ToolName: g.tool, ToolUseID: "toolu_first", ToolInput: []byte(g.input),
@@ -97,6 +97,45 @@ func TestHighRiskClassesHaveAStableOperationID(t *testing.T) {
 		}
 		if first.Span.OperationID == first.Span.InvocationID {
 			t.Errorf("%s: operation id is the invocation — see the fallback in operationID", g.tool)
+		}
+	}
+}
+
+// A known limitation, asserted so it stays deliberate. ADR-0017 gates every
+// class, but only shell and MCP have a structural discriminator; the rest key on
+// the invocation, so their approval identity moves on every retry. An approval
+// granted for one of these calls is therefore never consumed — the developer
+// retries and a fresh request is filed instead.
+//
+// This is pinned rather than fixed because the fix is to change operationID,
+// which changes activity_id — this product's event identity, byte-pinned in
+// client/approval_key_pin_test.go and relied on by core's dedupe. That is its
+// own decision.
+//
+// What makes the limitation tolerable is its direction, which this test also
+// pins: the id moving means an approval cannot be MATCHED, so the call is
+// re-asked. It can never be silently granted.
+func TestUngatedClassesKeepInvocationScopedIdentity(t *testing.T) {
+	m := testMapper()
+	for _, tool := range []string{"Write", "Read", "WebFetch"} {
+		first, ok := m.Map(HookPreToolUse, &HookEvent{
+			SessionID: "s1", ToolName: tool, ToolUseID: "toolu_first",
+			ToolInput: []byte(`{"file_path":"/tmp/x","content":"y"}`),
+		})
+		if !ok {
+			t.Fatalf("%s did not map", tool)
+		}
+		retry, _ := m.Map(HookPreToolUse, &HookEvent{
+			SessionID: "s1", ToolName: tool, ToolUseID: "toolu_retry",
+			ToolInput: []byte(`{"file_path":"/tmp/x","content":"y"}`),
+		})
+		if first.Span.OperationID != first.Span.InvocationID {
+			t.Errorf("%s: expected the invocation fallback; it gained a discriminator, so "+
+				"the limitation above is stale and the approval loop now works for it", tool)
+		}
+		if first.Span.OperationID == retry.Span.OperationID {
+			t.Errorf("%s: identity survived a retry, which contradicts the documented "+
+				"limitation — update the comment on operationID", tool)
 		}
 	}
 }

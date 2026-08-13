@@ -17,7 +17,10 @@
 //	OPENBOX_BASE_URL   openbox-core base, e.g. https://core.openbox.ai
 //	OPENBOX_API_KEY    obx_(live|test)_… runtime key   (INV-1: never logged)
 //	OPENBOX_DID        the agent's did:aip:<uuid>
-//	OPENBOX_SEED       base64 raw 32-byte Ed25519 seed (INV-1: never logged)
+//	OPENBOX_AGENT_PRIVATE_KEY  base64 raw 32-byte Ed25519 signing key
+//	                           (INV-1: never logged). OPENBOX_SEED and
+//	                           OPENBOX_ED25519_SEED still read as deprecated
+//	                           aliases so an existing workflow keeps working.
 //
 // Ownership verification (off by default). With it off, every trailer stays
 // an unverified claim and deploys resolve `inferred` (the NoopVerifier
@@ -101,11 +104,11 @@ func run(args []string, stdout, stderr io.Writer) int {
 	// A real client is built only when we intend to emit. Dry-run needs no creds.
 	if !*dryRun {
 		c, err := client.New(client.Config{
-			BaseURL: os.Getenv("OPENBOX_BASE_URL"),
-			APIKey:  os.Getenv("OPENBOX_API_KEY"),
-			DID:     os.Getenv("OPENBOX_DID"),
-			SeedB64: os.Getenv("OPENBOX_SEED"),
-			Logger:  logger,
+			BaseURL:       os.Getenv("OPENBOX_BASE_URL"),
+			APIKey:        os.Getenv("OPENBOX_API_KEY"),
+			DID:           os.Getenv("OPENBOX_DID"),
+			PrivateKeyB64: privateKeyFromEnv(),
+			Logger:        logger,
 		})
 		if err != nil {
 			// A structurally unusable identity is a precondition fault, not a
@@ -173,4 +176,22 @@ func selectVerifier(dryRun bool, logger *log.Logger) gitaction.OwnershipVerifier
 	}
 	logger.Printf("openbox-git-action: ownership verification ENABLED against %s", apiURL)
 	return v
+}
+
+// privateKeyFromEnv reads the signing key under the name OpenBox documents, then
+// the two deprecated aliases.
+//
+// This action shipped with OPENBOX_SEED while the CLI used
+// OPENBOX_ED25519_SEED and the platform's own SDK docs said
+// OPENBOX_AGENT_PRIVATE_KEY — three names for one value, so a developer
+// following the docs configured a variable nothing read (ADR-0015). The
+// documented name wins; the aliases keep existing CI workflows green, and
+// retiring them needs its own decision.
+func privateKeyFromEnv() string {
+	for _, name := range []string{"OPENBOX_AGENT_PRIVATE_KEY", "OPENBOX_SEED", "OPENBOX_ED25519_SEED"} {
+		if v := os.Getenv(name); v != "" {
+			return v
+		}
+	}
+	return ""
 }

@@ -1,11 +1,22 @@
 #!/usr/bin/env bash
-# 10-onboard.sh — onboard for real: register a developer agent against the local
-# backend and govern exactly one scratch project.
+# 10-onboard.sh — onboard for real, through the product's own two-command front
+# door: `openbox auth` registers a developer agent against the local backend and
+# writes credentials; `openbox init` governs exactly one scratch project.
 #
-# This is the product's own front door, not a fixture: the same `init` a
-# developer runs, against the same backend, writing the same config. What the
-# harness changes is only WHERE it writes (XDG_CONFIG_HOME, see env.sh) and how
-# far it reaches (--local-hooks, one project).
+# This is not a fixture: the same commands a developer runs, against the same
+# backend, writing the same files. What the harness changes is only WHERE they
+# write — every path is pinned into testbed/.state by env.sh.
+#
+# Two things this phase proves that unit tests cannot:
+#
+#   * `auth` non-interactively via the stdin path — the automation contract, with
+#     no secret on argv (INV-1);
+#   * `init` at its DEFAULT scope, run from inside the project. The default is new
+#     (ADR-0016), so passing --scope explicitly would test something no user does.
+#
+# It also asserts the NEGATIVE: a directory where `init` was not run has no hook
+# config, so sessions there are ungoverned. That gap is what ADR-0016 accepts, and
+# a governance product should demonstrate its own limits rather than assert them.
 set -uo pipefail
 
 TB_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -13,8 +24,10 @@ TB_DIR="$(cd "$(dirname "$0")" && pwd)"
 . "$TB_DIR/lib/assert.sh"
 . "$TB_DIR/lib/sql.sh"
 
-CONFIG="$XDG_CONFIG_HOME/openbox/dev.json"
+CONFIG="$OPENBOX_HOME/dev.json"
 HOOKS="$TB_PROJECT/.claude/settings.local.json"
+# A second project, never initialized, for the negative scope assertion.
+TB_UNGOVERNED="${TB_UNGOVERNED:-/tmp/openbox-testbed-ungoverned}"
 
 tb_step "build the binary under test"
 go build -o "$TB_BIN" "$TB_REPO/cli/cmd/openbox" || tb_fatal "go build failed"
@@ -24,8 +37,9 @@ tb_step "a fresh governed project"
 # The identity survives a re-run by default: an agent's API key and signing key
 # are shown exactly once, so wiping the credential store strands the agent in
 # the org. TB_FRESH=1 opts into a clean registration (and a new agent).
-rm -rf "$TB_PROJECT"
-[ "${TB_FRESH:-0}" = "1" ] && rm -rf "$XDG_CONFIG_HOME/openbox"
+rm -rf "$TB_PROJECT" "$TB_UNGOVERNED"
+[ "${TB_FRESH:-0}" = "1" ] && rm -rf "$TB_STATE/state" "$OPENBOX_HOME"
+mkdir -p "$OPENBOX_HOME"
 mkdir -p "$TB_PROJECT"
 git -C "$TB_PROJECT" init -q -b main || tb_fatal "git init failed"
 git -C "$TB_PROJECT" config user.name "OpenBox Testbed"
@@ -33,34 +47,95 @@ git -C "$TB_PROJECT" config user.email "testbed@openbox.ai"
 git -C "$TB_PROJECT" config commit.gpgsign false
 printf '# OpenBox testbed project\n\nA scratch project whose Claude Code sessions are governed.\n' >"$TB_PROJECT/README.md"
 git -C "$TB_PROJECT" add README.md && git -C "$TB_PROJECT" commit -qm "chore: init testbed project"
-tb_ok "project at $TB_PROJECT"
+# The ungoverned twin: a real project, deliberately never initialized.
+mkdir -p "$TB_UNGOVERNED"
+git -C "$TB_UNGOVERNED" init -q -b main || tb_fatal "git init failed"
+git -C "$TB_UNGOVERNED" config user.name "OpenBox Testbed"
+git -C "$TB_UNGOVERNED" config user.email "testbed@openbox.ai"
+git -C "$TB_UNGOVERNED" config commit.gpgsign false
+printf '# Ungoverned twin\n\nNo `openbox init` was run here. Sessions started here must produce nothing.\n' >"$TB_UNGOVERNED/README.md"
+git -C "$TB_UNGOVERNED" add README.md && git -C "$TB_UNGOVERNED" commit -qm "chore: init ungoverned twin"
+tb_ok "governed project at $TB_PROJECT; ungoverned twin at $TB_UNGOVERNED"
 
-tb_step "openbox init"
+tb_step "openbox auth (registers the agent, writes credentials)"
 [ -n "${OPENBOX_CONTROL_TOKEN:-}" ] || tb_fatal "no control token — run ./testbed/env.sh mint"
 
 # One stable agent per machine, so repeated runs do not sprawl the org's seats.
-tb_init() { # [extra flags…]
-	"$TB_BIN" init \
+#
+# --yes rather than a prompt, and the coordinates as FLAGS while the secrets would
+# come over stdin: no flag on this command accepts a secret value (INV-1). On the
+# register path there is nothing to pipe — the server issues both credentials — so
+# stdin stays closed and `auth` short-circuits past the credential prompts.
+tb_auth() { # [extra flags…]
+	"$TB_BIN" auth \
 		--provider claude-code \
 		--agent-name "$TB_AGENT_NAME" \
-		--enforce \
-		--install-git-hook \
-		--local-hooks "$TB_PROJECT" \
+		--org "$OPENBOX_ORG" \
 		--backend-url "$OPENBOX_BACKEND_URL" \
 		--base-url "$OPENBOX_BASE_URL" \
-		--secret-backend file "$@" >"$TB_STATE/init.out" 2>&1
+		--yes "$@" >"$TB_STATE/auth.out" 2>&1
 }
 
-if tb_init; then
-	tb_ok "init succeeded"
-elif grep -q "already exists in this org" "$TB_STATE/init.out"; then
+if tb_auth; then
+	tb_ok "auth succeeded"
+elif grep -q "already exists in this org" "$TB_STATE/auth.out"; then
 	# The org holds an agent of this name whose one-time keys we no longer have.
-	# Registering a distinctly-named one is the only recovery the product offers.
+	# Registering a distinctly-named one is one of the two recoveries the product
+	# offers; `auth --rotate` is the other, and it needs the agent id we lack here.
 	tb_note "$TB_AGENT_NAME exists remotely with no local credentials — registering a new one (--force)"
-	if tb_init --force; then tb_ok "init succeeded (--force)"; else tb_bad "init succeeded" 0 "$(tail -2 "$TB_STATE/init.out")"; fi
+	if tb_auth --force; then tb_ok "auth succeeded (--force)"; else tb_bad "auth succeeded" 0 "$(tail -2 "$TB_STATE/auth.out")"; fi
 else
-	tb_bad "init succeeded" 0 "$(tail -2 "$TB_STATE/init.out")"
+	tb_bad "auth succeeded" 0 "$(tail -2 "$TB_STATE/auth.out")"
 fi
+
+tb_step "the credential file it wrote"
+[ -r "$TB_ENV_FILE" ] || tb_fatal "no credential file at $TB_ENV_FILE — $(tail -3 "$TB_STATE/auth.out")"
+env_body="$(cat "$TB_ENV_FILE")"
+assert_contains "credential file is testbed-scoped, not ~/.openbox" "$TB_ENV_FILE" "$TB_STATE"
+assert_contains "api key written under the documented name" "$env_body" "OPENBOX_API_KEY="
+assert_contains "signing key written under the documented name" "$env_body" "OPENBOX_AGENT_PRIVATE_KEY="
+# ADR-0015's one-store-per-field split: a coordinate in the credential file is the
+# two-store bug that made a stale DID revert a corrected one on every install.
+assert_absent "no DID in the credential file (secrets and coordinates never share)" "$env_body" "OPENBOX_AGENT_DID="
+assert_absent "no agent id in the credential file" "$env_body" "OPENBOX_AGENT_ID="
+# The header is a security control: it is where a human learns the file is
+# plaintext, is the only copy, and must not be committed.
+assert_contains "header states the plaintext posture" "$env_body" "PLAINTEXT"
+assert_contains "header says do not commit" "$env_body" "DO NOT COMMIT"
+if [ "$(uname)" != "MINGW"* ]; then
+	assert_eq "credential file is 0600" 600 "$(stat -f '%Lp' "$TB_ENV_FILE" 2>/dev/null || stat -c '%a' "$TB_ENV_FILE")"
+fi
+# INV-1 on the command's own output: auth may report WHICH credential it wrote,
+# never the value.
+auth_out="$(cat "$TB_STATE/auth.out")"
+for v in $(python3 -c "
+import sys,re
+body=open('$TB_ENV_FILE').read()
+for line in body.splitlines():
+    if line.startswith(('OPENBOX_API_KEY=','OPENBOX_AGENT_PRIVATE_KEY=')):
+        print(line.split('=',1)[1].strip().strip(chr(39)))
+"); do
+	assert_absent "auth output does not echo a credential value" "$auth_out" "$v"
+done
+assert_contains "auth names init as the next step" "$auth_out" "openbox init"
+
+tb_step "openbox init (DEFAULT scope, from inside the project)"
+# No --scope: project scope is the default since ADR-0016, and the default is what
+# a user gets. Running from inside $TB_PROJECT is how that default resolves.
+(cd "$TB_PROJECT" && "$TB_BIN" init \
+	--provider claude-code \
+	--install-git-hook) >"$TB_STATE/init.out" 2>&1 ||
+	tb_bad "init succeeded" 0 "$(tail -3 "$TB_STATE/init.out")"
+tb_ok "init succeeded at default scope"
+
+init_out="$(cat "$TB_STATE/init.out")"
+assert_contains "init names the one governed project" "$init_out" "$TB_PROJECT"
+assert_contains "init states what is NOT governed" "$init_out" "not governed"
+assert_contains "init states the audit consequence" "$init_out" "absence of events is not evidence"
+# The overstatement this product exists to avoid: a project-scoped install must
+# never read as machine-wide coverage.
+assert_absent "init does not claim ambient coverage" "$init_out" "Governance is ambient"
+
 [ -r "$CONFIG" ] || tb_fatal "no dev.json at $CONFIG — $(tail -3 "$TB_STATE/init.out")"
 
 cfg="$(cat "$CONFIG")"
@@ -70,10 +145,13 @@ tb_state_set agent_id "$agent_id"
 tb_state_set did "$did"
 
 tb_step "the config it wrote"
-assert_contains "config is testbed-scoped, not ~/.config" "$CONFIG" "$TB_STATE"
+assert_contains "config is testbed-scoped, not the real home" "$CONFIG" "$TB_STATE"
 assert_nonempty "agent_id persisted" "$agent_id"
 assert_nonempty "developer_did persisted" "$did"
-assert_eq "enforce persisted (ADR-0006: no runtime env)" true "$(tb_json "$cfg" enforce)"
+# ENFORCE BY DEFAULT (ADR-0016): nothing above passed --enforce.
+assert_eq "enforce persisted with no flag asking for it" true "$(tb_json "$cfg" enforce)"
+# And no secret leaked into the coordinate file.
+assert_absent "dev.json carries no api key" "$cfg" "obx_"
 assert_eq "backend_url persisted" "$OPENBOX_BACKEND_URL" "$(tb_json "$cfg" backend_url)"
 # The data-plane URL a self-hosted install must carry: without it the hook and
 # `dev verify` sign their requests at the SaaS core and get a 401 that reads as a
@@ -86,8 +164,8 @@ assert_eq "agent row is a developer agent" developer "$(tb_val "select agent_typ
 assert_eq "AIP signing required on every event" t "$(tb_val "select signing_required from agents where id='$agent_id';")"
 assert_eq "agent belongs to the harness org" "$OPENBOX_ORG_ID" "$(tb_val "select organization_id from agents where id='$agent_id';")"
 
-tb_step "hooks, scoped to one project"
-[ -r "$HOOKS" ] || tb_fatal "no $HOOKS — --local-hooks did not write"
+tb_step "hooks, scoped to one project (the default)"
+[ -r "$HOOKS" ] || tb_fatal "no $HOOKS — default (project) scope did not merge the hook block"
 hooks="$(cat "$HOOKS")"
 for ev in SessionStart UserPromptSubmit PreToolUse PostToolUse SessionEnd; do
 	assert_contains "$ev wired" "$hooks" "hook claude-code $ev"
@@ -103,6 +181,18 @@ assert_contains "rewake is async, so it cannot gate" "$hooks" '"asyncRewake": tr
 # a global enforce posture causes.
 enabled="$(cat "$HOME/.claude/settings.json" 2>/dev/null || echo '{}')"
 assert_absent "plugin not globally enabled — scope holds" "$enabled" "openbox-observe"
+
+tb_step "the negative: a directory where init was not run"
+# ADR-0016's accepted cost, demonstrated rather than asserted. A session started
+# here produces NOTHING — no session row, no events — so on a machine set up this
+# way, absence of events is not evidence of absence of work.
+[ -e "$TB_UNGOVERNED/.claude/settings.local.json" ] &&
+	tb_bad "ungoverned twin has no hook config" "absent" "$TB_UNGOVERNED/.claude/settings.local.json exists"
+assert_absent "ungoverned twin has no .claude dir at all" "$(ls -a "$TB_UNGOVERNED" 2>/dev/null)" ".claude"
+tb_ok "no hook config in $TB_UNGOVERNED — sessions there are ungoverned"
+# 20-capture.sh drives a real session in this directory and asserts zero rows;
+# recording the path in state is what lets it do that without re-deriving it.
+tb_state_set ungoverned_project "$TB_UNGOVERNED"
 
 tb_step "verify + doctor"
 "$TB_BIN" dev verify >"$TB_STATE/verify.out" 2>&1

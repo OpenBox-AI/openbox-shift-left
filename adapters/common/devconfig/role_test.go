@@ -48,13 +48,11 @@ func TestConfigPathForKeepsTheRolesApart(t *testing.T) {
 func TestApproverConfigRoundTrip(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "approver.json")
 	want := devconfig.ApproverConfig{
-		BackendURL:          "http://localhost:3000",
-		OrgID:               "acme.example",
-		SecretService:       "ai.openbox.dev",
-		ControlTokenAccount: "acme.example/approver/control_token",
-		Host:                "claude-code",
-		Shadow:              true,
-		PollIntervalMS:      1000,
+		BackendURL:     "http://localhost:3000",
+		OrgID:          "acme.example",
+		Host:           "claude-code",
+		Shadow:         true,
+		PollIntervalMS: 1000,
 	}
 	if err := devconfig.WriteApprover(path, want); err != nil {
 		t.Fatalf("WriteApprover: %v", err)

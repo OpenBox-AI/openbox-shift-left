@@ -67,13 +67,56 @@ jobs:
         # that pin the INV-3 hook contract (exit 0, empty stdout).
         run: go test -race $MODS
 
+      - name: Cross-compile for Windows
+        # ADR-0015 made Windows a supported target for the first time: credentials
+        # are a plaintext file, so there is no platform secret-store subprocess to
+        # port. Nothing in CI RUNS on Windows, and a cross-compile is not runtime
+        # verification — but it catches the most likely regression class by far, a
+        # stray unix-only call (syscall.Umask, /dev/null, os/exec of `security`),
+        # and it costs one step with no extra runner.
+        #
+        # Everything about Windows beyond "it compiles" is in phase 8's manual
+        # checklist and stated as unverified in the docs. Do not let this step be
+        # read as more than it is.
+        run: GOOS=windows GOARCH=amd64 go build $MODS
+
+      - name: Cross-compile for Linux arm64
+        # The other target a macOS/amd64-centric dev loop can silently break.
+        run: GOOS=linux GOARCH=arm64 go build $MODS
+
       - name: Fuzz (short)
-        # The rego-path parser and the secret redactor read attacker-adjacent
-        # strings on the enforce path, where a panic is a crashed hook. A short
-        # budget per target catches the shallow cases on every change; the
-        # corpus persists in testdata for anything found.
+        # The secret redactor reads attacker-adjacent strings on the enforce
+        # path, where a panic is a crashed hook. A short budget catches the
+        # shallow cases on every change; the corpus persists in testdata for
+        # anything found.
+        #
+        # The two rego-path fuzzers went with the local evaluator (ADR-0017).
+        # FuzzRedact was defined in the same file and had to be deliberately
+        # kept: it covers code that still runs on every gated call with a body.
         run: |
           cd decision
-          for target in FuzzTokenizePath FuzzResolvePath FuzzRedact; do
-            go test -run XXX -fuzz "$target" -fuzztime 20s ./
-          done
+          go test -run XXX -fuzz FuzzRedact -fuzztime 20s ./
+
+      - name: No tier vocabulary in user-facing docs
+        # ADR-0017 replaced the tier model with three named features. This gate
+        # covers the documents a USER reads, where "Tier 2" would describe a
+        # layering the product does not have.
+        #
+        # It is deliberately NOT repo-wide. The `tier2` config key still parses
+        # (deprecated and inert), so code has to keep spelling it, and comments
+        # explaining what the tiers WERE are how a reader understands why a
+        # deprecated key exists at all. A gate failing on those would be pressure
+        # to delete the explanation, which is the opposite of what is wanted.
+        #
+        # ADRs are records and keep their own words; the upgrade note names the
+        # deprecated keys on purpose.
+        run: |
+          hits=$(grep -rniE '\btier[- ]?[123]\b' docs README.md \
+            | grep -v '^docs/adr/' \
+            | grep -v '^docs/upgrading-to-inline-evaluation.md' \
+            || true)
+          if [ -n "$hits" ]; then
+            echo "tier vocabulary in user-facing docs (ADR-0017 retired it):"
+            echo "$hits"
+            exit 1
+          fi

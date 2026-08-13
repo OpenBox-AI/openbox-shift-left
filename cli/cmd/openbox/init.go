@@ -10,7 +10,6 @@ import (
 
 	"github.com/openbox-ai/openbox-shift-left/adapters/common/devconfig"
 	"github.com/openbox-ai/openbox-shift-left/cli/internal/backend"
-	"github.com/openbox-ai/openbox-shift-left/cli/internal/secret"
 )
 
 // `openbox init` — the front door for both roles.
@@ -80,13 +79,21 @@ func (a *app) runApproverInit(args []string) int {
 	fs.StringVar(&orgID, "org", a.env("OPENBOX_ORG_ID", ""), "organization whose approval queue this approver works (required)")
 	fs.StringVar(&backendURL, "backend-url", a.env(devconfig.EnvBackendURL, ""), "openbox-backend control-plane base URL")
 	fs.StringVar(&clientID, "client-id", a.env("OPENBOX_CLIENT", "openbox-cli"), "value for the x-openbox-client header (Keycloak JWT path)")
-	fs.StringVar(&secretBackend, "secret-backend", a.env("OPENBOX_SECRET_BACKEND", "auto"), "credential store: auto|os (OS keychain, default) or file (opt-in 0600 plaintext file)")
+	// Parsed only so passing it fails loudly rather than silently doing nothing
+	// (ADR-0015 deleted the store it selected).
+	fs.StringVar(&secretBackend, "secret-backend", "", "REMOVED — the approver credential lives in ~/.openbox/.env")
 	fs.StringVar(&host, "host", "", "agentic host that evaluates a request when running unattended: claude-code|codex (default: none — a human decides)")
 	fs.StringVar(&envelope, "envelope", "", "policy bundle bounding what the host may decide; the host may only narrow it")
 	fs.BoolVar(&decide, "allow-decide", false, "let this approver DECIDE, not just observe. Off by default: an approver starts in shadow mode until its envelope has been read against real traffic")
-	fs.BoolVar(&dryRun, "dry-run", false, "print the plan; make no network or secret-store writes")
+	fs.BoolVar(&dryRun, "dry-run", false, "print the plan; make no network or filesystem writes")
 	if code, ok := parseFlags(fs, args); !ok {
 		return code
+	}
+	if secretBackend != "" {
+		return a.errorf("--secret-backend was removed: there is no secret store to choose any more.\n" +
+			"  The approver credential is written to ~/.openbox/.env (plaintext, 0600 — see\n" +
+			"  docs/adr/ADR-0015-plaintext-credential-file.md), by this command or by `openbox auth`.\n" +
+			"  Re-run without this flag.")
 	}
 	if orgID == "" {
 		return a.errorf("--org is required (or OPENBOX_ORG_ID) — it names the approval queue this approver works")
@@ -95,15 +102,25 @@ func (a *app) runApproverInit(args []string) int {
 		return a.errorf("set --backend-url or %s to the openbox-backend base URL", devconfig.EnvBackendURL)
 	}
 
-	path := devconfig.DefaultApproverConfigPath()
-	account := orgID + "/approver/control_token"
+	a.migrateLegacyConfig()
+	path, err := devconfig.ApproverConfigWritePath()
+	if err != nil {
+		return a.errorf("%v", err)
+	}
+	envPath, err := devconfig.EnvFilePath()
+	if err != nil {
+		return a.errorf("%v", err)
+	}
 
 	if dryRun {
-		fmt.Fprintf(a.stdout, "DRY RUN — no network calls, no secret-store or filesystem writes.\n\n")
+		fmt.Fprintf(a.stdout, "DRY RUN — no network calls, no filesystem writes.\n\n")
 		fmt.Fprintf(a.stdout, "Would install an APPROVER (a queue client; no agent is registered, no hooks are installed):\n")
 		fmt.Fprintf(a.stdout, "  org:          %s\n  backend:      %s\n  host:         %s\n  envelope:     %s\n  mode:         %s\n",
 			orgID, backendURL, orNone(host), orNone(envelope), shadowLabel(!decide))
-		fmt.Fprintf(a.stdout, "  config:       %s\n  credential:   secret store %q, account %q (the token itself is never written here)\n", path, secret.Service, account)
+		fmt.Fprintf(a.stdout, "  config:       %s\n  credential:   %s as %s\n", path, envPath, devconfig.EnvControlToken)
+		fmt.Fprintf(a.stdout, "\n  NOTE: that credential is an ORGANIZATION key with fleet-wide create/rotate\n")
+		fmt.Fprintf(a.stdout, "        authority, and it is stored in PLAINTEXT (ADR-0015). An agent signing key\n")
+		fmt.Fprintf(a.stdout, "        compromises one agent; this compromises every agent in %s.\n", orgID)
 		return exitOK
 	}
 
@@ -135,7 +152,7 @@ func (a *app) runApproverInit(args []string) int {
 	// answers 403 both for a missing permission AND for an agent outside the
 	// caller's org — a made-up agent id cannot tell those apart.
 	probeAgent, err := cl.FirstAgentID(ctx)
-	if err != nil {
+	if err != nil { //nolint:govet // err is reused deliberately
 		return a.errorf("cannot list %s's agents to verify this credential: %v", orgID, err)
 	}
 	switch {
@@ -153,33 +170,23 @@ func (a *app) runApproverInit(args []string) int {
 		fmt.Fprintf(a.stdout, "✓ credential may decide approvals (manage:agent_session)\n")
 	}
 
-	store, err := a.openStore(secretBackend)
-	if err != nil {
-		if errors.Is(err, secret.ErrNoStore) {
-			return a.errorf("HALT: %v — refusing to store the approver credential in plaintext by default.\n"+
-				"  Install an OS keyring, or opt in explicitly:\n"+
-				"      openbox init --role approver --org %s --secret-backend file", err, orgID)
-		}
-		return a.errorf("%v", err)
-	}
-	if err := store.Set(secret.Service, account, token); err != nil {
-		return a.errorf("store approver credential: %v", err)
+	// The org key is persisted so `openbox approve` runs later with no
+	// environment. That is the point of an approver install — and it is also the
+	// largest single exposure this product creates, so the write is announced
+	// rather than silent (ADR-0015).
+	if err := devconfig.WriteEnvFile(envPath, map[string]string{devconfig.EnvControlToken: token}); err != nil {
+		return a.errorf("write approver credential: %v", err)
 	}
 
 	cfg := devconfig.ApproverConfig{
-		BackendURL:          backendURL,
-		OrgID:               orgID,
-		SecretService:       secret.Service,
-		ControlTokenAccount: account,
-		Host:                host,
-		Envelope:            envelope,
-		Shadow:              !decide,
-		PollIntervalMS:      1000,
-		HostTimeoutMS:       8000,
-		MaxAutoPerHour:      60,
-	}
-	if secretBackend == "file" {
-		cfg.SecretFile = secret.DefaultFilePath()
+		BackendURL:     backendURL,
+		OrgID:          orgID,
+		Host:           host,
+		Envelope:       envelope,
+		Shadow:         !decide,
+		PollIntervalMS: 1000,
+		HostTimeoutMS:  8000,
+		MaxAutoPerHour: 60,
 	}
 	if err := devconfig.WriteApprover(path, cfg); err != nil {
 		return a.errorf("%v", err)
@@ -187,6 +194,9 @@ func (a *app) runApproverInit(args []string) int {
 
 	fmt.Fprintf(a.stdout, "\nApprover installed.\n")
 	fmt.Fprintf(a.stdout, "  config    %s\n  queue     %s (org %s)\n  mode      %s\n", path, backendURL, orgID, shadowLabel(cfg.Shadow))
+	fmt.Fprintf(a.stderr, "\nwarning: %s now holds an ORGANIZATION key in plaintext. It can create and rotate\n", envPath)
+	fmt.Fprintf(a.stderr, "         agents across %s — a far larger blast radius than one agent's signing key.\n", orgID)
+	fmt.Fprintf(a.stderr, "         Do not run an approver install on a shared host (ADR-0015).\n")
 	if host != "" {
 		fmt.Fprintf(a.stdout, "  host      %s\n", host)
 	}

@@ -169,7 +169,7 @@ func TestAcceptanceStockCoreAcceptsEmittedEvents(t *testing.T) {
 	}
 
 	log := &captureLogger{}
-	c, err := client.New(client.Config{BaseURL: baseURL, APIKey: apiKey, DID: did, SeedB64: seed, Logger: log})
+	c, err := client.New(client.Config{BaseURL: baseURL, APIKey: apiKey, DID: did, PrivateKeyB64: seed, Logger: log})
 	if err != nil {
 		t.Fatalf("build client: %v", err)
 	}
@@ -239,7 +239,7 @@ func TestAcceptanceEmitsOnlyStockWireTypes(t *testing.T) {
 
 	did := "did:aip:00000000-0000-0000-0000-000000000000"
 	log := &captureLogger{}
-	c, err := client.New(client.Config{BaseURL: srv.URL, APIKey: "obx_test_stockcore", DID: did, SeedB64: ephemeralSeedB64(t), Logger: log})
+	c, err := client.New(client.Config{BaseURL: srv.URL, APIKey: "obx_test_stockcore", DID: did, PrivateKeyB64: ephemeralPrivateKeyB64(t), Logger: log})
 	if err != nil {
 		t.Fatalf("build client: %v", err)
 	}
@@ -271,9 +271,9 @@ func TestAcceptanceEmitsOnlyStockWireTypes(t *testing.T) {
 	})
 }
 
-// ephemeralSeedB64 mints a throwaway base64 Ed25519 seed for the fake-core test
+// ephemeralPrivateKeyB64 mints a throwaway base64 Ed25519 seed for the fake-core test
 // (the fake never verifies the signature; the client just needs a valid signer).
-func ephemeralSeedB64(t *testing.T) string {
+func ephemeralPrivateKeyB64(t *testing.T) string {
 	t.Helper()
 	seed := make([]byte, ed25519.SeedSize)
 	if _, err := rand.Read(seed); err != nil {

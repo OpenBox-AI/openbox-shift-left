@@ -21,7 +21,7 @@ TB_DIR="$(cd "$(dirname "$0")" && pwd)"
 . "$TB_DIR/lib/session.sh"
 
 export TB_MCP_CONFIG="$TB_MCP"
-# Observe posture, deliberately. A Tier-2 escalation is allowed to carry the
+# Observe posture, deliberately. A gated call is allowed to carry the
 # command so an approver can decide (OD-E9-7, client.Content.ToolInput) — that
 # copy is 40-approvals' business. What must hold HERE is the observe rule:
 # ordinary telemetry never gains a command or a file body.
@@ -170,7 +170,7 @@ fi
 assert_ge "AGE evaluated" 1 "$(tb_count "age_evaluations where governance_event_id in $events")"
 
 tb_step "spool drained at SessionEnd"
-spool="$XDG_CONFIG_HOME/openbox/cc-spool"
+spool="$OPENBOX_SPOOL_DIR"
 assert_eq "no events left spooled for this session" 0 "$(find "$spool" -name "*$sid*" 2>/dev/null | wc -l)"
 
 tb_step "privacy posture (INV-2 / SL3-SEC-3)"
@@ -184,5 +184,30 @@ assert_nonempty "egress captured for inspection" "$egress"
 assert_contains "prompt content egressed (content_capture on)" "$egress" "$PROMPT_MARK"
 assert_absent "shell command text never egressed" "$egress" "$SHELL_MARK"
 assert_absent "file body never egressed" "$egress" "$FILE_MARK"
+
+# ── the negative: an ungoverned directory produces NOTHING ───────────────────
+# ADR-0016's accepted cost, demonstrated end to end rather than asserted. This is
+# the assertion that makes "absence of events is not evidence of absence of work"
+# a measured property of the product instead of a caveat in a document.
+tb_step "a real session in a directory where init was not run"
+ungoverned="$(tb_state_get ungoverned_project)"
+if [ -z "$ungoverned" ] || [ ! -d "$ungoverned" ]; then
+	tb_note "no ungoverned twin recorded — run 10-onboard.sh; skipping the negative scope assertion"
+else
+	before="$(tb_count "governance_events")"
+	UNGOVERNED_MARK="ungoverned-$(date +%s)"
+	sid_un="$(TB_SESSION_DIR="$ungoverned" tb_session "Say the word $UNGOVERNED_MARK and nothing else." "")"
+	after="$(tb_count "governance_events")"
+	assert_eq "no governance events from an ungoverned directory" "$before" "$after"
+	if [ -n "$sid_un" ]; then
+		assert_eq "no session row for it either" 0 "$(tb_count "governance_events where run_id='$sid_un'")"
+	fi
+	# And nothing about that session reached OpenBox at all, prompt included. The
+	# whole row is scanned rather than one column, matching how the capture
+	# assertions above inspect egress.
+	assert_eq "its prompt never egressed" 0 \
+		"$(tb_val "select count(*) from governance_events e where row_to_json(e)::text like '%$UNGOVERNED_MARK%';")"
+	tb_ok "the ungoverned twin produced no rows — the scope gap is real and bounded"
+fi
 
 tb_finish

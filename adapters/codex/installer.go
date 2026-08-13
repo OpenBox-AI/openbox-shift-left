@@ -91,11 +91,10 @@ func (i Installer) Plan(ref CredentialRef) string {
 	fmt.Fprintf(&b, "  - Write dev config (non-secret coordinates) → %s\n", i.configPath())
 	fmt.Fprintf(&b, "      developer_did=%s\n", ref.DID)
 	fmt.Fprintf(&b, "      base_url=%s\n", devconfig.BaseURLLabel(ref.BaseURL))
-	fmt.Fprintf(&b, "      secret_service=%q api_key_account=%q private_key_account=%q\n",
-		ref.SecretService, ref.APIKeyAccount, ref.PrivateKeyAccount)
 	fmt.Fprintf(&b, "      content_capture=%s (default ON as of 2026-07-15; set false to restore metadata-only)\n", contentCaptureLabel(ref.ContentCapture))
-	fmt.Fprintf(&b, "  - Credentials stay in the OS secret store; the hook reads them at runtime (INV-1) —\n")
-	fmt.Fprintf(&b, "    hooks.json carries the engine path + event names ONLY (no key, DID, or URL).\n")
+	fmt.Fprintf(&b, "  - Credentials are NOT touched here: `openbox auth` wrote them to ~/.openbox/.env and\n")
+	fmt.Fprintf(&b, "    the hook reads them at runtime (ADR-0015) — hooks.json carries the engine path +\n")
+	fmt.Fprintf(&b, "    event names ONLY (no key, DID, or URL).\n")
 	fmt.Fprintf(&b, "\nTrust step (Codex hash-trusts non-managed hooks):\n")
 	fmt.Fprintf(&b, "  After install, run /hooks inside Codex to review and TRUST the new OpenBox hooks —\n")
 	fmt.Fprintf(&b, "  until trusted they do not run. (`--dangerously-bypass-hook-trust` and `--disable hooks`\n")
@@ -347,6 +346,17 @@ func (i Installer) hooksPath() string {
 func (i Installer) configPath() string {
 	if i.ConfigPath != "" {
 		return i.ConfigPath
+	}
+	// The WRITE target, deliberately — not DefaultConfigPath(), which is
+	// read-resolved and prefers an existing LEGACY file over a not-yet-created new
+	// one (devconfig.resolveConfigPath). Writing through the read path would let an
+	// install land in the pre-ADR-0015 directory whenever migration had not yet
+	// created the new file — and migration is explicitly non-fatal, so that is
+	// reachable, not theoretical. It happens to work today only because
+	// migrateLegacyConfig usually runs first; relying on that ordering is what this
+	// avoids.
+	if p, err := devconfig.DevConfigWritePath(); err == nil {
+		return p
 	}
 	return DefaultConfigPath()
 }

@@ -12,8 +12,8 @@ import (
 // One machine can hold two unrelated identities: the DEVELOPER runtime whose
 // sessions are governed, and an APPROVER that decides other people's requests.
 // They must not share a file. The developer config is read by every hook on the
-// tool hot path; the approver config carries a different principal's
-// coordinates and is read only by `openbox approve`.
+// tool hot path; the approver config carries a different principal's settings
+// and is read only by `openbox approve`.
 //
 // The separation is structural rather than conventional: the hook path calls
 // DefaultConfigPath and has no way to name the approver file (guarded by
@@ -55,33 +55,27 @@ func ConfigPathFor(r Role) string {
 	return DefaultConfigPath()
 }
 
-// DefaultApproverConfigPath is <user-config-dir>/openbox/approver.json.
+// DefaultApproverConfigPath is ~/.openbox/approver.json (ADR-0015), with the
+// same read-side legacy fallback DefaultConfigPath has.
 func DefaultApproverConfigPath() string {
-	if p := os.Getenv(EnvApproverConfigPath); p != "" {
-		return p
+	p, err := ApproverConfigPath()
+	if err != nil {
+		return filepath.Join(legacyConfigDir(), "approver.json")
 	}
-	dir, err := os.UserConfigDir()
-	if err != nil || dir == "" {
-		dir = filepath.Join(os.Getenv("HOME"), ".config")
-	}
-	return filepath.Join(dir, "openbox", "approver.json")
+	return p
 }
 
 // ApproverConfig is the non-secret half of an approver install: where the queue
 // is, and how this approver is meant to work it.
 //
-// INV-1 holds here exactly as it does for the developer config — the control
-// token itself lives in the OS secret store, and this file carries only the
-// coordinates needed to find it.
+// The control token itself lives in ~/.openbox/.env under OPENBOX_CONTROL_TOKEN
+// (ADR-0015), not here — this file stays credential-free. On an approver install
+// that token is an org key with fleet-wide create/rotate authority, which is why
+// ADR-0015 names it separately from the agent signing key.
 type ApproverConfig struct {
 	// BackendURL and OrgID name the queue to read.
 	BackendURL string `json:"backend_url,omitempty"`
 	OrgID      string `json:"org_id,omitempty"`
-
-	// Credential coordinates (never the credential).
-	SecretService       string `json:"secret_service,omitempty"`
-	ControlTokenAccount string `json:"control_token_account,omitempty"`
-	SecretFile          string `json:"secret_file,omitempty"`
 
 	// Host is what evaluates a request when the approver runs unattended:
 	// "claude-code", "codex", … Empty means no autonomous evaluation — the
@@ -121,9 +115,8 @@ func LoadApprover(path string) (ApproverConfig, error) {
 	return c, nil
 }
 
-// WriteApprover writes the approver config 0600 — it names a principal's
-// credential coordinates, so it is not world-readable even though it holds no
-// secret.
+// WriteApprover writes the approver config 0600 — it names which queue a
+// principal works, so it is not world-readable even though it holds no secret.
 func WriteApprover(path string, c ApproverConfig) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return fmt.Errorf("approver config mkdir: %w", err)

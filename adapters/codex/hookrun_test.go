@@ -12,6 +12,8 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/openbox-ai/openbox-shift-left/adapters/common/devconfig"
 )
 
 // setHookEnv isolates RunHook from the real machine: temp spool + nonexistent
@@ -119,6 +121,16 @@ func TestRunHook_SessionEndFlushesSpool(t *testing.T) {
 	t.Setenv("OPENBOX_BASE_URL", srv.URL) // loopback http allowed (INV-1 guard)
 	t.Setenv("OPENBOX_API_KEY", "obx_test_key")
 	t.Setenv("OPENBOX_ED25519_SEED", base64.StdEncoding.EncodeToString(make([]byte, 32)))
+	// Content capture OFF, stated rather than inherited, because this case is
+	// about the FLUSH path carrying no content — not about the content posture.
+	//
+	// It used to get that for free: with the gate narrowed to escalating
+	// nothing by default, the spooled metadata-only copy was the only thing
+	// that ever reached the wire. ADR-0017 evaluates every gated call inline,
+	// and an escalation DOES attach content when capture is on (E7), so leaving
+	// the default here would assert the absence of something the design now
+	// deliberately sends. That posture belongs to its own tests.
+	t.Setenv(devconfig.EnvContentCapture, "0")
 
 	secret := "FLUSH-SECRET-COMMAND"
 	pre := `{"hook_event_name":"PreToolUse","session_id":"th-flush","cwd":"/r","tool_name":"Bash",` +

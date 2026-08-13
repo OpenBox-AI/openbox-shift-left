@@ -42,7 +42,7 @@ const flushBudget = 12 * time.Second
 // to `stdout` — the INV-3b carve-out. It still only ever tightens (deny /
 // content-stripping rewrite, never a grant) and still exits 0, so a
 // non-blocking verdict is byte-identical to observe mode. Every other
-// hook, and observe mode, write nothing to stdout (except the Tier-3
+// hook, and observe mode, write nothing to stdout (except the
 // findings additionalContext/systemMessage).
 //
 // `sub` is the hook name (SessionStart/UserPromptSubmit/PreToolUse/PostToolUse/
@@ -50,7 +50,7 @@ const flushBudget = 12 * time.Second
 // the enforce apply writes the permissionDecision (unused in observe mode).
 func RunHook(sub string, stdin io.Reader, stdout io.Writer, logger *log.Logger) {
 	// Freeze config reads for this hook run: everything the gate decides —
-	// enforce, the failure policy, tier-2 — must come from one version of
+	// enforce, the failure policy — must come from one version of
 	// dev.json, not one read per flag.
 	defer devconfig.Pin()()
 	// Guarantee a panic never escapes into the caller's exit path.
@@ -109,9 +109,9 @@ func RunHook(sub string, stdin io.Reader, stdout io.Writer, logger *log.Logger) 
 	// value so Map stays I/O-free.
 	ad.Mapper.ThreadID = os.Getenv(obgit.EnvCodexThreadID)
 	// Pin the Mapper clock to one instant for this hook invocation. In
-	// enforce+Tier-2 mode RunHook maps the PreToolUse event twice — once
+	// on a gated call RunHook maps the PreToolUse event twice — once
 	// here via Observe (the spooled copy, flushed on SessionEnd) and once
-	// inside escalateTier2 → runTier2 (the synchronous /evaluate copy). A
+	// inside escalateEvaluation → runTier2 (the synchronous /evaluate copy). A
 	// fresh time.Now() on each Map would fold a different RFC3339Nano
 	// timestamp into deriveID and yield different event_ids, so the two
 	// would not collapse under one Idempotency-Key server-side
@@ -167,11 +167,7 @@ func RunHook(sub string, stdin io.Reader, stdout io.Writer, logger *log.Logger) 
 	// It is the only SessionStart stdout writer, so running it earlier does not
 	// reorder anything the provider sees.
 	if hook == HookSessionStart {
-		staleness := devconfig.StalenessNotChecked
-		if ResolveEnforce() {
-			staleness = hookflow.CheckPolicyStaleness(logger, ev.SessionID, stdout)
-		}
-		posture := effectivePosture(staleness)
+		posture := effectivePosture()
 		ad.Mapper.Posture = &posture
 	}
 
@@ -193,7 +189,7 @@ func RunHook(sub string, stdin io.Reader, stdout io.Writer, logger *log.Logger) 
 	gated := hook == HookPreToolUse && ResolveEnforce()
 
 	// The observe copy. On a gated hook it is DEFERRED into the gate below,
-	// which spools it only if the Tier-2 escalation did not already deliver the
+	// which spools it only if the inline evaluation did not already deliver the
 	// identical event — see EnforceGate.SpoolObserve for why writing it here
 	// stored every escalated ActivityStarted twice. The duration stash is still
 	// threaded now (RecordDeferred): it has to be written before the tool runs,
@@ -230,11 +226,11 @@ func RunHook(sub string, stdin io.Reader, stdout io.Writer, logger *log.Logger) 
 	// The gate's steps and their order live in hookflow.EnforceGate, shared with
 	// every provider. What this adapter supplies is how to read its own hook
 	// event (enforceTarget), how it spells a response (contract), and its hook
-	// budget (tier2).
+	// budget (the evaluation).
 	if gated {
 		g := hookflow.EnforceGate{
 			Contract:     contract,
-			Tier2:        tier2,
+			Evaluator:    evaluator,
 			Record:       func(dec decision.Decision, res hookflow.ApplyResult) { recordEnforcement(logger, ev, dec, res) },
 			SpoolObserve: spoolObserve,
 		}

@@ -12,21 +12,24 @@ as reconstructed and states what evidence it was rebuilt from. They record what
 was decided and why, as accurately as the surviving evidence supports; where the
 original reasoning is not recoverable, they say so rather than inventing it.
 
-ADR-0008, 0010, 0011, 0012, 0013 and 0014 are originals.
+ADR-0008, 0010, 0011, 0012, 0013, 0014, 0015, 0016 and 0017 are originals.
 
 | ADR | Title | Status |
 |-----|-------|--------|
 | [0001](ADR-0001-provider-spi-registry.md) | Provider SPI with the registry in the composition root | Accepted (reconstructed) |
-| [0002](ADR-0002-inv3b-carve-out.md) | INV-3b: enforcement may block, but only in-process | Accepted (reconstructed) |
+| [0002](ADR-0002-inv3b-carve-out.md) | INV-3b: enforcement may block, but only in-process | Accepted in part (reconstructed; clause 3 retired by 0017, clause 1 by 0016) |
 | [0003](ADR-0003-decision-module.md) | The decision engine is its own module | Accepted (reconstructed, superseded in part by 0006) |
 | [0004](ADR-0004-base-wire-unification.md) | Unify dev telemetry onto the base SDK wire model | Accepted (reconstructed, amended, superseded in part by 0013) |
-| [0005](ADR-0005-native-policy-evaluator.md) | Native Go policy evaluator instead of embedded OPA | Accepted (reconstructed) |
+| [0005](ADR-0005-native-policy-evaluator.md) | Native Go policy evaluator instead of embedded OPA | **Superseded by 0017** (reconstructed) |
 | [0006](ADR-0006-in-process-decider.md) | In-process decider; retire the socket sidecar | Accepted (reconstructed) |
 | [0007](ADR-0007-shared-devconfig.md) | One shared dev-config module across adapters | Accepted (reconstructed) |
-| [0008](ADR-0008-signed-policy-bundles.md) | Signed policy bundles | Accepted (client side implemented) |
+| [0008](ADR-0008-signed-policy-bundles.md) | Signed policy bundles | **Moot for this runtime** since 0017 — there is no bundle to sign |
 | [0009](ADR-0009-idempotency-receipts.md) | Server-side idempotency and delivery receipts | Accepted (reconstructed) |
 | [0010](ADR-0010-signed-commit-attestation.md) | Signed commit attestation | Accepted |
 | [0011](ADR-0011-multi-module-layout.md) | Keep the multi-module layout, with a workspace | Accepted |
 | [0012](ADR-0012-autonomous-approver.md) | Autonomous approver: envelope-bounded, host-pluggable, narrowing-only | Accepted |
 | [0013](ADR-0013-tool-call-as-activity.md) | A tool call is an Activity; retire the hook-span layer | Accepted |
 | [0014](ADR-0014-turn-as-activity-and-identifier-allowlist.md) | A model turn is an Activity; INV-2's usage path becomes an allowlist | Accepted |
+| [0015](ADR-0015-plaintext-credential-file.md) | Credentials live in one plaintext file; the OS keychain is deleted | Accepted |
+| [0016](ADR-0016-default-install-posture.md) | What a bare `openbox init` does: project-local scope, enforce ON | Accepted |
+| [0017](ADR-0017-inline-policy-evaluation.md) | Inline policy evaluation: `/evaluate` is the only decider | Accepted |

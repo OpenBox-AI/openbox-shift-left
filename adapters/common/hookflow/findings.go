@@ -15,7 +15,7 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/client"
 )
 
-// Tier-3 findings loop.
+// findings loop.
 //
 // Governance findings (guardrail categories, goal-drift, risk, would-block)
 // are computed by /evaluate and recorded — content-free — on the flush

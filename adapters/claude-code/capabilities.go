@@ -22,7 +22,7 @@ func Capabilities() []providerspi.Capability {
 		{Key: "commit.binding", Supported: true, How: "OpenBox-Session git trailer; provider-independent"},
 		{Key: "telemetry.tokens", Supported: true, How: "PER TURN (ResolveFinops, default on): Stop/SubagentStop → llm_completion activity pair carrying model + 4 token counts (ADR-0014), plus the SessionEnd session rollup. Window sums, not per-model-call — hooks fire per turn. Transcript projection binds one egressing string (model), allowlist-enforced (INV-2); off the hot path. Cost never derived here"},
 		{Key: "telemetry.model", Supported: true, How: "per-turn model attribution from the transcript's message.model (last non-empty in the window); omitted rather than guessed when a window names none. SessionStart's model field is separate and not guaranteed present"},
-		{Key: "verdict.apply", Supported: true, How: "enforce leg: PreToolUse in-process decision → permissionDecision deny/ask (opt-in, default observe); tighten-only, never emits allow as a grant; REQUIRE_APPROVAL→ask (CC has an HITL prompt)"},
-		{Key: "enforce.rewrite", Supported: true, How: "Tier-1 secret redaction → permissionDecision:allow + updatedInput on the proceed path (Write/Edit bodies); allow rides only a redacting rewrite; gated on content posture"},
+		{Key: "verdict.apply", Supported: true, How: "enforce leg: every gated PreToolUse call is evaluated by /evaluate (ADR-0017) → permissionDecision deny/ask; ON by default (ADR-0016); tighten-only, never emits allow as a grant; REQUIRE_APPROVAL is held for a real decision and denies if unanswered"},
+		{Key: "enforce.rewrite", Supported: true, How: "local secret redaction → permissionDecision:allow + updatedInput on the proceed path (Write/Edit bodies); allow rides only a redacting rewrite; gated on content posture"},
 	}
 }

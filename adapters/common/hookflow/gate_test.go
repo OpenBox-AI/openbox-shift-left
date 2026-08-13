@@ -6,14 +6,15 @@ import (
 	"encoding/json"
 	"log"
 	"os"
-	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/openbox-ai/openbox-shift-left/adapters/common/devconfig"
 	"github.com/openbox-ai/openbox-shift-left/client"
 	"github.com/openbox-ai/openbox-shift-left/decision"
+	"github.com/openbox-ai/openbox-shift-left/provider"
 )
 
 // shellTarget is a high-risk (shell) tool call, the class the gate escalates.
@@ -26,7 +27,7 @@ func (shellTarget) HighRisk() bool             { return true }
 func (shellTarget) DecisionRequest(bool) decision.DecisionRequest {
 	return decision.DecisionRequest{SessionID: "sess-1", Tool: client.Tool{Name: "Bash", Kind: client.ToolShell}}
 }
-func (shellTarget) DevEvent() (client.DevEvent, bool) {
+func (shellTarget) DevEvent(*client.Content) (client.DevEvent, bool) {
 	return client.DevEvent{
 		SchemaVersion: client.SchemaVersion,
 		EventID:       "evt-1",
@@ -66,8 +67,8 @@ func runGate(t *testing.T, g *fakeGovernor, holdMS string) (string, decision.Dec
 	var out bytes.Buffer
 	gate := EnforceGate{
 		Contract: testContract{approval: "ask"},
-		Tier2: Tier2{
-			HookBudget: 29 * time.Second,
+		Evaluator: Evaluator{
+			Ceiling:    provider.HookCeiling{Gating: 30 * time.Second},
 			MaxTimeout: 4 * time.Second,
 			NewClient:  func(*log.Logger) (Governor, error) { return approvalGovernor{fakeGovernor: g}, nil },
 		},
@@ -153,7 +154,7 @@ func TestGate_MarkerHandoffToTheWatcher(t *testing.T) {
 
 func mustDevEvent(t *testing.T) client.DevEvent {
 	t.Helper()
-	ev, ok := shellTarget{}.DevEvent()
+	ev, ok := shellTarget{}.DevEvent(nil)
 	if !ok {
 		t.Fatal("shellTarget must map")
 	}
@@ -167,58 +168,66 @@ func (g degradedGovernor) Emit(context.Context, client.DevEvent) (client.Evaluat
 	return client.Evaluation{}, client.ErrDelivery
 }
 
-// A REQUIRE_APPROVAL that survived a DEGRADED escalation was never sent, so
-// there is no record to poll for. Holding on it would spend the entire budget
-// on not-founds and then deny a call the org only asked to prompt about.
-func TestGate_DoesNotHoldForAnUnfiledApproval(t *testing.T) {
+// countingGovernor records how many times the gate asked for a verdict.
+type countingGovernor struct {
+	*fakeGovernor
+	emits *int32
+}
+
+func (g countingGovernor) Emit(context.Context, client.DevEvent) (client.Evaluation, error) {
+	atomic.AddInt32(g.emits, 1)
+	return client.Evaluation{}, client.ErrDelivery
+}
+
+// The gate must not retry a failed evaluation. It runs on EVERY gated tool call
+// since ADR-0017, so a retry loop here would turn one control-plane hiccup into
+// a client-side amplifier — every developer's every tool call hammering a
+// struggling core, and each call delayed by the full retry sequence while doing
+// it. A failed evaluation applies the org's failure policy and returns.
+//
+// Stated at this layer deliberately: the transport has its own bounded retry,
+// which is a different decision made in a different place. What is pinned here
+// is that the GATE asks exactly once.
+func TestGate_DoesNotRetryAFailedEvaluation(t *testing.T) {
 	isolateConfig(t)
-	t.Setenv(devconfig.EnvTier2, "1")
-	t.Setenv(devconfig.EnvApprovalHold, "5000")
+	isolateMarkers(t)
 	t.Setenv(devconfig.EnvEnforcementFile, t.TempDir()+"/enforcements.jsonl")
 	defer devconfig.Pin()()
 
-	// A local bundle that requires approval for this call: Tier-1 says approval
-	// is needed, and the escalation that would file it cannot deliver.
-	raw, err := json.Marshal(&decision.Bundle{
-		Version: "hold-test",
-		Rules: []decision.Rule{{
-			ID:       "shell-approval",
-			Match:    decision.RuleMatch{ToolKind: "shell"},
-			Decision: "require_approval",
-			Reason:   "shell needs approval",
-		}},
-	})
-	if err != nil {
-		t.Fatalf("marshal bundle: %v", err)
-	}
-	bundlePath := filepath.Join(t.TempDir(), "policy-bundle.json")
-	if err := os.WriteFile(bundlePath, raw, 0o600); err != nil {
-		t.Fatalf("write bundle: %v", err)
-	}
-	t.Setenv(EnvBundle, bundlePath)
-
-	g := &fakeGovernor{replies: []func() (client.ApprovalStatus, error){pending(time.Now().Add(time.Hour))}}
+	var emits int32
 	var out bytes.Buffer
 	gate := EnforceGate{
 		Contract: testContract{approval: "ask"},
-		Tier2: Tier2{
-			HookBudget: 29 * time.Second,
-			MaxTimeout: 100 * time.Millisecond,
-			NewClient:  func(*log.Logger) (Governor, error) { return degradedGovernor{fakeGovernor: g}, nil },
+		Evaluator: Evaluator{
+			Ceiling:    provider.HookCeiling{Gating: 30 * time.Second},
+			MaxTimeout: 4 * time.Second,
+			NewClient: func(*log.Logger) (Governor, error) {
+				return countingGovernor{fakeGovernor: &fakeGovernor{}, emits: &emits}, nil
+			},
 		},
 		Record: func(decision.Decision, ApplyResult) {},
 	}
-
-	start := time.Now()
 	gate.Run(context.Background(), discard(), &out, shellTarget{})
-	if g.polls != 0 {
-		t.Errorf("polled %d times for a request that was never filed", g.polls)
-	}
-	if elapsed := time.Since(start); elapsed > 2*time.Second {
-		t.Errorf("gate took %v — it held for an unfiled approval", elapsed)
-	}
-	// It degrades to the provider's own prompt, exactly as before the hold existed.
-	if out.String() != "ask\n" {
-		t.Errorf("provider output = %q, want the provider's approval prompt", out.String())
+
+	if n := atomic.LoadInt32(&emits); n != 1 {
+		t.Errorf("gate asked for a verdict %d times, want exactly 1 — a retry inside the "+
+			"gate amplifies a core outage across every tool call of every session", n)
 	}
 }
+
+// A REQUIRE_APPROVAL that survived a DEGRADED escalation was never sent, so
+// there is no record to poll for. Holding on it would spend the entire budget
+// on not-founds and then deny a call the org only asked to prompt about.
+// TestGate_DoesNotHoldForAnUnfiledApproval is deleted with the local evaluator
+// (ADR-0017).
+//
+// It covered a state that can no longer exist: a LOCAL bundle returning
+// REQUIRE_APPROVAL while the escalation that would file it could not deliver,
+// so the gate held for a record nobody had created — spending the whole budget
+// on not-founds and then denying. There is no local verdict now, so a
+// REQUIRE_APPROVAL can only come from the server, which means it was filed by
+// definition.
+//
+// The guard that outlived it is in the gate itself and still reads
+// `dec.Source == SourceEvaluate` before holding, so a hold still requires a
+// server verdict rather than merely a REQUIRE_APPROVAL-shaped decision.

@@ -28,21 +28,43 @@ tb_ok "built $ACTION"
 
 # The action authenticates as the developer agent itself — same DID, same key —
 # because a deploy that is not this agent's is not this agent's lineage. The
-# credentials come out of the harness's own secret store rather than being
-# re-minted, so the Deploy event is signed by exactly the identity whose
-# sessions it references.
-eval "$(python3 - "$OPENBOX_SECRET_FILE" <<'PY'
-import json, sys, shlex
+# credentials come out of the harness's own credential file rather than being
+# re-minted, so the Deploy event is signed by exactly the identity whose sessions
+# it references.
+#
+# Two names, deliberately: the SECRETS come from ~/.openbox/.env and the DID from
+# dev.json, because ADR-0015 keeps them in separate files. Reading the DID from
+# beside the secrets is the two-store bug that split removed.
+eval "$(python3 - "$TB_ENV_FILE" "$OPENBOX_HOME/dev.json" <<'PY'
+import json, shlex, sys
+
+def parse_env(path):
+    out = {}
+    try:
+        for line in open(path):
+            line = line.strip().removeprefix("export ")
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            k, v = line.split("=", 1)
+            out[k.strip()] = v.strip().strip("'\"")
+    except OSError:
+        pass
+    return out
+
+env = parse_env(sys.argv[1])
 try:
-    store = json.load(open(sys.argv[1]))["ai.openbox.dev"]
+    did = json.load(open(sys.argv[2])).get("developer_did", "")
 except Exception:
-    raise SystemExit(0)
-pick = lambda suffix: next((v for k, v in store.items() if k.endswith(suffix)), "")
-for var, suffix in (("OPENBOX_DID", "/did"), ("OPENBOX_API_KEY", "/api_key"), ("OPENBOX_SEED", "/private_key")):
-    print(f"export {var}={shlex.quote(pick(suffix))}")
+    did = ""
+print(f"export OPENBOX_DID={shlex.quote(did)}")
+print(f"export OPENBOX_API_KEY={shlex.quote(env.get('OPENBOX_API_KEY', ''))}")
+# Under the name the platform documents; the action still reads the old aliases,
+# but the harness exercises the current one.
+print(f"export OPENBOX_AGENT_PRIVATE_KEY={shlex.quote(env.get('OPENBOX_AGENT_PRIVATE_KEY', ''))}")
 PY
 )"
-[ -n "${OPENBOX_DID:-}" ] || tb_fatal "no developer credentials in $OPENBOX_SECRET_FILE — run 10-onboard.sh"
+[ -n "${OPENBOX_DID:-}" ] || tb_fatal "no developer DID in $OPENBOX_HOME/dev.json — run 10-onboard.sh"
+[ -n "${OPENBOX_API_KEY:-}" ] || tb_fatal "no credentials in $TB_ENV_FILE — run 10-onboard.sh"
 export OPENBOX_AGENT_ID="$AGENT"
 
 # ── the authoring session ─────────────────────────────────────────────────────

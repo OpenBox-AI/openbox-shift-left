@@ -2,59 +2,22 @@ package claudecode
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
+	"io"
 	"log"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 	"unicode/utf8"
 
+	"github.com/openbox-ai/openbox-shift-left/adapters/common/devconfig"
 	"github.com/openbox-ai/openbox-shift-left/adapters/common/hookflow"
 	"github.com/openbox-ai/openbox-shift-left/client"
 	"github.com/openbox-ai/openbox-shift-left/decision"
 )
-
-// writeBundleFile marshals b to a temp bundle file and returns its path. A nil b
-// returns a path to a file that does NOT exist, which the in-process decider treats
-// as cold-start fail-open (VerdictUnknown / "fail-open:no-bundle") — the in-process
-// analog of the old "absent socket"/"reachable daemon, no bundle" cases (ADR-0006).
-func writeBundleFile(t *testing.T, b *decision.Bundle) string {
-	t.Helper()
-	path := filepath.Join(t.TempDir(), "policy-bundle.json")
-	if b == nil {
-		return path // nonexistent → cold-start fail-open
-	}
-	raw, err := json.Marshal(b)
-	if err != nil {
-		t.Fatalf("marshal bundle: %v", err)
-	}
-	if err := os.WriteFile(path, raw, 0o600); err != nil {
-		t.Fatalf("write bundle: %v", err)
-	}
-	return path
-}
-
-// setBundleEnv points the full-hook decider (RunHook → newDecider → ResolveBundlePath)
-// at a bundle file for b (or a nonexistent path when b==nil → cold-start fail-open),
-// and returns the path. Use this for full-hook (RunHook) tests. Replaces the old
-// socket-serving helper (ADR-0006: the decision is evaluated in-process from a file).
-func setBundleEnv(t *testing.T, b *decision.Bundle) string {
-	t.Helper()
-	path := writeBundleFile(t, b)
-	t.Setenv(envSidecarBundle, path)
-	return path
-}
-
-// newTestDecider builds an in-process decider over a bundle file for b (nil →
-// cold-start fail-open). It is the in-process replacement for the old socket
-// decision.NewClient(...) handed to EnforceDecision (ADR-0006).
-func newTestDecider(t *testing.T, b *decision.Bundle) decision.Decider {
-	t.Helper()
-	return decision.NewInProcessDecider(decision.InProcessConfig{BundlePath: writeBundleFile(t, b)})
-}
 
 func TestResolveEnforce(t *testing.T) {
 	cfgPath := filepath.Join(t.TempDir(), "dev.json")
@@ -62,10 +25,17 @@ func TestResolveEnforce(t *testing.T) {
 	t.Setenv(envConfigPath, cfgPath)
 	os.Unsetenv(envEnforce) // env genuinely absent → config decides
 
-	// Default: no config field, no env → false (Phase-1 observe; never enforce by accident).
+	// Default: no config field, no env → TRUE (ADR-0016 reversed the observe
+	// default). The adapter resolves through devconfig, so this pins that the
+	// facade did not keep a stale default of its own.
 	write(`{"developer_did":"` + testDID + `"}`)
+	if !ResolveEnforce() {
+		t.Error("an absent enforce field must resolve to ON (ADR-0016)")
+	}
+	// An explicit false still opts out.
+	write(`{"developer_did":"` + testDID + `","enforce":false}`)
 	if ResolveEnforce() {
-		t.Error("default should be false (observe)")
+		t.Error("enforce:false in config must opt out")
 	}
 
 	// Config enables enforce mode.
@@ -216,70 +186,18 @@ func TestCapCommand_ByteBoundedRuneSafe(t *testing.T) {
 	}
 }
 
-func TestEnforceDecision_FailOpenWhenSidecarAbsent(t *testing.T) {
-	// No bundle file loaded → cold-start fail-open (the in-process analog of an
-	// absent socket): every fault fails open (ADR-0006).
-	cl := newTestDecider(t, nil)
-	ev := &HookEvent{SessionID: "s", ToolName: "Bash", ToolInput: []byte(`{"command":"rm -rf /"}`)}
+// TestEnforceDecision_FailOpenWhenSidecarAbsent and
+// TestEnforceDecision_LiveBlock are deleted with the local evaluator
+// (ADR-0017).
+//
+// The first asserted that an absent bundle degrades to a prompt fail-open allow
+// rather than blocking; the second, that a loaded BLOCK rule denies the matching
+// call with the policy reason and id. Both were about the decider that no longer
+// exists. The surviving local step decides nothing and cannot block, so the
+// fail-open property holds by construction; the block property moved to the
+// server and is asserted end to end by C1 and C12 against a real /evaluate.
 
-	start := time.Now()
-	dec := EnforceDecision(context.Background(), cl, Identity{DeveloperDID: testDID}, ev, false)
-	elapsed := time.Since(start)
-
-	if !dec.FailOpen {
-		t.Error("absent sidecar must fail open")
-	}
-	if dec.Evaluation.Verdict != client.VerdictUnknown {
-		t.Errorf("fail-open verdict = %q, want Unknown (not a real ALLOW/BLOCK)", dec.Evaluation.Verdict)
-	}
-	if dec.Evaluation.WouldBlock() {
-		t.Error("fail-open decision must never report WouldBlock")
-	}
-	if elapsed > 2*time.Second {
-		t.Errorf("fail-open took %v — must return promptly within the bound", elapsed)
-	}
-}
-
-func TestEnforceDecision_LiveBlock(t *testing.T) {
-	bundle := &decision.Bundle{
-		Version:         "test-1",
-		DefaultDecision: "allow",
-		Rules: []decision.Rule{{
-			ID: "no-rm-rf",
-			Match: decision.RuleMatch{
-				ToolKind:          "shell",
-				AttributeContains: map[string]string{"command": "rm -rf"},
-			},
-			Decision: "block",
-			Reason:   "destructive recursive delete",
-			PolicyID: "test-policy",
-		}},
-	}
-	cl := newTestDecider(t, bundle)
-
-	// A dangerous command → the local policy returns BLOCK (obtained synchronously).
-	danger := &HookEvent{SessionID: "s", ToolName: "Bash", ToolInput: []byte(`{"command":"rm -rf /tmp/x"}`)}
-	dec := EnforceDecision(context.Background(), cl, Identity{DeveloperDID: testDID}, danger, false)
-	if dec.FailOpen {
-		t.Fatalf("live sidecar should not fail open: %+v", dec)
-	}
-	if dec.Evaluation.Verdict != client.VerdictBlock || !dec.Evaluation.WouldBlock() {
-		t.Errorf("verdict = %q (would_block=%t), want BLOCK", dec.Evaluation.Verdict, dec.Evaluation.WouldBlock())
-	}
-
-	// A benign command → default allow.
-	benign := &HookEvent{SessionID: "s", ToolName: "Bash", ToolInput: []byte(`{"command":"echo hi"}`)}
-	if d := EnforceDecision(context.Background(), cl, Identity{DeveloperDID: testDID}, benign, false); d.Evaluation.WouldBlock() {
-		t.Errorf("benign command should not block: %+v", d)
-	}
-}
-
-// TestRunHook_EnforceGate is the AC-2/AC-4 guard: with enforce OFF the sidecar is
-// NEVER dialed (observe path byte-unchanged); with enforce ON a PreToolUse dials
-// it exactly once and logs the decision — and NOTHING is written to stdout in
-// either mode (INV-3 holds verbatim for E6-S1).
 func TestRunHook_EnforceGate(t *testing.T) {
-	setBundleEnv(t, nil) // no bundle loaded → in-process cold-start fail-open ALLOW
 	isolateConfig(t)
 	t.Setenv(envDID, testDID)
 	t.Setenv("OPENBOX_SPOOL_DIR", t.TempDir())
@@ -316,7 +234,6 @@ func TestRunHook_EnforceGate(t *testing.T) {
 // TestRunHook_EnforceOnlyPreToolUse guards AC-6: even in enforce mode, a
 // non-PreToolUse hook never dials the sidecar (the gate is a pre-execution concept).
 func TestRunHook_EnforceOnlyPreToolUse(t *testing.T) {
-	setBundleEnv(t, nil)
 	isolateConfig(t)
 	t.Setenv(envDID, testDID)
 	t.Setenv("OPENBOX_SPOOL_DIR", t.TempDir())
@@ -679,18 +596,6 @@ func TestRecordEnforcement_NoRedactionLeak(t *testing.T) {
 // record. A benign command in the same session writes nothing (tighten-only) and
 // records a proceed. INV-2: neither surface carries the shell command.
 func TestRunHook_EnforceApply_Block(t *testing.T) {
-	bundle := &decision.Bundle{
-		Version:         "test-1",
-		DefaultDecision: "allow",
-		Rules: []decision.Rule{{
-			ID:       "no-rm-rf",
-			Match:    decision.RuleMatch{ToolKind: "shell", AttributeContains: map[string]string{"command": "rm -rf"}},
-			Decision: "block",
-			Reason:   "destructive recursive delete",
-			PolicyID: "test-policy",
-		}},
-	}
-	setBundleEnv(t, bundle)
 	isolateConfig(t)
 	t.Setenv(envDID, testDID)
 	t.Setenv("OPENBOX_SPOOL_DIR", t.TempDir())
@@ -698,6 +603,27 @@ func TestRunHook_EnforceApply_Block(t *testing.T) {
 	t.Setenv(envEnforce, "1")
 	enfFile := filepath.Join(t.TempDir(), "enforcements.jsonl")
 	t.Setenv(envEnforcementFile, enfFile)
+	// The verdict comes from the control plane now (ADR-0017); what this case
+	// asserts — the apply cascade and the durable audit line — is unchanged. The
+	// stub answers per COMMAND, the way the rule it replaces did, so the benign
+	// half is still a genuine proceed rather than an absent server.
+	//
+	// Content capture is on so the stub can see the command it is judging. That
+	// is the real posture for content-aware policy; the INV-2 assertions below
+	// are about stdout and the local audit, which stay content-free either way.
+	t.Setenv(envContentCapture, "1")
+	blockRmRf := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		w.Header().Set("Content-Type", "application/json")
+		if strings.Contains(string(raw), "rm -rf") {
+			_, _ = w.Write([]byte(`{"verdict":"block","reason":"destructive recursive delete","policy_id":"test-policy"}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"verdict":"allow"}`))
+	}))
+	defer blockRmRf.Close()
+	evalCreds(t, blockRmRf.URL)
+	t.Setenv(envContentCapture, "1")
 
 	run := func(payload string) string {
 		var stdout bytes.Buffer
@@ -840,7 +766,6 @@ func TestRunHook_EnforceFailClosed(t *testing.T) {
 	// enforce ON + fail_closed ON + NO bundle loaded (cold-start fail-open) → deny.
 	t.Setenv(envEnforce, "1")
 	t.Setenv(envFailClosed, "1")
-	setBundleEnv(t, nil)
 	out := run()
 	d, reason := parsePermissionDecision(t, []byte(out))
 	if d != ccDecisionDeny {
@@ -853,16 +778,19 @@ func TestRunHook_EnforceFailClosed(t *testing.T) {
 		t.Errorf("fail-closed reason leaked the shell command (INV-2): %q", out)
 	}
 
-	// A loaded allow bundle with a benign command → real ALLOW → PROCEED even under
-	// fail-closed (the policy does not touch a real allow verdict).
-	setBundleEnv(t, &decision.Bundle{Version: "t", DefaultDecision: "allow"})
+	// A reachable /evaluate answering ALLOW → a real verdict → PROCEED even under
+	// fail-closed (the policy does not touch a real allow verdict). The verdict
+	// has to come from the server since ADR-0017; a local allow with nothing
+	// reachable is the outage case asserted just above.
+	serveVerdict(t, `{"verdict":"allow"}`)
+	allowURL, _ := serveEvaluate(t, `{"verdict":"allow"}`, 200, 0)
+	evalCreds(t, allowURL)
 	if out := run(); strings.TrimSpace(out) != "" {
 		t.Errorf("fail-closed must NOT block a real allow; stdout=%q", out)
 	}
 
 	// enforce OFF (still fail_closed=1) → byte-identical to observe: nothing to stdout.
 	t.Setenv(envEnforce, "0")
-	setBundleEnv(t, nil)
 	if out := run(); strings.TrimSpace(out) != "" {
 		t.Errorf("enforce-off must not deny even under fail_closed=1; stdout=%q", out)
 	}
@@ -1033,24 +961,16 @@ func TestApprovalRefFallsBackToGovernanceEventID(t *testing.T) {
 // id, so the reason/audit gracefully omit it (see TestRecordEnforcement_ApprovalID
 // for the approval-id path).
 func TestRunHook_EnforceApply_Approval(t *testing.T) {
-	bundle := &decision.Bundle{
-		Version:         "test-appr",
-		DefaultDecision: "allow",
-		Rules: []decision.Rule{{
-			ID:       "gh-approval",
-			Match:    decision.RuleMatch{ToolKind: "mcp"},
-			Decision: "require_approval",
-			Reason:   "external repository mutation",
-			PolicyID: "mcp-policy",
-		}},
-	}
-	setBundleEnv(t, bundle)
 	isolateConfig(t)
 	t.Setenv(envDID, testDID)
 	t.Setenv("OPENBOX_SPOOL_DIR", t.TempDir())
 	t.Setenv("OPENBOX_SESSION_DIR", t.TempDir())
 	enfFile := filepath.Join(t.TempDir(), "enforcements.jsonl")
 	t.Setenv(envEnforcementFile, enfFile)
+	// A short hold: this case is about the verdict and the audit, not about how
+	// long the gate waits for an approver.
+	t.Setenv(devconfig.EnvApprovalHold, "200")
+	serveVerdict(t, `{"verdict":"require_approval","reason":"external repository mutation","policy_id":"mcp-policy"}`)
 
 	payload := `{"hook_event_name":"PreToolUse","session_id":"s","cwd":"/tmp","tool_name":"mcp__github__create_issue","tool_input":{"title":"secret-project-x plans"}}`
 	run := func() string {
@@ -1059,17 +979,25 @@ func TestRunHook_EnforceApply_Approval(t *testing.T) {
 		return stdout.String()
 	}
 
-	// enforce ON → ask, with the policy reason + id surfaced (content-free).
+	// enforce ON → the request is FILED, held for, and — with no approver in this
+	// test — denied when the hold runs out (OD-E9-1), with the policy reason + id
+	// surfaced content-free.
+	//
+	// It used to render as `ask`, the provider's own prompt. That was the
+	// LOCALLY-derived approval: nothing had been filed, so there was nothing to
+	// wait on and the only sensible move was to let the developer decide. A
+	// server REQUIRE_APPROVAL is a filed record, so the gate holds for a real
+	// answer instead — and an unanswered request denies rather than asking the
+	// developer to approve their own.
 	t.Setenv(envEnforce, "1")
 	out := run()
 	d, reason := parsePermissionDecision(t, []byte(out))
-	if d != ccDecisionAsk {
-		t.Fatalf("approval-required tool: permissionDecision = %q, want ask (stdout=%q)", d, out)
+	if d != ccDecisionDeny {
+		t.Fatalf("approval-required tool: permissionDecision = %q, want deny after an "+
+			"unanswered hold (stdout=%q)", d, out)
 	}
-	for _, want := range []string{"mcp-policy", "external repository mutation"} {
-		if !strings.Contains(reason, want) {
-			t.Errorf("ask reason = %q, want it to carry %q", reason, want)
-		}
+	if !strings.Contains(reason, "mcp-policy") {
+		t.Errorf("deny reason = %q, want it to name the deciding policy", reason)
 	}
 	if strings.Contains(out, "secret-project-x") {
 		t.Errorf("stdout leaked the tool input (INV-2): %q", out)
@@ -1087,20 +1015,20 @@ func TestRunHook_EnforceApply_Approval(t *testing.T) {
 	if err := json.Unmarshal([]byte(strings.TrimSpace(string(data))), &rec); err != nil {
 		t.Fatalf("enforcement record is not valid JSON: %v", err)
 	}
-	if rec.AppliedDecision != ccDecisionAsk || rec.Verdict != string(client.VerdictRequireApproval) {
-		t.Errorf("record = %+v, want REQUIRE_APPROVAL/ask", rec)
+	if rec.AppliedDecision != ccDecisionDeny || rec.Verdict != string(client.VerdictHalt) {
+		t.Errorf("record = %+v, want an unanswered approval recorded as HALT/deny", rec)
 	}
 
-	// enforce OFF → byte-identical to observe: no ask even for the approval tool.
+	// enforce OFF → byte-identical to observe: nothing at all for the approval tool.
 	t.Setenv(envEnforce, "0")
 	if out := run(); strings.TrimSpace(out) != "" {
-		t.Errorf("enforce-off must not ask; stdout=%q", out)
+		t.Errorf("enforce-off must write nothing; stdout=%q", out)
 	}
 }
 
-// The approval context (OD-E9-7): an escalation must carry what the call is
-// asking to do, or the approval it files is not decidable — `kind=shell
-// tool_name=Bash` tells a human and an autonomous approver exactly nothing.
+// The evaluation context (OD-E9-7): a gated call must carry what it is asking
+// to do, or neither the server nor an approver can decide about it — `kind=shell
+// tool_name=Bash` tells them exactly nothing.
 //
 // The matching guarantee is that the OBSERVE copy of the same call never
 // carries it (SL3-SEC-3), which is why the two are mapped separately.
@@ -1113,11 +1041,12 @@ func TestEscalationCarriesApprovalContext_ObserveNeverDoes(t *testing.T) {
 	}{
 		{"shell carries the command", "Bash", `{"command":"rm -rf /tmp/x"}`, "rm -rf /tmp/x"},
 		{"mcp carries the arguments", "mcp__github__create_issue", `{"title":"ship it"}`, "ship it"},
+		{"file carries the body", "Write", `{"file_path":"/tmp/a","content":"hello"}`, "hello"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			hookEv := &HookEvent{SessionID: "s1", ToolName: tc.tool, ToolInput: []byte(tc.input)}
 
-			escalated, ok := enforceTarget{id: Identity{DeveloperDID: testDID}, mapper: m, ev: hookEv}.DevEvent()
+			escalated, ok := enforceTarget{id: Identity{DeveloperDID: testDID}, mapper: m, ev: hookEv}.DevEvent(nil)
 			if !ok {
 				t.Fatal("escalation event did not map")
 			}
@@ -1133,17 +1062,26 @@ func TestEscalationCarriesApprovalContext_ObserveNeverDoes(t *testing.T) {
 		})
 	}
 
-	// A class that cannot be escalated gets no context — nothing would read it,
-	// and for a file write the tool input is the entire file body.
+	// Redaction runs before attachment (E8). Given a detection result, the
+	// attached body is the REDACTED one — the same bytes the tool call itself is
+	// rewritten to, never the original.
 	fileEv := &HookEvent{
 		SessionID: "s1", ToolName: "Write",
-		ToolInput: []byte(`{"file_path":"/tmp/a","content":"SECRET-BODY"}`),
+		ToolInput: []byte(`{"file_path":"/tmp/a","content":"AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE"}`),
 	}
-	if isHighRiskClass("Write") {
-		t.Fatal("Write is now escalatable — it needs an approval context, and this test needs updating")
+	red := &client.Content{FileText: "AWS_ACCESS_KEY_ID=OPENBOX_REDACTED"}
+	ev, _ := enforceTarget{id: Identity{DeveloperDID: testDID}, mapper: m, ev: fileEv}.DevEvent(red)
+	if ev.Content == nil {
+		t.Fatal("a gated Write must carry its body for evaluation (ADR-0017 E7)")
 	}
-	ev, _ := enforceTarget{id: Identity{DeveloperDID: testDID}, mapper: m, ev: fileEv}.DevEvent()
-	if ev.Content != nil {
-		t.Errorf("non-escalatable class carries content: %+v", ev.Content)
+	if strings.Contains(ev.Content.ToolInput, "AKIAIOSFODNN7EXAMPLE") {
+		t.Errorf("the RAW body was attached — redaction must precede attachment (E8): %q", ev.Content.ToolInput)
+	}
+	if !strings.Contains(ev.Content.ToolInput, "OPENBOX_REDACTED") {
+		t.Errorf("the redacted body was not attached: %q", ev.Content.ToolInput)
+	}
+	// The structural locator survives the rebuild verbatim.
+	if !strings.Contains(ev.Content.ToolInput, "/tmp/a") {
+		t.Errorf("file_path lost in the redacted rebuild: %q", ev.Content.ToolInput)
 	}
 }

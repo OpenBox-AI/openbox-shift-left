@@ -3,7 +3,31 @@ package provider
 import (
 	"io"
 	"log"
+	"time"
 )
+
+// HookCeiling is the wall-clock limit a provider imposes on one hook run.
+//
+// It is a hard kill, not a latency preference: a hook that overruns is killed
+// mid-flight and both shipped providers then let the tool run. On the gating
+// hook that is a silently ungoverned execution, which no org setting can
+// prevent — so the engine must always write its verdict before Gating elapses.
+// Since ADR-0017 every gated call waits on a network verdict, which turns this
+// from an arithmetic detail into the enforce path's outer failure boundary.
+//
+// The ceiling is not always the provider's own limit. Where a provider lets the
+// installer choose (Codex defaults to 600s and honours what we write), the
+// declared value is the one the installer actually wrote, because that is what
+// will kill the hook. An adapter therefore declares what is true of an INSTALLED
+// hook, not what the tool's documentation permits.
+type HookCeiling struct {
+	// Gating is the ceiling on the hook that can deny a tool call (PreToolUse):
+	// the only hook that runs the enforce gate, and so the only one that can
+	// hold for an approval decision.
+	Gating time.Duration
+	// Other is the ceiling on every non-gating hook event.
+	Other time.Duration
+}
 
 // HookEngine is the runtime half of the SPI: what a provider's adapter does
 // when its tool fires a hook.
@@ -25,6 +49,13 @@ type HookEngine interface {
 	// Capabilities declares what this adapter supports, so a session's
 	// coverage tier can be derived and displayed rather than assumed.
 	Capabilities() []Capability
+
+	// HookCeilings declares the wall-clock limits this provider kills a hook
+	// at, so the engine derives its own budget rather than trusting each
+	// adapter to do the arithmetic. It is on the interface, not an optional
+	// side channel, because an adapter that does not declare one cannot be
+	// governed safely: the engine would have no boundary to stay inside.
+	HookCeilings() HookCeiling
 }
 
 // Rewaker is the OPTIONAL background-wake half of the runtime SPI: a provider

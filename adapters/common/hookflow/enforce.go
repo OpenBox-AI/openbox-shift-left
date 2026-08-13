@@ -144,28 +144,15 @@ const MaxRedactBody = 512 << 10 // 512 KiB (bytes)
 // tool_input.
 const MaxJSONCompareBytes = 256 << 10 // 256 KiB (bytes)
 
-// newDecider builds the enforce-hook decision transport. There is exactly
-// one (ADR-0006): the local bundle is evaluated in-process — no resident
-// daemon, no socket, nothing for the developer to start. The evaluator is
-// pure-Go and in-memory, so the hook (a short-lived per-tool-call process)
-// loads the same bundle `openbox dev sync` wrote and decides directly. It
-// fails open on any fault (absent/unreadable bundle → cold-start
-// fail-open), so an infra failure never blocks the developer (INV-3b).
-// This is what makes enforcement ambient after `openbox init` with
-// zero runtime setup.
-func NewDecider() decision.Decider {
-	pubKeyB64, _ := devconfig.ResolveOrgSigningKey()
-	return decision.NewInProcessDecider(decision.InProcessConfig{
-		BundlePath: ResolveBundlePath(),
-		// OD-RF-3: an org that has deployed signing can refuse an unverified
-		// bundle outright rather than enforce it and merely record that it was
-		// unverified.
-		RequireVerified: devconfig.ResolveRequireVerifiedBundle(),
-		// The org's pinned policy-signing key (E8-S6). Unset ⇒ a signed bundle
-		// is not trusted and an unsigned one behaves as before.
-		SigningPubKey: decision.DecodePublicKey(pubKeyB64),
-	})
-}
+// NewDecider builds the local step that runs before the evaluation: secret
+// redaction, and nothing else.
+//
+// It used to construct the in-process policy evaluator over a signed local
+// bundle. ADR-0017 made OpenBox the decider, so what remains here is content
+// protection — deliberately still local, because it must run BEFORE the content
+// leaves the machine and it sees the whole body where the server sees at most
+// the first 64KB.
+func NewDecider() decision.Decider { return decision.NewRedactor() }
 
 // ApplyFailurePolicy is the Go analog of the SDK's _handle_api_error,
 // applied between obtain and apply. It touches a decision only when the
@@ -267,8 +254,8 @@ func LogEnforceDecision(logger *log.Logger, toolName string, dec decision.Decisi
 	// fail_open=true) is legible in the diagnostic — otherwise
 	// "would_block=true fail_open=true" looks contradictory. See
 	// ApplyFailurePolicy.
-	logger.Printf("enforce decision: tool=%s verdict=%s would_block=%t source=%s fail_open=%t stale=%t policy=%s",
-		CapIdent(toolName), verdict, dec.Evaluation.WouldBlock(), OrDash(dec.Source), dec.FailOpen, dec.Stale, policy)
+	logger.Printf("enforce decision: tool=%s verdict=%s would_block=%t source=%s fail_open=%t policy=%s",
+		CapIdent(toolName), verdict, dec.Evaluation.WouldBlock(), OrDash(dec.Source), dec.FailOpen, policy)
 }
 
 // applyInputRedaction turns a local redaction (secret detection) into the
@@ -517,7 +504,6 @@ func RecordEnforcement(logger *log.Logger, sessionID, toolKind string, dec decis
 		AppliedDecision: res.Decision,
 		Source:          dec.Source,
 		FailOpen:        dec.FailOpen,
-		Stale:           dec.Stale,
 		PolicyID:        dec.Evaluation.PolicyID,
 		ApprovalRef:     dec.Evaluation.ApprovalRef(), // correlates an ask to the governance approval; id only, no content
 		Constraints:     dec.Evaluation.Constraints,

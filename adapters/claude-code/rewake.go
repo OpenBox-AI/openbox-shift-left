@@ -23,7 +23,7 @@ const RewakeExitCode = 2
 const rewakeHookTimeoutSec = 2700
 
 // RunRewake is the background half of the PreToolUse registration (E9 §2.2
-// Tier 2). It runs alongside the gate on every tool call, waits to learn
+// the background half). It runs alongside the gate on every tool call, waits to learn
 // whether this call filed an approval, and — if one did and it is decided after
 // the gate already denied — writes the outcome to `wake` and returns
 // RewakeExitCode so Claude Code injects it as a system reminder.
@@ -43,9 +43,9 @@ func RunRewake(stdin io.Reader, wake io.Writer, logger *log.Logger) int {
 		}
 	}()
 
-	// Inert unless the session is actually gating: without enforce + Tier-2 no
-	// approval can be filed, so there is nothing to watch for.
-	if !ResolveEnforce() || !devconfig.ResolveTier2() {
+	// Inert unless the session is actually gating: without enforce, no approval
+	// can be filed, so there is nothing to watch for.
+	if !ResolveEnforce() {
 		return 0
 	}
 	id, err := ResolveIdentity()
@@ -56,16 +56,16 @@ func RunRewake(stdin io.Reader, wake io.Writer, logger *log.Logger) int {
 	if err != nil {
 		return 0
 	}
-	// Only the classes the gate escalates can have filed anything.
-	if !isHighRiskClass(ev.ToolName) {
-		return 0
-	}
+	// Every gated class evaluates inline since ADR-0017, so any of them can have
+	// filed an approval. The high-risk narrowing that used to stand here would
+	// now silently drop the watcher for exactly the classes that newly gained
+	// approval holds — a call held, denied at the budget, and then never woken.
 	devEv, ok := New(id, DefaultSpoolDir()).Mapper.Map(HookPreToolUse, ev)
 	if !ok {
 		return 0
 	}
 
-	msg, ok := hookflow.AwaitRewake(context.Background(), logger, client.ApprovalKeyFor(devEv), tier2.NewClient)
+	msg, ok := hookflow.AwaitRewake(context.Background(), logger, client.ApprovalKeyFor(devEv), evaluator.NewClient)
 	if !ok {
 		return 0
 	}

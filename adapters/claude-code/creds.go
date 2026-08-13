@@ -1,13 +1,11 @@
 package claudecode
 
 import (
-	"os"
 	"time"
 
 	"github.com/openbox-ai/openbox-shift-left/adapters/common/devconfig"
 	"github.com/openbox-ai/openbox-shift-left/adapters/common/hookflow"
 	"github.com/openbox-ai/openbox-shift-left/client"
-	"github.com/openbox-ai/openbox-shift-left/decision"
 )
 
 // Credential resolution for the hook binary. The provider-neutral
@@ -21,16 +19,13 @@ import (
 // enforce-budget clamps stay here — they encode Claude Code's own
 // correctness bound (the 5s hook kill), which is provider-specific.
 //
-// Identity is minted by `openbox init` and stored in the OS secret
-// store; the hook reads it here. INV-1: the obx_ key and Ed25519 seed are
-// read straight into the client and never logged, printed, or placed on an
-// argv. See devconfig for the full env/config contract.
+// Identity is minted by `openbox auth`, which writes it to ~/.openbox/.env; the
+// hook reads it here (ADR-0015). INV-1: the obx_ key and signing key are read
+// straight into the client and never logged, printed, or placed on an argv. See
+// devconfig for the full env/config contract.
 const (
 	envBaseURL         = devconfig.EnvBaseURL
 	envDID             = devconfig.EnvDID
-	envSecretService   = devconfig.EnvSecretService
-	envAPIKeyAccount   = devconfig.EnvAPIKeyAccount
-	envPrivKeyAccount  = devconfig.EnvPrivKeyAccount
 	envContentCapture  = devconfig.EnvContentCapture
 	envFinops          = devconfig.EnvFinops
 	envInstallGitHook  = devconfig.EnvInstallGitHook
@@ -44,9 +39,8 @@ const (
 	envFindingsCursor  = devconfig.EnvFindingsCursor
 	envEnforcementFile = devconfig.EnvEnforcementFile
 	envAPIKeyDirect    = devconfig.EnvAPIKeyDirect
-	envSeedDirect      = devconfig.EnvSeedDirect
+	envAgentPrivateKey = devconfig.EnvAgentPrivateKey
 	envConfigPath      = devconfig.EnvConfigPath
-	envSecretFile      = devconfig.EnvSecretFile
 	envAgentID         = devconfig.EnvAgentID
 	envBackendURL      = devconfig.EnvBackendURL
 	envControlToken    = devconfig.EnvControlToken
@@ -73,7 +67,7 @@ type Credentials struct {
 	BaseURL               string
 	APIKey                string
 	DID                   string
-	SeedB64               string
+	PrivateKeyB64         string
 	ContentCaptureEnabled bool
 }
 
@@ -86,15 +80,11 @@ func (c Credentials) NewClient(logger client.Logger) (*client.Client, error) {
 		BaseURL:               c.BaseURL,
 		APIKey:                c.APIKey,
 		DID:                   c.DID,
-		SeedB64:               c.SeedB64,
+		PrivateKeyB64:         c.PrivateKeyB64,
 		ContentCaptureEnabled: c.ContentCaptureEnabled,
 		Logger:                logger,
 	})
 }
-
-// secretLookup is the OS secret-store reader; overridable in tests. It
-// mirrors the backends `openbox init` wrote with.
-var secretLookup devconfig.SecretLookup = devconfig.OSSecretLookup
 
 // ResolveIdentity resolves ONLY the developer DID (env, then config file) — no
 // secret-store access (INV-1 + NFR-2: zero secret I/O on the hot path).
@@ -118,27 +108,29 @@ func DefaultSpoolDir() string { return devconfig.SpoolDir("cc-spool") }
 // hook on SessionStart (default false; env overrides config).
 func ResolveInstallGitHook() bool { return devconfig.ResolveInstallGitHook() }
 
-// ResolveFinops reports whether transcript usage extraction is
-// enabled (default false).
+// ResolveFinops reports whether transcript usage extraction is enabled.
+// DEFAULT ON since ADR-0014; `finops: false` or OPENBOX_FINOPS=0 opts out.
 func ResolveFinops() bool { return devconfig.ResolveFinops() }
 
 // ResolveContentCapture reports the org content posture (default on,
 // opt-out via config false / env 0).
 func ResolveContentCapture() bool { return devconfig.ResolveContentCapture() }
 
-// ResolveSecretDetection reports whether Tier-1 local secret detection is
+// ResolveSecretDetection reports whether local secret detection is
 // on (default true, opt-out).
 func ResolveSecretDetection() bool { return devconfig.ResolveSecretDetection() }
 
-// ResolveFindings reports whether the Tier-3 findings loop is on (default
-// false, opt-in).
+// ResolveFindings reports whether the findings loop is on. As with the other posture flags,
+// the resolver default is false but `openbox init` couples it to enforce, which
+// now defaults on — so a bare install writes findings: true.
 func ResolveFindings() bool { return devconfig.ResolveFindings() }
 
 // ResolveFindingsCursor resolves the findings-loop cursor state file path.
 func ResolveFindingsCursor() string { return devconfig.ResolveFindingsCursor("claude-code") }
 
-// ResolveEnforce reports whether the developer runtime is in enforce mode
-// (ADR-0006; default false = observe).
+// ResolveEnforce reports whether the developer runtime is in enforce mode.
+// DEFAULT ON (ADR-0016 reversed the observe default; ADR-0006 governs the
+// in-process mechanism, not the default value).
 func ResolveEnforce() bool { return devconfig.ResolveEnforce() }
 
 // correctness bound, not a nicety: Claude Code kills the PreToolUse hook at
@@ -153,23 +145,28 @@ const maxEnforceTimeout = 2 * time.Second
 // fail-open).
 func ResolveFailClosed() bool { return devconfig.ResolveFailClosed() }
 
-// ResolveTier2 reports whether the Tier-2 synchronous /evaluate escalation
-// is on (default false, opt-in).
+// ResolveTier2 reads the DEPRECATED, inert `tier2` key (ADR-0017).
+// It changes nothing: every gated call is evaluated. It is retained so an
+// existing dev.json parses, and it warns once to stderr when present. See
+// devconfig.ResolveTier2 for why an explicit false is deliberately not honoured.
+// Historic note: `openbox init` used to couple tier2 to the
+// enforce posture and enforce now defaults on — so a bare install writes
+// tier2: true. There is no standalone flag; it follows enforce.
 func ResolveTier2() bool { return devconfig.ResolveTier2() }
 
-// ResolveTier2Timeout resolves the in-binary budget for one Tier-2
+// ResolveEvaluationTimeout resolves the in-binary budget for one
 // /evaluate escalation: config first, env-if-parseable wins; <=0 yields
-// defaultTier2Timeout; clamped to maxTier2Timeout (the CC 5s-hook-kill
+// defaultEvaluationTimeout; clamped to maxEvaluationTimeout (the CC 5s-hook-kill
 // bound).
-func ResolveTier2Timeout() time.Duration {
+func ResolveEvaluationTimeout() time.Duration {
 	ms := devconfig.ResolveTimeoutMS(func(c DevConfig) int { return c.Tier2TimeoutMS }, envTier2Timeout)
 	if ms <= 0 {
-		return hookflow.DefaultTier2Timeout
+		return hookflow.DefaultEvaluationTimeout
 	}
 	// Clamp in milliseconds before the multiply so a near-max-int64 value
 	// can never overflow time.Duration.
-	if maxMS := int64(maxTier2Timeout / time.Millisecond); int64(ms) > maxMS {
-		return maxTier2Timeout
+	if maxMS := int64(maxEvaluationTimeout / time.Millisecond); int64(ms) > maxMS {
+		return maxEvaluationTimeout
 	}
 	return time.Duration(ms) * time.Millisecond
 }
@@ -189,24 +186,17 @@ func ResolveControlToken() string { return devconfig.ResolveControlToken() }
 // (base64 raw Ed25519) and its id, from the shared dev config (E8-S6).
 func ResolveOrgSigningKey() (pubKeyB64, keyID string) { return devconfig.ResolveOrgSigningKey() }
 
-// ResolveBundlePath resolves the local policy-bundle path the in-process
-// decider evaluates and `dev sync`/staleness read: OPENBOX_SIDECAR_BUNDLE env,
-// else decision.DefaultBundlePath(). Enforce-specific (imports decision), so it
-// stays in this adapter rather than the shared devconfig module.
-func ResolveBundlePath() string {
-	if p := os.Getenv(envSidecarBundle); p != "" {
-		return p
-	}
-	return decision.DefaultBundlePath()
-}
-
-// ResolveCredentials assembles Credentials from env + the secret store via
-// the shared resolver, threading this adapter's injectable secretLookup
-// (the test seam). It returns an error (never a panic) when identity is
-// incomplete; the caller logs it fail-open and exits 0 (INV-3). No secret
-// value is ever included in a returned error.
+// ResolveCredentials assembles Credentials through the shared resolver: secrets
+// from the environment then ~/.openbox/.env, coordinates from the environment
+// then dev.json. It returns an error (never a panic) when identity is
+// incomplete; the caller logs it fail-open and exits 0 (INV-3). No secret value
+// is ever included in a returned error.
+//
+// There is no injectable lookup seam any more — tests point OPENBOX_HOME at a
+// temp dir and use t.Setenv, which is both simpler and closer to what production
+// actually does than substituting a function.
 func ResolveCredentials() (Credentials, error) {
-	dc, err := devconfig.ResolveCredentials(secretLookup)
+	dc, err := devconfig.ResolveCredentials()
 	if err != nil {
 		return Credentials{}, err
 	}
@@ -214,15 +204,9 @@ func ResolveCredentials() (Credentials, error) {
 		BaseURL:               dc.BaseURL,
 		APIKey:                dc.APIKey,
 		DID:                   dc.DID,
-		SeedB64:               dc.SeedB64,
+		PrivateKeyB64:         dc.PrivateKeyB64,
 		ContentCaptureEnabled: dc.ContentCaptureEnabled,
 	}, nil
-}
-
-// osSecretLookup is the platform secret-store reader (shared implementation;
-// kept under its original name for the adapter's tests).
-func osSecretLookup(service, account string) (string, error) {
-	return devconfig.OSSecretLookup(service, account)
 }
 
 func firstNonEmpty(vals ...string) string { return devconfig.FirstNonEmpty(vals...) }

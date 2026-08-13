@@ -54,7 +54,7 @@ const SourceApprovalDecided = "approval:decided"
 // transport, an unreachable control plane, an unparseable status) is logged and
 // re-tried at the poll cadence until the budget is spent, because a transport
 // blip during a hold is not evidence that the approval was refused.
-func (t Tier2) AwaitApproval(ctx context.Context, logger *log.Logger, key client.ApprovalKey, enforceStart time.Time) (decision.Decision, bool) {
+func (t Evaluator) AwaitApproval(ctx context.Context, logger *log.Logger, key client.ApprovalKey, enforceStart time.Time) (decision.Decision, bool) {
 	budget := t.HoldBudget(enforceStart, resolveApprovalHold())
 	if budget <= 0 {
 		return decision.Decision{}, false
@@ -105,7 +105,7 @@ func (t Tier2) AwaitApproval(ctx context.Context, logger *log.Logger, key client
 // earlier work. A non-positive result means there is no room to hold, so the
 // caller denies immediately rather than overrun the provider's hook timeout —
 // which would be killed and fail open, defeating a fail-closed org.
-func (t Tier2) HoldBudget(enforceStart time.Time, configured time.Duration) time.Duration {
+func (t Evaluator) HoldBudget(enforceStart time.Time, configured time.Duration) time.Duration {
 	if rem := t.remaining(enforceStart); rem < configured {
 		return rem
 	}

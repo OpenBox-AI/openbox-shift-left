@@ -41,7 +41,7 @@ func TestEmit_UnbuildableEventReportsLoss(t *testing.T) {
 func TestNew_ZeroRetriesIsExpressible(t *testing.T) {
 	zero := 0
 	c, err := New(Config{
-		BaseURL: "https://core.example", APIKey: testAPIKey, DID: testDID, SeedB64: testSeedB64,
+		BaseURL: "https://core.example", APIKey: testAPIKey, DID: testDID, PrivateKeyB64: testPrivateKeyB64,
 		MaxRetries: &zero,
 	})
 	if err != nil {
@@ -53,7 +53,7 @@ func TestNew_ZeroRetriesIsExpressible(t *testing.T) {
 }
 
 func TestNew_DefaultsWhenUnset(t *testing.T) {
-	c, err := New(Config{BaseURL: "https://core.example", APIKey: testAPIKey, DID: testDID, SeedB64: testSeedB64})
+	c, err := New(Config{BaseURL: "https://core.example", APIKey: testAPIKey, DID: testDID, PrivateKeyB64: testPrivateKeyB64})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -67,14 +67,14 @@ func TestNew_DefaultsWhenUnset(t *testing.T) {
 func TestNew_NegativeRetryConfigIsRejected(t *testing.T) {
 	neg := -1
 	if _, err := New(Config{
-		BaseURL: "https://core.example", APIKey: testAPIKey, DID: testDID, SeedB64: testSeedB64,
+		BaseURL: "https://core.example", APIKey: testAPIKey, DID: testDID, PrivateKeyB64: testPrivateKeyB64,
 		MaxRetries: &neg,
 	}); err == nil {
 		t.Error("a negative MaxRetries must be rejected at construction, not silently disable sending")
 	}
 	negd := -time.Second
 	if _, err := New(Config{
-		BaseURL: "https://core.example", APIKey: testAPIKey, DID: testDID, SeedB64: testSeedB64,
+		BaseURL: "https://core.example", APIKey: testAPIKey, DID: testDID, PrivateKeyB64: testPrivateKeyB64,
 		RetryBase: &negd,
 	}); err == nil {
 		t.Error("a negative RetryBase must be rejected at construction")

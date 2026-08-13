@@ -15,7 +15,7 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/client"
 )
 
-// The rewake channel (E9 §2.2 Tier 2).
+// The rewake channel (E9 §2.2).
 //
 // The bounded hold covers approvers that answer in seconds. A human who does
 // not is the tail the hold deliberately refuses to wait for: the call is denied
@@ -57,6 +57,14 @@ const (
 	// wanted in. 10s is ~2.5× that worst case; the cost of the margin is a few
 	// extra idle seconds in a background process nothing waits on, which is the
 	// right side to be wrong on.
+	//
+	// That cost is paid far more often since ADR-0017. The watcher used to start
+	// only for shell and MCP calls; every gated class evaluates inline now, so a
+	// session doing many small tool calls holds one idle watcher per call for up
+	// to this grace. The trade is unchanged in shape — an idle process nothing
+	// waits on, versus an approval that can never wake the session — but it is
+	// no longer a rare path, and that is the number to revisit first if watcher
+	// count ever becomes the problem.
 	rewakeMarkerGrace = 10 * time.Second
 
 	// rewakePollInterval is the cadence while waiting on a human. Far slower

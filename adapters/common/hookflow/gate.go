@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io"
 	"log"
+	"sync/atomic"
 	"time"
 
 	"github.com/openbox-ai/openbox-shift-left/adapters/common/devconfig"
@@ -22,15 +23,23 @@ type EnforceTarget interface {
 	// ToolInput is the raw native tool input, used to reconstruct a redacted
 	// replacement. Never egressed.
 	ToolInput() json.RawMessage
-	// HighRisk reports whether this class is worth a synchronous Tier-2
-	// round-trip (shell execution, MCP calls).
+	// HighRisk reports whether this class is shell execution or an MCP call.
+	// The gate no longer consults it (ADR-0017 evaluates every class); it
+	// survives for the adapters' own classification.
 	HighRisk() bool
-	// DecisionRequest builds the local Tier-1 request. Metadata axes only
+	// DecisionRequest builds the local decision request. Metadata axes only
 	// (INV-2); content is carried solely for local redaction.
 	DecisionRequest(localRedaction bool) decision.DecisionRequest
-	// DevEvent maps the call for a Tier-2 escalation, or reports !ok when it
+	// DevEvent maps the call for the inline evaluation, or reports !ok when it
 	// cannot be mapped.
-	DevEvent() (client.DevEvent, bool)
+	//
+	// redacted is the local secret-detection result for this call, or nil when
+	// nothing was scanned or nothing matched. It is passed IN rather than looked
+	// up because the ordering is the security property: the content this event
+	// attaches must be the redacted body, and an implementation that cannot see
+	// the redaction cannot honour that. A secret sent to the control plane lands
+	// in governance event storage, which is the hardest place to purge it from.
+	DevEvent(redacted *client.Content) (client.DevEvent, bool)
 }
 
 // EnforceGate is the synchronous pre-execution gate: the sequence a hook runs
@@ -39,11 +48,11 @@ type EnforceTarget interface {
 // The individual steps were already shared; this shares their ORDER, which is
 // the part a new tier or a reordering would otherwise have to be applied to
 // twice. The order is load-bearing — stale gate before evaluation, failure
-// policy between obtain and apply, Tier-2 only when Tier-1 would proceed,
+// policy between obtain and apply, evaluation only when the local step would proceed,
 // audit after the decision is written — so it belongs in one place.
 type EnforceGate struct {
-	Contract OutputContract
-	Tier2    Tier2
+	Contract  OutputContract
+	Evaluator Evaluator
 	// Record writes the durable audit line. Off the blocking path,
 	// best-effort, never fails a tool call.
 	Record func(dec decision.Decision, res ApplyResult)
@@ -74,33 +83,35 @@ func (g EnforceGate) Run(ctx context.Context, logger *log.Logger, stdout io.Writ
 	//
 	// g is a value receiver, so wiring OnDelivered here mutates only this
 	// invocation's copy: no shared state between concurrent hook processes.
+	//
+	// The flag is atomic because the two accesses can genuinely be concurrent.
+	// Escalate runs the transport in its own goroutine and abandons it when the
+	// budget expires; only its result-channel path carries a happens-before edge
+	// back here, so on a budget-exceeded escalation the abandoned goroutine can
+	// still be running — and calling OnDelivered — while this defer reads. A plain
+	// bool made that a data race that -race reports, and left the read free to
+	// observe a stale value.
+	//
+	// Reading "not delivered" while a POST is still in flight is not itself the
+	// bug: an escalation we gave up on may or may not have been stored, and the
+	// direction of failure is settled — spool, because a redundant copy is a bug
+	// and a missing one is lost telemetry. What remains is the lost-200 window
+	// (core committed the row, our client saw only the cancellation), which no
+	// client-side change can close; server-side dedupe is still absent.
 	if g.SpoolObserve != nil {
-		delivered := false
-		g.Tier2.OnDelivered = func() { delivered = true }
+		var delivered atomic.Bool
+		g.Evaluator.OnDelivered = func() { delivered.Store(true) }
 		defer func() {
-			if !delivered {
+			if !delivered.Load() {
 				g.SpoolObserve()
 			}
 		}()
 	}
 
-	// One wall clock for the whole gate (Tier-1 plus a possible Tier-2), so the
-	// sequential per-tier budgets can never jointly exceed the provider's hook
+	// One wall clock for the whole gate (the local step plus the evaluation), so the
+	// sequential budgets can never jointly exceed the provider's hook
 	// timeout — which would fail open and defeat a fail-closed org.
 	enforceStart := time.Now()
-
-	// The fail-closed session-start staleness block is realized here, because
-	// no provider has a "deny this session" primitive at session start. If the
-	// session was marked stale under fail-closed, deny every tool call —
-	// reusing the ordinary apply cascade via a synthesized HALT — until
-	// `openbox dev sync` clears the marker. A local file stat; no network
-	// (INV-3b).
-	if dec, blocked := StaleGateDecision(t.SessionID()); blocked {
-		policy := ResolveFailurePolicy()
-		LogEnforceDecision(logger, t.ToolName(), dec, policy)
-		g.Record(dec, ApplyDecision(stdout, dec, false, t.ToolInput(), g.Contract))
-		return
-	}
 
 	// Local redaction gate: the tool body reaches the in-process detector only
 	// under secret detection (default on) or content capture. With both off,
@@ -108,40 +119,41 @@ func (g EnforceGate) Run(ctx context.Context, logger *log.Logger, stdout io.Writ
 	// observe baseline.
 	localRedaction := devconfig.ResolveSecretDetection() || devconfig.ResolveContentCapture()
 
-	dec := NewDecider().Decide(ctx, t.DecisionRequest(localRedaction))
+	// The local step redacts; it does not decide (ADR-0017).
+	local := NewDecider().Decide(ctx, t.DecisionRequest(localRedaction))
 
-	// The per-org failure policy sits between obtain and apply: on an
-	// evaluation outage under fail-closed it synthesizes a HALT so the
-	// unchanged apply cascade denies. Otherwise the decision passes through
-	// untouched — a real verdict is never overridden.
+	// Evaluate. Unconditional, because there is no local verdict that could
+	// make a round-trip pointless: every gated call is the server's to decide.
+	//
+	// The failure policy runs strictly AFTER this, and that ordering is now
+	// load-bearing rather than stylistic. It used to sit between the local
+	// verdict and the escalation, which was harmless while the local step
+	// produced real verdicts — but a local step that always reports "no verdict"
+	// turns an early ApplyFailurePolicy into an immediate synthesized HALT under
+	// fail_closed, which then reads as "already tightened" and suppresses the
+	// evaluation entirely. A fail-closed org would deny every gated call without
+	// ever asking. C1 caught exactly that.
+	dec, key := g.escalate(ctx, logger, t, local.RedactedContent, enforceStart)
+
+	// Carry the local redaction onto the decision so a redact-and-continue still
+	// applies on the proceed path.
+	dec.RedactedContent = local.RedactedContent
+	dec.RedactionCategories = local.RedactionCategories
+
+	// On an evaluation outage under fail-closed this synthesizes a HALT so the
+	// unchanged apply cascade denies. A real verdict passes through untouched.
 	policy := ResolveFailurePolicy()
 	dec = ApplyFailurePolicy(dec, policy)
 
-	// For high-risk classes, when Tier-2 is enabled and a server round-trip can
-	// still change the outcome, escalate to the authoritative verdict before the
-	// tool runs — closing the policy-only floor exactly where arbitrary execution
-	// is dangerous, and nowhere else. Default off; inert when off.
-	if devconfig.ResolveTier2() && t.HighRisk() && ShouldEscalate(dec, g.Contract) {
-		t2, key := g.escalate(ctx, logger, t, enforceStart)
-		// Carry the local Tier-1 redaction onto the Tier-2 decision so a
-		// redact-and-continue still applies on the Tier-2 proceed path.
-		t2.RedactedContent = dec.RedactedContent
-		t2.RedactionCategories = dec.RedactionCategories
-		dec = ApplyFailurePolicy(KeepTighter(dec, t2, g.Contract), policy)
-
-		// A server REQUIRE_APPROVAL is a filed request, not a final answer, so
-		// hold for whoever is going to decide it. The hook blocks the tool call
-		// while it runs either way — the only question is whether it spends that
-		// time asking.
-		//
-		// Only a SERVER verdict is held for. A local REQUIRE_APPROVAL that
-		// survived a degraded escalation (KeepTighter) was never sent, so there
-		// is no record to poll: holding on it would spend the entire budget on
-		// not-founds and then deny. That case keeps the provider's own approval
-		// prompt, which is exactly what it had before.
-		if dec.Evaluation.Verdict == client.VerdictRequireApproval && dec.Source == SourceTier2 {
-			dec = g.awaitApproval(ctx, logger, t, dec, key, enforceStart)
-		}
+	// A server REQUIRE_APPROVAL is a filed request, not a final answer, so hold
+	// for whoever is going to decide it. The hook blocks the tool call while it
+	// runs either way — the only question is whether it spends that time asking.
+	//
+	// Only a SERVER verdict is held for: a degraded evaluation has filed no
+	// record, so holding on it would spend the whole budget on not-founds and
+	// then deny.
+	if dec.Evaluation.Verdict == client.VerdictRequireApproval && dec.Source == SourceEvaluate {
+		dec = g.awaitApproval(ctx, logger, t, dec, key, enforceStart)
 	}
 
 	LogEnforceDecision(logger, t.ToolName(), dec, policy)
@@ -153,12 +165,12 @@ func (g EnforceGate) Run(ctx context.Context, logger *log.Logger, stdout io.Writ
 // escalate runs one Tier-2 round-trip and returns the poll key for the approval
 // it may have filed. The key is derived from the SAME event that was escalated,
 // so a hold can only ever address the row this call created.
-func (g EnforceGate) escalate(ctx context.Context, logger *log.Logger, t EnforceTarget, enforceStart time.Time) (decision.Decision, client.ApprovalKey) {
-	ev, ok := t.DevEvent()
+func (g EnforceGate) escalate(ctx context.Context, logger *log.Logger, t EnforceTarget, redacted *client.Content, enforceStart time.Time) (decision.Decision, client.ApprovalKey) {
+	ev, ok := t.DevEvent(redacted)
 	if !ok {
-		return Tier2FailOpen("tier-2 event not mappable"), client.ApprovalKey{}
+		return EvaluationFailOpen("event not mappable"), client.ApprovalKey{}
 	}
-	dec := g.Tier2.Escalate(ctx, logger, ev, g.Tier2.Budget(enforceStart, resolveTier2Timeout()))
+	dec := g.Evaluator.Escalate(ctx, logger, ev, g.Evaluator.Budget(enforceStart, resolveEvaluationTimeout()))
 	return dec, client.ApprovalKeyFor(ev)
 }
 
@@ -177,7 +189,7 @@ func (g EnforceGate) awaitApproval(ctx context.Context, logger *log.Logger, t En
 	// whole hold just to discover the usual answer: nothing to do.
 	RecordPendingApproval(logger, key, t.ToolName())
 
-	answered, ok := g.Tier2.AwaitApproval(ctx, logger, key, enforceStart)
+	answered, ok := g.Evaluator.AwaitApproval(ctx, logger, key, enforceStart)
 	if !ok {
 		// Leave the marker standing: the watcher owns the tail from here.
 		return ApprovalUndecided(dec, "within this hook's budget")

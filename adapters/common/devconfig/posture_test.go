@@ -38,7 +38,15 @@ func TestPostureMetadata_BooleansAlwaysPresent(t *testing.T) {
 func TestPostureFields_CoverEveryConfigControl(t *testing.T) {
 	// install_git_hook is local convenience (whether we wrote a hook into this
 	// repo's .git), not a governance posture an org would attest to.
-	notPosture := map[string]bool{"install_git_hook": true}
+	//
+	// require_verified_bundle is parsed for back-compat and reports nothing: it
+	// guarded a local policy bundle, and ADR-0017 deleted the bundle. A control
+	// that cannot engage must not appear in the posture, or an org reading
+	// `true` would believe a signature check was protecting it.
+	notPosture := map[string]bool{
+		"install_git_hook":        true,
+		"require_verified_bundle": true,
+	}
 
 	reported := map[string]bool{}
 	for _, f := range postureFields() {
@@ -144,21 +152,113 @@ func TestEffectivePosture_MatchesResolvers(t *testing.T) {
 		p.SecretDetection != ResolveSecretDetection() ||
 		p.ContentCapture != ResolveContentCapture() ||
 		p.Findings != ResolveFindings() ||
-		p.Finops != ResolveFinops() ||
-		p.RequireVerifiedBundle != ResolveRequireVerifiedBundle() {
+		p.Finops != ResolveFinops() {
 		t.Errorf("EffectivePosture drifted from the resolvers: %+v", p)
 	}
 	// Flags is what `openbox doctor` and the session record both read, so it
 	// must agree with the struct field for every control.
-	if p.Flags()["require_verified_bundle"] != p.RequireVerifiedBundle {
+	if p.Flags()["content_capture"] != p.ContentCapture {
 		t.Error("Flags disagrees with the resolved posture — doctor would report a control that is not in force")
 	}
-	// The documented defaults: observe, with secret detection and content
-	// capture on (content capture default-ON is brian's 2026-07-15 decision).
-	if p.Enforce {
-		t.Error("enforce must default off — enforcement never turns on by omission (INV-3)")
+	// require_verified_bundle must NOT be reported: it guarded a local bundle
+	// that no longer exists (ADR-0017), so an org reading `true` would believe a
+	// signature check was protecting it.
+	if _, reported := p.Flags()["require_verified_bundle"]; reported {
+		t.Error("require_verified_bundle is still reported — it cannot engage, so reporting it overstates")
+	}
+	// The documented defaults: ENFORCE (ADR-0016), with secret detection and
+	// content capture on (content capture default-ON is the 2026-07-15 decision).
+	//
+	// This assertion used to read "enforce must default off — enforcement never
+	// turns on by omission (INV-3)". ADR-0016 reversed the default deliberately,
+	// and the INV-3 property it cited is preserved elsewhere and unchanged: a
+	// FAILURE never blocks a tool call, because fail_closed defaults off and the
+	// gate fails open on error. "Never enforce by omission" was a default, not an
+	// invariant; "never BLOCK by failure" is the invariant, and it still holds —
+	// see the fail_closed assertion below.
+	if !p.Enforce {
+		t.Error("enforce must default ON (ADR-0016)")
+	}
+	if p.FailClosed {
+		t.Error("fail_closed must stay off — enforce-by-default is only defensible while an outage cannot block a developer")
 	}
 	if !p.SecretDetection || !p.ContentCapture {
 		t.Errorf("secret_detection and content_capture default on, got %+v", p)
+	}
+}
+
+// Policy provenance replaced the bundle coordinates, and the replacement has to
+// answer a question posture can actually answer at the moment it is built.
+//
+// Posture rides SessionStarted — before this session has decided anything — so a
+// deciding policy id here could only ever be some other session's. What IS
+// knowable then is who decides and what happens when they cannot be reached, and
+// under fail_open that second field is the honest statement that enforcement is
+// reachability-dependent.
+func TestPostureReportsDecisionProvenance(t *testing.T) {
+	t.Run("default is control plane, fail-open", func(t *testing.T) {
+		isolateConfig(t)
+		p := EffectivePosture()
+		if p.DecisionAuthority != DecisionAuthorityControlPlane {
+			t.Errorf("decision authority = %q, want %q", p.DecisionAuthority, DecisionAuthorityControlPlane)
+		}
+		if p.FailurePolicy != FailurePolicyFailOpen {
+			t.Errorf("failure policy = %q, want %q — the default must not overstate", p.FailurePolicy, FailurePolicyFailOpen)
+		}
+	})
+
+	t.Run("fail_closed is reported", func(t *testing.T) {
+		isolateConfig(t)
+		t.Setenv(EnvFailClosed, "1")
+		if p := EffectivePosture(); p.FailurePolicy != FailurePolicyFailClosed {
+			t.Errorf("failure policy = %q, want %q", p.FailurePolicy, FailurePolicyFailClosed)
+		}
+	})
+
+	// The word that must not come back. "verified" and "integrity" described a
+	// signature check over a local artifact; there is no artifact and no check,
+	// so reusing the vocabulary for a weaker claim would be the overstatement
+	// this repo's own rules forbid.
+	t.Run("no verification vocabulary on the new fields", func(t *testing.T) {
+		isolateConfig(t)
+		p := EffectivePosture()
+		for _, v := range []string{p.DecisionAuthority, p.FailurePolicy} {
+			for _, banned := range []string{"verif", "integrity", "signed"} {
+				if strings.Contains(strings.ToLower(v), banned) {
+					t.Errorf("%q implies a cryptographic check that no longer happens", v)
+				}
+			}
+		}
+	})
+}
+
+// A deprecation notice that cannot fire is the same as no notice. ADR-0017
+// removed the last runtime caller of ResolveTier2, so a warning hung off that
+// resolver was unreachable — found by driving the real binary, not by a test,
+// which is why this one exists.
+func TestDeprecatedKeysAreDetectedWherePostureIsRead(t *testing.T) {
+	t.Run("silent when nothing deprecated is set", func(t *testing.T) {
+		isolateConfig(t)
+		if got := deadKeysPresent(); len(got) != 0 {
+			t.Errorf("clean config reported deprecated keys: %v", got)
+		}
+	})
+
+	// An explicit false is the case most worth warning about: it is the setting
+	// that used to disable enforcement and silently no longer does.
+	for _, tc := range []struct{ name, env, val, want string }{
+		{"tier2 explicitly off", EnvTier2, "0", "`tier2`"},
+		{"tier2 on", EnvTier2, "1", "`tier2`"},
+		{"tier2_timeout_ms", EnvTier2Timeout, "500", "`tier2_timeout_ms`"},
+		{"require_verified_bundle", EnvRequireVerified, "1", "`require_verified_bundle`"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			isolateConfig(t)
+			t.Setenv(tc.env, tc.val)
+			got := deadKeysPresent()
+			if len(got) != 1 || got[0] != tc.want {
+				t.Errorf("deadKeysPresent() = %v, want [%s]", got, tc.want)
+			}
+		})
 	}
 }

@@ -198,7 +198,7 @@ func TestIsAdvisory_RiskOnly(t *testing.T) {
 
 // A body whose rich fields do not decode must still yield its verdict. The
 // fallback used to decode into the same type that had just failed, so it could
-// only ever repeat the failure — and on the Tier-2 escalation path a lost BLOCK
+// only ever repeat the failure — and on the inline evaluation path a lost BLOCK
 // degrades to fail-open allow, which is the wrong direction to be wrong in.
 func TestParseEvaluation_MalformedSiblingFieldKeepsVerdict(t *testing.T) {
 	for _, tc := range []struct {
