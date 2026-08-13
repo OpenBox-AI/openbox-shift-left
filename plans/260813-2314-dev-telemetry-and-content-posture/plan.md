@@ -1,7 +1,7 @@
 ---
 title: "Dev-session telemetry: status + failure hooks + widget feeds + content-posture ADR"
 description: "Merged plan: tool status & failure/lifecycle events (P0), one content-gated assistant-turn span feeding the alignment widgets, ADR-0018 carrier (Accepted) + ADR-0019 full-capture posture (Proposed)"
-status: pending
+status: complete
 priority: P1
 effort: 21h
 branch: main
@@ -33,13 +33,13 @@ Strictly sequential (phases 2–4 share `client/payload.go`, `client/testdata/go
 
 | # | Phase | Effort | Status | Blocks on |
 |---|---|---|---|---|
-| 1 | [ADR-0018 — dev-turn content carrier (Accepted)](phase-01-adr-0018-dev-turn-content-carrier.md) | 1.5h | pending | — |
-| 2 | [`status` on tool results](phase-02-status-on-tool-results.md) | 3h | pending | 1 |
-| 3 | [Failure + lifecycle hooks](phase-03-failure-and-lifecycle-hooks.md) | 5h | pending | 1, 2 |
-| 4 | [Assistant-turn span + core ask](phase-04-assistant-turn-span.md) | 4h | pending | 1, 2, 3 |
-| 5 | [Docs + contract reconciliation](phase-05-docs-and-contract-reconciliation.md) | 2.5h | pending | 2, 3, 4 |
-| 6 | [Manual verification guide + dormant testbed assertions](phase-06-manual-verification-and-testbed.md) | 2h | pending | 5 |
-| 7 | [ADR-0019 — full-content-capture posture draft (Proposed)](phase-07-adr-0019-content-posture-draft.md) | 3h | pending | 4, 5 (sequenced last per user request) |
+| 1 | [ADR-0018 — dev-turn content carrier (Accepted)](phase-01-adr-0018-dev-turn-content-carrier.md) | 1.5h | done | — |
+| 2 | [`status` on tool results](phase-02-status-on-tool-results.md) | 3h | done | 1 |
+| 3 | [Failure + lifecycle hooks](phase-03-failure-and-lifecycle-hooks.md) | 5h | done | 1, 2 |
+| 4 | [Assistant-turn span + core ask](phase-04-assistant-turn-span.md) | 4h | done | 1, 2, 3 |
+| 5 | [Docs + contract reconciliation](phase-05-docs-and-contract-reconciliation.md) | 2.5h | done | 2, 3, 4 |
+| 6 | [Manual verification guide + dormant testbed assertions](phase-06-manual-verification-and-testbed.md) | 2h | done | 5 |
+| 7 | [ADR-0019 — full-content-capture posture draft (Proposed)](phase-07-adr-0019-content-posture-draft.md) | 3h | done (Proposed — awaiting owner acceptance) | 4, 5 (sequenced last per user request) |
 
 ## Validation Summary
 
@@ -71,9 +71,9 @@ Strictly sequential (phases 2–4 share `client/payload.go`, `client/testdata/go
 ### Action items from validation
 
 - [x] Merge the two plans into this one; supersede both originals
-- [ ] Phase 2 step 1: empirical failure-surface check gates the status derivation (see unresolved Q1)
-- [ ] Phase 4: file the openbox-core AGE ask when the span ships
-- [ ] Phase 1/4: reword thinking stance to defer, not foreclose
+- [x] Phase 2 step 1: empirical failure-surface check — **branch B1 confirmed** (probe report)
+- [x] Phase 4: openbox-core AGE ask filed — [#130](https://github.com/OpenBox-AI/openbox-core/issues/130)
+- [x] Phase 1/4: thinking stance worded as deferred (ADR-0019 P3 owns it), never foreclosed
 
 ## Verification artifacts
 
@@ -99,33 +99,40 @@ Strictly sequential (phases 2–4 share `client/payload.go`, `client/testdata/go
 
 ## Acceptance criteria
 
-- [ ] Tool `ActivityCompleted` wire bytes carry `"status":"completed"`; failure path carries
+- [x] Tool `ActivityCompleted` wire bytes carry `"status":"completed"`; failure path carries
       `"failed"` — asserted on outbound bytes in conformance; absent on turn/lifecycle/signal events
-- [ ] `PostToolUseFailure`, `SubagentStart`, `PermissionDenied`, `StopFailure` wired end-to-end,
+- [x] `PostToolUseFailure`, `SubagentStart`, `PermissionDenied`, `StopFailure` wired end-to-end,
       structural fields only, fail-open preserved (INV-3); Task `subagent_type` metadata
-- [ ] `TurnCompleted` under capture carries exactly one span; AGE-compatible `response_body`;
+- [x] `TurnCompleted` under capture carries exactly one span; AGE-compatible `response_body`;
       deterministic ids; nothing new on the wire with `content_capture:false`; secrets redacted
       before attach (asserted on bytes)
-- [ ] `activity_id`/`event_id`/approval keys byte-unchanged (pin tests untouched); 11 modules green
+- [x] `activity_id`/`event_id`/approval keys byte-unchanged (pin tests untouched); 11 modules green
       under `-race`; both cross-compiles
-- [ ] ADR-0018 Accepted + indexed; ADR-0019 Proposed + indexed; docs/contracts reconciled (no
+- [x] ADR-0018 Accepted + indexed; ADR-0019 Proposed + indexed; docs/contracts reconciled (no
       surviving "span-less"/"status retired"/stale PR-#125 claims)
-- [ ] Manual guide runs stack-free in <15 min; dormant testbed assertions merged (run deferred)
-- [ ] openbox-core AGE ask filed and linked
+- [x] Manual guide runs stack-free in <15 min; dormant testbed assertions merged (run deferred)
+- [x] openbox-core AGE ask filed and linked
 
-## Unresolved questions
+## Outcome of the unresolved questions
 
-1. **Does `PostToolUse` also fire for failed calls alongside `PostToolUseFailure`?** Phase 2 step 1
-   gates on this (scratch-project empirical + hooks docs). Pre-decided: failure-hook-only →
-   proceed; PostToolUse-fires-with-structural-marker → derive from the marker; both-fire-per-call →
-   stop-and-replan the derivation (candidate: spool-local suppression keyed on `tool_use_id`) —
-   never ship a path that reports SUCCESS 100% while calls fail.
-2. Minimum Claude Code version for the new hook names; older versions must degrade to
-   never-invoked/fail-open (phase 3 verifies against installed 2.1.229 + one older doc).
-3. `workflow_status` populated on activity rows — cosmetic or harmful downstream? Phase 5 verifies
-   the reader inventory again; candidate small core ask to scope the copy to Workflow* events.
-4. Codex parity: no failure hook, no assistant-text field, per-session usage → success-unknown and
-   alignment-unfed, documented in capabilities + ADRs; separate pass later.
-5. Alignment preconditions outside this repo: LlamaFirewall reachable + Redis up
-   (`llama_firewall.go:31-34`) — phase 6 P0 checklist, else both widgets stay empty with a perfect
-   client.
+1. **RESOLVED — branch B1.** `PostToolUseFailure` fires INSTEAD of `PostToolUse`: a failing Bash
+   on 2.1.229 produced the failure hook and zero `PostToolUse` firings, and the binary's own hook
+   table documents the split. No stop-and-replan.
+2. **RESOLVED, differently than planned.** Both older locally-installed versions (2.1.227,
+   2.1.228) already know all four hooks, so the "older version" case could not be produced that
+   way. The underlying property was tested directly instead: an unknown hook key in settings is
+   silently ignored — session clean, hook never invoked, no warning.
+3. **Accepted as-is.** Reader inventory re-confirmed: one consumer, the backend compliance
+   evidence export. Scoping `status` to tool results is what keeps it off the events where the
+   column means something else; no core ask filed.
+4. **Documented, not closed.** Codex declares `tool.status` unsupported (pinned FALSE in its
+   capability test) and feeds no alignment. Recorded in COVERAGE.md, ADR-0018 and ADR-0019's
+   parity-gap section.
+5. **Still open, and outside this repo.** LlamaFirewall reachable + Redis up. It is P0 of the
+   manual guide's live checklist and the first precondition `testbed/35-telemetry.sh` checks —
+   both report it as a SKIP rather than a failure, because the client can be perfect and both
+   widgets still empty.
+
+6. **NEW, found during phase 3 and worth carrying forward.** Any `SignalReceived` with non-empty
+   `signal_args` overwrites core's goal-alignment session goal (`age.go:112-137`). The three new
+   signals therefore carry none. A future signal type must make the same choice deliberately.

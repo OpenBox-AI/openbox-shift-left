@@ -18,6 +18,11 @@ Amended by: **ADR-0018** — a `TurnCompleted` may carry assistant text, sourced
 from the `last_assistant_message` hook field. The transcript allowlist below and
 its sentinel `TestFinops_NoContentOnWire` are **untouched** by that amendment; a
 transcript-bound string still needs its own.
+Amendment PROPOSED by: **ADR-0019 P3** — thinking blocks and intermediate
+assistant text, which are transcript-only and therefore DO require widening the
+allowlist below. Not accepted, not implemented. If it is accepted, the sentinel
+evolves from asserting absence to asserting redaction-and-cap, and the rule this
+ADR set carries over unchanged: **a version that passes trivially is a defect.**
 
 ## Context
 

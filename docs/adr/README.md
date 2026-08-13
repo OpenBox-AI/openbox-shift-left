@@ -34,3 +34,4 @@ ADR-0008, 0010, 0011, 0012, 0013, 0014, 0015, 0016, 0017 and 0018 are originals.
 | [0016](ADR-0016-default-install-posture.md) | What a bare `openbox init` does: project-local scope, enforce ON | Accepted |
 | [0017](ADR-0017-inline-policy-evaluation.md) | Inline policy evaluation: `/evaluate` is the only decider | Accepted |
 | [0018](ADR-0018-dev-turn-content-carrier.md) | Tool status, and one wire span carrying the assistant turn text | Accepted (amends 0013 and 0014) |
+| [0019](ADR-0019-full-content-capture.md) | Full content capture, under one org gate | **Proposed** — authorizes nothing until accepted |
