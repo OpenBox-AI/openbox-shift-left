@@ -1,6 +1,11 @@
 # ADR-0008 — Signed policy bundles
 
-Status: **Accepted (client side implemented; backend signing not yet built)**
+Status: **Moot for the developer runtime since
+[ADR-0017](ADR-0017-inline-policy-evaluation.md) (2026-08-13)** — policy is
+evaluated inline by `/evaluate`, so there is no local bundle to sign or verify.
+The client-side verifier described here is deleted. Kept for the threat model,
+which still applies wherever a bundle is distributed.
+Previously: Accepted (client side implemented; backend signing not yet built).
 Date: 2026-07-29
 Story: E8-S6 (report finding SL-02)
 Supersedes nothing. Related: ADR-0005 (bundle sync + staleness pin), ADR-0006 (in-process decider).

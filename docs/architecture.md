@@ -144,6 +144,22 @@ Being precise here is part of the product.
   remove it: prevention without assurance. For Codex the hook itself cannot yet be
   mandated — a `requirements.toml` cannot define one — so the shipped mandate pins
   approval and sandbox modes instead.
+- **Enforcement depends on reaching the control plane, and under the default it
+  is bypassable.** Every gated tool call is decided by a synchronous `/evaluate`
+  call ([ADR-0017](adr/ADR-0017-inline-policy-evaluation.md)); there is no local
+  policy to fall back on. If the control plane cannot be reached, the org's
+  `fail_closed` setting decides, and it defaults to **fail-open** — so blocking a
+  single hostname disables enforcement for that developer. An org that needs
+  enforcement to survive a developer who does not want it must set `fail_closed`,
+  and accept that a control-plane outage then blocks work. This replaced a local
+  evaluator that kept deciding while offline; the trade is deliberate, and the
+  reason it was worth making is that hand-written rego could never be evaluated
+  locally at all, so those orgs' gates simply opened.
+- **Content-based policy sees at most the first 64KB of a write.** Bodies are
+  truncated by `capBody` (`client/payload.go`) before egress, so a rule that would
+  match past that offset does not fire. Content-based policy is not a complete
+  check on large files. Local secret detection is not subject to this — it runs
+  before the cap and sees the whole body.
 - **Absence of events is not evidence of absence of activity.** A bare
   `openbox init` governs the current directory only
   ([ADR-0016](adr/ADR-0016-default-install-posture.md)), because that is the only

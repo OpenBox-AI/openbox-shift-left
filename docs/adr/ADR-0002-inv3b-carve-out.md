@@ -1,8 +1,16 @@
 # ADR-0002 — INV-3b: enforcement may block, but only in-process
 
-Status: Accepted — **reconstructed 2026-07-31** (see `docs/adr/README.md`).
+Status: Accepted **in part** — **reconstructed 2026-07-31** (see
+`docs/adr/README.md`).
 Reconstructed from: `decision/doc.go`, the INV-3b references throughout the
 enforce path, and `adapters/*/enforce_conformance_test.go`.
+
+**Clause 3 is retired by [ADR-0017](ADR-0017-inline-policy-evaluation.md)
+(2026-08-13):** the verdict now comes from a synchronous `/evaluate` call, so
+"no I/O on the decision path" no longer holds. That is a deliberate reversal —
+do not restore it as a bug fix. **Clause 1** was superseded earlier by
+[ADR-0016](ADR-0016-default-install-posture.md): enforce is on by default.
+Clauses 2, 4 and 5 stand unchanged.
 
 ## Context
 

@@ -1,9 +1,15 @@
 # ADR-0005 — Native Go policy evaluator instead of embedded OPA
 
-Status: Accepted — **reconstructed 2026-07-31**.
+Status: **Superseded by [ADR-0017](ADR-0017-inline-policy-evaluation.md)
+(2026-08-13)** — reconstructed 2026-07-31.
 Reconstructed from: `decision/builder.go`, `decision/regoparity.go`,
 `cli/internal/policysync`, and ADR-0008's reference to "ADR-0005 (bundle sync +
 staleness pin)".
+
+**Both decisions below are retired.** Policy is evaluated inline by `/evaluate`;
+there is no local evaluator, no bundle, and no staleness check. The parity
+obligation Decision 1 names is the reason — read it as the argument that
+superseded it. Kept for the reasoning, not as current behaviour.
 
 ## Context
 
