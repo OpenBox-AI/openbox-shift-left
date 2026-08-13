@@ -17,6 +17,8 @@ phases=(
 	"realtime:25-realtime.sh"
 	"usage:28-usage.sh"
 	"enforce:30-enforce.sh"
+	# DORMANT: written, never run — no stack has been reachable. See its header.
+	"telemetry:35-telemetry.sh"
 	"approvals:40-approvals.sh"
 	"lineage:50-lineage.sh"
 	"visibility:60-visibility.sh"
