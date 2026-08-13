@@ -12,17 +12,18 @@ One static binary. Two commands to set up. No daemon, no proxy, no second dashbo
 
 ## Quickstart
 
-**1. Install the engine.** CLI, hook engine, git hook and policy evaluator in one
-no-cgo static binary.
+**1. Install the engine.** CLI, hook engine and git hook in one no-cgo static
+binary.
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/OpenBox-AI/openbox-shift-left/main/install.sh | bash
 ```
 
-**2. Authenticate.** `openbox auth` asks for what it needs and stores it. Every
-field is prefilled with a sensible default or your current value, so a first run is
-mostly pressing Enter. **Leave the agent id blank and it registers a new agent for
-you** — then it stops asking, because there is nothing left to ask.
+**2. Authenticate.** `openbox auth` asks for what it needs and stores it. The URLs
+prefill with sensible defaults or your current values, so a first run is mostly
+pressing Enter. The agent id is **never** prefilled: **leave it blank and a new
+agent is registered for you** — then it stops asking, because there is nothing left
+to ask.
 
 ```bash
 export OPENBOX_CONTROL_TOKEN=obx_key_…    # your org key, from the dashboard
@@ -30,12 +31,11 @@ openbox auth
 ```
 
 ```
-Organization                  [local]:                    acme
 Backend URL (control plane)   [https://api.openbox.ai]:
 Core URL (data plane)         [https://core.openbox.ai]:
-Agent id (blank registers a new agent):   ← blank registers one
+Agent id (blank registers a new agent):   ← press Enter
 
-  Register a new developer agent for org "acme"? [y/N] y
+  Register a new developer agent? [y/N] y
   ✓ registered  agent 4f2a…  did:aip:9c1b…
   ✓ wrote ~/.openbox/.env       (api key, signing key — 0600)
   ✓ wrote ~/.openbox/dev.json   (agent id, DID, URLs)
@@ -49,9 +49,10 @@ you type and **no flag ever takes a secret value**, so nothing lands in your she
 history. Re-run `auth` any time to change any of it.
 
 **3. Govern a project.** `openbox init` installs the hooks. It governs **the current
-directory only**, and it **enforces** — blocking, ask-for-approval and local secret
-redaction are on by default. It never touches credentials; if they are missing it
-stops and points you back at `auth`.
+directory only**, and it **enforces** — blocking, ask-for-approval and secret
+redaction are on by default. Blocking and approval come from OpenBox, so they need
+it reachable; secret redaction is local and does not. It never touches credentials;
+if they are missing it stops and points you back at `auth`.
 
 ```bash
 cd ~/code/my-project
@@ -146,21 +147,36 @@ coordinates  OPENBOX_AGENT_DID, OPENBOX_AGENT_ID, …       env var  >  dev.json
 ## How it works
 
 ```
- claude / codex ──hooks──▶ openbox engine ──▶ local policy (µs, no network)
-                                 │                    │
-                                 │                    └─▶ allow · deny · ask · redact
-                                 ▼
-                        spool ──▶ openbox-core /evaluate ──▶ sessions · events · lineage
-                                        (AIP-signed, same endpoint as agent runtime)
+ claude / codex ──hooks──▶ openbox engine ──┬──▶ redact secrets locally (µs)
+                                            │
+                                            ├──▶ openbox-core /evaluate  ⟵ BLOCKS the call
+                                            │      └─▶ allow · deny · ask · redact
+                                            ▼
+                                   spool ──▶ openbox-core ──▶ sessions · events · lineage
+                                              (AIP-signed, same endpoint as agent runtime)
 ```
 
-A single static binary is the whole runtime: it is the CLI, the hook engine, the
-git hook and the policy evaluator. Enforcement decides **in-process** in
-microseconds ([ADR-0006](docs/adr/ADR-0006-in-process-decider.md)); telemetry is
-spooled and delivered off the hot path in near-real-time (a detached, debounced
-flusher drains the spool within ~2s of each tool call; SessionEnd remains the
-completeness safety net), so a slow or absent OpenBox never slows a tool call
-and never blocks one.
+A single static binary is the whole runtime: the CLI, the hook engine and the git
+hook. **OpenBox decides every gated tool call** — the hook asks `/evaluate` and
+waits for the verdict before the tool runs
+([ADR-0017](docs/adr/ADR-0017-inline-policy-evaluation.md)). There is one policy
+implementation, on the server; nothing evaluates policy on your machine. Still no
+daemon and no socket ([ADR-0006](docs/adr/ADR-0006-in-process-decider.md) stands —
+a bounded outbound call is not a resident process).
+
+That is a trade, and it cuts both ways: enforcement now depends on reaching
+OpenBox, and under the default `fail_closed:false` a gated call proceeds when it
+cannot. What it buys is that an org whose policy is hand-written rego is enforced
+at all — the local evaluator this replaced could not evaluate rego, so those gates
+silently opened.
+
+The one thing still decided locally is **secret redaction**: it must run before
+content leaves the machine.
+
+Telemetry is unaffected — spooled and delivered off the hot path in near-real-time
+(a detached, debounced flusher drains the spool within ~2s of each tool call;
+SessionEnd remains the completeness safety net), so a slow or absent OpenBox never
+delays an event.
 
 Everything provider-agnostic lives in one engine; each tool adds only a thin
 adapter behind one SPI. Adding a tool is an adapter, not a fork.
