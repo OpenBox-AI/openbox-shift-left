@@ -79,9 +79,10 @@ openbox auth
 ```
 
 Every field is prefilled with a sensible default or your current value, so a first
-run is mostly pressing Enter. **Leave the agent id blank and it registers a new
-agent for you** — then it stops asking, because registration returns the DID and
-both credentials and there is nothing left to ask.
+run is mostly pressing Enter — with one deliberate exception. **The agent id is
+never prefilled: leave it blank and a new agent is registered for you**, and it
+then stops asking, because registration returns the DID and both credentials.
+Reusing a specific agent is the explicit act — type its id.
 
 ```
 Organization                  [local]:                    acme

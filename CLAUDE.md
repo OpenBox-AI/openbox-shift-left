@@ -34,8 +34,8 @@ contract. Adding a provider is an adapter, not an engine change.
 
 The SPI (`provider/`) is `Installer` (install time) + `HookEngine` (runtime +
 capabilities). The engine is `adapters/common/hookflow`: spool, duration stash,
-advisory sink, findings loop, staleness gate, the enforce cascade and its gate
-sequence, Tier-2 escalation, approval hold, rewake. An adapter is four things — its
+advisory sink, findings loop, the enforce cascade and its gate sequence, inline
+evaluation, approval hold, rewake. An adapter is four things — its
 native hook shape, its mapper, an `OutputContract`, its installer.
 
 **The engine used to be copy-pasted per adapter** (~85% of non-test adapter code was
@@ -52,7 +52,7 @@ reintroduce that: if something is provider-agnostic it goes in `hookflow` or
 | `adapters/common/devconfig/`, `adapters/common/git/` | shared config/posture; trailer, notes, attestation |
 | `adapters/claude-code/`, `adapters/codex/` | one thin adapter each |
 | `client/` | core client: payload, AIP signing, verdicts |
-| `decision/` | in-process enforcement: bundle, evaluator, secret detection, redaction |
+| `decision/` | local secret detection + redaction — all that survives ADR-0017 |
 | `cli/` | the `openbox` CLI, incl. `cli/internal/approver` (ADR-0012) and `cli/internal/prompt` (masked input) |
 | `actions/openbox-git-action/` | commit→deploy lineage for CI |
 | `contracts/dev-event/` | event schema, wire mapping, conformance |
@@ -76,10 +76,12 @@ reintroduce that: if something is provider-agnostic it goes in `hookflow` or
   Usage capture is **also ON by default** (2026-08-11, ADR-0014): four token counts
   plus a model id per turn, opt out with `finops:false` / `OPENBOX_FINOPS=0`.
   Guardrail redaction at source is **not wired yet**, so prompt text egresses
-  unredacted. Tool commands and file bodies never egress on observe events; an
-  approval escalation is the one exception and is content-gated. Tier-1 secret
-  detection redacts Write/Edit bodies locally, in enforce mode. Keep
-  `docs/data-and-privacy.md` true.
+  unredacted. Tool commands and file bodies never egress on observe events — but
+  since ADR-0017 they DO on a **gated** call, every class, content_capture-gated:
+  OpenBox cannot decide on content it cannot see. Local secret detection redacts
+  the body **before** it is attached, and that ordering is the only in-transit
+  control there is (`adapters/*/enforcetarget.go`, pinned by conformance case C18).
+  The server sees at most the first 64KB. Keep `docs/data-and-privacy.md` true.
 - **`usage.go`'s INV-2 guarantee is an allowlist now, not an impossibility.** It
   used to hold structurally — the transcript projection bound only numeric fields,
   so content had nowhere to land. Binding `message.model` (required: the model id is
@@ -108,16 +110,70 @@ cd <module> && go test ./...        # per module (go.work lists them all, ADR-00
 
 ## Current state
 
-Shipped and verified end to end: observe telemetry, enforce (Tier 1–3), the E9
-approval loop with hold + rewake, the autonomous approver (ADR-0012), lineage
-(trailer → signed attestation → deploy → queryable links) including its read side,
-and the managed-config posture layer.
+Shipped and verified end to end: observe telemetry, enforcement, the E9 approval
+loop with hold + rewake, the autonomous approver (ADR-0012), lineage (trailer →
+signed attestation → deploy → queryable links) including its read side, and the
+managed-config posture layer.
 
-**Setup is two commands now** (ADR-0015 + ADR-0016, 2026-08-13): `openbox auth`
-authenticates — collects or registers credentials and writes `~/.openbox/.env`
-(secrets) plus `dev.json` (coordinates) — then `openbox init` sets up hooks at a
-scope and writes posture. Four things changed together, and each one has a reason
-worth not re-litigating:
+**`/evaluate` is the only decider** (ADR-0017, 2026-08-13). The local Go policy
+evaluator, the bundle, its signature check, `policysync`, `openbox dev sync` and
+the session-start staleness gate are deleted. Enforcement is three independent
+named things now, not three tiers: local secret redaction, inline evaluation,
+findings. Four things about it are worth not re-litigating:
+
+- **The gate consults nothing local.** `ShouldEscalate` is the only condition;
+  every gated class goes to the server, because risk is a property of the POLICY
+  and the engine deciding which calls deserved a real verdict was the engine
+  second-guessing the thing meant to decide. The narrowing it replaced is why a
+  **raw-rego** org was ungoverned on everything but shell and MCP: the evaluator
+  could not evaluate their policy at all, so it served fail-open.
+- **`ApplyFailurePolicy` must run AFTER the evaluation, never before.** It sat
+  between the local verdict and the escalation, which was harmless while the local
+  step produced verdicts. A local step that always reports "no verdict" turns an
+  early call into an immediate synthesized HALT under `fail_closed`, which then
+  reads as "already tightened" and suppresses the round-trip — **a fail-closed org
+  would deny every gated call without ever asking.** Conformance case C1 caught it.
+- **Deprecated keys must stay reachable to warn.** `tier2`, `tier2_timeout_ms` and
+  `require_verified_bundle` still parse and do nothing. `tier2` is deliberately NOT
+  honoured: an org that set `tier2:false` under the old design would otherwise
+  upgrade into silent enforcement. The warning lives in `EffectivePosture`, not on
+  the resolver — ADR-0017 removed the last runtime caller of `ResolveTier2`, so a
+  notice hung there could never fire, which is the same as no notice.
+- **Approval identity did NOT move, deliberately.** Only shell and MCP have a
+  retry-stable operation id; every other class keys on the invocation, so an
+  approval for a `Write` cannot be matched after a retry and the call is re-asked.
+  Fixing it means changing `activity_id` — this product's event identity, byte-
+  pinned and load-bearing for core's dedupe — so it is its own decision.
+  `TestUngatedClassesKeepInvocationScopedIdentity` pins the limit and its safe
+  direction: over-ask, never over-grant.
+
+**Status: implemented, unit-verified, all 11 modules green under `-race` plus both
+cross-compiles — the testbed has NOT run.** The conformance cases drive the real
+hook against a real `/evaluate` stub over HTTP, so deny/allow, redact-before-send
+(asserted on the outbound bytes) and both failure-policy branches are strongly
+covered. What that cannot reach is the claim the ADR rests on: **that a raw-rego
+org is now enforced.** `testbed/30-enforce.sh` §A publishes a raw-rego deny through
+the backend to prove it and is waiting on a stack. The lost-200 double-store window
+is also still open and irreducible client-side — closing it needs server-side
+dedupe on developer events, a backend ask.
+`plans/260813-0140-inline-policy-evaluation/reports/verification-260813-inline-evaluation.md`
+splits every claim by evidence strength;
+`plans/260813-0140-inline-policy-evaluation/manual-test-guide.md` is the stack-free
+walkthrough.
+
+**Setup is two commands** (ADR-0015 + ADR-0016, 2026-08-13): `openbox auth`
+authenticates a MACHINE — collects or registers credentials and writes
+`~/.openbox/.env` (secrets) plus `dev.json` (coordinates) — then `openbox init
+--provider <tool>` sets up hooks at a scope and writes posture. `auth` takes no
+`--provider`, `--org` or `--agent-name`: the agent is machine-scoped, so a
+per-tool flag on it was a contradiction, and nothing ever read `Org`. The
+agent-id prompt **never prefills**, because `prompt.Line` returns its default on
+empty input — offering the stored id made "blank registers a new agent"
+unachievable and demanded a key the user did not have. Blanking it would erase
+`agent_id`, which feeds `SelfAgentID` in the autonomous approver (ADR-0012), so
+the credential-reuse path returns it from `dev.json` like it already did the DID.
+Four things changed with the original split, and each has a reason worth not
+re-litigating:
 
 - **The OS keychain is deleted, not demoted.** Credentials are one plaintext file,
   `0600` on unix and unprotected on Windows. This is a real security downgrade and
@@ -209,7 +265,9 @@ Known limits, documented in
 `docs/architecture.md#assurance--what-the-evidence-proves`: the signing key is
 readable by anything running as the developer, a default install governs one
 directory so absence of events is not evidence of absence of work, the backend does
-not sign policy bundles yet (so `require_verified_bundle` defaults off), Codex's hook
+enforcement depends on reaching the control plane and under the default
+`fail_closed:false` is disabled by blocking one hostname, content-based policy sees
+at most the first 64KB of a write, Codex's hook
 cannot be mandated by `requirements.toml`, Guardrail redaction at source is not
 wired, the production-runtime lineage hop is not joined, token usage is write-only
 until core ships its extractor, Codex reports usage per session rather than per turn,

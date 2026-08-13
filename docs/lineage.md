@@ -25,8 +25,8 @@ Three producers, all in this repo:
    root over its leaves, signed.
 2. **The commit hook** (`prepare-commit-msg`) stamps `OpenBox-Session: <id>` into the
    commit message, mirrors it into `refs/notes/openbox`, and signs an attestation
-   envelope into `refs/notes/openbox-attest` covering the commit sha, the tree sha,
-   the session ids and the policy bundle in force
+   envelope into `refs/notes/openbox-attest` covering the commit sha, the tree sha
+   and the session ids
    ([ADR-0010](adr/ADR-0010-signed-commit-attestation.md)).
 3. **The deploy action** (`openbox-git-action`) resolves the pushed range back to
    sessions, carries the attestation, and emits one Deploy event per environment —

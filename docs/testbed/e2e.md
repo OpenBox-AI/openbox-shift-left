@@ -47,8 +47,8 @@ adapter parity can be driven the same way.
 **Not replaced by anything:** core, backend, OPA, guardrails, AGE, Postgres,
 Temporal workers, the MCP server, git, the FE. All real, all local.
 
-**Deliberately still absent** (§9): a production runtime session, GitHub-App
-webhooks, and an org-signed policy bundle.
+**Deliberately still absent** (§9): a production runtime session and GitHub-App
+webhooks.
 
 Verified Claude Code flags for the headless driver (against the installed CLI):
 `-p/--print`, `--output-format json`, `--model`, `--mcp-config`,
@@ -122,8 +122,7 @@ Real `openbox auth` then `openbox init --provider claude-code` (default scope, e
 (the only onboarding spelling — §8). Asserts: `agents` row with
 `agent_type=developer` and `signing_required=t`; config written; hooks installed
 **scoped to the testbed project only**; `openbox dev verify` succeeds;
-`openbox doctor` reports every posture flag with provenance, including
-`require_verified_bundle`.
+`openbox doctor` reports every posture flag with provenance.
 
 > **Trap:** enforcement written to the *global* config
 > fail-closed-denies every Claude Code session on the box. The harness writes
@@ -217,11 +216,16 @@ default). Asserts:
   defensible after the fact.
 
 ### 30-enforce
-Real deny rule in the local bundle; a file containing a synthetic `AKIA…` and
-`sk-ant-…`; core killed for the fail-closed path; findings channel on. Asserts:
-`enforcements.jsonl` rows with a local-redaction source; the written file contains
-`OPENBOX_REDACTED` and the secret never egresses; a synthesized HALT plus the stale
-marker, and recovery after `dev sync`; findings surface in-session.
+A **raw-rego** org policy that denies — the shape the deleted local evaluator
+served fail-open, so these sessions used to proceed ungoverned
+([ADR-0017](../adr/ADR-0017-inline-policy-evaluation.md)); a file containing a
+synthetic `AKIA…` and `sk-ant-…`; core killed for both failure-policy branches;
+findings channel on. Asserts: the deny is sourced from `evaluate` with a
+`policy_id`; a class that never used to escalate (`Write`) is decided by the
+server and stored once; the written file contains `OPENBOX_REDACTED` and the
+secret never egresses; fail-closed synthesizes a HALT while fail-open proceeds
+**and is recorded** as ungoverned; redaction survives the outage; findings
+surface in-session.
 
 ### 40-approvals
 The five approval scenarios, scripted with timing, using the P4 approver
@@ -350,7 +354,7 @@ openbox init --role approver [--org …]                   # role=approver
 
 | Role | File | Read by |
 |---|---|---|
-| `dev` (default) | `~/.openbox/dev.json` (`adapters/common/devconfig/paths.go`) | every hook, every adapter, `doctor`, `dev sync` |
+| `dev` (default) | `~/.openbox/dev.json` (`adapters/common/devconfig/paths.go`) | every hook, every adapter, `doctor` |
 | `approver` | `~/.config/openbox/approver.json` | `openbox approve` only |
 
 **Rules that keep this safe and cheap**
@@ -491,8 +495,6 @@ now represented in the local data, which is what the read side needs.
   the fifth must render as an explicit gap, never be quietly omitted.
 - **GitHub-App webhooks** (Mechanism B) — needs a real app plus a tunnel; seed
   instead (P5) or skip explicitly.
-- **`require_verified_bundle` as a true positive** — the backend does not sign
-  bundles yet (G1), so only the refusal path is testable.
 - **Real-KMS attestation verification** — superseded locally by the
   `KMS_PROVIDER=local` verifier, but it is a different code path than production.
 
