@@ -9,9 +9,15 @@ Implements: `client/event.go` (`EventTurnStarted`/`EventTurnCompleted`, widened
 `adapters/*/usage.go`.
 Builds on: ADR-0013 (a tool call is an Activity; the span layer is retired).
 ADR-0013 is **not amended** — spans stay retired, and this rides the activity
-shape it established.
+shape it established. *(ADR-0018 later amended that: one span rides
+`TurnCompleted`. The sentence above records what was true when this ADR was
+accepted.)*
 Narrows: the INV-2 claim that `usage.go`'s transcript projection is
 *structurally* content-proof.
+Amended by: **ADR-0018** — a `TurnCompleted` may carry assistant text, sourced
+from the `last_assistant_message` hook field. The transcript allowlist below and
+its sentinel `TestFinops_NoContentOnWire` are **untouched** by that amendment; a
+transcript-bound string still needs its own.
 
 ## Context
 

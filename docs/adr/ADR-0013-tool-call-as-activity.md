@@ -5,6 +5,11 @@ Implements: `client/payload.go` (`buildPayload`, `wireTypeFor`,
 `structuralActivityOutput`, `durationMs`), `client/testdata/golden/activity_*.json`.
 Supersedes: ADR-0004's `ToolCall`/`ToolResult` wire rows and its §Amendment
 mirror obligation. ADR-0004 otherwise stands.
+Amended by: **ADR-0018** — "developer sessions are span-less" now holds for tool
+events only. One minimal span rides `TurnCompleted` under the content gate, to
+feed a core reader that accepts no other shape. `client/hookspan.go`,
+`client/spanbuilder.go`, the family root tuples and `AssertHookWireShape` stay
+deleted; everything below about TOOL events is unchanged.
 
 ## Context
 
