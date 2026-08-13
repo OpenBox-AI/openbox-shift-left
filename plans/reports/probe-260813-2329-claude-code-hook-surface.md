@@ -61,6 +61,21 @@ The binary's own hook table says the same: `PostToolUse` — "Run after **succes
 string) — a `permissions.deny` rule denies without firing it (probe 3: `PreToolUse` only). It is
 therefore wired from the schema and marked docs-only-verified, as phase 03 pre-decided.
 
+## Q3 — do unknown hook keys break an older Claude Code?
+
+**No — they are silently ignored.** The two other locally installed versions (2.1.227, 2.1.228)
+already know all four new hooks, so the "older version" case could not be produced that way. The
+underlying property was tested directly instead: a made-up key,
+`"TotallyUnknownFutureHook"`, was added to the project settings and a session run.
+
+```
+exit 0 · session completed normally · the unknown hook never fired · no warning, no error
+```
+
+⇒ registering the four hook keys is safe on a version that does not implement them: the events are
+simply absent (fail-open, INV-3). What an existing install does NOT get is the new events until
+`openbox init` is re-run — a documentation item, not a failure.
+
 ## What this does not prove
 
 Neither source is a live OpenBox run. That `PostToolUseFailure` reaches `/evaluate` as
