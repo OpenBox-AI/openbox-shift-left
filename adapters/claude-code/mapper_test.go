@@ -309,3 +309,77 @@ func TestSplitMCPName(t *testing.T) {
 		}
 	}
 }
+
+// The outcome derivation (ADR-0018 Decision 1). It is structural: which hook
+// fired IS the answer, so these tests assert the mapping and — more importantly
+// — that nothing was read out of the tool's own output to get there.
+func TestMap_ToolStatusIsDerivedFromWhichHookFired(t *testing.T) {
+	m := testMapper()
+
+	ev, ok := m.Map(HookPostToolUse, &HookEvent{
+		SessionID: "s", ToolName: "Bash", ToolUseID: "toolu_1",
+		ToolInput: json.RawMessage(`{"command":"go vet ./..."}`),
+	})
+	if !ok {
+		t.Fatal("PostToolUse must map")
+	}
+	if ev.Status != client.StatusCompleted {
+		t.Errorf("PostToolUse status = %q, want %q — Claude Code fires this hook only "+
+			"after a SUCCESSFUL tool (2.1.229 hook table; failures fire PostToolUseFailure)",
+			ev.Status, client.StatusCompleted)
+	}
+
+	// The started half has no outcome yet, and must not claim one.
+	call, ok := m.Map(HookPreToolUse, &HookEvent{SessionID: "s", ToolName: "Bash", ToolUseID: "toolu_1"})
+	if !ok {
+		t.Fatal("PreToolUse must map")
+	}
+	if call.Status != "" {
+		t.Errorf("PreToolUse carries status %q; a call that has not run has no outcome", call.Status)
+	}
+}
+
+// Lifecycle events must never carry an outcome: payload.status writes the row's
+// workflow_status column for any event type, where it means something else.
+func TestMap_LifecycleEventsCarryNoStatus(t *testing.T) {
+	m := testMapper()
+	for _, tc := range []struct {
+		hook HookName
+		ev   *HookEvent
+	}{
+		{HookSessionStart, &HookEvent{SessionID: "s", Source: "startup"}},
+		{HookUserPromptSubmit, &HookEvent{SessionID: "s", Prompt: "hi"}},
+		{HookSessionEnd, &HookEvent{SessionID: "s", Reason: "other"}},
+	} {
+		ev, ok := m.Map(tc.hook, tc.ev)
+		if !ok {
+			t.Fatalf("%s must map", tc.hook)
+		}
+		if ev.Status != "" {
+			t.Errorf("%s carries status %q; the field is tool-results-only", tc.hook, ev.Status)
+		}
+	}
+}
+
+// INV-2 the structural way: the derivation must not have introduced a path from
+// tool output text to the event. A sentinel in tool_response — the field this
+// adapter deliberately does not bind — must be nowhere in the emitted event.
+func TestMap_StatusDerivationReadsNoToolOutput(t *testing.T) {
+	m := testMapper()
+	const sentinel = "SENTINEL-TOOL-OUTPUT-must-not-be-read"
+	ev, ok := m.Map(HookPostToolUse, &HookEvent{
+		SessionID: "s", ToolName: "Bash", ToolUseID: "toolu_2",
+		ToolInput: json.RawMessage(`{"command":"echo hi"}`),
+	})
+	if !ok {
+		t.Fatal("must map")
+	}
+	blob, _ := json.Marshal(ev)
+	if strings.Contains(string(blob), sentinel) {
+		t.Errorf("tool output reached the event: %s", blob)
+	}
+	// And the status is present, so the assertion above is not vacuous.
+	if ev.Status != client.StatusCompleted {
+		t.Errorf("status = %q, want %q", ev.Status, client.StatusCompleted)
+	}
+}

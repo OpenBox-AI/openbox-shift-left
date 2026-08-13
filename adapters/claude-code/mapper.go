@@ -199,6 +199,20 @@ func (m Mapper) Map(hook HookName, e *HookEvent) (client.DevEvent, bool) {
 		ev.EndedAt = ts
 		ev.Tool, ev.Span = mapTool(e, "completed")
 		ev.Metadata = toolMetadata(e)
+		// Which hook fired IS the outcome — nothing is inferred and nothing is
+		// read out of the tool's output. Claude Code splits the two: PostToolUse
+		// is documented as "Run after successful tool" and PostToolUseFailure as
+		// "Run after tool fails", and they are mutually exclusive per call
+		// (verified empirically on 2.1.229 — a failing Bash fired
+		// PostToolUseFailure and no PostToolUse; see
+		// plans/reports/probe-260813-2329-claude-code-hook-surface.md).
+		//
+		// That exclusivity is what makes an unconditional "completed" truthful
+		// here. If a future version fired both, this line would report SUCCESS
+		// 100% on failing calls — a worse failure than the 0% it replaces,
+		// because it is believable. The probe is the standing evidence, and the
+		// pairing is re-checked whenever the hook surface changes.
+		ev.Status = client.StatusCompleted
 
 	case HookSessionEnd:
 		ev.EventType = client.EventSessionEnded

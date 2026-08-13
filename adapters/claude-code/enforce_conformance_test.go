@@ -318,6 +318,73 @@ func TestEnforcementConformance(t *testing.T) {
 		}
 	})
 
+	// ── ADR-0018: the outcome field ────────────────────────────────────────────
+	//
+	// Core's per-tool success metric reads ONE thing:
+	//
+	//	metric.IsSuccess = payload.Status != nil && *payload.Status == "completed"
+	//
+	// so these two cases assert the literal on the bytes actually POSTed, not on
+	// the DevEvent or the mapper's return. A field that is correct in the struct
+	// and absent from the wire looks identical to every unit test and leaves the
+	// dashboard at 0.0% — which is the state this field exists to fix.
+	//
+	// observeThenFlush drives the real observe path for one hook and then the
+	// SessionEnd flush that delivers it, returning what reached /evaluate.
+	observeThenFlush := func(t *testing.T, hook, payload string) []string {
+		t.Helper()
+		bodies := serveCapturing(t, `{"verdict":"allow"}`)
+		// The detached realtime flusher would fork a second process mid-test and
+		// race the assertion; SessionEnd's flush is the deterministic delivery.
+		t.Setenv(envRealtime, "0")
+		t.Setenv(envEnforce, "0") // observe path — no gate, no deferred spool
+		var out bytes.Buffer
+		RunHook(hook, strings.NewReader(payload), &out, log.New(&bytes.Buffer{}, "", 0))
+		RunHook("SessionEnd", strings.NewReader(
+			`{"hook_event_name":"SessionEnd","session_id":"s-status","cwd":"/tmp","reason":"other"}`),
+			&out, log.New(&bytes.Buffer{}, "", 0))
+		return *bodies
+	}
+
+	t.Run("C20 a completed tool call reports status \"completed\" on the outbound bytes", func(t *testing.T) {
+		bodies := observeThenFlush(t, "PostToolUse",
+			`{"hook_event_name":"PostToolUse","session_id":"s-status","cwd":"/tmp","tool_name":"Bash","tool_use_id":"toolu_c20","tool_input":{"command":"go test ./..."},"tool_response":{"output":"ok"}}`)
+
+		var completed string
+		for _, b := range bodies {
+			if strings.Contains(b, `"event_type":"ActivityCompleted"`) && strings.Contains(b, `"activity_type":"Bash"`) {
+				completed = b
+			}
+		}
+		if completed == "" {
+			t.Fatalf("no ActivityCompleted reached /evaluate; bodies=%v", bodies)
+		}
+		// The exact literal, on the wire. Not `strings.Contains(b, "completed")`
+		// — "ActivityCompleted" contains that substring and would pass forever.
+		if !strings.Contains(completed, `"status":"completed"`) {
+			t.Errorf("completed tool call carries no \"status\":\"completed\"; core scores it as a failure: %s", completed)
+		}
+	})
+
+	t.Run("C21 status ships unchanged with content_capture:false", func(t *testing.T) {
+		// The whole point of deriving status structurally: an org that sends no
+		// content still gets its success metric. If this ever regresses, Tool
+		// Health silently becomes a privacy-setting-dependent feature.
+		t.Setenv(envContentCapture, "0")
+		bodies := observeThenFlush(t, "PostToolUse",
+			`{"hook_event_name":"PostToolUse","session_id":"s-status","cwd":"/tmp","tool_name":"Read","tool_use_id":"toolu_c21","tool_input":{"file_path":"/tmp/a.txt"}}`)
+
+		var found bool
+		for _, b := range bodies {
+			if strings.Contains(b, `"event_type":"ActivityCompleted"`) && strings.Contains(b, `"status":"completed"`) {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("status absent with capture off — it is structural, not content: %v", bodies)
+		}
+	})
+
 	t.Run("C10 secret in Write body → redact-and-continue (E6-S9)", func(t *testing.T) {
 		// A reachable, BUNDLED allow decision. Secret detection is DEFAULT ON and
 		// DECOUPLED from content_capture (which stays OFF): the file body reaches only
