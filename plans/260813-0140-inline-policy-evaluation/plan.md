@@ -53,7 +53,7 @@ consumed, and the sync/staleness/signing machinery around it are deleted. Local
 |---|---|---|---|---|
 | 1 | [Gate: dedupe under universal escalation + Codex ceiling](phase-01-gate-dedupe-and-ceilings.md) | done — stack run waived | 3h | — |
 | 2 | [ADR-0017 + honest docs ahead of the code](phase-02-adr-and-docs.md) | done | 3h | 1 |
-| 3 | [Hook-ceiling capability in the SPI; widen the gate to all classes](phase-03-ceiling-spi-and-widen-gate.md) | pending | 5h | 2 |
+| 3 | [Hook-ceiling capability in the SPI; widen the gate to all classes](phase-03-ceiling-spi-and-widen-gate.md) | done | 5h | 2 |
 | 4 | [Content: redact locally, then send](phase-04-redact-then-send.md) | pending | 3h | 3 |
 | 5 | [Evidence: verdict `policy_id` into posture](phase-05-policy-identity-evidence.md) | pending | 2h | 3 |
 | 6 | [Delete the local policy path](phase-06-delete-local-policy.md) | pending | 5h | 4, 5 |

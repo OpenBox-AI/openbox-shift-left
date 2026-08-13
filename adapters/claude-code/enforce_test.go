@@ -1109,9 +1109,9 @@ func TestRunHook_EnforceApply_Approval(t *testing.T) {
 	}
 }
 
-// The approval context (OD-E9-7): an escalation must carry what the call is
-// asking to do, or the approval it files is not decidable — `kind=shell
-// tool_name=Bash` tells a human and an autonomous approver exactly nothing.
+// The evaluation context (OD-E9-7): a gated call must carry what it is asking
+// to do, or neither the server nor an approver can decide about it — `kind=shell
+// tool_name=Bash` tells them exactly nothing.
 //
 // The matching guarantee is that the OBSERVE copy of the same call never
 // carries it (SL3-SEC-3), which is why the two are mapped separately.
@@ -1124,11 +1124,12 @@ func TestEscalationCarriesApprovalContext_ObserveNeverDoes(t *testing.T) {
 	}{
 		{"shell carries the command", "Bash", `{"command":"rm -rf /tmp/x"}`, "rm -rf /tmp/x"},
 		{"mcp carries the arguments", "mcp__github__create_issue", `{"title":"ship it"}`, "ship it"},
+		{"file carries the body", "Write", `{"file_path":"/tmp/a","content":"hello"}`, "hello"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			hookEv := &HookEvent{SessionID: "s1", ToolName: tc.tool, ToolInput: []byte(tc.input)}
 
-			escalated, ok := enforceTarget{id: Identity{DeveloperDID: testDID}, mapper: m, ev: hookEv}.DevEvent()
+			escalated, ok := enforceTarget{id: Identity{DeveloperDID: testDID}, mapper: m, ev: hookEv}.DevEvent(nil)
 			if !ok {
 				t.Fatal("escalation event did not map")
 			}
@@ -1144,17 +1145,26 @@ func TestEscalationCarriesApprovalContext_ObserveNeverDoes(t *testing.T) {
 		})
 	}
 
-	// A class that cannot be escalated gets no context — nothing would read it,
-	// and for a file write the tool input is the entire file body.
+	// Redaction runs before attachment (E8). Given a detection result, the
+	// attached body is the REDACTED one — the same bytes the tool call itself is
+	// rewritten to, never the original.
 	fileEv := &HookEvent{
 		SessionID: "s1", ToolName: "Write",
-		ToolInput: []byte(`{"file_path":"/tmp/a","content":"SECRET-BODY"}`),
+		ToolInput: []byte(`{"file_path":"/tmp/a","content":"AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE"}`),
 	}
-	if isHighRiskClass("Write") {
-		t.Fatal("Write is now escalatable — it needs an approval context, and this test needs updating")
+	red := &client.Content{FileText: "AWS_ACCESS_KEY_ID=OPENBOX_REDACTED"}
+	ev, _ := enforceTarget{id: Identity{DeveloperDID: testDID}, mapper: m, ev: fileEv}.DevEvent(red)
+	if ev.Content == nil {
+		t.Fatal("a gated Write must carry its body for evaluation (ADR-0017 E7)")
 	}
-	ev, _ := enforceTarget{id: Identity{DeveloperDID: testDID}, mapper: m, ev: fileEv}.DevEvent()
-	if ev.Content != nil {
-		t.Errorf("non-escalatable class carries content: %+v", ev.Content)
+	if strings.Contains(ev.Content.ToolInput, "AKIAIOSFODNN7EXAMPLE") {
+		t.Errorf("the RAW body was attached — redaction must precede attachment (E8): %q", ev.Content.ToolInput)
+	}
+	if !strings.Contains(ev.Content.ToolInput, "OPENBOX_REDACTED") {
+		t.Errorf("the redacted body was not attached: %q", ev.Content.ToolInput)
+	}
+	// The structural locator survives the rebuild verbatim.
+	if !strings.Contains(ev.Content.ToolInput, "/tmp/a") {
+		t.Errorf("file_path lost in the redacted rebuild: %q", ev.Content.ToolInput)
 	}
 }

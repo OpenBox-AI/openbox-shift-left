@@ -482,9 +482,31 @@ func buildMetadata(ev DevEvent) (json.RawMessage, error) {
 // renders (log.input), and what core runs Guardrails stage "0" over
 // (services/guardrail.go:180). It carries only structural fields: the tool
 // name/kind and the file/mcp locators. It never carries content — the shell
-// command, file text, or tool arguments — with the single documented exception
-// of the escalation context below. Returns nil (field omitted) when nothing
-// structural is known.
+// command, file text, or tool arguments — except on a gated call's evaluation
+// event, which attaches the content below. Returns nil (field omitted) when
+// nothing structural is known.
+//
+// That exception used to be one class of call (the approval escalation, shell
+// and MCP only). ADR-0017 evaluates every gated class inline, so it now covers
+// every gated call — including file writes, whose content is the file body. The
+// gate is `content_capture`, unchanged: stripContent nils Content before this
+// runs when the org has it off, and the observe copy of the same call never
+// carries content on any path.
+// contentKeyFor names the activity_input field a gated call's content lands in.
+// "command" is kept for shell so the field an approver and every existing
+// dashboard already read does not move.
+func contentKeyFor(kind ToolKind) string {
+	switch kind {
+	case ToolShell:
+		return "command"
+	case ToolMCP:
+		return "arguments"
+	case ToolFile:
+		return "content"
+	}
+	return "arguments"
+}
+
 func structuralActivityInput(ev DevEvent) json.RawMessage {
 	m := map[string]any{}
 	if ev.Tool.Name != "" {
@@ -509,17 +531,17 @@ func structuralActivityInput(ev DevEvent) json.RawMessage {
 			}
 		}
 	}
-	// The approval context, when the escalation carried one (Content.ToolInput).
-	// It rides activity_input because that is the field the approvals queue and
-	// the dashboard already surface, so an approver sees it with no server-side
-	// change. Content-gated: stripContent has already nil'd Content when the org
-	// has content capture off, so it is simply absent then.
+	// The evaluation context, when the gated call carried one
+	// (Content.ToolInput). It rides activity_input because that is the field
+	// core's Guardrails stage 0, the approvals queue and the dashboard already
+	// read, so content-aware policy and an approver both see it with no
+	// server-side change. Content-gated: stripContent has already nil'd Content
+	// when the org has content capture off, so it is simply absent then.
+	//
+	// The key names what the content IS, per class, because a reviewer reading
+	// `command: <a file body>` would be misled about what was executed.
 	if ev.Content != nil && ev.Content.ToolInput != "" {
-		key := "command"
-		if ev.Tool.Kind == ToolMCP {
-			key = "arguments"
-		}
-		m[key] = capBody(ev.Content.ToolInput)
+		m[contentKeyFor(ev.Tool.Kind)] = capBody(ev.Content.ToolInput)
 	}
 	if len(m) == 0 {
 		return nil

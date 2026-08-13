@@ -4,11 +4,15 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"io/fs"
 	"log"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 
@@ -260,6 +264,99 @@ func TestEnforcementConformance(t *testing.T) {
 			})
 		}
 	}
+
+	// serveCapturing records every body POSTed to /evaluate, so a case can assert
+	// on the actual outbound bytes rather than on what should have been sent.
+	serveCapturing := func(t *testing.T, verdict string) *[]string {
+		t.Helper()
+		var mu sync.Mutex
+		var bodies []string
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			raw, _ := io.ReadAll(r.Body)
+			mu.Lock()
+			bodies = append(bodies, string(raw))
+			mu.Unlock()
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(verdict))
+		}))
+		t.Cleanup(srv.Close)
+		tier2Creds(t, srv.URL)
+		return &bodies
+	}
+
+	// THE tripwire for ADR-0017's E8. Write bodies egress now, so the local
+	// redaction is the one control standing between a secret in a file and the
+	// control plane's event storage — which is the hardest place to purge
+	// anything from.
+	//
+	// It asserts on the bytes actually POSTed, not on the decision or the
+	// rewrite: a correct redaction applied to the tool call while the ORIGINAL
+	// body is sent for evaluation would satisfy every other test in this file
+	// and still leak. Never weaken this to a substring check on a decision.
+	t.Run("C18 a secret in a Write body never reaches /evaluate (E8)", func(t *testing.T) {
+		setBundleEnv(t, &decision.Bundle{Version: "conf-allow", DefaultDecision: "allow"})
+		bodies := serveCapturing(t, `{"verdict":"allow"}`)
+		t.Setenv(envEnforce, "1")
+		t.Setenv(envFailClosed, "0")
+		t.Setenv(envContentCapture, "1") // content ON: the body is attached
+		os.Unsetenv(envSecretDetection)  // detection default ON
+		run(t, secretWrite)
+
+		if len(*bodies) == 0 {
+			t.Fatal("no /evaluate call — a gated Write must be evaluated (ADR-0017)")
+		}
+		for i, b := range *bodies {
+			if strings.Contains(b, awsSecret) {
+				t.Errorf("the raw secret reached /evaluate in body #%d — redaction must "+
+					"run BEFORE attachment: %s", i, b)
+			}
+		}
+		// The body must actually be attached, or this test would pass by sending
+		// nothing at all and prove nothing.
+		joined := strings.Join(*bodies, "")
+		if !strings.Contains(joined, "OPENBOX_REDACTED") {
+			t.Errorf("no redacted body attached; the case proves nothing if content never "+
+				"egressed at all: %s", joined)
+		}
+	})
+
+	// The other half: content_capture is a hard gate, not a best-effort filter.
+	// With it off, no class attaches anything and the server decides on the
+	// structural axes alone — coarser enforcement, which is the honest trade.
+	t.Run("C19 content_capture:false attaches no content, any class", func(t *testing.T) {
+		setBundleEnv(t, &decision.Bundle{Version: "conf-allow", DefaultDecision: "allow"})
+		bodies := serveCapturing(t, `{"verdict":"allow"}`)
+		t.Setenv(envEnforce, "1")
+		t.Setenv(envFailClosed, "0")
+		t.Setenv(envContentCapture, "0")
+
+		const canary = "CANARY-CONTENT-must-not-egress"
+		for _, payload := range []string{
+			`{"hook_event_name":"PreToolUse","session_id":"s","cwd":"/tmp","tool_name":"Write","tool_input":{"file_path":"/tmp/a","content":"` + canary + `"}}`,
+			`{"hook_event_name":"PreToolUse","session_id":"s","cwd":"/tmp","tool_name":"Bash","tool_input":{"command":"` + canary + `"}}`,
+			`{"hook_event_name":"PreToolUse","session_id":"s","cwd":"/tmp","tool_name":"mcp__x__y","tool_input":{"arg":"` + canary + `"}}`,
+			// The path is deliberately canary-free: a file_path is a structural
+			// locator and egresses on every event by design, capture on or off.
+			// What must not appear is the tool's CONTENT.
+			`{"hook_event_name":"PreToolUse","session_id":"s","cwd":"/tmp","tool_name":"Read","tool_input":{"file_path":"/tmp/plain.txt","pattern":"` + canary + `"}}`,
+		} {
+			run(t, payload)
+		}
+		if len(*bodies) == 0 {
+			t.Fatal("no /evaluate calls — every class is gated")
+		}
+		for i, b := range *bodies {
+			if strings.Contains(b, canary) {
+				t.Errorf("content egressed with capture OFF in body #%d: %s", i, b)
+			}
+			// Structural axes must still be there, or enforcement would have
+			// nothing to decide on and "no content" would be indistinguishable
+			// from "no evaluation".
+			if !strings.Contains(b, `"tool_name"`) {
+				t.Errorf("body #%d carries no structural axes: %s", i, b)
+			}
+		}
+	})
 
 	t.Run("C10 secret in Write body → redact-and-continue (E6-S9)", func(t *testing.T) {
 		// A reachable, BUNDLED allow decision. Secret detection is DEFAULT ON and

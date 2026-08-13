@@ -23,15 +23,23 @@ type EnforceTarget interface {
 	// ToolInput is the raw native tool input, used to reconstruct a redacted
 	// replacement. Never egressed.
 	ToolInput() json.RawMessage
-	// HighRisk reports whether this class is worth a synchronous Tier-2
-	// round-trip (shell execution, MCP calls).
+	// HighRisk reports whether this class is shell execution or an MCP call.
+	// The gate no longer consults it (ADR-0017 evaluates every class); it
+	// survives for the adapters' own classification.
 	HighRisk() bool
-	// DecisionRequest builds the local Tier-1 request. Metadata axes only
+	// DecisionRequest builds the local decision request. Metadata axes only
 	// (INV-2); content is carried solely for local redaction.
 	DecisionRequest(localRedaction bool) decision.DecisionRequest
-	// DevEvent maps the call for an inline evaluation, or reports !ok when it
+	// DevEvent maps the call for the inline evaluation, or reports !ok when it
 	// cannot be mapped.
-	DevEvent() (client.DevEvent, bool)
+	//
+	// redacted is the local secret-detection result for this call, or nil when
+	// nothing was scanned or nothing matched. It is passed IN rather than looked
+	// up because the ordering is the security property: the content this event
+	// attaches must be the redacted body, and an implementation that cannot see
+	// the redaction cannot honour that. A secret sent to the control plane lands
+	// in governance event storage, which is the hardest place to purge it from.
+	DevEvent(redacted *client.Content) (client.DevEvent, bool)
 }
 
 // EnforceGate is the synchronous pre-execution gate: the sequence a hook runs
@@ -142,7 +150,10 @@ func (g EnforceGate) Run(ctx context.Context, logger *log.Logger, stdout io.Writ
 	// raw-rego orgs ungoverned on everything else, because the local evaluator
 	// that handled the rest could not evaluate their policy at all.
 	if ShouldEscalate(dec, g.Contract) {
-		t2, key := g.escalate(ctx, logger, t, enforceStart)
+		// dec.RedactedContent is the local scan's result, computed above and
+		// carried in rather than re-derived: what this call attaches for the
+		// server to judge is the same body the tool call is rewritten to.
+		t2, key := g.escalate(ctx, logger, t, dec.RedactedContent, enforceStart)
 		// Carry the local Tier-1 redaction onto the evaluated decision so a
 		// redact-and-continue still applies on the Tier-2 proceed path.
 		t2.RedactedContent = dec.RedactedContent
@@ -173,8 +184,8 @@ func (g EnforceGate) Run(ctx context.Context, logger *log.Logger, stdout io.Writ
 // escalate runs one Tier-2 round-trip and returns the poll key for the approval
 // it may have filed. The key is derived from the SAME event that was escalated,
 // so a hold can only ever address the row this call created.
-func (g EnforceGate) escalate(ctx context.Context, logger *log.Logger, t EnforceTarget, enforceStart time.Time) (decision.Decision, client.ApprovalKey) {
-	ev, ok := t.DevEvent()
+func (g EnforceGate) escalate(ctx context.Context, logger *log.Logger, t EnforceTarget, redacted *client.Content, enforceStart time.Time) (decision.Decision, client.ApprovalKey) {
+	ev, ok := t.DevEvent(redacted)
 	if !ok {
 		return EvaluationFailOpen("event not mappable"), client.ApprovalKey{}
 	}

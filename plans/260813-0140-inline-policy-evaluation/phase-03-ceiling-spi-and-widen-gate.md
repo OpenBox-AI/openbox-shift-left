@@ -13,7 +13,7 @@
 - **Description:** Two changes. Declare each provider's hook ceiling in the SPI so the
   engine derives its own budget instead of each adapter hardcoding one. Then remove the
   narrowing that limits inline evaluation to high-risk classes.
-- **Priority:** P1 · **Implementation status:** pending · **Review status:** pending
+- **Priority:** P1 · **Implementation status:** done · **Review status:** pending
 
 ## Key Insights
 
@@ -101,15 +101,15 @@ the *policy*, which is where it belonged.
 
 ## Todo list
 
-- [ ] Hook ceiling declared in the SPI and both adapters
-- [ ] `hookflow` derives its budget from the declaration; no hardcoded adapter timeout
-- [ ] Verdict-before-ceiling pinned per adapter
-- [ ] Narrowing removed: every gated call evaluates inline (its own commit)
-- [ ] No retry inside the gate, asserted
-- [ ] Tier2 vocabulary and filenames renamed
-- [ ] `tier2*` config parsed-but-ignored with a once-only stderr warning
-- [ ] Approval hold / rewake / redaction carry-over unchanged, tests green
-- [ ] All 11 modules build, vet, `-race` green
+- [x] Hook ceiling declared in the SPI and both adapters
+- [x] `hookflow` derives its budget from the declaration; no hardcoded adapter timeout
+- [x] Verdict-before-ceiling pinned per adapter
+- [x] Narrowing removed: every gated call evaluates inline (its own commit)
+- [x] No retry inside the gate, asserted
+- [x] Tier2 vocabulary and filenames renamed
+- [x] `tier2*` config parsed-but-ignored with a once-only stderr warning
+- [x] Approval hold / rewake / redaction carry-over unchanged, tests green
+- [x] All 11 modules build, vet, `-race` green
 
 ## Success Criteria
 
