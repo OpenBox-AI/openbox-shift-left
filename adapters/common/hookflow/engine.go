@@ -77,7 +77,7 @@ func (e *Engine) Record(ev client.DevEvent) error {
 //
 //	duration stash — must be written before the tool runs, and says nothing
 //	                 about delivery. Always runs.
-//	spool append   — is a SECOND copy of the event once the Tier-2 escalation
+//	spool append   — is a SECOND copy of the event once the inline evaluation
 //	                 has POSTed the identical one, because core does not dedupe
 //	                 developer events on their id. Runs only if T2 did not.
 //

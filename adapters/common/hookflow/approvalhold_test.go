@@ -52,11 +52,11 @@ func decided(v client.Verdict, expiry time.Time) func() (client.ApprovalStatus, 
 	}
 }
 
-func holdTier2(t *testing.T, g *fakeGovernor, holdMS string) Tier2 {
+func holdEvaluator(t *testing.T, g *fakeGovernor, holdMS string) Evaluator {
 	t.Helper()
 	isolateConfig(t)
 	t.Setenv(devconfig.EnvApprovalHold, holdMS)
-	return Tier2{
+	return Evaluator{
 		Ceiling:    provider.HookCeiling{Gating: 30 * time.Second},
 		MaxTimeout: 4 * time.Second,
 		NewClient:  func(*log.Logger) (Governor, error) { return g, nil },
@@ -79,7 +79,7 @@ func TestAwaitApproval_DecidedDuringTheHold(t *testing.T) {
 				pending(expiry), pending(expiry), decided(tc.verdict, expiry),
 			}}
 			key := client.ApprovalKey{WorkflowID: "w", RunID: "r", ActivityID: "a"}
-			dec, ok := holdTier2(t, g, "5000").AwaitApproval(context.Background(), discard(), key, time.Now())
+			dec, ok := holdEvaluator(t, g, "5000").AwaitApproval(context.Background(), discard(), key, time.Now())
 			if !ok {
 				t.Fatal("a decision that landed during the hold must be reported")
 			}
@@ -105,7 +105,7 @@ func TestAwaitApproval_SurvivesAPollFailure(t *testing.T) {
 		func() (client.ApprovalStatus, error) { return client.ApprovalStatus{}, errors.New("connection reset") },
 		decided(client.VerdictAllow, expiry),
 	}}
-	dec, ok := holdTier2(t, g, "5000").AwaitApproval(context.Background(), discard(),
+	dec, ok := holdEvaluator(t, g, "5000").AwaitApproval(context.Background(), discard(),
 		client.ApprovalKey{WorkflowID: "w", RunID: "r", ActivityID: "a"}, time.Now())
 	if !ok || dec.Evaluation.Verdict != client.VerdictAllow {
 		t.Fatalf("hold gave up on a transient fault: ok=%t dec=%+v", ok, dec)
@@ -117,7 +117,7 @@ func TestAwaitApproval_SurvivesAPollFailure(t *testing.T) {
 func TestAwaitApproval_StopsWhenTheWindowCloses(t *testing.T) {
 	g := &fakeGovernor{replies: []func() (client.ApprovalStatus, error){pending(time.Now().Add(-time.Minute))}}
 	start := time.Now()
-	if _, ok := holdTier2(t, g, "5000").AwaitApproval(context.Background(), discard(),
+	if _, ok := holdEvaluator(t, g, "5000").AwaitApproval(context.Background(), discard(),
 		client.ApprovalKey{WorkflowID: "w", RunID: "r", ActivityID: "a"}, time.Now()); ok {
 		t.Fatal("a closed window must not report a decision")
 	}
@@ -128,7 +128,7 @@ func TestAwaitApproval_StopsWhenTheWindowCloses(t *testing.T) {
 
 func TestAwaitApproval_UndecidedWithinBudget(t *testing.T) {
 	g := &fakeGovernor{replies: []func() (client.ApprovalStatus, error){pending(time.Now().Add(30 * time.Minute))}}
-	if _, ok := holdTier2(t, g, "700").AwaitApproval(context.Background(), discard(),
+	if _, ok := holdEvaluator(t, g, "700").AwaitApproval(context.Background(), discard(),
 		client.ApprovalKey{WorkflowID: "w", RunID: "r", ActivityID: "a"}, time.Now()); ok {
 		t.Fatal("an undecided request must not report a decision")
 	}
@@ -141,7 +141,7 @@ func TestAwaitApproval_UndecidedWithinBudget(t *testing.T) {
 // none left there is no room to hold, so the caller denies immediately rather
 // than overrun the hook and be killed (which fails open).
 func TestHoldBudget_ClampedByTheHookCeiling(t *testing.T) {
-	tr := Tier2{Ceiling: provider.HookCeiling{Gating: 30 * time.Second}}
+	tr := Evaluator{Ceiling: provider.HookCeiling{Gating: 30 * time.Second}}
 	if got := tr.HoldBudget(time.Now(), 20*time.Second); got != 20*time.Second {
 		t.Errorf("fresh hold budget = %v, want the configured 20s", got)
 	}
@@ -153,7 +153,7 @@ func TestHoldBudget_ClampedByTheHookCeiling(t *testing.T) {
 	}
 
 	g := &fakeGovernor{replies: []func() (client.ApprovalStatus, error){pending(time.Now().Add(time.Hour))}}
-	tr2 := holdTier2(t, g, "20000")
+	tr2 := holdEvaluator(t, g, "20000")
 	if _, ok := tr2.AwaitApproval(context.Background(), discard(),
 		client.ApprovalKey{WorkflowID: "w", RunID: "r", ActivityID: "a"},
 		time.Now().Add(-30*time.Second)); ok {

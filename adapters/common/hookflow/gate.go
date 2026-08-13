@@ -29,7 +29,7 @@ type EnforceTarget interface {
 	// DecisionRequest builds the local Tier-1 request. Metadata axes only
 	// (INV-2); content is carried solely for local redaction.
 	DecisionRequest(localRedaction bool) decision.DecisionRequest
-	// DevEvent maps the call for a Tier-2 escalation, or reports !ok when it
+	// DevEvent maps the call for an inline evaluation, or reports !ok when it
 	// cannot be mapped.
 	DevEvent() (client.DevEvent, bool)
 }
@@ -40,11 +40,11 @@ type EnforceTarget interface {
 // The individual steps were already shared; this shares their ORDER, which is
 // the part a new tier or a reordering would otherwise have to be applied to
 // twice. The order is load-bearing — stale gate before evaluation, failure
-// policy between obtain and apply, Tier-2 only when Tier-1 would proceed,
+// policy between obtain and apply, evaluation only when the local step would proceed,
 // audit after the decision is written — so it belongs in one place.
 type EnforceGate struct {
-	Contract OutputContract
-	Tier2    Tier2
+	Contract  OutputContract
+	Evaluator Evaluator
 	// Record writes the durable audit line. Off the blocking path,
 	// best-effort, never fails a tool call.
 	Record func(dec decision.Decision, res ApplyResult)
@@ -92,7 +92,7 @@ func (g EnforceGate) Run(ctx context.Context, logger *log.Logger, stdout io.Writ
 	// client-side change can close; server-side dedupe is still absent.
 	if g.SpoolObserve != nil {
 		var delivered atomic.Bool
-		g.Tier2.OnDelivered = func() { delivered.Store(true) }
+		g.Evaluator.OnDelivered = func() { delivered.Store(true) }
 		defer func() {
 			if !delivered.Load() {
 				g.SpoolObserve()
@@ -100,8 +100,8 @@ func (g EnforceGate) Run(ctx context.Context, logger *log.Logger, stdout io.Writ
 		}()
 	}
 
-	// One wall clock for the whole gate (Tier-1 plus a possible Tier-2), so the
-	// sequential per-tier budgets can never jointly exceed the provider's hook
+	// One wall clock for the whole gate (the local step plus the evaluation), so the
+	// sequential budgets can never jointly exceed the provider's hook
 	// timeout — which would fail open and defeat a fail-closed org.
 	enforceStart := time.Now()
 
@@ -143,7 +143,7 @@ func (g EnforceGate) Run(ctx context.Context, logger *log.Logger, stdout io.Writ
 	// that handled the rest could not evaluate their policy at all.
 	if ShouldEscalate(dec, g.Contract) {
 		t2, key := g.escalate(ctx, logger, t, enforceStart)
-		// Carry the local Tier-1 redaction onto the Tier-2 decision so a
+		// Carry the local Tier-1 redaction onto the evaluated decision so a
 		// redact-and-continue still applies on the Tier-2 proceed path.
 		t2.RedactedContent = dec.RedactedContent
 		t2.RedactionCategories = dec.RedactionCategories
@@ -159,7 +159,7 @@ func (g EnforceGate) Run(ctx context.Context, logger *log.Logger, stdout io.Writ
 		// is no record to poll: holding on it would spend the entire budget on
 		// not-founds and then deny. That case keeps the provider's own approval
 		// prompt, which is exactly what it had before.
-		if dec.Evaluation.Verdict == client.VerdictRequireApproval && dec.Source == SourceTier2 {
+		if dec.Evaluation.Verdict == client.VerdictRequireApproval && dec.Source == SourceEvaluate {
 			dec = g.awaitApproval(ctx, logger, t, dec, key, enforceStart)
 		}
 	}
@@ -176,9 +176,9 @@ func (g EnforceGate) Run(ctx context.Context, logger *log.Logger, stdout io.Writ
 func (g EnforceGate) escalate(ctx context.Context, logger *log.Logger, t EnforceTarget, enforceStart time.Time) (decision.Decision, client.ApprovalKey) {
 	ev, ok := t.DevEvent()
 	if !ok {
-		return Tier2FailOpen("tier-2 event not mappable"), client.ApprovalKey{}
+		return EvaluationFailOpen("event not mappable"), client.ApprovalKey{}
 	}
-	dec := g.Tier2.Escalate(ctx, logger, ev, g.Tier2.Budget(enforceStart, resolveTier2Timeout()))
+	dec := g.Evaluator.Escalate(ctx, logger, ev, g.Evaluator.Budget(enforceStart, resolveEvaluationTimeout()))
 	return dec, client.ApprovalKeyFor(ev)
 }
 
@@ -197,7 +197,7 @@ func (g EnforceGate) awaitApproval(ctx context.Context, logger *log.Logger, t En
 	// whole hold just to discover the usual answer: nothing to do.
 	RecordPendingApproval(logger, key, t.ToolName())
 
-	answered, ok := g.Tier2.AwaitApproval(ctx, logger, key, enforceStart)
+	answered, ok := g.Evaluator.AwaitApproval(ctx, logger, key, enforceStart)
 	if !ok {
 		// Leave the marker standing: the watcher owns the tail from here.
 		return ApprovalUndecided(dec, "within this hook's budget")

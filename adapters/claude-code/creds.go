@@ -155,17 +155,17 @@ func ResolveTier2() bool { return devconfig.ResolveTier2() }
 
 // ResolveTier2Timeout resolves the in-binary budget for one Tier-2
 // /evaluate escalation: config first, env-if-parseable wins; <=0 yields
-// defaultTier2Timeout; clamped to maxTier2Timeout (the CC 5s-hook-kill
+// defaultTier2Timeout; clamped to maxEvaluationTimeout (the CC 5s-hook-kill
 // bound).
 func ResolveTier2Timeout() time.Duration {
 	ms := devconfig.ResolveTimeoutMS(func(c DevConfig) int { return c.Tier2TimeoutMS }, envTier2Timeout)
 	if ms <= 0 {
-		return hookflow.DefaultTier2Timeout
+		return hookflow.DefaultEvaluationTimeout
 	}
 	// Clamp in milliseconds before the multiply so a near-max-int64 value
 	// can never overflow time.Duration.
-	if maxMS := int64(maxTier2Timeout / time.Millisecond); int64(ms) > maxMS {
-		return maxTier2Timeout
+	if maxMS := int64(maxEvaluationTimeout / time.Millisecond); int64(ms) > maxMS {
+		return maxEvaluationTimeout
 	}
 	return time.Duration(ms) * time.Millisecond
 }

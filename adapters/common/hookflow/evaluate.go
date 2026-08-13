@@ -11,17 +11,17 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/provider"
 )
 
-// Decision sources for a Tier-2 escalation, distinct from the local bundle's so
+// Decision sources for the inline evaluation, distinct from the local bundle's so
 // the audit can tell where a verdict came from.
 const (
-	SourceTier2         = "tier2:evaluate"
-	SourceTier2FailOpen = "tier2:fail-open"
+	SourceEvaluate         = "evaluate"
+	SourceEvaluateFailOpen = "evaluate:fail-open"
 )
 
-// DefaultTier2Timeout is the default budget for one escalation. It sits under
+// DefaultEvaluationTimeout is the default budget for one evaluation. It sits under
 // the hook budget so a slow control plane degrades rather than trips the
 // provider's hook kill.
-const DefaultTier2Timeout = 3500 * time.Millisecond
+const DefaultEvaluationTimeout = 3500 * time.Millisecond
 
 // HookBudgetMargin is the slack reserved under the provider's declared gating
 // ceiling for the non-gate work that brackets the gate: config reads, classify,
@@ -35,7 +35,7 @@ const DefaultTier2Timeout = 3500 * time.Millisecond
 const HookBudgetMargin = 1 * time.Second
 
 // EnforceBudget is the whole-hook wall clock the gate may spend: the provider's
-// declared gating ceiling less the margin. The T1 gate, the evaluation and any
+// declared gating ceiling less the margin. The local step, the evaluation and any
 // approval hold run sequentially inside it, so their individually-clamped
 // budgets can never jointly push the hook past the provider's kill.
 //
@@ -48,23 +48,27 @@ func EnforceBudget(c provider.HookCeiling) time.Duration {
 	return c.Gating - HookBudgetMargin
 }
 
-// Tier2 is the synchronous escalation to the control plane for high-risk tool
-// classes, used when the local Tier-1 decision would otherwise proceed.
+// Evaluator obtains the authoritative verdict for a gated tool call: one
+// bounded, synchronous /evaluate round-trip, run before the tool does.
+//
+// It was Tier2, the upper half of a two-tier scheme whose lower half evaluated
+// policy locally. ADR-0017 deleted the tiers rather than the escalation, so what
+// remains is not "tier 2" of anything — it is the evaluation.
 //
 // The two providers differ in exactly one value — the wall-clock ceiling the
 // tool kills the hook at. That is now declared through the SPI
 // (provider.HookCeiling) rather than hardcoded per adapter, so the engine
 // derives its own budget and no adapter carries a timeout the engine cannot see.
-type Tier2 struct {
+type Evaluator struct {
 	// Ceiling is the provider's declared hook-kill limit. The whole-hook
-	// budget derives from it via EnforceBudget: the T1 gate, the evaluation
+	// budget derives from it via EnforceBudget: the local step, the evaluation
 	// and any approval hold run sequentially, and their independently-clamped
 	// budgets must never jointly push the hook past the kill (which would fail
 	// open and defeat a fail-closed org).
 	Ceiling provider.HookCeiling
-	// MaxTimeout clamps the configured per-escalation budget.
+	// MaxTimeout clamps the configured per-evaluation budget.
 	MaxTimeout time.Duration
-	// NewClient builds the control-plane transport for the escalation and for
+	// NewClient builds the control-plane transport for the evaluation and for
 	// the approval hold that can follow it.
 	NewClient func(*log.Logger) (Governor, error)
 
@@ -76,13 +80,13 @@ type Tier2 struct {
 	// second Merkle leaf for one real tool call.
 	//
 	// It is keyed on transport success, deliberately, NOT on the verdict. An
-	// evaluation that came back unusable (Tier2FailOpen "no verdict") or one
+	// evaluation that came back unusable (EvaluationFailOpen "no verdict") or one
 	// that came back REQUIRE_APPROVAL and led to a hold was still delivered and
 	// still stored, so the observe copy is redundant in those cases too. Keying
 	// it on the decision instead would miss both.
 	//
 	// It may run AFTER Escalate has already returned. A budget-exceeded
-	// escalation abandons the goroutine running the transport rather than
+	// evaluation abandons the goroutine running the transport rather than
 	// waiting for it, so the callback races the caller's own teardown and must
 	// be safe to invoke concurrently with whatever reads what it sets.
 	OnDelivered func()
@@ -91,20 +95,20 @@ type Tier2 struct {
 // Governor is the control-plane transport the enforce path needs: escalate an
 // event for an authoritative verdict, and read back where a filed approval
 // stands. Satisfied by *client.Client; one interface rather than two because
-// the hold always follows an escalation over the same credentials.
+// the hold always follows an evaluation over the same credentials.
 type Governor interface {
 	Emitter
 	PollApproval(ctx context.Context, key client.ApprovalKey) (client.ApprovalStatus, error)
 }
 
-// Budget is the effective budget for an escalation: the configured T2 budget,
-// but never more than the time remaining in HookBudget after the T1 gate ran.
-// enforceStart is the instant the enforce block began.
+// Budget is the effective budget for one evaluation: the configured budget, but
+// never more than the time remaining in the whole-hook budget after the local
+// step ran. enforceStart is the instant the enforce block began.
 //
-// A non-positive remainder (T1 already consumed the ceiling) yields a
+// A non-positive remainder (the local step already consumed the ceiling) yields a
 // non-positive budget, so Escalate fails open immediately rather than push the
 // hook past the provider's timeout — the safe direction, by construction.
-func (t Tier2) Budget(enforceStart time.Time, configured time.Duration) time.Duration {
+func (t Evaluator) Budget(enforceStart time.Time, configured time.Duration) time.Duration {
 	budget := configured
 	if t.MaxTimeout > 0 && budget > t.MaxTimeout {
 		budget = t.MaxTimeout
@@ -118,13 +122,13 @@ func (t Tier2) Budget(enforceStart time.Time, configured time.Duration) time.Dur
 // remaining is what is left of the whole-hook budget. Every budget the gate
 // hands out is clamped by it, so the sequential steps can never jointly overrun
 // the provider's hook timeout however they are configured individually.
-func (t Tier2) remaining(enforceStart time.Time) time.Duration {
+func (t Evaluator) remaining(enforceStart time.Time) time.Duration {
 	return EnforceBudget(t.Ceiling) - time.Since(enforceStart)
 }
 
-// Escalate runs one bounded Tier-2 evaluation for an already-mapped event.
+// Escalate runs one bounded evaluation for an already-mapped event.
 // Exceeding the budget degrades to fail-open rather than blocking the call.
-func (t Tier2) Escalate(ctx context.Context, logger *log.Logger, ev client.DevEvent, budget time.Duration) decision.Decision {
+func (t Evaluator) Escalate(ctx context.Context, logger *log.Logger, ev client.DevEvent, budget time.Duration) decision.Decision {
 	cctx, cancel := context.WithTimeout(ctx, budget)
 	defer cancel()
 
@@ -135,12 +139,12 @@ func (t Tier2) Escalate(ctx context.Context, logger *log.Logger, ev client.DevEv
 	case dec := <-resultCh:
 		return dec
 	case <-cctx.Done():
-		logger.Printf("tier-2 escalation degrading (budget %v exceeded)", budget)
-		return Tier2FailOpen("tier-2 budget exceeded")
+		logger.Printf("inline evaluation degrading (budget %v exceeded)", budget)
+		return EvaluationFailOpen("evaluation budget exceeded")
 	}
 }
 
-func (t Tier2) run(cctx context.Context, logger *log.Logger, ev client.DevEvent) decision.Decision {
+func (t Evaluator) run(cctx context.Context, logger *log.Logger, ev client.DevEvent) decision.Decision {
 	// A missing transport is a misconfiguration, but it must degrade like any
 	// other fault rather than panic: this runs on every gated tool call since
 	// ADR-0017, so a nil here would be a guaranteed crash on the enforce path
@@ -149,17 +153,17 @@ func (t Tier2) run(cctx context.Context, logger *log.Logger, ev client.DevEvent)
 	// same as failing open.
 	if t.NewClient == nil {
 		logger.Print("evaluation degrading: no control-plane transport configured")
-		return Tier2FailOpen("tier-2 client unavailable")
+		return EvaluationFailOpen("control plane unreachable")
 	}
 	cl, err := t.NewClient(logger)
 	if err != nil {
-		logger.Printf("tier-2 escalation degrading (client init): %v", err)
-		return Tier2FailOpen("tier-2 client unavailable")
+		logger.Printf("inline evaluation degrading (client init): %v", err)
+		return EvaluationFailOpen("control plane unreachable")
 	}
 	eval, err := cl.Emit(cctx, ev)
 	if err != nil {
-		logger.Printf("tier-2 escalation degrading (emit): %v", err)
-		return Tier2FailOpen("tier-2 escalation undelivered")
+		logger.Printf("inline evaluation degrading (emit): %v", err)
+		return EvaluationFailOpen("evaluation undelivered")
 	}
 	// The event is now stored server-side, whatever the verdict turns out to be.
 	// Announce that before mapping the verdict, so no return path below can skip
@@ -167,24 +171,24 @@ func (t Tier2) run(cctx context.Context, logger *log.Logger, ev client.DevEvent)
 	if t.OnDelivered != nil {
 		t.OnDelivered()
 	}
-	return Tier2Decision(eval)
+	return EvaluationDecision(eval)
 }
 
-// Tier2FailOpen is the degraded escalation outcome: no real verdict, marked
+// EvaluationFailOpen is the degraded escalation outcome: no real verdict, marked
 // fail-open so the org's failure policy decides what happens next.
-func Tier2FailOpen(cause string) decision.Decision {
+func EvaluationFailOpen(cause string) decision.Decision {
 	return decision.Decision{
 		Evaluation: client.Evaluation{Verdict: client.VerdictUnknown, Reason: cause},
 		FailOpen:   true,
-		Source:     SourceTier2FailOpen,
+		Source:     SourceEvaluateFailOpen,
 	}
 }
 
-func Tier2Decision(eval client.Evaluation) decision.Decision {
+func EvaluationDecision(eval client.Evaluation) decision.Decision {
 	if eval.Verdict == client.VerdictUnknown {
-		return Tier2FailOpen("tier-2 /evaluate returned no verdict")
+		return EvaluationFailOpen("/evaluate returned no verdict")
 	}
-	return decision.Decision{Evaluation: eval, Source: SourceTier2}
+	return decision.Decision{Evaluation: eval, Source: SourceEvaluate}
 }
 
 // DecisionTightens reports whether a decision would produce a deny/ask — i.e.
@@ -194,9 +198,9 @@ func DecisionTightens(dec decision.Decision, c OutputContract) bool {
 	return d != ""
 }
 
-// ShouldEscalate reports whether a Tier-2 round-trip can still change the
-// outcome. Normally it cannot once Tier-1 has tightened, because Tier-2 can
-// only ever be more restrictive — so escalation fires when Tier-1 would
+// ShouldEscalate reports whether a round-trip can still change the outcome.
+// Normally it cannot once the local step has tightened, because the server can
+// only ever be more restrictive — so evaluation fires when the local step would
 // otherwise proceed.
 //
 // REQUIRE_APPROVAL is the one exception, and the reason this predicate exists
@@ -212,12 +216,17 @@ func ShouldEscalate(dec decision.Decision, c OutputContract) bool {
 	return !DecisionTightens(dec, c)
 }
 
-// KeepTighter picks between the Tier-1 and Tier-2 decisions: the Tier-2 answer
-// wins, unless the escalation failed to deliver a real verdict and Tier-1 had
-// already tightened — in which case the local decision stands.
+// KeepTighter picks between the local and the evaluated decision: the server's
+// answer wins, unless the evaluation failed to deliver a real verdict and the
+// local step had already tightened — in which case the local decision stands.
 //
-// This became load-bearing with ShouldEscalate. While escalation ran only over
-// a would-proceed Tier-1 there was nothing to lose; now that a local
+// It is on borrowed time. Once local policy evaluation is deleted the local side
+// carries only redaction, so there is nothing left to compare and this collapses
+// to "take the server's answer". It stays until then because removing it in the
+// same change that widened the gate would conflate two failure modes.
+//
+// This became load-bearing with ShouldEscalate. While evaluation ran only over
+// a would-proceed local decision there was nothing to lose; now that a local
 // REQUIRE_APPROVAL escalates, a degraded round-trip would otherwise replace a
 // deny/ask with VerdictUnknown and let the call through — enforcement loosening
 // itself on an outage, which is exactly what the tighten-only invariant forbids.
@@ -228,13 +237,13 @@ func KeepTighter(t1, t2 decision.Decision, c OutputContract) decision.Decision {
 	return t2
 }
 
-// resolveTier2Timeout reads the configured per-escalation budget. It is clamped
-// only against overflow here; the real ceiling is Tier2.MaxTimeout, which is
+// resolveEvaluationTimeout reads the configured per-evaluation budget. It is clamped
+// only against overflow here; the real ceiling is Evaluator.MaxTimeout, which is
 // provider-derived and applied in Budget.
-func resolveTier2Timeout() time.Duration {
+func resolveEvaluationTimeout() time.Duration {
 	ms := devconfig.ResolveTimeoutMS(func(c devconfig.DevConfig) int { return c.Tier2TimeoutMS }, devconfig.EnvTier2Timeout)
 	if ms <= 0 {
-		return DefaultTier2Timeout
+		return DefaultEvaluationTimeout
 	}
 	// Clamp in milliseconds before the multiply so a near-max-int64 value can
 	// never overflow time.Duration.

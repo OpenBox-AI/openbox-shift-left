@@ -250,7 +250,7 @@ type verdictOnly struct {
 // rich type made this a fallback in name only: it failed on exactly the bodies
 // that had already failed the rich decode, so one type-mismatched sibling field
 // — a `constraints` that arrived as a string, say — discarded a perfectly good
-// verdict beside it. On the Tier-2 escalation path that turned a BLOCK into
+// verdict beside it. On the inline evaluation path that turned a BLOCK into
 // VerdictUnknown, which the failure policy then proceeds on.
 func parseVerdict(body []byte) Verdict {
 	var r verdictOnly

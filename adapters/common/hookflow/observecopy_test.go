@@ -19,7 +19,7 @@ import (
 //
 // A gated PreToolUse has two ways to reach core, and they carry the SAME event
 // (one event_id, because the mapper clock is pinned for the hook invocation):
-// the Tier-2 escalation POSTs it synchronously, and the observe copy is spooled
+// the inline evaluation POSTs it synchronously, and the observe copy is spooled
 // and flushed. Core does not dedupe developer events on their id, so whichever
 // of the two runs, the other must not — otherwise one tool call becomes two
 // stored rows and two Merkle leaves. Both halves used to run, so every escalated
@@ -44,7 +44,7 @@ func deliveringGate(t *testing.T, gov Governor, tier2Enabled string) (spooled bo
 	var out bytes.Buffer
 	gate := EnforceGate{
 		Contract: testContract{approval: "ask"},
-		Tier2: Tier2{
+		Evaluator: Evaluator{
 			Ceiling:    provider.HookCeiling{Gating: 30 * time.Second},
 			MaxTimeout: 4 * time.Second,
 			NewClient:  func(*log.Logger) (Governor, error) { return gov, nil },
@@ -62,7 +62,7 @@ func deliveringGate(t *testing.T, gov Governor, tier2Enabled string) (spooled bo
 // fakeGovernor's Emit succeeds but returns an EMPTY evaluation — delivered, yet
 // no usable verdict, so the escalation still degrades to fail-open. That is the
 // case a check on the resulting decision would get wrong: the decision reads
-// "tier-2 returned no verdict" while the event is already stored. Delivery is a
+// "/evaluate returned no verdict" while the event is already stored. Delivery is a
 // property of the transport, not of the answer.
 func TestGate_ObserveCopySkippedWhenEscalationDelivered(t *testing.T) {
 	gov := &fakeGovernor{}
@@ -154,7 +154,7 @@ func TestGate_ObserveCopySpooledWhenEscalationOutlivesItsBudget(t *testing.T) {
 	var out bytes.Buffer
 	gate := EnforceGate{
 		Contract: testContract{approval: "ask"},
-		Tier2: Tier2{
+		Evaluator: Evaluator{
 			Ceiling:    provider.HookCeiling{Gating: 30 * time.Second},
 			MaxTimeout: 4 * time.Second,
 			NewClient:  func(*log.Logger) (Governor, error) { return gov, nil },
@@ -193,7 +193,7 @@ func TestGate_ObserveCopySpooledOnStaleGateEarlyReturn(t *testing.T) {
 	var out bytes.Buffer
 	gate := EnforceGate{
 		Contract: testContract{approval: "ask"},
-		Tier2: Tier2{
+		Evaluator: Evaluator{
 			Ceiling:    provider.HookCeiling{Gating: 30 * time.Second},
 			MaxTimeout: 4 * time.Second,
 			NewClient: func(*log.Logger) (Governor, error) {
@@ -223,9 +223,9 @@ func TestGate_NilSpoolObserveIsInert(t *testing.T) {
 
 	var out bytes.Buffer
 	gate := EnforceGate{
-		Contract: testContract{approval: "ask"},
-		Tier2:    Tier2{Ceiling: provider.HookCeiling{Gating: 30 * time.Second}},
-		Record:   func(decision.Decision, ApplyResult) {},
+		Contract:  testContract{approval: "ask"},
+		Evaluator: Evaluator{Ceiling: provider.HookCeiling{Gating: 30 * time.Second}},
+		Record:    func(decision.Decision, ApplyResult) {},
 	}
 	gate.Run(context.Background(), discard(), &out, shellTarget{})
 }

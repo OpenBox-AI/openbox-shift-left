@@ -53,7 +53,7 @@ const DefaultRealtimeWindow = 2 * time.Second
 // defence: core does not dedupe developer events on their id today (E8-S7 is the
 // client half only — a stable, unique id so that eventual dedupe is trivially
 // correct). Anything that reaches core outside the spool therefore has to avoid
-// duplicating itself on its own. The Tier-2 escalation is exactly that case, and
+// duplicating itself on its own. The inline evaluation is exactly that case, and
 // assuming a dedupe that did not exist is how it came to store every escalated
 // ActivityStarted twice — see EnforceGate.SpoolObserve.
 type RealtimeTrigger struct {

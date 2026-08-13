@@ -123,13 +123,13 @@ before="$(tb_audit_size)"
 # watcher keeps `claude -p` alive for its whole 45-minute window. The hook's
 # answer lands in the audit long before that, and that is what B is about.
 tb_session_bg "Run the shell command: echo scenario-b" "Bash"
-if wait_for_audit '"source":"tier2:evaluate"' 120 "$before"; then
+if wait_for_audit '"source":"evaluate"' 120 "$before"; then
 	audit="$(tb_audit_since "$before")"
 	assert_contains "the call was denied" "$audit" '"applied_decision":"deny"'
-	assert_contains "the deny came from the escalation, not a local prompt" "$audit" '"source":"tier2:evaluate"'
+	assert_contains "the deny came from the escalation, not a local prompt" "$audit" '"source":"evaluate"'
 	assert_contains "the audit carries a resolvable approval reference" "$audit" '"approval_ref"'
 else
-	tb_bad "the escalation denied within the hold" "a tier2:evaluate deny" "nothing in the audit after 120s"
+	tb_bad "the escalation denied within the hold" "an evaluate deny" "nothing in the audit after 120s"
 fi
 pending_b="$(pending_first)"
 assert_nonempty "the request is still pending for a human" "$pending_b"
@@ -216,7 +216,7 @@ settle
 # without a started one), so a DUPLICATED started half passed it unseen.
 #
 # Scoped to this file because this is where real escalations happen (the sessions
-# above produced tier2:evaluate verdicts and filed approvals).
+# above produced evaluate verdicts and filed approvals).
 tb_step "G · no activity_id is stored more than once per half"
 dupes="$(tb_val "select count(*) from (
 	select activity_id, event_type from governance_events

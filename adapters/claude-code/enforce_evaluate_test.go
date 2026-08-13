@@ -64,36 +64,36 @@ func TestDecisionTightens(t *testing.T) {
 	}
 }
 
-func TestTier2Decision(t *testing.T) {
+func TestEvaluationDecision(t *testing.T) {
 	// A real verdict is carried through, hookflow.FailOpen=false, so fail-closed never
 	// overrides a reachable-core allow.
-	real := hookflow.Tier2Decision(client.Evaluation{Verdict: client.VerdictBlock, Reason: "policy"})
+	real := hookflow.EvaluationDecision(client.Evaluation{Verdict: client.VerdictBlock, Reason: "policy"})
 	if real.FailOpen {
 		t.Error("a real BLOCK verdict must be hookflow.FailOpen=false")
 	}
-	if real.Source != hookflow.SourceTier2 {
-		t.Errorf("Source = %q, want %q", real.Source, hookflow.SourceTier2)
+	if real.Source != hookflow.SourceEvaluate {
+		t.Errorf("Source = %q, want %q", real.Source, hookflow.SourceEvaluate)
 	}
 	if real.Evaluation.Verdict != client.VerdictBlock {
 		t.Errorf("verdict = %q, want BLOCK", real.Evaluation.Verdict)
 	}
-	allow := hookflow.Tier2Decision(client.Evaluation{Verdict: client.VerdictAllow})
+	allow := hookflow.EvaluationDecision(client.Evaluation{Verdict: client.VerdictAllow})
 	if allow.FailOpen {
 		t.Error("a real ALLOW verdict must be hookflow.FailOpen=false")
 	}
 	// No verdict (Emit fail-open drop / empty response) → fail-open decision.
-	unknown := hookflow.Tier2Decision(client.Evaluation{Verdict: client.VerdictUnknown})
+	unknown := hookflow.EvaluationDecision(client.Evaluation{Verdict: client.VerdictUnknown})
 	if !unknown.FailOpen {
 		t.Error("VerdictUnknown must be hookflow.FailOpen=true (no real server verdict)")
 	}
-	if unknown.Source != hookflow.SourceTier2FailOpen {
-		t.Errorf("Source = %q, want %q", unknown.Source, hookflow.SourceTier2FailOpen)
+	if unknown.Source != hookflow.SourceEvaluateFailOpen {
+		t.Errorf("Source = %q, want %q", unknown.Source, hookflow.SourceEvaluateFailOpen)
 	}
 }
 
-func TestTier2FailOpen(t *testing.T) {
-	d := hookflow.Tier2FailOpen("tier-2 credentials unavailable")
-	if !d.FailOpen || d.Source != hookflow.SourceTier2FailOpen {
+func TestEvaluationFailOpen(t *testing.T) {
+	d := hookflow.EvaluationFailOpen("tier-2 credentials unavailable")
+	if !d.FailOpen || d.Source != hookflow.SourceEvaluateFailOpen {
 		t.Errorf("tier2FailOpen must be hookflow.FailOpen + fail-open source, got %+v", d)
 	}
 	if d.Evaluation.Verdict != client.VerdictUnknown {
@@ -122,26 +122,26 @@ func TestResolveTier2(t *testing.T) {
 
 func TestResolveTier2Timeout(t *testing.T) {
 	isolateConfig(t)
-	if got := ResolveTier2Timeout(); got != hookflow.DefaultTier2Timeout {
-		t.Errorf("default = %v, want %v", got, hookflow.DefaultTier2Timeout)
+	if got := ResolveTier2Timeout(); got != hookflow.DefaultEvaluationTimeout {
+		t.Errorf("default = %v, want %v", got, hookflow.DefaultEvaluationTimeout)
 	}
 	t.Setenv(envTier2Timeout, "1000")
 	if got := ResolveTier2Timeout(); got != time.Second {
 		t.Errorf("1000ms env = %v, want 1s", got)
 	}
-	// Over the clamp → maxTier2Timeout (correctness bound under the 5s hook timeout).
+	// Over the clamp → maxEvaluationTimeout (correctness bound under the 5s hook timeout).
 	t.Setenv(envTier2Timeout, "60000")
-	if got := ResolveTier2Timeout(); got != maxTier2Timeout {
-		t.Errorf("60000ms env = %v, want the %v clamp", got, maxTier2Timeout)
+	if got := ResolveTier2Timeout(); got != maxEvaluationTimeout {
+		t.Errorf("60000ms env = %v, want the %v clamp", got, maxEvaluationTimeout)
 	}
 	// Garbage env is ignored → default (never wipes a valid config silently).
 	t.Setenv(envTier2Timeout, "notanumber")
-	if got := ResolveTier2Timeout(); got != hookflow.DefaultTier2Timeout {
-		t.Errorf("garbage env = %v, want default %v", got, hookflow.DefaultTier2Timeout)
+	if got := ResolveTier2Timeout(); got != hookflow.DefaultEvaluationTimeout {
+		t.Errorf("garbage env = %v, want default %v", got, hookflow.DefaultEvaluationTimeout)
 	}
 	// A margin invariant: the max T2 budget must stay under the shipped hook timeout.
-	if maxTier2Timeout >= 5*time.Second {
-		t.Errorf("maxTier2Timeout %v must stay under CC's 5s hook timeout (fails OPEN)", maxTier2Timeout)
+	if maxEvaluationTimeout >= 5*time.Second {
+		t.Errorf("maxEvaluationTimeout %v must stay under CC's 5s hook timeout (fails OPEN)", maxEvaluationTimeout)
 	}
 }
 
@@ -178,14 +178,14 @@ func TestPinnedClockStableEventID(t *testing.T) {
 }
 
 func TestTier2Budget(t *testing.T) {
-	isolateConfig(t) // default T2 budget = hookflow.DefaultTier2Timeout (3.5s)
+	isolateConfig(t) // default T2 budget = hookflow.DefaultEvaluationTimeout (3.5s)
 	// Just started: remaining (~4s) exceeds the default, so the budget is the default.
-	if got := tier2Budget(time.Now()); got != hookflow.DefaultTier2Timeout {
-		t.Errorf("fresh enforceStart budget = %v, want default %v", got, hookflow.DefaultTier2Timeout)
+	if got := evaluationBudget(time.Now()); got != hookflow.DefaultEvaluationTimeout {
+		t.Errorf("fresh enforceStart budget = %v, want default %v", got, hookflow.DefaultEvaluationTimeout)
 	}
 	// T1 already consumed the whole-hook cap → the remainder (and thus the budget) is
-	// non-positive, so escalateTier2 fail-opens immediately rather than overrun the hook.
-	if got := tier2Budget(time.Now().Add(-hookflow.EnforceBudget(Engine{}.HookCeilings()) - time.Second)); got > 0 {
+	// non-positive, so escalateEvaluation fail-opens immediately rather than overrun the hook.
+	if got := evaluationBudget(time.Now().Add(-hookflow.EnforceBudget(Engine{}.HookCeilings()) - time.Second)); got > 0 {
 		t.Errorf("exhausted-cap budget = %v, want <= 0 (immediate fail-open)", got)
 	}
 }
@@ -211,9 +211,9 @@ func TestEnforceBudgetStaysUnderTheDeclaredCeiling(t *testing.T) {
 		t.Errorf("whole-hook budget %v must stay strictly under the ceiling %v; "+
 			"a hook killed mid-gate lets the tool run ungoverned", budget, ceiling.Gating)
 	}
-	if maxTier2Timeout > budget {
+	if maxEvaluationTimeout > budget {
 		t.Errorf("the evaluation clamp %v must stay within the whole-hook budget %v",
-			maxTier2Timeout, budget)
+			maxEvaluationTimeout, budget)
 	}
 	if ceiling.Other <= 0 {
 		t.Error("a non-gating ceiling of zero would make every non-gate hook budget negative")
@@ -330,7 +330,7 @@ func TestEscalateTier2_RealVerdict(t *testing.T) {
 	m := NewMapper(Identity{DeveloperDID: testDID})
 	ev := &HookEvent{HookEventName: "PreToolUse", SessionID: "s", Cwd: "/tmp", ToolName: "Bash",
 		ToolInput: []byte(`{"command":"rm -rf /tmp/x"}`)}
-	dec := escalateTier2(context.Background(), log.New(&nopWriter{}, "", 0), m, ev, time.Second)
+	dec := escalateEvaluation(context.Background(), log.New(&nopWriter{}, "", 0), m, ev, time.Second)
 
 	if atomic.LoadInt32(hits) != 1 {
 		t.Fatalf("/evaluate hits = %d, want 1", atomic.LoadInt32(hits))
@@ -341,8 +341,8 @@ func TestEscalateTier2_RealVerdict(t *testing.T) {
 	if dec.Evaluation.Verdict != client.VerdictBlock {
 		t.Errorf("verdict = %q, want BLOCK", dec.Evaluation.Verdict)
 	}
-	if dec.Source != hookflow.SourceTier2 {
-		t.Errorf("Source = %q, want %q", dec.Source, hookflow.SourceTier2)
+	if dec.Source != hookflow.SourceEvaluate {
+		t.Errorf("Source = %q, want %q", dec.Source, hookflow.SourceEvaluate)
 	}
 }
 
@@ -356,12 +356,12 @@ func TestEscalateTier2_Outage(t *testing.T) {
 	m := NewMapper(Identity{DeveloperDID: testDID})
 	ev := &HookEvent{HookEventName: "PreToolUse", SessionID: "s", Cwd: "/tmp", ToolName: "Bash",
 		ToolInput: []byte(`{"command":"echo hi"}`)}
-	dec := escalateTier2(context.Background(), log.New(&nopWriter{}, "", 0), m, ev, time.Second)
+	dec := escalateEvaluation(context.Background(), log.New(&nopWriter{}, "", 0), m, ev, time.Second)
 	if !dec.FailOpen {
 		t.Error("a /evaluate outage must yield a fail-open decision")
 	}
-	if dec.Source != hookflow.SourceTier2FailOpen {
-		t.Errorf("Source = %q, want %q", dec.Source, hookflow.SourceTier2FailOpen)
+	if dec.Source != hookflow.SourceEvaluateFailOpen {
+		t.Errorf("Source = %q, want %q", dec.Source, hookflow.SourceEvaluateFailOpen)
 	}
 }
 
@@ -374,7 +374,7 @@ func TestEscalateTier2_NoCredentials(t *testing.T) {
 	m := NewMapper(Identity{DeveloperDID: testDID})
 	ev := &HookEvent{HookEventName: "PreToolUse", SessionID: "s", Cwd: "/tmp", ToolName: "Bash",
 		ToolInput: []byte(`{"command":"echo hi"}`)}
-	dec := escalateTier2(context.Background(), log.New(&nopWriter{}, "", 0), m, ev, time.Second)
+	dec := escalateEvaluation(context.Background(), log.New(&nopWriter{}, "", 0), m, ev, time.Second)
 	if !dec.FailOpen {
 		t.Error("missing credentials must degrade to a fail-open decision")
 	}
@@ -386,7 +386,7 @@ func TestEscalateTier2_NoCredentials(t *testing.T) {
 func TestEscalateTier2_BudgetBound(t *testing.T) {
 	isolateConfig(t)
 	t.Setenv(envDID, testDID)
-	// A server slower than the budget: escalateTier2 must return within ~budget
+	// A server slower than the budget: escalateEvaluation must return within ~budget
 	// (the ctx cancels Emit), not wait for the server.
 	url, _ := serveEvaluate(t, `{"verdict":"allow"}`, 200, 2*time.Second)
 	tier2Creds(t, url)
@@ -394,10 +394,10 @@ func TestEscalateTier2_BudgetBound(t *testing.T) {
 	ev := &HookEvent{HookEventName: "PreToolUse", SessionID: "s", Cwd: "/tmp", ToolName: "Bash",
 		ToolInput: []byte(`{"command":"echo hi"}`)}
 	start := time.Now()
-	dec := escalateTier2(context.Background(), log.New(&nopWriter{}, "", 0), m, ev, 150*time.Millisecond)
+	dec := escalateEvaluation(context.Background(), log.New(&nopWriter{}, "", 0), m, ev, 150*time.Millisecond)
 	elapsed := time.Since(start)
 	if elapsed > time.Second {
-		t.Errorf("escalateTier2 took %v, must return near the 150ms budget", elapsed)
+		t.Errorf("escalateEvaluation took %v, must return near the 150ms budget", elapsed)
 	}
 	if !dec.FailOpen {
 		t.Error("a budget-exceeding /evaluate must yield a fail-open decision")

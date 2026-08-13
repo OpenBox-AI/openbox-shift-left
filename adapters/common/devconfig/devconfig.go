@@ -438,10 +438,45 @@ func ResolveFailClosed() bool {
 	return resolveBool("fail_closed", func(c DevConfig) *bool { b := c.FailClosed; return &b }, false, EnvFailClosed)
 }
 
+// tier2DeprecationOnce keeps the notice below to one line per process. A hook
+// runs per tool call, so warning unconditionally would flood a session's stderr
+// with the same sentence.
+var tier2DeprecationOnce sync.Once
+
 // ResolveTier2 reports whether the Tier-2 synchronous escalation is on.
-// Default false — opt-in (it adds hot-path secret I/O + latency).
+//
+// DEPRECATED and inert (ADR-0017). Every gated call is evaluated inline now, so
+// there are no tiers to switch between. The key is still read so an existing
+// config does not become an error, and it warns once — but it CANNOT turn
+// evaluation off. Honouring it would leave the orgs most likely to have set it,
+// early adopters of enforcement, silently ungoverned after an upgrade; a
+// deprecated key that quietly disables the product's headline control is the
+// failure this exists to prevent.
+//
+// The return value is retained only so the deprecation warning has a caller.
+// Nothing on the enforce path branches on it.
 func ResolveTier2() bool {
-	return resolveBool("tier2", func(c DevConfig) *bool { return c.Tier2 }, false, EnvTier2)
+	v := resolveBool("tier2", func(c DevConfig) *bool { return c.Tier2 }, false, EnvTier2)
+	if tier2Configured() {
+		tier2DeprecationOnce.Do(func() {
+			fmt.Fprintln(os.Stderr, "openbox: `tier2` is deprecated and ignored — "+
+				"every gated tool call is evaluated by OpenBox (ADR-0017). Remove it from "+
+				"dev.json / OPENBOX_TIER2 to silence this notice.")
+		})
+	}
+	return v
+}
+
+// tier2Configured reports whether the deprecated key was set at all, by env or
+// in dev.json. Presence is the question, not the value: an explicit `false` is
+// exactly the case worth warning about, because that is the setting that used
+// to disable enforcement and no longer does.
+func tier2Configured() bool {
+	if _, ok := os.LookupEnv(EnvTier2); ok {
+		return true
+	}
+	cfg, err := load()
+	return err == nil && cfg.Tier2 != nil
 }
 
 // ResolveTimeoutMS resolves a millisecond budget knob: the config field

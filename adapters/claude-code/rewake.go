@@ -65,7 +65,7 @@ func RunRewake(stdin io.Reader, wake io.Writer, logger *log.Logger) int {
 		return 0
 	}
 
-	msg, ok := hookflow.AwaitRewake(context.Background(), logger, client.ApprovalKeyFor(devEv), tier2.NewClient)
+	msg, ok := hookflow.AwaitRewake(context.Background(), logger, client.ApprovalKeyFor(devEv), evaluator.NewClient)
 	if !ok {
 		return 0
 	}

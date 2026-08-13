@@ -26,7 +26,7 @@ func (t enforceTarget) DecisionRequest(localRedaction bool) decision.DecisionReq
 	return buildDecisionRequest(t.id, t.ev, localRedaction)
 }
 
-// DevEvent maps the call for a Tier-2 escalation, and — unlike the observe copy
+// DevEvent maps the call for an inline evaluation, and — unlike the observe copy
 // of the same call — attaches the approval context, so an approver can see what
 // they are deciding about. The observe path spools its own separately-mapped
 // copy that never carries one, so SL3-SEC-3 holds by construction. Content-gated

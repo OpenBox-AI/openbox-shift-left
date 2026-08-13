@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -67,7 +68,7 @@ func runGate(t *testing.T, g *fakeGovernor, holdMS string) (string, decision.Dec
 	var out bytes.Buffer
 	gate := EnforceGate{
 		Contract: testContract{approval: "ask"},
-		Tier2: Tier2{
+		Evaluator: Evaluator{
 			Ceiling:    provider.HookCeiling{Gating: 30 * time.Second},
 			MaxTimeout: 4 * time.Second,
 			NewClient:  func(*log.Logger) (Governor, error) { return approvalGovernor{fakeGovernor: g}, nil },
@@ -168,6 +169,53 @@ func (g degradedGovernor) Emit(context.Context, client.DevEvent) (client.Evaluat
 	return client.Evaluation{}, client.ErrDelivery
 }
 
+// countingGovernor records how many times the gate asked for a verdict.
+type countingGovernor struct {
+	*fakeGovernor
+	emits *int32
+}
+
+func (g countingGovernor) Emit(context.Context, client.DevEvent) (client.Evaluation, error) {
+	atomic.AddInt32(g.emits, 1)
+	return client.Evaluation{}, client.ErrDelivery
+}
+
+// The gate must not retry a failed evaluation. It runs on EVERY gated tool call
+// since ADR-0017, so a retry loop here would turn one control-plane hiccup into
+// a client-side amplifier — every developer's every tool call hammering a
+// struggling core, and each call delayed by the full retry sequence while doing
+// it. A failed evaluation applies the org's failure policy and returns.
+//
+// Stated at this layer deliberately: the transport has its own bounded retry,
+// which is a different decision made in a different place. What is pinned here
+// is that the GATE asks exactly once.
+func TestGate_DoesNotRetryAFailedEvaluation(t *testing.T) {
+	isolateConfig(t)
+	isolateMarkers(t)
+	t.Setenv(devconfig.EnvEnforcementFile, t.TempDir()+"/enforcements.jsonl")
+	defer devconfig.Pin()()
+
+	var emits int32
+	var out bytes.Buffer
+	gate := EnforceGate{
+		Contract: testContract{approval: "ask"},
+		Evaluator: Evaluator{
+			Ceiling:    provider.HookCeiling{Gating: 30 * time.Second},
+			MaxTimeout: 4 * time.Second,
+			NewClient: func(*log.Logger) (Governor, error) {
+				return countingGovernor{fakeGovernor: &fakeGovernor{}, emits: &emits}, nil
+			},
+		},
+		Record: func(decision.Decision, ApplyResult) {},
+	}
+	gate.Run(context.Background(), discard(), &out, shellTarget{})
+
+	if n := atomic.LoadInt32(&emits); n != 1 {
+		t.Errorf("gate asked for a verdict %d times, want exactly 1 — a retry inside the "+
+			"gate amplifies a core outage across every tool call of every session", n)
+	}
+}
+
 // A REQUIRE_APPROVAL that survived a DEGRADED escalation was never sent, so
 // there is no record to poll for. Holding on it would spend the entire budget
 // on not-founds and then deny a call the org only asked to prompt about.
@@ -202,7 +250,7 @@ func TestGate_DoesNotHoldForAnUnfiledApproval(t *testing.T) {
 	var out bytes.Buffer
 	gate := EnforceGate{
 		Contract: testContract{approval: "ask"},
-		Tier2: Tier2{
+		Evaluator: Evaluator{
 			Ceiling:    provider.HookCeiling{Gating: 30 * time.Second},
 			MaxTimeout: 100 * time.Millisecond,
 			NewClient:  func(*log.Logger) (Governor, error) { return degradedGovernor{fakeGovernor: g}, nil },

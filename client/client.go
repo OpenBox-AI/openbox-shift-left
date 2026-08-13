@@ -163,7 +163,7 @@ var ErrUnbuildable = errors.New("client: event could not be built")
 // carries a stable Idempotency-Key: the server returns the original verdict for
 // a key it has already seen instead of counting the event twice (E8-S7).
 //
-// Callers that cannot retry (the git action, the Tier-2 escalation) must keep
+// Callers that cannot retry (the git action, the inline evaluation) must keep
 // ignoring the error and proceed fail-open.
 func (c *Client) Emit(ctx context.Context, ev DevEvent) (Evaluation, error) {
 	// EventID is the idempotency key (INV-5); SessionID becomes core's run_id.

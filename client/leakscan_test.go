@@ -80,7 +80,7 @@ func TestNoGatedContentEgressesWhenCaptureIsOff(t *testing.T) {
 // side: an adapter stuffing the command into a Span field must not get it onto
 // the wire by turning capture on.
 //
-// The one deliberate exception is the Tier-2 escalation's Content.ToolInput,
+// The one deliberate exception is the inline evaluation's Content.ToolInput,
 // which is not the observe path and is content-gated — see
 // structuralActivityInput.
 func TestShellCommandNeverEgressesEvenWithCaptureOn(t *testing.T) {

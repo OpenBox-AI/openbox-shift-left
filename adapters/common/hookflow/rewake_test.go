@@ -25,7 +25,7 @@ func newGovernor(g *fakeGovernor) func(*log.Logger) (Governor, error) {
 }
 
 // The grace must outlast the worst case for the gate to file an approval — a
-// full Tier-2 escalation budget plus process startup. Too short and the watcher
+// full inline evaluation budget plus process startup. Too short and the watcher
 // gives up mid-escalation, and the rewake silently never fires for precisely
 // the slow-control-plane case it exists to cover.
 func TestRewakeMarkerGraceOutlastsTheEscalation(t *testing.T) {

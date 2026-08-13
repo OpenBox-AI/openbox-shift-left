@@ -13,10 +13,10 @@ import (
 
 const bashToolName = "Bash"
 
-// maxTier2Timeout caps the configurable T2 budget. Unchanged by the raised hook
+// maxEvaluationTimeout caps the configurable T2 budget. Unchanged by the raised hook
 // ceiling below: a slow control plane must still degrade quickly, and only a
 // FILED approval is worth waiting longer for.
-const maxTier2Timeout = 4 * time.Second
+const maxEvaluationTimeout = 4 * time.Second
 
 // preToolUseHookTimeoutSec is the `timeout` the plugin installs on PreToolUse
 // (plugin/hooks/hooks.json), and the value every enforce budget below derives
@@ -47,12 +47,12 @@ func (Engine) HookCeilings() providerspi.HookCeiling {
 	}
 }
 
-// tier2 binds the shared escalation to this provider's declared ceiling and
+// evaluator binds the shared evaluation to this provider's declared ceiling and
 // transport. The escalation itself — bounded run, degrade-on-timeout, verdict
 // mapping — is provider-independent and lives in hookflow.
-var tier2 = hookflow.Tier2{
+var evaluator = hookflow.Evaluator{
 	Ceiling:    Engine{}.HookCeilings(),
-	MaxTimeout: maxTier2Timeout,
+	MaxTimeout: maxEvaluationTimeout,
 	NewClient: func(logger *log.Logger) (hookflow.Governor, error) {
 		creds, err := ResolveCredentials()
 		if err != nil {
@@ -62,10 +62,10 @@ var tier2 = hookflow.Tier2{
 	},
 }
 
-// tier2Budget is the effective budget for an escalation given when the enforce
+// evaluationBudget is the effective budget for an escalation given when the enforce
 // block began.
-func tier2Budget(enforceStart time.Time) time.Duration {
-	return tier2.Budget(enforceStart, ResolveTier2Timeout())
+func evaluationBudget(enforceStart time.Time) time.Duration {
+	return evaluator.Budget(enforceStart, ResolveTier2Timeout())
 }
 
 // isHighRiskClass selects the tool classes worth a synchronous round-trip:
@@ -82,12 +82,12 @@ func decisionTightens(dec decision.Decision) bool {
 	return hookflow.DecisionTightens(dec, contract)
 }
 
-// escalateTier2 maps the native hook event and runs the shared escalation. The
+// escalateEvaluation maps the native hook event and runs the shared escalation. The
 // mapping is the only provider-specific step.
-func escalateTier2(ctx context.Context, logger *log.Logger, m Mapper, ev *HookEvent, budget time.Duration) decision.Decision {
+func escalateEvaluation(ctx context.Context, logger *log.Logger, m Mapper, ev *HookEvent, budget time.Duration) decision.Decision {
 	devEv, ok := m.Map(HookPreToolUse, ev)
 	if !ok {
-		return hookflow.Tier2FailOpen("tier-2 event not mappable")
+		return hookflow.EvaluationFailOpen("event not mappable")
 	}
-	return tier2.Escalate(ctx, logger, devEv, budget)
+	return evaluator.Escalate(ctx, logger, devEv, budget)
 }

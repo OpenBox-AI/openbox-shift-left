@@ -173,15 +173,15 @@ func ResolveBundlePath() string {
 
 // ResolveTier2Timeout resolves the in-binary budget for one Tier-2
 // escalation: config first, env-if-parseable wins; <=0 yields
-// defaultTier2Timeout; clamped to maxTier2Timeout (the Codex whole-hook
+// defaultTier2Timeout; clamped to maxEvaluationTimeout (the Codex whole-hook
 // wall-clock bound — see enforce_tier2.go).
 func ResolveTier2Timeout() time.Duration {
 	ms := devconfig.ResolveTimeoutMS(func(c DevConfig) int { return c.Tier2TimeoutMS }, envTier2Timeout)
 	if ms <= 0 {
-		return hookflow.DefaultTier2Timeout
+		return hookflow.DefaultEvaluationTimeout
 	}
-	if maxMS := int64(maxTier2Timeout / time.Millisecond); int64(ms) > maxMS {
-		return maxTier2Timeout
+	if maxMS := int64(maxEvaluationTimeout / time.Millisecond); int64(ms) > maxMS {
+		return maxEvaluationTimeout
 	}
 	return time.Duration(ms) * time.Millisecond
 }

@@ -111,7 +111,7 @@ func RunHook(sub string, stdin io.Reader, stdout io.Writer, logger *log.Logger) 
 	// Pin the Mapper clock to one instant for this hook invocation. In
 	// enforce+Tier-2 mode RunHook maps the PreToolUse event twice — once
 	// here via Observe (the spooled copy, flushed on SessionEnd) and once
-	// inside escalateTier2 → runTier2 (the synchronous /evaluate copy). A
+	// inside escalateEvaluation → runTier2 (the synchronous /evaluate copy). A
 	// fresh time.Now() on each Map would fold a different RFC3339Nano
 	// timestamp into deriveID and yield different event_ids, so the two
 	// would not collapse under one Idempotency-Key server-side
@@ -193,7 +193,7 @@ func RunHook(sub string, stdin io.Reader, stdout io.Writer, logger *log.Logger) 
 	gated := hook == HookPreToolUse && ResolveEnforce()
 
 	// The observe copy. On a gated hook it is DEFERRED into the gate below,
-	// which spools it only if the Tier-2 escalation did not already deliver the
+	// which spools it only if the inline evaluation did not already deliver the
 	// identical event — see EnforceGate.SpoolObserve for why writing it here
 	// stored every escalated ActivityStarted twice. The duration stash is still
 	// threaded now (RecordDeferred): it has to be written before the tool runs,
@@ -230,11 +230,11 @@ func RunHook(sub string, stdin io.Reader, stdout io.Writer, logger *log.Logger) 
 	// The gate's steps and their order live in hookflow.EnforceGate, shared with
 	// every provider. What this adapter supplies is how to read its own hook
 	// event (enforceTarget), how it spells a response (contract), and its hook
-	// budget (tier2).
+	// budget (the evaluation).
 	if gated {
 		g := hookflow.EnforceGate{
 			Contract:     contract,
-			Tier2:        tier2,
+			Evaluator:    evaluator,
 			Record:       func(dec decision.Decision, res hookflow.ApplyResult) { recordEnforcement(logger, ev, dec, res) },
 			SpoolObserve: spoolObserve,
 		}

@@ -102,7 +102,7 @@ if docker stop "$CORE_CTR" >/dev/null 2>&1; then
 	# `fail_open:true` here is provenance, not outcome: the escalation returned
 	# no real verdict, so the org's failure policy decided — and fail-closed
 	# turned that into a HALT rather than letting the call through.
-	assert_contains "the escalation degraded" "$audit" '"source":"tier2:fail-open"'
+	assert_contains "the escalation degraded" "$audit" '"source":"evaluate:fail-open"'
 	assert_contains "fail-closed synthesised a HALT" "$audit" '"verdict":"HALT"'
 	assert_contains "the call was denied" "$audit" '"applied_decision":"deny"'
 	restore_core

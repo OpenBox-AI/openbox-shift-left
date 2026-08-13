@@ -41,11 +41,11 @@ func TestDecisionTightens_Codex(t *testing.T) {
 	}
 }
 
-func TestTier2Decision_Codex(t *testing.T) {
-	if d := hookflow.Tier2Decision(client.Evaluation{Verdict: client.VerdictUnknown}); !d.FailOpen {
+func TestEvaluationDecision_Codex(t *testing.T) {
+	if d := hookflow.EvaluationDecision(client.Evaluation{Verdict: client.VerdictUnknown}); !d.FailOpen {
 		t.Error("an unknown T2 verdict must fold to hookflow.FailOpen (no real verdict)")
 	}
-	if d := hookflow.Tier2Decision(client.Evaluation{Verdict: client.VerdictBlock}); d.FailOpen {
+	if d := hookflow.EvaluationDecision(client.Evaluation{Verdict: client.VerdictBlock}); d.FailOpen {
 		t.Error("a real T2 BLOCK must be hookflow.FailOpen=false")
 	}
 }
@@ -53,14 +53,14 @@ func TestTier2Decision_Codex(t *testing.T) {
 func TestTier2Budget_ClampsUnderWholeHookBudget(t *testing.T) {
 	// A T1 gate that already consumed most of the budget leaves T2 a smaller slice.
 	start := time.Now().Add(-(hookflow.EnforceBudget((Engine{}).HookCeilings()) - 200*time.Millisecond))
-	if b := tier2Budget(start); b > 300*time.Millisecond {
-		t.Errorf("tier2Budget = %v, want it clamped to the remaining whole-hook budget", b)
+	if b := evaluationBudget(start); b > 300*time.Millisecond {
+		t.Errorf("evaluationBudget = %v, want it clamped to the remaining whole-hook budget", b)
 	}
 	// A T1 gate that overran the whole budget yields a non-positive T2 budget →
-	// escalateTier2 fail-opens immediately (safe direction).
+	// escalateEvaluation fail-opens immediately (safe direction).
 	over := time.Now().Add(-2 * hookflow.EnforceBudget((Engine{}).HookCeilings()))
-	if b := tier2Budget(over); b > 0 {
-		t.Errorf("tier2Budget after overrun = %v, want non-positive (immediate fail-open)", b)
+	if b := evaluationBudget(over); b > 0 {
+		t.Errorf("evaluationBudget after overrun = %v, want non-positive (immediate fail-open)", b)
 	}
 }
 
@@ -69,7 +69,7 @@ func TestEscalateTier2_DegradesFailOpenOnZeroBudget(t *testing.T) {
 	// decision (never hang, never a real verdict) so the failure policy decides.
 	m := NewMapper(Identity{DeveloperDID: testDID})
 	ev := &HookEvent{SessionID: "s", ToolName: "Bash", ToolInput: []byte(`{"command":"echo hi"}`)}
-	dec := escalateTier2(context.Background(), log.New(&nopWriter{}, "", 0), m, ev, -1)
+	dec := escalateEvaluation(context.Background(), log.New(&nopWriter{}, "", 0), m, ev, -1)
 	if !dec.FailOpen {
 		t.Errorf("zero/negative budget must degrade fail-open, got %+v", dec)
 	}
@@ -79,7 +79,7 @@ func TestEscalateTier2_DegradesFailOpenOnZeroBudget(t *testing.T) {
 // PreToolUse event must derive the SAME deterministic event_id as its spooled
 // observe counterpart, so the two collapse under one Idempotency-Key server-side
 // (no double-count). RunHook pins ad.Mapper.Now to one instant and hands that SAME
-// pinned Mapper to escalateTier2 → runTier2, so both Map() calls fold the identical
+// pinned Mapper to escalateEvaluation → runTier2, so both Map() calls fold the identical
 // RFC3339Nano timestamp into deriveID.
 func TestTier2EventIDMatchesObserve(t *testing.T) {
 	ev := &HookEvent{
