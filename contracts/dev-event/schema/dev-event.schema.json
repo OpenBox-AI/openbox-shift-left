@@ -40,7 +40,10 @@
         "CommitCreated",
         "Deploy",
         "TurnStarted",
-        "TurnCompleted"
+        "TurnCompleted",
+        "SubagentStarted",
+        "PermissionDenied",
+        "APIError"
       ]
     },
     "openbox_session_id": {
@@ -170,6 +173,24 @@
       "description": "Closes one model turn and carries what it spent: tokens (all four counts the provider reports) and the model that spent them. Both are optional — a turn the projection could not measure is still a real turn, and zero-filling would claim it spent nothing.",
       "required": ["event_type", "turn_index"],
       "properties": { "event_type": { "const": "TurnCompleted" } }
+    },
+    {
+      "title": "SubagentStarted",
+      "description": "A subagent spawned (v1.2, ADR-0018). Rides SignalReceived(subagent_started). Metadata-only: agent_id + agent_type. Carries NO signal_args — core's alignment engine treats any SignalReceived with non-empty signal_args as a NEW USER GOAL and overwrites the session's goal with them (openbox-core internal/services/age.go:112-137), so structural detail rides metadata for all three of these signals.",
+      "required": ["event_type"],
+      "properties": { "event_type": { "const": "SubagentStarted" } }
+    },
+    {
+      "title": "PermissionDenied",
+      "description": "A policy or classifier refused a tool call (v1.2, ADR-0018). Rides SignalReceived(permission_denied). Records THAT a decision happened and which tool it was about — never the content and never the reason (the provider's `reason` is free text and is not bound; ADR-0019 owns it). Note the provider limit: Claude Code 2.1.229 fires its PermissionDenied hook only after an auto-mode classifier denial, so a static deny rule denies WITHOUT producing this event — absence is not evidence that nothing was denied.",
+      "required": ["event_type"],
+      "properties": { "event_type": { "const": "PermissionDenied" } }
+    },
+    {
+      "title": "APIError",
+      "description": "A model turn ended in a provider-side error instead of an answer (v1.2, ADR-0018). Rides SignalReceived(api_error). metadata.error_type is the provider's own closed enum (rate_limit, overloaded, authentication_failed, oauth_org_not_allowed, billing_error, invalid_request, model_not_found, server_error, max_output_tokens, unknown), allowlisted at the adapter; anything else is dropped rather than egressed. Free-text error detail is NOT carried.",
+      "required": ["event_type"],
+      "properties": { "event_type": { "const": "APIError" } }
     }
   ],
   "$defs": {

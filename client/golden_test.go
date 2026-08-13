@@ -185,6 +185,34 @@ func goldenCases() []goldenCase {
 	}
 	mcpResult := completed(mcpCall, "ev-9", "2026-07-31T09:00:00.75Z")
 
+	// The three failure/lifecycle signals (ADR-0018). Their fixtures exist
+	// mainly to pin ONE property that no unit test states as loudly: the wire
+	// payload has NO signal_args key. Core reads a SignalReceived carrying
+	// signal_args as a new user goal and overwrites the alignment session's goal
+	// with it (age.go:112-137), so a well-meaning "let's show the denied tool in
+	// the Verify tab's Input" would silently destroy goal alignment. If these
+	// three fixtures ever gain a signal_args key, that is the bug.
+	subagentStarted := base(EventSubagentStarted, "ev-17")
+	subagentStarted.Tool = Tool{Name: "claude-code", Kind: ToolShell}
+	subagentStarted.AgentID = "agt-code-reviewer-01"
+	subagentStarted.Metadata = map[string]any{
+		"provider":   "claude-code",
+		"agent_id":   "agt-code-reviewer-01",
+		"agent_type": "code-reviewer",
+	}
+
+	permissionDenied := base(EventPermissionDenied, "ev-18")
+	permissionDenied.Tool = Tool{Name: "Bash", Kind: ToolShell}
+	permissionDenied.Span = &Span{SemanticType: "internal", Stage: "completed", InvocationID: "toolu_denied01"}
+	permissionDenied.Metadata = map[string]any{
+		"provider":    "claude-code",
+		"tool_use_id": "toolu_denied01",
+	}
+
+	apiError := base(EventAPIError, "ev-19")
+	apiError.Tool = Tool{Name: "claude-code", Kind: ToolShell}
+	apiError.Metadata = map[string]any{"provider": "claude-code", "error_type": "rate_limit"}
+
 	// A turn: the same activity carrier as a tool call, with an id derived from
 	// the turn index instead of hashed from an operation, and usage rather than
 	// byte counts in activity_output. Both halves are emitted from one hook
@@ -268,6 +296,9 @@ func goldenCases() []goldenCase {
 		{"activity_shell_started", shellCall},
 		{"activity_shell_completed", shellResult},
 		{"activity_tool_failed", shellFailed},
+		{"signal_subagent_started", subagentStarted},
+		{"signal_permission_denied", permissionDenied},
+		{"signal_api_error", apiError},
 		{"activity_mcp_started", mcpCall},
 		{"activity_mcp_completed", mcpResult},
 		{"activity_turn_started", turnStarted},

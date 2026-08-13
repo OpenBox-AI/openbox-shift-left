@@ -60,6 +60,35 @@ const (
 	// (turnActivityIDFor), which is what pairs them onto one row.
 	EventTurnStarted   EventType = "TurnStarted"
 	EventTurnCompleted EventType = "TurnCompleted"
+
+	// The failure/lifecycle signals (ADR-0018). All three ride stock
+	// SignalReceived (INV-8) — no new endpoint, no new table, per the repo's
+	// reuse rule — and all three are metadata-only.
+	//
+	// They carry NO signal_args, and that is a correctness constraint rather
+	// than a minimalism preference. Core's goal-alignment engine treats ANY
+	// SignalReceived with non-empty signal_args as a new user goal: it runs an
+	// alignment check against the assistant messages accumulated so far and then
+	// OVERWRITES the session's goal with the stringified args
+	// (openbox-core internal/services/age.go:112-137). Putting the denied tool's
+	// name in signal_args would therefore replace the developer's actual prompt
+	// as the thing every later turn is scored against, silently wrecking the
+	// feature the turn span exists to feed. Structural detail rides metadata.
+	// TestNewSignalsCarryNoSignalArgs holds this.
+
+	// EventSubagentStarted marks a subagent spawning. Until this existed a
+	// subagent was visible only through the agent_id on its tool events, so one
+	// that spawned and did nothing left no trace.
+	EventSubagentStarted EventType = "SubagentStarted"
+	// EventPermissionDenied records that a policy or classifier refused a tool
+	// call — that a decision happened and which tool it was about, never what
+	// the content was and never why (the provider's `reason` is free text and
+	// is not bound).
+	EventPermissionDenied EventType = "PermissionDenied"
+	// EventAPIError records a turn that ended in a provider-side error rather
+	// than an answer (rate limit, billing, auth, overload). Without it, a
+	// session throttled into silence is indistinguishable from an idle one.
+	EventAPIError EventType = "APIError"
 )
 
 // AllEventTypes is the complete vocabulary, so callers that need to enumerate it
@@ -77,6 +106,9 @@ var AllEventTypes = []EventType{
 	EventDeploy,
 	EventTurnStarted,
 	EventTurnCompleted,
+	EventSubagentStarted,
+	EventPermissionDenied,
+	EventAPIError,
 }
 
 // Tool-result outcome vocabulary (ADR-0018 Decision 1). Two literals, closed.

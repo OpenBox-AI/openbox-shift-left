@@ -1,0 +1,17 @@
+{
+  "source": "developer-runtime",
+  "event_type": "SignalReceived",
+  "activity_type": "SubagentStarted",
+  "workflow_id": "openbox-ai/openbox-shift-left",
+  "run_id": "sess-golden-0001",
+  "workflow_type": "developer-session",
+  "signal_name": "subagent_started",
+  "timestamp": "2026-07-31T09:00:00Z",
+  "metadata": {
+    "agent_id": "agt-code-reviewer-01",
+    "agent_type": "code-reviewer",
+    "event_id": "ev-17",
+    "provider": "claude-code",
+    "tool_name": "claude-code"
+  }
+}

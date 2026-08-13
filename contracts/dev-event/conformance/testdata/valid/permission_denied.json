@@ -1,0 +1,11 @@
+{
+  "schema_version": "1.2",
+  "event_id": "evt-0011",
+  "event_type": "PermissionDenied",
+  "openbox_session_id": "sess-abc123",
+  "developer_did": "did:aip:7f3c9b2e-0000-5000-a000-000000000001",
+  "timestamp": "2026-07-07T12:00:25Z",
+  "tool": { "name": "Bash", "kind": "shell" },
+  "span": { "semantic_type": "internal", "stage": "completed" },
+  "metadata": { "tool_name": "Bash", "tool_use_id": "toolu_denied01", "permission_mode": "default" }
+}

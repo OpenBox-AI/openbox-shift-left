@@ -208,6 +208,17 @@ func wireTypeFor(et EventType) (wireType, signalName string, err error) {
 		return wireSignalReceived, "commit_created", nil
 	case EventDeploy:
 		return wireSignalReceived, "deploy", nil
+	// The failure/lifecycle signals (ADR-0018). Stock SignalReceived, so a stock
+	// core accepts them with no patch (INV-8). buildSignalArgs deliberately has
+	// no arm for any of them — see the EventSubagentStarted doc comment for why
+	// non-empty signal_args on these would overwrite the goal-alignment session's
+	// user goal.
+	case EventSubagentStarted:
+		return wireSignalReceived, "subagent_started", nil
+	case EventPermissionDenied:
+		return wireSignalReceived, "permission_denied", nil
+	case EventAPIError:
+		return wireSignalReceived, "api_error", nil
 	case EventToolCall, EventTurnStarted:
 		return wireActivityStarted, "", nil
 	case EventToolResult, EventTurnCompleted:

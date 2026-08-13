@@ -46,10 +46,13 @@ import (
 var devEventTypes = []client.EventType{
 	client.EventSessionStarted,
 	client.EventPromptSubmitted,
+	client.EventSubagentStarted,
 	client.EventToolCall,
+	client.EventPermissionDenied,
 	client.EventToolResult,
 	client.EventTurnStarted,
 	client.EventTurnCompleted,
+	client.EventAPIError,
 	client.EventCommitCreated,
 	client.EventDeploy,
 	client.EventSessionEnded,
