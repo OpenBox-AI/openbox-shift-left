@@ -11,7 +11,7 @@
 - **Date:** 2026-08-13
 - **Description:** Newly-gated classes attach their content so policy can decide on it
   (E7) — and the body is locally redacted first, so a secret never leaves (E8).
-- **Priority:** P1 · **Implementation status:** pending · **Review status:** pending
+- **Priority:** P1 · **Implementation status:** done · **Review status:** pending
 
 ## Key Insights
 
@@ -94,13 +94,13 @@ One body, redacted once, used for both the verdict request and the applied redac
 
 ## Todo list
 
-- [ ] Existing content-free guard test located and read
-- [ ] Secret-never-egresses test written and initially failing
-- [ ] Redacted body attached for all gated classes
-- [ ] `content_capture:false` attaches nothing, asserted per class
-- [ ] Detection-off behaviour pinned
-- [ ] `payload.go:485` comment + guard test updated together
-- [ ] All 11 modules green
+- [x] Existing content-free guard test located and read
+- [x] Secret-never-egresses test written and initially failing
+- [x] Redacted body attached for all gated classes
+- [x] `content_capture:false` attaches nothing, asserted per class
+- [x] Detection-off behaviour pinned
+- [x] `payload.go:485` comment + guard test updated together
+- [x] All 11 modules green
 
 ## Success Criteria
 

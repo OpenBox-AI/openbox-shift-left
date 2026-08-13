@@ -87,6 +87,33 @@ type Posture struct {
 	// state, not a failure — but it is also not assurance, which is why it is
 	// recorded rather than assumed.
 	BundleIntegrity string
+
+	// DecisionAuthority names what decides this session's gated tool calls:
+	// "control_plane" since ADR-0017, when /evaluate answers.
+	//
+	// It replaces the bundle coordinates above as the posture's policy-provenance
+	// evidence, and it deliberately answers a smaller question. The bundle fields
+	// existed because the ENDPOINT was the decider, so only the endpoint knew
+	// which policy it had enforced — the control plane had to be told. That is no
+	// longer true: the control plane decides, so it already holds the identity of
+	// the policy it applied, and asking the endpoint to report it back would be
+	// asking a party to attest to someone else's record.
+	//
+	// What does NOT close itself is the fail-open case, which is why
+	// FailurePolicy sits beside this: a call decided locally because /evaluate
+	// was unreachable is decided by NO policy, and core may have no record of it
+	// at all. That gap is the thing worth reporting.
+	//
+	// Never described as "verified" or as an integrity claim. It is a statement
+	// about who decides, carried over an authenticated channel — not a signature
+	// check, which is what the word integrity meant here before and no longer
+	// happens.
+	DecisionAuthority string
+	// FailurePolicy is what governs a gated call when the control plane cannot
+	// be reached: "fail_open" (the default — the call proceeds ungoverned) or
+	// "fail_closed" (it is denied). Under fail_open this field is the honest
+	// statement that enforcement is reachability-dependent.
+	FailurePolicy string
 	// ConfigSource names where each posture flag came from (E8-S9): default,
 	// user, env, managed_default, or managed. This is what lets the control
 	// plane distinguish "the org requires enforce" from "this developer happens
@@ -110,8 +137,25 @@ func EffectivePosture() Posture {
 		*f.into(&p) = v
 		p.ConfigSource[f.name] = string(src)
 	}
+	// Who decides, and what happens when it cannot be reached. Both are
+	// knowable at session start, which the deciding policy id is not — posture
+	// rides SessionStarted, before this session has made any decision, so a
+	// policy id here could only ever be some other session's.
+	p.DecisionAuthority = DecisionAuthorityControlPlane
+	p.FailurePolicy = FailurePolicyFailOpen
+	if p.FailClosed {
+		p.FailurePolicy = FailurePolicyFailClosed
+	}
 	return p
 }
+
+// The vocabulary for the two provenance fields, so reporting sites cannot
+// invent their own spelling of the same state.
+const (
+	DecisionAuthorityControlPlane = "control_plane"
+	FailurePolicyFailOpen         = "fail_open"
+	FailurePolicyFailClosed       = "fail_closed"
+)
 
 // Flags renders the resolved boolean posture, keyed by the same names
 // ConfigSource uses and built from the same field table.

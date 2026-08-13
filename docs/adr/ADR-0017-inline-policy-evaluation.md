@@ -219,6 +219,38 @@ targeted race tests, **not** against a live stack. The real per-call row count
 under universal escalation has not been observed. This ADR is accepted knowing
 that.
 
+## Policy provenance as evidence
+
+Deleting the bundle removes what posture used to report about policy: its
+version, its id, its content hash and its signature-verification outcome. The
+replacement is deliberately smaller, and **no backend ask is filed**, because the
+question those fields answered has changed rather than gone unanswered.
+
+They existed because the *endpoint* was the decider. Only the endpoint knew which
+policy it had enforced, so the control plane had to be told — and had to be given
+a hash and a signature, because it was trusting a self-report about a local
+artifact. Under this ADR the control plane decides, so it already holds the
+identity of the policy it applied. Asking the endpoint to report that back would
+be asking one party to attest to another's record: weaker evidence than the
+control plane's own, dressed as corroboration.
+
+Posture therefore carries **who decides** (`decision_authority: control_plane`)
+and **what happens when they cannot be reached**
+(`failure_policy: fail_open | fail_closed`). Neither is called "verified" and
+neither is an integrity claim — that word described a signature check over a
+local file, and there is no longer a file or a check.
+
+The gap that does *not* close itself is the fail-open case: a call decided
+locally because `/evaluate` was unreachable is decided by **no policy at all**,
+and the control plane may have no record of it. `failure_policy` is what makes
+that visible in advance, and `openbox doctor`'s last-decision line makes it
+visible after the fact — reporting the source alongside the policy id, because an
+empty policy id alone reads as "unknown" when it means "ungoverned".
+
+Revision-level evidence ("was this call judged before or after the tightening?")
+is not available from the endpoint and is not sought from it. It is a question
+about the control plane's own decision record, to be answered there.
+
 ## Consequences
 
 - `/evaluate` is on the blocking path of every gated tool call. Its availability

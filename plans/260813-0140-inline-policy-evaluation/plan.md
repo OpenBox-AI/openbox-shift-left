@@ -54,8 +54,8 @@ consumed, and the sync/staleness/signing machinery around it are deleted. Local
 | 1 | [Gate: dedupe under universal escalation + Codex ceiling](phase-01-gate-dedupe-and-ceilings.md) | done — stack run waived | 3h | — |
 | 2 | [ADR-0017 + honest docs ahead of the code](phase-02-adr-and-docs.md) | done | 3h | 1 |
 | 3 | [Hook-ceiling capability in the SPI; widen the gate to all classes](phase-03-ceiling-spi-and-widen-gate.md) | done | 5h | 2 |
-| 4 | [Content: redact locally, then send](phase-04-redact-then-send.md) | pending | 3h | 3 |
-| 5 | [Evidence: verdict `policy_id` into posture](phase-05-policy-identity-evidence.md) | pending | 2h | 3 |
+| 4 | [Content: redact locally, then send](phase-04-redact-then-send.md) | done | 3h | 3 |
+| 5 | [Evidence: verdict `policy_id` into posture](phase-05-policy-identity-evidence.md) | done | 2h | 3 |
 | 6 | [Delete the local policy path](phase-06-delete-local-policy.md) | pending | 5h | 4, 5 |
 | 7 | [Rename to three named features; rewrite the privacy docs](phase-07-rename-and-docs-rewrite.md) | pending | 4h | 6 |
 | 8 | [Verify against the real thing](phase-08-verification.md) | pending | 3h | 7 |
@@ -115,9 +115,11 @@ collision points are already patched in that plan; see its Validation Summary.
    it properly is a backend ask. See
    [phase 1's finding](reports/finding-260813-dedupe-and-ceilings.md).
    *Question 2 below is answered by the same finding and is retained for history.*
-1. **Does `/evaluate` return a policy version/epoch, or only `policy_id`?** Only
-   `policy_id` is parsed today (`client/verdict.go:195`). If version-level evidence is
-   required, phase 5 files a backend ask.
+1. **RESOLVED (phase 5): no backend ask.** Policy provenance belongs to whoever decides,
+   and that is the control plane now — it already holds the identity of the policy it
+   applied, so having the endpoint report it back would be one party attesting to
+   another's record. Posture carries `decision_authority` + `failure_policy` instead. See
+   ADR-0017 §Policy provenance as evidence.
 2. **Codex's hook ceiling is unverified.** Phase 1 must read it; Codex enforcement is
    blocked until it is known.
 3. **Notification obligation** for existing `content_capture:true` orgs whose file bodies

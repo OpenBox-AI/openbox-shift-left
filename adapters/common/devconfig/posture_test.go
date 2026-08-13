@@ -173,3 +173,48 @@ func TestEffectivePosture_MatchesResolvers(t *testing.T) {
 		t.Errorf("secret_detection and content_capture default on, got %+v", p)
 	}
 }
+
+// Policy provenance replaced the bundle coordinates, and the replacement has to
+// answer a question posture can actually answer at the moment it is built.
+//
+// Posture rides SessionStarted — before this session has decided anything — so a
+// deciding policy id here could only ever be some other session's. What IS
+// knowable then is who decides and what happens when they cannot be reached, and
+// under fail_open that second field is the honest statement that enforcement is
+// reachability-dependent.
+func TestPostureReportsDecisionProvenance(t *testing.T) {
+	t.Run("default is control plane, fail-open", func(t *testing.T) {
+		isolateConfig(t)
+		p := EffectivePosture()
+		if p.DecisionAuthority != DecisionAuthorityControlPlane {
+			t.Errorf("decision authority = %q, want %q", p.DecisionAuthority, DecisionAuthorityControlPlane)
+		}
+		if p.FailurePolicy != FailurePolicyFailOpen {
+			t.Errorf("failure policy = %q, want %q — the default must not overstate", p.FailurePolicy, FailurePolicyFailOpen)
+		}
+	})
+
+	t.Run("fail_closed is reported", func(t *testing.T) {
+		isolateConfig(t)
+		t.Setenv(EnvFailClosed, "1")
+		if p := EffectivePosture(); p.FailurePolicy != FailurePolicyFailClosed {
+			t.Errorf("failure policy = %q, want %q", p.FailurePolicy, FailurePolicyFailClosed)
+		}
+	})
+
+	// The word that must not come back. "verified" and "integrity" described a
+	// signature check over a local artifact; there is no artifact and no check,
+	// so reusing the vocabulary for a weaker claim would be the overstatement
+	// this repo's own rules forbid.
+	t.Run("no verification vocabulary on the new fields", func(t *testing.T) {
+		isolateConfig(t)
+		p := EffectivePosture()
+		for _, v := range []string{p.DecisionAuthority, p.FailurePolicy} {
+			for _, banned := range []string{"verif", "integrity", "signed"} {
+				if strings.Contains(strings.ToLower(v), banned) {
+					t.Errorf("%q implies a cryptographic check that no longer happens", v)
+				}
+			}
+		}
+	})
+}

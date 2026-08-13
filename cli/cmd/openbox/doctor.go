@@ -3,10 +3,12 @@ package main
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"github.com/openbox-ai/openbox-shift-left/adapters/common/hookflow"
 	"os"
 	"sort"
+	"strings"
 
 	"github.com/openbox-ai/openbox-shift-left/adapters/common/devconfig"
 	"github.com/openbox-ai/openbox-shift-left/cli/internal/managed"
@@ -111,11 +113,19 @@ func (a *app) runDoctor(args []string) int {
 		}
 	}
 
-	fmt.Fprintf(a.stdout, "\nPolicy bundle\n")
-	fmt.Fprintf(a.stdout, "  path       %s\n", hookflow.ResolveBundlePath())
-	fmt.Fprintf(a.stdout, "  policy id  %s\n", orUnset(p.BundlePolicyID))
-	fmt.Fprintf(a.stdout, "  sha256     %s\n", orUnset(p.BundleSHA256))
-	fmt.Fprintf(a.stdout, "  integrity  %s%s\n", orUnset(p.BundleIntegrity), integrityNote(p.BundleIntegrity))
+	// Policy provenance, in place of the bundle block. The heading changed
+	// because the claim changed: there is no local artifact to hash or verify,
+	// so reporting a "bundle integrity" would be describing a check that no
+	// longer runs (ADR-0017).
+	fmt.Fprintf(a.stdout, "\nPolicy decisions\n")
+	fmt.Fprintf(a.stdout, "  decided by      %s\n", orUnset(p.DecisionAuthority))
+	fmt.Fprintf(a.stdout, "  if unreachable  %s\n", orUnset(p.FailurePolicy))
+	if p.FailurePolicy == devconfig.FailurePolicyFailOpen {
+		fmt.Fprintf(a.stdout, "                  gated calls PROCEED when the control plane cannot be\n")
+		fmt.Fprintf(a.stdout, "                  reached, so enforcement depends on reachability. Set\n")
+		fmt.Fprintf(a.stdout, "                  fail_closed to deny instead.\n")
+	}
+	fmt.Fprintf(a.stdout, "  last decision   %s\n", lastDecisionSummary())
 
 	fmt.Fprintf(a.stdout, "\nProvider managed configuration\n")
 	for _, prov := range []managed.Provider{managed.ProviderClaudeCode, managed.ProviderCodex} {
@@ -150,6 +160,39 @@ func orUnset(s string) string {
 		return "(unset)"
 	}
 	return s
+}
+
+// lastDecisionSummary reads the most recent line of the local enforcement audit
+// and says which policy decided it — the local view of policy provenance now
+// that there is no bundle to name.
+//
+// It reports the SOURCE as well as the policy id, because the two answer
+// different questions and only together are they honest: a line with no policy
+// id and an `evaluate:fail-open` source means the control plane was unreachable
+// and the call was decided by the failure policy, which is the one case where no
+// policy decided anything at all. Printing an empty policy id alone would read
+// as "unknown" rather than as "ungoverned".
+//
+// Best-effort: an absent or unreadable audit is the normal state on a machine
+// that has not run a governed session, not a fault.
+func lastDecisionSummary() string {
+	raw, err := os.ReadFile(hookflow.DefaultEnforcementPath())
+	if err != nil || len(raw) == 0 {
+		return "(none recorded)"
+	}
+	lines := strings.Split(strings.TrimRight(string(raw), "\n"), "\n")
+	var rec struct {
+		PolicyID string `json:"policy_id"`
+		Source   string `json:"source"`
+		Verdict  string `json:"verdict"`
+	}
+	if json.Unmarshal([]byte(lines[len(lines)-1]), &rec) != nil {
+		return "(unreadable)"
+	}
+	if rec.PolicyID == "" {
+		return fmt.Sprintf("%s via %s — NO policy decided this call", orUnset(rec.Verdict), orUnset(rec.Source))
+	}
+	return fmt.Sprintf("policy %s (%s via %s)", rec.PolicyID, orUnset(rec.Verdict), orUnset(rec.Source))
 }
 
 // withPresence annotates a config path with whether it exists — an absent

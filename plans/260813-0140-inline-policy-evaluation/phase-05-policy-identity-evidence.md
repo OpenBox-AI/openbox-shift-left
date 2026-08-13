@@ -13,7 +13,7 @@
 - **Description:** Deleting the bundle removes `bundle_version`, `bundle_integrity`,
   `bundle_sha256` and `policy_id` from the reported posture. Replace them with the identity
   of the policy that actually decided, which `/evaluate` already returns.
-- **Priority:** P1 · **Implementation status:** pending · **Review status:** pending
+- **Priority:** P1 · **Implementation status:** done · **Review status:** pending
 
 ## Key Insights
 
@@ -82,12 +82,12 @@ no verdict obtained ──▶ posture: decided_by = failure_policy (fail_open|fa
 
 ## Todo list
 
-- [ ] Posture carries the deciding `policy_id`
-- [ ] No-verdict sessions report failure-policy-decided, not an empty field
-- [ ] `doctor` reports it in place of the bundle fields
-- [ ] No "verified"/"integrity" language reused for a weaker claim
-- [ ] `policy_id`-is-enough decision recorded; backend ask filed if not
-- [ ] All 11 modules green
+- [x] Posture carries the deciding `policy_id`
+- [x] No-verdict sessions report failure-policy-decided, not an empty field
+- [x] `doctor` reports it in place of the bundle fields
+- [x] No "verified"/"integrity" language reused for a weaker claim
+- [x] `policy_id`-is-enough decision recorded; backend ask filed if not
+- [x] All 11 modules green
 
 ## Success Criteria
 
