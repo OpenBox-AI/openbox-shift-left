@@ -239,6 +239,16 @@ func goldenCases() []goldenCase {
 	}
 	turnCompleted.Metadata = map[string]any{"provider": "claude-code", "turn_index": turnIndex}
 
+	// The same turn WITH the assistant's text (ADR-0018). This fixture is the
+	// byte-exact record of the one span a developer session emits: the
+	// classification attributes core recomputes semantic_type from, the
+	// synthetic marker, the hash-derived ids, and the OpenAI-chat wrapper its
+	// alignment extractor unmarshals. Every one of those fails SILENTLY if it
+	// drifts — core logs and returns "" — so the fixture is the alarm.
+	turnWithContent := turnCompleted
+	turnWithContent.EventID = "ev-20"
+	turnWithContent.Content = &Content{Output: "I refactored the spool; all 11 modules are green."}
+
 	// A subagent's turn: same shape, partitioned id, attributed by agent.
 	subIndex := 1
 	subagentTurn := turnCompleted
@@ -303,6 +313,7 @@ func goldenCases() []goldenCase {
 		{"activity_mcp_completed", mcpResult},
 		{"activity_turn_started", turnStarted},
 		{"activity_turn_completed", turnCompleted},
+		{"activity_turn_completed_content", turnWithContent},
 		{"activity_turn_subagent_completed", subagentTurn},
 		{"activity_usage_rollup_started", rollupStarted},
 		{"activity_usage_rollup_completed", rollupCompleted},

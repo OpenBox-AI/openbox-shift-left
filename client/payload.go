@@ -90,6 +90,17 @@ type governanceEventPayload struct {
 	// field anywhere else would rewrite every fixture and obscure the one-key
 	// diff that shows this change is additive.
 	Status string `json:"status,omitempty"`
+	// Spans carries EXACTLY ONE span, on a TurnCompleted under content capture,
+	// and nothing else ever (ADR-0018 Decision 2). It is not a return of the
+	// span layer ADR-0013 retired: tool events stay span-less and the deleted
+	// files stay deleted. It exists because core's goal-alignment extractor
+	// reads assistant text from payload.Spans and from no other field, so a
+	// span-less session can never feed it — see client/turnspan.go.
+	//
+	// Both keys are absent unless there is text, which is what makes
+	// content_capture:false emit nothing new at all rather than an empty array.
+	Spans     []wireSpan `json:"spans,omitempty"`
+	SpanCount int        `json:"span_count,omitempty"`
 }
 
 // Base wire event types (INV-8: every dev event maps onto one of these stock
@@ -173,6 +184,15 @@ func buildPayload(ev DevEvent) ([]byte, error) {
 		p.ActivityID = turnActivityIDFor(ev)
 		p.ActivityOutput = turnActivityOutput(ev)
 		p.DurationMs = durationMs(ev)
+		// The assistant's words, when capture left them on the event. Note what
+		// is deliberately NOT set alongside: hook_trigger. A payload with
+		// hook_trigger true AND spans present enters core's approval-bypass
+		// fingerprint path (governance_workflow.go:310-330), and a model turn is
+		// not an approvable operation.
+		if span := turnAssistantSpan(ev); span != nil {
+			p.Spans = []wireSpan{*span}
+			p.SpanCount = 1
+		}
 	}
 
 	meta, err := buildMetadata(ev)
@@ -351,12 +371,22 @@ const activityTypeLLMCompletion = "llm_completion"
 // produced it — which is the whole point of routing the turn through an activity
 // instead of reviving the span layer ADR-0013 retired.
 //
-// INV-2, stated exactly: this object carries FOUR NUMBERS AND ONE IDENTIFIER.
+// INV-2, stated exactly: THIS OBJECT carries FOUR NUMBERS AND ONE IDENTIFIER.
 // No prompt, no completion, no thinking block, no stop reason, no tool content.
 // The model id is the single free-form string, already capStr-bounded by the
 // adapter. Core runs Guardrails stage "1" and OPA over this field, so token
 // spend becomes policy-visible — an intended upside, and a second reason the
 // schema must stay numbers plus one bounded identifier.
+//
+// Scope note (ADR-0018): the sentence above is about activity_output and stays
+// exactly true. The TURN EVENT as a whole is no longer content-free — under
+// content capture it carries the assistant's text, on the span
+// (buildPayload's EventTurnCompleted arm, client/turnspan.go). The text was put
+// there rather than here for one reason: core's alignment extractor reads
+// payload.Spans and nothing else. openbox-core#130 asks for it to read this
+// field instead, and when that lands the text moves HERE as
+// activity_output.message and the span is deleted — at which point this
+// paragraph is what needs rewriting.
 //
 // Cost is deliberately absent. Core and the backend each derive it server-side
 // from a model-keyed pricing table; deriving it here would fabricate a number

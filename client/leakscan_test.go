@@ -60,6 +60,24 @@ func TestNoGatedContentEgressesWhenCaptureIsOff(t *testing.T) {
 			},
 			canaries: []string{canaryOutput, canaryRespBody},
 		},
+		{
+			// ADR-0018's new content class. The turn span is the one place the
+			// client puts assistant text on the wire, so it is the one place a
+			// gate regression would put it there unconditionally — and unlike the
+			// cases above, this one is NEW, so no prior test covers it.
+			name: "turn carrying the assistant message",
+			event: func() DevEvent {
+				idx := 0
+				return DevEvent{
+					SchemaVersion: SchemaVersion, EventID: "ev-4", EventType: EventTurnCompleted,
+					SessionID: "sess-leak", DeveloperDID: "did:aip:x", Timestamp: "2026-07-31T09:00:00Z",
+					Tool:      Tool{Name: "claude-code", Kind: ToolShell},
+					TurnIndex: &idx,
+					Content:   &Content{Output: canaryOutput},
+				}
+			}(),
+			canaries: []string{canaryOutput},
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			// stripContent is what Emit applies when content-capture is off.

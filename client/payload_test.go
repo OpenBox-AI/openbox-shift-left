@@ -39,6 +39,17 @@ func decodeRaw(t *testing.T, ev DevEvent) map[string]any {
 // activity: the span layer is retired, so nothing the client emits may carry a
 // span or the hook envelope that used to wrap one. A key reappearing here means
 // the retired machinery grew a caller again.
+//
+// ADR-0018 carved out exactly ONE exception — a TurnCompleted carrying assistant
+// text under content capture — and this helper is deliberately NOT relaxed to
+// accommodate it. It is still applied to every tool and lifecycle payload, and
+// the turn case has its own tests that assert the span's shape positively. The
+// carve-out stays a carve-out: if a tool payload ever grows `spans`, this fails,
+// which is the whole point.
+//
+// hook_trigger stays forbidden EVERYWHERE, turn span included: a payload with
+// hook_trigger true and spans present enters core's approval-bypass fingerprint
+// path (governance_workflow.go:310-330).
 func assertNoSpanKeys(t *testing.T, m map[string]any) {
 	t.Helper()
 	for _, k := range []string{"spans", "span_count", "hook_trigger"} {
