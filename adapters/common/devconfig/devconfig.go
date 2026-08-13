@@ -452,45 +452,56 @@ func ResolveFailClosed() bool {
 	return resolveBool("fail_closed", func(c DevConfig) *bool { b := c.FailClosed; return &b }, false, EnvFailClosed)
 }
 
-// tier2DeprecationOnce keeps the notice below to one line per process. A hook
-// runs per tool call, so warning unconditionally would flood a session's stderr
-// with the same sentence.
-var tier2DeprecationOnce sync.Once
+// deprecationOnce keeps the notice to one line per process. A hook runs per tool
+// call, so warning unconditionally would flood a session's stderr.
+var deprecationOnce sync.Once
 
-// ResolveTier2 reports whether the Tier-2 synchronous escalation is on.
+// warnDeprecatedKeys tells the developer, once, about config keys that still
+// parse but no longer do anything.
 //
-// DEPRECATED and inert (ADR-0017). Every gated call is evaluated inline now, so
-// there are no tiers to switch between. The key is still read so an existing
-// config does not become an error, and it warns once — but it CANNOT turn
-// evaluation off. Honouring it would leave the orgs most likely to have set it,
-// early adopters of enforcement, silently ungoverned after an upgrade; a
-// deprecated key that quietly disables the product's headline control is the
-// failure this exists to prevent.
-//
-// The return value is retained only so the deprecation warning has a caller.
-// Nothing on the enforce path branches on it.
-func ResolveTier2() bool {
-	v := resolveBool("tier2", func(c DevConfig) *bool { return c.Tier2 }, false, EnvTier2)
-	if tier2Configured() {
-		tier2DeprecationOnce.Do(func() {
-			fmt.Fprintln(os.Stderr, "openbox: `tier2` is deprecated and ignored — "+
-				"every gated tool call is evaluated by OpenBox (ADR-0017). Remove it from "+
-				"dev.json / OPENBOX_TIER2 to silence this notice.")
-		})
+// It is called from EffectivePosture rather than from each resolver, because
+// ADR-0017 removed the last RUNTIME caller of ResolveTier2 — a warning hung off
+// the resolver was unreachable, which is indistinguishable from no warning at
+// all. EffectivePosture runs once per session and on every `openbox doctor`.
+func warnDeprecatedKeys() {
+	dead := deadKeysPresent()
+	if len(dead) == 0 {
+		return
 	}
-	return v
+	deprecationOnce.Do(func() {
+		fmt.Fprintf(os.Stderr, "openbox: %s set but ignored — every gated tool call is "+
+			"evaluated by OpenBox (ADR-0017), so there are no tiers to switch between and no "+
+			"local bundle to verify. Remove from dev.json / the environment to silence this.\n",
+			strings.Join(dead, ", "))
+	})
 }
 
-// tier2Configured reports whether the deprecated key was set at all, by env or
-// in dev.json. Presence is the question, not the value: an explicit `false` is
-// exactly the case worth warning about, because that is the setting that used
-// to disable enforcement and no longer does.
-func tier2Configured() bool {
-	if _, ok := os.LookupEnv(EnvTier2); ok {
-		return true
-	}
+// deadKeysPresent names the deprecated keys this machine actually sets.
+//
+// Presence is the question, not the value: an explicit `tier2:false` is the case
+// most worth warning about, because that is the setting that used to disable
+// enforcement and silently no longer does.
+func deadKeysPresent() []string {
 	cfg, err := load()
-	return err == nil && cfg.Tier2 != nil
+	ok := err == nil
+	var dead []string
+	if _, env := os.LookupEnv(EnvTier2); env || (ok && cfg.Tier2 != nil) {
+		dead = append(dead, "`tier2`")
+	}
+	if _, env := os.LookupEnv(EnvTier2Timeout); env || (ok && cfg.Tier2TimeoutMS != 0) {
+		dead = append(dead, "`tier2_timeout_ms`")
+	}
+	if _, env := os.LookupEnv(EnvRequireVerified); env || (ok && cfg.RequireVerifiedBundle != nil) {
+		dead = append(dead, "`require_verified_bundle`")
+	}
+	return dead
+}
+
+// ResolveTier2 reads the DEPRECATED, inert `tier2` key (ADR-0017). Nothing on
+// the enforce path branches on it; it survives so an existing dev.json parses.
+// The deprecation notice lives in warnDeprecatedKeys, not here.
+func ResolveTier2() bool {
+	return resolveBool("tier2", func(c DevConfig) *bool { return c.Tier2 }, false, EnvTier2)
 }
 
 // ResolveTimeoutMS resolves a millisecond budget knob: the config field

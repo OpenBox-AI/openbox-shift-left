@@ -231,3 +231,34 @@ func TestPostureReportsDecisionProvenance(t *testing.T) {
 		}
 	})
 }
+
+// A deprecation notice that cannot fire is the same as no notice. ADR-0017
+// removed the last runtime caller of ResolveTier2, so a warning hung off that
+// resolver was unreachable — found by driving the real binary, not by a test,
+// which is why this one exists.
+func TestDeprecatedKeysAreDetectedWherePostureIsRead(t *testing.T) {
+	t.Run("silent when nothing deprecated is set", func(t *testing.T) {
+		isolateConfig(t)
+		if got := deadKeysPresent(); len(got) != 0 {
+			t.Errorf("clean config reported deprecated keys: %v", got)
+		}
+	})
+
+	// An explicit false is the case most worth warning about: it is the setting
+	// that used to disable enforcement and silently no longer does.
+	for _, tc := range []struct{ name, env, val, want string }{
+		{"tier2 explicitly off", EnvTier2, "0", "`tier2`"},
+		{"tier2 on", EnvTier2, "1", "`tier2`"},
+		{"tier2_timeout_ms", EnvTier2Timeout, "500", "`tier2_timeout_ms`"},
+		{"require_verified_bundle", EnvRequireVerified, "1", "`require_verified_bundle`"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			isolateConfig(t)
+			t.Setenv(tc.env, tc.val)
+			got := deadKeysPresent()
+			if len(got) != 1 || got[0] != tc.want {
+				t.Errorf("deadKeysPresent() = %v, want [%s]", got, tc.want)
+			}
+		})
+	}
+}

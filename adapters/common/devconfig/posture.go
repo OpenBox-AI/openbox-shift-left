@@ -135,6 +135,17 @@ func EffectivePosture() Posture {
 		*f.into(&p) = v
 		p.ConfigSource[f.name] = string(src)
 	}
+	// Deprecated keys are reported here because this is the one moment a session
+	// reads its whole config: once per session at SessionStart, and again when a
+	// developer runs `openbox doctor` — which is exactly where someone would want
+	// to hear that a key they set does nothing.
+	//
+	// It was on the resolver itself first, which was wrong in a way worth
+	// recording: ADR-0017 removed the last runtime caller of ResolveTier2, so the
+	// warning existed and could never fire. A deprecation notice nothing reaches
+	// is the same as no notice.
+	warnDeprecatedKeys()
+
 	// Who decides, and what happens when it cannot be reached. Both are
 	// knowable at session start, which the deciding policy id is not — posture
 	// rides SessionStarted, before this session has made any decision, so a
