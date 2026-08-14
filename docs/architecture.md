@@ -156,6 +156,17 @@ Being precise here is part of the product.
   legible. On an approver install the same file also holds an org key that can
   create and rotate agents fleet-wide, which is a strictly larger blast radius
   than one agent's seed.
+- **A project can hold a registration from an older engine until the next
+  `init`.** Hooks live in a file on the developer's machine, so an install run
+  with a different `HOME` used to leave a second OpenBox entry beside the current
+  one — both engines then fired for every hook, storing every governed tool call
+  twice, and an older engine reports fewer fields than the current one. `init` now
+  removes its own redundant entries — at another engine path, or the same one
+  registered twice — and prints what it retired, and `openbox doctor` reports both
+  conditions for the directory it is run from. Two limits stay: the repair happens
+  **only when `init` is next run in that directory**, and events already stored are
+  not corrected — so a fleet's history can contain duplicates that no client-side
+  change removes.
 - **Enforcement.** The gate is a hook in the developer's own config. Until the
   provider's managed configuration is deployed (`deploy/managed/`), a developer can
   remove it: prevention without assurance. For Codex the hook itself cannot yet be

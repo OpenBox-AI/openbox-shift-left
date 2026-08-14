@@ -332,6 +332,60 @@ testbed has NOT run.** `plans/260813-2314-dev-telemetry-and-content-posture/manu
 is the stack-free walkthrough; `plans/reports/probe-260813-2329-claude-code-hook-surface.md`
 is the hook-surface evidence.
 
+**`init` replaces its own stale-path registrations; posture reports who decides**
+(2026-08-14, no ADR — no new table, endpoint or service). Two defects found
+verifying ADR-0018 against the first real session's 66 events:
+
+- **The double-count was two engines, not an ADR-0018 defect.** `writeLocalHooks`
+  matched its own entries by exact command string, so an entry written by an
+  install run with a different `HOME` read as a FOREIGN hook and was preserved;
+  re-init appended beside it and reported success. Both engines fired, every
+  governed tool call stored twice, and the older engine omitted `status` — which
+  reads exactly like the new status work being broken. It is not. Ownership is
+  decided by ARGV SHAPE now (`ownedLocalHook`, ported from Codex's installer,
+  which never had this bug), stale-path entries are replaced, and the swap prints
+  what it retired. Genuinely foreign hooks — including a compound command that
+  merely embeds our invocation — are still preserved, which is the direction of
+  error to keep: over-keep, never over-delete. `openbox doctor` grew a
+  duplicate-engine warning built on the SAME classifier, deliberately, so the
+  check and the fix cannot disagree about what "ours" means; it reaches the
+  adapter through `cli/internal/providers` because `TestOnlyTheRegistryImportsAdapters`
+  forbids `cli/cmd/openbox` importing an adapter directly. Two limits stay: the
+  repair happens only on the next `init` in that directory, and already-stored
+  duplicates are not corrected.
+  **The sweep de-duplicates, it does not only replace** — and shipping the
+  replace half alone was a real bug. Doctor reports TWO conditions (a second
+  engine, and one invocation registered twice at one path) and names `init` as
+  the remedy for both; `init` originally repaired only the first, so the second
+  warned forever through the command it recommended. Dedupe is keyed by
+  INVOCATION, not by event: PreToolUse legitimately carries two of ours (the gate
+  and the rewake watcher), and collapsing by event would delete the watcher and
+  no approval hold would ever wake. The general rule: **when a diagnostic names a
+  remedy, run the remedy in the state it warns about** — a check and a fix built
+  on one classifier can still disagree about what the fix covers.
+- **`decision_authority` never reached the wire.** ADR-0017:237-239 says posture
+  carries it; `Posture.Metadata()` — the only path onto the wire — omitted it and
+  `failure_policy` both, while `openbox doctor` printed both off the struct. Local
+  view complete, remote view silent: the inverse of what that ADR argues. The gap
+  shipped because `TestPostureReportsDecisionProvenance` asserted the STRUCT and
+  never called `.Metadata()`; the new subtest crosses that seam, and the rule
+  generalizes — **asserting the struct is not asserting the wire.** The five
+  bundle-era keys (`bundle_version`, `bundle_policy_id`, `bundle_sha256`,
+  `staleness`, `bundle_integrity`), the `Staleness` type and its 7 consts are
+  deleted outright, per the `require_verified_bundle` precedent; absence is
+  asserted rather than left to the empty-value guard. `adapters/common/git`
+  defines its OWN `BundlePolicyID`/`BundleSHA256` for the attestation envelope —
+  different struct, shipping feature, do not rename repo-wide.
+
+**Status: implemented, unit-verified, all 11 modules green under `-race` plus both
+cross-compiles; `doctor`'s warning exercised against the real binary on a seeded
+two-engine project — the testbed has NOT run.** Unproven without a live stack:
+that a re-inited settings file still produces events in a real session, that the
+double-count disappears end to end, and that `decision_authority` lands in
+`governance_events` — `testbed/30-enforce.sh:185-186` already asserts the last one
+and failed before this change. `testbed/10-onboard.sh` gained the dormant
+stale-path replacement assertions.
+
 Next: the Cursor adapter; policy template packs. The one dependency this repo now
 has is `golang.org/x/term v0.34.0`, **pinned** — v0.35.0+ declares `go 1.24.0` and
 would raise the language floor across all eleven modules; `go mod tidy` and

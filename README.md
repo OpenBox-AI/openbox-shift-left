@@ -91,9 +91,12 @@ openbox init --provider claude-code --scope global   # every project — see bel
 ```
 
 **Project scope** writes the hook entries into `<project>/.claude/settings.local.json`
-and takes effect immediately. Sessions started **anywhere else are not governed and
-produce no events** — so on a machine set up this way, absence of events is not
-evidence of absence of work.
+and takes effect immediately. Re-running it removes any redundant OpenBox entry —
+one left at a different engine path, or one of ours registered twice — and says
+so, so a project cannot end up firing a hook more than once; hooks you added
+yourself are preserved. Sessions started **anywhere else
+are not governed and produce no events** — so on a machine set up this way, absence
+of events is not evidence of absence of work.
 
 **Global scope** is the real fleet rollout, and `init` cannot finish it alone: Claude
 Code activates a plugin org-wide through managed settings, which is an
@@ -255,7 +258,7 @@ Details and current status: **[Assurance](docs/architecture.md#assurance--what-t
 |---|---|
 | `openbox auth` | credentials for this machine — it asks for everything authentication needs and nothing else. `--rotate` re-issues them for an agent that already exists |
 | `openbox init` | install hooks + posture. `--scope`, `--enforce=false`, `--install-git-hook`, `--role approver` |
-| `openbox doctor` | the posture actually in effect, who decides, and what happens when they are unreachable |
+| `openbox doctor` | the posture actually in effect, who decides, what happens when they are unreachable, and whether this directory has more than one OpenBox engine registered |
 | `openbox dev verify` | can this machine reach and authenticate to core? |
 | `openbox approve` | `list`, `allow`, `deny`, or `--watch --auto` for the autonomous approver |
 | `openbox managed install` | write the managed-settings files for a fleet rollout |

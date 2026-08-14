@@ -175,6 +175,67 @@ assert_contains "PreToolUse reads as a reason, not a freeze" "$hooks" "OpenBox g
 assert_contains "rewake watcher rides alongside the gate" "$hooks" "rewake claude-code"
 assert_contains "rewake is async, so it cannot gate" "$hooks" '"asyncRewake": true'
 
+tb_step "a re-init replaces an entry left at another engine path"
+# The live failure this pins: a project inited twice, the second time with a
+# different HOME, kept BOTH registrations — the merge matched on the exact command
+# string, so an entry at another path read as a foreign hook and was preserved.
+# Both engines then fired for every hook and every governed tool call was stored
+# twice, silently, for the life of the project.
+BOGUS_ENGINE="/tmp/openbox-from-another-home/bin/openbox"
+# Derive the installed engine path from the file rather than reconstructing it:
+# the path is wrapped in ESCAPED quotes in the JSON, so a pattern anchored on the
+# quotes has to know how Go encoded them. Matching the path itself does not.
+real_engine="$(grep -o '[^"\\]*/bin/openbox' "$HOOKS" | head -1)"
+[ -n "$real_engine" ] || tb_fatal "no engine path found in $HOOKS"
+sed -i.bak "s#$real_engine#$BOGUS_ENGINE#g" "$HOOKS"
+rm -f "$HOOKS.bak"
+grep -q "$BOGUS_ENGINE" "$HOOKS" || tb_fatal "could not plant a stale engine path in $HOOKS"
+
+(cd "$TB_PROJECT" && "$TB_BIN" init \
+	--provider claude-code \
+	--install-git-hook) >"$TB_STATE/reinit.out" 2>&1 ||
+	tb_bad "re-init succeeded" 0 "$(tail -3 "$TB_STATE/reinit.out")"
+
+hooks="$(cat "$HOOKS")"
+assert_eq "PreToolUse registered exactly once" 1 "$(grep -c 'hook claude-code PreToolUse' "$HOOKS")"
+assert_absent "the stale engine path is gone" "$hooks" "$BOGUS_ENGINE"
+assert_contains "the rewake watcher survived the replacement" "$hooks" "rewake claude-code"
+# Swapping a governing binary without saying so is the same class of problem as
+# the silent duplicate it repairs.
+assert_contains "re-init names what it replaced" "$(cat "$TB_STATE/reinit.out")" "$BOGUS_ENGINE"
+# doctor and init must agree about what "ours" means, or doctor keeps warning
+# after the command it recommends.
+doctor_out="$(cd "$TB_PROJECT" && "$TB_BIN" doctor 2>&1 || true)"
+assert_absent "doctor sees one engine after the repair" "$doctor_out" "OpenBox engines are registered"
+
+tb_step "a re-init collapses one of our hooks registered twice at the same path"
+# The other shape doctor warns about, and it names the same remedy for both: our
+# own invocation registered twice at ONE engine double-counts exactly as a second
+# engine does. A re-init that could not clear it would leave a developer running
+# the recommended command forever while the warning stayed.
+python3 - "$HOOKS" <<'PY' || tb_fatal "could not plant a duplicate registration"
+import json, sys
+p = sys.argv[1]
+s = json.load(open(p))
+s["hooks"]["Stop"].append(json.loads(json.dumps(s["hooks"]["Stop"][0])))
+json.dump(s, open(p, "w"), indent=2)
+PY
+doctor_out="$(cd "$TB_PROJECT" && "$TB_BIN" doctor 2>&1 || true)"
+assert_contains "doctor flags the duplicate first" "$doctor_out" "more than once"
+
+(cd "$TB_PROJECT" && "$TB_BIN" init \
+	--provider claude-code \
+	--install-git-hook) >"$TB_STATE/reinit-dup.out" 2>&1 ||
+	tb_bad "re-init succeeded" 0 "$(tail -3 "$TB_STATE/reinit-dup.out")"
+
+assert_eq "Stop registered exactly once again" 1 "$(grep -c 'hook claude-code Stop"' "$HOOKS")"
+# The gate and the watcher share the PreToolUse key and differ only by invocation;
+# collapsing by event would delete the watcher and no approval hold would wake.
+assert_eq "the approval watcher is untouched" 1 "$(grep -c 'rewake claude-code' "$HOOKS")"
+assert_contains "re-init names the duplicate it removed" "$(cat "$TB_STATE/reinit-dup.out")" "removed duplicate OpenBox hook registrations"
+doctor_out="$(cd "$TB_PROJECT" && "$TB_BIN" doctor 2>&1 || true)"
+assert_absent "the warning doctor raised is now clear" "$doctor_out" "more than once"
+
 # The plugin bundle is materialised into ~/.claude/plugins but activation is a
 # separate, deliberate step. If it were enabled here, every session on this
 # machine would be governed by the testbed's config — the exact accident
