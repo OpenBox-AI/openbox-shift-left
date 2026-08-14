@@ -5,12 +5,12 @@ import "regexp"
 // Effective endpoint posture — the evidence that makes assurance tiers
 // visible without a managed deployment (E8-S5).
 //
-// Enforcement, redaction, content capture and policy freshness are all
-// resolved on the developer's own machine from a config file the developer can
-// edit and env vars they can set. The control plane therefore cannot tell an
-// enforcing session from an observing one, nor a session running fresh policy
-// from one whose freshness check was silently skipped for want of a control
-// token (report SL-01 and the SL-03 nuance). Posture closes that by recording
+// Enforcement, redaction and content capture are all resolved on the
+// developer's own machine from a config file the developer can edit and env
+// vars they can set. The control plane therefore cannot tell an enforcing
+// session from an observing one, nor one that would deny a gated call when
+// /evaluate is unreachable from one that would let it through (report SL-01).
+// Posture closes that by recording
 // what was *actually* in effect, as ordinary structural metadata on the
 // session-start event: no new endpoint, no new table, and — because core
 // merges event metadata into the session's Merkle leaf — tamper-evident for
@@ -24,35 +24,6 @@ import "regexp"
 // INV-1: every field is a boolean, a bounded enum, or an opaque non-secret id.
 // No token, key, seed, path or content value may ever be added here — this
 // object egresses on every session start.
-
-// Staleness is the outcome of the session-start policy-freshness check.
-// Naming the *reason* a check did not happen is the point: "skipped" used to
-// be a line on the hook's stderr that nobody collected, so a session running
-// unverified policy looked exactly like one running fresh policy.
-type Staleness string
-
-const (
-	// StalenessNotChecked — the check did not run because the session is not
-	// enforcing. Honest and expected in observe mode, not a degradation.
-	StalenessNotChecked Staleness = "not_checked"
-	// StalenessFresh — local bundle pin matches the backend's current policy.
-	StalenessFresh Staleness = "fresh"
-	// StalenessStaleWarned — policy changed; fail-open, so the session
-	// proceeded on the last-good bundle after warning.
-	StalenessStaleWarned Staleness = "stale_warned"
-	// StalenessStaleBlocked — policy changed; fail-closed, so the session was
-	// marked stale and its tool calls are denied until `openbox dev sync`.
-	StalenessStaleBlocked Staleness = "stale_blocked"
-	// StalenessSkippedNoToken — no control token / backend url / agent id, so
-	// freshness is unknowable. This is the SL-03 silent skip, now recorded.
-	StalenessSkippedNoToken Staleness = "skipped_no_token"
-	// StalenessSkippedNoPin — no local bundle pin to compare against (never
-	// synced, or a pinless bundle).
-	StalenessSkippedNoPin Staleness = "skipped_no_pin"
-	// StalenessError — the check ran and failed (offline, HTTP error, bad
-	// response). The session proceeded on the last-good bundle.
-	StalenessError Staleness = "error"
-)
 
 // Posture is the effective posture of one session. The boolean block is
 // resolved from config+env by EffectivePosture; the string block is supplied
@@ -70,21 +41,18 @@ type Posture struct {
 	// (debounced background flush) or batched to session end.
 	RealtimeFlush bool
 
-	// Adapter-supplied. Bundle* are opaque staleness/integrity coordinates
-	// (a policy id, an opaque version, a content hash) — never policy text.
+	// Adapter-supplied: which adapter, and which provider build it drove.
+	//
+	// The bundle coordinates and the freshness outcome that used to sit here went
+	// with the bundle itself (ADR-0017). They are deleted rather than kept as
+	// empty fields, following require_verified_bundle below: a reporting surface
+	// for a subsystem that no longer exists can only ever overstate, and while
+	// they lingered an OLDER binary could still populate them — which is exactly
+	// how a session was observed reporting a bundle_sha256 that nothing in this
+	// tree can produce.
 	Adapter         string
 	AdapterVersion  string
 	ProviderVersion string
-	BundleVersion   string
-	BundlePolicyID  string
-	BundleSHA256    string
-	Staleness       Staleness
-	// BundleIntegrity is the signature-verification outcome for the local
-	// policy bundle (E8-S6): unsigned / verified / no_key / bad_signature /
-	// expired / epoch_rollback / malformed. "unsigned" is the compatibility
-	// state, not a failure — but it is also not assurance, which is why it is
-	// recorded rather than assumed.
-	BundleIntegrity string
 
 	// DecisionAuthority names what decides this session's gated tool calls:
 	// "control_plane" since ADR-0017, when /evaluate answers.
@@ -248,12 +216,15 @@ func (p Posture) Metadata() map[string]any {
 		"adapter":          p.Adapter,
 		"adapter_version":  p.AdapterVersion,
 		"provider_version": p.ProviderVersion,
-		"bundle_version":   p.BundleVersion,
-		"bundle_policy_id": p.BundlePolicyID,
-		"bundle_sha256":    p.BundleSHA256,
-		"staleness":        string(p.Staleness),
-		"bundle_integrity": p.BundleIntegrity,
-		"provider_managed": p.ProviderManaged,
+		// Policy provenance. ADR-0017 argues these two ARE posture's evidence
+		// about policy now that the bundle coordinates are gone — so omitting
+		// them left the local view (`openbox doctor` prints both off the struct)
+		// complete and the remote view silent, the inverse of what that ADR
+		// claims. They share this map deliberately, to inherit its
+		// looksLikeSecret/truncate guards rather than growing a second path.
+		"decision_authority": p.DecisionAuthority,
+		"failure_policy":     p.FailurePolicy,
+		"provider_managed":   p.ProviderManaged,
 	} {
 		if v == "" || looksLikeSecret(v) {
 			continue // unknown, or refused — see looksLikeSecret

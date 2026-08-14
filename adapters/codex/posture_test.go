@@ -11,7 +11,7 @@ import (
 // invite two events in one session to disagree.
 func TestPosture_OnSessionStartOnly(t *testing.T) {
 	m := testMapper()
-	p := devconfig.Posture{Enforce: true, Staleness: devconfig.StalenessFresh, Adapter: "codex/1"}
+	p := devconfig.Posture{Enforce: true, DecisionAuthority: devconfig.DecisionAuthorityControlPlane, Adapter: "codex/1"}
 	m.Posture = &p
 
 	start, ok := m.Map(HookSessionStart, &HookEvent{SessionID: "s1", Source: "startup"})
@@ -22,7 +22,7 @@ func TestPosture_OnSessionStartOnly(t *testing.T) {
 	if !present {
 		t.Fatalf("SessionStarted carries no posture: %v", start.Metadata)
 	}
-	if got["enforce"] != true || got["staleness"] != string(devconfig.StalenessFresh) {
+	if got["enforce"] != true || got["decision_authority"] != devconfig.DecisionAuthorityControlPlane {
 		t.Errorf("posture did not round-trip: %v", got)
 	}
 
@@ -46,30 +46,6 @@ func TestPosture_AbsentWhenNotSupplied(t *testing.T) {
 	ev, _ := m.Map(HookSessionStart, &HookEvent{SessionID: "s1", Source: "startup"})
 	if _, present := ev.Metadata["posture"]; present {
 		t.Errorf("no posture should be emitted when none was resolved: %v", ev.Metadata)
-	}
-}
-
-// The staleness enum must distinguish *why* a check did not happen — that
-// distinction is the SL-03 fix, and collapsing it back to a bare "skipped"
-// would silently undo the story.
-func TestPosture_StalenessNamesTheSkipReason(t *testing.T) {
-	distinct := map[devconfig.Staleness]bool{}
-	for _, s := range []devconfig.Staleness{
-		devconfig.StalenessNotChecked,
-		devconfig.StalenessFresh,
-		devconfig.StalenessStaleWarned,
-		devconfig.StalenessStaleBlocked,
-		devconfig.StalenessSkippedNoToken,
-		devconfig.StalenessSkippedNoPin,
-		devconfig.StalenessError,
-	} {
-		if s == "" {
-			t.Error("staleness values must be non-empty so they render in metadata")
-		}
-		if distinct[s] {
-			t.Errorf("duplicate staleness value %q — the outcomes must be distinguishable", s)
-		}
-		distinct[s] = true
 	}
 }
 
