@@ -53,12 +53,13 @@ func TestMain(m *testing.M) {
 		fmt.Fprintf(os.Stderr, "hermeticity guard: cannot create sentinel dir: %v\n", err)
 		os.Exit(1)
 	}
+	xdgConfig := filepath.Join(sentinel, "xdg-config")
 	os.Setenv("HOME", sentinel)
-	os.Setenv("XDG_CONFIG_HOME", filepath.Join(sentinel, "xdg-config"))
+	os.Setenv("XDG_CONFIG_HOME", xdgConfig)
 
 	code := m.Run()
 
-	if leaks := filesUnder(sentinel); len(leaks) > 0 {
+	if leaks := filesUnder(sentinel, goConfigDirs(sentinel, xdgConfig)); len(leaks) > 0 {
 		fmt.Fprintf(os.Stderr, "HERMETICITY VIOLATION: %d file(s) written under the sentinel HOME — "+
 			"a test escaped isolateHome and would have written into the developer's real home:\n", len(leaks))
 		for _, l := range leaks {
@@ -72,10 +73,10 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
-// filesUnder returns every regular file below root (relative paths),
-// best-effort — a walk error is reported as a pseudo-leak so it is never
-// silently ignored.
-func filesUnder(root string) []string {
+// filesUnder returns every regular file below root (relative paths), skipping
+// anything inside skipDirs, best-effort — a walk error is reported as a
+// pseudo-leak so it is never silently ignored.
+func filesUnder(root string, skipDirs []string) []string {
 	var out []string
 	_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -87,8 +88,10 @@ func filesUnder(root string) []string {
 			if rerr != nil {
 				rel = path
 			}
-			if isToolchainArtifact(rel) {
-				return nil
+			for _, prefix := range skipDirs {
+				if strings.HasPrefix(rel, prefix) {
+					return nil
+				}
 			}
 			out = append(out, rel)
 		}
@@ -97,20 +100,26 @@ func filesUnder(root string) []string {
 	return out
 }
 
-// isToolchainArtifact reports whether a file under the sentinel belongs to the
-// Go toolchain rather than to us. The end-to-end test shells out to `go build`,
-// and the go command writes its own counter files under the relocated HOME.
-// Those are not an escape by our code, and flagging them would make the guard
-// fail for a reason no one can act on — the fastest way to get a useful guard
-// deleted.
-func isToolchainArtifact(rel string) bool {
-	for _, prefix := range []string{
-		filepath.Join("Library", "Application Support", "go") + string(filepath.Separator), // macOS
-		filepath.Join(".config", "go") + string(filepath.Separator),                        // linux/XDG
-	} {
-		if strings.HasPrefix(rel, prefix) {
-			return true
-		}
+// goConfigDirs returns the sentinel-relative directories where the Go toolchain
+// keeps its own bookkeeping. The end-to-end test shells out to the go command,
+// which writes telemetry counters under the relocated HOME; those are not an
+// escape by our code, and flagging them would fail the guard for a reason no one
+// can act on — the fastest way to get a useful guard deleted. Skipping only a
+// `go/` directory cannot mask us: our own writes land under `openbox/`.
+//
+// The XDG entry is DERIVED from the config root this guard sets, never from
+// XDG's default. The guard overrides XDG_CONFIG_HOME, so a hardcoded
+// ".config/go" matches nothing on linux — while macOS keeps passing because
+// os.UserConfigDir ignores XDG there. That asymmetry is exactly how this guard
+// came to be green on darwin and red on linux CI.
+func goConfigDirs(sentinel, xdgConfig string) []string {
+	sep := string(filepath.Separator)
+	dirs := []string{
+		filepath.Join("Library", "Application Support", "go") + sep, // macOS
+		filepath.Join(".config", "go") + sep,                        // a child that clears XDG_CONFIG_HOME
 	}
-	return false
+	if rel, err := filepath.Rel(sentinel, xdgConfig); err == nil && rel != "." && !strings.HasPrefix(rel, "..") {
+		dirs = append(dirs, filepath.Join(rel, "go")+sep)
+	}
+	return dirs
 }

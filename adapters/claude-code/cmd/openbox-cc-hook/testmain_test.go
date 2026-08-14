@@ -57,8 +57,9 @@ func TestMain(m *testing.M) {
 		fmt.Fprintf(os.Stderr, "hermeticity guard: cannot create sink dir: %v\n", err)
 		os.Exit(1)
 	}
+	xdgConfig := filepath.Join(sentinel, "xdg-config")
 	os.Setenv("HOME", sentinel)
-	os.Setenv("XDG_CONFIG_HOME", filepath.Join(sentinel, "xdg-config"))
+	os.Setenv("XDG_CONFIG_HOME", xdgConfig)
 	os.Setenv(devconfig.EnvEnforcementFile, filepath.Join(sinks, "enforcements.jsonl"))
 	os.Setenv(devconfig.EnvPendingApprovalDir, filepath.Join(sinks, "pending-approvals"))
 	os.Setenv("OPENBOX_ADVISORY_FILE", filepath.Join(sinks, "advisories.jsonl"))
@@ -69,7 +70,7 @@ func TestMain(m *testing.M) {
 
 	code := m.Run()
 
-	if leaks := filesUnder(sentinel); len(leaks) > 0 {
+	if leaks := filesUnder(sentinel, goConfigDirs(sentinel, xdgConfig)); len(leaks) > 0 {
 		fmt.Fprintf(os.Stderr, "HERMETICITY VIOLATION: %d file(s) written under the sentinel HOME — "+
 			"a test (or a child it spawned) escaped its path pinning and would have written into the developer's real home:\n", len(leaks))
 		for _, l := range leaks {
@@ -85,10 +86,10 @@ func TestMain(m *testing.M) {
 }
 
 // filesUnder returns every regular file below root (relative paths), skipping
-// the Go toolchain's own counter files — each test shells out to `go build`,
-// and flagging the go command's bookkeeping would fail the guard for a reason
-// nobody can act on.
-func filesUnder(root string) []string {
+// anything inside skipDirs — each test shells out to the go command, and
+// flagging its own bookkeeping would fail the guard for a reason nobody can act
+// on.
+func filesUnder(root string, skipDirs []string) []string {
 	var out []string
 	_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -102,10 +103,7 @@ func filesUnder(root string) []string {
 		if rerr != nil {
 			rel = path
 		}
-		for _, prefix := range []string{
-			filepath.Join("Library", "Application Support", "go") + string(filepath.Separator),
-			filepath.Join(".config", "go") + string(filepath.Separator),
-		} {
+		for _, prefix := range skipDirs {
 			if strings.HasPrefix(rel, prefix) {
 				return nil
 			}
@@ -114,4 +112,25 @@ func filesUnder(root string) []string {
 		return nil
 	})
 	return out
+}
+
+// goConfigDirs returns the sentinel-relative directories where the Go toolchain
+// keeps its own bookkeeping. Skipping only a `go/` directory cannot mask us:
+// our own writes land under `openbox/`.
+//
+// The XDG entry is DERIVED from the config root this guard sets, never from
+// XDG's default. The guard overrides XDG_CONFIG_HOME, so a hardcoded
+// ".config/go" matches nothing on linux — while macOS keeps passing because
+// os.UserConfigDir ignores XDG there. That asymmetry is exactly how this guard
+// came to be green on darwin and red on linux CI.
+func goConfigDirs(sentinel, xdgConfig string) []string {
+	sep := string(filepath.Separator)
+	dirs := []string{
+		filepath.Join("Library", "Application Support", "go") + sep, // macOS
+		filepath.Join(".config", "go") + sep,                        // a child that clears XDG_CONFIG_HOME
+	}
+	if rel, err := filepath.Rel(sentinel, xdgConfig); err == nil && rel != "." && !strings.HasPrefix(rel, "..") {
+		dirs = append(dirs, filepath.Join(rel, "go")+sep)
+	}
+	return dirs
 }
