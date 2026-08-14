@@ -64,6 +64,15 @@ Correct, and it refines the scope rather than contradicting the mechanism. Evide
 
 **Fix guidance updated:** Option A (normal-path event-level write when `GoalAlignmentChecked`, e.g. re-wiring `StoreAGETrustScoreActivity` after `StoreGovernanceEvent`) is now clearly the fix for **all** runtimes going forward, not just dev — SDK agents stopped getting new drift rows at the migration too, it's just masked by their old data. Folding in the stranded PROD-211 gate fix on the hook path is a small complementary correctness win. No double-write by construction: post-migration hook events always carry `checked=false/drift=false`, and the drift-bearing events (signals/lifecycle) are normal-path only — but assert it in a test.
 
+## Fix drafted (2026-08-14 12:48, openbox-core branch `fix/goal-alignment-evaluation-persistence`)
+
+**Shipped 13:07:** Jira [PROD-314](https://krnl-labs.atlassian.net/browse/PROD-314) (Bug, sprint v1.6.0, assignee Bi) · commit c7a93f3 · PR [openbox-core#131](https://github.com/OpenBox-AI/openbox-core/pull/131) → develop · PR linked on ticket comment.
+
+- `internal/services/activities/governance/storage_event.go`: (1) `StoreGovernanceEvent` now calls new `storeEventLevelAGEEvaluation` after event create — persists the event-level `age_evaluations` row (span_id NULL, drift + reason → `goal_alignment_detail`) whenever `GoalAlignmentChecked`, same gate as the trend metric, so rows ↔ counters agree by construction; skips session-less events (FK); best-effort (log, never fail the event); trust-score counters update only after successful insert. Reuses `buildEventEvaluation` (age.go) — no new builder. Implemented inside the existing activity, NOT as a new workflow call — no Temporal history change, no determinism risk for in-flight workflows. (2) Hook-path gate `len(storedSpans) > 0` → `input.SessionID != uuid.Nil` — the stranded PROD-211 fix folded in, so the hook event-level row survives span-insert failure.
+- `storage_event_test.go`: 7 tests — end-to-end drift row via activity env, aligned row + counters, skips (unchecked / no AGE result / nil session), insert-failure-skips-counters, and the ported June regression test (`TestStoreHookSpanActivity_StoresEventLevelAGEWhenSpanInsertFails`).
+- Verified: `go build ./...` OK, `go vet` OK, full `go test ./internal/...` green (16 pkgs). NOT verified: live stack (row lands in `age_evaluations`, widget renders) — needs a drifted dev session against a deployed build.
+- Supersedes merging the stranded branches (`fix/claude-code-age-session-persistence`, `fix/prod-000-*`): their one-line change is included here.
+
 ## Unresolved questions
 
 1. Fix in core (A) vs backend (B) — and if A, should aligned (non-drift) evaluations also persist per event (recommended for stats/trace consistency), or drift-only?
