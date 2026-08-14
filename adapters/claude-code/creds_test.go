@@ -38,6 +38,28 @@ func isolateConfig(t *testing.T) {
 	t.Helper()
 	t.Setenv(envConfigPath, filepath.Join(t.TempDir(), "none.json"))
 	t.Setenv(devconfig.EnvHome, t.TempDir())
+
+	// OPENBOX_HOME does NOT cover these three. They resolve from
+	// os.UserConfigDir() instead, and that split is deliberate (see
+	// devconfig/paths.go) — so pinning OPENBOX_HOME alone left every test that
+	// reached the enforce path appending to the DEVELOPER'S real audit sink and
+	// filing real approval markers. Each has its own documented override; this
+	// is the one place that has to remember all of them.
+	// Never clobber a pin the test already made: helpers like findingsEnv point
+	// the advisory sink at a file they then seed, and they are called either side
+	// of this one. Requiring a call order instead would be the same fragility
+	// that let the escape happen — one that only shows up as a confusing
+	// assertion failure, or as a silent write to the real sink.
+	sinks := t.TempDir()
+	pinIfUnset := func(name, path string) {
+		if os.Getenv(name) == "" {
+			t.Setenv(name, path)
+		}
+	}
+	pinIfUnset(devconfig.EnvEnforcementFile, filepath.Join(sinks, "enforcements.jsonl"))
+	pinIfUnset(devconfig.EnvPendingApprovalDir, filepath.Join(sinks, "pending-approvals"))
+	pinIfUnset("OPENBOX_ADVISORY_FILE", filepath.Join(sinks, "advisories.jsonl"))
+
 	for _, name := range []string{envAPIKeyDirect, envAgentPrivateKey, "OPENBOX_ED25519_SEED", "OPENBOX_SEED"} {
 		t.Setenv(name, "")
 	}

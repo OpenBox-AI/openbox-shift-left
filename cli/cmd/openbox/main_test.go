@@ -56,15 +56,57 @@ func testApp(env map[string]string) (*app, *bytes.Buffer, *bytes.Buffer) {
 	return a, &out, &errb
 }
 
-// isolateHome points OPENBOX_HOME and OPENBOX_CONFIG at temp dirs so a command
-// under test writes its credential file and dev.json there, never into the
-// developer's real ~/.openbox.
+// isolateHome redirects everything `init` writes to outside its own arguments,
+// so a command under test cannot reach the developer's real machine:
+//
+//   - OPENBOX_HOME / OPENBOX_CONFIG — the credential file and dev.json;
+//   - HOME — the Claude Code plugin bundle. The installer resolves
+//     ~/.claude/plugins/openbox-observe from it and copies the running engine
+//     into that bundle's bin/, so a test that redirects only OPENBOX_HOME still
+//     writes a multi-megabyte binary into the developer's real plugin
+//     directory — the one their live sessions execute out of;
+//   - the working directory. `init` defaults to PROJECT scope and takes the
+//     project from the process cwd, which under `go test` is the package
+//     directory. Redirecting HOME does not help: the hook registrations land
+//     in the source tree instead, at whatever path the engine resolved to.
+//
+// Returns the OPENBOX_HOME dir. The cwd and HOME dirs are deliberately separate
+// temp dirs, so a caller asserting on the contents of the returned directory
+// does not also see a plugin bundle or a .claude project tree.
 func isolateHome(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
 	t.Setenv(devconfig.EnvHome, dir)
 	t.Setenv(devconfig.EnvConfigPath, filepath.Join(dir, "dev.json"))
 	t.Setenv(devconfig.EnvApproverConfigPath, filepath.Join(dir, "approver.json"))
+	t.Setenv("HOME", t.TempDir())
+
+	// OPENBOX_HOME does not reach these three: they resolve from
+	// os.UserConfigDir(), and that split is deliberate (devconfig/paths.go). A
+	// test that runs the enforce path therefore appended to the DEVELOPER'S real
+	// audit sink. Pinned only when unset, so a test that points one of them
+	// somewhere it then reads keeps its own value regardless of call order.
+	sinks := t.TempDir()
+	for env, path := range map[string]string{
+		devconfig.EnvEnforcementFile:    filepath.Join(sinks, "enforcements.jsonl"),
+		devconfig.EnvPendingApprovalDir: filepath.Join(sinks, "pending-approvals"),
+		"OPENBOX_ADVISORY_FILE":         filepath.Join(sinks, "advisories.jsonl"),
+	} {
+		if os.Getenv(env) == "" {
+			t.Setenv(env, path)
+		}
+	}
+
+	// No test in this package runs in parallel, so a process-wide chdir is safe;
+	// restore it either way, or every later test inherits this one's cwd.
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("resolve working directory: %v", err)
+	}
+	if err := os.Chdir(t.TempDir()); err != nil {
+		t.Fatalf("isolate working directory: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(wd) })
 	return dir
 }
 
@@ -186,9 +228,17 @@ func TestConfigManualOnlyExitsTwo(t *testing.T) {
 // TestClaudeCodeInstallsForRealExitsZero proves the SL4-WIRE-1 front door: the
 // CLI registers the real claudecode.Installer (not the SL-2 stub), so
 // `init --provider claude-code` materializes the plugin bundle + dev config
-// and exits 0. HOME and OPENBOX_CONFIG are redirected to temp dirs (the
-// installer reads them directly) so nothing lands in the developer's real home.
+// and exits 0.
+//
+// It runs the REAL installer against the REAL default paths, so it has to be
+// isolated on every axis `init` writes to — isolateHome covers all three, and
+// this test then re-points HOME and OPENBOX_CONFIG at dirs it wants to assert
+// on. Redirecting only those two is what let an earlier version of this test
+// register hooks into the checked-out source tree: `init` defaults to project
+// scope and takes the project from cwd, which under `go test` is this package's
+// own directory.
 func TestClaudeCodeInstallsForRealExitsZero(t *testing.T) {
+	isolateHome(t)
 	home := t.TempDir()
 	cfgPath := filepath.Join(t.TempDir(), "openbox", "dev.json")
 	t.Setenv("HOME", home)
@@ -281,6 +331,13 @@ func setHookEnv(t *testing.T) string {
 	t.Setenv("OPENBOX_SPOOL_DIR", spool)
 	t.Setenv("OPENBOX_SESSION_DIR", filepath.Join(dir, "sessions"))
 	t.Setenv("OPENBOX_CONFIG", filepath.Join(dir, "none.json"))
+	// The hook path records enforcement decisions, advisories and approval
+	// markers. None of those sinks follow OPENBOX_HOME — they resolve from
+	// os.UserConfigDir() (a deliberate split, devconfig/paths.go) — so a hook
+	// test without these appends to the DEVELOPER'S real audit trail.
+	t.Setenv(devconfig.EnvEnforcementFile, filepath.Join(dir, "enforcements.jsonl"))
+	t.Setenv(devconfig.EnvPendingApprovalDir, filepath.Join(dir, "pending-approvals"))
+	t.Setenv("OPENBOX_ADVISORY_FILE", filepath.Join(dir, "advisories.jsonl"))
 	return spool
 }
 
@@ -357,6 +414,14 @@ func TestUnifiedBinaryHookObserveOnlyContract(t *testing.T) {
 		// ~/.openbox, so this fails only on a real developer's machine — which
 		// is the worst place for a test to start disagreeing with CI.
 		"OPENBOX_HOME="+dir,
+		// The same argument one level deeper: OPENBOX_HOME does NOT relocate the
+		// enforcement, advisory or pending-approval sinks — those resolve from
+		// os.UserConfigDir(), a split devconfig/paths.go makes deliberately. A
+		// child spawned without these appends to the DEVELOPER'S real audit trail
+		// on every run.
+		devconfig.EnvEnforcementFile+"="+filepath.Join(dir, "enforcements.jsonl"),
+		devconfig.EnvPendingApprovalDir+"="+filepath.Join(dir, "pending-approvals"),
+		"OPENBOX_ADVISORY_FILE="+filepath.Join(dir, "advisories.jsonl"),
 		"OPENBOX_SESSION_DIR="+filepath.Join(dir, "sessions"),
 	)
 	var stdout, stderr strings.Builder
@@ -436,6 +501,12 @@ func TestHookEndToEndSmoke(t *testing.T) {
 	t.Setenv("OPENBOX_BASE_URL", srv.URL)
 	t.Setenv("OPENBOX_API_KEY", "obx_test_"+strings.Repeat("a", 48))
 	t.Setenv("OPENBOX_ED25519_SEED", "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=")
+	// Same three ambient sinks setHookEnv pins, and for the same reason: they
+	// resolve from os.UserConfigDir() rather than OPENBOX_HOME, so the enforce
+	// path this test drives would append to the developer's real audit trail.
+	t.Setenv(devconfig.EnvEnforcementFile, filepath.Join(dir, "enforcements.jsonl"))
+	t.Setenv(devconfig.EnvPendingApprovalDir, filepath.Join(dir, "pending-approvals"))
+	t.Setenv("OPENBOX_ADVISORY_FILE", filepath.Join(dir, "advisories.jsonl"))
 	// Pin the realtime opt-out: this test's contract is the LEGACY delivery
 	// shape (zero egress before SessionEnd), which is exactly what
 	// OPENBOX_REALTIME=0 must restore. Realtime-on delivery has its own
@@ -587,6 +658,14 @@ func TestHookRealtimeDelivery(t *testing.T) {
 		// ~/.openbox, so this fails only on a real developer's machine — which
 		// is the worst place for a test to start disagreeing with CI.
 		"OPENBOX_HOME="+dir,
+		// The same argument one level deeper: OPENBOX_HOME does NOT relocate the
+		// enforcement, advisory or pending-approval sinks — those resolve from
+		// os.UserConfigDir(), a split devconfig/paths.go makes deliberately. A
+		// child spawned without these appends to the DEVELOPER'S real audit trail
+		// on every run.
+		devconfig.EnvEnforcementFile+"="+filepath.Join(dir, "enforcements.jsonl"),
+		devconfig.EnvPendingApprovalDir+"="+filepath.Join(dir, "pending-approvals"),
+		"OPENBOX_ADVISORY_FILE="+filepath.Join(dir, "advisories.jsonl"),
 		"OPENBOX_SESSION_DIR="+filepath.Join(dir, "sessions"),
 		"OPENBOX_BASE_URL="+srv.URL,
 		"OPENBOX_API_KEY=obx_test_"+strings.Repeat("a", 48),

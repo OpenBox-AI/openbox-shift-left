@@ -25,11 +25,14 @@ var ambientSessionEnv = []string{
 	"OPENBOX_SESSION_DIR",
 }
 
-func TestMain(m *testing.M) {
+// scrubAmbientSessionEnv is called from the package's single TestMain, in
+// testmain_test.go, which also contains the home-directory hermeticity guard.
+// Go allows one TestMain per package; the scrub stays defined here, beside the
+// list it clears and the test that asserts it happened.
+func scrubAmbientSessionEnv() {
 	for _, k := range ambientSessionEnv {
 		os.Unsetenv(k)
 	}
-	os.Exit(m.Run())
 }
 
 // TestHarness_NoAmbientSessionEnv names the cause if the scrub is ever removed.
