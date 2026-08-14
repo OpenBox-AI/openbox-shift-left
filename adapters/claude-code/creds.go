@@ -28,6 +28,7 @@ const (
 	envDID             = devconfig.EnvDID
 	envContentCapture  = devconfig.EnvContentCapture
 	envFinops          = devconfig.EnvFinops
+	envRealtime        = devconfig.EnvRealtime
 	envInstallGitHook  = devconfig.EnvInstallGitHook
 	envEnforce         = devconfig.EnvEnforce
 	envFailClosed      = devconfig.EnvFailClosed

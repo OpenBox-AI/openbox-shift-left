@@ -146,9 +146,12 @@ That command:
 - installs the Claude Code plugin into `~/.claude/plugins/openbox-observe` and
   copies the engine into it;
 - merges the hook entries into `./.claude/settings.local.json`, so the next
-  session **in this directory** is governed;
-- writes your posture to `~/.openbox/dev.json`;
-- pulls your org policy into a local bundle, if an org key is exported.
+  session **in this directory** is governed. Hooks you added yourself are left
+  alone; an OpenBox entry left behind at a *different* engine path — what an
+  install run with another `HOME` leaves — is **replaced**, and one of ours that
+  appears twice at the *same* path is collapsed. Either way the command prints
+  what it removed;
+- writes your posture to `~/.openbox/dev.json`.
 
 It never reads, writes or prompts for a credential. If none is present it stops and
 points you back at `auth`, installing nothing.
@@ -384,8 +387,10 @@ events" has not been re-confirmed against a live stack since the flow changed.
 | No events at all, and `doctor` looks fine | Almost always scope: `init` governs one directory. Check which one it named, or use `--scope global` plus managed settings. |
 | Everything is denied | `fail_closed` is on and OpenBox cannot be reached, so every gated call denies. `openbox doctor` shows the failure policy and the last decision. Restore connectivity, or set `fail_closed:false` to proceed ungoverned instead. |
 | A session hangs on a tool call | An approval is filed and undecided. `openbox approve list` shows it; deciding it releases the session. |
+| Every tool call appears twice; success rates and latencies look wrong | The directory has an OpenBox hook registered twice — usually a second engine left by an `init` once run with a different `HOME`. `openbox doctor` reports both that and a repeat at one path; re-running `openbox init` there removes the extra registration. Events already stored stay duplicated. |
 | `OPENBOX_ED25519_SEED is deprecated` | Harmless, and it still works. Rename it to `OPENBOX_AGENT_PRIVATE_KEY` — the name OpenBox documents. |
 
 `openbox doctor` is the first thing to run for anything posture-related: it prints
 every flag, its value, and whether it came from a default, your config, the
-environment, or an org mandate.
+environment, or an org mandate. It also names the OpenBox engine(s) registered in
+the directory you run it from, and warns when there is more than one.

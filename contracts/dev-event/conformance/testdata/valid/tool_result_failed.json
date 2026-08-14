@@ -1,0 +1,13 @@
+{
+  "schema_version": "1.2",
+  "event_id": "evt-0004b",
+  "event_type": "ToolResult",
+  "openbox_session_id": "sess-abc123",
+  "developer_did": "did:aip:7f3c9b2e-0000-5000-a000-000000000001",
+  "timestamp": "2026-07-07T12:00:14Z",
+  "ended_at": "2026-07-07T12:00:14Z",
+  "tool": { "name": "Bash", "kind": "shell" },
+  "span": { "semantic_type": "internal", "stage": "completed" },
+  "status": "failed",
+  "metadata": { "tool_name": "Bash", "is_interrupt": false }
+}

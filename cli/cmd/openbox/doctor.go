@@ -10,6 +10,7 @@ import (
 
 	"github.com/openbox-ai/openbox-shift-left/adapters/common/devconfig"
 	"github.com/openbox-ai/openbox-shift-left/cli/internal/managed"
+	"github.com/openbox-ai/openbox-shift-left/cli/internal/providers"
 )
 
 // runDoctor prints the effective posture and, for each flag, where the value came
@@ -111,6 +112,43 @@ func (a *app) runDoctor(args []string) int {
 	for _, prov := range []managed.Provider{managed.ProviderClaudeCode, managed.ProviderCodex} {
 		state := managed.ProviderState(prov)
 		fmt.Fprintf(a.stdout, "  %-12s %s\n", prov, state)
+	}
+
+	// The LOCAL counterpart to the managed state above, and the only place a
+	// second registration is visible at all: while two engines were registered,
+	// every hook fired once per engine and every governed tool call was stored
+	// twice, with no warning anywhere and no way to tell it from a client defect.
+	fmt.Fprintf(a.stdout, "\nProject hook registration\n")
+	if wd, err := os.Getwd(); err != nil {
+		fmt.Fprintf(a.stdout, "  current directory unreadable (%v) — check skipped\n", err)
+	} else {
+		audit, err := providers.AuditProjectHooks(wd)
+		switch {
+		case err != nil:
+			fmt.Fprintf(a.stdout, "  %s: could not be read — %v\n", audit.SettingsPath, err)
+		case !audit.Present:
+			fmt.Fprintf(a.stdout, "  %s  (absent)\n", audit.SettingsPath)
+			fmt.Fprintf(a.stdout, "    No project hook config in THIS directory. A global-scope install governs\n")
+			fmt.Fprintf(a.stdout, "    through managed settings instead; `openbox init` here adds project scope.\n")
+		case len(audit.Engines) == 0:
+			fmt.Fprintf(a.stdout, "  %s  (present, no OpenBox hooks)\n", audit.SettingsPath)
+		default:
+			fmt.Fprintf(a.stdout, "  %s  (present)\n", audit.SettingsPath)
+			for _, engine := range audit.Engines {
+				fmt.Fprintf(a.stdout, "    engine  %s\n", engine)
+			}
+			if len(audit.Engines) > 1 {
+				fmt.Fprintf(a.stdout, "    WARNING: %d OpenBox engines are registered here. Every hook fires once\n", len(audit.Engines))
+				fmt.Fprintf(a.stdout, "      per engine, so every governed tool call is stored TWICE and tool\n")
+				fmt.Fprintf(a.stdout, "      success rates and latencies are meaningless. An older engine also\n")
+				fmt.Fprintf(a.stdout, "      omits fields the current one sends. Run `openbox init` in this\n")
+				fmt.Fprintf(a.stdout, "      directory: it replaces registrations left at another engine path.\n")
+			}
+			if len(audit.DuplicateEvents) > 0 {
+				fmt.Fprintf(a.stdout, "    WARNING: registered more than once for: %s — same duplication.\n", strings.Join(audit.DuplicateEvents, ", "))
+				fmt.Fprintf(a.stdout, "      Run `openbox init` in this directory.\n")
+			}
+		}
 	}
 
 	fmt.Fprintf(a.stdout, "\nWhat this does and does not prove\n")

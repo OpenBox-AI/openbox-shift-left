@@ -8,7 +8,9 @@ What leaves the machine, what never does, and the one setting that changes it.
 |---|---|---|
 | Session, tool and MCP **metadata** | always | tool name, kind (`shell`/`file`/`mcp`), file path, MCP server + tool name, timing |
 | **Token counts and the model id** | yes, by default | per model turn. `finops: false` turns it off — see [Usage capture](#usage-capture) |
-| **Prompt text** | yes, by default | the one content field on ordinary telemetry. `content_capture: false` turns it off |
+| **Prompt text** | yes, by default | `content_capture: false` turns it off |
+| **The assistant's reply text** | yes, by default | **this changed** — one message per model turn, scanned locally for secrets and REDACTED first, truncated at 64KB. Same `content_capture` switch. See [What a model turn sends](#what-a-model-turn-sends) |
+| **The assistant's thinking** | **never** | not captured today. [ADR-0019](adr/ADR-0019-full-content-capture.md) is where that would be decided — it is deferred, not ruled out |
 | **Shell command text** | on a **gated** call, with capture on | never on ordinary telemetry — see [What an enforced call sends](#what-an-enforced-call-sends) |
 | **File contents** (a Write/Edit body) | on a **gated** call, with capture on | **this changed** — see below. Scanned locally for secrets and REDACTED before it is sent, and truncated at 64KB |
 | **File contents** (a file you read) | **never** | |
@@ -21,21 +23,27 @@ new field cannot start egressing by accident. Structural identifiers (paths, too
 names, MCP server names) are metadata and always flow; bodies are content and do
 not.
 
-Two of those "never" rows got stronger rather than merely staying true. A tool
-call used to be reported as a hand-built telemetry span, and that span had two
-fields — a request body and a response body — which *could* have carried a tool's
-input or output text with content capture on. Nothing ever put anything in them:
-no adapter has ever set either field, and both adapters have tests asserting they
-stay empty. The span is now gone entirely
-([ADR-0013](adr/ADR-0013-tool-call-as-activity.md)), so the fields are not read at
-all and the channel cannot be re-opened by an adapter mistake plus a
-content-capture opt-in. What a completed tool call reports instead is counts —
-bytes read, bytes written, lines changed, and an exit code if the tool provides
-one. Never the output itself.
+A tool call used to be reported as a hand-built telemetry span, and that span had
+two fields — a request body and a response body — which *could* have carried a
+tool's input or output text. Nothing ever put anything in them, and
+[ADR-0013](adr/ADR-0013-tool-call-as-activity.md) removed the span from tool
+events entirely. What a completed tool call reports instead is counts — bytes
+read, bytes written, lines changed, and an exit code if the tool provides one —
+plus, since [ADR-0018](adr/ADR-0018-dev-turn-content-carrier.md), whether it
+**succeeded or failed**. Never the output itself.
 
-This is a narrowing of what *could* egress, not of what did. It is worth stating
-precisely because the opposite claim — "we improved your privacy" — would be the
-kind of overstatement this page exists to avoid.
+**One span came back, deliberately, and it carries content.** This page
+previously said the response-body channel "cannot be re-opened by an adapter
+mistake plus a content-capture opt-in". That is no longer true, and the honest
+version is: a model turn now carries exactly one span whose response body is the
+assistant's reply, because OpenBox's goal-alignment engine reads assistant text
+from that field and from nowhere else. It is a deliberate widening with three
+bounds — the `content_capture` switch, local secret redaction before it is sent,
+and a 64KB cap — and it applies to **one** carrier. Tool calls remain span-less
+and carry no bodies at all.
+
+Neither paragraph is a privacy improvement claim. The first is a narrowing of
+what *could* egress; the second is a widening of what does.
 
 *When* it leaves: events are delivered in near-real-time by default — a detached
 flusher drains the local spool within ~2 seconds of each tool call
@@ -59,11 +67,16 @@ answers — and it is what makes a dev session visible in the cost dashboards.
 | the turn's index and duration | `<session>:turn:3`, `duration_ms` |
 | the subagent id, when a subagent ran the turn | so per-agent spend is attributable |
 
-**Exactly what is not sent, on this path:** no prompt, no completion, no thinking
-block, no stop reason, no assistant message, no tool command, no tool output, no
-file body — **and no cost.** Cost is derived server-side from a model-keyed pricing
-table; deriving it here would mean inventing a number from a table this client does
-not own.
+**Exactly what is not sent, on this path:** no prompt, no thinking block, no stop
+reason, no tool command, no tool output, no file body — **and no cost.** Cost is
+derived server-side from a model-keyed pricing table; deriving it here would mean
+inventing a number from a table this client does not own.
+
+The assistant's reply used to be on that list. It is not any more — it rides the
+same turn event, under content capture, and has its own section below. The
+numbers above and the reply text are separately switchable: `finops: false`
+removes the numbers *and* the turn events they ride on (so the reply goes too),
+while `content_capture: false` removes only the reply.
 
 *When*: per model turn for Claude Code (its `Stop` hook), and once per session for
 Codex — Codex's per-turn hook exists but is deliberately not wired, so its usage
@@ -116,10 +129,12 @@ Turn it off per install:
 ```
 
 or per session with `OPENBOX_CONTENT_CAPTURE=0`. With it off, sessions still produce
-full metadata, lineage and token usage — you lose prompt visibility and any policy
-that depends on it. Content capture and usage capture are separate settings on
-purpose: usage capture sends no content, so turning content off does not turn usage
-off, and vice versa.
+full metadata, lineage, token usage, tool success/failure and the lifecycle signals
+— you lose prompt visibility, the assistant's reply, enforced-call bodies, and any
+policy or dashboard panel that depends on them (goal alignment and drift go empty).
+Content capture and usage capture are separate settings on purpose: usage capture
+sends no content of its own, so turning content off does not turn usage off, and
+vice versa.
 
 An org can pin the setting so a developer cannot change it, via the managed config
 (`deploy/managed/`). `openbox doctor` always reports the effective value and where it
@@ -128,6 +143,45 @@ came from.
 > **Redaction at source is not implemented yet.** With capture on, prompt text is
 > sent as-is; the server-side Guardrail redaction layer is not wired. If that matters
 > for your data, run with capture off until it is.
+>
+> Note the asymmetry, because it is real: the assistant's reply and enforced-call
+> bodies ARE scanned locally for secrets before they are sent. The **prompt** is
+> not. Nothing about that changed here — it is the same gap, now standing beside
+> two paths that do have a control.
+
+## What a model turn sends
+
+**This section describes a change in what leaves your machine.** Since
+[ADR-0018](adr/ADR-0018-dev-turn-content-carrier.md), a model turn carries the
+**assistant's reply text** — one message per turn, the same text you saw in your
+terminal.
+
+Why it is sent at all: OpenBox's goal-alignment and drift detection score what the
+agent said against what you asked for. Those two dashboard panels were empty for
+every developer session, and no amount of extra metadata could fill them — the
+feature reads the assistant's words or it reads nothing.
+
+What bounds it:
+
+- **The `content_capture` switch**, the same one that governs prompt text. With it
+  off, no reply text is sent — not truncated, not summarized: the field and the
+  span carrying it are absent from the payload entirely.
+- **`finops: false` also removes it**, since the reply rides the turn event and
+  turn events exist only under usage capture.
+- **Local secret detection runs first**, over the whole message, before it is
+  attached. This is better than the prompt path, which has no such control.
+- **64KB cap.** A longer reply is truncated before it is sent.
+
+What is NOT sent on this path: the assistant's **thinking blocks**, the stop
+reason, and any tool output the reply describes. Thinking is deferred to a future
+posture decision ([ADR-0019](adr/ADR-0019-full-content-capture.md)), not ruled out.
+
+Two consequences worth knowing rather than discovering:
+
+- **The reply is stored server-side** as a span row, with its own integrity leaf.
+  That is a real increase in what OpenBox retains about a session.
+- **`secret_detection: false` with capture on sends replies unredacted**, the same
+  way it does for enforced-call bodies.
 
 ## What an enforced call sends
 

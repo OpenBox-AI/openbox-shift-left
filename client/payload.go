@@ -75,6 +75,32 @@ type governanceEventPayload struct {
 	DurationMs *float64        `json:"duration_ms,omitempty"`
 	Timestamp  string          `json:"timestamp"`
 	Metadata   json.RawMessage `json:"metadata,omitempty"`
+	// Status is the tool call's outcome, and the single field core's per-tool
+	// success metric reads:
+	//
+	//	metric.IsSuccess = payload.Status != nil && *payload.Status == "completed"
+	//	  — openbox-core internal/services/activities/observability/errors.go:333
+	//
+	// It went unwritten by every producer for this field's whole existence, while
+	// `.total` incremented on every ActivityStarted — so each completion scored
+	// as tool.<name>.failed and SUCCESS read 0.0% by construction (ADR-0018).
+	//
+	// APPENDED LAST deliberately. Key order on the wire is this struct's
+	// declaration order and the golden fixtures pin it byte-exactly; adding the
+	// field anywhere else would rewrite every fixture and obscure the one-key
+	// diff that shows this change is additive.
+	Status string `json:"status,omitempty"`
+	// Spans carries EXACTLY ONE span, on a TurnCompleted under content capture,
+	// and nothing else ever (ADR-0018 Decision 2). It is not a return of the
+	// span layer ADR-0013 retired: tool events stay span-less and the deleted
+	// files stay deleted. It exists because core's goal-alignment extractor
+	// reads assistant text from payload.Spans and from no other field, so a
+	// span-less session can never feed it — see client/turnspan.go.
+	//
+	// Both keys are absent unless there is text, which is what makes
+	// content_capture:false emit nothing new at all rather than an empty array.
+	Spans     []wireSpan `json:"spans,omitempty"`
+	SpanCount int        `json:"span_count,omitempty"`
 }
 
 // Base wire event types (INV-8: every dev event maps onto one of these stock
@@ -145,6 +171,7 @@ func buildPayload(ev DevEvent) ([]byte, error) {
 		p.ActivityID = activityIDFor(ev)
 		p.ActivityOutput = structuralActivityOutput(ev)
 		p.DurationMs = durationMs(ev)
+		p.Status = statusFor(ev)
 	// A turn is an activity too (ADR-0014). Its id is derived from the turn
 	// index rather than hashed from an operation, because a turn has no
 	// operation to key on and a readable id is worth having in stored rows.
@@ -157,6 +184,15 @@ func buildPayload(ev DevEvent) ([]byte, error) {
 		p.ActivityID = turnActivityIDFor(ev)
 		p.ActivityOutput = turnActivityOutput(ev)
 		p.DurationMs = durationMs(ev)
+		// The assistant's words, when capture left them on the event. Note what
+		// is deliberately NOT set alongside: hook_trigger. A payload with
+		// hook_trigger true AND spans present enters core's approval-bypass
+		// fingerprint path (governance_workflow.go:310-330), and a model turn is
+		// not an approvable operation.
+		if span := turnAssistantSpan(ev); span != nil {
+			p.Spans = []wireSpan{*span}
+			p.SpanCount = 1
+		}
 	}
 
 	meta, err := buildMetadata(ev)
@@ -192,6 +228,17 @@ func wireTypeFor(et EventType) (wireType, signalName string, err error) {
 		return wireSignalReceived, "commit_created", nil
 	case EventDeploy:
 		return wireSignalReceived, "deploy", nil
+	// The failure/lifecycle signals (ADR-0018). Stock SignalReceived, so a stock
+	// core accepts them with no patch (INV-8). buildSignalArgs deliberately has
+	// no arm for any of them — see the EventSubagentStarted doc comment for why
+	// non-empty signal_args on these would overwrite the goal-alignment session's
+	// user goal.
+	case EventSubagentStarted:
+		return wireSignalReceived, "subagent_started", nil
+	case EventPermissionDenied:
+		return wireSignalReceived, "permission_denied", nil
+	case EventAPIError:
+		return wireSignalReceived, "api_error", nil
 	case EventToolCall, EventTurnStarted:
 		return wireActivityStarted, "", nil
 	case EventToolResult, EventTurnCompleted:
@@ -324,12 +371,22 @@ const activityTypeLLMCompletion = "llm_completion"
 // produced it — which is the whole point of routing the turn through an activity
 // instead of reviving the span layer ADR-0013 retired.
 //
-// INV-2, stated exactly: this object carries FOUR NUMBERS AND ONE IDENTIFIER.
+// INV-2, stated exactly: THIS OBJECT carries FOUR NUMBERS AND ONE IDENTIFIER.
 // No prompt, no completion, no thinking block, no stop reason, no tool content.
 // The model id is the single free-form string, already capStr-bounded by the
 // adapter. Core runs Guardrails stage "1" and OPA over this field, so token
 // spend becomes policy-visible — an intended upside, and a second reason the
 // schema must stay numbers plus one bounded identifier.
+//
+// Scope note (ADR-0018): the sentence above is about activity_output and stays
+// exactly true. The TURN EVENT as a whole is no longer content-free — under
+// content capture it carries the assistant's text, on the span
+// (buildPayload's EventTurnCompleted arm, client/turnspan.go). The text was put
+// there rather than here for one reason: core's alignment extractor reads
+// payload.Spans and nothing else. openbox-core#130 asks for it to read this
+// field instead, and when that lands the text moves HERE as
+// activity_output.message and the span is deleted — at which point this
+// paragraph is what needs rewriting.
 //
 // Cost is deliberately absent. Core and the backend each derive it server-side
 // from a model-keyed pricing table; deriving it here would fabricate a number
@@ -367,6 +424,37 @@ func turnActivityOutput(ev DevEvent) json.RawMessage {
 		return nil
 	}
 	return b
+}
+
+// toolStatuses is the closed wire vocabulary for `status` (ADR-0018).
+var toolStatuses = map[string]bool{
+	StatusCompleted: true,
+	StatusFailed:    true,
+}
+
+// statusFor resolves the wire `status` for an event, enforcing BOTH halves of
+// the field's contract at the one boundary every event crosses:
+//
+//   - event-type scope — tool results only. A turn already fails core's tool
+//     metric by exclusion (errors.go:320-322), but a lifecycle event would land
+//     its value in governance_events.workflow_status, a column that means
+//     something else. That is the binding reason, and it is why this is checked
+//     here rather than trusted to each adapter.
+//   - vocabulary — anything but the two literals is DROPPED, not forwarded.
+//     Core scores every non-"completed" value as a failure, so shipping a typo
+//     would report 0% success just as convincingly as shipping nothing, while
+//     looking correct in the payload. Omitting says "unknown", which is true.
+//
+// Returns "" (the field is omitted) for every other event and every unknown
+// value.
+func statusFor(ev DevEvent) string {
+	if ev.EventType != EventToolResult {
+		return ""
+	}
+	if !toolStatuses[ev.Status] {
+		return ""
+	}
+	return ev.Status
 }
 
 // activityLabel resolves the human-readable action label emitted as core's

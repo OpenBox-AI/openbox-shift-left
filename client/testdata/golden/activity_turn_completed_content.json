@@ -1,0 +1,53 @@
+{
+  "source": "developer-runtime",
+  "event_type": "ActivityCompleted",
+  "activity_type": "llm_completion",
+  "activity_id": "sess-golden-0001:turn:0",
+  "workflow_id": "openbox-ai/openbox-shift-left",
+  "run_id": "sess-golden-0001",
+  "workflow_type": "developer-session",
+  "activity_output": {
+    "model": "claude-opus-4-8",
+    "usage": {
+      "cache_creation_input_tokens": 4096,
+      "cache_read_input_tokens": 58210,
+      "input_tokens": 1204,
+      "output_tokens": 318
+    }
+  },
+  "duration_ms": 12000,
+  "timestamp": "2026-07-31T09:00:12Z",
+  "metadata": {
+    "event_id": "ev-20",
+    "model": "claude-opus-4-8",
+    "provider": "claude-code",
+    "tokens": {
+      "input": 1204,
+      "output": 318,
+      "total": 63828,
+      "cache_creation_input": 4096,
+      "cache_read": 58210
+    },
+    "tool_name": "claude-code",
+    "turn_index": 0
+  },
+  "spans": [
+    {
+      "span_id": "d194640197263e33",
+      "trace_id": "2c7ecf96574db5a80a23592c4573d446",
+      "name": "llm_completion",
+      "kind": "CLIENT",
+      "stage": "completed",
+      "start_time": 1785488400000000000,
+      "end_time": 1785488412000000000,
+      "attributes": {
+        "http.method": "POST",
+        "http.url": "https://api.anthropic.com/v1/messages",
+        "openbox.span_synthetic": true
+      },
+      "response_body": "{\"choices\":[{\"message\":{\"content\":\"I refactored the spool; all 11 modules are green.\"}}]}",
+      "semantic_type": "llm_completion"
+    }
+  ],
+  "span_count": 1
+}

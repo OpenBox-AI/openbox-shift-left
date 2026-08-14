@@ -77,7 +77,7 @@ func TestPostureMetadata_UnknownStringsOmitted(t *testing.T) {
 	m := Posture{}.Metadata()
 	for _, k := range []string{
 		"adapter", "adapter_version", "provider_version",
-		"bundle_version", "bundle_policy_id", "bundle_sha256", "staleness",
+		"decision_authority", "failure_policy",
 	} {
 		if _, present := m[k]; present {
 			t.Errorf("%s should be omitted when empty, got %v", k, m[k])
@@ -86,12 +86,7 @@ func TestPostureMetadata_UnknownStringsOmitted(t *testing.T) {
 
 	full := Posture{
 		Adapter: "codex/1", AdapterVersion: "codex/1", ProviderVersion: "codex-cli 0.145.0",
-		BundleVersion: "v7", BundlePolicyID: "pol-1", BundleSHA256: "abc123",
-		Staleness: StalenessFresh,
 	}.Metadata()
-	if full["staleness"] != string(StalenessFresh) {
-		t.Errorf("staleness = %v, want %q", full["staleness"], StalenessFresh)
-	}
 	if full["provider_version"] != "codex-cli 0.145.0" {
 		t.Errorf("provider_version = %v", full["provider_version"])
 	}
@@ -108,10 +103,7 @@ func TestPostureMetadata_NoSecretShapedValues(t *testing.T) {
 		Adapter:         "obx_live_deadbeefdeadbeefdeadbeef",
 		AdapterVersion:  "obx_key_0123456789abcdef",
 		ProviderVersion: "-----BEGIN PRIVATE KEY-----",
-		BundleVersion:   "sk-proj-abcdefghijklmnop",
-		BundlePolicyID:  "ghp_0123456789abcdefghij",
-		BundleSHA256:    strings.Repeat("a", 64),
-		Staleness:       StalenessFresh,
+		ProviderManaged: "ghp_0123456789abcdefghij",
 	}
 	raw, err := json.Marshal(p.Metadata())
 	if err != nil {
@@ -212,6 +204,40 @@ func TestPostureReportsDecisionProvenance(t *testing.T) {
 		t.Setenv(EnvFailClosed, "1")
 		if p := EffectivePosture(); p.FailurePolicy != FailurePolicyFailClosed {
 			t.Errorf("failure policy = %q, want %q", p.FailurePolicy, FailurePolicyFailClosed)
+		}
+	})
+
+	// Metadata() is the ONLY path onto the wire, and asserting the struct is not
+	// asserting the wire. That seam is how the gap shipped: population and
+	// serialization were each tested, in isolation, and for months the control
+	// plane was told neither field while `openbox doctor` printed both — the exact
+	// inverse of the ADR-0017 argument, which is about what the control plane
+	// knows. Build through EffectivePosture, not Posture{}: an empty string is
+	// dropped by the unknown-value guard, so a zero value would pass vacuously.
+	t.Run("both reach the emitted metadata, and no bundle key does", func(t *testing.T) {
+		isolateConfig(t)
+		m := EffectivePosture().Metadata()
+		if m["decision_authority"] != DecisionAuthorityControlPlane {
+			t.Errorf("decision_authority = %v, want %q — ADR-0017 makes this posture's policy-provenance evidence",
+				m["decision_authority"], DecisionAuthorityControlPlane)
+		}
+		if m["failure_policy"] != FailurePolicyFailOpen {
+			t.Errorf("failure_policy = %v, want %q", m["failure_policy"], FailurePolicyFailOpen)
+		}
+		// The bundle coordinates are gone, not empty. Absence has to be structural:
+		// an empty-value guard would hide a field that a later edit repopulates.
+		for k := range m {
+			if strings.HasPrefix(k, "bundle_") || k == "staleness" {
+				t.Errorf("%q is still emitted — it reports a subsystem ADR-0017 deleted", k)
+			}
+		}
+	})
+
+	t.Run("failure_policy tracks fail_closed onto the wire", func(t *testing.T) {
+		isolateConfig(t)
+		t.Setenv(EnvFailClosed, "1")
+		if m := EffectivePosture().Metadata(); m["failure_policy"] != FailurePolicyFailClosed {
+			t.Errorf("failure_policy = %v, want %q", m["failure_policy"], FailurePolicyFailClosed)
 		}
 	})
 

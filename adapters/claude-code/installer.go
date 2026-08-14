@@ -1,6 +1,7 @@
 package claudecode
 
 import (
+	"crypto/sha256"
 	"embed"
 	"fmt"
 	"io"
@@ -8,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/openbox-ai/openbox-shift-left/adapters/common/devconfig"
 	obgit "github.com/openbox-ai/openbox-shift-left/adapters/common/git"
@@ -106,6 +108,12 @@ func (i Installer) Install(ref CredentialRef) error {
 	if ref.DID == "" {
 		return fmt.Errorf("claude-code install: CredentialRef.DID is required")
 	}
+	release, err := i.acquireInstallLock()
+	if err != nil {
+		return err
+	}
+	defer release()
+
 	if err := i.materializeBundle(); err != nil {
 		return err
 	}
@@ -127,6 +135,68 @@ func (i Installer) Install(ref CredentialRef) error {
 	return nil
 }
 
+// installLockStale is how long an install lock may go untouched before a later
+// run treats it as abandoned. An install writes a few small files plus one
+// engine copy — well under a second — so a minute is far beyond any live run
+// while still self-healing after a kill, which is the failure that leaves one
+// behind.
+const installLockStale = time.Minute
+
+// acquireInstallLock serializes installs against one plugin bundle, returning
+// the release function.
+//
+// It FAILS FAST rather than queueing, and that is the whole point. Concurrent
+// installs each create a temp file, write ~10MB and rename, all in one
+// directory; APFS serializes those on a kernel lock for the directory. Past a
+// few dozen writers the queue drains slower than it fills, every arrival makes
+// it worse, and the processes never exit — thousands of them accumulated that
+// way and took a machine down. A blocking lock would have produced the same
+// pile-up with the waiting moved into userspace. Refusing is what bounds it: at
+// most one install touches the bundle, and a second caller learns why
+// immediately instead of hanging.
+//
+// The claim protocol mirrors the realtime flush lock (hookflow/realtime.go):
+// O_EXCL create is the atomic happy path, and on EEXIST the mtime decides
+// between a live install (refuse) and a stale claim from a killed one (take
+// over). Best-effort by design — if the lock cannot be created at all we
+// proceed rather than block a legitimate install on a filesystem quirk, since
+// the guard exists to bound a pathological case, not to gate the normal one.
+func (i Installer) acquireInstallLock() (release func(), err error) {
+	dir := i.pluginDir()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return func() {}, fmt.Errorf("claude-code install: plugin dir: %w", err)
+	}
+	lock := filepath.Join(dir, ".install.lock")
+
+	f, err := os.OpenFile(lock, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	switch {
+	case err == nil:
+		fmt.Fprintf(f, "%d\n", os.Getpid())
+		f.Close()
+	case os.IsExist(err):
+		info, statErr := os.Stat(lock)
+		if statErr != nil {
+			// Vanished mid-race: the holder just finished. Treat the bundle as
+			// free rather than inventing a failure.
+			break
+		}
+		if time.Since(info.ModTime()) < installLockStale {
+			return func() {}, fmt.Errorf(
+				"claude-code install: another `openbox init` is already installing into %s "+
+					"(lock held since %s). Wait for it to finish and re-run; if no other init is "+
+					"running, delete %s",
+				dir, info.ModTime().Format(time.RFC3339), lock)
+		}
+		now := time.Now()
+		if chErr := os.Chtimes(lock, now, now); chErr != nil {
+			return func() {}, fmt.Errorf("claude-code install: cannot reclaim stale lock %s: %w", lock, chErr)
+		}
+	default:
+		return func() {}, nil // cannot lock here; do not block a legitimate install
+	}
+	return func() { _ = os.Remove(lock) }, nil
+}
+
 // placeEngineBinary copies the unified `openbox` engine into the bundle's
 // bin/openbox (0755) so the hooks — which invoke
 // ${CLAUDE_PLUGIN_ROOT}/bin/openbox — resolve to it. No-op when
@@ -139,20 +209,48 @@ func (i Installer) Install(ref CredentialRef) error {
 // bin/openbox is a silently broken install, so we fail loudly. The caller
 // decides whether to set EngineBinary at all (cli resolves it best-effort
 // from os.Executable()).
+//
+// Re-running `init` is a supported, encouraged operation — new hook keys only
+// register on a re-init — so the common case is that the engine already in
+// place is the one being installed. That case now costs a read and no write:
+// the copy is skipped when the bytes already match. It used to rewrite the
+// whole ~10MB binary every time, which is how a repeated init turned into
+// gigabytes of churn in a directory Claude Code executes out of.
 func (i Installer) placeEngineBinary() error {
 	if i.EngineBinary == "" {
 		return nil
 	}
+	binDir := filepath.Join(i.pluginDir(), "bin")
+	if err := os.MkdirAll(binDir, 0o755); err != nil {
+		return fmt.Errorf("claude-code install: bin dir: %w", err)
+	}
+	dst := filepath.Join(binDir, "openbox")
+
+	// Reclaim residue from earlier runs BEFORE deciding whether to copy, so a
+	// no-op re-init still cleans up (see sweepStaleEngineTemps for why a
+	// killed run leaves any).
+	sweepStaleEngineTemps(binDir)
+
+	// Already the engine being installed: leave it alone. Still assert the mode,
+	// because the hooks invoke this path directly and a non-executable engine
+	// fails every hook rather than the install.
+	same, err := sameContents(i.EngineBinary, dst)
+	if err != nil {
+		return fmt.Errorf("claude-code install: compare engine: %w", err)
+	}
+	if same {
+		if err := os.Chmod(dst, 0o755); err != nil {
+			return fmt.Errorf("claude-code install: engine mode: %w", err)
+		}
+		return nil
+	}
+
 	src, err := os.Open(i.EngineBinary)
 	if err != nil {
 		return fmt.Errorf("claude-code install: open engine binary: %w", err)
 	}
 	defer src.Close()
 
-	binDir := filepath.Join(i.pluginDir(), "bin")
-	if err := os.MkdirAll(binDir, 0o755); err != nil {
-		return fmt.Errorf("claude-code install: bin dir: %w", err)
-	}
 	tmp, err := os.CreateTemp(binDir, ".openbox-*.tmp")
 	if err != nil {
 		return fmt.Errorf("claude-code install: temp engine: %w", err)
@@ -170,10 +268,93 @@ func (i Installer) placeEngineBinary() error {
 	if err := tmp.Close(); err != nil {
 		return err
 	}
-	if err := os.Rename(tmpName, filepath.Join(binDir, "openbox")); err != nil {
+	if err := os.Rename(tmpName, dst); err != nil {
 		return fmt.Errorf("claude-code install: commit engine: %w", err)
 	}
 	return nil
+}
+
+// engineTempAge is how long a .openbox-*.tmp must have gone untouched before
+// the sweep treats it as residue. The copy it belongs to takes well under a
+// second, so an hour cannot reach a live one while still reclaiming promptly.
+const engineTempAge = time.Hour
+
+// sweepStaleEngineTemps deletes abandoned engine temp files from binDir.
+//
+// placeEngineBinary removes its own temp on every ordinary path, including
+// every error, via defer. What defer cannot survive is the process being
+// killed, and a killed init leaves a multi-megabyte partial copy behind with
+// nothing that ever reclaims it. Enough interrupted runs and the residue
+// outgrows everything else in the plugin, inside the directory Claude Code
+// scans for the engine.
+//
+// Only files older than engineTempAge are touched, because a concurrent init
+// may be mid-copy into one right now and deleting it would break that run's
+// rename. Best-effort throughout: this is housekeeping, and failing to tidy
+// must never fail an install.
+func sweepStaleEngineTemps(binDir string) {
+	entries, err := os.ReadDir(binDir)
+	if err != nil {
+		return
+	}
+	for _, e := range entries {
+		name := e.Name()
+		if e.IsDir() || !strings.HasPrefix(name, ".openbox-") || !strings.HasSuffix(name, ".tmp") {
+			continue
+		}
+		info, err := e.Info()
+		if err != nil || time.Since(info.ModTime()) < engineTempAge {
+			continue
+		}
+		_ = os.Remove(filepath.Join(binDir, name))
+	}
+}
+
+// sameContents reports whether a and b are byte-identical. A missing b is
+// simply "not the same" — the first install has nothing to compare against.
+//
+// Size is checked first so the common mismatch (a rebuilt engine) costs two
+// stats. Equal sizes fall through to a full comparison rather than trusting
+// mtime, which a copy rewrites and so can never indicate sameness here.
+func sameContents(a, b string) (bool, error) {
+	ai, err := os.Stat(a)
+	if err != nil {
+		return false, err
+	}
+	bi, err := os.Stat(b)
+	if os.IsNotExist(err) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if !ai.Mode().IsRegular() || !bi.Mode().IsRegular() || ai.Size() != bi.Size() {
+		return false, nil
+	}
+	sumA, err := fileSum(a)
+	if err != nil {
+		return false, err
+	}
+	sumB, err := fileSum(b)
+	if err != nil {
+		return false, err
+	}
+	return sumA == sumB, nil
+}
+
+func fileSum(path string) ([sha256.Size]byte, error) {
+	var sum [sha256.Size]byte
+	f, err := os.Open(path)
+	if err != nil {
+		return sum, err
+	}
+	defer f.Close()
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return sum, err
+	}
+	copy(sum[:], h.Sum(nil))
+	return sum, nil
 }
 
 func (i Installer) materializeBundle() error {

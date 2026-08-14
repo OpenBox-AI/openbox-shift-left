@@ -368,25 +368,65 @@ func TestRunHook_StopSpoolsOnlyTurnEvents(t *testing.T) {
 	}
 }
 
-// The Stop payload's content fields must not reach the spool. They are not bound
-// on HookEvent at all, so this is a regression guard on that absence: a future
-// contributor who adds last_assistant_message to the struct fails here.
-func TestRunHook_StopPayloadContentNeverSpooled(t *testing.T) {
-	spool := turnEnv(t, true)
-	transcript := filepath.Join(t.TempDir(), "transcript.jsonl")
-	if err := os.WriteFile(transcript, []byte(usageLine("claude-opus-4-8", 100, 10, false)), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	var out bytes.Buffer
-	RunHook("Stop", strings.NewReader(stopPayload("sess-content", transcript, "")), &out, nopLogger())
-
-	for _, ev := range spooledEvents(t, spool) {
-		raw, _ := json.Marshal(ev)
-		for _, banned := range []string{"SENTINEL_LASTMSG", "SENTINEL_STOPREASON"} {
-			if strings.Contains(string(raw), banned) {
-				t.Errorf("INV-2 breach: Stop payload content %q reached the spool: %s", banned, raw)
+// What the Stop payload may and may not put in the spool.
+//
+// This test used to say "the Stop payload's content fields must not reach the
+// spool… a future contributor who adds last_assistant_message to the struct
+// fails here". ADR-0018 IS that change, made deliberately and gated — so the
+// guard is re-aimed rather than removed, and it is strictly stronger than it
+// was: it now pins BOTH postures, where before it only ever exercised one.
+//
+// The line that did not move: everything else on that payload stays unbound.
+// `stop_reason` is banned under capture ON as well as OFF — and in this
+// provider version it does not even exist on the payload, so a sentinel
+// appearing would mean the adapter had started binding fields speculatively.
+func TestRunHook_StopPayloadContentIsGated(t *testing.T) {
+	const (
+		message    = "SENTINEL_LASTMSG"
+		stopReason = "SENTINEL_STOPREASON"
+	)
+	for _, tc := range []struct {
+		name        string
+		capture     string
+		wantMessage bool
+	}{
+		{"capture off — nothing from the payload egresses", "0", false},
+		{"capture on — the assistant message, and only it", "1", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			spool := turnEnv(t, true)
+			t.Setenv(devconfig.EnvContentCapture, tc.capture)
+			transcript := filepath.Join(t.TempDir(), "transcript.jsonl")
+			if err := os.WriteFile(transcript, []byte(usageLine("claude-opus-4-8", 100, 10, false)), 0o600); err != nil {
+				t.Fatal(err)
 			}
-		}
+			var out bytes.Buffer
+			RunHook("Stop", strings.NewReader(stopPayload("sess-content", transcript, "")), &out, nopLogger())
+
+			var sawMessage bool
+			for _, ev := range spooledEvents(t, spool) {
+				raw, _ := json.Marshal(ev)
+				if strings.Contains(string(raw), stopReason) {
+					t.Errorf("INV-2 breach: stop_reason reached the spool — it is not bound, "+
+						"and does not exist on this provider's Stop payload: %s", raw)
+				}
+				if strings.Contains(string(raw), message) {
+					sawMessage = true
+					if ev.EventType != client.EventTurnCompleted {
+						t.Errorf("the assistant message rode a %s event; only the completed "+
+							"half may carry it: %s", ev.EventType, raw)
+					}
+				}
+			}
+			if sawMessage != tc.wantMessage {
+				if tc.wantMessage {
+					t.Errorf("capture ON but the assistant message never reached the spool — " +
+						"the other assertions here would then be vacuous")
+				} else {
+					t.Errorf("capture OFF and the assistant message reached the spool anyway")
+				}
+			}
+		})
 	}
 }
 

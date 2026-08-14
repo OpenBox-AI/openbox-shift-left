@@ -19,6 +19,7 @@ var contractEventTypes = []string{
 	"SessionStarted", "PromptSubmitted", "ToolCall", "ToolResult",
 	"SessionEnded", "CommitCreated", "Deploy",
 	"TurnStarted", "TurnCompleted",
+	"SubagentStarted", "PermissionDenied", "APIError",
 }
 
 // The previous version of this test asserted len(enum) == 7. That passes

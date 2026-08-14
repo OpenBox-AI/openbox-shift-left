@@ -144,6 +144,30 @@ const MaxRedactBody = 512 << 10 // 512 KiB (bytes)
 // tool_input.
 const MaxJSONCompareBytes = 256 << 10 // 256 KiB (bytes)
 
+// RedactText redacts a content body for secrets before it is attached to an
+// event, bounded exactly like the file-body path (MaxRedactBody).
+//
+// Over the cap the text is returned UNCHANGED rather than truncated, which is
+// the same skip-not-truncate rule the file body follows and for a related
+// reason: a truncated assistant message would silently misreport what the model
+// said, and the cap exists to bound scan time on a hook, not to bound egress —
+// capBody does that, at the client, over the whole body.
+//
+// The direction of that trade is worth being explicit about, because it is
+// fail-open on a security control: an oversized body egresses unscanned. It is
+// bounded by the same 512 KiB the file path already accepts, and the alternative
+// — dropping the text — would silently disable the feature for long turns.
+//
+// A nil redactor is the `secret_detection:false` case and returns the text
+// unchanged.
+func RedactText(r *decision.Redactor, s string) string {
+	if r == nil || len(s) > MaxRedactBody {
+		return s
+	}
+	out, _, _ := r.RedactText(s)
+	return out
+}
+
 // NewDecider builds the local step that runs before the evaluation: secret
 // redaction, and nothing else.
 //

@@ -82,3 +82,91 @@ func TestLocalHooksIdempotentAgainstAnUnquotedLegacyEntry(t *testing.T) {
 		t.Errorf("SessionStart has %d handlers, want 1 — a re-init duplicated the hook across the quoting change", n)
 	}
 }
+
+// Every install that exists today predates the ADR-0018 hooks, so the FIRST
+// thing this change meets in the field is a settings file holding the old seven
+// and none of the new four. Re-init has to add exactly the four and touch
+// nothing else — and that is a property of the SECOND invocation, which is the
+// case fifteen green enforce tests missed once already (ADR-0016,
+// TestPlainReInitDoesNotRevertAnEnforceOptOut).
+func TestReInitAddsTheNewHooksExactlyOnce(t *testing.T) {
+	dir := t.TempDir()
+	engine := filepath.Join(dir, "bin", "openbox")
+
+	// An install from before this change: the pre-ADR-0018 hook set only.
+	preADR0018 := map[string]bool{
+		"SessionStart": true, "UserPromptSubmit": true, "PreToolUse": true,
+		"PostToolUse": true, "Stop": true, "SubagentStop": true, "SessionEnd": true,
+	}
+	settingsPath := filepath.Join(dir, ".claude", "settings.local.json")
+	if err := os.MkdirAll(filepath.Dir(settingsPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	old := map[string]any{"hooks": map[string]any{}}
+	for _, ev := range localHookEvents {
+		if !preADR0018[ev.Event] {
+			continue
+		}
+		old["hooks"].(map[string]any)[ev.Event] = []any{map[string]any{
+			"matcher": ev.Matcher,
+			"hooks": []any{map[string]any{
+				"type":    "command",
+				"command": localHookCommand(engine, "hook claude-code "+ev.Event),
+				"timeout": ev.Timeout,
+			}},
+		}}
+	}
+	// A foreign hook a developer added themselves — it must survive untouched.
+	old["hooks"].(map[string]any)["PostToolUse"] = append(
+		old["hooks"].(map[string]any)["PostToolUse"].([]any),
+		map[string]any{"matcher": "*", "hooks": []any{map[string]any{"type": "command", "command": "my-own-linter"}}})
+	raw, _ := json.MarshalIndent(old, "", "  ")
+	if err := os.WriteFile(settingsPath, raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := writeLocalHooks(dir, engine); err != nil {
+		t.Fatalf("re-init: %v", err)
+	}
+
+	got, _ := os.ReadFile(settingsPath)
+	var settings struct {
+		Hooks map[string][]struct {
+			Hooks []struct{ Command string } `json:"hooks"`
+		} `json:"hooks"`
+	}
+	if err := json.Unmarshal(got, &settings); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, ev := range localHookEvents {
+		want := localHookCommand(engine, "hook claude-code "+ev.Event)
+		n := 0
+		for _, entry := range settings.Hooks[ev.Event] {
+			for _, h := range entry.Hooks {
+				if h.Command == want {
+					n++
+				}
+			}
+		}
+		switch {
+		case n == 0:
+			t.Errorf("%s is not registered after re-init — an existing install never fires it", ev.Event)
+		case n > 1:
+			t.Errorf("%s registered %d times; re-init must be additive AND idempotent", ev.Event, n)
+		}
+	}
+
+	// The developer's own hook is still there.
+	var foreign bool
+	for _, entry := range settings.Hooks["PostToolUse"] {
+		for _, h := range entry.Hooks {
+			if h.Command == "my-own-linter" {
+				foreign = true
+			}
+		}
+	}
+	if !foreign {
+		t.Error("re-init dropped a foreign PostToolUse hook the developer had added")
+	}
+}

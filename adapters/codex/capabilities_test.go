@@ -19,6 +19,10 @@ func TestCapabilitiesProfile(t *testing.T) {
 		"telemetry.model":   true, // session-level model id from turn_context (ADR-0014)
 		"verdict.apply":     true, // STORY-SL7-B: PreToolUse deny gate (opt-in)
 		"enforce.rewrite":   true, // STORY-SL7-B: local secret redaction via allow+updatedInput
+		// ADR-0018: Claude Code reports per-tool success, Codex does not. Pinned
+		// FALSE so the divergence is a declared limit rather than a gap someone
+		// closes later with a heuristic over tool_response.
+		"tool.status": false,
 	}
 	got := Capabilities()
 	if len(got) != len(want) {
@@ -61,5 +65,17 @@ func TestCapabilitiesProfile(t *testing.T) {
 	// stays silent.
 	if !strings.Contains(tokens, "default on") {
 		t.Errorf("telemetry.tokens is on by default; the How note must say so: %q", tokens)
+	}
+
+	// The same discipline for the outcome gap: unsupported must read as "the
+	// payload carries no structural outcome", never as "assume success". A
+	// future edit that made this note vague would be the first step toward
+	// shipping status:"completed" unconditionally, which reports 100% success
+	// for a session whose calls failed.
+	status := byKey["tool.status"]
+	for _, want := range []string{"no failure hook", "no exit code", "SUCCESS 100%"} {
+		if !strings.Contains(status, want) {
+			t.Errorf("tool.status How note must say why it is unreported (%q missing): %q", want, status)
+		}
 	}
 }

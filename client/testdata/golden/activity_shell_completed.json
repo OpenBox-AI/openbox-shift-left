@@ -12,5 +12,6 @@
     "event_id": "ev-8",
     "provider": "claude-code",
     "tool_name": "Bash"
-  }
+  },
+  "status": "completed"
 }

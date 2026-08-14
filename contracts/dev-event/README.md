@@ -1,12 +1,17 @@
 # `contracts/dev-event` — normalized developer-runtime event contract
 
-**Story:** STORY-SL-1 · **Version:** 1.0 · **Status:** built + validated; G1_READY + G3_REVIEW approved (2026-07-07)
+**Story:** STORY-SL-1 · **Version:** the `schema_version` `const` in
+[the schema](schema/dev-event.schema.json) is the authority — v1.1 added the turn pair
+(ADR-0014), v1.2 tool `status`, the subagent/denial/error types and the turn span
+(ADR-0018) · **Status:** built + validated (v1.0 carried G1_READY + G3_REVIEW, 2026-07-07;
+the later bumps are additive and were reviewed with their ADRs)
 
 The single, versioned, **tool-agnostic** event schema that every coding-tool adapter
 maps its native payload onto (SPI `emit()`). The OpenBox client then re-expresses it onto
 the base SDK's unified wire model (`Workflow*` / `SignalReceived` / `ActivityStarted` /
-`ActivityCompleted`, all span-less) for openbox-core — see MAPPING.md; **ADR-0004** and
-**ADR-0013**. Adding a provider (Claude Code, Codex, Cursor, …) never changes this contract
+`ActivityCompleted`; span-less apart from the one content-gated turn span of
+**ADR-0018**) for openbox-core — see MAPPING.md; **ADR-0004**, **ADR-0013** and
+**ADR-0018**. Adding a provider (Claude Code, Codex, Cursor, …) never changes this contract
 or the wire model (PRD **FR-4**, architecture **§1b**).
 
 ## Layout
@@ -15,13 +20,15 @@ or the wire model (PRD **FR-4**, architecture **§1b**).
 |---|---|
 | [`schema/dev-event.schema.json`](schema/dev-event.schema.json) | The contract — JSON Schema (draft 2020-12), language-neutral. 7 lifecycle event types, common envelope, `tool{}`, `span`, gated `content`, canonical `verdict` enum. |
 | [`MAPPING.md`](MAPPING.md) | How the contract maps onto the base-SDK unified wire model on openbox-core (ADR-0004, ADR-0013). SL-3 builds payloads from this without guessing. §3's field-home table is the authority on what the serializer reads; also carries the downstream-consumer sweep (INV-8) and client signing/transport notes. |
-| [`COVERAGE.md`](COVERAGE.md) | How Claude Code / Cursor / Codex real event surfaces map onto the 7 types, field-derivation rules, and the bounded Phase-1 non-goals (v1.1 candidates). The reference for adapter authors (SL-4/7/8). |
+| [`COVERAGE.md`](COVERAGE.md) | How Claude Code / Cursor / Codex real event surfaces map onto the lifecycle types, field-derivation rules, and the bounded non-goals. The reference for adapter authors (SL-4/7/8). |
 | [`conformance/`](conformance/) | Go conformance harness (OD17). Dependency-free; validates samples against the schema and enforces the INV-2 content gate. |
 
-## The 7 lifecycle event types
+## The lifecycle event types
 
-`SessionStarted` · `PromptSubmitted` · `ToolCall` · `ToolResult` · `SessionEnded` ·
-`CommitCreated` · `Deploy`
+The `event_type` enum in [the schema](schema/dev-event.schema.json) is the list, and
+COVERAGE.md §1 maps each one onto the providers' native hooks. v1.0's original seven
+have since been joined by the turn pair (ADR-0014) and by `SubagentStarted` /
+`PermissionDenied` / `APIError` (ADR-0018).
 
 These are the adapter-facing **lifecycle** axis. The client re-maps them onto the base
 SDK's stock wire types — no core accept-list patch. `ToolCall`/`ToolResult` became
@@ -31,9 +38,12 @@ which is the two-layer split working as intended.
 The `span` object stays in the contract and adapters keep populating it, but it is no
 longer serialized as a span: the client reads locators and counts out of it into
 `activity_input`/`activity_output`. One consequence is worth knowing before you write an
-adapter — since no span reaches core, core computes no `semantic_type`, so
-`file_write`/`mcp_tool_call`/`shell_command` classification does not happen for dev
-sessions. `tool.kind` is what carries that distinction now. See MAPPING.md §3.
+adapter — no tool event reaches core as a span, so core computes no `semantic_type` for
+one, and `file_write`/`mcp_tool_call`/`shell_command` classification does not happen for
+dev sessions. `tool.kind` is what carries that distinction now. The one span that does
+reach core is minted by the *client* on a captured turn (ADR-0018): no adapter populates
+it, it carries no locator, and it exists because the alignment reader accepts no other
+shape. See MAPPING.md §3.
 
 ## Privacy (INV-2)
 
@@ -48,22 +58,28 @@ What INV-2 still guarantees:
   at the same gate (RF-S7; before that, metadata was a hole INV-2 rested on adapter convention
   to keep closed).
 - `span.request_body`/`response_body` remain in the schema but are **no longer read by the
-  client**, so they cannot egress at all (ADR-0013). No adapter ever set them; both adapters
-  have tests asserting they stay empty.
-- Tool commands and file bodies never egress on observe events (SL3-SEC-3), capture on or off.
+  client**, so nothing an adapter puts there can egress (ADR-0013). No adapter ever set them;
+  both adapters have tests asserting they stay empty. The assistant text that *does* egress
+  (ADR-0018) rides a span the client mints from a hook field, not this one — so the two are
+  not the same channel re-opened.
+- Tool commands and file bodies never egress on **observe** events (SL3-SEC-3), capture on or
+  off. On a **gated** call they do, under content capture and redacted before they are
+  attached (ADR-0017; conformance C18 asserts that ordering on the outbound bytes).
 - The conformance harness rejects any event carrying content while content-capture is disabled.
 
 What it does **not** guarantee today: captured content is meant to be Guardrail-redacted at
 source, but that layer is inert (`[EXT-guardrail-redaction]`), so with capture on — the default —
-prompt content egresses **unredacted**. Tier-1 local secret detection redacts Write/Edit bodies
-in enforce mode only.
+prompt content egresses **unredacted**. Local secret detection — ADR-0017 retired the tier
+vocabulary; it is one of three independently named things now — redacts Write/Edit bodies in
+enforce mode only, and only while `secret_detection` is on.
 
 ## Verdict vocabulary
 
 Canonical (priority): `HALT > BLOCK > REQUIRE_APPROVAL > CONSTRAIN > ALLOW`. openbox-core
 serializes the response `verdict` field as lowercase (`halt|block|require_approval|constrain|allow`)
 plus a legacy `action` field — see `$defs.verdict` and MAPPING.md §4. Observe mode treats every
-verdict as allow (INV-3); the opt-in enforce mode acts on them, tighten-only — see COVERAGE.md §4.
+verdict as allow (INV-3); enforce mode — **on by default** since ADR-0016 — acts on them,
+tighten-only. See COVERAGE.md §4.
 
 ## Validate
 

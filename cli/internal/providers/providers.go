@@ -36,6 +36,34 @@ func Engine(name string) (provider.HookEngine, error) {
 	}
 }
 
+// LocalHookAudit is the provider-neutral shape of a project's hook
+// registration, re-declared here so command code can read it without importing
+// an adapter (TestOnlyTheRegistryImportsAdapters).
+type LocalHookAudit struct {
+	SettingsPath    string
+	Present         bool
+	Engines         []string
+	DuplicateEvents []string
+}
+
+// AuditProjectHooks reports which OpenBox engines a project's provider-local
+// hook config registers.
+//
+// Only Claude Code has a project-scoped hook file that can accumulate a second
+// registration: its merge preserved anything it could not match by exact
+// command string, so an install run from another HOME left both engines live.
+// Codex has always replaced by argv shape, so it has no equivalent state to
+// report and is deliberately absent here rather than silently returning empty.
+func AuditProjectHooks(projectDir string) (LocalHookAudit, error) {
+	a, err := claudecode.AuditLocalHooks(projectDir)
+	return LocalHookAudit{
+		SettingsPath:    a.SettingsPath,
+		Present:         a.Present,
+		Engines:         a.Engines,
+		DuplicateEvents: a.DuplicateEvents,
+	}, err
+}
+
 // Lookup returns the Installer for a provider name, or ErrUnknown. Built
 // adapters return a real installer; unbuilt ones a provider.Stub
 // (Available()==false).

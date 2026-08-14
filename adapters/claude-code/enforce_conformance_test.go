@@ -41,6 +41,18 @@ import (
 // | C9| — (removed: nothing local can be stale — ADR-0017)                          |
 // |C10| on      | fail-open   | up + secret in Write| redact | Tier-1 redact-and-continue (E6-S9)|
 // |C11| on      | fail-open   | up, detection OFF  | proceed| opt-out → no redaction (E6-S9)  |
+//
+// C18–C19 assert the content gate on the bytes POSTed to /evaluate. C20–C26 do
+// the same for ADR-0018, driving the real observe/turn paths and the flush that
+// delivers them:
+//
+// |C20| PostToolUse            | status:"completed" on the wire                  |
+// |C21| the same, capture OFF  | status is structural, not gated                 |
+// |C22| PostToolUseFailure     | status:"failed" + a duration paired across hooks|
+// |C23| the three new signals  | signal_name present, free text and signal_args absent |
+// |C24| Stop, capture ON       | ONE span core's alignment extractor can read    |
+// |C25| Stop, capture OFF      | no span, no span_count, no text — turns still ship |
+// |C26| Stop + a secret        | redacted BEFORE attachment (C18 discipline)     |
 
 // The local bundle helpers are gone with the evaluator they fed (ADR-0017). A
 // case's expected outcome is a SERVER verdict now, so setup names the verdict
@@ -315,6 +327,299 @@ func TestEnforcementConformance(t *testing.T) {
 			if !strings.Contains(b, `"tool_name"`) {
 				t.Errorf("body #%d carries no structural axes: %s", i, b)
 			}
+		}
+	})
+
+	// ── ADR-0018: the outcome field ────────────────────────────────────────────
+	//
+	// Core's per-tool success metric reads ONE thing:
+	//
+	//	metric.IsSuccess = payload.Status != nil && *payload.Status == "completed"
+	//
+	// so these two cases assert the literal on the bytes actually POSTed, not on
+	// the DevEvent or the mapper's return. A field that is correct in the struct
+	// and absent from the wire looks identical to every unit test and leaves the
+	// dashboard at 0.0% — which is the state this field exists to fix.
+	//
+	// observeThenFlush drives the real observe path for one hook and then the
+	// SessionEnd flush that delivers it, returning what reached /evaluate.
+	observeThenFlush := func(t *testing.T, hook, payload string) []string {
+		t.Helper()
+		bodies := serveCapturing(t, `{"verdict":"allow"}`)
+		// The detached realtime flusher would fork a second process mid-test and
+		// race the assertion; SessionEnd's flush is the deterministic delivery.
+		t.Setenv(envRealtime, "0")
+		t.Setenv(envEnforce, "0") // observe path — no gate, no deferred spool
+		var out bytes.Buffer
+		RunHook(hook, strings.NewReader(payload), &out, log.New(&bytes.Buffer{}, "", 0))
+		RunHook("SessionEnd", strings.NewReader(
+			`{"hook_event_name":"SessionEnd","session_id":"s-status","cwd":"/tmp","reason":"other"}`),
+			&out, log.New(&bytes.Buffer{}, "", 0))
+		return *bodies
+	}
+
+	t.Run("C20 a completed tool call reports status \"completed\" on the outbound bytes", func(t *testing.T) {
+		bodies := observeThenFlush(t, "PostToolUse",
+			`{"hook_event_name":"PostToolUse","session_id":"s-status","cwd":"/tmp","tool_name":"Bash","tool_use_id":"toolu_c20","tool_input":{"command":"go test ./..."},"tool_response":{"output":"ok"}}`)
+
+		var completed string
+		for _, b := range bodies {
+			if strings.Contains(b, `"event_type":"ActivityCompleted"`) && strings.Contains(b, `"activity_type":"Bash"`) {
+				completed = b
+			}
+		}
+		if completed == "" {
+			t.Fatalf("no ActivityCompleted reached /evaluate; bodies=%v", bodies)
+		}
+		// The exact literal, on the wire. Not `strings.Contains(b, "completed")`
+		// — "ActivityCompleted" contains that substring and would pass forever.
+		if !strings.Contains(completed, `"status":"completed"`) {
+			t.Errorf("completed tool call carries no \"status\":\"completed\"; core scores it as a failure: %s", completed)
+		}
+	})
+
+	t.Run("C21 status ships unchanged with content_capture:false", func(t *testing.T) {
+		// The whole point of deriving status structurally: an org that sends no
+		// content still gets its success metric. If this ever regresses, Tool
+		// Health silently becomes a privacy-setting-dependent feature.
+		t.Setenv(envContentCapture, "0")
+		bodies := observeThenFlush(t, "PostToolUse",
+			`{"hook_event_name":"PostToolUse","session_id":"s-status","cwd":"/tmp","tool_name":"Read","tool_use_id":"toolu_c21","tool_input":{"file_path":"/tmp/a.txt"}}`)
+
+		var found bool
+		for _, b := range bodies {
+			if strings.Contains(b, `"event_type":"ActivityCompleted"`) && strings.Contains(b, `"status":"completed"`) {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("status absent with capture off — it is structural, not content: %v", bodies)
+		}
+	})
+
+	// observeSeqThenFlush drives several observe hooks in order (so a PreToolUse
+	// can leave its duration stash for the failure hook that follows) and then
+	// the SessionEnd flush that delivers them.
+	observeSeqThenFlush := func(t *testing.T, session string, steps ...[2]string) []string {
+		t.Helper()
+		bodies := serveCapturing(t, `{"verdict":"allow"}`)
+		t.Setenv(envRealtime, "0")
+		t.Setenv(envEnforce, "0")
+		var out bytes.Buffer
+		for _, s := range steps {
+			RunHook(s[0], strings.NewReader(s[1]), &out, log.New(&bytes.Buffer{}, "", 0))
+		}
+		RunHook("SessionEnd", strings.NewReader(
+			`{"hook_event_name":"SessionEnd","session_id":"`+session+`","cwd":"/tmp","reason":"other"}`),
+			&out, log.New(&bytes.Buffer{}, "", 0))
+		return *bodies
+	}
+
+	t.Run("C22 a failed tool call reports status \"failed\" with a real duration", func(t *testing.T) {
+		bodies := observeSeqThenFlush(t, "s-fail",
+			[2]string{"PreToolUse", `{"hook_event_name":"PreToolUse","session_id":"s-fail","cwd":"/tmp","tool_name":"Bash","tool_use_id":"toolu_c22","tool_input":{"command":"exit 3"}}`},
+			[2]string{"PostToolUseFailure", `{"hook_event_name":"PostToolUseFailure","session_id":"s-fail","cwd":"/tmp","tool_name":"Bash","tool_use_id":"toolu_c22","tool_input":{"command":"exit 3"},"error":"Error: exit code 3","is_interrupt":false,"duration_ms":562}`},
+		)
+
+		var failed string
+		for _, b := range bodies {
+			if strings.Contains(b, `"event_type":"ActivityCompleted"`) {
+				failed = b
+			}
+		}
+		if failed == "" {
+			t.Fatalf("a failed tool call produced no ActivityCompleted; bodies=%v", bodies)
+		}
+		if !strings.Contains(failed, `"status":"failed"`) {
+			t.Errorf("failed call does not report status \"failed\": %s", failed)
+		}
+		// The duration stash must pair across the two DIFFERENT hooks, or a
+		// failed call reports no duration and the latency percentiles quietly
+		// exclude every failure.
+		if !strings.Contains(failed, `"duration_ms"`) {
+			t.Errorf("failed call carries no duration_ms — the stash did not pair "+
+				"PreToolUse with PostToolUseFailure: %s", failed)
+		}
+		// The provider's free-text error must not have ridden along.
+		if strings.Contains(failed, "exit code 3") {
+			t.Errorf("the tool's free-text error egressed (ADR-0019 owns it): %s", failed)
+		}
+	})
+
+	t.Run("C23 lifecycle signals carry their signal_name and no free text", func(t *testing.T) {
+		const denialReason = "DENIAL-REASON-must-not-egress"
+		bodies := observeSeqThenFlush(t, "s-signals",
+			[2]string{"SubagentStart", `{"hook_event_name":"SubagentStart","session_id":"s-signals","cwd":"/tmp","agent_id":"agt-1","agent_type":"code-reviewer"}`},
+			[2]string{"PermissionDenied", `{"hook_event_name":"PermissionDenied","session_id":"s-signals","cwd":"/tmp","tool_name":"Bash","tool_use_id":"toolu_c23","tool_input":{"command":"rm -rf /"},"reason":"` + denialReason + `"}`},
+			[2]string{"StopFailure", `{"hook_event_name":"StopFailure","session_id":"s-signals","cwd":"/tmp","error":"rate_limit","error_details":"` + denialReason + `"}`},
+		)
+
+		joined := strings.Join(bodies, "\n")
+		for _, name := range []string{"subagent_started", "permission_denied", "api_error"} {
+			if !strings.Contains(joined, `"signal_name":"`+name+`"`) {
+				t.Errorf("no %s signal reached /evaluate: %s", name, joined)
+			}
+		}
+		// Free text from either payload must be nowhere on the wire.
+		if strings.Contains(joined, denialReason) {
+			t.Errorf("free-text reason/error_details egressed: %s", joined)
+		}
+		// The structural detail that makes the events useful must be there, or
+		// the assertion above would pass for events carrying nothing.
+		for _, want := range []string{`"agent_type":"code-reviewer"`, `"error_type":"rate_limit"`, `"tool_use_id":"toolu_c23"`} {
+			if !strings.Contains(joined, want) {
+				t.Errorf("missing structural detail %s: %s", want, joined)
+			}
+		}
+		// And NO signal_args on any of the three — core reads those as a new
+		// user goal and overwrites the alignment session's goal with them
+		// (age.go:112-137).
+		for _, b := range bodies {
+			for _, name := range []string{"subagent_started", "permission_denied", "api_error"} {
+				if strings.Contains(b, `"signal_name":"`+name+`"`) && strings.Contains(b, `"signal_args"`) {
+					t.Errorf("%s carries signal_args; core would overwrite the alignment goal with it: %s", name, b)
+				}
+			}
+		}
+	})
+
+	// ── ADR-0018 Decision 2: the assistant-turn span ───────────────────────────
+	//
+	// The egress change. These drive a REAL Stop hook — transcript read, turn
+	// window, mapper, spool, flush — and assert on what reached /evaluate,
+	// because every failure mode here is silent: core logs and returns "" for a
+	// span it cannot read, which is indistinguishable from the empty widgets
+	// this change exists to fill.
+	//
+	// A minimal transcript with usage, so the Stop hook has a turn to report.
+	turnTranscript := func(t *testing.T) string {
+		t.Helper()
+		p := filepath.Join(t.TempDir(), "transcript.jsonl")
+		const body = `{"type":"assistant","isSidechain":false,"timestamp":"2026-08-13T09:00:01.500Z","message":{"model":"claude-opus-4-8","content":[{"type":"text","text":"reply"}],"usage":{"input_tokens":100,"output_tokens":30}}}` + "\n"
+		if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	// stopThenFlush runs one Stop hook with the given assistant message and
+	// returns the bodies that reached /evaluate.
+	//
+	// `capture` is set AFTER serveCapturing, deliberately: serveCapturing calls
+	// evalCreds, which forces content capture OFF. Setting it before would be
+	// silently overwritten, and the capture-ON case would then pass by proving
+	// the capture-OFF behaviour.
+	stopThenFlush := func(t *testing.T, session, transcript, assistantMessage, capture string) []string {
+		t.Helper()
+		bodies := serveCapturing(t, `{"verdict":"allow"}`)
+		t.Setenv(envContentCapture, capture)
+		t.Setenv(envRealtime, "0")
+		t.Setenv(envEnforce, "0")
+		t.Setenv(envFinops, "1") // turn events exist only under finops
+		var out bytes.Buffer
+		payload, err := json.Marshal(map[string]any{
+			"hook_event_name":        "Stop",
+			"session_id":             session,
+			"cwd":                    "/tmp",
+			"transcript_path":        transcript,
+			"last_assistant_message": assistantMessage,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		RunHook("Stop", bytes.NewReader(payload), &out, log.New(&bytes.Buffer{}, "", 0))
+		if s := out.String(); strings.TrimSpace(s) != "" {
+			t.Errorf("Stop wrote to stdout (%q); it can block a session, so every path "+
+				"must stay silent (INV-3)", s)
+		}
+		RunHook("SessionEnd", strings.NewReader(
+			`{"hook_event_name":"SessionEnd","session_id":"`+session+`","cwd":"/tmp","reason":"other"}`),
+			&out, log.New(&bytes.Buffer{}, "", 0))
+		return *bodies
+	}
+
+	t.Run("C24 a turn span carries the assistant text only with content capture on", func(t *testing.T) {
+		const answer = "I refactored the spool and all 11 modules are green."
+		bodies := stopThenFlush(t, "s-span", turnTranscript(t), answer, "1")
+
+		var turn string
+		for _, b := range bodies {
+			if strings.Contains(b, `"activity_type":"llm_completion"`) && strings.Contains(b, `"spans"`) {
+				turn = b
+			}
+		}
+		if turn == "" {
+			t.Fatalf("no turn payload carried a span; bodies=%v", bodies)
+		}
+		// The four conditions core's extractor checks, on the real outbound bytes.
+		for _, want := range []string{
+			`"span_count":1`,
+			`"stage":"completed"`,
+			`"semantic_type":"llm_completion"`,
+			`"http.method":"POST"`,
+			`api.anthropic.com`,
+			`"openbox.span_synthetic":true`,
+		} {
+			if !strings.Contains(turn, want) {
+				t.Errorf("turn span missing %s — core would classify it as something else and "+
+					"the extractor would silently yield \"\": %s", want, turn)
+			}
+		}
+		if !strings.Contains(turn, answer) {
+			t.Errorf("the assistant text is not in the span: %s", turn)
+		}
+		// hook_trigger with spans present enters the approval-bypass path.
+		if strings.Contains(turn, `"hook_trigger"`) {
+			t.Errorf("turn payload carries hook_trigger alongside spans: %s", turn)
+		}
+	})
+
+	t.Run("C25 content_capture:false emits no span and no span_count", func(t *testing.T) {
+		const answer = "CANARY-ASSISTANT-TEXT-must-not-egress"
+		bodies := stopThenFlush(t, "s-span-off", turnTranscript(t), answer, "0")
+
+		var sawTurn bool
+		for _, b := range bodies {
+			if strings.Contains(b, `"activity_type":"llm_completion"`) {
+				sawTurn = true
+			}
+			for _, forbidden := range []string{`"spans"`, `"span_count"`, answer} {
+				if strings.Contains(b, forbidden) {
+					t.Errorf("capture off but %s reached /evaluate: %s", forbidden, b)
+				}
+			}
+		}
+		// The turn events themselves must still ship — this is a content gate,
+		// not a telemetry gate. Without this the case would pass for a client
+		// that stopped emitting turns entirely.
+		if !sawTurn {
+			t.Errorf("no turn events at all with capture off; the gate is on CONTENT, "+
+				"not on the turn: %v", bodies)
+		}
+	})
+
+	t.Run("C26 a secret in the assistant text never reaches /evaluate", func(t *testing.T) {
+		// Same discipline as C18: assert on the bytes POSTed, not on the mapper's
+		// return. A redaction applied after attachment would satisfy every other
+		// test in this file and still leak.
+		os.Unsetenv(envSecretDetection) // default ON
+		bodies := stopThenFlush(t, "s-span-secret", turnTranscript(t),
+			"here is the key you asked for: AWS_ACCESS_KEY_ID="+awsSecret, "1")
+
+		var turn string
+		for _, b := range bodies {
+			if strings.Contains(b, `"spans"`) {
+				turn = b
+			}
+			if strings.Contains(b, awsSecret) {
+				t.Errorf("the raw secret reached /evaluate — redaction must run BEFORE "+
+					"attachment: %s", b)
+			}
+		}
+		if turn == "" {
+			t.Fatal("no span was sent at all; the case proves nothing if the text never egressed")
+		}
+		if !strings.Contains(turn, "OPENBOX_REDACTED") {
+			t.Errorf("no redaction placeholder in the span body: %s", turn)
 		}
 	})
 

@@ -1,0 +1,11 @@
+{
+  "schema_version": "1.2",
+  "event_id": "evt-0010",
+  "event_type": "SubagentStarted",
+  "openbox_session_id": "sess-abc123",
+  "developer_did": "did:aip:7f3c9b2e-0000-5000-a000-000000000001",
+  "timestamp": "2026-07-07T12:00:20Z",
+  "tool": { "name": "claude-code", "kind": "shell" },
+  "agent_id": "agt-code-reviewer-01",
+  "metadata": { "agent_id": "agt-code-reviewer-01", "agent_type": "code-reviewer" }
+}

@@ -1,10 +1,11 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://openbox.ai/schemas/dev-event/1.1/dev-event.schema.json",
+  "$id": "https://openbox.ai/schemas/dev-event/1.2/dev-event.schema.json",
   "title": "OpenBox Developer-Runtime Normalized Event",
   "description": "Tool-agnostic, versioned ADAPTER-FACING event contract for developer-runtime coding tools (Claude Code, Codex, Cursor). Every provider adapter maps its native payload onto this shape (SPI emit()). The OpenBox client then RE-EXPRESSES it onto the base SDK's unified wire model — WorkflowStarted/WorkflowCompleted/SignalReceived/ActivityStarted+hook_trigger — on POST /api/v1/governance/evaluate (see MAPPING.md; ADR-0004). This is NOT a verbatim event_type pass-through: the SL-1 EXT-core accept-list is retired (E7-S2). Adding a provider never changes this contract or the wire model (PRD FR-4, architecture §1b). Verified against openbox-core internal/content/{governance,session}.go and the base contract openbox-sdk-python/openbox_core/contracts/events.py (spikes S6, S8/E7-S0).",
-  "x-schema-version": "1.1",
+  "x-schema-version": "1.2",
   "x-changelog": {
+    "1.2": "Adds `status` on tool results (ADR-0018 Decision 1) — the field openbox-core's per-tool success metric reads and no producer had ever written, which pinned Tool Health SUCCESS at 0%. Closed enum completed|failed, ToolResult only (payload.status also writes the row's workflow_status column, so it must not ride a lifecycle event), derived structurally and NOT content-gated. Also adds the failure/lifecycle event types SubagentStarted/PermissionDenied/APIError, which ride stock SignalReceived. Purely additive: every 1.1 event is a valid 1.2 event.",
     "1.1": "Adds the turn pair (TurnStarted/TurnCompleted → ActivityStarted/ActivityCompleted with activity_type llm_completion, ADR-0014) and the fields it needs: model, turn_index, agent_id. Widens $defs.tokens with cache_creation_input/cache_read and RE-DEFINES `input` as PURE input — the Claude Code SessionEnd rollup used to fold both cache counts into it. Additive except for that one semantic, which is why this is a version bump and not a silent edit.",
     "1.0": "Initial contract (ADR-0004 base wire unification; ADR-0013 retired the span layer without changing this shape)."
   },
@@ -21,7 +22,7 @@
   "properties": {
     "schema_version": {
       "description": "Version of THIS event contract carried on the wire. Bumped on a breaking change to the normalized shape.",
-      "const": "1.1"
+      "const": "1.2"
     },
     "event_id": {
       "description": "Client-generated unique id for idempotent ingestion (INV-5). Retries/buffered flush reuse the same id so tokens/cost/lineage are never double-counted.",
@@ -39,7 +40,10 @@
         "CommitCreated",
         "Deploy",
         "TurnStarted",
-        "TurnCompleted"
+        "TurnCompleted",
+        "SubagentStarted",
+        "PermissionDenied",
+        "APIError"
       ]
     },
     "openbox_session_id": {
@@ -84,6 +88,10 @@
     "agent_id": {
       "description": "Subagent this event occurred inside. On turn events it partitions the activity_id so a subagent's turns never collide with the main thread's. Empty/absent on the main thread. Structural identifier (INV-2).",
       "type": "string"
+    },
+    "status": {
+      "description": "Outcome of a tool call (v1.2, ADR-0018 Decision 1). Set on ToolResult ONLY — the client drops it on every other event type, because core copies payload.status into the row's workflow_status column for ANY event type (activities/governance/storage_event.go:417) and a lifecycle event's workflow_status means something else. This scope cannot be expressed in the subset of JSON Schema the conformance validator implements, so it is enforced by client.statusFor and asserted on the outbound bytes by conformance case C20. Structural, NOT content (INV-2): derived from which provider hook fired, or from a bound bool/int — never parsed from tool output — so it is not content-gated and ships identically with content_capture off. Core reads the literal 'completed' and nothing else (observability/errors.go:333), which is why the enum is closed rather than free-form.",
+      "enum": ["completed", "failed"]
     },
     "metadata": {
       "description": "Additive per-type key/values. Lands verbatim in core payload's `metadata` (json.RawMessage). Never carries credentials/secrets (INV-1) or raw content (INV-2 — content lives only under `content`).",
@@ -165,6 +173,24 @@
       "description": "Closes one model turn and carries what it spent: tokens (all four counts the provider reports) and the model that spent them. Both are optional — a turn the projection could not measure is still a real turn, and zero-filling would claim it spent nothing.",
       "required": ["event_type", "turn_index"],
       "properties": { "event_type": { "const": "TurnCompleted" } }
+    },
+    {
+      "title": "SubagentStarted",
+      "description": "A subagent spawned (v1.2, ADR-0018). Rides SignalReceived(subagent_started). Metadata-only: agent_id + agent_type. Carries NO signal_args — core's alignment engine treats any SignalReceived with non-empty signal_args as a NEW USER GOAL and overwrites the session's goal with them (openbox-core internal/services/age.go:112-137), so structural detail rides metadata for all three of these signals.",
+      "required": ["event_type"],
+      "properties": { "event_type": { "const": "SubagentStarted" } }
+    },
+    {
+      "title": "PermissionDenied",
+      "description": "A policy or classifier refused a tool call (v1.2, ADR-0018). Rides SignalReceived(permission_denied). Records THAT a decision happened and which tool it was about — never the content and never the reason (the provider's `reason` is free text and is not bound; ADR-0019 owns it). Note the provider limit: Claude Code 2.1.229 fires its PermissionDenied hook only after an auto-mode classifier denial, so a static deny rule denies WITHOUT producing this event — absence is not evidence that nothing was denied.",
+      "required": ["event_type"],
+      "properties": { "event_type": { "const": "PermissionDenied" } }
+    },
+    {
+      "title": "APIError",
+      "description": "A model turn ended in a provider-side error instead of an answer (v1.2, ADR-0018). Rides SignalReceived(api_error). metadata.error_type is the provider's own closed enum (rate_limit, overloaded, authentication_failed, oauth_org_not_allowed, billing_error, invalid_request, model_not_found, server_error, max_output_tokens, unknown), allowlisted at the adapter; anything else is dropped rather than egressed. Free-text error detail is NOT carried.",
+      "required": ["event_type"],
+      "properties": { "event_type": { "const": "APIError" } }
     }
   ],
   "$defs": {

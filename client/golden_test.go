@@ -132,6 +132,11 @@ func goldenCases() []goldenCase {
 		span := *call.Span
 		span.Stage = "completed"
 		res.Span = &span
+		// The outcome (ADR-0018). It rides the completed half only, and these
+		// three fixtures are what pins the literal core compares against — a
+		// rename to "success" or "COMPLETED" shows up here as a wire diff rather
+		// than as a dashboard that quietly reads 0%.
+		res.Status = StatusCompleted
 		return res
 	}
 
@@ -157,6 +162,19 @@ func goldenCases() []goldenCase {
 	shellCall.Span = &Span{SemanticType: "shell_command", Stage: "started"}
 	shellResult := completed(shellCall, "ev-8", "2026-07-31T09:00:01Z")
 
+	// The failure half of the same shape: a shell call that failed. Everything
+	// but `status` is identical to the successful one, which is the point —
+	// nothing else on the wire distinguishes a failed call, so the enum is
+	// load-bearing rather than decorative. `duration_ms` is present because a
+	// failed call still took time, and the failure hook is paired by the same
+	// duration stash as the success one.
+	shellFailedCall := base(EventToolCall, "ev-15")
+	shellFailedCall.Tool = Tool{Name: "Bash", Kind: ToolShell}
+	shellFailedCall.Span = &Span{SemanticType: "shell_command", Stage: "started", InvocationID: "toolu_fail01"}
+	shellFailed := completed(shellFailedCall, "ev-16", "2026-07-31T09:00:03.25Z")
+	shellFailed.Status = StatusFailed
+	shellFailed.Metadata = map[string]any{"provider": "claude-code", "is_interrupt": false}
+
 	mcpCall := base(EventToolCall, "ev-7")
 	mcpCall.Tool = Tool{Name: "search_issues", Kind: ToolMCP, MCPServer: "github"}
 	mcpCall.Span = &Span{
@@ -166,6 +184,34 @@ func goldenCases() []goldenCase {
 		Function:     "search_issues",
 	}
 	mcpResult := completed(mcpCall, "ev-9", "2026-07-31T09:00:00.75Z")
+
+	// The three failure/lifecycle signals (ADR-0018). Their fixtures exist
+	// mainly to pin ONE property that no unit test states as loudly: the wire
+	// payload has NO signal_args key. Core reads a SignalReceived carrying
+	// signal_args as a new user goal and overwrites the alignment session's goal
+	// with it (age.go:112-137), so a well-meaning "let's show the denied tool in
+	// the Verify tab's Input" would silently destroy goal alignment. If these
+	// three fixtures ever gain a signal_args key, that is the bug.
+	subagentStarted := base(EventSubagentStarted, "ev-17")
+	subagentStarted.Tool = Tool{Name: "claude-code", Kind: ToolShell}
+	subagentStarted.AgentID = "agt-code-reviewer-01"
+	subagentStarted.Metadata = map[string]any{
+		"provider":   "claude-code",
+		"agent_id":   "agt-code-reviewer-01",
+		"agent_type": "code-reviewer",
+	}
+
+	permissionDenied := base(EventPermissionDenied, "ev-18")
+	permissionDenied.Tool = Tool{Name: "Bash", Kind: ToolShell}
+	permissionDenied.Span = &Span{SemanticType: "internal", Stage: "completed", InvocationID: "toolu_denied01"}
+	permissionDenied.Metadata = map[string]any{
+		"provider":    "claude-code",
+		"tool_use_id": "toolu_denied01",
+	}
+
+	apiError := base(EventAPIError, "ev-19")
+	apiError.Tool = Tool{Name: "claude-code", Kind: ToolShell}
+	apiError.Metadata = map[string]any{"provider": "claude-code", "error_type": "rate_limit"}
 
 	// A turn: the same activity carrier as a tool call, with an id derived from
 	// the turn index instead of hashed from an operation, and usage rather than
@@ -192,6 +238,16 @@ func goldenCases() []goldenCase {
 		Total:              intPtrGolden(63828),
 	}
 	turnCompleted.Metadata = map[string]any{"provider": "claude-code", "turn_index": turnIndex}
+
+	// The same turn WITH the assistant's text (ADR-0018). This fixture is the
+	// byte-exact record of the one span a developer session emits: the
+	// classification attributes core recomputes semantic_type from, the
+	// synthetic marker, the hash-derived ids, and the OpenAI-chat wrapper its
+	// alignment extractor unmarshals. Every one of those fails SILENTLY if it
+	// drifts — core logs and returns "" — so the fixture is the alarm.
+	turnWithContent := turnCompleted
+	turnWithContent.EventID = "ev-20"
+	turnWithContent.Content = &Content{Output: "I refactored the spool; all 11 modules are green."}
 
 	// A subagent's turn: same shape, partitioned id, attributed by agent.
 	subIndex := 1
@@ -249,10 +305,15 @@ func goldenCases() []goldenCase {
 		{"activity_file_completed", fileResult},
 		{"activity_shell_started", shellCall},
 		{"activity_shell_completed", shellResult},
+		{"activity_tool_failed", shellFailed},
+		{"signal_subagent_started", subagentStarted},
+		{"signal_permission_denied", permissionDenied},
+		{"signal_api_error", apiError},
 		{"activity_mcp_started", mcpCall},
 		{"activity_mcp_completed", mcpResult},
 		{"activity_turn_started", turnStarted},
 		{"activity_turn_completed", turnCompleted},
+		{"activity_turn_completed_content", turnWithContent},
 		{"activity_turn_subagent_completed", subagentTurn},
 		{"activity_usage_rollup_started", rollupStarted},
 		{"activity_usage_rollup_completed", rollupCompleted},

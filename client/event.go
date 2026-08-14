@@ -25,7 +25,10 @@ package client
 // 1.1 added the turn pair (ADR-0014) and widened Tokens, re-defining Input as
 // pure input. The schema's x-changelog records what changed and why the Tokens
 // semantic made it a bump rather than a silent edit.
-const SchemaVersion = "1.1"
+//
+// 1.2 added Status on tool results and the failure/lifecycle event types
+// (ADR-0018). Purely additive — every 1.1 event is a valid 1.2 event.
+const SchemaVersion = "1.2"
 
 // EventType is a developer-runtime lifecycle event type. Each maps 1:1 onto
 // an openbox-core event_type string (INV-8) — see MAPPING.md §2.
@@ -57,6 +60,35 @@ const (
 	// (turnActivityIDFor), which is what pairs them onto one row.
 	EventTurnStarted   EventType = "TurnStarted"
 	EventTurnCompleted EventType = "TurnCompleted"
+
+	// The failure/lifecycle signals (ADR-0018). All three ride stock
+	// SignalReceived (INV-8) — no new endpoint, no new table, per the repo's
+	// reuse rule — and all three are metadata-only.
+	//
+	// They carry NO signal_args, and that is a correctness constraint rather
+	// than a minimalism preference. Core's goal-alignment engine treats ANY
+	// SignalReceived with non-empty signal_args as a new user goal: it runs an
+	// alignment check against the assistant messages accumulated so far and then
+	// OVERWRITES the session's goal with the stringified args
+	// (openbox-core internal/services/age.go:112-137). Putting the denied tool's
+	// name in signal_args would therefore replace the developer's actual prompt
+	// as the thing every later turn is scored against, silently wrecking the
+	// feature the turn span exists to feed. Structural detail rides metadata.
+	// TestNewSignalsCarryNoSignalArgs holds this.
+
+	// EventSubagentStarted marks a subagent spawning. Until this existed a
+	// subagent was visible only through the agent_id on its tool events, so one
+	// that spawned and did nothing left no trace.
+	EventSubagentStarted EventType = "SubagentStarted"
+	// EventPermissionDenied records that a policy or classifier refused a tool
+	// call — that a decision happened and which tool it was about, never what
+	// the content was and never why (the provider's `reason` is free text and
+	// is not bound).
+	EventPermissionDenied EventType = "PermissionDenied"
+	// EventAPIError records a turn that ended in a provider-side error rather
+	// than an answer (rate limit, billing, auth, overload). Without it, a
+	// session throttled into silence is indistinguishable from an idle one.
+	EventAPIError EventType = "APIError"
 )
 
 // AllEventTypes is the complete vocabulary, so callers that need to enumerate it
@@ -74,7 +106,24 @@ var AllEventTypes = []EventType{
 	EventDeploy,
 	EventTurnStarted,
 	EventTurnCompleted,
+	EventSubagentStarted,
+	EventPermissionDenied,
+	EventAPIError,
 }
+
+// Tool-result outcome vocabulary (ADR-0018 Decision 1). Two literals, closed.
+//
+// The strings are not ours to choose: core compares the wire value against the
+// literal "completed" and nothing else
+// (openbox-core internal/services/activities/observability/errors.go:333). A
+// near-miss — "success", "COMPLETED", "complete" — does not degrade the metric,
+// it pins it at 0%, which is exactly the state this field exists to fix. So the
+// vocabulary is closed and statusFor drops anything outside it rather than
+// forwarding a value core will silently score as a failure.
+const (
+	StatusCompleted = "completed"
+	StatusFailed    = "failed"
+)
 
 // ToolKind is the provider-agnostic tool class ($defs.tool.kind).
 type ToolKind string
@@ -214,6 +263,21 @@ type DevEvent struct {
 	Cost          *Cost     `json:"cost,omitempty"`
 	Span          *Span     `json:"span,omitempty"`
 	Content       *Content  `json:"content,omitempty"`
+
+	// Status is a tool call's outcome — StatusCompleted or StatusFailed — and
+	// is the only thing core reads to decide whether a completed call succeeded.
+	// Set on ToolResult and nowhere else: payload.Status also writes the row's
+	// workflow_status column for ANY event type
+	// (openbox-core .../governance/storage_event.go:417), so putting a tool
+	// outcome on a lifecycle event would overwrite a genuinely workflow-scoped
+	// field. statusFor enforces both the vocabulary and the event-type scope at
+	// the wire boundary, so an adapter mistake cannot widen either.
+	//
+	// Structural, NOT content (INV-2): it is derived from which hook fired, or
+	// from a bound bool/int — never parsed out of tool output. It is therefore
+	// not content-gated and ships identically with content_capture off. A
+	// two-literal enum has no room to encode anything.
+	Status string `json:"status,omitempty"`
 
 	// Model is the provider model id that spent this event's tokens
 	// ("claude-opus-4-8", "gpt-5-codex", …). It is the ONE free-form string the
