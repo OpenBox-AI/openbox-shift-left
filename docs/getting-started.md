@@ -167,7 +167,10 @@ project you want governed. `init` prints which directory it governed, every time
 default. Two things keep that from being a surprise you cannot recover from:
 enforcement acts on *your org's policy*, so until your org publishes one nothing is
 blocked and you get observability either way; and `fail_closed` stays **off**, so
-an OpenBox outage never blocks a tool call. Want telemetry without enforcement:
+an OpenBox outage never blocks a tool call. One diagnosed defect escapes both
+today — a control-plane precondition failure expressed as a HALT; the symptom and
+the recovery are in [Troubleshooting](#troubleshooting) under `Session is no
+longer active`. Want telemetry without enforcement:
 
 ```bash
 openbox init --provider claude-code --enforce=false
@@ -386,6 +389,7 @@ events" has not been re-confirmed against a live stack since the flow changed.
 | Hooks never fire | The session was started before `init`, or you are in a directory where `init` was not run (project scope is the default). Restart the tool; for Codex run `/hooks` and trust them. |
 | No events at all, and `doctor` looks fine | Almost always scope: `init` governs one directory. Check which one it named, or use `--scope global` plus managed settings. |
 | Everything is denied | `fail_closed` is on and OpenBox cannot be reached, so every gated call denies. `openbox doctor` shows the failure policy and the last decision. Restore connectivity, or set `fail_closed:false` to proceed ungoverned instead. |
+| `OpenBox governance: Session is no longer active` on every tool call | Not your org's policy — a policy verdict names its policy in a `(policy: …)` suffix, and this one has none. The control plane's record of this session went terminal (e.g. a `SessionEnded` was recorded while the session was live) and it rejects every later event as a HALT; fail-open does not apply, because a HALT is a verdict rather than an outage. Start a new session — that restores the server-side record. Known defect, fix under decision ([diagnosis](../plans/reports/debug-260814-1231-session-no-longer-active-halt.md)). |
 | A session hangs on a tool call | An approval is filed and undecided. `openbox approve list` shows it; deciding it releases the session. |
 | Every tool call appears twice; success rates and latencies look wrong | The directory has an OpenBox hook registered twice — usually a second engine left by an `init` once run with a different `HOME`. `openbox doctor` reports both that and a repeat at one path; re-running `openbox init` there removes the extra registration. Events already stored stay duplicated. |
 | `OPENBOX_ED25519_SEED is deprecated` | Harmless, and it still works. Rename it to `OPENBOX_AGENT_PRIVATE_KEY` — the name OpenBox documents. |

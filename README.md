@@ -61,7 +61,8 @@ openbox init --provider claude-code
 
 Want telemetry without enforcement? `--enforce=false`. Note that enforcement acts on
 *your org's policy*, so until your org publishes one nothing is blocked and you get
-observability either way.
+observability either way — with one diagnosed exception, documented in
+[What this does not prove](#what-this-does-not-prove).
 
 **4. Use `claude` as normal.** Nothing to run, no runtime environment to set.
 
@@ -242,6 +243,14 @@ prevent, so the limits are documented as first-class:
   developer who does not want it must set `fail_closed`, and accept that a
   control-plane outage then blocks work
   ([ADR-0017](docs/adr/ADR-0017-inline-policy-evaluation.md)).
+- **A control-plane HALT is applied even when no policy authored it.** Core can
+  express an operational failure — its record of a session gone terminal while the
+  session was still live — as a HALT verdict with no policy id, and the client
+  applies it: every later gated call in that session is denied until a new session
+  starts, even in an org that has published no policy. Fail-open does not engage,
+  because it covers *no verdict*, not *a HALT verdict*. Diagnosed live, fix under
+  decision
+  ([diagnosis](plans/reports/debug-260814-1231-session-no-longer-active-halt.md)).
 - **Egress is recorded, not controlled.** OpenBox does not proxy or allow-list the
   coding tool's traffic to its model provider; it records that posture as evidence.
 - **Content-based policy sees at most the first 64KB of a write.** Bodies are

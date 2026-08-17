@@ -190,6 +190,22 @@ Being precise here is part of the product.
   evaluator that kept deciding while offline; the trade is deliberate, and the
   reason it was worth making is that hand-written rego could never be evaluated
   locally at all, so those orgs' gates simply opened.
+- **A control-plane verdict is applied even when no policy authored it.** The
+  enforce path trusts every `/evaluate` HALT as a policy decision, and core can
+  express an operational precondition failure as one: once its record of a session
+  goes terminal — observed when a `SessionEnded` was recorded while the session was
+  still live — it answers every later event `HALT` ("Session is no longer active")
+  with **no policy id and no governance event**. Both default-posture mitigations
+  miss it: "inert until your org publishes a policy" is falsified directly, and
+  fail-open never engages because the failure policy covers *no verdict*, not *a
+  HALT verdict*. One such HALT latches the server-side session, so the remainder of
+  that session denies until a new session restores a pending record — and the
+  denial itself stores no governance event, so the control plane holds no record of
+  the blocking it did. Whether the client should stop trusting a HALT that carries
+  neither a policy id nor a governance-event id, or the server should stop
+  expressing preconditions as verdicts, is an open decision; the live diagnosis and
+  the options are in
+  [`debug-260814-1231-session-no-longer-active-halt.md`](../plans/reports/debug-260814-1231-session-no-longer-active-halt.md).
 - **Content-based policy sees at most the first 64KB of a write.** Bodies are
   truncated by `capBody` (`client/payload.go`) before egress, so a rule that would
   match past that offset does not fire. Content-based policy is not a complete
