@@ -93,6 +93,40 @@ if [ -n "$sid" ]; then
 	assert_eq "one ActivityStarted per gated Write" 1 "$started"
 fi
 
+# ── A3. a HALT ends the session: turn stop, latch, no re-evaluation (ADR-0020) ─
+tb_step "A3 · HALT ends the session"
+HALT_MARK="OBXHALT$run"
+halt_rego() { # <marker>
+	printf '%s' 'default result := {"decision": "allow", "reason": "no rule matched"}
+
+result := {"decision": "halt", "reason": "testbed raw-rego halt"} if {
+	input.event_type == "ActivityStarted"
+	input.activity_type == "Bash"
+	contains(object.get(input, ["activity_input", "command"], ""), "'"$1"'")
+}'
+}
+tb_policy_apply "openbox testbed — raw-rego halt" "$(halt_rego "$HALT_MARK")" >/dev/null
+if tb_wait_for_opa Bash halt; then
+	before="$(tb_audit_size)"
+	rm -f "$TB_PROJECT/after-halt.txt"
+	# One prompt, two requested actions: the HALT on the echo must stop the turn
+	# (continue:false), so the follow-up Write never happens.
+	tb_session "Run the shell command: echo $HALT_MARK — then create a file after-halt.txt containing ok." "Bash Write" >/dev/null
+	audit="$(tb_audit_since "$before")"
+	assert_contains "the HALT was applied as a session stop" "$audit" '"applied_decision":"halt"'
+	assert_contains "decided by the control plane" "$audit" '"source":"evaluate"'
+	assert_absent "the turn stopped at the HALT — no later write" "$([ -r "$TB_PROJECT/after-halt.txt" ] && echo written)" "written"
+	assert_nonempty "the session is latched" "$(ls "$OPENBOX_HALT_DIR" 2>/dev/null)"
+	# Latched replays refuse locally and are audited as such; a one-shot headless
+	# session may end at the HALT without a further gated hook, so the replay row
+	# is asserted only when one exists — the structural claim is the latch above.
+	if printf '%s' "$audit" | grep -q '"source":"session-halt"'; then
+		tb_ok "latch replays are audited (source session-halt)"
+	fi
+else
+	tb_bad "OPA serves the raw-rego halt" "halt" "$(tb_opa_decision Bash)"
+fi
+
 tb_policy_apply "openbox testbed — ungated" "$TB_ALLOW_REGO" >/dev/null
 tb_wait_for_opa Bash allow || tb_bad "policy reset to allow" "allow" "$(tb_opa_decision Bash)"
 
