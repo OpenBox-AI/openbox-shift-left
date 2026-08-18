@@ -95,12 +95,13 @@ testbed/
   25-realtime.sh
   28-usage.sh
   30-enforce.sh
+  35-telemetry.sh
   40-approvals.sh
   50-lineage.sh
   60-visibility.sh
   70-approver-auto.sh
   99-teardown.sh
-  run-all.sh          # tags: capture, realtime, usage, enforce, approvals, lineage, visibility, auto
+  run-all.sh          # one tag per phase — its phases array is the authoritative list
 ```
 
 Scripts are numbered because they share state deliberately: `50-lineage` needs the
@@ -122,7 +123,11 @@ Real `openbox auth` then `openbox init --provider claude-code` (default scope, e
 (the only onboarding spelling — §8). Asserts: `agents` row with
 `agent_type=developer` and `signing_required=t`; config written; hooks installed
 **scoped to the testbed project only**; `openbox dev verify` succeeds;
-`openbox doctor` reports every posture flag with provenance.
+`openbox doctor` reports every posture flag with provenance. A planted
+stale-engine copy of our own hook (the residue of an `init` once run under a
+different `HOME`) is **replaced** on re-init and the swap names what it
+retired — ownership is decided by argv shape, so a genuinely foreign hook
+survives.
 
 > **Trap:** enforcement written to the *global* config
 > fail-closed-denies every Claude Code session on the box. The harness writes
@@ -161,6 +166,16 @@ Its activity counts are scoped to **tool** activities
 (`activity_type is distinct from 'llm_completion'`). A session also emits model-turn
 activities on the same two wire types, so an unscoped count would let "4 tool calls
 captured" pass on two tool calls plus two turns. Turn pairing lives in `28-usage`.
+
+### 25-realtime
+Telemetry reaches core **while the session is still running**
+(`hookflow.RealtimeTrigger`, on by default — the phase deliberately sets no
+`OPENBOX_REALTIME`, because the default posture is the claim). The proof is
+**ordering, not latency**: the session's `WorkflowStarted` and tool activity are
+queryable in core while the driver process is still alive. Then the join proves
+completeness survived — exactly one `WorkflowStarted`/`WorkflowCompleted` pair,
+so an overlapping realtime drain and end-of-session drain never double-count
+(server-side `Idempotency-Key` dedupe).
 
 ### 28-usage
 Per-turn model + token usage (ADR-0014), and the arithmetic that makes it worth
@@ -225,7 +240,31 @@ findings channel on. Asserts: the deny is sourced from `evaluate` with a
 server and stored once; the written file contains `OPENBOX_REDACTED` and the
 secret never egresses; fail-closed synthesizes a HALT while fail-open proceeds
 **and is recorded** as ungoverned; redaction survives the outage; findings
-surface in-session.
+surface in-session. Two later additions ride the same phase: a published
+raw-rego **HALT ends the session**
+([ADR-0020](../adr/ADR-0020-prompt-gate-and-halt-session-stop.md)) — applied as
+a session stop, the turn stops before its follow-up write, the latch file
+appears under `OPENBOX_HALT_DIR`, and a same-session replay is audited as
+`source:"session-halt"`; and the `SessionStarted` posture names **who decides**
+(`control_plane`) and the failure policy while making no bundle-integrity
+claim, `doctor` agrees, and the retired `dev sync` fails loudly rather than
+appearing to succeed.
+
+### 35-telemetry
+Tool outcome, the failure/lifecycle signals, and the one content-bearing turn
+span ([ADR-0018](../adr/ADR-0018-dev-turn-content-carrier.md)). Its own phase
+because it needs a session that **fails** a tool call and one that spawns a
+subagent — neither `20-capture` nor `28-usage` drives either, and bending them
+into it would make their own counts noisier. The load-bearing checks, in the
+order their failures matter: `status` on the completed row (Tool Health can
+compute at all); a failed call stored `failed` (SUCCESS% means something); ONE
+span, `llm_completion` (Goal Alignment has text to score); capture off ⇒ **no**
+span rows (the gate is real server-side, not just on the wire); `signal_args`
+NULL on the new signals (the alignment goal is not overwritten). The single
+list a live run must confirm is
+[`MAPPING.md`](../../contracts/dev-event/MAPPING.md) §7 items 15–21 — the
+script is that list's executable form and defers to it. **Dormant: written,
+never run** — its own header says not to cite it as evidence until it has.
 
 ### 40-approvals
 The five approval scenarios, scripted with timing, using the P4 approver
