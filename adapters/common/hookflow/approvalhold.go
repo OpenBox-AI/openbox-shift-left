@@ -46,6 +46,14 @@ const approvalPollInterval = 500 * time.Millisecond
 // audit can tell "the server said approval was needed" from "someone decided".
 const SourceApprovalDecided = "approval:decided"
 
+// SourceApprovalUndecided marks the deny synthesized when a filed approval was
+// never answered within the hold. It exists because ApprovalUndecided rewrites
+// the verdict to HALT while the decision still carried Source=evaluate — which
+// made a hold timeout indistinguishable, in the audit and to the session-halt
+// discriminator, from the control plane actually answering HALT. A HALT with
+// this source denies one call; it must never terminate the session.
+const SourceApprovalUndecided = "approval:undecided"
+
 // AwaitApproval holds the tool call while a filed approval is decided, and
 // reports the answer. ok is false when the hold ended with the request still
 // undecided — the caller turns that into a deny (see ApprovalUndecided).
@@ -150,6 +158,10 @@ func ApprovalUndecided(dec decision.Decision, cause string) decision.Decision {
 	}
 	dec.Evaluation.Verdict = client.VerdictHalt
 	dec.Evaluation.Reason = reason
+	// The HALT above is synthesized, not the server's answer. Re-source it so
+	// the audit says so and the session-halt discriminator (Source==evaluate)
+	// can never read a hold timeout as a session-terminating verdict.
+	dec.Source = SourceApprovalUndecided
 	return dec
 }
 

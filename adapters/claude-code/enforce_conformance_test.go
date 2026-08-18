@@ -16,6 +16,8 @@ import (
 	"testing"
 
 	"time"
+
+	"github.com/openbox-ai/openbox-shift-left/adapters/common/hookflow"
 )
 
 // Enforcement conformance suite (STORY-E6-S7) — executable INV-3b evidence.
@@ -692,3 +694,174 @@ func TestEnforcementConformance(t *testing.T) {
 // are properties of a local bundle's freshness; there is no local bundle, so
 // nothing can be stale. `openbox dev sync`, which cleared the marker, is retired
 // in the same change.
+
+// ── Session-halt conformance (plan 260818-1714) ──────────────────────────────
+//
+// C27–C31 drive the real RunHook paths and assert the session-halt semantics on
+// the exact stdout bytes: a HALT the control plane returns terminates the
+// session — `continue:false` now, a latch refusing every later gated hook with
+// no re-evaluation — while a BLOCK and every SYNTHESIZED halt stay per-call,
+// and the prompt gate blocks prompts exactly as the tool gate denies calls.
+//
+// |C27| tool HALT           | deny + continue:false + latch; later hooks refuse locally, 0 POSTs |
+// |C28| prompt HALT         | decision:block + continue:false + latch                            |
+// |C29| prompt BLOCK        | block only — no continue:false, no latch, next prompt re-evaluates |
+// |C30| prompt ALLOW        | empty stdout (byte-identical to observe)                           |
+// |C31| fail-closed no-verdict | plain deny, NO continue:false, NO latch                         |
+func TestSessionHaltConformance(t *testing.T) {
+	isolateConfig(t)
+	t.Setenv(envDID, testDID)
+	t.Setenv("OPENBOX_SPOOL_DIR", t.TempDir())
+	t.Setenv("OPENBOX_SESSION_DIR", t.TempDir())
+	t.Setenv(envEnforcementFile, filepath.Join(t.TempDir(), "enf.jsonl"))
+	t.Setenv(envContentCapture, "0")
+	t.Setenv(envEnforce, "1")
+	t.Setenv(envFailClosed, "0")
+
+	run := func(t *testing.T, hook, payload string) string {
+		t.Helper()
+		var stdout bytes.Buffer
+		RunHook(hook, strings.NewReader(payload), &stdout, log.New(io.Discard, "", 0))
+		return stdout.String()
+	}
+	toolPayload := func(sid, cmd string) string {
+		return `{"hook_event_name":"PreToolUse","session_id":"` + sid + `","cwd":"/tmp","tool_name":"Bash","tool_input":{"command":"` + cmd + `"}}`
+	}
+	promptPayload := func(sid, text string) string {
+		return `{"hook_event_name":"UserPromptSubmit","session_id":"` + sid + `","cwd":"/tmp","prompt":"` + text + `"}`
+	}
+	parseToolOut := func(t *testing.T, out string) preToolUseOutput {
+		t.Helper()
+		var got preToolUseOutput
+		if err := json.Unmarshal([]byte(out), &got); err != nil {
+			t.Fatalf("stdout is not valid PreToolUse JSON: %v (%q)", err, out)
+		}
+		return got
+	}
+	parsePromptOut := func(t *testing.T, out string) userPromptSubmitOutput {
+		t.Helper()
+		var got userPromptSubmitOutput
+		if err := json.Unmarshal([]byte(out), &got); err != nil {
+			t.Fatalf("stdout is not valid UserPromptSubmit JSON: %v (%q)", err, out)
+		}
+		return got
+	}
+	stopped := func(c *bool) bool { return c != nil && !*c }
+
+	t.Run("C27 tool HALT denies, stops the session, and latches", func(t *testing.T) {
+		t.Setenv("OPENBOX_HALT_DIR", t.TempDir())
+		url, hits := serveEvaluate(t, `{"verdict":"halt","reason":"org kill switch","policy_id":"halt-pol"}`, 200, 0)
+		evalCreds(t, url)
+
+		got := parseToolOut(t, run(t, "PreToolUse", toolPayload("halt-s1", "echo one")))
+		if !stopped(got.Continue) || got.HookSpecificOutput.PermissionDecision != ccDecisionDeny {
+			t.Fatalf("HALT render = %+v, want continue:false + permissionDecision deny", got)
+		}
+		if !strings.Contains(got.StopReason, "org kill switch") || !strings.Contains(got.StopReason, "halt-pol") {
+			t.Errorf("stopReason %q must carry the policy reason and id", got.StopReason)
+		}
+		if _, halted := hookflow.SessionHalted("halt-s1"); !halted {
+			t.Fatal("the session must be latched after an emitted session halt")
+		}
+
+		// Every later gated hook in the session refuses LOCALLY: same stdout
+		// shape, zero further /evaluate round-trips.
+		before := atomic.LoadInt32(hits)
+		got2 := parseToolOut(t, run(t, "PreToolUse", toolPayload("halt-s1", "echo two")))
+		if !stopped(got2.Continue) || got2.HookSpecificOutput.PermissionDecision != ccDecisionDeny {
+			t.Errorf("latched PreToolUse render = %+v, want continue:false + deny", got2)
+		}
+		gotP := parsePromptOut(t, run(t, "UserPromptSubmit", promptPayload("halt-s1", "carry on")))
+		if !stopped(gotP.Continue) || gotP.Decision != ccPromptDecisionBlock {
+			t.Errorf("latched UserPromptSubmit render = %+v, want continue:false + decision:block", gotP)
+		}
+		if after := atomic.LoadInt32(hits); after != before {
+			t.Errorf("latched session made %d further /evaluate calls, want 0 — the latch is the decided state", after-before)
+		}
+
+		// The audit distinguishes the server HALT from the latch replays.
+		enf, err := os.ReadFile(os.Getenv(envEnforcementFile))
+		if err != nil {
+			t.Fatalf("read enforcement sink: %v", err)
+		}
+		if !strings.Contains(string(enf), `"source":"evaluate"`) || !strings.Contains(string(enf), `"source":"session-halt"`) {
+			t.Errorf("enforcement sink must carry both the evaluate HALT and the session-halt replays: %s", enf)
+		}
+		if !strings.Contains(string(enf), `"applied_decision":"halt"`) {
+			t.Errorf("enforcement sink must record the applied session stop: %s", enf)
+		}
+	})
+
+	t.Run("C28 prompt HALT blocks the prompt and stops the session", func(t *testing.T) {
+		t.Setenv("OPENBOX_HALT_DIR", t.TempDir())
+		url, _ := serveEvaluate(t, `{"verdict":"halt","reason":"prompt policy","policy_id":"p-halt"}`, 200, 0)
+		evalCreds(t, url)
+
+		got := parsePromptOut(t, run(t, "UserPromptSubmit", promptPayload("halt-s2", "please do the thing")))
+		if got.Decision != ccPromptDecisionBlock || !stopped(got.Continue) || got.StopReason == "" {
+			t.Fatalf("prompt HALT render = %+v, want decision:block + continue:false + stopReason", got)
+		}
+		if !strings.Contains(got.Reason, "prompt policy") || !strings.Contains(got.Reason, "p-halt") {
+			t.Errorf("reason %q must carry the policy reason and id", got.Reason)
+		}
+		if strings.Contains(got.Reason, "please do the thing") {
+			t.Errorf("reason leaked the prompt text (INV-2): %q", got.Reason)
+		}
+		if _, halted := hookflow.SessionHalted("halt-s2"); !halted {
+			t.Error("the session must be latched after a prompt HALT")
+		}
+		enf, _ := os.ReadFile(os.Getenv(envEnforcementFile))
+		if !strings.Contains(string(enf), `"tool_kind":"prompt"`) {
+			t.Errorf("enforcement sink must record the prompt gate under its own kind: %s", enf)
+		}
+	})
+
+	t.Run("C29 prompt BLOCK blocks only that prompt", func(t *testing.T) {
+		t.Setenv("OPENBOX_HALT_DIR", t.TempDir())
+		url, hits := serveEvaluate(t, `{"verdict":"block","reason":"off-scope prompt","policy_id":"p-block"}`, 200, 0)
+		evalCreds(t, url)
+
+		got := parsePromptOut(t, run(t, "UserPromptSubmit", promptPayload("halt-s3", "first ask")))
+		if got.Decision != ccPromptDecisionBlock {
+			t.Fatalf("prompt BLOCK render = %+v, want decision:block", got)
+		}
+		if got.Continue != nil {
+			t.Errorf("a BLOCK must not stop the session: %+v", got)
+		}
+		if _, halted := hookflow.SessionHalted("halt-s3"); halted {
+			t.Error("a BLOCK must not latch the session")
+		}
+		// The next prompt is evaluated afresh — blocked again by the stub, but
+		// through a real round-trip, not a latch.
+		before := atomic.LoadInt32(hits)
+		_ = run(t, "UserPromptSubmit", promptPayload("halt-s3", "second ask"))
+		if after := atomic.LoadInt32(hits); after != before+1 {
+			t.Errorf("un-latched session made %d further calls, want exactly 1", after-before)
+		}
+	})
+
+	t.Run("C30 prompt ALLOW writes nothing", func(t *testing.T) {
+		t.Setenv("OPENBOX_HALT_DIR", t.TempDir())
+		url, _ := serveEvaluate(t, `{"verdict":"allow"}`, 200, 0)
+		evalCreds(t, url)
+		if out := run(t, "UserPromptSubmit", promptPayload("halt-s4", "benign ask")); strings.TrimSpace(out) != "" {
+			t.Errorf("an allowed prompt must be byte-identical to observe (empty stdout); got %q", out)
+		}
+	})
+
+	t.Run("C31 fail-closed synthesized HALT stays per-call: no stop, no latch", func(t *testing.T) {
+		t.Setenv("OPENBOX_HALT_DIR", t.TempDir())
+		t.Setenv(envFailClosed, "1")
+		// No reachable control plane: the gate synthesizes the fail-closed HALT.
+		got := parseToolOut(t, run(t, "PreToolUse", toolPayload("halt-s5", "echo blocked")))
+		if got.HookSpecificOutput.PermissionDecision != ccDecisionDeny {
+			t.Fatalf("fail-closed render = %+v, want a plain deny", got)
+		}
+		if got.Continue != nil {
+			t.Errorf("a synthesized HALT must not stop the session: %+v", got)
+		}
+		if _, halted := hookflow.SessionHalted("halt-s5"); halted {
+			t.Error("a synthesized HALT must not latch the session")
+		}
+	})
+}

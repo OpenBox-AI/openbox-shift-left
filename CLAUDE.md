@@ -386,6 +386,36 @@ double-count disappears end to end, and that `decision_authority` lands in
 and failed before this change. `testbed/10-onboard.sh` gained the dormant
 stale-path replacement assertions.
 
+**Prompts gate, and HALT ends the session** (ADR-0020, 2026-08-18): UserPromptSubmit
+runs the SAME shared EnforceGate as PreToolUse (block/erase on HALT/BLOCK, hold on
+REQUIRE_APPROVAL), and a HALT the control plane returns renders `continue:false` +
+a local latch (`halted-sessions/`) that refuses every later gated hook in that
+session with no re-evaluation — resume included. Four things not to re-litigate:
+
+- **The kill discriminator is exact:** `Verdict==HALT && Source==evaluate &&
+  !FailOpen`, marked AFTER the approval hold. `ApprovalUndecided` got its own
+  source (`approval:undecided`) BECAUSE it synthesizes a HALT while leaving
+  Source=evaluate — without that, every hold timeout would kill the session.
+  `TestApplyDecisionSessionHaltSplit` and C27–C31 pin all of it.
+- **Every server HALT kills, authored or not** (owner decision): the unauthored-
+  HALT core defect now ENDS sessions instead of denying calls until it clears.
+  Deliberate — client-side verdict discrimination stays rejected (plan
+  260814-2235); the remedy is the pending core fix.
+- **Codex renders HALT as deny explicitly.** Its `Render` writes NOTHING for an
+  unknown literal, so omitting the `DecisionHalt` case would make HALT silently
+  PROCEED there. No latch is written for Codex (keyed on the session stop being
+  expressed); Codex session-kill is an open follow-up.
+- **The prompt gate needs a re-init** (UserPromptSubmit timeout 5→30 +
+  statusMessage, mirrored in localhooks.go AND plugin/hooks/hooks.json — a pin
+  test holds them together). Prompt approval keys are session-coarse
+  (`activityPairKey` has no span for signals); identity is byte-pinned, so the
+  hold's failure modes all land on block — over-ask, never over-grant.
+
+**Status: implemented, unit- and conformance-verified (C27–C31 on real RunHook
+stdout bytes), all 11 modules green under `-race` plus both cross-compiles — the
+testbed has NOT run.** `testbed/30-enforce.sh` §A3 (raw-rego halt → turn stop +
+latch) is dormant, waiting on a stack.
+
 Next: the Cursor adapter; policy template packs. The one dependency this repo now
 has is `golang.org/x/term v0.34.0`, **pinned** — v0.35.0+ declares `go 1.24.0` and
 would raise the language floor across all eleven modules; `go mod tidy` and

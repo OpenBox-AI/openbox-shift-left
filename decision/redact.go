@@ -37,6 +37,13 @@ type Decision struct {
 	// on it: fail-open (default) proceeds, fail-closed denies. The local step
 	// always sets it, because the local step never decides.
 	FailOpen bool
+	// SessionHalt marks a HALT that terminates the whole session, not just this
+	// call. Only two producers may set it: the enforce gate, for a HALT the
+	// control plane actually returned (Source==evaluate, FailOpen==false), and
+	// the session-halt latch replaying that decision onto later calls. A
+	// synthesized HALT — fail-closed outage, undecided approval, approver
+	// reject — must never carry it: those deny one call.
+	SessionHalt bool
 	// Source names where a verdict came from, for the audit.
 	Source string
 	// RedactedContent carries the local secret-redaction of the tool content.

@@ -380,3 +380,111 @@ func captureStderr(t *testing.T, fn func()) string {
 	r.Close()
 	return out
 }
+
+// A re-init at the SAME engine path must reconcile the registration SHAPE, not
+// just skip on the command match. Found live: the ADR-0020 UserPromptSubmit
+// ceiling raise (5s → the gating ceiling) never arrived on a re-init, so the
+// prompt gate was killed by Claude Code's old 5s timeout mid-evaluation and
+// failed open — through the very `openbox init` the docs name as the upgrade
+// step. Foreign hooks keep their own shape.
+func TestReInitReconcilesRegistrationShape(t *testing.T) {
+	dir := t.TempDir()
+	engine := filepath.Join(dir, "bin", "openbox")
+
+	settingsPath := filepath.Join(dir, ".claude", "settings.local.json")
+	if err := os.MkdirAll(filepath.Dir(settingsPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Our entries at the CURRENT engine path, but in the pre-ADR-0020 shape:
+	// UserPromptSubmit still at 5s with no statusMessage, plus a stale watcher
+	// timeout — and one foreign hook whose shape must survive untouched.
+	old := map[string]any{"hooks": map[string]any{
+		"UserPromptSubmit": []any{map[string]any{
+			"matcher": "",
+			"hooks": []any{
+				map[string]any{"type": "command", "command": localHookCommand(engine, "hook claude-code UserPromptSubmit"), "timeout": 5},
+				map[string]any{"type": "command", "command": "my-prompt-linter", "timeout": 7},
+			},
+		}},
+		"PreToolUse": []any{map[string]any{
+			"matcher": "*",
+			"hooks": []any{
+				map[string]any{"type": "command", "command": localHookCommand(engine, "hook claude-code PreToolUse"), "timeout": 5},
+				map[string]any{"type": "command", "command": localHookCommand(engine, "rewake claude-code"), "asyncRewake": true, "timeout": 60},
+			},
+		}},
+	}}
+	raw, _ := json.MarshalIndent(old, "", "  ")
+	if err := os.WriteFile(settingsPath, raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := writeLocalHooks(dir, engine); err != nil {
+		t.Fatal(err)
+	}
+
+	read := func() map[string]any {
+		t.Helper()
+		raw, err := os.ReadFile(settingsPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got map[string]any
+		if err := json.Unmarshal(raw, &got); err != nil {
+			t.Fatal(err)
+		}
+		return got
+	}
+	hookFields := func(got map[string]any, event, command string) map[string]any {
+		t.Helper()
+		entries, _ := got["hooks"].(map[string]any)[event].([]any)
+		want := unquoteHookCommand(command)
+		for _, e := range entries {
+			entry, _ := e.(map[string]any)
+			inner, _ := entry["hooks"].([]any)
+			for _, h := range inner {
+				hook, _ := h.(map[string]any)
+				cmd, _ := hook["command"].(string)
+				if unquoteHookCommand(cmd) == want {
+					return hook
+				}
+			}
+		}
+		t.Fatalf("no %s hook with command %q", event, command)
+		return nil
+	}
+
+	got := read()
+	ups := hookFields(got, "UserPromptSubmit", localHookCommand(engine, "hook claude-code UserPromptSubmit"))
+	if ts, _ := ups["timeout"].(float64); int(ts) != preToolUseHookTimeoutSec {
+		t.Errorf("UserPromptSubmit timeout = %v, want the gating ceiling %d", ups["timeout"], preToolUseHookTimeoutSec)
+	}
+	if msg, _ := ups["statusMessage"].(string); msg == "" {
+		t.Error("UserPromptSubmit gate must carry a statusMessage after reconcile")
+	}
+	watcher := hookFields(got, "PreToolUse", localHookCommand(engine, "rewake claude-code"))
+	if ts, _ := watcher["timeout"].(float64); int(ts) != rewakeHookTimeoutSec {
+		t.Errorf("rewake watcher timeout = %v, want %d", watcher["timeout"], rewakeHookTimeoutSec)
+	}
+	foreign := hookFields(got, "UserPromptSubmit", "my-prompt-linter")
+	if ts, _ := foreign["timeout"].(float64); int(ts) != 7 {
+		t.Errorf("foreign hook timeout = %v, want its own 7 — reconcile must not touch foreign hooks", foreign["timeout"])
+	}
+
+	// No duplicate entries were appended alongside the reconciled ones, and a
+	// second run is byte-stable (idempotent).
+	first, err := os.ReadFile(settingsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := writeLocalHooks(dir, engine); err != nil {
+		t.Fatal(err)
+	}
+	second, err := os.ReadFile(settingsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(first, second) {
+		t.Error("second re-init changed the file — reconcile is not idempotent")
+	}
+}

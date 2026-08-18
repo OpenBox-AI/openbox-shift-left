@@ -61,7 +61,10 @@ var localHookEvents = []struct {
 	StatusMessage string
 }{
 	{Event: "SessionStart", Timeout: 5},
-	{Event: "UserPromptSubmit", Timeout: 5},
+	// UserPromptSubmit carries the prompt gate (plan 260818-1714), so it needs
+	// the same raised ceiling as PreToolUse: evaluation + approval hold must
+	// finish under the hook kill, or the gate is killed mid-hold and fails open.
+	{Event: "UserPromptSubmit", Timeout: preToolUseHookTimeoutSec, StatusMessage: "OpenBox governance…"},
 	{Event: "PreToolUse", Matcher: "*", Timeout: preToolUseHookTimeoutSec, StatusMessage: "OpenBox governance…"},
 	{Event: "PostToolUse", Matcher: "*", Timeout: 5},
 	{Event: "PostToolUseFailure", Matcher: "*", Timeout: 5},
@@ -114,8 +117,18 @@ func writeLocalHooks(projectDir, engine string) error {
 			redundant = append(redundant, ev.Event)
 		}
 		if hasLocalHookCommand(entries, command) {
-			// Already ours at this engine. The sweep may still have changed the
-			// slice, so write it back rather than leaving the original in place.
+			// Already ours at this engine — but "ours" is matched by COMMAND, and
+			// the registration SHAPE around that command can still be stale. The
+			// prompt gate raised UserPromptSubmit's timeout to the gating ceiling
+			// (ADR-0020); a re-run that merely skipped here kept the old 5s kill,
+			// so Claude Code killed the gate mid-evaluation and failed open —
+			// silently, forever, through the very command the docs name as the
+			// upgrade remedy. Reconcile the fields this installer owns on our
+			// entries (timeout, statusMessage); foreign hooks stay untouched.
+			entries = reconcileLocalHook(entries, command, ev.Timeout, ev.StatusMessage)
+			if ev.Event == "PreToolUse" {
+				entries = reconcileLocalHook(entries, localHookCommand(engine, "rewake claude-code"), rewakeHookTimeoutSec, "")
+			}
 			hooks[ev.Event] = entries
 			continue
 		}
@@ -456,6 +469,36 @@ func splitEngineToken(cmd string) (engine, rest string, ok bool) {
 // gate would evaluate and hold twice, which is a real latency and approval
 // defect. Normalising both sides is what keeps the merge idempotent across the
 // format change.
+// reconcileLocalHook updates the registration shape — timeout and
+// statusMessage, the fields this installer owns — on OUR hook entries, matched
+// by exact command under the same identity rule as hasLocalHookCommand. It
+// never touches a foreign hook, another of our invocations (the rewake watcher
+// has its own command), or the group matcher. It exists because ownership
+// matching by command made a re-init SKIP an entry whose command already
+// matched, which pinned every shape change to fresh installs only — found live
+// when the ADR-0020 ceiling raise did not arrive on a re-init.
+func reconcileLocalHook(entries []any, command string, timeoutSec int, statusMessage string) []any {
+	want := unquoteHookCommand(command)
+	for _, e := range entries {
+		entry, _ := e.(map[string]any)
+		inner, _ := entry["hooks"].([]any)
+		for _, h := range inner {
+			hook, _ := h.(map[string]any)
+			got, _ := hook["command"].(string)
+			if unquoteHookCommand(got) != want {
+				continue
+			}
+			hook["timeout"] = timeoutSec
+			if statusMessage != "" {
+				hook["statusMessage"] = statusMessage
+			} else {
+				delete(hook, "statusMessage")
+			}
+		}
+	}
+	return entries
+}
+
 func hasLocalHookCommand(entries []any, command string) bool {
 	want := unquoteHookCommand(command)
 	for _, e := range entries {

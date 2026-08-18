@@ -33,12 +33,16 @@ const flushBudget = 12 * time.Second
 //     payload, missing identity, unreachable OpenBox, even a panic) is
 //     logged and swallowed. The caller must exit 0 regardless.
 //
-// Enforce mode (opt-in via ResolveEnforce, default off) is the sole
+// Enforce mode (ResolveEnforce, default ON since ADR-0016) is the sole
 // exception to "nothing to stdout": on a PreToolUse hook it may write a
-// Claude Code permissionDecision (deny/ask) to `stdout` — the INV-3b
-// carve-out. It still only ever tightens (deny/ask, never allow) and
-// still exits 0, so a non-blocking verdict is byte-identical to observe
-// mode. Every other hook, and observe mode, write nothing to stdout.
+// Claude Code permissionDecision (deny/ask), on a UserPromptSubmit hook a
+// prompt block, and for a session-halting HALT either may add
+// `continue:false` (plan 260818-1714) — the INV-3b carve-out. It still
+// only ever tightens (deny/ask/block, never allow) and still exits 0, so
+// a non-blocking verdict is byte-identical to observe mode. Every other
+// hook, and observe mode, write nothing to stdout (the findings surface,
+// gated on ResolveFindings, adds only additionalContext — never a
+// decision).
 //
 // `sub` is the hook name (SessionStart/UserPromptSubmit/PreToolUse/PostToolUse/
 // SessionEnd) or "flush"; `stdin` carries the hook payload JSON; `stdout` is where
@@ -193,8 +197,30 @@ func RunHook(sub string, stdin io.Reader, stdout io.Writer, logger *log.Logger) 
 
 	// Resolved ONCE and reused by the gate below. The two must agree: deciding
 	// to defer the observe copy here and then not running the gate would drop
-	// the event.
-	gated := hook == HookPreToolUse && ResolveEnforce()
+	// the event. PreToolUse gates tool calls; UserPromptSubmit gates prompts
+	// (plan 260818-1714) — both through the same shared EnforceGate.
+	gated := ResolveEnforce() && (hook == HookPreToolUse || hook == HookUserPromptSubmit)
+
+	// A session the control plane halted stays halted: gated hooks refuse
+	// locally — deny/block plus continue:false, no re-evaluation — until the
+	// session id changes (a new session). The refused attempt is still
+	// observed, so the dashboard shows what the latch did.
+	if gated {
+		if info, halted := hookflow.SessionHalted(ev.SessionID); halted {
+			if _, err := ad.Observe(hook, ev); err != nil {
+				logger.Printf("spool %s event: %v", hook, err)
+			}
+			nudgeFlush()
+			var c hookflow.OutputContract = promptContract
+			toolName, toolKind := promptToolKind, promptToolKind
+			if hook == HookPreToolUse {
+				kind, _, _, _, _ := classifyTool(ev.ToolName)
+				c, toolName, toolKind = contract, ev.ToolName, string(kind)
+			}
+			hookflow.ReplaySessionHalt(logger, stdout, info, ev.SessionID, toolName, toolKind, c)
+			return
+		}
+	}
 
 	// The observe copy. On a gated hook it is DEFERRED into the gate below,
 	// which spools it only if the inline evaluation did not already deliver the
@@ -224,25 +250,41 @@ func RunHook(sub string, stdin io.Reader, stdout io.Writer, logger *log.Logger) 
 		}
 	}
 
-	// In enforce mode the PreToolUse hook is a synchronous pre-execution gate:
-	// obtain the governance decision before the tool runs (INV-3b — evaluated
-	// in-memory, no network or IPC, fail-open on any fault). Default off: with
-	// enforce off the decider is never invoked and this is inert, so the observe
-	// path stays byte-identical to observe-only. Only PreToolUse gates; every
-	// other hook keeps observing.
+	// In enforce mode the PreToolUse and UserPromptSubmit hooks are synchronous
+	// pre-execution gates: obtain the governance decision before the tool runs
+	// / the prompt is processed (INV-3b — fail-open on any fault). With enforce
+	// off the gate is never invoked and the observe path stays byte-identical
+	// to observe-only. Every other hook keeps observing.
 	//
 	// The gate's steps and their order live in hookflow.EnforceGate, shared with
 	// every provider. What this adapter supplies is how to read its own hook
-	// event (enforceTarget), how it spells a response (contract), and its hook
-	// budget (the evaluation).
+	// event (enforceTarget / promptTarget), how each hook spells a response
+	// (contract / promptContract), and its hook budget (the evaluation).
 	if gated {
+		// One gate, two skins: the hook picks its target (how the event reads),
+		// contract (how a response is spelled) and audit label; everything else
+		// is identical by construction.
+		var (
+			c      hookflow.OutputContract = promptContract
+			target hookflow.EnforceTarget  = promptTarget{id: id, mapper: ad.Mapper, ev: ev}
+			record                         = recordPromptEnforcement
+		)
+		if hook == HookPreToolUse {
+			c, target, record = contract, enforceTarget{id: id, mapper: ad.Mapper, ev: ev}, recordEnforcement
+		}
 		g := hookflow.EnforceGate{
-			Contract:     contract,
+			Contract:     c,
 			Evaluator:    evaluator,
-			Record:       func(dec decision.Decision, res hookflow.ApplyResult) { recordEnforcement(logger, ev, dec, res) },
+			Record:       func(dec decision.Decision, res hookflow.ApplyResult) { record(logger, ev, dec, res) },
 			SpoolObserve: spoolObserve,
 		}
-		g.Run(context.Background(), logger, stdout, enforceTarget{id: id, mapper: ad.Mapper, ev: ev})
+		res := g.Run(context.Background(), logger, stdout, target)
+		// The findings surface still runs on a gated prompt, but only when the
+		// gate wrote nothing: a hook run may emit at most one stdout JSON
+		// document, and a blocked prompt has no turn to inject context into.
+		if hook == HookUserPromptSubmit && !res.Emitted && ResolveFindings() {
+			hookflow.SurfaceFindings("claude-code", string(hook), stdout, logger)
+		}
 		return
 	}
 
@@ -256,7 +298,9 @@ func RunHook(sub string, stdin io.Reader, stdout io.Writer, logger *log.Logger) 
 	// block a tool call (INV-3); it surfaces only categories/counts,
 	// never content (INV-2); and PostToolUse is stat-guarded. Orthogonal
 	// to enforce — findings are advisory feedback in both observe and
-	// enforce sessions.
+	// enforce sessions. (A GATED UserPromptSubmit runs the surface inside
+	// the gate branch above, only after the gate proceeded — one stdout
+	// JSON document per hook run.)
 	if hook == HookPostToolUse || hook == HookUserPromptSubmit {
 		if ResolveFindings() {
 			hookflow.SurfaceFindings("claude-code", string(hook), stdout, logger)

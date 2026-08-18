@@ -56,7 +56,13 @@ func (outputContract) Render(decision, reason string, updatedInput json.RawMessa
 	applied := ""
 
 	switch {
-	case decision == codexDecisionDeny:
+	case decision == codexDecisionDeny, decision == hookflow.DecisionHalt:
+		// Codex has no session-stop lever (no `continue:false` analog), so a
+		// session-halting HALT renders as this provider's strongest refusal: a
+		// per-call deny. Applied stays "deny" — the truthful record of what was
+		// expressed — which also keeps the shared gate from latching a session
+		// this adapter's hooks would never consult. Without this case a HALT
+		// would fall through to "write nothing" and silently PROCEED.
 		hso.PermissionDecision = codexDecisionDeny
 		hso.PermissionDecisionReason = reason
 		applied = codexDecisionDeny

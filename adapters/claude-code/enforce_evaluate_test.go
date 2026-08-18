@@ -273,9 +273,23 @@ func TestInstalledHookTimeoutMatchesThePlugin(t *testing.T) {
 			watcher.Timeout, rewakeHookTimeoutSec)
 	}
 
-	// Only the gating hook carries the raised ceiling; the rest stay tight.
+	// UserPromptSubmit is the second gating hook (the prompt gate, plan
+	// 260818-1714): it must carry the SAME raised ceiling the evaluator
+	// budgets against, or the gate is killed mid-hold and fails open.
+	ups := f.Hooks["UserPromptSubmit"]
+	if len(ups) != 1 || len(ups[0].Hooks) != 1 {
+		t.Fatalf("UserPromptSubmit should register exactly the prompt gate, got %+v", ups)
+	}
+	if got := ups[0].Hooks[0].Timeout; got != preToolUseHookTimeoutSec {
+		t.Errorf("hooks.json UserPromptSubmit timeout = %d, want preToolUseHookTimeoutSec = %d", got, preToolUseHookTimeoutSec)
+	}
+	if ups[0].Hooks[0].StatusMessage == "" {
+		t.Error("the prompt gate needs a statusMessage so a hold shows a reason")
+	}
+
+	// Only the gating hooks carry the raised ceiling; the rest stay tight.
 	for event, gs := range f.Hooks {
-		if event == "PreToolUse" || event == "SessionEnd" {
+		if event == "PreToolUse" || event == "UserPromptSubmit" || event == "SessionEnd" {
 			continue
 		}
 		for _, g := range gs {

@@ -72,9 +72,12 @@ type EnforceGate struct {
 	SpoolObserve func()
 }
 
-// Run gates one tool call. It is fail-open throughout (INV-3b): every fault
+// Run gates one call. It is fail-open throughout (INV-3b): every fault
 // degrades to proceed, and the gate can only ever add a deny/ask/redaction.
-func (g EnforceGate) Run(ctx context.Context, logger *log.Logger, stdout io.Writer, t EnforceTarget) {
+// It reports what the apply leg emitted, so a caller that owns other stdout
+// writers on the same hook (the findings surface on a gated prompt) can keep
+// the one-JSON-document-per-hook rule.
+func (g EnforceGate) Run(ctx context.Context, logger *log.Logger, stdout io.Writer, t EnforceTarget) ApplyResult {
 	// The observe copy rides whichever exit this gate takes: spooled unless the
 	// escalation delivered the identical event. Deferred, and the flag is set
 	// from inside the escalation's transport, so neither the early returns below
@@ -156,10 +159,28 @@ func (g EnforceGate) Run(ctx context.Context, logger *log.Logger, stdout io.Writ
 		dec = g.awaitApproval(ctx, logger, t, dec, key, enforceStart)
 	}
 
+	// A HALT the control plane actually returned terminates the session, not
+	// just this call (plan 260818-1714). Marked AFTER the hold, so a hold
+	// outcome — which re-sources the decision to approval:decided or
+	// approval:undecided — can never qualify, and a synthesized fail-closed
+	// HALT (FailOpen=true) stays a per-call deny.
+	if dec.Evaluation.Verdict == client.VerdictHalt && dec.Source == SourceEvaluate && !dec.FailOpen {
+		dec.SessionHalt = true
+	}
+
 	LogEnforceDecision(logger, t.ToolName(), dec, policy)
 	// Apply the decision, plus the proceed-path redaction. The audit runs after
 	// the decision is written, off the blocking path.
-	g.Record(dec, ApplyDecision(stdout, dec, localRedaction, t.ToolInput(), g.Contract))
+	res := ApplyDecision(stdout, dec, localRedaction, t.ToolInput(), g.Contract)
+	// Latch only what the provider actually expressed: an emitted session stop.
+	// A contract with no session-stop lever (Codex) renders a HALT as its
+	// per-call deny, so it never accumulates latch state its hooks would not
+	// consult.
+	if res.Decision == DecisionHalt {
+		WriteSessionHalt(logger, t.SessionID(), dec.Evaluation)
+	}
+	g.Record(dec, res)
+	return res
 }
 
 // escalate runs one Tier-2 round-trip and returns the poll key for the approval

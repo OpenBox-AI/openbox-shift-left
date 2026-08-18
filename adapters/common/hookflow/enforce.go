@@ -80,6 +80,15 @@ type ApplyResult struct {
 // DecisionDeny is the one decision literal every provider spells the same way.
 const DecisionDeny = "deny"
 
+// DecisionHalt is the session-terminating decision: deny this call AND stop
+// the session (Claude Code: `continue:false` + the deny; a provider with no
+// session-stop lever renders its strongest per-call refusal instead — Codex
+// maps it to deny). Only a session-halting decision reaches Render with this
+// literal: ApplyDecision downgrades it to DecisionDeny unless the decision
+// carries SessionHalt, so a synthesized HALT (fail-closed outage, undecided
+// approval, approver reject) stays a per-call deny.
+const DecisionHalt = "halt"
+
 // ApplyDecision writes the provider's hook response for a decision and reports
 // what was applied. On the proceed path with nothing to say it writes nothing,
 // byte-identical to observe.
@@ -92,6 +101,12 @@ func ApplyDecision(stdout io.Writer, dec decision.Decision, localRedaction bool,
 		return ApplyResult{} // fail-open: nowhere to write
 	}
 	d, reason := MapVerdict(dec.Evaluation, c)
+	// Only a decision the gate marked session-halting renders the provider's
+	// session-stop shape. Every other HALT — the fail-closed synthesized one,
+	// an undecided approval, an approver reject — denies this one call.
+	if d == DecisionHalt && !dec.SessionHalt {
+		d = DecisionDeny
+	}
 
 	// Redaction is a proceed-path rewrite, computed only when no deny/ask is
 	// being emitted — mirroring the reference SDK, which applies
@@ -278,8 +293,8 @@ func LogEnforceDecision(logger *log.Logger, toolName string, dec decision.Decisi
 	// fail_open=true) is legible in the diagnostic — otherwise
 	// "would_block=true fail_open=true" looks contradictory. See
 	// ApplyFailurePolicy.
-	logger.Printf("enforce decision: tool=%s verdict=%s would_block=%t source=%s fail_open=%t policy=%s",
-		CapIdent(toolName), verdict, dec.Evaluation.WouldBlock(), OrDash(dec.Source), dec.FailOpen, policy)
+	logger.Printf("enforce decision: tool=%s verdict=%s would_block=%t source=%s fail_open=%t policy=%s session_halt=%t",
+		CapIdent(toolName), verdict, dec.Evaluation.WouldBlock(), OrDash(dec.Source), dec.FailOpen, policy, dec.SessionHalt)
 }
 
 // applyInputRedaction turns a local redaction (secret detection) into the
@@ -408,8 +423,10 @@ func canonicalJSON(raw json.RawMessage) ([]byte, error) {
 // decisions, in the same priority order. It returns the CC decision and a
 // content-free reason, or ("","") meaning "emit nothing — proceed".
 //
-//   - HALT / BLOCK → deny (the SDK terminates / raises a non-retryable
-//     block).
+//   - HALT → halt (the SDK terminates the workflow; here the provider's
+//     session-stop shape — ApplyDecision downgrades it to deny unless the
+//     decision is marked session-halting).
+//   - BLOCK → deny (the SDK raises a non-retryable block).
 //   - A failed guardrail validation → deny, checked after HALT/BLOCK but
 //     before approval and independent of the verdict value — exactly as
 //     the SDK, so a guardrail failure is never silently swallowed by an
@@ -428,7 +445,7 @@ func canonicalJSON(raw json.RawMessage) ([]byte, error) {
 func MapVerdict(e client.Evaluation, c OutputContract) (decision, reason string) {
 	switch e.Verdict {
 	case client.VerdictHalt:
-		return DecisionDeny, GovReason(e, "action halted by OpenBox governance policy")
+		return DecisionHalt, GovReason(e, "action halted by OpenBox governance policy")
 	case client.VerdictBlock:
 		return DecisionDeny, GovReason(e, "action blocked by OpenBox governance policy")
 	}
@@ -505,11 +522,7 @@ func DefaultEnforcementPath() string {
 	if p := os.Getenv(devconfig.EnvEnforcementFile); p != "" {
 		return p
 	}
-	dir, err := os.UserConfigDir()
-	if err != nil || dir == "" {
-		dir = filepath.Join(os.Getenv("HOME"), ".config")
-	}
-	return filepath.Join(dir, "openbox", "enforcements.jsonl")
+	return filepath.Join(openboxConfigDir(), "enforcements.jsonl")
 }
 
 // recordEnforcement appends one enforcement-decision audit line for an
@@ -568,7 +581,7 @@ type EnforcementRecord struct {
 	ToolKind            string           `json:"tool_kind,omitempty"`
 	Verdict             string           `json:"verdict"`
 	WouldBlock          bool             `json:"would_block"`
-	AppliedDecision     string           `json:"applied_decision,omitempty"` // deny|ask|"" (proceed)
+	AppliedDecision     string           `json:"applied_decision,omitempty"` // deny|ask|block|halt|"" (proceed) — the provider literal that was applied
 	Source              string           `json:"source,omitempty"`
 	FailOpen            bool             `json:"fail_open"`
 	Stale               bool             `json:"stale,omitempty"`

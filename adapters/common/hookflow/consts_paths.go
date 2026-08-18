@@ -1,5 +1,22 @@
 package hookflow
 
+import (
+	"os"
+	"path/filepath"
+)
+
+// openboxConfigDir is the base directory for the runtime's local governance
+// state — the enforcement/advisory sinks and the session-halt latches: the
+// platform user-config dir, with the classic ~/.config fallback when it cannot
+// be resolved. One resolver, so the sinks can never drift onto different bases.
+func openboxConfigDir() string {
+	dir, err := os.UserConfigDir()
+	if err != nil || dir == "" {
+		dir = filepath.Join(os.Getenv("HOME"), ".config")
+	}
+	return filepath.Join(dir, "openbox")
+}
+
 // EnvStaleDir named the stale-marker directory the session-start freshness
 // check wrote to. Both the check and the markers are gone with the local policy
 // bundle (ADR-0017); the constant survives only so a test harness that still

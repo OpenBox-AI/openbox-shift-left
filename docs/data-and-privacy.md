@@ -217,6 +217,15 @@ Three limits, stated rather than implied:
 The observe copy of the same call is mapped separately and never carries content, so
 ordinary telemetry is unaffected either way.
 
+**Prompts gate too** ([ADR-0020](adr/ADR-0020-prompt-gate-and-halt-session-stop.md)):
+in enforce mode the `PromptSubmitted` event is sent for a decision **at submit
+time**, before the prompt is processed, instead of riding the near-real-time flush
+a moment later. What the event carries did not change — prompt text only under
+`content_capture`, and the prompt remains the one content path with **no local
+redaction** (the asymmetry above, unchanged). What changed is only the timing and
+that the verdict is applied: HALT/BLOCK refuses the prompt, and a HALT ends the
+session.
+
 ## Local files
 
 Two directories, and the split is worth knowing.
@@ -246,6 +255,7 @@ Both are readable only by you.
 | `cc-spool/` | events awaiting flush |
 | `cc-spool/turns/` | how far each turn window has been read: a byte offset and a turn index, nothing else |
 | `pending-approvals/`, `stale/` | content-free markers keyed by session id |
+| `halted-sessions/` | one small file per HALTed session — the policy reason, policy id and a timestamp, never tool content. It is what keeps a halted session refused ([ADR-0020](adr/ADR-0020-prompt-gate-and-halt-session-stop.md)); deleting it un-halts only this machine's view, and every verdict is already recorded server-side |
 | `approvals-auto.jsonl` | an autonomous approver's decisions, if you run one |
 
 ## Where credentials live
