@@ -164,11 +164,17 @@ of events is not evidence of absence of work. Run `openbox init` once in each
 project you want governed. `init` prints which directory it governed, every time.
 
 **It ENFORCES.** Blocking, ask-for-approval and local secret redaction are on by
-default. Two things keep that from being a surprise you cannot recover from:
-enforcement acts on *your org's policy*, so until your org publishes one nothing is
-blocked and you get observability either way; and `fail_closed` stays **off**, so
-an OpenBox outage never blocks a tool call. One diagnosed defect escapes both
-today — a control-plane precondition failure expressed as a HALT; the symptom and
+default — on tool calls AND on prompts: every gated tool call and every submitted
+prompt is decided by your org's policy before it runs, and a **HALT verdict ends
+the session on the spot** (the current turn stops, and every later prompt or tool
+call in that session is refused locally until you start a new session —
+[ADR-0020](adr/ADR-0020-prompt-gate-and-halt-session-stop.md)). BLOCK refuses just
+the one call or prompt. Two things keep that from being a surprise you cannot
+recover from: enforcement acts on *your org's policy*, so until your org publishes
+one nothing is blocked and you get observability either way; and `fail_closed`
+stays **off**, so an OpenBox outage never blocks a tool call. One diagnosed defect
+escapes both today — a control-plane precondition failure expressed as a HALT,
+which since ADR-0020 ends the session rather than denying calls; the symptom and
 the recovery are in [Troubleshooting](#troubleshooting) under `Session is no
 longer active`. Want telemetry without enforcement:
 
@@ -343,6 +349,7 @@ and enforcement is on by default.
 |---|---|
 | Turn enforcement off | `openbox init --provider <tool> --enforce=false`, or `"enforce": false` in `~/.openbox/dev.json` |
 | Turn it back on | re-run `init` — enforce is the default |
+| Get the prompt gate + HALT session stop on an existing install | re-run `openbox init --provider <tool>` in each governed project — the prompt gate and its raised hook timeout are installer-registered ([ADR-0020](adr/ADR-0020-prompt-gate-and-halt-session-stop.md)), so an old registration keeps the old behavior until then |
 | Change a credential | `openbox auth` (re-run it any time) |
 | Re-issue credentials | `openbox auth --rotate` |
 | Govern another project | `cd` there and `openbox init --provider <tool>` |
@@ -389,7 +396,8 @@ events" has not been re-confirmed against a live stack since the flow changed.
 | Hooks never fire | The session was started before `init`, or you are in a directory where `init` was not run (project scope is the default). Restart the tool; for Codex run `/hooks` and trust them. |
 | No events at all, and `doctor` looks fine | Almost always scope: `init` governs one directory. Check which one it named, or use `--scope global` plus managed settings. |
 | Everything is denied | `fail_closed` is on and OpenBox cannot be reached, so every gated call denies. `openbox doctor` shows the failure policy and the last decision. Restore connectivity, or set `fail_closed:false` to proceed ungoverned instead. |
-| `OpenBox governance: Session is no longer active` on every tool call | Not your org's policy — a policy verdict names its policy in a `(policy: …)` suffix, and this one has none. The control plane's record of this session went terminal (e.g. a `SessionEnded` was recorded while the session was live) and it rejects every later event as a HALT; fail-open does not apply, because a HALT is a verdict rather than an outage. Start a new session — that restores the server-side record. Known defect, fix under decision ([diagnosis](../plans/reports/debug-260814-1231-session-no-longer-active-halt.md)). |
+| `OpenBox governance: Session is no longer active` — the session stops, and every prompt after it is refused | Not your org's policy — a policy verdict names its policy in a `(policy: …)` suffix, and this one has none. The control plane's record of this session went terminal (e.g. a `SessionEnded` was recorded while the session was live) and it answers the next event with a HALT; since [ADR-0020](adr/ADR-0020-prompt-gate-and-halt-session-stop.md) a HALT ends the session — the turn stops and a local latch refuses every later prompt/tool call in it. Fail-open does not apply, because a HALT is a verdict rather than an outage. **Start a new session** — the latch is per-session and a fresh session restores the server-side record. Known core defect, fix in flight ([diagnosis](../plans/reports/debug-260814-1231-session-no-longer-active-halt.md)). |
+| A session refuses everything with `session halted by a governance HALT verdict` | Your org's policy (or the defect above) HALTed this session earlier; the latch under `~/Library/Application Support/openbox/halted-sessions/` (Linux: `~/.config/openbox/`) is replaying it, by design. Start a new session. The halting verdict and every refusal are in `enforcements.jsonl` (`source:"evaluate"` for the verdict, `source:"session-halt"` for the replays). |
 | A session hangs on a tool call | An approval is filed and undecided. `openbox approve list` shows it; deciding it releases the session. |
 | Every tool call appears twice; success rates and latencies look wrong | The directory has an OpenBox hook registered twice — usually a second engine left by an `init` once run with a different `HOME`. `openbox doctor` reports both that and a repeat at one path; re-running `openbox init` there removes the extra registration. Events already stored stay duplicated. |
 | `OPENBOX_ED25519_SEED is deprecated` | Harmless, and it still works. Rename it to `OPENBOX_AGENT_PRIVATE_KEY` — the name OpenBox documents. |

@@ -50,9 +50,12 @@ history. Re-run `auth` any time to change any of it.
 
 **3. Govern a project.** `openbox init` installs the hooks. It governs **the current
 directory only**, and it **enforces** — blocking, ask-for-approval and secret
-redaction are on by default. Blocking and approval come from OpenBox, so they need
-it reachable; secret redaction is local and does not. It never touches credentials;
-if they are missing it stops and points you back at `auth`.
+redaction are on by default, on tool calls and on submitted prompts alike, and a
+HALT verdict ends the whole session, not just the call
+([ADR-0020](docs/adr/ADR-0020-prompt-gate-and-halt-session-stop.md)). Blocking and
+approval come from OpenBox, so they need it reachable; secret redaction is local
+and does not. It never touches credentials; if they are missing it stops and
+points you back at `auth`.
 
 ```bash
 cd ~/code/my-project
@@ -246,10 +249,13 @@ prevent, so the limits are documented as first-class:
 - **A control-plane HALT is applied even when no policy authored it.** Core can
   express an operational failure — its record of a session gone terminal while the
   session was still live — as a HALT verdict with no policy id, and the client
-  applies it: every later gated call in that session is denied until a new session
-  starts, even in an org that has published no policy. Fail-open does not engage,
-  because it covers *no verdict*, not *a HALT verdict*. Diagnosed live, fix under
-  decision
+  applies it, even in an org that has published no policy. Since
+  [ADR-0020](docs/adr/ADR-0020-prompt-gate-and-halt-session-stop.md) a HALT ends
+  the session outright (turn stops, later prompts and calls refused locally), so
+  this defect now ends sessions rather than denying calls until the record clears
+  — an accepted consequence of trusting every server HALT uniformly. Fail-open
+  does not engage, because it covers *no verdict*, not *a HALT verdict*. Diagnosed
+  live, core-side fix in flight
   ([diagnosis](plans/reports/debug-260814-1231-session-no-longer-active-halt.md)).
 - **Egress is recorded, not controlled.** OpenBox does not proxy or allow-list the
   coding tool's traffic to its model provider; it records that posture as evidence.

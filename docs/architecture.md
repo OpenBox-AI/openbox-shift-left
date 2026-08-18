@@ -89,7 +89,7 @@ Each install runs at exactly one level, and reports which:
 |---|---|---|
 | **Observe** (default) | normalized telemetry, lineage, cost. Never blocks. | none — spooled |
 | **Advisory** | verdicts and guardrail findings are recorded and surfaced back into the session, never applied | none |
-| **Enforce** (default since [ADR-0016](adr/ADR-0016-default-install-posture.md)) | the PreToolUse gate applies the verdict: deny, ask, or redact | one round-trip to `/evaluate`, bounded by the provider's hook ceiling |
+| **Enforce** (default since [ADR-0016](adr/ADR-0016-default-install-posture.md)) | the PreToolUse and UserPromptSubmit gates apply the verdict: deny/block, ask, or redact — and a HALT stops the whole session ([ADR-0020](adr/ADR-0020-prompt-gate-and-halt-session-stop.md)) | one round-trip to `/evaluate` per gated hook, bounded by the provider's hook ceiling |
 
 Enforce is three named things, not three tiers. They are independent — any one can
 be on without the others:
@@ -100,10 +100,22 @@ be on without the others:
   (`secret_detection`).
 - **Inline evaluation.** The gated call is sent to `/evaluate` and the verdict is
   applied before the tool runs. Every gated class, not a risk-selected subset —
-  risk is a property of the policy. If the control plane cannot be reached, the
+  risk is a property of the policy. Prompts gate the same way: `UserPromptSubmit`
+  evaluates the `PromptSubmitted` event before the prompt is processed, and a
+  HALT/BLOCK blocks (and erases) the prompt ([ADR-0020](adr/ADR-0020-prompt-gate-and-halt-session-stop.md)).
+  If the control plane cannot be reached, the
   org's `fail_closed` decides: fail-open proceeds (the default), fail-closed denies.
   No retry: one hiccup must not become a client-side amplifier across every tool
   call of every session.
+- **HALT ends the session.** A HALT the control plane returns is a session
+  verdict, not a call verdict: the response carries Claude Code's
+  `continue:false` (the turn stops immediately) and a local latch
+  (`halted-sessions/` beside the other sinks) refuses every later prompt and
+  tool call in that session with no re-evaluation — `--resume` included. BLOCK
+  stays per-call. A *synthesized* HALT — the fail-closed outage answer, an
+  unanswered approval — never ends the session: only the server's own HALT
+  does. Codex has no session-stop lever, so a HALT there renders as its
+  strongest per-call deny and no latch is written.
 - **Findings.** Asynchronous guardrail and drift findings surfaced back into the
   session after the fact. Off by default (`findings`).
 
@@ -201,9 +213,12 @@ Being precise here is part of the product.
   HALT verdict*. One such HALT latches the server-side session, so the remainder of
   that session denies until a new session restores a pending record — and the
   denial itself stores no governance event, so the control plane holds no record of
-  the blocking it did. Whether the client should stop trusting a HALT that carries
-  neither a policy id nor a governance-event id, or the server should stop
-  expressing preconditions as verdicts, is an open decision; the live diagnosis and
+  the blocking it did. Since [ADR-0020](adr/ADR-0020-prompt-gate-and-halt-session-stop.md)
+  the client treats every server HALT as a session stop, so this precondition
+  failure now **ends the session outright** rather than denying calls until the
+  server record clears — a deliberately accepted consequence (the owner chose
+  uniform HALT trust over client-side discrimination), remedied when the core-side
+  fix lands (plan 260814-2235). The live diagnosis and
   the options are in
   [`debug-260814-1231-session-no-longer-active-halt.md`](../plans/reports/debug-260814-1231-session-no-longer-active-halt.md).
 - **Content-based policy sees at most the first 64KB of a write.** Bodies are
