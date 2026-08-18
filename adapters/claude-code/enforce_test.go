@@ -287,7 +287,11 @@ func TestMapVerdict(t *testing.T) {
 		reasonNoLeak string
 		reasonHas    string
 	}{
-		{"halt denies", client.Evaluation{Verdict: client.VerdictHalt, Reason: "kill switch"}, ccDecisionDeny, true, "", "kill switch"},
+		// HALT maps to the session-terminating literal; ApplyDecision downgrades
+		// it to deny unless the gate marked the decision session-halting (a HALT
+		// the control plane actually returned) — that split is pinned by
+		// TestApplyDecisionSessionHaltSplit.
+		{"halt maps to the session-stop literal", client.Evaluation{Verdict: client.VerdictHalt, Reason: "kill switch"}, hookflow.DecisionHalt, true, "", "kill switch"},
 		{"block denies with policy id", client.Evaluation{Verdict: client.VerdictBlock, Reason: "no rm -rf", PolicyID: "p-1"}, ccDecisionDeny, true, "", "p-1"},
 		{"require_approval asks", client.Evaluation{Verdict: client.VerdictRequireApproval, Reason: "needs review"}, ccDecisionAsk, true, "", "needs review"},
 		// E6-S6: the approval id (server correlation id) is surfaced on the ask reason.
@@ -317,6 +321,93 @@ func TestMapVerdict(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestApplyDecisionSessionHaltSplit pins the session-halt discriminator at the
+// apply seam (plan 260818-1714): only a decision the gate marked SessionHalt
+// renders Claude Code's session stop (`continue:false` + stopReason, deny
+// riding along); every synthesized HALT — fail-closed outage, undecided
+// approval — stays a per-call deny with NO session stop. Getting this wrong in
+// the tight direction terminates sessions on hold timeouts and outages.
+func TestApplyDecisionSessionHaltSplit(t *testing.T) {
+	halt := client.Evaluation{Verdict: client.VerdictHalt, Reason: "org kill switch", PolicyID: "p-9"}
+
+	t.Run("a server HALT renders the session stop", func(t *testing.T) {
+		var out bytes.Buffer
+		dec := decision.Decision{Evaluation: halt, Source: hookflow.SourceEvaluate, SessionHalt: true}
+		res := hookflow.ApplyDecision(&out, dec, false, nil, contract)
+		if !res.Emitted || res.Decision != hookflow.DecisionHalt {
+			t.Fatalf("applied = %+v, want an emitted %q", res, hookflow.DecisionHalt)
+		}
+		var got preToolUseOutput
+		if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+			t.Fatalf("stdout is not valid PreToolUse JSON: %v (%q)", err, out.Bytes())
+		}
+		if got.Continue == nil || *got.Continue {
+			t.Errorf("continue = %v, want false — the session stop", got.Continue)
+		}
+		if !strings.Contains(got.StopReason, "org kill switch") || !strings.Contains(got.StopReason, "p-9") {
+			t.Errorf("stopReason %q must carry the policy reason and id", got.StopReason)
+		}
+		if got.HookSpecificOutput.PermissionDecision != ccDecisionDeny {
+			t.Errorf("permissionDecision = %q, want deny riding along for the pending call", got.HookSpecificOutput.PermissionDecision)
+		}
+	})
+
+	t.Run("a synthesized HALT stays a per-call deny", func(t *testing.T) {
+		for name, dec := range map[string]decision.Decision{
+			"fail-closed":        {Evaluation: halt, Source: hookflow.SourceEvaluateFailOpen, FailOpen: true},
+			"undecided approval": {Evaluation: halt, Source: hookflow.SourceApprovalUndecided},
+			"latch-less HALT":    {Evaluation: halt, Source: hookflow.SourceEvaluate}, // gate did not mark it
+		} {
+			var out bytes.Buffer
+			res := hookflow.ApplyDecision(&out, dec, false, nil, contract)
+			if res.Decision != ccDecisionDeny {
+				t.Errorf("%s: applied = %q, want plain deny", name, res.Decision)
+			}
+			if bytes.Contains(out.Bytes(), []byte(`"continue"`)) {
+				t.Errorf("%s: stdout %q must not carry the session stop", name, out.Bytes())
+			}
+		}
+	})
+}
+
+// TestPromptContractRender pins the UserPromptSubmit output shapes: any refusal
+// is a top-level decision:"block" (the only literal the hook honours), a
+// session-halting HALT adds continue:false, and the proceed path writes
+// NOTHING — it must leave stdout to the findings surface.
+func TestPromptContractRender(t *testing.T) {
+	t.Run("halt blocks and stops the session", func(t *testing.T) {
+		line, applied := promptContract.Render(hookflow.DecisionHalt, "OpenBox governance: kill switch", nil)
+		if applied != hookflow.DecisionHalt {
+			t.Fatalf("applied = %q, want %q", applied, hookflow.DecisionHalt)
+		}
+		var got userPromptSubmitOutput
+		if err := json.Unmarshal(line, &got); err != nil {
+			t.Fatalf("not valid JSON: %v (%q)", err, line)
+		}
+		if got.Decision != ccPromptDecisionBlock || got.Continue == nil || *got.Continue || got.StopReason == "" {
+			t.Errorf("halt render = %+v, want decision:block + continue:false + stopReason", got)
+		}
+	})
+	t.Run("deny blocks the prompt only", func(t *testing.T) {
+		line, applied := promptContract.Render(hookflow.DecisionDeny, "OpenBox governance: blocked", nil)
+		if applied != ccPromptDecisionBlock {
+			t.Fatalf("applied = %q, want %q", applied, ccPromptDecisionBlock)
+		}
+		var got userPromptSubmitOutput
+		if err := json.Unmarshal(line, &got); err != nil {
+			t.Fatalf("not valid JSON: %v (%q)", err, line)
+		}
+		if got.Decision != ccPromptDecisionBlock || got.Continue != nil {
+			t.Errorf("deny render = %+v, want decision:block with no session stop", got)
+		}
+	})
+	t.Run("proceed writes nothing", func(t *testing.T) {
+		if line, applied := promptContract.Render("", "", nil); line != nil || applied != "" {
+			t.Errorf("proceed rendered (%q, %q), want nothing", line, applied)
+		}
+	})
 }
 
 func TestApplyDecision(t *testing.T) {

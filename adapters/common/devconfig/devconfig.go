@@ -62,7 +62,10 @@ const (
 	// EnvPendingApprovalDir relocates the filed-approval markers the gate and
 	// the rewake watcher coordinate through (tests point it at a temp dir).
 	EnvPendingApprovalDir = "OPENBOX_PENDING_APPROVAL_DIR"
-	EnvAPIKeyDirect       = "OPENBOX_API_KEY"
+	// EnvHaltDir relocates the session-halt latches a HALT verdict writes
+	// (tests point it at a temp dir).
+	EnvHaltDir      = "OPENBOX_HALT_DIR"
+	EnvAPIKeyDirect = "OPENBOX_API_KEY"
 	// EnvAgentPrivateKey is the Ed25519 signing key, under the name the OpenBox
 	// platform documents for its own SDK. It replaced OPENBOX_ED25519_SEED,
 	// which no published doc ever mentioned — so a developer following the docs

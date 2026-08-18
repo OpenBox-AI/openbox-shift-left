@@ -159,16 +159,22 @@ func TestMapVerdict_Codex(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
+			// Assert the RENDERED outcome, not the intermediate literal:
+			// MapVerdict now yields the session-stop literal for HALT, and this
+			// provider has no session-stop lever — its Render must downgrade to
+			// deny. A missed case in Render falls through to "write nothing",
+			// which would silently PROCEED a halted call; this is the pin.
 			d, reason := hookflow.MapVerdict(c.eval, contract)
-			if d != c.want {
-				t.Fatalf("decision = %q, want %q", d, c.want)
+			_, applied := contract.Render(d, reason, nil)
+			if applied != c.want {
+				t.Fatalf("rendered decision = %q, want %q", applied, c.want)
 			}
 			if c.want == codexDecisionDeny && c.wantSub != "" && !strings.Contains(reason, c.wantSub) {
 				t.Errorf("reason = %q, want it to contain %q", reason, c.wantSub)
 			}
-			// Tighten-only: mapVerdict NEVER yields allow.
-			if d == codexDecisionAllow {
-				t.Errorf("mapVerdict must never emit allow (tighten-only)")
+			// Tighten-only: the cascade NEVER yields allow.
+			if applied == codexDecisionAllow {
+				t.Errorf("the cascade must never emit allow (tighten-only)")
 			}
 		})
 	}

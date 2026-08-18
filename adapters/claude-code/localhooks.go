@@ -61,7 +61,10 @@ var localHookEvents = []struct {
 	StatusMessage string
 }{
 	{Event: "SessionStart", Timeout: 5},
-	{Event: "UserPromptSubmit", Timeout: 5},
+	// UserPromptSubmit carries the prompt gate (plan 260818-1714), so it needs
+	// the same raised ceiling as PreToolUse: evaluation + approval hold must
+	// finish under the hook kill, or the gate is killed mid-hold and fails open.
+	{Event: "UserPromptSubmit", Timeout: preToolUseHookTimeoutSec, StatusMessage: "OpenBox governance…"},
 	{Event: "PreToolUse", Matcher: "*", Timeout: preToolUseHookTimeoutSec, StatusMessage: "OpenBox governance…"},
 	{Event: "PostToolUse", Matcher: "*", Timeout: 5},
 	{Event: "PostToolUseFailure", Matcher: "*", Timeout: 5},

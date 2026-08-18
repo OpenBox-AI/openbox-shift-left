@@ -155,6 +155,15 @@ func buildDecisionRequest(id Identity, e *HookEvent, localRedaction bool) decisi
 // policy-authored reason, never the tool command/file/output content
 // (INV-2).
 type preToolUseOutput struct {
+	// Continue/StopReason are Claude Code's session-stop lever, common to every
+	// hook and documented to take precedence over any per-event decision. They
+	// are emitted ONLY for a session-halting HALT (hookflow.DecisionHalt):
+	// `continue:false` ends the turn immediately and StopReason is shown to the
+	// user. A *bool because omitempty drops a plain false — the same trap
+	// devconfig.Enforce already documents — and `continue:true` must never be
+	// emitted (it could read as a grant; tighten-only).
+	Continue           *bool              `json:"continue,omitempty"`
+	StopReason         string             `json:"stopReason,omitempty"`
 	HookSpecificOutput hookSpecificOutput `json:"hookSpecificOutput"`
 }
 

@@ -1,6 +1,7 @@
 package hookflow
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"log"
@@ -176,10 +177,24 @@ func TestApprovalUndecided_DeniesWithTheReference(t *testing.T) {
 	if out.Evaluation.Verdict != client.VerdictHalt {
 		t.Errorf("verdict = %q, want HALT so the apply cascade denies", out.Evaluation.Verdict)
 	}
-	d, reason := MapVerdict(out.Evaluation, testContract{approval: "ask"})
-	if d != DecisionDeny {
-		t.Errorf("decision = %q, want deny — never the provider's self-approval prompt", d)
+	// The synthesized HALT must be re-sourced: with Source left "evaluate" a
+	// hold timeout would read — in the audit and to the session-halt
+	// discriminator — as the control plane answering HALT, and every timed-out
+	// approval would terminate the session.
+	if out.Source != SourceApprovalUndecided {
+		t.Errorf("source = %q, want %q", out.Source, SourceApprovalUndecided)
 	}
+	if out.SessionHalt {
+		t.Error("an undecided approval must never be marked session-halting")
+	}
+	// Through the full apply cascade: a per-call deny — never the provider's
+	// self-approval prompt, and never the session-stop rendering.
+	var buf bytes.Buffer
+	res := ApplyDecision(&buf, out, false, nil, testContract{approval: "ask"})
+	if res.Decision != DecisionDeny {
+		t.Errorf("applied decision = %q, want deny — never the provider's self-approval prompt", res.Decision)
+	}
+	_, reason := MapVerdict(out.Evaluation, testContract{approval: "ask"})
 	if !strings.Contains(reason, "ge-42") {
 		t.Errorf("deny reason %q must name the approval reference", reason)
 	}
