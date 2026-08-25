@@ -137,15 +137,22 @@ func ApplyDecision(stdout io.Writer, dec decision.Decision, localRedaction bool,
 // local-only and never egressed (see HookEvent.command / INV-2).
 const MaxCommandLen = 8 << 10 // 8 KiB (bytes)
 
-// MaxRedactBody bounds the file body handed to the in-process secret
-// detector for redaction. A body over this cap is not scanned (Content
-// stays nil), so the tool proceeds unredacted (fail-open) rather than risk
-// a slow scan on the hot path. The cap is a skip threshold, never a
-// truncation: a truncated body reconstructed into updatedInput would drop
-// the file's tail and corrupt the write, so we send the whole body or
-// none. 512 KiB comfortably covers the .env/config/key pastes that are the
-// real secret-leak surface; larger-body scanning is a noted follow-up
-// (bigger local request cap or streaming scan).
+// MaxRedactBody bounds the body handed to the in-process secret detector, to
+// keep a slow scan off the hot path. What happens AT the cap differs by caller,
+// and the difference is not an inconsistency — it follows from whether the
+// scanned bytes get replayed:
+//
+//   - The FILE path (buildDecisionRequest) SKIPS: over the cap, Content stays
+//     nil and the tool proceeds unredacted (fail-open). It cannot truncate,
+//     because the redacted body is reconstructed into updatedInput and written
+//     to the developer's file — a short reconstruction corrupts the write.
+//   - The TELEMETRY path (RedactText) TRUNCATES and then scans. Nothing is
+//     replayed there, and the client's own 65536-RUNE egress cap is strictly
+//     smaller than this one, so the discarded bytes could never have egressed.
+//     Skipping there was fail-open on the only in-transit control, for no gain.
+//
+// 512 KiB comfortably covers the .env/config/key pastes that are the real
+// secret-leak surface; streaming-scan for the file path is a noted follow-up.
 const MaxRedactBody = 512 << 10 // 512 KiB (bytes)
 
 // MaxJSONCompareBytes bounds the jsonEqual double-parse. The redacted
@@ -160,27 +167,52 @@ const MaxRedactBody = 512 << 10 // 512 KiB (bytes)
 const MaxJSONCompareBytes = 256 << 10 // 256 KiB (bytes)
 
 // RedactText redacts a content body for secrets before it is attached to an
-// event, bounded exactly like the file-body path (MaxRedactBody).
+// event. Scan time is bounded by MaxRedactBody; egress is NOT — capBody does
+// that at the client.
 //
-// Over the cap the text is returned UNCHANGED rather than truncated, which is
-// the same skip-not-truncate rule the file body follows and for a related
-// reason: a truncated assistant message would silently misreport what the model
-// said, and the cap exists to bound scan time on a hook, not to bound egress —
-// capBody does that, at the client, over the whole body.
+// Over the cap the body is TRUNCATED and then scanned, rather than returned
+// unscanned. It used to be the latter, on the file path's skip-not-truncate
+// rule, and that was wrong here — the rule and its reason do not transfer:
 //
-// The direction of that trade is worth being explicit about, because it is
-// fail-open on a security control: an oversized body egresses unscanned. It is
-// bounded by the same 512 KiB the file path already accepts, and the alternative
-// — dropping the text — would silently disable the feature for long turns.
+//   - The file path must not truncate because the redacted body is REPLAYED
+//     into the developer's actual write; a short reconstruction corrupts the
+//     file. Every caller of THIS function attaches to a telemetry event
+//     instead, where nothing is replayed.
+//   - Skipping was fail-open on the one in-transit control, and it left a real
+//     hole: the client caps at 65536 RUNES (capBody), which is at most 256 KiB
+//     of UTF-8 — strictly less than this 512 KiB cap. So a >512 KiB body was
+//     returned unscanned and then capped, egressing its first 64K unscanned.
+//     A large `cat`, an install log or a build log reaches that size routinely.
+//
+// Truncating here therefore discards ONLY bytes capBody would have dropped
+// anyway: the margin between the two caps is what makes this lossless rather
+// than a trade. Scan-then-cap is also the correct order — capping first would
+// cut a secret into a fragment no pattern matches, and ship the fragment.
 //
 // A nil redactor is the `secret_detection:false` case and returns the text
 // unchanged.
 func RedactText(r *decision.Redactor, s string) string {
-	if r == nil || len(s) > MaxRedactBody {
+	if r == nil {
 		return s
+	}
+	if len(s) > MaxRedactBody {
+		s = truncateBytes(s, MaxRedactBody)
 	}
 	out, _, _ := r.RedactText(s)
 	return out
+}
+
+// truncateBytes cuts s to at most n bytes on a rune boundary, so a truncated
+// body is still valid UTF-8 (a split rune would land on the wire as U+FFFD and
+// could break a JSON body the caller is carrying).
+func truncateBytes(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	for n > 0 && !utf8.RuneStart(s[n]) {
+		n--
+	}
+	return s[:n]
 }
 
 // NewDecider builds the local step that runs before the evaluation: secret

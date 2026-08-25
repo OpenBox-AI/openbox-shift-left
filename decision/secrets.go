@@ -97,7 +97,22 @@ func newSecretDetector() *secretDetector {
 		{category: "jwt", re: regexp.MustCompile(`\beyJ[A-Za-z0-9_\-]{5,}\.eyJ[A-Za-z0-9_\-]{5,}\.[A-Za-z0-9_\-]{5,}\b`)},
 		// Generic KEY=VALUE / KEY: VALUE assignment — redact the VALUE only (group 2),
 		// keeping the key + surrounding quote. Case-insensitive on the key names.
-		{category: "secret_assignment", valueGroup: 2, re: regexp.MustCompile(`(?i)((?:api[_-]?key|secret|token|password|passwd|pwd|access[_-]?key|auth[_-]?token|client[_-]?secret)\s*[:=]\s*["']?)([^\s"',;]{8,})(["']?)`)},
+		//
+		// The `[\\"']*` either side of the delimiter is what makes JSON work. The
+		// keyword used to have to sit ADJACENT to the `:`/`=`, so `password=x`
+		// matched but `{"password":"x"}` did not — the key's closing quote is in
+		// between — and once a JSON value is nested inside another JSON string
+		// (which is what a tool_response is) there is an escaping backslash there
+		// too. Tool output made that the common shape, not an edge case.
+		//
+		// The value group ends with `[^\s"',;\\]`: 8+ permitted characters whose
+		// LAST is not a backslash. Greedy matching then stops before the `\` that
+		// terminates an escaped JSON string, so the redaction cannot swallow it and
+		// leave unparseable JSON on the wire. Excluding `\` from the whole value
+		// instead would have silently stopped redacting a Windows-path value —
+		// `password=${OPENBOX_REDACTED_SECRET_ASSIGNMENT} would truncate to `C:` and fall under the 8-char
+		// floor. Both directions are pinned by TestRedact_JSONShapedSecrets.
+		{category: "secret_assignment", valueGroup: 2, re: regexp.MustCompile(`(?i)((?:api[_-]?key|secret|token|password|passwd|pwd|access[_-]?key|auth[_-]?token|client[_-]?secret)[\\"']*\s*[:=]\s*[\\"']*)([^\s"',;]{7,}[^\s"',;\\])(["']?)`)},
 	}}
 }
 
@@ -180,15 +195,21 @@ func (d *secretDetector) redactEntropy(text string, catSet map[string]struct{}) 
 }
 
 // precededByAssignment reports whether the byte at start is in a value position:
-// the nearest non-space, non-quote byte before it is an assignment delimiter
-// (`=` or `:`). It looks back over spaces/tabs and a single layer of quoting so
-// `key = "<tok>"` and `key:<tok>` both qualify, while a token at line start or after
-// a `,`/`/` (blob data) does not.
+// the nearest non-space, non-quote, non-escape byte before it is an assignment
+// delimiter (`=` or `:`). It looks back over spaces/tabs, quoting and JSON escapes
+// so `key = "<tok>"`, `key:<tok>` and `{\"key\":\"<tok>\"}` all qualify, while a
+// token at line start or after a `,`/`/` (blob data) does not.
+//
+// The backslash is in that skip set because tool output is carried as JSON: a
+// nested value arrives escaped, and stopping at the `\` meant the entropy pass
+// silently declined to look at any secret inside an MCP result or a
+// `cat config.json`. It skipped quotes already for the same reason, one layer
+// short.
 func precededByAssignment(text string, start int) bool {
 	k := start - 1
 	for k >= 0 {
 		switch text[k] {
-		case ' ', '\t', '"', '\'':
+		case ' ', '\t', '"', '\'', '\\':
 			k--
 		case '=', ':':
 			return true

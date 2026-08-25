@@ -182,3 +182,79 @@ func containsStr(ss []string, want string) bool {
 	}
 	return false
 }
+
+// JSON shape. Until ADR-0019 P1 this scanner only ever saw natural language and
+// flat KEY=VALUE lines, so nothing exercised what happens when a secret is nested
+// inside JSON. Tool output made that the common case: a tool's response IS JSON,
+// so a nested value arrives ESCAPED — `{\"key\":\"<tok>\"}` — and an MCP result or
+// a `cat config.json` is exactly that shape.
+//
+// Both generic mechanisms used to miss it, for the same underlying reason and in
+// two different places:
+//
+//   - secretAssignment required the keyword ADJACENT to the `:`/`=`, and a JSON
+//     key's closing quote (plus its escaping backslash) sits in between.
+//   - precededByAssignment walked back over spaces and quotes to decide whether a
+//     high-entropy token sits in a value position, but stopped at a backslash.
+//
+// The named formats were never affected — they match on the secret's own shape,
+// so surrounding syntax is irrelevant. That asymmetry is what made this easy to
+// miss: an AWS key in JSON was caught, and a database password was not.
+func TestRedact_JSONShapedSecrets(t *testing.T) {
+	d := newSecretDetector()
+	const entropyTok = "aB3xQ9vK2mZ7pL4wR8tY6nH1jF5sD0gC"
+
+	for _, c := range []struct {
+		name, in, secret, cat string
+	}{
+		{"unescaped json, keyword", `{"password":"hunter2-prod-db-2026"}`, "hunter2-prod-db-2026", "secret_assignment"},
+		{"unescaped json, spaced", `{"api_key": "abcdefghijklmnop"}`, "abcdefghijklmnop", "secret_assignment"},
+		{"escaped json, keyword", `{"stdout":"{\"password\":\"hunter2-prod-db-2026\"}"}`, "hunter2-prod-db-2026", "secret_assignment"},
+		{"escaped json, entropy", `{"stdout":"{\"key\":\"` + entropyTok + `\"}"}`, entropyTok, "entropy"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			out, cats, changed := d.Redact(c.in)
+			if !changed {
+				t.Fatalf("not redacted at all: %s", c.in)
+			}
+			if strings.Contains(out, c.secret) {
+				t.Errorf("secret survived: %s", out)
+			}
+			if !containsCat(cats, c.cat) {
+				t.Errorf("categories = %v, want %q", cats, c.cat)
+			}
+		})
+	}
+
+	// The escaping must survive redaction. The value group must not swallow the
+	// backslash that terminates a JSON string, or the redacted output stops being
+	// parseable — and this text is carried INSIDE a JSON body on the wire.
+	t.Run("escaping survives", func(t *testing.T) {
+		in := `{"stdout":"{\"password\":\"hunter2-prod-db-2026\"}"}`
+		out, _, _ := d.Redact(in)
+		if !strings.Contains(out, `\"}`) {
+			t.Errorf("the closing escaped quote was consumed by the redaction: %s", out)
+		}
+	})
+
+	// A value that legitimately contains backslashes must still be redacted whole.
+	// Excluding `\` from the value charset outright would silently stop redacting
+	// this, which is why the pattern only refuses a backslash as the LAST character.
+	t.Run("windows path value still redacted", func(t *testing.T) {
+		in := `password=C:\Users\dev\secret.key`
+		out, cats, changed := d.Redact(in)
+		if !changed || strings.Contains(out, `C:\Users\dev\secret.key`) {
+			t.Errorf("a backslash-bearing value must still be redacted: out=%q cats=%v", out, cats)
+		}
+	})
+}
+
+// containsCat reports whether cats contains want.
+func containsCat(cats []string, want string) bool {
+	for _, c := range cats {
+		if c == want {
+			return true
+		}
+	}
+	return false
+}
