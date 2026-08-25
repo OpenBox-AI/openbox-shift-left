@@ -206,6 +206,24 @@ Being precise here is part of the product.
   - **Whether subscription-OAuth traffic even follows `ANTHROPIC_BASE_URL` is
     unresolved** (ADR-0021 §8). If it does not, this covers API-key/console orgs
     only. Nobody has measured it, and this document will not guess.
+  - **Anything that can reach loopback can call the gateway, including a web page.**
+    The daemon performs no caller authentication; ADR-0021 names the loopback bind
+    as the caller boundary, and for *relaying* that is defensible — a caller
+    supplies its own credential, so it gains no access it did not already have.
+    But loopback is not a user boundary on a shared machine, and it is not a
+    browser boundary at all: a page the developer visits can `fetch()`
+    `http://127.0.0.1:8788/v1/messages` as a CORS-simple request, which is *sent*
+    even though the reply cannot be read cross-origin. Today the consequence is
+    bounded, because the shipping `openbox gateway` wires neither capture nor the
+    gate and is a pure relay. It stops being bounded the moment capture is wired:
+    a caller that reaches the listener would then have its content redacted,
+    signed with the developer's key and stored as that developer's governance
+    evidence — evidence forgery by an unauthenticated local caller. Closing it
+    means adding a caller check (an `Origin`/`Sec-Fetch-Site` rejection, or a
+    loopback token) to a relay documented as transparent, which is a product
+    decision and is **not** made yet. Related and smaller: the relay buffers up
+    to 64 MiB per in-flight request with no concurrency cap, so the same
+    unauthenticated listener is a local memory-pressure lever.
 - **The inline-evaluation path has not been exercised against a live stack.**
   Every claim below about enforcement rests on tests that drive the real hook
   against a local `/evaluate` stub — which is real HTTP and the real gate, but not
