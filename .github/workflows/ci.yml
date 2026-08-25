@@ -25,9 +25,27 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Set up Go
+        # A SUPPORTED major, and the reason is security rather than features.
+        # Go patches only the two most recent majors, so a pin to an older one
+        # stops receiving stdlib fixes entirely while still building green:
+        # this was pinned to 1.23 two majors past its end of life, and
+        # govulncheck found reachable stdlib vulnerabilities in every module
+        # (quadratic net/url resolvePath, a crypto/tls post-handshake message
+        # limit, encoding/asn1 recursion depth, net/textproto error escaping)
+        # whose fixes shipped only in 1.25.11+ and could therefore never arrive
+        # on any 1.23 patch.
+        #
+        # This is deliberately NOT the go.mod language floor, which stays at
+        # 1.23: a newer toolchain compiles an older language version, so the
+        # x/term v0.34.0 pin (v0.35.0+ would raise that floor across all twelve
+        # modules) is unaffected. Toolchain and floor move independently, and
+        # only one of them is a security input.
+        #
+        # A MAJOR, not a full version, so patch releases — which is what
+        # security fixes are — arrive without a commit here.
         uses: actions/setup-go@v5
         with:
-          go-version: "1.23"
+          go-version: "1.26"
 
       - name: Check formatting
         run: |
@@ -66,6 +84,34 @@ jobs:
         # No -short: the tests that exec the real built binary are the ones
         # that pin the INV-3 hook contract (exit 0, empty stdout).
         run: go test -race $MODS
+
+      - name: Vulnerability scan
+        # The gate that makes the pin above self-maintaining. Without it, the
+        # toolchain silently ages out of support again and nothing says so —
+        # which is exactly how it reached two majors past end of life, green the
+        # whole way.
+        #
+        # A RED result here usually means "bump the toolchain", not "this change
+        # broke something": a newly published stdlib advisory fails an unrelated
+        # PR. That is the intended direction for a governance product — a known
+        # reachable vulnerability in a shipped binary is worse than a blocked
+        # merge — and the remedy is one line above.
+        #
+        # Per module, because the repo root is not a module. -show=verbose is
+        # omitted: the default output already names the reachable symbol traces,
+        # which is what turns a report into an action.
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          failed=""
+          for dir in $(go list -m -f '{{.Dir}}'); do
+            echo "::group::govulncheck $dir"
+            (cd "$dir" && govulncheck ./...) || failed="$failed $dir"
+            echo "::endgroup::"
+          done
+          if [ -n "$failed" ]; then
+            echo "::error::reachable vulnerabilities in:$failed"
+            exit 1
+          fi
 
       - name: Cross-compile for Windows
         # ADR-0015 made Windows a supported target for the first time: credentials

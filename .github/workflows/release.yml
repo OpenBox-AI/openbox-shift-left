@@ -22,7 +22,10 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: "1.23"
+          # Keep in step with ci.yml. This is the toolchain that builds the
+          # PUBLISHED binaries, so an unsupported pin here ships the stdlib
+          # vulnerabilities rather than merely testing against them.
+          go-version: "1.26"
 
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v6
