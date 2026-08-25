@@ -122,6 +122,29 @@ assert_eq "no span classified as something else" 0 \
 assert_ge "the assistant text reached the span body" 1 \
 	"$(tb_val "select count(*) from spans s where s.session_id='$uuid' and s.response_body like '%$FAIL_MARK%';")"
 
+# ADR-0019 P3: thinking must NOT also be in that span. This is the assertion for
+# the failure mode with no error anywhere — core reads this body as the
+# assistant's REPLY, so chain-of-thought here would score every later turn's drift
+# against the model's reasoning instead of its answer, and nothing would log.
+#
+# Asserted HERE and not in 20-capture.sh because this is the phase where a span is
+# expected to EXIST; a non-leak check against zero spans proves nothing.
+#
+# Cross-field rather than marker-based: no prompt can make a model think a chosen
+# phrase, so the needle is the stored thinking itself. It stays entirely inside
+# SQL — the model's own text is never interpolated through the shell.
+if [ "$(tb_count "governance_events where run_id='$sid' and output ? 'thinking'")" -gt 0 ]; then
+	assert_eq "thinking did not ride the assistant span" 0 		"$(tb_val "select count(*) from spans s
+			where s.session_id='$uuid'
+			  and position(
+			        left((select output->>'thinking' from governance_events
+			              where run_id='$sid' and output ? 'thinking'
+			              order by created_at desc limit 1), 60)
+			        in coalesce(s.response_body,'')) > 0;")"
+else
+	tb_skip "thinking did not ride the assistant span" "no thinking block in this session (extended thinking may be off)"
+fi
+
 # ── alignment ────────────────────────────────────────────────────────────────
 tb_step "goal alignment is fed"
 if [ "$ALIGNMENT_READY" -eq 0 ]; then

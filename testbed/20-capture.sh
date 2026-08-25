@@ -25,6 +25,10 @@
 # server-side by 35-telemetry.sh, which already drives a capture-off session. That
 # half is strict for thinking, because absence needs no cooperation from a model.
 #
+# The related check that thinking did NOT also ride the assistant's span lives in
+# 35-telemetry.sh too, and deliberately not here: this phase asserts a dev session
+# writes ZERO spans, and a non-leak assertion against zero spans proves nothing.
+#
 # Neither the shell command nor the file body appears in the prompt: they are
 # read out of files inside the project, so their presence downstream means the
 # runtime captured them from the tool call, not that the prompt mentioned them.
@@ -148,6 +152,13 @@ assert_ge "MCP call captured with its server+tool" 1 \
 	"$(tb_count "governance_events where run_id='$sid' and event_type='ActivityStarted' and input->>'mcp_server' is not null and input->>'mcp_tool' is not null")"
 
 tb_step "zero spans — the accepted trade-off, asserted on purpose"
+# KNOWN TENSION, unresolved until this suite first runs: ADR-0018 put ONE span on
+# a content-capturing TurnCompleted, and 35-telemetry.sh:122 positively asserts
+# that span's row exists. This session captures content too, so on the first live
+# run exactly one of the two assertions is wrong. Left as-is rather than guessed
+# at: which one depends on whether core stores an embedded spans[] entry as a
+# spans row, which nobody in this repo has observed (MAPPING.md §7). Whoever runs
+# this first should expect to resolve it, not to be surprised by it.
 # NOT a bug and NOT something to "fix" by re-adding a span. A hook process has no
 # in-process OpenTelemetry, so the spans shift-left used to send were fabricated
 # by hand to satisfy a wire shape. ADR-0013 retired them. The cost is real and is
@@ -216,8 +227,6 @@ assert_contains "file body egressed (content_capture on)" "$egress" "$FILE_MARK"
 if [ "$(tb_count "governance_events where run_id='$sid' and activity_type='llm_completion' and output is not null and output ? 'thinking'")" -gt 0 ]; then
 	assert_ge "turn thinking egressed (content_capture on)" 1 \
 		"$(tb_count "governance_events where run_id='$sid' and output ? 'thinking'")"
-	# It must NOT have also gone into the span that core reads as the assistant's
-	# REPLY — chain-of-thought there silently corrupts goal-alignment scoring.
 	tb_note "thinking bytes: $(tb_val "select length(output->>'thinking') from governance_events where run_id='$sid' and output ? 'thinking' order by created_at desc limit 1;")"
 else
 	tb_skip "turn thinking egressed" "no thinking block in this session (extended thinking may be off — see MAPPING.md §7 item 22)"

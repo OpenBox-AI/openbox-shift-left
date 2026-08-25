@@ -218,7 +218,8 @@ Two of those lines used to read the other way, and both changed in August 2026:
   They still ride a gated call too — OpenBox decides every gated call now
   ([ADR-0017](docs/adr/ADR-0017-inline-policy-evaluation.md)) and cannot decide on
   content it cannot see — but "never on observe events" is no longer true.
-- **The assistant's thinking is captured**, one block per turn, under the same
+- **The assistant's thinking is captured** — the turn's thinking blocks,
+  concatenated in file order, under the same
   switch. This goes further than Anthropic's own telemetry: their OpenTelemetry
   export redacts extended thinking unconditionally, and no hook carries it, so the
   session transcript is the only source

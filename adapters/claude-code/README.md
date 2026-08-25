@@ -78,6 +78,7 @@ gates every content class this adapter binds:
 | assistant reply (`Stop`/`SubagentStop`) | ADR-0018 | yes |
 | tool input on the **observe** path | ADR-0019 P1 | yes |
 | tool output (`tool_response`), incl. a failed call's `error` | ADR-0019 P1 | yes |
+| **the turn's thinking** (`Stop`/`SubagentStop` transcript) | ADR-0019 P3 | yes |
 | refusal free text (`PermissionDenied.reason`, `StopFailure.error_details`) | ADR-0019 P1 | yes |
 
 **Opt out** with `content_capture:false` in `~/.openbox/dev.json` or
