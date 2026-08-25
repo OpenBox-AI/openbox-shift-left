@@ -1,6 +1,7 @@
 package gatewaycheck
 
 import (
+	"io/fs"
 	"net"
 	"os"
 	"path/filepath"
@@ -149,6 +150,17 @@ func TestNonLoopbackTargetIsFlagged(t *testing.T) {
 	if !strings.Contains(strings.Join(r.BypassNotes, " "), "not loopback") {
 		t.Errorf("the note does not name the mismatch: %v", r.BypassNotes)
 	}
+	// The port-defaulting half. This URL has no explicit port and is perfectly
+	// valid — a real client connects on 443. Requiring one made the dial fail, so
+	// the report described a WORKING, ungoverned configuration as "model calls
+	// will FAIL rather than escape, the safe direction": exactly backwards, and
+	// this test previously pinned that wrong claim by not looking.
+	if !r.Alive {
+		t.Errorf("api.anthropic.com reported unreachable (%s) — the port was not defaulted from the scheme, so a working ungoverned config reads as failing safe", r.AliveErr)
+	}
+	if strings.Contains(strings.Join(r.BypassNotes, " "), "safe direction") {
+		t.Errorf("a reachable provider URL is being described as failing safe: %v", r.BypassNotes)
+	}
 }
 
 // TestDeadGatewayNamesTheSafeDirection — a dead gateway fails model calls rather
@@ -229,5 +241,52 @@ func TestUnparseableSettingsDegradesNotLies(t *testing.T) {
 	}
 	if !r.BypassCapable {
 		t.Error("an unparseable config must not read as governed")
+	}
+}
+
+// TestPortIsDefaultedFromTheScheme is the unit-level half of the same finding,
+// isolated so it does not depend on network reachability.
+func TestPortIsDefaultedFromTheScheme(t *testing.T) {
+	cases := map[string][2]string{
+		"https://api.anthropic.com":      {"api.anthropic.com", "443"},
+		"http://127.0.0.1:8788":          {"127.0.0.1", "8788"},
+		"https://api.anthropic.com/v1":   {"api.anthropic.com", "443"},
+		"http://localhost":               {"localhost", "80"},
+		"https://gw.internal:8443/relay": {"gw.internal", "8443"},
+	}
+	for in, want := range cases {
+		h, p := hostPort(in)
+		if h != want[0] || p != want[1] {
+			t.Errorf("hostPort(%q) = %q,%q want %q,%q", in, h, p, want[0], want[1])
+		}
+	}
+}
+
+// TestUnknownOwnerIsNotReportedAsNonRoot covers the Windows path, which has no uid
+// to read. -1 means UNKNOWN; treating it as "not root" printed a confident false
+// claim ("owned by uid -1, not root — the developer can rewrite it") about a file
+// that may be properly locked down.
+func TestUnknownOwnerIsNotReportedAsNonRoot(t *testing.T) {
+	orig := statUID
+	statUID = func(fs.FileInfo) int { return -1 }
+	t.Cleanup(func() { statUID = orig })
+
+	managedPath := filepath.Join(t.TempDir(), "managed-settings.json")
+	writeSettings(t, managedPath, "http://127.0.0.1:8788")
+
+	r := Inspect(t.TempDir(), managedPath, dialWait)
+	if r.OwnerUID != -1 {
+		t.Fatalf("OwnerUID = %d, want -1 for this fixture", r.OwnerUID)
+	}
+	notes := strings.Join(r.BypassNotes, " ")
+	if strings.Contains(notes, "not root") {
+		t.Errorf("unknown ownership reported as confirmed non-root: %v", r.BypassNotes)
+	}
+	if !strings.Contains(notes, "cannot be CONFIRMED") {
+		t.Errorf("the note does not admit it could not tell: %v", r.BypassNotes)
+	}
+	// It still must not claim the MDM tier it cannot observe.
+	if r.Tier == TierMDM {
+		t.Error("claimed the MDM tier without being able to check ownership")
 	}
 }

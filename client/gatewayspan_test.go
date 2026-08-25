@@ -102,7 +102,7 @@ func TestGatewaySpanOnWireWithCaptureOn(t *testing.T) {
 			ResponseHeaders       map[string]string `json:"response_headers"`
 			HTTPMethod            string            `json:"http_method"`
 			HTTPURL               string            `json:"http_url"`
-			HTTPStatus            int               `json:"http_status"`
+			HTTPStatus            int               `json:"http_status_code"`
 			CredentialFingerprint string            `json:"credential_fingerprint"`
 			Attributes            map[string]any    `json:"attributes"`
 		} `json:"spans"`
@@ -121,6 +121,17 @@ func TestGatewaySpanOnWireWithCaptureOn(t *testing.T) {
 	}
 	if s.HTTPMethod != "POST" || s.HTTPStatus != 200 {
 		t.Errorf("classification root fields wrong: method=%q status=%d", s.HTTPMethod, s.HTTPStatus)
+	}
+	// The KEY NAME is the assertion, not just the value. Core spells it
+	// `http_status_code`; the shorter `http_status` was silently dropped on
+	// ingest, and every test here passed while that was happening because they
+	// all asserted OUTBOUND bytes rather than the receiving type.
+	if strings.Contains(string(body), `"http_status"`) {
+		t.Error(`span carries "http_status"; core's SpanData field is "http_status_code" and drops the other silently`)
+	}
+	// The fingerprint's only route into core: attributes, which survive ingest.
+	if s.Attributes["openbox.credential_fingerprint"] == nil {
+		t.Error("fingerprint absent from attributes — core has no credential_fingerprint field, so the top-level key alone is dropped and account binding can never match")
 	}
 	if s.CredentialFingerprint == "" {
 		t.Error("credential_fingerprint absent from the wire")
@@ -215,5 +226,52 @@ func TestHookTurnUnaffectedByTheGatewayPath(t *testing.T) {
 	// wrapper core's extractor unmarshals.
 	if !strings.Contains(raw, `\"choices\"`) {
 		t.Errorf("the assistant span's chat wrapper is gone; alignment would read nothing:\n%s", raw)
+	}
+}
+
+// TestGatewaySpanKeysMatchCoreSpanData pins the receiving contract by NAME.
+//
+// Every other test in this file asserts the bytes this client produces. That is
+// not the same as asserting the bytes core can READ: Go's encoding/json drops an
+// unrecognized key on Unmarshal without erroring, so a misspelled field is
+// invisible to outbound-byte assertions, to golden fixtures, and to mutation
+// drills alike. Two fields were being thrown away that way.
+//
+// The list below is transcribed from openbox-core's SpanData
+// (internal/content/governance.go). It is a copy, and a copy can go stale — but a
+// stale copy fails loudly here, whereas the alternative failed silently in
+// production. If core adds credential_fingerprint, move it out of attributes and
+// add it here.
+func TestGatewaySpanKeysMatchCoreSpanData(t *testing.T) {
+	coreKnows := map[string]bool{
+		"span_id": true, "trace_id": true, "parent_span_id": true, "name": true,
+		"kind": true, "start_time": true, "end_time": true, "duration_ns": true,
+		"attributes": true, "status": true, "events": true,
+		"request_headers": true, "response_headers": true,
+		"request_body": true, "response_body": true,
+		"semantic_type": true, "stage": true, "data": true, "hook_type": true,
+		"error": true, "http_method": true, "http_url": true, "http_status_code": true,
+		// Known-dropped, kept deliberately for the day core adds the field. Its
+		// working copy rides attributes["openbox.credential_fingerprint"].
+		"credential_fingerprint": true,
+	}
+
+	body, err := buildPayload(gatewayTurn())
+	if err != nil {
+		t.Fatalf("buildPayload: %v", err)
+	}
+	var p struct {
+		Spans []map[string]json.RawMessage `json:"spans"`
+	}
+	if err := json.Unmarshal(body, &p); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(p.Spans) != 1 {
+		t.Fatalf("want one span, got %d", len(p.Spans))
+	}
+	for key := range p.Spans[0] {
+		if !coreKnows[key] {
+			t.Errorf("span key %q is not a field on core's SpanData — it will be dropped silently on ingest", key)
+		}
 	}
 }

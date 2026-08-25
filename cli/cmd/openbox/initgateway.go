@@ -55,6 +55,20 @@ func (a *app) setupGateway(homeDir, addr, upstream string) error {
 		return err
 	}
 
+	// Is the port already taken by something else? This has to be checked BEFORE
+	// starting, because the readiness probe below cannot tell our gateway from a
+	// stranger: it is a bare TCP connect. Without this, a foreign process holding
+	// the port means our gateway fails to bind, the probe connects to the stranger
+	// anyway, and init writes ANTHROPIC_BASE_URL pointing the developer's model
+	// traffic at an unknown local service while reporting success.
+	//
+	// A pre-check rather than a post-hoc identity check because the relay has no
+	// identity to assert — it is a transparent proxy by design, so there is no
+	// endpoint that could answer "are you OpenBox?" without breaking that.
+	if occupied, who := portOccupied(cfg.Addr); occupied {
+		return fmt.Errorf("%s is already in use%s — refusing to continue, because the readiness check cannot tell our gateway from whatever is listening. Stop it, or choose another --gateway-addr", cfg.Addr, who)
+	}
+
 	binPath, err := os.Executable()
 	if err != nil {
 		return fmt.Errorf("cannot resolve this binary's path for the service unit: %w", err)
@@ -105,12 +119,18 @@ func (a *app) removeGateway(homeDir string) error {
 		fmt.Fprintf(a.stdout, "  removed        %s from %s\n", key, gatewayservice.SettingsPath(homeDir))
 	}
 
+	// Unload BEFORE deleting the file. launchctl's fallback spelling
+	// (`launchctl unload <path>`) has to READ the plist to identify the job, so
+	// doing this after os.Remove left the fallback structurally unable to help: if
+	// the primary `bootout` failed, a KeepAlive job could stay running and
+	// restarting with no unit on disk, silently, while init reported success.
+	a.unloadUnit(gatewayservice.UnitPath(runtime.GOOS, homeDir))
+
 	unitPath, err := gatewayservice.RemoveUnit(runtime.GOOS, homeDir)
 	if err != nil {
 		return err
 	}
 	if unitPath != "" {
-		a.unloadUnit(unitPath)
 		fmt.Fprintf(a.stdout, "  removed        %s\n", unitPath)
 	}
 	return nil
@@ -206,4 +226,20 @@ func (a *app) homeDir() string {
 		return h
 	}
 	return ""
+}
+
+// portOccupied reports whether something already accepts connections at addr.
+//
+// A successful DIAL, not a failed bind: binding to test would race the daemon we
+// are about to start, and on some platforms a bind-then-close leaves the port in a
+// state the real listener has to wait out.
+func portOccupied(addr string) (bool, string) {
+	conn, err := net.DialTimeout("tcp", addr, 300*time.Millisecond)
+	if err != nil {
+		return false, ""
+	}
+	conn.Close()
+	// No identity to report: whatever answered, it answered before our gateway
+	// existed, so it is not ours.
+	return true, " (something is already listening there)"
 }

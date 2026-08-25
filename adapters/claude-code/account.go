@@ -2,6 +2,7 @@ package claudecode
 
 import (
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 )
@@ -33,6 +34,11 @@ import (
 // on 2026-08-25 against the installed 2.1.229 (probe P1 §3).
 const accountStateFile = ".claude.json"
 
+// maxAccountStateBytes bounds the read. Generous — the file legitimately grows
+// with project history — but finite. A truncated read simply fails to unmarshal
+// and yields no evidence, which is the same silent no-op as a missing file.
+const maxAccountStateBytes = 16 << 20 // 16 MiB
+
 // accountEvidence is the bound subset. The struct IS the allowlist: a field that
 // is not here cannot be egressed by this path, so adding one is a visible change
 // rather than a silent widening.
@@ -51,7 +57,17 @@ func localAccount(homeDir string) accountEvidence {
 	if homeDir == "" {
 		return accountEvidence{}
 	}
-	raw, err := os.ReadFile(filepath.Join(homeDir, accountStateFile))
+	// BOUNDED, like every other externally-controlled read in this repo
+	// (maxHookPayload 32MiB, maxTranscriptBytes 64MiB, maxFindingsDelta 4MiB). This
+	// file is not ours: it accumulates project history, cached experiment payloads
+	// and MCP settings, so it grows without an upper bound we control, and this
+	// runs on EVERY SessionStart.
+	f, err := os.Open(filepath.Join(homeDir, accountStateFile))
+	if err != nil {
+		return accountEvidence{}
+	}
+	defer f.Close()
+	raw, err := io.ReadAll(io.LimitReader(f, maxAccountStateBytes))
 	if err != nil {
 		return accountEvidence{}
 	}

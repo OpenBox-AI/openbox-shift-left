@@ -25,6 +25,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -106,23 +107,42 @@ func Inspect(homeDir, managedPath string, dialTimeout time.Duration) Report {
 	// Ownership decides the tier, not the file's location: an org can push the
 	// same bytes to either path. A user-writable managed file is base tier
 	// wearing an MDM path, and reporting it as MDM would overstate.
+	// Ownership decides the tier. -1 means this OS exposed no owner to check
+	// (Windows), and that is UNKNOWN rather than "not root": treating the two
+	// alike printed "owned by uid -1, not root — the developer can rewrite it"
+	// about a file that may be properly ACL-locked, which is a false claim in the
+	// confident direction. Unknown ownership cannot confirm the MDM tier either,
+	// so it reports base AND says why it could not tell.
 	if r.SettingsPath != "" && r.Tier == TierMDM && r.OwnerUID != 0 {
 		r.Tier = TierBase
-		r.BypassNotes = append(r.BypassNotes,
-			fmt.Sprintf("%s sits at the managed path but is owned by uid %d, not root — "+
-				"the developer can rewrite it, so this is the base tier, not the MDM tier", r.SettingsPath, r.OwnerUID))
+		if r.OwnerUID < 0 {
+			r.BypassNotes = append(r.BypassNotes,
+				fmt.Sprintf("%s sits at the managed path, but this OS exposes no file owner to "+
+					"check, so the MDM tier cannot be CONFIRMED here. It may well be locked down; "+
+					"this build simply cannot see it. Verify ownership by hand.", r.SettingsPath))
+		} else {
+			r.BypassNotes = append(r.BypassNotes,
+				fmt.Sprintf("%s sits at the managed path but is owned by uid %d, not root — "+
+					"the developer can rewrite it, so this is the base tier, not the MDM tier", r.SettingsPath, r.OwnerUID))
+		}
 	}
 
 	if r.ConfiguredAddr != "" {
-		host, _, err := net.SplitHostPort(stripScheme(r.ConfiguredAddr))
-		if err == nil {
-			if ip := net.ParseIP(host); ip != nil {
-				r.TargetsGateway = ip.IsLoopback()
-			} else {
-				r.TargetsGateway = host == "localhost"
-			}
+		host, port := hostPort(r.ConfiguredAddr)
+		if ip := net.ParseIP(host); ip != nil {
+			r.TargetsGateway = ip.IsLoopback()
+		} else {
+			r.TargetsGateway = host == "localhost"
 		}
-		r.Alive, r.AliveErr = dial(stripScheme(r.ConfiguredAddr), dialTimeout)
+		// The port has to be DEFAULTED, not required. A configured value with no
+		// explicit port ("https://api.anthropic.com") is perfectly valid — a real
+		// client connects on 443 — but SplitHostPort errors on it, and so did the
+		// dial. The result was Alive=false, which the report then explained as
+		// "model calls will FAIL rather than escape, the safe direction" while
+		// those calls were in fact succeeding, directly, completely ungoverned.
+		// Exactly backwards, on the one machine state an operator most needs the
+		// truth about.
+		r.Alive, r.AliveErr = dial(net.JoinHostPort(host, port), dialTimeout)
 	}
 
 	r.BypassCapable, r.BypassNotes = bypassAssessment(r, r.BypassNotes)
@@ -231,3 +251,28 @@ func stripScheme(s string) string {
 
 // statUID is implemented per-OS: unix reads the syscall stat, Windows cannot.
 var statUID = func(fs.FileInfo) int { return -1 }
+
+// hostPort splits a configured base URL into host and port, DEFAULTING the port
+// from the scheme when none is given.
+//
+// This is the whole of finding #7: requiring an explicit port made a perfectly
+// valid "https://api.anthropic.com" look unreachable, and the report then
+// described a working, ungoverned configuration as failing safely.
+func hostPort(configured string) (host, port string) {
+	scheme := "http"
+	if strings.HasPrefix(configured, "https://") {
+		scheme = "https"
+	}
+	bare := stripScheme(configured)
+	// Trim any path, so "https://host/v1" does not become part of the host.
+	if i := strings.IndexByte(bare, '/'); i >= 0 {
+		bare = bare[:i]
+	}
+	if h, p, err := net.SplitHostPort(bare); err == nil {
+		return h, p
+	}
+	if scheme == "https" {
+		return bare, "443"
+	}
+	return bare, "80"
+}

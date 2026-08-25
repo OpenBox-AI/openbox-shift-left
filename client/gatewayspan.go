@@ -49,6 +49,16 @@ func gatewaySpanAttributes(s *Span) map[string]any {
 	if s.HTTPStatus != 0 {
 		attrs["http.status_code"] = s.HTTPStatus
 	}
+	// The fingerprint's ONLY route into core. Core's SpanData has no
+	// credential_fingerprint field, and an unrecognized key is dropped silently on
+	// Unmarshal — so without this, account binding (ADR-0021 §6) had no evidence
+	// to match on and could never have fired. `attributes` is carried and stored,
+	// so it is where derived evidence has to live until core grows the field.
+	//
+	// Namespaced `openbox.` so it cannot collide with an OTel convention.
+	if s.CredentialFingerprint != "" {
+		attrs["openbox.credential_fingerprint"] = s.CredentialFingerprint
+	}
 	return attrs
 }
 

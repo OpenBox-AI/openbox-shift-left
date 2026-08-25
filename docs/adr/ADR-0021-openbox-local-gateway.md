@@ -195,6 +195,32 @@ invariant". That is true of the legacy `Director` path and NOT of the modern
 reason to hand-roll is phase 05's two-way tee. Corrected in `gateway/proxy.go`'s
 package comment; recorded here so the ADR and the code do not disagree.
 
+## Not yet reachable from the served handler (state this before believing the table)
+
+**`openbox init --gateway` today installs a TRANSPARENT PROXY.** It relays, and
+that is all. `gate.Decide`, `capture.Capture` and `WriteRefusal` are written,
+tested and drilled, but nothing calls them from `ServeHTTP` — so as shipped, the
+gateway captures no evidence and refuses nothing.
+
+That is deliberate sequencing (the join is where a bug refuses every model call on
+a developer's machine, and it should land with the doctor check that distinguishes
+"policy refused" from "gateway dead"), but the table above reads as though §6 and
+§7 are live. They are not, and a reader of this ADR alone would have been misled.
+
+One design gap in that seam, found in review and worth fixing before the wiring:
+`Capture` takes the response as an argument, while the gate must run BEFORE
+forwarding, i.e. before a response exists. Whoever wires this either calls
+`Capture` twice — duplicating the fingerprint and redaction work — or splits it
+into a request half and a response half. The second is right; neither is built.
+
+A related consequence of §4 that only shows up once wired: a gateway turn's span
+carries the provider's RAW response body, which is not the
+`{"choices":[{"message":{"content":…}}]}` shape core's alignment extractor
+requires. Since the two span producers ride mutually exclusive events, a
+gateway-observed turn contributes nothing to goal alignment — it is not corruption,
+but it is a silent gap, and alignment for those turns comes from the hook path or
+not at all.
+
 ## What this gateway explicitly CANNOT do
 
 Mandatory, because "gateway" invites the wrong inference:

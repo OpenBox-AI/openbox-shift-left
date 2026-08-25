@@ -50,6 +50,8 @@ func TestNoRefusalWithoutAnEvaluationAttempt(t *testing.T) {
 		{"block", &recordingEvaluator{verdict: client.VerdictBlock, reason: "policy Y"}},
 		{"require approval", &recordingEvaluator{verdict: client.VerdictRequireApproval, ref: "apr-1"}},
 		{"empty verdict", &recordingEvaluator{verdict: ""}},
+		// NOTE: CONSTRAIN is deliberately absent here — it FORWARDS. See
+		// TestConstrainForwardsLikeEverywhereElse.
 		{"unknown verdict", &recordingEvaluator{verdict: client.Verdict("WAT")}},
 	}
 	for _, tc := range cases {
@@ -217,5 +219,34 @@ func TestRefusalCarriesNoCapturedContent(t *testing.T) {
 	}
 	if strings.Contains(d.Reason, secret) {
 		t.Errorf("the decision reason echoed captured content: %q", d.Reason)
+	}
+}
+
+// TestConstrainForwardsLikeEverywhereElse pins a verdict that was being refused.
+//
+// CONSTRAIN is non-blocking in every other consumer in this repo (hookflow's
+// cascade groups it with ALLOW and UNKNOWN). It fell to this gate's default branch
+// and was refused, so once wired, one policy verdict would have meant "proceed"
+// for tool calls and "deny" for model calls — a divergence nobody decided. The
+// owner's always-refuse decision is about a MISSING verdict, not about a verdict
+// that says go ahead.
+func TestConstrainForwardsLikeEverywhereElse(t *testing.T) {
+	ev := &recordingEvaluator{verdict: client.VerdictConstrain}
+	d := Decide(context.Background(), ev, true, Captured{})
+
+	if !d.Forward {
+		t.Fatal("CONSTRAIN was refused; it is non-blocking everywhere else in this repo")
+	}
+	if !d.Evaluated || ev.calls != 1 {
+		t.Errorf("CONSTRAIN must still have asked: evaluated=%v calls=%d", d.Evaluated, ev.calls)
+	}
+	if d.Unreachable {
+		t.Error("CONSTRAIN flagged as unreachable")
+	}
+
+	// And the asymmetry holds: a verdict this build does not know still refuses.
+	unknown := &recordingEvaluator{verdict: client.Verdict("SOME_FUTURE_VERDICT")}
+	if Decide(context.Background(), unknown, true, Captured{}).Forward {
+		t.Error("an uninterpretable verdict forwarded; a future blocking verdict would be waved through")
 	}
 }

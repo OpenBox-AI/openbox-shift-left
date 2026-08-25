@@ -80,8 +80,13 @@ func SystemdUnit(binPath, addr, upstream string) string {
 		"",
 		"[Service]",
 		"Type=simple",
+		// QUOTED. The macOS sibling escapes its argv and this did not: a binPath
+		// containing a space (an $HOME with one is ordinary) breaks systemd's line
+		// parsing, and a '%' in --upstream — plausible under the proxy and
+		// egress-control setups the MDM recipe documents — is a systemd specifier
+		// that gets expanded rather than passed through.
 		fmt.Sprintf("ExecStart=%s gateway --addr %s --upstream %s --shutdown-grace %ds",
-			binPath, addr, upstream, StopTimeout),
+			systemdArg(binPath), systemdArg(addr), systemdArg(upstream), StopTimeout),
 		"Restart=always",
 		"RestartSec=2",
 		// Must match --shutdown-grace: see StopTimeout.
@@ -132,6 +137,19 @@ func WriteUnit(goos, homeDir, binPath, addr, upstream string) (string, error) {
 	return path, nil
 }
 
+// UnitPath is where this OS's unit lives, or "" where none is packaged. Exposed so
+// an uninstall can unload the job BEFORE deleting the file the unload needs.
+func UnitPath(goos, homeDir string) string {
+	switch goos {
+	case "darwin":
+		return LaunchdPath(homeDir)
+	case "linux":
+		return SystemdPath(homeDir)
+	default:
+		return ""
+	}
+}
+
 // RemoveUnit is the uninstall half.
 func RemoveUnit(goos, homeDir string) (string, error) {
 	var path string
@@ -164,4 +182,19 @@ func xmlEscape(s string) string {
 		"'", "&apos;",
 	)
 	return r.Replace(s)
+}
+
+// systemdArg quotes an argument for a systemd ExecStart line.
+//
+// Two escapes matter and they are not the same: '%' is a systemd SPECIFIER
+// introducer and is escaped by doubling it, while quotes and backslashes are
+// shell-ish quoting inside the double-quoted form. Getting only one of them
+// produces a unit that either fails to parse or silently launches with the wrong
+// argv — and a supervised service with the wrong argv looks like a gateway that
+// does not work rather than like a config bug.
+func systemdArg(s string) string {
+	s = strings.ReplaceAll(s, `\`, `\\`)
+	s = strings.ReplaceAll(s, `"`, `\"`)
+	s = strings.ReplaceAll(s, "%", "%%")
+	return `"` + s + `"`
 }

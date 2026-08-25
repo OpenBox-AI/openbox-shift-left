@@ -237,3 +237,43 @@ func min(a, b int) int {
 	}
 	return b
 }
+
+// TestOccupiedPortIsRefusedRatherThanAdopted closes the gap the readiness probe
+// cannot: a bare TCP connect proves SOMETHING listens, not that it is ours.
+//
+// Without the pre-check, a foreign process holding the port means our gateway
+// fails to bind, the probe connects to the stranger, and init points the
+// developer's model traffic at an unknown local service while printing success.
+func TestOccupiedPortIsRefusedRatherThanAdopted(t *testing.T) {
+	skipUnlessSupervised(t)
+	// A stranger on the port, up before init runs.
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	go func() {
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			c.Close()
+		}
+	}()
+
+	home := t.TempDir()
+	a, _, _ := testApp(nil)
+	stubSupervisor(t, "", false)
+
+	err = a.setupGateway(home, ln.Addr().String(), "https://api.anthropic.com")
+	if err == nil {
+		t.Fatal("setupGateway adopted a port held by a foreign process")
+	}
+	if !strings.Contains(err.Error(), "already in use") {
+		t.Errorf("the error does not name the cause: %v", err)
+	}
+	if _, present := gatewayservice.CurrentEnv(home); present {
+		t.Error("ANTHROPIC_BASE_URL was written pointing at an unknown local service")
+	}
+}

@@ -161,11 +161,52 @@ func writeSettings(path string, settings map[string]any) error {
 		return fmt.Errorf("gatewayservice: encoding settings: %w", err)
 	}
 	out = append(out, '\n')
-	// 0644: this file is read by the tool, and it is the DEVELOPER's config. Its
+	// ATOMIC: temp file then rename, not os.WriteFile.
+	//
+	// A crash or a full disk part-way through a plain WriteFile truncates
+	// ~/.claude/settings.json to invalid JSON — and readSettings' own "not valid
+	// JSON, refusing to rewrite it" guard then blocks every later repair, so the
+	// developer is left with a broken tool config that this command will not fix.
+	// A rename is the difference between "the old file or the new file" and "an
+	// arbitrary prefix of the new file".
+	//
+	// This does NOT make concurrent writers safe. Two inits, or an init racing the
+	// tool's own writer, still read-modify-write the same file and the last rename
+	// wins with no error either way. Atomicity bounds the damage to a lost update
+	// rather than a corrupt file; a lock is what would close the race, and this
+	// package deliberately does not claim to have one.
+	//
+	// 0644 because the tool reads it and it is the DEVELOPER's config. Its
 	// permissions are not an assurance boundary — doctor reports ownership as the
 	// tier signal precisely because a user-owned file is user-changeable.
-	if err := os.WriteFile(path, out, 0o644); err != nil {
+	if err := writeFileAtomic(path, out, 0o644); err != nil {
 		return fmt.Errorf("gatewayservice: writing %s: %w", path, err)
 	}
 	return nil
+}
+
+// writeFileAtomic writes via a temp file in the same directory, then renames.
+// Same approach as the adapter's settings writer; kept local rather than exported
+// across a module boundary for one caller.
+func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".settings-*.tmp")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	defer os.Remove(tmpName) // no-op after a successful rename
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		return err
+	}
+	// CreateTemp makes it 0600; match the intended perm rather than silently
+	// tightening a file other tools read.
+	if err := tmp.Chmod(perm); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmpName, path)
 }

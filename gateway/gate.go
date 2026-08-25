@@ -88,7 +88,13 @@ func Decide(ctx context.Context, ev Evaluator, gated bool, c Captured) Decision 
 	}
 
 	switch evaluation.Verdict {
-	case client.VerdictAllow:
+	case client.VerdictAllow, client.VerdictConstrain:
+		// CONSTRAIN forwards. It is non-blocking everywhere else in this repo —
+		// hookflow's cascade treats CONSTRAIN, ALLOW and UNKNOWN alike — and having
+		// the gateway alone refuse it would mean one policy verdict silently
+		// meaning "proceed" for tool calls and "deny" for model calls. That
+		// divergence is not the owner's always-refuse decision, which is about a
+		// MISSING verdict, not about a verdict that says go ahead.
 		return Decision{Forward: true, Evaluated: true, Verdict: evaluation.Verdict}
 
 	case client.VerdictRequireApproval:
@@ -113,7 +119,13 @@ func Decide(ctx context.Context, ev Evaluator, gated bool, c Captured) Decision 
 		}
 
 	default:
-		// An empty or unrecognized verdict is NOT an allow. Rendering nothing for
+		// An empty or unrecognized verdict is NOT an allow.
+		//
+		// Note the asymmetry with CONSTRAIN above, which is deliberate: a verdict
+		// this build KNOWS and knows to be non-blocking forwards; a verdict it
+		// cannot interpret refuses. Folding the two together in either direction
+		// would either block a legitimate CONSTRAIN or wave through a future
+		// blocking verdict this build has never heard of. Rendering nothing for
 		// an unknown literal is how Codex would have made HALT silently proceed
 		// (ADR-0020); the same trap is avoided here by defaulting to refusal on a
 		// verdict this build cannot interpret.

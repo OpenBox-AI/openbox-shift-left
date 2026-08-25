@@ -69,9 +69,27 @@ type wireSpan struct {
 	ResponseHeaders map[string]string `json:"response_headers,omitempty"`
 	HTTPMethod      string            `json:"http_method,omitempty"`
 	HTTPURL         string            `json:"http_url,omitempty"`
-	HTTPStatus      int               `json:"http_status,omitempty"`
+	// http_status_CODE, not http_status. Core's SpanData spells it
+	// `http_status_code` (internal/content/governance.go), and Go's
+	// encoding/json DROPS an unrecognized key silently on Unmarshal — so the
+	// shorter spelling reached core's parser and vanished before either policy
+	// evaluation or storage saw it, with no error on either side.
+	//
+	// This is the failure mode this repo's "asserting the struct is not asserting
+	// the wire" rule was written for, one level further out: asserting the
+	// OUTBOUND bytes is not asserting the RECEIVING TYPE. Every mutation drill and
+	// golden fixture here passed while the field was being thrown away.
+	HTTPStatus int `json:"http_status_code,omitempty"`
 	// CredentialFingerprint is present whether or not content capture is on: it is
 	// derived governance evidence, not content. See client.Span for why.
+	//
+	// Core has NO field for it (verified: zero matches for credential_fingerprint
+	// across openbox-core), so this top-level key is dropped on ingest today. It
+	// is kept for the day core adds one, and the value ALSO rides
+	// attributes["openbox.credential_fingerprint"] — `attributes` is a real
+	// SpanData field that survives ingest and is stored, so that is the copy
+	// account binding can actually match on. Sending only the top-level key would
+	// have made ADR-0021 §6 unimplementable while looking finished.
 	CredentialFingerprint string `json:"credential_fingerprint,omitempty"`
 }
 

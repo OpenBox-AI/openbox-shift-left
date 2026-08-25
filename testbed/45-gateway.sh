@@ -99,24 +99,38 @@ fi
 
 # ── B. credential never egresses; its fingerprint does ───────────────────────
 tb_step "45.B  the raw provider credential is in zero stored bytes; the fingerprint is present"
-leaked="$(tb_val "select count(*) from spans where session_id='$uuid_a' and (request_headers::text ilike '%sk-ant-%' or request_headers::text ilike '%bearer sk-%')")"
-if [ "${leaked:-0}" = "0" ]; then
-	tb_ok "no raw credential in stored request headers"
+# STRICT, and the column names matter. The `spans` table has NO request_headers /
+# request_body / credential_fingerprint columns — only the JSON blobs `data`,
+# `attributes` and `metadata`. An earlier version of this case queried the
+# non-existent columns, and because tb_sql discards stderr and callers coerce ""
+# to 0, it would have printed a GREEN TICK for "no credential leaked" the first
+# time anyone ran it. A broken query must never be indistinguishable from a clean
+# result on the one assertion that matters most.
+if ! leaked="$(tb_count_strict "spans where session_id='$uuid_a' and (data::text ilike '%sk-ant-%' or data::text ilike '%bearer sk-%' or attributes::text ilike '%sk-ant-%')")"; then
+	tb_bad "credential-leak query FAILED — this is an inconclusive assertion, not a pass"
+elif [ "$leaked" = "0" ]; then
+	tb_ok "no raw credential in stored span data"
 else
 	tb_bad "RAW CREDENTIAL IN STORED ROWS ($leaked) — treat as an incident, not a bug"
 fi
-fp="$(tb_val "select count(*) from spans where session_id='$uuid_a' and credential_fingerprint is not null and credential_fingerprint <> ''")"
-if [ "${fp:-0}" -gt 0 ]; then
-	tb_ok "credential fingerprint present on gateway spans ($fp)"
+
+# The fingerprint's route into core is attributes["openbox.credential_fingerprint"]:
+# core's SpanData has no credential_fingerprint field at all (verified against
+# openbox-core), so the top-level key is dropped on ingest and `attributes` is the
+# only copy that survives to be matched on.
+if ! fp="$(tb_count_strict "spans where session_id='$uuid_a' and attributes::text like '%openbox.credential_fingerprint%'")"; then
+	tb_bad "fingerprint query FAILED — inconclusive"
+elif [ "$fp" -gt 0 ]; then
+	tb_ok "credential fingerprint present in span attributes ($fp)"
 else
-	tb_bad "no credential fingerprint — account binding has nothing to match on"
+	tb_bad "no credential fingerprint in attributes — account binding has nothing to match on"
 fi
 
 # ── C. the silent failures ───────────────────────────────────────────────────
 # None of these throw. That is exactly why they are asserted.
 tb_step "45.C  silent-failure assertions: beta passthrough, system-array identity, discovery"
 
-beta="$(tb_val "select count(*) from spans where session_id='$uuid_a' and request_headers::text ilike '%anthropic-beta%'")"
+beta="$(tb_val "select count(*) from spans where session_id='$uuid_a' and data::text ilike '%anthropic-beta%'")"
 if [ "${beta:-0}" -gt 0 ]; then
 	tb_ok "anthropic-beta survived the relay (a stripped value makes a capability quietly unavailable)"
 else
@@ -125,7 +139,7 @@ fi
 
 # The system array must still be an ARRAY with the attribution block first. A
 # reordered or stringified system block poisons the prompt-cache key with no error.
-sysfirst="$(tb_val "select count(*) from spans where session_id='$uuid_a' and request_body::text like '%\"system\":[%'")"
+sysfirst="$(tb_val "select count(*) from spans where session_id='$uuid_a' and data::text like '%\"system\":[%'")"
 if [ "${sysfirst:-0}" -gt 0 ]; then
 	tb_ok "system block relayed as a positional array"
 else
