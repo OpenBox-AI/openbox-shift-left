@@ -3,6 +3,7 @@ package client
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"sort"
 )
 
 // gatewayspan.go builds the span a LOCAL GATEWAY turn carries (ADR-0021).
@@ -62,6 +63,65 @@ func gatewaySpanAttributes(s *Span) map[string]any {
 	return attrs
 }
 
+// Header bounds. The two bodies beside these go through capBody; the header maps
+// went to the wire uncapped, which is the one content-bearing field on this span
+// that had no bound at all.
+//
+// Neither limit is theoretical. An inbound header block is bounded by net/http's
+// MaxHeaderBytes (1 MiB by default) and a RESPONSE header block by the
+// Transport's MaxResponseHeaderBytes, whose default is 10 MiB — so an upstream,
+// or anything reaching the gateway's unauthenticated loopback listener, could put
+// megabytes of headers on an event that shift-left then SIGNS and POSTs. The
+// failure is not a slow request: core rejects an oversized body, so the whole
+// event is lost, and the evidence a refusal produced is exactly the evidence an
+// auditor needs.
+const (
+	// maxHeaderValueBytes is generous against real traffic — a model call's
+	// largest header is a user-agent or a beta list, both far under this.
+	maxHeaderValueBytes = 4096
+	// maxHeaderCount bounds the map. A real Anthropic exchange carries ~15.
+	maxHeaderCount = 64
+)
+
+// capHeaders bounds a captured header map for egress.
+//
+// Keys are sorted before truncating, and that is load-bearing rather than tidy:
+// Go randomizes map iteration, so dropping "whatever came last" would make two
+// emissions of the SAME exchange produce different signed bytes. Gateway spans
+// are deliberately re-emittable — gatewaySpanID mints a stable id so a re-emit
+// after a crash dedupes instead of storing twice — and evidence that changes
+// shape per attempt is evidence an auditor cannot reconcile.
+//
+// Truncation is marked, not silent: a reader has to be able to tell a short
+// header from a shortened one.
+func capHeaders(h map[string]string) map[string]string {
+	if len(h) == 0 {
+		return nil
+	}
+	keys := make([]string, 0, len(h))
+	for k := range h {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	if len(keys) > maxHeaderCount {
+		keys = keys[:maxHeaderCount]
+	}
+	out := make(map[string]string, len(keys))
+	for _, k := range keys {
+		v := h[k]
+		if len(v) > maxHeaderValueBytes {
+			// Runes, so a multi-byte value cannot be cut mid-character — the same
+			// reason capBody counts runes.
+			r := []rune(v)
+			if len(r) > maxHeaderValueBytes {
+				v = string(r[:maxHeaderValueBytes]) + "…[truncated]"
+			}
+		}
+		out[k] = v
+	}
+	return out
+}
+
 // gatewaySpanID derives the span id from the gateway's request id, so a re-emit
 // after a crash mints the same id and core's span dedupe — (span_id, stage)
 // scoped by session_id — absorbs it instead of storing a second row. The same
@@ -109,8 +169,8 @@ func gatewayObservedSpan(ev DevEvent) *wireSpan {
 		// bytes.
 		ResponseBody:    capBody(s.ResponseBody),
 		RequestBody:     capBody(s.RequestBody),
-		RequestHeaders:  s.RequestHeaders,
-		ResponseHeaders: s.ResponseHeaders,
+		RequestHeaders:  capHeaders(s.RequestHeaders),
+		ResponseHeaders: capHeaders(s.ResponseHeaders),
 		Attributes:      gatewaySpanAttributes(s),
 		// Structural / derived: these survive the gate by design.
 		HTTPMethod:            s.HTTPMethod,
