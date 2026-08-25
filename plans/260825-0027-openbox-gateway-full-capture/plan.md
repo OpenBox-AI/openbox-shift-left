@@ -134,6 +134,14 @@ Resolve in phase 03 before phase 04 starts:
   evidence is org UUID + email, nothing more.
 - [x] Codex deferral recorded as a decided non-goal (owner, 2026-08-25).
 
+## Status
+
+Consolidated: [progress-260826-0009](../reports/progress-260826-0009-gateway-full-capture-plan-sync.md)
+— phase-by-phase state, the two defects a review found that this repo's own
+verification structurally could not see, the seven vacuous checks and how each was
+caught, what is blocked and why code cannot close it, and five in-flight decisions
+an owner should confirm.
+
 ## Status, 2026-08-25 (agent session)
 
 **Track A complete** (phases 01–02, shipped earlier). **Phase 04 implemented and reviewed.**
