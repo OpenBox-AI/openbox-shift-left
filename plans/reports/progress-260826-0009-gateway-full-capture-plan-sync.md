@@ -107,6 +107,24 @@ why phase 05 req 6 shipped.
 **Highest leverage: P0 and probe A.** Two runs, ~30 minutes, per
 `probes/RUNBOOK.md` — they close three of the seven rows above.
 
+### Probe A is now cheaper, and tests the shipping path
+
+`openbox gateway --refuse-all --refusal-status N --refusal-error-type S` refuses
+every model call with a candidate shape, so probe A drives the REAL refusal code
+rather than a throwaway server that resembles it, and trying a candidate costs a
+restart instead of a recompile. It announces itself loudly on stderr — a gateway
+refusing everything looks exactly like a gateway that is broken — and its refusal
+message says PROBE MODE, so nothing it produces can be mistaken for a real policy
+denial in the record.
+
+`RefusalShape.Validate` rejects a candidate the requirement already rules out
+(`429`, `503`, a provider error-type literal) before a session is spent on it. The
+runbook carries four candidates worth trying.
+
+These flags are a probe affordance, not configuration: they are absent from posture,
+they require `--refuse-all`, and once probe A names a shape the DEFAULTS change and
+these stay a tool.
+
 ## Decisions made in-flight that an owner should confirm
 
 1. **`--gateway` is OPT-IN.** ADR-0016's lesson argues for on-by-default;

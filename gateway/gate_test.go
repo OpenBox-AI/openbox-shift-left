@@ -250,3 +250,63 @@ func TestConstrainForwardsLikeEverywhereElse(t *testing.T) {
 		t.Error("an uninterpretable verdict forwarded; a future blocking verdict would be waved through")
 	}
 }
+
+// TestRefuseEverythingIsProbeOnlyAndSaysSo covers the probe affordance. It must be
+// unmistakable in what it returns: a refusal that read like a real policy denial
+// would be indistinguishable from one in whatever the probe records, and knowing
+// which behaviour came from where is the entire point of running the probe.
+func TestRefuseEverythingIsProbeOnlyAndSaysSo(t *testing.T) {
+	shape := RefusalShape{Status: 418, ErrorType: "openbox_probe_candidate"}
+	srv := httptest.NewServer(RefuseEverything(shape))
+	defer srv.Close()
+
+	resp, err := srv.Client().Post(srv.URL+"/v1/messages", "application/json", strings.NewReader(`{}`))
+	if err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != shape.Status {
+		t.Errorf("status = %d want the injected %d", resp.StatusCode, shape.Status)
+	}
+	var got refusalBody
+	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
+		t.Fatalf("body is not valid JSON: %v", err)
+	}
+	if got.Error.Type != shape.ErrorType {
+		t.Errorf("error.type = %q want the injected %q", got.Error.Type, shape.ErrorType)
+	}
+	if !strings.Contains(got.Error.Message, "PROBE MODE") {
+		t.Errorf("a probe refusal is not distinguishable from a real one: %q", got.Error.Message)
+	}
+	if !strings.Contains(got.Error.Message, "No policy was consulted") {
+		t.Errorf("the message does not say no policy ran: %q", got.Error.Message)
+	}
+}
+
+// TestRefusalShapeValidateRejectsHopelessCandidates keeps a probe run from burning
+// a real session on a shape the requirement already rules out.
+func TestRefusalShapeValidateRejectsHopelessCandidates(t *testing.T) {
+	bad := []RefusalShape{
+		{Status: 200, ErrorType: "x"},                    // not a refusal at all
+		{Status: 503, ErrorType: "x"},                    // 5xx reads as the provider failing
+		{Status: 429, ErrorType: "x"},                    // the canonical retry signal
+		{Status: 408, ErrorType: "x"},                    // likewise
+		{Status: 403, ErrorType: ""},                     // unnamed error
+		{Status: 403, ErrorType: "overloaded_error"},     // the provider's own literal
+		{Status: 403, ErrorType: "authentication_error"}, // ditto
+	}
+	for _, s := range bad {
+		if err := s.Validate(); err == nil {
+			t.Errorf("Validate accepted a hopeless candidate: %+v", s)
+		}
+	}
+	// And the provisional default must itself be valid, or the shipped path is
+	// asserting a shape its own validator rejects.
+	if err := DefaultRefusalShape().Validate(); err != nil {
+		t.Errorf("the provisional default fails its own validator: %v", err)
+	}
+	if err := (RefusalShape{Status: 403, ErrorType: "openbox_probe_candidate"}).Validate(); err != nil {
+		t.Errorf("a legitimate candidate was rejected: %v", err)
+	}
+}

@@ -24,6 +24,15 @@ func (a *app) runGateway(args []string) int {
 	addr := fs.String("addr", gateway.DefaultAddr, "loopback listen address (host:port)")
 	upstream := fs.String("upstream", gateway.DefaultUpstream, "provider base URL to forward to")
 	grace := fs.Duration("shutdown-grace", 30*time.Second, "how long to let in-flight streams drain after a stop signal")
+	// PROBE-A AFFORDANCE, not an org knob. Probe A has to try several refusal
+	// shapes against a real Claude Code session; without these it is a recompile
+	// per candidate, on a probe that already needs a human. With them the probe
+	// exercises the REAL refusal path rather than a throwaway stand-in that only
+	// approximates it. Once probe A names a shape, the defaults change and these
+	// stay a probe tool.
+	refuseAll := fs.Bool("refuse-all", false, "PROBE A ONLY: refuse every model call, to measure how Claude Code reacts to the refusal shape")
+	refuseStatus := fs.Int("refusal-status", 0, "PROBE A ONLY: override the refusal status code (default: the provisional 403)")
+	refuseType := fs.String("refusal-error-type", "", "PROBE A ONLY: override the refusal error type string")
 	if code, ok := parseFlags(fs, args); !ok {
 		return code
 	}
@@ -42,8 +51,36 @@ func (a *app) runGateway(args []string) int {
 		return a.errorf("%v", err)
 	}
 
+	// Probe-A mode. Announced loudly, because a gateway that refuses everything
+	// looks exactly like a gateway that is broken — the failure mode phase 06's own
+	// security note names — and nobody should discover this state by debugging it.
+	var handler http.Handler = g
+	if *refuseAll {
+		shape := gateway.DefaultRefusalShape()
+		if *refuseStatus != 0 {
+			shape.Status = *refuseStatus
+		}
+		if *refuseType != "" {
+			shape.ErrorType = *refuseType
+		}
+		if err := shape.Validate(); err != nil {
+			listener.Close()
+			return a.errorf("%v", err)
+		}
+		handler = gateway.RefuseEverything(shape)
+		fmt.Fprintf(a.stderr, "PROBE MODE: refusing EVERY model call with status %d, error type %q.\n", shape.Status, shape.ErrorType)
+		fmt.Fprintf(a.stderr, "  Nothing is forwarded and no governance decision is consulted. This exists to\n")
+		fmt.Fprintf(a.stderr, "  measure how Claude Code reacts to the refusal shape (probe A). Watch the CLIENT:\n")
+		fmt.Fprintf(a.stderr, "  how many requests arrive for one prompt, what the session prints, whether it\n")
+		fmt.Fprintf(a.stderr, "  disables a capability for the rest of its life, and its exit code.\n")
+		fmt.Fprintf(a.stderr, "  Stop this process when you are done.\n")
+	} else if *refuseStatus != 0 || *refuseType != "" {
+		listener.Close()
+		return a.errorf("--refusal-status/--refusal-error-type only apply with --refuse-all (they are probe-A tools, not configuration)")
+	}
+
 	srv := &http.Server{
-		Handler: g,
+		Handler: handler,
 		// A header deadline only. There is deliberately no ReadTimeout or
 		// WriteTimeout: a streamed completion legitimately runs for minutes and
 		// either one would abort it mid-stream — the exact failure the relay is

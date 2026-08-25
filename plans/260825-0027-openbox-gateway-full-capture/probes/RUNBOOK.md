@@ -94,13 +94,43 @@ UUID and an email are readable at all, and under which keys.
 
 ## 3. Probe A — which refusal shape stops a call without a retry?
 
-Restart the server per shape and drive one session each:
+**Use the REAL gateway, not the throwaway server.** The gateway now has a probe
+mode, added specifically so this probe exercises the code that will actually ship
+rather than a stand-in that only resembles it — and so trying a candidate costs a
+restart instead of a recompile:
+
+```bash
+openbox gateway --addr 127.0.0.1:8788 --refuse-all --refusal-status 403 --refusal-error-type openbox_policy_refusal
+```
+
+It announces itself loudly on stderr, because a gateway refusing everything looks
+exactly like a gateway that is broken. It consults no policy and forwards nothing.
+
+Then, in another terminal, one session per candidate:
+
+```bash
+mkdir -p /tmp/obx-probe-proj && cd /tmp/obx-probe-proj
+ANTHROPIC_BASE_URL=http://127.0.0.1:8788 claude -p "say ok"
+```
+
+Candidates worth trying, restarting the gateway between each:
+
+| `--refusal-status` | `--refusal-error-type` | why |
+|---|---|---|
+| 403 | `openbox_policy_refusal` | the provisional default — unlike any transience signal |
+| 403 | `permission_denied` | reads more like a policy decision; may collide with client wording rules |
+| 400 | `openbox_policy_refusal` | a request-level rejection rather than an authz one |
+| 451 | `openbox_policy_refusal` | rarely special-cased by clients, so rarely matched by a retry rule |
+
+Candidates the gateway REFUSES to run are already ruled out by the requirement —
+`--refusal-status 429` or `503`, or one of the provider's own error-type literals —
+so it fails fast rather than spending a session proving what is already known.
+
+The old throwaway-server route still works if you prefer it, but it tests an
+approximation:
 
 ```bash
 cd /tmp/obx-probe && GOWORK=off go run main.go -refuse 403 -shape anthropic
-cd /tmp/obx-probe && GOWORK=off go run main.go -refuse 403 -shape plain
-cd /tmp/obx-probe && GOWORK=off go run main.go -refuse 400 -shape anthropic
-cd /tmp/obx-probe && GOWORK=off go run main.go -refuse 403 -shape empty
 ```
 
 For each, watch **the client**, not the server, and record:
