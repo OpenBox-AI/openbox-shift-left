@@ -335,7 +335,10 @@ type captureSink struct {
 	buf []byte
 }
 
-const maxCaptureSinkBytes = 4 * captureBodyRunes
+// Deliberately the SAME number as the redactor's input bound, not a second
+// choice of one: this sink is what already made the response direction satisfy
+// that bound, and two independent values would let one drift above the other.
+const maxCaptureSinkBytes = maxCaptureInputBytes
 
 func (s *captureSink) Write(p []byte) {
 	if s == nil || len(s.buf) >= maxCaptureSinkBytes {

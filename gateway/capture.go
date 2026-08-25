@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/textproto"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/openbox-ai/openbox-shift-left/decision"
 )
@@ -59,6 +60,38 @@ var fingerprintOrder = []string{"Authorization", "X-Api-Key", "Api-Key"}
 // way at both ends.
 const captureBodyRunes = 65536
 
+// maxCaptureInputBytes bounds what is handed to the REDACTOR, which is a
+// separate bound from the wire cap and exists for a different reason.
+//
+// The redactor runs eleven full regex passes plus an entropy walk over whatever
+// it is given, and on the request path it is given the whole relayed body —
+// bounded only by maxRequestBody (64 MiB). Measured on this machine, redacting a
+// 64 MiB body takes ~11.4s of CPU, and 32 MiB takes ~5.7s, to produce a result
+// that capRunes then truncates to 65,536 runes. That work sits SYNCHRONOUSLY in
+// front of the forward and in front of the gate's verdict, on a listener that
+// performs no caller authentication, so it is both a per-call latency cost and
+// an amplification any local caller can aim.
+//
+// The response path was already bounded this way by captureSink; this is the
+// same bound applied to the direction that lacked it.
+//
+// It must stay LARGER than captureBodyRunes or the wire cap becomes vacuous —
+// the relationship maxThinkingBytes has to capBody in the client, and
+// TestCaptureInputBoundExceedsTheWireCap is its control. 4x leaves room for the
+// case where redaction GROWS a body: a placeholder is longer than the shortest
+// value it replaces, so 65,536 runes of output can derive from fewer input
+// bytes.
+//
+// The cost, stated rather than hidden: this is a truncation BEFORE redaction,
+// and the ordering comment above is explicit that capping first can slice a
+// secret in half. What that risks concretely is the one multiline pattern — a
+// PEM block straddling this boundary loses its END anchor, so the retained head
+// is base64 that no named pattern matches and that the entropy pass declines
+// (it is not in a value position). For that head to reach the wire, the ~256 KiB
+// in front of it would also have to redact down below the 65,536-rune cap. A PEM
+// key is ~2-3 KiB, so the window is ~80x the object it could bisect.
+const maxCaptureInputBytes = 4 * captureBodyRunes
+
 // fingerprintHexLen is how much of the digest is kept. Enough to distinguish the
 // credentials one org registers; short enough that the value is obviously an
 // identifier and not a secret.
@@ -107,9 +140,22 @@ func redactHeaders(h http.Header) map[string]string {
 var bodyRedactor = decision.NewRedactor()
 
 // captureBody redacts then caps a captured body, in that order.
+// The input bound is applied HERE rather than at the two call sites, because
+// CaptureRequest, Complete and Capture are all exported and each takes a caller's
+// string. One funnel means a new caller cannot be the one that forgets it.
 func captureBody(body string) string {
 	if body == "" {
 		return ""
+	}
+	if len(body) > maxCaptureInputBytes {
+		// Trim back to a rune boundary. A mid-rune cut would leave an invalid
+		// UTF-8 tail that json.Marshal silently rewrites to U+FFFD, so the stored
+		// evidence would end in a character the exchange never contained.
+		end := maxCaptureInputBytes
+		for end > 0 && !utf8.RuneStart(body[end]) {
+			end--
+		}
+		body = body[:end]
 	}
 	redacted, _, _ := bodyRedactor.RedactText(body)
 	return capRunes(redacted)
