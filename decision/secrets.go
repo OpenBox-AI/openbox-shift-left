@@ -105,14 +105,33 @@ func newSecretDetector() *secretDetector {
 		// (which is what a tool_response is) there is an escaping backslash there
 		// too. Tool output made that the common shape, not an edge case.
 		//
-		// The value group ends with `[^\s"',;\\]`: 8+ permitted characters whose
-		// LAST is not a backslash. Greedy matching then stops before the `\` that
-		// terminates an escaped JSON string, so the redaction cannot swallow it and
-		// leave unparseable JSON on the wire. Excluding `\` from the whole value
-		// instead would have silently stopped redacting a Windows-path value —
-		// `password=${OPENBOX_REDACTED_SECRET_ASSIGNMENT} would truncate to `C:` and fall under the 8-char
-		// floor. Both directions are pinned by TestRedact_JSONShapedSecrets.
-		{category: "secret_assignment", valueGroup: 2, re: regexp.MustCompile(`(?i)((?:api[_-]?key|secret|token|password|passwd|pwd|access[_-]?key|auth[_-]?token|client[_-]?secret)[\\"']*\s*[:=]\s*[\\"']*)([^\s"',;]{7,}[^\s"',;\\])(["']?)`)},
+		// The value group is `[^\s"',;]{8,}` — backslashes INCLUDED, because a
+		// secret can legitimately contain and end with one (a Windows directory
+		// used as a credential value is the everyday case).
+		//
+		// Two properties have to hold at once here, and the regex can only express
+		// one of them:
+		//
+		//	the secret is redacted whole
+		//	the `\` that terminates an escaped JSON string is NOT swallowed —
+		//	this text rides inside a JSON body, and eating that backslash leaves
+		//	unparseable JSON on the wire
+		//
+		// Expressing the second in the pattern — requiring the last character not
+		// to be a backslash — cost the first, silently: a value of exactly 8
+		// characters ending in a backslash then matched NOTHING, because no split
+		// satisfies both the 8-char floor and a non-backslash tail. So the boundary
+		// lives in the REPLACEMENT step instead (Redact below), which trims
+		// trailing backslashes out of the placeholder while still measuring the
+		// whole value against the floor. Both directions are pinned:
+		// TestRedact_ValueEndingInBackslash and
+		// TestRedact_JSONShapedSecrets/escaping_survives.
+		//
+		// (This comment previously carried a `keyword=value` example of the Windows
+		// case and the detector redacted its own documentation, leaving the
+		// sentence unreadable. Examples here stay unmatchable — a bare path, never
+		// beside a keyword and a delimiter.)
+		{category: "secret_assignment", valueGroup: 2, re: regexp.MustCompile(`(?i)((?:api[_-]?key|secret|token|password|passwd|pwd|access[_-]?key|auth[_-]?token|client[_-]?secret)[\\"']*\s*[:=]\s*[\\"']*)([^\s"',;]{8,})(["']?)`)},
 	}}
 }
 
@@ -141,11 +160,31 @@ func (d *secretDetector) Redact(text string) (redacted string, categories []stri
 			}
 			val := m[loc[2*g]:loc[2*g+1]]
 			// Never re-redact an already-inserted placeholder, and skip too-short values.
+			// The floor is measured against the WHOLE value, before the backslash trim
+			// below — trimming first would push a value that legitimately ends in a
+			// separator under the floor and stop redacting it.
 			if len(val) < minAssignmentValueLen || strings.Contains(val, redactedPrefix) {
 				return m
 			}
+			// Trailing backslashes stay OUTSIDE the placeholder. In a JSON body — which
+			// is what a tool_response is — the backslash after a value is the escape
+			// that terminates the string, so swallowing it leaves output the consumer
+			// cannot parse. Backslashes carry no secret material, so keeping them costs
+			// nothing: what is redacted is still the whole value minus its separators.
+			//
+			// This is the boundary the pattern used to express and could not, because
+			// requiring a non-backslash tail there made an at-the-floor value invisible.
+			end := loc[2*g+1]
+			for end > loc[2*g] && m[end-1] == '\\' {
+				end--
+			}
+			// A value of only backslashes has nothing to redact. Emitting a placeholder
+			// over an empty span would report a redaction that did not happen.
+			if end == loc[2*g] {
+				return m
+			}
 			catSet[p.category] = struct{}{}
-			return m[:loc[2*g]] + placeholder(p.category) + m[loc[2*g+1]:]
+			return m[:loc[2*g]] + placeholder(p.category) + m[end:]
 		})
 	}
 	out = d.redactEntropy(out, catSet)

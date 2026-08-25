@@ -852,10 +852,17 @@ const maxBodySize = 65536
 
 // capBody truncates a content body to maxBodySize, the Go mirror of the base
 // SDK's truncate_string: hard cut, no marker, counted in runes to match
-// Python's per-character semantics. Only content bodies (request_body/
-// response_body) are capped — structural identifiers (paths, tool/mcp names)
-// are already bounded at the adapter (capStr) and shell_command is never
-// carried on the egress path (INV-2).
+// Python's per-character semantics. Structural identifiers (paths, tool/mcp
+// names) are not capped here — they are already bounded at the adapter (capStr).
+//
+// What it caps has grown, and the old wording did not: this comment used to say
+// "shell_command is never carried on the egress path (INV-2)", which was
+// SL3-SEC-3 and is retired (ADR-0019 P1). Tool commands, file bodies, tool
+// output, the turn's reply and the turn's thinking all flow through HERE now, on
+// ordinary telemetry, so this function is one of the three mechanisms standing
+// between a body and the wire — gate, redact, cap. Stating otherwise inside the
+// function the content actually crosses is how a reader concludes a bound does
+// not apply to them.
 func capBody(s string) string {
 	if len(s) <= maxBodySize { // fast path: byte len ≤ cap ⇒ rune count ≤ cap
 		return s

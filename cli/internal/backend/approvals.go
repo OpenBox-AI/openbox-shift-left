@@ -51,8 +51,15 @@ type Approval struct {
 	AgentName string         `json:"agent_name"`
 	// ActivityType is the tool (e.g. "Bash", "mcp__github__create_issue").
 	ActivityType string `json:"activity_type"`
-	// Input is the structural activity_input: tool kind and identifiers only,
-	// never the command or a file body (INV-2).
+	// Input is the activity_input the gated event carried: tool kind and
+	// identifiers always, and — with content capture on — the command, the MCP
+	// arguments or the file body under `command`/`arguments`/`content`.
+	//
+	// This said "never the command or a file body (INV-2)", contradicting the type
+	// comment four lines above it, which records the opposite: a gated call has
+	// carried Content.ToolInput since ADR-0017. Request() reads Input["command"]
+	// precisely because it is the field an approval is decided on, so the old
+	// wording described the one thing this struct exists to show.
 	Input     map[string]any `json:"input"`
 	Reason    *string        `json:"reason"`
 	ExpiresAt *time.Time     `json:"approval_expired_at"`

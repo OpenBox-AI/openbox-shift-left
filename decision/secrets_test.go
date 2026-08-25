@@ -249,6 +249,61 @@ func TestRedact_JSONShapedSecrets(t *testing.T) {
 	})
 }
 
+// A value whose LAST character is a raw backslash must still be redacted.
+//
+// This is the case the JSON-escape fix cost, and it cost it silently: the value
+// group was narrowed to "8+ permitted characters whose last is not a backslash",
+// so for a value of exactly 8 characters ending in a backslash no split satisfies
+// both halves — the 8-char floor and the non-backslash tail — and the pattern
+// matched NOTHING. Not partially: nothing. The entropy pass is no backstop
+// either, since a short low-entropy value cannot clear the 4.5-bit floor.
+//
+// Two properties have to hold at once, which is why the boundary moved out of the
+// regex and into the replacement step:
+//
+//	the secret is redacted            (this test)
+//	the JSON escape is not swallowed  (TestRedact_JSONShapedSecrets/escaping_survives)
+//
+// A change that satisfies either one alone has been shipped before.
+func TestRedact_ValueEndingInBackslash(t *testing.T) {
+	d := newSecretDetector()
+
+	for _, c := range []struct {
+		name, in, secret string
+	}{
+		// Exactly at the 8-char floor: the total-miss case.
+		{"eight chars ending in a backslash", `password=abcdefg\`, "abcdefg"},
+		// Above the floor: was redacted before, must stay redacted.
+		{"nine chars ending in a backslash", `password=abcdefgh\`, "abcdefgh"},
+		// A Windows directory as a secret value — trailing separator included.
+		{"windows directory value", `client_secret=C:\Users\dev\`, `C:\Users\dev`},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			out, cats, changed := d.Redact(c.in)
+			if !changed {
+				t.Fatalf("not redacted at all: %s", c.in)
+			}
+			if strings.Contains(out, c.secret) {
+				t.Errorf("secret survived: %s", out)
+			}
+			if !containsCat(cats, "secret_assignment") {
+				t.Errorf("categories = %v, want secret_assignment", cats)
+			}
+		})
+	}
+
+	// A value that is ONLY backslashes carries no secret material, and stripping
+	// the trailing ones would leave the placeholder covering nothing. Redacting it
+	// would report a redaction that did not happen.
+	t.Run("all-backslash value is left alone", func(t *testing.T) {
+		in := `password=` + strings.Repeat(`\`, 10)
+		out, _, changed := d.Redact(in)
+		if changed || out != in {
+			t.Errorf("a value of only backslashes must not report a redaction: out=%q changed=%v", out, changed)
+		}
+	})
+}
+
 // containsCat reports whether cats contains want.
 func containsCat(cats []string, want string) bool {
 	for _, c := range cats {

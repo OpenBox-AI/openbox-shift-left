@@ -95,7 +95,15 @@ reintroduce that: if something is provider-agnostic it goes in `hookflow` or
   enforce-path redactor REWRITES file bodies, so false positives corrupt files.
   Nested-JSON blindness WAS a second gap and is closed (2026-08-25) — both generic
   patterns now tolerate JSON quoting/escaping, which matters because a
-  `tool_response` is JSON and every MCP result arrives escaped. One deliberate
+  `tool_response` is JSON and every MCP result arrives escaped. **The JSON-escape
+  boundary lives in the REPLACEMENT step, not in the pattern, and moving it back
+  would reopen a hole.** Expressing "the value must not end in a backslash" as a
+  regex made a value of exactly 8 characters ending in one match NOTHING — no
+  split satisfies both the 8-char floor and a non-backslash tail — so a real
+  secret went out unredacted while the JSON case looked fixed.
+  `TestRedact_ValueEndingInBackslash` and
+  `TestRedact_JSONShapedSecrets/escaping_survives` pin the two directions
+  together; a change that satisfies one alone has shipped once already. One deliberate
   exception stands: **a gated shell/MCP call sends its command VERBATIM**, because
   policy must judge the command that will actually run (ADR-0017 §Content, amended).
   Keep `docs/data-and-privacy.md` true.
