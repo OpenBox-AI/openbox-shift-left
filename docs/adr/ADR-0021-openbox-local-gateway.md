@@ -1,6 +1,13 @@
 # ADR-0021 — The OpenBox gateway is a per-developer LOCAL service
 
-Status: **DRAFT — not accepted, not implemented.** Date: 2026-08-25.
+Status: **DRAFT — not accepted. Substantially IMPLEMENTED.** Date: 2026-08-25.
+
+The status split is deliberate and is not a contradiction. Everything in §§1–7 is
+built and unit/conformance-verified; §§8–10 are still open, and they are the ones
+that decide who this tier COVERS, how a refusal RENDERS, and whether the OAuth
+account rule can refuse at all. Code that does not depend on those answers was
+worth building; accepting an ADR whose load-bearing empirical questions are
+unanswered would not be. Nothing has run against a real stack.
 
 Three sections carry a `TBD(probe)` marker. **They are the load-bearing ones**,
 and this ADR must not be accepted while they are open: each is an empirical answer
@@ -129,6 +136,19 @@ Source: P0, `plans/reports/probe-260825-baseurl-auth-coverage.md`.
 
 ### 9. `TBD(probe)` — the refusal shape
 
+**Implementation note (2026-08-25).** The refusal PATH is built
+(`gateway/refuse.go`, `gateway/gate.go`); only two constants — `refusalStatus`
+and `refusalErrorType` — are provisional, and they are isolated so probe A's
+answer is a two-line change. The provisional pair is `403` plus an error type that
+is deliberately none of the provider's own literals, chosen to be maximally unlike
+a transience signal the client is built to retry. `TestRefusalShapeIsProbePending`
+asserts that REQUIREMENT — not the answer — so a future edit cannot quietly pick a
+status the client retries around.
+
+If probe A finds no qualifying shape, the descope is already written: phase 06
+becomes observe-only, prevention stays in the hooks, and the gate ships with
+refusal disabled.
+
 The status code and body a refusal uses is **unresolved**. It must not trip Claude
 Code's capability-rejection retry, which matches on upstream error wording: a shape
 that does would silently disable a capability for the rest of the session, which is
@@ -145,6 +165,35 @@ matchable ⇒ it ships **detection-only** for OAuth while API-key fingerprints s
 refuse. The branch must be named in this ADR, not left to the reader.
 
 Source: P1, same report as §8.
+
+## Implementation record (2026-08-25) — what §§1–7 became
+
+Stated here because an ADR whose code has drifted from it is worse than no ADR.
+
+| Decision | Where it lives | Held by |
+|---|---|---|
+| §1 local-first | `gateway/`, loopback-only, `openbox gateway` | `TestListenerMustBeLoopback`, and `gateway.Listen` re-checks the address the KERNEL returned, because a name can resolve differently at bind time than at validate time |
+| §2 detection tier | `cli/internal/gatewaycheck` + `openbox doctor` | tier inferred from FILE OWNERSHIP, never from a flag OpenBox writes; `TestReportNeverClaimsPrevention` fails on any affirmative prevention claim AND requires the detection framing |
+| §3 pass-through | no credential path in `gateway/` at all | an AST guard that resolves import aliases, covers `os`/`syscall`/`io/ioutil`, refuses dot-imports, and is bounded by an import allowlist so its single-module scan is provably complete |
+| §4 inspect without modifying | hand-rolled relay | forward-identity asserted in BOTH directions with an enumerated exception set — the no-ADDITIONS leg is the one that matters, since every default this defeats adds rather than removes |
+| §6 account evidence | `gateway/capture.go` + `adapters/claude-code/account.go` | fingerprint→redact→cap ordering enforced INSIDE one function, so it is a property of code rather than of a caller's discipline |
+| §7 always refuse | `gateway/gate.go` | `Decision.Evaluated` makes the ordering invariant CHECKABLE; asserted across all six refusing branches |
+
+Two things worth recording because they are easy to get wrong later:
+
+- **There is no `fail_closed` input to the gateway's gate at all.** That absence IS
+  §7. A posture key there would be a way to switch the gateway's enforcement off,
+  which is precisely what the owner decision rejected.
+- **An uninterpretable verdict REFUSES.** An empty or unrecognized literal is not
+  an allow. This is ADR-0020's trap in a new place: Codex's renderer wrote nothing
+  for an unknown literal, which would have made HALT silently proceed.
+
+One deliberate divergence from this ADR's own framing: the doc originally argued
+the relay had to be hand-rolled because "every default in net/http undoes the
+invariant". That is true of the legacy `Director` path and NOT of the modern
+`Rewrite` hook, which strips `X-Forwarded-*` and auto-flushes SSE. The honest
+reason to hand-roll is phase 05's two-way tee. Corrected in `gateway/proxy.go`'s
+package comment; recorded here so the ADR and the code do not disagree.
 
 ## What this gateway explicitly CANNOT do
 

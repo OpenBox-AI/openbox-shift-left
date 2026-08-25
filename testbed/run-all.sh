@@ -20,6 +20,10 @@ phases=(
 	# DORMANT: written, never run — no stack has been reachable. See its header.
 	"telemetry:35-telemetry.sh"
 	"approvals:40-approvals.sh"
+	# DORMANT: written, never run. Needs a stack AND `openbox init --gateway`,
+	# which is opt-in — so this phase installs the gateway itself rather than
+	# assuming an earlier phase did.
+	"gateway:45-gateway.sh"
 	"lineage:50-lineage.sh"
 	"visibility:60-visibility.sh"
 	"auto:70-approver-auto.sh"

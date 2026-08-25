@@ -16,6 +16,10 @@ require github.com/openbox-ai/openbox-shift-left/adapters/common/git v0.0.0
 
 require github.com/openbox-ai/openbox-shift-left/client v0.0.0
 
+// The local OpenBox gateway (ADR-0021). The CLI serves it; the gateway module
+// imports nothing from here, and imports no adapter at all.
+require github.com/openbox-ai/openbox-shift-left/gateway v0.0.0
+
 require golang.org/x/sys v0.35.0 // indirect
 
 // The in-process decision engine the enforce hook evaluates against (ADR-0006
@@ -38,6 +42,8 @@ replace github.com/openbox-ai/openbox-shift-left/adapters/common/devconfig => ..
 
 replace github.com/openbox-ai/openbox-shift-left/client => ../client
 
+replace github.com/openbox-ai/openbox-shift-left/gateway => ../gateway
+
 replace github.com/openbox-ai/openbox-shift-left/contracts/dev-event/conformance => ../contracts/dev-event/conformance
 
 replace github.com/openbox-ai/openbox-shift-left/decision => ../decision
@@ -51,7 +57,7 @@ require (
 	//
 	// PINNED, and not to the latest: x/term v0.35.0+ declares `go 1.24.0` and
 	// v0.45.0 wants `go 1.25.0`, so upgrading raises this repo's language floor
-	// across all eleven modules and go.work — a toolchain decision arriving
+	// across all twelve modules and go.work — a toolchain decision arriving
 	// disguised as a dependency bump. `go mod tidy` and `go get -u` will both
 	// happily do it; don't let them. v0.34.0 is the newest release still
 	// declaring `go 1.23.0`.

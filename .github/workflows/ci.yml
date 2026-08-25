@@ -120,3 +120,53 @@ jobs:
             echo "$hits"
             exit 1
           fi
+
+      - name: Gateway units invoke only flags that exist
+        # Phase 07's plan documented the service unit as running
+        # `openbox gateway --config <path>`. No such flag exists, so a generated
+        # unit would have been rejected by flag parsing and the gateway would have
+        # failed to start on EVERY BOOT — a total outage of the phase's own
+        # deliverable, discoverable only by running it.
+        #
+        # Four separate phantom flags were written into this plan's docs before
+        # this gate existed, so it is mechanical rather than a review habit.
+        run: |
+          cd cli
+          go test -run 'TestUnitsUseFlagsThatExist|TestUnitStopTimeoutMatchesTheGracePeriod' ./internal/gatewayservice/
+
+      - name: No prevention claims about gateway bypass
+        # The base assurance claim is DETECTION. Bypass is visible and
+        # attributable, never prevented — prevention belongs to the org's MDM and
+        # is out of OpenBox's scope. A doc that says "cannot be bypassed" is the
+        # overstatement this product exists to prevent, and it is the kind of
+        # sentence that gets written by accident while summarising.
+        #
+        # Phrases, not vocabulary: "not prevented" and "prevention needs your MDM"
+        # are the CORRECT phrasings, so banning the word would push the wording in
+        # exactly the wrong direction. That mistake was made once already while
+        # writing the equivalent Go test.
+        #
+        # Known limit, stated so the fix is obvious: this cannot distinguish a
+        # CLAIM from a DISCLAIMER. A sentence promising never to say "cannot be
+        # bypassed" trips it — that happened on the first run, in the MDM recipe's
+        # own "what OpenBox will not do" list. The remedy is to REWORD the doc, not
+        # to weaken the gate: prose that disclaims a phrase reads almost the same
+        # as prose that asserts it, and a reader skimming will not tell them apart
+        # either.
+        run: |
+          hits=$(grep -rniE 'cannot be bypassed|cannot bypass|bypass is prevented|impossible to bypass|tamper-proof' \
+            docs README.md 2>/dev/null | grep -v '^docs/adr/' || true)
+          if [ -n "$hits" ]; then
+            echo "prevention claim about bypass in user-facing docs:"
+            echo "$hits"
+            exit 1
+          fi
+
+      - name: Testbed scripts are syntactically valid
+        # These are dormant until a stack is reachable, so nothing else executes
+        # them. A dormant script with a syntax error is discovered at the worst
+        # possible moment — the first time someone finally has a stack.
+        run: |
+          for f in testbed/*.sh testbed/lib/*.sh; do
+            bash -n "$f" || { echo "syntax error in $f"; exit 1; }
+          done

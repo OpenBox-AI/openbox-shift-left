@@ -134,6 +134,17 @@ func render(name, openboxBin string) ([]byte, error) {
 	return []byte(strings.ReplaceAll(string(raw), binPlaceholder, openboxBin)), nil
 }
 
+// ClaudeCodeManagedDir exposes the managed-settings directory so `openbox doctor`
+// resolves it through THIS package rather than re-deriving the path.
+//
+// Same reason doctor's duplicate-engine warning and init's repair are built on one
+// classifier: a check and the thing it checks must not be able to disagree about
+// where the file lives. Returns "" where this build knows no path for the OS.
+func ClaudeCodeManagedDir() string {
+	dir, _ := claudeCodeDir()
+	return dir
+}
+
 // claudeCodeDir returns the OS-specific managed-settings directory.
 func claudeCodeDir() (dir, warning string) {
 	switch runtime.GOOS {

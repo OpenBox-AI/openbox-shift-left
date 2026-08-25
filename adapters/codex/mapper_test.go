@@ -2,6 +2,7 @@ package codex
 
 import (
 	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -153,7 +154,9 @@ func TestMap_LifecycleAndToolEvents(t *testing.T) {
 			case tt.wantSpan != nil && got.Span == nil:
 				t.Errorf("expected span %+v, got nil", tt.wantSpan)
 			case tt.wantSpan != nil:
-				if *got.Span != *tt.wantSpan {
+				// DeepEqual, not !=: Span carries maps since the gateway's
+				// header capture (ADR-0021), so it is no longer comparable.
+				if !reflect.DeepEqual(*got.Span, *tt.wantSpan) {
 					t.Errorf("span = %+v, want %+v", *got.Span, *tt.wantSpan)
 				}
 			}

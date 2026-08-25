@@ -40,7 +40,13 @@ package client
 // ADR-0014's transcript allowlist to permit it). Purely additive and gated the
 // same way, so an org with content capture off again sends byte-identical
 // payloads.
-const SchemaVersion = "1.4"
+//
+// 1.5 added the LOCAL GATEWAY's span fields (ADR-0021): request/response headers,
+// the HTTP classification keys, and credential_fingerprint on Span, plus
+// GatewayRequestID on the event. Purely additive — the header pair is gated like
+// every other content field and the rest is structural, so a hook-only install
+// sends byte-identical payloads and every 1.4 event is a valid 1.5 event.
+const SchemaVersion = "1.5"
 
 // EventType is a developer-runtime lifecycle event type. Each maps 1:1 onto
 // an openbox-core event_type string (INV-8) — see MAPPING.md §2.
@@ -225,6 +231,40 @@ type Span struct {
 	// egress unless content-capture is enabled for the org.
 	RequestBody  string `json:"request_body,omitempty"`
 	ResponseBody string `json:"response_body,omitempty"`
+
+	// RequestHeaders/ResponseHeaders carry a model call's HTTP headers, observed
+	// by the local gateway (ADR-0021). GATED content, and the highest-risk class
+	// this client has: the developer's live provider credential is on every
+	// request. Two mechanisms stand between it and the wire and BOTH are
+	// mandatory — the capture side redacts by key name before these are ever
+	// populated, and stripContent empties them here when the org opted out.
+	//
+	// Header values are already-redacted strings, joined per key. A map rather
+	// than a typed http.Header because this package must not import net/http
+	// semantics into the wire contract.
+	RequestHeaders  map[string]string `json:"request_headers,omitempty"`
+	ResponseHeaders map[string]string `json:"response_headers,omitempty"`
+
+	// HTTPMethod/HTTPURL/HTTPStatus are the classification keys. Core RECOMPUTES
+	// semantic_type per span and isLLMCall reads http.method plus an LLM domain
+	// in http.url, so a gateway span without these stores as something else and
+	// alignment silently dies — the same trap ADR-0018's synthesized attributes
+	// documented. Structural, not content: a method, a status and a URL whose
+	// query is dropped at capture.
+	HTTPMethod string `json:"http_method,omitempty"`
+	HTTPURL    string `json:"http_url,omitempty"`
+	HTTPStatus int    `json:"http_status,omitempty"`
+
+	// CredentialFingerprint identifies WHICH registered credential made the call,
+	// without carrying it. One-way SHA-256 over the raw header value, truncated,
+	// computed at capture BEFORE the key-name redaction that removes the value.
+	//
+	// Deliberately NOT gated. It is derived evidence like Status — but unlike
+	// Status it derives FROM a secret, so "the raw value is absent while this is
+	// present" is asserted on outbound bytes rather than assumed. Account binding
+	// is a governance control; making it disappear under a privacy setting would
+	// let an org opt out of being identified.
+	CredentialFingerprint string `json:"credential_fingerprint,omitempty"`
 }
 
 // Content is the only structured location for raw prompt/output/file
@@ -402,6 +442,21 @@ type DevEvent struct {
 	// down to a single row. An indexless, non-rollup turn stays what it is: a
 	// defect, caught by the pin test.
 	SessionRollup bool `json:"session_rollup,omitempty"`
+
+	// GatewayRequestID marks a turn event produced by the LOCAL GATEWAY rather
+	// than by a hook, and supplies that turn's id (ADR-0021).
+	//
+	// It exists to keep the two producers' activity ids in disjoint namespaces,
+	// which is the whole of requirement 8. The gateway and the hooks describe the
+	// same model turn from two vantage points; if they could mint the same
+	// activity_id, core's dedupe — keyed on
+	// (agent_id, workflow_id, run_id, activity_id, event_type) — would absorb one
+	// as a duplicate of the other and silently drop half the evidence.
+	//
+	// The id is opaque to core. It has to be derivable from fields that survive
+	// the spool, for the same reason TurnIndex does: a flush can happen long
+	// after the process that built the event exited.
+	GatewayRequestID string `json:"gateway_request_id,omitempty"`
 
 	// WorkspaceID is a stable per-workspace/developer identity used as core's
 	// workflow_id so (workflow_id, run_id) is unique per session (MAPPING.md

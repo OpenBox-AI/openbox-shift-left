@@ -16,7 +16,12 @@ What leaves the machine, what never does, and the one setting that changes it.
 | **File contents** (a file you read) | yes, by default | **this changed** — a read's arguments and its result both ride the tool event now |
 | **Tool and MCP output** | yes, by default | **this changed** — what a tool printed or returned, including a failed tool's error text. Redacted and truncated the same way |
 | **Why a tool was refused** | yes, by default | **new** — the classifier's reason on a denial, and the provider's detail on a failed turn |
-| **Credentials** | **never** | they stay on your machine — in a plaintext file readable by you, see [Where credentials live](#where-credentials-live) |
+| **Your provider account's email** | yes, if you are signed in | **new** — one field per session, read from Claude Code's own local account record. This is PII, and it egresses as governance evidence like your DID. Not gated by `content_capture`: it is attribution, not content. See [Account attribution](#account-attribution) |
+| **Your provider organization's UUID** | yes, if you are signed in | **new** — same source, same session field |
+| **Your provider organization's NAME, role, tier, billing** | **never** | all four sit in the same local file beside the two rows above, and none of them is sent. The evidence scope is org UUID + email, deliberately |
+| **Model-call HTTP headers** | only with the local gateway running | **new** — and only the non-credential ones: `Authorization`, `x-api-key`, `Cookie`, `Set-Cookie` and four more are replaced with `[redacted]` by name before anything is attached. The KEY is kept so a reviewer can see one was sent. Gated by `content_capture` |
+| **A one-way fingerprint of your provider credential** | only with the local gateway running | **new** — a truncated SHA-256, so OpenBox can tell WHICH registered credential made a call without holding it. Not gated: it is the account-binding control, and a privacy switch that removed it would let an org opt out of being identified |
+| **Credentials** | **never** | they stay on your machine — in a plaintext file readable by you, see [Where credentials live](#where-credentials-live). The gateway relays yours to the provider byte-for-byte and stores none of it |
 | Git **commit trailer** and signed attestation | yes | commit sha, tree sha, session id — no diff, no file content |
 
 The rule behind the table: content is gated at one choke point in the client, so a
@@ -306,6 +311,35 @@ a moment later. What the event carries did not change — prompt text only under
 redaction** (the asymmetry above, unchanged). What changed is only the timing and
 that the verdict is applied: HALT/BLOCK refuses the prompt, and a HALT ends the
 session.
+
+## Account attribution
+
+Two fields, once per session: your provider account's **email** and your
+organization's **UUID**. They come from `~/.claude.json`'s `oauthAccount` record —
+written by Claude Code, not by OpenBox — and they exist so a stored session can be
+attributed to an org.
+
+**What is NOT sent, though it sits in the same object:** `organizationName`,
+`organizationRole`, `organizationType`, `seatTier`, `billingType`,
+`organizationRateLimitTier`, `userRateLimitTier`. The bound set is exactly two
+fields and the Go struct that reads them *is* the allowlist, so adding a third is a
+visible code change rather than a quiet widening.
+
+The email is PII. It is not covered by `content_capture`, because it is attribution
+rather than content — the same treatment your DID already gets. If that is not
+acceptable for your org, the honest answer today is that there is no switch for it
+short of not signing in; say so rather than assume one exists.
+
+**What this evidence is worth.** `~/.claude.json` is written by the tool this
+product governs and is readable and writable by anything running as you — the same
+posture [ADR-0015](adr/ADR-0015-plaintext-credential-file.md) already concedes for
+the signing key. So it proves origin-of-config, not tamper-resistance. A determined
+developer can edit it. Pair it with the gateway's credential fingerprint, which is
+derived from the credential actually presented on the wire, if you need the
+stronger signal.
+
+If you are not signed in, or the file is unreadable, nothing is stamped at all —
+and that absence is itself informative.
 
 ## Local files
 

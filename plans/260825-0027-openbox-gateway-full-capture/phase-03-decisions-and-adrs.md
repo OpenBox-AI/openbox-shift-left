@@ -121,7 +121,12 @@ left is the part that needs a human or a credential.
       the credential arrive verbatim
 - [ ] **USER: run probe A** — name a refusal shape that does not trip
       capability-rejection retry
-- [ ] **USER: run P1** — org-id matchable from the credential? local account state shape?
+- [~] **P1, split.** §3 (local account state) **RUN 2026-08-25** by an agent — it needs no
+      credential, no network and no quota, so its blast radius is a file read. Result:
+      `oauthAccount.organizationUuid` + `oauthAccount.emailAddress` are strings at a stable
+      path, which unblocks phase 05's account evidence. §1 (org id from the credential)
+      **remains USER** — it needs the OAuth session to reach the probe server, i.e. P0 1b.
+      §2 (response headers) is unresolvable from a throwaway server by construction.
 - [ ] **USER: accept ADR-0019** (owner signature — the ADR's own Acceptance section
       says it stays Proposed until the owner accepts; the 2026-08-25 plan validation
       pre-authorised the substance, but the flip is not an agent's to make)

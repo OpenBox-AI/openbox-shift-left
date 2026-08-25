@@ -34,6 +34,7 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/cli/internal/devinit"
 	"github.com/openbox-ai/openbox-shift-left/cli/internal/providers"
 	"github.com/openbox-ai/openbox-shift-left/client"
+	"github.com/openbox-ai/openbox-shift-left/gateway"
 	"github.com/openbox-ai/openbox-shift-left/provider"
 	"io"
 	"log"
@@ -104,6 +105,8 @@ func (a *app) run(args []string) int {
 		return a.runManaged(args[1:])
 	case "doctor":
 		return a.runDoctor(args[1:])
+	case "gateway":
+		return a.runGateway(args[1:])
 	case "version", "--version", "-v":
 		fmt.Fprintln(a.stdout, "openbox "+version)
 		return exitOK
@@ -330,6 +333,16 @@ func (a *app) runDevInit(args []string) int {
 	fs.BoolVar(&enforce, "enforce", true, "ENFORCE mode: the PreToolUse hook blocks/asks/redacts in-process, no daemon and no runtime env. ON BY DEFAULT (ADR-0016) — inert until your org publishes a policy, and fail-open, so an OpenBox outage never blocks you. Pass --enforce=false to opt out; the opt-out persists.")
 	fs.BoolVar(&noEnforce, "no-enforce", false, "alias for --enforce=false")
 	fs.BoolVar(&o.InstallGitHook, "install-git-hook", false, "enable ambient install of the commit-trailer hook into repos on session start (off by default — it modifies .git/hooks)")
+	// The local gateway (ADR-0021). OFF by default, deliberately: unlike
+	// enforcement-by-default, which is inert without an org policy, this redirects
+	// live model traffic. See initgateway.go for the full reasoning and for when
+	// the default should be revisited.
+	var withGateway, removeGateway bool
+	var gatewayAddr, gatewayUpstream string
+	fs.BoolVar(&withGateway, "gateway", false, "also install and start the local model-call gateway, and point this machine at it (OFF by default: it redirects live model traffic)")
+	fs.BoolVar(&removeGateway, "remove-gateway", false, "stop the local gateway and remove only the configuration OpenBox owns")
+	fs.StringVar(&gatewayAddr, "gateway-addr", gateway.DefaultAddr, "loopback address the gateway listens on")
+	fs.StringVar(&gatewayUpstream, "gateway-upstream", gateway.DefaultUpstream, "provider base URL the gateway forwards to")
 	fs.BoolVar(&o.DryRun, "dry-run", false, "print the plan; make no network or filesystem writes")
 	// --role is consumed by runInit before dispatch; declared here so `init -h`
 	// lists it and `--role approver` is not reported as an unknown flag.
@@ -435,6 +448,10 @@ func (a *app) runDevInit(args []string) int {
 		fmt.Fprintln(a.stdout, "note: turning ENFORCE off — this machine was enforcing (explicitly, or by default).")
 	}
 
+	if withGateway && removeGateway {
+		return a.errorf("--gateway and --remove-gateway are mutually exclusive")
+	}
+
 	inst, err := providers.Lookup(o.Provider)
 	if err != nil {
 		return a.errorf("%v", err)
@@ -523,6 +540,25 @@ func (a *app) runDevInit(args []string) int {
 	// ambient part is true of the MECHANISM (no daemon, nothing to keep running),
 	// not of the COVERAGE, and conflating the two is the overstatement this
 	// product exists to avoid.
+	// --- the local gateway (phase 07 req 1) --------------------------------
+	// Opt-in, and the reasoning is in initgateway.go: this redirects live model
+	// traffic, unlike enforcement-by-default which is inert without a policy.
+	if withGateway {
+		fmt.Fprintf(a.stdout, "\nLocal gateway (model-call governance)\n")
+		if err := a.setupGateway(a.homeDir(), gatewayAddr, gatewayUpstream); err != nil {
+			// NOT fatal to the whole install: the hooks are already in place and
+			// governing tool calls. Reporting this as a total failure would tell a
+			// developer to undo work that succeeded.
+			fmt.Fprintf(a.stderr, "warning: gateway setup did not complete: %v\n", err)
+		}
+	}
+	if removeGateway {
+		fmt.Fprintf(a.stdout, "\nRemoving local gateway configuration\n")
+		if err := a.removeGateway(a.homeDir()); err != nil {
+			fmt.Fprintf(a.stderr, "warning: gateway removal did not complete: %v\n", err)
+		}
+	}
+
 	fmt.Fprintf(a.stdout, "\nDone. Nothing to run and no environment to keep set — the hooks do the rest.\n")
 	fmt.Fprintf(a.stdout, "  openbox dev verify     confirm this machine can reach and authenticate to OpenBox\n")
 	fmt.Fprintf(a.stdout, "  openbox doctor         the effective posture, and where each value came from\n")
@@ -559,6 +595,7 @@ Usage:
   openbox approve list [--org <id>] [--watch]
   openbox approve <allow|deny> <event-id> [--org <id>]
   openbox approve --watch --auto [--host claude-code] [--decide]   (ADR-0012)
+  openbox gateway [--addr <loopback host:port>] [--upstream <provider base URL>]
   openbox doctor
   openbox version
 

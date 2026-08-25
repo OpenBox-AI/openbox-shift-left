@@ -15,7 +15,10 @@
   `openbox init`, make its health and bypass exposure visible through `doctor`, and ship
   the artifacts an MDM-capable org needs to harden it — without OpenBox operating anything.
 - Priority: P1
-- Implementation status: pending
+- Implementation status: **all seven requirements built.** `openbox init --gateway`
+  installs, starts, verifies and points the machine at the gateway;
+  `--remove-gateway` reverses it. Reqs 3-6 as below. Req 7 (Windows deferred) is an
+  explicit error rather than a silent skip.
 - Review status: not reviewed
 
 ## Key insights
@@ -61,7 +64,18 @@
 
 Extend the existing non-destructive `settings.json` writer to an `env` block at user
 scope. Daemon lifecycle is owned by the OS supervisor, not by openbox processes: `init`
-writes the unit/plist and loads it; the unit runs `openbox gateway --config <path>`.
+writes the unit/plist and loads it; the unit runs
+`openbox gateway --addr <loopback host:port> --upstream <base URL>`.
+The unit must also set its stop timeout to match `--shutdown-grace` (default 30s):
+`http.Server.Shutdown` never force-closes an ACTIVE connection, so whatever is still
+streaming when the window expires is cut when the process exits. Exceeding the service
+manager's own timeout buys nothing — launchd SIGKILLs at 20s, systemd at 90s — so the two
+numbers have to be chosen together, not independently.
+
+**Not `--config`**: no such flag exists (phase 04 ships `--addr`/`--upstream`, because a
+config-file reader needs `os.ReadFile` and requirement 5's guard forbids it). A unit
+generated against the old wording would be rejected by flag parsing and the gateway
+would fail to start on every boot.
 Deterministic port from config; loopback-only (phase 04 invariant).
 
 Base tier: everything user-owned. MDM tier: the same files, root-owned and pushed by the
@@ -139,3 +153,119 @@ ownership, so OpenBox needs no tier flag.
 
 Phase 08 proves the whole thing — including the account HALT and bypass visibility —
 against a live stack.
+
+## Status, 2026-08-25
+
+**Requirement 4 is built** — `cli/internal/gatewaycheck` + `openbox doctor`'s
+"Local gateway" section. This is the phase's assurance core: the plan's base claim is
+DETECTION, and this is that claim in code.
+
+It answers four questions and keeps them apart, which is the design:
+
+- **alive** — a TCP connect, not an HTTP request. Deciding what a healthy *answer* looks
+  like is not doctor's business; the gateway's job is relaying someone else's answers.
+- **actually used** — does the tool's active config point at loopback at all. A gateway can
+  be running perfectly while the tool talks straight to the provider, and conflating "alive"
+  with "in use" is how a dashboard comes to show governance that is not happening.
+- **who owns the config** — the tier is INFERRED FROM OWNERSHIP, not from a flag OpenBox
+  writes. A flag would be a claim; ownership is an observation. A user-owned file at the
+  managed path is reported as **base**, with the downgrade explained.
+- **bypass exposure** — always printed, including when everything looks healthy, because a
+  check that goes quiet on the happy path trains a reader to read silence as prevention.
+
+**The wording is tested, not just written.** `TestReportNeverClaimsPrevention` runs every
+tier and fails on any affirmative prevention claim while REQUIRING the detection framing.
+Writing that test taught something worth keeping: the first version banned the word
+"prevented" and failed on the honest phrase "not prevented" — so it now tests the CLAIM, not
+the vocabulary. A wording guard that pushes wording the wrong way is worse than none.
+
+Even the MDM tier reports bypass as capable: a root-owned file stops the developer rewriting
+it, but a shell export still wins for a directly-launched process. Saying "cannot" there
+would be the exact overstatement this product exists to prevent.
+
+Verified on the real binary across all three states — unconfigured, configured + running,
+configured + dead — not only in tests.
+
+Windows degrades to "owner unknown" rather than silently reporting the MDM tier, because it
+exposes no uid to check. Claiming a tier this build cannot observe is the same failure in a
+smaller place.
+
+`managed.ClaudeCodeManagedDir` was exported so doctor resolves the managed path through the
+package that owns it. Same reason `doctor`'s duplicate-engine warning and `init`'s repair are
+built on one classifier: a check and the thing it checks must not be able to disagree about
+where the file lives.
+
+### Also built (2026-08-25): `cli/internal/gatewayservice`
+
+**Requirement 3 — the env writer, which is where this repo has shipped bugs twice.** Both
+lessons are encoded as tests rather than comments:
+
+- **Foreign keys are preserved; only owned keys are replaced.** `init` once matched its own
+  hook entries by exact command string, so an entry written under a different `HOME` read as
+  FOREIGN, was kept, and both engines fired — every governed call stored twice.
+- **A plain re-run cannot revert a deliberate opt-out.** `TestPlainReWriteIsIdempotent` is
+  the SECOND-INVOCATION test, and it exists because fifteen green enforce tests missed
+  exactly this bug by each running the command once.
+- An unparseable settings file is **refused, not clobbered** — a file we cannot parse is a
+  file we cannot safely rewrite.
+- A replacement is **reported**, so a developer or org that had pointed the variable
+  elsewhere sees the change rather than discovering it later.
+
+**Requirement 5 — uninstall.** `RemoveEnv` removes only owned keys, and drops the `env`
+block only when nothing else is left in it: an org with its own variables there must not
+lose them because OpenBox was removed.
+
+**Requirement 6 — MDM enablement.** `docs/gateway-mdm-recipe.md`, plus the unit renderers.
+The recipe leads with what the MDM tier does NOT buy — a root-owned settings file stops a
+developer rewriting the file but a shell export still wins, so egress control is the only
+item on the page that prevents rather than detects, and it is the org's to deploy.
+
+Two defects were caught while writing that doc, both the same species as the `--config`
+bug: it referenced an `openbox init --print-unit` flag that does not exist, and it claimed
+`openbox init` writes the units when nothing wires them yet. Both corrected. **Documenting a
+flag that does not exist is now three-for-three in this plan** — worth a sweep of the other
+phase docs.
+
+`TestUnitsUseFlagsThatExist` is the mechanical guard: it parses the rendered units and fails
+on any `--flag` the CLI does not define.
+
+### Requirement 1: wired, and the ORDER is the safety property
+
+`cli/cmd/openbox/initgateway.go`. The sequence is
+**unit -> start -> PROVE it listens -> only then write `ANTHROPIC_BASE_URL`**, and it is not
+stylistic. Writing the env var first points Claude Code at a port nothing answers, and
+because a dead localhost fails closed, EVERY model call on the machine fails — `init` would
+have broken the developer's tool while printing success. So the env write is last and
+conditional: if the daemon cannot be proven up, the variable is not written at all and the
+machine is left working and ungoverned, with an error that says so in those words.
+
+Uninstall runs the **reverse** order for the mirror reason: env var first, then the daemon,
+so there is never a window where the tool points at something gone.
+
+Both orderings are mutation-drilled — moving the env write earlier, or the daemon removal
+earlier, each turns a named test red. A third check asserts the readiness probe is real:
+accepting a unit is not evidence that a process is serving, so the supervisor's success and
+the listener's existence are separate gates.
+
+### `--gateway` is OPT-IN, and that is an OD-class call worth the owner's eye
+
+ADR-0016's lesson — a default-off headline feature stays off — argues for defaulting this
+ON. It is off anyway, because the two cases are not alike: **enforcement-by-default is INERT
+without an org policy, so flipping it could not break anyone.** This redirects live model
+traffic through a process that has never run against a real stack, whose refusal shape is
+still unprobed, and which has no daemon packaging on Windows at all.
+
+Revisit once phase 08 has run the end-to-end path. `TestGatewayIsOffByDefault` reads `init`'s
+own help text, so flipping the default is a deliberate edit rather than a silent one.
+
+### One discoverability defect found by that test
+
+The new flags did not appear in `init -h` at all: that command prints a CURATED block, not
+`flag.PrintDefaults()`, so adding a flag does not advertise it. `--gateway` changes what a
+machine sends model traffic to — the largest blast radius this command has — and an
+undiscoverable flag for it is a support problem, not a tidy help screen. Now listed.
+
+### Requirement 2
+
+Hooks stay project-scoped: the gateway step touches only user-scope settings and the
+machine-level unit, and no code path in it reaches the project hook writer.

@@ -536,7 +536,7 @@ bodies are never sent on ordinary telemetry") was corrected in the same change.
 
 Next: the Cursor adapter; policy template packs. The one dependency this repo now
 has is `golang.org/x/term v0.34.0`, **pinned** — v0.35.0+ declares `go 1.24.0` and
-would raise the language floor across all eleven modules; `go mod tidy` and
+would raise the language floor across all twelve modules; `go mod tidy` and
 `go get -u` will both happily do that, so don't let them (the require block in
 `cli/go.mod` says so too). (Upstreaming the
 `shell`/`mcp`/`tool` hook types to `openbox-sdk-python` is no longer needed —

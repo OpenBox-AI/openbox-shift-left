@@ -64,12 +64,12 @@ and account-binding evidence. Track A must not wait for Track B.
 |---|---|---|---|---|
 | 01 | [Tool content capture](phase-01-tool-content-capture.md) | **implemented** (testbed dormant) | 2d | — |
 | 02 | [Thinking capture](phase-02-thinking-capture.md) | **implemented** (testbed dormant) | 3d | 01 (shares gate plumbing) |
-| 03 | [Decisions, ADRs, probes](phase-03-decisions-and-adrs.md) | **prepared** — probe runs + 2 sign-offs are user actions | 2d | — |
-| 04 | [Gateway passthrough core](phase-04-gateway-passthrough-core.md) | pending | 4d | 03 |
-| 05 | [Capture, identity, account evidence](phase-05-gateway-capture-pipeline.md) | pending | 4d | 04 |
-| 06 | [Gateway enforcement](phase-06-gateway-enforcement.md) | pending | 3d | 05 |
-| 07 | [Local daemon + MDM enablement](phase-07-distribution-assurance.md) | pending | 2d | 06 |
-| 08 | [Conformance and testbed](phase-08-conformance-testbed.md) | pending | 3d | 07 |
+| 03 | [Decisions, ADRs, probes](phase-03-decisions-and-adrs.md) | **prepared** — P1 §3 run; P0/probe A/P1 §1 + 2 sign-offs remain user actions | 2d | — |
+| 04 | [Gateway passthrough core](phase-04-gateway-passthrough-core.md) | **implemented** (reviewed; testbed dormant) | 4d | 03 (relaxed — see phase file) |
+| 05 | [Capture, identity, account evidence](phase-05-gateway-capture-pipeline.md) | **implemented except req 5** (identity needs P0) | 4d | 04 |
+| 06 | [Gateway enforcement](phase-06-gateway-enforcement.md) | **implemented except the refusal shape** (2 constants, probe A) | 3d | 05 |
+| 07 | [Local daemon + MDM enablement](phase-07-distribution-assurance.md) | **implemented** (all 7 reqs; `--gateway` opt-in pending phase 08 evidence) | 2d | 06 |
+| 08 | [Conformance and testbed](phase-08-conformance-testbed.md) | **assets written, DORMANT**; 3 CI gates live; needs a stack to run | 3d | 07 |
 
 ## Acceptance criteria
 
@@ -133,3 +133,43 @@ Resolve in phase 03 before phase 04 starts:
   (PII) + fingerprint egress; `organizationName`/`organizationRole` explicitly excluded —
   evidence is org UUID + email, nothing more.
 - [x] Codex deferral recorded as a decided non-goal (owner, 2026-08-25).
+
+## Status, 2026-08-25 (agent session)
+
+**Track A complete** (phases 01–02, shipped earlier). **Phase 04 implemented and reviewed.**
+
+Phase 03 moved partly: **P1 §3 is run** — `oauthAccount.organizationUuid` and
+`oauthAccount.emailAddress` are readable locally as strings, so phase 05's account-evidence
+requirement is NOT gated on the credential-bearing probes. Recorded in
+[probe-260825-baseurl-auth-coverage](../reports/probe-260825-baseurl-auth-coverage.md) as key
+names and types only.
+
+### Still user actions
+
+1. **P0** (both auth modes), **probe A** (refusal shape), **P1 §1** (org id from the bearer).
+   The runbook gates these to a human; probe A additionally needs an interactive session,
+   because its "disabled a capability for the rest of the session" signal needs ≥2 turns in
+   one process. The API-key half of P0 also needs a key this machine does not have.
+2. **Accept ADR-0019** — an owner signature the plan explicitly reserves.
+3. **File the backend ask** — outward-facing, cross-repo.
+
+### What that blocks, precisely
+
+- **Phase 05:** startable. Its capture/fingerprint/redaction core and its account evidence
+  are unblocked. **Requirement 5 (identity from `x-claude-code-session-id`) is not** — phase
+  04 proved that header relays verbatim, which is silent on whether Claude Code sends it.
+  Confirming that needs real traffic through the gateway, so it needs P0 positive.
+- **Phase 06:** hard-blocked. The refusal shape IS the phase; building against a placeholder
+  is the guessed interface this plan exists to avoid.
+- **Phase 07:** blocked on 06, plus the ADR-0016 amendment.
+- **Phase 08:** blocked on 07 **and a live local stack** — a dependency not previously listed
+  among the user actions, and the same one Track A's dormant testbed assertions wait on.
+
+### Corrections made to this plan while implementing
+
+- Phase 05's "Schema v1.4" → **v1.5**: `schema_version` is already `"1.4"` (phase 02), and
+  the bump repins golden fixtures, so it is a step of its own.
+- Phase 05's identity risk row claimed phase 04 asserts header *presence*; it asserts
+  *pass-through*. Corrected — they are not the same guarantee.
+- Phase 07's service invocation said `openbox gateway --config <path>`. No such flag exists,
+  so a unit generated from that wording would have failed to start on **every boot**.

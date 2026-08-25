@@ -170,7 +170,15 @@ func (a *app) initUsage(fs *flag.FlagSet) func() {
 		fmt.Fprintf(a.stderr, "Usage: openbox init --provider <claude-code|codex|cursor> [flags]\n\n")
 		fmt.Fprintf(a.stderr, "Installs the tool's hooks and writes posture. Run `openbox auth` first —\n")
 		fmt.Fprintf(a.stderr, "this command never reads, writes or prompts for a credential.\n\n")
-		for _, name := range []string{"provider", "scope", "enforce", "no-enforce", "install-git-hook", "role", "dry-run"} {
+		// The gateway flags are listed rather than left to the "not listed" pointer:
+		// --gateway changes what a machine sends model traffic to, which is the
+		// largest-blast-radius thing this command can do, and an undiscoverable
+		// flag for it would be a support problem rather than a tidy help screen.
+		for _, name := range []string{
+			"provider", "scope", "enforce", "no-enforce", "install-git-hook",
+			"gateway", "remove-gateway", "gateway-addr", "gateway-upstream",
+			"role", "dry-run",
+		} {
 			f := fs.Lookup(name)
 			if f == nil {
 				continue

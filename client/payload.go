@@ -190,7 +190,15 @@ func buildPayload(ev DevEvent) ([]byte, error) {
 		// hook_trigger true AND spans present enters core's approval-bypass
 		// fingerprint path (governance_workflow.go:310-330), and a model turn is
 		// not an approvable operation.
-		if span := turnAssistantSpan(ev); span != nil {
+		// Two producers, one at a time. A gateway turn carries the OBSERVED HTTP
+		// exchange; a hook turn carries the assistant's reply. They never ride the
+		// same event — GatewayRequestID is what separates them — so the extractor
+		// that reads the LAST span as assistant text can never be handed a raw
+		// provider response body by accident.
+		if span := gatewayObservedSpan(ev); span != nil {
+			p.Spans = []wireSpan{*span}
+			p.SpanCount = 1
+		} else if span := turnAssistantSpan(ev); span != nil {
 			p.Spans = []wireSpan{*span}
 			p.SpanCount = 1
 		}
@@ -340,6 +348,13 @@ func activityIDFor(ev DevEvent) string {
 // omitted rather than minting "<session>:turn:" for something that is not a turn.
 // TestTurnActivityIDIsPinned holds these bytes.
 func turnActivityIDFor(ev DevEvent) string {
+	// A gateway-observed turn takes its own namespace. ":gateway:" cannot collide
+	// with ":turn:<decimal>", with ":usage:rollup", or with a tool call's
+	// "cc-act-<32 hex>" — the last by containing ':' at all. That disjointness IS
+	// requirement 8, and TestGatewayAndHookTurnIDsNeverCollide holds it.
+	if ev.GatewayRequestID != "" {
+		return ev.SessionID + ":gateway:" + ev.GatewayRequestID
+	}
 	if ev.SessionRollup {
 		return ev.SessionID + ":usage:rollup"
 	}
@@ -837,6 +852,13 @@ func stripContent(ev DevEvent) DevEvent {
 		s := *ev.Span // copy so the caller's Span is untouched
 		s.RequestBody = ""
 		s.ResponseBody = ""
+		// Gateway-observed headers are content too, and the riskiest kind: the
+		// developer's live provider credential transits every model call. The
+		// capture side redacts by key name before these are populated; this is
+		// the second of the two mechanisms, and it is the one the org's posture
+		// controls.
+		s.RequestHeaders = nil
+		s.ResponseHeaders = nil
 		ev.Span = &s
 	}
 	return ev

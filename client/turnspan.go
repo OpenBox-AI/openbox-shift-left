@@ -57,6 +57,22 @@ type wireSpan struct {
 	// (internal/services/governance_workflow.go:303), so whatever is sent here
 	// is overwritten by ComputeSemanticTypeFromSpan.
 	SemanticType string `json:"semantic_type"`
+
+	// --- Gateway-only fields (ADR-0021, schema 1.5). ---
+	//
+	// APPENDED, and all omitempty, so the assistant turn span above serializes to
+	// byte-identical bytes and its golden fixture does not churn. Key order on the
+	// wire is declaration order; inserting any of these earlier would rewrite a
+	// pinned fixture for no reason.
+	RequestBody     string            `json:"request_body,omitempty"`
+	RequestHeaders  map[string]string `json:"request_headers,omitempty"`
+	ResponseHeaders map[string]string `json:"response_headers,omitempty"`
+	HTTPMethod      string            `json:"http_method,omitempty"`
+	HTTPURL         string            `json:"http_url,omitempty"`
+	HTTPStatus      int               `json:"http_status,omitempty"`
+	// CredentialFingerprint is present whether or not content capture is on: it is
+	// derived governance evidence, not content. See client.Span for why.
+	CredentialFingerprint string `json:"credential_fingerprint,omitempty"`
 }
 
 // spanNameLLMCompletion is the span name.

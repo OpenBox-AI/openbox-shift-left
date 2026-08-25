@@ -1,5 +1,5 @@
 {
-  "schema_version": "1.4",
+  "schema_version": "1.5",
   "event_id": "evt-content-1",
   "event_type": "PromptSubmitted",
   "openbox_session_id": "sess-abc123",

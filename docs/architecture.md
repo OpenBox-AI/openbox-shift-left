@@ -184,6 +184,28 @@ Being precise here is part of the product.
   remove it: prevention without assurance. For Codex the hook itself cannot yet be
   mandated — a `requirements.toml` cannot define one — so the shipped mandate pins
   approval and sandbox modes instead.
+- **Model calls are governed only if the local gateway is installed, and it is
+  OPT-IN.** `openbox init --gateway` (ADR-0021) points this machine's
+  `ANTHROPIC_BASE_URL` at a loopback daemon that relays every model call and can
+  refuse one on a policy verdict. Without it, tool calls are governed and model
+  calls are not — the hooks never see a model request. Three limits are worth
+  stating plainly rather than discovering:
+  - **The base claim is DETECTION, not prevention.** A developer can unset one
+    environment variable. That is *visible* — a session with model turns and no
+    gateway spans is queryable, and `openbox doctor` reports the exposure at every
+    tier including the healthy one. It is not prevented. Root-owning the config via
+    MDM stops the developer editing the FILE; a shell export still wins for a
+    process launched from that shell. Only egress control closes it, and that is
+    the org's to deploy — see [the MDM recipe](gateway-mdm-recipe.md).
+  - **Refusal has never been tried against a real session.** The status code and
+    error body a refusal uses are provisional: Claude Code's retry logic matches on
+    upstream error wording, so a wrong shape makes a policy denial look transient
+    and get retried around, or disables a capability for the rest of the session.
+    ADR-0021 §9 holds that open, and phase 06 descopes to observe-only if no shape
+    qualifies.
+  - **Whether subscription-OAuth traffic even follows `ANTHROPIC_BASE_URL` is
+    unresolved** (ADR-0021 §8). If it does not, this covers API-key/console orgs
+    only. Nobody has measured it, and this document will not guess.
 - **The inline-evaluation path has not been exercised against a live stack.**
   Every claim below about enforcement rests on tests that drive the real hook
   against a local `/evaluate` stub — which is real HTTP and the real gate, but not

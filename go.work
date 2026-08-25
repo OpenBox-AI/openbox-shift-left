@@ -1,6 +1,6 @@
 // Workspace over every module in this repo.
 //
-// The repo is split into 11 modules that reference each other through relative
+// The repo is split into 12 modules that reference each other through relative
 // `replace` directives. Without a workspace there is no way to build or test
 // the repo as a whole — `go build ./...` only ever sees one module — which is
 // how `main` came to have no verification at all. The workspace gives CI (and
@@ -22,5 +22,6 @@ use (
 	./client
 	./contracts/dev-event/conformance
 	./decision
+	./gateway
 	./provider
 )

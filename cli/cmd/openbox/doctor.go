@@ -5,10 +5,14 @@ import (
 	"fmt"
 	"github.com/openbox-ai/openbox-shift-left/adapters/common/hookflow"
 	"os"
+	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/openbox-ai/openbox-shift-left/adapters/common/devconfig"
+	"github.com/openbox-ai/openbox-shift-left/cli/internal/gatewaycheck"
 	"github.com/openbox-ai/openbox-shift-left/cli/internal/managed"
 	"github.com/openbox-ai/openbox-shift-left/cli/internal/providers"
 )
@@ -151,6 +155,8 @@ func (a *app) runDoctor(args []string) int {
 		}
 	}
 
+	a.reportGateway()
+
 	fmt.Fprintf(a.stdout, "\nWhat this does and does not prove\n")
 	fmt.Fprintf(a.stdout, "  Settings sourced from `user` or `env` can be changed by whoever runs this\n")
 	fmt.Fprintf(a.stdout, "  command, so they are not assurance. Only `managed` values, and only with the\n")
@@ -205,4 +211,68 @@ func withPresence(path string) string {
 		return path + "  (present)"
 	}
 	return path + "  (absent)"
+}
+
+// reportGateway prints the local gateway's detection-tier posture (ADR-0021,
+// phase 07 requirement 4).
+//
+// Four separate questions, kept separate on purpose. "Alive" and "actually used"
+// are not the same claim — a gateway can be running perfectly while the tool is
+// configured to talk straight to the provider — and conflating them is how a
+// dashboard comes to show governance that is not happening.
+func (a *app) reportGateway() {
+	home := a.getenv("HOME")
+	if home == "" {
+		if h, err := os.UserHomeDir(); err == nil {
+			home = h
+		}
+	}
+	r := gatewaycheck.Inspect(home, managedSettingsPathForDoctor(), 750*time.Millisecond)
+
+	fmt.Fprintf(a.stdout, "\nLocal gateway (model-call governance)\n")
+
+	if r.SettingsPath == "" {
+		fmt.Fprintf(a.stdout, "  configured   no — ANTHROPIC_BASE_URL is not set in any settings file\n")
+	} else {
+		fmt.Fprintf(a.stdout, "  configured   %s\n", r.ConfiguredAddr)
+		fmt.Fprintf(a.stdout, "  from         %s\n", r.SettingsPath)
+		owner := "uid " + strconv.Itoa(r.OwnerUID)
+		switch r.OwnerUID {
+		case 0:
+			owner = "root"
+		case -1:
+			owner = "unknown (this OS exposes no owner to check)"
+		}
+		fmt.Fprintf(a.stdout, "  owned by     %s\n", owner)
+		fmt.Fprintf(a.stdout, "  tier         %s\n", r.Tier)
+		if !r.TargetsGateway {
+			fmt.Fprintf(a.stdout, "  target       NOT loopback — this machine is pointed at something else\n")
+		}
+		if r.Alive {
+			fmt.Fprintf(a.stdout, "  reachable    yes\n")
+		} else {
+			fmt.Fprintf(a.stdout, "  reachable    NO — %s\n", r.AliveErr)
+			fmt.Fprintf(a.stdout, "               model calls will FAIL rather than escape, which is the safe\n")
+			fmt.Fprintf(a.stdout, "               direction. Start the gateway: `openbox gateway`\n")
+		}
+	}
+
+	// Always printed, including in the healthiest case. The base assurance claim
+	// is DETECTION, and a check that stays silent when everything looks fine
+	// trains a reader to believe silence means prevention.
+	fmt.Fprintf(a.stdout, "  bypass       %s\n", map[bool]string{true: "DETECTABLE, not prevented", false: "no exposure found"}[r.BypassCapable])
+	for _, note := range r.BypassNotes {
+		fmt.Fprintf(a.stdout, "               - %s\n", note)
+	}
+}
+
+// managedSettingsPathForDoctor resolves the provider's managed-settings file, or
+// "" where this build has no path for the OS. Reached through the managed package
+// so doctor and `managed install` cannot disagree about where the file lives.
+func managedSettingsPathForDoctor() string {
+	dir := managed.ClaudeCodeManagedDir()
+	if dir == "" {
+		return ""
+	}
+	return filepath.Join(dir, "managed-settings.json")
 }

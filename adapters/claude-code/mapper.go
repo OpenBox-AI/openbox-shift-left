@@ -185,7 +185,13 @@ func (m Mapper) Map(hook HookName, e *HookEvent) (client.DevEvent, bool) {
 	case HookSessionStart:
 		ev.EventType = client.EventSessionStarted
 		ev.Tool = client.Tool{Name: agentToolName, Kind: client.ToolShell}
-		ev.Metadata = sessionStartMetadata(e)
+		ev.Metadata = mergeMetadata(
+			sessionStartMetadata(e),
+			// Account attribution, once per session (ADR-0021 req 6). Read from
+			// the client's own local record, so a session is attributable to an
+			// org even where the gateway is not running. Silent on any failure:
+			// an optional attribution field must never stop a session reporting.
+			accountMetadata(localAccount(homeDir())))
 		// Effective posture as evidence (E8-S5): structural booleans and
 		// opaque ids only, so it is INV-1/INV-2 safe to egress.
 		if m.Posture != nil {

@@ -1,5 +1,5 @@
 {
-  "schema_version": "1.4",
+  "schema_version": "1.5",
   "event_id": "evt-bad-6",
   "event_type": "ToolResult",
   "openbox_session_id": "sess-abc123",

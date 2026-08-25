@@ -1,5 +1,5 @@
 {
-  "schema_version": "1.4",
+  "schema_version": "1.5",
   "event_id": "evt-0003",
   "event_type": "ToolCall",
   "openbox_session_id": "sess-abc123",

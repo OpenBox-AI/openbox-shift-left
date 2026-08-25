@@ -14,7 +14,9 @@
   contract against Anthropic's own machine-readable spec so a Claude Code release cannot
   break it silently.
 - Priority: P1
-- Implementation status: pending
+- Implementation status: **assets written and DORMANT; three CI gates live.**
+  Nothing here has run against a stack — which is the whole point of the phase,
+  so the status is honest rather than encouraging.
 - Review status: not reviewed
 
 ## Key insights
@@ -142,3 +144,60 @@ contract change rather than on a broken session weeks later.
 ## Next steps
 
 Reconcile `CLAUDE.md` and `docs/architecture.md`, then decide fleet rollout on the evidence.
+
+## Status, 2026-08-25
+
+### Written and dormant
+
+`testbed/45-gateway.sh` (45, because 40 is approvals), registered in `run-all.sh` and marked
+DORMANT there like `35-telemetry.sh`. Seven case groups:
+
+| | Case | Covers |
+|---|---|---|
+| 45.0 | install through the REAL `init --gateway` | the ordering guarantee, on a real machine: config exists ONLY because the daemon came up |
+| A | a real model call becomes a gateway span | reqs 1, 4 — including that the two producers' `activity_id`s are **disjoint**, since a collision means core's dedupe silently ate half the evidence |
+| B | raw credential absent, fingerprint present | req 5's precondition, phrased as an incident if it fails |
+| C | beta passthrough, system-array identity, `/v1/models` discovery | req 3 — **the silent failures**, none of which throw |
+| D | refusal without a retry storm | **PROBE-A DEPENDENT**, and says so at the point of failure |
+| E | bypass is queryable + doctor names it | req 6's detection half |
+| F | config present, daemon stopped ⇒ zero calls succeed | req 6's fail-closed-by-accident half |
+| G | Track A holds with NO gateway | req 7 — otherwise "ships alone" was never true |
+
+Case D carries an explicit note that a failure there is a **probe-A finding, not a
+regression**, and that if no shape qualifies the case is DELETED rather than fixed. Leaving
+whoever finally runs this to guess which kind of failure they are looking at would waste the
+one thing this phase is for.
+
+Cases D and F are opt-in behind env vars: D needs a published deny policy, and F
+deliberately breaks the machine's model calls, which is not something a full-suite run
+should do without being asked.
+
+### Live now (not dormant) — three CI gates
+
+1. **Gateway units invoke only flags that exist.** Phase 07's plan documented
+   `openbox gateway --config <path>`; no such flag exists, so a generated unit would have
+   failed to start on **every boot**. Four separate phantom flags were written into this
+   plan's docs before this gate existed, which is why it is mechanical rather than a review
+   habit.
+2. **No prevention claims about gateway bypass** in user-facing docs. It caught a real hit on
+   its first run — in the MDM recipe's own "what OpenBox will not do" list, where the phrase
+   was a DISCLAIMER. The gate cannot tell a claim from a disclaimer, so the doc was reworded
+   and the limit is written into the gate: reword the prose, never weaken the gate, because a
+   skimming reader cannot tell those two sentences apart either.
+3. **Testbed scripts parse.** Dormant scripts are executed by nothing, so a syntax error in
+   one surfaces at the worst possible moment — the first time somebody finally has a stack.
+
+### Not done, and not doable here
+
+- **Requirement 2's `/protocol` diff.** The oracle is an endpoint on a RUNNING Claude apps
+  gateway; there is nothing to diff against in CI without one. The flag-existence gate above
+  covers the failure mode that actually bit this plan four times; the protocol diff needs the
+  service before it can be written honestly rather than as a stub that always skips.
+- **Requirements 1, 4, 5, 6, 7 as EVIDENCE.** The assertions exist; none has run. Every
+  status line in this plan that says "unit-verified, testbed has NOT run" still says it.
+- **Requirement 8 — the backend asks.** Outward-facing and cross-repo, so it is the owner's
+  to file. The account-registry ask is drafted
+  (`plans/reports/backend-ask-260825-account-registry.md`); retention-for-body-volume and
+  server-side dedupe need MEASUREMENTS from a run that has not happened, so drafting them now
+  would mean inventing the numbers that are the entire point of the ask.
+- **Requirement 9 — docs reconciled to what the run proved.** Nothing has been proved yet.
