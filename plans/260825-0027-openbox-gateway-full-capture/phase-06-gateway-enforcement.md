@@ -71,7 +71,7 @@ proceeds ungoverned is worse than an over-ask.
 | `gateway/gate.go` | new — evaluate → forward \| refuse |
 | `gateway/refuse.go` | new — probe-A refusal shape |
 | `adapters/common/hookflow/failurepolicy.go` | reuse; do not fork |
-| `docs/adr/ADR-0021-openbox-gateway.md` | enforcement semantics |
+| `docs/adr/ADR-0021-openbox-local-gateway.md` | enforcement semantics |
 | `docs/architecture.md` | Approvals + assurance sections |
 
 ## Implementation steps

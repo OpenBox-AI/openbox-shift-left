@@ -15,7 +15,9 @@
   ADR-0016's install scope, run the three probes that shape Track B, and open the
   account-registry conversation with the backend.
 - Priority: P1
-- Implementation status: pending
+- Implementation status: **partially prepared** — every artifact an unattended
+  session can produce is written; the three probe RUNS, ADR-0019's acceptance,
+  and the backend filing are user actions (see Todo)
 - Review status: not reviewed
 
 ## Key insights
@@ -73,10 +75,11 @@ inspection plus a local-state read.
 | Path | Change |
 |---|---|
 | `docs/adr/ADR-0019-full-content-capture.md` | status → Accepted |
-| `docs/adr/ADR-0021-openbox-gateway.md` | new — local topology, tiers, pass-through |
+| `docs/adr/ADR-0021-openbox-local-gateway.md` | new — local topology, tiers, pass-through (**drafted**; `local` is in the filename because it is the decision) |
 | `docs/adr/ADR-0016-default-install-posture.md` | amendment: scope for gateway env config |
-| `plans/reports/probe-260825-*-halt-rendering.md` | probe A output |
-| `plans/reports/probe-260825-*-baseurl-auth-coverage.md` | P0 + P1 output |
+| `plans/reports/probe-260825-halt-rendering.md` | probe A output (**template**) |
+| `plans/reports/probe-260825-baseurl-auth-coverage.md` | P0 + P1 output (**template**) |
+| `plans/260825-0027-openbox-gateway-full-capture/probes/` | the probe server + runbook (**written**) |
 | `CLAUDE.md` | current-state paragraph after acceptance |
 
 ## Implementation steps
@@ -98,15 +101,34 @@ inspection plus a local-state read.
 
 ## Todo
 
-- [ ] P0 run, report written (per auth mode: redirects? header verbatim?)
-- [ ] Probe A run, report written (refusal shape named)
-- [ ] P1 run, report written (org-id matchable? local state shape?)
-- [ ] ADR-0019 accepted
-- [ ] ADR-0021 written and reviewed (tiers explicit)
-- [ ] ADR-0016 amended
-- [ ] Always-refuse posture recorded in ADR-0021 (divergence + cost + no offline grace)
-- [ ] Account-registry backend ask filed
-- [ ] CLAUDE.md current-state updated
+Prepared 2026-08-25 — the harness, the templates and the drafts exist, so what is
+left is the part that needs a human or a credential.
+
+- [x] Probe harness written and smoke-tested: [`probes/probe-server.go`](probes/probe-server.go)
+      (stdlib-only, serves P0 + P1 + probe A; reduces every credential to
+      `(kind, length, sha256[:8])` **in code**, because these reports are committed)
+- [x] [`probes/RUNBOOK.md`](probes/RUNBOOK.md) — per-mode steps, what to record, teardown
+- [x] Report templates: `plans/reports/probe-260825-baseurl-auth-coverage.md`,
+      `plans/reports/probe-260825-halt-rendering.md`
+- [x] `docs/adr/ADR-0021-openbox-local-gateway.md` **drafted** — the tiers are
+      explicit and the always-refuse posture (§7) carries the divergence, the cost
+      and the no-offline-grace statement. Three `TBD(probe)` slots (§§8–10) are the
+      probe answers and **must block acceptance**
+- [x] `docs/adr/ADR-0016` amendment **drafted** (user/managed scope for the gateway
+      env config; probe-independent, so written in full)
+- [x] Backend ask **drafted**: `plans/reports/backend-ask-260825-account-registry.md`
+- [ ] **USER: run P0** — per auth mode, does `ANTHROPIC_BASE_URL` redirect, and does
+      the credential arrive verbatim
+- [ ] **USER: run probe A** — name a refusal shape that does not trip
+      capability-rejection retry
+- [ ] **USER: run P1** — org-id matchable from the credential? local account state shape?
+- [ ] **USER: accept ADR-0019** (owner signature — the ADR's own Acceptance section
+      says it stays Proposed until the owner accepts; the 2026-08-25 plan validation
+      pre-authorised the substance, but the flip is not an agent's to make)
+- [ ] **USER: file the backend ask** (outward-facing, cross-repo)
+- [ ] Fill ADR-0021 §§8–10 from the probe reports, then review it (tier split is the
+      decision — do not merge if the tiers read as one claim)
+- [ ] CLAUDE.md current-state updated once ADR-0021 is accepted
 
 ## Success criteria
 

@@ -1,6 +1,8 @@
 # ADR-0016 — What a bare `openbox init` does: project-local scope, enforce ON
 
-Status: Accepted — 2026-08-13.
+Status: Accepted — 2026-08-13. **Amendment DRAFTED 2026-08-25** (ADR-0021, the
+local gateway): install scope for the gateway's env config. See the amendment
+section at the end — it is drafted, not accepted.
 Implements: `cli/cmd/openbox/init.go` (`--scope local|global`),
 `cli/cmd/openbox/main.go` (`printGovernedScope`),
 `adapters/common/devconfig/devconfig.go` (`Enforce *bool`, `ResolveEnforce`),
@@ -270,3 +272,50 @@ reviewer running it would see exactly the intended behaviour. Rejected because
 next read re-enables enforcement. Shipping a mandate labelled as a default is
 worse than shipping no flip at all, and it is the failure a reviewer is least
 likely to catch, because the happy path is flawless.
+
+## Amendment (DRAFT, 2026-08-25) — scope for the gateway's env config
+
+Drafted for [ADR-0021](ADR-0021-openbox-local-gateway.md). **Not accepted.** It
+does not depend on any probe answer, so it is drafted in full rather than left as a
+TBD — but it must not land before ADR-0021 does, because on its own it would move
+an install default for a feature that does not exist.
+
+### The conflict
+
+This ADR defaults `init` to **project scope**, and for a good reason that has not
+changed: project scope is the only scope the CLI can actually activate, so the old
+global default reported success while governing nothing.
+
+`ANTHROPIC_BASE_URL` does not work that way. It is read from managed settings and
+`~/.claude/settings.json` — not from a project's `.claude/settings.local.json`
+where `init` writes hooks — and background agents read settings rather than shell
+exports. So the gateway's config cannot live where the hooks live.
+
+### The amendment
+
+`openbox init --provider claude-code` writes the gateway's env config at **user
+scope** (`~/.claude/settings.json`) or, when the org deploys one, at **managed
+scope**. Hook registration is unchanged and stays project-scoped by default.
+
+One install, two scopes, deliberately — and this is the part a reader will find
+surprising, so it is stated rather than implied: **the hooks govern a directory and
+the gateway governs the machine.** They have different blast radii because they
+have different reach, not because the install is inconsistent.
+
+### What this does NOT change
+
+- **Project scope stays the default for hooks.** The argument in Context holds.
+- **`init` still cannot read, write or prompt for a secret** (ADR-0015). The env
+  config is a URL, not a credential.
+- **Enforce stays default-on**, and the `*bool` + `flagPassed` discipline this ADR
+  established applies unchanged to any new persisted key the gateway adds. The
+  rule from Consequences generalises and is worth repeating because a new key is
+  exactly where it will be forgotten: **check reads and writes separately, and
+  test the second invocation.**
+
+### The cost
+
+A user-scope write is a machine-wide side effect from a command whose other half is
+directory-scoped. `openbox doctor` must report the gateway's env config and its
+scope, or a developer will have no way to see what a past `init` did to their
+machine — the same argument that put `decision_authority` on the wire.

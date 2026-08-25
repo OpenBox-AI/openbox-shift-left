@@ -4,7 +4,7 @@ description: "Capture every input and output a governed session produces — inc
 status: pending
 priority: P1
 effort: 23d
-branch: main
+branch: feat/tool-content-capture
 tags: [gateway, local-gateway, content-capture, enforcement, adr-0019, account-binding, telemetry]
 created: 2026-08-25
 updated: 2026-08-25
@@ -63,8 +63,8 @@ and account-binding evidence. Track A must not wait for Track B.
 | # | Phase | Status | Effort | Depends on |
 |---|---|---|---|---|
 | 01 | [Tool content capture](phase-01-tool-content-capture.md) | **implemented** (testbed dormant) | 2d | — |
-| 02 | [Thinking capture](phase-02-thinking-capture.md) | pending | 3d | 01 (shares gate plumbing) |
-| 03 | [Decisions, ADRs, probes](phase-03-decisions-and-adrs.md) | pending | 2d | — |
+| 02 | [Thinking capture](phase-02-thinking-capture.md) | **implemented** (testbed dormant) | 3d | 01 (shares gate plumbing) |
+| 03 | [Decisions, ADRs, probes](phase-03-decisions-and-adrs.md) | **prepared** — probe runs + 2 sign-offs are user actions | 2d | — |
 | 04 | [Gateway passthrough core](phase-04-gateway-passthrough-core.md) | pending | 4d | 03 |
 | 05 | [Capture, identity, account evidence](phase-05-gateway-capture-pipeline.md) | pending | 4d | 04 |
 | 06 | [Gateway enforcement](phase-06-gateway-enforcement.md) | pending | 3d | 05 |

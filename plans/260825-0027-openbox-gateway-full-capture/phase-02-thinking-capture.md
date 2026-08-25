@@ -13,8 +13,8 @@
 - Description: lift thinking blocks from the session transcript via the existing byte-offset
   cursor, and amend the ADR-0014 allowlist that currently forbids them.
 - Priority: P1
-- Implementation status: pending
-- Review status: not reviewed
+- Implementation status: **implemented** (testbed dormant)
+- Review status: in review (code-reviewer, 2026-08-25)
 
 ## Key insights
 
@@ -73,13 +73,31 @@ Thinking rides the turn's `activity_output`, not a new event type.
 
 ## Todo
 
-- [ ] ADR-0014 amendment merged first
-- [ ] Sentinel evolved, adversarial section added
-- [ ] Projection widened
-- [ ] Redact-before-attach asserted on bytes
-- [ ] Sidechain partition verified
-- [ ] Privacy doc row flipped
-- [ ] 11 modules green under `-race`
+- [x] ADR-0014 amendment written first — the amendment section at the end of the
+  ADR carries the mechanism table (gate/redact/cap), the scope limit, and the cost
+- [x] Sentinel evolved: `sentinels` split so `SENTINEL_THINKING` is posture-
+  dependent, capture-OFF half tightened to include it, capture-ON half asserts
+  presence in the decoded `activity_output.thinking`
+- [x] **Both mutation drills performed literally.** Cap removed ⇒ red
+  ("70084 runes, want <= 65536" + the tail marker on the wire); redaction removed
+  ⇒ red (raw AWS key in the outbound body). Restored, green.
+- [x] Projection widened — `message.content` bound as `json.RawMessage`, decoded
+  only far enough to find `thinking` blocks
+- [x] Redact-before-attach asserted on bytes (sentinel §g, and C40/C41 through
+  real `RunHook` over HTTP)
+- [x] Sidechain partition verified for thinking, at BOTH levels: the parser
+  (`TestTurnWindow_PartitionsSidechainOut` now asserts the subagent lifts its own
+  block and the parent lifts none of it) and the wire (`SENTINEL_SIDETHINKING` in
+  the always-forbidden list)
+- [x] Span non-leak asserted — thinking must not reach the one span core reads as
+  the assistant's REPLY (sentinel §f + C40)
+- [x] Privacy doc rows flipped (3 sites in `docs/data-and-privacy.md`), plus a
+  pre-existing FALSE claim fixed in `README.md` left over from phase 01
+- [x] Contract v1.4: schema, `content.thinking` property, changelog entry, all
+  conformance testdata, a new gated fixture, the golden wire bytes
+- [x] Dormant testbed assertions (`20-capture.sh` gate open, `35-telemetry.sh`
+  gate closed) + `MAPPING.md` §7 items 22–24
+- [x] 11 modules green under `-race`, both cross-compiles clean, `gofmt` clean
 
 ## Success criteria
 
@@ -107,5 +125,24 @@ Thinking rides the turn's `activity_output`, not a new event type.
 
 ## Next steps
 
-Track A complete. Thinking and tool I/O are captured without any new service. Phase 03
-decides whether Track B proceeds.
+Track A complete. Thinking and tool I/O are captured without any new service.
+
+**What shipped differently from this plan, and why.** Two deliberate narrowings:
+
+- **Intermediate assistant text was NOT bound.** The phase file paired it with
+  thinking ("thinking blocks and intermediate assistant text"). The final reply
+  already egresses from the hook field ADR-0018 bound, so a second text source
+  would have widened the allowlist twice for one reader. ADR-0019 P3 records it as
+  still open, needing its own amendment.
+- **The lift is ungated; only the attachment is gated.** Gating the parser too was
+  considered and cut: it buys nothing on the wire (the chunk the text was read from
+  was already resident) and would put a second copy of the posture decision inside
+  a pure function. What the parser owes instead is a bound, and the bound has its
+  own guard test because the cap's mutation control depends on it.
+
+**Unproven without a live stack** (`MAPPING.md` §7 items 22–24): that core stores
+`activity_output.thinking` as its own key on the row, that the sibling key does not
+perturb `ExtractModelMetricsFromActivity`, and the volume question — ≤64KB of
+thinking per turn through the realtime flusher.
+
+Phase 03 decides whether Track B proceeds.
