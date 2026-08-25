@@ -170,3 +170,39 @@ jobs:
           for f in testbed/*.sh testbed/lib/*.sh; do
             bash -n "$f" || { echo "syntax error in $f"; exit 1; }
           done
+
+      - name: Docs never show an openbox flag the CLI does not define
+        # Four separate phantom flags were written into this feature's docs before
+        # any gate existed. The worst was a service unit documented as
+        # `openbox gateway --config <path>`: flag parsing rejects it, so the
+        # supervised gateway would have failed to start on EVERY BOOT.
+        #
+        # Scoped to COPYABLE commands — lines inside ``` fences, or lines that are
+        # themselves an invocation. Prose is excluded on purpose: a sentence saying
+        # "there is no --config flag" is correct and must not fail. The
+        # prevention-claim gate above learned that same lesson by failing on its
+        # own disclaimer.
+        run: |
+          declared=$(grep -rhoE '\.(Bool|String|Int64|Int|Duration)Var\(&[A-Za-z0-9_.]+, *"[a-z][a-z0-9-]*"|\.(Bool|String|Int64|Int|Duration)\("[a-z][a-z0-9-]*"' cli/cmd/openbox/*.go \
+            | grep -oE '"[a-z][a-z0-9-]*"$' | tr -d '"' | sort -u)
+          if [ -z "$declared" ]; then
+            echo "could not extract any declared flags — the extractor broke, which would make this gate vacuous"
+            exit 1
+          fi
+          # Only lines that a reader could copy: a fenced/indented command, or a
+          # line whose first token is `openbox`.
+          # [[:space:]] not \s: BSD grep (macOS, where this is developed) does not
+          # support \s in ERE, so the pattern silently matched almost nothing and the
+          # gate passed on a real phantom flag. Caught by a mutation drill, not review.
+          used=$(grep -rhE '^[[:space:]]*(\$ )?openbox [a-z]' docs README.md 2>/dev/null \
+            | grep -oE '\-\-[a-z][a-z0-9-]+' | sed 's/^--//' | sort -u)
+          bad=""
+          for f in $used; do
+            echo "$declared" | grep -qx "$f" || bad="$bad $f"
+          done
+          if [ -n "$bad" ]; then
+            echo "docs show openbox flags the CLI does not define:$bad"
+            echo "declared flags were:"; echo "$declared" | tr '\n' ' '; echo
+            exit 1
+          fi
+          echo "all openbox flags shown in copyable commands are declared"
