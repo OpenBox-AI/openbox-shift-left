@@ -66,21 +66,32 @@ no span is sent, so nothing classifies it and the field never reaches the wire.
 [MAPPING.md](../../contracts/dev-event/MAPPING.md) §3 for which `span` fields the
 client still reads and which are inert.
 
-## Privacy (INV-2 / SL3-SEC-3)
+## Privacy (INV-2)
 
-**Content capture is ON by default (2026-07-15).** With it on, the developer's
-**prompt** text IS copied onto the emitted event and egressed — capped, but
-**unredacted** (redaction-at-source, `[EXT-guardrail-redaction]`, is inert).
-**Opt out** with `content_capture:false` in `~/.config/openbox/dev.json` or
-`OPENBOX_CONTENT_CAPTURE=0` to restore the metadata-only projection. The prompt
-is the **only** field gated by content-capture (`TestMap_PromptCaptureGatedOnContentCapture`).
+**Content capture is ON by default (2026-07-15).** One key, `content_capture`,
+gates every content class this adapter binds:
 
-Regardless of the toggle, the adapter carries **only structural** data for tool
-events — tool identifiers, file paths, and lifecycle enums (`source`, `reason`,
-`permission_mode`, `model`, `cwd`) — and **never** copies Bash command strings,
-file contents, or tool output into an event (not `content`, not `metadata`, not
-`tool.name`). This unconditional SL3-SEC-3 guarantee is asserted end-to-end by
-`TestMap_NoContentLeak` and the binary subprocess test.
+| Class | Since | Redacted before attach? |
+|---|---|---|
+| prompt text (`UserPromptSubmit`) | 2026-07-15 | **no** — redaction-at-source (`[EXT-guardrail-redaction]`) is still inert |
+| enforced-call body (`Write`/`Edit`) | ADR-0017 | yes |
+| assistant reply (`Stop`/`SubagentStop`) | ADR-0018 | yes |
+| tool input on the **observe** path | ADR-0019 P1 | yes |
+| tool output (`tool_response`), incl. a failed call's `error` | ADR-0019 P1 | yes |
+| refusal free text (`PermissionDenied.reason`, `StopFailure.error_details`) | ADR-0019 P1 | yes |
+
+**Opt out** with `content_capture:false` in `~/.openbox/dev.json` or
+`OPENBOX_CONTENT_CAPTURE=0` to restore the metadata-only projection: tool
+identifiers, file paths, and lifecycle enums (`source`, `reason`,
+`permission_mode`, `model`, `cwd`), plus the ungated structural `status`.
+
+**SL3-SEC-3 ("commands, file bodies and tool output never egress on observe
+events") is retired** by ADR-0019 P1. It was an unconditional guarantee; what
+replaces it is a gate plus a redaction plus a cap, none of which is structural
+and each of which can be got wrong. That is why they are asserted on the
+**outbound bytes** — conformance C32–C38, plus C18/C26 for the ordering — rather
+than on the mapper's return. `TestMap_NoContentLeak` still holds the capture-OFF
+half.
 
 ## Known Phase-1 limitations (honest, no silent caps)
 

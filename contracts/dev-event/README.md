@@ -62,9 +62,13 @@ What INV-2 still guarantees:
   both adapters have tests asserting they stay empty. The assistant text that *does* egress
   (ADR-0018) rides a span the client mints from a hook field, not this one — so the two are
   not the same channel re-opened.
-- Tool commands and file bodies never egress on **observe** events (SL3-SEC-3), capture on or
-  off. On a **gated** call they do, under content capture and redacted before they are
-  attached (ADR-0017; conformance C18 asserts that ordering on the outbound bytes).
+- ~~Tool commands and file bodies never egress on **observe** events (SL3-SEC-3).~~
+  **Retired in v1.3** (ADR-0019 P1). Tool input, tool output and the free-text failure
+  detail now egress on ordinary tool events, under the same `content_capture` gate that
+  covers a gated call's body — redacted before they are attached and capped at 64KB.
+  The guarantee is a posture now, not a structural property, which is why the ordering
+  and the gate are asserted on the outbound bytes (conformance C18, C26, C32–C38) rather
+  than inferred from the absence of a field.
 - The conformance harness rejects any event carrying content while content-capture is disabled.
 
 What it does **not** guarantee today: captured content is meant to be Guardrail-redacted at

@@ -78,12 +78,24 @@ reintroduce that: if something is provider-agnostic it goes in `hookflow` or
   Usage capture is **also ON by default** (2026-08-11, ADR-0014): four token counts
   plus a model id per turn, opt out with `finops:false` / `OPENBOX_FINOPS=0`.
   Guardrail redaction at source is **not wired yet**, so prompt text egresses
-  unredacted. Tool commands and file bodies never egress on observe events — but
-  since ADR-0017 they DO on a **gated** call, every class, content_capture-gated:
-  OpenBox cannot decide on content it cannot see. Local secret detection redacts
-  the body **before** it is attached, and that ordering is the only in-transit
-  control there is (`adapters/*/enforcetarget.go`, pinned by conformance case C18).
-  The server sees at most the first 64KB. Keep `docs/data-and-privacy.md` true.
+  unredacted. **SL3-SEC-3 is retired** (ADR-0019 P1, 2026-08-25): tool commands,
+  file bodies, tool output and the refusal free text now egress on ORDINARY tool
+  events, not only on a gated call — all under the one `content_capture` key. Local
+  secret detection redacts the body **before** it is attached, and that ordering is
+  the only in-transit control there is (pinned on outbound bytes by C18/C26/C34).
+  The server sees at most the first 65,536 RUNES (`capBody` counts characters, not
+  bytes, so non-ASCII content can exceed 64KB on the wire). What that control catches is
+  measured, not assumed (C39 + `TestRedact_JSONShapedSecrets`): **the keyword
+  decides, not the charset** — a high-entropy value beside an unrecognized key name
+  is invisible, because hex cannot clear the 4.5-bit entropy floor. Lowering that
+  floor is NOT the fix: below 4.0 every git SHA and UUID matches, and the
+  enforce-path redactor REWRITES file bodies, so false positives corrupt files.
+  Nested-JSON blindness WAS a second gap and is closed (2026-08-25) — both generic
+  patterns now tolerate JSON quoting/escaping, which matters because a
+  `tool_response` is JSON and every MCP result arrives escaped. One deliberate
+  exception stands: **a gated shell/MCP call sends its command VERBATIM**, because
+  policy must judge the command that will actually run (ADR-0017 §Content, amended).
+  Keep `docs/data-and-privacy.md` true.
 - **`usage.go`'s INV-2 guarantee is an allowlist now, not an impossibility.** It
   used to hold structurally — the transcript projection bound only numeric fields,
   so content had nowhere to land. Binding `message.model` (required: the model id is
@@ -272,10 +284,12 @@ readable by anything running as the developer, a default install governs one
 directory so absence of events is not evidence of absence of work, the backend does
 enforcement depends on reaching the control plane and under the default
 `fail_closed:false` is disabled by blocking one hostname, content-based policy sees
-at most the first 64KB of a write, Codex's hook
+at most the first 64KB of any body, local secret detection is keyword-driven so an
+unlabelled high-entropy value is invisible to it, Codex's hook
 cannot be mandated by `requirements.toml`, Guardrail redaction at source is not
 wired, the production-runtime lineage hop is not joined, Codex reports usage per
-session rather than per turn and reports no tool success at all, goal alignment
+session rather than per turn, reports no tool success at all and captures no tool
+content, goal alignment
 additionally requires `finops` ∧ `content_capture` (both default-ON, a user
 constraint) plus a reachable LlamaFirewall and Redis — without those the widgets
 stay empty with a perfect client — and Windows is build-verified only.
@@ -415,6 +429,43 @@ session with no re-evaluation — resume included. Four things not to re-litigat
 stdout bytes), all 11 modules green under `-race` plus both cross-compiles — the
 testbed has NOT run.** `testbed/30-enforce.sh` §A3 (raw-rego halt → turn stop +
 latch) is dormant, waiting on a stack.
+
+**Tool content capture; SL3-SEC-3 retired** (ADR-0019 P1, contract **v1.3**,
+2026-08-25 — phase 01 of plan 260825-0027, which ships alone). The Claude Code
+adapter bound `tool_response`, tool input on the **observe** path,
+`PostToolUseFailure.error`, `PermissionDenied.reason` and `StopFailure.error_details`;
+all gated on the SAME `content_capture` key, redacted before attach, capped at 64KB.
+Four things not to re-litigate:
+
+- **`Content.Output` is turn text and must stay that.** Tool output got its own
+  `Content.ToolOutput` → `activity_output.output`. One shared field would put turn
+  text on tool events and tool output into core's alignment extractor the moment
+  either mapping slipped.
+- **The signals' free text rides `metadata`, never `signal_args`** — core reads a
+  `SignalReceived` with non-empty `signal_args` as a NEW USER GOAL (`age.go:112-137`).
+  Keys are `denial_reason` / `error_details`, deliberately NOT the provider's own
+  names: `reason` is already a closed enum on SessionEnd metadata, and `error` is
+  one JSON key on two hooks (free text on PostToolUseFailure, a closed provider
+  enum on StopFailure). Only the routing keeps free text off the UNGATED enum fields.
+  No core reader renders these yet — stored and queryable, like `metadata.event_id`.
+- **The guarantee got weaker in kind, not just in scope.** SL3-SEC-3 held
+  structurally (content had no field to land in); what replaces it is a gate + a
+  redaction + a cap, each fallible. So the capture-OFF half is asserted wherever the
+  ON half is, on outbound bytes (C32–C39), and the testbed was INVERTED rather than
+  deleted — `20-capture.sh` asserts the gate open, `35-telemetry.sh` closed. "The
+  marker is nowhere" and "the runtime emitted nothing" are the same observation.
+- **C39 measures detector REACH, which C34's ordering case does not.** The boundary
+  is the keyword, not the charset; one leg asserts an unlabelled hex token DOES
+  leak. That is the honest limit, pinned so closing it is a decision — and it is not
+  fixable by lowering the entropy floor (see the privacy bullet above).
+
+**Status: implemented, unit- and conformance-verified, all 11 modules green under
+`-race` plus both cross-compiles — the testbed has NOT run.** Unproven without a
+stack: that core stores `activity_output.output` as the row's `output`, that the two
+new metadata keys survive ingest, and the volume question — 64KB bodies at
+tool-call cadence through the realtime flusher. Codex is untouched and binds none of
+this, so the two providers now send different amounts of content under one posture
+(stated in `COVERAGE.md` §3.4 rather than averaged away).
 
 Next: the Cursor adapter; policy template packs. The one dependency this repo now
 has is `golang.org/x/term v0.34.0`, **pinned** — v0.35.0+ declares `go 1.24.0` and

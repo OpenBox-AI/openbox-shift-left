@@ -85,11 +85,31 @@ below; it is content protection, not policy evaluation.
 **Content attaches for all gated classes**, gated as today on `content_capture`.
 This is a change in what leaves the machine and it gets its own section below.
 
-**The body is locally redacted first.** Tier-1 secret detection runs before the
-payload is built, so core receives the redacted body. `decision/secrets.go`
+**The FILE body is locally redacted first.** Tier-1 secret detection runs before
+the payload is built, so core receives the redacted body. `decision/secrets.go`
 therefore survives the deletion, for two reasons: it is content *protection*
 rather than policy evaluation, and it sees the whole body where core sees at most
 `maxBodySize` = 64KB (`client/payload.go:676`).
+
+**A gated SHELL or MCP call sends its command/arguments VERBATIM** — this is the
+scope of that "first", and it was left implicit until ADR-0019 forced the question
+(amended 2026-08-25, owner-confirmed as deliberate). `buildDecisionRequest`
+populates `DecisionRequest.Content` only for a file semantic, so no detection
+result exists to rebuild from and `evaluationContext` returns the raw text. A
+token on a `curl` command line reaches `/evaluate` intact.
+
+That is the intended trade, not an oversight. A policy deciding whether a command
+is dangerous must see the command that will actually run: redacting it first would
+mean the server judging text that differs from what executes, and a rule matching
+a credential-shaped argument would stop firing. Unlike a file body, nothing here is
+written back to the developer's machine, so there is no reconstruction to keep
+faithful.
+
+The consequence worth stating plainly, because ADR-0019 P1 made it visible: the
+OBSERVE copy of that same call *is* redacted (`Mapper.Map` runs the text
+redactor), so ordinary telemetry is better protected than the copy sent for a
+governance decision. Disclosed in `docs/data-and-privacy.md` under "What an
+enforced call sends".
 
 ## What this weakens
 

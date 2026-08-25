@@ -153,10 +153,14 @@ func goldenCases() []goldenCase {
 	// client can produce now that there is no span for core to derive it from.
 	fileResult := completed(fileCall, "ev-5", "2026-07-31T09:00:02.5Z")
 
-	// Shell: the command is read for the local enforce decision and never
-	// egresses (SL3-SEC-3), so neither half carries it. The completed half has
-	// no counts either — the providers expose none for a shell call — so its
-	// activity_output is absent rather than an empty object.
+	// Shell: this fixture carries no Content at all, which is the CAPTURE-OFF
+	// shape — the bytes an org with content_capture:false sends. (It used to be
+	// the unconditional shape: SL3-SEC-3 said a command never egressed. ADR-0019
+	// P1 retired that, so with capture ON both halves do carry content; the
+	// golden set deliberately pins the gated-off bytes, because those are the
+	// ones that must never drift.) The completed half has no counts either —
+	// the providers expose none for a shell call — so its activity_output is
+	// absent rather than an empty object.
 	shellCall := base(EventToolCall, "ev-6")
 	shellCall.Tool = Tool{Name: "Bash", Kind: ToolShell}
 	shellCall.Span = &Span{SemanticType: "shell_command", Stage: "started"}

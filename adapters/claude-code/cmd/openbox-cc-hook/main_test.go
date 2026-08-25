@@ -14,7 +14,8 @@ import (
 // TestHookBinary_ObserveOnlyContract builds and runs the real binary against a
 // PreToolUse payload and asserts the observe-only safety contract end-to-end:
 // exit 0, EMPTY stdout (so nothing is injected / no block), a spool file is
-// written, and content from tool_input never reaches the spool (INV-2/SL3-SEC-3).
+// written, and — with the content gate closed — no tool_input content reaches the
+// spool (INV-2; SL3-SEC-3's unconditional form is retired by ADR-0019 P1).
 func TestHookBinary_ObserveOnlyContract(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds a binary; skipped in -short")
@@ -36,6 +37,14 @@ func TestHookBinary_ObserveOnlyContract(t *testing.T) {
 		"OPENBOX_AGENT_DID=did:aip:7f3c9b2e-0000-5000-a000-000000000001",
 		"OPENBOX_SPOOL_DIR="+spoolDir,
 		"OPENBOX_CONFIG="+filepath.Join(dir, "none.json"),
+		// Pinned, not inherited. Content capture defaults ON, and since
+		// ADR-0019 P1 the observe path carries the tool's input under that
+		// gate — so a test that left the posture to the default would be
+		// asserting the OPPOSITE of what its name says. Capture OFF is the
+		// posture this case is about: the gate closed, nothing carried.
+		// The capture-ON side is conformance C36, which asserts on the
+		// outbound bytes rather than on the spool.
+		"OPENBOX_CONTENT_CAPTURE=0",
 	)
 	var stdout, stderr strings.Builder
 	cmd.Stdout = &stdout
@@ -71,7 +80,7 @@ func TestHookBinary_ObserveOnlyContract(t *testing.T) {
 		t.Errorf("spooled event should be a ToolCall: %s", raw)
 	}
 	if strings.Contains(string(raw), secret) {
-		t.Fatalf("command content leaked into the spool: %s", raw)
+		t.Fatalf("command content leaked into the spool with content capture OFF: %s", raw)
 	}
 }
 

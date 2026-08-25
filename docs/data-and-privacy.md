@@ -11,10 +11,11 @@ What leaves the machine, what never does, and the one setting that changes it.
 | **Prompt text** | yes, by default | `content_capture: false` turns it off |
 | **The assistant's reply text** | yes, by default | **this changed** — one message per model turn, scanned locally for secrets and REDACTED first, truncated at 64KB. Same `content_capture` switch. See [What a model turn sends](#what-a-model-turn-sends) |
 | **The assistant's thinking** | **never** | not captured today. [ADR-0019](adr/ADR-0019-full-content-capture.md) is where that would be decided — it is deferred, not ruled out |
-| **Shell command text** | on a **gated** call, with capture on | never on ordinary telemetry — see [What an enforced call sends](#what-an-enforced-call-sends) |
-| **File contents** (a Write/Edit body) | on a **gated** call, with capture on | **this changed** — see below. Scanned locally for secrets and REDACTED before it is sent, and truncated at 64KB |
-| **File contents** (a file you read) | **never** | |
-| **Tool output** | **never** | |
+| **Shell command text** | yes, by default | **this changed** — it used to ride a *gated* call only; it is now on ordinary tool telemetry too, under the same `content_capture` switch. Redacted and truncated like every body |
+| **File contents** (a Write/Edit body) | yes, by default | **this changed twice** — first onto gated calls, now onto ordinary tool telemetry as well. Scanned locally for secrets and REDACTED before it is sent, and truncated at 64KB |
+| **File contents** (a file you read) | yes, by default | **this changed** — a read's arguments and its result both ride the tool event now |
+| **Tool and MCP output** | yes, by default | **this changed** — what a tool printed or returned, including a failed tool's error text. Redacted and truncated the same way |
+| **Why a tool was refused** | yes, by default | **new** — the classifier's reason on a denial, and the provider's detail on a failed turn |
 | **Credentials** | **never** | they stay on your machine — in a plaintext file readable by you, see [Where credentials live](#where-credentials-live) |
 | Git **commit trailer** and signed attestation | yes | commit sha, tree sha, session id — no diff, no file content |
 
@@ -68,7 +69,9 @@ answers — and it is what makes a dev session visible in the cost dashboards.
 | the subagent id, when a subagent ran the turn | so per-agent spend is attributable |
 
 **Exactly what is not sent, on this path:** no prompt, no thinking block, no stop
-reason, no tool command, no tool output, no file body — **and no cost.** Cost is
+reason — **and no cost.** (Tool commands, tool output and file bodies are not on
+this path either; they ride the *tool* events instead, under content capture —
+see the table at the top.) Cost is
 derived server-side from a model-keyed pricing table; deriving it here would mean
 inventing a number from a table this client does not own.
 
@@ -130,8 +133,14 @@ Turn it off per install:
 
 or per session with `OPENBOX_CONTENT_CAPTURE=0`. With it off, sessions still produce
 full metadata, lineage, token usage, tool success/failure and the lifecycle signals
-— you lose prompt visibility, the assistant's reply, enforced-call bodies, and any
-policy or dashboard panel that depends on them (goal alignment and drift go empty).
+— you lose prompt visibility, the assistant's reply, tool input and output,
+enforced-call bodies, the refusal reasons, and any policy or dashboard panel that
+depends on them (goal alignment and drift go empty).
+
+**It is one switch on purpose.** Every content class listed in the table above
+answers to this single key. A second, class-specific setting would let an org
+believe it had opted out of content while one class kept egressing — so the cost
+of the single switch (you cannot keep prompts and drop tool output) is deliberate.
 Content capture and usage capture are separate settings on purpose: usage capture
 sends no content of its own, so turning content off does not turn usage off, and
 vice versa.
@@ -144,10 +153,11 @@ came from.
 > sent as-is; the server-side Guardrail redaction layer is not wired. If that matters
 > for your data, run with capture off until it is.
 >
-> Note the asymmetry, because it is real: the assistant's reply and enforced-call
-> bodies ARE scanned locally for secrets before they are sent. The **prompt** is
-> not. Nothing about that changed here — it is the same gap, now standing beside
-> two paths that do have a control.
+> Note the asymmetry, because it is real: the assistant's reply, enforced-call
+> bodies, tool input and output, and the refusal reasons ARE scanned locally for
+> secrets before they are sent. The **prompt** is not. Nothing about that changed
+> here — it is the same gap, now standing beside every other content path, all of
+> which do have a control.
 
 ## What a model turn sends
 
@@ -202,10 +212,11 @@ An enforced call sends, in this order:
 
 Three limits, stated rather than implied:
 
-- **The server sees at most the first 64KB** of a body (`capBody`). Content-based
-  policy is therefore not a complete check on a large file: a rule that would match
-  at byte 70,000 does not fire. Local secret detection is *not* subject to this —
-  it runs before the cap and sees everything.
+- **The server sees at most the first 65,536 CHARACTERS** of a body (`capBody`).
+  Characters, not bytes — so a body of non-ASCII text can exceed 64KB on the wire,
+  up to about 256KB in the worst case. Content-based policy is therefore not a
+  complete check on a large file: a rule that would match past the cap does not
+  fire. Local secret detection is *not* subject to this — it runs before the cap.
 - **`content_capture: false` means structural-only enforcement.** No body is sent
   for any class, and policy decides on the metadata axes alone. That is coarser, not
   broken — and it is the honest trade: fidelity scales with what you let leave the
@@ -213,9 +224,50 @@ Three limits, stated rather than implied:
 - **`secret_detection: false` with capture on sends bodies unredacted.** Turning off
   the local detector removes the only in-transit protection there is; guardrail
   redaction at source is still not wired.
+- **A gated SHELL or MCP call sends its command VERBATIM, unredacted** — even with
+  secret detection on. Only a file body is scanned and rewritten before it is sent
+  for a decision. So `curl -H "Authorization: Bearer …"` reaches the control plane
+  with the token intact if that call is gated. This is deliberate, not an
+  oversight: a policy that decides whether a command is dangerous has to see the
+  command that will actually run, and unlike a file body nothing here is written
+  back to your machine. It is the one place where the *ordinary telemetry* copy of
+  a call is better protected than the copy sent for enforcement — the observe copy
+  of that same command IS redacted.
 
-The observe copy of the same call is mapped separately and never carries content, so
-ordinary telemetry is unaffected either way.
+The observe copy of the same call used to be the reassurance here: mapped
+separately, carrying no content, so ordinary telemetry was unaffected either way.
+**That is no longer true.** Since [ADR-0019](adr/ADR-0019-full-content-capture.md)
+the observe copy carries the same input under the same `content_capture` switch,
+and the tool's *output* with it. The gate is now the only thing separating
+ordinary telemetry from an enforced call's payload — which is why it is one
+switch, asserted on the outbound bytes rather than assumed.
+
+## What a tool call sends
+
+With content capture on (the default), every tool and MCP call sends what it was
+asked to do and what it produced:
+
+| | |
+|---|---|
+| on the call | the command for a shell tool, the arguments for an MCP tool, the file body for a write, the arguments for a read |
+| on the result | what the tool printed or returned — and, when the call failed, the tool's own error text instead |
+
+Both go through the same three steps as an enforced body, in the same order:
+**local secret detection first, attachment second, 64KB cap third.** The ordering
+is the control, and it is asserted on the bytes actually sent (conformance cases
+C32–C38), not on the code path.
+
+Three consequences worth knowing rather than discovering:
+
+- **This is the biggest single widening of what leaves the machine.** It happens at
+  tool-call cadence, not turn cadence — a busy session is hundreds of bodies.
+- **Tool output is where secrets actually surface.** An `env` dump, a `cat` of a
+  dotenv file, a token in a stack trace. Local detection is the only in-transit
+  control, and `secret_detection: false` removes it for these four classes too.
+  **What that control does and does not catch is measured, not assumed** — see
+  below.
+- **`content_capture: false` removes all of it** and returns tool telemetry to
+  structural fields alone — tool name, kind, path, timing, outcome.
 
 **Prompts gate too** ([ADR-0020](adr/ADR-0020-prompt-gate-and-halt-session-stop.md)):
 in enforce mode the `PromptSubmitted` event is sent for a decision **at submit
@@ -252,7 +304,7 @@ Both are readable only by you.
 | `policy-bundle.json` | **inert leftover.** There is no local policy bundle since [ADR-0017](adr/ADR-0017-inline-policy-evaluation.md); nothing reads this file and it can be deleted |
 | `enforcements.jsonl` | what enforcement did: verdict, source, whether it blocked, redaction *categories* — never the secret, never the body |
 | `advisories.jsonl` | advisory verdicts and guardrail findings |
-| `cc-spool/` | events awaiting flush |
+| `cc-spool/` | events awaiting flush. With content capture on (the default) these hold the same bodies the events carry — commands, file contents, tool output — already secret-redacted, in plaintext files readable by you |
 | `cc-spool/turns/` | how far each turn window has been read: a byte offset and a turn index, nothing else |
 | `pending-approvals/`, `stale/` | content-free markers keyed by session id |
 | `halted-sessions/` | one small file per HALTed session — the policy reason, policy id and a timestamp, never tool content. It is what keeps a halted session refused ([ADR-0020](adr/ADR-0020-prompt-gate-and-halt-session-stop.md)); deleting it un-halts only this machine's view, and every verdict is already recorded server-side |
@@ -315,6 +367,51 @@ before the tool runs. A hit is redacted **in the tool input** — the file is wr
 with `OPENBOX_REDACTED…` in place of the secret — and the audit records the category
 (`aws_key`, `entropy`, …), never the value. Nothing about the finding except the
 category leaves the machine.
+
+### What the scanner catches — and the one gap
+
+Measured against the real detector, not asserted (conformance
+`TestContentCaptureCredentialCoverage` drives a dotenv dump through a real tool
+event and asserts the flushed bytes):
+
+| In tool output | Redacted? | Why |
+|---|---|---|
+| an AWS / GitHub / Stripe / JWT / `sk-` key, anywhere | yes | matched by shape, so surrounding syntax is irrelevant |
+| `OPENBOX_API_KEY=obx_…` | yes | the key name matches a known credential keyword |
+| `OPENBOX_AGENT_PRIVATE_KEY=<base64>` | yes | no keyword match, but base64 clears the entropy floor |
+| `API_KEY=<64 hex chars>` | yes | keyword match — the value's alphabet does not matter |
+| `DEPLOY_HEX=<64 hex chars>` | **no** | no keyword, and hex cannot clear the entropy floor |
+| `{"password":"…"}` or `{"key":"<base64>"}` **nested in tool output** | yes | the generic patterns tolerate JSON quoting and escaping |
+
+One standing limit and one recently closed, both measured rather than assumed:
+
+**1. For generic secrets, the keyword decides — not the shape of the value.** A
+high-entropy value next to an unrecognized key name is invisible. That one is
+deliberate: the entropy floor sits above what hex can reach (16 symbols cap it at
+4.0 bits per character, against a 4.5 threshold) precisely so git SHAs, UUIDs and
+content hashes are never flagged. Lowering it would make the scanner fire on
+ordinary identifiers — and on the enforce path the scanner **rewrites the file your
+tool is about to write**, so a false positive corrupts real content.
+
+**2. Nested JSON used to be a second gap. It is closed.** A tool's response is
+itself JSON, so a nested value arrives escaped (`{\"key\":\"…\"}`), and both
+generic mechanisms used to miss that shape — which covers `cat config.json` and
+every MCP tool result. Both were widened, so a password or a high-entropy token
+inside nested JSON is now redacted like a flat one. Recorded because the scanner's
+behaviour changed, and because the named formats were never affected: an AWS key
+in JSON was always caught while a database password was not, which is exactly what
+made the gap easy to miss.
+
+If your credentials fall under limit 1, that is the case to plan around: run with
+`content_capture: false`, or keep them out of the working directory of a governed
+session.
+
+The same scanner runs on **every** content body before it is attached to an event,
+enforce mode or not: the assistant's reply, tool input, tool output, and the refusal
+reasons. Only the prompt is exempt, and that gap is stated above rather than
+mitigated. Redaction runs **before** attachment in all cases — a redaction applied
+afterwards would pass every code-level test and still ship the secret, so the
+ordering is asserted on the outbound bytes (conformance C18, C26, C34).
 
 ## Verified, not asserted
 

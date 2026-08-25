@@ -26,13 +26,32 @@ func (t enforceTarget) DecisionRequest(localRedaction bool) decision.DecisionReq
 	return buildDecisionRequest(t.id, t.ev, localRedaction)
 }
 
-// DevEvent maps the call for the inline evaluation, and — unlike the observe
-// copy of the same call — attaches the content the server needs to judge it.
+// DevEvent maps the call for the inline evaluation and attaches the content the
+// server needs to judge it.
 //
-// This is the ONLY place a tool's own input is put on an outbound event, and it
-// is why the split matters: the observe path spools its own separately-mapped
-// copy that never carries one, so SL3-SEC-3 (commands and file bodies never
-// egress on observe events) holds by construction rather than by care.
+// This used to be the ONLY place a tool's input reached an outbound event, and
+// the observe copy's emptiness was what made SL3-SEC-3 hold by construction.
+// ADR-0019 P1 retires that: Mapper.Map now attaches the same extract to the
+// observe copy under the content gate, and this method OVERWRITES it here.
+//
+// **What is attached differs by class, and the difference is not cosmetic:**
+//
+//   - A FILE write carries the REDACTED body — rebuilt through the same
+//     RedactToolInput the tool-call rewrite uses, from the same detection
+//     result, so the server judges exactly the bytes the developer's file was
+//     written with. That is why the overwrite exists at all.
+//   - A SHELL or MCP call carries the command/arguments VERBATIM. buildDecisionRequest
+//     populates DecisionRequest.Content only for a file semantic, so `redacted`
+//     is nil here for these classes and no rebuild happens. A token on a `curl`
+//     command line reaches /evaluate in the clear.
+//
+// That asymmetry predates ADR-0019 and is arguably deliberate — a policy matching
+// on a dangerous command should see the true command, and unlike a file body
+// nothing here is replayed into the developer's machine. But ADR-0019 makes it
+// VISIBLE in a new way: the observe copy of the very same call now runs the text
+// redactor (Mapper.Map), so ordinary telemetry is better protected than the copy
+// sent for a governance decision. Recorded, not silently fixed — changing it
+// changes what policy can match on, which is an owner decision, not a cleanup.
 //
 // Evaluation is a different question from telemetry. The org has asked OpenBox
 // to decide about this call; it cannot decide on content it cannot see.
@@ -66,6 +85,18 @@ func (t enforceTarget) DevEvent(redacted *client.Content) (client.DevEvent, bool
 // could differ from it. When nothing was scanned or nothing matched, redacted is
 // nil and the original stands.
 func evaluationContext(e *HookEvent, redacted *client.Content) string {
+	return hookflow.CapCommand(toolInputExtract(e, redacted))
+}
+
+// toolInputExtract is evaluationContext without the cap, so a caller that has to
+// redact the text itself can do so BEFORE it is truncated.
+//
+// The split exists for the observe path (Mapper.Map): it has no detection result
+// to rebuild from, so it runs the text redactor over this output and only then
+// caps. Capping first would cut a secret straddling the boundary into a fragment
+// no pattern matches — and ship the fragment. Same detect → redact → cap order
+// the gated path gets for free from the rebuild above.
+func toolInputExtract(e *HookEvent, redacted *client.Content) string {
 	kind, _, _, _, _ := classifyTool(e.ToolName)
 	input := e.ToolInput
 	if redacted != nil && redacted.FileText != "" {
@@ -80,9 +111,9 @@ func evaluationContext(e *HookEvent, redacted *client.Content) string {
 		// input is unchanged here and reading from the event is equivalent —
 		// stated rather than assumed, because adding "command" to those keys
 		// would silently make it wrong.
-		return hookflow.CapCommand(commandOf(input, e))
+		return commandOf(input, e)
 	}
-	return hookflow.CapCommand(string(input))
+	return string(input)
 }
 
 // commandOf reads the shell command from a possibly-rebuilt tool_input, falling

@@ -157,10 +157,12 @@ server**. Asserts:
 - one `policy_evaluations` / `guardrails_evaluations` / `age_evaluations` row per
   evaluation;
 - spool drains at SessionEnd inside the flush budget;
-- **the privacy assertion (INV-2 / SL3-SEC-3):** the prompt is present on the
-  `prompt_submitted` signal under content-capture-on, and the shell command text
-  and file bodies appear **nowhere** in any observe-path row. This is the one
-  behaviour that is currently only unit-tested (`client/leakscan_test.go`).
+- **the privacy assertion (INV-2):** with content capture on, the prompt is
+  present on the `prompt_submitted` signal **and so are the tool command and file
+  body** — ADR-0019 P1 retired SL3-SEC-3, so this phase asserts the gate OPEN and
+  35-telemetry.sh asserts it CLOSED on a capture-off session. Inverting rather
+  than deleting matters: "the marker is nowhere" and "the runtime emitted nothing"
+  are the same observation, and only the positive form separates them.
 
 Its activity counts are scoped to **tool** activities
 (`activity_type is distinct from 'llm_completion'`). A session also emits model-turn
@@ -490,9 +492,11 @@ it exposed:
   `mcp_tool_call` **span**; since ADR-0013 tool calls carry no span, and the assertion
   moved to `activity_input.mcp_server`/`mcp_tool`. The finding stands — what is
   captured did not change, only where it is carried.)
-- INV-2 / SL3-SEC-3 in the observe posture: the prompt egresses, the shell
-  command text and the file body do not — asserted against every row the session
-  wrote, not just unit-tested.
+- INV-2 in the observe posture: with capture on the prompt, the shell command
+  text and the file body all egress; with capture off none of them do — both
+  halves asserted against every row the session wrote, not just unit-tested.
+  (Until ADR-0019 P1 this read "the command and file body do not egress at all";
+  that was SL3-SEC-3, and it is retired, not weakened by accident.)
 - The whole approval loop unattended: approve-inside-hold, timeout→deny,
   late-approval→rewake (the session ends *because* the watcher saw the decision),
   reject, ungated cost, and an MCP escalation carrying its `arguments`.

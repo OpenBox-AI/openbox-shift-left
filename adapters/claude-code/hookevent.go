@@ -1,6 +1,7 @@
 package claudecode
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -91,15 +92,24 @@ func ParseHookName(s string) (HookName, error) {
 // HookEvent is the subset of a Claude Code hook's stdin JSON this adapter
 // reads.
 //
-// It captures only non-content, structural fields (INV-2) — session id,
-// working directory, tool identity, lifecycle enums — with one deliberate,
-// gated exception: Prompt (the UserPromptSubmit text). Command strings,
-// file contents, and tool output remain intentionally not decoded, so they
-// cannot leak into an emitted event even by accident. Prompt is decoded but
-// is copied onto an event only under the content-capture opt-in
-// (Mapper.CaptureContent) — with capture off it is inert, exactly like the
-// structural-only fields. Unknown/extra fields are ignored
-// (forward-compatible with Claude Code drift).
+// It captures structural fields (INV-2) — session id, working directory, tool
+// identity, lifecycle enums — plus a named, deliberately small set of CONTENT
+// fields, every one of them gated: Prompt (UserPromptSubmit),
+// LastAssistantMessage (Stop/SubagentStop, ADR-0018), and ToolResponse plus the
+// free-text failure fields (ADR-0019 P1).
+//
+// The gated fields are decoded here but are copied onto an emitted event only
+// under the content-capture opt-in (Mapper.CaptureContent) — with capture off
+// they are inert, exactly like the structural-only fields. Command strings and
+// file bodies still have no field of their own: they are read out of the raw
+// ToolInput at the point of use, under the same gate.
+//
+// This comment used to say the absence of the fields was the safeguard. For the
+// gated set it no longer is: the safeguard is a gate plus a redaction plus a
+// cap, each of which can be got wrong, which is why each is asserted on the
+// outbound bytes (conformance C18/C26, C32–C37) rather than trusted here.
+//
+// Unknown/extra fields are ignored (forward-compatible with Claude Code drift).
 type HookEvent struct {
 	// Common (present on every hook payload).
 	HookEventName  string `json:"hook_event_name"`
@@ -134,6 +144,22 @@ type HookEvent struct {
 	// versions, which fall back to the heuristic derivation.
 	ToolUseID string `json:"tool_use_id"`
 
+	// ToolResponse is what the tool PRODUCED, on PostToolUse. It is CONTENT,
+	// and it is bound here by ADR-0019 P1 — the change that retires SL3-SEC-3's
+	// "tool output never egresses" for the observe path.
+	//
+	// Kept as raw bytes rather than a decoded shape because there isn't one:
+	// Bash returns {stdout,stderr,interrupted}, a file read returns a string,
+	// an MCP tool returns whatever its server returns. toolOutputText flattens
+	// it to text at the point of use.
+	//
+	// The safeguard is no longer structural for this field, exactly as for
+	// LastAssistantMessage: it is a gate (Mapper.CaptureContent) plus a
+	// redaction (Mapper.RedactContent) plus a cap (client capBody), each of
+	// which can be got wrong, which is why each is asserted on the outbound
+	// bytes by the C32–C35 conformance cases rather than trusted here.
+	ToolResponse json.RawMessage `json:"tool_response"`
+
 	// AgentID / AgentType identify the subagent an event occurred inside.
 	// They ride *every* hook payload fired within a subagent (not only the
 	// Subagent* hooks), so a session's subagent tree is reconstructable from
@@ -152,8 +178,22 @@ type HookEvent struct {
 	AgentID   string `json:"agent_id"`
 	AgentType string `json:"agent_type"`
 
-	// SessionEnd.
+	// Reason is SessionEnd's close reason — a closed enum (reasonValues),
+	// allowlisted through enumOr.
+	//
+	// CAUTION: `reason` is ALSO the key PermissionDenied uses for the free text
+	// its classifier wrote, so this one binding decodes both. The routing is what
+	// keeps them apart, exactly as for ErrorType below: the SessionEnd arm sends
+	// it through enumOr (anything outside the enum is dropped), while the
+	// PermissionDenied arm sends it to GATED CONTENT (Content.SignalDetail).
+	// Free text therefore has no path to the ungated metadata.reason.
 	Reason string `json:"reason"`
+
+	// ErrorDetails is StopFailure's free-text elaboration of ErrorType — what
+	// the provider said beyond the enum ("retry after 60s"). CONTENT, gated
+	// (ADR-0019 P1); it lands beside error_type in metadata so a reader gets the
+	// class and the explanation together.
+	ErrorDetails string `json:"error_details"`
 
 	// IsInterrupt separates "the user cancelled this" from "the tool failed"
 	// on PostToolUseFailure. Both are status:"failed" — the call did not
@@ -180,11 +220,17 @@ type HookEvent struct {
 	// only because of how it is consumed — the sole reader is
 	// enumOr(e.ErrorType, apiErrorTypes) on the StopFailure arm, and enumOr
 	// returns "" for anything outside the ten values, so a free-text error has
-	// no path to an emitted event. That is an allowlist, not an impossibility
-	// (the ADR-0014 distinction), so it is pinned by a test rather than left to
-	// this comment: TestMap_FreeTextErrorNeverEgresses.
+	// no path to metadata.error_type — the UNGATED field. That is an allowlist,
+	// not an impossibility (the ADR-0014 distinction), so it is pinned by a test
+	// rather than left to this comment: TestMap_FreeTextErrorNeverEgresses.
 	//
-	// StopFailure's `error_details` and `last_assistant_message` are NOT bound.
+	// What changed with ADR-0019 P1: the free text is no longer dropped
+	// outright, it is routed to GATED content (Content.ToolOutput on the failure
+	// arm). The enum field is unaffected, which is the half this comment is
+	// about.
+	//
+	// StopFailure's `error_details` IS bound now (see ErrorDetails);
+	// `last_assistant_message` is bound separately for the turn text.
 	ErrorType string `json:"error"`
 
 	// LastAssistantMessage is the text of the assistant message that closed this
@@ -360,4 +406,29 @@ func (e *HookEvent) fileText() string {
 		return in.Content
 	}
 	return in.NewString
+}
+
+// toolOutputText flattens PostToolUse's tool_response to text for the gated
+// content path (ADR-0019 P1).
+//
+// There is no single shape to decode: Bash returns an object
+// ({stdout,stderr,interrupted}), a file read returns a bare JSON string, and an
+// MCP tool returns whatever its server returned. A JSON string is unquoted so a
+// reader sees the text rather than an escaped blob; everything else is passed
+// through as its JSON source, which loses nothing and invents nothing.
+//
+// Returns "" when the hook carried no tool_response — the honest state for
+// every hook that is not PostToolUse.
+func (e *HookEvent) toolOutputText() string {
+	raw := bytes.TrimSpace(e.ToolResponse)
+	if len(raw) == 0 || string(raw) == "null" {
+		return ""
+	}
+	if raw[0] == '"' {
+		var s string
+		if err := json.Unmarshal(raw, &s); err == nil {
+			return s
+		}
+	}
+	return string(raw)
 }

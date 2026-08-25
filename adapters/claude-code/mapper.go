@@ -11,6 +11,7 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/client"
 
 	"github.com/openbox-ai/openbox-shift-left/adapters/common/devconfig"
+	"github.com/openbox-ai/openbox-shift-left/adapters/common/hookflow"
 )
 
 // provider is the constant provider tag carried in metadata (MAPPING.md §2).
@@ -60,8 +61,13 @@ type Mapper struct {
 	// Emit uses to decide whether to strip content — so capture and
 	// egress always agree. Redaction at source is a separate layer
 	// ([EXT-guardrail-redaction], inert locally); the prompt is capped
-	// before egress (capBody, buildSignalArgs). Only the prompt is gated
-	// here — command/file/output content is still never decoded.
+	// before egress (capBody, buildSignalArgs).
+	//
+	// It gates every content field, not just the prompt: the assistant's turn
+	// text (ADR-0018) and, since ADR-0019 P1, tool input on the observe path,
+	// tool output, and the lifecycle signals' free text. One flag for all of
+	// them is deliberate — a second posture key would let an org believe it had
+	// opted out of content while one class kept egressing.
 	CaptureContent bool
 	// RedactContent redacts a content body for secrets before it is attached to
 	// an event. nil ⇒ identity, which is the honest `secret_detection:false`
@@ -137,9 +143,13 @@ func NewMapper(id Identity) Mapper {
 // which case the caller drops it fail-open (INV-3), never blocking the
 // tool call.
 //
-// Map never copies content (prompt text, command strings, file bodies,
-// tool output) into the event (INV-2). It carries only structural
-// metadata: the tool identity, file paths, and lifecycle enums.
+// Map copies content onto an event ONLY under CaptureContent, and only after
+// RedactContent has run over it (INV-2). With capture off it carries structural
+// metadata alone — the tool identity, file paths, and lifecycle enums — which is
+// the same shape it always produced. What changed with ADR-0019 P1 is that the
+// with-capture-on shape now includes tool input on the observe path, tool
+// output, and the signals' free text; the gate, not the absence of a field, is
+// what keeps them off the wire.
 func (m Mapper) Map(hook HookName, e *HookEvent) (client.DevEvent, bool) {
 	if e == nil || e.SessionID == "" {
 		return client.DevEvent{}, false
@@ -206,6 +216,25 @@ func (m Mapper) Map(hook HookName, e *HookEvent) (client.DevEvent, bool) {
 		ev.StartedAt = ts
 		ev.Tool, ev.Span = mapTool(e, "started")
 		ev.Metadata = toolMetadata(e)
+		// What the tool was asked to do, on the OBSERVE path — the shell
+		// command, the MCP arguments, the file body. This is the change that
+		// retires SL3-SEC-3 ("tool commands and file bodies never egress on
+		// observe events"): the guarantee becomes a posture, not a structural
+		// property, and the same gate that covers the prompt covers this.
+		//
+		// evaluationContext is reused rather than reimplemented so the observe
+		// copy and the gated /evaluate copy of one call carry the IDENTICAL
+		// extract. Two copies of one call that disagreed about the command
+		// would be worse than either alone. The gated path overwrites this with
+		// its own precisely-redacted rebuild (enforceTarget.DevEvent).
+		if m.CaptureContent {
+			// redact BEFORE the cap: toolInputExtract is deliberately uncapped
+			// so a secret straddling the boundary is replaced rather than cut
+			// into an unmatchable fragment that then ships.
+			if in := hookflow.CapCommand(m.redact(toolInputExtract(e, nil))); in != "" {
+				ev.Content = &client.Content{ToolInput: in}
+			}
+		}
 
 	case HookPostToolUse:
 		ev.EventType = client.EventToolResult
@@ -226,6 +255,9 @@ func (m Mapper) Map(hook HookName, e *HookEvent) (client.DevEvent, bool) {
 		// because it is believable. The probe is the standing evidence, and the
 		// pairing is re-checked whenever the hook surface changes.
 		ev.Status = client.StatusCompleted
+		// What the call PRODUCED (ADR-0019 P1). Gated, redacted, then capped by
+		// the client — see gatedToolOutput.
+		ev.Content = m.gatedToolOutput(e.toolOutputText())
 
 	case HookPostToolUseFailure:
 		// The failure half of PostToolUse, and the same event on the wire: a
@@ -245,6 +277,17 @@ func (m Mapper) Map(hook HookName, e *HookEvent) (client.DevEvent, bool) {
 		if e.IsInterrupt != nil {
 			ev.Metadata["is_interrupt"] = *e.IsInterrupt
 		}
+		// A failed activity's OUTPUT is its error text, so the tool's own
+		// free-text `error` lands in the same gated field a successful call's
+		// result body does — `status` already says which it is, and a second
+		// field would split one question across two places.
+		//
+		// It is the SAME JSON key StopFailure uses for its closed provider enum
+		// (HookEvent.ErrorType), which is why routing matters: this arm sends it
+		// to gated CONTENT, the StopFailure arm sends it through enumOr. Free
+		// text still has no path to metadata.error_type — pinned by
+		// TestMap_FreeTextErrorNeverEgresses and conformance C37.
+		ev.Content = m.gatedToolOutput(e.ErrorType)
 
 	case HookSubagentStart:
 		ev.EventType = client.EventSubagentStarted
@@ -252,14 +295,18 @@ func (m Mapper) Map(hook HookName, e *HookEvent) (client.DevEvent, bool) {
 		ev.Metadata = subagentMetadata(e)
 
 	case HookPermissionDenied:
-		// That a denial happened, and which tool it was about. NOT why: the
-		// payload's `reason` is free text a classifier wrote and is not bound
-		// (ADR-0019 owns it). The tool identity and locators come from the same
+		// That a denial happened, which tool it was about, and — under the
+		// content gate — WHY. The tool identity and locators come from the same
 		// mapTool the call itself used, so the denial correlates with the
 		// PreToolUse that preceded it by tool_use_id.
+		//
+		// The reason is free text a classifier wrote, so it rides gated content
+		// (ADR-0019 P1) and reaches metadata.denial_reason. It must never reach
+		// signal_args — see Content.SignalDetail for what core would do with it.
 		ev.EventType = client.EventPermissionDenied
 		ev.Tool, ev.Span = mapTool(e, "completed")
 		ev.Metadata = toolMetadata(e)
+		ev.Content = m.gatedSignalDetail(e.Reason)
 
 	case HookStopFailure:
 		// The model could not answer. error_type is the provider's own closed
@@ -271,6 +318,9 @@ func (m Mapper) Map(hook HookName, e *HookEvent) (client.DevEvent, bool) {
 		ev.Metadata = mergeMetadata(
 			compact(map[string]any{"error_type": enumOr(e.ErrorType, apiErrorTypes)}),
 			subagentMetadata(e))
+		// The provider's elaboration of that enum, gated: "rate_limit" says the
+		// class, "retry after 60s" says what to do about it.
+		ev.Content = m.gatedSignalDetail(e.ErrorDetails)
 
 	case HookSessionEnd:
 		ev.EventType = client.EventSessionEnded
@@ -718,6 +768,39 @@ func (m Mapper) clock() time.Time {
 
 // redact applies the injected content redactor, or returns the text unchanged
 // when none is wired (secret detection off — the honest degradation, ADR-0018).
+// gatedToolOutput wraps a tool's produced text as gated content: the org's
+// opt-in first, the redactor second, attachment last (the client caps it).
+//
+// The ORDER is the control, not a detail. A redaction applied after attachment
+// passes every unit test in this package and still ships the secret, which is
+// why the conformance cases assert on the outbound bytes. Returns nil — no
+// Content at all — when capture is off or nothing survives, so the absent state
+// is genuinely absent rather than an empty string on the wire.
+func (m Mapper) gatedToolOutput(text string) *client.Content {
+	if !m.CaptureContent || text == "" {
+		return nil
+	}
+	out := m.redact(text)
+	if out == "" {
+		return nil
+	}
+	return &client.Content{ToolOutput: out}
+}
+
+// gatedSignalDetail is gatedToolOutput's counterpart for a lifecycle signal's
+// free text. Same three steps in the same order — opt-in, redact, attach — and
+// the same nil-when-empty contract.
+func (m Mapper) gatedSignalDetail(text string) *client.Content {
+	if !m.CaptureContent || text == "" {
+		return nil
+	}
+	out := m.redact(text)
+	if out == "" {
+		return nil
+	}
+	return &client.Content{SignalDetail: out}
+}
+
 func (m Mapper) redact(s string) string {
 	if m.RedactContent == nil {
 		return s

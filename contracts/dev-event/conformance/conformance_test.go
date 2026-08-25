@@ -76,9 +76,25 @@ func TestInvalidSamplesRejected(t *testing.T) {
 
 // AC (b): any event carrying content is rejected when content-capture is
 // DISABLED, and accepted when it is ENABLED (INV-2 / OD4).
+// The fixture set is read from the directory rather than listed here, like the
+// two tests above: a hardcoded list means a fixture added for a NEW gated field
+// is never validated, and "no test ran it" is indistinguishable from "it
+// passed".
 func TestContentGate(t *testing.T) {
-	for _, name := range []string{"with_content.json", "with_span_body.json"} {
-		raw := read(t, filepath.Join("testdata/content", name))
+	dir := "testdata/content"
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("read dir: %v", err)
+	}
+	if len(entries) == 0 {
+		t.Fatal("no content fixtures — the gate would be asserted against nothing")
+	}
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		raw := read(t, filepath.Join(dir, name))
 
 		err := ValidateDevEvent(raw, false)
 		if !errors.Is(err, ErrContentDisabled) {

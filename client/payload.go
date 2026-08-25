@@ -63,8 +63,9 @@ type governanceEventPayload struct {
 	ActivityInput json.RawMessage `json:"activity_input,omitempty"`
 	// ActivityOutput rides ActivityCompleted; core stores it as the row's
 	// `output` and runs Guardrails stage "1" over it
-	// (services/guardrail.go:192). Counts and an exit code, never tool output
-	// text (INV-2) — see structuralActivityOutput.
+	// (services/guardrail.go:192). Counts and an exit code, plus — under the
+	// content gate — the tool's own output text (ADR-0019 P1; on a failed call
+	// that text is the tool's error). See structuralActivityOutput.
 	ActivityOutput json.RawMessage `json:"activity_output,omitempty"`
 	// DurationMs is how long the tool call took, in milliseconds. The client
 	// computes it because there is no longer a span for core to derive it from:
@@ -505,18 +506,46 @@ func activityLabel(ev DevEvent) string {
 // list is deliberately small and specific — a backstop against a mistake, not a
 // content classifier.
 var contentMetadataKeys = map[string]bool{
-	"message":    true, // a commit message body
-	"prompt":     true,
-	"output":     true,
-	"content":    true,
-	"file_text":  true,
-	"diff":       true,
-	"patch":      true,
-	"body":       true,
-	"stdout":     true,
-	"stderr":     true,
-	"command":    true, // never egresses on the observe path (SL3-SEC-3)
+	"message":   true, // a commit message body
+	"prompt":    true,
+	"output":    true,
+	"content":   true,
+	"file_text": true,
+	"diff":      true,
+	"patch":     true,
+	"body":      true,
+	"stdout":    true,
+	"stderr":    true,
+	// Tool input DOES egress on the observe path since ADR-0019 P1 — but under
+	// Content.ToolInput, which stripContent nils. This key stays listed as the
+	// backstop it always was: an adapter that put a command straight into
+	// metadata would route around the gate.
+	"command":    true,
 	"input_text": true,
+	// The signal free-text keys signalDetailKeyFor writes. The client sets them
+	// from Content (already gated), so these entries only matter if an adapter
+	// ever sets them directly — which is exactly what this list is for.
+	"denial_reason": true,
+	"error_details": true,
+}
+
+// signalDetailKeyFor names the metadata key a signal's gated free text lands in.
+// Per event type rather than one generic key, so the detail sits beside the
+// structural fields a reader already has for that signal: `error_details` next
+// to `error_type` on an APIError, `denial_reason` next to the tool identity on a
+// PermissionDenied.
+//
+// Returns "" for every other event type, which drops the field: a signal detail
+// on a tool result or a lifecycle event has no defined meaning, and inventing a
+// key for it would put free text somewhere no reader expects one.
+func signalDetailKeyFor(t EventType) string {
+	switch t {
+	case EventPermissionDenied:
+		return "denial_reason"
+	case EventAPIError:
+		return "error_details"
+	}
+	return ""
 }
 
 func buildMetadata(ev DevEvent) (json.RawMessage, error) {
@@ -526,6 +555,13 @@ func buildMetadata(ev DevEvent) (json.RawMessage, error) {
 			continue // INV-2: gated content never rides the metadata blob either
 		}
 		m[k] = v
+	}
+	// A signal's free text, when capture left it on the event. Capped like every
+	// other gated body — the bytes this map produces are signed.
+	if ev.Content != nil && ev.Content.SignalDetail != "" {
+		if k := signalDetailKeyFor(ev.EventType); k != "" {
+			m[k] = capBody(ev.Content.SignalDetail)
+		}
 	}
 	m["event_id"] = ev.EventID
 	// tool_name is carried here as well as in activity_type/activity_input
@@ -645,10 +681,15 @@ func structuralActivityInput(ev DevEvent) json.RawMessage {
 // ActivityCompleted — what core stores as the row's `output` and runs Guardrails
 // stage "1" over (services/guardrail.go:192).
 //
-// It carries what the tool DID, never what it produced: byte and line counts,
-// and the exit code when an adapter reports one. Tool output text is content and
-// never egresses on the observe path (INV-2), so the field an operator might
-// expect here — the result body — is deliberately absent.
+// It carries what the tool DID — byte and line counts, and the exit code when an
+// adapter reports one — plus, under the content gate, what it PRODUCED.
+//
+// The result body used to be absent unconditionally, because tool output had no
+// field to land in (SL3-SEC-3). ADR-0019 P1 retires that: the body is carried on
+// Content.ToolOutput, which stripContent has already nil'd when the org has
+// content capture off, so "absent" is now a posture rather than a structural
+// property. It is capped here — the bytes this function feeds are the bytes
+// buildPayload signs.
 //
 // The counts are the same Span fields the retired hook span carried at its root,
 // re-homed rather than dropped. exit_code is read from metadata because the
@@ -674,6 +715,12 @@ func structuralActivityOutput(ev DevEvent) json.RawMessage {
 	}
 	if v, ok := ev.Metadata["exit_code"]; ok {
 		m["exit_code"] = v
+	}
+	// What the tool produced, when capture left it on the event. Capped exactly
+	// like the gated call's activity_input content: a single `cat` of a large
+	// file would otherwise put megabytes on the wire per tool call.
+	if ev.Content != nil && ev.Content.ToolOutput != "" {
+		m["output"] = capBody(ev.Content.ToolOutput)
 	}
 	if len(m) == 0 {
 		return nil

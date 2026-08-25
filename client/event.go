@@ -28,7 +28,13 @@ package client
 //
 // 1.2 added Status on tool results and the failure/lifecycle event types
 // (ADR-0018). Purely additive — every 1.1 event is a valid 1.2 event.
-const SchemaVersion = "1.2"
+//
+// 1.3 added Content.ToolOutput and documented Content.ToolInput, which now also
+// rides the OBSERVE ToolCall rather than only a gated call's evaluation event
+// (ADR-0019 P1 — the change that retires SL3-SEC-3). Purely additive: both are
+// gated fields on an already-gated object, so every 1.2 event is a valid 1.3
+// event and an org with content capture off sends byte-identical payloads.
+const SchemaVersion = "1.3"
 
 // EventType is a developer-runtime lifecycle event type. Each maps 1:1 onto
 // an openbox-core event_type string (INV-8) — see MAPPING.md §2.
@@ -81,9 +87,9 @@ const (
 	// that spawned and did nothing left no trace.
 	EventSubagentStarted EventType = "SubagentStarted"
 	// EventPermissionDenied records that a policy or classifier refused a tool
-	// call — that a decision happened and which tool it was about, never what
-	// the content was and never why (the provider's `reason` is free text and
-	// is not bound).
+	// call — that a decision happened, which tool it was about, and, under the
+	// content gate, why (ADR-0019 P1: the provider's free-text `reason` rides
+	// Content.SignalDetail → metadata.denial_reason). Never the tool's content.
 	EventPermissionDenied EventType = "PermissionDenied"
 	// EventAPIError records a turn that ended in a provider-side error rather
 	// than an answer (rate limit, billing, auth, overload). Without it, a
@@ -227,10 +233,14 @@ type Content struct {
 	// call, the arguments for an MCP one — carried so an approver can see what
 	// they are deciding about.
 	//
-	// It is set ONLY on an inline evaluation, and only for a class that can
-	// require approval. It is never set on the observe path, so SL3-SEC-3
-	// ("tool commands and file bodies never egress on observe events") is
-	// unchanged: no ordinary telemetry gains a command.
+	// It is set on an inline evaluation — where the adapter rebuilds it from
+	// the enforce gate's own detection result, so the server judges the exact
+	// bytes the tool call was rewritten to — AND, since ADR-0019 P1, on the
+	// observe path under the same content gate.
+	//
+	// This comment used to say it was "never set on the observe path, so
+	// SL3-SEC-3 is unchanged". That guarantee is retired: ordinary tool
+	// telemetry does gain the command now, when the org has content capture on.
 	//
 	// Why it exists: an approval request that reads `kind=shell
 	// tool_name=Bash` is not decidable. Neither a human nor an autonomous
@@ -245,6 +255,45 @@ type Content struct {
 	// only the structural fields — a real posture choice with a real cost,
 	// recorded as OD-E9-7.
 	ToolInput string `json:"tool_input,omitempty"`
+
+	// ToolOutput is what the tool PRODUCED — the result body of a completed
+	// call, or the tool's own error text when the call failed. It lands in
+	// `activity_output.output`, the field core stores as the row's `output` and
+	// runs Guardrails stage "1" over.
+	//
+	// It is a separate field from Output rather than a reuse of it, and the
+	// distinction is load-bearing: Output carries the assistant's turn text
+	// (ADR-0018), which rides a TurnCompleted's span. Overloading one field
+	// across both would put turn text on tool events and tool output in the
+	// alignment extractor the moment either mapping slipped.
+	//
+	// Gated like every other Content field — stripContent nils Content when the
+	// org has content capture off — redacted for secrets by the adapter BEFORE
+	// attachment, and capped at maxBodySize by structuralActivityOutput before
+	// the payload is signed. With `secret_detection:false` it egresses
+	// unredacted; stated, not mitigated.
+	ToolOutput string `json:"tool_output,omitempty"`
+
+	// SignalDetail is a lifecycle signal's free text: why a classifier refused a
+	// call (PermissionDenied), what the provider said when a turn failed
+	// (APIError). It lands in `metadata`, under a key named per event type —
+	// beside `error_type` on an APIError, beside `tool_name`/`tool_use_id` on a
+	// PermissionDenied — because metadata is where a signal's structural detail
+	// already rides (MAPPING.md §2).
+	//
+	// It emphatically does NOT land in `signal_args`, and that is a correctness
+	// constraint, not a stylistic one: core's alignment engine reads ANY
+	// SignalReceived with non-empty signal_args as a NEW USER GOAL and
+	// overwrites the session's goal with the stringified args
+	// (openbox-core internal/services/age.go:112-137). A denial reason routed
+	// there would replace the developer's prompt as the thing every later turn
+	// is scored against, and the symptom would look like drift rather than a
+	// bug. Conformance C38 holds it.
+	//
+	// It is a Content field rather than an adapter-set metadata key so the gate
+	// is a property of the choke point: stripContent nils Content, so no
+	// mis-typed key can route free text around the posture.
+	SignalDetail string `json:"signal_detail,omitempty"`
 }
 
 // DevEvent is the normalized developer-runtime event a caller hands to Emit,

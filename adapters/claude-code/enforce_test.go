@@ -1121,8 +1121,16 @@ func TestRunHook_EnforceApply_Approval(t *testing.T) {
 // to do, or neither the server nor an approver can decide about it — `kind=shell
 // tool_name=Bash` tells them exactly nothing.
 //
-// The matching guarantee is that the OBSERVE copy of the same call never
-// carries it (SL3-SEC-3), which is why the two are mapped separately.
+// The two copies are mapped separately, and that split outlived the reason for
+// it. It used to be SL3-SEC-3 — the observe copy carried NOTHING, unconditionally.
+// ADR-0019 P1 retired that: the observe copy carries the same extract under the
+// content gate. What the split still buys is the redaction: the gated copy is
+// rebuilt from the enforce gate's own detection result, so the server judges the
+// exact bytes the tool call was rewritten to.
+//
+// This case pins the capture-OFF half — with the gate closed the observe copy is
+// still empty while the gated copy is not, because evaluation is a different
+// question from telemetry. The capture-ON half is conformance C36.
 func TestEscalationCarriesApprovalContext_ObserveNeverDoes(t *testing.T) {
 	isolateConfig(t)
 	m := testMapper()
@@ -1145,10 +1153,26 @@ func TestEscalationCarriesApprovalContext_ObserveNeverDoes(t *testing.T) {
 				t.Errorf("escalation lacks the approval context: %+v", escalated.Content)
 			}
 
-			// The observe copy of the very same call must stay metadata-only.
+			// The observe copy of the very same call stays metadata-only with
+			// the content gate CLOSED (testMapper has capture off), while the
+			// gated copy above carries the body regardless: an org that opted
+			// out of content telemetry still gets decisions made on content.
 			observed, _ := m.Map(HookPreToolUse, hookEv)
 			if observed.Content != nil {
-				t.Errorf("observe copy carries content (SL3-SEC-3): %+v", observed.Content)
+				t.Errorf("observe copy carries content with capture off: %+v", observed.Content)
+			}
+
+			// …and with the gate OPEN it carries the SAME extract the gated copy
+			// does. Asserting equality rather than mere presence is the point:
+			// two copies of one call that disagreed about what the command was
+			// would be worse than either alone, and nothing else pins them
+			// together.
+			on := m
+			on.CaptureContent = true
+			observedOn, _ := on.Map(HookPreToolUse, hookEv)
+			if observedOn.Content == nil || observedOn.Content.ToolInput != escalated.Content.ToolInput {
+				t.Errorf("observe copy with capture on = %+v, want the same extract as the "+
+					"gated copy (%q)", observedOn.Content, escalated.Content.ToolInput)
 			}
 		})
 	}

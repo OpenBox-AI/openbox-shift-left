@@ -29,13 +29,17 @@ import (
 // declare. E9 §3.5 flagged the shape as something to verify against a real
 // envelope before depending on it; this is that verification.
 //
-// What the queue therefore gives an approver is the agent, the tool, its
-// structural identifiers, and the policy's own reason. What it does NOT give is
-// the command string — and that is by design rather than a gap: the developer
-// runtime never egresses tool commands or file bodies on an observe event
-// (INV-2), so the queue cannot show what was never sent. Judging a borderline
-// request on the command text would require changing that posture, not the
-// queue.
+// What the queue gives an approver is the agent, the tool, its structural
+// identifiers, and the policy's own reason. Whether it can also show the command
+// depends on the org's posture, not on this DTO: a gated call has carried
+// Content.ToolInput since ADR-0017, so with content capture ON the command IS on
+// the envelope this reads. With capture off it is absent and the queue cannot
+// show what was never sent.
+//
+// This comment used to say the runtime "never egresses tool commands or file
+// bodies on an observe event" — which was SL3-SEC-3, retired by ADR-0019 P1, and
+// was in any case the wrong invariant to cite here: the queue is fed by GATED
+// events, not observe ones.
 type Approval struct {
 	ID string `json:"id"`
 	// AgentID owns the request; the decide route is per-agent.

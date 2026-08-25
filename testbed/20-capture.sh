@@ -4,14 +4,22 @@
 # The three markers are the design of this phase:
 #
 #   PROMPT marker  must be PRESENT  — content capture is on by default, and the
-#                                     prompt is the one piece of content that
-#                                     legitimately egresses.
-#   SHELL marker   must be ABSENT   — a tool command never egresses on an observe
-#   FILE marker    must be ABSENT     event (INV-2 / SL3-SEC-3).
+#   SHELL marker   must be PRESENT     prompt, the tool input and the tool output
+#   FILE marker    must be PRESENT     all egress under that one gate.
+#
+# SHELL and FILE used to be ABSENT assertions (INV-2 / SL3-SEC-3: "a tool command
+# never egresses on an observe event"). **ADR-0019 P1 retired that guarantee** —
+# tool input and output now ride ordinary tool events under `content_capture`,
+# redacted and capped. The assertion is inverted rather than deleted, because
+# "the marker is nowhere" and "the runtime emitted nothing at all" are the same
+# observation, and only the positive form can tell them apart.
+#
+# The gate's OTHER half — capture off ⇒ none of this egresses — is asserted
+# server-side by 35-telemetry.sh, which already drives a capture-off session.
 #
 # Neither the shell command nor the file body appears in the prompt: they are
-# read out of files inside the project, so their absence downstream means the
-# runtime dropped them, not that they were never mentioned.
+# read out of files inside the project, so their presence downstream means the
+# runtime captured them from the tool call, not that the prompt mentioned them.
 set -uo pipefail
 
 TB_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -173,7 +181,7 @@ tb_step "spool drained at SessionEnd"
 spool="$OPENBOX_SPOOL_DIR"
 assert_eq "no events left spooled for this session" 0 "$(find "$spool" -name "*$sid*" 2>/dev/null | wc -l)"
 
-tb_step "privacy posture (INV-2 / SL3-SEC-3)"
+tb_step "privacy posture (INV-2 — content gate ON)"
 # Everything the runtime egressed for this session, as text. The spans query is
 # kept deliberately: it returns nothing now (asserted above), and if a span ever
 # reappears its contents are scanned for leaked content rather than silently
@@ -182,8 +190,11 @@ egress="$(tb_sql "select row_to_json(e)::text from governance_events e where run
 $(tb_sql "select row_to_json(s)::text from spans s where session_id='$uuid';")"
 assert_nonempty "egress captured for inspection" "$egress"
 assert_contains "prompt content egressed (content_capture on)" "$egress" "$PROMPT_MARK"
-assert_absent "shell command text never egressed" "$egress" "$SHELL_MARK"
-assert_absent "file body never egressed" "$egress" "$FILE_MARK"
+# ADR-0019 P1: tool input and output egress under the same gate. Both markers are
+# reachable two ways — as the tool's input and as what it printed — so either
+# path satisfies these; the capture-off half is 35-telemetry.sh's job.
+assert_contains "shell command text egressed (content_capture on)" "$egress" "$SHELL_MARK"
+assert_contains "file body egressed (content_capture on)" "$egress" "$FILE_MARK"
 
 # ── the negative: an ungoverned directory produces NOTHING ───────────────────
 # ADR-0016's accepted cost, demonstrated end to end rather than asserted. This is

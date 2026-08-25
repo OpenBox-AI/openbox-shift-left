@@ -338,6 +338,11 @@ func setHookEnv(t *testing.T) string {
 	t.Setenv(devconfig.EnvEnforcementFile, filepath.Join(dir, "enforcements.jsonl"))
 	t.Setenv(devconfig.EnvPendingApprovalDir, filepath.Join(dir, "pending-approvals"))
 	t.Setenv("OPENBOX_ADVISORY_FILE", filepath.Join(dir, "advisories.jsonl"))
+	// Pinned, not inherited. Content capture defaults ON, and since ADR-0019 P1
+	// the observe path carries the tool's input under that gate — so a hook test
+	// that left the posture to the default would silently start asserting the
+	// capture-ON behaviour. Cases that want capture ON set it themselves.
+	t.Setenv(devconfig.EnvContentCapture, "0")
 	return spool
 }
 
@@ -359,7 +364,7 @@ func TestHookIsObserveOnlyInProcess(t *testing.T) {
 	}
 	raw, _ := os.ReadFile(filepath.Join(spool, onlySpoolFile(t, spool)))
 	if strings.Contains(string(raw), secret) {
-		t.Fatalf("command content leaked into the spool: %s", raw)
+		t.Fatalf("command content leaked into the spool with content capture OFF: %s", raw)
 	}
 }
 
@@ -423,6 +428,10 @@ func TestUnifiedBinaryHookObserveOnlyContract(t *testing.T) {
 		devconfig.EnvPendingApprovalDir+"="+filepath.Join(dir, "pending-approvals"),
 		"OPENBOX_ADVISORY_FILE="+filepath.Join(dir, "advisories.jsonl"),
 		"OPENBOX_SESSION_DIR="+filepath.Join(dir, "sessions"),
+		// See setHookEnv: capture defaults ON and the observe path now carries
+		// tool input under that gate (ADR-0019 P1). This case is about the gate
+		// CLOSED; conformance C36 owns the open side.
+		devconfig.EnvContentCapture+"=0",
 	)
 	var stdout, stderr strings.Builder
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
@@ -434,7 +443,7 @@ func TestUnifiedBinaryHookObserveOnlyContract(t *testing.T) {
 	}
 	spoolFile := onlySpoolFile(t, spool)
 	if raw, _ := os.ReadFile(filepath.Join(spool, spoolFile)); strings.Contains(string(raw), secret) {
-		t.Fatalf("content leaked into the spool: %s", raw)
+		t.Fatalf("content leaked into the spool with content capture OFF: %s", raw)
 	}
 }
 

@@ -182,4 +182,25 @@ assert_eq "no span rows with capture off" 0 "$(tb_count "spans where session_id=
 assert_ge "status still recorded with capture off" 1 \
 	"$(tb_count "governance_events where run_id='$sid_off' and workflow_status='completed'")"
 
+# …and neither does the tool content ADR-0019 P1 added. This is the closing half
+# of the gate 20-capture.sh proves open: the same classes, the same session shape,
+# the opposite posture. Without it, "capture off" would be verified for spans only
+# while four newer content classes went unchecked end to end.
+tb_step "content capture off ⇒ no tool input or output on any row"
+# Asserted as JSONB key tests, NOT as a substring scan of row_to_json. `input` and
+# `output` are real columns that row_to_json renders on EVERY row (as null when
+# empty), so `assert_absent '"output":'` would fail on a perfectly correct run —
+# it would be testing the column list, not the content. The nested keys below are
+# the ones that appear only when Content survived the gate.
+assert_eq "no tool command/arguments/body on any row with capture off" 0 \
+	"$(tb_count "governance_events where run_id='$sid_off' and input is not null and (input ? 'command' or input ? 'arguments' or input ? 'content')")"
+assert_eq "no tool output text on any row with capture off" 0 \
+	"$(tb_count "governance_events where run_id='$sid_off' and output is not null and output ? 'output'")"
+assert_eq "no refusal free text on any row with capture off" 0 \
+	"$(tb_count "governance_events where run_id='$sid_off' and metadata is not null and (metadata ? 'denial_reason' or metadata ? 'error_details')")"
+# The structural axes must survive, or "no content" would be indistinguishable
+# from "no events" — the same reason 20-capture.sh asserts the gate positively.
+assert_ge "structural tool identity survives capture off" 1 \
+	"$(tb_count "governance_events where run_id='$sid_off' and metadata ? 'tool_name'")"
+
 tb_finish

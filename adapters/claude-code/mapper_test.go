@@ -137,10 +137,15 @@ func TestMap_LifecycleAndToolEvents(t *testing.T) {
 	}
 }
 
-// TestMap_NoContentLeak is the SL3-SEC-3 guard: content present in a hook's
-// tool_input (command, file contents, output) must NEVER appear anywhere in the
-// emitted event — not in metadata, not in tool.name, not in a span body. Only
-// the structural file_path is carried.
+// TestMap_NoContentLeak is the content-gate guard: with capture OFF (testMapper's
+// default), content present in a hook's tool_input must not appear anywhere in
+// the emitted event — not in metadata, not in tool.name, not in a span body.
+// Only the structural file_path is carried.
+//
+// It was the SL3-SEC-3 guard, which held UNCONDITIONALLY. ADR-0019 P1 retired
+// that guarantee; what survives is this half, and it is now the posture
+// assertion rather than a structural one. The capture-ON half is
+// TestMap_ToolOutputIsGatedOnContentCapture and conformance C36.
 func TestMap_NoContentLeak(t *testing.T) {
 	m := testMapper()
 	secret := "SUPER-SECRET-PAYLOAD-should-not-egress"
@@ -449,26 +454,86 @@ func TestMap_LifecycleEventsCarryNoStatus(t *testing.T) {
 	}
 }
 
-// INV-2 the structural way: the derivation must not have introduced a path from
-// tool output text to the event. A sentinel in tool_response — the field this
-// adapter deliberately does not bind — must be nowhere in the emitted event.
+// `status` is STRUCTURAL: it is derived from which hook fired, never parsed out
+// of what the tool produced. ADR-0019 P1 binds tool_response as gated content,
+// which makes the distinction testable rather than structural — so this asserts
+// it on the axis that still holds: the outcome is identical whether or not the
+// hook carried any output at all.
+//
+// It used to assert that a tool_response sentinel was absent from the event
+// while never putting one in the payload, so it proved nothing on that axis and
+// its premise ("the field this adapter deliberately does not bind") is now
+// false. The gate itself is TestMap_ToolOutputIsGatedOnContentCapture.
 func TestMap_StatusDerivationReadsNoToolOutput(t *testing.T) {
-	m := testMapper()
+	m := testMapper() // content capture OFF
 	const sentinel = "SENTINEL-TOOL-OUTPUT-must-not-be-read"
 	ev, ok := m.Map(HookPostToolUse, &HookEvent{
 		SessionID: "s", ToolName: "Bash", ToolUseID: "toolu_2",
-		ToolInput: json.RawMessage(`{"command":"echo hi"}`),
+		ToolInput:    json.RawMessage(`{"command":"echo hi"}`),
+		ToolResponse: json.RawMessage(`{"stdout":"` + sentinel + `"}`),
 	})
 	if !ok {
 		t.Fatal("must map")
 	}
 	blob, _ := json.Marshal(ev)
 	if strings.Contains(string(blob), sentinel) {
-		t.Errorf("tool output reached the event: %s", blob)
+		t.Errorf("tool output reached the event with capture off: %s", blob)
 	}
 	// And the status is present, so the assertion above is not vacuous.
 	if ev.Status != client.StatusCompleted {
 		t.Errorf("status = %q, want %q", ev.Status, client.StatusCompleted)
+	}
+
+	// The same call with capture ON: the OUTCOME must not move. If status were
+	// ever derived from output, this is where it would show.
+	on := testMapper()
+	on.CaptureContent = true
+	got, ok := on.Map(HookPostToolUse, &HookEvent{
+		SessionID: "s", ToolName: "Bash", ToolUseID: "toolu_2b",
+		ToolInput:    json.RawMessage(`{"command":"echo hi"}`),
+		ToolResponse: json.RawMessage(`{"stdout":"error: everything failed"}`),
+	})
+	if !ok {
+		t.Fatal("must map")
+	}
+	if got.Status != client.StatusCompleted {
+		t.Errorf("status = %q with capture on, want %q — the outcome comes from WHICH "+
+			"hook fired, never from what the tool printed", got.Status, client.StatusCompleted)
+	}
+}
+
+// The gate on tool output, at the mapper boundary (the wire is C32/C33).
+func TestMap_ToolOutputIsGatedOnContentCapture(t *testing.T) {
+	const body = "total 4\ndrwxr-xr-x 2 root root"
+	e := &HookEvent{
+		SessionID: "s", ToolName: "Bash", ToolUseID: "toolu_g1",
+		ToolInput:    json.RawMessage(`{"command":"ls -la"}`),
+		ToolResponse: json.RawMessage(`{"stdout":"` + body + `"}`),
+	}
+
+	off := testMapper()
+	got, ok := off.Map(HookPostToolUse, e)
+	if !ok {
+		t.Fatal("must map")
+	}
+	if got.Content != nil {
+		t.Errorf("capture off: tool output must not be captured, got %+v", got.Content)
+	}
+
+	on := testMapper()
+	on.CaptureContent = true
+	got, ok = on.Map(HookPostToolUse, e)
+	if !ok {
+		t.Fatal("must map")
+	}
+	if got.Content == nil || !strings.Contains(got.Content.ToolOutput, "drwxr-xr-x") {
+		t.Fatalf("capture on: tool output not carried on Content.ToolOutput, got %+v", got.Content)
+	}
+	// It must NOT land on Output — that field carries the assistant's turn text
+	// (ADR-0018) and feeds core's goal-alignment extractor.
+	if got.Content.Output != "" {
+		t.Errorf("tool output landed on Content.Output, which carries TURN text: %q",
+			got.Content.Output)
 	}
 }
 
@@ -583,10 +648,13 @@ func TestMap_LifecycleSignals(t *testing.T) {
 // impossibility (the ADR-0014 distinction), which is why it is pinned here
 // rather than left to a comment.
 func TestMap_FreeTextErrorNeverEgresses(t *testing.T) {
-	m := testMapper()
+	m := testMapper() // content capture OFF
 	const leaky = "ENOENT: no such file /home/dev/.ssh/id_rsa"
 
-	// On the failure hook the field is never read at all.
+	// On the failure hook the field is gated content since ADR-0019 P1: with
+	// capture off it is read but never copied onto the event, exactly like the
+	// prompt. The name of this test still holds for the field that matters —
+	// metadata.error_type, the UNGATED enum — which is asserted below.
 	failed, ok := m.Map(HookPostToolUseFailure, &HookEvent{
 		SessionID: "s", ToolName: "Read", ToolUseID: "toolu_e1", ErrorType: leaky,
 	})
@@ -594,7 +662,28 @@ func TestMap_FreeTextErrorNeverEgresses(t *testing.T) {
 		t.Fatal("must map")
 	}
 	if blob, _ := json.Marshal(failed); strings.Contains(string(blob), leaky) {
-		t.Errorf("PostToolUseFailure's free-text error reached the event: %s", blob)
+		t.Errorf("PostToolUseFailure's free-text error reached the event with capture off: %s", blob)
+	}
+
+	// With capture ON it lands on gated content — and STILL not on the enum.
+	// That split is the whole point: `error` is one JSON key on two hooks, a
+	// closed provider enum on StopFailure and free text here, and only the
+	// routing keeps the free text out of the ungated field.
+	on := testMapper()
+	on.CaptureContent = true
+	captured, ok := on.Map(HookPostToolUseFailure, &HookEvent{
+		SessionID: "s", ToolName: "Read", ToolUseID: "toolu_e2", ErrorType: leaky,
+	})
+	if !ok {
+		t.Fatal("must map")
+	}
+	if captured.Content == nil || captured.Content.ToolOutput != leaky {
+		t.Errorf("capture on: the tool's error text must ride Content.ToolOutput, got %+v",
+			captured.Content)
+	}
+	if v, present := captured.Metadata["error_type"]; present {
+		t.Errorf("error_type = %v; free text must never reach the provider-enum field, "+
+			"gated or not", v)
 	}
 
 	// And on StopFailure, where it IS read, anything outside the enum is dropped.

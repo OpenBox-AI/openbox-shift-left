@@ -90,17 +90,19 @@ func TestNoGatedContentEgressesWhenCaptureIsOff(t *testing.T) {
 	}
 }
 
-// SL3-SEC-3 is stronger than the content gate: a shell command is read for the
-// local enforce decision and must never egress, content-capture on or off. It
-// holds structurally today because the serializer has no field that carries a
-// command on the observe path — activity_input takes structural locators only,
-// and the shell fixtures pin that. So this guards the property from the input
-// side: an adapter stuffing the command into a Span field must not get it onto
-// the wire by turning capture on.
+// The narrow property this still guards: Span.Function is NOT an egress channel
+// for a command. The serializer reads Function only for an MCP tool's mcp_tool
+// name (structuralActivityInput), so an adapter stuffing a shell command in there
+// must not get it onto the wire — capture on or off. That is an input-side guard
+// and it is unaffected by the content gate.
 //
-// The one deliberate exception is the inline evaluation's Content.ToolInput,
-// which is not the observe path and is content-gated — see
-// structuralActivityInput.
+// It used to be framed as SL3-SEC-3: "a shell command must never egress,
+// content-capture on or off", holding structurally because no field carried a
+// command on the observe path. ADR-0019 P1 retired that — Content.ToolInput now
+// rides the observe ToolCall under the gate, and the command DOES egress with
+// capture on. This test still passes because its canary sits on Span.Function
+// rather than on Content, so re-read the name as being about the FIELD, not
+// about commands in general.
 func TestShellCommandNeverEgressesEvenWithCaptureOn(t *testing.T) {
 	ev := DevEvent{
 		SchemaVersion: SchemaVersion, EventID: "ev-4", EventType: EventToolCall,

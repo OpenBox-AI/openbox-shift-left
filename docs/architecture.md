@@ -307,7 +307,13 @@ Being precise here is part of the product.
 ## Verification
 
 `testbed/` is a mock-free end-to-end suite: it drives real headless sessions against
-a real local OpenBox and asserts what arrived — including that tool commands and
-file bodies never egress on an **observe** event. (On a gated call they do, under
-content capture and redacted first — ADR-0017.) See
-[end-to-end tests](testbed/e2e.md).
+a real local OpenBox and asserts what arrived — including the content gate in BOTH
+directions: with capture on, the tool command, the file body and the tool output
+all egress on ordinary tool events; with capture off, none of them do.
+
+That used to read "tool commands and file bodies never egress on an **observe**
+event", which was SL3-SEC-3 — an unconditional, structural guarantee, because tool
+content had no field to land in. [ADR-0019](adr/ADR-0019-full-content-capture.md)
+P1 retired it. What replaces it is a gate plus a redaction plus a cap, none of them
+structural, which is why the suite asserts the closed direction as explicitly as the
+open one. See [end-to-end tests](testbed/e2e.md).
