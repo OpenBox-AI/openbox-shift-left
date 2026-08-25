@@ -196,16 +196,24 @@ func RedactText(r *decision.Redactor, s string) string {
 		return s
 	}
 	if len(s) > MaxRedactBody {
-		s = truncateBytes(s, MaxRedactBody)
+		s = TruncateBytes(s, MaxRedactBody)
 	}
 	out, _, _ := r.RedactText(s)
 	return out
 }
 
-// truncateBytes cuts s to at most n bytes on a rune boundary, so a truncated
+// TruncateBytes cuts s to at most n bytes on a rune boundary, so a truncated
 // body is still valid UTF-8 (a split rune would land on the wire as U+FFFD and
 // could break a JSON body the caller is carrying).
-func truncateBytes(s string, n int) string {
+//
+// Exported because this is the repo's ONE implementation of that primitive, and
+// it had grown three: RedactText's pre-scan bound below, CapCommand's own copy of
+// the same backup loop 70 lines further down, and the Claude Code adapter's
+// thinking accumulator — which reached the same result by revalidating the whole
+// candidate string per step instead of testing one byte. Three copies of a
+// boundary rule is three places for an off-by-one to hide, and this one governs
+// whether bytes on the wire are parseable.
+func TruncateBytes(s string, n int) string {
 	if len(s) <= n {
 		return s
 	}
@@ -283,15 +291,7 @@ func failClosedReason(cause string) string {
 // regardless of the command's encoding. An empty command yields ""
 // (CompactAny then drops it).
 func CapCommand(s string) string {
-	if len(s) <= MaxCommandLen {
-		return s
-	}
-	cut := MaxCommandLen
-	// Back up off any continuation byte so we cut on a rune start.
-	for cut > 0 && !utf8.RuneStart(s[cut]) {
-		cut--
-	}
-	return s[:cut]
+	return TruncateBytes(s, MaxCommandLen)
 }
 
 // CompactAny drops empty-string values from an attribute map (absent-when-unknown,

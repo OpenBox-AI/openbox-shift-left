@@ -7,7 +7,6 @@ import (
 	"io"
 	"os"
 	"time"
-	"unicode/utf8"
 
 	"github.com/openbox-ai/openbox-shift-left/adapters/common/hookflow"
 	"github.com/openbox-ai/openbox-shift-left/client"
@@ -172,8 +171,12 @@ type thinkingBlock struct {
 // appendThinking folds one block's text onto the window's accumulator, bounded.
 //
 // Truncation is a hard cut with no marker (capBody's rule), trimmed back to a
-// rune boundary: a mid-rune byte cut produces invalid UTF-8, which json.Marshal
-// silently rewrites to U+FFFD — corrupting the body rather than shortening it.
+// rune boundary by hookflow.TruncateBytes: a mid-rune byte cut produces invalid
+// UTF-8, which json.Marshal silently rewrites to U+FFFD — corrupting the body
+// rather than shortening it. The shared helper is used rather than a local loop
+// because this is the same boundary rule the enforce path's body bound and
+// CapCommand apply, and three copies of it is three places for an off-by-one to
+// hide.
 func appendThinking(acc, block string) string {
 	if block == "" {
 		return acc
@@ -186,14 +189,10 @@ func appendThinking(acc, block string) string {
 	if room <= 0 {
 		return acc
 	}
-	if len(block) > room {
-		block = block[:room]
-		for len(block) > 0 && !utf8.ValidString(block) {
-			block = block[:len(block)-1]
-		}
-		if block == "" {
-			return acc
-		}
+	// A block that does not fit is cut, and a cut that lands mid-rune backs up —
+	// so a rune straddling the budget is dropped whole rather than split.
+	if block = hookflow.TruncateBytes(block, room); block == "" {
+		return acc
 	}
 	return acc + sep + block
 }

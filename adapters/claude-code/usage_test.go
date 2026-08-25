@@ -264,12 +264,16 @@ func TestTurnWindow_StringMessageContentStillCounts(t *testing.T) {
 	}
 }
 
-// The collection bound must stay STRICTLY LARGER than the wire cap, and this is
-// not tidiness — it is what keeps the cap's mutation control alive. If
-// maxThinkingBytes were <= the 65,536-rune cap, the collector would truncate
-// first and deleting capBody would become undetectable: the sentinel would stay
-// green with the cap gone. A future commit that "unifies the two constants" is
-// the change this test exists to stop.
+// The collection bound must cover the WIDEST text the wire cap would allow, and
+// this is not tidiness — it is what keeps the cap's mutation control alive. If
+// maxThinkingBytes were below that, the collector would truncate first and
+// deleting capBody would become undetectable: the sentinel would stay green with
+// the cap gone. A future commit that "unifies the two constants" is the change
+// this test exists to stop.
+//
+// The relation is >=, not >: at exactly 4 bytes/rune the two budgets agree on the
+// same cut point for the worst case, so equality is sufficient and is where the
+// constant sits.
 func TestThinkingCollectionBoundExceedsTheWireCap(t *testing.T) {
 	const wireCapRunes = 65536 // client.maxBodySize, counted in runes by capBody
 	// A rune is at most 4 bytes, so the byte budget must cover the widest text
@@ -324,6 +328,25 @@ func TestTurnWindow_ThinkingBoundaryDoesNotSplitARune(t *testing.T) {
 	}
 	if strings.Contains(w.Thinking, "世") {
 		t.Error("a rune that does not fit the budget was kept")
+	}
+}
+
+// The exact-fit case: a block that fills the budget precisely must be kept
+// WHOLE. The cut is `len(block) > room`, so equality is the one input where an
+// off-by-one would either drop a byte that fits or admit one that does not —
+// and neither the over-budget nor the straddling-rune test above can see it.
+func TestTurnWindow_ThinkingExactlyAtBudgetIsKeptWhole(t *testing.T) {
+	exact := strings.Repeat("t", maxThinkingBytes)
+	body := `{"isSidechain":false,"message":{"content":[{"type":"thinking","thinking":"` +
+		exact + `"}],"usage":{"input_tokens":1,"output_tokens":1}}}` + "\n"
+
+	w := aggregateTurnWindow([]byte(body), false)
+	if len(w.Thinking) != maxThinkingBytes {
+		t.Errorf("thinking held %d bytes, want exactly %d (a block that fits must not "+
+			"be truncated)", len(w.Thinking), maxThinkingBytes)
+	}
+	if w.Thinking != exact {
+		t.Error("a block that fits the budget exactly was altered")
 	}
 }
 
