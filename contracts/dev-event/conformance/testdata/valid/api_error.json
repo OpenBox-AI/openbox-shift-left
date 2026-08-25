@@ -1,5 +1,5 @@
 {
-  "schema_version": "1.3",
+  "schema_version": "1.4",
   "event_id": "evt-0012",
   "event_type": "APIError",
   "openbox_session_id": "sess-abc123",

@@ -162,7 +162,14 @@ server**. Asserts:
   body** — ADR-0019 P1 retired SL3-SEC-3, so this phase asserts the gate OPEN and
   35-telemetry.sh asserts it CLOSED on a capture-off session. Inverting rather
   than deleting matters: "the marker is nowhere" and "the runtime emitted nothing"
-  are the same observation, and only the positive form separates them.
+  are the same observation, and only the positive form separates them;
+- **the turn's thinking (ADR-0019 P3)**, checked by KEY presence rather than by a
+  marker string, and **skipped rather than failed** when the session produced no
+  block. No prompt can make a model think a chosen phrase, and extended thinking
+  is a client setting this suite does not control — so a marker assertion here
+  would measure the model's compliance instead of the pipeline. The capture-off
+  half in 35-telemetry.sh IS strict, because absence needs no cooperation from a
+  model.
 
 Its activity counts are scoped to **tool** activities
 (`activity_type is distinct from 'llm_completion'`). A session also emits model-turn
@@ -262,9 +269,11 @@ order their failures matter: `status` on the completed row (Tool Health can
 compute at all); a failed call stored `failed` (SUCCESS% means something); ONE
 span, `llm_completion` (Goal Alignment has text to score); capture off ⇒ **no**
 span rows (the gate is real server-side, not just on the wire); `signal_args`
-NULL on the new signals (the alignment goal is not overwritten). The single
-list a live run must confirm is
-[`MAPPING.md`](../../contracts/dev-event/MAPPING.md) §7 items 15–21 — the
+NULL on the new signals (the alignment goal is not overwritten); and capture off
+⇒ **no `thinking` key** on any row, while the turn's token numbers survive
+(ADR-0019 P3 — otherwise "no content" would pass for a client that stopped
+emitting turns). The single list a live run must confirm is
+[`MAPPING.md`](../../contracts/dev-event/MAPPING.md) §7 items 15–24 — the
 script is that list's executable form and defers to it. **Dormant: written,
 never run** — its own header says not to cite it as evidence until it has.
 

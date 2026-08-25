@@ -10,7 +10,7 @@ What leaves the machine, what never does, and the one setting that changes it.
 | **Token counts and the model id** | yes, by default | per model turn. `finops: false` turns it off — see [Usage capture](#usage-capture) |
 | **Prompt text** | yes, by default | `content_capture: false` turns it off |
 | **The assistant's reply text** | yes, by default | **this changed** — one message per model turn, scanned locally for secrets and REDACTED first, truncated at 64KB. Same `content_capture` switch. See [What a model turn sends](#what-a-model-turn-sends) |
-| **The assistant's thinking** | **never** | not captured today. [ADR-0019](adr/ADR-0019-full-content-capture.md) is where that would be decided — it is deferred, not ruled out |
+| **The assistant's thinking** | yes, by default | **this changed** — extended-thinking text, one block per model turn, scanned locally for secrets and REDACTED first, truncated at 64KB. Same `content_capture` switch. This captures more than Anthropic's own telemetry will: their OTel export redacts thinking unconditionally. See [What a model turn sends](#what-a-model-turn-sends) |
 | **Shell command text** | yes, by default | **this changed** — it used to ride a *gated* call only; it is now on ordinary tool telemetry too, under the same `content_capture` switch. Redacted and truncated like every body |
 | **File contents** (a Write/Edit body) | yes, by default | **this changed twice** — first onto gated calls, now onto ordinary tool telemetry as well. Scanned locally for secrets and REDACTED before it is sent, and truncated at 64KB |
 | **File contents** (a file you read) | yes, by default | **this changed** — a read's arguments and its result both ride the tool event now |
@@ -68,10 +68,12 @@ answers — and it is what makes a dev session visible in the cost dashboards.
 | the turn's index and duration | `<session>:turn:3`, `duration_ms` |
 | the subagent id, when a subagent ran the turn | so per-agent spend is attributable |
 
-**Exactly what is not sent, on this path:** no prompt, no thinking block, no stop
-reason — **and no cost.** (Tool commands, tool output and file bodies are not on
-this path either; they ride the *tool* events instead, under content capture —
-see the table at the top.) Cost is
+**Exactly what is not sent, on this path:** no prompt, no stop reason — **and no
+cost.** (Tool commands, tool output and file bodies are not on this path either;
+they ride the *tool* events instead, under content capture — see the table at the
+top.) Thinking used to be on this list too; it is not any more — it rides the same
+turn event under content capture, beside the reply, and has its own section below.
+Cost is
 derived server-side from a model-keyed pricing table; deriving it here would mean
 inventing a number from a table this client does not own.
 
@@ -106,18 +108,27 @@ defensible if you can tell afterwards which sessions it applied to.
 > **How this reads the transcript, stated precisely.** The token counts are not
 > available from any hook — the session transcript file is the only source, so the
 > engine parses it. It binds four numeric fields, plus the model id, plus a line
-> timestamp (used to compute the turn's duration and then discarded) and a boolean
-> marking subagent lines. Nothing else in that file — prompts, completions,
-> thinking blocks, tool inputs, tool results, file snapshots — is bound, so it has
-> nowhere to land and cannot reach an event.
+> timestamp (used to compute the turn's duration and then discarded), a boolean
+> marking subagent lines, and — since 2026-08-25 — the **thinking** blocks.
+> Nothing else in that file — prompts, completions, tool inputs, tool results,
+> file snapshots — is bound, so it has nowhere to land and cannot reach an event.
 >
 > This used to be a structural guarantee: the parser held only numbers, so content
-> was *impossible* to capture. It is now an **allowlist**, because the model id is a
-> string. The allowlist is enforced by a test that seeds the transcript with marker
-> strings in four content field classes and asserts they are absent from the actual
-> signed request body while the model id is present. See
-> [ADR-0014](adr/ADR-0014-turn-as-activity-and-identifier-allowlist.md), which
-> records the narrowing rather than leaving the older, stronger claim standing.
+> was *impossible* to capture. It is now an **allowlist**. The model id made it one
+> (a string, but an identifier); thinking is the first genuinely free-form content
+> in it, and what protects that field is not the type any more but three fallible
+> mechanisms in a fixed order — the `content_capture` switch, local secret
+> redaction, and the 64KB cap.
+>
+> The allowlist is enforced by a test that seeds the transcript with marker strings
+> in every content field class and asserts, on the actual signed request body, that
+> **all of them are absent with capture off**, and that with capture on exactly one
+> — thinking — is present, redacted and capped, while the rest are still absent. It
+> is also mutation-tested: deleting the redaction, or deleting the cap, must each
+> make it fail. See
+> [ADR-0014](adr/ADR-0014-turn-as-activity-and-identifier-allowlist.md) and its
+> 2026-08-25 amendment, which record the narrowing and then the widening rather
+> than leaving an older, stronger claim standing.
 
 ## Content capture
 
@@ -182,9 +193,27 @@ What bounds it:
   attached. This is better than the prompt path, which has no such control.
 - **64KB cap.** A longer reply is truncated before it is sent.
 
-What is NOT sent on this path: the assistant's **thinking blocks**, the stop
-reason, and any tool output the reply describes. Thinking is deferred to a future
-posture decision ([ADR-0019](adr/ADR-0019-full-content-capture.md)), not ruled out.
+**The assistant's thinking rides the same turn event**, under the same
+`content_capture` switch, redacted and capped the same way — and in its own field
+(`activity_output.thinking`), never merged into the reply. Two things about it are
+worth knowing rather than discovering:
+
+- **This goes further than the provider will.** Claude Code's own OpenTelemetry
+  export redacts extended thinking unconditionally, with every content flag
+  enabled. There is no hook that carries it either; the session transcript is the
+  only source. Capturing it is a decision an org makes about its own machine,
+  recorded in the [ADR-0014 amendment](adr/ADR-0014-turn-as-activity-and-identifier-allowlist.md)
+  rather than inherited from "capture everything". `content_capture: false` turns
+  it off with everything else.
+- **It is the densest content here.** Thinking restates prompts, file contents,
+  and any credential the turn saw earlier in its reasoning, so the local secret
+  scan matters more on this field than anywhere else. That scan is the same
+  keyword-driven detector used everywhere else in this engine, with the same
+  measured limits (see [Secret detection stays local](#secret-detection-stays-local)) —
+  and thinking is the field those limits apply to most.
+
+What is NOT sent on this path: the stop reason, and any tool output the reply
+describes.
 
 Two consequences worth knowing rather than discovering:
 

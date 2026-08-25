@@ -18,11 +18,12 @@ Amended by: **ADR-0018** — a `TurnCompleted` may carry assistant text, sourced
 from the `last_assistant_message` hook field. The transcript allowlist below and
 its sentinel `TestFinops_NoContentOnWire` are **untouched** by that amendment; a
 transcript-bound string still needs its own.
-Amendment PROPOSED by: **ADR-0019 P3** — thinking blocks and intermediate
-assistant text, which are transcript-only and therefore DO require widening the
-allowlist below. Not accepted, not implemented. If it is accepted, the sentinel
-evolves from asserting absence to asserting redaction-and-cap, and the rule this
-ADR set carries over unchanged: **a version that passes trivially is a defect.**
+Amended by: **ADR-0019 P3** — 2026-08-25. Thinking blocks are transcript-only
+and therefore DO widen the allowlist below; the amendment is recorded in
+*Amendment — ADR-0019 P3 adds one content field* at the end of this document. The
+sentinel changed direction with it, from asserting absence to asserting
+redaction-and-cap, and the rule this ADR set carries over unchanged: **a version
+that passes trivially is a defect.**
 
 ## Context
 
@@ -118,9 +119,12 @@ is a curated allowlist that a test enforces:
 | `message.model` | identifier | **Yes** — the one string, `capStr`-bounded |
 | `timestamp` | timestamp | No — parsed to a `time.Time` for `duration_ms`, then discarded |
 | `isSidechain` | bool | No — partitions subagent lines out of the parent's sums |
+| `message.content[].thinking` | **content** | **Yes, gated** — added by the ADR-0019 P3 amendment below (2026-08-25) |
 
-Everything else — `content`, `text`, `thinking`, `tool_input`, `tool_result`,
-`cwd` — still has nowhere to land. The sentinel test was rewritten to prove the
+Everything else — `text`, `tool_input`, `tool_result`, `cwd` — still has nowhere
+to land. `message.content` itself is bound as a `json.RawMessage` and decoded
+only far enough to find `thinking` blocks, so the sibling block types remain
+unreachable rather than merely unused. The sentinel test was rewritten to prove the
 narrower claim rather than the old one: sentinel content absent from the signed
 wire bytes, the model present, the raw timestamp absent, sidechain sums excluded.
 A sentinel test that passed unchanged through this change would have meant the
@@ -259,3 +263,72 @@ and their tables disagree with each other on key style
 (`claude-sonnet-4` vs `claude-sonnet-4.5`) and list none of the current Claude
 Code default models — so a third table here would add a third answer. Noted in
 the core-side issue instead.
+
+## Amendment — ADR-0019 P3 adds one content field
+
+Accepted 2026-08-25, as phase 02 of the full-capture plan. The allowlist table
+above gains a fourth row, and this section is the decision behind it.
+
+**What is added.** `message.content[]` blocks of type `thinking`, concatenated in
+file order across the turn's window, on the `TurnCompleted` half only, as
+`activity_output.thinking`. Contract v1.4 (`content.thinking`).
+
+**Why it cannot come from anywhere else.** Hook payloads carry no thinking, and
+Claude Code's own OTel export redacts extended thinking unconditionally with
+every content flag enabled. The session transcript is the only source, so either
+this projection widens or the class is uncapturable. The Track B gateway would
+also see it in the raw API response, and this amendment deliberately does not
+wait for that: thinking ships on the pipeline that already exists.
+
+**What changed in kind, not just in degree.** The three fields ADR-0014 bound
+were an identifier, a timestamp and a bool — none of them could carry a secret,
+a prompt, or a file body, so the allowlist's *contents* were self-limiting even
+though its *form* was no longer structural. `thinking` is the first genuinely
+free-form content string in this projection, and it is the densest one available:
+it restates prompts, file contents, and any credential the turn saw earlier. The
+guarantee protecting it is therefore no longer "this cannot happen" and no longer
+even "what lands here is harmless". It is three fallible mechanisms in a fixed
+order — **gate, redact, cap** — asserted on outbound bytes.
+
+**Where each mechanism lives, and the one that is NOT here.**
+
+| Mechanism | Where | Failure if removed |
+|---|---|---|
+| Gate | `MapTurn` (`CaptureContent`) + `stripContent` at the client choke point | thinking egresses for an org that opted out |
+| Redact | `Mapper.redact` before attachment | a credential the turn reasoned about egresses verbatim |
+| Cap | `capBody` in `turnActivityOutput`, 65,536 runes | unbounded bodies at turn cadence |
+
+The lift itself is **deliberately ungated**: `aggregateTurnWindowInto` collects
+thinking whether or not the org captures, and the gate is at attachment. Gating
+the reader too was considered and cut — it buys nothing on the wire (the chunk
+the text was read from was already resident), and it would have put a second,
+differently-shaped copy of the posture decision inside a pure parser. What the
+reader owes instead is a **bound**: `maxThinkingBytes` keeps the streaming
+aggregation's memory guarantee intact, which an unbounded concatenation across a
+multi-hundred-megabyte first window would have destroyed.
+
+**The sentinel changed direction and must not become trivial.**
+`TestFinops_NoContentOnWire` used to assert `SENTINEL_THINKING` was absent
+everywhere. It now asserts:
+
+- capture OFF ⇒ absent from the signed bytes, as before, byte-identical;
+- capture ON ⇒ **present** in `activity_output.thinking`, and every other
+  transcript sentinel still absent — so the widening is exactly one field wide;
+- a credential inside a thinking block ⇒ redacted before attachment;
+- a thinking block past the cap ⇒ truncated, with a tail marker proving the cut.
+
+The last two are the mutation controls: deleting the redaction, or deleting the
+cap, must each turn the test red. A version that passes with either mechanism
+removed is a defect, not a green suite.
+
+**What this amendment does NOT authorize.** No other transcript field. Not
+`text` (the assistant's final answer already rides the hook field ADR-0018 bound,
+and intermediate text is not bound by this amendment), not `tool_input`, not
+`tool_result`, not `cwd`. A fifth row needs its own amendment for the same reason
+this one exists.
+
+**The cost, stated plainly.** This captures content the provider itself refuses
+to export, on the org's own machine, by the org's own choice. It is defensible
+only as a decision someone made and signed — which is what this section is — and
+never as a consequence of "capture everything". With `secret_detection:false` it
+egresses unredacted; that is stated, not mitigated.

@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"time"
+	"unicode/utf8"
 
 	"github.com/openbox-ai/openbox-shift-left/adapters/common/hookflow"
 	"github.com/openbox-ai/openbox-shift-left/client"
@@ -33,25 +34,40 @@ import (
 // numeric fields, so every content-bearing field in the transcript (prompt
 // text, tool inputs, tool_result bodies, file contents, the assistant's
 // message `content`, thinking blocks) had nowhere to land and could not
-// enter memory at all. ADR-0014 narrowed that. `turnLine` binds three
-// non-numeric fields, and exactly one of them egresses:
+// enter memory at all. ADR-0014 narrowed that, and its 2026-08-25 amendment
+// (ADR-0019 P3) widened it once more. `turnLine` binds four non-numeric
+// fields, and two of them egress:
 //
-//	message.model  identifier  → EGRESSES (the one string; capStr-bounded)
-//	timestamp      timestamp   → parsed to a time.Time for duration_ms, discarded
-//	isSidechain    bool        → partitions subagent lines out of the parent's sums
+//	message.model                 identifier → EGRESSES (capStr-bounded)
+//	message.content[].thinking    CONTENT    → EGRESSES, GATED (see below)
+//	timestamp                     timestamp  → parsed to a time.Time for duration_ms, discarded
+//	isSidechain                   bool       → partitions subagent lines out of the parent's sums
 //
-// Everything else still has nowhere to land. `content`, `text`, `thinking`,
-// `tool_input`, `tool_result`, `cwd`, `service_tier`, `inference_geo` and
-// `speed` are unbound, and so are two numeric siblings that would
-// double-count if bound: `usage.cache_creation.ephemeral_*` (sums to
-// cache_creation_input_tokens) and `usage.iterations[]` (a per-model-call
-// breakdown of the same line).
+// Everything else still has nowhere to land. `text`, `tool_input`,
+// `tool_result`, `cwd`, `service_tier`, `inference_geo` and `speed` are
+// unbound, and so are two numeric siblings that would double-count if bound:
+// `usage.cache_creation.ephemeral_*` (sums to cache_creation_input_tokens)
+// and `usage.iterations[]` (a per-model-call breakdown of the same line).
+// `message.content` is bound only as raw JSON, decoded no further than the
+// thinking blocks — so its siblings stay unreachable rather than unused.
 //
-// TestFinops_NoContentOnWire proves the NARROWED claim: sentinel content
-// absent from the real signed wire body, the model present, the raw
-// timestamp string absent, sidechain sums excluded. It is load-bearing
-// rather than supplementary — a change that makes it pass trivially is a
-// defect, because the guarantee no longer defends itself.
+// Thinking is the first genuinely FREE-FORM content string here, and what
+// protects it is no longer a property of the type. It is three fallible
+// mechanisms in a fixed order — gate (Mapper.CaptureContent, then the
+// client's stripContent), redact (Mapper.RedactContent, before attachment),
+// cap (capBody, 65,536 runes) — and all three are asserted on outbound
+// bytes, because a redaction applied after attachment passes every unit test
+// in this package and still ships the secret.
+//
+// TestFinops_NoContentOnWire proves the CURRENT claim, in both directions:
+// with capture off every sentinel is absent from the real signed wire body,
+// including the thinking one; with capture on the thinking sentinel is
+// present in activity_output.thinking, redacted and capped, and every OTHER
+// transcript sentinel is still absent — so the widening is exactly one field
+// wide. It is load-bearing rather than supplementary: a change that makes it
+// pass trivially is a defect, because the guarantee no longer defends
+// itself. Its two mutation controls are the proof — deleting the redaction,
+// or deleting the cap, must each turn it red.
 //
 // INV-3: best-effort. A missing / oversized / malformed /
 // partially-written transcript yields an error the caller logs and skips;
@@ -105,14 +121,105 @@ type turnLine struct {
 	// counted twice — see readTurnUsage.
 	IsSidechain bool `json:"isSidechain"`
 	Message     *struct {
-		// Model is the ONE string this projection egresses. Provider-controlled
-		// free text, so the mapper capStr-bounds it at the boundary. Values seen
-		// in real transcripts include "<synthetic>", which is passed through
-		// unchanged: filtering it would drop real tokens and rewriting it would
-		// fabricate an attribution.
-		Model string        `json:"model"`
-		Usage *usageNumbers `json:"usage"`
+		// Model is the ONE IDENTIFIER string this projection egresses.
+		// Provider-controlled free text, so the mapper capStr-bounds it at the
+		// boundary. Values seen in real transcripts include "<synthetic>", which
+		// is passed through unchanged: filtering it would drop real tokens and
+		// rewriting it would fabricate an attribution.
+		Model string `json:"model"`
+		// Content is the message's content blocks, bound as RAW JSON and decoded
+		// no further than thinkingFrom needs (the ADR-0014 amendment,
+		// 2026-08-25). Two reasons it is a RawMessage rather than a typed slice:
+		//
+		//  1. Correctness. `message.content` is a STRING on user lines and an
+		//     ARRAY on assistant ones. A typed slice fails the whole line's
+		//     unmarshal on a string, which would silently drop that line's token
+		//     counts — a finops regression with no error anywhere.
+		//  2. Scope. Decoding on demand keeps every sibling block type (`text`,
+		//     `tool_use`, `tool_result`) unreachable rather than merely unused,
+		//     which is what the amendment authorised and no more.
+		Content json.RawMessage `json:"content"`
+		Usage   *usageNumbers   `json:"usage"`
 	} `json:"message"`
+}
+
+// maxThinkingBytes bounds the thinking text one window may hold.
+//
+// It exists to preserve readTurnUsage's memory guarantee. That reader streams a
+// window of ANY size in turnChunkBytes-sized chunks precisely because the first
+// firing after a mid-session enable reads the whole transcript to date as one
+// window; an unbounded concatenation across such a window would put hundreds of
+// megabytes back in memory and undo the design.
+//
+// The budget is in BYTES and sits at 4x the client's 65,536-RUNE egress cap
+// (capBody). A rune is at most 4 bytes, so this can never discard a byte the
+// wire cap would have kept — the two bounds compose instead of fighting.
+const maxThinkingBytes = 4 * 65536
+
+// thinkingBlock is the one content-block shape this projection decodes. Type is
+// bound to select the block; Thinking is the text. No other field of a content
+// block is bound, so `text`, `tool_use` inputs and `tool_result` bodies cannot
+// land here.
+//
+// The `type` filter also excludes `redacted_thinking`, whose payload is
+// provider-encrypted base64 — capturing it would spend the 64KB egress budget on
+// ciphertext nothing downstream can read.
+type thinkingBlock struct {
+	Type     string `json:"type"`
+	Thinking string `json:"thinking"`
+}
+
+// appendThinking folds one block's text onto the window's accumulator, bounded.
+//
+// Truncation is a hard cut with no marker (capBody's rule), trimmed back to a
+// rune boundary: a mid-rune byte cut produces invalid UTF-8, which json.Marshal
+// silently rewrites to U+FFFD — corrupting the body rather than shortening it.
+func appendThinking(acc, block string) string {
+	if block == "" {
+		return acc
+	}
+	sep := ""
+	if acc != "" {
+		sep = "\n\n"
+	}
+	room := maxThinkingBytes - len(acc) - len(sep)
+	if room <= 0 {
+		return acc
+	}
+	if len(block) > room {
+		block = block[:room]
+		for len(block) > 0 && !utf8.ValidString(block) {
+			block = block[:len(block)-1]
+		}
+		if block == "" {
+			return acc
+		}
+	}
+	return acc + sep + block
+}
+
+// thinkingFrom lifts the thinking text out of one message's content blocks, in
+// file order. A non-array content (a user line's plain string), a malformed
+// array, or an array with no thinking block all yield "" — never an error
+// (INV-3: a transcript shape this projection does not recognise degrades to
+// no-thinking, it never fails a flush or blocks a session).
+func thinkingFrom(raw json.RawMessage) string {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 || trimmed[0] != '[' {
+		return ""
+	}
+	var blocks []thinkingBlock
+	if err := json.Unmarshal(trimmed, &blocks); err != nil {
+		return ""
+	}
+	var out string
+	for _, b := range blocks {
+		if b.Type != "thinking" {
+			continue
+		}
+		out = appendThinking(out, b.Thinking)
+	}
+	return out
 }
 
 // turnWindow is one turn's worth of transcript, aggregated. "Turn" here means
@@ -137,6 +244,17 @@ type turnWindow struct {
 	// HasUsage reports whether any line in the window carried usage at all. A
 	// window without it is not a turn worth emitting.
 	HasUsage bool
+	// Thinking is the window's `thinking` content blocks, concatenated in file
+	// order and bounded at maxThinkingBytes (the ADR-0014 amendment). It is the
+	// first genuinely free-form CONTENT string this projection lifts.
+	//
+	// The lift is deliberately UNGATED and the gate sits at attachment
+	// (Mapper.MapTurn's CaptureContent, then the client's stripContent). Gating
+	// the parser too would buy nothing on the wire — the chunk this text was read
+	// out of was already resident — while putting a second copy of the posture
+	// decision inside a pure function. What the parser owes instead is the bound
+	// above.
+	Thinking string
 }
 
 // total is the whole-throughput figure for the window: input + output + both
@@ -338,6 +456,10 @@ func aggregateTurnWindowInto(w *turnWindow, raw []byte, sidechain bool) {
 		if tl.Message.Model != "" {
 			w.Model = tl.Message.Model // last non-empty wins, within this window only
 		}
+		// Thinking accumulates across the window in file order — a turn is many
+		// model calls, so a turn's reasoning is many blocks. Bounded; see
+		// maxThinkingBytes.
+		w.Thinking = appendThinking(w.Thinking, thinkingFrom(tl.Message.Content))
 		if u := tl.Message.Usage; u != nil {
 			// nonNeg clamps a malformed negative source value so emitted numbers
 			// always satisfy the schema's `minimum: 0`.

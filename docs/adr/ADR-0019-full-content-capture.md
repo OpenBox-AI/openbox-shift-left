@@ -131,8 +131,17 @@ the span first kills alignment silently.
 
 ### P3 — thinking, and the allowlist amendment
 
-- thinking blocks and intermediate assistant text from the transcript window;
-- the **ADR-0014 amendment** that permits them.
+**Implemented 2026-08-25** (contract v1.4). Scope landed narrower than proposed,
+deliberately: **thinking only.** Intermediate assistant text was NOT bound — the
+final reply already egresses from the hook field ADR-0018 bound, and a second
+text source would have widened the allowlist twice for one reader.
+
+- thinking blocks from the transcript window → `activity_output.thinking` on
+  `TurnCompleted`, gated / redacted / capped;
+- the **ADR-0014 amendment** that permits them, written before the binding merged
+  and carrying the mechanism table, the scope limit, and the cost;
+- ~~intermediate assistant text~~ — not bound. Still open, still needs its own
+  amendment.
 
 Staged last, deliberately. ADR-0014 replaced a structural impossibility with a
 curated allowlist enforced by one test, and CLAUDE.md names that test

@@ -249,9 +249,17 @@ func goldenCases() []goldenCase {
 	// synthetic marker, the hash-derived ids, and the OpenAI-chat wrapper its
 	// alignment extractor unmarshals. Every one of those fails SILENTLY if it
 	// drifts — core logs and returns "" — so the fixture is the alarm.
+	//
+	// It carries BOTH content fields a turn can hold, deliberately: the reply on
+	// the span and the thinking in activity_output. One fixture showing them in
+	// their separate places is what stops a future change quietly merging them —
+	// which would corrupt the alignment reader rather than error.
 	turnWithContent := turnCompleted
 	turnWithContent.EventID = "ev-20"
-	turnWithContent.Content = &Content{Output: "I refactored the spool; all 11 modules are green."}
+	turnWithContent.Content = &Content{
+		Output:   "I refactored the spool; all 11 modules are green.",
+		Thinking: "The spool writer is called from two hooks, so the lock has to be held across the rename.",
+	}
 
 	// A subagent's turn: same shape, partitioned id, attributed by agent.
 	subIndex := 1

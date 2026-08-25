@@ -12,9 +12,11 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/openbox-ai/openbox-shift-left/adapters/common/hookflow"
 	"github.com/openbox-ai/openbox-shift-left/client"
+	"github.com/openbox-ai/openbox-shift-left/decision"
 )
 
 // A fixed, well-formed Ed25519 seed (matches the client's own test vector) so the
@@ -39,18 +41,31 @@ const testPrivateKeyB64 = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="
 const poisonedTranscript = `{"type":"user","isSidechain":false,"timestamp":"2026-08-11T09:00:00.000Z","message":{"role":"user","content":"SENTINEL_PROMPT top secret prompt"},"cwd":"/x","sessionId":"s1"}
 {"type":"assistant","isSidechain":false,"timestamp":"2026-08-11T09:00:01.500Z","message":{"model":"claude-opus-4-8","content":[{"type":"text","text":"SENTINEL_OUTPUT assistant reply"},{"type":"tool_use","name":"Bash","input":{"command":"SENTINEL_CMD dangerous"}}],"usage":{"input_tokens":100,"cache_read_input_tokens":2000,"cache_creation_input_tokens":50,"output_tokens":30,"service_tier":"standard","cache_creation":{"ephemeral_1h_input_tokens":50,"ephemeral_5m_input_tokens":0},"iterations":[{"input_tokens":100,"output_tokens":30}]}},"costUSD":0.0123}
 {"type":"user","isSidechain":false,"message":{"role":"user","content":[{"type":"tool_result","content":"SENTINEL_TOOLRESULT captured file body"}]}}
-{"type":"assistant","isSidechain":true,"timestamp":"2026-08-11T09:00:02.000Z","message":{"model":"SENTINEL_SIDEMODEL-sonnet","content":[{"type":"text","text":"SENTINEL_SIDETEXT subagent reply"}],"usage":{"input_tokens":7000,"output_tokens":700}}}
+{"type":"assistant","isSidechain":true,"timestamp":"2026-08-11T09:00:02.000Z","message":{"model":"SENTINEL_SIDEMODEL-sonnet","content":[{"type":"text","text":"SENTINEL_SIDETEXT subagent reply"},{"type":"thinking","thinking":"SENTINEL_SIDETHINKING subagent chain of thought"}],"usage":{"input_tokens":7000,"output_tokens":700}}}
 {"type":"assistant","isSidechain":false,"timestamp":"2026-08-11T09:00:03.000Z","message":{"content":[{"type":"thinking","thinking":"SENTINEL_THINKING private chain of thought"}],"usage":{"input_tokens":10,"output_tokens":5}}}
 {"type":"file-history-snapshot","isSidechain":false,"snapshot":{"content":"SENTINEL_FILE entire file contents"}}
 `
 
+// sentinels are the transcript strings that must NEVER egress, at any posture.
+// SENTINEL_THINKING is deliberately absent from this list — the ADR-0014
+// amendment (ADR-0019 P3) authorised exactly that one field, so it egresses under
+// the content gate and has its own two-directional assertions below. Everything
+// here stays unreachable whether capture is on or off, which is how the sentinel
+// proves the widening is one field wide rather than "content is fine now".
 var sentinels = []string{
 	"SENTINEL_PROMPT", "SENTINEL_OUTPUT", "SENTINEL_CMD",
-	"SENTINEL_TOOLRESULT", "SENTINEL_THINKING", "SENTINEL_FILE",
-	// The sidechain line's model and text: a main-thread turn must carry neither,
-	// which proves the partition holds on the wire and not merely in the sums.
-	"SENTINEL_SIDEMODEL", "SENTINEL_SIDETEXT",
+	"SENTINEL_TOOLRESULT", "SENTINEL_FILE",
+	// The sidechain line's model, text and thinking: a main-thread turn must
+	// carry none of them, which proves the partition holds on the wire and not
+	// merely in the sums. The thinking one matters most — it is the only
+	// content class that egresses, so it is the only one where a broken
+	// partition would put a subagent's reasoning on the parent's turn.
+	"SENTINEL_SIDEMODEL", "SENTINEL_SIDETEXT", "SENTINEL_SIDETHINKING",
 }
+
+// thinkingSentinel is the ONE transcript string whose expected presence depends
+// on posture: absent with capture off, present (redacted, capped) with it on.
+const thinkingSentinel = "SENTINEL_THINKING"
 
 func writeTranscript(t *testing.T, body string) string {
 	t.Helper()
@@ -127,6 +142,17 @@ func TestTurnWindow_PartitionsSidechainOut(t *testing.T) {
 	if side.Input != 7000 || side.Output != 700 {
 		t.Errorf("sidechain window = in %d/out %d, want 7000/700", side.Input, side.Output)
 	}
+	// The content class splits with the numbers. The subagent's own record carries
+	// its reasoning; the parent's must not — and the wire-level absence asserted
+	// in TestFinops_NoContentOnWire is only meaningful if the block is genuinely
+	// there to be leaked, which is what this pair proves.
+	if !strings.Contains(side.Thinking, "SENTINEL_SIDETHINKING") {
+		t.Errorf("the sidechain window did not lift its own thinking (%q) — every "+
+			"main-thread assertion about its absence is then vacuous", side.Thinking)
+	}
+	if strings.Contains(main.Thinking, "SENTINEL_SIDETHINKING") {
+		t.Errorf("a main-thread turn carried the subagent's reasoning: %q", main.Thinking)
+	}
 
 	// The partitions are exhaustive: together they equal the rollup, field by
 	// field. This is the invariant that makes the live reconciliation assertion
@@ -191,6 +217,130 @@ func TestTurnWindow_ModelIsLastNonEmptyInWindow(t *testing.T) {
 	}
 	if !noModel.HasUsage || noModel.Input != 9 {
 		t.Errorf("a model-less window must still report its usage: %+v", noModel)
+	}
+}
+
+// --- thinking blocks (ADR-0019 P3 / the ADR-0014 amendment) ---
+
+// Thinking is lifted from `message.content[]` blocks of type "thinking", in file
+// order, across the whole window — not one block per turn. Everything else in
+// that array stays unreachable, which is the width of the amendment.
+func TestTurnWindow_LiftsThinkingBlocksInFileOrder(t *testing.T) {
+	body := `{"isSidechain":false,"message":{"model":"claude-opus-4-8","content":[{"type":"thinking","thinking":"FIRST thought"},{"type":"text","text":"MUST_NOT_LIFT visible answer"}],"usage":{"input_tokens":5,"output_tokens":1}}}
+{"isSidechain":false,"message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"MUST_NOT_LIFT rm -rf"}}],"usage":{"input_tokens":1,"output_tokens":1}}}
+{"isSidechain":false,"message":{"content":[{"type":"thinking","thinking":"SECOND thought"}],"usage":{"input_tokens":5,"output_tokens":1}}}
+`
+	w := aggregateTurnWindow([]byte(body), false)
+	if want := "FIRST thought\n\nSECOND thought"; w.Thinking != want {
+		t.Errorf("thinking = %q, want %q (both blocks, file order)", w.Thinking, want)
+	}
+	if strings.Contains(w.Thinking, "MUST_NOT_LIFT") {
+		t.Errorf("a sibling content block was lifted: %q", w.Thinking)
+	}
+	// The numbers are unaffected by the widening.
+	if w.Input != 11 || w.Output != 3 {
+		t.Errorf("usage arithmetic changed with the projection: %+v", w)
+	}
+}
+
+// The regression this widening could most easily cause: `message.content` is a
+// STRING on user lines and an ARRAY on assistant ones. Binding it as a typed
+// array would fail the whole line's unmarshal and silently drop that line's
+// token counts — a finops bug with no error anywhere.
+func TestTurnWindow_StringMessageContentStillCounts(t *testing.T) {
+	body := `{"isSidechain":false,"message":{"role":"user","content":"a plain string body","usage":{"input_tokens":7,"output_tokens":2}}}
+{"isSidechain":false,"message":{"content":null,"usage":{"input_tokens":1,"output_tokens":1}}}
+{"isSidechain":false,"message":{"content":[{"type":"thinking","thinking":"still lifted"}],"usage":{"input_tokens":2,"output_tokens":0}}}
+`
+	w := aggregateTurnWindow([]byte(body), false)
+	if w.Input != 10 || w.Output != 3 {
+		t.Errorf("a string/null message.content dropped a line's usage: %+v", w)
+	}
+	if w.Thinking != "still lifted" {
+		t.Errorf("thinking = %q; a tolerated non-array sibling must not stop the lift", w.Thinking)
+	}
+	if strings.Contains(w.Thinking, "a plain string body") {
+		t.Errorf("string content was lifted as thinking: %q", w.Thinking)
+	}
+}
+
+// The collection bound must stay STRICTLY LARGER than the wire cap, and this is
+// not tidiness — it is what keeps the cap's mutation control alive. If
+// maxThinkingBytes were <= the 65,536-rune cap, the collector would truncate
+// first and deleting capBody would become undetectable: the sentinel would stay
+// green with the cap gone. A future commit that "unifies the two constants" is
+// the change this test exists to stop.
+func TestThinkingCollectionBoundExceedsTheWireCap(t *testing.T) {
+	const wireCapRunes = 65536 // client.maxBodySize, counted in runes by capBody
+	// A rune is at most 4 bytes, so the byte budget must cover the widest text
+	// the rune cap would have allowed — otherwise the two bounds fight instead
+	// of composing, and the collector silently owns the truncation.
+	if maxThinkingBytes < 4*wireCapRunes {
+		t.Fatalf("maxThinkingBytes = %d, want >= %d (4 bytes/rune x the wire cap): the "+
+			"collector must never be the thing that truncates, or the cap's mutation "+
+			"control in TestFinops_NoContentOnWire goes vacuous",
+			maxThinkingBytes, 4*wireCapRunes)
+	}
+}
+
+// The streaming reader aggregates a window of ANY size in bounded memory. An
+// unbounded concatenation would undo that — the first firing after capture is
+// enabled mid-session reads the whole transcript to date as one window. The
+// budget is in BYTES and sits above the client's 65,536-RUNE wire cap, so it can
+// never drop a byte the wire would have kept.
+func TestTurnWindow_ThinkingAccumulationIsBounded(t *testing.T) {
+	huge := strings.Repeat("t", maxThinkingBytes*2)
+	body := `{"isSidechain":false,"message":{"content":[{"type":"thinking","thinking":"` + huge + `"}],"usage":{"input_tokens":1,"output_tokens":1}}}` + "\n" +
+		`{"isSidechain":false,"message":{"content":[{"type":"thinking","thinking":"TAIL_PAST_BUDGET"}],"usage":{"input_tokens":1,"output_tokens":1}}}` + "\n"
+
+	w := aggregateTurnWindow([]byte(body), false)
+	if len(w.Thinking) > maxThinkingBytes {
+		t.Errorf("thinking held %d bytes, want <= %d", len(w.Thinking), maxThinkingBytes)
+	}
+	if strings.Contains(w.Thinking, "TAIL_PAST_BUDGET") {
+		t.Error("a block past the budget was appended anyway")
+	}
+	if !w.HasUsage || w.Input != 2 {
+		t.Errorf("bounding the text must not drop the numbers: %+v", w)
+	}
+	// The cut must not leave invalid UTF-8 behind: json.Marshal would silently
+	// substitute U+FFFD, so a mid-rune truncation corrupts the body rather than
+	// shortening it.
+	if !utf8.ValidString(w.Thinking) {
+		t.Error("bounded thinking is not valid UTF-8")
+	}
+}
+
+// A multi-byte rune straddling the budget boundary is dropped whole, not split.
+func TestTurnWindow_ThinkingBoundaryDoesNotSplitARune(t *testing.T) {
+	// Fill to one byte short of the budget, then a 3-byte rune: it cannot fit,
+	// and a byte-slice cut would leave one third of it behind.
+	fill := strings.Repeat("t", maxThinkingBytes-1)
+	body := `{"isSidechain":false,"message":{"content":[{"type":"thinking","thinking":"` + fill + `世"}],"usage":{"input_tokens":1,"output_tokens":1}}}` + "\n"
+
+	w := aggregateTurnWindow([]byte(body), false)
+	if !utf8.ValidString(w.Thinking) {
+		t.Errorf("a rune was split at the budget boundary: last bytes %q", w.Thinking[max(0, len(w.Thinking)-4):])
+	}
+	if strings.Contains(w.Thinking, "世") {
+		t.Error("a rune that does not fit the budget was kept")
+	}
+}
+
+// The partition is what stops a subagent's turn being counted twice. It must
+// hold for thinking exactly as it holds for the numbers — otherwise a main-thread
+// turn would carry a subagent's reasoning.
+func TestTurnWindow_ThinkingRespectsSidechainPartition(t *testing.T) {
+	body := `{"isSidechain":false,"message":{"content":[{"type":"thinking","thinking":"MAIN reasoning"}],"usage":{"input_tokens":1,"output_tokens":1}}}
+{"isSidechain":true,"message":{"content":[{"type":"thinking","thinking":"SUBAGENT reasoning"}],"usage":{"input_tokens":9,"output_tokens":9}}}
+`
+	main := aggregateTurnWindow([]byte(body), false)
+	if main.Thinking != "MAIN reasoning" {
+		t.Errorf("main-thread thinking = %q, want only its own", main.Thinking)
+	}
+	sub := aggregateTurnWindow([]byte(body), true)
+	if sub.Thinking != "SUBAGENT reasoning" {
+		t.Errorf("subagent thinking = %q, want only its own", sub.Thinking)
 	}
 }
 
@@ -541,10 +691,12 @@ func TestFinops_NoContentOnWire(t *testing.T) {
 		{"TurnCompleted", turnCompleted},
 	}
 
-	// (a) No sentinel in any normalized event.
+	// (a) No sentinel in any normalized event. The thinking sentinel is asserted
+	// alongside them here: this mapper never set CaptureContent, so with capture
+	// OFF the amended allowlist must egress exactly as much as the old one did.
 	for _, e := range events {
 		evJSON, _ := json.Marshal(e.ev)
-		for _, s := range sentinels {
+		for _, s := range append(append([]string{}, sentinels...), thinkingSentinel) {
 			if strings.Contains(string(evJSON), s) {
 				t.Fatalf("INV-2 breach: sentinel %q present in %s event: %s", s, e.name, evJSON)
 			}
@@ -564,7 +716,7 @@ func TestFinops_NoContentOnWire(t *testing.T) {
 		if len(body) == 0 {
 			t.Fatalf("%s: empty request body", events[i].name)
 		}
-		for _, s := range sentinels {
+		for _, s := range append(append([]string{}, sentinels...), thinkingSentinel) {
 			if strings.Contains(string(body), s) {
 				t.Fatalf("INV-2 breach: sentinel %q on the wire for %s: %s", s, events[i].name, body)
 			}
@@ -609,16 +761,16 @@ func TestFinops_NoContentOnWire(t *testing.T) {
 		t.Errorf("expected token total %d on the SessionEnded wire body, got: %s", wantTotal, bodies[0])
 	}
 
-	// (f) ADR-0018 made a turn able to carry assistant text. That widening MUST
-	// NOT widen this projection, and everything above ran with capture off — so
-	// without this section the strongest new failure mode is untested and the
-	// test would pass trivially for the change that introduced it.
+	// (f) Capture ON — the direction the ADR-0014 amendment changed, and the half
+	// where every remaining guarantee lives. Without this section the strongest
+	// failure modes are untested and the test passes trivially for the change
+	// that introduced them.
 	//
-	// The adversarial setup: content capture ON, the same poisoned transcript,
-	// and a hook payload carrying its own assistant message. What must hold is
-	// the exact ADR-0018 claim — the text comes from the HOOK FIELD, so the
-	// transcript stays as unreadable as it was, including SENTINEL_THINKING,
-	// which is the field ADR-0019 P3 would have to amend this allowlist to get.
+	// The adversarial setup: content capture ON, the same poisoned transcript, a
+	// hook payload carrying its own assistant message. Three claims must hold at
+	// once — the assistant text still comes from the HOOK FIELD (ADR-0018), the
+	// ONE amended transcript field egresses, and every OTHER transcript sentinel
+	// stays as unreachable as it was.
 	const hookMessage = "the hook-supplied assistant answer"
 	capturing := NewMapper(Identity{DeveloperDID: testDID})
 	capturing.NewID = func() string { return "evt-2" }
@@ -640,10 +792,18 @@ func TestFinops_NoContentOnWire(t *testing.T) {
 	for _, s := range sentinels {
 		if strings.Contains(capturedBody, s) {
 			t.Fatalf("INV-2 breach: transcript sentinel %q reached the wire on a "+
-				"content-capturing turn — ADR-0018 sources assistant text from the HOOK "+
-				"payload, and binding it must not have widened the transcript "+
-				"projection: %s", s, capturedBody)
+				"content-capturing turn — the ADR-0014 amendment authorised thinking and "+
+				"NOTHING else, so the projection must still be unable to see this: %s",
+				s, capturedBody)
 		}
+	}
+	// The amended field DID egress, in the place the amendment named. Asserted on
+	// the decoded activity_output rather than by substring, so a thinking block
+	// that leaked through some other field would fail rather than pass.
+	if got := activityOutputThinking(t, capturedBody); !strings.Contains(got, thinkingSentinel) {
+		t.Fatalf("activity_output.thinking = %q, want the transcript's thinking block — "+
+			"the amendment costs a privacy narrowing and must buy the field: %s",
+			got, capturedBody)
 	}
 	// And the hook-supplied text DID reach the wire, so the absence above is a
 	// real result and not "content capture quietly did nothing".
@@ -651,6 +811,138 @@ func TestFinops_NoContentOnWire(t *testing.T) {
 		t.Fatalf("the hook-supplied assistant message did not reach the wire; every "+
 			"assertion in this section would then be vacuous: %s", capturedBody)
 	}
+	// Thinking must NOT have also landed on the assistant span. That span exists
+	// for one reader — core's alignment extractor — which takes its
+	// choices[0].message.content as the assistant's REPLY and scores every later
+	// turn's drift against it. Chain-of-thought there corrupts the reader
+	// silently: core logs nothing when the text is merely the wrong text.
+	//
+	// Without this assertion an implementation that ALSO concatenated thinking
+	// into Content.Output would satisfy every other check in this section, which
+	// is one sloppy merge away.
+	span := assistantSpanBody(t, capturedBody)
+	if !strings.Contains(span, hookMessage) {
+		t.Errorf("the assistant span lost its own text: %q", span)
+	}
+	if strings.Contains(span, thinkingSentinel) {
+		t.Errorf("thinking rode the assistant span, where core reads it as the turn's "+
+			"REPLY — it belongs in activity_output.thinking and nowhere else: %q", span)
+	}
+
+	// (g) The two mutation controls. Thinking is the densest content this client
+	// captures — it restates prompts, file bodies, and any credential the turn
+	// saw — so the gate alone is not the guarantee. Deleting the redaction, or
+	// deleting the cap, must each turn this test red.
+	t.Run("thinking is redacted before attachment and capped before signing", func(t *testing.T) {
+		// Assembled at runtime for the same reason C34 does it: a repo-side secret
+		// scanner rewriting a whole key in source would silently turn this into an
+		// assertion about a placeholder.
+		awsKey := "AKIA" + "IOSFODNN7EXAMPLE"
+		const tail = "TAIL_PAST_THE_CAP"
+		poisoned := `{"isSidechain":false,"timestamp":"2026-08-11T09:00:01.000Z","message":` +
+			`{"model":"claude-opus-4-8","content":[{"type":"thinking","thinking":"` +
+			`reasoning about AWS_ACCESS_KEY_ID=` + awsKey + ` then ` +
+			strings.Repeat("z", 70000) + tail + `"}],` +
+			`"usage":{"input_tokens":1,"output_tokens":1}}}` + "\n"
+		capPath := writeTranscript(t, poisoned)
+
+		var got [][]byte
+		capSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			b, _ := io.ReadAll(r.Body)
+			got = append(got, b)
+			_, _ = w.Write([]byte(`{}`))
+		}))
+		defer capSrv.Close()
+		capClient, err := client.New(client.Config{
+			BaseURL:               capSrv.URL,
+			APIKey:                "obx_test_0123456789abcdef0123456789abcdef0123456789abcdef",
+			DID:                   testDID,
+			PrivateKeyB64:         testPrivateKeyB64,
+			ContentCaptureEnabled: true,
+		})
+		if err != nil {
+			t.Fatalf("client.New: %v", err)
+		}
+
+		w, _, err := readTurnUsage(capPath, hookflow.TurnPos{}, false)
+		if err != nil {
+			t.Fatalf("readTurnUsage: %v", err)
+		}
+		red := NewMapper(Identity{DeveloperDID: testDID})
+		red.NewID = func() string { return "evt-3" }
+		red.CaptureContent = true
+		// The real detector, wired exactly as RunHook wires it — a test-local stub
+		// would assert the plumbing against itself.
+		red.RedactContent = func(s string) string {
+			return hookflow.RedactText(decision.NewRedactor(), s)
+		}
+		_, completed, ok := red.MapTurn(&HookEvent{SessionID: "s1", TranscriptPath: capPath}, w, 0)
+		if !ok {
+			t.Fatal("MapTurn not ok")
+		}
+		if _, err := capClient.Emit(context.Background(), completed); err != nil {
+			t.Fatalf("Emit: %v", err)
+		}
+		if len(got) != 1 {
+			t.Fatalf("captured %d bodies, want 1", len(got))
+		}
+		body := string(got[0])
+
+		// Redaction, on the outbound bytes. Removing the redact call ships the key.
+		if strings.Contains(body, awsKey) {
+			t.Errorf("the raw credential reached the wire inside a thinking block — "+
+				"redaction must run BEFORE attachment: %s", body)
+		}
+		thinking := activityOutputThinking(t, body)
+		if !strings.Contains(thinking, "OPENBOX_REDACTED") {
+			t.Errorf("no redaction placeholder in activity_output.thinking: %q", thinking)
+		}
+		// Cap, on the outbound bytes. Removing capBody ships the tail.
+		if strings.Contains(body, tail) {
+			t.Errorf("thinking past the 65,536-rune cap reached the wire: the cap must " +
+				"bound the signed bytes, not the struct")
+		}
+		if n := len([]rune(thinking)); n > 65536 {
+			t.Errorf("activity_output.thinking is %d runes, want <= 65536", n)
+		}
+		if thinking == "" {
+			t.Error("a capped thinking block must still be sent, not dropped")
+		}
+	})
+}
+
+// assistantSpanBody decodes the one span's response_body out of a wire body —
+// the field core's alignment extractor reads as the assistant's reply.
+func assistantSpanBody(t *testing.T, body string) string {
+	t.Helper()
+	var p struct {
+		Spans []struct {
+			ResponseBody string `json:"response_body"`
+		} `json:"spans"`
+	}
+	if err := json.Unmarshal([]byte(body), &p); err != nil {
+		t.Fatalf("decode wire body: %v (%s)", err, body)
+	}
+	if len(p.Spans) == 0 {
+		return ""
+	}
+	return p.Spans[len(p.Spans)-1].ResponseBody // the extractor reads the LAST entry
+}
+
+// activityOutputThinking decodes activity_output.thinking out of a wire body. It
+// reads the field the amendment named rather than substring-matching the whole
+// payload, so thinking arriving anywhere ELSE fails instead of passing.
+func activityOutputThinking(t *testing.T, body string) string {
+	t.Helper()
+	var p struct {
+		ActivityOutput struct {
+			Thinking string `json:"thinking"`
+		} `json:"activity_output"`
+	}
+	if err := json.Unmarshal([]byte(body), &p); err != nil {
+		t.Fatalf("decode wire body: %v (%s)", err, body)
+	}
+	return p.ActivityOutput.Thinking
 }
 
 // Cost must never be derived. The transcript is the only source; a transcript

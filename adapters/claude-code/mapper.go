@@ -442,9 +442,21 @@ func (m Mapper) MapTurn(e *HookEvent, w turnWindow, index int) (started, complet
 	// Deliberately NOT on the started half: a turn's input is the prompt, which
 	// already rides PromptSubmitted under the same gate. Duplicating it here
 	// would double the egress for no reader.
-	if m.CaptureContent && e.LastAssistantMessage != "" {
-		if text := m.redact(e.LastAssistantMessage); text != "" {
-			completed.Content = &client.Content{Output: text}
+	//
+	// Thinking joins it on the same half and under the same gate (v1.4, the
+	// ADR-0014 amendment), from the transcript window rather than a hook field —
+	// no hook carries thinking. Two fields on ONE Content, built together: two
+	// separate assignments would have the second silently discard the first.
+	if m.CaptureContent {
+		var c client.Content
+		if e.LastAssistantMessage != "" {
+			c.Output = m.redact(e.LastAssistantMessage)
+		}
+		if w.Thinking != "" {
+			c.Thinking = m.redact(w.Thinking)
+		}
+		if c.Output != "" || c.Thinking != "" {
+			completed.Content = &c
 		}
 	}
 	completed.Metadata = turnMetadata(e, turnIndex)

@@ -78,7 +78,10 @@ reintroduce that: if something is provider-agnostic it goes in `hookflow` or
   Usage capture is **also ON by default** (2026-08-11, ADR-0014): four token counts
   plus a model id per turn, opt out with `finops:false` / `OPENBOX_FINOPS=0`.
   Guardrail redaction at source is **not wired yet**, so prompt text egresses
-  unredacted. **SL3-SEC-3 is retired** (ADR-0019 P1, 2026-08-25): tool commands,
+  unredacted. **Thinking capture is ON by default too** (2026-08-25, ADR-0019 P3 /
+  the ADR-0014 amendment): the turn's extended-thinking text egresses under the
+  same `content_capture` key — which goes FURTHER than the provider's own telemetry,
+  since Anthropic's OTel export redacts extended thinking unconditionally. **SL3-SEC-3 is retired** (ADR-0019 P1, 2026-08-25): tool commands,
   file bodies, tool output and the refusal free text now egress on ORDINARY tool
   events, not only on a gated call — all under the one `content_capture` key. Local
   secret detection redacts the body **before** it is attached, and that ordering is
@@ -102,7 +105,10 @@ reintroduce that: if something is provider-agnostic it goes in `hookflow` or
   the backend's aggregation key) replaced that with a curated allowlist enforced by
   the sentinel test. **That test is load-bearing.** A change that makes it pass
   trivially is a defect, and a second bound string needs an ADR amendment, not a
-  commit.
+  commit. One has since been added THAT WAY: `message.content[].thinking`, under
+  the ADR-0014 amendment (2026-08-25) — and it is CONTENT, not an identifier, so
+  the allowlist's contents stopped being self-limiting at the same time. A fifth
+  bound field needs its own amendment for the same reason.
 - **Decisions only a human can make** (scope, privacy posture, priority) are `OD*`
   decisions: surface them, never infer them.
 - **Cite sources in docs** — the repo symbol/path or upstream doc URL behind each
@@ -288,8 +294,10 @@ at most the first 64KB of any body, local secret detection is keyword-driven so 
 unlabelled high-entropy value is invisible to it, Codex's hook
 cannot be mandated by `requirements.toml`, Guardrail redaction at source is not
 wired, the production-runtime lineage hop is not joined, Codex reports usage per
-session rather than per turn, reports no tool success at all and captures no tool
-content, goal alignment
+session rather than per turn, reports no tool success at all and captures neither
+tool content nor thinking (so the two providers send different amounts of content
+under one posture — stated in `COVERAGE.md` §3 rather than averaged away), goal
+alignment
 additionally requires `finops` ∧ `content_capture` (both default-ON, a user
 constraint) plus a reachable LlamaFirewall and Redis — without those the widgets
 stay empty with a perfect client — and Windows is build-verified only.
@@ -466,6 +474,57 @@ new metadata keys survive ingest, and the volume question — 64KB bodies at
 tool-call cadence through the realtime flusher. Codex is untouched and binds none of
 this, so the two providers now send different amounts of content under one posture
 (stated in `COVERAGE.md` §3.4 rather than averaged away).
+
+**Thinking capture; the allowlist is amended** (ADR-0019 P3, contract **v1.4**,
+2026-08-25 — phase 02 of plan 260825-0027, Track A complete). The turn's
+extended-thinking blocks egress as `activity_output.thinking` on `TurnCompleted`,
+under the same `content_capture` key, redacted before attach, capped at 64KB.
+Five things not to re-litigate:
+
+- **This is the amendment ADR-0014 warned about, and it changed KIND.** The three
+  fields that ADR-0014 bound were an identifier, a timestamp and a bool — none
+  could carry a secret, so the allowlist's *contents* were self-limiting even
+  after its *form* stopped being structural. `thinking` is the first free-form
+  content string in that projection, and the densest content this client carries:
+  it restates prompts, file bodies, and any credential the turn saw. What protects
+  it is three fallible mechanisms in a fixed order — gate, redact, cap — each
+  asserted on outbound bytes. The amendment section at the end of ADR-0014 is the
+  decision; the code is the consequence.
+- **The sentinel turned around and is mutation-tested, literally.** `TestFinops_NoContentOnWire`
+  now asserts absence with capture off (thinking included) and PRESENCE with it on,
+  in the decoded `activity_output.thinking`, with every other transcript sentinel
+  still absent — so the widening is exactly one field wide. Deleting the redaction
+  ⇒ red (raw AWS key on the wire); deleting the cap ⇒ red (tail marker past 65,536
+  runes). Both drills were run, not asserted. **A version that passes with either
+  mechanism removed is a defect.**
+- **`message.content` is bound as `json.RawMessage`, and that is load-bearing.**
+  It is a STRING on user lines and an ARRAY on assistant ones; a typed slice would
+  fail the whole line's unmarshal on a string and silently drop that line's token
+  counts — a finops regression with no error anywhere.
+  `TestTurnWindow_StringMessageContentStillCounts` holds it.
+- **Thinking must NOT ride the assistant span.** That span exists for one reader,
+  core's alignment extractor, which takes it as the assistant's REPLY; chain-of-
+  thought there would score every later turn's drift against the model's reasoning
+  and fail silently. Asserted at both levels (sentinel §f, conformance C40).
+- **Two bounds, ordered deliberately.** `maxThinkingBytes` (4×65,536 BYTES) bounds
+  the collection so the streaming window reader keeps its memory guarantee;
+  `capBody` (65,536 RUNES) bounds the wire. The collection bound must stay the
+  LARGER one or the cap's mutation control goes vacuous —
+  `TestThinkingCollectionBoundExceedsTheWireCap` exists so a future "unify the
+  constants" commit cannot kill it silently.
+
+Two deliberate narrowings from the plan: intermediate assistant text was NOT bound
+(the final reply already egresses from the hook field ADR-0018 bound), and the LIFT
+is ungated — only the attachment is gated, because gating a pure parser buys
+nothing on the wire and would duplicate the posture decision.
+
+**Status: implemented, unit- and conformance-verified (C40/C41 on real POSTed
+bytes), all 11 modules green under `-race` plus both cross-compiles — the testbed
+has NOT run.** Unproven without a stack (`MAPPING.md` §7 items 22–24): that core
+stores `activity_output.thinking` as its own key, that the sibling key does not
+perturb `ExtractModelMetricsFromActivity`, and the volume question. A pre-existing
+FALSE claim in `README.md` left over from ADR-0019 P1 ("tool commands and file
+bodies are never sent on ordinary telemetry") was corrected in the same change.
 
 Next: the Cursor adapter; policy template packs. The one dependency this repo now
 has is `golang.org/x/term v0.34.0`, **pinned** — v0.35.0+ declares `go 1.24.0` and

@@ -46,6 +46,7 @@ Source-cited to `client/payload.go` (`governanceEventPayload`, the marshaled bod
 | `content.prompt` | `signal_args.prompt` **only when content-capture enabled**, capped to 65536 chars (`capBody`) | Stripped at the client when disabled (INV-2). |
 | `content.tool_input` | `activity_input.command` / `.arguments` / `.content` **only when content-capture enabled**, capped | Key named per tool class (`contentKeyFor`), so a reader is never shown a file body labelled `command`. **v1.3 (ADR-0019 P1): also on the OBSERVE path**, not gated calls only — the "never the observe path" half of OD-E9-7 is retired. The gated copy overwrites the observe extract with the bytes the tool rewrite produced, so the server judges exactly what the tool was rewritten to. |
 | `content.tool_output` | `activity_output.output` **only when content-capture enabled**, capped | **v1.3 (ADR-0019 P1).** `ToolResult` only. What the tool produced — or, on a failed call, its own free-text error; `status` says which. Core stores it as the row's `output` and runs Guardrails stage "1" over it. Secret-redacted **before** attachment (conformance C34). |
+| `content.thinking` (turn) | `activity_output.thinking` **only when content-capture enabled**, capped | **v1.4 (ADR-0019 P3).** `TurnCompleted` only. The turn's extended-thinking blocks, concatenated in file order from the transcript window — the only source, since no hook carries thinking and the provider's own OTel export redacts it unconditionally. Deliberately **not** the span in the row above: that span is read as the assistant's REPLY by core's alignment extractor, so chain-of-thought there would score every later turn's drift against the model's reasoning. Secret-redacted **before** attachment, `capBody`-capped, absent with capture off (conformance C40/C41, sentinel `TestFinops_NoContentOnWire`). This is the field that AMENDS ADR-0014's transcript allowlist — the first free-form content string that projection binds. |
 | `content.signal_detail` | `metadata.denial_reason` / `metadata.error_details` **only when content-capture enabled**, capped | **v1.3 (ADR-0019 P1).** Per event type (`signalDetailKeyFor`); dropped on every other type. Deliberately **not** `signal_args` — core reads a `SignalReceived` with non-empty `signal_args` as a NEW USER GOAL (`age.go:112-137`). Conformance C38 asserts both halves. **No reader renders these yet** — the Verify tab reads `signal_args`, which this deliberately avoids — so they are stored-and-queryable rather than displayed. Same posture as `metadata.event_id`. |
 | `span.request_body/response_body` (adapter-facing) | — | **Not an egress channel.** These are fields of the frozen ADAPTER-FACING `span` object, which the serializer does not read: no adapter has ever populated either, and both mappers assert they stay empty (`adapters/claude-code/mapper_test.go:169`, `adapters/codex/mapper_test.go:207`). The wire span's `response_body` in the row above is a different field on a different struct (`client.wireSpan`), built only from `content.output`. |
 
@@ -294,6 +295,7 @@ into `activity_input`/`activity_output` instead of serializing it as a span.
 | `started_at`, `ended_at` | `duration_ms` | completed | float ms; **omitted, not zero**, when the stash missed, a timestamp does not parse, or the result is not positive. Zero would claim the call took no time |
 | `content.tool_input` | `activity_input.command` / `.arguments` / `.content` | started | content-gated, `capBody`-capped. **v1.3: observe path too**, not gated calls only |
 | `content.tool_output` | `activity_output.output` | completed | **v1.3**; content-gated, redacted before attach, `capBody`-capped. A failed call carries its error text here |
+| `content.thinking` | `activity_output.thinking` | completed | **v1.4**, turns only; content-gated, redacted before attach, `capBody`-capped. Sourced from the transcript window, not a hook field |
 | `span.invocation_id` | — (local) | — | feeds the duration-stash key; never a wire field |
 | `span.operation_id` | — (local) | — | feeds `activity_id`; never a wire field |
 | `span.semantic_type` | — | — | the client has never sent this field; the wire span's own `semantic_type` is built independently and is recomputed by core anyway (§2) |
@@ -441,12 +443,15 @@ The suite's assertions are in place (`testbed/20-capture.sh`, `25-realtime.sh`,
     (`observability/errors.go:320-322`, read at `develop` 68f0398 — PR #125
     merged as `0643ad3`). This check was previously "pollution is present and
     expected"; it is now an absence assertion.
-13. **The narrowed INV-2, end to end.** Sentinel strings seeded into the
-    transcript's `content`, `thinking`, `tool_input` and `tool_result` are absent
-    from the stored rows, while `model` is present. Unit-level absence is
-    necessary, not sufficient — this is the assertion a privacy reviewer should
-    be pointed at, because ADR-0014 replaced a structural impossibility with an
-    allowlist.
+13. **The amended INV-2, end to end.** Sentinel strings seeded into the
+    transcript's `content`, `tool_input` and `tool_result` are absent from the
+    stored rows, while `model` is present. Unit-level absence is necessary, not
+    sufficient — this is the assertion a privacy reviewer should be pointed at,
+    because ADR-0014 replaced a structural impossibility with an allowlist.
+    **v1.4 makes this two-directional:** the `thinking` sentinel must be absent
+    from stored rows with capture off and PRESENT (redacted, capped) with it on.
+    "The marker is nowhere" and "the runtime stored nothing" are the same
+    observation; only the positive half separates them.
 14. **The documented opt-out is real.** With usage capture disabled: zero
     `llm_completion` rows and no model anywhere beyond `SessionStarted`.
 
@@ -478,8 +483,24 @@ The suite's assertions are in place (`testbed/20-capture.sh`, `25-realtime.sh`,
     `span_type='mcp_tool_call'` only: the new `llm_completion` spans must not
     appear there.
 21. **Capture off ⇒ nothing new.** Re-run with `OPENBOX_CONTENT_CAPTURE=0`: no
-    span rows, no assistant text anywhere, and `status` still present on tool
-    rows. This single check validates the whole gate design.
+    span rows, no assistant text anywhere, no `thinking` key, and `status` still
+    present on tool rows. This single check validates the whole gate design.
+
+### Additionally, for ADR-0019 P3 (thinking)
+
+22. **`activity_output.thinking` survives ingest**, as its own key on the turn's
+    `ActivityCompleted` row. Core's merged `ExtractModelMetricsFromActivity`
+    unmarshals `{model, usage}` from this object, so a sibling key should be
+    ignored by the Go decoder and the whole object stored as the row's output.
+    Both halves are **read, not run** — the testbed is what settles whether the
+    key is stored and whether the extra field perturbs usage extraction.
+23. **Thinking is NOT in the turn's span**, on the same rows: the span's
+    `response_body` carries the reply and only the reply. If thinking appears
+    there, goal-alignment scoring is comparing later turns against
+    chain-of-thought, which fails silently and looks like drift.
+24. **Volume, measured not assumed.** Thinking at ≤64KB per turn through the
+    realtime flusher is the same open question phase 01 left for tool bodies —
+    record bytes/session, not just presence.
 
 _When the run happens, record the artifact under
 `plans/260811-0245-tool-activity-event-shape/reports/` (ADR-0013 claims) and

@@ -31,6 +31,8 @@ import (
 // |C37| PostToolUseFailure       | the free-text error egresses gated, never as error_type |
 // |C38| the two signal free-texts| egress gated as metadata, and NEVER as signal_args      |
 // |C39| a dotenv dump as output  | which credential FORMATS the one control actually catches|
+// |C40| Stop, capture ON          | the turn's THINKING reaches activity_output.thinking     |
+// |C41| the same, capture OFF     | no thinking; the turn pair still ships                   |
 //
 // What these cases deliberately do NOT relax: with capture OFF the tool events
 // must still ship. A case that passed because the client stopped emitting would
@@ -348,6 +350,86 @@ func TestContentCaptureConformance(t *testing.T) {
 					}
 				}
 			})
+		}
+	})
+
+	// C40/C41 are the only content cases whose source is the TRANSCRIPT rather
+	// than a hook payload field, which is the whole reason they exist separately:
+	// thinking reaches the wire through the ADR-0014 projection, so a gate that
+	// works for every hook-sourced field proves nothing about it.
+	stopWithThinking := func(t *testing.T, session, thinking string) string {
+		t.Helper()
+		path := filepath.Join(t.TempDir(), "transcript.jsonl")
+		line := `{"type":"assistant","isSidechain":false,"timestamp":"2026-08-25T09:00:01.000Z",` +
+			`"message":{"model":"claude-opus-4-8","content":[{"type":"thinking","thinking":"` +
+			thinking + `"},{"type":"text","text":"the visible answer"}],` +
+			`"usage":{"input_tokens":100,"output_tokens":10}}}` + "\n"
+		if err := os.WriteFile(path, []byte(line), 0o600); err != nil {
+			t.Fatalf("write transcript: %v", err)
+		}
+		return `{"hook_event_name":"Stop","session_id":"` + session + `","cwd":"/tmp",` +
+			`"transcript_path":"` + path + `","last_assistant_message":"the visible answer"}`
+	}
+
+	t.Run("C40 the turn's thinking reaches activity_output.thinking with capture on", func(t *testing.T) {
+		const thinking = "THINKING-SENTINEL the lock must outlive the rename"
+		t.Setenv(envFinops, "1") // turn events are finops-gated; the pair is the carrier
+		bodies := observeThenFlush(t, "cc-think-on", "1", "Stop",
+			stopWithThinking(t, "cc-think-on", thinking))
+
+		out, found := activityOutput(t, bodies)
+		if !found {
+			t.Fatalf("no ActivityCompleted reached /evaluate at all; bodies=%v", bodies)
+		}
+		got, _ := out["thinking"].(string)
+		if !strings.Contains(got, thinking) {
+			t.Errorf("activity_output.thinking = %q, want the turn's thinking block", got)
+		}
+		// It must NOT have ridden the assistant span instead: that span feeds
+		// core's alignment extractor as the assistant's REPLY, so thinking there
+		// would score later turns against the model's reasoning. Silent if wrong.
+		for _, b := range bodies {
+			var p struct {
+				Spans []struct {
+					ResponseBody string `json:"response_body"`
+				} `json:"spans"`
+			}
+			if json.Unmarshal([]byte(b), &p) != nil {
+				continue
+			}
+			for _, sp := range p.Spans {
+				if strings.Contains(sp.ResponseBody, thinking) {
+					t.Errorf("thinking rode the assistant span, where core reads it as the "+
+						"turn's REPLY: %s", sp.ResponseBody)
+				}
+			}
+		}
+	})
+
+	t.Run("C41 content_capture:false carries no thinking, but the turn still ships", func(t *testing.T) {
+		const canary = "CANARY-THINKING-must-not-egress"
+		t.Setenv(envFinops, "1")
+		bodies := observeThenFlush(t, "cc-think-off", "0", "Stop",
+			stopWithThinking(t, "cc-think-off", canary))
+
+		for i, b := range bodies {
+			if strings.Contains(b, canary) {
+				t.Errorf("thinking egressed with capture OFF in body #%d: %s", i, b)
+			}
+		}
+		// The gate is on the CONTENT, not on the turn. Without this the case would
+		// pass for a client that stopped emitting turns entirely — and the token
+		// numbers are the reason turns exist.
+		out, found := activityOutput(t, bodies)
+		if !found {
+			t.Fatalf("no ActivityCompleted with capture off; the gate is on the turn's "+
+				"THINKING, not on the turn event: %v", bodies)
+		}
+		if _, has := out["thinking"]; has {
+			t.Errorf("activity_output carries a thinking key with capture off: %v", out)
+		}
+		if _, has := out["usage"]; !has {
+			t.Errorf("the turn's token usage went missing with capture off: %v", out)
 		}
 	})
 }

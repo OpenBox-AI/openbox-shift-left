@@ -198,9 +198,20 @@ assert_eq "no tool output text on any row with capture off" 0 \
 	"$(tb_count "governance_events where run_id='$sid_off' and output is not null and output ? 'output'")"
 assert_eq "no refusal free text on any row with capture off" 0 \
 	"$(tb_count "governance_events where run_id='$sid_off' and metadata is not null and (metadata ? 'denial_reason' or metadata ? 'error_details')")"
+# ADR-0019 P3: thinking is the newest content class and the only one sourced from
+# the TRANSCRIPT rather than a hook field, so a gate that holds for every
+# hook-sourced field above proves nothing about it. Same JSONB key test, same
+# reason: `output` is a column that renders on every row.
+assert_eq "no thinking on any row with capture off" 0 \
+	"$(tb_count "governance_events where run_id='$sid_off' and output is not null and output ? 'thinking'")"
 # The structural axes must survive, or "no content" would be indistinguishable
 # from "no events" — the same reason 20-capture.sh asserts the gate positively.
 assert_ge "structural tool identity survives capture off" 1 \
 	"$(tb_count "governance_events where run_id='$sid_off' and metadata ? 'tool_name'")"
+# The turn's NUMBERS are on the same object thinking would have used, and they are
+# gated by finops, not by content. If they vanished with capture off, the check
+# above would pass for a client that simply stopped emitting turns.
+assert_ge "turn usage survives capture off" 1 \
+	"$(tb_count "governance_events where run_id='$sid_off' and activity_type='llm_completion' and output is not null and output ? 'usage'")"
 
 tb_finish

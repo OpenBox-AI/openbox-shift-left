@@ -1,6 +1,6 @@
 {
   "schema_version": "1.4",
-  "event_id": "evt-0011",
+  "event_id": "evt-content-5",
   "event_type": "TurnCompleted",
   "openbox_session_id": "sess-abc123",
   "developer_did": "did:aip:7f3c9b2e-0000-5000-a000-000000000001",
@@ -16,6 +16,10 @@
     "cache_creation_input": 4096,
     "cache_read": 58210,
     "total": 63828
+  },
+  "content": {
+    "output": "I refactored the spool; all 11 modules are green.",
+    "thinking": "The spool writer is called from two hooks, so the lock has to be held across the rename, not just the write."
   },
   "metadata": { "provider": "claude-code", "turn_index": 0 }
 }

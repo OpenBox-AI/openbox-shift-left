@@ -372,22 +372,27 @@ const activityTypeLLMCompletion = "llm_completion"
 // produced it — which is the whole point of routing the turn through an activity
 // instead of reviving the span layer ADR-0013 retired.
 //
-// INV-2, stated exactly: THIS OBJECT carries FOUR NUMBERS AND ONE IDENTIFIER.
-// No prompt, no completion, no thinking block, no stop reason, no tool content.
-// The model id is the single free-form string, already capStr-bounded by the
-// adapter. Core runs Guardrails stage "1" and OPA over this field, so token
-// spend becomes policy-visible — an intended upside, and a second reason the
-// schema must stay numbers plus one bounded identifier.
+// INV-2, stated exactly: THIS OBJECT carries FOUR NUMBERS, ONE IDENTIFIER, and
+// — since v1.4 — ONE GATED CONTENT FIELD. No prompt, no completion, no stop
+// reason, no tool content. The model id is capStr-bounded by the adapter;
+// `thinking` is gated (stripContent nils Content when the org opted out),
+// redacted at the adapter before attachment, and capped here.
 //
-// Scope note (ADR-0018): the sentence above is about activity_output and stays
-// exactly true. The TURN EVENT as a whole is no longer content-free — under
-// content capture it carries the assistant's text, on the span
-// (buildPayload's EventTurnCompleted arm, client/turnspan.go). The text was put
-// there rather than here for one reason: core's alignment extractor reads
-// payload.Spans and nothing else. openbox-core#130 asks for it to read this
-// field instead, and when that lands the text moves HERE as
-// activity_output.message and the span is deleted — at which point this
-// paragraph is what needs rewriting.
+// This paragraph used to end "the schema must stay numbers plus one bounded
+// identifier", and that is no longer what it is. The reason it changed is worth
+// keeping: core runs Guardrails stage "1" and OPA over this field
+// (internal/services/guardrail.go:191-194, opa.go:529-531), so what lands here
+// is policy-VISIBLE. For token spend that was an intended upside; for thinking
+// it is the point — reasoning a policy can see is reasoning a policy can judge.
+// It also means a body here is inspected content, which is why the cap is not
+// optional.
+//
+// Scope note (ADR-0018): the assistant's ANSWER is still not here. It rides the
+// span (buildPayload's EventTurnCompleted arm, client/turnspan.go) because
+// core's alignment extractor reads payload.Spans and nothing else.
+// openbox-core#130 asks for it to read this field instead, and when that lands
+// the answer moves HERE as activity_output.message and the span is deleted —
+// beside `thinking`, not merged with it.
 //
 // Cost is deliberately absent. Core and the backend each derive it server-side
 // from a model-keyed pricing table; deriving it here would fabricate a number
@@ -416,6 +421,19 @@ func turnActivityOutput(ev DevEvent) json.RawMessage {
 		if len(usage) > 0 {
 			m["usage"] = usage
 		}
+	}
+	// The turn's extended thinking, when capture left it on the event (v1.4,
+	// ADR-0019 P3). Capped HERE — this is the choke point every turn crosses, and
+	// the signed bytes are the bytes buildPayload returns, so capping here caps
+	// what is signed.
+	//
+	// It rides activity_output rather than the assistant span deliberately: that
+	// span exists solely to feed core's alignment extractor, which reads it as
+	// the assistant's REPLY. Putting chain-of-thought there would score every
+	// later turn's drift against the model's reasoning instead of its answer, and
+	// fail silently — core logs nothing when the text is merely the wrong text.
+	if ev.Content != nil && ev.Content.Thinking != "" {
+		m["thinking"] = capBody(ev.Content.Thinking)
 	}
 	if len(m) == 0 {
 		return nil

@@ -34,7 +34,13 @@ package client
 // (ADR-0019 P1 — the change that retires SL3-SEC-3). Purely additive: both are
 // gated fields on an already-gated object, so every 1.2 event is a valid 1.3
 // event and an org with content capture off sends byte-identical payloads.
-const SchemaVersion = "1.3"
+//
+// 1.4 added Content.Thinking — the turn's extended-thinking text, in
+// activity_output.thinking on a TurnCompleted (ADR-0019 P3, which amends
+// ADR-0014's transcript allowlist to permit it). Purely additive and gated the
+// same way, so an org with content capture off again sends byte-identical
+// payloads.
+const SchemaVersion = "1.4"
 
 // EventType is a developer-runtime lifecycle event type. Each maps 1:1 onto
 // an openbox-core event_type string (INV-8) — see MAPPING.md §2.
@@ -294,6 +300,30 @@ type Content struct {
 	// is a property of the choke point: stripContent nils Content, so no
 	// mis-typed key can route free text around the posture.
 	SignalDetail string `json:"signal_detail,omitempty"`
+
+	// Thinking is the model's extended-thinking text for a turn — its
+	// `thinking` content blocks, concatenated in file order across the turn's
+	// transcript window. It lands in `activity_output.thinking` on a
+	// TurnCompleted (v1.4, ADR-0019 P3 / the ADR-0014 amendment).
+	//
+	// It is a separate field from Output for the same reason ToolOutput is:
+	// Output is the assistant's ANSWER and rides the one span core's alignment
+	// extractor reads. Chain-of-thought in that span would make every later
+	// turn's drift score compare against the model's reasoning instead of its
+	// reply — a silent corruption of the reader, not a formatting choice.
+	//
+	// The transcript is the only source: no hook payload carries thinking, and
+	// Claude Code's own OTel export redacts it unconditionally with every
+	// content flag enabled. Capturing it therefore goes FURTHER than the
+	// provider will, on the org's own machine, by the org's own decision —
+	// recorded in the ADR-0014 amendment rather than inferred from "capture
+	// everything".
+	//
+	// It is also the densest content this client carries: thinking restates
+	// prompts, file bodies, and any credential the turn saw earlier. Gate,
+	// redact, cap — in that order, all three asserted on outbound bytes. With
+	// `secret_detection:false` it egresses unredacted; stated, not mitigated.
+	Thinking string `json:"thinking,omitempty"`
 }
 
 // DevEvent is the normalized developer-runtime event a caller hands to Emit,

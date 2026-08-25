@@ -14,8 +14,16 @@
 # "the marker is nowhere" and "the runtime emitted nothing at all" are the same
 # observation, and only the positive form can tell them apart.
 #
+# ADR-0019 P3 adds one more class under the same gate — the turn's THINKING — and
+# it is checked differently on purpose: no prompt can make a model think a chosen
+# phrase, so a marker assertion there would test the model's compliance rather
+# than the pipeline. Presence of the `thinking` KEY is the check, and it is a skip
+# rather than a failure when the session produced no block (extended thinking is a
+# client setting this suite does not control).
+#
 # The gate's OTHER half — capture off ⇒ none of this egresses — is asserted
-# server-side by 35-telemetry.sh, which already drives a capture-off session.
+# server-side by 35-telemetry.sh, which already drives a capture-off session. That
+# half is strict for thinking, because absence needs no cooperation from a model.
 #
 # Neither the shell command nor the file body appears in the prompt: they are
 # read out of files inside the project, so their presence downstream means the
@@ -195,6 +203,25 @@ assert_contains "prompt content egressed (content_capture on)" "$egress" "$PROMP
 # path satisfies these; the capture-off half is 35-telemetry.sh's job.
 assert_contains "shell command text egressed (content_capture on)" "$egress" "$SHELL_MARK"
 assert_contains "file body egressed (content_capture on)" "$egress" "$FILE_MARK"
+
+# ADR-0019 P3: the turn's THINKING, on the llm_completion row's activity_output.
+# Asserted as presence of the KEY rather than of a marker string, because nothing
+# in a prompt can make a model think a chosen phrase — a marker assertion here
+# would be a test of the model's compliance, not of the pipeline.
+#
+# It is a SOFT check: extended thinking has to be active for the session to
+# produce any block at all, and that is a client setting this suite does not
+# control. A skip naming the reason is honest; asserting it into a false failure
+# is not. The capture-off half (35-telemetry.sh) is the strict one.
+if [ "$(tb_count "governance_events where run_id='$sid' and activity_type='llm_completion' and output is not null and output ? 'thinking'")" -gt 0 ]; then
+	assert_ge "turn thinking egressed (content_capture on)" 1 \
+		"$(tb_count "governance_events where run_id='$sid' and output ? 'thinking'")"
+	# It must NOT have also gone into the span that core reads as the assistant's
+	# REPLY — chain-of-thought there silently corrupts goal-alignment scoring.
+	tb_note "thinking bytes: $(tb_val "select length(output->>'thinking') from governance_events where run_id='$sid' and output ? 'thinking' order by created_at desc limit 1;")"
+else
+	tb_skip "turn thinking egressed" "no thinking block in this session (extended thinking may be off — see MAPPING.md §7 item 22)"
+fi
 
 # ── the negative: an ungoverned directory produces NOTHING ───────────────────
 # ADR-0016's accepted cost, demonstrated end to end rather than asserted. This is

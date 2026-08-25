@@ -297,19 +297,31 @@ Being precise here is part of the product.
   v0.145.0 and this adapter deliberately does not wire it, so its usage arrives as
   one `<session>:usage:rollup` activity. Scope, not a provider limit — the upgrade
   path is to subscribe `Stop` and delta the cumulative total.
-- **The transcript projection's INV-2 guarantee is now an allowlist.** It used to
-  be structural: the parser bound only numeric fields, so content could not enter
-  memory. Binding the model id — required, because the model is the backend's
-  aggregation key — replaced that with a curated allowlist enforced by a test.
-  The test is load-bearing, and ADR-0014 says so rather than leaving the older,
-  stronger claim in place.
+- **The transcript projection's INV-2 guarantee is now an allowlist, and it
+  carries content.** It used to be structural: the parser bound only numeric
+  fields, so content could not enter memory. Binding the model id — required,
+  because the model is the backend's aggregation key — replaced that with a curated
+  allowlist enforced by a test. The 2026-08-25 amendment added the turn's
+  **thinking**, which is the first free-form content in it, so the allowlist's
+  contents stopped being self-limiting as well as its form. The test is
+  load-bearing and mutation-tested against the removal of either the redaction or
+  the cap; ADR-0014 and its amendment say so rather than leaving an older, stronger
+  claim in place.
+- **Thinking capture goes further than the provider's own telemetry.** Anthropic's
+  OpenTelemetry export redacts extended thinking unconditionally, with every
+  content flag enabled, and no hook carries it — so the session transcript is the
+  only source. Capturing it is a decision an org makes about its own machine, and
+  `content_capture: false` turns it off with everything else.
 
 ## Verification
 
 `testbed/` is a mock-free end-to-end suite: it drives real headless sessions against
 a real local OpenBox and asserts what arrived — including the content gate in BOTH
-directions: with capture on, the tool command, the file body and the tool output
-all egress on ordinary tool events; with capture off, none of them do.
+directions: with capture on, the tool command, the file body, the tool output and
+the turn's thinking all egress; with capture off, none of them do. The thinking
+half is asymmetric on purpose — presence is a skip when the session produced no
+block (no prompt can make a model think a chosen phrase), while absence is strict,
+because absence needs no cooperation from a model.
 
 That used to read "tool commands and file bodies never egress on an **observe**
 event", which was SL3-SEC-3 — an unconditional, structural guarantee, because tool

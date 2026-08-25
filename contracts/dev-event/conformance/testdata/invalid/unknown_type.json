@@ -1,5 +1,5 @@
 {
-  "schema_version": "1.3",
+  "schema_version": "1.4",
   "event_id": "evt-bad-1",
   "event_type": "BananaEvent",
   "openbox_session_id": "sess-abc123",

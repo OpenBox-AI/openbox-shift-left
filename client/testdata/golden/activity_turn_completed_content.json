@@ -8,6 +8,7 @@
   "workflow_type": "developer-session",
   "activity_output": {
     "model": "claude-opus-4-8",
+    "thinking": "The spool writer is called from two hooks, so the lock has to be held across the rename.",
     "usage": {
       "cache_creation_input_tokens": 4096,
       "cache_read_input_tokens": 58210,

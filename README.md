@@ -211,12 +211,21 @@ Two things are **on by default**, and both are opt-out:
 - **token usage** — four token counts and the model id per turn
   (`finops: false` to stop).
 
-The assistant's **thinking** is not captured. Tool commands and file bodies are
-**never** sent on ordinary telemetry. They ARE
-sent on a **gated** call under enforcement — OpenBox decides every gated call now
-([ADR-0017](docs/adr/ADR-0017-inline-policy-evaluation.md)), and it cannot decide on
-content it cannot see. That is gated on `content_capture`, the body is scanned for
-secrets and redacted locally first, and the server sees at most its first 64KB.
+Two of those lines used to read the other way, and both changed in August 2026:
+
+- **Tool commands, file bodies and tool output now ride ordinary telemetry**, not
+  only a gated call ([ADR-0019](docs/adr/ADR-0019-full-content-capture.md) P1).
+  They still ride a gated call too — OpenBox decides every gated call now
+  ([ADR-0017](docs/adr/ADR-0017-inline-policy-evaluation.md)) and cannot decide on
+  content it cannot see — but "never on observe events" is no longer true.
+- **The assistant's thinking is captured**, one block per turn, under the same
+  switch. This goes further than Anthropic's own telemetry: their OpenTelemetry
+  export redacts extended thinking unconditionally, and no hook carries it, so the
+  session transcript is the only source
+  ([the ADR-0014 amendment](docs/adr/ADR-0014-turn-as-activity-and-identifier-allowlist.md)).
+
+Everything above is gated on `content_capture`, scanned for secrets and redacted
+locally before it is sent, and the server sees at most the first 64KB of any body.
 Credentials are never transmitted.
 
 The exact field list is in **[Data and privacy](docs/data-and-privacy.md)**.
