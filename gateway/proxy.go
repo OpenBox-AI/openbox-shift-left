@@ -191,6 +191,36 @@ func New(cfg Config) (*Gateway, error) {
 // so is anything the provider adds next -- being a transparent stand-in is what
 // keeps this forward-compatible without a release.
 func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	// ORIGIN-FORM ONLY, and this check is what keeps the upstream host fixed.
+	//
+	// The target below is built by CONCATENATION (g.upstream + r.RequestURI), so
+	// a request-target that does not begin with "/" splices into the AUTHORITY
+	// rather than onto the path. Measured, not theorized: net/http hands the
+	// handler r.RequestURI == "evil.com:443" for an authority-form line
+	// (`CONNECT evil.com:443`), which concatenates to
+	// "https://api.anthropic.comevil.com:443" — a syntactically valid URL whose
+	// host is a DIFFERENT, registrable domain. Two things follow, and the second
+	// is the one that matters here:
+	//
+	//   - copyHeaders relays the developer's live Authorization header, so the
+	//     credential would egress to that host.
+	//   - the capture records http.url as g.upstream + r.URL.Path, i.e.
+	//     "https://api.anthropic.com". A call that went somewhere else would be
+	//     stored as though it went to the provider — which breaks ADR-0021 §2's
+	//     assurance claim at its root: a bypass is supposed to leave a HOLE in
+	//     the record, and a misrecorded destination leaves none.
+	//
+	// Refusing is correct rather than merely convenient. Every form this rejects
+	// is already unusable here: absolute-form would have to be re-encoded from
+	// r.URL to be forwarded, which is exactly the byte-identity the comment on
+	// `target` below refuses to give up; asterisk-form and authority-form name no
+	// path to forward. A client pointed at a base URL sends origin-form.
+	if !strings.HasPrefix(r.RequestURI, "/") {
+		g.relayError(w, http.StatusBadRequest,
+			"request target must be origin-form (a path beginning with /)")
+		return
+	}
+
 	// Read the body once. The exact bytes are what gets forwarded, and knowing
 	// the length is what keeps the framing identical instead of chunked.
 	//
