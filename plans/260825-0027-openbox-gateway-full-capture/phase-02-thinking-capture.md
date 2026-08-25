@@ -14,7 +14,26 @@
   cursor, and amend the ADR-0014 allowlist that currently forbids them.
 - Priority: P1
 - Implementation status: **implemented** (testbed dormant)
-- Review status: in review (code-reviewer, 2026-08-25)
+- Review status: **reviewed 2026-08-25 (code-reviewer) — DONE, no blocking findings.**
+  All 6 acceptance criteria verified, incl. independently re-running both sentinel
+  mutation drills (cap removed / redaction removed) from scratch — both fail red,
+  matching the commit's claims exactly. All 11 modules green under `-race`
+  (fresh run), gofmt/vet clean repo-wide, both cross-compiles clean for the two
+  touched modules. Three low-severity nits only (doc wording, a comment/code
+  strictness mismatch, a missing exact-boundary unit test) — see
+  `plans/reports/review-260825-1029-thinking-capture.md`. **All three are fixed**
+  (`e6fe191`, `836f297`), along with four gaps a parallel cleanup pass found: a
+  missing thinking row in the adapter-local README, a comment in
+  `testbed/20-capture.sh` that stated a requirement and asserted nothing (the real
+  span non-leak assertion now lives in `35-telemetry.sh`, where a span is expected
+  to exist), and three copies of one truncation primitive collapsed into
+  `hookflow.TruncateBytes`.
+
+  One finding from that pass was NOT phase-02 scope and was fixed separately
+  (`627ce54`): the `secret_assignment` value group had been narrowed in `a391a0e`
+  so a value of exactly 8 characters ending in a backslash matched nothing at all.
+  The JSON-escape boundary moved into the replacement step; both directions are
+  now pinned together.
 
 ## Key insights
 
