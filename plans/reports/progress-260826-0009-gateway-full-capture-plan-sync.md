@@ -31,10 +31,17 @@ evidence and refuses nothing. Deliberate sequencing (the join is where a bug
 refuses every model call on a developer's machine), now disclosed in ADR-0021,
 which previously read as though both were live.
 
-One design gap to fix before that wiring: `Capture` takes the response as an
-argument, but the gate must run BEFORE forwarding. It needs splitting into a
-request half and a response half; calling it twice would duplicate the fingerprint
-and redaction work.
+**That seam is now built.** `CaptureRequest` does the request half before
+forwarding, `RequestCapture.ForGate()` renders it for the gate's evaluation (with
+response fields ABSENT rather than zeroed — a gate reading `HTTPStatus 0` as
+"status zero" would be reading a value nothing measured), and `Complete()` joins
+the response half without re-deriving the fingerprint. `Capture` remains as
+`CaptureRequest`+`Complete` so the two paths cannot diverge.
+
+The split's own risk is drilled: making `Complete` recompute the fingerprint from
+the already-redacted request headers turns the test red, because that yields the
+placeholder's hash — identical for every developer, present on every span. What
+remains for the wiring is calling these from `ServeHTTP`.
 
 ## The two defects worth remembering
 

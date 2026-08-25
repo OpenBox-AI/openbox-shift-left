@@ -147,29 +147,83 @@ type Captured struct {
 	HTTPStatus            int
 }
 
-// Capture builds the evidence for one relayed call, in the one order that works.
+// RequestCapture is the request half of the evidence, done before forwarding.
 //
-// The sequence is not a style choice and the ordering test is its control:
+// It exists because the gate has to decide BEFORE a response exists, while the
+// span needs both halves. Without the split, a caller would have to run Capture
+// twice — once with zeroed response fields to feed the gate, once fully populated
+// for the span — redoing the fingerprint and the redaction, and giving the
+// ordering invariant two places to be got wrong instead of one.
+type RequestCapture struct {
+	// Fingerprint is taken from the LIVE headers, before Headers below was
+	// redacted. That ordering is the whole reason this type holds both.
+	Fingerprint string
+	Headers     map[string]string
+	Body        string
+	Method      string
+	URL         string
+}
+
+// CaptureRequest does the request half, in the one order that works.
+//
+// The sequence is not a style choice and the ordering test is its control: the
 // fingerprint is taken from the LIVE request headers, before redactHeaders
 // replaces the value it derives from. Reversing these two lines yields a
 // fingerprint of the literal placeholder — the same value for every developer in
 // every org, present on every span, and wrong in a way nothing else would show.
-func Capture(method, url string, reqHeaders http.Header, reqBody string,
-	status int, respHeaders http.Header, respBody string) Captured {
+func CaptureRequest(method, url string, reqHeaders http.Header, reqBody string) RequestCapture {
 	// 1. Fingerprint FIRST, from the untouched headers.
 	fingerprint := credentialFingerprint(reqHeaders)
 
 	// 2. Redact. Headers by key name; bodies through the shared detector.
 	// 3. Cap — inside captureBody, after its redaction, never before.
+	return RequestCapture{
+		Fingerprint: fingerprint,
+		Headers:     redactHeaders(reqHeaders),
+		Body:        captureBody(reqBody),
+		Method:      method,
+		URL:         stripQuery(url),
+	}
+}
+
+// Complete joins the response half onto an already-captured request.
+//
+// The request half is NOT recomputed: it was done once, before forwarding, and
+// redoing it here would mean fingerprinting headers that have already been
+// redacted — the exact inversion CaptureRequest exists to prevent.
+func (r RequestCapture) Complete(status int, respHeaders http.Header, respBody string) Captured {
 	return Captured{
-		CredentialFingerprint: fingerprint,
-		RequestHeaders:        redactHeaders(reqHeaders),
+		CredentialFingerprint: r.Fingerprint,
+		RequestHeaders:        r.Headers,
 		ResponseHeaders:       redactHeaders(respHeaders),
-		RequestBody:           captureBody(reqBody),
+		RequestBody:           r.Body,
 		ResponseBody:          captureBody(respBody),
-		HTTPMethod:            method,
-		HTTPURL:               stripQuery(url),
+		HTTPMethod:            r.Method,
+		HTTPURL:               r.URL,
 		HTTPStatus:            status,
+	}
+}
+
+// Capture is the whole-exchange convenience, for a caller that already has both
+// halves. It is CaptureRequest followed by Complete and nothing else, so the two
+// paths cannot diverge in ordering.
+func Capture(method, url string, reqHeaders http.Header, reqBody string,
+	status int, respHeaders http.Header, respBody string) Captured {
+	return CaptureRequest(method, url, reqHeaders, reqBody).Complete(status, respHeaders, respBody)
+}
+
+// ForGate renders the request half as a Captured for the gate's evaluation, whose
+// verdict must be obtained before a response exists.
+//
+// The response fields are absent rather than zeroed-and-meaningful: a gate reading
+// HTTPStatus 0 as "status zero" would be reading a value nothing measured.
+func (r RequestCapture) ForGate() Captured {
+	return Captured{
+		CredentialFingerprint: r.Fingerprint,
+		RequestHeaders:        r.Headers,
+		RequestBody:           r.Body,
+		HTTPMethod:            r.Method,
+		HTTPURL:               r.URL,
 	}
 }
 
