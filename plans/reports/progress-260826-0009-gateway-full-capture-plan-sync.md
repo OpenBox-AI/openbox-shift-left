@@ -22,14 +22,36 @@ Verification standing on every commit: 12/12 modules green under `-race`,
 Tests added: gateway 44, client 113, gatewaycheck 10, gatewayservice 14,
 claude-code 191.
 
-## What is shipped but NOT reachable
+## The capture and gate paths are now REACHABLE
 
-`openbox init --gateway` installs a **transparent proxy**. `gate.Decide`,
-`capture.Capture` and `WriteRefusal` are written, tested and mutation-drilled, but
-nothing calls them from `ServeHTTP` — so as shipped the gateway captures no
-evidence and refuses nothing. Deliberate sequencing (the join is where a bug
-refuses every model call on a developer's machine), now disclosed in ADR-0021,
-which previously read as though both were live.
+`ServeHTTP` calls them, both opt-in via `WithCapture` / `WithGate`. A Gateway with
+neither set relays byte-identically — which is what phase 04's whole suite asserts,
+so they had to stay opt-in rather than become defaults.
+
+Three invariants, each mutation-drilled:
+
+- **Capture never alters the forward.** Redacting the forwarded `Authorization`
+  turns the test red. The capture copy is redacted; the relayed bytes are not.
+- **The response tee does not buffer.** First-byte latency is asserted against a
+  600ms-stalled upstream, so the tee cannot reintroduce the failure phase 04 exists
+  to prevent. The sink is bounded, and its bound is deliberately LARGER than the
+  wire cap so the cap still has something to truncate.
+- **A refusal never reaches the upstream**, and it is still EMITTED — a stopped
+  call is exactly the one an auditor needs, so dropping its evidence would make
+  refusals invisible in stored data.
+
+**What remains open is the gating PREDICATE, and it is a product decision, not
+missing code.** `WithGate` takes `gated func(*http.Request) bool`; a nil predicate
+gates nothing and makes no round-trip. Where it should come from is genuinely
+undecided: ADR-0017 says the engine must not second-guess the decider, and ~52
+model calls were measured per turn window, so gating everything is a round-trip per
+call. The gateway deliberately does not invent an answer.
+
+One test-writing lesson worth keeping: the first version of the capture assertion
+was RACY. The client returns from reading the body when the server closes the
+response, which is before the handler goroutine runs the emit that follows the
+relay — so asserting a server-side side effect right after the client sees EOF is a
+race, and it lost on the first run.
 
 **That seam is now built.** `CaptureRequest` does the request half before
 forwarding, `RequestCapture.ForGate()` renders it for the gate's evaluation (with

@@ -93,6 +93,13 @@ const maxRequestBody = 64 << 20 // 64 MiB
 // long is stuck, not slow.
 const writeIdleTimeout = 2 * time.Minute
 
+// Emitter receives the evidence one relayed call produced. A seam, so the gateway
+// never builds a client of its own: the CLI wires the same client, auth and signing
+// the hook path uses, and this package stays free of credential handling.
+type Emitter interface {
+	Emit(ctx context.Context, c Captured)
+}
+
 // Gateway relays requests to the configured upstream. It is safe for concurrent
 // use and holds no credential state.
 type Gateway struct {
@@ -101,6 +108,34 @@ type Gateway struct {
 	// maxBody is maxRequestBody in production. It is a field so a test can drive
 	// the over-cap path without allocating 64 MiB.
 	maxBody int64
+
+	// emitter, evaluator and gated are all OPTIONAL, and a Gateway with none of
+	// them set relays byte-identically — which is what phase 04's whole test suite
+	// asserts, so they must stay opt-in rather than become defaults.
+	emitter   Emitter
+	evaluator Evaluator
+	gated     func(*http.Request) bool
+}
+
+// WithCapture turns on evidence emission. Observe-only: it changes what is
+// REPORTED, never what is forwarded.
+func (g *Gateway) WithCapture(em Emitter) *Gateway {
+	g.emitter = em
+	return g
+}
+
+// WithGate turns on synchronous refusal.
+//
+// `gated` decides which calls get a verdict, and it is INJECTED rather than
+// decided here on purpose. ADR-0017's lesson is that the engine second-guessing
+// the decider is how a raw-rego org went ungoverned — and separately, ~52 model
+// calls were measured per turn window, so gating everything is a round-trip per
+// call. Where that predicate comes from is an open product decision; until it is
+// made, a nil `gated` means nothing is gated and no round-trip happens.
+func (g *Gateway) WithGate(ev Evaluator, gated func(*http.Request) bool) *Gateway {
+	g.evaluator = ev
+	g.gated = gated
+	return g
 }
 
 // New validates the configuration and returns the relay.
@@ -174,6 +209,32 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Capture the request half BEFORE forwarding, because the gate needs a verdict
+	// before a response exists and the fingerprint has to come off the live
+	// headers. Skipped entirely when neither capture nor the gate is on, so a bare
+	// relay does no redaction work it will not use.
+	var reqCapture RequestCapture
+	capturing := g.emitter != nil || g.evaluator != nil
+	if capturing {
+		reqCapture = CaptureRequest(r.Method, g.upstream+r.URL.Path, r.Header, string(body))
+	}
+
+	// The gate. Nothing is gated unless a predicate says so, and a nil predicate
+	// means no round-trip — see WithGate.
+	if g.evaluator != nil && g.gated != nil && g.gated(r) {
+		decision := Decide(r.Context(), g.evaluator, true, reqCapture.ForGate())
+		if !decision.Forward {
+			WriteRefusal(w, decision)
+			// Emit the refusal as evidence too: a call that was stopped is exactly
+			// the one an auditor needs to see, and dropping it would make a refusal
+			// invisible in stored data.
+			if g.emitter != nil {
+				g.emitter.Emit(r.Context(), reqCapture.Complete(refusalStatus, nil, ""))
+			}
+			return
+		}
+	}
+
 	// Match on path, not URL, and carry the query through: requests arrive as
 	// /v1/messages?beta=true.
 	//
@@ -216,13 +277,65 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// error body from acquiring an OpenBox envelope.
 	copyHeaders(w.Header(), resp.Header)
 	w.WriteHeader(resp.StatusCode)
-	g.stream(w, resp.Body)
+
+	// Tee the response into the capture buffer while relaying, so the evidence
+	// costs one pass rather than a second read of something already streamed.
+	// Bounded by the same rune cap the wire has, so a long stream cannot grow this
+	// without limit.
+	var sink *captureSink
+	if g.emitter != nil {
+		sink = &captureSink{}
+	}
+	g.streamTo(w, resp.Body, sink)
+
+	if g.emitter != nil {
+		g.emitter.Emit(r.Context(), reqCapture.Complete(resp.StatusCode, resp.Header, sink.String()))
+	}
+}
+
+// captureSink accumulates a bounded copy of the relayed response.
+//
+// Bounded at the collection step, not only at the wire step: a streamed completion
+// can run for minutes, and an unbounded buffer here would be the one place this
+// relay could grow without limit. The bound is deliberately LARGER than the wire
+// cap so the cap still has something to truncate — the same relationship
+// maxThinkingBytes has to capBody, and for the same reason: make the outer bound
+// smaller and the wire cap becomes vacuous.
+type captureSink struct {
+	buf []byte
+}
+
+const maxCaptureSinkBytes = 4 * captureBodyRunes
+
+func (s *captureSink) Write(p []byte) {
+	if s == nil || len(s.buf) >= maxCaptureSinkBytes {
+		return
+	}
+	room := maxCaptureSinkBytes - len(s.buf)
+	if len(p) > room {
+		p = p[:room]
+	}
+	s.buf = append(s.buf, p...)
+}
+
+func (s *captureSink) String() string {
+	if s == nil {
+		return ""
+	}
+	return string(s.buf)
 }
 
 // stream tees the response through with a flush per chunk. Buffer-then-forward
 // is forbidden here: Claude Code's byte watchdog cannot tell a buffered relay
 // from a stalled provider.
 func (g *Gateway) stream(w http.ResponseWriter, src io.Reader) {
+	g.streamTo(w, src, nil)
+}
+
+// streamTo relays and, when sink is non-nil, tees a bounded copy. The relay is
+// unchanged by the tee: the write to the client happens first and its error is
+// what ends the loop, so a capture problem can never abort a stream.
+func (g *Gateway) streamTo(w http.ResponseWriter, src io.Reader, sink *captureSink) {
 	ctl := http.NewResponseController(w)
 	buf := make([]byte, relayBufferSize)
 	for {
@@ -240,6 +353,7 @@ func (g *Gateway) stream(w http.ResponseWriter, src io.Reader) {
 			if _, writeErr := w.Write(buf[:n]); writeErr != nil {
 				return
 			}
+			sink.Write(buf[:n])
 			// Ignored deliberately: a ResponseWriter that cannot flush (HTTP/2
 			// handles it itself, or the client is gone) is not a reason to abort
 			// a stream that is otherwise being delivered.
