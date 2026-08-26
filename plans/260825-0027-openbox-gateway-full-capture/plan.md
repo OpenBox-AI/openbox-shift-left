@@ -66,7 +66,7 @@ and account-binding evidence. Track A must not wait for Track B.
 | 02 | [Thinking capture](phase-02-thinking-capture.md) | **implemented** (testbed dormant) | 3d | 01 (shares gate plumbing) |
 | 03 | [Decisions, ADRs, probes](phase-03-decisions-and-adrs.md) | **prepared** — P1 §3 run; P0/probe A/P1 §1 + 2 sign-offs remain user actions | 2d | — |
 | 04 | [Gateway passthrough core](phase-04-gateway-passthrough-core.md) | **implemented** (reviewed; testbed dormant) | 4d | 03 (relaxed — see phase file) |
-| 05 | [Capture, identity, account evidence](phase-05-gateway-capture-pipeline.md) | **implemented except req 5** (identity needs P0) | 4d | 04 |
+| 05 | [Capture, identity, account evidence](phase-05-gateway-capture-pipeline.md) | **implemented** — req 7 (the emitter) built 2026-08-26; req 5 coded, unproven (P0) | 4d | 04 |
 | 06 | [Gateway enforcement](phase-06-gateway-enforcement.md) | **implemented except the refusal shape** (2 constants, probe A) | 3d | 05 |
 | 07 | [Local daemon + MDM enablement](phase-07-distribution-assurance.md) | **implemented** (all 7 reqs; `--gateway` opt-in pending phase 08 evidence) | 2d | 06 |
 | 08 | [Conformance and testbed](phase-08-conformance-testbed.md) | **assets written, DORMANT**; 3 CI gates live; needs a stack to run | 3d | 07 |

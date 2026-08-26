@@ -16,9 +16,14 @@
   local account metadata), and retire ADR-0018's fabricated span attributes where the span
   is genuinely observed.
 - Priority: P1
-- Implementation status: **implemented except requirement 5** (identity from the
-  session header, which needs P0). Everything else is on the wire and drilled.
-- Review status: not reviewed
+- Implementation status: **implemented** (2026-08-26). Requirement 7 was NOT built when
+  this line first said "implemented except requirement 5", and the gap was invisible
+  from here: `WithCapture` had no production caller, so the relay discarded every
+  capture while both sides' tests stayed green. It is built now —
+  `cli/internal/gatewayemit` is the connector and `runGateway` opts in. Requirement 5
+  is coded against the header and still UNPROVEN (P0); when the header is absent the
+  gateway emits nothing and says so, rather than inventing a session.
+- Review status: reviewed 2026-08-26 (emitter change only)
 
 ## Key insights
 
@@ -128,9 +133,9 @@ by session_id.
 - [x] Body cap (65,536 RUNES, after redaction never before) — both drilled.
 - [x] Privacy doc: six new summary rows plus an **Account attribution** section — email as PII, the fingerprint, and the seven sibling fields deliberately NOT sent, with the origin-of-config-not-tamper-resistance limit stated.
 - [x] Classification attributes set from OBSERVED values (`http.method`, `http.url`, `http.status_code`) AND the root fields. Drilled: emptying the attributes turns the test red. ADR-0018's "synthesized" marker deliberately absent — this span really is observed.
-- [ ] **BLOCKED on P0.** Identity mapped from headers; session id equals hook-observed id. Phase 04 proved the header RELAYS verbatim; whether Claude Code SENDS `x-claude-code-session-id` needs real traffic through the gateway.
+- [~] **Coded; header presence STATICALLY EVIDENCED, live equality pending.** Identity is read from `X-Claude-Code-Session-Id` (canonical spelling — the capture side canonicalizes every key, and a lowercase lookup would miss on every request; `TestSessionHeaderLookupIsCanonical` holds it). A static probe of the installed 2.1.229 found it in the UNCONDITIONAL default header map beside `x-app`/`User-Agent`, so this is no longer blocked on P0 — see the 2026-08-26 amendment in [the probe report](../../reports/probe-260825-baseurl-auth-coverage.md). Two things stay unproven: that the bundled value EQUALS the hook-observed session id (inference from `Wt(){return KD()?.sessionId??Z9.id}`), and P0 itself (whether OAuth traffic follows a changed base URL — that bounds tier COVERAGE, not this emitter). `x-claude-code-agent-id` is bound to `DevEvent.AgentID`; it is CONDITIONAL on an agent context, so absence is normal. **`x-claude-code-parent-agent-id` is deliberately NOT bound** — `DevEvent` has no field for it, and adding one is a schema decision, not a wiring detail. **When the session header is absent the gateway emits NOTHING and warns, hourly.** A synthesized id was rejected deliberately: it fabricates a session core never saw start, and anything can reach a loopback port — curl, health checks, probes — none of which deserves a session record.
 - [x] SessionStart account stamping — `account_email` + `account_org_uuid` from the local record, metadata only. The bound struct IS the allowlist; a test asserts exactly two keys and that none of the seven sibling fields (name/role/type/tiers/billing) can escape. Every read failure is silent.
-- [~] Rides the existing client path (`buildPayload` → sign → POST), so signing and idempotency are inherited. The gateway process calling it is phase 06's wiring, since that is where the gateway gets a verdict round-trip.
+- [x] `Spool.Append` wiring — **this is the one that was missing, and deferring it to phase 06 is how it got lost.** `cli/internal/gatewayemit.Emitter` files each relayed call into the Claude Code adapter's spool under the session the request named, so the existing hook-driven flushers deliver it; signing and idempotency are inherited unchanged. A consequence worth keeping: the daemon does ZERO secret I/O — the flusher owns the key. `EventID` is `gw-` + sha256 over structural fields only (INV-5), because a redelivery long after the daemon exited must present the same key. With no DID configured the relay runs WITHOUT capture and says so, since those events could never be flushed.
 - [x] `activity_id` collision test — checked by CONSTRUCTION across all four namespaces (`:gateway:`, `:turn:<n>`, `:usage:rollup`, `cc-act-<hex>`). Drilled: removing the gateway namespace turns it red.
 - [x] Synthetic marker retired where observed — the gateway span carries no `synthesized` attribute because it is a real measurement. The hook turn span keeps its marker until openbox-core#130.
 - [x] Schema v1.5 — `const` and `x-schema-version` bumped, 25 conformance samples updated, changelog entry written. Golden fixtures show ZERO churn: the new `wireSpan` fields are appended and `omitempty`, so a hook-only install serializes byte-identically.

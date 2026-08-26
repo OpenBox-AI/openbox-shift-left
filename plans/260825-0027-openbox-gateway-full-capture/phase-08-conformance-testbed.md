@@ -112,6 +112,10 @@ contract change rather than on a broken session weeks later.
 - [ ] Volume + latency measured
 - [ ] Backend asks filed (retention, dedupe, account registry, mismatch alert)
 - [ ] Docs reconciled, verification report written
+- [ ] **Session-id EQUALITY asserted live.** The gateway's `X-Claude-Code-Session-Id` is statically evidenced as unconditional in 2.1.229, but that the value equals the id the HOOKS observe is still an inference. Assert a real session produces `:gateway:` rows whose `openbox_session_id` matches the hook-observed one. This is what moves phase 05 requirement 5 to done.
+- [ ] **Ingest with no `WorkflowStarted`.** The gateway covers the whole MACHINE (user-scope `ANTHROPIC_BASE_URL`) while hooks default to PROJECT scope, so a session in an un-inited directory produces gateway `ActivityCompleted` rows for which no hook ever opened a session. Whether core stores, orphans or rejects those is unknown — reading core is not evidence. Rejection burns the 5-attempt recovery budget and drops, which is bounded but silent. Until this runs, **docs must not claim un-inited-directory coverage lands in core** — only that it egresses.
+- [ ] **Response-header size at rest.** `capHeaders` bounds the WIRE, not the spool; `Transport.MaxResponseHeaderBytes` defaults to 10 MiB, so a broken upstream can write multi-MB spool lines. Measure, then either apply the `capHeaders` numbers at the bridge or set `MaxResponseHeaderBytes` in `gateway.New`.
+- [ ] **Spool growth with `OPENBOX_REALTIME=0` in an un-inited directory** — nothing flushes until a manual run. Pre-existing shape, multiplied by gateway call volume.
 
 ## Success criteria
 

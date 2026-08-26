@@ -130,6 +130,52 @@ subscription session for org A while the local file still described org B, and
 this leg cannot detect that. Binding the two together is P1 §1's job, and it
 remains open.
 
+## Amendment 2026-08-26 — the SESSION HEADER, answered statically
+
+**RUN.** A different question from P0 above, recorded here because phase 05
+requirement 5 depended on it and the plan called it "BLOCKED on P0". It is not
+blocked on P0: header PRESENCE is a property of the client binary, and this repo
+has probed a client binary statically before (probe-260813-2329). No credential,
+no network, no model call.
+
+Source: the installed Claude Code, `~/.local/share/claude/versions/2.1.229`.
+
+```
+strings -a <bin> | grep -o -i "x-claude-code[a-z-]*" | sort | uniq -c
+   3 X-Claude-Code-Ide-Authorization
+   5 X-Claude-Code-Session-Id
+   5 x-claude-code-agent-id
+   5 x-claude-code-parent-agent-id
+```
+
+The default header builder for API requests, extracted verbatim:
+
+```js
+p={"x-app":Ls()?"cli-bg":"cli","User-Agent":Eke(),"X-Claude-Code-Session-Id":Wt(),
+   ...,...c?.agentId&&{"x-claude-code-agent-id":...
+```
+
+**What this settles.** `X-Claude-Code-Session-Id` is UNCONDITIONAL — same tier as
+`x-app` and `User-Agent`, not behind a feature flag or an agent context. The
+agent/parent-agent headers ARE conditional (`...c?.agentId&&{…}`), so their absence
+is normal and must never read as a fault. A client-side sanitize set names the same
+three headers with source `"claude-code"`.
+
+**What this does NOT settle**, and the distinction is the whole discipline:
+
+- This is CODE-PATH evidence, not observed traffic. Presence in the bundle is not
+  proof of presence on the wire.
+- It says nothing about P0 above — whether subscription-OAuth traffic follows a
+  CHANGED `ANTHROPIC_BASE_URL` at all. That bounds who the gateway tier COVERS; it
+  does not bound whether the emitter is correct.
+- **Header value == the session id the hooks observe** remains an INFERENCE. The
+  getter is `function Wt(){return KD()?.sessionId??Z9.id}` — the agent context's
+  session id, falling back to the main one — which reads like the client's single
+  session identity, but equality has to be ASSERTED live. That is phase 08's job.
+
+**Consequence for phase 05 requirement 5:** move it from "BLOCKED on P0" to
+"statically evidenced; live equality assertion pending". Not to "done".
+
 ## Unresolved questions
 
 - **P0, both modes:** does `ANTHROPIC_BASE_URL` redirect, and does the credential
