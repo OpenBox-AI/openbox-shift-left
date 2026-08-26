@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"net/http"
 	"strconv"
 	"strings"
 	"sync"
@@ -171,8 +172,17 @@ func (e *Emitter) Emit(ctx context.Context, c gateway.Captured) {
 		// User-Agent — but that is code-path evidence, not observed traffic, so
 		// this path stays live and must stay loud.
 		e.vlog("  capture: SKIPPED — the call carries no %s header, so it cannot be attributed to a session", sessionHeader)
-		e.warnThrottled(&e.lastNoSessionWarn, "openbox gateway: relayed calls carry no %s header, so nothing can be attributed to a session and no governance events are being sent. "+
-			"The model calls themselves are unaffected.", sessionHeader)
+		// The WARNING is gated on the call plausibly being a model call; the SKIP
+		// above is not. A healthy install relays health checks and model-list
+		// probes that legitimately carry no session id — `HEAD /api/hello` on every
+		// startup — and warning about those said "no governance events are being
+		// sent" on a gateway that was working perfectly. A recurring false alarm in
+		// the one channel that reports real gaps is worse than no channel: it
+		// trains the reader to ignore it.
+		if isModelCall(c) {
+			e.warnThrottled(&e.lastNoSessionWarn, "openbox gateway: relayed model calls carry no %s header, so nothing can be attributed to a session and no governance events are being sent. "+
+				"The model calls themselves are unaffected.", sessionHeader)
+		}
 		return
 	}
 
@@ -191,6 +201,19 @@ func (e *Emitter) Emit(ctx context.Context, c gateway.Captured) {
 	if e.Flush != nil {
 		e.Flush(sessionID)
 	}
+}
+
+// isModelCall reports whether a relayed call could be an inference request.
+//
+// Keyed on the METHOD, because the Messages API is POST-only: a HEAD or GET is a
+// health check, a model-list probe or a capability ping, none of which has a
+// session to belong to. Deliberately permissive in the other direction — any POST
+// counts, including one to a path this code has never heard of — because the
+// failure directions are not symmetric. A missed warning hides a real governance
+// gap; a spurious one only adds noise, and this predicate exists to remove noise
+// without ever suppressing the real thing.
+func isModelCall(c gateway.Captured) bool {
+	return strings.EqualFold(c.HTTPMethod, http.MethodPost)
 }
 
 // requestID picks the id this call is known by. The provider's own id when it

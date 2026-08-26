@@ -318,7 +318,7 @@ func TestLoopbackSpellingIsCaseInsensitive(t *testing.T) {
 	}
 }
 
-// TestEnvOverrideIsDetected is the control on a report that could previously
+// TestEnvValueIsDetected is the control on a report that could previously
 // assert the opposite of the truth.
 //
 // A real ANTHROPIC_BASE_URL beats the settings file. Without this, doctor read the
@@ -326,17 +326,17 @@ func TestLoopbackSpellingIsCaseInsensitive(t *testing.T) {
 // reported "configured / reachable yes" on a machine where every model call went
 // straight to the provider — a bypass reported as healthy, which is the failure
 // this product exists to prevent.
-func TestEnvOverrideIsDetected(t *testing.T) {
+func TestEnvValueIsReportedWithoutClaimingItWins(t *testing.T) {
 	home := t.TempDir()
 	writeSettings(t, filepath.Join(home, ".claude", "settings.json"), "http://127.0.0.1:8788")
 
 	t.Run("env disagrees with the file", func(t *testing.T) {
 		r := Inspect(home, "", dialWait, func(string) string { return "https://api.anthropic.com" })
-		if !r.EnvOverridesSettings {
-			t.Error("an env value that disagrees with the file was not reported as an override")
+		if !r.EnvDiffersFromSettings {
+			t.Error("an env value that disagrees with the file was not reported at all")
 		}
-		if r.EnvOverride != "https://api.anthropic.com" {
-			t.Errorf("EnvOverride = %q", r.EnvOverride)
+		if r.EnvValue != "https://api.anthropic.com" {
+			t.Errorf("EnvValue = %q", r.EnvValue)
 		}
 		// The file value is still reported: it is what an operator has to change.
 		if r.ConfiguredAddr != "http://127.0.0.1:8788" {
@@ -346,22 +346,22 @@ func TestEnvOverrideIsDetected(t *testing.T) {
 
 	t.Run("env agrees", func(t *testing.T) {
 		r := Inspect(home, "", dialWait, func(string) string { return "http://127.0.0.1:8788" })
-		if r.EnvOverridesSettings {
+		if r.EnvDiffersFromSettings {
 			t.Error("an agreeing env value was reported as an override")
 		}
 	})
 
 	t.Run("a trailing slash is not a disagreement", func(t *testing.T) {
 		r := Inspect(home, "", dialWait, func(string) string { return "http://127.0.0.1:8788/" })
-		if r.EnvOverridesSettings {
+		if r.EnvDiffersFromSettings {
 			t.Error("a trailing slash was reported as a conflicting override")
 		}
 	})
 
 	t.Run("env unset", func(t *testing.T) {
 		r := Inspect(home, "", dialWait, func(string) string { return "" })
-		if r.EnvOverridesSettings || r.EnvOverride != "" {
-			t.Errorf("unset env produced override=%v value=%q", r.EnvOverridesSettings, r.EnvOverride)
+		if r.EnvDiffersFromSettings || r.EnvValue != "" {
+			t.Errorf("unset env produced override=%v value=%q", r.EnvDiffersFromSettings, r.EnvValue)
 		}
 	})
 }

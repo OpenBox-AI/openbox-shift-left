@@ -256,26 +256,25 @@ func (a *app) reportGateway() {
 			fmt.Fprintf(a.stdout, "               model calls will FAIL rather than escape, which is the safe\n")
 			fmt.Fprintf(a.stdout, "               direction. Start the gateway: `openbox gateway`\n")
 		}
-		// THE FILE IS NOT THE EFFECTIVE VALUE, and saying so is the difference
-		// between a true report and a confident false one. A real environment
-		// variable beats the settings file, so every line above can describe a
-		// correctly configured, reachable gateway that receives nothing —
-		// which is what happened on a real machine whose tool carried the
-		// provider URL in its own launch environment.
-		if r.EnvOverridesSettings {
-			fmt.Fprintf(a.stdout, "  EFFECTIVE    %s — from the environment, NOT the file above\n", r.EnvOverride)
-			fmt.Fprintf(a.stdout, "               ANTHROPIC_BASE_URL is set in this process's environment and a real\n")
-			fmt.Fprintf(a.stdout, "               environment variable OVERRIDES the settings file, so the file is\n")
-			fmt.Fprintf(a.stdout, "               inert and model calls are NOT reaching the gateway. Everything\n")
-			fmt.Fprintf(a.stdout, "               above describes configuration that is not in force.\n")
-		} else if r.EnvOverride != "" {
-			fmt.Fprintf(a.stdout, "  environment  agrees (ANTHROPIC_BASE_URL=%s)\n", r.EnvOverride)
+		// PRECEDENCE, stated because the first version of this block asserted the
+		// reverse and was wrong: for Claude Code the SETTINGS FILE WINS over a shell
+		// export (Anthropic's docs, llm-gateway-connect#set-in-a-settings-file). So
+		// a differing env value is reported as INFORMATION, never as a fault — the
+		// file above is what the tool uses.
+		//
+		// The remedy line matters more than any of it: `/status` inside a session
+		// prints the base URL actually in force. That is the authoritative check,
+		// and doctor cannot be — it sees its own environment, not the session's.
+		if r.EnvDiffersFromSettings {
+			fmt.Fprintf(a.stdout, "  environment  ANTHROPIC_BASE_URL=%s is also set here, and DIFFERS\n", r.EnvValue)
+			fmt.Fprintf(a.stdout, "               The settings file above takes precedence for Claude Code, so the\n")
+			fmt.Fprintf(a.stdout, "               file is what the tool uses. Confirm with `/status` in a session.\n")
+		} else if r.EnvValue != "" {
+			fmt.Fprintf(a.stdout, "  environment  agrees (ANTHROPIC_BASE_URL=%s)\n", r.EnvValue)
 		} else {
-			// The honest limit: this is one process's environment, not the tool's.
-			fmt.Fprintf(a.stdout, "  environment  ANTHROPIC_BASE_URL not set here — but this is `doctor`'s own\n")
-			fmt.Fprintf(a.stdout, "               environment, and it cannot see the environment the tool was\n")
-			fmt.Fprintf(a.stdout, "               launched with. A tool that sets the variable itself overrides\n")
-			fmt.Fprintf(a.stdout, "               the file, so \"configured\" above is not proof of routing.\n")
+			fmt.Fprintf(a.stdout, "  verify with  `/status` in a Claude Code session — it prints the base URL\n")
+			fmt.Fprintf(a.stdout, "               actually in force. doctor reads the file, which is the source\n")
+			fmt.Fprintf(a.stdout, "               that wins, but only the session can confirm what it resolved.\n")
 		}
 		// Where the daemon's own diagnostics are. Named because it is the only
 		// place the gateway says it is RELAYING BUT NOT RECORDING — a missing DID,

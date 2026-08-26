@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -376,4 +377,61 @@ func TestAUsableSessionHeaderStillSpools(t *testing.T) {
 	if len(files) == 0 {
 		t.Error("a valid UUID session id was refused; the bound is too tight to be useful")
 	}
+}
+
+// TestOnlyModelCallsWarnAboutAMissingSession. A healthy install relays calls that
+// legitimately have no session id — Claude Code sends `HEAD /api/hello` on
+// startup — and warning about those announced "no governance events are being
+// sent" on a gateway that was working perfectly. A recurring false alarm in the
+// one channel that reports real gaps is worse than no channel.
+//
+// The SKIP is unconditional; only the WARNING is gated. A non-model call must
+// still produce no event.
+func TestOnlyModelCallsWarnAboutAMissingSession(t *testing.T) {
+	noSession := func(method, url string) gateway.Captured {
+		c := sampleCaptured()
+		c.HTTPMethod = method
+		c.HTTPURL = url
+		c.RequestHeaders = map[string]string{"Anthropic-Version": "2023-06-01"}
+		return c
+	}
+
+	t.Run("a health check is silent", func(t *testing.T) {
+		em, spool, warnings := newTestEmitter(t)
+		em.Emit(context.Background(), noSession(http.MethodHead, "https://api.anthropic.com/api/hello"))
+		if got := warnings.String(); got != "" {
+			t.Errorf("a health check produced a governance warning: %q", got)
+		}
+		if entries, _ := os.ReadDir(spool.Dir); len(entries) != 0 {
+			t.Error("a health check was spooled as a governance event")
+		}
+	})
+
+	t.Run("a model listing is silent", func(t *testing.T) {
+		em, _, warnings := newTestEmitter(t)
+		em.Emit(context.Background(), noSession(http.MethodGet, "https://api.anthropic.com/v1/models"))
+		if got := warnings.String(); got != "" {
+			t.Errorf("a model listing produced a governance warning: %q", got)
+		}
+	})
+
+	// The half that must NOT be suppressed: a real inference request with no
+	// session id is a genuine governance gap and has to stay loud.
+	t.Run("a model call still warns", func(t *testing.T) {
+		em, _, warnings := newTestEmitter(t)
+		em.Emit(context.Background(), noSession(http.MethodPost, "https://api.anthropic.com/v1/messages"))
+		if !strings.Contains(strings.ToLower(warnings.String()), "x-claude-code-session-id") {
+			t.Errorf("a POSTed model call with no session id did not warn: %q", warnings.String())
+		}
+	})
+
+	// Permissive in the safe direction: an unrecognised POST path still warns,
+	// because a missed warning hides a real gap while a spurious one is only noise.
+	t.Run("an unknown POST path still warns", func(t *testing.T) {
+		em, _, warnings := newTestEmitter(t)
+		em.Emit(context.Background(), noSession(http.MethodPost, "https://api.anthropic.com/v1/something-new"))
+		if warnings.String() == "" {
+			t.Error("an unrecognised POST was silently ignored; the predicate must err toward warning")
+		}
+	})
 }

@@ -72,21 +72,23 @@ type Report struct {
 	// BypassNotes are the specific, checkable reasons.
 	BypassNotes []string
 
-	// EnvOverride is ANTHROPIC_BASE_URL as it stands in the INSPECTING process's
+	// EnvValue is ANTHROPIC_BASE_URL as it stands in the INSPECTING process's
 	// environment, empty when unset.
 	//
-	// It is here because a real environment variable BEATS the settings file, and
-	// without it this report was able to state the opposite of the truth: on a
-	// machine whose tool carried the provider URL in its own launch environment,
-	// doctor read the settings file, found the loopback address it had written
-	// there, and reported "configured / reachable yes" while every model call went
-	// straight to the provider. A governance product asserting a bypass is healthy
-	// is the failure it exists to prevent.
-	EnvOverride string
+	// PRECEDENCE, because the first version of this got it backwards: for Claude
+	// Code the SETTINGS FILE WINS. Anthropic's own documentation is explicit —
+	// "when both a shell export and a settings-file env block set the same
+	// variable, the settings-file value applies"
+	// (code.claude.com/docs/en/llm-gateway-connect#set-in-a-settings-file). So an
+	// env value that disagrees with a configured file is NOT an override and must
+	// not be reported as one; the file is what the tool uses. It matters only when
+	// no settings file sets the variable at all, where the environment is then the
+	// effective source.
+	EnvValue string
 
-	// EnvOverridesSettings is the actionable case: an env value that disagrees
-	// with the file, so the file is inert.
-	EnvOverridesSettings bool
+	// EnvDiffersFromSettings is informational, not a fault: both are set and they
+	// disagree, and the file is the one in force.
+	EnvDiffersFromSettings bool
 }
 
 // envKey is the variable Claude Code reads to find its API base.
@@ -100,7 +102,7 @@ func Inspect(homeDir, managedPath string, dialTimeout time.Duration, getenv func
 	// Injected rather than read directly so a test can drive both branches, and so
 	// the caller decides whose environment is being described.
 	if getenv != nil {
-		r.EnvOverride = strings.TrimSpace(getenv(envKey))
+		r.EnvValue = strings.TrimSpace(getenv(envKey))
 	}
 
 	// Managed settings win, and their precedence is why they are checked first:
@@ -178,9 +180,9 @@ func Inspect(homeDir, managedPath string, dialTimeout time.Duration, getenv func
 	// The env comparison comes last, because it is a statement ABOUT the
 	// configured value. Normalised on both sides so a trailing slash is not
 	// reported as a disagreement.
-	if r.EnvOverride != "" && r.ConfiguredAddr != "" &&
-		!strings.EqualFold(strings.TrimRight(r.EnvOverride, "/"), strings.TrimRight(r.ConfiguredAddr, "/")) {
-		r.EnvOverridesSettings = true
+	if r.EnvValue != "" && r.ConfiguredAddr != "" &&
+		!strings.EqualFold(strings.TrimRight(r.EnvValue, "/"), strings.TrimRight(r.ConfiguredAddr, "/")) {
+		r.EnvDiffersFromSettings = true
 	}
 
 	r.BypassCapable, r.BypassNotes = bypassAssessment(r, r.BypassNotes)
