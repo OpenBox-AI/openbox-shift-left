@@ -23,9 +23,9 @@ func newTestEmitter(t *testing.T) (*Emitter, hookflow.Spool, *bytes.Buffer) {
 	spool := hookflow.Spool{Dir: filepath.Join(dir, "cc-spool")}
 	var warnings bytes.Buffer
 	em := &Emitter{
-		Spool:        spool,
-		DeveloperDID: testDID,
-		Warn:         func(format string, args ...any) { fmt.Fprintf(&warnings, format, args...) },
+		Spool: spool,
+		DID:   func() string { return testDID },
+		Warn:  func(format string, args ...any) { fmt.Fprintf(&warnings, format, args...) },
 		// nil Flush: the detached flusher must never be spawned from a test.
 	}
 	return em, spool, &warnings
@@ -265,5 +265,50 @@ func TestTheWarningReturnsAfterTheInterval(t *testing.T) {
 	em.Emit(context.Background(), c)
 	if n := strings.Count(strings.ToLower(warnings.String()), "x-claude-code-session-id"); n != 2 {
 		t.Errorf("warned %d times after the interval elapsed, want 2 — a standing fault went silent", n)
+	}
+}
+
+// TestDIDIsResolvedLazilySoAuthTakesEffectWithoutARestart. The gateway is a
+// supervised daemon that can easily be started before `openbox auth` finishes —
+// that is the ordinary order, not an edge case. Resolving the DID once at
+// construction meant such a daemon relayed without recording for its entire life,
+// with a single startup line as the only witness.
+func TestDIDIsResolvedLazilySoAuthTakesEffectWithoutARestart(t *testing.T) {
+	em, spool, warnings := newTestEmitter(t)
+	did := ""
+	em.DID = func() string { return did }
+
+	em.Emit(context.Background(), capturedWithSession("sess-1"))
+	if entries, _ := os.ReadDir(spool.Dir); len(entries) != 0 {
+		t.Fatal("spooled an event with no DID — nothing could have attributed it")
+	}
+	if !strings.Contains(warnings.String(), "openbox auth") {
+		t.Errorf("the warning does not name the remedy: %q", warnings.String())
+	}
+
+	// `openbox auth` runs in another terminal. No restart.
+	did = testDID
+	em.Emit(context.Background(), capturedWithSession("sess-1"))
+	evs := spooledEvents(t, spool, "sess-1")
+	if len(evs) != 1 {
+		t.Fatalf("spooled %d events after the DID appeared, want 1 — a restart should not be required", len(evs))
+	}
+	if evs[0].DeveloperDID != testDID {
+		t.Errorf("DeveloperDID = %q", evs[0].DeveloperDID)
+	}
+}
+
+// TestDIDIsCachedOnceResolved keeps the lazy read from becoming a per-call file
+// read at ~52 model calls per turn.
+func TestDIDIsCachedOnceResolved(t *testing.T) {
+	em, _, _ := newTestEmitter(t)
+	calls := 0
+	em.DID = func() string { calls++; return testDID }
+
+	for i := 0; i < 4; i++ {
+		em.Emit(context.Background(), capturedWithSession("sess-1"))
+	}
+	if calls != 1 {
+		t.Errorf("resolved the DID %d times, want 1 once it is known", calls)
 	}
 }

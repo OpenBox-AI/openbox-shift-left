@@ -4,7 +4,9 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/openbox-ai/openbox-shift-left/adapters/common/hookflow"
@@ -43,8 +45,16 @@ const upstreamRequestHeader = "Request-Id"
 // stating: this process never touches the signing key or the obx_ credential —
 // the flusher does. The relay daemon does zero secret I/O.
 type Emitter struct {
-	Spool        hookflow.Spool
-	DeveloperDID string
+	Spool hookflow.Spool
+
+	// DID resolves the developer identity, and it is a FUNCTION because this is a
+	// long-lived daemon. Reading it once at construction meant a gateway started
+	// before `openbox auth` finished stayed capture-less for its whole life —
+	// which is the ordinary order of operations, not an edge case, and the hook
+	// path never had the problem because each hook is a fresh process. Resolved
+	// lazily and cached on the first non-empty answer, so the steady state is
+	// still one read.
+	DID func() string
 
 	// Warn reports a dropped event. Required in practice: every path that
 	// declines to emit is a governance gap, and a gap nobody is told about is
@@ -61,6 +71,33 @@ type Emitter struct {
 
 	mu                sync.Mutex
 	lastNoSessionWarn time.Time
+	lastNoDIDWarn     time.Time
+	cachedDID         string
+	fallbackSeq       uint64
+}
+
+// developerDID resolves the DID, caching the first non-empty answer. Re-reading
+// until one appears is what lets `openbox auth` take effect without a restart.
+func (e *Emitter) developerDID() string {
+	e.mu.Lock()
+	if e.cachedDID != "" {
+		did := e.cachedDID
+		e.mu.Unlock()
+		return did
+	}
+	e.mu.Unlock()
+
+	if e.DID == nil {
+		return ""
+	}
+	did := e.DID()
+	if did == "" {
+		return ""
+	}
+	e.mu.Lock()
+	e.cachedDID = did
+	e.mu.Unlock()
+	return did
 }
 
 // Emit records one relayed call. It never returns an error and never panics.
@@ -75,6 +112,21 @@ func (e *Emitter) Emit(ctx context.Context, c gateway.Captured) {
 			e.warn("openbox gateway: dropped a captured call after a panic: %v", r)
 		}
 	}()
+
+	// A REFUSED call arrives here too (gateway/proxy.go emits one so a stopped
+	// call is not invisible in stored data), and this mapping would report it as a
+	// COMPLETED turn — the refusal status is the only hint, and 403 is also a real
+	// upstream answer. Latent today: WithGate has no production caller, so nothing
+	// is gated and this path cannot fire. It must be settled before the gate is
+	// wired, and how a refusal is represented on the wire is phase 06's decision,
+	// not something to invent here — `status` is tool-only by client.statusFor.
+	// Recorded in phase 06 rather than left to be rediscovered.
+
+	did := e.developerDID()
+	if did == "" {
+		e.warnThrottled(&e.lastNoDIDWarn, "openbox gateway: no developer DID configured, so relayed model calls are NOT being recorded. Run `openbox auth`; no restart is needed.")
+		return
+	}
 
 	sessionID := c.RequestHeaders[sessionHeader]
 	if sessionID == "" {
@@ -97,7 +149,7 @@ func (e *Emitter) Emit(ctx context.Context, c gateway.Captured) {
 
 	id := Identity{
 		SessionID:    sessionID,
-		DeveloperDID: e.DeveloperDID,
+		DeveloperDID: did,
 		AgentID:      c.RequestHeaders[agentHeader],
 	}
 	ev := EventFor(id, e.requestID(c), e.now(), c)
@@ -128,10 +180,16 @@ func (e *Emitter) requestID(c gateway.Captured) string {
 	}
 	var b [16]byte
 	if _, err := rand.Read(b[:]); err != nil {
-		// Cannot fail in practice; a timestamp still separates calls if it does.
-		return "gw-" + e.now().UTC().Format("20060102T150405.000000000")
+		// A bare timestamp here would NOT be unique: two concurrent calls in the
+		// same session can read the same clock tick, and the id feeds the
+		// idempotency hash — so core would absorb the second as a duplicate and
+		// that call's evidence would vanish with no error anywhere. A process-local
+		// counter cannot collide with itself, which is the property actually
+		// needed.
+		return GatewayIDPrefix + "seq-" + strconv.FormatUint(atomic.AddUint64(&e.fallbackSeq, 1), 36) +
+			"-" + strconv.FormatInt(e.now().UTC().UnixNano(), 36)
 	}
-	return "gw-" + hex.EncodeToString(b[:])
+	return GatewayIDPrefix + hex.EncodeToString(b[:])
 }
 
 func (e *Emitter) now() time.Time {

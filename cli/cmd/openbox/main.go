@@ -67,8 +67,12 @@ type app struct {
 	newRegistrar   func(baseURL, credential, clientID string) devinit.Registrar
 
 	// gatewayReady and gatewayCtx exist so a test can drive the REAL `gateway`
-	// command instead of a stand-in. Both nil in production, where the command
-	// serves until a signal arrives.
+	// command instead of a stand-in. Both nil in production.
+	//
+	// gatewayCtx is an ADDITIONAL cancellation source, never a replacement for
+	// signal handling — that stays armed unconditionally, so no field can leave a
+	// daemon unable to answer SIGTERM and the branch tests drive is the branch
+	// production runs.
 	//
 	// They are here rather than as flags because the wiring itself is what needs
 	// covering: the gateway once shipped with capture unconnected, and no test

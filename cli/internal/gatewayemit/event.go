@@ -22,6 +22,11 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/gateway"
 )
 
+// GatewayIDPrefix marks every id this package mints — the idempotency key and
+// the fallback request id. One constant, because three hand-typed copies across
+// two files can drift apart silently.
+const GatewayIDPrefix = "gw-"
+
 // Identity is what the daemon knows about the session a captured call belongs to.
 //
 // It is a parameter rather than something this package resolves, because the
@@ -75,7 +80,7 @@ func EventFor(id Identity, requestID string, at time.Time, c gateway.Captured) c
 			ResponseBody:          c.ResponseBody,
 		},
 	}
-	ev.EventID = eventID(ev)
+	ev.EventID = eventID(id.SessionID, requestID, string(ev.EventType), ev.Timestamp, c.HTTPMethod, c.HTTPURL)
 	return ev
 }
 
@@ -86,18 +91,15 @@ func EventFor(id Identity, requestID string, at time.Time, c gateway.Captured) c
 // that wrote it exited, and a redelivery has to present the same key or core
 // counts the call twice. Only structural fields feed the hash — never a header
 // value, a body, or the fingerprint, which derives from a secret.
-func eventID(ev client.DevEvent) string {
+//
+// It takes the fields flat rather than a DevEvent so that it has no reachable
+// nil precondition: reading them back out of a Span pointer built one statement
+// earlier bought nothing and made a panic possible from any future caller.
+func eventID(parts ...string) string {
 	h := sha256.New()
-	for _, part := range []string{
-		ev.SessionID,
-		ev.GatewayRequestID,
-		string(ev.EventType),
-		ev.Timestamp,
-		ev.Span.HTTPMethod,
-		ev.Span.HTTPURL,
-	} {
+	for _, part := range parts {
 		h.Write([]byte(part))
 		h.Write([]byte{0x1f}) // separator: two fields cannot merge into one preimage
 	}
-	return "gw-" + hex.EncodeToString(h.Sum(nil))[:32]
+	return GatewayIDPrefix + hex.EncodeToString(h.Sum(nil))[:32]
 }

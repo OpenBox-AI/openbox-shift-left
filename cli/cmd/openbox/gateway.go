@@ -72,21 +72,25 @@ func (a *app) runGateway(args []string) int {
 	// and no gateway span ever reached core. gatewaycapture_test.go is the
 	// control, and it drives this function rather than constructing a Gateway.
 	//
-	// An unconfigured machine relays WITHOUT capture rather than spooling events
-	// nobody can attribute: with no DID the flusher cannot build a client, so
-	// those events would sit on disk forever while looking like success here.
-	if did := devconfig.ResolveDIDOrEmpty(); did != "" {
+	// Probe-A mode replaces the handler wholesale below, so `g` — and the emitter
+	// wired onto it — would never be served. Skipping the wiring here keeps that
+	// explicit rather than building a capture pipeline the run discards.
+	//
+	// The DID is passed as a RESOLVER, not a value. This daemon outlives the
+	// moment it starts: resolving once meant a gateway started before `openbox
+	// auth` finished never recorded anything, for its whole life, which is the
+	// ordinary order of operations rather than an edge case. The hook path never
+	// had the problem because every hook is a fresh process.
+	if !*refuseAll {
 		spool := hookflow.Spool{Dir: devconfig.SpoolDir(gatewaySpoolSubdir)}
 		trigger := hookflow.RealtimeTrigger{Spool: spool, Provider: gatewaySpoolProvider}
 		logger := log.New(a.stderr, "", 0)
 		g = g.WithCapture(&gatewayemit.Emitter{
-			Spool:        spool,
-			DeveloperDID: did,
-			Warn:         func(format string, args ...any) { fmt.Fprintf(a.stderr, format+"\n", args...) },
-			Flush:        func(sessionID string) { trigger.Maybe(logger, sessionID) },
+			Spool: spool,
+			DID:   devconfig.ResolveDIDOrEmpty,
+			Warn:  logger.Printf,
+			Flush: func(sessionID string) { trigger.Maybe(logger, sessionID) },
 		})
-	} else {
-		fmt.Fprintln(a.stderr, "openbox gateway: no developer DID configured, so model calls are relayed but NOT recorded. Run `openbox auth`.")
 	}
 
 	// Probe-A mode. Announced loudly, because a gateway that refuses everything
@@ -111,6 +115,8 @@ func (a *app) runGateway(args []string) int {
 		fmt.Fprintf(a.stderr, "  measure how Claude Code reacts to the refusal shape (probe A). Watch the CLIENT:\n")
 		fmt.Fprintf(a.stderr, "  how many requests arrive for one prompt, what the session prints, whether it\n")
 		fmt.Fprintf(a.stderr, "  disables a capability for the rest of its life, and its exit code.\n")
+		fmt.Fprintf(a.stderr, "  CAPTURE IS ALSO OFF in this mode: nothing reaches the relay, so nothing is\n")
+		fmt.Fprintf(a.stderr, "  recorded. A probe run leaves no governance events behind.\n")
 		fmt.Fprintf(a.stderr, "  Stop this process when you are done.\n")
 	} else if *refuseStatus != 0 || *refuseType != "" {
 		listener.Close()
@@ -131,13 +137,19 @@ func (a *app) runGateway(args []string) int {
 	fmt.Fprintf(a.stdout, "openbox gateway listening on %s, forwarding to %s\n", listener.Addr(), cfg.Upstream)
 	fmt.Fprintln(a.stdout, "pass-through auth: this process resolves, stores and injects no credential")
 
-	// Stop on the signals a service manager actually sends. A test supplies its
-	// own context instead, because a test binary cannot signal itself safely.
-	ctx := a.gatewayCtx
-	if ctx == nil {
-		signalCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-		defer stop()
-		ctx = signalCtx
+	// Stop on the signals a service manager actually sends. UNCONDITIONALLY: an
+	// earlier version armed this only when no test context was set, which made
+	// signal handling something a struct field could switch off and left the
+	// production branch — the only one that ever runs for real — unexercised by
+	// every test. A test context is an ADDITIONAL cancellation source instead, so
+	// what the tests drive is what a daemon runs.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	if a.gatewayCtx != nil {
+		merged, cancel := context.WithCancel(ctx)
+		defer cancel()
+		defer context.AfterFunc(a.gatewayCtx, cancel)()
+		ctx = merged
 	}
 	if a.gatewayReady != nil {
 		a.gatewayReady(listener.Addr())
