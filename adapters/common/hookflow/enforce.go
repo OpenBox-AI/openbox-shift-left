@@ -213,7 +213,18 @@ func RedactText(r *decision.Redactor, s string) string {
 // candidate string per step instead of testing one byte. Three copies of a
 // boundary rule is three places for an off-by-one to hide, and this one governs
 // whether bytes on the wire are parseable.
+// A non-positive n yields "", it does not panic. That guard belongs HERE rather
+// than in a caller, and the reason is this function's own justification: it was
+// extracted to be the repo's one implementation of the primitive, so a bound
+// computed as remaining budget — `maxThinkingBytes - len(acc) - len(sep)`, the
+// exact shape appendThinking uses — is the natural next call. Without it,
+// `len(s) <= n` is false for every negative n, the backup loop is skipped by
+// `n > 0`, and `s[:n]` panics on a hook, where INV-3 says nothing may fail a
+// tool call.
 func TruncateBytes(s string, n int) string {
+	if n <= 0 {
+		return ""
+	}
 	if len(s) <= n {
 		return s
 	}

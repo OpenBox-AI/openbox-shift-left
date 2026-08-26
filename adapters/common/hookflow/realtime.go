@@ -164,6 +164,22 @@ func (t RealtimeTrigger) Maybe(logger *log.Logger, sessionID string) {
 		return
 	}
 	if cmd.Process != nil {
-		_ = cmd.Process.Release()
+		// REAP IT. Release drops this process's handle on the child; it does not
+		// collect the child's exit status, so the child stays a zombie until its
+		// parent dies. That was invisible while every caller was a hook — a
+		// process that exits in milliseconds, after which init reaps — and became
+		// a resource leak the moment a LONG-LIVED caller appeared: the gateway
+		// daemon runs under launchd KeepAlive / systemd Restart=always for days
+		// and calls Maybe per relayed model call, so at one spawn per debounce
+		// window it accumulates zombies until the per-uid process limit is hit,
+		// at which point nothing on the machine can fork.
+		//
+		// Wait in a goroutine, not Release: the child is already detached
+		// (detachAttr gives it its own session) so waiting does not tie its
+		// lifetime to ours, and there are no pipes to drain — stdin/stdout/stderr
+		// are nil above — so this goroutine blocks only on the child's exit and
+		// then ends. A hook process that exits before the goroutine runs loses
+		// nothing: init reaps, exactly as before.
+		go func() { _ = cmd.Wait() }()
 	}
 }
