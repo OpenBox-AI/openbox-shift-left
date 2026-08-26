@@ -107,3 +107,47 @@ func TestGatewayHeaderCapLeavesOrdinaryHeadersAlone(t *testing.T) {
 		t.Error("an empty header map must stay nil, so omitempty drops the key")
 	}
 }
+
+// TestGatewayHeaderCapIsAByteBound is the gap the first version of this bound
+// could not hold.
+//
+// maxHeaderValueBytes exists because core rejects an oversized body and loses the
+// WHOLE event, and core measures bytes — so the budget is bytes. The original
+// implementation tested bytes and then cut runes against the same number, which
+// means a value could enter the truncation branch and then decline to truncate:
+// anything whose byte length exceeds the bound while its rune count does not.
+// Multi-byte text is exactly that shape.
+//
+// Both directions are asserted, because the byte assertion alone would also pass
+// an implementation that mangled characters: the result must be within budget AND
+// still be valid UTF-8.
+func TestGatewayHeaderCapIsAByteBound(t *testing.T) {
+	for name, value := range map[string]string{
+		// 3-byte runes: 2000 of them is 6000 bytes but only 2000 runes, so a
+		// rune-counted cut leaves it whole.
+		"CJK over the byte bound but under it in runes": strings.Repeat("日", 2000),
+		// 4-byte runes: the worst case, 4x the budget.
+		"astral plane, 4 bytes per rune": strings.Repeat("𝄞", 2000),
+		// Plain ASCII: bytes and runes agree, so this case passed before too. It
+		// stays so the fix cannot regress the case that already worked.
+		"ASCII over the bound": strings.Repeat("a", maxHeaderValueBytes+64),
+	} {
+		t.Run(name, func(t *testing.T) {
+			got := capHeaders(map[string]string{"X-Big": value})["X-Big"]
+
+			// The marker is appended AFTER the budget, so the budget applies to
+			// the value's own bytes.
+			body := strings.TrimSuffix(got, "…[truncated]")
+			if len(body) > maxHeaderValueBytes {
+				t.Errorf("value kept %d bytes, over the %d-byte bound — the cap did not hold",
+					len(body), maxHeaderValueBytes)
+			}
+			if !strings.HasSuffix(got, "…[truncated]") {
+				t.Error("an over-bound value was not marked as truncated; a reader cannot tell a short header from a shortened one")
+			}
+			if !utf8.ValidString(got) {
+				t.Error("the cut produced invalid UTF-8 — json.Marshal would rewrite it to U+FFFD")
+			}
+		})
+	}
+}

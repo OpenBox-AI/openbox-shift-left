@@ -560,6 +560,17 @@ var contentMetadataKeys = map[string]bool{
 	// ever sets them directly — which is exactly what this list is for.
 	"denial_reason": true,
 	"error_details": true,
+	// `arguments` is the MCP class's own key: contentKeyFor(ToolMCP) returns it,
+	// so its siblings `command` and `content` were listed and it was not. An
+	// adapter writing MCP arguments straight into metadata would have routed
+	// around the gate through the one key the list forgot.
+	"arguments": true,
+	// `thinking` is the densest content this client carries — it restates
+	// prompts, file bodies and any credential the turn saw — and it is the newest
+	// class, added after this list was last extended. It rides
+	// activity_output.thinking from Content, which stripContent nils; this is the
+	// same backstop the rest of the list is, for the field that needs it most.
+	"thinking": true,
 }
 
 // signalDetailKeyFor names the metadata key a signal's gated free text lands in.

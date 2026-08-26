@@ -8,12 +8,15 @@ import (
 // Canaries are distinctive enough that a substring hit in the payload can only
 // mean the field reached the wire.
 const (
-	canaryPrompt   = "CANARY-PROMPT-8f21"
-	canaryOutput   = "CANARY-OUTPUT-8f22"
-	canaryFileText = "CANARY-FILETEXT-8f23"
-	canaryReqBody  = "CANARY-REQBODY-8f24"
-	canaryRespBody = "CANARY-RESPBODY-8f25"
-	canaryCommand  = "CANARY-COMMAND-8f26"
+	canaryPrompt       = "CANARY-PROMPT-8f21"
+	canaryOutput       = "CANARY-OUTPUT-8f22"
+	canaryFileText     = "CANARY-FILETEXT-8f23"
+	canaryReqBody      = "CANARY-REQBODY-8f24"
+	canaryRespBody     = "CANARY-RESPBODY-8f25"
+	canaryCommand      = "CANARY-COMMAND-8f26"
+	canaryToolOutput   = "CANARY-TOOLOUTPUT-8f27"
+	canarySignalDetail = "CANARY-SIGNALDETAIL-8f28"
+	canaryThinking     = "CANARY-THINKING-8f29"
 )
 
 // INV-2 asserted against the whole payload rather than against the one field a
@@ -77,6 +80,59 @@ func TestNoGatedContentEgressesWhenCaptureIsOff(t *testing.T) {
 				}
 			}(),
 			canaries: []string{canaryOutput},
+		},
+		{
+			// The classes added after this table was last extended: ToolInput and
+			// ToolOutput (v1.3), SignalDetail (v1.3) and Thinking (v1.4). Their
+			// capture-off behaviour was asserted only by the conformance cases;
+			// nothing pinned it at the ONE choke point every event crosses, which
+			// is where a gate regression would land.
+			name: "tool call carrying input, output and a signal detail",
+			event: DevEvent{
+				SchemaVersion: SchemaVersion, EventID: "ev-30", EventType: EventToolResult,
+				SessionID: "sess-leak", DeveloperDID: "did:aip:x", Timestamp: "2026-07-31T09:00:00Z",
+				Tool: Tool{Name: "Bash", Kind: ToolShell},
+				Content: &Content{
+					ToolInput:    canaryCommand,
+					ToolOutput:   canaryToolOutput,
+					SignalDetail: canarySignalDetail,
+				},
+			},
+			canaries: []string{canaryCommand, canaryToolOutput, canarySignalDetail},
+		},
+		{
+			name: "turn carrying thinking",
+			event: func() DevEvent {
+				idx := 0
+				return DevEvent{
+					SchemaVersion: SchemaVersion, EventID: "ev-31", EventType: EventTurnCompleted,
+					SessionID: "sess-leak", DeveloperDID: "did:aip:x", Timestamp: "2026-07-31T09:00:00Z",
+					Tool:      Tool{Name: "claude-code", Kind: ToolShell},
+					TurnIndex: &idx,
+					Content:   &Content{Thinking: canaryThinking},
+				}
+			}(),
+			canaries: []string{canaryThinking},
+		},
+		{
+			// The METADATA backstop, which is a separate mechanism from Content:
+			// stripContent nils Content and the span, while buildMetadata drops
+			// only the keys contentMetadataKeys names. `arguments` (the MCP class's
+			// own key, contentKeyFor(ToolMCP)) and `thinking` were missing from
+			// that list, so an adapter setting either directly routed around the
+			// gate entirely.
+			name: "content smuggled through metadata",
+			event: DevEvent{
+				SchemaVersion: SchemaVersion, EventID: "ev-32", EventType: EventToolCall,
+				SessionID: "sess-leak", DeveloperDID: "did:aip:x", Timestamp: "2026-07-31T09:00:00Z",
+				Tool: Tool{Name: "mcp__github__create_issue", Kind: ToolMCP},
+				Metadata: map[string]any{
+					"arguments": canaryCommand,
+					"thinking":  canaryThinking,
+					"command":   canaryCommand,
+				},
+			},
+			canaries: []string{canaryCommand, canaryThinking},
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

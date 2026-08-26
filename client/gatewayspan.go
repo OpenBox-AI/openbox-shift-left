@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"sort"
+	"unicode/utf8"
 )
 
 // gatewayspan.go builds the span a LOCAL GATEWAY turn carries (ADR-0021).
@@ -108,18 +109,34 @@ func capHeaders(h map[string]string) map[string]string {
 	}
 	out := make(map[string]string, len(keys))
 	for _, k := range keys {
-		v := h[k]
-		if len(v) > maxHeaderValueBytes {
-			// Runes, so a multi-byte value cannot be cut mid-character — the same
-			// reason capBody counts runes.
-			r := []rune(v)
-			if len(r) > maxHeaderValueBytes {
-				v = string(r[:maxHeaderValueBytes]) + "…[truncated]"
-			}
-		}
-		out[k] = v
+		out[k] = capHeaderValue(h[k])
 	}
 	return out
+}
+
+// capHeaderValue bounds one header value in BYTES, cut on a rune boundary.
+//
+// Bytes because that is what the bound is FOR: the reason capHeaders exists is
+// that core rejects an oversized body and loses the whole event, and core
+// measures the body in bytes. The rune boundary is only about not cutting a
+// character in half — it is not the unit of the budget.
+//
+// Those two were conflated, and the result was a bound that could not hold: the
+// test was `len(v) > max` (bytes) and the cut was `len([]rune(v)) > max` (runes),
+// so a value between the two — 4097 bytes of CJK is ~1366 runes — entered the
+// branch and then declined to truncate, reaching the wire uncapped. Worst case
+// was 4 bytes per rune × 4096 runes = 16 KiB per value and ~1 MiB per map,
+// exactly the loss the bound exists to prevent. TestGatewayHeaderCapIsAByteBound
+// drives that gap; the old shape passes every other case in the file.
+func capHeaderValue(v string) string {
+	if len(v) <= maxHeaderValueBytes {
+		return v
+	}
+	end := maxHeaderValueBytes
+	for end > 0 && !utf8.RuneStart(v[end]) {
+		end--
+	}
+	return v[:end] + "…[truncated]"
 }
 
 // gatewaySpanID derives the span id from the gateway's request id, so a re-emit
