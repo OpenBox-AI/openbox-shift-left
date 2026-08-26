@@ -1,6 +1,8 @@
 package decision
 
 import (
+	"encoding/json"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
@@ -313,3 +315,72 @@ func containsCat(cats []string, want string) bool {
 	}
 	return false
 }
+
+// TestRedact_JSONTerminatorsSurvive is the parseability control.
+//
+// The value group excludes quotes and commas but not `}` or `]`, so an UNQUOTED
+// value at the end of an object or array ran its own terminator into the match —
+// and the placeholder ate it. That produced invalid JSON on the wire and, on the
+// enforce path, a file written to disk without its closing brace: the redactor
+// there does not annotate, it REWRITES what the tool is about to write.
+//
+// It only became reachable when the pattern learned to skip the key's quoting
+// (the change that made JSON match at all), so the two belong in one test.
+//
+// Each case asserts three things together, because any one alone passes for a
+// broken implementation: the secret is gone, the terminator survived, and the
+// result still parses.
+func TestRedact_JSONTerminatorsSurvive(t *testing.T) {
+	r := NewRedactor()
+	// parses is false where the ORIGINAL value was unquoted: a bare
+	// ${OPENBOX_REDACTED_*} token cannot stand where a JSON number stood, and no
+	// text redactor can fix that without knowing it is inside JSON. That is a
+	// TYPE change and it is inherent to the placeholder design; the STRUCTURAL
+	// break — a swallowed closer — is the defect this test exists for, and it is
+	// asserted on every case.
+	for name, tc := range map[string]struct {
+		in, secret string
+		parses     bool
+	}{
+		"unquoted value closing an object": {`{"auth_token": 1755123456789}`, "1755123456789", false},
+		"unquoted value closing an array":  {`[{"password":12345678},{"a":1}]`, "12345678", false},
+		"nested escaped JSON":              {`{"stdout":"{\"secret\":1755123456789}"}`, "1755123456789", true},
+		"quoted value closing an object":   {`{"api_key":"abcdefgh12345678"}`, "abcdefgh12345678", true},
+		"unquoted value closing both":      {`{"secrets":[{"token":98765432}]}`, "98765432", false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			out, _, changed := r.RedactText(tc.in)
+			if !changed {
+				t.Fatalf("nothing was redacted in %q — the secret shipped", tc.in)
+			}
+			if strings.Contains(out, tc.secret) {
+				t.Errorf("secret %q survived: %s", tc.secret, out)
+			}
+			// The terminators the input ended in must still be there. Counted
+			// rather than suffix-matched, so a swallowed INNER closer is caught too
+			// (the nested and closing-both cases).
+			//
+			// The placeholders are stripped BEFORE counting, and that is the whole
+			// reason this assertion works: `${OPENBOX_REDACTED_…}` ends in `}`
+			// itself, so counting the raw output lets a placeholder stand in for the
+			// closer it just ate — the first version of this test passed a broken
+			// implementation for exactly that reason.
+			bare := placeholderPattern.ReplaceAllString(out, "")
+			for _, closer := range []string{"}", "]"} {
+				if want, got := strings.Count(tc.in, closer), strings.Count(bare, closer); got < want {
+					t.Errorf("%d of %d %q closers were swallowed: %s", want-got, want, closer, out)
+				}
+			}
+			if tc.parses {
+				var doc any
+				if err := json.Unmarshal([]byte(out), &doc); err != nil {
+					t.Errorf("redacted output no longer parses as JSON (%v): %s", err, out)
+				}
+			}
+		})
+	}
+}
+
+// placeholderPattern matches an inserted redaction placeholder, so an assertion
+// about the surrounding text is not confounded by the placeholder's own braces.
+var placeholderPattern = regexp.MustCompile(`\$\{OPENBOX_REDACTED_[A-Z0-9_]+\}`)

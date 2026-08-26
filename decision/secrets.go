@@ -135,6 +135,25 @@ func newSecretDetector() *secretDetector {
 	}}
 }
 
+// isValueTerminator reports whether b is a byte that ends a value's CONTAINER
+// rather than being part of the value.
+//
+// The generic assignment pattern's value group excludes whitespace, quotes,
+// commas and semicolons, so those can never be swallowed. These four can, and
+// each one matters somewhere the redacted text has to stay parseable: `\` closes
+// an escaped JSON string, `}` and `]` close the object or array an unquoted value
+// sits at the end of, and `)` closes a shell or config substitution. Trimming
+// them out of the placeholder is what keeps the redactor from turning valid JSON
+// into a parse error — which on the enforce path is written to the developer's
+// file, not merely logged.
+func isValueTerminator(b byte) bool {
+	switch b {
+	case '\\', '}', ']', ')':
+		return true
+	}
+	return false
+}
+
 // Redact scans text and returns (redacted, categories, changed). categories is the
 // sorted, de-duplicated set of pattern categories that fired (never the secret
 // itself — INV-2). changed reports whether any redaction was applied; when false,
@@ -166,19 +185,32 @@ func (d *secretDetector) Redact(text string) (redacted string, categories []stri
 			if len(val) < minAssignmentValueLen || strings.Contains(val, redactedPrefix) {
 				return m
 			}
-			// Trailing backslashes stay OUTSIDE the placeholder. In a JSON body — which
-			// is what a tool_response is — the backslash after a value is the escape
-			// that terminates the string, so swallowing it leaves output the consumer
-			// cannot parse. Backslashes carry no secret material, so keeping them costs
-			// nothing: what is redacted is still the whole value minus its separators.
+			// Trailing STRUCTURAL bytes stay OUTSIDE the placeholder. In a JSON body —
+			// which is what a tool_response is, and what an unquoted value in a config
+			// file looks like — these are the bytes that terminate the value's
+			// container, so swallowing one leaves output the consumer cannot parse.
+			// None of them carries secret material, so keeping them costs nothing:
+			// what is redacted is still the whole value minus its separators.
 			//
 			// This is the boundary the pattern used to express and could not, because
-			// requiring a non-backslash tail there made an at-the-floor value invisible.
+			// requiring a non-separator tail there made an at-the-floor value
+			// invisible: no split satisfies both the 8-character floor and a
+			// constrained final byte, so a value of exactly 8 characters ending in one
+			// matched NOTHING and a real secret shipped.
+			//
+			// The set is `\` plus the closers, and the closers are why: the value
+			// group excludes `"`, `'`, `,` and `;` but NOT `}` or `]`, so an unquoted
+			// value at the end of an object or array — `{"auth_token": ${OPENBOX_REDACTED_SECRET_ASSIGNMENT}
+			// — ran its terminator into the match. That became reachable only when the
+			// pattern learned to skip the key's quoting, i.e. exactly when JSON started
+			// matching at all, so the two changes belong together.
+			// TestRedact_JSONTerminatorsSurvive and
+			// TestRedact_ValueEndingInBackslash pin both directions.
 			end := loc[2*g+1]
-			for end > loc[2*g] && m[end-1] == '\\' {
+			for end > loc[2*g] && isValueTerminator(m[end-1]) {
 				end--
 			}
-			// A value of only backslashes has nothing to redact. Emitting a placeholder
+			// A value of only separators has nothing to redact. Emitting a placeholder
 			// over an empty span would report a redaction that did not happen.
 			if end == loc[2*g] {
 				return m
