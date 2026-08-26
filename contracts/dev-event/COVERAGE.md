@@ -20,6 +20,16 @@ machine, and nothing in this document's matrix describes it: a lifecycle matrix 
 hooks, and the gateway has none. Its fields are in
 [MAPPING.md](MAPPING.md) §3 and its own §7 verification items.
 
+**Narrower than "Claude Code": the terminal CLI only.** Measured 2026-08-27 — a CLI
+session relayed and was captured; a desktop-app session over the same install
+produced nothing, because the desktop app routes through its own third-party
+inference configuration rather than `ANTHROPIC_BASE_URL`
+([ADR-0021 §8](../../docs/adr/ADR-0021-openbox-local-gateway.md)). State it rather
+than averaging it: two developers on one org and one posture, one working in the
+terminal and one in the desktop app, send *entirely different* model-call evidence —
+the first sends whole request and response bodies, the second sends none and nothing
+reports the gap.
+
 ## 1. Lifecycle coverage matrix
 
 | Contract type | Claude Code *(shipped)* | Cursor *(survey only — SL-8 unbuilt)* | Codex *(shipped)* |

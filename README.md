@@ -133,8 +133,24 @@ A call that names a session is also captured as governance evidence — request 
 response headers and bodies, plus a one-way fingerprint of the credential that paid
 for it; a call that names none is relayed and recorded nowhere, because the gateway
 will not invent a session. `--gateway-addr` and `--gateway-upstream` change where it
-listens and where it forwards. Claude Code only — it speaks the Anthropic Messages API
-and is configured through Claude Code's own settings.
+listens and where it forwards. Add `--gateway-verbose` and the daemon logs every
+relayed call, and whether it was recorded, to `~/.openbox/gateway.log` — the only way
+to tell a governed gateway from a bypassed one without querying stored data.
+
+**It governs the terminal CLI, and not the desktop app** (measured 2026-08-27, not
+inferred: with the daemon listening and configured, `claude` in a terminal produced
+`POST /v1/messages` lines and captured events, while a desktop-app session produced
+nothing at all). The CLI reads `ANTHROPIC_BASE_URL` from `~/.claude/settings.json`,
+which is what `--gateway` writes; the desktop app routes through its own
+[third-party inference configuration](https://claude.com/docs/third-party/claude-desktop/gateway)
+instead and ignores that file. So on a machine where the developer works in the
+desktop app, **`--gateway` governs no model calls and says nothing about it** —
+`openbox doctor` reports the file it wrote, not what the app resolved. Pointing the
+desktop app at the gateway is possible (`inferenceGatewayBaseUrl`, MDM-distributable)
+but collides with pass-through auth: that mode replaces the claude.ai login with a
+credential you supply, so there is no provider credential left for the gateway to
+relay unless your org has an Anthropic API key. See
+[ADR-0021 §8](docs/adr/ADR-0021-openbox-local-gateway.md).
 
 Three things to know before you turn it on:
 

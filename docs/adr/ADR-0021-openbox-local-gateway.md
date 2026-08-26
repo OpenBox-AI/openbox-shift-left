@@ -125,14 +125,46 @@ gated model call while reporting a policy decision that no policy made. **No
 synthesized refusal may fire before an evaluation attempt** — phase 06's ordering
 test is the control, and it is a merge blocker.
 
-### 8. `TBD(probe)` — auth coverage
+### 8. Coverage — CLIENT resolved, auth mode still open
 
-Which auth modes follow `ANTHROPIC_BASE_URL` is **unresolved**, and it bounds who
-this tier covers. If subscription OAuth does not redirect, the gateway tier covers
-API-key/console orgs only and **this ADR and the product docs must say so in those
-words.** Track B proceeds either way; the probe scopes it.
+Two questions were folded together here. The first is now **answered**, by
+observation rather than inference.
 
-Source: P0, `plans/reports/probe-260825-baseurl-auth-coverage.md`.
+**Which CLIENTS follow `ANTHROPIC_BASE_URL`: the terminal CLI does, the desktop
+app does not** (measured 2026-08-27). With the daemon listening, configured at
+`~/.claude/settings.json`, and `--gateway-verbose` on: a `claude` session in a
+terminal produced `POST /v1/messages` arrivals and three `capture: recorded` events
+carrying real provider request ids, while a desktop-app session over the same
+install produced **no log lines at all**. Anthropic's own documentation gives the
+mechanism — the desktop app reads gateway routing from its
+[third-party inference configuration](https://claude.com/docs/third-party/claude-desktop/gateway),
+"not from `ANTHROPIC_BASE_URL` or `settings.json`".
+
+So, in the words this section demanded: **`openbox init --gateway` governs model
+calls made by the terminal CLI. It governs none made by the desktop app, and
+reports nothing about the difference** — `doctor` reads the settings file it wrote,
+and the desktop app never consults that file. On a machine where the developer
+works in the desktop app, the model-call tier is inert while every local check
+looks healthy. That is the "configured but not in force" shape §2 promised would be
+detectable and, for this client, is not.
+
+The desktop app *can* be pointed at the gateway — `inferenceProvider: gateway` plus
+`inferenceGatewayBaseUrl`, MDM-distributable as a `.mobileconfig` — but that path
+**collides with §3**. Gateway mode replaces the claude.ai login with a credential
+the org supplies, so a pass-through relay has no provider credential to forward
+unless the org holds an Anthropic API key it can put in `inferenceGatewayApiKey`.
+For a subscription developer the two designs are incompatible, and closing that is
+a product decision, not a wiring detail.
+
+**Still open:** whether subscription OAuth follows a changed base URL *for the
+CLI*. The three captured calls above prove the CLI relays and is captured; they do
+not prove which auth mode was in play. If OAuth does not redirect, the tier covers
+API-key/console orgs only, and that sentence still has to be written here.
+
+Sources: P0 and its 2026-08-26 amendment,
+`plans/reports/probe-260825-baseurl-auth-coverage.md`; the client measurement above
+is `~/.openbox/gateway.log` on the author's machine, reproducible with
+`--gateway-verbose` and one prompt per client.
 
 ### 9. `TBD(probe)` — the refusal shape
 
