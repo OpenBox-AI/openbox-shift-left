@@ -195,23 +195,40 @@ invariant". That is true of the legacy `Director` path and NOT of the modern
 reason to hand-roll is phase 05's two-way tee. Corrected in `gateway/proxy.go`'s
 package comment; recorded here so the ADR and the code do not disagree.
 
-## Not yet reachable from the served handler (state this before believing the table)
+## What is reachable from the served handler (state this before believing the table)
 
-**`openbox init --gateway` today installs a TRANSPARENT PROXY.** It relays, and
-that is all. `gate.Decide`, `capture.Capture` and `WriteRefusal` are written,
-tested and drilled, but nothing calls them from `ServeHTTP` — so as shipped, the
-gateway captures no evidence and refuses nothing.
+**Capture is wired; refusal is not.** The two halves shipped separately and the
+distinction is the point:
 
-That is deliberate sequencing (the join is where a bug refuses every model call on
-a developer's machine, and it should land with the doctor check that distinguishes
-"policy refused" from "gateway dead"), but the table above reads as though §6 and
-§7 are live. They are not, and a reader of this ADR alone would have been misled.
+- **Capture: LIVE (2026-08-26).** `openbox gateway` calls `WithCapture`, and each
+  relayed call becomes a `TurnCompleted` carrying the observed exchange. The
+  connector is `cli/internal/gatewayemit`, which files the event in the Claude Code
+  adapter's spool under the session id the request named, so the existing
+  hook-driven flushers deliver it on the existing client, auth and signing. The
+  relay process itself performs no credential I/O of any kind — not the provider's
+  (§3) and not OpenBox's own, since the flusher owns the signing key.
+- **Refusal: written, still uncalled.** `gate.Decide` and `WriteRefusal` are
+  tested and drilled, but nothing calls them from `ServeHTTP`, and `WithGate` has
+  no production caller. So §7's always-refuse posture is **not** in force: a gated
+  model call is not gated, because nothing is. Deliberate — probe A has not named
+  a refusal shape, a wrong one silently disables a Claude Code capability for the
+  session (§9), and the join should land with the doctor check that distinguishes
+  "policy refused" from "gateway dead". §6 account binding attaches its evidence
+  but no verdict acts on it yet.
 
-One design gap in that seam, found in review and worth fixing before the wiring:
-`Capture` takes the response as an argument, while the gate must run BEFORE
-forwarding, i.e. before a response exists. Whoever wires this either calls
-`Capture` twice — duplicating the fingerprint and redaction work — or splits it
-into a request half and a response half. The second is right; neither is built.
+**How capture came to be absent for as long as it was, recorded because the shape
+recurs.** `WithCapture` had no production caller at all, so `g.emitter` was nil and
+every capture was discarded — while package `gateway` tested the relay against a
+stub `Emitter` and package `client` tested the span builder against a hand-written
+`DevEvent`. A fake at each end of a seam with no implementation between them keeps
+both suites green and proves nothing about the seam. The control is
+`cli/cmd/openbox/gatewaycapture_test.go`, which drives the real command into the
+real spool and supplies no fake anywhere.
+
+The design gap this section used to name — `Capture` needing the response while the
+gate must decide before one exists — **is fixed**: `CaptureRequest`/`Complete`
+split it (`gateway/capture.go`), with the fingerprint taken from the live headers
+before redaction, once.
 
 A related consequence of §4 that only shows up once wired: a gateway turn's span
 carries the provider's RAW response body, which is not the

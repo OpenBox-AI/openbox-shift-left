@@ -213,16 +213,31 @@ Being precise here is part of the product.
     But loopback is not a user boundary on a shared machine, and it is not a
     browser boundary at all: a page the developer visits can `fetch()`
     `http://127.0.0.1:8788/v1/messages` as a CORS-simple request, which is *sent*
-    even though the reply cannot be read cross-origin. Today the consequence is
-    bounded, because the shipping `openbox gateway` wires neither capture nor the
-    gate and is a pure relay. It stops being bounded the moment capture is wired:
-    a caller that reaches the listener would then have its content redacted,
-    signed with the developer's key and stored as that developer's governance
-    evidence — evidence forgery by an unauthenticated local caller. Closing it
-    means adding a caller check (an `Origin`/`Sec-Fetch-Site` rejection, or a
-    loopback token) to a relay documented as transparent, which is a product
-    decision and is **not** made yet. Related and smaller: the relay buffers up
-    to 64 MiB per in-flight request with no concurrency cap, so the same
+    even though the reply cannot be read cross-origin. **Capture is now wired
+    (2026-08-26), so the "bounded because it stores nothing" clause this bullet
+    used to carry is spent.** What replaces it is narrower and worth stating
+    exactly, because the two sub-vectors no longer have the same answer:
+
+    - **A cross-origin web page: bounded, incidentally.** Evidence is filed only
+      for a call carrying `X-Claude-Code-Session-Id`, and a custom request header
+      is not CORS-simple — it forces a preflight, and the gateway forwards
+      preflights upstream rather than granting them. A page can therefore still
+      make the relay *forward* a request, but it cannot make it *record* one. This
+      falls out of requiring a real session id, not from a caller check; it holds
+      only while that requirement does.
+    - **A local process: LIVE.** Anything running as the developer can set the
+      header and have its content redacted, signed with the developer's key and
+      stored as that developer's governance evidence — evidence forgery by an
+      unauthenticated local caller, exactly as this bullet predicted. It is the
+      same trust boundary ADR-0015 already concedes for the signing key (anything
+      running as the developer can read it), so it grants no new *capability* — but
+      it does make forgery cheaper, and a governance record that can be written by
+      any local process should say so.
+
+    Closing it still means adding a caller check (an `Origin`/`Sec-Fetch-Site`
+    rejection, or a loopback token) to a relay documented as transparent, which is
+    a product decision and is **not** made yet. Related and smaller: the relay
+    buffers up to 64 MiB per in-flight request with no concurrency cap, so the same
     unauthenticated listener is a local memory-pressure lever.
 - **The inline-evaluation path has not been exercised against a live stack.**
   Every claim below about enforcement rests on tests that drive the real hook

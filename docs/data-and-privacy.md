@@ -19,8 +19,9 @@ What leaves the machine, what never does, and the one setting that changes it.
 | **Your provider account's email** | yes, if you are signed in | **new** — one field per session, read from Claude Code's own local account record. This is PII, and it egresses as governance evidence like your DID. Not gated by `content_capture`: it is attribution, not content. See [Account attribution](#account-attribution) |
 | **Your provider organization's UUID** | yes, if you are signed in | **new** — same source, same session field |
 | **Your provider organization's NAME, role, tier, billing** | **never** | all four sit in the same local file beside the two rows above, and none of them is sent. The evidence scope is org UUID + email, deliberately |
-| **Model-call HTTP headers** | only with the local gateway running | **new** — and only the non-credential ones: `Authorization`, `x-api-key`, `Cookie`, `Set-Cookie` and four more are replaced with `[redacted]` by name before anything is attached. The KEY is kept so a reviewer can see one was sent. Gated by `content_capture` |
-| **A one-way fingerprint of your provider credential** | only with the local gateway running | **new** — a truncated SHA-256, so OpenBox can tell WHICH registered credential made a call without holding it. Not gated: it is the account-binding control, and a privacy switch that removed it would let an org opt out of being identified |
+| **Model-call request and response bodies** | only with the local gateway running, and only when the call names a session | **new** — the whole request the tool sent the model, which includes the **system prompt**, the full message history and every tool definition, plus the model's response. This is the largest content class OpenBox collects. Three bounds apply and all three are fallible: the `content_capture` switch, local secret redaction before anything is attached, and a 64KB cap. Same session caveat as the row below |
+| **Model-call HTTP headers** | only with the local gateway running, and only when the call names a session | **new** — and only the non-credential ones: `Authorization`, `x-api-key`, `Cookie`, `Set-Cookie` and four more are replaced with `[redacted]` by name before anything is attached. The KEY is kept so a reviewer can see one was sent. Gated by `content_capture`. A relayed call that carries no `x-claude-code-session-id` header is recorded NOWHERE — the gateway declines to invent a session, so this is a real gap in the record rather than a silent attribution |
+| **A one-way fingerprint of your provider credential** | only with the local gateway running, and only when the call names a session | **new** — a truncated SHA-256, so OpenBox can tell WHICH registered credential made a call without holding it. Not gated by `content_capture`: it is the account-binding control, and a privacy switch that removed it would let an org opt out of being identified |
 | **Credentials** | **never** | they stay on your machine — in a plaintext file readable by you, see [Where credentials live](#where-credentials-live). The gateway relays yours to the provider byte-for-byte and stores none of it |
 | Git **commit trailer** and signed attestation | yes | commit sha, tree sha, session id — no diff, no file content |
 
@@ -47,6 +48,16 @@ from that field and from nowhere else. It is a deliberate widening with three
 bounds — the `content_capture` switch, local secret redaction before it is sent,
 and a 64KB cap — and it applies to **one** carrier. Tool calls remain span-less
 and carry no bodies at all.
+
+**A second body-carrying span exists once the local gateway runs**, and it is a
+larger widening than the first. The gateway observes real HTTP exchanges, so its
+span's request body is the whole request the tool sent the model — system prompt,
+message history, tool definitions — and its response body is the model's reply.
+Unlike the turn span, this one is a genuine measurement rather than a synthesized
+carrier, which is why it is the only span here without ADR-0018's `synthesized`
+marker. It is bounded by the same three mechanisms, it exists only while the
+gateway is running, and it records nothing at all for a call that names no
+session. See [ADR-0021](adr/ADR-0021-openbox-local-gateway.md).
 
 Neither paragraph is a privacy improvement claim. The first is a narrowing of
 what *could* egress; the second is a widening of what does.
