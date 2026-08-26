@@ -4,6 +4,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
+
+	"github.com/openbox-ai/openbox-shift-left/client"
 )
 
 // refuse.go renders a refusal to Claude Code.
@@ -96,7 +99,41 @@ const (
 	reasonUnreachable = "OpenBox governance: this model call was refused because no governance " +
 		"decision could be obtained — the control plane was unreachable. This is an OUTAGE, " +
 		"not a policy denial, and it is refused deliberately: the gateway has no offline grace."
+
+	// reasonCallerGone is NOT an outage, and separating the two is the whole
+	// point: a developer pressing Esc cancels the request context, so every
+	// interrupted turn used to produce a stored record blaming the control plane.
+	// Decision.Unreachable exists so an operator can tell a denial from an outage,
+	// and this is the third case it must not be confused with.
+	reasonCallerGone = "OpenBox governance: this model call was not completed because the caller " +
+		"went away before a governance decision arrived. Nothing was forwarded, and this is " +
+		"neither a policy denial nor a control-plane outage."
 )
+
+// reasonGuardrailFailed names a guardrail block without quoting the content that
+// tripped it.
+//
+// Only GuardrailReason.Type — the CATEGORY — is rendered. `Reason` is free text
+// about the matched content and a guardrail fires on content by definition, so
+// including it would put the prompt in a refusal that is both shown to the
+// developer and stored (INV-2). An empty category renders "?" rather than being
+// dropped, matching hookflow.ReasonTypeCategories: two renderings of one signal
+// should not disagree about how many findings there were.
+func reasonGuardrailFailed(e client.Evaluation) string {
+	r := "OpenBox governance: this model call was refused because a content guardrail did not pass."
+	if g := e.Guardrail; g != nil && len(g.Reasons) > 0 {
+		cats := make([]string, 0, len(g.Reasons))
+		for _, reason := range g.Reasons {
+			if reason.Type == "" {
+				cats = append(cats, "?")
+				continue
+			}
+			cats = append(cats, reason.Type)
+		}
+		r += " Categories: [" + strings.Join(cats, ",") + "]."
+	}
+	return r
+}
 
 func reasonPolicyRefused(serverReason string) string {
 	r := "OpenBox governance: this model call was refused by policy."

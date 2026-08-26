@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/openbox-ai/openbox-shift-left/client"
 )
@@ -309,4 +310,147 @@ func TestRefusalShapeValidateRejectsHopelessCandidates(t *testing.T) {
 	if err := (RefusalShape{Status: 403, ErrorType: "openbox_probe_candidate"}).Validate(); err != nil {
 		t.Errorf("a legitimate candidate was rejected: %v", err)
 	}
+}
+
+// stubEvaluator returns a whole Evaluation, which recordingEvaluator cannot: the
+// guardrail block is a nested struct, not one of its scalar fields.
+type stubEvaluator struct {
+	result client.Evaluation
+	err    error
+}
+
+func (s *stubEvaluator) Evaluate(context.Context, Captured) (client.Evaluation, error) {
+	if s.err != nil {
+		return client.Evaluation{}, s.err
+	}
+	return s.result, nil
+}
+
+// TestFailedGuardrailRefusesLikeTheHookPath is the enforcement-parity control.
+//
+// hookflow.MapVerdict treats a failed guardrail as a DENY, in that exact position:
+// after HALT/BLOCK, before REQUIRE_APPROVAL. The gate read only `Verdict`, so one
+// and the same /evaluate response — ALLOW with validation_passed:false — denied
+// the tool call and FORWARDED the model call, credential and prompt included.
+//
+// The reason must name the CATEGORIES and nothing else: a guardrail fires on
+// content, so its free text is the prompt.
+func TestFailedGuardrailRefusesLikeTheHookPath(t *testing.T) {
+	ev := &stubEvaluator{result: client.Evaluation{
+		Verdict: client.VerdictAllow,
+		Guardrail: &client.GuardrailResult{
+			Passed: false,
+			Reasons: []client.GuardrailReason{
+				{Type: "pii", Field: "email", Reason: "contains alice@example.com"},
+				{Type: "secrets"},
+			},
+		},
+	}}
+
+	d := Decide(context.Background(), ev, true, Captured{HTTPMethod: "POST"})
+
+	if d.Forward {
+		t.Fatal("a failed guardrail FORWARDED the model call — the hook path denies the same verdict")
+	}
+	if !d.Evaluated {
+		t.Error("Evaluated is false on a refusal that followed a real evaluation")
+	}
+	if d.Unreachable {
+		t.Error("a guardrail block is a policy decision, not an outage")
+	}
+	if !strings.Contains(d.Reason, "pii") || !strings.Contains(d.Reason, "secrets") {
+		t.Errorf("reason names no categories: %q", d.Reason)
+	}
+	if strings.Contains(d.Reason, "alice@example.com") {
+		t.Errorf("the guardrail's free text put content in a stored refusal (INV-2): %q", d.Reason)
+	}
+}
+
+// TestPassingGuardrailStillForwards keeps the fix from becoming a blanket refusal:
+// `Passed` true, and an absent guardrail block, must both proceed.
+func TestPassingGuardrailStillForwards(t *testing.T) {
+	for name, g := range map[string]*client.GuardrailResult{
+		"absent":                 nil,
+		"passed with no reasons": {Passed: true},
+		"passed with reasons":    {Passed: true, Reasons: []client.GuardrailReason{{Type: "pii"}}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			ev := &stubEvaluator{result: client.Evaluation{Verdict: client.VerdictAllow, Guardrail: g}}
+			if d := Decide(context.Background(), ev, true, Captured{}); !d.Forward {
+				t.Errorf("a passing guardrail refused the call: %q", d.Reason)
+			}
+		})
+	}
+}
+
+// TestCallerCancellationIsNotReportedAsAnOutage.
+//
+// Decide is handed the REQUEST's context, which net/http cancels the moment the
+// developer interrupts a turn. Mapping that to reasonUnreachable manufactured a
+// durable record saying the control plane was down — and Unreachable is the field
+// an operator reads to tell an outage from a denial, so it was being filled in
+// with the wrong answer on the most ordinary event there is.
+func TestCallerCancellationIsNotReportedAsAnOutage(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	d := Decide(ctx, &stubEvaluator{err: context.Canceled}, true, Captured{})
+
+	if d.Forward {
+		t.Error("a cancelled call must not forward")
+	}
+	if d.Unreachable {
+		t.Error("caller cancellation was recorded as a control-plane outage")
+	}
+	if strings.Contains(d.Reason, "OUTAGE") {
+		t.Errorf("the stored reason blames the control plane: %q", d.Reason)
+	}
+	if !d.Evaluated {
+		t.Error("Evaluated must stay true: an evaluation WAS attempted")
+	}
+}
+
+// TestARealUnreachableControlPlaneStillReportsAnOutage is the other half — the
+// cancellation carve-out must not swallow the case it was carved out of.
+func TestARealUnreachableControlPlaneStillReportsAnOutage(t *testing.T) {
+	d := Decide(context.Background(), &stubEvaluator{err: errors.New("dial tcp: connection refused")}, true, Captured{})
+	if d.Forward {
+		t.Error("an unreachable control plane must refuse")
+	}
+	if !d.Unreachable {
+		t.Error("a real outage is no longer reported as one")
+	}
+}
+
+// TestHungEvaluationIsBoundedRatherThanHanging.
+//
+// The gateway's client has no overall timeout on purpose (a streamed completion
+// runs for minutes), so an evaluator that never answers left the gated call
+// hanging: neither forwarded nor refused, which is the one outcome the
+// always-refuse posture claims to have eliminated.
+func TestHungEvaluationIsBoundedRatherThanHanging(t *testing.T) {
+	if evaluateTimeout > 30*time.Second {
+		t.Fatalf("evaluateTimeout is %v — too long to be a bound on a developer's model call", evaluateTimeout)
+	}
+	// Drive the deadline rather than waiting it out: a context already past its
+	// own deadline makes the evaluator observe exactly what a hang produces.
+	ctx, cancel := context.WithTimeout(context.Background(), time.Nanosecond)
+	defer cancel()
+	blocked := &blockingEvaluator{}
+	d := Decide(ctx, blocked, true, Captured{})
+	if d.Forward {
+		t.Error("a hung evaluation forwarded the call")
+	}
+	if !d.Evaluated {
+		t.Error("the evaluation was attempted, so Evaluated must be true")
+	}
+}
+
+// blockingEvaluator answers only when its context ends, which is what a control
+// plane that accepts a connection and never replies looks like from here.
+type blockingEvaluator struct{}
+
+func (blockingEvaluator) Evaluate(ctx context.Context, _ Captured) (client.Evaluation, error) {
+	<-ctx.Done()
+	return client.Evaluation{}, ctx.Err()
 }

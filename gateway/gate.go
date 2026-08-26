@@ -2,9 +2,20 @@ package gateway
 
 import (
 	"context"
+	"errors"
+	"time"
 
 	"github.com/openbox-ai/openbox-shift-left/client"
 )
+
+// evaluateTimeout bounds the gate's round-trip to the control plane.
+//
+// It exists so "the server never answered" becomes "we could not ask" instead of
+// a hung model call. Chosen against the failure it converts rather than against a
+// latency target: a gated call already costs a round-trip, and a developer would
+// rather be refused in 10s with a reason than wait for Claude Code's own 180s
+// watchdog to abort a call nobody decided on.
+const evaluateTimeout = 10 * time.Second
 
 // gate.go decides whether a model call is forwarded or refused (ADR-0021 §7).
 //
@@ -75,15 +86,56 @@ func Decide(ctx context.Context, ev Evaluator, gated bool, c Captured) Decision 
 	}
 
 	// ATTEMPT FIRST. Everything below this line depends on having asked.
-	evaluation, err := ev.Evaluate(ctx, c)
+	//
+	// With a DEADLINE of its own. The caller's context is the request's, and the
+	// gateway's client deliberately has no overall timeout (a streamed completion
+	// runs for minutes) — so a control plane that accepts the connection and never
+	// answers left the gated call hanging indefinitely: neither forwarded nor
+	// refused, which is the one outcome the always-refuse posture claims to have
+	// eliminated. "Never answers" is not "unreachable", and only a deadline turns
+	// the first into the second.
+	evalCtx, cancel := context.WithTimeout(ctx, evaluateTimeout)
+	defer cancel()
+	evaluation, err := ev.Evaluate(evalCtx, c)
 
 	if err != nil {
+		// THE CALLER GOING AWAY IS NOT AN OUTAGE. r.Context() is cancelled the
+		// moment the developer interrupts a turn, so every Esc produced a durable
+		// record saying the control plane was unreachable — and Unreachable exists
+		// precisely so an operator can tell an outage from a denial, so it was the
+		// field being filled in with the wrong answer. Nothing is forwarded either
+		// way; what changes is what the record claims happened.
+		if errors.Is(err, context.Canceled) && ctx.Err() != nil {
+			return Decision{
+				Forward:   false,
+				Evaluated: true,
+				Reason:    reasonCallerGone,
+			}
+		}
 		// Always refuse — regardless of fail_closed, with no grace window.
 		return Decision{
 			Forward:     false,
 			Evaluated:   true,
 			Unreachable: true,
 			Reason:      reasonUnreachable,
+		}
+	}
+
+	// A FAILED GUARDRAIL IS A BLOCK, and it is checked here for the same reason
+	// hookflow.MapVerdict checks it in this exact position (enforce.go:484-486):
+	// after HALT/BLOCK, before REQUIRE_APPROVAL. Reading only `Verdict` meant one
+	// /evaluate response — ALLOW with guardrails_result.passed:false — denied the
+	// tool call on the hook path and FORWARDED the model call here, credential and
+	// prompt included, on the surface ADR-0021 §7 calls the stronger enforcement
+	// point. The reference SDK's enforce_verdict treats it as a block too
+	// (client/verdict.go:132-134 records that), so this was an omission rather
+	// than the deliberate divergence the header comment enumerates.
+	if g := evaluation.Guardrail; g != nil && !g.Passed {
+		return Decision{
+			Forward:   false,
+			Evaluated: true,
+			Verdict:   evaluation.Verdict,
+			Reason:    reasonGuardrailFailed(evaluation),
 		}
 	}
 
