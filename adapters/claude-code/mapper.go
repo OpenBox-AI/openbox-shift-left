@@ -11,7 +11,6 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/client"
 
 	"github.com/openbox-ai/openbox-shift-left/adapters/common/devconfig"
-	"github.com/openbox-ai/openbox-shift-left/adapters/common/hookflow"
 )
 
 // provider is the constant provider tag carried in metadata (MAPPING.md §2).
@@ -213,8 +212,19 @@ func (m Mapper) Map(hook HookName, e *HookEvent) (client.DevEvent, bool) {
 		// opt-in — where it becomes the SignalReceived signal_args
 		// (buildSignalArgs, capped). Default off ⇒ Content stays nil and
 		// the prompt never egresses (Emit would strip it anyway).
+		//
+		// REDACTED, like every other content field on this event. It was the one
+		// that was not: `Prompt: e.Prompt` reached the wire unscanned while
+		// Output, Thinking, ToolInput, ToolOutput and SignalDetail all pass
+		// through m.redact — so a developer pasting a credential into a prompt
+		// shipped it verbatim with secret_detection fully ON. Map's own doc
+		// comment ("only after RedactContent has run over it") and README's
+		// "scanned for secrets and redacted locally first" both describe the
+		// behaviour this line now has, and described something else before.
 		if m.CaptureContent && e.Prompt != "" {
-			ev.Content = &client.Content{Prompt: e.Prompt}
+			if p := m.redact(e.Prompt); p != "" {
+				ev.Content = &client.Content{Prompt: p}
+			}
 		}
 
 	case HookPreToolUse:
@@ -234,10 +244,25 @@ func (m Mapper) Map(hook HookName, e *HookEvent) (client.DevEvent, bool) {
 		// would be worse than either alone. The gated path overwrites this with
 		// its own precisely-redacted rebuild (enforceTarget.DevEvent).
 		if m.CaptureContent {
-			// redact BEFORE the cap: toolInputExtract is deliberately uncapped
-			// so a secret straddling the boundary is replaced rather than cut
-			// into an unmatchable fragment that then ships.
-			if in := hookflow.CapCommand(m.redact(toolInputExtract(e, nil))); in != "" {
+			// Redact and attach; the EGRESS cap is the client's capBody, like
+			// every other content field.
+			//
+			// It used to be hookflow.CapCommand — MaxCommandLen, 8 KiB — whose own
+			// doc says it bounds the LOCAL DecisionRequest command and is "never
+			// egressed". Reusing a local-only bound as an egress bound made the
+			// wire cap 8x smaller than every document describing it:
+			// docs/data-and-privacy.md says a Write body is "truncated at 64KB"
+			// and CLAUDE.md says content-based policy "sees at most the first 64KB
+			// of any body". A 40 KB source file egressed as 8 KiB, and core's
+			// Guardrails stage 0 and any approver saw only that. It also coupled
+			// two unrelated numbers: changing MaxCommandLen for local-matching
+			// reasons silently changed what the server can see.
+			//
+			// Still bounded: m.redact truncates at MaxRedactBody before scanning,
+			// which is the same shape ToolOutput and Thinking already have. And
+			// redact still runs BEFORE any cap, so a secret straddling a boundary
+			// is replaced rather than cut into an unmatchable fragment.
+			if in := m.redact(toolInputExtract(e, nil)); in != "" {
 				ev.Content = &client.Content{ToolInput: in}
 			}
 		}

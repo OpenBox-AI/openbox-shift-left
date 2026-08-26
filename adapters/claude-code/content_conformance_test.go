@@ -432,6 +432,40 @@ func TestContentCaptureConformance(t *testing.T) {
 			t.Errorf("the turn's token usage went missing with capture off: %v", out)
 		}
 	})
+
+	// C42 — the PROMPT is redacted before it egresses.
+	//
+	// It was the one content field on the observe path that was not. Output,
+	// Thinking, ToolInput, ToolOutput and SignalDetail all passed through
+	// Mapper.redact; `Prompt: e.Prompt` did not — so with secret_detection fully
+	// ON, a credential pasted into a prompt reached the control plane verbatim,
+	// while Map's own doc comment and README both said prompts are "scanned for
+	// secrets and redacted locally first".
+	//
+	// Asserted in three directions on the real outbound bytes. The secret absent
+	// AND the placeholder present, because absence alone also passes for a client
+	// that stopped sending prompts; and the surrounding text intact, because
+	// "redacted" must be distinguishable from "dropped".
+	t.Run("C42 the prompt is redacted before egress", func(t *testing.T) {
+		const secret = "AKIAIOSFODNN7EXAMPLE"
+		bodies := observeThenFlush(t, "cc-prompt-redact", "1", "UserPromptSubmit",
+			`{"hook_event_name":"UserPromptSubmit","session_id":"cc-prompt-redact","cwd":"/tmp",`+
+				`"prompt":`+jsonQuote("deploy with key "+secret)+`}`)
+
+		joined := strings.Join(bodies, "\n")
+		if joined == "" {
+			t.Fatal("nothing reached /evaluate; the case proves nothing")
+		}
+		if strings.Contains(joined, secret) {
+			t.Errorf("the prompt's credential reached the wire unredacted:\n%s", joined)
+		}
+		if !strings.Contains(joined, "OPENBOX_REDACTED") {
+			t.Errorf("no redaction placeholder on the wire — the prompt was never scanned:\n%s", joined)
+		}
+		if !strings.Contains(joined, "deploy with key") {
+			t.Errorf("the prompt's non-secret text did not egress, so this proves nothing about redaction:\n%s", joined)
+		}
+	})
 }
 
 // C39 is a detection-COVERAGE case, not an ordering case, and it is separate from

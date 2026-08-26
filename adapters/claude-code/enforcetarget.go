@@ -84,8 +84,15 @@ func (t enforceTarget) DevEvent(redacted *client.Content) (client.DevEvent, bool
 // tool was rewritten to — not the original, and not a second redaction that
 // could differ from it. When nothing was scanned or nothing matched, redacted is
 // nil and the original stands.
+// The bound is MaxRedactBody, not MaxCommandLen. MaxCommandLen (8 KiB) is
+// documented as bounding the LOCAL DecisionRequest command and being "never
+// egressed"; this string IS egressed, on Content.ToolInput, so using it here made
+// the gated copy 8x smaller than the 64KB every document describes — and tied
+// what the server can see to a constant chosen for local matching. MaxRedactBody
+// is the bound the observe copy already lands on (m.redact truncates there), so
+// the two copies of one call stay the same size as well as the same text.
 func evaluationContext(e *HookEvent, redacted *client.Content) string {
-	return hookflow.CapCommand(toolInputExtract(e, redacted))
+	return hookflow.TruncateBytes(toolInputExtract(e, redacted), hookflow.MaxRedactBody)
 }
 
 // toolInputExtract is evaluationContext without the cap, so a caller that has to
