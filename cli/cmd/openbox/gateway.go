@@ -4,13 +4,27 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
 
+	"github.com/openbox-ai/openbox-shift-left/adapters/common/devconfig"
+	"github.com/openbox-ai/openbox-shift-left/adapters/common/hookflow"
+	"github.com/openbox-ai/openbox-shift-left/cli/internal/gatewayemit"
 	"github.com/openbox-ai/openbox-shift-left/gateway"
+)
+
+// The gateway files its evidence in the Claude Code adapter's spool, under the
+// session id the request carried, so the hook path's existing flushers deliver it
+// — no second delivery mechanism, and the two producers' events for one session
+// travel together. ADR-0021 scopes the gateway to Claude Code; a second provider
+// needs its own resolution here, not a rename.
+const (
+	gatewaySpoolSubdir   = "cc-spool"
+	gatewaySpoolProvider = "claude-code"
 )
 
 // runGateway serves the local OpenBox gateway in the foreground.
@@ -49,6 +63,30 @@ func (a *app) runGateway(args []string) int {
 	if err != nil {
 		listener.Close()
 		return a.errorf("%v", err)
+	}
+
+	// TURN CAPTURE ON. Without this the relay works perfectly and reports
+	// nothing: package gateway keeps its emitter optional so phase 04's
+	// byte-identity suite can assert a bare relay, and for a while nothing in
+	// the shipping binary opted in — so every observed exchange was discarded
+	// and no gateway span ever reached core. gatewaycapture_test.go is the
+	// control, and it drives this function rather than constructing a Gateway.
+	//
+	// An unconfigured machine relays WITHOUT capture rather than spooling events
+	// nobody can attribute: with no DID the flusher cannot build a client, so
+	// those events would sit on disk forever while looking like success here.
+	if did := devconfig.ResolveDIDOrEmpty(); did != "" {
+		spool := hookflow.Spool{Dir: devconfig.SpoolDir(gatewaySpoolSubdir)}
+		trigger := hookflow.RealtimeTrigger{Spool: spool, Provider: gatewaySpoolProvider}
+		logger := log.New(a.stderr, "", 0)
+		g = g.WithCapture(&gatewayemit.Emitter{
+			Spool:        spool,
+			DeveloperDID: did,
+			Warn:         func(format string, args ...any) { fmt.Fprintf(a.stderr, format+"\n", args...) },
+			Flush:        func(sessionID string) { trigger.Maybe(logger, sessionID) },
+		})
+	} else {
+		fmt.Fprintln(a.stderr, "openbox gateway: no developer DID configured, so model calls are relayed but NOT recorded. Run `openbox auth`.")
 	}
 
 	// Probe-A mode. Announced loudly, because a gateway that refuses everything
@@ -93,9 +131,17 @@ func (a *app) runGateway(args []string) int {
 	fmt.Fprintf(a.stdout, "openbox gateway listening on %s, forwarding to %s\n", listener.Addr(), cfg.Upstream)
 	fmt.Fprintln(a.stdout, "pass-through auth: this process resolves, stores and injects no credential")
 
-	// Stop on the signals a service manager actually sends.
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
+	// Stop on the signals a service manager actually sends. A test supplies its
+	// own context instead, because a test binary cannot signal itself safely.
+	ctx := a.gatewayCtx
+	if ctx == nil {
+		signalCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		defer stop()
+		ctx = signalCtx
+	}
+	if a.gatewayReady != nil {
+		a.gatewayReady(listener.Addr())
+	}
 
 	serveErr := make(chan error, 1)
 	go func() { serveErr <- srv.Serve(listener) }()

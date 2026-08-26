@@ -38,6 +38,7 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/provider"
 	"io"
 	"log"
+	"net"
 	"os"
 	"strings"
 )
@@ -64,6 +65,16 @@ type app struct {
 	stdin          io.Reader
 	getenv         func(string) string
 	newRegistrar   func(baseURL, credential, clientID string) devinit.Registrar
+
+	// gatewayReady and gatewayCtx exist so a test can drive the REAL `gateway`
+	// command instead of a stand-in. Both nil in production, where the command
+	// serves until a signal arrives.
+	//
+	// They are here rather than as flags because the wiring itself is what needs
+	// covering: the gateway once shipped with capture unconnected, and no test
+	// that constructed its own Gateway could have seen that.
+	gatewayReady func(net.Addr)
+	gatewayCtx   context.Context
 }
 
 func defaultApp() *app {
