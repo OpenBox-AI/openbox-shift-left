@@ -90,8 +90,15 @@ fi
 
 # And the two producers must not have collided on activity_id, or core's dedupe
 # absorbed one as a duplicate of the other and half the evidence is silently gone.
-dupes="$(tb_val "select count(*) from (select activity_id from governance_events where run_id='$uuid_a' and activity_id like '%:gateway:%' intersect select activity_id from governance_events where run_id='$uuid_a' and activity_id like '%:turn:%')")"
-if [ "${dupes:-0}" = "0" ]; then
+# ALIAS the subquery, and use the STRICT reader. PostgreSQL requires an alias for
+# a subquery in FROM ("subquery in FROM must have an alias"), so this query
+# ERRORED — and tb_val discards stderr while the caller coerces "" to 0, which
+# made the collision assertion report PASS unconditionally. That is precisely the
+# failure mode 45.B's header describes and tb_val_strict was added for, fifteen
+# lines further down the same file.
+if ! dupes="$(tb_val_strict "select count(*) from (select activity_id from governance_events where run_id='$uuid_a' and activity_id like '%:gateway:%' intersect select activity_id from governance_events where run_id='$uuid_a' and activity_id like '%:turn:%') as shared")"; then
+	tb_bad "activity_id collision query FAILED — this is an inconclusive assertion, not a pass"
+elif [ "$dupes" = "0" ]; then
 	tb_ok "gateway and hook activity ids are disjoint"
 else
 	tb_bad "activity_id COLLISION between producers ($dupes) — core's dedupe will have dropped evidence"
@@ -134,7 +141,7 @@ beta="$(tb_val "select count(*) from spans where session_id='$uuid_a' and data::
 if [ "${beta:-0}" -gt 0 ]; then
 	tb_ok "anthropic-beta survived the relay (a stripped value makes a capability quietly unavailable)"
 else
-	tb_skip "no anthropic-beta on this session's calls — inconclusive, not a pass"
+	tb_skip "anthropic-beta survived the relay" "no anthropic-beta on this session's calls — inconclusive, not a pass"
 fi
 
 # The system array must still be an ARRAY with the attribution block first. A
@@ -161,7 +168,7 @@ tb_note "PROVISIONAL: the refusal shape (gateway/refuse.go) is unprobed. A failu
 tb_note "is a probe-A finding, not necessarily a regression. If no shape qualifies,"
 tb_note "phase 06 descopes to observe-only and this case is DELETED, not fixed."
 if [ "${TB_GATEWAY_REFUSAL:-0}" != "1" ]; then
-	tb_skip "set TB_GATEWAY_REFUSAL=1 with a deny policy published to run case D"
+	tb_skip "policy refusal stops the call" "set TB_GATEWAY_REFUSAL=1 with a deny policy published to run case D"
 else
 	before="$(tb_count "governance_events where agent_id='$TB_AGENT'")"
 	uuid_d="$(tb_session "say exactly: gateway-d-$run")"
@@ -207,13 +214,22 @@ fi
 # is the direction that makes a dead gateway safe instead of a hole.
 tb_step "45.F  config present + daemon stopped ⇒ zero model calls succeed"
 if [ "${TB_GATEWAY_DEADSTOP:-0}" != "1" ]; then
-	tb_skip "set TB_GATEWAY_DEADSTOP=1 to run the dead-daemon case (it makes the machine's model calls fail)"
+	tb_skip "dead daemon blocks model calls" "set TB_GATEWAY_DEADSTOP=1 to run it (it makes this machine's model calls fail)"
 else
 	"$OPENBOX_BIN" init --provider claude-code --gateway --gateway-addr "$GW_ADDR" >/dev/null 2>&1
 	pkill -f "openbox gateway" 2>/dev/null
 	sleep 1
 	uuid_f="$(tb_session "say exactly: gateway-f-$run" || true)"
-	spans_f="$(tb_count "spans where session_id='${uuid_f:-none}' and name like '%llm%'")"
+	# A session that never started is the EXPECTED outcome here, and it must not be
+	# checked by querying a uuid column for the literal 'none': that is a type
+	# error, and the "" it returns is coerced to 0 — the same value as the pass.
+	if [ -z "$uuid_f" ]; then
+		tb_ok "a dead gateway blocked the session outright (no run id was produced)"
+		spans_f=0
+	elif ! spans_f="$(tb_count_strict "spans where session_id='$uuid_f' and name like '%llm%'")"; then
+		tb_bad "dead-gateway span query FAILED — inconclusive"
+		spans_f=-1
+	fi
 	if [ "${spans_f:-0}" = "0" ]; then
 		tb_ok "a dead gateway blocked the calls rather than letting them escape"
 	else
@@ -225,7 +241,15 @@ fi
 # Phases 01-02 must hold with NO gateway at all, or Track A's "ships alone"
 # property was never true.
 tb_step "45.G  Track A holds with no gateway present"
-content="$(tb_val "select count(*) from governance_events where run_id='$uuid_e' and (activity_output::text like '%thinking%' or activity_output::text like '%output%')")"
+# `output`, not `activity_output`. The latter is the WIRE field name; the COLUMN
+# core stores it in is `output`, which is what every other query in this suite
+# uses. The mismatch made this query error, tb_val swallow it, and case G report a
+# FALSE FAILURE — "Track A capture stopped working" — on a perfectly good run.
+# Strict, so a future column rename fails loudly instead of inverting the verdict.
+if ! content="$(tb_val_strict "select count(*) from governance_events where run_id='$uuid_e' and output is not null and (output ? 'thinking' or output ? 'output')")"; then
+	tb_bad "Track A content query FAILED — inconclusive, not a failure of Track A"
+	content=0
+fi
 if [ "${content:-0}" -gt 0 ]; then
 	tb_ok "tool/turn content still captured with the gateway removed ($content)"
 else

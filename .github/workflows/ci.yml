@@ -217,6 +217,36 @@ jobs:
             bash -n "$f" || { echo "syntax error in $f"; exit 1; }
           done
 
+      - name: Testbed helpers are called with the arity they declare
+        # `bash -n` CANNOT see this, and the failure is worse than a syntax error:
+        # every script runs under `set -u`, so a tb_skip called with one argument
+        # expands an unset $2 and the phase ABORTS at that line. 45-gateway.sh had
+        # three, all on default paths, so cases E, F and G never executed and
+        # run-all.sh recorded a bare non-zero exit with no diagnostic.
+        #
+        # Arity is counted from the double quotes on the call line, which is how
+        # every call site in the suite is written. A call spanning lines, or one
+        # using a variable rather than a literal, is skipped rather than guessed
+        # at — a gate that reports false positives gets disabled.
+        run: |
+          bad=""
+          for f in testbed/*.sh; do
+            while IFS= read -r line; do
+              case "$line" in
+                *'tb_skip "'*)
+                  q=$(printf '%s' "$line" | tr -cd '"' | wc -c)
+                  [ "$q" -ge 4 ] || bad="$bad$f: $line"$'\n'
+                  ;;
+              esac
+            done < "$f"
+          done
+          if [ -n "$bad" ]; then
+            echo "tb_skip takes <name> <reason>; these pass one argument and would abort the phase under set -u:"
+            printf '%s' "$bad"
+            exit 1
+          fi
+          echo "all tb_skip call sites pass both arguments"
+
       - name: Docs never show an openbox flag the CLI does not define
         # Four separate phantom flags were written into this feature's docs before
         # any gate existed. The worst was a service unit documented as
