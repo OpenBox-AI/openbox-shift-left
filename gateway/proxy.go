@@ -121,6 +121,10 @@ type Gateway struct {
 	emitter   Emitter
 	evaluator Evaluator
 	gated     func(*http.Request) bool
+
+	// logf is the optional per-call commentary seam (see verbose.go). Nil means
+	// silent, which is the default.
+	logf func(format string, args ...any)
 }
 
 // WithCapture turns on evidence emission. Observe-only: it changes what is
@@ -197,6 +201,15 @@ func New(cfg Config) (*Gateway, error) {
 // so is anything the provider adds next -- being a transparent stand-in is what
 // keeps this forward-compatible without a release.
 func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	// The arrival line is logged BEFORE any validation, because "did anything
+	// reach this process at all" is the question verbose mode exists to answer —
+	// and a request rejected by the checks below is still an arrival. Path only,
+	// never RequestURI: the query can carry content or a token.
+	var start time.Time
+	if g.verbose() {
+		start = time.Now()
+		g.vlog("→ %s %s", r.Method, r.URL.Path)
+	}
 	// ORIGIN-FORM ONLY, and this check is what keeps the upstream host fixed.
 	//
 	// The target below is built by CONCATENATION (g.upstream + r.RequestURI), so
@@ -379,6 +392,18 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	streamErr := g.streamTo(w, resp.Body, sink)
 
+	if g.verbose() {
+		// Logged after the stream finishes, so the duration is the real one a
+		// developer feels. A streamed completion legitimately runs for minutes,
+		// which is itself worth seeing.
+		outcome := "ok"
+		if streamErr != nil {
+			outcome = "stream aborted"
+		}
+		g.vlog("← %s %s %d in %s (%s)", r.Method, r.URL.Path, resp.StatusCode,
+			time.Since(start).Round(time.Millisecond), outcome)
+	}
+
 	if g.emitter != nil {
 		g.emitter.Emit(r.Context(), reqCapture.Complete(resp.StatusCode, resp.Header,
 			capturableBody(sink.Bytes(), resp.Header)))
@@ -525,6 +550,12 @@ func (g *Gateway) streamTo(w http.ResponseWriter, src io.Reader, sink *captureSi
 // upstream response -- those are forwarded verbatim -- and it never echoes
 // request detail, because the developer's live credential transits every request.
 func (g *Gateway) relayError(w http.ResponseWriter, status int, reason string) {
+	// Every relay-level rejection funnels through here, which is why the log line
+	// lives here rather than at the five call sites: a rejection that printed
+	// nothing would read, from the terminal, as no traffic at all — the precise
+	// misreading verbose mode exists to prevent. `reason` is this package's own
+	// fixed wording and never echoes request detail (see the doc comment above).
+	g.vlog("✗ relay refused: %d %s", status, reason)
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	fmt.Fprintf(w, `{"type":"error","error":{"type":"openbox_gateway_error","message":%q}}`, reason)

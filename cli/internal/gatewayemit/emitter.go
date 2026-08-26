@@ -67,6 +67,15 @@ type Emitter struct {
 	// still ship on the session's next hook-driven flush.
 	Flush func(sessionID string)
 
+	// Verbose reports the capture outcome of EVERY call, unthrottled. It is the
+	// counterpart to Warn, not a louder version of it: Warn is a standing fault
+	// worth an hourly line, while this is a developer watching a terminal to find
+	// out whether the thing works at all. Nil ⇒ silent.
+	//
+	// It prints identifiers and counts only — never a header, a body, or the
+	// credential fingerprint.
+	Verbose func(format string, args ...any)
+
 	// Now is injectable so a test can pin a timestamp; nil ⇒ time.Now.
 	Now func() time.Time
 
@@ -126,6 +135,7 @@ func (e *Emitter) Emit(ctx context.Context, c gateway.Captured) {
 
 	did := e.developerDID()
 	if did == "" {
+		e.vlog("  capture: SKIPPED — no developer DID configured (run `openbox auth`)")
 		e.warnThrottled(&e.lastNoDIDWarn, "openbox gateway: no developer DID configured, so relayed model calls are NOT being recorded. Run `openbox auth`; no restart is needed.")
 		return
 	}
@@ -142,6 +152,7 @@ func (e *Emitter) Emit(ctx context.Context, c gateway.Captured) {
 	// the id that matters less.
 	sessionID := c.RequestHeaders[sessionHeader]
 	if sessionID != "" && !usableSessionID(sessionID) {
+		e.vlog("  capture: SKIPPED — %s is not a usable session id", sessionHeader)
 		e.warnThrottled(&e.lastBadSessionWarn, "openbox gateway: relayed calls carry a %s header that is not a usable session id "+
 			"(too long, or not printable ASCII), so nothing can be attributed to a session. The model calls themselves are unaffected.", sessionHeader)
 		return
@@ -159,6 +170,7 @@ func (e *Emitter) Emit(ctx context.Context, c gateway.Captured) {
 		// sits in the unconditional default header map beside x-app and
 		// User-Agent — but that is code-path evidence, not observed traffic, so
 		// this path stays live and must stay loud.
+		e.vlog("  capture: SKIPPED — the call carries no %s header, so it cannot be attributed to a session", sessionHeader)
 		e.warnThrottled(&e.lastNoSessionWarn, "openbox gateway: relayed calls carry no %s header, so nothing can be attributed to a session and no governance events are being sent. "+
 			"The model calls themselves are unaffected.", sessionHeader)
 		return
@@ -171,9 +183,11 @@ func (e *Emitter) Emit(ctx context.Context, c gateway.Captured) {
 	}
 	ev := EventFor(id, e.requestID(c), e.now(), c)
 	if err := e.Spool.Append(ev); err != nil {
+		e.vlog("  capture: DROPPED — %v", err)
 		e.warn("openbox gateway: dropped event %s: %v", ev.EventID, err)
 		return
 	}
+	e.vlog("  capture: recorded session=%s activity=%s:gateway:%s", sessionID, sessionID, ev.GatewayRequestID)
 	if e.Flush != nil {
 		e.Flush(sessionID)
 	}
@@ -214,6 +228,13 @@ func (e *Emitter) now() time.Time {
 		return e.Now()
 	}
 	return time.Now()
+}
+
+// vlog is the unthrottled per-call commentary (see the Verbose field).
+func (e *Emitter) vlog(format string, args ...any) {
+	if e.Verbose != nil {
+		e.Verbose(format, args...)
+	}
 }
 
 func (e *Emitter) warn(format string, args ...any) {

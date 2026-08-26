@@ -38,6 +38,7 @@ func (a *app) runGateway(args []string) int {
 	addr := fs.String("addr", gateway.DefaultAddr, "loopback listen address (host:port)")
 	upstream := fs.String("upstream", gateway.DefaultUpstream, "provider base URL to forward to")
 	grace := fs.Duration("shutdown-grace", 30*time.Second, "how long to let in-flight streams drain after a stop signal")
+	verbose := fs.Bool("verbose", false, "log every relayed call and whether it was recorded (no credentials, headers or bodies are printed)")
 	// PROBE-A AFFORDANCE, not an org knob. Probe A has to try several refusal
 	// shapes against a real Claude Code session; without these it is a recompile
 	// per candidate, on a probe that already needs a human. With them the probe
@@ -81,16 +82,28 @@ func (a *app) runGateway(args []string) int {
 	// auth` finished never recorded anything, for its whole life, which is the
 	// ordinary order of operations rather than an edge case. The hook path never
 	// had the problem because every hook is a fresh process.
+	logger := log.New(a.stderr, "", 0)
 	if !*refuseAll {
 		spool := hookflow.Spool{Dir: devconfig.SpoolDir(gatewaySpoolSubdir)}
 		trigger := hookflow.RealtimeTrigger{Spool: spool, Provider: gatewaySpoolProvider}
-		logger := log.New(a.stderr, "", 0)
-		g = g.WithCapture(&gatewayemit.Emitter{
+		em := &gatewayemit.Emitter{
 			Spool: spool,
 			DID:   devconfig.ResolveDIDOrEmpty,
 			Warn:  logger.Printf,
 			Flush: func(sessionID string) { trigger.Maybe(logger, sessionID) },
-		})
+		}
+		// The capture half of --verbose, and the half that answers the question a
+		// developer is usually really asking. "A call reached the relay" and "a
+		// call was recorded" are different facts, and every gap this feature exists
+		// to expose lives between them: a gateway can relay perfectly and record
+		// nothing.
+		if *verbose {
+			em.Verbose = logger.Printf
+		}
+		g = g.WithCapture(em)
+	}
+	if *verbose {
+		g = g.WithVerbose(logger.Printf)
 	}
 
 	// Probe-A mode. Announced loudly, because a gateway that refuses everything
