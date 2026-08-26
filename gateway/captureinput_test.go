@@ -75,25 +75,52 @@ func TestCaptureBodyTrimsToARuneBoundary(t *testing.T) {
 // TestCaptureBodyStillRedactsWithinTheBound is the security half: bounding the
 // INPUT must not weaken redaction of what is kept. A credential inside the window
 // still has to be replaced before the value can reach the wire.
+//
+// TWO THINGS MADE THE FIRST VERSION VACUOUS, and both are worth naming because
+// either alone is enough to make a redaction test prove nothing.
+//
+//   - The "secret" was `${OPENBOX_REDACTED_AWS_KEY}` — the redactor's OWN output
+//     placeholder, which no pattern matches. Deleting the redactor entirely left
+//     that string untouched, so "the secret survived redaction" could not fire.
+//   - It was placed PAST the 65,536-rune wire cap, so capRunes removed it whatever
+//     the redactor did. Measured: captureBody returned exactly the leading run of
+//     x's and nothing else.
+//
+// So the secret now sits INSIDE the cap, it is a real AWS key, and the assertion
+// is two-sided: the key absent AND its placeholder present. Absence alone also
+// passes for truncation, which is the trap this test fell into.
 func TestCaptureBodyStillRedactsWithinTheBound(t *testing.T) {
-	const secret = "${OPENBOX_REDACTED_AWS_KEY}"
-	// Place it inside the retained window but well past the wire cap, so only the
-	// input bound (not the rune cap) decides whether the redactor ever saw it.
-	body := strings.Repeat("x", captureBodyRunes+1024) + " " + secret +
-		` "password":"hunter2hunter2" ` + strings.Repeat("y", 64<<20)
+	const awsKey = "AKIAIOSFODNN7EXAMPLE"
+	const assigned = "hunter2hunter2"
+	// Inside the wire cap, so only redaction can be the reason it is gone; the
+	// oversized tail keeps the INPUT bound in play at the same time.
+	body := strings.Repeat("x", 1024) + " " + awsKey +
+		` "password":"` + assigned + `" ` + strings.Repeat("y", 64<<10)
 
 	got := captureBody(body)
-	if strings.Contains(got, secret) {
+	if strings.Contains(got, awsKey) {
 		t.Error("an AWS key inside the bounded window survived redaction")
 	}
+	if strings.Contains(got, assigned) {
+		t.Error("an assigned password inside the bounded window survived redaction")
+	}
+	if !strings.Contains(got, "OPENBOX_REDACTED") {
+		t.Errorf("no redaction placeholder — the body was truncated, not scanned:\n%.200s", got)
+	}
+	// The surrounding text must survive, or "redacted" is indistinguishable from
+	// "dropped".
+	if !strings.Contains(got, strings.Repeat("x", 1024)) {
+		t.Error("the non-secret prefix did not survive; this proves nothing about redaction")
+	}
+
 	// And the whole exchange still has to pass the ordering rule: the fingerprint
 	// comes off live headers, not off a redacted copy.
-	h := http.Header{"Authorization": []string{"Bearer " + secret}}
+	h := http.Header{"Authorization": []string{"Bearer " + awsKey}}
 	rc := CaptureRequest("POST", "https://api.anthropic.com/v1/messages", h, body)
 	if rc.Fingerprint == "" {
 		t.Error("no credential fingerprint; it must be taken before header redaction")
 	}
-	if strings.Contains(rc.Body, secret) {
+	if strings.Contains(rc.Body, awsKey) {
 		t.Error("the secret reached the captured request body")
 	}
 	if v := rc.Headers["Authorization"]; v != redactedHeaderValue {
