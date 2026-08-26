@@ -59,17 +59,23 @@ var hopByHopHeaders = map[string]bool{
 	"Keep-Alive":          true,
 	"Proxy-Authenticate":  true,
 	"Proxy-Authorization": true,
-	"Te":                  true,
-	"Trailer":             true,
-	"Transfer-Encoding":   true,
-	"Upgrade":             true,
+	// Non-standard, and still sent by clients behind a corporate proxy and by
+	// older HTTP stacks. net/http/httputil's own hopHeaders lists it for exactly
+	// that reason, and connectionNamedHeaders below cannot cover it: the whole
+	// point of Proxy-Connection is that it appears INSTEAD of being named in a
+	// Connection value.
+	"Proxy-Connection":  true,
+	"Te":                true,
+	"Trailer":           true,
+	"Transfer-Encoding": true,
+	"Upgrade":           true,
 }
 
 // relayBufferSize is the tee chunk, matching net/http.Transport's own read
 // buffer -- the ceiling on what one upstream Read can return when nothing is
 // already buffered.
 //
-// It is NOT what protects SSE pings. stream() flushes buf[:n] after every
+// It is NOT what protects SSE pings. streamTo flushes buf[:n] after every
 // non-empty Read, so a 50-byte ping relays as 50 bytes at any buffer size; the
 // flush-per-read is the mechanism, not the size. Growing this would cut syscalls
 // on a large bursty body and cost nothing in latency, but that is an unmeasured
@@ -221,6 +227,19 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// A '#' is refused for the same reason and by the same rule. It is not valid
+	// in a request-target, and it cannot be relayed verbatim: `target` below is
+	// handed to url.Parse, which splits everything after the '#' into
+	// URL.Fragment, and Request.write then emits only URL.RequestURI() — so
+	// `GET /v1/messages#x` reaches the provider as `/v1/messages`. Measured, not
+	// theorized. Silently dropping bytes is the one thing this relay must not do,
+	// and the byte-identity comment on `target` is the invariant it would break.
+	if strings.Contains(r.RequestURI, "#") {
+		g.relayError(w, http.StatusBadRequest,
+			"request target must not contain a fragment; it cannot be forwarded byte-identically")
+		return
+	}
+
 	// Read the body once. The exact bytes are what gets forwarded, and knowing
 	// the length is what keeps the framing identical instead of chunked.
 	//
@@ -243,10 +262,25 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// before a response exists and the fingerprint has to come off the live
 	// headers. Skipped entirely when neither capture nor the gate is on, so a bare
 	// relay does no redaction work it will not use.
+	// r.RequestURI, not r.URL.Path, and for the same reason `target` below uses it:
+	// r.URL.Path is DECODED. stripQuery then cut the recorded destination at a
+	// %3F and un-escaped a %2F into a path separator, so the stored http.url was
+	// not the path that was relayed — `/v1/mess%3Fages` recorded as `/v1/mess`,
+	// `/v1/a%2Fb` recorded as `/v1/a/b` (both measured). ServeHTTP's origin-form
+	// guard above exists precisely because a misrecorded destination leaves no
+	// hole in the record, and this is that class one level down: the host was
+	// defended and the path was not. stripQuery inside CaptureRequest drops the
+	// query, so passing the raw target is safe.
+	//
+	// The body is sliced before it is stringified: captureBody's first act is to
+	// truncate to maxCaptureInputBytes, so converting the whole thing first copies
+	// up to maxRequestBody (64 MiB) to throw almost all of it away — on the
+	// pre-forward path, on a listener with no caller authentication.
 	var reqCapture RequestCapture
 	capturing := g.emitter != nil || g.evaluator != nil
 	if capturing {
-		reqCapture = CaptureRequest(r.Method, g.upstream+r.URL.Path, r.Header, string(body))
+		reqCapture = CaptureRequest(r.Method, g.upstream+r.RequestURI, r.Header,
+			capturableBody(body, r.Header))
 	}
 
 	// The gate. Nothing is gated unless a predicate says so, and a nil predicate
@@ -292,6 +326,24 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	resp, err := g.client.Do(outbound)
 	if err != nil {
+		// NO RESPONSE, BUT THE CALL STILL HAPPENED — so it still gets a record.
+		//
+		// Both branches used to return without emitting, and that was the widest
+		// assurance hole in this file: the transport writes the request body
+		// upstream before Do returns, so a caller that hangs up 400ms into a POST
+		// has already sent its whole prompt to the provider and left ZERO evidence
+		// (measured). It is client-controlled and deterministic — any local process,
+		// the governed agent included, could suppress its own record by not waiting
+		// for the response. ADR-0021 §2 rests on a bypass leaving a HOLE in the
+		// record; this left no hole at all.
+		//
+		// Status 0, not a synthesized code: `omitempty` drops it, and a span
+		// carrying a method, a URL and a fingerprint with NO status is exactly the
+		// shape "a call was relayed and no response was observed" should have. A
+		// fabricated 502 would be indistinguishable from one the provider sent.
+		if g.emitter != nil {
+			g.emitter.Emit(r.Context(), reqCapture.Complete(0, nil, ""))
+		}
 		// A client that hung up mid-request is not a gateway failure; there is
 		// nobody left to answer.
 		if errors.Is(err, context.Canceled) {
@@ -308,6 +360,15 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	copyHeaders(w.Header(), resp.Header)
 	w.WriteHeader(resp.StatusCode)
 
+	// FLUSH THE HEADERS. Go buffers WriteHeader, and the only other flush in this
+	// file is inside `if n > 0`, so an upstream that sends headers immediately and
+	// then pauses — a queued request, a long thinking pause, the exact case this
+	// package's doc comment is written around — relayed as total silence until the
+	// first body byte. Measured at 1.2s on a replica. This is the one default
+	// httputil.ReverseProxy defeats explicitly, and response headers are bytes:
+	// Claude Code's watchdog counts them.
+	_ = http.NewResponseController(w).Flush()
+
 	// Tee the response into the capture buffer while relaying, so the evidence
 	// costs one pass rather than a second read of something already streamed.
 	// Bounded by the same rune cap the wire has, so a long stream cannot grow this
@@ -316,11 +377,62 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if g.emitter != nil {
 		sink = &captureSink{}
 	}
-	g.streamTo(w, resp.Body, sink)
+	streamErr := g.streamTo(w, resp.Body, sink)
 
 	if g.emitter != nil {
-		g.emitter.Emit(r.Context(), reqCapture.Complete(resp.StatusCode, resp.Header, sink.String()))
+		g.emitter.Emit(r.Context(), reqCapture.Complete(resp.StatusCode, resp.Header,
+			capturableBody(sink.Bytes(), resp.Header)))
 	}
+
+	// A stream that DIED must not look finished. streamErr is an upstream read
+	// error, and returning normally here makes Go write the terminating chunk — so
+	// a completion truncated mid-`content_block_delta` reached the client as a
+	// syntactically complete 200 body, which neither retries nor errors (measured:
+	// status=200, readErr=nil, half a message). Aborting the handler is what
+	// httputil.ReverseProxy does for the same reason (Go issue 23643); the client
+	// then sees a broken connection, which is what actually happened.
+	//
+	// After the emit, deliberately: the evidence of a failed call is exactly the
+	// evidence an auditor needs, and panicking first would discard it.
+	if streamErr != nil {
+		panic(http.ErrAbortHandler)
+	}
+}
+
+// capturableBody decides what may be RECORDED for a body, given its headers.
+//
+// A content-encoded body is not captured, and that is a correctness fix rather
+// than caution. DisableCompression stops the transport requesting gzip on the
+// client's behalf, but the CLIENT's own Accept-Encoding is relayed verbatim (a
+// tested invariant, and undici's fetch sends `gzip, deflate` by default), so the
+// upstream can legitimately answer compressed. Those bytes then went straight to
+// the shared secret detector, which matched NOTHING — measured: a response
+// carrying an AWS key captured with no redaction marker, `utf8.ValidString`
+// false, and json.Marshal rewriting every byte to U+FFFD. Every guarantee
+// capture.go's header comment makes about redaction evaporated silently, and the
+// stored evidence was destroyed anyway.
+//
+// A marker rather than decompression: decompressing an upstream-controlled body
+// on an unauthenticated loopback listener adds a decompression-bomb surface, and
+// the honest limit is the safer trade. The marker names no upstream text, so the
+// record cannot carry attacker-chosen bytes.
+//
+// It also does the pre-truncation captureBody would do anyway, so a 64 MiB
+// request body is never copied whole just to be thrown away.
+func capturableBody(body []byte, h http.Header) string {
+	if isContentEncoded(h) {
+		return "[openbox: not captured — the body was content-encoded, so redaction could not inspect it]"
+	}
+	if len(body) > maxCaptureInputBytes {
+		body = body[:maxCaptureInputBytes]
+	}
+	return string(body)
+}
+
+// isContentEncoded reports whether a body is not in its literal form.
+func isContentEncoded(h http.Header) bool {
+	enc := strings.TrimSpace(h.Get("Content-Encoding"))
+	return enc != "" && !strings.EqualFold(enc, "identity")
 }
 
 // captureSink accumulates a bounded copy of the relayed response.
@@ -352,23 +464,29 @@ func (s *captureSink) Write(p []byte) {
 }
 
 func (s *captureSink) String() string {
-	if s == nil {
-		return ""
-	}
-	return string(s.buf)
+	return string(s.Bytes())
 }
 
-// stream tees the response through with a flush per chunk. Buffer-then-forward
-// is forbidden here: Claude Code's byte watchdog cannot tell a buffered relay
-// from a stalled provider.
-func (g *Gateway) stream(w http.ResponseWriter, src io.Reader) {
-	g.streamTo(w, src, nil)
+// Bytes returns the accumulated copy without a conversion, so a caller that only
+// needs to inspect or bound it does not pay for a second copy of up to
+// maxCaptureSinkBytes.
+func (s *captureSink) Bytes() []byte {
+	if s == nil {
+		return nil
+	}
+	return s.buf
 }
 
 // streamTo relays and, when sink is non-nil, tees a bounded copy. The relay is
 // unchanged by the tee: the write to the client happens first and its error is
 // what ends the loop, so a capture problem can never abort a stream.
-func (g *Gateway) streamTo(w http.ResponseWriter, src io.Reader, sink *captureSink) {
+//
+// It RETURNS the upstream read error, and the caller must act on it. Treating an
+// error like io.EOF is what let a stream that died mid-completion reach the
+// client as a clean, well-formed 200 — see ServeHTTP's streamErr handling. A
+// client write error is NOT returned: the caller is gone, there is nothing left
+// to tell, and it is not an upstream failure.
+func (g *Gateway) streamTo(w http.ResponseWriter, src io.Reader, sink *captureSink) error {
 	ctl := http.NewResponseController(w)
 	buf := make([]byte, relayBufferSize)
 	for {
@@ -384,7 +502,7 @@ func (g *Gateway) streamTo(w http.ResponseWriter, src io.Reader, sink *captureSi
 			// A ResponseWriter that cannot take a deadline is left alone.
 			_ = ctl.SetWriteDeadline(time.Now().Add(writeIdleTimeout))
 			if _, writeErr := w.Write(buf[:n]); writeErr != nil {
-				return
+				return nil
 			}
 			sink.Write(buf[:n])
 			// Ignored deliberately: a ResponseWriter that cannot flush (HTTP/2
@@ -393,7 +511,12 @@ func (g *Gateway) streamTo(w http.ResponseWriter, src io.Reader, sink *captureSi
 			_ = ctl.Flush()
 		}
 		if readErr != nil {
-			return
+			// io.EOF is the stream ending; anything else is the stream BREAKING,
+			// and the two must not be conflated — see this function's doc comment.
+			if errors.Is(readErr, io.EOF) {
+				return nil
+			}
+			return readErr
 		}
 	}
 }
