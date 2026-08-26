@@ -1,0 +1,1297 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>OpenBox Shift-Left — an outside developer's guide</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Fira+Code:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  /* ============ THEME — blueprint (cool slate/blue), three-tier ============ */
+  :root {
+    --font-body: 'DM Sans', system-ui, sans-serif;
+    --font-mono: 'Fira Code', 'SF Mono', Consolas, monospace;
+
+    --bg: #f0f4f8;
+    --surface: #ffffff;
+    --surface2: #e8eef4;
+    --surface-elevated: #fbfdff;
+    --border: rgba(30, 60, 100, 0.10);
+    --border-bright: rgba(30, 60, 100, 0.22);
+    --text: #1a2a3a;
+    --text-dim: #5a7090;
+    --text-bright: #0d1c2b;
+    --accent: #1a5fa8;
+    --accent-dim: rgba(26, 95, 168, 0.07);
+
+    --green: #0e7a4e;
+    --green-dim: rgba(14, 122, 78, 0.08);
+    --red: #b3352e;
+    --red-dim: rgba(179, 53, 46, 0.08);
+    --amber: #b45309;
+    --amber-dim: rgba(180, 83, 9, 0.09);
+    --teal: #0f766e;
+    --teal-dim: rgba(15, 118, 110, 0.08);
+    --plum: #8e3a63;
+    --plum-dim: rgba(142, 58, 99, 0.08);
+    --slate: #42586e;
+    --slate-dim: rgba(66, 88, 110, 0.08);
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0d1421;
+      --surface: #111d2e;
+      --surface2: #16233a;
+      --surface-elevated: #182741;
+      --border: rgba(100, 160, 220, 0.12);
+      --border-bright: rgba(100, 160, 220, 0.24);
+      --text: #c8d8e8;
+      --text-dim: #6d829a;
+      --text-bright: #e8f1fa;
+      --accent: #4a90d9;
+      --accent-dim: rgba(74, 144, 217, 0.10);
+
+      --green: #34d399;
+      --green-dim: rgba(52, 211, 153, 0.10);
+      --red: #f0827a;
+      --red-dim: rgba(240, 130, 122, 0.10);
+      --amber: #fbbf24;
+      --amber-dim: rgba(251, 191, 36, 0.10);
+      --teal: #5eead4;
+      --teal-dim: rgba(94, 234, 212, 0.10);
+      --plum: #e598bd;
+      --plum-dim: rgba(229, 152, 189, 0.10);
+      --slate: #8ba4bd;
+      --slate-dim: rgba(139, 164, 189, 0.10);
+    }
+  }
+
+  [data-theme="dark"] {
+    --bg: #0d1421;
+    --surface: #111d2e;
+    --surface2: #16233a;
+    --surface-elevated: #182741;
+    --border: rgba(100, 160, 220, 0.12);
+    --border-bright: rgba(100, 160, 220, 0.24);
+    --text: #c8d8e8;
+    --text-dim: #6d829a;
+    --text-bright: #e8f1fa;
+    --accent: #4a90d9;
+    --accent-dim: rgba(74, 144, 217, 0.10);
+
+    --green: #34d399;
+    --green-dim: rgba(52, 211, 153, 0.10);
+    --red: #f0827a;
+    --red-dim: rgba(240, 130, 122, 0.10);
+    --amber: #fbbf24;
+    --amber-dim: rgba(251, 191, 36, 0.10);
+    --teal: #5eead4;
+    --teal-dim: rgba(94, 234, 212, 0.10);
+    --plum: #e598bd;
+    --plum-dim: rgba(229, 152, 189, 0.10);
+    --slate: #8ba4bd;
+    --slate-dim: rgba(139, 164, 189, 0.10);
+  }
+
+  /* ============ RESET + BASE ============ */
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  html { scroll-behavior: smooth; }
+
+  body {
+    background-color: var(--bg);
+    background-image: radial-gradient(circle, var(--border) 1px, transparent 1px);
+    background-size: 26px 26px;
+    color: var(--text);
+    font-family: var(--font-body);
+    font-size: 15px;
+    line-height: 1.6;
+    padding: 40px;
+    min-height: 100vh;
+    overflow-wrap: break-word;
+  }
+  body.no-scroll { overflow: hidden; }
+
+  a { color: var(--accent); text-decoration: underline; text-decoration-color: var(--border-bright); text-underline-offset: 3px; }
+  a:hover { text-decoration-color: var(--accent); }
+
+  /* ============ THEME TOGGLE ============ */
+  .theme-toggle {
+    position: fixed; top: 16px; right: 16px; z-index: 500;
+    width: 36px; height: 36px; border-radius: 8px;
+    border: 1px solid var(--border); background: var(--surface);
+    color: var(--text-dim); cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 16px; transition: background 0.15s, color 0.15s;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06);
+  }
+  .theme-toggle:hover { background: var(--surface2); color: var(--text); }
+
+  /* ============ ANIMATION ============ */
+  @keyframes fadeUp {
+    from { opacity: 0; transform: translateY(12px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  .section, .flow-arrow, .kpi { animation: fadeUp 0.4s ease-out both; animation-delay: calc(var(--i, 0) * 0.05s); }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important;
+      animation-delay: 0ms !important;
+      transition-duration: 0.01ms !important;
+    }
+    html { scroll-behavior: auto; }
+  }
+
+  /* ============ LAYOUT: TOC + MAIN ============ */
+  .wrap {
+    max-width: 1360px;
+    margin: 0 auto;
+    display: grid;
+    grid-template-columns: 185px 1fr;
+    gap: 0 40px;
+  }
+  .main { min-width: 0; max-width: 980px; }
+
+  .toc {
+    position: sticky; top: 24px; align-self: start;
+    padding: 14px 0; grid-row: 1 / -1;
+    max-height: calc(100dvh - 48px); overflow-y: auto;
+  }
+  .toc::-webkit-scrollbar { width: 3px; }
+  .toc::-webkit-scrollbar-thumb { background: var(--surface2); border-radius: 2px; }
+  .toc-title {
+    font-family: var(--font-mono); font-size: 10px; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 2px; color: var(--text-dim);
+    padding: 0 0 10px; margin-bottom: 8px; border-bottom: 1px solid var(--border);
+  }
+  .toc a {
+    display: block; font-size: 12px; color: var(--text-dim);
+    text-decoration: none; padding: 4px 8px; border-radius: 5px;
+    border-left: 2px solid transparent; transition: all 0.15s;
+    line-height: 1.4; margin-bottom: 1px;
+  }
+  .toc a:hover { color: var(--text); background: var(--surface2); }
+  .toc a.active { color: var(--text); border-left-color: var(--accent); background: var(--accent-dim); }
+
+  /* ============ TYPOGRAPHY ============ */
+  h1 {
+    font-size: clamp(30px, 4vw, 40px); font-weight: 700; letter-spacing: -1px;
+    margin-bottom: 8px; color: var(--text-bright); text-wrap: balance;
+  }
+  .subtitle {
+    color: var(--text-dim); font-size: 13px; margin-bottom: 36px;
+    font-family: var(--font-mono);
+  }
+  .sec-head {
+    font-family: var(--font-mono); font-size: 13px; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 2px; color: var(--accent);
+    margin: 48px 0 16px; padding-bottom: 8px;
+    border-bottom: 1px solid var(--border);
+    display: flex; align-items: baseline; gap: 10px;
+    scroll-margin-top: 16px;
+  }
+  .sec-head .n { color: var(--text-dim); font-weight: 400; }
+
+  p { margin-bottom: 12px; }
+  strong { color: var(--text-bright); font-weight: 600; }
+
+  code {
+    font-family: var(--font-mono); font-size: 0.86em;
+    background: var(--accent-dim); color: var(--accent);
+    padding: 1px 5px; border-radius: 4px;
+  }
+
+  /* ============ SECTION CARDS ============ */
+  .section {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 12px; padding: 20px 24px; margin-bottom: 16px;
+  }
+  .section--hero {
+    background: var(--surface-elevated);
+    border-color: color-mix(in srgb, var(--border) 45%, var(--accent) 55%);
+    box-shadow: 0 4px 20px rgba(10, 30, 60, 0.07);
+    padding: 26px 30px;
+  }
+  .section--recessed {
+    background: color-mix(in srgb, var(--bg) 60%, var(--surface) 40%);
+    box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.04);
+  }
+
+  .section-label {
+    font-family: var(--font-mono); font-size: 11px; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 1.5px; margin-bottom: 14px;
+    display: flex; align-items: center; gap: 8px; color: var(--accent);
+  }
+  .section-label .dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; display: inline-block; }
+  .section--green-l .section-label { color: var(--green); }
+  .section--amber-l .section-label { color: var(--amber); }
+  .section--teal-l .section-label { color: var(--teal); }
+  .section--plum-l .section-label { color: var(--plum); }
+  .section--red-l .section-label { color: var(--red); }
+
+  .lead { font-size: 17px; line-height: 1.65; color: var(--text-bright); margin-bottom: 16px; max-width: 72ch; }
+
+  /* ============ KPI ROW ============ */
+  .kpi-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin: 18px 0 6px; }
+  .kpi {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+    padding: 14px 16px; box-shadow: 0 2px 8px rgba(10, 30, 60, 0.05);
+  }
+  .kpi .v { font-size: 28px; font-weight: 700; letter-spacing: -0.5px; color: var(--text-bright); font-variant-numeric: tabular-nums; }
+  .kpi .v small { font-size: 15px; font-weight: 600; color: var(--text-dim); }
+  .kpi .l {
+    font-family: var(--font-mono); font-size: 10px; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 1.3px; color: var(--text-dim); margin-top: 5px;
+  }
+
+  /* ============ INNER GRID / CONCEPT CARDS ============ */
+  .inner-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .inner-grid > * { min-width: 0; }
+  .inner-card {
+    background: var(--surface2); border: 1px solid var(--border);
+    border-radius: 8px; padding: 14px 16px;
+  }
+  .inner-card .title { font-weight: 600; font-size: 14px; margin-bottom: 5px; color: var(--text-bright); display: flex; align-items: center; gap: 7px; }
+  .inner-card .title::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); flex-shrink: 0; }
+  .inner-card.t-green .title::before { background: var(--green); }
+  .inner-card.t-amber .title::before { background: var(--amber); }
+  .inner-card.t-teal .title::before { background: var(--teal); }
+  .inner-card.t-plum .title::before { background: var(--plum); }
+  .inner-card.t-slate .title::before { background: var(--slate); }
+  .inner-card .desc { color: var(--text-dim); font-size: 13px; line-height: 1.55; }
+  .inner-card .desc strong { color: var(--text); }
+
+  /* ============ LISTS ============ */
+  .node-list { list-style: none; font-size: 14px; line-height: 1.75; }
+  .node-list li { padding-left: 15px; position: relative; margin-bottom: 6px; }
+  .node-list li::before { content: '›'; color: var(--accent); font-weight: 600; position: absolute; left: 0; }
+  .node-list--red li::before { color: var(--red); }
+
+  /* ============ CODE BLOCKS ============ */
+  .code-block {
+    font-family: var(--font-mono); font-size: 13.5px; line-height: 1.6;
+    background: color-mix(in srgb, var(--bg) 55%, var(--surface) 45%);
+    border: 1px solid var(--border); border-radius: 8px;
+    padding: 14px 16px; overflow-x: auto;
+    white-space: pre; margin: 10px 0;
+  }
+  .code-block .c { color: var(--text-dim); }
+  .code-block .k { color: var(--teal); }
+  .code-block .p { color: var(--amber); }
+
+  .dir-tree {
+    font-family: var(--font-mono); font-size: 12.5px; line-height: 1.8;
+    background: color-mix(in srgb, var(--bg) 55%, var(--surface) 45%);
+    border: 1px solid var(--border); border-radius: 8px;
+    padding: 16px 20px; overflow-x: auto; white-space: pre; margin: 10px 0;
+  }
+  .dir-tree .ann { color: var(--text-dim); }
+  .dir-tree .hl { color: var(--accent); font-weight: 600; }
+  .dir-tree .warn { color: var(--amber); }
+
+  /* ============ FLOW ARROW ============ */
+  .flow-arrow {
+    display: flex; justify-content: center; align-items: center; gap: 8px;
+    color: var(--text-dim); font-family: var(--font-mono); font-size: 12px; padding: 2px 0 14px;
+  }
+  .flow-arrow svg { width: 18px; height: 18px; fill: none; stroke: var(--border-bright); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+
+  /* ============ TABLES ============ */
+  .table-wrap { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; margin: 10px 0; }
+  .table-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .data-table { width: 100%; border-collapse: collapse; font-size: 14px; line-height: 1.55; }
+  .data-table th {
+    background: var(--surface2); font-family: var(--font-mono); font-size: 11px; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 1px; color: var(--text-dim);
+    text-align: left; padding: 10px 14px; border-bottom: 2px solid var(--border-bright); white-space: nowrap;
+  }
+  .data-table td { padding: 10px 14px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  .data-table tbody tr:last-child td { border-bottom: none; }
+  .data-table tbody tr:hover { background: var(--accent-dim); }
+  .data-table code { white-space: nowrap; }
+  .data-table td.wrapcol code { white-space: normal; }
+
+  .status {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-family: var(--font-mono); font-size: 11.5px; font-weight: 500;
+    padding: 2px 9px; border-radius: 6px; white-space: nowrap;
+  }
+  .status--on   { background: var(--green-dim); color: var(--green); }
+  .status--off  { background: var(--slate-dim); color: var(--slate); }
+  .status--warn { background: var(--amber-dim); color: var(--amber); }
+  .status--na   { background: var(--red-dim); color: var(--red); }
+
+  /* ============ CALLOUTS ============ */
+  .callout {
+    padding: 14px 18px; border-radius: 0 8px 8px 0;
+    border: 1px solid var(--border); border-left: 3px solid var(--callout-c, var(--accent));
+    background: color-mix(in srgb, var(--callout-c, var(--accent)) 6%, var(--surface));
+    margin: 14px 0; font-size: 14px; line-height: 1.6;
+  }
+  .callout--warn { --callout-c: var(--amber); }
+  .callout--danger { --callout-c: var(--red); }
+  .callout--good { --callout-c: var(--green); }
+  .callout .ct { font-family: var(--font-mono); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 1.3px; color: var(--callout-c, var(--accent)); margin-bottom: 6px; }
+
+  /* ============ SETUP STEPS ============ */
+  .step { display: grid; grid-template-columns: 52px 1fr; gap: 16px; margin-bottom: 14px; }
+  .step > * { min-width: 0; }
+  .step-num {
+    font-family: var(--font-mono); font-size: 20px; font-weight: 600; color: var(--accent);
+    background: var(--accent-dim); border: 1px solid var(--border); border-radius: 10px;
+    display: flex; align-items: center; justify-content: center; height: 52px;
+  }
+  .step-body { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 14px 18px; }
+  .step-body h3 { font-size: 15px; font-weight: 600; color: var(--text-bright); margin-bottom: 6px; }
+  .step-body p { font-size: 14px; color: var(--text-dim); margin-bottom: 8px; }
+  .step-body p strong { color: var(--text); }
+  .step-body .code-block { margin: 8px 0; }
+
+  /* ============ COLLAPSIBLE ============ */
+  details.collapsible { border: 1px solid var(--border); border-radius: 10px; overflow: hidden; margin: 10px 0; background: var(--surface); }
+  details.collapsible summary {
+    padding: 12px 18px; font-family: var(--font-mono); font-size: 12px; font-weight: 600;
+    cursor: pointer; list-style: none; display: flex; align-items: center; gap: 8px; color: var(--text);
+  }
+  details.collapsible summary::-webkit-details-marker { display: none; }
+  details.collapsible summary::before { content: '▸'; font-size: 11px; color: var(--text-dim); transition: transform 0.15s ease; }
+  details.collapsible[open] summary::before { transform: rotate(90deg); }
+  details.collapsible .collapsible__body { padding: 4px 18px 16px; border-top: 1px solid var(--border); font-size: 14px; }
+
+  /* ============ MERMAID SHELL + ZOOM ============ */
+  .diagram-shell { position: relative; margin: 10px 0 4px; }
+  .diagram-shell__hint { font-family: var(--font-mono); font-size: 11px; color: var(--text-dim); margin-bottom: 6px; opacity: 0.75; }
+  .mermaid-wrap {
+    position: relative; background: var(--surface); border: 1px solid var(--border);
+    border-radius: 12px; overflow: hidden; cursor: grab;
+  }
+  .mermaid-wrap.is-panning { cursor: grabbing; user-select: none; }
+  .mermaid-wrap.is-expanded {
+    position: fixed; inset: 16px; z-index: 400;
+    box-shadow: 0 12px 60px rgba(0, 0, 0, 0.35);
+  }
+  .mermaid-viewport { position: relative; overflow: hidden; width: 100%; height: 580px; }
+  .mermaid-viewport--tall { height: 700px; }
+  .is-expanded .mermaid-viewport, .is-expanded .mermaid-viewport--tall { height: 100%; }
+  .mermaid-canvas { position: absolute; top: 0; left: 0; transform-origin: 0 0; }
+  .mermaid-canvas svg { display: block; max-width: none !important; }
+
+  .zoom-controls {
+    position: absolute; top: 8px; right: 8px; display: flex; align-items: center; gap: 2px;
+    z-index: 10; background: var(--surface); border: 1px solid var(--border);
+    border-radius: 6px; padding: 2px; box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+  }
+  .zoom-controls button {
+    min-width: 28px; height: 28px; border: none; background: transparent; color: var(--text-dim);
+    font-family: var(--font-mono); font-size: 13px; cursor: pointer; border-radius: 4px;
+    display: flex; align-items: center; justify-content: center; padding: 0 5px;
+    transition: background 0.15s ease, color 0.15s ease;
+  }
+  .zoom-controls button:hover { background: var(--border); color: var(--text); }
+  .zoom-label { font-family: var(--font-mono); font-size: 10px; color: var(--text-dim); padding: 0 6px; white-space: nowrap; }
+
+  /* Mermaid text follows the page theme; sizes stay at mermaid's own metrics so paint matches layout */
+  .mermaid-canvas .nodeLabel { color: var(--text) !important; font-family: var(--font-body) !important; }
+  .mermaid-canvas .edgeLabel { color: var(--text-dim) !important; background-color: transparent !important; }
+  .mermaid-canvas .node rect, .mermaid-canvas .node circle, .mermaid-canvas .node polygon, .mermaid-canvas .node path { stroke-width: 1.5px; }
+
+  /* ============ LEGEND ============ */
+  .legend { display: flex; gap: 18px; flex-wrap: wrap; margin-top: 10px; }
+  .legend-item { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-dim); font-family: var(--font-mono); }
+  .legend-swatch { width: 12px; height: 12px; border-radius: 3px; }
+
+  /* ============ SOURCE FOOTNOTE ============ */
+  .src { font-family: var(--font-mono); font-size: 10.5px; color: var(--text-dim); opacity: 0.7; margin: 4px 2px 0; }
+
+  footer { margin-top: 56px; padding-top: 16px; border-top: 1px solid var(--border); font-family: var(--font-mono); font-size: 11px; color: var(--text-dim); }
+
+  /* ============ RESPONSIVE ============ */
+  @media (max-width: 1000px) {
+    body { padding: 20px; }
+    .wrap { grid-template-columns: 1fr; }
+    .toc {
+      position: sticky; top: 0; z-index: 200; max-height: none;
+      display: flex; gap: 4px; align-items: center; overflow-x: auto;
+      -webkit-overflow-scrolling: touch; background: var(--bg);
+      border-bottom: 1px solid var(--border); padding: 10px 0;
+      margin: 0 -20px; padding-left: 20px; padding-right: 20px; grid-row: auto;
+    }
+    .toc::-webkit-scrollbar { display: none; }
+    .toc-title { display: none; }
+    .toc a {
+      white-space: nowrap; flex-shrink: 0; border-left: none;
+      border-bottom: 2px solid transparent; border-radius: 4px 4px 0 0;
+      padding: 6px 10px; font-size: 11px;
+    }
+    .toc a.active { border-left: none; border-bottom-color: var(--accent); background: var(--surface); }
+    .main { padding-top: 16px; }
+    .sec-head { scroll-margin-top: 56px; }
+  }
+  @media (max-width: 768px) {
+    .inner-grid { grid-template-columns: 1fr; }
+    .step { grid-template-columns: 40px 1fr; gap: 10px; }
+    .step-num { height: 40px; font-size: 16px; border-radius: 8px; }
+    .mermaid-viewport { height: 380px; }
+  }
+</style>
+</head>
+<body>
+<button class="theme-toggle" id="themeToggle" title="Toggle theme" aria-label="Toggle light/dark theme"></button>
+<script>
+(function() {
+  var store = {
+    get: function() { try { return localStorage.getItem('theme'); } catch (e) { return null; } },
+    set: function(v) { try { localStorage.setItem('theme', v); } catch (e) {} }
+  };
+  var t = document.getElementById('themeToggle');
+  var s = store.get();
+  var i = s || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+  if (s) document.documentElement.setAttribute('data-theme', i);
+  t.textContent = i === 'dark' ? '☀' : '☾';
+  t.addEventListener('click', function() {
+    var c = document.documentElement.getAttribute('data-theme')
+      || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+    var n = c === 'light' ? 'dark' : 'light';
+    document.documentElement.setAttribute('data-theme', n);
+    store.set(n);
+    t.textContent = n === 'dark' ? '☀' : '☾';
+    document.dispatchEvent(new CustomEvent('obx-theme-changed'));
+  });
+})();
+</script>
+
+<div class="wrap">
+
+<nav class="toc" id="toc">
+  <div class="toc-title">Contents</div>
+  <a href="#s1">1. What it is</a>
+  <a href="#s2">2. The big picture</a>
+  <a href="#s3">3. A gated tool call</a>
+  <a href="#s4">4. The model-call gateway</a>
+  <a href="#s5">5. Core concepts</a>
+  <a href="#s6">6. Setup, step by step</a>
+  <a href="#s7">7. What leaves your machine</a>
+  <a href="#s8">8. Commands &amp; files</a>
+  <a href="#s9">9. Honest limits</a>
+  <a href="#s10">10. Troubleshooting</a>
+  <a href="#s11">11. Under the hood</a>
+</nav>
+
+<div class="main">
+
+<h1>OpenBox Shift-Left</h1>
+<p class="subtitle">an outside developer's guide — what it does · how it works · how to set it up and run it</p>
+
+<!-- ============ 1. WHAT IT IS ============ -->
+<div id="s1" class="sec-head"><span class="n">01</span> What it is</div>
+
+<div class="section section--hero" style="--i:0">
+  <p class="lead"><strong>Governance for the coding agents you already use.</strong> OpenBox governs AI agents at runtime; Shift-Left extends that same pipeline one step earlier — to Claude Code, OpenAI Codex and other agentic tools that <em>write</em> the code. For any commit or deploy, your org can answer: <strong>who produced this, with which tools and prompts, at what cost — and was it allowed?</strong></p>
+  <p style="color:var(--text-dim);font-size:14px;max-width:72ch">It is one static Go binary that installs itself as native <strong>hooks</strong> inside your coding tool. By default there is no daemon, no proxy, no second dashboard, and nothing you have to keep running. Sessions emit normalized telemetry to your org's OpenBox; risky tool calls and prompts are decided by your org's policy <em>before</em> they run; commits get a lineage trailer and a signed attestation. Opt-in, a local gateway relays the model calls themselves — the one surface hooks cannot see (<a href="#s4">section 04</a>).</p>
+
+  <div class="kpi-row">
+    <div class="kpi" style="--i:1"><div class="v">1</div><div class="l">static binary</div></div>
+    <div class="kpi" style="--i:2"><div class="v">2</div><div class="l">commands to set up</div></div>
+    <div class="kpi" style="--i:3"><div class="v">0</div><div class="l">daemons by default</div></div>
+    <div class="kpi" style="--i:4"><div class="v">~2<small>s</small></div><div class="l">telemetry latency</div></div>
+  </div>
+</div>
+
+<div class="section" style="--i:2">
+  <div class="section-label"><span class="dot"></span> Provider support</div>
+  <div class="table-wrap"><div class="table-scroll">
+    <table class="data-table">
+      <thead><tr><th>Provider</th><th>Telemetry</th><th>Enforcement</th><th>Scope</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><strong>Claude Code</strong></td>
+          <td><span class="status status--on">shipped</span> hooks + durable spool</td>
+          <td>deny · ask · redact · HALT ends the session; full approvals incl. waking a session on a late decision</td>
+          <td>per-project or global; model calls via the opt-in gateway</td>
+        </tr>
+        <tr>
+          <td><strong>Codex</strong></td>
+          <td><span class="status status--on">shipped</span> hooks + durable spool</td>
+          <td>deny · redact (no native "ask" — approval-required renders as deny)</td>
+          <td>user-wide only; no gateway (deferred)</td>
+        </tr>
+        <tr>
+          <td><strong>Cursor</strong></td>
+          <td><span class="status status--na">not built</span></td>
+          <td>—</td>
+          <td>—</td>
+        </tr>
+      </tbody>
+    </table>
+  </div></div>
+  <p style="font-size:13px;color:var(--text-dim);margin:8px 0 0">Two capabilities are provider-independent and work with any tool: OpenBox agent registration and the git-trailer commit binding — so lineage and cost tracking still apply where no adapter exists.</p>
+</div>
+<p class="src">source: README.md · docs/architecture.md</p>
+
+<!-- ============ 2. BIG PICTURE ============ -->
+<div id="s2" class="sec-head"><span class="n">02</span> The big picture</div>
+
+<div class="section" style="--i:0">
+  <div class="section-label"><span class="dot"></span> How the pieces connect</div>
+  <section class="diagram-shell">
+    <p class="diagram-shell__hint">Ctrl/Cmd + wheel to zoom · drag to pan · double-click to fit · buttons top-right</p>
+    <div class="mermaid-wrap">
+      <div class="zoom-controls">
+        <button type="button" data-action="zoom-in" title="Zoom in">+</button>
+        <button type="button" data-action="zoom-out" title="Zoom out">&minus;</button>
+        <button type="button" data-action="zoom-fit" title="Fit">&#8634;</button>
+        <button type="button" data-action="zoom-one" title="1:1">1:1</button>
+        <button type="button" data-action="zoom-expand" title="Expand">&#x26F6;</button>
+        <span class="zoom-label">…</span>
+      </div>
+      <div class="mermaid-viewport">
+        <div class="mermaid-canvas"></div>
+      </div>
+    </div>
+    <script type="text/plain" class="diagram-source">
+flowchart TD
+  subgraph DEV["your machine"]
+    TOOL["claude / codex"]
+    ENGINE["openbox engine<br/>(static binary)"]
+    REDACT["secret redaction<br/>(local, runs first)"]
+    SPOOL[("event spool")]
+    GIT["git hook<br/>trailer + note"]
+    GW["local gateway<br/>(opt-in daemon)"]
+  end
+  subgraph OBX["OpenBox — hosted or self-hosted"]
+    CORE["openbox-core<br/>/evaluate"]
+    BE["openbox-backend<br/>policy · approvals"]
+    DB[("sessions · events<br/>lineage")]
+  end
+  API["Anthropic API"]
+  APP["approver<br/>dashboard · CLI · auto"]
+  TOOL -->|"hook events"| ENGINE
+  ENGINE --> REDACT
+  REDACT ==>|"gated — blocks"| CORE
+  CORE ==>|"allow · deny · ask · HALT"| TOOL
+  REDACT -->|"telemetry ~2s"| SPOOL
+  SPOOL --> CORE
+  CORE --> DB
+  GIT -.->|"attestation"| CORE
+  TOOL -.->|"model calls<br/>ANTHROPIC_BASE_URL"| GW
+  GW -.->|"byte-identical relay"| API
+  GW -.->|"span evidence · gate"| CORE
+  BE -->|"org policy"| CORE
+  BE <-->|"approvals"| APP
+  classDef store fill:#0f766e2b,stroke:#2a9d8f,stroke-width:1.5px
+  classDef decide fill:#1a5fa833,stroke:#4a90d9,stroke-width:2px
+  classDef human fill:#b4530926,stroke:#d97706,stroke-width:1.5px
+  classDef optin fill:#8e3a6326,stroke:#c26a94,stroke-width:1.5px,stroke-dasharray:6 3
+  classDef ext fill:none,stroke:#7d8fa5,stroke-dasharray:5 5
+  class SPOOL,DB store
+  class CORE decide
+  class APP human
+  class GW optin
+  class API ext
+    </script>
+  </section>
+  <div class="legend">
+    <div class="legend-item"><div class="legend-swatch" style="background:var(--accent-dim);border:1px solid var(--accent)"></div>the decider</div>
+    <div class="legend-item"><div class="legend-swatch" style="background:var(--teal-dim);border:1px solid var(--teal)"></div>storage</div>
+    <div class="legend-item"><div class="legend-swatch" style="background:var(--amber-dim);border:1px solid var(--amber)"></div>human / approver</div>
+    <div class="legend-item"><div class="legend-swatch" style="background:var(--plum-dim);border:1px dashed var(--plum)"></div>opt-in gateway path</div>
+  </div>
+</div>
+
+<div class="section" style="--i:1">
+  <div class="section-label"><span class="dot"></span> Two paths, deliberately separate</div>
+  <div class="inner-grid">
+    <div class="inner-card">
+      <div class="title">Gated calls block on a verdict</div>
+      <div class="desc">Every gated <code>PreToolUse</code> call and every submitted prompt is evaluated by <code>/evaluate</code> <strong>before</strong> the tool runs. One policy implementation, on the server — nothing evaluates policy on your machine (ADR-0017). If OpenBox is unreachable, <code>fail_closed</code> decides: the default is <strong>fail-open</strong>, so an outage never blocks work.</div>
+    </div>
+    <div class="inner-card t-teal">
+      <div class="title">Telemetry never blocks anything</div>
+      <div class="desc">Events are spooled locally and drained by a detached, debounced flusher within ~2s of each tool call. A slow or absent OpenBox cannot slow a tool call; undelivered events are retried, not dropped. SessionEnd flush is the completeness safety net.</div>
+    </div>
+    <div class="inner-card t-green">
+      <div class="title">One engine, thin adapters</div>
+      <div class="desc">Everything provider-agnostic lives in one engine (<code>hookflow</code>); each tool adds a thin adapter behind one SPI — its native hook shape, a mapper, an output contract, an installer. Adding a tool is an adapter, never a fork.</div>
+    </div>
+    <div class="inner-card t-plum">
+      <div class="title">Same pipeline as the agent runtime</div>
+      <div class="desc">Dev sessions register as OpenBox agents (<code>kind=developer</code>), sign with the same AIP scheme, hit the same endpoint, and land in the same tables as production agent-runtime sessions — one dashboard, not two.</div>
+    </div>
+  </div>
+</div>
+<p class="src">source: docs/architecture.md · README.md §how-it-works</p>
+
+<!-- ============ 3. GATED TOOL CALL ============ -->
+<div id="s3" class="sec-head"><span class="n">03</span> A gated tool call, start to finish</div>
+
+<div class="section" style="--i:0">
+  <div class="section-label"><span class="dot"></span> The enforcement sequence</div>
+  <section class="diagram-shell">
+    <p class="diagram-shell__hint">Ctrl/Cmd + wheel to zoom · drag to pan · double-click to fit</p>
+    <div class="mermaid-wrap">
+      <div class="zoom-controls">
+        <button type="button" data-action="zoom-in" title="Zoom in">+</button>
+        <button type="button" data-action="zoom-out" title="Zoom out">&minus;</button>
+        <button type="button" data-action="zoom-fit" title="Fit">&#8634;</button>
+        <button type="button" data-action="zoom-one" title="1:1">1:1</button>
+        <button type="button" data-action="zoom-expand" title="Expand">&#x26F6;</button>
+        <span class="zoom-label">…</span>
+      </div>
+      <div class="mermaid-viewport mermaid-viewport--tall">
+        <div class="mermaid-canvas"></div>
+      </div>
+    </div>
+    <script type="text/plain" class="diagram-source">
+sequenceDiagram
+  autonumber
+  participant CC as Claude Code
+  participant EN as openbox engine
+  participant OB as OpenBox core
+  participant AP as Approver
+  CC->>EN: PreToolUse fires before the tool runs
+  EN->>EN: scan body, redact secrets locally
+  EN->>OB: evaluate under org policy
+  alt verdict is ALLOW
+    OB-->>EN: allow
+    EN-->>CC: tool call proceeds
+  else verdict is DENY or BLOCK
+    OB-->>EN: deny with policy reason
+    EN-->>CC: call refused, reason shown in session
+  else verdict is REQUIRE APPROVAL
+    OB-->>EN: approval required
+    EN->>AP: request filed, holds ~20s
+    AP-->>OB: allow or deny
+    OB-->>EN: decision
+    EN-->>CC: proceed, or deny with approval id
+  else verdict is HALT
+    OB-->>EN: halt
+    EN-->>CC: session ends, later calls refused
+  end
+  EN--)OB: telemetry flushes async ~2s
+  note over EN,OB: unreachable? fail_closed decides - default fail open
+    </script>
+  </section>
+</div>
+
+<div class="section" style="--i:1">
+  <div class="section-label"><span class="dot"></span> What each verdict means to you</div>
+  <div class="table-wrap"><div class="table-scroll">
+    <table class="data-table">
+      <thead><tr><th>Verdict</th><th>Effect</th><th>Scope</th></tr></thead>
+      <tbody>
+        <tr><td><code>ALLOW</code></td><td>Tool call runs; you notice nothing.</td><td>one call</td></tr>
+        <tr><td><code>REDACT</code></td><td>Detected secrets are replaced and the call proceeds with the redacted body (redact-and-continue).</td><td>one call</td></tr>
+        <tr><td><code>DENY / BLOCK</code></td><td>That one call (or prompt) is refused; the policy reason appears in the session so the agent can adapt.</td><td>one call</td></tr>
+        <tr><td><code>REQUIRE_APPROVAL</code></td><td>The one verdict that is a <em>question</em>: a real approval record is filed and the session pauses ~20s. Answered in time → the call simply proceeds. Unanswered → denied with the approval id; if the decision lands later, a background watcher <strong>wakes the session</strong> with the outcome.</td><td>one call</td></tr>
+        <tr><td><code>HALT</code></td><td>A <strong>session</strong> verdict, not a call verdict: the current turn stops (<code>continue:false</code>) and a local latch refuses every later prompt and tool call in that session — <code>--resume</code> included. Start a new session to continue. Only a server-authored HALT does this; a synthesized one (outage under fail-closed, unanswered approval) never ends the session.</td><td>whole session</td></tr>
+      </tbody>
+    </table>
+  </div></div>
+  <div class="callout">
+    <div class="ct">Until your org publishes a policy</div>
+    Enforcement acts on <em>your org's policy</em>. No policy published → nothing is blocked, and you get full observability either way. One diagnosed core defect escapes this ("Session is no longer active" — see <a href="#s10">troubleshooting</a>).
+  </div>
+</div>
+<p class="src">source: docs/architecture.md §governance-levels · ADR-0017 · ADR-0020</p>
+
+<!-- ============ 4. GATEWAY ============ -->
+<div id="s4" class="sec-head"><span class="n">04</span> Governing the model call itself — the opt-in gateway</div>
+
+<div class="section" style="--i:0">
+  <div class="section-label section--plum-l"><span class="dot"></span> Why hooks are not enough</div>
+  <p style="font-size:14px;max-width:76ch">Hooks see what the agent <em>does</em>. They cannot see the model call itself — no hook carries the request headers, the request body, or the response — so system prompts, raw request/response bodies, and <strong>which account paid for a call</strong> are all structurally unreachable from the hook path. The gateway (ADR-0021) is the surface where those exist: a <strong>per-developer loopback daemon</strong> that Claude Code is pointed at via <code>ANTHROPIC_BASE_URL</code>. Every model call relays through it to Anthropic; the gateway reports to the same <code>/evaluate</code> as everything else. It is <strong>off by default</strong> — it redirects live model traffic, so turning it on is your call:</p>
+  <div class="code-block">openbox init --provider claude-code --gateway          <span class="c"># install + start it, and point this machine at it</span>
+openbox init --provider claude-code --remove-gateway   <span class="c"># undo — restores direct provider traffic</span>
+openbox gateway                                        <span class="c"># the daemon itself: foreground, supervised by launchd/systemd</span></div>
+  <div class="inner-grid" style="margin-top:12px">
+    <div class="inner-card t-plum">
+      <div class="title">Model-call capture</div>
+      <div class="desc">Request and response evidence for the call itself — the last large capture gap hooks cannot reach. Credential headers (<code>Authorization</code>, <code>x-api-key</code>, <code>Cookie</code>…) are replaced with <code>[redacted]</code> <strong>by name</strong> before anything is attached; the key is kept so a reviewer can see one was sent. Gated by <code>content_capture</code>.</div>
+    </div>
+    <div class="inner-card t-amber">
+      <div class="title">Refusing the inference itself</div>
+      <div class="desc">The hook path can refuse a <em>tool</em> call; only the gateway can refuse the <em>model</em> call, synchronously, before it leaves the machine — on a verdict from <code>/evaluate</code>, never on local rules.</div>
+    </div>
+    <div class="inner-card t-teal">
+      <div class="title">Account binding</div>
+      <div class="desc">A truncated SHA-256 <strong>fingerprint</strong> of the credential that actually paid — deliberately <em>not</em> gated by <code>content_capture</code>, because a privacy switch that removed it would let an org opt out of being identified. Core policy (not gateway logic) can HALT a call from a non-org account.</div>
+    </div>
+    <div class="inner-card t-green">
+      <div class="title">Four guarantees, by construction</div>
+      <div class="desc"><strong>Pass-through auth:</strong> OpenBox holds zero provider secrets — your credential relays untouched and appears in no outbound byte (conformance-asserted). <strong>Inspect without modifying:</strong> forwarded bytes are byte-identical; redaction applies to the captured copy only. <strong>Loopback-only</strong> listener, re-checked against what the kernel actually bound. <strong>No MITM proxy</strong> — no CA that could forge a domain.</div>
+    </div>
+  </div>
+</div>
+
+<div class="section" style="--i:1">
+  <div class="section-label"><span class="dot"></span> What it buys, honestly: detection tiers</div>
+  <div class="table-wrap"><div class="table-scroll">
+    <table class="data-table">
+      <thead><tr><th>Tier</th><th>What the org deploys</th><th>What it actually buys</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><strong>Base</strong> <span class="status status--on">ships</span></td>
+          <td><code>openbox init --gateway</code> sets the env at user scope</td>
+          <td class="wrapcol"><strong>Tamper-evident, not tamper-proof.</strong> A developer can unset one environment variable; doing so is <em>visible</em> — a session with model turns and no gateway spans is a queryable shape, and <code>openbox doctor</code> reports the exposure at every tier, the healthy one included. Bypass is detected, never prevented.</td>
+        </tr>
+        <tr>
+          <td><strong>MDM</strong></td>
+          <td>managed settings + root-owned daemon, optionally egress control</td>
+          <td class="wrapcol">Prevention, to the extent the org's MDM provides it. OpenBox ships MDM-pushable artifacts (<a href="../../docs/gateway-mdm-recipe.md">the recipe</a>) — it never ships MDM tooling. A root-owned config still loses to a shell <code>export</code>; only egress control closes that.</td>
+        </tr>
+        <tr>
+          <td><strong>Central</strong></td>
+          <td>not built</td>
+          <td class="wrapcol">Nothing new in kind — named only so "we could host it" is not mistaken for "we do".</td>
+        </tr>
+      </tbody>
+    </table>
+  </div></div>
+  <div class="callout callout--danger">
+    <div class="ct">One deliberate divergence from the hook path</div>
+    A <strong>gated model call is refused when <code>/evaluate</code> is unreachable, regardless of <code>fail_closed</code></strong> — there is no fail-open here and no offline grace (a grace window is a local verdict cache wearing a different name, and those are rejected). The gateway is the stronger enforcement point by owner intent; the accepted cost is that a core outage refuses gated model calls. Ungated calls still forward with no round-trip.
+  </div>
+  <div class="callout callout--warn">
+    <div class="ct">Status — read before relying on it</div>
+    ADR-0021 is a <strong>draft, deliberately</strong>: the relay, capture, gate, refusal and account evidence are built and conformance-tested, but <strong>the daemon a default install runs today is a pure relay</strong> — the CLI does not yet wire the evidence emitter or the evaluator into it, and <em>which</em> calls get gated is an open product decision (~52 model calls were measured per turn window; gating everything is a round-trip per call). Three probe questions bound the whole tier: whether subscription-OAuth traffic follows <code>ANTHROPIC_BASE_URL</code> at all (if not, this covers API-key/console orgs only); the refusal's exact HTTP shape (provisional <code>403</code> — a wrong shape reads as transient and Claude Code retries around it; if no shape qualifies, refusal descopes to observe-only); and whether an OAuth credential can be matched to an org (else the account rule is detection-only for OAuth). Also out of scope: Codex (deferred), CI machines, non-Anthropic wire formats — and nothing has run against a live stack.
+  </div>
+</div>
+<p class="src">source: docs/adr/ADR-0021-openbox-local-gateway.md · gateway/ · cli/internal/gatewaycheck · docs/data-and-privacy.md</p>
+
+<!-- ============ 5. CORE CONCEPTS ============ -->
+<div id="s5" class="sec-head"><span class="n">05</span> Core concepts</div>
+
+<div class="section" style="--i:0">
+  <div class="inner-grid">
+    <div class="inner-card">
+      <div class="title">Governance levels</div>
+      <div class="desc">Each install runs at exactly one level and reports which: <strong>Observe</strong> (telemetry, lineage, cost — never blocks) · <strong>Advisory</strong> (verdicts recorded and surfaced, never applied) · <strong>Enforce</strong> (verdicts applied — the default since ADR-0016). Only enforce costs a tool call anything: one round-trip per gated hook.</div>
+    </div>
+    <div class="inner-card t-green">
+      <div class="title">Enforcement is three switches, not tiers</div>
+      <div class="desc"><strong>Local secret redaction</strong> (on): Write/Edit bodies scanned before anything leaves the machine. <strong>Inline evaluation</strong> (on): every gated class asks <code>/evaluate</code> — no local risk triage. <strong>Findings</strong> (off): async guardrail findings surfaced back into the session. Each is independent.</div>
+    </div>
+    <div class="inner-card t-amber">
+      <div class="title">Approvals are four-eyes</div>
+      <div class="desc">An approver is a <strong>separate principal</strong> with its own credential: the dashboard, <code>openbox approve</code>, or a bounded autonomous approver (ADR-0012) that decides inside an org envelope, starts in shadow mode, and records every outcome. Approving on the machine that filed the request is refused by default.</div>
+    </div>
+    <div class="inner-card t-teal">
+      <div class="title">Lineage: session → commit → deploy</div>
+      <div class="desc">A git hook stamps each commit with an <code>OpenBox-Session</code> trailer (an <em>inferred</em> claim) and signs an attestation into <code>refs/notes/openbox-attest</code>. The deploy action carries it; core marks a commit <strong>verified</strong> only when ownership <em>and</em> an accepted attestation both hold.</div>
+    </div>
+    <div class="inner-card t-plum">
+      <div class="title">Posture is evidence</div>
+      <div class="desc">Every session start reports its own effective posture — enforce on/off, fail-open/closed, content capture, who decides — so the control plane can tell a governed machine from an ungoverned one without trusting the endpoint's word. <code>openbox doctor</code> prints the same thing locally with per-value provenance.</div>
+    </div>
+    <div class="inner-card t-slate">
+      <div class="title">Two planes, two URLs</div>
+      <div class="desc">The <strong>backend</strong> is the control plane (agents, policy, approvals — <code>api.openbox.ai</code>); <strong>core</strong> is the data plane (where events go — <code>core.openbox.ai</code>). Self-hosting? Set <strong>both</strong> explicitly at <code>auth</code> time — the control plane cannot tell the CLI where your core is.</div>
+    </div>
+  </div>
+</div>
+<p class="src">source: docs/architecture.md · docs/lineage.md · docs/getting-started.md</p>
+
+<!-- ============ 5. SETUP ============ -->
+<div id="s6" class="sec-head"><span class="n">06</span> Setup, step by step</div>
+
+<div class="step" style="--i:0">
+  <div class="step-num">1</div>
+  <div class="step-body">
+    <h3>Install the engine</h3>
+    <p>One no-cgo static binary: the CLI, the hook engine and the git hook. The installer downloads a prebuilt binary for Linux/macOS (amd64/arm64), verifies its checksum, and puts it on your <code>PATH</code> (<code>~/.local/bin</code>). No Go toolchain needed — unless no prebuilt asset matches, in which case it builds from source with Go 1.23+.</p>
+    <div class="code-block"><span class="c"># install</span>
+curl -fsSL https://raw.githubusercontent.com/OpenBox-AI/openbox-shift-left/main/install.sh | bash
+openbox version</div>
+    <p style="margin:0"><strong>Windows:</strong> build-verified only — compile from source with Go 1.23+; <code>install.sh</code> is bash.</p>
+  </div>
+</div>
+
+<div class="step" style="--i:1">
+  <div class="step-num">2</div>
+  <div class="step-body">
+    <h3>Get the right credential</h3>
+    <p>OpenBox has two kinds of key, and this is the step people get wrong. You want the <strong>organization key</strong> (<code>obx_key_…</code>, dashboard → Organization → API Keys) — and only to <em>register</em>. The agent runtime key (<code>obx_…</code>) is <em>minted by</em> registration, never an input to it. Grant the org key <code>create:agent</code> + <code>read:agent</code>.</p>
+    <div class="code-block">export OPENBOX_CONTROL_TOKEN=${OPENBOX_REDACTED_SECRET_ASSIGNMENT}   <span class="c"># env only — never a flag, so it can't leak into shell history</span></div>
+  </div>
+</div>
+
+<div class="step" style="--i:2">
+  <div class="step-num">3</div>
+  <div class="step-body">
+    <h3>Authenticate the machine</h3>
+    <p>Interactive; every field prefills with a sensible default, so a first run is mostly pressing Enter. One deliberate exception: <strong>the agent id never prefills — leave it blank and a new agent is registered for you.</strong> Type an id only to reuse an existing agent (it then asks for that agent's DID and keys, masked as you type).</p>
+    <div class="code-block">openbox auth
+<span class="c">  Backend URL (control plane)   [https://api.openbox.ai]:
+  Core URL (data plane)         [https://core.openbox.ai]:
+  Agent id (blank registers a new agent):        ← press Enter
+  ✓ registered  agent 4f2a…  did:aip:9c1b…
+  ✓ wrote ~/.openbox/.env       (api key, signing key — 0600)
+  ✓ wrote ~/.openbox/dev.json   (agent id, DID, URLs — no secrets)</span></div>
+    <p style="margin:0"><strong>Self-hosted?</strong> Set <em>both</em> URLs here: <code>openbox auth --backend-url http://localhost:3000 --base-url http://localhost:8086</code>. Setting only one sends events to the hosted core and surfaces later as a confusing 401. For CI, skip <code>auth</code> and export <code>OPENBOX_API_KEY</code>, <code>OPENBOX_AGENT_PRIVATE_KEY</code>, <code>OPENBOX_AGENT_DID</code>, <code>OPENBOX_AGENT_ID</code> — a real env var always wins over the file.</p>
+  </div>
+</div>
+
+<div class="step" style="--i:3">
+  <div class="step-num">4</div>
+  <div class="step-body">
+    <h3>Govern a project</h3>
+    <p>Installs the hooks into <code>&lt;project&gt;/.claude/settings.local.json</code> and the plugin bundle into <code>~/.claude/plugins/openbox-observe</code>. It never touches credentials — missing ones stop it with a pointer back to <code>auth</code>.</p>
+    <div class="code-block">cd ~/code/my-project
+openbox init --provider claude-code           <span class="c"># or --provider codex</span></div>
+    <p><strong>Two defaults to know before you run it:</strong> it governs <strong>this directory only</strong> (run it once per project; sessions elsewhere produce <em>no events at all</em>), and it <strong>enforces</strong> — blocking, ask-for-approval and secret redaction on by default, on tool calls and prompts alike.</p>
+    <div class="code-block">openbox init --provider claude-code --enforce=false   <span class="c"># telemetry without enforcement</span>
+openbox init --provider claude-code --gateway         <span class="c"># also relay model calls through the local gateway — see section 04</span>
+openbox init --provider claude-code --scope global    <span class="c"># fleet rollout — needs managed settings (admin deploy)</span>
+openbox init --provider claude-code --dry-run         <span class="c"># show the whole plan, touch nothing</span></div>
+  </div>
+</div>
+
+<div class="step" style="--i:4">
+  <div class="step-num">5</div>
+  <div class="step-body">
+    <h3>Verify, then just work</h3>
+    <div class="code-block">openbox dev verify    <span class="c"># ✓ can this machine reach and authenticate to core?</span>
+openbox doctor        <span class="c"># the posture actually in effect, and where each value came from</span>
+claude                <span class="c"># nothing to run, no env vars to keep set</span></div>
+    <p style="margin:0">Sessions in governed directories now emit telemetry, commits are stamped for lineage, and gated calls wait for a verdict. Re-run <code>init</code> in a project any time — it replaces its own stale hook entries (and says what it retired), never yours, and a plain re-run never silently downgrades posture.</p>
+  </div>
+</div>
+
+<div class="callout callout--warn" style="--i:5">
+  <div class="ct">Codex differences worth knowing up front</div>
+  Codex asks you to trust new hooks via <code>/hooks</code> before they run · maps approval-required to a plain deny · cannot wake a session (late decisions arrive via the findings channel) · hooks are <strong>user-wide only</strong>, so <code>--scope local</code> is rejected rather than silently governing everything.
+</div>
+<p class="src">source: docs/getting-started.md · README.md §quickstart</p>
+
+<!-- ============ 6. WHAT LEAVES YOUR MACHINE ============ -->
+<div id="s7" class="sec-head"><span class="n">07</span> What leaves your machine</div>
+
+<div class="section" style="--i:0">
+  <div class="section-label section--amber-l"><span class="dot"></span> On by default — and opt-out</div>
+  <p style="font-size:14px;color:var(--text-dim)">This is the part to read before your first governed session. Everything below is scanned for secrets and <strong>redacted locally first</strong>, and the server sees at most the first 64KB of any body. Credentials are never transmitted.</p>
+  <div class="table-wrap"><div class="table-scroll">
+    <table class="data-table">
+      <thead><tr><th>Setting</th><th>Default</th><th>What it sends</th><th>Turn it off</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><code>content_capture</code></td>
+          <td><span class="status status--on">ON</span></td>
+          <td class="wrapcol">Your prompts, the assistant's reply text, the turn's <strong>extended thinking</strong>, tool commands, file bodies (Write/Edit), tool output, denial/error free text. Thinking capture goes <em>further than Anthropic's own telemetry</em>, which redacts it unconditionally.</td>
+          <td><code>"content_capture": false</code><br><code>OPENBOX_CONTENT_CAPTURE=0</code></td>
+        </tr>
+        <tr>
+          <td><code>finops</code></td>
+          <td><span class="status status--on">ON</span></td>
+          <td class="wrapcol">Four token counts + the model id, per turn — the same signal the agent runtime reports.</td>
+          <td><code>"finops": false</code><br><code>OPENBOX_FINOPS=0</code></td>
+        </tr>
+        <tr>
+          <td>account attribution</td>
+          <td><span class="status status--on">ON</span></td>
+          <td class="wrapcol">Your provider account's <strong>email + org UUID</strong>, per session, read from Claude Code's own local account record. PII, egressed as governance evidence like your DID. Org <em>name, role, tier and billing</em> sit in the same local file and are <strong>never</strong> sent.</td>
+          <td>not gated — attribution, not content</td>
+        </tr>
+        <tr>
+          <td>gateway evidence</td>
+          <td><span class="status status--warn">opt-in</span></td>
+          <td class="wrapcol">Only with the local gateway (<a href="#s4">section 04</a>): model-call HTTP headers — credential headers replaced with <code>[redacted]</code> by name, the key kept — plus a truncated SHA-256 <strong>fingerprint</strong> of the credential that paid. Your raw credential relays to Anthropic byte-for-byte and is stored nowhere.</td>
+          <td>headers: <code>content_capture</code><br>fingerprint: not gated</td>
+        </tr>
+        <tr>
+          <td><code>secret_detection</code></td>
+          <td><span class="status status--on">ON</span></td>
+          <td class="wrapcol">Sends nothing — it's the local scan-and-redact step that runs <em>before</em> content is attached or a body egresses.</td>
+          <td><code>"secret_detection": false</code> <span class="status status--warn">content goes out unredacted</span></td>
+        </tr>
+        <tr>
+          <td><code>realtime_flush</code></td>
+          <td><span class="status status--on">ON</span></td>
+          <td class="wrapcol">Delivery cadence only: events queryable ~2s after each call vs. batched at session end.</td>
+          <td><code>"realtime_flush": false</code><br><code>OPENBOX_REALTIME=0</code></td>
+        </tr>
+        <tr>
+          <td><code>fail_closed</code></td>
+          <td><span class="status status--off">OFF</span></td>
+          <td class="wrapcol">Behavior when OpenBox is unreachable: off → gated calls proceed (outage never blocks work); on → gated calls deny.</td>
+          <td><code>"fail_closed": true</code> to turn <em>on</em></td>
+        </tr>
+        <tr>
+          <td><code>findings</code></td>
+          <td><span class="status status--off">OFF</span></td>
+          <td class="wrapcol">Async guardrail/drift findings surfaced back into the session after the fact.</td>
+          <td>enable in <code>dev.json</code></td>
+        </tr>
+      </tbody>
+    </table>
+  </div></div>
+  <div class="callout callout--warn">
+    <div class="ct">One deliberate exception</div>
+    A <strong>gated</strong> shell/MCP call sends its command <strong>verbatim</strong> regardless of <code>content_capture</code> — policy must judge the command that will actually run (ADR-0017). And the two providers send different amounts under one posture: Codex captures neither tool content nor thinking, and reports usage per session rather than per turn.
+  </div>
+</div>
+<p class="src">source: README.md §what-leaves-your-machine · docs/data-and-privacy.md · ADR-0019 · ADR-0014</p>
+
+<!-- ============ 7. COMMANDS & FILES ============ -->
+<div id="s8" class="sec-head"><span class="n">08</span> Day-to-day commands &amp; where things live</div>
+
+<div class="section" style="--i:0">
+  <div class="section-label"><span class="dot"></span> The CLI surface</div>
+  <div class="table-wrap"><div class="table-scroll">
+    <table class="data-table">
+      <thead><tr><th>Command</th><th>What it does</th></tr></thead>
+      <tbody>
+        <tr><td><code>openbox auth</code></td><td>Credentials for this machine — asks for everything authentication needs and nothing else. <code>--rotate</code> re-issues them for an existing agent. Re-run any time.</td></tr>
+        <tr><td><code>openbox init</code></td><td>Install hooks + posture. <code>--provider</code>, <code>--scope</code>, <code>--enforce=false</code>, <code>--gateway</code> / <code>--remove-gateway</code>, <code>--install-git-hook</code>, <code>--role approver</code>, <code>--dry-run</code>.</td></tr>
+        <tr><td><code>openbox doctor</code></td><td>The posture actually in effect, who decides, what happens when they're unreachable, whether this directory has more than one OpenBox engine registered — and the gateway's exposure tier, healthy or not.</td></tr>
+        <tr><td><code>openbox dev verify</code></td><td>Can this machine reach and authenticate to core?</td></tr>
+        <tr><td><code>openbox gateway</code></td><td>The model-call relay daemon itself, foreground only — <code>init --gateway</code> installs it under launchd/systemd, so you rarely run it by hand.</td></tr>
+        <tr><td><code>openbox approve</code></td><td><code>list</code>, <code>allow</code>, <code>deny</code>, or <code>--watch --auto</code> for the bounded autonomous approver.</td></tr>
+        <tr><td><code>openbox managed install</code></td><td>Write the managed-settings files for a fleet rollout.</td></tr>
+      </tbody>
+    </table>
+  </div></div>
+</div>
+
+<div class="section" style="--i:1">
+  <div class="section-label section--teal-l"><span class="dot"></span> On disk</div>
+<pre class="dir-tree">~/.openbox/
+├── <span class="hl">.env</span>            api key + signing key    <span class="warn">plaintext, 0600 — never commit, it is the only copy</span>
+├── <span class="hl">dev.json</span>        posture + coordinates    <span class="ann">enforce, capture, fail_closed · DID, agent id, URLs — no secrets</span>
+└── approver.json   approver config          <span class="ann">only if you are one — holds a fleet-scoped org key</span>
+
+&lt;project&gt;/.claude/settings.local.json       <span class="ann">which hooks fire here (project scope)</span>
+~/.claude/plugins/openbox-observe/          <span class="ann">plugin bundle + engine copy</span>
+&lt;os-config-dir&gt;/openbox/                    <span class="ann">runtime state: spool, audit logs, halted-sessions</span>
+                                            <span class="ann">(~/Library/Application Support on macOS · ~/.config on Linux · %AppData% on Windows)</span></pre>
+  <p style="font-size:13px;color:var(--text-dim);margin:6px 0 0">Secrets and non-secrets never share a file, and no value lives in two places. A real environment variable always wins, so CI can override anything without touching disk. <code>OPENBOX_HOME</code> relocates the config directory; <code>OPENBOX_SPOOL_DIR</code> moves the spool.</p>
+</div>
+<p class="src">source: README.md §commands · §where-things-live</p>
+
+<!-- ============ 8. HONEST LIMITS ============ -->
+<div id="s9" class="sec-head"><span class="n">09</span> Honest limits — what this does <em>not</em> prove</div>
+
+<div class="section section--recessed" style="--i:0">
+  <div class="section-label section--red-l"><span class="dot"></span> Documented as first-class, not fine print</div>
+  <p style="font-size:14px;color:var(--text-dim)">The project's own position: a governance tool that overstates its guarantees is the failure it exists to prevent. Know these before you rely on it.</p>
+  <ul class="node-list node-list--red">
+    <li><strong>Your credentials sit in a plaintext file.</strong> <code>~/.openbox/.env</code> is <code>0600</code> on macOS/Linux, but anything running <em>as you</em> — including the coding agent under governance — can read the signing key and sign events as you. On Windows <code>0600</code> is a no-op. Attestation proves <strong>origin-of-config</strong>, not tamper-resistance against the developer (ADR-0015).</li>
+    <li><strong>Project scope means partial coverage.</strong> A default <code>init</code> governs one directory; sessions anywhere else produce <em>no events at all</em> — so absence of events is not evidence of absence of work. Fleet coverage needs <code>--scope global</code> plus a managed-settings deployment.</li>
+    <li><strong>Enforcement prevents mistakes, not motivated bypass.</strong> The hook lives in the developer's own config until managed settings are deployed, and under the default <code>fail_closed:false</code> blocking one hostname disables enforcement for that machine. Orgs that need it to survive an unwilling developer set <code>fail_closed</code> — and accept that an outage then blocks work.</li>
+    <li><strong>Content-based policy sees at most the first 64KB of a body.</strong> A rule that would match past that offset does not fire. Local secret detection is exempt — it runs before the cap and sees the whole body.</li>
+    <li><strong>Local secret detection is keyword-driven.</strong> A high-entropy value beside an unrecognized key name is invisible to it. That reach is measured by tests rather than assumed.</li>
+    <li><strong>Egress is recorded, not controlled — and the gateway does not change that without MDM.</strong> OpenBox does not allow-list the coding tool's traffic. Model calls are seen only with the opt-in gateway installed; its base tier is <em>detection</em> (one unset env var bypasses it, visibly), and the daemon a default install runs today is a pure relay — capture and gating are built and tested but not yet wired into what <code>openbox gateway</code> serves (<a href="#s4">section 04</a>).</li>
+    <li><strong>Commit attribution is an inferred claim</strong> unless your pipeline fetches the signed attestation note (<code>refs/notes/openbox-attest</code> — not fetched by default); then it is cryptographically verified.</li>
+    <li><strong>Windows is build-verified, not runtime-verified</strong>, and the newest flows (inline evaluation against a live stack, the setup flow end-to-end) are covered by unit/conformance tests plus hand-driven runs — the mock-free testbed run against a live stack is still pending for them. The docs say so per claim.</li>
+  </ul>
+</div>
+<p class="src">source: README.md §what-this-does-not-prove · docs/architecture.md §assurance</p>
+
+<!-- ============ 9. TROUBLESHOOTING ============ -->
+<div id="s10" class="sec-head"><span class="n">10</span> Troubleshooting quick hits</div>
+
+<div class="section" style="--i:0">
+  <p style="font-size:14px;color:var(--text-dim);margin-bottom:10px"><code>openbox doctor</code> first, always: every flag, its value, and whether it came from a default, your config, the environment, or an org mandate.</p>
+  <div class="table-wrap"><div class="table-scroll">
+    <table class="data-table">
+      <thead><tr><th>Symptom</th><th>Cause and fix</th></tr></thead>
+      <tbody>
+        <tr><td>Hooks never fire</td><td>Session started before <code>init</code>, or you're in an ungoverned directory. Restart the tool; for Codex run <code>/hooks</code> and trust them.</td></tr>
+        <tr><td>No events at all, <code>doctor</code> looks fine</td><td>Almost always scope: <code>init</code> governs one directory. Check which one it named, or go <code>--scope global</code> + managed settings.</td></tr>
+        <tr><td><code>dev verify</code> → 401 identity rejected</td><td>Self-hosted with only one URL set — events are going to the hosted core. Re-run <code>auth</code> with both <code>--backend-url</code> and <code>--base-url</code>.</td></tr>
+        <tr><td>Everything is denied</td><td><code>fail_closed</code> is on and OpenBox is unreachable. Restore connectivity, or set <code>fail_closed:false</code> to proceed ungoverned instead.</td></tr>
+        <tr><td>"Session is no longer active" — session stops, every prompt after refused</td><td>Not your org's policy (a policy verdict names its policy; this has none). Known core defect: the server's record of the session went terminal and it answers with a HALT, which ends the session. <strong>Start a new session.</strong> Fix in flight core-side.</td></tr>
+        <tr><td>Every tool call appears twice; metrics look wrong</td><td>Two engines registered (usually an old <code>init</code> run with a different <code>HOME</code>). <code>doctor</code> warns about it; re-running <code>openbox init</code> there removes the stale entry. Already-stored duplicates stay.</td></tr>
+        <tr><td><code>looks like an AGENT RUNTIME key</code></td><td>Wrong key type — you pasted the per-agent <code>obx_…</code> key where the org <code>obx_key_…</code> belongs (or vice versa). See setup step 2.</td></tr>
+        <tr><td>A session hangs on a tool call</td><td>An approval is filed and undecided. <code>openbox approve list</code> shows it; deciding it releases the session.</td></tr>
+      </tbody>
+    </table>
+  </div></div>
+</div>
+<p class="src">source: docs/getting-started.md §troubleshooting</p>
+
+<!-- ============ 10. UNDER THE HOOD ============ -->
+<div id="s11" class="sec-head"><span class="n">11</span> Under the hood (if you'll read or contribute)</div>
+
+<div class="section" style="--i:0">
+  <div class="section-label section--plum-l"><span class="dot"></span> Repo shape</div>
+  <p style="font-size:14px;color:var(--text-dim)">A Go 1.23+ workspace of small modules, no cgo (ADR-0011). The standing rule: anything provider-agnostic belongs in <code>adapters/common/</code>; a new table, endpoint or service needs an ADR — the engine was once copy-pasted per adapter and the copies drifted on the enforcement path, so it won't be again.</p>
+  <div class="table-wrap"><div class="table-scroll">
+    <table class="data-table">
+      <thead><tr><th>Module</th><th>What it owns</th></tr></thead>
+      <tbody>
+        <tr><td><code>provider/</code></td><td>the SPI: <code>Installer</code> (install time) + <code>HookEngine</code> (runtime + capabilities)</td></tr>
+        <tr><td><code>adapters/common/hookflow/</code></td><td><strong>the engine</strong> — spool, enforce cascade, inline evaluation, approval hold, rewake, findings loop</td></tr>
+        <tr><td><code>adapters/claude-code/</code> · <code>adapters/codex/</code></td><td>one thin adapter each: native hook shape, mapper, output contract, installer</td></tr>
+        <tr><td><code>client/</code></td><td>openbox-core client: wire payload, AIP signing, verdict parsing</td></tr>
+        <tr><td><code>decision/</code></td><td>local secret detection and redaction — the one thing still decided locally</td></tr>
+        <tr><td><code>cli/</code></td><td>the <code>openbox</code> CLI: auth, init, doctor, dev verify, approve, managed</td></tr>
+        <tr><td><code>contracts/dev-event/</code></td><td>the normalized event contract + wire mapping + conformance suite</td></tr>
+        <tr><td><code>actions/openbox-git-action/</code></td><td>commit → deploy lineage for CI</td></tr>
+        <tr><td><code>testbed/</code></td><td>mock-free end-to-end suite: real headless sessions against a real local stack</td></tr>
+      </tbody>
+    </table>
+  </div></div>
+  <div class="code-block" style="margin-top:12px"><span class="c"># build and test</span>
+go build ./cli/...          <span class="c"># the binary</span>
+cd cli &amp;&amp; go test ./...     <span class="c"># per module — go.work lists them all</span>
+./testbed/run-all.sh        <span class="c"># end to end — needs a reachable local OpenBox stack</span></div>
+  <details class="collapsible">
+    <summary>Where the docs live</summary>
+    <div class="collapsible__body">
+      <ul class="node-list">
+        <li><code>docs/getting-started.md</code> — install → onboard → verify, with troubleshooting</li>
+        <li><code>docs/architecture.md</code> — engine, adapters, enforcement, approvals, assurance</li>
+        <li><code>docs/data-and-privacy.md</code> — exactly what is captured and sent, field by field</li>
+        <li><code>docs/lineage.md</code> — session → commit → deploy and how it's verified</li>
+        <li><code>docs/adr/</code> — the decisions and why; <code>contracts/dev-event/</code> — the event schema</li>
+        <li>License: Apache-2.0</li>
+      </ul>
+    </div>
+  </details>
+</div>
+<p class="src">source: docs/architecture.md §modules · README.md §contributing</p>
+
+<footer>
+  generated 2026-08-26 from README.md, docs/getting-started.md, docs/architecture.md, docs/data-and-privacy.md and ADR-0021 at feat/tool-content-capture · openbox-shift-left · Apache-2.0
+</footer>
+
+</div><!-- /main -->
+</div><!-- /wrap -->
+
+<!-- ============ MERMAID + ZOOM ENGINE ============ -->
+<script type="module">
+import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+
+const clamp = (n, lo, hi) => Math.max(lo, Math.min(hi, n));
+let activeDrag = null;
+addEventListener('mousemove', e => activeDrag && activeDrag.onMove(e));
+addEventListener('mouseup', () => { if (activeDrag) activeDrag.onEnd(); activeDrag = null; });
+
+function isDark() {
+  const t = document.documentElement.getAttribute('data-theme');
+  if (t) return t === 'dark';
+  return matchMedia('(prefers-color-scheme: dark)').matches;
+}
+
+function themeVars(dark) {
+  return {
+    fontSize: '18px',
+    fontFamily: "'DM Sans', system-ui, sans-serif",
+    primaryColor: dark ? '#16283c' : '#e3edf7',
+    primaryBorderColor: dark ? '#4a90d9' : '#1a5fa8',
+    primaryTextColor: dark ? '#dbe7f3' : '#132435',
+    secondaryColor: dark ? '#1b3328' : '#e5f3e8',
+    secondaryBorderColor: dark ? '#34d399' : '#0e7a4e',
+    tertiaryColor: dark ? '#332a1a' : '#faf0dc',
+    tertiaryBorderColor: dark ? '#fbbf24' : '#b45309',
+    lineColor: dark ? '#5e7490' : '#7d8fa5',
+    textColor: dark ? '#c8d8e8' : '#1a2a3a',
+    clusterBkg: dark ? 'rgba(74,144,217,0.05)' : 'rgba(26,95,168,0.04)',
+    clusterBorder: dark ? 'rgba(100,160,220,0.35)' : 'rgba(26,95,168,0.30)',
+    edgeLabelBackground: dark ? '#111d2e' : '#f0f4f8',
+    noteBkgColor: dark ? '#2a2618' : '#fdf6e3',
+    noteTextColor: dark ? '#e8dcb8' : '#4a3d1f',
+    noteBorderColor: dark ? '#8a7434' : '#d9b45b',
+    actorBkg: dark ? '#16283c' : '#e3edf7',
+    actorBorder: dark ? '#4a90d9' : '#1a5fa8',
+    actorTextColor: dark ? '#dbe7f3' : '#132435',
+    signalColor: dark ? '#8ba4bd' : '#42586e',
+    signalTextColor: dark ? '#b8c9da' : '#2c3e50',
+    labelBoxBkgColor: dark ? '#1c2c40' : '#e8eef4',
+    labelBoxBorderColor: dark ? '#4a90d9' : '#1a5fa8',
+    labelTextColor: dark ? '#c8d8e8' : '#1a2a3a',
+    loopTextColor: dark ? '#c8d8e8' : '#1a2a3a',
+    activationBkgColor: dark ? '#22344a' : '#d7e5f2',
+    activationBorderColor: dark ? '#4a90d9' : '#1a5fa8',
+    sequenceNumberColor: dark ? '#0d1421' : '#ffffff'
+  };
+}
+
+function initMermaid() {
+  mermaid.initialize({
+    startOnLoad: false,
+    theme: 'base',
+    securityLevel: 'loose',
+    themeVariables: themeVars(isDark()),
+    flowchart: { useMaxWidth: false, htmlLabels: true, curve: 'basis', padding: 14 },
+    sequence: { useMaxWidth: false, mirrorActors: false }
+  });
+}
+
+let counter = 0;
+const rerenders = [];
+
+function initDiagram(shell) {
+  const wrap = shell.querySelector('.mermaid-wrap');
+  const viewport = shell.querySelector('.mermaid-viewport');
+  const canvas = shell.querySelector('.mermaid-canvas');
+  const source = shell.querySelector('.diagram-source');
+  const label = shell.querySelector('.zoom-label');
+  if (!wrap || !viewport || !canvas || !source || !label) return;
+
+  let zoom = 1, panX = 0, panY = 0, natW = 800, natH = 500, userTouched = false;
+
+  function apply() {
+    const svg = canvas.querySelector('svg');
+    if (!svg) return;
+    svg.style.width = (natW * zoom) + 'px';
+    svg.style.height = (natH * zoom) + 'px';
+    canvas.style.transform = 'translate(' + panX + 'px,' + panY + 'px)';
+    label.textContent = Math.round(zoom * 100) + '%';
+  }
+  function fit() {
+    const pad = 28;
+    const vw = viewport.clientWidth - pad * 2, vh = viewport.clientHeight - pad * 2;
+    if (vw <= 0 || vh <= 0) return;
+    userTouched = false;
+    const ideal = Math.min(vw / natW, vh / natH);
+    zoom = clamp(ideal, 0.65, 1.5);
+    panX = (viewport.clientWidth - natW * zoom) / 2;
+    panY = ideal < 0.65 ? pad : (viewport.clientHeight - natH * zoom) / 2;
+    apply();
+  }
+  function zoomAt(cx, cy, factor) {
+    userTouched = true;
+    const nz = clamp(zoom * factor, 0.15, 4);
+    const k = nz / zoom;
+    panX = cx - k * (cx - panX);
+    panY = cy - k * (cy - panY);
+    zoom = nz;
+    apply();
+  }
+  function center() {
+    panX = (viewport.clientWidth - natW * zoom) / 2;
+    panY = (viewport.clientHeight - natH * zoom) / 2;
+    apply();
+  }
+
+  async function render() {
+    try {
+      const code = source.textContent.trim();
+      if (!code) { label.textContent = 'empty'; return; }
+      const id = 'obxd' + (counter++) + Math.random().toString(36).slice(2, 7);
+      const { svg } = await mermaid.render(id, code);
+      canvas.innerHTML = svg;
+      const el = canvas.querySelector('svg');
+      const vb = el.viewBox && el.viewBox.baseVal;
+      natW = (vb && vb.width) || parseFloat(el.getAttribute('width')) || 800;
+      natH = (vb && vb.height) || parseFloat(el.getAttribute('height')) || 500;
+      el.removeAttribute('width');
+      el.removeAttribute('height');
+      fit();
+    } catch (err) {
+      console.error('Mermaid render failed:', err);
+      label.textContent = 'render error';
+      canvas.innerHTML = '<pre style="padding:16px;color:var(--red);font-size:12px;white-space:pre-wrap">' +
+        String(err && err.message || err).replace(/[<>&]/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;'}[c])) + '</pre>';
+    }
+  }
+
+  wrap.querySelectorAll('.zoom-controls button').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const a = btn.dataset.action;
+      const cx = viewport.clientWidth / 2, cy = viewport.clientHeight / 2;
+      if (a === 'zoom-in') zoomAt(cx, cy, 1.25);
+      else if (a === 'zoom-out') zoomAt(cx, cy, 0.8);
+      else if (a === 'zoom-fit') fit();
+      else if (a === 'zoom-one') { userTouched = true; zoom = 1; center(); }
+      else if (a === 'zoom-expand') {
+        wrap.classList.toggle('is-expanded');
+        document.body.classList.toggle('no-scroll', wrap.classList.contains('is-expanded'));
+        requestAnimationFrame(fit);
+      }
+    });
+  });
+
+  viewport.addEventListener('wheel', e => {
+    if (!(e.ctrlKey || e.metaKey)) return;
+    e.preventDefault();
+    const r = viewport.getBoundingClientRect();
+    zoomAt(e.clientX - r.left, e.clientY - r.top, e.deltaY < 0 ? 1.12 : 0.89);
+  }, { passive: false });
+
+  viewport.addEventListener('mousedown', e => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    const sx = e.clientX, sy = e.clientY, ox = panX, oy = panY;
+    userTouched = true;
+    wrap.classList.add('is-panning');
+    activeDrag = {
+      onMove(ev) { panX = ox + (ev.clientX - sx); panY = oy + (ev.clientY - sy); apply(); },
+      onEnd() { wrap.classList.remove('is-panning'); }
+    };
+  });
+
+  viewport.addEventListener('dblclick', fit);
+
+  // A load in a hidden or zero-width pane measures 0x0; re-fit once real size arrives.
+  if (typeof ResizeObserver !== 'undefined') {
+    new ResizeObserver(() => { if (!userTouched) fit(); }).observe(viewport);
+  }
+
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape' && wrap.classList.contains('is-expanded')) {
+      wrap.classList.remove('is-expanded');
+      document.body.classList.remove('no-scroll');
+      requestAnimationFrame(fit);
+    }
+  });
+
+  rerenders.push(render);
+  return render();
+}
+
+initMermaid();
+const shells = Array.from(document.querySelectorAll('.diagram-shell'));
+for (const shell of shells) { await initDiagram(shell); }
+
+document.addEventListener('obx-theme-changed', () => {
+  initMermaid();
+  rerenders.forEach(r => r());
+});
+</script>
+
+<!-- ============ SCROLL SPY ============ -->
+<script>
+(function() {
+  const toc = document.getElementById('toc');
+  if (!toc) return;
+  const links = toc.querySelectorAll('a');
+  const sections = [];
+  links.forEach(link => {
+    const id = link.getAttribute('href').slice(1);
+    const el = document.getElementById(id);
+    if (el) sections.push({ el, link });
+  });
+  const observer = new IntersectionObserver(entries => {
+    entries.forEach(entry => {
+      if (entry.isIntersecting) {
+        links.forEach(l => l.classList.remove('active'));
+        const match = sections.find(s => s.el === entry.target);
+        if (match) {
+          match.link.classList.add('active');
+          if (window.innerWidth <= 1000) {
+            match.link.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+          }
+        }
+      }
+    });
+  }, { rootMargin: '-10% 0px -80% 0px' });
+  sections.forEach(s => observer.observe(s.el));
+  links.forEach(link => {
+    link.addEventListener('click', e => {
+      e.preventDefault();
+      const el = document.getElementById(link.getAttribute('href').slice(1));
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        history.replaceState(null, '', link.getAttribute('href'));
+      }
+    });
+  });
+})();
+</script>
+
+</body>
+</html>
