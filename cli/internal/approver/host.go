@@ -133,10 +133,18 @@ const (
 // same reason sanitizeCategory strips them from a remote-sourced category: a
 // bare CR or an escape sequence can rewrite how a line renders in whatever reads
 // the transcript.
+//
+// THE ORDER IS THE CONTROL. Control characters are removed FIRST, and only then
+// are the markers neutralized. Neutralizing first leaves a hole big enough to
+// walk through: a marker carrying one control byte inside it
+// ("--- END UNTRUSTED\x01 REQUEST TEXT ---") does not match the literal, so
+// ReplaceAll passes it through untouched — and the strip pass then DELETES that
+// byte, reassembling an exact terminator on the way out. Stripping first means
+// every byte the matcher will be compared against is already present, so a
+// forged marker cannot be assembled by a later step. Verified both directions by
+// TestFenceForgeryViaControlCharacterInMarker.
 func defuseFence(text string) string {
-	text = strings.ReplaceAll(text, fenceEnd, "--- [FENCE MARKER NEUTRALIZED] ---")
-	text = strings.ReplaceAll(text, fenceBegin, "--- [FENCE MARKER NEUTRALIZED] ---")
-	return strings.Map(func(r rune) rune {
+	text = strings.Map(func(r rune) rune {
 		// Newline and tab survive: a shell command legitimately contains both,
 		// and stripping them would change the text the reviewer is judging.
 		if r == '\n' || r == '\t' {
@@ -147,6 +155,8 @@ func defuseFence(text string) string {
 		}
 		return r
 	}, text)
+	text = strings.ReplaceAll(text, fenceEnd, "--- [FENCE MARKER NEUTRALIZED] ---")
+	return strings.ReplaceAll(text, fenceBegin, "--- [FENCE MARKER NEUTRALIZED] ---")
 }
 
 // prompt fences the untrusted text so the boundary is visible in the transcript
