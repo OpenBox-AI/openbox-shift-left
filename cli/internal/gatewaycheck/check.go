@@ -71,6 +71,22 @@ type Report struct {
 	BypassCapable bool
 	// BypassNotes are the specific, checkable reasons.
 	BypassNotes []string
+
+	// EnvOverride is ANTHROPIC_BASE_URL as it stands in the INSPECTING process's
+	// environment, empty when unset.
+	//
+	// It is here because a real environment variable BEATS the settings file, and
+	// without it this report was able to state the opposite of the truth: on a
+	// machine whose tool carried the provider URL in its own launch environment,
+	// doctor read the settings file, found the loopback address it had written
+	// there, and reported "configured / reachable yes" while every model call went
+	// straight to the provider. A governance product asserting a bypass is healthy
+	// is the failure it exists to prevent.
+	EnvOverride string
+
+	// EnvOverridesSettings is the actionable case: an env value that disagrees
+	// with the file, so the file is inert.
+	EnvOverridesSettings bool
 }
 
 // envKey is the variable Claude Code reads to find its API base.
@@ -78,8 +94,14 @@ const envKey = "ANTHROPIC_BASE_URL"
 
 // Inspect builds the report. homeDir and managedPath are injected so a test can
 // point them at a temp dir rather than at the developer's real machine.
-func Inspect(homeDir, managedPath string, dialTimeout time.Duration) Report {
+func Inspect(homeDir, managedPath string, dialTimeout time.Duration, getenv func(string) string) Report {
 	r := Report{Tier: TierNone}
+
+	// Injected rather than read directly so a test can drive both branches, and so
+	// the caller decides whose environment is being described.
+	if getenv != nil {
+		r.EnvOverride = strings.TrimSpace(getenv(envKey))
+	}
 
 	// Managed settings win, and their precedence is why they are checked first:
 	// a root-owned managed file cannot be overridden by the user file below it.
@@ -151,6 +173,14 @@ func Inspect(homeDir, managedPath string, dialTimeout time.Duration) Report {
 		// Exactly backwards, on the one machine state an operator most needs the
 		// truth about.
 		r.Alive, r.AliveErr = dial(net.JoinHostPort(host, port), dialTimeout)
+	}
+
+	// The env comparison comes last, because it is a statement ABOUT the
+	// configured value. Normalised on both sides so a trailing slash is not
+	// reported as a disagreement.
+	if r.EnvOverride != "" && r.ConfiguredAddr != "" &&
+		!strings.EqualFold(strings.TrimRight(r.EnvOverride, "/"), strings.TrimRight(r.ConfiguredAddr, "/")) {
+		r.EnvOverridesSettings = true
 	}
 
 	r.BypassCapable, r.BypassNotes = bypassAssessment(r, r.BypassNotes)

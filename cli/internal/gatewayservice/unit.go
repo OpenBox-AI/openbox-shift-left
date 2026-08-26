@@ -37,24 +37,45 @@ const (
 // explicitly below rather than left to the default.
 const StopTimeout = 30
 
+// verboseFlag is the one spelling of the flag. Both renderers reference it, and
+// TestBothUnitsCarryVerboseOnlyWhenAsked holds them together — the two platforms
+// drifting on whether a supervised gateway logs would be invisible until someone
+// tried to debug the one that does not.
+const verboseFlag = "--verbose"
+
+// gatewayArgv is the launchd argv.
+//
+// --verbose belongs in the UNIT, not only on a hand-started relay. The daemon owns
+// the port, so without this the flag is reachable only by stopping the supervised
+// job and racing it for the port — which is exactly how a developer ends up unable
+// to answer "is anything flowing through this at all?". stdio already goes to
+// ~/.openbox/gateway.log, so the lines land somewhere tailable.
+func gatewayArgv(binPath, addr, upstream string, verbose bool) []string {
+	argv := []string{
+		binPath, "gateway",
+		"--addr", addr,
+		"--upstream", upstream,
+		"--shutdown-grace", strconv.Itoa(StopTimeout) + "s",
+	}
+	if verbose {
+		argv = append(argv, verboseFlag)
+	}
+	return argv
+}
+
 // LaunchdPlist renders the macOS unit.
 //
 // homeDir is needed for the log paths: launchd sends stdio to /dev/null unless
 // told otherwise, and the gateway's only signal that it is recording nothing goes
 // to stderr.
-func LaunchdPlist(homeDir, binPath, addr, upstream string) string {
+func LaunchdPlist(homeDir, binPath, addr, upstream string, verbose bool) string {
 	var b strings.Builder
 	b.WriteString(`<?xml version="1.0" encoding="UTF-8"?>` + "\n")
 	b.WriteString(`<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">` + "\n")
 	b.WriteString(`<plist version="1.0">` + "\n<dict>\n")
 	b.WriteString("  <key>Label</key>\n  <string>" + xmlEscape(LaunchdLabel) + "</string>\n")
 	b.WriteString("  <key>ProgramArguments</key>\n  <array>\n")
-	for _, arg := range []string{
-		binPath, "gateway",
-		"--addr", addr,
-		"--upstream", upstream,
-		"--shutdown-grace", strconv.Itoa(StopTimeout) + "s",
-	} {
+	for _, arg := range gatewayArgv(binPath, addr, upstream, verbose) {
 		b.WriteString("    <string>" + xmlEscape(arg) + "</string>\n")
 	}
 	b.WriteString("  </array>\n")
@@ -100,7 +121,7 @@ func LogPath(homeDir string) string {
 // developer's hands. An org hardening to the MDM tier deploys the same content
 // root-owned — identical bytes, different ownership, which is exactly what doctor
 // reads the tier from.
-func SystemdUnit(binPath, addr, upstream string) string {
+func SystemdUnit(binPath, addr, upstream string, verbose bool) string {
 	return strings.Join([]string{
 		"[Unit]",
 		"Description=OpenBox local gateway (model-call governance)",
@@ -113,8 +134,7 @@ func SystemdUnit(binPath, addr, upstream string) string {
 		// parsing, and a '%' in --upstream — plausible under the proxy and
 		// egress-control setups the MDM recipe documents — is a systemd specifier
 		// that gets expanded rather than passed through.
-		fmt.Sprintf("ExecStart=%s gateway --addr %s --upstream %s --shutdown-grace %ds",
-			systemdArg(binPath), systemdArg(addr), systemdArg(upstream), StopTimeout),
+		"ExecStart=" + systemdExec(binPath, addr, upstream, verbose),
 		"Restart=always",
 		"RestartSec=2",
 		// Must match --shutdown-grace: see StopTimeout.
@@ -124,6 +144,23 @@ func SystemdUnit(binPath, addr, upstream string) string {
 		"WantedBy=default.target",
 		"",
 	}, "\n")
+}
+
+// systemdExec renders the ExecStart line.
+//
+// Only the three VALUES are quoted, deliberately: the macOS sibling escapes its
+// argv and this once did not — a binPath containing a space (an $HOME with one is
+// ordinary) breaks systemd's line parsing, and a '%' in --upstream, plausible
+// under the proxy and egress-control setups the MDM recipe documents, is a systemd
+// specifier that gets expanded rather than passed through. Flag NAMES need no
+// quoting, and quoting them would rewrite every existing unit file for nothing.
+func systemdExec(binPath, addr, upstream string, verbose bool) string {
+	line := fmt.Sprintf("%s gateway --addr %s --upstream %s --shutdown-grace %ds",
+		systemdArg(binPath), systemdArg(addr), systemdArg(upstream), StopTimeout)
+	if verbose {
+		line += " " + verboseFlag
+	}
+	return line
 }
 
 // LaunchdPath is where the plist goes for a user-scope install.
@@ -142,13 +179,13 @@ func SystemdPath(homeDir string) string {
 // the caller runs and reports on. Keeping the write separate from the load means a
 // failure to start is distinguishable from a failure to configure — the same
 // reason doctor separates "alive" from "actually used".
-func WriteUnit(goos, homeDir, binPath, addr, upstream string) (string, error) {
+func WriteUnit(goos, homeDir, binPath, addr, upstream string, verbose bool) (string, error) {
 	var path, body string
 	switch goos {
 	case "darwin":
-		path, body = LaunchdPath(homeDir), LaunchdPlist(homeDir, binPath, addr, upstream)
+		path, body = LaunchdPath(homeDir), LaunchdPlist(homeDir, binPath, addr, upstream, verbose)
 	case "linux":
-		path, body = SystemdPath(homeDir), SystemdUnit(binPath, addr, upstream)
+		path, body = SystemdPath(homeDir), SystemdUnit(binPath, addr, upstream, verbose)
 	default:
 		// Windows daemon packaging is deferred (phase 07 requirement 7) and the
 		// repo's posture there is build-verified only. An error, not a silent

@@ -82,7 +82,7 @@ func TestGatewayEnvIsNotWrittenWhenTheDaemonDoesNotStart(t *testing.T) {
 	// port-occupied pre-check and never reached the failed-start branch this case
 	// is about. The assertion then failed on the wrong error and the CLI suite went
 	// red for exactly the developers most likely to run it.
-	err := a.setupGateway(home, freeAddr(t), "https://api.anthropic.com")
+	err := a.setupGateway(home, freeAddr(t), "https://api.anthropic.com", false)
 	if err == nil {
 		t.Fatal("setupGateway reported success though the daemon never started")
 	}
@@ -111,7 +111,7 @@ func TestGatewayEnvIsNotWrittenWhenTheListenerNeverComesUp(t *testing.T) {
 	waitForListenerFn = func(string, time.Duration) bool { return false }
 	t.Cleanup(func() { waitForListenerFn = orig })
 
-	err := a.setupGateway(home, freeAddr(t), "https://api.anthropic.com")
+	err := a.setupGateway(home, freeAddr(t), "https://api.anthropic.com", false)
 	if err == nil {
 		t.Fatal("setupGateway succeeded with nothing listening")
 	}
@@ -129,7 +129,7 @@ func TestGatewaySetupWritesEnvOnlyAfterTheListenerIsUp(t *testing.T) {
 	addr := freeAddr(t)
 	stubSupervisor(t, addr, false)
 
-	if err := a.setupGateway(home, addr, "https://api.anthropic.com"); err != nil {
+	if err := a.setupGateway(home, addr, "https://api.anthropic.com", false); err != nil {
 		t.Fatalf("setupGateway: %v", err)
 	}
 	v, present := gatewayservice.CurrentEnv(home)
@@ -166,7 +166,7 @@ func TestRemoveGatewayUnsetsEnvBeforeRemovingTheDaemon(t *testing.T) {
 	addr := freeAddr(t)
 	stubSupervisor(t, addr, false)
 
-	if err := a.setupGateway(home, addr, "https://api.anthropic.com"); err != nil {
+	if err := a.setupGateway(home, addr, "https://api.anthropic.com", false); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
 	out.Reset()
@@ -192,7 +192,7 @@ func TestRemoveGatewayUnsetsEnvBeforeRemovingTheDaemon(t *testing.T) {
 func TestGatewaySetupRejectsANonLoopbackAddr(t *testing.T) {
 	home := t.TempDir()
 	a, _, _ := testApp(nil)
-	err := a.setupGateway(home, "0.0.0.0:8788", "https://api.anthropic.com")
+	err := a.setupGateway(home, "0.0.0.0:8788", "https://api.anthropic.com", false)
 	if err == nil {
 		t.Fatal("setupGateway accepted a listener bound to every interface")
 	}
@@ -273,7 +273,7 @@ func TestOccupiedPortIsRefusedRatherThanAdopted(t *testing.T) {
 	a, _, _ := testApp(nil)
 	stubSupervisor(t, "", false)
 
-	err = a.setupGateway(home, ln.Addr().String(), "https://api.anthropic.com")
+	err = a.setupGateway(home, ln.Addr().String(), "https://api.anthropic.com", false)
 	if err == nil {
 		t.Fatal("setupGateway adopted a port held by a foreign process")
 	}
@@ -301,7 +301,7 @@ func TestReInstallReplacesOurOwnGatewayInsteadOfRefusing(t *testing.T) {
 	stubSupervisor(t, addr, false)
 
 	// First install writes the unit and (via the stub) brings a listener up.
-	if err := a.setupGateway(home, addr, "https://api.anthropic.com"); err != nil {
+	if err := a.setupGateway(home, addr, "https://api.anthropic.com", false); err != nil {
 		t.Fatalf("first install: %v", err)
 	}
 	if _, present := gatewayservice.CurrentEnv(home); !present {
@@ -321,7 +321,7 @@ func TestReInstallReplacesOurOwnGatewayInsteadOfRefusing(t *testing.T) {
 	waitForPortFreeFn = func(string, time.Duration) bool { return true }
 	t.Cleanup(func() { waitForPortFreeFn = origFree })
 
-	if err := a.setupGateway(home, addr, "https://api.anthropic.com"); err != nil {
+	if err := a.setupGateway(home, addr, "https://api.anthropic.com", false); err != nil {
 		t.Errorf("re-install refused instead of replacing: %v", err)
 	}
 	if !strings.Contains(out.String(), "replacing") {
@@ -346,7 +346,7 @@ func TestAForeignProcessOnThePortIsStillRefused(t *testing.T) {
 
 	a, _, _ := testApp(nil)
 	stubSupervisor(t, "", false)
-	err = a.setupGateway(home, addr, "https://api.anthropic.com")
+	err = a.setupGateway(home, addr, "https://api.anthropic.com", false)
 	if err == nil {
 		t.Fatal("setupGateway proceeded over a foreign listener")
 	}
@@ -376,7 +376,7 @@ func TestAFailedInstallLeavesNoUnitBehind(t *testing.T) {
 	waitForListenerFn = func(string, time.Duration) bool { return false }
 	t.Cleanup(func() { waitForListenerFn = orig })
 
-	if err := a.setupGateway(home, freeAddr(t), "https://api.anthropic.com"); err == nil {
+	if err := a.setupGateway(home, freeAddr(t), "https://api.anthropic.com", false); err == nil {
 		t.Fatal("setupGateway reported success with nothing listening")
 	}
 	if path := gatewayservice.UnitPath(runtime.GOOS, home); path != "" {

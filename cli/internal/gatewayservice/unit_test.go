@@ -18,7 +18,7 @@ import (
 func TestUnitStopTimeoutMatchesTheGracePeriod(t *testing.T) {
 	grace := strconv.Itoa(StopTimeout)
 
-	plist := LaunchdPlist(t.TempDir(), "/usr/local/bin/openbox", "127.0.0.1:8788", "https://api.anthropic.com")
+	plist := LaunchdPlist(t.TempDir(), "/usr/local/bin/openbox", "127.0.0.1:8788", "https://api.anthropic.com", false)
 	if !strings.Contains(plist, "--shutdown-grace") || !strings.Contains(plist, grace+"s") {
 		t.Errorf("plist does not pass --shutdown-grace %ss:\n%s", grace, plist)
 	}
@@ -28,7 +28,7 @@ func TestUnitStopTimeoutMatchesTheGracePeriod(t *testing.T) {
 		t.Errorf("plist does not raise ExitTimeOut to %s; launchd's 20s default would SIGKILL mid-drain:\n%s", grace, plist)
 	}
 
-	unit := SystemdUnit("/usr/local/bin/openbox", "127.0.0.1:8788", "https://api.anthropic.com")
+	unit := SystemdUnit("/usr/local/bin/openbox", "127.0.0.1:8788", "https://api.anthropic.com", false)
 	if !strings.Contains(unit, "TimeoutStopSec="+grace) {
 		t.Errorf("systemd unit does not set TimeoutStopSec=%s:\n%s", grace, unit)
 	}
@@ -46,8 +46,8 @@ func TestUnitsUseFlagsThatExist(t *testing.T) {
 	valid := map[string]bool{"--addr": true, "--upstream": true, "--shutdown-grace": true}
 
 	for name, body := range map[string]string{
-		"launchd": LaunchdPlist(t.TempDir(), "/bin/openbox", "127.0.0.1:8788", "https://api.anthropic.com"),
-		"systemd": SystemdUnit("/bin/openbox", "127.0.0.1:8788", "https://api.anthropic.com"),
+		"launchd": LaunchdPlist(t.TempDir(), "/bin/openbox", "127.0.0.1:8788", "https://api.anthropic.com", false),
+		"systemd": SystemdUnit("/bin/openbox", "127.0.0.1:8788", "https://api.anthropic.com", false),
 	} {
 		for _, field := range strings.Fields(strings.NewReplacer("<string>", " ", "</string>", " ").Replace(body)) {
 			if strings.HasPrefix(field, "--") && !valid[field] {
@@ -65,7 +65,7 @@ func TestUnitsUseFlagsThatExist(t *testing.T) {
 // error anywhere.
 func TestLaunchdPlistIsWellFormedXML(t *testing.T) {
 	// A path with characters that MUST be escaped.
-	plist := LaunchdPlist(t.TempDir(), `/Users/a&b/<tools>/openbox`, "127.0.0.1:8788", "https://api.anthropic.com")
+	plist := LaunchdPlist(t.TempDir(), `/Users/a&b/<tools>/openbox`, "127.0.0.1:8788", "https://api.anthropic.com", false)
 
 	var doc any
 	if err := xml.Unmarshal([]byte(plist), &doc); err != nil {
@@ -83,11 +83,11 @@ func TestLaunchdPlistIsWellFormedXML(t *testing.T) {
 // is the whole answer to "the gateway died"; without keep-alive the failure is
 // permanent for the session.
 func TestSupervisorRestartsACrashedGateway(t *testing.T) {
-	plist := LaunchdPlist(t.TempDir(), "/bin/openbox", "127.0.0.1:8788", "https://x")
+	plist := LaunchdPlist(t.TempDir(), "/bin/openbox", "127.0.0.1:8788", "https://x", false)
 	if !strings.Contains(plist, "<key>KeepAlive</key>") || !strings.Contains(plist, "<key>RunAtLoad</key>") {
 		t.Errorf("plist does not keep the gateway alive across crashes or logins:\n%s", plist)
 	}
-	unit := SystemdUnit("/bin/openbox", "127.0.0.1:8788", "https://x")
+	unit := SystemdUnit("/bin/openbox", "127.0.0.1:8788", "https://x", false)
 	if !strings.Contains(unit, "Restart=always") {
 		t.Errorf("systemd unit does not restart on crash:\n%s", unit)
 	}
@@ -103,7 +103,7 @@ func TestWriteAndRemoveUnitRoundTrip(t *testing.T) {
 	for _, goos := range []string{"darwin", "linux"} {
 		t.Run(goos, func(t *testing.T) {
 			home := t.TempDir()
-			path, err := WriteUnit(goos, home, "/bin/openbox", "127.0.0.1:8788", "https://api.anthropic.com")
+			path, err := WriteUnit(goos, home, "/bin/openbox", "127.0.0.1:8788", "https://api.anthropic.com", false)
 			if err != nil {
 				t.Fatalf("WriteUnit: %v", err)
 			}
@@ -132,7 +132,7 @@ func TestWriteAndRemoveUnitRoundTrip(t *testing.T) {
 // service and did not is worse off than one told plainly. Windows daemon packaging
 // is deferred (requirement 7), and the error says what to do instead.
 func TestWindowsIsRefusedNotSilentlySkipped(t *testing.T) {
-	_, err := WriteUnit("windows", t.TempDir(), "openbox.exe", "127.0.0.1:8788", "https://x")
+	_, err := WriteUnit("windows", t.TempDir(), "openbox.exe", "127.0.0.1:8788", "https://x", false)
 	if err == nil {
 		t.Fatal("WriteUnit claimed success on windows, where packaging is deferred")
 	}
@@ -153,7 +153,7 @@ func TestWindowsIsRefusedNotSilentlySkipped(t *testing.T) {
 // that question at all.
 func TestLaunchdUnitCapturesStdio(t *testing.T) {
 	home := t.TempDir()
-	plist := LaunchdPlist(home, "/bin/openbox", "127.0.0.1:8788", "https://api.anthropic.com")
+	plist := LaunchdPlist(home, "/bin/openbox", "127.0.0.1:8788", "https://api.anthropic.com", false)
 
 	for _, key := range []string{"StandardOutPath", "StandardErrorPath"} {
 		if !strings.Contains(plist, "<key>"+key+"</key>") {
@@ -163,5 +163,39 @@ func TestLaunchdUnitCapturesStdio(t *testing.T) {
 	}
 	if !strings.Contains(plist, LogPath(home)) {
 		t.Errorf("the plist does not name %s:\n%s", LogPath(home), plist)
+	}
+}
+
+// TestBothUnitsCarryVerboseOnlyWhenAsked. The supervised daemon owns the port, so
+// a platform whose unit cannot carry --verbose leaves a developer there with no
+// way to see whether calls are flowing at all — and the two renderers are separate
+// functions, so that gap would be invisible until someone tried to debug the one
+// that does not log.
+func TestBothUnitsCarryVerboseOnlyWhenAsked(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		off  string
+		on   string
+	}{
+		{
+			name: "launchd",
+			off:  LaunchdPlist(t.TempDir(), "/bin/openbox", "127.0.0.1:8788", "https://api.anthropic.com", false),
+			on:   LaunchdPlist(t.TempDir(), "/bin/openbox", "127.0.0.1:8788", "https://api.anthropic.com", true),
+		},
+		{
+			name: "systemd",
+			off:  SystemdUnit("/bin/openbox", "127.0.0.1:8788", "https://api.anthropic.com", false),
+			on:   SystemdUnit("/bin/openbox", "127.0.0.1:8788", "https://api.anthropic.com", true),
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if strings.Contains(tc.off, verboseFlag) {
+				t.Errorf("%s unit carries %s when it was not asked for:\n%s", tc.name, verboseFlag, tc.off)
+			}
+			if !strings.Contains(tc.on, verboseFlag) {
+				t.Errorf("%s unit cannot carry %s, so a supervised gateway there can never report whether calls arrive:\n%s",
+					tc.name, verboseFlag, tc.on)
+			}
+		})
 	}
 }

@@ -354,10 +354,12 @@ func (a *app) runDevInit(args []string) int {
 	// the default should be revisited.
 	var withGateway, removeGateway bool
 	var gatewayAddr, gatewayUpstream string
+	var gatewayVerbose bool
 	fs.BoolVar(&withGateway, "gateway", false, "also install and start the local model-call gateway, and point this machine at it (OFF by default: it redirects live model traffic)")
 	fs.BoolVar(&removeGateway, "remove-gateway", false, "stop the local gateway and remove only the configuration OpenBox owns")
 	fs.StringVar(&gatewayAddr, "gateway-addr", gateway.DefaultAddr, "loopback address the gateway listens on")
 	fs.StringVar(&gatewayUpstream, "gateway-upstream", gateway.DefaultUpstream, "provider base URL the gateway forwards to")
+	fs.BoolVar(&gatewayVerbose, "gateway-verbose", false, "run the gateway with --verbose, logging every relayed call to ~/.openbox/gateway.log (no credentials, headers or bodies)")
 	fs.BoolVar(&o.DryRun, "dry-run", false, "print the plan; make no network or filesystem writes")
 	// --role is consumed by runInit before dispatch; declared here so `init -h`
 	// lists it and `--role approver` is not reported as an unknown flag.
@@ -607,7 +609,7 @@ func (a *app) runDevInit(args []string) int {
 		if code != exitOK {
 			return code
 		}
-		if err := a.setupGateway(home, gatewayAddr, gatewayUpstream); err != nil {
+		if err := a.setupGateway(home, gatewayAddr, gatewayUpstream, gatewayVerbose); err != nil {
 			// NOT fatal to the whole install: the hooks are already in place and
 			// governing tool calls. Reporting this as a total failure would tell a
 			// developer to undo work that succeeded.

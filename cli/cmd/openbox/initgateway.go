@@ -51,7 +51,7 @@ const gatewayReadyTimeout = 10 * time.Second
 
 // setupGateway installs, starts and verifies the gateway, then points the tool at
 // it. Any failure leaves the machine unconfigured rather than half-configured.
-func (a *app) setupGateway(homeDir, addr, upstream string) error {
+func (a *app) setupGateway(homeDir, addr, upstream string, verbose bool) error {
 	cfg := gateway.Config{Addr: addr, Upstream: upstream}
 	if err := cfg.Validate(); err != nil {
 		return err
@@ -101,7 +101,7 @@ func (a *app) setupGateway(homeDir, addr, upstream string) error {
 		return fmt.Errorf("cannot resolve this binary's path for the service unit: %w", err)
 	}
 
-	unitPath, err := gatewayservice.WriteUnit(runtime.GOOS, homeDir, binPath, cfg.Addr, cfg.Upstream)
+	unitPath, err := gatewayservice.WriteUnit(runtime.GOOS, homeDir, binPath, cfg.Addr, cfg.Upstream, verbose)
 	if err != nil {
 		// Includes the Windows case, which is an error rather than a silent skip:
 		// a developer who believes a service was installed and finds none later is

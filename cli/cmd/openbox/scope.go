@@ -176,7 +176,7 @@ func (a *app) initUsage(fs *flag.FlagSet) func() {
 		// flag for it would be a support problem rather than a tidy help screen.
 		for _, name := range []string{
 			"provider", "scope", "enforce", "no-enforce", "install-git-hook",
-			"gateway", "remove-gateway", "gateway-addr", "gateway-upstream",
+			"gateway", "remove-gateway", "gateway-addr", "gateway-upstream", "gateway-verbose",
 			"role", "dry-run",
 		} {
 			f := fs.Lookup(name)

@@ -48,7 +48,7 @@ func listener(t *testing.T) string {
 // practice: nothing configured means model calls never touch the gateway, and the
 // report has to say so rather than look healthy because no check failed.
 func TestNoConfigurationIsReportedAsUngoverned(t *testing.T) {
-	r := Inspect(t.TempDir(), filepath.Join(t.TempDir(), "managed-settings.json"), dialWait)
+	r := Inspect(t.TempDir(), filepath.Join(t.TempDir(), "managed-settings.json"), dialWait, nil)
 
 	if r.Tier != TierNone {
 		t.Errorf("Tier = %q want %q", r.Tier, TierNone)
@@ -71,7 +71,7 @@ func TestUserOwnedConfigIsBaseTier(t *testing.T) {
 	addr := listener(t)
 	writeSettings(t, filepath.Join(home, ".claude", "settings.json"), "http://"+addr)
 
-	r := Inspect(home, filepath.Join(t.TempDir(), "managed-settings.json"), dialWait)
+	r := Inspect(home, filepath.Join(t.TempDir(), "managed-settings.json"), dialWait, nil)
 
 	if r.Tier != TierBase {
 		t.Errorf("Tier = %q want %q", r.Tier, TierBase)
@@ -101,7 +101,7 @@ func TestManagedPathWithoutRootOwnershipIsNotTheMDMTier(t *testing.T) {
 	addr := listener(t)
 	writeSettings(t, managedPath, "http://"+addr)
 
-	r := Inspect(home, managedPath, dialWait)
+	r := Inspect(home, managedPath, dialWait, nil)
 
 	if r.SettingsPath != managedPath {
 		t.Fatalf("managed file not picked up: %q", r.SettingsPath)
@@ -127,7 +127,7 @@ func TestManagedPrecedesUserSettings(t *testing.T) {
 	writeSettings(t, managedPath, "http://127.0.0.1:9001")
 	writeSettings(t, filepath.Join(home, ".claude", "settings.json"), "http://127.0.0.1:9002")
 
-	r := Inspect(home, managedPath, dialWait)
+	r := Inspect(home, managedPath, dialWait, nil)
 	if r.ConfiguredAddr != "http://127.0.0.1:9001" {
 		t.Errorf("ConfiguredAddr = %q; the managed value must win", r.ConfiguredAddr)
 	}
@@ -143,7 +143,7 @@ func TestNonLoopbackTargetIsFlagged(t *testing.T) {
 	home := t.TempDir()
 	writeSettings(t, filepath.Join(home, ".claude", "settings.json"), "https://api.anthropic.com")
 
-	r := Inspect(home, "", dialWait)
+	r := Inspect(home, "", dialWait, nil)
 	if r.TargetsGateway {
 		t.Error("a provider URL was treated as pointing at the local gateway")
 	}
@@ -171,7 +171,7 @@ func TestDeadGatewayNamesTheSafeDirection(t *testing.T) {
 	// Port 1 on loopback: nothing listens and connecting fails fast.
 	writeSettings(t, filepath.Join(home, ".claude", "settings.json"), "http://127.0.0.1:1")
 
-	r := Inspect(home, "", dialWait)
+	r := Inspect(home, "", dialWait, nil)
 	if r.Alive {
 		t.Error("reported a dead port as reachable")
 	}
@@ -197,7 +197,7 @@ func TestReportNeverClaimsPrevention(t *testing.T) {
 		func() { writeSettings(t, managedPath, "http://"+addr) },
 	} {
 		setup()
-		r := Inspect(home, managedPath, dialWait)
+		r := Inspect(home, managedPath, dialWait, nil)
 		all := strings.ToLower(strings.Join(r.BypassNotes, " "))
 		// Affirmative CLAIMS, not the vocabulary. "not prevented" and "Prevention
 		// needs the org's MDM" are exactly the honest phrasings, so a check that
@@ -235,7 +235,7 @@ func TestUnparseableSettingsDegradesNotLies(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	r := Inspect(home, "", dialWait)
+	r := Inspect(home, "", dialWait, nil)
 	if r.Tier != TierNone {
 		t.Errorf("Tier = %q; an unreadable file is 'not configured here', not a tier", r.Tier)
 	}
@@ -274,7 +274,7 @@ func TestUnknownOwnerIsNotReportedAsNonRoot(t *testing.T) {
 	managedPath := filepath.Join(t.TempDir(), "managed-settings.json")
 	writeSettings(t, managedPath, "http://127.0.0.1:8788")
 
-	r := Inspect(t.TempDir(), managedPath, dialWait)
+	r := Inspect(t.TempDir(), managedPath, dialWait, nil)
 	if r.OwnerUID != -1 {
 		t.Fatalf("OwnerUID = %d, want -1 for this fixture", r.OwnerUID)
 	}
@@ -309,11 +309,59 @@ func TestLoopbackSpellingIsCaseInsensitive(t *testing.T) {
 				target = "http://[::1]:8788"
 			}
 			writeSettings(t, filepath.Join(home, ".claude", "settings.json"), target)
-			r := Inspect(home, "", dialWait)
+			r := Inspect(home, "", dialWait, nil)
 			if !r.TargetsGateway {
 				t.Errorf("%s reported as not loopback; doctor would tell a correctly "+
 					"configured developer their machine is pointed elsewhere", target)
 			}
 		})
 	}
+}
+
+// TestEnvOverrideIsDetected is the control on a report that could previously
+// assert the opposite of the truth.
+//
+// A real ANTHROPIC_BASE_URL beats the settings file. Without this, doctor read the
+// loopback address it had written to the file, found something listening there, and
+// reported "configured / reachable yes" on a machine where every model call went
+// straight to the provider — a bypass reported as healthy, which is the failure
+// this product exists to prevent.
+func TestEnvOverrideIsDetected(t *testing.T) {
+	home := t.TempDir()
+	writeSettings(t, filepath.Join(home, ".claude", "settings.json"), "http://127.0.0.1:8788")
+
+	t.Run("env disagrees with the file", func(t *testing.T) {
+		r := Inspect(home, "", dialWait, func(string) string { return "https://api.anthropic.com" })
+		if !r.EnvOverridesSettings {
+			t.Error("an env value that disagrees with the file was not reported as an override")
+		}
+		if r.EnvOverride != "https://api.anthropic.com" {
+			t.Errorf("EnvOverride = %q", r.EnvOverride)
+		}
+		// The file value is still reported: it is what an operator has to change.
+		if r.ConfiguredAddr != "http://127.0.0.1:8788" {
+			t.Errorf("ConfiguredAddr = %q, want the file's value", r.ConfiguredAddr)
+		}
+	})
+
+	t.Run("env agrees", func(t *testing.T) {
+		r := Inspect(home, "", dialWait, func(string) string { return "http://127.0.0.1:8788" })
+		if r.EnvOverridesSettings {
+			t.Error("an agreeing env value was reported as an override")
+		}
+	})
+
+	t.Run("a trailing slash is not a disagreement", func(t *testing.T) {
+		r := Inspect(home, "", dialWait, func(string) string { return "http://127.0.0.1:8788/" })
+		if r.EnvOverridesSettings {
+			t.Error("a trailing slash was reported as a conflicting override")
+		}
+	})
+
+	t.Run("env unset", func(t *testing.T) {
+		r := Inspect(home, "", dialWait, func(string) string { return "" })
+		if r.EnvOverridesSettings || r.EnvOverride != "" {
+			t.Errorf("unset env produced override=%v value=%q", r.EnvOverridesSettings, r.EnvOverride)
+		}
+	})
 }
