@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -69,11 +70,12 @@ type Emitter struct {
 	// Now is injectable so a test can pin a timestamp; nil ⇒ time.Now.
 	Now func() time.Time
 
-	mu                sync.Mutex
-	lastNoSessionWarn time.Time
-	lastNoDIDWarn     time.Time
-	cachedDID         string
-	fallbackSeq       uint64
+	mu                 sync.Mutex
+	lastBadSessionWarn time.Time
+	lastNoSessionWarn  time.Time
+	lastNoDIDWarn      time.Time
+	cachedDID          string
+	fallbackSeq        uint64
 }
 
 // developerDID resolves the DID, caching the first non-empty answer. Re-reading
@@ -128,7 +130,22 @@ func (e *Emitter) Emit(ctx context.Context, c gateway.Captured) {
 		return
 	}
 
+	// BOUNDED, like the upstream request id below and for a stronger reason: this
+	// one is chosen by the CALLER, on a loopback listener that performs no caller
+	// authentication, and it is used three ways — as a spool FILENAME, as the
+	// per-session debounce key that decides whether a flusher process is spawned,
+	// and as core's run_id. Unchecked, `for i in $(seq 5000)` with a distinct
+	// header per request defeated the debounce entirely and forced 5000 spawns and
+	// 5000 lockfiles; a header at net/http's 1 MiB ceiling produced a 1 MiB
+	// filename, an ENAMETOOLONG on every call, and one unthrottled stderr line
+	// each. usableSessionID is the same shape usableRequestID already applies to
+	// the id that matters less.
 	sessionID := c.RequestHeaders[sessionHeader]
+	if sessionID != "" && !usableSessionID(sessionID) {
+		e.warnThrottled(&e.lastBadSessionWarn, "openbox gateway: relayed calls carry a %s header that is not a usable session id "+
+			"(too long, or not printable ASCII), so nothing can be attributed to a session. The model calls themselves are unaffected.", sessionHeader)
+		return
+	}
 	if sessionID == "" {
 		// Deliberately no synthesized id, and the reason is NOT that such events
 		// would go undelivered — they would: the flush nudge below takes whatever
@@ -223,14 +240,38 @@ func (e *Emitter) warnThrottled(last *time.Time, format string, args ...any) {
 // activity_id column.
 const maxRequestIDLen = 128
 
+// maxSessionIDLen bounds the caller-supplied session id. Generous next to a real
+// one (Claude Code sends a UUID, 36 characters) and far below anything that could
+// become an unusable filename.
+const maxSessionIDLen = 128
+
+// usableSessionID is usableRequestID's rule applied to the id that carries more
+// weight: it becomes a spool filename, the flush debounce key and core's run_id.
+//
+// Path separators are refused on top of the shared rule, because this one is
+// joined into a path: a session id of "../../x" would put a spool file outside
+// the spool directory.
+func usableSessionID(id string) bool {
+	if !printableASCII(id, maxSessionIDLen) {
+		return false
+	}
+	return !strings.ContainsAny(id, `/\`) && id != "." && id != ".."
+}
+
 // usableRequestID reports whether an upstream id may be used verbatim. Printable
 // ASCII only: a control character or a newline in an id that becomes part of a
 // stored key is a shape nobody downstream is expecting.
 func usableRequestID(id string) bool {
-	if id == "" || len(id) > maxRequestIDLen {
+	return printableASCII(id, maxRequestIDLen)
+}
+
+// printableASCII is the shared rule: non-empty, within n bytes, and every rune a
+// printable ASCII character.
+func printableASCII(s string, n int) bool {
+	if s == "" || len(s) > n {
 		return false
 	}
-	for _, r := range id {
+	for _, r := range s {
 		if r < 0x21 || r > 0x7e {
 			return false
 		}

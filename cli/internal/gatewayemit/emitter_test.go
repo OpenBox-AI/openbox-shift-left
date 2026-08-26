@@ -312,3 +312,68 @@ func TestDIDIsCachedOnceResolved(t *testing.T) {
 		t.Errorf("resolved the DID %d times, want 1 once it is known", calls)
 	}
 }
+
+// TestUnusableSessionHeaderIsRefusedAndReported.
+//
+// The session id comes off a request header, on a loopback listener the package's
+// own doc says "performs no caller authentication" — and it is used as a spool
+// FILENAME, as the per-session flush-debounce key, and as core's run_id. Only the
+// far less load-bearing upstream request id was bounded.
+//
+// Each case is a distinct concrete failure: an over-long id becomes an
+// ENAMETOOLONG filename on every call; a control character lands in a stored key;
+// a path separator escapes the spool directory. All three must be refused with a
+// throttled warning rather than spooled.
+func TestUnusableSessionHeaderIsRefusedAndReported(t *testing.T) {
+	for name, id := range map[string]string{
+		"over the length bound": strings.Repeat("s", maxSessionIDLen+1),
+		"control character":     "sess\x00id",
+		"newline":               "sess\nid",
+		"path traversal":        "../../escape",
+		"bare parent":           "..",
+		"path separator":        "a/b",
+	} {
+		t.Run(name, func(t *testing.T) {
+			spool := hookflow.Spool{Dir: t.TempDir()}
+			var warned int
+			e := &Emitter{
+				Spool: spool,
+				DID:   func() string { return "did:aip:x" },
+				Warn:  func(string, ...any) { warned++ },
+				Now:   func() time.Time { return time.Unix(0, 0).UTC() },
+			}
+			e.Emit(context.Background(), gateway.Captured{
+				HTTPMethod:     "POST",
+				RequestHeaders: map[string]string{sessionHeader: id},
+			})
+
+			files, _ := os.ReadDir(spool.Dir)
+			if len(files) != 0 {
+				t.Errorf("an unusable session id produced %d spool file(s): %v", len(files), files)
+			}
+			if warned == 0 {
+				t.Error("the drop was silent; a governance gap nobody is told about is indistinguishable from a working gateway")
+			}
+		})
+	}
+}
+
+// TestAUsableSessionHeaderStillSpools keeps the bound from becoming a blanket
+// refusal: a real Claude Code session id is a UUID and must pass.
+func TestAUsableSessionHeaderStillSpools(t *testing.T) {
+	spool := hookflow.Spool{Dir: t.TempDir()}
+	e := &Emitter{
+		Spool: spool,
+		DID:   func() string { return "did:aip:x" },
+		Warn:  func(string, ...any) {},
+		Now:   func() time.Time { return time.Unix(0, 0).UTC() },
+	}
+	e.Emit(context.Background(), gateway.Captured{
+		HTTPMethod:     "POST",
+		RequestHeaders: map[string]string{sessionHeader: "3f1c9a6e-4b2d-4c8a-9e10-7d5b2a8c4f61"},
+	})
+	files, _ := os.ReadDir(spool.Dir)
+	if len(files) == 0 {
+		t.Error("a valid UUID session id was refused; the bound is too tight to be useful")
+	}
+}

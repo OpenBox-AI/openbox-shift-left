@@ -38,7 +38,11 @@ const (
 const StopTimeout = 30
 
 // LaunchdPlist renders the macOS unit.
-func LaunchdPlist(binPath, addr, upstream string) string {
+//
+// homeDir is needed for the log paths: launchd sends stdio to /dev/null unless
+// told otherwise, and the gateway's only signal that it is recording nothing goes
+// to stderr.
+func LaunchdPlist(homeDir, binPath, addr, upstream string) string {
 	var b strings.Builder
 	b.WriteString(`<?xml version="1.0" encoding="UTF-8"?>` + "\n")
 	b.WriteString(`<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">` + "\n")
@@ -61,8 +65,32 @@ func LaunchdPlist(binPath, addr, upstream string) string {
 	// launchd's default is 20s, below the gateway's own 30s grace, so a routine
 	// restart mid-stream would be SIGKILLed before it finished draining.
 	b.WriteString("  <key>ExitTimeOut</key>\n  <integer>" + strconv.Itoa(StopTimeout) + "</integer>\n")
+	// WHERE THE DIAGNOSTICS GO. launchd.plist(5) defaults both of these to
+	// /dev/null, and the systemd sibling gets the journal for free — so on macOS,
+	// the platform that actually runs the KeepAlive daemon, every line the gateway
+	// writes to stderr was discarded.
+	//
+	// That is not cosmetic. The emitter's own design rests on those lines: "every
+	// path that declines to emit is a governance gap, and a gap nobody is told
+	// about is indistinguishable from a working gateway". Its two throttled
+	// warnings — no developer DID configured, and no session header on relayed
+	// calls — are the ONLY signal that a perfectly working relay is recording
+	// nothing, and `openbox doctor` reports configured/alive/tier/bypass but never
+	// "is it recording". A developer who ran `init --gateway` before `openbox
+	// auth` had no way to find out.
+	b.WriteString("  <key>StandardOutPath</key>\n  <string>" + xmlEscape(LogPath(homeDir)) + "</string>\n")
+	b.WriteString("  <key>StandardErrorPath</key>\n  <string>" + xmlEscape(LogPath(homeDir)) + "</string>\n")
 	b.WriteString("</dict>\n</plist>\n")
 	return b.String()
+}
+
+// LogPath is where a supervised gateway's stdio is kept.
+//
+// Under the OpenBox config dir rather than ~/Library/Logs: it is OpenBox state,
+// `openbox doctor` can name one path on both platforms, and the directory already
+// exists with the right permissions.
+func LogPath(homeDir string) string {
+	return filepath.Join(homeDir, ".openbox", "gateway.log")
 }
 
 // SystemdUnit renders the Linux USER unit.
@@ -118,7 +146,7 @@ func WriteUnit(goos, homeDir, binPath, addr, upstream string) (string, error) {
 	var path, body string
 	switch goos {
 	case "darwin":
-		path, body = LaunchdPath(homeDir), LaunchdPlist(binPath, addr, upstream)
+		path, body = LaunchdPath(homeDir), LaunchdPlist(homeDir, binPath, addr, upstream)
 	case "linux":
 		path, body = SystemdPath(homeDir), SystemdUnit(binPath, addr, upstream)
 	default:

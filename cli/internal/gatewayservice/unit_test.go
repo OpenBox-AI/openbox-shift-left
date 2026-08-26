@@ -18,7 +18,7 @@ import (
 func TestUnitStopTimeoutMatchesTheGracePeriod(t *testing.T) {
 	grace := strconv.Itoa(StopTimeout)
 
-	plist := LaunchdPlist("/usr/local/bin/openbox", "127.0.0.1:8788", "https://api.anthropic.com")
+	plist := LaunchdPlist(t.TempDir(), "/usr/local/bin/openbox", "127.0.0.1:8788", "https://api.anthropic.com")
 	if !strings.Contains(plist, "--shutdown-grace") || !strings.Contains(plist, grace+"s") {
 		t.Errorf("plist does not pass --shutdown-grace %ss:\n%s", grace, plist)
 	}
@@ -46,7 +46,7 @@ func TestUnitsUseFlagsThatExist(t *testing.T) {
 	valid := map[string]bool{"--addr": true, "--upstream": true, "--shutdown-grace": true}
 
 	for name, body := range map[string]string{
-		"launchd": LaunchdPlist("/bin/openbox", "127.0.0.1:8788", "https://api.anthropic.com"),
+		"launchd": LaunchdPlist(t.TempDir(), "/bin/openbox", "127.0.0.1:8788", "https://api.anthropic.com"),
 		"systemd": SystemdUnit("/bin/openbox", "127.0.0.1:8788", "https://api.anthropic.com"),
 	} {
 		for _, field := range strings.Fields(strings.NewReplacer("<string>", " ", "</string>", " ").Replace(body)) {
@@ -65,7 +65,7 @@ func TestUnitsUseFlagsThatExist(t *testing.T) {
 // error anywhere.
 func TestLaunchdPlistIsWellFormedXML(t *testing.T) {
 	// A path with characters that MUST be escaped.
-	plist := LaunchdPlist(`/Users/a&b/<tools>/openbox`, "127.0.0.1:8788", "https://api.anthropic.com")
+	plist := LaunchdPlist(t.TempDir(), `/Users/a&b/<tools>/openbox`, "127.0.0.1:8788", "https://api.anthropic.com")
 
 	var doc any
 	if err := xml.Unmarshal([]byte(plist), &doc); err != nil {
@@ -83,7 +83,7 @@ func TestLaunchdPlistIsWellFormedXML(t *testing.T) {
 // is the whole answer to "the gateway died"; without keep-alive the failure is
 // permanent for the session.
 func TestSupervisorRestartsACrashedGateway(t *testing.T) {
-	plist := LaunchdPlist("/bin/openbox", "127.0.0.1:8788", "https://x")
+	plist := LaunchdPlist(t.TempDir(), "/bin/openbox", "127.0.0.1:8788", "https://x")
 	if !strings.Contains(plist, "<key>KeepAlive</key>") || !strings.Contains(plist, "<key>RunAtLoad</key>") {
 		t.Errorf("plist does not keep the gateway alive across crashes or logins:\n%s", plist)
 	}
@@ -138,5 +138,30 @@ func TestWindowsIsRefusedNotSilentlySkipped(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "openbox gateway") {
 		t.Errorf("the error does not say what to do instead: %v", err)
+	}
+}
+
+// TestLaunchdUnitCapturesStdio is the visibility control for the platform that
+// actually runs the daemon.
+//
+// launchd.plist(5) defaults StandardOutPath and StandardErrorPath to /dev/null,
+// and the systemd sibling gets the journal for free — so on macOS every line the
+// gateway wrote to stderr was discarded. Those lines are not decoration: the
+// emitter's two throttled warnings ("no developer DID configured, so relayed
+// model calls are NOT being recorded"; no session header) are the only signal
+// that a perfectly working relay is recording nothing, and doctor does not ask
+// that question at all.
+func TestLaunchdUnitCapturesStdio(t *testing.T) {
+	home := t.TempDir()
+	plist := LaunchdPlist(home, "/bin/openbox", "127.0.0.1:8788", "https://api.anthropic.com")
+
+	for _, key := range []string{"StandardOutPath", "StandardErrorPath"} {
+		if !strings.Contains(plist, "<key>"+key+"</key>") {
+			t.Errorf("the plist sets no %s, so launchd sends it to /dev/null and the "+
+				"gateway's only 'I am recording nothing' warning is lost", key)
+		}
+	}
+	if !strings.Contains(plist, LogPath(home)) {
+		t.Errorf("the plist does not name %s:\n%s", LogPath(home), plist)
 	}
 }

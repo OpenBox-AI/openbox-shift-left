@@ -7,6 +7,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/openbox-ai/openbox-shift-left/cli/internal/gatewayservice"
 )
@@ -75,7 +76,13 @@ func TestGatewayEnvIsNotWrittenWhenTheDaemonDoesNotStart(t *testing.T) {
 	a, _, _ := testApp(nil)
 	stubSupervisor(t, "", true) // start fails
 
-	err := a.setupGateway(home, "127.0.0.1:8788", "https://api.anthropic.com")
+	// freeAddr, NOT the production default. This hardcoded gateway.DefaultAddr
+	// ("127.0.0.1:8788"), so on any machine actually running `openbox gateway` —
+	// i.e. anyone dogfooding this feature — setupGateway returned at the
+	// port-occupied pre-check and never reached the failed-start branch this case
+	// is about. The assertion then failed on the wrong error and the CLI suite went
+	// red for exactly the developers most likely to run it.
+	err := a.setupGateway(home, freeAddr(t), "https://api.anthropic.com")
 	if err == nil {
 		t.Fatal("setupGateway reported success though the daemon never started")
 	}
@@ -101,7 +108,7 @@ func TestGatewayEnvIsNotWrittenWhenTheListenerNeverComesUp(t *testing.T) {
 
 	// Shorten the wait: this test is about the branch, not about the timeout.
 	orig := waitForListenerFn
-	waitForListenerFn = func(string, ...any) bool { return false }
+	waitForListenerFn = func(string, time.Duration) bool { return false }
 	t.Cleanup(func() { waitForListenerFn = orig })
 
 	err := a.setupGateway(home, freeAddr(t), "https://api.anthropic.com")
@@ -275,5 +282,110 @@ func TestOccupiedPortIsRefusedRatherThanAdopted(t *testing.T) {
 	}
 	if _, present := gatewayservice.CurrentEnv(home); present {
 		t.Error("ANTHROPIC_BASE_URL was written pointing at an unknown local service")
+	}
+}
+
+// TestReInstallReplacesOurOwnGatewayInsteadOfRefusing is the "test the SECOND
+// invocation" rule this repo already learned once, applied to the gateway.
+//
+// The port pre-check could not tell our own daemon from a stranger, so the second
+// `init --gateway` on any gateway-enabled machine returned BEFORE WriteUnit — and
+// a unit written by an older binary could never be refreshed. That is the same
+// stale-path failure `init` repairs for hook registrations, and the remedy its own
+// error recommends ("re-run init") was the thing that could not work.
+func TestReInstallReplacesOurOwnGatewayInsteadOfRefusing(t *testing.T) {
+	skipUnlessSupervised(t)
+	home := t.TempDir()
+	addr := freeAddr(t)
+	a, out, _ := testApp(nil)
+	stubSupervisor(t, addr, false)
+
+	// First install writes the unit and (via the stub) brings a listener up.
+	if err := a.setupGateway(home, addr, "https://api.anthropic.com"); err != nil {
+		t.Fatalf("first install: %v", err)
+	}
+	if _, present := gatewayservice.CurrentEnv(home); !present {
+		t.Fatal("first install did not write the env var")
+	}
+
+	// Now the port IS occupied — by us. A re-run must replace, not refuse.
+	occupied, _ := portOccupied(addr)
+	if !occupied {
+		t.Skip("the stub listener did not stay up; this case needs a held port")
+	}
+	// The stubbed supervisor cannot actually stop its own listener — `run` is a
+	// no-op — so the socket-clear wait is stubbed too. What is under test is
+	// replace-vs-REFUSE: that setupGateway gets past the port pre-check and
+	// rewrites the unit, not that launchctl works.
+	origFree := waitForPortFreeFn
+	waitForPortFreeFn = func(string, time.Duration) bool { return true }
+	t.Cleanup(func() { waitForPortFreeFn = origFree })
+
+	if err := a.setupGateway(home, addr, "https://api.anthropic.com"); err != nil {
+		t.Errorf("re-install refused instead of replacing: %v", err)
+	}
+	if !strings.Contains(out.String(), "replacing") {
+		t.Errorf("the replace was silent; a swap has to say what it retired:\n%s", out.String())
+	}
+}
+
+// TestAForeignProcessOnThePortIsStillRefused is the other half: the ownership test
+// must not become a licence to stop whatever is listening. Over-refuse, never
+// over-terminate.
+func TestAForeignProcessOnThePortIsStillRefused(t *testing.T) {
+	skipUnlessSupervised(t)
+	home := t.TempDir()
+
+	// Something else holds a port, and no unit of ours names it.
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { ln.Close() })
+	addr := ln.Addr().String()
+
+	a, _, _ := testApp(nil)
+	stubSupervisor(t, "", false)
+	err = a.setupGateway(home, addr, "https://api.anthropic.com")
+	if err == nil {
+		t.Fatal("setupGateway proceeded over a foreign listener")
+	}
+	if !strings.Contains(err.Error(), "already in use") {
+		t.Errorf("the error does not name the conflict: %v", err)
+	}
+	if _, present := gatewayservice.CurrentEnv(home); present {
+		t.Error("ANTHROPIC_BASE_URL was written while a foreign process held the port")
+	}
+}
+
+// TestAFailedInstallLeavesNoUnitBehind is setupGateway's own documented promise —
+// "any failure leaves the machine unconfigured rather than half-configured".
+//
+// Every failure after WriteUnit broke it: the unit stayed on disk with
+// KeepAlive/Restart=always, so the supervisor kept restart-looping a gateway
+// nobody was told about, `init` still exited 0 (main.go downgrades the error to a
+// warning), and the error's own remedy — re-run init — was blocked by the port
+// pre-check seeing that very daemon.
+func TestAFailedInstallLeavesNoUnitBehind(t *testing.T) {
+	skipUnlessSupervised(t)
+	home := t.TempDir()
+	a, _, _ := testApp(nil)
+	stubSupervisor(t, "", false) // supervisor accepts, nothing listens
+
+	orig := waitForListenerFn
+	waitForListenerFn = func(string, time.Duration) bool { return false }
+	t.Cleanup(func() { waitForListenerFn = orig })
+
+	if err := a.setupGateway(home, freeAddr(t), "https://api.anthropic.com"); err == nil {
+		t.Fatal("setupGateway reported success with nothing listening")
+	}
+	if path := gatewayservice.UnitPath(runtime.GOOS, home); path != "" {
+		if _, err := os.Stat(path); err == nil {
+			t.Errorf("%s survived a failed install — the supervisor will restart-loop a gateway "+
+				"the developer was never told about, and the port pre-check will then block the re-run", path)
+		}
+	}
+	if _, present := gatewayservice.CurrentEnv(home); present {
+		t.Error("ANTHROPIC_BASE_URL was written despite the failure")
 	}
 }

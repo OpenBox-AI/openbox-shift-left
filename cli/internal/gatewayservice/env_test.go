@@ -214,3 +214,90 @@ func TestCurrentEnvIsTheReadSide(t *testing.T) {
 		t.Error("value still reported after removal")
 	}
 }
+
+// TestUninstallRestoresAnOrgsOwnBaseURL is the data-loss control.
+//
+// The package's stated rule was key-ownership: "foreign keys are preserved; only
+// keys we own are replaced." That missed the case where the KEY is ours and the
+// VALUE is theirs — an org pointing Claude Code at its own relay through
+// ANTHROPIC_BASE_URL, which is the setup docs/gateway-mdm-recipe.md targets.
+// Install overwrote it and merely PRINTED the old URL; uninstall deleted the key.
+// After that round trip the org's relay existed nowhere on the machine, and every
+// model call went direct to the provider — bypassing the org's own egress control
+// — while doctor reported "not set", which reads as clean rather than as damage.
+func TestUninstallRestoresAnOrgsOwnBaseURL(t *testing.T) {
+	const orgRelay = "https://llm-proxy.corp.internal"
+	home := t.TempDir()
+	seed(t, home, `{"env":{"`+EnvKey+`":"`+orgRelay+`","CORP_TOKEN_PATH":"/etc/corp/token"}}`)
+
+	if _, err := WriteEnv(home, "127.0.0.1:8788"); err != nil {
+		t.Fatalf("WriteEnv: %v", err)
+	}
+	if got, _ := CurrentEnv(home); got != "http://127.0.0.1:8788" {
+		t.Fatalf("install did not point the tool at the gateway: %q", got)
+	}
+
+	removed, restored, err := RemoveEnvDetailed(home)
+	if err != nil {
+		t.Fatalf("RemoveEnvDetailed: %v", err)
+	}
+	if restored != orgRelay {
+		t.Errorf("restored %q, want the org's own relay %q", restored, orgRelay)
+	}
+	if len(removed) != 0 {
+		t.Errorf("reported %v as removed; a restore is not a removal", removed)
+	}
+	got, present := CurrentEnv(home)
+	if !present || got != orgRelay {
+		t.Errorf("after uninstall the base URL is %q (present=%v); the org's relay was destroyed", got, present)
+	}
+	// The unrelated key must still be there — the original guarantee.
+	env, _ := read(t, home)["env"].(map[string]any)
+	if v, _ := env["CORP_TOKEN_PATH"].(string); v != "/etc/corp/token" {
+		t.Errorf("a foreign env key was lost: %q", v)
+	}
+}
+
+// TestUninstallStillRemovesWhenThereWasNothingToRestore keeps the fix from
+// turning every uninstall into a restore: with no prior value the key must go.
+func TestUninstallStillRemovesWhenThereWasNothingToRestore(t *testing.T) {
+	home := t.TempDir()
+	if _, err := WriteEnv(home, "127.0.0.1:8788"); err != nil {
+		t.Fatalf("WriteEnv: %v", err)
+	}
+	removed, restored, err := RemoveEnvDetailed(home)
+	if err != nil {
+		t.Fatalf("RemoveEnvDetailed: %v", err)
+	}
+	if restored != "" {
+		t.Errorf("restored %q out of nowhere", restored)
+	}
+	if len(removed) != 1 || removed[0] != EnvKey {
+		t.Errorf("removed = %v, want just %s", removed, EnvKey)
+	}
+	if _, present := CurrentEnv(home); present {
+		t.Error("the key we wrote survived uninstall")
+	}
+}
+
+// TestASecondInstallDoesNotOverwriteTheRememberedOriginal is the "test the SECOND
+// invocation" rule this package's own header states, applied to the new record: a
+// re-install must not replace the org's original value with our own gateway URL.
+func TestASecondInstallDoesNotOverwriteTheRememberedOriginal(t *testing.T) {
+	const orgRelay = "https://llm-proxy.corp.internal"
+	home := t.TempDir()
+	seed(t, home, `{"env":{"`+EnvKey+`":"`+orgRelay+`"}}`)
+
+	for _, addr := range []string{"127.0.0.1:8788", "127.0.0.1:9999"} {
+		if _, err := WriteEnv(home, addr); err != nil {
+			t.Fatalf("WriteEnv(%s): %v", addr, err)
+		}
+	}
+	_, restored, err := RemoveEnvDetailed(home)
+	if err != nil {
+		t.Fatalf("RemoveEnvDetailed: %v", err)
+	}
+	if restored != orgRelay {
+		t.Errorf("restored %q after two installs, want the pre-OpenBox %q", restored, orgRelay)
+	}
+}

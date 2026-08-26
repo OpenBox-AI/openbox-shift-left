@@ -290,3 +290,30 @@ func TestUnknownOwnerIsNotReportedAsNonRoot(t *testing.T) {
 		t.Error("claimed the MDM tier without being able to check ownership")
 	}
 }
+
+// TestLoopbackSpellingIsCaseInsensitive.
+//
+// DNS names are case-insensitive and the gateway's own validator treats them that
+// way (gateway/config.go isLoopbackSpelling uses EqualFold), so `LOCALHOST:8788`
+// passed validation and was written to the settings file — and doctor then
+// reported "NOT loopback — this machine is pointed at something else" about a
+// machine it had just configured, while also reporting it reachable. This
+// package's rule is that doctor degrades to LESS information, never to a wrong
+// claim.
+func TestLoopbackSpellingIsCaseInsensitive(t *testing.T) {
+	for _, host := range []string{"localhost", "LOCALHOST", "LocalHost", "127.0.0.1", "::1"} {
+		t.Run(host, func(t *testing.T) {
+			home := t.TempDir()
+			target := "http://" + host + ":8788"
+			if host == "::1" {
+				target = "http://[::1]:8788"
+			}
+			writeSettings(t, filepath.Join(home, ".claude", "settings.json"), target)
+			r := Inspect(home, "", dialWait)
+			if !r.TargetsGateway {
+				t.Errorf("%s reported as not loopback; doctor would tell a correctly "+
+					"configured developer their machine is pointed elsewhere", target)
+			}
+		})
+	}
+}

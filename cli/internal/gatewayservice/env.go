@@ -48,10 +48,32 @@ func SettingsPath(homeDir string) string {
 	return filepath.Join(homeDir, ".claude", "settings.json")
 }
 
+// priorEnvPath is where the value WriteEnv displaced is remembered, so RemoveEnv
+// can put it back.
+//
+// Under homeDir rather than via devconfig.Home() on purpose: every function in
+// this package takes homeDir explicitly so a test can point the whole gateway
+// step at a temp dir, and a helper that read the real HOME instead would make the
+// restore untestable and, worse, write real state during a test run.
+func priorEnvPath(homeDir string) string {
+	return filepath.Join(homeDir, ".openbox", "gateway-prior-env.json")
+}
+
 // WriteEnv points the tool at the gateway, preserving everything it does not own.
 //
 // Returns the keys it replaced, so a caller can print what changed rather than
 // claiming success silently.
+//
+// A displaced FOREIGN value is remembered, not just reported. The package's rule
+// was stated as key-ownership — "foreign keys are preserved; only keys we own are
+// replaced" — and that missed the case where the KEY is ours and the VALUE is
+// theirs: an org pointing Claude Code at its own LiteLLM/Bedrock relay through
+// ANTHROPIC_BASE_URL, which is exactly the setup docs/gateway-mdm-recipe.md
+// targets. Install printed the old URL and overwrote it; uninstall deleted the
+// key. After that round trip the org's relay existed nowhere, every model call
+// went straight to the provider — silently bypassing the org's own egress point —
+// and `openbox doctor` reported "not set", which reads as clean rather than as
+// damage.
 func WriteEnv(homeDir, addr string) (replaced []string, err error) {
 	path := SettingsPath(homeDir)
 	settings, err := readSettings(path)
@@ -68,6 +90,15 @@ func WriteEnv(homeDir, addr string) (replaced []string, err error) {
 	if existing, present := env[EnvKey]; present {
 		if s, _ := existing.(string); s != want {
 			replaced = append(replaced, fmt.Sprintf("%s: %v -> %s", EnvKey, existing, want))
+			// Remember it, unless a record already exists: a second install must
+			// not overwrite the ORIGINAL foreign value with our own gateway URL
+			// from the first one. First writer wins, which is the only order that
+			// preserves what was there before OpenBox.
+			if s != "" && !hasPriorEnv(homeDir) {
+				if err := savePriorEnv(homeDir, s); err != nil {
+					return replaced, err
+				}
+			}
 		}
 	}
 	env[EnvKey] = want
@@ -79,31 +110,100 @@ func WriteEnv(homeDir, addr string) (replaced []string, err error) {
 // RemoveEnv is the uninstall half. It removes ONLY owned keys, and removes the
 // env block itself only when nothing else is left in it — an org that put its own
 // variables there must not lose them because OpenBox was uninstalled.
+//
+// A remembered prior value is RESTORED rather than deleted, which is the other
+// half of WriteEnv's record. Returns the keys it removed and the ones it restored
+// so a caller can say which happened; a restore is not a removal and reporting it
+// as one would tell an operator their machine is unconfigured when it is back to
+// what the org configured.
 func RemoveEnv(homeDir string) (removed []string, err error) {
+	removed, _, err = removeEnv(homeDir)
+	return removed, err
+}
+
+// RemoveEnvDetailed is RemoveEnv with the restore reported separately.
+func RemoveEnvDetailed(homeDir string) (removed []string, restored string, err error) {
+	return removeEnv(homeDir)
+}
+
+func removeEnv(homeDir string) (removed []string, restored string, err error) {
 	path := SettingsPath(homeDir)
 	settings, err := readSettings(path)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	env, _ := settings["env"].(map[string]any)
 	if env == nil {
-		return nil, nil
+		return nil, "", nil
 	}
+	prior := loadPriorEnv(homeDir)
 	for key := range ownedEnvKeys {
-		if _, present := env[key]; present {
-			delete(env, key)
-			removed = append(removed, key)
+		if _, present := env[key]; !present {
+			continue
 		}
+		if key == EnvKey && prior != "" {
+			env[key] = prior
+			restored = prior
+			continue
+		}
+		delete(env, key)
+		removed = append(removed, key)
 	}
 	if len(env) == 0 {
 		delete(settings, "env")
 	} else {
 		settings["env"] = env
 	}
-	if len(removed) == 0 {
-		return nil, nil
+	if len(removed) == 0 && restored == "" {
+		return nil, "", nil
 	}
-	return removed, writeSettings(path, settings)
+	if err := writeSettings(path, settings); err != nil {
+		return nil, "", err
+	}
+	// Only after the settings write succeeded: dropping the record first would
+	// lose the org's value if the write then failed.
+	if restored != "" {
+		_ = os.Remove(priorEnvPath(homeDir))
+	}
+	return removed, restored, nil
+}
+
+// priorEnv is the on-disk record. A struct rather than a bare string so a future
+// second remembered key does not need a format change.
+type priorEnv struct {
+	BaseURL string `json:"anthropic_base_url"`
+}
+
+func hasPriorEnv(homeDir string) bool {
+	_, err := os.Stat(priorEnvPath(homeDir))
+	return err == nil
+}
+
+func savePriorEnv(homeDir, value string) error {
+	path := priorEnvPath(homeDir)
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return fmt.Errorf("create %s: %w", filepath.Dir(path), err)
+	}
+	raw, err := json.Marshal(priorEnv{BaseURL: value})
+	if err != nil {
+		return err
+	}
+	return writeFileAtomic(path, raw, 0o600)
+}
+
+// loadPriorEnv returns "" for every failure. A missing or unreadable record means
+// "there was nothing to restore", which is the same outcome as before this
+// existed — never a reason to fail an uninstall.
+func loadPriorEnv(homeDir string) string {
+	raw, err := os.ReadFile(priorEnvPath(homeDir))
+	if err != nil {
+		return ""
+	}
+	var p priorEnv
+	if err := json.Unmarshal(raw, &p); err != nil {
+		return ""
+	}
+	return p.BaseURL
 }
 
 // CurrentEnv reports what the settings file currently sets, so a caller can

@@ -13,6 +13,7 @@ import (
 
 	"github.com/openbox-ai/openbox-shift-left/adapters/common/devconfig"
 	"github.com/openbox-ai/openbox-shift-left/cli/internal/gatewaycheck"
+	"github.com/openbox-ai/openbox-shift-left/cli/internal/gatewayservice"
 	"github.com/openbox-ai/openbox-shift-left/cli/internal/managed"
 	"github.com/openbox-ai/openbox-shift-left/cli/internal/providers"
 )
@@ -255,6 +256,11 @@ func (a *app) reportGateway() {
 			fmt.Fprintf(a.stdout, "               model calls will FAIL rather than escape, which is the safe\n")
 			fmt.Fprintf(a.stdout, "               direction. Start the gateway: `openbox gateway`\n")
 		}
+		// Where the daemon's own diagnostics are. Named because it is the only
+		// place the gateway says it is RELAYING BUT NOT RECORDING — a missing DID,
+		// or relayed calls carrying no session header — and none of the four
+		// questions above asks that.
+		fmt.Fprintf(a.stdout, "  log          %s\n", gatewayservice.LogPath(home))
 	}
 
 	// Always printed, including in the healthiest case. The base assurance claim

@@ -129,10 +129,18 @@ func Inspect(homeDir, managedPath string, dialTimeout time.Duration) Report {
 
 	if r.ConfiguredAddr != "" {
 		host, port := hostPort(r.ConfiguredAddr)
+		// EqualFold, not ==. DNS names are case-insensitive and the gateway's own
+		// validator already treats them that way (gateway/config.go
+		// isLoopbackSpelling), so `--gateway-addr LOCALHOST:8788` passed
+		// validation, was written to the settings file, and then doctor reported
+		// "target NOT loopback — this machine is pointed at something else" about a
+		// correctly configured machine, alongside "reachable yes". This package's
+		// own rule is that doctor must degrade to LESS information, never to a
+		// wrong claim.
 		if ip := net.ParseIP(host); ip != nil {
 			r.TargetsGateway = ip.IsLoopback()
 		} else {
-			r.TargetsGateway = host == "localhost"
+			r.TargetsGateway = strings.EqualFold(host, "localhost")
 		}
 		// The port has to be DEFAULTED, not required. A configured value with no
 		// explicit port ("https://api.anthropic.com") is perfectly valid — a real
@@ -241,12 +249,7 @@ func dial(addr string, timeout time.Duration) (bool, string) {
 
 // stripScheme turns "http://127.0.0.1:8788" into "127.0.0.1:8788".
 func stripScheme(s string) string {
-	for _, prefix := range []string{"http://", "https://"} {
-		if len(s) >= len(prefix) && s[:len(prefix)] == prefix {
-			return s[len(prefix):]
-		}
-	}
-	return s
+	return strings.TrimPrefix(strings.TrimPrefix(s, "https://"), "http://")
 }
 
 // statUID is implemented per-OS: unix reads the syscall stat, Windows cannot.

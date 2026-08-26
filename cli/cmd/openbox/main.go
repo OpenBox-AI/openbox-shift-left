@@ -467,6 +467,20 @@ func (a *app) runDevInit(args []string) int {
 		return a.errorf("--gateway and --remove-gateway are mutually exclusive")
 	}
 
+	// The gateway is Claude Code's, and only Claude Code's. Its upstream default,
+	// its session/agent request headers and the settings file it writes are all
+	// that provider's (ADR-0021 scopes it there explicitly). Without this guard
+	// `openbox init --provider codex --gateway` installed a supervised relay to
+	// api.anthropic.com and pointed ~/.claude/settings.json at it — on a machine
+	// whose tool is Codex, which reads neither.
+	if (withGateway || removeGateway) && o.Provider != "claude-code" {
+		flag := "--gateway"
+		if removeGateway {
+			flag = "--remove-gateway"
+		}
+		return a.errorf("%s applies to --provider claude-code only (got %q); the gateway relays the Anthropic Messages API and is configured through Claude Code's own settings", flag, o.Provider)
+	}
+
 	inst, err := providers.Lookup(o.Provider)
 	if err != nil {
 		return a.errorf("%v", err)
@@ -509,6 +523,35 @@ func (a *app) runDevInit(args []string) int {
 		// Whether the plan governs anything is part of the plan, and dry-run is
 		// where a careful operator looks before committing to it.
 		a.printGovernedScope(o, resolvedScope)
+		// The gateway blocks live below this early return, so a plan that omitted
+		// them described everything EXCEPT the one action scope.go calls "the
+		// largest-blast-radius thing this command can do". An operator vetting a
+		// fleet rollout was shown hooks and posture and told nothing about a
+		// supervised daemon and a rewritten ANTHROPIC_BASE_URL.
+		a.printGatewayPlan(withGateway, removeGateway, gatewayAddr, gatewayUpstream)
+		return exitOK
+	}
+
+	// --- UNINSTALL RUNS BEFORE THE CREDENTIAL GATE -------------------------
+	// Removal must not require the thing being removed to still be usable.
+	// `--remove-gateway` sat below requireCredentials, so a machine whose
+	// credentials had been deleted — an offboarding, a rotation, a wiped
+	// ~/.openbox — could not unset ANTHROPIC_BASE_URL: every model call kept
+	// failing closed against a dead loopback port, `init --remove-gateway` exited
+	// with "no credentials on this machine ... Nothing was installed", and the
+	// only remaining fix was hand-editing the provider's settings file. Removal
+	// touches no backend and needs no secret, so it has no business behind that
+	// gate — and it returns here rather than falling through, because a re-install
+	// of hooks is the opposite of what the flag names.
+	if removeGateway {
+		home, code := a.gatewayHome()
+		if code != exitOK {
+			return code
+		}
+		fmt.Fprintf(a.stdout, "\nRemoving local gateway configuration\n")
+		if err := a.removeGateway(home); err != nil {
+			return a.errorf("gateway removal did not complete: %v", err)
+		}
 		return exitOK
 	}
 
@@ -560,21 +603,28 @@ func (a *app) runDevInit(args []string) int {
 	// traffic, unlike enforcement-by-default which is inert without a policy.
 	if withGateway {
 		fmt.Fprintf(a.stdout, "\nLocal gateway (model-call governance)\n")
-		if err := a.setupGateway(a.homeDir(), gatewayAddr, gatewayUpstream); err != nil {
+		home, code := a.gatewayHome()
+		if code != exitOK {
+			return code
+		}
+		if err := a.setupGateway(home, gatewayAddr, gatewayUpstream); err != nil {
 			// NOT fatal to the whole install: the hooks are already in place and
 			// governing tool calls. Reporting this as a total failure would tell a
 			// developer to undo work that succeeded.
 			fmt.Fprintf(a.stderr, "warning: gateway setup did not complete: %v\n", err)
 		}
 	}
-	if removeGateway {
-		fmt.Fprintf(a.stdout, "\nRemoving local gateway configuration\n")
-		if err := a.removeGateway(a.homeDir()); err != nil {
-			fmt.Fprintf(a.stderr, "warning: gateway removal did not complete: %v\n", err)
-		}
-	}
 
-	fmt.Fprintf(a.stdout, "\nDone. Nothing to run and no environment to keep set — the hooks do the rest.\n")
+	// The closing line has to be true of THIS invocation. With --gateway it is
+	// not: a supervised daemon is now running and ANTHROPIC_BASE_URL is set, and
+	// telling a developer otherwise is what sends them debugging failing model
+	// calls with no idea a relay exists. The comment block above reasons carefully
+	// about not overstating "ambient" for the same reason.
+	if withGateway {
+		fmt.Fprintf(a.stdout, "\nDone. A supervised gateway is running and this machine's model calls now route through it.\n")
+	} else {
+		fmt.Fprintf(a.stdout, "\nDone. Nothing to run and no environment to keep set — the hooks do the rest.\n")
+	}
 	fmt.Fprintf(a.stdout, "  openbox dev verify     confirm this machine can reach and authenticate to OpenBox\n")
 	fmt.Fprintf(a.stdout, "  openbox doctor         the effective posture, and where each value came from\n")
 	if o.Enforce != nil && !*o.Enforce {
