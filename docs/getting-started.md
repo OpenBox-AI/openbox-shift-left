@@ -1,7 +1,9 @@
 # Getting started
 
 Governance for your Claude Code or Codex sessions. Two commands to set up, then
-nothing to run and no environment variables to keep set.
+nothing to run and no environment variables to keep set — unless you opt into
+[governing the model call itself](#governing-the-model-call-itself), which adds a
+local daemon and one environment variable.
 
 ```
 openbox auth     authenticate — credentials for this machine
@@ -220,7 +222,62 @@ developer's own decision.
 Codex is **user-wide only**: `--scope local --provider codex` is rejected, and a
 bare `init --provider codex` resolves to global scope and says so on stdout.
 
-Add `--dry-run` to any of this to see the whole plan without touching anything.
+Add `--dry-run` to any of this to see the whole plan without touching anything —
+including the gateway below, whose plan names the daemon and the environment variable
+before either exists.
+
+### Governing the model call itself
+
+Everything above governs what the agent *does*. No hook carries the model request, so
+by default the model call is neither recorded nor governed. `--gateway` changes that,
+for Claude Code only:
+
+```bash
+openbox init --provider claude-code --gateway
+```
+
+It writes a launchd/systemd user unit, starts it, **proves it is listening**, and only
+then points `ANTHROPIC_BASE_URL` in `~/.claude/settings.json` at it. That order is the
+safety property: writing the variable first would point your tool at a dead port, and
+a dead loopback listener fails closed — every model call on the machine would fail. If
+any step fails, the unit is removed again and the variable is left alone; `init` says
+so and the rest of the install still stands.
+
+```bash
+openbox init --provider claude-code --gateway-addr 127.0.0.1:9000   # listen elsewhere
+openbox init --provider claude-code --gateway-upstream https://my-relay.internal
+openbox gateway                                                     # run it in the foreground
+```
+
+`--gateway-upstream` is what to use when your org already has a relay: the gateway
+forwards to it instead of straight to the provider. If a value was already set in
+`ANTHROPIC_BASE_URL` when you installed, it is remembered in
+`~/.openbox/gateway-prior-env.json` and **put back** by `--remove-gateway` — a
+round-trip through OpenBox does not lose your own relay.
+
+Four things to know:
+
+- **It is a second process.** launchd/systemd keeps it running; `openbox doctor`
+  reports whether it is alive, whether this machine actually points at it, and what
+  could bypass it. Its stdio is at `~/.openbox/gateway.log`, which is the only place
+  it says it is running but recording nothing (a missing DID, or relayed calls that
+  carry no session header).
+- **It captures; it does not refuse.** A relayed call is always forwarded. The refusal
+  path exists and is unwired on purpose
+  ([ADR-0021](adr/ADR-0021-openbox-local-gateway.md) §9).
+- **The assurance is detection.** Unsetting the variable is enough to route around it,
+  and nothing here stops that; what you get is a queryable hole in the record. See
+  [the MDM recipe](gateway-mdm-recipe.md) if you need more.
+- **Removal never needs a credential.** `--remove-gateway` works on a machine whose
+  `~/.openbox` has been wiped, because otherwise an offboarded laptop could not stop
+  pointing at a dead port.
+- **macOS and Linux only.** There is no Windows daemon packaging yet, and `--gateway`
+  says so rather than reporting a service it did not install. `openbox gateway` still
+  runs in the foreground there, supervised by whatever you choose.
+
+```bash
+openbox init --provider claude-code --remove-gateway
+```
 
 ### Self-hosted OpenBox
 
@@ -355,7 +412,9 @@ and enforcement is on by default.
 | Govern another project | `cd` there and `openbox init --provider <tool>` |
 | Stop sending prompt text | `"content_capture": false` (see [Data and privacy](data-and-privacy.md)) |
 | Stop sending token counts | `"finops": false` |
-| Uninstall | remove `~/.claude/plugins/openbox-observe`, `~/.openbox/`, `~/.config/openbox/`, each project's `.claude/settings.local.json`, and the `openbox` binary |
+| Govern model calls too | `openbox init --provider claude-code --gateway` (see [above](#governing-the-model-call-itself)) |
+| Stop governing model calls | `openbox init --provider claude-code --remove-gateway` — stops the daemon, removes the unit, and restores any `ANTHROPIC_BASE_URL` it displaced. Needs no credential |
+| Uninstall | run `--remove-gateway` first if you used it, then remove `~/.claude/plugins/openbox-observe`, `~/.openbox/`, `~/.config/openbox/`, each project's `.claude/settings.local.json`, and the `openbox` binary |
 
 A plain re-run of `init` never downgrades your posture silently: turning enforcement
 off takes an explicit `--enforce=false`, and `init` says so when it does.
@@ -372,6 +431,7 @@ list). Specific to setup:
 | Windows | **build-verified only** — CI cross-compiles every change; no automated suite runs there, and `install.sh` is bash |
 | `--scope global` activation | **not verifiable by us** — it needs a managed-settings deployment in a real fleet |
 | Credential at rest | not protected on any platform; `0600` on macOS/Linux, nothing on Windows |
+| `--gateway` | **never run against a live stack.** Whether subscription-OAuth traffic even follows `ANTHROPIC_BASE_URL` is unmeasured, so who this covers is not yet settled ([ADR-0021](adr/ADR-0021-openbox-local-gateway.md) §8) |
 
 So: **no platform is end-to-end verified for this setup flow yet.** The commands,
 the credential file, the scope default and the enforce default are all covered by
@@ -401,6 +461,11 @@ events" has not been re-confirmed against a live stack since the flow changed.
 | A session hangs on a tool call | An approval is filed and undecided. `openbox approve list` shows it; deciding it releases the session. |
 | Every tool call appears twice; success rates and latencies look wrong | The directory has an OpenBox hook registered twice — usually a second engine left by an `init` once run with a different `HOME`. `openbox doctor` reports both that and a repeat at one path; re-running `openbox init` there removes the extra registration. Events already stored stay duplicated. |
 | `OPENBOX_ED25519_SEED is deprecated` | Harmless, and it still works. Rename it to `OPENBOX_AGENT_PRIVATE_KEY` — the name OpenBox documents. |
+| Every model call fails after `--gateway` | The daemon is not listening and a dead loopback port fails closed. `openbox doctor` says whether it is alive; `~/.openbox/gateway.log` says why it exited; `openbox gateway` in the foreground shows the same in real time. `--remove-gateway` gets you working again immediately. |
+| `--gateway applies to --provider claude-code only` | It relays the Anthropic Messages API and is configured through Claude Code's own settings, so it means nothing for Codex. |
+| `… is already in use — refusing to continue` | Something other than an OpenBox gateway holds that port. A gateway *we* installed at that address is replaced instead, and the command says so. Stop the other process, or pass `--gateway-addr`. |
+| The gateway runs but nothing is recorded | Two causes, both in `~/.openbox/gateway.log`: no developer DID configured (run `openbox auth`), or relayed calls carry no session header — the gateway will not invent a session, so those calls are recorded nowhere. |
+| `openbox doctor` flags a bypass even though the gateway is healthy | By design. The exposure is reported at every state including the healthy one, because a check that goes quiet trains you to read silence as prevention. |
 
 `openbox doctor` is the first thing to run for anything posture-related: it prints
 every flag, its value, and whether it came from a default, your config, the

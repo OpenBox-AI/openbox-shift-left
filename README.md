@@ -8,7 +8,9 @@ you can answer, for any commit or deploy:
 
 > **who produced this, with which tools and prompts, at what cost — and was it allowed?**
 
-One static binary. Two commands to set up. No daemon, no proxy, no second dashboard.
+One static binary. Two commands to set up. No second dashboard. The default install
+runs no daemon and proxies nothing — governing the *model call* itself is opt-in and
+does both ([the local gateway](#governing-the-model-call-itself)).
 
 ## Quickstart
 
@@ -67,7 +69,9 @@ Want telemetry without enforcement? `--enforce=false`. Note that enforcement act
 observability either way — with one diagnosed exception, documented in
 [What this does not prove](#what-this-does-not-prove).
 
-**4. Use `claude` as normal.** Nothing to run, no runtime environment to set.
+**4. Use `claude` as normal.** Nothing to run, no runtime environment to set — unless
+you added `--gateway`, which is the one flag that changes that
+([below](#governing-the-model-call-itself)).
 
 ```bash
 openbox doctor      # what posture is actually in effect
@@ -111,6 +115,41 @@ pending rather than pretending it happened.
 Codex is **user-scoped only** — its hooks live at `~/.codex/hooks.json`, so
 `--scope local` is rejected rather than silently governing everything.
 
+## Governing the model call itself
+
+Hooks see what the agent *does*. No hook carries the model request, so by default the
+model call is unobserved and ungoverned. `--gateway` closes that, and it is **opt-in**
+because it redirects live model traffic:
+
+```bash
+openbox init --provider claude-code --gateway
+openbox init --provider claude-code --remove-gateway   # and back out again
+```
+
+It installs a loopback daemon under launchd/systemd (macOS and Linux; no Windows
+packaging yet), proves it is listening, and only then points Claude Code's
+`ANTHROPIC_BASE_URL` at it. Every model call is relayed byte-for-byte to the provider.
+A call that names a session is also captured as governance evidence — request and
+response headers and bodies, plus a one-way fingerprint of the credential that paid
+for it; a call that names none is relayed and recorded nowhere, because the gateway
+will not invent a session. `--gateway-addr` and `--gateway-upstream` change where it
+listens and where it forwards. Claude Code only — it speaks the Anthropic Messages API
+and is configured through Claude Code's own settings.
+
+Three things to know before you turn it on:
+
+- **The claim is detection, not prevention.** A developer can unset one environment
+  variable. That is *visible* — a session with model turns and no gateway spans is a
+  queryable shape, and `openbox doctor` reports the exposure — but it is not stopped.
+  Prevention is your MDM's job: [the MDM recipe](docs/gateway-mdm-recipe.md).
+- **It captures, it does not yet refuse.** The refusal path is written and tested but
+  nothing calls it, deliberately: the status code a refusal should use is unprobed, and
+  a wrong one silently disables a Claude Code capability for the rest of the session
+  ([ADR-0021](docs/adr/ADR-0021-openbox-local-gateway.md) §9).
+- **It is a second process to run and diagnose**, and it has never run against a live
+  stack. `openbox doctor` reports whether it is alive, whether this machine actually
+  points at it, and what could bypass it.
+
 ## Where things live
 
 ```
@@ -118,7 +157,14 @@ Codex is **user-scoped only** — its hooks live at `~/.codex/hooks.json`, so
   .env          your credentials — API key, signing key (0600, never commit)
   dev.json      posture (enforce, capture, fail_closed) + coordinates (DID, agent id, URLs)
   approver.json approver config, if you are one
+                    ── with --gateway only ──
+  gateway.log   the daemon's stdio; the only place it says it is recording nothing
+  gateway-prior-env.json   the ANTHROPIC_BASE_URL the install displaced, so
+                           --remove-gateway can put your own relay back
 <project>/.claude/settings.local.json    which hooks fire here  (init --scope local)
+~/.claude/settings.json                  ANTHROPIC_BASE_URL, with --gateway only
+~/Library/LaunchAgents/ai.openbox.gateway.plist        the gateway unit (macOS)
+~/.config/systemd/user/openbox-gateway.service        the gateway unit (Linux)
 ~/.claude/plugins/openbox-observe/       the plugin bundle + engine copy
 <os-config-dir>/openbox/                 runtime state: spool, audit logs
                                          (~/.config on Linux, ~/Library/Application Support
@@ -150,6 +196,7 @@ coordinates  OPENBOX_AGENT_DID, OPENBOX_AGENT_ID, …       env var  >  dev.json
 | **Autonomous approval** | a bounded approver answers inside the pause, so routine work never waits ([ADR-0012](docs/adr/ADR-0012-autonomous-approver.md)) |
 | **Lineage** | `session → commit → deploy`, with a signed commit attestation |
 | **Evidence** | each session reports its own effective posture, so the control plane never has to trust the endpoint's word |
+| **Model-call capture** | the request the tool actually sent the model, and the response — via an opt-in local relay, Claude Code only ([ADR-0021](docs/adr/ADR-0021-openbox-local-gateway.md)) |
 
 ## How it works
 
@@ -167,9 +214,11 @@ A single static binary is the whole runtime: the CLI, the hook engine and the gi
 hook. **OpenBox decides every gated tool call** — the hook asks `/evaluate` and
 waits for the verdict before the tool runs
 ([ADR-0017](docs/adr/ADR-0017-inline-policy-evaluation.md)). There is one policy
-implementation, on the server; nothing evaluates policy on your machine. Still no
-daemon and no socket ([ADR-0006](docs/adr/ADR-0006-in-process-decider.md) stands —
-a bounded outbound call is not a resident process).
+implementation, on the server; nothing evaluates policy on your machine. The hook
+path adds no daemon and no socket ([ADR-0006](docs/adr/ADR-0006-in-process-decider.md)
+stands — a bounded outbound call is not a resident process); the opt-in
+[gateway](#governing-the-model-call-itself) is a resident process, which is why it is
+a separate flag rather than part of the default install.
 
 That is a trade, and it cuts both ways: enforcement now depends on reaching
 OpenBox, and under the default `fail_closed:false` a gated call proceeds when it
@@ -191,11 +240,16 @@ adapter behind one SPI. Adding a tool is an adapter, not a fork.
 
 ## Provider support
 
-| Provider | Telemetry | Enforcement | Approvals | Scope | Org mandate |
-|---|---|---|---|---|---|
-| **Claude Code** | shipped — hooks + durable spool | deny · ask · redact | full, incl. waking a session on a late decision | project or global | managed settings |
-| **Codex** | shipped — hooks + durable spool | deny · redact (no native "ask") | deny + findings channel | user-wide only | `requirements.toml` / MDM (hook itself not yet mandatable) |
-| **Cursor** | not built | — | — | — | Team hooks available |
+| Provider | Telemetry | Enforcement | Approvals | Model calls | Scope | Org mandate |
+|---|---|---|---|---|---|---|
+| **Claude Code** | shipped — hooks + durable spool | deny · ask · redact | full, incl. waking a session on a late decision | opt-in gateway, capture only | project or global | managed settings |
+| **Codex** | shipped — hooks + durable spool | deny · redact (no native "ask") | deny + findings channel | not built | user-wide only | `requirements.toml` / MDM (hook itself not yet mandatable) |
+| **Cursor** | not built | — | — | — | — | Team hooks available |
+
+The two providers also send **different amounts of content under one posture**: Claude
+Code captures tool input, tool output, the failure detail and the turn's thinking;
+Codex captures none of them. Stated rather than averaged, in
+[COVERAGE](contracts/dev-event/COVERAGE.md) §3.
 
 Two capabilities are provider-independent and work with any tool: OpenBox
 registration and the git-trailer commit binding — so lineage and cost tracking
@@ -225,9 +279,17 @@ Two of those lines used to read the other way, and both changed in August 2026:
   session transcript is the only source
   ([the ADR-0014 amendment](docs/adr/ADR-0014-turn-as-activity-and-identifier-allowlist.md)).
 
+With the opt-in [gateway](#governing-the-model-call-itself) there is a third and much
+larger class: **the whole model request and response**, which includes the system
+prompt, the full message history and every tool definition. Same `content_capture`
+switch, same redaction, same cap — and one more limit worth knowing: a body the
+provider sent **compressed is not captured at all**, because redaction cannot inspect
+bytes it cannot read, so a marker is stored in its place.
+
 Everything above is gated on `content_capture`, scanned for secrets and redacted
 locally before it is sent, and the server sees at most the first 64KB of any body.
-Credentials are never transmitted.
+Credentials are never transmitted — the gateway relays yours to the provider
+untouched and stores only a one-way fingerprint of it.
 
 The exact field list is in **[Data and privacy](docs/data-and-privacy.md)**.
 
@@ -267,8 +329,18 @@ prevent, so the limits are documented as first-class:
   does not engage, because it covers *no verdict*, not *a HALT verdict*. Diagnosed
   live, core-side fix in flight
   ([diagnosis](plans/reports/debug-260814-1231-session-no-longer-active-halt.md)).
-- **Egress is recorded, not controlled.** OpenBox does not proxy or allow-list the
-  coding tool's traffic to its model provider; it records that posture as evidence.
+- **Egress is observed, not controlled.** Without `--gateway`, OpenBox does not carry
+  the coding tool's traffic to its model provider at all; it records that posture as
+  evidence. With `--gateway` it relays and records every model call — but it still does
+  not *refuse* one: the refusal path is written and unwired, so a model call that
+  reaches the relay is forwarded
+  ([ADR-0021](docs/adr/ADR-0021-openbox-local-gateway.md) §9). Nothing anywhere
+  allow-lists the tool's other destinations.
+- **The gateway detects a bypass, it does not stop one.** Unsetting one environment
+  variable is enough, and no OpenBox default prevents that. What you get is a hole in
+  the record that is queryable and attributable, plus an `openbox doctor` warning.
+  Prevention needs your MDM to own the config and control egress
+  ([the recipe](docs/gateway-mdm-recipe.md)).
 - **Content-based policy sees at most the first 64KB of a write.** Bodies are
   truncated before egress, so a rule that would match past that offset does not
   fire. Local secret detection is not subject to the cap.
@@ -282,8 +354,9 @@ Details and current status: **[Assurance](docs/architecture.md#assurance--what-t
 | | |
 |---|---|
 | `openbox auth` | credentials for this machine — it asks for everything authentication needs and nothing else. `--rotate` re-issues them for an agent that already exists |
-| `openbox init` | install hooks + posture. `--scope`, `--enforce=false`, `--install-git-hook`, `--role approver` |
-| `openbox doctor` | the posture actually in effect, who decides, what happens when they are unreachable, and whether this directory has more than one OpenBox engine registered |
+| `openbox init` | install hooks + posture. `--scope`, `--enforce=false`, `--install-git-hook`, `--role approver`, `--gateway` / `--remove-gateway` |
+| `openbox gateway` | run the model-call relay in the foreground — what the service unit invokes, and how you see why it will not start |
+| `openbox doctor` | the posture actually in effect, who decides, what happens when they are unreachable, whether this directory has more than one OpenBox engine registered, and — with the gateway — whether it is alive, whether this machine points at it, and what could bypass it |
 | `openbox dev verify` | can this machine reach and authenticate to core? |
 | `openbox approve` | `list`, `allow`, `deny`, or `--watch --auto` for the autonomous approver |
 | `openbox managed install` | write the managed-settings files for a fleet rollout |
@@ -297,6 +370,7 @@ Details and current status: **[Assurance](docs/architecture.md#assurance--what-t
 | [Data and privacy](docs/data-and-privacy.md) | exactly what is captured and sent |
 | [Upgrading to inline evaluation](docs/upgrading-to-inline-evaluation.md) | what changes for an existing install, incl. file bodies now egressing |
 | [Lineage](docs/lineage.md) | `session → commit → deploy` and how it is verified |
+| [Gateway MDM recipe](docs/gateway-mdm-recipe.md) | the artifacts to push if you need the gateway prevented-from, not just detected-around |
 | [ADRs](docs/adr/) | the decisions, and why |
 | [Event contract](contracts/dev-event/) | the normalized event schema and its wire mapping |
 | [End-to-end tests](docs/testbed/e2e.md) | `testbed/` — a mock-free suite against a real stack |

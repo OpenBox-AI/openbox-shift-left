@@ -8,7 +8,7 @@ What leaves the machine, what never does, and the one setting that changes it.
 |---|---|---|
 | Session, tool and MCP **metadata** | always | tool name, kind (`shell`/`file`/`mcp`), file path, MCP server + tool name, timing |
 | **Token counts and the model id** | yes, by default | per model turn. `finops: false` turns it off — see [Usage capture](#usage-capture) |
-| **Prompt text** | yes, by default | `content_capture: false` turns it off |
+| **Prompt text** | yes, by default | on Claude Code, scanned locally for secrets and REDACTED first, like every other body on this table; **on Codex it is not** — that adapter has no redactor on the content it sends. `content_capture: false` turns it off |
 | **The assistant's reply text** | yes, by default | **this changed** — one message per model turn, scanned locally for secrets and REDACTED first, truncated at 64KB. Same `content_capture` switch. See [What a model turn sends](#what-a-model-turn-sends) |
 | **The assistant's thinking** | yes, by default | **this changed** — extended-thinking text — every thinking block of a turn, concatenated in file order, so one FIELD per turn rather than one block — scanned locally for secrets and REDACTED first, truncated at 64KB. Same `content_capture` switch. This captures more than Anthropic's own telemetry will: their OTel export redacts thinking unconditionally. See [What a model turn sends](#what-a-model-turn-sends) |
 | **Shell command text** | yes, by default | **this changed** — it used to ride a *gated* call only; it is now on ordinary tool telemetry too, under the same `content_capture` switch. Redacted and truncated like every body |
@@ -19,7 +19,7 @@ What leaves the machine, what never does, and the one setting that changes it.
 | **Your provider account's email** | yes, if you are signed in | **new** — one field per session, read from Claude Code's own local account record. This is PII, and it egresses as governance evidence like your DID. Not gated by `content_capture`: it is attribution, not content. See [Account attribution](#account-attribution) |
 | **Your provider organization's UUID** | yes, if you are signed in | **new** — same source, same session field |
 | **Your provider organization's NAME, role, tier, billing** | **never** | all four sit in the same local file beside the two rows above, and none of them is sent. The evidence scope is org UUID + email, deliberately |
-| **Model-call request and response bodies** | only with the local gateway running, and only when the call names a session | **new** — the whole request the tool sent the model, which includes the **system prompt**, the full message history and every tool definition, plus the model's response. This is the largest content class OpenBox collects. Three bounds apply and all three are fallible: the `content_capture` switch, local secret redaction before anything is attached, and a 64KB cap. Same session caveat as the row below |
+| **Model-call request and response bodies** | only with the local gateway running, and only when the call names a session | **new** — the whole request the tool sent the model, which includes the **system prompt**, the full message history and every tool definition, plus the model's response. This is the largest content class OpenBox collects. Three bounds apply and all three are fallible: the `content_capture` switch, local secret redaction before anything is attached, and a 64KB cap. A body the provider sent **compressed is not captured at all** — redaction cannot inspect it, so a marker is stored instead. Same session caveat as the row below |
 | **Model-call HTTP headers** | only with the local gateway running, and only when the call names a session | **new** — and only the non-credential ones: `Authorization`, `x-api-key`, `Cookie`, `Set-Cookie` and four more are replaced with `[redacted]` by name before anything is attached. The KEY is kept so a reviewer can see one was sent. Gated by `content_capture`. A relayed call that carries no `x-claude-code-session-id` header is recorded NOWHERE — the gateway declines to invent a session, so this is a real gap in the record rather than a silent attribution |
 | **A one-way fingerprint of your provider credential** | only with the local gateway running, and only when the call names a session | **new** — a truncated SHA-256, so OpenBox can tell WHICH registered credential made a call without holding it. Not gated by `content_capture`: it is the account-binding control, and a privacy switch that removed it would let an org opt out of being identified |
 | **Credentials** | **never** | they stay on your machine — in a plaintext file readable by you, see [Where credentials live](#where-credentials-live). The gateway relays yours to the provider byte-for-byte and stores none of it |
@@ -57,7 +57,18 @@ Unlike the turn span, this one is a genuine measurement rather than a synthesize
 carrier, which is why it is the only span here without ADR-0018's `synthesized`
 marker. It is bounded by the same three mechanisms, it exists only while the
 gateway is running, and it records nothing at all for a call that names no
-session. See [ADR-0021](adr/ADR-0021-openbox-local-gateway.md).
+session. Two further limits on it, both deliberate: a body the provider sent
+**compressed is not captured at all** — a marker is stored instead, because
+compressed bytes are opaque to the secret detector and attaching them would satisfy
+every redaction guarantee vacuously — and a call whose transport fails after the
+request was already sent is recorded **with no response and no status**, so a
+suppressed answer still leaves a trace. See
+[ADR-0021](adr/ADR-0021-openbox-local-gateway.md).
+
+**Part of the gateway span is not content-gated.** The observed method, URL (query
+dropped), status and the credential fingerprint ship with `content_capture: false`
+too: they are the account-binding evidence, and a privacy switch that removed them
+would let an org opt out of being identified. Only the headers and bodies are gated.
 
 Neither paragraph is a privacy improvement claim. The first is a narrowing of
 what *could* egress; the second is a widening of what does.
@@ -176,15 +187,21 @@ An org can pin the setting so a developer cannot change it, via the managed conf
 (`deploy/managed/`). `openbox doctor` always reports the effective value and where it
 came from.
 
-> **Redaction at source is not implemented yet.** With capture on, prompt text is
-> sent as-is; the server-side Guardrail redaction layer is not wired. If that matters
-> for your data, run with capture off until it is.
+> **Redaction at source is not implemented yet.** The server-side Guardrail
+> redaction layer is not wired anywhere in this product. Local secret detection is
+> the only control on content in transit, and what it catches is
+> [measured, not assumed](#what-the-scanner-catches--and-the-one-gap). If that
+> matters for your data, run with capture off.
 >
-> Note the asymmetry, because it is real: the assistant's reply, enforced-call
-> bodies, tool input and output, and the refusal reasons ARE scanned locally for
-> secrets before they are sent. The **prompt** is not. Nothing about that changed
-> here — it is the same gap, now standing beside every other content path, all of
-> which do have a control.
+> The asymmetry that used to live here — every content class scanned except the
+> prompt — **is closed on Claude Code.** Prompt text now passes through the same
+> local redactor as the assistant's reply, thinking, tool input and output, the
+> enforced-call bodies and the refusal reasons.
+>
+> **It is not closed on Codex.** That adapter's mapper has no redactor at all — its
+> local redaction covers only the enforce path's file body — and the prompt is the
+> only content class it sends. So a Codex prompt egresses **unscanned even with
+> `secret_detection` on**. Closing it is adapter work.
 
 ## What a model turn sends
 
@@ -372,6 +389,8 @@ Both are readable only by you.
 | `.env` | `~/.openbox/` | **your credentials**, in plaintext, `0600` — see below |
 | `dev.json` | `~/.openbox/` | non-secret coordinates and your posture. No credentials |
 | `approver.json` | `~/.openbox/` | approver config, if you run one. No credentials |
+| `gateway.log` | `~/.openbox/` | the gateway daemon's stdio, with `--gateway` only. Diagnostics — that it started, and its throttled warnings that it is recording nothing. Not a copy of relayed traffic |
+| `gateway-prior-env.json` | `~/.openbox/` | the one `ANTHROPIC_BASE_URL` the gateway install displaced, so `--remove-gateway` can restore your org's own relay instead of deleting it. A URL, no credential |
 
 | File | What it holds |
 |---|---|

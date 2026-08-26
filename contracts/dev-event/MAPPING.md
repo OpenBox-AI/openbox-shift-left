@@ -1,7 +1,7 @@
 # Mapping — normalized dev event → base-SDK unified wire model (openbox-core `/evaluate`)
 
-**Contract:** [`schema/dev-event.schema.json`](schema/dev-event.schema.json) **v1.2** (the tool-agnostic **adapter-facing** shape).
-**Wire model:** the **base SDK's** `EventType` set — `WorkflowStarted / WorkflowCompleted / SignalReceived / ActivityStarted / ActivityCompleted` — serialized by `client/payload.go` (`buildPayload`) onto `POST /api/v1/governance/evaluate` (openbox-core). Every payload is hook-less, and span-less except for the ONE content-gated span a `TurnCompleted` carries (ADR-0018, §2).
+**Contract:** [`schema/dev-event.schema.json`](schema/dev-event.schema.json) — the version is `x-schema-version` in that file, which is the authority; this document tracks it.
+**Wire model:** the **base SDK's** `EventType` set — `WorkflowStarted / WorkflowCompleted / SignalReceived / ActivityStarted / ActivityCompleted` — serialized by `client/payload.go` (`buildPayload`) onto `POST /api/v1/governance/evaluate` (openbox-core). Every payload is hook-less. It is also span-less, with two exceptions and both ride a `TurnCompleted`: the ONE content-gated span of a hook-observed turn (ADR-0018, §2), and the span of a gateway-observed model call (ADR-0021, §3).
 
 > **What changed, read this first.** Two reshapes brought the wire here.
 >
@@ -12,6 +12,8 @@
 > The normalized contract (this schema) was **unchanged** through both — adapters still emit `ToolCall`/`SessionStarted`/…; only the **client→core wire serialization** moved.
 >
 > **[ADR-0018](../../docs/adr/ADR-0018-dev-turn-content-carrier.md)** is v1.2, and it is purely additive: a top-level `status` on tool results (the field core's success metric reads and no producer had ever written — Tool Health showed 0.0% for every session because of it), three failure/lifecycle signal types, and the one turn span above. **Cost, stated plainly:** the assistant's reply text now egresses under content capture, redacted and capped; and to be classified as an LLM call by core's own recompute, that span must carry synthesized `http.*` attributes describing a request the client never made — marked `openbox.span_synthetic:true` and retired by [openbox-core#130](https://github.com/OpenBox-AI/openbox-core/issues/130).
+>
+> **[ADR-0021](../../docs/adr/ADR-0021-openbox-local-gateway.md)** is v1.5, purely additive, and it introduces a **second producer** rather than a second event: a local relay observes the model call itself and emits a `TurnCompleted` alongside the hook path's. Both describe a turn, so the one thing that must never collide is `activity_id` — hence `gateway_request_id` (§1) and its disjoint `:gateway:` namespace. Its span is the first this client sends that is **measured rather than synthesized**, so it carries no `openbox.span_synthetic` marker and its `http_*` fields are observations. **Cost, stated plainly:** the largest content class this contract carries (a whole model request, system prompt included) and the first span fields that ship with content capture OFF — `http_method`, `http_url`, `http_status` and `credential_fingerprint` are structural account-binding evidence, deliberately outside the privacy switch.
 >
 > **[ADR-0014](../../docs/adr/ADR-0014-turn-as-activity-and-identifier-allowlist.md)** is the first change that DID touch this contract, which is why it is v1.1: it adds the model-turn pair (`TurnStarted`/`TurnCompleted`, riding the same two activity wire types with `activity_type: llm_completion`) and the fields it needs (`model`, `turn_index`, `agent_id`), and it **re-defines `tokens.input` as pure input** — v1.0's Claude Code rollup folded both cache counts into it. Everything else is additive; that one semantic is what makes it a version bump rather than a silent edit. **Cost, stated plainly:** the transcript projection's INV-2 guarantee is now a curated allowlist enforced by a test, not a structural impossibility, because the model id is a bound string.
 
@@ -32,6 +34,7 @@ Source-cited to `client/payload.go` (`governanceEventPayload`, the marshaled bod
 | — (constant) | `workflow_type` = `"developer-session"` | **Required** by the base contract on `Workflow*` and `SignalReceived` events (`event_rules.py` `_REQUIRED_WORKFLOW_FIELDS`; core reads it into a dedicated column, `storage_event.go`). The *constant* value keeps a session's whole tree on one `(workflow_id, run_id, workflow_type)` identity so core resolves it to **one** session row. Now present on **tool events too** — the old hook envelope omitted it, diverging from the base SDK's `ActivityContext.to_payload_fields()`; routing tool events through the same struct fixed that at no cost. |
 | — (per signal) | `signal_name` | Set **only** on `SignalReceived` (`prompt_submitted`/`commit_created`/`deploy`/`subagent_started`/`permission_denied`/`api_error`); required there (`event_rules.py` raises `ENVELOPE_MISSING_FIELDS` otherwise). |
 | — (activity events) | `activity_id` | Set on **both** halves of a tool call and of a turn. Pairs them onto one row; for a tool call it is additionally the approval key — see §2 "Operation vs invocation identity" and "The turn pair". |
+| `gateway_request_id` | — (feeds `activity_id` and the span id) | **v1.5, ADR-0021.** A gateway-observed turn's discriminator: the provider's own `Request-Id`, or a locally minted `gw-` id. `turnActivityIDFor` returns from its gateway branch first, so such an event carries no `turn_index` and needs none — the schema requires **exactly one** of the two. Its ONLY job is to keep the two turn producers in disjoint `activity_id` namespaces: they describe the same turn, and a shared namespace would let core's dedupe absorb one as a duplicate of the other, losing half the evidence with no error anywhere. Bounded and charset-checked before it is trusted (`gatewayemit.usableRequestID`) because it originates upstream and reaches a stored key verbatim. |
 | `tool.name` | `activity_type` | The dashboard's "Activity" column. Lifecycle events carry their `event_type` string instead, so the column is never empty. |
 | `tool.*`, `span.*` (started) | `activity_input` | Structural locators only; see §3. Core stores it as the row's `input` and runs Guardrails **stage 0** over it (`internal/services/guardrail.go:180`). |
 | `span.*` (completed) | `activity_output` | Counts and an exit code only; see §3. Core stores it as the row's `output` and runs Guardrails **stage 1** over it (`guardrail.go:192`). |
@@ -48,7 +51,7 @@ Source-cited to `client/payload.go` (`governanceEventPayload`, the marshaled bod
 | `content.tool_output` | `activity_output.output` **only when content-capture enabled**, capped | **v1.3 (ADR-0019 P1).** `ToolResult` only. What the tool produced — or, on a failed call, its own free-text error; `status` says which. Core stores it as the row's `output` and runs Guardrails stage "1" over it. Secret-redacted **before** attachment (conformance C34). |
 | `content.thinking` (turn) | `activity_output.thinking` **only when content-capture enabled**, capped | **v1.4 (ADR-0019 P3).** `TurnCompleted` only. The turn's extended-thinking blocks, concatenated in file order from the transcript window — the only source, since no hook carries thinking and the provider's own OTel export redacts it unconditionally. Deliberately **not** the span in the row above: that span is read as the assistant's REPLY by core's alignment extractor, so chain-of-thought there would score every later turn's drift against the model's reasoning. Secret-redacted **before** attachment, `capBody`-capped, absent with capture off (conformance C40/C41, sentinel `TestFinops_NoContentOnWire`). This is the field that AMENDS ADR-0014's transcript allowlist — the first free-form content string that projection binds. |
 | `content.signal_detail` | `metadata.denial_reason` / `metadata.error_details` **only when content-capture enabled**, capped | **v1.3 (ADR-0019 P1).** Per event type (`signalDetailKeyFor`); dropped on every other type. Deliberately **not** `signal_args` — core reads a `SignalReceived` with non-empty `signal_args` as a NEW USER GOAL (`age.go:112-137`). Conformance C38 asserts both halves. **No reader renders these yet** — the Verify tab reads `signal_args`, which this deliberately avoids — so they are stored-and-queryable rather than displayed. Same posture as `metadata.event_id`. |
-| `span.request_body/response_body` (adapter-facing) | — | **Not an egress channel.** These are fields of the frozen ADAPTER-FACING `span` object, which the serializer does not read: no adapter has ever populated either, and both mappers assert they stay empty (`adapters/claude-code/mapper_test.go:169`, `adapters/codex/mapper_test.go:207`). The wire span's `response_body` in the row above is a different field on a different struct (`client.wireSpan`), built only from `content.output`. |
+| `span.request_body/response_body` (adapter-facing) | `spans[].request_body` / `.response_body`, **gateway only** | **Not an egress channel for any HOOK adapter**, and that is asserted rather than assumed: neither mapper populates either and both pin them empty (`adapters/claude-code/mapper_test.go:169`, `adapters/codex/mapper_test.go:207`). **v1.5 opened it for exactly one producer**: `gatewayObservedSpan` reads both off this same adapter-facing object when the event carries a `gateway_request_id`, because a relay observes a real request and response. Content-gated (`stripContent` clears them) and `capBody`-capped. The assistant turn span's `response_body` in the row above is yet another path — same wire field, built from `content.output` instead. |
 
 `schema_version` and `event_id` are contract/idempotency fields — `event_id` is the client's idempotency key (INV-5), used client-side for dedupe; neither is a core payload field.
 
@@ -301,7 +304,18 @@ into `activity_input`/`activity_output` instead of serializing it as a span.
 | `span.semantic_type` | — | — | the client has never sent this field; the wire span's own `semantic_type` is built independently and is recomputed by core anyway (§2) |
 | `span.stage` | — | — | **retained, read by nothing.** Kept deliberately: the adapter contract is frozen, adapters still set it, and a future span-bearing shape would need it back without an adapter change. (The wire span's `stage` is a separate, hard-coded `"completed"` — it does not come from here) |
 | `span.module` | — | — | never had a wire home |
-| `span.request_body`, `span.response_body` | — | — | **dropped as an egress channel** (§1). Measured, not assumed: no adapter has ever set either |
+| `span.request_body`, `span.response_body` | `spans[].request_body` / `.response_body` | completed | **Dropped for every producer except one.** No hook adapter sets either, and none may — that is what §1's "span-less" means. The GATEWAY sets both (v1.5, ADR-0021): they are the observed model request and response, content-gated by `stripContent`, `capBody`-capped. The assistant turn span (ADR-0018) also writes `response_body`, with the reply text |
+
+**Gateway-only span fields** (v1.5, [ADR-0021](../../docs/adr/ADR-0021-openbox-local-gateway.md)). All `omitempty` and declared last on `wireSpan`, so the assistant turn span's bytes — and its golden fixture — are untouched. `gatewayObservedSpan` is the only producer; a hook event carries none of them.
+
+| `DevEvent` field | Wire home | Gated | Notes |
+|---|---|---|---|
+| `span.request_headers` | `spans[].request_headers` | **yes** | Credential headers are already replaced by KEY NAME at capture, before the gate is consulted; the key survives so an authenticated call stays distinguishable from an anonymous one. Bounded per value and per map (`capHeaders`) because an upstream header block is bounded only by the Transport's 10 MiB default, and an oversized event is rejected whole |
+| `span.response_headers` | `spans[].response_headers` | **yes** | same treatment |
+| `span.http_method` | `spans[].http_method` | no | structural. Core RECOMPUTES `semantic_type` per span and `isLLMCall` is the only path to `llm_completion`, reading this plus an LLM domain in the URL — so a span missing the pair still stores, classifies as something else, and every `llm_completion` reader goes quiet with no error |
+| `span.http_url` | `spans[].http_url` | no | structural, **query dropped** — so a provider that ever accepted content or a token as a query parameter cannot turn this ungated field into a content leak |
+| `span.http_status` | `spans[].**http_status_code**` | no | structural. The rename is load-bearing: core's `SpanData` spells it `http_status_code` and `encoding/json` drops an unrecognized key silently, so the short spelling reached core's parser and vanished before policy or storage saw it. Absent (`omitempty`) when no response was observed at all — a relayed call whose transport failed after the request went out |
+| `span.credential_fingerprint` | `spans[].credential_fingerprint` **and** `spans[].attributes["openbox.credential_fingerprint"]` | no | Both, deliberately. Core has no field for the top-level key so it is dropped on ingest today; `attributes` is a real `SpanData` field that survives and is stored, so it is the copy account binding can match on. Ungated because a privacy switch must not let an org opt out of being identified |
 
 Retired with the span layer: `parent_span_id`, `hook_type`, `duration_ns`,
 `events`, the family root tuples (`file_mode`, `shell_command`,
@@ -501,6 +515,34 @@ The suite's assertions are in place (`testbed/20-capture.sh`, `25-realtime.sh`,
 24. **Volume, measured not assumed.** Thinking at ≤64KB per turn through the
     realtime flusher is the same open question phase 01 left for tool bodies —
     record bytes/session, not just presence.
+
+### Additionally, for ADR-0021 (the gateway span)
+
+Driven by `testbed/45-gateway.sh`, which is written and has never run.
+
+25. **A gateway span is stored as its own `spans` row**, with the observed
+    `http_method` / `http_url` / `http_status_code`. The rename matters more than
+    presence: the short spelling `http_status` was silently dropped by core's
+    decoder, so assert the value arrived, not that the client sent it.
+26. **`attributes["openbox.credential_fingerprint"]` survives ingest.** It is the
+    only copy account binding can match on — core has no top-level field, so that
+    key is dropped. If the attribute does not survive either, ADR-0021 §6 has no
+    evidence to decide on and the account rule cannot fire.
+27. **The two producers' `activity_id`s are disjoint** on one session that has both.
+    A collision means core's dedupe absorbed one turn as a duplicate of the other
+    and half the evidence is gone with no error — case 45.B asserts the intersection
+    is empty.
+28. **`semantic_type` recomputes to `llm_completion`.** Core recomputes it per span
+    and `isLLMCall` reads method + URL; if it classifies as anything else, every
+    reader that filters on `llm_completion` goes quiet with no error anywhere.
+29. **A capture-off gateway span still STORES**, carrying only its structural
+    fields. The outbound bytes are already pinned both ways
+    (`TestGatewaySpanContentGatedOffTheWire`); what a live run adds is whether core
+    keeps a span row whose bodies and header maps are absent, since this is the one
+    span where the gate removes some fields and deliberately keeps others.
+30. **Volume.** A full model request and response is a larger increment than
+    thinking or tool bodies — record bytes/session at tool-call cadence before any
+    cap is widened.
 
 _When the run happens, record the artifact under
 `plans/260811-0245-tool-activity-event-shape/reports/` (ADR-0013 claims) and

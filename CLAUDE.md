@@ -55,7 +55,8 @@ reintroduce that: if something is provider-agnostic it goes in `hookflow` or
 | `adapters/claude-code/`, `adapters/codex/` | one thin adapter each |
 | `client/` | core client: payload, AIP signing, verdicts |
 | `decision/` | local secret detection + redaction — all that survives ADR-0017 |
-| `cli/` | the `openbox` CLI, incl. `cli/internal/approver` (ADR-0012) and `cli/internal/prompt` (masked input) |
+| `gateway/` | the local model-call relay: byte-identical forward, capture, the gate (ADR-0021) |
+| `cli/` | the `openbox` CLI, incl. `cli/internal/approver` (ADR-0012), `cli/internal/prompt` (masked input) and the gateway's install/inspect/emit halves (`gatewayservice`, `gatewaycheck`, `gatewayemit`) |
 | `actions/openbox-git-action/` | commit→deploy lineage for CI |
 | `contracts/dev-event/` | event schema, wire mapping, conformance |
 | `testbed/` | the mock-free end-to-end suite (`docs/testbed/e2e.md`) |
@@ -302,9 +303,11 @@ at most the first 64KB of any body, local secret detection is keyword-driven so 
 unlabelled high-entropy value is invisible to it, Codex's hook
 cannot be mandated by `requirements.toml`, Guardrail redaction at source is not
 wired, the production-runtime lineage hop is not joined, Codex reports usage per
-session rather than per turn, reports no tool success at all and captures neither
-tool content nor thinking (so the two providers send different amounts of content
-under one posture — stated in `COVERAGE.md` §3 rather than averaged away), goal
+session rather than per turn, reports no tool success at all, captures neither
+tool content nor thinking and redacts nothing it sends (so the two providers differ
+in both the amount of content AND whether it is scanned — stated in `COVERAGE.md` §3
+rather than averaged away), model calls are unobserved unless the opt-in gateway is
+installed and are not refused even then, goal
 alignment
 additionally requires `finops` ∧ `content_capture` (both default-ON, a user
 constraint) plus a reachable LlamaFirewall and Redis — without those the widgets
@@ -533,6 +536,116 @@ stores `activity_output.thinking` as its own key, that the sibling key does not
 perturb `ExtractModelMetricsFromActivity`, and the volume question. A pre-existing
 FALSE claim in `README.md` left over from ADR-0019 P1 ("tool commands and file
 bodies are never sent on ordinary telemetry") was corrected in the same change.
+
+**The local model-call gateway** (ADR-0021, contract **v1.5**, 2026-08-25/26): a
+per-developer loopback daemon that Claude Code is pointed at via
+`ANTHROPIC_BASE_URL`, relays every model call byte-identically, and captures the
+exchange as a `TurnCompleted` carrying a real observed span. `openbox init --provider
+claude-code --gateway` installs it; `--remove-gateway` backs it out. **Capture is
+live; refusal is written and uncalled** — `gate.Decide`/`WriteRefusal` have no
+production caller because probe A has not named a refusal shape, and a wrong one
+silently disables a Claude Code capability for the rest of the session. Ten things
+worth not re-litigating:
+
+- **Opt-in, and Claude Code only.** ADR-0016's default-on lesson does NOT transfer:
+  enforcement-by-default is inert without an org policy, this redirects live model
+  traffic through a path that has never run against a real stack. And
+  `--provider codex --gateway` used to install an Anthropic relay and point
+  `~/.claude/settings.json` at it on a machine that reads neither.
+- **Install ordering is a safety property, and so is rollback.** unit → start →
+  PROVE it listens → only THEN write the env var; uninstall reverses it. Writing the
+  var first points the tool at a dead port, and a dead localhost fails closed, so
+  every model call on the machine fails while `init` prints success. Any failure
+  after `WriteUnit` must ALSO remove the unit: `KeepAlive`/`Restart=always` would
+  restart-loop a gateway the developer was never told about, `main.go` downgrades the
+  error to a warning so `init` still exits 0, and the port pre-check then blocked the
+  "re-run init" the error recommends.
+- **`--remove-gateway` runs BEFORE the credential gate.** Removal must not require
+  the thing being removed to still be usable — a wiped `~/.openbox` otherwise left
+  every model call failing against a dead port with no CLI fix.
+- **The span's `http_*` keys and the fingerprint's DUAL home are load-bearing.** Core
+  recomputes `semantic_type` and `isLLMCall` is the only path to `llm_completion`;
+  deleting the keys does not error, the span just classifies as something else and
+  every reader goes quiet. `http_status` must serialize as **`http_status_code`** —
+  core's `SpanData` spells it that way and `encoding/json` drops an unrecognized key
+  silently, so the short spelling vanished before policy or storage saw it while
+  every golden fixture stayed green (*asserting the outbound bytes is not asserting
+  the receiving type*). The fingerprint rides `attributes["openbox.credential_fingerprint"]`
+  because core has no field for the top-level key.
+- **There is no `fail_closed` input to the gate at all, and that absence IS §7.** A
+  posture key there would be a switch to turn the gateway's enforcement off. An
+  uninterpretable verdict REFUSES — ADR-0020's Codex trap in a new place.
+- **`Decision.Evaluated` makes "no synthesized refusal before an evaluation attempt"
+  checkable.** The pre-ADR-0017 `ApplyFailurePolicy` bug, worse here: refusal on a
+  missing verdict is unconditional, so the mistake turns every control-plane blip
+  into a total model-call outage reported as a policy decision no policy made. The
+  10s evaluate deadline is part of it — "never answers" is not "unreachable", and
+  only a deadline converts the first into the second. A cancelled CALLER is a third
+  case (`reasonCallerGone`): every Esc otherwise wrote a durable record blaming the
+  control plane.
+- **The two turn producers must never share an `activity_id`.** Both describe the
+  same turn; core's dedupe would absorb one as a duplicate and half the evidence
+  would vanish with no error. Hence `gateway_request_id` and the disjoint `:gateway:`
+  namespace, and hence the schema's `oneOf` requiring exactly one discriminator.
+  Also: the gateway span carries the provider's RAW response body, not the shape
+  core's alignment extractor parses, so a gateway-observed turn contributes nothing
+  to goal alignment — a silent gap, not corruption.
+- **A displaced `ANTHROPIC_BASE_URL` is REMEMBERED, first-writer-wins.**
+  Key-ownership was the stated rule and it missed the case where the key is ours and
+  the value is theirs: an org's own LiteLLM/Bedrock relay was overwritten on install
+  and deleted on uninstall, after which `doctor` reported "not set", which reads as
+  clean rather than as damage.
+- **A content-encoded body is NOT captured.** The client's own `Accept-Encoding` is
+  relayed verbatim, so an upstream may answer gzip; those bytes matched nothing in
+  the detector, `utf8.ValidString` was false and `json.Marshal` rewrote every byte to
+  U+FFFD — every redaction guarantee held vacuously and the evidence was destroyed
+  anyway. A marker, not decompression: decompressing an upstream body on an
+  unauthenticated loopback listener is a bomb surface.
+- **launchd sends stdio to `/dev/null` by default**, and the emitter's throttled
+  warnings are the ONLY signal that a perfectly working relay is recording nothing
+  (no DID, or no session header). `doctor` reports alive/configured/bypass and never
+  "is it recording". Hence `StandardOutPath`/`StandardErrorPath` →
+  `~/.openbox/gateway.log`.
+
+**How capture came to be absent for as long as it was, because the shape recurs:**
+`WithCapture` had no production caller, so `g.emitter` was nil and every capture was
+discarded — while package `gateway` tested the relay against a stub `Emitter` and
+package `client` tested the span builder against a hand-written `DevEvent`. **A fake
+at each end of a seam with no implementation between them keeps both suites green and
+proves nothing about the seam.** `cli/cmd/openbox/gatewaycapture_test.go` is the
+control: it drives the real command into the real spool with no fake anywhere.
+
+**Status: implemented, unit- and conformance-verified, green under `-race` plus both
+cross-compiles — the testbed has NOT run.** `testbed/45-gateway.sh` is written and
+dormant; `MAPPING.md` §7 items 25–30 list what a live run must confirm. ADR-0021
+stays **DRAFT** deliberately: §§8–10 are empirical questions about a provider we do
+not control (does subscription OAuth follow `ANTHROPIC_BASE_URL`; what refusal shape
+Claude Code does not retry around; is an org matchable from an OAuth credential), and
+filling one in by inference is the overstatement this product exists to prevent.
+
+**Bounds have owners, and reusing one is a silent regression** (2026-08-26, the fix
+series around the gateway). Four of these shipped together and the pattern is one
+pattern:
+
+- **`MaxCommandLen` (8 KiB) is LOCAL-only** — its own doc says it bounds the
+  `DecisionRequest` command and is never egressed. It was reused as the egress bound
+  for `content.tool_input`, so a 40 KB source file egressed as 8 KiB while
+  `data-and-privacy.md` and this file both said 64KB, and core's Guardrails stage 0
+  and every approver saw only that. Egress bounds are `MaxRedactBody` (scan) then
+  `capBody` (wire).
+- **The prompt was the ONE content field assigned directly** instead of through
+  `m.redact`, so it egressed unscanned with `secret_detection` fully ON while
+  `Map`'s own doc comment and `README` both described the opposite. **The Codex
+  mapper still has no redactor at all** and the prompt is the only content it sends —
+  documented in `COVERAGE.md` §3.4 rather than smoothed over.
+- **A cap must be tested in the unit it claims.** `capHeaders` tested bytes and cut
+  runes, so a CJK value between the two entered the branch and declined to truncate:
+  4 bytes × 4096 runes = 16 KiB per value, ~1 MiB per map, exactly the loss the bound
+  exists to prevent.
+- **`contentMetadataKeys` is a backstop that must list every content key.**
+  `arguments` (the MCP class's own key, sibling of two that were listed) and
+  `thinking` were missing, so an adapter writing either straight into metadata routed
+  around the gate.
 
 Next: the Cursor adapter; policy template packs. The one dependency this repo now
 has is `golang.org/x/term v0.34.0`, **pinned** — v0.35.0+ declares `go 1.24.0` and

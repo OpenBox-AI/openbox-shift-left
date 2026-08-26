@@ -87,10 +87,21 @@ On macOS `<os-config-dir>` is `~/Library/Application Support`; on Linux,
 
 ## What did not change
 
-Telemetry is still spooled and asynchronous — the observe path is untouched, and it
-still carries no tool commands or file bodies. Approvals, lineage, commit
-attestation and usage capture are unchanged. There is still no daemon and no socket:
-a bounded outbound call from a hook is not a resident process.
+Telemetry is still spooled and asynchronous — the observe path is untouched by *this*
+change. Approvals, lineage, commit attestation and usage capture are unchanged. The
+hook path adds no daemon and no socket: a bounded outbound call from a hook is not a
+resident process.
+
+Two of those sentences have since been overtaken, and they are called out here because
+this page is where an upgrading reader looks:
+
+- the observe path **does** now carry tool commands, file bodies and tool output
+  ([ADR-0019](adr/ADR-0019-full-content-capture.md) P1), so "no bodies on observe
+  events" stopped being true in August 2026;
+- there **is** now an optional daemon — the model-call gateway
+  ([ADR-0021](adr/ADR-0021-openbox-local-gateway.md)). It is opt-in per machine
+  (`openbox init --provider claude-code --gateway`), so an existing install acquires
+  it only by asking for it.
 
 One approval behaviour did shift: a `REQUIRE_APPROVAL` verdict is now always a
 *filed* record, so the hook holds briefly for a real decision instead of falling

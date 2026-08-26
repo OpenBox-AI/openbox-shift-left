@@ -35,9 +35,12 @@ Two paths, deliberately separate:
 - **A gated tool call waits for OpenBox to decide it.** Every gated PreToolUse call
   is evaluated by `/evaluate` before the tool runs
   ([ADR-0017](adr/ADR-0017-inline-policy-evaluation.md)). One policy
-  implementation, on the server. There is still no daemon and no socket
+  implementation, on the server. This path has no daemon and no socket
   ([ADR-0006](adr/ADR-0006-in-process-decider.md) is untouched — a bounded outbound
-  call is not a resident process).
+  call is not a resident process). The model-call gateway
+  ([ADR-0021](adr/ADR-0021-openbox-local-gateway.md)) is a resident process, and it
+  is a third path rather than a change to this one: opt-in, per machine, and
+  reaching a surface no hook can see.
 
   This is the trade the ADR argues: enforcement now depends on reaching the control
   plane, and under the default `fail_closed:false` a gated call PROCEEDS when it
@@ -206,6 +209,18 @@ Being precise here is part of the product.
   - **Whether subscription-OAuth traffic even follows `ANTHROPIC_BASE_URL` is
     unresolved** (ADR-0021 §8). If it does not, this covers API-key/console orgs
     only. Nobody has measured it, and this document will not guess.
+  - **A compressed body is recorded as a marker, not as content.** The client's own
+    `Accept-Encoding` is relayed verbatim, so a provider may legitimately answer
+    `gzip` — and compressed bytes are opaque to the secret detector, which would
+    attach an unredacted, unreadable body while every redaction guarantee held
+    vacuously. So such a body is not captured at all. The honest limit is preferred to
+    decompressing an upstream-controlled body on an unauthenticated loopback listener.
+  - **A relayed call that never gets a response still leaves a record.** The request
+    body reaches the provider before the transport reports failure, so a caller that
+    hangs up mid-POST has already sent its prompt. That case emits a span with no
+    status rather than nothing — otherwise any local process could suppress its own
+    record by not waiting for the answer, and the bypass-detection argument above
+    rests on a bypass leaving a hole rather than leaving no trace.
   - **Anything that can reach loopback can call the gateway, including a web page.**
     The daemon performs no caller authentication; ADR-0021 names the loopback bind
     as the caller boundary, and for *relaying* that is defensible — a caller
@@ -292,10 +307,14 @@ Being precise here is part of the product.
   Codex is user-scoped either way. `printGovernedScope` names the governed
   directory at install time so the gap is visible at the moment it is created
   rather than discovered from an empty dashboard.
-- **Egress.** OpenBox chooses where *its own* telemetry goes. It does not proxy,
-  intercept or allow-list the coding tool's traffic to its model provider — that is
-  the provider's plane plus your network controls. OpenBox records that posture as
-  evidence.
+- **Egress.** OpenBox chooses where *its own* telemetry goes. Without the gateway it
+  does not proxy, intercept or allow-list the coding tool's traffic to its model
+  provider — that is the provider's plane plus your network controls, and OpenBox
+  records that posture as evidence. With the gateway
+  ([ADR-0021](adr/ADR-0021-openbox-local-gateway.md)) it carries and records the
+  model call, but it still allow-lists nothing and still refuses nothing: the
+  refusal path is unwired. Everything else the tool talks to is untouched either
+  way.
 - **Policy integrity is no longer a client-side claim.** There is no local bundle to
   sign, hash or verify ([ADR-0017](adr/ADR-0017-inline-policy-evaluation.md)), so
   the client makes no integrity claim about policy at all — the control plane holds
@@ -324,7 +343,19 @@ Being precise here is part of the product.
   that is the only input core's classifier accepts, and every such span carries
   `openbox.span_synthetic: true` so an auditor can tell — and it is a stopgap,
   retired by [openbox-core#130](https://github.com/OpenBox-AI/openbox-core/issues/130).
-  With `content_capture: false` there are no span rows at all.
+  With `content_capture: false` the hook path writes no span rows at all.
+
+  **The gateway is a second span producer, and it behaves differently in both
+  respects** ([ADR-0021](adr/ADR-0021-openbox-local-gateway.md)). Its span describes a
+  real observed HTTP exchange, so nothing about it is synthesized — and part of it
+  ships with capture **off**: the method, URL, status and credential fingerprint are
+  structural evidence for account binding, so a privacy switch does not remove them.
+  Only the headers and bodies are gated. The two producers ride mutually exclusive
+  events and their activity ids are in disjoint namespaces, so neither absorbs the
+  other in core's dedupe. One consequence is a silent gap rather than an error:
+  a gateway span carries the provider's **raw** response body, which is not the shape
+  core's alignment extractor parses, so a gateway-observed turn contributes nothing to
+  goal alignment. Alignment for those turns comes from the hook path or not at all.
 - **Token usage is stored, aggregated and queryable.** Per-turn model + usage is
   emitted as an `llm_completion` activity pair
   ([ADR-0014](adr/ADR-0014-turn-as-activity-and-identifier-allowlist.md)), and the
