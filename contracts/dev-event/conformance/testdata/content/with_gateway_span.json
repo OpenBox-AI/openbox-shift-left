@@ -1,0 +1,22 @@
+{
+  "schema_version": "1.5",
+  "event_id": "gw-9f2c1d7a4b6e8f0a1c3d5e7f9a0b2c4d",
+  "event_type": "TurnCompleted",
+  "openbox_session_id": "3f1c9a6e-4b2d-4c8a-9e10-7d5b2a8c4f61",
+  "developer_did": "did:aip:dev-1",
+  "timestamp": "2026-08-26T09:00:00Z",
+  "tool": { "name": "claude-code", "kind": "shell" },
+  "gateway_request_id": "req_011CSabc",
+  "span": {
+    "semantic_type": "llm_completion",
+    "stage": "completed",
+    "http_method": "POST",
+    "http_url": "https://api.anthropic.com/v1/messages",
+    "http_status": 200,
+    "credential_fingerprint": "9a1f4c7e2b8d0a35",
+    "request_headers": { "X-Api-Key": "[redacted]", "Anthropic-Version": "2023-06-01" },
+    "response_headers": { "Request-Id": "req_011CSabc" },
+    "request_body": "{\"model\":\"claude-opus-4-8\"}",
+    "response_body": "{\"type\":\"message\"}"
+  }
+}

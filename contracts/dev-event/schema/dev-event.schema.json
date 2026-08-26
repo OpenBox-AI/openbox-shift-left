@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://openbox.ai/schemas/dev-event/1.4/dev-event.schema.json",
+  "$id": "https://openbox.ai/schemas/dev-event/1.5/dev-event.schema.json",
   "title": "OpenBox Developer-Runtime Normalized Event",
   "description": "Tool-agnostic, versioned ADAPTER-FACING event contract for developer-runtime coding tools (Claude Code, Codex, Cursor). Every provider adapter maps its native payload onto this shape (SPI emit()). The OpenBox client then RE-EXPRESSES it onto the base SDK's unified wire model — WorkflowStarted/WorkflowCompleted/SignalReceived/ActivityStarted+hook_trigger — on POST /api/v1/governance/evaluate (see MAPPING.md; ADR-0004). This is NOT a verbatim event_type pass-through: the SL-1 EXT-core accept-list is retired (E7-S2). Adding a provider never changes this contract or the wire model (PRD FR-4, architecture §1b). Verified against openbox-core internal/content/{governance,session}.go and the base contract openbox-sdk-python/openbox_core/contracts/events.py (spikes S6, S8/E7-S0).",
   "x-schema-version": "1.5",
@@ -96,6 +96,10 @@
       "description": "Outcome of a tool call (v1.2, ADR-0018 Decision 1). Set on ToolResult ONLY — the client drops it on every other event type, because core copies payload.status into the row's workflow_status column for ANY event type (activities/governance/storage_event.go:417) and a lifecycle event's workflow_status means something else. This scope cannot be expressed in the subset of JSON Schema the conformance validator implements, so it is enforced by client.statusFor and asserted on the outbound bytes by conformance case C20. Structural, NOT content (INV-2): derived from which provider hook fired, or from a bound bool/int — never parsed from tool output — so it is not content-gated and ships identically with content_capture off. Core reads the literal 'completed' and nothing else (observability/errors.go:333), which is why the enum is closed rather than free-form.",
       "enum": ["completed", "failed"]
     },
+    "gateway_request_id": {
+      "description": "The LOCAL GATEWAY's id for one relayed model call (v1.5, ADR-0021): the provider's own Request-Id when it sent one, otherwise a locally minted `gw-` id. Its ONLY job is to put a gateway turn's activity_id in a namespace disjoint from the hook path's `<session>:turn:<n>` — both producers describe the same turn, so a shared namespace would let core's dedupe absorb one as a duplicate of the other and half the evidence would vanish with no error anywhere. Structural identifier (INV-2), bounded and charset-checked before it is trusted (gatewayemit.usableRequestID) because it originates upstream and reaches a stored key verbatim.",
+      "type": "string"
+    },
     "metadata": {
       "description": "Additive per-type key/values. Lands verbatim in core payload's `metadata` (json.RawMessage). Never carries credentials/secrets (INV-1) or raw content (INV-2 — content lives only under `content`).",
       "type": "object"
@@ -173,9 +177,21 @@
     },
     {
       "title": "TurnCompleted",
-      "description": "Closes one model turn and carries what it spent: tokens (all four counts the provider reports) and the model that spent them. Both are optional — a turn the projection could not measure is still a real turn, and zero-filling would claim it spent nothing.",
-      "required": ["event_type", "turn_index"],
-      "properties": { "event_type": { "const": "TurnCompleted" } }
+      "description": "Closes one model turn and carries what it spent: tokens (all four counts the provider reports) and the model that spent them. Both are optional — a turn the projection could not measure is still a real turn, and zero-filling would claim it spent nothing. EXACTLY ONE activity-id discriminator is required, and the nested oneOf is what enforces it: a HOOK turn is identified by turn_index, a GATEWAY-observed model call by gateway_request_id (v1.5, ADR-0021). Requiring turn_index unconditionally made every gateway event fail its own contract while the version marker claimed to carry them. Requiring exactly one also states the property client/payload.go depends on — the two producers describe the same turn and must never ride one event, or core dedupe absorbs one as a duplicate of the other.",
+      "required": ["event_type"],
+      "properties": { "event_type": { "const": "TurnCompleted" } },
+      "oneOf": [
+        {
+          "title": "hook-observed turn",
+          "description": "The client derives the pair's activity_id from turn_index; without it the started/completed pair cannot correlate.",
+          "required": ["turn_index"]
+        },
+        {
+          "title": "gateway-observed model call",
+          "description": "turnActivityIDFor returns from its gateway branch before it ever reaches the turn_index branch, so a relayed call carries no index and needs none.",
+          "required": ["gateway_request_id"]
+        }
+      ]
     },
     {
       "title": "SubagentStarted",
@@ -305,6 +321,33 @@
           "description": "Tool output content. GATED (INV-2); capped to 65536 chars before egress (capBody, G_SEC SEC-1). Maps to core SpanData.response_body.",
           "type": "string",
           "x-content-gated": true
+        },
+        "request_headers": {
+          "description": "The request headers of a gateway-observed model call (v1.5, ADR-0021). GATED (INV-2) and the highest-risk content class this client carries, because the developer's live provider credential is on every model request — so capture replaces credential values BY KEY NAME before the gate is even consulted, keeping the key (that a call was authenticated is governance-relevant) and dropping the value. Bounded per value and per map before egress (capHeaders).",
+          "type": "object",
+          "x-content-gated": true
+        },
+        "response_headers": {
+          "description": "The response headers of a gateway-observed model call (v1.5, ADR-0021). GATED (INV-2), redacted by key name and bounded exactly like request_headers — an upstream header block is bounded only by the Transport's MaxResponseHeaderBytes (10 MiB by default), so an unbounded map here would make core reject the whole event and lose the evidence.",
+          "type": "object",
+          "x-content-gated": true
+        },
+        "http_method": {
+          "description": "The observed HTTP method of a gateway-relayed model call (v1.5, ADR-0021). NOT decorative: core recomputes semantic_type per span before storage and isLLMCall is the only path to llm_completion, reading this plus an LLM domain in http_url. A gateway span without the pair still stores — it just classifies as something else, and every reader that filters on llm_completion goes quiet with no error anywhere. Structural (INV-2), so it ships with content capture off.",
+          "type": "string"
+        },
+        "http_url": {
+          "description": "The observed destination of a gateway-relayed model call (v1.5, ADR-0021): scheme, host and path, with the QUERY DROPPED so a provider that ever accepts content or a token as a query parameter cannot turn this structural field into an ungated content leak. Paired with http_method for core's isLLMCall. Structural (INV-2).",
+          "type": "string"
+        },
+        "http_status": {
+          "description": "The observed response status of a gateway-relayed model call (v1.5, ADR-0021). Structural (INV-2). Spelled `http_status` on this adapter-facing contract and `http_status_code` on the wire, deliberately: core's SpanData uses the longer name and encoding/json DROPS an unrecognized key silently on Unmarshal, so the shorter spelling reached core's parser and vanished before either policy evaluation or storage saw it.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "credential_fingerprint": {
+          "description": "A one-way digest of the provider credential that made a gateway-relayed model call (v1.5, ADR-0021), for account binding. NOT content-gated, deliberately: it is derived evidence for a governance control, and letting a privacy setting remove it would let an org opt out of being identified. What is asserted instead is that the raw credential is absent while this is present. It also rides attributes[\"openbox.credential_fingerprint\"] on the wire, because core has no first-class field for it and an unrecognized top-level key is dropped on ingest.",
+          "type": "string"
         }
       }
     },

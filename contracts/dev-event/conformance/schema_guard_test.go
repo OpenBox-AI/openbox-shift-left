@@ -2,7 +2,9 @@ package conformance
 
 import (
 	"fmt"
+	"regexp"
 	"sort"
+	"strings"
 	"testing"
 )
 
@@ -153,5 +155,119 @@ func assertSameSet(t *testing.T, aName string, a []string, bName string, b []str
 	}
 	if len(onlyB) > 0 {
 		t.Errorf("in %s but not %s: %v", bName, aName, onlyB)
+	}
+}
+
+// TestSchemaVersionMarkersAgree pins the three places the schema states its own
+// version to each other.
+//
+// It exists because they disagreed: the file declared `x-schema-version: 1.5`
+// and `schema_version.const: 1.5` while `$id` still named 1.4, and the 1.5
+// changelog entry described seven fields that were never added to `properties`.
+// With both objects `additionalProperties: false`, that made every event the
+// version claimed to support fail its own contract — and nothing noticed,
+// because no fixture carried one.
+//
+// The changelog check is the load-bearing half: a bump whose entry names a field
+// the schema does not declare is exactly the state this file shipped in, and it
+// is not catchable by validating the fixtures that already exist.
+func TestSchemaVersionMarkersAgree(t *testing.T) {
+	schema, err := LoadSchema()
+	if err != nil {
+		t.Fatalf("load schema: %v", err)
+	}
+
+	version, _ := schema["x-schema-version"].(string)
+	if version == "" {
+		t.Fatal("schema declares no x-schema-version")
+	}
+
+	id, _ := schema["$id"].(string)
+	if !strings.Contains(id, "/"+version+"/") {
+		t.Errorf("$id %q does not name the declared version %q — a consumer resolving the id gets a different contract than the one it validated against", id, version)
+	}
+
+	props, _ := schema["properties"].(map[string]any)
+	sv, _ := props["schema_version"].(map[string]any)
+	if got, _ := sv["const"].(string); got != version {
+		t.Errorf("schema_version const is %q but x-schema-version is %q", got, version)
+	}
+
+	changelog, _ := schema["x-changelog"].(map[string]any)
+	if _, ok := changelog[version]; !ok {
+		t.Errorf("no x-changelog entry for the declared version %q", version)
+	}
+
+	// Every backtick-quoted `span.<field>` / bare `<field>` the current entry
+	// claims must actually be declared. Scoped to the current version's entry:
+	// older entries describe fields that may since have been removed.
+	entry, _ := changelog[version].(string)
+	declared := declaredNames(schema)
+	for _, claimed := range backquoted(entry) {
+		name := strings.TrimPrefix(claimed, "span.")
+		// Field names in this contract are lower_snake_case, so anything else in
+		// backticks is prose: a glob (`http_*`), a Go symbol (`isLLMCall`), an id
+		// template (`<session>:turn:<n>`), a nested path, or a value literal.
+		// Checking those would make the assertion unmaintainable rather than
+		// stricter.
+		if !fieldNamePattern.MatchString(name) {
+			continue
+		}
+		if !declared[name] {
+			t.Errorf("the %s changelog claims field %q, which is not declared in properties — an event carrying it is rejected by additionalProperties:false", version, claimed)
+		}
+	}
+}
+
+// fieldNamePattern is the shape a property name has in this contract. Anything
+// else inside backticks in the changelog is prose.
+var fieldNamePattern = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
+
+// declaredNames collects every property name the schema declares, at the top
+// level and inside $defs, so a claim naming either is checkable.
+func declaredNames(schema map[string]any) map[string]bool {
+	out := map[string]bool{}
+	var walk func(any)
+	walk = func(n any) {
+		m, ok := n.(map[string]any)
+		if !ok {
+			return
+		}
+		if props, ok := m["properties"].(map[string]any); ok {
+			for name, sub := range props {
+				out[name] = true
+				walk(sub)
+			}
+		}
+		for _, key := range []string{"$defs", "items"} {
+			if sub, ok := m[key]; ok {
+				if defs, ok := sub.(map[string]any); ok {
+					for _, d := range defs {
+						walk(d)
+					}
+				}
+				walk(sub)
+			}
+		}
+	}
+	walk(schema)
+	return out
+}
+
+// backquoted returns the `…` spans in s — how the changelog names fields.
+func backquoted(s string) []string {
+	var out []string
+	for {
+		i := strings.Index(s, "`")
+		if i < 0 {
+			return out
+		}
+		s = s[i+1:]
+		j := strings.Index(s, "`")
+		if j < 0 {
+			return out
+		}
+		out = append(out, s[:j])
+		s = s[j+1:]
 	}
 }
