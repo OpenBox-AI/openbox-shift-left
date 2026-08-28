@@ -181,6 +181,18 @@ func (p *Proxy) onConnect(host string, ctx *goproxy.ProxyCtx) (*goproxy.ConnectA
 	}, host
 }
 
+// ServeIntercepted terminates TLS on an already-accepted CONNECT and serves the
+// relay over it. It CLOSES the connection when it returns.
+//
+// Exported because the lane's control test lives in the CLI — package transport
+// cannot import the spool or the emitter without breaking its own dependency
+// guard — and that test has to drive the real path rather than a reconstruction
+// of it. This is the unit of work the hijack callback performs, so exporting it
+// exposes no seam that production does not already take.
+func (p *Proxy) ServeIntercepted(client net.Conn, host string) error {
+	return p.interceptConn(client, host)
+}
+
 // interceptConn terminates TLS on a hijacked CONNECT and serves the relay over it.
 //
 // goproxy writes NO response for ConnectHijack (https.go, the ConnectHijack
@@ -277,9 +289,13 @@ func (p *Proxy) relayFor(host string) (http.Handler, error) {
 // relay is reached only over a connection that already passed through the
 // allowlist, so the field is satisfied rather than used. Port 0 says so.
 func (p *Proxy) newRelay(host string) (http.Handler, error) {
+	upstream := p.cfg.Upstream
+	if upstream == "" {
+		upstream = UpstreamFor(host)
+	}
 	g, err := gateway.New(gateway.Config{
 		Addr:     "127.0.0.1:0",
-		Upstream: UpstreamFor(host),
+		Upstream: upstream,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("transport: build relay for %s: %w", host, err)

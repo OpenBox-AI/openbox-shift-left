@@ -42,6 +42,19 @@ type Config struct {
 	// blind-tunnelled. Empty means the default single host; an explicitly
 	// configured set is kept as-is and never widened by Validate.
 	Allowlist Allowlist
+
+	// Upstream overrides where an intercepted request is forwarded. EMPTY is the
+	// production value and means "derive it from the CONNECT host" (UpstreamFor),
+	// which is the only correct rule for a relay that must not retarget a call.
+	//
+	// It is here for the same reason gateway.Config.Upstream is — address
+	// configurability without a code change — and its only caller today is the
+	// control test, which needs a destination that fails deterministically rather
+	// than one that depends on this machine reaching the real provider. Stated
+	// plainly rather than dressed up: a field with one test caller is worth having
+	// only because the production rule it bypasses cannot otherwise be exercised
+	// without live provider traffic in a unit test.
+	Upstream string
 }
 
 // Validate fills defaults and rejects a configuration that would break the two
@@ -53,6 +66,13 @@ func (c *Config) Validate() error {
 	}
 	if len(c.Allowlist.hosts) == 0 {
 		c.Allowlist = NewAllowlist(DefaultInterceptHost)
+	}
+
+	if c.Upstream != "" {
+		u, err := url.Parse(c.Upstream)
+		if err != nil || u.Scheme == "" || u.Host == "" {
+			return fmt.Errorf("transport: upstream %q must be an absolute URL", c.Upstream)
+		}
 	}
 
 	host, port, err := net.SplitHostPort(c.Addr)

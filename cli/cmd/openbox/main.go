@@ -87,6 +87,14 @@ type app struct {
 	// ADDITIONAL cancellation source, never a replacement for the signal handler.
 	telemetryReady func(addr string)
 	telemetryCtx   context.Context
+
+	// transportReady and transportCtx are the same two seams for the `transport`
+	// subcommand. Same reason again, and it is the third lane to need it: the
+	// control test drives the REAL command into the REAL spool, because the one
+	// failure this family of daemons keeps having is a relay that works perfectly
+	// and records nothing.
+	transportReady func(addr string)
+	transportCtx   context.Context
 }
 
 func defaultApp() *app {
@@ -132,6 +140,8 @@ func (a *app) run(args []string) int {
 		return a.runGateway(args[1:])
 	case "telemetry":
 		return a.runTelemetry(args[1:])
+	case "transport":
+		return a.runTransport(args[1:])
 	case "version", "--version", "-v":
 		fmt.Fprintln(a.stdout, "openbox "+version)
 		return exitOK
