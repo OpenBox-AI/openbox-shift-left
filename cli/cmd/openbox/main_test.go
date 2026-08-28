@@ -10,6 +10,7 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/adapters/common/devconfig"
 	"io"
 	"net/http"
+	"net/http/httptest"
 
 	"github.com/openbox-ai/openbox-shift-left/client/memhttptest"
 	"os"
@@ -639,7 +640,7 @@ func TestHookRealtimeDelivery(t *testing.T) {
 	}
 	var mu sync.Mutex
 	var keys []string
-	srv := memhttptest.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPost && r.URL.Path == "/api/v1/governance/evaluate" {
 			_, _ = io.Copy(io.Discard, r.Body)
 			mu.Lock()

@@ -16,6 +16,26 @@
 // evidence about bind, listen, TLS or the dialer, and no test should read it
 // that way.
 //
+// WHEN NOT TO USE THIS, and it is not obvious: the pipe lives in THIS process's
+// address space, so the server is unreachable by anything that does not share it.
+// Two cases, both of which have bitten this repo already (2026-08-28):
+//
+//   - A CHILD PROCESS. A test that compiles the binary and runs it with
+//     exec.Command hands the child a URL it cannot dial. Symptom: the child
+//     reports no traffic at all, so the test times out waiting for delivery and
+//     reads as a broken feature.
+//   - CODE THAT BUILDS ITS OWN http.Transport. The registry is installed on
+//     http.DefaultTransport, so a caller with its own Transport never consults
+//     it. gateway.New is the one in this repo, and it keeps the real dialer on
+//     purpose (see upstreamDialContext). Symptom: the relay 502s because its
+//     upstream "does not exist", and every downstream assertion about the
+//     captured exchange then fails for the wrong reason.
+//
+// Both are guarded by RequireBind, and that is exactly how the mistake hides: the
+// test SKIPS on a bind-denied host, so the port looks clean and only fails on a
+// machine that can bind. If a test needs RequireBind, its servers almost
+// certainly need to be real httptest servers too.
+//
 // One fidelity gap to know about before writing a test against this: writes are
 // BUFFERED (see bufferedPipe), so a write error surfaces one write late and an
 // error on the final write before Close is discarded. Behaviour that depends on
