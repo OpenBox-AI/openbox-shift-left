@@ -724,15 +724,37 @@ Everything else is blind-tunnelled. Eight things worth not re-litigating:
   which the assertion searched for a string the request no longer carried. Derive
   such fixtures in code.
 
-**Status: implemented, unit-verified with six mutation drills RUN and red on
-deletion, 14 modules green under `-race` plus both cross-compiles — no socket,
-no stack.** The control test drives a real CONNECT → real TLS → real
+**A new module needs a `require` AND a `replace` in every module that imports it,
+and `go mod tidy` supplies only the first.** `cli` imported `transport` with
+neither, so `go.work` resolved it and all 14 modules reported green while
+`GOWORK=off` — the only path `.goreleaser.yaml` runs — could not resolve the
+import at all. Tidy does not write `replace` directives, and a `v0.0.0` require
+with no replace has no source. The workspace is what hides this; the fix is to
+run `GOWORK=off go build` in the importing module and believe it over the
+workspace.
+
+**Status: implemented, unit-verified with eight mutation drills RUN and red on
+deletion, 14 modules green under `-race`, both cross-compiles, and `cli` green
+under `GOWORK=off` — no socket, no stack.** The control test drives a real CONNECT → real TLS → real
 `gateway.Gateway` → real emitter → real spool file with no fake in it, over a
 `net.Pipe` with a refused upstream. So **no response body has ever traversed
 this lane**, byte-identity on the CONNECT path is unrun, and `GOWORK=off` for
 `transport/` is unverifiable on the dev host (x/net v0.50.0 absent from the
-module cache). Install, doctor and env activation are phase 12's, alongside
-telemetry's — deferred rather than hand-copied a third time.
+module cache — the release artifact builds `cli`, which is verified). Install,
+doctor and env activation are phase 12's, alongside telemetry's — deferred rather
+than hand-copied a third time, which also means **OD2's "one command in, one
+command out" is phase 12's, not met here.**
+
+**The risk phase 12 must DESIGN for rather than discover: cross-process
+double-emission.** `clearInheritedProxyEnv` protects the transport's own upstream
+leg and does nothing for the GATEWAY, a different process. If both lanes are
+installed and activation sets `HTTPS_PROXY` where the gateway daemon inherits it,
+the gateway relays through the transport — and both emit for the same call. Their
+activity_ids are **disjoint**, which is exactly what stops core's dedupe merging
+them, so both store and every token count doubles. **The namespaces built to stop
+one lane erasing another are what let this survive.** The election therefore has
+to be an activation-time mutual exclusion across processes, never a client-side
+dedupe.
 
 **Two more model-call lanes, contracted but NOT BUILT** (ADR-0022, contract **v1.6**,
 2026-08-28 — phase 08 of plan 260827-2301, which gates 09–14). A local OTLP
