@@ -211,6 +211,15 @@ func (p *Proxy) ServeIntercepted(client net.Conn, host string) error {
 // goproxy writes NO response for ConnectHijack (https.go, the ConnectHijack
 // case) — the 200 below is ours to send, and the client will not start its TLS
 // handshake until it arrives.
+//
+// KNOWN LIMIT, inherited rather than introduced. goproxy hijacks with
+// `proxyClient, _, e := hij.Hijack()` and DISCARDS the *bufio.ReadWriter, so any
+// bytes net/http had already buffered past the CONNECT request line are gone. A
+// client that pipelines its TLS ClientHello immediately after CONNECT, without
+// waiting for this 200, would lose them — and the symptom is a handshake that
+// fails for no visible reason. Every mainstream client waits, and goproxy's own
+// MITM path discards the same buffer, so the tee design would have had this too.
+// Recorded because the symptom points nowhere near the cause.
 func (p *Proxy) interceptConn(client net.Conn, host string) error {
 	defer client.Close()
 

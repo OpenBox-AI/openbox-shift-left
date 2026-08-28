@@ -186,7 +186,14 @@ fixture is **derived in code** now, the mitigation `CLAUDE.md` already names.
    Measured for the logger's stack, not for every client and auth mode. If a
    client requires h2 to the provider and refuses http/1.1, it stays
    telemetry-only — a `COVERAGE.md` statement, not an average.
-5. `transport/allowlist_test.go`'s Cyrillic case is built at runtime; a reviewer
+5. **A pipelining client would lose buffered bytes.** goproxy hijacks with
+   `proxyClient, _, e := hij.Hijack()` and discards the `*bufio.ReadWriter`, so a
+   client that sends its TLS ClientHello without waiting for the CONNECT 200 loses
+   those bytes and sees a handshake fail for no visible reason. Inherited, not
+   introduced — goproxy's MITM path discards the same buffer, so the tee design
+   would have had it too. Every mainstream client waits. Recorded because the
+   symptom points nowhere near the cause.
+6. `transport/allowlist_test.go`'s Cyrillic case is built at runtime; a reviewer
    reading the source sees `cyrillicA` and a comment, not an invisible glyph.
 
 ## Unresolved questions
