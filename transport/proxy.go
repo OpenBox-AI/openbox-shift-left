@@ -116,7 +116,10 @@ func New(cfg Config, ca *CA, emitter gateway.Emitter, opts ...Option) (*Proxy, e
 	}
 	p.handlerFor = p.newRelay
 	p.engine.OnRequest().HandleConnectFunc(p.onConnect)
-	return p, nil
+	// Applied HERE. A variadic option parameter that is accepted and dropped is a
+	// silent no-op at every call site — the caller reads as configured and the
+	// daemon runs unconfigured. TestNewAppliesItsOptions is the control.
+	return p.Apply(opts...), nil
 }
 
 // Option configures a Proxy.
@@ -127,7 +130,8 @@ func WithVerbose(logf func(format string, args ...any)) Option {
 	return func(p *Proxy) { p.logf = logf }
 }
 
-// Apply is how the CLI passes options after construction validated.
+// Apply configures a Proxy after construction. New calls it with its own
+// variadic options; a caller only needs it to change something later.
 func (p *Proxy) Apply(opts ...Option) *Proxy {
 	for _, o := range opts {
 		o(p)

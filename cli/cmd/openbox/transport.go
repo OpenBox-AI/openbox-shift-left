@@ -77,12 +77,13 @@ func (a *app) runTransport(args []string) int {
 		em.Verbose = logger.Printf
 	}
 
-	p, err := transport.New(transport.Config{Addr: *addr}, ca, em)
+	var opts []transport.Option
+	if *verbose {
+		opts = append(opts, transport.WithVerbose(logger.Printf))
+	}
+	p, err := transport.New(transport.Config{Addr: *addr}, ca, em, opts...)
 	if err != nil {
 		return a.errorf("%v", err)
-	}
-	if *verbose {
-		p.Apply(transport.WithVerbose(logger.Printf))
 	}
 
 	listener, cfg, err := gateway.Listen(gateway.Config{Addr: *addr, Upstream: gateway.DefaultUpstream})

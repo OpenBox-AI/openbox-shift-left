@@ -171,6 +171,26 @@ func TestNewClearsInheritedProxyEnv(t *testing.T) {
 	}
 }
 
+// TestNewAppliesItsOptions.
+//
+// New takes `opts ...Option` and, in its first draft, dropped them on the floor.
+// A variadic option that is accepted and ignored is the worst kind of no-op: every
+// call site reads as configured, and the daemon runs unconfigured — here that
+// meant a --verbose transport logging nothing, which is indistinguishable from a
+// relay nothing reaches.
+func TestNewAppliesItsOptions(t *testing.T) {
+	var lines int
+	p, err := New(Config{}, testCA(t), &stubEmitter{},
+		WithVerbose(func(string, ...any) { lines++ }))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	p.vlog("hello")
+	if lines != 1 {
+		t.Errorf("the verbose option passed to New was dropped: %d lines logged, want 1", lines)
+	}
+}
+
 // TestInterceptedRequestReachesTheHandlerOverRealTLS rehearses the whole CONNECT
 // choreography in memory: write the 200, terminate TLS with a leaf from our CA,
 // and serve HTTP/1.1 over it.
