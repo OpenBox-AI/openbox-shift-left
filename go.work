@@ -27,4 +27,5 @@ use (
 	./gateway
 	./provider
 	./telemetry
+	./transport
 )
