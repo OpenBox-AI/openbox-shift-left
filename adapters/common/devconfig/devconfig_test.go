@@ -1,6 +1,7 @@
 package devconfig
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -485,5 +486,64 @@ func TestSpoolDir(t *testing.T) {
 	d := SpoolDir("codex-spool")
 	if filepath.Base(d) != "codex-spool" || filepath.Base(filepath.Dir(d)) != "openbox" {
 		t.Errorf("default spool dir = %q, want …/openbox/codex-spool", d)
+	}
+}
+
+// TestTelemetryOptOutSurvivesARoundTrip is why Telemetry is a *bool.
+//
+// `omitempty` drops a plain `false`, so an org's deliberate `telemetry:false`
+// would vanish from the file the next time anything rewrote it — and since the
+// default is ON, the lane would silently switch itself back on. That is the bug
+// ADR-0016 records for `Enforce`, and the reason every posture key here is a
+// pointer. Drilled 2026-08-28: as a plain bool this marshals to `{}`.
+func TestTelemetryOptOutSurvivesARoundTrip(t *testing.T) {
+	off := false
+	raw, err := json.Marshal(DevConfig{Telemetry: &off})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if !strings.Contains(string(raw), `"telemetry":false`) {
+		t.Fatalf("an explicit opt-out did not survive the write: %s", raw)
+	}
+
+	var back DevConfig
+	if err := json.Unmarshal(raw, &back); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if back.Telemetry == nil {
+		t.Fatal("the opt-out read back as ABSENT, which resolves to the ON default")
+	}
+	if *back.Telemetry {
+		t.Fatal("the opt-out read back as true")
+	}
+
+	// And absent must stay absent, or every config file grows keys nobody set.
+	bare, err := json.Marshal(DevConfig{})
+	if err != nil {
+		t.Fatalf("marshal bare: %v", err)
+	}
+	if strings.Contains(string(bare), "telemetry") {
+		t.Errorf("an unset field was written anyway: %s", bare)
+	}
+}
+
+// TestResolveTelemetryDefaultsOnAndEnvWins pins the posture resolution.
+//
+// Default ON is ADR-0016's ResolveFinops lesson: INSTALLING the lane is the
+// opt-in, so a default-off second switch would leave a developer who ran the
+// install command with a daemon that receives everything and records nothing.
+func TestResolveTelemetryDefaultsOnAndEnvWins(t *testing.T) {
+	isolateConfig(t)
+
+	if !ResolveTelemetry() {
+		t.Error("default is OFF; installing the lane is the opt-in, so it must default ON")
+	}
+	t.Setenv(EnvTelemetry, "0")
+	if ResolveTelemetry() {
+		t.Errorf("%s=0 did not switch the lane off", EnvTelemetry)
+	}
+	t.Setenv(EnvTelemetry, "1")
+	if !ResolveTelemetry() {
+		t.Errorf("%s=1 did not switch the lane on", EnvTelemetry)
 	}
 }

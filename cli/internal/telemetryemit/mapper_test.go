@@ -69,15 +69,15 @@ func TestUnelectedMapperEmitsNothing(t *testing.T) {
 	for _, name := range []string{"api_request", "api_response_body", "tool_result", "tool_decision", "user_prompt"} {
 		rec := apiRequest(map[string]string{"event.name": name})
 		rec.EventName = name
-		if ev, ok := m.EventFor(rec); ok {
+		if ev, out := m.EventFor(rec); out == Emitted {
 			t.Errorf("%s: an UNELECTED mapper emitted %s — this doubles every token count on every dashboard", name, ev.EventType)
 		}
 	}
 }
 
 func TestAPIRequestBecomesTurnCompleted(t *testing.T) {
-	ev, ok := elected().EventFor(apiRequest(nil))
-	if !ok {
+	ev, out := elected().EventFor(apiRequest(nil))
+	if out != Emitted {
 		t.Fatal("api_request produced no event")
 	}
 
@@ -169,7 +169,7 @@ func TestOtelRequestIDRejectsMalformedProviderValues(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			// Both id sources bad, so there is nothing legitimate to fall back to.
 			rec := apiRequest(map[string]string{"request_id": bad, "client_request_id": bad})
-			if ev, ok := elected().EventFor(rec); ok {
+			if ev, out := elected().EventFor(rec); out == Emitted {
 				t.Errorf("emitted an event with otel_request_id %q (activity_id would be %q…)", ev.OtelRequestID, ev.SessionID+":otel:"+ev.OtelRequestID)
 			}
 		})
@@ -178,8 +178,8 @@ func TestOtelRequestIDRejectsMalformedProviderValues(t *testing.T) {
 
 func TestOtelRequestIDFallsBackToClientRequestID(t *testing.T) {
 	rec := apiRequest(map[string]string{"request_id": ""})
-	ev, ok := elected().EventFor(rec)
-	if !ok {
+	ev, out := elected().EventFor(rec)
+	if out != Emitted {
 		t.Fatal("no event; client_request_id should have served as the id")
 	}
 	if ev.OtelRequestID != "b3f1c2d4-0000-4000-8000-000000000001" {
@@ -189,7 +189,7 @@ func TestOtelRequestIDFallsBackToClientRequestID(t *testing.T) {
 
 func TestNoIDAtAllEmitsNothing(t *testing.T) {
 	rec := apiRequest(map[string]string{"request_id": "", "client_request_id": ""})
-	if _, ok := elected().EventFor(rec); ok {
+	if _, out := elected().EventFor(rec); out == Emitted {
 		t.Error("emitted a turn with no provider id — a minted id would break idempotency across a re-flush")
 	}
 }
@@ -199,7 +199,7 @@ func TestNoIDAtAllEmitsNothing(t *testing.T) {
 // fails later, further from the cause.
 func TestSessionlessRecordEmitsNothing(t *testing.T) {
 	rec := apiRequest(map[string]string{"session.id": ""})
-	if _, ok := elected().EventFor(rec); ok {
+	if _, out := elected().EventFor(rec); out == Emitted {
 		t.Error("emitted an event with no session id")
 	}
 }
@@ -210,7 +210,7 @@ func TestSessionlessRecordEmitsNothing(t *testing.T) {
 func TestUnknownEventNamesAreIgnoredNotErrors(t *testing.T) {
 	rec := apiRequest(map[string]string{"event.name": "some_future_event"})
 	rec.EventName = "some_future_event"
-	if _, ok := elected().EventFor(rec); ok {
+	if _, out := elected().EventFor(rec); out == Emitted {
 		t.Error("an unknown event name produced an event")
 	}
 }
@@ -220,8 +220,8 @@ func TestUnknownEventNamesAreIgnoredNotErrors(t *testing.T) {
 // reporting a fabricated zero would silently understate spend.
 func TestMalformedNumbersDoNotFabricateZeros(t *testing.T) {
 	rec := apiRequest(map[string]string{"output_tokens": "not-a-number"})
-	ev, ok := elected().EventFor(rec)
-	if !ok {
+	ev, out := elected().EventFor(rec)
+	if out != Emitted {
 		t.Fatal("no event")
 	}
 	if ev.Tokens.Output != nil {
@@ -240,8 +240,8 @@ func TestMalformedNumbersDoNotFabricateZeros(t *testing.T) {
 // StartedAt is end - duration_ms. Without a window the span's start and end
 // collapse and every latency reader shows zero.
 func TestDurationDerivesTheTurnWindow(t *testing.T) {
-	ev, ok := elected().EventFor(apiRequest(nil))
-	if !ok {
+	ev, out := elected().EventFor(apiRequest(nil))
+	if out != Emitted {
 		t.Fatal("no event")
 	}
 	start, err := time.Parse(time.RFC3339Nano, ev.StartedAt)
@@ -302,14 +302,14 @@ func TestSessionIDIsValidatedLikeAPath(t *testing.T) {
 			} else {
 				rec.Attrs["session.id"] = bad
 			}
-			if ev, ok := elected().EventFor(rec); ok {
+			if ev, out := elected().EventFor(rec); out == Emitted {
 				t.Errorf("emitted an event whose session id is %q — it reaches a path join as %q.jsonl", bad, ev.SessionID)
 			}
 		})
 	}
 	// A real session id must still pass, or the guard is just an outage.
 	rec := apiRequest(map[string]string{"session.id": "b3f1c2d4-0000-4000-8000-000000000001"})
-	if _, ok := elected().EventFor(rec); !ok {
+	if _, out := elected().EventFor(rec); out != Emitted {
 		t.Error("a UUID session id was rejected — all 59 in the corpus are UUIDs")
 	}
 }
@@ -323,7 +323,64 @@ func TestSessionIDIsValidatedLikeAPath(t *testing.T) {
 func TestZeroTimestampIsDropped(t *testing.T) {
 	rec := apiRequest(nil)
 	rec.Timestamp = time.Time{}
-	if ev, ok := elected().EventFor(rec); ok {
+	if ev, out := elected().EventFor(rec); out == Emitted {
 		t.Errorf("emitted a turn stamped %q", ev.Timestamp)
+	}
+}
+
+// TestOutcomeSeparatesSkipsFromDrops holds phase 10's inherited pin.
+//
+// "Nothing was emitted" covers two very different situations. A SKIP is expected:
+// the export carries 19 event types and this slice binds one. A DROP is a record
+// the lane wanted and could not use. Collapsing them into a bare bool is what the
+// phase-10 report flagged as dangerous — this package's own argument is that
+// erroring on an unfamiliar event NAME would turn upstream drift into a lane
+// outage, and id-format drift is the same class. A lane that goes quiet because
+// every record now fails validation must not look identical to a quiet session.
+func TestOutcomeSeparatesSkipsFromDrops(t *testing.T) {
+	cases := []struct {
+		name     string
+		rec      telemetry.Record
+		mapper   *Mapper
+		want     Outcome
+		wantDrop bool
+	}{
+		{"unelected is a skip, not a drop", apiRequest(nil), New(testDID, Policy{}), SkipNotElected, false},
+		{"an unbound event type is a skip", func() telemetry.Record {
+			r := apiRequest(nil)
+			r.EventName = "retention_sweep"
+			return r
+		}(), elected(), SkipUnhandledEvent, false},
+		{"an unusable session is a DROP", func() telemetry.Record {
+			r := apiRequest(nil)
+			r.Attrs["session.id"] = "../escape"
+			return r
+		}(), elected(), DropBadSession, true},
+		{"no request id is a DROP", func() telemetry.Record {
+			r := apiRequest(nil)
+			delete(r.Attrs, "request_id")
+			delete(r.Attrs, "client_request_id")
+			return r
+		}(), elected(), DropNoRequestID, true},
+		{"a zero timestamp is a DROP", func() telemetry.Record {
+			r := apiRequest(nil)
+			r.Timestamp = time.Time{}
+			return r
+		}(), elected(), DropNoTimestamp, true},
+		{"a good record is emitted", apiRequest(nil), elected(), Emitted, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			_, out := c.mapper.EventFor(c.rec)
+			if out != c.want {
+				t.Errorf("outcome = %v (%s), want %v (%s)", int(out), out, int(c.want), c.want)
+			}
+			if out.IsDrop() != c.wantDrop {
+				t.Errorf("IsDrop() = %v, want %v — the daemon warns on drops and stays quiet on skips, so this classification decides whether a broken lane is noticed", out.IsDrop(), c.wantDrop)
+			}
+			if out.String() == "unknown" {
+				t.Errorf("outcome %d has no name; it reaches operator-facing output", int(out))
+			}
+		})
 	}
 }

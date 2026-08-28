@@ -47,6 +47,61 @@ type Policy struct {
 	Elected bool
 }
 
+// Outcome says what happened to a record, because "nothing was emitted" covers
+// two very different situations and only one of them is fine.
+//
+// A SKIP is the expected case: the export carries 19 event types and this slice
+// binds one, so most records are simply not interesting. A DROP is a record this
+// lane WANTED and could not use — a malformed id, an unusable session, a missing
+// timestamp. Collapsing both into a bare false is what phase 10's own report
+// flagged as dangerous: this package's argument is that erroring on an
+// unfamiliar event NAME would turn upstream drift into a lane outage, and
+// id-format drift is the same class. A lane that goes quiet because every record
+// now fails validation must not look identical to a quiet session.
+//
+// The daemon counts drops and warns; skips are not worth counting.
+type Outcome int
+
+const (
+	// Emitted: the event is usable.
+	Emitted Outcome = iota
+	// SkipNotElected: another lane owns this session's model calls.
+	SkipNotElected
+	// SkipUnhandledEvent: a record type this slice does not bind.
+	SkipUnhandledEvent
+	// DropBadSession: session.id absent or unusable as an identity and a filename.
+	DropBadSession
+	// DropNoRequestID: neither request id is present and usable.
+	DropNoRequestID
+	// DropNoTimestamp: the record carries no time of its own.
+	DropNoTimestamp
+)
+
+// IsDrop reports whether this outcome lost a record the lane wanted.
+func (o Outcome) IsDrop() bool {
+	return o == DropBadSession || o == DropNoRequestID || o == DropNoTimestamp
+}
+
+// String names the outcome for a counter key or a log line. Deliberately terse
+// and stable: these strings reach operator-facing output.
+func (o Outcome) String() string {
+	switch o {
+	case Emitted:
+		return "emitted"
+	case SkipNotElected:
+		return "not-elected"
+	case SkipUnhandledEvent:
+		return "unhandled-event"
+	case DropBadSession:
+		return "bad-session-id"
+	case DropNoRequestID:
+		return "no-request-id"
+	case DropNoTimestamp:
+		return "no-timestamp"
+	}
+	return "unknown"
+}
+
 // Mapper maps telemetry records to events. It holds no per-session state: every
 // event this slice produces is derivable from a single record, which is what
 // keeps it safe to call from the receiver's consumer goroutines.
@@ -75,12 +130,12 @@ func New(did string, p Policy) *Mapper {
 // error, because the export is a provider surface behind a beta flag (OD3) and
 // erroring on an unfamiliar name would turn a routine upstream addition into a
 // lane outage.
-func (m *Mapper) EventFor(rec telemetry.Record) (client.DevEvent, bool) {
+func (m *Mapper) EventFor(rec telemetry.Record) (client.DevEvent, Outcome) {
 	if m == nil || !m.policy.Elected {
-		return client.DevEvent{}, false
+		return client.DevEvent{}, SkipNotElected
 	}
 	if rec.EventName != eventAPIRequest {
-		return client.DevEvent{}, false
+		return client.DevEvent{}, SkipUnhandledEvent
 	}
 	return m.turnFor(rec)
 }
@@ -104,10 +159,10 @@ const maxRequestIDLen = 128
 // span in client/turnspan.go asserts the same URL for the same reason.
 const synthesizedLLMURL = "https://api.anthropic.com/v1/messages"
 
-func (m *Mapper) turnFor(rec telemetry.Record) (client.DevEvent, bool) {
+func (m *Mapper) turnFor(rec telemetry.Record) (client.DevEvent, Outcome) {
 	session := rec.Attrs["session.id"]
 	if !safeSessionID(session) {
-		return client.DevEvent{}, false
+		return client.DevEvent{}, DropBadSession
 	}
 	if rec.Timestamp.IsZero() {
 		// record.go binds the record's own time and leaves a zero to "the mapper
@@ -116,11 +171,11 @@ func (m *Mapper) turnFor(rec telemetry.Record) (client.DevEvent, bool) {
 		// downstream would reject it — the turn would simply be filed a
 		// millennium out, and every window and latency reader would quietly
 		// disagree with every other lane.
-		return client.DevEvent{}, false
+		return client.DevEvent{}, DropNoTimestamp
 	}
 	reqID, ok := requestIDFrom(rec.Attrs)
 	if !ok {
-		return client.DevEvent{}, false
+		return client.DevEvent{}, DropNoRequestID
 	}
 
 	end := rec.Timestamp.UTC()
@@ -163,7 +218,7 @@ func (m *Mapper) turnFor(rec telemetry.Record) (client.DevEvent, bool) {
 		},
 	}
 	ev.EventID = eventID(session, reqID, string(ev.EventType), ev.Timestamp)
-	return ev, true
+	return ev, Emitted
 }
 
 // requestIDFrom picks the id that becomes part of activity_id, and validates it.

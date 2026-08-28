@@ -79,6 +79,14 @@ type app struct {
 	// that constructed its own Gateway could have seen that.
 	gatewayReady func(net.Addr)
 	gatewayCtx   context.Context
+
+	// telemetryReady and telemetryCtx are the same two seams for the `telemetry`
+	// subcommand, and exist for the same reason: the control test has to drive the
+	// REAL command — receiver, mapper, spool, no fake anywhere — because a fake at
+	// each end of a seam proves nothing about the seam. telemetryCtx is an
+	// ADDITIONAL cancellation source, never a replacement for the signal handler.
+	telemetryReady func(addr string)
+	telemetryCtx   context.Context
 }
 
 func defaultApp() *app {
@@ -122,6 +130,8 @@ func (a *app) run(args []string) int {
 		return a.runDoctor(args[1:])
 	case "gateway":
 		return a.runGateway(args[1:])
+	case "telemetry":
+		return a.runTelemetry(args[1:])
 	case "version", "--version", "-v":
 		fmt.Fprintln(a.stdout, "openbox "+version)
 		return exitOK

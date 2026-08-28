@@ -46,6 +46,7 @@ const (
 	EnvDID             = "OPENBOX_AGENT_DID"
 	EnvContentCapture  = "OPENBOX_CONTENT_CAPTURE"
 	EnvFinops          = "OPENBOX_FINOPS"
+	EnvTelemetry       = "OPENBOX_TELEMETRY"
 	EnvInstallGitHook  = "OPENBOX_INSTALL_GIT_HOOK"
 	EnvEnforce         = "OPENBOX_ENFORCE"
 	EnvFailClosed      = "OPENBOX_FAIL_CLOSED"
@@ -132,6 +133,20 @@ type DevConfig struct {
 	// Default ON, as of the same reasoning that flipped content capture: absent
 	// means on; `finops:false` or OPENBOX_FINOPS=0 opts out.
 	Finops *bool `json:"finops,omitempty"`
+
+	// Telemetry enables the local OTLP receiver lane (ADR-0022's `:otel:`).
+	//
+	// Default ON, and the reason is ADR-0016's ResolveFinops lesson rather than a
+	// preference: INSTALLING the lane is the opt-in. A second switch defaulting
+	// off would leave a developer who ran the install command with a daemon that
+	// receives every export and records nothing — the failure this lane is least
+	// able to notice about itself.
+	//
+	// A *bool, not a bool, for the reason every other posture key here is one:
+	// `omitempty` drops an explicit `false` on write, so an org's deliberate
+	// opt-out would vanish from the file the next time anything rewrote it.
+	// TestTelemetryOptOutSurvivesARoundTrip holds that.
+	Telemetry *bool `json:"telemetry,omitempty"`
 	// InstallGitHook enables ambient install of the prepare-commit-msg
 	// hook on SessionStart. Default false — it modifies a repo's
 	// .git/hooks.
@@ -351,6 +366,20 @@ func ResolveInstallGitHook() bool {
 // Finops field comment.
 func ResolveFinops() bool {
 	return resolveBool("finops", func(c DevConfig) *bool { return c.Finops }, true, EnvFinops)
+}
+
+// ResolveTelemetry reports whether the local telemetry lane may record.
+//
+// Config `telemetry` first, then OPENBOX_TELEMETRY, env wins either way. Default
+// ON — see the field comment for why a default-off second switch would be a bug
+// rather than a conservative choice.
+//
+// This gates RECORDING, never RECEIVING. A receiver that rejected exports would
+// make the governed tool retry and eventually surface an error, degrading the
+// session this lane exists to observe; the lane is additive by construction, so
+// "off" means accept and discard.
+func ResolveTelemetry() bool {
+	return resolveBool("telemetry", func(c DevConfig) *bool { return c.Telemetry }, true, EnvTelemetry)
 }
 
 // ResolveContentCapture reports the org content posture: config

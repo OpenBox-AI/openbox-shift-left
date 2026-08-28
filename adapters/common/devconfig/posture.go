@@ -37,6 +37,7 @@ type Posture struct {
 	ContentCapture  bool
 	Findings        bool
 	Finops          bool
+	Telemetry       bool
 	// RealtimeFlush reports whether telemetry is delivered mid-session
 	// (debounced background flush) or batched to session end.
 	RealtimeFlush bool
@@ -179,6 +180,13 @@ func postureFields() []struct {
 			func(p *Posture) *bool { return &p.ContentCapture }},
 		{"findings", func(c DevConfig) *bool { return c.Findings }, false, EnvFindings,
 			func(p *Posture) *bool { return &p.Findings }},
+		// Reported for the reason finops is: it is an EGRESS posture, default-on,
+		// and the posture record is what lets an auditor tell after the fact
+		// whether a given session's model calls were being observed by this lane.
+		// A lane that records nothing and a lane that was switched off look
+		// identical in the data without it.
+		{"telemetry", func(c DevConfig) *bool { return c.Telemetry }, true, EnvTelemetry,
+			func(p *Posture) *bool { return &p.Telemetry }},
 		// require_verified_bundle is gone from this table with the bundle it
 		// guarded (ADR-0017). Reporting it would be reporting a control that
 		// cannot engage: there is nothing to verify, so an org reading `true`

@@ -243,3 +243,23 @@ func receiverSettings() receiver.Settings {
 		BuildInfo:         component.NewDefaultBuildInfo(),
 	}
 }
+
+// nopHost is the component.Host the standalone daemon supplies.
+//
+// otlpreceiver's Start takes a host so a collector pipeline can offer it
+// extensions — authenticators, and nothing else this receiver uses. Running
+// stand-alone there are none, and reporting a fatal error through the host would
+// duplicate what Start already returns.
+type nopHost struct{}
+
+func (nopHost) GetExtensions() map[component.ID]component.Component { return nil }
+
+// StartStandalone starts the receiver outside a collector pipeline.
+//
+// It exists so a caller does not have to name a collector type to run this. That
+// matters beyond tidiness: the CLI is the only production caller, and every
+// collector identifier it mentions is one more place a future dependency bump can
+// break the shipping binary rather than this module.
+func (r *Receiver) StartStandalone(ctx context.Context) error {
+	return r.Start(ctx, nopHost{})
+}
