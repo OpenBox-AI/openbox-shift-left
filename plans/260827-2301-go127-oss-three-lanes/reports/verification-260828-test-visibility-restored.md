@@ -106,6 +106,28 @@ test). This makes the substitution **more** faithful: the thing being emulated i
 a buffered transport. Stable over 6 consecutive runs per module, and green under
 `-race`.
 
+## Drills proving the transport does not mask the controls it now carries
+
+The obvious objection to this change is that 635 tests started passing at the
+same moment their transport was replaced. Two drills answer it directly, both on
+the gateway — the module with the most to lose, since byte-identity and
+per-chunk streaming are its whole point.
+
+| drill | mutation | result |
+|---|---|---|
+| byte-identity | relay injects `X-Openbox-Drill` into the forwarded request | **`TestForwardIdentity` RED** |
+| per-chunk streaming | relay's per-chunk `ctl.Flush()` deleted | **`TestResponseIsNotBuffered`, `TestStreamChunkBoundariesPreserved`, `TestCaptureDoesNotBufferTheStream` all RED** |
+
+The second is the one that mattered, because this change *added* buffering and
+per-chunk flush is load-bearing for SSE. It does not mask it, and the reason is
+structural rather than lucky: `memhttptest`'s buffer sits **below**
+`http.Server`, so deleting the handler's flush leaves the server's own buffering
+to swallow the chunk boundaries long before any byte reaches the pipe. The buffer
+decouples the handler from the reader; it does not coalesce what the handler
+already chose to flush.
+
+Both mutations were reverted and the module re-verified green.
+
 ## What this unblocks — measured, not inferred
 
 | | before | after |
