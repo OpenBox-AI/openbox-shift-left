@@ -16,7 +16,8 @@
 ## Overview
 
 - Date: 2026-08-27 · Priority: P1 · Effort: 8h
-- Implementation status: pending · Review status: pending
+- Implementation status: **partial (2026-08-28)** — module done, daemon blocked on `bind`
+- Report: [verification-260828-phase-09](reports/verification-260828-phase-09-telemetry-receiver.md)
 - Stand up a loopback OTLP receiver inside the openbox daemon and activate Claude
   Code's own telemetry into it. This phase **receives and spools raw records**;
   phase 10 maps them onto the contract.
@@ -143,19 +144,19 @@ identify the stale owner rather than incrementing.
 
 ## Todo
 
-- [ ] encoding/endpoint probe + report (config input)
-- [ ] `telemetry/` module + `go.work` + its own dependency guard test
-- [ ] dependency tree + binary-size delta measured and recorded
-- [ ] loopback-only config + deterministic port
-- [ ] otlpreceiver wired, three signals, bounded reads set explicitly
-- [ ] consumers bound to consumed fields only
-- [ ] emitter wired in production code
+- [ ] encoding/endpoint probe + report (config input) — **BLOCKED: needs a listener + live client**
+- [x] `telemetry/` module + `go.work` + its own dependency guard test
+- [x] dependency tree + binary-size delta measured and recorded — **+16.5 MB, an open decision**
+- [x] loopback-only config + deterministic port (8789; drilled)
+- [x] otlpreceiver wired, three signals, bounded reads set explicitly (8MiB body, 10s header)
+- [x] consumers bound to consumed fields only
+- [ ] emitter wired in production code — seam exists, **no production caller yet** (the WithCapture bug, still open)
 - [ ] `telemetryservice` unit via phase-04 mechanism + log path
-- [ ] install proof-order + rollback-removes-unit
+- [ ] install proof-order + rollback-removes-unit — **BLOCKED: "prove listening" needs a bind**
 - [ ] doctor: configured / reachable / recording
-- [ ] control test with no fakes
+- [ ] control test with no fakes — **BLOCKED: needs a bind**
 - [ ] default-on posture + **second-invocation** re-run test
-- [ ] `go test ./...` per module, `-race`, both cross-compiles
+- [x] `go test ./...` per module, `-race`, both cross-compiles — green across 13 modules
 
 ## Success criteria
 

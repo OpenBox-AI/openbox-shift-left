@@ -103,7 +103,7 @@ about what egresses — no content field, gate or cap moves in phases 01–07.
 | 06 | [gitleaks detection engine](phase-06-gitleaks-detection-engine.md) | 01, **05** | **done*** | 10h |
 | 07 | [Stage-A docs reconciliation](phase-07-consolidation-docs.md) | 02–06 | **done** | 3h |
 | 08 | [ADR-0022 + contract v1.6 + ADR-0021 amendments](phase-08-adr-contract-decision.md) | 01 (02 strongly recommended first) | **done\*\*** | 4h |
-| 09 | [Telemetry receiver daemon (otlpreceiver, loopback)](phase-09-telemetry-receiver-daemon.md) | 04, 08 | pending | 8h |
+| 09 | [Telemetry receiver daemon (otlpreceiver, loopback)](phase-09-telemetry-receiver-daemon.md) | 04, 08 | **partial\*\*\*** | 8h |
 | 10 | [Telemetry mappers → contract (`:otel:`)](phase-10-telemetry-mappers.md) | 09 | pending | 8h |
 | 11 | [Transport proxy as native service (`:proxy:`, goproxy)](phase-11-transport-proxy-service.md) | 04, 10 | pending | 15h |
 | 12 | [One-command install/remove + producer election](phase-12-one-command-and-election.md) | 09, 11 | pending | 6h |
@@ -115,6 +115,12 @@ machine that can bind a listener and run `launchctl` — see its report.
 Phase 06 is implemented and green, with **two open items**: the false-positive soak did not clear the
 enforce path (2 false positives from `generic-api-key`), and the mutation drills need a listener the
 sandbox denies. See its report.
+\*\*\* Phase 09's MODULE half is done and green — `telemetry/` with otlpreceiver v0.159.0 compiled
+against the real API, its dependency guard, loopback config, consumers, and 27 tests. Its DAEMON half
+(emitter wiring, service unit, install proof-order, doctor, posture key, control test) is blocked: the
+host denies every `net.Listen`. The dependency block was solved mid-phase — see its report and
+`blocker-260828-phase-09-environment.md`. Open decision: linking the receiver adds **+16.5 MB** to a
+17 MB binary.
 \*\* Phase 08 is implemented and its own tests are green with both mutation drills red-on-deletion,
 but **C1-C41 did not run** — the sandbox denies every TCP bind, so ~334 listener-dependent tests
 across 6 modules could not execute. Acceptance criterion 2 is UNVERIFIED until a host that can bind
