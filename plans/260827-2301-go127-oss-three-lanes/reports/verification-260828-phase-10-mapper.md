@@ -245,14 +245,21 @@ downstream.
 
 ## Unresolved questions
 
-1. **This branch has no upstream, so no run of these 1138 tests over a real
-   socket exists anywhere.** The sandbox verifies payload, framing, gate,
-   redaction and cap; CI (`ubuntu-latest`) is the socket half and has never seen
-   any of this work. Pushing is the single action that can falsify the most.
-2. **Should CI assert the skip count is 0?** The 19 guards are honest on any host
-   and inert on a capable one — but if a runner ever loses bind, they would skip
-   silently and the build would still be green. That is the same
-   green-by-omission failure one level up.
+1. **This branch has no upstream, so no run of these 1140 tests over a real
+   socket exists anywhere** — **owner-deferred 2026-08-28: do not push yet.** The
+   sandbox verifies payload, framing, gate, redaction and cap; CI
+   (`ubuntu-latest`) is the socket half and has never seen any of this work. The
+   gap is recorded, not forgotten: until a bind-capable run happens, every claim
+   about listen/bind/TLS/dialer behaviour in this branch rests on the 19
+   capability guards having been *correctly placed*, which is itself only
+   argued.
+2. **Should CI assert no skip cites a bind or DNS capability?** —
+   **owner-deferred 2026-08-28: not now.** The 19 guards are honest on any host
+   and inert on a capable one, but if a runner ever loses bind they would skip
+   silently and the build would stay green. That is the same green-by-omission
+   failure as the 635 invisible tests, one level up. (The review's literal
+   proposal — skip count == 0 — would break CI on the two deliberate opt-in
+   skips; the narrow form is the correct one if this is revisited.)
 3. **The confinement root for `body_ref`** is still phase 09's undecided env-key
    question, and body attachment cannot be finished without it.
 4. Whether `assistant_response` / `user_prompt` stay unbound (the hook lane

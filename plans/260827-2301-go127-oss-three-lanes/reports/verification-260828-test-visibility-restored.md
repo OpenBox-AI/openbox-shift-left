@@ -232,6 +232,12 @@ allowlisted requirement of every affected module, and
 
 ## Unresolved questions
 
+0. **Both follow-ups below were put to the owner on 2026-08-28 and deliberately
+   deferred**: do not push the branch yet, and do not add a CI capability
+   assertion. So the socket half of this evidence does not exist anywhere, and
+   nothing yet detects a CI runner silently losing bind. Recorded as accepted
+   risk, not as an open task.
+
 1. **Should the guards stay permanently, or become a build tag?** They are honest
    on any host and inert on a capable one, so they are cheap — but 19 tests that
    skip silently on a misconfigured CI runner would look like a green build.
