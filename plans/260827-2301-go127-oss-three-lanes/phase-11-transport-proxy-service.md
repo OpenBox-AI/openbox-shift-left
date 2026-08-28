@@ -16,7 +16,32 @@
 
 - Date: 2026-08-27 · Priority: P1 · Effort: 15h (12h + 3h goproxy spike/tee,
   validation round 2)
-- Implementation status: pending · Review status: pending
+- Implementation status: **spike done, gate PASSED (2026-08-29)** · Review status: pending
+- Report: [verification-260829 goproxy spike](reports/verification-260829-phase-11-goproxy-spike.md)
+
+## Gate answer (2026-08-29): PROCEED
+
+Run on a bind-capable host: 5 tests, 5 passes. goproxy v1.9.0 forwards
+byte-identically and streams SSE per chunk, so the pre-decided PROCEED branch is
+taken and the service work below is unblocked.
+
+Three amendments to this phase as written, from the spike:
+
+1. **Byte-identity needs THREE non-default settings, not one.**
+   `KeepAcceptEncoding` (v1.9.0 DELETES the client's own `Accept-Encoding` — the
+   opposite of the injection this phase anticipated), `Tr.DisableCompression`, and
+   `PreventCanonicalization`. `NewIdentityProxy` holds them; a stock-goproxy
+   negative control proves they are load-bearing.
+2. **"Header order preserved" is UNACHIEVABLE and should be struck.** `net/http`
+   models headers as a map; no Go proxy can hold their order, and the gateway's
+   own identity suite asserts presence, values and absence-of-additions rather
+   than order for exactly that reason.
+3. **The gate exercised the PLAIN-HTTP path only.** `RemoveProxyHeaders` is shared
+   with MITM so the header findings transfer, but the response copy is different
+   code (`resp.Write` to the raw conn vs `flushWriter`) and is a source reading,
+   not a measurement. **Running the CONNECT path should be the FIRST thing the
+   conformance work does, not the last.** First-byte latency is also untested —
+   only chunk separation.
 - The in-path point for model calls the base-URL gateway cannot reach: the desktop
   app and any client that honours proxy env but not `ANTHROPIC_BASE_URL`.
 

@@ -160,6 +160,30 @@ by any of this.
   literal became `${OPENBOX_REDACTED_SECRET_ASSIGNMENT}`, silently, on the write.
   The file did not compile and the cause sat two steps from the symptom. Third
   demonstrated victim class. Recorded in `CLAUDE.md` with the two mitigations.
+- **The honest pattern: bind-guarded tests hide bugs from their own author.**
+  Across 2026-08-28/29 the owner ran the bind-dependent suites six times. Five of
+  the six failures were bugs in the TESTS, not the code under test:
+
+  | reported as | actually |
+  |---|---|
+  | 4 tests failing after the memhttptest port | `memhttptest` servers pointed at things that cannot reach an in-process pipe — a child process, and `gateway.New`'s own Transport |
+  | the spike HANGS (twice) | the streaming test deadlocked itself; `Do()` cannot return before headers, headers cannot leave before the first write, and the first write was gated behind a release that came after `Do()` |
+  | "no spooled event" while naming the file | the test read WIRE field names off the pre-wire spooled struct (`session_id` vs `openbox_session_id`) |
+  | the receiver PANICS | a real defect — nil `*zap.Logger` — and the only genuine one |
+
+  The mechanism is always the same: `RequireBind` skips these on a bind-denied
+  host, so the author's suite is green and the port, the choreography and the
+  vocabulary are all unexercised. **A capability guard makes a test honest about
+  what it needs and simultaneously blinds whoever cannot meet it.**
+
+  Three durable mitigations came out of it, and they are the transferable part:
+  a failure mode that is a HANG must be bounded (a stalled `go test` reads as an
+  environment problem, not an answer — and here it wore the costume of the gate's
+  stop-and-report branch, which would have killed the transport lane on a test
+  bug); a construction-time defect must be reachable without a socket (hence
+  splitting `Receiver.build` out of `Start`); and choreography can be rehearsed
+  in-memory even when the thing it measures cannot be.
+
 - **Two latent defects in shipped code**, both fixed: the observed-span gap that
   would have dropped every `:otel:`/`:proxy:` span, and `maxAttrValueBytes`
   sitting below the wire cap.
@@ -176,9 +200,9 @@ by any of this.
 | 06 | [gitleaks detection engine](phase-06-gitleaks-detection-engine.md) | 01, **05** | **done\*\*** | 10h |
 | 07 | [Stage-A docs reconciliation](phase-07-consolidation-docs.md) | 02–06 | **done** | 3h |
 | 08 | [ADR-0022 + contract v1.6 + ADR-0021 amendments](phase-08-adr-contract-decision.md) | 01 (02 strongly recommended first) | **done\*\*\*** | 4h |
-| 09 | [Telemetry receiver daemon (otlpreceiver, loopback)](phase-09-telemetry-receiver-daemon.md) | 04, 08 | **partial†** | 8h |
+| 09 | [Telemetry receiver daemon (otlpreceiver, loopback)](phase-09-telemetry-receiver-daemon.md) | 04, 08 | **mostly done†** | 8h |
 | 10 | [Telemetry mappers → contract (`:otel:`)](phase-10-telemetry-mappers.md) | 09 | **partial‡** | 8h |
-| 11 | [Transport proxy as native service (`:proxy:`, goproxy)](phase-11-transport-proxy-service.md) | 04, 10 | pending | 15h |
+| 11 | [Transport proxy as native service (`:proxy:`, goproxy)](phase-11-transport-proxy-service.md) | 04, 10 | **gate PASSED§** | 15h |
 | 12 | [One-command install/remove + producer election](phase-12-one-command-and-election.md) | 09, 11 | pending | 6h |
 | 13 | [Conformance, fixtures & probe-A instrument](phase-13-conformance-fixtures-probe.md) | 10, 11 | pending | 8h |
 | 14 | [Coverage matrix & docs reconciliation](phase-14-coverage-and-docs.md) | 09–13 | pending | 4h |
@@ -204,12 +228,37 @@ failing.**
 [verification-260828-test-visibility-restored](reports/verification-260828-test-visibility-restored.md).
 It also repaired `TurnStarted`, beyond the phase's written scope.
 
+**§** **Phase 11's spike GATE PASSED (2026-08-29)** — 5/5 on a real socket:
+byte-identical forward, no injected hop headers, per-chunk SSE, and a streaming
+tee that sees the whole body without buffering the client's stream. Three
+amendments came out of it. Byte-identity needs **three** non-default settings, not
+the one this plan named — and the `Accept-Encoding` hazard is the OPPOSITE of what
+was anticipated: v1.9.0 DELETES the client's own header rather than injecting one.
+**"Header order preserved" is unachievable in Go and should be struck** from the
+phase's criteria. And the gate exercised the **plain-HTTP path only**: the MITM
+response copy is different code, read statically, so running the CONNECT path is
+the FIRST thing the conformance work should do. First-byte latency is untested.
+[Report](reports/verification-260829-phase-11-goproxy-spike.md).
+
 **†** **Phase 09's MODULE half** is done and green — `telemetry/` with
 otlpreceiver v0.159.0 compiled against the real API, its dependency guard,
-loopback config, consumers, and 27 tests. Its **DAEMON half** (emitter wiring,
-service unit, install proof-order, doctor, posture key, control test) is blocked:
-the host denies every `net.Listen`, and "prove it is listening" is the property,
-not an implementation detail. The dependency block was solved mid-phase — see its
+loopback config, consumers, and 27 tests. Its **DAEMON half is now mostly done**: `openbox telemetry` is the production
+caller the mapper lacked, and its **control test passes on a bind-capable host** —
+real command, real receiver, real OTLP export, real spool, no fake at either end.
+That closes the `WithCapture` gap for this lane. The `telemetry` posture key
+(default-on, `*bool`, round-trip drilled) is in. **`telemetryservice`'s unit,
+the install proof-order and doctor's lane block are deferred to phase 12**, because
+the env activation they pair with is phase 12's shared transactional mechanism and
+a telemetry-specific copy of `gatewayservice/env.go` is how the engine drifted the
+first time. The step-1 encoding probe is **answered by evidence** rather than a
+probe run: the logger's proven 14-key set produced the corpus, protocol
+`http/protobuf`.
+
+Two real defects surfaced only when it was finally RUN, and both had been hidden
+behind "compiles against the real API": the receiver **panicked** on a nil
+`*zap.Logger` from `component.TelemetrySettings{}` (whose zero value is not a
+no-op), and that failure happens entirely in CONSTRUCTION — so `Start` is now
+split, and three bind-free tests reach it. The dependency block was solved mid-phase — see its
 report and `blocker-260828-phase-09-environment.md`. The +16.5 MB packaging
 question is **decided (OD5): one binary.** It also now carries a pin inherited
 from phase 10: **a drop must be countable**, or a lane that fails validation on

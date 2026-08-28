@@ -735,6 +735,26 @@ tests is not a package with two problems.** Count declared tests
 (`go test -list '.*'`) against tests that produced a verdict
 (`--- PASS|FAIL|SKIP`); the difference is what nobody is looking at.
 
+**A capability guard makes a test honest and blinds its author at the same time**
+(2026-08-29, learned the hard way). `RequireBind` correctly names what a test
+needs — and on a host that cannot meet it the test SKIPS, so its own port,
+choreography and assertions go unexercised while the suite reports green. Over two
+days the owner ran the bind-dependent suites six times; **five of the six failures
+were bugs in the tests, not the code under test**: `memhttptest` servers pointed at
+a child process and at `gateway.New`'s own hand-built Transport (neither can reach
+an in-process pipe); a streaming test that deadlocked itself twice; and a test
+reading WIRE field names off the pre-wire spooled struct (`session_id` vs
+`openbox_session_id` — asserting the wire is not asserting the struct, and the
+inverse bites too). Three transferable rules came out of it. **A failure mode that
+is a HANG must be bounded** — a stalled `go test` reads as an environment problem
+rather than an answer, and in the goproxy spike it wore the costume of the gate's
+own stop-and-report branch, which would have killed the transport lane on a test
+bug. **A construction-time defect must be reachable without a socket** — the
+receiver's nil-logger panic happened entirely before any bind, but lived inside
+`Start`, so `Receiver.build` is now split out and three bind-free tests reach it.
+And **choreography can be rehearsed in-memory even when the thing it measures
+cannot be.**
+
 `client/memhttptest` serves HTTP over in-memory pipes for hosts that deny bind. It
 is one shared package precisely because six copies is the shape this file already
 names as the original sin, and it needed **no `go.mod` change and no dependency-guard

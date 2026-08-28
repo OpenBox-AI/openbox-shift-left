@@ -164,18 +164,18 @@ them alone.
 
 ## Todo
 
-- [ ] encoding/endpoint probe + report (config input) — **BLOCKED: needs a listener + live client**
+- [x] encoding/endpoint probe — **answered by EVIDENCE rather than a probe run**: the logger's proven 14-key set produced the 4366-record corpus, with `OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf`. Recorded in the phase-10 measure report; a live re-check stays worthwhile at first install.
 - [x] `telemetry/` module + `go.work` + its own dependency guard test
 - [x] dependency tree + binary-size delta measured and recorded — **+16.5 MB, DECIDED (OD5): one binary, mirroring `openbox gateway`**
 - [x] loopback-only config + deterministic port (8789; drilled)
 - [x] otlpreceiver wired, three signals, bounded reads set explicitly (8MiB body, 10s header)
 - [x] consumers bound to consumed fields only
-- [ ] emitter wired in production code — seam exists, **no production caller yet** (the WithCapture bug, still open)
-- [ ] `telemetryservice` unit via phase-04 mechanism + log path
-- [ ] install proof-order + rollback-removes-unit — **BLOCKED: "prove listening" needs a bind**
-- [ ] doctor: configured / reachable / recording
-- [ ] control test with no fakes — **BLOCKED: needs a bind**
-- [ ] default-on posture + **second-invocation** re-run test
+- [x] emitter wired in production code — `openbox telemetry` is the caller; **the WithCapture gap is CLOSED**
+- [ ] `telemetryservice` unit via phase-04 mechanism + log path — **deferred to phase 12**: the env activation it pairs with is phase 12's shared transactional mechanism, and a telemetry-specific copy of `gatewayservice/env.go` is how the engine drifted the first time
+- [ ] install proof-order + rollback-removes-unit — **deferred with `telemetryservice`** (phase 12)
+- [ ] doctor: configured / reachable / recording — **deferred to phase 12** with the shared env mechanism
+- [x] control test with no fakes — **PASSES on a bind-capable host (2026-08-29)**: real command → real receiver → real OTLP export → real spool
+- [x] default-on posture (`telemetry`, `*bool`, env override, round-trip drilled) — the **second-invocation** half belongs to phase 12's install command, which writes the key
 - [x] `go test ./...` per module, `-race`, both cross-compiles — green across 13 modules
 
 ## Success criteria
