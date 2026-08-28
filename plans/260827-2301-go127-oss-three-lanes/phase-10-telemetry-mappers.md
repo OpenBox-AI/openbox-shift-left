@@ -9,9 +9,40 @@
 ## Overview
 
 - Date: 2026-08-27 · Priority: P1 · Effort: 8h
-- Implementation status: pending · Review status: pending
+- Implementation status: **started (2026-08-28)** · Review status: pending
+- Reports: [measure-260828 attribute inventory](reports/measure-260828-otel-attribute-inventory.md)
 - Turn spooled OTel records into normalized DevEvents that pass the existing
   pipeline unchanged, plus OD4's silence finding.
+
+## Amendments recorded before implementation (2026-08-28)
+
+Three things in this phase as written are wrong or incomplete. Recorded here
+rather than discovered mid-build.
+
+1. **The mapper cannot live in `telemetry/`.** That module's own guard
+   (`telemetry/guard_test.go`) forbids `client` and `decision`, which is what
+   quarantines the collector's ~492-package tree. The mapper needs both, so it
+   goes in **`cli/internal/telemetryemit`**, mirroring `cli/internal/gatewayemit`
+   — which exists for exactly this reason, stated in its own package doc.
+2. **The span-attachment gap was real, and is now fixed.** Requirement 1's
+   "bodies → observed-span fields" could not have worked: `buildPayload` attaches
+   an observed span only through `gatewayObservedSpan`, which returned nil unless
+   `GatewayRequestID != ""`. An otel turn with a populated `Span` was accepted,
+   spooled, signed and POSTed carrying **no span at all**. Generalized to
+   `observedSpan`/`observedSpanID` across all three lanes, with the gateway's
+   derivation byte-identical so no stored id moves
+   (`client/observedspan_test.go`; drilled).
+3. **`maxAttrValueBytes` sat BELOW the wire cap** — 16 KiB against `capBody`'s
+   65,536 runes. Content reaches this lane as *attributes*, so every one of them
+   truncated ~4x tighter than OD1(c) blesses, and the cap's own mutation drill
+   would have exercised only states the receiver cannot produce. Raised to
+   4x65536; the relation needs the cross-module test that lands with the mapper.
+
+Two corrections from the corpus (see the measure report): identity attributes are
+**record**-level, not resource-level as this phase's Architecture section says;
+and model bodies arrive as **`body_ref` filesystem paths**, not inline — which on
+an unauthenticated loopback listener is a local-file-read oracle and needs
+`os.Root` confinement. That is the highest-severity open item in the phase.
 
 ## Key insights
 
@@ -92,7 +123,7 @@
 
 ## Todo
 
-- [ ] attribute inventory from real corpus
+- [x] attribute inventory from real corpus — 19 event types, per-event keys, value types
 - [ ] `api_request` → turn pair (usage/model/cost/ids)
 - [ ] bodies → observed span (gated, redacted, capped, `http_status_code`)
 - [ ] `tool_decision` → metadata, never `signal_args` (+ negative test)

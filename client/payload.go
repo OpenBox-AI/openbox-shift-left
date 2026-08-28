@@ -190,12 +190,13 @@ func buildPayload(ev DevEvent) ([]byte, error) {
 		// hook_trigger true AND spans present enters core's approval-bypass
 		// fingerprint path (governance_workflow.go:310-330), and a model turn is
 		// not an approvable operation.
-		// Two producers, one at a time. A gateway turn carries the OBSERVED HTTP
+		// Two producers, one at a time. An OBSERVING lane's turn (gateway,
+		// transport relay or telemetry receiver) carries the observed HTTP
 		// exchange; a hook turn carries the assistant's reply. They never ride the
-		// same event — GatewayRequestID is what separates them — so the extractor
-		// that reads the LAST span as assistant text can never be handed a raw
-		// provider response body by accident.
-		if span := gatewayObservedSpan(ev); span != nil {
+		// same event — the lane discriminator is what separates them — so the
+		// extractor that reads the LAST span as assistant text can never be handed
+		// a raw provider response body by accident.
+		if span := observedSpan(ev); span != nil {
 			p.Spans = []wireSpan{*span}
 			p.SpanCount = 1
 		} else if span := turnAssistantSpan(ev); span != nil {

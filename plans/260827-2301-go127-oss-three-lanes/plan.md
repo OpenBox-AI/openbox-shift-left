@@ -55,6 +55,15 @@ Phase reports land in `reports/`.
   detection.
 - **OD4** telemetry silence on an otherwise-active session is a **finding**; the
   late HALT (next-boundary latch) is accepted.
+- **OD5** (2026-08-28) the telemetry receiver links into the **one `openbox`
+  binary**, mirroring `openbox gateway`. The +16.5 MB on a 17 MB binary is
+  accepted: one artifact, one version, and phase 04's settled lifecycle transfers
+  with no new mechanics. Reversing it means a second artifact to sign, distribute
+  and version-skew against.
+- **OD6** (2026-08-28) the ~635 tests this sandbox could not run are worth
+  porting onto an in-memory transport rather than deferring to a bind-capable
+  host. Done — see
+  [verification-260828-test-visibility-restored](reports/verification-260828-test-visibility-restored.md).
 
 ## Decisions — the fixed premises (owner, 2026-08-27)
 
@@ -104,7 +113,7 @@ about what egresses — no content field, gate or cap moves in phases 01–07.
 | 07 | [Stage-A docs reconciliation](phase-07-consolidation-docs.md) | 02–06 | **done** | 3h |
 | 08 | [ADR-0022 + contract v1.6 + ADR-0021 amendments](phase-08-adr-contract-decision.md) | 01 (02 strongly recommended first) | **done\*\*** | 4h |
 | 09 | [Telemetry receiver daemon (otlpreceiver, loopback)](phase-09-telemetry-receiver-daemon.md) | 04, 08 | **partial\*\*\*** | 8h |
-| 10 | [Telemetry mappers → contract (`:otel:`)](phase-10-telemetry-mappers.md) | 09 | pending | 8h |
+| 10 | [Telemetry mappers → contract (`:otel:`)](phase-10-telemetry-mappers.md) | 09 | **started† ** | 8h |
 | 11 | [Transport proxy as native service (`:proxy:`, goproxy)](phase-11-transport-proxy-service.md) | 04, 10 | pending | 15h |
 | 12 | [One-command install/remove + producer election](phase-12-one-command-and-election.md) | 09, 11 | pending | 6h |
 | 13 | [Conformance, fixtures & probe-A instrument](phase-13-conformance-fixtures-probe.md) | 10, 11 | pending | 8h |
@@ -119,12 +128,25 @@ sandbox denies. See its report.
 against the real API, its dependency guard, loopback config, consumers, and 27 tests. Its DAEMON half
 (emitter wiring, service unit, install proof-order, doctor, posture key, control test) is blocked: the
 host denies every `net.Listen`. The dependency block was solved mid-phase — see its report and
-`blocker-260828-phase-09-environment.md`. Open decision: linking the receiver adds **+16.5 MB** to a
-17 MB binary.
-\*\* Phase 08 is implemented and its own tests are green with both mutation drills red-on-deletion,
-but **C1-C41 did not run** — the sandbox denies every TCP bind, so ~334 listener-dependent tests
-across 6 modules could not execute. Acceptance criterion 2 is UNVERIFIED until a host that can bind
-re-runs them. It also repaired `TurnStarted`, beyond the phase's written scope. See its report.
+`blocker-260828-phase-09-environment.md`. The +16.5 MB packaging question is **decided** — OD5,
+one binary.
+\*\* Phase 08 is implemented, its own tests green with both mutation drills red-on-deletion. Its
+"**C1-C41 did not run**" caveat is **RETIRED as of 2026-08-28**: 38 conformance cases now run and
+pass (C8/C9 do not exist — deliberately deleted under ADR-0006), so acceptance criterion 2 moved
+from an inference to a measurement. The count of blocked tests in that caveat was also wrong — it
+was 635, not ~334, and they were INVISIBLE rather than failing. See
+[verification-260828-test-visibility-restored](reports/verification-260828-test-visibility-restored.md).
+It also repaired `TurnStarted`, beyond the phase's written scope. See its report.
+
+† Phase 10 is STARTED, not done. Delivered: step 1's attribute inventory from a real desktop corpus
+([measure-260828](reports/measure-260828-otel-attribute-inventory.md)); the `maxAttrValueBytes` bound
+defect (16 KiB sat BELOW the 65,536-rune wire cap, so attribute-carried content truncated 4x tighter
+than OD1(c) blesses AND the cap's mutation drill would have been vacuous); and the observed-span
+generalization the phase file never listed — `gatewayObservedSpan` gated on `GatewayRequestID`, so an
+event carrying the `OtelRequestID`/`ProxyRequestID` phase 08 shipped was spooled, signed and POSTed
+with NO span attached. NOT delivered: the mapper itself, `body_ref` containment (the inventory's
+finding 1 — a local-file-read oracle on an unauthenticated listener), the election-suppression
+policy, OD4's silence finding, and the sentinel.
 
 **Order.** Phase 01 first and **alone** (02 may run beside it — the library
 builds at the old floor). Then 03/04/05 in any order; **05 must precede 06** —
@@ -147,7 +169,10 @@ Stage A — foundation:
 1. Every module declares `go 1.27.0`; no pin instruction for `x/term` survives
    anywhere; per-module `GOWORK=off` builds pass.
 2. Conformance C1–C41 pass **unmodified** against the library validator, with the
-   `x-content-gated` pass still separate.
+   `x-content-gated` pass still separate. **MET 2026-08-28** — 38 cases run, 38
+   pass, 0 fail (C8/C9 do not exist; both deliberately deleted under ADR-0006).
+   Assertions unmodified; the listener beneath them is in-memory, which is the
+   caveat to carry rather than round off.
 3. The TOML regression test fails on the old scanner and passes on go-toml;
    `codexMandated` is correct on the new fixture.
 4. `~/.openbox/gateway.log` receives real output from a running gateway, asserted

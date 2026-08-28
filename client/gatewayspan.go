@@ -89,7 +89,7 @@ const (
 // Keys are sorted before truncating, and that is load-bearing rather than tidy:
 // Go randomizes map iteration, so dropping "whatever came last" would make two
 // emissions of the SAME exchange produce different signed bytes. Gateway spans
-// are deliberately re-emittable — gatewaySpanID mints a stable id so a re-emit
+// are deliberately re-emittable — observedSpanID mints a stable id so a re-emit
 // after a crash dedupes instead of storing twice — and evidence that changes
 // shape per attempt is evidence an auditor cannot reconcile.
 //
@@ -139,21 +139,73 @@ func capHeaderValue(v string) string {
 	return v[:end] + "…[truncated]"
 }
 
-// gatewaySpanID derives the span id from the gateway's request id, so a re-emit
-// after a crash mints the same id and core's span dedupe — (span_id, stage)
-// scoped by session_id — absorbs it instead of storing a second row. The same
-// over-report-rather-than-lose direction the turn cursor already takes.
-func gatewaySpanID(ev DevEvent) string {
-	sum := sha256.Sum256([]byte("gwspan\x1f" + ev.SessionID + "\x1f" + ev.GatewayRequestID))
-	return "gw-" + hex.EncodeToString(sum[:16])
+// observedLane names the producer that OBSERVED this turn, and its request id.
+//
+// The precedence is turnActivityIDFor's, deliberately and not coincidentally:
+// proxy, then gateway, then otel (ADR-0022 §3 — in-path relay outranks a
+// client-asserted lane). If the two disagreed, an event could take its
+// activity_id from one lane and its span id from another, and core would file
+// half the evidence under a row the other half never joins.
+//
+// A well-formed event carries exactly one (the contract's turnProducer oneOf
+// rejects two), so the order only decides how a MALFORMED event is attributed.
+func observedLane(ev DevEvent) (name, id string) {
+	switch {
+	case ev.ProxyRequestID != "":
+		return "proxy", ev.ProxyRequestID
+	case ev.GatewayRequestID != "":
+		return "gw", ev.GatewayRequestID
+	case ev.OtelRequestID != "":
+		return "otel", ev.OtelRequestID
+	}
+	return "", ""
 }
 
-// gatewayObservedSpan builds the span for a gateway-observed model call.
+// observedSpanID derives the span id from the observing lane's request id, so a
+// re-emit after a crash mints the same id and core's span dedupe — (span_id,
+// stage) scoped by session_id — absorbs it instead of storing a second row. The
+// same over-report-rather-than-lose direction the turn cursor already takes.
 //
-// Returns nil when the event is not a gateway turn or carries no gateway
+// The lane name appears TWICE — in the hash input and in the prefix — for the
+// reason the activity_id namespaces exist: two lanes describing the same turn
+// must not mint the same span id, or core's dedupe absorbs one and half the
+// evidence vanishes with no error.
+//
+// The two are redundant with each other, and that is measured rather than
+// assumed: deleting either one alone leaves the ids disjoint (the prefix keeps
+// them distinct strings; the hash keeps the digests distinct), and only deleting
+// BOTH collides. So TestObservingLaneSpanIDsAreDisjoint goes red on the
+// both-removed mutation and green on each single one — stated here because a
+// comment claiming either is individually load-bearing would be false, and this
+// one said exactly that until the drill was run.
+//
+// The gateway's derivation is byte-identical to what it was before the other
+// lanes existed ("gwspan" / "gw-"), so no stored id moves.
+func observedSpanID(ev DevEvent) string {
+	lane, id := observedLane(ev)
+	if lane == "" {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(lane + "span\x1f" + ev.SessionID + "\x1f" + id))
+	return lane + "-" + hex.EncodeToString(sum[:16])
+}
+
+// observedSpan builds the span for a model call one of the OBSERVING lanes saw
+// — the local gateway, the local transport relay, or the local telemetry
+// receiver.
+//
+// Returns nil when the event is not one of those turns or carries no observed
 // evidence, so a hook-only install emits exactly what it emitted before.
-func gatewayObservedSpan(ev DevEvent) *wireSpan {
-	if ev.GatewayRequestID == "" || ev.Span == nil {
+//
+// It was gateway-only, and gating on GatewayRequestID alone was a latent defect
+// the moment ADR-0022 declared the other two discriminators: an event carrying
+// OtelRequestID or ProxyRequestID plus a populated Span was accepted, spooled,
+// signed and POSTed with NO span attached. That failure is this repo's signature
+// shape — a working-looking lane carrying none of its evidence — and it is
+// exactly what deleting the http.* keys would also cause.
+func observedSpan(ev DevEvent) *wireSpan {
+	lane, _ := observedLane(ev)
+	if lane == "" || ev.Span == nil {
 		return nil
 	}
 	s := ev.Span
@@ -173,7 +225,7 @@ func gatewayObservedSpan(ev DevEvent) *wireSpan {
 	}
 
 	return &wireSpan{
-		SpanID:    gatewaySpanID(ev),
+		SpanID:    observedSpanID(ev),
 		TraceID:   turnTraceID(ev),
 		Name:      spanNameLLMCompletion,
 		Kind:      spanKindClient,

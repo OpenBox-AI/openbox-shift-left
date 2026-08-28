@@ -21,7 +21,7 @@ func TestGatewayHeadersAreCappedOnTheWire(t *testing.T) {
 		resp[fmt.Sprintf("X-Pad-%03d", i)] = "v"
 	}
 
-	span := gatewayObservedSpan(DevEvent{
+	span := observedSpan(DevEvent{
 		SessionID:        "sess-1",
 		GatewayRequestID: "gwreq-1",
 		Span: &Span{
@@ -48,7 +48,7 @@ func TestGatewayHeadersAreCappedOnTheWire(t *testing.T) {
 }
 
 // TestGatewayHeaderCapIsDeterministic is the reason keys are sorted. Gateway
-// spans are re-emittable by design (gatewaySpanID mints a stable id so a re-emit
+// spans are re-emittable by design (observedSpanID mints a stable id so a re-emit
 // dedupes), so two emissions of the same exchange must produce the same bytes —
 // Go randomizes map iteration, and dropping "whatever came last" would not.
 func TestGatewayHeaderCapIsDeterministic(t *testing.T) {

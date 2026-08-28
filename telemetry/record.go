@@ -67,6 +67,23 @@ const eventNameAttr = "event.name"
 // dropped: the mapper's own caps are what decide egress, and a value that arrived
 // is evidence even when it arrived clipped.
 const (
-	maxAttrs          = 128
-	maxAttrValueBytes = 16 * 1024
+	maxAttrs = 128
+
+	// maxAttrValueBytes must stay LARGER than the wire cap, and the factor of 4
+	// is the worst case for UTF-8: client.capBody bounds egress at 65,536
+	// RUNES, which is up to 262,144 bytes.
+	//
+	// This bound was 16 KiB, and that was a defect of exactly the kind
+	// TestThinkingCollectionBoundExceedsTheWireCap exists to forbid. Content
+	// reaches this lane as ATTRIBUTES — tool_result.tool_input,
+	// user_prompt.prompt, assistant_response.response — so a collection bound
+	// below the wire cap truncates every one of them before the cap can act.
+	// Two consequences, and the second is worse. Real content would truncate
+	// ~4x tighter than the ruling (OD1(c)) blesses, silently. And the cap's
+	// mutation drill would go VACUOUS: it would only ever exercise a state the
+	// receiver cannot produce, so deleting the cap would leave the drill green.
+	//
+	// Total memory does not grow with this: MaxRequestBodyBytes (8 MiB) bounds
+	// what one request can carry, and it is the smaller number.
+	maxAttrValueBytes = 4 * 65536
 )

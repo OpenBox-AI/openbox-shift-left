@@ -146,7 +146,7 @@ identify the stale owner rather than incrementing.
 
 - [ ] encoding/endpoint probe + report (config input) — **BLOCKED: needs a listener + live client**
 - [x] `telemetry/` module + `go.work` + its own dependency guard test
-- [x] dependency tree + binary-size delta measured and recorded — **+16.5 MB, an open decision**
+- [x] dependency tree + binary-size delta measured and recorded — **+16.5 MB, DECIDED (OD5): one binary, mirroring `openbox gateway`**
 - [x] loopback-only config + deterministic port (8789; drilled)
 - [x] otlpreceiver wired, three signals, bounded reads set explicitly (8MiB body, 10s header)
 - [x] consumers bound to consumed fields only
