@@ -131,8 +131,9 @@ Both mutations were reverted and the module re-verified green.
 ## The socket run happened, and it found a defect in this change
 
 **2026-08-28, on the owner's machine** (bind available), the full suite ran over
-real TCP for the first time. **21 of 25 packages green, 4 tests failed — all four
-in tests this change had guarded with `RequireBind`.**
+real TCP for the first time. First pass: **21 of 25 packages green, 4 tests failed
+— all four in tests this change had guarded with `RequireBind`.** After the fix
+below: **25 of 25 green.**
 
 That is the point of the exercise, and it also indicts the port: a guard that
 skips a test on a bind-denied host means the port to `memhttptest` was never
@@ -170,9 +171,21 @@ in-process verifier.
 catch it and structure has to: *if a test needs `RequireBind`, its servers almost
 certainly need to be real `httptest` servers too.*
 
-**This fix is NOT verified by its author.** All four tests skip on a bind-denied
-host, so the local suite going green says nothing about them. A re-run on a
-bind-capable machine is the only evidence.
+**The fix is VERIFIED — on the owner's machine, not its author's.** All four tests
+report PASS with zero SKIP:
+
+```
+--- PASS: TestGatewayCommandActuallyCaptures (0.00s)
+--- PASS: TestGatewayWithoutADIDStillRelays (0.00s)
+--- PASS: TestSpooledGatewayEventReachesTheWire (0.00s)
+--- PASS: TestHookRealtimeDelivery (1.16s)
+```
+
+So **25 of 25 packages are green over real TCP**, and the two failure shapes that
+`RequireBind` had hidden are both closed. Worth stating why the author could not
+supply this evidence: those four tests skip on a bind-denied host by construction,
+so a green local suite says nothing about them. The verification had to come from
+a machine that binds.
 
 ### What the run DID confirm
 

@@ -110,6 +110,7 @@ about what egresses — no content field, gate or cap moves in phases 01–07.
 | | state |
 |---|---|
 | Tests with a verdict | **1140 / 1140** across 13 modules, **0 invisible** (was 205/840 in the 6 affected modules) |
+| Socket-verified | **25 / 25 packages green over real TCP** (owner's machine, 2026-08-28) |
 | Skips | 21, each naming the host capability it needs (19 new guards, 2 pre-existing opt-ins) |
 | Gates | **52/52** — 13 modules × `-race`, `vet`, `windows/amd64`, `linux/arm64`, `GOWORK=off` |
 | Conformance | 38 numbered cases run, 38 pass |
@@ -120,13 +121,18 @@ about what egresses — no content field, gate or cap moves in phases 01–07.
 on 09 + 11, and 13's live half gates on both. Nothing in 11 is blocked: the
 goproxy spike is the next unblocked unit of work on the critical path.
 
-**The socket run happened (2026-08-28, owner's machine).** 21 of 25 packages
-green over real TCP; `gateway`'s full 81 pass, so the in-memory substitution was
-faithful for the module with the most to lose. It also **found a defect the port
-introduced** — 4 tests whose servers must be reachable from another process or
-from `gateway`'s own Transport were pointed at in-memory pipes, and `RequireBind`
-had hidden that by skipping them. Fixed; **not re-verified by the author**, since
-those four skip on a bind-denied host. See the report.
+**The socket run happened, and it is now GREEN (2026-08-28, owner's machine).**
+First pass: 21 of 25 packages, with 4 failures — all in tests whose servers must
+be reachable from another process or from `gateway`'s own Transport, which the
+port had pointed at in-memory pipes while `RequireBind` hid it by skipping them.
+Fixed and **re-verified by the owner: 4 PASS, 0 SKIP → 25 of 25 packages green
+over real TCP.** `gateway`'s full 81 pass on both transports, so the in-memory
+substitution is faithful for the module with the most to lose.
+
+**This is the first socket-verified green run of the full unit + conformance suite
+in this repo's history** — every prior feature's status line reads "unit-verified,
+the testbed has NOT run", and those were verified on a host that could not bind.
+It is NOT the testbed: nothing stack-dependent is touched.
 
 **The evidence ceiling, stated plainly.** Everything else verified this session was
 verified over an **in-memory transport**. That measures payload, framing, gate,
