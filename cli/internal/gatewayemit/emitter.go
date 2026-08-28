@@ -303,6 +303,12 @@ const maxSessionIDLen = 128
 // Path separators are refused on top of the shared rule, because this one is
 // joined into a path: a session id of "../../x" would put a spool file outside
 // the spool directory.
+// NOTE (2026-08-28): printableASCII admits ':' , so a colon-bearing upstream id
+// combined with a colon-bearing session id could in principle make
+// "<session>:gateway:<id>" ambiguous the way telemetryemit.safeRequestID refuses
+// outright. Injectivity holds whenever either half is colon-free, and both
+// observed shapes are, so this is adversarial-only and not a live defect — but
+// the otel lane's stricter rule is the better one if these are ever unified.
 func usableSessionID(id string) bool {
 	if !printableASCII(id, maxSessionIDLen) {
 		return false

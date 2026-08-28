@@ -274,3 +274,56 @@ func TestEventIDIsDeterministic(t *testing.T) {
 		t.Error("different calls share an idempotency key — core would drop one")
 	}
 }
+
+// TestSessionIDIsValidatedLikeAPath is the defect this test was written for.
+//
+// session.id is a provider value off the same unauthenticated loopback listener
+// as everything else, and it does not merely become the activity_id prefix and
+// core's run_id — every spool consumer in this repo turns it into a FILENAME
+// (`<session>.jsonl`, hookflow/spool.go). The mapper originally checked only
+// non-empty, so a local process could have named the file.
+//
+// gatewayemit.usableSessionID already made this refusal; the asymmetry was the
+// bug.
+func TestSessionIDIsValidatedLikeAPath(t *testing.T) {
+	for name, bad := range map[string]string{
+		"parent traversal":  "../../etc/passwd",
+		"a bare dot":        ".",
+		"a bare double dot": "..",
+		"a backslash":       `..\..\win`,
+		"a colon":           "sess:1",
+		"a newline":         "sess\n1",
+		"empty":             "",
+	} {
+		t.Run(name, func(t *testing.T) {
+			rec := apiRequest(map[string]string{"session.id": bad})
+			if bad == "" {
+				delete(rec.Attrs, "session.id")
+			} else {
+				rec.Attrs["session.id"] = bad
+			}
+			if ev, ok := elected().EventFor(rec); ok {
+				t.Errorf("emitted an event whose session id is %q — it reaches a path join as %q.jsonl", bad, ev.SessionID)
+			}
+		})
+	}
+	// A real session id must still pass, or the guard is just an outage.
+	rec := apiRequest(map[string]string{"session.id": "b3f1c2d4-0000-4000-8000-000000000001"})
+	if _, ok := elected().EventFor(rec); !ok {
+		t.Error("a UUID session id was rejected — all 59 in the corpus are UUIDs")
+	}
+}
+
+// TestZeroTimestampIsDropped: record.go binds the record's own time and leaves a
+// zero for "the mapper to decide what to do about". This is the decision.
+//
+// Formatting a zero time yields a VALID RFC3339 string in year 0001, so nothing
+// downstream rejects it — the turn is simply filed a millennium out and every
+// window and latency reader quietly disagrees with every other lane.
+func TestZeroTimestampIsDropped(t *testing.T) {
+	rec := apiRequest(nil)
+	rec.Timestamp = time.Time{}
+	if ev, ok := elected().EventFor(rec); ok {
+		t.Errorf("emitted a turn stamped %q", ev.Timestamp)
+	}
+}

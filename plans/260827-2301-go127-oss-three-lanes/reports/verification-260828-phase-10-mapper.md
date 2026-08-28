@@ -13,7 +13,7 @@ Delivered: `api_request` → a conformant `TurnCompleted` under the `:otel:`
 namespace, carrying the model id and all four token counts where
 `ExtractModelMetricsFromActivity` reads them; the election-suppression invariant;
 identity safety on the provider's request id; the synthesized-span honesty
-marker; and a sentinel asserted on real POSTed bytes. **Seven mutation drills,
+marker; and a sentinel asserted on real POSTed bytes. **Nine mutation drills,
 all red on deletion, all run rather than claimed.**
 
 Deferred: body attachment, `tool_decision`/`tool_result`, hook engine-health, and
@@ -62,7 +62,7 @@ That is the shape ADR-0014 specifies and core's extractor reads, in the `:otel:`
 namespace ADR-0022 declared, with the classification keys that make core
 recompute `semantic_type` as `llm_completion`.
 
-## The seven drills
+## The nine drills
 
 Each mutation was applied, the named test observed RED, and the mutation
 reverted. Two of them were **inconclusive on the first attempt** — the mutation
@@ -77,6 +77,8 @@ failed to compile, and a build failure is not a red test. They were redone.
 | 5 | `MaxAttrValueBytes` reverted to 16 KiB | `TestAttrValueBoundExceedsTheWireCap` RED, naming the measured 65,536-rune cap |
 | 6 | a production file imports `memhttptest` | `TestMemhttptestStaysTestOnly` RED |
 | 7 | a bypass note starts claiming prevention | `TestReportNeverClaimsPreventionWithoutAListener` RED |
+| 8 | session-id validation reverted to an emptiness check | **6** traversal cases ship, incl. `../../etc/passwd` |
+| 9 | zero-timestamp guard removed | a turn ships stamped `0001-01-01T00:00:00Z` |
 
 Drill 3 is the one that matters most. Copying the attribute map into metadata is
 the natural thing to write, and it routes content around the content gate
@@ -204,6 +206,42 @@ about.
 **The binary is still 17 MB.** OD5's +16.5 MB has not materialized because
 nothing links the mapper yet — the linker is package-granular, and no production
 package imports it. That cost lands with the daemon subcommand, not here.
+
+## Two defects the advisory review found, and one correction to its advice
+
+Both were real, in code committed an hour earlier, and both are now fixed and
+drilled (drills 8 and 9).
+
+- **`session.id` was checked only for emptiness.** It is a provider value off the
+  same unauthenticated loopback listener as everything else, and it does not
+  merely become the `activity_id` prefix and core's `run_id` — every spool
+  consumer in this repo turns it into a **filename** (`<session>.jsonl`,
+  `hookflow/spool.go:84`). `gatewayemit.usableSessionID` already refused
+  `/ \ . ..` for exactly that reason; the asymmetry was the bug. Now
+  charset-checked, which makes traversal *unrepresentable* rather than forbidden.
+  Drill 8: reverting to the emptiness check lets **6** traversal cases ship,
+  including `../../etc/passwd`.
+- **A zero record timestamp was formatted and shipped.** `record.go` binds the
+  record's own time and explicitly leaves a zero for "the mapper to decide what to
+  do about" — and the mapper did not decide. `time.Time{}` formats to a *valid*
+  RFC3339 string, so nothing downstream rejects it; the turn is simply filed in
+  year 0001 and every window and latency reader quietly disagrees with every other
+  lane. Drill 9 confirms.
+
+**The correction:** the review's proposed CI guard, "assert the skip count is 0
+on the runner", would **break CI**. Two of the 21 skips are pre-existing opt-ins
+that always skip —`TestAcceptanceStockCoreAcceptsEmittedEvents` needs a live core
+and `TestRealInstallWritesTheExpectedArtifact` writes a real launchd unit. The
+correct assertion is narrower: **no skip may cite a bind or DNS capability.** That
+still closes the green-by-omission hole one level up without failing on the
+deliberate opt-ins. Not implemented here — it is a CI-config change affecting
+everyone's builds, so it is the owner's call.
+
+Verified rather than accepted, from the same review: `isLLMCall` takes no status
+input (`openbox-core/internal/content/session.go:451-476`), so omitting
+`http_status` does not break the `llm_completion` classification; and no core
+reader consumes `total`, so withholding it on a malformed component costs nothing
+downstream.
 
 ## Unresolved questions
 

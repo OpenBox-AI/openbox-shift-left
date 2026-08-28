@@ -142,6 +142,26 @@ identify the stale owner rather than incrementing.
    last N minutes), because reachable ≠ recording.
 10. Control test: real command → real receiver → real spool, no fake at either end.
 
+## Pins inherited from phase 10's mapper (2026-08-28)
+
+The mapper exists and is suppressed until elected; these are requirements on the
+DAEMON that will call it, recorded here because the mapper has no way to satisfy
+them alone.
+
+- **A drop must be countable.** `EventFor` collapses "not an api_request", "no
+  session", "no id", "malformed id" and "zero timestamp" into one silent `false`.
+  That is correct for the first case and dangerous for the rest: this phase's own
+  argument is that erroring on an unfamiliar event NAME would turn upstream drift
+  into a lane outage — and id-format drift is the same class, with the same
+  compensating control (OD4) also unbuilt. The daemon must count or
+  throttled-warn on drops, the shape `gatewayemit`'s emitter already uses. A lane
+  that goes quiet because every record now fails validation must not look
+  identical to a quiet session.
+- **Two validations are already done in the mapper** and must not be re-relaxed:
+  `session.id` is charset-checked because every spool consumer turns it into a
+  filename (`<session>.jsonl`), and a zero record timestamp is dropped rather
+  than formatted into year 0001.
+
 ## Todo
 
 - [ ] encoding/endpoint probe + report (config input) — **BLOCKED: needs a listener + live client**

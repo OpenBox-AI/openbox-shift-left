@@ -106,9 +106,16 @@ const synthesizedLLMURL = "https://api.anthropic.com/v1/messages"
 
 func (m *Mapper) turnFor(rec telemetry.Record) (client.DevEvent, bool) {
 	session := rec.Attrs["session.id"]
-	if session == "" {
-		// session_id maps to core's run_id and Emit rejects an empty one. Failing
-		// here keeps the cause next to the record that caused it.
+	if !safeSessionID(session) {
+		return client.DevEvent{}, false
+	}
+	if rec.Timestamp.IsZero() {
+		// record.go binds the record's own time and leaves a zero to "the mapper
+		// to decide what to do about". This is the decision: drop it. Formatting a
+		// zero time yields a valid RFC3339 string in year 0001, so nothing
+		// downstream would reject it — the turn would simply be filed a
+		// millennium out, and every window and latency reader would quietly
+		// disagree with every other lane.
 		return client.DevEvent{}, false
 	}
 	reqID, ok := requestIDFrom(rec.Attrs)
@@ -181,6 +188,30 @@ func requestIDFrom(attrs map[string]string) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+// safeSessionID validates the session id, which is a provider value arriving off
+// the same unauthenticated loopback listener as everything else here.
+//
+// It needs at least as much rigor as the request id, and arguably more: it is the
+// activity_id PREFIX, it becomes core's run_id, and every spool consumer in this
+// repo turns it into a FILENAME (`<session>.jsonl`, hookflow/spool.go). An
+// unchecked value from a local process therefore reaches a path join.
+//
+// The charset does the structural work — no `/` or `\` can survive it, so
+// traversal is unrepresentable rather than merely forbidden — and `.`/`..` are
+// rejected as whole tokens on top, because both pass a charset test and neither
+// is a filename anyone wants. Measured safe against the corpus: all 59 real
+// session ids are UUIDs.
+//
+// gatewayemit.usableSessionID makes the same refusal for the same reason; the
+// rules are deliberately NOT shared, because that one's printableASCII admits
+// ':' and this lane's namespace argument forbids it.
+func safeSessionID(s string) bool {
+	if s == "." || s == ".." {
+		return false
+	}
+	return safeRequestID(s)
 }
 
 func safeRequestID(s string) bool {

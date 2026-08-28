@@ -38,6 +38,20 @@ rather than discovered mid-build.
    would have exercised only states the receiver cannot produce. Raised to
    4x65536; the relation needs the cross-module test that lands with the mapper.
 
+**When body attachment is built, two things must land in the SAME commit as the
+first file open, not after it:**
+
+1. A path-escape test named after the attempt — a `body_ref` resolving outside the
+   configured root is refused, asserted.
+2. The reader takes an `os.Root` (or `fs.FS`), **not a path string**. That makes
+   an unconfined open *unrepresentable* rather than merely forbidden, which is the
+   difference between a control and a convention. `os.Root` is also immune to the
+   symlink TOCTOU that `EvalSymlinks` + prefix comparison is not.
+
+Building the confinement *before* the first open would be a containment function
+with no production caller — the `WithCapture` seam shape, and its drills would be
+vacuous.
+
 Two corrections from the corpus (see the measure report): identity attributes are
 **record**-level, not resource-level as this phase's Architecture section says;
 and model bodies arrive as **`body_ref` filesystem paths**, not inline — which on
