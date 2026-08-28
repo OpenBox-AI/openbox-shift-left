@@ -2,8 +2,8 @@
 title: "Go 1.27 + OSS foundation, then Three Lanes, One Pipeline"
 description: "One sequence, two stages: raise the Go floor and replace hand-rolled components with maintained libraries, then fold openbox-logger's telemetry + transport observation into shift-left as native Go services under the 2026-08-27 owner rulings."
 status: in-progress
-progress: "stage A complete; stage B 08 done, 09+10 partial, 11-14 pending (~57h of ~89h)"
-updated: 2026-08-28
+progress: "stage A complete; stage B 08 done, 09+10 partial, 11 done, 12-14 pending (~72h of ~89h)"
+updated: 2026-08-29
 priority: P1
 effort: ~89h (14 phases: stage A ~36h, stage B ~53h)
 branch: feat/tool-content-capture
@@ -104,8 +104,8 @@ about what egresses — no content field, gate or cap moves in phases 01–07.
 
 ## Progress (2026-08-28)
 
-**Stage A complete. Stage B: 08 done, 09 and 10 partial, 11–14 pending.**
-~57h of ~89h delivered by phase weight; 4 of the 7 stage-B phases remain.
+**Stage A complete. Stage B: 08 done, 09 and 10 partial, 11 done, 12–14 pending.**
+~72h of ~89h delivered by phase weight; 3 of the 7 stage-B phases remain.
 
 | | state |
 |---|---|
@@ -116,10 +116,11 @@ about what egresses — no content field, gate or cap moves in phases 01–07.
 | Conformance | 38 numbered cases run, 38 pass |
 | Binary | still 17 MB — the mapper is unlinked, so OD5's +16.5 MB arrives with the daemon subcommand |
 
-**What actually blocks the rest.** Phase 09's daemon half needs a host that can
-`bind`, and it is the mapper's missing caller — so 10 cannot be closed, 12 gates
-on 09 + 11, and 13's live half gates on both. Nothing in 11 is blocked: the
-goproxy spike is the next unblocked unit of work on the critical path.
+**What actually blocks the rest.** Phase 11 is done, so 12 is unblocked and is
+the next unit of work on the critical path — and it is now the home of THREE
+deferred service lifecycles (telemetry's from 09, transport's from 11) plus the
+election, which is why they were deferred rather than hand-copied a third time.
+13's live half still gates on a bind-capable host and a stack.
 
 **The socket run happened, and it is now GREEN (2026-08-28, owner's machine).**
 First pass: 21 of 25 packages, with 4 failures — all in tests whose servers must
@@ -202,7 +203,7 @@ by any of this.
 | 08 | [ADR-0022 + contract v1.6 + ADR-0021 amendments](phase-08-adr-contract-decision.md) | 01 (02 strongly recommended first) | **done\*\*\*** | 4h |
 | 09 | [Telemetry receiver daemon (otlpreceiver, loopback)](phase-09-telemetry-receiver-daemon.md) | 04, 08 | **mostly done†** | 8h |
 | 10 | [Telemetry mappers → contract (`:otel:`)](phase-10-telemetry-mappers.md) | 09 | **partial‡** | 8h |
-| 11 | [Transport proxy as native service (`:proxy:`, goproxy)](phase-11-transport-proxy-service.md) | 04, 10 | **gate PASSED§** | 15h |
+| 11 | [Transport proxy as native service (`:proxy:`, goproxy)](phase-11-transport-proxy-service.md) | 04, 10 | **done§** | 15h |
 | 12 | [One-command install/remove + producer election](phase-12-one-command-and-election.md) | 09, 11 | pending | 6h |
 | 13 | [Conformance, fixtures & probe-A instrument](phase-13-conformance-fixtures-probe.md) | 10, 11 | pending | 8h |
 | 14 | [Coverage matrix & docs reconciliation](phase-14-coverage-and-docs.md) | 09–13 | pending | 4h |
@@ -228,7 +229,48 @@ failing.**
 [verification-260828-test-visibility-restored](reports/verification-260828-test-visibility-restored.md).
 It also repaired `TurnStarted`, beyond the phase's written scope.
 
-**§** **Phase 11's spike GATE PASSED (2026-08-29)** — 5/5 on a real socket:
+**§** **Phase 11 is DONE (2026-08-29)** — the lane records end to end, proven
+without a socket:
+[verification-260829-phase-11-transport-lane](reports/verification-260829-phase-11-transport-lane.md).
+Four things came out of it that the phase file did not anticipate.
+
+**The tee was not built, and that is the substance of the phase.** goproxy
+HIJACKS the allowlisted CONNECT; we terminate TLS and serve the EXISTING
+`gateway.Gateway` over it. A tee would have been a second implementation of
+byte-identical forwarding, per-chunk SSE, the fingerprint-before-redact ordering
+and the 64KB cap — on the enforcement path — and would additionally have run
+through goproxy's MITM response copy, which the spike explicitly did NOT measure.
+Three phase items collapsed as a result: the tee is MOOT, the "export the gateway
+seam" step is a NO-OP (the surface was already exported), and the `client/`
+`:proxy:` edit had already landed in phase 08. The credential-path surface is
+therefore SMALLER than planned — `{goproxy, gateway}`, not
+`{goproxy, gateway, client, decision}`.
+
+**A defect neither the phase nor the plan named: the self-loop.** `gateway.New`
+and `NewIdentityProxy` both set `http.ProxyFromEnvironment`. Phase 12 activates
+this lane by putting `HTTPS_PROXY` at our own port into the CLIENT's environment
+— and a daemon that inherits it dials ITSELF, recursing until sockets run out.
+`transport.New` clears the six variables, in the constructor rather than by
+asking a caller to remember, because `net/http` caches the environment behind a
+`sync.Once` on first use and a later clear does nothing.
+
+**What is proven, and what is not.** The control test drives a real CONNECT, a
+real TLS handshake against the real project CA, the real gateway relay, the real
+emitter and a real spool file — with NO fake in it, on a host that denies bind.
+One substitution: a `net.Pipe` and an upstream at a refused loopback port, which
+works because gateway emits a capture on the upstream-unreachable path. So
+**no response body has ever traversed this lane**, and byte-identity on the
+CONNECT path — the spike's own unresolved item 3 — is still unrun. Six mutation
+drills were RUN and all go red on deletion.
+
+**`GOWORK=off` for `transport/` is unverifiable on the dev host** (`x/net
+v0.50.0` absent from the module cache, sandbox denies the write). Already true
+before this change; needs a `go mod tidy` on a normal host before release, since
+the release path sets `GOWORK=off` and `cli` now imports `transport`.
+
+The spike's own record follows.
+
+**Phase 11's spike GATE PASSED (2026-08-29)** — 5/5 on a real socket:
 byte-identical forward, no injected hop headers, per-chunk SSE, and a streaming
 tee that sees the whole body without buffering the client's stream. Three
 amendments came out of it. Byte-identity needs **three** non-default settings, not
@@ -352,8 +394,13 @@ Stage B — convergence:
    landing it in `governance_events` additionally needs a live stack (the
    standing D6 limit).
 8. With transport installed, that same session's model calls pass an in-path
-   relay (capture live; refusal dormant pending probe A). **NOT MET** — phase 11
-   not started. Unblocked, unlike 7.
+   relay (capture live; refusal dormant pending probe A). **Half met.** The
+   RELAY and its capture are met and drilled: a real CONNECT is TLS-terminated
+   with the project CA and served by the existing `gateway.Gateway`, and the
+   evidence reaches a real spool file under `:proxy:`. Refusal is dormant, and
+   structurally so — no evaluator is constructed. What is NOT met is
+   "**installed**": the service lifecycle is phase 12's, alongside telemetry's.
+   And no response body has traversed the lane yet.
 9. Exactly one model-call producer emits per session; `activity_id`s never
    collide across `:otel:` / `:gateway:` / `:proxy:`.
    **Half met, and the two halves are different controls.** Non-collision is

@@ -16,8 +16,37 @@
 
 - Date: 2026-08-27 · Priority: P1 · Effort: 15h (12h + 3h goproxy spike/tee,
   validation round 2)
-- Implementation status: **spike done, gate PASSED (2026-08-29)** · Review status: pending
-- Report: [verification-260829 goproxy spike](reports/verification-260829-phase-11-goproxy-spike.md)
+- Implementation status: **DONE (2026-08-29)** — capture live, refusal dormant,
+  service lifecycle deferred to phase 12 · Review status: pending
+- Reports: [gate/spike](reports/verification-260829-phase-11-goproxy-spike.md) ·
+  [implementation](reports/verification-260829-phase-11-transport-lane.md)
+
+## Outcome (2026-08-29): the design changed, and three items became no-ops
+
+**The tee was not built.** goproxy HIJACKS the allowlisted CONNECT
+(`ConnectHijack`); we terminate TLS with the project CA and serve the EXISTING
+`gateway.Gateway` over the connection. The tee would have been a second
+implementation of byte-identical forwarding, per-chunk SSE, the
+fingerprint-before-redact ordering and the 64KB cap — on the enforcement path —
+and would have run through goproxy's MITM response copy, which the spike
+explicitly did NOT measure. Steps 2 and 7 are therefore moot and a no-op
+respectively, and the `client/` edit had already landed in phase 08.
+
+**The credential surface is SMALLER than planned:** `{goproxy, gateway}`, not
+`{goproxy, gateway, client, decision}`. Nothing in `transport/` imports `client`
+or `decision`.
+
+**A defect this phase did not name was found and fixed: the self-loop.** Both
+legs read `http.ProxyFromEnvironment`, so a daemon inheriting phase 12's
+`HTTPS_PROXY` would dial itself until sockets ran out. `transport.New` clears it,
+in the constructor because `net/http` caches the environment behind a
+`sync.Once`.
+
+**Deferred to phase 12** (same reasoning the plan already applied to
+`telemetryservice`): `transportservice`, install proof-order, rollback, doctor
+block, env activation. **Deferred to phase 13:** injection mode and live gate
+wiring — dormancy here is structural (no evaluator exists) and held by an
+AST-walking test.
 
 ## Gate answer (2026-08-29): PROCEED
 
@@ -180,28 +209,37 @@ goproxy's hooks to the capture path, config, service wiring.
 
 ## Todo
 
-- [ ] **spike gate passed and recorded** (byte-identity + per-chunk SSE), or
-      stopped and reported
-- [ ] streaming tee prototyped: capture without buffering, first-byte latency held
-- [ ] `transport/` module + go.work + own guard test; dependency delta recorded
-- [ ] CA generate/persist/permission-refusal; goproxy consumes it
-- [ ] exact-host allowlist + confusable negative tests
-- [ ] loopback-only config, distinct port
-- [ ] CONNECT + TLS terminate + blind tunnel fallback (goproxy)
-- [ ] gateway capture/gate seam exported (smallest surface), reused — no fork
-- [ ] `:proxy:` emit path + span attributes
-- [ ] gate wired, refusal dormant + dormancy test
-- [ ] service unit via phase-04 mechanism, log, install proof-order, rollback
-- [ ] doctor block incl. CA scope
-- [ ] injection mode, off by default
-- [ ] `-race` + both cross-compiles
+- [x] **spike gate passed and recorded** (byte-identity + per-chunk SSE)
+- [x] ~~streaming tee prototyped~~ — **MOOT.** `gateway.streamTo` already tees to
+      `captureSink`; the hijack design reuses it rather than reimplementing it
+- [x] `transport/` module + go.work + own guard test; the guard FIRED on the new
+      `gateway` require and the allowlist now records the decision
+- [x] CA generate/persist/permission-refusal — plus a **name constraint** the
+      phase did not ask for, which is what survives a key leak
+- [x] exact-host allowlist + confusable negative tests (ASCII-only fold)
+- [x] loopback-only config, port 8790
+- [x] CONNECT + TLS terminate + blind tunnel fallback (goproxy)
+- [x] ~~gateway capture/gate seam exported~~ — **NO-OP.** The needed surface was
+      already exported; recorded rather than invented
+- [x] `:proxy:` emit path — a `Lane` on the existing emitter, not a second
+      package; an unset lane is REFUSED, never defaulted
+- [x] gate NOT wired; dormancy is structural and AST-asserted
+- [ ] service unit, install proof-order, rollback → **phase 12**
+- [ ] doctor block incl. CA scope → **phase 12**
+- [ ] injection mode, off by default → **phase 13**
+- [x] `-race` (14 modules) + both cross-compiles + vet
+- [ ] `GOWORK=off` for `transport/` — **unverifiable on the dev host** (x/net
+      v0.50.0 absent from the module cache, sandbox denies the write); already
+      true before this change, needs a `go mod tidy` on a normal host
 
 ## Success criteria
 
 - A desktop session's model calls are captured with real provider request ids.
-- Bytes forwarded are identical: header order, `anthropic-beta`, `system` array
-  order, and SSE chunk boundaries preserved (asserted, not assumed — on the
-  goproxy path, not just the old gateway path).
+- Bytes forwarded are identical: `anthropic-beta`, `system` array order, and SSE
+  chunk boundaries preserved (asserted, not assumed — on the goproxy path, not
+  just the old gateway path). **"Header order" is STRUCK: unachievable in Go, see
+  the gate amendments above. NOT YET MET on the CONNECT path** — no response body
+  has traversed this lane, because the control test's upstream always refuses.
 - A non-allowlisted host is tunnelled with zero capture and zero TLS interception.
 - Removing the service deletes the CA; no system trust store entry ever existed.
 - `gateway/`'s guard still passes with its two-entry allowlist — goproxy appears
