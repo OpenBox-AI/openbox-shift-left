@@ -138,9 +138,16 @@ Both mutations were reverted and the module re-verified green.
 
 ### Plan acceptance criterion 2 is now met
 
-**Conformance C1–C42: 38 cases run, 38 pass, 0 fail.** C1–C7, C10–C16, C18–C42.
-C8 and C9 do not exist — both were deliberately deleted (`enforce_conformance_test.go:208,213`,
-ADR-0006). The assertions are **unmodified**; what changed is the listener
+**Conformance: 38 numbered cases run, 38 pass, 0 fail.** The census, because a
+report arguing "count declared tests against verdicts" cannot carry an
+off-by-one of its own: exactly 38 `t.Run("C…")` subtests exist — C1–C7,
+C10–C16, C18–C38, C40–C42. **Three numbers do not exist**: C8 and C9 were
+deliberately deleted under ADR-0006 (`enforce_conformance_test.go:208,213`) and
+**C17 under ADR-0017** (`enforce_evaluate_test.go:573` — there is no local
+verdict left to short-circuit on). **C39 is not a subtest at all**: it runs as
+`TestContentCaptureCredentialCoverage`
+(`content_conformance_test.go:512`), and it passes. The assertions are
+**unmodified**; what changed is the listener
 underneath them, which is the caveat to carry rather than round off.
 
 That retires the standing "C1–C41 DID NOT RUN" caveat on **phase 08**, whose

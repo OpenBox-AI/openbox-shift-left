@@ -10,7 +10,7 @@
 
 - Date: 2026-08-27 · Priority: P1 · Effort: 8h
 - Implementation status: **started (2026-08-28)** · Review status: pending
-- Reports: [measure-260828 attribute inventory](reports/measure-260828-otel-attribute-inventory.md)
+- Reports: [measure-260828 attribute inventory](reports/measure-260828-otel-attribute-inventory.md) · [verification-260828 mapper](reports/verification-260828-phase-10-mapper.md)
 - Turn spooled OTel records into normalized DevEvents that pass the existing
   pipeline unchanged, plus OD4's silence finding.
 
@@ -124,15 +124,20 @@ an unauthenticated loopback listener is a local-file-read oracle and needs
 ## Todo
 
 - [x] attribute inventory from real corpus — 19 event types, per-event keys, value types
-- [ ] `api_request` → turn pair (usage/model/cost/ids)
-- [ ] bodies → observed span (gated, redacted, capped, `http_status_code`)
-- [ ] `tool_decision` → metadata, never `signal_args` (+ negative test)
-- [ ] `tool_result` → outcome where hooks are silent
-- [ ] `hook_execution_*` → engine-health signal
-- [ ] OD4 silence finding
-- [ ] `contentMetadataKeys` updated
-- [ ] sentinel + both mutation drills run and recorded
-- [ ] `usage.go` untouched; its sentinel still green
+- [x] `api_request` → **TurnCompleted** (model + 4 token counts + duration + ids) — `cli/internal/telemetryemit`
+- [x] election-suppression: `Policy`'s ZERO VALUE emits nothing (drilled)
+- [x] identity safety: `otel_request_id` bounded + charset-checked, ':' rejected (drilled)
+- [x] the otel span is marked `openbox.span_synthetic`; the in-path lanes are not (drilled)
+- [x] sentinel: no content on the wire at EITHER posture, on real POSTed bytes (drilled — wholesale `Attrs`→metadata turns it red)
+- [x] the `maxAttrValueBytes` ≥ 4x wire-cap relation is now a TEST, not a comment (drilled)
+- [ ] bodies → observed span — **DEFERRED**: `body_ref` is a filesystem path, so this needs the `os.Root` confinement root, which follows phase 09's unmade env-key decision. No file is opened today, so no oracle exists yet; the containment must land in the SAME change as the first body read.
+- [ ] `tool_decision` → metadata, never `signal_args` (+ negative test) — **DEFERRED**: needs "where the hook lane is silent", which is cross-lane knowledge the election (phase 12) supplies. Emitting now doubles Tool Health rows.
+- [ ] `tool_result` → outcome where hooks are silent — **DEFERRED**, same reason
+- [ ] `hook_execution_*` → engine-health signal — **DEFERRED (yagni)**: `doctor` already detects a duplicate engine; a second continuous path adds no capability
+- [ ] OD4 silence finding — **DEFERRED**: needs the daemon to schedule a window check, and the daemon half is blocked. A pure function with no caller is the WithCapture shape.
+- [x] `contentMetadataKeys` — nothing to add: this slice binds no content key (asserted both structurally and on the wire)
+- [x] sentinel + drills run and recorded (7 drills, all red on deletion)
+- [x] `usage.go` untouched (zero diff); its sentinel still green
 
 ## Success criteria
 

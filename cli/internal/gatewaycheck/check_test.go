@@ -202,29 +202,62 @@ func TestReportNeverClaimsPrevention(t *testing.T) {
 		func() { writeSettings(t, managedPath, "http://"+addr) },
 	} {
 		setup()
-		r := Inspect(home, managedPath, dialWait, nil)
-		all := strings.ToLower(strings.Join(r.BypassNotes, " "))
-		// Affirmative CLAIMS, not the vocabulary. "not prevented" and "Prevention
-		// needs the org's MDM" are exactly the honest phrasings, so a check that
-		// banned the word "prevented" would push the wording in the wrong
-		// direction — which is how this assertion first failed.
-		for _, forbidden := range []string{
-			"cannot bypass", "cannot be bypassed", "is prevented", "bypass is prevented",
-			"impossible", "tamper-proof", "tamper proof", "guaranteed", "fully prevented",
-			"no way to bypass",
-		} {
-			if strings.Contains(all, forbidden) {
-				t.Errorf("report claims prevention with %q: %v", forbidden, r.BypassNotes)
-			}
+		assertNeverClaimsPrevention(t, Inspect(home, managedPath, dialWait, nil))
+	}
+}
+
+// TestReportNeverClaimsPreventionWithoutAListener runs the same wording control
+// on a host that cannot bind.
+//
+// It exists because the bind-requiring version above is SKIPPED in a sandbox
+// that denies bind — which is where most iteration happens — and this is the
+// product's own overstatement guard. Leaving it unrunnable there means the one
+// check that stops the CLI claiming prevention is absent exactly when someone is
+// editing the wording.
+//
+// Nothing about the wording depends on the gateway being alive; only the address
+// does. Pointing at a dead port covers the not-answering branch as well, so this
+// is broader coverage than the original, not a weaker substitute.
+func TestReportNeverClaimsPreventionWithoutAListener(t *testing.T) {
+	home := t.TempDir()
+	managedPath := filepath.Join(t.TempDir(), "managed-settings.json")
+	// Port 1 needs root to bind, so nothing local answers here.
+	const deadAddr = "127.0.0.1:1"
+
+	for _, setup := range []func(){
+		func() {},
+		func() { writeSettings(t, filepath.Join(home, ".claude", "settings.json"), "http://"+deadAddr) },
+		func() { writeSettings(t, managedPath, "http://"+deadAddr) },
+	} {
+		setup()
+		assertNeverClaimsPrevention(t, Inspect(home, managedPath, dialWait, nil))
+	}
+}
+
+// assertNeverClaimsPrevention holds the wording rule for one report.
+func assertNeverClaimsPrevention(t *testing.T, r Report) {
+	t.Helper()
+	all := strings.ToLower(strings.Join(r.BypassNotes, " "))
+	// Affirmative CLAIMS, not the vocabulary. "not prevented" and "Prevention
+	// needs the org's MDM" are exactly the honest phrasings, so a check that
+	// banned the word "prevented" would push the wording in the wrong
+	// direction — which is how this assertion first failed.
+	for _, forbidden := range []string{
+		"cannot bypass", "cannot be bypassed", "is prevented", "bypass is prevented",
+		"impossible", "tamper-proof", "tamper proof", "guaranteed", "fully prevented",
+		"no way to bypass",
+	} {
+		if strings.Contains(all, forbidden) {
+			t.Errorf("report claims prevention with %q: %v", forbidden, r.BypassNotes)
 		}
-		// The honest framing must actually be present, not merely un-forbidden.
-		if !strings.Contains(all, "detectable") && !strings.Contains(all, "detect") {
-			t.Errorf("no note frames this as detection: %v", r.BypassNotes)
-		}
-		// And it must never go quiet: silence reads as prevention.
-		if len(r.BypassNotes) == 0 {
-			t.Error("no bypass note at all; silence trains a reader to assume prevention")
-		}
+	}
+	// The honest framing must actually be present, not merely un-forbidden.
+	if !strings.Contains(all, "detectable") && !strings.Contains(all, "detect") {
+		t.Errorf("no note frames this as detection: %v", r.BypassNotes)
+	}
+	// And it must never go quiet: silence reads as prevention.
+	if len(r.BypassNotes) == 0 {
+		t.Error("no bypass note at all; silence trains a reader to assume prevention")
 	}
 }
 

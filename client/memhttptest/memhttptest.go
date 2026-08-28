@@ -16,7 +16,15 @@
 // evidence about bind, listen, TLS or the dialer, and no test should read it
 // that way.
 //
-// Test-only. Nothing in production imports this package.
+// One fidelity gap to know about before writing a test against this: writes are
+// BUFFERED (see bufferedPipe), so a write error surfaces one write late and an
+// error on the final write before Close is discarded. Behaviour that depends on
+// a write deadline firing against a stalled reader — gateway's writeIdleTimeout,
+// for one — cannot be regression-tested here. Guard such a test with
+// RequireBind instead.
+//
+// Test-only. Nothing in production imports this package, and
+// TestMemhttptestStaysTestOnly holds that.
 package memhttptest
 
 import (
@@ -89,10 +97,14 @@ func install() error {
 		}
 		next.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
 			mu.RLock()
-			l := registry[addr]
+			l, known := registry[addr]
 			mu.RUnlock()
-			if l != nil {
+			switch {
+			case l != nil:
 				return l.dial(ctx)
+			case known:
+				// Registered once, now closed. Refuse rather than fall through.
+				return nil, fmt.Errorf("memhttptest: dial %s: connection refused (server closed)", addr)
 			}
 			return fallback(ctx, network, addr)
 		}
@@ -160,7 +172,13 @@ func (s *Server) Close() {
 	s.closed.Do(func() {
 		mu.Lock()
 		for _, a := range s.addrs {
-			delete(registry, a)
+			// Leave a REFUSING sentinel rather than deleting the entry. Deleting
+			// it makes a later dial of this URL fall through to a REAL dial of
+			// 127.0.0.1:<synthetic port> — which on a bind-capable machine can
+			// reach an unrelated local service and, worst case, POST a signed
+			// governance payload at it. "Connection refused" is both safer and a
+			// truer emulation of a stopped server.
+			registry[a] = nil
 		}
 		mu.Unlock()
 		s.lis.Close()
@@ -254,11 +272,17 @@ func RequireResolvableHost(t TB, host string) {
 // only the dialer.
 func DialContext(ctx context.Context, network, addr string) (net.Conn, error) {
 	mu.RLock()
-	l := registry[addr]
+	l, known := registry[addr]
 	mu.RUnlock()
-	if l != nil {
+	switch {
+	case l != nil:
 		return l.dial(ctx)
+	case known:
+		return nil, fmt.Errorf("memhttptest: dial %s: connection refused (server closed)", addr)
 	}
+	// The fallback's timeouts are this package's, not any caller's. A test
+	// asserting DIAL LATENCY would be measuring the wrong constant here —
+	// gateway's production dialer is 10s/30s — so do not write one against this.
 	return (&net.Dialer{Timeout: 30 * time.Second, KeepAlive: 30 * time.Second}).DialContext(ctx, network, addr)
 }
 

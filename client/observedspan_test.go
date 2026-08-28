@@ -189,3 +189,44 @@ func TestNoLaneStillTakesTheHookPath(t *testing.T) {
 		t.Errorf("a turn with no observing lane built an observed span: %+v", span)
 	}
 }
+
+// TestOnlyTheTelemetryLaneMarksItsSpanSynthetic pins the honesty control.
+//
+// The in-path lanes SAW the method, URL and status they report. The telemetry
+// lane did not — Claude Code's export carries neither a method nor a URL — so
+// the client synthesizes both to reach core's isLLMCall, which is the only path
+// to an llm_completion classification. An unmarked synthetic span is
+// indistinguishable from real captured traffic in a stored row, and a governance
+// product asserting it observed a request it inferred is the overstatement this
+// product exists to prevent.
+//
+// The marker is derived from the LANE, not set by the caller, so a mapper cannot
+// forget it. Removing the derivation must turn this red in the otel direction.
+func TestOnlyTheTelemetryLaneMarksItsSpanSynthetic(t *testing.T) {
+	for lane, wantMarked := range map[string]bool{
+		"otel":  true,  // client-asserted: the http.* keys are synthesized
+		"gw":    false, // in-path: it saw them
+		"proxy": false, // in-path: it saw them
+	} {
+		t.Run(lane, func(t *testing.T) {
+			span, ok := spanOf(t, turnWithLane(lane, lane+"-req-1"))
+			if !ok {
+				t.Fatalf("%s: no span", lane)
+			}
+			attrs, _ := span["attributes"].(map[string]any)
+			marked, _ := attrs["openbox.span_synthetic"].(bool)
+			if marked != wantMarked {
+				t.Errorf("%s: openbox.span_synthetic = %v, want %v", lane, marked, wantMarked)
+			}
+			// Whether observed or synthesized, the classification keys must be
+			// present: without them core classifies the span as something else
+			// and every model-call reader goes quiet, with no error anywhere.
+			if attrs["http.method"] != "POST" {
+				t.Errorf("%s: http.method = %v, want POST", lane, attrs["http.method"])
+			}
+			if attrs["http.url"] == nil {
+				t.Errorf("%s: no http.url — isLLMCall needs it", lane)
+			}
+		})
+	}
+}

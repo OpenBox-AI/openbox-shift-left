@@ -40,8 +40,28 @@ import (
 // Note what is absent: the "synthesized" marker ADR-0018 added. This span is
 // genuinely observed — a real request, a real response — so claiming otherwise
 // would be false, and the marker exists to flag the hook path's fabrication.
-func gatewaySpanAttributes(s *Span) map[string]any {
+// observedSpanAttributes builds the classification keys, and marks the ones that
+// were not actually observed.
+//
+// The in-path lanes — the gateway and the transport relay — SAW the method, URL
+// and status they report. The telemetry lane did not: Claude Code's export
+// carries neither a method nor a URL, so this client synthesizes both to reach
+// core's isLLMCall (the only path to an llm_completion classification). That is
+// a described request, not an observed one, and `openbox.span_synthetic` is what
+// keeps the two distinguishable in stored rows — the same marker and the same
+// reason as turnSpanAttributes.
+//
+// It is decided from the LANE rather than passed in by the caller, deliberately.
+// A mapper that had to remember to set it would eventually forget, and the
+// failure is invisible: the span stores either way, and an unmarked synthetic
+// span is indistinguishable from real captured traffic. A governance product
+// asserting it observed a request it inferred is the overstatement this product
+// exists to prevent.
+func observedSpanAttributes(lane string, s *Span) map[string]any {
 	attrs := map[string]any{}
+	if lane == "otel" {
+		attrs["openbox.span_synthetic"] = true
+	}
 	if s.HTTPMethod != "" {
 		attrs["http.method"] = s.HTTPMethod
 	}
@@ -240,7 +260,7 @@ func observedSpan(ev DevEvent) *wireSpan {
 		RequestBody:     capBody(s.RequestBody),
 		RequestHeaders:  capHeaders(s.RequestHeaders),
 		ResponseHeaders: capHeaders(s.ResponseHeaders),
-		Attributes:      gatewaySpanAttributes(s),
+		Attributes:      observedSpanAttributes(lane, s),
 		// Structural / derived: these survive the gate by design.
 		HTTPMethod:            s.HTTPMethod,
 		HTTPURL:               s.HTTPURL,

@@ -1,0 +1,280 @@
+// Package telemetryemit turns Claude Code's own OpenTelemetry export into
+// governance events.
+//
+// It lives in the CLI rather than in package telemetry for the same reason
+// gatewayemit lives here rather than in package gateway: telemetry's import
+// guard (telemetry/guard_test.go) allows the collector family and nothing else,
+// and that guard is what quarantines a ~492-package dependency tree from the
+// rest of the repo. A mapper needs `client`, so it cannot live behind that
+// guard.
+//
+// What this lane is FOR, and its honest standing: it is the only lane that
+// reaches the desktop app and subscription-OAuth sessions, because it rides the
+// env block of ~/.claude/settings.json rather than per-client routing. It is
+// also the WEAKEST claim in the product (ADR-0022) — it is the governed tool
+// reporting its own calls, suppressible by the thing it observes. Never average
+// it together with the in-path lanes into "model calls are governed". OD4 is the
+// compensating control: telemetry silence on an otherwise-active session is a
+// finding.
+package telemetryemit
+
+import (
+	"crypto/sha256"
+	"encoding/hex"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/openbox-ai/openbox-shift-left/client"
+	"github.com/openbox-ai/openbox-shift-left/telemetry"
+)
+
+// Policy is the emission policy, and its ZERO VALUE SUPPRESSES.
+//
+// That is a correctness invariant, not a default. Two lanes can observe the same
+// model call, and core does NOT absorb one as a duplicate of the other — the
+// activity_id namespaces are disjoint by design, which is what prevents silent
+// LOSS. Nothing prevents silent DOUBLING except exactly one lane emitting, and
+// that election is phase 12's, which does not exist yet.
+//
+// So until it does, the only policy a caller can construct without naming
+// Elected is the one that emits nothing. A half-built lane cannot corrupt a
+// dashboard.
+type Policy struct {
+	// Elected reports that this lane is the chosen model-call producer for the
+	// session. Precedence when phase 12 lands is transport > gateway >
+	// telemetry: in-path outranks client-asserted.
+	Elected bool
+}
+
+// Mapper maps telemetry records to events. It holds no per-session state: every
+// event this slice produces is derivable from a single record, which is what
+// keeps it safe to call from the receiver's consumer goroutines.
+type Mapper struct {
+	did    string
+	policy Policy
+}
+
+// New builds a mapper for one developer identity.
+//
+// It takes no redactor, deliberately. Nothing this slice binds is content —
+// api_request carries a model id, four token counts, a cost, a duration and two
+// request ids, and no free text at all. A redactor parameter with no call site
+// would read like a wired control and not be one, which is precisely the shape
+// that let the gateway discard every capture it made. It arrives with the body
+// attachment that needs it.
+func New(did string, p Policy) *Mapper {
+	return &Mapper{did: did, policy: p}
+}
+
+// EventFor maps one record to one event, or reports false when the record maps
+// to nothing.
+//
+// False is the normal answer for most records. The export emits 19 event types
+// and this slice binds one; an unrecognised name is IGNORED rather than an
+// error, because the export is a provider surface behind a beta flag (OD3) and
+// erroring on an unfamiliar name would turn a routine upstream addition into a
+// lane outage.
+func (m *Mapper) EventFor(rec telemetry.Record) (client.DevEvent, bool) {
+	if m == nil || !m.policy.Elected {
+		return client.DevEvent{}, false
+	}
+	if rec.EventName != eventAPIRequest {
+		return client.DevEvent{}, false
+	}
+	return m.turnFor(rec)
+}
+
+// eventAPIRequest is the provider's discriminator for one completed model call.
+//
+// One turn per api_request, and only per api_request. The corpus also carries
+// api_request_body / api_response_body for the SAME call, and a
+// claude_code.llm_request SPAN for it as well; binding any of those as a second
+// producer would triple-count within this one lane, which no namespace and no
+// election protects against.
+const eventAPIRequest = "api_request"
+
+// maxRequestIDLen bounds a provider value before it becomes part of event
+// identity. 128 is generous against the observed shapes (a 29-char `req_…` and a
+// 36-char UUID) and small enough that activity_id stays a sane key.
+const maxRequestIDLen = 128
+
+// synthesizedLLMURL must be a host core's isLLMCall matches, or the span
+// classifies as something else and every model-call reader goes quiet. The turn
+// span in client/turnspan.go asserts the same URL for the same reason.
+const synthesizedLLMURL = "https://api.anthropic.com/v1/messages"
+
+func (m *Mapper) turnFor(rec telemetry.Record) (client.DevEvent, bool) {
+	session := rec.Attrs["session.id"]
+	if session == "" {
+		// session_id maps to core's run_id and Emit rejects an empty one. Failing
+		// here keeps the cause next to the record that caused it.
+		return client.DevEvent{}, false
+	}
+	reqID, ok := requestIDFrom(rec.Attrs)
+	if !ok {
+		return client.DevEvent{}, false
+	}
+
+	end := rec.Timestamp.UTC()
+	start := end
+	if d, ok := parseInt(rec.Attrs["duration_ms"]); ok && d > 0 {
+		// The export reports a duration, not a start. Without deriving the window
+		// the span's start and end collapse and every latency reader shows zero.
+		start = end.Add(-time.Duration(d) * time.Millisecond)
+	}
+
+	ev := client.DevEvent{
+		SchemaVersion: client.SchemaVersion,
+		EventType:     client.EventTurnCompleted,
+		SessionID:     session,
+		DeveloperDID:  m.did,
+		Timestamp:     end.Format(time.RFC3339Nano),
+		StartedAt:     start.Format(time.RFC3339Nano),
+		EndedAt:       end.Format(time.RFC3339Nano),
+		// A model call is not a shell/file/MCP invocation, but Tool is a required
+		// wire object. It names the governed TOOL, which is what every other
+		// event from this machine already reports. Same choice gatewayemit makes.
+		Tool:  client.Tool{Name: "claude-code", Kind: client.ToolShell},
+		Model: rec.Attrs["model"],
+		// The lane discriminator (ADR-0022). Without it turnActivityIDFor falls
+		// through to the hook path's TurnIndex branch and, with no index, returns
+		// an EMPTY activity_id.
+		OtelRequestID: reqID,
+		Tokens:        tokensFrom(rec.Attrs),
+		// The span exists for ONE reader: core recomputes semantic_type per span,
+		// and isLLMCall's attribute inputs are the only path to llm_completion.
+		// http_method and http_url are SYNTHESIZED here — the export carries
+		// neither — and client marks them as such on this lane. http_status is
+		// deliberately left unset: api_request reports no status (only api_error
+		// does), and asserting 200 would be inventing an observation.
+		Span: &client.Span{
+			SemanticType: "llm_completion",
+			Stage:        "completed",
+			HTTPMethod:   "POST",
+			HTTPURL:      synthesizedLLMURL,
+		},
+	}
+	ev.EventID = eventID(session, reqID, string(ev.EventType), ev.Timestamp)
+	return ev, true
+}
+
+// requestIDFrom picks the id that becomes part of activity_id, and validates it.
+//
+// It is a provider value arriving straight off an unauthenticated loopback
+// listener, and activity_id is this product's event identity — byte-pinned and
+// load-bearing for core's dedupe. So it is bounded and charset-checked, and a
+// value that fails is a DROPPED turn rather than a malformed identity: a gap is
+// recoverable, a colliding or ambiguous activity_id corrupts a stored row.
+//
+// ':' is the one that matters. activity_id reads "<session>:otel:<id>", so a
+// colon inside the id makes the namespace boundary ambiguous — and the
+// namespaces are what keep two lanes' evidence from being merged.
+//
+// No id is minted when both are absent. A locally minted id would break INV-5:
+// the spool can be drained by a different process long after the daemon exited,
+// and a re-flush must present the same idempotency key.
+func requestIDFrom(attrs map[string]string) (string, bool) {
+	for _, key := range []string{"request_id", "client_request_id"} {
+		if id := attrs[key]; safeRequestID(id) {
+			return id, true
+		}
+	}
+	return "", false
+}
+
+func safeRequestID(s string) bool {
+	if s == "" || len(s) > maxRequestIDLen {
+		return false
+	}
+	return strings.IndexFunc(s, func(r rune) bool {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+			return false
+		case r == '-', r == '_', r == '.':
+			return false
+		}
+		return true
+	}) < 0
+}
+
+// tokensFrom reads the four counts.
+//
+// `input_tokens` is PURE input and is passed through as such. Measured on the
+// corpus: input=2 beside cache_read=90485, so it excludes cache — exactly
+// contract v1.1's redefinition. Adding cache into it would double-count ~90k
+// tokens on a single call.
+//
+// A MISSING count and a MALFORMED one are different, and conflating them is how
+// spend gets understated. Missing means not applicable: the field stays nil and
+// the total is still meaningful. Malformed means a number was reported and could
+// not be read: the field stays nil AND the total is withheld, because a sum that
+// silently omits a component reads as authoritative and is wrong.
+func tokensFrom(attrs map[string]string) *client.Tokens {
+	var (
+		t       client.Tokens
+		sum     int
+		any     bool
+		unknown bool
+	)
+	for _, f := range []struct {
+		key  string
+		dest **int
+	}{
+		{"input_tokens", &t.Input},
+		{"output_tokens", &t.Output},
+		{"cache_read_tokens", &t.CacheRead},
+		{"cache_creation_tokens", &t.CacheCreationInput},
+	} {
+		raw, present := attrs[f.key]
+		if !present {
+			continue
+		}
+		n, ok := parseInt(raw)
+		if !ok {
+			unknown = true
+			continue
+		}
+		v := n
+		*f.dest = &v
+		sum += n
+		any = true
+	}
+	if !any {
+		return nil
+	}
+	if !unknown {
+		total := sum
+		t.Total = &total
+	}
+	return &t
+}
+
+// parseInt reads a count from its string form.
+//
+// Every attribute arrives as a string because consume.go flattens all OTLP value
+// types through AsString — which is load-bearing, not lazy: the provider types
+// the SAME attribute differently per event (duration_ms is intValue on
+// api_request and stringValue on tool_result), so a typed read would return zero
+// on one of them with no error.
+//
+// Negative counts are rejected rather than clamped: a negative token count means
+// the export is not what this mapper thinks it is, and a silent 0 would hide it.
+func parseInt(s string) (int, bool) {
+	if s == "" {
+		return 0, false
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(s))
+	if err != nil || n < 0 {
+		return 0, false
+	}
+	return n, true
+}
+
+// eventID derives the idempotency key (INV-5). Deterministic for the reason
+// gatewayemit's copy gives: the spool outlives the process that wrote it, so a
+// redelivery has to present the same key or core stores a second row.
+func eventID(session, reqID, eventType, ts string) string {
+	sum := sha256.Sum256([]byte("otelemit\x1f" + session + "\x1f" + reqID + "\x1f" + eventType + "\x1f" + ts))
+	return "otel-" + hex.EncodeToString(sum[:16])
+}

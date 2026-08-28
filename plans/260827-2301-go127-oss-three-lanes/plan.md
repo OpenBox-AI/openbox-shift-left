@@ -138,7 +138,23 @@ was 635, not ~334, and they were INVISIBLE rather than failing. See
 [verification-260828-test-visibility-restored](reports/verification-260828-test-visibility-restored.md).
 It also repaired `TurnStarted`, beyond the phase's written scope. See its report.
 
-† Phase 10 is STARTED, not done. Delivered: step 1's attribute inventory from a real desktop corpus
+† Phase 10 is PARTIAL — one slice done and verified, four deferred with named reasons
+([verification-260828-phase-10-mapper](reports/verification-260828-phase-10-mapper.md)).
+Done: `api_request` → a conformant `TurnCompleted` under `:otel:` carrying the model and all
+four token counts where core's extractor reads them; `Policy`'s zero value SUPPRESSES (the
+election invariant, so a half-built lane cannot double-count); `otel_request_id` bounded and
+charset-checked before it becomes identity; the otel span marked `openbox.span_synthetic`
+while the in-path lanes are not; and a no-content-on-wire sentinel on real POSTed bytes.
+Seven mutation drills, all red on deletion — two of them redone after the first attempt
+produced a BUILD FAILURE rather than a red test, and one after the injection landed in
+Windows-only dead code. **The mapper has no production caller** (its caller is the blocked
+receiver daemon), which is the WithCapture shape, named rather than discovered.
+Deferred: bodies (needs the `os.Root` confinement root, which follows phase 09's unmade
+env-key decision — no file is opened today, so no oracle exists, and containment must land
+in the SAME change as the first body read), `tool_decision`/`tool_result` (need the
+election's cross-lane knowledge or Tool Health doubles), hook engine-health (yagni — doctor
+already detects a duplicate engine), OD4's silence finding (needs the daemon's scheduling).
+Earlier delivered: step 1's attribute inventory from a real desktop corpus
 ([measure-260828](reports/measure-260828-otel-attribute-inventory.md)); the `maxAttrValueBytes` bound
 defect (16 KiB sat BELOW the 65,536-rune wire cap, so attribute-carried content truncated 4x tighter
 than OD1(c) blesses AND the cap's mutation drill would have been vacuous); and the observed-span
@@ -169,10 +185,15 @@ Stage A — foundation:
 1. Every module declares `go 1.27.0`; no pin instruction for `x/term` survives
    anywhere; per-module `GOWORK=off` builds pass.
 2. Conformance C1–C41 pass **unmodified** against the library validator, with the
-   `x-content-gated` pass still separate. **MET 2026-08-28** — 38 cases run, 38
-   pass, 0 fail (C8/C9 do not exist; both deliberately deleted under ADR-0006).
-   Assertions unmodified; the listener beneath them is in-memory, which is the
-   caveat to carry rather than round off.
+   `x-content-gated` pass still separate. **MET 2026-08-28, on an in-memory
+   transport.** 38 numbered cases run and pass (C8/C9 deleted under ADR-0006,
+   C17 under ADR-0017; C39 runs separately as
+   `TestContentCaptureCredentialCoverage`, also passing). Assertions unmodified,
+   made on real POSTed bytes — so this measures payload, framing, gate,
+   redaction and cap, **not** bind, listen, TLS or the dialer. Socket-based
+   confirmation is CI's job and **has not happened: this branch has no
+   upstream**, so no run of these 1117 tests over a real socket exists
+   anywhere.
 3. The TOML regression test fails on the old scanner and passes on go-toml;
    `codexMandated` is correct on the new fixture.
 4. `~/.openbox/gateway.log` receives real output from a running gateway, asserted

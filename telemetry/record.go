@@ -85,5 +85,15 @@ const (
 	//
 	// Total memory does not grow with this: MaxRequestBodyBytes (8 MiB) bounds
 	// what one request can carry, and it is the smaller number.
-	maxAttrValueBytes = 4 * 65536
+	maxAttrValueBytes = MaxAttrValueBytes
 )
+
+// MaxAttrValueBytes is the collection bound, exported so the relation to the
+// WIRE cap is pinned by a test in the module that can see both. Until that pin
+// existed the relation was a comment, and a revert of this constant was silent.
+//
+// The worst case is exact rather than comfortable: 65,536 runes of 4-byte UTF-8
+// is 262,144 bytes, so a maximal multi-byte value fits with NO headroom. A cap
+// drill written with multi-byte fixtures is therefore vacuous at the boundary —
+// use ASCII, where the bound is 4x the cap and truncation can only be capBody's.
+const MaxAttrValueBytes = 4 * 65536
