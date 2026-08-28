@@ -16,8 +16,13 @@ import (
 // keyed by session and the findings cursor tracks an offset into an advisory
 // file, none of which another local account should be able to rewrite.
 //
-// It also pins the property renameio's WithExistingPermissions() makes subtle: a
-// REWRITE preserves the existing mode. A file that starts 0600 must not drift.
+// It also pins the direction a rewrite moves in, which renameio's default made
+// subtle and wrong for these files: WriteFile applies WithExistingPermissions()
+// after WithPermissions(), so a record that had become group- or world-readable
+// kept those permissions through every later 0600 write. atomicWriteFile asks for
+// WithStaticPermissions instead, so the requested mode is ENFORCED on a rewrite,
+// not merely applied at creation — the behavior the hand-rolled writer this
+// replaced had, and the one atomicwrite_windows.go still has.
 func TestAtomicWritesKeepModes(t *testing.T) {
 	root := t.TempDir()
 
@@ -48,6 +53,25 @@ func TestAtomicWritesKeepModes(t *testing.T) {
 			t.Fatalf("Write rewrite: %v", err)
 		}
 		assertMode(t, c.RecordPath("sess-2", "agent-1"), 0o600)
+	})
+
+	// The case a "does it stay 0600?" assertion cannot see. Preserving the mode
+	// and enforcing it are the same thing on a file that is already 0600, so the
+	// subtests above pass either way; only a WIDENED file tells them apart.
+	t.Run("a widened record is tightened again", func(t *testing.T) {
+		c := TurnCursor{Dir: filepath.Join(root, "widened")}
+		if err := c.Write("sess-3", "agent-1", TurnPos{Offset: 1}); err != nil {
+			t.Fatalf("Write: %v", err)
+		}
+		path := c.RecordPath("sess-3", "agent-1")
+		if err := os.Chmod(path, 0o644); err != nil {
+			t.Fatalf("chmod: %v", err)
+		}
+
+		if err := c.Write("sess-3", "agent-1", TurnPos{Offset: 2}); err != nil {
+			t.Fatalf("Write rewrite: %v", err)
+		}
+		assertMode(t, path, 0o600)
 	})
 }
 

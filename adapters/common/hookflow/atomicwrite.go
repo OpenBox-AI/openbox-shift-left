@@ -22,6 +22,23 @@ import (
 // empty. atomicwrite_windows.go keeps the previous behavior there. The
 // consequence is honest and worth stating: Windows gets atomicity without the
 // fsync, exactly as before this change.
+//
+// NewPendingFile rather than renameio.WriteFile, and the reason is perm.
+// WriteFile appends WithExistingPermissions() AFTER WithPermissions(perm), and
+// that option overwrites the requested mode with the mode of the file already on
+// disk (renameio tempfile.go:269-288). So a record that became group- or
+// world-readable for any reason kept those permissions through every subsequent
+// 0600 rewrite, silently — where the hand-rolled writer this replaced chmod'd on
+// every write, and where atomicwrite_windows.go still does. WithStaticPermissions
+// is the option that means what the caller asked for.
 func atomicWriteFile(path string, data []byte, perm os.FileMode) error {
-	return renameio.WriteFile(path, data, perm)
+	t, err := renameio.NewPendingFile(path, renameio.WithStaticPermissions(perm))
+	if err != nil {
+		return err
+	}
+	defer t.Cleanup()
+	if _, err := t.Write(data); err != nil {
+		return err
+	}
+	return t.CloseAtomicallyReplace()
 }
