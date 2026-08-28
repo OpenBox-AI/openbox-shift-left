@@ -385,9 +385,10 @@ var errListenerDrained = errors.New("transport: connection served")
 // loop by hand is where a relay quietly stops supporting a second request on the
 // same tunnel.
 type singleConnListener struct {
-	conn net.Conn
-	once sync.Once
-	done chan struct{}
+	conn      net.Conn
+	once      sync.Once
+	closeOnce sync.Once
+	done      chan struct{}
 }
 
 func newSingleConnListener(c net.Conn) *singleConnListener {
@@ -409,11 +410,12 @@ func (l *singleConnListener) Accept() (net.Conn, error) {
 }
 
 func (l *singleConnListener) Close() error {
-	select {
-	case <-l.done:
-	default:
-		close(l.done)
-	}
+	// sync.Once rather than a select/default check. Safe either way today —
+	// http.Server calls ConnState serially for one connection — but a
+	// check-then-close is a race the moment a second caller appears, and the
+	// panic it would produce ("close of closed channel") would land inside a
+	// developer's model call.
+	l.closeOnce.Do(func() { close(l.done) })
 	return nil
 }
 

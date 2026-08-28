@@ -175,6 +175,14 @@ assertion was searching for a string the request no longer carried. Fourth
 demonstrated victim class for the open `generic-api-key` false positive. The
 fixture is **derived in code** now, the mitigation `CLAUDE.md` already names.
 
+## OD2's "one command in, one command out" is REASSIGNED to phase 12
+
+Said explicitly rather than left to be inferred from a table, because dropping it
+silently is how a ruling looks met when it is not. Phase 11 ships the **relay
+daemon** — `openbox transport`, foreground, supervisable. Phase 12 ships the
+**command**: install, activate, roll back, `doctor`. Until then a developer
+cannot turn this lane on, so **OD2 is unmet and phase 12 owns it.**
+
 ## What is NOT done, and where it went
 
 | phase item | disposition |
@@ -186,13 +194,26 @@ fixture is **derived in code** now, the mitigation `CLAUDE.md` already names.
 
 ## Open, and honest
 
-1. **`GOWORK=off` is unverifiable for `transport/` on this host.** `x/net
-   v0.50.0` is absent from the module cache and the sandbox denies the write the
-   resolver needs. This was **already** true before this change. `transport/go.sum`
-   is currently a **superset** merged from `gateway/go.sum`, pending
-   `go mod tidy` where the cache is writable. The release path sets `GOWORK=off`
-   and `cli` now imports `transport`, so this needs clearing on a normal host
-   before release.
+1. **The release build was BROKEN and is now fixed; one module gate remains
+   unverifiable.** `cli/cmd/openbox/transport.go` imports `transport`, but
+   `cli/go.mod` had neither a `require` nor a `replace` for it. The workspace
+   resolved it through `go.work`, so all 14 modules were green — while
+   `GOWORK=off`, the **only** path `.goreleaser.yaml` runs, could not resolve the
+   import at all. Exactly the failure `CLAUDE.md` already names: *a new dependency
+   in a shared module needs tidying in every module that transitively depends on
+   it, or `GOWORK=off` fails while the workspace stays green — the release path is
+   the one that breaks.* Note that `go mod tidy` alone would NOT have fixed it:
+   tidy does not write `replace` directives, and without one the `v0.0.0` require
+   has no source.
+
+   **Fixed and verified:** `cd cli && GOWORK=off go build ./...` passes.
+
+   Still open: `cd transport && GOWORK=off go build ./...` cannot run on this
+   host — standalone, transport's MVS wants `x/net v0.50.0`, which is absent from
+   the module cache, and the sandbox denies both the download and the cache lock.
+   That gate needs a normal host, along with `go mod tidy` in `cli` and
+   `transport` to prune the merged `go.sum` supersets. **It does not affect the
+   release artifact**, which builds `cli`.
 2. **No response body has traversed this lane.** The control's upstream always
    refuses, so request capture, fingerprint, redaction, spool and identity are
    proven while the response half is not. Byte-identity **on the CONNECT path** —
@@ -212,6 +233,37 @@ fixture is **derived in code** now, the mitigation `CLAUDE.md` already names.
    symptom points nowhere near the cause.
 6. `transport/allowlist_test.go`'s Cyrillic case is built at runtime; a reviewer
    reading the source sees `cyrillicA` and a comment, not an invisible glyph.
+
+## The risk phase 12 must design for, not discover
+
+**Cross-process double-emission that core's dedupe cannot catch.**
+`clearInheritedProxyEnv` protects the transport's OWN upstream leg. It does
+nothing for the **gateway**, which is a different process. If both lanes are
+installed and phase 12's activation sets `HTTPS_PROXY` where the gateway daemon
+inherits it, the gateway's upstream client — `http.ProxyFromEnvironment`, never
+cleared there — dials `api.anthropic.com` **through the transport**. The
+transport sees the forwarded session header and emits `:proxy:`; the gateway
+emits `:gateway:` for the same call.
+
+Two events, two **disjoint** activity_ids — which is exactly the property that
+stops core absorbing one as a duplicate of the other — so **both store, and every
+token count doubles.** The namespaces built to prevent one lane erasing another
+are precisely what let this survive.
+
+So the election must be an **activation-time mutual exclusion across processes**
+(installing transport disables the gateway's base-URL redirect, or refuses
+co-activation), never a client-side span dedupe. Two supporting hazards in the
+same phase:
+
+- **The `sync.Once` ordering.** `clearInheritedProxyEnv` works only because it
+  runs in `transport.New` before any outbound HTTP. If activation makes the
+  daemon do an HTTP call first — a health check, an auth refresh — the cache
+  poisons and the self-loop returns. A guard test that nothing dials before `New`
+  is cheap.
+- **"Never system trust" (requirement 5) versus Chromium.** The desktop app is
+  the reason this lane exists, and Electron reads the OS trust store. Getting it
+  to trust a client-only CA collides head-on with that requirement, and it is the
+  genuinely hard part of activation.
 
 ## Unresolved questions
 

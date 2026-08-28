@@ -162,7 +162,7 @@ func EventFor(lane Lane, id Identity, requestID string, at time.Time, c gateway.
 	// that only one lane observed), and adding it would change every gateway
 	// event's idempotency key in a release that only claims to add a lane — after
 	// which core would count one redelivered call twice.
-	ev.EventID = eventID(id.SessionID, requestID, string(ev.EventType), ev.Timestamp, c.HTTPMethod, c.HTTPURL)
+	ev.EventID = eventID(lane.IDPrefix, id.SessionID, requestID, string(ev.EventType), ev.Timestamp, c.HTTPMethod, c.HTTPURL)
 	return ev, nil
 }
 
@@ -174,14 +174,20 @@ func EventFor(lane Lane, id Identity, requestID string, at time.Time, c gateway.
 // counts the call twice. Only structural fields feed the hash — never a header
 // value, a body, or the fingerprint, which derives from a secret.
 //
+// The PREFIX is the lane's, so a proxy event's key does not read `gw-`. Note what
+// is NOT hashed: the lane name. The id is already lane-scoped — a fallback carries
+// the lane's own prefix, and a provider Request-Id belongs to one exchange only one
+// lane observed — so hashing the lane would change every SHIPPED gateway event's
+// key for no gain, after which core counts a redelivered call twice.
+//
 // It takes the fields flat rather than a DevEvent so that it has no reachable
 // nil precondition: reading them back out of a Span pointer built one statement
 // earlier bought nothing and made a panic possible from any future caller.
-func eventID(parts ...string) string {
+func eventID(prefix string, parts ...string) string {
 	h := sha256.New()
 	for _, part := range parts {
 		h.Write([]byte(part))
 		h.Write([]byte{0x1f}) // separator: two fields cannot merge into one preimage
 	}
-	return GatewayIDPrefix + hex.EncodeToString(h.Sum(nil))[:32]
+	return prefix + hex.EncodeToString(h.Sum(nil))[:32]
 }

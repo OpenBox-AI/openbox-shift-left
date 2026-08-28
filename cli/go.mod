@@ -19,6 +19,7 @@ require (
 	github.com/openbox-ai/openbox-shift-left/gateway v0.0.0
 	github.com/openbox-ai/openbox-shift-left/provider v0.0.0
 	github.com/openbox-ai/openbox-shift-left/telemetry v0.0.0
+	github.com/openbox-ai/openbox-shift-left/transport v0.0.0
 	// Masked credential input and TTY detection that works on native Windows,
 	// where the stdlib mode check misjudges a console handle (golang/go#23123).
 	// ADR-0015 took this module's first external dependency for it.
@@ -41,6 +42,7 @@ require (
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/charmbracelet/lipgloss v0.5.0 // indirect
 	github.com/dsnet/compress v0.0.2-0.20230904184137-39efe44ab707 // indirect
+	github.com/elazarl/goproxy v1.9.0 // indirect
 	github.com/fatih/semgroup v1.2.0 // indirect
 	github.com/felixge/httpsnoop v1.1.0 // indirect
 	github.com/foxboron/go-tpm-keyfiles v0.0.0-20251226215517-609e4778396f // indirect
@@ -177,6 +179,8 @@ replace github.com/openbox-ai/openbox-shift-left/adapters/common/devconfig => ..
 replace github.com/openbox-ai/openbox-shift-left/client => ../client
 
 replace github.com/openbox-ai/openbox-shift-left/telemetry => ../telemetry
+
+replace github.com/openbox-ai/openbox-shift-left/transport => ../transport
 
 replace github.com/openbox-ai/openbox-shift-left/gateway => ../gateway
 
