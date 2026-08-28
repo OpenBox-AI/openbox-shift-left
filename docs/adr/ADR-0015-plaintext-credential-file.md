@@ -75,6 +75,9 @@ support is deleted rather than demoted.
 - No dependency is added for storage. Dotenv parsing and writing are hand-rolled
   (~120 lines including the edge cases) rather than pulling a library for a
   format this repo writes and reads on both ends.
+  **Superseded on 2026-08-28 for the READ side only (decision D-OSS-7):** parsing
+  is `joho/godotenv` at its package defaults. Writing is still hand-rolled. See
+  the rejected-alternatives note below for what that changed.
 
 ### `.env` holds secrets; `dev.json` keeps the coordinates
 
@@ -127,6 +130,13 @@ One visible consequence: `cli/go.mod` and `go.work` now read `go 1.23.0` rather
 than `go 1.23`, because a module must declare a version at least as specific as
 its dependencies'. Same language version with the patch component spelled out; no
 `toolchain` directive is pinned, so any Go 1.23.x still builds the repo.
+
+> **Superseded on 2026-08-27 (decision D-GO-1), pin only.** The language floor was
+> raised to `go 1.27.0` across `go.work` and all twelve modules, so the reason to
+> hold `x/term` at v0.34.0 no longer exists and the pin is retired — `x/term`
+> resolves at latest (v0.45.0, pulling `x/sys` v0.47.0). `go.work` now carries
+> `toolchain go1.27.0`. Everything else in this ADR — the plaintext file, its
+> permissions, and the two-module dependency budget — stands unchanged.
 
 Being honest about what this buys: masking keeps the credential out of terminal
 scrollback, screen shares, tmux buffers and recorded sessions, and off argv. **It
@@ -301,3 +311,30 @@ already read `.env`, which is encryption whose key sits next to the ciphertext.
 dependency count at exactly one deliberate entry; the format this repo needs is
 ~120 lines including CRLF handling, quoting, and the duplicate-key error, and
 this repo writes both ends of it.
+
+> **Reversed on 2026-08-28 (decision D-OSS-7).** The READ side is `godotenv` at
+> its package defaults; dependency count is no longer a deciding argument. The
+> rejection above named three things the hand-rolled parser did, and this records
+> what happened to each, because two of them were real controls:
+>
+> - **CRLF handling** — godotenv handles it; measured, no change.
+> - **Quoting** — changed. godotenv EXPANDS `$VAR`/`${VAR}` in unquoted and
+>   double-quoted values and processes `\n`-style escapes in double-quoted ones,
+>   unconditionally (there is no non-expanding entry point). A credential
+>   containing `$` is silently rewritten. Neither of the two secrets this file
+>   holds uses `$`; a hand-added value may.
+> - **The duplicate-key error** — GONE. godotenv takes the last assignment
+>   silently. The refusal existed because two lines setting one credential means
+>   the user believes something the file does not say, and the loser surfaces
+>   later as an unexplained 401.
+>
+> And one consequence the rejection did not anticipate: **godotenv's parse error
+> echoes the offending line**, so a malformed line that is a bare secret puts that
+> secret into the error string and into whatever logs it. The hand-rolled parser
+> named the file and line and never the content.
+>
+> All of this is accepted per the owner's ruling to take package defaults without
+> working around them, and all of it is pinned by tests in
+> `adapters/common/devconfig/envfile_test.go`. The write side still refuses values
+> containing `'`, `\n` or `\r`, so the two halves of the codec no longer share
+> one model of the format — a limit worth knowing before extending either.

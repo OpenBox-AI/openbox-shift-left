@@ -9,14 +9,15 @@ import (
 )
 
 // contractEventTypes is this package's declaration of the developer-runtime
-// vocabulary, used for coverage bookkeeping in conformance_test.go. The module
-// is deliberately dependency-free so adapters can import it without pulling in
-// the client, which is why the list exists here at all rather than being read
-// from client.EventType.
+// vocabulary, used for coverage bookkeeping in conformance_test.go. This module
+// must not depend on `client` — the adapters import both, and the contract is
+// meant to be the thing they are checked AGAINST rather than a mirror of one of
+// them — which is why the list is declared here rather than read from
+// client.EventType.
 //
 // TestSchemaEnumMatchesContract below binds it to the schema, and the acceptance
 // module binds the schema to the client constants — so all three declarations
-// are pinned to each other transitively without this module gaining a dependency.
+// are pinned to each other transitively without this module importing client.
 var contractEventTypes = []string{
 	"SessionStarted", "PromptSubmitted", "ToolCall", "ToolResult",
 	"SessionEnded", "CommitCreated", "Deploy",
@@ -47,9 +48,14 @@ func TestSchemaEnumMatchesContract(t *testing.T) {
 	assertSameSet(t, "schema event_type enum", got, "conformance contractEventTypes", contractEventTypes)
 }
 
-// schemaKeywords the hand-rolled validator actually implements. Anything else in
-// the schema is silently ignored at validation time, so a constraint written with
-// an unimplemented keyword would look enforced while enforcing nothing.
+// schemaKeywords is the keyword set this contract deliberately confines itself to.
+//
+// It used to be the list the hand-rolled validator implemented, and anything
+// outside it was silently ignored at validation time. The library implements the
+// whole draft, so that failure mode is gone — but the list is kept, narrowed to
+// its remaining purpose: the contract stays small and every keyword in it has
+// been reviewed for the semantics we actually want. `contentEncoding`, for one,
+// needs Compiler.AssertContent to do anything at all.
 var schemaKeywords = map[string]bool{
 	"$ref": true, "const": true, "enum": true, "type": true,
 	"minLength": true, "pattern": true, "minimum": true, "oneOf": true,
@@ -76,10 +82,11 @@ var annotationKeywords = map[string]bool{
 	"x-local-only": true,
 }
 
-// The validator covers a deliberate subset of JSON Schema. That is a fine
-// trade-off for a dependency-free contract check, but only while the schema
-// stays inside the subset: `"format": "date-time"` or `"maxLength": 64` added to
-// the schema would read as a tightened contract and change nothing at all.
+// The contract confines itself to a reviewed subset of JSON Schema. The library
+// would honour more, so this is a scope guard rather than a capability guard:
+// a keyword arriving here should be a decision, because some need a compiler
+// setting to take effect at all (see TestDateTimeFormatIsAsserted) and some
+// interact in ways the contract has not considered.
 func TestSchemaUsesOnlySupportedKeywords(t *testing.T) {
 	schema, err := LoadSchema()
 	if err != nil {
@@ -91,15 +98,16 @@ func TestSchemaUsesOnlySupportedKeywords(t *testing.T) {
 			switch {
 			case schemaKeywords[k], annotationKeywords[k]:
 			default:
-				t.Errorf("%s: keyword %q is not implemented by this validator — "+
-					"either implement it in validator.go or express the constraint differently; "+
-					"as written it validates nothing", path, k)
+				t.Errorf("%s: keyword %q is outside the contract's reviewed keyword set — "+
+					"add it to schemaKeywords deliberately (checking whether it needs a "+
+					"Compiler setting to take effect) or express the constraint differently", path, k)
 			}
-			// additionalProperties is honoured only in its boolean form; as a
-			// schema object it is silently skipped.
+			// additionalProperties is kept to its boolean form. The library handles
+			// the schema form correctly, but the contract has never used it and the
+			// two forms read very differently to someone auditing the schema.
 			if k == "additionalProperties" {
 				if _, isBool := v.(bool); !isBool {
-					t.Errorf("%s.additionalProperties: only the boolean form is implemented, got %T", path, v)
+					t.Errorf("%s.additionalProperties: the contract uses only the boolean form, got %T", path, v)
 				}
 			}
 		}

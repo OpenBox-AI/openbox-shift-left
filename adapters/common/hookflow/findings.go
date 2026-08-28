@@ -243,17 +243,9 @@ func advanceCursor(path string, offset int64, logger interface{ Printf(string, .
 		}
 		return
 	}
-	tmp := path + ".tmp." + randomID()
-	if err := os.WriteFile(tmp, []byte(strconv.FormatInt(offset, 10)), 0o600); err != nil {
+	if err := atomicWriteFile(path, []byte(strconv.FormatInt(offset, 10)), 0o600); err != nil {
 		if logger != nil {
 			logger.Printf("findings: cursor write failed: %v", err)
-		}
-		return
-	}
-	if err := os.Rename(tmp, path); err != nil {
-		_ = os.Remove(tmp)
-		if logger != nil {
-			logger.Printf("findings: cursor rename failed: %v", err)
 		}
 	}
 }

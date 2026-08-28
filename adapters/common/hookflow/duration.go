@@ -43,25 +43,7 @@ func (d DurationStash) PutStart(sessionID, key, startedAt string) error {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
-	f, err := os.CreateTemp(dir, keyHash(key)+"-*.tmp")
-	if err != nil {
-		return err
-	}
-	tmp := f.Name()
-	if _, err := f.WriteString(startedAt); err != nil {
-		f.Close()
-		os.Remove(tmp)
-		return err
-	}
-	if err := f.Close(); err != nil {
-		os.Remove(tmp)
-		return err
-	}
-	if err := os.Rename(tmp, d.RecordPath(sessionID, key)); err != nil {
-		os.Remove(tmp) // don't leave the temp behind on a failed rename
-		return err
-	}
-	return nil
+	return atomicWriteFile(d.RecordPath(sessionID, key), []byte(startedAt), 0o600)
 }
 
 // TakeStart reads and removes the start timestamp for a pairing key, returning ""

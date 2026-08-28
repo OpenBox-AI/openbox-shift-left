@@ -1,9 +1,12 @@
 // Package conformance validates OpenBox normalized developer-runtime events
 // against the versioned JSON Schema at ../schema/dev-event.schema.json.
 //
-// It is intentionally dependency-free: it ships a minimal JSON Schema
-// validator covering exactly the keywords the contract uses, so `go build
-// ./... && go test ./...` runs offline with no module downloads.
+// Structural validation is performed by santhosh-tekuri/jsonschema/v6, which
+// covers the whole draft. The package shipped a hand-rolled subset covering only
+// the keywords the contract happened to use, so a constraint written with any
+// other keyword read as a tightened contract and enforced nothing; D-OSS-5 traded
+// that — and this module's former zero-dependency property — for the reference
+// implementation. deps_test.go's allowlist is what keeps the trade bounded.
 package conformance
 
 import (

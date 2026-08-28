@@ -191,6 +191,12 @@ func TestGatewayReadsNoCredential(t *testing.T) {
 // it never needs to. So the guarantee is now two narrower statements instead of
 // one broad one: the gateway's own files resolve nothing (the scan above), and
 // its imports are confined to this list (the check below).
+//
+// THE BOUNDARY, since ADR-0023: direct imports and direct requires are bounded
+// HERE; an allowlisted module's own dependencies are bounded at THAT module's own
+// guard (decision/guard_test.go). Indirect requires are skipped by the go.mod
+// check — a reduction in what this test proves, argued in the ADR rather than
+// absorbed. Adding to this list is a decision; so is moving that boundary again.
 var allowedNonStdlibImports = map[string]bool{
 	"github.com/openbox-ai/openbox-shift-left/client":   true,
 	"github.com/openbox-ai/openbox-shift-left/decision": true,
@@ -222,25 +228,84 @@ func TestGatewayImportsAreConfined(t *testing.T) {
 		}
 	}
 
-	// The go.mod is the other half: every requirement there must be a module the
-	// allowlist names, so the two cannot drift apart.
+	// The go.mod is the other half: every DIRECT requirement there must be a
+	// module the allowlist names, so the two cannot drift apart.
+	for _, path := range unallowedDirectRequires(readGoMod(t), allowedNonStdlibImports) {
+		t.Errorf("gateway/go.mod directly requires %q, which the import allowlist does not name", path)
+	}
+}
+
+// readGoMod reads this module's go.mod.
+func readGoMod(t *testing.T) string {
+	t.Helper()
 	mod, err := os.ReadFile("go.mod")
 	if err != nil {
 		t.Fatalf("reading go.mod: %v", err)
 	}
-	for _, line := range strings.Split(string(mod), "\n") {
+	return string(mod)
+}
+
+// unallowedDirectRequires returns the DIRECT module requirements in a go.mod body
+// that the allowlist does not name.
+//
+// Two deliberate scope decisions, both recorded in
+// docs/adr/ADR-0023-credential-guard-scope.md:
+//
+// INDIRECT REQUIRES ARE SKIPPED, and this is a REDUCTION in what the guard
+// proves, not a clarification. It used to reject any requirement outside the
+// allowlist; it now only rejects ones this module asked for itself. The reason is
+// that an allowlisted module's own dependency tree lands here as `// indirect`
+// lines, and the alternative — enumerating that closure in the allowlist — makes
+// the allowlist unreviewable, which is the one thing it exists to be. The bound
+// is re-established at the module that actually took the dependency: each module
+// with a non-stdlib dependency carries its own guard (decision/guard_test.go,
+// conformance/deps_test.go). What is genuinely no longer bounded here is
+// arbitrary transitive code linked into the binary — see the ADR.
+//
+// ANY module host counts, not just github.com. The previous version matched only
+// lines beginning `github.com/`, so a direct `golang.org/x/…` or
+// `go.opentelemetry.io/…` requirement was invisible to it while the import half
+// would have caught the import. That gap is closed here: the rule is now the same
+// one the import half uses — a dot in the first path segment means it is not
+// stdlib.
+//
+// The `// indirect` comment is matched textually. `go list -m` would be more
+// robust but needs the module graph resolved, which makes the test dependent on a
+// populated cache; the mutation control in guardscope_test.go is what keeps the
+// textual match honest — if it ever stopped discriminating, the seeded direct case
+// goes green and fails.
+func unallowedDirectRequires(gomod string, allowed map[string]bool) []string {
+	var bad []string
+	for _, line := range strings.Split(gomod, "\n") {
 		line = strings.TrimSpace(line)
-		if !strings.HasPrefix(line, "github.com/") && !strings.HasPrefix(line, "require github.com/") {
+
+		// `module` names this module; `replace` redirects one, it does not add one.
+		if strings.HasPrefix(line, "module ") || strings.HasPrefix(line, "replace ") {
 			continue
 		}
-		fields := strings.Fields(strings.TrimPrefix(line, "require "))
-		if len(fields) == 0 {
+		if strings.Contains(line, "// indirect") {
 			continue
 		}
-		if !allowedNonStdlibImports[fields[0]] {
-			t.Errorf("gateway/go.mod requires %q, which the import allowlist does not name", fields[0])
+		line = strings.TrimPrefix(line, "require ")
+		fields := strings.Fields(line)
+		// A requirement is `path version`; anything else is punctuation, a
+		// directive, or a comment.
+		if len(fields) < 2 || !strings.HasPrefix(fields[1], "v") {
+			continue
+		}
+		path := fields[0]
+		first := path
+		if i := strings.Index(first, "/"); i >= 0 {
+			first = first[:i]
+		}
+		if !strings.Contains(first, ".") {
+			continue
+		}
+		if !allowed[path] {
+			bad = append(bad, path)
 		}
 	}
+	return bad
 }
 
 // TestGuardCatchesACredentialRead is the mutation control: a guard that cannot

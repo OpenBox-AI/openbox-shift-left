@@ -107,25 +107,7 @@ func (c TurnCursor) Write(sessionID, agentID string, p TurnPos) error {
 	if err != nil {
 		return err
 	}
-	f, err := os.CreateTemp(dir, cursorKey(agentID)+"-*.tmp")
-	if err != nil {
-		return err
-	}
-	tmp := f.Name()
-	if _, err := f.Write(raw); err != nil {
-		f.Close()
-		os.Remove(tmp)
-		return err
-	}
-	if err := f.Close(); err != nil {
-		os.Remove(tmp)
-		return err
-	}
-	if err := os.Rename(tmp, c.RecordPath(sessionID, agentID)); err != nil {
-		os.Remove(tmp) // don't leave the temp behind on a failed rename
-		return err
-	}
-	return nil
+	return atomicWriteFile(c.RecordPath(sessionID, agentID), raw, 0o600)
 }
 
 // ClearSession removes a session's whole cursor subdir, sweeping the main

@@ -393,7 +393,8 @@ Details and current status: **[Assurance](docs/architecture.md#assurance--what-t
 
 ## Contributing
 
-Go 1.23+, no cgo. The repo is a Go workspace of small modules
+Go 1.27+, no cgo — a `GOTOOLCHAIN=auto` default fetches it for you. The
+repo is a Go workspace of small modules
 ([ADR-0011](docs/adr/ADR-0011-multi-module-layout.md)):
 
 ```bash

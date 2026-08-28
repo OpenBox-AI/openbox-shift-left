@@ -284,29 +284,3 @@ func writeSettings(path string, settings map[string]any) error {
 	}
 	return nil
 }
-
-// writeFileAtomic writes via a temp file in the same directory, then renames.
-// Same approach as the adapter's settings writer; kept local rather than exported
-// across a module boundary for one caller.
-func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
-	tmp, err := os.CreateTemp(filepath.Dir(path), ".settings-*.tmp")
-	if err != nil {
-		return err
-	}
-	tmpName := tmp.Name()
-	defer os.Remove(tmpName) // no-op after a successful rename
-	if _, err := tmp.Write(data); err != nil {
-		tmp.Close()
-		return err
-	}
-	// CreateTemp makes it 0600; match the intended perm rather than silently
-	// tightening a file other tools read.
-	if err := tmp.Chmod(perm); err != nil {
-		tmp.Close()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	return os.Rename(tmpName, path)
-}

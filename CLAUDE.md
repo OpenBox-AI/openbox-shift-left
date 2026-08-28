@@ -91,7 +91,32 @@ reintroduce that: if something is provider-agnostic it goes in `hookflow` or
   bytes, so non-ASCII content can exceed 64KB on the wire). What that control catches is
   measured, not assumed (C39 + `TestRedact_JSONShapedSecrets`): **the keyword
   decides, not the charset** — a high-entropy value beside an unrecognized key name
-  is invisible, because hex cannot clear the 4.5-bit entropy floor. Lowering that
+  is invisible, because hex cannot clear the 4.5-bit entropy floor.
+  **gitleaks ADDS 222 maintained rules BENEATH which the nine hand-rolled named
+  formats REMAIN as a floor** (D-OSS-4, 2026-08-28). Deleting the nine was tried and
+  regressed six conformance cases (C18/C26/C34/C42, CDX-C10, the finops thinking
+  sentinel), because gitleaks **allowlists published documentation keys** — AWS's
+  `AKIA…IOSFODNN7EXAMPLE`, the fixture in all six — and `AWS_ACCESS_KEY_ID=` is
+  invisible to `secret_assignment` since `_ID` sits between the keyword and the
+  delimiter. The nine are LOOSE where gitleaks is PRECISE, and that looseness is
+  what covers values gitleaks intentionally skips. Our floor runs FIRST, so audit
+  categories stay `aws_key`/`private_key`/`jwt` for formats that already had them;
+  gitleaks rule ids appear only where it alone matches. Three more things.
+  (a) The order is our patterns → gitleaks → entropy and it is LOAD-BEARING —
+  gitleaks replaces a finding's text wholesale and does not go through the
+  value-group + terminator-trim path, so running it first made JSON parseability
+  depend on how it drew its capture group. (b) A verdict-set diff over tests that CANNOT RUN is not evidence: the
+  six cases above are listener-dependent, never executed in a sandbox that denies
+  binds, and were reported green by omission.
+  (c) gitleaks is PRECISE where ours was LOOSE: it adds charset, length and
+  entropy on top of format, and allowlists AWS's published doc key — so
+  format-only fixtures stopped matching, and a provider changing its key length
+  silently stops matching until the pack is refreshed. `secret_assignment` and
+  `redactEntropy` are the backstop for exactly that, which is why they were kept.
+  **The false-positive soak did NOT clear the enforce path:** `generic-api-key`
+  matched a Go identifier and a credential FINGERPRINT (deliberately egressed,
+  deliberately not secret) in this repo's own tree, and the enforce-path redactor
+  rewrites developer files. Open item; disabling that one rule removes both. Lowering that
   floor is NOT the fix: below 4.0 every git SHA and UUID matches, and the
   enforce-path redactor REWRITES file bodies, so false positives corrupt files.
   Nested-JSON blindness WAS a second gap and is closed (2026-08-25) — both generic
@@ -299,8 +324,10 @@ readable by anything running as the developer, a default install governs one
 directory so absence of events is not evidence of absence of work, the backend does
 enforcement depends on reaching the control plane and under the default
 `fail_closed:false` is disabled by blocking one hostname, content-based policy sees
-at most the first 64KB of any body, local secret detection is keyword-driven so an
-unlabelled high-entropy value is invisible to it, Codex's hook
+at most the first 64KB of any body, local secret detection is keyword-driven for
+assignment shapes so an unlabelled high-entropy value below the 4.5-bit floor is
+invisible to it (the named-format half is gitleaks' 222 rules, precise but brittle
+to a provider changing a key format), Codex's hook
 cannot be mandated by `requirements.toml`, Guardrail redaction at source is not
 wired, the production-runtime lineage hop is not joined, Codex reports usage per
 session rather than per turn, reports no tool success at all, captures neither
@@ -647,11 +674,56 @@ pattern:
   `thinking` were missing, so an adapter writing either straight into metadata routed
   around the gate.
 
-Next: the Cursor adapter; policy template packs. The one dependency this repo now
-has is `golang.org/x/term v0.34.0`, **pinned** — v0.35.0+ declares `go 1.24.0` and
-would raise the language floor across all twelve modules; `go mod tidy` and
-`go get -u` will both happily do that, so don't let them (the require block in
-`cli/go.mod` says so too). (Upstreaming the
+Next: the Cursor adapter; policy template packs. The language floor is
+`go 1.27.0` across `go.work` and all twelve modules, so every dependency resolves
+at latest with no pin. **Dependencies are module-scoped now, not "one for the
+repo"**: `cli` has `golang.org/x/term` (masked input, ADR-0015) and
+`google/renameio/v2`; `contracts/dev-event/conformance` has
+`santhosh-tekuri/jsonschema/v6` (+ `golang.org/x/text`, D-OSS-5), which reaches
+the test graphs of both adapters and `client`; `adapters/common/devconfig` has
+`pelletier/go-toml/v2` (D-OSS-6) and `joho/godotenv` (D-OSS-7);
+`adapters/common/hookflow` has `google/renameio/v2` (D-OSS-8); `cli` also has
+`kardianos/service` (D-OSS-3). **Seven external direct dependencies now, up from
+one.** Three things follow.
+**A new dependency in a shared module needs `go mod tidy` in every module that
+transitively depends on it**, or `GOWORK=off` builds fail on a missing go.sum
+entry while the workspace build stays green — the release path is the one that
+breaks. And **`renameio` is `!windows` on every file**, so it sits behind a
+build-tagged `atomicWriteFile` helper: unix fsyncs, Windows keeps the prior
+temp+rename. Each module with a non-stdlib dependency carries its own allowlist
+test — `gateway/guard_test.go`, `conformance/deps_test.go`, `decision/guard_test.go`
+— and adding to one is a decision, which is why they fail first.
+
+**`kardianos/service` owns the gateway's unit file but NOT its path, and that has a
+test consequence** (D-OSS-3): on darwin it derives the home from `user.Current()`
+and ignores `$HOME`, with no override, so calling `Install()` from a test writes a
+live launchd unit into the runner's home. Production goes through the library;
+`installUnitFn`/`uninstallUnitFn` in `initgateway.go` are the seam the nine
+`setupGateway` tests use so `go test ./...` cannot install a daemon. Both paths emit
+identical bytes — `TestSuppliedTemplatesSurviveRendering` pins that the library's
+template render is an identity transform over our unit bodies. Its `Install()` also
+REFUSES an existing unit, so `Reinstall` uninstalls first; dropping that reopens the
+stale-unit bug where a moved binary left launchd restarting a path that no longer
+existed. `launchctl` start/stop stayed ours: the library uses the older `load`/
+`unload` where this repo uses `bootstrap`/`bootout`.
+
+**The credential guard bounds DIRECT requires only** (ADR-0023). Its go.mod half
+used to reject every requirement outside gateway's two-entry allowlist, transitive
+ones included; that was untenable once an allowlisted module grew its own tree, and
+enumerating the closure would make the allowlist unreadable — the one thing it
+exists to be. So the bound moved: direct requires are checked at each module, and
+transitive code is bounded at the module that took the dependency. **What is no
+longer bounded by any test is arbitrary transitive code**, and that was already true
+before — the old check matched only lines starting `github.com/`, so a direct
+`golang.org/x/…` require was invisible to it. The host gap is closed while the scope
+narrowed. Do not widen an allowlist to make a direct import pass; that inverts the
+ADR's reasoning.
+
+**`.env` parsing is godotenv's, at its defaults, and that removed two controls**
+(D-OSS-7): a duplicate key is last-wins rather than an error, `$VAR` and `\n`
+expand inside values, and **its parse error echoes the offending line**, so a
+malformed line that is a bare secret leaks it into logs. Owner-ruled, pinned by
+tests, recorded in ADR-0015 — do not "fix" it without reopening that ruling. (Upstreaming the
 `shell`/`mcp`/`tool` hook types to `openbox-sdk-python` is no longer needed —
 ADR-0013 retired the Go mirror by deleting the span layer it mirrored.)
 

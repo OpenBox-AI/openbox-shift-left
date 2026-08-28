@@ -1,20 +1,22 @@
 package devconfig
 
 import (
-	"bufio"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/joho/godotenv"
 )
 
 // envfile.go — the dotenv codec for ~/.openbox/.env (ADR-0015).
 //
-// Hand-rolled rather than a dependency: this repo writes and reads both ends of
-// the format, and the whole thing is the file you are reading. ADR-0015 records
-// that as a decision, so a later "just add godotenv" is a reversal, not a
-// cleanup.
+// The READ side is joho/godotenv at its defaults (D-OSS-7). That reverses
+// ADR-0015's "hand-rolled rather than a dependency", deliberately and with the
+// consequences measured rather than assumed — see ParseEnvFile's comment for
+// exactly what changed. The WRITE side is still ours: it has to emit the header
+// below and merge unknown keys, neither of which the library does.
 //
 // The codec is deliberately a plain map[string]string with no knowledge of which
 // keys are credentials. Precedence — real env var beats file — belongs to
@@ -46,83 +48,52 @@ const envFileHeader = `# OpenBox credentials for this machine — written by ` +
 //
 // A missing file is an empty map and a nil error: no credentials configured is a
 // legitimate state that the caller reports in its own words, not an I/O failure.
+// WriteEnvFile also relies on it for the first write to a fresh path.
 //
-// Supported syntax, which is the intersection of what people actually type and
-// what can be parsed unambiguously:
+// Parsing is godotenv's, at its defaults. Four behaviours differ from the
+// hand-rolled parser this replaced, all measured against it over an 18-case
+// corpus, and all of them LOSSES rather than neutral changes. They are recorded
+// here because each one is a way a credential can go wrong silently:
 //
-//	# comment                       (and trailing blank lines)
-//	KEY=value
-//	export KEY=value                (pasted straight from a shell)
-//	KEY="value"  /  KEY='value'     (quotes stripped, one level)
-//	  KEY = value                   (whitespace around key and value)
-//	KEY=                            (explicit empty)
+//   - a DUPLICATE key is last-wins, not an error. The old parser refused, on the
+//     reasoning that two lines setting one credential means the user believes
+//     something the file does not say — and the failure surfaces much later as an
+//     unexplained 401 from the key that lost. That refusal is gone;
+//   - `$VAR` and `${VAR}` are EXPANDED in unquoted and double-quoted values, and
+//     `\n`-style escapes are expanded in double-quoted ones. A credential
+//     containing a dollar sign is silently rewritten. Base64 and `obx_` keys use
+//     no `$`, so the two secrets this file is for are unaffected — a hand-added
+//     value is not;
+//   - a `#` after a value starts a comment, so `KEY=abc # note` yields `abc`. The
+//     old parser treated it as data;
+//   - `=value` (empty key) is accepted rather than refused.
 //
-// A duplicate key is an ERROR, not last-wins. Two lines setting one credential
-// means the user believes something the file does not say, and silently picking
-// one is how a rotated key gets shadowed by the line above it — a failure that
-// surfaces as an unexplained 401 much later.
+// And one that is a disclosure rather than a parse difference: godotenv's error
+// for a malformed line ECHOES THAT LINE. On a file whose whole purpose is
+// credentials, a line that is a bare secret puts the secret in the error string,
+// and from there into whatever logged it. The old parser named the file and line
+// number and never the content, and its test asserted exactly that.
+//
+// All five are accepted: the owner's ruling is to take the package's default
+// behaviour and not work around it. Nothing here compensates for them, on
+// purpose — a wrapper that restored the old semantics would mean the dependency
+// bought nothing while hiding where the behaviour actually comes from.
 func ParseEnvFile(path string) (map[string]string, error) {
-	out := map[string]string{}
-	f, err := os.Open(path)
-	if err != nil {
+	// The missing-file contract is this function's own, not something to delegate:
+	// godotenv.Read surfaces the open error, and callers here treat "no file" as
+	// "no credentials".
+	if _, err := os.Stat(path); err != nil {
 		if os.IsNotExist(err) {
-			return out, nil
+			return map[string]string{}, nil
 		}
 		return nil, fmt.Errorf("read %s: %w", path, err)
 	}
-	defer f.Close()
 
-	sc := bufio.NewScanner(f)
-	// A pasted private key is short, but a generous ceiling costs nothing and
-	// avoids a truncation that would look like a corrupt credential.
-	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
-	line := 0
-	for sc.Scan() {
-		line++
-		// CRLF: a Windows user editing this in Notepad produces \r\n. A naive
-		// parser leaves \r on every value, and a \r inside a base64 signing key
-		// fails signature verification with an error that names neither the
-		// file nor the character. Strip it here so it cannot reach a signer.
-		raw := strings.TrimRight(sc.Text(), "\r")
-		s := strings.TrimSpace(raw)
-		if s == "" || strings.HasPrefix(s, "#") {
-			continue
-		}
-		s = strings.TrimPrefix(s, "export ")
-
-		// Split on the FIRST '=' only. Base64 values are padded with '=', so
-		// splitting on all of them truncates a 32-byte key to nothing.
-		eq := strings.Index(s, "=")
-		if eq < 0 {
-			return nil, fmt.Errorf("%s:%d: not a KEY=value line", path, line)
-		}
-		key := strings.TrimSpace(s[:eq])
-		if key == "" {
-			return nil, fmt.Errorf("%s:%d: empty key", path, line)
-		}
-		if _, dup := out[key]; dup {
-			// Name the key and the line, never the value.
-			return nil, fmt.Errorf("%s:%d: duplicate key %s — remove one of the two lines "+
-				"(a second assignment silently shadows the first, which is how a rotated credential stops working)", path, line, key)
-		}
-		out[key] = unquote(strings.TrimSpace(s[eq+1:]))
-	}
-	if err := sc.Err(); err != nil {
+	kv, err := godotenv.Read(path)
+	if err != nil {
 		return nil, fmt.Errorf("read %s: %w", path, err)
 	}
-	return out, nil
-}
-
-// unquote strips one level of matching surrounding quotes. Unbalanced quotes are
-// left alone: a value that merely contains a quote is data, not a syntax error.
-func unquote(v string) string {
-	if len(v) < 2 {
-		return v
-	}
-	if (v[0] == '"' && v[len(v)-1] == '"') || (v[0] == '\'' && v[len(v)-1] == '\'') {
-		return v[1 : len(v)-1]
-	}
-	return v
+	return kv, nil
 }
 
 // WriteEnvFile merges kv over whatever is already at path and writes the result

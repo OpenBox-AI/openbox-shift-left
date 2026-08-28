@@ -100,7 +100,11 @@ be on without the others:
 - **Local secret redaction.** A Write/Edit body is scanned before anything leaves
   the machine; a detected secret is replaced and the call proceeds with the redacted
   body (redact-and-continue) rather than being blocked. On by default
-  (`secret_detection`).
+  (`secret_detection`). Detection is two layers: **231 format rules** — nine
+  hand-rolled regexes (`decision/secrets.go`) beneath gitleaks' 222
+  (`decision/gitleaks.go`, D-OSS-4) — then a keyword-and-entropy layer for values in
+  no known format. What that reaches, and the two shapes it does not, is measured in
+  [data-and-privacy.md](data-and-privacy.md#what-the-scanner-catches--and-where-it-stops).
 - **Inline evaluation.** The gated call is sent to `/evaluate` and the verdict is
   applied before the tool runs. Every gated class, not a risk-selected subset —
   risk is a property of the policy. Prompts gate the same way: `UserPromptSubmit`
@@ -254,6 +258,28 @@ Being precise here is part of the product.
     a product decision and is **not** made yet. Related and smaller: the relay
     buffers up to 64 MiB per in-flight request with no concurrency cap, so the same
     unauthenticated listener is a local memory-pressure lever.
+- **Local secret detection has a measured reach, and two shapes fall outside it.**
+  231 format rules catch a known credential by SHAPE wherever it appears. Anything
+  in no known format is caught only by the keyword-and-entropy layer, and that layer
+  has two documented misses: the recognised keyword must sit **adjacent** to the
+  delimiter, so `AWS_ACCESS_KEY_ID=<unrecognised value>` is invisible while
+  `access_key=<same value>` is caught; and a high-entropy value beside an
+  unrecognised key name is invisible below the 4.5-bit floor, which is deliberate —
+  lowering it would flag every git SHA and UUID, and on the enforce path the
+  redactor **rewrites the developer's file**, so a false positive corrupts real
+  content. Both are measured, not assumed
+  ([data-and-privacy.md](data-and-privacy.md#what-the-scanner-catches--and-where-it-stops)).
+  The same redactor also fires on a base64 literal in a source assignment, which
+  rewrote three of this repo's own test files during the gitleaks adoption.
+- **The credential guard bounds direct requires, not transitive code**
+  ([ADR-0023](adr/ADR-0023-credential-guard-scope.md)). `gateway/` must never read
+  the developer's provider credential; its own files are scanned for that and its
+  direct imports are held to a two-module allowlist. What no test bounds is
+  arbitrary transitive code linked into the binary — accepted, and named, because
+  the alternative was an allowlist too long to read. That was already the real
+  boundary: the previous check matched only `github.com/…` requirements, so a direct
+  `golang.org/x/…` one was invisible to it. Each module that takes a dependency now
+  carries its own allowlist (`gateway/`, `decision/`, `conformance/`).
 - **The inline-evaluation path has not been exercised against a live stack.**
   Every claim below about enforcement rests on tests that drive the real hook
   against a local `/evaluate` stub — which is real HTTP and the real gate, but not

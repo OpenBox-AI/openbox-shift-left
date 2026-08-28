@@ -13,7 +13,7 @@
 #
 # If no prebuilt asset matches your platform (or you set OPENBOX_FROM_SOURCE=1), it
 # FALLS BACK to building the one unified static engine from source — which then
-# requires a Go 1.23+ toolchain + git. Same OD17 binary either way: one no-cgo
+# requires a Go 1.27+ toolchain + git. Same OD17 binary either way: one no-cgo
 # `openbox` that is CLI + hook + sidecar + git-hook.
 #
 # It deliberately does NOT register you with OpenBox or wire Claude Code. That is
@@ -47,7 +47,7 @@ REPO_URL="${OPENBOX_REPO_URL:-https://github.com/${GH_OWNER}/${GH_REPO}.git}"
 REF="${OPENBOX_REF:-main}"
 INSTALL_DIR="${OPENBOX_INSTALL_DIR:-$HOME/.local/bin}"
 BIN_NAME="openbox"
-MIN_GO_MINOR=23   # require go 1.23+ for the SOURCE fallback only
+MIN_GO_MINOR=27   # require go 1.27+ for the SOURCE fallback only
 
 # ----------------------------------------------------------------------------- #
 # Pretty output (no color when not a tty)
@@ -168,7 +168,7 @@ install_prebuilt() {
 }
 
 # ----------------------------------------------------------------------------- #
-# Fallback path: build the unified engine from source (needs go 1.23+ and git)
+# Fallback path: build the unified engine from source (needs go 1.27+ and git)
 # ----------------------------------------------------------------------------- #
 build_from_source() {
   command -v git >/dev/null 2>&1 || die "git is required for the source build but was not found on PATH."

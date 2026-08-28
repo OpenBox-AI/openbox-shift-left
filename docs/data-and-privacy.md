@@ -190,7 +190,7 @@ came from.
 > **Redaction at source is not implemented yet.** The server-side Guardrail
 > redaction layer is not wired anywhere in this product. Local secret detection is
 > the only control on content in transit, and what it catches is
-> [measured, not assumed](#what-the-scanner-catches--and-the-one-gap). If that
+> [measured, not assumed](#what-the-scanner-catches--and-where-it-stops). If that
 > matters for your data, run with capture off.
 >
 > The asymmetry that used to live here — every content class scanned except the
@@ -241,9 +241,11 @@ worth knowing rather than discovering:
 - **It is the densest content here.** Thinking restates prompts, file contents,
   and any credential the turn saw earlier in its reasoning, so the local secret
   scan matters more on this field than anywhere else. That scan is the same
-  keyword-driven detector used everywhere else in this engine, with the same
-  measured limits (see [Secret detection stays local](#secret-detection-stays-local)) —
-  and thinking is the field those limits apply to most.
+  detector used everywhere else in this engine — **231 format rules where the
+  SHAPE decides, plus a keyword-and-entropy layer for everything else** — with the
+  same measured limits (see
+  [Secret detection stays local](#secret-detection-stays-local)), and thinking is
+  the field those limits apply to most.
 
 What is NOT sent on this path: the stop reason, and any tool output the reply
 describes.
@@ -461,7 +463,7 @@ with `OPENBOX_REDACTED…` in place of the secret — and the audit records the 
 (`aws_key`, `entropy`, …), never the value. Nothing about the finding except the
 category leaves the machine.
 
-### What the scanner catches — and the one gap
+### What the scanner catches — and where it stops
 
 Measured against the real detector, not asserted (conformance
 `TestContentCaptureCredentialCoverage` drives a dotenv dump through a real tool
@@ -470,13 +472,23 @@ event and asserts the flushed bytes):
 | In tool output | Redacted? | Why |
 |---|---|---|
 | an AWS / GitHub / Stripe / JWT / `sk-` key, anywhere | yes | matched by shape, so surrounding syntax is irrelevant |
+| a GitLab / Shopify / Twilio / DigitalOcean / Grafana / … token, anywhere | yes | one of gitleaks' 222 rules; shape again, no key name needed |
 | `OPENBOX_API_KEY=obx_…` | yes | the key name matches a known credential keyword |
-| `OPENBOX_AGENT_PRIVATE_KEY=<base64>` | yes | no keyword match, but base64 clears the entropy floor |
+| `OPENBOX_AGENT_PRIVATE_KEY=<base64>` | yes | matched as a generic API key by shape; the entropy pass would catch it too |
 | `API_KEY=<64 hex chars>` | yes | keyword match — the value's alphabet does not matter |
+| **`AWS_ACCESS_KEY_ID=<value in no known format>`** | **no** | **the keyword must sit NEXT TO the delimiter, and `_ID` intervenes** |
 | `DEPLOY_HEX=<64 hex chars>` | **no** | no keyword, and hex cannot clear the entropy floor |
 | `{"password":"…"}` or `{"key":"<base64>"}` **nested in tool output** | yes | the generic patterns tolerate JSON quoting and escaping |
 
-One standing limit and one recently closed, both measured rather than assumed:
+The format layer is two sets that stack: nine hand-rolled regexes
+(`decision/secrets.go`) beneath gitleaks' 222 maintained rules
+(`decision/gitleaks.go`, D-OSS-4). The nine are LOOSE where gitleaks is PRECISE —
+gitleaks adds charset, length and entropy floors and allowlists published
+documentation keys — so deleting them in favour of it regressed six conformance
+cases and they were restored as a floor. Both layers run before the
+keyword/entropy layer.
+
+Two standing limits and one recently closed, all measured rather than assumed:
 
 **1. For generic secrets, the keyword decides — not the shape of the value.** A
 high-entropy value next to an unrecognized key name is invisible. That one is
@@ -485,6 +497,23 @@ deliberate: the entropy floor sits above what hex can reach (16 symbols cap it a
 content hashes are never flagged. Lowering it would make the scanner fire on
 ordinary identifiers — and on the enforce path the scanner **rewrites the file your
 tool is about to write**, so a false positive corrupts real content.
+
+**1b. The keyword has to be ADJACENT to the delimiter.** `access_key=…` is caught;
+`AWS_ACCESS_KEY_ID=…` is not, because `_ID` sits between the recognised keyword and
+the `=`. If the value happens to match one of the 231 format rules the format layer
+catches it anyway — a real AWS key id is caught — but a credential-named assignment
+carrying an unrecognised value is invisible. Measured, and it is the gap that caused
+a real regression: when the nine format regexes were briefly deleted, six
+conformance cases went red on exactly this shape.
+
+**A false-positive class worth stating, because the enforce path rewrites files.**
+The entropy pass fires on a base64-class token of ≥24 characters at ≥4.5 bits per
+character **in a value position** — and a Go source line like
+`myConstant := "<48 chars of base64>"` is a value position. During this work the
+redactor rewrote three of the repo's own test files that way, replacing a fixture
+with a placeholder on disk. Nothing detected it except a test that then measured
+the wrong thing. If you keep base64 fixtures in source under a governed session,
+that is the shape to know about.
 
 **2. Nested JSON used to be a second gap. It is closed.** A tool's response is
 itself JSON, so a nested value arrives escaped (`{\"key\":\"…\"}`), and both
@@ -500,9 +529,14 @@ If your credentials fall under limit 1, that is the case to plan around: run wit
 session.
 
 The same scanner runs on **every** content body before it is attached to an event,
-enforce mode or not: the assistant's reply, tool input, tool output, and the refusal
-reasons. Only the prompt is exempt, and that gap is stated above rather than
-mitigated. Redaction runs **before** attachment in all cases — a redaction applied
+enforce mode or not: the prompt, the assistant's reply, tool input, tool output, and
+the refusal reasons. **The prompt is no longer exempt** — it was the one field
+assigned directly instead of through the mapper's redactor, so it egressed unscanned
+with `secret_detection` fully on; that was fixed on 2026-08-26 and conformance C42
+asserts it on the outbound bytes (`adapters/claude-code/mapper.go:225`). The same
+shape is **still live for Codex**, whose mapper has no redactor at all — see
+[COVERAGE.md §3.4](../contracts/dev-event/COVERAGE.md). Redaction runs **before**
+attachment in all cases — a redaction applied
 afterwards would pass every code-level test and still ship the secret, so the
 ordering is asserted on the outbound bytes (conformance C18, C26, C34).
 

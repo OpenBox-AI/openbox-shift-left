@@ -5,6 +5,8 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+
+	"github.com/zricethezav/gitleaks/v8/detect"
 )
 
 // Tier-1 local secret/entropy detection. Given a content string (a file
@@ -67,9 +69,11 @@ type namedPattern struct {
 	valueGroup int
 }
 
-// secretDetector holds the compiled pattern set. Immutable after construction.
+// secretDetector holds the compiled pattern set and the shared gitleaks detector.
+// Immutable after construction.
 type secretDetector struct {
 	patterns []namedPattern
+	gitleaks *detect.Detector
 }
 
 // defaultSecretDetector is the process-wide detector (compiled once). Safe for
@@ -77,7 +81,32 @@ type secretDetector struct {
 var defaultSecretDetector = newSecretDetector()
 
 func newSecretDetector() *secretDetector {
-	return &secretDetector{patterns: []namedPattern{
+	// The gitleaks detector is the process-wide singleton, not a fresh one per
+	// construction: building it compiles 222 rules and mutates global viper state.
+	// Tests call newSecretDetector freely, so this must stay cheap.
+	return &secretDetector{gitleaks: gitleaksDetector(), patterns: []namedPattern{
+		// These nine named formats are a FLOOR BENEATH gitleaks, not a duplicate of
+		// it (D-OSS-4, see gitleaks.go). Deleting them in favour of the 222
+		// maintained rules was tried and REGRESSED six conformance cases, because
+		// gitleaks' rules are deliberately stricter in two ways ours are not:
+		//
+		//   - they ALLOWLIST published documentation keys — AWS's own
+		//     `AKIA…IOSFODNN7EXAMPLE` is excluded by design, and that value is what
+		//     C18/C26/C34/C42, CDX-C10 and the finops thinking sentinel all carry;
+		//   - they add charset, length and entropy floors on top of the format, so a
+		//     low-entropy or wrong-charset value shaped like a key does not match.
+		//
+		// For a REAL credential that is correct and better than ours. But the second
+		// half of the gap is not about test values at all: `AWS_ACCESS_KEY_ID=` is
+		// invisible to the generic assignment pattern below, because `_ID` sits
+		// between the `access_key` keyword and the delimiter. So with these patterns
+		// gone, an unmistakably credential-named assignment carrying anything
+		// gitleaks did not recognise egressed UNREDACTED. These regexes were the only
+		// thing covering it.
+		//
+		// They run BEFORE gitleaks, which keeps the audit's category names stable
+		// (`aws_key`, not `aws-access-token`) for the formats that already had them.
+		//
 		// PEM private-key block (multiline). Whole block → placeholder.
 		{category: "private_key", re: regexp.MustCompile(`(?s)-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----.*?-----END [A-Z0-9 ]*PRIVATE KEY-----`)},
 		// AWS access key id (AKIA/ASIA/… + 16 upper-alnum).
@@ -95,6 +124,8 @@ func newSecretDetector() *secretDetector {
 		{category: "ai_api_key", re: regexp.MustCompile(`\bsk-(?:ant-)?[A-Za-z0-9_\-]{20,}\b`)},
 		// JWT (three base64url segments).
 		{category: "jwt", re: regexp.MustCompile(`\beyJ[A-Za-z0-9_\-]{5,}\.eyJ[A-Za-z0-9_\-]{5,}\.[A-Za-z0-9_\-]{5,}\b`)},
+		// And the generic one gitleaks cannot replace, because it REPORTS findings
+		// and does not structurally rewrite a body:
 		// Generic KEY=VALUE / KEY: VALUE assignment — redact the VALUE only (group 2),
 		// keeping the key + surrounding quote. Case-insensitive on the key names.
 		//
@@ -164,6 +195,7 @@ func (d *secretDetector) Redact(text string) (redacted string, categories []stri
 	}
 	catSet := map[string]struct{}{}
 	out := text
+
 	for i := range d.patterns {
 		p := d.patterns[i]
 		out = p.re.ReplaceAllStringFunc(out, func(m string) string {
@@ -219,6 +251,25 @@ func (d *secretDetector) Redact(text string) (redacted string, categories []stri
 			return m[:loc[2*g]] + placeholder(p.category) + m[end:]
 		})
 	}
+	// gitleaks runs AFTER our own patterns, and the order is load-bearing.
+	//
+	// gitleaks replaces its finding's secret TEXT wholesale; it does not go through
+	// the value-group + terminator-trim path above. For an assignment-shaped secret
+	// — which is the common case, because a tool_response is JSON — that path is
+	// what keeps the output parseable: it preserves the key and its quoting and
+	// leaves a trailing `\`, `}`, `]` or `)` OUTSIDE the placeholder. Running
+	// gitleaks first let its generic-api-key rule match those cases and redact them
+	// without that care, which both changed the reported category and made the
+	// parseability guarantee depend on how gitleaks happened to draw its capture
+	// group.
+	//
+	// Running it second makes the division of labour explicit: our pattern owns
+	// assignment-shaped values, gitleaks owns named formats our pattern cannot see
+	// (a bare AKIA token with no keyword beside it, a PEM block, a JWT). By the time
+	// it runs, anything our pattern handled is already a placeholder, so its scan
+	// finds nothing there and cannot double-report.
+	out = redactGitleaks(d.gitleaks, out, catSet)
+
 	out = d.redactEntropy(out, catSet)
 	if out == text {
 		return text, nil, false
@@ -333,10 +384,34 @@ func shannonEntropy(s string) float64 {
 }
 
 // placeholder renders the env-var-ref redaction marker for a category, e.g.
-// "aws_key" → "${OPENBOX_REDACTED_AWS_KEY}". Category slugs are already env-var-safe
-// ([a-z0-9_]).
+// "aws-access-token" → "${OPENBOX_REDACTED_AWS_ACCESS_TOKEN}".
+//
+// Non-alphanumerics are folded to underscores because the whole point of the
+// env-var shape is that a developer can act on it: gitleaks rule ids are
+// hyphenated slugs ("aws-access-token", "1password-secret-key"), and a hyphen is
+// not legal in a shell identifier, so emitting one verbatim would produce a
+// placeholder that cannot be exported. A leading digit needs no special handling —
+// the category is appended after "OPENBOX_REDACTED_", so the name never starts
+// with one.
 func placeholder(category string) string {
-	return "${" + redactedPrefix + "_" + strings.ToUpper(category) + "}"
+	var b strings.Builder
+	b.Grow(len(redactedPrefix) + len(category) + 4)
+	b.WriteString("${")
+	b.WriteString(redactedPrefix)
+	b.WriteByte('_')
+	for i := 0; i < len(category); i++ {
+		c := category[i]
+		switch {
+		case c >= 'a' && c <= 'z':
+			b.WriteByte(c - 32)
+		case (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_':
+			b.WriteByte(c)
+		default:
+			b.WriteByte('_')
+		}
+	}
+	b.WriteByte('}')
+	return b.String()
 }
 
 // sortedCategories returns the map keys sorted, for a deterministic audit signal.

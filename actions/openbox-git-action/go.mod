@@ -1,6 +1,6 @@
 module github.com/openbox-ai/openbox-shift-left/actions/openbox-git-action
 
-go 1.23
+go 1.27.0
 
 require (
 	github.com/openbox-ai/openbox-shift-left/adapters/common/git v0.0.0

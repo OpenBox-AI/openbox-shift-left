@@ -101,24 +101,34 @@ func (a *app) setupGateway(homeDir, addr, upstream string, verbose bool) error {
 		return fmt.Errorf("cannot resolve this binary's path for the service unit: %w", err)
 	}
 
-	unitPath, err := gatewayservice.WriteUnit(runtime.GOOS, homeDir, binPath, cfg.Addr, cfg.Upstream, verbose)
-	if err != nil {
+	// kardianos/service writes the unit now (D-OSS-3). Reinstall, not Install: the
+	// library refuses when the file exists, and re-running `init --gateway` is how a
+	// unit written by an older binary gets refreshed.
+	//
+	// The unit's own PATH is the library's to choose — on darwin it derives the home
+	// from user.Current() and ignores $HOME, with no override. In production that is
+	// this same homeDir; under a test with a fake HOME it is not, which is the
+	// isolation cost accepted when D-OSS-3 was adopted. unitPath below is therefore
+	// the path for REPORTING and for the re-install check, correct wherever the two
+	// agree.
+	if err := installUnitFn(runtime.GOOS, homeDir, binPath, cfg.Addr, cfg.Upstream, verbose); err != nil {
 		// Includes the Windows case, which is an error rather than a silent skip:
 		// a developer who believes a service was installed and finds none later is
 		// worse off than one told plainly at install time.
 		return err
 	}
+	unitPath := gatewayservice.UnitPath(runtime.GOOS, homeDir)
 	fmt.Fprintf(a.stdout, "  gateway unit   %s\n", unitPath)
 
 	if err := a.loadUnit(unitPath); err != nil {
 		// Do NOT write the env var. Report and leave the machine working — and
 		// leave NO unit behind either: see rollbackUnit.
-		a.rollbackUnit(unitPath)
+		a.rollbackUnit(homeDir, unitPath)
 		return fmt.Errorf("wrote %s but could not start it (%w) — ANTHROPIC_BASE_URL was NOT set, so model calls still work and are ungoverned. Start it by hand with `openbox gateway`, then re-run init", unitPath, err)
 	}
 
 	if !waitForListenerFn(cfg.Addr, gatewayReadyTimeout) {
-		a.rollbackUnit(unitPath)
+		a.rollbackUnit(homeDir, unitPath)
 		return fmt.Errorf("the gateway did not start listening on %s within %s — ANTHROPIC_BASE_URL was NOT set, so model calls still work and are ungoverned. Check the service logs, or run `openbox gateway` in the foreground to see why", cfg.Addr, gatewayReadyTimeout)
 	}
 	fmt.Fprintf(a.stdout, "  gateway        listening on %s\n", cfg.Addr)
@@ -126,7 +136,7 @@ func (a *app) setupGateway(homeDir, addr, upstream string, verbose bool) error {
 	// Only now. Everything above had to succeed for this to be safe.
 	replaced, err := gatewayservice.WriteEnv(homeDir, cfg.Addr)
 	if err != nil {
-		a.rollbackUnit(unitPath)
+		a.rollbackUnit(homeDir, unitPath)
 		return err
 	}
 	fmt.Fprintf(a.stdout, "  %s  %s (user scope: %s)\n",
@@ -165,11 +175,10 @@ func (a *app) removeGateway(homeDir string) error {
 	// restarting with no unit on disk, silently, while init reported success.
 	a.unloadUnit(gatewayservice.UnitPath(runtime.GOOS, homeDir))
 
-	unitPath, err := gatewayservice.RemoveUnit(runtime.GOOS, homeDir)
-	if err != nil {
+	if err := uninstallUnitFn(runtime.GOOS, homeDir); err != nil {
 		return err
 	}
-	if unitPath != "" {
+	if unitPath := gatewayservice.UnitPath(runtime.GOOS, homeDir); unitPath != "" {
 		fmt.Fprintf(a.stdout, "  removed        %s\n", unitPath)
 	}
 	return nil
@@ -221,6 +230,26 @@ func (a *app) unloadUnit(unitPath string) {
 // passes explicitly — so `waitForListenerFn(addr, 5)` compiled, silently failed
 // the assertion, and waited the default instead of 5. A plain function value keeps
 // the seam and lets the compiler check it.
+// installUnitFn / uninstallUnitFn are the unit-file seam.
+//
+// Production goes through kardianos/service (D-OSS-3). That library derives the
+// darwin plist path from user.Current() and IGNORES $HOME, with no override — so
+// calling it from a test would write a live launchd unit into the home directory of
+// whoever ran `go test`, including CI, no matter what homeDir the test passed.
+//
+// The nine tests that drive setupGateway are the ones that prove the safety
+// property this repo cares most about — that ANTHROPIC_BASE_URL is never written
+// while nothing listens, and that a failed start leaves no unit behind. Gating them
+// off by default to accommodate the library would remove that proof from every
+// ordinary test run, which is a worse trade than routing them through the
+// path-explicit writer. Both produce identical bytes: the bodies come from the same
+// renderers, and gatewayservice.TestSuppliedTemplatesSurviveRendering pins that the
+// library's template render is an identity transform over them. The library's own
+// write is covered by its opt-in artifact test.
+var installUnitFn = gatewayservice.Reinstall
+
+var uninstallUnitFn = gatewayservice.Uninstall
+
 var waitForListenerFn = waitForListener
 
 // waitForListener polls until something accepts a connection, or the deadline
@@ -403,12 +432,17 @@ func unitDescribesAddr(unitPath, addr string) bool {
 // Best-effort and silent about its own failures: this runs on a path that is
 // already reporting an error, and a second error about cleaning up the first
 // would bury it.
-func (a *app) rollbackUnit(unitPath string) {
+func (a *app) rollbackUnit(homeDir, unitPath string) {
 	if unitPath == "" {
 		return
 	}
 	a.unloadUnit(unitPath)
-	if err := os.Remove(unitPath); err == nil {
+	// Uninstall, not os.Remove(unitPath): since D-OSS-3 the library chose where the
+	// unit went, and on darwin that path is derived from user.Current() rather than
+	// from homeDir. Removing the caller-computed path would leave the real unit in
+	// place whenever the two disagree — a rollback that reports success and leaves a
+	// KeepAlive job behind is the failure this function exists to prevent.
+	if err := uninstallUnitFn(runtime.GOOS, homeDir); err == nil {
 		fmt.Fprintf(a.stdout, "  rolled back    removed %s\n", unitPath)
 	}
 }

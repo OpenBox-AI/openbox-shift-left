@@ -28,24 +28,24 @@ jobs:
         # A SUPPORTED major, and the reason is security rather than features.
         # Go patches only the two most recent majors, so a pin to an older one
         # stops receiving stdlib fixes entirely while still building green:
-        # this was pinned to 1.23 two majors past its end of life, and
+        # this was once pinned to 1.23 two majors past its end of life, and
         # govulncheck found reachable stdlib vulnerabilities in every module
         # (quadratic net/url resolvePath, a crypto/tls post-handshake message
         # limit, encoding/asn1 recursion depth, net/textproto error escaping)
         # whose fixes shipped only in 1.25.11+ and could therefore never arrive
         # on any 1.23 patch.
         #
-        # This is deliberately NOT the go.mod language floor, which stays at
-        # 1.23: a newer toolchain compiles an older language version, so the
-        # x/term v0.34.0 pin (v0.35.0+ would raise that floor across all twelve
-        # modules) is unaffected. Toolchain and floor move independently, and
-        # only one of them is a security input.
+        # The go.mod language floor is 1.27.0 too, so the two currently coincide.
+        # They remain independent knobs — a newer toolchain compiles an older
+        # language version — and only the toolchain is a security input, so keep
+        # bumping this on its own schedule rather than waiting for a floor
+        # decision.
         #
         # A MAJOR, not a full version, so patch releases — which is what
         # security fixes are — arrive without a commit here.
         uses: actions/setup-go@v5
         with:
-          go-version: "1.26"
+          go-version: "1.27"
 
       - name: Check formatting
         run: |

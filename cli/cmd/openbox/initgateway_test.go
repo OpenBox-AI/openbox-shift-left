@@ -19,6 +19,22 @@ func stubSupervisor(t *testing.T, addr string, startFails bool) {
 	origRun, origUID := run, currentUID
 	t.Cleanup(func() { run, currentUID = origRun, origUID })
 
+	// Route the unit write through the PATH-EXPLICIT writer for the duration of the
+	// test. Production uses kardianos/service, which ignores $HOME on darwin and
+	// would install a real launchd unit into the developer's home on every
+	// `go test` — see installUnitFn. Identical bytes either way; only the location
+	// differs, and here the location is the whole point.
+	origInstall, origUninstall := installUnitFn, uninstallUnitFn
+	t.Cleanup(func() { installUnitFn, uninstallUnitFn = origInstall, origUninstall })
+	installUnitFn = func(goos, homeDir, binPath, addr, upstream string, verbose bool) error {
+		_, err := gatewayservice.WriteUnit(goos, homeDir, binPath, addr, upstream, verbose)
+		return err
+	}
+	uninstallUnitFn = func(goos, homeDir string) error {
+		_, err := gatewayservice.RemoveUnit(goos, homeDir)
+		return err
+	}
+
 	currentUID = func() string { return "501" }
 	run = func(string, ...string) error {
 		if startFails {

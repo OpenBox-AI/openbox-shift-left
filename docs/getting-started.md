@@ -30,7 +30,7 @@ curl -fsSL https://raw.githubusercontent.com/OpenBox-AI/openbox-shift-left/main/
 Downloads the prebuilt `openbox` binary for your platform (Linux/macOS,
 amd64/arm64), verifies its checksum, and puts it on your PATH (`~/.local/bin` by
 default). No Go toolchain needed. If no prebuilt asset matches your platform it
-falls back to building from source, which does need Go 1.23+.
+falls back to building from source, which does need Go 1.27+.
 
 ```bash
 openbox version
@@ -38,7 +38,7 @@ openbox version
 
 **Windows:** the binary compiles and CI cross-compiles it on every change, but
 `install.sh` is bash and no automated suite exercises Windows at runtime. Build
-from source with Go 1.23+, and see [What is not verified](#what-is-not-verified).
+from source with Go 1.27+, and see [What is not verified](#what-is-not-verified).
 
 ## 2. Get the right credential
 

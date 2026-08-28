@@ -9,7 +9,9 @@
 //
 // The release build sets GOWORK=off (see .goreleaser.yaml) so a published
 // binary resolves exactly as it would outside this checkout.
-go 1.23.0
+go 1.27.0
+
+toolchain go1.27.0
 
 use (
 	./actions/openbox-git-action

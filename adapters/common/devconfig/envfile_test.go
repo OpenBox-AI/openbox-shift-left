@@ -81,21 +81,35 @@ func TestParseEnvFile(t *testing.T) {
 			want: map[string]string{"K": "a=b"},
 		},
 		{
-			name: "duplicate key is an error naming key and line",
-			// Sentinel values, so the leak assertion below cannot collide with
-			// ordinary English in the error's prose.
-			body:  "OPENBOX_API_KEY=obx_SENTINEL_FIRST\nOPENBOX_API_KEY=obx_SENTINEL_SECOND\n",
-			errIs: "duplicate key OPENBOX_API_KEY",
+			// BEHAVIOUR CHANGE, D-OSS-7: the hand-rolled parser REFUSED a
+			// duplicate key, naming the key and line, because two lines setting
+			// one credential means the user believes something the file does not
+			// say — and the loser surfaces later as an unexplained 401. godotenv
+			// takes the last assignment, and the owner's ruling is to accept the
+			// package's default rather than restore the refusal. Pinned so the
+			// change is visible in the suite, not just in a comment.
+			name: "duplicate key is last-wins, not an error",
+			body: "OPENBOX_API_KEY=obx_first\nOPENBOX_API_KEY=obx_second\n",
+			want: map[string]string{"OPENBOX_API_KEY": "obx_second"},
 		},
 		{
 			name:  "line with no equals",
 			body:  "OPENBOX_API_KEY\n",
-			errIs: "not a KEY=value line",
+			errIs: "unexpected character",
 		},
 		{
-			name:  "empty key",
-			body:  "=value\n",
-			errIs: "empty key",
+			// BEHAVIOUR CHANGE, D-OSS-7: `=value` was refused as an empty key and
+			// is now accepted. godotenv binds it to the empty name, so the map
+			// gains a "" key rather than the file being rejected.
+			name: "empty key is accepted, bound to the empty name",
+			body: "=value\n",
+			want: map[string]string{"": "value"},
+		},
+		{
+			// BEHAVIOUR CHANGE, D-OSS-7: a `#` after a value now starts a comment.
+			name: "trailing hash starts a comment",
+			body: "OPENBOX_API_KEY=obx_abc # note\n",
+			want: map[string]string{"OPENBOX_API_KEY": "obx_abc"},
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -110,10 +124,6 @@ func TestParseEnvFile(t *testing.T) {
 				}
 				if !strings.Contains(err.Error(), tc.errIs) {
 					t.Fatalf("error = %q, want it to contain %q", err, tc.errIs)
-				}
-				// An error must never echo a value — this file is credentials.
-				if strings.Contains(err.Error(), "SENTINEL") {
-					t.Fatalf("error %q leaks a value", err)
 				}
 				return
 			}
@@ -264,7 +274,11 @@ func TestWriteEnvFilePreservesUnknownKeys(t *testing.T) {
 // write rather than replace an unreadable file with a fresh one.
 func TestWriteEnvFileRefusesToOverwriteAnUnparseableFile(t *testing.T) {
 	path := filepath.Join(t.TempDir(), ".env")
-	original := "OPENBOX_API_KEY=obx_original\nOPENBOX_API_KEY=obx_duplicate\n"
+	// A line with no `=` at all. This used to be a duplicate key, which the
+	// hand-rolled parser refused; under godotenv (D-OSS-7) a duplicate parses
+	// fine as last-wins, so it no longer exercises the refusal. The property
+	// under test is unchanged: an unreadable credential file must stop the write.
+	original := "OPENBOX_API_KEY=obx_original\nthis line has no equals sign\n"
 	if err := os.WriteFile(path, []byte(original), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -364,5 +378,35 @@ func TestRefusedWriteLeavesAnExistingFileIntact(t *testing.T) {
 	}
 	if kv, _ := ParseEnvFile(path); kv["OPENBOX_API_KEY"] != "obx_good" {
 		t.Error("the existing credential was lost")
+	}
+}
+
+// godotenv's parse error ECHOES the offending line, and this file is credentials.
+//
+// The hand-rolled parser named the file and line number and never the content,
+// and this suite asserted that. D-OSS-7 takes the package's default behaviour
+// without working around it, so the disclosure is real: a malformed line that IS
+// a bare secret puts that secret into the error string, and from there into
+// whatever logs or prints it — `openbox auth`, `openbox doctor`, a hook's stderr.
+//
+// Pinned deliberately, in the direction of the truth rather than the direction we
+// would prefer. A test that quietly stopped checking would leave the exposure
+// invisible; this one makes it show up in the suite, so removing it later is a
+// decision. If the ruling changes, this test is what flips.
+func TestParseEnvFileErrorEchoesTheOffendingLine(t *testing.T) {
+	path := filepath.Join(t.TempDir(), ".env")
+	// A pasted credential with the `KEY=` accidentally lost.
+	body := "obx_live_SENTINELSECRET\n"
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, err := ParseEnvFile(path)
+	if err == nil {
+		t.Fatal("a line with no '=' should be a parse error")
+	}
+	if !strings.Contains(err.Error(), "SENTINELSECRET") {
+		t.Skipf("godotenv no longer echoes the offending line (%v) — the disclosure "+
+			"documented in ParseEnvFile's comment is gone and that comment should be "+
+			"updated", err)
 	}
 }

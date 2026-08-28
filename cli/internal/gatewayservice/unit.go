@@ -175,6 +175,16 @@ func SystemdPath(homeDir string) string {
 
 // WriteUnit writes the unit for the given OS and returns its path.
 //
+// NOT THE PRODUCTION PATH since D-OSS-3 — `Install`/`Reinstall` in service.go are,
+// and they go through kardianos/service. This survives because it is the only way
+// to assert the WRITTEN ARTIFACT at a caller-chosen location: the library derives
+// the darwin plist path from `user.Current()` and ignores `$HOME`, so a test that
+// used it would write a live launchd unit into whoever ran it. The bodies are
+// identical either way — both come from the renderers above, and
+// TestSuppliedTemplatesSurviveRendering pins that the library's template render is
+// an identity transform over them — so asserting this artifact asserts the
+// library's too.
+//
 // It does NOT load or start anything: loading is `launchctl`/`systemctl`, which
 // the caller runs and reports on. Keeping the write separate from the load means a
 // failure to start is distinguishable from a failure to configure — the same

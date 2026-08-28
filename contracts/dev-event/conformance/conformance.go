@@ -29,10 +29,15 @@ func ValidateDevEvent(raw []byte, contentCaptureEnabled bool) error {
 		return fmt.Errorf("invalid JSON: %w", err)
 	}
 
-	v := &validator{root: schema, contentEnabled: contentCaptureEnabled}
+	sch, err := compileSchema(schema)
+	if err != nil {
+		return err
+	}
 
 	var errs []string
-	v.validate(schema, inst, "$", &errs)
+	if err := sch.Validate(inst); err != nil {
+		errs = append(errs, err.Error())
+	}
 
 	// Extra contract rule not expressible in the schema subset:
 	// tool.kind == "mcp" requires tool.mcp_server.
@@ -50,8 +55,14 @@ func ValidateDevEvent(raw []byte, contentCaptureEnabled bool) error {
 		return fmt.Errorf("event is not conformant:\n  - %s", strings.Join(errs, "\n  - "))
 	}
 
-	// Content-gate pass (INV-2): independent of structural validity so a
-	// posture violation is never masked by a oneOf branch trial.
+	// Content-gate pass (INV-2): a separate walk over the raw schema map, run
+	// after structural validation and never folded into it. The reason is
+	// unchanged by the validator swap — inside a oneOf branch trial a content
+	// violation and a structural mismatch are indistinguishable, so a posture
+	// violation would get reported as "no branch matched" and read as a schema
+	// problem. Keeping the passes separate is what makes ErrContentDisabled a
+	// distinct, attributable finding.
+	v := &validator{root: schema}
 	if !contentCaptureEnabled && v.hasGatedContent(schema, inst) {
 		return ErrContentDisabled
 	}
