@@ -167,7 +167,7 @@ func TestRedact_ConcurrentSafe(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			out, _, changed := defaultSecretDetector.Redact(in)
+			out, _, changed := defaultSecretDetector().Redact(in)
 			if !changed || strings.Contains(out, "AKIAIOSFODNN7EXAMPLE") {
 				t.Errorf("concurrent redaction wrong: %q", out)
 			}

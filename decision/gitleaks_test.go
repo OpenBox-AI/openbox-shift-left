@@ -1,8 +1,12 @@
 package decision
 
 import (
+	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/zricethezav/gitleaks/v8/config"
+	"github.com/zricethezav/gitleaks/v8/detect"
 )
 
 // The detector must actually construct.
@@ -90,5 +94,38 @@ func TestPlaceholderIsEnvVarSafe(t *testing.T) {
 		if name[0] >= '0' && name[0] <= '9' {
 			t.Errorf("placeholder(%q) = %q starts with a digit", cat, got)
 		}
+	}
+}
+
+// TestOverlappingFindingsCannotLeaveSecretFragments pins the ORDER findings are
+// applied in, which is a correctness property and not a preference.
+//
+// Two rules can match overlapping spans of one credential — a generic rule on a
+// substring, a named-format rule on the whole thing — and the detector does not
+// return them longest-first. Replacing the SHORT one first destroys the long
+// one's text, so the "already covered by an earlier finding" guard skips it, and
+// the head of a real secret goes out unredacted: measured as
+// `AKIA${OPENBOX_REDACTED_SHORT_TOKEN}` before this was ordered.
+//
+// Two synthetic rules rather than a pair from the 222: the property is about the
+// engine's replacement loop, and pinning it to whichever maintained rules happen
+// to overlap today would make this test a hostage to a rule-pack refresh.
+func TestOverlappingFindingsCannotLeaveSecretFragments(t *testing.T) {
+	const secret = "AKIAABCDEFGHIJKLMNOPTAIL"
+	d := detect.NewDetector(config.Config{Rules: map[string]config.Rule{
+		"long-token":  {RuleID: "long-token", Regex: regexp.MustCompile(`AKIA[0-9A-Z]{16}TAIL`)},
+		"short-token": {RuleID: "short-token", Regex: regexp.MustCompile(`[0-9A-Z]{16}TAIL`)},
+	}})
+
+	got := redactGitleaks(d, "value="+secret+" end", map[string]struct{}{})
+
+	if strings.Contains(got, "AKIA") {
+		t.Errorf("a fragment of the credential survived redaction: %q", got)
+	}
+	if strings.Contains(got, secret) {
+		t.Errorf("the credential survived redaction entirely: %q", got)
+	}
+	if !strings.Contains(got, "OPENBOX_REDACTED") {
+		t.Errorf("nothing was redacted: %q", got)
 	}
 }

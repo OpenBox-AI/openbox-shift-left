@@ -5,6 +5,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/zricethezav/gitleaks/v8/detect"
 )
@@ -78,7 +79,16 @@ type secretDetector struct {
 
 // defaultSecretDetector is the process-wide detector (compiled once). Safe for
 // concurrent use.
-var defaultSecretDetector = newSecretDetector()
+//
+// LAZY, deliberately. As a plain `var x = newSecretDetector()` this ran during
+// package init, which built the 222-rule gitleaks detector in every process that
+// merely LINKS this package — defeating gitleaksDetector's own sync.OnceValue and
+// charging ~10ms to hooks that never redact anything (SessionStart, Stop,
+// PostToolUse) and to orgs that opted out of secret detection entirely. Hooks are
+// fresh processes fired per tool call on the developer's blocking path, so init
+// work is paid at that cadence. Production builds its detectors through
+// NewRedactor; this accessor exists for callers that want the shared one.
+var defaultSecretDetector = sync.OnceValue(newSecretDetector)
 
 func newSecretDetector() *secretDetector {
 	// The gitleaks detector is the process-wide singleton, not a fresh one per

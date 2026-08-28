@@ -1,6 +1,7 @@
 package decision
 
 import (
+	"sort"
 	"strings"
 	"sync"
 
@@ -94,11 +95,21 @@ func redactGitleaks(d *detect.Detector, text string, catSet map[string]struct{})
 		return text
 	}
 	out := text
-	for _, f := range findings(d, text) {
-		secret := f.Secret
-		if secret == "" {
-			secret = f.Match
-		}
+	// LONGEST FIRST, and the order is a correctness property rather than a
+	// preference. Two rules can match overlapping spans of one credential — a
+	// generic rule on a substring, a named-format rule on the whole thing — and
+	// detector order is not length order. Replacing the SHORT one first destroys
+	// the long one's text, so the `!strings.Contains` guard below then skips it as
+	// "already covered" and the remaining head and tail of a real secret survive
+	// on the wire. Replacing the long one first cannot lose the short one: either
+	// it was inside the replaced span, or it is still present and gets its own
+	// placeholder.
+	all := findings(d, text)
+	sort.SliceStable(all, func(i, j int) bool {
+		return len(secretText(all[i])) > len(secretText(all[j]))
+	})
+	for _, f := range all {
+		secret := secretText(f)
 		if len(secret) < minGitleaksSecretLen {
 			continue
 		}
@@ -116,6 +127,16 @@ func redactGitleaks(d *detect.Detector, text string, catSet map[string]struct{})
 		out = strings.ReplaceAll(out, secret, placeholder(f.RuleID))
 	}
 	return out
+}
+
+// secretText is the text a finding asks us to remove. Secret is what the rule
+// captured; Match is the whole matched span, which is what a rule with no capture
+// group reports.
+func secretText(f report.Finding) string {
+	if f.Secret != "" {
+		return f.Secret
+	}
+	return f.Match
 }
 
 // findings runs the detector, isolating the call so a panic inside a third-party
