@@ -674,6 +674,22 @@ read as a shipped lane. Four things not to re-litigate:
   (silent loss of half the evidence); the election stops two lanes both emitting
   (a doubled token count on every dashboard). Precedence: transport > gateway >
   telemetry — in-path outranks client-asserted.
+- **Declaring the discriminators was not enough, and the gap was silent** (fixed
+  2026-08-28). `buildPayload` attached an observed span only through
+  `gatewayObservedSpan`, which returned nil unless `GatewayRequestID` was set — so
+  an event carrying the new `otel_request_id` or `proxy_request_id` **plus** a
+  populated `Span` was accepted, spooled, AIP-signed and POSTed with **no span at
+  all**. Nothing emits those lanes yet, so no test had reason to look. Now
+  `observedLane`/`observedSpanID`/`observedSpan` cover all three, the gateway's
+  derivation stays byte-identical (its ids are already stored core-side, and core's
+  span dedupe is `(span_id, stage)` scoped by session), and `observedLane`'s
+  precedence IS `turnActivityIDFor`'s with a test crossing both — disagreement
+  would take an event's `activity_id` from one lane and its span id from another,
+  filing half the evidence under a row the other half never joins. The
+  disjointness drill is worth reading before touching it: the lane name sits in
+  **both** the hash input and the prefix, **either alone suffices**, and only
+  removing both collides — the comment asserting the hash input was individually
+  load-bearing was false until the drill was actually run.
 - **The contract had been rejecting shapes the client already emitted, in two
   places.** `session_rollup` was never a declared property while the object is
   `additionalProperties:false`, so Codex's usage pair has failed its own contract
@@ -688,12 +704,41 @@ read as a shipped lane. Four things not to re-litigate:
   nowhere org-side. Both stated in ADR-0022's Consequences, neither softened.
 
 **Status: contract + ADRs only; no lane exists. Unit-verified, both mutation drills
-red-on-deletion, all 12 modules build/vet/cross-compile green — but C1–C41 DID NOT
-RUN.** The sandbox denied every TCP bind, so ~334 listener-dependent tests could not
-execute. Mitigating but not sufficient: the wire payload carries no `schema_version`
-key at all and no Go file hardcodes a version, so the bump should move zero outbound
-bytes — *should*, by inference. Re-run C1–C41 on a host that can bind before trusting
-the bump. `MAPPING.md` §7 items 31–33 list what a live stack must confirm.
+red-on-deletion, all 12 modules build/vet/cross-compile green. C1–C41 now RUN** —
+38 cases, 38 pass, 0 fail (2026-08-28; C8/C9 do not exist, both deliberately deleted
+under ADR-0006). The v1.6 bump moving zero outbound bytes was an *inference* here
+("the payload carries no `schema_version` key at all and no Go file hardcodes a
+version, so it *should* move nothing"); it is now measured on real POSTed payloads.
+`MAPPING.md` §7 items 31–33 still list what a **live stack** must confirm — that is
+unchanged, and unrelated.
+
+**How the tests came to be unrunnable is worth more than the fix.** The claim above
+used to read "~334 listener-dependent tests could not execute". Both halves were
+wrong. `httptest.NewServer` **panics** when it cannot bind, and a panic kills the
+whole test binary — so the real figure was **635 tests that produced no verdict at
+all**, and they were INVISIBLE rather than failing. `gateway` ran **1 of its 81
+tests** while reporting one failure, which reads as one known problem rather than a
+98%-unmeasured package. The general rule: **a package reporting FAIL with two named
+tests is not a package with two problems.** Count declared tests
+(`go test -list '.*'`) against tests that produced a verdict
+(`--- PASS|FAIL|SKIP`); the difference is what nobody is looking at.
+
+`client/memhttptest` serves HTTP over in-memory pipes for hosts that deny bind. It
+is one shared package precisely because six copies is the shape this file already
+names as the original sin, and it needed **no `go.mod` change and no dependency-guard
+widening** — `client` was already a direct allowlisted require of every affected
+module. Two things about it are load-bearing. Its send side is **buffered**, because
+a raw `net.Pipe` blocks a handler's write until the client reads, which INVERTS the
+ordering HTTP tests depend on (a socket lets the handler log its outcome while the
+client is still reading) — unbuffered, one gateway verbose test failed 4 runs in 5.
+And it is **not** evidence about bind, listen, TLS or the dialer: 19 tests carry
+`RequireBind`/`RequireResolvableHost` skips naming the capability they need, chiefly
+the ones that run the compiled binary as a CHILD process, which cannot reach a pipe
+in the parent. `gateway/proxy.go`'s upstream dial is a package variable for the same
+reason — the gateway builds the repo's only hand-rolled `http.Transport`, and letting
+a test substitute the whole Transport would bypass `DisableCompression`,
+`ForceAttemptHTTP2` and the idle pool, which are exactly what the byte-identity
+assertions prove.
 
 **Bounds have owners, and reusing one is a silent regression** (2026-08-26, the fix
 series around the gateway). Four of these shipped together and the pattern is one
