@@ -513,6 +513,15 @@ func (s *captureSink) Bytes() []byte {
 // to tell, and it is not an upstream failure.
 func (g *Gateway) streamTo(w http.ResponseWriter, src io.Reader, sink *captureSink) error {
 	ctl := http.NewResponseController(w)
+	// CLEAR the deadline on the way out, or it outlives this response. The
+	// deadline below is set on the underlying connection, and net/http re-arms it
+	// per request only when Server.WriteTimeout > 0 — which this server
+	// deliberately leaves at 0 so a long completion is never cut off. So the last
+	// chunk's absolute deadline stays armed on a keep-alive connection: a client
+	// that reuses it after the idle window gets an immediate
+	// os.ErrDeadlineExceeded on a response whose request was already relayed
+	// upstream, which reads as the gateway dropping answers at random.
+	defer func() { _ = ctl.SetWriteDeadline(time.Time{}) }()
 	buf := make([]byte, relayBufferSize)
 	for {
 		n, readErr := src.Read(buf)

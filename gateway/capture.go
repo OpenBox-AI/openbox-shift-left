@@ -148,17 +148,39 @@ func captureBody(body string) string {
 		return ""
 	}
 	if len(body) > maxCaptureInputBytes {
-		// Trim back to a rune boundary. A mid-rune cut would leave an invalid
-		// UTF-8 tail that json.Marshal silently rewrites to U+FFFD, so the stored
-		// evidence would end in a character the exchange never contained.
-		end := maxCaptureInputBytes
-		for end > 0 && !utf8.RuneStart(body[end]) {
-			end--
-		}
-		body = body[:end]
+		body = body[:maxCaptureInputBytes]
 	}
+	// Trim an incomplete trailing rune. A mid-rune cut leaves an invalid UTF-8
+	// tail that json.Marshal silently rewrites to U+FFFD, so the stored evidence
+	// would end in a character the exchange never contained.
+	//
+	// Unconditional, NOT only when this function truncated. Callers pre-truncate
+	// on a raw byte boundary before the body ever gets here — capturableBody cuts
+	// at exactly maxCaptureInputBytes and captureSink fills to exactly its cap —
+	// which lands the body AT the bound, not over it. A guard that only fired on
+	// `len > max` therefore never ran for the one producer that actually cuts, and
+	// the broken tail reached the wire. Doing it on every body also costs nothing:
+	// the scan is bounded to the last utf8.UTFMax bytes.
+	body = trimPartialRune(body)
 	redacted, _, _ := bodyRedactor.RedactText(body)
 	return capRunes(redacted)
+}
+
+// trimPartialRune drops a trailing byte sequence that is the start of a rune the
+// string does not finish. A complete final rune, and an invalid byte that is not
+// a truncation artefact, are both left alone: this repairs cuts, it does not
+// sanitize.
+func trimPartialRune(s string) string {
+	for i := len(s) - 1; i >= 0 && i > len(s)-utf8.UTFMax; i-- {
+		if !utf8.RuneStart(s[i]) {
+			continue
+		}
+		if r, size := utf8.DecodeRuneInString(s[i:]); r == utf8.RuneError && size <= 1 {
+			return s[:i]
+		}
+		return s
+	}
+	return s
 }
 
 // capRunes truncates to captureBodyRunes, counted in characters.
