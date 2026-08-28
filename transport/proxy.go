@@ -173,7 +173,16 @@ func (p *Proxy) intercepts(host string) bool { return p.cfg.Allowlist.Allows(hos
 func (p *Proxy) onConnect(host string, ctx *goproxy.ProxyCtx) (*goproxy.ConnectAction, string) {
 	if !p.intercepts(host) {
 		p.vlog("tunnel %s (not allowlisted; no interception, no capture)", host)
-		return goproxy.OkConnect, host
+		// Deliberately NOT goproxy.OkConnect. That value carries
+		// TLSConfigFromCA(&GoproxyCa) — goproxy's BUILT-IN CA, whose private key
+		// ships in the package source and is therefore public. ConnectAccept never
+		// reads TLSConfig (https.go, the ConnectAccept case: it dials and copies
+		// bytes), so the field is inert here — but a value that merely NAMES a
+		// public-key CA on the interception path is one refactor away from being
+		// used, and the failure would be silent and total. This module never
+		// references goproxy's CA at all; TestGoproxysBundledCAIsNeverReferenced
+		// holds that.
+		return &goproxy.ConnectAction{Action: goproxy.ConnectAccept}, host
 	}
 	return &goproxy.ConnectAction{
 		Action: goproxy.ConnectHijack,

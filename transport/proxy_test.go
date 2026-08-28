@@ -394,6 +394,62 @@ func TestTheGateIsNotWired(t *testing.T) {
 	})
 }
 
+// TestGoproxysBundledCAIsNeverReferenced.
+//
+// goproxy ships a built-in CA (GoproxyCa) whose PRIVATE KEY is in the package
+// source, so anyone can mint a certificate it signs. Using it to terminate TLS
+// would mean every intercepted model call could be decrypted by anyone who had
+// read the library — total, and silent.
+//
+// goproxy.OkConnect and goproxy.MitmConnect both carry
+// TLSConfigFromCA(&GoproxyCa). OkConnect's is inert (ConnectAccept never reads
+// TLSConfig) but naming it is one refactor away from using it, so this module
+// names it nowhere.
+func TestGoproxysBundledCAIsNeverReferenced(t *testing.T) {
+	fset := token.NewFileSet()
+	pkgs, err := parser.ParseDir(fset, ".", func(fi os.FileInfo) bool {
+		return !strings.HasSuffix(fi.Name(), "_test.go")
+	}, 0)
+	if err != nil {
+		t.Fatalf("parse package: %v", err)
+	}
+	forbidden := map[string]bool{
+		"GoproxyCa":       true,
+		"OkConnect":       true,
+		"MitmConnect":     true,
+		"HTTPMitmConnect": true,
+		"RejectConnect":   true,
+		"CA_CERT":         true,
+		"CA_KEY":          true,
+	}
+	seen := false
+	for _, pkg := range pkgs {
+		for name, f := range pkg.Files {
+			seen = true
+			ast.Inspect(f, func(n ast.Node) bool {
+				sel, ok := n.(*ast.SelectorExpr)
+				if !ok || !forbidden[sel.Sel.Name] {
+					return true
+				}
+				ident, ok := sel.X.(*ast.Ident)
+				if !ok || ident.Name != "goproxy" {
+					return true
+				}
+				t.Errorf("%s: %s references goproxy.%s, which carries goproxy's built-in CA. "+
+					"Its private key is published in the library source; terminating TLS with it "+
+					"would let anyone decrypt every intercepted model call.",
+					fset.Position(sel.Pos()), name, sel.Sel.Name)
+				return true
+			})
+		}
+	}
+	// A scan that found no files would pass while measuring nothing — the same
+	// reason gateway's moduleSources refuses an empty file list.
+	if !seen {
+		t.Fatal("parsed no non-test files; this guard would pass without scanning anything")
+	}
+}
+
 // TestNonAllowlistedHostIsNeverCaptured is the promise that makes the ADR-0021 §5
 // reversal defensible, asserted rather than described: a host outside the
 // allowlist is not intercepted, so no capture can exist for it.
