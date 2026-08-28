@@ -1,0 +1,1429 @@
+<title>Three Lanes, One Pipeline</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Zilla+Slab:wght@500;600;700&family=Source+Sans+3:ital,wght@0,400;0,500;0,600;0,700;1,400&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+  :root {
+    --bg: #F5F7F5;
+    --surface: #FFFFFF;
+    --surface-2: #ECF0EC;
+    --ink: #1A231E;
+    --ink-2: #4C5951;
+    --ink-3: #74827A;
+    --line: #D5DDD5;
+    --line-strong: #B9C4BA;
+    --accent: #0E6B5C;
+    --accent-soft: #E0EDE9;
+    --measured: #2E7D4F;
+    --open: #9A6A10;
+    --dead: #A8382C;
+    --od: #5B4A9E;
+    --code-bg: #EDF1ED;
+    --sel: #CDE5DE;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #121714;
+      --surface: #1A211C;
+      --surface-2: #212A24;
+      --ink: #E3EAE4;
+      --ink-2: #A4B2A9;
+      --ink-3: #7C8A81;
+      --line: #2D3931;
+      --line-strong: #3D4C43;
+      --accent: #4CC0A6;
+      --accent-soft: #1D332D;
+      --measured: #5FBD87;
+      --open: #D9A24B;
+      --dead: #D9705F;
+      --od: #A794E0;
+      --code-bg: #232D26;
+      --sel: #2A4A41;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #121714;
+    --surface: #1A211C;
+    --surface-2: #212A24;
+    --ink: #E3EAE4;
+    --ink-2: #A4B2A9;
+    --ink-3: #7C8A81;
+    --line: #2D3931;
+    --line-strong: #3D4C43;
+    --accent: #4CC0A6;
+    --accent-soft: #1D332D;
+    --measured: #5FBD87;
+    --open: #D9A24B;
+    --dead: #D9705F;
+    --od: #A794E0;
+    --code-bg: #232D26;
+    --sel: #2A4A41;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: "Source Sans 3", "Segoe UI", system-ui, sans-serif;
+    font-size: 17px;
+    line-height: 1.62;
+    margin: 0;
+    -webkit-font-smoothing: antialiased;
+  }
+  ::selection { background: var(--sel); }
+
+  .shell {
+    max-width: 1240px;
+    margin: 0 auto;
+    padding: 0 24px 96px;
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 0 48px;
+  }
+  @media (min-width: 1120px) {
+    .shell { grid-template-columns: 216px minmax(0, 1fr); }
+  }
+
+  /* ---------- rail ---------- */
+  .rail { display: none; }
+  @media (min-width: 1120px) {
+    .rail {
+      display: block;
+      position: sticky;
+      top: 0;
+      align-self: start;
+      height: 100vh;
+      overflow-y: auto;
+      padding: 40px 0 40px;
+      font-size: 13.5px;
+    }
+  }
+  .rail .rail-kicker {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 10.5px;
+    letter-spacing: .14em;
+    color: var(--ink-3);
+    text-transform: uppercase;
+    margin-bottom: 14px;
+  }
+  .rail a {
+    display: block;
+    color: var(--ink-2);
+    text-decoration: none;
+    padding: 5px 10px;
+    border-left: 2px solid var(--line);
+    line-height: 1.35;
+  }
+  .rail a:hover { color: var(--accent); border-left-color: var(--accent); }
+  .rail a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 2px; }
+  .rail a .n { font-family: "IBM Plex Mono", monospace; font-size: 11px; color: var(--ink-3); margin-right: 6px; }
+
+  main { min-width: 0; }
+
+  /* ---------- typography ---------- */
+  h1, h2, h3 { font-family: "Zilla Slab", "Georgia", serif; text-wrap: balance; }
+  h1 { font-size: clamp(34px, 5vw, 52px); font-weight: 700; line-height: 1.08; margin: 14px 0 18px; letter-spacing: -0.01em; }
+  h2 { font-size: 27px; font-weight: 600; margin: 0 0 6px; }
+  h3 { font-size: 19.5px; font-weight: 600; margin: 30px 0 8px; }
+  p, ul, ol { max-width: 72ch; }
+  ul, ol { padding-left: 1.3em; }
+  li { margin: 5px 0; }
+  li::marker { color: var(--accent); }
+  a { color: var(--accent); text-decoration-thickness: 1px; text-underline-offset: 2px; }
+  a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 2px; }
+  strong { font-weight: 600; }
+  code, .mono {
+    font-family: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+    font-size: .855em;
+  }
+  code { background: var(--code-bg); padding: 1px 5px; border-radius: 3px; }
+  .dim { color: var(--ink-2); }
+
+  /* ---------- masthead ---------- */
+  header.mast { padding: 52px 0 34px; border-bottom: 1px solid var(--line-strong); }
+  .eyebrow {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 12px;
+    letter-spacing: .16em;
+    text-transform: uppercase;
+    color: var(--accent);
+  }
+  .stand { font-size: 20px; line-height: 1.55; color: var(--ink-2); max-width: 68ch; margin: 0 0 26px; }
+  .stand b { color: var(--ink); font-weight: 600; }
+  .meta-row {
+    display: flex; flex-wrap: wrap; gap: 8px 26px;
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 12px; color: var(--ink-3);
+  }
+  .meta-row span b { color: var(--ink-2); font-weight: 500; }
+
+  /* ---------- sections ---------- */
+  section { padding: 44px 0 10px; }
+  section + section { border-top: 1px solid var(--line); }
+  .sec-head { display: flex; align-items: baseline; gap: 14px; margin-bottom: 4px; }
+  .sec-num {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 13px; font-weight: 600;
+    color: var(--accent);
+    letter-spacing: .06em;
+  }
+  .sec-sub { color: var(--ink-2); margin-top: 0; }
+
+  /* ---------- evidence chips ---------- */
+  .chip {
+    display: inline-block;
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: .09em;
+    text-transform: uppercase;
+    padding: 2px 8px 1px;
+    border-radius: 3px;
+    border: 1px solid;
+    vertical-align: 2px;
+    white-space: nowrap;
+  }
+  .chip.measured { color: var(--measured); border-color: color-mix(in srgb, var(--measured) 45%, transparent); background: color-mix(in srgb, var(--measured) 10%, transparent); }
+  .chip.inferred { color: var(--ink-2); border-color: var(--line-strong); background: color-mix(in srgb, var(--ink-3) 8%, transparent); }
+  .chip.open { color: var(--open); border-color: color-mix(in srgb, var(--open) 45%, transparent); background: color-mix(in srgb, var(--open) 10%, transparent); }
+  .chip.dead { color: var(--dead); border-color: color-mix(in srgb, var(--dead) 45%, transparent); background: color-mix(in srgb, var(--dead) 9%, transparent); }
+  .chip.od { color: var(--od); border-color: color-mix(in srgb, var(--od) 45%, transparent); background: color-mix(in srgb, var(--od) 10%, transparent); }
+  .chip.decided { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, transparent); background: color-mix(in srgb, var(--accent) 10%, transparent); }
+
+  /* ---------- ledger rows (dead-ends) ---------- */
+  .ledger { border-top: 1px solid var(--line-strong); margin: 22px 0 8px; }
+  .ledger-row {
+    display: grid;
+    grid-template-columns: 52px minmax(0, 1fr);
+    gap: 6px 18px;
+    padding: 15px 2px 17px;
+    border-bottom: 1px solid var(--line);
+  }
+  .ledger-row .id {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 13px; font-weight: 600;
+    color: var(--dead);
+    padding-top: 2px;
+  }
+  .ledger-row .body p { margin: 4px 0 0; font-size: 15.5px; color: var(--ink-2); max-width: 78ch; }
+  .ledger-row .body .t { font-weight: 600; color: var(--ink); font-size: 16.5px; }
+  .ledger-row .src {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 11.5px; color: var(--ink-3);
+    margin-top: 6px; display: block;
+    overflow-wrap: anywhere;
+  }
+
+  /* ---------- tables ---------- */
+  .tblwrap { overflow-x: auto; margin: 20px 0; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); }
+  table { border-collapse: collapse; width: 100%; font-size: 14.5px; }
+  th {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 10.5px; letter-spacing: .1em; text-transform: uppercase;
+    color: var(--ink-3); font-weight: 600;
+    text-align: left; padding: 10px 14px;
+    border-bottom: 1px solid var(--line-strong);
+    background: var(--surface-2);
+    white-space: nowrap;
+  }
+  td { padding: 10px 14px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  tr:last-child td { border-bottom: none; }
+  td.num { font-family: "IBM Plex Mono", monospace; font-variant-numeric: tabular-nums; font-size: 13.5px; white-space: nowrap; }
+  td .mono { font-size: 12.5px; color: var(--ink-2); overflow-wrap: anywhere; }
+
+  /* ---------- diagram ---------- */
+  .diagram { margin: 26px 0 8px; overflow-x: auto; }
+  .lanes {
+    display: grid;
+    grid-template-columns: 150px repeat(3, minmax(196px, 1fr));
+    gap: 0;
+    min-width: 860px;
+    border: 1px solid var(--line-strong);
+    border-radius: 8px;
+    background: var(--surface);
+    overflow: hidden;
+  }
+  .lanes .colhead {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 10.5px; font-weight: 600; letter-spacing: .12em; text-transform: uppercase;
+    color: var(--ink-3);
+    padding: 12px 16px;
+    background: var(--surface-2);
+    border-bottom: 1px solid var(--line-strong);
+  }
+  .lanes .cell {
+    padding: 14px 16px 16px;
+    border-bottom: 1px solid var(--line);
+    border-left: 1px solid var(--line);
+    font-size: 13.5px;
+    line-height: 1.5;
+  }
+  .lanes .cell:first-child, .lanes .colhead:first-child { border-left: none; }
+  .lanes .rowlab {
+    font-weight: 600; font-size: 14px;
+    border-left: none;
+    display: flex; flex-direction: column; gap: 4px; justify-content: center;
+  }
+  .lanes .rowlab .tier { font-family: "IBM Plex Mono", monospace; font-size: 10px; letter-spacing: .08em; font-weight: 600; }
+  .lanes .cell .bt { font-weight: 600; color: var(--ink); display: block; margin-bottom: 2px; }
+  .lanes .cell .d { color: var(--ink-2); font-size: 12.8px; }
+  .lanes .cell.quiet { color: var(--ink-3); font-size: 12.8px; }
+  .lanes .lastrow .cell, .lanes .lastrow.cell { border-bottom: none; }
+  .t-enf { color: var(--dead); }
+  .t-att { color: var(--accent); }
+  .t-ast { color: var(--open); }
+  .t-lab { color: var(--od); }
+  .legend { display: flex; flex-wrap: wrap; gap: 8px 22px; margin: 12px 2px 0; font-size: 12.5px; color: var(--ink-2); }
+  .legend .mono { font-size: 11px; font-weight: 600; letter-spacing: .06em; }
+
+  /* ---------- figures ---------- */
+  figure.fig { margin: 26px 0 10px; padding: 0; }
+  .figwrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); padding: 16px 14px 8px; }
+  .figwrap svg { display: block; height: auto; margin: 0 auto; }
+  figure.fig figcaption { font-size: 13.5px; color: var(--ink-3); margin: 10px 2px 0; max-width: 84ch; line-height: 1.55; }
+  .fig text { font-family: "Source Sans 3", system-ui, sans-serif; fill: var(--ink); font-size: 12.5px; }
+  .fig text.s { font-size: 10.5px; fill: var(--ink-2); }
+  .fig text.m { font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 10px; letter-spacing: .1em; fill: var(--ink-3); }
+  .fig text.lab { font-size: 11.5px; fill: var(--ink-2); }
+  .fig text.g { font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 10.5px; fill: var(--ink-2); font-style: italic; }
+  .fig line.msg, .fig path.msg { stroke: var(--ink-2); stroke-width: 1.4; fill: none; }
+  .fig .dash { stroke-dasharray: 5 4; }
+  .fig rect.node { fill: var(--surface-2); stroke: var(--line-strong); }
+  .fig line.life { stroke: var(--line-strong); stroke-dasharray: 3 4; }
+
+  /* ---------- callouts ---------- */
+  .note {
+    border: 1px solid var(--line-strong);
+    background: var(--surface);
+    border-radius: 6px;
+    padding: 16px 20px;
+    margin: 20px 0;
+    max-width: 80ch;
+    font-size: 15.5px;
+  }
+  .note.finding { border-color: color-mix(in srgb, var(--accent) 40%, transparent); background: var(--accent-soft); }
+  .note .note-k {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 10.5px; font-weight: 600; letter-spacing: .12em; text-transform: uppercase;
+    color: var(--accent); display: block; margin-bottom: 6px;
+  }
+  .note p { margin: 6px 0; }
+
+  .odblock {
+    border-left: 3px solid var(--od);
+    padding: 4px 0 4px 18px;
+    margin: 18px 0;
+    max-width: 76ch;
+  }
+  .odblock .od-t { font-weight: 600; }
+  .odblock p { margin: 4px 0; font-size: 15.5px; color: var(--ink-2); }
+
+  /* ---------- workstreams ---------- */
+  .ws { border-top: 1px solid var(--line-strong); margin-top: 22px; }
+  .ws-row {
+    display: grid;
+    grid-template-columns: 54px minmax(0, 1fr);
+    gap: 4px 18px;
+    padding: 16px 2px 18px;
+    border-bottom: 1px solid var(--line);
+  }
+  .ws-row .wid { font-family: "IBM Plex Mono", monospace; font-size: 13px; font-weight: 600; color: var(--accent); padding-top: 3px; }
+  .ws-row .t { font-weight: 600; font-size: 16.5px; }
+  .ws-row p { margin: 5px 0 0; font-size: 15.5px; color: var(--ink-2); max-width: 78ch; }
+  .ws-row .files { font-family: "IBM Plex Mono", monospace; font-size: 11.5px; color: var(--ink-3); display: block; margin-top: 7px; overflow-wrap: anywhere; }
+
+  /* ---------- sources ---------- */
+  .sources { columns: 2; column-gap: 40px; font-family: "IBM Plex Mono", monospace; font-size: 12px; color: var(--ink-2); max-width: none; padding-left: 1.2em; }
+  .sources li { break-inside: avoid; margin: 6px 0; overflow-wrap: anywhere; }
+  @media (max-width: 760px) { .sources { columns: 1; } }
+
+  @media (prefers-reduced-motion: no-preference) {
+    html { scroll-behavior: smooth; }
+  }
+</style>
+
+<div class="shell">
+  <nav class="rail" aria-label="Contents">
+    <div class="rail-kicker">Contents</div>
+    <a href="#s0"><span class="n">§0</span>Finding</a>
+    <a href="#s1"><span class="n">§1</span>The dead-ends</a>
+    <a href="#s2"><span class="n">§2</span>What the logger is</a>
+    <a href="#s3"><span class="n">§3</span>Why it unblocks shift-left</a>
+    <a href="#s4"><span class="n">§4</span>Combined architecture</a>
+    <a href="#s5"><span class="n">§5</span>Interception, answered</a>
+    <a href="#s6"><span class="n">§6</span>Workstreams</a>
+    <a href="#s7"><span class="n">§7</span>Owner rulings &amp; limits</a>
+    <a href="#s8"><span class="n">§8</span>Verification</a>
+    <a href="#s9"><span class="n">§9</span>Sources</a>
+  </nav>
+
+  <main>
+    <header class="mast">
+      <div class="eyebrow">OpenBox · Convergence Proposal · 2026-08-27</div>
+      <h1>Three Lanes, One Pipeline</h1>
+      <p class="stand">
+        <b>openbox-logger</b> ran a live capture on this machine today and proved, with bytes on disk, the three things
+        <b>openbox-shift-left</b> has been unable to prove for a month: that a <b>subscription-OAuth</b> install's model calls
+        are observable, that the <b>desktop app</b> is coverable, and that the full model-call exchange can be captured
+        <b>without redirecting <code>ANTHROPIC_BASE_URL</code></b>. This document maps the logger's architecture onto
+        shift-left's existing pipeline and names what each dead-end becomes.
+      </p>
+      <div class="meta-row">
+        <span>repos <b>openbox-shift-left · openbox-logger</b></span>
+        <span>evidence run <b>20260827T063932Z-225cac</b></span>
+        <span>touches <b>ADR-0021 §§5,8,9,10 · proposes ADR-0022</b></span>
+      </div>
+    </header>
+
+    <section id="s0">
+      <div class="sec-head"><span class="sec-num">§0</span><h2>The finding, in one paragraph</h2></div>
+      <p>
+        Shift-left's gateway observes model calls by redirecting <code>ANTHROPIC_BASE_URL</code> — a lane the desktop app
+        ignores and subscription OAuth may not follow (ADR-0021 §8). The logger observes the same calls through
+        <strong>environment lanes the embedded engine honors everywhere</strong>: Claude Code's enhanced-telemetry beta
+        (<code>OTEL_LOG_RAW_API_BODIES</code>, <code>OTEL_LOG_TOOL_CONTENT</code>, <code>tool_decision</code> events) and, on
+        the transport side, a loopback TLS proxy scoped to <code>api.anthropic.com</code>. Today's run captured a
+        <strong>desktop-app session on a claude.ai login</strong> — every one of 97 <code>/v1/messages</code> calls carried an
+        OAuth <code>authorization</code> header, zero carried <code>x-api-key</code> — through both lanes at once.
+        <span class="chip measured">measured 2026-08-27</span>
+      </p>
+      <p>
+        The proposal is one sentence: <strong>hooks enforce; native telemetry observes; an in-path relay fronts model calls —
+        the base-URL gateway on the CLI, the transport proxy (a product service, per OD2) on both clients; refusal awaits
+        probe A.</strong> All lanes feed the pipeline shift-left already has —
+        redact&nbsp;→&nbsp;cap&nbsp;→&nbsp;spool&nbsp;→&nbsp;sign&nbsp;→&nbsp;<code>/evaluate</code> — and nothing new is invented
+        server-side. <a href="#s5">§5</a> answers the interception question hop by hop: where a verdict lands <em>before</em> the
+        communication, where only monitoring is possible, and how monitored evidence still gets enforcement teeth.
+        <strong>Owner update, 2026-08-27:</strong> all four <a href="#s7">§7</a> decisions are ruled — full-body egress with
+        accepted truncation (OD1&nbsp;c), the transport proxy as a native product service with a one-command install and a
+        one-command clean removal (OD2), the beta surface accepted (OD3), and telemetry silence treated as a finding with the
+        late HALT accepted (OD4).
+      </p>
+    </section>
+
+    <section id="s1">
+      <div class="sec-head"><span class="sec-num">§1</span><h2>The dead-ends this addresses</h2></div>
+      <p class="sec-sub">Eight blockers carried across sessions, each with its record of origin.</p>
+
+      <div class="ledger">
+        <div class="ledger-row">
+          <span class="id">D1</span>
+          <div class="body">
+            <span class="t">The desktop app is ungovernable by the gateway <span class="chip dead">dead end</span></span>
+            <p>Measured 2026-08-27: the CLI follows <code>ANTHROPIC_BASE_URL</code>; the desktop app reads its own inference-provider
+            config and never consults <code>settings.json</code> for routing. Pointing desktop at a gateway replaces the claude.ai
+            login with an org-supplied credential — incompatible with §3 pass-through for subscription developers. Model-call
+            coverage on desktop machines: zero, while every local check reports healthy.</p>
+            <span class="src">ADR-0021 §8 · plans/reports/probe-260825-baseurl-auth-coverage.md</span>
+          </div>
+        </div>
+        <div class="ledger-row">
+          <span class="id">D2</span>
+          <div class="body">
+            <span class="t">The refusal shape is unknown, so gateway enforcement is uncalled <span class="chip open">probe pending</span></span>
+            <p><code>gate.Decide</code>/<code>WriteRefusal</code> exist with no production caller. A wrong status/body pair trips
+            Claude Code's capability-rejection matcher and silently disables a capability for the session — worse than not refusing.
+            Probe A has no instrument to answer it.</p>
+            <span class="src">ADR-0021 §9 · plans/reports/probe-260825-halt-rendering.md</span>
+          </div>
+        </div>
+        <div class="ledger-row">
+          <span class="id">D3</span>
+          <div class="body">
+            <span class="t">No org identity is derivable from an OAuth credential <span class="chip open">unresolved</span></span>
+            <p>The gateway fingerprints credentials, but whether an org is matchable from an OAuth token is open — so the account
+            rule cannot decide between refusing and detection-only, and ADR-0021 §10 cannot be written.</p>
+            <span class="src">ADR-0021 §10 · probe P1</span>
+          </div>
+        </div>
+        <div class="ledger-row">
+          <span class="id">D4</span>
+          <div class="body">
+            <span class="t">Gateway-observed turns contribute nothing to goal alignment <span class="chip dead">silent gap</span></span>
+            <p>The gateway span carries the provider's raw response body, not the shape core's alignment extractor parses. No error
+            anywhere; the widgets just stay quiet for those turns.</p>
+            <span class="src">ADR-0021 · openbox-core#130</span>
+          </div>
+        </div>
+        <div class="ledger-row">
+          <span class="id">D5</span>
+          <div class="body">
+            <span class="t">The volume question was unmeasured <span class="chip open">open</span></span>
+            <p>Whether 64&nbsp;KiB bodies at tool-call cadence survive the realtime flusher — and what a full model-call body even
+            weighs — had no numbers. Every content ADR shipped with this listed as unproven.</p>
+            <span class="src">MAPPING.md §7 · ADR-0019, ADR-0021 status blocks</span>
+          </div>
+        </div>
+        <div class="ledger-row">
+          <span class="id">D6</span>
+          <div class="body">
+            <span class="t">The testbed has never run <span class="chip dead">standing</span></span>
+            <p>Six shipped features carry “implemented, unit-verified, testbed NOT run.” Every end-to-end claim waits on a live
+            OpenBox stack that has not been reachable from this machine.</p>
+            <span class="src">CLAUDE.md status blocks · testbed/run-all.sh</span>
+          </div>
+        </div>
+        <div class="ledger-row">
+          <span class="id">D7</span>
+          <div class="body">
+            <span class="t">Every provider is a hand-built adapter over a reverse-engineered hook surface <span class="chip dead">structural</span></span>
+            <p>Codex reports usage per session, no tool success, no content, and redacts nothing; Cursor is next and starts from
+            zero. Each hook surface is probed per version (<code>classifier_verdict</code> didn't exist; <code>Stop</code> carries
+            no <code>stop_reason</code>). Coverage asymmetry is documented rather than solved.</p>
+            <span class="src">COVERAGE.md §3.4 · plans/reports/probe-260813-2329-claude-code-hook-surface.md</span>
+          </div>
+        </div>
+        <div class="ledger-row">
+          <span class="id">D8</span>
+          <div class="body">
+            <span class="t">Approval identity is invocation-scoped for everything but shell and MCP <span class="chip decided">pinned limit</span></span>
+            <p>A <code>Write</code> approval cannot be matched after a retry, so the call is re-asked. Fixing it means changing
+            <code>activity_id</code> — byte-pinned, load-bearing for core's dedupe — so it is its own decision. Direction of error:
+            over-ask, never over-grant.</p>
+            <span class="src">TestUngatedClassesKeepInvocationScopedIdentity · CLAUDE.md</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="s2">
+      <div class="sec-head"><span class="sec-num">§2</span><h2>What openbox-logger actually is</h2></div>
+      <p class="sec-sub">~1,200 lines of Python plus two pinned containers. Three separate evidence lanes, never averaged together.</p>
+
+      <h3>The three lanes</h3>
+      <ul>
+        <li><strong>Transcript lane.</strong> A future-only watcher over <code>~/.claude/projects/**/*.jsonl</code> with a byte-offset
+          cursor, inode-based rotation detection, and invalid-JSON retention. Shift-left's <code>hookflow.TurnCursor</code> is the same
+          idea, narrower.</li>
+        <li><strong>Telemetry lane.</strong> Claude Code's own OTel export, switched on via env
+          (<code>CLAUDE_CODE_ENABLE_TELEMETRY</code> + <code>CLAUDE_CODE_ENHANCED_TELEMETRY_BETA</code>), pointed at a loopback
+          collector. The beta adds content events — and <code>OTEL_LOG_RAW_API_BODIES=file:&lt;dir&gt;</code> writes the
+          <em>untruncated</em> Messages API request and response of every model call to local files, referenced from
+          <code>api_request_body</code>/<code>api_response_body</code> events by <code>body_ref</code>.</li>
+        <li><strong>Transport lane (optional).</strong> mitmproxy in a container, TLS-inspecting <em>only</em>
+          <code>api.anthropic.com</code> (<code>--allow-hosts</code>), reached via <code>HTTPS_PROXY</code> with a project-scoped CA
+          handed to the client through <code>NODE_EXTRA_CA_CERTS</code> — never the system trust store. Auth headers are redacted
+          before events are written; bodies are kept as evidence.</li>
+      </ul>
+
+      <h3>What today's run recorded <span class="chip measured">run 20260827T063932Z-225cac</span></h3>
+      <div class="tblwrap"><table>
+        <thead><tr><th>Lane</th><th>Volume</th><th>What it proves</th></tr></thead>
+        <tbody>
+          <tr>
+            <td><strong>Transport</strong> <span class="mono">proxy/events.jsonl</span></td>
+            <td class="num">2,076 events · 51 MB</td>
+            <td>97 × <code>POST /v1/messages</code> — <strong>all OAuth bearer, zero <code>x-api-key</code></strong>; 173 ×
+              <code>count_tokens</code>; cloud-session worker/heartbeat traffic; statuses 200×1050, 404×18, 204×1.</td>
+          </tr>
+          <tr>
+            <td><strong>Telemetry</strong> <span class="mono">otel/logs·traces·metrics</span></td>
+            <td class="num">102 log batches · 15 event types</td>
+            <td><code>api_request</code> (request_id, client_request_id, 4 token counts, cost_usd, duration, model),
+              <code>tool_decision</code>, <code>tool_result</code> (success, duration, <code>tool_use_id</code>),
+              <code>assistant_response</code>, <code>user_prompt</code>, <code>hook_registered</code>×393,
+              <code>hook_execution_*</code>×294, <code>mcp_server_connection</code>.</td>
+          </tr>
+          <tr>
+            <td><strong>Raw bodies</strong> <span class="mono">api-bodies/</span></td>
+            <td class="num">98 files · avg 290 KB · max 566 KB</td>
+            <td>Full request (system prompt, tools, messages, thinking config) and response (content blocks, stop_reason, usage).
+              <strong>92 of 97 request bodies exceed 64 KiB.</strong></td>
+          </tr>
+          <tr>
+            <td><strong>Transcripts</strong> <span class="mono">transcripts/events.jsonl</span></td>
+            <td class="num">463 events</td>
+            <td>Every persisted message, tool call, tool result, subagent record, with source file + byte offset.</td>
+          </tr>
+        </tbody>
+      </table></div>
+      <p>
+        Identity rides <em>every</em> telemetry record: <code>organization.id</code>, <code>user.email</code>,
+        <code>user.account_uuid</code>, <code>session.id</code>, plus resource attributes
+        (<code>service.name: claude-code-desktop</code>, <code>service.version</code>, <code>claude.deployment_mode</code>).
+        <span class="chip measured">measured</span>
+      </p>
+
+      <h3>The disciplines worth stealing wholesale</h3>
+      <ul>
+        <li><strong>Activation as a recorded transaction.</strong> <code>enable</code> writes only the <code>env</code> block of
+          <code>settings.json</code>, stores an exact pre-change backup, the original presence/value of every managed key, and
+          before/after SHA-256. It <em>fails on conflict</em> unless forced; <code>disable</code> restores only managed keys and
+          refuses if a managed value changed underneath it. This is the general form of the lesson shift-left learned the hard way
+          on <code>ANTHROPIC_BASE_URL</code> (first-writer-wins, displaced value remembered).</li>
+        <li><strong>Evidence has a chain of custody.</strong> Run-scoped directories, a SHA-256 <code>snapshot</code> manifest over
+          every captured file, and redaction as a <em>derived export</em> that never rewrites raw evidence.</li>
+        <li><strong>Coverage is a table, not a sentence.</strong> <code>CAPTURE_MODEL.md</code> states per-signal, per-lane, what is
+          and is not seen — including “permission decisions: transcript not authoritative, <code>tool_decision</code> is.” The same
+          stated-not-averaged posture as COVERAGE.md §3.4.</li>
+        <li><strong>Start ordering as a safety property.</strong> Collector up → health-checked → proxy up → CA exists → watcher
+          ready → <em>only then</em> is activation offered. The same invariant ADR-0021 encodes for the gateway unit.</li>
+      </ul>
+    </section>
+
+    <section id="s3">
+      <div class="sec-head"><span class="sec-num">§3</span><h2>Why this unblocks shift-left</h2></div>
+
+      <div class="note finding">
+        <span class="note-k">The mechanism behind D1</span>
+        <p>The desktop app embeds the same engine as the CLI (user-agent observed today:
+        <code>claude-cli/2.1.246 (external, claude-desktop, …)</code>). Routing config — <code>ANTHROPIC_BASE_URL</code> — is read
+        per-client, which is why the gateway sees nothing from desktop. But <strong>environment lanes reach the embedded engine
+        regardless of which shell launched it</strong>: today's run changed only the <code>env</code> block of
+        <code>~/.claude/settings.json</code>, and a desktop session emitted OTel, wrote raw bodies, and routed through the proxy.
+        The gateway's blind spot is a property of the <em>lane</em>, not of the traffic.</p>
+      </div>
+
+      <div class="tblwrap"><table>
+        <thead><tr><th>Dead-end</th><th>What the logger contributes</th><th>What it becomes</th><th>Grade</th></tr></thead>
+        <tbody>
+          <tr>
+            <td><strong>D1</strong> desktop coverage</td>
+            <td>Telemetry + raw-body lanes observed a desktop, subscription-OAuth session end to end today.</td>
+            <td>Model-call <em>observation</em> for CLI and desktop, OAuth included, without touching base-url routing. The gateway
+              narrows to what it honestly governs: CLI enforcement. ADR-0021 §8's missing sentence can be written. OD2 (ruled)
+              goes further: the transport proxy as a product service puts an in-path point on the desktop route too.</td>
+            <td><span class="chip measured">measured</span></td>
+          </tr>
+          <tr>
+            <td><strong>D2</strong> refusal shape</td>
+            <td>A scoped mitmproxy is precisely the missing probe instrument: inject candidate refusal shapes into a throwaway
+              session and watch retry behavior on real transport. Per-attempt <code>api_request</code> events
+              (<code>client_request_id</code> vs <code>request_id</code>) make retries directly countable.</td>
+            <td>Probe A gets a runbook and an instrument — now the transport service's injection mode (W6). §9's two provisional
+              constants get filled — or the descope to observe-only executes with evidence.</td>
+            <td><span class="chip open">instrument ready · probe to run</span></td>
+          </tr>
+          <tr>
+            <td><strong>D3</strong> OAuth → org</td>
+            <td><code>organization.id</code> + <code>user.email</code> on every telemetry event.</td>
+            <td>§10's branch can be named: <strong>detection-tier binding from client-asserted telemetry</strong> for OAuth;
+              credential-fingerprint refusal stays API-key-only. Asserted ≠ proven — stated, not blurred.</td>
+            <td><span class="chip measured">measured</span> <span class="chip decided">branch nameable</span></td>
+          </tr>
+          <tr>
+            <td><strong>D4</strong> alignment gap</td>
+            <td>Nothing. The hook turn carrier already feeds alignment; telemetry doesn't change that.</td>
+            <td>Unchanged. Retire the expectation explicitly; the fix path remains openbox-core#130.</td>
+            <td><span class="chip decided">honest no-op</span></td>
+          </tr>
+          <tr>
+            <td><strong>D5</strong> volume</td>
+            <td>Real numbers: 290 KB avg, 566 KB max, 95% of model-call request bodies over 64 KiB.</td>
+            <td><strong>Ruled OD1(c):</strong> attempt full bodies and accept the truncation — ~19 of every 20 model-call bodies cut
+              at the cap, through the standard redact→cap leg, no new mechanism. The numbers made the cost explicit before it was
+              accepted.</td>
+            <td><span class="chip measured">measured</span></td>
+          </tr>
+          <tr>
+            <td><strong>D6</strong> testbed</td>
+            <td>Today's corpus is a fixture mine: real transcripts, OTel batches, and transport pairs from a live session.</td>
+            <td>Replay conformance — drive the mappers with sanitized real fixtures and assert outbound bytes, stack-free, extending
+              the C1–C41 pattern. The live stack keeps ownership of control-plane claims only.</td>
+            <td><span class="chip inferred">design</span></td>
+          </tr>
+          <tr>
+            <td><strong>D7</strong> provider asymmetry</td>
+            <td>OTLP is a standard receiver, not a per-tool hook surface; the transcript watcher and transport lane are
+              client-shape-independent.</td>
+            <td>Capture converges on standard lanes; adapters shrink toward enforcement-only shims. Whether Codex exports OTel is a
+              probe, not an assumption.</td>
+            <td><span class="chip open">direction · Codex probe</span></td>
+          </tr>
+          <tr>
+            <td><strong>D8</strong> approval identity</td>
+            <td><code>tool_use_id</code> observed on <code>tool_decision</code> and <code>tool_result</code> — a per-invocation id
+              that joins decision to result.</td>
+            <td>If the hook payload carries it too (probe), a retry-stable identity exists for every class. Adopting it changes
+              <code>activity_id</code> — byte-pinned — so it stays its own ADR. Until then the pinned limit stands.</td>
+            <td><span class="chip open">probe</span></td>
+          </tr>
+        </tbody>
+      </table></div>
+    </section>
+
+    <section id="s4">
+      <div class="sec-head"><span class="sec-num">§4</span><h2>The combined architecture</h2></div>
+      <p class="sec-sub">One engine, one contract, one decider — four capture lanes with named assurance tiers.</p>
+
+      <div class="diagram">
+        <div class="lanes">
+          <div class="colhead">Lane</div>
+          <div class="colhead">Capture point</div>
+          <div class="colhead">One engine (existing)</div>
+          <div class="colhead">Control plane (existing)</div>
+
+          <div class="cell rowlab"><span class="tier t-enf">T1 · Enforce</span>Hooks</div>
+          <div class="cell"><span class="bt">Adapter hooks (CLI + desktop)</span>
+            <span class="d">PreToolUse gate · prompt gate · HALT latch · turn cursor · thinking lift. The only in-path point for tools and prompts.</span></div>
+          <div class="cell"><span class="bt">hookflow → decision → client</span>
+            <span class="d">map → redact-before-attach → cap (65,536 runes) → spool → AIP-sign → realtime flush. Unchanged; all lanes converge here.</span></div>
+          <div class="cell"><span class="bt">/evaluate — the only decider</span>
+            <span class="d">sessions → governance_events → Merkle leaves. Dashboards, alignment, approver read the same tables.</span></div>
+
+          <div class="cell rowlab"><span class="tier t-enf">T1 · Enforce</span>Gateway</div>
+          <div class="cell"><span class="bt">Loopback relay (CLI, opt-in)</span>
+            <span class="d">Byte-identical forward + capture; refusal wired, pending probe A (D2). Honest scope after §8: terminal CLI.</span></div>
+          <div class="cell quiet">same path — <code>:gateway:</code> id namespace, disjoint from hook turns by construction</div>
+          <div class="cell quiet">same tables — spans classify via <code>http_*</code> keys as today</div>
+
+          <div class="cell rowlab"><span class="tier t-ast">T3 · Observe, asserted</span>Telemetry <em>(new)</em></div>
+          <div class="cell"><span class="bt">Loopback OTLP receiver in the daemon</span>
+            <span class="d"><code>api_request</code> → model-call evidence · <code>tool_decision</code> → decision metadata ·
+            <code>hook_execution_*</code> → engine health · bodies → local evidence store, digest on the wire.</span></div>
+          <div class="cell quiet">same path — posture-gated (<code>content_capture</code>, finops), same redactor, <code>:otel:</code> namespace; one model-call producer elected per session</div>
+          <div class="cell quiet">same tables — no new endpoint, no new table (repo rule holds)</div>
+
+          <div class="cell rowlab lastrow"><span class="tier t-enf">T1 · Enforce-capable</span>Transport proxy <em>(ruled OD2)</em></div>
+          <div class="cell lastrow"><span class="bt">Native TLS relay — system service, no Docker</span>
+            <span class="d">In-path for CLI <em>and</em> desktop: scoped to <code>api.anthropic.com</code>, credential-grade CA, never system trust. One command in, one command out. Refusal shares probe A.</span></div>
+          <div class="cell quiet lastrow">same path — <code>:proxy:</code> namespace; joins the one-producer election</div>
+          <div class="cell quiet lastrow">same tables — spans classify like gateway capture</div>
+        </div>
+        <div class="legend">
+          <span><span class="mono t-enf">T1</span> in-path, can block</span>
+          <span><span class="mono t-att">T2</span> bytes on the wire, attested (gateway/transport capture)</span>
+          <span><span class="mono t-ast">T3</span> client-asserted, suppressible — detection, not prevention</span>
+          <span><span class="mono t-lab">LAB</span> injection/debug mode of the transport service — probes only</span>
+        </div>
+      </div>
+
+      <h3>Inside the one engine — order is load-bearing</h3>
+      <figure class="fig">
+        <div class="figwrap">
+        <svg viewBox="0 0 980 240" role="img" style="min-width:900px"
+             aria-label="Every capture lane converges on one client-side pipeline: mapper, secret redaction, wire cap, spool, signing, realtime flush, then /evaluate and the shared tables. The enforce cascade branches off the mapper for gated hops and returns a decision synchronously; model-call bodies ride the same evidence leg and truncate at the wire cap, as ruled in OD1.">
+          <defs>
+            <marker id="fdA" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0L10,5L0,10z" style="fill:var(--ink-2)"/></marker>
+            <marker id="fdAc" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0L10,5L0,10z" style="fill:var(--accent)"/></marker>
+          </defs>
+
+          <!-- inputs -->
+          <text x="124" y="184" text-anchor="end" class="lab">hooks (stdin)</text>
+          <text x="124" y="199" text-anchor="end" class="lab" style="fill:var(--open)">OTLP (proposed)</text>
+          <text x="124" y="214" text-anchor="end" class="lab">turn cursor</text>
+          <line x1="128" y1="180" x2="140" y2="188" class="msg" marker-end="url(#fdA)"/>
+          <line x1="128" y1="195" x2="140" y2="195" class="msg" marker-end="url(#fdA)"/>
+          <line x1="128" y1="210" x2="140" y2="202" class="msg" marker-end="url(#fdA)"/>
+
+          <!-- main row: 9 boxes w=86 gap=6 from x=140, y=170..218 -->
+          <rect class="node" x="140" y="170" width="86" height="48" rx="5"/>
+          <text x="183" y="190" text-anchor="middle">mapper</text>
+          <text x="183" y="205" text-anchor="middle" class="s">native → event</text>
+          <rect class="node" x="232" y="170" width="86" height="48" rx="5"/>
+          <text x="275" y="190" text-anchor="middle">redaction</text>
+          <text x="275" y="205" text-anchor="middle" class="s">before attach</text>
+          <rect class="node" x="324" y="170" width="86" height="48" rx="5"/>
+          <text x="367" y="190" text-anchor="middle">cap</text>
+          <text x="367" y="205" text-anchor="middle" class="s">65,536 runes</text>
+          <rect class="node" x="416" y="170" width="86" height="48" rx="5"/>
+          <text x="459" y="190" text-anchor="middle">spool</text>
+          <text x="459" y="205" text-anchor="middle" class="s">durable first</text>
+          <rect class="node" x="508" y="170" width="86" height="48" rx="5"/>
+          <text x="551" y="190" text-anchor="middle">AIP sign</text>
+          <text x="551" y="205" text-anchor="middle" class="s">client/</text>
+          <rect class="node" x="600" y="170" width="86" height="48" rx="5"/>
+          <text x="643" y="190" text-anchor="middle">flush</text>
+          <text x="643" y="205" text-anchor="middle" class="s">debounced ≤1s</text>
+          <rect x="692" y="170" width="86" height="48" rx="5" style="fill:var(--accent-soft);stroke:var(--accent)"/>
+          <text x="735" y="190" text-anchor="middle">/evaluate</text>
+          <text x="735" y="205" text-anchor="middle" class="s">only decider</text>
+          <rect class="node" x="784" y="170" width="86" height="48" rx="5"/>
+          <text x="827" y="190" text-anchor="middle">tables</text>
+          <text x="827" y="205" text-anchor="middle" class="s">events · Merkle</text>
+          <rect class="node" x="876" y="170" width="86" height="48" rx="5"/>
+          <text x="919" y="190" text-anchor="middle">readers</text>
+          <text x="919" y="205" text-anchor="middle" class="s">dash · align · appr</text>
+          <line x1="226" y1="194" x2="232" y2="194" class="msg" marker-end="url(#fdA)"/>
+          <line x1="318" y1="194" x2="324" y2="194" class="msg" marker-end="url(#fdA)"/>
+          <line x1="410" y1="194" x2="416" y2="194" class="msg" marker-end="url(#fdA)"/>
+          <line x1="502" y1="194" x2="508" y2="194" class="msg" marker-end="url(#fdA)"/>
+          <line x1="594" y1="194" x2="600" y2="194" class="msg" marker-end="url(#fdA)"/>
+          <line x1="686" y1="194" x2="692" y2="194" class="msg" marker-end="url(#fdA)"/>
+          <line x1="778" y1="194" x2="784" y2="194" class="msg" marker-end="url(#fdA)"/>
+          <line x1="870" y1="194" x2="876" y2="194" class="msg" marker-end="url(#fdA)"/>
+
+          <!-- enforce cascade branch (sync) -->
+          <rect x="140" y="44" width="250" height="104" rx="5" style="fill:none;stroke:var(--accent);stroke-width:1.6"/>
+          <text x="265" y="62" text-anchor="middle">enforce cascade</text>
+          <text x="265" y="78" text-anchor="middle" class="s">ShouldEscalate → evaluate → MapVerdict</text>
+          <rect class="node" x="152" y="88" width="226" height="24" rx="4"/>
+          <text x="265" y="104" text-anchor="middle" class="s">HALT latch — halted-sessions/</text>
+          <rect class="node" x="152" y="118" width="226" height="24" rx="4"/>
+          <text x="265" y="134" text-anchor="middle" class="s">approval hold · rewake watcher</text>
+          <line x1="183" y1="170" x2="183" y2="148" class="msg" style="stroke:var(--accent)" marker-end="url(#fdAc)"/>
+          <text x="192" y="164" class="s" style="fill:var(--accent)">gated hops — sync</text>
+          <path class="msg" style="stroke:var(--accent)" d="M390,68 H735 V166" marker-end="url(#fdAc)"/>
+          <text x="560" y="60" text-anchor="middle" class="lab" style="fill:var(--accent)">sync round-trip — verdict BEFORE the hop</text>
+          <path class="msg" d="M140,60 H108" marker-end="url(#fdA)"/>
+          <text x="132" y="80" text-anchor="end" class="s">decision JSON → stdout</text>
+          <text x="132" y="94" text-anchor="end" class="s">deny · ask · rewrite</text>
+          <text x="132" y="108" text-anchor="end" class="s">continue:false</text>
+
+        </svg>
+        </div>
+        <figcaption><strong>Fig 1 — one pipeline, two legs.</strong> Every lane (hooks, proposed OTLP receiver, turn cursor) feeds the same mapper.
+        The <em>enforce leg</em> (top) runs only on gated hops and is synchronous: the verdict comes back before the hop happens, is rendered as the
+        provider's native decision JSON, and HALT additionally arms the latch. The <em>evidence leg</em> (bottom) runs on everything: redact before
+        attach, cap at the wire, spool durably, sign, flush. Model-call bodies ride this same leg — ~95% truncate at the cap, ruled OD1(c): the tail is lost by decision, not by accident.
+        Two orderings are pinned by conformance: redaction precedes attachment, and failure policy applies only <em>after</em> an evaluation attempt.</figcaption>
+      </figure>
+
+      <h3>Every component, its responsibility, its value</h3>
+      <div class="tblwrap"><table>
+        <thead><tr><th>Component</th><th>Responsibility</th><th>Why it earns its place</th></tr></thead>
+        <tbody>
+          <tr><td><strong>Provider SPI</strong> <span class="mono">provider/</span></td>
+            <td>The seam: <code>Installer</code> (install time) + <code>HookEngine</code> (runtime + capabilities).</td>
+            <td>Adding a tool is an adapter, never an engine change — the anti-drift rule that ended the copy-paste era.</td></tr>
+          <tr><td><strong>Adapter + mapper + OutputContract</strong> <span class="mono">adapters/claude-code · codex</span></td>
+            <td>Native hook shape → normalized event; verdict → native decision JSON.</td>
+            <td>Provider quirks stay quarantined at the edge: Codex rejects <code>ask</code>, CC accepts <code>updatedInput</code> — the engine never learns either.</td></tr>
+          <tr><td><strong>Enforce cascade + gate</strong> <span class="mono">hookflow/enforce.go</span></td>
+            <td>The synchronous verdict path: <code>ShouldEscalate</code> → <code>/evaluate</code> → <code>MapVerdict</code>; failure policy applied <em>after</em> evaluation.</td>
+            <td>This <em>is</em> interception. No local second-guessing of policy (ADR-0017) — the raw-rego lesson.</td></tr>
+          <tr><td><strong>Secret detection + redaction</strong> <span class="mono">decision/</span></td>
+            <td>Redact content before it is attached; rewrite proceed-path inputs via <code>allow + updatedInput</code>.</td>
+            <td>The only in-transit content control; its reach is measured (C39), not assumed — keyword decides, not charset.</td></tr>
+          <tr><td><strong>Wire caps</strong> <span class="mono">capBody · MaxRedactBody</span></td>
+            <td>Bound what egresses: 65,536 runes per body after a larger scan bound.</td>
+            <td>Bounds have owners — reusing a local bound as an egress bound already shipped one silent regression.</td></tr>
+          <tr><td><strong>Spool + realtime flusher</strong> <span class="mono">hookflow</span></td>
+            <td>Durable-then-deliver; debounced detached flush per session.</td>
+            <td>A crash over-reports into core's dedupe rather than losing evidence — the safe direction by construction.</td></tr>
+          <tr><td><strong>Duration stash + TurnCursor</strong> <span class="mono">hookflow</span></td>
+            <td>Pair started/completed for durations; byte-offset transcript windows per turn.</td>
+            <td>Per-turn usage and thinking without holding transcripts in memory; spool-then-cursor ordering survives crashes.</td></tr>
+          <tr><td><strong>Advisory sink + findings loop</strong> <span class="mono">hookflow</span></td>
+            <td>Surface non-blocking evaluations (CONSTRAIN, risk, guardrail hits) back into the session.</td>
+            <td>The after-side feedback channel — how monitored evidence reaches the developer without blocking.</td></tr>
+          <tr><td><strong>Approval hold + rewake</strong> <span class="mono">hookflow · cli/internal/approver</span></td>
+            <td>Hold REQUIRE_APPROVAL where no native prompt exists (prompts); wake when the decision lands; ADR-0012 approver can answer autonomously.</td>
+            <td>Approvals resolve without polling; undecided fails closed to block — over-ask, never over-grant.</td></tr>
+          <tr><td><strong>HALT latch</strong> <span class="mono">halted-sessions/</span></td>
+            <td>After a server HALT: refuse every later gated hook in the session, no re-evaluation, resume included.</td>
+            <td>The <em>next-boundary binder</em> — the mechanism that gives monitor-only lanes enforcement teeth (§5).</td></tr>
+          <tr><td><strong>Gateway</strong> <span class="mono">gateway/</span></td>
+            <td>Byte-identical relay of CLI model calls; capture as an observed span; gate built, refusal dormant.</td>
+            <td>The only in-path point that exists for LLM traffic — scoped honestly to the client that follows it.</td></tr>
+          <tr><td><strong>Telemetry receiver + mappers</strong> <span class="chip od">proposed W3–W4</span></td>
+            <td>Loopback OTLP ingest; <code>api_request</code>/<code>tool_decision</code>/<code>hook_execution_*</code> → contract events.</td>
+            <td>Desktop and OAuth model-call evidence with zero traffic risk; the hook engine becomes self-monitoring.</td></tr>
+          <tr><td><strong>Transport proxy</strong> <span class="chip decided">ruled OD2 · W5</span></td>
+            <td>Native launchd TLS relay scoped to <code>api.anthropic.com</code>; credential-grade CA under <code>~/.openbox/</code>;
+              one command in, one command out; capture under <code>:proxy:</code> ids.</td>
+            <td>The in-path point that covers desktop/OAuth model calls — closes D1's enforcement half once probe A lands.</td></tr>
+          <tr><td><strong>Client</strong> <span class="mono">client/</span></td>
+            <td>DevEvent payload, AIP signing, verdict parsing (<code>ALLOW · CONSTRAIN · REQUIRE_APPROVAL · BLOCK · HALT</code>).</td>
+            <td>One wire shape, byte-pinned identity — core's dedupe and the approval keys depend on it.</td></tr>
+          <tr><td><strong>Control plane</strong> <span class="mono">/evaluate · governance_events</span></td>
+            <td>The only decider; same tables and readers as the agent runtime.</td>
+            <td>Dev sessions and production agents are governed by one pipeline — the repo's founding rule.</td></tr>
+        </tbody>
+      </table></div>
+
+      <h3>Rules that survive unchanged</h3>
+      <ul>
+        <li><strong>One model-call evidence producer per session.</strong> Election at <code>init</code>: telemetry, gateway, or
+          transport — exactly one captures, never two — extending ADR-0021's disjoint-namespace rule
+          (<code>:gateway:</code> / <code>:otel:</code> / <code>:proxy:</code>) so core's dedupe never absorbs half the evidence.</li>
+        <li><strong>Signals carry no <code>signal_args</code>;</strong> free text rides metadata keys — the core goal-overwrite trap
+          (<code>age.go:112-137</code>) applies to telemetry-sourced events identically.</li>
+        <li><strong>The INV-2 allowlist is untouched.</strong> The OTel lane binds at its own edge with its own sentinel test;
+          <code>usage.go</code>'s transcript projection and its mutation-tested sentinel stay exactly as they are.</li>
+        <li><strong>Redact before attach, cap at the wire</strong> — telemetry content passes the same keyword-driven detector with
+          the same honestly-stated reach (C39's unlabelled-hex limit applies here too).</li>
+        <li><strong>Reuse, don't rebuild:</strong> no new control-plane table, endpoint, or service. The receiver is a client-side
+          component; its events are activities and signals shaped by the existing contract.</li>
+      </ul>
+    </section>
+
+    <section id="s5">
+      <div class="sec-head"><span class="sec-num">§5</span><h2>Interception, answered — gate, tap, or nothing</h2></div>
+      <p class="sec-sub">Can OpenBox evaluate before <em>and</em> after every prompt, tool call, HTTP call, LLM call, and MCP call — and act on the verdict?</p>
+
+      <p>
+        <strong>Short answer: intercept-before exists exactly where the harness offers an in-path point, and that covers prompts,
+        tool calls, and MCP calls on both clients — synchronously, with the full verdict set.</strong> LLM calls are interceptable
+        in-path only where a relay sits on the route: the gateway covers the terminal CLI, and OD2's ruling makes the transport
+        proxy a product service that puts a relay on the desktop/OAuth route too (refusal on both relays awaits probe A). Where
+        no relay is installed, model calls are monitor-only through the OTel lane — an after-the-fact, batched, client-asserted
+        export that cannot return a verdict to the call it describes, <em>by construction</em>. HTTP made by tools is
+        intercepted at <em>tool granularity</em> (the invocation, command verbatim, is judged before it runs), never at wire
+        granularity. And on <em>every</em> surface, “after” interception is bounded by causality, not by OpenBox: a side effect
+        that has run can be evaluated, surfaced, and punished — never revoked.
+      </p>
+      <p>
+        What keeps the monitor lanes inside the enforcement story is <strong>next-boundary binding</strong>: every lane's events
+        flow to <code>/evaluate</code>, so evidence that arrives after the fact still produces a verdict — and a HALT lands as the
+        <em>latch</em>, which refuses every later gated hook in the session, resume included. The verdict doesn't reach the call it
+        judged; it reaches everything after it. Evaluation is both-sides everywhere; interception is pre-side, at gates.
+      </p>
+
+      <figure class="fig">
+        <div class="figwrap">
+        <svg viewBox="0 0 980 430" role="img" style="min-width:900px"
+             aria-label="One governed turn, left to right: prompt, LLM call, tool or MCP call, execution. Synchronous gates sit on the path before the prompt and before tool calls; dormant relay gates — the gateway for the CLI and the ruled transport proxy for both clients — cover model calls, and without transport installed desktop OAuth falls back to monitor-only taps. Taps hang below the path, feed /evaluate asynchronously, and a HALT verdict loops back as a latch that closes every later gate.">
+          <defs>
+            <marker id="faA" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0L10,5L0,10z" style="fill:var(--ink-2)"/></marker>
+            <marker id="faAc" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0L10,5L0,10z" style="fill:var(--accent)"/></marker>
+            <marker id="faAo" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0L10,5L0,10z" style="fill:var(--open)"/></marker>
+          </defs>
+
+          <text x="24" y="28" class="m">IN-PATH GATES — SYNCHRONOUS VERDICT BEFORE THE HOP</text>
+
+          <!-- gates -->
+          <rect x="88" y="40" width="144" height="52" rx="6" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.8"/>
+          <text x="160" y="61" text-anchor="middle">UserPromptSubmit</text>
+          <text x="160" y="77" text-anchor="middle" class="s">prompt gate · ADR-0020</text>
+
+          <rect x="308" y="40" width="144" height="52" rx="6" class="dash" style="fill:none;stroke:var(--open);stroke-width:1.8"/>
+          <text x="380" y="61" text-anchor="middle" style="fill:var(--open)">gateway · transport</text>
+          <text x="380" y="77" text-anchor="middle" class="s">in-path relays · refusal dormant</text>
+
+          <rect x="528" y="40" width="144" height="52" rx="6" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.8"/>
+          <text x="600" y="61" text-anchor="middle">PreToolUse</text>
+          <text x="600" y="77" text-anchor="middle" class="s">every tool class · MCP</text>
+
+          <text x="820" y="128" text-anchor="middle" class="s" style="fill:var(--ink-3)">no pre-point exists —</text>
+          <text x="820" y="143" text-anchor="middle" class="s" style="fill:var(--ink-3)">execution already happened</text>
+
+          <!-- gate connectors -->
+          <line x1="160" y1="92" x2="160" y2="164" class="msg" style="stroke:var(--accent)" marker-end="url(#faAc)"/>
+          <line x1="380" y1="92" x2="380" y2="164" class="msg dash" style="stroke:var(--open)" marker-end="url(#faAo)"/>
+          <line x1="600" y1="92" x2="600" y2="164" class="msg" style="stroke:var(--accent)" marker-end="url(#faAc)"/>
+          <text x="390" y="118" class="s" style="fill:var(--dead)">desktop / OAuth: transport (OD2)</text>
+          <text x="390" y="132" class="s" style="fill:var(--dead)">— not installed ⇒ tap only</text>
+
+          <!-- timeline -->
+          <rect class="node" x="85" y="166" width="150" height="48" rx="5"/>
+          <text x="160" y="186" text-anchor="middle">Prompt</text>
+          <text x="160" y="202" text-anchor="middle" class="s">developer → agent</text>
+          <rect class="node" x="305" y="166" width="150" height="48" rx="5"/>
+          <text x="380" y="186" text-anchor="middle">LLM call ⇄</text>
+          <text x="380" y="202" text-anchor="middle" class="s">request + response</text>
+          <rect class="node" x="525" y="166" width="150" height="48" rx="5"/>
+          <text x="600" y="186" text-anchor="middle">Tool · MCP call</text>
+          <text x="600" y="202" text-anchor="middle" class="s">HTTP rides tools</text>
+          <rect class="node" x="745" y="166" width="150" height="48" rx="5"/>
+          <text x="820" y="186" text-anchor="middle">Execution &amp; result</text>
+          <text x="820" y="202" text-anchor="middle" class="s">side effect happens</text>
+          <line x1="235" y1="190" x2="305" y2="190" class="msg" marker-end="url(#faA)"/>
+          <line x1="455" y1="190" x2="525" y2="190" class="msg" marker-end="url(#faA)"/>
+          <line x1="675" y1="190" x2="745" y2="190" class="msg" marker-end="url(#faA)"/>
+          <path class="msg" d="M820,214 V244 H420 V216" marker-end="url(#faA)"/>
+          <text x="620" y="238" text-anchor="middle" class="s">agent continues — the next hop re-enters the gates</text>
+
+          <!-- taps -->
+          <line x1="340" y1="214" x2="340" y2="268" class="msg dash" marker-end="url(#faA)"/>
+          <line x1="600" y1="214" x2="600" y2="268" class="msg dash" marker-end="url(#faA)"/>
+          <line x1="820" y1="214" x2="820" y2="268" class="msg dash" marker-end="url(#faA)"/>
+          <rect x="24" y="268" width="830" height="76" rx="6" class="dash" style="fill:none;stroke:var(--line-strong)"/>
+          <text x="36" y="290" class="m">MONITOR TAPS — ASYNC EVIDENCE · NO VERDICT REACHES THIS CALL</text>
+          <text x="36" y="311" class="s">LLM: OTel api_request · raw bodies (body_ref) · gateway span &nbsp;&nbsp;·&nbsp;&nbsp; thinking: transcript lift only</text>
+          <text x="36" y="329" class="s">tools &amp; turns: tool_decision · tool_result · PostToolUse · transcripts · turn window</text>
+
+          <rect x="870" y="268" width="94" height="76" rx="6" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.6"/>
+          <text x="917" y="296" text-anchor="middle">/evaluate</text>
+          <text x="917" y="312" text-anchor="middle" class="s">only decider</text>
+          <text x="917" y="328" text-anchor="middle" class="s">findings ↺</text>
+          <line x1="854" y1="306" x2="870" y2="306" class="msg" marker-end="url(#faA)"/>
+
+          <!-- latch feedback -->
+          <path class="msg dash" style="stroke:var(--accent);stroke-width:1.6" d="M917,268 V64 H676" marker-end="url(#faAc)"/>
+          <text x="796" y="56" text-anchor="middle" class="lab" style="fill:var(--accent)">HALT ⇒ latch closes every LATER gate</text>
+          <text x="796" y="80" text-anchor="middle" class="s" style="fill:var(--accent)">(session ends · resume refused)</text>
+
+          <!-- legend -->
+          <rect x="24" y="376" width="12" height="12" rx="2" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.6"/>
+          <text x="44" y="386" class="s">in-path gate — verdict before the hop</text>
+          <rect x="300" y="376" width="12" height="12" rx="2" class="dash" style="fill:none;stroke:var(--open);stroke-width:1.6"/>
+          <text x="320" y="386" class="s">built, dormant (probe A)</text>
+          <line x1="560" y1="382" x2="596" y2="382" class="msg dash"/>
+          <text x="606" y="386" class="s">tap — monitor only, async</text>
+        </svg>
+        </div>
+        <figcaption><strong>Fig 2 — the interception map.</strong> One governed turn, left to right. Gates sit <em>on</em> the path and return a verdict
+        before the hop; taps hang <em>off</em> the path and can only describe it afterwards. The LLM column has two relay gates, both dormant until
+        probe A names a refusal shape: the base-URL gateway (CLI) and — ruled OD2, 2026-08-27 — the transport proxy as a product service, which
+        covers the desktop/OAuth route too; a session without transport installed falls back to taps for its model calls. The accent feedback path
+        is what makes taps matter: their evidence still produces verdicts, and a HALT closes every gate the session would meet next.</figcaption>
+      </figure>
+
+      <h3>The matrix — per communication, per side</h3>
+      <div class="tblwrap"><table>
+        <thead><tr><th>Communication</th><th>Before — sync verdict?</th><th>After — what is possible</th><th>Today</th></tr></thead>
+        <tbody>
+          <tr>
+            <td><strong>Prompt</strong></td>
+            <td><strong>Yes.</strong> UserPromptSubmit gate: BLOCK erases the prompt, REQUIRE_APPROVAL holds (undecided ⇒ block, no kill),
+              HALT ends the session + latch.</td>
+            <td>The reply is observed (turn carrier) and evaluated; it cannot be un-shown. Findings feed the next turn; HALT binds at the next hop.</td>
+            <td><span class="chip decided">shipped · ADR-0020</span></td>
+          </tr>
+          <tr>
+            <td><strong>Tool call</strong> <span class="dim">(shell, file, web — every class)</span></td>
+            <td><strong>Yes.</strong> PreToolUse gate, full verdict set; shell command judged verbatim; local redaction can rewrite input
+              (<code>allow + updatedInput</code>).</td>
+            <td>PostToolUse observes status, output, failure signals — redacted, capped, evaluated. The side effect is not revocable.</td>
+            <td><span class="chip decided">shipped · ADR-0017/18/19</span></td>
+          </tr>
+          <tr>
+            <td><strong>MCP call</strong></td>
+            <td><strong>Yes.</strong> Same PreToolUse gate; the MCP invocation egresses verbatim on gated calls so policy judges the real thing;
+              retry-stable approval identity.</td>
+            <td>MCP result captured (JSON-escape-aware redaction), evaluated, findings surfaced.</td>
+            <td><span class="chip decided">shipped</span></td>
+          </tr>
+          <tr>
+            <td><strong>LLM call — terminal CLI</strong></td>
+            <td><strong>In-path point exists</strong> (gateway relay). Refusal path built and isolated to two constants — dormant until probe A
+              proves a shape the client won't retry around. Until then: capture only.</td>
+            <td>Full exchange passes through the relay — inspectable and captured as an observed span. Modification is excluded by decision
+              (ADR-0021 §4: byte-identical is load-bearing).</td>
+            <td><span class="chip open">capture live · refusal probe A</span></td>
+          </tr>
+          <tr>
+            <td><strong>LLM call — desktop / subscription OAuth</strong></td>
+            <td><strong>Yes once W5 ships:</strong> the transport proxy (ruled OD2) is in-path on this route too — refusal shares
+              probe A. Without transport installed: monitor-only via OTel <code>api_request</code> + raw bodies.
+              <em>Hooks gate this session's prompts and tools either way.</em></td>
+            <td>Full exchange observable post-hoc (proven today); verdicts bind at the next gated hook — a HALT ends the session before its
+              next prompt or tool call.</td>
+            <td><span class="chip decided">ruled OD2 · W5 to build</span></td>
+          </tr>
+          <tr>
+            <td><strong>HTTP by tools</strong> <span class="dim">(WebFetch, curl-in-Bash, MCP server egress)</span></td>
+            <td><strong>At tool granularity only.</strong> The invocation carrying the URL/command is gated before it runs. The wire itself is
+              not: a subprocess or MCP server that ignores proxy env is invisible.</td>
+            <td>Tool output observed. The transport proxy (product, per OD2) ground-truths <code>api.anthropic.com</code> only;
+              widening its allowlist to other hosts is its own decision.</td>
+            <td><span class="chip decided">by design — stated limit</span></td>
+          </tr>
+          <tr>
+            <td><strong>Thinking / server-side generation</strong></td>
+            <td><strong>No pre-point exists anywhere</strong> — it is generated upstream, inside the provider.</td>
+            <td>Monitor-only via transcript lift (ADR-0019 P3); Anthropic's own OTel redacts thinking unconditionally.</td>
+            <td><span class="chip decided">shipped · monitor-only</span></td>
+          </tr>
+        </tbody>
+      </table></div>
+      <p class="dim" style="font-size:15px; max-width:80ch">
+        Fail posture footnote: gated hooks default fail-open (<code>fail_closed:false</code> — an unreachable control plane proceeds, and
+        <code>ApplyFailurePolicy</code> runs only <em>after</em> an evaluation attempt). The gateway is deliberately the opposite: no
+        interpretable verdict ⇒ refuse, always, with no posture switch to turn that off (ADR-0021 §7). A failed guardrail also denies.
+      </p>
+
+      <figure class="fig">
+        <div class="figwrap">
+        <svg viewBox="0 0 940 700" role="img" style="min-width:860px"
+             aria-label="Sequence diagram of one gated tool or MCP call. Claude Code sends PreToolUse to the OpenBox hook, which redacts and posts a signed activity to /evaluate. The verdict branches: ALLOW or CONSTRAIN proceeds and the tool executes; BLOCK denies; REQUIRE_APPROVAL shows a native ask prompt; HALT denies, ends the turn, and writes the session latch. After execution, PostToolUse is captured, redacted, spooled and flushed asynchronously.">
+          <defs>
+            <marker id="fbA" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0L10,5L0,10z" style="fill:var(--ink-2)"/></marker>
+          </defs>
+          <!-- lifeline heads -->
+          <rect class="node" x="55" y="10" width="190" height="36" rx="5"/>
+          <text x="150" y="33" text-anchor="middle">Claude Code (CLI &amp; desktop)</text>
+          <rect class="node" x="305" y="10" width="190" height="36" rx="5"/>
+          <text x="400" y="33" text-anchor="middle">OpenBox hook (engine)</text>
+          <rect x="555" y="10" width="190" height="36" rx="5" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+          <text x="650" y="33" text-anchor="middle">/evaluate</text>
+          <rect class="node" x="750" y="10" width="180" height="36" rx="5"/>
+          <text x="840" y="33" text-anchor="middle">Tool / MCP server</text>
+          <line class="life" x1="150" y1="46" x2="150" y2="672"/>
+          <line class="life" x1="400" y1="46" x2="400" y2="672"/>
+          <line class="life" x1="650" y1="46" x2="650" y2="672"/>
+          <line class="life" x1="840" y1="46" x2="840" y2="672"/>
+
+          <!-- pre leg -->
+          <line x1="150" y1="78" x2="400" y2="78" class="msg" marker-end="url(#fbA)"/>
+          <text x="275" y="70" text-anchor="middle" class="lab">PreToolUse — tool_input on stdin</text>
+          <path class="msg" d="M400,98 h34 v14 h-34" marker-end="url(#fbA)"/>
+          <text x="442" y="108" class="lab">redact secrets · verbatim cmd for shell/MCP</text>
+          <line x1="400" y1="142" x2="650" y2="142" class="msg" marker-end="url(#fbA)"/>
+          <text x="525" y="134" text-anchor="middle" class="lab">POST — AIP-signed activity</text>
+          <line x1="650" y1="168" x2="400" y2="168" class="msg dash" marker-end="url(#fbA)"/>
+          <text x="525" y="160" text-anchor="middle" class="lab">verdict · constraints[] · approval ref</text>
+
+          <!-- alt frame -->
+          <rect x="60" y="190" width="850" height="374" style="fill:none;stroke:var(--line-strong);stroke-width:1.2"/>
+          <rect x="60" y="190" width="104" height="20" style="fill:var(--surface-2);stroke:var(--line-strong);stroke-width:1.2"/>
+          <text x="112" y="204" text-anchor="middle" class="m">ALT · VERDICT</text>
+
+          <text x="74" y="224" class="g">[ALLOW · CONSTRAIN — proceeds; constraints recorded as advisory]</text>
+          <line x1="400" y1="244" x2="150" y2="244" class="msg" marker-end="url(#fbA)"/>
+          <text x="275" y="236" text-anchor="middle" class="lab">silence — allow+updatedInput only to carry a redaction</text>
+          <line x1="150" y1="272" x2="840" y2="272" class="msg" marker-end="url(#fbA)"/>
+          <text x="495" y="264" text-anchor="middle" class="lab">execute</text>
+          <line x1="840" y1="298" x2="150" y2="298" class="msg dash" marker-end="url(#fbA)"/>
+          <text x="495" y="290" text-anchor="middle" class="lab">result — the side effect happens here</text>
+
+          <line x1="60" y1="314" x2="910" y2="314" class="dash" style="stroke:var(--line-strong)"/>
+          <text x="74" y="334" class="g">[BLOCK]</text>
+          <line x1="400" y1="358" x2="150" y2="358" class="msg" marker-end="url(#fbA)"/>
+          <text x="275" y="350" text-anchor="middle" class="lab">permissionDecision: deny + policy reason</text>
+
+          <line x1="60" y1="376" x2="910" y2="376" class="dash" style="stroke:var(--line-strong)"/>
+          <text x="74" y="396" class="g">[REQUIRE_APPROVAL]</text>
+          <line x1="400" y1="420" x2="150" y2="420" class="msg" marker-end="url(#fbA)"/>
+          <text x="275" y="412" text-anchor="middle" class="lab">ask → native permission prompt (Codex: deny — tighter)</text>
+          <path class="msg" d="M150,440 h34 v14 h-34" marker-end="url(#fbA)"/>
+          <text x="192" y="450" class="lab">developer or ADR-0012 approver resolves; unanswered ⇒ deny</text>
+
+          <line x1="60" y1="474" x2="910" y2="474" class="dash" style="stroke:var(--line-strong)"/>
+          <text x="74" y="494" class="g" style="fill:var(--dead)">[HALT]</text>
+          <line x1="400" y1="518" x2="150" y2="518" class="msg" style="stroke:var(--dead)" marker-end="url(#fbA)"/>
+          <text x="275" y="510" text-anchor="middle" class="lab" style="fill:var(--dead)">deny + continue:false — the turn ends now</text>
+          <path class="msg" style="stroke:var(--dead)" d="M400,536 h34 v14 h-34" marker-end="url(#fbA)"/>
+          <text x="442" y="546" class="lab" style="fill:var(--dead)">write halted-sessions/ latch — every later gated hook refused</text>
+
+          <!-- post leg -->
+          <line x1="24" y1="584" x2="916" y2="584" class="dash" style="stroke:var(--line-strong)"/>
+          <text x="24" y="576" class="m">AFTER EXECUTION — EVIDENCE SIDE (PROCEED BRANCH)</text>
+          <line x1="150" y1="612" x2="400" y2="612" class="msg" marker-end="url(#fbA)"/>
+          <text x="275" y="604" text-anchor="middle" class="lab">PostToolUse — result · status · failure signals</text>
+          <path class="msg" d="M400,628 h34 v14 h-34" marker-end="url(#fbA)"/>
+          <text x="442" y="638" class="lab">redact → cap 65,536 runes → spool</text>
+          <line x1="400" y1="664" x2="650" y2="664" class="msg dash" marker-end="url(#fbA)"/>
+          <text x="525" y="656" text-anchor="middle" class="lab">ActivityCompleted — async realtime flush</text>
+        </svg>
+        </div>
+        <figcaption><strong>Fig 3 — one gated tool/MCP call, both sides.</strong> The pre leg is a synchronous round-trip: the hop does not happen
+        until the verdict returns (or fail-open policy proceeds). ALLOW is rendered as silence — the hook never emits a grant; an
+        <code>allow</code> appears only when it carries a redacting <code>updatedInput</code> rewrite. CONSTRAIN proceeds with its constraints
+        recorded to the advisory/findings channel — the rewrite mechanism exists but applying server-authored constraints as input mutations is W4
+        follow-up work. The post leg is evidence: it evaluates and remembers, it cannot revoke.</figcaption>
+      </figure>
+
+      <figure class="fig">
+        <div class="figwrap">
+        <svg viewBox="0 0 960 450" role="img" style="min-width:880px"
+             aria-label="Two sequence diagrams side by side. Left: a terminal CLI model call passes through the gateway relay, which can decide before forwarding byte-identically and captures the exchange. Right: a desktop or OAuth model call goes directly to the API; the OpenBox daemon only receives OTel telemetry afterwards, so no synchronous verdict exists for that call — both sides feed /evaluate, and a HALT binds at the next gated hook.">
+          <defs>
+            <marker id="fcA" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0L10,5L0,10z" style="fill:var(--ink-2)"/></marker>
+            <marker id="fcAc" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0L10,5L0,10z" style="fill:var(--accent)"/></marker>
+          </defs>
+          <text x="24" y="22" class="m" style="fill:var(--accent)">TERMINAL CLI — RELAY ON THE ROUTE (IN-PATH)</text>
+          <text x="500" y="22" class="m" style="fill:var(--open)">DESKTOP / OAUTH, NO TRANSPORT — TAP OFF THE ROUTE</text>
+          <line x1="470" y1="14" x2="470" y2="330" class="dash" style="stroke:var(--line-strong)"/>
+
+          <!-- left lifelines -->
+          <rect class="node" x="25" y="34" width="140" height="34" rx="5"/>
+          <text x="95" y="56" text-anchor="middle">claude CLI</text>
+          <rect x="195" y="34" width="140" height="34" rx="5" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5"/>
+          <text x="265" y="56" text-anchor="middle">gateway :port</text>
+          <rect class="node" x="355" y="34" width="105" height="34" rx="5"/>
+          <text x="407" y="56" text-anchor="middle" class="lab">api.anthropic</text>
+          <line class="life" x1="95" y1="68" x2="95" y2="318"/>
+          <line class="life" x1="265" y1="68" x2="265" y2="318"/>
+          <line class="life" x1="407" y1="68" x2="407" y2="318"/>
+
+          <line x1="95" y1="96" x2="265" y2="96" class="msg" marker-end="url(#fcA)"/>
+          <text x="180" y="88" text-anchor="middle" class="lab">POST /v1/messages</text>
+          <path class="msg" style="stroke:var(--open)" d="M265,114 h30 v12 h-30" marker-end="url(#fcA)"/>
+          <text x="303" y="123" class="lab" style="fill:var(--open)">gate.Decide — dormant (probe A)</text>
+          <line x1="265" y1="158" x2="407" y2="158" class="msg" marker-end="url(#fcA)"/>
+          <text x="336" y="150" text-anchor="middle" class="lab">byte-identical fwd</text>
+          <line x1="407" y1="186" x2="265" y2="186" class="msg dash" marker-end="url(#fcA)"/>
+          <text x="336" y="178" text-anchor="middle" class="lab">SSE response</text>
+          <line x1="265" y1="214" x2="95" y2="214" class="msg dash" marker-end="url(#fcA)"/>
+          <text x="180" y="206" text-anchor="middle" class="lab">byte-identical relay</text>
+          <path class="msg" d="M265,240 h30 v12 h-30" marker-end="url(#fcA)"/>
+          <text x="303" y="243" class="lab">capture → TurnCompleted + span</text>
+          <text x="303" y="258" class="lab">(:gateway: ids) → redact → spool</text>
+
+          <!-- right lifelines -->
+          <rect class="node" x="490" y="34" width="140" height="34" rx="5"/>
+          <text x="560" y="56" text-anchor="middle">embedded engine</text>
+          <rect class="node" x="650" y="34" width="130" height="34" rx="5"/>
+          <text x="715" y="56" text-anchor="middle" class="lab">api.anthropic</text>
+          <rect x="800" y="34" width="150" height="34" rx="5" class="dash" style="fill:none;stroke:var(--od);stroke-width:1.5"/>
+          <text x="875" y="56" text-anchor="middle" style="fill:var(--od)">daemon (OTLP)</text>
+          <line class="life" x1="560" y1="68" x2="560" y2="318"/>
+          <line class="life" x1="715" y1="68" x2="715" y2="318"/>
+          <line class="life" x1="875" y1="68" x2="875" y2="318"/>
+
+          <line x1="560" y1="96" x2="715" y2="96" class="msg" marker-end="url(#fcA)"/>
+          <text x="637" y="88" text-anchor="middle" class="lab">model call — direct TLS</text>
+          <line x1="715" y1="124" x2="560" y2="124" class="msg dash" marker-end="url(#fcA)"/>
+          <text x="637" y="116" text-anchor="middle" class="lab">response</text>
+          <line x1="560" y1="164" x2="875" y2="164" class="msg dash" marker-end="url(#fcA)"/>
+          <text x="717" y="156" text-anchor="middle" class="lab">OTel api_request · tool_decision · bodies (batched ~1s)</text>
+          <path class="msg" d="M875,184 h-30 v12 h30" marker-end="url(#fcA)"/>
+          <text x="837" y="193" text-anchor="end" class="lab">map (:otel: ids) → redact</text>
+          <text x="837" y="208" text-anchor="end" class="lab">→ digest bodies → spool</text>
+          <text x="717" y="252" text-anchor="middle" class="lab" style="fill:var(--dead)">no synchronous verdict exists for THIS call</text>
+
+          <!-- shared decider -->
+          <rect x="330" y="342" width="300" height="44" rx="6" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.6"/>
+          <text x="480" y="360" text-anchor="middle">/evaluate → governance_events</text>
+          <text x="480" y="376" text-anchor="middle" class="s">one decider, one table set, both worlds</text>
+          <path class="msg dash" d="M265,318 V364 H330" marker-end="url(#fcA)"/>
+          <text x="260" y="344" text-anchor="end" class="lab">async flush</text>
+          <path class="msg dash" d="M875,318 V364 H630" marker-end="url(#fcA)"/>
+          <text x="880" y="344" class="lab">async, post-hoc</text>
+          <text x="480" y="416" text-anchor="middle" class="lab" style="fill:var(--accent)">verdicts from monitored evidence bind at the NEXT gated hook — a HALT latch ends the session</text>
+        </svg>
+        </div>
+        <figcaption><strong>Fig 4 — the same LLM call in the two worlds.</strong> Left: the relay is on the route, so a pre-verdict point
+        <em>exists</em> — dormant only because the refusal shape is unproven (probe A), and modification is excluded by decision, not by
+        capability. Right: the telemetry-only fallback — nothing in-path, so the daemon's knowledge is necessarily after the fact.
+        OD2's ruling (2026-08-27) makes this fallback the exception rather than the ceiling: with the transport service installed, desktop
+        traffic passes a relay like the left panel's. Both worlds converge on the same decider, which is how a monitored breach still ends
+        the session one hop later.</figcaption>
+      </figure>
+
+      <h3>What each verdict does at each point</h3>
+      <div class="tblwrap"><table>
+        <thead><tr><th>Verdict</th><th>Tool / MCP gate</th><th>Prompt gate</th><th>Gateway / transport (LLM)</th><th>Monitor lanes</th></tr></thead>
+        <tbody>
+          <tr>
+            <td><strong>ALLOW</strong></td>
+            <td>Silence — proceeds. Never emitted as a grant; <code>allow</code> rides only a redacting rewrite.</td>
+            <td>Prompt passes.</td>
+            <td>Relay forwards (today: always).</td>
+            <td>Recorded.</td>
+          </tr>
+          <tr>
+            <td><strong>CONSTRAIN</strong></td>
+            <td>Proceeds; <code>constraints[]</code> recorded → advisory sink + findings. Rewrite mechanism exists
+              (<code>updatedInput</code>, used today for local redaction); applying server constraints = W4 follow-up.</td>
+            <td>Proceeds + recorded.</td>
+            <td>Cannot apply in-path — byte-identical forward is load-bearing for both relays (ADR-0021 §4); would need its own ADR.</td>
+            <td>Recorded, advisory.</td>
+          </tr>
+          <tr>
+            <td><strong>REQUIRE_APPROVAL</strong></td>
+            <td>CC: native <code>ask</code> prompt, resolved synchronously by the developer or the ADR-0012 approver.
+              Codex: deny (its runtime rejects <code>ask</code> — strictly tighter).</td>
+            <td>Hold + rewake; undecided ⇒ block (<code>approval:undecided</code> — never a session kill).</td>
+            <td>Dormant with the rest of the gate.</td>
+            <td>n/a → next boundary.</td>
+          </tr>
+          <tr>
+            <td><strong>BLOCK</strong></td>
+            <td>Deny + policy reason; session continues.</td>
+            <td>Prompt erased; session continues.</td>
+            <td>Refusal shape pending probe A.</td>
+            <td>Binds at next gated hook.</td>
+          </tr>
+          <tr>
+            <td><strong>HALT</strong></td>
+            <td>Deny + <code>continue:false</code> + latch — every later gated hook refused, resume included.
+              (Codex renders deny; session-kill is an open follow-up.)</td>
+            <td>Same: turn ends, latch written.</td>
+            <td>Would refuse (dormant); an uninterpretable verdict already refuses by design.</td>
+            <td>Latch at next gated hook — the teeth of the monitor lanes.</td>
+          </tr>
+        </tbody>
+      </table></div>
+    </section>
+
+    <section id="s6">
+      <div class="sec-head"><span class="sec-num">§6</span><h2>Workstreams</h2></div>
+      <p class="sec-sub">Ordered by dependency. W1 gates everything; W2 can land the same day.</p>
+
+      <div class="ws">
+        <div class="ws-row">
+          <span class="wid">W1</span>
+          <div>
+            <span class="t">ADR-0022 — native telemetry as an evidence lane</span>
+            <p>The decision document: lane tiers (T1/T2/T3 as claims, not marketing), the one-producer election
+            (telemetry | gateway | transport), the <code>:otel:</code> and <code>:proxy:</code> namespaces, posture keys
+            (<code>telemetry</code> under the existing <code>content_capture</code> and <code>finops</code> gates), the beta-flag
+            dependency accepted by ruling (OD3), OD1(c)'s truncation posture, and the sentinel-test list. New lane = new
+            component = ADR, per the repo's own rule.</p>
+            <span class="files">docs/adr/ADR-0022-*.md · contracts/dev-event (v1.6 if any field is added)</span>
+          </div>
+        </div>
+        <div class="ws-row">
+          <span class="wid">W2</span>
+          <div>
+            <span class="t">ADR-0021 amendments — write the three missing sentences</span>
+            <p>§8: the desktop mechanism and the env-lane answer, with today's run as the citation. §10: the branch named —
+            detection-tier org binding from asserted telemetry for OAuth; fingerprint refusal for API keys. §5: <strong>formally
+            reversed by owner ruling (OD2, 2026-08-27)</strong> — the amendment records the reversal, its safeguards (loopback
+            only, single-host allowlist, credential-grade CA, never the system trust store), and the one-command
+            install/removal contract.</p>
+            <span class="files">docs/adr/ADR-0021-openbox-local-gateway.md (DRAFT → closable)</span>
+          </div>
+        </div>
+        <div class="ws-row">
+          <span class="wid">W3</span>
+          <div>
+            <span class="t">The daemon grows a loopback OTLP receiver</span>
+            <p>Same unit, same log file, same doctor surface as the gateway (install ordering is already a solved safety property
+            there — reuse it). <code>openbox init --provider claude-code --telemetry</code> writes the env block through devconfig
+            using the logger's activation discipline: original-values map, before/after SHA-256, refuse-on-conflict, restore only
+            managed keys on removal. This generalizes the <code>ANTHROPIC_BASE_URL</code> first-writer-wins fix to every managed
+            key. OD3 is accepted: the version-pinned beta probes and doctor-visible silence detection ship here, and OD4's
+            silence finding (W4) consumes them.</p>
+            <span class="files">gateway/ (receiver) · adapters/common/devconfig (transactional env) · cli gatewayservice/gatewaycheck</span>
+          </div>
+        </div>
+        <div class="ws-row">
+          <span class="wid">W4</span>
+          <div>
+            <span class="t">Mappers — telemetry events into the existing contract</span>
+            <p><code>api_request</code> → model-call evidence (usage, cost, model, request ids) under the elected producer;
+            <code>tool_decision</code> → decision metadata on the matching activity (never <code>signal_args</code>);
+            <code>hook_registered</code>/<code>hook_execution_*</code> → continuous duplicate-engine detection (doctor's warning
+            becomes a runtime signal); <code>api_request_body</code>/<code>api_response_body</code> → full-body attach through the
+            standard redact→cap leg (OD1 c: truncation accepted). Per OD4, hook-lane activity with no telemetry in the same
+            session window emits a <strong>silence finding</strong> through the existing findings loop — the late HALT it may
+            trigger is accepted. Everything passes the existing redactor; content keys join <code>contentMetadataKeys</code> so
+            nothing routes around the gate.</p>
+            <span class="files">gateway/ or adapters/common (mapper) · client/ (no new bound transcript fields — INV-2 untouched)</span>
+          </div>
+        </div>
+        <div class="ws-row">
+          <span class="wid">W5</span>
+          <div>
+            <span class="t">The transport proxy as a native service <span class="chip decided">ruled OD2</span></span>
+            <p>A Go TLS-intercepting relay in the openbox daemon — no Docker, no mitmproxy: local CA generated and stored
+            credential-grade under <code>~/.openbox/</code>, interception allowlisted to <code>api.anthropic.com</code> only,
+            every other host tunneled untouched. Env activation (<code>HTTPS_PROXY</code> · <code>NO_PROXY</code> ·
+            <code>NODE_EXTRA_CA_CERTS</code> · <code>CLAUDE_CODE_CERT_STORE</code>) rides W3's transactional devconfig.
+            <strong>Install is one command</strong> and proof-ordered — unit → start → listening proven → CA present → only then
+            env — and <strong>removal is one command</strong> that reverses it exactly: restore-only-managed settings, service
+            stopped and unloaded, CA and local captures deleted, the system as close to untouched as possible (org-side rows
+            already hold the evidence). Capture maps under the <code>:proxy:</code> producer namespace; refusal shares probe A
+            with the gateway; the debug/injection mode doubles as the probe instrument (W6).</p>
+            <span class="files">gateway/ sibling package · cli gatewayservice/gatewaycheck patterns · adapters/common/devconfig</span>
+          </div>
+        </div>
+        <div class="ws-row">
+          <span class="wid">W6</span>
+          <div>
+            <span class="t">Replay conformance + the probe instrument</span>
+            <p>Sanitize today's corpus into committed fixtures; drive the mappers with real desktop/CLI events and assert outbound
+            bytes (extends C1–C41, runs stack-free — the D6 logjam breaks for the capture half). Probe A's injector becomes W5's
+            transport service in debug mode: candidate refusal shapes in, retry behavior out, counted via per-attempt telemetry
+            (the logger's mitmproxy stack remains the lab reference, not a product dependency).</p>
+            <span class="files">contracts/dev-event/conformance · testbed/50-telemetry.sh (dormant) · plans/260825-0027/probes/</span>
+          </div>
+        </div>
+        <div class="ws-row">
+          <span class="wid">W7</span>
+          <div>
+            <span class="t">Coverage becomes a per-lane matrix</span>
+            <p>COVERAGE.md adopts the logger's <code>CAPTURE_MODEL.md</code> table form: per signal, per lane, per provider — what is
+            seen, what is authoritative, what is absent. The Codex column stays honest (its OTel export is a probe result, not an
+            assumption), and the desktop column gains both tap entries and — with transport installed — in-path entries.</p>
+            <span class="files">COVERAGE.md · docs/architecture.md#assurance</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="s7">
+      <div class="sec-head"><span class="sec-num">§7</span><h2>Owner rulings &amp; honest limits</h2></div>
+      <p class="sec-sub">All four decisions were ruled by the owner on 2026-08-27 — recorded here with their consequences, plus the limits that stay true no matter what.</p>
+
+      <div class="odblock">
+        <span class="chip od">OD1</span> <span class="chip decided">ruled (c) · 2026-08-27</span> <span class="od-t">Egress posture for oversized bodies.</span>
+        <p>Ruling: <strong>attempt full bodies and accept ~95% truncation.</strong> Model-call bodies ride the existing leg —
+        redact, then cap at 65,536 runes — like every other content field. No digest scheme, no excerpt logic, no new mechanism;
+        the proposed evidence store is retired with it (W5 was reassigned to the transport service). The accepted cost is stated
+        in the limits below: the tail beyond the cap exists nowhere org-side.</p>
+      </div>
+      <div class="odblock">
+        <span class="chip od">OD2</span> <span class="chip decided">ruled · 2026-08-27</span> <span class="od-t">Transport lane: product, native, one command each way.</span>
+        <p>Ruling: <strong>product, not lab — and a native system service, not Docker.</strong> The transport proxy ships in the
+        openbox daemon (launchd-managed, like the gateway unit; mitmproxy and Docker retire from the product path), TLS-scoped to
+        <code>api.anthropic.com</code>, CA handled as a credential under <code>~/.openbox/</code>. Contract: <strong>one command
+        installs, configures, and enables everything; one command removes it all</strong> — services unloaded, every displaced
+        setting restored from the activation record, CA and local captures deleted — the system as close to untouched as possible.
+        This formally reverses ADR-0021 §5 (W2 records it) and gives desktop/OAuth model calls an in-path point: D1's enforcement
+        half closes once probe A lands.</p>
+      </div>
+      <div class="odblock">
+        <span class="chip od">OD3</span> <span class="chip decided">ruled · 2026-08-27</span> <span class="od-t">Riding a beta surface.</span>
+        <p>Ruling: <strong>accept.</strong> The lane ships against <code>CLAUDE_CODE_ENHANCED_TELEMETRY_BETA</code> and
+        <code>OTEL_LOG_RAW_API_BODIES</code> now, with version-pinned probes and doctor-visible silence detection committed as W3
+        scope — the failure mode is absence, and absence is made observable.</p>
+      </div>
+      <div class="odblock">
+        <span class="chip od">OD4</span> <span class="chip decided">ruled · 2026-08-27</span> <span class="od-t">What silence means.</span>
+        <p>Ruling: <strong>silence is a finding.</strong> Hook-lane activity with no telemetry in the same session window emits a
+        finding through the existing findings loop; policy may answer it with a HALT, and the ruling accepts that this HALT is
+        late by construction — it binds at the next gated hook, not at the silent call.</p>
+      </div>
+
+      <h3>Limits that stay true</h3>
+      <ul>
+        <li><strong>T3 is suppressible.</strong> Anything that edits env kills the lane silently. Telemetry is detection with the
+          same claim tier ADR-0021 §2 already argues — never prevention.</li>
+        <li><strong>Thinking does not ride OTel.</strong> Anthropic's export redacts extended thinking unconditionally; the
+          transcript lift (ADR-0019 P3) remains the only thinking source. No change.</li>
+        <li><strong>Desktop model-call enforcement now has a path — through W5's transport proxy only, and only after probe A.</strong>
+          Until both land, hooks still enforce that session's tools and prompts, telemetry watches its model calls, and whether
+          desktop honors <code>continue:false</code> session kill is a probe, not a claim.</li>
+        <li><strong>The wire loses the tail (accepted, OD1).</strong> ~95% of model-call request bodies exceed the cap, so
+          content-based policy and the org record see at most the first 65,536 runes of a model call; the truncated remainder
+          exists nowhere org-side.</li>
+        <li><strong>The transport CA can impersonate <code>api.anthropic.com</code> to this machine.</strong> It is a credential
+          with the same trust boundary as the signing key (ADR-0015): anything running as the developer can read it. Single-host
+          interception and loopback-only listening bound the blast radius; they do not remove it.</li>
+        <li><strong>Asserted identity is not proven identity.</strong> <code>organization.id</code> from the client binds sessions
+          for detection; only a credential fingerprint at an in-path point supports refusal.</li>
+        <li><strong>Lane counts never reconcile 1:1</strong> (batching windows differ). Correlation is by
+          <code>session.id</code> / <code>request_id</code> / <code>tool_use_id</code>, never by counting.</li>
+        <li><strong>The redactor's reach is unchanged:</strong> keyword-driven, entropy-floored — an unlabelled high-entropy value
+          in a 290 KB body is as invisible as it was in a 64 KiB one. C39's honest limit scales with the volume.</li>
+      </ul>
+    </section>
+
+    <section id="s8">
+      <div class="sec-head"><span class="sec-num">§8</span><h2>Verification — what proves each claim</h2></div>
+      <div class="tblwrap"><table>
+        <thead><tr><th>#</th><th>Claim</th><th>Proof</th><th>Needs a stack?</th></tr></thead>
+        <tbody>
+          <tr><td class="num">V1</td><td>Mappers produce correct bytes from real events</td>
+            <td>Replay conformance over sanitized fixtures from run 225cac — asserted on outbound bytes, like C1–C41</td><td>No</td></tr>
+          <tr><td class="num">V2</td><td>A desktop session lands in <code>governance_events</code> with org identity</td>
+            <td><code>testbed/50-telemetry.sh</code>: one desktop + one CLI session, assert rows, producers disjoint</td><td>Yes</td></tr>
+          <tr><td class="num">V3</td><td>Refusal shape (D2) answered or descoped</td>
+            <td>Probe A via the transport service's injection mode against a throwaway session; retries counted from per-attempt telemetry</td><td>No</td></tr>
+          <tr><td class="num">V4</td><td>One-producer election holds</td>
+            <td>Sentinel: telemetry + gateway both installed ⇒ exactly one model-call producer emits; ids never collide</td><td>No</td></tr>
+          <tr><td class="num">V5</td><td>Volume is survivable under OD1(c)</td>
+            <td>Soak at model-call cadence with full-body attach: ~95% of bodies truncate at the cap; spool growth + flusher latency measured; the cap's mutation drill (tail marker) stays red-on-removal</td><td>No</td></tr>
+          <tr><td class="num">V6</td><td>Activation is reversible</td>
+            <td>Enable → mutate a managed key externally → disable refuses; restore leaves foreign keys untouched (port of the logger's settings tests)</td><td>No</td></tr>
+          <tr><td class="num">V7</td><td>One command in, one command out (OD2)</td>
+            <td>Install → system-state diff (launchctl, <code>settings.json</code> env, <code>~/.openbox</code> files) → remove → diff returns empty; displaced values restored byte-identically</td><td>No</td></tr>
+        </tbody>
+      </table></div>
+      <p class="dim" style="font-size:15px">
+        Six of seven run stack-free. That is the point: the D6 logjam stops gating everything except the claims only a live
+        control plane can own.
+      </p>
+    </section>
+
+    <section id="s9">
+      <div class="sec-head"><span class="sec-num">§9</span><h2>Sources</h2></div>
+      <ul class="sources">
+        <li>openbox-logger/src/openbox_logger/settings.py — the env lanes + activation transaction</li>
+        <li>openbox-logger/src/openbox_logger/transcripts.py — cursor, rotation, invalid-JSON retention</li>
+        <li>openbox-logger/mitmproxy/capture.py · compose.yaml — scoped transport lane</li>
+        <li>openbox-logger/docs/CAPTURE_MODEL.md · SCHEMA.md · SECURITY.md</li>
+        <li>openbox-logger/data/runs/20260827T063932Z-225cac/ — the evidence run (local, private)</li>
+        <li>openbox-logger/data/api-bodies/ — 98 untruncated request/response files</li>
+        <li>openbox-shift-left/docs/adr/ADR-0021-openbox-local-gateway.md §§5, 8, 9, 10</li>
+        <li>openbox-shift-left/docs/adr/ADR-0013 · 0014 · 0017 · 0018 · 0019 · 0020</li>
+        <li>openbox-shift-left/plans/reports/probe-260825-baseurl-auth-coverage.md</li>
+        <li>openbox-shift-left/plans/reports/probe-260825-halt-rendering.md</li>
+        <li>openbox-shift-left/CLAUDE.md — status blocks and pinned limits</li>
+        <li>code.claude.com/docs/en/monitoring-usage — the upstream OTel contract</li>
+        <li>owner rulings, 2026-08-27 — OD1(c) truncation · OD2 product transport, one command in/out · OD3 accept beta · OD4 silence ⇒ finding (recorded in §7)</li>
+      </ul>
+      <p class="dim" style="font-size:14px; margin-top:18px">
+        Grades: <span class="chip measured">measured</span> bytes on disk from today's run ·
+        <span class="chip inferred">inferred</span> mechanism read from code/docs, not yet exercised ·
+        <span class="chip open">open</span> needs a probe ·
+        <span class="chip od">od</span> owner decision ·
+        <span class="chip decided">decided</span> already pinned by an ADR or test.
+      </p>
+    </section>
+  </main>
+</div>
