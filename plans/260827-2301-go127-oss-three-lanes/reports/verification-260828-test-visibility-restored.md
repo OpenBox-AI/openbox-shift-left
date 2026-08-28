@@ -128,6 +128,64 @@ already chose to flush.
 
 Both mutations were reverted and the module re-verified green.
 
+## The socket run happened, and it found a defect in this change
+
+**2026-08-28, on the owner's machine** (bind available), the full suite ran over
+real TCP for the first time. **21 of 25 packages green, 4 tests failed — all four
+in tests this change had guarded with `RequireBind`.**
+
+That is the point of the exercise, and it also indicts the port: a guard that
+skips a test on a bind-denied host means the port to `memhttptest` was never
+exercised there either, so **the guard hid a defect the port introduced.**
+
+| failing test | symptom |
+|---|---|
+| `TestGatewayCommandActuallyCaptures` | relay returned **502**, want 200 |
+| `TestGatewayWithoutADIDStillRelays` | relay returned **502**, want 200 |
+| `TestSpooledGatewayEventReachesTheWire` | minted fallback `activity_id`; `http_status_code = 0` |
+| `TestHookRealtimeDelivery` | 0 events delivered, timed out |
+
+**One root cause, four symptoms.** A `memhttptest` server lives in the *test
+process's* address space, so anything not sharing that space cannot reach it:
+
+- `gatewaycapture_test.go`'s upstream is dialed by **`gateway.New`'s own
+  Transport**, which this very change deliberately left on the real dialer so
+  `DisableCompression`/HTTP2/idle-pool stay in the byte-identity path. It dialed a
+  synthetic `127.0.0.1:45xxx` with nothing listening → 502 → and every downstream
+  assertion about the captured exchange then failed for the wrong reason (the
+  minted id and the zero status read like broken capture rather than a dead
+  upstream).
+- `TestHookRealtimeDelivery` drives the compiled binary as a **child process**,
+  which cannot reach a pipe in the parent → 0 events → timeout.
+
+Fixed by reverting those four servers to real `httptest` listeners; they are
+`RequireBind`-guarded anyway, so a real socket is guaranteed present. The other
+three `memhttptest` servers in `main_test.go` serve in-process callers and are
+correct — checked individually rather than reverted wholesale. The third file in
+this class (`actions/.../cmd/openbox-git-action/main_test.go`) passed and was
+verified legitimate: its `exec.Command` calls are `git`, and its server serves an
+in-process verifier.
+
+**The rule now lives in `memhttptest`'s package doc**, because diligence did not
+catch it and structure has to: *if a test needs `RequireBind`, its servers almost
+certainly need to be real `httptest` servers too.*
+
+**This fix is NOT verified by its author.** All four tests skip on a bind-denied
+host, so the local suite going green says nothing about them. A re-run on a
+bind-capable machine is the only evidence.
+
+### What the run DID confirm
+
+- **`gateway`: all 81 tests pass over real sockets**, including the two that had
+  been skipped. The in-memory substitution was faithful for the module with the
+  most to lose — the byte-identity and streaming assertions hold identically on
+  both transports.
+- `client`, `client/acceptancetest`, `client/memhttptest`, `conformance`,
+  `decision`, `telemetry`, `provider`, every `cli/internal/*` (including
+  `gatewaycheck`'s previously-skipped tier tests and `telemetryemit`),
+  `adapters/codex`, `adapters/common/*`, and **`adapters/claude-code` including
+  its subprocess hook-binary test** — all green on real sockets.
+
 ## What this unblocks — measured, not inferred
 
 | | before | after |

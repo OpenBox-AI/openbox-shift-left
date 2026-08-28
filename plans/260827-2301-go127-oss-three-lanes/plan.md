@@ -120,7 +120,15 @@ about what egresses — no content field, gate or cap moves in phases 01–07.
 on 09 + 11, and 13's live half gates on both. Nothing in 11 is blocked: the
 goproxy spike is the next unblocked unit of work on the critical path.
 
-**The evidence ceiling, stated plainly.** Everything verified this session was
+**The socket run happened (2026-08-28, owner's machine).** 21 of 25 packages
+green over real TCP; `gateway`'s full 81 pass, so the in-memory substitution was
+faithful for the module with the most to lose. It also **found a defect the port
+introduced** — 4 tests whose servers must be reachable from another process or
+from `gateway`'s own Transport were pointed at in-memory pipes, and `RequireBind`
+had hidden that by skipping them. Fixed; **not re-verified by the author**, since
+those four skip on a bind-denied host. See the report.
+
+**The evidence ceiling, stated plainly.** Everything else verified this session was
 verified over an **in-memory transport**. That measures payload, framing, gate,
 redaction and cap; it measures nothing about bind, listen, TLS or the dialer.
 Owner-deferred 2026-08-28: **the branch is not pushed**, so no socket-based run of
