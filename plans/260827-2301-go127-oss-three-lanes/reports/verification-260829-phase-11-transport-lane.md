@@ -1,7 +1,7 @@
 # Phase 11 — the transport lane (`:proxy:`), implemented
 
 **Date:** 2026-08-29 · **Branch:** `feat/tool-content-capture` ·
-**Commits:** `0ac3f0d`, `3507c1e`, `a0089ca` ·
+**Commits:** `0ac3f0d`, `3507c1e`, `a0089ca`, `2be7902`, `c7fb3a1`, `4840a0d` ·
 **Host:** bind-DENIED sandbox (`listen tcp 127.0.0.1:0: operation not permitted`)
 
 ## Verdict
@@ -125,6 +125,9 @@ existence — deterministic, no DNS, no egress.
 
 ### Mutation drills — RUN, all red on deletion
 
+Eight, not six: two more defects were found by re-reading the code after the
+first six passed, and each got its own control and drill.
+
 | mutation | control that went red |
 |---|---|
 | unset `Lane` defaults to gateway | `TestAnUnsetLaneIsRefused…`, `TestEmitRefusesAnUnconfiguredLane` |
@@ -133,6 +136,8 @@ existence — deterministic, no DNS, no egress.
 | allowlist matches by suffix | `TestAllowlistRefusesEverythingElse` |
 | CA name constraint removed | `TestCAShapeIsWhatThePhaseSpecifies`, `TestServerConfigRefusesAHostOutside…` |
 | `h2` added to ALPN | `TestServerConfigNeverNegotiatesHTTP2`, the choreography test |
+| `New` drops its variadic options | `TestNewAppliesItsOptions` |
+| blind tunnel returns `goproxy.OkConnect` | `TestGoproxysBundledCAIsNeverReferenced` |
 
 ### Gates
 
@@ -146,7 +151,19 @@ existence — deterministic, no DNS, no egress.
 The declared-vs-verdict count is here because a "green" run that executed nothing
 is this plan's own most expensive lesson.
 
-## Two things the first draft got wrong
+## Four things the first draft got wrong
+
+**`New` accepted `opts ...Option` and dropped them.** A variadic option that is
+accepted and ignored is the worst kind of no-op: every call site reads as
+configured while the daemon runs unconfigured. Here it meant `--verbose` would
+log nothing, which is indistinguishable from a relay nothing reaches.
+
+**The blind-tunnel branch returned `goproxy.OkConnect`, which names goproxy's
+built-in CA** — whose private key ships in the library source. `ConnectAccept`
+never reads `TLSConfig`, so it was inert; inert is not safe, and a value naming a
+public-key CA on the interception path is one refactor from being used. This
+module now names it nowhere, and an AST guard holds that.
+
 
 **The redaction assertion was vacuous in one direction.** "The secret is absent"
 passes trivially if the header never reached the record at all. The header's
