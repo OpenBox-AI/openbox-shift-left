@@ -1,0 +1,11 @@
+{
+  "schema_version": "1.6",
+  "event_id": "evt-0020",
+  "event_type": "TurnStarted",
+  "openbox_session_id": "sess-codex-01",
+  "developer_did": "did:aip:7f3c9b2e-0000-5000-a000-000000000001",
+  "timestamp": "2026-08-28T09:14:00Z",
+  "tool": { "name": "codex", "kind": "shell" },
+  "session_rollup": true,
+  "metadata": { "provider": "codex", "usage_scope": "session" }
+}

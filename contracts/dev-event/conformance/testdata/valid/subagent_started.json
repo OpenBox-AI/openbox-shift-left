@@ -1,5 +1,5 @@
 {
-  "schema_version": "1.5",
+  "schema_version": "1.6",
   "event_id": "evt-0010",
   "event_type": "SubagentStarted",
   "openbox_session_id": "sess-abc123",

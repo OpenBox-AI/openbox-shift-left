@@ -645,10 +645,55 @@ control: it drives the real command into the real spool with no fake anywhere.
 **Status: implemented, unit- and conformance-verified, green under `-race` plus both
 cross-compiles — the testbed has NOT run.** `testbed/45-gateway.sh` is written and
 dormant; `MAPPING.md` §7 items 25–30 list what a live run must confirm. ADR-0021
-stays **DRAFT** deliberately: §§8–10 are empirical questions about a provider we do
-not control (does subscription OAuth follow `ANTHROPIC_BASE_URL`; what refusal shape
-Claude Code does not retry around; is an org matchable from an OAuth credential), and
-filling one in by inference is the overstatement this product exists to prevent.
+stays **DRAFT**, but as of 2026-08-28 only **§9** keeps it there: what refusal shape
+Claude Code does not retry around is still an empirical question about a provider we
+do not control, and filling it in by inference is the overstatement this product
+exists to prevent. §5 is **reversed** (OD2 — an in-path TLS relay is now a product
+decision), §8's coverage question is **answered by measurement**, and §10 is
+**decided** (detection-only for OAuth, fingerprint refusal for API keys) — all three
+by ADR-0022 below.
+
+**Two more model-call lanes, contracted but NOT BUILT** (ADR-0022, contract **v1.6**,
+2026-08-28 — phase 08 of plan 260827-2301, which gates 09–14). A local OTLP
+**telemetry** receiver (`otel_request_id`, `:otel:`) and a local in-path TLS
+**transport** relay (`proxy_request_id`, `:proxy:`) will cover what the gateway lane
+cannot: the desktop app and subscription-OAuth sessions, both measured capturable by
+the sibling lab repo (`openbox-logger` run `20260827T063932Z-225cac`, 97 calls, all
+OAuth, zero `x-api-key`). Right now the contract carries the discriminators and
+**nothing emits them** — `COVERAGE.md` says so explicitly, so a declared field is not
+read as a shipped lane. Four things not to re-litigate:
+
+- **The lane is a CLAIM, not a rank, and T3 is the weakest claim in the product.**
+  Telemetry is the governed tool reporting its own calls — suppressible by the thing
+  it observes. It is adopted because it is the only lane covering desktop/OAuth
+  today, and OD4 is the compensating control: telemetry silence on an otherwise-
+  active session is a **finding**, not an absence. Never average the three lanes into
+  "model calls are governed".
+- **Namespaces and the election are different controls and neither substitutes.**
+  Disjoint ids stop core's dedupe absorbing one lane as a duplicate of another
+  (silent loss of half the evidence); the election stops two lanes both emitting
+  (a doubled token count on every dashboard). Precedence: transport > gateway >
+  telemetry — in-path outranks client-asserted.
+- **The contract had been rejecting shapes the client already emitted, in two
+  places.** `session_rollup` was never a declared property while the object is
+  `additionalProperties:false`, so Codex's usage pair has failed its own contract
+  since v1.1; and `TurnStarted` required `turn_index` unconditionally while v1.5
+  repaired only the close — which rejected the ROLLUP's opening half, not the
+  gateway's, since `gatewayemit.EventFor` emits `TurnCompleted` only. The exactly-one rule now lives ONCE, in `$defs.turnProducer`, `$ref`'d by
+  both halves. **Restating a rule per branch is how the two halves drifted apart;
+  structure, not diligence, is what stops it recurring.**
+- **A CA on the developer's machine is the accepted cost** (ADR-0021 §5's risk
+  assessment was not disproven, its *alternative-coverage* clause was), and under
+  OD1(c) ~95% of model-call bodies truncate at 65,536 runes, so their tails exist
+  nowhere org-side. Both stated in ADR-0022's Consequences, neither softened.
+
+**Status: contract + ADRs only; no lane exists. Unit-verified, both mutation drills
+red-on-deletion, all 12 modules build/vet/cross-compile green — but C1–C41 DID NOT
+RUN.** The sandbox denied every TCP bind, so ~334 listener-dependent tests could not
+execute. Mitigating but not sufficient: the wire payload carries no `schema_version`
+key at all and no Go file hardcodes a version, so the bump should move zero outbound
+bytes — *should*, by inference. Re-run C1–C41 on a host that can bind before trusting
+the bump. `MAPPING.md` §7 items 31–33 list what a live stack must confirm.
 
 **Bounds have owners, and reusing one is a silent regression** (2026-08-26, the fix
 series around the gateway). Four of these shipped together and the pattern is one

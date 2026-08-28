@@ -1,0 +1,15 @@
+{
+  "schema_version": "1.6",
+  "event_id": "evt-0023",
+  "event_type": "TurnCompleted",
+  "openbox_session_id": "sess-abc123",
+  "developer_did": "did:aip:7f3c9b2e-0000-5000-a000-000000000001",
+  "timestamp": "2026-08-28T09:22:33Z",
+  "started_at": "2026-08-28T09:22:29Z",
+  "ended_at": "2026-08-28T09:22:33Z",
+  "tool": { "name": "claude-code", "kind": "shell" },
+  "proxy_request_id": "px-4f2a9c1e7b30",
+  "model": "claude-opus-4-8",
+  "tokens": { "input": 990, "output": 210, "total": 1200 },
+  "metadata": { "provider": "claude-code", "producer": "transport" }
+}

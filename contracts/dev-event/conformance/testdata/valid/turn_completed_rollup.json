@@ -1,0 +1,19 @@
+{
+  "schema_version": "1.6",
+  "event_id": "evt-0021",
+  "event_type": "TurnCompleted",
+  "openbox_session_id": "sess-codex-01",
+  "developer_did": "did:aip:7f3c9b2e-0000-5000-a000-000000000001",
+  "timestamp": "2026-08-28T09:14:00Z",
+  "ended_at": "2026-08-28T09:14:00Z",
+  "tool": { "name": "codex", "kind": "shell" },
+  "session_rollup": true,
+  "model": "gpt-5-codex",
+  "tokens": {
+    "input": 8102,
+    "output": 1440,
+    "cache_read": 41000,
+    "total": 50542
+  },
+  "metadata": { "provider": "codex", "usage_scope": "session" }
+}

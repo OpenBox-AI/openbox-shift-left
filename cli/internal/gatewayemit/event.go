@@ -39,9 +39,13 @@ type Identity struct {
 
 	// AgentID scopes the call to a subagent when the request named one. Optional:
 	// Claude Code sends it only when an agent context exists, unlike the session
-	// header. It cannot perturb the activity id — turnActivityIDFor returns from
-	// its ":gateway:" branch before it ever reaches the ":agent:" one
-	// (client/payload.go:355) — so this is attribution detail, not identity.
+	// header. It cannot perturb the activity id — client.turnActivityIDFor returns
+	// from its ":gateway:" branch before it ever reaches the ":agent:" one — so
+	// this is attribution detail, not identity. (Cited by symbol, not line: the
+	// branch moved when ADR-0022 added the ":proxy:" and ":otel:" lanes, and a
+	// line number is a citation that rots silently.) ":proxy:" now precedes
+	// ":gateway:", which does not affect this: a gateway-built event sets no
+	// proxy id.
 	AgentID string
 }
 

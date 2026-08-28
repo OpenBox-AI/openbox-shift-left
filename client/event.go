@@ -46,7 +46,18 @@ package client
 // GatewayRequestID on the event. Purely additive — the header pair is gated like
 // every other content field and the rest is structural, so a hook-only install
 // sends byte-identical payloads and every 1.4 event is a valid 1.5 event.
-const SchemaVersion = "1.5"
+//
+// 1.6 added two model-call producers — OtelRequestID (local telemetry receiver)
+// and ProxyRequestID (local transport relay) — and declared SessionRollup, which
+// the client had emitted since 1.1 while the schema rejected it. It also repaired
+// the contract so BOTH turn halves require exactly one producer discriminator:
+// TurnStarted had kept requiring turn_index unconditionally, and 1.5 repaired only
+// the close. What that actually broke is the Codex ROLLUP pair, whose opening half
+// carries no index — not the gateway, which emits no TurnStarted at all. It would
+// equally have broken any later lane emitting a pair (ADR-0022). Additive: no
+// existing field moved, no emitted bytes changed, and the shapes that begin to
+// validate are ones this client already sent.
+const SchemaVersion = "1.6"
 
 // EventType is a developer-runtime lifecycle event type. Each maps 1:1 onto
 // an openbox-core event_type string (INV-8) — see MAPPING.md §2.
@@ -446,17 +457,44 @@ type DevEvent struct {
 	// GatewayRequestID marks a turn event produced by the LOCAL GATEWAY rather
 	// than by a hook, and supplies that turn's id (ADR-0021).
 	//
-	// It exists to keep the two producers' activity ids in disjoint namespaces,
-	// which is the whole of requirement 8. The gateway and the hooks describe the
-	// same model turn from two vantage points; if they could mint the same
-	// activity_id, core's dedupe — keyed on
-	// (agent_id, workflow_id, run_id, activity_id, event_type) — would absorb one
-	// as a duplicate of the other and silently drop half the evidence.
+	// It exists to keep the producers' activity ids in disjoint namespaces, which
+	// is the whole of requirement 8. It was two producers when this field was
+	// added and is five since ADR-0022 (see OtelRequestID below); the argument did
+	// not change, only its arity. Each describes the same model turn from a
+	// different vantage point; if any two could mint the same activity_id, core's
+	// dedupe — keyed on (agent_id, workflow_id, run_id, activity_id, event_type)
+	// — would absorb one as a duplicate of the other and silently drop half the
+	// evidence.
 	//
 	// The id is opaque to core. It has to be derivable from fields that survive
 	// the spool, for the same reason TurnIndex does: a flush can happen long
 	// after the process that built the event exited.
 	GatewayRequestID string `json:"gateway_request_id,omitempty"`
+
+	// OtelRequestID marks a turn event produced by the LOCAL TELEMETRY RECEIVER
+	// — the OTLP intake the governed tool exports to — and supplies that turn's
+	// id (ADR-0022). ProxyRequestID does the same for the LOCAL TRANSPORT RELAY,
+	// which observes the call in path rather than being told about it.
+	//
+	// They exist for exactly the reason GatewayRequestID does, and the reason
+	// scales with each lane added: five producers now describe the same model
+	// turn from different vantage points, and core's dedupe key is
+	// (agent_id, workflow_id, run_id, activity_id, event_type). Two producers
+	// able to mint one id would have half their evidence absorbed as a duplicate
+	// — silently, since dedupe is the server behaving correctly. The namespaces
+	// make the ids disjoint; the producer election (one lane per session) makes
+	// the COUNT right. Both are needed: disjoint ids still double-report a turn.
+	//
+	// Both values originate upstream — a provider request id relayed through an
+	// OTLP payload, or read off a relayed response — and reach a stored key
+	// verbatim, so each producer bounds and charset-checks its own before
+	// setting it (gatewayemit.usableRequestID is the shape), and the contract
+	// states the same bound declaratively so a later lane inherits it.
+	//
+	// Structural identifiers (INV-2), never derived from prompt or body text,
+	// and therefore not content-gated: neither joins contentMetadataKeys.
+	OtelRequestID  string `json:"otel_request_id,omitempty"`
+	ProxyRequestID string `json:"proxy_request_id,omitempty"`
 
 	// WorkspaceID is a stable per-workspace/developer identity used as core's
 	// workflow_id so (workflow_id, run_id) is unique per session (MAPPING.md

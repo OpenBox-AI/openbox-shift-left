@@ -36,5 +36,6 @@ Every ADR not marked "reconstructed" in the table below is an original.
 | [0018](ADR-0018-dev-turn-content-carrier.md) | Tool status, and one wire span carrying the assistant turn text | Accepted (amends 0013 and 0014) |
 | [0019](ADR-0019-full-content-capture.md) | Full content capture, under one org gate | **Proposed** — authorizes nothing until accepted |
 | [0020](ADR-0020-prompt-gate-and-halt-session-stop.md) | The prompt gate, and HALT ends the session | Accepted (extends 0017) |
-| [0021](ADR-0021-openbox-local-gateway.md) | The OpenBox gateway is a per-developer LOCAL service | **Draft** — 3 probe answers open |
+| [0021](ADR-0021-openbox-local-gateway.md) | The OpenBox gateway is a per-developer LOCAL service | **Draft** — §9 open; §5 reversed, §8/§10 resolved by 0022 |
+| [0022](ADR-0022-native-telemetry-and-transport-lanes.md) | Two more model-call lanes, native and local: telemetry and transport | Accepted (reverses 0021 §5) |
 | [0023](ADR-0023-credential-guard-scope.md) | The credential guard bounds DIRECT requires only | Accepted (reduces the go.mod half added for 0021) |

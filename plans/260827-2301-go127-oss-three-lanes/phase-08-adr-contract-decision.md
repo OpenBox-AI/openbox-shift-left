@@ -13,7 +13,8 @@
 ## Overview
 
 - Date: 2026-08-27 · Priority: P1 · Effort: 4h
-- Implementation status: pending · Review status: pending
+- Implementation status: **done (2026-08-28)** · Review status: **reviewed** (advisory + 5 review angles; all substantive findings applied)
+- Report: [verification-260828-phase-08](reports/verification-260828-phase-08-adr-contract-decision.md)
 - Write the decisions before the code. Two new local services + two new producer
   namespaces = new components, which the repo rule says require an ADR.
 
@@ -113,15 +114,20 @@ presence, which is how the gateway branch avoids ambiguity today.
 
 ## Todo
 
-- [ ] confirm `oneOf[8]` shape in-file
-- [ ] ADR-0022 written and marked accepted (incl. adoptions + floor raise +
+- [x] confirm `oneOf[8]` shape in-file — 2 branches, as planned
+- [x] ADR-0022 written and marked accepted (incl. adoptions + floor raise +
       OD2-intact statement)
-- [ ] `DevEvent` fields + `turnActivityIDFor` branches
-- [ ] schema v1.6 (2 new branches + `session_rollup` repair)
-- [ ] pin tests extended (5 namespaces, no existing pin changed)
-- [ ] ADR-0021 §§5/8/10 amended
-- [ ] MAPPING.md + COVERAGE.md rows
-- [ ] `cd client && go test ./...` and conformance module green
+- [x] `DevEvent` fields + `turnActivityIDFor` branches
+- [x] schema v1.6 (2 new branches + `session_rollup` repair) — **and the
+      `TurnStarted` repair, beyond the written scope: it required `turn_index`
+      unconditionally, so the OPENING half of every non-hook turn also failed.
+      Both halves now `$ref` one `$defs.turnProducer`.**
+- [x] pin tests extended (6 shapes incl. subagent, no existing pin changed)
+- [x] ADR-0021 §§5/8/10 amended (§9 remains the only TBD)
+- [x] MAPPING.md + COVERAGE.md rows
+- [x] `client` and conformance modules green — **BUT C1-C41 did NOT run: this
+      sandbox denies every TCP bind. Acceptance criterion 2 is unverified until
+      a host that can bind re-runs them.**
 
 ## Success criteria
 

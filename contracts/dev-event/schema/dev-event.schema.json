@@ -1,10 +1,11 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://openbox.ai/schemas/dev-event/1.5/dev-event.schema.json",
+  "$id": "https://openbox.ai/schemas/dev-event/1.6/dev-event.schema.json",
   "title": "OpenBox Developer-Runtime Normalized Event",
   "description": "Tool-agnostic, versioned ADAPTER-FACING event contract for developer-runtime coding tools (Claude Code, Codex, Cursor). Every provider adapter maps its native payload onto this shape (SPI emit()). The OpenBox client then RE-EXPRESSES it onto the base SDK's unified wire model — WorkflowStarted/WorkflowCompleted/SignalReceived/ActivityStarted+hook_trigger — on POST /api/v1/governance/evaluate (see MAPPING.md; ADR-0004). This is NOT a verbatim event_type pass-through: the SL-1 EXT-core accept-list is retired (E7-S2). Adding a provider never changes this contract or the wire model (PRD FR-4, architecture §1b). Verified against openbox-core internal/content/{governance,session}.go and the base contract openbox-sdk-python/openbox_core/contracts/events.py (spikes S6, S8/E7-S0).",
-  "x-schema-version": "1.5",
+  "x-schema-version": "1.6",
   "x-changelog": {
+    "1.6": "Adds two model-call PRODUCERS and repairs a third (ADR-0022). `otel_request_id` names a turn observed by the local TELEMETRY receiver (`<session>:otel:<id>`) and `proxy_request_id` one observed by the local TRANSPORT relay (`<session>:proxy:<id>`), symmetric with `gateway_request_id`: one self-describing field per producer, so the client branches on a field's PRESENCE and never on a value. Both ids originate upstream and reach a stored key verbatim, so they carry their bound declaratively here (128 characters, printable ASCII, no whitespace) and a producer added later inherits it from the contract instead of having to remember it. `gateway_request_id` is retrofitted to the same bound in this version. It was first left alone on the theory that tightening a shipped field breaks it, and that theory was false: GatewayRequestID has exactly ONE production assignment path, already gated by gatewayemit.usableRequestID at the identical 128-character printable-ASCII rule, so the retrofit rejects nothing any gateway can emit. Three fields of one kind now sit at one contract depth. THE REPAIR: both turn branches now require EXACTLY ONE producer discriminator, where 1.5 required `turn_index` unconditionally on TurnStarted and one of two on TurnCompleted. That made Codex's session-rollup pair fail its own contract on both halves — `session_rollup` was not even a declared property, so `additionalProperties: false` rejected it a second time — and it is the same defect ADR-0021 records shipping for the gateway. `session_rollup` is therefore declared here for the first time. Exactly-one is the invariant every model-call lane rests on: the five producers describe the same kind of turn, and core's dedupe key includes activity_id, so a shared namespace loses half the evidence with no error and two discriminators on one event attribute it to a producer that did not observe it. Purely additive to what already validated: every 1.5 event that passed still passes once its version marker is restamped (`schema_version` is const-pinned per version, as in every prior bump), no existing bytes move \u2014 the wire payload carries no `schema_version` key at all \u2014 and the shapes that BEGIN to validate are ones the client was already emitting and the contract was rejecting.",
     "1.5": "Adds the LOCAL GATEWAY's span fields (ADR-0021): `span.request_headers`, `span.response_headers`, `span.http_method`, `span.http_url`, `span.http_status`, `span.credential_fingerprint`, and `gateway_request_id` on the event. The header pair is CONTENT and gated like every other content field (stripContent nils both), and it is the highest-risk class this client carries because the developer's live provider credential is on every model request \u2014 so capture redacts credential headers BY KEY NAME before the gate is even consulted, keeping the key and dropping the value. `credential_fingerprint` is deliberately NOT gated: it is one-way derived evidence for account binding, and letting a privacy setting remove it would let an org opt out of being identified; what is asserted instead is that the raw value is absent while the fingerprint is present. The `http_*` keys exist because core RECOMPUTES semantic_type per span and `isLLMCall` reads http.method plus an LLM domain in http.url, so a gateway span without them stores as something else and alignment silently dies; `http_url` carries host+path with the query dropped. `gateway_request_id` puts the gateway's activity ids in a namespace disjoint from the hook path's `<session>:turn:<n>`, because both producers describe the same turn and core's dedupe would otherwise absorb one as a duplicate of the other. Purely additive: every 1.4 event is a valid 1.5 event, and a hook-only install sends byte-identical payloads.",
     "1.4": "Adds `content.thinking` (ADR-0019 P3) — the model's extended-thinking text for a turn, its `thinking` content blocks concatenated in file order across the turn's transcript window, landing in the wire payload's `activity_output.thinking` on a TurnCompleted. This is the bump that AMENDS ADR-0014's transcript allowlist: the projection that reads token counts out of the session transcript now binds one free-form CONTENT string, where before it bound only an identifier, a timestamp and a bool. The transcript is the only source — no hook payload carries thinking, and Claude Code's own OTel export redacts it unconditionally with every content flag enabled, so capturing it goes further than the provider itself will. It rides activity_output rather than the assistant span (ADR-0018) deliberately: that span feeds core's goal-alignment extractor, which reads it as the assistant's REPLY, and chain-of-thought there would score every later turn's drift against the model's reasoning instead of its answer. Content-gated (INV-2) — absent unless the org opted in — redacted at source before attachment and capped at 64KB before signing. Purely additive: every 1.3 event is a valid 1.4 event, and an org with content capture off sends byte-identical payloads.",
     "1.3": "Adds `content.tool_output` (ADR-0019 P1) — what a tool PRODUCED, carried on ToolResult and landing in the wire payload's `activity_output.output`, the field core stores as the row's `output` and runs Guardrails stage 1 over. A failed call carries its own free-text error there instead of a result body; `status` already says which it is. This is the change that RETIRES SL3-SEC-3 (\"tool commands and file bodies never egress on observe events\"): tool input now also rides `content.tool_input` on the observe ToolCall, not only on a gated call's evaluation event. Also adds `content.signal_detail` for the PermissionDenied / APIError free text, which reaches `metadata` and deliberately never `signal_args`. Both are content-gated (INV-2) — absent unless the org opted in — redacted at source before attachment and capped at 64KB before signing. `content.tool_input` itself is not new to the wire (ADR-0017 attached it to gated calls); it was simply never listed here, and is documented in this bump. Purely additive: every 1.2 event is a valid 1.3 event.",
@@ -25,7 +26,7 @@
   "properties": {
     "schema_version": {
       "description": "Version of THIS event contract carried on the wire. Bumped on a breaking change to the normalized shape.",
-      "const": "1.5"
+      "const": "1.6"
     },
     "event_id": {
       "description": "Client-generated unique id for idempotent ingestion (INV-5). Retries/buffered flush reuse the same id so tokens/cost/lineage are never double-counted.",
@@ -97,8 +98,26 @@
       "enum": ["completed", "failed"]
     },
     "gateway_request_id": {
-      "description": "The LOCAL GATEWAY's id for one relayed model call (v1.5, ADR-0021): the provider's own Request-Id when it sent one, otherwise a locally minted `gw-` id. Its ONLY job is to put a gateway turn's activity_id in a namespace disjoint from the hook path's `<session>:turn:<n>` — both producers describe the same turn, so a shared namespace would let core's dedupe absorb one as a duplicate of the other and half the evidence would vanish with no error anywhere. Structural identifier (INV-2), bounded and charset-checked before it is trusted (gatewayemit.usableRequestID) because it originates upstream and reaches a stored key verbatim.",
-      "type": "string"
+      "description": "The LOCAL GATEWAY's id for one relayed model call (v1.5, ADR-0021): the provider's own Request-Id when it sent one, otherwise a locally minted `gw-` id. Its ONLY job is to put a gateway turn's activity_id in a namespace disjoint from the hook path's `<session>:turn:<n>` — both producers describe the same turn, so a shared namespace would let core's dedupe absorb one as a duplicate of the other and half the evidence would vanish with no error anywhere. Structural identifier (INV-2), bounded and charset-checked by its producer (gatewayemit.usableRequestID) because it originates upstream and reaches a stored key verbatim \u2014 and, since 1.6, declared here too, so all three producer ids sit at one contract depth. The retrofit rejects nothing a gateway can emit: GatewayRequestID has exactly one production assignment path, which returns either a usableRequestID-gated upstream id or a locally minted `gw-` id of ~35 printable-ASCII characters. gatewayemit.TestGatewayIDBoundMatchesTheContract asserts the declared bound and the producer's own agree on every boundary value, so the two cannot drift apart.",
+      "type": "string",
+      "maxLength": 128,
+      "pattern": "^[\\x21-\\x7e]+$"
+    },
+    "session_rollup": {
+      "description": "Marks a turn activity covering the WHOLE SESSION rather than one turn, giving it activity_id `<session>:usage:rollup`. It is Codex's granularity: its per-turn hook exists but is deliberately unwired (ADR-0014), so its usage arrives once, at SessionEnd. Declared for the first time in 1.6 — the client has emitted it since 1.1, but the schema never carried it, so with `additionalProperties: false` every Codex rollup pair failed its own contract. An explicit flag rather than 'a turn event with no turn_index' deliberately: inferring it from an absent index would turn a provider bug into a silent collapse of every turn in the session onto one activity_id. Structural identifier (INV-2), locally derived, never upstream text.",
+      "type": "boolean"
+    },
+    "otel_request_id": {
+      "description": "The local TELEMETRY receiver's id for one observed model call (v1.6, ADR-0022), putting that turn's activity_id at `<session>:otel:<id>`. Symmetric with `gateway_request_id` and `proxy_request_id`: one self-describing field per producer, so client.turnActivityIDFor branches on PRESENCE and never on a value. Structural identifier (INV-2), never derived from prompt or body text. The bound is declared rather than left to the producer, because the value originates upstream (the provider's own request id, relayed through an OTLP payload the receiver does not author) and reaches a stored key verbatim — the same exposure gatewayemit.usableRequestID guards imperatively.",
+      "type": "string",
+      "maxLength": 128,
+      "pattern": "^[\\x21-\\x7e]+$"
+    },
+    "proxy_request_id": {
+      "description": "The local TRANSPORT relay's id for one in-path model call (v1.6, ADR-0022), putting that turn's activity_id at `<session>:proxy:<id>`. Same shape and same reasoning as `otel_request_id`; the two lanes differ in vantage point, not in contract. Structural identifier (INV-2), never derived from prompt or body text, bounded and charset-checked declaratively because it too reaches a stored key verbatim.",
+      "type": "string",
+      "maxLength": 128,
+      "pattern": "^[\\x21-\\x7e]+$"
     },
     "metadata": {
       "description": "Additive per-type key/values. Lands verbatim in core payload's `metadata` (json.RawMessage). Never carries credentials/secrets (INV-1) or raw content (INV-2 — content lives only under `content`).",
@@ -171,27 +190,17 @@
     },
     {
       "title": "TurnStarted",
-      "description": "Opens one model turn. turn_index is required because the client derives the pair's activity_id from it; without it the pair cannot correlate. Carries no usage — the numbers are known only at the close.",
-      "required": ["event_type", "turn_index"],
-      "properties": { "event_type": { "const": "TurnStarted" } }
+      "description": "Opens one model turn. Carries no usage — the numbers are known only at the close. Names its producer with exactly one discriminator, exactly as TurnCompleted does: until v1.6 this branch required turn_index UNCONDITIONALLY, and v1.5 repaired only the closing branch. What that actually rejected is the Codex session-rollup pair's opening half — the gateway emits no TurnStarted at all, so it was never affected — and it would equally have rejected any later lane that emits a pair.",
+      "required": ["event_type"],
+      "properties": { "event_type": { "const": "TurnStarted" } },
+      "$ref": "#/$defs/turnProducer"
     },
     {
       "title": "TurnCompleted",
-      "description": "Closes one model turn and carries what it spent: tokens (all four counts the provider reports) and the model that spent them. Both are optional — a turn the projection could not measure is still a real turn, and zero-filling would claim it spent nothing. EXACTLY ONE activity-id discriminator is required, and the nested oneOf is what enforces it: a HOOK turn is identified by turn_index, a GATEWAY-observed model call by gateway_request_id (v1.5, ADR-0021). Requiring turn_index unconditionally made every gateway event fail its own contract while the version marker claimed to carry them. Requiring exactly one also states the property client/payload.go depends on — the two producers describe the same turn and must never ride one event, or core dedupe absorbs one as a duplicate of the other.",
+      "description": "Closes one model turn and carries what it spent: tokens (all four counts the provider reports) and the model that spent them. Both are optional — a turn the projection could not measure is still a real turn, and zero-filling would claim it spent nothing. Names its producer with exactly one discriminator, like TurnStarted; $defs.turnProducer is the shared rule and the reason both halves cannot drift apart again.",
       "required": ["event_type"],
       "properties": { "event_type": { "const": "TurnCompleted" } },
-      "oneOf": [
-        {
-          "title": "hook-observed turn",
-          "description": "The client derives the pair's activity_id from turn_index; without it the started/completed pair cannot correlate.",
-          "required": ["turn_index"]
-        },
-        {
-          "title": "gateway-observed model call",
-          "description": "turnActivityIDFor returns from its gateway branch before it ever reaches the turn_index branch, so a relayed call carries no index and needs none.",
-          "required": ["gateway_request_id"]
-        }
-      ]
+      "$ref": "#/$defs/turnProducer"
     },
     {
       "title": "SubagentStarted",
@@ -213,6 +222,38 @@
     }
   ],
   "$defs": {
+    "turnProducer": {
+      "title": "exactly one model-call producer",
+      "description": "A turn event names the producer that observed it with EXACTLY ONE discriminator field, and this oneOf is what enforces it. Five producers describe the same kind of thing — one model turn — and client.turnActivityIDFor derives a disjoint activity_id per producer by branching on which of these fields is PRESENT. Core's dedupe key includes activity_id, so two producers able to mint one id would have half their evidence absorbed as a duplicate with no error anywhere; two discriminators on ONE event is the same failure from the other side, attributing the turn to a producer that did not observe it. BOTH turn branches $ref this definition rather than restating it: v1.5 stated the rule on TurnCompleted alone and TurnStarted kept requiring turn_index unconditionally, so a pair-emitting producer had its opening half rejected while its closing half validated. Concretely that was the Codex rollup, the only pair-emitting non-hook producer at the time; the gateway emits no TurnStarted and was unaffected. A sixth producer is added HERE, once, and both halves accept it.",
+      "oneOf": [
+        {
+          "title": "hook-observed turn",
+          "description": "The provider's own hook, over the transcript cursor. activity_id <session>[:agent:<id>]:turn:<n> — the index is what pairs the two halves onto one row.",
+          "required": ["turn_index"]
+        },
+        {
+          "title": "gateway-observed model call",
+          "description": "The local gateway relay (v1.5, ADR-0021). activity_id <session>:gateway:<id>.",
+          "required": ["gateway_request_id"]
+        },
+        {
+          "title": "session usage rollup",
+          "description": "One usage activity for a whole session — Codex's granularity, since its per-turn hook is deliberately unwired (ADR-0014). activity_id <session>:usage:rollup. Declared in v1.6; the client has emitted this shape since v1.1 and the schema rejected all of it. The value is const TRUE, not merely present, because the client's derivation is truthiness-based (`if ev.SessionRollup`): presence alone would let `session_rollup:false` satisfy this branch, producing a contract-valid turn for which turnActivityIDFor mints NO id — and would simultaneously make it match this branch AND turn_index's, rejecting a legitimate hook turn that happened to marshal the false. Go's omitempty hides both from this client; the contract is adapter-facing and an adapter need not be Go.",
+          "required": ["session_rollup"],
+          "properties": { "session_rollup": { "const": true } }
+        },
+        {
+          "title": "telemetry-observed model call",
+          "description": "The local OTLP receiver (v1.6, ADR-0022). activity_id <session>:otel:<id>. Client-asserted evidence: the tool reports its own calls, so this lane is suppressible by the governed tool and claims T3, not T1.",
+          "required": ["otel_request_id"]
+        },
+        {
+          "title": "transport-observed model call",
+          "description": "The local in-path TLS relay (v1.6, ADR-0022, OD2). activity_id <session>:proxy:<id>. In-path, so it outranks the client-asserted lanes in the producer election.",
+          "required": ["proxy_request_id"]
+        }
+      ]
+    },
     "tool": {
       "description": "The developer tool/action that produced the event. `kind` is the provider-agnostic tool class; `mcp_server` is required when kind=mcp (enforced by the conformance harness).",
       "type": "object",

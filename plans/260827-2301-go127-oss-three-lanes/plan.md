@@ -102,7 +102,7 @@ about what egresses — no content field, gate or cap moves in phases 01–07.
 | 05 | [Credential-guard scope (ADR)](phase-05-credential-guard-scope.md) | 01 | **done** | 3h |
 | 06 | [gitleaks detection engine](phase-06-gitleaks-detection-engine.md) | 01, **05** | **done*** | 10h |
 | 07 | [Stage-A docs reconciliation](phase-07-consolidation-docs.md) | 02–06 | **done** | 3h |
-| 08 | [ADR-0022 + contract v1.6 + ADR-0021 amendments](phase-08-adr-contract-decision.md) | 01 (02 strongly recommended first) | pending | 4h |
+| 08 | [ADR-0022 + contract v1.6 + ADR-0021 amendments](phase-08-adr-contract-decision.md) | 01 (02 strongly recommended first) | **done\*\*** | 4h |
 | 09 | [Telemetry receiver daemon (otlpreceiver, loopback)](phase-09-telemetry-receiver-daemon.md) | 04, 08 | pending | 8h |
 | 10 | [Telemetry mappers → contract (`:otel:`)](phase-10-telemetry-mappers.md) | 09 | pending | 8h |
 | 11 | [Transport proxy as native service (`:proxy:`, goproxy)](phase-11-transport-proxy-service.md) | 04, 10 | pending | 15h |
@@ -115,6 +115,10 @@ machine that can bind a listener and run `launchctl` — see its report.
 Phase 06 is implemented and green, with **two open items**: the false-positive soak did not clear the
 enforce path (2 false positives from `generic-api-key`), and the mutation drills need a listener the
 sandbox denies. See its report.
+\*\* Phase 08 is implemented and its own tests are green with both mutation drills red-on-deletion,
+but **C1-C41 did not run** — the sandbox denies every TCP bind, so ~334 listener-dependent tests
+across 6 modules could not execute. Acceptance criterion 2 is UNVERIFIED until a host that can bind
+re-runs them. It also repaired `TurnStarted`, beyond the phase's written scope. See its report.
 
 **Order.** Phase 01 first and **alone** (02 may run beside it — the library
 builds at the old floor). Then 03/04/05 in any order; **05 must precede 06** —

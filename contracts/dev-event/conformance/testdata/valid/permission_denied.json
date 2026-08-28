@@ -1,5 +1,5 @@
 {
-  "schema_version": "1.5",
+  "schema_version": "1.6",
   "event_id": "evt-0011",
   "event_type": "PermissionDenied",
   "openbox_session_id": "sess-abc123",

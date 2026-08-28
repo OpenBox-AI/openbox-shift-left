@@ -348,12 +348,29 @@ func activityIDFor(ev DevEvent) string {
 // omitted rather than minting "<session>:turn:" for something that is not a turn.
 // TestTurnActivityIDIsPinned holds these bytes.
 func turnActivityIDFor(ev DevEvent) string {
-	// A gateway-observed turn takes its own namespace. ":gateway:" cannot collide
-	// with ":turn:<decimal>", with ":usage:rollup", or with a tool call's
-	// "cc-act-<32 hex>" — the last by containing ':' at all. That disjointness IS
-	// requirement 8, and TestGatewayAndHookTurnIDsNeverCollide holds it.
+	// Each lane that can observe a model turn takes its own namespace, and the
+	// separators are what keep them apart: ":proxy:", ":otel:" and ":gateway:"
+	// cannot collide with ":turn:<decimal>", with ":usage:rollup", or with a tool
+	// call's "cc-act-<32 hex>" — the last by containing ':' at all. That
+	// disjointness IS requirement 8, and TestEveryTurnProducerNamespaceIsDisjoint
+	// holds it across all five producers.
+	//
+	// The order is the producer election's precedence (ADR-0022 §3) — in-path
+	// relay, then gateway, then client-asserted telemetry — with the two
+	// non-elected shapes below it, since a rollup and a hook index are what remain
+	// when no relay observed the turn at all. A well-formed event carries exactly
+	// ONE of these (the contract's turnProducer oneOf rejects two), so the order
+	// only decides how a MALFORMED event is attributed; it is pinned anyway,
+	// because a silent reorder would re-attribute the same stream across a binary
+	// upgrade and core would split one turn across two rows with no error.
+	if ev.ProxyRequestID != "" {
+		return ev.SessionID + ":proxy:" + ev.ProxyRequestID
+	}
 	if ev.GatewayRequestID != "" {
 		return ev.SessionID + ":gateway:" + ev.GatewayRequestID
+	}
+	if ev.OtelRequestID != "" {
+		return ev.SessionID + ":otel:" + ev.OtelRequestID
 	}
 	if ev.SessionRollup {
 		return ev.SessionID + ":usage:rollup"

@@ -59,7 +59,16 @@ func TestSchemaEnumMatchesContract(t *testing.T) {
 var schemaKeywords = map[string]bool{
 	"$ref": true, "const": true, "enum": true, "type": true,
 	"minLength": true, "pattern": true, "minimum": true, "oneOf": true,
-	"required": true, "properties": true, "additionalProperties": true,
+	// maxLength bounds all three producer ids (ADR-0022) — gateway_request_id was
+	// retrofitted to the same bound in v1.6. Reviewed, per this
+	// list's purpose: it is a plain assertion needing no Compiler setting, and it
+	// counts CODE POINTS where the imperative precedent it mirrors
+	// (gatewayemit.printableASCII) counts bytes. Those agree here only because the
+	// same properties also carry a printable-ASCII `pattern`, which leaves no rune
+	// wider than one byte. A future field taking maxLength without that pattern
+	// does NOT inherit the equivalence.
+	"maxLength": true,
+	"required":  true, "properties": true, "additionalProperties": true,
 	"$defs": true, "x-content-gated": true, "format": true,
 }
 

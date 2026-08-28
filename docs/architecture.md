@@ -210,9 +210,18 @@ Being precise here is part of the product.
     and get retried around, or disables a capability for the rest of the session.
     ADR-0021 §9 holds that open, and phase 06 descopes to observe-only if no shape
     qualifies.
-  - **Whether subscription-OAuth traffic even follows `ANTHROPIC_BASE_URL` is
-    unresolved** (ADR-0021 §8). If it does not, this covers API-key/console orgs
-    only. Nobody has measured it, and this document will not guess.
+  - **Whether subscription-OAuth traffic follows `ANTHROPIC_BASE_URL` is still
+    unresolved for THIS lane** (ADR-0021 §8). If it does not, the gateway covers
+    API-key/console orgs only.
+    What *has* been measured (2026-08-27) is the bigger question behind it: the
+    terminal CLI follows the variable and **the desktop app does not**, and
+    subscription-OAuth model calls are capturable by two other means that need no
+    base-URL change at all — 97 calls observed, every one carrying OAuth
+    authorization and none carrying `x-api-key` (openbox-logger run
+    `20260827T063932Z-225cac`). [ADR-0022](adr/ADR-0022-native-telemetry-and-transport-lanes.md)
+    builds both lanes, so the open question is now about this lane's reach rather
+    than about a class of developer being ungoverned. **Neither lane exists yet**
+    — the contract carries their discriminators and nothing emits them.
   - **A compressed body is recorded as a marker, not as content.** The client's own
     `Accept-Encoding` is relayed verbatim, so a provider may legitimately answer
     `gzip` — and compressed bytes are opaque to the secret detector, which would

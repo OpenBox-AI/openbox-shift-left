@@ -55,3 +55,47 @@ func mustMarshalContractShape(t *testing.T, ev client.DevEvent) []byte {
 	}
 	return raw
 }
+
+// TestUsageRollupPairIsConformant closes the seam this adapter's rollup fell
+// through: MapUsageRollup does not go through Map, so TestEmittedEventsAreConformant
+// above never covered it, and NO turn shape from either adapter was ever validated
+// as real mapper output.
+//
+// That gap is exactly why the defect lived: contract v1.6 found that the schema
+// had rejected this pair since v1.1 — `session_rollup` was never a declared
+// property while the event object is `additionalProperties: false`, and BOTH turn
+// branches required an index the rollup does not have. Every session of Codex usage
+// has been failing its own contract, and nothing said so, because the only things
+// validated against the schema were hand-built.
+//
+// Hand-built fixtures prove the schema accepts a shape someone wrote by hand. This
+// proves it accepts the shape the adapter actually emits, which is the claim that
+// matters.
+func TestUsageRollupPairIsConformant(t *testing.T) {
+	m := testMapper()
+	in, out, cacheRead := 8102, 1440, 41000
+	m.Finops = &FinopsUsage{
+		Model:  "gpt-5.3-codex",
+		Tokens: &client.Tokens{Input: &in, Output: &out, CacheRead: &cacheRead},
+	}
+
+	started, completed, ok := m.MapUsageRollup(&HookEvent{SessionID: "th-1", Reason: "other"})
+	if !ok {
+		t.Fatal("MapUsageRollup ok=false — the rollup this test exists to validate was not produced")
+	}
+
+	for _, tc := range []struct {
+		name string
+		ev   client.DevEvent
+	}{
+		{"TurnStarted", started},
+		{"TurnCompleted", completed},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			raw := mustMarshalContractShape(t, tc.ev)
+			if err := conformance.ValidateDevEvent(raw, false); err != nil {
+				t.Fatalf("emitted rollup half is not SL-1 conformant:\n%s\nerror: %v", raw, err)
+			}
+		})
+	}
+}

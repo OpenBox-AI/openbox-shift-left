@@ -1,19 +1,29 @@
 # ADR-0021 — The OpenBox gateway is a per-developer LOCAL service
 
 Status: **DRAFT — not accepted. Substantially IMPLEMENTED.** Date: 2026-08-25.
+**Amended 2026-08-28** (§5 reversed, §8 completed, §10 decided) — see below.
 
 The status split is deliberate and is not a contradiction. Everything in §§1–7 is
-built and unit/conformance-verified; §§8–10 are still open, and they are the ones
-that decide who this tier COVERS, how a refusal RENDERS, and whether the OAuth
-account rule can refuse at all. Code that does not depend on those answers was
-worth building; accepting an ADR whose load-bearing empirical questions are
+built and unit/conformance-verified. Code that does not depend on the open answers
+was worth building; accepting an ADR whose load-bearing empirical questions are
 unanswered would not be. Nothing has run against a real stack.
 
-Three sections carry a `TBD(probe)` marker. **They are the load-bearing ones**,
-and this ADR must not be accepted while they are open: each is an empirical answer
-about a provider we do not control, and filling one in by inference is the
-overstatement failure this product exists to prevent. See
-[the probe runbook](../../plans/260825-0027-openbox-gateway-full-capture/probes/RUNBOOK.md).
+**Three sections carried a `TBD(probe)` marker; one still does.** As of
+2026-08-28:
+
+- **§5 is REVERSED** by owner ruling OD2 — an in-path TLS relay with a local CA is
+  now a product decision. [ADR-0022](ADR-0022-native-telemetry-and-transport-lanes.md) §2.
+- **§8's coverage question is ANSWERED** by measurement: the terminal CLI follows
+  `ANTHROPIC_BASE_URL`, the desktop app does not, and desktop/OAuth calls are
+  reachable by two other lanes instead. What remains open there is narrower and no
+  longer blocks coverage.
+- **§10 is DECIDED** — detection-only for OAuth, fingerprint refusal for API keys.
+- **§9 remains `TBD(probe)`** and is still load-bearing: the refusal shape is an
+  empirical answer about a provider we do not control, and filling it in by
+  inference is the overstatement failure this product exists to prevent. **This
+  ADR must not be accepted while §9 is open.**
+
+See [the probe runbook](../../plans/260825-0027-openbox-gateway-full-capture/probes/RUNBOOK.md).
 
 Requires a new service, so this ADR exists per `CLAUDE.md`'s rule. It reuses every
 existing table, endpoint and auth path: gateway spans ride the same
@@ -87,10 +97,39 @@ Forwarded bytes are byte-identical to received bytes. Redaction applies to the
 **captured copy** only. A gateway that rewrote the request would change what the
 model saw, which makes the capture a description of something that did not happen.
 
-### 5. No MITM proxy
+### 5. No MITM proxy — **REVERSED 2026-08-27 by owner ruling OD2**
 
-Unchanged from the earlier design: a CA that can forge any domain is a large new
-risk that buys no assurance a substituting gateway does not already have.
+> **This section no longer holds.** [ADR-0022](ADR-0022-native-telemetry-and-transport-lanes.md)
+> §2 adopts an in-path TLS relay with a local CA. What follows is the original
+> decision, kept for the record, and then what changed.
+
+Original: a CA that can forge any domain is a large new risk that buys no
+assurance a substituting gateway does not already have.
+
+**What changed is the second clause, not the first.** The risk did not shrink. The
+alternative's coverage turned out to be smaller than believed: §8 below measured
+that the substituting gateway covers the terminal CLI and **not** the desktop app,
+and cannot cover a subscription-OAuth session without colliding with §3. "No
+assurance a substituting gateway does not already have" was the load-bearing half
+of the sentence, and it was false for a large share of real use.
+
+The ruling (OD2, 2026-08-27) is that the transport lane is a **product**: a native
+Go TLS relay in the openbox daemon, launchd-managed, scoped to
+`api.anthropic.com`, CA generated per developer under `~/.openbox/`. **Not Docker,
+not mitmproxy** — those stay refused, and the `goproxy` library compiled into our
+own binary is not a reversal of that.
+
+Safeguards, which are what make the reversal acceptable rather than a
+capitulation: one upstream host only; a per-developer CA that is never shared;
+**one command installs everything and one command removes it all**, proven by a
+system-state diff (services unloaded, displaced settings restored from the
+activation record, CA and local captures deleted); and §4 stands unchanged —
+forwarding stays byte-identical, so the relay still describes what actually
+happened.
+
+The cost is stated in ADR-0022's Consequences and not softened here: a CA private
+key now exists on the developer's machine, under the same plaintext exposure
+ADR-0015 documents for every other credential this product holds.
 
 ### 6. Account binding is core POLICY, not gateway logic
 
@@ -156,10 +195,26 @@ unless the org holds an Anthropic API key it can put in `inferenceGatewayApiKey`
 For a subscription developer the two designs are incompatible, and closing that is
 a product decision, not a wiring detail.
 
-**Still open:** whether subscription OAuth follows a changed base URL *for the
-CLI*. The three captured calls above prove the CLI relays and is captured; they do
-not prove which auth mode was in play. If OAuth does not redirect, the tier covers
-API-key/console orgs only, and that sentence still has to be written here.
+**Still open for THIS lane:** whether subscription OAuth follows a changed base
+URL *for the CLI*. The three captured calls above prove the CLI relays and is
+captured; they do not prove which auth mode was in play. If OAuth does not
+redirect, this tier covers API-key/console orgs only.
+
+**What is no longer open is the COVERAGE question this section was really
+asking** (2026-08-27). The sibling lab repo `openbox-logger`, run
+`20260827T063932Z-225cac` on a live desktop session, captured **97 `/v1/messages`
+calls, every one carrying an OAuth `authorization` header and none carrying
+`x-api-key`** — through two lanes that need no base-URL change at all: the tool's
+own enhanced-telemetry OTel export, and an in-path TLS relay, both reached through
+the `env` block of `~/.claude/settings.json`. So desktop and subscription-OAuth
+model calls **are** observable; they are simply not observable *by this lane*.
+
+[ADR-0022](ADR-0022-native-telemetry-and-transport-lanes.md) builds both, which
+changes what the open question costs. It is now a question about **this** lane's
+reach, not about whether a whole class of developer is ungoverned — and answering
+it either way no longer blocks coverage. The honest statement of this lane,
+unchanged: `openbox init --gateway` governs model calls made by the terminal CLI,
+governs none made by the desktop app, and reports nothing about the difference.
 
 Sources: P0 and its 2026-08-26 amendment,
 `plans/reports/probe-260825-baseurl-auth-coverage.md`; the client measurement above
@@ -189,14 +244,33 @@ observe-only and prevention stays in the hooks.
 
 Source: probe A, `plans/reports/probe-260825-halt-rendering.md`.
 
-### 10. `TBD(probe)` — the OAuth account rule
+### 10. The OAuth account rule — **branch named 2026-08-27**
 
-Whether an org identifier is matchable from an OAuth credential is **unresolved**.
-Two branches, both acceptable: matchable ⇒ the account rule can refuse; not
-matchable ⇒ it ships **detection-only** for OAuth while API-key fingerprints still
-refuse. The branch must be named in this ADR, not left to the reader.
+Whether an org identifier is matchable from an OAuth credential was left with two
+branches: matchable ⇒ the account rule can refuse; not matchable ⇒ it ships
+**detection-only** for OAuth while API-key fingerprints still refuse. As required,
+the branch is named rather than left to the reader.
 
-Source: P1, same report as §8.
+**The branch taken is detection-only for OAuth.** An org *is* identifiable —
+`organization.id` and `user.email` ride every enhanced-telemetry event (evidence
+run `20260827T063932Z-225cac`) — but that identity is **asserted by the tool being
+governed**, not observed independently. Attribution of that kind is evidence, not
+proof, and it can refuse nothing on its own: a client that misreports its org
+would be refused on the strength of its own claim, and a client that reports
+nothing would be refused on nothing at all.
+
+So:
+
+- **OAuth** → **detection-tier binding from asserted telemetry.** The account rule
+  observes and reports; it does not refuse.
+- **API key** → the credential **fingerprint** still supports refusal, unchanged
+  by this.
+
+This resolves §10 as a decision. It does not resolve §9 (the refusal shape), which
+remains a `TBD(probe)`: naming who can be refused says nothing about what a
+refusal must look like on the wire.
+
+Source: P1, same report as §8; ADR-0022 §8.
 
 ## Implementation record (2026-08-25) — what §§1–7 became
 

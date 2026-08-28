@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+
+	"github.com/openbox-ai/openbox-shift-left/contracts/dev-event/conformance"
 )
 
 // The turn activity_id is the second identity in this package a refactor must not
@@ -347,4 +349,265 @@ func keysOf(m map[string]any) []string {
 		out = append(out, k)
 	}
 	return out
+}
+
+const (
+	pinOtelActivityID  = "sess-pin-0001:otel:req_011CSxKq9mNp"
+	pinProxyActivityID = "sess-pin-0001:proxy:px-4f2a9c1e7b30"
+)
+
+// TestNewLaneActivityIDsArePinned holds the wire bytes for the two lanes ADR-0022
+// adds. Same reason the shapes above are pinned, and the same instruction: if one
+// of these fails, the derivation moved and the change is wrong, not the fixture.
+func TestNewLaneActivityIDsArePinned(t *testing.T) {
+	otel := pinTurnEvent()
+	otel.TurnIndex = nil
+	otel.OtelRequestID = "req_011CSxKq9mNp"
+	if got := turnActivityIDFor(otel); got != pinOtelActivityID {
+		t.Errorf("telemetry turn id = %q, want %q", got, pinOtelActivityID)
+	}
+
+	proxy := pinTurnEvent()
+	proxy.TurnIndex = nil
+	proxy.ProxyRequestID = "px-4f2a9c1e7b30"
+	if got := turnActivityIDFor(proxy); got != pinProxyActivityID {
+		t.Errorf("transport turn id = %q, want %q", got, pinProxyActivityID)
+	}
+}
+
+// turnLanes is the ONE list of model-call producers these tests share.
+//
+// It was two hand-maintained lists — one for disjointness, one for precedence —
+// which is the same shape of unchecked enumeration that
+// conformance.turnDiscriminators has, except that one is bound to the schema by
+// TestDiscriminatorListMatchesTheSchema. Building the safeguard for one list and
+// not these was an inconsistency: a sixth lane added to the schema and to
+// turnActivityIDFor, but not here, would leave both tests green while silently
+// covering one producer fewer. TestTurnLanesMatchTheContract binds this list to
+// the contract so that cannot happen.
+//
+// Order IS the precedence ladder (ADR-0022 §3): in-path relay, then gateway, then
+// client-asserted telemetry, then the two non-elected shapes.
+var turnLanes = []struct {
+	name string
+	// field is the contract's discriminator property for this lane.
+	field string
+	// set puts this lane's discriminator on an event.
+	set func(*DevEvent)
+	// clear removes it, so the precedence test can peel one rung at a time.
+	clear func(*DevEvent)
+	// marker is the namespace separator that keeps this lane's ids disjoint.
+	marker string
+	// id is the exact activity_id for the fixture below. Pinned bytes.
+	id string
+}{
+	{
+		name: "transport", field: "proxy_request_id",
+		set:    func(e *DevEvent) { e.ProxyRequestID = "px-4f2a9c1e7b30" },
+		clear:  func(e *DevEvent) { e.ProxyRequestID = "" },
+		marker: ":proxy:", id: "sess-1:proxy:px-4f2a9c1e7b30",
+	},
+	{
+		name: "gateway", field: "gateway_request_id",
+		set:    func(e *DevEvent) { e.GatewayRequestID = "req-abc123" },
+		clear:  func(e *DevEvent) { e.GatewayRequestID = "" },
+		marker: ":gateway:", id: "sess-1:gateway:req-abc123",
+	},
+	{
+		name: "telemetry", field: "otel_request_id",
+		set:    func(e *DevEvent) { e.OtelRequestID = "req_011CSxKq9mNp" },
+		clear:  func(e *DevEvent) { e.OtelRequestID = "" },
+		marker: ":otel:", id: "sess-1:otel:req_011CSxKq9mNp",
+	},
+	{
+		name: "rollup", field: "session_rollup",
+		set:    func(e *DevEvent) { e.SessionRollup = true },
+		clear:  func(e *DevEvent) { e.SessionRollup = false },
+		marker: ":usage:rollup", id: "sess-1:usage:rollup",
+	},
+	{
+		name: "hook", field: "turn_index",
+		set:    func(e *DevEvent) { i := 3; e.TurnIndex = &i },
+		clear:  func(e *DevEvent) { e.TurnIndex = nil },
+		marker: ":turn:", id: "sess-1:turn:3",
+	},
+}
+
+func laneEvent() DevEvent {
+	return DevEvent{SessionID: "sess-1", EventType: EventTurnCompleted}
+}
+
+// TestTurnLanesMatchTheContract binds the list above to the schema, the way
+// conformance.TestDiscriminatorListMatchesTheSchema binds its own.
+//
+// Without it, both tests below rest on a comment. A sixth lane reaching the
+// contract and turnActivityIDFor but not this list would leave them passing while
+// proving less than they did — "stays green and covers one fewer" is precisely the
+// failure this contract has already shipped twice.
+func TestTurnLanesMatchTheContract(t *testing.T) {
+	schema, err := conformance.LoadSchema()
+	if err != nil {
+		t.Fatalf("load schema: %v", err)
+	}
+	defs, _ := schema["$defs"].(map[string]any)
+	producer, _ := defs["turnProducer"].(map[string]any)
+	branches, _ := producer["oneOf"].([]any)
+	if len(branches) == 0 {
+		t.Fatal("$defs.turnProducer has no branches — the exactly-one rule is gone")
+	}
+
+	inContract := map[string]bool{}
+	for _, b := range branches {
+		m, _ := b.(map[string]any)
+		req, _ := m["required"].([]any)
+		for _, r := range req {
+			f, _ := r.(string)
+			inContract[f] = true
+		}
+	}
+	inTests := map[string]bool{}
+	for _, l := range turnLanes {
+		inTests[l.field] = true
+	}
+
+	for f := range inContract {
+		if !inTests[f] {
+			t.Errorf("contract declares producer %q but turnLanes omits it — "+
+				"its disjointness and precedence are unasserted", f)
+		}
+	}
+	for f := range inTests {
+		if !inContract[f] {
+			t.Errorf("turnLanes has %q but no contract branch requires it — "+
+				"these tests assert a producer the contract does not have", f)
+		}
+	}
+}
+
+// TestEveryTurnProducerNamespaceIsDisjoint is requirement 8, widened from two
+// producers to all of them.
+//
+// Each lane can observe THE SAME model turn from a different vantage point.
+// Core's dedupe key includes activity_id, so any two that could mint one id
+// would have half their evidence absorbed as a duplicate — no error, no log
+// line, just missing rows. The disjointness is structural (each lane owns a
+// separator no other lane writes), and this is what keeps it that way.
+func TestEveryTurnProducerNamespaceIsDisjoint(t *testing.T) {
+	seen := map[string]string{}
+	check := func(name, id, marker string) {
+		t.Helper()
+		if id == "" {
+			t.Errorf("%s lane minted no activity_id; its turns would never correlate onto a row", name)
+			return
+		}
+		if !strings.Contains(id, marker) {
+			t.Errorf("%s lane id %q lost its %q namespace marker — disjointness is by separator, not by luck", name, id, marker)
+		}
+		if prev, dup := seen[id]; dup {
+			t.Errorf("%s and %s lanes share activity_id %q; core dedupe would absorb one and half the evidence would vanish", prev, name, id)
+		}
+		seen[id] = name
+	}
+
+	for _, l := range turnLanes {
+		ev := laneEvent()
+		l.set(&ev)
+		got := turnActivityIDFor(ev)
+		if got != l.id {
+			t.Errorf("%s lane id = %q, want %q", l.name, got, l.id)
+		}
+		check(l.name, got, l.marker)
+	}
+
+	// A subagent's turn is a PARTITION of the hook lane, not a sixth producer:
+	// same discriminator, extra scoping. It belongs here (its ids must stay
+	// disjoint too) and not in turnLanes (it is not a contract branch).
+	sub := laneEvent()
+	idx := 3
+	sub.TurnIndex = &idx
+	sub.AgentID = "agt-77"
+	check("subagent", turnActivityIDFor(sub), ":agent:")
+
+	// And none of them can collide with a tool call's id, which contains no colon.
+	tool := activityIDFor(pinEvent())
+	if strings.ContainsRune(tool, ':') {
+		t.Fatalf("tool activity id %q gained a colon; the separation argument above no longer holds", tool)
+	}
+	if name, dup := seen[tool]; dup {
+		t.Errorf("%s lane id collides with a tool call id %q", name, tool)
+	}
+}
+
+// The derivation reads exactly one discriminator, so an event carrying two is
+// malformed — the contract's turnProducer oneOf rejects it before it can be sent.
+// This pins what the client does anyway, rung by rung.
+//
+// Pinning only the TOP of the ladder would let any two rungs beneath it be
+// swapped silently. That matters because activity_id is this product's event
+// identity: a reorder shipped in a binary upgrade would re-attribute the same
+// stream mid-session, and core would split one turn across two rows with no error
+// anywhere. The contract makes the order unreachable for a conformant producer,
+// so this pins defence in depth — but it turns a reorder into a decision.
+func TestTurnProducerPrecedenceIsPinned(t *testing.T) {
+	// Each rung gets its OWN event, built from scratch: every lane at or below
+	// this rung set, everything above it absent. Peeling one shared event instead
+	// would make a single wrong closure corrupt every rung after it — five
+	// failures, none naming the one-line mistake.
+	for i, want := range turnLanes {
+		t.Run(want.name, func(t *testing.T) {
+			ev := laneEvent()
+			for _, l := range turnLanes[i:] {
+				l.set(&ev)
+			}
+			if got := turnActivityIDFor(ev); got != want.id {
+				t.Errorf("with %s the highest lane set: id = %q, want %q", want.name, got, want.id)
+			}
+		})
+	}
+
+	// No discriminator at all: no id, rather than a namespace prefix with nothing
+	// after it. An id like "sess-1:turn:" would collapse every such turn onto one row.
+	t.Run("none", func(t *testing.T) {
+		if got := turnActivityIDFor(laneEvent()); got != "" {
+			t.Errorf("id = %q with no discriminator set, want %q", got, "")
+		}
+	})
+}
+
+// A turn with no producer discriminator must get NO span.
+//
+// turnSpanID hashes turnActivityIDFor's output, and that function returns "" for
+// an event naming no producer. Hashing "" yields sha256("turnspan\x1f") — one
+// fixed value, independent of session and turn. Core dedupes spans on
+// (span_id, stage) scoped by session, so a second such turn in one session is
+// absorbed as a duplicate of the first and its assistant text is dropped with no
+// error anywhere: the exact silent-collision failure the producer namespaces
+// exist to prevent, arriving through the one path that bypasses them.
+//
+// Unreachable from the shipped adapters, which always set an index — but the
+// discriminator set just went from two producers to five, nothing client-side
+// enforces the contract's exactly-one rule (ValidateDevEvent is test-only), and
+// the event already carries no activity_id, so a span for it addresses nothing
+// that exists.
+func TestTurnWithNoProducerGetsNoSpan(t *testing.T) {
+	ev := laneEvent()
+	ev.Content = &Content{Output: "the assistant's reply"}
+
+	if got := turnActivityIDFor(ev); got != "" {
+		t.Fatalf("fixture is wrong: it names a producer (%q), so it cannot exercise the empty-id path", got)
+	}
+	if span := turnAssistantSpan(ev); span != nil {
+		t.Errorf("a turn naming no producer got span_id %q; every such turn in a session "+
+			"shares that id and core's dedupe drops all but the first", span.SpanID)
+	}
+
+	// The same turn WITH a producer still gets its span — the guard must not
+	// suppress the shape this span exists for.
+	for _, l := range turnLanes {
+		withLane := ev
+		l.set(&withLane)
+		if turnAssistantSpan(withLane) == nil {
+			t.Errorf("%s turn carrying assistant text got no span", l.name)
+		}
+	}
 }

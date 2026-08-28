@@ -146,6 +146,17 @@ func turnAssistantSpan(ev DevEvent) *wireSpan {
 	if ev.Content == nil || ev.Content.Output == "" {
 		return nil
 	}
+	// A turn naming no producer gets no span. turnSpanID hashes the activity id,
+	// and turnActivityIDFor returns "" for such an event — so every one of them
+	// would share sha256("turnspan\x1f"), one fixed value across all sessions and
+	// turns. Core dedupes spans on (span_id, stage), so the second would be
+	// absorbed as a duplicate of the first and its assistant text dropped with no
+	// error: the silent collision the producer namespaces exist to prevent,
+	// through the one path that does not consult them. The event already carries
+	// no activity_id, so the span would address nothing in any case.
+	if turnActivityIDFor(ev) == "" {
+		return nil
+	}
 	// Cap the TEXT before wrapping it, so the 64KB limit bounds the assistant's
 	// words rather than the JSON envelope around them. Capping after would let
 	// the wrapper's own bytes eat into the budget and, worse, could truncate

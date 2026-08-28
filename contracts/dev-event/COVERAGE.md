@@ -30,6 +30,21 @@ terminal and one in the desktop app, send *entirely different* model-call eviden
 the first sends whole request and response bodies, the second sends none and nothing
 reports the gap.
 
+**Two more non-adapter producers are contracted but NOT YET BUILT**
+([ADR-0022](../../docs/adr/ADR-0022-native-telemetry-and-transport-lanes.md), v1.6).
+A local OTLP **telemetry** receiver (`:otel:`) and a local in-path TLS **transport**
+relay (`:proxy:`) will cover the desktop and subscription-OAuth calls the gateway
+lane cannot reach. As of 2026-08-28 the contract carries their discriminators and
+nothing emits them — phases 09–13 of plan `260827-2301-go127-oss-three-lanes`. Until
+then the paragraph above is still the whole truth about model-call coverage, and
+this note exists so a reader of the contract does not mistake a declared field for a
+shipped lane.
+
+When they do ship, the claims are **not** interchangeable and this document must not
+flatten them: transport and gateway observe the bytes in path; telemetry is the
+governed tool reporting its own calls, so it is suppressible by the thing it
+observes. A lane's presence in a row will say which one produced the evidence.
+
 ## 1. Lifecycle coverage matrix
 
 | Contract type | Claude Code *(shipped)* | Cursor *(survey only — SL-8 unbuilt)* | Codex *(shipped)* |
