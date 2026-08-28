@@ -56,7 +56,9 @@ reintroduce that: if something is provider-agnostic it goes in `hookflow` or
 | `client/` | core client: payload, AIP signing, verdicts |
 | `decision/` | local secret detection + redaction — all that survives ADR-0017 |
 | `gateway/` | the local model-call relay: byte-identical forward, capture, the gate (ADR-0021) |
-| `cli/` | the `openbox` CLI, incl. `cli/internal/approver` (ADR-0012), `cli/internal/prompt` (masked input) and the gateway's install/inspect/emit halves (`gatewayservice`, `gatewaycheck`, `gatewayemit`) |
+| `telemetry/` | the local OTLP receiver — the `:otel:` lane's intake (ADR-0022) |
+| `transport/` | the in-path CONNECT/TLS relay — the `:proxy:` lane. Allowlist, CA, and the hijack that hands an intercepted connection to `gateway` (ADR-0022) |
+| `cli/` | the `openbox` CLI, incl. `cli/internal/approver` (ADR-0012), `cli/internal/prompt` (masked input) and the gateway's install/inspect/emit halves (`gatewayservice`, `gatewaycheck`, `gatewayemit` — the last of which serves BOTH in-path lanes via its `Lane`) |
 | `actions/openbox-git-action/` | commit→deploy lineage for CI |
 | `contracts/dev-event/` | event schema, wire mapping, conformance |
 | `testbed/` | the mock-free end-to-end suite (`docs/testbed/e2e.md`) |
@@ -665,6 +667,73 @@ decision), §8's coverage question is **answered by measurement**, and §10 is
 **decided** (detection-only for OAuth, fingerprint refusal for API keys) — all three
 by ADR-0022 below.
 
+**The transport lane is BUILT — capture live, refusal dormant, install not yet**
+(ADR-0022's `:proxy:`, 2026-08-29). `openbox transport` is a loopback CONNECT
+proxy: goproxy parses the CONNECT, an allowlisted host is TLS-terminated with a
+project CA, and the connection is served by the **existing** `gateway.Gateway`.
+Everything else is blind-tunnelled. Eight things worth not re-litigating:
+
+- **The relay is REUSED, not forked, and that decided the design.** The plan
+  specified a hand-built streaming tee on goproxy's MITM response hooks. That
+  would have been a second implementation of byte-identical forwarding,
+  per-chunk SSE, the fingerprint-before-redact ordering and the 64KB cap — on
+  the enforcement path, which is where this repo's copy-paste original sin
+  already happened once. So goproxy owns CONNECT, the blind tunnel and the
+  plain-HTTP forward; `transport/` owns the allowlist, the CA and ~30 lines that
+  turn one hijacked connection into an `http.Server`; **gateway owns every byte
+  and every piece of evidence.** Consequence: the credential-path surface is
+  SMALLER than planned — `transport/`'s guard is `{goproxy, gateway}` and
+  nothing there imports `client` or `decision`.
+- **THE SELF-LOOP, which is the defect nobody had named.** `gateway.New` and
+  `NewIdentityProxy` both set `Proxy: http.ProxyFromEnvironment`. Activation puts
+  `HTTPS_PROXY=http://127.0.0.1:8790` into the CLIENT's environment — and a
+  daemon that INHERITS it dials itself: CONNECT → hijack → serve → `Do()` →
+  `HTTPS_PROXY` → CONNECT, until sockets run out. `transport.New` clears the six
+  variables, **in the constructor**, because `net/http` caches the environment
+  behind a `sync.Once` on first use and a later clear does nothing at all.
+  Consequence owned rather than hidden: this lane does not chain through a
+  corporate proxy.
+- **The emitter is REQUIRED at construction.** That is the `WithCapture` gap made
+  unreachable instead of tested around — there is no state where this lane relays
+  without recording.
+- **An unset `Lane` is REFUSED, never defaulted.** `gatewayemit` serves both
+  in-path lanes now. A transport emitter falling back to `:gateway:` would have
+  its events absorbed by core's dedupe against the real gateway lane's, and half
+  the evidence would vanish with no error. The `eventID` hash deliberately does
+  NOT include the lane name: adding it would change every shipped gateway event's
+  idempotency key, after which core double-counts a redelivery.
+- **The CA is name-constrained to the intercepted host at GENERATION**, so a
+  leaked key cannot mint a usable certificate for anything else — the control
+  that survives the trust boundary ADR-0015 already concedes. Leaves are minted
+  with stdlib x509, not `goproxy.TLSConfigFromCA`, because that helper clones a
+  `defaultTLSConfig` carrying `InsecureSkipVerify: true` (certs.go:27) and no
+  ALPN of ours. ALPN is **http/1.1 only**: the relay behind it speaks HTTP/1.1,
+  so a negotiated h2 fails every request in a way that looks like a network
+  fault.
+- **Host matching folds ASCII ONLY, and that is a security property.**
+  `strings.ToLower` folds Unicode and some non-ASCII runes fold INTO ASCII
+  letters — U+212A KELVIN SIGN lowercases to `k` — so a Unicode-aware fold can
+  make a non-provider host compare equal to the provider's. The confusable
+  fixtures are BUILT in code: a homoglyph written as a literal is invisible to a
+  reviewer, which is the attack.
+- **`ConnState` closing the one-shot listener is load-bearing.** Without it
+  `http.Server.Serve` blocks forever in its second `Accept` — a leaked goroutine
+  and fd **per tunnel**, and Claude Code opens tunnels continuously.
+- **A fourth victim of the `generic-api-key` false positive**: a literal API-key
+  fixture in a test file became `${OPENBOX_REDACTED_AI_API_KEY}` on write, after
+  which the assertion searched for a string the request no longer carried. Derive
+  such fixtures in code.
+
+**Status: implemented, unit-verified with six mutation drills RUN and red on
+deletion, 14 modules green under `-race` plus both cross-compiles — no socket,
+no stack.** The control test drives a real CONNECT → real TLS → real
+`gateway.Gateway` → real emitter → real spool file with no fake in it, over a
+`net.Pipe` with a refused upstream. So **no response body has ever traversed
+this lane**, byte-identity on the CONNECT path is unrun, and `GOWORK=off` for
+`transport/` is unverifiable on the dev host (x/net v0.50.0 absent from the
+module cache). Install, doctor and env activation are phase 12's, alongside
+telemetry's — deferred rather than hand-copied a third time.
+
 **Two more model-call lanes, contracted but NOT BUILT** (ADR-0022, contract **v1.6**,
 2026-08-28 — phase 08 of plan 260827-2301, which gates 09–14). A local OTLP
 **telemetry** receiver (`otel_request_id`, `:otel:`) and a local in-path TLS
@@ -796,7 +865,9 @@ pattern:
   `thinking` were missing, so an adapter writing either straight into metadata routed
   around the gate.
 
-Next: the Cursor adapter; policy template packs. The language floor is
+Next: phase 12 — one-command install/removal and the producer election, which
+owns the service lifecycle for BOTH new lanes. Then the Cursor adapter; policy
+template packs. The language floor is
 `go 1.27.0` across `go.work` and all twelve modules, so every dependency resolves
 at latest with no pin. **Dependencies are module-scoped now, not "one for the
 repo"**: `cli` has `golang.org/x/term` (masked input, ADR-0015) and

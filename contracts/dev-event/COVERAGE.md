@@ -30,18 +30,32 @@ terminal and one in the desktop app, send *entirely different* model-call eviden
 the first sends whole request and response bodies, the second sends none and nothing
 reports the gap.
 
-**Two more non-adapter producers are contracted but NOT YET BUILT**
+**Two more non-adapter producers, at different stages**
 ([ADR-0022](../../docs/adr/ADR-0022-native-telemetry-and-transport-lanes.md), v1.6).
 A local OTLP **telemetry** receiver (`:otel:`) and a local in-path TLS **transport**
-relay (`:proxy:`) will cover the desktop and subscription-OAuth calls the gateway
-lane cannot reach. As of 2026-08-28 the contract carries their discriminators and
-nothing emits them — phases 09–13 of plan `260827-2301-go127-oss-three-lanes`. Until
-then the paragraph above is still the whole truth about model-call coverage, and
-this note exists so a reader of the contract does not mistake a declared field for a
-shipped lane.
+relay (`:proxy:`) are meant to cover the desktop and subscription-OAuth calls the
+gateway lane cannot reach — phases 09–13 of plan
+`260827-2301-go127-oss-three-lanes`.
 
-When they do ship, the claims are **not** interchangeable and this document must not
-flatten them: transport and gateway observe the bytes in path; telemetry is the
+As of **2026-08-29** neither is reachable by a developer, and the two are unbuilt in
+different ways:
+
+- **`:proxy:` (transport)** — the relay and its capture are BUILT and verified: a
+  CONNECT to the allowlisted host is TLS-terminated with a project CA and served by
+  the existing gateway relay, and the evidence reaches the spool. It is not
+  INSTALLABLE — the service unit, `doctor` block and proxy-env activation are
+  phase 12 — so no developer machine emits it. Two further limits: no response body
+  has traversed it yet (its control test's upstream always refuses), and refusal is
+  dormant, so this lane OBSERVES and never stops a call.
+- **`:otel:` (telemetry)** — the receiver and mapper exist and `openbox telemetry`
+  calls them, but emission is suppressed unless elected, and the same install half
+  is phase 12's.
+
+Until a lane is installable, the paragraph above is still the whole truth about
+model-call coverage. This note exists so a reader of the contract does not mistake a
+declared field — or a built one — for a lane that is actually producing evidence.
+
+The claims are **not** interchangeable and this document must not flatten them: transport and gateway observe the bytes in path; telemetry is the
 governed tool reporting its own calls, so it is suppressible by the thing it
 observes. A lane's presence in a row will say which one produced the evidence.
 
