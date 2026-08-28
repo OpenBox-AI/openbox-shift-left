@@ -2,6 +2,7 @@ package transport
 
 import (
 	"bufio"
+	"context"
 	"errors"
 	"io"
 	"net"
@@ -275,17 +276,22 @@ func TestGoproxyStreamsPerChunk(t *testing.T) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.WriteHeader(http.StatusOK)
 		fl, _ := w.(http.Flusher)
-		// Flush the HEADERS before waiting on the first gate. Without this the
-		// test deadlocks itself and looks exactly like a buffering relay: the
-		// client's Do() blocks until response headers arrive, the headers do not
-		// leave until something flushes, and the first release only happens after
-		// Do() returns. That is a test bug wearing the costume of the gate's
-		// stop-and-report branch, and it cost one already.
-		if fl != nil {
-			fl.Flush()
-		}
+		// CHUNK 0 IS UNGATED, and that is load-bearing rather than tidy.
+		//
+		// The client's Do() cannot return until response HEADERS arrive, and
+		// goproxy cannot push headers to the client until it has body bytes to
+		// write — Go's http.Server buffers WriteHeader. So if chunk 0 waited on a
+		// release the test only performs after Do() returns, the test deadlocks
+		// ITSELF and looks exactly like the gate's stop-and-report branch. That
+		// misdiagnosis cost two runs: flushing the headers before the gate was not
+		// enough, because a flush has nothing to carry until the first write.
+		//
+		// Chunks 1..n-1 stay gated, each released only after the previous has been
+		// read, which is what actually measures per-chunk delivery.
 		for i := 0; i < chunks; i++ {
-			<-release[i]
+			if i > 0 {
+				<-release[i]
+			}
 			_, _ = io.WriteString(w, "data: chunk-"+string(rune('0'+i))+"\n\n")
 			if fl != nil {
 				fl.Flush()
@@ -294,11 +300,16 @@ func TestGoproxyStreamsPerChunk(t *testing.T) {
 	})
 	proxy := serveProxy(t, NewIdentityProxy())
 
-	req, _ := http.NewRequest(http.MethodGet, upstream.URL+"/v1/messages", nil)
+	// The whole exchange is bounded: a buffering relay stalls in Do(), before any
+	// read, so a per-read deadline cannot see it. Generous enough that a slow
+	// machine cannot produce a false stop-and-report.
+	reqCtx, cancelReq := context.WithTimeout(context.Background(), streamDeadline)
+	defer cancelReq()
+	req, _ := http.NewRequestWithContext(reqCtx, http.MethodGet, upstream.URL+"/v1/messages", nil)
 	req.Header.Set("Accept", "text/event-stream")
 	resp, err := proxyClient(t, proxy.URL).Do(req)
 	if err != nil {
-		t.Fatalf("through proxy: %v", err)
+		t.Fatalf("through proxy: %v (a relay that buffers the whole body stalls here rather than returning headers)", err)
 	}
 	defer resp.Body.Close()
 
@@ -309,7 +320,9 @@ func TestGoproxyStreamsPerChunk(t *testing.T) {
 	// passing with a wrong shape.
 	br := bufio.NewReader(resp.Body)
 	for i := 0; i < chunks; i++ {
-		close(release[i])
+		if i > 0 {
+			close(release[i])
+		}
 		line, err := readLineBy(t, br, chunkDeadline)
 		if err != nil {
 			t.Fatalf("chunk %d: %v", i, err)
@@ -343,17 +356,22 @@ func TestStreamingTeeDoesNotBuffer(t *testing.T) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.WriteHeader(http.StatusOK)
 		fl, _ := w.(http.Flusher)
-		// Flush the HEADERS before waiting on the first gate. Without this the
-		// test deadlocks itself and looks exactly like a buffering relay: the
-		// client's Do() blocks until response headers arrive, the headers do not
-		// leave until something flushes, and the first release only happens after
-		// Do() returns. That is a test bug wearing the costume of the gate's
-		// stop-and-report branch, and it cost one already.
-		if fl != nil {
-			fl.Flush()
-		}
+		// CHUNK 0 IS UNGATED, and that is load-bearing rather than tidy.
+		//
+		// The client's Do() cannot return until response HEADERS arrive, and
+		// goproxy cannot push headers to the client until it has body bytes to
+		// write — Go's http.Server buffers WriteHeader. So if chunk 0 waited on a
+		// release the test only performs after Do() returns, the test deadlocks
+		// ITSELF and looks exactly like the gate's stop-and-report branch. That
+		// misdiagnosis cost two runs: flushing the headers before the gate was not
+		// enough, because a flush has nothing to carry until the first write.
+		//
+		// Chunks 1..n-1 stay gated, each released only after the previous has been
+		// read, which is what actually measures per-chunk delivery.
 		for i := 0; i < chunks; i++ {
-			<-release[i]
+			if i > 0 {
+				<-release[i]
+			}
 			_, _ = io.WriteString(w, "data: t"+string(rune('0'+i))+"\n")
 			if fl != nil {
 				fl.Flush()
@@ -379,16 +397,20 @@ func TestStreamingTeeDoesNotBuffer(t *testing.T) {
 	})
 	proxy := serveProxy(t, p)
 
-	req, _ := http.NewRequest(http.MethodGet, upstream.URL+"/v1/messages", nil)
+	reqCtx, cancelReq := context.WithTimeout(context.Background(), streamDeadline)
+	defer cancelReq()
+	req, _ := http.NewRequestWithContext(reqCtx, http.MethodGet, upstream.URL+"/v1/messages", nil)
 	resp, err := proxyClient(t, proxy.URL).Do(req)
 	if err != nil {
-		t.Fatalf("through proxy: %v", err)
+		t.Fatalf("through proxy: %v (a relay that buffers the whole body stalls here rather than returning headers)", err)
 	}
 	defer resp.Body.Close()
 
 	br := bufio.NewReader(resp.Body)
 	for i := 0; i < chunks; i++ {
-		close(release[i])
+		if i > 0 {
+			close(release[i])
+		}
 		line, err := readLineBy(t, br, chunkDeadline)
 		if err != nil {
 			t.Fatalf("chunk %d: %v — the tee is buffering the stream", i, err)
@@ -445,3 +467,6 @@ func readLineBy(t *testing.T, br *bufio.Reader, within time.Duration) (string, e
 // chunkDeadline bounds one chunk. Generous: the assertion is about buffering,
 // not latency, so a slow machine must not produce a false stop-and-report.
 const chunkDeadline = 10 * time.Second
+
+// streamDeadline bounds a whole streaming exchange, headers included.
+const streamDeadline = 20 * time.Second

@@ -89,30 +89,41 @@ func TestTelemetryCommandActuallyRecords(t *testing.T) {
 
 	ev := readSpooledEvent(t, spoolDir, session)
 
-	if got := ev["event_type"]; got != "ActivityCompleted" {
-		t.Errorf("event_type = %v, want ActivityCompleted", got)
+	// These are DevEvent field names, deliberately. The spool holds the struct;
+	// its translation into activity_type / activity_output / the :otel:
+	// activity_id happens in buildPayload on the way out, and the sentinel test
+	// asserts that on real POSTed bytes. Asserting wire names here is what made
+	// this test claim an empty spool while the lane worked.
+	if got := ev["event_type"]; got != "TurnCompleted" {
+		t.Errorf("event_type = %v, want TurnCompleted", got)
 	}
-	if got := ev["activity_type"]; got != "llm_completion" {
-		t.Errorf("activity_type = %v, want llm_completion", got)
+	if got := ev["otel_request_id"]; got != requestID {
+		t.Errorf("otel_request_id = %v, want %q — without it turnActivityIDFor returns an EMPTY activity_id", got, requestID)
 	}
-	if got, _ := ev["activity_id"].(string); !strings.Contains(got, ":otel:"+requestID) {
-		t.Errorf("activity_id = %q, want the :otel: namespace and the provider's request id", got)
+	if got := ev["model"]; got != "claude-opus-4-8" {
+		t.Errorf("model = %v — core's aggregation key", got)
 	}
-	out, _ := ev["activity_output"].(map[string]any)
-	if out == nil {
-		t.Fatalf("no activity_output on the spooled event: %v", ev)
+	tokens, _ := ev["tokens"].(map[string]any)
+	if tokens == nil {
+		t.Fatalf("no tokens on the spooled event, which is this lane's whole payload: %v", ev)
 	}
-	if got := out["model"]; got != "claude-opus-4-8" {
-		t.Errorf("activity_output.model = %v", got)
-	}
-	usage, _ := out["usage"].(map[string]any)
-	if usage == nil {
-		t.Fatalf("no activity_output.usage: %v", out)
-	}
-	for _, k := range []string{"input_tokens", "output_tokens", "cache_read_input_tokens", "cache_creation_input_tokens"} {
-		if _, ok := usage[k]; !ok {
-			t.Errorf("activity_output.usage is missing %s: %v", k, usage)
+	for k, want := range map[string]float64{
+		"input": 2, "output": 173, "cache_read": 90485, "cache_creation_input": 333,
+	} {
+		got, ok := tokens[k].(float64)
+		if !ok {
+			t.Errorf("tokens.%s absent: %v", k, tokens)
+			continue
 		}
+		if got != want {
+			t.Errorf("tokens.%s = %v, want %v", k, got, want)
+		}
+	}
+	span, _ := ev["span"].(map[string]any)
+	if span == nil {
+		t.Error("no span — core cannot classify the turn as llm_completion without one")
+	} else if got := span["semantic_type"]; got != "llm_completion" {
+		t.Errorf("span.semantic_type = %v", got)
 	}
 	// stderr must SAY it recorded. launchd sends stdio to /dev/null unless told
 	// otherwise, so this line is the only signal a reachable-but-silent lane has.
@@ -264,10 +275,12 @@ func readSpooledEvent(t *testing.T, spoolDir, session string) map[string]any {
 			if err := json.Unmarshal([]byte(line), &ev); err != nil {
 				continue
 			}
-			if s, _ := ev["session_id"].(string); s == session {
-				return ev
-			}
-			if s, _ := ev["run_id"].(string); s == session {
+			// openbox_session_id, NOT session_id. The spool stores the
+			// pre-wire DevEvent; `session_id`/`run_id` are names buildPayload
+			// mints on the way out. Reading the struct with the wire's
+			// vocabulary is what made this test report an empty spool while the
+			// lane was working correctly.
+			if s, _ := ev["openbox_session_id"].(string); s == session {
 				return ev
 			}
 		}
