@@ -45,7 +45,7 @@ var sampleAt = time.Date(2026, 8, 26, 12, 0, 0, 0, time.UTC)
 // picked TurnStarted, or invented a type, would spool and POST successfully
 // while carrying none of the evidence it exists to carry.
 func TestEventTypeIsTurnCompleted(t *testing.T) {
-	ev := EventFor(sampleIdentity(), "req-1", sampleAt, sampleCaptured())
+	ev := mustEvent(LaneGateway, sampleIdentity(), "req-1", sampleAt, sampleCaptured())
 	if ev.EventType != client.EventTurnCompleted {
 		t.Fatalf("EventType = %q, want %q — no other type attaches the span", ev.EventType, client.EventTurnCompleted)
 	}
@@ -56,7 +56,7 @@ func TestEventTypeIsTurnCompleted(t *testing.T) {
 // through to the hook path's TurnIndex branch, and with no index it returns "" —
 // so the event would carry no activity_id at all.
 func TestGatewayRequestIDIsSet(t *testing.T) {
-	ev := EventFor(sampleIdentity(), "req-1", sampleAt, sampleCaptured())
+	ev := mustEvent(LaneGateway, sampleIdentity(), "req-1", sampleAt, sampleCaptured())
 	if ev.GatewayRequestID != "req-1" {
 		t.Errorf("GatewayRequestID = %q, want the relayed call's id", ev.GatewayRequestID)
 	}
@@ -66,15 +66,15 @@ func TestGatewayRequestIDIsSet(t *testing.T) {
 // different process long after the daemon that wrote it exited, and a retry must
 // present the SAME idempotency key or core counts the call twice.
 func TestEventIDIsDeterministicPerCall(t *testing.T) {
-	a := EventFor(sampleIdentity(), "req-1", sampleAt, sampleCaptured())
-	b := EventFor(sampleIdentity(), "req-1", sampleAt, sampleCaptured())
+	a := mustEvent(LaneGateway, sampleIdentity(), "req-1", sampleAt, sampleCaptured())
+	b := mustEvent(LaneGateway, sampleIdentity(), "req-1", sampleAt, sampleCaptured())
 	if a.EventID == "" {
 		t.Fatal("EventID empty — client.Emit rejects the event outright")
 	}
 	if a.EventID != b.EventID {
 		t.Errorf("EventID not stable: %q vs %q", a.EventID, b.EventID)
 	}
-	c := EventFor(sampleIdentity(), "req-2", sampleAt, sampleCaptured())
+	c := mustEvent(LaneGateway, sampleIdentity(), "req-2", sampleAt, sampleCaptured())
 	if a.EventID == c.EventID {
 		t.Error("two distinct calls share one idempotency key — the second would be absorbed as a duplicate")
 	}
@@ -83,7 +83,7 @@ func TestEventIDIsDeterministicPerCall(t *testing.T) {
 // TestSessionAndDIDAreCarried — client.Emit rejects an empty SessionID, and the
 // DID is what core groups the session under.
 func TestSessionAndDIDAreCarried(t *testing.T) {
-	ev := EventFor(sampleIdentity(), "req-1", sampleAt, sampleCaptured())
+	ev := mustEvent(LaneGateway, sampleIdentity(), "req-1", sampleAt, sampleCaptured())
 	if ev.SessionID != "sess-1" {
 		t.Errorf("SessionID = %q", ev.SessionID)
 	}
@@ -98,7 +98,7 @@ func TestSessionAndDIDAreCarried(t *testing.T) {
 // asserting the wire. So this drives a REAL client at a real HTTP server and
 // reads the bytes that were actually POSTed.
 func TestObservedExchangeReachesTheWire(t *testing.T) {
-	body := postThroughRealClient(t, EventFor(sampleIdentity(), "req-1", sampleAt, sampleCaptured()), true)
+	body := postThroughRealClient(t, mustEvent(LaneGateway, sampleIdentity(), "req-1", sampleAt, sampleCaptured()), true)
 
 	var p struct {
 		ActivityID string `json:"activity_id"`
@@ -154,7 +154,7 @@ func TestObservedExchangeReachesTheWire(t *testing.T) {
 func TestCaptureOffStripsBodiesAndHeadersButKeepsTheFingerprint(t *testing.T) {
 	c := sampleCaptured()
 	c.RequestHeaders = map[string]string{"Authorization": "[redacted]", "Anthropic-Version": "2023-06-01"}
-	raw := postThroughRealClient(t, EventFor(sampleIdentity(), "req-1", sampleAt, c), false)
+	raw := postThroughRealClient(t, mustEvent(LaneGateway, sampleIdentity(), "req-1", sampleAt, c), false)
 	got := string(raw)
 
 	if strings.Contains(got, "claude-opus-4") || strings.Contains(got, `"role":"assistant"`) {

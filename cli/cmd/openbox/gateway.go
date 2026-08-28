@@ -87,6 +87,7 @@ func (a *app) runGateway(args []string) int {
 		spool := hookflow.Spool{Dir: devconfig.SpoolDir(gatewaySpoolSubdir)}
 		trigger := hookflow.RealtimeTrigger{Spool: spool, Provider: gatewaySpoolProvider}
 		em := &gatewayemit.Emitter{
+			Lane:  gatewayemit.LaneGateway,
 			Spool: spool,
 			DID:   devconfig.ResolveDIDOrEmpty,
 			Warn:  logger.Printf,

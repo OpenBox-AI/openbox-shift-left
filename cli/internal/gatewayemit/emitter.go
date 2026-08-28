@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/openbox-ai/openbox-shift-left/adapters/common/hookflow"
+	"github.com/openbox-ai/openbox-shift-left/client"
 	"github.com/openbox-ai/openbox-shift-left/gateway"
 )
 
@@ -47,6 +48,12 @@ const upstreamRequestHeader = "Request-Id"
 // stating: this process never touches the signing key or the obx_ credential —
 // the flusher does. The relay daemon does zero secret I/O.
 type Emitter struct {
+	// Lane names the producer this emitter speaks for. REQUIRED — there is no
+	// default, deliberately. See Lane in event.go: an emitter that fell back to
+	// the gateway lane would file transport evidence under `:gateway:`, where
+	// core's dedupe absorbs it against the real gateway lane's event.
+	Lane Lane
+
 	Spool hookflow.Spool
 
 	// DID resolves the developer identity, and it is a FUNCTION because this is a
@@ -134,6 +141,18 @@ func (e *Emitter) Emit(ctx context.Context, c gateway.Captured) {
 	// not something to invent here — `status` is tool-only by client.statusFor.
 	// Recorded in phase 06 rather than left to be rediscovered.
 
+	// The lane check comes FIRST, before the DID and the session id, because it is
+	// the only one that is a programming error rather than a machine-state
+	// question: the other two describe a machine that is not set up yet, this one
+	// describes an emitter that was constructed wrong. Reporting it first stops a
+	// misconfigured lane being diagnosed as a missing credential.
+	if !e.Lane.valid() {
+		e.vlog("  capture: DROPPED — this emitter has no lane configured")
+		e.warn("openbox: a model-call emitter was constructed with no lane, so captured calls " +
+			"cannot be attributed to a producer and are being DROPPED. This is a wiring defect, not a setting.")
+		return
+	}
+
 	did := e.developerDID()
 	if did == "" {
 		e.vlog("  capture: SKIPPED — no developer DID configured (run `openbox auth`)")
@@ -199,13 +218,21 @@ func (e *Emitter) Emit(ctx context.Context, c gateway.Captured) {
 		// attribution is much cheaper than losing the evidence.
 		AgentID: usableAgentID(c.RequestHeaders[agentHeader]),
 	}
-	ev := EventFor(id, e.requestID(c), e.now(), c)
+	ev, err := EventFor(e.Lane, id, e.requestID(c), e.now(), c)
+	if err != nil {
+		// Unreachable while the guard at the top of Emit stands, and kept anyway:
+		// the two checks are one line apart today and could be separated by an
+		// edit, and the failure they prevent is silent.
+		e.vlog("  capture: DROPPED — %v", err)
+		e.warn("openbox: dropped a captured call: %v", err)
+		return
+	}
 	if err := e.Spool.Append(ev); err != nil {
 		e.vlog("  capture: DROPPED — %v", err)
 		e.warn("openbox gateway: dropped event %s: %v", ev.EventID, err)
 		return
 	}
-	e.vlog("  capture: recorded session=%s activity=%s:gateway:%s", sessionID, sessionID, ev.GatewayRequestID)
+	e.vlog("  capture: recorded session=%s activity=%s:%s:%s", sessionID, sessionID, e.Lane.Name, requestIDOf(ev))
 	if e.Flush != nil {
 		e.Flush(sessionID)
 	}
@@ -251,7 +278,22 @@ func (e *Emitter) requestID(c gateway.Captured) string {
 		return GatewayIDPrefix + "seq-" + strconv.FormatUint(atomic.AddUint64(&e.fallbackSeq, 1), 36) +
 			"-" + strconv.FormatInt(e.now().UTC().UnixNano(), 36)
 	}
-	return GatewayIDPrefix + hex.EncodeToString(b[:])
+	return e.Lane.IDPrefix + hex.EncodeToString(b[:])
+}
+
+// requestIDOf reads back whichever discriminator the lane wrote, for the verbose
+// line. Reading it off the built event rather than re-deriving it means the log
+// says what was actually recorded — including, if a lane were ever wired wrong,
+// the empty string.
+func requestIDOf(ev client.DevEvent) string {
+	switch {
+	case ev.ProxyRequestID != "":
+		return ev.ProxyRequestID
+	case ev.GatewayRequestID != "":
+		return ev.GatewayRequestID
+	default:
+		return ""
+	}
 }
 
 func (e *Emitter) now() time.Time {

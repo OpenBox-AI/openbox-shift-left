@@ -18,6 +18,21 @@ import (
 // the scan that allowlist protects (plan 260827-2301, validation round 2).
 var allowedDirectRequires = map[string]bool{
 	"github.com/elazarl/goproxy": true,
+
+	// gateway, because this lane REUSES the relay rather than forking it. Phase 11
+	// planned a second capture implementation here — a "streaming tee" onto
+	// goproxy's response hooks — and that would have been a copy of
+	// byte-identical forwarding, per-chunk SSE, the fingerprint-before-redact
+	// ordering and the 64KB cap, on the enforcement path. This repo's core rule is
+	// that the engine used to be copy-pasted and the copies drifted.
+	//
+	// So the credential-path surface here is SMALLER than the phase anticipated,
+	// not larger: the phase expected {goproxy, gateway, client, decision}, and
+	// serving the existing gateway.Gateway over the hijacked connection means
+	// nothing in this module imports client or decision at all. Those two remain
+	// bounded at gateway's own guard, which still allows exactly them and fails on
+	// a third.
+	"github.com/openbox-ai/openbox-shift-left/gateway": true,
 }
 
 // TestOnlyReviewedDirectRequires bounds what this module can execute.

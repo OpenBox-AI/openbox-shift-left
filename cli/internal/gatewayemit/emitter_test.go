@@ -24,6 +24,7 @@ func newTestEmitter(t *testing.T) (*Emitter, hookflow.Spool, *bytes.Buffer) {
 	spool := hookflow.Spool{Dir: filepath.Join(dir, "cc-spool")}
 	var warnings bytes.Buffer
 	em := &Emitter{
+		Lane:  LaneGateway,
 		Spool: spool,
 		DID:   func() string { return testDID },
 		Warn:  func(format string, args ...any) { fmt.Fprintf(&warnings, format, args...) },
@@ -190,8 +191,8 @@ func TestAgentIDIsBoundWhenPresent(t *testing.T) {
 // branch, and the gateway namespace must win regardless — otherwise binding an
 // optional attribution field would silently move requirement 8's boundary.
 func TestAgentIDNeverPerturbsTheActivityID(t *testing.T) {
-	base := EventFor(Identity{SessionID: "s", DeveloperDID: testDID}, "req-1", sampleAt, sampleCaptured())
-	withAgent := EventFor(Identity{SessionID: "s", DeveloperDID: testDID, AgentID: "agent-7"}, "req-1", sampleAt, sampleCaptured())
+	base := mustEvent(LaneGateway, Identity{SessionID: "s", DeveloperDID: testDID}, "req-1", sampleAt, sampleCaptured())
+	withAgent := mustEvent(LaneGateway, Identity{SessionID: "s", DeveloperDID: testDID, AgentID: "agent-7"}, "req-1", sampleAt, sampleCaptured())
 	if base.GatewayRequestID != withAgent.GatewayRequestID {
 		t.Fatal("fixture drift")
 	}
@@ -338,6 +339,7 @@ func TestUnusableSessionHeaderIsRefusedAndReported(t *testing.T) {
 			spool := hookflow.Spool{Dir: t.TempDir()}
 			var warned int
 			e := &Emitter{
+				Lane:  LaneGateway,
 				Spool: spool,
 				DID:   func() string { return "did:aip:x" },
 				Warn:  func(string, ...any) { warned++ },
@@ -364,6 +366,7 @@ func TestUnusableSessionHeaderIsRefusedAndReported(t *testing.T) {
 func TestAUsableSessionHeaderStillSpools(t *testing.T) {
 	spool := hookflow.Spool{Dir: t.TempDir()}
 	e := &Emitter{
+		Lane:  LaneGateway,
 		Spool: spool,
 		DID:   func() string { return "did:aip:x" },
 		Warn:  func(string, ...any) {},
