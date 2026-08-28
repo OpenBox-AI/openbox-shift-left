@@ -3,7 +3,8 @@ package gitaction
 import (
 	"context"
 	"net/http"
-	"net/http/httptest"
+
+	"github.com/openbox-ai/openbox-shift-left/client/memhttptest"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -28,7 +29,7 @@ func testPusherDID(t *testing.T) string {
 // last request (to assert the path, query, and X-API-Key), and serves a
 // canned status/body for GET /agent/<agentID>/sessions.
 type mockBackend struct {
-	srv     *httptest.Server
+	srv     *memhttptest.Server
 	calls   int32
 	lastReq *http.Request
 
@@ -40,7 +41,7 @@ type mockBackend struct {
 func newMockBackend(t *testing.T, status int, body string) *mockBackend {
 	t.Helper()
 	m := &mockBackend{status: status, body: body}
-	m.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	m.srv = memhttptest.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		atomic.AddInt32(&m.calls, 1)
 		m.lastReq = r.Clone(context.Background())
 		if m.delay > 0 {
@@ -192,7 +193,7 @@ func TestAPIVerifier_DoesNotForwardKeyOnCrossHostRedirect(t *testing.T) {
 	// disabled the 302 surfaces as a non-2xx → fail-closed, and the foreign host is
 	// never contacted (so the key never leaves the configured origin).
 	var foreignHits int32
-	foreign := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	foreign := memhttptest.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		atomic.AddInt32(&foreignHits, 1)
 		if r.Header.Get("X-API-Key") != "" {
 			t.Errorf("org key leaked to foreign host via redirect: %q", r.Header.Get("X-API-Key"))
@@ -202,7 +203,7 @@ func TestAPIVerifier_DoesNotForwardKeyOnCrossHostRedirect(t *testing.T) {
 	}))
 	defer foreign.Close()
 
-	redirector := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	redirector := memhttptest.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, foreign.URL+r.URL.Path, http.StatusFound)
 	}))
 	defer redirector.Close()

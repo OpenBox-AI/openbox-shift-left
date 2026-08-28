@@ -6,7 +6,8 @@ import (
 	"errors"
 	"io"
 	"net/http"
-	"net/http/httptest"
+
+	"github.com/openbox-ai/openbox-shift-left/client/memhttptest"
 	"testing"
 
 	"github.com/openbox-ai/openbox-shift-left/cli/internal/aivss"
@@ -15,7 +16,7 @@ import (
 func TestCreateParsesResponseAndSendsContract(t *testing.T) {
 	var gotBody map[string]any
 	var gotAuth, gotClient, gotContentType string
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := memhttptest.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost || r.URL.Path != "/agent/create" {
 			t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
 		}
@@ -72,7 +73,7 @@ func TestCreateParsesResponseAndSendsContract(t *testing.T) {
 
 func TestCreateBearerPathSetsClientHeader(t *testing.T) {
 	var gotAuth, gotClient string
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := memhttptest.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotAuth = r.Header.Get("Authorization")
 		gotClient = r.Header.Get("x-openbox-client")
 		_, _ = io.WriteString(w, `{"data":{"agent":{"id":"a"},"token":"t","identity":{"did":"d","privateKey":"p"}}}`)
@@ -94,7 +95,7 @@ func TestCreateBearerPathSetsClientHeader(t *testing.T) {
 func TestCreateDIDFallsBackToAgentBody(t *testing.T) {
 	// F6: identity is not in the advertised Swagger DTO; when identity.did is
 	// absent the client must fall back to agent.did.
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := memhttptest.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = io.WriteString(w, `{"data":{"agent":{"id":"a","did":"did:aip:from-agent"},"token":"t","identity":{"privateKey":"p"}}}`)
 	}))
 	defer srv.Close()
@@ -109,7 +110,7 @@ func TestCreateDIDFallsBackToAgentBody(t *testing.T) {
 }
 
 func TestCreateAPIError(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := memhttptest.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)
 		_, _ = io.WriteString(w, `{"message":"AIVSS config is required"}`)
 	}))
@@ -133,7 +134,7 @@ func TestFindByName(t *testing.T) {
 	}
 	for name, payload := range cases {
 		t.Run(name, func(t *testing.T) {
-			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			srv := memhttptest.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if r.URL.Path != "/agent/list" {
 					t.Errorf("path = %s", r.URL.Path)
 				}
@@ -177,7 +178,7 @@ func repeat(s string, n int) string {
 // extracts config.policy_builder / raw-rego presence.
 func TestGetCurrentPolicy_BuilderConfig(t *testing.T) {
 	var gotPath, gotAuth string
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := memhttptest.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotPath, gotAuth = r.URL.Path, r.Header.Get("X-API-Key")
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = io.WriteString(w, `{"status":200,"data":{"id":"pol-1","updated_at":"2026-07-15T00:00:00Z","rego_code":"package x","config":{"path":"org/o/policy_1","policy_builder":{"version":1,"rules":[]}}}}`)
@@ -208,7 +209,7 @@ func TestGetCurrentPolicy_BuilderConfig(t *testing.T) {
 
 func TestGetCurrentPolicy_NullDataAndRawRego(t *testing.T) {
 	// data:null → (nil,nil): no current policy.
-	nullSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	nullSrv := memhttptest.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = io.WriteString(w, `{"status":200,"data":null}`)
 	}))
 	defer nullSrv.Close()
@@ -217,7 +218,7 @@ func TestGetCurrentPolicy_NullDataAndRawRego(t *testing.T) {
 	}
 
 	// raw rego, no policy_builder → HasRawRego true.
-	rawSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	rawSrv := memhttptest.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = io.WriteString(w, `{"status":200,"data":{"id":"pol-2","updated_at":"t","rego_code":"package x\nallow { true }","config":{"path":"p"}}}`)
 	}))
 	defer rawSrv.Close()
@@ -231,7 +232,7 @@ func TestGetCurrentPolicy_NullDataAndRawRego(t *testing.T) {
 }
 
 func TestGetCurrentPolicy_APIErrorPropagates(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := memhttptest.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusForbidden)
 		_, _ = io.WriteString(w, `forbidden`)
 	}))
@@ -248,7 +249,7 @@ func TestGetCurrentPolicy_APIErrorPropagates(t *testing.T) {
 // devinit relies on: non-force init would walk into an opaque 400, and --force
 // would pick a name that is already taken.
 func TestFindByName_UnrecognizedShapeErrors(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := memhttptest.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = io.WriteString(w, `{"data":{"agents":[{"id":"1","agent_name":"alpha"}]}}`)
 	}))
 	defer srv.Close()
@@ -264,7 +265,7 @@ func TestFindByName_UnrecognizedShapeErrors(t *testing.T) {
 
 // An empty data field is a legitimate "no agents", not a parse failure.
 func TestFindByName_EmptyDataIsNotAnError(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := memhttptest.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = io.WriteString(w, `{"data":[]}`)
 	}))
 	defer srv.Close()

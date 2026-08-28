@@ -6,7 +6,8 @@ import (
 	"io"
 	"net"
 	"net/http"
-	"net/http/httptest"
+
+	"github.com/openbox-ai/openbox-shift-left/client/memhttptest"
 	"strings"
 	"testing"
 	"time"
@@ -26,6 +27,7 @@ import (
 // own record. ADR-0021 §2 rests on a bypass leaving a HOLE in the record; this
 // left nothing at all.
 func TestUnreachableUpstreamStillProducesEvidence(t *testing.T) {
+	memhttptest.RequireBind(t)
 	// A closed port: Do fails without any server involved.
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -73,7 +75,7 @@ func TestCancelledRelayStillProducesEvidence(t *testing.T) {
 	// outbound connection to drop, and that drop is what Close is waiting to
 	// observe. A ceiling breaks the cycle without weakening the case — the cancel
 	// still arrives first.
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	upstream := memhttptest.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		select {
 		case <-r.Context().Done():
 		case <-time.After(600 * time.Millisecond):
@@ -117,7 +119,7 @@ func TestCancelledRelayStillProducesEvidence(t *testing.T) {
 // so it neither retried nor errored. httputil.ReverseProxy panics with
 // ErrAbortHandler for exactly this (Go issue 23643).
 func TestBrokenStreamIsNotRelayedAsACleanEnd(t *testing.T) {
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	upstream := memhttptest.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		// Declare more than we send, then hang up: the client's read of the body
 		// fails rather than ending.
@@ -161,7 +163,7 @@ func TestBrokenStreamIsNotRelayedAsACleanEnd(t *testing.T) {
 // must decline instead of storing binary it cannot inspect.
 func TestContentEncodedBodyIsNotFedToTheRedactor(t *testing.T) {
 	const secret = "AKIAIOSFODNN7EXAMPLE"
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	upstream := memhttptest.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Encoding", "gzip")
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
@@ -234,7 +236,7 @@ func TestFragmentInRequestTargetIsRefused(t *testing.T) {
 	upstream := upstreamRecorder(t, &got, nil)
 	srv := serveGateway(t, wire(t, upstream.URL, nil, nil, nil))
 
-	conn, err := net.Dial("tcp", strings.TrimPrefix(srv.URL, "http://"))
+	conn, err := memhttptest.DialContext(context.Background(), "tcp", strings.TrimPrefix(srv.URL, "http://"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -279,7 +281,7 @@ func TestProxyConnectionIsNotForwarded(t *testing.T) {
 // response headers are bytes.
 func TestResponseHeadersReachTheClientBeforeTheFirstBodyByte(t *testing.T) {
 	const pause = 400 * time.Millisecond
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	upstream := memhttptest.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.WriteHeader(http.StatusOK)
 		http.NewResponseController(w).Flush()

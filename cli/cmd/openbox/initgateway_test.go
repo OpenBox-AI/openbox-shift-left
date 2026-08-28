@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"github.com/openbox-ai/openbox-shift-left/client/memhttptest"
 	"net"
 	"os"
 	"runtime"
@@ -87,6 +88,7 @@ func skipUnlessSupervised(t *testing.T) {
 // developer's tool while printing success. So the env write is last and
 // conditional, and a failed start must leave the machine exactly as it was.
 func TestGatewayEnvIsNotWrittenWhenTheDaemonDoesNotStart(t *testing.T) {
+	memhttptest.RequireBind(t)
 	skipUnlessSupervised(t)
 	home := t.TempDir()
 	a, _, _ := testApp(nil)
@@ -116,6 +118,7 @@ func TestGatewayEnvIsNotWrittenWhenTheDaemonDoesNotStart(t *testing.T) {
 // supervisor accepted the unit but nothing is listening. Accepting a unit is not
 // evidence that a process is serving.
 func TestGatewayEnvIsNotWrittenWhenTheListenerNeverComesUp(t *testing.T) {
+	memhttptest.RequireBind(t)
 	skipUnlessSupervised(t)
 	home := t.TempDir()
 	a, _, _ := testApp(nil)
@@ -139,6 +142,7 @@ func TestGatewayEnvIsNotWrittenWhenTheListenerNeverComesUp(t *testing.T) {
 // TestGatewaySetupWritesEnvOnlyAfterTheListenerIsUp is the happy path, and it
 // asserts the ORDER rather than only the outcome.
 func TestGatewaySetupWritesEnvOnlyAfterTheListenerIsUp(t *testing.T) {
+	memhttptest.RequireBind(t)
 	skipUnlessSupervised(t)
 	home := t.TempDir()
 	a, out, _ := testApp(nil)
@@ -176,6 +180,7 @@ func TestGatewaySetupWritesEnvOnlyAfterTheListenerIsUp(t *testing.T) {
 // mirror-image reason: removing the daemon first would leave a window where the
 // tool points at something gone and every model call fails.
 func TestRemoveGatewayUnsetsEnvBeforeRemovingTheDaemon(t *testing.T) {
+	memhttptest.RequireBind(t)
 	skipUnlessSupervised(t)
 	home := t.TempDir()
 	a, out, _ := testApp(nil)
@@ -268,6 +273,7 @@ func min(a, b int) int {
 // fails to bind, the probe connects to the stranger, and init points the
 // developer's model traffic at an unknown local service while printing success.
 func TestOccupiedPortIsRefusedRatherThanAdopted(t *testing.T) {
+	memhttptest.RequireBind(t)
 	skipUnlessSupervised(t)
 	// A stranger on the port, up before init runs.
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
@@ -310,6 +316,7 @@ func TestOccupiedPortIsRefusedRatherThanAdopted(t *testing.T) {
 // stale-path failure `init` repairs for hook registrations, and the remedy its own
 // error recommends ("re-run init") was the thing that could not work.
 func TestReInstallReplacesOurOwnGatewayInsteadOfRefusing(t *testing.T) {
+	memhttptest.RequireBind(t)
 	skipUnlessSupervised(t)
 	home := t.TempDir()
 	addr := freeAddr(t)
@@ -349,6 +356,7 @@ func TestReInstallReplacesOurOwnGatewayInsteadOfRefusing(t *testing.T) {
 // must not become a licence to stop whatever is listening. Over-refuse, never
 // over-terminate.
 func TestAForeignProcessOnThePortIsStillRefused(t *testing.T) {
+	memhttptest.RequireBind(t)
 	skipUnlessSupervised(t)
 	home := t.TempDir()
 
@@ -383,6 +391,7 @@ func TestAForeignProcessOnThePortIsStillRefused(t *testing.T) {
 // warning), and the error's own remedy — re-run init — was blocked by the port
 // pre-check seeing that very daemon.
 func TestAFailedInstallLeavesNoUnitBehind(t *testing.T) {
+	memhttptest.RequireBind(t)
 	skipUnlessSupervised(t)
 	home := t.TempDir()
 	a, _, _ := testApp(nil)

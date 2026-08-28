@@ -30,7 +30,8 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"net/http/httptest"
+
+	"github.com/openbox-ai/openbox-shift-left/client/memhttptest"
 	"os"
 	"strings"
 	"sync"
@@ -214,7 +215,7 @@ func TestAcceptanceStockCoreAcceptsEmittedEvents(t *testing.T) {
 func TestAcceptanceEmitsOnlyStockWireTypes(t *testing.T) {
 	var seenTypes sync.Map // event_type -> struct{}: what the client actually put on the wire
 
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := memhttptest.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == client.AuthValidatePath:
 			w.WriteHeader(http.StatusOK)

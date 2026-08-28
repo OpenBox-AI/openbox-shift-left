@@ -5,7 +5,8 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
-	"net/http/httptest"
+
+	"github.com/openbox-ai/openbox-shift-left/client/memhttptest"
 	"net/textproto"
 	"sort"
 	"strings"
@@ -37,9 +38,9 @@ type recorded struct {
 
 // upstreamRecorder serves as the provider and captures the forwarded request
 // verbatim. respond lets a test choose the status and body it replies with.
-func upstreamRecorder(t *testing.T, got *recorded, respond func(w http.ResponseWriter)) *httptest.Server {
+func upstreamRecorder(t *testing.T, got *recorded, respond func(w http.ResponseWriter)) *memhttptest.Server {
 	t.Helper()
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := memhttptest.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, err := io.ReadAll(r.Body)
 		if err != nil {
 			t.Errorf("upstream: reading body: %v", err)
@@ -67,7 +68,7 @@ func upstreamRecorder(t *testing.T, got *recorded, respond func(w http.ResponseW
 // no-additions assertion below untestable through any client.
 func probeClient() *http.Client {
 	return &http.Client{
-		Transport: &http.Transport{DisableCompression: true},
+		Transport: &http.Transport{DisableCompression: true, DialContext: memhttptest.DialContext},
 		// Never follow a redirect either: these assertions are about what the
 		// gateway returned, and a client that chased a 302 would report the
 		// redirect target's answer as the gateway's.
@@ -81,15 +82,15 @@ func probeClient() *http.Client {
 // the assertions run against bytes on a socket rather than a handler call. Tests
 // that need to reach into the gateway first (the body-bound cases) construct it
 // themselves and hand it here.
-func serveGateway(t *testing.T, g *Gateway) *httptest.Server {
+func serveGateway(t *testing.T, g *Gateway) *memhttptest.Server {
 	t.Helper()
-	srv := httptest.NewServer(g)
+	srv := memhttptest.NewServer(t, g)
 	t.Cleanup(srv.Close)
 	return srv
 }
 
 // newTestGateway places a stock gateway in front of the given upstream.
-func newTestGateway(t *testing.T, upstream string) *httptest.Server {
+func newTestGateway(t *testing.T, upstream string) *memhttptest.Server {
 	t.Helper()
 	g, err := New(Config{Addr: DefaultAddr, Upstream: upstream})
 	if err != nil {

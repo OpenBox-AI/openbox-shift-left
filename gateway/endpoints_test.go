@@ -3,16 +3,17 @@ package gateway
 import (
 	"io"
 	"net/http"
-	"net/http/httptest"
+
+	"github.com/openbox-ai/openbox-shift-left/client/memhttptest"
 	"strings"
 	"testing"
 )
 
 // sseUpstream serves an event stream, giving the test control of the flush
 // cadence so buffering and coalescing are observable.
-func sseUpstream(t *testing.T, write func(w http.ResponseWriter, ctl *http.ResponseController)) *httptest.Server {
+func sseUpstream(t *testing.T, write func(w http.ResponseWriter, ctl *http.ResponseController)) *memhttptest.Server {
 	t.Helper()
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := memhttptest.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		io.Copy(io.Discard, r.Body)
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.WriteHeader(http.StatusOK)
@@ -99,13 +100,13 @@ func TestNamedEndpointsServed(t *testing.T) {
 // response named.
 func TestRedirectNotFollowed(t *testing.T) {
 	var reached bool
-	elsewhere := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	elsewhere := memhttptest.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		reached = true
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer elsewhere.Close()
 
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	upstream := memhttptest.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, elsewhere.URL+"/v1/models", http.StatusFound)
 	}))
 	defer upstream.Close()

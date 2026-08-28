@@ -4,7 +4,8 @@ import (
 	"context"
 	"io"
 	"net/http"
-	"net/http/httptest"
+
+	"github.com/openbox-ai/openbox-shift-left/client/memhttptest"
 	"strings"
 	"testing"
 )
@@ -13,7 +14,7 @@ import (
 // against a core mirror that verifies the AIP signature exactly as openbox-core
 // would (empty-body SHA, canonical GET string, Ed25519 verify). A 200 → nil.
 func TestValidate_HappyPath_SignedGET(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := memhttptest.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			t.Errorf("method = %s, want GET", r.Method)
 		}

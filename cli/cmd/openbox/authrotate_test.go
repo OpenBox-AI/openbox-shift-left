@@ -5,7 +5,8 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"net/http"
-	"net/http/httptest"
+
+	"github.com/openbox-ai/openbox-shift-left/client/memhttptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -17,10 +18,10 @@ import (
 const rotateTestDID = "did:aip:3f2504e0-4f89-11d3-9a0c-0305e82c3301"
 
 // rotateBackend serves both rotation endpoints, recording which were called.
-func rotateBackend(t *testing.T, keyBody, identityBody string, keyStatus, identityStatus int) (*httptest.Server, *[]string) {
+func rotateBackend(t *testing.T, keyBody, identityBody string, keyStatus, identityStatus int) (*memhttptest.Server, *[]string) {
 	t.Helper()
 	var called []string
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := memhttptest.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case strings.HasSuffix(r.URL.Path, "/rotate-api-key"):
 			called = append(called, "key")

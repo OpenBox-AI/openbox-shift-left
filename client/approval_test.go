@@ -7,7 +7,8 @@ import (
 	"errors"
 	"io"
 	"net/http"
-	"net/http/httptest"
+
+	"github.com/openbox-ai/openbox-shift-left/client/memhttptest"
 	"testing"
 	"time"
 )
@@ -15,10 +16,10 @@ import (
 // approvalServer stands in for core's /governance/approval: it authenticates
 // and verifies the AIP signature exactly as core would, records the decoded
 // key, and returns whatever the test wants.
-func approvalServer(t *testing.T, pub ed25519.PublicKey, respond func() (int, string)) (*httptest.Server, *ApprovalKey) {
+func approvalServer(t *testing.T, pub ed25519.PublicKey, respond func() (int, string)) (*memhttptest.Server, *ApprovalKey) {
 	t.Helper()
 	var got ApprovalKey
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := memhttptest.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != approvalPath {
 			t.Errorf("path = %q, want %q", r.URL.Path, approvalPath)
 		}

@@ -6,7 +6,8 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
-	"net/http/httptest"
+
+	"github.com/openbox-ai/openbox-shift-left/client/memhttptest"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
@@ -308,7 +309,7 @@ func TestInstalledHookTimeoutMatchesThePlugin(t *testing.T) {
 func serveEvaluate(t *testing.T, verdictJSON string, status int, delay time.Duration) (url string, hits *int32) {
 	t.Helper()
 	var n int32
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := memhttptest.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		atomic.AddInt32(&n, 1)
 		if delay > 0 {
 			select {

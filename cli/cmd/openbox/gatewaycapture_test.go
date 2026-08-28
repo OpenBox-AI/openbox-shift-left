@@ -10,7 +10,8 @@ import (
 	"io"
 	"net"
 	"net/http"
-	"net/http/httptest"
+
+	"github.com/openbox-ai/openbox-shift-left/client/memhttptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -33,7 +34,8 @@ import (
 // through the real relay, into the real emitter and the real spool, and reads the
 // event back off disk. It fails if any link in that chain is missing.
 func TestGatewayCommandActuallyCaptures(t *testing.T) {
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	memhttptest.RequireBind(t)
+	upstream := memhttptest.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		io.Copy(io.Discard, r.Body)
 		w.Header().Set("Request-Id", "req_upstream_seam")
 		w.Header().Set("Content-Type", "application/json")
@@ -155,7 +157,8 @@ func fakeCredential() string {
 // precondition for the developer's model calls. An unconfigured machine must
 // still get a working relay — the same fail-open direction the hook path holds.
 func TestGatewayWithoutADIDStillRelays(t *testing.T) {
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	memhttptest.RequireBind(t)
+	upstream := memhttptest.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		io.WriteString(w, `{"ok":true}`)
 	}))
 	defer upstream.Close()
@@ -245,7 +248,8 @@ func decodeSpooledEvent(t *testing.T, line []byte) client.DevEvent {
 // flush drains. If those drift, the flush finds nothing and this reds — whereas
 // every unit test on either side would stay green.
 func TestSpooledGatewayEventReachesTheWire(t *testing.T) {
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	memhttptest.RequireBind(t)
+	upstream := memhttptest.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		io.Copy(io.Discard, r.Body)
 		w.Header().Set("Request-Id", "req_wire_seam")
 		io.WriteString(w, `{"type":"message","role":"assistant"}`)
@@ -253,7 +257,7 @@ func TestSpooledGatewayEventReachesTheWire(t *testing.T) {
 	defer upstream.Close()
 
 	var posted []byte
-	core := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	core := memhttptest.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		posted, _ = io.ReadAll(r.Body)
 		w.Header().Set("Content-Type", "application/json")
 		io.WriteString(w, `{"decision":"ALLOW"}`)

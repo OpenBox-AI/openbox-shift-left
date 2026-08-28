@@ -4,6 +4,8 @@ import (
 	"encoding/base64"
 	"net/http"
 	"net/http/httptest"
+
+	"github.com/openbox-ai/openbox-shift-left/client/memhttptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -206,6 +208,7 @@ func TestHookBinary_AmbientGitHookInstall(t *testing.T) {
 // guardrail category) AND the hook STILL exits 0 with EMPTY stdout — nothing is
 // denied, delayed, or errored. The record carries no tool content (INV-2).
 func TestHookBinary_BlockVerdictRecordsAdvisoryExitsZero(t *testing.T) {
+	memhttptest.RequireBind(t)
 	if testing.Short() {
 		t.Skip("builds a binary; skipped in -short")
 	}

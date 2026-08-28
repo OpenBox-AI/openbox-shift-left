@@ -4,7 +4,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"net/http"
-	"net/http/httptest"
+
+	"github.com/openbox-ai/openbox-shift-left/client/memhttptest"
 	"os"
 	"strings"
 	"testing"
@@ -15,10 +16,10 @@ const testOrgKey = "obx_key_secretorgkey"
 
 // approveBackend stands in for the control plane's approval queue: it serves
 // the pending list and records the decide calls.
-func approveBackend(t *testing.T, pending []map[string]any) (*httptest.Server, *[]string) {
+func approveBackend(t *testing.T, pending []map[string]any) (*memhttptest.Server, *[]string) {
 	t.Helper()
 	var decided []string
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := memhttptest.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if got := r.Header.Get("X-API-Key"); got != testOrgKey {
 			t.Errorf("X-API-Key = %q — the approver acts under its own org credential", got)
 		}
@@ -51,7 +52,7 @@ func approveBackend(t *testing.T, pending []map[string]any) (*httptest.Server, *
 	return srv, &decided
 }
 
-func approveApp(t *testing.T, srv *httptest.Server) (*app, *bytes.Buffer, *bytes.Buffer) {
+func approveApp(t *testing.T, srv *memhttptest.Server) (*app, *bytes.Buffer, *bytes.Buffer) {
 	t.Helper()
 	t.Setenv("OPENBOX_CONFIG", t.TempDir()+"/none.json")
 	t.Setenv("OPENBOX_CONTROL_TOKEN", testOrgKey)

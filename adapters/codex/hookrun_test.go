@@ -6,7 +6,8 @@ import (
 	"io"
 	"log"
 	"net/http"
-	"net/http/httptest"
+
+	"github.com/openbox-ai/openbox-shift-left/client/memhttptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -111,7 +112,7 @@ func TestRunHook_MisuseIsSafe(t *testing.T) {
 func TestRunHook_SessionEndFlushesSpool(t *testing.T) {
 	setHookEnv(t)
 	var mu bytesBuffer
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := memhttptest.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		raw, _ := io.ReadAll(r.Body)
 		mu.append(raw)
 		w.Header().Set("Content-Type", "application/json")

@@ -6,7 +6,8 @@ import (
 	"io"
 	"log"
 	"net/http"
-	"net/http/httptest"
+
+	"github.com/openbox-ai/openbox-shift-left/client/memhttptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -703,7 +704,7 @@ func TestRunHook_EnforceApply_Block(t *testing.T) {
 	// is the real posture for content-aware policy; the INV-2 assertions below
 	// are about stdout and the local audit, which stay content-free either way.
 	t.Setenv(envContentCapture, "1")
-	blockRmRf := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	blockRmRf := memhttptest.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		raw, _ := io.ReadAll(r.Body)
 		w.Header().Set("Content-Type", "application/json")
 		if strings.Contains(string(raw), "rm -rf") {

@@ -6,7 +6,8 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
-	"net/http/httptest"
+
+	"github.com/openbox-ai/openbox-shift-left/client/memhttptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -197,7 +198,7 @@ func TestFinops_NoContentOnWire(t *testing.T) {
 	// (b) The exact SIGNED WIRE BODY carries no sentinel — content-capture ON so
 	// the stripper cannot be what saves us; only the projection-only parser can.
 	var body []byte
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := memhttptest.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ = io.ReadAll(r.Body)
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{}`))

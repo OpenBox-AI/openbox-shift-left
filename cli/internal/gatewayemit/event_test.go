@@ -8,7 +8,8 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
-	"net/http/httptest"
+
+	"github.com/openbox-ai/openbox-shift-left/client/memhttptest"
 	"strings"
 	"testing"
 	"time"
@@ -173,7 +174,7 @@ func postThroughRealClient(t *testing.T, ev client.DevEvent, contentOn bool) []b
 	t.Helper()
 
 	var captured []byte
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := memhttptest.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		captured, _ = io.ReadAll(r.Body)
 		w.Header().Set("Content-Type", "application/json")
 		io.WriteString(w, `{"decision":"ALLOW"}`)

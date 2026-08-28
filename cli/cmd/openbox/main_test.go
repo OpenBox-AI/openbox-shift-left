@@ -10,7 +10,8 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/adapters/common/devconfig"
 	"io"
 	"net/http"
-	"net/http/httptest"
+
+	"github.com/openbox-ai/openbox-shift-left/client/memhttptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -486,7 +487,7 @@ func TestHookEndToEndSmoke(t *testing.T) {
 	var mu sync.Mutex
 	got := 0
 	var bodies []string
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := memhttptest.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPost && r.URL.Path == "/api/v1/governance/evaluate" {
 			b, _ := io.ReadAll(r.Body)
 			mu.Lock()
@@ -632,12 +633,13 @@ func TestHookEndToEndSmoke(t *testing.T) {
 // SessionEnd that follows delivers exactly the remainder (no loss, no
 // duplicate Idempotency-Keys when realtime and teardown flushes overlap).
 func TestHookRealtimeDelivery(t *testing.T) {
+	memhttptest.RequireBind(t)
 	if testing.Short() {
 		t.Skip("builds a binary + spawns detached flushers; skipped in -short")
 	}
 	var mu sync.Mutex
 	var keys []string
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := memhttptest.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPost && r.URL.Path == "/api/v1/governance/evaluate" {
 			_, _ = io.Copy(io.Discard, r.Body)
 			mu.Lock()
@@ -831,14 +833,14 @@ const verifyTestDID = "did:aip:00000000-0000-0000-0000-000000000042"
 // coreValidateOK verifies the AIP-signed GET /api/v1/auth/validate exactly as
 // openbox-core would (empty-body SHA, canonical GET string, Ed25519 verify) and
 // answers 200; a bad signature → 401. It stands in for the real core.
-func coreValidateOK(t *testing.T, seedB64 string) *httptest.Server {
+func coreValidateOK(t *testing.T, seedB64 string) *memhttptest.Server {
 	t.Helper()
 	seed, err := base64.StdEncoding.DecodeString(seedB64)
 	if err != nil {
 		t.Fatalf("decode seed: %v", err)
 	}
 	pub := ed25519.NewKeyFromSeed(seed).Public().(ed25519.PublicKey)
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := memhttptest.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet || r.URL.Path != client.AuthValidatePath {
 			t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
 		}
@@ -900,7 +902,7 @@ func TestDevVerifyHappyPath(t *testing.T) {
 func TestDevVerifyBadKeyIsMappedFailure(t *testing.T) {
 	// A server that always 401s, regardless of the signature (simulates a wrong
 	// key / unprovisioned agent).
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	srv := memhttptest.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
 		_, _ = io.WriteString(w, `{"code":401,"message":"invalid token"}`)
 	}))

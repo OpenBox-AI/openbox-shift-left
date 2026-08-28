@@ -6,7 +6,8 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
-	"net/http/httptest"
+
+	"github.com/openbox-ai/openbox-shift-left/client/memhttptest"
 	"strings"
 	"testing"
 
@@ -19,7 +20,7 @@ import (
 func newWireCapture(t *testing.T) (*client.Client, *[][]byte) {
 	t.Helper()
 	var bodies [][]byte
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := memhttptest.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		raw, _ := io.ReadAll(r.Body)
 		bodies = append(bodies, raw)
 		w.Header().Set("Content-Type", "application/json")

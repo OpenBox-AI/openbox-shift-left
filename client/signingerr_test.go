@@ -5,7 +5,8 @@ import (
 	"errors"
 	"io"
 	"net/http"
-	"net/http/httptest"
+
+	"github.com/openbox-ai/openbox-shift-left/client/memhttptest"
 	"strings"
 	"testing"
 )
@@ -113,9 +114,9 @@ func TestExtractReason_IgnoresIntCode(t *testing.T) {
 // fixedRespServer returns a server that answers every request with a fixed
 // status + body, ignoring the (validly signed) request — so a test can drive the
 // real Emit→post→attempt→httpError→describeDrop path against any core response.
-func fixedRespServer(t *testing.T, status int, body string) *httptest.Server {
+func fixedRespServer(t *testing.T, status int, body string) *memhttptest.Server {
 	t.Helper()
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := memhttptest.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(status)
 		_, _ = io.WriteString(w, body)

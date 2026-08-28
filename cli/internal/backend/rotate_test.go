@@ -3,14 +3,15 @@ package backend
 import (
 	"context"
 	"net/http"
-	"net/http/httptest"
+
+	"github.com/openbox-ai/openbox-shift-left/client/memhttptest"
 	"strings"
 	"testing"
 )
 
-func rotateServer(t *testing.T, handler func(w http.ResponseWriter, r *http.Request)) *httptest.Server {
+func rotateServer(t *testing.T, handler func(w http.ResponseWriter, r *http.Request)) *memhttptest.Server {
 	t.Helper()
-	srv := httptest.NewServer(http.HandlerFunc(handler))
+	srv := memhttptest.NewServer(t, http.HandlerFunc(handler))
 	t.Cleanup(srv.Close)
 	return srv
 }

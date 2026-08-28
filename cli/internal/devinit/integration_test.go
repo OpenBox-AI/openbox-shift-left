@@ -6,7 +6,8 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
-	"net/http/httptest"
+
+	"github.com/openbox-ai/openbox-shift-left/client/memhttptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -20,9 +21,9 @@ import (
 
 // mockCreateServer is an httptest backend that reports no existing agent and
 // returns a fixed registration on agent/create, capturing the request body.
-func mockCreateServer(t *testing.T, createBody *map[string]any) *httptest.Server {
+func mockCreateServer(t *testing.T, createBody *map[string]any) *memhttptest.Server {
 	t.Helper()
-	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	return memhttptest.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/agent/list":
 			_, _ = io.WriteString(w, `{"data":[]}`)

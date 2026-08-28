@@ -4,7 +4,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/http/httptest"
+
+	"github.com/openbox-ai/openbox-shift-left/client/memhttptest"
 	"strings"
 	"sync"
 	"testing"
@@ -42,7 +43,7 @@ func secretForLog() string { return "sk" + "-ant-" + strings.Repeat("z4", 20) }
 // on REAL traffic carrying a real-shaped credential, a token in the query string
 // and content in both bodies, rather than on the format strings.
 func TestVerboseNeverLogsCredentialsOrBodies(t *testing.T) {
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	upstream := memhttptest.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		io.Copy(io.Discard, r.Body)
 		w.Header().Set("X-Upstream-Secret-Header", "upstream-header-value-must-not-log")
 		io.WriteString(w, `{"role":"assistant","text":"RESPONSE_BODY_MUST_NOT_LOG"}`)
@@ -54,7 +55,7 @@ func TestVerboseNeverLogsCredentialsOrBodies(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	srv := httptest.NewServer(g.WithVerbose(rec.logf))
+	srv := memhttptest.NewServer(t, g.WithVerbose(rec.logf))
 	defer srv.Close()
 
 	// Assembled at runtime for the same reason secretForLog is: written as a
@@ -99,7 +100,7 @@ func TestVerboseNeverLogsCredentialsOrBodies(t *testing.T) {
 // TestVerboseReportsArrivalAndOutcome is the feature itself: a developer must be
 // able to tell "traffic is reaching this process" from "nothing is".
 func TestVerboseReportsArrivalAndOutcome(t *testing.T) {
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	upstream := memhttptest.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusTeapot)
 		io.WriteString(w, `{}`)
 	}))
@@ -110,7 +111,7 @@ func TestVerboseReportsArrivalAndOutcome(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	srv := httptest.NewServer(g.WithVerbose(rec.logf))
+	srv := memhttptest.NewServer(t, g.WithVerbose(rec.logf))
 	defer srv.Close()
 
 	resp, err := probeClient().Post(srv.URL+"/v1/messages", "application/json", strings.NewReader(`{}`))
@@ -135,7 +136,7 @@ func TestVerboseReportsArrivalAndOutcome(t *testing.T) {
 // at all. That is the exact misreading this feature exists to prevent.
 func TestVerboseReportsARejectionTooKeepsSilenceHonest(t *testing.T) {
 	reached := false
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	upstream := memhttptest.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		reached = true
 		io.WriteString(w, `{}`)
 	}))
@@ -149,7 +150,7 @@ func TestVerboseReportsARejectionTooKeepsSilenceHonest(t *testing.T) {
 	// The over-cap path: maxBody is a field precisely so a test can drive this
 	// without allocating 64 MiB. A refused body is never forwarded even in part.
 	g.maxBody = 8
-	srv := httptest.NewServer(g.WithVerbose(rec.logf))
+	srv := memhttptest.NewServer(t, g.WithVerbose(rec.logf))
 	defer srv.Close()
 
 	resp, err := probeClient().Post(srv.URL+"/v1/messages", "application/json",
@@ -175,7 +176,7 @@ func TestVerboseReportsARejectionTooKeepsSilenceHonest(t *testing.T) {
 
 // TestVerboseOffIsSilent keeps the default path exactly what it was.
 func TestVerboseOffIsSilent(t *testing.T) {
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	upstream := memhttptest.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		io.WriteString(w, `{}`)
 	}))
 	defer upstream.Close()
@@ -187,7 +188,7 @@ func TestVerboseOffIsSilent(t *testing.T) {
 	if g.verbose() {
 		t.Error("a Gateway with no WithVerbose reports itself verbose")
 	}
-	srv := httptest.NewServer(g) // no panic on the nil seam is the assertion
+	srv := memhttptest.NewServer(t, g) // no panic on the nil seam is the assertion
 	defer srv.Close()
 	resp, err := probeClient().Post(srv.URL+"/v1/messages", "application/json", strings.NewReader(`{}`))
 	if err != nil {

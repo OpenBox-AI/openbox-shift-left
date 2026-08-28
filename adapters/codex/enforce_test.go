@@ -5,7 +5,8 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"net/http"
-	"net/http/httptest"
+
+	"github.com/openbox-ai/openbox-shift-left/client/memhttptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -52,7 +53,7 @@ func parsePreToolUse(t *testing.T, out []byte) (decisionVal, reason string, upda
 // SERVER verdict, not a local bundle, so the setup names the verdict directly.
 func serveVerdict(t *testing.T, verdictJSON string) {
 	t.Helper()
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	srv := memhttptest.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(verdictJSON))
 	}))

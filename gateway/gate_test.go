@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+
+	"github.com/openbox-ai/openbox-shift-left/client/memhttptest"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -258,7 +260,7 @@ func TestConstrainForwardsLikeEverywhereElse(t *testing.T) {
 // which behaviour came from where is the entire point of running the probe.
 func TestRefuseEverythingIsProbeOnlyAndSaysSo(t *testing.T) {
 	shape := RefusalShape{Status: 418, ErrorType: "openbox_probe_candidate"}
-	srv := httptest.NewServer(RefuseEverything(shape))
+	srv := memhttptest.NewServer(t, RefuseEverything(shape))
 	defer srv.Close()
 
 	resp, err := srv.Client().Post(srv.URL+"/v1/messages", "application/json", strings.NewReader(`{}`))

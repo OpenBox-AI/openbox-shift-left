@@ -5,7 +5,8 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
-	"net/http/httptest"
+
+	"github.com/openbox-ai/openbox-shift-left/client/memhttptest"
 	"regexp"
 	"strings"
 	"testing"
@@ -265,7 +266,7 @@ func assertActivityWireShape(t *testing.T, payload map[string]any, wantType stri
 // halves and any retry.
 func TestWire_ToolEventsAreActivityPairs(t *testing.T) {
 	var bodies [][]byte
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := memhttptest.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		raw, _ := io.ReadAll(r.Body)
 		bodies = append(bodies, raw)
 		w.Header().Set("Content-Type", "application/json")

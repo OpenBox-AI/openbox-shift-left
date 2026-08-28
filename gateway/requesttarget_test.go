@@ -2,16 +2,18 @@ package gateway
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
-	"net/http/httptest"
+
 	"net/url"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/openbox-ai/openbox-shift-left/client/memhttptest"
 )
 
 // requesttarget_test.go pins the origin-form requirement, whose whole job is to
@@ -28,7 +30,7 @@ import (
 // status line plus body. No http.Client, which would refuse to emit these forms.
 func rawRequestLine(t *testing.T, addr, line string) (int, string) {
 	t.Helper()
-	conn, err := net.Dial("tcp", addr)
+	conn, err := memhttptest.DialContext(context.Background(), "tcp", addr)
 	if err != nil {
 		t.Fatalf("dial: %v", err)
 	}
@@ -47,7 +49,7 @@ func rawRequestLine(t *testing.T, addr, line string) (int, string) {
 }
 
 // hostPort reduces a test server's URL to the host:port a raw socket needs.
-func hostPort(t *testing.T, srv *httptest.Server) string {
+func hostPort(t *testing.T, srv *memhttptest.Server) string {
 	t.Helper()
 	u, err := url.Parse(srv.URL)
 	if err != nil {
@@ -63,7 +65,7 @@ func TestNonOriginFormTargetsCannotRetargetTheUpstreamHost(t *testing.T) {
 	// A recorder that must never be reached: any forward at all is a failure,
 	// because every line below names a host that is not this one.
 	var reached bool
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	upstream := memhttptest.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		reached = true
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -143,7 +145,7 @@ func TestOriginFormStillRelaysVerbatim(t *testing.T) {
 	} {
 		t.Run(target, func(t *testing.T) {
 			var got string
-			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			upstream := memhttptest.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				got = r.RequestURI
 				w.WriteHeader(http.StatusOK)
 			}))

@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"github.com/openbox-ai/openbox-shift-left/client/memhttptest"
 	"net"
 	"strings"
 	"testing"
@@ -120,6 +121,7 @@ func TestNameHostsAreResolvedNotTrusted(t *testing.T) {
 // what closes the window between validating a name and binding whatever the
 // resolver returns at that later moment.
 func TestListenVerifiesWhatTheKernelReturned(t *testing.T) {
+	memhttptest.RequireBind(t)
 	// Port 0 lets the OS choose, so this cannot collide with a real gateway.
 	listener, resolved, err := Listen(Config{Addr: "127.0.0.1:0", Upstream: DefaultUpstream})
 	if err != nil {

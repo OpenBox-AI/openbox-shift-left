@@ -6,7 +6,8 @@ import (
 	"io"
 	"log"
 	"net/http"
-	"net/http/httptest"
+
+	"github.com/openbox-ai/openbox-shift-left/client/memhttptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -50,7 +51,7 @@ func TestContentCaptureConformance(t *testing.T) {
 		t.Helper()
 		var mu sync.Mutex
 		var bodies []string
-		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		srv := memhttptest.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			raw, _ := io.ReadAll(r.Body)
 			mu.Lock()
 			bodies = append(bodies, string(raw))
@@ -576,7 +577,7 @@ func TestContentCaptureCredentialCoverage(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			var mu sync.Mutex
 			var bodies []string
-			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			srv := memhttptest.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				raw, _ := io.ReadAll(r.Body)
 				mu.Lock()
 				bodies = append(bodies, string(raw))

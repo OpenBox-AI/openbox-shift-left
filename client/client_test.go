@@ -8,7 +8,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/http/httptest"
+
+	"github.com/openbox-ai/openbox-shift-left/client/memhttptest"
 	"strings"
 	"sync"
 	"testing"
@@ -75,12 +76,12 @@ func sampleEvent() DevEvent {
 // Bearer key, verifies the AIP signature exactly as core would, records the
 // decoded payload, and returns a verdict. onRequest lets a test override the
 // status/verdict per call (for retry tests).
-func coreMirrorServer(t *testing.T, pub ed25519.PublicKey, onRequest func(n int) (status int, verdict string)) (*httptest.Server, *[]governanceEventPayload, *int) {
+func coreMirrorServer(t *testing.T, pub ed25519.PublicKey, onRequest func(n int) (status int, verdict string)) (*memhttptest.Server, *[]governanceEventPayload, *int) {
 	t.Helper()
 	var mu sync.Mutex
 	var payloads []governanceEventPayload
 	calls := 0
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := memhttptest.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		mu.Lock()
 		calls++
 		n := calls
@@ -333,7 +334,7 @@ func TestEmit_IdempotencyKeyHeader(t *testing.T) {
 	var mu sync.Mutex
 	var headers []string
 	var bodies [][]byte
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := memhttptest.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
 		mu.Lock()
 		headers = append(headers, r.Header.Get("Idempotency-Key"))
@@ -381,7 +382,7 @@ func TestEmit_IdempotencyKeyStableAcrossRetries(t *testing.T) {
 	var mu sync.Mutex
 	var headers []string
 	calls := 0
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := memhttptest.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		mu.Lock()
 		calls++
 		n := calls

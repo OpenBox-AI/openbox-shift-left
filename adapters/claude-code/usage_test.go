@@ -5,7 +5,8 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
-	"net/http/httptest"
+
+	"github.com/openbox-ai/openbox-shift-left/client/memhttptest"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -659,7 +660,7 @@ func TestFinops_NoContentOnWire(t *testing.T) {
 	path := writeTranscript(t, poisonedTranscript)
 
 	var bodies [][]byte
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := memhttptest.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		b, _ := io.ReadAll(r.Body)
 		bodies = append(bodies, b)
 		w.WriteHeader(http.StatusOK)
@@ -870,7 +871,7 @@ func TestFinops_NoContentOnWire(t *testing.T) {
 		capPath := writeTranscript(t, poisoned)
 
 		var got [][]byte
-		capSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capSrv := memhttptest.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			b, _ := io.ReadAll(r.Body)
 			got = append(got, b)
 			_, _ = w.Write([]byte(`{}`))

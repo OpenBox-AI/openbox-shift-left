@@ -6,7 +6,8 @@ import (
 	"io/fs"
 	"log"
 	"net/http"
-	"net/http/httptest"
+
+	"github.com/openbox-ai/openbox-shift-left/client/memhttptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -144,7 +145,7 @@ func TestEnforcementConformance_Codex(t *testing.T) {
 		// longer the decider, so a local allow with nothing reachable is the
 		// outage CDX-C4 asserts denies, not an allow.
 		serveVerdict(t, `{"verdict":"allow"}`)
-		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		srv := memhttptest.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"verdict":"allow"}`))
 		}))

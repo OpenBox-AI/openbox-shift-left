@@ -1,6 +1,7 @@
 package gatewaycheck
 
 import (
+	"github.com/openbox-ai/openbox-shift-left/client/memhttptest"
 	"io/fs"
 	"net"
 	"os"
@@ -67,6 +68,7 @@ func TestNoConfigurationIsReportedAsUngoverned(t *testing.T) {
 // TestUserOwnedConfigIsBaseTier — user-owned config is tamper-evident, not
 // tamper-resistant, and the report must never imply otherwise.
 func TestUserOwnedConfigIsBaseTier(t *testing.T) {
+	memhttptest.RequireBind(t)
 	home := t.TempDir()
 	addr := listener(t)
 	writeSettings(t, filepath.Join(home, ".claude", "settings.json"), "http://"+addr)
@@ -96,6 +98,7 @@ func TestUserOwnedConfigIsBaseTier(t *testing.T) {
 // the MDM tier, and reporting otherwise would claim assurance this build cannot
 // observe.
 func TestManagedPathWithoutRootOwnershipIsNotTheMDMTier(t *testing.T) {
+	memhttptest.RequireBind(t)
 	home := t.TempDir()
 	managedPath := filepath.Join(t.TempDir(), "managed-settings.json")
 	addr := listener(t)
@@ -140,6 +143,7 @@ func TestManagedPrecedesUserSettings(t *testing.T) {
 // completely unused because the tool points somewhere else. "Alive" and "actually
 // used" are different claims.
 func TestNonLoopbackTargetIsFlagged(t *testing.T) {
+	memhttptest.RequireResolvableHost(t, "api.anthropic.com")
 	home := t.TempDir()
 	writeSettings(t, filepath.Join(home, ".claude", "settings.json"), "https://api.anthropic.com")
 
@@ -187,6 +191,7 @@ func TestDeadGatewayNamesTheSafeDirection(t *testing.T) {
 // point of this package. The base assurance claim is DETECTION; any output saying
 // bypass is impossible would be the overstatement this product exists to prevent.
 func TestReportNeverClaimsPrevention(t *testing.T) {
+	memhttptest.RequireBind(t)
 	home := t.TempDir()
 	managedPath := filepath.Join(t.TempDir(), "managed-settings.json")
 	addr := listener(t)
