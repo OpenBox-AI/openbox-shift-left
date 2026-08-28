@@ -301,3 +301,34 @@ func TestASecondInstallDoesNotOverwriteTheRememberedOriginal(t *testing.T) {
 		t.Errorf("restored %q after two installs, want the pre-OpenBox %q", restored, orgRelay)
 	}
 }
+
+// TestOurOwnGatewayURLIsNotRememberedAsTheOrgs is the other half of the
+// first-writer-wins record, and the half that was missing.
+//
+// TestASecondInstallDoesNotOverwriteTheRememberedOriginal seeds a FOREIGN value first, so it never reaches the case
+// where the displaced value is one WE wrote: re-running init with a different
+// --gateway-addr. Recording that made `--remove-gateway` restore a loopback URL
+// whose daemon it had just unloaded, and a dead localhost fails closed — so the
+// command that undoes the gateway left every model call on the machine failing,
+// while announcing that it had restored the org's own setting.
+func TestOurOwnGatewayURLIsNotRememberedAsTheOrgs(t *testing.T) {
+	home := t.TempDir()
+
+	if _, err := WriteEnv(home, "127.0.0.1:8788"); err != nil {
+		t.Fatalf("first install: %v", err)
+	}
+	if _, err := WriteEnv(home, "127.0.0.1:9999"); err != nil {
+		t.Fatalf("re-install on a new port: %v", err)
+	}
+	if hasPriorEnv(home) {
+		t.Fatalf("our own previous gateway URL was recorded as the pre-OpenBox value: %q", loadPriorEnv(home))
+	}
+
+	_, restored, err := RemoveEnvDetailed(home)
+	if err != nil {
+		t.Fatalf("remove: %v", err)
+	}
+	if restored != "" {
+		t.Errorf("uninstall restored %q; there was nothing of the org's to restore", restored)
+	}
+}

@@ -22,8 +22,11 @@ package gatewayservice
 import (
 	"encoding/json"
 	"fmt"
+	"net"
+	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // EnvKey is the one variable this package owns in a settings env block.
@@ -94,7 +97,16 @@ func WriteEnv(homeDir, addr string) (replaced []string, err error) {
 			// not overwrite the ORIGINAL foreign value with our own gateway URL
 			// from the first one. First writer wins, which is the only order that
 			// preserves what was there before OpenBox.
-			if s != "" && !hasPriorEnv(homeDir) {
+			//
+			// FOREIGN is the condition, and first-writer-wins alone did not express
+			// it. Re-running init with a different --gateway-addr makes `existing`
+			// OUR OWN previous gateway URL, which differs from `want` and is
+			// therefore recorded as the org's original when no record exists yet.
+			// `--remove-gateway` then "restores" a loopback address whose daemon it
+			// has just unloaded — and a dead localhost fails closed, so the command
+			// meant to undo the gateway leaves every model call on the machine
+			// failing, while reporting that it restored what was there before.
+			if s != "" && !ourGatewayURL(s) && !hasPriorEnv(homeDir) {
 				if err := savePriorEnv(homeDir, s); err != nil {
 					return replaced, err
 				}
@@ -174,6 +186,31 @@ type priorEnv struct {
 	BaseURL string `json:"anthropic_base_url"`
 }
 
+// ourGatewayURL reports whether a displaced value is one WE could have written.
+//
+// Keyed on the host being loopback, not on the exact address, because the
+// address is what changes: the case this exists for is a re-run with a different
+// --gateway-addr, where the value being displaced is our own previous port. The
+// CLI only ever accepts a loopback listen address (gateway.isLoopbackSpelling
+// enforces it at parse time), so a loopback base URL cannot be the org relay this
+// record was built to preserve — that one is a remote host by definition.
+//
+// The deliberate limit: an org whose own relay runs on this machine's loopback is
+// treated as ours and not remembered. It is the same false-negative direction as
+// the rest of this record — forget rather than restore something wrong — and a
+// loopback relay is indistinguishable from ours by inspection anyway.
+func ourGatewayURL(raw string) bool {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return false
+	}
+	host := u.Hostname()
+	if ip := net.ParseIP(host); ip != nil {
+		return ip.IsLoopback()
+	}
+	return strings.EqualFold(host, "localhost")
+}
+
 func hasPriorEnv(homeDir string) bool {
 	_, err := os.Stat(priorEnvPath(homeDir))
 	return err == nil
@@ -188,7 +225,16 @@ func savePriorEnv(homeDir, value string) error {
 	if err != nil {
 		return err
 	}
-	return writeFileAtomic(path, raw, 0o600)
+	if err := writeFileAtomic(path, raw, 0o600); err != nil {
+		return err
+	}
+	// ENFORCED, not requested. writeFileAtomic's unix path preserves an EXISTING
+	// file's mode deliberately — right for the settings file it also writes, wrong
+	// here: this record can hold an org relay URL with an embedded credential, and
+	// a record that became readable once would stay readable through every
+	// rewrite. The settings file's mode is the developer's to choose; this one's is
+	// not.
+	return os.Chmod(path, 0o600)
 }
 
 // loadPriorEnv returns "" for every failure. A missing or unreadable record means

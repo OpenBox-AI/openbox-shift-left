@@ -603,13 +603,16 @@ func (a *app) runDevInit(args []string) int {
 	// --- the local gateway (phase 07 req 1) --------------------------------
 	// Opt-in, and the reasoning is in initgateway.go: this redirects live model
 	// traffic, unlike enforcement-by-default which is inert without a policy.
+	gatewayRunning := false
 	if withGateway {
 		fmt.Fprintf(a.stdout, "\nLocal gateway (model-call governance)\n")
 		home, code := a.gatewayHome()
 		if code != exitOK {
 			return code
 		}
+		gatewayRunning = true
 		if err := a.setupGateway(home, gatewayAddr, gatewayUpstream, gatewayVerbose); err != nil {
+			gatewayRunning = false
 			// NOT fatal to the whole install: the hooks are already in place and
 			// governing tool calls. Reporting this as a total failure would tell a
 			// developer to undo work that succeeded.
@@ -622,9 +625,22 @@ func (a *app) runDevInit(args []string) int {
 	// telling a developer otherwise is what sends them debugging failing model
 	// calls with no idea a relay exists. The comment block above reasons carefully
 	// about not overstating "ambient" for the same reason.
-	if withGateway {
+	//
+	// Which is why it is gated on the OUTCOME, not on the flag. setupGateway's
+	// failure is deliberately non-fatal — the hooks are in place and governing —
+	// but a warning on stderr followed by "a supervised gateway is running" on
+	// stdout is the same overstatement in the other direction, and the exit code
+	// is 0 either way, so stdout is all a fleet script has to go on.
+	switch {
+	case withGateway && gatewayRunning:
 		fmt.Fprintf(a.stdout, "\nDone. A supervised gateway is running and this machine's model calls now route through it.\n")
-	} else {
+	case withGateway:
+		// Deliberately does not claim where model calls go. This run did not stand
+		// a gateway up, but a PREVIOUS one may have left ANTHROPIC_BASE_URL set, so
+		// "they reach the provider directly" would be its own confident wrong
+		// claim. doctor is the command that actually knows.
+		fmt.Fprintf(a.stdout, "\nDone for the hooks — they are in place and governing tool calls. The gateway did NOT come up; see the warning above, and run `openbox doctor` for where this machine's model calls are pointed.\n")
+	default:
 		fmt.Fprintf(a.stdout, "\nDone. Nothing to run and no environment to keep set — the hooks do the rest.\n")
 	}
 	fmt.Fprintf(a.stdout, "  openbox dev verify     confirm this machine can reach and authenticate to OpenBox\n")

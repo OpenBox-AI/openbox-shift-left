@@ -405,3 +405,31 @@ func TestAFailedInstallLeavesNoUnitBehind(t *testing.T) {
 		t.Error("ANTHROPIC_BASE_URL was written despite the failure")
 	}
 }
+
+// TestUnitAddrMatchIsAWholeToken pins the ownership check that authorizes killing
+// whatever holds the port.
+//
+// A substring match made a shorter address match a longer one, so installing on
+// :878 while a stranger held it would decide the stranger was ours, unload the
+// WORKING gateway on :8788, and then fail — leaving ANTHROPIC_BASE_URL pointed at
+// a dead port. Over-refuse is the direction this check chose; over-terminate is
+// the one it must never take.
+func TestUnitAddrMatchIsAWholeToken(t *testing.T) {
+	const plist = "<string>--addr</string>\n<string>127.0.0.1:8788</string>\n"
+	const unitSystemd = `ExecStart=/usr/local/bin/openbox gateway --addr "127.0.0.1:8788"`
+
+	for name, tc := range map[string]struct {
+		body, addr string
+		want       bool
+	}{
+		"plist, exact":               {plist, "127.0.0.1:8788", true},
+		"systemd, exact":             {unitSystemd, "127.0.0.1:8788", true},
+		"plist, shorter port prefix": {plist, "127.0.0.1:878", false},
+		"plist, longer port":         {plist, "127.0.0.1:87880", false},
+		"plist, different host":      {plist, "127.0.0.2:8788", false},
+	} {
+		if got := containsAddrToken(tc.body, tc.addr); got != tc.want {
+			t.Errorf("%s: containsAddrToken(%q) = %v, want %v", name, tc.addr, got, tc.want)
+		}
+	}
+}

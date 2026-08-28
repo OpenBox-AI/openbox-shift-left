@@ -400,11 +400,20 @@ func waitForPortFree(addr string, within time.Duration) bool {
 
 // unitDescribesAddr reports whether the unit we wrote names this listen address.
 //
-// A substring match on the unit body, which is exactly right here: both renderers
-// put the address in the argv as `--addr <addr>` (the plist as its own <string>,
-// the systemd unit inside ExecStart), so finding it means OUR unit is configured
-// for this port. Reading the file is also what makes this an OWNERSHIP test
-// rather than a socket probe — the thing the old pre-check could not do.
+// A search of the unit body, which is exactly right here: both renderers put the
+// address in the argv as `--addr <addr>` (the plist as its own <string>, the
+// systemd unit inside ExecStart), so finding it means OUR unit is configured for
+// this port. Reading the file is also what makes this an OWNERSHIP test rather
+// than a socket probe — the thing the old pre-check could not do.
+//
+// WHOLE TOKEN, not a substring, because the answer authorizes KILLING whatever
+// holds the port. A plain strings.Contains makes a shorter address a match for a
+// longer one — a unit for `127.0.0.1:8788` "describes" `127.0.0.1:878` — so
+// installing on :878 while a stranger held it would unload the working gateway on
+// :8788 and then fail, leaving ANTHROPIC_BASE_URL pointed at a port with nothing
+// behind it. Requiring the neighbouring bytes to be outside an address token
+// (both renderers put a quote, an angle bracket or whitespace there) keeps the
+// error on the over-refuse side, which is the direction this check chose.
 //
 // Any read failure answers false: no unit we can read means nothing we can claim,
 // and refusing is the safe direction.
@@ -416,7 +425,37 @@ func unitDescribesAddr(unitPath, addr string) bool {
 	if err != nil {
 		return false
 	}
-	return strings.Contains(string(body), addr)
+	return containsAddrToken(string(body), addr)
+}
+
+// containsAddrToken reports whether addr appears in body delimited by bytes that
+// cannot be part of an address.
+func containsAddrToken(body, addr string) bool {
+	for i := 0; ; {
+		j := strings.Index(body[i:], addr)
+		if j < 0 {
+			return false
+		}
+		start := i + j
+		end := start + len(addr)
+		if !addrByte(body, start-1) && !addrByte(body, end) {
+			return true
+		}
+		i = start + 1
+	}
+}
+
+// addrByte reports whether the byte at i could be part of an address token. Out
+// of range counts as a delimiter: the string boundary ends the token.
+func addrByte(s string, i int) bool {
+	if i < 0 || i >= len(s) {
+		return false
+	}
+	c := s[i]
+	return c >= '0' && c <= '9' ||
+		c >= 'a' && c <= 'z' ||
+		c >= 'A' && c <= 'Z' ||
+		c == '.' || c == ':' || c == '-' || c == '_' || c == '[' || c == ']'
 }
 
 // rollbackUnit undoes a unit that was written and then could not be made to work.

@@ -435,3 +435,22 @@ func TestOnlyModelCallsWarnAboutAMissingSession(t *testing.T) {
 		}
 	})
 }
+
+// TestAgentIDIsBounded pins the third caller-supplied id to the same rule as the
+// other two. It is the one that reaches a SIGNED payload's metadata, so an
+// unbounded value does not merely mis-attribute the call — the event grows past
+// what core accepts and the whole record of that model call is lost.
+func TestAgentIDIsBounded(t *testing.T) {
+	if got := usableAgentID(strings.Repeat("a", maxRequestIDLen+1)); got != "" {
+		t.Errorf("an over-long agent id was accepted (%d chars kept); it must be dropped", len(got))
+	}
+	if got := usableAgentID("agent\nid"); got != "" {
+		t.Error("an agent id containing a newline was accepted")
+	}
+	if got := usableAgentID("agent-a1b2"); got != "agent-a1b2" {
+		t.Errorf("a normal agent id was dropped: %q", got)
+	}
+	if got := usableAgentID(""); got != "" {
+		t.Errorf("an absent agent id must stay absent, got %q", got)
+	}
+}

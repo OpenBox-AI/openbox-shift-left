@@ -189,7 +189,15 @@ func (e *Emitter) Emit(ctx context.Context, c gateway.Captured) {
 	id := Identity{
 		SessionID:    sessionID,
 		DeveloperDID: did,
-		AgentID:      c.RequestHeaders[agentHeader],
+		// BOUNDED for the same reason as the session id above: it is chosen by the
+		// caller, on a loopback listener that authenticates nobody, and it rides a
+		// SIGNED, spooled and POSTed payload. Unbounded, a header at net/http's
+		// 1 MiB ceiling produced a ~1 MiB event that core rejects outright — so a
+		// junk agent id did not just mis-attribute the call, it deleted the whole
+		// governance record of it. An unusable value is dropped rather than
+		// rejecting the event: agent id is attribution detail, and losing the
+		// attribution is much cheaper than losing the evidence.
+		AgentID: usableAgentID(c.RequestHeaders[agentHeader]),
 	}
 	ev := EventFor(id, e.requestID(c), e.now(), c)
 	if err := e.Spool.Append(ev); err != nil {
@@ -300,6 +308,22 @@ func usableSessionID(id string) bool {
 		return false
 	}
 	return !strings.ContainsAny(id, `/\`) && id != "." && id != ".."
+}
+
+// usableAgentID returns the caller's agent id when it is usable, and "" when it
+// is not — an empty agent id is already the normal case (Claude Code sends the
+// header only when an agent context exists), so dropping an unusable one costs
+// attribution detail and nothing else.
+//
+// Same rule as the request id, and it is the ABSENCE of this bound that mattered:
+// AgentID rides metadata on a signed payload, so an oversized header turned into
+// an oversized event that core rejects, losing the record of the model call
+// itself.
+func usableAgentID(id string) string {
+	if printableASCII(id, maxRequestIDLen) {
+		return id
+	}
+	return ""
 }
 
 // usableRequestID reports whether an upstream id may be used verbatim. Printable
