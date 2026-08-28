@@ -2,6 +2,14 @@ module github.com/openbox-ai/openbox-shift-left/telemetry
 
 go 1.27.0
 
+// The OTLP intake is the collector's OWN receiver (D-OSS-2), not a hand-rolled
+// decode: it handles both OTLP encodings and all three signal endpoints, so the
+// wire-format question is configuration rather than a fork in the design.
+//
+// It is also the largest third-party surface this product links, which is why
+// telemetry/ is its own module with its own guard_test.go. gateway/'s two-entry
+// allowlist stays untouched and this tree cannot leak into it — the module
+// boundary is the control, not a convention.
 require (
 	go.opentelemetry.io/collector/component v1.65.0
 	go.opentelemetry.io/collector/config/configgrpc v1.65.0
@@ -11,16 +19,11 @@ require (
 	go.opentelemetry.io/collector/pdata v1.65.0
 	go.opentelemetry.io/collector/receiver v1.65.0
 	go.opentelemetry.io/collector/receiver/otlpreceiver v0.159.0
+	go.opentelemetry.io/otel/metric v1.46.0
+	go.opentelemetry.io/otel/trace v1.46.0
+	go.uber.org/zap v1.28.0
 )
 
-// The OTLP intake is the collector's OWN receiver (D-OSS-2), not a hand-rolled
-// decode: it handles both OTLP encodings and all three signal endpoints, so the
-// wire-format question is configuration rather than a fork in the design.
-//
-// It is also the largest third-party surface this product links, which is why
-// telemetry/ is its own module with its own guard_test.go. gateway/'s two-entry
-// allowlist stays untouched and this tree cannot leak into it — the module
-// boundary is the control, not a convention.
 require (
 	github.com/Microsoft/go-winio v0.6.2 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
@@ -70,11 +73,8 @@ require (
 	go.opentelemetry.io/collector/receiver/xreceiver v0.159.0 // indirect
 	go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.70.0 // indirect
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.70.0 // indirect
-	go.opentelemetry.io/otel v1.45.0 // indirect
-	go.opentelemetry.io/otel/metric v1.45.0 // indirect
-	go.opentelemetry.io/otel/trace v1.45.0 // indirect
+	go.opentelemetry.io/otel v1.46.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
-	go.uber.org/zap v1.28.0 // indirect
 	go.yaml.in/yaml/v3 v3.0.5 // indirect
 	golang.org/x/crypto v0.54.0 // indirect
 	golang.org/x/net v0.57.0 // indirect

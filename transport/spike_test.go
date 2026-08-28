@@ -2,6 +2,7 @@ package transport
 
 import (
 	"bufio"
+	"errors"
 	"io"
 	"net"
 	"net/http"
@@ -12,6 +13,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 // This file IS the phase-11 gate (plan 260827-2301). It asks two questions and
@@ -273,6 +275,15 @@ func TestGoproxyStreamsPerChunk(t *testing.T) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.WriteHeader(http.StatusOK)
 		fl, _ := w.(http.Flusher)
+		// Flush the HEADERS before waiting on the first gate. Without this the
+		// test deadlocks itself and looks exactly like a buffering relay: the
+		// client's Do() blocks until response headers arrive, the headers do not
+		// leave until something flushes, and the first release only happens after
+		// Do() returns. That is a test bug wearing the costume of the gate's
+		// stop-and-report branch, and it cost one already.
+		if fl != nil {
+			fl.Flush()
+		}
 		for i := 0; i < chunks; i++ {
 			<-release[i]
 			_, _ = io.WriteString(w, "data: chunk-"+string(rune('0'+i))+"\n\n")
@@ -299,15 +310,15 @@ func TestGoproxyStreamsPerChunk(t *testing.T) {
 	br := bufio.NewReader(resp.Body)
 	for i := 0; i < chunks; i++ {
 		close(release[i])
-		line, err := br.ReadString('\n')
+		line, err := readLineBy(t, br, chunkDeadline)
 		if err != nil {
-			t.Fatalf("chunk %d: %v (a buffering relay stalls here)", i, err)
+			t.Fatalf("chunk %d: %v", i, err)
 		}
 		want := "data: chunk-" + string(rune('0'+i)) + "\n"
 		if line != want {
 			t.Fatalf("chunk %d: got %q want %q — boundaries were coalesced", i, line, want)
 		}
-		if _, err := br.ReadString('\n'); err != nil { // the blank separator line
+		if _, err := readLineBy(t, br, chunkDeadline); err != nil { // blank separator
 			t.Fatalf("chunk %d separator: %v", i, err)
 		}
 	}
@@ -332,6 +343,15 @@ func TestStreamingTeeDoesNotBuffer(t *testing.T) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.WriteHeader(http.StatusOK)
 		fl, _ := w.(http.Flusher)
+		// Flush the HEADERS before waiting on the first gate. Without this the
+		// test deadlocks itself and looks exactly like a buffering relay: the
+		// client's Do() blocks until response headers arrive, the headers do not
+		// leave until something flushes, and the first release only happens after
+		// Do() returns. That is a test bug wearing the costume of the gate's
+		// stop-and-report branch, and it cost one already.
+		if fl != nil {
+			fl.Flush()
+		}
 		for i := 0; i < chunks; i++ {
 			<-release[i]
 			_, _ = io.WriteString(w, "data: t"+string(rune('0'+i))+"\n")
@@ -369,7 +389,7 @@ func TestStreamingTeeDoesNotBuffer(t *testing.T) {
 	br := bufio.NewReader(resp.Body)
 	for i := 0; i < chunks; i++ {
 		close(release[i])
-		line, err := br.ReadString('\n')
+		line, err := readLineBy(t, br, chunkDeadline)
 		if err != nil {
 			t.Fatalf("chunk %d: %v — the tee is buffering the stream", i, err)
 		}
@@ -397,3 +417,31 @@ func (l *lockedWriter) Write(p []byte) (int, error) {
 	defer l.mu.Unlock()
 	return l.w.Write(p)
 }
+
+// readLineBy reads one line, failing rather than hanging past the deadline.
+//
+// A buffering relay's natural failure mode is a stall, and a stalled `go test`
+// tells the reader nothing — it looks like an environment problem, not a gate
+// answer. This converts it into a named failure.
+func readLineBy(t *testing.T, br *bufio.Reader, within time.Duration) (string, error) {
+	t.Helper()
+	type res struct {
+		line string
+		err  error
+	}
+	ch := make(chan res, 1)
+	go func() {
+		line, err := br.ReadString('\n')
+		ch <- res{line, err}
+	}()
+	select {
+	case r := <-ch:
+		return r.line, r.err
+	case <-time.After(within):
+		return "", errors.New("no chunk within " + within.String() + " — the relay is buffering the stream rather than flushing per chunk")
+	}
+}
+
+// chunkDeadline bounds one chunk. Generous: the assertion is about buffering,
+// not latency, so a slow machine must not produce a false stop-and-report.
+const chunkDeadline = 10 * time.Second

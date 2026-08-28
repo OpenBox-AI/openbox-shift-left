@@ -3,9 +3,16 @@ package telemetry
 import (
 	"context"
 	"fmt"
+	"io"
+	"os"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	metricnoop "go.opentelemetry.io/otel/metric/noop"
+	tracenoop "go.opentelemetry.io/otel/trace/noop"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/config/configgrpc"
@@ -28,6 +35,7 @@ type Receiver struct {
 	cfg     Config
 	emitter Emitter
 	warn    func(string, ...any)
+	logSink io.Writer
 
 	// counts answers doctor's "is it recording", which is a different question
 	// from "is it reachable" — a perfectly reachable receiver that no client was
@@ -64,6 +72,11 @@ type Option func(*Receiver)
 // the control test in the command package is what holds that.
 func WithEmitter(e Emitter) Option { return func(r *Receiver) { r.emitter = e } }
 
+// WithLogWriter redirects the COLLECTOR's own diagnostics (not this package's
+// warnings, which WithWarnFunc owns). Exists so a test can assert that a failing
+// receiver says something, rather than trusting that it would.
+func WithLogWriter(w io.Writer) Option { return func(r *Receiver) { r.logSink = w } }
+
 // WithWarnFunc sets the diagnostic sink.
 //
 // launchd sends a daemon's stdio to /dev/null unless the unit says otherwise, so
@@ -91,10 +104,44 @@ func (r *Receiver) Start(ctx context.Context, host component.Host) error {
 		return fmt.Errorf("telemetry: receiver already started")
 	}
 
+	built, err := r.build(ctx)
+	if err != nil {
+		return err
+	}
+
+	for i, c := range built {
+		if err := c.Start(ctx, host); err != nil {
+			// Unwind what already started. Leaving a half-started receiver behind
+			// would hold the port while the caller believes the install failed —
+			// and the install path's next act is to remove the unit, so the port
+			// would stay taken by a process nobody is tracking.
+			for _, s := range built[:i] {
+				_ = s.Shutdown(context.Background())
+			}
+			return fmt.Errorf("telemetry: start receiver: %w", err)
+		}
+	}
+
+	r.receivers = built
+	r.started = true
+	return nil
+}
+
+// build constructs the three signal receivers without binding anything.
+//
+// It is split out of Start for one reason, and it is worth stating: the receiver
+// PANICKED the first time it was really started, on a nil *zap.Logger inside the
+// factory — and every line of that failure happens HERE, in construction, before
+// a socket is involved. Because it lived inside Start, the only way to reach it
+// was a test that could bind, and on a host that cannot bind the whole thing was
+// unreachable and looked fine. Now the construction half is testable anywhere,
+// which is where a "compiles against the real API" claim was quietly standing in
+// for "runs".
+func (r *Receiver) build(ctx context.Context) ([]component.Component, error) {
 	factory := otlpreceiver.NewFactory()
 	cfg, ok := factory.CreateDefaultConfig().(*otlpreceiver.Config)
 	if !ok {
-		return fmt.Errorf("telemetry: otlpreceiver default config has an unexpected type")
+		return nil, fmt.Errorf("telemetry: otlpreceiver default config has an unexpected type")
 	}
 
 	// HTTP only. The gRPC endpoint is switched OFF rather than left at its
@@ -122,22 +169,22 @@ func (r *Receiver) Start(ctx context.Context, host component.Host) error {
 	})
 
 	if err := cfg.Validate(); err != nil {
-		return fmt.Errorf("telemetry: otlp config: %w", err)
+		return nil, fmt.Errorf("telemetry: otlp config: %w", err)
 	}
 
-	set := receiverSettings()
+	set := receiverSettings(r.logWriter())
 
 	logs, err := consumer.NewLogs(r.consumeLogs)
 	if err != nil {
-		return fmt.Errorf("telemetry: logs consumer: %w", err)
+		return nil, fmt.Errorf("telemetry: logs consumer: %w", err)
 	}
 	traces, err := consumer.NewTraces(r.consumeTraces)
 	if err != nil {
-		return fmt.Errorf("telemetry: traces consumer: %w", err)
+		return nil, fmt.Errorf("telemetry: traces consumer: %w", err)
 	}
 	metrics, err := consumer.NewMetrics(r.consumeMetrics)
 	if err != nil {
-		return fmt.Errorf("telemetry: metrics consumer: %w", err)
+		return nil, fmt.Errorf("telemetry: metrics consumer: %w", err)
 	}
 
 	// All three signals share one underlying listener inside the factory, but
@@ -146,36 +193,20 @@ func (r *Receiver) Start(ctx context.Context, host component.Host) error {
 	built := make([]component.Component, 0, 3)
 	lr, err := factory.CreateLogs(ctx, set, cfg, logs)
 	if err != nil {
-		return fmt.Errorf("telemetry: create logs receiver: %w", err)
+		return nil, fmt.Errorf("telemetry: create logs receiver: %w", err)
 	}
 	built = append(built, lr)
 	tr, err := factory.CreateTraces(ctx, set, cfg, traces)
 	if err != nil {
-		return fmt.Errorf("telemetry: create traces receiver: %w", err)
+		return nil, fmt.Errorf("telemetry: create traces receiver: %w", err)
 	}
 	built = append(built, tr)
 	mr, err := factory.CreateMetrics(ctx, set, cfg, metrics)
 	if err != nil {
-		return fmt.Errorf("telemetry: create metrics receiver: %w", err)
+		return nil, fmt.Errorf("telemetry: create metrics receiver: %w", err)
 	}
 	built = append(built, mr)
-
-	for i, c := range built {
-		if err := c.Start(ctx, host); err != nil {
-			// Unwind what already started. Leaving a half-started receiver behind
-			// would hold the port while the caller believes the install failed —
-			// and the install path's next act is to remove the unit, so the port
-			// would stay taken by a process nobody is tracking.
-			for _, s := range built[:i] {
-				_ = s.Shutdown(context.Background())
-			}
-			return fmt.Errorf("telemetry: start receiver: %w", err)
-		}
-	}
-
-	r.receivers = built
-	r.started = true
-	return nil
+	return built, nil
 }
 
 // Shutdown stops the receiver. Safe to call when Start never succeeded.
@@ -230,17 +261,36 @@ func (c *signalCounts) snapshot() map[Signal]int64 {
 	}
 }
 
-// receiverSettings builds the minimum component settings the factory needs.
+// receiverSettings builds the component settings the factory needs.
 //
-// The collector's own telemetry is left at its no-op defaults deliberately: this
-// process is a governance sensor, and wiring the collector's metrics/tracing into
-// it would mean the observer exporting observations of itself — more moving
-// parts, another surface, and nothing this lane's readers consume.
-func receiverSettings() receiver.Settings {
+// Every field here must be NON-NIL, and that sentence replaces a comment which
+// claimed the opposite. It used to pass `component.TelemetrySettings{}` and say
+// the collector's telemetry was "left at its no-op defaults" — but the zero value
+// of that struct is not a no-op, it is nil interfaces and a nil *zap.Logger, and
+// the factory dereferences the logger during creation. The receiver PANICKED on
+// the first real Start (otlpreceiver → DropInjectedAttributes → zap clone on nil).
+// It compiled, and compiling was never the same as starting.
+//
+// The collector's own metrics and traces really are discarded, and that part was
+// deliberate: this process is a governance sensor, and exporting the observer's
+// observations of itself is more surface for nothing any reader here consumes.
+// Discarding them is what noop providers do; a nil provider is a crash.
+//
+// The logger is NOT discarded. It goes to stderr at Warn and above, because this
+// daemon's stdio is the only place a silently-not-recording lane can be noticed,
+// and a receiver that fails internally after start would otherwise say nothing at
+// all.
+func receiverSettings(w io.Writer) receiver.Settings {
+	encoder := zapcore.NewConsoleEncoder(zap.NewProductionEncoderConfig())
+	core := zapcore.NewCore(encoder, zapcore.AddSync(w), zapcore.WarnLevel)
 	return receiver.Settings{
-		ID:                component.NewID(component.MustNewType("otlp")),
-		TelemetrySettings: component.TelemetrySettings{},
-		BuildInfo:         component.NewDefaultBuildInfo(),
+		ID: component.NewID(component.MustNewType("otlp")),
+		TelemetrySettings: component.TelemetrySettings{
+			Logger:         zap.New(core),
+			TracerProvider: tracenoop.NewTracerProvider(),
+			MeterProvider:  metricnoop.NewMeterProvider(),
+		},
+		BuildInfo: component.NewDefaultBuildInfo(),
 	}
 }
 
@@ -262,4 +312,15 @@ func (nopHost) GetExtensions() map[component.ID]component.Component { return nil
 // break the shipping binary rather than this module.
 func (r *Receiver) StartStandalone(ctx context.Context) error {
 	return r.Start(ctx, nopHost{})
+}
+
+// logWriter is where the collector's own diagnostics go.
+//
+// Defaults to stderr: under launchd that is the file the unit points at, which is
+// the only place a failing receiver is visible at all.
+func (r *Receiver) logWriter() io.Writer {
+	if r.logSink != nil {
+		return r.logSink
+	}
+	return os.Stderr
 }

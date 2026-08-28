@@ -42,6 +42,21 @@ var allowedDirectRequires = map[string]bool{
 	"go.opentelemetry.io/collector/pdata":                 true,
 	"go.opentelemetry.io/collector/receiver":              true,
 	"go.opentelemetry.io/collector/receiver/otlpreceiver": true,
+
+	// The three below became DIRECT on 2026-08-28, and the reason is not
+	// convenience: `component.TelemetrySettings` types its fields as
+	// `*zap.Logger`, `trace.TracerProvider` and `metric.MeterProvider`, so a
+	// non-nil value cannot be supplied without naming those packages. The zero
+	// value crashed the receiver on its first real start, so "don't import them"
+	// was never an option — see receiverSettings.
+	//
+	// All three were already in this module's graph as collector dependencies;
+	// what changed is honesty about which types this module names. That is not
+	// the allowlist-widening ADR-0023 warns against: the ADR's concern is
+	// smuggling in unreviewed code, and nothing new entered the build.
+	"go.uber.org/zap":                 true,
+	"go.opentelemetry.io/otel/trace":  true,
+	"go.opentelemetry.io/otel/metric": true,
 }
 
 // TestOnlyReviewedDirectRequires reads go.mod and fails on any direct require
