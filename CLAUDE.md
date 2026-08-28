@@ -119,6 +119,18 @@ reintroduce that: if something is provider-agnostic it goes in `hookflow` or
   rewrites developer files. Open item; disabling that one rule removes both. Lowering that
   floor is NOT the fix: below 4.0 every git SHA and UUID matches, and the
   enforce-path redactor REWRITES file bodies, so false positives corrupt files.
+  **This is not theoretical and it is not confined to `go.sum`.** Three victim
+  classes are now demonstrated in this repo: a Go identifier, a credential
+  fingerprint, `go.sum` checksums (two real base64 hashes replaced by
+  `${OPENBOX_REDACTED_ENTROPY}`, after which the build failed on a mismatch) and
+  — 2026-08-28 — **a Go source file written during a session**, where an Ed25519
+  TEST VECTOR became `${OPENBOX_REDACTED_ENTROPY}=` and an `APIKey:` literal
+  became `${OPENBOX_REDACTED_SECRET_ASSIGNMENT}`, silently, on the write. The
+  file did not compile and the cause was two steps removed from the symptom. Two
+  practical consequences until the rule is fixed: **check any file this repo
+  writes for that placeholder**, and prefer DERIVING a base64 test fixture in
+  code (`base64.StdEncoding.EncodeToString(seed)`) over writing the literal —
+  `cli/internal/telemetryemit/sentinel_test.go` does exactly that, and says why.
   Nested-JSON blindness WAS a second gap and is closed (2026-08-25) — both generic
   patterns now tolerate JSON quoting/escaping, which matters because a
   `tool_response` is JSON and every MCP result arrives escaped. **The JSON-escape
