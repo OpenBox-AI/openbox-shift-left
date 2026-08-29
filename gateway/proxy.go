@@ -42,11 +42,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"net/textproto"
 	"strings"
 	"time"
+
+	"github.com/openbox-ai/openbox-shift-left/gateway/internal/dialhook"
 )
 
 // hopByHopHeaders describe a single connection rather than the message, so a
@@ -148,21 +149,6 @@ func (g *Gateway) WithGate(ev Evaluator, gated func(*http.Request) bool) *Gatewa
 	return g
 }
 
-// upstreamDialContext is the TCP dial the relay's transport uses.
-//
-// It is a package variable for one reason: a test host that cannot bind a socket
-// has no upstream to dial, and the alternative -- letting a test substitute the
-// whole Transport -- would bypass DisableCompression, ForceAttemptHTTP2 and the
-// idle-pool settings above, which are exactly what the byte-identity assertions
-// exist to prove. Replacing only the dial keeps every one of those in the path.
-//
-// Same seam shape as installUnitFn/uninstallUnitFn in the CLI's gateway install.
-// Production never assigns it.
-var upstreamDialContext = (&net.Dialer{
-	Timeout:   10 * time.Second,
-	KeepAlive: 30 * time.Second,
-}).DialContext
-
 // New validates the configuration and returns the relay.
 func New(cfg Config) (*Gateway, error) {
 	if err := cfg.Validate(); err != nil {
@@ -183,7 +169,7 @@ func New(cfg Config) (*Gateway, error) {
 			// minutes, and an overall deadline would abort it mid-stream.
 			Transport: &http.Transport{
 				Proxy:             http.ProxyFromEnvironment,
-				DialContext:       upstreamDialContext,
+				DialContext:       dialhook.Dial,
 				ForceAttemptHTTP2: true,
 				MaxIdleConns:      100,
 				// Every request from this relay goes to the one upstream host, so

@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/openbox-ai/openbox-shift-left/client/memhttptest"
+	"github.com/openbox-ai/openbox-shift-left/gateway/internal/dialhook"
 )
 
 // TestMain points the relay's upstream dial at the in-memory registry.
@@ -19,6 +20,6 @@ import (
 // hand out, so a test that means to reach a genuinely unreachable host still
 // does.
 func TestMain(m *testing.M) {
-	upstreamDialContext = memhttptest.DialContext
+	dialhook.UpstreamDialContext = memhttptest.DialContext
 	os.Exit(m.Run())
 }

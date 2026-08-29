@@ -206,6 +206,25 @@ var allowedNonStdlibImports = map[string]bool{
 // follow a call into another package, so an unreviewed import would put code
 // beyond its reach. The allowlist keeps that surface enumerated and small; adding
 // to it is a decision, which is the point of making it fail here first.
+// selfModulePrefix is this module's own import path with its separator.
+//
+// An import rooted here is NOT an external dependency and exempting it is NOT an
+// allowlist widening — the distinction matters because widening the allowlist to
+// make an import pass is exactly what ADR-0023 forbids. The allowlist exists
+// because the credential scan only covers THIS module, so anything it pulls in
+// from elsewhere sits outside the scan. A subpackage of this module is inside it:
+// moduleSources below already walks it, and every rule in this file already
+// applies to it. Reading `gateway/internal/dialhook` as external would have said
+// the opposite of the truth.
+//
+// The trailing slash is load-bearing. Without it the prefix would also match a
+// sibling module whose path merely starts with these characters.
+const selfModulePrefix = "github.com/openbox-ai/openbox-shift-left/gateway/"
+
+func isSelfModule(importPath string) bool {
+	return strings.HasPrefix(importPath, selfModulePrefix)
+}
+
 func TestGatewayImportsAreConfined(t *testing.T) {
 	for _, path := range moduleSources(t) {
 		fset := token.NewFileSet()
@@ -221,7 +240,7 @@ func TestGatewayImportsAreConfined(t *testing.T) {
 			if idx := strings.Index(first, "/"); idx >= 0 {
 				first = first[:idx]
 			}
-			if strings.Contains(first, ".") && !allowedNonStdlibImports[importPath] {
+			if strings.Contains(first, ".") && !isSelfModule(importPath) && !allowedNonStdlibImports[importPath] {
 				t.Errorf("%s: import %q is not on the gateway's allowlist — the credential guard only scans this module, so a new external import puts code beyond its reach and needs a deliberate decision",
 					fset.Position(spec.Pos()), importPath)
 			}
@@ -391,5 +410,36 @@ func fine(h http.Header) string { return strings.ToLower(h.Get("Anthropic-Versio
 	}
 	if hits := scanSource(fset, file); len(hits) != 0 {
 		t.Errorf("scanSource flagged clean source: %v", hits)
+	}
+}
+
+// TestSelfModuleExemptionIsNarrow pins the shape of the exemption added above.
+//
+// It exists because "imports of our own repository are fine" is the version of
+// this rule that would be wrong: `client`, `decision` and `provider` all live
+// under the same repository prefix and all sit OUTSIDE this module's credential
+// scan, which is the entire reason this guard exists. Only paths under this
+// module's own directory are inside it.
+func TestSelfModuleExemptionIsNarrow(t *testing.T) {
+	const repo = "github.com/openbox-ai/openbox-shift-left/"
+	for _, in := range []string{
+		repo + "gateway/internal/dialhook",
+		repo + "gateway/gatewaytest",
+	} {
+		if !isSelfModule(in) {
+			t.Errorf("%q is inside this module but was treated as external", in)
+		}
+	}
+	for _, out := range []string{
+		repo + "client",
+		repo + "client/memhttptest",
+		repo + "decision",
+		repo + "transport",
+		repo + "gatewayfoo",
+		"github.com/elazarl/goproxy",
+	} {
+		if isSelfModule(out) {
+			t.Errorf("%q is outside this module's credential scan but was exempted", out)
+		}
 	}
 }
