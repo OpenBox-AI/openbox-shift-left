@@ -573,6 +573,48 @@ claims belong to phases 09–13 and are listed in their plan, not here.
     token count on every dashboard rather than as missing rows. Count the
     `llm_completion` activities for a session against the turns actually taken.
 
+### Additionally, for the lanes themselves (ADR-0022, phases 09–13)
+
+The paragraph above used to say the lanes' behavioural claims "belong to phases
+09–13 and are listed in their plan, not here." Both lanes now exist and emit, so
+their live-stack items belong with the rest. Items 34–39 are held by the dormant
+`testbed/46-otel-lane.sh` and `47-transport.sh`.
+
+Everything below is unproven for one shared reason: both lanes are verified by
+**replay** — real recorded traffic through the shipped code path on a host that
+cannot bind — so no socket, no supervisor and no control plane has been in the
+path of one of these events.
+
+34. **The OTLP HTTP intake accepts what the CLIENT actually exports.** The intake
+    itself is not unrun: `TestTelemetryCommandActuallyRecords` POSTs a real
+    OTLP/JSON export to a real receiver on a real port and reads the governance
+    event back off disk, and it **passed on a bind-capable host** (phase 09). What
+    it has never seen is a real Claude Code export — its own protobuf encoding,
+    its own resource attributes, its own batching. The replay path adds nothing
+    here, because it enters one layer BELOW the HTTP server
+    (`Receiver.ConsumeLogsJSON`).
+35. **The 13 telemetry env keys are the ones Claude Code reads.** This is the one
+    claim the repo cannot test about itself: every test asserts JSON we wrote, and
+    the client silently ignores a name it does not recognise, so a rename yields a
+    green suite and a receiver that never gets a record. The set is copied verbatim
+    from the sibling lab run that produced the corpus and pinned as a literal list
+    (`cli/internal/activation/keys.go`). Confirm by observing a record arrive, not
+    by reading the file back.
+36. **Core stores an `:otel:` `TurnCompleted` as its own row**, and its synthetic
+    span (`openbox.span_synthetic`) classifies as `llm_completion` after ingest.
+    Same failure mode as item 28: misclassification is silent.
+37. **Core stores a `:proxy:` `TurnCompleted` as its own row.** Its span carries
+    the provider's raw response body, so — exactly as for the gateway lane — it
+    contributes nothing to goal alignment. Confirm the row, not the alignment.
+38. **The election holds across a real session, not just per record.** Item 33
+    counts producers; this adds the ordering that broke once already — install
+    telemetry first and transport second, then confirm telemetry falls silent from
+    the next record rather than from the next daemon restart.
+39. **Volume at the transport lane's real cadence.** Measured locally at **70,080
+    bytes of spool per model call** (~334 MB per 5,000-call session, run
+    `20260827T063932Z-225cac`). What a live run adds is whether the flusher and the
+    control plane absorb that rate; it is a larger increment than item 30's.
+
 _When the run happens, record the artifact under
 `plans/260811-0245-tool-activity-event-shape/reports/` (ADR-0013 claims) and
 `plans/260811-1640-coding-agent-token-usage/reports/` (ADR-0014 claims), and

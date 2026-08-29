@@ -319,9 +319,12 @@ Three things to know:
   rather than replaced while a lane is active. If a value changed after OpenBox set it,
   removal **refuses** and names the key rather than overwriting your edit —
   `--force-restore` overrides that.
-- **`--remove-all` deletes data.** The CA, the lane logs, the activation record, and
-  the spool — which may hold captured events not yet delivered. It prints each path as
-  it goes, and it works on a machine whose credentials are gone.
+- **`--remove-all` deletes data.** The CA and its private key, the three lane logs,
+  and the activation record. It prints each path as it goes, and it works on a machine
+  whose credentials are gone. **The spool is deliberately kept** — it may hold captured
+  events not yet delivered, it lives outside `~/.openbox/`, and it is shared with the
+  hooks, which this command does not remove. The command names it and its file count;
+  delete it by hand if you mean to discard that evidence.
 - **Your open sessions keep their old routing.** The tool reads these settings when a
   session starts, so restart it after installing or removing a lane.
 
@@ -482,7 +485,9 @@ list). Specific to setup:
 | Windows | **build-verified only** — CI cross-compiles every change; no automated suite runs there, and `install.sh` is bash |
 | `--scope global` activation | **not verifiable by us** — it needs a managed-settings deployment in a real fleet |
 | Credential at rest | not protected on any platform; `0600` on macOS/Linux, nothing on Windows |
-| `--gateway` | **never run against a live stack.** Whether subscription-OAuth traffic even follows `ANTHROPIC_BASE_URL` is unmeasured, so who this covers is not yet settled ([ADR-0021](adr/ADR-0021-openbox-local-gateway.md) §8) |
+| `--gateway` | **never run against a live stack.** It governs the terminal CLI and **not** the desktop app — that much is measured (2026-08-27). Whether subscription-OAuth traffic follows `ANTHROPIC_BASE_URL` for *this* lane is still open, so who it covers is not fully settled ([ADR-0021](adr/ADR-0021-openbox-local-gateway.md) §8/§10); the two lanes below exist for the gap |
+| `--telemetry`, `--transport` | **verified by replay only, and never run against a live stack.** Real recorded model calls run through the shipped code on a host that cannot bind a socket: that proves the bytes, the mapping, the gate and the caps, and proves nothing about bind, listen, TLS to a real socket, or what the control plane stores. The desktop-app and OAuth coverage they exist for is **unconfirmed**. The OTLP intake itself is not in that list — a synthetic export has crossed it end to end on a bind-capable host. But that export was **JSON** and the tool is configured to send **protobuf**, so the decoder real traffic will use is untested, and the real client has never exported to this lane |
+| The telemetry lane's env keys | **unconfirmed against the client.** They are copied verbatim from a set proven in a sibling lab run and pinned as a literal list, but every test asserts JSON we wrote and Claude Code silently ignores a name it does not recognise — so a rename gives a green suite and a receiver that never gets a record |
 
 So: **no platform is end-to-end verified for this setup flow yet.** The commands,
 the credential file, the scope default and the enforce default are all covered by

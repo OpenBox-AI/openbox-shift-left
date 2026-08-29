@@ -19,9 +19,9 @@ What leaves the machine, what never does, and the one setting that changes it.
 | **Your provider account's email** | yes, if you are signed in | **new** — one field per session, read from Claude Code's own local account record. This is PII, and it egresses as governance evidence like your DID. Not gated by `content_capture`: it is attribution, not content. See [Account attribution](#account-attribution) |
 | **Your provider organization's UUID** | yes, if you are signed in | **new** — same source, same session field |
 | **Your provider organization's NAME, role, tier, billing** | **never** | all four sit in the same local file beside the two rows above, and none of them is sent. The evidence scope is org UUID + email, deliberately |
-| **Model-call request and response bodies** | only with the local gateway running, and only when the call names a session | **new** — the whole request the tool sent the model, which includes the **system prompt**, the full message history and every tool definition, plus the model's response. This is the largest content class OpenBox collects. Three bounds apply and all three are fallible: the `content_capture` switch, local secret redaction before anything is attached, and a 64KB cap. A body the provider sent **compressed is not captured at all** — redaction cannot inspect it, so a marker is stored instead. Same session caveat as the row below |
-| **Model-call HTTP headers** | only with the local gateway running, and only when the call names a session | **new** — and only the non-credential ones: `Authorization`, `x-api-key`, `Cookie`, `Set-Cookie` and four more are replaced with `[redacted]` by name before anything is attached. The KEY is kept so a reviewer can see one was sent. Gated by `content_capture`. A relayed call that carries no `x-claude-code-session-id` header is recorded NOWHERE — the gateway declines to invent a session, so this is a real gap in the record rather than a silent attribution |
-| **A one-way fingerprint of your provider credential** | only with the local gateway running, and only when the call names a session | **new** — a truncated SHA-256, so OpenBox can tell WHICH registered credential made a call without holding it. Not gated by `content_capture`: it is the account-binding control, and a privacy switch that removed it would let an org opt out of being identified |
+| **Model-call request and response bodies** | only with an **in-path lane** running (gateway or transport), and only when the call names a session | **new** — the whole request the tool sent the model, which includes the **system prompt**, the full message history and every tool definition, plus the model's response. This is the largest content class OpenBox collects. Three bounds apply and all three are fallible: the `content_capture` switch, local secret redaction before anything is attached, and a 64KB cap. A body the provider sent **compressed is not captured at all** — redaction cannot inspect it, so a marker is stored instead. Same session caveat as the row below |
+| **Model-call HTTP headers** | only with an **in-path lane** running (gateway or transport), and only when the call names a session | **new** — and only the non-credential ones: `Authorization`, `x-api-key`, `Cookie`, `Set-Cookie` and four more are replaced with `[redacted]` by name before anything is attached. The KEY is kept so a reviewer can see one was sent. Gated by `content_capture`. A relayed call that carries no `x-claude-code-session-id` header is recorded NOWHERE — the gateway declines to invent a session, so this is a real gap in the record rather than a silent attribution |
+| **A one-way fingerprint of your provider credential** | only with an **in-path lane** running (gateway or transport), and only when the call names a session | **new** — a truncated SHA-256, so OpenBox can tell WHICH registered credential made a call without holding it. Not gated by `content_capture`: it is the account-binding control, and a privacy switch that removed it would let an org opt out of being identified |
 | **Credentials** | **never** | they stay on your machine — in a plaintext file readable by you, see [Where credentials live](#where-credentials-live). The gateway relays yours to the provider byte-for-byte and stores none of it |
 | Git **commit trailer** and signed attestation | yes | commit sha, tree sha, session id — no diff, no file content |
 
@@ -393,6 +393,9 @@ Both are readable only by you.
 | `approver.json` | `~/.openbox/` | approver config, if you run one. No credentials |
 | `gateway.log` | `~/.openbox/` | the gateway daemon's stdio, with `--gateway` only. Diagnostics — that it started, and its throttled warnings that it is recording nothing. Not a copy of relayed traffic |
 | `gateway-prior-env.json` | `~/.openbox/` | the one `ANTHROPIC_BASE_URL` the gateway install displaced, so `--remove-gateway` can restore your org's own relay instead of deleting it. A URL, no credential |
+| `telemetry.log`, `transport.log` | `~/.openbox/` | the same, for the other two lanes. They exist for the same reason: launchd sends a daemon's stdio to `/dev/null` by default, and a throttled warning is the only signal that a perfectly working relay is recording nothing |
+| `activation.json` | `~/.openbox/` | `0600`. Per lane: the environment keys OpenBox wrote into the tool's settings, and **the values that were there first**, with a before/after SHA-256. It is what lets `--remove-all` restore your own relay or corporate proxy key by key instead of truncating a settings file. No credentials |
+| `transport-ca.pem`, `transport-ca.key` | `~/.openbox/` | **a certificate authority and its private key**, with `--transport`/`--full` only. Generated once on this machine, never transmitted, and name-constrained at generation to the single intercepted host — so a leaked key cannot mint a usable certificate for anything else. It has no more at-rest protection than `.env` does: anything running as you can read it, and with it impersonate that one host to this machine. `--remove-all` deletes it rather than leaving it behind a relay that is gone |
 
 | File | What it holds |
 |---|---|
@@ -404,6 +407,54 @@ Both are readable only by you.
 | `pending-approvals/`, `stale/` | content-free markers keyed by session id |
 | `halted-sessions/` | one small file per HALTed session — the policy reason, policy id and a timestamp, never tool content. It is what keeps a halted session refused ([ADR-0020](adr/ADR-0020-prompt-gate-and-halt-session-stop.md)); deleting it un-halts only this machine's view, and every verdict is already recorded server-side |
 | `approvals-auto.jsonl` | an autonomous approver's decisions, if you run one |
+
+### The three model-call lanes send different amounts, and one sends no content at all
+
+A model call can be observed three ways, and the privacy difference between them is
+larger than the table above can show in one row.
+
+- **`--gateway` and `--transport` are in-path relays.** They see the whole exchange,
+  so they are what the three body/header/fingerprint rows above describe. Same
+  `content_capture` gate, same local redaction before attachment, same 64KB cap.
+- **`--telemetry` sends no content whatsoever.** It receives the tool's own
+  OpenTelemetry export and binds exactly one record type to seven values: the model
+  id, four token counts, a duration and one request id. No cost — the server derives
+  that from a pricing table, and fabricating it here would invent a number. No prompt, no
+  completion, no body, no headers, no credential fingerprint. Its mapper takes **no
+  redactor**, because there is nothing to redact
+  (`cli/internal/telemetryemit/mapper.go`).
+
+**One environment key is deliberately withheld.** Claude Code supports
+`OTEL_LOG_RAW_API_BODIES`, which makes the client write raw prompt and completion
+bodies to disk. OpenBox does **not** set it. It would create a local liability with
+no corresponding evidence, since this lane ingests no bodies.
+
+**~97% of captured model-call requests are truncated.** Measured on 5,049 recorded
+calls: 96.75% of request bodies exceed the 65,536-rune cap (p50 529,175 runes, max
+2,566,660). Response bodies: 0.06%. So for an in-path lane the org typically holds
+the *head* of a prompt, not the prompt. That is accepted policy (OD1(c)), and it cuts
+both ways — less of your content leaves, and less of it is reviewable.
+
+### What `--remove-all` destroys
+
+Removal deletes local evidence. It is printed path by path as it goes, and it is not
+recoverable, so export anything you need first.
+
+**Deleted:** `transport-ca.pem` and `transport-ca.key` (leaving a trusted signing key
+behind a relay that no longer exists is a strictly worse posture than removing it),
+`gateway.log`, `telemetry.log`, `transport.log`, and `activation.json`.
+
+**Restored, not deleted:** every environment key OpenBox wrote into the tool's
+settings is put back to the value it displaced, key by key from `activation.json`.
+The settings file is never truncated, and a key that was ours is removed rather than
+blanked.
+
+**Deliberately kept:** the **spool** of undelivered events. It lives outside
+`~/.openbox/` (under the OS config directory) and it is shared with the hook path —
+`--remove-all` removes lanes, not hooks, so deleting it would destroy undelivered
+governed tool-call evidence belonging to a component that is still installed and
+still running. The command names the directory and the file count rather than staying
+silent about it; delete it by hand if you mean to discard that evidence.
 
 ## Where credentials live
 

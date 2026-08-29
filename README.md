@@ -166,6 +166,53 @@ Three things to know before you turn it on:
   stack. `openbox doctor` reports whether it is alive, whether this machine actually
   points at it, and what could bypass it.
 
+### Two more lanes, for the calls the gateway cannot see
+
+The gateway only governs what follows `ANTHROPIC_BASE_URL` — the terminal CLI. Two
+further lanes exist for the rest, and one command installs everything:
+
+```bash
+openbox init --provider claude-code --full        # hooks + telemetry + transport
+openbox init --provider claude-code --remove-all  # and back out again
+```
+
+- **`--telemetry`** runs a loopback OTLP receiver and points Claude Code's own
+  OpenTelemetry export at it. It carries **no content at all** — a model id, four
+  token counts, a duration and one request id — no cost, which the server derives.
+  Because it is the governed
+  tool reporting its own calls, it is *suppressible by the thing it observes*: the
+  weakest claim in this product, adopted because it is the only lane that reaches
+  the desktop app at all.
+- **`--transport`** is an in-path CONNECT proxy. An allowlisted host — one,
+  `api.anthropic.com` — is TLS-terminated with a CA generated on your machine and
+  served by the same relay the gateway uses; everything else is blind-tunnelled
+  untouched. It sees what the gateway sees, without needing the tool to honour a
+  base URL.
+
+Exactly one lane emits per model call, decided by where your settings actually route
+model calls (transport > gateway > telemetry). That is not a preference: the lanes'
+event ids are deliberately disjoint so nothing dedupes them, which means two lanes
+emitting would both store and **double every token count**. `openbox doctor` names
+the elected producer and warns when the elected lane has nothing listening.
+
+Four things to know before turning these on:
+
+- **They are verified by replay, not by running.** Real recorded model calls run
+  through the shipped code on a host that cannot open a socket. That proves the bytes,
+  the mapping, the gate and the caps; it proves nothing about bind, listen, TLS to a
+  real socket, or what the control plane stores. **No stack has ever received an
+  event from either lane**, and the desktop coverage that motivated them is intent,
+  not measurement.
+- **`--transport` installs a certificate authority on your machine.** It is generated
+  locally, never transmitted, and name-constrained to that single host so a leak
+  cannot mint a certificate for anything else. It has no more protection than your
+  credentials do — anything running as you can read it. `--remove-all` deletes it.
+- **Neither lane refuses a call**, for the same reason the gateway does not: the
+  refusal shape is unprobed.
+- **The transport lane cannot chain through a corporate proxy.** It clears the proxy
+  environment variables it would otherwise inherit, because a relay that inherits its
+  own address dials itself until sockets run out.
+
 ## Where things live
 
 ```
@@ -177,10 +224,17 @@ Three things to know before you turn it on:
   gateway.log   the daemon's stdio; the only place it says it is recording nothing
   gateway-prior-env.json   the ANTHROPIC_BASE_URL the install displaced, so
                            --remove-gateway can put your own relay back
+                    ── with --telemetry / --transport / --full ──
+  telemetry.log, transport.log   the same, per lane
+  activation.json  per lane: the env keys we wrote, and the values that were there
+                   first, so --remove-all restores them key by key (0600)
+  transport-ca.pem, transport-ca.key   the transport lane's CA and its private key
+                   — generated here, never sent, name-constrained to one host, and
+                   readable by anything running as you. --remove-all deletes both
 <project>/.claude/settings.local.json    which hooks fire here  (init --scope local)
 ~/.claude/settings.json                  ANTHROPIC_BASE_URL, with --gateway only
-~/Library/LaunchAgents/ai.openbox.gateway.plist        the gateway unit (macOS)
-~/.config/systemd/user/openbox-gateway.service        the gateway unit (Linux)
+~/Library/LaunchAgents/ai.openbox.{gateway,telemetry,transport}.plist   lane units (macOS)
+~/.config/systemd/user/openbox-{gateway,telemetry,transport}.service     lane units (Linux)
 ~/.claude/plugins/openbox-observe/       the plugin bundle + engine copy
 <os-config-dir>/openbox/                 runtime state: spool, audit logs
                                          (~/.config on Linux, ~/Library/Application Support
@@ -212,7 +266,7 @@ coordinates  OPENBOX_AGENT_DID, OPENBOX_AGENT_ID, …       env var  >  dev.json
 | **Autonomous approval** | a bounded approver answers inside the pause, so routine work never waits ([ADR-0012](docs/adr/ADR-0012-autonomous-approver.md)) |
 | **Lineage** | `session → commit → deploy`, with a signed commit attestation |
 | **Evidence** | each session reports its own effective posture, so the control plane never has to trust the endpoint's word |
-| **Model-call capture** | the request the tool actually sent the model, and the response — via an opt-in local relay, Claude Code only ([ADR-0021](docs/adr/ADR-0021-openbox-local-gateway.md)) |
+| **Model-call capture** | the request the tool actually sent the model, and the response — via an opt-in local relay, Claude Code only ([ADR-0021](docs/adr/ADR-0021-openbox-local-gateway.md)). Two further opt-in lanes exist for the calls that relay cannot see, both verified by replay and **never run against a live stack** ([ADR-0022](docs/adr/ADR-0022-native-telemetry-and-transport-lanes.md)) |
 
 ## How it works
 
@@ -258,7 +312,7 @@ adapter behind one SPI. Adding a tool is an adapter, not a fork.
 
 | Provider | Telemetry | Enforcement | Approvals | Model calls | Scope | Org mandate |
 |---|---|---|---|---|---|---|
-| **Claude Code** | shipped — hooks + durable spool | deny · ask · redact | full, incl. waking a session on a late decision | opt-in gateway, capture only | project or global | managed settings |
+| **Claude Code** | shipped — hooks + durable spool | deny · ask · redact | full, incl. waking a session on a late decision | three opt-in lanes (gateway, telemetry, transport), capture only, one elected per call | project or global | managed settings |
 | **Codex** | shipped — hooks + durable spool | deny · redact (no native "ask") | deny + findings channel | not built | user-wide only | `requirements.toml` / MDM (hook itself not yet mandatable) |
 | **Cursor** | not built | — | — | — | — | Team hooks available |
 
@@ -345,13 +399,23 @@ prevent, so the limits are documented as first-class:
   does not engage, because it covers *no verdict*, not *a HALT verdict*. Diagnosed
   live, core-side fix in flight
   ([diagnosis](plans/reports/debug-260814-1231-session-no-longer-active-halt.md)).
-- **Egress is observed, not controlled.** Without `--gateway`, OpenBox does not carry
-  the coding tool's traffic to its model provider at all; it records that posture as
-  evidence. With `--gateway` it relays and records every model call — but it still does
-  not *refuse* one: the refusal path is written and unwired, so a model call that
-  reaches the relay is forwarded
+- **Egress is observed, not controlled.** With no lane installed, OpenBox does not
+  carry the coding tool's traffic to its model provider at all; it records that
+  posture as evidence. With `--gateway` or `--transport` it relays and records every
+  model call — but it still does not *refuse* one: the refusal path is written and
+  unwired on **both** in-path lanes, so a model call that reaches either is forwarded
   ([ADR-0021](docs/adr/ADR-0021-openbox-local-gateway.md) §9). Nothing anywhere
   allow-lists the tool's other destinations.
+- **The two newer lanes have never run against a live stack, and their reason for
+  existing is unconfirmed.** `--telemetry` and `--transport` are verified by replaying
+  real recorded traffic through the shipped code on a host that cannot bind a socket.
+  The desktop-app and subscription-OAuth coverage they were built for is intent, not
+  measurement. `--telemetry` additionally reports what the governed tool chooses to
+  report, so it is suppressible by the thing it observes; treat its silence on an
+  otherwise-active session as a finding rather than as an absence.
+- **`--transport` puts a CA private key on the developer's machine.** Name-constrained
+  to the one intercepted host, generated locally, never transmitted — and readable by
+  anything running as that developer, exactly like the signing key.
 - **The gateway detects a bypass, it does not stop one.** Unsetting one environment
   variable is enough, and no OpenBox default prevents that. What you get is a hole in
   the record that is queryable and attributable, plus an `openbox doctor` warning.
@@ -359,7 +423,10 @@ prevent, so the limits are documented as first-class:
   ([the recipe](docs/gateway-mdm-recipe.md)).
 - **Content-based policy sees at most the first 64KB of a write.** Bodies are
   truncated before egress, so a rule that would match past that offset does not
-  fire. Local secret detection is not subject to the cap.
+  fire. Local secret detection is not subject to the cap. For model calls that bound
+  binds hard and it is now measured rather than estimated: **96.75% of 5,049 recorded
+  request bodies exceeded it** (p50 529,175 runes), so an org typically holds the head
+  of a prompt rather than the prompt.
 - **Windows is build-verified, not runtime-verified.** CI cross-compiles it on
   every change; no automated suite exercises it, and `install.sh` is bash.
 
@@ -370,8 +437,10 @@ Details and current status: **[Assurance](docs/architecture.md#assurance--what-t
 | | |
 |---|---|
 | `openbox auth` | credentials for this machine — it asks for everything authentication needs and nothing else. `--rotate` re-issues them for an agent that already exists |
-| `openbox init` | install hooks + posture. `--scope`, `--enforce=false`, `--install-git-hook`, `--role approver`, `--gateway` / `--remove-gateway` |
+| `openbox init` | install hooks + posture. `--scope`, `--enforce=false`, `--install-git-hook`, `--role approver`, `--gateway` / `--remove-gateway`, `--telemetry`, `--transport`, and `--full` / `--remove-all` for every lane at once |
 | `openbox gateway` | run the model-call relay in the foreground — what the service unit invokes, and how you see why it will not start |
+| `openbox telemetry` | the same, for the loopback OTLP receiver (`--telemetry` / `--full`) |
+| `openbox transport` | the same, for the in-path CONNECT relay (`--transport` / `--full`) |
 | `openbox doctor` | the posture actually in effect, who decides, what happens when they are unreachable, whether this directory has more than one OpenBox engine registered, and — with the gateway — whether it is alive, whether this machine points at it, and what could bypass it |
 | `openbox dev verify` | can this machine reach and authenticate to core? |
 | `openbox approve` | `list`, `allow`, `deny`, or `--watch --auto` for the autonomous approver |

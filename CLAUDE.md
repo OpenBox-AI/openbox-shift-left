@@ -758,8 +758,9 @@ workspace.
 deletion, 14 modules green under `-race`, both cross-compiles, and `cli` green
 under `GOWORK=off` — no socket, no stack.** The control test drives a real CONNECT → real TLS → real
 `gateway.Gateway` → real emitter → real spool file with no fake in it, over a
-`net.Pipe` with a refused upstream. So **no response body has ever traversed
-this lane**, byte-identity on the CONNECT path is unrun, and `GOWORK=off` for
+`net.Pipe` with a refused upstream. So at the close of phase 11 **no response body
+had traversed this lane** and byte-identity on the CONNECT path was unrun — both
+**RETIRED by phase 13**, see its block below. `GOWORK=off` for
 `transport/` is unverifiable on the dev host (x/net v0.50.0 absent from the
 module cache — the release artifact builds `cli`, which is verified). Install,
 doctor and env activation are phase 12's, alongside telemetry's — deferred rather
@@ -777,15 +778,17 @@ one lane erasing another are what let this survive.** The election therefore has
 to be an activation-time mutual exclusion across processes, never a client-side
 dedupe.
 
-**Two more model-call lanes, contracted but NOT BUILT** (ADR-0022, contract **v1.6**,
-2026-08-28 — phase 08 of plan 260827-2301, which gates 09–14). A local OTLP
-**telemetry** receiver (`otel_request_id`, `:otel:`) and a local in-path TLS
-**transport** relay (`proxy_request_id`, `:proxy:`) will cover what the gateway lane
-cannot: the desktop app and subscription-OAuth sessions, both measured capturable by
-the sibling lab repo (`openbox-logger` run `20260827T063932Z-225cac`, 97 calls, all
-OAuth, zero `x-api-key`). Right now the contract carries the discriminators and
-**nothing emits them** — `COVERAGE.md` says so explicitly, so a declared field is not
-read as a shipped lane. Four things not to re-litigate:
+**Two more model-call lanes: contracted here, BUILT in phases 09–13** (ADR-0022,
+contract **v1.6**, 2026-08-28 — phase 08 of plan 260827-2301, which gates 09–14).
+*This paragraph records the CONTRACT decision; the lanes' current status is the
+phase 13 block below, which supersedes it.* A local OTLP **telemetry** receiver
+(`otel_request_id`, `:otel:`) and a local in-path TLS **transport** relay
+(`proxy_request_id`, `:proxy:`) were built to cover what the gateway lane cannot: the
+desktop app and subscription-OAuth sessions, both measured capturable by the sibling
+lab repo (`openbox-logger` run `20260827T063932Z-225cac`, 97 calls, all OAuth, zero
+`x-api-key`) — **capturable in the lab is not covered in the field**, and no desktop
+session has yet produced a governance event end to end. Four things not to
+re-litigate:
 
 - **The lane is a CLAIM, not a rank, and T3 is the weakest claim in the product.**
   Telemetry is the governed tool reporting its own calls — suppressible by the thing
@@ -912,7 +915,8 @@ pattern:
 260827-2301, 2026-08-29). `openbox init --provider claude-code --full` installs hooks
 + telemetry + transport in proof order (unit → start → PROVE listening → env, rollback
 removes the unit on any later failure); `--remove-all` restores every managed env key,
-unloads and deletes every unit, and deletes the CA, logs, activation record and spool —
+unloads and deletes every unit, and deletes the CA, logs and activation record
+(NOT the spool — it is outside `~/.openbox` and shared with the hook path) —
 **before** the credential gate, because removal must not require the thing being removed
 to still be usable. `cli/internal/activation` is the shared settings-env mechanism
 (per-lane managed/original record at `~/.openbox/activation.json` 0600, before/after
@@ -992,19 +996,110 @@ model call.
 `plans/260827-2301-go127-oss-three-lanes/reports/verification-260829-phase-12-one-command-and-election.md`
 splits every claim by evidence strength.
 
-Next: phase 13 — conformance, fixtures and the probe-A instrument (its live half needs a
-bind-capable host and a stack). Then phase 14's docs reconciliation; the Cursor adapter;
-policy template packs. The language floor is
-`go 1.27.0` across `go.work` and all twelve modules, so every dependency resolves
-at latest with no pin. **Dependencies are module-scoped now, not "one for the
+**Both new lanes RECORD, proven by REPLAY of real recorded traffic** (phase 13,
+2026-08-29). A recorded model call crosses the CONNECT path byte-identically in both
+directions — on a replayed exchange with the upstream dial substituted — and a
+60-frame SSE response streams through it per chunk; a recorded OTLP export decodes
+through the collector's own unmarshaler and maps end to end. That retires phase 11's
+"no response body has ever traversed this lane" and the spike's "the gate exercised
+the plain-HTTP path only". Six things worth not re-litigating:
+
+- **The enabling seam is the smallest one available, and a `Config.DialContext` field
+  was REJECTED.** `gateway/internal/dialhook` holds the upstream dial (no module
+  outside `gateway` can import it); `gateway/gatewaytest` is the test-only mutator
+  with its own non-test-importer tripwire. The hazard the rejected option carries is
+  not injection — anything that can set `Config` already sets `Config.Upstream`, where
+  the credential goes — it is DRIFT: a production feature later populating the field
+  would silently stop the identity suite from describing the production dial path, and
+  `nil ⇒ default` makes that invisible. The dial is read PER DIAL, so a swap cannot
+  depend on construction order.
+- **A drill came back GREEN and that was the most useful result of the six.** The
+  `DisableCompression` mutation could not be detected by the assertion aimed at it:
+  `net/http` adds `Accept-Encoding` only when the request lacks one, so with the
+  fixture's own header present both settings behave identically. The fix is a second
+  case sending NO `Accept-Encoding`. **Without the drill, an assertion that reads
+  exactly like a control would have shipped as one.**
+- **OD1(c) is measured, not estimated: 96.75%** of 5,049 recorded request bodies
+  exceed the 65,536-rune cap (p50 529,175, max 2,566,660); responses 0.06%. Spool cost
+  is **70,080 bytes per model call**, ~334 MB per 5,000-call session — the number the
+  backend dedupe ask now carries. **Three denominators appear in that corpus and they
+  are different populations** (5,340 recorded requests / 5,231 carrying the retry
+  header / 5,049 flow-paired), all from run `20260827T063932Z-225cac`: one machine,
+  one workload, all subscription-OAuth. **The all-zero `x-stainless-retry-count` is
+  evidence the header EXISTS, not evidence about retry-around behaviour** — probe A
+  stays the only source for ADR-0021 §9, and `probes/refusal-injector/` is its
+  instrument.
+- **Four self-inflicted measurement errors are recorded rather than quietly fixed**,
+  because the shape recurs: a drill that reported RED with `-run` pointed at the wrong
+  package; a revert whose ambiguous anchor corrupted `gateway/proxy.go`; an OD1(c)
+  test that passed with the body STRIPPED rather than capped (content capture is a
+  `client.Config` field, not the env var assumed); and a corpus prefilter wrong by 8×.
+  All four are **a result that looks like a measurement and is not**.
+- **The `:proxy:` capture-OFF half holds BY COMPOSITION**, not by a per-lane case —
+  `gatewayemit`'s test covers lane-independent code. Sound today; **a gap the moment
+  `EventFor` branches on `Lane`.** Recorded so the composition is a decision rather
+  than an oversight.
+- **The gateway import guard was CORRECTED, not widened.** Its premise that "the
+  credential guard only scans this module" is false for a subpackage;
+  `TestSelfModuleExemptionIsNarrow` pins that `client`, `decision`, `transport` and a
+  lookalike `gatewayfoo` stay outside the one-prefix exemption.
+
+**Status: implemented; capture verified by REPLAY (bind-free, upstream dial
+substituted); install/removal choreography unit-verified; 61 of 61 gates green — 15
+modules × {`-race`, vet, windows/amd64, linux/arm64} + `cli` under `GOWORK=off`; 1,278
+declared tests, 1,860 verdicts, nothing invisible, 29 capability skips.** What replay
+does NOT prove: bind, listen, TLS to a real socket, the real dialer, brotli exchanges
+(excluded — stdlib cannot decode them), and anything stack-dependent. **No launchd
+install has ever run and no control plane has ever received an event from either
+lane**; the desktop/OAuth coverage both were built for is INTENT, not measurement.
+`testbed/46-otel-lane.sh` and `47-transport.sh` hold the live claims, dormant. One
+thing outside the replay HAS run: a **synthetic** OTLP export crossed the receiver's
+real HTTP intake end to end on a bind-capable host (phase 09). **That export was
+JSON, and `activation.TelemetryKeys` sets `OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf`
+— so NO test anywhere drives the collector's protobuf decoder, which is the only
+path production traffic takes.** `ConsumeLogsJSON` and the bind-guarded control test
+both use the JSON unmarshaler; a claim that "the intake is proven" reads past that.
+The real client has never exported to this lane, and the 13 env keys that would route
+it are the one thing this repo cannot verify about itself.
+
+**The redactor's reach is MEASURED now, and the attribution is the part that changes a
+decision.** 2,820 of 5,340 recorded model calls (52.8%) carry a `${OPENBOX_REDACTED_*}`
+marker, 22,060 occurrences from only **~200 distinct rewrite SITES** — ~110×
+amplification by context replay, since one rewritten file read early poisons every
+later call. By site: `redactEntropy` 28% and `secret_assignment` 27% — **our own two
+generic rules are 55%** — while gitleaks' `generic-api-key` is 13%. **Do not restate
+the old "two false positives" sentence, and do not treat "disable `generic-api-key`"
+as the fix**: it addresses a minority. Not every marker is a false positive, and
+nothing distinguishes them without inspecting the ~200 sites. **Awaiting an owner
+ruling; no fix is chosen.**
+
+Next: the Cursor adapter; policy template packs; and the live half of everything above —
+the dormant testbed phases (35, 45, 46, 47) and probe A, which additionally needs a
+bind-capable host, a real install and credentials. The language floor is
+`go 1.27.0` across `go.work` and all fifteen modules (`transport`, `telemetry` and
+`probes/refusal-injector` joined since), so every dependency resolves at latest
+with no pin. **Dependencies are module-scoped now, not "one for the
 repo"**: `cli` has `golang.org/x/term` (masked input, ADR-0015) and
 `google/renameio/v2`; `contracts/dev-event/conformance` has
 `santhosh-tekuri/jsonschema/v6` (+ `golang.org/x/text`, D-OSS-5), which reaches
 the test graphs of both adapters and `client`; `adapters/common/devconfig` has
 `pelletier/go-toml/v2` (D-OSS-6) and `joho/godotenv` (D-OSS-7);
 `adapters/common/hookflow` has `google/renameio/v2` (D-OSS-8); `cli` also has
-`kardianos/service` (D-OSS-3). **Seven external direct dependencies now, up from
-one.** Three things follow.
+`kardianos/service` (D-OSS-3); `telemetry` has **eleven** (eight
+`go.opentelemetry.io/collector/*` including `receiver/otlpreceiver`, plus
+`otel/metric`, `otel/trace` and `go.uber.org/zap`, D-OSS-2); `transport` has
+`elazarl/goproxy` (D-OSS-1); `decision` has `zricethezav/gitleaks/v8` (D-OSS-4).
+**Nineteen DISTINCT external modules now, up from one** — 20 by per-module entry,
+because `renameio` is required by both `cli` and `hookflow`; keep the two numbers
+apart rather than picking whichever is being argued — and the number that is actually paid is transitive: phase 09 measured
+`telemetry`'s tree at **492 transitive packages / 124 modules in graph** (against
+`gateway`'s 381 / 206), with a **leak check of zero** — no collector require reaches
+`gateway`, `decision`, `client`, `cli` or either adapter. The binary
+is **40,287,986 bytes (38.4 MB) on darwin/arm64 via the release path
+(`GOWORK=off`), measured 2026-08-30**, against
+the 17 MB recorded while the mapper was unlinked; OD5 accepted +16.5 MB, so the
+delivered total is ~5 MB above the number the decision was made on. Three things
+follow.
 **A new dependency in a shared module needs `go mod tidy` in every module that
 transitively depends on it**, or `GOWORK=off` builds fail on a missing go.sum
 entry while the workspace build stays green — the release path is the one that

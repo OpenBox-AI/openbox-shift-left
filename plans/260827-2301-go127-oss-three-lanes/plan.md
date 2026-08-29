@@ -1,9 +1,9 @@
 ---
 title: "Go 1.27 + OSS foundation, then Three Lanes, One Pipeline"
 description: "One sequence, two stages: raise the Go floor and replace hand-rolled components with maintained libraries, then fold openbox-logger's telemetry + transport observation into shift-left as native Go services under the 2026-08-27 owner rulings."
-status: in-progress
-progress: "stage A complete; stage B 08 done, 09+10 partial, 11-13 done, 14 pending (~86h of ~89h)"
-updated: 2026-08-29
+status: complete
+progress: "stage A complete; stage B 08 done, 09+10 partial, 11-14 done (~89h of ~89h) — every live-stack claim remains dormant"
+updated: 2026-08-30
 priority: P1
 effort: ~89h (14 phases: stage A ~36h, stage B ~53h)
 branch: feat/tool-content-capture
@@ -102,27 +102,28 @@ joining gateway turns to goal alignment (stays openbox-core#130) · answering
 probe A — stage B builds the instrument, not the answer. Stage A changes nothing
 about what egresses — no content field, gate or cap moves in phases 01–07.
 
-## Progress (2026-08-28)
+## Progress (2026-08-30)
 
-**Stage A complete. Stage B: 08 done, 09 and 10 partial, 11–13 done, 14 pending.**
-~86h of ~89h delivered by phase weight; 1 of the 7 stage-B phases remains.
+**Stage A complete. Stage B: 08 done, 09 and 10 partial, 11–14 done. Plan complete
+by phase weight (~89h of ~89h).**
 
 | | state |
 |---|---|
-| Tests with a verdict | **1140 / 1140** across 13 modules, **0 invisible** (was 205/840 in the 6 affected modules) |
+| Tests with a verdict | **1,860 verdicts from 1,278 declared** across 15 modules, **0 invisible** (was 205/840 in the 6 affected modules) |
 | Socket-verified | **25 / 25 packages green over real TCP** (owner's machine, 2026-08-28) |
-| Skips | 21, each naming the host capability it needs (19 new guards, 2 pre-existing opt-ins) |
-| Gates | **52/52** — 13 modules × `-race`, `vet`, `windows/amd64`, `linux/arm64`, `GOWORK=off` |
+| Skips | 29, each naming the host capability it needs |
+| Gates | **61/61** — 15 modules × `-race`, `vet`, `windows/amd64`, `linux/arm64`, plus `cli` under `GOWORK=off` |
 | Conformance | 38 numbered cases run, 38 pass |
-| Binary | still 17 MB — the mapper is unlinked, so OD5's +16.5 MB arrives with the daemon subcommand |
+| Binary | **40,287,986 bytes (38.4 MB)**, darwin/arm64, release path — the mapper is linked now; ~5 MB above the +16.5 MB OD5 accepted |
 
-**What actually blocks the rest.** Phase 13 is done, so **14 is the last unit of
-work** and it is documentation reconciliation. What still gates on a live stack has
-NOT moved: the three dormant testbed phases (35, 45, 46, 47), and probe A, which
-additionally needs a bind-capable host and real credentials. Phase 13 changed the
-evidence for the CAPTURE half of both new lanes from "unit-verified" to "proven on
-real recorded traffic"; it changed nothing about the live half, and phase 14 must
-not blur the two.
+**What the plan did NOT deliver, stated plainly.** Every phase is done and **nothing
+stack-dependent has been demonstrated**. The dormant testbed phases (35, 45, 46, 47)
+and probe A still gate all of it, and probe A additionally needs a bind-capable host
+and real credentials. Phase 13 moved the CAPTURE half of both new lanes from
+"unit-verified" to "proven on real recorded traffic"; phase 14 wrote that down
+without blurring it into the live half. **The desktop and subscription-OAuth
+coverage the two lanes were built for remains INTENT, not measurement** — that is
+the plan's motivating claim, and it is the one thing it could not close from here.
 
 **The socket run happened, and it is now GREEN (2026-08-28, owner's machine).**
 First pass: 21 of 25 packages, with 4 failures — all in tests whose servers must
@@ -208,7 +209,7 @@ by any of this.
 | 11 | [Transport proxy as native service (`:proxy:`, goproxy)](phase-11-transport-proxy-service.md) | 04, 10 | **done§** | 15h |
 | 12 | [One-command install/remove + producer election](phase-12-one-command-and-election.md) | 09, 11 | **done¶** | 6h |
 | 13 | [Conformance, fixtures & probe-A instrument](phase-13-conformance-fixtures-probe.md) | 10, 11 | **done‖** | 8h |
-| 14 | [Coverage matrix & docs reconciliation](phase-14-coverage-and-docs.md) | 09–13 | pending | 4h |
+| 14 | [Coverage matrix & docs reconciliation](phase-14-coverage-and-docs.md) | 09–13 | **done⁑** | 4h |
 
 \* **Phase 04** is implemented; its real install/uninstall cycle and the
 `gateway.log` check need a machine that can bind a listener and run `launchctl`.
@@ -283,6 +284,74 @@ phase's criteria. And the gate exercised the **plain-HTTP path only**: the MITM
 response copy is different code, read statically, so running the CONNECT path is
 the FIRST thing the conformance work should do. First-byte latency is untested.
 [Report](reports/verification-260829-phase-11-goproxy-spike.md).
+
+**⁑** **Phase 14 is DONE (2026-08-30)** —
+[verification-260830-0022-three-lanes](../reports/verification-260830-0022-three-lanes.md).
+Documentation-only; the one code change is a false help string. Four things came out
+of it.
+
+**Four false claims were found by the sweep, and two of them were the same defect in
+two places.** `docs/architecture.md:223` still said "**Neither lane exists yet**";
+`COVERAGE.md` still said no response body had traversed `:proxy:`; and BOTH the
+`--remove-all` flag help and `getting-started.md` claimed the command deletes the
+**spool**, which `purgeLaneData` deliberately does not — it is outside `~/.openbox/`
+and shared with the hook path, and the code says so in a comment. The falsehood
+pointed the dangerous direction: an offboarding developer scrubbing a laptop would
+believe captured prompt and file-content evidence was gone. The string was corrected
+(the flag, the flag-block comment, `initlanes.go`, the getting-started prose — and a
+FIFTH copy inside CLAUDE.md's own phase-12 paragraph that the first sweep missed
+because it sat outside every hunk this phase touched, caught by review); **no
+behaviour was touched**, and a true full teardown stays the owner item phase 12 left
+open. Five copies of one sentence is the finding: a claim repeated per document is
+corrected per document, and grepping only the files you are already editing finds
+four of five.
+
+**The phase's own draft overstated in the "safe" direction, which is still false.**
+It was about to record the OTLP HTTP intake as unrun, because phase 13's report says
+the replay "enters one layer below it" and its control test "skips here". But
+`TestTelemetryCommandActuallyRecords` POSTs a real export to a real receiver on a
+real port and **passed on a bind-capable host** (phase 09, footnote † above) — "skips
+here" means the bind-denied dev host, not never. The correct sentence is that a
+**synthetic** export has crossed the intake end to end and the **real client** never
+has. Understating erases evidence the product earned; it is not the conservative
+choice.
+
+**Then the corrected sentence turned out to be incomplete in the OTHER direction, and
+a review pass caught it.** "A synthetic export crossed the intake end to end" is true
+and hides the thing that matters: that export was **JSON**
+(`telemetrycapture_test.go:67,168`), the replay decodes with `plog.JSONUnmarshaler`,
+and production is configured `OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf`
+(`activation/keys.go:64`). **No test in the repository drives the collector's
+protobuf decoder — the only path real traffic takes.** `MAPPING.md` item 34 had said
+so in full; the terser sentences in four other documents had not, and a reader
+trusting those would believe the intake proven on the one dimension where the fixture
+and real traffic actually differ. All five now carry the encoding caveat. The lesson
+is narrower than "don't overstate": **a claim can be individually true in five places
+and still mislead, because the qualifier only survived in the longest one.**
+
+**Two numbers had to be re-measured rather than copied.** The binary is
+**40,287,986 bytes (38.4 MB)** on darwin/arm64 via the release path — the plan's
+"still 17 MB" predated the telemetry link, and the delivered total is ~5 MB above the
++16.5 MB OD5 accepted. And the dependency count in `CLAUDE.md` was stale at stage-A
+values (seven direct requires, twelve modules) against an actual **19 distinct
+external modules — 20 by per-module entry, since `renameio` is required by both
+`cli` and `hookflow` — and 15 modules**. The
+transitive cost is cited as phase 09 measured it (**492 packages / 124 modules in
+graph**, leak check zero) rather than as go.mod indirect lines, which is a weaker
+metric that happens to be easier to count.
+
+**A wording contract now governs the two lanes, because the overstatement is a single
+verb.** "Verified" alone is never used of them — always "verified by replay", with
+the dial substitution named in the same sentence — and "byte-identical" never stands
+as a product property, because the *gateway's* byte identity IS socket-verified while
+the *transport CONNECT path's* is not. `COVERAGE.md` gained a §1b per-signal ×
+per-lane matrix whose `:otel:` content row is the one that matters: that lane carries
+**no content at all**, and `OTEL_LOG_RAW_API_BODIES` is deliberately withheld.
+
+**Status: documentation reconciled; `cli` green (build, vet, full test suite, and
+`GOWORK=off`); zero broken links across the seven touched documents.** Nothing about
+the live half moved, and phase 14 was not able to move it: the dormant testbed phases
+(35, 45, 46, 47) and probe A still gate every stack-dependent claim.
 
 **‖** **Phase 13 is DONE (2026-08-29)** —
 [verification-260829-phase-13-replay-conformance](reports/verification-260829-phase-13-replay-conformance.md).

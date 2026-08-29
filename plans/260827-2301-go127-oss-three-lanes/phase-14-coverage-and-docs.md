@@ -9,7 +9,7 @@
 ## Overview
 
 - Date: 2026-08-27 · Priority: P1 · Effort: 4h
-- Implementation status: pending · Review status: pending
+- Implementation status: implemented (2026-08-30) · Review status: pending
 - Make the documentation true about what now exists — including what still does not
   work. Runs last because it documents what phases 09–13 *actually proved*, not what
   they intended.
@@ -97,15 +97,15 @@ machine-owned artifacts rather than copying their content.
 
 ## Todo
 
-- [ ] coverage matrix built from phase reports
-- [ ] assurance limits updated (T3, truncation, CA, allowlist, dormant refusal, OD4)
-- [ ] data-and-privacy rewritten for three lanes + removal deletions
-- [ ] CLAUDE.md status block
-- [ ] MAPPING.md §7 items
-- [ ] dependency story finalized with measured numbers (incl. otlpreceiver tree)
-- [ ] absolute-claim sweep across README and docs
-- [ ] verification report by evidence strength
-- [ ] getting-started: the two commands
+- [x] coverage matrix built from phase reports
+- [x] assurance limits updated (T3, truncation, CA, allowlist, dormant refusal, OD4)
+- [x] data-and-privacy rewritten for three lanes + removal deletions
+- [x] CLAUDE.md status block
+- [x] MAPPING.md §7 items
+- [x] dependency story finalized with measured numbers (incl. otlpreceiver tree)
+- [x] absolute-claim sweep across README and docs
+- [x] verification report by evidence strength
+- [x] getting-started: the two commands
 
 ## Success criteria
 

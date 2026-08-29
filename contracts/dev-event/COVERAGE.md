@@ -37,22 +37,43 @@ relay (`:proxy:`) are meant to cover the desktop and subscription-OAuth calls th
 gateway lane cannot reach — phases 09–13 of plan
 `260827-2301-go127-oss-three-lanes`.
 
-As of **2026-08-29** both are INSTALLABLE — `openbox init --provider claude-code
+As of **2026-08-30** both are INSTALLABLE — `openbox init --provider claude-code
 --full` installs and enables them, `--remove-all` backs them out (phase 12) — and both
-remain unconfirmed against a real client:
+remain unconfirmed against a real client.
 
-- **`:proxy:` (transport)** — the relay and its capture are BUILT and verified: a
-  CONNECT to the allowlisted host is TLS-terminated with a project CA and served by
-  the existing gateway relay, and the evidence reaches the spool. Two limits stand:
-  no response body has traversed it yet (its control test's upstream always refuses),
-  and refusal is dormant, so this lane OBSERVES and never stops a call.
+**Read this before reading any row below.** Both new lanes are verified by REPLAY:
+real recorded traffic through the shipped code path, bind-free, with the relay's
+upstream dial substituted (`gateway/gatewaytest`) and no socket anywhere. That proves
+the bytes the relay forwards and captures, the mapping, the gate and the caps — it
+proves nothing about bind, listen, TLS to a real socket, the OTLP HTTP intake, or what
+core stores. Those live only in the dormant `testbed/46-otel-lane.sh` and
+`47-transport.sh`.
+
+- **`:proxy:` (transport)** — a CONNECT to the allowlisted host is TLS-terminated
+  with a project CA and served by the existing gateway relay, and the evidence
+  reaches the spool. **A recorded model call now crosses that path byte-identically
+  in both directions, and a recorded 60-frame SSE response streams through it per
+  chunk** (phase 13) — retiring phase 11's "no response body has ever traversed this
+  lane". One limit stands where it did: refusal is dormant, so this lane OBSERVES and
+  never stops a call.
 - **`:otel:` (telemetry)** — the receiver, the mapper and `openbox telemetry` all
-  exist and are wired; emission is suppressed unless this lane wins the producer
-  election. **What has never been confirmed is that the env keys the installer
-  writes are the ones the client actually reads.** They are copied verbatim from a
-  proven set in a sibling lab repo and pinned as a literal list, but every test around
-  them asserts JSON we wrote, and the client silently ignores a name it does not
-  recognize. A rename yields a green suite and a receiver that never gets a record.
+  exist and are wired, and a real recorded OTLP export maps end to end: 20 records,
+  16 event types, of which `api_request` becomes a conformant `TurnCompleted` and the
+  other 15 are **counted as drops** so a lane dropping everything is distinguishable
+  from a quiet session. Emission is suppressed unless this lane wins the producer
+  election. Two things are still unconfirmed. The replay enters one layer BELOW the
+  HTTP server, so it adds nothing about the intake. **One synthetic export has
+  crossed that intake end to end on a bind-capable host** (phase 09's control test:
+  real command, real receiver, real POST, real spool) — but **it was JSON, and
+  production is configured for `http/protobuf`**
+  (`cli/internal/activation/keys.go`). No test in this repository drives the
+  collector's protobuf decoder, so the wire format real traffic will actually use
+  is unexercised, and the real client has never exported to this lane at all. And **it has never been confirmed that the env keys the
+  installer writes are the ones the client actually reads** —
+  they are copied verbatim from a proven set in a sibling lab repo and pinned as a
+  literal list, but every test around them asserts JSON we wrote, and the client
+  silently ignores a name it does not recognize. A rename yields a green suite and a
+  receiver that never gets a record.
 
 **Exactly one lane emits a model-call turn per session**, decided by an election
 derived from where the tool's settings route model calls — precedence transport >
@@ -88,6 +109,60 @@ observes. A lane's presence in a row will say which one produced the evidence.
 | `SubagentStarted` *(v1.2)* | `SubagentStart` hook | *(unsurveyed)* | **none** |
 | `PermissionDenied` *(v1.2)* | `PermissionDenied` hook — **auto-mode classifier denials only**; a static `permissions.deny` rule denies without firing it (verified), so absence is not evidence that nothing was denied | `permissionRequest`? *(unsurveyed)* | **none** |
 | `APIError` *(v1.2)* | `StopFailure` hook | *(unsurveyed)* | **none** |
+
+## 1b. Model-call coverage matrix — per signal, per lane
+
+Section 1 maps HOOKS, and none of the three model-call producers has one. This
+table is what each *lane* sees of a single model call. It is deliberately not
+averaged into a "model calls are governed" sentence: the three lanes differ in what
+they carry, in who can suppress them, and in how strongly each is verified.
+
+All three are **Claude Code only, and structurally so** — `--gateway`, `--telemetry`
+and `--transport` are rejected for `--provider codex` (`cli/cmd/openbox/main.go`),
+the transport allowlist holds one host (`api.anthropic.com`), and the telemetry keys
+are `CLAUDE_CODE_*`. **Codex and Cursor: no lane, and no probe has been run** — their
+absence here is unsurveyed, not measured-empty.
+
+| Signal | `:gateway:` | `:proxy:` (transport) | `:otel:` (telemetry) |
+|---|---|---|---|
+| Model **request** body (system prompt, full history, tool definitions) | ✅ captured | ✅ captured | ❌ **never** — this lane binds no content at all |
+| Model **response** body | ✅ captured | ✅ captured | ❌ never |
+| Request/response headers | ✅ | ✅ | ❌ |
+| 4 token counts + model id | ✅ | ✅ | ✅ (its whole payload) |
+| Credential fingerprint (one-way) | ✅ | ✅ | ❌ |
+| Compressed (`gzip`/`br`) response body | ⚠️ marker only, never content | ⚠️ marker only | n/a |
+| Refuse a call on a verdict | ⚠️ written, **dormant** | ⚠️ written, **dormant** | ❌ impossible — out of path |
+| Terminal CLI | ✅ | ✅ | ✅ |
+| **Desktop app** | ❌ measured-empty 2026-08-27 | ⬜ intended, **unconfirmed** | ⬜ intended, **unconfirmed** |
+| Subscription-OAuth session | ⬜ open (ADR-0021 §8/§10) | ⬜ intended, **unconfirmed** | ⬜ intended, **unconfirmed** |
+| Suppressible by the governed tool | no — in path | no — in path | **yes** — the tool reports its own calls |
+| Strongest evidence to date | socket-verified relay; no live stack | **replay** (bind-free) | **replay** (bind-free); intake's JSON path crossed by a synthetic export, **protobuf path — what production uses — untested** |
+
+✅ shipped and exercised · ⚠️ present but not active · ⬜ intended, no evidence
+either way · ❌ absent by construction
+
+**The `:otel:` row that matters most is the content one.** This lane carries no
+prompt, no completion and no body — only the model id, four token counts, a duration
+and one request id (`cli/internal/telemetryemit/mapper.go`). **No cost**: the server
+derives that from a model-keyed pricing table, and `turnFor` never sets it. Its mapper
+takes **no redactor**, deliberately, because there is nothing to redact; that is a
+correct design today and the thing to re-check first if body ingestion is ever added.
+`OTEL_LOG_RAW_API_BODIES` — which would make the client dump raw prompt and
+completion bodies to disk — is deliberately **subtracted** from the key set the
+installer writes, so the lane creates no liability it has no evidence to justify.
+
+**"Suppressible" is the row that decides how much a reader may lean on a lane.**
+Telemetry is the governed tool reporting its own calls, so it is suppressible by the
+thing it observes — the weakest claim in the product. It is adopted because it is the
+only lane that even attempts desktop and OAuth coverage today, and OD4 is the
+compensating control: telemetry silence on an otherwise-active session is a
+**finding**, not an absence.
+
+**The two ⬜ columns are the honest centre of this table.** Desktop and OAuth coverage
+is the reason both lanes were built, and neither has been confirmed against a real
+client — the desktop cell is intent, and only `testbed/46-otel-lane.sh` and
+`47-transport.sh` can turn it into a measurement. Do not read "built for it" as
+"covers it".
 
 ## 2. Field-derivation rules
 

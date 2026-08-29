@@ -220,8 +220,9 @@ Being precise here is part of the product.
     authorization and none carrying `x-api-key` (openbox-logger run
     `20260827T063932Z-225cac`). [ADR-0022](adr/ADR-0022-native-telemetry-and-transport-lanes.md)
     builds both lanes, so the open question is now about this lane's reach rather
-    than about a class of developer being ungoverned. **Neither lane exists yet**
-    — the contract carries their discriminators and nothing emits them.
+    than about a class of developer being ungoverned. **Both lanes now exist and
+    are installable** (2026-08-30) — see the bullet below for what that does and
+    does not buy.
   - **A compressed body is recorded as a marker, not as content.** The client's own
     `Accept-Encoding` is relayed verbatim, so a provider may legitimately answer
     `gzip` — and compressed bytes are opaque to the secret detector, which would
@@ -267,6 +268,66 @@ Being precise here is part of the product.
     a product decision and is **not** made yet. Related and smaller: the relay
     buffers up to 64 MiB per in-flight request with no concurrency cap, so the same
     unauthenticated listener is a local memory-pressure lever.
+- **Two more model-call lanes exist, and both are verified by REPLAY rather than by
+  running** ([ADR-0022](adr/ADR-0022-native-telemetry-and-transport-lanes.md)).
+  `openbox init --provider claude-code --full` installs a local OTLP **telemetry**
+  receiver (`:otel:`) and an in-path CONNECT/TLS **transport** relay (`:proxy:`)
+  alongside the hooks; `--remove-all` backs every lane out. What that buys, and what
+  it does not:
+  - **The evidence is replay, not operation.** Real recorded traffic runs through the
+    shipped code path on a host that cannot bind a socket, with the relay's upstream
+    dial substituted. That proves the bytes forwarded and captured, the mapping, the
+    gate and the caps. It proves nothing about bind, listen, TLS to a real socket, or
+    what core stores — **no control plane has ever received one of these events.**
+    One thing the replay does not reach HAS been run separately: a synthetic OTLP
+    export crossed the receiver's real HTTP intake end to end on a bind-capable host
+    (phase 09). Two limits on that: the export was **JSON**, while production is
+    configured for `http/protobuf` — so **no test drives the protobuf decoder, which
+    is the only path real traffic takes** — and the real client has never exported
+    to this lane at all. The dormant `testbed/46-otel-lane.sh` and `47-transport.sh`
+    are what would change that.
+  - **The desktop and OAuth coverage these lanes were built for is unconfirmed.**
+    That is the whole reason they exist, and it is intent rather than measurement
+    until a real client is put behind them.
+  - **The telemetry lane is suppressible by the thing it observes.** It is the
+    governed tool reporting its own calls — the weakest claim in this product, and it
+    must never be averaged with the two in-path lanes. OD4 is the compensating
+    control: telemetry silence on an otherwise-active session is a **finding**, not
+    an absence. `openbox doctor` names the elected producer and warns when the
+    elected lane has nothing listening behind it.
+  - **Exactly one lane may emit per model call, and that is a correctness property.**
+    The three namespaces are deliberately disjoint so core's dedupe cannot absorb one
+    lane's event as another's — which means two lanes emitting both STORE, and every
+    token count doubles with no error anywhere. The election is derived from where
+    the tool's settings actually route model calls and is answered per record;
+    resolving it once at daemon start shipped exactly that double-count into review.
+  - **Neither in-path lane refuses a call.** Both carry a written, tested refusal
+    path that nothing calls, for the same reason the gateway's is dormant: the
+    refusal shape Claude Code does not retry around is unprobed
+    ([ADR-0021](adr/ADR-0021-openbox-local-gateway.md) §9). `probes/refusal-injector/`
+    is the instrument; it needs a bind-capable host, a real install and credentials.
+  - **The transport lane installs a CA on the developer's machine, and that is a real
+    downgrade accepted for coverage.** It is generated once, stored beside the
+    credentials under `~/.openbox/` with no more protection than they have, and
+    anything running as the developer can read it — the same boundary
+    [ADR-0015](adr/ADR-0015-plaintext-credential-file.md) already concedes for the
+    signing key. What bounds it is **name constraint at generation**: the CA is
+    constrained to the single intercepted host, so a leaked key cannot mint a usable
+    certificate for anything else, and the allowlist holds that one host
+    (`api.anthropic.com`) while everything else is blind-tunnelled. `--remove-all`
+    deletes the CA rather than leaving a trusted signing key behind a relay that is
+    gone.
+  - **The lane does not chain through a corporate proxy.** `transport.New` clears the
+    six proxy environment variables in its constructor, because a daemon that
+    inherits the `HTTPS_PROXY` the installer wrote would dial itself until sockets
+    run out. Owned rather than hidden: an org that requires an upstream proxy cannot
+    use this lane today.
+  - **~97% of model-call request bodies are truncated before egress.** Measured, not
+    estimated: 96.75% of 5,049 recorded request bodies exceed the 65,536-rune cap
+    (p50 529,175, max 2,566,660; run `20260827T063932Z-225cac`). Response bodies:
+    0.06%. Under OD1(c) the tail of an oversized body exists nowhere org-side, so
+    content-based policy and every reader see the head only. This is accepted, not a
+    defect — but a reader must not assume a captured call is a complete call.
 - **Local secret detection has a measured reach, and two shapes fall outside it.**
   231 format rules catch a known credential by SHAPE wherever it appears. Anything
   in no known format is caught only by the keyword-and-entropy layer, and that layer
@@ -288,7 +349,41 @@ Being precise here is part of the product.
   the alternative was an allowlist too long to read. That was already the real
   boundary: the previous check matched only `github.com/…` requirements, so a direct
   `golang.org/x/…` one was invisible to it. Each module that takes a dependency now
-  carries its own allowlist (`gateway/`, `decision/`, `conformance/`).
+  carries its own allowlist — `gateway/guard_test.go`, `decision/guard_test.go`,
+  `telemetry/guard_test.go`, `transport/guard_test.go`,
+  `contracts/dev-event/conformance/deps_test.go` — and adding to one is a decision,
+  which is why they fail first. **Do not widen an allowlist to make a direct import
+  pass**; that inverts the ADR's reasoning.
+
+  Dependencies are module-scoped, not repo-wide. Measured 2026-08-30 from each
+  `go.mod`:
+
+  | Module | Direct external requires | `go.sum` lines | Bounded by |
+  |---|---|---|---|
+  | `telemetry/` | **11** — 8 × `go.opentelemetry.io/collector/*` (incl. `receiver/otlpreceiver` v0.159.0), `otel/metric`, `otel/trace`, `go.uber.org/zap` | 187 | `telemetry/guard_test.go` |
+  | `transport/` | **1** — `elazarl/goproxy` v1.9.0 | 432 | `transport/guard_test.go` |
+  | `decision/` | **1** — `zricethezav/gitleaks/v8` v8.30.1 | 420 | `decision/guard_test.go` |
+  | `cli/` | **3** — `kardianos/service` v1.3.0, `google/renameio/v2`, `golang.org/x/term` | 625 | — |
+  | `adapters/common/devconfig/` | **2** — `pelletier/go-toml/v2`, `joho/godotenv` | — | — |
+  | `adapters/common/hookflow/` | **1** — `google/renameio/v2` | — | — |
+  | `contracts/dev-event/conformance/` | **1** — `santhosh-tekuri/jsonschema/v6` v6.0.3 | — | `deps_test.go` |
+  | `gateway/` | **0** external | 420 | `gateway/guard_test.go` |
+  | every other module | **0** | — | — |
+
+  **otlpreceiver's transitive tree is an accepted cost, stated with the numbers
+  phase 09 measured** rather than smoothed into "a few libraries": **492 transitive
+  packages and 124 modules in the graph** for `telemetry/`, against 381 and 206 for
+  `gateway/` — and a **leak check of zero**, since `gateway`, `decision`, `client`,
+  `cli` and both adapters have no collector require at all. The module boundary is
+  what holds that, and each guard is what holds the boundary.
+
+  The binary is the visible half. Phase 09 measured a minimal `main` linking the
+  receiver at **18.8 MB against a 2.3 MB baseline — +16.5 MB**, which is the number
+  OD5 accepted, on a shipped binary that was then **17.0 MB**. The delivered binary
+  is **40,287,986 bytes (38.4 MB)**, measured on darwin/arm64 via the release path
+  (`GOWORK=off`) on 2026-08-30 — roughly **5 MB more than that estimate**, and it
+  carries goproxy and the transport lane as well as telemetry. Recorded rather than
+  rounded: the decision was made on the smaller number.
 - **The inline-evaluation path has not been exercised against a live stack.**
   Every claim below about enforcement rests on tests that drive the real hook
   against a local `/evaluate` stub — which is real HTTP and the real gate, but not
