@@ -155,8 +155,9 @@ func laneRouted(home string, lane activation.Lane) bool {
 // removalRequest is what `--remove-all` and the per-lane removal flags ask for.
 type removalRequest struct {
 	gateway, telemetry, transport bool
-	// purge additionally deletes the CA, the logs and the spool — data
-	// destruction by design, so it is named rather than implied.
+	// purge additionally deletes the CA, the lane logs and the activation record —
+	// data destruction by design, so it is named rather than implied. It does NOT
+	// delete the spool; purgeLaneData says why, and reports what it kept.
 	purge bool
 	force bool
 }

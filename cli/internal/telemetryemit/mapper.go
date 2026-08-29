@@ -135,8 +135,12 @@ type Mapper struct {
 // New builds a mapper for one developer identity.
 //
 // It takes no redactor, deliberately. Nothing this slice binds is content —
-// api_request carries a model id, four token counts, a cost, a duration and two
-// request ids, and no free text at all. A redactor parameter with no call site
+// api_request carries a model id, four token counts, a duration and one request
+// id, and no free text at all. (No cost: turnFor never sets ev.Cost, because the
+// server derives cost from a model-keyed pricing table and deriving it here would
+// fabricate a number — see client/payload.go. This comment said "a cost" and "two
+// request ids" for a while, and three user-facing documents copied it before
+// anyone read turnFor; the list below is the function's, not the intent's.) A redactor parameter with no call site
 // would read like a wired control and not be one, which is precisely the shape
 // that let the gateway discard every capture it made. It arrives with the body
 // attachment that needs it.

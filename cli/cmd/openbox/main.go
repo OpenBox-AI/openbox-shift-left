@@ -386,14 +386,15 @@ func (a *app) runDevInit(args []string) int {
 	// The two in-path/observation lanes ADR-0022 adds, and the one command each
 	// way OD2 ruled for. --full is the front door; the per-lane flags exist so a
 	// developer can back one lane out without --remove-all, which also deletes the
-	// CA and the spool.
+	// CA, the lane logs and the activation record. The spool is NOT deleted; see
+	// purgeLaneData.
 	var withFull, removeAll bool
 	var withTelemetry, removeTelemetryLane bool
 	var withTransport, removeTransportLane bool
 	var telemetryAddr, transportAddr string
 	var laneVerbose, forceRestore bool
 	fs.BoolVar(&withFull, "full", false, "install and enable everything: hooks, the telemetry receiver and the in-path transport relay")
-	fs.BoolVar(&removeAll, "remove-all", false, "remove every OpenBox lane: restore all managed env keys, unload and delete all units, and delete the CA, logs and spool")
+	fs.BoolVar(&removeAll, "remove-all", false, "remove every OpenBox lane: restore all managed env keys, unload and delete all units, and delete the CA, the logs and the activation record. The spool is KEPT — it is shared with the hook path, which this does not remove")
 	fs.BoolVar(&withTelemetry, "telemetry", false, "install and start the local OTLP telemetry receiver, and point the tool's own telemetry at it")
 	fs.BoolVar(&removeTelemetryLane, "remove-telemetry", false, "stop the telemetry receiver and restore the env keys it displaced")
 	fs.BoolVar(&withTransport, "transport", false, "install and start the in-path transport relay, and point the tool's proxy and CA trust at it")
