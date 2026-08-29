@@ -24,6 +24,10 @@ phases=(
 	# which is opt-in — so this phase installs the gateway itself rather than
 	# assuming an earlier phase did.
 	"gateway:45-gateway.sh"
+	# DORMANT: written, never run. The capture half of both lanes is proven on
+	# the RECORDED corpus without a stack; these two hold only the live claims.
+	"otel-lane:46-otel-lane.sh"
+	"transport:47-transport.sh"
 	"lineage:50-lineage.sh"
 	"visibility:60-visibility.sh"
 	"auto:70-approver-auto.sh"
