@@ -1,0 +1,3508 @@
+{
+  "resourceLogs": [
+    {
+      "resource": {
+        "attributes": [
+          {
+            "key": "service.name",
+            "value": {
+              "stringValue": "claude-code-desktop"
+            }
+          },
+          {
+            "key": "service.version",
+            "value": {
+              "stringValue": "1.40609.0"
+            }
+          },
+          {
+            "key": "claude.deployment_mode",
+            "value": {
+              "stringValue": "1p"
+            }
+          },
+          {
+            "key": "host.arch",
+            "value": {
+              "stringValue": "arm64"
+            }
+          },
+          {
+            "key": "os.type",
+            "value": {
+              "stringValue": "darwin"
+            }
+          },
+          {
+            "key": "os.version",
+            "value": {
+              "stringValue": "26.0.1"
+            }
+          },
+          {
+            "key": "process.owner",
+            "value": {
+              "stringValue": "fixture"
+            }
+          }
+        ]
+      },
+      "scopeLogs": [
+        {
+          "logRecords": [
+            {
+              "attributes": [
+                {
+                  "key": "service.name",
+                  "value": {
+                    "stringValue": "claude-code-desktop"
+                  }
+                },
+                {
+                  "key": "service.version",
+                  "value": {
+                    "stringValue": "1.40609.0"
+                  }
+                },
+                {
+                  "key": "claude.deployment_mode",
+                  "value": {
+                    "stringValue": "1p"
+                  }
+                },
+                {
+                  "key": "host.arch",
+                  "value": {
+                    "stringValue": "arm64"
+                  }
+                },
+                {
+                  "key": "os.type",
+                  "value": {
+                    "stringValue": "darwin"
+                  }
+                },
+                {
+                  "key": "os.version",
+                  "value": {
+                    "stringValue": "26.0.1"
+                  }
+                },
+                {
+                  "key": "process.owner",
+                  "value": {
+                    "stringValue": "fixture"
+                  }
+                },
+                {
+                  "key": "user.id",
+                  "value": {
+                    "stringValue": "fixtureuserid"
+                  }
+                },
+                {
+                  "key": "session.id",
+                  "value": {
+                    "stringValue": "00000000-0000-4000-8000-000000000001"
+                  }
+                },
+                {
+                  "key": "organization.id",
+                  "value": {
+                    "stringValue": "00000000-0000-4000-8000-000000000002"
+                  }
+                },
+                {
+                  "key": "user.email",
+                  "value": {
+                    "stringValue": "fixture@example.invalid"
+                  }
+                },
+                {
+                  "key": "user.account_uuid",
+                  "value": {
+                    "stringValue": "00000000-0000-4000-8000-000000000003"
+                  }
+                },
+                {
+                  "key": "user.account_id",
+                  "value": {
+                    "stringValue": "fixtureaccountid"
+                  }
+                },
+                {
+                  "key": "terminal.type",
+                  "value": {
+                    "stringValue": "non-interactive"
+                  }
+                },
+                {
+                  "key": "event.name",
+                  "value": {
+                    "stringValue": "api_request"
+                  }
+                },
+                {
+                  "key": "event.timestamp",
+                  "value": {
+                    "stringValue": "2026-08-28T19:36:51.536Z"
+                  }
+                },
+                {
+                  "key": "event.sequence",
+                  "value": {
+                    "intValue": "306"
+                  }
+                },
+                {
+                  "key": "prompt.id",
+                  "value": {
+                    "stringValue": "00000000-0000-4000-8000-000000000004"
+                  }
+                },
+                {
+                  "key": "model",
+                  "value": {
+                    "stringValue": "claude-fable-5"
+                  }
+                },
+                {
+                  "key": "input_tokens",
+                  "value": {
+                    "intValue": "2"
+                  }
+                },
+                {
+                  "key": "output_tokens",
+                  "value": {
+                    "intValue": "156"
+                  }
+                },
+                {
+                  "key": "cache_read_tokens",
+                  "value": {
+                    "intValue": "75912"
+                  }
+                },
+                {
+                  "key": "cache_creation_tokens",
+                  "value": {
+                    "intValue": "4653"
+                  }
+                },
+                {
+                  "key": "cost_usd",
+                  "value": {
+                    "doubleValue": 0.14189449999999998
+                  }
+                },
+                {
+                  "key": "cost_usd_micros",
+                  "value": {
+                    "intValue": "141894"
+                  }
+                },
+                {
+                  "key": "duration_ms",
+                  "value": {
+                    "intValue": "6014"
+                  }
+                },
+                {
+                  "key": "request_id",
+                  "value": {
+                    "stringValue": "req_fixture000001"
+                  }
+                },
+                {
+                  "key": "client_request_id",
+                  "value": {
+                    "stringValue": "req_fixture000002"
+                  }
+                },
+                {
+                  "key": "speed",
+                  "value": {
+                    "stringValue": "normal"
+                  }
+                },
+                {
+                  "key": "query_source",
+                  "value": {
+                    "stringValue": "agent:custom"
+                  }
+                },
+                {
+                  "key": "effort",
+                  "value": {
+                    "stringValue": "max"
+                  }
+                },
+                {
+                  "key": "agent.name",
+                  "value": {
+                    "stringValue": "custom"
+                  }
+                },
+                {
+                  "key": "skill.name",
+                  "value": {
+                    "stringValue": "ak-cook"
+                  }
+                }
+              ],
+              "body": {
+                "stringValue": "claude_code.api_request"
+              },
+              "flags": 1,
+              "observedTimeUnixNano": "1787945811536000000",
+              "spanId": "0000000000000001",
+              "timeUnixNano": "1787945811536000000",
+              "traceId": "00000000000000000000000000000002"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "service.name",
+                  "value": {
+                    "stringValue": "claude-code-desktop"
+                  }
+                },
+                {
+                  "key": "service.version",
+                  "value": {
+                    "stringValue": "1.40609.0"
+                  }
+                },
+                {
+                  "key": "claude.deployment_mode",
+                  "value": {
+                    "stringValue": "1p"
+                  }
+                },
+                {
+                  "key": "host.arch",
+                  "value": {
+                    "stringValue": "arm64"
+                  }
+                },
+                {
+                  "key": "os.type",
+                  "value": {
+                    "stringValue": "darwin"
+                  }
+                },
+                {
+                  "key": "os.version",
+                  "value": {
+                    "stringValue": "26.0.1"
+                  }
+                },
+                {
+                  "key": "process.owner",
+                  "value": {
+                    "stringValue": "fixture"
+                  }
+                },
+                {
+                  "key": "user.id",
+                  "value": {
+                    "stringValue": "fixtureuserid"
+                  }
+                },
+                {
+                  "key": "session.id",
+                  "value": {
+                    "stringValue": "00000000-0000-4000-8000-000000000001"
+                  }
+                },
+                {
+                  "key": "organization.id",
+                  "value": {
+                    "stringValue": "00000000-0000-4000-8000-000000000002"
+                  }
+                },
+                {
+                  "key": "user.email",
+                  "value": {
+                    "stringValue": "fixture@example.invalid"
+                  }
+                },
+                {
+                  "key": "user.account_uuid",
+                  "value": {
+                    "stringValue": "00000000-0000-4000-8000-000000000003"
+                  }
+                },
+                {
+                  "key": "user.account_id",
+                  "value": {
+                    "stringValue": "fixtureaccountid"
+                  }
+                },
+                {
+                  "key": "terminal.type",
+                  "value": {
+                    "stringValue": "non-interactive"
+                  }
+                },
+                {
+                  "key": "event.name",
+                  "value": {
+                    "stringValue": "api_request"
+                  }
+                },
+                {
+                  "key": "event.timestamp",
+                  "value": {
+                    "stringValue": "2026-08-28T19:36:54.357Z"
+                  }
+                },
+                {
+                  "key": "event.sequence",
+                  "value": {
+                    "intValue": "321"
+                  }
+                },
+                {
+                  "key": "prompt.id",
+                  "value": {
+                    "stringValue": "00000000-0000-4000-8000-000000000004"
+                  }
+                },
+                {
+                  "key": "model",
+                  "value": {
+                    "stringValue": "claude-opus-5"
+                  }
+                },
+                {
+                  "key": "input_tokens",
+                  "value": {
+                    "intValue": "2"
+                  }
+                },
+                {
+                  "key": "output_tokens",
+                  "value": {
+                    "intValue": "110"
+                  }
+                },
+                {
+                  "key": "cache_read_tokens",
+                  "value": {
+                    "intValue": "162039"
+                  }
+                },
+                {
+                  "key": "cache_creation_tokens",
+                  "value": {
+                    "intValue": "1466"
+                  }
+                },
+                {
+                  "key": "cost_usd",
+                  "value": {
+                    "doubleValue": 0.0984395
+                  }
+                },
+                {
+                  "key": "cost_usd_micros",
+                  "value": {
+                    "intValue": "98440"
+                  }
+                },
+                {
+                  "key": "duration_ms",
+                  "value": {
+                    "intValue": "2614"
+                  }
+                },
+                {
+                  "key": "request_id",
+                  "value": {
+                    "stringValue": "req_fixture000003"
+                  }
+                },
+                {
+                  "key": "client_request_id",
+                  "value": {
+                    "stringValue": "req_fixture000004"
+                  }
+                },
+                {
+                  "key": "speed",
+                  "value": {
+                    "stringValue": "normal"
+                  }
+                },
+                {
+                  "key": "query_source",
+                  "value": {
+                    "stringValue": "sdk"
+                  }
+                },
+                {
+                  "key": "effort",
+                  "value": {
+                    "stringValue": "max"
+                  }
+                },
+                {
+                  "key": "skill.name",
+                  "value": {
+                    "stringValue": "ak-cook"
+                  }
+                }
+              ],
+              "body": {
+                "stringValue": "claude_code.api_request"
+              },
+              "flags": 1,
+              "observedTimeUnixNano": "1787945814357000000",
+              "spanId": "0000000000000003",
+              "timeUnixNano": "1787945814357000000",
+              "traceId": "00000000000000000000000000000002"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "service.name",
+                  "value": {
+                    "stringValue": "claude-code-desktop"
+                  }
+                },
+                {
+                  "key": "service.version",
+                  "value": {
+                    "stringValue": "1.40609.0"
+                  }
+                },
+                {
+                  "key": "claude.deployment_mode",
+                  "value": {
+                    "stringValue": "1p"
+                  }
+                },
+                {
+                  "key": "host.arch",
+                  "value": {
+                    "stringValue": "arm64"
+                  }
+                },
+                {
+                  "key": "os.type",
+                  "value": {
+                    "stringValue": "darwin"
+                  }
+                },
+                {
+                  "key": "os.version",
+                  "value": {
+                    "stringValue": "26.0.1"
+                  }
+                },
+                {
+                  "key": "process.owner",
+                  "value": {
+                    "stringValue": "fixture"
+                  }
+                },
+                {
+                  "key": "user.id",
+                  "value": {
+                    "stringValue": "fixtureuserid"
+                  }
+                },
+                {
+                  "key": "session.id",
+                  "value": {
+                    "stringValue": "00000000-0000-4000-8000-000000000001"
+                  }
+                },
+                {
+                  "key": "organization.id",
+                  "value": {
+                    "stringValue": "00000000-0000-4000-8000-000000000002"
+                  }
+                },
+                {
+                  "key": "user.email",
+                  "value": {
+                    "stringValue": "fixture@example.invalid"
+                  }
+                },
+                {
+                  "key": "user.account_uuid",
+                  "value": {
+                    "stringValue": "00000000-0000-4000-8000-000000000003"
+                  }
+                },
+                {
+                  "key": "user.account_id",
+                  "value": {
+                    "stringValue": "fixtureaccountid"
+                  }
+                },
+                {
+                  "key": "terminal.type",
+                  "value": {
+                    "stringValue": "non-interactive"
+                  }
+                },
+                {
+                  "key": "event.name",
+                  "value": {
+                    "stringValue": "api_request"
+                  }
+                },
+                {
+                  "key": "event.timestamp",
+                  "value": {
+                    "stringValue": "2026-08-28T19:37:01.742Z"
+                  }
+                },
+                {
+                  "key": "event.sequence",
+                  "value": {
+                    "intValue": "330"
+                  }
+                },
+                {
+                  "key": "prompt.id",
+                  "value": {
+                    "stringValue": "00000000-0000-4000-8000-000000000004"
+                  }
+                },
+                {
+                  "key": "model",
+                  "value": {
+                    "stringValue": "claude-opus-5"
+                  }
+                },
+                {
+                  "key": "input_tokens",
+                  "value": {
+                    "intValue": "2"
+                  }
+                },
+                {
+                  "key": "output_tokens",
+                  "value": {
+                    "intValue": "102"
+                  }
+                },
+                {
+                  "key": "cache_read_tokens",
+                  "value": {
+                    "intValue": "163505"
+                  }
+                },
+                {
+                  "key": "cache_creation_tokens",
+                  "value": {
+                    "intValue": "1437"
+                  }
+                },
+                {
+                  "key": "cost_usd",
+                  "value": {
+                    "doubleValue": 0.0986825
+                  }
+                },
+                {
+                  "key": "cost_usd_micros",
+                  "value": {
+                    "intValue": "98683"
+                  }
+                },
+                {
+                  "key": "duration_ms",
+                  "value": {
+                    "intValue": "5103"
+                  }
+                },
+                {
+                  "key": "request_id",
+                  "value": {
+                    "stringValue": "req_fixture000005"
+                  }
+                },
+                {
+                  "key": "client_request_id",
+                  "value": {
+                    "stringValue": "req_fixture000006"
+                  }
+                },
+                {
+                  "key": "speed",
+                  "value": {
+                    "stringValue": "normal"
+                  }
+                },
+                {
+                  "key": "query_source",
+                  "value": {
+                    "stringValue": "sdk"
+                  }
+                },
+                {
+                  "key": "effort",
+                  "value": {
+                    "stringValue": "max"
+                  }
+                },
+                {
+                  "key": "skill.name",
+                  "value": {
+                    "stringValue": "ak-cook"
+                  }
+                }
+              ],
+              "body": {
+                "stringValue": "claude_code.api_request"
+              },
+              "flags": 1,
+              "observedTimeUnixNano": "1787945821742000000",
+              "spanId": "0000000000000003",
+              "timeUnixNano": "1787945821742000000",
+              "traceId": "00000000000000000000000000000002"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "service.name",
+                  "value": {
+                    "stringValue": "claude-code-desktop"
+                  }
+                },
+                {
+                  "key": "service.version",
+                  "value": {
+                    "stringValue": "1.40609.0"
+                  }
+                },
+                {
+                  "key": "claude.deployment_mode",
+                  "value": {
+                    "stringValue": "1p"
+                  }
+                },
+                {
+                  "key": "host.arch",
+                  "value": {
+                    "stringValue": "arm64"
+                  }
+                },
+                {
+                  "key": "os.type",
+                  "value": {
+                    "stringValue": "darwin"
+                  }
+                },
+                {
+                  "key": "os.version",
+                  "value": {
+                    "stringValue": "26.0.1"
+                  }
+                },
+                {
+                  "key": "process.owner",
+                  "value": {
+                    "stringValue": "fixture"
+                  }
+                },
+                {
+                  "key": "user.id",
+                  "value": {
+                    "stringValue": "fixtureuserid"
+                  }
+                },
+                {
+                  "key": "session.id",
+                  "value": {
+                    "stringValue": "00000000-0000-4000-8000-000000000001"
+                  }
+                },
+                {
+                  "key": "organization.id",
+                  "value": {
+                    "stringValue": "00000000-0000-4000-8000-000000000002"
+                  }
+                },
+                {
+                  "key": "user.email",
+                  "value": {
+                    "stringValue": "fixture@example.invalid"
+                  }
+                },
+                {
+                  "key": "user.account_uuid",
+                  "value": {
+                    "stringValue": "00000000-0000-4000-8000-000000000003"
+                  }
+                },
+                {
+                  "key": "user.account_id",
+                  "value": {
+                    "stringValue": "fixtureaccountid"
+                  }
+                },
+                {
+                  "key": "terminal.type",
+                  "value": {
+                    "stringValue": "non-interactive"
+                  }
+                },
+                {
+                  "key": "event.name",
+                  "value": {
+                    "stringValue": "api_request"
+                  }
+                },
+                {
+                  "key": "event.timestamp",
+                  "value": {
+                    "stringValue": "2026-08-28T19:37:09.197Z"
+                  }
+                },
+                {
+                  "key": "event.sequence",
+                  "value": {
+                    "intValue": "339"
+                  }
+                },
+                {
+                  "key": "prompt.id",
+                  "value": {
+                    "stringValue": "00000000-0000-4000-8000-000000000004"
+                  }
+                },
+                {
+                  "key": "model",
+                  "value": {
+                    "stringValue": "claude-opus-5"
+                  }
+                },
+                {
+                  "key": "input_tokens",
+                  "value": {
+                    "intValue": "2"
+                  }
+                },
+                {
+                  "key": "output_tokens",
+                  "value": {
+                    "intValue": "271"
+                  }
+                },
+                {
+                  "key": "cache_read_tokens",
+                  "value": {
+                    "intValue": "164942"
+                  }
+                },
+                {
+                  "key": "cache_creation_tokens",
+                  "value": {
+                    "intValue": "224"
+                  }
+                },
+                {
+                  "key": "cost_usd",
+                  "value": {
+                    "doubleValue": 0.09149600000000001
+                  }
+                },
+                {
+                  "key": "cost_usd_micros",
+                  "value": {
+                    "intValue": "91496"
+                  }
+                },
+                {
+                  "key": "duration_ms",
+                  "value": {
+                    "intValue": "4993"
+                  }
+                },
+                {
+                  "key": "request_id",
+                  "value": {
+                    "stringValue": "req_fixture000007"
+                  }
+                },
+                {
+                  "key": "client_request_id",
+                  "value": {
+                    "stringValue": "req_fixture000008"
+                  }
+                },
+                {
+                  "key": "speed",
+                  "value": {
+                    "stringValue": "normal"
+                  }
+                },
+                {
+                  "key": "query_source",
+                  "value": {
+                    "stringValue": "sdk"
+                  }
+                },
+                {
+                  "key": "effort",
+                  "value": {
+                    "stringValue": "max"
+                  }
+                },
+                {
+                  "key": "skill.name",
+                  "value": {
+                    "stringValue": "ak-cook"
+                  }
+                }
+              ],
+              "body": {
+                "stringValue": "claude_code.api_request"
+              },
+              "flags": 1,
+              "observedTimeUnixNano": "1787945829197000000",
+              "spanId": "0000000000000003",
+              "timeUnixNano": "1787945829197000000",
+              "traceId": "00000000000000000000000000000002"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "service.name",
+                  "value": {
+                    "stringValue": "claude-code-desktop"
+                  }
+                },
+                {
+                  "key": "service.version",
+                  "value": {
+                    "stringValue": "1.40609.0"
+                  }
+                },
+                {
+                  "key": "claude.deployment_mode",
+                  "value": {
+                    "stringValue": "1p"
+                  }
+                },
+                {
+                  "key": "host.arch",
+                  "value": {
+                    "stringValue": "arm64"
+                  }
+                },
+                {
+                  "key": "os.type",
+                  "value": {
+                    "stringValue": "darwin"
+                  }
+                },
+                {
+                  "key": "os.version",
+                  "value": {
+                    "stringValue": "26.0.1"
+                  }
+                },
+                {
+                  "key": "process.owner",
+                  "value": {
+                    "stringValue": "fixture"
+                  }
+                },
+                {
+                  "key": "user.id",
+                  "value": {
+                    "stringValue": "fixtureuserid"
+                  }
+                },
+                {
+                  "key": "session.id",
+                  "value": {
+                    "stringValue": "00000000-0000-4000-8000-000000000001"
+                  }
+                },
+                {
+                  "key": "organization.id",
+                  "value": {
+                    "stringValue": "00000000-0000-4000-8000-000000000002"
+                  }
+                },
+                {
+                  "key": "user.email",
+                  "value": {
+                    "stringValue": "fixture@example.invalid"
+                  }
+                },
+                {
+                  "key": "user.account_uuid",
+                  "value": {
+                    "stringValue": "00000000-0000-4000-8000-000000000003"
+                  }
+                },
+                {
+                  "key": "user.account_id",
+                  "value": {
+                    "stringValue": "fixtureaccountid"
+                  }
+                },
+                {
+                  "key": "terminal.type",
+                  "value": {
+                    "stringValue": "non-interactive"
+                  }
+                },
+                {
+                  "key": "event.name",
+                  "value": {
+                    "stringValue": "api_request"
+                  }
+                },
+                {
+                  "key": "event.timestamp",
+                  "value": {
+                    "stringValue": "2026-08-28T19:37:17.627Z"
+                  }
+                },
+                {
+                  "key": "event.sequence",
+                  "value": {
+                    "intValue": "348"
+                  }
+                },
+                {
+                  "key": "prompt.id",
+                  "value": {
+                    "stringValue": "00000000-0000-4000-8000-000000000004"
+                  }
+                },
+                {
+                  "key": "model",
+                  "value": {
+                    "stringValue": "claude-opus-5"
+                  }
+                },
+                {
+                  "key": "input_tokens",
+                  "value": {
+                    "intValue": "2"
+                  }
+                },
+                {
+                  "key": "output_tokens",
+                  "value": {
+                    "intValue": "313"
+                  }
+                },
+                {
+                  "key": "cache_read_tokens",
+                  "value": {
+                    "intValue": "165166"
+                  }
+                },
+                {
+                  "key": "cache_creation_tokens",
+                  "value": {
+                    "intValue": "1326"
+                  }
+                },
+                {
+                  "key": "cost_usd",
+                  "value": {
+                    "doubleValue": 0.10367799999999999
+                  }
+                },
+                {
+                  "key": "cost_usd_micros",
+                  "value": {
+                    "intValue": "103678"
+                  }
+                },
+                {
+                  "key": "duration_ms",
+                  "value": {
+                    "intValue": "6888"
+                  }
+                },
+                {
+                  "key": "request_id",
+                  "value": {
+                    "stringValue": "req_fixture000009"
+                  }
+                },
+                {
+                  "key": "client_request_id",
+                  "value": {
+                    "stringValue": "req_fixture000010"
+                  }
+                },
+                {
+                  "key": "speed",
+                  "value": {
+                    "stringValue": "normal"
+                  }
+                },
+                {
+                  "key": "query_source",
+                  "value": {
+                    "stringValue": "sdk"
+                  }
+                },
+                {
+                  "key": "effort",
+                  "value": {
+                    "stringValue": "max"
+                  }
+                },
+                {
+                  "key": "skill.name",
+                  "value": {
+                    "stringValue": "ak-cook"
+                  }
+                }
+              ],
+              "body": {
+                "stringValue": "claude_code.api_request"
+              },
+              "flags": 1,
+              "observedTimeUnixNano": "1787945837627000000",
+              "spanId": "0000000000000003",
+              "timeUnixNano": "1787945837627000000",
+              "traceId": "00000000000000000000000000000002"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "service.name",
+                  "value": {
+                    "stringValue": "claude-code-desktop"
+                  }
+                },
+                {
+                  "key": "service.version",
+                  "value": {
+                    "stringValue": "1.40609.0"
+                  }
+                },
+                {
+                  "key": "claude.deployment_mode",
+                  "value": {
+                    "stringValue": "1p"
+                  }
+                },
+                {
+                  "key": "host.arch",
+                  "value": {
+                    "stringValue": "arm64"
+                  }
+                },
+                {
+                  "key": "os.type",
+                  "value": {
+                    "stringValue": "darwin"
+                  }
+                },
+                {
+                  "key": "os.version",
+                  "value": {
+                    "stringValue": "26.0.1"
+                  }
+                },
+                {
+                  "key": "process.owner",
+                  "value": {
+                    "stringValue": "fixture"
+                  }
+                },
+                {
+                  "key": "user.id",
+                  "value": {
+                    "stringValue": "fixtureuserid"
+                  }
+                },
+                {
+                  "key": "session.id",
+                  "value": {
+                    "stringValue": "00000000-0000-4000-8000-000000000001"
+                  }
+                },
+                {
+                  "key": "organization.id",
+                  "value": {
+                    "stringValue": "00000000-0000-4000-8000-000000000002"
+                  }
+                },
+                {
+                  "key": "user.email",
+                  "value": {
+                    "stringValue": "fixture@example.invalid"
+                  }
+                },
+                {
+                  "key": "user.account_uuid",
+                  "value": {
+                    "stringValue": "00000000-0000-4000-8000-000000000003"
+                  }
+                },
+                {
+                  "key": "user.account_id",
+                  "value": {
+                    "stringValue": "fixtureaccountid"
+                  }
+                },
+                {
+                  "key": "terminal.type",
+                  "value": {
+                    "stringValue": "non-interactive"
+                  }
+                },
+                {
+                  "key": "event.name",
+                  "value": {
+                    "stringValue": "api_refusal"
+                  }
+                },
+                {
+                  "key": "event.timestamp",
+                  "value": {
+                    "stringValue": "2026-08-28T19:40:58.397Z"
+                  }
+                },
+                {
+                  "key": "event.sequence",
+                  "value": {
+                    "intValue": "565"
+                  }
+                },
+                {
+                  "key": "prompt.id",
+                  "value": {
+                    "stringValue": "00000000-0000-4000-8000-000000000004"
+                  }
+                },
+                {
+                  "key": "model",
+                  "value": {
+                    "stringValue": "claude-fable-5"
+                  }
+                },
+                {
+                  "key": "request_id",
+                  "value": {
+                    "stringValue": "req_fixture000011"
+                  }
+                },
+                {
+                  "key": "speed",
+                  "value": {
+                    "stringValue": "normal"
+                  }
+                },
+                {
+                  "key": "attempt",
+                  "value": {
+                    "intValue": "1"
+                  }
+                },
+                {
+                  "key": "server_fallback_hop",
+                  "value": {
+                    "boolValue": false
+                  }
+                },
+                {
+                  "key": "query_source",
+                  "value": {
+                    "stringValue": "agent:custom"
+                  }
+                },
+                {
+                  "key": "effort",
+                  "value": {
+                    "stringValue": "max"
+                  }
+                },
+                {
+                  "key": "has_category",
+                  "value": {
+                    "boolValue": true
+                  }
+                },
+                {
+                  "key": "has_explanation",
+                  "value": {
+                    "boolValue": true
+                  }
+                },
+                {
+                  "key": "category",
+                  "value": {
+                    "stringValue": "cyber"
+                  }
+                },
+                {
+                  "key": "agent.name",
+                  "value": {
+                    "stringValue": "custom"
+                  }
+                },
+                {
+                  "key": "skill.name",
+                  "value": {
+                    "stringValue": "ak-cook"
+                  }
+                }
+              ],
+              "body": {
+                "stringValue": "claude_code.api_refusal"
+              },
+              "flags": 1,
+              "observedTimeUnixNano": "1787946058397000000",
+              "spanId": "0000000000000001",
+              "timeUnixNano": "1787946058397000000",
+              "traceId": "00000000000000000000000000000002"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "service.name",
+                  "value": {
+                    "stringValue": "claude-code-desktop"
+                  }
+                },
+                {
+                  "key": "service.version",
+                  "value": {
+                    "stringValue": "1.40609.0"
+                  }
+                },
+                {
+                  "key": "claude.deployment_mode",
+                  "value": {
+                    "stringValue": "1p"
+                  }
+                },
+                {
+                  "key": "host.arch",
+                  "value": {
+                    "stringValue": "arm64"
+                  }
+                },
+                {
+                  "key": "os.type",
+                  "value": {
+                    "stringValue": "darwin"
+                  }
+                },
+                {
+                  "key": "os.version",
+                  "value": {
+                    "stringValue": "26.0.1"
+                  }
+                },
+                {
+                  "key": "process.owner",
+                  "value": {
+                    "stringValue": "fixture"
+                  }
+                },
+                {
+                  "key": "user.id",
+                  "value": {
+                    "stringValue": "fixtureuserid"
+                  }
+                },
+                {
+                  "key": "session.id",
+                  "value": {
+                    "stringValue": "00000000-0000-4000-8000-000000000001"
+                  }
+                },
+                {
+                  "key": "organization.id",
+                  "value": {
+                    "stringValue": "00000000-0000-4000-8000-000000000002"
+                  }
+                },
+                {
+                  "key": "user.email",
+                  "value": {
+                    "stringValue": "fixture@example.invalid"
+                  }
+                },
+                {
+                  "key": "user.account_uuid",
+                  "value": {
+                    "stringValue": "00000000-0000-4000-8000-000000000003"
+                  }
+                },
+                {
+                  "key": "user.account_id",
+                  "value": {
+                    "stringValue": "fixtureaccountid"
+                  }
+                },
+                {
+                  "key": "terminal.type",
+                  "value": {
+                    "stringValue": "non-interactive"
+                  }
+                },
+                {
+                  "key": "event.name",
+                  "value": {
+                    "stringValue": "api_request_body"
+                  }
+                },
+                {
+                  "key": "event.timestamp",
+                  "value": {
+                    "stringValue": "2026-08-28T19:36:51.744Z"
+                  }
+                },
+                {
+                  "key": "event.sequence",
+                  "value": {
+                    "intValue": "313"
+                  }
+                },
+                {
+                  "key": "prompt.id",
+                  "value": {
+                    "stringValue": "00000000-0000-4000-8000-000000000004"
+                  }
+                },
+                {
+                  "key": "body_ref",
+                  "value": {
+                    "stringValue": "/Users/fixture/project"
+                  }
+                },
+                {
+                  "key": "body_length",
+                  "value": {
+                    "stringValue": "453277"
+                  }
+                },
+                {
+                  "key": "model",
+                  "value": {
+                    "stringValue": "claude-opus-5"
+                  }
+                },
+                {
+                  "key": "query_source",
+                  "value": {
+                    "stringValue": "sdk"
+                  }
+                }
+              ],
+              "body": {
+                "stringValue": "claude_code.api_request_body"
+              },
+              "flags": 1,
+              "observedTimeUnixNano": "1787945811744000000",
+              "spanId": "0000000000000003",
+              "timeUnixNano": "1787945811744000000",
+              "traceId": "00000000000000000000000000000002"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "service.name",
+                  "value": {
+                    "stringValue": "claude-code-desktop"
+                  }
+                },
+                {
+                  "key": "service.version",
+                  "value": {
+                    "stringValue": "1.40609.0"
+                  }
+                },
+                {
+                  "key": "claude.deployment_mode",
+                  "value": {
+                    "stringValue": "1p"
+                  }
+                },
+                {
+                  "key": "host.arch",
+                  "value": {
+                    "stringValue": "arm64"
+                  }
+                },
+                {
+                  "key": "os.type",
+                  "value": {
+                    "stringValue": "darwin"
+                  }
+                },
+                {
+                  "key": "os.version",
+                  "value": {
+                    "stringValue": "26.0.1"
+                  }
+                },
+                {
+                  "key": "process.owner",
+                  "value": {
+                    "stringValue": "fixture"
+                  }
+                },
+                {
+                  "key": "user.id",
+                  "value": {
+                    "stringValue": "fixtureuserid"
+                  }
+                },
+                {
+                  "key": "session.id",
+                  "value": {
+                    "stringValue": "00000000-0000-4000-8000-000000000001"
+                  }
+                },
+                {
+                  "key": "organization.id",
+                  "value": {
+                    "stringValue": "00000000-0000-4000-8000-000000000002"
+                  }
+                },
+                {
+                  "key": "user.email",
+                  "value": {
+                    "stringValue": "fixture@example.invalid"
+                  }
+                },
+                {
+                  "key": "user.account_uuid",
+                  "value": {
+                    "stringValue": "00000000-0000-4000-8000-000000000003"
+                  }
+                },
+                {
+                  "key": "user.account_id",
+                  "value": {
+                    "stringValue": "fixtureaccountid"
+                  }
+                },
+                {
+                  "key": "terminal.type",
+                  "value": {
+                    "stringValue": "non-interactive"
+                  }
+                },
+                {
+                  "key": "event.name",
+                  "value": {
+                    "stringValue": "api_response_body"
+                  }
+                },
+                {
+                  "key": "event.timestamp",
+                  "value": {
+                    "stringValue": "2026-08-28T19:36:51.536Z"
+                  }
+                },
+                {
+                  "key": "event.sequence",
+                  "value": {
+                    "intValue": "307"
+                  }
+                },
+                {
+                  "key": "prompt.id",
+                  "value": {
+                    "stringValue": "00000000-0000-4000-8000-000000000004"
+                  }
+                },
+                {
+                  "key": "body_ref",
+                  "value": {
+                    "stringValue": "/Users/fixture/project"
+                  }
+                },
+                {
+                  "key": "body_length",
+                  "value": {
+                    "stringValue": "1573"
+                  }
+                },
+                {
+                  "key": "model",
+                  "value": {
+                    "stringValue": "claude-fable-5"
+                  }
+                },
+                {
+                  "key": "query_source",
+                  "value": {
+                    "stringValue": "agent:custom:kongming"
+                  }
+                },
+                {
+                  "key": "request_id",
+                  "value": {
+                    "stringValue": "req_fixture000001"
+                  }
+                }
+              ],
+              "body": {
+                "stringValue": "claude_code.api_response_body"
+              },
+              "flags": 1,
+              "observedTimeUnixNano": "1787945811536000000",
+              "spanId": "0000000000000001",
+              "timeUnixNano": "1787945811536000000",
+              "traceId": "00000000000000000000000000000002"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "service.name",
+                  "value": {
+                    "stringValue": "claude-code-desktop"
+                  }
+                },
+                {
+                  "key": "service.version",
+                  "value": {
+                    "stringValue": "1.40609.0"
+                  }
+                },
+                {
+                  "key": "claude.deployment_mode",
+                  "value": {
+                    "stringValue": "1p"
+                  }
+                },
+                {
+                  "key": "host.arch",
+                  "value": {
+                    "stringValue": "arm64"
+                  }
+                },
+                {
+                  "key": "os.type",
+                  "value": {
+                    "stringValue": "darwin"
+                  }
+                },
+                {
+                  "key": "os.version",
+                  "value": {
+                    "stringValue": "26.0.1"
+                  }
+                },
+                {
+                  "key": "process.owner",
+                  "value": {
+                    "stringValue": "fixture"
+                  }
+                },
+                {
+                  "key": "user.id",
+                  "value": {
+                    "stringValue": "fixtureuserid"
+                  }
+                },
+                {
+                  "key": "session.id",
+                  "value": {
+                    "stringValue": "00000000-0000-4000-8000-000000000001"
+                  }
+                },
+                {
+                  "key": "organization.id",
+                  "value": {
+                    "stringValue": "00000000-0000-4000-8000-000000000002"
+                  }
+                },
+                {
+                  "key": "user.email",
+                  "value": {
+                    "stringValue": "fixture@example.invalid"
+                  }
+                },
+                {
+                  "key": "user.account_uuid",
+                  "value": {
+                    "stringValue": "00000000-0000-4000-8000-000000000003"
+                  }
+                },
+                {
+                  "key": "user.account_id",
+                  "value": {
+                    "stringValue": "fixtureaccountid"
+                  }
+                },
+                {
+                  "key": "terminal.type",
+                  "value": {
+                    "stringValue": "non-interactive"
+                  }
+                },
+                {
+                  "key": "event.name",
+                  "value": {
+                    "stringValue": "assistant_response"
+                  }
+                },
+                {
+                  "key": "event.timestamp",
+                  "value": {
+                    "stringValue": "2026-08-28T19:37:30.517Z"
+                  }
+                },
+                {
+                  "key": "event.sequence",
+                  "value": {
+                    "intValue": "358"
+                  }
+                },
+                {
+                  "key": "prompt.id",
+                  "value": {
+                    "stringValue": "00000000-0000-4000-8000-000000000004"
+                  }
+                },
+                {
+                  "key": "response_length",
+                  "value": {
+                    "intValue": "1395"
+                  }
+                },
+                {
+                  "key": "response",
+                  "value": {
+                    "stringValue": "Scout complete. Summary before I proceed:\n\n**Codebase context**\n- Go workspace, 13 modules. `transport/` module **already exists** (go.mod + goproxy v1.9.0 + `identity.go` + `guard_test.go` + 5 spike tests). Phase-11 steps 1–3 are largely done.\n- **This host denies `bind`** (confirmed: `operation not permitted`). All 5 spike tests SKIP here — the exact trap `CLAUDE.md` documents. Everything I write must be reachable over `net.Pipe`/`memhttptest`, or it goes unexercised.\n- `gateway/`'s exported surface already contains the whole seam phase 11 says to \"export\": `Captured`, `CaptureRequest`, `Complete`, `ForGate`, `Decide`, `WriteRefusal`, `Emitter`, `WithCapture`, `WithGate`, `New`, `Config`.\n- `client/` already carries `ProxyRequestID`, `observedLane`/`observedSpanID` (`:proxy:` precedes `:gateway:`) — phase 08/10 shipped it.\n- `cli/internal/gatewayemit` (Emitter: session header, lazy DID, throttled warns, spool, flush) and `cli/internal/gatewayservice` (kardianos unit, proof-order install, env record) are the reuse targets, not templates to copy.\n\nI've asked kongming for counsel on one fork before writing code: the phase specifies a hand-built *streaming tee* on goproxy's MITM hooks, but `ConnectHijack` would let me serve the **existing** `gateway.Gateway` over the terminated TLS conn — reusing its proven byte-identity, streaming, capture and gate rather than forking them."
+                  }
+                },
+                {
+                  "key": "request_id",
+                  "value": {
+                    "stringValue": "req_fixture000012"
+                  }
+                },
+                {
+                  "key": "message.uuid",
+                  "value": {
+                    "stringValue": "00000000-0000-4000-8000-000000000005"
+                  }
+                },
+                {
+                  "key": "model",
+                  "value": {
+                    "stringValue": "claude-opus-5"
+                  }
+                },
+                {
+                  "key": "query_source",
+                  "value": {
+                    "stringValue": "sdk"
+                  }
+                }
+              ],
+              "body": {
+                "stringValue": "claude_code.assistant_response"
+              },
+              "flags": 1,
+              "observedTimeUnixNano": "1787945850517000000",
+              "spanId": "0000000000000003",
+              "timeUnixNano": "1787945850517000000",
+              "traceId": "00000000000000000000000000000002"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "service.name",
+                  "value": {
+                    "stringValue": "claude-code-desktop"
+                  }
+                },
+                {
+                  "key": "service.version",
+                  "value": {
+                    "stringValue": "1.40609.0"
+                  }
+                },
+                {
+                  "key": "claude.deployment_mode",
+                  "value": {
+                    "stringValue": "1p"
+                  }
+                },
+                {
+                  "key": "host.arch",
+                  "value": {
+                    "stringValue": "arm64"
+                  }
+                },
+                {
+                  "key": "os.type",
+                  "value": {
+                    "stringValue": "darwin"
+                  }
+                },
+                {
+                  "key": "os.version",
+                  "value": {
+                    "stringValue": "26.0.1"
+                  }
+                },
+                {
+                  "key": "process.owner",
+                  "value": {
+                    "stringValue": "fixture"
+                  }
+                },
+                {
+                  "key": "user.id",
+                  "value": {
+                    "stringValue": "fixtureuserid"
+                  }
+                },
+                {
+                  "key": "session.id",
+                  "value": {
+                    "stringValue": "00000000-0000-4000-8000-000000000001"
+                  }
+                },
+                {
+                  "key": "organization.id",
+                  "value": {
+                    "stringValue": "00000000-0000-4000-8000-000000000002"
+                  }
+                },
+                {
+                  "key": "user.email",
+                  "value": {
+                    "stringValue": "fixture@example.invalid"
+                  }
+                },
+                {
+                  "key": "user.account_uuid",
+                  "value": {
+                    "stringValue": "00000000-0000-4000-8000-000000000003"
+                  }
+                },
+                {
+                  "key": "user.account_id",
+                  "value": {
+                    "stringValue": "fixtureaccountid"
+                  }
+                },
+                {
+                  "key": "terminal.type",
+                  "value": {
+                    "stringValue": "non-interactive"
+                  }
+                },
+                {
+                  "key": "event.name",
+                  "value": {
+                    "stringValue": "hook_execution_complete"
+                  }
+                },
+                {
+                  "key": "event.timestamp",
+                  "value": {
+                    "stringValue": "2026-08-28T19:36:51.655Z"
+                  }
+                },
+                {
+                  "key": "event.sequence",
+                  "value": {
+                    "intValue": "308"
+                  }
+                },
+                {
+                  "key": "prompt.id",
+                  "value": {
+                    "stringValue": "00000000-0000-4000-8000-000000000004"
+                  }
+                },
+                {
+                  "key": "hook_event",
+                  "value": {
+                    "stringValue": "PreToolUse"
+                  }
+                },
+                {
+                  "key": "hook_name",
+                  "value": {
+                    "stringValue": "PreToolUse:Bash"
+                  }
+                },
+                {
+                  "key": "num_hooks",
+                  "value": {
+                    "stringValue": "4"
+                  }
+                },
+                {
+                  "key": "num_success",
+                  "value": {
+                    "stringValue": "4"
+                  }
+                },
+                {
+                  "key": "num_blocking",
+                  "value": {
+                    "stringValue": "0"
+                  }
+                },
+                {
+                  "key": "num_non_blocking_error",
+                  "value": {
+                    "stringValue": "0"
+                  }
+                },
+                {
+                  "key": "num_cancelled",
+                  "value": {
+                    "stringValue": "0"
+                  }
+                },
+                {
+                  "key": "total_duration_ms",
+                  "value": {
+                    "stringValue": "1373"
+                  }
+                },
+                {
+                  "key": "managed_only",
+                  "value": {
+                    "stringValue": "false"
+                  }
+                },
+                {
+                  "key": "hook_source",
+                  "value": {
+                    "stringValue": "merged"
+                  }
+                },
+                {
+                  "key": "safe_mode",
+                  "value": {
+                    "stringValue": "false"
+                  }
+                }
+              ],
+              "body": {
+                "stringValue": "claude_code.hook_execution_complete"
+              },
+              "flags": 1,
+              "observedTimeUnixNano": "1787945811655000000",
+              "spanId": "0000000000000003",
+              "timeUnixNano": "1787945811655000000",
+              "traceId": "00000000000000000000000000000002"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "service.name",
+                  "value": {
+                    "stringValue": "claude-code-desktop"
+                  }
+                },
+                {
+                  "key": "service.version",
+                  "value": {
+                    "stringValue": "1.40609.0"
+                  }
+                },
+                {
+                  "key": "claude.deployment_mode",
+                  "value": {
+                    "stringValue": "1p"
+                  }
+                },
+                {
+                  "key": "host.arch",
+                  "value": {
+                    "stringValue": "arm64"
+                  }
+                },
+                {
+                  "key": "os.type",
+                  "value": {
+                    "stringValue": "darwin"
+                  }
+                },
+                {
+                  "key": "os.version",
+                  "value": {
+                    "stringValue": "26.0.1"
+                  }
+                },
+                {
+                  "key": "process.owner",
+                  "value": {
+                    "stringValue": "fixture"
+                  }
+                },
+                {
+                  "key": "user.id",
+                  "value": {
+                    "stringValue": "fixtureuserid"
+                  }
+                },
+                {
+                  "key": "session.id",
+                  "value": {
+                    "stringValue": "00000000-0000-4000-8000-000000000001"
+                  }
+                },
+                {
+                  "key": "organization.id",
+                  "value": {
+                    "stringValue": "00000000-0000-4000-8000-000000000002"
+                  }
+                },
+                {
+                  "key": "user.email",
+                  "value": {
+                    "stringValue": "fixture@example.invalid"
+                  }
+                },
+                {
+                  "key": "user.account_uuid",
+                  "value": {
+                    "stringValue": "00000000-0000-4000-8000-000000000003"
+                  }
+                },
+                {
+                  "key": "user.account_id",
+                  "value": {
+                    "stringValue": "fixtureaccountid"
+                  }
+                },
+                {
+                  "key": "terminal.type",
+                  "value": {
+                    "stringValue": "non-interactive"
+                  }
+                },
+                {
+                  "key": "event.name",
+                  "value": {
+                    "stringValue": "hook_execution_start"
+                  }
+                },
+                {
+                  "key": "event.timestamp",
+                  "value": {
+                    "stringValue": "2026-08-28T19:36:51.534Z"
+                  }
+                },
+                {
+                  "key": "event.sequence",
+                  "value": {
+                    "intValue": "305"
+                  }
+                },
+                {
+                  "key": "prompt.id",
+                  "value": {
+                    "stringValue": "00000000-0000-4000-8000-000000000004"
+                  }
+                },
+                {
+                  "key": "hook_event",
+                  "value": {
+                    "stringValue": "PreToolUse"
+                  }
+                },
+                {
+                  "key": "hook_name",
+                  "value": {
+                    "stringValue": "PreToolUse:Bash"
+                  }
+                },
+                {
+                  "key": "num_hooks",
+                  "value": {
+                    "stringValue": "4"
+                  }
+                },
+                {
+                  "key": "managed_only",
+                  "value": {
+                    "stringValue": "false"
+                  }
+                },
+                {
+                  "key": "hook_source",
+                  "value": {
+                    "stringValue": "merged"
+                  }
+                },
+                {
+                  "key": "safe_mode",
+                  "value": {
+                    "stringValue": "false"
+                  }
+                }
+              ],
+              "body": {
+                "stringValue": "claude_code.hook_execution_start"
+              },
+              "flags": 1,
+              "observedTimeUnixNano": "1787945811534000000",
+              "spanId": "0000000000000001",
+              "timeUnixNano": "1787945811534000000",
+              "traceId": "00000000000000000000000000000002"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "service.name",
+                  "value": {
+                    "stringValue": "claude-code-desktop"
+                  }
+                },
+                {
+                  "key": "service.version",
+                  "value": {
+                    "stringValue": "1.40609.0"
+                  }
+                },
+                {
+                  "key": "claude.deployment_mode",
+                  "value": {
+                    "stringValue": "1p"
+                  }
+                },
+                {
+                  "key": "host.arch",
+                  "value": {
+                    "stringValue": "arm64"
+                  }
+                },
+                {
+                  "key": "os.type",
+                  "value": {
+                    "stringValue": "darwin"
+                  }
+                },
+                {
+                  "key": "os.version",
+                  "value": {
+                    "stringValue": "26.0.1"
+                  }
+                },
+                {
+                  "key": "process.owner",
+                  "value": {
+                    "stringValue": "fixture"
+                  }
+                },
+                {
+                  "key": "user.id",
+                  "value": {
+                    "stringValue": "fixtureuserid"
+                  }
+                },
+                {
+                  "key": "session.id",
+                  "value": {
+                    "stringValue": "00000000-0000-4000-8000-000000000006"
+                  }
+                },
+                {
+                  "key": "organization.id",
+                  "value": {
+                    "stringValue": "00000000-0000-4000-8000-000000000002"
+                  }
+                },
+                {
+                  "key": "user.email",
+                  "value": {
+                    "stringValue": "fixture@example.invalid"
+                  }
+                },
+                {
+                  "key": "user.account_uuid",
+                  "value": {
+                    "stringValue": "00000000-0000-4000-8000-000000000003"
+                  }
+                },
+                {
+                  "key": "user.account_id",
+                  "value": {
+                    "stringValue": "fixtureaccountid"
+                  }
+                },
+                {
+                  "key": "terminal.type",
+                  "value": {
+                    "stringValue": "non-interactive"
+                  }
+                },
+                {
+                  "key": "event.name",
+                  "value": {
+                    "stringValue": "hook_registered"
+                  }
+                },
+                {
+                  "key": "event.timestamp",
+                  "value": {
+                    "stringValue": "2026-08-28T19:46:25.618Z"
+                  }
+                },
+                {
+                  "key": "event.sequence",
+                  "value": {
+                    "intValue": "1"
+                  }
+                },
+                {
+                  "key": "hook_event",
+                  "value": {
+                    "stringValue": "PostToolUse"
+                  }
+                },
+                {
+                  "key": "hook_type",
+                  "value": {
+                    "stringValue": "command"
+                  }
+                },
+                {
+                  "key": "hook_source",
+                  "value": {
+                    "stringValue": "userSettings"
+                  }
+                },
+                {
+                  "key": "safe_mode",
+                  "value": {
+                    "stringValue": "false"
+                  }
+                },
+                {
+                  "key": "hook_matcher",
+                  "value": {
+                    "stringValue": "Edit|Write|MultiEdit"
+                  }
+                }
+              ],
+              "body": {
+                "stringValue": "claude_code.hook_registered"
+              },
+              "observedTimeUnixNano": "1787946385618000000",
+              "timeUnixNano": "1787946385618000000"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "service.name",
+                  "value": {
+                    "stringValue": "claude-code-desktop"
+                  }
+                },
+                {
+                  "key": "service.version",
+                  "value": {
+                    "stringValue": "1.40609.0"
+                  }
+                },
+                {
+                  "key": "claude.deployment_mode",
+                  "value": {
+                    "stringValue": "1p"
+                  }
+                },
+                {
+                  "key": "host.arch",
+                  "value": {
+                    "stringValue": "arm64"
+                  }
+                },
+                {
+                  "key": "os.type",
+                  "value": {
+                    "stringValue": "darwin"
+                  }
+                },
+                {
+                  "key": "os.version",
+                  "value": {
+                    "stringValue": "26.0.1"
+                  }
+                },
+                {
+                  "key": "process.owner",
+                  "value": {
+                    "stringValue": "fixture"
+                  }
+                },
+                {
+                  "key": "user.id",
+                  "value": {
+                    "stringValue": "fixtureuserid"
+                  }
+                },
+                {
+                  "key": "session.id",
+                  "value": {
+                    "stringValue": "00000000-0000-4000-8000-000000000007"
+                  }
+                },
+                {
+                  "key": "organization.id",
+                  "value": {
+                    "stringValue": "00000000-0000-4000-8000-000000000002"
+                  }
+                },
+                {
+                  "key": "user.email",
+                  "value": {
+                    "stringValue": "fixture@example.invalid"
+                  }
+                },
+                {
+                  "key": "user.account_uuid",
+                  "value": {
+                    "stringValue": "00000000-0000-4000-8000-000000000003"
+                  }
+                },
+                {
+                  "key": "user.account_id",
+                  "value": {
+                    "stringValue": "fixtureaccountid"
+                  }
+                },
+                {
+                  "key": "terminal.type",
+                  "value": {
+                    "stringValue": "non-interactive"
+                  }
+                },
+                {
+                  "key": "event.name",
+                  "value": {
+                    "stringValue": "mcp_server_connection"
+                  }
+                },
+                {
+                  "key": "event.timestamp",
+                  "value": {
+                    "stringValue": "2026-08-28T20:04:15.217Z"
+                  }
+                },
+                {
+                  "key": "event.sequence",
+                  "value": {
+                    "intValue": "37"
+                  }
+                },
+                {
+                  "key": "status",
+                  "value": {
+                    "stringValue": "connected"
+                  }
+                },
+                {
+                  "key": "transport_type",
+                  "value": {
+                    "stringValue": "stdio"
+                  }
+                },
+                {
+                  "key": "server_scope",
+                  "value": {
+                    "stringValue": "user"
+                  }
+                },
+                {
+                  "key": "duration_ms",
+                  "value": {
+                    "stringValue": "82"
+                  }
+                },
+                {
+                  "key": "is_plugin",
+                  "value": {
+                    "boolValue": false
+                  }
+                },
+                {
+                  "key": "server_name",
+                  "value": {
+                    "stringValue": "pencil"
+                  }
+                }
+              ],
+              "body": {
+                "stringValue": "claude_code.mcp_server_connection"
+              },
+              "observedTimeUnixNano": "1787947455217000000",
+              "timeUnixNano": "1787947455217000000"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "service.name",
+                  "value": {
+                    "stringValue": "claude-code-desktop"
+                  }
+                },
+                {
+                  "key": "service.version",
+                  "value": {
+                    "stringValue": "1.40609.0"
+                  }
+                },
+                {
+                  "key": "claude.deployment_mode",
+                  "value": {
+                    "stringValue": "1p"
+                  }
+                },
+                {
+                  "key": "host.arch",
+                  "value": {
+                    "stringValue": "arm64"
+                  }
+                },
+                {
+                  "key": "os.type",
+                  "value": {
+                    "stringValue": "darwin"
+                  }
+                },
+                {
+                  "key": "os.version",
+                  "value": {
+                    "stringValue": "26.0.1"
+                  }
+                },
+                {
+                  "key": "process.owner",
+                  "value": {
+                    "stringValue": "fixture"
+                  }
+                },
+                {
+                  "key": "user.id",
+                  "value": {
+                    "stringValue": "fixtureuserid"
+                  }
+                },
+                {
+                  "key": "session.id",
+                  "value": {
+                    "stringValue": "00000000-0000-4000-8000-000000000006"
+                  }
+                },
+                {
+                  "key": "organization.id",
+                  "value": {
+                    "stringValue": "00000000-0000-4000-8000-000000000002"
+                  }
+                },
+                {
+                  "key": "user.email",
+                  "value": {
+                    "stringValue": "fixture@example.invalid"
+                  }
+                },
+                {
+                  "key": "user.account_uuid",
+                  "value": {
+                    "stringValue": "00000000-0000-4000-8000-000000000003"
+                  }
+                },
+                {
+                  "key": "user.account_id",
+                  "value": {
+                    "stringValue": "fixtureaccountid"
+                  }
+                },
+                {
+                  "key": "terminal.type",
+                  "value": {
+                    "stringValue": "non-interactive"
+                  }
+                },
+                {
+                  "key": "event.name",
+                  "value": {
+                    "stringValue": "plugin_loaded"
+                  }
+                },
+                {
+                  "key": "event.timestamp",
+                  "value": {
+                    "stringValue": "2026-08-28T19:46:25.618Z"
+                  }
+                },
+                {
+                  "key": "event.sequence",
+                  "value": {
+                    "intValue": "23"
+                  }
+                },
+                {
+                  "key": "plugin.name",
+                  "value": {
+                    "stringValue": "cowork-plugin-management"
+                  }
+                },
+                {
+                  "key": "marketplace.name",
+                  "value": {
+                    "stringValue": "inline"
+                  }
+                },
+                {
+                  "key": "plugin.version",
+                  "value": {
+                    "stringValue": "0.2.2"
+                  }
+                },
+                {
+                  "key": "plugin.scope",
+                  "value": {
+                    "stringValue": "user-local"
+                  }
+                },
+                {
+                  "key": "enabled_via",
+                  "value": {
+                    "stringValue": "user-install"
+                  }
+                },
+                {
+                  "key": "plugin_id_hash",
+                  "value": {
+                    "stringValue": "hixture000000001"
+                  }
+                },
+                {
+                  "key": "has_hooks",
+                  "value": {
+                    "boolValue": false
+                  }
+                },
+                {
+                  "key": "has_mcp",
+                  "value": {
+                    "boolValue": false
+                  }
+                },
+                {
+                  "key": "host_owned_mcp",
+                  "value": {
+                    "boolValue": false
+                  }
+                },
+                {
+                  "key": "skill_path_count",
+                  "value": {
+                    "intValue": "1"
+                  }
+                },
+                {
+                  "key": "command_path_count",
+                  "value": {
+                    "intValue": "0"
+                  }
+                },
+                {
+                  "key": "agent_path_count",
+                  "value": {
+                    "intValue": "0"
+                  }
+                },
+                {
+                  "key": "safe_mode",
+                  "value": {
+                    "stringValue": "false"
+                  }
+                }
+              ],
+              "body": {
+                "stringValue": "claude_code.plugin_loaded"
+              },
+              "observedTimeUnixNano": "1787946385618000000",
+              "timeUnixNano": "1787946385618000000"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "service.name",
+                  "value": {
+                    "stringValue": "claude-code-desktop"
+                  }
+                },
+                {
+                  "key": "service.version",
+                  "value": {
+                    "stringValue": "1.40609.0"
+                  }
+                },
+                {
+                  "key": "claude.deployment_mode",
+                  "value": {
+                    "stringValue": "1p"
+                  }
+                },
+                {
+                  "key": "host.arch",
+                  "value": {
+                    "stringValue": "arm64"
+                  }
+                },
+                {
+                  "key": "os.type",
+                  "value": {
+                    "stringValue": "darwin"
+                  }
+                },
+                {
+                  "key": "os.version",
+                  "value": {
+                    "stringValue": "26.0.1"
+                  }
+                },
+                {
+                  "key": "process.owner",
+                  "value": {
+                    "stringValue": "fixture"
+                  }
+                },
+                {
+                  "key": "user.id",
+                  "value": {
+                    "stringValue": "fixtureuserid"
+                  }
+                },
+                {
+                  "key": "session.id",
+                  "value": {
+                    "stringValue": "00000000-0000-4000-8000-000000000001"
+                  }
+                },
+                {
+                  "key": "organization.id",
+                  "value": {
+                    "stringValue": "00000000-0000-4000-8000-000000000002"
+                  }
+                },
+                {
+                  "key": "user.email",
+                  "value": {
+                    "stringValue": "fixture@example.invalid"
+                  }
+                },
+                {
+                  "key": "user.account_uuid",
+                  "value": {
+                    "stringValue": "00000000-0000-4000-8000-000000000003"
+                  }
+                },
+                {
+                  "key": "user.account_id",
+                  "value": {
+                    "stringValue": "fixtureaccountid"
+                  }
+                },
+                {
+                  "key": "terminal.type",
+                  "value": {
+                    "stringValue": "non-interactive"
+                  }
+                },
+                {
+                  "key": "event.name",
+                  "value": {
+                    "stringValue": "retention_sweep"
+                  }
+                },
+                {
+                  "key": "event.timestamp",
+                  "value": {
+                    "stringValue": "2026-08-28T19:43:15.336Z"
+                  }
+                },
+                {
+                  "key": "event.sequence",
+                  "value": {
+                    "intValue": "649"
+                  }
+                },
+                {
+                  "key": "prompt.id",
+                  "value": {
+                    "stringValue": "00000000-0000-4000-8000-000000000004"
+                  }
+                },
+                {
+                  "key": "result",
+                  "value": {
+                    "stringValue": "complete"
+                  }
+                },
+                {
+                  "key": "period_days",
+                  "value": {
+                    "stringValue": "30"
+                  }
+                },
+                {
+                  "key": "used_default",
+                  "value": {
+                    "stringValue": "true"
+                  }
+                },
+                {
+                  "key": "transcripts_deleted",
+                  "value": {
+                    "stringValue": "0"
+                  }
+                },
+                {
+                  "key": "session_files_deleted",
+                  "value": {
+                    "stringValue": "0"
+                  }
+                },
+                {
+                  "key": "artifacts_deleted",
+                  "value": {
+                    "stringValue": "0"
+                  }
+                },
+                {
+                  "key": "files_retained_fresh",
+                  "value": {
+                    "stringValue": "238"
+                  }
+                },
+                {
+                  "key": "files_past_cutoff",
+                  "value": {
+                    "stringValue": "0"
+                  }
+                },
+                {
+                  "key": "error_count",
+                  "value": {
+                    "stringValue": "0"
+                  }
+                }
+              ],
+              "body": {
+                "stringValue": "claude_code.retention_sweep"
+              },
+              "flags": 1,
+              "observedTimeUnixNano": "1787946195336000000",
+              "spanId": "0000000000000003",
+              "timeUnixNano": "1787946195336000000",
+              "traceId": "00000000000000000000000000000002"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "service.name",
+                  "value": {
+                    "stringValue": "claude-code-desktop"
+                  }
+                },
+                {
+                  "key": "service.version",
+                  "value": {
+                    "stringValue": "1.40609.0"
+                  }
+                },
+                {
+                  "key": "claude.deployment_mode",
+                  "value": {
+                    "stringValue": "1p"
+                  }
+                },
+                {
+                  "key": "host.arch",
+                  "value": {
+                    "stringValue": "arm64"
+                  }
+                },
+                {
+                  "key": "os.type",
+                  "value": {
+                    "stringValue": "darwin"
+                  }
+                },
+                {
+                  "key": "os.version",
+                  "value": {
+                    "stringValue": "26.0.1"
+                  }
+                },
+                {
+                  "key": "process.owner",
+                  "value": {
+                    "stringValue": "fixture"
+                  }
+                },
+                {
+                  "key": "user.id",
+                  "value": {
+                    "stringValue": "fixtureuserid"
+                  }
+                },
+                {
+                  "key": "session.id",
+                  "value": {
+                    "stringValue": "00000000-0000-4000-8000-000000000007"
+                  }
+                },
+                {
+                  "key": "organization.id",
+                  "value": {
+                    "stringValue": "00000000-0000-4000-8000-000000000002"
+                  }
+                },
+                {
+                  "key": "user.email",
+                  "value": {
+                    "stringValue": "fixture@example.invalid"
+                  }
+                },
+                {
+                  "key": "user.account_uuid",
+                  "value": {
+                    "stringValue": "00000000-0000-4000-8000-000000000003"
+                  }
+                },
+                {
+                  "key": "user.account_id",
+                  "value": {
+                    "stringValue": "fixtureaccountid"
+                  }
+                },
+                {
+                  "key": "terminal.type",
+                  "value": {
+                    "stringValue": "non-interactive"
+                  }
+                },
+                {
+                  "key": "event.name",
+                  "value": {
+                    "stringValue": "skill_activated"
+                  }
+                },
+                {
+                  "key": "event.timestamp",
+                  "value": {
+                    "stringValue": "2026-08-28T20:04:15.715Z"
+                  }
+                },
+                {
+                  "key": "event.sequence",
+                  "value": {
+                    "intValue": "41"
+                  }
+                },
+                {
+                  "key": "prompt.id",
+                  "value": {
+                    "stringValue": "00000000-0000-4000-8000-000000000008"
+                  }
+                },
+                {
+                  "key": "skill.name",
+                  "value": {
+                    "stringValue": "ak-xia"
+                  }
+                },
+                {
+                  "key": "invocation_trigger",
+                  "value": {
+                    "stringValue": "user-slash"
+                  }
+                },
+                {
+                  "key": "skill.source",
+                  "value": {
+                    "stringValue": "userSettings"
+                  }
+                }
+              ],
+              "body": {
+                "stringValue": "claude_code.skill_activated"
+              },
+              "flags": 1,
+              "observedTimeUnixNano": "1787947455715000000",
+              "spanId": "0000000000000005",
+              "timeUnixNano": "1787947455715000000",
+              "traceId": "00000000000000000000000000000004"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "service.name",
+                  "value": {
+                    "stringValue": "claude-code-desktop"
+                  }
+                },
+                {
+                  "key": "service.version",
+                  "value": {
+                    "stringValue": "1.40609.0"
+                  }
+                },
+                {
+                  "key": "claude.deployment_mode",
+                  "value": {
+                    "stringValue": "1p"
+                  }
+                },
+                {
+                  "key": "host.arch",
+                  "value": {
+                    "stringValue": "arm64"
+                  }
+                },
+                {
+                  "key": "os.type",
+                  "value": {
+                    "stringValue": "darwin"
+                  }
+                },
+                {
+                  "key": "os.version",
+                  "value": {
+                    "stringValue": "26.0.1"
+                  }
+                },
+                {
+                  "key": "process.owner",
+                  "value": {
+                    "stringValue": "fixture"
+                  }
+                },
+                {
+                  "key": "user.id",
+                  "value": {
+                    "stringValue": "fixtureuserid"
+                  }
+                },
+                {
+                  "key": "session.id",
+                  "value": {
+                    "stringValue": "00000000-0000-4000-8000-000000000001"
+                  }
+                },
+                {
+                  "key": "organization.id",
+                  "value": {
+                    "stringValue": "00000000-0000-4000-8000-000000000002"
+                  }
+                },
+                {
+                  "key": "user.email",
+                  "value": {
+                    "stringValue": "fixture@example.invalid"
+                  }
+                },
+                {
+                  "key": "user.account_uuid",
+                  "value": {
+                    "stringValue": "00000000-0000-4000-8000-000000000003"
+                  }
+                },
+                {
+                  "key": "user.account_id",
+                  "value": {
+                    "stringValue": "fixtureaccountid"
+                  }
+                },
+                {
+                  "key": "terminal.type",
+                  "value": {
+                    "stringValue": "non-interactive"
+                  }
+                },
+                {
+                  "key": "event.name",
+                  "value": {
+                    "stringValue": "subagent_completed"
+                  }
+                },
+                {
+                  "key": "event.timestamp",
+                  "value": {
+                    "stringValue": "2026-08-28T19:50:08.435Z"
+                  }
+                },
+                {
+                  "key": "event.sequence",
+                  "value": {
+                    "intValue": "949"
+                  }
+                },
+                {
+                  "key": "prompt.id",
+                  "value": {
+                    "stringValue": "00000000-0000-4000-8000-000000000004"
+                  }
+                },
+                {
+                  "key": "agent_type",
+                  "value": {
+                    "stringValue": "kongming"
+                  }
+                },
+                {
+                  "key": "agent.source",
+                  "value": {
+                    "stringValue": "userSettings"
+                  }
+                },
+                {
+                  "key": "is_built_in",
+                  "value": {
+                    "boolValue": false
+                  }
+                },
+                {
+                  "key": "is_async",
+                  "value": {
+                    "boolValue": true
+                  }
+                },
+                {
+                  "key": "total_tokens",
+                  "value": {
+                    "intValue": "194184"
+                  }
+                },
+                {
+                  "key": "total_tool_uses",
+                  "value": {
+                    "intValue": "28"
+                  }
+                },
+                {
+                  "key": "duration_ms",
+                  "value": {
+                    "intValue": "873101"
+                  }
+                },
+                {
+                  "key": "model",
+                  "value": {
+                    "stringValue": "claude-fable-5"
+                  }
+                },
+                {
+                  "key": "final_model",
+                  "value": {
+                    "stringValue": "claude-opus-4-8"
+                  }
+                },
+                {
+                  "key": "model_swapped",
+                  "value": {
+                    "boolValue": true
+                  }
+                }
+              ],
+              "body": {
+                "stringValue": "claude_code.subagent_completed"
+              },
+              "flags": 1,
+              "observedTimeUnixNano": "1787946608435000000",
+              "spanId": "0000000000000001",
+              "timeUnixNano": "1787946608435000000",
+              "traceId": "00000000000000000000000000000002"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "service.name",
+                  "value": {
+                    "stringValue": "claude-code-desktop"
+                  }
+                },
+                {
+                  "key": "service.version",
+                  "value": {
+                    "stringValue": "1.40609.0"
+                  }
+                },
+                {
+                  "key": "claude.deployment_mode",
+                  "value": {
+                    "stringValue": "1p"
+                  }
+                },
+                {
+                  "key": "host.arch",
+                  "value": {
+                    "stringValue": "arm64"
+                  }
+                },
+                {
+                  "key": "os.type",
+                  "value": {
+                    "stringValue": "darwin"
+                  }
+                },
+                {
+                  "key": "os.version",
+                  "value": {
+                    "stringValue": "26.0.1"
+                  }
+                },
+                {
+                  "key": "process.owner",
+                  "value": {
+                    "stringValue": "fixture"
+                  }
+                },
+                {
+                  "key": "user.id",
+                  "value": {
+                    "stringValue": "fixtureuserid"
+                  }
+                },
+                {
+                  "key": "session.id",
+                  "value": {
+                    "stringValue": "00000000-0000-4000-8000-000000000001"
+                  }
+                },
+                {
+                  "key": "organization.id",
+                  "value": {
+                    "stringValue": "00000000-0000-4000-8000-000000000002"
+                  }
+                },
+                {
+                  "key": "user.email",
+                  "value": {
+                    "stringValue": "fixture@example.invalid"
+                  }
+                },
+                {
+                  "key": "user.account_uuid",
+                  "value": {
+                    "stringValue": "00000000-0000-4000-8000-000000000003"
+                  }
+                },
+                {
+                  "key": "user.account_id",
+                  "value": {
+                    "stringValue": "fixtureaccountid"
+                  }
+                },
+                {
+                  "key": "terminal.type",
+                  "value": {
+                    "stringValue": "non-interactive"
+                  }
+                },
+                {
+                  "key": "event.name",
+                  "value": {
+                    "stringValue": "tool_decision"
+                  }
+                },
+                {
+                  "key": "event.timestamp",
+                  "value": {
+                    "stringValue": "2026-08-28T19:36:51.656Z"
+                  }
+                },
+                {
+                  "key": "event.sequence",
+                  "value": {
+                    "intValue": "309"
+                  }
+                },
+                {
+                  "key": "prompt.id",
+                  "value": {
+                    "stringValue": "00000000-0000-4000-8000-000000000004"
+                  }
+                },
+                {
+                  "key": "decision",
+                  "value": {
+                    "stringValue": "accept"
+                  }
+                },
+                {
+                  "key": "source",
+                  "value": {
+                    "stringValue": "config"
+                  }
+                },
+                {
+                  "key": "tool_name",
+                  "value": {
+                    "stringValue": "Bash"
+                  }
+                },
+                {
+                  "key": "tool_use_id",
+                  "value": {
+                    "stringValue": "toolu_fixture000001"
+                  }
+                },
+                {
+                  "key": "tool_source",
+                  "value": {
+                    "stringValue": "builtin"
+                  }
+                },
+                {
+                  "key": "tool_parameters",
+                  "value": {
+                    "stringValue": "{\"bash_command\":\"ls\",\"full_command\":\"ls client/memhttptest/ \u0026\u0026 sed -n '1,80p' client/memhttptest/*.go | head -100\",\"description\":\"Read memhttptest API\"}"
+                  }
+                }
+              ],
+              "body": {
+                "stringValue": "claude_code.tool_decision"
+              },
+              "flags": 1,
+              "observedTimeUnixNano": "1787945811656000000",
+              "spanId": "0000000000000006",
+              "timeUnixNano": "1787945811656000000",
+              "traceId": "00000000000000000000000000000002"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "service.name",
+                  "value": {
+                    "stringValue": "claude-code-desktop"
+                  }
+                },
+                {
+                  "key": "service.version",
+                  "value": {
+                    "stringValue": "1.40609.0"
+                  }
+                },
+                {
+                  "key": "claude.deployment_mode",
+                  "value": {
+                    "stringValue": "1p"
+                  }
+                },
+                {
+                  "key": "host.arch",
+                  "value": {
+                    "stringValue": "arm64"
+                  }
+                },
+                {
+                  "key": "os.type",
+                  "value": {
+                    "stringValue": "darwin"
+                  }
+                },
+                {
+                  "key": "os.version",
+                  "value": {
+                    "stringValue": "26.0.1"
+                  }
+                },
+                {
+                  "key": "process.owner",
+                  "value": {
+                    "stringValue": "fixture"
+                  }
+                },
+                {
+                  "key": "user.id",
+                  "value": {
+                    "stringValue": "fixtureuserid"
+                  }
+                },
+                {
+                  "key": "session.id",
+                  "value": {
+                    "stringValue": "00000000-0000-4000-8000-000000000001"
+                  }
+                },
+                {
+                  "key": "organization.id",
+                  "value": {
+                    "stringValue": "00000000-0000-4000-8000-000000000002"
+                  }
+                },
+                {
+                  "key": "user.email",
+                  "value": {
+                    "stringValue": "fixture@example.invalid"
+                  }
+                },
+                {
+                  "key": "user.account_uuid",
+                  "value": {
+                    "stringValue": "00000000-0000-4000-8000-000000000003"
+                  }
+                },
+                {
+                  "key": "user.account_id",
+                  "value": {
+                    "stringValue": "fixtureaccountid"
+                  }
+                },
+                {
+                  "key": "terminal.type",
+                  "value": {
+                    "stringValue": "non-interactive"
+                  }
+                },
+                {
+                  "key": "event.name",
+                  "value": {
+                    "stringValue": "tool_result"
+                  }
+                },
+                {
+                  "key": "event.timestamp",
+                  "value": {
+                    "stringValue": "2026-08-28T19:36:51.705Z"
+                  }
+                },
+                {
+                  "key": "event.sequence",
+                  "value": {
+                    "intValue": "310"
+                  }
+                },
+                {
+                  "key": "prompt.id",
+                  "value": {
+                    "stringValue": "00000000-0000-4000-8000-000000000004"
+                  }
+                },
+                {
+                  "key": "tool_name",
+                  "value": {
+                    "stringValue": "Bash"
+                  }
+                },
+                {
+                  "key": "tool_use_id",
+                  "value": {
+                    "stringValue": "toolu_fixture000001"
+                  }
+                },
+                {
+                  "key": "success",
+                  "value": {
+                    "stringValue": "true"
+                  }
+                },
+                {
+                  "key": "duration_ms",
+                  "value": {
+                    "stringValue": "48"
+                  }
+                },
+                {
+                  "key": "tool_parameters",
+                  "value": {
+                    "stringValue": "{\"bash_command\":\"ls\",\"full_command\":\"ls client/memhttptest/ \u0026\u0026 sed -n '1,80p' client/memhttptest/*.go | head -100\",\"description\":\"Read memhttptest API\"}"
+                  }
+                },
+                {
+                  "key": "tool_input",
+                  "value": {
+                    "stringValue": "{\"command\":\"ls client/memhttptest/ \u0026\u0026 sed -n '1,80p' client/memhttptest/*.go | head -100\",\"description\":\"Read memhttptest API\"}"
+                  }
+                },
+                {
+                  "key": "tool_input_size_bytes",
+                  "value": {
+                    "stringValue": "127"
+                  }
+                },
+                {
+                  "key": "tool_result_size_bytes",
+                  "value": {
+                    "stringValue": "2416"
+                  }
+                }
+              ],
+              "body": {
+                "stringValue": "claude_code.tool_result"
+              },
+              "flags": 1,
+              "observedTimeUnixNano": "1787945811705000000",
+              "spanId": "0000000000000003",
+              "timeUnixNano": "1787945811705000000",
+              "traceId": "00000000000000000000000000000002"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "service.name",
+                  "value": {
+                    "stringValue": "claude-code-desktop"
+                  }
+                },
+                {
+                  "key": "service.version",
+                  "value": {
+                    "stringValue": "1.40609.0"
+                  }
+                },
+                {
+                  "key": "claude.deployment_mode",
+                  "value": {
+                    "stringValue": "1p"
+                  }
+                },
+                {
+                  "key": "host.arch",
+                  "value": {
+                    "stringValue": "arm64"
+                  }
+                },
+                {
+                  "key": "os.type",
+                  "value": {
+                    "stringValue": "darwin"
+                  }
+                },
+                {
+                  "key": "os.version",
+                  "value": {
+                    "stringValue": "26.0.1"
+                  }
+                },
+                {
+                  "key": "process.owner",
+                  "value": {
+                    "stringValue": "fixture"
+                  }
+                },
+                {
+                  "key": "user.id",
+                  "value": {
+                    "stringValue": "fixtureuserid"
+                  }
+                },
+                {
+                  "key": "session.id",
+                  "value": {
+                    "stringValue": "00000000-0000-4000-8000-000000000007"
+                  }
+                },
+                {
+                  "key": "organization.id",
+                  "value": {
+                    "stringValue": "00000000-0000-4000-8000-000000000002"
+                  }
+                },
+                {
+                  "key": "user.email",
+                  "value": {
+                    "stringValue": "fixture@example.invalid"
+                  }
+                },
+                {
+                  "key": "user.account_uuid",
+                  "value": {
+                    "stringValue": "00000000-0000-4000-8000-000000000003"
+                  }
+                },
+                {
+                  "key": "user.account_id",
+                  "value": {
+                    "stringValue": "fixtureaccountid"
+                  }
+                },
+                {
+                  "key": "terminal.type",
+                  "value": {
+                    "stringValue": "non-interactive"
+                  }
+                },
+                {
+                  "key": "event.name",
+                  "value": {
+                    "stringValue": "user_prompt"
+                  }
+                },
+                {
+                  "key": "event.timestamp",
+                  "value": {
+                    "stringValue": "2026-08-28T20:04:15.715Z"
+                  }
+                },
+                {
+                  "key": "event.sequence",
+                  "value": {
+                    "intValue": "40"
+                  }
+                },
+                {
+                  "key": "prompt.id",
+                  "value": {
+                    "stringValue": "00000000-0000-4000-8000-000000000008"
+                  }
+                },
+                {
+                  "key": "prompt_length",
+                  "value": {
+                    "stringValue": "103"
+                  }
+                },
+                {
+                  "key": "prompt",
+                  "value": {
+                    "stringValue": "/ak:xia /tmp/project-layout \"project layout, folder structure, file naming convention\" --improve --auto"
+                  }
+                },
+                {
+                  "key": "command_name",
+                  "value": {
+                    "stringValue": "ak:xia"
+                  }
+                },
+                {
+                  "key": "command_source",
+                  "value": {
+                    "stringValue": "custom"
+                  }
+                }
+              ],
+              "body": {
+                "stringValue": "claude_code.user_prompt"
+              },
+              "flags": 1,
+              "observedTimeUnixNano": "1787947455715000000",
+              "spanId": "0000000000000005",
+              "timeUnixNano": "1787947455715000000",
+              "traceId": "00000000000000000000000000000004"
+            }
+          ],
+          "scope": {
+            "name": "com.anthropic.claude_code.events"
+          }
+        }
+      ]
+    }
+  ]
+}

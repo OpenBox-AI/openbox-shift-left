@@ -13,6 +13,14 @@ Thumbs.db
 bin/
 /openbox
 
+# `go build ./...` in a module whose package is `main` writes the binary into the
+# CURRENT directory, so a routine cross-compile gate leaves one beside the source.
+# That is how 18 MB of untracked binaries came to be sitting in
+# probes/refusal-injector/ where `git status` showed only the directory — an
+# untracked directory hides its contents, so no review would have seen them.
+*.exe
+probes/refusal-injector/refusal-injector
+
 # Env / secrets
 .env
 .env.*
