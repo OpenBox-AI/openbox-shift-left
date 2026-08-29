@@ -85,6 +85,44 @@ jobs:
         # that pin the INV-3 hook contract (exit 0, empty stdout).
         run: go test -race $MODS
 
+      - name: Build every module WITHOUT the workspace
+        # The gate whose absence let a broken release ship green.
+        #
+        # Every step above builds through go.work, which is what the workspace is
+        # FOR — and its cost is that it resolves imports a module's own go.mod does
+        # not declare. `cli` imported `transport` with neither a require nor a
+        # replace: 14 modules built, vetted, tested under -race and cross-compiled
+        # clean, while `GOWORK=off` — the ONLY mode .goreleaser.yaml runs
+        # (.goreleaser.yaml: `env: [GOWORK=off]`, `dir: cli`) — could not resolve
+        # the import at all. The release artifact did not build and nothing said so.
+        #
+        # Note what would NOT have caught it: `go mod tidy`. Tidy writes require
+        # lines and does not write replace directives, and an intra-repo v0.0.0
+        # require has no source without one. So the remedy for a failure here is
+        # "add BOTH", not "run tidy".
+        #
+        # Build, not test: this gate is about MODULE RESOLUTION outside the
+        # workspace. The suites already ran above, and running them again per
+        # module would double CI time to re-answer a question already answered.
+        #
+        # There is a same-class Go test (cli TestEveryIntraRepoImportIsWiredInGoMod)
+        # that needs no network and runs on a developer's machine before the push.
+        # Both are kept: that one is structural and fast, this one is the ground
+        # truth, and only this one would catch a resolution failure the structural
+        # check cannot model.
+        run: |
+          failed=""
+          for dir in $(go list -m -f '{{.Dir}}'); do
+            echo "::group::GOWORK=off build $dir"
+            (cd "$dir" && GOWORK=off go build ./...) || failed="$failed $dir"
+            echo "::endgroup::"
+          done
+          if [ -n "$failed" ]; then
+            echo "::error::these modules do not build without the workspace (missing require and/or replace in their own go.mod):$failed"
+            exit 1
+          fi
+          echo "every module builds standalone"
+
       - name: Vulnerability scan
         # The gate that makes the pin above self-maintaining. Without it, the
         # toolchain silently ages out of support again and nothing says so —
