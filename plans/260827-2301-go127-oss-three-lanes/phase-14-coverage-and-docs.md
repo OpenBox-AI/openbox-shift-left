@@ -139,6 +139,47 @@ machine-owned artifacts rather than copying their content.
 - Restate the redactor's measured reach at the new volume rather than repeating the
   old sentence unchanged.
 
+## Handoff from phase 13 — the sentences this phase must not get wrong
+
+Phase 13 produced **strong replay evidence and zero live evidence**. The
+overstatement most likely to appear here is collapsing the two: writing that the
+transport lane "relays byte-identically" and the telemetry lane "maps provider
+traffic" as verified product properties, while dropping the dial substitution, the
+in-memory pipe, the un-run OTLP HTTP intake and the fact that no stack has ever
+stored one of these events.
+
+**This sentence belongs in `COVERAGE.md` and its substance echoed in CLAUDE.md's
+status paragraph:**
+
+> Both new lanes are verified by REPLAY: real recorded traffic through the shipped
+> code path, bind-free, with the relay's upstream dial substituted
+> (`gateway/gatewaytest`) and no socket anywhere. That proves the bytes the relay
+> forwards and captures, the mapping, the gate and the caps — it proves nothing
+> about bind, listen, TLS to a real socket, the OTLP HTTP intake, or what core
+> stores. Those live only in the dormant `testbed/46-otel-lane.sh` and
+> `47-transport.sh`.
+
+Three companion rules:
+
+1. **Every corpus number carries its run id.** `20260827T063932Z-225cac` is one
+   machine, one workload, all subscription-OAuth. 96.75%, 70,080 bytes/call and
+   the retry-count census generalize no further than that, and the three
+   denominators (5,340 / 5,231 / 5,049) are different populations — the
+   verification report explains which.
+2. **The all-zero `x-stainless-retry-count` must never appear near ADR-0021 §9.**
+   A corpus containing no refusals is evidence that the header exists, not
+   evidence about retry-around behaviour. Probe A remains the only source for §9,
+   and `probes/refusal-injector/` + its runbook are now the instrument.
+3. **The redactor's reach is measured now and the attribution matters more than
+   the headline.** 52.8% of recorded model calls carry a marker, from ~200
+   distinct sites, of which our own two generic rules are 55% and gitleaks'
+   `generic-api-key` is 13%. Do not restate the old "two false positives"
+   sentence.
+
+Also for this phase: the module count is **15** (`probes/refusal-injector` added),
+and the backend ask gains a capacity number — roughly **334 MB of spool per
+5,000-call session** — alongside the still-open server-side dedupe request.
+
 ## Next steps
 
 Plan complete. Remaining open items — probe A's outcome, ADR-0021 §10's OAuth

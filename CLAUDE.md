@@ -128,11 +128,32 @@ reintroduce that: if something is provider-agnostic it goes in `hookflow` or
   — 2026-08-28 — **a Go source file written during a session**, where an Ed25519
   TEST VECTOR became `${OPENBOX_REDACTED_ENTROPY}=` and an `APIKey:` literal
   became `${OPENBOX_REDACTED_SECRET_ASSIGNMENT}`, silently, on the write. The
-  file did not compile and the cause was two steps removed from the symptom. Two
+  file did not compile and the cause was two steps removed from the symptom.
+  **The blast radius is now MEASURED** (2026-08-29), and the three numbers must be
+  kept apart or the finding overstates one thing and understates another. Of 5,340
+  recorded model calls from real governed sessions in this repo, **2,820 (52.8%)
+  carry `${OPENBOX_REDACTED_*}` in their context**, from **22,060 occurrences**
+  traced to only **~200 distinct rewrite SITES** — roughly 200 corrupted places
+  amplified ~110x by context replay, because one rewritten file read early poisons
+  every later call. **The attribution is the part that changes a decision: by
+  distinct site, `redactEntropy` is 28% and `secret_assignment` 27% — our own two
+  generic rules are 55% — while gitleaks' `generic-api-key` is 13%.** Disabling
+  that one rule, the narrow option on the table, leaves the majority in place. Not
+  every marker is a false positive, and nothing distinguishes them without
+  inspecting the ~200 sites; what makes the FP reading likely is the category mix,
+  `ENTROPY` leading over a tree full of git SHAs, UUIDs, base64 test vectors and
+  `go.sum` hashes. It was also **invisible until the
+  bodies were decompressed** — while a response was gzipped the marker matched
+  nothing, the same mechanism this file already names for a content-encoded body
+  defeating the detector, observed on our own artifacts. Two
   practical consequences until the rule is fixed: **check any file this repo
   writes for that placeholder**, and prefer DERIVING a base64 test fixture in
   code (`base64.StdEncoding.EncodeToString(seed)`) over writing the literal —
   `cli/internal/telemetryemit/sentinel_test.go` does exactly that, and says why.
+  `cli/internal/corpusfixture` now REFUSES to commit any fixture carrying the
+  marker, for the reason that generalizes: a corrupted fixture still parses and
+  still replays, so every assertion built on it silently becomes a statement
+  about the accident rather than about the product.
   Nested-JSON blindness WAS a second gap and is closed (2026-08-25) — both generic
   patterns now tolerate JSON quoting/escaping, which matters because a
   `tool_response` is JSON and every MCP result arrives escaped. **The JSON-escape

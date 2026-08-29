@@ -2,7 +2,7 @@
 title: "Go 1.27 + OSS foundation, then Three Lanes, One Pipeline"
 description: "One sequence, two stages: raise the Go floor and replace hand-rolled components with maintained libraries, then fold openbox-logger's telemetry + transport observation into shift-left as native Go services under the 2026-08-27 owner rulings."
 status: in-progress
-progress: "stage A complete; stage B 08 done, 09+10 partial, 11 done, 12 done with two named deviations, 13-14 pending (~78h of ~89h)"
+progress: "stage A complete; stage B 08 done, 09+10 partial, 11-13 done, 14 pending (~86h of ~89h)"
 updated: 2026-08-29
 priority: P1
 effort: ~89h (14 phases: stage A ~36h, stage B ~53h)
@@ -104,8 +104,8 @@ about what egresses — no content field, gate or cap moves in phases 01–07.
 
 ## Progress (2026-08-28)
 
-**Stage A complete. Stage B: 08 done, 09 and 10 partial, 11 and 12 done, 13–14 pending.**
-~78h of ~89h delivered by phase weight; 2 of the 7 stage-B phases remain.
+**Stage A complete. Stage B: 08 done, 09 and 10 partial, 11–13 done, 14 pending.**
+~86h of ~89h delivered by phase weight; 1 of the 7 stage-B phases remains.
 
 | | state |
 |---|---|
@@ -116,11 +116,13 @@ about what egresses — no content field, gate or cap moves in phases 01–07.
 | Conformance | 38 numbered cases run, 38 pass |
 | Binary | still 17 MB — the mapper is unlinked, so OD5's +16.5 MB arrives with the daemon subcommand |
 
-**What actually blocks the rest.** Phases 11 and 12 are done, so 13 is the next
-unit of work — and its live half gates on a bind-capable host and a stack. The
-three deferred service lifecycles (telemetry's from 09, transport's from 11) and
-the election all landed in 12, on one shared mechanism rather than a third
-hand-copy.
+**What actually blocks the rest.** Phase 13 is done, so **14 is the last unit of
+work** and it is documentation reconciliation. What still gates on a live stack has
+NOT moved: the three dormant testbed phases (35, 45, 46, 47), and probe A, which
+additionally needs a bind-capable host and real credentials. Phase 13 changed the
+evidence for the CAPTURE half of both new lanes from "unit-verified" to "proven on
+real recorded traffic"; it changed nothing about the live half, and phase 14 must
+not blur the two.
 
 **The socket run happened, and it is now GREEN (2026-08-28, owner's machine).**
 First pass: 21 of 25 packages, with 4 failures — all in tests whose servers must
@@ -205,7 +207,7 @@ by any of this.
 | 10 | [Telemetry mappers → contract (`:otel:`)](phase-10-telemetry-mappers.md) | 09 | **partial‡** | 8h |
 | 11 | [Transport proxy as native service (`:proxy:`, goproxy)](phase-11-transport-proxy-service.md) | 04, 10 | **done§** | 15h |
 | 12 | [One-command install/remove + producer election](phase-12-one-command-and-election.md) | 09, 11 | **done¶** | 6h |
-| 13 | [Conformance, fixtures & probe-A instrument](phase-13-conformance-fixtures-probe.md) | 10, 11 | pending | 8h |
+| 13 | [Conformance, fixtures & probe-A instrument](phase-13-conformance-fixtures-probe.md) | 10, 11 | **done‖** | 8h |
 | 14 | [Coverage matrix & docs reconciliation](phase-14-coverage-and-docs.md) | 09–13 | pending | 4h |
 
 \* **Phase 04** is implemented; its real install/uninstall cycle and the
@@ -281,6 +283,62 @@ phase's criteria. And the gate exercised the **plain-HTTP path only**: the MITM
 response copy is different code, read statically, so running the CONNECT path is
 the FIRST thing the conformance work should do. First-byte latency is untested.
 [Report](reports/verification-260829-phase-11-goproxy-spike.md).
+
+**‖** **Phase 13 is DONE (2026-08-29)** —
+[verification-260829-phase-13-replay-conformance](reports/verification-260829-phase-13-replay-conformance.md).
+Five things came out of it that the phase file did not anticipate.
+
+**The headline retires two standing caveats at once.** A recorded model call now
+crosses the CONNECT path byte-identically in both directions, and a 60-frame SSE
+response streams through it per chunk — phase 11's "no response body has ever
+traversed this lane" and the spike's "the gate exercised the plain-HTTP path only"
+are both gone. The enabling seam is the smallest one available: `gateway/internal/dialhook`
+holds the upstream dial (no module outside `gateway` can import it), and
+`gateway/gatewaytest` is the test-only mutator with its own non-test-importer
+tripwire. A `Config.DialContext` field was REJECTED — the hazard is not injection
+(anything that can set `Config` already sets `Config.Upstream`, where the
+credential goes) but DRIFT: a production feature later populating it would silently
+stop the identity suite from describing the production dial path.
+
+**OD1(c) is measured, not estimated: 96.75%** of 5,049 recorded model-call request
+bodies exceed the 65,536-rune cap (p50 529,175, max 2,566,660). Response bodies:
+0.06%. The oversized-body fixture is therefore REAL rather than synthetic — no
+smaller clean exchange exists.
+
+**More than half of the recorded model calls carried this repository's own
+redaction markers**, and the site census changes which decision that points at.
+2,820 of 5,340 model-call requests (52.8%) carry `${OPENBOX_REDACTED_*}` in their
+context; 22,060 occurrences trace to only ~200 distinct rewrite SITES, amplified
+~110x by context replay. By distinct site, **our own `redactEntropy` (28%) and
+`secret_assignment` (27%) are 55% of it, while gitleaks' `generic-api-key` is
+13%** — so Open Q1's narrow "disable `generic-api-key` alone" option addresses a
+minority of the corruption. That is new information about a decision already on
+the table; it is SURFACED for an owner ruling, not decided here. It was also
+**invisible until bodies were decompressed** — while a response was gzipped the
+marker matched nothing, the same mechanism this repo already documents for a
+content-encoded body defeating its own detector, observed on its own artifacts.
+
+**A drill came back GREEN and that was the most useful result of the six.** The
+`DisableCompression` mutation could not be detected by the assertion aimed at it:
+`net/http` only adds `Accept-Encoding` when the request lacks one, so with the
+fixture's own header present both settings behave identically. The fix is a second
+case sending NO `Accept-Encoding`. Without the drill, an assertion that reads
+exactly like a control would have shipped as one.
+
+**Four self-inflicted measurement errors are recorded in the report rather than
+quietly fixed**, because the shape recurs: a drill that reported RED without
+measuring anything (wrong `-run` package), a drill revert whose anchor was
+ambiguous and corrupted `gateway/proxy.go`, an OD1(c) test that passed with the
+body STRIPPED rather than capped, and a corpus prefilter wrong by 8x. All four are
+"a result that looks like a measurement and is not".
+
+**Requirement 2 was rescoped and requirement 7 was rehomed.** Four of req 2's five
+replay subjects are phase-10 deferred items with no mapper behind them, so it
+became a 16-event-type census where the 15 unhandled types must be COUNTED as
+drops. Req 7's injector is `probes/refusal-injector/`, its own module with no
+product dependency, rather than a debug mode inside `openbox transport` — response
+fabrication does not belong on the enforcement path permanently to answer one
+question.
 
 **¶** **Phase 12 is DONE (2026-08-29), with two named deviations** —
 [verification-260829-phase-12-one-command-and-election](reports/verification-260829-phase-12-one-command-and-election.md).
@@ -458,7 +516,15 @@ Stage B — convergence:
    landing it in `governance_events` additionally needs a live stack (the
    standing D6 limit).
 8. With transport installed, that same session's model calls pass an in-path
-   relay (capture live; refusal dormant pending probe A). **Half met.** The
+   relay (capture live; refusal dormant pending probe A). **Half met, and the met
+   half got materially stronger in phase 13: a REAL recorded exchange — a
+   564,718-rune request and its response — now crosses the CONNECT path
+   byte-identically, and a real 60-frame SSE response streams through it per
+   chunk. Phase 11's "no response body has ever traversed this lane" is
+   retired.** Still not met: "installed" against a real launchd, and refusal,
+   whose instrument now exists (`probes/refusal-injector/`) but has not been run.
+   The original phase-11 wording follows.
+   The
    RELAY and its capture are met and drilled: a real CONNECT is TLS-terminated
    with the project CA and served by the existing `gateway.Gateway`, and the
    evidence reaches a real spool file under `:proxy:`. Refusal is dormant, and
@@ -477,12 +543,13 @@ Stage B — convergence:
     system-state diff returns empty (settings restored, services unloaded, CA
     deleted). **NOT MET** — phase 12 not started.
 11. New mappers pass replay conformance on sanitized real fixtures, asserting
-    outbound bytes; `usage.go`'s INV-2 sentinel untouched.
-    **Partially met.** Outbound-byte assertions are live for the `api_request`
-    mapper, including a nine-drill sentinel, and **`usage.go` has a zero diff**
-    with its sentinel green. What is missing is *replay over sanitized real
-    fixtures*: the corpus has been read for schema only, no fixture has been
-    sanitized into this repo, and that is phase 13's.
+    outbound bytes; `usage.go`'s INV-2 sentinel untouched. **MET (2026-08-29).**
+    Sanitized fixtures are committed under `telemetry/testdata/corpus/` and
+    `transport/testdata/corpus/`, gated by a test that DISCOVERS corpus
+    directories rather than listing them. The telemetry replay enters through the
+    PRODUCTION OTLP decode and exits at a real spool file; the transport replay
+    enters at a real CONNECT and exits at real POSTed bytes. `usage.go` still has
+    a zero diff and its sentinel is green.
 12. All modules green under `-race` + both cross-compiles; docs reconciled at
     both checkpoints (07 and 14). **`-race` and both cross-compiles MET**
     (52/52, all 13 modules, plus `GOWORK=off`). Checkpoint 07 done; 14 pending.
@@ -543,6 +610,29 @@ Whole-plan: `-race`, both cross-compiles, per-module `GOWORK=off` build.
    removing both original false positives. That trades a slice of unlabelled-
    secret coverage for file integrity. **It is a privacy/security posture call —
    surface, never infer.**
+
+   **AMENDED 2026-08-29 by measurement, and the narrow option no longer fits.**
+   Phase 13's corpus census puts numbers on this for the first time: **2,820 of
+   5,340 recorded model calls (52.8%) carry `${OPENBOX_REDACTED_*}` in their
+   context**, 22,060 occurrences traced to **~200 distinct rewrite sites**
+   (amplified ~110x by context replay — one rewritten file poisons every later
+   call). By distinct site the responsibility is:
+   **`redactEntropy` 28%, `secret_assignment` 27% — our own two generic rules at
+   55% — and gitleaks' `generic-api-key` 13%.** So the third option addresses a
+   *minority* of the corruption, and the question the owner is actually being
+   asked has changed: it is about **our own generic rules on the file-rewrite
+   surface**, not about one gitleaks rule.
+
+   Two bind-free experiments would turn this from a taste fork into a measured
+   one, and neither needs a stack: (a) classify the ~200 sites as true or false
+   positives by inspection — the marker names its own category, so this is
+   tractable; (b) re-run the detector over the corpus with each generic rule
+   disabled in turn and diff what uniquely disappears, which is the only fact the
+   decision actually turns on. A reasonable default to argue against: drop the
+   generic rules from the **file-rewrite** surface, where a false positive is
+   silent data loss, and decide the **egress** surface on the diff, where a false
+   positive is a loud marker. Still an owner call.
+   [Evidence](reports/verification-260829-phase-13-replay-conformance.md).
 2. **The `body_ref` confinement root** (phase 10's blocking item) is phase 09's
    unmade env-key decision. Body attachment cannot be finished without it, and
    the containment must ship in the same commit as the first file read.

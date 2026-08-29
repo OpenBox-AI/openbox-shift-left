@@ -10,7 +10,8 @@
 ## Overview
 
 - Date: 2026-08-27 · Priority: P1 · Effort: 8h
-- Implementation status: pending · Review status: pending
+- Implementation status: **done (2026-08-29)** · Review status: reviewed
+- Report: [verification-260829-phase-13-replay-conformance](reports/verification-260829-phase-13-replay-conformance.md)
 - Break the D6 logjam for the capture half: prove the new lanes on **real recorded
   traffic**, stack-free — and hand probe A the instrument it has been missing.
 
@@ -96,16 +97,58 @@ credential leak into git history.
 
 ## Todo
 
-- [ ] sanitizer + assertion test
-- [ ] fixtures committed (incl. an oversized body)
-- [ ] telemetry replay cases, ON and OFF
-- [ ] transport replay cases incl. byte-identity and blind-tunnel silence
-- [ ] goproxy identity + SSE suite permanent in CI (promoted from the spike)
-- [ ] two no-fake control tests
-- [ ] volume soak + recorded numbers
-- [ ] `46-otel-lane.sh`, `47-transport.sh` (dormant)
-- [ ] probe A runbook + injector wiring
-- [ ] full `-race` sweep across all modules + both cross-compiles
+- [x] sanitizer + assertion test — `cli/internal/corpusfixture/`; the committed-fixture
+      gate DISCOVERS `testdata/corpus` directories rather than listing them
+- [x] fixtures committed (incl. an oversized body) — the oversized one is REAL
+      (564,718 runes), not synthetic: no smaller clean exchange exists in the corpus
+- [x] telemetry replay cases, ON and OFF — **rescoped** to a 16-event-type census
+      (see Deviations); the un-elected half is presence-anchored
+- [x] transport replay cases incl. byte-identity — over a real CONNECT, with a real
+      response body, which had never happened before
+- [x] goproxy identity + SSE suite — the CONNECT path is covered bind-free in
+      `cli/cmd/openbox`; the socket twin stays in `transport/spike_test.go`
+- [x] two no-fake control tests — **already delivered** by phases 09/11; drilled
+      rather than rebuilt (see Deviations)
+- [x] volume soak + recorded numbers — 70,080 bytes of spool per model call
+- [x] `46-otel-lane.sh`, `47-transport.sh` (dormant), registered in `run-all.sh`
+- [x] probe A runbook + injector — `probes/refusal-injector/` (own module) and
+      `probes/RUNBOOK.md`
+- [x] full `-race` sweep across all modules + both cross-compiles
+
+## Deviations from this phase file, and why
+
+**Requirement 2 was rescoped, because four of its five subjects do not exist.**
+It named "turn pair, bodies, `tool_decision` routing, engine-health, silence
+finding". Phase 10 deferred bodies (needs `os.Root` containment in the same commit
+as the first read), `tool_decision` (needs the election's cross-lane knowledge, or
+Tool Health doubles), engine-health (yagni'd — `doctor` already detects it) and
+OD4's silence finding (needs the daemon's scheduling). Only `api_request` has a
+mapper. Executing the requirement verbatim would have meant building phase-10
+deferred work without its named preconditions. What replaced it is a census of all
+**16** recorded event types (the phase file said 15): `api_request` produces an
+exact `TurnCompleted`, the other 15 produce nothing **and are counted as drops** —
+which finally exercises the countable-drop pin phase 09 inherited.
+
+**Requirement 4 was already met.** `cli/cmd/openbox/{gatewaycapture,telemetrycapture,transportcapture}_test.go`
+exist from phases 09 and 11. They were DRILLED (unwire `WithCapture` ⇒ red) rather
+than rewritten. Note the gateway lane's three controls are `RequireBind`-guarded
+and SKIP on this host, so no drill was claimed for them.
+
+**Requirement 3's blind-tunnel silence case was not added.** `transport/allowlist_test.go`
+and the proxy tests already cover that a non-allowlisted host is blind-tunnelled and
+produces nothing; a replay case would have re-asserted it with a bigger fixture.
+
+**Requirement 7's injector is a separate module, not a mode of the product.** Phase
+11 anticipated a debug/injection mode inside `openbox transport`. Building it there
+would put response fabrication on the enforcement path permanently to answer one
+empirical question. `probes/refusal-injector/` has no product dependency, is in no
+release artifact, and Go itself enforces that nothing imports it.
+
+**Requirement 1's oversized body is real rather than synthetic.** The phase asked to
+keep it synthetic "where possible". It was not possible in the useful direction: the
+smallest clean recorded exchange carries a 564,718-rune request, because 96.75% of
+recorded model-call request bodies exceed the cap and most of the small ones had
+already been rewritten by this repo's own redactor. Real is also better evidence.
 
 ## Success criteria
 
