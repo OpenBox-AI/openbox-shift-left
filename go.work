@@ -25,6 +25,7 @@ use (
 	./contracts/dev-event/conformance
 	./decision
 	./gateway
+	./probes/refusal-injector
 	./provider
 	./telemetry
 	./transport
