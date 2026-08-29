@@ -6,16 +6,21 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/adapters/common/hookflow"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/openbox-ai/openbox-shift-left/adapters/common/devconfig"
+	"github.com/openbox-ai/openbox-shift-left/cli/internal/activation"
 	"github.com/openbox-ai/openbox-shift-left/cli/internal/gatewaycheck"
 	"github.com/openbox-ai/openbox-shift-left/cli/internal/gatewayservice"
+	"github.com/openbox-ai/openbox-shift-left/cli/internal/laneservice"
 	"github.com/openbox-ai/openbox-shift-left/cli/internal/managed"
 	"github.com/openbox-ai/openbox-shift-left/cli/internal/providers"
+	"github.com/openbox-ai/openbox-shift-left/telemetry"
+	"github.com/openbox-ai/openbox-shift-left/transport"
 )
 
 // runDoctor prints the effective posture and, for each flag, where the value came
@@ -157,6 +162,7 @@ func (a *app) runDoctor(args []string) int {
 	}
 
 	a.reportGateway()
+	a.reportLanes()
 
 	fmt.Fprintf(a.stdout, "\nWhat this does and does not prove\n")
 	fmt.Fprintf(a.stdout, "  Settings sourced from `user` or `env` can be changed by whoever runs this\n")
@@ -302,4 +308,119 @@ func managedSettingsPathForDoctor() string {
 		return ""
 	}
 	return filepath.Join(dir, "managed-settings.json")
+}
+
+// reportLanes prints the model-call producer election and the two lanes ADR-0022
+// added, per lane and separately from each other.
+//
+// THE ELECTION LINE IS THE POINT. The precedence is automatic and the developer
+// never chose it, so a lane can be perfectly installed, perfectly reachable, and
+// emitting nothing — which is exactly the "configured but not in force" shape
+// ADR-0021 promised would always be detectable. It resolves through the SAME
+// function the telemetry daemon uses, deliberately: a check and the thing it
+// checks must not be able to disagree about what "elected" means. That is the
+// lesson from the duplicate-hook-engine repair, where the diagnostic and the fix
+// were built on one classifier on purpose.
+//
+// "Installed" and "reachable" stay separate for the same reason doctor keeps
+// them apart for the gateway: a unit on disk is not a process serving, and
+// conflating them is how a dashboard comes to show governance that is not
+// happening. Neither answers "is it RECORDING" — the lane log is where that
+// lives, so it is named every time.
+func (a *app) reportLanes() {
+	home := a.homeDir()
+	settingsPath := gatewayservice.SettingsPath(home)
+	election := activation.ResolveElection(settingsPath)
+
+	fmt.Fprintf(a.stdout, "\nModel-call producer (which lane emits turn events)\n")
+	if election.Elected == "" {
+		fmt.Fprintf(a.stdout, "  elected      (none) — %s\n", election.Reason)
+		fmt.Fprintf(a.stdout, "               No lane emits model-call turns, so token counts and costs for this\n")
+		fmt.Fprintf(a.stdout, "               machine are ABSENT rather than merely incomplete.\n")
+	} else {
+		fmt.Fprintf(a.stdout, "  elected      %s\n", election.Elected)
+		fmt.Fprintf(a.stdout, "  because      %s\n", election.Reason)
+	}
+	if len(election.Routed) > 1 {
+		fmt.Fprintf(a.stdout, "  routed       %v — exactly one of these emits; the others still send their own\n", election.Routed)
+		fmt.Fprintf(a.stdout, "               non-turn evidence, which does not collide.\n")
+	}
+	// ROUTED and IN PATH are different facts, and only one state separates them:
+	// a base URL sends the call past the relay. Reporting a lane as configured
+	// while saying plainly that it cannot see this machine's calls is the honest
+	// pair; collapsing them would either hide a configured lane or promise
+	// observation that is not happening.
+	for _, lane := range election.Routed {
+		if !containsLaneName(election.Candidates, lane) {
+			fmt.Fprintf(a.stdout, "  NOT IN PATH  %s is configured but cannot see this machine's model calls —\n", lane)
+			fmt.Fprintf(a.stdout, "               ANTHROPIC_BASE_URL sends them somewhere it does not intercept.\n")
+		}
+	}
+
+	for _, lane := range []struct {
+		name string
+		spec laneservice.Spec
+		addr string
+	}{
+		{"telemetry", laneservice.Telemetry(telemetry.DefaultAddr, false), telemetry.DefaultAddr},
+		{"transport", laneservice.Transport(transport.DefaultAddr, false), transport.DefaultAddr},
+	} {
+		fmt.Fprintf(a.stdout, "\n%s lane\n", strings.ToUpper(lane.name[:1])+lane.name[1:])
+		unit := lane.spec.UnitPath(runtime.GOOS, home)
+		switch {
+		case unit == "":
+			fmt.Fprintf(a.stdout, "  unit         (no daemon packaging on %s)\n", runtime.GOOS)
+		case fileExists(unit):
+			fmt.Fprintf(a.stdout, "  unit         %s\n", unit)
+		default:
+			fmt.Fprintf(a.stdout, "  unit         not installed\n")
+		}
+		// Routed is read off the settings file rather than off the unit, because
+		// they answer different questions: a unit says a daemon exists, the
+		// settings say the tool will actually talk to it.
+		// Configured is the ROUTED set: what the tool points at, regardless of
+		// whether this lane can win the election or even see the call.
+		routed := containsLaneName(election.Routed, activation.Lane(lane.name))
+		fmt.Fprintf(a.stdout, "  configured   %s\n", map[bool]string{true: "yes — " + settingsPath, false: "no — the tool is not pointed at it"}[routed])
+		occupied, _ := portOccupied(lane.addr)
+		if occupied {
+			fmt.Fprintf(a.stdout, "  reachable    yes (%s)\n", lane.addr)
+		} else {
+			fmt.Fprintf(a.stdout, "  reachable    NO — nothing is listening on %s\n", lane.addr)
+			if routed {
+				fmt.Fprintf(a.stdout, "               The tool is pointed at a port with nothing behind it.\n")
+			}
+		}
+		// ELECTED BUT ABSENT is the election's own worst failure, and it is
+		// otherwise silent. The election reads the tool's ROUTING, so a
+		// developer's own loopback proxy — or a stale key left by hand — can
+		// elect a lane that OpenBox never installed. Every other lane then
+		// correctly stands down, and the machine reports no model calls at all
+		// while each individual line above still reads as fine. Only putting the
+		// two facts on one line makes it visible.
+		if election.Elected == activation.Lane(lane.name) && !occupied {
+			fmt.Fprintf(a.stdout, "  WARNING      this lane is ELECTED but nothing is listening, so NO lane is emitting\n")
+			fmt.Fprintf(a.stdout, "               model-call turns on this machine. If you did not install it, something\n")
+			fmt.Fprintf(a.stdout, "               else set its env keys — the election reads where the tool is routed,\n")
+			fmt.Fprintf(a.stdout, "               not what OpenBox installed. `openbox init --provider claude-code --full`\n")
+			fmt.Fprintf(a.stdout, "               installs it, or --remove-all clears the routing.\n")
+		}
+		// Named unconditionally: this is the only place a lane says it is running
+		// perfectly and recording nothing, and launchd sends stdio to /dev/null
+		// unless the unit says otherwise — which ours does.
+		fmt.Fprintf(a.stdout, "  log          %s\n", laneLogPath(lane.spec, home))
+	}
+	fmt.Fprintf(a.stdout, "\n  Installed is not recording. A lane can be reachable, configured and elected\n")
+	fmt.Fprintf(a.stdout, "  while emitting nothing — no developer DID, or a posture key off. The log above\n")
+	fmt.Fprintf(a.stdout, "  is the only place that says so.\n")
+}
+
+// containsLaneName is a local membership test for doctor's two short lane lists.
+func containsLaneName(lanes []activation.Lane, want activation.Lane) bool {
+	for _, l := range lanes {
+		if l == want {
+			return true
+		}
+	}
+	return false
 }

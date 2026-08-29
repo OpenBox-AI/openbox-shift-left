@@ -41,11 +41,33 @@ import (
 // Elected is the one that emits nothing. A half-built lane cannot corrupt a
 // dashboard.
 type Policy struct {
-	// Elected reports that this lane is the chosen model-call producer for the
-	// session. Precedence when phase 12 lands is transport > gateway >
-	// telemetry: in-path outranks client-asserted.
-	Elected bool
+	// Elected reports that this lane is the chosen model-call producer.
+	// Precedence is transport > gateway > telemetry: in-path outranks
+	// client-asserted.
+	//
+	// A FUNCTION, not a bool, and that is load-bearing rather than stylistic.
+	// The election changes WHILE THIS PROCESS RUNS: `openbox init --full`
+	// installs telemetry first and transport second, so a daemon that resolved
+	// the election once at startup booted correctly elected, froze that answer,
+	// and kept emitting after the transport lane took the election from it —
+	// both lanes then emitting a turn for the same model call. The namespaces
+	// are deliberately disjoint so core's dedupe cannot merge them, so nothing
+	// errors and every token count doubles. The reverse is just as bad and
+	// quieter: remove the stronger lane and a daemon frozen at "not elected"
+	// stays silent forever.
+	//
+	// A snapshot of derivable state is exactly what deriving the election was
+	// meant to eliminate. Resolving live is the only form with nothing to keep
+	// in sync — no restart choreography, and correct when the settings file is
+	// changed by a hand edit or an MDM deployment rather than by this CLI.
+	//
+	// NIL SUPPRESSES, which keeps the zero value's guarantee structural: a
+	// half-built caller that never names Elected emits nothing.
+	Elected func() bool
 }
+
+// elected answers the policy's question, treating an unset gate as "no".
+func (p Policy) elected() bool { return p.Elected != nil && p.Elected() }
 
 // Outcome says what happened to a record, because "nothing was emitted" covers
 // two very different situations and only one of them is fine.
@@ -131,7 +153,7 @@ func New(did string, p Policy) *Mapper {
 // erroring on an unfamiliar name would turn a routine upstream addition into a
 // lane outage.
 func (m *Mapper) EventFor(rec telemetry.Record) (client.DevEvent, Outcome) {
-	if m == nil || !m.policy.Elected {
+	if m == nil || !m.policy.elected() {
 		return client.DevEvent{}, SkipNotElected
 	}
 	if rec.EventName != eventAPIRequest {

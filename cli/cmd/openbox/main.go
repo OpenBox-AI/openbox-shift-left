@@ -36,6 +36,8 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/client"
 	"github.com/openbox-ai/openbox-shift-left/gateway"
 	"github.com/openbox-ai/openbox-shift-left/provider"
+	"github.com/openbox-ai/openbox-shift-left/telemetry"
+	"github.com/openbox-ai/openbox-shift-left/transport"
 	"io"
 	"log"
 	"net"
@@ -380,6 +382,29 @@ func (a *app) runDevInit(args []string) int {
 	fs.StringVar(&gatewayAddr, "gateway-addr", gateway.DefaultAddr, "loopback address the gateway listens on")
 	fs.StringVar(&gatewayUpstream, "gateway-upstream", gateway.DefaultUpstream, "provider base URL the gateway forwards to")
 	fs.BoolVar(&gatewayVerbose, "gateway-verbose", false, "run the gateway with --verbose, logging every relayed call to ~/.openbox/gateway.log (no credentials, headers or bodies)")
+
+	// The two in-path/observation lanes ADR-0022 adds, and the one command each
+	// way OD2 ruled for. --full is the front door; the per-lane flags exist so a
+	// developer can back one lane out without --remove-all, which also deletes the
+	// CA and the spool.
+	var withFull, removeAll bool
+	var withTelemetry, removeTelemetryLane bool
+	var withTransport, removeTransportLane bool
+	var telemetryAddr, transportAddr string
+	var laneVerbose, forceRestore bool
+	fs.BoolVar(&withFull, "full", false, "install and enable everything: hooks, the telemetry receiver and the in-path transport relay")
+	fs.BoolVar(&removeAll, "remove-all", false, "remove every OpenBox lane: restore all managed env keys, unload and delete all units, and delete the CA, logs and spool")
+	fs.BoolVar(&withTelemetry, "telemetry", false, "install and start the local OTLP telemetry receiver, and point the tool's own telemetry at it")
+	fs.BoolVar(&removeTelemetryLane, "remove-telemetry", false, "stop the telemetry receiver and restore the env keys it displaced")
+	fs.BoolVar(&withTransport, "transport", false, "install and start the in-path transport relay, and point the tool's proxy and CA trust at it")
+	fs.BoolVar(&removeTransportLane, "remove-transport", false, "stop the transport relay and restore the env keys it displaced")
+	fs.StringVar(&telemetryAddr, "telemetry-addr", telemetry.DefaultAddr, "loopback address the telemetry receiver listens on")
+	fs.StringVar(&transportAddr, "transport-addr", transport.DefaultAddr, "loopback address the transport relay listens on")
+	fs.BoolVar(&laneVerbose, "lane-verbose", false, "run the telemetry and transport daemons with --verbose, logging to ~/.openbox/<lane>.log")
+	// NOT --force: that name is already taken by the flag that moved to `openbox
+	// auth` and now errors by name, and a flag whose meaning depends on which
+	// other flags are present is how a fleet script does something nobody meant.
+	fs.BoolVar(&forceRestore, "force-restore", false, "during removal, restore env keys even where the value changed after OpenBox set it (the conflict is named either way)")
 	fs.BoolVar(&o.DryRun, "dry-run", false, "print the plan; make no network or filesystem writes")
 	// --role is consumed by runInit before dispatch; declared here so `init -h`
 	// lists it and `--role approver` is not reported as an unknown flag.
@@ -488,6 +513,47 @@ func (a *app) runDevInit(args []string) int {
 	if withGateway && removeGateway {
 		return a.errorf("--gateway and --remove-gateway are mutually exclusive")
 	}
+	// --full implies both lanes. Expanded here rather than checked everywhere
+	// below, so there is exactly one place that decides what "everything" means.
+	if withFull {
+		withTelemetry, withTransport = true, true
+	}
+	for _, pair := range []struct {
+		on, off   bool
+		onN, offN string
+	}{
+		{withTelemetry, removeTelemetryLane, "--telemetry", "--remove-telemetry"},
+		{withTransport, removeTransportLane, "--transport", "--remove-transport"},
+		{withFull, removeAll, "--full", "--remove-all"},
+	} {
+		if pair.on && pair.off {
+			return a.errorf("%s and %s are mutually exclusive", pair.onN, pair.offN)
+		}
+	}
+
+	// Every lane here is Claude Code's, and only Claude Code's: they relay or
+	// receive that tool's own traffic and are configured through its settings
+	// file. Without this guard `--provider codex --full` would install two
+	// supervised daemons and rewrite ~/.claude/settings.json on a machine whose
+	// tool reads neither — the exact defect --gateway already shipped and fixed.
+	// An ORDERED slice, not a map. Go randomizes map iteration per process, so
+	// `--provider codex --full` cited whichever lane flag came up first — the
+	// message was never WRONG, but a fleet script grepping for the flag it passed
+	// would match only sometimes. The mutual-exclusion check above already uses a
+	// slice for the same reason.
+	laneFlags := []struct {
+		name string
+		on   bool
+	}{
+		{"--full", withFull}, {"--remove-all", removeAll},
+		{"--telemetry", withTelemetry}, {"--remove-telemetry", removeTelemetryLane},
+		{"--transport", withTransport}, {"--remove-transport", removeTransportLane},
+	}
+	for _, f := range laneFlags {
+		if f.on && o.Provider != "claude-code" {
+			return a.errorf("%s applies to --provider claude-code only (got %q); these lanes observe the Anthropic Messages API and are configured through Claude Code's own settings", f.name, o.Provider)
+		}
+	}
 
 	// The gateway is Claude Code's, and only Claude Code's. Its upstream default,
 	// its session/agent request headers and the settings file it writes are all
@@ -551,6 +617,13 @@ func (a *app) runDevInit(args []string) int {
 		// fleet rollout was shown hooks and posture and told nothing about a
 		// supervised daemon and a rewritten ANTHROPIC_BASE_URL.
 		a.printGatewayPlan(withGateway, removeGateway, gatewayAddr, gatewayUpstream)
+		a.printLanePlan(lanePlan{
+			telemetry: withTelemetry, transport: withTransport,
+			removeTelemetry: removeTelemetryLane || removeAll,
+			removeTransport: removeTransportLane || removeAll,
+			purge:           removeAll,
+			telemetryAddr:   telemetryAddr, transportAddr: transportAddr,
+		})
 		return exitOK
 	}
 
@@ -565,16 +638,18 @@ func (a *app) runDevInit(args []string) int {
 	// touches no backend and needs no secret, so it has no business behind that
 	// gate — and it returns here rather than falling through, because a re-install
 	// of hooks is the opposite of what the flag names.
-	if removeGateway {
+	if removeGateway || removeAll || removeTelemetryLane || removeTransportLane {
 		home, code := a.gatewayHome()
 		if code != exitOK {
 			return code
 		}
-		fmt.Fprintf(a.stdout, "\nRemoving local gateway configuration\n")
-		if err := a.removeGateway(home); err != nil {
-			return a.errorf("gateway removal did not complete: %v", err)
-		}
-		return exitOK
+		return a.runRemovals(home, removalRequest{
+			gateway:   removeGateway || removeAll,
+			telemetry: removeTelemetryLane || removeAll,
+			transport: removeTransportLane || removeAll,
+			purge:     removeAll,
+			force:     forceRestore,
+		})
 	}
 
 	// --- credentials must already exist ------------------------------------
@@ -640,6 +715,19 @@ func (a *app) runDevInit(args []string) int {
 		}
 	}
 
+	// --- the telemetry and transport lanes (ADR-0022) -----------------------
+	// After the gateway, deliberately: transport SUPERSEDES the gateway in path,
+	// so installing it while a gateway is routed would leave the developer with
+	// two relays and a precedence they cannot see. setupLanes retires the gateway
+	// in that case and says so.
+	laneReport := a.setupLanes(laneRequest{
+		telemetry:     withTelemetry,
+		transport:     withTransport,
+		telemetryAddr: telemetryAddr,
+		transportAddr: transportAddr,
+		verbose:       laneVerbose,
+	})
+
 	// The closing line has to be true of THIS invocation. With --gateway it is
 	// not: a supervised daemon is now running and ANTHROPIC_BASE_URL is set, and
 	// telling a developer otherwise is what sends them debugging failing model
@@ -672,6 +760,7 @@ func (a *app) runDevInit(args []string) int {
 		fmt.Fprintf(a.stdout, "        policy, and fail-open, so an OpenBox outage never blocks you. `--enforce=false` opts out.\n")
 	}
 	a.printGovernedScope(o, resolvedScope)
+	laneReport.print(a)
 	return exitOK
 }
 
@@ -692,6 +781,8 @@ Setup is two commands, in this order:
 Usage:
   openbox auth [--rotate] [flags]
   openbox init --provider <claude-code|codex|cursor> [--scope local|global] [flags]
+  openbox init --provider claude-code --full          hooks + telemetry + transport
+  openbox init --provider claude-code --remove-all    every lane, restored and deleted
   openbox init --role approver --org <id> [--host claude-code] [flags]
   openbox dev verify [--dry-run]
   openbox managed install --provider <claude-code,codex> [--dry-run] [--force]

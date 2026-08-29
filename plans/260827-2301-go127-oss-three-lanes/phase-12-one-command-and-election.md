@@ -12,7 +12,8 @@
 ## Overview
 
 - Date: 2026-08-27 · Priority: P1 · Effort: 6h
-- Implementation status: pending · Review status: pending
+- Implementation status: **done, with three named deviations** (2026-08-29) · Review status: reviewed; the critical finding is **FIXED and drilled** (see Code review below)
+- Report: [verification-260829-phase-12-one-command-and-election](reports/verification-260829-phase-12-one-command-and-election.md)
 - The UX contract the owner ruled, and the invariant that keeps three producers from
   corrupting each other's evidence.
 
@@ -113,15 +114,32 @@ value changed underneath it (unless forced), and never touches an unmanaged key.
 
 ## Todo
 
-- [ ] `activation.go` with original/managed/SHA-256/refuse-on-conflict
-- [ ] gateway ported, its existing tests unchanged and green
-- [ ] per-lane managed-key sets
-- [ ] election resolver + `dev.json` + second-invocation test
-- [ ] `--full` install, proof-ordered, partial-failure honest
-- [ ] `--remove-all` before credential gate, partial-state tolerant
-- [ ] doctor: elected producer **and why** + three lane blocks
-- [ ] V7 state-diff test incl. foreign-value restore
-- [ ] `-race`, both cross-compiles
+- [x] `activation.go` with original/managed/SHA-256/refuse-on-conflict — `cli/internal/activation/`.
+      The refusal sits on REMOVAL, not on install: redirecting the tool is the whole purpose of
+      installing a lane, so refusing because the key we exist to change is already set would refuse
+      on exactly the machines that need governing. Install replaces, records and REPORTS.
+- [ ] gateway ported, its existing tests unchanged and green — **NOT DONE, deliberately.**
+      Zero-behavior-change refactor of the only socket-verified lane in this repo, serving neither
+      half of the stated outcome. `--remove-all` composes the existing `removeGateway`. The
+      *unit/service* layer WAS generalized (`cli/internal/laneservice/`) and the gateway delegates
+      to it with **no test edited** — that half carried real DRY value on the path where drift is
+      least visible. Owner call: report §6(a).
+- [x] per-lane managed-key sets — 13 telemetry + 5 transport, copied verbatim from the proven set,
+      pinned by a literal-list test. `OTEL_LOG_RAW_API_BODIES` deliberately subtracted (report §5).
+- [x] election resolver + second-invocation test — **DERIVED from the settings file, not stored in
+      `dev.json`.** The `dev.json` field was written, tested green, then reverted: a second store of
+      derivable state whose drift silences every lane while looking configured. Report §4.
+- [x] `--full` install, proof-ordered, partial-failure honest
+- [x] `--remove-all` before credential gate, partial-state tolerant — **does NOT delete the
+      spool**, against requirement 2's text and per this phase's own Security section: the spool
+      lives outside `~/.openbox` and is SHARED with the hook path, which `--remove-all` does not
+      remove, so deleting it would destroy undelivered tool-call evidence from a component that is
+      still running. Named in the output instead. Report §6(c).
+- [x] doctor: elected producer **and why** + lane blocks (unit / configured / reachable / log)
+- [x] V7 state-diff test incl. foreign-value restore — bind-free
+- [x] `-race` (14 modules), both cross-compiles, `GOWORK=off` for `cli`
+- [x] 21 mutation drills run, 21 red on deletion — one was GREEN until its test was strengthened
+      (report §3), which is the finding worth more than the ten that passed
 
 ## Success criteria
 
@@ -157,6 +175,73 @@ value changed underneath it (unless forced), and never touches an unmanaged key.
 - Forcing over a changed managed value overwrites someone's deliberate edit —
   require an explicit flag and print the diff.
 
+## Outcome (2026-08-29)
+
+Implemented, unit-verified **bind-free**, 14 modules green under `-race`, both cross-compiles
+green, `cli` green under `GOWORK=off`. No socket, no launchd, no stack.
+
+Every pre-existing test passes **unedited** — `git diff --stat -- '*_test.go'` is empty, which is
+this phase's own stop-signal check.
+
+The single highest-consequence unverified claim: **that the 13 telemetry env keys are the ones the
+installed client actually reads.** Every test asserts JSON we wrote; the consumer drops what it does
+not recognize, exactly as core did with `http_status` vs `http_status_code`. A rename here yields a
+green suite and a receiver that never gets a record — which OD4 then reports as silence, i.e. as a
+finding against the developer. Phase 13 confirms it live.
+
+## Code review (2026-08-29) — one critical, found and FIXED
+
+**The critical was real, and it broke this phase's own success criterion #3**
+("exactly one model-call producer emits per session, provably").
+
+The telemetry daemon resolved the election ONCE at its own startup and baked the
+answer into a static `telemetryemit.Policy{Elected bool}`. `setupLanes` installs
+telemetry BEFORE transport, so on every fresh `--full` the telemetry daemon boots,
+correctly elects itself (nothing else is routed yet), freezes that answer — and then
+transport is installed and takes the election from it. Both lanes then emit a turn
+for the same model call. The activity_id namespaces are deliberately disjoint, so
+core stores both rather than rejecting one: **every token count and cost figure
+doubles, silently**, while `openbox doctor` reports a clean single elected lane
+because it re-resolves from the settings file and has no channel to a sibling
+daemon's in-memory decision. The reverse is quieter and costs everything instead:
+install telemetry while a stronger lane is routed, remove that lane later, and a
+process frozen at "not elected" stays silent forever — and doctor's ELECTED-BUT-ABSENT
+warning does not fire, because something IS listening.
+
+The reviewer proved it against the real packages rather than by inference, and no
+test reached it: every existing test covered the pure election function or one lane's
+install/removal in isolation, so it survived 19 mutation drills by being unreachable
+from all of them.
+
+**Fixed by making the gate live, not by bouncing the daemon.** `Policy.Elected`
+is a `func() bool` resolved per record; nil suppresses, so the zero value's
+guarantee became structural rather than conventional. The reviewer leaned toward the
+surgical fix — restart telemetry's unit whenever an install would flip the election —
+and that was rejected for the reason this phase already rejected a stored election: a
+snapshot of derivable state is a second store with a sync obligation, and the restart
+form covers only the paths `init` controls, leaving a hand-edited settings file or an
+MDM deployment stale. `TestElectionIsAnsweredPerRecordNotAtConstruction` flips the
+answer under a mapper that is already built; two drills (freeze the gate at
+construction; treat nil as elected) are red on deletion.
+
+**Warning, also fixed:** the `--provider claude-code`-only guard iterated a Go map to
+pick which flag to name, so the error cited a different flag run to run (measured 7/8
+`--full`, 1/8 `--transport`). Never wrong, never flaky in the suite — the test matches
+the common substring — but a fleet script grepping the flag it passed would match
+only sometimes. Now an ordered slice, matching the mutual-exclusion check above it;
+verified deterministic over 6 runs of the real binary.
+
+**Also from the review:** the gateway's launchd label and systemd unit name existed as
+two independent literals (`gatewayservice` and `laneservice`); `laneservice` now owns
+them and `gatewayservice`'s constants are aliases. `serviceName` is documented as
+off the production path. `Applied.Replaced`'s comment no longer claims a displaced
+value is always the org's — on a re-install it is our own previous write. One test
+tightened from presence to value equality. A stray, INCOMPLETE `transport/go.sum` diff
+(a partial artifact of a `GOWORK=off` resolve the sandbox denied part-way) was
+reverted rather than committed.
+
 ## Next steps
 
-Phase 13 proves the bytes; phase 14 reconciles the docs.
+Phase 13 proves the bytes — and should test the SEQUENTIAL-INSTALL case explicitly,
+not only steady state: the defect above was invisible to every steady-state test.
+Phase 14 reconciles the docs.

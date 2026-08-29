@@ -37,23 +37,38 @@ relay (`:proxy:`) are meant to cover the desktop and subscription-OAuth calls th
 gateway lane cannot reach — phases 09–13 of plan
 `260827-2301-go127-oss-three-lanes`.
 
-As of **2026-08-29** neither is reachable by a developer, and the two are unbuilt in
-different ways:
+As of **2026-08-29** both are INSTALLABLE — `openbox init --provider claude-code
+--full` installs and enables them, `--remove-all` backs them out (phase 12) — and both
+remain unconfirmed against a real client:
 
 - **`:proxy:` (transport)** — the relay and its capture are BUILT and verified: a
   CONNECT to the allowlisted host is TLS-terminated with a project CA and served by
-  the existing gateway relay, and the evidence reaches the spool. It is not
-  INSTALLABLE — the service unit, `doctor` block and proxy-env activation are
-  phase 12 — so no developer machine emits it. Two further limits: no response body
-  has traversed it yet (its control test's upstream always refuses), and refusal is
-  dormant, so this lane OBSERVES and never stops a call.
-- **`:otel:` (telemetry)** — the receiver and mapper exist and `openbox telemetry`
-  calls them, but emission is suppressed unless elected, and the same install half
-  is phase 12's.
+  the existing gateway relay, and the evidence reaches the spool. Two limits stand:
+  no response body has traversed it yet (its control test's upstream always refuses),
+  and refusal is dormant, so this lane OBSERVES and never stops a call.
+- **`:otel:` (telemetry)** — the receiver, the mapper and `openbox telemetry` all
+  exist and are wired; emission is suppressed unless this lane wins the producer
+  election. **What has never been confirmed is that the env keys the installer
+  writes are the ones the client actually reads.** They are copied verbatim from a
+  proven set in a sibling lab repo and pinned as a literal list, but every test around
+  them asserts JSON we wrote, and the client silently ignores a name it does not
+  recognize. A rename yields a green suite and a receiver that never gets a record.
 
-Until a lane is installable, the paragraph above is still the whole truth about
-model-call coverage. This note exists so a reader of the contract does not mistake a
-declared field — or a built one — for a lane that is actually producing evidence.
+**Exactly one lane emits a model-call turn per session**, decided by an election
+derived from where the tool's settings route model calls — precedence transport >
+gateway > telemetry, in-path outranking client-asserted. That is a correctness
+invariant rather than a preference: the three namespaces are deliberately disjoint so
+core's dedupe cannot absorb one lane's event as another's, which means two lanes
+emitting would both STORE and double every token count with no error anywhere. The
+election is answered PER RECORD rather than once per daemon: resolving it at startup
+shipped that exact double-count into review, because `--full` installs telemetry
+before transport and the daemon froze an answer that was correct only for the second
+it was taken.
+
+So a `:otel:` or `:proxy:` row can now legitimately appear in a developer's data. What
+a reader must NOT infer from a declared discriminator, or from an installed lane, is
+that evidence is arriving: `openbox doctor` names the elected producer and warns when
+the elected lane has nothing listening behind it, and that is the check to run.
 
 The claims are **not** interchangeable and this document must not flatten them: transport and gateway observe the bytes in path; telemetry is the
 governed tool reporting its own calls, so it is suppressible by the thing it

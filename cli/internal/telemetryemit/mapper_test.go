@@ -51,7 +51,7 @@ func apiRequest(overrides map[string]string) telemetry.Record {
 }
 
 func elected() *Mapper {
-	return New(testDID, Policy{Elected: true})
+	return New(testDID, Policy{Elected: func() bool { return true }})
 }
 
 // TestUnelectedMapperEmitsNothing is the single most important test in the file.
@@ -382,5 +382,57 @@ func TestOutcomeSeparatesSkipsFromDrops(t *testing.T) {
 				t.Errorf("outcome %d has no name; it reaches operator-facing output", int(out))
 			}
 		})
+	}
+}
+
+// TestElectionIsAnsweredPerRecordNotAtConstruction is the regression for a
+// defect that reached review: a lane emitting turns it had already lost the
+// right to emit.
+//
+// `openbox init --full` installs telemetry FIRST and transport second. A daemon
+// that resolved the election once, at construction, booted correctly elected —
+// nothing else was routed yet — froze that answer, and went on emitting after
+// the transport lane took the election from it moments later. Both lanes then
+// described the same model call, and because the activity_id namespaces are
+// deliberately disjoint, core stores both rather than rejecting one: every token
+// count and cost figure doubles, silently, with `openbox doctor` still reporting
+// a clean single elected lane because it re-resolves from the settings file.
+//
+// The reverse costs everything instead of doubling it: install telemetry while a
+// stronger lane is routed, remove that lane later, and a snapshot of "not
+// elected" keeps the machine silent forever.
+//
+// A snapshot of derivable state is precisely what deriving the election was
+// meant to eliminate — so the gate is a function, and this test flips the answer
+// under a mapper that is already built.
+func TestElectionIsAnsweredPerRecordNotAtConstruction(t *testing.T) {
+	elected := true
+	m := New(testDID, Policy{Elected: func() bool { return elected }})
+
+	if _, outcome := m.EventFor(apiRequest(nil)); outcome == SkipNotElected {
+		t.Fatalf("the mapper refused a record while elected: %v", outcome)
+	}
+
+	// A stronger lane is installed after this mapper was built.
+	elected = false
+	if _, outcome := m.EventFor(apiRequest(nil)); outcome != SkipNotElected {
+		t.Errorf("outcome = %v after losing the election; the lane kept emitting, "+
+			"so two producers now describe the same model call and every token count doubles", outcome)
+	}
+
+	// And back: a lane that regains the election must start emitting again
+	// without a restart, or removing a stronger lane silences the machine.
+	elected = true
+	if _, outcome := m.EventFor(apiRequest(nil)); outcome == SkipNotElected {
+		t.Error("the lane stayed silent after regaining the election; only a daemon restart would fix it")
+	}
+}
+
+// TestAnUnsetElectionGateSuppresses keeps the zero value's guarantee structural
+// now that it is a function: a half-built caller that never names Elected must
+// emit nothing, exactly as it did when this was a bool.
+func TestAnUnsetElectionGateSuppresses(t *testing.T) {
+	if _, outcome := New(testDID, Policy{}).EventFor(apiRequest(nil)); outcome != SkipNotElected {
+		t.Errorf("outcome = %v for a policy that never named a gate; the zero value must suppress", outcome)
 	}
 }

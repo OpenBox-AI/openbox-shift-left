@@ -279,6 +279,57 @@ Four things to know:
 openbox init --provider claude-code --remove-gateway
 ```
 
+### The other two lanes, and one command for all of them
+
+The gateway only sees calls that go through `ANTHROPIC_BASE_URL`. That misses the
+desktop app and subscription-OAuth sessions, so there are two more lanes
+([ADR-0022](adr/ADR-0022-native-telemetry-and-transport-lanes.md)) and one command
+that installs everything:
+
+```bash
+openbox init --provider claude-code --full        # hooks + telemetry + transport
+openbox init --provider claude-code --remove-all  # all of it, back out
+```
+
+- **telemetry** — a loopback OTLP receiver. The tool exports its own telemetry to it.
+  Additive: it never sits in the path of a model call, so it cannot break one — but it
+  is the tool reporting on itself, which is also its weakness.
+- **transport** — a loopback CONNECT proxy that terminates TLS for the provider's host
+  with a CA generated on this machine, and tunnels every other host uninspected. It
+  observes the real bytes.
+
+Each installs the same way the gateway does — unit, start, **prove it is listening**,
+and only then write the settings — and each rolls its unit back if any later step
+fails. Both are Claude Code only; `--full` on another provider is an error rather than
+a no-op. Per-lane flags (`--telemetry`, `--transport`, and their `--remove-` halves)
+exist so you can back one out without removing everything.
+
+**Only one lane reports each model call.** They all describe the same call, so if two
+of them reported it every token count you see would be doubled. OpenBox picks one
+automatically — the in-path lanes outrank telemetry, because they see the real bytes —
+and `openbox doctor` prints which one and why. It also warns when the elected lane has
+nothing listening behind it, which is the one state where every other line still looks
+healthy and nothing is being recorded at all.
+
+Three things to know:
+
+- **Your own settings come back.** Every key OpenBox writes is recorded with whatever
+  was there before, in `~/.openbox/activation.json`, and removal puts it back. A
+  corporate `HTTPS_PROXY` or `NO_PROXY` survives the round trip; `NO_PROXY` is merged
+  rather than replaced while a lane is active. If a value changed after OpenBox set it,
+  removal **refuses** and names the key rather than overwriting your edit —
+  `--force-restore` overrides that.
+- **`--remove-all` deletes data.** The CA, the lane logs, the activation record, and
+  the spool — which may hold captured events not yet delivered. It prints each path as
+  it goes, and it works on a machine whose credentials are gone.
+- **Your open sessions keep their old routing.** The tool reads these settings when a
+  session starts, so restart it after installing or removing a lane.
+
+```bash
+openbox init --provider claude-code --full --dry-run   # names every daemon and key first
+openbox doctor                                          # which lane is elected, and why
+```
+
 ### Self-hosted OpenBox
 
 Set **both** URLs, at `auth` time:

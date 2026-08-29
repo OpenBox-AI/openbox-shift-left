@@ -51,172 +51,144 @@ const gatewayReadyTimeout = 10 * time.Second
 
 // setupGateway installs, starts and verifies the gateway, then points the tool at
 // it. Any failure leaves the machine unconfigured rather than half-configured.
+//
+// The ORDER — unit, start, prove, env — and the rollback live in setupLane, which
+// all three lanes share. What stays here is what is only true of this lane: its
+// config validation, its one env key, and the seams its own tests bind.
 func (a *app) setupGateway(homeDir, addr, upstream string, verbose bool) error {
 	cfg := gateway.Config{Addr: addr, Upstream: upstream}
 	if err := cfg.Validate(); err != nil {
 		return err
 	}
-
-	// Is the port already taken by something else? This has to be checked BEFORE
-	// starting, because the readiness probe below cannot tell our gateway from a
-	// stranger: it is a bare TCP connect. Without this, a foreign process holding
-	// the port means our gateway fails to bind, the probe connects to the stranger
-	// anyway, and init writes ANTHROPIC_BASE_URL pointing the developer's model
-	// traffic at an unknown local service while reporting success.
-	//
-	// A pre-check rather than a post-hoc identity check because the relay has no
-	// identity to assert — it is a transparent proxy by design, so there is no
-	// endpoint that could answer "are you OpenBox?" without breaking that.
-	// OUR OWN daemon holding the port is a RE-INSTALL, not a conflict.
-	//
-	// The pre-check could not tell the two apart, so the second `init --gateway` on
-	// any gateway-enabled machine refused before WriteUnit ever ran — which meant a
-	// unit written by an older binary could never be refreshed. That is the exact
-	// stale-path failure `init` already repairs for hook registrations, and the
-	// remedy the error text recommends ("re-run init") was the thing that could not
-	// work. A moved binary (an upgrade, a reinstall) then left launchd restarting a
-	// path that no longer exists, with no CLI fix.
-	//
-	// Ownership is decided by OUR UNIT, not by probing the socket: if the unit we
-	// wrote names this same address, whatever answers there is ours to replace. A
-	// port held by anything else is still refused — over-refuse, never
-	// over-terminate.
-	if occupied, who := portOccupied(cfg.Addr); occupied {
-		unitPath := gatewayservice.UnitPath(runtime.GOOS, homeDir)
-		if !unitDescribesAddr(unitPath, cfg.Addr) {
-			return fmt.Errorf("%s is already in use%s — refusing to continue, because the readiness check cannot tell our gateway from whatever is listening. Stop it, or choose another --gateway-addr", cfg.Addr, who)
-		}
-		fmt.Fprintf(a.stdout, "  replacing      the gateway already installed at %s (%s)\n", cfg.Addr, unitPath)
-		a.unloadUnit(unitPath)
-		// Give the socket a moment to clear so the fresh start can bind. A failure
-		// to clear surfaces as the readiness timeout below, which already says what
-		// to do about it.
-		if !waitForPortFreeFn(cfg.Addr, gatewayStopTimeout) {
-			return fmt.Errorf("the gateway already running on %s did not stop within %s — ANTHROPIC_BASE_URL was left as it was. Stop it by hand and re-run init", cfg.Addr, gatewayStopTimeout)
-		}
+	binPath, err := a.selfPath()
+	if err != nil {
+		return err
 	}
+	return a.setupLane(laneInstall{
+		label:        "gateway",
+		addr:         cfg.Addr,
+		homeDir:      homeDir,
+		laneIdentity: gatewayIdentity(homeDir),
+		// The gateway's own seams, not the shared ones: nine tests bind these
+		// directly, and they are the tests that prove ANTHROPIC_BASE_URL is never
+		// written while nothing listens.
+		installUnit: func() error {
+			return installUnitFn(runtime.GOOS, homeDir, binPath, cfg.Addr, cfg.Upstream, verbose)
+		},
+		uninstallUnit: func() error { return uninstallUnitFn(runtime.GOOS, homeDir) },
+		envNotSet:     gatewayservice.EnvKey + " was NOT set, so model calls still work and are ungoverned",
+		activate: func() ([]string, error) {
+			replaced, err := gatewayservice.WriteEnv(homeDir, cfg.Addr)
+			if err != nil {
+				return nil, err
+			}
+			fmt.Fprintf(a.stdout, "  %s  %s (user scope: %s)\n",
+				gatewayservice.EnvKey, "http://"+cfg.Addr, gatewayservice.SettingsPath(homeDir))
+			return replaced, nil
+		},
+	})
+}
 
+// gatewayIdentity is how the supervisor addresses the gateway. Built from
+// gatewayservice's own constants rather than from a lane spec, because those
+// constants are what doctor and the re-install detection already read.
+func gatewayIdentity(homeDir string) laneIdentity {
+	return laneIdentity{
+		unitPath:     gatewayservice.UnitPath(runtime.GOOS, homeDir),
+		launchdLabel: gatewayservice.LaunchdLabel,
+		systemdUnit:  gatewayservice.SystemdUnitName,
+	}
+}
+
+// selfPath resolves this binary's path for a service unit.
+func (a *app) selfPath() (string, error) {
 	binPath, err := os.Executable()
 	if err != nil {
-		return fmt.Errorf("cannot resolve this binary's path for the service unit: %w", err)
+		return "", fmt.Errorf("cannot resolve this binary's path for the service unit: %w", err)
 	}
+	return binPath, nil
+}
 
-	// kardianos/service writes the unit now (D-OSS-3). Reinstall, not Install: the
-	// library refuses when the file exists, and re-running `init --gateway` is how a
-	// unit written by an older binary gets refreshed.
-	//
-	// The unit's own PATH is the library's to choose — on darwin it derives the home
-	// from user.Current() and ignores $HOME, with no override. In production that is
-	// this same homeDir; under a test with a fake HOME it is not, which is the
-	// isolation cost accepted when D-OSS-3 was adopted. unitPath below is therefore
-	// the path for REPORTING and for the re-install check, correct wherever the two
-	// agree.
-	if err := installUnitFn(runtime.GOOS, homeDir, binPath, cfg.Addr, cfg.Upstream, verbose); err != nil {
-		// Includes the Windows case, which is an error rather than a silent skip:
-		// a developer who believes a service was installed and finds none later is
-		// worse off than one told plainly at install time.
-		return err
-	}
-	unitPath := gatewayservice.UnitPath(runtime.GOOS, homeDir)
-	fmt.Fprintf(a.stdout, "  gateway unit   %s\n", unitPath)
+// gatewaySettingsPath is the settings file every lane writes, resolved in one
+// place so the lanes and doctor cannot disagree about which file that is.
+func gatewaySettingsPath(homeDir string) string { return gatewayservice.SettingsPath(homeDir) }
 
-	if err := a.loadUnit(unitPath); err != nil {
-		// Do NOT write the env var. Report and leave the machine working — and
-		// leave NO unit behind either: see rollbackUnit.
-		a.rollbackUnit(homeDir, unitPath)
-		return fmt.Errorf("wrote %s but could not start it (%w) — ANTHROPIC_BASE_URL was NOT set, so model calls still work and are ungoverned. Start it by hand with `openbox gateway`, then re-run init", unitPath, err)
-	}
-
-	if !waitForListenerFn(cfg.Addr, gatewayReadyTimeout) {
-		a.rollbackUnit(homeDir, unitPath)
-		return fmt.Errorf("the gateway did not start listening on %s within %s — ANTHROPIC_BASE_URL was NOT set, so model calls still work and are ungoverned. Check the service logs, or run `openbox gateway` in the foreground to see why", cfg.Addr, gatewayReadyTimeout)
-	}
-	fmt.Fprintf(a.stdout, "  gateway        listening on %s\n", cfg.Addr)
-
-	// Only now. Everything above had to succeed for this to be safe.
-	replaced, err := gatewayservice.WriteEnv(homeDir, cfg.Addr)
-	if err != nil {
-		a.rollbackUnit(homeDir, unitPath)
-		return err
-	}
-	fmt.Fprintf(a.stdout, "  %s  %s (user scope: %s)\n",
-		gatewayservice.EnvKey, "http://"+cfg.Addr, gatewayservice.SettingsPath(homeDir))
-	for _, r := range replaced {
-		// Never silent: the developer or their org had pointed this elsewhere.
-		fmt.Fprintf(a.stdout, "  replaced       %s\n", r)
-	}
-	return nil
+// fileExists reports whether a path is there. Used where naming a file that is
+// absent would break the tool rather than degrade a lane.
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
 }
 
 // removeGateway is the uninstall path, in the opposite order.
+//
+// Env var FIRST, so the tool stops pointing at the gateway before the gateway
+// goes away. The reverse would leave a window where every model call fails.
 func (a *app) removeGateway(homeDir string) error {
-	// Env var FIRST, so the tool stops pointing at the gateway before the gateway
-	// goes away. The reverse would leave a window where every model call fails.
-	removed, restored, err := gatewayservice.RemoveEnvDetailed(homeDir)
-	if err != nil {
-		return err
-	}
-	for _, key := range removed {
-		fmt.Fprintf(a.stdout, "  removed        %s from %s\n", key, gatewayservice.SettingsPath(homeDir))
-	}
-	// A restore has to be SAID. It is the opposite of a removal — the machine is
-	// back to what the org configured, not unconfigured — and a developer who is
-	// told "removed" about a value that was actually put back will go looking for
-	// the wrong thing.
-	if restored != "" {
-		fmt.Fprintf(a.stdout, "  restored       %s = %s (the value that was there before OpenBox)\n",
-			gatewayservice.EnvKey, restored)
-	}
-
-	// Unload BEFORE deleting the file. launchctl's fallback spelling
-	// (`launchctl unload <path>`) has to READ the plist to identify the job, so
-	// doing this after os.Remove left the fallback structurally unable to help: if
-	// the primary `bootout` failed, a KeepAlive job could stay running and
-	// restarting with no unit on disk, silently, while init reported success.
-	a.unloadUnit(gatewayservice.UnitPath(runtime.GOOS, homeDir))
-
-	if err := uninstallUnitFn(runtime.GOOS, homeDir); err != nil {
-		return err
-	}
-	if unitPath := gatewayservice.UnitPath(runtime.GOOS, homeDir); unitPath != "" {
-		fmt.Fprintf(a.stdout, "  removed        %s\n", unitPath)
-	}
-	return nil
+	return a.removeLane(laneRemoval{
+		label:         "gateway",
+		laneIdentity:  gatewayIdentity(homeDir),
+		uninstallUnit: func() error { return uninstallUnitFn(runtime.GOOS, homeDir) },
+		deactivate: func() error {
+			removed, restored, err := gatewayservice.RemoveEnvDetailed(homeDir)
+			if err != nil {
+				return err
+			}
+			for _, key := range removed {
+				fmt.Fprintf(a.stdout, "  removed        %s from %s\n", key, gatewayservice.SettingsPath(homeDir))
+			}
+			// A restore has to be SAID. It is the opposite of a removal — the
+			// machine is back to what the org configured, not unconfigured — and a
+			// developer told "removed" about a value that was actually put back
+			// will go looking for the wrong thing.
+			if restored != "" {
+				fmt.Fprintf(a.stdout, "  restored       %s = %s (the value that was there before OpenBox)\n",
+					gatewayservice.EnvKey, restored)
+			}
+			return nil
+		},
+	})
 }
 
 // loadUnit asks the OS supervisor to take ownership. Best-effort by design on the
 // unload side, strict here: if the supervisor will not take it, the caller must
 // not proceed to the env write.
-func (a *app) loadUnit(unitPath string) error {
+//
+// It takes the lane's IDENTITY rather than reading the gateway's, and that is a
+// correctness fix rather than a tidy-up: `systemctl --user enable --now` names a
+// unit, and `launchctl bootout` names a label, so a hardcoded gateway identity
+// here would have started the gateway when asked to start telemetry — reporting
+// success while the lane the developer installed never came up.
+func (a *app) loadUnit(id laneIdentity) error {
 	switch runtime.GOOS {
 	case "darwin":
 		// bootstrap is the modern spelling; `load` is kept as a fallback because
 		// it is what older macOS accepts, and an install that works on one and
 		// not the other is a support problem rather than a purity question.
-		if err := run("launchctl", "bootstrap", "gui/"+currentUID(), unitPath); err == nil {
+		if err := run("launchctl", "bootstrap", "gui/"+currentUID(), id.unitPath); err == nil {
 			return nil
 		}
-		return run("launchctl", "load", "-w", unitPath)
+		return run("launchctl", "load", "-w", id.unitPath)
 	case "linux":
 		if err := run("systemctl", "--user", "daemon-reload"); err != nil {
 			return err
 		}
-		return run("systemctl", "--user", "enable", "--now", gatewayservice.SystemdUnitName)
+		return run("systemctl", "--user", "enable", "--now", id.systemdUnit)
 	default:
 		return fmt.Errorf("no supervisor integration for %s", runtime.GOOS)
 	}
 }
 
-// unloadUnit is best-effort: the file is already gone, and a supervisor that has
-// forgotten the unit is the desired end state either way.
-func (a *app) unloadUnit(unitPath string) {
+// unloadUnit is best-effort: the file may already be gone, and a supervisor that
+// has forgotten the unit is the desired end state either way.
+func (a *app) unloadUnit(id laneIdentity) {
 	switch runtime.GOOS {
 	case "darwin":
-		if run("launchctl", "bootout", "gui/"+currentUID()+"/"+gatewayservice.LaunchdLabel) != nil {
-			_ = run("launchctl", "unload", unitPath)
+		if run("launchctl", "bootout", "gui/"+currentUID()+"/"+id.launchdLabel) != nil {
+			_ = run("launchctl", "unload", id.unitPath)
 		}
 	case "linux":
-		_ = run("systemctl", "--user", "disable", "--now", gatewayservice.SystemdUnitName)
+		_ = run("systemctl", "--user", "disable", "--now", id.systemdUnit)
 		_ = run("systemctl", "--user", "daemon-reload")
 	}
 }
@@ -456,32 +428,4 @@ func addrByte(s string, i int) bool {
 		c >= 'a' && c <= 'z' ||
 		c >= 'A' && c <= 'Z' ||
 		c == '.' || c == ':' || c == '-' || c == '_' || c == '[' || c == ']'
-}
-
-// rollbackUnit undoes a unit that was written and then could not be made to work.
-//
-// setupGateway's own doc promises "any failure leaves the machine unconfigured
-// rather than half-configured", and every failure after WriteUnit broke that: the
-// unit stayed on disk with KeepAlive / Restart=always, so the supervisor kept
-// restart-looping a gateway the developer was never told about — while `init`
-// exited 0 because main.go downgrades the error to a warning. Worse, the error's
-// own remedy ("re-run init") was then blocked by the port pre-check seeing that
-// very daemon.
-//
-// Best-effort and silent about its own failures: this runs on a path that is
-// already reporting an error, and a second error about cleaning up the first
-// would bury it.
-func (a *app) rollbackUnit(homeDir, unitPath string) {
-	if unitPath == "" {
-		return
-	}
-	a.unloadUnit(unitPath)
-	// Uninstall, not os.Remove(unitPath): since D-OSS-3 the library chose where the
-	// unit went, and on darwin that path is derived from user.Current() rather than
-	// from homeDir. Removing the caller-computed path would leave the real unit in
-	// place whenever the two disagree — a rollback that reports success and leaves a
-	// KeepAlive job behind is the failure this function exists to prevent.
-	if err := uninstallUnitFn(runtime.GOOS, homeDir); err == nil {
-		fmt.Fprintf(a.stdout, "  rolled back    removed %s\n", unitPath)
-	}
 }

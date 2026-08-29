@@ -11,6 +11,8 @@ import (
 
 	"github.com/openbox-ai/openbox-shift-left/adapters/common/devconfig"
 	"github.com/openbox-ai/openbox-shift-left/adapters/common/hookflow"
+	"github.com/openbox-ai/openbox-shift-left/cli/internal/activation"
+	"github.com/openbox-ai/openbox-shift-left/cli/internal/gatewayservice"
 	"github.com/openbox-ai/openbox-shift-left/cli/internal/telemetryemit"
 	"github.com/openbox-ai/openbox-shift-left/telemetry"
 )
@@ -34,7 +36,7 @@ func (a *app) runTelemetry(args []string) int {
 	addr := fs.String("addr", telemetry.DefaultAddr, "loopback listen address (host:port)")
 	grace := fs.Duration("shutdown-grace", 10*time.Second, "how long to let in-flight exports finish after a stop signal")
 	verbose := fs.Bool("verbose", false, "report the outcome of every record (recorded, skipped, dropped)")
-	elected := fs.Bool("elected", false, "emit model-call turns from this lane. OFF by default: two lanes emitting the same turn doubles every token count downstream, and the producer election is phase 12's")
+	elected := fs.Bool("elected", false, "force this lane to emit model-call turns, overriding the automatic producer election. Normally unnecessary: the election is derived from where the tool's settings route model calls")
 	if code, ok := parseFlags(fs, args); !ok {
 		return code
 	}
@@ -56,12 +58,44 @@ func (a *app) runTelemetry(args []string) int {
 	trigger := hookflow.RealtimeTrigger{Spool: spool, Provider: telemetrySpoolProvider}
 	// Two independent switches, and conflating them would be a bug. The posture
 	// key is the ORG's: telemetry:false means this machine's lane records nothing,
-	// without uninstalling it. --elected is the PRODUCER ELECTION's: it stops two
-	// lanes emitting the same turn. Either one alone must silence emission.
+	// without uninstalling it. The election is the PRODUCER's: it stops two lanes
+	// emitting the same turn. Either one alone must silence emission.
+	// THE PRODUCER ELECTION, resolved from where the tool's settings actually
+	// route model calls rather than from a flag baked into this unit's argv.
+	//
+	// This lane is the only one that needs to ask. The two in-path lanes see a
+	// call only if the client is routed to them, so for those the routing IS the
+	// mutual exclusion; telemetry keeps receiving either way, because the tool
+	// exports to it over its own channel regardless of where the call itself
+	// went. Asking the same question doctor asks, through the same function, so
+	// the two cannot give a developer different answers.
+	//
+	// RESOLVED PER RECORD, not once at startup, and that is the whole point of
+	// deriving it. `openbox init --full` installs telemetry FIRST and transport
+	// second, so a daemon that snapshotted the election booted correctly elected
+	// and then kept emitting after the transport lane took the election from it —
+	// two lanes emitting a turn for the same model call, which the disjoint
+	// namespaces guarantee core will store twice rather than reject. The reverse
+	// is quieter and just as wrong: remove the stronger lane and a snapshot of
+	// "not elected" stays silent forever. Live resolution has nothing to keep in
+	// sync, and it is also correct when the settings file changes by a hand edit
+	// or an MDM deployment rather than through this CLI.
+	settingsPath := gatewayservice.SettingsPath(a.homeDir())
+	electedNow := func() bool {
+		// The posture key is read live for the same reason. Both reads are
+		// stamp-cached on the file, so this costs a stat in the common case.
+		return devconfig.ResolveTelemetry() &&
+			(*elected || activation.ResolveElection(settingsPath).Elected == activation.LaneTelemetry)
+	}
+	// Snapshots for the STARTUP LINES only — what this process reports about
+	// itself when it comes up. The gate above is what decides each record.
 	recording := devconfig.ResolveTelemetry()
+	election := activation.ResolveElection(settingsPath)
+	emitting := electedNow()
+
 	em := &telemetryemit.Emitter{
 		Spool:  spool,
-		Mapper: telemetryemit.New("", telemetryemit.Policy{Elected: *elected && recording}),
+		Mapper: telemetryemit.New("", telemetryemit.Policy{Elected: electedNow}),
 		DID:    devconfig.ResolveDIDOrEmpty,
 		Warn:   logger.Printf,
 		Flush:  func(sessionID string) { trigger.Maybe(logger, sessionID) },
@@ -98,11 +132,13 @@ func (a *app) runTelemetry(args []string) int {
 		// looks exactly like a broken one, and the remedy is completely different.
 		logger.Printf("openbox telemetry: posture telemetry=false — receiving exports and recording NOTHING (config `telemetry` or %s)", devconfig.EnvTelemetry)
 	}
-	if !*elected {
-		// Said once, loudly, at startup. A lane that is listening and recording
-		// nothing looks identical to a broken one, and this is the single most
-		// likely reason for it in the field today.
-		logger.Printf("openbox telemetry: NOT elected — receiving exports but emitting no model-call turns (pass --elected once the producer election is settled)")
+	if !emitting {
+		// Said once, loudly, at startup, and it names the WINNER. A lane that is
+		// listening and recording nothing looks identical to a broken one, and an
+		// automatic precedence the developer cannot see is exactly the state
+		// ADR-0021 promised would always be detectable.
+		logger.Printf("openbox telemetry: NOT elected — the producer is %s (%s); receiving exports but emitting no model-call turns",
+			orNone(string(election.Elected)), election.Reason)
 	}
 
 	<-ctx.Done()

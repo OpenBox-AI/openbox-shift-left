@@ -174,9 +174,19 @@ func (a *app) initUsage(fs *flag.FlagSet) func() {
 		// --gateway changes what a machine sends model traffic to, which is the
 		// largest-blast-radius thing this command can do, and an undiscoverable
 		// flag for it would be a support problem rather than a tidy help screen.
+		// The lane flags are listed for the same reason as the gateway's: they
+		// change what a machine sends model traffic to, and --full additionally
+		// puts a CA on the developer's machine. Those are the
+		// largest-blast-radius things this command does, and an undiscoverable
+		// flag for one of them is a support problem rather than a tidy help
+		// screen.
 		for _, name := range []string{
 			"provider", "scope", "enforce", "no-enforce", "install-git-hook",
+			"full", "remove-all",
 			"gateway", "remove-gateway", "gateway-addr", "gateway-upstream", "gateway-verbose",
+			"telemetry", "remove-telemetry", "telemetry-addr",
+			"transport", "remove-transport", "transport-addr",
+			"lane-verbose", "force-restore",
 			"role", "dry-run",
 		} {
 			f := fs.Lookup(name)

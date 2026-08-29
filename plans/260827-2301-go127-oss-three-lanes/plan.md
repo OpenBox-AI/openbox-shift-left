@@ -2,7 +2,7 @@
 title: "Go 1.27 + OSS foundation, then Three Lanes, One Pipeline"
 description: "One sequence, two stages: raise the Go floor and replace hand-rolled components with maintained libraries, then fold openbox-logger's telemetry + transport observation into shift-left as native Go services under the 2026-08-27 owner rulings."
 status: in-progress
-progress: "stage A complete; stage B 08 done, 09+10 partial, 11 done, 12-14 pending (~72h of ~89h)"
+progress: "stage A complete; stage B 08 done, 09+10 partial, 11 done, 12 done with two named deviations, 13-14 pending (~78h of ~89h)"
 updated: 2026-08-29
 priority: P1
 effort: ~89h (14 phases: stage A ~36h, stage B ~53h)
@@ -104,8 +104,8 @@ about what egresses — no content field, gate or cap moves in phases 01–07.
 
 ## Progress (2026-08-28)
 
-**Stage A complete. Stage B: 08 done, 09 and 10 partial, 11 done, 12–14 pending.**
-~72h of ~89h delivered by phase weight; 3 of the 7 stage-B phases remain.
+**Stage A complete. Stage B: 08 done, 09 and 10 partial, 11 and 12 done, 13–14 pending.**
+~78h of ~89h delivered by phase weight; 2 of the 7 stage-B phases remain.
 
 | | state |
 |---|---|
@@ -116,11 +116,11 @@ about what egresses — no content field, gate or cap moves in phases 01–07.
 | Conformance | 38 numbered cases run, 38 pass |
 | Binary | still 17 MB — the mapper is unlinked, so OD5's +16.5 MB arrives with the daemon subcommand |
 
-**What actually blocks the rest.** Phase 11 is done, so 12 is unblocked and is
-the next unit of work on the critical path — and it is now the home of THREE
-deferred service lifecycles (telemetry's from 09, transport's from 11) plus the
-election, which is why they were deferred rather than hand-copied a third time.
-13's live half still gates on a bind-capable host and a stack.
+**What actually blocks the rest.** Phases 11 and 12 are done, so 13 is the next
+unit of work — and its live half gates on a bind-capable host and a stack. The
+three deferred service lifecycles (telemetry's from 09, transport's from 11) and
+the election all landed in 12, on one shared mechanism rather than a third
+hand-copy.
 
 **The socket run happened, and it is now GREEN (2026-08-28, owner's machine).**
 First pass: 21 of 25 packages, with 4 failures — all in tests whose servers must
@@ -204,7 +204,7 @@ by any of this.
 | 09 | [Telemetry receiver daemon (otlpreceiver, loopback)](phase-09-telemetry-receiver-daemon.md) | 04, 08 | **mostly done†** | 8h |
 | 10 | [Telemetry mappers → contract (`:otel:`)](phase-10-telemetry-mappers.md) | 09 | **partial‡** | 8h |
 | 11 | [Transport proxy as native service (`:proxy:`, goproxy)](phase-11-transport-proxy-service.md) | 04, 10 | **done§** | 15h |
-| 12 | [One-command install/remove + producer election](phase-12-one-command-and-election.md) | 09, 11 | pending | 6h |
+| 12 | [One-command install/remove + producer election](phase-12-one-command-and-election.md) | 09, 11 | **done¶** | 6h |
 | 13 | [Conformance, fixtures & probe-A instrument](phase-13-conformance-fixtures-probe.md) | 10, 11 | pending | 8h |
 | 14 | [Coverage matrix & docs reconciliation](phase-14-coverage-and-docs.md) | 09–13 | pending | 4h |
 
@@ -281,6 +281,70 @@ phase's criteria. And the gate exercised the **plain-HTTP path only**: the MITM
 response copy is different code, read statically, so running the CONNECT path is
 the FIRST thing the conformance work should do. First-byte latency is untested.
 [Report](reports/verification-260829-phase-11-goproxy-spike.md).
+
+**¶** **Phase 12 is DONE (2026-08-29), with two named deviations** —
+[verification-260829-phase-12-one-command-and-election](reports/verification-260829-phase-12-one-command-and-election.md).
+`openbox init --provider claude-code --full` installs hooks + telemetry + transport
+in proof order; `--remove-all` restores every managed env key, unloads and deletes
+every unit, and deletes the CA, logs, record and spool — before the credential gate.
+Every pre-existing test passes **unedited**. Four things worth not re-litigating.
+
+**The election is DERIVED, not stored, and requirement 4 was reversed to get there.**
+A `model_call_producer` field in `dev.json` was written, tested green, and then
+REVERTED: it is a second store of derivable state, and its drift is silent in the
+worst direction — remove the transport lane without rewriting the field and telemetry
+stays quiet forever, so the machine reports NO model calls at all while looking
+perfectly configured. The election now reads the tool's own env block, which is the
+one place that decides where a model call actually goes: a lane observes a call only
+if the client is routed to it, so "who is routed" and "who may emit" are the same
+question and there is nothing to keep in sync. Precedence is corrected by one rule a
+pure ranking gets wrong: **a base URL set to anything takes the relay out of the path**
+(loopback is not proxied, any other host is blind-tunnelled), so with both in-path lanes
+configured the GATEWAY is the emitter — the count was never at risk, the ATTRIBUTION was.
+`Election` carries `Routed` and `Candidates` separately for exactly that.
+**Loopback is the discriminator and that is a correctness property** — an org relay in `ANTHROPIC_BASE_URL`, a corporate
+proxy or a company OTel collector must not read as one of ours, because electing a
+producer that does not exist silences the one that does. Only telemetry consults it;
+the two in-path lanes are excluded structurally. `doctor` and the daemon call the
+SAME resolver, deliberately.
+
+**The gateway's ENV module was NOT ported (requirement 3), but its UNIT layer was.**
+The env port is a zero-behavior-change refactor of the only socket-verified lane in
+the repo and serves neither half of the outcome; `--remove-all` composes the existing
+`removeGateway`. The unit/service layer DID need generalizing — `cli/internal/laneservice`
+now renders and installs all three units from one `Spec`, because the unit body is
+where drift is least visible and most expensive (a plist that forgot
+`StandardErrorPath` logs nowhere; an `ExitTimeOut` that stopped matching
+`--shutdown-grace` is SIGKILLed mid-drain every restart). Neither surfaces as an error.
+
+**The env key names are the one thing this repo cannot verify about itself.** Every
+test asserts JSON we wrote; the client reads these names and silently ignores what it
+does not recognize — `http_status` vs `http_status_code` in a new place. So the 13
+telemetry keys are copied verbatim from the set that produced the logger's corpus and
+pinned as a LITERAL LIST. `OTEL_LOG_RAW_API_BODIES` is deliberately subtracted: it
+makes the client dump raw prompt and completion bodies to disk, and phase 10 deferred
+body ingestion, so writing it would create a liability with no corresponding evidence.
+
+**Code review found one CRITICAL, and how it survived is the transferable part.** The
+telemetry daemon resolved the election ONCE at startup and froze it; `--full` installs
+telemetry before transport, so it booted elected, kept that answer, and went on emitting
+after transport took the election — both lanes describing one model call, which the
+disjoint namespaces guarantee core stores twice. Every token count doubles, silently,
+while doctor reports one clean elected lane. Fixed by making the gate a `func() bool`
+resolved per record (nil suppresses). The REJECTED fix is the instructive half: bouncing
+the daemon on an election change is the same shape as a stored election — a second copy
+with a sync obligation, covering only the paths `init` controls. **It survived 19 mutation
+drills because a drill can only be red on a line some test executes, and every test agreed
+with this one**: they covered the pure election function or ONE lane in isolation, never a
+second daemon's already-running snapshot against a later routing change.
+
+**One of the twenty-one mutation drills was GREEN until its test was strengthened**, and
+that finding is worth more than the ten that passed. On darwin the install path
+reaches only `launchctl bootstrap <path>`, which names the unit by PATH; the LABEL is
+used by `bootout` alone, which nothing but a removal or a rollback calls. The test
+stopped after the install, and its one assertion passed off the plist path — which
+contains the label as a substring. **A test that passes for a reason other than the
+one it names is indistinguishable from one that works.**
 
 **†** **Phase 09's MODULE half** is done and green — `telemetry/` with
 otlpreceiver v0.159.0 compiled against the real API, its dependency guard,

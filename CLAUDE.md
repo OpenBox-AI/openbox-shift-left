@@ -58,7 +58,7 @@ reintroduce that: if something is provider-agnostic it goes in `hookflow` or
 | `gateway/` | the local model-call relay: byte-identical forward, capture, the gate (ADR-0021) |
 | `telemetry/` | the local OTLP receiver — the `:otel:` lane's intake (ADR-0022) |
 | `transport/` | the in-path CONNECT/TLS relay — the `:proxy:` lane. Allowlist, CA, and the hijack that hands an intercepted connection to `gateway` (ADR-0022) |
-| `cli/` | the `openbox` CLI, incl. `cli/internal/approver` (ADR-0012), `cli/internal/prompt` (masked input) and the gateway's install/inspect/emit halves (`gatewayservice`, `gatewaycheck`, `gatewayemit` — the last of which serves BOTH in-path lanes via its `Lane`) |
+| `cli/` | the `openbox` CLI, incl. `cli/internal/approver` (ADR-0012), `cli/internal/prompt` (masked input), the gateway's install/inspect/emit halves (`gatewayservice`, `gatewaycheck`, `gatewayemit` — the last of which serves BOTH in-path lanes via its `Lane`), and the three-lane install machinery: `activation` (settings-env record + the derived producer election + the per-lane key sets), `laneservice` (every supervisor unit, one `Spec` per lane), `atomicfile` |
 | `actions/openbox-git-action/` | commit→deploy lineage for CI |
 | `contracts/dev-event/` | event schema, wire mapping, conformance |
 | `testbed/` | the mock-free end-to-end suite (`docs/testbed/e2e.md`) |
@@ -347,8 +347,8 @@ wired, the production-runtime lineage hop is not joined, Codex reports usage per
 session rather than per turn, reports no tool success at all, captures neither
 tool content nor thinking and redacts nothing it sends (so the two providers differ
 in both the amount of content AND whether it is scanned — stated in `COVERAGE.md` §3
-rather than averaged away), model calls are unobserved unless the opt-in gateway is
-installed and are not refused even then, goal
+rather than averaged away), model calls are unobserved unless one of the three opt-in lanes is
+installed (`--full`, or a per-lane flag) and are not refused even then, goal
 alignment
 additionally requires `finops` ∧ `content_capture` (both default-ON, a user
 constraint) plus a reachable LlamaFirewall and Redis — without those the widgets
@@ -887,9 +887,93 @@ pattern:
   `thinking` were missing, so an adapter writing either straight into metadata routed
   around the gate.
 
-Next: phase 12 — one-command install/removal and the producer election, which
-owns the service lifecycle for BOTH new lanes. Then the Cursor adapter; policy
-template packs. The language floor is
+**One command in, one command out; the election is DERIVED** (phase 12 of plan
+260827-2301, 2026-08-29). `openbox init --provider claude-code --full` installs hooks
++ telemetry + transport in proof order (unit → start → PROVE listening → env, rollback
+removes the unit on any later failure); `--remove-all` restores every managed env key,
+unloads and deletes every unit, and deletes the CA, logs, activation record and spool —
+**before** the credential gate, because removal must not require the thing being removed
+to still be usable. `cli/internal/activation` is the shared settings-env mechanism
+(per-lane managed/original record at `~/.openbox/activation.json` 0600, before/after
+SHA-256, first-writer-wins per lane); `cli/internal/laneservice` renders and installs all
+three supervisor units from one `Spec`; `cli/internal/atomicfile` is the one atomic writer.
+Six things worth not re-litigating:
+
+- **The election is DERIVED from the tool's env block, not stored in `dev.json`** — the
+  phase specified a stored field, it was written, tested green, and REVERTED. It is a
+  second store of derivable state whose drift is silent in the worst direction: remove the
+  transport lane without rewriting the field and telemetry stays quiet forever, so the
+  machine reports NO model calls at all while looking perfectly configured. A lane observes
+  a call only if the client is routed to it, so "who is routed" and "who may emit" are the
+  same question and there is nothing to keep in sync. Precedence transport > gateway >
+  telemetry, **corrected by one rule a pure ranking gets wrong: a base URL set to anything
+  takes the relay out of the path** — loopback is not proxied (`NO_PROXY` carries 127.0.0.1,
+  which we write) and any other host is blind-tunnelled because it is not the provider's. So
+  with both in-path lanes configured the GATEWAY is the emitter. The COUNT was never at risk;
+  the ATTRIBUTION was. Hence `Election` carries both `Routed` (what doctor reports as
+  configured) and `Candidates` (what can see the call), with a NOT IN PATH line for the
+  difference.
+- **LOOPBACK is the discriminator and that is a correctness property.** An org relay in
+  `ANTHROPIC_BASE_URL`, a corporate proxy, or a company OTel collector must not read as one
+  of ours: electing a producer that does not exist silences the one that does. The opposite
+  error — a developer's own loopback proxy read as our transport lane — only costs
+  telemetry's turn events and is announced. Only telemetry consults the election; the two
+  in-path lanes are excluded structurally. `doctor` and the daemon call the SAME resolver.
+- **ELECTED BUT ABSENT is the election's own worst failure**, and `doctor` is the only
+  place it is visible: every other lane correctly stands down, so the machine emits nothing
+  at all while each individual line still reads as fine. One line puts "elected" and
+  "nothing listening" together; deleting it is a drill.
+- **The gateway's ENV module was NOT ported (deliberately); its UNIT layer WAS.** The env
+  port is a zero-behavior-change refactor of the only socket-verified lane here and serves
+  neither half of the outcome, so `gatewayservice/env.go` still owns `ANTHROPIC_BASE_URL`
+  and `--remove-all` composes the existing `removeGateway`. Two mechanisms, not three. The
+  unit layer did need generalizing: a plist that forgot `StandardErrorPath` logs nowhere and
+  an `ExitTimeOut` that stopped matching `--shutdown-grace` is SIGKILLed mid-drain every
+  restart, and neither surfaces as an error.
+- **The env key names are the one thing this repo cannot verify about itself.** Every test
+  asserts JSON we wrote; the client reads these names and silently ignores what it does not
+  recognize — `http_status` vs `http_status_code` in a new place. The 13 telemetry keys are
+  copied verbatim from the set that produced openbox-logger's corpus and pinned as a LITERAL
+  LIST. **`OTEL_LOG_RAW_API_BODIES` is deliberately subtracted**: it makes the client dump
+  raw prompt and completion bodies to disk, and phase 10 deferred body ingestion, so writing
+  it creates a liability with no corresponding evidence.
+- **The election is resolved PER RECORD, and a snapshot of it was a real defect that
+  reached review.** The telemetry daemon resolved it once at startup; `--full` installs
+  telemetry FIRST and transport second, so the daemon booted correctly elected, froze that
+  answer, and kept emitting after transport took the election from it — both lanes then
+  describing the same model call, which the disjoint namespaces guarantee core STORES twice.
+  Every token count doubles, silently, while `doctor` reports one clean elected lane. The
+  reverse is quieter and costs everything: remove the stronger lane and a process frozen at
+  "not elected" is silent forever. `Policy.Elected` is a `func() bool` now, nil suppressing,
+  so the zero value's guarantee is structural. **The rejected fix is the instructive half**:
+  bouncing the daemon on an election change was the obvious repair and is the same shape as a
+  stored election — a second copy with a sync obligation, covering only the paths `init`
+  controls and leaving a hand-edited settings file or an MDM deployment stale.
+- **A defect every test agrees with is invisible to mutation testing.** The above survived 19
+  drills. Drills prove a test is load-bearing; they say nothing about a case no test
+  constructs — here, every test covered the pure election function or ONE lane in isolation,
+  and none built a second daemon's already-running snapshot and changed the routing under it.
+- **A test that passes for a reason other than the one it names is indistinguishable from
+  one that works.** Of twenty-one mutation drills, one was GREEN until its test was strengthened:
+  on darwin the install path reaches only `launchctl bootstrap <path>`, which names the unit
+  by PATH, while the LABEL is used by `bootout` alone — which nothing but a removal or a
+  rollback calls. The test stopped after the install, and its assertion passed off the plist
+  path, which contains the label as a substring.
+
+**Status: implemented, unit-verified BIND-FREE, 14 modules green under `-race`, both
+cross-compiles, `cli` green under `GOWORK=off` — no socket, no launchd, no stack.** Every
+pre-existing test passes unedited. The install choreography is covered without a listener
+(the readiness probe is a seam, and a dial to a free port answers without binding), which is
+deliberate: 20 `cli` tests skip on a bind-denied host, and one string a skipped test asserts
+was found by inspection to be about to break. Unproven: a real `launchctl` install, that the
+13 keys are the ones the client reads, and that exactly one lane's turn events arrive per
+model call.
+`plans/260827-2301-go127-oss-three-lanes/reports/verification-260829-phase-12-one-command-and-election.md`
+splits every claim by evidence strength.
+
+Next: phase 13 — conformance, fixtures and the probe-A instrument (its live half needs a
+bind-capable host and a stack). Then phase 14's docs reconciliation; the Cursor adapter;
+policy template packs. The language floor is
 `go 1.27.0` across `go.work` and all twelve modules, so every dependency resolves
 at latest with no pin. **Dependencies are module-scoped now, not "one for the
 repo"**: `cli` has `golang.org/x/term` (masked input, ADR-0015) and
