@@ -29,6 +29,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"unicode/utf8"
 )
 
 // uuidKeys are keys whose corpus values are UUIDs or UUID-like account handles.
@@ -98,6 +99,28 @@ var fixedKeys = map[string]string{
 	"cf-ray":          "fixture",
 	"server-timing":   "fixture",
 }
+
+// contentKeys are keys whose values are recorded FREE TEXT — a prompt, a model
+// reply, a tool's arguments or its output.
+//
+// They get filler rather than a pseudonym because there is nothing to preserve.
+// A pseudonym exists so two distinct real values stay distinct downstream, and
+// nothing downstream reads these: the telemetry lane's body ingestion is
+// deferred, so the value is carried and never parsed. What free text does carry
+// is whatever the recording machine had in front of the model, which has no
+// shape and so cannot be scanned for.
+var contentKeys = map[string]bool{
+	"prompt":          true,
+	"response":        true,
+	"tool_input":      true,
+	"tool_parameters": true,
+}
+
+// systemReminder is the tag the provider wraps injected context in, and it is
+// the mechanism by which a developer's global configuration file reached a
+// committed fixture: the first prompt of a session carries that file inside one
+// of these blocks. Naming the tag names the vector without naming anyone.
+const systemReminder = "<system-reminder"
 
 // Value patterns. These run over EVERY string in the document, not only the ones
 // under a known key, because the same identity leaks through free text: a home
@@ -306,9 +329,17 @@ func (s *sanitizer) rewrite(key, val string) string {
 		return s.pseudonym("token", val, tokenPlaceholder, tokenPlaceholderRe)
 	case hexShapeKeys[lk] && val != "":
 		return s.sameLengthDigits(val)
+	case contentKeys[lk]:
+		return SyntheticProse(utf8.RuneCountInString(val))
 	}
 	if fixed, ok := fixedKeys[lk]; ok {
 		return fixed
+	}
+	// A recorded request body carries the prompt, so its free text is replaced
+	// before the value patterns run: what survives that substitution is
+	// structure, and the patterns exist for identifiers hiding in structure.
+	if lk == "body" {
+		val = SubstitutePromptText(val)
 	}
 	return s.scrubText(val)
 }
@@ -449,6 +480,21 @@ func scanString(val, path, key string, out *[]Violation) {
 			*out = append(*out, Violation{Path: path, Kind: "unsanitized identity key " + lk})
 		}
 		return
+	}
+	if contentKeys[lk] {
+		if val != SyntheticProse(utf8.RuneCountInString(val)) {
+			*out = append(*out, Violation{Path: path, Kind: "recorded free text under " + lk})
+		}
+		return
+	}
+	// The check is the substitution itself rather than a second description of
+	// what filler looks like: a rule stated twice is a rule that drifts, and the
+	// half that drifts here is the one admitting fixtures.
+	if lk == "body" && SubstitutePromptText(val) != val {
+		*out = append(*out, Violation{Path: path, Kind: "recorded prompt text in a model-call body"})
+	}
+	if strings.Contains(val, systemReminder) {
+		*out = append(*out, Violation{Path: path, Kind: "injected-context block (carries whatever the recording machine had open)"})
 	}
 	for _, m := range redactedMarkerRe.FindAllString(val, -1) {
 		*out = append(*out, Violation{Path: path, Kind: "redaction marker " + m + " (fixture was rewritten on write)"})

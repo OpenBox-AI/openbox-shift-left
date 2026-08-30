@@ -400,9 +400,8 @@ reply. Five things are worth not re-litigating:
 - **The turn span's `http.*` attributes are synthesized and must stay.** Core
   RECOMPUTES `semantic_type` per span, and `isLLMCall` is the only path to
   `llm_completion`. Deleting them does not error — the span still stores,
-  classifies as something else, and alignment silently dies. They retire when
-  [openbox-core#130](https://github.com/OpenBox-AI/openbox-core/issues/130) lands
-  and the text moves to `activity_output.message`.
+  classifies as something else, and alignment silently dies. They retire when the
+  control plane moves the text to `activity_output.message`.
 - **The three new signals must carry NO `signal_args`.** Core reads any
   `SignalReceived` with non-empty `signal_args` as a NEW USER GOAL and overwrites
   the alignment session's goal with it (`age.go:112-137`). Surfacing the denied
@@ -1026,7 +1025,7 @@ the plain-HTTP path only". Six things worth not re-litigating:
   exactly like a control would have shipped as one.**
 - **OD1(c) is measured, not estimated: 96.75%** of 5,049 recorded request bodies
 exceed the 65,536-rune cap (p50 529,175, max 2,566,660); responses 0.06%. Spool cost
-is **70,080 bytes per model call**, ~334 MB per 5,000-call session — the number the
+is **69,179 bytes per model call**, ~330 MB per 5,000-call session — the number the
 backend dedupe ask now carries. **Three denominators appear in that corpus and they
 are different populations** (5,340 recorded requests / 5,231 carrying the retry header
 / 5,049 flow-paired), all from run `20260827T063932Z-225cac`: one machine, one

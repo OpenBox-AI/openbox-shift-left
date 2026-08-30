@@ -1,6 +1,7 @@
 package corpusfixture
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -148,4 +149,21 @@ func isRepoRoot(dir string) bool {
 		}
 	}
 	return false
+}
+
+// TestCommittedFixtureScanCatchesRecordedProse is the second drill, and it exists
+// because the rule it exercises is the one with a recognizer in front of it.
+// The identity sentinels fire on any string; this one fires only on a body that
+// Scan first recognizes as a model call, so a recognizer that silently stopped
+// matching would leave the gate reporting clean forever.
+func TestCommittedFixtureScanCatchesRecordedProse(t *testing.T) {
+	body := `{"model":"claude-x","messages":[{"role":"user","content":` +
+		`[{"type":"text","text":"a verbatim recorded prompt that was never substituted"}]}]}`
+	doc, err := json.Marshal(map[string]any{"request": map[string]any{"body": body}})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if v := Scan(doc); len(v) == 0 {
+		t.Fatal("the committed-fixture scan found nothing in a body carrying verbatim recorded prose")
+	}
 }

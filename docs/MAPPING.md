@@ -11,7 +11,7 @@ two exceptions and both ride a `TurnCompleted`: the ONE content-gated span of a 
 >
 > The normalized contract (this schema) was **unchanged** through both — adapters still emit `ToolCall`/`SessionStarted`/…; only the **client→core wire serialization** moved.
 >
-> **that decision** is v1.2, and it is purely additive: a top-level `status` on tool results (the field core's success metric reads and no producer had ever written — Tool Health showed 0.0% for every session because of it), three failure/lifecycle signal types, and the one turn span above. **Cost, stated plainly:** the assistant's reply text now egresses under content capture, redacted and capped; and to be classified as an LLM call by core's own recompute, that span must carry synthesized `http.*` attributes describing a request the client never made — marked `openbox.span_synthetic:true` and retired by [openbox-core#130](https://github.com/OpenBox-AI/openbox-core/issues/130).
+> **that decision** is v1.2, and it is purely additive: a top-level `status` on tool results (the field core's success metric reads and no producer had ever written — Tool Health showed 0.0% for every session because of it), three failure/lifecycle signal types, and the one turn span above. **Cost, stated plainly:** the assistant's reply text now egresses under content capture, redacted and capped; and to be classified as an LLM call by core's own recompute, that span must carry synthesized `http.*` attributes describing a request the client never made — marked `openbox.span_synthetic:true` and retired once the control plane carries assistant content on the activity itself.
 >
 > **that decision** is v1.5, purely additive, and it introduces a **second producer** rather than a second event: a local relay observes the model call itself and emits a `TurnCompleted` alongside the hook path's. Both describe a turn, so the one thing that must never collide is `activity_id` — hence `gateway_request_id` (§1) and its disjoint `:gateway:` namespace. Its span is the first this client sends that is **measured rather than synthesized**, so it carries no `openbox.span_synthetic` marker and its `http_*` fields are observations. **Cost, stated plainly:** the largest content class this contract carries (a whole model request, system prompt included) and the first span fields that ship with content capture OFF — `http_method`, `http_url`, `http_status` and `credential_fingerprint` are structural account-binding evidence, deliberately outside the privacy switch.
 >
@@ -247,9 +247,8 @@ this is meant to fill:
 | `span_id`/`trace_id` | sha256-derived, 16/32 hex | core dedupes on `(span_id, stage)` and the turn cursor re-reads a window after a crash; random ids would store the text twice |
 
 The synthesized attributes are **OD-0018-1**, accepted with a named retirement
-condition: [openbox-core#130](https://github.com/OpenBox-AI/openbox-core/issues/130)
-moves assistant content onto the `llm_completion` `activity_output`, at which
-point the span and its attributes are deleted. Removing them before that lands
+condition: when the control plane moves assistant content onto the
+`llm_completion` `activity_output`, the span and its attributes are deleted. Removing them before that lands
 kills the feature silently.
 
 This is the ONLY span any developer event carries. Tool events stay span-less,
@@ -609,8 +608,8 @@ path of one of these events.
     counts producers; this adds the ordering that broke once already — install
     telemetry first and transport second, then confirm telemetry falls silent from
     the next record rather than from the next daemon restart.
-39. **Volume at the transport lane's real cadence.** Measured locally at **70,080
-    bytes of spool per model call** (~334 MB per 5,000-call session, run
+39. **Volume at the transport lane's real cadence.** Measured locally at **69,179
+    bytes of spool per model call** (~330 MB per 5,000-call session, run
     `20260827T063932Z-225cac`). What a live run adds is whether the flusher and the
     control plane absorb that rate; it is a larger increment than item 30's.
 

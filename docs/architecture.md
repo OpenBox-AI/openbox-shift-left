@@ -502,8 +502,8 @@ classification, and their text is retained server-side. Two honesty notes on tha
 its classification attributes are **synthesized** — they describe an HTTP request the
 client never made, because that is the only input core's classifier accepts, and every
 such span carries `openbox.span_synthetic: true` so an auditor can tell — and it is a
-stopgap, retired by
-[openbox-core#130](https://github.com/OpenBox-AI/openbox-core/issues/130). With
+stopgap, retired once the control plane carries assistant content on the activity
+itself. With
 `content_capture: false` the hook path writes no span rows at all.
 
 **The gateway is a second span producer, and it behaves differently in both

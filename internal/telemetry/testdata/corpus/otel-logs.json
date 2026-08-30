@@ -1681,7 +1681,7 @@
                 {
                   "key": "response",
                   "value": {
-                    "stringValue": "Scout complete. Summary before I proceed:\n\n**Codebase context**\n- Go workspace, 13 modules. `transport/` module **already exists** (go.mod + goproxy v1.9.0 + `identity.go` + `guard_test.go` + 5 spike tests). Phase-11 steps 1–3 are largely done.\n- **This host denies `bind`** (confirmed: `operation not permitted`). All 5 spike tests SKIP here — the exact trap `CLAUDE.md` documents. Everything I write must be reachable over `net.Pipe`/`memhttptest`, or it goes unexercised.\n- `gateway/`'s exported surface already contains the whole seam phase 11 says to \"export\": `Captured`, `CaptureRequest`, `Complete`, `ForGate`, `Decide`, `WriteRefusal`, `Emitter`, `WithCapture`, `WithGate`, `New`, `Config`.\n- `client/` already carries `ProxyRequestID`, `observedLane`/`observedSpanID` (`:proxy:` precedes `:gateway:`) — phase 08/10 shipped it.\n- `cli/internal/gatewayemit` (Emitter: session header, lazy DID, throttled warns, spool, flush) and `cli/internal/gatewayservice` (kardianos unit, proof-order install, env record) are the reuse targets, not templates to copy.\n\nI've asked kongming for counsel on one fork before writing code: the phase specifies a hand-built *streaming tee* on goproxy's MITM hooks, but `ConnectHijack` would let me serve the **existing** `gateway.Gateway` over the terminated TLS conn — reusing its proven byte-identity, streaming, capture and gate rather than forking them."
+                    "stringValue": "This paragraph is synthetic fixture prose. It stands in for recorded prompt text so the committed corpus carries no real content, while the exchange keeps the rune geometry the recording had. This paragraph is synthetic fixture prose. It stands in for recorded prompt text so the committed corpus carries no real content, while the exchange keeps the rune geometry the recording had. This paragraph is synthetic fixture prose. It stands in for recorded prompt text so the committed corpus carries no real content, while the exchange keeps the rune geometry the recording had. This paragraph is synthetic fixture prose. It stands in for recorded prompt text so the committed corpus carries no real content, while the exchange keeps the rune geometry the recording had. This paragraph is synthetic fixture prose. It stands in for recorded prompt text so the committed corpus carries no real content, while the exchange keeps the rune geometry the recording had. This paragraph is synthetic fixture prose. It stands in for recorded prompt text so the committed corpus carries no real content, while the exchange keeps the rune geometry the recording had. This paragraph is synthetic fixture prose. It stands in for recorded prompt text so the committed corpus carries no real content, while the exchange keeps the rune geometry the recording had. This paragraph is synthetic fixture prose. It stand"
                   }
                 },
                 {
@@ -3172,7 +3172,7 @@
                 {
                   "key": "tool_parameters",
                   "value": {
-                    "stringValue": "{\"bash_command\":\"ls\",\"full_command\":\"ls client/memhttptest/ \u0026\u0026 sed -n '1,80p' client/memhttptest/*.go | head -100\",\"description\":\"Read memhttptest API\"}"
+                    "stringValue": "This paragraph is synthetic fixture prose. It stands in for recorded prompt text so the committed corpus carries no real content, while the exchange kee"
                   }
                 }
               ],
@@ -3322,13 +3322,13 @@
                 {
                   "key": "tool_parameters",
                   "value": {
-                    "stringValue": "{\"bash_command\":\"ls\",\"full_command\":\"ls client/memhttptest/ \u0026\u0026 sed -n '1,80p' client/memhttptest/*.go | head -100\",\"description\":\"Read memhttptest API\"}"
+                    "stringValue": "This paragraph is synthetic fixture prose. It stands in for recorded prompt text so the committed corpus carries no real content, while the exchange kee"
                   }
                 },
                 {
                   "key": "tool_input",
                   "value": {
-                    "stringValue": "{\"command\":\"ls client/memhttptest/ \u0026\u0026 sed -n '1,80p' client/memhttptest/*.go | head -100\",\"description\":\"Read memhttptest API\"}"
+                    "stringValue": "This paragraph is synthetic fixture prose. It stands in for recorded prompt text so the committed corpus carries no real conten"
                   }
                 },
                 {
@@ -3472,7 +3472,7 @@
                 {
                   "key": "prompt",
                   "value": {
-                    "stringValue": "/ak:xia /tmp/project-layout \"project layout, folder structure, file naming convention\" --improve --auto"
+                    "stringValue": "This paragraph is synthetic fixture prose. It stands in for recorded prompt text so the committed corpu"
                   }
                 },
                 {

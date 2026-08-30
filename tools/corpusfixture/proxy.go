@@ -251,6 +251,9 @@ func withoutContentEncoding(h map[string]string) map[string]string {
 func fixtureFor(req, resp *event) (any, error) {
 	return map[string]any{
 		"note": "Sanitized from an openbox-logger desktop-observation run. " +
+			"Every free-text field of the request — prompts, thinking, tool arguments, tool output, " +
+			"tool descriptions — is synthetic filler of the recorded rune length: no recorded prose " +
+			"is committed, and every consumer of this fixture is content-agnostic. " +
 			"The response body is DECOMPRESSED and its content-encoding header removed: " +
 			"every recorded event-stream response was gzip. " +
 			"Chunk boundaries are NOT recorded either — the recorder flattened the response " +
