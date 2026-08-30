@@ -13,7 +13,7 @@
 - **Description:** Prove three suspect `cmd/` trees dead and delete them, then
   15 modules → 1. Root `/cmd`, `/internal`, `/tools`. ~444 import lines rewritten,
   45 `replace` directives and `go.work` deleted.
-- **Priority:** P1 · **Implementation status:** not started · **Review:** not reviewed
+- **Priority:** P1 · **Implementation status:** COMPLETE (2026-08-30) · **Review:** self-verified; report at `reports/collapse-260830.md`
 - **Mutates Go code:** yes — deletions (commit a), then paths only (commit b)
 
 **Two commits, not one.** (a) verification gate + deletions. (b) `git mv` + import
@@ -150,22 +150,22 @@ Gate inputs: `cli/cmd/openbox/main_test.go:764` · `adapters/claude-code/hookrun
 
 **Commit (a)**
 
-- [ ] three reachability verdicts written, each with a settling file:line
-- [ ] proved-dead trees deleted with their modules and `go.work` entries
-- [ ] deleted `main_test.go` files enumerated for criterion 3's subtraction
-- [ ] green gate on the reduced multi-module tree
+- [x] three reachability verdicts written, each with a settling file:line — **two of the three are REACHABLE**; only `openbox-cc-hook` was dead
+- [x] the one proved-dead tree deleted (it had no module of its own)
+- [x] deleted tests enumerated by name — 5 from the alias binary in commit (a), 11 guards in commit (b)
+- [x] green gate on the reduced multi-module tree; only the deleted package's counts moved
 
 **Commit (b)**
 
-- [ ] root `go.mod` authored from the union
-- [ ] directories moved with `git mv`; rename detection intact
-- [ ] imports rewritten; diff confined to the map
-- [ ] `go.work` + 14 module files deleted; zero `replace` in the repo
-- [ ] `go mod tidy` version delta listed
-- [ ] 5 superseded guards deleted, 6 replacements green
-- [ ] probe binaries removed and ignored
-- [ ] full green gate incl. both cross-compiles
-- [ ] verdict count matches baseline
+- [x] root `go.mod` authored from the union (19 direct, 115 indirect, highest version pinned anywhere)
+- [x] 452 renames detected; `git log --follow` reaches 10 commits through `internal/gateway/proxy.go`
+- [x] 432 import lines rewritten; **four other forms of location-encoding string are invisible to any grep** and were hand-edited
+- [x] `go.work`, `go.work.sum` and 29 module files deleted; zero `replace` in the repo
+- [ ] **`go mod tidy` COULD NOT RUN** — the sandbox denies module-cache writes and breaks the checksum database. No dependency version moved, so step 10 has nothing to re-verify; that is only true because tidy did not run. Owed with network access.
+- [x] superseded guards deleted, replacements green; **18 drills re-run on the collapsed tree**, 18 correct
+- [x] probe binaries removed and ignored (they were never tracked — the plan's premise was wrong)
+- [x] gofmt, build, vet, `-race`, both cross-compiles, and `GOWORK=off` — all from the repo root
+- [x] 1288→1277 declared, 1884→1861 verdicts, 0 fails, **skips unchanged at 28** across the same 35 packages
 
 ## Success criteria
 

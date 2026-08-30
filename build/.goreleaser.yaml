@@ -18,10 +18,6 @@ builds:
     binary: openbox
     env:
       - CGO_ENABLED=0
-      # Ignore the repo's go.work. The workspace exists so CI and editors can see
-      # all 12 modules at once; a release binary must resolve through the module's
-      # own `replace` directives, exactly as it would outside this checkout.
-      - GOWORK=off
     flags:
       - -trimpath
     ldflags:

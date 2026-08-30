@@ -14,7 +14,7 @@
   no workspace to discover, and give the release path its first automated coverage.
 - **Priority:** P1 — the release path is the one thing in this repo with no automated
   coverage; ADR-0011 named that as reason 1 for not collapsing.
-- **Implementation status:** not started · **Review:** not reviewed
+- **Implementation status:** COMPLETE (2026-08-30) · **Review:** self-verified; report at `reports/release-260830.md`
 
 ## Key insights
 
@@ -110,12 +110,12 @@ unchanged)
 
 ## Todo list
 
-- [ ] goreleaser config moved; `dir:` and `GOWORK=off` removed with the stale comment
-- [ ] release workflow passes `--config`
-- [ ] two vacuous CI steps deleted; `./...` in use; gofmt + Go-version steps untouched
-- [ ] snapshot binary built **and executed**
-- [ ] archive-name check against `install.sh`
-- [ ] `install.sh` unchanged **by this phase**; no `scripts/` created
+- [x] config moved; `dir:` removed in phase 03 as a moved path, `GOWORK=off` and its comment removed here
+- [x] release workflow passes `--config`
+- [x] **three** vacuous CI steps deleted — the third was the per-module `GOWORK=off` loop, now identical to the Build step above it; `./...` in use; gofmt and Go-version steps untouched; two stale comments corrected
+- [x] snapshot built **and executed** — `--version` and `doctor` both exit 0 with real output
+- [x] archive-name contract matches `install.sh:136`, unchanged by this phase
+- [x] `install.sh` unchanged by this phase (its collapse fix rode with phase 03); no `scripts/`
 
 ## Success criteria
 

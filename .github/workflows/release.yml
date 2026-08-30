@@ -31,6 +31,10 @@ jobs:
         uses: goreleaser/goreleaser-action@v6
         with:
           version: "~> v2"
-          args: release --clean
+          # GoReleaser looks for .goreleaser.yaml at the repo root; this config
+          # lives under build/ and has to be named. GitHub requires
+          # .github/workflows/ at its own fixed path — the same kind of
+          # tool-mandated exception, in the other direction.
+          args: release --clean --config build/.goreleaser.yaml
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

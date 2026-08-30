@@ -48,3 +48,7 @@ testbed/env.local.sh
 !/tools/**/
 !/tools/**/*.go
 !/tools/**/*.md
+
+# GoReleaser output. The config moved under build/, but goreleaser still
+# writes its artefacts to dist/ at the repo root.
+/dist/

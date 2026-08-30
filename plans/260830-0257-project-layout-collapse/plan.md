@@ -2,7 +2,7 @@
 title: "Collapse to one module and adopt golang-standards/project-layout"
 description: "Fold 15 modules into one with root /cmd, /internal and /tools, take the non-Go directory renames, and rebuild the six module-boundary guards as package-scoped controls before the boundary that carries them is removed."
 status: ready
-progress: "2 of 7 phases"
+progress: "4 of 7 phases"
 updated: 2026-08-30
 priority: P2
 effort: ~35h (7 phases)
@@ -26,7 +26,7 @@ owner decision (2026-08-30); the old plan's phases 04/05 survive here as phase 0
 | D2 | **`/internal` only — no `/pkg`** | Nothing is published today (every inter-module require is `v0.0.0` + relative `replace`), so the compiler-enforced form is the right one. Matches the source's own advice. |
 | D3 | **All four root renames** — *amended 2026-08-30* | `testbed/`→`test/`, `deploy/`→`deployments/`, schema→`api/` + unit templates→`init/`, `.goreleaser.yaml`→`build/`. **`install.sh` stays at the repo root and `scripts/` is not created** — see D4. |
 | D4 | **`install.sh` stays at root; no `scripts/`** | The source's `/build` README blesses root placement when a tool demands the path ("don't worry if it's … keeping those files in the root directory makes your life easier"); `curl \| bash` demands a root URL exactly that way. `install.sh` is also the only shell script outside the testbed, so `scripts/` would hold one file — against "keep what you need and delete everything else". Avoids a second network and trust hop on a script whose job is verifying release checksums. |
-| D5 | **Dead `cmd/` trees are verified and deleted in phase 03** | GoReleaser builds only `./cmd/openbox`; `cli/cmd/openbox/main_test.go:764` states the trailer is stamped "with no separate openbox-git-hook binary"; `openbox-cc-hook` survives only in a comment; `actions/openbox-git-action` has no `action.yml`. Deletion is inside phase 03 by owner call, against the recommendation to do it beforehand — mitigated by splitting the phase into two commits. |
+| D5 | **Dead `cmd/` trees are verified and deleted in phase 03** — *gate outcome 2026-08-30: only ONE of the three was dead; see [gate-260830](reports/gate-260830-dead-tree-verdicts.md)* | GoReleaser builds only `./cmd/openbox`; `cli/cmd/openbox/main_test.go:764` states the trailer is stamped "with no separate openbox-git-hook binary"; `openbox-cc-hook` survives only in a comment; `actions/openbox-git-action` has no `action.yml`. Deletion is inside phase 03 by owner call, against the recommendation to do it beforehand — mitigated by splitting the phase into two commits. |
 | D6 | **`tools/`, not `cmd/`, for dev instruments** | `/tools` = "Supporting tools for this project… can import code from `/pkg` and `/internal`". `corpusfixture` and `refusal-injector` go there, which also settles whether they ship: `tools/` is not a release surface. |
 
 ## The finding that shapes the plan
@@ -63,8 +63,8 @@ precondition. If a phase-02 mutation drill comes back green, phase 03 does not s
 |---|---|---|---|
 | 01 | [Baseline, path map, rewrite instrument](phase-01-baseline-and-rewrite-instrument.md) ✅ | ~4h | — |
 | 02 | [Rebuild the six guards, package-scoped](phase-02-package-scoped-guards.md) ✅ | ~7h | 01 |
-| 03 | [Dead-tree gate, then the collapse](phase-03-the-collapse.md) | ~10h | 02 |
-| 04 | [Release path](phase-04-release-and-install-path.md) | ~3h | 03 |
+| 03 | [Dead-tree gate, then the collapse](phase-03-the-collapse.md) ✅ | ~10h | 02 |
+| 04 | [Release path](phase-04-release-and-install-path.md) ✅ | ~3h | 03 |
 | 05 | [Non-Go directory moves](phase-05-non-go-directory-moves.md) | ~4h | 03 |
 | 06 | [ADRs and the layout maps](phase-06-adrs-and-layout-maps.md) | ~4h | 04, 05 |
 | 07 | [Conventions and drift check](phase-07-conventions-and-drift-check.md) | ~3h | 06 |
@@ -93,7 +93,9 @@ rejected.
 2. `go build ./...`, `go vet ./...`, `go test -race ./...` green, plus both
    cross-compiles — from the repo root, with no workspace involved.
 3. Declared-test and verdict counts equal the phase-01 baseline **minus the tests
-   belonging to the trees D5 deletes, enumerated by name**. Any other drop is a
+   belonging to the trees D5 deletes, enumerated by name** — and **skips compared
+   per package**, because a stale path can turn a test into a skip, and a skip is
+   still a verdict. Any other drop is a
    regression, not a simplification. (Without that subtraction this criterion would
    contradict D5 — the deleted trees carry `main_test.go` files.)
 4. All six rebuilt guards are red on their mutation drills; no allowlist grew.

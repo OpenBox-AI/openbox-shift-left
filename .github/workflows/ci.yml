@@ -1,10 +1,10 @@
 name: ci
 
-# Build, vet and test every module in the workspace on every change.
+# Build, vet and test the repository on every change.
 #
-# Modules are discovered from go.work rather than listed here, so a new module
-# is covered the moment it joins the workspace — the previous state of this repo
-# (11 modules, no CI at all) is the failure mode worth engineering against.
+# `./...` covers everything because there is one module. It used to be fifteen,
+# discovered from go.work, and the state before that (eleven modules, no CI at
+# all) is the failure mode worth engineering against.
 on:
   push:
     branches: [main]
@@ -56,27 +56,11 @@ jobs:
             exit 1
           fi
 
-      - name: Check go.work covers every module
-        # Discovery below reads go.work, so a module missing from it would be
-        # silently unverified — the exact hole this workflow exists to close.
-        run: |
-          on_disk=$(find . -name go.mod -not -path './.git/*' | wc -l)
-          in_workspace=$(go list -m | wc -l)
-          if [ "$on_disk" -ne "$in_workspace" ]; then
-            echo "::error::$on_disk go.mod files on disk but $in_workspace modules in go.work — add the new module to go.work"
-            exit 1
-          fi
-
-      - name: Resolve workspace modules
-        # The repo root is not itself a module, so `./...` matches nothing;
-        # every module's package pattern has to be named explicitly.
-        run: echo "MODS=$(go list -m -f '{{.Dir}}/...' | tr '\n' ' ')" >> "$GITHUB_ENV"
-
       - name: Build
-        run: go build $MODS
+        run: go build ./...
 
       - name: Vet
-        run: go vet $MODS
+        run: go vet ./...
 
       - name: Test
         # -race matters here: the spool, the liveness registry and the findings
@@ -87,57 +71,16 @@ jobs:
         # -count=1 is a CORRECTNESS flag, not a speed knob, and removing it
         # silently disables five guards.
         #
-        # Go's test cache does not verify reads that land in a SIBLING WORKSPACE
-        # MODULE -- measured 2026-08-30 both ways: a violating file planted in the
-        # same module but a different package invalidates correctly, while the
-        # same file in a sibling go.work module returns a stale `ok`. Every guard
-        # here that walks across modules had it: internal/depguard,
-        # internal/client/memhttptest, internal/gateway/gatewaytest,
-        # internal/cli/corpusfixture/committed_test.go. actions/setup-go restores
-        # the build cache by default, so CI is exposed exactly as a laptop is.
+        # A test's own file reads are tracked by the cache; a CHILD PROCESS's are
+        # not, because they never reach the test log. internal/depguard's
+        # conformance closure guard shells out to `go list`, so without this flag
+        # it can serve a stale `ok` while the closure has actually changed.
         #
-        # The collapse to one module closed most of this: a same-module read IS
-        # tracked. What stays uncacheable-stale is the one guard that shells out to
-        # `go list`, because a child process's reads never reach the test log.
-        run: go test -race -count=1 $MODS
-
-      - name: Build every module WITHOUT the workspace
-        # The gate whose absence let a broken release ship green.
-        #
-        # Every step above builds through go.work, which is what the workspace is
-        # FOR — and its cost is that it resolves imports a module's own go.mod does
-        # not declare. `cli` imported `transport` with neither a require nor a
-        # replace: 14 modules built, vetted, tested under -race and cross-compiled
-        # clean, while `GOWORK=off` — the ONLY mode .goreleaser.yaml runs
-        # (.goreleaser.yaml: `env: [GOWORK=off]`, `dir: cli`) — could not resolve
-        # the import at all. The release artifact did not build and nothing said so.
-        #
-        # Note what would NOT have caught it: `go mod tidy`. Tidy writes require
-        # lines and does not write replace directives, and an intra-repo v0.0.0
-        # require has no source without one. So the remedy for a failure here is
-        # "add BOTH", not "run tidy".
-        #
-        # Build, not test: this gate is about MODULE RESOLUTION outside the
-        # workspace. The suites already ran above, and running them again per
-        # module would double CI time to re-answer a question already answered.
-        #
-        # There is a same-class Go test (cli TestEveryIntraRepoImportIsWiredInGoMod)
-        # that needs no network and runs on a developer's machine before the push.
-        # Both are kept: that one is structural and fast, this one is the ground
-        # truth, and only this one would catch a resolution failure the structural
-        # check cannot model.
-        run: |
-          failed=""
-          for dir in $(go list -m -f '{{.Dir}}'); do
-            echo "::group::GOWORK=off build $dir"
-            (cd "$dir" && GOWORK=off go build ./...) || failed="$failed $dir"
-            echo "::endgroup::"
-          done
-          if [ -n "$failed" ]; then
-            echo "::error::these modules do not build without the workspace (missing require and/or replace in their own go.mod):$failed"
-            exit 1
-          fi
-          echo "every module builds standalone"
+        # Measured 2026-08-30, when the repo was still fifteen modules: reads
+        # landing in a sibling workspace module were not verified either, and five
+        # tree-walking guards served stale passes. The collapse to one module
+        # closed that half — a same-module read IS tracked — and left this one.
+        run: go test -race -count=1 ./...
 
       - name: Vulnerability scan
         # The gate that makes the pin above self-maintaining. Without it, the
@@ -178,11 +121,11 @@ jobs:
         # Everything about Windows beyond "it compiles" is in phase 8's manual
         # checklist and stated as unverified in the docs. Do not let this step be
         # read as more than it is.
-        run: GOOS=windows GOARCH=amd64 go build $MODS
+        run: GOOS=windows GOARCH=amd64 go build ./...
 
       - name: Cross-compile for Linux arm64
         # The other target a macOS/amd64-centric dev loop can silently break.
-        run: GOOS=linux GOARCH=arm64 go build $MODS
+        run: GOOS=linux GOARCH=arm64 go build ./...
 
       - name: Fuzz (short)
         # The secret redactor reads attacker-adjacent strings on the enforce
