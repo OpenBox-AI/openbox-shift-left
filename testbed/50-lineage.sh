@@ -23,7 +23,7 @@ ACTION="$TB_STATE/openbox-git-action"
 REPO_SLUG="${TB_REPO_SLUG:-openboxai/openbox-testbed}"
 
 tb_step "build the deploy action"
-go build -o "$ACTION" "$TB_REPO/actions/openbox-git-action/cmd/openbox-git-action" || tb_fatal "go build failed"
+go build -o "$ACTION" "$TB_REPO/cmd/openbox-git-action" || tb_fatal "go build failed"
 tb_ok "built $ACTION"
 
 # The action authenticates as the developer agent itself — same DID, same key —

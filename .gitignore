@@ -38,3 +38,13 @@ testbed/env.local.sh
 # never in the tree of a PUBLIC repo — f6690e7 committed them by accident,
 # against a decision already written down in plans/reports/.
 .probe-evidence/
+
+# Compiled dev instruments. `tools/` holds source, never artefacts: goreleaser
+# builds none of it, and a committed binary in a governance repo is a supply
+# chain nobody reviewed. Allow-list rather than pattern-match the artefacts —
+# `go build` with no -o drops a binary named after its directory, which no
+# extension rule can catch.
+/tools/**
+!/tools/**/
+!/tools/**/*.go
+!/tools/**/*.md

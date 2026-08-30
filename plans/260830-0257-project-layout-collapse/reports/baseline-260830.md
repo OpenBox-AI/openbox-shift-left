@@ -254,35 +254,57 @@ collisions and ownership legibility). Recording it as a **cost**, not a wash: 15
 packages lose a compiler-enforced boundary and gain nothing but a shorter path.
 Restoring it would cost one path segment per row and no behaviour.
 
-### F8 — three source-relative paths break, and one of them breaks **silently**
+### F8 — location-encoding strings come in four forms, and a grep finds two of them
 
-`schemaRelPath` (F2) is not the only one. A full audit of `"../` literals in Go
-outside `testdata` finds three that encode a location and therefore move:
+`schemaRelPath` (F2) was the first one found. The full set only emerged when the
+collapse actually broke things, and **the first two audits were both too narrow**
+— which is the transferable part, because the same audit will be run again.
 
-| path | today | after the collapse | how it fails |
-|---|---|---|---|
-| `contracts/dev-event/conformance/schema.go:21` | `../schema/dev-event.schema.json` | needs `../../contracts/dev-event/schema/…` | **loud** — `LoadSchema` errors, conformance cases stop executing |
-| `cli/internal/gatewayemit/contract_test.go:23` | `../../../contracts/dev-event/schema/…` | **unchanged — survives by coincidence** | n/a |
-| `adapters/common/devconfig/managed_test.go:204` | `../../../deploy/managed/openbox/dev.json` | needs `../../../../deploy/…` | **SILENT** |
+| form | example | found by |
+|---|---|---|
+| contiguous qualified import | `".../gateway"` | the rewrite instrument |
+| leading-`../` literal | `"../schema/dev-event.schema.json"` | `grep '"\.\./'` |
+| **segment-split `filepath.Join`** | `filepath.Join("..","..","..","telemetry","testdata",…)` | **nothing textual** |
+| **concatenated from a bare prefix** | `repoPrefix + "/client"`, `repo + "gateway/gatewaytest"` | **nothing textual** |
 
-**The second survives by arithmetic, not by design.** `cli/internal/gatewayemit`
-and `internal/cli/gatewayemit` are both three segments deep, so `../../../` still
-lands on the repo root. Worth stating, because phase 05 moves the schema and must
-then edit **both** constants — a reader who only knows about the conformance one
-will leave this at a dead path.
+**Audit one was too narrow twice over.** It grepped `"\.\./` and then filtered
+`| grep -v testdata` to drop testdata *directories* — which also dropped every
+line that merely mentioned testdata, and that is exactly where three fixture
+paths lived. Two filters, one of them silently removing the answer.
 
-**The third is the dangerous one.** `TestManaged_ShippedTemplateLoadsAndLocks`
-does `os.Stat(template)` and `t.Skipf("template not present")` on failure. After
-the move the path resolves to nothing, so the test **skips instead of failing** —
-and its own comment says *"the failure mode (silently unmanaged) is the one this
-story exists to prevent"*. A test about managed-config enforcement would quietly
-stop running.
+**Audit two missed a whole form.** `filepath.Join("..", "..", "..", "telemetry",
+…)` contains no `../` substring at all. Three fixture loaders in `cmd/openbox`
+were found only when their tests failed after the move.
 
-**A skip is still a verdict, so the plan's acceptance criterion cannot see this.**
-Declared and verdict counts both stay put; only the SKIP count moves, 29 → 30.
-Phase 03's verification must compare **skips per package**, not just declared and
-verdict totals. The phase-01 baseline records them, which is the only reason this
-is checkable at all.
+The complete audit is four greps, and it is worth keeping:
+
+```
+grep -rn 'openbox-shift-left/' --include='*.go' .      # qualified imports
+grep -rn '"\.\./' --include='*.go' .                    # leading-../ literals, NO filters
+grep -rnE 'Join\(\s*"\.\."' --include='*.go' .          # segment-split
+grep -rn 'repoPrefix + "\|repo + "' --include='*.go' .  # concatenated
+```
+
+What each of the found paths needed:
+
+| path | disposition |
+|---|---|
+| `conformance/schema.go` `schemaRelPath` | `../schema/…` → `../../contracts/dev-event/schema/…` |
+| `cli/internal/gatewayemit/contract_test.go` `schemaRelPath` | **unchanged — survives by arithmetic**, both old and new locations are three deep |
+| `devconfig/managed_test.go` deploy template | `../../../` → `../../../../`; **fails SILENTLY**, see below |
+| `cmd/openbox/{telemetryreplay,transportreplay,main}_test.go` | `Join("..","..","..",X)` → `Join("..","..","internal",X)` |
+| `devconfig/rolescope_test.go` `Join("..","..")` | **unchanged** — still resolves to the adapters directory |
+| `gateway/guard_test.go` lookalike fixtures, `gatewaytest` dialhook path, all of `depguard` | concatenated or bare; hand-edited |
+
+**The devconfig one is the dangerous member of the set**, and it is the reason
+the acceptance criterion had to change.
+`TestManaged_ShippedTemplateLoadsAndLocks` does `os.Stat` and `t.Skipf` on
+failure, so a stale path **skips instead of failing** — quietly retiring a test
+whose own subject is that unmanaged config fails silently. **A skip is still a
+verdict**, so declared and verdict totals do not move; only the SKIP count does.
+Phase 03's verification therefore compares **skips per package**, not just
+declared and verdict totals, and the skip message now names the path it could not
+find.
 
 ### F5 — phase 03 deletes `go.work`, and **four more test files hard-fail** on that
 

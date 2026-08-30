@@ -44,11 +44,24 @@
   script outside the testbed, so `scripts/` would contain one file. Three independent
   arguments, one conclusion.
 
+> **AMENDED 2026-08-30, during phase 03.** D4 decided `install.sh` does not
+> **move**. It never decided the script could not be **corrected**, and the
+> collapse forces one correction: the from-source build path (`$SRC/cli/go.mod`
+> as the checkout marker, `cd "$SRC/cli"` to build) names a directory that no
+> longer exists. That breaks the plain clone-and-build path, not just
+> `OPENBOX_SRC`. Left as written, this phase's "unmodified" criterion and the
+> parent's "unchanged by construction" would have forbidden a fix the collapse
+> makes necessary, and the contradiction would have been resolved ad hoc
+> mid-phase. The two-line fix landed in phase 03's commit (b), with the moved
+> testbed and CI paths it belongs beside; the criterion below now guards against a
+> ride-along edit rather than against any edit at all.
+
 ## Requirements
 
 1. `build/.goreleaser.yaml`: no `dir:`, no `GOWORK=off`, `main: ./cmd/openbox`.
 2. `release.yml`: `args: release --clean --config build/.goreleaser.yaml`.
-3. `install.sh` stays at the repo root, unmodified. No `scripts/` directory.
+3. `install.sh` stays at the repo root. No `scripts/` directory. **It is not
+   byte-frozen** — see the amendment below.
 4. `ci.yml`: the two workspace-discovery steps deleted, replaced by `./...`.
 5. Snapshot build produced **and the binary executed**.
 
@@ -92,8 +105,8 @@ unchanged)
    a successful build is not the same claim.
 6. Compare the produced archive name against the one `install.sh` constructs from
    `uname` (`openbox_<version>_<os>_<arch>.tar.gz`). The template is the contract.
-7. Confirm `install.sh` is byte-identical to its pre-phase state — `git diff --stat`
-   on it must be empty.
+7. Confirm `install.sh` carries no diff **in this phase** — the source-path fix
+   belongs to phase 03's commit (b), and anything else is a ride-along.
 
 ## Todo list
 
@@ -102,13 +115,15 @@ unchanged)
 - [ ] two vacuous CI steps deleted; `./...` in use; gofmt + Go-version steps untouched
 - [ ] snapshot binary built **and executed**
 - [ ] archive-name check against `install.sh`
-- [ ] `install.sh` unchanged; no `scripts/` created
+- [ ] `install.sh` unchanged **by this phase**; no `scripts/` created
 
 ## Success criteria
 
 1. `goreleaser build --snapshot` succeeds from the repo root with the new config path.
 2. The produced binary runs and reports a version.
-3. `git diff --stat install.sh` is empty, and `test ! -d scripts` passes.
+3. `install.sh` is still at the repo root and `test ! -d scripts` passes. Its
+   only permitted diff is the two-line source-path correction phase 03 made; any
+   other hunk is the ride-along this criterion exists to stop.
 4. CI contains no step that is trivially true.
 
 ## Risk assessment

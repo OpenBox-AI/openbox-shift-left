@@ -191,7 +191,7 @@ build_from_source() {
   local SRC
   if [ -n "${OPENBOX_SRC:-}" ]; then
     SRC="$OPENBOX_SRC"
-    [ -f "$SRC/cli/go.mod" ] || die "OPENBOX_SRC=$SRC does not look like an openbox-shift-left checkout (no cli/go.mod)."
+    [ -f "$SRC/go.mod" ] || die "OPENBOX_SRC=$SRC does not look like an openbox-shift-left checkout (no go.mod)."
     info "Building from existing checkout: $SRC"
   else
     SRC="$(mktemp -d "${TMPDIR:-/tmp}/openbox-shift-left.XXXXXX")"
@@ -212,7 +212,7 @@ build_from_source() {
   OUT="$SRC/${BIN_NAME}"
   info "Building ${BIN_NAME} ${VERSION} (static, no-cgo) …"
   (
-    cd "$SRC/cli"
+    cd "$SRC"
     CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" -o "$OUT" ./cmd/openbox
   )
   [ -x "$OUT" ] || die "build produced no binary at $OUT"

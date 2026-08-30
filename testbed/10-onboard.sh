@@ -30,7 +30,7 @@ HOOKS="$TB_PROJECT/.claude/settings.local.json"
 TB_UNGOVERNED="${TB_UNGOVERNED:-/tmp/openbox-testbed-ungoverned}"
 
 tb_step "build the binary under test"
-go build -o "$TB_BIN" "$TB_REPO/cli/cmd/openbox" || tb_fatal "go build failed"
+go build -o "$TB_BIN" "$TB_REPO/cmd/openbox" || tb_fatal "go build failed"
 tb_ok "built $TB_BIN"
 
 tb_step "a fresh governed project"

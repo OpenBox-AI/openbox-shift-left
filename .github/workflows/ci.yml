@@ -91,11 +91,14 @@ jobs:
         # MODULE -- measured 2026-08-30 both ways: a violating file planted in the
         # same module but a different package invalidates correctly, while the
         # same file in a sibling go.work module returns a stale `ok`. Every guard
-        # here that walks across modules has it: cli/internal/depguard,
-        # client/memhttptest, gateway/gatewaytest,
-        # cli/internal/corpusfixture/committed_test.go and
-        # cli/cmd/openbox/modulewiring_test.go. actions/setup-go restores the
-        # build cache by default, so CI is exposed exactly as a laptop is.
+        # here that walks across modules had it: internal/depguard,
+        # internal/client/memhttptest, internal/gateway/gatewaytest,
+        # internal/cli/corpusfixture/committed_test.go. actions/setup-go restores
+        # the build cache by default, so CI is exposed exactly as a laptop is.
+        #
+        # The collapse to one module closed most of this: a same-module read IS
+        # tracked. What stays uncacheable-stale is the one guard that shells out to
+        # `go list`, because a child process's reads never reach the test log.
         run: go test -race -count=1 $MODS
 
       - name: Build every module WITHOUT the workspace
@@ -191,7 +194,7 @@ jobs:
         # FuzzRedact was defined in the same file and had to be deliberately
         # kept: it covers code that still runs on every gated call with a body.
         run: |
-          cd decision
+          cd internal/decision
           go test -run XXX -fuzz FuzzRedact -fuzztime 20s ./
 
       - name: No tier vocabulary in user-facing docs
@@ -228,8 +231,7 @@ jobs:
         # Four separate phantom flags were written into this plan's docs before
         # this gate existed, so it is mechanical rather than a review habit.
         run: |
-          cd cli
-          go test -run 'TestUnitsUseFlagsThatExist|TestUnitStopTimeoutMatchesTheGracePeriod' ./internal/gatewayservice/
+          go test -run 'TestUnitsUseFlagsThatExist|TestUnitStopTimeoutMatchesTheGracePeriod' ./internal/cli/gatewayservice/
 
       - name: No prevention claims about gateway bypass
         # The base assurance claim is DETECTION. Bypass is visible and
@@ -310,7 +312,7 @@ jobs:
         # prevention-claim gate above learned that same lesson by failing on its
         # own disclaimer.
         run: |
-          declared=$(grep -rhoE '\.(Bool|String|Int64|Int|Duration)Var\(&[A-Za-z0-9_.]+, *"[a-z][a-z0-9-]*"|\.(Bool|String|Int64|Int|Duration)\("[a-z][a-z0-9-]*"' cli/cmd/openbox/*.go \
+          declared=$(grep -rhoE '\.(Bool|String|Int64|Int|Duration)Var\(&[A-Za-z0-9_.]+, *"[a-z][a-z0-9-]*"|\.(Bool|String|Int64|Int|Duration)\("[a-z][a-z0-9-]*"' cmd/openbox/*.go \
             | grep -oE '"[a-z][a-z0-9-]*"$' | tr -d '"' | sort -u)
           if [ -z "$declared" ]; then
             echo "could not extract any declared flags — the extractor broke, which would make this gate vacuous"
