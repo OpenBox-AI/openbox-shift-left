@@ -1,4 +1,4 @@
-# OpenBox commit-trailer stamping (STORY-SL-5)
+# OpenBox commit-trailer stamping
 
 The **provider-independent** write side of session→commit attribution. It binds
 a git commit to the OpenBox session(s) that produced it by stamping an

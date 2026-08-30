@@ -1,4 +1,4 @@
-# OpenBox client; AIP-signed `/evaluate` transport (STORY-SL-3)
+# OpenBox client; AIP-signed `/evaluate` transport
 
 The shared, reusable data-plane client every developer-runtime adapter (SL-4
 Claude Code, SL-7 Codex, SL-8 Cursor) and the git action (SL-6) use to emit a

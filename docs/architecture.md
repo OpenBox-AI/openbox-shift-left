@@ -184,7 +184,7 @@ governed machine from an ungoverned one without trusting the endpoint's word for
 it. `openbox doctor` prints the same thing locally, with the provenance of each
 value (default, your config, environment, or org mandate).
 
-## Assurance; what the evidence proves
+## Assurance
 
 Being precise here is part of the product.
 
@@ -225,10 +225,11 @@ Being precise here is part of the product.
   itself cannot yet be mandated, a `requirements.toml` cannot define one, so the
   shipped mandate pins approval and sandbox modes instead.
 - **Model calls are governed only if the local gateway is installed, and it is
-  OPT-IN.** `openbox init --gateway` points this machine's `ANTHROPIC_BASE_URL`
-  at a loopback daemon that relays every model call and can refuse one on a
-  policy verdict. Without it, tool calls are governed and model calls are not;
-  the hooks never see a model request. Three limits are worth stating plainly
+  opt-in.** `openbox init --gateway` points this machine's `ANTHROPIC_BASE_URL`
+  at a loopback daemon that relays and records every model call. It does not
+  refuse one: the refusal path is written and has no production caller, pending
+  the probe that would say what shape a refusal must take. Without the gateway, tool calls are
+  governed and model calls are not, because the hooks never see a model request. Three limits are worth stating plainly
   rather than discovering:
   - **The base claim is detection, not prevention.** A developer can unset one
     environment variable. That is *visible*; a session with model turns and no
@@ -517,7 +518,7 @@ was made on the smaller number.
   evidence that was never measuring anything, but it is a removal, and the tree
   is shallower than an agent-runtime session's.
 
-One exception, added deliberately : with content capture on, a model turn
+One exception, added deliberately: with content capture on, a model turn
 carries **one** span whose response body is the assistant's reply, because
 core's goal-alignment engine reads assistant text from `payload.Spans` and from
 no other field. Those spans get span-level Merkle leaves and server-side
@@ -555,7 +556,7 @@ alignment. Alignment for those turns comes from the hook path or not at all.
 - **Neither cost table prices the current models, and they fail differently.**
   `claude-opus-5`, `claude-fable-5`, `claude-opus-4-8`, `gpt-5.6-sol` and
   `gpt-5.5` are absent from core's Go table and the backend's TS one. Core falls
-  back to a default 1.00/3.00 per M; wrong but non-zero; the backend skips an
+  back to a default 1.00/3.00 per M, wrong but non-zero, while the backend skips an
   unpriced model entirely, so it contributes nothing to `total_cost` *and does
   not appear in the cost breakdown at all*. Dev-session spend is therefore
   mispriced or invisible until those tables are updated, which is a pricing

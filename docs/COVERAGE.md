@@ -4,7 +4,7 @@ How the three target coding tools' real event surfaces map onto this contract's
 12 lifecycle types, plus the **bounded non-goals**. Sourced from a G3_REVIEW
 pass over the tools' official docs (Claude Code hooks + OTel; Cursor hooks +
 Admin API; OpenAI Codex hooks + `notify` + Usage/Cost API). This is the
-reference an adapter author (SL-4 Claude Code, SL-7 Codex, SL-8 Cursor)
+reference an adapter author
 implements `emit()` against.
 
 **Adapter status (keep this line current; report SL-07 was a stale-doc
@@ -140,7 +140,7 @@ not measured-empty.
 | **Desktop app** | ❌ measured-empty 2026-08-27 | ⬜ intended, **unconfirmed** | ⬜ intended, **unconfirmed** |
 | Subscription-OAuth session | ⬜ open | ⬜ intended, **unconfirmed** | ⬜ intended, **unconfirmed** |
 | Suppressible by the governed tool | no; in path | no; in path | **yes**; the tool reports its own calls |
-| Strongest evidence to date | socket-verified relay; no live stack | **replay** (bind-free) | **replay** (bind-free); intake's JSON path crossed by a synthetic export, **protobuf path; what production uses; untested** |
+| Strongest evidence to date | socket-verified relay; no live stack | **replay** (bind-free) | **replay** (bind-free), intake's JSON path crossed by a synthetic export, **protobuf path; what production uses; untested** |
 
 ✅ shipped and exercised · ⚠️ present but not active · ⬜ intended, no evidence
 either way · ❌ absent by construction

@@ -5,7 +5,7 @@ profiles, or manage your fleet; that boundary is deliberate, and it is why this
 page is a recipe rather than a feature.
 
 Read
-[`docs/architecture.md`](architecture.md#assurance--what-the-evidence-proves)
+[`docs/architecture.md`](architecture.md#assurance)
 first for what the evidence proves generally. This page covers one question:
 what changes when you push the gateway's configuration from your MDM instead of
 letting each developer own it.

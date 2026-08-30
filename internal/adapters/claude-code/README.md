@@ -1,4 +1,4 @@
-# OpenBox Claude Code adapter (STORY-SL-4)
+# OpenBox Claude Code adapter
 
 The first realization of the generic Provider Adapter Contract (architecture
 §1b): it maps Claude Code's native hooks onto the normalized developer event
@@ -8,7 +8,7 @@ deny, or slow a Claude Code tool call (Phase-1 / INV-3 / D7).
 
 ```
 Claude Code hook (stdin JSON)
-   └─ openbox hook claude-code <event>     # the plugin wires each hook here (SL4-WIRE-2)
+   └─ openbox hook claude-code <event>     # the plugin wires each hook here
         ├─ map → normalized SL-1 DevEvent  # mapper.go (no content; INV-2)
         ├─ append → local spool            # spool.go (hot path: local I/O only)
         └─ exit 0, empty stdout            # can't block / inject (D7)
@@ -41,7 +41,7 @@ idempotency. The server-side half is partial and lives outside this adapter -
 [`client/README.md`](../../client/README.md) owns which events core deduplicates
 and which it does not.
 
-## Event mapping (SL-1 contract)
+## Event mapping
 
 | Claude Code hook | SL-1 `event_type` | Span (`semantic_type`) |
 |---|---|---|
@@ -59,7 +59,7 @@ else (`Glob`, `Grep`, `WebFetch`, `Task`, …) → the coarse catch-all
 `metadata.tool_name`, so nothing is lost to the 3-value `kind` enum.
 
 `semantic_type` is now **adapter-local**. It used to be a hint core recomputed
-server-side from the span it received; since that decision no span is sent, so
+server-side from the span it received; a tool event now carries no span, so
 nothing classifies it and the field never reaches the wire. `tool.kind` is what
 carries the distinction downstream. The mapper still sets `semantic_type`
 because the adapter contract is frozen at schema v1.0; see
@@ -73,13 +73,17 @@ gates every content class this adapter binds:
 
 | Class | Since | Redacted before attach? |
 |---|---|---|
-| prompt text (`UserPromptSubmit`) | 2026-07-15 | **no**; redaction-at-source (`[EXT-guardrail-redaction]`) is still inert |
-| enforced-call body (`Write`/`Edit`) | that decision | yes |
-| assistant reply (`Stop`/`SubagentStop`) | that decision | yes |
-| tool input on the **observe** path | that decision | yes |
-| tool output (`tool_response`), incl. a failed call's `error` | that decision | yes |
-| **the turn's thinking** (`Stop`/`SubagentStop` transcript) | that decision | yes |
-| refusal free text (`PermissionDenied.reason`, `StopFailure.error_details`) | that decision | yes |
+| prompt text (`UserPromptSubmit`) | v1.0 | yes |
+| enforced-call body (`Write`/`Edit`) | v1.0 | yes |
+| assistant reply (`Stop`/`SubagentStop`) | v1.2 | yes |
+| tool input on the **observe** path | v1.3 | yes |
+| tool output (`tool_response`), incl. a failed call's `error` | v1.3 | yes |
+| **the turn's thinking** (`Stop`/`SubagentStop` transcript) | v1.4 | yes |
+| refusal free text (`PermissionDenied.reason`, `StopFailure.error_details`) | v1.3 | yes |
+
+Redaction here is local and keyword-driven, so it is a control with a measured
+reach rather than a guarantee. See
+[data and privacy](../../../docs/data-and-privacy.md).
 
 **Opt out** with `content_capture:false` in `~/.openbox/dev.json` or
 `OPENBOX_CONTENT_CAPTURE=0` to restore the metadata-only projection: tool
@@ -140,7 +144,7 @@ Org-wide force-enable via managed settings
 (`{"enabledPlugins":["openbox-observe"]}`) is **verified, not activated** for
 the Phase-1 opt-in pilot (NFR-5).
 
-## Integration follow-up (SL-4 ↔ SL-2 seam)
+## Integration follow-up
 
 `Installer` here is the real installer for the `claude-code` provider. Wiring it
 into the CLI's `provider` registry (replacing the SL-2 `stub`) is a one-line CLI

@@ -480,7 +480,7 @@ does.
 ## What is not verified
 
 Being precise about this is part of the product
-([Assurance](architecture.md#assurance--what-the-evidence-proves) has the full
+([Assurance](architecture.md#assurance) has the full
 list). Specific to setup:
 
 | | Status |

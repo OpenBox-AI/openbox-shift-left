@@ -139,7 +139,7 @@ One headless session that uses **Read, Grep, Bash, Edit, and the `everything`
 MCP server**. Asserts:
 
 - `sessions` +1, `WorkflowStarted` → `WorkflowCompleted` present;
-- **Tool calls are activity pairs** : every tool call is an `ActivityStarted`
+- **Tool calls are activity pairs**: every tool call is an `ActivityStarted`
   **and** an `ActivityCompleted` sharing one `activity_id`, counts equal, no
   unpaired completed row. Under the old hook shape both halves were
   `ActivityStarted` with the same `activity_id`, which matched core's whole
@@ -160,7 +160,7 @@ MCP server**. Asserts:
 - Spool drains at SessionEnd inside the flush budget;
 - **The privacy assertion (INV-2):** with content capture on, the prompt is
   present on the `prompt_submitted` signal **and so are the tool command and
-  file body**; that decision retired SL3-SEC-3, so this phase asserts the gate
+  file body**: v1.3 retired the metadata-only posture, so this phase asserts the gate
   open and 35-telemetry.sh asserts it closed on a capture-off session. Inverting
   rather than deleting matters: "the marker is nowhere" and "the runtime emitted
   nothing" are the same observation, and only the positive form separates them;
@@ -222,7 +222,7 @@ the default). Asserts:
   could not settle: whether `SubagentStop`'s window carries `isSidechain` lines;
 - **INV-2, end to end**: the shell, file and prompt markers appear on **no**
   turn row, and no raw transcript timestamp does either. This is the only
-  end-to-end proof that INV-2 holds after that decision replaced the
+  end-to-end proof that INV-2 holds after v1.1 replaced the
   projection's structural impossibility with an allowlist; the unit sentinel
   test is necessary, not sufficient, and this is the assertion a privacy
   reviewer should be pointed at;
@@ -269,7 +269,7 @@ something); ONE span, `llm_completion` (Goal Alignment has text to score);
 capture off ⇒ **no** span rows (the gate is real server-side, not just on the
 wire); `signal_args` null on the new signals (the alignment goal is not
 overwritten); and capture off ⇒ **no `thinking` key** on any row, while the
-turn's token numbers survive (that decision; otherwise "no content" would pass
+turn's token numbers survive (otherwise "no content" would pass
 for a client that stopped emitting turns). The single list a live run must
 confirm is [`MAPPING.md`](../../docs/MAPPING.md) §7 items 15–24; the script is
 that list's executable form and defers to it. **Dormant: written, never run**;
@@ -505,13 +505,13 @@ what it exposed:
 **Now proven end to end for the first time**
 - MCP capture: a real `mcp__everything__echo` call reaches core. Before this
   there were no MCP calls on the stack at all. (This originally asserted an
-  `mcp_tool_call` **span**; since that decision tool calls carry no span, and
+  `mcp_tool_call` **span**: tool calls carry no span, and
   the assertion moved to `activity_input.mcp_server`/`mcp_tool`. The finding
   stands; what is captured did not change, only where it is carried.)
 - INV-2 in the observe posture: with capture on the prompt, the shell command
   text and the file body all egress; with capture off none of them do; both
   halves asserted against every row the session wrote, not just unit-tested.
-  (Until that decision this read "the command and file body do not egress at
+  (Until v1.3 this read "the command and file body do not egress at
   all"; that was SL3-SEC-3, and it is retired, not weakened by accident.)
 - The whole approval loop unattended: approve-inside-hold, timeout→deny,
   late-approval→rewake (the session ends *because* the watcher saw the

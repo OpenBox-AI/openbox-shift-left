@@ -1,4 +1,4 @@
-# openbox-git-action (STORY-SL-6)
+# openbox-git-action
 
 Server-side, push-time **deploy-lineage** resolver for OpenBox. At push/deploy
 it binds the pushed commit to the OpenBox session(s) that produced it (reading
@@ -20,7 +20,7 @@ resolved session set. It is the read/resolve counterpart to the write side in
 - **No silent caps:** a walk that hits `MaxCommits` records `scope_walked` /
   `scope_total`.
 
-## Security; the trailer is an untrusted claim (SL5-SEC-1)
+## Security; the trailer is an untrusted claim
 
 Anyone who can author a commit can name **any** session id (including a
 victim's, visible in their pushed commits). A raw trailer is therefore a claim,

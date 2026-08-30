@@ -44,7 +44,7 @@ before you write an adapter; no tool event reaches core as a span, so core
 computes no `semantic_type` for one, and
 `file_write`/`mcp_tool_call`/`shell_command` classification does not happen for
 dev sessions. `tool.kind` is what carries that distinction now. The one span
-that does reach core is minted by the *client* on a captured turn : no adapter
+that does reach core is minted by the *client* on a captured turn: no adapter
 populates it, it carries no locator, and it exists because the alignment reader
 accepts no other shape. See MAPPING.md §3.
 

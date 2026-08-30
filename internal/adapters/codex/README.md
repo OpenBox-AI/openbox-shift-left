@@ -1,4 +1,4 @@
-# OpenBox Codex adapter (STORY-SL7-A observe + STORY-SL7-B enforce)
+# OpenBox Codex adapter
 
 The second realization of the generic Provider Adapter Contract (architecture
 §1b), a 1:1 structural port of the Claude Code adapter: it maps Codex CLI's
@@ -30,7 +30,7 @@ the CC adapter; see `internal/adapters/claude-code/README.md`. Codex-specific:
 the spool lives under `…/openbox/codex-spool` so a machine running both tools
 never cross-drains, and the deterministic ids are namespaced `cdx-`.
 
-## Event mapping (SL-1 contract)
+## Event mapping
 
 | Codex hook | SL-1 `event_type` | Span (`semantic_type`) |
 |---|---|---|
@@ -76,7 +76,7 @@ MCP tools keep `span.function` = the real MCP function (it IS wire data) and
 fall back to the CC-parity derivation; `tool_use_id`/`turn_id` ride tool-event
 `metadata` for audit either way.
 
-## Privacy (SL3-SEC-3 / INV-2)
+## Privacy
 
 **Content capture is ON by default (2026-07-15)**; the developer's **prompt** is
 the only gated field: carried (capped) on `PromptSubmitted` unless the org opts
@@ -87,7 +87,7 @@ decodes, and `tool_response` is not even bound to a field. Asserted by
 `TestMap_NoContentLeak`, `TestWire_NoContentLeakEndToEnd`, and the cli
 real-binary E2E (`TestCodexUnifiedBinaryObserveE2E`).
 
-## Commit attribution (SL-5 parity, simpler)
+## Commit attribution
 
 Codex injects `CODEX_THREAD_ID` into **every** tool/shell exec environment, so
 the shared prepare-commit-msg hook (`internal/adapters/common/git`) stamps
@@ -130,7 +130,7 @@ vectors; acceptable for the observe posture (NFR-5 parity with CC's opt-in
 pilot); requirements.toml-managed hooks and the Codex plugin channel are the
 recorded hardening/distribution options (OD-SL7-dist).
 
-## Finops / token usage (STORY-SL7-C, SL-16 parity)
+## Finops / token usage
 
 Codex hooks expose no usage, but the session's **rollout JSONL**; the file the
 SessionEnd payload's `transcript_path` points at, flushed by Codex *before* the
@@ -209,7 +209,7 @@ byte-identical to the pre-SL7-C path.
   nil and `telemetry.cost` stays false.
 - **At-most-once delivery**; same contract and caveats as the CC adapter.
 
-## Enforce leg (STORY-SL7-B)
+## Enforce leg
 
 **Opt-in, default observe.** Enable at onboarding; `openbox init --provider
 codex --enforce` persists `enforce`/`tier2`/`findings` to `dev.json` (no runtime

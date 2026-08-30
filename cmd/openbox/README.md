@@ -1,4 +1,4 @@
-# `openbox` CLI (STORY-SL-2)
+# `openbox` CLI
 
 The developer-runtime governance front door. One command onboards a coding tool
 to OpenBox: register a developer agent, capture its credentials into the OS
@@ -70,7 +70,7 @@ internal/cli/devinit/     the dev-init orchestration
 internal/cli/providers/   the adapter registry; the only place the CLI reaches an adapter
 ```
 
-`internal/secret/` is gone: that decision deleted the OS keychain, and
+`internal/secret/` is gone: the OS keychain was deleted, and
 credentials are one plaintext file. `internal/provider/` is the SPI itself and
 lives at `internal/provider/`, not under `cli`.
 

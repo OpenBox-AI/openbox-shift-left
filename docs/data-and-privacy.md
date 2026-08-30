@@ -8,7 +8,7 @@ What leaves the machine, what never does, and the one setting that changes it.
 |---|---|---|
 | Session, tool and MCP **metadata** | always | tool name, kind (`shell`/`file`/`mcp`), file path, MCP server + tool name, timing |
 | **Token counts and the model id** | yes, by default | per model turn. `finops: false` turns it off; see [Usage capture](#usage-capture) |
-| **Prompt text** | yes, by default | on Claude Code, scanned locally for secrets and REDACTED first, like every other body on this table; **on Codex it is not**; that adapter has no redactor on the content it sends. `content_capture: false` turns it off |
+| **Prompt text** | yes, by default | on Claude Code, scanned locally for secrets and redacted first, like every other body on this table; **on Codex it is not**; that adapter has no redactor on the content it sends. `content_capture: false` turns it off |
 | **The assistant's reply text** | yes, by default | **this changed**; one message per model turn, scanned locally for secrets and REDACTED first, truncated at 64KB. Same `content_capture` switch. See [What a model turn sends](#what-a-model-turn-sends) |
 | **The assistant's thinking** | yes, by default | **this changed**; extended-thinking text; every thinking block of a turn, concatenated in file order, so one FIELD per turn rather than one block; scanned locally for secrets and REDACTED first, truncated at 64KB. Same `content_capture` switch. This captures more than Anthropic's own telemetry will: their OTel export redacts thinking unconditionally. See [What a model turn sends](#what-a-model-turn-sends) |
 | **Shell command text** | yes, by default | **this changed**; it used to ride a *gated* call only; it is now on ordinary tool telemetry too, under the same `content_capture` switch. Redacted and truncated like every body |
@@ -134,7 +134,7 @@ only defensible if you can tell afterwards which sessions it applied to.
 > available from any hook; the session transcript file is the only source, so the
 > engine parses it. It binds four numeric fields, plus the model id, plus a line
 > timestamp (used to compute the turn's duration and then discarded), a boolean
-> marking subagent lines, and; since 2026-08-25; the **thinking** blocks.
+> marking subagent lines, and, since 2026-08-25, the **thinking** blocks.
 > Nothing else in that file; prompts, completions, tool inputs, tool results,
 > file snapshots; is bound, so it has nowhere to land and cannot reach an event.
 >
@@ -148,7 +148,7 @@ only defensible if you can tell afterwards which sessions it applied to.
 > The allowlist is enforced by a test that seeds the transcript with marker strings
 > in every content field class and asserts, on the actual signed request body, that
 > **all of them are absent with capture off**, and that with capture on exactly one
->; thinking; is present, redacted and capped, while the rest are still absent. It
+> field, thinking, is present, redacted and capped, while the rest are absent. It
 > is also mutation-tested: deleting the redaction, or deleting the cap, must each
 > make it fail. The narrowing and the subsequent widening are both recorded here
 > rather than leaving an older, stronger claim standing.
@@ -330,11 +330,11 @@ Three consequences worth knowing rather than discovering:
 - **`content_capture: false` removes all of it** and returns tool telemetry to
   structural fields alone; tool name, kind, path, timing, outcome.
 
-**Prompts gate too** : in enforce mode the `PromptSubmitted` event is sent for a
+**Prompts gate too**: in enforce mode the `PromptSubmitted` event is sent for a
 decision **at submit time**, before the prompt is processed, instead of riding
 the near-real-time flush a moment later. What the event carries did not change;
-prompt text only under `content_capture`, and the prompt remains the one content
-path with **no local redaction** (the asymmetry above, unchanged). What changed
+prompt text only under `content_capture`, redacted locally first on Claude Code
+and not on Codex, which has no redactor on the content it sends. What changed
 is only the timing and that the verdict is applied: HALT/BLOCK refuses the
 prompt, and a HALT ends the session.
 
@@ -591,11 +591,15 @@ redaction applied afterwards would pass every code-level test and still ship the
 secret, so the ordering is asserted on the outbound bytes (conformance C18, C26,
 C34).
 
-## Verified, not asserted
+## How this is checked
 
-The end-to-end suite proves this rather than documenting it: a real session
-writes a file containing a synthetic AWS key and runs a shell command containing
-a marker, both sourced from files so neither appears in the prompt. It then
-asserts the prompt marker **is** present in what reached OpenBox and the command
-and file markers are **absent from every row** the session produced. See
+The conformance suite asserts each of these on the actual outbound bytes: that a
+gated field is absent with capture off, present and redacted with it on, and
+capped. Those cases run on every change.
+
+The end-to-end suite goes further, driving a real session that writes a file
+containing a synthetic AWS key and runs a shell command carrying a marker, both
+sourced from files so neither appears in the prompt, and then asserting what
+reached the control plane. It has **not** been run against a live stack, so
+treat it as written rather than as evidence. See
 [`docs/test/e2e.md`](test/e2e.md) § capture.

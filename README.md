@@ -419,6 +419,11 @@ prevent, so the limits are documented as first-class:
   get is a hole in the record that is queryable and attributable, plus an
   `openbox doctor` warning. Prevention needs your MDM to own the config and
   control egress ([the recipe](docs/gateway-mdm-recipe.md)).
+- **Secret redaction is keyword-driven, so its reach is measured rather than
+  guaranteed.** Named formats come from a maintained rule pack; beneath them sit
+  an assignment-shape rule and an entropy floor. An unlabelled high-entropy value
+  below that floor is invisible, and the floor cannot simply be lowered: every
+  git SHA and UUID would match, and this redactor rewrites developer files.
 - **Content-based policy sees at most the first 64KB of a write.** Bodies are
   truncated before egress, so a rule that would match past that offset does not
   fire. Local secret detection is not subject to the cap. For model calls that
@@ -429,7 +434,7 @@ prevent, so the limits are documented as first-class:
   every change; no automated suite exercises it, and `install.sh` is bash.
 
 Details and current status:
-**[Assurance](docs/architecture.md#assurance--what-the-evidence-proves)**.
+**[Assurance](docs/architecture.md#assurance)**.
 
 ## Commands
 
