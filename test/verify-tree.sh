@@ -43,7 +43,11 @@ GOOS=linux GOARCH=arm64 go build ./... >/dev/null 2>&1 && { printf '  ok    cros
 
 echo
 echo "Nothing of anyone else's"
-row "third-party identifiers" 0 "$(git grep -icE 'claudekit|mrgoonie|duynguyen|bnqtoan|MAMP' -- . | wc -l | tr -d ' ')"
+# The pattern is ASSEMBLED rather than written, so this file never contains the
+# names it looks for. A denylist spelled out in the checker makes the checker its
+# own first hit, which is how this row failed on its first fresh clone.
+third_party="claude""kit|mrg""oonie|duy""nguyen|bnq""toan|MA""MP"
+row "third-party identifiers" 0 "$(git grep -icE "$third_party" -- . | wc -l | tr -d ' ')"
 row "links to a private repository" 0 "$(git grep -cE 'openbox-core/(issues|pull)' -- . | wc -l | tr -d ' ')"
 row "tracked delivery records" 0 "$(git ls-files plans | wc -l | tr -d ' ')"
 row "probe evidence on disk" 0 "$([ -d .probe-evidence ] && echo 1 || echo 0)"
