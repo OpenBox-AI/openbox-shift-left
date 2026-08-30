@@ -75,7 +75,6 @@ is the part that stops a directory quietly becoming a junk drawer.
 | `docs/` | design and user documents, and the decision records | anything a program parses |
 | `init/` | **illustrative** copies of the supervisor units, and only that | a `go:embed`, or anything treated as authoritative. `internal/cli/laneservice` renders the real ones |
 | `internal/` | every package this repo does not publish — which is all of them | a package meant for external import. Publishing one reopens the `/pkg` question |
-| `plans/` | stateful delivery records: plans, phases, reports, journals | evergreen documentation. A plan is true on its date and is never rewritten |
 | `test/` | the mock-free end-to-end suite (shell), see [e2e](test/e2e.md) | Go tests. Those live beside the code they test |
 | `tools/` | supporting dev instruments — `corpusfixture`, `refusal-injector`, `openbox-git-hook` | anything the release builds. `tools/` is not a release surface |
 
@@ -455,8 +454,7 @@ so the remainder of that session denies until a new session restores a pending r
 governance event, so the control plane holds no record of the blocking it did. The client now treats every
 server HALT as a session stop, so this precondition failure now **ends the session outright** rather than denying calls until
 the server record clears — a deliberately accepted consequence (the owner chose uniform HALT trust over client-side
-discrimination), remedied when the core-side fix lands (plan 260814-2235). The live diagnosis and the options are in
-[`debug-260814-1231-session-no-longer-active-halt.md`](../plans/reports/debug-260814-1231-session-no-longer-active-halt.md).
+discrimination), remedied when the core-side fix lands.
 - **Content-based policy sees at most the first 64KB of a write.** Bodies are
   truncated by `capBody` (`client/payload.go`) before egress, so a rule that would
   match past that offset does not fire. Content-based policy is not a complete

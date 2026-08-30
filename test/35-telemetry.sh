@@ -188,9 +188,8 @@ assert_ge "prompt_submitted still carries its args" 1 \
 
 # permission_denied and api_error are not producible on demand: the first needs an
 # auto-mode classifier denial, the second a provider-side API error. Their wiring
-# is schema-verified only (see plans/reports/probe-260813-2329-…). Recorded as a
-# gap rather than asserted into a false pass.
-tb_note "permission_denied / api_error not driven: neither is producible on demand (probe report §Q2)"
+# is schema-verified only. Recorded as a gap rather than asserted into a false pass.
+tb_note "permission_denied / api_error not driven: neither is producible on demand"
 
 # ── the negative: capture off ⇒ no span rows at all ──────────────────────────
 # The strongest single check in the phase. One run validates the whole gate

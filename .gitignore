@@ -33,6 +33,11 @@ testbed/env.local.sh
 # Local agent tooling state (never project content)
 .fab7/
 
+# Delivery records: plans, phases, reports, journals. Kept on disk because they
+# are how the work is run, untracked because they are internal process rather
+# than product — a clone should check out the thing, not the paperwork behind it.
+plans/
+
 # Supplied API dumps used as one-off probe evidence. Real governance data:
 # agent, session and run identifiers from a live org. They belong in a report,
 # never in the tree of a PUBLIC repo — f6690e7 committed them by accident,

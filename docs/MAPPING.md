@@ -613,7 +613,4 @@ path of one of these events.
     `20260827T063932Z-225cac`). What a live run adds is whether the flusher and the
     control plane absorb that rate; it is a larger increment than item 30's.
 
-_When the run happens, record the artifact under
-`plans/260811-0245-tool-activity-event-shape/reports/` (that decision
-claims) and `plans/260811-1640-coding-agent-token-usage/reports/` (that
-decision claims), and replace this status line with what was observed._
+_When the run happens, replace this status line with what was observed._

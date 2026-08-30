@@ -31,8 +31,7 @@ const (
 	// HookPostToolUseFailure is the other half of PostToolUse. Claude Code
 	// documents the pair as mutually exclusive — "Run after successful tool" vs
 	// "Run after tool fails" — and a probe of 2.1.229 confirmed it: a failing
-	// Bash fired this hook and no PostToolUse at all
-	// (plans/reports/probe-260813-2329-claude-code-hook-surface.md).
+	// Bash fired this hook and no PostToolUse at all.
 	//
 	// That exclusivity is what makes the outcome structural rather than inferred,
 	// and it is the whole basis for status on a tool result. If a future version

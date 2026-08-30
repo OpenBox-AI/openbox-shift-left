@@ -213,10 +213,8 @@ func freeLoopbackAddr(t *testing.T) string {
 // otlpAPIRequest builds a real OTLP/JSON logs export carrying one api_request.
 //
 // The shape and the attribute names come from a measured desktop corpus
-// (claude-code-desktop 1.37937.3) — see
-// plans/.../reports/measure-260828-otel-attribute-inventory.md. Values arrive as
-// the provider types them: the token counts as intValue, the model as
-// stringValue.
+// (claude-code-desktop 1.37937.3). Values arrive as the provider types them: the
+// token counts as intValue, the model as stringValue.
 func otlpAPIRequest(session, requestID string) string {
 	attr := func(k, v string) string {
 		return fmt.Sprintf(`{"key":%q,"value":{"stringValue":%q}}`, k, v)

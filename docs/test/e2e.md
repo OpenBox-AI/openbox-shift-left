@@ -217,8 +217,7 @@ default). Asserts:
 - **subagent**: separate `<session>:agent:<id>:turn:<n>` records, attributed via
   `agent_id`, complete pairs. Reported as an honest **skip** when no such records
   appear — which is itself the answer to the one question static analysis could not
-  settle (whether `SubagentStop`'s window carries `isSidechain` lines; see
-  `plans/260811-1640-coding-agent-token-usage/reports/measure-260811-transcript-turn-surface.md`);
+  settle: whether `SubagentStop`'s window carries `isSidechain` lines;
 - **INV-2, end to end**: the shell, file and prompt markers appear on **no** turn
 row, and no raw transcript timestamp does either. This is the only end-to-end
 proof that INV-2 holds after that decision replaced the projection's structural

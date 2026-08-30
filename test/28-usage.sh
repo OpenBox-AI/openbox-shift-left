@@ -184,7 +184,7 @@ if [ "${sub_rows:-0}" -eq 0 ]; then
 	# settle (see the measurement report); this is the phase that settles it, and
 	# "no subagent records" is a real answer that must be visible in the summary.
 	tb_skip "subagent turns recorded separately" "no :agent: turn ids — the session may not have spawned one, or SubagentStop's window held no sidechain usage (measurement question 2)"
-	tb_note "if the session DID spawn a subagent, this is the signal that SubagentStop reads a transcript whose lines are not marked isSidechain — see plans/260811-1640-coding-agent-token-usage/reports/measure-260811-transcript-turn-surface.md"
+	tb_note "if the session DID spawn a subagent, this is the signal that SubagentStop reads a transcript whose lines are not marked isSidechain"
 else
 	tb_note "subagent turn rows: $sub_rows"
 	# Subagent ids must be partitioned from the main thread's, or the two would
@@ -239,7 +239,7 @@ polluted="$(tb_val "select count(*) from agent_metrics
 if [ -z "$polluted" ]; then
 	tb_skip "tool-metric pollution recorded" "agent_metrics not readable from here"
 elif [ "$polluted" -gt 0 ]; then
-	tb_note "EXPECTED: $polluted tool-metric row(s) for llm_completion — core has not shipped the ExtractToolMetric exclusion yet (see plans/260811-1640-coding-agent-token-usage/reports/core-issue-activity-usage-extractor.md ask 4)"
+	tb_note "EXPECTED: $polluted tool-metric row(s) for llm_completion — core has not shipped the ExtractToolMetric exclusion yet"
 	tb_ok "tool-metric pollution present and explained (not a shift-left defect)"
 else
 	tb_note "no llm_completion tool metrics — core may already exclude it; if so, convert this step to assert_eq 0"

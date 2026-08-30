@@ -283,8 +283,7 @@ func (w turnWindow) tokens() *client.Tokens {
 // subagent's lines land in the parent's transcript. Whether they do is not
 // settled (measured: the field is present on every line and was false on every
 // line across 32 sessions), and this split is safe under every answer: it cannot
-// double-count, and its worst case is a subagent that reports nothing. See
-// plans/…/reports/measure-260811-transcript-turn-surface.md.
+// double-count, and its worst case is a subagent that reports nothing.
 //
 // The two partitions are exhaustive, so when both hooks read one file
 // Σ(main) + Σ(subagent) equals the SessionEnd rollup exactly — which is the

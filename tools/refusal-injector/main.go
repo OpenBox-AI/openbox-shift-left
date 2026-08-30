@@ -23,9 +23,6 @@
 // any release artifact. It also does NOT relay byte-identically — it uses
 // httputil.ReverseProxy — so nothing observed through it is evidence about the
 // product's own relay.
-//
-// The runbook, including how to count retries and what each outcome decides, is
-// at plans/260827-2301-go127-oss-three-lanes/probes/RUNBOOK.md.
 package main
 
 import (

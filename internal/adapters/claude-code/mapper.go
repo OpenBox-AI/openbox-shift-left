@@ -276,8 +276,7 @@ func (m Mapper) Map(hook HookName, e *HookEvent) (client.DevEvent, bool) {
 		// is documented as "Run after successful tool" and PostToolUseFailure as
 		// "Run after tool fails", and they are mutually exclusive per call
 		// (verified empirically on 2.1.229 — a failing Bash fired
-		// PostToolUseFailure and no PostToolUse; see
-		// plans/reports/probe-260813-2329-claude-code-hook-surface.md).
+		// PostToolUseFailure and no PostToolUse).
 		//
 		// That exclusivity is what makes an unconditional "completed" truthful
 		// here. If a future version fired both, this line would report SUCCESS

@@ -384,8 +384,7 @@ HALT now ends the session outright (turn stops, later prompts and calls refused
 locally), so this defect now ends sessions rather than denying calls until the
 record clears — an accepted consequence of trusting every server HALT uniformly.
 Fail-open does not engage, because it covers *no verdict*, not *a HALT verdict*.
-Diagnosed live, core-side fix in flight
-([diagnosis](plans/reports/debug-260814-1231-session-no-longer-active-halt.md)).
+Diagnosed live, core-side fix in flight.
 - **Egress is observed, not controlled.** With no lane installed, OpenBox does not
 carry the coding tool's traffic to its model provider at all; it records that posture
 as evidence. With `--gateway` or `--transport` it relays and records every model call
