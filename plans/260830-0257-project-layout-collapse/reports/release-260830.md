@@ -98,4 +98,4 @@ a **ride-along** edit rather than against any edit — which is what it was for.
 1. `goreleaser release` itself is still unrun — only `build --snapshot
    --single-target`. The full matrix (5 os/arch pairs, archives, checksums) has
    never been produced from this config.
-2. `go mod tidy` is still owed with network access (phase 03).
+2. ~~`go mod tidy` is still owed~~ — **run 2026-08-30; `go.mod` unchanged, only `go.sum` pruned.** See `collapse-260830.md`.

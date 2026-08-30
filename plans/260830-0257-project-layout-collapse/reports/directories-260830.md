@@ -115,4 +115,4 @@ were not well-formed XML. All three now parse.
 1. The testbed is dormant — `00-preflight.sh` is the only script that ran, and it
    ran only far enough to fail on a missing stack. The other phases' path
    correctness rests on the sweep plus `bash -n`, which cannot see a wrong path.
-2. `go mod tidy` is still owed with network access (phase 03).
+2. ~~`go mod tidy` is still owed~~ — **run 2026-08-30; `go.mod` unchanged.** See `collapse-260830.md`.

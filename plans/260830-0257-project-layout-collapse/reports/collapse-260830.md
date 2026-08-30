@@ -124,10 +124,29 @@ pinned — the same selection MVS makes — and `go.sum` is the union of the twe
 committed, already-verified files. `go build ./...` needed no additions to it,
 which is the evidence that the union is complete for the build.
 
-**Unproven and owed:** run `go mod tidy` once with network access. The committed
-`go.mod` may carry indirect requires a tidied one would drop, and no dependency
-version moved here, so the phase's step-10 redaction re-run has nothing to
-re-verify — a claim that is only true because tidy did not run.
+**RESOLVED 2026-08-30 — tidy ran, and `go.mod` did not move.** With `GOMODCACHE`
+redirected to a writable path and `SSL_CERT_FILE=/etc/ssl/cert.pem` (the sandbox
+routes egress through a filtering proxy whose certificate Go would not verify,
+though curl did), `go mod tidy` completed against the real proxy:
+
+- **`go.mod`: byte-identical.** 19 direct, 115 indirect, **0 added, 0 dropped, 0
+  version changes.** The hand-authored union was exactly what MVS selects.
+- **`go.sum`: 629 → 593 lines**, −50/+14. Tidy pruned hashes for *older* versions
+  the fifteen separate `go.sum` files had carried in, and added the ones for
+  test-of-dependency modules the union never needed. All 19 direct requires still
+  carry both their `h1:` and `/go.mod h1:` lines; `go mod verify` reports all
+  modules verified.
+- Suite, gates and artefacts unchanged: 1275 declared / 1859 verdicts / 28 skips /
+  0 fails, 49 conformance cases, and a **byte-identical binary** at 40,311,474.
+
+So step 10's redaction re-run genuinely had nothing to re-verify — and that is now
+a measured fact rather than a claim resting on tidy not having run.
+
+The reason the union held is worth keeping: each per-module `go.mod` was already
+tidied, so its recorded versions dominate every requirement edge in its own graph.
+The merged graph is the union of the fifteen, so the max-of-fifteen dominates every
+edge in it, and MVS's fixpoint **is** that max. Recomputation was a no-op by
+construction, not by luck.
 
 ## The corruption check needed a third form
 

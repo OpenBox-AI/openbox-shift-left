@@ -188,13 +188,13 @@ stop timeout gets the daemon SIGKILLed mid-drain on every restart.
   `internal/` directories.
 - Adding an external dependency edits one `go.mod`, and only the four guarded
   subtrees will notice.
-- **`go mod tidy` has not been run on the merged module.** The environment the
-  collapse ran in denies module-cache writes and breaks the checksum database, so
-  `go.mod` was authored from the union of the fifteen at the highest version any
-  pinned, and `go.sum` from the union of the twelve committed, already-verified
-  files. `go build ./...` needs no additions to either. Tidy is owed once with
-  network access, and the committed `go.mod` may carry indirect requires a tidied
-  one would drop.
+- **`go mod tidy` was run (2026-08-30) and `go.mod` did not change.** It was
+  authored from the union of the fifteen at the highest version any pinned; tidy
+  selects exactly that — 0 added, 0 dropped, 0 version changes. Only `go.sum`
+  moved, pruning hashes for older versions the separate files had carried in.
+  That is not luck: each per-module `go.mod` was already tidied, so its versions
+  dominate every edge in its own graph, and the max-of-fifteen therefore dominates
+  every edge in the merged one.
 
 ## Revisit
 

@@ -138,4 +138,4 @@ file was deleted in the collapse. Corrected to name `internal/depguard`.
    Unifying it is its own change.
 2. The CI check covers the §Layout **table**. Nothing keeps `CLAUDE.md`'s command
    blocks true — and they were wrong twice over before phase 06 corrected them.
-3. `go mod tidy` is still owed with network access (phase 03).
+3. ~~`go mod tidy` is still owed~~ — **run 2026-08-30; `go.mod` unchanged.** See `collapse-260830.md`.
