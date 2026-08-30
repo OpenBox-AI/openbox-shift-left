@@ -254,6 +254,36 @@ collisions and ownership legibility). Recording it as a **cost**, not a wash: 15
 packages lose a compiler-enforced boundary and gain nothing but a shorter path.
 Restoring it would cost one path segment per row and no behaviour.
 
+### F8 — three source-relative paths break, and one of them breaks **silently**
+
+`schemaRelPath` (F2) is not the only one. A full audit of `"../` literals in Go
+outside `testdata` finds three that encode a location and therefore move:
+
+| path | today | after the collapse | how it fails |
+|---|---|---|---|
+| `contracts/dev-event/conformance/schema.go:21` | `../schema/dev-event.schema.json` | needs `../../contracts/dev-event/schema/…` | **loud** — `LoadSchema` errors, conformance cases stop executing |
+| `cli/internal/gatewayemit/contract_test.go:23` | `../../../contracts/dev-event/schema/…` | **unchanged — survives by coincidence** | n/a |
+| `adapters/common/devconfig/managed_test.go:204` | `../../../deploy/managed/openbox/dev.json` | needs `../../../../deploy/…` | **SILENT** |
+
+**The second survives by arithmetic, not by design.** `cli/internal/gatewayemit`
+and `internal/cli/gatewayemit` are both three segments deep, so `../../../` still
+lands on the repo root. Worth stating, because phase 05 moves the schema and must
+then edit **both** constants — a reader who only knows about the conformance one
+will leave this at a dead path.
+
+**The third is the dangerous one.** `TestManaged_ShippedTemplateLoadsAndLocks`
+does `os.Stat(template)` and `t.Skipf("template not present")` on failure. After
+the move the path resolves to nothing, so the test **skips instead of failing** —
+and its own comment says *"the failure mode (silently unmanaged) is the one this
+story exists to prevent"*. A test about managed-config enforcement would quietly
+stop running.
+
+**A skip is still a verdict, so the plan's acceptance criterion cannot see this.**
+Declared and verdict counts both stay put; only the SKIP count moves, 29 → 30.
+Phase 03's verification must compare **skips per package**, not just declared and
+verdict totals. The phase-01 baseline records them, which is the only reason this
+is checkable at all.
+
 ### F5 — phase 03 deletes `go.work`, and **four more test files hard-fail** on that
 
 Phase 03 requirement 5 enumerates *"the five original go.mod-reading guards"*.

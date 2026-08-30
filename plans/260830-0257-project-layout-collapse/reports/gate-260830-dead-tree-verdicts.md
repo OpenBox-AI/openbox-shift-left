@@ -32,35 +32,61 @@ not a reference to the binary, and stays accurate after deletion.
 
 ---
 
-## 2. `adapters/common/git/cmd/openbox-git-hook` — **DEAD, delete, with one caveat**
+## 2. `adapters/common/git/cmd/openbox-git-hook` — **REACHABLE. Do NOT delete.**
 
-| check | result |
-|---|---|
-| does any caller install a hook naming it? | all three production callers set `Command` explicitly to the running executable: `adapters/claude-code/hookrun.go:429`, `adapters/codex/hookrun.go:315`, `adapters/common/git/hookrun.go:78` (all `HookConfig{Command: self, …}`) |
-| released? | no |
-| testbed? | no reference |
-| stated in-repo | `cli/cmd/openbox/main_test.go:764` — the trailer is stamped "with no separate openbox-git-hook binary"; `adapters/common/git/hook.go:84-86` — "OD17: single `openbox` engine ... without this package needing to change" |
+**This verdict was WRONG on the first pass and is corrected here.** The first pass
+checked the install paths (all three set `Command` to the running executable), the
+release config, and `testbed/`. All three were clean, and the conclusion "delete"
+followed. It missed a fourth kind of invocation path: **a Go test harness that
+builds the binary.**
 
-**Settling lines: `adapters/claude-code/hookrun.go:429` and
-`adapters/codex/hookrun.go:315`** — the two production install paths, both naming
-`self`. **Verdict: delete** (4 declared tests).
+```
+adapters/common/git/integration_test.go:30
+    build := exec.Command("go", "build", "-o", hookBin, "./cmd/openbox-git-hook")
+    if err := build.Run(); err != nil { panic("build hook binary: " + err.Error()) }
+```
 
-**The caveat, which grep would not have found and which the phase's own gate
-language predicted.** Two places name the binary as a **fallback default**, not as
-a reference:
+This is in `TestMain`, it **panics** on failure, and `hookBin` is used by five
+tests. Deleting the tree does not fail one test — it kills the whole package's
+suite, **59 declared tests**, through a panic in `TestMain`. That is precisely the
+invisible-tests failure mode this repo already documents twice.
 
-- `adapters/common/git/hook.go:88,96` — `HookConfig.Command` documents `"" =>
-  "openbox-git-hook"` and `command()` returns that literal;
-- `adapters/common/git/hookrun.go:76-78` — if `os.Executable()` fails,
-  `self = "openbox-git-hook"`.
+**Settling line: `adapters/common/git/integration_test.go:30`.** **Verdict: KEEP.**
 
-Neither fires on any production path, but after deletion both name an executable
-that cannot exist. They are error-path degradations for a binary that was never
-released, so they are harmless — but leaving them silently pointing at nothing is
-the kind of false comment this repo removes on sight. **Phase 03 should update
-both in commit (a), in the same change that deletes the tree.**
+### Where it lands
 
----
+The plan's rule for a surviving tree: *"a product path keeps it in `cmd/`, a test
+or dev path moves it to `tools/`."* The **only** path that reaches this one is a
+test harness — no installer, no doc, no release. So it goes to
+**`tools/openbox-git-hook`**, alongside `corpusfixture` and `refusal-injector`,
+which is also the honest statement about whether it ships: `tools/` is not a
+release surface, and goreleaser never built it.
+
+`integration_test.go:30` must then build it by **qualified package path** rather
+than the relative `./cmd/openbox-git-hook` — after the collapse the test sits at a
+different depth from `tools/`, and a relative path that has to count `../` hops is
+the fragile form. Forced by the move, same class as the `schemaRelPath` edit.
+
+The two fallback literals the first pass flagged for correction —
+`adapters/common/git/hook.go:88,96` and `hookrun.go:76-78`, both defaulting to the
+string `"openbox-git-hook"` — **need no change now**, because the binary they name
+still exists. That correction is withdrawn along with the deletion.
+
+### Why the first pass missed it, since the shape recurs
+
+The check asked "does any *install or invocation* path produce this executable's
+name?" and looked at installers, docs, the release config and the shell testbed. A
+**Go test that shells out to `go build`** is an invocation path too, and it is
+invisible to a search for the binary's name in install code because the name is
+assembled by the test's own `filepath.Join`. The exhaustive form of the check is
+one grep — every `exec.Command("go", "build", ...)` in the repo, with its target:
+
+| builder | target | verdict |
+|---|---|---|
+| `cli/cmd/openbox/main_test.go` ×4 | `.` (itself) | n/a |
+| `adapters/claude-code/cmd/openbox-cc-hook/main_test.go` ×5 | `.` (itself) | goes with the tree |
+| `adapters/common/git/cmd/openbox-git-hook/main_test.go` | `.` (itself) | goes with the tree |
+| **`adapters/common/git/integration_test.go:30`** | **`./cmd/openbox-git-hook`** | **external builder — KEEP** |
 
 ## 3. `actions/openbox-git-action/cmd/openbox-git-action` — **REACHABLE. Do NOT delete.**
 
@@ -97,16 +123,22 @@ because its only importer survives. It moves to
 
 ## Consequences for the plan
 
-1. **D5 is wrong about one of its three.** It should read *two* dead `cmd/` trees,
-   not three. The `action.yml` argument does not establish what it was used for.
-2. **Parent acceptance criterion 3's subtraction is 9 tests, not 16 or 74**:
-   `openbox-cc-hook` (5) + `openbox-git-hook` (4). Enumerated by name:
+1. **D5 is wrong about two of its three.** Only `openbox-cc-hook` is dead. The
+   `action.yml` argument did not establish what the git action was used for, and
+   "no separate openbox-git-hook binary" in `main_test.go:764` describes the
+   *trailer stamping path*, not the binary's existence.
+2. **Parent acceptance criterion 3's subtraction is 5 tests**, enumerated:
    `TestHookBinary_{ObserveOnlyContract, MaintainsSessionRegistry,
-   AmbientGitHookInstall, BlockVerdictRecordsAdvisoryExitsZero, NoArgsIsSafe}`;
-   `TestBinary_{AlwaysExitsZero, StampsMessageFile, NeverStampsSecret,
-   InstallStampsCommit}`.
-3. **Acceptance criterion 7** ("`cmd/` contains exactly the binaries GoReleaser
-   builds, plus any of the three the gate proved live") is satisfied by
-   `cmd/openbox` + `cmd/openbox-git-action`.
-4. `testbed/50-lineage.sh:26` carries a path that phase 03 and phase 05 both move.
-   It is a **dormant** script — no CI covers it — so the sweep is the only net.
+   AmbientGitHookInstall, BlockVerdictRecordsAdvisoryExitsZero, NoArgsIsSafe}`.
+3. **Final `/cmd` and `/tools` membership**, satisfying criterion 7:
+   - `cmd/openbox` — the only binary GoReleaser builds
+   - `cmd/openbox-git-action` — product path (`docs/lineage.md:90`)
+   - `tools/openbox-git-hook` — test path only (`integration_test.go:30`)
+   - `tools/corpusfixture`, `tools/refusal-injector` — D6
+4. **Three scripts and one test carry paths the collapse moves**:
+   `testbed/10-onboard.sh:33`, `testbed/50-lineage.sh:26`,
+   `adapters/common/git/integration_test.go:30`. The two testbed scripts are
+   dormant and have no CI net, so the sweep is the only thing that catches them.
+5. **A verdict of "dead" is only as good as its enumeration of invocation kinds.**
+   The first pass had four kinds and needed five. The fifth — a test harness that
+   shells out to `go build` — is now in the table above.

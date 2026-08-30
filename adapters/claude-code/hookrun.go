@@ -20,9 +20,9 @@ import (
 const flushBudget = 12 * time.Second
 
 // RunHook executes the observe-only path for one Claude Code hook
-// invocation. It is the single engine shared by the unified `openbox hook
-// claude-code <event>` subcommand and the retired-to-alias
-// openbox-cc-hook binary.
+// invocation. It is the single engine behind `openbox hook claude-code
+// <event>`, which is the only way in: the standalone alias binary it once
+// also served was never released and is gone.
 //
 // Safety contract (INV-3 — observe-only, never block):
 //   - In observe mode (the default) it writes nothing to stdout. On
@@ -403,12 +403,12 @@ func emitTurn(ad *Adapter, logger *log.Logger, hook HookName, ev *HookEvent) {
 // idempotent, and refuses to overwrite a foreign hook (InstallHook).
 //
 // Assumption: os.Executable() is the unified `openbox` engine (which
-// handles the baked `hook git prepare-commit-msg` args). In production it
-// is — the plugin wires SessionStart to `bin/openbox hook claude-code
-// SessionStart`. If this ever runs under the legacy openbox-cc-hook alias
-// (which cannot parse `hook git …`), the installed hook fail-opens to a
-// no-op (commit proceeds, unstamped) rather than aborting the commit — an
-// acceptable degradation for a deprecated path.
+// handles the baked `hook git prepare-commit-msg` args). That is now the
+// only entrypoint — the plugin wires SessionStart to `bin/openbox hook
+// claude-code SessionStart`, and the alias binary that could not parse
+// `hook git …` is gone. Should some other executable ever get here, the
+// installed hook fail-opens to a no-op (commit proceeds, unstamped) rather
+// than aborting the commit.
 func maybeInstallGitHook(logger *log.Logger, cwd string) {
 	if !ResolveInstallGitHook() {
 		return

@@ -130,8 +130,10 @@ executable. The hooks invoke `${CLAUDE_PLUGIN_ROOT}/bin/openbox hook claude-code
 go build -o plugin/bin/openbox ../../cli/cmd/openbox
 ```
 
-The standalone `cmd/openbox-cc-hook` remains as a thin backward-compat alias over
-the same engine (`claudecode.RunHook`); it is no longer referenced by the plugin.
+The standalone `cmd/openbox-cc-hook` alias is **gone**. It was never built by
+`.goreleaser.yaml`, so no release ever carried it, and nothing outside its own
+tests invoked it — the plugin manifest and every installer name the engine
+(`bin/openbox hook claude-code <event>`), which is the only entrypoint now.
 
 Org-wide force-enable via managed settings (`{"enabledPlugins":["openbox-observe"]}`)
 is **verified, not activated** for the Phase-1 opt-in pilot (NFR-5).

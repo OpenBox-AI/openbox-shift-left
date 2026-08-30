@@ -66,9 +66,13 @@ dir	transport	internal/transport
 # about it. The rows stay `cond` so the rewrite script tolerates the deletions
 # without the map being edited mid-phase.
 #
-# DEAD -- deleted in commit (a), so these rows never apply:
+# DEAD -- deleted in commit (a), so this row never applies. Nothing outside its
+# own tree builds it; the plugin manifest and every installer name the engine.
 cond	adapters/claude-code/cmd/openbox-cc-hook	cmd/openbox-cc-hook
-cond	adapters/common/git/cmd/openbox-git-hook	cmd/openbox-git-hook
+# REACHABLE by a TEST path only -- adapters/common/git/integration_test.go:30
+# builds it in TestMain and PANICS on failure, so 59 tests depend on it existing.
+# A test path means tools/, not cmd/, by the plan's own rule.
+dir	adapters/common/git/cmd/openbox-git-hook	tools/openbox-git-hook
 # REACHABLE -- testbed/50-lineage.sh:26 builds and runs it, docs/lineage.md:90
 # documents it as the deploy-time CLI, and its tool_name is in two committed wire
 # fixtures. A PRODUCT path reaches it, so by the plan's own rule it stays in cmd/.

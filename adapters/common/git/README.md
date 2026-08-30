@@ -113,7 +113,7 @@ squash healing, not from parallel liveness.
 
 ### Who writes the registry / installs the hook
 
-- The **Claude Code adapter** (`cmd/openbox-cc-hook`) writes/refreshes the record
+- The **Claude Code adapter** (`openbox hook claude-code <event>`) writes/refreshes the record
   on `SessionStart`/`PreToolUse`/`PostToolUse` and removes it on `SessionEnd`.
 - **Ambient hook install** is opt-in (`OPENBOX_INSTALL_GIT_HOOK=1`): on
   `SessionStart` the adapter installs this `prepare-commit-msg` hook into the

@@ -35,7 +35,7 @@
 //     delay beyond a small local-I/O budget, or fail a Claude Code tool
 //     call. The hook path always exits 0 with empty stdout (the shared
 //     engine is claudecode.RunHook, invoked as `openbox hook claude-code
-//     <event>`, with a thin legacy alias at cmd/openbox-cc-hook).
+//     <event>`).
 //
 // The single Go engine (this package + client/) is shared by every provider
 // adapter; adding a new tool is a new mapper + package, no change here.
