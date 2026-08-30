@@ -457,7 +457,8 @@ Details and current status: **[Assurance](docs/architecture.md#assurance--what-t
 | [Lineage](docs/lineage.md) | `session → commit → deploy` and how it is verified |
 | [Gateway MDM recipe](docs/gateway-mdm-recipe.md) | the artifacts to push if you need the gateway prevented-from, not just detected-around |
 | [ADRs](docs/adr/) | the decisions, and why |
-| [Event contract](api//) | the normalized event schema and its wire mapping |
+| [Event contract](api/dev-event.schema.json) | the normalized event schema |
+| [Wire mapping](docs/MAPPING.md) | how each field lands in core's columns |
 | [End-to-end tests](docs/test/e2e.md) | `test/` — a mock-free suite against a real stack |
 
 ## Contributing
@@ -472,7 +473,7 @@ cd cli && go test ./...             # one module
 ./test/run-all.sh                # the end-to-end suite (needs a local OpenBox stack)
 ```
 
-Anything provider-agnostic belongs in `adapters/common/`; a new table, endpoint or
+Anything provider-agnostic belongs in `internal/adapters/common/`; a new table, endpoint or
 service needs an ADR. The end-to-end suite needs an OpenBox stack it can reach —
 `test/00-preflight.sh` tells you whether the one you have is healthy enough to
 trust the results.

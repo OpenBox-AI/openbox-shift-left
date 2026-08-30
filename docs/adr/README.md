@@ -26,7 +26,7 @@ Every ADR not marked "reconstructed" in the table below is an original.
 | [0008](ADR-0008-signed-policy-bundles.md) | Signed policy bundles | **Moot for this runtime** since 0017 — there is no bundle to sign |
 | [0009](ADR-0009-idempotency-receipts.md) | Server-side idempotency and delivery receipts | Accepted (reconstructed) |
 | [0010](ADR-0010-signed-commit-attestation.md) | Signed commit attestation | Accepted |
-| [0011](ADR-0011-multi-module-layout.md) | Keep the multi-module layout, with a workspace | Accepted |
+| [0011](ADR-0011-multi-module-layout.md) | Keep the multi-module layout, with a workspace | **Superseded by 0024** |
 | [0012](ADR-0012-autonomous-approver.md) | Autonomous approver: envelope-bounded, host-pluggable, narrowing-only | Accepted |
 | [0013](ADR-0013-tool-call-as-activity.md) | A tool call is an Activity; retire the hook-span layer | Accepted |
 | [0014](ADR-0014-turn-as-activity-and-identifier-allowlist.md) | A model turn is an Activity; INV-2's usage path becomes an allowlist | Accepted |
@@ -38,4 +38,5 @@ Every ADR not marked "reconstructed" in the table below is an original.
 | [0020](ADR-0020-prompt-gate-and-halt-session-stop.md) | The prompt gate, and HALT ends the session | Accepted (extends 0017) |
 | [0021](ADR-0021-openbox-local-gateway.md) | The OpenBox gateway is a per-developer LOCAL service | **Draft** — §9 open; §5 reversed, §8/§10 resolved by 0022 |
 | [0022](ADR-0022-native-telemetry-and-transport-lanes.md) | Two more model-call lanes, native and local: telemetry and transport | Accepted (reverses 0021 §5) |
-| [0023](ADR-0023-credential-guard-scope.md) | The credential guard bounds DIRECT requires only | Accepted (reduces the go.mod half added for 0021) |
+| [0023](ADR-0023-credential-guard-scope.md) | The credential guard bounds DIRECT requires only | Accepted (reduces the go.mod half added for 0021); **amended by 0024** |
+| [0024](ADR-0024-single-module-layout.md) | One module, with root `/cmd`, `/internal` and `/tools` | Accepted (**supersedes 0011**, amends 0023) |

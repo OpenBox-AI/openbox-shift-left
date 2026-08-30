@@ -182,7 +182,7 @@ Mandatory, because "full" invites the wrong inference:
 ## Consequences
 
 - **Documentation rewrite, file by file.** `docs/data-and-privacy.md` (its
-  "never" rows become gated rows), `docs/MAPPING.md` §1/§3,
+  "never" rows become gated rows), `contracts/dev-event/MAPPING.md` §1/§3,
   `COVERAGE.md` §2/§3, `README.md`, `CLAUDE.md`. Each must read as a widening
   with its bounds, never as an improvement.
 - **A storage and retention ask for the backend.** 64KB-class payloads at

@@ -2,7 +2,7 @@
 title: "Collapse to one module and adopt golang-standards/project-layout"
 description: "Fold 15 modules into one with root /cmd, /internal and /tools, take the non-Go directory renames, and rebuild the six module-boundary guards as package-scoped controls before the boundary that carries them is removed."
 status: ready
-progress: "5 of 7 phases"
+progress: "6 of 7 phases"
 updated: 2026-08-30
 priority: P2
 effort: ~35h (7 phases)
@@ -66,7 +66,7 @@ precondition. If a phase-02 mutation drill comes back green, phase 03 does not s
 | 03 | [Dead-tree gate, then the collapse](phase-03-the-collapse.md) ✅ | ~10h | 02 |
 | 04 | [Release path](phase-04-release-and-install-path.md) ✅ | ~3h | 03 |
 | 05 | [Non-Go directory moves](phase-05-non-go-directory-moves.md) ✅ | ~4h | 03 |
-| 06 | [ADRs and the layout maps](phase-06-adrs-and-layout-maps.md) | ~4h | 04, 05 |
+| 06 | [ADRs and the layout maps](phase-06-adrs-and-layout-maps.md) ✅ | ~4h | 04, 05 |
 | 07 | [Conventions and drift check](phase-07-conventions-and-drift-check.md) | ~3h | 06 |
 
 ## Target tree

@@ -9,11 +9,11 @@ This is the reference an adapter author (SL-4 Claude Code, SL-7 Codex, SL-8 Curs
 and Codex adapters are **shipped**, observe + default-on enforce + default-on usage capture; each adapter's
 `Capabilities()` is the authoritative per-provider profile and this document must agree with it.
 The **Cursor** column below is a *surface survey*, not shipped support — SL-8 is unbuilt. Last
-reconciled 2026-08-26 (ADR-0021) against `adapters/claude-code/capabilities.go` and
-`adapters/codex/capabilities.go`.
+reconciled 2026-08-26 (ADR-0021) against `internal/adapters/claude-code/capabilities.go` and
+`internal/adapters/codex/capabilities.go`.
 
 **One producer is not an adapter at all.** The local gateway
-([ADR-0021](../../docs/adr/ADR-0021-openbox-local-gateway.md), v1.5) emits a
+([ADR-0021](adr/ADR-0021-openbox-local-gateway.md), v1.5) emits a
 `TurnCompleted` for each relayed model call without going through any provider adapter
 or hook — it observes the HTTP exchange itself. It is Claude Code only, opt-in per
 machine, and nothing in this document's matrix describes it: a lifecycle matrix maps
@@ -24,14 +24,14 @@ hooks, and the gateway has none. Its fields are in
 session relayed and was captured; a desktop-app session over the same install
 produced nothing, because the desktop app routes through its own third-party
 inference configuration rather than `ANTHROPIC_BASE_URL`
-([ADR-0021 §8](../../docs/adr/ADR-0021-openbox-local-gateway.md)). State it rather
+([ADR-0021 §8](adr/ADR-0021-openbox-local-gateway.md)). State it rather
 than averaging it: two developers on one org and one posture, one working in the
 terminal and one in the desktop app, send *entirely different* model-call evidence —
 the first sends whole request and response bodies, the second sends none and nothing
 reports the gap.
 
 **Two more non-adapter producers, at different stages**
-([ADR-0022](../../docs/adr/ADR-0022-native-telemetry-and-transport-lanes.md), v1.6).
+([ADR-0022](adr/ADR-0022-native-telemetry-and-transport-lanes.md), v1.6).
 A local OTLP **telemetry** receiver (`:otel:`) and a local in-path TLS **transport**
 relay (`:proxy:`) are meant to cover the desktop and subscription-OAuth calls the
 gateway lane cannot reach — phases 09–13 of plan
@@ -43,7 +43,7 @@ remain unconfirmed against a real client.
 
 **Read this before reading any row below.** Both new lanes are verified by REPLAY:
 real recorded traffic through the shipped code path, bind-free, with the relay's
-upstream dial substituted (`gateway/gatewaytest`) and no socket anywhere. That proves
+upstream dial substituted (`internal/gateway/gatewaytest`) and no socket anywhere. That proves
 the bytes the relay forwards and captures, the mapping, the gate and the caps — it
 proves nothing about bind, listen, TLS to a real socket, the OTLP HTTP intake, or what
 core stores. Those live only in the dormant `test/46-otel-lane.sh` and
@@ -66,7 +66,7 @@ core stores. Those live only in the dormant `test/46-otel-lane.sh` and
   crossed that intake end to end on a bind-capable host** (phase 09's control test:
   real command, real receiver, real POST, real spool) — but **it was JSON, and
   production is configured for `http/protobuf`**
-  (`cli/internal/activation/keys.go`). No test in this repository drives the
+  (`internal/cli/activation/keys.go`). No test in this repository drives the
   collector's protobuf decoder, so the wire format real traffic will actually use
   is unexercised, and the real client has never exported to this lane at all. And **it has never been confirmed that the env keys the
   installer writes are the ones the client actually reads** —
@@ -118,7 +118,7 @@ averaged into a "model calls are governed" sentence: the three lanes differ in w
 they carry, in who can suppress them, and in how strongly each is verified.
 
 All three are **Claude Code only, and structurally so** — `--gateway`, `--telemetry`
-and `--transport` are rejected for `--provider codex` (`cli/cmd/openbox/main.go`),
+and `--transport` are rejected for `--provider codex` (`cmd/openbox/main.go`),
 the transport allowlist holds one host (`api.anthropic.com`), and the telemetry keys
 are `CLAUDE_CODE_*`. **Codex and Cursor: no lane, and no probe has been run** — their
 absence here is unsurveyed, not measured-empty.
@@ -143,7 +143,7 @@ either way · ❌ absent by construction
 
 **The `:otel:` row that matters most is the content one.** This lane carries no
 prompt, no completion and no body — only the model id, four token counts, a duration
-and one request id (`cli/internal/telemetryemit/mapper.go`). **No cost**: the server
+and one request id (`internal/cli/telemetryemit/mapper.go`). **No cost**: the server
 derives that from a model-keyed pricing table, and `turnFor` never sets it. Its mapper
 takes **no redactor**, deliberately, because there is nothing to redact; that is a
 correct design today and the thing to re-check first if body ingestion is ever added.
@@ -186,8 +186,8 @@ The contract is honest about what it does **not** model in v1.0. None is require
 4. **Assistant message/thought** — **retired as a non-goal: v1.2 for the completion text, v1.3 for tool content, v1.4 for thinking.** The completion TEXT egresses for Claude Code on the turn's span (ADR-0018); **tool output, observe-path tool input, and the free-text failure detail egress as of v1.3** (ADR-0019 P1); **thinking egresses as of v1.4** in `activity_output.thinking` (ADR-0019 P3) — all under the one `content_capture` gate, redacted before attachment and capped at 64KB. Thinking was the item that required amending ADR-0014's transcript allowlist and turning its load-bearing sentinel around; that amendment is written, and the sentinel is mutation-tested against the removal of either the redaction or the cap. What is still out of scope:
    - **intermediate assistant text** from the transcript window. Only the FINAL reply egresses, from the hook field ADR-0018 bound; the amendment authorised `thinking` and nothing else in that array.
    - **`redacted_thinking` blocks** — provider-encrypted base64. Excluded by the block-type filter, deliberately: it would spend the 64KB budget on ciphertext no reader can use.
-   - **Cursor and Codex** have no equivalent wired at all. Codex binds no `tool_response` field (`adapters/codex/hookevent.go:73`, pinned by `adapters/codex/hookevent_test.go:50`) and reads no transcript thinking, so closing either for Codex is adapter work, not a contract change. **State the asymmetry rather than averaging it, and note that every version since v1.3 has WIDENED it:** a Claude Code session and a Codex session on the same org, same posture, send different amounts of content — Claude Code sends tool input, tool output, the failure detail and the turn's thinking, and with the opt-in gateway the whole model request and response as well; Codex sends none of them.
-   - **The asymmetry is also about redaction, not only volume, and that direction is the dangerous one.** `adapters/claude-code/hookrun.go` wires a redactor onto the mapper as a collaborator, so every content field it attaches is scanned by construction. **The Codex mapper has no such field to wire** — its local redaction exists only on the enforce path, over an `apply_patch` body — so the prompt, the only content class it egresses, is sent **unscanned even with `secret_detection` on**. The Claude Code prompt had exactly this gap until 2026-08-26, and it survived review because that one field was assigned directly instead of through the collaborator; conformance C42 now asserts it on the outbound bytes, and **the same shape is still live for Codex**. The asymmetry WIDENED again with D-OSS-4 (2026-08-28): the scanner Claude Code's content passes through gained gitleaks' 222 format rules on top of the nine hand-rolled ones, so Claude Code content is now checked against 231 formats and Codex's prompt against none.
+   - **Cursor and Codex** have no equivalent wired at all. Codex binds no `tool_response` field (`internal/adapters/codex/hookevent.go:73`, pinned by `internal/adapters/codex/hookevent_test.go:50`) and reads no transcript thinking, so closing either for Codex is adapter work, not a contract change. **State the asymmetry rather than averaging it, and note that every version since v1.3 has WIDENED it:** a Claude Code session and a Codex session on the same org, same posture, send different amounts of content — Claude Code sends tool input, tool output, the failure detail and the turn's thinking, and with the opt-in gateway the whole model request and response as well; Codex sends none of them.
+   - **The asymmetry is also about redaction, not only volume, and that direction is the dangerous one.** `internal/adapters/claude-code/hookrun.go` wires a redactor onto the mapper as a collaborator, so every content field it attaches is scanned by construction. **The Codex mapper has no such field to wire** — its local redaction exists only on the enforce path, over an `apply_patch` body — so the prompt, the only content class it egresses, is sent **unscanned even with `secret_detection` on**. The Claude Code prompt had exactly this gap until 2026-08-26, and it survived review because that one field was assigned directly instead of through the collaborator; conformance C42 now asserts it on the outbound bytes, and **the same shape is still live for Codex**. The asymmetry WIDENED again with D-OSS-4 (2026-08-28): the scanner Claude Code's content passes through gained gitleaks' 222 format rules on top of the nine hand-rolled ones, so Claude Code content is now checked against 231 formats and Codex's prompt against none.
    A dedicated `CompletionReceived` type was the v1.1 candidate here; it was not built, because the alignment reader that needs the text keys on a span rather than an event type.
 5. **Non-session telemetry** (Cursor Tab hooks, `workspaceOpen`, cloud-agent sessions that never emit `sessionStart`) — the contract requires `openbox_session_id`, so events with no resolvable session are **not emittable** (adapter drops or synthesizes a session). Honest degradation — the architecture's "no false coverage" rule.
 6. **`PermissionRequest` vs generic `preToolUse`/`PreToolUse` overlap** — adapters emit **one** `ToolCall` per tool invocation (prefer the specific pre-tool hook); `event_id` idempotency (INV-5) also guards double-counting.

@@ -404,7 +404,7 @@ openbox init --role approver [--org …]                   # role=approver
 
 | Role | File | Read by |
 |---|---|---|
-| `dev` (default) | `~/.openbox/dev.json` (`adapters/common/devconfig/paths.go`) | every hook, every adapter, `doctor` |
+| `dev` (default) | `~/.openbox/dev.json` (`internal/adapters/common/devconfig/paths.go`) | every hook, every adapter, `doctor` |
 | `approver` | `~/.config/openbox/approver.json` | `openbox approve` only |
 
 **Rules that keep this safe and cheap**

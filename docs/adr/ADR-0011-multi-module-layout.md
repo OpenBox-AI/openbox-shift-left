@@ -1,8 +1,16 @@
 # ADR-0011 — Keep the multi-module layout, with a workspace
 
 Date: 2026-07-31
-Status: Accepted
+Status: **Superseded by [ADR-0024](ADR-0024-single-module-layout.md)** (2026-08-30)
 Context: the RF refactor, story RF-S10 (its plan is no longer in the repo)
+
+> **Superseded 2026-08-30 by [ADR-0024](ADR-0024-single-module-layout.md).**
+> The owner reversed this decision and the repository is now one module. Nothing
+> below is edited: it is the record of a decision that was correct on its date,
+> and ADR-0024 takes each of its three reasons in turn and says what became of it.
+> In short — R1 inverted, R2 was genuinely lost and is now carried by a test, R3
+> was already neutral. The revisit condition at the end was met *concurrently*
+> with the collapse rather than before it.
 
 ## Context
 
@@ -26,12 +34,12 @@ discovers modules from it and fails if a `go.mod` on disk is missing from it, so
 a new module cannot slip through unverified. The `replace` directives remain
 authoritative for anyone building a module on its own.
 
-`api//acceptance` is folded into `client` as
+`contracts/dev-event/acceptance` is folded into `client` as
 `client/acceptancetest`. It exported nothing, was imported by nothing, and
 existed only to host two tests — a module's worth of ceremony for a package's
 worth of content.
 
-`api//conformance` stays a module and stays dependency-free, with
+`contracts/dev-event/conformance` stays a module and stays dependency-free, with
 a test asserting its `go.mod` gains no `require` or `replace`. That property is
 the point: adapters import it from their tests, and it must never pull anything
 in.

@@ -232,7 +232,7 @@ the assistant text egresses unredacted.** That is stated rather than mitigated.
   response is the root-field variant (`http_method`/`http_url`), not removing the
   marker.
 - **The compliance evidence export gains `workflow_status`** on tool activity rows.
-- `docs/MAPPING.md:235-245` is wrong in three rows the moment this
+- `contracts/dev-event/MAPPING.md:235-245` is wrong in three rows the moment this
   ships (`span.response_body` "dropped as an egress channel", `span.stage`
   "retained, read by nothing", and `status` in the retired list). Reconciling them
   is part of shipping, not follow-up.
@@ -266,7 +266,7 @@ core's `(span_id, stage)` dedupe and store twice.
   plus the binary's own input schemas (`plans/reports/probe-260813-2329-…`).
   `PermissionDenied` and `StopFailure` were **not** producible on demand and are
   schema-verified only.
-- **The test has not run.** Conformance asserts the wire bytes against a real
+- **The testbed has not run.** Conformance asserts the wire bytes against a real
   `/evaluate` stub over HTTP, which is strong evidence about what this client sends
   and no evidence about what the server stores or renders.
 - Goal alignment additionally requires reachable infrastructure this repo does not

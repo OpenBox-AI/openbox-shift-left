@@ -63,19 +63,52 @@ Two paths, deliberately separate:
   double-count: spool rotation is an atomic rename and core deduplicates on each
   event's Idempotency-Key.
 
-## Modules
+## Layout
 
-| Module | What it owns |
+One Go module, `github.com/openbox-ai/openbox-shift-left`
+([ADR-0024](adr/ADR-0024-single-module-layout.md)). One row per top-level
+directory, each saying what belongs in it **and what does not** — the second half
+is the part that stops a directory quietly becoming a junk drawer.
+
+| Directory | What belongs | What must not go here |
+|---|---|---|
+| `api/` | machine-readable contract artefacts — today, the dev-event JSON Schema | prose *about* the wire. `MAPPING.md` and `COVERAGE.md` are documents, and they live in `docs/` |
+| `build/` | packaging and release configuration (`.goreleaser.yaml`) | anything a build produces. Artefacts are git-ignored |
+| `cmd/` | one directory per **shipped** executable, `main` package only | a binary nothing ships. A dev instrument belongs in `tools/` |
+| `deployments/` | managed-settings templates an org deploys (MDM) | anything read at runtime by this repo's own code |
+| `docs/` | design and user documents, and the ADRs | anything a program parses |
+| `init/` | **illustrative** copies of the supervisor units, and only that | a `go:embed`, or anything treated as authoritative. `internal/cli/laneservice` renders the real ones |
+| `internal/` | every package this repo does not publish — which is all of them | a package meant for external import. Publishing one reopens the `/pkg` question |
+| `plans/` | stateful delivery records: plans, phases, reports, journals | evergreen documentation. A plan is true on its date and is never rewritten |
+| `test/` | the mock-free end-to-end suite (shell), see [e2e](test/e2e.md) | Go tests. Those live beside the code they test |
+| `tools/` | supporting dev instruments — `corpusfixture`, `refusal-injector`, `openbox-git-hook` | anything the release builds. `tools/` is not a release surface |
+
+`install.sh` and `.github/workflows/` stay at the repository root deliberately:
+`curl … | bash` needs a root URL and GitHub demands its own path. Both are
+tool-mandated, and completing the pattern by moving `install.sh` would break the
+documented install command.
+
+### Inside `internal/`
+
+| Package | What it owns |
 |---|---|
 | `provider/` | the SPI: `Installer` (install time) and `HookEngine` (runtime + capabilities) |
-| `adapters/common/hookflow/` | **the engine** — spool, duration stash, advisory sink, findings loop, the enforce cascade, inline evaluation, approval hold, rewake |
-| `adapters/claude-code/`, `adapters/codex/` | one thin adapter each: native event shape, mapper, `OutputContract`, installer |
-| `adapters/common/devconfig/`, `adapters/common/git/` | shared config/posture resolution; commit trailer, notes and attestation |
+| `internal/adapters/common/hookflow/` | **the engine** — spool, duration stash, advisory sink, findings loop, the enforce cascade, inline evaluation, approval hold, rewake |
+| `internal/adapters/claude-code/`, `internal/adapters/codex/` | one thin adapter each: native event shape, mapper, `OutputContract`, installer |
+| `internal/adapters/common/devconfig/`, `internal/adapters/common/git/` | shared config/posture resolution; commit trailer, notes and attestation |
 | `client/` | the openbox-core client: wire payload, AIP signing, verdict parsing |
 | `decision/` | local secret detection and redaction (all that survives [ADR-0017](adr/ADR-0017-inline-policy-evaluation.md)) |
-| `cli/` | the `openbox` CLI — `auth`, `init`, `dev verify`, `hook`, `approve`, `doctor`, `managed` |
-| `actions/openbox-git-action/` | commit → deploy lineage for CI |
-| `api//` | the normalized event contract + wire mapping + conformance suite |
+| `gateway/` | the local model-call relay: byte-identical forward, capture, the gate ([ADR-0021](adr/ADR-0021-openbox-local-gateway.md)) |
+| `telemetry/` | the local OTLP receiver — the `:otel:` lane's intake ([ADR-0022](adr/ADR-0022-native-telemetry-and-transport-lanes.md)) |
+| `transport/` | the in-path CONNECT/TLS relay — the `:proxy:` lane |
+| `cli/` | everything behind the `openbox` commands: `approver`, `prompt`, the gateway's install/inspect/emit halves, and the three-lane install machinery (`activation`, `laneservice`, `atomicfile`) |
+| `conformance/` | the event contract's conformance suite |
+| `internal/actions/openbox-git-action/` | commit → deploy lineage for CI |
+| `depguard/` | the dependency and layering guards ([ADR-0024](adr/ADR-0024-single-module-layout.md)) |
+
+`internal/gateway/internal/dialhook` keeps its **nested** `internal/`
+deliberately: it restricts importers to the `internal/gateway` subtree, which is
+the property it exists to have. Root `internal/` alone would not.
 
 An adapter is only four things: its native hook shape, its mapper, an
 `OutputContract` (how it spells a hook response, where a redactable body lives, what
@@ -83,6 +116,11 @@ an approval verdict becomes) and its installer. If something is
 provider-agnostic it belongs in `hookflow` or `devconfig` — that rule exists because
 the engine was once copy-pasted per adapter, and the copies drifted on the
 enforcement path.
+
+**Layering is enforced by tests now, not by the compiler.** Fifteen modules used
+to make "no adapter imports another, and the CLI reaches them only through the
+registry" mechanical; `internal/depguard` carries it instead, and a test is weaker
+than a compiler. ADR-0024 records that as the price of the collapse.
 
 ## Governance levels
 
@@ -304,7 +342,7 @@ Being precise here is part of the product.
   - **Neither in-path lane refuses a call.** Both carry a written, tested refusal
     path that nothing calls, for the same reason the gateway's is dormant: the
     refusal shape Claude Code does not retry around is unprobed
-    ([ADR-0021](adr/ADR-0021-openbox-local-gateway.md) §9). `probes/refusal-injector/`
+    ([ADR-0021](adr/ADR-0021-openbox-local-gateway.md) §9). `tools/refusal-injector/`
     is the instrument; it needs a bind-capable host, a real install and credentials.
   - **The transport lane installs a CA on the developer's machine, and that is a real
     downgrade accepted for coverage.** It is generated once, stored beside the
@@ -341,34 +379,45 @@ Being precise here is part of the product.
   ([data-and-privacy.md](data-and-privacy.md#what-the-scanner-catches--and-where-it-stops)).
   The same redactor also fires on a base64 literal in a source assignment, which
   rewrote three of this repo's own test files during the gitleaks adoption.
-- **The credential guard bounds direct requires, not transitive code**
-  ([ADR-0023](adr/ADR-0023-credential-guard-scope.md)). `gateway/` must never read
-  the developer's provider credential; its own files are scanned for that and its
-  direct imports are held to a two-module allowlist. What no test bounds is
-  arbitrary transitive code linked into the binary — accepted, and named, because
-  the alternative was an allowlist too long to read. That was already the real
-  boundary: the previous check matched only `github.com/…` requirements, so a direct
-  `golang.org/x/…` one was invisible to it. Each module that takes a dependency now
-  carries its own allowlist — `gateway/guard_test.go`, `decision/guard_test.go`,
-  `telemetry/guard_test.go`, `transport/guard_test.go`,
-  `api//conformance/deps_test.go` — and adding to one is a decision,
-  which is why they fail first. **Do not widen an allowlist to make a direct import
-  pass**; that inverts the ADR's reasoning.
+- **The dependency guard bounds a package subtree's direct imports, not
+  transitive code** ([ADR-0023](adr/ADR-0023-credential-guard-scope.md), amended by
+  [ADR-0024](adr/ADR-0024-single-module-layout.md)). `internal/gateway` must never
+  read the developer's provider credential; its own files are scanned for that and
+  its imports are held to a two-entry allowlist. What no test bounds is arbitrary
+  transitive code linked into the binary — accepted, and named, because the
+  alternative was an allowlist too long to read.
 
-  Dependencies are module-scoped, not repo-wide. Measured 2026-08-30 from each
-  `go.mod`:
+  The bound used to be the module, and until 2026-08-30 there were fifteen of them.
+  With one module, `go.mod` names every external dependency in the repository at
+  once, so a `go.mod`-reading allowlist would either fail outright or be "fixed" by
+  widening to the union — which looks like a fix and removes the control. The
+  allowlists moved to `internal/depguard`, scoped by directory. **Do not widen one
+  to make an import pass**; that inverts the ADR's reasoning.
 
-  | Module | Direct external requires | `go.sum` lines | Bounded by |
-  |---|---|---|---|
-  | `telemetry/` | **11** — 8 × `go.opentelemetry.io/collector/*` (incl. `receiver/otlpreceiver` v0.159.0), `otel/metric`, `otel/trace`, `go.uber.org/zap` | 187 | `telemetry/guard_test.go` |
-  | `transport/` | **1** — `elazarl/goproxy` v1.9.0 | 432 | `transport/guard_test.go` |
-  | `decision/` | **1** — `zricethezav/gitleaks/v8` v8.30.1 | 420 | `decision/guard_test.go` |
-  | `cli/` | **3** — `kardianos/service` v1.3.0, `google/renameio/v2`, `golang.org/x/term` | 625 | — |
-  | `adapters/common/devconfig/` | **2** — `pelletier/go-toml/v2`, `joho/godotenv` | — | — |
-  | `adapters/common/hookflow/` | **1** — `google/renameio/v2` | — | — |
-  | `api//conformance/` | **1** — `santhosh-tekuri/jsonschema/v6` v6.0.3 | — | `deps_test.go` |
-  | `gateway/` | **0** external | 420 | `gateway/guard_test.go` |
-  | every other module | **0** | — | — |
+  **Four subtrees are guarded; the rest are not, and that is a named loss.**
+  Measured 2026-08-30:
+
+  | Subtree | Direct external imports | Bounded by |
+  |---|---|---|
+  | `internal/telemetry` | **11** — 8 × `go.opentelemetry.io/collector/*` (incl. `receiver/otlpreceiver` v0.159.0), `otel/metric`, `otel/trace`, `go.uber.org/zap` | `internal/depguard` |
+  | `internal/transport` | **1** — `elazarl/goproxy` v1.9.0 | `internal/depguard` |
+  | `internal/decision` | **1** — `zricethezav/gitleaks/v8` v8.30.1 | `internal/depguard` |
+  | `internal/gateway` | **0** external — and that is the strongest statement available, not a vacuous one | `internal/depguard`, plus its own credential scan |
+  | `internal/conformance` | **1** — `santhosh-tekuri/jsonschema/v6` v6.0.3, plus `golang.org/x/text` transitively | `internal/depguard`, by package **closure** |
+  | `internal/cli` + `cmd/` | **3** — `kardianos/service` v1.3.0, `google/renameio/v2`, `golang.org/x/term` | **nothing** |
+  | `internal/adapters/common/devconfig` | **2** — `pelletier/go-toml/v2`, `joho/godotenv` | **nothing** |
+  | `internal/adapters/common/hookflow` | **1** — `google/renameio/v2` | **nothing** |
+  | everything else | **0** | **nothing** |
+
+  The rows saying **nothing** are the loss ADR-0024 records: those subtrees never
+  had a guard, and what used to bound them was that adding a dependency meant
+  editing their own small `go.mod`. Now anything already in the union graph is
+  importable from them with no diff outside a `.go` file. `internal/conformance` is
+  the one checked by closure rather than by direct import, because `x/text` arrives
+  through `jsonschema` and an import walk cannot see it.
+
+  The whole repository has **19 direct external requires** in one `go.mod`, which
+  is the union of what the fifteen modules declared.
 
   **otlpreceiver's transitive tree is an accepted cost, stated with the numbers
   phase 09 measured** rather than smoothed into "a few libraries": **492 transitive

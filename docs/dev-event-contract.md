@@ -1,7 +1,7 @@
 # `api/` — normalized developer-runtime event contract
 
 **Story:** STORY-SL-1 · **Version:** the `schema_version` `const` in
-[the schema](schema/dev-event.schema.json) is the authority — v1.1 added the turn pair
+[the schema](../api/dev-event.schema.json) is the authority — v1.1 added the turn pair
 (ADR-0014), v1.2 tool `status`, the subagent/denial/error types and the turn span
 (ADR-0018), v1.3 tool content and the signals' free text (ADR-0019 P1), v1.4 the turn's
 thinking (ADR-0019 P3) · **Status:** built + validated (v1.0 carried G1_READY + G3_REVIEW,
@@ -19,14 +19,14 @@ or the wire model (PRD **FR-4**, architecture **§1b**).
 
 | Path | What |
 |---|---|
-| [`schema/dev-event.schema.json`](schema/dev-event.schema.json) | The contract — JSON Schema (draft 2020-12), language-neutral. 7 lifecycle event types, common envelope, `tool{}`, `span`, gated `content`, canonical `verdict` enum. |
+| [`schema/dev-event.schema.json`](../api/dev-event.schema.json) | The contract — JSON Schema (draft 2020-12), language-neutral. 7 lifecycle event types, common envelope, `tool{}`, `span`, gated `content`, canonical `verdict` enum. |
 | [`MAPPING.md`](MAPPING.md) | How the contract maps onto the base-SDK unified wire model on openbox-core (ADR-0004, ADR-0013). SL-3 builds payloads from this without guessing. §3's field-home table is the authority on what the serializer reads; also carries the downstream-consumer sweep (INV-8) and client signing/transport notes. |
 | [`COVERAGE.md`](COVERAGE.md) | How Claude Code / Cursor / Codex real event surfaces map onto the lifecycle types, field-derivation rules, and the bounded non-goals. The reference for adapter authors (SL-4/7/8). |
-| [`conformance/`](conformance/) | Go conformance harness (OD17). Dependency-free; validates samples against the schema and enforces the INV-2 content gate. |
+| [`conformance/`](../internal/conformance/) | Go conformance harness (OD17). Dependency-free; validates samples against the schema and enforces the INV-2 content gate. |
 
 ## The lifecycle event types
 
-The `event_type` enum in [the schema](schema/dev-event.schema.json) is the list, and
+The `event_type` enum in [the schema](../api/dev-event.schema.json) is the list, and
 COVERAGE.md §1 maps each one onto the providers' native hooks. v1.0's original seven
 have since been joined by the turn pair (ADR-0014) and by `SubagentStarted` /
 `PermissionDenied` / `APIError` (ADR-0018).
@@ -101,6 +101,6 @@ toolchain and no module downloads.
   package to validate outbound events before signing/POST.
 - **Adapters (SL-4/7/8):** map native tool payloads onto this schema in `emit()`.
 - **EXT-core — RETIRED (ADR-0004 / E7-S2):** dev events now map to stock base wire types that
-  openbox-core already accept-lists; no patch is needed. See [`ext-core/README.md`](ext-core/README.md).
+  openbox-core already accept-lists; no patch is needed. See `ext-core/README.md` (retired 2026-07-15; [ADR-0004](adr/ADR-0004-base-wire-unification.md) is the record).
   The one additive core change E7 keeps is the semantic classifier (`shell`→`shell_command`,
   `mcp`→`mcp_tool_call`), not an accept-list.

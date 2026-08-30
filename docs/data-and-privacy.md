@@ -422,7 +422,7 @@ larger than the table above can show in one row.
   that from a pricing table, and fabricating it here would invent a number. No prompt, no
   completion, no body, no headers, no credential fingerprint. Its mapper takes **no
   redactor**, because there is nothing to redact
-  (`cli/internal/telemetryemit/mapper.go`).
+  (`internal/cli/telemetryemit/mapper.go`).
 
 **One environment key is deliberately withheld.** Claude Code supports
 `OTEL_LOG_RAW_API_BODIES`, which makes the client write raw prompt and completion
@@ -584,7 +584,7 @@ enforce mode or not: the prompt, the assistant's reply, tool input, tool output,
 the refusal reasons. **The prompt is no longer exempt** — it was the one field
 assigned directly instead of through the mapper's redactor, so it egressed unscanned
 with `secret_detection` fully on; that was fixed on 2026-08-26 and conformance C42
-asserts it on the outbound bytes (`adapters/claude-code/mapper.go:225`). The same
+asserts it on the outbound bytes (`internal/adapters/claude-code/mapper.go:225`). The same
 shape is **still live for Codex**, whose mapper has no redactor at all — see
 [COVERAGE.md §3.4](../docs/COVERAGE.md). Redaction runs **before**
 attachment in all cases — a redaction applied

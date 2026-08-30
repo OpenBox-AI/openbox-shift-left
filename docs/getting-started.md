@@ -15,7 +15,7 @@ order wrong.
 
 Examples use `--provider claude-code`; substitute `--provider codex` and most steps
 are the same. Codex differs in four ways worth knowing up front
-(`adapters/codex/README.md`): it asks you to trust new hooks via `/hooks` before they
+(`internal/adapters/codex/README.md`): it asks you to trust new hooks via `/hooks` before they
 run, it maps an approval-required verdict to a deny rather than a prompt, it cannot
 wake a session — so a late approval decision reaches you through the findings
 channel — and its hooks are **user-wide only**, so `--scope local` is rejected

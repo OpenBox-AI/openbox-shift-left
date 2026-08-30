@@ -107,10 +107,10 @@ stored span.
 
 ### Scope held constant
 
-The adapter-facing contract (`api/dev-event.schema.json`
+The adapter-facing contract (`contracts/dev-event/schema/dev-event.schema.json`
 v1.0) is **unchanged** — no `schema_version` bump. Adapters, mappers, the spool,
 the duration stash, local enforcement (INV-3b) and the approval loop are
-untouched. `api//conformance` passed with zero edits, which is the
+untouched. `contracts/dev-event/conformance` passed with zero edits, which is the
 two-layer split ADR-0004 established working as designed. Event volume is
 unchanged: two POSTs per tool call, as before.
 
@@ -189,7 +189,7 @@ stores an `ActivityCompleted` for an existing `activity_id` as its own row rathe
 than merging, deduping or rejecting it. The dedupe key includes `event_type`
 (`validation.go:96`), which says it should — but that is source-reading, and this
 repo's own rule is that unit tests and code reading are not evidence that a hook
-works. `test/run-all.sh` against a live local stack is what settles it; until
+works. `testbed/run-all.sh` against a live local stack is what settles it; until
 that run, MAPPING.md §7 carries the claims as underived.
 
 ## Alternatives rejected

@@ -88,7 +88,7 @@ So on a machine set up with the default:
 
 Anyone reasoning about fleet coverage must therefore treat a default install as
 **partial by construction**. The fleet answer is `--scope global` plus managed
-settings (`deployments/managed/`), and the docs say so where a user will read it —
+settings (`deploy/managed/`), and the docs say so where a user will read it —
 `docs/getting-started.md`, not only here.
 
 Codex is **user-scoped only**: its hooks live at `$CODEX_HOME/hooks.json` or

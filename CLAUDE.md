@@ -35,7 +35,7 @@ Provider-agnostic engine + one thin adapter per tool behind a normalized event
 contract. Adding a provider is an adapter, not an engine change.
 
 The SPI (`provider/`) is `Installer` (install time) + `HookEngine` (runtime +
-capabilities). The engine is `adapters/common/hookflow`: spool, duration stash,
+capabilities). The engine is `internal/adapters/common/hookflow`: spool, duration stash,
 advisory sink, findings loop, the enforce cascade and its gate sequence, inline
 evaluation, approval hold, rewake. An adapter is four things — its
 native hook shape, its mapper, an `OutputContract`, its installer.
@@ -47,22 +47,38 @@ reintroduce that: if something is provider-agnostic it goes in `hookflow` or
 
 ## Where things live
 
+One module (ADR-0024, superseding ADR-0011). Top level first:
+
+| Path | What |
+|---|---|
+| `cmd/` | the two shipped binaries: `openbox`, and `openbox-git-action` (the deploy-lineage CLI) |
+| `internal/` | every package — see below |
+| `tools/` | dev instruments that ship nowhere: `corpusfixture`, `refusal-injector`, `openbox-git-hook` |
+| `api/` | the dev-event JSON Schema, and nothing else. Prose about the wire is in `docs/` |
+| `build/` | `.goreleaser.yaml` |
+| `deployments/` | managed-settings templates for MDM |
+| `init/` | ILLUSTRATIVE supervisor units + README. `internal/cli/laneservice` renders the real ones — never embed these |
+| `test/` | the mock-free end-to-end suite (`docs/test/e2e.md`) |
+| `docs/` | user documentation and ADRs — keep it true, and keep it short |
+| `install.sh`, `.github/workflows/` | at the root deliberately: `curl \| bash` needs a root URL, GitHub demands its own path |
+
+Inside `internal/`:
+
 | Path | What |
 |---|---|
 | `provider/` | the SPI |
-| `adapters/common/hookflow/` | the engine every adapter runs on |
-| `adapters/common/devconfig/`, `adapters/common/git/` | shared config/posture; trailer, notes, attestation |
-| `adapters/claude-code/`, `adapters/codex/` | one thin adapter each |
+| `internal/adapters/common/hookflow/` | the engine every adapter runs on |
+| `internal/adapters/common/devconfig/`, `internal/adapters/common/git/` | shared config/posture; trailer, notes, attestation |
+| `internal/adapters/claude-code/`, `internal/adapters/codex/` | one thin adapter each |
 | `client/` | core client: payload, AIP signing, verdicts |
 | `decision/` | local secret detection + redaction — all that survives ADR-0017 |
-| `gateway/` | the local model-call relay: byte-identical forward, capture, the gate (ADR-0021) |
+| `gateway/` | the local model-call relay: byte-identical forward, capture, the gate (ADR-0021). Its `internal/dialhook` keeps a NESTED internal/ on purpose |
 | `telemetry/` | the local OTLP receiver — the `:otel:` lane's intake (ADR-0022) |
 | `transport/` | the in-path CONNECT/TLS relay — the `:proxy:` lane. Allowlist, CA, and the hijack that hands an intercepted connection to `gateway` (ADR-0022) |
-| `cli/` | the `openbox` CLI, incl. `cli/internal/approver` (ADR-0012), `cli/internal/prompt` (masked input), the gateway's install/inspect/emit halves (`gatewayservice`, `gatewaycheck`, `gatewayemit` — the last of which serves BOTH in-path lanes via its `Lane`), and the three-lane install machinery: `activation` (settings-env record + the derived producer election + the per-lane key sets), `laneservice` (every supervisor unit, one `Spec` per lane), `atomicfile` |
-| `actions/openbox-git-action/` | commit→deploy lineage for CI |
-| `api//` | event schema, wire mapping, conformance |
-| `test/` | the mock-free end-to-end suite (`docs/test/e2e.md`) |
-| `docs/` | user documentation — keep it true, and keep it short |
+| `cli/` | everything behind the `openbox` commands, incl. `approver` (ADR-0012), `prompt` (masked input), the gateway's install/inspect/emit halves (`gatewayservice`, `gatewaycheck`, `gatewayemit` — the last of which serves BOTH in-path lanes via its `Lane`), and the three-lane install machinery: `activation` (settings-env record + the derived producer election + the per-lane key sets), `laneservice` (every supervisor unit, one `Spec` per lane), `atomicfile` |
+| `conformance/` | the event contract's conformance suite |
+| `internal/actions/openbox-git-action/` | commit→deploy lineage for CI |
+| `depguard/` | the dependency and layering guards. **Run these with `-count=1`** — see below |
 
 `.claude/` and `.fab7/` are local tooling and git-ignored — do not commit them.
 
@@ -149,8 +165,8 @@ reintroduce that: if something is provider-agnostic it goes in `hookflow` or
   practical consequences until the rule is fixed: **check any file this repo
   writes for that placeholder**, and prefer DERIVING a base64 test fixture in
   code (`base64.StdEncoding.EncodeToString(seed)`) over writing the literal —
-  `cli/internal/telemetryemit/sentinel_test.go` does exactly that, and says why.
-  `cli/internal/corpusfixture` now REFUSES to commit any fixture carrying the
+  `internal/cli/telemetryemit/sentinel_test.go` does exactly that, and says why.
+  `internal/cli/corpusfixture` now REFUSES to commit any fixture carrying the
   marker, for the reason that generalizes: a corrupted fixture still parses and
   still replays, so every assertion built on it silently becomes a statement
   about the accident rather than about the product.
@@ -192,9 +208,9 @@ reintroduce that: if something is provider-agnostic it goes in `hookflow` or
 ## Build and test
 
 ```bash
-go build ./cli/...                 # the binary
-cd <module> && go test ./...        # per module (go.work lists them all, ADR-0011)
-./test/run-all.sh               # end to end, needs a local OpenBox stack
+go build ./...                     # everything, from the root — one module (ADR-0024)
+go test -race -count=1 ./...       # -count=1 is required: see internal/depguard
+./test/run-all.sh                  # end to end, needs a local OpenBox stack
 ```
 
 ## Current state
@@ -444,8 +460,8 @@ verifying ADR-0018 against the first real session's 66 events:
   error to keep: over-keep, never over-delete. `openbox doctor` grew a
   duplicate-engine warning built on the SAME classifier, deliberately, so the
   check and the fix cannot disagree about what "ours" means; it reaches the
-  adapter through `cli/internal/providers` because `TestOnlyTheRegistryImportsAdapters`
-  forbids `cli/cmd/openbox` importing an adapter directly. Two limits stay: the
+  adapter through `internal/cli/providers` because `TestOnlyTheRegistryImportsAdapters`
+  forbids `cmd/openbox` importing an adapter directly. Two limits stay: the
   repair happens only on the next `init` in that directory, and already-stored
   duplicates are not corrected.
   **The sweep de-duplicates, it does not only replace** — and shipping the
@@ -468,7 +484,7 @@ verifying ADR-0018 against the first real session's 66 events:
   bundle-era keys (`bundle_version`, `bundle_policy_id`, `bundle_sha256`,
   `staleness`, `bundle_integrity`), the `Staleness` type and its 7 consts are
   deleted outright, per the `require_verified_bundle` precedent; absence is
-  asserted rather than left to the empty-value guard. `adapters/common/git`
+  asserted rather than left to the empty-value guard. `internal/adapters/common/git`
   defines its OWN `BundlePolicyID`/`BundleSHA256` for the attestation envelope —
   different struct, shipping feature, do not rename repo-wide.
 
@@ -674,7 +690,7 @@ worth not re-litigating:
 discarded — while package `gateway` tested the relay against a stub `Emitter` and
 package `client` tested the span builder against a hand-written `DevEvent`. **A fake
 at each end of a seam with no implementation between them keeps both suites green and
-proves nothing about the seam.** `cli/cmd/openbox/gatewaycapture_test.go` is the
+proves nothing about the seam.** `cmd/openbox/gatewaycapture_test.go` is the
 control: it drives the real command into the real spool with no fake anywhere.
 
 **Status: implemented, unit- and conformance-verified, green under `-race` plus both
@@ -870,7 +886,7 @@ receiver's nil-logger panic happened entirely before any bind, but lived inside
 And **choreography can be rehearsed in-memory even when the thing it measures
 cannot be.**
 
-`client/memhttptest` serves HTTP over in-memory pipes for hosts that deny bind. It
+`internal/client/memhttptest` serves HTTP over in-memory pipes for hosts that deny bind. It
 is one shared package precisely because six copies is the shape this file already
 names as the original sin, and it needed **no `go.mod` change and no dependency-guard
 widening** — `client` was already a direct allowlisted require of every affected
@@ -918,10 +934,10 @@ removes the unit on any later failure); `--remove-all` restores every managed en
 unloads and deletes every unit, and deletes the CA, logs and activation record
 (NOT the spool — it is outside `~/.openbox` and shared with the hook path) —
 **before** the credential gate, because removal must not require the thing being removed
-to still be usable. `cli/internal/activation` is the shared settings-env mechanism
+to still be usable. `internal/cli/activation` is the shared settings-env mechanism
 (per-lane managed/original record at `~/.openbox/activation.json` 0600, before/after
-SHA-256, first-writer-wins per lane); `cli/internal/laneservice` renders and installs all
-three supervisor units from one `Spec`; `cli/internal/atomicfile` is the one atomic writer.
+SHA-256, first-writer-wins per lane); `internal/cli/laneservice` renders and installs all
+three supervisor units from one `Spec`; `internal/cli/atomicfile` is the one atomic writer.
 Six things worth not re-litigating:
 
 - **The election is DERIVED from the tool's env block, not stored in `dev.json`** — the
@@ -1005,8 +1021,8 @@ through the collector's own unmarshaler and maps end to end. That retires phase 
 the plain-HTTP path only". Six things worth not re-litigating:
 
 - **The enabling seam is the smallest one available, and a `Config.DialContext` field
-  was REJECTED.** `gateway/internal/dialhook` holds the upstream dial (no module
-  outside `gateway` can import it); `gateway/gatewaytest` is the test-only mutator
+  was REJECTED.** `internal/gateway/internal/dialhook` holds the upstream dial (no module
+  outside `gateway` can import it); `internal/gateway/gatewaytest` is the test-only mutator
   with its own non-test-importer tripwire. The hazard the rejected option carries is
   not injection — anything that can set `Config` already sets `Config.Upstream`, where
   the credential goes — it is DRIFT: a production feature later populating the field
@@ -1027,7 +1043,7 @@ the plain-HTTP path only". Six things worth not re-litigating:
   header / 5,049 flow-paired), all from run `20260827T063932Z-225cac`: one machine,
   one workload, all subscription-OAuth. **The all-zero `x-stainless-retry-count` is
   evidence the header EXISTS, not evidence about retry-around behaviour** — probe A
-  stays the only source for ADR-0021 §9, and `probes/refusal-injector/` is its
+  stays the only source for ADR-0021 §9, and `tools/refusal-injector/` is its
   instrument.
 - **Four self-inflicted measurement errors are recorded rather than quietly fixed**,
   because the shape recurs: a drill that reported RED with `-run` pointed at the wrong
@@ -1076,22 +1092,29 @@ ruling; no fix is chosen.**
 Next: the Cursor adapter; policy template packs; and the live half of everything above —
 the dormant test phases (35, 45, 46, 47) and probe A, which additionally needs a
 bind-capable host, a real install and credentials. The language floor is
-`go 1.27.0` across `go.work` and all fifteen modules (`transport`, `telemetry` and
-`probes/refusal-injector` joined since), so every dependency resolves at latest
-with no pin. **Dependencies are module-scoped now, not "one for the
-repo"**: `cli` has `golang.org/x/term` (masked input, ADR-0015) and
-`google/renameio/v2`; `api//conformance` has
-`santhosh-tekuri/jsonschema/v6` (+ `golang.org/x/text`, D-OSS-5), which reaches
-the test graphs of both adapters and `client`; `adapters/common/devconfig` has
-`pelletier/go-toml/v2` (D-OSS-6) and `joho/godotenv` (D-OSS-7);
-`adapters/common/hookflow` has `google/renameio/v2` (D-OSS-8); `cli` also has
-`kardianos/service` (D-OSS-3); `telemetry` has **eleven** (eight
+`go 1.27.0` in the repository's one `go.mod`, so every dependency resolves at
+latest with no pin. **Dependencies are repo-wide now** — that inverted on
+2026-08-30 with the collapse (ADR-0024), and the sentence that stood here said the
+opposite. **What is still SUBTREE-scoped is the GUARD**, not the dependency:
+`internal/depguard` holds the allowlists, and only four subtrees have one. Which
+subtree takes which is still worth knowing, because it is what the allowlists
+assert: `internal/cli` + `cmd/` have `golang.org/x/term` (masked input, ADR-0015),
+`google/renameio/v2` and `kardianos/service` (D-OSS-3), **and no guard**;
+`internal/conformance` has `santhosh-tekuri/jsonschema/v6` (+ `golang.org/x/text`,
+D-OSS-5), which reaches the test graphs of both adapters and `client`, and is the
+one guarded by CLOSURE rather than by direct import — `x/text` arrives through
+jsonschema and no import walk can see it; `internal/adapters/common/devconfig` has
+`pelletier/go-toml/v2` (D-OSS-6) and `joho/godotenv` (D-OSS-7), **no guard**;
+`internal/adapters/common/hookflow` has `google/renameio/v2` (D-OSS-8), **no
+guard**; `internal/telemetry` has **eleven** (eight
 `go.opentelemetry.io/collector/*` including `receiver/otlpreceiver`, plus
-`otel/metric`, `otel/trace` and `go.uber.org/zap`, D-OSS-2); `transport` has
-`elazarl/goproxy` (D-OSS-1); `decision` has `zricethezav/gitleaks/v8` (D-OSS-4).
-**Nineteen DISTINCT external modules now, up from one** — 20 by per-module entry,
-because `renameio` is required by both `cli` and `hookflow`; keep the two numbers
-apart rather than picking whichever is being argued — and the number that is actually paid is transitive: phase 09 measured
+`otel/metric`, `otel/trace` and `go.uber.org/zap`, D-OSS-2); `internal/transport`
+has `elazarl/goproxy` (D-OSS-1); `internal/decision` has
+`zricethezav/gitleaks/v8` (D-OSS-4); `internal/gateway` has **zero external**,
+which is what makes its lexical credential scan sufficient rather than lucky.
+**Nineteen DISTINCT external modules, in one `go.mod`** — the per-module count of
+20 is retired with the modules, since `renameio` no longer has two entries — and
+the number that is actually paid is transitive: phase 09 measured
 `telemetry`'s tree at **492 transitive packages / 124 modules in graph** (against
 `gateway`'s 381 / 206), with a **leak check of zero** — no collector require reaches
 `gateway`, `decision`, `client`, `cli` or either adapter. The binary
@@ -1100,14 +1123,16 @@ is **40,287,986 bytes (38.4 MB) on darwin/arm64 via the release path
 the 17 MB recorded while the mapper was unlinked; OD5 accepted +16.5 MB, so the
 delivered total is ~5 MB above the number the decision was made on. Three things
 follow.
-**A new dependency in a shared module needs `go mod tidy` in every module that
-transitively depends on it**, or `GOWORK=off` builds fail on a missing go.sum
-entry while the workspace build stays green — the release path is the one that
-breaks. And **`renameio` is `!windows` on every file**, so it sits behind a
-build-tagged `atomicWriteFile` helper: unix fsyncs, Windows keeps the prior
-temp+rename. Each module with a non-stdlib dependency carries its own allowlist
-test — `gateway/guard_test.go`, `conformance/deps_test.go`, `decision/guard_test.go`
-— and adding to one is a decision, which is why they fail first.
+**A new dependency is now one `go mod tidy` in one place**, which retires the
+whole class where a shared module's new require made `GOWORK=off` fail on a
+missing go.sum entry while the workspace build stayed green. **`renameio` is
+`!windows` on every file**, so it still sits behind a build-tagged
+`atomicWriteFile` helper: unix fsyncs, Windows keeps the prior temp+rename. The
+allowlists live in `internal/depguard` — one file, four subtrees plus the
+conformance closure — and adding to one is a decision, which is why they fail
+first. **Run them with `-count=1`**: the conformance guard shells out to `go list`,
+and a child process's file reads never reach the test cache's log, so without the
+flag it can serve a stale pass.
 
 **`kardianos/service` owns the gateway's unit file but NOT its path, and that has a
 test consequence** (D-OSS-3): on darwin it derives the home from `user.Current()`
@@ -1126,8 +1151,10 @@ existed. `launchctl` start/stop stayed ours: the library uses the older `load`/
 used to reject every requirement outside gateway's two-entry allowlist, transitive
 ones included; that was untenable once an allowlisted module grew its own tree, and
 enumerating the closure would make the allowlist unreadable — the one thing it
-exists to be. So the bound moved: direct requires are checked at each module, and
-transitive code is bounded at the module that took the dependency. **What is no
+exists to be. So the bound moved: direct requires were checked at each module, and
+transitive code bounded at the module that took the dependency. **ADR-0024 moved
+it again** — with one module the bound is the package SUBTREE, and the allowlists
+live in `internal/depguard`. **What is no
 longer bounded by any test is arbitrary transitive code**, and that was already true
 before — the old check matched only lines starting `github.com/`, so a direct
 `golang.org/x/…` require was invisible to it. The host gap is closed while the scope

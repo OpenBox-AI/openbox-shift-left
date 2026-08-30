@@ -1,6 +1,7 @@
 # ADR-0023 — The credential guard bounds DIRECT requires only
 
 **Status:** Accepted
+**Amended by:** [ADR-0024](ADR-0024-single-module-layout.md) (2026-08-30) — the bound moves from the module to the package subtree
 **Date:** 2026-08-28
 **Supersedes in part:** the go.mod half of `gateway/guard_test.go` as written for
 [ADR-0021](ADR-0021-openbox-local-gateway.md)
@@ -56,7 +57,7 @@ actually checkable:
 | The gateway imports nothing outside two modules | the import half of `TestGatewayImportsAreConfined` | **unchanged** |
 | The gateway *requires* nothing outside two modules, directly | `unallowedDirectRequires` | **narrowed** — indirect skipped |
 | `decision`'s direct dependencies are reviewed | `decision/guard_test.go` | **new** |
-| `api//conformance`'s are reviewed | `conformance/deps_test.go` | added by D-OSS-5 |
+| `contracts/dev-event/conformance`'s are reviewed | `conformance/deps_test.go` | added by D-OSS-5 |
 | Arbitrary transitive code resolves no provider credential | — | **not bounded by any test** |
 
 The last row is the accepted residual risk. It is named rather than softened.
@@ -118,3 +119,30 @@ reject:
 
 `decision/guard_test.go` mirrors it with an empty allowlist and its own seeded
 case.
+
+## Amendment, 2026-08-30 — the bound is a package subtree now
+
+This ADR's scope sentence says transitive code is bounded **at the module that
+took the dependency**. With one module ([ADR-0024](ADR-0024-single-module-layout.md))
+that sentence has no referent, and a guard whose documentation no longer describes
+what it does is worse than no guard.
+
+The full amendment is in ADR-0024 under *The ADR-0023 amendment*. In brief:
+
+- the bound is the **package subtree**, and the guards live in `internal/depguard`;
+- membership is **entry-or-subpackage with a slash boundary**, because allowlists
+  name module paths while imports name package paths;
+- an `// indirect` requirement is invisible to an import walk;
+  `internal/conformance` keeps a package **closure** check for exactly that
+  reason;
+- the transitive hole this ADR already accepted is **unchanged in kind and wider
+  in reach**, because any package may now import any other;
+- `gateway`'s go.mod cross-check is **dissolved, conditionally** — only because
+  the import walk covers `_test.go` files and classifies repo-local imports;
+- **nine previously unguarded modules lose their `go.mod` as a review surface**,
+  accepted as a named loss rather than answered with a root-level allowlist.
+
+**Which allowlist fails first, for someone adding a dependency:** the subtree
+guard in `internal/depguard` for `internal/{decision,telemetry,transport,gateway}`,
+and the closure check for `internal/conformance`. Everywhere else nothing fails —
+that is the named loss above, not an oversight.

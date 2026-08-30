@@ -15,7 +15,7 @@
   and make every path reference in the repo true again.
 - **Priority:** P1 — a governance product that overstates itself is the failure it
   exists to prevent.
-- **Implementation status:** not started · **Review:** not reviewed
+- **Implementation status:** COMPLETE (2026-08-30) · **Review:** self-verified; report at `reports/adrs-260830.md`
 
 ## Key insights
 
@@ -127,13 +127,13 @@ someone will otherwise reverse as tidying:
 
 ## Todo list
 
-- [ ] ADR-0024 written; three reasons individually dispositioned
-- [ ] ADR-0011 superseded header; ADR index updated
-- [ ] ADR-0023 amended
-- [ ] `CLAUDE.md` table + :800 corrected
-- [ ] `architecture.md` §Layout rewritten
-- [ ] path sweep clean for live references
-- [ ] old plan marked superseded
+- [x] ADR-0024 written; R1 inverted / R2 lost-and-replaced-by-a-test / R3 already neutral, each named separately; the revisit condition recorded as met CONCURRENTLY, not beforehand
+- [x] ADR-0011 superseded header + note, **body untouched**; index updated
+- [x] ADR-0023 amended, ending with which allowlist fails first — and the honest answer that in most subtrees nothing does
+- [x] `CLAUDE.md` table rewritten; the one live module-count claim rephrased; the Current-state dependency paragraph said *"module-scoped now"*, exactly inverted, and now distinguishes repo-wide DEPENDENCIES from subtree-scoped GUARDS
+- [x] `architecture.md` §Layout rewritten — one row per top-level directory with a *what must not go here* clause; the assurance table's "Bounded by" column now says `nothing` for five subtrees
+- [x] sweep restricted to multi-segment paths (a bare `gateway/` is prose as often as a path); a link check then found **18 dangling links** from the contract prose's move, all fixed — 0 remain
+- [x] old plan already marked superseded before this phase began
 
 ## Success criteria
 
@@ -170,3 +170,13 @@ someone will otherwise reverse as tidying:
 
 Phase 07 adds the convention statement and the check that stops the new layout
 drifting the way the old one did.
+
+## Defect found and undone in this phase
+
+**Phase 05's sweep damaged eight ADRs.** Its exclusion list covered `plans/` and
+not `docs/adr/`, and in ADR-0011 it produced literal nonsense (`api//conformance`).
+ADRs are stateful in exactly the way plans are. All eight were reverted before this
+phase's own edits; the net ADR change here is additions only.
+
+The rule that generalizes: **an exclusion list for "stateful" has to name every
+stateful surface.** `plans/` is not the only one.
