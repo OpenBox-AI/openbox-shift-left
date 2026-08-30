@@ -17,7 +17,7 @@ import (
 // short-lived processes, so without shared state the completed span's
 // start_time would be its own timestamp.
 //
-// Mirrors the session registry (adapters/common/git/registry.go): the
+// Mirrors the session registry (internal/adapters/common/git/registry.go): the
 // started hook writes a tiny record keyed by the tool call's pairing key; the
 // completed hook reads+deletes it and stamps ev.StartedAt before the event is
 // spooled, so pairing survives the spool's rotation/recovery-file splitting.

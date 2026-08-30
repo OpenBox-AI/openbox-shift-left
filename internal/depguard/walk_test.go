@@ -28,11 +28,19 @@ import (
 // across them would need a `require`, a `replace`, AND an allowlist entry in each
 // of the six — the exact widening this file exists to prevent. So the guards walk
 // subtrees by FILESYSTEM PATH from the repo root, which needs no module
-// relationship at all. `cli/cmd/openbox/modulewiring_test.go` and
-// `cli/internal/corpusfixture/committed_test.go` both already do this.
+// relationship at all. `internal/cli/corpusfixture/committed_test.go` already
+// does this, and `cli/cmd/openbox/modulewiring_test.go` did too until the
+// collapse deleted it -- the workspace-resolution bug it guarded became
+// unrepresentable.
 //
-// The package is test-only by construction: every file here is a _test.go, so
-// nothing it contains can be reached from production code.
+// DO NOT DELETE THIS PACKAGE AS UNUSED. Every file here is a _test.go, so it has
+// no non-test source, no importer, and no POSSIBLE importer -- which makes it
+// indistinguishable from dead code to any reachability-based analysis or hygiene
+// pass. Removing it takes the four subtree allowlists, the conformance closure
+// check and the adapter-isolation rule out of CI with nothing turning red. This
+// repo's dead-tree gate already misjudged two binaries by absence-of-reference
+// before a positive check reversed it, and there is no equivalent counter-check
+// for a library package.
 //
 // RUN THESE WITH -count=1. MEASURED 2026-08-30, NOT INFERRED.
 //
@@ -45,8 +53,8 @@ import (
 // That is pre-existing and not specific to this package. Every guard in this repo
 // that walks across module boundaries has it -- `client/memhttptest/guard_test.go`
 // reproduces it exactly, and `gateway/gatewaytest/guard_test.go`,
-// `cli/internal/corpusfixture/committed_test.go` and
-// `cli/cmd/openbox/modulewiring_test.go` read the same way. CI is exposed too:
+// `internal/cli/corpusfixture/committed_test.go` and
+// `cmd/openbox/modulewiring_test.go` read the same way. CI is exposed too:
 // `actions/setup-go` restores the build cache by default, and adding a file to
 // `gateway/` does not change this package's build ID.
 //
@@ -56,6 +64,11 @@ import (
 // TestConformanceClosureIsReviewed runs `go list` as a child process, and a
 // child's file reads never enter the test log. That is what `-count=1` in ci.yml
 // is for afterwards; do not remove it to save CI minutes.
+//
+// That test is named for its SUBJECT and lives in THIS package, not in
+// internal/conformance. If the flag is ever narrowed from `./...`, it has to
+// cover `./internal/depguard/...` -- scoping it to `./internal/conformance/...`
+// reads correct and protects nothing.
 
 // repoPrefix is the module namespace this repo publishes under.
 const repoPrefix = "github.com/openbox-ai/openbox-shift-left"
@@ -101,7 +114,20 @@ func subtreeImports(root, selfPrefix string) (imports, error) {
 		if err != nil {
 			return err
 		}
-		if d.IsDir() || !strings.HasSuffix(path, ".go") {
+		if d.IsDir() {
+			// Prune what is not module source. Every guarded subtree currently has
+			// a git-ignored .claude/ directory on disk, and a stray .go file
+			// dropped in one -- an editor temp file, a scratch fixture, another
+			// session's debris -- would otherwise be attributed to the subtree and
+			// fail the allowlist for a file the module never compiled. A guard
+			// that fails on tooling debris gets disabled, which is the same
+			// outcome as not having it.
+			if skipDir[d.Name()] || strings.HasPrefix(d.Name(), ".") {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !strings.HasSuffix(path, ".go") {
 			return nil
 		}
 		files++
@@ -139,6 +165,10 @@ func subtreeImports(root, selfPrefix string) (imports, error) {
 	out.external, out.repoLocal = sorted(ext), sorted(local)
 	return out, nil
 }
+
+// skipDir names directories that hold no module source. Dot-directories are
+// pruned by prefix; these are the ones without a leading dot.
+var skipDir = map[string]bool{"testdata": true, "node_modules": true, "vendor": true}
 
 // under reports whether importPath is prefix itself or a package beneath it.
 //
@@ -212,11 +242,9 @@ func dead(got []string, allow map[string]bool) []string {
 
 // repoRoot walks up to the repository root.
 //
-// The marker must survive phase 03: `go.work` is deleted by it, and four other
-// guards in this repo currently t.Fatalf on exactly that. So either marker
-// counts — the workspace file today, the root module file after — and one of the
-// two is always true.
-//
+// The marker is the root go.mod. It was go.work while the repo had fifteen
+// modules -- the only file true from every one of them -- and four guards here
+// t.Fatalf'd on its absence, which is how the collapse surfaced them.//
 // It FAILS rather than skips when it finds neither, for the same reason
 // subtreeImports refuses an empty tree.
 func repoRoot(t *testing.T) string {
@@ -226,9 +254,6 @@ func repoRoot(t *testing.T) string {
 		t.Fatalf("getwd: %v", err)
 	}
 	for {
-		if _, err := os.Stat(filepath.Join(dir, "go.work")); err == nil {
-			return dir
-		}
 		if b, err := os.ReadFile(filepath.Join(dir, "go.mod")); err == nil {
 			// Line-wise, not a prefix of the file: the root go.mod opens with a
 			// comment block, so the module line is not at byte zero.
@@ -240,7 +265,7 @@ func repoRoot(t *testing.T) string {
 		}
 		parent := filepath.Dir(dir)
 		if parent == dir {
-			t.Fatalf("no go.work or root go.mod above the working directory; the guards would scan the wrong tree")
+			t.Fatalf("no root go.mod above the working directory; the guards would scan the wrong tree")
 		}
 		dir = parent
 	}

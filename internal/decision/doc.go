@@ -40,7 +40,7 @@
 //     verdict.
 //
 // Observe/advisory sessions never invoke the decider; their async spool path
-// (adapters/claude-code) is untouched and INV-3 holds verbatim for them.
+// (internal/adapters/claude-code) is untouched and INV-3 holds verbatim for them.
 //
 // DEPENDENCY BOUNDARY. This subtree's imports are held to an allowlist in
 // internal/depguard, both external and repo-local (ADR-0023 as amended by

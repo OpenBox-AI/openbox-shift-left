@@ -92,7 +92,7 @@ if [ "${after:-0}" -gt "${before:-0}" ]; then
 else
 	tb_bad "no :otel: turn reached governance_events"
 	tb_note "NEEDS A STACK: the mapper is proven on the recorded corpus without one"
-	tb_note "(cli/cmd/openbox/telemetryreplay_test.go). What is unproven without this"
+	tb_note "(cmd/openbox/telemetryreplay_test.go). What is unproven without this"
 	tb_note "run is that core STORES the row — its dedupe key includes event_type,"
 	tb_note "which says it should, but reading core is not evidence."
 fi

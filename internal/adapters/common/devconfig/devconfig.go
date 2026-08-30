@@ -13,8 +13,8 @@
 // merely fixed.
 //
 // It was extracted, behavior-preserving, from
-// adapters/claude-code/creds.go — that adapter keeps thin aliases so its
-// public API and tests are unchanged. Like adapters/common/git, this
+// internal/adapters/claude-code/creds.go — that adapter keeps thin aliases so its
+// public API and tests are unchanged. Like internal/adapters/common/git, this
 // module is dependency-free: it never imports the client, an adapter, or
 // the CLI.
 //

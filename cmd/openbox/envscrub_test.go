@@ -12,7 +12,7 @@ import (
 // suite from inside a live Codex session stamps that session instead of the
 // fixture's and the assertion fails on what looks like a product bug (report
 // SL-11). Unsetting before m.Run keeps the vars out of every child env; the
-// mirror of this scrub lives in adapters/common/git/envscrub_test.go.
+// mirror of this scrub lives in internal/adapters/common/git/envscrub_test.go.
 //
 // Note for anyone re-running the repro: `go test` caches results, and the env
 // here is read by a spawned child rather than the test binary, so the cache

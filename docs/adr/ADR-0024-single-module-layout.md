@@ -94,9 +94,9 @@ silently.
 
 **ADR-0023's bound changes shape.** See the amendment below.
 
-**Nine modules lose their `go.mod` as a review surface.** `cli`, `client`,
-`provider`, `devconfig`, `hookflow`, `git`, both adapters and `refusal-injector`
-never had a dependency guard; what bounded them was that adding a dependency meant
+**Ten modules lose their `go.mod` as a review surface.** `cli`, `client`,
+`provider`, `devconfig`, `hookflow`, `git`, both adapters, `refusal-injector`
+and `actions/openbox-git-action` never had a dependency guard; what bounded them was that adding a dependency meant
 editing their own small `go.mod`. Under one module, anything already in the union
 graph — `viper`, `afero`, `zerolog`, the whole gitleaks tree — becomes importable
 from `client` or `provider` **with no diff outside a `.go` file**. The same

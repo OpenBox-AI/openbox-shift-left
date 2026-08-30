@@ -7,7 +7,7 @@ import (
 // unit.go is the gateway's view of the supervisor unit.
 //
 // The rendering, the paths, the write/remove pair and the escaping moved to
-// cli/internal/laneservice when telemetry and transport needed the same
+// internal/cli/laneservice when telemetry and transport needed the same
 // mechanics. Nothing about the gateway's unit changed: this file names its Spec
 // and keeps the call sites, doctor and the tests reading exactly as before.
 //

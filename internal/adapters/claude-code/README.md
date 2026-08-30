@@ -127,7 +127,7 @@ executable. The hooks invoke `${CLAUDE_PLUGIN_ROOT}/bin/openbox hook claude-code
 <event>`. Packaging/marketplace builds place the per-platform binary instead:
 
 ```bash
-go build -o plugin/bin/openbox ../../cli/cmd/openbox
+go build -o plugin/bin/openbox ../../cmd/openbox
 ```
 
 The standalone `cmd/openbox-cc-hook` alias is **gone**. It was never built by
@@ -144,13 +144,13 @@ is **verified, not activated** for the Phase-1 opt-in pilot (NFR-5).
 into the CLI's `provider` registry (replacing the SL-2 `stub`) is a one-line CLI
 change: the `cli` module imports this adapter and registers a `provider.Installer`
 that delegates to `claudecode.Installer`. It is deferred because the CLI's
-`provider.Installer` interface lives under `cli/internal/` (not importable across
+`provider.Installer` interface lives under `internal/cli/` (not importable across
 modules); moving it out is a `cli`-scoped edit tracked as **SL4-WIRE-1**.
 
 ## Test / validate
 
 ```bash
-cd adapters/claude-code && go build ./... && go vet ./... && go test ./...
+cd internal/adapters/claude-code && go build ./... && go vet ./... && go test ./...
 # 54 tests incl. SL-1 conformance of every emitted event + a real-binary
 # observe-only end-to-end (exit 0, empty stdout, no content leak).
 ```

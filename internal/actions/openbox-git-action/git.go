@@ -12,7 +12,7 @@ import (
 )
 
 // trailerKey is the commit-message trailer that binds a commit to its
-// OpenBox session(s). Reused from the write side (adapters/common/git) so
+// OpenBox session(s). Reused from the write side (internal/adapters/common/git) so
 // both sides agree by construction (there is exactly one authoritative key).
 const trailerKey = obgit.TrailerKey
 

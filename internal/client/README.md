@@ -11,7 +11,7 @@ normalized DevEvent ─▶ strip content (INV-2) ─▶ build GovernanceEventPay
 ```
 
 It is deliberately **not** the control-plane client. Onboarding/registration
-(`POST /agent/create`, human/org credential) lives in `cli/internal/backend`
+(`POST /agent/create`, human/org credential) lives in `internal/cli/backend`
 (STORY-SL-2). This package is the **agent's own** runtime transport: auth is the
 agent's `obx_` runtime key + an Ed25519 AIP signature.
 
@@ -72,7 +72,7 @@ but the client now reads locators and counts *out* of it into
 The client owns **half** the idempotency contract and guarantees it (STORY-SL-14):
 
 - **Stable + unique key.** The CC `event_id` is derived deterministically from the
-  event's own structural fields (adapters/claude-code `deriveID`), so the same
+  event's own structural fields (internal/adapters/claude-code `deriveID`), so the same
   logical event always hashes to the same id and two distinct events never
   collide — robust even if the id is ever recomputed from the spooled record.
 - **On the wire twice.** It rides in `metadata.event_id` **and** in a standard

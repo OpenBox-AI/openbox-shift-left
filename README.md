@@ -463,14 +463,14 @@ Details and current status: **[Assurance](docs/architecture.md#assurance--what-t
 
 ## Contributing
 
-Go 1.27+, no cgo — a `GOTOOLCHAIN=auto` default fetches it for you. The
-repo is a Go workspace of small modules
-([ADR-0011](docs/adr/ADR-0011-multi-module-layout.md)):
+Go 1.27+, no cgo — a `GOTOOLCHAIN=auto` default fetches it for you. The repo is
+one Go module ([ADR-0024](docs/adr/ADR-0024-single-module-layout.md)), laid out
+per `golang-standards/project-layout`:
 
 ```bash
-go build ./cli/...                  # the binary
-cd cli && go test ./...             # one module
-./test/run-all.sh                # the end-to-end suite (needs a local OpenBox stack)
+go build ./...                      # everything, from the root
+go test -race -count=1 ./...        # -count=1 is required; see internal/depguard
+./test/run-all.sh                   # the end-to-end suite (needs a local OpenBox stack)
 ```
 
 Anything provider-agnostic belongs in `internal/adapters/common/`; a new table, endpoint or

@@ -66,19 +66,19 @@ Inside `internal/`:
 
 | Path | What |
 |---|---|
-| `provider/` | the SPI |
+| `internal/provider/` | the SPI |
 | `internal/adapters/common/hookflow/` | the engine every adapter runs on |
 | `internal/adapters/common/devconfig/`, `internal/adapters/common/git/` | shared config/posture; trailer, notes, attestation |
 | `internal/adapters/claude-code/`, `internal/adapters/codex/` | one thin adapter each |
-| `client/` | core client: payload, AIP signing, verdicts |
-| `decision/` | local secret detection + redaction — all that survives ADR-0017 |
-| `gateway/` | the local model-call relay: byte-identical forward, capture, the gate (ADR-0021). Its `internal/dialhook` keeps a NESTED internal/ on purpose |
-| `telemetry/` | the local OTLP receiver — the `:otel:` lane's intake (ADR-0022) |
-| `transport/` | the in-path CONNECT/TLS relay — the `:proxy:` lane. Allowlist, CA, and the hijack that hands an intercepted connection to `gateway` (ADR-0022) |
-| `cli/` | everything behind the `openbox` commands, incl. `approver` (ADR-0012), `prompt` (masked input), the gateway's install/inspect/emit halves (`gatewayservice`, `gatewaycheck`, `gatewayemit` — the last of which serves BOTH in-path lanes via its `Lane`), and the three-lane install machinery: `activation` (settings-env record + the derived producer election + the per-lane key sets), `laneservice` (every supervisor unit, one `Spec` per lane), `atomicfile` |
-| `conformance/` | the event contract's conformance suite |
+| `internal/client/` | core client: payload, AIP signing, verdicts |
+| `internal/decision/` | local secret detection + redaction — all that survives ADR-0017 |
+| `internal/gateway/` | the local model-call relay: byte-identical forward, capture, the gate (ADR-0021). Its `internal/dialhook` keeps a NESTED internal/ on purpose |
+| `internal/telemetry/` | the local OTLP receiver — the `:otel:` lane's intake (ADR-0022) |
+| `internal/transport/` | the in-path CONNECT/TLS relay — the `:proxy:` lane. Allowlist, CA, and the hijack that hands an intercepted connection to `gateway` (ADR-0022) |
+| `internal/cli/` | everything behind the `openbox` commands, incl. `approver` (ADR-0012), `prompt` (masked input), the gateway's install/inspect/emit halves (`gatewayservice`, `gatewaycheck`, `gatewayemit` — the last of which serves BOTH in-path lanes via its `Lane`), and the three-lane install machinery: `activation` (settings-env record + the derived producer election + the per-lane key sets), `laneservice` (every supervisor unit, one `Spec` per lane), `atomicfile` |
+| `internal/conformance/` | the event contract's conformance suite |
 | `internal/actions/openbox-git-action/` | commit→deploy lineage for CI |
-| `depguard/` | the dependency and layering guards. **Run these with `-count=1`** — see below |
+| `internal/depguard/` | the dependency and layering guards. **Run these with `-count=1`** — see below |
 
 `.claude/` and `.fab7/` are local tooling and git-ignored — do not commit them.
 
@@ -94,10 +94,10 @@ Inside `internal/`:
   recreates the drift the check exists to stop.
 - **Non-test Go filenames are flat lowercase with no separators** —
   `approvalhold.go`, `outputcontract.go`, `failurepolicy.go`, `enforceevaluate.go`.
-  Measured: **356 of 356, no exceptions.** An underscore is otherwise reserved for
+  Measured: **0 of 180 use a separator — no exceptions.** An underscore is otherwise reserved for
   what the toolchain reads — `_test.go`, `_unix.go`, `_windows.go`, `_GOARCH.go` —
   and renaming one of those changes what builds.
-  - **Test files may separate words**, and 25 do: `localhooks_quote_test.go`,
+  - **Test files may separate words**, and 23 do: `localhooks_quote_test.go`,
     `content_conformance_test.go`. The underscore names the SUBJECT the file
     covers, which is how a package with thirty test files stays navigable. A test
     file that pairs one-to-one with a source file should match its name

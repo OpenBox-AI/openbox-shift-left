@@ -61,7 +61,7 @@ func decodeBody(t *testing.T, raw []byte) map[string]any {
 // on the wire. It replaces client.AssertHookWireShape, which checked the flat
 // hook-span shape this repo no longer emits.
 //
-// Its twin lives in adapters/claude-code/conformance_parity_test.go and asserts
+// Its twin lives in internal/adapters/claude-code/conformance_parity_test.go and asserts
 // the identical contract. The two are deliberate copies rather than a shared
 // helper: the adapters are separate Go modules, and the property under test is
 // that both produce the SAME shape independently — a shared helper they both

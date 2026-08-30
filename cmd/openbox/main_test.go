@@ -1154,7 +1154,7 @@ func TestCodexHookMisuseIsSafe(t *testing.T) {
 // TestCodexUnifiedBinaryObserveE2E is the story's real-binary observe E2E
 // (AC-10): build the actual `openbox` binary and drive ALL FIVE wired events
 // through `openbox hook codex <event>` with the v0.145.0-shaped fixture
-// payloads from adapters/codex/testdata. Every invocation must exit 0 with
+// payloads from internal/adapters/codex/testdata. Every invocation must exit 0 with
 // EMPTY stdout; the tool hooks spool; no tool content ever reaches the spool;
 // SessionEnd attempts the flush fail-open (no core configured → events remain
 // spooled, exit still 0).

@@ -155,9 +155,16 @@ func moduleSources(t *testing.T) []string {
 // provider credential, and honouring them is what lets the relay work behind a
 // corporate proxy.
 //
-// Scope: this scans THIS MODULE's own files, and TestGatewayImportsOnlyStdlib is
-// what makes that sufficient rather than lucky — with no non-stdlib import
-// reachable, there is no local package for a credential read to hide in.
+// Scope: this scans this SUBTREE's own non-test files, and the import allowlist
+// is what makes that sufficient rather than lucky — with no external import
+// reachable, there is no third-party package for a credential read to hide in.
+//
+// That allowlist lives in internal/depguard now, with the other four. It used to
+// be duplicated here, and the two copies had already drifted: this file's
+// moduleSources skips _test.go (correctly — the fixtures below contain credential
+// literals on purpose), so the local copy could not see an unreviewed import
+// added in a test file, while depguard's walk can. Two allowlists for one subtree,
+// one of them strictly weaker, is the shape this repo already paid for once.
 func TestGatewayReadsNoCredential(t *testing.T) {
 	for _, path := range moduleSources(t) {
 		fset := token.NewFileSet()
@@ -173,78 +180,6 @@ func TestGatewayReadsNoCredential(t *testing.T) {
 	// The guard is only evidence if it is actually looking at the relay.
 	if _, err := os.Stat("proxy.go"); err != nil {
 		t.Fatalf("proxy.go not found, so the guard is not covering the relay: %v", err)
-	}
-}
-
-// allowedNonStdlibImports is the module's entire non-stdlib surface.
-//
-// It started empty, and the change from "zero imports" to "these two" is worth
-// stating rather than absorbing. Phase 05 has the gateway emit through the SAME
-// client and the SAME redactor as the hook path — reusing them is the repo's own
-// rule, and reimplementing signing or secret detection here would be far worse
-// than importing them.
-//
-// What that costs: the lexical scan below no longer covers everything this module
-// can execute. `client` DOES resolve a credential — the OpenBox signing key — and
-// that is required, not a leak. Requirement 5 is about PROVIDER credentials: the
-// gateway must never read the developer's Anthropic key, and pass-through is why
-// it never needs to. So the guarantee is now two narrower statements instead of
-// one broad one: the gateway's own files resolve nothing (the scan above), and
-// its imports are confined to this list (the check below).
-//
-// THE BOUNDARY, since ADR-0023: direct imports and direct requires are bounded
-// HERE; an allowlisted module's own dependencies are bounded at THAT module's own
-// guard (decision/guard_test.go). Indirect requires are skipped by the go.mod
-// check — a reduction in what this test proves, argued in the ADR rather than
-// absorbed. Adding to this list is a decision; so is moving that boundary again.
-var allowedNonStdlibImports = map[string]bool{
-	"github.com/openbox-ai/openbox-shift-left/internal/client":   true,
-	"github.com/openbox-ai/openbox-shift-left/internal/decision": true,
-}
-
-// TestGatewayImportsAreConfined bounds the scan above. A lexical scan cannot
-// follow a call into another package, so an unreviewed import would put code
-// beyond its reach. The allowlist keeps that surface enumerated and small; adding
-// to it is a decision, which is the point of making it fail here first.
-// selfModulePrefix is this module's own import path with its separator.
-//
-// An import rooted here is NOT an external dependency and exempting it is NOT an
-// allowlist widening — the distinction matters because widening the allowlist to
-// make an import pass is exactly what ADR-0023 forbids. The allowlist exists
-// because the credential scan only covers THIS module, so anything it pulls in
-// from elsewhere sits outside the scan. A subpackage of this module is inside it:
-// moduleSources below already walks it, and every rule in this file already
-// applies to it. Reading `gateway/internal/dialhook` as external would have said
-// the opposite of the truth.
-//
-// The trailing slash is load-bearing. Without it the prefix would also match a
-// sibling module whose path merely starts with these characters.
-const selfModulePrefix = "github.com/openbox-ai/openbox-shift-left/internal/gateway/"
-
-func isSelfModule(importPath string) bool {
-	return strings.HasPrefix(importPath, selfModulePrefix)
-}
-
-func TestGatewayImportsAreConfined(t *testing.T) {
-	for _, path := range moduleSources(t) {
-		fset := token.NewFileSet()
-		file, err := parser.ParseFile(fset, path, nil, 0)
-		if err != nil {
-			t.Fatalf("parsing %s: %v", path, err)
-		}
-		for _, spec := range file.Imports {
-			importPath := strings.Trim(spec.Path.Value, `"`)
-			// A stdlib path's first segment carries no dot; anything module-ish
-			// ("github.com/…", "golang.org/x/…") does.
-			first := importPath
-			if idx := strings.Index(first, "/"); idx >= 0 {
-				first = first[:idx]
-			}
-			if strings.Contains(first, ".") && !isSelfModule(importPath) && !allowedNonStdlibImports[importPath] {
-				t.Errorf("%s: import %q is not on the gateway's allowlist — the credential guard only scans this module, so a new external import puts code beyond its reach and needs a deliberate decision",
-					fset.Position(spec.Pos()), importPath)
-			}
-		}
 	}
 }
 
@@ -331,36 +266,5 @@ func fine(h http.Header) string { return strings.ToLower(h.Get("Anthropic-Versio
 	}
 	if hits := scanSource(fset, file); len(hits) != 0 {
 		t.Errorf("scanSource flagged clean source: %v", hits)
-	}
-}
-
-// TestSelfModuleExemptionIsNarrow pins the shape of the exemption added above.
-//
-// It exists because "imports of our own repository are fine" is the version of
-// this rule that would be wrong: `client`, `decision` and `provider` all live
-// under the same repository prefix and all sit OUTSIDE this module's credential
-// scan, which is the entire reason this guard exists. Only paths under this
-// module's own directory are inside it.
-func TestSelfModuleExemptionIsNarrow(t *testing.T) {
-	const repo = "github.com/openbox-ai/openbox-shift-left/"
-	for _, in := range []string{
-		repo + "internal/gateway/internal/dialhook",
-		repo + "internal/gateway/gatewaytest",
-	} {
-		if !isSelfModule(in) {
-			t.Errorf("%q is inside this module but was treated as external", in)
-		}
-	}
-	for _, out := range []string{
-		repo + "internal/client",
-		repo + "internal/client/memhttptest",
-		repo + "internal/decision",
-		repo + "internal/transport",
-		repo + "internal/gatewayfoo",
-		"github.com/elazarl/goproxy",
-	} {
-		if isSelfModule(out) {
-			t.Errorf("%q is outside this module's credential scan but was exempted", out)
-		}
 	}
 }

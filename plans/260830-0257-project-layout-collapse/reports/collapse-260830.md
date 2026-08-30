@@ -173,3 +173,37 @@ one without; the flags, not the layout.
 1. `go mod tidy` with network access — see above.
 2. `.goreleaser.yaml` still carries `GOWORK=off` and a comment describing a
    workspace and `replace` directives that no longer exist. Phase 04.
+
+## Post-review addendum (2026-08-30) — a sweep rewrote hashed data
+
+Code review found that the follow-up path sweep over comments rewrote two lines
+that were **fixture data, not prose**:
+
+```go
+FilePath:     "cli/cmd/openbox/main.go",   ->   "cmd/openbox/main.go"
+```
+
+in `internal/client/{approval_key_pin_test.go, golden_test.go}`. That field is
+**input to the `activity_id` hash and to the golden wire bytes**, so the edit
+broke `TestApprovalKeyIsPinned` and two golden payloads — a change to this
+product's event identity, which CLAUDE.md records as byte-pinned and load-bearing
+for core's dedupe.
+
+Reverted, with a comment at each site saying the value is hashed and must not
+track the tree.
+
+**This is the third time in this plan a mechanical rewrite has hit data instead
+of prose**, and the pattern is now unmistakable: the four-forms audit (F8) asked
+"where do paths hide?", and the missing question is **"which of these paths is an
+input rather than a reference?"** A path in a comment describes the tree. A path
+in a fixture is a value, and correcting it changes a result. The three instances:
+
+1. the `${OPENBOX_REDACTED_*}` corruption this repo already documents, where the
+   redactor rewrote a literal on write;
+2. phase 05's sweep damaging eight ADRs, which are dated records rather than live
+   claims;
+3. this one, where the path was an argument to a hash.
+
+The check that would have caught all three in seconds: **run the suite after a
+sweep, not only a build.** `go build` and `go vet` were green throughout; only the
+tests knew.

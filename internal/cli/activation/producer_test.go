@@ -263,7 +263,7 @@ func merge(maps ...map[string]string) map[string]string {
 func TestLaneKeySetsDoNotOverlap(t *testing.T) {
 	telemetry := TelemetryKeys("127.0.0.1:8789")
 	transport := TransportKeys("127.0.0.1:8790", "/x/ca.pem", nil)
-	// The gateway's one key is owned by cli/internal/gatewayservice rather than by
+	// The gateway's one key is owned by internal/cli/gatewayservice rather than by
 	// this record, but it shares the same env block, so it counts here too.
 	const gatewayKey = "ANTHROPIC_BASE_URL"
 

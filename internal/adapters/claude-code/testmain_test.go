@@ -9,7 +9,7 @@ import (
 )
 
 // TestMain is the asserted-hermeticity control for this package, the twin of
-// adapters/codex's. Codex grew one after its stub-era tests drove a real
+// internal/adapters/codex's. Codex grew one after its stub-era tests drove a real
 // installer at DEFAULT paths and wrote the developer's actual home; this
 // package never got the same guard, and the same class of escape recurred here
 // at a far larger scale — a full test run wrote hook registrations into the

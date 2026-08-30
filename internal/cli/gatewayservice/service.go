@@ -10,7 +10,7 @@ import (
 //
 // The library/custom boundary, the reason both unit bodies are supplied as
 // template overrides, and why Start/Stop stay with the caller are all documented
-// once in cli/internal/laneservice — restating them per lane is how three copies
+// once in internal/cli/laneservice — restating them per lane is how three copies
 // of one decision come to disagree. This file exists so the gateway's call sites,
 // doctor and its tests keep the names they had.
 

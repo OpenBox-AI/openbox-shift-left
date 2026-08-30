@@ -42,7 +42,7 @@ func TestUnitStopTimeoutMatchesTheGracePeriod(t *testing.T) {
 // `openbox gateway --config <path>`; no such flag exists, so flag parsing would
 // reject it and the supervised gateway would fail to start forever.
 func TestUnitsUseFlagsThatExist(t *testing.T) {
-	// The real flag set, as registered by cli/cmd/openbox/gateway.go.
+	// The real flag set, as registered by cmd/openbox/gateway.go.
 	valid := map[string]bool{"--addr": true, "--upstream": true, "--shutdown-grace": true}
 
 	for name, body := range map[string]string{

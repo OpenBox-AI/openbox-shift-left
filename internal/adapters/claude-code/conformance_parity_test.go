@@ -132,7 +132,7 @@ var conformanceParity = []parityRow{
 		goCase:   "TestWire_ToolEventsAreActivityPairs (+ client/testdata/golden/activity_*.json)",
 		baseCase: "",
 		status:   statusGoExtension,
-		note:     "The activity envelope for a tool call: ToolCall->ActivityStarted, ToolResult->ActivityCompleted sharing one activity_id, workflow_type set, no spans/span_count/hook_trigger, no client-set semantic_type. No base analog — the base SDK reserves ActivityCompleted for hook-LESS lifecycle events, so this shape is a deliberate shift-left divergence (see the tool-call-as-activity ADR). adapters/codex/wire_test.go asserts the identical contract; the two are independent copies so a drift in one adapter cannot pass by moving a shared helper.",
+		note:     "The activity envelope for a tool call: ToolCall->ActivityStarted, ToolResult->ActivityCompleted sharing one activity_id, workflow_type set, no spans/span_count/hook_trigger, no client-set semantic_type. No base analog — the base SDK reserves ActivityCompleted for hook-LESS lifecycle events, so this shape is a deliberate shift-left divergence (see the tool-call-as-activity ADR). internal/adapters/codex/wire_test.go asserts the identical contract; the two are independent copies so a drift in one adapter cannot pass by moving a shared helper.",
 	},
 	{
 		goCase:   "",
@@ -227,7 +227,7 @@ func TestConformanceParityMatrix(t *testing.T) {
 // on the wire. It replaces client.AssertHookWireShape, which checked the flat
 // hook-span shape this repo no longer emits.
 //
-// Its twin lives in adapters/codex/wire_test.go and asserts the identical
+// Its twin lives in internal/adapters/codex/wire_test.go and asserts the identical
 // contract. The two are deliberate copies rather than a shared helper: the
 // adapters are separate Go modules, and the property under test is that both
 // produce the SAME shape independently — a shared helper they both called could
@@ -324,7 +324,7 @@ func TestWire_ToolEventsAreActivityPairs(t *testing.T) {
 // ── STORY-SL7-B: cross-ADAPTER parity (Claude Code ↔ Codex) ──────────────────
 //
 // SL7-B ports the E6 enforce cascade onto a SECOND provider (Codex,
-// adapters/codex/enforce_conformance_test.go, cases CDX-C1..CDX-C12). This matrix
+// internal/adapters/codex/enforce_conformance_test.go, cases CDX-C1..CDX-C12). This matrix
 // is the durable record that both adapters assert the SAME invariant set, and
 // where Codex's contract forces a documented DELTA. It is data-only (no import of
 // the codex module — a separate Go module); TestCrossAdapterParityMatrix_SL7B guards

@@ -53,7 +53,7 @@ type Lane string
 const (
 	// LaneGateway is the loopback base-URL relay (ADR-0021).
 	//
-	// Its env writes still go through cli/internal/gatewayservice, which shipped
+	// Its env writes still go through internal/cli/gatewayservice, which shipped
 	// and is socket-verified. The lane identity exists here so the election and
 	// `--remove-all` can reason about all three lanes uniformly.
 	LaneGateway Lane = "gateway"
@@ -427,7 +427,7 @@ func marshalSettings(settings map[string]any) ([]byte, error) {
 //
 // 0644 because the tool reads it and it is the DEVELOPER's config; its
 // permissions are not an assurance boundary. The write is atomic — see
-// cli/internal/atomicfile for why a truncated settings file would block its own
+// internal/cli/atomicfile for why a truncated settings file would block its own
 // repair.
 func writeSettings(path string, raw []byte) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {

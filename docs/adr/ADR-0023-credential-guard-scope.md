@@ -139,7 +139,7 @@ The full amendment is in ADR-0024 under *The ADR-0023 amendment*. In brief:
   in reach**, because any package may now import any other;
 - `gateway`'s go.mod cross-check is **dissolved, conditionally** — only because
   the import walk covers `_test.go` files and classifies repo-local imports;
-- **nine previously unguarded modules lose their `go.mod` as a review surface**,
+- **ten previously unguarded modules lose their `go.mod` as a review surface**,
   accepted as a named loss rather than answered with a root-level allowlist.
 
 **Which allowlist fails first, for someone adding a dependency:** the subtree

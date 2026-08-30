@@ -145,6 +145,10 @@ func goldenCases() []goldenCase {
 	fileCall.Span = &Span{
 		SemanticType: "file_write",
 		Stage:        "started",
+		// A sample path, and it is INPUT TO THE activity_id HASH and to the golden
+		// wire bytes. It does not track the real tree and must not be "corrected"
+		// when a directory moves — a rename sweep already did that once and broke
+		// the byte pin, which is core's dedupe key.
 		FilePath:     "cli/cmd/openbox/main.go",
 		FileOp:       "write",
 		BytesWritten: &bytesWritten,

@@ -71,7 +71,7 @@ type Lane struct {
 
 // The two in-path lanes. The telemetry lane (`:otel:`) is NOT here: it does not
 // observe a relayed exchange, so it has no gateway.Captured to map and builds its
-// event in cli/internal/telemetryemit instead.
+// event in internal/cli/telemetryemit instead.
 var (
 	LaneGateway = Lane{
 		Name:             "gateway",

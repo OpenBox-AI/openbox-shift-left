@@ -11,7 +11,7 @@ import (
 // Credential resolution for the hook binary. The provider-neutral
 // config/credential machinery — the dev.json `DevConfig` contract, the
 // Resolve* precedence rules, and the OS/file secret-store readers — lives
-// in the shared module adapters/common/devconfig, consumed by every
+// in the shared module internal/adapters/common/devconfig, consumed by every
 // adapter (ADR-0007). This file is the Claude Code adapter's thin,
 // behavior-preserving facade over it: every symbol below keeps its
 // pre-extraction name, signature, and semantics (the full original

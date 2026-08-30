@@ -5,7 +5,7 @@ binds the pushed commit to the OpenBox session(s) that produced it (reading the
 `OpenBox-Session:` trailers that the SL-5 hook wrote) and emits a **`Deploy`**
 governance event, through the shared SL-3 client, carrying the resolved session
 set. It is the read/resolve counterpart to the write side in
-[`adapters/common/git`](../../adapters/common/git) (SL-5).
+[`internal/adapters/common/git`](../../internal/adapters/common/git) (SL-5).
 
 ## What it guarantees (INV-6)
 

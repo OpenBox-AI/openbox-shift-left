@@ -106,11 +106,18 @@ jobs:
           for dir in */; do
             d="${dir%/}"
             case "$d" in .*|plans) continue;; esac
-            # A ROW, not a mention. `grep -q` on the bare name passes when some
-            # other row merely refers to the directory in prose — deleting the
-            # tools/ row left the cmd/ row's "belongs in `tools/`" behind, and the
-            # drill came back green.
-            printf '%s\n' "$layout" | grep -qE "^\\| \`$d/\`" || missing="$missing $d"
+            # An exact FIRST-CELL match, which is the rule stated directly:
+            # "there is a row whose first cell is this directory".
+            #
+            # Two weaker forms were tried and both passed when they should not
+            # have. `grep -q` on the bare name matched any mention, so deleting
+            # the tools/ row left the cmd/ row's "belongs in `tools/`" behind.
+            # Anchoring with grep -E then interpolated the directory name into a
+            # PATTERN, so a directory named `a.b` was satisfied by a row for
+            # `aXb` — the dot matching any character. No regex, no escaping.
+            printf '%s\n' "$layout" | awk -F'|' -v want="\`$d/\`" '
+              NF > 2 { cell = $2; gsub(/^[ \t]+|[ \t]+$/, "", cell); if (cell == want) found = 1 }
+              END { exit !found }' || missing="$missing $d"
           done
           if [ -n "$missing" ]; then
             echo "::error::these top-level directories have no row in docs/architecture.md '## Layout':$missing"

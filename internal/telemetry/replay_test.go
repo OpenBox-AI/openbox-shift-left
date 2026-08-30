@@ -10,7 +10,7 @@ import (
 // replay_test.go — the recorded-corpus census for this lane's intake.
 //
 // The fixture is a sanitized OTLP/JSON logs payload lifted from a real desktop
-// session (see cli/cmd/corpusfixture). It carries EVERY event type that session
+// session (see tools/corpusfixture). It carries EVERY event type that session
 // produced, not only the one the mapper handles, because "an unrecognized event
 // is skipped, never an error" is a claim about this lane's tolerance of a
 // provider addition — it rides a beta surface — and a fixture containing only

@@ -339,7 +339,7 @@ func TestStripContent_Default_RemovesAllContent(t *testing.T) {
 //
 // This removes no working behavior: no adapter has ever populated either field,
 // and both adapter mappers have tests asserting they stay empty
-// (adapters/claude-code/mapper_test.go:169, adapters/codex/mapper_test.go:207).
+// (internal/adapters/claude-code/mapper_test.go:169, internal/adapters/codex/mapper_test.go:207).
 // The channel existed and carried nothing.
 func TestSpanBodiesAreNoLongerAnEgressChannel(t *testing.T) {
 	ev := DevEvent{

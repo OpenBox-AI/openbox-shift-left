@@ -61,16 +61,19 @@ key (`obx_key_…`, sent as `X-API-Key`) — auto-detected by prefix.
 ## Layout
 
 ```
-cmd/openbox/        entrypoint + subcommand routing
-internal/aivss/     default developer AIVSS posture (integers verified vs backend)
-internal/backend/   control-plane client: agent/create + agent/list
-internal/secret/    OS secret store abstraction + backends
-internal/provider/  adapter-installer seam (stubs until SL-4/7/8)
-internal/devinit/   the dev-init orchestration
+cmd/openbox/              entrypoint + subcommand routing
+internal/cli/aivss/       default developer AIVSS posture (integers verified vs backend)
+internal/cli/backend/     control-plane client: agent/create + agent/list
+internal/cli/devinit/     the dev-init orchestration
+internal/cli/providers/   the adapter registry — the only place the CLI reaches an adapter
 ```
+
+`internal/secret/` is gone: ADR-0015 deleted the OS keychain, and credentials are
+one plaintext file. `internal/provider/` is the SPI itself and lives at
+`internal/provider/`, not under `cli`.
 
 ## Build & test
 
 ```bash
-cd cli && go build ./... && go vet ./... && go test ./...
+go build ./... && go vet ./... && go test -race -count=1 ./...
 ```

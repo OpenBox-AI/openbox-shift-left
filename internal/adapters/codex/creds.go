@@ -21,7 +21,7 @@ const (
 )
 
 // Credential/config resolution for the Codex hook path — thin bindings
-// over the shared adapters/common/devconfig module (ADR-0007). Codex reads the
+// over the shared internal/adapters/common/devconfig module (ADR-0007). Codex reads the
 // same `~/.openbox/dev.json` posture `openbox init` writes and the same
 // `~/.openbox/.env` credentials `openbox auth` writes, for every provider;
 // nothing here is Codex-specific except the spool subdir name.

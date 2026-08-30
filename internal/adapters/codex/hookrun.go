@@ -296,7 +296,7 @@ func RunHook(sub string, stdin io.Reader, stdout io.Writer, logger *log.Logger) 
 // Gated behind the install_git_hook posture (default off), a no-op
 // outside a git repo, idempotent, and it refuses to overwrite a foreign
 // hook (obgit.InstallHook). The installed hook stamps `OpenBox-Session:`
-// from CODEX_THREAD_ID (highest precedence — see adapters/common/git).
+// from CODEX_THREAD_ID (highest precedence — see internal/adapters/common/git).
 func maybeInstallGitHook(logger *log.Logger, cwd string) {
 	if !ResolveInstallGitHook() {
 		return

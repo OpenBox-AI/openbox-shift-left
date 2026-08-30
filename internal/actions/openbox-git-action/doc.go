@@ -4,7 +4,7 @@
 // those sessions.
 //
 // It is the read/resolve counterpart to the write side in
-// adapters/common/git. That package's prepare-commit-msg hook writes an
+// internal/adapters/common/git. That package's prepare-commit-msg hook writes an
 // `OpenBox-Session:` trailer into the commit object locally; this action
 // reads it back at push, against the real pushed SHA (never a pre-push SHA
 // — git hooks are local and SHAs are unstable until push), dedups to a

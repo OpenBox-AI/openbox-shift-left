@@ -10,7 +10,7 @@ import (
 )
 
 // TestMain is the asserted-hermeticity control for the package that owns
-// `init`, matching the one in adapters/claude-code and adapters/codex.
+// `init`, matching the one in internal/adapters/claude-code and internal/adapters/codex.
 //
 // isolateHome is the per-test lever and stays the first line of defence, but it
 // only protects tests that CALL it. A test that forgets writes to the

@@ -33,8 +33,8 @@ func TestOnlyTheRegistryImportsAdapters(t *testing.T) {
 			t.Fatalf("import %s: %v", pkg, err)
 		}
 		for _, imp := range full.Imports {
-			if strings.Contains(imp, "/adapters/claude-code") || strings.Contains(imp, "/adapters/codex") {
-				t.Errorf("%s imports the adapter %q directly — route it through cli/internal/providers, "+
+			if strings.Contains(imp, "/internal/adapters/claude-code") || strings.Contains(imp, "/internal/adapters/codex") {
+				t.Errorf("%s imports the adapter %q directly — route it through internal/cli/providers, "+
 					"or use the shared devconfig/hookflow package if the need is provider-neutral", pkg, imp)
 			}
 		}

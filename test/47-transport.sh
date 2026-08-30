@@ -106,7 +106,7 @@ if [ "${after:-0}" -gt "${before:-0}" ]; then
 else
 	tb_bad "no :proxy: turn reached governance_events"
 	tb_note "NEEDS A STACK. Byte-identity and per-chunk SSE across the CONNECT path"
-	tb_note "are proven without one (cli/cmd/openbox/transportreplay_test.go)."
+	tb_note "are proven without one (cmd/openbox/transportreplay_test.go)."
 	tb_note "What this adds is a real socket, a real dialer, and a CA that the"
 	tb_note "running Claude Code actually trusts."
 fi

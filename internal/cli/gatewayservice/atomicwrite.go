@@ -9,7 +9,7 @@ import (
 // writeFileAtomic delegates to the one atomic writer in this module.
 //
 // It was a per-platform pair in this package until three lanes needed the same
-// guarantee. The pair moved to cli/internal/atomicfile unchanged; this alias
+// guarantee. The pair moved to internal/cli/atomicfile unchanged; this alias
 // stays so the call sites and their reasoning — the settings file must never be
 // left as an arbitrary prefix, because readSettings then refuses to repair it —
 // read exactly as before.

@@ -805,7 +805,7 @@ func structuralActivityOutput(ev DevEvent) json.RawMessage {
 //
 // The start time arrives cross-process: a PostToolUse hook has no idea when its
 // PreToolUse fired, so the adapters' duration stash recovers ev.StartedAt and
-// stamps it before the event is spooled (adapters/common/hookflow/duration.go).
+// stamps it before the event is spooled (internal/adapters/common/hookflow/duration.go).
 //
 // Returns nil — the field is OMITTED, not zero — when the stash missed, when the
 // timestamps do not parse, or when the arithmetic is not positive. Zero would

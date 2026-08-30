@@ -26,7 +26,7 @@ Codex hook (stdin JSON)
 
 The spool/flush/recovery design (why not emit inline, at-most-once +
 undelivered-remainder recovery, deterministic `event_id` — INV-5) is identical
-to the CC adapter; see `adapters/claude-code/README.md`. Codex-specific: the
+to the CC adapter; see `internal/adapters/claude-code/README.md`. Codex-specific: the
 spool lives under `…/openbox/codex-spool` so a machine running both tools never
 cross-drains, and the deterministic ids are namespaced `cdx-`.
 
@@ -90,7 +90,7 @@ cli real-binary E2E (`TestCodexUnifiedBinaryObserveE2E`).
 ## Commit attribution (SL-5 parity, simpler)
 
 Codex injects `CODEX_THREAD_ID` into **every** tool/shell exec environment, so
-the shared prepare-commit-msg hook (`adapters/common/git`) stamps
+the shared prepare-commit-msg hook (`internal/adapters/common/git`) stamps
 `OpenBox-Session:` directly from the env — highest precedence, **no liveness
 registry** (the CC mechanism stays untouched and CC sessions never set the
 var). Ambient hook install on SessionStart is gated by
@@ -101,7 +101,7 @@ terminal are OD-SL7-USERTERM (deferred).
 
 Identity comes from the same `openbox init` flow and the same
 `~/.config/openbox/dev.json` + OS/file secret store as every provider, via the
-shared `adapters/common/devconfig` module (OD-SL7-SHARE ruling (a), ADR-0007).
+shared `internal/adapters/common/devconfig` module (OD-SL7-SHARE ruling (a), ADR-0007).
 The hook reads the **DID only** on the hot path; the obx_ key + Ed25519 seed
 are read only at flush, straight into the client. `hooks.json` carries the
 engine path + event names only — no key, DID, or URL.
@@ -288,7 +288,7 @@ end-to-end (`CDX-C1..CDX-C12`) covering every quadrant, including the
 degraded-state cases (LESSON-E6E7-04): reachable-but-unbundled under fail-closed
 (CDX-C6), the stale-policy gate (`TestEnforcementConformance_StaleGate_Codex`),
 and the probed hook-timeout fail-open bound (CDX-C8). The cross-adapter parity
-matrix (`adapters/claude-code/conformance_parity_test.go`,
+matrix (`internal/adapters/claude-code/conformance_parity_test.go`,
 `TestCrossAdapterParityMatrix_SL7B`) records that CC and Codex assert the same
 invariant set and where Codex's contract forces a documented delta.
 
@@ -332,7 +332,7 @@ validates the value; noted for a future explicit-override escape hatch.
 ## Test / validate
 
 ```bash
-cd adapters/codex && go build ./... && go vet ./... && go test -race ./...
+cd internal/adapters/codex && go build ./... && go vet ./... && go test -race ./...
 # plus the cli-level routing + real-binary observe E2E:
 cd ../../cli && go test ./cmd/openbox -run Codex
 ```

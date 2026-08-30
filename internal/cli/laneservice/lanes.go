@@ -14,7 +14,7 @@ import "strconv"
 // grace renders the --shutdown-grace value that must match StopTimeout.
 var grace = strconv.Itoa(StopTimeout) + "s"
 
-// The gateway's supervisor identity, exported so cli/internal/gatewayservice can
+// The gateway's supervisor identity, exported so internal/cli/gatewayservice can
 // keep its own long-standing constants without a second literal to drift from.
 // Two spellings, because the platforms do not share a convention: a reverse-DNS
 // launchd label and a hyphenated systemd unit.

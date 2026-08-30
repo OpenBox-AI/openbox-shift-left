@@ -11,7 +11,7 @@ import (
 
 // Provider-independent session discovery.
 //
-// This package lives in adapters/common/ precisely because "which session
+// This package lives in internal/adapters/common/ precisely because "which session
 // produced this commit" must not depend on any one tool. Resolution has
 // two tiers:
 //
@@ -128,7 +128,7 @@ func (r SessionResolver) Resolve(worktree string) []string {
 	//     it to suppress attribution).
 	//   - Forked threads: this is a THREAD id, while the Codex event stream is
 	//     keyed by the root SESSION id (a fork keeps the root's session id —
-	//     see adapters/codex/hookevent.go). Under a fork the trailer therefore
+	//     see internal/adapters/codex/hookevent.go). Under a fork the trailer therefore
 	//     names the thread and no session row shares that id. Deliberately
 	//     unchanged here: the id is still the most precise true statement about
 	//     which thread made the commit, and the Codex adapter emits

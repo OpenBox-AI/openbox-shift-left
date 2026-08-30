@@ -54,7 +54,7 @@ import (
 // would stay green.
 func TestSubtreeImports_RepoLocalIsNotSilentlyDropped(t *testing.T) {
 	root := tree(t, map[string]string{
-		"a.go": "package a\nimport \"" + repoPrefix + "/cli/internal/devinit\"\n",
+		"a.go": "package a\nimport \"" + repoPrefix + "/internal/cli/devinit\"\n",
 	})
 	got, _ := subtreeImports(root, repoPrefix+"/gateway")
 	if len(got.repoLocal) != 1 {

@@ -68,7 +68,7 @@ func TestParseEvaluation_FullFields(t *testing.T) {
 	}
 	// INV-2: redacted_input (content) has no Evaluation field, so it is dropped
 	// at parse. The advisory-record test asserts the persisted record likewise
-	// never carries it (adapters/claude-code advisory_test.go).
+	// never carries it (internal/adapters/claude-code advisory_test.go).
 }
 
 // TestParseEvaluation_VerdictOnly proves graceful degradation: a Phase-1 core

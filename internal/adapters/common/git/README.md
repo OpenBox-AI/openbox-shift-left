@@ -3,7 +3,7 @@
 The **provider-independent** write side of session→commit attribution. It binds a
 git commit to the OpenBox session(s) that produced it by stamping an
 `OpenBox-Session:` commit-message **trailer**, exactly as spike S3 (R1–R6)
-prescribes. Lives in `adapters/common/` because "which session made this commit"
+prescribes. Lives in `internal/adapters/common/` because "which session made this commit"
 must not depend on any one tool (Claude Code, Codex, Cursor).
 
 ```
@@ -129,5 +129,5 @@ SL4-WIRE-2).
 ## Validate
 
 ```
-cd adapters/common/git && go build ./... && go vet ./... && go test -race ./...
+cd internal/adapters/common/git && go build ./... && go vet ./... && go test -race ./...
 ```

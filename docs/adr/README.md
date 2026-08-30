@@ -1,5 +1,15 @@
 # Architecture decision records
 
+**Paths in an ADR are as of its date.** These are dated records of decisions and
+their bodies are not swept when the tree moves — rewriting them would erase what
+the decision was actually made about. Most ADRs predate the single-module layout
+([ADR-0024](ADR-0024-single-module-layout.md), 2026-08-30) and cite `cli/`,
+`adapters/`, `contracts/dev-event/` and similar; that code now lives under
+`internal/`, `api/` and `docs/`. A superseded or amended ADR says so in its own
+header. For where something lives **today**, read
+[architecture.md](../architecture.md) §Layout.
+
+
 CLAUDE.md's rule is that a new table, endpoint or service requires an ADR. That
 rule was unenforceable for most of this repo's life: ADR-0001 through 0007 and
 0009 were cited throughout the code and docs — including by ADR-0008 itself —

@@ -345,7 +345,7 @@ func AuditLocalHooks(projectDir string) (LocalHookAudit, error) {
 // handlers were ALL ours is removed with them; an entry that was already empty is
 // left exactly as it was.
 //
-// Keep/drop discipline mirrors adapters/codex Installer.mergeEvent, which has
+// Keep/drop discipline mirrors internal/adapters/codex Installer.mergeEvent, which has
 // always replaced by shape; see ownedLocalHook for why there are two copies.
 func sweepStale(entries []any, event, engine string) (kept []any, dropped []string, deduped bool) {
 	want := unquoteHookCommand(engine)
@@ -409,12 +409,16 @@ func sweepStale(entries []any, event, engine string) (kept []any, dropped []stri
 // event key. Exact-remainder matching after a one-token strip is what keeps a
 // developer's own hook safe; a `strings.Contains` here would delete it.
 //
-// Ported from adapters/codex isOpenBoxHandler + stripEngineToken
-// (adapters/codex/installer.go:262-302) rather than shared: the adapters are
-// separate go.work modules, this one owns a second invocation (`rewake`) that
-// Codex's anchored regex rejects, and the handlers arrive here as
-// map[string]any instead of json.RawMessage. A shared home costs a twelfth
-// module for ~25 lines. Revisit when a third adapter needs the same parse.
+// Ported from internal/adapters/codex isOpenBoxHandler + stripEngineToken
+// (internal/adapters/codex/installer.go:262-302) rather than shared: this one owns
+// a second invocation (`rewake`) that Codex's anchored regex rejects, and the
+// handlers arrive here as map[string]any instead of json.RawMessage.
+//
+// The original reason also counted the cost of a shared home as "a twelfth
+// module for ~25 lines". THAT COST IS GONE — both adapters sit under
+// internal/adapters/ now, with internal/adapters/common/ already beside them, so
+// only the two behavioural differences above still argue for the port. Revisit
+// when a third adapter needs the same parse.
 func ownedLocalHook(hookType, command, event string) (engine string, ok bool) {
 	if hookType != "command" {
 		return "", false
