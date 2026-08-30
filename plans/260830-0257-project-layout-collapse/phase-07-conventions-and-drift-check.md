@@ -15,7 +15,7 @@
   that fails when the tree stops matching them.
 - **Priority:** P3 — the only droppable phase, but it is what stops phase 06's work
   going stale.
-- **Implementation status:** not started · **Review:** not reviewed
+- **Implementation status:** COMPLETE (2026-08-30) · **Review:** self-verified; report at `reports/conventions-260830.md`
 
 ## Key insights
 
@@ -115,13 +115,13 @@ conventions · new `.editorconfig` · `internal/*/doc.go`
 
 ## Todo list
 
-- [ ] `.editorconfig` written from measurement
-- [ ] conventions in `CLAUDE.md`, incl. exception + divergence note
-- [ ] CI documentation check added
-- [ ] deletion drill **run**
-- [ ] subtree docs added; skips recorded
-- [ ] filename deviations fixed; green gate
-- [ ] no reformat diff on save
+- [x] `.editorconfig` written from measurement; both rejected source settings named IN the file so they are not re-imported
+- [x] conventions in `CLAUDE.md`, incl. the provider-mandated `.toml` exception and the snake_case divergence
+- [x] CI check added — and its FIRST run found an emptied `contracts/` still on disk
+- [x] five drills run, all red. **Drill 1 was GREEN first**: `grep -q` on the bare name matched another row's prose, so deleting the `tools/` row passed. The check now requires a table ROW
+- [x] five dependency-boundary signposts appended to EXISTING package comments (a second `doc.go` is a vet finding); every other subtree skipped and the skips recorded; one stale pointer to the deleted `deps_test.go` found and fixed
+- [x] three deviations fixed, plus the `foo.go`/`foo_test.go` pairing my own rename broke; build, vet and both cross-compiles re-run
+- [x] no reformat diff, spot-checked across `.go`, `.md`, `.yml`
 
 ## Success criteria
 
@@ -156,3 +156,15 @@ conventions · new `.editorconfig` · `internal/*/doc.go`
 Plan complete. Remaining repo work is unchanged by this refactor: the dormant testbed
 phases (35, 45, 46, 47), probe A, and the `${OPENBOX_REDACTED_*}` false-positive
 ruling — none of which this plan touches.
+
+## The naming rule failed its own spot-check
+
+Criterion 3 says *"if a rule fails the spot-check, the rule is wrong — not the
+files."* It did. The first draft said "Go filenames are flat lowercase with no
+separators"; measured, that is **356 of 356 non-test files with no exceptions**,
+and **25 files with a separator, every one a `_test.go`**. The rule is narrower
+than written: non-test files are exceptionlessly flat, and test files may separate
+words to name the subject they cover. `CLAUDE.md` states both halves.
+
+The earlier deviation scan could not have found this — it filtered out everything
+matching `_test.go`, which is the entire population where separators occur.

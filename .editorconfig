@@ -1,0 +1,32 @@
+# Measured from this tree, not transplanted.
+#
+# Two settings from golang-standards/project-layout are deliberately NOT taken.
+# `[*.md] indent_style = tab` would put every markdown file here in violation on
+# first save — there is not one leading tab in README.md, CLAUDE.md or docs/. And
+# `.gitattributes`' blanket `* -text` is a line-ending policy, wrong for a repo
+# that ships shell scripts and cross-compiles for Windows, and not layout anyway.
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+[{*.go,go.mod,go.sum}]
+indent_style = tab
+
+[*.{yml,yaml,json}]
+indent_style = space
+indent_size = 2
+
+[*.md]
+indent_style = space
+# Documented shell snippets and table alignment rely on exact spacing, and
+# several would be silently reflowed.
+trim_trailing_whitespace = false
+
+# *.sh is DELIBERATELY ABSENT. The repo is split and one rule would put half the
+# scripts in violation on first save: every script under test/ indents with tabs
+# (17 of them), install.sh with spaces (zero tabs). Unifying shell indentation is
+# its own change with its own diff, and this file is not the place to force it.

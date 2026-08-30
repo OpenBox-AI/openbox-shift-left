@@ -4,6 +4,12 @@
 // configuration that forwards byte-identically, and nothing else. The spike is a
 // GATE (plan 260827-2301 phase 11) — no service code, no CA, no allowlist, no
 // capture until the gate answer is recorded.
+//
+// DEPENDENCY BOUNDARY. This subtree's imports are held to an allowlist in
+// internal/depguard, both external and repo-local (ADR-0023 as amended by
+// ADR-0024). Adding an import outside it fails there first, which is the
+// point — widening the list to make an import pass inverts the ADR's
+// reasoning. This comment is the signpost; depguard is the enforcement.
 package transport
 
 import (

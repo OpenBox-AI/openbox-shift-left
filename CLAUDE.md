@@ -84,6 +84,41 @@ Inside `internal/`:
 
 ## Working conventions
 
+- **Layout and naming are measured, and one CI step keeps them true.**
+  `docs/architecture.md` §Layout has one row per top-level directory saying what
+  belongs in it **and what must not**; CI fails, naming the directory, when a
+  directory on disk has no row. That step replaces the one that used to fail when
+  a `go.mod` was missing from `go.work` — same idea, from *registered* to
+  *documented*. **§Layout is the one authority**; this file's table points at the
+  same tree but CI reads only that one, because making both authoritative
+  recreates the drift the check exists to stop.
+- **Non-test Go filenames are flat lowercase with no separators** —
+  `approvalhold.go`, `outputcontract.go`, `failurepolicy.go`, `enforceevaluate.go`.
+  Measured: **356 of 356, no exceptions.** An underscore is otherwise reserved for
+  what the toolchain reads — `_test.go`, `_unix.go`, `_windows.go`, `_GOARCH.go` —
+  and renaming one of those changes what builds.
+  - **Test files may separate words**, and 25 do: `localhooks_quote_test.go`,
+    `content_conformance_test.go`. The underscore names the SUBJECT the file
+    covers, which is how a package with thirty test files stays navigable. A test
+    file that pairs one-to-one with a source file should match its name
+    (`enforceevaluate.go` ↔ `enforceevaluate_test.go`).
+  - The first draft of this rule said "Go filenames" without the test carve-out
+    and failed its own spot-check. The rule was wrong, not the 25 files.
+  - Non-Go assets are kebab-case.
+  - **This diverges from the generic "Go uses snake_case" guidance**, and the
+    divergence is deliberate: ~380 files here follow the flat form, and so does
+    most of the standard library. Do not "fix" the tree toward the generic rule.
+  - **Two filenames are provider-mandated exceptions**: `managed_config.toml` and
+    `requirements.toml` keep their underscores because Codex reads those exact
+    names.
+- **`.editorconfig` is derived from measurement**, and two of the source layout's
+  settings are rejected on it: `[*.md] indent_style = tab` (there is not one
+  leading tab in any markdown file here) and a blanket `.gitattributes` `* -text`
+  (a line-ending policy, wrong for a repo shipping shell and cross-compiling for
+  Windows). **`*.sh` is deliberately absent** — `test/*.sh` indents with tabs and
+  `install.sh` with spaces, so one rule would put half the scripts in violation on
+  first save. Unifying shell indentation is its own change.
+
 - **Credentials are plaintext, deliberately.** `~/.openbox/.env`, `0600` on
   macOS/Linux and with **no at-rest protection on Windows** (ADR-0015). Anything
   running as the developer — including the governed agent — can read the signing

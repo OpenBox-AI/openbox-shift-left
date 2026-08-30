@@ -16,6 +16,12 @@
 // the desktop app and subscription OAuth today, and because partial evidence that
 // names its own limit beats a gap (ADR-0022 §1). OD4 is the compensating control:
 // telemetry silence on an otherwise-active session is a FINDING, not an absence.
+//
+// DEPENDENCY BOUNDARY. This subtree's imports are held to an allowlist in
+// internal/depguard, both external and repo-local (ADR-0023 as amended by
+// ADR-0024). Adding an import outside it fails there first, which is the
+// point — widening the list to make an import pass inverts the ADR's
+// reasoning. This comment is the signpost; depguard is the enforcement.
 package telemetry
 
 import (

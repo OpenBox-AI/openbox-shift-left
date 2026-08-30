@@ -6,7 +6,13 @@
 // the keywords the contract happened to use, so a constraint written with any
 // other keyword read as a tightened contract and enforced nothing; D-OSS-5 traded
 // that — and this module's former zero-dependency property — for the reference
-// implementation. deps_test.go's allowlist is what keeps the trade bounded.
+// implementation. The allowlist in internal/depguard keeps the trade bounded.
+//
+// DEPENDENCY BOUNDARY. This subtree's imports are held to an allowlist in
+// internal/depguard, both external and repo-local (ADR-0023 as amended by
+// ADR-0024). Adding an import outside it fails there first, which is the
+// point — widening the list to make an import pass inverts the ADR's
+// reasoning. This comment is the signpost; depguard is the enforcement.
 package conformance
 
 import (

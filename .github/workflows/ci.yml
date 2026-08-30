@@ -82,6 +82,43 @@ jobs:
         # closed that half — a same-module read IS tracked — and left this one.
         run: go test -race -count=1 ./...
 
+      - name: Every top-level directory is documented
+        # The convention that replaces the go.work coverage check this workflow
+        # used to run. That step failed when a go.mod on disk was missing from the
+        # workspace; this one fails when a DIRECTORY on disk is missing from
+        # docs/architecture.md's Layout table. Same idea, one hop over: from
+        # registered to documented.
+        #
+        # It reads ONE table. CLAUDE.md carries a layout map too, and making both
+        # authoritative would recreate the drift this exists to stop —
+        # architecture.md is user-facing and CLAUDE.md already points at it.
+        #
+        # Before this repo had any of it, two entire modules were undocumented,
+        # the module count was stale, and three filenames deviated from a
+        # convention nobody had written down. None of that was catchable.
+        run: |
+          layout=$(sed -n '/^## Layout/,/^## /p' docs/architecture.md)
+          if [ -z "$layout" ]; then
+            echo "::error::no '## Layout' section in docs/architecture.md — this check would pass vacuously"
+            exit 1
+          fi
+          missing=""
+          for dir in */; do
+            d="${dir%/}"
+            case "$d" in .*|plans) continue;; esac
+            # A ROW, not a mention. `grep -q` on the bare name passes when some
+            # other row merely refers to the directory in prose — deleting the
+            # tools/ row left the cmd/ row's "belongs in `tools/`" behind, and the
+            # drill came back green.
+            printf '%s\n' "$layout" | grep -qE "^\\| \`$d/\`" || missing="$missing $d"
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::these top-level directories have no row in docs/architecture.md '## Layout':$missing"
+            echo "add a row saying what belongs in each one AND what must not go there, or delete the directory"
+            exit 1
+          fi
+          echo "every top-level directory is documented"
+
       - name: Vulnerability scan
         # The gate that makes the pin above self-maintaining. Without it, the
         # toolchain silently ages out of support again and nothing says so —

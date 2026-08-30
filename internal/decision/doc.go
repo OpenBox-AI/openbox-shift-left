@@ -41,4 +41,10 @@
 //
 // Observe/advisory sessions never invoke the decider; their async spool path
 // (adapters/claude-code) is untouched and INV-3 holds verbatim for them.
+//
+// DEPENDENCY BOUNDARY. This subtree's imports are held to an allowlist in
+// internal/depguard, both external and repo-local (ADR-0023 as amended by
+// ADR-0024). Adding an import outside it fails there first, which is the
+// point — widening the list to make an import pass inverts the ADR's
+// reasoning. This comment is the signpost; depguard is the enforcement.
 package decision
