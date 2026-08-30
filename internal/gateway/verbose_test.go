@@ -11,7 +11,6 @@ import (
 	"testing"
 )
 
-// verboseRecorder collects commentary the way the CLI would emit it.
 type verboseRecorder struct {
 	mu    sync.Mutex
 	lines []string
@@ -29,19 +28,9 @@ func (v *verboseRecorder) all() string {
 	return strings.Join(v.lines, "\n")
 }
 
-// secretForLog is assembled at runtime, for the reason the CLI's seam test
-// documents: a credential-shaped literal in this file would be rewritten by this
-// repo's own enforce-path redactor before the file reached disk, and the absence
-// assertion would then be checking for a string that was never sent.
 func secretForLog() string { return "sk" + "-ant-" + strings.Repeat("z4", 20) }
 
 // TestVerboseNeverLogsCredentialsOrBodies is the control on the whole feature.
-//
-// The developer's live credential transits every request through this relay, and
-// a debug flag is exactly the kind of thing that gets left on — into a terminal,
-// or into a launchd log file that outlives the session. So the assertion is made
-// on REAL traffic carrying a real-shaped credential, a token in the query string
-// and content in both bodies, rather than on the format strings.
 func TestVerboseNeverLogsCredentialsOrBodies(t *testing.T) {
 	upstream := memhttptest.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		io.Copy(io.Discard, r.Body)
@@ -58,9 +47,6 @@ func TestVerboseNeverLogsCredentialsOrBodies(t *testing.T) {
 	srv := memhttptest.NewServer(t, g.WithVerbose(rec.logf))
 	defer srv.Close()
 
-	// Assembled at runtime for the same reason secretForLog is: written as a
-	// literal, this repo's own redactor rewrites it before the file reaches disk
-	// and the absence check below becomes vacuous.
 	queryToken := "QUERY" + "_TOKEN_MUST_NOT_LOG"
 	req, err := http.NewRequest(http.MethodPost,
 		srv.URL+"/v1/messages?access_token="+queryToken,
@@ -97,8 +83,8 @@ func TestVerboseNeverLogsCredentialsOrBodies(t *testing.T) {
 	}
 }
 
-// TestVerboseReportsArrivalAndOutcome is the feature itself: a developer must be
-// able to tell "traffic is reaching this process" from "nothing is".
+// TestVerboseReportsArrivalAndOutcome is the feature itself: a developer must
+// be able to tell "traffic is reaching this process" from "nothing is".
 func TestVerboseReportsArrivalAndOutcome(t *testing.T) {
 	upstream := memhttptest.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusTeapot)
@@ -131,9 +117,9 @@ func TestVerboseReportsArrivalAndOutcome(t *testing.T) {
 }
 
 // TestVerboseReportsARejectionTooKeepsSilenceHonest. A request refused by the
-// relay's own checks never reaches the upstream and never produces evidence — so
-// without a line here it is indistinguishable, from the terminal, from no traffic
-// at all. That is the exact misreading this feature exists to prevent.
+// relay's own checks never reaches the upstream and never produces evidence;
+// so without a line here it is indistinguishable, from the terminal, from no
+// traffic at all.
 func TestVerboseReportsARejectionTooKeepsSilenceHonest(t *testing.T) {
 	reached := false
 	upstream := memhttptest.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -147,8 +133,7 @@ func TestVerboseReportsARejectionTooKeepsSilenceHonest(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	// The over-cap path: maxBody is a field precisely so a test can drive this
-	// without allocating 64 MiB. A refused body is never forwarded even in part.
+	// A refused body is never forwarded even in part.
 	g.maxBody = 8
 	srv := memhttptest.NewServer(t, g.WithVerbose(rec.logf))
 	defer srv.Close()

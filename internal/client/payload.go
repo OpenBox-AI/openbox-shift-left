@@ -63,8 +63,9 @@ const (
 	wireActivityCompleted = "ActivityCompleted"
 )
 
-// buildPayload maps a normalized DevEvent onto core's GovernanceEventPayload
-// and marshals it to the exact bytes that will be signed and transmitted.
+// buildPayload the bytes returned here are both hashed for the signature AND
+// sent as the body, so they are produced exactly once; client.go never re-
+// marshals.
 func buildPayload(ev DevEvent) ([]byte, error) {
 	wireType, signalName, err := wireTypeFor(ev.EventType)
 	if err != nil {
@@ -167,8 +168,6 @@ func activityPairKey(ev DevEvent) string {
 	return b.String()
 }
 
-// workflowIDFor is the wire workflow_id: the workspace identity, falling back
-// to the stable per-developer one.
 func workflowIDFor(ev DevEvent) string {
 	if ev.WorkspaceID != "" {
 		return ev.WorkspaceID
@@ -184,6 +183,12 @@ func activityIDFor(ev DevEvent) string {
 // turnActivityIDFor is the wire activity_id shared by a turn's ActivityStarted
 // and ActivityCompleted: "<session_id>:turn:<index>", or
 // "<session_id>:agent:<agent_id>:turn:<index>" for a subagent's turn.
+//   - There is nothing to hash.
+//   - It must be derivable from fields that survive the spool (SessionID,
+//     TurnIndex, AgentID are all persisted), because a flush can happen long
+//     after the hook process that built the event exited.
+//   - It cannot collide with a tool-call id by construction: those are "cc-
+//     act-" + 32 hex chars, and this shape contains ':' and a decimal index.
 func turnActivityIDFor(ev DevEvent) string {
 	if ev.ProxyRequestID != "" {
 		return ev.SessionID + ":proxy:" + ev.ProxyRequestID
@@ -213,9 +218,7 @@ func turnActivityIDFor(ev DevEvent) string {
 
 const activityTypeLLMCompletion = "llm_completion"
 
-// turnActivityOutput builds the `activity_output` for a turn's
-// ActivityCompleted: the model that ran and the four token counts it spent.
-// Cost is deliberately absent.
+// turnActivityOutput cost is deliberately absent.
 func turnActivityOutput(ev DevEvent) json.RawMessage {
 	m := map[string]any{}
 	if ev.Model != "" {
@@ -267,9 +270,14 @@ func statusFor(ev DevEvent) string {
 	return ev.Status
 }
 
-// activityLabel resolves the human-readable action label emitted as core's
-// pass-through `activity_type` column (openbox-fe's "Activity" column reads it
-// first and shows "Unknown" when absent).
+// activityLabel identifier-class only; a tool name, a fixed label, or an event
+// type; never content (INV-2).
+//   - A tool event (ToolCall/ToolResult) → the specific tool name ("Edit"/
+//     "Bash"/"mcp__…"), the most useful Activity label;
+//   - A turn event → "llm_completion", the same label on both halves, so the
+//     core-side usage extractor has one key to select on and the two runtimes
+//     share one vocabulary;
+//   - Everything else (lifecycle, Deploy) → the event_type string.
 func activityLabel(ev DevEvent) string {
 	switch ev.EventType {
 	case EventToolCall, EventToolResult:
@@ -403,9 +411,9 @@ func structuralActivityInput(ev DevEvent) json.RawMessage {
 	return b
 }
 
-// structuralActivityOutput builds the INV-2-safe `activity_output` for an
-// ActivityCompleted; what core stores as the row's `output` and runs
-// Guardrails stage "1" over (services/guardrail.go:192).
+// structuralActivityOutput returns nil (field omitted) when nothing is known;
+// which is the honest state for a shell call, whose counts the providers do
+// not expose.
 func structuralActivityOutput(ev DevEvent) json.RawMessage {
 	m := map[string]any{}
 	if s := ev.Span; s != nil {
@@ -435,8 +443,6 @@ func structuralActivityOutput(ev DevEvent) json.RawMessage {
 	return b
 }
 
-// durationMs is how long a tool call took, in float milliseconds, for the
-// ActivityCompleted payload.
 func durationMs(ev DevEvent) *float64 {
 	start := rfc3339Nanos(firstNonEmpty(ev.StartedAt, ev.Timestamp))
 	end := rfc3339Nanos(firstNonEmpty(ev.EndedAt, ev.Timestamp))
@@ -477,8 +483,7 @@ func copyMetaKeys(dst, src map[string]any, keys ...string) {
 	}
 }
 
-// stripContent returns a copy of ev with every gated content field removed
-// (INV-2). The caller's event is never mutated.
+// stripContent the caller's event is never mutated.
 func stripContent(ev DevEvent) DevEvent {
 	ev.contentStripped = true
 	ev.Content = nil

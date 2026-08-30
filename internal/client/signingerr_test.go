@@ -13,8 +13,7 @@ import (
 
 // TestDiagnose_ForwardCompatReasonCodes feeds each SDK reason code as a string
 // body field (the shape a future EXT-core would emit) and asserts the mapped,
-// actionable guidance. Covers all six codes plus the reason_code/code/reason key
-// order and the unrecognized-code fallback.
+// actionable guidance.
 func TestDiagnose_ForwardCompatReasonCodes(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -28,11 +27,8 @@ func TestDiagnose_ForwardCompatReasonCodes(t *testing.T) {
 		{"verifier_not_configured", 500, `{"reason_code":"verifier_not_configured"}`, "no KMS verifier"},
 		{"timestamp_outside_window", 401, `{"reason_code":"timestamp_outside_window"}`, "±300s"},
 		{"timestamp_skew alias", 401, `{"reason_code":"timestamp_skew"}`, "±300s"},
-		// key order: `reason` is read when reason_code/code are absent.
 		{"legacy reason key", 401, `{"reason":"nonce_replayed"}`, "buffered event was re-sent"},
-		// a STRING `code` is honored (config.py order); stock core's INT code is not.
 		{"string code key", 401, `{"code":"did_agent_mismatch"}`, "does not match"},
-		// unrecognized reason → raw code + status, no guess, no crash.
 		{"unknown reason", 401, `{"reason_code":"teapot"}`, "unrecognized reason code"},
 	}
 	for _, tc := range cases {
@@ -43,7 +39,6 @@ func TestDiagnose_ForwardCompatReasonCodes(t *testing.T) {
 			}
 		})
 	}
-	// the unknown-reason line must echo the raw code and the status (no guess).
 	got := diagnose(401, `{"reason_code":"teapot"}`)
 	if !strings.Contains(got, "teapot") || !strings.Contains(got, "401") {
 		t.Errorf("unknown-reason diagnostic dropped raw code/status: %q", got)
@@ -51,8 +46,8 @@ func TestDiagnose_ForwardCompatReasonCodes(t *testing.T) {
 }
 
 // TestDiagnose_StockCoreStatusMapping covers the reality today: core emits an
-// integer `code` + a generic `message` with no machine reason code, so diagnose
-// maps on status + message.
+// integer `code` + a generic `message` with no machine reason code, so
+// diagnose maps on status + message.
 func TestDiagnose_StockCoreStatusMapping(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -81,8 +76,8 @@ func TestDiagnose_StockCoreStatusMapping(t *testing.T) {
 	}
 }
 
-// TestDiagnose_BoundedMessage confirms a hostile/huge core message can't blow up
-// a log line (reuses the upstream 1 MiB read cap + this per-line trim).
+// TestDiagnose_BoundedMessage confirms a hostile/huge core message can't blow
+// up a log line (reuses the upstream 1 MiB read cap + this per-line trim).
 func TestDiagnose_BoundedMessage(t *testing.T) {
 	huge := strings.Repeat("A", 10000)
 	got := diagnose(400, `{"code":400,"message":"`+huge+`"}`)
@@ -94,8 +89,9 @@ func TestDiagnose_BoundedMessage(t *testing.T) {
 	}
 }
 
-// TestExtractReason_IgnoresIntCodeAndNonObject verifies the forward-compat probe
-// mirrors config.py: only a STRING value counts, and a non-object degrades to "".
+// TestExtractReason_IgnoresIntCodeAndNonObject verifies the forward-compat
+// probe mirrors config.py: only a string value counts, and a non-object
+// degrades to "".
 func TestExtractReason_IgnoresIntCode(t *testing.T) {
 	if r := extractReason([]byte(`{"code":401,"message":"x"}`)); r != "" {
 		t.Errorf("integer code must not be read as a reason, got %q", r)
@@ -111,9 +107,6 @@ func TestExtractReason_IgnoresIntCode(t *testing.T) {
 	}
 }
 
-// fixedRespServer returns a server that answers every request with a fixed
-// status + body, ignoring the (validly signed) request — so a test can drive the
-// real Emit→post→attempt→httpError→describeDrop path against any core response.
 func fixedRespServer(t *testing.T, status int, body string) *memhttptest.Server {
 	t.Helper()
 	srv := memhttptest.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -126,11 +119,11 @@ func fixedRespServer(t *testing.T, status int, body string) *memhttptest.Server 
 }
 
 // TestEmit_MapsRejection_FailOpenAndLogSafe drives the full client path: a 401
-// core rejection must (a) still fail-open on the VERDICT (VerdictUnknown, which
-// no caller reads as a block) while reporting the advisory ErrDelivery so a
-// durable caller can retry (E8-S7), (b) produce exactly one log line carrying
-// the mapped guidance + event id, and (c) never leak the obx_ key or Ed25519
-// seed (INV-1).
+// core rejection must (a) still fail-open on the verdict (VerdictUnknown,
+// which no caller reads as a block) while reporting the advisory ErrDelivery
+// so a durable caller can retry (E8-S7), (b) produce exactly one log line
+// carrying the mapped guidance + event id, and (c) never leak the obx_ key or
+// Ed25519 seed (INV-1).
 func TestEmit_MapsRejection_FailOpenAndLogSafe(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -169,7 +162,6 @@ func TestEmit_MapsRejection_FailOpenAndLogSafe(t *testing.T) {
 			if !strings.Contains(all, "evt-1") {
 				t.Errorf("diagnostic missing event id: %q", all)
 			}
-			// INV-1: no secret material in the diagnostic, ever.
 			if strings.Contains(all, testAPIKey) || strings.Contains(all, testPrivateKeyB64) {
 				t.Error("INV-1 violation: secret material leaked into the diagnostic")
 			}

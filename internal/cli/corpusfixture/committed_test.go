@@ -8,26 +8,11 @@ import (
 	"testing"
 )
 
-// committed_test.go — the permanent gate on every fixture this repository ships.
-//
-// Sanitize runs once, by hand, against a corpus that is not in this repository.
-// This runs forever, in CI, against what was committed — and it is the only
-// control that survives the person who ran the extractor. So it does not ask
-// "did the extractor run"; it re-derives what a clean fixture looks like from the
-// placeholder shapes and the value patterns, which is why a fixture hand-edited
-// after sanitization is still caught.
-//
-// It DISCOVERS the directories rather than listing them. A hardcoded list is a
-// gate that silently stops covering the thing it was added for the moment
-// somebody adds a fixture next door — and this particular gate failing open is a
-// credential in git history.
+// Committed_test.go; the permanent gate on every fixture this repository
+// ships. A hardcoded list is a gate that silently stops covering the thing it
+// was added for the moment somebody adds a fixture next door; and this
+// particular gate failing open is a credential in git history.
 
-// The marker is the root go.mod. It used to be go.work, which was the only
-// file true from every module while the repo had fifteen; the collapse to one
-// module deleted it and left this walk climbing to the filesystem root.
-//
-// repoRoot walks up to the directory holding the root go.mod, which is the only marker
-// that is true from every module in this workspace.
 func repoRoot(t *testing.T) string {
 	t.Helper()
 	dir, err := os.Getwd()
@@ -46,7 +31,6 @@ func repoRoot(t *testing.T) string {
 	}
 }
 
-// corpusDirs finds every testdata/corpus directory in the workspace.
 func corpusDirs(t *testing.T) []string {
 	t.Helper()
 	root := repoRoot(t)
@@ -55,9 +39,6 @@ func corpusDirs(t *testing.T) []string {
 		if err != nil || !d.IsDir() {
 			return nil
 		}
-		// Dotted directories are tooling state, and vendor/node_modules are
-		// third-party trees: walking them costs seconds and can only produce
-		// findings about code this repository does not own.
 		if name := d.Name(); path != root && (strings.HasPrefix(name, ".") || name == "vendor" || name == "node_modules") {
 			return filepath.SkipDir
 		}
@@ -105,11 +86,9 @@ func TestCommittedFixturesCarryNoRealIdentity(t *testing.T) {
 	t.Logf("scanned %d fixture(s) across %d director(ies)", scanned, len(dirs))
 }
 
-// TestCommittedFixtureScanIsNotVacuous is the drill, run in-process rather than
-// claimed: plant an unsanitized fixture where the gate looks and confirm it is
-// reported. Without it, a Scan that silently returned nothing would be
-// indistinguishable from a repository full of clean fixtures — which is the exact
-// shape of failure this plan keeps finding in its own evidence.
+// TestCommittedFixtureScanIsNotVacuous is the drill, run in-process rather
+// than claimed: plant an unsanitized fixture where the gate looks and confirm
+// it is reported.
 func TestCommittedFixtureScanIsNotVacuous(t *testing.T) {
 	dirs := corpusDirs(t)
 	if len(dirs) == 0 {
@@ -131,18 +110,14 @@ func TestCommittedFixtureScanIsNotVacuous(t *testing.T) {
 	}
 }
 
-// isRepoRoot reports whether dir holds the repository's root go.mod.
-//
-// It checks the module PATH rather than the file's mere existence, so the walk
-// cannot stop at some unrelated module that happens to sit above the checkout.
+// isRepoRoot reports whether dir holds the repository's root go.mod. It checks
+// the module PATH rather than the file's mere existence, so the walk cannot
+// stop at some unrelated module that happens to sit above the checkout.
 func isRepoRoot(dir string) bool {
 	b, err := os.ReadFile(filepath.Join(dir, "go.mod"))
 	if err != nil {
 		return false
 	}
-	// Line-wise, not a prefix of the file: the root go.mod opens with a comment
-	// block, so the module line is not at byte zero. A prefix check compiles,
-	// passes its own review, and then walks past the repo root to "/".
 	for _, line := range strings.Split(string(b), "\n") {
 		if strings.TrimSpace(line) == "module github.com/openbox-ai/openbox-shift-left" {
 			return true
@@ -151,11 +126,9 @@ func isRepoRoot(dir string) bool {
 	return false
 }
 
-// TestCommittedFixtureScanCatchesRecordedProse is the second drill, and it exists
-// because the rule it exercises is the one with a recognizer in front of it.
-// The identity sentinels fire on any string; this one fires only on a body that
-// Scan first recognizes as a model call, so a recognizer that silently stopped
-// matching would leave the gate reporting clean forever.
+// TestCommittedFixtureScanCatchesRecordedProse is the second drill, and it
+// exists because the rule it exercises is the one with a recognizer in front
+// of it.
 func TestCommittedFixtureScanCatchesRecordedProse(t *testing.T) {
 	body := `{"model":"claude-x","messages":[{"role":"user","content":` +
 		`[{"type":"text","text":"a verbatim recorded prompt that was never substituted"}]}]}`

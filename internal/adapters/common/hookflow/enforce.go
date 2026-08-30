@@ -102,6 +102,9 @@ const MaxCommandLen = 8 << 10 // 8 KiB (bytes)
 
 // MaxRedactBody bounds the body handed to the in-process secret detector, to
 // keep a slow scan off the hot path.
+//   - The file path (buildDecisionRequest) skips: over the cap, Content stays
+//     nil and the tool proceeds unredacted (fail-open).
+//   - The telemetry path (RedactText) truncates and then scans.
 const MaxRedactBody = 512 << 10 // 512 KiB (bytes)
 
 // MaxJSONCompareBytes bounds the jsonEqual double-parse. 256 KiB is ample for
@@ -109,8 +112,13 @@ const MaxRedactBody = 512 << 10 // 512 KiB (bytes)
 const MaxJSONCompareBytes = 256 << 10 // 256 KiB (bytes)
 
 // RedactText redacts a content body for secrets before it is attached to an
-// event. - The file path must not truncate because the redacted body is
-// replayed
+// event.
+//   - The file path must not truncate because the redacted body is replayed
+//     into the developer's actual write; a short reconstruction corrupts the
+//     file.
+//   - Skipping was fail-open on the one in-transit control, and it left a real
+//     hole: the client caps at 65536 runes (capBody), which is at most 256 KiB
+//     of UTF-8; strictly less than this 512 KiB cap.
 func RedactText(r *decision.Redactor, s string) string {
 	if r == nil {
 		return s
@@ -144,6 +152,12 @@ func NewDecider() decision.Decider { return decision.NewRedactor() }
 
 // ApplyFailurePolicy is the Go analog of the SDK's _handle_api_error, applied
 // between obtain and apply.
+//   - Fail-open (default): a fail-open decision stays VerdictUnknown →
+//     mapVerdict emits nothing → proceed (byte-identical to observe).
+//   - A real verdict (dec.FailOpen==false) under either policy: the failure
+//     policy governs only the evaluation-unavailable case, never a real
+//     ALLOW/constrain/BLOCK answer; a loaded-bundle decider's allow still
+//     proceeds under fail-closed.
 func ApplyFailurePolicy(dec decision.Decision, policy FailurePolicy) decision.Decision {
 	if !dec.FailOpen || policy != FailClosed {
 		return dec
@@ -153,8 +167,9 @@ func ApplyFailurePolicy(dec decision.Decision, policy FailurePolicy) decision.De
 	return dec
 }
 
-// failClosedReason builds the content-free deny reason for a fail-closed no-
-// verdict case.
+// failClosedReason the cause is the decider's internal diagnostic (empty on a
+// cold-start fail-open today); a fixed, content-free string, never tool
+// content (INV-2).
 func failClosedReason(cause string) string {
 	r := "request denied — no governance decision could be obtained and this session is fail-closed"
 	if cause != "" {
@@ -199,6 +214,11 @@ func LogEnforceDecision(logger *log.Logger, toolName string, dec decision.Decisi
 
 // ApplyInputRedaction turns a local redaction (secret detection) into the
 // Claude Code `updatedInput` to emit, or nil to emit nothing.
+//   - Local redaction is on (secret detection [default on] or content
+//     capture).
+//   - The Decision carries a non-empty RedactedContent.FileText.
+//   - Reconstructing the original tool_input with only the content field
+//     replaced produces a valid object that differs from the original.
 func ApplyInputRedaction(dec decision.Decision, localRedaction bool, origInput json.RawMessage, contentFieldKeys []string) json.RawMessage {
 	if !localRedaction {
 		return nil
@@ -281,6 +301,14 @@ func canonicalJSON(raw json.RawMessage) ([]byte, error) {
 
 // MapVerdict is the SDK enforce_verdict cascade ported to Claude Code
 // decisions, in the same priority order.
+//   - HALT → halt (the SDK terminates the workflow; here the provider's
+//     session-stop shape; ApplyDecision downgrades it to deny unless the
+//     decision is marked session-halting).
+//   - BLOCK → deny (the SDK raises a non-retryable block).
+//   - A failed guardrail validation → deny, checked after HALT/BLOCK but
+//     before approval and independent of the verdict value; exactly as the
+//     SDK, so a guardrail failure is never silently swallowed by an approval
+//     flow.
 func MapVerdict(e client.Evaluation, c OutputContract) (decision, reason string) {
 	switch e.Verdict {
 	case client.VerdictHalt:

@@ -13,9 +13,6 @@ import (
 	"time"
 )
 
-// approvalServer stands in for core's /governance/approval: it authenticates
-// and verifies the AIP signature exactly as core would, records the decoded
-// key, and returns whatever the test wants.
 func approvalServer(t *testing.T, pub ed25519.PublicKey, respond func() (int, string)) (*memhttptest.Server, *ApprovalKey) {
 	t.Helper()
 	var got ApprovalKey
@@ -27,7 +24,6 @@ func approvalServer(t *testing.T, pub ed25519.PublicKey, respond func() (int, st
 			t.Errorf("Authorization = %q — the poll must be agent-authenticated like /evaluate", h)
 		}
 		body, _ := io.ReadAll(r.Body)
-		// The signature is over the approval path, not the evaluate path.
 		if err := verifyLikeCore(pub, r.Method, r.URL.Path, body, r.Header); err != nil {
 			t.Errorf("core-mirror rejected the poll signature: %v", err)
 			w.WriteHeader(401)
@@ -46,9 +42,7 @@ func approvalServer(t *testing.T, pub ed25519.PublicKey, respond func() (int, st
 }
 
 // TestApprovalKeyFor_MatchesTheWirePayload is the load-bearing property of the
-// whole hold: a poll must address the row the escalation created. Independently
-// re-derived ids would silently address a different row (or none), and the hold
-// would report "never decided" for an approval that was in fact granted.
+// whole hold: a poll must address the row the escalation created.
 func TestApprovalKeyFor_MatchesTheWirePayload(t *testing.T) {
 	for _, ev := range []DevEvent{sampleEvent(), func() DevEvent {
 		e := sampleEvent()
@@ -120,12 +114,10 @@ func TestPollApproval_PendingAndDecided(t *testing.T) {
 	}
 }
 
-// A 404 means the request was never filed (or has not landed yet) — an answer
-// worth retrying at the poll cadence, not an outage for the failure policy.
-// Decided must require the approval window. Core renders a record with no
-// verdict as action="allow", so "allow" alone cannot tell "an approver said
-// yes" from "this row was never governed" — and a hold that could not tell
-// those apart would release a pending call.
+// TestApprovalStatus_DecidedRequiresTheWindow a 404 means the request was
+// never filed (or has not landed yet); an answer worth retrying at the poll
+// cadence, not an outage for the failure policy. Decided must require the
+// approval window.
 func TestApprovalStatus_DecidedRequiresTheWindow(t *testing.T) {
 	window := time.Now().Add(30 * time.Minute)
 	for _, tc := range []struct {
@@ -167,8 +159,8 @@ func TestPollApproval_ServerErrorIsADeliveryFailure(t *testing.T) {
 	}
 }
 
-// PollApproval makes exactly one attempt: the caller's poll interval is the
-// retry. An internal retry loop would spend a hold's whole budget in one tick.
+// TestPollApproval_MakesOneAttempt pollApproval makes exactly one attempt: the
+// caller's poll interval is the retry.
 func TestPollApproval_MakesOneAttempt(t *testing.T) {
 	calls := 0
 	srv, _ := approvalServer(t, pub(t), func() (int, string) {
@@ -190,8 +182,9 @@ func TestPollApproval_RejectsAPartialKey(t *testing.T) {
 	}
 }
 
-// An unparseable status is "unknown", never "allow": a hold that guessed would
-// either block a granted call or release a pending one.
+// TestPollApproval_UnparseableStatusErrors an unparseable status is "unknown",
+// never "allow": a hold that guessed would either block a granted call or
+// release a pending one.
 func TestPollApproval_UnparseableStatusErrors(t *testing.T) {
 	srv, _ := approvalServer(t, pub(t), func() (int, string) { return 200, `not json` })
 	c, _ := newTestClient(t, srv.URL, false)

@@ -9,11 +9,10 @@ import (
 	"testing"
 )
 
-// Two engines registered in one project is a silent, self-inflicted double-count
-// of every governed tool call: both fire, both store, and an operator reading the
-// result sees broken tool-health numbers with nothing pointing at the cause.
-// Doctor is where that becomes visible, so the warning has to name both the
-// consequence and the remedy.
+// TestDoctorWarnsWhenTwoEnginesAreRegistered two engines registered in one
+// project is a silent, self-inflicted double-count of every governed tool
+// call: both fire, both store, and an operator reading the result sees broken
+// tool-health numbers with nothing pointing at the cause.
 func TestDoctorWarnsWhenTwoEnginesAreRegistered(t *testing.T) {
 	out := inDirWithSettings(t, map[string]any{"hooks": map[string]any{
 		"PreToolUse": []any{
@@ -36,10 +35,11 @@ func TestDoctorWarnsWhenTwoEnginesAreRegistered(t *testing.T) {
 	}
 }
 
-// A healthy install must not warn — PreToolUse legitimately carries two of our
-// handlers (the gate and the approval watcher), so counting handlers per event
-// rather than per invocation would warn on every correct install and train the
-// reader to ignore the one that matters.
+// TestDoctorDoesNotWarnOnASingleEngine a healthy install must not warn;
+// PreToolUse legitimately carries two of our handlers (the gate and the
+// approval watcher), so counting handlers per event rather than per invocation
+// would warn on every correct install and train the reader to ignore the one
+// that matters.
 func TestDoctorDoesNotWarnOnASingleEngine(t *testing.T) {
 	out := inDirWithSettings(t, map[string]any{"hooks": map[string]any{
 		"PreToolUse": []any{
@@ -63,8 +63,9 @@ func TestDoctorDoesNotWarnOnASingleEngine(t *testing.T) {
 	}
 }
 
-// The same invocation registered twice at ONE path is the same defect, and it is
-// what an unquoted-path edge case or a hand-edited file leaves behind.
+// TestDoctorWarnsWhenOneInvocationIsRegisteredTwice the same invocation
+// registered twice at ONE path is the same defect, and it is what an unquoted-
+// path edge case or a hand-edited file leaves behind.
 func TestDoctorWarnsWhenOneInvocationIsRegisteredTwice(t *testing.T) {
 	out := inDirWithSettings(t, map[string]any{"hooks": map[string]any{
 		"Stop": []any{
@@ -79,9 +80,10 @@ func TestDoctorWarnsWhenOneInvocationIsRegisteredTwice(t *testing.T) {
 	}
 }
 
-// An absent file is the NORMAL state — a global-scope install, or any directory
-// that was never initialized. It must read as a fact about this directory, not as
-// a fault, and never as "not governed".
+// TestDoctorReportsAnAbsentProjectHookFileAsAFact an absent file is the normal
+// state; a global-scope install, or any directory that was never initialized.
+// It must read as a fact about this directory, not as a fault, and never as
+// "not governed".
 func TestDoctorReportsAnAbsentProjectHookFileAsAFact(t *testing.T) {
 	out, code := runDoctorIn(t, t.TempDir())
 	if code != exitOK {
@@ -95,8 +97,9 @@ func TestDoctorReportsAnAbsentProjectHookFileAsAFact(t *testing.T) {
 	}
 }
 
-// Doctor must survive a settings file it cannot parse: this command is what a
-// developer runs when something is already wrong.
+// TestDoctorSurvivesInvalidProjectSettingsJSON doctor must survive a settings
+// file it cannot parse: this command is what a developer runs when something
+// is already wrong.
 func TestDoctorSurvivesInvalidProjectSettingsJSON(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, ".claude", "settings.local.json")
@@ -139,11 +142,6 @@ func inDirWithSettings(t *testing.T, settings map[string]any) string {
 	return out
 }
 
-// runDoctorIn runs doctor with the process CWD set to dir, because the check
-// audits the directory the developer is standing in — the same directory `init`
-// would govern. t.Chdir needs Go 1.24 and this module's floor is 1.23 (the
-// golang.org/x/term pin), so the swap is manual and these tests do not run in
-// parallel.
 func runDoctorIn(t *testing.T, dir string) (string, int) {
 	t.Helper()
 	saved, err := os.Getwd()
@@ -155,7 +153,6 @@ func runDoctorIn(t *testing.T, dir string) (string, int) {
 	}
 	t.Cleanup(func() { os.Chdir(saved) })
 
-	// Point config discovery at a scratch home so the run reads no real posture.
 	t.Setenv("OPENBOX_HOME", t.TempDir())
 	var out, errb bytes.Buffer
 	a := &app{stdout: &out, stderr: &errb, getenv: os.Getenv}

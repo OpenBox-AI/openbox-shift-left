@@ -8,9 +8,8 @@ import (
 	"testing"
 )
 
-// The resolver runs against REAL git (that is the whole point of a server-side
-// resolver — it must agree with git's own trailer parsing). If git is absent we
-// skip the package cleanly rather than fail.
+// TestMain the resolver runs against real git (that is the whole point of a
+// server-side resolver; it must agree with git's own trailer parsing).
 func TestMain(m *testing.M) {
 	if _, err := exec.LookPath("git"); err != nil {
 		os.Exit(0)
@@ -18,10 +17,6 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
-// testRepo is a throwaway git repo for resolver tests. Unlike the SL-5 harness
-// it installs NO hook — SL-6 reads history that already exists, so tests author
-// commit messages directly (simulating what SL-5's hook, a squash, or a human
-// left behind).
 type testRepo struct {
 	t   *testing.T
 	dir string
@@ -38,7 +33,6 @@ func newTestRepo(t *testing.T) *testRepo {
 	return r
 }
 
-// git runs a git command in the repo under a hermetic environment.
 func (r *testRepo) git(args ...string) string {
 	r.t.Helper()
 	out, err := r.gitErr(args...)
@@ -59,10 +53,6 @@ func (r *testRepo) gitErr(args ...string) (string, error) {
 	return string(out), err
 }
 
-// commit creates an empty commit whose message is exactly msg (verbatim: git
-// does not reflow or strip it), and returns the new HEAD SHA. Authoring the raw
-// message lets a test place an OpenBox-Session line in the trailing block (a
-// proper trailer) or mid-body (a pre-install squash residue).
 func (r *testRepo) commit(msg string) string {
 	r.t.Helper()
 	f := filepath.Join(r.t.TempDir(), "msg")
@@ -77,8 +67,6 @@ func (r *testRepo) head() string {
 	return strings.TrimSpace(r.git("rev-parse", "HEAD"))
 }
 
-// trailerMsg builds a message with the given subject and a trailing trailer
-// block of OpenBox-Session lines (what SL-5's stamper produces).
 func trailerMsg(subject string, sessions ...string) string {
 	var b strings.Builder
 	b.WriteString(subject)
@@ -95,7 +83,6 @@ func (r *testRepo) resolver(v OwnershipVerifier) *Resolver {
 
 func contains(s, sub string) bool { return strings.Contains(s, sub) }
 
-// ids extracts session ids from a claim slice for order-insensitive assertions.
 func ids(claims []SessionClaim) map[string]bool {
 	m := map[string]bool{}
 	for _, c := range claims {

@@ -9,12 +9,9 @@ import (
 )
 
 // TestUnitStopTimeoutMatchesTheGracePeriod is the coordination control.
-//
-// http.Server.Shutdown never force-closes an ACTIVE connection, so whatever is
+// Http.Server.Shutdown never force-closes an active connection, so whatever is
 // still streaming when the gateway's --shutdown-grace expires is cut when the
-// process exits. If the supervisor's stop timeout is SHORTER than that grace, the
-// supervisor SIGKILLs first and the grace never gets used at all — the two numbers
-// are only correct together, which is exactly the kind of pairing that drifts.
+// process exits.
 func TestUnitStopTimeoutMatchesTheGracePeriod(t *testing.T) {
 	grace := strconv.Itoa(StopTimeout)
 
@@ -22,8 +19,6 @@ func TestUnitStopTimeoutMatchesTheGracePeriod(t *testing.T) {
 	if !strings.Contains(plist, "--shutdown-grace") || !strings.Contains(plist, grace+"s") {
 		t.Errorf("plist does not pass --shutdown-grace %ss:\n%s", grace, plist)
 	}
-	// launchd defaults to 20s, BELOW the 30s grace, so it must be set explicitly
-	// or a routine restart mid-stream is killed before it finishes draining.
 	if !strings.Contains(plist, "<key>ExitTimeOut</key>") || !strings.Contains(plist, "<integer>"+grace+"</integer>") {
 		t.Errorf("plist does not raise ExitTimeOut to %s; launchd's 20s default would SIGKILL mid-drain:\n%s", grace, plist)
 	}
@@ -37,12 +32,9 @@ func TestUnitStopTimeoutMatchesTheGracePeriod(t *testing.T) {
 	}
 }
 
-// TestUnitsUseFlagsThatExist is the guard for the defect that would have broken
-// every boot. Phase 07's plan documented the unit as running
-// `openbox gateway --config <path>`; no such flag exists, so flag parsing would
-// reject it and the supervised gateway would fail to start forever.
+// TestUnitsUseFlagsThatExist is the guard for the defect that would have
+// broken every boot.
 func TestUnitsUseFlagsThatExist(t *testing.T) {
-	// The real flag set, as registered by cmd/openbox/gateway.go.
 	valid := map[string]bool{"--addr": true, "--upstream": true, "--shutdown-grace": true}
 
 	for name, body := range map[string]string{
@@ -60,11 +52,10 @@ func TestUnitsUseFlagsThatExist(t *testing.T) {
 	}
 }
 
-// TestLaunchdPlistIsWellFormedXML — an unescaped path produces a plist launchd
-// silently refuses to load, which presents as "the gateway never starts" with no
-// error anywhere.
+// TestLaunchdPlistIsWellFormedXML; an unescaped path produces a plist launchd
+// silently refuses to load, which presents as "the gateway never starts" with
+// no error anywhere.
 func TestLaunchdPlistIsWellFormedXML(t *testing.T) {
-	// A path with characters that MUST be escaped.
 	plist := LaunchdPlist(t.TempDir(), `/Users/a&b/<tools>/openbox`, "127.0.0.1:8788", "https://api.anthropic.com", false)
 
 	var doc any
@@ -79,9 +70,7 @@ func TestLaunchdPlistIsWellFormedXML(t *testing.T) {
 	}
 }
 
-// TestSupervisorRestartsACrashedGateway pins the availability story. Supervision
-// is the whole answer to "the gateway died"; without keep-alive the failure is
-// permanent for the session.
+// TestSupervisorRestartsACrashedGateway pins the availability story.
 func TestSupervisorRestartsACrashedGateway(t *testing.T) {
 	plist := LaunchdPlist(t.TempDir(), "/bin/openbox", "127.0.0.1:8788", "https://x", false)
 	if !strings.Contains(plist, "<key>KeepAlive</key>") || !strings.Contains(plist, "<key>RunAtLoad</key>") {
@@ -91,14 +80,13 @@ func TestSupervisorRestartsACrashedGateway(t *testing.T) {
 	if !strings.Contains(unit, "Restart=always") {
 		t.Errorf("systemd unit does not restart on crash:\n%s", unit)
 	}
-	// A USER unit, not a system one: the base tier is user-owned by definition.
 	if !strings.Contains(unit, "WantedBy=default.target") {
 		t.Errorf("systemd unit is not a user unit:\n%s", unit)
 	}
 }
 
-// TestWriteAndRemoveUnitRoundTrip covers the install/uninstall pair on both real
-// targets, and the deferred one.
+// TestWriteAndRemoveUnitRoundTrip covers the install/uninstall pair on both
+// real targets, and the deferred one.
 func TestWriteAndRemoveUnitRoundTrip(t *testing.T) {
 	for _, goos := range []string{"darwin", "linux"} {
 		t.Run(goos, func(t *testing.T) {
@@ -120,7 +108,6 @@ func TestWriteAndRemoveUnitRoundTrip(t *testing.T) {
 			if _, err := os.Stat(path); !os.IsNotExist(err) {
 				t.Error("unit survived removal")
 			}
-			// Removing twice must not error.
 			if again, err := RemoveUnit(goos, home); err != nil || again != "" {
 				t.Errorf("second RemoveUnit: %q, %v", again, err)
 			}
@@ -128,9 +115,8 @@ func TestWriteAndRemoveUnitRoundTrip(t *testing.T) {
 	}
 }
 
-// TestWindowsIsRefusedNotSilentlySkipped — a caller that believes it installed a
-// service and did not is worse off than one told plainly. Windows daemon packaging
-// is deferred (requirement 7), and the error says what to do instead.
+// TestWindowsIsRefusedNotSilentlySkipped; a caller that believes it installed
+// a service and did not is worse off than one told plainly.
 func TestWindowsIsRefusedNotSilentlySkipped(t *testing.T) {
 	_, err := WriteUnit("windows", t.TempDir(), "openbox.exe", "127.0.0.1:8788", "https://x", false)
 	if err == nil {
@@ -143,14 +129,6 @@ func TestWindowsIsRefusedNotSilentlySkipped(t *testing.T) {
 
 // TestLaunchdUnitCapturesStdio is the visibility control for the platform that
 // actually runs the daemon.
-//
-// launchd.plist(5) defaults StandardOutPath and StandardErrorPath to /dev/null,
-// and the systemd sibling gets the journal for free — so on macOS every line the
-// gateway wrote to stderr was discarded. Those lines are not decoration: the
-// emitter's two throttled warnings ("no developer DID configured, so relayed
-// model calls are NOT being recorded"; no session header) are the only signal
-// that a perfectly working relay is recording nothing, and doctor does not ask
-// that question at all.
 func TestLaunchdUnitCapturesStdio(t *testing.T) {
 	home := t.TempDir()
 	plist := LaunchdPlist(home, "/bin/openbox", "127.0.0.1:8788", "https://api.anthropic.com", false)
@@ -166,11 +144,7 @@ func TestLaunchdUnitCapturesStdio(t *testing.T) {
 	}
 }
 
-// TestBothUnitsCarryVerboseOnlyWhenAsked. The supervised daemon owns the port, so
-// a platform whose unit cannot carry --verbose leaves a developer there with no
-// way to see whether calls are flowing at all — and the two renderers are separate
-// functions, so that gap would be invisible until someone tried to debug the one
-// that does not log.
+// TestBothUnitsCarryVerboseOnlyWhenAsked.
 func TestBothUnitsCarryVerboseOnlyWhenAsked(t *testing.T) {
 	for _, tc := range []struct {
 		name string

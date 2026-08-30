@@ -12,7 +12,6 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/internal/client"
 )
 
-// readSpooledEvents reads the events a session spooled (one JSON line each).
 func readSpooledEvents(t *testing.T, spoolDir, sessionID string) []client.DevEvent {
 	t.Helper()
 	raw, err := os.ReadFile(filepath.Join(spoolDir, sessionID+".jsonl"))
@@ -33,8 +32,6 @@ func readSpooledEvents(t *testing.T, spoolDir, sessionID string) []client.DevEve
 	return out
 }
 
-// clockSeq returns a clock that walks a fixed sequence, then holds the last
-// value — so a test can pin distinct start/end times without sleeping.
 func clockSeq(times ...time.Time) func() time.Time {
 	i := 0
 	return func() time.Time {
@@ -46,10 +43,9 @@ func clockSeq(times ...time.Time) func() time.Time {
 	}
 }
 
-// --- Observe threading --------------------------------------------------------
-
-// A PreToolUse then its paired PostToolUse: the spooled ToolResult carries the
-// Pre's StartedAt (threaded across processes), so a real duration is recoverable.
+// TestThreadDuration_CompletedRecoversStart a PreToolUse then its paired
+// PostToolUse: the spooled ToolResult carries the Pre's StartedAt (threaded
+// across processes), so a real duration is recoverable.
 func TestThreadDuration_CompletedRecoversStart(t *testing.T) {
 	dir := t.TempDir()
 	ad := New(Identity{DeveloperDID: testDID}, dir)
@@ -84,8 +80,9 @@ func TestThreadDuration_CompletedRecoversStart(t *testing.T) {
 	}
 }
 
-// An unpaired PostToolUse (no matching Pre): threading is a no-op, StartedAt stays
-// empty (the documented stash-miss fallback), and nothing panics.
+// TestThreadDuration_UnpairedCompletedNoStart an unpaired PostToolUse (no
+// matching Pre): threading is a no-op, StartedAt stays empty (the documented
+// stash-miss fallback), and nothing panics.
 func TestThreadDuration_UnpairedCompletedNoStart(t *testing.T) {
 	dir := t.TempDir()
 	ad := New(Identity{DeveloperDID: testDID}, dir)
@@ -102,25 +99,25 @@ func TestThreadDuration_UnpairedCompletedNoStart(t *testing.T) {
 	}
 }
 
-// SessionEnd sweeps the session's stash so a tool call whose PostToolUse never
-// fired does not leave a record behind.
+// TestThreadDuration_SessionEndClearsStash sessionEnd sweeps the session's
+// stash so a tool call whose PostToolUse never fired does not leave a record
+// behind.
 func TestThreadDuration_SessionEndClearsStash(t *testing.T) {
 	dir := t.TempDir()
 	ad := New(Identity{DeveloperDID: testDID}, dir)
-	// A Pre with no matching Post leaves an orphan record.
 	if _, err := ad.Observe(HookPreToolUse, &HookEvent{SessionID: "s1", ToolName: "Bash"}); err != nil {
 		t.Fatalf("observe pre: %v", err)
 	}
 	if _, err := ad.Observe(HookSessionEnd, &HookEvent{SessionID: "s1"}); err != nil {
 		t.Fatalf("observe end: %v", err)
 	}
-	// The session stash subdir is gone.
 	if _, err := os.Stat(ad.Durations.SessionDir("s1")); !os.IsNotExist(err) {
 		t.Errorf("session stash dir should be removed after SessionEnd, stat err = %v", err)
 	}
 }
 
-// The durations subdir must not derail FlushAll (it skips subdirectories).
+// TestThreadDuration_DoesNotBreakFlushAll the durations subdir must not derail
+// FlushAll (it skips subdirectories).
 func TestThreadDuration_DoesNotBreakFlushAll(t *testing.T) {
 	dir := t.TempDir()
 	ad := New(Identity{DeveloperDID: testDID}, dir)

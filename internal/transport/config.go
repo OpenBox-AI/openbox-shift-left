@@ -83,7 +83,6 @@ func UpstreamFor(connectTarget string) string {
 	return "https://" + net.JoinHostPort(host, port)
 }
 
-// requireLoopback rejects any bind host that is not loopback.
 func requireLoopback(host string) error {
 	if host == "" || host == "0.0.0.0" || host == "::" || host == "*" {
 		return fmt.Errorf("transport: listen host %q binds every interface; loopback is required", host)

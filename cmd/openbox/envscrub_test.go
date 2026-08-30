@@ -5,18 +5,7 @@ import (
 	"testing"
 )
 
-// Ambient agent context must not reach these tests.
-//
-// The git-hook cases spawn git (which spawns our hook) with os.Environ(), and
-// the hook resolves a session from CODEX_THREAD_ID at Tier-0 — so running the
-// suite from inside a live Codex session stamps that session instead of the
-// fixture's and the assertion fails on what looks like a product bug (report
-// SL-11). Unsetting before m.Run keeps the vars out of every child env; the
-// mirror of this scrub lives in internal/adapters/common/git/envscrub_test.go.
-//
-// Note for anyone re-running the repro: `go test` caches results, and the env
-// here is read by a spawned child rather than the test binary, so the cache
-// cannot see the difference — use -count=1.
+// ambientSessionEnv ambient agent context must not reach these tests.
 var ambientSessionEnv = []string{
 	"CODEX_THREAD_ID",
 	"OPENBOX_SESSION",
@@ -25,17 +14,14 @@ var ambientSessionEnv = []string{
 	"OPENBOX_SESSION_DIR",
 }
 
-// scrubAmbientSessionEnv is called from the package's single TestMain, in
-// testmain_test.go, which also contains the home-directory hermeticity guard.
-// Go allows one TestMain per package; the scrub stays defined here, beside the
-// list it clears and the test that asserts it happened.
 func scrubAmbientSessionEnv() {
 	for _, k := range ambientSessionEnv {
 		os.Unsetenv(k)
 	}
 }
 
-// TestHarness_NoAmbientSessionEnv names the cause if the scrub is ever removed.
+// TestHarness_NoAmbientSessionEnv names the cause if the scrub is ever
+// removed.
 func TestHarness_NoAmbientSessionEnv(t *testing.T) {
 	for _, k := range ambientSessionEnv {
 		if v := os.Getenv(k); v != "" {

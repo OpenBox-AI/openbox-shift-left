@@ -8,9 +8,8 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/devconfig"
 )
 
-// controlTokenProblem describes a credential that cannot work, in the terms
-// the user has in front of them (what they copied, from where) rather than in
-// terms of what the backend rejected.
+// controlTokenProblem the runtime key is an output of `openbox init`, never an
+// input to it.
 func controlTokenProblem(token string) string {
 	t := strings.TrimSpace(token)
 	switch {
@@ -41,9 +40,6 @@ func safePrefix(token string) string {
 	return token
 }
 
-// selfHostedWithoutDataPlane reports whether this install is pointed at a
-// self-hosted control plane while leaving the data plane at its default; which
-// is a hosted URL that self-hosted deployment cannot serve.
 func selfHostedWithoutDataPlane(backendURL, baseURL string) bool {
 	if strings.TrimSpace(baseURL) != "" {
 		return false

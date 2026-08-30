@@ -28,7 +28,7 @@ type wireSpan struct {
 	// overwritten by ComputeSemanticTypeFromSpan.
 	SemanticType string `json:"semantic_type"`
 
-	// --- Gateway-only fields (that decision, schema 1.5). --.
+	// --- Gateway-only fields (that decision, schema 1.5). ---
 	RequestBody     string            `json:"request_body,omitempty"`
 	RequestHeaders  map[string]string `json:"request_headers,omitempty"`
 	ResponseHeaders map[string]string `json:"response_headers,omitempty"`
@@ -48,9 +48,8 @@ const spanKindClient = "CLIENT"
 
 const synthesizedLLMURL = "https://api.anthropic.com/v1/messages"
 
-// turnSpanAttributes are the classification keys, and they are the ugliest
-// part of this design (OD-0018-1, accepted by the owner 2026-08-13). The
-// client cannot simply declare semantic_type: core recomputes it.
+// turnSpanAttributes the client cannot simply declare semantic_type: core
+// recomputes it.
 func turnSpanAttributes() map[string]any {
 	return map[string]any{
 		"http.method":            "POST",
@@ -96,8 +95,6 @@ func turnAssistantSpan(ev DevEvent) *wireSpan {
 	}
 }
 
-// turnSpanID and turnTraceID derive the ids by hash rather than at random, and
-// that is load-bearing rather than tidy.
 func turnSpanID(ev DevEvent) string {
 	sum := sha256.Sum256([]byte("turnspan\x1f" + turnActivityIDFor(ev)))
 	return hex.EncodeToString(sum[:])[:16]

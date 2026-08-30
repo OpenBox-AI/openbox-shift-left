@@ -272,9 +272,7 @@ func (m Mapper) MapTurn(e *HookEvent, w turnWindow, index int) (started, complet
 	return started, completed, true
 }
 
-// turnMetadata builds a turn event's metadata: the turn index plus the
-// subagent correlation ids. Identifiers and one integer, never content
-// (INV-2).
+// turnMetadata identifiers and one integer, never content (INV-2).
 func turnMetadata(e *HookEvent, index int) map[string]any {
 	m := compact(map[string]any{
 		"agent_id":   capStr(e.AgentID),
@@ -284,9 +282,10 @@ func turnMetadata(e *HookEvent, index int) map[string]any {
 	return m
 }
 
-// mapTool builds the Tool identity and the semantic Span for a Pre/PostToolUse
-// event. Stage is "started" (ToolCall) or "completed" (ToolResult). Two
-// identities, deliberately separate (client.Span.InvocationID / OperationID):
+// mapTool two identities, deliberately separate (client.Span.InvocationID /
+// OperationID):
+//   - InvocationID = tool_use_id, which Claude Code mints per call.
+//   - Shell → the command, hashed.
 func mapTool(e *HookEvent, stage string) (client.Tool, *client.Span) {
 	kind, sem, fileOp, mcpServer, function := classifyTool(e.ToolName)
 
@@ -323,9 +322,8 @@ func operationID(kind client.ToolKind, e *HookEvent) string {
 	return capStr(e.ToolUseID)
 }
 
-// toolMetadata builds the Pre/PostToolUse metadata: the permission mode plus
-// the structural correlation ids. Identifiers only, never content (INV-2);
-// tool_input and tool_response are not represented.
+// toolMetadata identifiers only, never content (INV-2); tool_input and
+// tool_response are not represented.
 func toolMetadata(e *HookEvent) map[string]any {
 	return compact(map[string]any{
 		"permission_mode": enumOr(e.PermissionMode, permissionModes),
@@ -506,9 +504,12 @@ func (m Mapper) eventID(ev client.DevEvent) string {
 	return deriveID(ev)
 }
 
-// deriveID computes the deterministic, collision-safe idempotency id (INV-5)
-// for an event as "cc-" + sha256 over its structural fields. - two distinct
-// events never collide: the high-resolution timestamp
+//   - The same logical event always yields the same id; robust even if the id
+//     is ever recomputed from the spooled/persisted record (the fields it
+//     hashes all survive the spool round-trip), and
+//   - Two distinct events never collide: the high-resolution timestamp
+//     (RFC3339Nano) is the per-event distinguisher, reinforced by the
+//     structural separators (session, type, tool name, file/function locator).
 func deriveID(ev client.DevEvent) string {
 	const sep = 0x1f
 	var b strings.Builder

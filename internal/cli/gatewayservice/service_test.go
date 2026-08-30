@@ -9,14 +9,9 @@ import (
 	"text/template"
 )
 
-// The library renders a supplied template through text/template before writing it
-// (service_darwin.go, service_systemd_linux.go both call `t.render(data, …)`).
-// Our two bodies contain no template actions, so that render must be an IDENTITY
-// transform — and the whole test strategy rests on it: because the bytes are the
-// same either way, asserting WriteUnit's artifact also asserts the library's.
-//
-// A future edit that introduces `{{` into a unit body would break that silently:
-// text/template would either error or, worse, substitute. This is the tripwire.
+// TestSuppliedTemplatesSurviveRendering the library renders a supplied
+// template through text/template before writing it (service_darwin.go,
+// service_systemd_linux.go both call `t.render(data, …)`).
 func TestSuppliedTemplatesSurviveRendering(t *testing.T) {
 	home := t.TempDir()
 	for name, body := range map[string]string{
@@ -35,7 +30,6 @@ func TestSuppliedTemplatesSurviveRendering(t *testing.T) {
 				t.Fatalf("the library could not parse the %s body as a template: %v", name, err)
 			}
 			var out strings.Builder
-			// The library passes a data map; a body with no actions must ignore it.
 			if err := tmpl.Execute(&out, map[string]any{"Name": "ignored"}); err != nil {
 				t.Fatalf("rendering the %s body failed: %v", name, err)
 			}
@@ -46,11 +40,8 @@ func TestSuppliedTemplatesSurviveRendering(t *testing.T) {
 	}
 }
 
-// The library's Name must produce exactly the paths this repo already uses, on
-// both platforms. It derives the unit filename from Name — `<Name>.plist` on
-// darwin, `<Name>.service` on systemd — and the two platforms here do not share a
-// convention, so one shared value would silently rename one of them. `UnitPath`,
-// `openbox doctor` and the re-install check all read the path this produces.
+// TestServiceNameMatchesTheRepoPaths the library's Name must produce exactly
+// the paths this repo already uses, on both platforms.
 func TestServiceNameMatchesTheRepoPaths(t *testing.T) {
 	home := t.TempDir()
 
@@ -75,8 +66,9 @@ func TestServiceNameMatchesTheRepoPaths(t *testing.T) {
 	}
 }
 
-// An unsupported platform is an error, not a silent no-op: a developer who believes
-// a service was installed and finds none later is worse off than one told plainly.
+// TestUnsupportedPlatformIsAnError an unsupported platform is an error, not a
+// silent no-op: a developer who believes a service was installed and finds
+// none later is worse off than one told plainly.
 func TestUnsupportedPlatformIsAnError(t *testing.T) {
 	if _, err := New("windows", t.TempDir(), "openbox.exe", "127.0.0.1:8788", "https://x", false); err == nil {
 		t.Fatal("expected an error for windows")
@@ -86,9 +78,10 @@ func TestUnsupportedPlatformIsAnError(t *testing.T) {
 	}
 }
 
-// Uninstalling when nothing is installed is success — `--remove-gateway` has to be
-// safe on a machine that never had a gateway, and it runs BEFORE the credential
-// gate precisely so a wiped ~/.openbox can still be backed out.
+// TestUninstallIsIdempotent uninstalling when nothing is installed is success;
+// `--remove-gateway` has to be safe on a machine that never had a gateway, and
+// it runs before the credential gate precisely so a wiped ~/.openbox can still
+// be backed out.
 func TestUninstallIsIdempotent(t *testing.T) {
 	if !IsNotInstalled(nil) {
 		t.Error("nil must read as not-installed")
@@ -109,23 +102,8 @@ type stringError struct{ s string }
 
 func (e *stringError) Error() string { return e.s }
 
-// REQUIREMENT 2, the artifact assertion — OPT-IN, and here is why.
-//
-// The phase requires the log paths be "verified by reading the written plist, not
-// by trusting an option". The library gives us no way to do that in isolation: on
-// darwin it derives the plist path from user.Current() and ignores $HOME (measured:
-// with HOME=/tmp/…, user.Current().HomeDir still returns the real home), and no
-// Option overrides it. So running this unguarded would install a live launchd unit
-// into the home directory of whoever ran the tests, including CI.
-//
-// Gated rather than deleted, because the alternative is asserting the config struct
-// and calling it artifact verification — which is the exact bug this repo has
-// already shipped once. Run it deliberately:
-//
-//	OPENBOX_TEST_REAL_SERVICE_INSTALL=1 go test ./internal/gatewayservice/ -run TestRealInstall
-//
-// It installs, reads the plist off disk, asserts, and uninstalls. It does NOT start
-// the job.
+// TestRealInstallWritesTheExpectedArtifact requirement 2, the artifact
+// assertion; OPT-IN, and here is why. Run it deliberately:
 func TestRealInstallWritesTheExpectedArtifact(t *testing.T) {
 	if os.Getenv("OPENBOX_TEST_REAL_SERVICE_INSTALL") != "1" {
 		t.Skip("opt-in: writes a real unit into your home directory. " +
@@ -162,9 +140,8 @@ func TestRealInstallWritesTheExpectedArtifact(t *testing.T) {
 				t.Errorf("%s missing from the written plist", key)
 			}
 		}
-		// BOTH streams to ONE tailable file. This is the requirement the library's
-		// own LogDirectory option cannot express: it hardcodes <Name>.out.log and
-		// <Name>.err.log.
+		// This is the requirement the library's own LogDirectory option cannot
+		// express: it hardcodes <Name>.out.log and <Name>.err.log.
 		if strings.Count(got, logPath) != 2 {
 			t.Errorf("expected both log keys to name %s; plist:\n%s", logPath, got)
 		}
@@ -185,7 +162,6 @@ func TestRealInstallWritesTheExpectedArtifact(t *testing.T) {
 		}
 	}
 
-	// And it must come back out.
 	if err := Uninstall(runtime.GOOS, home); err != nil {
 		t.Fatalf("Uninstall: %v", err)
 	}

@@ -10,6 +10,8 @@ import (
 )
 
 // What it does NOT replace, deliberately:
+//   - The generic `secret_assignment` value-group pattern, because gitleaks
+//     reports
 
 var gitleaksDetector = sync.OnceValue(func() *detect.Detector {
 	d, err := detect.NewDetectorDefaultConfig()
@@ -22,11 +24,10 @@ var gitleaksDetector = sync.OnceValue(func() *detect.Detector {
 	return d
 })
 
-// minGitleaksSecretLen is the shortest finding this will act on.
 const minGitleaksSecretLen = 8
 
-// redactGitleaks replaces every gitleaks finding's secret text with a
-// placeholder, recording each rule id as a category.
+// redactGitleaks categories are gitleaks rule IDS, content-free by
+// construction; they name the rule, never the matched text.
 func redactGitleaks(d *detect.Detector, text string, catSet map[string]struct{}) string {
 	if d == nil || text == "" {
 		return text

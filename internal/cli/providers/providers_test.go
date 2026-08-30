@@ -9,7 +9,6 @@ import (
 )
 
 func TestBuiltProvidersAreRealAndCursorIsStub(t *testing.T) {
-	// claude-code (SL4-WIRE-1) and codex (STORY-SL7-A) are real installers.
 	for name, want := range map[string]provider.Name{
 		"claude-code": provider.ClaudeCode,
 		"codex":       provider.Codex,
@@ -26,7 +25,6 @@ func TestBuiltProvidersAreRealAndCursorIsStub(t *testing.T) {
 		}
 	}
 
-	// cursor stays a stub until SL-8 builds its adapter.
 	inst, err := Lookup("cursor")
 	if err != nil {
 		t.Fatalf("Lookup(cursor): %v", err)
@@ -53,8 +51,6 @@ func TestStubPlanNamesTheIdentityNeverASecret(t *testing.T) {
 		t.Fatalf("Install = %v, want ErrNotBuilt", err)
 	}
 	plan := inst.Plan(ref)
-	// The plan names the identity and where credentials come from — never a
-	// secret-store location, since that decision deleted the store.
 	if !strings.Contains(plan, "did:aip:abc") || !strings.Contains(plan, ".env") {
 		t.Errorf("plan should name the DID and the credential file:\n%s", plan)
 	}
@@ -63,8 +59,9 @@ func TestStubPlanNamesTheIdentityNeverASecret(t *testing.T) {
 	}
 }
 
-// STORY-SL7-A AC-2: the codex installer resolves the running engine into its
-// hook commands and its plan surfaces the /hooks trust step (never a secret).
+// TestCodexInstallerPlanSurfacesTrustStep story-SL7-A AC-2: the codex
+// installer resolves the running engine into its hook commands and its plan
+// surfaces the /hooks trust step (never a secret).
 func TestCodexInstallerPlanSurfacesTrustStep(t *testing.T) {
 	inst, err := Lookup("codex")
 	if err != nil {

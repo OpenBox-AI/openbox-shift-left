@@ -5,7 +5,6 @@
 //	the lane's own set is the developer's or their org's and is never touched -
 //	not on install, not on removal, not when the whole env block is rewritten.
 //	Removing one lane must leave the others working.
-//	before OpenBox" is captured on the FIRST activation and can never be
 package activation
 
 import (
@@ -292,8 +291,7 @@ func saveRecord(homeDir string, rec Record) error {
 	return os.Chmod(path, 0o600)
 }
 
-// readSettings loads the file as a generic map so unknown keys survive a
-// round-trip. Decoding into a typed struct is how a writer silently deletes
+// readSettings decoding into a typed struct is how a writer silently deletes
 // configuration it was never taught about.
 func readSettings(path string) (map[string]any, []byte, error) {
 	raw, err := os.ReadFile(path)

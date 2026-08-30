@@ -6,9 +6,9 @@ import (
 	jsonschema "github.com/santhosh-tekuri/jsonschema/v6"
 )
 
-// schemaResourceURL is the in-memory identity the schema document is compiled
-// under. Any URL works; the point is that AddResource pins the document, so
-// the compiler resolves it from memory and never reaches for the network.
+// schemaResourceURL any URL works; the point is that AddResource pins the
+// document, so the compiler resolves it from memory and never reaches for the
+// network.
 const schemaResourceURL = "mem://openbox/dev-event.schema.json"
 
 type refusingLoader struct{}
@@ -17,8 +17,7 @@ func (refusingLoader) Load(url string) (any, error) {
 	return nil, fmt.Errorf("conformance: refused to fetch %q — the schema is pinned in memory and must resolve entirely from it", url)
 }
 
-// compileSchema compiles the contract schema for structural validation. Two
-// settings are load-bearing:
+// compileSchema two settings are load-bearing:
 func compileSchema(doc map[string]any) (*jsonschema.Schema, error) {
 	c := jsonschema.NewCompiler()
 	c.AssertFormat()

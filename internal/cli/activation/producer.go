@@ -30,9 +30,9 @@ func ResolveElection(settingsPath string) Election {
 	return electionFrom(CurrentEnv(settingsPath))
 }
 
-// electionFrom is the pure half, so the rule can be tested without a
-// filesystem and so doctor and the daemons cannot disagree about what
-// "elected" means.
+// electionFrom one classifier, two callers; the lesson from the duplicate-
+// hook-engine repair, where the check and the fix were built on the same
+// function on purpose.
 func electionFrom(env map[string]string) Election {
 	var routed []Lane
 	for _, lane := range lanePrecedence {
@@ -90,8 +90,9 @@ func containsLane(lanes []Lane, want Lane) bool {
 	return false
 }
 
-// candidateLanes filters the routed set down to the lanes that CAN see the
-// call, whatever the precedence says.
+// candidateLanes so with both lanes routed the call goes straight to the
+// gateway, transport records nothing, and naming transport as the producer
+// would attribute every turn to a lane that never saw one.
 func candidateLanes(routed []Lane, env map[string]string) []Lane {
 	baseURL := env["ANTHROPIC_BASE_URL"]
 	var out []Lane
@@ -127,7 +128,9 @@ func laneIsRouted(lane Lane, env map[string]string) bool {
 	}
 }
 
-// isLoopbackURL reports whether raw addresses this machine.
+// isLoopbackURL this one answers "is a lane of ours routed here" for several,
+// and the two are kept apart deliberately: merging them would make a change to
+// either question silently change the other.
 func isLoopbackURL(raw string) bool {
 	if raw == "" {
 		return false

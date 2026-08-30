@@ -14,7 +14,6 @@ const (
 	scopeGlobal = "global"
 )
 
-// resolveScope turns the --scope flag into a scope, per provider.
 func (a *app) resolveScope(scope, providerName string) (string, int) {
 	switch scope {
 	case "", scopeLocal, scopeGlobal:
@@ -54,7 +53,9 @@ func flagPassed(fs *flag.FlagSet, name string) bool {
 	return found
 }
 
-// requireCredentials refuses to install when this machine has no credentials.
+// requireCredentials it must not half-install: a bundle installed against no
+// identity produces hooks that fire, fail to resolve credentials, and fail
+// open silently; an install that looks finished and governs nothing.
 func (a *app) requireCredentials() int {
 	envPath, err := devconfig.EnvFilePath()
 	if err != nil {

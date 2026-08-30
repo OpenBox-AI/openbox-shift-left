@@ -39,11 +39,9 @@ func sampleIdentity() Identity {
 
 var sampleAt = time.Date(2026, 8, 26, 12, 0, 0, 0, time.UTC)
 
-// TestEventTypeIsTurnCompleted is not a taste assertion. client/payload.go
-// attaches a gateway span ONLY under `case EventTurnCompleted` — every other
-// event type drops Span on the floor with no error anywhere. An emitter that
-// picked TurnStarted, or invented a type, would spool and POST successfully
-// while carrying none of the evidence it exists to carry.
+// TestEventTypeIsTurnCompleted is not a taste assertion. Client/payload.go
+// attaches a gateway span only under `case EventTurnCompleted`; every other
+// event type drops Span on the floor with no error anywhere.
 func TestEventTypeIsTurnCompleted(t *testing.T) {
 	ev := mustEvent(LaneGateway, sampleIdentity(), "req-1", sampleAt, sampleCaptured())
 	if ev.EventType != client.EventTurnCompleted {
@@ -51,10 +49,8 @@ func TestEventTypeIsTurnCompleted(t *testing.T) {
 	}
 }
 
-// TestGatewayRequestIDIsSet keeps the two turn producers in disjoint activity-id
-// namespaces (that decision requirement 8). Empty here means turnActivityIDFor
-// falls through to the hook path's TurnIndex branch, and with no index it
-// returns "" — so the event would carry no activity_id at all.
+// TestGatewayRequestIDIsSet keeps the two turn producers in disjoint activity-
+// id namespaces (that decision requirement 8).
 func TestGatewayRequestIDIsSet(t *testing.T) {
 	ev := mustEvent(LaneGateway, sampleIdentity(), "req-1", sampleAt, sampleCaptured())
 	if ev.GatewayRequestID != "req-1" {
@@ -63,8 +59,8 @@ func TestGatewayRequestIDIsSet(t *testing.T) {
 }
 
 // TestEventIDIsDeterministicPerCall is INV-5. The spool can be drained by a
-// different process long after the daemon that wrote it exited, and a retry must
-// present the SAME idempotency key or core counts the call twice.
+// different process long after the daemon that wrote it exited, and a retry
+// must present the same idempotency key or core counts the call twice.
 func TestEventIDIsDeterministicPerCall(t *testing.T) {
 	a := mustEvent(LaneGateway, sampleIdentity(), "req-1", sampleAt, sampleCaptured())
 	b := mustEvent(LaneGateway, sampleIdentity(), "req-1", sampleAt, sampleCaptured())
@@ -80,7 +76,7 @@ func TestEventIDIsDeterministicPerCall(t *testing.T) {
 	}
 }
 
-// TestSessionAndDIDAreCarried — client.Emit rejects an empty SessionID, and the
+// TestSessionAndDIDAreCarried; client.Emit rejects an empty SessionID, and the
 // DID is what core groups the session under.
 func TestSessionAndDIDAreCarried(t *testing.T) {
 	ev := mustEvent(LaneGateway, sampleIdentity(), "req-1", sampleAt, sampleCaptured())
@@ -92,11 +88,7 @@ func TestSessionAndDIDAreCarried(t *testing.T) {
 	}
 }
 
-// TestObservedExchangeReachesTheWire is the assertion that counts. This repo has
-// shipped a field that was present on the struct and absent from the wire
-// (decision_authority), and its own rule is that asserting the struct is not
-// asserting the wire. So this drives a REAL client at a real HTTP server and
-// reads the bytes that were actually POSTed.
+// TestObservedExchangeReachesTheWire is the assertion that counts.
 func TestObservedExchangeReachesTheWire(t *testing.T) {
 	body := postThroughRealClient(t, mustEvent(LaneGateway, sampleIdentity(), "req-1", sampleAt, sampleCaptured()), true)
 
@@ -146,11 +138,8 @@ func TestObservedExchangeReachesTheWire(t *testing.T) {
 	}
 }
 
-// TestCaptureOffStripsBodiesAndHeadersButKeepsTheFingerprint is the other half of
-// the gate, asserted on outbound bytes for the same reason. That decision makes
-// the fingerprint deliberately UNGATED: it is derived evidence for a governance
-// control, and letting an org opt out of being identified is not a privacy
-// setting. The raw credential must be absent either way.
+// TestCaptureOffStripsBodiesAndHeadersButKeepsTheFingerprint is the other half
+// of the gate, asserted on outbound bytes for the same reason.
 func TestCaptureOffStripsBodiesAndHeadersButKeepsTheFingerprint(t *testing.T) {
 	c := sampleCaptured()
 	c.RequestHeaders = map[string]string{"Authorization": "[redacted]", "Anthropic-Version": "2023-06-01"}
@@ -168,8 +157,6 @@ func TestCaptureOffStripsBodiesAndHeadersButKeepsTheFingerprint(t *testing.T) {
 	}
 }
 
-// postThroughRealClient POSTs ev through a real client.Client and returns the
-// exact bytes that left the process.
 func postThroughRealClient(t *testing.T, ev client.DevEvent, contentOn bool) []byte {
 	t.Helper()
 

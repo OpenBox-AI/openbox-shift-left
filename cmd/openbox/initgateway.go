@@ -92,9 +92,8 @@ func (a *app) removeGateway(homeDir string) error {
 	})
 }
 
-// loadUnit asks the OS supervisor to take ownership. Best-effort by design on
-// the unload side, strict here: if the supervisor will not take it, the caller
-// must not proceed to the env write.
+// loadUnit best-effort by design on the unload side, strict here: if the
+// supervisor will not take it, the caller must not proceed to the env write.
 func (a *app) loadUnit(id laneIdentity) error {
 	switch runtime.GOOS {
 	case "darwin":
@@ -124,9 +123,6 @@ func (a *app) unloadUnit(id laneIdentity) {
 	}
 }
 
-// installUnitFn waitForListenerFn is the readiness probe, behind a seam so a
-// test can drive the "supervisor accepted the unit but nothing is serving"
-// branch without waiting out a real timeout.
 var installUnitFn = gatewayservice.Reinstall
 
 var uninstallUnitFn = gatewayservice.Uninstall
@@ -203,8 +199,7 @@ func unitPathForPlan(home string) string {
 	return "(no daemon packaging on " + runtime.GOOS + ")"
 }
 
-// gatewayHome resolves the home directory the gateway writes into, refusing an
-// empty one. Refusing is the only safe answer: a home the process cannot name
+// gatewayHome refusing is the only safe answer: a home the process cannot name
 // is not a home it may guess.
 func (a *app) gatewayHome() (string, int) {
 	home := a.homeDir()

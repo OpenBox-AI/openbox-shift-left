@@ -185,9 +185,8 @@ func RunHook(sub string, stdin io.Reader, stdout io.Writer, logger *log.Logger) 
 	}
 }
 
-// emitTurn reads the transcript window this turn-boundary hook delimits and
-// spools the TurnStarted/TurnCompleted pair for it. Spool both halves; 4.
-// Advance the cursor; last.
+// emitTurn read the transcript from that offset, taking this side of the
+// sidechain partition only; 3. Spool both halves; 4. Advance the cursor; last.
 func emitTurn(ad *Adapter, logger *log.Logger, hook HookName, ev *HookEvent) {
 	agentID := ev.AgentID
 	sidechain := hook == HookSubagentStop

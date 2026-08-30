@@ -13,9 +13,9 @@ import (
 
 const bashToolName = "Bash"
 
-// maxEvaluationTimeout caps the configurable T2 budget. Unchanged by the
-// raised hook ceiling below: a slow control plane must still degrade quickly,
-// and only a filed approval is worth waiting longer for.
+// maxEvaluationTimeout unchanged by the raised hook ceiling below: a slow
+// control plane must still degrade quickly, and only a filed approval is worth
+// waiting longer for.
 const maxEvaluationTimeout = 4 * time.Second
 
 const preToolUseHookTimeoutSec = 30

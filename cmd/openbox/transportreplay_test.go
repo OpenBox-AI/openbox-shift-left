@@ -23,23 +23,10 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/internal/transport"
 )
 
-// transportreplay_test.go — a REAL recorded model call crossing the CONNECT path.
-//
-// Until this existed, no response body had ever traversed this lane. The control
-// test next door proves the whole chain records, but its upstream is a refused
-// loopback port, so everything it measures happens on the request side; the
-// spike suite that measured byte-identity ran the PLAIN-HTTP path, which is
-// different code from goproxy's hijack. Phase 11's report and the spike's own
-// report both named running the CONNECT path as the first thing conformance
-// should do. This is that.
-//
-// One substitution, and it is the smallest one available: the relay's upstream
-// DIAL is pointed at an in-memory server (gatewaytest.SwapUpstreamDial). The
-// relay's own Transport — DisableCompression, ForceAttemptHTTP2, the redirect
-// rule, the idle pool — stays in the path, and the Accept-Encoding assertion
-// below is what proves it did: if the Transport had been substituted wholesale,
-// Go would advertise gzip on the client's behalf and the header arriving upstream
-// would not be the client's own.
+// The control test next door proves the whole chain records, but its upstream
+// is a refused loopback port, so everything it measures happens on the request
+// side; the spike suite that measured byte-identity ran the plain-HTTP path,
+// which is different code from goproxy's hijack.
 
 type recordedExchange struct {
 	Request struct {
@@ -57,9 +44,6 @@ type recordedExchange struct {
 
 func loadExchange(t *testing.T, name string) recordedExchange {
 	t.Helper()
-	// Segment-split and relative to this package directory, which means no
-	// text search for a path finds it. Recount the hops whenever either end
-	// moves.
 	path := filepath.Join("..", "..", "internal", "transport", "testdata", "corpus", name)
 	raw, err := os.ReadFile(path)
 	if err != nil {
@@ -75,21 +59,12 @@ func loadExchange(t *testing.T, name string) recordedExchange {
 	return ex
 }
 
-// hopByHop are the headers a relay owns rather than forwards. They are excluded
-// from the identity assertion because forwarding them would be the BUG.
 var hopByHop = map[string]bool{
 	"connection": true, "keep-alive": true, "proxy-connection": true,
 	"transfer-encoding": true, "upgrade": true, "content-length": true,
 	"host": true,
 }
 
-// connectAndHandshake performs the client half of an intercepted CONNECT.
-//
-// Every step is ordered the way a real client orders it, and the reason is
-// recorded where it bites: on a pipe a write BLOCKS until it is read, so reading
-// the CONNECT response before starting the handshake is not politeness — skipping
-// it deadlocks, and a deadlocked go test reads as an environment problem rather
-// than as an answer.
 func connectAndHandshake(t *testing.T, p *transport.Proxy, ca *transport.CA, host string) *tls.Conn {
 	t.Helper()
 	clientConn, serverConn := net.Pipe()
@@ -155,8 +130,6 @@ func TestTransportRelaysARecordedExchangeByteIdentically(t *testing.T) {
 	}))
 	t.Cleanup(upstream.Close)
 
-	// Only the DIAL is replaced. See the package doc on gatewaytest for exactly
-	// what that buys and what it does not.
 	gatewaytest.SwapUpstreamDial(t, memhttptest.DialContext)
 
 	spoolDir := t.TempDir()
@@ -210,7 +183,6 @@ func TestTransportRelaysARecordedExchangeByteIdentically(t *testing.T) {
 		t.Fatal("the request never reached the upstream; nothing below measures anything")
 	}
 
-	// Request direction.
 	if gotReq.Method != http.MethodPost || gotReq.URL.Path != "/v1/messages" {
 		t.Errorf("upstream saw %s %s, want POST /v1/messages", gotReq.Method, gotReq.URL.Path)
 	}
@@ -223,9 +195,6 @@ func TestTransportRelaysARecordedExchangeByteIdentically(t *testing.T) {
 			t.Errorf("request header %s arrived as %q, sent %q", k, got, want)
 		}
 	}
-	// The two mutations a proxy adds by default, and the reason this is not
-	// paranoia: the identity suite was first run against
-	// httputil.NewSingleHostReverseProxy and failed on exactly these.
 	if v := gotReq.Header.Get("X-Forwarded-For"); v != "" {
 		t.Errorf("the relay injected X-Forwarded-For: %q", v)
 	}
@@ -234,7 +203,6 @@ func TestTransportRelaysARecordedExchangeByteIdentically(t *testing.T) {
 			"(DisableCompression) are no longer in the path", got, want)
 	}
 
-	// Response direction.
 	if resp.StatusCode != ex.Response.Status {
 		t.Errorf("status = %d, recorded %d", resp.StatusCode, ex.Response.Status)
 	}
@@ -243,8 +211,6 @@ func TestTransportRelaysARecordedExchangeByteIdentically(t *testing.T) {
 			len(body), len(ex.Response.Body))
 	}
 
-	// And the evidence: a response body finally traversed this lane, so the
-	// capture has something a request-only run could never show.
 	ev := readOneSpooledEvent(t, spoolDir, waitForSpool(t, spoolDir, sessionID, warn))
 	if ev.Span == nil {
 		t.Fatal("no span on the spooled event")
@@ -257,15 +223,10 @@ func TestTransportRelaysARecordedExchangeByteIdentically(t *testing.T) {
 	}
 }
 
-// TestTransportStreamsARecordedSSEResponsePerChunk is the streaming half, on the
-// CONNECT path.
-//
-// It is written so that the failure it hunts — the relay buffering the response —
-// is a BOUNDED failure rather than a hang. A buffering relay cannot deliver the
-// first frame until the handler returns, and the handler does not return until
-// the client has read the first frame, so a buffered relay deadlocks. The
-// deadlock is caught by a timeout that says what it means; without the bound this
-// test would stall and read as a broken environment.
+// TestTransportStreamsARecordedSSEResponsePerChunk is the streaming half, on
+// the CONNECT path. A buffering relay cannot deliver the first frame until the
+// handler returns, and the handler does not return until the client has read
+// the first frame, so a buffered relay deadlocks.
 func TestTransportStreamsARecordedSSEResponsePerChunk(t *testing.T) {
 	ex := loadExchange(t, "messages-sse.json")
 	frames := strings.SplitAfter(ex.Response.Body, "\n\n")
@@ -285,9 +246,6 @@ func TestTransportStreamsARecordedSSEResponsePerChunk(t *testing.T) {
 		select {
 		case <-readFirst:
 		case <-time.After(20 * time.Second):
-			// Falling through writes the rest anyway, so the client unblocks and
-			// the assertion below reports "buffered" instead of the whole test
-			// timing out with no explanation.
 		}
 		_, _ = io.WriteString(w, rest)
 		w.(http.Flusher).Flush()
@@ -364,11 +322,6 @@ func TestTransportStreamsARecordedSSEResponsePerChunk(t *testing.T) {
 }
 
 // warnLog collects the emitter's warnings so a failure can quote them.
-//
-// The emitter must NOT be handed t.Logf: the capture completes on the relay's own
-// goroutine, and a log after the test function returns panics the whole binary —
-// which would read as a crash in the code under test rather than as a race in the
-// harness.
 type warnLog struct {
 	mu    sync.Mutex
 	lines []string
@@ -390,12 +343,6 @@ func (w *warnLog) String() string {
 }
 
 // waitForSpool blocks until the lane's spool file exists, bounded.
-//
-// The capture completes on the relay's goroutine AFTER the client has read the
-// last byte, so reading the spool the instant the response ends is a race the
-// test loses about as often as it wins. Bounded rather than a bare poll loop: an
-// unbounded wait turns "the capture never happened" into a hung `go test`, which
-// reads as a broken environment instead of as the answer.
 func waitForSpool(t *testing.T, spoolDir, sessionID string, warn *warnLog) string {
 	t.Helper()
 	path := hookflow.Spool{Dir: spoolDir}.SessionPath(sessionID)
@@ -414,15 +361,6 @@ func waitForSpool(t *testing.T, spoolDir, sessionID string, warn *warnLog) strin
 // TestTransportAddsNoCompressionHeaderOfItsOwn is the control for
 // DisableCompression, and it exists because the obvious version of that
 // assertion does not work.
-//
-// Asserting that a client's OWN Accept-Encoding survives cannot detect
-// DisableCompression being switched off: net/http only adds the header when the
-// request does not already carry one, so with the fixture's header present both
-// settings behave identically and the mutation drill stays green — measured, not
-// assumed. The state that separates them is a request with NO Accept-Encoding,
-// where a compressing transport advertises gzip on the developer's behalf,
-// changing the bytes the provider sees and silently decompressing the response
-// the relay is supposed to forward untouched.
 func TestTransportAddsNoCompressionHeaderOfItsOwn(t *testing.T) {
 	var got http.Header
 	upstream := memhttptest.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -458,7 +396,6 @@ func TestTransportAddsNoCompressionHeaderOfItsOwn(t *testing.T) {
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Claude-Code-Session-Id", "7f3c9b2e-0000-5000-a000-0000000000ae")
-	// Deliberately no Accept-Encoding.
 	if err := req.Write(tc); err != nil {
 		t.Fatalf("write request: %v", err)
 	}

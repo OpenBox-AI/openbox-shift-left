@@ -14,9 +14,9 @@ func fixedClock() func() time.Time {
 	return func() time.Time { return time.Date(2026, 7, 29, 12, 0, 0, 0, time.UTC) }
 }
 
-// A managed hook cannot depend on the provider's working directory, so a relative
-// binary path is refused rather than rendered into a file that would silently not
-// run.
+// TestPlanInstall_RequiresAbsoluteBinary a managed hook cannot depend on the
+// provider's working directory, so a relative binary path is refused rather
+// than rendered into a file that would silently not run.
 func TestPlanInstall_RequiresAbsoluteBinary(t *testing.T) {
 	for _, bin := range []string{"", "  ", "openbox", "./openbox"} {
 		if _, err := PlanInstall([]Provider{ProviderClaudeCode}, bin); err == nil {
@@ -25,8 +25,9 @@ func TestPlanInstall_RequiresAbsoluteBinary(t *testing.T) {
 	}
 }
 
-// The rendered file must invoke the deployed binary, and the placeholder must be
-// gone — a leftover placeholder would produce a hook that cannot execute.
+// TestPlanInstall_SubstitutesBinaryPath the rendered file must invoke the
+// deployed binary, and the placeholder must be gone; a leftover placeholder
+// would produce a hook that cannot execute.
 func TestPlanInstall_SubstitutesBinaryPath(t *testing.T) {
 	plan, err := PlanInstall([]Provider{ProviderClaudeCode, ProviderCodex}, "/opt/openbox/bin/openbox")
 	if err != nil {
@@ -35,8 +36,6 @@ func TestPlanInstall_SubstitutesBinaryPath(t *testing.T) {
 	if len(plan.Files) < 2 {
 		t.Fatalf("expected files for both providers, got %d", len(plan.Files))
 	}
-	// No file may keep the placeholder — a leftover would render a hook that
-	// cannot execute.
 	invokes := map[string]bool{}
 	for _, f := range plan.Files {
 		body := string(f.Contents)
@@ -47,23 +46,15 @@ func TestPlanInstall_SubstitutesBinaryPath(t *testing.T) {
 			invokes[filepath.Base(f.Path)] = true
 		}
 	}
-	// Claude Code's managed settings DEFINE the hook, so they must name the
-	// deployed binary. Codex's managed files cannot: `hooks` is not a
-	// requirements.toml key, and managed_config.toml carries defaults only — the
-	// Codex hook is installed by `openbox init --provider codex`. What the
-	// Codex mandate contributes is asserted in
-	// TestPlanInstall_CodexMandatesAreTopLevel instead.
+	// Codex's managed files cannot: `hooks` is not a requirements.toml key, and
+	// managed_config.toml carries defaults only; the Codex hook is installed by
+	// `openbox init --provider codex`.
 	if !invokes["managed-settings.json"] {
 		t.Errorf("claude-code managed settings must invoke the deployed binary, got %v", invokes)
 	}
 }
 
-// TestPlanInstall_CodexMandatesAreTopLevel is the E8-S8 regression guard. TOML
-// binds a bare key written after a table header to that table, so an earlier
-// revision of requirements.toml — which listed the mandate keys below `[hooks]` —
-// shipped them as `hooks.allowed_sandbox_modes` and friends: parsed by Codex,
-// ignored, and silently not in effect while `openbox doctor` and session posture
-// both reported "managed". Assert on the parsed structure, not on the text.
+// TestPlanInstall_CodexMandatesAreTopLevel is the E8-S8 regression guard.
 func TestPlanInstall_CodexMandatesAreTopLevel(t *testing.T) {
 	plan, err := PlanInstall([]Provider{ProviderCodex}, "/opt/openbox/bin/openbox")
 	if err != nil {
@@ -84,7 +75,6 @@ func TestPlanInstall_CodexMandatesAreTopLevel(t *testing.T) {
 			t.Errorf("%s is not a TOP-LEVEL key in requirements.toml (nested keys are ignored by Codex); top-level keys = %v", want, keys)
 		}
 	}
-	// The pins must exclude the escapes they exist to block.
 	body := string(req)
 	for _, forbidden := range []string{`"never"`, `"danger-full-access"`} {
 		for _, line := range strings.Split(body, "\n") {
@@ -97,18 +87,14 @@ func TestPlanInstall_CodexMandatesAreTopLevel(t *testing.T) {
 			}
 		}
 	}
-	// Hook exclusivity must not be live while no managed hook definition ships:
-	// Codex would then ignore the user-level hooks.json `init` writes and run
-	// no OpenBox hook at all.
 	if keys["allow_managed_hooks_only"] {
 		t.Error("allow_managed_hooks_only is enabled but this template ships no managed hook definition — " +
 			"Codex would ignore the user-level hooks.json and run no OpenBox hook (see the template comment)")
 	}
 }
 
-// A mandate must be recognized from a TOP-LEVEL key only. A file whose keys are
-// nested under a table imposes nothing, and reporting it as managed is the false
-// assurance E8-S8 shipped.
+// TestMandates_CodexRejectsNestedKeys a mandate must be recognized from a TOP-
+// level key only.
 func TestMandates_CodexRejectsNestedKeys(t *testing.T) {
 	nested := []byte("[hooks]\nallow_managed_hooks_only = true\nallowed_sandbox_modes = [\"read-only\"]\n")
 	if mandates(ProviderCodex, nested) {
@@ -118,8 +104,6 @@ func TestMandates_CodexRejectsNestedKeys(t *testing.T) {
 	if !mandates(ProviderCodex, top) {
 		t.Error("a top-level mandate key must be recognized")
 	}
-	// `hook codex` in requirements.toml proves nothing: hooks are not a
-	// requirements key, so a file naming our hook imposes no mandate.
 	if mandates(ProviderCodex, []byte("[hooks]\nPreToolUse = \"openbox hook codex PreToolUse\"\n")) {
 		t.Error("naming our hook in requirements.toml is not a mandate")
 	}
@@ -130,7 +114,6 @@ func TestApply_IdempotentAndBacksUp(t *testing.T) {
 	target := filepath.Join(dir, "managed-settings.json")
 	plan := Plan{Files: []File{{Path: target, Contents: []byte("v2"), Mode: 0o644}}}
 
-	// First write.
 	out, err := Apply(plan, false, fixedClock())
 	if err != nil {
 		t.Fatalf("apply: %v", err)
@@ -139,8 +122,6 @@ func TestApply_IdempotentAndBacksUp(t *testing.T) {
 		t.Errorf("first apply = %q, want written", out[0].Action)
 	}
 
-	// Re-running must not churn the file — a config-management loop runs this
-	// repeatedly and should be a no-op when nothing changed.
 	out, err = Apply(plan, false, fixedClock())
 	if err != nil {
 		t.Fatalf("apply: %v", err)
@@ -149,8 +130,6 @@ func TestApply_IdempotentAndBacksUp(t *testing.T) {
 		t.Errorf("second apply = %q, want unchanged", out[0].Action)
 	}
 
-	// Replacing different contents preserves the old file: this overwrites org
-	// security configuration, so "I can put it back" has to be true.
 	if err := os.WriteFile(target, []byte("v1-operator-edited"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -167,14 +146,10 @@ func TestApply_IdempotentAndBacksUp(t *testing.T) {
 	}
 }
 
-// The property that matters most: never quietly downgrade a mandate. A visible
-// failure is recoverable; a silent downgrade is what an attacker would want.
-// A strictness marker that survives only as a COMMENT in the incoming file is not
-// in effect, so replacing a live mandate with it is a downgrade and must be
-// refused. Without this, the Codex template — which ships
-// `allow_managed_hooks_only` commented out, because enabling it without a managed
-// hook definition would disable the OpenBox hook entirely — would silently replace
-// an operator's live hook-exclusivity setting.
+// TestApply_CommentedMarkerIsNotStrictness the property that matters most:
+// never quietly downgrade a mandate. A strictness marker that survives only as
+// a comment in the incoming file is not in effect, so replacing a live mandate
+// with it is a downgrade and must be refused.
 func TestApply_CommentedMarkerIsNotStrictness(t *testing.T) {
 	dir := t.TempDir()
 	target := filepath.Join(dir, "requirements.toml")
@@ -222,7 +197,6 @@ func TestApply_RefusesToWeaken(t *testing.T) {
 		t.Error("the stricter file must be left in place")
 	}
 
-	// --force is the deliberate override.
 	out, err = Apply(lax, true, fixedClock())
 	if err != nil {
 		t.Fatalf("forced apply: %v", err)
@@ -232,8 +206,9 @@ func TestApply_RefusesToWeaken(t *testing.T) {
 	}
 }
 
-// Replacing a file with an equally-strict or stricter one is not a downgrade and
-// must proceed, or upgrades would be impossible.
+// TestApply_AllowsEqualOrStricter replacing a file with an equally-strict or
+// stricter one is not a downgrade and must proceed, or upgrades would be
+// impossible.
 func TestApply_AllowsEqualOrStricter(t *testing.T) {
 	dir := t.TempDir()
 	target := filepath.Join(dir, "managed-settings.json")
@@ -254,8 +229,9 @@ func TestApply_AllowsEqualOrStricter(t *testing.T) {
 	}
 }
 
-// Every shipped template must render and be non-trivial: an embed that silently
-// resolved to nothing would produce an empty managed file, i.e. no mandate at all.
+// TestTemplates_AllProvidersRender every shipped template must render and be
+// non-trivial: an embed that silently resolved to nothing would produce an
+// empty managed file, i.e. No mandate at all.
 func TestTemplates_AllProvidersRender(t *testing.T) {
 	for _, p := range []Provider{ProviderClaudeCode, ProviderCodex} {
 		plan, err := PlanInstall([]Provider{p}, "/opt/openbox")

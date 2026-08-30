@@ -6,8 +6,6 @@ import (
 	"time"
 )
 
-// fileCache resolving one boolean touches four files: the managed config and
-// its raw key set, then the user config and its raw key set.
 type fileCache[T any] struct {
 	mu    sync.Mutex
 	stamp fileStamp
@@ -115,7 +113,6 @@ func cachedUser() userState {
 	return st
 }
 
-// pinned holds the config view frozen by Pin.
 var pinned struct {
 	mu      sync.Mutex
 	depth   int

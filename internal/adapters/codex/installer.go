@@ -17,14 +17,14 @@ import (
 // the obx_ key or Ed25519 seed value).
 type CredentialRef = providerspi.CredentialRef
 
-// ownedInvocation identifies a hooks.json command handler as OpenBox-owned by
-// matching the exact command shape this installer generates: one engine token
-// (optionally double-quoted) followed by `hook codex <event>`; and nothing
-// else.
+// `my-audit-log && "/usr/bin/openbox" hook codex PreToolUse`) is foreign; its
+// added functionality must survive re-install; so a substring test is not
+// enough; isOpenBoxHandler parses the command instead of scanning it.
 var ownedInvocation = regexp.MustCompile(`^hook (?:codex|claude-code) [A-Za-z]+$`)
 
-// Hook timeouts in seconds (the Codex `timeout` unit; addendum #8; contrast
-// CC's 5 s hard kill, Codex's default is 600 s).
+// The four hot hooks get a small explicit bound so a wedged hook can never
+// stall a tool call for long; the SessionEnd flush hook gets more headroom
+// (the engine's own flushBudget of 12 s stays under it).
 const (
 	hotHookTimeoutSec        = 5
 	preToolUseHookTimeoutSec = 30
@@ -106,8 +106,8 @@ type commandHandler struct {
 	Timeout int    `json:"timeout"`
 }
 
-// writeHooks performs the idempotent merge. A pre-existing file that is not
-// valid JSON is a hard error; never clobber a file we cannot understand.
+// writeHooks a pre-existing file that is not valid JSON is a hard error; never
+// clobber a file we cannot understand.
 func (i Installer) writeHooks() error {
 	path := i.hooksPath()
 
@@ -281,9 +281,8 @@ func (i Installer) configPath() string {
 	return DefaultConfigPath()
 }
 
-// defaultHooksPath is Codex's user-level hooks file: $CODEX_HOME/hooks.json
-// when CODEX_HOME is set (Codex's own home override), else
-// ~/.codex/hooks.json.
+// (Repo-level .codex/hooks.json and config.toml [hooks] are alternative
+// locations this installer deliberately does not touch.)
 func defaultHooksPath() string {
 	if h := os.Getenv("CODEX_HOME"); h != "" {
 		return filepath.Join(h, "hooks.json")

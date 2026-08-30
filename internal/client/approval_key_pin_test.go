@@ -2,27 +2,11 @@ package client
 
 import "testing"
 
-// The approval key is the one identity in this package that a refactor must not
-// move. An approval is filed against (workflow_id, run_id, activity_id); the
-// hold polls that same triple; core scopes both of its bypass grants by
-// activity_id. Change any derivation and every in-flight approval becomes
-// unaddressable — the grant an approver made can never be consumed, the retry
-// files a fresh request, and a rewake that says "re-run to proceed" loops.
-//
-// The failure is silent under the rest of this package's tests: they build their
-// expectations from the same functions they exercise, so a derivation that
-// changes CONSISTENTLY passes them all. These cases pin literal bytes instead.
-// They were captured from the serializer as it stood before tool events moved
-// onto the activity lifecycle, and must keep passing across that change and any
-// later one.
-//
-// Do not regenerate these values. If one fails, the derivation moved and the
-// change is wrong, not the fixture.
+// Change any derivation and every in-flight approval becomes unaddressable;
+// the grant an approver made can never be consumed, the retry files a fresh
+// request, and a rewake that says "re-run to proceed" loops.
 
-// pinEvent is the fixed event the pinned ids are derived from. Every field the
-// derivations read is set explicitly, including the two that must NOT feed the
-// activity id (Stage, InvocationID) — so a refactor that starts folding them in
-// fails here rather than in production.
+// pinEvent is the fixed event the pinned ids are derived from.
 func pinEvent() DevEvent {
 	return DevEvent{
 		SchemaVersion: SchemaVersion,
@@ -36,10 +20,9 @@ func pinEvent() DevEvent {
 		Span: &Span{
 			SemanticType: "file_write",
 			Stage:        "started",
-			// A sample path, and it is INPUT TO THE activity_id HASH and to the golden
-			// wire bytes. It does not track the real tree and must not be "corrected"
-			// when a directory moves — a rename sweep already did that once and broke
-			// the byte pin, which is core's dedupe key.
+			// It does not track the real tree and must not be "corrected" when a
+			// directory moves; a rename sweep already did that once and broke the byte
+			// pin, which is core's dedupe key.
 			FilePath:     "cli/cmd/openbox/main.go",
 			FileOp:       "write",
 			InvocationID: "toolu_pin_attempt_1",
@@ -82,9 +65,9 @@ func TestApprovalKeyIsPinned(t *testing.T) {
 }
 
 // TestApprovalKeyWorkflowIDFallsBackToDID pins the fallback branch. An adapter
-// that leaves WorkspaceID empty (the Claude Code mapper does, deliberately) must
-// still produce a stable workflow_id, or (workflow_id, run_id) fragments and the
-// poll addresses nothing.
+// that leaves WorkspaceID empty (the Claude Code mapper does, deliberately)
+// must still produce a stable workflow_id, or (workflow_id, run_id) fragments
+// and the poll addresses nothing.
 func TestApprovalKeyWorkflowIDFallsBackToDID(t *testing.T) {
 	ev := pinEvent()
 	ev.WorkspaceID = ""
@@ -99,13 +82,10 @@ func TestApprovalKeyWorkflowIDFallsBackToDID(t *testing.T) {
 
 // TestApprovalKeyIsStableAcrossStagesAndRetries pins the two invariants that
 // make an approval consumable: the started and completed halves of one call
-// address one record, and so does a RETRY of the same operation. Both are
-// properties of what activityPairKey excludes — the stage, the timestamp, and
-// the per-attempt invocation id.
+// address one record, and so does a retry of the same operation.
 func TestApprovalKeyIsStableAcrossStagesAndRetries(t *testing.T) {
 	want := ApprovalKeyFor(pinEvent())
 
-	// The completed half of the same call.
 	result := pinEvent()
 	result.EventID = "ev-pin-2"
 	result.EventType = EventToolResult
@@ -119,8 +99,6 @@ func TestApprovalKeyIsStableAcrossStagesAndRetries(t *testing.T) {
 		t.Errorf("completed half key = %+v, want %+v (started and completed must address one record)", got, want)
 	}
 
-	// A second attempt at the same operation: new event id, new invocation id,
-	// later timestamp — same operation, so the same approval.
 	retry := pinEvent()
 	retry.EventID = "ev-pin-3"
 	retry.Timestamp = "2026-07-31T09:05:00Z"
@@ -131,7 +109,6 @@ func TestApprovalKeyIsStableAcrossStagesAndRetries(t *testing.T) {
 		t.Errorf("retry key = %+v, want %+v (a retry must consume the approval already granted)", got, want)
 	}
 
-	// A DIFFERENT operation must not collide with it.
 	other := pinEvent()
 	ospan := *other.Span
 	ospan.OperationID = "op-pin-write-other"

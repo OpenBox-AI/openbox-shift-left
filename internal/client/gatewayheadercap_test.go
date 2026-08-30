@@ -7,12 +7,11 @@ import (
 	"unicode/utf8"
 )
 
-// gatewayheadercap_test.go bounds the one content-bearing field on a gateway span
-// that reached the wire uncapped. The bodies beside it always went through
-// capBody; the header maps did not.
+// Gatewayheadercap_test.go bounds the one content-bearing field on a gateway
+// span that reached the wire uncapped.
 
-// TestGatewayHeadersAreCappedOnTheWire asserts on the built span rather than on
-// the struct, because the struct is not what gets signed.
+// TestGatewayHeadersAreCappedOnTheWire asserts on the built span rather than
+// on the struct, because the struct is not what gets signed.
 func TestGatewayHeadersAreCappedOnTheWire(t *testing.T) {
 	huge := strings.Repeat("A", 512<<10) // 512 KiB in one header value
 	req := map[string]string{"User-Agent": huge}
@@ -40,17 +39,12 @@ func TestGatewayHeadersAreCappedOnTheWire(t *testing.T) {
 	if got := len(span.ResponseHeaders); got > maxHeaderCount {
 		t.Errorf("response header count is %d, want <= %d", got, maxHeaderCount)
 	}
-	// Truncation must be visible: a reader has to tell a short header from a
-	// shortened one.
 	if !strings.Contains(span.RequestHeaders["User-Agent"], "truncated") {
 		t.Error("a truncated header value is not marked as truncated")
 	}
 }
 
-// TestGatewayHeaderCapIsDeterministic is the reason keys are sorted. Gateway
-// spans are re-emittable by design (observedSpanID mints a stable id so a re-emit
-// dedupes), so two emissions of the same exchange must produce the same bytes —
-// Go randomizes map iteration, and dropping "whatever came last" would not.
+// TestGatewayHeaderCapIsDeterministic is the reason keys are sorted.
 func TestGatewayHeaderCapIsDeterministic(t *testing.T) {
 	in := map[string]string{}
 	for i := 0; i < maxHeaderCount*4; i++ {
@@ -83,9 +77,9 @@ func TestGatewayHeaderCapKeepsRunesWhole(t *testing.T) {
 	}
 }
 
-// TestGatewayHeaderCapLeavesOrdinaryHeadersAlone is the no-op half: real traffic
-// must pass through byte-identical, or the stored evidence stops matching the
-// exchange.
+// TestGatewayHeaderCapLeavesOrdinaryHeadersAlone is the no-op half: real
+// traffic must pass through byte-identical, or the stored evidence stops
+// matching the exchange.
 func TestGatewayHeaderCapLeavesOrdinaryHeadersAlone(t *testing.T) {
 	in := map[string]string{
 		"Authorization":    "[redacted]",
@@ -109,34 +103,19 @@ func TestGatewayHeaderCapLeavesOrdinaryHeadersAlone(t *testing.T) {
 }
 
 // TestGatewayHeaderCapIsAByteBound is the gap the first version of this bound
-// could not hold.
-//
-// maxHeaderValueBytes exists because core rejects an oversized body and loses the
-// WHOLE event, and core measures bytes — so the budget is bytes. The original
-// implementation tested bytes and then cut runes against the same number, which
-// means a value could enter the truncation branch and then decline to truncate:
-// anything whose byte length exceeds the bound while its rune count does not.
-// Multi-byte text is exactly that shape.
-//
-// Both directions are asserted, because the byte assertion alone would also pass
-// an implementation that mangled characters: the result must be within budget AND
-// still be valid UTF-8.
+// could not hold. Both directions are asserted, because the byte assertion
+// alone would also pass an implementation that mangled characters: the result
+// must be within budget AND still be valid UTF-8.
 func TestGatewayHeaderCapIsAByteBound(t *testing.T) {
 	for name, value := range map[string]string{
-		// 3-byte runes: 2000 of them is 6000 bytes but only 2000 runes, so a
-		// rune-counted cut leaves it whole.
 		"CJK over the byte bound but under it in runes": strings.Repeat("日", 2000),
-		// 4-byte runes: the worst case, 4x the budget.
-		"astral plane, 4 bytes per rune": strings.Repeat("𝄞", 2000),
-		// Plain ASCII: bytes and runes agree, so this case passed before too. It
-		// stays so the fix cannot regress the case that already worked.
+		"astral plane, 4 bytes per rune":                strings.Repeat("𝄞", 2000),
+		// It stays so the fix cannot regress the case that already worked.
 		"ASCII over the bound": strings.Repeat("a", maxHeaderValueBytes+64),
 	} {
 		t.Run(name, func(t *testing.T) {
 			got := capHeaders(map[string]string{"X-Big": value})["X-Big"]
 
-			// The marker is appended AFTER the budget, so the budget applies to
-			// the value's own bytes.
 			body := strings.TrimSuffix(got, "…[truncated]")
 			if len(body) > maxHeaderValueBytes {
 				t.Errorf("value kept %d bytes, over the %d-byte bound — the cap did not hold",

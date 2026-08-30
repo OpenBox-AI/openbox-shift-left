@@ -107,7 +107,9 @@ func (r *Receiver) Start(ctx context.Context, host component.Host) error {
 	return nil
 }
 
-// build constructs the three signal receivers without binding anything.
+// build because it lived inside Start, the only way to reach it was a test
+// that could bind, and on a host that cannot bind the whole thing was
+// unreachable and looked fine.
 func (r *Receiver) build(ctx context.Context) ([]component.Component, error) {
 	factory := otlpreceiver.NewFactory()
 	cfg, ok := factory.CreateDefaultConfig().(*otlpreceiver.Config)
@@ -216,9 +218,8 @@ func (c *signalCounts) snapshot() map[Signal]int64 {
 	}
 }
 
-// receiverSettings builds the component settings the factory needs. Every
-// field here must be NON-NIL, and that sentence replaces a comment which
-// claimed the opposite.
+// receiverSettings every field here must be NON-NIL, and that sentence
+// replaces a comment which claimed the opposite.
 func receiverSettings(w io.Writer) receiver.Settings {
 	encoder := zapcore.NewConsoleEncoder(zap.NewProductionEncoderConfig())
 	core := zapcore.NewCore(encoder, zapcore.AddSync(w), zapcore.WarnLevel)

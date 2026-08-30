@@ -13,9 +13,9 @@ import (
 
 const redactedHeaderValue = "[redacted]"
 
-// credentialHeaders are redacted by name. From phase 05's requirement 1, and a
-// deliberately closed list; a name not here is treated as ordinary metadata,
-// so additions belong in this constant rather than in a caller.
+// credentialHeaders from phase 05's requirement 1, and a deliberately closed
+// list; a name not here is treated as ordinary metadata, so additions belong
+// in this constant rather than in a caller.
 var credentialHeaders = map[string]bool{
 	"Authorization":        true,
 	"Proxy-Authorization":  true,
@@ -27,19 +27,16 @@ var credentialHeaders = map[string]bool{
 	"X-Amz-Security-Token": true,
 }
 
-// fingerprintOrder is the credential header preference, in order. Fixed rather
-// than "whichever is present", so the fingerprint for one credential cannot
-// change because an unrelated header appeared alongside it.
+// fingerprintOrder fixed rather than "whichever is present", so the
+// fingerprint for one credential cannot change because an unrelated header
+// appeared alongside it.
 var fingerprintOrder = []string{"Authorization", "X-Api-Key", "Api-Key"}
 
 const captureBodyRunes = 65536
 
-// maxCaptureInputBytes bounds what is handed to the redactor, which is a
-// separate bound from the wire cap and exists for a different reason.
-//
-// It must stay larger than captureBodyRunes. Equal or smaller and the wire cap
-// never acts, so the control proving the cap bounds egress goes vacuous while
-// still passing.
+// maxCaptureInputBytes 4x leaves room for the case where redaction grows a
+// body: a placeholder is longer than the shortest value it replaces, so 65,536
+// runes of output can derive from fewer input bytes.
 const maxCaptureInputBytes = 4 * captureBodyRunes
 
 const fingerprintHexLen = 32
@@ -72,13 +69,11 @@ func redactHeaders(h http.Header) map[string]string {
 	return out
 }
 
-// bodyRedactor is the same secret detector the hook path uses. Shared
-// deliberately: a second implementation would drift, and this one's reach is
-// already measured rather than assumed.
+// bodyRedactor shared deliberately: a second implementation would drift, and
+// this one's reach is already measured rather than assumed.
 var bodyRedactor = decision.NewRedactor()
 
-// captureBody redacts then caps a captured body, in that order. One funnel
-// means a new caller cannot be the one that forgets it.
+// captureBody one funnel means a new caller cannot be the one that forgets it.
 func captureBody(body string) string {
 	if body == "" {
 		return ""

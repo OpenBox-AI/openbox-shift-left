@@ -2,9 +2,9 @@ package client
 
 import "testing"
 
-// TestParseEvaluation_FullFields parses a rich /evaluate response (mirroring the
-// reference SDK GovernanceVerdictResponse) and asserts every sibling signal is
-// carried onto the Evaluation — the Advisory-tier value (STORY-SL-9).
+// TestParseEvaluation_FullFields parses a rich /evaluate response (mirroring
+// the reference SDK GovernanceVerdictResponse) and asserts every sibling
+// signal is carried onto the Evaluation; the Advisory-tier value (story-SL-9).
 func TestParseEvaluation_FullFields(t *testing.T) {
 	body := []byte(`{
 		"verdict": "block",
@@ -66,14 +66,14 @@ func TestParseEvaluation_FullFields(t *testing.T) {
 	if r.Type != "pii" || r.Field != "email" || r.Reason != "Contains PII" {
 		t.Errorf("guardrail reason = %+v", r)
 	}
-	// INV-2: redacted_input (content) has no Evaluation field, so it is dropped
-	// at parse. The advisory-record test asserts the persisted record likewise
-	// never carries it (internal/adapters/claude-code advisory_test.go).
+	// The advisory-record test asserts the persisted record likewise never
+	// carries it (internal/adapters/claude-code advisory_test.go).
 }
 
 // TestParseEvaluation_VerdictOnly proves graceful degradation: a Phase-1 core
-// that returns ONLY `verdict` still yields a usable Evaluation with every rich
-// field at its zero value (never an error) — the load-bearing forward-compat AC.
+// that returns only `verdict` still yields a usable Evaluation with every rich
+// field at its zero value (never an error); the load-bearing forward-compat
+// AC.
 func TestParseEvaluation_VerdictOnly(t *testing.T) {
 	e := parseEvaluation([]byte(`{"verdict":"allow"}`))
 	if e.Verdict != VerdictAllow {
@@ -88,8 +88,8 @@ func TestParseEvaluation_VerdictOnly(t *testing.T) {
 	}
 }
 
-// TestParseEvaluation_LegacyAction covers the pre-verdict core: only the legacy
-// `action` field present, mapped through the compat table.
+// TestParseEvaluation_LegacyAction covers the pre-verdict core: only the
+// legacy `action` field present, mapped through the compat table.
 func TestParseEvaluation_LegacyAction(t *testing.T) {
 	e := parseEvaluation([]byte(`{"action":"stop"}`))
 	if e.Verdict != VerdictBlock {
@@ -98,7 +98,8 @@ func TestParseEvaluation_LegacyAction(t *testing.T) {
 }
 
 // TestParseEvaluation_Malformed never errors: a body that will not decode into
-// the rich shape falls back to VerdictUnknown (INV-3 fail-open, stop condition).
+// the rich shape falls back to VerdictUnknown (INV-3 fail-open, stop
+// condition).
 func TestParseEvaluation_Malformed(t *testing.T) {
 	e := parseEvaluation([]byte(`not json`))
 	if e.Verdict != VerdictUnknown {
@@ -109,8 +110,9 @@ func TestParseEvaluation_Malformed(t *testing.T) {
 	}
 }
 
-// TestParseEvaluation_GuardrailAbsentDefaultsPassed mirrors the SDK: an omitted
-// validation_passed defaults to passed=true (not a false-y zero value).
+// TestParseEvaluation_GuardrailAbsentDefaultsPassed mirrors the SDK: an
+// omitted validation_passed defaults to passed=true (not a false-y zero
+// value).
 func TestParseEvaluation_GuardrailAbsentDefaultsPassed(t *testing.T) {
 	e := parseEvaluation([]byte(`{"verdict":"allow","guardrails_result":{"reasons":[]}}`))
 	if e.Guardrail == nil {
@@ -121,9 +123,9 @@ func TestParseEvaluation_GuardrailAbsentDefaultsPassed(t *testing.T) {
 	}
 }
 
-// TestParseEvaluation_Drift parses core's age_result into the CONTENT-FREE
-// DriftResult (STORY-E6-S11): only the boolean/count signals, never the free-text
-// reason / final_trust_score / span_results detail.
+// TestParseEvaluation_Drift parses core's age_result into the content-free
+// DriftResult (story-E6-S11): only the boolean/count signals, never the free-
+// text reason / final_trust_score / span_results detail.
 func TestParseEvaluation_Drift(t *testing.T) {
 	body := []byte(`{
 		"verdict": "allow",
@@ -143,15 +145,13 @@ func TestParseEvaluation_Drift(t *testing.T) {
 	if !e.Drift.GoalDrifted || !e.Drift.GoalAlignmentChecked || e.Drift.ViolationsCount != 2 {
 		t.Errorf("drift signals mismapped: %+v", e.Drift)
 	}
-	// INV-2: DriftResult has NO free-text field, so the "SHOULD-NOT-BE-PARSED" detail
-	// is structurally undecodable (proven by the type + this parse succeeding without it).
-	// A drift-only ALLOW is advisory (the "surface a finding without blocking" case).
 	if !e.IsAdvisory() {
 		t.Error("ALLOW with goal drift should be advisory")
 	}
 }
 
-// TestParseEvaluation_DriftAbsent: no age_result → nil Drift, byte-identical parse.
+// TestParseEvaluation_DriftAbsent: no age_result → nil Drift, byte-identical
+// parse.
 func TestParseEvaluation_DriftAbsent(t *testing.T) {
 	e := parseEvaluation([]byte(`{"verdict":"allow"}`))
 	if e.Drift != nil {
@@ -165,8 +165,8 @@ func TestParseEvaluation_DriftAbsent(t *testing.T) {
 	}
 }
 
-// TestDriftDetected_NotCheckedIsNotAFinding: goal_drifted with the classifier NOT
-// run is not a real finding (the signal is meaningless).
+// TestDriftDetected_NotCheckedIsNotAFinding: goal_drifted with the classifier
+// NOT run is not a real finding (the signal is meaningless).
 func TestDriftDetected_NotCheckedIsNotAFinding(t *testing.T) {
 	d := &DriftResult{GoalDrifted: true, GoalAlignmentChecked: false, ViolationsCount: 3}
 	if d.Detected() {
@@ -177,8 +177,8 @@ func TestDriftDetected_NotCheckedIsNotAFinding(t *testing.T) {
 	}
 }
 
-// TestParseEvaluation_TrustTierInt proves the ambiguous trust_tier wire type: an
-// integer tier renders to a plain string (no ".0") without erroring.
+// TestParseEvaluation_TrustTierInt proves the ambiguous trust_tier wire type:
+// an integer tier renders to a plain string (no ".0") without erroring.
 func TestParseEvaluation_TrustTierInt(t *testing.T) {
 	e := parseEvaluation([]byte(`{"verdict":"allow","trust_tier":3}`))
 	if e.TrustTier != "3" {
@@ -196,10 +196,8 @@ func TestIsAdvisory_RiskOnly(t *testing.T) {
 	}
 }
 
-// A body whose rich fields do not decode must still yield its verdict. The
-// fallback used to decode into the same type that had just failed, so it could
-// only ever repeat the failure — and on the inline evaluation path a lost BLOCK
-// degrades to fail-open allow, which is the wrong direction to be wrong in.
+// TestParseEvaluation_MalformedSiblingFieldKeepsVerdict a body whose rich
+// fields do not decode must still yield its verdict.
 func TestParseEvaluation_MalformedSiblingFieldKeepsVerdict(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -219,7 +217,8 @@ func TestParseEvaluation_MalformedSiblingFieldKeepsVerdict(t *testing.T) {
 	}
 }
 
-// Genuinely undecodable input still yields unknown — never a manufactured deny.
+// TestParseEvaluation_UnparseableBodyIsUnknown genuinely undecodable input
+// still yields unknown; never a manufactured deny.
 func TestParseEvaluation_UnparseableBodyIsUnknown(t *testing.T) {
 	for _, body := range []string{``, `not json`, `[]`, `{"verdict":`} {
 		if got := parseEvaluation([]byte(body)).Verdict; got != VerdictUnknown {

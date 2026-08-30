@@ -7,9 +7,13 @@ import (
 	"github.com/kardianos/service"
 )
 
-// What IT does NOT OWN, deliberately:
+//   - **the unit content.** Both bodies are still rendered by unit.go and
+//     handed to the library as its own template overrides.
+//   - **the install ordering, the readiness proof, the rollback, or the env
+//     activation record.** Those live in the caller and are the safety
+//     property: unit → start → prove listening → env, and any failure after
+//     the install removes the unit again.
 
-// serviceName is the library's `Name`, and it is PER-platform on purpose.
 func (s Spec) serviceName(goos string) (string, error) {
 	switch goos {
 	case "darwin":

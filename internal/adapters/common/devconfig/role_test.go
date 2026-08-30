@@ -18,9 +18,6 @@ func TestParseRoleDefaultsToDev(t *testing.T) {
 	if got, err := devconfig.ParseRole("approver"); err != nil || got != devconfig.RoleApprover {
 		t.Fatalf("ParseRole(approver) = %q, %v", got, err)
 	}
-	// A typo must fail loudly: silently installing a developer runtime when
-	// the operator asked for an approver would hand the wrong principal the
-	// wrong file.
 	if _, err := devconfig.ParseRole("aprover"); err == nil {
 		t.Fatal("ParseRole(aprover) = nil error; want a rejection")
 	}
@@ -65,7 +62,6 @@ func TestApproverConfigRoundTrip(t *testing.T) {
 		t.Errorf("round trip changed the config:\n got %+v\nwant %+v", got, want)
 	}
 
-	// It names a principal's credential coordinates, so it is not world-readable.
 	st, err := os.Stat(path)
 	if err != nil {
 		t.Fatal(err)
@@ -74,7 +70,6 @@ func TestApproverConfigRoundTrip(t *testing.T) {
 		t.Errorf("approver config mode = %v, want 0600", perm)
 	}
 
-	// A machine with no approver installed is a normal state, not an error.
 	if _, err := devconfig.LoadApprover(filepath.Join(t.TempDir(), "absent.json")); err != nil {
 		t.Errorf("LoadApprover(absent) = %v; want no error", err)
 	}

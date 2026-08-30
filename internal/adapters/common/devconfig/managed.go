@@ -45,7 +45,6 @@ type managedState struct {
 	unknownKeys []string
 }
 
-// loadManagedUncached loadManaged reads the managed layer.
 func loadManagedUncached() managedState {
 	path := ManagedConfigPath()
 	raw, err := os.ReadFile(path)
@@ -169,8 +168,8 @@ func unknownManagedKeys(raw []byte) []string {
 	return out
 }
 
-// lockableFields are the settings an org mandate can pin. Derived from the
-// DevConfig json tags so it cannot drift from the schema.
+// lockableFields derived from the DevConfig json tags so it cannot drift from
+// the schema.
 func lockableFields() map[string]bool {
 	out := map[string]bool{}
 	t := reflect.TypeOf(DevConfig{})

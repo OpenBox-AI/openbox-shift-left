@@ -14,9 +14,6 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/internal/client"
 )
 
-// newWireCapture builds a real AIP-signed client pointed at a loopback core
-// that records every /evaluate body, so tests can assert the EXACT bytes the
-// Codex adapter's events put on the wire (story AC-5: E7 flat-hook parity).
 func newWireCapture(t *testing.T) (*client.Client, *[][]byte) {
 	t.Helper()
 	var bodies [][]byte
@@ -57,21 +54,11 @@ func decodeBody(t *testing.T, raw []byte) map[string]any {
 	return m
 }
 
-// assertActivityWireShape is the envelope contract every tool event must satisfy
-// on the wire. It replaces client.AssertHookWireShape, which checked the flat
-// hook-span shape this repo no longer emits.
-//
-// Its twin lives in internal/adapters/claude-code/conformance_parity_test.go and asserts
-// the identical contract. The two are deliberate copies rather than a shared
-// helper: the adapters are separate Go modules, and the property under test is
-// that both produce the SAME shape independently — a shared helper they both
-// called could drift with them and still pass.
 func assertActivityWireShape(t *testing.T, payload map[string]any, wantType string) {
 	t.Helper()
 	if payload["event_type"] != wantType {
 		t.Errorf("event_type = %v, want %s", payload["event_type"], wantType)
 	}
-	// The retired hook envelope. A key here means the span layer grew a caller.
 	for _, k := range []string{"spans", "span_count", "hook_trigger"} {
 		if v, present := payload[k]; present {
 			t.Errorf("payload carries retired key %q = %v", k, v)
@@ -85,19 +72,19 @@ func assertActivityWireShape(t *testing.T, payload map[string]any, wantType stri
 	if payload["workflow_type"] != "developer-session" {
 		t.Errorf("workflow_type = %v, want developer-session", payload["workflow_type"])
 	}
-	// semantic_type was computed by core from the span. With no span there is no
-	// classification, and the client must not invent one — an unowned field would
-	// be a claim nothing verifies.
+	// With no span there is no classification, and the client must not invent
+	// one; an unowned field would be a claim nothing verifies.
 	if _, present := payload["semantic_type"]; present {
 		t.Error("client must not set semantic_type")
 	}
 }
 
 // TestWire_ToolEventsAreActivityPairs proves the activity lifecycle end-to-end
-// through the REAL client: a ToolCall is an ActivityStarted and its ToolResult
-// an ActivityCompleted, the pair shares one activity_id, and a second invocation
-// of the same tool gets its own — the exact-pairing property Codex's tool_use_id
-// buys, now carried by activity_id alone since there is no span_id.
+// through the real client: a ToolCall is an ActivityStarted and its ToolResult
+// an ActivityCompleted, the pair shares one activity_id, and a second
+// invocation of the same tool gets its own; the exact-pairing property Codex's
+// tool_use_id buys, now carried by activity_id alone since there is no
+// span_id.
 func TestWire_ToolEventsAreActivityPairs(t *testing.T) {
 	cl, bodies := newWireCapture(t)
 	m := testMapper()
@@ -124,25 +111,18 @@ func TestWire_ToolEventsAreActivityPairs(t *testing.T) {
 	completed := activityID((*bodies)[1], "ActivityCompleted")
 	second := activityID((*bodies)[2], "ActivityStarted")
 
-	// Both halves of one call address one row — and one approval.
 	if started != completed {
 		t.Errorf("pre/post of one tool_use_id must share activity_id: %s vs %s", started, completed)
 	}
-	// A distinct invocation is a distinct operation here (a bare Bash call has no
-	// structural discriminator, so the operation id falls back to the tool_use_id).
 	if started == second {
 		t.Error("two Bash invocations with distinct tool_use_ids must not share activity_id")
 	}
 }
 
 // TestWire_ToolUseIDNeverRidesTheWire pins the pairing-channel invariant the
-// mapper's mapTool doc comment claims: the tool_use_id shapes the DERIVED
-// activity_id but never appears as a wire FIELD outside metadata, which is the
+// mapper's mapTool doc comment claims: the tool_use_id shapes the derived
+// activity_id but never appears as a wire field outside metadata, which is the
 // one deliberate carrier (a structural identifier, and the audit channel).
-//
-// The old span root fields it used to check are gone, so this now scans the
-// whole payload with metadata removed — a stricter test than the field list it
-// replaces, since it catches a leak into any field, including one added later.
 func TestWire_ToolUseIDNeverRidesTheWire(t *testing.T) {
 	cl, bodies := newWireCapture(t)
 	m := testMapper()
@@ -163,11 +143,8 @@ func TestWire_ToolUseIDNeverRidesTheWire(t *testing.T) {
 	}
 }
 
-// TestWire_MCPIdentifiersRideActivityInput: the mcp server/tool identifiers used
-// to ride the span's mcp family fields. With the span retired, activity_input is
-// their only home — so an mcp call must still be distinguishable from a shell
-// one on the wire, and the mapper must not overwrite the function with the
-// tool_use_id.
+// TestWire_MCPIdentifiersRideActivityInput: the mcp server/tool identifiers
+// used to ride the span's mcp family fields.
 func TestWire_MCPIdentifiersRideActivityInput(t *testing.T) {
 	cl, bodies := newWireCapture(t)
 	m := testMapper()
@@ -188,9 +165,9 @@ func TestWire_MCPIdentifiersRideActivityInput(t *testing.T) {
 	}
 }
 
-// TestWire_LifecycleEventsUseBaseWireTypes (AC-5, E7-S5 rule): lifecycle events
-// ride the base Workflow*/SignalReceived wire types with workflow_type set on
-// signals too, and are span-less.
+// TestWire_LifecycleEventsUseBaseWireTypes (AC-5, E7-S5 rule): lifecycle
+// events ride the base Workflow*/SignalReceived wire types with workflow_type
+// set on signals too, and are span-less.
 func TestWire_LifecycleEventsUseBaseWireTypes(t *testing.T) {
 	cl, bodies := newWireCapture(t)
 	m := testMapper()

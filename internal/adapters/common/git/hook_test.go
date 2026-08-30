@@ -48,7 +48,6 @@ func TestInstallHook_RefusesForeignHook(t *testing.T) {
 	if err := InstallHook(dir, HookConfig{}); err == nil {
 		t.Fatal("expected refusal to overwrite a foreign hook")
 	}
-	// The foreign hook must be left intact.
 	body, _ := os.ReadFile(path)
 	if !strings.Contains(string(body), "someone elses hook") {
 		t.Fatalf("foreign hook was clobbered:\n%s", body)
@@ -57,7 +56,6 @@ func TestInstallHook_RefusesForeignHook(t *testing.T) {
 
 func TestHookScript_CustomCommandAndArgs(t *testing.T) {
 	s := hookScript(HookConfig{Command: "openbox", Args: []string{"hook", "git", "prepare-commit-msg"}})
-	// The OD17 unified-engine invocation must render safely.
 	if !strings.Contains(s, "'hook' 'git' 'prepare-commit-msg'") {
 		t.Fatalf("unified-engine args not rendered:\n%s", s)
 	}
@@ -72,8 +70,9 @@ func TestShellQuote(t *testing.T) {
 	}
 }
 
-// RunPrepareCommitMsg is fail-open at the arg layer: no message-file arg is a
-// logged no-op, never an error that would surface to git.
+// TestRunPrepareCommitMsg_NoArgsIsNoop runPrepareCommitMsg is fail-open at the
+// arg layer: no message-file arg is a logged no-op, never an error that would
+// surface to git.
 func TestRunPrepareCommitMsg_NoArgsIsNoop(t *testing.T) {
 	g := Git{}
 	n, err := g.RunPrepareCommitMsg(nil, SessionResolver{}, nil)
@@ -82,11 +81,8 @@ func TestRunPrepareCommitMsg_NoArgsIsNoop(t *testing.T) {
 	}
 }
 
-// TestHookConfigDefaultsToTheShippedBinary holds a default that outlived what it
-// named. It once produced `openbox-git-hook`, a dev instrument that shipped in no
-// release and that no installer targeted, so a zero-valued HookConfig wrote a
-// hook invoking a binary present on no machine. Production always sets Command,
-// which is exactly why nothing noticed.
+// TestHookConfigDefaultsToTheShippedBinary holds a default that outlived what
+// it named.
 func TestHookConfigDefaultsToTheShippedBinary(t *testing.T) {
 	var c HookConfig
 	if got := c.command(); got != "openbox" {

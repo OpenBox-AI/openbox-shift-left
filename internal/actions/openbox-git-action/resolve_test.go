@@ -11,8 +11,6 @@ import (
 
 var ctx = context.Background()
 
-// --- The core S3 attribution matrix (server-side read side) ----------------
-
 func TestResolve_PlainTrailerCommit(t *testing.T) {
 	r := newTestRepo(t)
 	sha := r.commit(trailerMsg("do work", "sess-A"))
@@ -30,7 +28,6 @@ func TestResolve_PlainTrailerCommit(t *testing.T) {
 	if res.Sessions[0].Source != SourceTrailer {
 		t.Fatalf("source = %s, want trailer", res.Sessions[0].Source)
 	}
-	// No verifier ⇒ a trailer is a CLAIM, not proof (SL5-SEC-1).
 	if res.Status != StatusInferred {
 		t.Fatalf("status = %s, want inferred (unverified claim)", res.Status)
 	}
@@ -59,7 +56,6 @@ func TestResolve_HumanCommitUnattributed(t *testing.T) {
 }
 
 func TestResolve_SquashFanInFromTrailerBlock(t *testing.T) {
-	// SL-5's healing leaves ALL sessions in the trailing block after a squash.
 	r := newTestRepo(t)
 	sha := r.commit(trailerMsg("squashed feature", "sess-A", "sess-B", "sess-C"))
 
@@ -79,15 +75,12 @@ func TestResolve_SquashFanInFromTrailerBlock(t *testing.T) {
 }
 
 func TestResolve_PreInstallSquashRecoveredByBodyScan(t *testing.T) {
-	// A squash done BEFORE SL-5's hook existed left an OpenBox-Session line
-	// mid-body, where %(trailers) cannot see it. SL6-SCAN recovers it.
 	r := newTestRepo(t)
 	msg := "squashed before hook\n\n" +
 		trailerKey + ": sess-old\n\n" +
 		"later prose paragraph that becomes the trailing block\n"
 	sha := r.commit(msg)
 
-	// Sanity: git's own trailer parser does NOT see the mid-body line.
 	block := r.git("show", "-s", "--format=%(trailers:key="+trailerKey+",valueonly)", sha)
 	if got := len(nonEmptyLines(block)); got != 0 {
 		t.Fatalf("precondition: trailer block should be empty, saw %d lines: %q", got, block)
@@ -109,8 +102,7 @@ func TestResolve_PreInstallSquashRecoveredByBodyScan(t *testing.T) {
 }
 
 func TestResolve_TrailerBlockBeatsBodyScanForSameID(t *testing.T) {
-	// The same id appears both mid-body and in the trailing block. It must be
-	// counted once, credited to the higher-trust trailer source.
+	// It must be counted once, credited to the higher-trust trailer source.
 	r := newTestRepo(t)
 	msg := "x\n\n" + trailerKey + ": sess-A\n\nmore\n\n" + trailerKey + ": sess-A\n"
 	sha := r.commit(msg)
@@ -128,10 +120,8 @@ func TestResolve_TrailerBlockBeatsBodyScanForSameID(t *testing.T) {
 }
 
 func TestResolve_TrailerBeatsBodyScanAcrossCommits(t *testing.T) {
-	// C2: the SAME id appears as a proper trailer in an OLDER commit and only
-	// mid-body in a NEWER commit. Even though the scope is walked newest-first,
-	// the id must be credited SourceTrailer (to the older commit), never
-	// mislabeled body-scan.
+	// Even though the scope is walked newest-first, the id must be credited
+	// SourceTrailer (to the older commit), never mislabeled body-scan.
 	r := newTestRepo(t)
 	root := r.commit("root\n")
 	cTrailer := r.commit(trailerMsg("older, proper trailer", "sess-X"))
@@ -153,10 +143,8 @@ func TestResolve_TrailerBeatsBodyScanAcrossCommits(t *testing.T) {
 }
 
 func TestResolve_MixedRangeRecoversStrippedSibling(t *testing.T) {
-	// C3: a range where one commit has a trailer and a SIBLING commit's trailer
-	// was stripped (but its SL-5 note survives). The sibling's session must be
-	// recovered per-commit, not silently dropped because the scope as a whole
-	// already had a claim.
+	// The sibling's session must be recovered per-commit, not silently dropped
+	// because the scope as a whole already had a claim.
 	r := newTestRepo(t)
 	root := r.commit("root\n")
 	r.commit(trailerMsg("A keeps its trailer", "sess-A"))
@@ -185,8 +173,6 @@ func TestResolve_MixedRangeRecoversStrippedSibling(t *testing.T) {
 }
 
 func TestResolve_MaxSessionsCapIsRecorded(t *testing.T) {
-	// SEC-6-1: a single commit naming many distinct sessions must not accumulate
-	// unbounded claims; the cap is enforced and disclosed (never silent).
 	r := newTestRepo(t)
 	sha := r.commit(trailerMsg("many", "s1", "s2", "s3", "s4", "s5"))
 
@@ -214,8 +200,6 @@ func TestResolve_MergeAttributesReachableOriginals(t *testing.T) {
 	r.git("merge", "--no-ff", "-m", "Merge feature", "feature")
 	merge := r.head()
 
-	// The merge commit itself has no trailer; its sessions come from the
-	// originals it brings in.
 	res, err := r.resolver(nil).Resolve(ctx, merge, "")
 	if err != nil {
 		t.Fatal(err)
@@ -232,7 +216,6 @@ func TestResolve_RangeBaseToTarget(t *testing.T) {
 	r.commit(trailerMsg("c2", "sess-B"))
 	c3 := r.commit("c3 human\n")
 
-	// base..target EXCLUDES base (c1/sess-A) and includes c2 (sess-B) + c3 (none).
 	res, err := r.resolver(nil).Resolve(ctx, c3, c1)
 	if err != nil {
 		t.Fatal(err)
@@ -246,8 +229,8 @@ func TestResolve_RangeBaseToTarget(t *testing.T) {
 }
 
 func TestResolve_ForcePushResolvesRealPushedSHA(t *testing.T) {
-	// INV-6: resolve the REAL pushed SHA, never a pre-push SHA. An amend mints a
-	// new SHA with a different trailer; each SHA must resolve to its own content.
+	// An amend mints a new SHA with a different trailer; each SHA must resolve to
+	// its own content.
 	r := newTestRepo(t)
 	before := r.commit(trailerMsg("work", "sess-A"))
 	r.git("commit", "--amend", "--allow-empty", "--cleanup=verbatim", "-F", writeTmp(t, trailerMsg("work v2", "sess-B")))
@@ -263,7 +246,6 @@ func TestResolve_ForcePushResolvesRealPushedSHA(t *testing.T) {
 	if got := resAfter.SessionIDs(); !reflect.DeepEqual(got, []string{"sess-B"}) {
 		t.Fatalf("pushed SHA %s → %v, want [sess-B]", after, got)
 	}
-	// The orphaned pre-amend SHA still resolves to exactly what IT contains.
 	resBefore, err := r.resolver(nil).Resolve(ctx, before, "")
 	if err != nil {
 		t.Fatal(err)
@@ -274,9 +256,8 @@ func TestResolve_ForcePushResolvesRealPushedSHA(t *testing.T) {
 }
 
 func TestResolve_FixupDropIsUnattributedNotWrong(t *testing.T) {
-	// Interactive fixup collapses a trailer-bearing commit into one without it;
-	// the S3 known loss mode. The resolver must mark it unattributed, never
-	// silently attribute to the wrong (surviving) commit's absent trailer.
+	// The resolver must mark it unattributed, never silently attribute to the
+	// wrong (surviving) commit's absent trailer.
 	r := newTestRepo(t)
 	sha := r.commit("refactor (fixup dropped the trailer)\n")
 
@@ -290,8 +271,6 @@ func TestResolve_FixupDropIsUnattributedNotWrong(t *testing.T) {
 }
 
 func TestResolve_TrailerStrippedRecoveredFromNoteMirror(t *testing.T) {
-	// A history rewrite stripped the trailer but the SL-5 notes mirror survives
-	// locally: recover as inferred with reason trailer-stripped.
 	r := newTestRepo(t)
 	sha := r.commit("rebased, trailer gone\n")
 	if err := (obgit.Git{Dir: r.dir}).WriteNoteMirror(sha, []string{"sess-N"}); err != nil {
@@ -313,12 +292,8 @@ func TestResolve_TrailerStrippedRecoveredFromNoteMirror(t *testing.T) {
 	}
 }
 
-// --- Hostile / malformed input (untrusted history) -------------------------
-
 func TestResolve_RejectsMalformedAndSecretTrailers(t *testing.T) {
 	r := newTestRepo(t)
-	// A hostile committer stuffs a secret-shaped value, a prose value with a
-	// space, and a real id into the trailer block.
 	msg := "x\n\n" +
 		trailerKey + ": obx_live_deadbeef\n" +
 		trailerKey + ": my great feature\n" +
@@ -333,8 +308,6 @@ func TestResolve_RejectsMalformedAndSecretTrailers(t *testing.T) {
 		t.Fatalf("sessions = %v, want [sess-A] (secret + whitespace dropped)", got)
 	}
 }
-
-// --- No silent caps --------------------------------------------------------
 
 func TestResolve_MaxCommitsCapIsRecorded(t *testing.T) {
 	r := newTestRepo(t)
@@ -362,7 +335,6 @@ func TestResolve_BadSHAIsPreconditionError(t *testing.T) {
 	if _, err := r.resolver(nil).Resolve(ctx, "not-a-real-rev", ""); err == nil {
 		t.Fatal("expected an error for an unknown rev (precondition, not a drop)")
 	}
-	// A ref beginning with '-' must never be read as a flag.
 	if _, err := r.resolver(nil).Resolve(ctx, "--upload-pack=touch pwned", ""); err == nil {
 		t.Fatal("expected an error for a flag-shaped rev")
 	}

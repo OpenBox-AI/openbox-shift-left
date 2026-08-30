@@ -10,8 +10,8 @@ import (
 )
 
 // allLanes is every supervised daemon, with the flag set its command actually
-// registers. The flag lists are hand-written on purpose: deriving them from the
-// Spec under test would make this agree with any spelling.
+// registers. The flag lists are hand-written on purpose: deriving them from
+// the Spec under test would make this agree with any spelling.
 var allLanes = []struct {
 	name  string
 	spec  Spec
@@ -34,14 +34,8 @@ var allLanes = []struct {
 	},
 }
 
-// TestSpecsUseFlagsThatExist is the guard for the defect that breaks every boot.
-//
-// A unit that passes a flag its command does not define is rejected by flag
-// parsing, so the supervised daemon fails to start forever — and on macOS that
-// failure goes to a log the supervisor discards unless the plist says otherwise,
-// so the developer sees a lane that is simply never up. The gateway's phase-07
-// plan documented `--config <path>`, a flag that has never existed; this is why
-// that never shipped.
+// TestSpecsUseFlagsThatExist is the guard for the defect that breaks every
+// boot.
 func TestSpecsUseFlagsThatExist(t *testing.T) {
 	for _, lane := range allLanes {
 		t.Run(lane.name, func(t *testing.T) {
@@ -62,9 +56,9 @@ func TestSpecsUseFlagsThatExist(t *testing.T) {
 	}
 }
 
-// TestEveryLaneIsAddressableAndSeparable. Two lanes sharing a label, a unit name
-// or a log file would have one install silently replace another's unit, or two
-// daemons interleave lines in one file.
+// TestEveryLaneIsAddressableAndSeparable. Two lanes sharing a label, a unit
+// name or a log file would have one install silently replace another's unit,
+// or two daemons interleave lines in one file.
 func TestEveryLaneIsAddressableAndSeparable(t *testing.T) {
 	home := t.TempDir()
 	seen := map[string]string{}
@@ -91,12 +85,6 @@ func TestEveryLaneIsAddressableAndSeparable(t *testing.T) {
 
 // TestEveryLaneCapturesStdio is the visibility control for the platform that
 // actually runs these daemons.
-//
-// launchd.plist(5) defaults StandardOutPath and StandardErrorPath to /dev/null,
-// and the systemd sibling gets the journal for free — so on macOS every line a
-// lane writes to stderr is discarded. Those lines are not decoration: each
-// lane's throttled warnings are the only signal that a perfectly working daemon
-// is recording nothing, and doctor does not ask that question at all.
 func TestEveryLaneCapturesStdio(t *testing.T) {
 	home := t.TempDir()
 	for _, lane := range allLanes {
@@ -112,7 +100,7 @@ func TestEveryLaneCapturesStdio(t *testing.T) {
 	}
 }
 
-// TestEveryLaneStopTimeoutMatchesItsGrace. launchd defaults to 20s, BELOW the
+// TestEveryLaneStopTimeoutMatchesItsGrace. Launchd defaults to 20s, below the
 // 30s grace, so a routine restart mid-stream is killed before it finishes
 // draining unless the unit says otherwise.
 func TestEveryLaneStopTimeoutMatchesItsGrace(t *testing.T) {
@@ -135,9 +123,9 @@ func TestEveryLaneStopTimeoutMatchesItsGrace(t *testing.T) {
 	}
 }
 
-// TestEveryLaneCarriesVerboseOnlyWhenAsked. The supervised daemon owns the port,
-// so a platform whose unit cannot carry --verbose leaves a developer there with
-// no way to see whether anything is flowing at all.
+// TestEveryLaneCarriesVerboseOnlyWhenAsked. The supervised daemon owns the
+// port, so a platform whose unit cannot carry --verbose leaves a developer
+// there with no way to see whether anything is flowing at all.
 func TestEveryLaneCarriesVerboseOnlyWhenAsked(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
@@ -163,9 +151,9 @@ func TestEveryLaneCarriesVerboseOnlyWhenAsked(t *testing.T) {
 	}
 }
 
-// TestPlistsAreWellFormedXML — an unescaped path produces a plist launchd
-// silently refuses to load, which presents as "the daemon never starts" with no
-// error anywhere.
+// TestPlistsAreWellFormedXML; an unescaped path produces a plist launchd
+// silently refuses to load, which presents as "the daemon never starts" with
+// no error anywhere.
 func TestPlistsAreWellFormedXML(t *testing.T) {
 	for _, lane := range allLanes {
 		plist := lane.spec.LaunchdPlist(t.TempDir(), `/Users/a&b/<tools>/openbox`)
@@ -176,10 +164,7 @@ func TestPlistsAreWellFormedXML(t *testing.T) {
 	}
 }
 
-// TestSystemdQuotingIsExplicitPerArgument. Two escapes matter and they are not
-// the same: '%' is a systemd SPECIFIER that gets expanded, and a space in $HOME
-// breaks the line's parsing. Both produce a unit that launches with the WRONG
-// ARGV rather than an error, which looks like a daemon that does not work.
+// TestSystemdQuotingIsExplicitPerArgument.
 func TestSystemdQuotingIsExplicitPerArgument(t *testing.T) {
 	unit := Gateway("127.0.0.1:8788", "https://relay.example/%s/v1", false).
 		SystemdUnit(`/Users/a b/bin/openbox`)
@@ -189,15 +174,13 @@ func TestSystemdQuotingIsExplicitPerArgument(t *testing.T) {
 	if !strings.Contains(unit, "%%s") {
 		t.Errorf("a '%%' in a value was not doubled, so systemd would expand it as a specifier:\n%s", unit)
 	}
-	// Flag names and fixed values stay bare: quoting them would rewrite every
-	// existing unit file for nothing.
 	if !strings.Contains(unit, " gateway --addr ") {
 		t.Errorf("the subcommand or a flag name was quoted:\n%s", unit)
 	}
 }
 
-// TestWriteAndRemoveUnitRoundTrip covers the install/uninstall pair on both real
-// targets, for every lane.
+// TestWriteAndRemoveUnitRoundTrip covers the install/uninstall pair on both
+// real targets, for every lane.
 func TestWriteAndRemoveUnitRoundTrip(t *testing.T) {
 	for _, lane := range allLanes {
 		for _, goos := range []string{"darwin", "linux"} {
@@ -214,7 +197,6 @@ func TestWriteAndRemoveUnitRoundTrip(t *testing.T) {
 				if err != nil || removed != path {
 					t.Fatalf("RemoveUnit = %q, %v; want %q", removed, err, path)
 				}
-				// Removing twice must not error: removal runs on partial state.
 				if again, err := lane.spec.RemoveUnit(goos, home); err != nil || again != "" {
 					t.Errorf("second RemoveUnit: %q, %v", again, err)
 				}
@@ -223,9 +205,9 @@ func TestWriteAndRemoveUnitRoundTrip(t *testing.T) {
 	}
 }
 
-// TestWindowsIsRefusedNotSilentlySkipped — a caller that believes it installed a
-// service and did not is worse off than one told plainly, and the error has to
-// name the foreground command to run instead.
+// TestWindowsIsRefusedNotSilentlySkipped; a caller that believes it installed
+// a service and did not is worse off than one told plainly, and the error has
+// to name the foreground command to run instead.
 func TestWindowsIsRefusedNotSilentlySkipped(t *testing.T) {
 	for _, lane := range allLanes {
 		_, err := lane.spec.WriteUnit("windows", t.TempDir(), "openbox.exe")
@@ -238,9 +220,8 @@ func TestWindowsIsRefusedNotSilentlySkipped(t *testing.T) {
 	}
 }
 
-// TestSuppliedTemplatesSurviveRendering. The library renders a supplied template
-// through text/template before writing it. Our bodies contain no template
-// actions, so that render must be an IDENTITY transform — and the whole test
+// TestSuppliedTemplatesSurviveRendering. Our bodies contain no template
+// actions, so that render must be an identity transform; and the whole test
 // strategy rests on it: because the bytes are the same either way, asserting
 // WriteUnit's artifact also asserts the library's.
 func TestSuppliedTemplatesSurviveRendering(t *testing.T) {

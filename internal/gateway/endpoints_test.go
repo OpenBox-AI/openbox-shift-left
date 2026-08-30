@@ -9,8 +9,6 @@ import (
 	"testing"
 )
 
-// sseUpstream serves an event stream, giving the test control of the flush
-// cadence so buffering and coalescing are observable.
 func sseUpstream(t *testing.T, write func(w http.ResponseWriter, ctl *http.ResponseController)) *memhttptest.Server {
 	t.Helper()
 	srv := memhttptest.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -23,11 +21,7 @@ func sseUpstream(t *testing.T, write func(w http.ResponseWriter, ctl *http.Respo
 	return srv
 }
 
-// TestNamedEndpointsServed covers the four routes Claude Code depends on. They
-// are served by the same relay as everything else -- the assertion is that each
-// one reaches the upstream with its method and path intact, because a route that
-// silently 404s at the gateway makes a capability look unavailable rather than
-// broken.
+// TestNamedEndpointsServed covers the four routes Claude Code depends on.
 func TestNamedEndpointsServed(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -74,10 +68,6 @@ func TestNamedEndpointsServed(t *testing.T) {
 			if tc.body != "" && string(got.body) != tc.body {
 				t.Errorf("body: got %q want %q", got.body, tc.body)
 			}
-			// A bodyless request must stay bodyless. The relay declares
-			// ContentLength explicitly to keep the framing off chunked, and the
-			// risk that carries is announcing a body where the client sent none:
-			// "Content-Length: 0" on a GET is an addition like any other.
 			if tc.body == "" {
 				if v := got.header.Get("Content-Length"); v != "" {
 					t.Errorf("relay added Content-Length: %q to a bodyless %s", v, tc.method)
@@ -93,11 +83,7 @@ func TestNamedEndpointsServed(t *testing.T) {
 	}
 }
 
-// TestRedirectNotFollowed matters most for /v1/models. Claude Code probes it at
-// the base URL with a short timeout and treats any redirect as failure, so the
-// gateway has to hand the redirect back rather than chase it. Following one
-// would also forward the developer's live credential to whatever host the
-// response named.
+// TestRedirectNotFollowed matters most for /v1/models.
 func TestRedirectNotFollowed(t *testing.T) {
 	var reached bool
 	elsewhere := memhttptest.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -131,11 +117,8 @@ func TestRedirectNotFollowed(t *testing.T) {
 	}
 }
 
-// TestUpstreamUnreachableIsNotSilent keeps a dead upstream legible. The relay
-// answers 502 with its own error type so the failure is attributable to the
-// gateway rather than mistaken for a provider response.
+// TestUpstreamUnreachableIsNotSilent keeps a dead upstream legible.
 func TestUpstreamUnreachableIsNotSilent(t *testing.T) {
-	// Port 1 on loopback: nothing listens, and connecting fails fast.
 	gw := newTestGateway(t, "http://127.0.0.1:1")
 
 	req, _ := http.NewRequest(http.MethodPost, gw.URL+"/v1/messages", strings.NewReader(`{}`))

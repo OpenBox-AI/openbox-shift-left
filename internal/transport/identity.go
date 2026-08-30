@@ -8,7 +8,14 @@ import (
 )
 
 // NewIdentityProxy returns a goproxy configured to forward byte-identically.
-// Each is here because a default silently changes the bytes:
+//   - KeepAcceptEncoding: goproxy's RemoveProxyHeaders deletes the client's
+//     Accept-Encoding header by default (proxy.go, RemoveProxyHeaders).
+//   - Tr.DisableCompression: with Accept-Encoding absent, Go's own Transport
+//     adds `gzip` on the caller's behalf and transparently decompresses the
+//     reply; so the bytes reaching the client are not the bytes the provider
+//     sent.
+//   - PreventCanonicalization: header names pass through as the client wrote
+//     them instead of being RFC-canonicalized.
 func NewIdentityProxy() *goproxy.ProxyHttpServer {
 	p := goproxy.NewProxyHttpServer()
 	p.KeepAcceptEncoding = true

@@ -15,13 +15,14 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/internal/gateway"
 )
 
-// connectTimeout bounds the TLS handshake on an intercepted tunnel. A client
-// that completed CONNECT and then never sent a ClientHello is stuck, not slow,
-// and an unbounded handshake holds the goroutine and the connection forever.
+// connectTimeout a client that completed CONNECT and then never sent a
+// ClientHello is stuck, not slow, and an unbounded handshake holds the
+// goroutine and the connection forever.
 const connectTimeout = 30 * time.Second
 
-// readHeaderTimeout bounds how long an idle tunnel may hold a goroutine before
-// sending a request line.
+// readHeaderTimeout there is deliberately NO ReadTimeout or WriteTimeout on
+// the server below: a streamed completion legitimately runs for minutes, and
+// either would abort it mid-stream.
 const readHeaderTimeout = 30 * time.Second
 
 var proxyEnvKeys = []string{
@@ -39,9 +40,9 @@ type Proxy struct {
 
 	clearedEnv []string
 
-	// handlerFor builds the relay that serves one intercepted host. Production
-	// must never get a stub, so TestProductionHandlerIsTheGatewayRelay asserts
-	// the default factory returns a real *gateway.Gateway.
+	// handlerFor production must never get a stub, so
+	// TestProductionHandlerIsTheGatewayRelay asserts the default factory returns
+	// a real *gateway.Gateway.
 	handlerFor func(host string) (http.Handler, error)
 
 	mu       sync.Mutex
@@ -110,9 +111,9 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 func (p *Proxy) intercepts(host string) bool { return p.cfg.Allowlist.Allows(host) }
 
-// onConnect decides what happens to one CONNECT. Everything else is accepted,
-// which in goproxy means a blind tunnel: bytes copied both ways, never
-// decrypted, never inspected, never captured.
+// onConnect everything else is accepted, which in goproxy means a blind
+// tunnel: bytes copied both ways, never decrypted, never inspected, never
+// captured.
 func (p *Proxy) onConnect(host string, ctx *goproxy.ProxyCtx) (*goproxy.ConnectAction, string) {
 	if !p.intercepts(host) {
 		p.vlog("tunnel %s (not allowlisted; no interception, no capture)", host)
@@ -197,8 +198,6 @@ func (p *Proxy) relayFor(host string) (http.Handler, error) {
 	return h, nil
 }
 
-// newRelay is the production handler factory: the existing gateway relay,
-// aimed at the intercepted host, with capture wired.
 func (p *Proxy) newRelay(host string) (http.Handler, error) {
 	upstream := p.cfg.Upstream
 	if upstream == "" {

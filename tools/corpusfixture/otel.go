@@ -9,8 +9,9 @@ import (
 	"sort"
 )
 
-// apiRequestSamples is how many api_request records the telemetry fixture
-// carries.
+// apiRequestSamples more than one because the mapper mints an activity_id per
+// request id, and a single-record fixture cannot show that two turns stay
+// distinct; which is the property core's dedupe depends on.
 const apiRequestSamples = 5
 
 func extractOTel(corpus, out string) error {

@@ -23,44 +23,15 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/internal/transport"
 )
 
-// transportcapture_test.go — the control for the transport lane.
-//
-// It exists for the reason gatewaycapture_test.go and telemetrycapture_test.go
-// exist, and the reason is a bug this repo actually shipped: package gateway
-// tested its relay against a stub Emitter, package client tested its span builder
-// against a hand-written DevEvent, both suites were green, and NOTHING joined
-// them — so `g.emitter` was nil in the shipping binary and every captured model
-// call was discarded. A fake at each end of a seam with no implementation between
-// them proves nothing about the seam.
-//
-// So these drive the real chain: a real CONNECT, a real TLS handshake against the
-// real project CA, the real gateway relay, the real emitter, and a real spool file
-// read back off disk.
-//
-// WHAT IS SUBSTITUTED, and it is one thing: the connection is a net.Pipe rather
-// than a socket, and the upstream is a refused loopback port. This host denies
-// bind, so a socket version would SKIP — and a control test that does not run is
-// the same as no control test. What that costs is stated where it matters:
-// TestTransportCommandListensAndRecords is the socket-level version, guarded.
+// Transportcapture_test.go; the control for the transport lane. A fake at each
+// end of a seam with no implementation between them proves nothing about the
+// seam.
 
-// refusedUpstream is a loopback port nothing listens on, so the relay's upstream
-// dial fails IMMEDIATELY and deterministically — no DNS, no timeout, no reliance
-// on this sandbox's egress.
-//
-// The failure is the point rather than a limitation. gateway/proxy.go emits a
-// capture on the upstream-unreachable path (reqCapture.Complete(0, nil, "")), so
-// the whole evidence chain runs without any upstream existing at all: request
-// capture, fingerprint, redaction, the emitter, the spool. What it cannot show is
-// a RESPONSE body, which is why the guarded socket test is still owed.
+// refusedUpstream is a loopback port nothing listens on, so the relay's
+// upstream dial fails immediately and deterministically; no DNS, no timeout,
+// no reliance on this sandbox's egress.
 const refusedUpstream = "https://127.0.0.1:1"
 
-// fakeKey is DERIVED rather than written as a literal, and that is not stylistic.
-// This repo's enforce-path redactor rewrites developer files on write, and it
-// rewrote this exact line on a previous save — the literal became
-// ${OPENBOX_REDACTED_AI_API_KEY} silently, after which the assertion below was
-// looking for a string the request no longer carried. CLAUDE.md names the
-// mitigation: derive the fixture in code. Same reasoning as
-// internal/cli/telemetryemit/sentinel_test.go.
 var fakeKey = "sk-" + "ant-" + strings.Repeat("0123456789", 4)
 
 // TestTransportLaneRecordsThroughTheRealChain.
@@ -73,8 +44,7 @@ func TestTransportLaneRecordsThroughTheRealChain(t *testing.T) {
 		t.Fatalf("LoadOrCreateCA: %v", err)
 	}
 
-	// The REAL emitter, wired exactly as runTransport wires it. Nil Flush: the
-	// detached flusher must never be spawned from a test binary.
+	// Nil Flush: the detached flusher must never be spawned from a test binary.
 	em := &gatewayemit.Emitter{
 		Lane:  gatewayemit.LaneProxy,
 		Spool: hookflow.Spool{Dir: spoolDir},
@@ -82,9 +52,6 @@ func TestTransportLaneRecordsThroughTheRealChain(t *testing.T) {
 		Warn:  func(string, ...any) {},
 	}
 
-	// The REAL gateway relay — not a stub — aimed at a port nothing answers, so the
-	// upstream leg fails fast. Everything between the TLS conn and the spool is
-	// production code; the destination is the single substitution.
 	p, err := transport.New(transport.Config{Upstream: refusedUpstream}, ca, em)
 	if err != nil {
 		t.Fatalf("transport.New: %v", err)
@@ -97,10 +64,6 @@ func TestTransportLaneRecordsThroughTheRealChain(t *testing.T) {
 	if err := clientConn.SetDeadline(time.Now().Add(20 * time.Second)); err != nil {
 		t.Fatalf("SetDeadline: %v", err)
 	}
-	// A real client reads the CONNECT 200 before it sends a ClientHello. On a pipe
-	// the write BLOCKS until it is read, so skipping this deadlocks — and the
-	// symptom is a hang, which reads as an environment problem rather than as an
-	// answer.
 	br := bufio.NewReader(clientConn)
 	status, err := br.ReadString('\n')
 	if err != nil {
@@ -149,8 +112,6 @@ func TestTransportLaneRecordsThroughTheRealChain(t *testing.T) {
 	}
 	io.Copy(io.Discard, resp.Body)
 	resp.Body.Close()
-	// 502: the upstream is a refused port. The relay answering at all is the proof
-	// that CONNECT, TLS termination and the HTTP server all worked.
 	if resp.StatusCode != http.StatusBadGateway {
 		t.Fatalf("relay answered %d, want 502 from the refused upstream", resp.StatusCode)
 	}
@@ -178,10 +139,9 @@ func TestTransportLaneRecordsThroughTheRealChain(t *testing.T) {
 	if ev.Span.CredentialFingerprint == "" {
 		t.Error("no credential fingerprint; account binding has nothing to match on")
 	}
-	// Redaction is gateway's; this asserts it survived the trip through THIS lane
-	// rather than re-testing it. Both directions, because only one of them is a
-	// control: "the secret is absent" passes trivially if the header never reached
-	// the record at all, so the header's PRESENCE is asserted too.
+	// Both directions, because only one of them is a control: "the secret is
+	// absent" passes trivially if the header never reached the record at all, so
+	// the header's presence is asserted too.
 	if _, ok := ev.Span.RequestHeaders["X-Api-Key"]; !ok {
 		t.Errorf("X-Api-Key is missing from the record entirely (headers: %v). The absence check "+
 			"below would then pass without measuring anything.", ev.Span.RequestHeaders)
@@ -191,30 +151,17 @@ func TestTransportLaneRecordsThroughTheRealChain(t *testing.T) {
 			t.Errorf("header %s carries the live credential verbatim: %q", k, v)
 		}
 	}
-	// And the session header has to survive, or nothing could have been attributed
-	// to a session in the first place.
 	if ev.SessionID != sessionID {
 		t.Errorf("session_id = %q, want %q", ev.SessionID, sessionID)
 	}
-	// NOT asserted here: that http_url carries an LLM domain. This test substitutes
-	// the upstream, and gateway records the destination it actually forwarded to —
-	// correctly. In production Upstream is empty and UpstreamFor derives it from the
-	// CONNECT host, so the recorded URL IS the provider's; TestUpstreamForIsFixedPerHost
-	// pins that derivation and the guarded socket test observes the result. Asserting
-	// a provider domain here would only be asserting the substitution.
 	if !strings.HasSuffix(ev.Span.HTTPURL, "/v1/messages") {
 		t.Errorf("http_url = %q, want the relayed path preserved", ev.Span.HTTPURL)
 	}
 }
 
-// TestTransportCommandListensAndRecords is the socket-level version: the REAL
+// TestTransportCommandListensAndRecords is the socket-level version: the real
 // `openbox transport` command, a real listener, a real CONNECT from a real
 // http.Client.
-//
-// Guarded, and this is exactly the trade CLAUDE.md names — the guard makes the
-// test honest about what it needs and blinds whoever cannot meet it. What it adds
-// over the in-memory control above is bind, listen, the dialer and goproxy's own
-// CONNECT parsing; without it, those four are unmeasured.
 func TestTransportCommandListensAndRecords(t *testing.T) {
 	memhttptest.RequireBind(t)
 
@@ -244,9 +191,6 @@ func TestTransportCommandListensAndRecords(t *testing.T) {
 		t.Fatalf("the transport never reported ready; stderr: %s", errb.String())
 	}
 
-	// A NON-allowlisted host, so this asserts the blind tunnel rather than the
-	// intercept: it must be forwarded with zero capture. Pointed at a refused
-	// loopback port so no real egress is needed.
 	tunnelled := probeThroughProxy(t, addr, "127.0.0.1:1")
 	if tunnelled == nil {
 		t.Log("blind tunnel to a refused port failed, as expected")
@@ -267,9 +211,9 @@ func TestTransportCommandListensAndRecords(t *testing.T) {
 	}
 }
 
-// probeThroughProxy issues one CONNECT through the proxy and returns the error,
-// if any. It never sends application bytes: the assertion is about whether a
-// capture was produced, not about the tunnel's payload.
+// probeThroughProxy issues one CONNECT through the proxy and returns the
+// error, if any. It never sends application bytes: the assertion is about
+// whether a capture was produced, not about the tunnel's payload.
 func probeThroughProxy(t *testing.T, proxyAddr, target string) error {
 	t.Helper()
 	conn, err := net.DialTimeout("tcp", proxyAddr, 10*time.Second)
@@ -288,7 +232,6 @@ func probeThroughProxy(t *testing.T, proxyAddr, target string) error {
 	return err
 }
 
-// readOneSpooledEvent reads the single event the session's spool file holds.
 func readOneSpooledEvent(t *testing.T, spoolDir, sessionID string) client.DevEvent {
 	t.Helper()
 	spool := hookflow.Spool{Dir: spoolDir}
@@ -313,8 +256,6 @@ func readOneSpooledEvent(t *testing.T, spoolDir, sessionID string) client.DevEve
 	return ev
 }
 
-// countSpoolFiles counts spool files, for the assertion that a tunnelled host
-// produced none.
 func countSpoolFiles(t *testing.T, dir string) int {
 	t.Helper()
 	entries, err := os.ReadDir(dir)
@@ -333,5 +274,4 @@ func countSpoolFiles(t *testing.T, dir string) int {
 	return n
 }
 
-// keep the gateway import meaningful if the assertions above are ever narrowed.
 var _ = gateway.Captured{}

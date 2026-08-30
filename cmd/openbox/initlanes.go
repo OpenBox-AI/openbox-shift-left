@@ -97,9 +97,8 @@ func (a *app) setupLanes(req laneRequest) laneReport {
 	return report
 }
 
-// laneRouted reports whether the tool's settings currently point at a lane.
-// Through the election's own resolver, so the install path, doctor and the
-// telemetry daemon cannot disagree about what "routed" means.
+// laneRouted through the election's own resolver, so the install path, doctor
+// and the telemetry daemon cannot disagree about what "routed" means.
 func laneRouted(home string, lane activation.Lane) bool {
 	for _, r := range activation.ResolveElection(gatewayservice.SettingsPath(home)).Routed {
 		if r == lane {

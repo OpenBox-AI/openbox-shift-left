@@ -26,7 +26,6 @@ func testTrigger(t *testing.T, enabled bool) (RealtimeTrigger, *[]*exec.Cmd) {
 
 func TestRealtimeMaybe_ClaimsLockAndSpawns(t *testing.T) {
 	tr, spawned := testTrigger(t, true)
-	// Append first, as the real hook path does, so the spool dir exists.
 	if err := tr.Spool.Append(ev("sess-1", "evt-1")); err != nil {
 		t.Fatal(err)
 	}
@@ -74,7 +73,6 @@ func TestRealtimeMaybe_TakesOverStaleLock(t *testing.T) {
 	tr, spawned := testTrigger(t, true)
 	tr.Window = 50 * time.Millisecond
 	tr.Maybe(discard(), "sess-1")
-	// Age the lock past the window (backdate mtime instead of sleeping).
 	lock := tr.Spool.FlushLockPath("sess-1")
 	old := time.Now().Add(-time.Second)
 	if err := os.Chtimes(lock, old, old); err != nil {
@@ -99,7 +97,6 @@ func TestRealtimeMaybe_DisabledIsZeroIO(t *testing.T) {
 	if len(*spawned) != 0 {
 		t.Fatal("disabled gate must not spawn")
 	}
-	// Byte-identical to pre-realtime behavior: not even the spool dir exists.
 	if _, err := os.Stat(tr.Spool.Dir); !os.IsNotExist(err) {
 		entries, _ := os.ReadDir(tr.Spool.Dir)
 		if len(entries) != 0 {
@@ -117,10 +114,6 @@ func TestRealtimeMaybe_EmptySessionIDSkips(t *testing.T) {
 }
 
 func TestRealtimeMaybe_RefusesToSpawnTestBinary(t *testing.T) {
-	// Self unset → os.Executable() resolves to THIS test binary (`*.test`),
-	// which the trigger must refuse to spawn (re-running the suite would be a
-	// fork bomb, not a flusher) — and it must bail before any filesystem
-	// write, so the spool dir stays untouched.
 	var spawned []*exec.Cmd
 	tr := RealtimeTrigger{
 		Spool:    Spool{Dir: filepath.Join(t.TempDir(), "spool")},
@@ -148,14 +141,12 @@ func TestRealtimeMaybe_SpawnFailureReleasesLock(t *testing.T) {
 
 func TestFlushLockLifecycle(t *testing.T) {
 	s := Spool{Dir: filepath.Join(t.TempDir(), "spool")}
-	// Touch creates (including the dir) when absent…
 	s.TouchFlushLock("sess-1")
 	lock := s.FlushLockPath("sess-1")
 	info1, err := os.Stat(lock)
 	if err != nil {
 		t.Fatalf("TouchFlushLock did not create the lock: %v", err)
 	}
-	// …and refreshes mtime when present.
 	old := time.Now().Add(-time.Hour)
 	_ = os.Chtimes(lock, old, old)
 	s.TouchFlushLock("sess-1")
@@ -182,7 +173,6 @@ func TestSpoolDrainsIgnoreFlushLock(t *testing.T) {
 	if err != nil || n != 1 {
 		t.Fatalf("FlushAll over a dir with a lockfile: n=%d err=%v, want 1,nil", n, err)
 	}
-	// The lock survives a drain (its lifecycle belongs to the flusher).
 	if _, err := os.Stat(s.FlushLockPath("sess-1")); err != nil {
 		t.Errorf("FlushAll must not consume the lockfile: %v", err)
 	}

@@ -7,9 +7,8 @@ import (
 	"strings"
 )
 
-// signingReasonGuidance maps a machine reason code; as enumerated by openbox-
-// core's AIP identity verifier and the reference SDK's map_signing_error; to a
-// shift-left-actionable one-line diagnostic.
+// signingReasonGuidance categories only, never content, never secrets
+// (INV-1/INV-2).
 var signingReasonGuidance = map[string]string{
 	"signature_invalid":        "the signed bytes were rejected — a rotated/mismatched Ed25519 key or a body-hash mismatch; re-provision the dev agent (docs/getting-started.md § Troubleshooting)",
 	"nonce_replayed":           "a buffered event was re-sent after a lost 200 (INV-5); safe to ignore unless persistent",
@@ -91,8 +90,9 @@ func extractReason(body []byte) string {
 	return ""
 }
 
-// describeDrop turns a fail-open drop error into a single actionable
-// diagnostic line for Emit's drop log.
+// describeDrop the result never contains our key/seed/nonce/signature (INV-1):
+// the secret lives only in the Authorization header, never in the request or
+// response body.
 func describeDrop(err error) string {
 	var he *httpError
 	if errors.As(err, &he) {

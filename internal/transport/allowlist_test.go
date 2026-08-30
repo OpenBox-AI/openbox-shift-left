@@ -24,16 +24,6 @@ func TestAllowlistMatchesTheExactHost(t *testing.T) {
 
 // TestAllowlistRefusesEverythingElse is the half that makes that decision
 // reversal defensible: every other host is blind-tunnelled, uninspected.
-//
-// The confusables are the point. A CA that can impersonate the provider to this
-// machine is the highest-value secret this product holds after the signing key
-// (phase 11 security notes); a matcher that accepted a lookalike would let it be
-// pointed somewhere the developer never agreed to.
-//
-// The two non-ASCII cases are BUILT rather than written as literals. A Cyrillic
-// homoglyph pasted into source is invisible to a reviewer — which is the whole
-// attack — and this repo already has a rule about not writing fixture bytes as
-// literals when they can be derived (CLAUDE.md, the base64 test-vector case).
 func TestAllowlistRefusesEverythingElse(t *testing.T) {
 	a := NewAllowlist("api.anthropic.com")
 
@@ -65,11 +55,10 @@ func TestAllowlistRefusesEverythingElse(t *testing.T) {
 	}
 }
 
-// TestEmptyAllowlistAllowsNothing pins the zero value's direction.
-//
-// Same shape as telemetry Policy's zero value SUPPRESSING (phase 10): a
-// half-built or misconfigured lane must fail toward doing nothing, not toward
-// intercepting everything.
+// TestEmptyAllowlistAllowsNothing pins the zero value's direction. Same shape
+// as telemetry Policy's zero value suppressing (phase 10): a half-built or
+// misconfigured lane must fail toward doing nothing, not toward intercepting
+// everything.
 func TestEmptyAllowlistAllowsNothing(t *testing.T) {
 	var a Allowlist
 	for _, host := range []string{"api.anthropic.com:443", "anything:443", ""} {
@@ -82,9 +71,9 @@ func TestEmptyAllowlistAllowsNothing(t *testing.T) {
 	}
 }
 
-// TestAllowlistNormalizesItsOwnHosts keeps configuration from being the hole the
-// matcher is not: a host configured with a port, a trailing dot or uppercase
-// must still match the wire form.
+// TestAllowlistNormalizesItsOwnHosts keeps configuration from being the hole
+// the matcher is not: a host configured with a port, a trailing dot or
+// uppercase must still match the wire form.
 func TestAllowlistNormalizesItsOwnHosts(t *testing.T) {
 	for _, configured := range []string{
 		"API.Anthropic.com",
@@ -95,16 +84,14 @@ func TestAllowlistNormalizesItsOwnHosts(t *testing.T) {
 			t.Errorf("NewAllowlist(%q) did not match the wire host api.anthropic.com:443", configured)
 		}
 	}
-	// An empty configured entry must not become a wildcard, or a stray comma in
-	// config silently intercepts every host.
 	if NewAllowlist("", "api.anthropic.com").Allows("evil.test:443") {
 		t.Error("an empty configured host acted as a wildcard")
 	}
 }
 
-// TestAllowlistHostsIsAStableCopy: the doctor block and the log line both report
-// what is intercepted, and a caller must not be able to widen the live matcher
-// by mutating what it was handed.
+// TestAllowlistHostsIsAStableCopy: the doctor block and the log line both
+// report what is intercepted, and a caller must not be able to widen the live
+// matcher by mutating what it was handed.
 func TestAllowlistHostsIsAStableCopy(t *testing.T) {
 	a := NewAllowlist("api.anthropic.com")
 	got := a.Hosts()

@@ -17,9 +17,10 @@ const recordedBody = `{"model":"claude-x","system":[{"type":"text","text":"a rec
 	`{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_x","content":"recorded tool output"}]}],` +
 	`"tools":[{"name":"Read","description":"product tool description"}],"max_tokens":9}`
 
-// TestSubstitutePromptTextPreservesRuneGeometry is the property the fixture scrub
-// rests on: a soak test asserting an oversized body, and a replay test asserting
-// byte counts, both stop meaning what they say if a substitution resizes the body.
+// TestSubstitutePromptTextPreservesRuneGeometry is the property the fixture
+// scrub rests on: a soak test asserting an oversized body, and a replay test
+// asserting byte counts, both stop meaning what they say if a substitution
+// resizes the body.
 func TestSubstitutePromptTextPreservesRuneGeometry(t *testing.T) {
 	got := SubstitutePromptText(recordedBody)
 	if a, b := utf8.RuneCountInString(got), utf8.RuneCountInString(recordedBody); a != b {
@@ -30,8 +31,8 @@ func TestSubstitutePromptTextPreservesRuneGeometry(t *testing.T) {
 	}
 }
 
-// TestSubstitutePromptTextRemovesRecordedProse names the whole point: no recorded
-// free text reaches disk.
+// TestSubstitutePromptTextRemovesRecordedProse names the whole point: no
+// recorded free text reaches disk.
 func TestSubstitutePromptTextRemovesRecordedProse(t *testing.T) {
 	got := SubstitutePromptText(recordedBody)
 	for _, recorded := range []string{
@@ -67,8 +68,8 @@ func TestSubstitutePromptTextKeepsStructure(t *testing.T) {
 }
 
 // TestSubstitutePromptTextIsIdempotent is what makes a regenerated fixture
-// reviewable: a second pass must produce the same bytes, or every regeneration is
-// an unreadable diff.
+// reviewable: a second pass must produce the same bytes, or every regeneration
+// is an unreadable diff.
 func TestSubstitutePromptTextIsIdempotent(t *testing.T) {
 	once := SubstitutePromptText(recordedBody)
 	if twice := SubstitutePromptText(once); twice != once {
@@ -76,8 +77,9 @@ func TestSubstitutePromptTextIsIdempotent(t *testing.T) {
 	}
 }
 
-// TestSubstitutePromptTextLeavesNonRequestJSONAlone keeps the rule from firing on
-// a document that is not a model-call request, where it would destroy evidence.
+// TestSubstitutePromptTextLeavesNonRequestJSONAlone keeps the rule from firing
+// on a document that is not a model-call request, where it would destroy
+// evidence.
 func TestSubstitutePromptTextLeavesNonRequestJSONAlone(t *testing.T) {
 	other := `{"resourceLogs":[{"body":{"stringValue":"an OTLP log line"}}]}`
 	if got := SubstitutePromptText(other); got != other {
@@ -86,8 +88,7 @@ func TestSubstitutePromptTextLeavesNonRequestJSONAlone(t *testing.T) {
 }
 
 // TestScanRejectsRecordedPromptText is the gate that makes the substitution
-// permanent. Without it the rule lives only in the generator, and a fixture
-// hand-edited or produced by an older extractor sails through.
+// permanent.
 func TestScanRejectsRecordedPromptText(t *testing.T) {
 	doc := `{"request":{"body":` + jsonQuote(recordedBody) + `}}`
 	v := Scan([]byte(doc))
@@ -105,9 +106,7 @@ func TestScanAcceptsSubstitutedPromptText(t *testing.T) {
 	}
 }
 
-// TestScanRejectsASystemReminder names the leak vector itself. The provider
-// injects the developer's global configuration into the first prompt inside this
-// tag, which is how a third party's private file reached a committed fixture.
+// TestScanRejectsASystemReminder names the leak vector itself.
 func TestScanRejectsASystemReminder(t *testing.T) {
 	doc := `{"note":"` + "<system-reminder>anything at all</system-reminder>" + `"}`
 	if v := Scan([]byte(doc)); len(v) == 0 {
@@ -116,7 +115,8 @@ func TestScanRejectsASystemReminder(t *testing.T) {
 }
 
 // TestScanRejectsRecordedTelemetryContent covers the same class on the other
-// lane: the OTLP corpus carries prompt and response bodies as attribute values.
+// lane: the OTLP corpus carries prompt and response bodies as attribute
+// values.
 func TestScanRejectsRecordedTelemetryContent(t *testing.T) {
 	for _, key := range []string{"prompt", "response", "tool_input", "tool_parameters"} {
 		doc := `{"attributes":[{"key":"` + key + `","value":{"stringValue":"a recorded body"}}]}`
@@ -130,8 +130,9 @@ func TestScanRejectsRecordedTelemetryContent(t *testing.T) {
 	}
 }
 
-// TestSanitizeSubstitutesRecordedContent holds the generator half: Sanitize must
-// produce exactly what Scan admits, or every regeneration fails its own gate.
+// TestSanitizeSubstitutesRecordedContent holds the generator half: Sanitize
+// must produce exactly what Scan admits, or every regeneration fails its own
+// gate.
 func TestSanitizeSubstitutesRecordedContent(t *testing.T) {
 	doc := `{"request":{"body":` + jsonQuote(recordedBody) + `},` +
 		`"attributes":[{"key":"response","value":{"stringValue":"a recorded reply"}}]}`
@@ -156,10 +157,7 @@ func jsonQuote(s string) string {
 }
 
 // TestSubstitutePromptTextDoesNotRewriteKeys is the collision drill, and it is
-// here because the collision happened. A four-rune string leaf inside a tool
-// input matched every `"text"` KEY and every `"type":"text"` discriminator in the
-// body, so a whole-string replace produced valid JSON, held the rune count, and
-// described an exchange no provider would send.
+// here because the collision happened.
 func TestSubstitutePromptTextDoesNotRewriteKeys(t *testing.T) {
 	body := `{"messages":[{"role":"assistant","content":[` +
 		`{"type":"tool_use","id":"toolu_a","name":"Edit","input":{"mode":"text"}},` +
@@ -185,10 +183,10 @@ func TestSubstitutePromptTextDoesNotRewriteKeys(t *testing.T) {
 	}
 }
 
-// TestSubstitutePromptTextRecursesIntoDescriptionObjects covers a schema property
-// literally named "description", where the key holds an object rather than a
-// string and a walker that only handled the string case walked past the prose
-// underneath it.
+// TestSubstitutePromptTextRecursesIntoDescriptionObjects covers a schema
+// property literally named "description", where the key holds an object rather
+// than a string and a walker that only handled the string case walked past the
+// prose underneath it.
 func TestSubstitutePromptTextRecursesIntoDescriptionObjects(t *testing.T) {
 	body := `{"messages":[],"tools":[{"name":"Read","input_schema":{"properties":` +
 		`{"description":{"type":"string","description":"recorded schema prose"}}}}]}`
@@ -197,9 +195,9 @@ func TestSubstitutePromptTextRecursesIntoDescriptionObjects(t *testing.T) {
 	}
 }
 
-// TestSubstituteSSEDeltasRemovesRecordedText covers the response side. A recorded
-// event stream carries the model's reply as deltas, which the request-body rule
-// never sees.
+// TestSubstituteSSEDeltasRemovesRecordedText covers the response side. A
+// recorded event stream carries the model's reply as deltas, which the
+// request-body rule never sees.
 func TestSubstituteSSEDeltasRemovesRecordedText(t *testing.T) {
 	sse := "event: content_block_delta\n" +
 		`data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"a recorded reply"}}` +
@@ -223,11 +221,7 @@ func TestSubstituteSSEDeltasRemovesRecordedText(t *testing.T) {
 	}
 }
 
-// TestScanRejectsAMalformedContentBlock is the second, independent gate. The
-// first rule asks whether substituting the body would change it, so a body the
-// substitution already corrupted answers no and sails through: the check and the
-// thing it checks were the same code. This rule reads the body's shape instead,
-// and it is what would have caught a discriminator rewritten to prose.
+// TestScanRejectsAMalformedContentBlock is the second, independent gate.
 func TestScanRejectsAMalformedContentBlock(t *testing.T) {
 	for name, body := range map[string]string{
 		"discriminator rewritten": `{"messages":[{"role":"user","content":[{"type":"This paragraph is","This":"x"}]}]}`,

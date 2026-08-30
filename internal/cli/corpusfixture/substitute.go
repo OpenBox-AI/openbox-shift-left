@@ -43,8 +43,9 @@ func SubstituteSSEDeltas(stream string) string {
 	return out.String()
 }
 
-// promptTargets reports whether a JSON path inside a request body addresses
-// recorded free text.
+// promptTargets the path is the sequence of object keys walked to reach the
+// value; array indices do not appear, because none of these rules depends on
+// position.
 func promptTargets(path []string) bool {
 	if len(path) == 0 {
 		return false

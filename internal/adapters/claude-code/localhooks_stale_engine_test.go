@@ -10,12 +10,9 @@ import (
 	"testing"
 )
 
-// A hook entry left behind at a DIFFERENT engine path is OURS and it is WRONG —
-// not a foreign hook to preserve. Matching by exact command string could not tell
-// those apart, so an install run once with another HOME left both engines
-// registered: every hook fired twice and every governed tool call was stored
-// twice, silently, for the life of the project. Re-init has to repair that, and
-// it is the only command that can.
+// TestReInitReplacesAnOpenBoxEntryAtAStaleEnginePath a hook entry left behind
+// at a different engine path is ours and it is wrong; not a foreign hook to
+// preserve.
 func TestReInitReplacesAnOpenBoxEntryAtAStaleEnginePath(t *testing.T) {
 	dir := t.TempDir()
 	const stale = "/opt/openbox-from-another-home/bin/openbox"
@@ -45,8 +42,6 @@ func TestReInitReplacesAnOpenBoxEntryAtAStaleEnginePath(t *testing.T) {
 			"hooks":   handlers,
 		}}
 	}
-	// Two things that must survive: a hook the developer wrote, and a compound
-	// command that merely EMBEDS our invocation.
 	old["hooks"].(map[string]any)["PostToolUse"] = append(
 		old["hooks"].(map[string]any)["PostToolUse"].([]any),
 		map[string]any{"matcher": "*", "hooks": []any{
@@ -131,8 +126,6 @@ func TestReInitReplacesAnOpenBoxEntryAtAStaleEnginePath(t *testing.T) {
 		t.Error("re-init dropped a compound foreign command that merely embeds our invocation")
 	}
 
-	// Swapping a governing binary without saying so is the same class of problem
-	// as the silent duplicate it repairs.
 	for _, want := range []string{stale, engine, settingsPath, "PreToolUse"} {
 		if !strings.Contains(notice, want) {
 			t.Errorf("replacement notice does not mention %q; got:\n%s", want, notice)
@@ -140,8 +133,8 @@ func TestReInitReplacesAnOpenBoxEntryAtAStaleEnginePath(t *testing.T) {
 	}
 }
 
-// The notice must stay silent when nothing was stale, or every ordinary re-init
-// trains the reader to ignore it.
+// TestReInitAtTheSameEnginePathPrintsNothing the notice must stay silent when
+// nothing was stale, or every ordinary re-init trains the reader to ignore it.
 func TestReInitAtTheSameEnginePathPrintsNothing(t *testing.T) {
 	dir := t.TempDir()
 	engine := filepath.Join(dir, "bin", "openbox")
@@ -158,10 +151,9 @@ func TestReInitAtTheSameEnginePathPrintsNothing(t *testing.T) {
 	}
 }
 
-// The check and the fix have to agree, or `openbox doctor` sends a developer to
-// run a command that does not clear the warning. They share one classifier for
-// that reason, and this is what holds the pairing: audit sees two engines, the
-// merge repairs it, audit sees one.
+// TestTheAuditAgreesWithWhatReInitRepairs the check and the fix have to agree,
+// or `openbox doctor` sends a developer to run a command that does not clear
+// the warning.
 func TestTheAuditAgreesWithWhatReInitRepairs(t *testing.T) {
 	dir := t.TempDir()
 	const stale = "/opt/openbox-from-another-home/bin/openbox"
@@ -171,8 +163,6 @@ func TestTheAuditAgreesWithWhatReInitRepairs(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(settingsPath), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	// The live shape: an unquoted registration from an install run with another
-	// HOME, beside the current quoted one.
 	seed := `{"hooks":{"PreToolUse":[` +
 		`{"matcher":"*","hooks":[{"type":"command","command":"` + stale + ` hook claude-code PreToolUse"}]},` +
 		`{"matcher":"*","hooks":[{"type":"command","command":"\"` + engine + `\" hook claude-code PreToolUse"}]}]}}`
@@ -210,13 +200,8 @@ func TestTheAuditAgreesWithWhatReInitRepairs(t *testing.T) {
 	}
 }
 
-// The OTHER shape doctor warns about: our own invocation registered twice at the
-// SAME engine. It double-counts exactly as a second engine does, and doctor names
-// this command as the remedy for both — so a re-init that could not clear it
-// would leave a developer re-running a command that never removes the warning.
-//
-// The gate and the approval watcher must survive that collapse: they are two
-// registrations under one event key and only their INVOCATIONS distinguish them.
+// TestReInitCollapsesADuplicateRegistrationAtTheSameEngine the other shape
+// doctor warns about: our own invocation registered twice at the same engine.
 func TestReInitCollapsesADuplicateRegistrationAtTheSameEngine(t *testing.T) {
 	dir := t.TempDir()
 	engine := filepath.Join(dir, "bin", "openbox")
@@ -224,8 +209,6 @@ func TestReInitCollapsesADuplicateRegistrationAtTheSameEngine(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(settingsPath), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	// One copy in the same entry, one in a separate entry — a hand-edited file or
-	// a merge resolution produces either.
 	seed := `{"hooks":{` +
 		`"Stop":[{"hooks":[` +
 		`{"type":"command","command":"\"` + engine + `\" hook claude-code Stop"},` +
@@ -269,7 +252,6 @@ func TestReInitCollapsesADuplicateRegistrationAtTheSameEngine(t *testing.T) {
 		}
 	}
 
-	// The gate and the watcher are two DIFFERENT invocations under one event key.
 	// Collapsing by event rather than by invocation would delete the watcher and
 	// the approval hold would never wake.
 	raw, err := os.ReadFile(settingsPath)
@@ -284,9 +266,9 @@ func TestReInitCollapsesADuplicateRegistrationAtTheSameEngine(t *testing.T) {
 	}
 }
 
-// An absent settings file is the normal state for a global-scope install, and an
-// unreadable one is what a developer already knows is broken. Neither may be an
-// error the caller has to special-case beyond rendering it.
+// TestAuditLocalHooksOnAbsentAndUnparsableFiles an absent settings file is the
+// normal state for a global-scope install, and an unreadable one is what a
+// developer already knows is broken.
 func TestAuditLocalHooksOnAbsentAndUnparsableFiles(t *testing.T) {
 	dir := t.TempDir()
 	audit, err := AuditLocalHooks(dir)
@@ -311,10 +293,10 @@ func TestAuditLocalHooksOnAbsentAndUnparsableFiles(t *testing.T) {
 	}
 }
 
-// The classifier is the one thing standing between this merge and deleting a
-// developer's own hook, so it is tested directly rather than only through the
-// merge. Over-keep is the safe direction: every uncertain shape must read as
-// foreign.
+// TestOwnedLocalHookRecognizesOurArgvShapeOnly the classifier is the one thing
+// standing between this merge and deleting a developer's own hook, so it is
+// tested directly rather than only through the merge. Over-keep is the safe
+// direction: every uncertain shape must read as foreign.
 func TestOwnedLocalHookRecognizesOurArgvShapeOnly(t *testing.T) {
 	const engine = "/opt/openbox/bin/openbox"
 	cases := []struct {
@@ -356,9 +338,6 @@ func TestOwnedLocalHookRecognizesOurArgvShapeOnly(t *testing.T) {
 	}
 }
 
-// captureStderr collects what fn writes to os.Stderr. The notice is written from
-// inside writeLocalHooks so its signature — and therefore the three pre-existing
-// call sites — stay unchanged.
 func captureStderr(t *testing.T, fn func()) string {
 	t.Helper()
 	r, w, err := os.Pipe()
@@ -381,12 +360,8 @@ func captureStderr(t *testing.T, fn func()) string {
 	return out
 }
 
-// A re-init at the SAME engine path must reconcile the registration SHAPE, not
-// just skip on the command match. Found live: that decision UserPromptSubmit
-// ceiling raise (5s → the gating ceiling) never arrived on a re-init, so the
-// prompt gate was killed by Claude Code's old 5s timeout mid-evaluation and
-// failed open — through the very `openbox init` the docs name as the upgrade
-// step. Foreign hooks keep their own shape.
+// TestReInitReconcilesRegistrationShape a re-init at the same engine path must
+// reconcile the registration shape, not just skip on the command match.
 func TestReInitReconcilesRegistrationShape(t *testing.T) {
 	dir := t.TempDir()
 	engine := filepath.Join(dir, "bin", "openbox")
@@ -395,10 +370,6 @@ func TestReInitReconcilesRegistrationShape(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(settingsPath), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	// Our entries at the CURRENT engine path, but in the pre-that decision
-	// shape: UserPromptSubmit still at 5s with no statusMessage, plus a stale
-	// watcher timeout — and one foreign hook whose shape must survive
-	// untouched.
 	old := map[string]any{"hooks": map[string]any{
 		"UserPromptSubmit": []any{map[string]any{
 			"matcher": "",
@@ -472,8 +443,6 @@ func TestReInitReconcilesRegistrationShape(t *testing.T) {
 		t.Errorf("foreign hook timeout = %v, want its own 7 — reconcile must not touch foreign hooks", foreign["timeout"])
 	}
 
-	// No duplicate entries were appended alongside the reconciled ones, and a
-	// second run is byte-stable (idempotent).
 	first, err := os.ReadFile(settingsPath)
 	if err != nil {
 		t.Fatal(err)

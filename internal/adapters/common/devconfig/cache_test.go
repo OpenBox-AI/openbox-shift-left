@@ -7,10 +7,8 @@ import (
 	"time"
 )
 
-// Resolving one flag reads the managed config, its key set, the user config and
-// its key set. An enforce-mode hook resolves around eight flags before it
-// decides, so one tool call used to re-read and re-parse the same two files
-// roughly thirty times.
+// TestResolve_ManyFlagsReadTheFilesOnce resolving one flag reads the managed
+// config, its key set, the user config and its key set.
 func TestResolve_ManyFlagsReadTheFilesOnce(t *testing.T) {
 	dir := t.TempDir()
 	cfg := filepath.Join(dir, "dev.json")
@@ -32,10 +30,10 @@ func TestResolve_ManyFlagsReadTheFilesOnce(t *testing.T) {
 	}
 }
 
-// The gate's flags must come from one version of the file. Resolving each one
-// separately meant Enforce, FailClosed and Tier2 could each see a different
-// dev.json if it were rewritten mid-hook, assembling a posture that never
-// existed as a whole.
+// TestResolve_FlagsShareOneViewOfTheFile the gate's flags must come from one
+// version of the file. Resolving each one separately meant Enforce, FailClosed
+// and Tier2 could each see a different dev.json if it were rewritten mid-hook,
+// assembling a posture that never existed as a whole.
 func TestResolve_FlagsShareOneViewOfTheFile(t *testing.T) {
 	dir := t.TempDir()
 	cfg := filepath.Join(dir, "dev.json")
@@ -58,8 +56,8 @@ func TestResolve_FlagsShareOneViewOfTheFile(t *testing.T) {
 	}
 }
 
-// A rewritten file must still be picked up, or the cache would pin a stale
-// posture for the life of the process.
+// TestResolve_RewrittenFileIsPickedUp a rewritten file must still be picked
+// up, or the cache would pin a stale posture for the life of the process.
 func TestResolve_RewrittenFileIsPickedUp(t *testing.T) {
 	dir := t.TempDir()
 	cfg := filepath.Join(dir, "dev.json")
@@ -73,8 +71,6 @@ func TestResolve_RewrittenFileIsPickedUp(t *testing.T) {
 		t.Fatal("enforce should be true from the first write")
 	}
 
-	// Distinguish the versions by size as well as mtime, since a same-size
-	// rewrite inside one filesystem timestamp tick is the hard case.
 	time.Sleep(10 * time.Millisecond)
 	if err := os.WriteFile(cfg, []byte(`{"enforce":false,"tier2":true}`), 0o600); err != nil {
 		t.Fatal(err)
@@ -84,9 +80,8 @@ func TestResolve_RewrittenFileIsPickedUp(t *testing.T) {
 	}
 }
 
-// A `locked` entry naming no real setting locks nothing. It used to do so in
-// complete silence, so an org could believe a mandate was in force when a typo
-// meant it never was.
+// TestManaged_UnknownLockedNamesAreReported a `locked` entry naming no real
+// setting locks nothing.
 func TestManaged_UnknownLockedNamesAreReported(t *testing.T) {
 	dir := t.TempDir()
 	managed := filepath.Join(dir, "managed.json")

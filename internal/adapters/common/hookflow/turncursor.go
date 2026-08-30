@@ -8,8 +8,13 @@ import (
 )
 
 // TurnCursor is the cross-process state that makes per-turn usage extraction
-// count each turn exactly once. The reverse order loses a turn's tokens
-// silently, with nothing to recover them from.
+// count each turn exactly once.
+//   - The record carries an offset AND a turn index, because the index is what
+//     the activity_id is derived from, so the two must advance together or the
+//     id and the window disagree;
+//   - The key is (session, agent), not just session.
+//   - INV-2: the record holds an integer offset, an integer index, and nothing
+//     else.
 type TurnCursor struct {
 	Dir string // cursor root; per-session subdirs live under it
 }
@@ -77,9 +82,9 @@ func (c TurnCursor) RecordPath(sessionID, agentID string) string {
 	return filepath.Join(c.SessionDir(sessionID), cursorKey(agentID))
 }
 
-// cursorKey is the per-agent filename within a session's cursor dir. The main
-// thread gets a fixed name; a subagent gets its sanitized id, prefixed so it
-// can never collide with the main thread's name whatever the provider mints.
+// cursorKey the main thread gets a fixed name; a subagent gets its sanitized
+// id, prefixed so it can never collide with the main thread's name whatever
+// the provider mints.
 func cursorKey(agentID string) string {
 	if strings.TrimSpace(agentID) == "" {
 		return "main.json"

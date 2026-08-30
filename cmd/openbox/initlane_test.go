@@ -16,20 +16,6 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/internal/transport"
 )
 
-// initlane_test.go covers the install and removal choreography WITHOUT a socket.
-//
-// That is deliberate rather than a compromise. The nine tests that cover the
-// gateway's own install all carry RequireBind, so on a host that denies bind they
-// SKIP — and this repo has already learned what that costs: over two days of
-// bind-guarded runs, five of six failures were bugs in the tests rather than in
-// the code, because the guard makes a test honest about what it needs and
-// simultaneously blinds whoever cannot meet it. Every assertion below is about
-// ORDER, IDENTITY and STATE, none of which needs a listener: the readiness probe
-// is already a seam, and a dial to a port nobody holds answers "not occupied"
-// without binding anything.
-
-// laneHarness stubs the supervisor and the readiness probe, and records every
-// command the install path would have run.
 type laneHarness struct {
 	home      string
 	commands  []string
@@ -60,9 +46,6 @@ func newLaneHarness(t *testing.T) *laneHarness {
 	waitForListenerFn = func(string, time.Duration) bool { return h.listening }
 	waitForPortFreeFn = func(string, time.Duration) bool { return true }
 
-	// Route the unit write through the PATH-EXPLICIT writer. Production uses
-	// kardianos/service, which ignores $HOME on darwin and would install a real
-	// launchd unit into the home of whoever ran `go test`.
 	installLaneUnitFn = func(spec laneservice.Spec, goos, homeDir, binPath string) error {
 		path, err := spec.WriteUnit(goos, homeDir, binPath)
 		if err == nil {
@@ -86,7 +69,6 @@ func newLaneHarness(t *testing.T) *laneHarness {
 		return err
 	}
 
-	// A private OPENBOX_HOME so the CA and spool paths never reach the real one.
 	t.Setenv(devconfig.EnvHome, filepath.Join(h.home, ".openbox"))
 	if err := os.MkdirAll(filepath.Join(h.home, ".openbox"), 0o700); err != nil {
 		t.Fatal(err)
@@ -94,9 +76,6 @@ func newLaneHarness(t *testing.T) *laneHarness {
 	return h
 }
 
-// seedCA writes the certificate the transport lane refuses to name unless it
-// exists. The daemon generates the real one before it listens; here the daemon
-// is stubbed, so the file stands in for it.
 func (h *laneHarness) seedCA(t *testing.T) string {
 	t.Helper()
 	openboxHome, err := devconfig.Home()
@@ -117,9 +96,6 @@ func laneSettings(t *testing.T, home string) map[string]string {
 
 // TestLaneEnvIsWrittenOnlyAfterTheDaemonIsProvenUp is the safety property, for
 // the two lanes that did not have it covered.
-//
-// A dead loopback proxy fails CLOSED, so writing HTTPS_PROXY before the relay is
-// proven up breaks every model call on the machine while `init` prints success.
 func TestLaneEnvIsWrittenOnlyAfterTheDaemonIsProvenUp(t *testing.T) {
 	skipUnlessSupervised(t)
 	h := newLaneHarness(t)
@@ -134,9 +110,6 @@ func TestLaneEnvIsWrittenOnlyAfterTheDaemonIsProvenUp(t *testing.T) {
 	if env := laneSettings(t, h.home); env["HTTPS_PROXY"] != "" {
 		t.Errorf("HTTPS_PROXY was written with no relay listening (%q) — every model call on this machine would now fail", env["HTTPS_PROXY"])
 	}
-	// And no unit is left behind: KeepAlive would restart-loop a daemon the
-	// developer was never told about, and init exits 0 because the caller
-	// downgrades this to a warning.
 	if len(h.units) != 0 {
 		t.Errorf("a failed install left units behind: %v", h.units)
 	}
@@ -145,8 +118,8 @@ func TestLaneEnvIsWrittenOnlyAfterTheDaemonIsProvenUp(t *testing.T) {
 	}
 }
 
-// TestLaneEnvIsWrittenAfterReadiness is the happy path, and it asserts the ORDER
-// rather than only the outcome.
+// TestLaneEnvIsWrittenAfterReadiness is the happy path, and it asserts the
+// order rather than only the outcome.
 func TestLaneEnvIsWrittenAfterReadiness(t *testing.T) {
 	skipUnlessSupervised(t)
 	h := newLaneHarness(t)
@@ -173,9 +146,7 @@ func TestLaneEnvIsWrittenAfterReadiness(t *testing.T) {
 	}
 }
 
-// TestTransportRefusesToNameACAThatIsNotThere. NODE_EXTRA_CA_CERTS pointing at a
-// missing file fails every intercepted handshake, which a developer experiences
-// as the provider being down rather than as a config error.
+// TestTransportRefusesToNameACAThatIsNotThere.
 func TestTransportRefusesToNameACAThatIsNotThere(t *testing.T) {
 	skipUnlessSupervised(t)
 	h := newLaneHarness(t) // no seedCA
@@ -194,17 +165,10 @@ func TestTransportRefusesToNameACAThatIsNotThere(t *testing.T) {
 }
 
 // TestEachLaneIsAddressedByItsOwnSupervisorIdentity is the defect this
-// generalization could most easily have introduced, and it is invisible from the
-// outside: `systemctl --user enable --now` names a UNIT and `launchctl bootout`
-// names a LABEL, so a hardcoded gateway identity would start or stop the gateway
-// when asked to start telemetry — and report success either way.
-//
-// It drives INSTALL AND REMOVAL, and that is load-bearing rather than thorough.
-// On darwin the install path only ever reaches `launchctl bootstrap`, which
-// names the unit PATH and is therefore per-lane whatever the code does; the
-// label is used solely by `bootout`, which nothing but a removal or a rollback
-// calls. A version of this test that stopped after the install passed with the
-// gateway's label hardcoded — measured, not assumed.
+// generalization could most easily have introduced, and it is invisible from
+// the outside: `systemctl --user enable --now` names a unit and `launchctl
+// bootout` names a label, so a hardcoded gateway identity would start or stop
+// the gateway when asked to start telemetry; and report success either way.
 func TestEachLaneIsAddressedByItsOwnSupervisorIdentity(t *testing.T) {
 	skipUnlessSupervised(t)
 	h := newLaneHarness(t)
@@ -223,9 +187,6 @@ func TestEachLaneIsAddressedByItsOwnSupervisorIdentity(t *testing.T) {
 	case "linux":
 		mine, theirs = "openbox-telemetry.service", "openbox-gateway.service"
 	case "darwin":
-		// The LABEL as launchctl is given it, not as it appears inside a plist
-		// path — the path contains the label too, so matching the bare string
-		// would pass on the install's `bootstrap <path>` alone.
 		mine, theirs = "gui/501/ai.openbox.telemetry", "gui/501/ai.openbox.gateway"
 	}
 	if !strings.Contains(joined, mine) {
@@ -235,8 +196,6 @@ func TestEachLaneIsAddressedByItsOwnSupervisorIdentity(t *testing.T) {
 		t.Errorf("acting on the telemetry lane addressed the GATEWAY (%s):\n%s", theirs, joined)
 	}
 
-	// And the mapping itself, on every platform: the two OS branches above can
-	// only ever exercise one of them from a single test run.
 	for _, tc := range []struct {
 		spec  laneservice.Spec
 		label string
@@ -252,19 +211,16 @@ func TestEachLaneIsAddressedByItsOwnSupervisorIdentity(t *testing.T) {
 	}
 }
 
-// TestRemovalRestoresAForeignValueByteIdentically is the state-diff the phase's
-// acceptance criterion names.
-//
-// The org's own relay and proxy settings must come back EXACTLY, and the keys
-// OpenBox added must be gone — with everything else in the file untouched.
+// TestRemovalRestoresAForeignValueByteIdentically is the state-diff the
+// phase's acceptance criterion names. The org's own relay and proxy settings
+// must come back exactly, and the keys OpenBox added must be gone; with
+// everything else in the file untouched.
 func TestRemovalRestoresAForeignValueByteIdentically(t *testing.T) {
 	skipUnlessSupervised(t)
 	h := newLaneHarness(t)
 	h.seedCA(t)
 	a, _, _ := testApp(map[string]string{"HOME": h.home})
 
-	// A machine that already has an org relay, a corporate proxy and an unrelated
-	// key inside the same env block.
 	settingsPath := gatewayservice.SettingsPath(h.home)
 	if err := os.MkdirAll(filepath.Dir(settingsPath), 0o755); err != nil {
 		t.Fatal(err)
@@ -320,9 +276,6 @@ func TestRemovalRestoresAForeignValueByteIdentically(t *testing.T) {
 		t.Errorf("a top-level key outside env was lost:\n%s", raw)
 	}
 
-	// The other half of the state diff, and the one with the worse failure: a unit
-	// left on disk carries KeepAlive/Restart=always, so the supervisor restart-loops
-	// a daemon the developer believes they removed.
 	if len(h.units) != 0 {
 		t.Errorf("units survived removal: %v", h.units)
 	}
@@ -334,17 +287,14 @@ func TestRemovalRestoresAForeignValueByteIdentically(t *testing.T) {
 			t.Errorf("%s survived removal", path)
 		}
 	}
-	// And the record forgot both lanes, so a later --remove-all has nothing to
-	// restore over.
 	if lanes := activation.ActiveLanes(h.home); len(lanes) != 0 {
 		t.Errorf("the activation record still claims %v as installed", lanes)
 	}
 }
 
-// TestASecondFullInstallDoesNotOverwriteTheRememberedOriginals is the
-// second-invocation rule this repo states in its own words: check reads and
-// writes separately, and test the SECOND invocation. Fifteen green tests once
-// missed a reverted opt-out because each ran init exactly once.
+// TestASecondFullInstallDoesNotOverwriteTheRememberedOriginals is the second-
+// invocation rule this repo states in its own words: check reads and writes
+// separately, and test the second invocation.
 func TestASecondFullInstallDoesNotOverwriteTheRememberedOriginals(t *testing.T) {
 	skipUnlessSupervised(t)
 	h := newLaneHarness(t)
@@ -359,8 +309,6 @@ func TestASecondFullInstallDoesNotOverwriteTheRememberedOriginals(t *testing.T) 
 		t.Fatal(err)
 	}
 
-	// Two installs, the second on a different port — the exact shape that made
-	// the gateway record its OWN previous URL as the org's.
 	if err := a.setupTransport(h.home, "127.0.0.1:18790", false); err != nil {
 		t.Fatalf("first install: %v", err)
 	}
@@ -375,8 +323,8 @@ func TestASecondFullInstallDoesNotOverwriteTheRememberedOriginals(t *testing.T) 
 	}
 }
 
-// TestRemovalIsSafeOnAMachineThatNeverInstalledAnything. `--remove-all` runs on
-// partial state by design, and before the credential gate — removal must not
+// TestRemovalIsSafeOnAMachineThatNeverInstalledAnything. `--remove-all` runs
+// on partial state by design, and before the credential gate; removal must not
 // require the thing being removed to still be usable.
 func TestRemovalIsSafeOnAMachineThatNeverInstalledAnything(t *testing.T) {
 	skipUnlessSupervised(t)
@@ -389,10 +337,6 @@ func TestRemovalIsSafeOnAMachineThatNeverInstalledAnything(t *testing.T) {
 }
 
 // TestRemovalRefusesToOverwriteAChangedValueButStillRemovesTheUnit.
-//
-// Restoring over a value somebody edited destroys their edit. Refusing is right
-// — but a refusal that also abandoned the daemon would leave a KeepAlive job
-// running with nothing pointing at it, which is the worse outcome of the two.
 func TestRemovalRefusesToOverwriteAChangedValueButStillRemovesTheUnit(t *testing.T) {
 	skipUnlessSupervised(t)
 	h := newLaneHarness(t)
@@ -402,7 +346,6 @@ func TestRemovalRefusesToOverwriteAChangedValueButStillRemovesTheUnit(t *testing
 	if err := a.setupTransport(h.home, "127.0.0.1:18790", false); err != nil {
 		t.Fatalf("setupTransport: %v", err)
 	}
-	// Somebody edits the value we set.
 	settingsPath := gatewayservice.SettingsPath(h.home)
 	if err := os.WriteFile(settingsPath, []byte(`{"env":{"HTTPS_PROXY":"http://someone-elses-proxy:9999"}}`), 0o644); err != nil {
 		t.Fatal(err)
@@ -415,7 +358,6 @@ func TestRemovalRefusesToOverwriteAChangedValueButStillRemovesTheUnit(t *testing
 		t.Errorf("the refusal still rewrote the value: %q", got)
 	}
 
-	// And --force-restore completes it.
 	if code := a.runRemovals(h.home, removalRequest{transport: true, force: true}); code != exitOK {
 		t.Fatalf("--force-restore did not complete the removal (exit %d)", code)
 	}
@@ -424,9 +366,7 @@ func TestRemovalRefusesToOverwriteAChangedValueButStillRemovesTheUnit(t *testing
 	}
 }
 
-// TestPurgeDeletesTheCAAndTheRecord. Leaving a trusted signing key on the
-// machine after the relay that used it is gone is a strictly worse posture than
-// removing it; it is regenerated on the next install.
+// TestPurgeDeletesTheCAAndTheRecord.
 func TestPurgeDeletesTheCAAndTheRecord(t *testing.T) {
 	skipUnlessSupervised(t)
 	h := newLaneHarness(t)
@@ -449,17 +389,15 @@ func TestPurgeDeletesTheCAAndTheRecord(t *testing.T) {
 	if fileExists(activation.RecordPath(h.home)) {
 		t.Error("the activation record survived --remove-all")
 	}
-	// Data destruction is announced, never silent.
 	if !strings.Contains(out.String(), "deleted") {
 		t.Errorf("nothing was reported as deleted:\n%s", out.String())
 	}
 }
 
-// TestLaneFlagsAreMutuallyExclusiveAndClaudeCodeOnly.
-//
-// The provider guard is the defect --gateway already shipped and fixed:
-// `--provider codex --full` would install two supervised daemons and rewrite
-// ~/.claude/settings.json on a machine whose tool reads neither.
+// TestLaneFlagsAreMutuallyExclusiveAndClaudeCodeOnly. The provider guard is
+// the defect --gateway already shipped and fixed: `--provider codex --full`
+// would install two supervised daemons and rewrite ~/.claude/settings.json on
+// a machine whose tool reads neither.
 func TestLaneFlagsAreMutuallyExclusiveAndClaudeCodeOnly(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -486,12 +424,9 @@ func TestLaneFlagsAreMutuallyExclusiveAndClaudeCodeOnly(t *testing.T) {
 	}
 }
 
-// TestLaneRemovalRunsBeforeTheCredentialGate.
-//
-// A machine whose credentials were deleted — an offboarding, a rotation, a wiped
-// ~/.openbox — must still be able to back the lanes out. When `--remove-gateway`
-// sat below that gate, every model call kept failing closed against a dead
-// loopback port and the only remaining fix was hand-editing the settings file.
+// TestLaneRemovalRunsBeforeTheCredentialGate. A machine whose credentials were
+// deleted; an offboarding, a rotation, a wiped ~/.openbox; must still be able
+// to back the lanes out.
 func TestLaneRemovalRunsBeforeTheCredentialGate(t *testing.T) {
 	skipUnlessSupervised(t)
 	h := newLaneHarness(t)
@@ -511,9 +446,7 @@ func TestLaneRemovalRunsBeforeTheCredentialGate(t *testing.T) {
 	}
 }
 
-// TestDryRunNamesTheLanesItWouldInstall. An operator vetting a fleet script has
-// to be told about a supervised daemon and a CA on the machine, not shown a
-// count.
+// TestDryRunNamesTheLanesItWouldInstall.
 func TestDryRunNamesTheLanesItWouldInstall(t *testing.T) {
 	isolateHome(t)
 	a, out, _ := testApp(nil)
@@ -545,14 +478,8 @@ func TestUnsupportedPlatformIsReportedNotSkipped(t *testing.T) {
 	}
 }
 
-// TestDoctorNamesAnElectedLaneThatIsNotThere is the election's own worst failure
-// mode, and the only place it is visible.
-//
-// The election reads where the tool is ROUTED, not what OpenBox installed — so a
-// developer's own loopback proxy, or a stale key left by hand, elects a lane that
-// does not exist. Every other lane then correctly stands down and the machine
-// emits nothing at all, while each individual doctor line still reads as fine.
-// Only putting "elected" and "nothing listening" on one line makes it findable.
+// TestDoctorNamesAnElectedLaneThatIsNotThere is the election's own worst
+// failure mode, and the only place it is visible.
 func TestDoctorNamesAnElectedLaneThatIsNotThere(t *testing.T) {
 	skipUnlessSupervised(t)
 	h := newLaneHarness(t)
@@ -560,7 +487,6 @@ func TestDoctorNamesAnElectedLaneThatIsNotThere(t *testing.T) {
 	t.Setenv("HOME", h.home)
 	a, out, _ := testApp(map[string]string{"HOME": h.home})
 
-	// Somebody else's loopback proxy, on the port nothing of ours holds.
 	settingsPath := gatewayservice.SettingsPath(h.home)
 	if err := os.MkdirAll(filepath.Dir(settingsPath), 0o755); err != nil {
 		t.Fatal(err)
@@ -583,14 +509,8 @@ func TestDoctorNamesAnElectedLaneThatIsNotThere(t *testing.T) {
 }
 
 // TestRemoveAllKeepsTheSharedSpool is a deliberate deviation from this phase's
-// requirement text, and it is the phase's own security constraint that decides it:
-// "never delete anything outside ~/.openbox/ and the managed keys".
-//
-// Two independent reasons, either alone sufficient. The spool resolves from
-// os.UserConfigDir(), which is outside ~/.openbox. And it is SHARED with the hook
-// path — `--remove-all` removes lanes, not hooks — so deleting it destroys
-// undelivered governed tool-call evidence belonging to a component that is still
-// installed and still running.
+// requirement text, and it is the phase's own security constraint that decides
+// it: "never delete anything outside ~/.openbox/ and the managed keys".
 func TestRemoveAllKeepsTheSharedSpool(t *testing.T) {
 	skipUnlessSupervised(t)
 	h := newLaneHarness(t)
@@ -612,8 +532,6 @@ func TestRemoveAllKeepsTheSharedSpool(t *testing.T) {
 	if !fileExists(pending) {
 		t.Error("--remove-all destroyed undelivered hook evidence in the shared spool")
 	}
-	// And it says so: a developer expecting a full teardown has to know what
-	// survived and where it is.
 	if !strings.Contains(out.String(), spool) {
 		t.Errorf("the spool was kept silently:\n%s", out.String())
 	}
@@ -622,13 +540,6 @@ func TestRemoveAllKeepsTheSharedSpool(t *testing.T) {
 // TestDoctorReportsAConfiguredLaneThatIsNotInPath keeps two different facts
 // apart, because exactly one state separates them and collapsing it loses
 // information in either direction.
-//
-// ROUTED is what the tool's settings point at. IN PATH is what can actually see
-// the call. A base URL sends the call past the relay — loopback bypasses the
-// proxy, and any other host is blind-tunnelled because it is not the provider's
-// — so a transport lane can be perfectly configured and observe nothing.
-// Reporting it as unconfigured would hide a lane the developer installed;
-// reporting it as in force would promise observation that is not happening.
 func TestDoctorReportsAConfiguredLaneThatIsNotInPath(t *testing.T) {
 	skipUnlessSupervised(t)
 	h := newLaneHarness(t)
@@ -640,7 +551,6 @@ func TestDoctorReportsAConfiguredLaneThatIsNotInPath(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(settingsPath), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	// Both in-path lanes configured: the relay AND a loopback base URL.
 	if err := os.WriteFile(settingsPath, []byte(
 		`{"env":{"HTTPS_PROXY":"http://127.0.0.1:8790","ANTHROPIC_BASE_URL":"http://127.0.0.1:8788"}}`), 0o644); err != nil {
 		t.Fatal(err)
@@ -656,9 +566,9 @@ func TestDoctorReportsAConfiguredLaneThatIsNotInPath(t *testing.T) {
 	if !strings.Contains(s, "NOT IN PATH  transport") {
 		t.Errorf("doctor did not say the transport lane cannot see this machine's calls:\n%s", s)
 	}
-	// And it is still reported as CONFIGURED, because it is. Scoped to the
-	// transport block: the telemetry lane legitimately reports "not pointed at
-	// it" in this fixture, and a whole-output match would pass on that instead.
+	// Scoped to the transport block: the telemetry lane legitimately reports "not
+	// pointed at it" in this fixture, and a whole-output match would pass on that
+	// instead.
 	block := s[strings.Index(s, "Transport lane"):]
 	if strings.Contains(block, "configured   no") {
 		t.Errorf("doctor reported a configured transport lane as unconfigured:\n%s", block)
@@ -668,20 +578,13 @@ func TestDoctorReportsAConfiguredLaneThatIsNotInPath(t *testing.T) {
 	}
 }
 
-// TestFullRetiresARoutedGateway. Both in-path lanes routed leaves the developer
-// with two supervised daemons and an outcome they did not choose: the loopback
-// base URL wins, so the relay they just installed observes nothing.
-//
-// `--full` therefore retires the gateway and SAYS so. The check reads the
-// ROUTING rather than the election, because the election is itself a function of
-// what is routed — they agree today, and this is about the machine's state.
+// TestFullRetiresARoutedGateway.
 func TestFullRetiresARoutedGateway(t *testing.T) {
 	skipUnlessSupervised(t)
 	h := newLaneHarness(t)
 	h.seedCA(t)
 	a, out, _ := testApp(map[string]string{"HOME": h.home})
 
-	// A machine with the gateway already installed.
 	if err := a.setupGateway(h.home, "127.0.0.1:18788", "https://api.anthropic.com", false); err != nil {
 		t.Fatalf("setupGateway: %v", err)
 	}

@@ -14,8 +14,6 @@ import (
 	"unicode/utf8"
 )
 
-// uuidKeys are keys whose corpus values are UUIDs or UUID-like account
-// handles.
 var uuidKeys = map[string]bool{
 	"session.id":                    true,
 	"organization.id":               true,
@@ -38,8 +36,6 @@ var tokenKeys = map[string]bool{
 	"x-client-request-id": true,
 }
 
-// hexShapeKeys are OTLP protocol fields whose values are validated as hex of
-// an exact length by the collector's own JSON unmarshaler.
 var hexShapeKeys = map[string]bool{
 	"spanid":       true,
 	"traceid":      true,
@@ -62,8 +58,9 @@ var fixedKeys = map[string]string{
 	"server-timing":   "fixture",
 }
 
-// contentKeys are keys whose values are recorded free text; a prompt, a model
-// reply, a tool's arguments or its output.
+// contentKeys a pseudonym exists so two distinct real values stay distinct
+// downstream, and nothing downstream reads these: the telemetry lane's body
+// ingestion is deferred, so the value is carried and never parsed.
 var contentKeys = map[string]bool{
 	"prompt":          true,
 	"response":        true,
@@ -79,9 +76,7 @@ var (
 	apiKeyRe   = regexp.MustCompile(`sk-ant-[A-Za-z0-9_\-]{16,}`)
 	bearerRe   = regexp.MustCompile(`(?i)bearer\s+[A-Za-z0-9._\-]{12,}`)
 
-	// opaqueIDRe the two value-shape rules, and they exist because the key-driven
-	// rules above provably were not enough. HexIDRe deliberately requires both a
-	// hex letter and a digit.
+	// opaqueIDRe hexIDRe deliberately requires both a hex letter and a digit.
 	opaqueIDRe = regexp.MustCompile(`\b(toolu|msg|cse|acct|user|org|sess|req)_([A-Za-z0-9]{12,})\b`)
 
 	uuidValueRe = regexp.MustCompile(`[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}`)
@@ -230,8 +225,7 @@ func (s *sanitizer) rewrite(key, val string) string {
 	return s.scrubText(val)
 }
 
-// sameLengthDigits scrubText applies the value patterns. Order is load-bearing
-// in two places.
+// sameLengthDigits order is load-bearing in two places.
 func (s *sanitizer) sameLengthDigits(real string) string {
 	if allDigits(real) {
 		return real // already a pseudonym; consume no counter

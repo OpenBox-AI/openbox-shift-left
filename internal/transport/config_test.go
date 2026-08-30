@@ -6,15 +6,7 @@ import (
 )
 
 // TestDefaultPortIsDistinctFromTheOtherLanes.
-//
-// Three loopback daemons can be installed on one machine. Two sharing a port
-// means whichever starts second fails to bind — and under launchd's KeepAlive
-// that is a restart loop, not a clean error the developer sees.
 func TestDefaultPortIsDistinctFromTheOtherLanes(t *testing.T) {
-	// Written as literals rather than imported: gateway and telemetry are not
-	// direct dependencies of this module (its guard allows one), and hard-coding
-	// them here is what makes a future collision show up as a failing test in the
-	// module that moved rather than as a silent restart loop in the field.
 	const gatewayAddr = "127.0.0.1:8788"
 	const telemetryAddr = "127.0.0.1:8789"
 
@@ -40,12 +32,6 @@ func TestValidateFillsDefaults(t *testing.T) {
 }
 
 // TestValidateRefusesANonLoopbackListener.
-//
-// This proxy performs no caller authentication and terminates TLS for the
-// provider's hostname. A non-loopback listener would let anything on the network
-// route its model calls through this machine's CA — the same reasoning as
-// gateway.Config.Validate, and a stronger case: the gateway only relays, this
-// also decrypts.
 func TestValidateRefusesANonLoopbackListener(t *testing.T) {
 	for _, addr := range []string{
 		"0.0.0.0:8790",
@@ -107,11 +93,6 @@ func TestValidateKeepsAnExplicitAllowlist(t *testing.T) {
 }
 
 // TestUpstreamForIsFixedPerHost.
-//
-// The intercepted request arrives in origin-form over the tunnel, so the upstream
-// base URL has to be reconstructed from the CONNECT host. Getting this wrong
-// would send the developer's credential somewhere else — the same failure
-// gateway.ServeHTTP's origin-form guard exists to prevent.
 func TestUpstreamForIsFixedPerHost(t *testing.T) {
 	cases := map[string]string{
 		"api.anthropic.com:443":  "https://api.anthropic.com",
@@ -124,8 +105,6 @@ func TestUpstreamForIsFixedPerHost(t *testing.T) {
 			t.Errorf("UpstreamFor(%q) = %q, want %q", in, got, want)
 		}
 	}
-	// A non-443 port must be carried, or the relay would silently retarget the
-	// call to the default port.
 	if got := UpstreamFor("api.anthropic.com:8443"); got != "https://api.anthropic.com:8443" {
 		t.Errorf("UpstreamFor with a non-default port = %q, want the port preserved", got)
 	}

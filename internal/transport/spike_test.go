@@ -17,43 +17,17 @@ import (
 	"time"
 )
 
-// This file IS the phase-11 gate (plan 260827-2301). It asks two questions and
-// nothing else: does goproxy forward byte-identically, and does it stream SSE
-// per chunk. Pre-decided branches: passes ⇒ phase 11 proceeds; mutates bytes
-// irreparably or cannot stream per-chunk ⇒ STOP AND REPORT, do not hand-roll a
-// replacement inside the phase.
-//
-// The fixtures deliberately mirror gateway/proxy_test.go's, so a reader can
-// compare the two relays' answers directly rather than trusting two different
-// setups. Non-ASCII, pre-escaped quotes and a multi-element `system` array are
-// all present for the reason the gateway's suite has them: a reordered `system`
-// array poisons the prompt cache silently, and a re-encoded body is a changed
-// body even when it parses the same.
+// Pre-decided branches: passes ⇒ phase 11 proceeds; mutates bytes irreparably
+// or cannot stream per-chunk ⇒ stop AND report, do not hand-roll a replacement
+// inside the phase.
 
-// The credential fixtures are ASSEMBLED, not written as literals, and that is
-// not style either.
-//
-// These mirror gateway/proxy_test.go's constants, which sit in the tree as plain
-// strings — but that file predates the gitleaks rule pack, and files are not
-// rescanned. Written fresh, this repo's own enforce-path redactor rewrote them on
-// the write, and on one of them it consumed the surrounding QUOTES, producing
-// Go that would not parse (`illegal character U+0024`). The values are already
-// obviously fake; the rule matches the `sk-ant-` FORMAT, not the secrecy.
-//
-// So the byte-identity fixtures for the transport gate cannot be expressed as
-// literals until the open generic/AI-key false-positive item is settled. See
-// plan.md's open question 1.
+// fixtureAPIKey the credential fixtures are assembled, not written as
+// literals, and that is not style either.
 var fixtureAPIKey = "sk-" + "ant-api03-fixture-not-a-real-credential"
 var fixtureCredential = "Bearer " + "sk-" + "ant-fixture-not-a-real-credential"
 
 const fixtureBody = `{"model":"claude-opus-4","system":[{"type":"text","text":"You are Claude Code, Anthropic's official CLI."},{"type":"text","text":"user context: café ☕ 日本語"}],"messages":[{"role":"user","content":"{\"nested\":\"pre-escaped\\\"quote\"}"}],"stream":true}`
 
-// requireBind skips when the host denies bind.
-//
-// Declared locally rather than importing client/memhttptest: this module's whole
-// point is transport fidelity, and an in-memory pipe is not evidence about a
-// transport. Five lines beats a module dependency that would also have to be
-// argued past this module's own dependency guard.
 func requireBind(t *testing.T) {
 	t.Helper()
 	l, err := net.Listen("tcp", "127.0.0.1:0")
@@ -73,7 +47,6 @@ type recorded struct {
 	transfer []string
 }
 
-// upstreamRecorder is the provider: it records the request verbatim.
 func upstreamRecorder(t *testing.T, got *recorded, respond func(http.ResponseWriter)) *httptest.Server {
 	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -96,12 +69,6 @@ func upstreamRecorder(t *testing.T, got *recorded, respond func(http.ResponseWri
 	return srv
 }
 
-// proxyClient routes through the proxy and adds nothing of its own.
-//
-// DisableCompression on the CLIENT matters as much as on the proxy: Go's default
-// client injects Accept-Encoding: gzip whenever a request carries none, which
-// would make the "proxy added no Accept-Encoding" assertion untestable through
-// any client. Same reasoning as gateway/proxy_test.go's probeClient.
 func proxyClient(t *testing.T, proxyURL string) *http.Client {
 	t.Helper()
 	u, err := url.Parse(proxyURL)
@@ -173,17 +140,15 @@ func TestGoproxyForwardsIdentically(t *testing.T) {
 			t.Errorf("header %s: got %q want %q", k, fwd, v)
 		}
 	}
-	// The credential headers get their own assertions in the gateway's suite and
-	// keep them here: they are the ones whose silent alteration would be worst.
 	if fwd := got.header.Get("Authorization"); fwd != fixtureCredential {
 		t.Errorf("Authorization not verbatim: got %q", fwd)
 	}
 	if fwd := got.header.Get("X-Api-Key"); fwd != fixtureAPIKey {
 		t.Errorf("x-api-key not verbatim: got %q", fwd)
 	}
-	// Additions. Accept-Encoding is in this list because the client sent none and
-	// neither the proxy nor its transport may invent one — the response would then
-	// be decompressed in flight and the client would receive bytes the provider
+	// Accept-Encoding is in this list because the client sent none and neither
+	// the proxy nor its transport may invent one; the response would then be
+	// decompressed in flight and the client would receive bytes the provider
 	// never sent.
 	for _, name := range []string{"X-Forwarded-For", "X-Forwarded-Host", "X-Forwarded-Proto", "Via", "Accept-Encoding"} {
 		if v := got.header.Get(name); v != "" {
@@ -204,14 +169,8 @@ func TestGoproxyForwardsIdentically(t *testing.T) {
 	}
 }
 
-// TestClientAcceptEncodingSurvives is the assertion the plan did not anticipate.
-//
-// The plan's criterion was "no INJECTED Accept-Encoding". goproxy v1.9.0's real
-// hazard is the opposite: RemoveProxyHeaders DELETES the client's own
-// Accept-Encoding unless KeepAcceptEncoding is set. A client that explicitly
-// asked for `identity` and got its request rewritten is just as much a
-// byte-identity break as an injected header, and it fails in the more dangerous
-// direction — the provider may then compress a reply the client cannot read.
+// TestClientAcceptEncodingSurvives is the assertion the plan did not
+// anticipate.
 func TestClientAcceptEncodingSurvives(t *testing.T) {
 	requireBind(t)
 	var got recorded
@@ -232,11 +191,10 @@ func TestClientAcceptEncodingSurvives(t *testing.T) {
 	}
 }
 
-// TestGoproxyDefaultsBreakByteIdentity is the negative control.
-//
-// It pins WHY NewIdentityProxy sets what it sets. A stock goproxy must be shown
-// to break the property, or the three settings are decoration and a later
-// "simplify" commit deletes them with every test still green.
+// TestGoproxyDefaultsBreakByteIdentity is the negative control. A stock
+// goproxy must be shown to break the property, or the three settings are
+// decoration and a later "simplify" commit deletes them with every test still
+// green.
 func TestGoproxyDefaultsBreakByteIdentity(t *testing.T) {
 	requireBind(t)
 	var got recorded
@@ -259,10 +217,6 @@ func TestGoproxyDefaultsBreakByteIdentity(t *testing.T) {
 
 // TestGoproxyStreamsPerChunk is gate question 2, and it is the one with a
 // stop-and-report branch attached.
-//
-// Anthropic streams completions as text/event-stream. If the relay buffers, the
-// developer's tokens arrive in one lump at the end: not a data loss, a
-// user-visible product regression, and the plan ranks that above the feature.
 func TestGoproxyStreamsPerChunk(t *testing.T) {
 	requireBind(t)
 	const chunks = 4
@@ -276,18 +230,9 @@ func TestGoproxyStreamsPerChunk(t *testing.T) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.WriteHeader(http.StatusOK)
 		fl, _ := w.(http.Flusher)
-		// CHUNK 0 IS UNGATED, and that is load-bearing rather than tidy.
-		//
-		// The client's Do() cannot return until response HEADERS arrive, and
-		// goproxy cannot push headers to the client until it has body bytes to
-		// write — Go's http.Server buffers WriteHeader. So if chunk 0 waited on a
-		// release the test only performs after Do() returns, the test deadlocks
-		// ITSELF and looks exactly like the gate's stop-and-report branch. That
-		// misdiagnosis cost two runs: flushing the headers before the gate was not
-		// enough, because a flush has nothing to carry until the first write.
-		//
-		// Chunks 1..n-1 stay gated, each released only after the previous has been
-		// read, which is what actually measures per-chunk delivery.
+		// The client's Do() cannot return until response headers arrive, and goproxy
+		// cannot push headers to the client until it has body bytes to write; Go's
+		// http.Server buffers WriteHeader.
 		for i := 0; i < chunks; i++ {
 			if i > 0 {
 				<-release[i]
@@ -300,9 +245,7 @@ func TestGoproxyStreamsPerChunk(t *testing.T) {
 	})
 	proxy := serveProxy(t, NewIdentityProxy())
 
-	// The whole exchange is bounded: a buffering relay stalls in Do(), before any
-	// read, so a per-read deadline cannot see it. Generous enough that a slow
-	// machine cannot produce a false stop-and-report.
+	// Generous enough that a slow machine cannot produce a false stop-and-report.
 	reqCtx, cancelReq := context.WithTimeout(context.Background(), streamDeadline)
 	defer cancelReq()
 	req, _ := http.NewRequestWithContext(reqCtx, http.MethodGet, upstream.URL+"/v1/messages", nil)
@@ -313,11 +256,9 @@ func TestGoproxyStreamsPerChunk(t *testing.T) {
 	}
 	defer resp.Body.Close()
 
-	// Read chunk i only after releasing chunk i. If the relay buffered the whole
-	// body, the first read could not return until the upstream finished — and the
-	// upstream cannot finish until we release chunk 3, which we have not done.
-	// So a buffering relay DEADLOCKS here and the test times out rather than
-	// passing with a wrong shape.
+	// If the relay buffered the whole body, the first read could not return until
+	// the upstream finished; and the upstream cannot finish until we release
+	// chunk 3, which we have not done.
 	br := bufio.NewReader(resp.Body)
 	for i := 0; i < chunks; i++ {
 		if i > 0 {
@@ -337,12 +278,9 @@ func TestGoproxyStreamsPerChunk(t *testing.T) {
 	}
 }
 
-// TestStreamingTeeDoesNotBuffer prototypes the capture tee (plan step 2).
-//
-// The tee must observe the whole body while flush-per-read still reaches the
-// client. Any goproxy helper that reads the body to make it re-readable is
-// disqualified on this path, which is why this uses io.TeeReader into a sink
-// rather than reading and replacing the body.
+// TestStreamingTeeDoesNotBuffer prototypes the capture tee (plan step 2). The
+// tee must observe the whole body while flush-per-read still reaches the
+// client.
 func TestStreamingTeeDoesNotBuffer(t *testing.T) {
 	requireBind(t)
 	const chunks = 3
@@ -356,18 +294,9 @@ func TestStreamingTeeDoesNotBuffer(t *testing.T) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.WriteHeader(http.StatusOK)
 		fl, _ := w.(http.Flusher)
-		// CHUNK 0 IS UNGATED, and that is load-bearing rather than tidy.
-		//
-		// The client's Do() cannot return until response HEADERS arrive, and
-		// goproxy cannot push headers to the client until it has body bytes to
-		// write — Go's http.Server buffers WriteHeader. So if chunk 0 waited on a
-		// release the test only performs after Do() returns, the test deadlocks
-		// ITSELF and looks exactly like the gate's stop-and-report branch. That
-		// misdiagnosis cost two runs: flushing the headers before the gate was not
-		// enough, because a flush has nothing to carry until the first write.
-		//
-		// Chunks 1..n-1 stay gated, each released only after the previous has been
-		// read, which is what actually measures per-chunk delivery.
+		// The client's Do() cannot return until response headers arrive, and goproxy
+		// cannot push headers to the client until it has body bytes to write; Go's
+		// http.Server buffers WriteHeader.
 		for i := 0; i < chunks; i++ {
 			if i > 0 {
 				<-release[i]
@@ -440,11 +369,6 @@ func (l *lockedWriter) Write(p []byte) (int, error) {
 	return l.w.Write(p)
 }
 
-// readLineBy reads one line, failing rather than hanging past the deadline.
-//
-// A buffering relay's natural failure mode is a stall, and a stalled `go test`
-// tells the reader nothing — it looks like an environment problem, not a gate
-// answer. This converts it into a named failure.
 func readLineBy(t *testing.T, br *bufio.Reader, within time.Duration) (string, error) {
 	t.Helper()
 	type res struct {
@@ -468,5 +392,4 @@ func readLineBy(t *testing.T, br *bufio.Reader, within time.Duration) (string, e
 // not latency, so a slow machine must not produce a false stop-and-report.
 const chunkDeadline = 10 * time.Second
 
-// streamDeadline bounds a whole streaming exchange, headers included.
 const streamDeadline = 20 * time.Second

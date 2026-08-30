@@ -8,10 +8,10 @@ import (
 	"testing"
 )
 
-// A home directory with a space is ordinary — an account named for a person on
-// macOS or Windows. Unquoted, the shell splits the command and every hook in the
-// project silently fails to start. Since that decision made project scope the
-// DEFAULT, that would break governance for those users on a plain `openbox init`.
+// TestLocalHookCommandQuotesTheEnginePath a home directory with a space is
+// ordinary; an account named for a person on macOS or Windows. Unquoted, the
+// shell splits the command and every hook in the project silently fails to
+// start.
 func TestLocalHookCommandQuotesTheEnginePath(t *testing.T) {
 	dir := t.TempDir()
 	engine := filepath.Join("/Users/John Doe/.claude/plugins/openbox-observe/bin", "openbox")
@@ -46,9 +46,10 @@ func TestLocalHookCommandQuotesTheEnginePath(t *testing.T) {
 	}
 }
 
-// The merge must stay idempotent ACROSS the quoting change: an install written by
-// an earlier version carries unquoted commands, and appending a quoted duplicate
-// beside it would make every hook fire twice.
+// TestLocalHooksIdempotentAgainstAnUnquotedLegacyEntry the merge must stay
+// idempotent across the quoting change: an install written by an earlier
+// version carries unquoted commands, and appending a quoted duplicate beside
+// it would make every hook fire twice.
 func TestLocalHooksIdempotentAgainstAnUnquotedLegacyEntry(t *testing.T) {
 	dir := t.TempDir()
 	engine := "/opt/openbox/bin/openbox"
@@ -56,7 +57,6 @@ func TestLocalHooksIdempotentAgainstAnUnquotedLegacyEntry(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(settingsPath), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	// Exactly what a pre-quoting install left behind.
 	legacy := `{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"` + engine + ` hook claude-code SessionStart","timeout":5}]}]}}`
 	if err := os.WriteFile(settingsPath, []byte(legacy), 0o644); err != nil {
 		t.Fatal(err)
@@ -83,17 +83,13 @@ func TestLocalHooksIdempotentAgainstAnUnquotedLegacyEntry(t *testing.T) {
 	}
 }
 
-// Every install that exists today predates that decision hooks, so the FIRST
-// thing this change meets in the field is a settings file holding the old seven
-// and none of the new four. Re-init has to add exactly the four and touch
-// nothing else — and that is a property of the SECOND invocation, which is the
-// case fifteen green enforce tests missed once already (that decision,
-// TestPlainReInitDoesNotRevertAnEnforceOptOut).
+// TestReInitAddsTheNewHooksExactlyOnce every install that exists today
+// predates that decision hooks, so the first thing this change meets in the
+// field is a settings file holding the old seven and none of the new four.
 func TestReInitAddsTheNewHooksExactlyOnce(t *testing.T) {
 	dir := t.TempDir()
 	engine := filepath.Join(dir, "bin", "openbox")
 
-	// An install from before this change: the earlier hook set only.
 	preStatusHooks := map[string]bool{
 		"SessionStart": true, "UserPromptSubmit": true, "PreToolUse": true,
 		"PostToolUse": true, "Stop": true, "SubagentStop": true, "SessionEnd": true,
@@ -116,7 +112,6 @@ func TestReInitAddsTheNewHooksExactlyOnce(t *testing.T) {
 			}},
 		}}
 	}
-	// A foreign hook a developer added themselves — it must survive untouched.
 	old["hooks"].(map[string]any)["PostToolUse"] = append(
 		old["hooks"].(map[string]any)["PostToolUse"].([]any),
 		map[string]any{"matcher": "*", "hooks": []any{map[string]any{"type": "command", "command": "my-own-linter"}}})
@@ -157,7 +152,6 @@ func TestReInitAddsTheNewHooksExactlyOnce(t *testing.T) {
 		}
 	}
 
-	// The developer's own hook is still there.
 	var foreign bool
 	for _, entry := range settings.Hooks["PostToolUse"] {
 		for _, h := range entry.Hooks {

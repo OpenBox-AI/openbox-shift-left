@@ -67,8 +67,9 @@ type realPrompter struct {
 
 func (p *realPrompter) Printf(format string, a ...any) { fmt.Fprintf(p.out, format, a...) }
 
-// isTerminal reports whether stdin is an interactive terminal. X/term asks the
-// OS directly.
+// isTerminal term.IsTerminal, NOT os.Stdin.Stat(): on Windows a console handle
+// sets ModeCharDevice but not ModeDevice (golang/go#23123), so the stdlib mode
+// check silently misjudges a real console there. X/term asks the OS directly.
 func (p *realPrompter) isTerminal() bool {
 	return p.in != nil && term.IsTerminal(int(p.in.Fd()))
 }

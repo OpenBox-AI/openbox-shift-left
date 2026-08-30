@@ -12,24 +12,12 @@ import (
 	"testing"
 )
 
-// forbiddenCalls are the ways this module could start resolving a credential,
-// keyed by IMPORT PATH rather than by the identifier at the call site. Keying on
-// the identifier is what an alias defeats: `import os2 "os"` then `os2.Getenv(…)`
-// presents a selector whose package name matches nothing.
-//
-// syscall and io/ioutil are here because they are the same capability under
-// other names — syscall.Environ() takes no arguments and returns the whole
-// environment, so a guard watching only os.Getenv would not see it.
 var forbiddenCalls = map[string][]string{
 	"os":        {"Getenv", "LookupEnv", "Environ", "ReadFile", "Open", "OpenFile", "ReadDir", "UserHomeDir", "UserConfigDir"},
 	"syscall":   {"Getenv", "Environ", "Open", "Read"},
 	"io/ioutil": {"ReadFile", "ReadDir"},
 }
 
-// forbiddenLiterals are credential coordinates. Matching is case-insensitive:
-// the same env var spelled in lower case is the same read. This is the weaker of
-// the two checks — it can only catch names it already knows — which is why the
-// call check is keyed on resolved imports rather than leaning on this list.
 var forbiddenLiterals = []string{
 	"ANTHROPIC_API_KEY",
 	"ANTHROPIC_AUTH_TOKEN",
@@ -40,26 +28,16 @@ var forbiddenLiterals = []string{
 	"api_key",
 }
 
-// guardHit is one reason a source file failed the guard.
 type guardHit struct {
 	pos  string
 	what string
 }
 
 // scanSource is the ONE implementation of the credential-read check.
-//
-// Both the guard and its mutation control call this, deliberately: a control
-// that re-implemented the walk would keep validating the old logic after the
-// real check was strengthened, and go on reporting green. That is the same drift
-// this repo already fixed by building `doctor`'s duplicate-hook warning and
-// `init`'s repair on one shared classifier, so the check and the fix cannot
-// disagree about what they cover.
 func scanSource(fset *token.FileSet, file *ast.File) []guardHit {
 	var hits []guardHit
 	at := func(n ast.Node) string { return fset.Position(n.Pos()).String() }
 
-	// Resolve the identifier each import is actually used under, so an alias is
-	// followed rather than missed.
 	bindings := map[string]string{}
 	for _, spec := range file.Imports {
 		importPath := strings.Trim(spec.Path.Value, `"`)
@@ -70,8 +48,6 @@ func scanSource(fset *token.FileSet, file *ast.File) []guardHit {
 		if spec.Name != nil {
 			switch spec.Name.Name {
 			case ".":
-				// A dot-import erases the qualifier, so no selector-based check
-				// can see through it. Refuse the construct instead of trying.
 				hits = append(hits, guardHit{at(spec), fmt.Sprintf("dot-import of %q erases the package qualifier", importPath)})
 				continue
 			case "_":
@@ -116,9 +92,7 @@ func scanSource(fset *token.FileSet, file *ast.File) []guardHit {
 }
 
 // moduleSources returns every non-test Go file in this module, walking
-// subdirectories rather than globbing one level. The module is flat today; a
-// guard that assumed it stays flat would silently stop covering the module the
-// first time it grew an internal package.
+// subdirectories rather than globbing one level.
 func moduleSources(t *testing.T) []string {
 	t.Helper()
 	var out []string
@@ -146,25 +120,6 @@ func moduleSources(t *testing.T) []string {
 
 // TestGatewayReadsNoCredential is the guard that keeps auth handling from
 // creeping back in, in the same spirit as the registry-import guard in cli/.
-// Requirement: the module contains no credential resolution path — no env read,
-// no file read.
-//
-// One stdlib exception is deliberate and named here so it is not mistaken for an
-// oversight: http.ProxyFromEnvironment reads HTTP_PROXY/HTTPS_PROXY/NO_PROXY
-// inside net/http. Those are the developer's own proxy coordinates, not a
-// provider credential, and honouring them is what lets the relay work behind a
-// corporate proxy.
-//
-// Scope: this scans this SUBTREE's own non-test files, and the import allowlist
-// is what makes that sufficient rather than lucky — with no external import
-// reachable, there is no third-party package for a credential read to hide in.
-//
-// That allowlist lives in internal/depguard now, with the other four. It used to
-// be duplicated here, and the two copies had already drifted: this file's
-// moduleSources skips _test.go (correctly — the fixtures below contain credential
-// literals on purpose), so the local copy could not see an unreviewed import
-// added in a test file, while depguard's walk can. Two allowlists for one subtree,
-// one of them strictly weaker, is the shape this repo already paid for once.
 func TestGatewayReadsNoCredential(t *testing.T) {
 	for _, path := range moduleSources(t) {
 		fset := token.NewFileSet()
@@ -177,16 +132,13 @@ func TestGatewayReadsNoCredential(t *testing.T) {
 		}
 	}
 
-	// The guard is only evidence if it is actually looking at the relay.
 	if _, err := os.Stat("proxy.go"); err != nil {
 		t.Fatalf("proxy.go not found, so the guard is not covering the relay: %v", err)
 	}
 }
 
 // TestGuardCatchesACredentialRead is the mutation control: a guard that cannot
-// fail is not a guard. It drives scanSource — the same function the guard uses —
-// with source that does read a credential, including the evasions a name-keyed
-// or case-sensitive check would miss.
+// fail is not a guard.
 func TestGuardCatchesACredentialRead(t *testing.T) {
 	cases := []struct {
 		name string

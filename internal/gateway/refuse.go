@@ -9,7 +9,6 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/internal/client"
 )
 
-// RefusalStatus / refusalErrorType are the provisional defaults (probe A).
 const (
 	refusalStatus    = http.StatusForbidden
 	refusalErrorType = "openbox_policy_refusal"
@@ -61,9 +60,9 @@ const (
 		"decision could be obtained — the control plane was unreachable. This is an OUTAGE, " +
 		"not a policy denial, and it is refused deliberately: the gateway has no offline grace."
 
-	// reasonCallerGone is NOT an outage, and separating the two is the whole
-	// point: a developer pressing Esc cancels the request context, so every
-	// interrupted turn used to produce a stored record blaming the control plane.
+	// reasonCallerGone decision.Unreachable exists so an operator can tell a
+	// denial from an outage, and this is the third case it must not be confused
+	// with.
 	reasonCallerGone = "OpenBox governance: this model call was not completed because the caller " +
 		"went away before a governance decision arrived. Nothing was forwarded, and this is " +
 		"neither a policy denial nor a control-plane outage."
@@ -122,10 +121,6 @@ type refusalBodyInfo struct {
 }
 
 // WriteRefusal renders a refused decision to the caller.
-//
-// Never leave a refusal unrendered: an unwritten refusal is a forward, so a
-// path that decides to refuse and then returns without writing has allowed the
-// call it just denied.
 func WriteRefusal(w http.ResponseWriter, d Decision) {
 	WriteRefusalAs(w, d, DefaultRefusalShape())
 }

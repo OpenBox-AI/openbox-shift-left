@@ -2,11 +2,6 @@ package client
 
 import "testing"
 
-// The wire `status` field. Its whole value is that core compares it against one
-// literal, so these tests are about the two ways it can be wrong without
-// looking wrong: a value core scores as a failure, and a value on an event type
-// where the column means something else.
-
 func statusEvent(t EventType, status string) DevEvent {
 	ev := DevEvent{
 		SchemaVersion: SchemaVersion,
@@ -28,9 +23,7 @@ func statusEvent(t EventType, status string) DevEvent {
 	return ev
 }
 
-// A completed tool call reports the literal core reads. Asserted on the decoded
-// wire payload rather than on the DevEvent, because the DevEvent field is an
-// input and the wire value is the contract.
+// TestStatusOnToolResult a completed tool call reports the literal core reads.
 func TestStatusOnToolResult(t *testing.T) {
 	for _, want := range []string{StatusCompleted, StatusFailed} {
 		p := decodePayload(t, statusEvent(EventToolResult, want))
@@ -40,9 +33,10 @@ func TestStatusOnToolResult(t *testing.T) {
 	}
 }
 
-// The exact bytes core compares against. Spelled as literals here, deliberately
-// NOT as the constants, so renaming a constant cannot silently rename the wire
-// value: this test is the second, independent copy of the contract.
+// TestStatusLiteralsMatchTheConsumer the exact bytes core compares against.
+// Spelled as literals here, deliberately NOT as the constants, so renaming a
+// constant cannot silently rename the wire value: this test is the second,
+// independent copy of the contract.
 func TestStatusLiteralsMatchTheConsumer(t *testing.T) {
 	if StatusCompleted != "completed" {
 		t.Errorf("StatusCompleted = %q; openbox-core compares against \"completed\" "+
@@ -53,10 +47,8 @@ func TestStatusLiteralsMatchTheConsumer(t *testing.T) {
 	}
 }
 
-// A value outside the enum is DROPPED, not forwarded. Core treats anything that
-// is not "completed" as a failure, so forwarding "success" would report 0%
-// success for calls that all succeeded — indistinguishable from the bug this
-// field fixes, but with a plausible-looking payload.
+// TestStatusOutsideTheVocabularyIsDropped a value outside the enum is dropped,
+// not forwarded.
 func TestStatusOutsideTheVocabularyIsDropped(t *testing.T) {
 	for _, bad := range []string{"success", "COMPLETED", "Completed", "ok", "error", "complete", " completed"} {
 		m := decodeRaw(t, statusEvent(EventToolResult, bad))
@@ -66,10 +58,10 @@ func TestStatusOutsideTheVocabularyIsDropped(t *testing.T) {
 	}
 }
 
-// Scope. payload.status is copied into the row's workflow_status column for ANY
-// event type (openbox-core activities/governance/storage_event.go:417), so a
-// status on a lifecycle event overwrites a genuinely workflow-scoped field with
-// a tool outcome. The client refuses even when an adapter sets it.
+// TestStatusRidesToolResultsOnly scope. Payload.status is copied into the
+// row's workflow_status column for ANY event type (openbox-core
+// activities/governance/storage_event.go:417), so a status on a lifecycle
+// event overwrites a genuinely workflow-scoped field with a tool outcome.
 func TestStatusRidesToolResultsOnly(t *testing.T) {
 	for _, et := range []EventType{
 		EventSessionStarted, EventSessionEnded, EventPromptSubmitted, EventDeploy,
@@ -82,11 +74,8 @@ func TestStatusRidesToolResultsOnly(t *testing.T) {
 	}
 }
 
-// Not content (INV-2): a two-literal enum derived from which hook fired cannot
-// encode anything, so it is not gated. Emit's stripContent is what runs with
-// capture off, and this asserts it leaves status alone — the field must be
-// byte-identical in both postures or Tool Health would depend on a privacy
-// setting.
+// TestStatusSurvivesContentStripping not content (INV-2): a two-literal enum
+// derived from which hook fired cannot encode anything, so it is not gated.
 func TestStatusSurvivesContentStripping(t *testing.T) {
 	ev := statusEvent(EventToolResult, StatusFailed)
 	ev.Content = &Content{ToolInput: "rm -rf /tmp/x"}
@@ -96,8 +85,6 @@ func TestStatusSurvivesContentStripping(t *testing.T) {
 		t.Errorf("status = %v after stripContent, want %q — status is structural, not gated",
 			stripped["status"], StatusFailed)
 	}
-	// And the gated content really was removed, or the assertion above would
-	// pass for a payload that stripped nothing at all.
 	if in, _ := stripped["activity_input"].(map[string]any); in != nil {
 		if _, leaked := in["command"]; leaked {
 			t.Errorf("stripContent left the gated command in activity_input: %v", in)

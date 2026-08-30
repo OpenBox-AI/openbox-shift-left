@@ -17,7 +17,6 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/internal/provider"
 )
 
-// shellTarget is a high-risk (shell) tool call, the class the gate escalates.
 type shellTarget struct{}
 
 func (shellTarget) SessionID() string          { return "sess-1" }
@@ -39,8 +38,6 @@ func (shellTarget) DevEvent(*client.Content) (client.DevEvent, bool) {
 	}, true
 }
 
-// approvalGovernor escalates to REQUIRE_APPROVAL and then answers polls from a
-// scripted sequence — the shape of the whole Part-2 flow in one fake.
 type approvalGovernor struct{ *fakeGovernor }
 
 func (g approvalGovernor) Emit(context.Context, client.DevEvent) (client.Evaluation, error) {
@@ -51,9 +48,6 @@ func (g approvalGovernor) Emit(context.Context, client.DevEvent) (client.Evaluat
 	}, nil
 }
 
-// runGate exercises the whole gate with Tier-2 on and no local bundle (so
-// Tier-1 fail-opens and the call escalates), and returns what was written to
-// the provider plus the decision the audit saw.
 func runGate(t *testing.T, g *fakeGovernor, holdMS string) (string, decision.Decision) {
 	t.Helper()
 	isolateConfig(t)
@@ -78,8 +72,9 @@ func runGate(t *testing.T, g *fakeGovernor, holdMS string) (string, decision.Dec
 	return out.String(), recorded
 }
 
-// The happy path of the whole design: the request is filed, an approver answers
-// inside the hold, and the developer sees nothing — the tool call proceeds.
+// TestGate_ApprovedDuringTheHoldProceeds the happy path of the whole design:
+// the request is filed, an approver answers inside the hold, and the developer
+// sees nothing; the tool call proceeds.
 func TestGate_ApprovedDuringTheHoldProceeds(t *testing.T) {
 	expiry := time.Now().Add(30 * time.Minute)
 	g := &fakeGovernor{replies: []func() (client.ApprovalStatus, error){
@@ -109,8 +104,9 @@ func TestGate_RejectedDuringTheHoldDenies(t *testing.T) {
 	}
 }
 
-// OD-E9-1: budget exhausted with the request still undecided denies — never a
-// silent allow, and never the provider's self-approval prompt.
+// TestGate_UndecidedApprovalDenies oD-E9-1: budget exhausted with the request
+// still undecided denies; never a silent allow, and never the provider's self-
+// approval prompt.
 func TestGate_UndecidedApprovalDenies(t *testing.T) {
 	g := &fakeGovernor{replies: []func() (client.ApprovalStatus, error){pending(time.Now().Add(30 * time.Minute))}}
 	out, rec := runGate(t, g, "600")
@@ -128,9 +124,10 @@ func TestGate_UndecidedApprovalDenies(t *testing.T) {
 	}
 }
 
-// The handoff between the two tiers: an exhausted hold leaves the marker
-// standing so the background watcher owns the tail, while a hold that answered
-// takes it away so nobody announces an outcome the call already saw.
+// TestGate_MarkerHandoffToTheWatcher the handoff between the two tiers: an
+// exhausted hold leaves the marker standing so the background watcher owns the
+// tail, while a hold that answered takes it away so nobody announces an
+// outcome the call already saw.
 func TestGate_MarkerHandoffToTheWatcher(t *testing.T) {
 	expiry := time.Now().Add(30 * time.Minute)
 	key := client.ApprovalKeyFor(mustDevEvent(t))
@@ -161,14 +158,12 @@ func mustDevEvent(t *testing.T) client.DevEvent {
 	return ev
 }
 
-// degradedGovernor cannot escalate, so nothing is ever filed.
 type degradedGovernor struct{ *fakeGovernor }
 
 func (g degradedGovernor) Emit(context.Context, client.DevEvent) (client.Evaluation, error) {
 	return client.Evaluation{}, client.ErrDelivery
 }
 
-// countingGovernor records how many times the gate asked for a verdict.
 type countingGovernor struct {
 	*fakeGovernor
 	emits *int32
@@ -179,15 +174,9 @@ func (g countingGovernor) Emit(context.Context, client.DevEvent) (client.Evaluat
 	return client.Evaluation{}, client.ErrDelivery
 }
 
-// The gate must not retry a failed evaluation. It runs on EVERY gated tool call
-// since that decision, so a retry loop here would turn one control-plane hiccup
-// into a client-side amplifier — every developer's every tool call hammering a
-// struggling core, and each call delayed by the full retry sequence while doing
-// it. A failed evaluation applies the org's failure policy and returns.
-//
-// Stated at this layer deliberately: the transport has its own bounded retry,
-// which is a different decision made in a different place. What is pinned here
-// is that the GATE asks exactly once.
+// TestGate_DoesNotRetryAFailedEvaluation the gate must not retry a failed
+// evaluation. Stated at this layer deliberately: the transport has its own
+// bounded retry, which is a different decision made in a different place.
 func TestGate_DoesNotRetryAFailedEvaluation(t *testing.T) {
 	isolateConfig(t)
 	isolateMarkers(t)
@@ -214,20 +203,3 @@ func TestGate_DoesNotRetryAFailedEvaluation(t *testing.T) {
 			"gate amplifies a core outage across every tool call of every session", n)
 	}
 }
-
-// A REQUIRE_APPROVAL that survived a DEGRADED escalation was never sent, so
-// there is no record to poll for. Holding on it would spend the entire budget
-// on not-founds and then deny a call the org only asked to prompt about.
-// TestGate_DoesNotHoldForAnUnfiledApproval is deleted with the local
-// evaluator.
-//
-// It covered a state that can no longer exist: a LOCAL bundle returning
-// REQUIRE_APPROVAL while the escalation that would file it could not deliver,
-// so the gate held for a record nobody had created — spending the whole budget
-// on not-founds and then denying. There is no local verdict now, so a
-// REQUIRE_APPROVAL can only come from the server, which means it was filed by
-// definition.
-//
-// The guard that outlived it is in the gate itself and still reads `dec.Source
-// == SourceEvaluate` before holding, so a hold still requires a server verdict
-// rather than merely a REQUIRE_APPROVAL-shaped decision.

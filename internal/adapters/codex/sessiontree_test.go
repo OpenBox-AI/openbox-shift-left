@@ -5,13 +5,10 @@ import (
 	"time"
 )
 
-// E8-S4. Codex's app-server rule is that a forked thread keeps the root's
-// session id, so the hook payload's session_id is the right OpenBox session
-// identity either way; what the payload cannot tell us is *which* thread we are
-// on. The hook process inherits that as CODEX_THREAD_ID, and when it differs
-// from session_id the run is a fork — the one case where the git trailer
-// (attributed by thread id) and the event stream (keyed by root session id)
-// would otherwise not join up.
+// TestSessionTree_ForkRecordsBothIDs e8-S4. Codex's app-server rule is that a
+// forked thread keeps the root's session id, so the hook payload's session_id
+// is the right OpenBox session identity either way; what the payload cannot
+// tell us is *which* thread we are on.
 func TestSessionTree_ForkRecordsBothIDs(t *testing.T) {
 	m := testMapper()
 	m.ThreadID = "thread-fork-9"
@@ -37,8 +34,9 @@ func TestSessionTree_ForkRecordsBothIDs(t *testing.T) {
 	}
 }
 
-// An unforked run — the ambient thread id equals the session id, or no Codex
-// env at all — must be byte-identical to before the story: no extra keys.
+// TestSessionTree_UnforkedEmitsNothing an unforked run; the ambient thread id
+// equals the session id, or no Codex env at all; must be byte-identical to
+// before the story: no extra keys.
 func TestSessionTree_UnforkedEmitsNothing(t *testing.T) {
 	for name, threadID := range map[string]string{
 		"root thread (ids equal)": "sess-1",
@@ -60,14 +58,13 @@ func TestSessionTree_UnforkedEmitsNothing(t *testing.T) {
 	}
 }
 
-// A fork's events must not collide with the root's under the idempotency
-// derivation (INV-5): same session, same tool, same instant, different thread.
+// TestSessionTree_ForkEventIDsDoNotCollide a fork's events must not collide
+// with the root's under the idempotency derivation (INV-5): same session, same
+// tool, same instant, different thread.
 func TestSessionTree_ForkEventIDsDoNotCollide(t *testing.T) {
 	payload := func() *HookEvent {
 		return &HookEvent{SessionID: "sess-1", ToolName: "Bash", PermissionMode: "default"}
 	}
-	// Deliberately not testMapper(): that pins NewID, which would bypass the
-	// deterministic derivation this test is about.
 	derivingMapper := func(threadID string) Mapper {
 		m := NewMapper(Identity{DeveloperDID: testDID})
 		m.Now = func() time.Time { return time.Date(2026, 7, 23, 12, 0, 0, 0, time.UTC) }
@@ -85,8 +82,8 @@ func TestSessionTree_ForkEventIDsDoNotCollide(t *testing.T) {
 	}
 }
 
-// The ids are externally influenced, so they are bounded like every other
-// identifier before egress (maxIdentLen).
+// TestSessionTree_IdentifiersBounded the ids are externally influenced, so
+// they are bounded like every other identifier before egress (maxIdentLen).
 func TestSessionTree_IdentifiersBounded(t *testing.T) {
 	long := ""
 	for len(long) < maxIdentLen*2 {

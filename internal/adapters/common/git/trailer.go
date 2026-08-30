@@ -51,9 +51,11 @@ func (g Git) run(args ...string) ([]byte, error) {
 }
 
 // StampMessageFile stamps an `OpenBox-Session:` trailer for each session id
-// onto the commit message at msgFile, idempotently and additively: Ids are
-// validated (validateSessionID) before reaching git: empty, over-long, multi-
-// line, and secret-shaped values are dropped, never stamped (INV-1).
+// onto the commit message at msgFile, idempotently and additively:
+//   - `--if-missing=add` first session id creates the trailer block.
+//   - `--if-exists=addIfDifferent` a distinct id is appended as a new line
+//     (multi-session fan-in); an id already present is not duplicated; this is
+//     what makes re-fire and `git commit --amend` safe.
 func (g Git) StampMessageFile(msgFile string, sessions []string) error {
 	if msgFile == "" {
 		return fmt.Errorf("stamp: empty message file path")
@@ -175,6 +177,10 @@ func validSessionIDs(sessions []string) []string {
 
 // ValidateSessionID enforces that only an opaque, single-line, non-secret id
 // is ever written into a commit (INV-1 + trailer-injection safety).
+//   - Empty / whitespace-only,
+//   - Anything over MaxSessionIDLen,
+//   - A value containing a newline, carriage return, or NUL; which could
+//     inject extra trailer lines or split the message,
 func ValidateSessionID(id string) error {
 	if strings.TrimSpace(id) == "" {
 		return fmt.Errorf("empty session id")

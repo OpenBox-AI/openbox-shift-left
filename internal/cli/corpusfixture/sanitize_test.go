@@ -6,22 +6,11 @@ import (
 	"testing"
 )
 
-// sanitize_test.go — the sanitizer's own test, written before the sanitizer.
-//
-// The phase this belongs to states the rule plainly: sanitization is a build
-// step with its own test, not a manual pass, because an unsanitized fixture is a
-// credential leak into git history and git history is the hardest place to purge
-// anything from.
-//
-// So this file asserts two directions that are easy to conflate. Sanitize must
-// REMOVE every real identity, and it must PRESERVE every field a consumer parses
-// — because a fixture that is clean and inert proves nothing, and would look
-// exactly like a fixture that works.
+// Sanitize_test.go; the sanitizer's own test, written before the sanitizer.
+// Sanitize must remove every real identity, and it must preserve every field a
+// consumer parses; because a fixture that is clean and inert proves nothing,
+// and would look exactly like a fixture that works.
 
-// unsanitized is one OTLP log record in the exact shape the corpus carries:
-// attributes as a [{key,value:{stringValue}}] list, not a plain object. A
-// sanitizer written against plain objects passes a naive test and leaves every
-// real corpus attribute untouched, so the shape is the fixture.
 const unsanitized = `{
   "resourceLogs": [{
     "resource": {"attributes": [
@@ -49,7 +38,6 @@ const unsanitized = `{
   }]
 }`
 
-// attrOf reads one flattened attribute out of the OTLP shape.
 func attrOf(t *testing.T, raw []byte, key string) string {
 	t.Helper()
 	var doc struct {
@@ -115,15 +103,8 @@ func TestSanitizeRemovesEveryRealIdentity(t *testing.T) {
 	}
 }
 
-// TestSanitizePreservesWhatTheMapperParses is the other direction, and it is the
-// one a sanitizer quietly fails.
-//
-// The telemetry mapper DROPS a record whose session id or request id fails its
-// charset check (safeSessionID/safeRequestID reject ':' and '/' among others),
-// and it drops a record with no model or no duration. A placeholder like
-// "<redacted>" or "REDACTED:user" therefore turns every replay fixture into a
-// dropped record — after which the replay suite passes, asserts nothing about
-// the mapping, and looks identical to a suite that works.
+// TestSanitizePreservesWhatTheMapperParses is the other direction, and it is
+// the one a sanitizer quietly fails.
 func TestSanitizePreservesWhatTheMapperParses(t *testing.T) {
 	out, err := Sanitize([]byte(unsanitized))
 	if err != nil {
@@ -151,10 +132,7 @@ func TestSanitizePreservesWhatTheMapperParses(t *testing.T) {
 	}
 }
 
-// identifierSafe mirrors the mapper's own charset rule. It is duplicated rather
-// than imported because this package must not depend on the mapper to state what
-// a usable placeholder is — if the two ever disagree, the replay fixtures stop
-// exercising the mapping and this test is the only thing that would say so.
+// identifierSafe mirrors the mapper's own charset rule.
 func identifierSafe(s string) bool {
 	if s == "" || s == "." || s == ".." {
 		return false
@@ -185,8 +163,8 @@ func TestSanitizeIsIdempotent(t *testing.T) {
 }
 
 // TestScanCatchesWhatSanitizeMissed is the assertion half. Scan is what runs
-// against the COMMITTED fixtures forever; Sanitize runs once, by hand, against a
-// corpus that is not in this repository. So Scan must be red on unsanitized
+// against the committed fixtures forever; Sanitize runs once, by hand, against
+// a corpus that is not in this repository. So Scan must be red on unsanitized
 // input on its own, without having been told what Sanitize did.
 func TestScanCatchesWhatSanitizeMissed(t *testing.T) {
 	v := Scan([]byte(unsanitized))
@@ -203,8 +181,8 @@ func TestScanCatchesWhatSanitizeMissed(t *testing.T) {
 	}
 }
 
-// TestScanCatchesEachSentinelClassAlone stops the previous test from passing for
-// one reason while every other class is unchecked.
+// TestScanCatchesEachSentinelClassAlone stops the previous test from passing
+// for one reason while every other class is unchecked.
 func TestScanCatchesEachSentinelClassAlone(t *testing.T) {
 	for name, doc := range map[string]string{
 		"email":        `{"a":"someone@example.com"}`,

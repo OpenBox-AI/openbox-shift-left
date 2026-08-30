@@ -1,10 +1,11 @@
 // Package provider is the shared SPI between the `openbox` CLI and the per-
-// tool adapters (Claude Code, Codex, Cursor). It has two halves: Until an
-// adapter is built, its slot is a Stub: Available()==false, Plan() only prints
-// the manual config the user must apply, and Install() returns ErrNotBuilt so
-// `init` exits non-zero for that provider. An Installer receives only non-
-// secret install-time context (the DID, URLs and posture); it must never
-// receive or embed a credential value.
+// tool adapters (Claude Code, Codex, Cursor). Until an adapter is built, its
+// slot is a Stub: Available()==false, Plan() only prints the manual config the
+// user must apply, and Install() returns ErrNotBuilt so `init` exits non-zero
+// for that provider. An Installer receives only non-secret install-time
+// context (the DID, URLs and posture); it must never receive or embed a
+// credential value.
+//   - Installer; install time: what `openbox init` delegates to an adapter to
 package provider
 
 import (

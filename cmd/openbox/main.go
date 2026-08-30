@@ -36,8 +36,6 @@ type app struct {
 	getenv         func(string) string
 	newRegistrar   func(baseURL, credential, clientID string) devinit.Registrar
 
-	// gatewayReady and gatewayCtx exist so a test can drive the real `gateway`
-	// command instead of a stand-in.
 	gatewayReady func(net.Addr)
 	gatewayCtx   context.Context
 
@@ -175,8 +173,8 @@ func displayOrUnset(s string) string {
 	return s
 }
 
-// runHook is the unified observe-only hook entrypoint: `openbox hook
-// <provider> <event>`.
+// runHook iNV-3 (the reason this does not go through errorf/usage): the hook
+// path must always return exitOK; a non-zero exit blocks the tool call.
 func (a *app) runHook(args []string) (code int) {
 	code = exitOK
 	// Report it on stderr, which the tool shows as a diagnostic and never parses

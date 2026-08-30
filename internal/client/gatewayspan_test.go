@@ -6,8 +6,6 @@ import (
 	"testing"
 )
 
-// gatewayTurn is a gateway-observed model call, as the gateway would hand it over
-// after its own fingerprint -> redact -> cap pass.
 func gatewayTurn() DevEvent {
 	idx := 3
 	return DevEvent{
@@ -38,10 +36,7 @@ func gatewayTurn() DevEvent {
 }
 
 // TestGatewayAndHookTurnIDsNeverCollide is requirement 8, and it is checked by
-// CONSTRUCTION rather than by sampling. Both producers describe the same model
-// turn; core's dedupe is keyed on activity_id, so a collision would silently
-// absorb one as a duplicate of the other and half the evidence would disappear
-// with no error anywhere.
+// construction rather than by sampling.
 func TestGatewayAndHookTurnIDsNeverCollide(t *testing.T) {
 	idx := 3
 	hook := DevEvent{SessionID: "sess-1", EventType: EventTurnCompleted, TurnIndex: &idx}
@@ -56,7 +51,6 @@ func TestGatewayAndHookTurnIDsNeverCollide(t *testing.T) {
 	if hookID == gwID {
 		t.Fatalf("gateway and hook turn share activity_id %q", hookID)
 	}
-	// Namespaces, not luck: the separators are what keep them apart.
 	if !strings.Contains(hookID, ":turn:") {
 		t.Errorf("hook id %q lost its :turn: namespace", hookID)
 	}
@@ -64,7 +58,6 @@ func TestGatewayAndHookTurnIDsNeverCollide(t *testing.T) {
 		t.Errorf("gateway id %q lost its :gateway: namespace", gwID)
 	}
 
-	// And neither can collide with a tool call's id, which contains no colon.
 	toolID := activityIDFor(sampleEvent())
 	if strings.Contains(toolID, ":") {
 		t.Errorf("tool activity id %q now contains ':', so the namespace argument no longer holds", toolID)
@@ -75,7 +68,6 @@ func TestGatewayAndHookTurnIDsNeverCollide(t *testing.T) {
 		}
 	}
 
-	// A rollup turn is a third shape and must also stay disjoint.
 	rollup := turnActivityIDFor(DevEvent{SessionID: "sess-1", SessionRollup: true})
 	if rollup == gwID || rollup == hookID {
 		t.Errorf("rollup id %q collides", rollup)
@@ -83,9 +75,9 @@ func TestGatewayAndHookTurnIDsNeverCollide(t *testing.T) {
 }
 
 // TestGatewaySpanOnWireWithCaptureOn asserts on the bytes that are actually
-// POSTed, not on the struct. This repo has already shipped a defect where a field
-// was present on the struct and absent from the wire, so the wire is the only
-// assertion that counts.
+// POSTed, not on the struct. This repo has already shipped a defect where a
+// field was present on the struct and absent from the wire, so the wire is the
+// only assertion that counts.
 func TestGatewaySpanOnWireWithCaptureOn(t *testing.T) {
 	body, err := buildPayload(gatewayTurn())
 	if err != nil {
@@ -122,14 +114,12 @@ func TestGatewaySpanOnWireWithCaptureOn(t *testing.T) {
 	if s.HTTPMethod != "POST" || s.HTTPStatus != 200 {
 		t.Errorf("classification root fields wrong: method=%q status=%d", s.HTTPMethod, s.HTTPStatus)
 	}
-	// The KEY NAME is the assertion, not just the value. Core spells it
-	// `http_status_code`; the shorter `http_status` was silently dropped on
-	// ingest, and every test here passed while that was happening because they
-	// all asserted OUTBOUND bytes rather than the receiving type.
+	// Core spells it `http_status_code`; the shorter `http_status` was silently
+	// dropped on ingest, and every test here passed while that was happening
+	// because they all asserted outbound bytes rather than the receiving type.
 	if strings.Contains(string(body), `"http_status"`) {
 		t.Error(`span carries "http_status"; core's SpanData field is "http_status_code" and drops the other silently`)
 	}
-	// The fingerprint's only route into core: attributes, which survive ingest.
 	if s.Attributes["openbox.credential_fingerprint"] == nil {
 		t.Error("fingerprint absent from attributes — core has no credential_fingerprint field, so the top-level key alone is dropped and account binding can never match")
 	}
@@ -149,8 +139,6 @@ func TestGatewaySpanOnWireWithCaptureOn(t *testing.T) {
 		t.Errorf("response_body did not reach the wire: %q", s.ResponseBody)
 	}
 
-	// Requirement 4: core recomputes semantic_type from the ATTRIBUTES, so these
-	// are the keys that decide whether this classifies as llm_completion at all.
 	if s.Attributes["http.method"] != "POST" {
 		t.Errorf("attributes[http.method] = %v; core cannot classify without it", s.Attributes["http.method"])
 	}
@@ -167,9 +155,8 @@ func TestGatewaySpanOnWireWithCaptureOn(t *testing.T) {
 	}
 }
 
-// TestGatewaySpanContentGatedOffTheWire is the capture-OFF half, and it has to be
-// asserted wherever the ON half is. The headers are the highest-risk field this
-// client carries, so "the gate works" is not something to infer from the ON case.
+// TestGatewaySpanContentGatedOffTheWire is the capture-OFF half, and it has to
+// be asserted wherever the ON half is.
 func TestGatewaySpanContentGatedOffTheWire(t *testing.T) {
 	stripped := stripContent(gatewayTurn())
 	body, err := buildPayload(stripped)
@@ -178,15 +165,11 @@ func TestGatewaySpanContentGatedOffTheWire(t *testing.T) {
 	}
 	raw := string(body)
 
-	// Content is gone.
 	for _, marker := range []string{"claude-opus-4", "assistant", "Anthropic-Version", "2023-06-01", "req_upstream", "request_headers", "response_headers"} {
 		if strings.Contains(raw, marker) {
 			t.Errorf("capture is OFF but the wire still carries %q", marker)
 		}
 	}
-	// Derived evidence and classification keys REMAIN — an org must not be able
-	// to opt out of being identified, and a span core cannot classify is a span
-	// that silently stops feeding every llm_completion reader.
 	for _, marker := range []string{"credential_fingerprint", "a1b2c3d4e5f60718293a4b5c6d7e8f90", "http_method", "http.url"} {
 		if !strings.Contains(raw, marker) {
 			t.Errorf("capture is OFF and %q disappeared too; it is structural, not content", marker)
@@ -222,26 +205,12 @@ func TestHookTurnUnaffectedByTheGatewayPath(t *testing.T) {
 	if strings.Contains(raw, "credential_fingerprint") || strings.Contains(raw, "http_method") {
 		t.Error("a hook turn acquired gateway span fields")
 	}
-	// The assistant span still reaches the one reader that needs it, in the chat
-	// wrapper core's extractor unmarshals.
 	if !strings.Contains(raw, `\"choices\"`) {
 		t.Errorf("the assistant span's chat wrapper is gone; alignment would read nothing:\n%s", raw)
 	}
 }
 
-// TestGatewaySpanKeysMatchCoreSpanData pins the receiving contract by NAME.
-//
-// Every other test in this file asserts the bytes this client produces. That is
-// not the same as asserting the bytes core can READ: Go's encoding/json drops an
-// unrecognized key on Unmarshal without erroring, so a misspelled field is
-// invisible to outbound-byte assertions, to golden fixtures, and to mutation
-// drills alike. Two fields were being thrown away that way.
-//
-// The list below is transcribed from openbox-core's SpanData
-// (internal/content/governance.go). It is a copy, and a copy can go stale — but a
-// stale copy fails loudly here, whereas the alternative failed silently in
-// production. If core adds credential_fingerprint, move it out of attributes and
-// add it here.
+// TestGatewaySpanKeysMatchCoreSpanData pins the receiving contract by name.
 func TestGatewaySpanKeysMatchCoreSpanData(t *testing.T) {
 	coreKnows := map[string]bool{
 		"span_id": true, "trace_id": true, "parent_span_id": true, "name": true,
@@ -251,8 +220,6 @@ func TestGatewaySpanKeysMatchCoreSpanData(t *testing.T) {
 		"request_body": true, "response_body": true,
 		"semantic_type": true, "stage": true, "data": true, "hook_type": true,
 		"error": true, "http_method": true, "http_url": true, "http_status_code": true,
-		// Known-dropped, kept deliberately for the day core adds the field. Its
-		// working copy rides attributes["openbox.credential_fingerprint"].
 		"credential_fingerprint": true,
 	}
 

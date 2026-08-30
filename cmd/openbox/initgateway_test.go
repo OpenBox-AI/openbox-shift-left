@@ -13,18 +13,11 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/gatewayservice"
 )
 
-// stubSupervisor replaces the launchctl/systemctl calls, and optionally brings a
-// real listener up so the readiness probe has something to find.
 func stubSupervisor(t *testing.T, addr string, startFails bool) {
 	t.Helper()
 	origRun, origUID := run, currentUID
 	t.Cleanup(func() { run, currentUID = origRun, origUID })
 
-	// Route the unit write through the PATH-EXPLICIT writer for the duration of the
-	// test. Production uses kardianos/service, which ignores $HOME on darwin and
-	// would install a real launchd unit into the developer's home on every
-	// `go test` — see installUnitFn. Identical bytes either way; only the location
-	// differs, and here the location is the whole point.
 	origInstall, origUninstall := installUnitFn, uninstallUnitFn
 	t.Cleanup(func() { installUnitFn, uninstallUnitFn = origInstall, origUninstall })
 	installUnitFn = func(goos, homeDir, binPath, addr, upstream string, verbose bool) error {
@@ -61,7 +54,6 @@ func stubSupervisor(t *testing.T, addr string, startFails bool) {
 	}
 }
 
-// freeAddr reserves a loopback port and releases it, so the stub can bind it.
 func freeAddr(t *testing.T) string {
 	t.Helper()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
@@ -80,13 +72,10 @@ func skipUnlessSupervised(t *testing.T) {
 	}
 }
 
-// TestGatewayEnvIsNotWrittenWhenTheDaemonDoesNotStart is the safety property, and
-// it is the one that would actually hurt a developer.
-//
-// If ANTHROPIC_BASE_URL is written while nothing listens, a dead localhost fails
-// closed and EVERY model call on the machine fails — `init` would have broken the
-// developer's tool while printing success. So the env write is last and
-// conditional, and a failed start must leave the machine exactly as it was.
+// TestGatewayEnvIsNotWrittenWhenTheDaemonDoesNotStart is the safety property,
+// and it is the one that would actually hurt a developer. So the env write is
+// last and conditional, and a failed start must leave the machine exactly as
+// it was.
 func TestGatewayEnvIsNotWrittenWhenTheDaemonDoesNotStart(t *testing.T) {
 	memhttptest.RequireBind(t)
 	skipUnlessSupervised(t)
@@ -94,12 +83,10 @@ func TestGatewayEnvIsNotWrittenWhenTheDaemonDoesNotStart(t *testing.T) {
 	a, _, _ := testApp(nil)
 	stubSupervisor(t, "", true) // start fails
 
-	// freeAddr, NOT the production default. This hardcoded gateway.DefaultAddr
-	// ("127.0.0.1:8788"), so on any machine actually running `openbox gateway` —
-	// i.e. anyone dogfooding this feature — setupGateway returned at the
-	// port-occupied pre-check and never reached the failed-start branch this case
-	// is about. The assertion then failed on the wrong error and the CLI suite went
-	// red for exactly the developers most likely to run it.
+	// This hardcoded gateway.DefaultAddr ("127.0.0.1:8788"), so on any machine
+	// actually running `openbox gateway`; i.e. Anyone dogfooding this feature;
+	// setupGateway returned at the port-occupied pre-check and never reached the
+	// failed-start branch this case is about.
 	err := a.setupGateway(home, freeAddr(t), "https://api.anthropic.com", false)
 	if err == nil {
 		t.Fatal("setupGateway reported success though the daemon never started")
@@ -107,25 +94,20 @@ func TestGatewayEnvIsNotWrittenWhenTheDaemonDoesNotStart(t *testing.T) {
 	if _, present := gatewayservice.CurrentEnv(home); present {
 		t.Error("ANTHROPIC_BASE_URL was written with no gateway listening — every model call on this machine would now fail")
 	}
-	// The error has to say the machine still works, or a developer will assume
-	// the opposite and start undoing things.
 	if !strings.Contains(err.Error(), "NOT set") {
 		t.Errorf("the error does not say the env var was left alone: %v", err)
 	}
 }
 
 // TestGatewayEnvIsNotWrittenWhenTheListenerNeverComesUp is the other half: the
-// supervisor accepted the unit but nothing is listening. Accepting a unit is not
-// evidence that a process is serving.
+// supervisor accepted the unit but nothing is listening.
 func TestGatewayEnvIsNotWrittenWhenTheListenerNeverComesUp(t *testing.T) {
 	memhttptest.RequireBind(t)
 	skipUnlessSupervised(t)
 	home := t.TempDir()
 	a, _, _ := testApp(nil)
-	// Supervisor succeeds but starts nothing.
 	stubSupervisor(t, "", false)
 
-	// Shorten the wait: this test is about the branch, not about the timeout.
 	orig := waitForListenerFn
 	waitForListenerFn = func(string, time.Duration) bool { return false }
 	t.Cleanup(func() { waitForListenerFn = orig })
@@ -140,7 +122,7 @@ func TestGatewayEnvIsNotWrittenWhenTheListenerNeverComesUp(t *testing.T) {
 }
 
 // TestGatewaySetupWritesEnvOnlyAfterTheListenerIsUp is the happy path, and it
-// asserts the ORDER rather than only the outcome.
+// asserts the order rather than only the outcome.
 func TestGatewaySetupWritesEnvOnlyAfterTheListenerIsUp(t *testing.T) {
 	memhttptest.RequireBind(t)
 	skipUnlessSupervised(t)
@@ -156,7 +138,6 @@ func TestGatewaySetupWritesEnvOnlyAfterTheListenerIsUp(t *testing.T) {
 	if !present || v != "http://"+addr {
 		t.Errorf("env = %q, %v; want http://%s", v, present, addr)
 	}
-	// The unit exists too.
 	unit := gatewayservice.LaunchdPath(home)
 	if runtime.GOOS == "linux" {
 		unit = gatewayservice.SystemdPath(home)
@@ -164,8 +145,6 @@ func TestGatewaySetupWritesEnvOnlyAfterTheListenerIsUp(t *testing.T) {
 	if _, err := os.Stat(unit); err != nil {
 		t.Errorf("unit not written: %v", err)
 	}
-	// "listening" must be reported BEFORE the env line, because that is the order
-	// the safety property depends on.
 	s := out.String()
 	iListen, iEnv := strings.Index(s, "listening on"), strings.Index(s, gatewayservice.EnvKey)
 	if iListen < 0 || iEnv < 0 {
@@ -176,9 +155,9 @@ func TestGatewaySetupWritesEnvOnlyAfterTheListenerIsUp(t *testing.T) {
 	}
 }
 
-// TestRemoveGatewayUnsetsEnvBeforeRemovingTheDaemon is the reverse order, for the
-// mirror-image reason: removing the daemon first would leave a window where the
-// tool points at something gone and every model call fails.
+// TestRemoveGatewayUnsetsEnvBeforeRemovingTheDaemon is the reverse order, for
+// the mirror-image reason: removing the daemon first would leave a window
+// where the tool points at something gone and every model call fails.
 func TestRemoveGatewayUnsetsEnvBeforeRemovingTheDaemon(t *testing.T) {
 	memhttptest.RequireBind(t)
 	skipUnlessSupervised(t)
@@ -208,8 +187,8 @@ func TestRemoveGatewayUnsetsEnvBeforeRemovingTheDaemon(t *testing.T) {
 	}
 }
 
-// TestGatewaySetupRejectsANonLoopbackAddr keeps the phase 04 invariant reachable
-// from the install path, not just from the gateway package.
+// TestGatewaySetupRejectsANonLoopbackAddr keeps the phase 04 invariant
+// reachable from the install path, not just from the gateway package.
 func TestGatewaySetupRejectsANonLoopbackAddr(t *testing.T) {
 	home := t.TempDir()
 	a, _, _ := testApp(nil)
@@ -222,8 +201,8 @@ func TestGatewaySetupRejectsANonLoopbackAddr(t *testing.T) {
 	}
 }
 
-// TestGatewayFlagsAreMutuallyExclusive — asking to install and remove in one run
-// is a mistake worth naming rather than resolving by flag order.
+// TestGatewayFlagsAreMutuallyExclusive; asking to install and remove in one
+// run is a mistake worth naming rather than resolving by flag order.
 func TestGatewayFlagsAreMutuallyExclusive(t *testing.T) {
 	a, _, errb := testApp(nil)
 	if code := a.run([]string{"init", "--provider", "claude-code", "--gateway", "--remove-gateway"}); code != exitError {
@@ -234,21 +213,17 @@ func TestGatewayFlagsAreMutuallyExclusive(t *testing.T) {
 	}
 }
 
-// TestGatewayIsOffByDefault pins the opt-in decision. This redirects live model
-// traffic, so a plain `init` must not enable it — and if that default is ever
-// flipped, it should be a deliberate change to this test, not a silent one.
+// TestGatewayIsOffByDefault pins the opt-in decision. This redirects live
+// model traffic, so a plain `init` must not enable it; and if that default is
+// ever flipped, it should be a deliberate change to this test, not a silent
+// one.
 func TestGatewayIsOffByDefault(t *testing.T) {
 	a, out, errb := testApp(nil)
-	// `init -h` lists every flag with its default, which is the surface a
-	// developer actually reads. The flag package writes usage to stderr, so read
-	// both rather than assuming which.
 	a.run([]string{"init", "-h"})
 	help := out.String() + errb.String()
 	if !strings.Contains(help, "-gateway") {
 		t.Fatalf("--gateway is not listed in init's help:\n%s", help)
 	}
-	// A bool flag defaulting to true renders "(default true)"; false renders
-	// nothing. Assert the absence next to the flag's own description.
 	i := strings.Index(help, "-gateway")
 	window := help[i:min(i+400, len(help))]
 	if strings.Contains(window, "(default true)") {
@@ -266,16 +241,12 @@ func min(a, b int) int {
 	return b
 }
 
-// TestOccupiedPortIsRefusedRatherThanAdopted closes the gap the readiness probe
-// cannot: a bare TCP connect proves SOMETHING listens, not that it is ours.
-//
-// Without the pre-check, a foreign process holding the port means our gateway
-// fails to bind, the probe connects to the stranger, and init points the
-// developer's model traffic at an unknown local service while printing success.
+// TestOccupiedPortIsRefusedRatherThanAdopted closes the gap the readiness
+// probe cannot: a bare TCP connect proves something listens, not that it is
+// ours.
 func TestOccupiedPortIsRefusedRatherThanAdopted(t *testing.T) {
 	memhttptest.RequireBind(t)
 	skipUnlessSupervised(t)
-	// A stranger on the port, up before init runs.
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -307,14 +278,8 @@ func TestOccupiedPortIsRefusedRatherThanAdopted(t *testing.T) {
 	}
 }
 
-// TestReInstallReplacesOurOwnGatewayInsteadOfRefusing is the "test the SECOND
+// TestReInstallReplacesOurOwnGatewayInsteadOfRefusing is the "test the second
 // invocation" rule this repo already learned once, applied to the gateway.
-//
-// The port pre-check could not tell our own daemon from a stranger, so the second
-// `init --gateway` on any gateway-enabled machine returned BEFORE WriteUnit — and
-// a unit written by an older binary could never be refreshed. That is the same
-// stale-path failure `init` repairs for hook registrations, and the remedy its own
-// error recommends ("re-run init") was the thing that could not work.
 func TestReInstallReplacesOurOwnGatewayInsteadOfRefusing(t *testing.T) {
 	memhttptest.RequireBind(t)
 	skipUnlessSupervised(t)
@@ -323,7 +288,6 @@ func TestReInstallReplacesOurOwnGatewayInsteadOfRefusing(t *testing.T) {
 	a, out, _ := testApp(nil)
 	stubSupervisor(t, addr, false)
 
-	// First install writes the unit and (via the stub) brings a listener up.
 	if err := a.setupGateway(home, addr, "https://api.anthropic.com", false); err != nil {
 		t.Fatalf("first install: %v", err)
 	}
@@ -331,15 +295,11 @@ func TestReInstallReplacesOurOwnGatewayInsteadOfRefusing(t *testing.T) {
 		t.Fatal("first install did not write the env var")
 	}
 
-	// Now the port IS occupied — by us. A re-run must replace, not refuse.
+	// A re-run must replace, not refuse.
 	occupied, _ := portOccupied(addr)
 	if !occupied {
 		t.Skip("the stub listener did not stay up; this case needs a held port")
 	}
-	// The stubbed supervisor cannot actually stop its own listener — `run` is a
-	// no-op — so the socket-clear wait is stubbed too. What is under test is
-	// replace-vs-REFUSE: that setupGateway gets past the port pre-check and
-	// rewrites the unit, not that launchctl works.
 	origFree := waitForPortFreeFn
 	waitForPortFreeFn = func(string, time.Duration) bool { return true }
 	t.Cleanup(func() { waitForPortFreeFn = origFree })
@@ -352,15 +312,14 @@ func TestReInstallReplacesOurOwnGatewayInsteadOfRefusing(t *testing.T) {
 	}
 }
 
-// TestAForeignProcessOnThePortIsStillRefused is the other half: the ownership test
-// must not become a licence to stop whatever is listening. Over-refuse, never
-// over-terminate.
+// TestAForeignProcessOnThePortIsStillRefused is the other half: the ownership
+// test must not become a licence to stop whatever is listening. Over-refuse,
+// never over-terminate.
 func TestAForeignProcessOnThePortIsStillRefused(t *testing.T) {
 	memhttptest.RequireBind(t)
 	skipUnlessSupervised(t)
 	home := t.TempDir()
 
-	// Something else holds a port, and no unit of ours names it.
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -382,14 +341,9 @@ func TestAForeignProcessOnThePortIsStillRefused(t *testing.T) {
 	}
 }
 
-// TestAFailedInstallLeavesNoUnitBehind is setupGateway's own documented promise —
-// "any failure leaves the machine unconfigured rather than half-configured".
-//
-// Every failure after WriteUnit broke it: the unit stayed on disk with
-// KeepAlive/Restart=always, so the supervisor kept restart-looping a gateway
-// nobody was told about, `init` still exited 0 (main.go downgrades the error to a
-// warning), and the error's own remedy — re-run init — was blocked by the port
-// pre-check seeing that very daemon.
+// TestAFailedInstallLeavesNoUnitBehind is setupGateway's own documented
+// promise; "any failure leaves the machine unconfigured rather than half-
+// configured".
 func TestAFailedInstallLeavesNoUnitBehind(t *testing.T) {
 	memhttptest.RequireBind(t)
 	skipUnlessSupervised(t)
@@ -415,14 +369,9 @@ func TestAFailedInstallLeavesNoUnitBehind(t *testing.T) {
 	}
 }
 
-// TestUnitAddrMatchIsAWholeToken pins the ownership check that authorizes killing
-// whatever holds the port.
-//
-// A substring match made a shorter address match a longer one, so installing on
-// :878 while a stranger held it would decide the stranger was ours, unload the
-// WORKING gateway on :8788, and then fail — leaving ANTHROPIC_BASE_URL pointed at
-// a dead port. Over-refuse is the direction this check chose; over-terminate is
-// the one it must never take.
+// TestUnitAddrMatchIsAWholeToken pins the ownership check that authorizes
+// killing whatever holds the port. Over-refuse is the direction this check
+// chose; over-terminate is the one it must never take.
 func TestUnitAddrMatchIsAWholeToken(t *testing.T) {
 	const plist = "<string>--addr</string>\n<string>127.0.0.1:8788</string>\n"
 	const unitSystemd = `ExecStart=/usr/local/bin/openbox gateway --addr "127.0.0.1:8788"`

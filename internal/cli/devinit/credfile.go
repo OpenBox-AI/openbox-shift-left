@@ -12,7 +12,9 @@ type localCredentials struct {
 	privateKey string
 }
 
-// readLocalCredentials reads the two secrets from the credential file.
+// readLocalCredentials an unparseable file IS an error; silently treating it
+// as "not registered" would make the caller register a second agent while the
+// user's real credentials sat in a file with a typo.
 func readLocalCredentials(override string) (localCredentials, error) {
 	path, err := credentialPath(override)
 	if err != nil {

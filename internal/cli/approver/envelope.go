@@ -1,11 +1,9 @@
 // Package approver is the autonomous half of the approval tier: a bounded,
 // policy-first decider that works the same queue a human works (`openbox
 // approve`), under the approver's own credential.
-//
-//	decided automatically at all. Anything it does not cover is left for a
-//	human; never approved because nothing objected.
-//	consulted only for the classes the envelope marks consultable, and it may
-//	only NARROW: its deny is always honoured, its approve is honoured only
+//   - Bounded authority.
+//   - THE model IS never THE authority.
+//   - Every decision IS evidence.
 package approver
 
 import (

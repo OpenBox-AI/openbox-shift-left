@@ -18,9 +18,9 @@ import (
 
 const sessionHeader = "X-Claude-Code-Session-Id"
 
-// agentHeader scopes a call to a subagent. Unlike the session header it is
-// conditional; Claude Code emits it only when an agent context exists; so its
-// absence is normal and must never be treated as a fault.
+// agentHeader unlike the session header it is conditional; Claude Code emits
+// it only when an agent context exists; so its absence is normal and must
+// never be treated as a fault.
 const agentHeader = "X-Claude-Code-Agent-Id"
 
 const warnInterval = time.Hour
@@ -149,7 +149,9 @@ func (e *Emitter) Emit(ctx context.Context, c gateway.Captured) {
 	}
 }
 
-// isModelCall reports whether a relayed call could be an inference request.
+// isModelCall deliberately permissive in the other direction; any POST counts,
+// including one to a path this code has never heard of; because the failure
+// directions are not symmetric.
 func isModelCall(c gateway.Captured) bool {
 	return strings.EqualFold(c.HTTPMethod, http.MethodPost)
 }

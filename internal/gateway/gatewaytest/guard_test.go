@@ -7,8 +7,6 @@ import (
 	"testing"
 )
 
-// skipDirs are directories the scan does not descend into. Named at runtime so
-// the literal does not appear in the source.
 var skipDirs = map[string]bool{
 	"." + "git":    true,
 	"node_modules": true,
@@ -16,16 +14,6 @@ var skipDirs = map[string]bool{
 }
 
 // TestGatewaytestStaysTestOnly is the tripwire this package's doc promises.
-//
-// The package mutates the relay's upstream dial process-wide. That is exactly
-// what a test needs and exactly what production must never do — a production
-// caller could silently reroute every model call this machine makes, to anywhere,
-// and every byte-identity assertion in the repository would still pass because
-// they all measure the relay rather than where it dialled.
-//
-// `internal/` cannot enforce it here: the point of the package is to be reachable
-// from other modules. So this walk is the enforcement. Only NON-TEST files are an
-// error; every _test.go importer is the reason the package exists.
 func TestGatewaytestStaysTestOnly(t *testing.T) {
 	root := repoRoot(t)
 
@@ -34,7 +22,6 @@ func TestGatewaytestStaysTestOnly(t *testing.T) {
 
 	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
-			// An unreadable subtree must not silently shrink the scan.
 			return err
 		}
 		if d.IsDir() {
@@ -64,10 +51,11 @@ func TestGatewaytestStaysTestOnly(t *testing.T) {
 	}
 }
 
-// TestDialHookStaysInternal is the other half. gatewaytest is guarded by the walk
-// above; the variable it mutates is guarded by Go itself, and this asserts the
-// arrangement still holds — a future move of dialhook out of internal/ would let
-// any module in the repository assign the dial with no tripwire at all.
+// TestDialHookStaysInternal is the other half. Gatewaytest is guarded by the
+// walk above; the variable it mutates is guarded by Go itself, and this
+// asserts the arrangement still holds; a future move of dialhook out of
+// internal/ would let any module in the repository assign the dial with no
+// tripwire at all.
 func TestDialHookStaysInternal(t *testing.T) {
 	root := repoRoot(t)
 	const hook = "internal/gateway/internal/dialhook"
@@ -76,11 +64,6 @@ func TestDialHookStaysInternal(t *testing.T) {
 	}
 }
 
-// The marker is the root go.mod. It used to be go.work, which was the only
-// file true from every module while the repo had fifteen; the collapse to one
-// module deleted it and left this walk climbing to the filesystem root.
-//
-// repoRoot walks up to the directory holding the root go.mod.
 func repoRoot(t *testing.T) string {
 	t.Helper()
 	dir, err := os.Getwd()
@@ -99,18 +82,14 @@ func repoRoot(t *testing.T) string {
 	}
 }
 
-// isRepoRoot reports whether dir holds the repository's root go.mod.
-//
-// It checks the module PATH rather than the file's mere existence, so the walk
-// cannot stop at some unrelated module that happens to sit above the checkout.
+// isRepoRoot reports whether dir holds the repository's root go.mod. It checks
+// the module PATH rather than the file's mere existence, so the walk cannot
+// stop at some unrelated module that happens to sit above the checkout.
 func isRepoRoot(dir string) bool {
 	b, err := os.ReadFile(filepath.Join(dir, "go.mod"))
 	if err != nil {
 		return false
 	}
-	// Line-wise, not a prefix of the file: the root go.mod opens with a comment
-	// block, so the module line is not at byte zero. A prefix check compiles,
-	// passes its own review, and then walks past the repo root to "/".
 	for _, line := range strings.Split(string(b), "\n") {
 		if strings.TrimSpace(line) == "module github.com/openbox-ai/openbox-shift-left" {
 			return true

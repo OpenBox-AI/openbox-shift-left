@@ -19,8 +19,6 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/internal/decision"
 )
 
-// testEvalKey is an obx_ runtime key shape the client accepts (non-empty); the
-// fake /evaluate server never verifies it.
 const testEvalKey = "obx_test_tier2000000000000000000000000000000"
 
 func TestIsHighRiskClass(t *testing.T) {
@@ -55,7 +53,6 @@ func TestDecisionTightens(t *testing.T) {
 			t.Errorf("decisionTightens(%s) = true, want false", v)
 		}
 	}
-	// A failed guardrail tightens (deny) regardless of a non-block verdict.
 	gf := decision.Decision{Evaluation: client.Evaluation{
 		Verdict:   client.VerdictAllow,
 		Guardrail: &client.GuardrailResult{Passed: false, Reasons: []client.GuardrailReason{{Type: "pii"}}},
@@ -66,8 +63,6 @@ func TestDecisionTightens(t *testing.T) {
 }
 
 func TestEvaluationDecision(t *testing.T) {
-	// A real verdict is carried through, hookflow.FailOpen=false, so fail-closed never
-	// overrides a reachable-core allow.
 	real := hookflow.EvaluationDecision(client.Evaluation{Verdict: client.VerdictBlock, Reason: "policy"})
 	if real.FailOpen {
 		t.Error("a real BLOCK verdict must be hookflow.FailOpen=false")
@@ -82,7 +77,6 @@ func TestEvaluationDecision(t *testing.T) {
 	if allow.FailOpen {
 		t.Error("a real ALLOW verdict must be hookflow.FailOpen=false")
 	}
-	// No verdict (Emit fail-open drop / empty response) → fail-open decision.
 	unknown := hookflow.EvaluationDecision(client.Evaluation{Verdict: client.VerdictUnknown})
 	if !unknown.FailOpen {
 		t.Error("VerdictUnknown must be hookflow.FailOpen=true (no real server verdict)")
@@ -100,7 +94,6 @@ func TestEvaluationFailOpen(t *testing.T) {
 	if d.Evaluation.Verdict != client.VerdictUnknown {
 		t.Errorf("verdict = %q, want UNKNOWN", d.Evaluation.Verdict)
 	}
-	// The cause becomes the fail-closed reason via failClosedReason — content-free.
 	if d.Evaluation.Reason != "evaluation credentials unavailable" {
 		t.Errorf("reason = %q, want the content-free cause", d.Evaluation.Reason)
 	}
@@ -130,27 +123,24 @@ func TestResolveEvaluationTimeout(t *testing.T) {
 	if got := ResolveEvaluationTimeout(); got != time.Second {
 		t.Errorf("1000ms env = %v, want 1s", got)
 	}
-	// Over the clamp → maxEvaluationTimeout (correctness bound under the 5s hook timeout).
 	t.Setenv(envTier2Timeout, "60000")
 	if got := ResolveEvaluationTimeout(); got != maxEvaluationTimeout {
 		t.Errorf("60000ms env = %v, want the %v clamp", got, maxEvaluationTimeout)
 	}
-	// Garbage env is ignored → default (never wipes a valid config silently).
 	t.Setenv(envTier2Timeout, "notanumber")
 	if got := ResolveEvaluationTimeout(); got != hookflow.DefaultEvaluationTimeout {
 		t.Errorf("garbage env = %v, want default %v", got, hookflow.DefaultEvaluationTimeout)
 	}
-	// A margin invariant: the max T2 budget must stay under the shipped hook timeout.
 	if maxEvaluationTimeout >= 5*time.Second {
 		t.Errorf("maxEvaluationTimeout %v must stay under CC's 5s hook timeout (fails OPEN)", maxEvaluationTimeout)
 	}
 }
 
-// TestPinnedClockStableEventID proves the MINOR-1 fix: with the Mapper clock pinned
-// (as RunHook does per-invocation), mapping the SAME PreToolUse payload twice — the
-// Observe spool copy + the T2 /evaluate copy — yields the SAME deterministic
-// event_id, so the two collapse under one Idempotency-Key (OD-SYNC-11). With the
-// default time.Now clock they would differ by the sub-second timestamp.
+// TestPinnedClockStableEventID proves the minor-1 fix: with the Mapper clock
+// pinned (as RunHook does per-invocation), mapping the same PreToolUse payload
+// twice; the Observe spool copy + the T2 /evaluate copy; yields the same
+// deterministic event_id, so the two collapse under one Idempotency-Key (OD-
+// sync-11).
 func TestPinnedClockStableEventID(t *testing.T) {
 	ev := &HookEvent{HookEventName: "PreToolUse", SessionID: "s", Cwd: "/tmp", ToolName: "Bash",
 		ToolInput: []byte(`{"command":"echo hi"}`)}
@@ -167,8 +157,6 @@ func TestPinnedClockStableEventID(t *testing.T) {
 		t.Errorf("pinned clock must yield a stable event_id: %q vs %q", e1.EventID, e2.EventID)
 	}
 
-	// Sanity: an UNpinned clock would (almost always) differ — proving the pin is
-	// load-bearing. Two Nano-precision instants a tick apart derive distinct ids.
 	mu := NewMapper(Identity{DeveloperDID: testDID})
 	u1, _ := mu.Map(HookPreToolUse, ev)
 	time.Sleep(2 * time.Millisecond)
@@ -180,26 +168,18 @@ func TestPinnedClockStableEventID(t *testing.T) {
 
 func TestTier2Budget(t *testing.T) {
 	isolateConfig(t) // default T2 budget = hookflow.DefaultEvaluationTimeout (3.5s)
-	// Just started: remaining (~4s) exceeds the default, so the budget is the default.
 	if got := evaluationBudget(time.Now()); got != hookflow.DefaultEvaluationTimeout {
 		t.Errorf("fresh enforceStart budget = %v, want default %v", got, hookflow.DefaultEvaluationTimeout)
 	}
-	// T1 already consumed the whole-hook cap → the remainder (and thus the budget) is
-	// non-positive, so escalateEvaluation fail-opens immediately rather than overrun the hook.
 	if got := evaluationBudget(time.Now().Add(-hookflow.EnforceBudget(Engine{}.HookCeilings()) - time.Second)); got > 0 {
 		t.Errorf("exhausted-cap budget = %v, want <= 0 (immediate fail-open)", got)
 	}
 }
 
-// The verdict-before-ceiling pin. Since that decision every gated call waits on
-// a network verdict, so this is a security control rather than arithmetic
-// hygiene: a hook killed before it writes lets the tool run, and no org setting
-// — not even fail_closed — can stop it, because there is no hook left to deny
-// with.
-//
-// It is stated against the SPI-declared ceiling and the timeout the installer
-// actually writes, never a literal, so raising one raises the other and the two
-// cannot drift apart silently.
+// TestEnforceBudgetStaysUnderTheDeclaredCeiling the verdict-before-ceiling
+// pin. It is stated against the SPI-declared ceiling and the timeout the
+// installer actually writes, never a literal, so raising one raises the other
+// and the two cannot drift apart silently.
 func TestEnforceBudgetStaysUnderTheDeclaredCeiling(t *testing.T) {
 	ceiling := Engine{}.HookCeilings()
 	installed := time.Duration(preToolUseHookTimeoutSec) * time.Second
@@ -222,10 +202,7 @@ func TestEnforceBudgetStaysUnderTheDeclaredCeiling(t *testing.T) {
 }
 
 // TestInstalledHookTimeoutMatchesThePlugin pins the plugin's PreToolUse
-// `timeout` to the constant the enforce budgets derive from. They are in two
-// files — a JSON bundle and Go — so nothing but this test stops them drifting,
-// and a drift means the engine budgets against a ceiling the provider is not
-// enforcing.
+// `timeout` to the constant the enforce budgets derive from.
 func TestInstalledHookTimeoutMatchesThePlugin(t *testing.T) {
 	raw, err := pluginFS.ReadFile("plugin/hooks/hooks.json")
 	if err != nil {
@@ -256,7 +233,6 @@ func TestInstalledHookTimeoutMatchesThePlugin(t *testing.T) {
 	if gate.Timeout != preToolUseHookTimeoutSec {
 		t.Errorf("hooks.json PreToolUse timeout = %d, want preToolUseHookTimeoutSec = %d", gate.Timeout, preToolUseHookTimeoutSec)
 	}
-	// Without a status message a hold reads as a freeze rather than a reason.
 	if gate.StatusMessage == "" {
 		t.Error("the gating hook needs a statusMessage so a hold shows a reason")
 	}
@@ -267,16 +243,11 @@ func TestInstalledHookTimeoutMatchesThePlugin(t *testing.T) {
 	if !strings.Contains(watcher.Command, "rewake claude-code") {
 		t.Errorf("watcher command = %q, want the rewake subcommand", watcher.Command)
 	}
-	// The watcher has to outlive core's approval window or a late decision
-	// lands unannounced.
 	if watcher.Timeout != rewakeHookTimeoutSec || time.Duration(watcher.Timeout)*time.Second < 30*time.Minute {
 		t.Errorf("watcher timeout = %ds, want rewakeHookTimeoutSec (%ds) covering the approval window",
 			watcher.Timeout, rewakeHookTimeoutSec)
 	}
 
-	// UserPromptSubmit is the second gating hook (the prompt gate, plan
-	// 260818-1714): it must carry the SAME raised ceiling the evaluator
-	// budgets against, or the gate is killed mid-hold and fails open.
 	ups := f.Hooks["UserPromptSubmit"]
 	if len(ups) != 1 || len(ups[0].Hooks) != 1 {
 		t.Fatalf("UserPromptSubmit should register exactly the prompt gate, got %+v", ups)
@@ -288,7 +259,6 @@ func TestInstalledHookTimeoutMatchesThePlugin(t *testing.T) {
 		t.Error("the prompt gate needs a statusMessage so a hold shows a reason")
 	}
 
-	// Only the gating hooks carry the raised ceiling; the rest stay tight.
 	for event, gs := range f.Hooks {
 		if event == "PreToolUse" || event == "UserPromptSubmit" || event == "SessionEnd" {
 			continue
@@ -303,9 +273,6 @@ func TestInstalledHookTimeoutMatchesThePlugin(t *testing.T) {
 	}
 }
 
-// serveEvaluate stands up a fake /evaluate endpoint returning verdictJSON (the
-// core wire shape) and counts POSTs. On 127.0.0.1 → http loopback is accepted by
-// the client's checkBaseURL. delay simulates a slow core.
 func serveEvaluate(t *testing.T, verdictJSON string, status int, delay time.Duration) (url string, hits *int32) {
 	t.Helper()
 	var n int32
@@ -326,11 +293,6 @@ func serveEvaluate(t *testing.T, verdictJSON string, status int, delay time.Dura
 	return srv.URL, &n
 }
 
-// evalCreds points the hot-path credential resolver at a fake core with a valid
-// signing seed (no secret store). serveVerdict stands up the control plane for
-// a case and points the adapter at it. It replaces setBundleEnv: since that
-// decision a case's expected outcome is a SERVER verdict, not a local bundle,
-// so the setup names the verdict directly.
 func serveVerdict(t *testing.T, verdictJSON string) {
 	t.Helper()
 	url, _ := serveEvaluate(t, verdictJSON, 200, 0)
@@ -373,7 +335,6 @@ func TestEscalateTier2_RealVerdict(t *testing.T) {
 func TestEscalateTier2_Outage(t *testing.T) {
 	isolateConfig(t)
 	t.Setenv(envDID, testDID)
-	// A 500 exhausts the client's retries and Emit fails open → no verdict.
 	url, _ := serveEvaluate(t, `boom`, 500, 0)
 	evalCreds(t, url)
 
@@ -392,7 +353,6 @@ func TestEscalateTier2_Outage(t *testing.T) {
 func TestEscalateTier2_NoCredentials(t *testing.T) {
 	isolateConfig(t)
 	t.Setenv(envDID, testDID)
-	// No API key / seed configured → ResolveCredentials fails → degrade fail-open.
 	url, hits := serveEvaluate(t, `{"verdict":"allow"}`, 200, 0)
 	t.Setenv(envBaseURL, url)
 	m := NewMapper(Identity{DeveloperDID: testDID})
@@ -410,8 +370,6 @@ func TestEscalateTier2_NoCredentials(t *testing.T) {
 func TestEscalateTier2_BudgetBound(t *testing.T) {
 	isolateConfig(t)
 	t.Setenv(envDID, testDID)
-	// A server slower than the budget: escalateEvaluation must return within ~budget
-	// (the ctx cancels Emit), not wait for the server.
 	url, _ := serveEvaluate(t, `{"verdict":"allow"}`, 200, 2*time.Second)
 	evalCreds(t, url)
 	m := NewMapper(Identity{DeveloperDID: testDID})
@@ -432,11 +390,8 @@ type nopWriter struct{}
 
 func (nopWriter) Write(p []byte) (int, error) { return len(p), nil }
 
-// ── STORY-E6-S10 conformance: Tier-2 sync /evaluate escalation (C12-C17) ──────
-//
-// These drive the REAL RunHook PreToolUse path end-to-end against a REAL local
-// sidecar (T1) + a fake /evaluate core (T2), asserting the exact CC stdout and
-// that /evaluate is called ONLY for high-risk classes when T1 allows and T2 is on.
+// ── story-E6-S10 conformance: Tier-2 sync /evaluate escalation (C12-C17)
+// ──────
 func TestEnforcementConformance_Tier2(t *testing.T) {
 	isolateConfig(t)
 	t.Setenv(envDID, testDID)
@@ -455,8 +410,6 @@ func TestEnforcementConformance_Tier2(t *testing.T) {
 		RunHook("PreToolUse", strings.NewReader(payload), &stdout, log.New(&nopWriter{}, "", 0))
 		return stdout.String()
 	}
-	// allowT1 serves a reachable, bundled sidecar whose default is allow, so T1 always
-	// proceeds and the escalation decision is entirely T2's.
 	allowT1 := func(t *testing.T) {
 		serveVerdict(t, `{"verdict":"allow"}`)
 	}
@@ -498,10 +451,6 @@ func TestEnforcementConformance_Tier2(t *testing.T) {
 	})
 
 	t.Run("C14 every gated class evaluates inline, incl. Edit ", func(t *testing.T) {
-		// The inverse of what this asserted before. Edit used to be decided
-		// locally and never reached the server, which is precisely how a
-		// raw-rego org — whose policy cannot be evaluated locally at all — was
-		// left ungoverned on everything but shell and MCP.
 		allowT1(t)
 		url, hits := serveEvaluate(t, `{"verdict":"block","reason":"edit policy","policy_id":"e-pol"}`, 200, 0)
 		evalCreds(t, url)
@@ -541,8 +490,6 @@ func TestEnforcementConformance_Tier2(t *testing.T) {
 		if !strings.Contains(reason, "fail-closed") {
 			t.Errorf("reason = %q, want the content-free fail-closed reason", reason)
 		}
-		// The in-binary budget must emit the deny well before CC's 5s hook timeout
-		// (which fails OPEN) — OD-SYNC-8.
 		if elapsed > 4500*time.Millisecond {
 			t.Errorf("fail-closed deny took %v; must land before CC's 5s hook timeout", elapsed)
 		}
@@ -552,10 +499,6 @@ func TestEnforcementConformance_Tier2(t *testing.T) {
 	})
 
 	t.Run("C16 the deprecated tier2=0 opt-out no longer disables evaluation", func(t *testing.T) {
-		// Back-compat with teeth: the key still parses, but an org that set it
-		// under the old design must not silently keep its gates open. Honouring
-		// it would leave exactly the population most likely to have set it —
-		// early adopters of enforcement — ungoverned after upgrading.
 		allowT1(t)
 		url, hits := serveEvaluate(t, `{"verdict":"block","reason":"still governed"}`, 200, 0)
 		evalCreds(t, url)
@@ -570,9 +513,4 @@ func TestEnforcementConformance_Tier2(t *testing.T) {
 		}
 	})
 
-	// C17 (a local BLOCK short-circuits the round-trip) is deleted with the local
-	// evaluator. There is no local verdict to short-circuit on, and the
-	// round-trip is no longer an optimisation to skip — it is where the verdict
-	// comes from. The property it protected, that governance only ever tightens,
-	// now lives entirely in the server's answer and the apply cascade.
 }

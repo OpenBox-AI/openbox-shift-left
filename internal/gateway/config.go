@@ -62,8 +62,8 @@ func (c *Config) Validate() error {
 	return nil
 }
 
-// selfReferential reports whether the upstream names the listener. Scope,
-// deliberately: only a loopback-shaped upstream is considered.
+// selfReferential scope, deliberately: only a loopback-shaped upstream is
+// considered.
 func selfReferential(listenAddr string, upstream *url.URL) bool {
 	listenHost, listenPort, err := net.SplitHostPort(listenAddr)
 	if err != nil {
@@ -95,7 +95,6 @@ func isLoopbackSpelling(host string) bool {
 	return ip != nil && ip.IsLoopback()
 }
 
-// requireLoopback rejects any bind host that is not loopback.
 func requireLoopback(host string) error {
 	if host == "" || host == "0.0.0.0" || host == "::" || host == "*" {
 		return fmt.Errorf("gateway: listen host %q binds every interface; loopback is required", host)

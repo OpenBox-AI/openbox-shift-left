@@ -24,8 +24,9 @@ func (t enforceTarget) DecisionRequest(localRedaction bool) decision.DecisionReq
 }
 
 // DevEvent maps the call for the inline evaluation and attaches the content
-// the server needs to judge it. Recorded, not silently fixed; changing it
-// changes what policy can match on, which is an owner decision, not a cleanup.
+// the server needs to judge it.
+//   - A file write carries the redacted body; rebuilt through the same
+//     RedactToolInput
 func (t enforceTarget) DevEvent(redacted *client.Content) (client.DevEvent, bool) {
 	ev, ok := t.mapper.Map(HookPreToolUse, t.ev)
 	if !ok {
@@ -37,9 +38,6 @@ func (t enforceTarget) DevEvent(redacted *client.Content) (client.DevEvent, bool
 	return ev, true
 }
 
-// evaluationContext is what the server needs to decide about this call: the
-// command for a shell tool, the arguments for an MCP one, the file body for a
-// write.
 func evaluationContext(e *HookEvent, redacted *client.Content) string {
 	return hookflow.TruncateBytes(toolInputExtract(e, redacted), hookflow.MaxRedactBody)
 }

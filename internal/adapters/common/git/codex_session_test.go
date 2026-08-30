@@ -8,10 +8,6 @@ import (
 	"time"
 )
 
-// STORY-SL7-A AC-8: CODEX_THREAD_ID — injected by Codex into every exec env —
-// is the highest-precedence session source, needs no registry, and leaves the
-// existing (Claude Code) resolution untouched when absent.
-
 func TestResolve_CodexThreadIDWinsOutright(t *testing.T) {
 	env := map[string]string{
 		EnvCodexThreadID: "0195c7e4-2222-7000-8000-00000000abcd",
@@ -27,21 +23,18 @@ func TestResolve_CodexThreadIDWinsOutright(t *testing.T) {
 func TestResolve_CodexThreadIDNeedsNoWorktreeOrRegistry(t *testing.T) {
 	env := map[string]string{EnvCodexThreadID: "th-42"}
 	r := SessionResolver{Getenv: func(k string) string { return env[k] }}
-	// Even with no resolvable worktree (registry tier unusable) it attributes.
 	if got := r.Resolve(""); len(got) != 1 || got[0] != "th-42" {
 		t.Fatalf("Resolve(\"\") = %v, want [th-42]", got)
 	}
 }
 
 func TestResolve_AbsentCodexThreadIDLeavesExistingTiersUntouched(t *testing.T) {
-	// Tier 1 still wins when only OPENBOX_SESSION is set.
 	env := map[string]string{EnvSession: "cc-session-1"}
 	r := SessionResolver{Getenv: func(k string) string { return env[k] }}
 	if got := r.Resolve("/wt"); len(got) != 1 || got[0] != "cc-session-1" {
 		t.Fatalf("Resolve = %v, want the OPENBOX_SESSION tier unchanged", got)
 	}
 
-	// Tier 2 (registry recency) still resolves with no env at all.
 	dir := t.TempDir()
 	now := time.Now()
 	if err := WriteSessionRecord(dir, "cc-live-session", "/wt/sub", now); err != nil {
@@ -57,8 +50,9 @@ func TestResolve_AbsentCodexThreadIDLeavesExistingTiersUntouched(t *testing.T) {
 	}
 }
 
-// End-to-end: with CODEX_THREAD_ID in the env, StampMessageFile stamps exactly
-// that id as the OpenBox-Session trailer (the sink still validates the id).
+// TestPrepareCommitMsg_StampsFromCodexThreadID end-to-end: with
+// CODEX_THREAD_ID in the env, StampMessageFile stamps exactly that id as the
+// OpenBox-Session trailer (the sink still validates the id).
 func TestPrepareCommitMsg_StampsFromCodexThreadID(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not available")
@@ -86,7 +80,6 @@ func TestPrepareCommitMsg_StampsFromCodexThreadID(t *testing.T) {
 		t.Fatalf("trailers = %v, want the codex thread id stamped", got)
 	}
 
-	// A secret-shaped value is still refused by the sink (INV-1).
 	msg2 := filepath.Join(dir, "COMMIT_EDITMSG2")
 	_ = os.WriteFile(msg2, []byte("feat: two\n"), 0o600)
 	env[EnvCodexThreadID] = "obx_live_notasession"

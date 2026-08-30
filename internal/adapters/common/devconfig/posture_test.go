@@ -8,12 +8,10 @@ import (
 	"testing"
 )
 
-// The posture booleans must always be present. An absent flag is ambiguous
-// between "off" and "this client is too old to report it", and telling those
-// apart is the entire point of recording posture.
-// The list is the field table itself, not a copy of it: a control that is
-// resolved but never reported is exactly how require_verified_bundle stayed
-// invisible to the orgs that had turned it on.
+// TestPostureMetadata_BooleansAlwaysPresent the posture booleans must always
+// be present. The list is the field table itself, not a copy of it: a control
+// that is resolved but never reported is exactly how require_verified_bundle
+// stayed invisible to the orgs that had turned it on.
 func TestPostureMetadata_BooleansAlwaysPresent(t *testing.T) {
 	m := Posture{}.Metadata()
 	for _, f := range postureFields() {
@@ -28,20 +26,10 @@ func TestPostureMetadata_BooleansAlwaysPresent(t *testing.T) {
 	}
 }
 
-// Every governance control in DevConfig must be reported in the posture.
-//
-// TestPostureMetadata_BooleansAlwaysPresent checks the field table against
-// ITSELF, so it cannot catch the failure that actually happened twice: a
-// control added to DevConfig with a resolver, and never added to the table.
-// This walks the config struct instead, so the next boolean control forces a
-// decision — report it, or name it here as deliberately not a posture control.
+// TestPostureFields_CoverEveryConfigControl every governance control in
+// DevConfig must be reported in the posture.
 func TestPostureFields_CoverEveryConfigControl(t *testing.T) {
-	// install_git_hook is local convenience (whether we wrote a hook into this
-	// repo's .git), not a governance posture an org would attest to.
-	//
-	// require_verified_bundle is parsed for back-compat and reports nothing: it
-	// guarded a local policy bundle, and that decision deleted the bundle. A
-	// control that cannot engage must not appear in the posture, or an org
+	// A control that cannot engage must not appear in the posture, or an org
 	// reading `true` would believe a signature check was protecting it.
 	notPosture := map[string]bool{
 		"install_git_hook":        true,
@@ -71,8 +59,9 @@ func TestPostureFields_CoverEveryConfigControl(t *testing.T) {
 	}
 }
 
-// Strings are omitted when unknown, so a field the adapter could not determine
-// reads as absent rather than as a false claim.
+// TestPostureMetadata_UnknownStringsOmitted strings are omitted when unknown,
+// so a field the adapter could not determine reads as absent rather than as a
+// false claim.
 func TestPostureMetadata_UnknownStringsOmitted(t *testing.T) {
 	m := Posture{}.Metadata()
 	for _, k := range []string{
@@ -92,12 +81,9 @@ func TestPostureMetadata_UnknownStringsOmitted(t *testing.T) {
 	}
 }
 
-// INV-1: posture egresses on every session start, so it must never carry a
-// credential. The type only has room for booleans, opaque ids and enums, and
-// this asserts that stays true even if someone stuffs a secret-shaped value
-// into an adapter-supplied field.
+// TestPostureMetadata_NoSecretShapedValues iNV-1: posture egresses on every
+// session start, so it must never carry a credential.
 func TestPostureMetadata_NoSecretShapedValues(t *testing.T) {
-	// Deliberately hostile input in every adapter-supplied string.
 	p := Posture{
 		Enforce:         true,
 		Adapter:         "obx_live_deadbeefdeadbeefdeadbeef",
@@ -110,9 +96,6 @@ func TestPostureMetadata_NoSecretShapedValues(t *testing.T) {
 		t.Fatalf("marshal: %v", err)
 	}
 
-	// The primary guarantee is structural — no code path assigns a credential
-	// to these fields — but Metadata also drops secret-shaped values outright,
-	// so a future mis-wiring degrades to a missing field instead of a leak.
 	probe := regexp.MustCompile(`obx_live_|obx_key_|BEGIN [A-Z ]*PRIVATE KEY|sk-proj-|ghp_`)
 	if got := probe.FindString(string(raw)); got != "" {
 		t.Errorf("secret-shaped value %q reached the posture metadata: %s\n"+
@@ -121,8 +104,9 @@ func TestPostureMetadata_NoSecretShapedValues(t *testing.T) {
 	}
 }
 
-// Values are bounded: provider_version comes from an external binary's stdout,
-// so the object stays bounded at the untrusted boundary.
+// TestPostureMetadata_ValuesBounded values are bounded: provider_version comes
+// from an external binary's stdout, so the object stays bounded at the
+// untrusted boundary.
 func TestPostureMetadata_ValuesBounded(t *testing.T) {
 	long := strings.Repeat("x", maxPostureValueLen*3)
 	m := Posture{ProviderVersion: long, Adapter: long}.Metadata()
@@ -133,8 +117,9 @@ func TestPostureMetadata_ValuesBounded(t *testing.T) {
 	}
 }
 
-// EffectivePosture must read through the same resolvers the runtime uses, so
-// the record cannot drift from the behaviour it describes.
+// TestEffectivePosture_MatchesResolvers effectivePosture must read through the
+// same resolvers the runtime uses, so the record cannot drift from the
+// behaviour it describes.
 func TestEffectivePosture_MatchesResolvers(t *testing.T) {
 	t.Setenv(EnvConfigPath, "/nonexistent/dev.json") // defaults only
 	p := EffectivePosture()
@@ -147,27 +132,15 @@ func TestEffectivePosture_MatchesResolvers(t *testing.T) {
 		p.Finops != ResolveFinops() {
 		t.Errorf("EffectivePosture drifted from the resolvers: %+v", p)
 	}
-	// Flags is what `openbox doctor` and the session record both read, so it
-	// must agree with the struct field for every control.
 	if p.Flags()["content_capture"] != p.ContentCapture {
 		t.Error("Flags disagrees with the resolved posture — doctor would report a control that is not in force")
 	}
-	// require_verified_bundle must NOT be reported: it guarded a local bundle
-	// that no longer exists, so an org reading `true` would believe a signature
-	// check was protecting it.
 	if _, reported := p.Flags()["require_verified_bundle"]; reported {
 		t.Error("require_verified_bundle is still reported — it cannot engage, so reporting it overstates")
 	}
-	// The documented defaults: ENFORCE, with secret detection and content capture
-	// on (content capture default-ON is the 2026-07-15 decision).
-	//
-	// This assertion used to read "enforce must default off — enforcement never
-	// turns on by omission (INV-3)". That decision reversed the default
-	// deliberately, and the INV-3 property it cited is preserved elsewhere and
-	// unchanged: a FAILURE never blocks a tool call, because fail_closed defaults
-	// off and the gate fails open on error. "Never enforce by omission" was a
-	// default, not an invariant; "never BLOCK by failure" is the invariant, and
-	// it still holds — see the fail_closed assertion below.
+	// That decision reversed the default deliberately, and the INV-3 property it
+	// cited is preserved elsewhere and unchanged: a failure never blocks a tool
+	// call, because fail_closed defaults off and the gate fails open on error.
 	if !p.Enforce {
 		t.Error("enforce must default ON ")
 	}
@@ -179,14 +152,9 @@ func TestEffectivePosture_MatchesResolvers(t *testing.T) {
 	}
 }
 
-// Policy provenance replaced the bundle coordinates, and the replacement has to
-// answer a question posture can actually answer at the moment it is built.
-//
-// Posture rides SessionStarted — before this session has decided anything — so a
-// deciding policy id here could only ever be some other session's. What IS
-// knowable then is who decides and what happens when they cannot be reached, and
-// under fail_open that second field is the honest statement that enforcement is
-// reachability-dependent.
+// TestPostureReportsDecisionProvenance policy provenance replaced the bundle
+// coordinates, and the replacement has to answer a question posture can
+// actually answer at the moment it is built.
 func TestPostureReportsDecisionProvenance(t *testing.T) {
 	t.Run("default is control plane, fail-open", func(t *testing.T) {
 		isolateConfig(t)
@@ -207,13 +175,8 @@ func TestPostureReportsDecisionProvenance(t *testing.T) {
 		}
 	})
 
-	// Metadata() is the ONLY path onto the wire, and asserting the struct is not
-	// asserting the wire. That seam is how the gap shipped: population and
-	// serialization were each tested, in isolation, and for months the control
-	// plane was told neither field while `openbox doctor` printed both — the exact
-	// inverse of that decision argument, which is about what the control plane
-	// knows. Build through EffectivePosture, not Posture{}: an empty string is
-	// dropped by the unknown-value guard, so a zero value would pass vacuously.
+	// Build through EffectivePosture, not Posture{}: an empty string is dropped
+	// by the unknown-value guard, so a zero value would pass vacuously.
 	t.Run("both reach the emitted metadata, and no bundle key does", func(t *testing.T) {
 		isolateConfig(t)
 		m := EffectivePosture().Metadata()
@@ -224,8 +187,6 @@ func TestPostureReportsDecisionProvenance(t *testing.T) {
 		if m["failure_policy"] != FailurePolicyFailOpen {
 			t.Errorf("failure_policy = %v, want %q", m["failure_policy"], FailurePolicyFailOpen)
 		}
-		// The bundle coordinates are gone, not empty. Absence has to be structural:
-		// an empty-value guard would hide a field that a later edit repopulates.
 		for k := range m {
 			if strings.HasPrefix(k, "bundle_") || k == "staleness" {
 				t.Errorf("%q is still emitted — it reports a subsystem that decision deleted", k)
@@ -241,10 +202,6 @@ func TestPostureReportsDecisionProvenance(t *testing.T) {
 		}
 	})
 
-	// The word that must not come back. "verified" and "integrity" described a
-	// signature check over a local artifact; there is no artifact and no check,
-	// so reusing the vocabulary for a weaker claim would be the overstatement
-	// this repo's own rules forbid.
 	t.Run("no verification vocabulary on the new fields", func(t *testing.T) {
 		isolateConfig(t)
 		p := EffectivePosture()
@@ -258,10 +215,8 @@ func TestPostureReportsDecisionProvenance(t *testing.T) {
 	})
 }
 
-// A deprecation notice that cannot fire is the same as no notice. That
-// decision removed the last runtime caller of ResolveTier2, so a warning hung
-// off that resolver was unreachable — found by driving the real binary, not
-// by a test, which is why this one exists.
+// TestDeprecatedKeysAreDetectedWherePostureIsRead a deprecation notice that
+// cannot fire is the same as no notice.
 func TestDeprecatedKeysAreDetectedWherePostureIsRead(t *testing.T) {
 	t.Run("silent when nothing deprecated is set", func(t *testing.T) {
 		isolateConfig(t)
@@ -270,8 +225,6 @@ func TestDeprecatedKeysAreDetectedWherePostureIsRead(t *testing.T) {
 		}
 	})
 
-	// An explicit false is the case most worth warning about: it is the setting
-	// that used to disable enforcement and silently no longer does.
 	for _, tc := range []struct{ name, env, val, want string }{
 		{"tier2 explicitly off", EnvTier2, "0", "`tier2`"},
 		{"tier2 on", EnvTier2, "1", "`tier2`"},

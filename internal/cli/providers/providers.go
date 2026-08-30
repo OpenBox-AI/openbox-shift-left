@@ -1,8 +1,6 @@
 // Package providers is the CLI's composition root for the install-time SPI: it
 // binds each recognized provider name (from the shared `provider` module) to a
-// concrete Installer. This is the one place that imports both the shared SPI
-// and the adapter modules; keeping it in `cli` (not in the shared module) is
-// what breaks the would-be import cycle between the SPI and its adapters.
+// concrete Installer.
 package providers
 
 import (

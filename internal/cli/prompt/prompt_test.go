@@ -9,8 +9,6 @@ import (
 	"testing"
 )
 
-// pipeStdin writes body to a temp file and returns it opened for reading, which
-// is a non-terminal *os.File — the shape a piped or redirected stdin has.
 func pipeStdin(t *testing.T, body string) *os.File {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "stdin")
@@ -49,8 +47,8 @@ func TestLine(t *testing.T) {
 	}
 }
 
-// The current value is shown so a re-run tells the user what pressing Enter will
-// keep. A prompt that hides it makes blank-keeps-current unusable.
+// TestLineShowsCurrentValue the current value is shown so a re-run tells the
+// user what pressing Enter will keep.
 func TestLineShowsCurrentValue(t *testing.T) {
 	var out bytes.Buffer
 	p := New(pipeStdin(t, "\n"), &out)
@@ -62,8 +60,9 @@ func TestLineShowsCurrentValue(t *testing.T) {
 	}
 }
 
-// A non-terminal stdin reads plainly: there is no echo to suppress, and refusing
-// here would break the documented --*-stdin automation path.
+// TestSecretReadsPipedInputAndNeverEchoesIt a non-terminal stdin reads
+// plainly: there is no echo to suppress, and refusing here would break the
+// documented --*-stdin automation path.
 func TestSecretReadsPipedInputAndNeverEchoesIt(t *testing.T) {
 	var out bytes.Buffer
 	p := New(pipeStdin(t, "obx_SENTINEL_SECRET\n"), &out)
@@ -86,8 +85,6 @@ func TestSecretTrimsCRLF(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// A \r left on a base64 signing key fails signature verification later with
-	// an error naming neither the file nor the character.
 	if got != "YmFzZTY0" {
 		t.Errorf("Secret = %q, want no trailing carriage return", got)
 	}
@@ -116,7 +113,6 @@ func TestConfirm(t *testing.T) {
 		{name: "n", input: "n\n", defaultYes: true, want: false},
 		{name: "blank takes the default (no)", input: "\n", defaultYes: false, want: false},
 		{name: "blank takes the default (yes)", input: "\n", defaultYes: true, want: true},
-		// A typo must never register an agent or rotate a credential.
 		{name: "garbage is not consent", input: "maybe\n", defaultYes: true, want: false},
 		{name: "whitespace around yes", input: "  y  \n", want: true},
 	} {
@@ -134,7 +130,8 @@ func TestConfirm(t *testing.T) {
 	}
 }
 
-// Anything irreversible must default to No, so the hint has to show it.
+// TestConfirmHintShowsTheDefault anything irreversible must default to No, so
+// the hint has to show it.
 func TestConfirmHintShowsTheDefault(t *testing.T) {
 	for _, tc := range []struct {
 		defaultYes bool
@@ -151,8 +148,7 @@ func TestConfirmHintShowsTheDefault(t *testing.T) {
 	}
 }
 
-// Fail fast, never hang. A command that blocks on stdin inside CI hangs until the
-// job's global timeout with no output explaining why.
+// TestRequireTerminalFailsFastOnAPipe fail fast, never hang.
 func TestRequireTerminalFailsFastOnAPipe(t *testing.T) {
 	err := RequireTerminal(pipeStdin(t, ""))
 	if err == nil {
@@ -161,7 +157,6 @@ func TestRequireTerminalFailsFastOnAPipe(t *testing.T) {
 	if !errors.Is(err, ErrNotATerminal) {
 		t.Errorf("error should wrap ErrNotATerminal, got %v", err)
 	}
-	// The remediation must name the automation path, or the error is a dead end.
 	for _, want := range []string{"--api-key-stdin", "--private-key-stdin", "OPENBOX_API_KEY"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("remediation missing %q:\n%s", want, err)
@@ -175,8 +170,9 @@ func TestRequireTerminalRejectsNilStdin(t *testing.T) {
 	}
 }
 
-// Running out of input is an explicit error, not an empty string that would be
-// read as "the user pressed Enter" and silently keep a stale credential.
+// TestExhaustedInputErrors running out of input is an explicit error, not an
+// empty string that would be read as "the user pressed Enter" and silently
+// keep a stale credential.
 func TestExhaustedInputErrors(t *testing.T) {
 	var out bytes.Buffer
 	p := New(pipeStdin(t, ""), &out)
@@ -184,8 +180,6 @@ func TestExhaustedInputErrors(t *testing.T) {
 		t.Fatal("expected an error when stdin is empty")
 	}
 }
-
-// --- the scripted prompter, which auth's own tests depend on ----------------
 
 func TestScriptedAnswersInOrderAndRecordsPrompts(t *testing.T) {
 	s := &Scripted{Answers: []string{"acme", "", "obx_k", "y"}}
@@ -216,8 +210,9 @@ func TestScriptedAnswersInOrderAndRecordsPrompts(t *testing.T) {
 	}
 }
 
-// A test whose prompt count drifted from the implementation must fail loudly
-// rather than quietly exercise "the user pressed Enter" for the rest.
+// TestScriptedExhaustionIsAnError a test whose prompt count drifted from the
+// implementation must fail loudly rather than quietly exercise "the user
+// pressed Enter" for the rest.
 func TestScriptedExhaustionIsAnError(t *testing.T) {
 	s := &Scripted{Answers: []string{"one"}}
 	if _, err := s.Line("First", ""); err != nil {
@@ -232,8 +227,9 @@ func TestScriptedExhaustionIsAnError(t *testing.T) {
 	}
 }
 
-// Remaining is how a test proves a short-circuit happened (a blank agent id
-// skipping the credential prompts) rather than assuming it did.
+// TestScriptedRemainingDetectsAShortCircuit remaining is how a test proves a
+// short-circuit happened (a blank agent id skipping the credential prompts)
+// rather than assuming it did.
 func TestScriptedRemainingDetectsAShortCircuit(t *testing.T) {
 	s := &Scripted{Answers: []string{"a", "b", "c"}}
 	if _, err := s.Line("only one asked", ""); err != nil {
@@ -244,7 +240,8 @@ func TestScriptedRemainingDetectsAShortCircuit(t *testing.T) {
 	}
 }
 
-// No implementation may write a secret to its own writer.
+// TestNoSecretIsEverWrittenToTheWriter no implementation may write a secret to
+// its own writer.
 func TestNoSecretIsEverWrittenToTheWriter(t *testing.T) {
 	const sentinel = "obx_NEVER_PRINT_ME"
 	s := &Scripted{Answers: []string{sentinel}}

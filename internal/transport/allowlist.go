@@ -49,7 +49,13 @@ func (a Allowlist) Hosts() []string {
 	return out
 }
 
-// normalizeHost reduces a host to the one form both sides compare in.
+// normalizeHost three reductions, each because the same DNS name legitimately
+// arrives in more than one shape, and a miss is a silent governance hole; an
+// unmatched host is blind-tunnelled, so the model call succeeds and is simply
+// never recorded:
+//   - The port is dropped ("api.anthropic.com:443" and ":8443" are one host);
+//   - One trailing root dot is dropped (the fqdn form of the same name);
+//   - ASCII letters are lowercased (DNS is case-insensitive).
 func normalizeHost(target string) string {
 	h := target
 	if host, _, err := net.SplitHostPort(target); err == nil {

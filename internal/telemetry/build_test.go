@@ -6,15 +6,10 @@ import (
 	"testing"
 )
 
-// TestBuildConstructsAllThreeSignals is the test that should have existed before
-// the receiver was ever called "done".
-//
-// The receiver panicked the first time it was really started — a nil *zap.Logger
-// dereferenced inside otlpreceiver's factory — and the whole failure happens in
-// CONSTRUCTION, before a socket exists. The previous verification said the wiring
-// was "compiled against the real API", and compiling was standing in for running.
-// This crosses into the real factory with no listener anywhere, so the same class
-// of failure is now reachable on a host that cannot bind.
+// TestBuildConstructsAllThreeSignals is the test that should have existed
+// before the receiver was ever called "done". This crosses into the real
+// factory with no listener anywhere, so the same class of failure is now
+// reachable on a host that cannot bind.
 func TestBuildConstructsAllThreeSignals(t *testing.T) {
 	r, err := New(Config{Addr: "127.0.0.1:8789"}, WithEmitter(nil), WithLogWriter(&bytes.Buffer{}))
 	if err != nil {
@@ -25,9 +20,9 @@ func TestBuildConstructsAllThreeSignals(t *testing.T) {
 	if err != nil {
 		t.Fatalf("build: %v", err)
 	}
-	// Logs, traces and metrics. Each must be created or its URL path 404s, and a
-	// 404 on a configured signal shows up as export errors in the governed tool's
-	// own logs — a lane meant to be invisible making noise in the thing it watches.
+	// Each must be created or its URL path 404s, and a 404 on a configured signal
+	// shows up as export errors in the governed tool's own logs; a lane meant to
+	// be invisible making noise in the thing it watches.
 	if len(built) != 3 {
 		t.Fatalf("built %d components, want 3 (logs, traces, metrics)", len(built))
 	}
@@ -39,12 +34,6 @@ func TestBuildConstructsAllThreeSignals(t *testing.T) {
 }
 
 // TestReceiverSettingsHasNoNilFields pins the specific defect.
-//
-// component.TelemetrySettings' zero value is not a no-op: it is a nil
-// *zap.Logger and nil provider interfaces, and the factory dereferences the
-// logger during creation. A comment in this file once claimed the zero value WAS
-// the no-op default. It compiled, it passed every test, and it crashed on the
-// first real start.
 func TestReceiverSettingsHasNoNilFields(t *testing.T) {
 	set := receiverSettings(&bytes.Buffer{})
 	if set.Logger == nil {
@@ -60,11 +49,6 @@ func TestReceiverSettingsHasNoNilFields(t *testing.T) {
 
 // TestCollectorDiagnosticsAreNotDiscarded: the collector's own logger writes
 // where we point it.
-//
-// It matters because this daemon's stdio is the only place a
-// silently-not-recording lane is visible at all, and the tempting fix for the
-// nil logger — zap.NewNop() — would have compiled, passed, and thrown away every
-// internal diagnostic the receiver ever produces.
 func TestCollectorDiagnosticsAreNotDiscarded(t *testing.T) {
 	var buf bytes.Buffer
 	set := receiverSettings(&buf)

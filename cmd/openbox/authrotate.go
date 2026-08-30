@@ -10,9 +10,9 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/prompt"
 )
 
-// runAuthRotate authrotate.go; `openbox auth --rotate`. Rotation is
-// destructive server-side; it invalidates the previous key and writes a
-// SECURITY_EVENT audit entry; so it never happens implicitly.
+// runAuthRotate rotation is destructive server-side; it invalidates the
+// previous key and writes a SECURITY_EVENT audit entry; so it never happens
+// implicitly.
 func (a *app) runAuthRotate(f authFields, piped map[string]string, envPath, backendURLFlag string, yes bool) int {
 	token := a.getenv(devconfig.EnvControlToken)
 	if token == "" {

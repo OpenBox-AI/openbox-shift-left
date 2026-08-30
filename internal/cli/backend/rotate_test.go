@@ -32,9 +32,9 @@ func TestRotateAPIKeyHappyPath(t *testing.T) {
 	}
 }
 
-// The control plane uses both a bare body and a {status,data:{…}} envelope across
-// endpoints, so the decoder must find the field either way rather than assume a
-// depth.
+// TestRotateToleratesTheDataEnvelope the control plane uses both a bare body
+// and a {status,data:{…}} envelope across endpoints, so the decoder must find
+// the field either way rather than assume a depth.
 func TestRotateToleratesTheDataEnvelope(t *testing.T) {
 	srv := rotateServer(t, func(w http.ResponseWriter, r *http.Request) {
 		switch {
@@ -55,8 +55,8 @@ func TestRotateToleratesTheDataEnvelope(t *testing.T) {
 	}
 }
 
-// A 2xx that omits the credential must FAIL. Returning an empty string would let
-// the caller write an empty key over a working one and report success.
+// TestRotateAPIKeyMissingTokenFailsLoudly a 2xx that omits the credential must
+// fail.
 func TestRotateAPIKeyMissingTokenFailsLoudly(t *testing.T) {
 	srv := rotateServer(t, func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(`{"status":200,"data":{}}`))
@@ -70,9 +70,10 @@ func TestRotateAPIKeyMissingTokenFailsLoudly(t *testing.T) {
 	}
 }
 
-// The guard that matters most: AgentIdentityResponseDto does not declare
-// privateKey, so a response serializer added upstream would strip it and every
-// rotation would silently return nothing usable.
+// TestRotateIdentityMissingPrivateKeyFailsLoudly the guard that matters most:
+// AgentIdentityResponseDto does not declare privateKey, so a response
+// serializer added upstream would strip it and every rotation would silently
+// return nothing usable.
 func TestRotateIdentityMissingPrivateKeyFailsLoudly(t *testing.T) {
 	srv := rotateServer(t, func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(`{"did":"did:aip:same","key_id":"k","public_key":"p"}`))
@@ -112,8 +113,6 @@ func TestRotateErrorMapping(t *testing.T) {
 			body: `{"message":"Forbidden"}`, wantText: "update:agent",
 		},
 		{
-			// NOT "no such agent" — this is signing_required == null, and reporting
-			// it as unknown-agent sends someone hunting for an agent that exists.
 			name: "404 not-provisioned reads differently", status: http.StatusNotFound,
 			body: `{"message":"Agent identity has not been provisioned"}`, wantText: "no signing identity provisioned",
 		},
@@ -138,8 +137,9 @@ func TestRotateErrorMapping(t *testing.T) {
 	}
 }
 
-// The two 404s must not be confusable. Pinned as a pair because the whole point
-// of the body check is that the status code alone cannot tell them apart.
+// TestTheTwo404sDoNotReadAlike the two 404s must not be confusable. Pinned as
+// a pair because the whole point of the body check is that the status code
+// alone cannot tell them apart.
 func TestTheTwo404sDoNotReadAlike(t *testing.T) {
 	msg := func(body string) string {
 		srv := rotateServer(t, func(w http.ResponseWriter, _ *http.Request) {
@@ -156,8 +156,9 @@ func TestTheTwo404sDoNotReadAlike(t *testing.T) {
 	}
 }
 
-// Getting the auth header wrong yields a bare 401 with no clue why, so it is
-// pinned: an obx_key_ org key goes in X-API-Key, anything else as a Bearer JWT.
+// TestRotateUsesXAPIKeyForAnOrgKeyAndBearerOtherwise getting the auth header
+// wrong yields a bare 401 with no clue why, so it is pinned: an obx_key_ org
+// key goes in X-API-Key, anything else as a Bearer JWT.
 func TestRotateUsesXAPIKeyForAnOrgKeyAndBearerOtherwise(t *testing.T) {
 	for _, tc := range []struct {
 		credential, wantHeader, wantValue string

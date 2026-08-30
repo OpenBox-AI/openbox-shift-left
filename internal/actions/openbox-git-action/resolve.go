@@ -185,8 +185,8 @@ func (r *Resolver) Resolve(ctx context.Context, target, base string) (Resolution
 	return res, nil
 }
 
-// scope computes the commits to consider, the total before any MaxCommits cap,
-// and a human note describing how.
+// scope the rev-list reads are bounded to maxCommits+1 so a huge range is
+// never buffered whole; a cap is disclosed in the note (never silent).
 func (r *Resolver) scope(sha, base string) (commits []string, total int, note string, err error) {
 	limit := r.maxCommits() + 1
 	capAt := func(list []string, how string) ([]string, int, string, error) {
@@ -234,7 +234,9 @@ func (r *Resolver) scope(sha, base string) (commits []string, total int, note st
 	return []string{sha}, 1, "", nil
 }
 
-// gatherClaims collects session ids across the whole scope in trust order:
+// gatherClaims running the trailer pass over the entire scope before the body
+// pass guarantees an id that appears as a proper trailer anywhere is credited
+// as SourceTrailer, never mislabeled SourceBodyScan by a later commit.
 func (r *Resolver) gatherClaims(scope []string) (claims []SessionClaim, capped, truncated bool, err error) {
 	seen := map[string]bool{}
 	contributed := map[string]bool{} // commit -> had >=1 valid trailer/body id (pre-dedupe)
@@ -303,8 +305,8 @@ func (r *Resolver) gatherClaims(scope []string) (claims []SessionClaim, capped, 
 	return claims, capped, truncated, nil
 }
 
-// verify runs the ownership check for each claim. A lookup error is treated as
-// "not verified"; never over-attribute on a failure.
+// verify a lookup error is treated as "not verified"; never over-attribute on
+// a failure.
 func (r *Resolver) verify(ctx context.Context, claims []SessionClaim) {
 	v := r.verifier()
 	for i := range claims {
@@ -378,8 +380,9 @@ func short(sha string) string {
 	return sha
 }
 
-// attachAttestations reads the signed attestation note for each claim's
-// commit.
+// attachAttestations best-effort throughout: a missing note is the common
+// case, and a malformed one is skipped rather than failing the deploy;
+// telemetry and lineage must never break a release.
 func (r *Resolver) attachAttestations(claims []SessionClaim) {
 	seen := map[string]*obgit.Attestation{}
 	for i := range claims {

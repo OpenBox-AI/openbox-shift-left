@@ -23,15 +23,14 @@ func TestSessionHaltLatchRoundTrip(t *testing.T) {
 	if info.Reason != "kill switch" || info.PolicyID != "p-1" || info.TS == "" {
 		t.Errorf("latch info = %+v, want the preserved reason, policy id and a timestamp", info)
 	}
-	// The latch is per-session: a sibling session is untouched.
 	if _, halted := SessionHalted("s-2"); halted {
 		t.Error("a different session reads halted")
 	}
 }
 
-// A latch that exists but will not parse still halts: presence is the decided
-// state, and a corrupt file must not quietly un-halt a session the control
-// plane terminated. The replayed decision then carries the generic reason.
+// TestSessionHaltCorruptLatchStillHalts a latch that exists but will not parse
+// still halts: presence is the decided state, and a corrupt file must not
+// quietly un-halt a session the control plane terminated.
 func TestSessionHaltCorruptLatchStillHalts(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv(devconfig.EnvHaltDir, dir)
@@ -56,9 +55,9 @@ func TestSessionHaltCorruptLatchStillHalts(t *testing.T) {
 	}
 }
 
-// Two session ids that sanitize to the same filename component must not share
-// a latch — a collision would halt an innocent session. The raw-id hash suffix
-// is what keeps them apart.
+// TestSessionHaltNoCollisionAcrossSanitizedIDs two session ids that sanitize
+// to the same filename component must not share a latch; a collision would
+// halt an innocent session.
 func TestSessionHaltNoCollisionAcrossSanitizedIDs(t *testing.T) {
 	t.Setenv(devconfig.EnvHaltDir, t.TempDir())
 	WriteSessionHalt(nopLogger(), "s/../a", client.Evaluation{Reason: "x"})
@@ -70,7 +69,8 @@ func TestSessionHaltNoCollisionAcrossSanitizedIDs(t *testing.T) {
 	}
 }
 
-// The latch must stay inside its directory whatever the session id contains.
+// TestSessionHaltPathIsConfinedToHaltDir the latch must stay inside its
+// directory whatever the session id contains.
 func TestSessionHaltPathIsConfinedToHaltDir(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv(devconfig.EnvHaltDir, dir)

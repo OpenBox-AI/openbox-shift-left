@@ -130,9 +130,9 @@ func writeLocalHooks(projectDir, engine string) error {
 	return nil
 }
 
-// writeFileAtomic replaces path in one step: a temp file in the same directory
-// (so the rename cannot cross a filesystem boundary), then a rename over the
-// target.
+// writeFileAtomic claude Code then cannot parse the settings for that project
+// at all: every hook in the file stops applying, which is a governance failure
+// that reports itself as nothing.
 func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
 	tmp, err := os.CreateTemp(filepath.Dir(path), ".settings-*.tmp")
 	if err != nil {
@@ -230,8 +230,8 @@ func AuditLocalHooks(projectDir string) (LocalHookAudit, error) {
 	return audit, nil
 }
 
-// sweepStale reduces one event's entries to at most ONE registration of each
-// of our invocations, at the engine being installed.
+// sweepStale foreign handlers, the first handler of each of our invocations at
+// the engine being installed, and anything it cannot parse are all kept.
 func sweepStale(entries []any, event, engine string) (kept []any, dropped []string, deduped bool) {
 	want := unquoteHookCommand(engine)
 	seen := map[string]bool{}
@@ -309,8 +309,8 @@ func splitEngineToken(cmd string) (engine, rest string, ok bool) {
 	return cmd, "", true
 }
 
-// reconcileLocalHook hasLocalHookCommand reports whether any entry already
-// carries this command (idempotent re-init; never duplicates).
+// reconcileLocalHook it never touches a foreign hook, another of our
+// invocations (the rewake watcher has its own command), or the group matcher.
 func reconcileLocalHook(entries []any, command string, timeoutSec int, statusMessage string) []any {
 	want := unquoteHookCommand(command)
 	for _, e := range entries {
@@ -349,16 +349,14 @@ func hasLocalHookCommand(entries []any, command string) bool {
 	return false
 }
 
-// unquoteHookCommand strips double quotes so a quoted and an unquoted spelling
-// of the same command compare equal. Quotes never appear inside an engine path
-// or an event name, so removing them all is sufficient and needs no parsing.
+// unquoteHookCommand quotes never appear inside an engine path or an event
+// name, so removing them all is sufficient and needs no parsing.
 func unquoteHookCommand(command string) string {
 	return strings.ReplaceAll(command, `"`, "")
 }
 
-// localHookCommand builds a hook command line with the engine path quoted.
-// Every hook in that project then fails to start, silently, with no error at
-// install time.
+// localHookCommand every hook in that project then fails to start, silently,
+// with no error at install time.
 func localHookCommand(engine, args string) string {
 	return `"` + engine + `" ` + args
 }

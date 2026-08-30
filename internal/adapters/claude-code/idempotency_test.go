@@ -11,8 +11,6 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/internal/client"
 )
 
-// drainCollect returns a FlushFunc that records every event it is handed, so a
-// test can assert on what delivery actually saw.
 func drainCollect() (hookflow.FlushFunc, *[]client.DevEvent) {
 	var got []client.DevEvent
 	return func(_ context.Context, ev client.DevEvent) error {
@@ -21,23 +19,14 @@ func drainCollect() (hookflow.FlushFunc, *[]client.DevEvent) {
 	}, &got
 }
 
-// STORY-SL-14 — idempotency hardening. These tests are the real deliverable: the
-// delivery-guarantee matrix proving the CC event_id is deterministic +
-// collision-safe (INV-5) and stable through the whole spool → rotate → flush →
-// recovery lifecycle, and that the client at-most-once guarantee holds.
-
-// derivingMapper is a Mapper with a PINNED clock but NO NewID override, so it
-// exercises the production deriveID path (the default when NewID is nil).
 func derivingMapper(t time.Time) Mapper {
 	m := NewMapper(Identity{DeveloperDID: testDID})
 	m.Now = func() time.Time { return t }
 	return m
 }
 
-// TestDeriveID_Deterministic: the SAME logical event always yields the SAME id —
-// even if the id is recomputed later from the spooled/persisted record. This is
-// the robustness guarantee: deriveID is a pure function of the event's structural
-// fields, all of which survive a JSON round-trip.
+// TestDeriveID_Deterministic: the same logical event always yields the same
+// id; even if the id is recomputed later from the spooled/persisted record.
 func TestDeriveID_Deterministic(t *testing.T) {
 	clock := time.Date(2026, 7, 13, 9, 30, 15, 123456789, time.UTC)
 	m := derivingMapper(clock)
@@ -51,13 +40,11 @@ func TestDeriveID_Deterministic(t *testing.T) {
 		t.Errorf("id lost the cc- prefix: %q", a.EventID)
 	}
 
-	// Same inputs + same clock → identical id (no hidden randomness).
 	b, _ := m.Map(HookPreToolUse, hookEv)
 	if a.EventID != b.EventID {
 		t.Errorf("non-deterministic id: %q vs %q", a.EventID, b.EventID)
 	}
 
-	// Recomputed from the persisted record (spool round-trip) → identical id.
 	line, err := json.Marshal(a)
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
@@ -71,10 +58,10 @@ func TestDeriveID_Deterministic(t *testing.T) {
 	}
 }
 
-// TestDeriveID_DistinctEventsNeverCollide is the collision-freedom property: any
-// two events that differ in ANY structural distinguisher (session, type, tool,
-// timestamp down to the nanosecond, or file locator) get distinct ids. A base
-// event plus a set of single-field mutations must all hash uniquely.
+// TestDeriveID_DistinctEventsNeverCollide is the collision-freedom property:
+// any two events that differ in ANY structural distinguisher (session, type,
+// tool, timestamp down to the nanosecond, or file locator) get distinct ids. A
+// base event plus a set of single-field mutations must all hash uniquely.
 func TestDeriveID_DistinctEventsNeverCollide(t *testing.T) {
 	base := client.DevEvent{
 		SessionID: "s1",
@@ -95,13 +82,9 @@ func TestDeriveID_DistinctEventsNeverCollide(t *testing.T) {
 		mutate(func(e *client.DevEvent) { e.SessionID = "s2" }),
 		mutate(func(e *client.DevEvent) { e.EventType = client.EventToolResult }),
 		mutate(func(e *client.DevEvent) { e.Tool.Name = "Write" }),
-		// Same second, different NANOSECOND — the sub-second distinguisher must
-		// separate two same-tool calls in the same wall-clock second.
 		mutate(func(e *client.DevEvent) { e.Timestamp = "2026-07-13T09:30:15.123456790Z" }),
 		mutate(func(e *client.DevEvent) { e.Span.FilePath = "b.go" }),
 		mutate(func(e *client.DevEvent) { e.Span.Function = "run" }),
-		// A separator can't be forged from adjacent fields: moving a char across the
-		// tool/timestamp boundary must still hash distinctly (0x1f delimiter).
 		mutate(func(e *client.DevEvent) { e.Tool.Name = "Edit\x1f"; e.Timestamp = "X" + base.Timestamp }),
 	}
 	seen := map[string]int{}
@@ -114,9 +97,10 @@ func TestDeriveID_DistinctEventsNeverCollide(t *testing.T) {
 	}
 }
 
-// TestDeriveID_NoContentInID guards INV-2 on the derived-id path: content present
-// in a hook's tool_input must not appear (even hashed-adjacent) in the event_id.
-// deriveID hashes only structural fields, so the opaque digest never echoes it.
+// TestDeriveID_NoContentInID guards INV-2 on the derived-id path: content
+// present in a hook's tool_input must not appear (even hashed-adjacent) in the
+// event_id. DeriveID hashes only structural fields, so the opaque digest never
+// echoes it.
 func TestDeriveID_NoContentInID(t *testing.T) {
 	m := derivingMapper(time.Date(2026, 7, 13, 9, 0, 0, 0, time.UTC))
 	secret := "SUPER-SECRET-should-not-appear"
@@ -132,15 +116,13 @@ func TestDeriveID_NoContentInID(t *testing.T) {
 	}
 }
 
-// TestEventID_StableAcrossSpoolLifecycle proves the id is stable through the full
-// delivery path: Map → spool → rotate → flush, then a ctx-cut drain → recovery
-// file → re-drain. The delivered id always equals the id Map derived, and an
-// already-acked event is NEVER re-sent (at-most-once, INV-5/INV-3).
+// TestEventID_StableAcrossSpoolLifecycle proves the id is stable through the
+// full delivery path: Map → spool → rotate → flush, then a ctx-cut drain →
+// recovery file → re-drain.
 func TestEventID_StableAcrossSpoolLifecycle(t *testing.T) {
 	m := derivingMapper(time.Date(2026, 7, 13, 9, 30, 0, 0, time.UTC))
 	sp := hookflow.Spool{Dir: t.TempDir()}
 
-	// Three distinct events in one session (distinct nanoseconds → distinct ids).
 	var want []string
 	for i, tool := range []string{"Read", "Edit", "Bash"} {
 		m.Now = func() time.Time { return time.Date(2026, 7, 13, 9, 30, 0, i, time.UTC) }
@@ -154,8 +136,6 @@ func TestEventID_StableAcrossSpoolLifecycle(t *testing.T) {
 		want = append(want, e.EventID)
 	}
 
-	// Full flush: delivered ids match the derived ids, in order (stable through
-	// spool → rotate → flush).
 	fn, got := drainCollect()
 	if _, err := sp.FlushSession(context.Background(), "sess", fn); err != nil {
 		t.Fatalf("flush: %v", err)
@@ -170,10 +150,10 @@ func TestEventID_StableAcrossSpoolLifecycle(t *testing.T) {
 	}
 }
 
-// TestEventID_RecoveryNeverReSendsAcked: a drain cut short after acking the first
-// event persists only the UNDELIVERED tail to a recovery file; the re-drain
-// delivers the tail once and never re-sends the acked event — and every id is the
-// original derived id (no regeneration on the recovery path).
+// TestEventID_RecoveryNeverReSendsAcked: a drain cut short after acking the
+// first event persists only the undelivered tail to a recovery file; the re-
+// drain delivers the tail once and never re-sends the acked event; and every
+// id is the original derived id (no regeneration on the recovery path).
 func TestEventID_RecoveryNeverReSendsAcked(t *testing.T) {
 	m := derivingMapper(time.Date(2026, 7, 13, 10, 0, 0, 0, time.UTC))
 	sp := hookflow.Spool{Dir: t.TempDir()}
@@ -186,7 +166,6 @@ func TestEventID_RecoveryNeverReSendsAcked(t *testing.T) {
 		ids = append(ids, e.EventID)
 	}
 
-	// Cancel after acking the first event.
 	ctx, cancel := context.WithCancel(context.Background())
 	var acked []string
 	fn := func(_ context.Context, e client.DevEvent) error {
@@ -203,8 +182,6 @@ func TestEventID_RecoveryNeverReSendsAcked(t *testing.T) {
 		t.Fatalf("first drain acked %v, want [%s]", acked, ids[0])
 	}
 
-	// Recovery drain: delivers ONLY the undelivered tail (ids[1:]), never re-sends
-	// the acked ids[0].
 	fn2, got := drainCollect()
 	if _, err := sp.FlushAll(context.Background(), fn2); err != nil {
 		t.Fatalf("recovery flush: %v", err)

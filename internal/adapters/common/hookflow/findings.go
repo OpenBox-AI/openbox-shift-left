@@ -16,6 +16,11 @@ import (
 )
 
 // They land in the dashboard today but never in the developer's session.
+//   - INV-2: the summary is built only from content-free AdvisoryRecord fields
+//     (verdict/would_block/risk/constraint count, guardrail reason categories
+//     via reasonTypeCategories, drift boolean + count).
+//   - INV-3: it emits only additionalContext + systemMessage; never a decision
+//     / permissionDecision / blocking field.
 
 // SurfaceFindings surfaces the content-free summary of any advisory findings
 // recorded since the last surface, then advances the cursor.
@@ -87,8 +92,8 @@ type findingsSummary struct {
 	maxRisk         float64
 }
 
-// summarizeFindings parses the jsonl delta of advisoryRecords and renders ONE
-// content-free summary line, or "" when the delta holds no notable record.
+// summarizeFindings every field it reads is a category/count/label; never free
+// text or content (INV-2).
 func summarizeFindings(delta []byte) string {
 	s := findingsSummary{verdicts: map[string]bool{}, guardrailCats: map[string]bool{}}
 	for _, line := range bytes.Split(delta, []byte{'\n'}) {
@@ -171,9 +176,8 @@ func writeFindingsOutput(stdout io.Writer, hook string, summary string) error {
 	return err
 }
 
-// readCursor reads the byte offset from the cursor state file. A
-// missing/unparsable file yields 0 (surface from the start); never an error
-// (INV-3).
+// readCursor a missing/unparsable file yields 0 (surface from the start);
+// never an error (INV-3).
 func readCursor(path string) int64 {
 	raw, err := os.ReadFile(path)
 	if err != nil {

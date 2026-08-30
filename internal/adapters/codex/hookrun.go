@@ -18,9 +18,11 @@ import (
 const flushBudget = 12 * time.Second
 
 // RunHook executes the path for one Codex hook invocation; the engine behind
-// the unified `openbox hook codex <event>` subcommand. Safety contract (INV-3;
-// observe-only, never block; the default whole-product posture): - In observe
-// mode (the default) it writes nothing to stdout.
+// the unified `openbox hook codex <event>` subcommand.
+//   - In observe mode (the default) it writes nothing to stdout.
+//   - It never returns a blocking signal in observe mode: any failure (bad
+//     payload, missing identity, unreachable OpenBox, even a panic) is logged
+//     and swallowed.
 func RunHook(sub string, stdin io.Reader, stdout io.Writer, logger *log.Logger) {
 	defer devconfig.Pin()()
 	defer func() {

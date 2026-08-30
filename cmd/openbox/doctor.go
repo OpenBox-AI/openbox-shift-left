@@ -182,9 +182,7 @@ func withPresence(path string) string {
 	return path + "  (absent)"
 }
 
-// reportGateway prints the local gateway's detection-tier posture (that
-// decision, phase 07 requirement 4). Four separate questions, kept separate on
-// purpose.
+// reportGateway four separate questions, kept separate on purpose.
 func (a *app) reportGateway() {
 	home := a.getenv("HOME")
 	if home == "" {
@@ -242,8 +240,8 @@ func (a *app) reportGateway() {
 	}
 }
 
-// managedSettingsPathForDoctor resolves the provider's managed-settings file,
-// or "" where this build has no path for the OS.
+// managedSettingsPathForDoctor reached through the managed package so doctor
+// and `managed install` cannot disagree about where the file lives.
 func managedSettingsPathForDoctor() string {
 	dir := managed.ClaudeCodeManagedDir()
 	if dir == "" {
@@ -252,8 +250,6 @@ func managedSettingsPathForDoctor() string {
 	return filepath.Join(dir, "managed-settings.json")
 }
 
-// reportLanes prints the model-call producer election and the two lanes that
-// decision added, per lane and separately from each other.
 func (a *app) reportLanes() {
 	home := a.homeDir()
 	settingsPath := gatewayservice.SettingsPath(home)

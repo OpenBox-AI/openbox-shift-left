@@ -19,8 +19,6 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/providers"
 )
 
-// mockCreateServer is an httptest backend that reports no existing agent and
-// returns a fixed registration on agent/create, capturing the request body.
 func mockCreateServer(t *testing.T, createBody *map[string]any) *memhttptest.Server {
 	t.Helper()
 	return memhttptest.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -39,11 +37,7 @@ func mockCreateServer(t *testing.T, createBody *map[string]any) *memhttptest.Ser
 
 // TestEndToEndAgainstMockBackend drives the real backend.Client (not a fake)
 // through devinit against an httptest server, covering the SL-2 integration AC
-// ("a init against a test OpenBox registers an agent") with a mock. It uses
-// cursor — still a Stub (SL-8 unbuilt) — so the config-manual-only partial path
-// stays exercised now that claude-code (SL4-WIRE-1) AND codex (STORY-SL7-A) are
-// real installers. (It previously used codex; a real installer here would write
-// the developer's ACTUAL default install paths from a unit test.)
+// ("a init against a test OpenBox registers an agent") with a mock.
 func TestEndToEndAgainstMockBackend(t *testing.T) {
 	var createBody map[string]any
 	srv := mockCreateServer(t, &createBody)
@@ -60,15 +54,12 @@ func TestEndToEndAgainstMockBackend(t *testing.T) {
 		Options{Provider: "cursor", AgentName: "dev-x"},
 		Deps{Registrar: reg, Installer: inst, Out: &out})
 
-	// The cursor adapter isn't built, so config is manual-only (expected error),
-	// but registration + credential capture must have fully succeeded.
 	if err == nil || !res.ConfigManualOnly {
 		t.Fatalf("expected manual-config outcome, got err=%v res=%+v", err, res)
 	}
 	if !res.Registered || res.AgentID != "srv-agent" || res.DID != "did:aip:server" {
 		t.Fatalf("registration not captured: %+v", res)
 	}
-	// The DTO the CLI sent must satisfy the backend's required fields.
 	if createBody["agent_type"] != "developer" {
 		t.Errorf("agent_type = %v", createBody["agent_type"])
 	}
@@ -78,7 +69,6 @@ func TestEndToEndAgainstMockBackend(t *testing.T) {
 	if _, ok := createBody["aivss_config"].(map[string]any); !ok {
 		t.Error("aivss_config must be an object")
 	}
-	// Credentials landed in ~/.openbox/.env under the documented names.
 	kv := readCredentialFile(t)
 	if v := kv[devconfig.EnvAPIKeyDirect]; !strings.HasPrefix(v, "obx_test_") {
 		t.Errorf("api key not written: %q", v)
@@ -86,17 +76,15 @@ func TestEndToEndAgainstMockBackend(t *testing.T) {
 	if v := kv[devconfig.EnvAgentPrivateKey]; v != "c2VlZA==" {
 		t.Errorf("private key not written: %q", v)
 	}
-	// The DID is a coordinate; it must not share the file with the secrets.
 	if v, ok := kv[devconfig.EnvDID]; ok {
 		t.Errorf("credential file carries the DID (%q); secrets and coordinates must not share a file", v)
 	}
 }
 
-// TestEndToEndClaudeCodeRealInstall is the SL4-WIRE-1 acceptance: a init for
+// TestEndToEndClaudeCodeRealInstall is the SL4-wire-1 acceptance: a init for
 // claude-code against a mock backend + a temp-HOME install materializes the
 // plugin bundle and the non-secret dev config, and NO written file contains a
-// secret value (INV-1). It uses the real claudecode.Installer (what the CLI
-// registers) pointed at temp dirs.
+// secret value (INV-1).
 func TestEndToEndClaudeCodeRealInstall(t *testing.T) {
 	var createBody map[string]any
 	srv := mockCreateServer(t, &createBody)
@@ -121,14 +109,12 @@ func TestEndToEndClaudeCodeRealInstall(t *testing.T) {
 		t.Fatalf("expected registered+config-applied, got %+v", res)
 	}
 
-	// Bundle materialized (including the dotted .claude-plugin dir).
 	for _, rel := range []string{".claude-plugin/plugin.json", "hooks/hooks.json"} {
 		if _, err := os.Stat(filepath.Join(pluginDir, rel)); err != nil {
 			t.Errorf("missing bundle file %s: %v", rel, err)
 		}
 	}
 
-	// Dev config carries the DID coordinate, never a credential value.
 	raw, err := os.ReadFile(cfgPath)
 	if err != nil {
 		t.Fatalf("read dev config: %v", err)
@@ -141,8 +127,6 @@ func TestEndToEndClaudeCodeRealInstall(t *testing.T) {
 		t.Errorf("dev config DID = %q", cfg.DID)
 	}
 
-	// INV-1: no file written under the plugin dir or the config path may contain
-	// a secret value. Both credentials landed in ~/.openbox/.env instead.
 	assertNoSecretInTree(t, pluginDir)
 	if strings.Contains(string(raw), "obx_") || strings.Contains(string(raw), "c2VlZA==") {
 		t.Errorf("dev config leaked a secret value:\n%s", raw)
@@ -156,8 +140,6 @@ func TestEndToEndClaudeCodeRealInstall(t *testing.T) {
 	}
 }
 
-// assertNoSecretInTree walks dir and fails if any file contains an obx_ key or
-// the test seed value — the INV-1 leak check for the materialized bundle.
 func assertNoSecretInTree(t *testing.T, dir string) {
 	t.Helper()
 	err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {

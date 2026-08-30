@@ -9,11 +9,11 @@ import (
 
 func boolPtr(b bool) *bool { return &b }
 
-// The bug this file exists for: `init --enforce` followed by a plain
-// `init` (to repair hooks, refresh the bundle, anything) used to drop the
-// developer from enforce to observe with exit 0 and no message, because the
-// installers rebuilt dev.json from the current run's flags and only carried
-// forward the sync coordinates.
+// TestWriteConfig_ReInitKeepsEnforcePosture the bug this file exists for:
+// `init --enforce` followed by a plain `init` (to repair hooks, refresh the
+// bundle, anything) used to drop the developer from enforce to observe with
+// exit 0 and no message, because the installers rebuilt dev.json from the
+// current run's flags and only carried forward the sync coordinates.
 func TestWriteConfig_ReInitKeepsEnforcePosture(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "dev.json")
 
@@ -26,7 +26,6 @@ func TestWriteConfig_ReInitKeepsEnforcePosture(t *testing.T) {
 		t.Fatalf("initial write: %v", err)
 	}
 
-	// A re-init that says nothing about posture.
 	if err := WriteConfig(path, Update{DID: "did:aip:x", BaseURL: "https://core.example"}); err != nil {
 		t.Fatalf("re-init write: %v", err)
 	}
@@ -46,8 +45,9 @@ func TestWriteConfig_ReInitKeepsEnforcePosture(t *testing.T) {
 	}
 }
 
-// Preserving on silence would be a one-way ratchet without an explicit way back
-// down, so --no-enforce has to actually work.
+// TestWriteConfig_ExplicitDowngradeApplies preserving on silence would be a
+// one-way ratchet without an explicit way back down, so --no-enforce has to
+// actually work.
 func TestWriteConfig_ExplicitDowngradeApplies(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "dev.json")
 	if err := WriteConfig(path, Update{DID: "did:aip:x", Enforce: boolPtr(true)}); err != nil {
@@ -61,8 +61,6 @@ func TestWriteConfig_ExplicitDowngradeApplies(t *testing.T) {
 	if err := WriteConfig(path, u); err != nil {
 		t.Fatal(err)
 	}
-	// The opt-out must be PRESENT and false, not absent — under enforce-by-default
-	// an absent field reads as ON, so a dropped field is a silent re-enable.
 	got := mustLoad(t, path).Enforce
 	if got == nil {
 		t.Fatal("the opt-out was dropped from the file; an absent enforce now means ON")
@@ -72,8 +70,8 @@ func TestWriteConfig_ExplicitDowngradeApplies(t *testing.T) {
 	}
 }
 
-// Silence is not a downgrade — otherwise every ordinary re-init would print a
-// posture warning.
+// TestWriteConfig_SilenceIsNotADowngrade silence is not a downgrade; otherwise
+// every ordinary re-init would print a posture warning.
 func TestWriteConfig_SilenceIsNotADowngrade(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "dev.json")
 	if err := WriteConfig(path, Update{DID: "did:aip:x", Enforce: boolPtr(true)}); err != nil {
@@ -84,8 +82,9 @@ func TestWriteConfig_SilenceIsNotADowngrade(t *testing.T) {
 	}
 }
 
-// The reuse path resolves the DID from the secret store but not the coordinates,
-// so a re-init used to blank fields it simply had nothing to say about.
+// TestWriteConfig_KeepsCoordinatesItWasNotGiven the reuse path resolves the
+// DID from the secret store but not the coordinates, so a re-init used to
+// blank fields it simply had nothing to say about.
 func TestWriteConfig_KeepsCoordinatesItWasNotGiven(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "dev.json")
 	if err := WriteConfig(path, Update{
@@ -114,10 +113,8 @@ func TestWriteConfig_KeepsCoordinatesItWasNotGiven(t *testing.T) {
 	}
 }
 
-// The merge starts from what is on disk, so a field this writer has never heard
-// of survives. That is what keeps the policy from rotting as DevConfig grows —
-// the previous implementations listed the fields to preserve, and the list was
-// already incomplete.
+// TestWriteConfig_KeepsFieldsTheUpdateCannotExpress the merge starts from what
+// is on disk, so a field this writer has never heard of survives.
 func TestWriteConfig_KeepsFieldsTheUpdateCannotExpress(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "dev.json")
 	seed := DevConfig{

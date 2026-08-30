@@ -14,8 +14,6 @@ import (
 
 const testOrgKey = "obx_key_secretorgkey"
 
-// approveBackend stands in for the control plane's approval queue: it serves
-// the pending list and records the decide calls.
 func approveBackend(t *testing.T, pending []map[string]any) (*memhttptest.Server, *[]string) {
 	t.Helper()
 	var decided []string
@@ -29,11 +27,6 @@ func approveBackend(t *testing.T, pending []map[string]any) (*memhttptest.Server
 				t.Errorf("status filter = %q, want pending", got)
 			}
 			w.Header().Set("Content-Type", "application/json")
-			// The live envelope, captured from the running control plane: the
-			// interceptor's `data`, then `approvals`, then ITS paginated `data`.
-			// The DTO declares `approvals` as a flat array; the wire does not,
-			// and building against the DTO produced a client that could not
-			// parse a single real response.
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"data": map[string]any{
 					"approvals": map[string]any{"data": pending, "total": len(pending)},
@@ -61,9 +54,6 @@ func approveApp(t *testing.T, srv *memhttptest.Server) (*app, *bytes.Buffer, *by
 	return &app{stdout: &out, stderr: &errb, getenv: os.Getenv}, &out, &errb
 }
 
-// pendingItem mirrors a real queue row: the agent name arrives NESTED under
-// `agent`, and the tool plus its structural input are present — both things the
-// DTO does not declare and the wire does.
 func pendingItem(id, agentID, agentName, reason string, expiresIn time.Duration) map[string]any {
 	return map[string]any{
 		"id":            id,
@@ -97,16 +87,13 @@ func TestApproveList(t *testing.T) {
 			t.Errorf("listing missing %q:\n%s", want, out.String())
 		}
 	}
-	// The request gets its own field — an approver must not have to pick it out
-	// of a line of identifiers.
 	if !strings.Contains(out.String(), "request  rm -rf /tmp/x") {
 		t.Errorf("the decisive field is not surfaced on its own line:\n%s", out.String())
 	}
 }
 
-// With no command or arguments there is nothing to judge, and the listing must
-// say so. Presenting a decidable-looking request that carries no request is how
-// an approval gate becomes a rubber stamp.
+// TestApproveList_SaysWhenARequestIsUndecidable with no command or arguments
+// there is nothing to judge, and the listing must say so.
 func TestApproveList_SaysWhenARequestIsUndecidable(t *testing.T) {
 	item := pendingItem("ge-1", "agent-1", "dev-brian", "shell needs approval", 25*time.Minute)
 	item["input"] = map[string]any{"kind": "shell", "tool_name": "Bash"} // no command
@@ -136,8 +123,9 @@ func TestApproveListEmpty(t *testing.T) {
 	}
 }
 
-// The approver types only the id they read off the list; the CLI resolves the
-// owning agent, because the decide route is per-agent.
+// TestApproveAllowResolvesTheAgent the approver types only the id they read
+// off the list; the CLI resolves the owning agent, because the decide route is
+// per-agent.
 func TestApproveAllowResolvesTheAgent(t *testing.T) {
 	srv, decided := approveBackend(t, []map[string]any{
 		pendingItem("ge-1", "agent-77", "dev-brian", "production shell command", 25*time.Minute),
@@ -173,9 +161,9 @@ func TestApproveDenySendsReject(t *testing.T) {
 	}
 }
 
-// An expired request cannot be decided — the server would refuse it, and
-// pretending otherwise would tell an approver they had answered something they
-// had not.
+// TestApproveRefusesAnExpiredRequest an expired request cannot be decided; the
+// server would refuse it, and pretending otherwise would tell an approver they
+// had answered something they had not.
 func TestApproveRefusesAnExpiredRequest(t *testing.T) {
 	srv, decided := approveBackend(t, []map[string]any{
 		pendingItem("ge-old", "agent-77", "dev-brian", "reason", -time.Minute),
@@ -205,8 +193,9 @@ func TestApproveRejectsAnUnknownEvent(t *testing.T) {
 	}
 }
 
-// INV-1: the approver's credential comes from the environment, never a flag,
-// so it cannot leak through argv or shell history.
+// TestApproveRequiresTheControlTokenFromTheEnvironment iNV-1: the approver's
+// credential comes from the environment, never a flag, so it cannot leak
+// through argv or shell history.
 func TestApproveRequiresTheControlTokenFromTheEnvironment(t *testing.T) {
 	t.Setenv("OPENBOX_CONFIG", t.TempDir()+"/none.json")
 	t.Setenv("OPENBOX_CONTROL_TOKEN", "")
@@ -220,7 +209,6 @@ func TestApproveRequiresTheControlTokenFromTheEnvironment(t *testing.T) {
 	if !strings.Contains(errb.String(), "OPENBOX_CONTROL_TOKEN") {
 		t.Errorf("error should name the env var, got %q", errb.String())
 	}
-	// The flag set must not offer a way to pass it either.
 	if strings.Contains(errb.String(), "--token") {
 		t.Error("the credential must never be a flag (INV-1)")
 	}

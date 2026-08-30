@@ -14,6 +14,8 @@ import (
 
 // Its two mutation controls are the proof; deleting the redaction, or deleting
 // the cap, must each turn it red.
+//   - Per turn, from a cursor position, on Stop/SubagentStop → the
+//     TurnStarted/TurnCompleted
 
 const maxTranscriptBytes = 64 << 20 // 64 MiB
 
@@ -26,7 +28,6 @@ type usageNumbers struct {
 	CacheReadInputTokens     int `json:"cache_read_input_tokens"`
 }
 
-// transcriptLine is the numbers-only projection of one jsonl transcript line.
 type transcriptLine struct {
 	CostUSD *float64 `json:"costUSD"`
 	Message *struct {
@@ -51,21 +52,17 @@ type turnLine struct {
 	} `json:"message"`
 }
 
-// maxThinkingBytes bounds the thinking text one window may hold. A rune is at
-// most 4 bytes, so this can never discard a byte the wire cap would have kept;
-// the two bounds compose instead of fighting.
+// maxThinkingBytes a rune is at most 4 bytes, so this can never discard a byte
+// the wire cap would have kept; the two bounds compose instead of fighting.
 const maxThinkingBytes = 4 * 65536
 
-// thinkingBlock is the one content-block shape this projection decodes. No
-// other field of a content block is bound, so `text`, `tool_use` inputs and
-// `tool_result` bodies cannot land here.
+// thinkingBlock no other field of a content block is bound, so `text`,
+// `tool_use` inputs and `tool_result` bodies cannot land here.
 type thinkingBlock struct {
 	Type     string `json:"type"`
 	Thinking string `json:"thinking"`
 }
 
-// appendThinking folds one block's text onto the window's accumulator,
-// bounded.
 func appendThinking(acc, block string) string {
 	if block == "" {
 		return acc
@@ -84,8 +81,6 @@ func appendThinking(acc, block string) string {
 	return acc + sep + block
 }
 
-// thinkingFrom lifts the thinking text out of one message's content blocks, in
-// file order.
 func thinkingFrom(raw json.RawMessage) string {
 	trimmed := bytes.TrimSpace(raw)
 	if len(trimmed) == 0 || trimmed[0] != '[' {
@@ -105,9 +100,8 @@ func thinkingFrom(raw json.RawMessage) string {
 	return out
 }
 
-// turnWindow is one turn's worth of transcript, aggregated. So these are
-// window sums, and no caller should read them as per-model-call numbers; hooks
-// cannot deliver that.
+// turnWindow so these are window sums, and no caller should read them as per-
+// model-call numbers; hooks cannot deliver that.
 type turnWindow struct {
 	Input              int
 	Output             int
@@ -148,10 +142,6 @@ func (w turnWindow) tokens() *client.Tokens {
 	}
 }
 
-// readTurnUsage reads the transcript from a cursor position and aggregates the
-// usage numbers in that window only, returning the next cursor position so the
-// caller can advance after a successful spool (never before; see
-// hookflow.TurnCursor for why that ordering is the correctness argument).
 func readTurnUsage(path string, from hookflow.TurnPos, sidechain bool) (turnWindow, hookflow.TurnPos, error) {
 	next := from
 	if path == "" {
@@ -227,8 +217,7 @@ func readTurnUsage(path string, from hookflow.TurnPos, sidechain bool) (turnWind
 // be streamed.
 const turnChunkBytes = 4 << 20 // 4 MiB
 
-// aggregateTurnWindow sums one window's usage from jsonl bytes. Bad lines are
-// skipped, never fatal.
+// aggregateTurnWindow bad lines are skipped, never fatal.
 func aggregateTurnWindow(raw []byte, sidechain bool) turnWindow {
 	var w turnWindow
 	aggregateTurnWindowInto(&w, raw, sidechain)

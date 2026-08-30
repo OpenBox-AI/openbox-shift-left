@@ -2,9 +2,6 @@ package client
 
 import "testing"
 
-// The three failure/lifecycle signals : SubagentStarted,
-// PermissionDenied, APIError. All ride stock SignalReceived (INV-8).
-
 func signalEvent(t EventType) DevEvent {
 	return DevEvent{
 		SchemaVersion: SchemaVersion,
@@ -41,19 +38,8 @@ func TestNewSignalsMapToStockWireTypes(t *testing.T) {
 	}
 }
 
-// THE load-bearing case for these three events.
-//
-// openbox-core's alignment engine treats ANY SignalReceived carrying non-empty
-// signal_args as a new user goal: it scores the assistant messages accumulated
-// so far against the previous goal and then OVERWRITES the session's goal with
-// the stringified args (internal/services/age.go:112-137).
-//
-// So a plausible, well-intentioned change — "surface the denied tool in the
-// Verify tab's Input, which reads signal_args" — would replace the developer's
-// actual prompt with a metadata blob as the thing every later turn is scored
-// against. Goal alignment would not error; it would quietly start measuring
-// drift from "permission_denied". Structural detail rides metadata instead, and
-// this test is what keeps it there.
+// TestNewSignalsCarryNoSignalArgs tHE load-bearing case for these three
+// events.
 func TestNewSignalsCarryNoSignalArgs(t *testing.T) {
 	for _, et := range []EventType{EventSubagentStarted, EventPermissionDenied, EventAPIError} {
 		m := decodeRaw(t, signalEvent(et))
@@ -62,8 +48,6 @@ func TestNewSignalsCarryNoSignalArgs(t *testing.T) {
 				"and overwrite the alignment session's goal with it (age.go:112-137). "+
 				"Structural detail belongs in metadata", et, v)
 		}
-		// And the detail really is carried somewhere, or this test would pass
-		// for an event that reports nothing at all.
 		meta, _ := m["metadata"].(map[string]any)
 		if len(meta) == 0 {
 			t.Errorf("%s carries no metadata either; the event reports nothing", et)
@@ -71,10 +55,9 @@ func TestNewSignalsCarryNoSignalArgs(t *testing.T) {
 	}
 }
 
-// prompt_submitted is the one signal that MUST keep its args — it is what
-// creates the goal-alignment session in the first place. Asserted here beside
-// the negative case so the distinction is visible in one place rather than
-// inferred from two files.
+// TestPromptSignalStillCarriesItsArgs prompt_submitted is the one signal that
+// must keep its args; it is what creates the goal-alignment session in the
+// first place.
 func TestPromptSignalStillCarriesItsArgs(t *testing.T) {
 	ev := signalEvent(EventPromptSubmitted)
 	ev.Content = &Content{Prompt: "refactor the spool"}

@@ -13,7 +13,6 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/internal/client"
 )
 
-// recoveryEmitter fails every Emit, driving the carry-over path.
 type recoveryEmitter struct {
 	got []client.DevEvent
 	err error
@@ -40,10 +39,8 @@ func recoveryNames(t *testing.T, dir string) []string {
 }
 
 // TestFlushSweepsAbandonedRecovery is the E8-S7 regression guard: carry-over
-// left by a thread that has already ended MUST be retried by a later session's
-// SessionEnd flush. Before the sweep, only FlushAll touched `.rec*` files and
-// nothing in the ambient hook lifecycle invoked it. The sweeping session has a
-// DIFFERENT thread id, so a session-scoped retry would not have found it.
+// left by a thread that has already ended must be retried by a later session's
+// SessionEnd flush.
 func TestFlushSweepsAbandonedRecovery(t *testing.T) {
 	dir := t.TempDir()
 	ad := New(Identity{DeveloperDID: testDID}, dir)
@@ -76,7 +73,8 @@ func TestFlushSweepsAbandonedRecovery(t *testing.T) {
 
 // TestFlushDoesNotBurnRetriesInOnePass guards the snapshot: one flush consumes
 // exactly one attempt, rather than walking the carry-over to
-// hookflow.MaxRecoveryAttempts because the sweep re-read what the same pass just wrote.
+// hookflow.MaxRecoveryAttempts because the sweep re-read what the same pass
+// just wrote.
 func TestFlushDoesNotBurnRetriesInOnePass(t *testing.T) {
 	dir := t.TempDir()
 	ad := New(Identity{DeveloperDID: testDID}, dir)
@@ -104,9 +102,7 @@ func TestFlushDoesNotBurnRetriesInOnePass(t *testing.T) {
 }
 
 // TestSweepIgnoresLiveSpool proves the sweep only claims unowned carry-over,
-// never a live spool that may belong to a running session. It drives the
-// production flush rather than the exported sweep wrapper, which had no caller
-// outside this assertion.
+// never a live spool that may belong to a running session.
 func TestSweepIgnoresLiveSpool(t *testing.T) {
 	dir := t.TempDir()
 	ad := New(Identity{DeveloperDID: testDID}, dir)
@@ -115,7 +111,6 @@ func TestSweepIgnoresLiveSpool(t *testing.T) {
 	if err := sp.Append(spoolEvent("d1", "dead")); err != nil {
 		t.Fatal(err)
 	}
-	// Turn the dead thread's spool into carry-over.
 	if err := os.Rename(sp.SessionPath("dead"), filepath.Join(dir, "dead.rec1-cx-abc.jsonl")); err != nil {
 		t.Fatal(err)
 	}
@@ -147,7 +142,6 @@ func TestIsRecoveryFile(t *testing.T) {
 		{"th.rec-cx-abc.jsonl", true}, // legacy, pre-counter
 		{"th.jsonl", false},
 		{"th.jsonl.flushing.cx-abc", false},
-		// `.reclaim.` contains ".rec" but is a drain in flight, not carry-over.
 		{"th.jsonl.flushing.cx-abc.reclaim.cx-def", false},
 		{"th.reclaim.cx-def.jsonl", false},
 		{"durations", false},

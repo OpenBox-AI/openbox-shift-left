@@ -19,6 +19,9 @@ import (
 	"time"
 )
 
+//   - The key is 0600 and the loader refuses to run when it is looser; - the
+//     CA is
+
 const (
 	caCertFile = "transport-ca.pem"
 	caKeyFile  = "transport-ca.key"

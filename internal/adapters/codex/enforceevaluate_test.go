@@ -51,13 +51,10 @@ func TestEvaluationDecision_Codex(t *testing.T) {
 }
 
 func TestTier2Budget_ClampsUnderWholeHookBudget(t *testing.T) {
-	// A T1 gate that already consumed most of the budget leaves T2 a smaller slice.
 	start := time.Now().Add(-(hookflow.EnforceBudget((Engine{}).HookCeilings()) - 200*time.Millisecond))
 	if b := evaluationBudget(start); b > 300*time.Millisecond {
 		t.Errorf("evaluationBudget = %v, want it clamped to the remaining whole-hook budget", b)
 	}
-	// A T1 gate that overran the whole budget yields a non-positive T2 budget →
-	// escalateEvaluation fail-opens immediately (safe direction).
 	over := time.Now().Add(-2 * hookflow.EnforceBudget((Engine{}).HookCeilings()))
 	if b := evaluationBudget(over); b > 0 {
 		t.Errorf("evaluationBudget after overrun = %v, want non-positive (immediate fail-open)", b)
@@ -65,8 +62,6 @@ func TestTier2Budget_ClampsUnderWholeHookBudget(t *testing.T) {
 }
 
 func TestEscalateTier2_DegradesFailOpenOnZeroBudget(t *testing.T) {
-	// With a non-positive budget the whole escalation must degrade to a fail-open
-	// decision (never hang, never a real verdict) so the failure policy decides.
 	m := NewMapper(Identity{DeveloperDID: testDID})
 	ev := &HookEvent{SessionID: "s", ToolName: "Bash", ToolInput: []byte(`{"command":"echo hi"}`)}
 	dec := escalateEvaluation(context.Background(), log.New(&nopWriter{}, "", 0), m, ev, -1)
@@ -75,20 +70,16 @@ func TestEscalateTier2_DegradesFailOpenOnZeroBudget(t *testing.T) {
 	}
 }
 
-// TestTier2EventIDMatchesObserve pins Sam G_SEC F2: the Tier-2 /evaluate copy of a
-// PreToolUse event must derive the SAME deterministic event_id as its spooled
-// observe counterpart, so the two collapse under one Idempotency-Key server-side
-// (no double-count). RunHook pins ad.Mapper.Now to one instant and hands that SAME
-// pinned Mapper to escalateEvaluation → runTier2, so both Map() calls fold the identical
-// RFC3339Nano timestamp into deriveID.
+// TestTier2EventIDMatchesObserve pins Sam G_SEC F2: the Tier-2 /evaluate copy
+// of a PreToolUse event must derive the same deterministic event_id as its
+// spooled observe counterpart, so the two collapse under one Idempotency-Key
+// server-side (no double-count).
 func TestTier2EventIDMatchesObserve(t *testing.T) {
 	ev := &HookEvent{
 		SessionID: "s", PermissionMode: "default", ToolName: "Bash",
 		ToolUseID: "call-1", ToolInput: []byte(`{"command":"deploy prod"}`),
 	}
 
-	// A pinned Mapper (as RunHook builds it) maps the SAME logical event twice — the
-	// observe/spool copy and the Tier-2 copy — and must yield identical event_ids.
 	pinned := time.Now()
 	m := NewMapper(Identity{DeveloperDID: testDID})
 	m.Now = func() time.Time { return pinned }
@@ -105,8 +96,6 @@ func TestTier2EventIDMatchesObserve(t *testing.T) {
 		t.Fatalf("pinned Mapper must derive one event_id: observe=%q tier2=%q", observeEv.EventID, tier2Ev.EventID)
 	}
 
-	// Guard the regression the fix addresses: an UNPINNED Mapper (fresh time.Now on
-	// each Map) diverges — the exact double-count Sam F2 flagged.
 	un := NewMapper(Identity{DeveloperDID: testDID})
 	a, _ := un.Map(HookPreToolUse, ev)
 	time.Sleep(2 * time.Millisecond) // ensure a distinct RFC3339Nano instant

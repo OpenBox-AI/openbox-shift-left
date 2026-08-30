@@ -32,10 +32,7 @@ func seed(t *testing.T, home, body string) {
 	}
 }
 
-// TestWriteEnvPreservesForeignConfiguration is the ownership rule. `init` once
-// destroyed configuration by deciding what it owned with an exact-match; here
-// anything outside the owned key set is preserved untouched, including inside the
-// env block itself.
+// TestWriteEnvPreservesForeignConfiguration is the ownership rule.
 func TestWriteEnvPreservesForeignConfiguration(t *testing.T) {
 	home := t.TempDir()
 	seed(t, home, `{
@@ -59,16 +56,14 @@ func TestWriteEnvPreservesForeignConfiguration(t *testing.T) {
 	if env[EnvKey] != "http://127.0.0.1:8788" {
 		t.Errorf("%s = %v", EnvKey, env[EnvKey])
 	}
-	// Keys this package has never heard of must survive the round-trip. Decoding
-	// into a typed struct is how a writer silently deletes them.
+	// Decoding into a typed struct is how a writer silently deletes them.
 	if got["permissions"] == nil || got["someFutureKey"] == nil {
 		t.Errorf("unknown top-level keys were dropped: %v", got)
 	}
 }
 
-// TestPlainReWriteIsIdempotent is the SECOND-INVOCATION test, and it exists
-// because this repo has already shipped the bug it guards. Fifteen green enforce
-// tests missed a silent opt-out revert because each ran the command exactly once.
+// TestPlainReWriteIsIdempotent is the second-invocation test, and it exists
+// because this repo has already shipped the bug it guards.
 func TestPlainReWriteIsIdempotent(t *testing.T) {
 	home := t.TempDir()
 
@@ -97,9 +92,7 @@ func TestPlainReWriteIsIdempotent(t *testing.T) {
 	}
 }
 
-// TestWriteEnvReportsWhatItReplaced keeps a silent overwrite from happening. When
-// a developer or an org had pointed the variable somewhere else, the change has to
-// be visible in the output rather than discovered later.
+// TestWriteEnvReportsWhatItReplaced keeps a silent overwrite from happening.
 func TestWriteEnvReportsWhatItReplaced(t *testing.T) {
 	home := t.TempDir()
 	seed(t, home, `{"env":{"`+EnvKey+`":"https://api.anthropic.com"}}`)
@@ -116,9 +109,9 @@ func TestWriteEnvReportsWhatItReplaced(t *testing.T) {
 	}
 }
 
-// TestRemoveEnvRemovesOnlyOwnedKeys is the uninstall counterpart to the ownership
-// rule. An org that put its own variables in the env block must not lose them
-// because OpenBox was removed.
+// TestRemoveEnvRemovesOnlyOwnedKeys is the uninstall counterpart to the
+// ownership rule. An org that put its own variables in the env block must not
+// lose them because OpenBox was removed.
 func TestRemoveEnvRemovesOnlyOwnedKeys(t *testing.T) {
 	home := t.TempDir()
 	seed(t, home, `{"env":{"`+EnvKey+`":"http://127.0.0.1:8788","HTTP_PROXY":"http://p:3128"},"permissions":{}}`)
@@ -143,7 +136,7 @@ func TestRemoveEnvRemovesOnlyOwnedKeys(t *testing.T) {
 	}
 }
 
-// TestRemoveEnvDropsAnEmptyEnvBlock — but only when nothing else is left in it.
+// TestRemoveEnvDropsAnEmptyEnvBlock; but only when nothing else is left in it.
 func TestRemoveEnvDropsAnEmptyEnvBlock(t *testing.T) {
 	home := t.TempDir()
 	seed(t, home, `{"env":{"`+EnvKey+`":"http://127.0.0.1:8788"}}`)
@@ -157,7 +150,7 @@ func TestRemoveEnvDropsAnEmptyEnvBlock(t *testing.T) {
 	}
 }
 
-// TestRemoveEnvOnAnUntouchedMachineIsANoOp — uninstall must not create files or
+// TestRemoveEnvOnAnUntouchedMachineIsANoOp; uninstall must not create files or
 // error when there was nothing to remove.
 func TestRemoveEnvOnAnUntouchedMachineIsANoOp(t *testing.T) {
 	home := t.TempDir()
@@ -173,9 +166,8 @@ func TestRemoveEnvOnAnUntouchedMachineIsANoOp(t *testing.T) {
 	}
 }
 
-// TestUnparseableSettingsIsRefusedNotClobbered — a file we cannot parse is a file
-// we cannot safely rewrite. Overwriting it would destroy configuration nobody
-// asked us to touch.
+// TestUnparseableSettingsIsRefusedNotClobbered; a file we cannot parse is a
+// file we cannot safely rewrite.
 func TestUnparseableSettingsIsRefusedNotClobbered(t *testing.T) {
 	home := t.TempDir()
 	const broken = `{"env": {"A": 1`
@@ -193,7 +185,7 @@ func TestUnparseableSettingsIsRefusedNotClobbered(t *testing.T) {
 	}
 }
 
-// TestCurrentEnvIsTheReadSide — the opt-out rule needs reads and writes checked
+// TestCurrentEnvIsTheReadSide; the opt-out rule needs reads and writes checked
 // separately, which is the general lesson from the enforce-flag bug.
 func TestCurrentEnvIsTheReadSide(t *testing.T) {
 	home := t.TempDir()
@@ -216,15 +208,6 @@ func TestCurrentEnvIsTheReadSide(t *testing.T) {
 }
 
 // TestUninstallRestoresAnOrgsOwnBaseURL is the data-loss control.
-//
-// The package's stated rule was key-ownership: "foreign keys are preserved; only
-// keys we own are replaced." That missed the case where the KEY is ours and the
-// VALUE is theirs — an org pointing Claude Code at its own relay through
-// ANTHROPIC_BASE_URL, which is the setup docs/gateway-mdm-recipe.md targets.
-// Install overwrote it and merely PRINTED the old URL; uninstall deleted the key.
-// After that round trip the org's relay existed nowhere on the machine, and every
-// model call went direct to the provider — bypassing the org's own egress control
-// — while doctor reported "not set", which reads as clean rather than as damage.
 func TestUninstallRestoresAnOrgsOwnBaseURL(t *testing.T) {
 	const orgRelay = "https://llm-proxy.corp.internal"
 	home := t.TempDir()
@@ -251,7 +234,6 @@ func TestUninstallRestoresAnOrgsOwnBaseURL(t *testing.T) {
 	if !present || got != orgRelay {
 		t.Errorf("after uninstall the base URL is %q (present=%v); the org's relay was destroyed", got, present)
 	}
-	// The unrelated key must still be there — the original guarantee.
 	env, _ := read(t, home)["env"].(map[string]any)
 	if v, _ := env["CORP_TOKEN_PATH"].(string); v != "/etc/corp/token" {
 		t.Errorf("a foreign env key was lost: %q", v)
@@ -280,9 +262,10 @@ func TestUninstallStillRemovesWhenThereWasNothingToRestore(t *testing.T) {
 	}
 }
 
-// TestASecondInstallDoesNotOverwriteTheRememberedOriginal is the "test the SECOND
-// invocation" rule this package's own header states, applied to the new record: a
-// re-install must not replace the org's original value with our own gateway URL.
+// TestASecondInstallDoesNotOverwriteTheRememberedOriginal is the "test the
+// second invocation" rule this package's own header states, applied to the new
+// record: a re-install must not replace the org's original value with our own
+// gateway URL.
 func TestASecondInstallDoesNotOverwriteTheRememberedOriginal(t *testing.T) {
 	const orgRelay = "https://llm-proxy.corp.internal"
 	home := t.TempDir()
@@ -302,15 +285,8 @@ func TestASecondInstallDoesNotOverwriteTheRememberedOriginal(t *testing.T) {
 	}
 }
 
-// TestOurOwnGatewayURLIsNotRememberedAsTheOrgs is the other half of the
-// first-writer-wins record, and the half that was missing.
-//
-// TestASecondInstallDoesNotOverwriteTheRememberedOriginal seeds a FOREIGN value first, so it never reaches the case
-// where the displaced value is one WE wrote: re-running init with a different
-// --gateway-addr. Recording that made `--remove-gateway` restore a loopback URL
-// whose daemon it had just unloaded, and a dead localhost fails closed — so the
-// command that undoes the gateway left every model call on the machine failing,
-// while announcing that it had restored the org's own setting.
+// TestOurOwnGatewayURLIsNotRememberedAsTheOrgs is the other half of the first-
+// writer-wins record, and the half that was missing.
 func TestOurOwnGatewayURLIsNotRememberedAsTheOrgs(t *testing.T) {
 	home := t.TempDir()
 

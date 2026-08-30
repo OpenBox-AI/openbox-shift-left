@@ -13,14 +13,12 @@ import (
 	"strings"
 )
 
-// minSSEFrames is how many event-stream frames the streaming fixture must
-// carry.
 const minSSEFrames = 3
 
 const redactedMarker = "${OPENBOX_REDACTED"
 
-// extractProxy pulls two model-call exchanges out of the recorded proxy
-// stream: one with a JSON response and one with an SSE response.
+// extractProxy the recorder flattened the response into ONE body, so real
+// chunk boundaries do not exist in the corpus.
 func extractProxy(corpus, out string) error {
 	f, err := os.Open(filepath.Join(corpus, "proxy", "events.jsonl"))
 	if err != nil {

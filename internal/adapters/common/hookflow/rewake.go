@@ -16,8 +16,9 @@ import (
 )
 
 const (
-	// rewakeMarkerGrace bounds how long the watcher waits for the gate to file an
-	// approval.
+	// rewakeMarkerGrace 10s is ~2.5× that worst case; the cost of the margin is a
+	// few extra idle seconds in a background process nothing waits on, which is
+	// the right side to be wrong on.
 	rewakeMarkerGrace = 10 * time.Second
 
 	rewakePollInterval = 5 * time.Second
@@ -148,9 +149,9 @@ func awaitMarker(ctx context.Context, key client.ApprovalKey) (PendingApproval, 
 	}
 }
 
-// rewakeMessage renders the wake text. Content-free (INV-2): the tool's name,
-// the outcome, the server reference, and the policy-authored reason; the same
-// class of fields the deny reason carries, never the command or file body.
+// rewakeMessage content-free (INV-2): the tool's name, the outcome, the server
+// reference, and the policy-authored reason; the same class of fields the deny
+// reason carries, never the command or file body.
 func rewakeMessage(tool string, st client.ApprovalStatus) string {
 	msg := "OpenBox governance: the approval for " + OrDash(tool)
 	if st.Verdict == client.VerdictAllow {

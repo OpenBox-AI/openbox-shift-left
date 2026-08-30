@@ -53,8 +53,7 @@ func (s Spool) FlushSession(ctx context.Context, sessionID string, fn FlushFunc)
 	return s.drainFile(ctx, s.SessionPath(sessionID), fn)
 }
 
-// recoveryFiles snapshots the carry-over files currently in the spool
-// directory. An unreadable directory yields none: a sweep is best-effort
+// recoveryFiles an unreadable directory yields none: a sweep is best-effort
 // catch-up (observe, INV-3), never a reason to fail a caller.
 func (s Spool) recoveryFiles() []string {
 	entries, err := os.ReadDir(s.Dir)
@@ -275,9 +274,8 @@ func recoveryStem(basePath string) string {
 	return filepath.Join(dir, name)
 }
 
-// writeRecovery persists undelivered lines to a fresh
-// `<session>.rec<N>-<id>.jsonl` file that FlushAll re-drains later, where N is
-// one more than the attempt this drain was.
+// writeRecovery best-effort (observe): a write failure only loses telemetry,
+// never blocks anything.
 func (s Spool) writeRecovery(basePath string, lines [][]byte, attempt int) {
 	if len(lines) == 0 {
 		return

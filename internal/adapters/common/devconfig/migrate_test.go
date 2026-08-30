@@ -7,8 +7,6 @@ import (
 	"testing"
 )
 
-// migrateEnv points Home() at a fresh dir and os.UserConfigDir() at another, so
-// the legacy and new locations are both writable temp dirs.
 func migrateEnv(t *testing.T) (newHome, legacyDir string) {
 	t.Helper()
 	newHome = t.TempDir()
@@ -52,8 +50,9 @@ func TestMigrateLegacyConfigCopiesBothFiles(t *testing.T) {
 	}
 }
 
-// Non-destructive by decision: deleting the legacy file makes a rollback to an
-// older binary lossy and buys nothing but tidiness.
+// TestMigrateLeavesTheLegacyFileInPlace non-destructive by decision: deleting
+// the legacy file makes a rollback to an older binary lossy and buys nothing
+// but tidiness.
 func TestMigrateLeavesTheLegacyFileInPlace(t *testing.T) {
 	_, legacyDir := migrateEnv(t)
 	legacy := filepath.Join(legacyDir, "dev.json")
@@ -89,9 +88,9 @@ func TestMigrateIsIdempotent(t *testing.T) {
 	}
 }
 
-// Presence of the new file always wins: a user who has already run the new
-// binary has a current config, and re-copying a stale legacy file over it would
-// revert whatever they last set.
+// TestMigrateNeverOverwritesAnExistingNewFile presence of the new file always
+// wins: a user who has already run the new binary has a current config, and
+// re-copying a stale legacy file over it would revert whatever they last set.
 func TestMigrateNeverOverwritesAnExistingNewFile(t *testing.T) {
 	newHome, legacyDir := migrateEnv(t)
 	current := []byte(`{"developer_did":"did:aip:current"}`)
@@ -123,14 +122,14 @@ func TestMigrateNoLegacyFilesIsANoOp(t *testing.T) {
 	if len(migrated) != 0 {
 		t.Fatalf("migrated = %v, want nothing", migrated)
 	}
-	// Nothing to migrate must not create the directory either.
 	if entries, err := os.ReadDir(newHome); err == nil && len(entries) != 0 {
 		t.Fatalf("a no-op migration wrote %v", entries)
 	}
 }
 
-// An unreadable legacy file is surfaced rather than swallowed: the alternative is
-// a silent fresh start that loses the user's posture with no sign it happened.
+// TestMigrateSurfacesAnUnreadableLegacyFile an unreadable legacy file is
+// surfaced rather than swallowed: the alternative is a silent fresh start that
+// loses the user's posture with no sign it happened.
 func TestMigrateSurfacesAnUnreadableLegacyFile(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("chmod 0000 does not deny reads on Windows")
@@ -147,8 +146,8 @@ func TestMigrateSurfacesAnUnreadableLegacyFile(t *testing.T) {
 	}
 }
 
-// Someone who set OPENBOX_CONFIG has named the file they want and is not asking
-// to be migrated.
+// TestMigrateSkipsWhenAnExplicitPathIsSet someone who set OPENBOX_CONFIG has
+// named the file they want and is not asking to be migrated.
 func TestMigrateSkipsWhenAnExplicitPathIsSet(t *testing.T) {
 	_, legacyDir := migrateEnv(t)
 	if err := os.WriteFile(filepath.Join(legacyDir, "dev.json"), []byte(`{}`), 0o600); err != nil {
@@ -166,8 +165,9 @@ func TestMigrateSkipsWhenAnExplicitPathIsSet(t *testing.T) {
 	}
 }
 
-// An operator pointing OPENBOX_HOME at the legacy directory would otherwise have
-// the migration copy a file over itself.
+// TestMigrateNoOpWhenHomeIsTheLegacyDir an operator pointing OPENBOX_HOME at
+// the legacy directory would otherwise have the migration copy a file over
+// itself.
 func TestMigrateNoOpWhenHomeIsTheLegacyDir(t *testing.T) {
 	pointUserConfigDirAt(t, t.TempDir())
 	legacy := legacyConfigDir()

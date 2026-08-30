@@ -227,9 +227,8 @@ func mergeMetadata(dst, src map[string]any) map[string]any {
 	return dst
 }
 
-// toolMetadata builds the Pre/PostToolUse metadata: the permission mode plus
-// the structural Codex correlation ids (tool_use_id, turn_id). Identifiers
-// only, never content (INV-2); tool_input/tool_response are not represented.
+// toolMetadata identifiers only, never content (INV-2);
+// tool_input/tool_response are not represented.
 func toolMetadata(e *HookEvent) map[string]any {
 	return compact(map[string]any{
 		"permission_mode": enumOr(e.PermissionMode, permissionModes),
@@ -238,8 +237,10 @@ func toolMetadata(e *HookEvent) map[string]any {
 	})
 }
 
-// mapTool builds the Tool identity and the semantic Span for a Pre/PostToolUse
-// event. Stage is "started" (ToolCall) or "completed" (ToolResult).
+//   - Span.InvocationID = tool_use_id.
+//   - Span.OperationID = what is being done, identical across a retry.
+//     Activity_id derives from it, and activity_id is the approval key plus
+//     the scope of both of core's bypass grants.
 func mapTool(e *HookEvent, stage string) (client.Tool, *client.Span) {
 	kind, sem, fileOp, mcpServer, function := classifyTool(e.ToolName)
 
@@ -321,8 +322,8 @@ func sessionStartMetadata(e *HookEvent) map[string]any {
 
 const maxIdentLen = 512
 
-// Known Codex lifecycle enum values, grounded in the 0.145.0 embedded hook
-// schemas (session-start.command.input / session-end.command.input).
+// A value outside its set is dropped (never egressed verbatim), keeping
+// metadata clean.
 var (
 	sourceValues    = map[string]bool{"startup": true, "resume": true, "clear": true, "compact": true}
 	reasonValues    = map[string]bool{"other": true}

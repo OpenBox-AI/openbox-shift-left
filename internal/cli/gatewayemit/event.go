@@ -35,7 +35,6 @@ type Lane struct {
 	// IDPrefix is what a minted fallback id starts with.
 	IDPrefix string
 
-	// setDiscriminator writes this lane's request id onto the event.
 	setDiscriminator func(*client.DevEvent, string)
 }
 

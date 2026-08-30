@@ -6,8 +6,6 @@ import (
 	"testing"
 )
 
-// allowList is a test OwnershipVerifier: it "owns" exactly the listed ids —
-// standing in for the deferred backend session-ownership lookup (SL5-SEC-1).
 func allowList(owned ...string) OwnershipVerifier {
 	set := map[string]bool{}
 	for _, id := range owned {
@@ -35,9 +33,8 @@ func TestOwnership_VerifiedClaimBecomesAttributed(t *testing.T) {
 }
 
 func TestOwnership_PartialVerificationStaysAttributedButFlagsClaims(t *testing.T) {
-	// One session is owned by the pusher, one is a forged claim naming a
-	// victim's id. The deploy is attributed (a real owner exists) but the
-	// forged id is recorded verified=false — never silently trusted.
+	// The deploy is attributed (a real owner exists) but the forged id is
+	// recorded verified=false; never silently trusted.
 	r := newTestRepo(t)
 	sha := r.commit(trailerMsg("work", "sess-mine", "sess-victim"))
 
@@ -64,7 +61,6 @@ func TestOwnership_PartialVerificationStaysAttributedButFlagsClaims(t *testing.T
 }
 
 func TestOwnership_LookupErrorFailsClosedOnAttribution(t *testing.T) {
-	// A lookup fault must never over-attribute: the claim stays unverified.
 	r := newTestRepo(t)
 	sha := r.commit(trailerMsg("work", "sess-A"))
 	boom := verifierFunc(func(context.Context, string) (bool, error) {

@@ -16,18 +16,11 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/internal/client/memhttptest"
 )
 
-// requesttarget_test.go pins the origin-form requirement, whose whole job is to
-// keep the upstream HOST fixed.
-//
-// The target is built by concatenation, so a request-target that does not start
-// with "/" splices into the authority instead of the path. These tests drive the
-// RAW request line over a socket rather than calling ServeHTTP with a synthetic
-// *http.Request, because the bug lives in what net/http's own parser hands the
-// handler — a hand-built Request could not reproduce it, and a test that cannot
-// reproduce the bug cannot hold the fix.
+// These tests drive the RAW request line over a socket rather than calling
+// ServeHTTP with a synthetic *http.Request, because the bug lives in what
+// net/http's own parser hands the handler; a hand-built Request could not
+// reproduce it, and a test that cannot reproduce the bug cannot hold the fix.
 
-// rawRequestLine sends one literal request line to a live gateway and returns the
-// status line plus body. No http.Client, which would refuse to emit these forms.
 func rawRequestLine(t *testing.T, addr, line string) (int, string) {
 	t.Helper()
 	conn, err := memhttptest.DialContext(context.Background(), "tcp", addr)
@@ -48,7 +41,6 @@ func rawRequestLine(t *testing.T, addr, line string) (int, string) {
 	return resp.StatusCode, string(body)
 }
 
-// hostPort reduces a test server's URL to the host:port a raw socket needs.
 func hostPort(t *testing.T, srv *memhttptest.Server) string {
 	t.Helper()
 	u, err := url.Parse(srv.URL)
@@ -59,11 +51,8 @@ func hostPort(t *testing.T, srv *memhttptest.Server) string {
 }
 
 // TestNonOriginFormTargetsCannotRetargetTheUpstreamHost is the control for the
-// host-splice. An authority-form line is the one that produced a syntactically
-// valid URL on a different host, so it is asserted by name.
+// host-splice.
 func TestNonOriginFormTargetsCannotRetargetTheUpstreamHost(t *testing.T) {
-	// A recorder that must never be reached: any forward at all is a failure,
-	// because every line below names a host that is not this one.
 	var reached bool
 	upstream := memhttptest.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		reached = true
@@ -73,35 +62,19 @@ func TestNonOriginFormTargetsCannotRetargetTheUpstreamHost(t *testing.T) {
 	addr := hostPort(t, newTestGateway(t, upstream.URL))
 
 	for _, tc := range []struct {
-		name string
-		line string
-		// oursToRefuse is false for a form net/http answers BEFORE the handler,
-		// so the test asserts the property that actually matters (nothing was
-		// forwarded) without claiming our code produced the response.
+		name         string
+		line         string
 		oursToRefuse bool
 	}{
-		// The measured case: r.RequestURI is "evil.com:443", which concatenates
-		// onto the upstream to yield host "…comevil.com:443".
 		{"authority form (CONNECT)", "CONNECT evil.com:443 HTTP/1.1", true},
 		{"authority form with a path", "CONNECT evil.com:443/v1/messages HTTP/1.1", true},
-		// Absolute-form does not currently reach another host (it yields an
-		// invalid port and a 502), but it is refused by name so a later change to
-		// the concatenation cannot quietly make it one.
 		{"absolute form", "GET http://evil.com/v1/messages HTTP/1.1", true},
-		// Asterisk-form never reaches ServeHTTP: net/http intercepts
-		// `OPTIONS *` in serverHandler.ServeHTTP and answers it with its own
-		// global handler. Kept in the table because the property under test is
-		// "not forwarded upstream", and that holds for the same reason either
-		// way — but asserting OUR 400 here would be asserting the stdlib's
-		// behaviour and would break if it ever delegated instead.
 		{"asterisk form", "OPTIONS * HTTP/1.1", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			reached = false
 			status, body := rawRequestLine(t, addr, tc.line)
 
-			// The invariant, and it holds for every form: the upstream host is
-			// fixed, so a target naming another host reaches nothing.
 			if reached {
 				t.Error("the request was forwarded upstream; a non-origin-form target must not be relayed at all")
 			}
@@ -112,8 +85,6 @@ func TestNonOriginFormTargetsCannotRetargetTheUpstreamHost(t *testing.T) {
 				t.Errorf("status = %d, want %d (%s must be refused, not relayed)",
 					status, http.StatusBadRequest, tc.name)
 			}
-			// The refusal has to name the reason: a bare 400 is indistinguishable
-			// from the gateway being broken.
 			var env struct {
 				Error struct {
 					Type    string `json:"type"`
@@ -130,10 +101,10 @@ func TestNonOriginFormTargetsCannotRetargetTheUpstreamHost(t *testing.T) {
 	}
 }
 
-// TestOriginFormStillRelaysVerbatim is the other half: the check must not narrow
-// what a real client sends. A percent-escape Go would not have chosen itself is
-// included because it is the case the `target` comment exists for — the forwarded
-// target must stay byte-identical.
+// TestOriginFormStillRelaysVerbatim is the other half: the check must not
+// narrow what a real client sends. A percent-escape Go would not have chosen
+// itself is included because it is the case the `target` comment exists for;
+// the forwarded target must stay byte-identical.
 func TestOriginFormStillRelaysVerbatim(t *testing.T) {
 	for _, target := range []string{
 		"/v1/messages",

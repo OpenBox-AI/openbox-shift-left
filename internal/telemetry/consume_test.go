@@ -12,9 +12,8 @@ import (
 	"go.opentelemetry.io/collector/pdata/ptrace"
 )
 
-// These drive REAL pdata through the REAL consumers. No socket is involved, so
-// they run everywhere; what they cannot cover is the HTTP path in front of them,
-// which needs a listener this sandbox denies.
+// No socket is involved, so they run everywhere; what they cannot cover is the
+// HTTP path in front of them, which needs a listener this sandbox denies.
 
 type captureEmitter struct {
 	records []Record
@@ -26,7 +25,6 @@ func (c *captureEmitter) Emit(_ context.Context, r Record) error {
 	return c.err
 }
 
-// logsWith builds one resource/scope/record tree with the given attributes.
 func logsWith(resource, scope, record map[string]string, ts time.Time) plog.Logs {
 	ld := plog.NewLogs()
 	rl := ld.ResourceLogs().AppendEmpty()
@@ -56,9 +54,8 @@ func newTestReceiver(t *testing.T, e Emitter) *Receiver {
 	return r
 }
 
-// The three attribute levels merge, and the most specific wins a collision.
-// Without the precedence, a resource-level key would mask the per-record value
-// that describes the event actually being reported.
+// TestLogRecordMergesAttributesMostSpecificWins the three attribute levels
+// merge, and the most specific wins a collision.
 func TestLogRecordMergesAttributesMostSpecificWins(t *testing.T) {
 	cap := &captureEmitter{}
 	r := newTestReceiver(t, cap)
@@ -97,10 +94,8 @@ func TestLogRecordMergesAttributesMostSpecificWins(t *testing.T) {
 	}
 }
 
-// Sibling records must not see each other's attributes. The resource map is
-// shared across every record beneath it, so a merge that wrote through the base
-// would leak the first record's keys onto the second — and each record's
-// attributes are what phase 10 attributes a turn from.
+// TestSiblingRecordsDoNotShareAttributes sibling records must not see each
+// other's attributes.
 func TestSiblingRecordsDoNotShareAttributes(t *testing.T) {
 	cap := &captureEmitter{}
 	r := newTestReceiver(t, cap)
@@ -129,9 +124,10 @@ func TestSiblingRecordsDoNotShareAttributes(t *testing.T) {
 	}
 }
 
-// A record naming no event still reaches the emitter. Dropping it here would hide
-// a provider rename as silence, and silence is the one signal OD4 turns into a
-// finding — it must mean "the client sent nothing", not "we discarded it".
+// TestUnnamedRecordStillDelivered a record naming no event still reaches the
+// emitter. Dropping it here would hide a provider rename as silence, and
+// silence is the one signal OD4 turns into a finding; it must mean "the client
+// sent nothing", not "we discarded it".
 func TestUnnamedRecordStillDelivered(t *testing.T) {
 	cap := &captureEmitter{}
 	r := newTestReceiver(t, cap)
@@ -146,10 +142,8 @@ func TestUnnamedRecordStillDelivered(t *testing.T) {
 	}
 }
 
-// The timestamp falls back to the observed time, and stays ZERO when neither is
-// set. A fabricated `now` would be indistinguishable downstream from a real
-// measurement, and this lane's whole value is that its records describe something
-// that actually happened.
+// TestTimestampFallsBackButIsNeverInvented the timestamp falls back to the
+// observed time, and stays zero when neither is set.
 func TestTimestampFallsBackButIsNeverInvented(t *testing.T) {
 	cap := &captureEmitter{}
 	r := newTestReceiver(t, cap)
@@ -174,10 +168,10 @@ func TestTimestampFallsBackButIsNeverInvented(t *testing.T) {
 	}
 }
 
-// An emitter error must not propagate. This lane is additive by construction: a
-// returned error becomes an export failure the governed tool retries and
-// eventually surfaces, so a failing sink would degrade the very session it exists
-// to observe silently.
+// TestEmitterErrorNeverReachesTheExporter an emitter error must not propagate.
+// This lane is additive by construction: a returned error becomes an export
+// failure the governed tool retries and eventually surfaces, so a failing sink
+// would degrade the very session it exists to observe silently.
 func TestEmitterErrorNeverReachesTheExporter(t *testing.T) {
 	cap := &captureEmitter{err: errFake{}}
 	var warned int
@@ -197,9 +191,9 @@ type errFake struct{}
 
 func (errFake) Error() string { return "sink unavailable" }
 
-// A receiver with no emitter still decodes and counts. Doctor's reachability
-// probe and the install-time proof that the port is live both run before any
-// emitter exists, so this path must not panic.
+// TestNilEmitterStillCounts a receiver with no emitter still decodes and
+// counts. Doctor's reachability probe and the install-time proof that the port
+// is live both run before any emitter exists, so this path must not panic.
 func TestNilEmitterStillCounts(t *testing.T) {
 	r, err := New(Config{})
 	if err != nil {
@@ -213,9 +207,9 @@ func TestNilEmitterStillCounts(t *testing.T) {
 	}
 }
 
-// Counts answer "is it recording", which is what doctor needs to distinguish from
-// "is it reachable" — the distinction the gateway lacks, where a working relay
-// capturing nothing reads as healthy.
+// TestCountsCoverEverySignal counts answer "is it recording", which is what
+// doctor needs to distinguish from "is it reachable"; the distinction the
+// gateway lacks, where a working relay capturing nothing reads as healthy.
 func TestCountsCoverEverySignal(t *testing.T) {
 	cap := &captureEmitter{}
 	r := newTestReceiver(t, cap)
@@ -243,23 +237,18 @@ func TestCountsCoverEverySignal(t *testing.T) {
 		}
 	}
 
-	// Traces and metrics are accepted and discarded, not projected — phase 10
-	// decides whether either carries anything the contract wants. They must not
-	// reach the emitter as if they had been mapped.
+	// They must not reach the emitter as if they had been mapped.
 	if len(cap.records) != 1 {
 		t.Errorf("emitter saw %d records, want only the log record", len(cap.records))
 	}
 }
 
-// An oversized attribute is TRUNCATED, not dropped, and truncation lands on a
-// rune boundary. A value cut mid-sequence becomes invalid UTF-8, which
-// json.Marshal rewrites to U+FFFD on the way to the spool — turning a clipped
-// value into a corrupted one.
+// TestOversizedAttributeIsTruncatedOnARuneBoundary an oversized attribute is
+// truncated, not dropped, and truncation lands on a rune boundary.
 func TestOversizedAttributeIsTruncatedOnARuneBoundary(t *testing.T) {
 	cap := &captureEmitter{}
 	r := newTestReceiver(t, cap)
 
-	// Multi-byte runes, so a byte-wise cut would land mid-sequence.
 	huge := strings.Repeat("é", maxAttrValueBytes)
 	if err := r.consumeLogs(context.Background(), logsWith(nil, nil, map[string]string{"big": huge}, time.Time{})); err != nil {
 		t.Fatalf("consumeLogs: %v", err)
@@ -285,9 +274,7 @@ func utf8Valid(s string) bool {
 	return true
 }
 
-// The attribute count is bounded. MaxRequestBodyBytes bounds the REQUEST; without
-// this a single conforming request could still expand into a map large enough to
-// matter, and the spool would then carry it.
+// TestAttributeCountIsBounded the attribute count is bounded.
 func TestAttributeCountIsBounded(t *testing.T) {
 	cap := &captureEmitter{}
 	r := newTestReceiver(t, cap)

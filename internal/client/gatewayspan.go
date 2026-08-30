@@ -9,6 +9,9 @@ import (
 
 // It is a second span producer alongside turnspan.go, and the two are kept
 // apart on purpose:
+//   - Turnspan.go carries the assistant's reply, for exactly one reader;
+//     core's
+//   - This file carries an observed HTTP exchange: the real headers, the real
 
 // observedSpanAttributes gatewaySpanAttributes carries the classification
 // keys, and they are NOT decorative. It is decided from the lane rather than
@@ -38,7 +41,6 @@ const (
 	maxHeaderCount      = 64
 )
 
-// capHeaders bounds a captured header map for egress.
 func capHeaders(h map[string]string) map[string]string {
 	if len(h) == 0 {
 		return nil
@@ -69,7 +71,9 @@ func capHeaderValue(v string) string {
 	return v[:end] + "…[truncated]"
 }
 
-// observedLane names the producer that observed this turn, and its request id.
+// observedLane the precedence is turnActivityIDFor's, deliberately and not
+// coincidentally: proxy, then gateway, then otel (that decision; in-path relay
+// outranks a client-asserted lane).
 func observedLane(ev DevEvent) (name, id string) {
 	switch {
 	case ev.ProxyRequestID != "":
@@ -82,9 +86,6 @@ func observedLane(ev DevEvent) (name, id string) {
 	return "", ""
 }
 
-// observedSpanID derives the span id from the observing lane's request id, so
-// a re-emit after a crash mints the same id and core's span dedupe; (span_id,
-// stage) scoped by session_id; absorbs it instead of storing a second row.
 func observedSpanID(ev DevEvent) string {
 	lane, id := observedLane(ev)
 	if lane == "" {

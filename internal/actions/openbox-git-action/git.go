@@ -13,9 +13,8 @@ import (
 
 const trailerKey = obgit.TrailerKey
 
-// maxMessageBytes bounds how much of a single commit message the resolver
-// reads. A body that exceeds this is truncated and the truncation is surfaced
-// (never silent).
+// maxMessageBytes a body that exceeds this is truncated and the truncation is
+// surfaced (never silent).
 const maxMessageBytes = 1 << 20 // 1 MiB
 
 // Repo is a read-only view of a git repository for server-side resolution. All
@@ -34,9 +33,7 @@ func (r Repo) bin() string {
 	return "git"
 }
 
-// run executes `git [-C dir] args...` and returns stdout, mapping a non-zero
-// exit to an error including stderr. We never pass a secret to git, so stderr
-// is secret-free by construction.
+// run we never pass a secret to git, so stderr is secret-free by construction.
 func (r Repo) run(args ...string) (string, error) {
 	full := args
 	if r.Dir != "" {
@@ -52,9 +49,9 @@ func (r Repo) run(args ...string) (string, error) {
 	return out.String(), nil
 }
 
-// runLimited runs git and returns at most maxBytes of stdout, reporting
-// whether the output was truncated. A giant commit body) can never be buffered
-// whole into memory (SEC-6-1).
+// runLimited unlike run it streams stdout through an io.LimitReader so a
+// hostile, arbitrarily large output (e.g. A giant commit body) can never be
+// buffered whole into memory (SEC-6-1).
 func (r Repo) runLimited(maxBytes int64, args ...string) (out string, truncated bool, err error) {
 	full := args
 	if r.Dir != "" {

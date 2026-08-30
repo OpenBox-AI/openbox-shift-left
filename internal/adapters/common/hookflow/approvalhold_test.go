@@ -16,8 +16,6 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/internal/provider"
 )
 
-// fakeGovernor answers polls from a scripted sequence, so a test can express
-// "pending, pending, then approved" without any wall-clock coupling.
 type fakeGovernor struct {
 	mu      sync.Mutex
 	replies []func() (client.ApprovalStatus, error)
@@ -97,8 +95,9 @@ func TestAwaitApproval_DecidedDuringTheHold(t *testing.T) {
 	}
 }
 
-// A transport blip mid-hold is not evidence that the approval was refused: the
-// hold keeps polling on its cadence rather than giving up on the first error.
+// TestAwaitApproval_SurvivesAPollFailure a transport blip mid-hold is not
+// evidence that the approval was refused: the hold keeps polling on its
+// cadence rather than giving up on the first error.
 func TestAwaitApproval_SurvivesAPollFailure(t *testing.T) {
 	expiry := time.Now().Add(30 * time.Minute)
 	g := &fakeGovernor{replies: []func() (client.ApprovalStatus, error){
@@ -113,8 +112,9 @@ func TestAwaitApproval_SurvivesAPollFailure(t *testing.T) {
 	}
 }
 
-// Once core's window has passed nothing will decide the request, so the hold
-// stops rather than spending the rest of its budget.
+// TestAwaitApproval_StopsWhenTheWindowCloses once core's window has passed
+// nothing will decide the request, so the hold stops rather than spending the
+// rest of its budget.
 func TestAwaitApproval_StopsWhenTheWindowCloses(t *testing.T) {
 	g := &fakeGovernor{replies: []func() (client.ApprovalStatus, error){pending(time.Now().Add(-time.Minute))}}
 	start := time.Now()
@@ -138,9 +138,8 @@ func TestAwaitApproval_UndecidedWithinBudget(t *testing.T) {
 	}
 }
 
-// The hold is clamped by whatever is left of the provider's hook timeout. With
-// none left there is no room to hold, so the caller denies immediately rather
-// than overrun the hook and be killed (which fails open).
+// TestHoldBudget_ClampedByTheHookCeiling the hold is clamped by whatever is
+// left of the provider's hook timeout.
 func TestHoldBudget_ClampedByTheHookCeiling(t *testing.T) {
 	tr := Evaluator{Ceiling: provider.HookCeiling{Gating: 30 * time.Second}}
 	if got := tr.HoldBudget(time.Now(), 20*time.Second); got != 20*time.Second {
@@ -165,9 +164,10 @@ func TestHoldBudget_ClampedByTheHookCeiling(t *testing.T) {
 	}
 }
 
-// OD-E9-1: an undecided approval DENIES, and names the reference so the model
-// can say what is being waited on. It must never fall through to the provider's
-// own prompt, which would ask the developer to approve their own request.
+// TestApprovalUndecided_DeniesWithTheReference oD-E9-1: an undecided approval
+// denies, and names the reference so the model can say what is being waited
+// on. It must never fall through to the provider's own prompt, which would ask
+// the developer to approve their own request.
 func TestApprovalUndecided_DeniesWithTheReference(t *testing.T) {
 	dec := decision.Decision{Evaluation: client.Evaluation{
 		Verdict:           client.VerdictRequireApproval,
@@ -177,18 +177,12 @@ func TestApprovalUndecided_DeniesWithTheReference(t *testing.T) {
 	if out.Evaluation.Verdict != client.VerdictHalt {
 		t.Errorf("verdict = %q, want HALT so the apply cascade denies", out.Evaluation.Verdict)
 	}
-	// The synthesized HALT must be re-sourced: with Source left "evaluate" a
-	// hold timeout would read — in the audit and to the session-halt
-	// discriminator — as the control plane answering HALT, and every timed-out
-	// approval would terminate the session.
 	if out.Source != SourceApprovalUndecided {
 		t.Errorf("source = %q, want %q", out.Source, SourceApprovalUndecided)
 	}
 	if out.SessionHalt {
 		t.Error("an undecided approval must never be marked session-halting")
 	}
-	// Through the full apply cascade: a per-call deny — never the provider's
-	// self-approval prompt, and never the session-stop rendering.
 	var buf bytes.Buffer
 	res := ApplyDecision(&buf, out, false, nil, testContract{approval: "ask"})
 	if res.Decision != DecisionDeny {
@@ -209,7 +203,6 @@ func TestResolveApprovalHold(t *testing.T) {
 	if got := resolveApprovalHold(); got != 1500*time.Millisecond {
 		t.Errorf("configured hold = %v, want 1.5s", got)
 	}
-	// A value that would overflow time.Duration on the multiply is clamped.
 	t.Setenv(devconfig.EnvApprovalHold, "9223372036854775807")
 	if got := resolveApprovalHold(); got != time.Hour {
 		t.Errorf("overflowing hold = %v, want the 1h clamp", got)

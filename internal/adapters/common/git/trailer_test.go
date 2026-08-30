@@ -7,7 +7,6 @@ import (
 	"testing"
 )
 
-// writeMsg writes a commit-message file for message-level stamping tests.
 func writeMsg(t *testing.T, body string) string {
 	t.Helper()
 	p := filepath.Join(t.TempDir(), "COMMIT_EDITMSG")
@@ -32,7 +31,8 @@ func TestStamp_AddsTrailer(t *testing.T) {
 	}
 }
 
-// Re-firing the hook (the `--amend` case, S3 R2) must NOT duplicate an id.
+// TestStamp_IdempotentOnReStamp re-firing the hook (the `--amend` case, S3 R2)
+// must NOT duplicate an id.
 func TestStamp_IdempotentOnReStamp(t *testing.T) {
 	g := Git{}
 	msg := writeMsg(t, "add feature\n")
@@ -47,14 +47,14 @@ func TestStamp_IdempotentOnReStamp(t *testing.T) {
 	}
 }
 
-// Distinct sessions => multiple lines (fan-in, S3 R3), order preserved.
+// TestStamp_MultiSessionFanIn distinct sessions => multiple lines (fan-in, S3
+// R3), order preserved.
 func TestStamp_MultiSessionFanIn(t *testing.T) {
 	g := Git{}
 	msg := writeMsg(t, "shared work\n")
 	if err := g.StampMessageFile(msg, []string{"sess-A", "sess-B"}); err != nil {
 		t.Fatal(err)
 	}
-	// A later commit adds a third session on top of the existing two.
 	if err := g.StampMessageFile(msg, []string{"sess-B", "sess-C"}); err != nil {
 		t.Fatal(err)
 	}
@@ -65,24 +65,19 @@ func TestStamp_MultiSessionFanIn(t *testing.T) {
 	}
 }
 
-// The core squash-healing property (this repo's own finding): a squash leaves
-// earlier session lines MID-BODY, where git's trailer parser cannot see them.
-// StampMessageFile must harvest them into the trailing block so the full fan-in
-// is resolvable via %(trailers) — exactly how SL-6 reads it (S3 R7).
+// TestStamp_HealsSquashConcatenation the core squash-healing property (this
+// repo's own finding): a squash leaves earlier session lines MID-body, where
+// git's trailer parser cannot see them.
 func TestStamp_HealsSquashConcatenation(t *testing.T) {
-	// Simulate the buffer a `git rebase -i` squash hands to prepare-commit-msg:
-	// two source messages concatenated, each ending in its own trailer.
 	squashed := "A subject\n\nOpenBox-Session: sess-A\n\nB subject\n\nOpenBox-Session: sess-B\n"
 	msg := writeMsg(t, squashed)
 	g := Git{}
 
-	// Before healing, only the trailing block (sess-B) is parseable.
 	pre, _ := g.ReadTrailers(msg)
 	if !reflect.DeepEqual(pre, []string{"sess-B"}) {
 		t.Fatalf("precondition: parser should see only sess-B, got %v", pre)
 	}
 
-	// Heal with no in-scope session (a human ran the squash): both must surface.
 	if err := g.StampMessageFile(msg, nil); err != nil {
 		t.Fatal(err)
 	}
@@ -93,9 +88,10 @@ func TestStamp_HealsSquashConcatenation(t *testing.T) {
 	}
 }
 
-// F1: a message with no real content (only git comments / blank lines) must be
-// left UNTOUCHED, so git's own empty-message abort still fires — stamping it
-// would create a junk trailer-only commit.
+// TestStamp_EmptyMessageNotStamped f1: a message with no real content (only
+// git comments / blank lines) must be left untouched, so git's own empty-
+// message abort still fires; stamping it would create a junk trailer-only
+// commit.
 func TestStamp_EmptyMessageNotStamped(t *testing.T) {
 	g := Git{}
 	commentOnly := "\n# Please enter the commit message for your changes.\n# with '#' will be ignored.\n#\n"
@@ -169,7 +165,8 @@ func TestValidateSessionID(t *testing.T) {
 	}
 }
 
-// A secret-shaped or malformed value must never reach the commit message.
+// TestStamp_DropsInvalidNeverWritesSecret a secret-shaped or malformed value
+// must never reach the commit message.
 func TestStamp_DropsInvalidNeverWritesSecret(t *testing.T) {
 	g := Git{}
 	msg := writeMsg(t, "work\n")
@@ -194,9 +191,9 @@ func TestValidSessionIDs_DedupePreservesOrder(t *testing.T) {
 	}
 }
 
-// F5: the harvest gate drops prose (whitespace) and secret-shaped values, so a
-// column-0 "OpenBox-Session: some prose" body line can never be hoisted into a
-// resolvable trailer.
+// TestValidSessionIDs_DropsProseAndSecrets f5: the harvest gate drops prose
+// (whitespace) and secret-shaped values, so a column-0 "OpenBox-Session: some
+// prose" body line can never be hoisted into a resolvable trailer.
 func TestValidSessionIDs_DropsProseAndSecrets(t *testing.T) {
 	got := validSessionIDs([]string{"good-id", "prose with spaces", "obx_secret", "also\tbad"})
 	want := []string{"good-id"}

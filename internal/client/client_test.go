@@ -18,8 +18,6 @@ import (
 
 const testAPIKey = "obx_test_" + "0123456789abcdef0123456789abcdef0123456789abcdef"
 
-// captureLogger records log lines so tests can assert fail-open diagnostics and,
-// critically, that no secret ever appears in them (INV-1).
 type captureLogger struct {
 	mu    sync.Mutex
 	lines []string
@@ -72,10 +70,6 @@ func sampleEvent() DevEvent {
 	}
 }
 
-// coreMirrorServer stands in for openbox-core's /evaluate: it authenticates the
-// Bearer key, verifies the AIP signature exactly as core would, records the
-// decoded payload, and returns a verdict. onRequest lets a test override the
-// status/verdict per call (for retry tests).
 func coreMirrorServer(t *testing.T, pub ed25519.PublicKey, onRequest func(n int) (status int, verdict string)) (*memhttptest.Server, *[]governanceEventPayload, *int) {
 	t.Helper()
 	var mu sync.Mutex
@@ -146,8 +140,6 @@ func TestEmit_HappyPath_SignedAndParsed(t *testing.T) {
 		t.Fatalf("payloads = %d, want 1", len(*payloads))
 	}
 	p := (*payloads)[0]
-	// A ToolCall serializes as an ActivityStarted (NOT event_type "ToolCall"):
-	// a tool execution is an activity, so it rides the activity lifecycle.
 	if p.Source != source || p.EventType != "ActivityStarted" || p.RunID != "sess-1" {
 		t.Errorf("envelope mismap: %+v", p)
 	}
@@ -187,10 +179,8 @@ func TestEmit_VerdictParsing(t *testing.T) {
 }
 
 func TestEmit_FailOpen_Unreachable(t *testing.T) {
-	// A closed port: Do() errors on every attempt. The fail-open invariant is
-	// about the VERDICT, not the error: a transport failure must yield a verdict
-	// no caller can read as a block. Emit also reports ErrDelivery so a durable
-	// caller can retry instead of losing the event (E8-S7) — advisory only.
+	// The fail-open invariant is about the verdict, not the error: a transport
+	// failure must yield a verdict no caller can read as a block.
 	c, log := newTestClient(t, "http://127.0.0.1:1", false)
 	v, err := c.Emit(context.Background(), sampleEvent())
 	if !errors.Is(err, ErrDelivery) {
@@ -202,14 +192,12 @@ func TestEmit_FailOpen_Unreachable(t *testing.T) {
 	if !strings.Contains(log.all(), "evt-1") {
 		t.Errorf("expected a drop log mentioning the event id; got %q", log.all())
 	}
-	// INV-1: the secret key must never appear in logs.
 	if strings.Contains(log.all(), testAPIKey) || strings.Contains(log.all(), testPrivateKeyB64) {
 		t.Error("INV-1 violation: secret material leaked into logs")
 	}
 }
 
 func TestEmit_RetriesThenSucceeds(t *testing.T) {
-	// 500 on the first two attempts, 200 on the third (== maxRetries+1).
 	srv, _, calls := coreMirrorServer(t, pub(t), func(n int) (int, string) {
 		if n < 3 {
 			return 500, ""
@@ -254,7 +242,6 @@ func TestEmit_4xxNotRetried(t *testing.T) {
 	if v.Verdict != VerdictUnknown {
 		t.Errorf("fail-open violated: verdict = %q, want unknown", v.Verdict)
 	}
-	// A 400 is terminal (e.g. today's un-accept-listed dev event_type — EXT-core).
 	if *calls != 1 {
 		t.Errorf("calls = %d, want 1 (4xx not retried)", *calls)
 	}
@@ -265,7 +252,6 @@ func TestEmit_EmptyEventID_IsCallerError(t *testing.T) {
 	c, _ := newTestClient(t, srv.URL, false)
 	ev := sampleEvent()
 	ev.EventID = ""
-	// The non-fail-open cases: preconditions the caller must fix.
 	if _, err := c.Emit(context.Background(), ev); err == nil {
 		t.Error("expected error for empty EventID (INV-5)")
 	}
@@ -283,12 +269,10 @@ func TestEmit_EmptySessionID_IsCallerError(t *testing.T) {
 
 func TestNew_RejectsPlaintextNonLoopback(t *testing.T) {
 	base := Config{APIKey: testAPIKey, DID: testDID, PrivateKeyB64: testPrivateKeyB64}
-	// Plaintext to a real host would leak the bearer key (INV-1).
 	base.BaseURL = "http://core.openbox.ai"
 	if _, err := New(base); err == nil {
 		t.Error("expected New to reject http:// to a non-loopback host")
 	}
-	// https anywhere and http on loopback are allowed.
 	for _, ok := range []string{"https://core.openbox.ai", "http://localhost:8080", "http://127.0.0.1:3000"} {
 		base.BaseURL = ok
 		if _, err := New(base); err != nil {
@@ -304,8 +288,6 @@ func TestNew_RejectsMalformedDID(t *testing.T) {
 }
 
 func TestEmit_RetryReusesSameEventID(t *testing.T) {
-	// Idempotency (INV-5): every attempt carries the identical body, so core
-	// dedupes on the same event's metadata/ids rather than double-counting.
 	srv, payloads, _ := coreMirrorServer(t, pub(t), func(n int) (int, string) {
 		if n < 2 {
 			return 500, ""
@@ -326,9 +308,9 @@ func TestEmit_RetryReusesSameEventID(t *testing.T) {
 	}
 }
 
-// TestEmit_IdempotencyKeyHeader (STORY-SL-14): every POST carries an
+// TestEmit_IdempotencyKeyHeader (story-SL-14): every POST carries an
 // Idempotency-Key request header equal to the event's EventID and to the
-// metadata.event_id in the signed body — the explicit, header-standard half of
+// metadata.event_id in the signed body; the explicit, header-standard half of
 // the dedupe contract (inert until EXT-core consumes it).
 func TestEmit_IdempotencyKeyHeader(t *testing.T) {
 	var mu sync.Mutex
@@ -357,7 +339,6 @@ func TestEmit_IdempotencyKeyHeader(t *testing.T) {
 	if headers[0] != ev.EventID {
 		t.Errorf("Idempotency-Key = %q, want %q (== EventID)", headers[0], ev.EventID)
 	}
-	// And it must equal metadata.event_id in the signed body.
 	var p governanceEventPayload
 	if err := json.Unmarshal(bodies[0], &p); err != nil {
 		t.Fatalf("unmarshal body: %v", err)
@@ -374,10 +355,10 @@ func TestEmit_IdempotencyKeyHeader(t *testing.T) {
 	}
 }
 
-// TestEmit_IdempotencyKeyStableAcrossRetries (STORY-SL-14): a retry after a lost
-// 200 (modeled as a 500 then 200) re-sends the SAME Idempotency-Key — never a
-// freshly generated one — so an eventual server-side dedupe collapses the two
-// stored copies. This is the client half of the lost-200 delivery guarantee.
+// TestEmit_IdempotencyKeyStableAcrossRetries (story-SL-14): a retry after a
+// lost 200 (modeled as a 500 then 200) re-sends the same Idempotency-Key;
+// never a freshly generated one; so an eventual server-side dedupe collapses
+// the two stored copies.
 func TestEmit_IdempotencyKeyStableAcrossRetries(t *testing.T) {
 	var mu sync.Mutex
 	var headers []string

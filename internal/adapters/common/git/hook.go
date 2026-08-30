@@ -95,8 +95,7 @@ func InstallPostCommitHook(hooksDir string, cfg HookConfig) error {
 	return writeHookScript(hooksDir, "post-commit", post)
 }
 
-// writeHookScript writes one hook, refusing to clobber a script OpenBox did
-// not write. A developer's existing hook is theirs; silently replacing it
+// writeHookScript a developer's existing hook is theirs; silently replacing it
 // would be a worse failure than not installing.
 func writeHookScript(hooksDir, name string, cfg HookConfig) error {
 	path := filepath.Join(hooksDir, name)
@@ -153,8 +152,8 @@ func (g Git) HooksDirDefault() (string, error) {
 	return filepath.Join(dir, "hooks"), nil
 }
 
-// hookScript renders the posix-sh hook. Every path exits 0; a non-zero exit
-// from prepare-commit-msg aborts the commit, which observe-only must never do.
+// hookScript every path exits 0; a non-zero exit from prepare-commit-msg
+// aborts the commit, which observe-only must never do.
 func hookScript(cfg HookConfig) string {
 	var parts []string
 	for _, a := range cfg.args() {

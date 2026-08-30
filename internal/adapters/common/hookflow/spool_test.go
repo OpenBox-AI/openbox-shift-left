@@ -10,7 +10,6 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/internal/client"
 )
 
-// testDID is a syntactically valid developer DID; the engine never inspects it.
 const testDID = "did:aip:7f3c9b2e-0000-5000-a000-000000000001"
 
 func jsonLine(e client.DevEvent) ([]byte, error) {
@@ -56,11 +55,9 @@ func TestSpoolRoundTrip(t *testing.T) {
 	if (*got)[0].EventID != "e1" || (*got)[2].EventID != "e3" {
 		t.Errorf("order not preserved: %v", *got)
 	}
-	// Spool file removed after drain.
 	if _, err := os.Stat(sp.SessionPath("sess")); !os.IsNotExist(err) {
 		t.Errorf("spool file should be gone after flush, stat err=%v", err)
 	}
-	// Second flush is a no-op.
 	n2, _ := sp.FlushSession(context.Background(), "sess", fn)
 	if n2 != 0 {
 		t.Errorf("re-flush should drain 0, got %d", n2)
@@ -71,7 +68,6 @@ func TestSpoolCorruptLineSkipped(t *testing.T) {
 	dir := t.TempDir()
 	sp := Spool{Dir: dir}
 	_ = sp.Append(ev("sess", "good1"))
-	// Append a corrupt line directly.
 	f, _ := os.OpenFile(sp.SessionPath("sess"), os.O_APPEND|os.O_WRONLY, 0o600)
 	_, _ = f.WriteString("{not valid json\n")
 	f.Close()
@@ -112,14 +108,13 @@ func TestFlushAllEmptyDir(t *testing.T) {
 }
 
 // TestSpoolCtxCancelPersistsRemainder is the F1 regression guard: a drain cut
-// short by ctx must NOT drop the undelivered tail — it persists to a recovery
+// short by ctx must NOT drop the undelivered tail; it persists to a recovery
 // file that a later FlushAll completes, with NO re-delivery of what was sent.
 func TestSpoolCtxCancelPersistsRemainder(t *testing.T) {
 	sp := Spool{Dir: t.TempDir()}
 	for _, id := range []string{"e1", "e2", "e3", "e4"} {
 		_ = sp.Append(ev("sess", id))
 	}
-	// A FlushFunc that cancels after delivering the 2nd event.
 	ctx, cancel := context.WithCancel(context.Background())
 	var delivered []string
 	fn := func(_ context.Context, e client.DevEvent) error {
@@ -136,8 +131,6 @@ func TestSpoolCtxCancelPersistsRemainder(t *testing.T) {
 	if n != 2 || len(delivered) != 2 {
 		t.Fatalf("delivered %d before cancel, want 2", len(delivered))
 	}
-	// The undelivered remainder (e3,e4) must be recoverable via FlushAll, with
-	// no re-delivery of e1,e2.
 	fn2, got := drainCollect()
 	n2, err := sp.FlushAll(context.Background(), fn2)
 	if err != nil {
@@ -156,7 +149,6 @@ func TestSpoolCtxCancelPersistsRemainder(t *testing.T) {
 func TestSpoolAdoptsOrphan(t *testing.T) {
 	dir := t.TempDir()
 	sp := Spool{Dir: dir}
-	// Simulate an orphan left by a killed drain.
 	orphan := filepath.Join(dir, "sess.jsonl.flushing.cc-deadbeef")
 	line, _ := jsonLine(ev("sess", "orphan1"))
 	if err := os.WriteFile(orphan, line, 0o600); err != nil {
@@ -182,7 +174,6 @@ func TestSanitizeSessionID(t *testing.T) {
 	if got := sanitizeSessionID(""); got != "unknown" {
 		t.Errorf("empty session id → %q, want unknown", got)
 	}
-	// A normal UUID passes through unchanged.
 	uuid := "7f3c9b2e-0000-5000-a000-000000000001"
 	if got := sanitizeSessionID(uuid); got != uuid {
 		t.Errorf("uuid mangled: %q", got)

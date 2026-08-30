@@ -1,9 +1,6 @@
 // Package codex is the OpenAI Codex CLI realization of the Provider Adapter
-// Contract; the observe leg. It maps Codex's native hooks (v0.145.0+, hooks
-// stable and on by default) onto the normalized developer event contract and
-// emits them through the shared AIP-signed transport on the flat hook wire.
-// Observe-only, fail-open; it never blocks, denies, or slows a Codex tool call
-// (INV-3; the enforce leg is in enforce.go).
+// Contract; the observe leg. Observe-only, fail-open; it never blocks, denies,
+// or slows a Codex tool call (INV-3; the enforce leg is in enforce.go).
 package codex
 
 import (

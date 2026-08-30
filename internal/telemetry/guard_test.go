@@ -10,26 +10,10 @@ import (
 	"testing"
 )
 
-// This module links the largest third-party surface in the product, so its
-// boundary is enforced rather than remembered.
-//
-// The rule it protects is the one that made telemetry/ a separate module at all:
-// the collector tree must not leak into gateway/ or decision/, whose own guards
-// bound what credential-path code can execute. A module boundary is a real
-// control only while something checks it — otherwise it is a directory name.
-//
-// Scope: DIRECT requires only. Transitive code is bounded at the module that
-// took the dependency. Enumerating the closure here would make the allowlist
-// unreadable, which is the one thing it must not be.
+// The rule it protects is the one that made telemetry/ a separate module at
+// all: the collector tree must not leak into gateway/ or decision/, whose own
+// guards bound what credential-path code can execute.
 
-// forbiddenCalls are the ways this module could start reading a credential or the
-// developer's files, keyed by IMPORT PATH rather than by the identifier at the
-// call site — an alias defeats identifier matching (`import os2 "os"`).
-//
-// This module runs as a daemon with content flowing through it. It has no reason
-// to read the environment or the filesystem: its configuration arrives as a
-// struct and its output leaves through the Emitter. Anything else is the CLI's
-// job, where the credential handling already lives and is already scanned.
 var forbiddenCalls = map[string][]string{
 	"os":        {"Getenv", "LookupEnv", "Environ", "ReadFile", "Open", "OpenFile", "UserHomeDir", "UserConfigDir"},
 	"syscall":   {"Getenv", "Environ", "Open", "Read"},
@@ -54,8 +38,6 @@ func TestNoCredentialOrFileReads(t *testing.T) {
 			t.Fatalf("parse %s: %v", name, err)
 		}
 
-		// Resolve each import's local name to its path, so an alias is followed
-		// rather than trusted.
 		local := map[string]string{}
 		for _, imp := range file.Imports {
 			path := strings.Trim(imp.Path.Value, `"`)

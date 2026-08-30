@@ -13,32 +13,14 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/internal/gateway"
 )
 
-// schemaRelPath is the dev-event contract, relative to this source file.
-//
-// Read with stdlib rather than through the conformance package on purpose. That
-// package is not a dependency of this module, and adding it would put a
-// jsonschema tree into cli's go.mod for one test — a real dependency edge, and
-// this repo's rule is that adding one is a decision. Reading two declared values
-// out of the document needs neither.
+// schemaRelPath is the dev-event contract, relative to this source file. Read
+// with stdlib rather than through the conformance package on purpose.
 const schemaRelPath = "../../../api/dev-event.schema.json"
 
-// The contract declares a bound on gateway_request_id (maxLength + a printable-
-// ASCII pattern); this package enforces the same rule imperatively in
-// usableRequestID, with its own constant. Two statements of one rule, in two
-// languages, in two modules — so this asserts they agree, and that the values
-// THIS producer actually mints satisfy both.
-//
-// It exists because they could otherwise drift silently in either direction.
-// Widen maxRequestIDLen alone and the producer starts emitting ids its own
-// contract rejects; loosen the schema alone and the contract starts accepting a
-// shape no producer emits, while the comments claiming they agree quietly become
-// false. Nothing validates events at runtime — the conformance validator has no
-// non-test caller anywhere — so a divergence surfaces at ingest or not at all.
-//
-// The equivalence is narrower than it looks: JSON Schema's maxLength counts CODE
-// POINTS and printableASCII counts BYTES. They agree only because the pattern
-// admits no rune wider than one byte. A field taking one without the other does
-// not inherit that.
+// TestGatewayIDBoundMatchesTheContract the contract declares a bound on
+// gateway_request_id (maxLength + a printable- ASCII pattern); this package
+// enforces the same rule imperatively in usableRequestID, with its own
+// constant.
 func TestGatewayIDBoundMatchesTheContract(t *testing.T) {
 	_, thisFile, _, ok := runtime.Caller(0)
 	if !ok {
@@ -58,10 +40,6 @@ func TestGatewayIDBoundMatchesTheContract(t *testing.T) {
 		t.Fatalf("parse contract: %v", err)
 	}
 
-	// All three producer ids are upstream-controlled text reaching a stored key
-	// verbatim, so all three carry the bound. Checking every one keeps a future
-	// lane from being added without it — the asymmetry this test was written to
-	// retire.
 	for _, field := range []string{"gateway_request_id", "otel_request_id", "proxy_request_id"} {
 		p, declared := doc.Properties[field]
 		if !declared {
@@ -86,8 +64,6 @@ func TestGatewayIDBoundMatchesTheContract(t *testing.T) {
 			t.Errorf("%s: contract pattern %q does not compile: %v", field, p.Pattern, err)
 			continue
 		}
-		// The two rules must agree on every value, not merely coexist. These are
-		// the boundaries where a disagreement would live.
 		for _, v := range []string{
 			"req_011CSxKq9mNp",                      // ordinary upstream id
 			GatewayIDPrefix + "1a2b3c4d5e6f",        // a minted fallback
@@ -106,8 +82,8 @@ func TestGatewayIDBoundMatchesTheContract(t *testing.T) {
 	}
 }
 
-// And the ids this producer actually mints must clear that bound. A rule the
-// producer's own output violates would be caught at ingest, or nowhere.
+// TestEmittedGatewayIDsAreUsable and the ids this producer actually mints must
+// clear that bound.
 func TestEmittedGatewayIDsAreUsable(t *testing.T) {
 	e := &Emitter{Now: func() time.Time { return time.Unix(1756000000, 0).UTC() }}
 	for _, tc := range []struct {

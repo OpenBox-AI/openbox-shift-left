@@ -46,8 +46,6 @@ func TestAttest_SignsAndVerifies(t *testing.T) {
 	if payload.CommitSHA != sampleInput(seed).CommitSHA || payload.SessionIDs[0] != "sess-1" {
 		t.Errorf("payload did not round-trip: %+v", payload)
 	}
-	// The policy in force is part of the statement — that is what makes this
-	// worth more than provenance alone.
 	if payload.BundlePolicyID != "pol-1" || payload.BundleSHA256 == "" {
 		t.Errorf("bundle coordinates missing from the signed payload: %+v", payload)
 	}
@@ -56,9 +54,9 @@ func TestAttest_SignsAndVerifies(t *testing.T) {
 	}
 }
 
-// The attack this exists to stop: stamping a real session onto an unrelated
-// commit. A genuine attestation replayed onto another commit must fail even
-// though its signature is valid.
+// TestAttest_ReplayOntoAnotherCommitFails the attack this exists to stop:
+// stamping a real session onto an unrelated commit. A genuine attestation
+// replayed onto another commit must fail even though its signature is valid.
 func TestAttest_ReplayOntoAnotherCommitFails(t *testing.T) {
 	seed, pub := testKeypair(t)
 	att, err := Attest(sampleInput(seed))
@@ -88,8 +86,8 @@ func TestAttest_TamperedPayloadFails(t *testing.T) {
 	}
 }
 
-// A different agent's key must not verify, or the DID binding would be
-// decorative.
+// TestAttest_ForeignKeyFails a different agent's key must not verify, or the
+// DID binding would be decorative.
 func TestAttest_ForeignKeyFails(t *testing.T) {
 	seed, _ := testKeypair(t)
 	_, otherPub := testKeypair(t)
@@ -102,8 +100,9 @@ func TestAttest_ForeignKeyFails(t *testing.T) {
 	}
 }
 
-// The outer DID is routing metadata; if it disagrees with the signed value, a
-// verifier that resolved the key from the outer field would check the wrong key.
+// TestAttest_OuterDIDMustMatchSigned the outer DID is routing metadata; if it
+// disagrees with the signed value, a verifier that resolved the key from the
+// outer field would check the wrong key.
 func TestAttest_OuterDIDMustMatchSigned(t *testing.T) {
 	seed, pub := testKeypair(t)
 	att, err := Attest(sampleInput(seed))
@@ -116,8 +115,9 @@ func TestAttest_OuterDIDMustMatchSigned(t *testing.T) {
 	}
 }
 
-// Refuse rather than produce something unverifiable: a broken attestation would
-// force the deploy path to decide what it means.
+// TestAttest_RefusesIncompleteInput refuse rather than produce something
+// unverifiable: a broken attestation would force the deploy path to decide
+// what it means.
 func TestAttest_RefusesIncompleteInput(t *testing.T) {
 	seed, _ := testKeypair(t)
 	cases := map[string]func(*AttestationInput){
@@ -141,8 +141,8 @@ func TestAttest_RefusesIncompleteInput(t *testing.T) {
 	}
 }
 
-// INV-1: the signed bytes are shipped to the server, so a credential embedded in
-// a remote URL must never reach them.
+// TestCanonicalRemote_StripsCredentials iNV-1: the signed bytes are shipped to
+// the server, so a credential embedded in a remote URL must never reach them.
 func TestCanonicalRemote_StripsCredentials(t *testing.T) {
 	cases := map[string]string{
 		"git@github.com:acme/app.git":                    "github.com/acme/app",

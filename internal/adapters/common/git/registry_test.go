@@ -9,7 +9,6 @@ import (
 	"time"
 )
 
-// fixedClock returns a resolver clock pinned to t0.
 func at(t0 time.Time) func() time.Time { return func() time.Time { return t0 } }
 
 func TestRegistry_WriteReadRemove(t *testing.T) {
@@ -28,14 +27,14 @@ func TestRegistry_WriteReadRemove(t *testing.T) {
 	if got := r.Resolve("/repo/a"); len(got) != 0 {
 		t.Fatalf("after remove, Resolve = %v, want empty", got)
 	}
-	// Removing a non-existent record is not an error.
 	if err := RemoveSessionRecord(dir, "sess-A"); err != nil {
 		t.Fatalf("remove absent: %v", err)
 	}
 }
 
-// The parallel-sessions requirement: two sessions in DIFFERENT worktrees each
-// resolve to their own — never cross-attributed.
+// TestRegistry_ParallelSessionsDifferentWorktrees the parallel-sessions
+// requirement: two sessions in different worktrees each resolve to their own;
+// never cross-attributed.
 func TestRegistry_ParallelSessionsDifferentWorktrees(t *testing.T) {
 	dir := t.TempDir()
 	now := time.Unix(1_700_000_000, 0)
@@ -49,14 +48,14 @@ func TestRegistry_ParallelSessionsDifferentWorktrees(t *testing.T) {
 	if got := r.Resolve("/work/repoB"); !reflect.DeepEqual(got, []string{"sess-B"}) {
 		t.Fatalf("repoB → %v, want [sess-B]", got)
 	}
-	// A worktree with no session working in it → unattributed.
 	if got := r.Resolve("/work/repoC"); len(got) != 0 {
 		t.Fatalf("repoC → %v, want empty", got)
 	}
 }
 
-// Two sessions in the SAME worktree resolve to the most-recently-updated one
-// (the committing session refreshed on its PreToolUse ms before the commit).
+// TestRegistry_SameWorktreeMostRecentWins two sessions in the same worktree
+// resolve to the most-recently-updated one (the committing session refreshed
+// on its PreToolUse ms before the commit).
 func TestRegistry_SameWorktreeMostRecentWins(t *testing.T) {
 	dir := t.TempDir()
 	base := time.Unix(1_700_000_000, 0)
@@ -68,8 +67,9 @@ func TestRegistry_SameWorktreeMostRecentWins(t *testing.T) {
 	}
 }
 
-// A record older than the TTL (a crashed session that never wrote SessionEnd) is
-// ignored, so a much-later human commit is not falsely attributed to it.
+// TestRegistry_StaleRecordIgnored a record older than the TTL (a crashed
+// session that never wrote SessionEnd) is ignored, so a much-later human
+// commit is not falsely attributed to it.
 func TestRegistry_StaleRecordIgnored(t *testing.T) {
 	dir := t.TempDir()
 	old := time.Unix(1_700_000_000, 0)
@@ -83,7 +83,8 @@ func TestRegistry_StaleRecordIgnored(t *testing.T) {
 	}
 }
 
-// The explicit env override beats the registry (CI / non-Claude-Code providers).
+// TestRegistry_EnvOverrideWins the explicit env override beats the registry
+// (CI / non-Claude-Code providers).
 func TestRegistry_EnvOverrideWins(t *testing.T) {
 	dir := t.TempDir()
 	now := time.Unix(1_700_000_000, 0)
@@ -122,8 +123,9 @@ func TestRegistry_TTLFromEnv(t *testing.T) {
 	}
 }
 
-// SL5-SEC-3: an invalid/secret-shaped id must never be persisted to the registry
-// (validate at source, not only at the trailer sink). Skips silently.
+// TestRegistry_WriteRejectsInvalidID sL5-SEC-3: an invalid/secret-shaped id
+// must never be persisted to the registry (validate at source, not only at the
+// trailer sink). Skips silently.
 func TestRegistry_WriteRejectsInvalidID(t *testing.T) {
 	dir := t.TempDir()
 	now := time.Unix(1_700_000_000, 0)
@@ -142,8 +144,9 @@ func TestRegistry_WriteRejectsInvalidID(t *testing.T) {
 	}
 }
 
-// F3: a session cwd recorded via a symlinked path still matches a worktree given
-// by its real path (macOS /tmp -> /private/tmp, etc.).
+// TestRegistry_SymlinkedCwd f3: a session cwd recorded via a symlinked path
+// still matches a worktree given by its real path (macOS /tmp -> /private/tmp,
+// etc.).
 func TestRegistry_SymlinkedCwd(t *testing.T) {
 	real := t.TempDir()
 	link := filepath.Join(t.TempDir(), "link")
@@ -159,8 +162,9 @@ func TestRegistry_SymlinkedCwd(t *testing.T) {
 	}
 }
 
-// F4: two records in the SAME wall-clock second are disambiguated by nanosecond
-// precision, so the genuinely-later session wins the recency tiebreak.
+// TestRegistry_SubSecondRecency f4: two records in the same wall-clock second
+// are disambiguated by nanosecond precision, so the genuinely-later session
+// wins the recency tiebreak.
 func TestRegistry_SubSecondRecency(t *testing.T) {
 	dir := t.TempDir()
 	base := time.Unix(1_700_000_000, 0)

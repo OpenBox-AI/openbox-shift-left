@@ -14,39 +14,6 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/internal/client"
 )
 
-// Base-SDK conformance parity matrix (STORY-E7-S6).
-//
-// That decision unified shift-left telemetry onto the base SDK's Activity/hook wire model so we "can
-// adopt the base conformance kit." This file is the durable, executable record of HOW our Go
-// conformance coverage lines up with the base SDK's canonical conformance matrix — and, just as
-// importantly, where it does NOT (Go-adapter-only extensions the base SDK has no concept of, and
-// base cases we deliberately do not mirror). If a reviewer asks "does shift-left pass the base
-// conformance behaviors?", this matrix is the answer, and TestConformanceParityMatrix guards it from
-// silently drifting out of date.
-//
-// The base matrix is openbox-sdk-python/tests/conformance/test_required_cases.py (READ-ONLY
-// reference), backed by openbox_core/conformance/fake_core.py (assert_hook_wire_shape) and the
-// fail-mode suites tests/client/test_fail_modes.py +
-// tests/instrumentation/test_hook_failclosed_and_sync_approval.py. (The base "conformance matrix"
-// proper covers verdict enforcement + wire shape; fail-open/fail-closed live in the adjacent
-// fail-mode suites — parity draws from both.)
-//
-// Our Go coverage, by file: - enforce_conformance_test.go  — C1..C9, the enforcement carve-out
-// (INV-3b). - TestWire_ToolEventsAreActivityPairs (this file) — the activity envelope every tool
-// event must satisfy on the wire, plus the client's golden fixtures which pin it byte-exactly. -
-// conformance_test.go (TestEmittedEventsAreConformant) — the shift-left-only adapter-facing
-// dev-event schema check (no base analog).
-//
-// NOTE (tool-call-as-activity): shift-left used to carry a Go mirror of the base SDK's
-// assert_hook_wire_shape in client/hookspan.go. It is gone, because the shape it guarded is gone: a
-// tool call is now an Activity (ToolCall→ActivityStarted, ToolResult→ActivityCompleted) and no
-// shift-left payload carries a hook envelope or a span. The rows below record that as a base case we
-// no longer mirror, rather than quietly leaving a parity claim that stopped being true.
-//
-// status values: parity        — a base required-case (or fail-mode case) asserts the same behavior.
-// go-extension  — a behavior the base SDK has NO concept of; shift-left-only. base-unmapped — a base
-// case with no Go conformance case yet (why is in note).
-
 type parityStatus string
 
 const (
@@ -62,10 +29,10 @@ type parityRow struct {
 	note     string
 }
 
-// conformanceParity is the authoritative cross-repo mapping. Ordered: our C1..C9,
-// then wire-shape + schema coverage, then base cases we do not (yet) mirror.
+// conformanceParity is the authoritative cross-repo mapping. Ordered: our
+// C1..C9, then wire-shape + schema coverage, then base cases we do not (yet)
+// mirror.
 var conformanceParity = []parityRow{
-	// --- enforcement: C1..C9 (enforce_conformance_test.go) ---
 	{
 		goCase:   "C1 enforced BLOCK denies pre-execution",
 		baseCase: "test_http_started_block_request_not_sent (+ db/file/function _block variants)",
@@ -121,7 +88,6 @@ var conformanceParity = []parityRow{
 		note:     "Base has no verdict-staleness/TTL concept. C9 pins that a stale-but-real bundle verdict (sourceLocalBundle) proceeds under fail-closed — staleness never triggers fail-closed.",
 	},
 
-	// --- wire shape (activity envelope; the hook mirror is retired) ---
 	{
 		goCase:   "TestWire_ToolEventsAreActivityPairs (+ client/testdata/golden/activity_*.json)",
 		baseCase: "",
@@ -135,7 +101,6 @@ var conformanceParity = []parityRow{
 		note:     "No longer mirrored, by design. The base assertion checks a flat hook SpanData under ActivityStarted+hook_trigger. shift-left emits no hook events and no spans: a hook process has no in-process OTel, so the span it used to send was fabricated to satisfy a shape rather than to record a measurement. Retiring it also dissolved that decision's standing obligation to hand-maintain the mirror against upstream. Cost: no span rows, no span-level Merkle leaves, no server-side semantic_type for dev sessions.",
 	},
 
-	// --- shift-left-only (no base analog) ---
 	{
 		goCase:   "conformance_test.go TestEmittedEventsAreConformant (dev-event schema, content-capture off)",
 		baseCase: "",
@@ -143,7 +108,6 @@ var conformanceParity = []parityRow{
 		note:     "The adapter-facing normalized dev-event contract (SL-1 schema) is a shift-left concept; the base SDK has no separate normalized vocabulary. Guards INV-2 at the adapter boundary (content-free by default).",
 	},
 
-	// --- base required cases we do NOT (yet) mirror ---
 	{
 		goCase:   "",
 		baseCase: "test_http_started_halt_not_sent_and_halt_shaped_error",
@@ -172,10 +136,9 @@ var conformanceParity = []parityRow{
 
 var hexNote = regexp.MustCompile(`\S`) // any non-space char -> note is non-empty
 
-// TestConformanceParityMatrix guards the parity record: every row is well-formed,
-// every enforcement case C1..C9 is present exactly once, and the base<->go linkage
-// is consistent with each row's status. This breaks HERE if a conformance case is
-// renamed/dropped or the matrix drifts, rather than leaving a stale doc.
+// TestConformanceParityMatrix guards the parity record: every row is well-
+// formed, every enforcement case C1..C9 is present exactly once, and the
+// base<->go linkage is consistent with each row's status.
 func TestConformanceParityMatrix(t *testing.T) {
 	validStatus := map[parityStatus]bool{statusParity: true, statusGoExtension: true, statusBaseUnmapped: true}
 
@@ -202,8 +165,6 @@ func TestConformanceParityMatrix(t *testing.T) {
 		}
 	}
 
-	// Every enforcement case C1..C9 must appear exactly once — the suite is the
-	// canonical enforcement contract; a dropped case must fail loudly.
 	for _, id := range []string{"C1", "C2", "C3", "C4", "C5", "C6", "C7", "C8", "C9"} {
 		n := 0
 		for _, r := range conformanceParity {
@@ -217,21 +178,11 @@ func TestConformanceParityMatrix(t *testing.T) {
 	}
 }
 
-// assertActivityWireShape is the envelope contract every tool event must satisfy
-// on the wire. It replaces client.AssertHookWireShape, which checked the flat
-// hook-span shape this repo no longer emits.
-//
-// Its twin lives in internal/adapters/codex/wire_test.go and asserts the identical
-// contract. The two are deliberate copies rather than a shared helper: the
-// adapters are separate Go modules, and the property under test is that both
-// produce the SAME shape independently — a shared helper they both called could
-// drift with them and still pass.
 func assertActivityWireShape(t *testing.T, payload map[string]any, wantType string) {
 	t.Helper()
 	if payload["event_type"] != wantType {
 		t.Errorf("event_type = %v, want %s", payload["event_type"], wantType)
 	}
-	// The retired hook envelope. A key here means the span layer grew a caller.
 	for _, k := range []string{"spans", "span_count", "hook_trigger"} {
 		if v, present := payload[k]; present {
 			t.Errorf("payload carries retired key %q = %v", k, v)
@@ -245,19 +196,18 @@ func assertActivityWireShape(t *testing.T, payload map[string]any, wantType stri
 	if payload["workflow_type"] != "developer-session" {
 		t.Errorf("workflow_type = %v, want developer-session", payload["workflow_type"])
 	}
-	// semantic_type was computed by core from the span. With no span there is no
-	// classification, and the client must not invent one — an unowned field would
-	// be a claim nothing verifies.
+	// With no span there is no classification, and the client must not invent
+	// one; an unowned field would be a claim nothing verifies.
 	if _, present := payload["semantic_type"]; present {
 		t.Error("client must not set semantic_type")
 	}
 }
 
-// TestWire_ToolEventsAreActivityPairs drives the REAL client and asserts the
+// TestWire_ToolEventsAreActivityPairs drives the real client and asserts the
 // activity envelope end to end: a PreToolUse becomes an ActivityStarted, its
-// PostToolUse an ActivityCompleted, and the pair shares one activity_id — which
-// is what puts them on one dashboard row and what makes one approval cover both
-// halves and any retry.
+// PostToolUse an ActivityCompleted, and the pair shares one activity_id; which
+// is what puts them on one dashboard row and what makes one approval cover
+// both halves and any retry.
 func TestWire_ToolEventsAreActivityPairs(t *testing.T) {
 	var bodies [][]byte
 	srv := memhttptest.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -315,15 +265,6 @@ func TestWire_ToolEventsAreActivityPairs(t *testing.T) {
 	}
 }
 
-// ── STORY-SL7-B: cross-ADAPTER parity (Claude Code ↔ Codex) ──────────────────
-//
-// SL7-B ports the E6 enforce cascade onto a SECOND provider (Codex,
-// internal/adapters/codex/enforce_conformance_test.go, cases CDX-C1..CDX-C12). This matrix
-// is the durable record that both adapters assert the SAME invariant set, and
-// where Codex's contract forces a documented DELTA. It is data-only (no import of
-// the codex module — a separate Go module); TestCrossAdapterParityMatrix_SL7B guards
-// it from drifting out of date. goCase = the Codex case; baseCase = the Claude Code
-// case it mirrors ("" when Codex-only).
 var codexConformanceParity = []parityRow{
 	{goCase: "CDX-C1 enforced BLOCK denies pre-execution", baseCase: "C1 enforced BLOCK denies pre-execution", status: statusParity,
 		note: "Identical invariant; Codex emits permissionDecision:deny + permissionDecisionReason (schema.rs PreToolUsePermissionDecisionWire) vs CC's deny. Real block carries the policy reason, not the fail-closed reason."},
@@ -353,10 +294,9 @@ var codexConformanceParity = []parityRow{
 		note: "Codex-only structural invariant: permissionDecision:allow is emitted ONLY bundled with a redacting updatedInput (never a grant — OD-SL7-ALLOW-REWRITE); a plain allow writes NOTHING. Codex itself rejects a bare allow ('unsupported permissionDecision:allow'), and any-deny-wins + no approval-bypass lever means allow+updatedInput cannot loosen."},
 }
 
-// TestCrossAdapterParityMatrix_SL7B guards the CC↔Codex parity record: every row
-// well-formed, every Codex enforcement case CDX-C1..CDX-C12 present exactly once,
-// and each parity row names its CC analog. Breaks HERE if a Codex conformance case
-// is renamed/dropped, rather than leaving a stale cross-repo claim.
+// TestCrossAdapterParityMatrix_SL7B guards the CC↔Codex parity record: every
+// row well-formed, every Codex enforcement case CDX-C1..CDX-C12 present
+// exactly once, and each parity row names its CC analog.
 func TestCrossAdapterParityMatrix_SL7B(t *testing.T) {
 	validStatus := map[parityStatus]bool{statusParity: true, statusGoExtension: true, statusBaseUnmapped: true}
 	for i, r := range codexConformanceParity {

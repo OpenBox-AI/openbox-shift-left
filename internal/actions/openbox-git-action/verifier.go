@@ -15,11 +15,16 @@ import (
 	"time"
 )
 
-// There is no DID-keyed session-ownership endpoint, and a DID cannot be
-// reversed to an agent id (did:aip:<uuidv5(agentID, namespace)> is one-way).
+//   - AgentID↔DID binding: at construction the verifier recomputes
+//     did:aip:<uuidv5(agentID, namespace)> and requires it to equal the deploy
+//     agent's DID (OPENBOX_DID).
+//   - Per-row agent_id check: a row is accepted only when its agent_id equals
+//     the queried agentID, so a stray/other-agent row can never enter the
+//     owned set.
 
-// aipNamespace mirrors openbox-backend's OPENBOX_AIP_NAMESPACE; the backend
-// derives an agent's DID as did:aip:<uuidv5(agentID, aipNamespace)>.
+// aipNamespace if the backend ever changes this derivation the bind fails →
+// the verifier degrades to Noop (fail-safe: it never over-attributes on a
+// mismatch).
 const aipNamespace = "b6e4a1d3-7c02-4e8a-9d1f-5a3b7c2d8e0f"
 
 // defaultOwnershipTimeout bounds the ownership read so a slow/absent API

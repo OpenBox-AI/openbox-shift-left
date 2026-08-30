@@ -6,12 +6,6 @@ import (
 	"testing"
 )
 
-// E7-S7 enrichment: the client populates the governance-event fields the openbox-fe
-// Verify-tab detail renders — activity_input on a tool call (log.input) and
-// signal_args on a signal (log.signal_args) — with STRUCTURAL metadata only, never
-// content (INV-2). These tests pin both the population and the content gate.
-
-// activityInput decodes the activity_input object from a tool-call payload.
 func activityInput(t *testing.T, ev DevEvent) map[string]any {
 	t.Helper()
 	p := decodeRaw(t, ev)
@@ -26,7 +20,6 @@ func activityInput(t *testing.T, ev DevEvent) map[string]any {
 	return m
 }
 
-// signalArgs decodes the signal_args object from a lifecycle (signal) payload.
 func signalArgs(t *testing.T, ev DevEvent) map[string]any {
 	t.Helper()
 	b, err := buildPayload(ev)
@@ -73,15 +66,15 @@ func TestActivityInput_MCPTool(t *testing.T) {
 	}
 }
 
-// INV-2: a shell tool call must carry only the identifier — never the command text
-// (which lives in the gated request_body, stripped by default).
+// TestActivityInput_ShellCarriesNoCommand iNV-2: a shell tool call must carry
+// only the identifier; never the command text (which lives in the gated
+// request_body, stripped by default).
 func TestActivityInput_ShellCarriesNoCommand(t *testing.T) {
 	ev := DevEvent{
 		EventID: "e1", EventType: EventToolCall, SessionID: "s", DeveloperDID: "did:aip:x",
 		Timestamp: "2026-07-15T00:00:00Z", Tool: Tool{Name: "Bash", Kind: ToolShell},
 		Span: &Span{SemanticType: "internal", Stage: "started", RequestBody: "rm -rf /tmp/danger"},
 	}
-	// Default (content-capture off) strips the body before buildPayload, as Emit does.
 	in := activityInput(t, stripContent(ev))
 	if in["tool_name"] != "Bash" || in["kind"] != "shell" {
 		t.Fatalf("shell activity_input should carry the identifier: %v", in)
@@ -92,9 +85,10 @@ func TestActivityInput_ShellCarriesNoCommand(t *testing.T) {
 	}
 }
 
-// activity_input rides only the STARTED event (which creates the Core event row);
-// a ToolResult (completed) must not carry it (Core would ignore it, and it keeps
-// the two paired events distinct on the wire).
+// TestActivityInput_OnlyOnStarted activity_input rides only the started event
+// (which creates the Core event row); a ToolResult (completed) must not carry
+// it (Core would ignore it, and it keeps the two paired events distinct on the
+// wire).
 func TestActivityInput_OnlyOnStarted(t *testing.T) {
 	base := DevEvent{
 		EventID: "e1", SessionID: "s", DeveloperDID: "did:aip:x",
@@ -117,13 +111,7 @@ func TestActivityInput_OnlyOnStarted(t *testing.T) {
 
 // TestActivityInput_EscalationContextIsTruncated pins the size cap on the one
 // content field that still reaches the wire from a tool call: the Tier-2
-// escalation context an approver decides on (Content.ToolInput). The cap is
-// applied here, on the bytes that get signed, so a runaway command cannot
-// produce an unbounded signed body.
-//
-// It used to be pinned through the span's request_body, which no longer
-// egresses; without this the cap would be untested on both of its remaining
-// call sites.
+// escalation context an approver decides on (Content.ToolInput).
 func TestActivityInput_EscalationContextIsTruncated(t *testing.T) {
 	huge := strings.Repeat("x", maxBodySize+5000)
 	ev := DevEvent{
@@ -139,7 +127,7 @@ func TestActivityInput_EscalationContextIsTruncated(t *testing.T) {
 }
 
 // TestSignalArgs_PromptIsTruncated pins the same cap on the other surviving
-// content field — the prompt carried under content capture.
+// content field; the prompt carried under content capture.
 func TestSignalArgs_PromptIsTruncated(t *testing.T) {
 	huge := strings.Repeat("y", maxBodySize+5000)
 	ev := DevEvent{
@@ -153,9 +141,10 @@ func TestSignalArgs_PromptIsTruncated(t *testing.T) {
 	}
 }
 
-// A prompt's input IS the prompt text = gated content. Under the default
-// metadata-only posture (no ev.Content), signal_args must be EMPTY — permission_mode
-// is session context (it stays in metadata/Overview), NOT the prompt's input.
+// TestSignalArgs_Prompt_EmptyByDefault a prompt's input IS the prompt text =
+// gated content. Under the default metadata-only posture (no ev.Content),
+// signal_args must be empty; permission_mode is session context (it stays in
+// metadata/Overview), NOT the prompt's input.
 func TestSignalArgs_Prompt_EmptyByDefault(t *testing.T) {
 	ev := DevEvent{
 		EventID: "e1", EventType: EventPromptSubmitted, SessionID: "s", DeveloperDID: "did:aip:x",
@@ -165,27 +154,25 @@ func TestSignalArgs_Prompt_EmptyByDefault(t *testing.T) {
 	if args := signalArgs(t, ev); args != nil {
 		t.Fatalf("metadata-only prompt must have empty signal_args (prompt is gated content); got %v", args)
 	}
-	// permission_mode still reaches the wire via metadata (Overview), just not as Input.
 	b, _ := buildPayload(ev)
 	if !strings.Contains(string(b), "permission_mode") {
 		t.Errorf("permission_mode should still ride metadata: %s", b)
 	}
 }
 
-// When content-capture is enabled (ev.Content survives), the prompt is carried in
-// signal_args as its input — gated + capped exactly like a tool request_body.
+// TestSignalArgs_Prompt_ContentGated when content-capture is enabled
+// (ev.Content survives), the prompt is carried in signal_args as its input;
+// gated + capped exactly like a tool request_body.
 func TestSignalArgs_Prompt_ContentGated(t *testing.T) {
 	ev := DevEvent{
 		EventID: "e1", EventType: EventPromptSubmitted, SessionID: "s", DeveloperDID: "did:aip:x",
 		Timestamp: "2026-07-15T00:00:00Z", Tool: Tool{Name: "claude-code", Kind: ToolShell},
 		Content: &Content{Prompt: "refactor the auth module"},
 	}
-	// content-capture ON path: buildPayload is post-gate, so ev.Content is present.
 	args := signalArgs(t, ev)
 	if args["prompt"] != "refactor the auth module" {
 		t.Fatalf("content-capture prompt should carry the prompt in signal_args: %v", args)
 	}
-	// And the default (stripped) path carries nothing.
 	if a := signalArgs(t, stripContent(ev)); a != nil {
 		t.Fatalf("stripped prompt must have empty signal_args; got %v", a)
 	}
@@ -201,17 +188,13 @@ func TestSignalArgs_Commit_LineageOnly(t *testing.T) {
 	if args["commit_sha"] != "abc123" || args["repo"] != "acme/app" || args["branch"] != "main" {
 		t.Fatalf("commit signal_args should carry lineage: %v", args)
 	}
-	// INV-2: the commit MESSAGE (free-text content) must never be lifted into signal_args.
-	//
-	// Scope: this asserts the signal_args PROJECTION. The message is also
-	// dropped from the metadata blob when content capture is off — see
-	// TestContentBearingMetadataIsGated in leakscan_test.go.
 	if _, leaked := args["message"]; leaked {
 		t.Fatalf("INV-2: commit message content leaked into signal_args: %v", args)
 	}
 }
 
-// A WorkflowStarted/Completed (non-signal) lifecycle event carries no signal_args.
+// TestSignalArgs_AbsentOnWorkflowEvents a WorkflowStarted/Completed (non-
+// signal) lifecycle event carries no signal_args.
 func TestSignalArgs_AbsentOnWorkflowEvents(t *testing.T) {
 	ev := DevEvent{
 		EventID: "e1", EventType: EventSessionStarted, SessionID: "s", DeveloperDID: "did:aip:x",

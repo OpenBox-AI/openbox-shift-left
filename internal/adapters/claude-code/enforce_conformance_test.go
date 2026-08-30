@@ -21,46 +21,12 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/hookflow"
 )
 
-// Enforcement conformance suite (STORY-E6-S7) — executable INV-3b evidence.
-//
-// This drives the REAL RunHook PreToolUse path end-to-end against a REAL /evaluate stub (or a
-// deliberately-unreachable one) and asserts the exact Claude Code stdout contract per quadrant of
-// the enforcement carve-out (that decision / INV-3b). It is the durable proof the carve-out holds:
-// a regression to enforce mode, the failure policy, or the fail-open default breaks HERE rather
-// than silently in the field. Each case is content-free (INV-1/INV-2): no asserted reason may
-// carry the shell command / file body / tool output.
-//
-// | # | Enforce | Policy | Control plane | Expect | Proves |
-// |---|---------|-------------|--------------------|--------|---------------------------------| |
-// C1| on | both | up + BLOCK rule | deny | enforced BLOCK denies pre-exec | | C2| on | fail-open |
-// absent socket | proceed| outage fails open (OD9) | | C3| on | fail-open | up, NO bundle |
-// proceed| unbundled fails open (default) | | C4| on | fail-closed | absent socket | deny |
-// fail-closed denies on outage | | C5| on | fail-closed | up + ALLOW default | proceed|
-// fail-closed never denies allow | | C6| on | fail-closed | up, NO bundle | deny | INFO-1: the
-// closed hole | | C7| off | — | up + BLOCK rule | proceed| INV-3 verbatim (observe) | | C8| —
-// (removed: in-process decision had no network timeout) | | C9| — (removed: nothing local can be
-// stale) | |C10| on | fail-open | up + secret in Write| redact | Tier-1 redact-and-continue
-// (E6-S9)| |C11| on | fail-open | up, detection OFF | proceed| opt-out → no redaction (E6-S9) |
-//
-// C18–C19 assert the content gate on the bytes POSTed to /evaluate. C20–C26 do the same for that
-// decision, driving the real observe/turn paths and the flush that delivers them:
-//
-// |C20| PostToolUse            | status:"completed" on the wire                  | |C21| the same,
-// capture OFF  | status is structural, not gated                 | |C22| PostToolUseFailure     |
-// status:"failed" + a duration paired across hooks| |C23| the three new signals  | signal_name
-// present, free text and signal_args absent | |C24| Stop, capture ON       | ONE span core's
-// alignment extractor can read    | |C25| Stop, capture OFF      | no span, no span_count, no text
-// — turns still ship | |C26| Stop + a secret        | redacted BEFORE attachment (C18 discipline)
-// |
-
-// The local bundle helpers are gone with the evaluator they fed. A case's
-// expected outcome is a SERVER verdict now, so setup names the verdict
-// directly through serveVerdict rather than building a rule the client would
-// have evaluated itself.
+// This drives the real RunHook PreToolUse path end-to-end against a real
+// /evaluate stub (or a deliberately-unreachable one) and asserts the exact
+// Claude Code stdout contract per quadrant of the enforcement carve-out (that
+// decision / INV-3b).
 
 func TestEnforcementConformance(t *testing.T) {
-	// Base isolation shared by every case (identity + spool/session/enforcement
-	// sinks under temp dirs; content capture OFF — no redaction engine is in play).
 	isolateConfig(t)
 	t.Setenv(envDID, testDID)
 	t.Setenv("OPENBOX_SPOOL_DIR", t.TempDir())
@@ -68,18 +34,14 @@ func TestEnforcementConformance(t *testing.T) {
 	t.Setenv(envEnforcementFile, filepath.Join(t.TempDir(), "enf.jsonl"))
 	t.Setenv(envContentCapture, "0")
 
-	// A dangerous Bash call (matches the BLOCK rule); the axis several cases key on.
 	const dangerPayload = `{"hook_event_name":"PreToolUse","session_id":"s","cwd":"/tmp","tool_name":"Bash","tool_input":{"command":"rm -rf /tmp/x"}}`
 
-	// run executes ONE PreToolUse hook with the currently-set env and returns stdout.
 	run := func(t *testing.T, payload string) string {
 		t.Helper()
 		var stdout bytes.Buffer
 		RunHook("PreToolUse", strings.NewReader(payload), &stdout, log.New(&bytes.Buffer{}, "", 0))
 		return stdout.String()
 	}
-	// assertNoLeak guards INV-2 across every case: no asserted output carries the
-	// shell command that was gated.
 	assertNoLeak := func(t *testing.T, out string) {
 		t.Helper()
 		if strings.Contains(out, "rm -rf") {
@@ -88,18 +50,14 @@ func TestEnforcementConformance(t *testing.T) {
 	}
 
 	t.Run("C1 enforced BLOCK denies pre-execution (either policy)", func(t *testing.T) {
-		// A real BLOCK denies under BOTH fail-open and fail-closed (structurally
-		// identical: a real verdict is hookflow.FailOpen=false → applyFailurePolicy is a no-op),
-		// and with the POLICY reason — never the fail-closed outage reason (fail-closed
-		// engages on no-verdict only; the Q1-vs-Q4 distinction).
 		serveVerdict(t, `{"verdict":"block","reason":"destructive recursive delete","policy_id":"conf-policy"}`)
 		t.Setenv(envEnforce, "1")
 		for _, fc := range []string{"0", "1"} {
 			t.Setenv(envFailClosed, fc)
-			// A DISTINCT command per iteration. The event id is derived from the
-			// call, so replaying the identical payload in one process collapses
-			// onto one idempotency key and the second POST is suppressed — the
-			// client behaving correctly, and a real session never does it.
+			// The event id is derived from the call, so replaying the identical payload
+			// in one process collapses onto one idempotency key and the second POST is
+			// suppressed; the client behaving correctly, and a real session never does
+			// it.
 			out := run(t, `{"hook_event_name":"PreToolUse","session_id":"s","cwd":"/tmp","tool_name":"Bash","tool_input":{"command":"rm -rf /tmp/x`+fc+`"}}`)
 			d, reason := parsePermissionDecision(t, []byte(out))
 			if d != ccDecisionDeny {
@@ -151,13 +109,6 @@ func TestEnforcementConformance(t *testing.T) {
 	})
 
 	t.Run("C5 fail-closed never denies a REAL allow", func(t *testing.T) {
-		// The crux clause: fail-closed denies only when no real verdict could be
-		// obtained, never a verdict that says allow.
-		//
-		// "Real" moved with. It used to mean a local bundle's allow; the decider
-		// is the server now, so a reachable /evaluate returning allow is what
-		// has to proceed. A local allow with the server unreachable is no longer
-		// a real verdict — it is an outage, and C4/C6 cover that it denies.
 		serveVerdict(t, `{"verdict":"allow"}`)
 		url, hits := serveEvaluate(t, `{"verdict":"allow"}`, 200, 0)
 		evalCreds(t, url)
@@ -173,9 +124,6 @@ func TestEnforcementConformance(t *testing.T) {
 	})
 
 	t.Run("C6 fail-closed + unbundled denies (E6-S3 INFO-1 closed)", func(t *testing.T) {
-		// The regression guard for the reconciliation: no real verdict (no bundle
-		// loaded → Source=fail-open:no-bundle → hookflow.FailOpen), so a fail-closed org DENIES
-		// rather than being silently ungoverned. Pre-fix this proceeded (the hole).
 		t.Setenv(envEnforce, "1")
 		t.Setenv(envFailClosed, "1")
 		out := run(t, dangerPayload)
@@ -190,8 +138,6 @@ func TestEnforcementConformance(t *testing.T) {
 	})
 
 	t.Run("C7 observe mode never blocks (INV-3 verbatim)", func(t *testing.T) {
-		// Even with a live BLOCK bundle, enforce OFF is the observe path: nothing to
-		// stdout, ever. This is the un-carved-out INV-3.
 		serveVerdict(t, `{"verdict":"block","reason":"destructive recursive delete","policy_id":"conf-policy"}`)
 		t.Setenv(envEnforce, "0")
 		t.Setenv(envFailClosed, "1") // even fail_closed=1 must not matter with enforce off
@@ -200,22 +146,13 @@ func TestEnforcementConformance(t *testing.T) {
 		}
 	})
 
-	// C9 (a STALE local verdict must not trigger fail-closed) is deleted with the
-	// bundle it read. Staleness described a local artifact falling behind the
-	// control plane; every verdict comes from the control plane now, so there is
-	// nothing that can be stale. Nothing replaces it — the condition cannot arise.
+	// Nothing replaces it; the condition cannot arise.
 
-	// C8 removed: in-process decision has no network timeout. The old case exercised
-	// the socket Client's hard timeout tripping and failing open; with the
-	// synchronous in-memory decider there is no latency path to bound.
-
-	// A Write whose body contains a real-shaped AWS key. The secret string must never
-	// survive on stdout / in any egress or audit sink; the placeholder must appear.
+	// The secret string must never survive on stdout / in any egress or audit
+	// sink; the placeholder must appear.
 	const awsSecret = "AKIAIOSFODNN7EXAMPLE"
 	secretWrite := `{"hook_event_name":"PreToolUse","session_id":"s","cwd":"/tmp","tool_name":"Write","tool_input":{"file_path":"/tmp/app.env","content":"AWS_ACCESS_KEY_ID=` + awsSecret + `"}}`
 
-	// assertNoEgress walks the spool + session dirs and the enforcement audit and
-	// asserts the raw secret never reached any egress/audit surface (INV-2).
 	assertNoEgress := func(t *testing.T) {
 		t.Helper()
 		for _, dir := range []string{os.Getenv("OPENBOX_SPOOL_DIR"), os.Getenv("OPENBOX_SESSION_DIR"), filepath.Dir(os.Getenv(envEnforcementFile))} {
@@ -235,8 +172,6 @@ func TestEnforcementConformance(t *testing.T) {
 		}
 	}
 
-	// serveCapturing records every body POSTed to /evaluate, so a case can assert
-	// on the actual outbound bytes rather than on what should have been sent.
 	serveCapturing := func(t *testing.T, verdict string) *[]string {
 		t.Helper()
 		var mu sync.Mutex
@@ -254,15 +189,7 @@ func TestEnforcementConformance(t *testing.T) {
 		return &bodies
 	}
 
-	// THE tripwire for that decision's E8. Write bodies egress now, so the
-	// local redaction is the one control standing between a secret in a file
-	// and the control plane's event storage — which is the hardest place to
-	// purge anything from.
-	//
-	// It asserts on the bytes actually POSTed, not on the decision or the
-	// rewrite: a correct redaction applied to the tool call while the ORIGINAL
-	// body is sent for evaluation would satisfy every other test in this file
-	// and still leak. Never weaken this to a substring check on a decision.
+	// Never weaken this to a substring check on a decision.
 	t.Run("C18 a secret in a Write body never reaches /evaluate (E8)", func(t *testing.T) {
 		serveVerdict(t, `{"verdict":"allow"}`)
 		bodies := serveCapturing(t, `{"verdict":"allow"}`)
@@ -281,8 +208,6 @@ func TestEnforcementConformance(t *testing.T) {
 					"run BEFORE attachment: %s", i, b)
 			}
 		}
-		// The body must actually be attached, or this test would pass by sending
-		// nothing at all and prove nothing.
 		joined := strings.Join(*bodies, "")
 		if !strings.Contains(joined, "OPENBOX_REDACTED") {
 			t.Errorf("no redacted body attached; the case proves nothing if content never "+
@@ -290,9 +215,6 @@ func TestEnforcementConformance(t *testing.T) {
 		}
 	})
 
-	// The other half: content_capture is a hard gate, not a best-effort filter.
-	// With it off, no class attaches anything and the server decides on the
-	// structural axes alone — coarser enforcement, which is the honest trade.
 	t.Run("C19 content_capture:false attaches no content, any class", func(t *testing.T) {
 		serveVerdict(t, `{"verdict":"allow"}`)
 		bodies := serveCapturing(t, `{"verdict":"allow"}`)
@@ -305,9 +227,7 @@ func TestEnforcementConformance(t *testing.T) {
 			`{"hook_event_name":"PreToolUse","session_id":"s","cwd":"/tmp","tool_name":"Write","tool_input":{"file_path":"/tmp/a","content":"` + canary + `"}}`,
 			`{"hook_event_name":"PreToolUse","session_id":"s","cwd":"/tmp","tool_name":"Bash","tool_input":{"command":"` + canary + `"}}`,
 			`{"hook_event_name":"PreToolUse","session_id":"s","cwd":"/tmp","tool_name":"mcp__x__y","tool_input":{"arg":"` + canary + `"}}`,
-			// The path is deliberately canary-free: a file_path is a structural
-			// locator and egresses on every event by design, capture on or off.
-			// What must not appear is the tool's CONTENT.
+			// What must not appear is the tool's content.
 			`{"hook_event_name":"PreToolUse","session_id":"s","cwd":"/tmp","tool_name":"Read","tool_input":{"file_path":"/tmp/plain.txt","pattern":"` + canary + `"}}`,
 		} {
 			run(t, payload)
@@ -319,34 +239,15 @@ func TestEnforcementConformance(t *testing.T) {
 			if strings.Contains(b, canary) {
 				t.Errorf("content egressed with capture OFF in body #%d: %s", i, b)
 			}
-			// Structural axes must still be there, or enforcement would have
-			// nothing to decide on and "no content" would be indistinguishable
-			// from "no evaluation".
 			if !strings.Contains(b, `"tool_name"`) {
 				t.Errorf("body #%d carries no structural axes: %s", i, b)
 			}
 		}
 	})
 
-	// ── that decision: the outcome field
-	// ────────────────────────────────────────────
-	//
-	// Core's per-tool success metric reads ONE thing:
-	//
-	// metric.IsSuccess = payload.Status != nil && *payload.Status == "completed"
-	//
-	// so these two cases assert the literal on the bytes actually POSTed, not on
-	// the DevEvent or the mapper's return. A field that is correct in the struct
-	// and absent from the wire looks identical to every unit test and leaves the
-	// dashboard at 0.0% — which is the state this field exists to fix.
-	//
-	// observeThenFlush drives the real observe path for one hook and then the
-	// SessionEnd flush that delivers it, returning what reached /evaluate.
 	observeThenFlush := func(t *testing.T, hook, payload string) []string {
 		t.Helper()
 		bodies := serveCapturing(t, `{"verdict":"allow"}`)
-		// The detached realtime flusher would fork a second process mid-test and
-		// race the assertion; SessionEnd's flush is the deterministic delivery.
 		t.Setenv(envRealtime, "0")
 		t.Setenv(envEnforce, "0") // observe path — no gate, no deferred spool
 		var out bytes.Buffer
@@ -370,17 +271,16 @@ func TestEnforcementConformance(t *testing.T) {
 		if completed == "" {
 			t.Fatalf("no ActivityCompleted reached /evaluate; bodies=%v", bodies)
 		}
-		// The exact literal, on the wire. Not `strings.Contains(b, "completed")`
-		// — "ActivityCompleted" contains that substring and would pass forever.
+		// Not `strings.Contains(b, "completed")`; "ActivityCompleted" contains that
+		// substring and would pass forever.
 		if !strings.Contains(completed, `"status":"completed"`) {
 			t.Errorf("completed tool call carries no \"status\":\"completed\"; core scores it as a failure: %s", completed)
 		}
 	})
 
 	t.Run("C21 status ships unchanged with content_capture:false", func(t *testing.T) {
-		// The whole point of deriving status structurally: an org that sends no
-		// content still gets its success metric. If this ever regresses, Tool
-		// Health silently becomes a privacy-setting-dependent feature.
+		// If this ever regresses, Tool Health silently becomes a privacy-setting-
+		// dependent feature.
 		t.Setenv(envContentCapture, "0")
 		bodies := observeThenFlush(t, "PostToolUse",
 			`{"hook_event_name":"PostToolUse","session_id":"s-status","cwd":"/tmp","tool_name":"Read","tool_use_id":"toolu_c21","tool_input":{"file_path":"/tmp/a.txt"}}`)
@@ -396,9 +296,6 @@ func TestEnforcementConformance(t *testing.T) {
 		}
 	})
 
-	// observeSeqThenFlush drives several observe hooks in order (so a PreToolUse
-	// can leave its duration stash for the failure hook that follows) and then
-	// the SessionEnd flush that delivers them.
 	observeSeqThenFlush := func(t *testing.T, session string, steps ...[2]string) []string {
 		t.Helper()
 		bodies := serveCapturing(t, `{"verdict":"allow"}`)
@@ -432,14 +329,10 @@ func TestEnforcementConformance(t *testing.T) {
 		if !strings.Contains(failed, `"status":"failed"`) {
 			t.Errorf("failed call does not report status \"failed\": %s", failed)
 		}
-		// The duration stash must pair across the two DIFFERENT hooks, or a
-		// failed call reports no duration and the latency percentiles quietly
-		// exclude every failure.
 		if !strings.Contains(failed, `"duration_ms"`) {
 			t.Errorf("failed call carries no duration_ms — the stash did not pair "+
 				"PreToolUse with PostToolUseFailure: %s", failed)
 		}
-		// The provider's free-text error must not have ridden along.
 		if strings.Contains(failed, "exit code 3") {
 			t.Errorf("the tool's free-text error egressed (that decision owns it): %s", failed)
 		}
@@ -459,20 +352,14 @@ func TestEnforcementConformance(t *testing.T) {
 				t.Errorf("no %s signal reached /evaluate: %s", name, joined)
 			}
 		}
-		// Free text from either payload must be nowhere on the wire.
 		if strings.Contains(joined, denialReason) {
 			t.Errorf("free-text reason/error_details egressed: %s", joined)
 		}
-		// The structural detail that makes the events useful must be there, or
-		// the assertion above would pass for events carrying nothing.
 		for _, want := range []string{`"agent_type":"code-reviewer"`, `"error_type":"rate_limit"`, `"tool_use_id":"toolu_c23"`} {
 			if !strings.Contains(joined, want) {
 				t.Errorf("missing structural detail %s: %s", want, joined)
 			}
 		}
-		// And NO signal_args on any of the three — core reads those as a new
-		// user goal and overwrites the alignment session's goal with them
-		// (age.go:112-137).
 		for _, b := range bodies {
 			for _, name := range []string{"subagent_started", "permission_denied", "api_error"} {
 				if strings.Contains(b, `"signal_name":"`+name+`"`) && strings.Contains(b, `"signal_args"`) {
@@ -482,15 +369,10 @@ func TestEnforcementConformance(t *testing.T) {
 		}
 	})
 
-	// ── that decision: the assistant-turn span ───────────────────────────
-	//
-	// The egress change. These drive a REAL Stop hook — transcript read, turn
-	// window, mapper, spool, flush — and assert on what reached /evaluate,
-	// because every failure mode here is silent: core logs and returns "" for a
-	// span it cannot read, which is indistinguishable from the empty widgets this
-	// change exists to fill.
-	//
-	// A minimal transcript with usage, so the Stop hook has a turn to report.
+	// These drive a real Stop hook; transcript read, turn window, mapper, spool,
+	// flush; and assert on what reached /evaluate, because every failure mode
+	// here is silent: core logs and returns "" for a span it cannot read, which
+	// is indistinguishable from the empty widgets this change exists to fill.
 	turnTranscript := func(t *testing.T) string {
 		t.Helper()
 		p := filepath.Join(t.TempDir(), "transcript.jsonl")
@@ -500,13 +382,8 @@ func TestEnforcementConformance(t *testing.T) {
 		}
 		return p
 	}
-	// stopThenFlush runs one Stop hook with the given assistant message and
-	// returns the bodies that reached /evaluate.
-	//
-	// `capture` is set AFTER serveCapturing, deliberately: serveCapturing calls
-	// evalCreds, which forces content capture OFF. Setting it before would be
-	// silently overwritten, and the capture-ON case would then pass by proving
-	// the capture-OFF behaviour.
+	// `capture` is set after serveCapturing, deliberately: serveCapturing calls
+	// evalCreds, which forces content capture OFF.
 	stopThenFlush := func(t *testing.T, session, transcript, assistantMessage, capture string) []string {
 		t.Helper()
 		bodies := serveCapturing(t, `{"verdict":"allow"}`)
@@ -549,7 +426,6 @@ func TestEnforcementConformance(t *testing.T) {
 		if turn == "" {
 			t.Fatalf("no turn payload carried a span; bodies=%v", bodies)
 		}
-		// The four conditions core's extractor checks, on the real outbound bytes.
 		for _, want := range []string{
 			`"span_count":1`,
 			`"stage":"completed"`,
@@ -566,7 +442,6 @@ func TestEnforcementConformance(t *testing.T) {
 		if !strings.Contains(turn, answer) {
 			t.Errorf("the assistant text is not in the span: %s", turn)
 		}
-		// hook_trigger with spans present enters the approval-bypass path.
 		if strings.Contains(turn, `"hook_trigger"`) {
 			t.Errorf("turn payload carries hook_trigger alongside spans: %s", turn)
 		}
@@ -587,9 +462,8 @@ func TestEnforcementConformance(t *testing.T) {
 				}
 			}
 		}
-		// The turn events themselves must still ship — this is a content gate,
-		// not a telemetry gate. Without this the case would pass for a client
-		// that stopped emitting turns entirely.
+		// Without this the case would pass for a client that stopped emitting turns
+		// entirely.
 		if !sawTurn {
 			t.Errorf("no turn events at all with capture off; the gate is on CONTENT, "+
 				"not on the turn: %v", bodies)
@@ -597,9 +471,6 @@ func TestEnforcementConformance(t *testing.T) {
 	})
 
 	t.Run("C26 a secret in the assistant text never reaches /evaluate", func(t *testing.T) {
-		// Same discipline as C18: assert on the bytes POSTed, not on the mapper's
-		// return. A redaction applied after attachment would satisfy every other
-		// test in this file and still leak.
 		os.Unsetenv(envSecretDetection) // default ON
 		bodies := stopThenFlush(t, "s-span-secret", turnTranscript(t),
 			"here is the key you asked for: AWS_ACCESS_KEY_ID="+awsSecret, "1")
@@ -623,10 +494,6 @@ func TestEnforcementConformance(t *testing.T) {
 	})
 
 	t.Run("C10 secret in Write body → redact-and-continue (E6-S9)", func(t *testing.T) {
-		// A reachable, BUNDLED allow decision. Secret detection is DEFAULT ON and
-		// DECOUPLED from content_capture (which stays OFF): the file body reaches only
-		// the local socket, the scanner redacts it, and the hook emits an updatedInput
-		// with the content field sanitized and NO permissionDecision (proceed).
 		serveVerdict(t, `{"verdict":"allow"}`)
 		t.Setenv(envEnforce, "1")
 		t.Setenv(envFailClosed, "0")
@@ -650,13 +517,11 @@ func TestEnforcementConformance(t *testing.T) {
 		if !strings.Contains(out, "OPENBOX_REDACTED") {
 			t.Errorf("expected the env-var redaction placeholder; got %q", out)
 		}
-		// Structural field preserved.
 		var ui map[string]any
 		_ = json.Unmarshal(got.HookSpecificOutput.UpdatedInput, &ui)
 		if ui["file_path"] != "/tmp/app.env" {
 			t.Errorf("file_path must survive reconstruction verbatim, got %v", ui["file_path"])
 		}
-		// Content-free audit signal recorded; raw secret never egressed/persisted.
 		data, _ := os.ReadFile(os.Getenv(envEnforcementFile))
 		if !strings.Contains(string(data), `"redacted":true`) {
 			t.Errorf("expected redacted:true in the enforcement audit; got %s", data)
@@ -677,34 +542,8 @@ func TestEnforcementConformance(t *testing.T) {
 	})
 }
 
-// ── Deleted with the local evaluator ──────────────────────────────
-//
-// TestEnforcementConformance_BuilderPolicy drove BLOCK / no-match /
-// REQUIRE_APPROVAL through the LOCAL implementation of the backend's
-// policy_builder semantics — the reimplementation whose permanent parity
-// obligation is that decision's central argument. Those three outcomes belong to
-// the server now, and C12 / C13 / C14 assert them end to end against a real
-// /evaluate.
-//
-// TestEnforcementConformance_StaleGate asserted that a stale-marked session
-// denies under fail-closed and that clearing the marker restores proceed. Both
-// are properties of a local bundle's freshness; there is no local bundle, so
-// nothing can be stale. `openbox dev sync`, which cleared the marker, is retired
-// in the same change.
-
-// ── Session-halt conformance (plan 260818-1714) ──────────────────────────────
-//
-// C27–C31 drive the real RunHook paths and assert the session-halt semantics on
-// the exact stdout bytes: a HALT the control plane returns terminates the
-// session — `continue:false` now, a latch refusing every later gated hook with
-// no re-evaluation — while a BLOCK and every SYNTHESIZED halt stay per-call,
-// and the prompt gate blocks prompts exactly as the tool gate denies calls.
-//
-// |C27| tool HALT           | deny + continue:false + latch; later hooks refuse locally, 0 POSTs |
-// |C28| prompt HALT         | decision:block + continue:false + latch                            |
-// |C29| prompt BLOCK        | block only — no continue:false, no latch, next prompt re-evaluates |
-// |C30| prompt ALLOW        | empty stdout (byte-identical to observe)                           |
-// |C31| fail-closed no-verdict | plain deny, NO continue:false, NO latch                         |
+// ── Session-halt conformance (plan 260818-1714)
+// ──────────────────────────────
 func TestSessionHaltConformance(t *testing.T) {
 	isolateConfig(t)
 	t.Setenv(envDID, testDID)
@@ -761,8 +600,6 @@ func TestSessionHaltConformance(t *testing.T) {
 			t.Fatal("the session must be latched after an emitted session halt")
 		}
 
-		// Every later gated hook in the session refuses LOCALLY: same stdout
-		// shape, zero further /evaluate round-trips.
 		before := atomic.LoadInt32(hits)
 		got2 := parseToolOut(t, run(t, "PreToolUse", toolPayload("halt-s1", "echo two")))
 		if !stopped(got2.Continue) || got2.HookSpecificOutput.PermissionDecision != ccDecisionDeny {
@@ -776,7 +613,6 @@ func TestSessionHaltConformance(t *testing.T) {
 			t.Errorf("latched session made %d further /evaluate calls, want 0 — the latch is the decided state", after-before)
 		}
 
-		// The audit distinguishes the server HALT from the latch replays.
 		enf, err := os.ReadFile(os.Getenv(envEnforcementFile))
 		if err != nil {
 			t.Fatalf("read enforcement sink: %v", err)
@@ -828,8 +664,6 @@ func TestSessionHaltConformance(t *testing.T) {
 		if _, halted := hookflow.SessionHalted("halt-s3"); halted {
 			t.Error("a BLOCK must not latch the session")
 		}
-		// The next prompt is evaluated afresh — blocked again by the stub, but
-		// through a real round-trip, not a latch.
 		before := atomic.LoadInt32(hits)
 		_ = run(t, "UserPromptSubmit", promptPayload("halt-s3", "second ask"))
 		if after := atomic.LoadInt32(hits); after != before+1 {
@@ -849,7 +683,6 @@ func TestSessionHaltConformance(t *testing.T) {
 	t.Run("C31 fail-closed synthesized HALT stays per-call: no stop, no latch", func(t *testing.T) {
 		t.Setenv("OPENBOX_HALT_DIR", t.TempDir())
 		t.Setenv(envFailClosed, "1")
-		// No reachable control plane: the gate synthesizes the fail-closed HALT.
 		got := parseToolOut(t, run(t, "PreToolUse", toolPayload("halt-s5", "echo blocked")))
 		if got.HookSpecificOutput.PermissionDecision != ccDecisionDeny {
 			t.Fatalf("fail-closed render = %+v, want a plain deny", got)

@@ -9,13 +9,10 @@ import (
 	obgit "github.com/openbox-ai/openbox-shift-left/internal/adapters/common/git"
 )
 
-// End to end through a real repository: a commit carrying a session trailer plus
-// a signed attestation note must resolve with the attestation attached, and the
-// signature must verify against the agent's public key for that exact commit.
-//
-// This is the property the story exists for — the trailer alone is a claim anyone
-// could write, and this proves the pipeline can carry the cryptographic upgrade
-// from the developer's machine to the server.
+// TestAttestation_EndToEndThroughRepo end to end through a real repository: a
+// commit carrying a session trailer plus a signed attestation note must
+// resolve with the attestation attached, and the signature must verify against
+// the agent's public key for that exact commit.
 func TestAttestation_EndToEndThroughRepo(t *testing.T) {
 	r := newTestRepo(t)
 	g := obgit.Git{Dir: r.dir}
@@ -65,9 +62,8 @@ func TestAttestation_EndToEndThroughRepo(t *testing.T) {
 		t.Errorf("tree sha = %q, want %q", payload.TreeSHA, tree)
 	}
 
-	// ...and all the way onto the wire. Verifying the claim but never checking
-	// the emitted event is what let the deploy event drop the attestation while
-	// this test stayed green.
+	// Verifying the claim but never checking the emitted event is what let the
+	// deploy event drop the attestation while this test stayed green.
 	sessions := deploySessions(t, res)
 	att2, ok := sessions[0]["attestation"].(map[string]any)
 	if !ok {
@@ -78,9 +74,10 @@ func TestAttestation_EndToEndThroughRepo(t *testing.T) {
 	}
 }
 
-// A commit with no note resolves exactly as before — absence must degrade to the
-// inferred/attributed claim, not to an error, because notes are not pushed by
-// default and most commits will have none.
+// TestAttestation_AbsentNoteIsNormal a commit with no note resolves exactly as
+// before; absence must degrade to the inferred/attributed claim, not to an
+// error, because notes are not pushed by default and most commits will have
+// none.
 func TestAttestation_AbsentNoteIsNormal(t *testing.T) {
 	r := newTestRepo(t)
 	sha := r.commit(trailerMsg("feat: unattested", "sess-plain-1"))
@@ -97,9 +94,10 @@ func TestAttestation_AbsentNoteIsNormal(t *testing.T) {
 	}
 }
 
-// An attestation naming a different session must not be presented as evidence
-// for this claim: notes are keyed by sha, so one cannot be moved between
-// commits, but a single note can name sessions other than the one being resolved.
+// TestAttestation_ForeignSessionNotAttached an attestation naming a different
+// session must not be presented as evidence for this claim: notes are keyed by
+// sha, so one cannot be moved between commits, but a single note can name
+// sessions other than the one being resolved.
 func TestAttestation_ForeignSessionNotAttached(t *testing.T) {
 	r := newTestRepo(t)
 	g := obgit.Git{Dir: r.dir}

@@ -29,14 +29,12 @@ func TestInstaller_MaterializesBundleAndConfig(t *testing.T) {
 		t.Fatalf("install: %v", err)
 	}
 
-	// Bundle materialized, including the dotted .claude-plugin dir (go:embed all:).
 	for _, rel := range []string{".claude-plugin/plugin.json", "hooks/hooks.json"} {
 		if _, err := os.Stat(filepath.Join(pluginDir, rel)); err != nil {
 			t.Errorf("missing bundle file %s: %v", rel, err)
 		}
 	}
 
-	// Config written with coordinates and NO secret values (INV-1).
 	raw, err := os.ReadFile(cfgPath)
 	if err != nil {
 		t.Fatalf("read config: %v", err)
@@ -48,20 +46,19 @@ func TestInstaller_MaterializesBundleAndConfig(t *testing.T) {
 	if cfg.DID != testDID {
 		t.Errorf("config coordinates wrong: %+v", cfg)
 	}
-	// The written file must never contain an obx_ key or a seed value.
 	if strings.Contains(string(raw), "obx_") {
 		t.Errorf("config leaked a credential value: %s", raw)
 	}
 
-	// Idempotent: a second install with the same ref succeeds.
 	if err := inst.Install(ref); err != nil {
 		t.Fatalf("re-install: %v", err)
 	}
 }
 
-// TestInstaller_PersistsEnforcePosture proves that decision onboarding change: the
-// enforce posture chosen at `init` time (ref.Enforce/Tier2/Findings, set by
-// --enforce) is written to dev.json, so the runtime hook reads it with NO env var.
+// TestInstaller_PersistsEnforcePosture proves that decision onboarding change:
+// the enforce posture chosen at `init` time (ref.Enforce/Tier2/Findings, set
+// by --enforce) is written to dev.json, so the runtime hook reads it with NO
+// env var.
 func TestInstaller_PersistsEnforcePosture(t *testing.T) {
 	pluginDir := t.TempDir()
 	cfgPath := filepath.Join(t.TempDir(), "openbox", "dev.json")
@@ -96,10 +93,8 @@ func TestInstaller_PersistsEnforcePosture(t *testing.T) {
 		t.Errorf("findings not persisted: %+v", cfg.Findings)
 	}
 
-	// The runtime resolvers must read the persisted posture with NO env override
-	// (OPENBOX_ENFORCE etc. unset) — the whole point of. Point the config loader at
-	// the file just written and ensure the env overrides are truly absent
-	// (LookupEnv must report !ok, so config wins).
+	// Point the config loader at the file just written and ensure the env
+	// overrides are truly absent (LookupEnv must report !ok, so config wins).
 	t.Setenv(envConfigPath, cfgPath)
 	for _, k := range []string{envEnforce, envTier2, envFindings} {
 		if _, ok := os.LookupEnv(k); ok {
@@ -127,14 +122,14 @@ func TestInstaller_Plan(t *testing.T) {
 			t.Errorf("plan missing %q:\n%s", want, plan)
 		}
 	}
-	// Plan must not print a secret (it never receives one, but guard anyway).
 	if strings.Contains(plan, "obx_") {
 		t.Errorf("plan leaked a credential: %s", plan)
 	}
 }
 
-// Re-init must be byte-identical: a second Install with the same ref overwrites
-// the bundle + config with the same content (idempotency, not just no-error).
+// TestInstaller_ReInstallIsByteIdentical re-init must be byte-identical: a
+// second Install with the same ref overwrites the bundle + config with the
+// same content (idempotency, not just no-error).
 func TestInstaller_ReInstallIsByteIdentical(t *testing.T) {
 	pluginDir := t.TempDir()
 	cfgPath := filepath.Join(t.TempDir(), "dev.json")
@@ -161,9 +156,9 @@ func TestInstaller_ReInstallIsByteIdentical(t *testing.T) {
 	}
 }
 
-// STORY-SL4-WIRE-2: when EngineBinary is set, Install copies the unified engine
-// into the bundle's bin/openbox (executable), idempotently. When it is empty the
-// copy is skipped (packaging supplies the binary).
+// TestInstaller_PlacesEngineBinary story-SL4-wire-2: when EngineBinary is set,
+// Install copies the unified engine into the bundle's bin/openbox
+// (executable), idempotently.
 func TestInstaller_PlacesEngineBinary(t *testing.T) {
 	pluginDir := t.TempDir()
 	engine := filepath.Join(t.TempDir(), "openbox")
@@ -189,7 +184,6 @@ func TestInstaller_PlacesEngineBinary(t *testing.T) {
 	if got, _ := os.ReadFile(placed); !strings.Contains(string(got), "exit 0") {
 		t.Errorf("placed engine content mismatch: %q", got)
 	}
-	// Idempotent: a second install re-copies without error.
 	if err := inst.Install(CredentialRef{DID: testDID}); err != nil {
 		t.Fatalf("re-install: %v", err)
 	}
@@ -213,10 +207,8 @@ func TestInstaller_RequiresDID(t *testing.T) {
 	}
 }
 
-// A re-init that says nothing about posture must leave it alone. Before this,
-// the installer rebuilt dev.json from the current run's flags and carried
-// forward only the sync coordinates, so the ordinary act of re-running
-// `init` to repair an install silently dropped enforce mode.
+// TestInstaller_ReInitKeepsEnforcePosture a re-init that says nothing about
+// posture must leave it alone.
 func TestInstaller_ReInitKeepsEnforcePosture(t *testing.T) {
 	pluginDir := t.TempDir()
 	cfgPath := filepath.Join(t.TempDir(), "openbox", "dev.json")
@@ -231,7 +223,6 @@ func TestInstaller_ReInitKeepsEnforcePosture(t *testing.T) {
 		t.Fatalf("install: %v", err)
 	}
 
-	// Plain re-init: no --enforce, so ref carries nil posture.
 	if err := inst.Install(CredentialRef{
 		DID: testDID,
 	}); err != nil {

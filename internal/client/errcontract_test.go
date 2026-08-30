@@ -8,13 +8,12 @@ import (
 	"time"
 )
 
-// A build failure used to return a nil error, which a durable caller reads as
-// "delivered" — so an event that never left the machine was dropped from the
-// spool as though core had accepted it.
+// TestEmit_UnbuildableEventReportsLoss a build failure used to return a nil
+// error, which a durable caller reads as "delivered"; so an event that never
+// left the machine was dropped from the spool as though core had accepted it.
 func TestEmit_UnbuildableEventReportsLoss(t *testing.T) {
 	c, log := newTestClient(t, "https://core.example", false)
 
-	// NaN cannot be marshalled, so the payload cannot be built.
 	_, err := c.Emit(context.Background(), DevEvent{
 		SchemaVersion: SchemaVersion,
 		EventID:       "ev-nan",
@@ -28,7 +27,6 @@ func TestEmit_UnbuildableEventReportsLoss(t *testing.T) {
 	if !errors.Is(err, ErrUnbuildable) {
 		t.Fatalf("err = %v, want ErrUnbuildable so the caller records a drop", err)
 	}
-	// It is emphatically NOT a delivery failure: retrying is pointless.
 	if errors.Is(err, ErrDelivery) {
 		t.Error("an unbuildable event must not look retryable")
 	}
@@ -37,7 +35,8 @@ func TestEmit_UnbuildableEventReportsLoss(t *testing.T) {
 	}
 }
 
-// Zero used to mean "unset, use the default", so no-retries was inexpressible.
+// TestNew_ZeroRetriesIsExpressible zero used to mean "unset, use the default",
+// so no-retries was inexpressible.
 func TestNew_ZeroRetriesIsExpressible(t *testing.T) {
 	zero := 0
 	c, err := New(Config{
@@ -62,8 +61,9 @@ func TestNew_DefaultsWhenUnset(t *testing.T) {
 	}
 }
 
-// A negative value used to skip the send loop and return a nil body with no
-// error, which parsed as VerdictUnknown — a silently ungoverned client.
+// TestNew_NegativeRetryConfigIsRejected a negative value used to skip the send
+// loop and return a nil body with no error, which parsed as VerdictUnknown; a
+// silently ungoverned client.
 func TestNew_NegativeRetryConfigIsRejected(t *testing.T) {
 	neg := -1
 	if _, err := New(Config{

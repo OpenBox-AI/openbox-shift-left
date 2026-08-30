@@ -10,33 +10,18 @@ import (
 	"testing"
 )
 
-// The five subtree dependency guards, replacing the go.mod-reading tests in
-// decision, telemetry, transport, gateway and conformance.
+// The five subtree dependency guards. Each allowlist entry is a module path and
+// admits that module's subpackages, which is what a `require` already meant;
+// nothing is added to make a list pass, and adding one is a decision.
 //
-// Each allowlist below is TODAY'S list, unchanged. Entries are MODULE paths and
-// admit their own subpackages, which is what a `require` already meant --
-// telemetry allows `collector/pdata` and imports `pdata/plog`; gateway allows
-// `.../client` and imports `client/memhttptest`. Nothing was added to make a
-// list pass; if one ever needs to be, that is an that decision amendment and not
-// a commit.
+// Two directions per guard: nothing unreviewed enters, and no reviewed entry is
+// stale, because an entry nobody imports is a claim of review with nothing
+// behind it.
 //
-// Two directions per guard, because two of the originals carry both: nothing
-// unreviewed enters, and no reviewed entry is stale. An entry nobody imports is
-// a standing claim of review with nothing behind it.
-//
-// NO PATH HERE IS IN A FORM AUTOMATION CAN FIND.
-//
-// Subtree names are bare (`"decision"`), allowlist entries are built by
-// concatenation (`repoPrefix + "/client"`), and roots are assembled with
-// filepath.Join -- so none of them ever contains the contiguous qualified import
-// path that a mechanical rewrite matches on. The module collapse had to update
-// this file by hand for exactly that reason, and the next move will too.
-//
-// The failure mode is loud but misleading: a stale path makes the unallowed and
-// dead-entry tests fire together, which reads as "the guards broke" rather than
-// "a path went stale". If you move a subtree, change it here and re-run the
-// drills -- the one that matters is internal/gateway importing
-// internal/cli/devinit, the package that reads ~/.openbox/.env.
+// No path here is in a form automation can find. Names are bare, entries are
+// built by concatenation and roots by filepath.Join, so none contains the
+// contiguous import path a mechanical rewrite matches on. Moving a subtree means
+// editing this file by hand.
 
 type subtreeGuard struct {
 	name string // the subtree, repo-relative
@@ -45,7 +30,7 @@ type subtreeGuard struct {
 	// repoLocal is every OTHER subtree of this repo it may reach.
 	//
 	// This half is not decoration. gateway's entire allowlist is repo-local and
-	// telemetry's is deliberately EMPTY -- the quarantine its own guard calls out
+	// telemetry's is deliberately empty; the quarantine its own guard calls out
 	// ("note what is ABSENT and was expected"). Drop this axis and
 	// `internal/gateway` could import `internal/cli/devinit`, which reads and
 	// writes ~/.openbox/.env, with every guard still green.
@@ -96,10 +81,9 @@ func guards() []subtreeGuard {
 			name:     "internal/transport",
 			external: map[string]bool{"github.com/elazarl/goproxy": true},
 			repoLocal: map[string]bool{
-				// gateway, because this lane REUSES the relay rather than forking
+				// gateway, because this lane reuses the relay rather than forking
 				// it. Serving the existing gateway.Gateway over the hijacked
-				// connection is why nothing here imports client or decision --
-				// the credential-path surface is SMALLER than phase 11 planned.
+				// connection is why nothing here imports client or decision; // the credential-path surface is smaller than phase 11 planned.
 				repoPrefix + "/internal/gateway": true,
 			},
 			why: "phase 11 expected {goproxy, gateway, client, decision}; the reuse decision removed two",
@@ -109,7 +93,7 @@ func guards() []subtreeGuard {
 			// Empty is the strongest statement available here, not a vacuous one:
 			// the relay imports NO external code at all, which is what makes the
 			// lexical credential scan in gateway/guard_test.go sufficient rather
-			// than lucky -- there is no third-party package for a credential read
+			// than lucky; there is no third-party package for a credential read
 			// to hide in.
 			external: map[string]bool{},
 			repoLocal: map[string]bool{
@@ -168,11 +152,11 @@ func TestSubtreeAllowlistsHaveNoDeadEntries(t *testing.T) {
 // is a CLOSURE rather than a direct-import list.
 //
 // The distinction is the whole guard. `golang.org/x/text` is not imported by any
-// file here -- it arrives through jsonschema -- so a direct-import check cannot
+// file here; it arrives through jsonschema -- so a direct-import check cannot
 // see it and would silently drop the entry. That would not be equivalence, and
 // this is the one guard that decision deliberately left closure-wide: its
 // closure is two entries, which is readable, and the reason the bound is tight
-// is that three adapters import this package in their TESTS, so anything
+// is that three adapters import this package in their tests, so anything
 // reaching here links into their test binaries too. Link-time spread follows the
 // import graph, not go.mod, so collapsing the modules does not relax it.
 var conformanceAllowed = map[string]bool{
@@ -230,7 +214,7 @@ func TestConformanceClosureIsReviewed(t *testing.T) {
 //
 // Its point was that the contract module must resolve identically in every
 // checkout, and a `replace` is what breaks that. Phase 03's acceptance criterion
-// says the collapsed repo carries no replace at all -- but a criterion is checked
+// says the collapsed repo carries no replace at all; but a criterion is checked
 // once, at merge, and a test is checked forever. This is the forever half.
 //
 // It means the same thing on both sides of the collapse: today the 45 intra-repo
@@ -281,7 +265,7 @@ func TestNoReplacePointsOutsideTheRepo(t *testing.T) {
 
 // replaceTarget returns the filesystem target of a `replace ... => <path>` line,
 // and false for any line that is not a replace onto a local path. A replace onto
-// another MODULE (no leading . or /) is a different thing and not this subject.
+// another module (no leading . or /) is a different thing and not this subject.
 func replaceTarget(line string) (string, bool) {
 	line = strings.TrimSpace(line)
 	if strings.HasPrefix(line, "//") {
@@ -315,7 +299,7 @@ func mustRel(root, path string) string {
 // get from the compiler.
 //
 // While the adapters are separate modules, one importing the other needs a
-// `require` and a `replace` -- mechanical, and nobody has to remember it. Under
+// `require` and a `replace`; mechanical, and nobody has to remember it. Under
 // one module they are siblings under internal/adapters/ and the compiler permits
 // it, so this test is the whole control. That is a real downgrade from a compiler
 // guarantee to a test, and that decision records it as one.

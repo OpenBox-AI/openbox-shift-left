@@ -41,8 +41,6 @@ func TestCreateParsesResponseAndSendsContract(t *testing.T) {
 		t.Fatalf("Create: %v", err)
 	}
 
-	// obx_key_ credential must go on X-API-Key, and the JWT-only x-openbox-client
-	// header must NOT be sent on the API-key path.
 	if gotAuth == "" {
 		t.Error("expected X-API-Key header to be set")
 	}
@@ -52,7 +50,6 @@ func TestCreateParsesResponseAndSendsContract(t *testing.T) {
 	if gotContentType != "application/json" {
 		t.Errorf("Content-Type = %q", gotContentType)
 	}
-	// Contract fields the backend requires.
 	if gotBody["agent_type"] != "developer" {
 		t.Errorf("agent_type = %v, want developer", gotBody["agent_type"])
 	}
@@ -62,7 +59,6 @@ func TestCreateParsesResponseAndSendsContract(t *testing.T) {
 	if _, ok := gotBody["aivss_config"]; !ok {
 		t.Error("aivss_config must be present")
 	}
-	// Parsed credentials.
 	if reg.APIKey == "" || reg.PrivateKey != "c2VlZA==" || reg.DID != "did:aip:x" {
 		t.Errorf("bad registration parse: %+v", reg)
 	}
@@ -93,8 +89,6 @@ func TestCreateBearerPathSetsClientHeader(t *testing.T) {
 }
 
 func TestCreateDIDFallsBackToAgentBody(t *testing.T) {
-	// F6: identity is not in the advertised Swagger DTO; when identity.did is
-	// absent the client must fall back to agent.did.
 	srv := memhttptest.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = io.WriteString(w, `{"data":{"agent":{"id":"a","did":"did:aip:from-agent"},"token":"t","identity":{"privateKey":"p"}}}`)
 	}))
@@ -138,8 +132,6 @@ func TestFindByName(t *testing.T) {
 				if r.URL.Path != "/agent/list" {
 					t.Errorf("path = %s", r.URL.Path)
 				}
-				// all=true asks for the unpaginated list; without it a
-				// duplicate past page one reads as "does not exist".
 				if r.URL.Query().Get("all") != "true" {
 					t.Errorf("query = %q, want all=true", r.URL.RawQuery)
 				}
@@ -148,7 +140,6 @@ func TestFindByName(t *testing.T) {
 			defer srv.Close()
 			c := New(srv.URL, "obx_key_x", "cli")
 
-			// Case-insensitive match.
 			got, err := c.FindByName(context.Background(), "beta")
 			if err != nil {
 				t.Fatalf("FindByName: %v", err)
@@ -156,7 +147,6 @@ func TestFindByName(t *testing.T) {
 			if got == nil || got.ID != "2" {
 				t.Fatalf("expected agent id 2, got %+v", got)
 			}
-			// No match returns nil, nil.
 			got, err = c.FindByName(context.Background(), "gamma")
 			if err != nil || got != nil {
 				t.Fatalf("expected (nil,nil), got (%+v,%v)", got, err)
@@ -173,9 +163,10 @@ func repeat(s string, n int) string {
 	return string(out)
 }
 
-// STORY-E6-S8: GetCurrentPolicy parses the {status,data:PolicyEntity|null}
-// envelope, sends the org key on X-API-Key with the read:agent_policy path, and
-// extracts config.policy_builder / raw-rego presence.
+// TestGetCurrentPolicy_BuilderConfig story-E6-S8: GetCurrentPolicy parses the
+// {status,data:PolicyEntity|null} envelope, sends the org key on X-API-Key
+// with the read:agent_policy path, and extracts config.policy_builder / raw-
+// rego presence.
 func TestGetCurrentPolicy_BuilderConfig(t *testing.T) {
 	var gotPath, gotAuth string
 	srv := memhttptest.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -208,7 +199,6 @@ func TestGetCurrentPolicy_BuilderConfig(t *testing.T) {
 }
 
 func TestGetCurrentPolicy_NullDataAndRawRego(t *testing.T) {
-	// data:null → (nil,nil): no current policy.
 	nullSrv := memhttptest.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = io.WriteString(w, `{"status":200,"data":null}`)
 	}))
@@ -217,7 +207,6 @@ func TestGetCurrentPolicy_NullDataAndRawRego(t *testing.T) {
 		t.Fatalf("null data = (%+v,%v), want (nil,nil)", p, err)
 	}
 
-	// raw rego, no policy_builder → HasRawRego true.
 	rawSrv := memhttptest.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = io.WriteString(w, `{"status":200,"data":{"id":"pol-2","updated_at":"t","rego_code":"package x\nallow { true }","config":{"path":"p"}}}`)
 	}))
@@ -244,10 +233,8 @@ func TestGetCurrentPolicy_APIErrorPropagates(t *testing.T) {
 	}
 }
 
-// An unreadable list shape must be an error, not an empty list. Returning nil
-// turned "could not parse" into "no such agent", defeating the duplicate guard
-// devinit relies on: non-force init would walk into an opaque 400, and --force
-// would pick a name that is already taken.
+// TestFindByName_UnrecognizedShapeErrors an unreadable list shape must be an
+// error, not an empty list.
 func TestFindByName_UnrecognizedShapeErrors(t *testing.T) {
 	srv := memhttptest.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = io.WriteString(w, `{"data":{"agents":[{"id":"1","agent_name":"alpha"}]}}`)
@@ -263,7 +250,8 @@ func TestFindByName_UnrecognizedShapeErrors(t *testing.T) {
 	}
 }
 
-// An empty data field is a legitimate "no agents", not a parse failure.
+// TestFindByName_EmptyDataIsNotAnError an empty data field is a legitimate "no
+// agents", not a parse failure.
 func TestFindByName_EmptyDataIsNotAnError(t *testing.T) {
 	srv := memhttptest.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = io.WriteString(w, `{"data":[]}`)

@@ -194,9 +194,9 @@ func (s Spec) foregroundCommand() string {
 	return "openbox " + s.Args[0].Value
 }
 
-// xmlEscape escapes a plist string value. A path can legitimately contain '&'
-// or '<', and an unescaped one produces a plist launchd silently refuses to
-// load; which presents as "the daemon never starts" with no error anywhere.
+// xmlEscape a path can legitimately contain '&' or '<', and an unescaped one
+// produces a plist launchd silently refuses to load; which presents as "the
+// daemon never starts" with no error anywhere.
 func xmlEscape(s string) string {
 	r := strings.NewReplacer(
 		"&", "&amp;",
@@ -208,7 +208,6 @@ func xmlEscape(s string) string {
 	return r.Replace(s)
 }
 
-// systemdArg quotes an argument for a systemd ExecStart line.
 func systemdArg(s string) string {
 	s = strings.ReplaceAll(s, `\`, `\\`)
 	s = strings.ReplaceAll(s, `"`, `\"`)

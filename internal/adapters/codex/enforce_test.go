@@ -19,18 +19,11 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/internal/decision"
 )
 
-// ── shared enforce test helpers (consumed by enforce_test + enforce_conformance) ──
-
-// isolateConfig points the dev config at a nonexistent temp file so no real
-// ~/.config/openbox/dev.json is read (hermeticity; the TestMain sentinel in
-// testmain_test.go is the structural backstop).
 func isolateConfig(t *testing.T) {
 	t.Helper()
 	t.Setenv(devconfig.EnvConfigPath, filepath.Join(t.TempDir(), "none.json"))
 }
 
-// parsePreToolUse parses a Codex PreToolUse hook stdout line into its decision,
-// reason, and raw updatedInput. Empty stdout → ("","",nil).
 func parsePreToolUse(t *testing.T, out []byte) (decisionVal, reason string, updatedInput json.RawMessage) {
 	t.Helper()
 	if len(bytes.TrimSpace(out)) == 0 {
@@ -46,12 +39,6 @@ func parsePreToolUse(t *testing.T, out []byte) (decisionVal, reason string, upda
 	return o.HookSpecificOutput.PermissionDecision, o.HookSpecificOutput.PermissionDecisionReason, o.HookSpecificOutput.UpdatedInput
 }
 
-// ── unit tests ──
-
-// serveVerdict stands up the control plane for a case and points the adapter at
-// it. It replaces setBundleEnv: since that decision a case's expected outcome
-// is a SERVER verdict, not a local bundle, so the setup names the verdict
-// directly.
 func serveVerdict(t *testing.T, verdictJSON string) {
 	t.Helper()
 	srv := memhttptest.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -70,14 +57,10 @@ func TestResolveEnforce_Codex(t *testing.T) {
 	t.Setenv(devconfig.EnvConfigPath, cfgPath)
 	os.Unsetenv(devconfig.EnvEnforce)
 
-	// Default ON (that decision reversed the observe default). This adapter
-	// resolves through devconfig, so the assertion pins that its facade kept no
-	// stale default of its own.
 	write(`{"developer_did":"` + testDID + `"}`)
 	if !ResolveEnforce() {
 		t.Error("an absent enforce field must resolve to ON ")
 	}
-	// An explicit false still opts out — the property the *bool change bought.
 	write(`{"developer_did":"` + testDID + `","enforce":false}`)
 	if ResolveEnforce() {
 		t.Error("enforce:false in config must opt out")
@@ -143,7 +126,8 @@ func TestBuildDecisionRequest_Codex(t *testing.T) {
 	})
 }
 
-// mapVerdict / applyDecision — the provider-shaped apply edge.
+// TestMapVerdict_Codex mapVerdict / applyDecision; the provider-shaped apply
+// edge.
 func TestMapVerdict_Codex(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -161,11 +145,8 @@ func TestMapVerdict_Codex(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			// Assert the RENDERED outcome, not the intermediate literal:
-			// MapVerdict now yields the session-stop literal for HALT, and this
-			// provider has no session-stop lever — its Render must downgrade to
-			// deny. A missed case in Render falls through to "write nothing",
-			// which would silently PROCEED a halted call; this is the pin.
+			// A missed case in Render falls through to "write nothing", which would
+			// silently proceed a halted call; this is the pin.
 			d, reason := hookflow.MapVerdict(c.eval, contract)
 			_, applied := contract.Render(d, reason, nil)
 			if applied != c.want {
@@ -174,7 +155,6 @@ func TestMapVerdict_Codex(t *testing.T) {
 			if c.want == codexDecisionDeny && c.wantSub != "" && !strings.Contains(reason, c.wantSub) {
 				t.Errorf("reason = %q, want it to contain %q", reason, c.wantSub)
 			}
-			// Tighten-only: the cascade NEVER yields allow.
 			if applied == codexDecisionAllow {
 				t.Errorf("the cascade must never emit allow (tighten-only)")
 			}
@@ -229,7 +209,6 @@ func TestApplyDecision_Codex(t *testing.T) {
 		if !strings.Contains(out.String(), "OPENBOX_REDACTED") {
 			t.Errorf("expected the redaction placeholder in updatedInput: %s", out.String())
 		}
-		// The rewritten command field is present + structural shape preserved.
 		var m map[string]any
 		_ = json.Unmarshal(ui, &m)
 		if _, ok := m["command"]; !ok {
@@ -287,13 +266,13 @@ func TestApplyFailurePolicy_Codex(t *testing.T) {
 	}
 }
 
-// TestEnforceDecision_ObtainsRealVerdict is deleted with the local evaluator
-// : EnforceDecision now runs secret redaction and produces no verdict at
-// all, so "obtains a real BLOCK" has no local meaning. CDX-C1 asserts the
-// same outcome end to end against a real /evaluate.
+// TestEnforceDecision_ObtainsRealVerdict is deleted with the local evaluator :
+// EnforceDecision now runs secret redaction and produces no verdict at all, so
+// "obtains a real BLOCK" has no local meaning.
 
-// The adapter-owned clamps are DERIVED from the installed gate-hook timeout, not
-// copied from Claude Code's constants (OD-SL7-T2-TIMEOUT).
+// TestClampsDerivedFromInstalledTimeout the adapter-owned clamps are derived
+// from the installed gate-hook timeout, not copied from Claude Code's
+// constants (OD-SL7-T2-timeout).
 func TestClampsDerivedFromInstalledTimeout(t *testing.T) {
 	if (Engine{}).HookCeilings().Gating != time.Duration(preToolUseHookTimeoutSec)*time.Second {
 		t.Errorf("(Engine{}).HookCeilings().Gating must derive from the installer's preToolUseHookTimeoutSec")

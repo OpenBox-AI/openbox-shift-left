@@ -6,8 +6,9 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/devconfig"
 )
 
-// migrateLegacyConfig carries dev.json / approver.json from the pre-that
-// decision location into ~/.openbox/, and says so once when it does.
+// migrateLegacyConfig read paths do not need it: they fall back to the legacy
+// location on their own (devconfig.DefaultConfigPath), so an upgraded binary
+// keeps governing a machine before anyone runs `auth` or `init`.
 func (a *app) migrateLegacyConfig() {
 	migrated, err := devconfig.MigrateLegacyConfig()
 	if err != nil {

@@ -8,22 +8,11 @@ import (
 	"testing"
 )
 
-// TestMain is the ASSERTED-hermeticity control from incident INC-SL7A-DEVJSON
+// TestMain is the asserted-hermeticity control from incident INC-sl7a-devjson
 // (G_SEC SL7-A F4): this suite's mock-backend integration test once assumed
-// "codex is a Stub ⇒ Install() is a no-op" and, when STORY-SL7-A made codex a
+// "codex is a Stub ⇒ Install() is a no-op" and, when story-SL7-A made codex a
 // real installer, wrote the developer's actual ~/.codex/hooks.json and
-// ~/.config/openbox/dev.json. The same assumption now rests on the cursor Stub
-// and would re-arm at SL-8's registry swap — so the property is made
-// STRUCTURAL here:
-//
-//  1. CONTAIN — HOME / XDG_CONFIG_HOME / CODEX_HOME are pointed at a throwaway
-//     sentinel dir before any test runs, so a future Stub-flip escapes into
-//     the sentinel, never into the developer's real home; and
-//  2. ASSERT — any file found under the sentinel after the run FAILS the suite
-//     loudly, so the escape is fixed rather than silently contained.
-//
-// Tests that pin their own paths (t.Setenv / injected Installer paths)
-// override the sentinel per-test as before.
+// ~/.config/openbox/dev.json.
 func TestMain(m *testing.M) {
 	sentinel, err := os.MkdirTemp("", "openbox-hermetic-home-")
 	if err != nil {
@@ -49,9 +38,6 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
-// filesUnder returns every regular file below root (relative paths),
-// best-effort — a walk error is reported as a pseudo-leak so it is never
-// silently ignored.
 func filesUnder(root string) []string {
 	var out []string
 	_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {

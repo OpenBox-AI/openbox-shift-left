@@ -11,22 +11,8 @@ import (
 
 var updateGolden = flag.Bool("update", false, "rewrite the golden wire fixtures from current output")
 
-// The bytes buildPayload returns are the bytes that get signed AND sent — the
-// client never re-marshals. So the wire contract is not "these fields decode to
-// these values", it is the exact byte sequence, key order included.
-//
-// Every other wire test in this package decodes first and asserts field by
-// field, which structurally cannot catch a key rename that a test happens not
-// to mention, an omitempty gained or lost, a value silently changing type, or
-// map key ordering shifting. These fixtures catch all of it, and they exist so
-// that the refactors extracting shared machinery out of this module can prove
-// they moved no bytes.
-//
-// Fixtures are stored indented for reviewable diffs and compacted before the
-// comparison; json.Compact only strips insignificant whitespace, so the check
-// is byte-exact on everything that reaches the wire.
-//
-// Regenerate deliberately, never reflexively:  go test ./client -run Golden -update
+// TestGoldenWirePayloads the bytes buildPayload returns are the bytes that get
+// signed AND sent; the client never re-marshals.
 func TestGoldenWirePayloads(t *testing.T) {
 	for _, tc := range goldenCases() {
 		t.Run(tc.name, func(t *testing.T) {
@@ -73,9 +59,6 @@ type goldenCase struct {
 	event DevEvent
 }
 
-// goldenCases pins one event per wire class. Values are fixed literals: every
-// id on the wire is derived (sha256 of the session/pair key) rather than
-// random, so the payload is a pure function of the event.
 func goldenCases() []goldenCase {
 	const (
 		session = "sess-golden-0001"
@@ -102,13 +85,9 @@ func goldenCases() []goldenCase {
 	sessionEnded := base(EventSessionEnded, "ev-2")
 	sessionEnded.Timestamp = "2026-07-31T09:30:00Z"
 
-	// A signal carrying content: prompt text rides signal_args only when
-	// content-capture left it in place (INV-2 gate runs before this point).
 	promptSubmitted := base(EventPromptSubmitted, "ev-3")
 	promptSubmitted.Content = &Content{Prompt: "refactor the spool"}
 
-	// A signal carrying lineage: commit/deploy keys have no first-class core
-	// column and ride the pass-through metadata blob.
 	deploy := base(EventDeploy, "deploy-production-37ec0a3f")
 	deploy.Tool = Tool{Name: "openbox-git-action", Kind: ToolShell}
 	deploy.Metadata = map[string]any{
@@ -117,11 +96,6 @@ func goldenCases() []goldenCase {
 		"repo":       ws,
 	}
 
-	// completed derives the ActivityCompleted half of a tool call from its
-	// started half, so a fixture pair cannot drift apart in the fields that must
-	// match. The activity_id is derived from the same operation, so the pair
-	// shares it — that pairing is what puts both rows on one timeline entry and
-	// what makes one approval cover both.
 	completed := func(call DevEvent, eventID, endedAt string) DevEvent {
 		res := call
 		res.EventID = eventID
@@ -132,10 +106,6 @@ func goldenCases() []goldenCase {
 		span := *call.Span
 		span.Stage = "completed"
 		res.Span = &span
-		// The outcome. It rides the completed half only, and these three
-		// fixtures are what pins the literal core compares against — a rename to
-		// "success" or "COMPLETED" shows up here as a wire diff rather than as a
-		// dashboard that quietly reads 0%.
 		res.Status = StatusCompleted
 		return res
 	}
@@ -145,37 +115,23 @@ func goldenCases() []goldenCase {
 	fileCall.Span = &Span{
 		SemanticType: "file_write",
 		Stage:        "started",
-		// A sample path, and it is INPUT TO THE activity_id HASH and to the golden
-		// wire bytes. It does not track the real tree and must not be "corrected"
-		// when a directory moves — a rename sweep already did that once and broke
-		// the byte pin, which is core's dedupe key.
+		// It does not track the real tree and must not be "corrected" when a
+		// directory moves; a rename sweep already did that once and broke the byte
+		// pin, which is core's dedupe key.
 		FilePath:     "cli/cmd/openbox/main.go",
 		FileOp:       "write",
 		BytesWritten: &bytesWritten,
 	}
-	// 2.5s later: pins duration_ms as a real number, which nothing but the
-	// client can produce now that there is no span for core to derive it from.
 	fileResult := completed(fileCall, "ev-5", "2026-07-31T09:00:02.5Z")
 
-	// Shell: this fixture carries no Content at all, which is the CAPTURE-OFF
-	// shape — the bytes an org with content_capture:false sends. (It used to be
-	// the unconditional shape: SL3-SEC-3 said a command never egressed. That
-	// decision retired that, so with capture ON both halves do carry content;
-	// the golden set deliberately pins the gated-off bytes, because those are
-	// the ones that must never drift.) The completed half has no counts either —
-	// the providers expose none for a shell call — so its activity_output is
-	// absent rather than an empty object.
 	shellCall := base(EventToolCall, "ev-6")
 	shellCall.Tool = Tool{Name: "Bash", Kind: ToolShell}
 	shellCall.Span = &Span{SemanticType: "shell_command", Stage: "started"}
 	shellResult := completed(shellCall, "ev-8", "2026-07-31T09:00:01Z")
 
-	// The failure half of the same shape: a shell call that failed. Everything
-	// but `status` is identical to the successful one, which is the point —
-	// nothing else on the wire distinguishes a failed call, so the enum is
-	// load-bearing rather than decorative. `duration_ms` is present because a
-	// failed call still took time, and the failure hook is paired by the same
-	// duration stash as the success one.
+	// Everything but `status` is identical to the successful one, which is the
+	// point; nothing else on the wire distinguishes a failed call, so the enum is
+	// load-bearing rather than decorative.
 	shellFailedCall := base(EventToolCall, "ev-15")
 	shellFailedCall.Tool = Tool{Name: "Bash", Kind: ToolShell}
 	shellFailedCall.Span = &Span{SemanticType: "shell_command", Stage: "started", InvocationID: "toolu_fail01"}
@@ -193,13 +149,10 @@ func goldenCases() []goldenCase {
 	}
 	mcpResult := completed(mcpCall, "ev-9", "2026-07-31T09:00:00.75Z")
 
-	// The three failure/lifecycle signals. Their fixtures exist mainly to pin
-	// ONE property that no unit test states as loudly: the wire payload has NO
-	// signal_args key. Core reads a SignalReceived carrying signal_args as a new
-	// user goal and overwrites the alignment session's goal with it
-	// (age.go:112-137), so a well-meaning "let's show the denied tool in the
-	// Verify tab's Input" would silently destroy goal alignment. If these three
-	// fixtures ever gain a signal_args key, that is the bug.
+	// Core reads a SignalReceived carrying signal_args as a new user goal and
+	// overwrites the alignment session's goal with it (age.go:112-137), so a
+	// well-meaning "let's show the denied tool in the Verify tab's Input" would
+	// silently destroy goal alignment.
 	subagentStarted := base(EventSubagentStarted, "ev-17")
 	subagentStarted.Tool = Tool{Name: "claude-code", Kind: ToolShell}
 	subagentStarted.AgentID = "agt-code-reviewer-01"
@@ -221,10 +174,6 @@ func goldenCases() []goldenCase {
 	apiError.Tool = Tool{Name: "claude-code", Kind: ToolShell}
 	apiError.Metadata = map[string]any{"provider": "claude-code", "error_type": "rate_limit"}
 
-	// A turn: the same activity carrier as a tool call, with an id derived from
-	// the turn index instead of hashed from an operation, and usage rather than
-	// byte counts in activity_output. Both halves are emitted from one hook
-	// firing, so the fixture pair is what one Stop produces.
 	turnIndex := 0
 	turnStarted := base(EventTurnStarted, "ev-10")
 	turnStarted.Tool = Tool{Name: "claude-code", Kind: ToolShell}
@@ -247,17 +196,10 @@ func goldenCases() []goldenCase {
 	}
 	turnCompleted.Metadata = map[string]any{"provider": "claude-code", "turn_index": turnIndex}
 
-	// The same turn WITH the assistant's text. This fixture is the byte-exact
-	// record of the one span a developer session emits: the classification
-	// attributes core recomputes semantic_type from, the synthetic marker, the
-	// hash-derived ids, and the OpenAI-chat wrapper its alignment extractor
-	// unmarshals. Every one of those fails SILENTLY if it drifts — core logs and
-	// returns "" — so the fixture is the alarm.
-	//
-	// It carries BOTH content fields a turn can hold, deliberately: the reply on
-	// the span and the thinking in activity_output. One fixture showing them in
-	// their separate places is what stops a future change quietly merging them —
-	// which would corrupt the alignment reader rather than error.
+	// Every one of those fails silently if it drifts; core logs and returns "";
+	// so the fixture is the alarm. It carries both content fields a turn can
+	// hold, deliberately: the reply on the span and the thinking in
+	// activity_output.
 	turnWithContent := turnCompleted
 	turnWithContent.EventID = "ev-20"
 	turnWithContent.Content = &Content{
@@ -265,7 +207,6 @@ func goldenCases() []goldenCase {
 		Thinking: "The spool writer is called from two hooks, so the lock has to be held across the rename.",
 	}
 
-	// A subagent's turn: same shape, partitioned id, attributed by agent.
 	subIndex := 1
 	subagentTurn := turnCompleted
 	subagentTurn.EventID = "ev-12"
@@ -284,12 +225,9 @@ func goldenCases() []goldenCase {
 		"agent_type": "code-reviewer",
 	}
 
-	// Codex's granularity: ONE llm_completion pair per session, id
-	// <session>:usage:rollup. Same carrier, same activity_type, same
-	// activity_output shape as the per-turn pairs above — which is the parity
-	// claim, pinned here rather than asserted in prose. The two adapters are
-	// separate modules and cannot import each other, so the client's fixtures are
-	// the only place the two shapes can be compared byte for byte.
+	// The two adapters are separate modules and cannot import each other, so the
+	// client's fixtures are the only place the two shapes can be compared byte
+	// for byte.
 	rollupStarted := base(EventTurnStarted, "ev-13")
 	rollupStarted.Tool = Tool{Name: "codex", Kind: ToolShell}
 	rollupStarted.SessionRollup = true
@@ -301,9 +239,6 @@ func goldenCases() []goldenCase {
 	rollupCompleted.Timestamp = "2026-07-31T09:30:00Z"
 	rollupCompleted.EndedAt = "2026-07-31T09:30:00Z"
 	rollupCompleted.Model = "gpt-5.6-sol"
-	// Codex's cache counts are sub-counts of input_tokens, so Input here is
-	// already net of them (14718 − 9984 = 4734) and Total is its own reported
-	// figure. The invariant Total == Input+Output+caches holds either way.
 	rollupCompleted.Tokens = &Tokens{
 		Input:     intPtrGolden(4734),
 		Output:    intPtrGolden(232),

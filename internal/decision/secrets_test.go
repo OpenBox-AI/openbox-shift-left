@@ -9,8 +9,8 @@ import (
 )
 
 // TestRedact_NamedPatterns asserts each high-confidence format is detected,
-// redacted to an env-var-ref placeholder, and reports its category — and that the
-// original secret NEVER survives in the redacted output.
+// redacted to an env-var-ref placeholder, and reports its category; and that
+// the original secret never survives in the redacted output.
 func TestRedact_NamedPatterns(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -62,8 +62,9 @@ func TestRedact_PEMBlock(t *testing.T) {
 	}
 }
 
-// TestRedact_AssignmentValueOnly redacts the VALUE of a KEY=VALUE assignment while
-// preserving the key and quoting (a partial patch, not a whole-line blank).
+// TestRedact_AssignmentValueOnly redacts the value of a KEY=value assignment
+// while preserving the key and quoting (a partial patch, not a whole-line
+// blank).
 func TestRedact_AssignmentValueOnly(t *testing.T) {
 	in := `password = "hunter2secret9999"`
 	out, cats, changed := newSecretDetector().Redact(in)
@@ -81,12 +82,10 @@ func TestRedact_AssignmentValueOnly(t *testing.T) {
 	}
 }
 
-// TestRedact_Entropy catches a long high-entropy base64 token in a VALUE position.
+// TestRedact_Entropy catches a long high-entropy base64 token in a value
+// position.
 func TestRedact_Entropy(t *testing.T) {
-	// 40-char base64-class token with high symbol diversity.
 	tok := "aB3xK9pLmQ7rT2vW8yZ1cD4fG6hJ0nS5uE7iO3q"
-	// Keys chosen to NOT collide with a named-pattern key (api_key/token/…), so the
-	// generic entropy fallback (not secret_assignment) is what fires.
 	for _, in := range []string{"value: " + tok, `blobval=` + tok, `nonce = "` + tok + `"`} {
 		out, cats, changed := newSecretDetector().Redact(in)
 		if !changed || strings.Contains(out, tok) {
@@ -98,14 +97,13 @@ func TestRedact_Entropy(t *testing.T) {
 	}
 }
 
-// TestRedact_EntropyBlobsNotCorrupted covers G3 Finding 2: on-by-default entropy
-// redaction must NOT corrupt free-floating base64 blobs that are not in a value
-// position — data: URIs, PEM certificate lines, minified/embedded assets.
+// TestRedact_EntropyBlobsNotCorrupted covers G3 Finding 2: on-by-default
+// entropy redaction must NOT corrupt free-floating base64 blobs that are not
+// in a value position; data: URIs, PEM certificate lines, minified/embedded
+// assets.
 func TestRedact_EntropyBlobsNotCorrupted(t *testing.T) {
 	blobs := []string{
-		// PEM certificate body lines (64-char base64 runs at line start).
 		"-----BEGIN CERTIFICATE-----\nMIIDdzCCAl+gAwIBAgIEAgICADANBgkqhkiG9w0BAQsFADBaMQswCQYDVQQGEwJV\nUzAeFw0xNjA4MTcyMDM2NTVaFw0xNzA4MTcyMDM2NTVaMFoxCzAJBgNVBAYTAlVT\n-----END CERTIFICATE-----",
-		// data: URI base64 payload (preceded by a comma, not an assignment).
 		"const img = load('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR42mNk')",
 	}
 	d := newSecretDetector()
@@ -117,9 +115,9 @@ func TestRedact_EntropyBlobsNotCorrupted(t *testing.T) {
 	}
 }
 
-// TestRedact_NoFalsePositives asserts ordinary prose/code is NOT redacted — the
-// low-false-positive posture (AC-6). Includes a git SHA and a UUID (hex ≤4.0 bits,
-// below the 4.5 entropy floor) that must survive.
+// TestRedact_NoFalsePositives asserts ordinary prose/code is NOT redacted; the
+// low-false-positive posture (AC-6). Includes a git SHA and a UUID (hex ≤4.0
+// bits, below the 4.5 entropy floor) that must survive.
 func TestRedact_NoFalsePositives(t *testing.T) {
 	safe := []string{
 		"package main\n\nimport \"fmt\"\n\nfunc main() { fmt.Println(\"hello world\") }",
@@ -137,7 +135,8 @@ func TestRedact_NoFalsePositives(t *testing.T) {
 	}
 }
 
-// TestRedact_NoOpAndEmpty: empty input and no-secret input return unchanged, nil cats.
+// TestRedact_NoOpAndEmpty: empty input and no-secret input return unchanged,
+// nil cats.
 func TestRedact_NoOpAndEmpty(t *testing.T) {
 	d := newSecretDetector()
 	for _, s := range []string{"", "just some ordinary text"} {
@@ -148,8 +147,9 @@ func TestRedact_NoOpAndEmpty(t *testing.T) {
 	}
 }
 
-// TestRedact_Idempotentish: re-running on an already-redacted body does not
-// re-redact the inserted placeholders (no runaway rewriting).
+// TestRedact_PlaceholderNotReRedacted testRedact_Idempotentish: re-running on
+// an already-redacted body does not re-redact the inserted placeholders (no
+// runaway rewriting).
 func TestRedact_PlaceholderNotReRedacted(t *testing.T) {
 	d := newSecretDetector()
 	once, _, _ := d.Redact("token = AKIAIOSFODNN7EXAMPLE")
@@ -159,7 +159,8 @@ func TestRedact_PlaceholderNotReRedacted(t *testing.T) {
 	}
 }
 
-// TestRedact_ConcurrentSafe runs the shared detector from many goroutines (-race).
+// TestRedact_ConcurrentSafe runs the shared detector from many goroutines
+// (-race).
 func TestRedact_ConcurrentSafe(t *testing.T) {
 	in := "key AKIAIOSFODNN7EXAMPLE and password=\"supersecretvalue123\""
 	var wg sync.WaitGroup
@@ -185,23 +186,9 @@ func containsStr(ss []string, want string) bool {
 	return false
 }
 
-// JSON shape. Until that decision this scanner only ever saw natural language and
-// flat KEY=VALUE lines, so nothing exercised what happens when a secret is nested
-// inside JSON. Tool output made that the common case: a tool's response IS JSON,
-// so a nested value arrives ESCAPED — `{\"key\":\"<tok>\"}` — and an MCP result or
-// a `cat config.json` is exactly that shape.
-//
-// Both generic mechanisms used to miss it, for the same underlying reason and in
-// two different places:
-//
-// - secretAssignment required the keyword ADJACENT to the `:`/`=`, and a JSON
-// key's closing quote (plus its escaping backslash) sits in between. -
-// precededByAssignment walked back over spaces and quotes to decide whether a
-// high-entropy token sits in a value position, but stopped at a backslash.
-//
-// The named formats were never affected — they match on the secret's own shape, so
-// surrounding syntax is irrelevant. That asymmetry is what made this easy to miss:
-// an AWS key in JSON was caught, and a database password was not.
+// TestRedact_JSONShapedSecrets jSON shape.
+//   - SecretAssignment required the keyword adjacent to the `:`/`=`, and a
+//     JSON
 func TestRedact_JSONShapedSecrets(t *testing.T) {
 	d := newSecretDetector()
 	const entropyTok = "aB3xQ9vK2mZ7pL4wR8tY6nH1jF5sD0gC"
@@ -228,9 +215,9 @@ func TestRedact_JSONShapedSecrets(t *testing.T) {
 		})
 	}
 
-	// The escaping must survive redaction. The value group must not swallow the
-	// backslash that terminates a JSON string, or the redacted output stops being
-	// parseable — and this text is carried INSIDE a JSON body on the wire.
+	// The value group must not swallow the backslash that terminates a JSON
+	// string, or the redacted output stops being parseable; and this text is
+	// carried inside a JSON body on the wire.
 	t.Run("escaping survives", func(t *testing.T) {
 		in := `{"stdout":"{\"password\":\"hunter2-prod-db-2026\"}"}`
 		out, _, _ := d.Redact(in)
@@ -239,9 +226,9 @@ func TestRedact_JSONShapedSecrets(t *testing.T) {
 		}
 	})
 
-	// A value that legitimately contains backslashes must still be redacted whole.
 	// Excluding `\` from the value charset outright would silently stop redacting
-	// this, which is why the pattern only refuses a backslash as the LAST character.
+	// this, which is why the pattern only refuses a backslash as the last
+	// character.
 	t.Run("windows path value still redacted", func(t *testing.T) {
 		in := `password=C:\Users\dev\secret.key`
 		out, cats, changed := d.Redact(in)
@@ -251,33 +238,16 @@ func TestRedact_JSONShapedSecrets(t *testing.T) {
 	})
 }
 
-// A value whose LAST character is a raw backslash must still be redacted.
-//
-// This is the case the JSON-escape fix cost, and it cost it silently: the value
-// group was narrowed to "8+ permitted characters whose last is not a backslash",
-// so for a value of exactly 8 characters ending in a backslash no split satisfies
-// both halves — the 8-char floor and the non-backslash tail — and the pattern
-// matched NOTHING. Not partially: nothing. The entropy pass is no backstop
-// either, since a short low-entropy value cannot clear the 4.5-bit floor.
-//
-// Two properties have to hold at once, which is why the boundary moved out of the
-// regex and into the replacement step:
-//
-//	the secret is redacted            (this test)
-//	the JSON escape is not swallowed  (TestRedact_JSONShapedSecrets/escaping_survives)
-//
-// A change that satisfies either one alone has been shipped before.
+// TestRedact_ValueEndingInBackslash a value whose last character is a raw
+// backslash must still be redacted.
 func TestRedact_ValueEndingInBackslash(t *testing.T) {
 	d := newSecretDetector()
 
 	for _, c := range []struct {
 		name, in, secret string
 	}{
-		// Exactly at the 8-char floor: the total-miss case.
 		{"eight chars ending in a backslash", `password=abcdefg\`, "abcdefg"},
-		// Above the floor: was redacted before, must stay redacted.
 		{"nine chars ending in a backslash", `password=abcdefgh\`, "abcdefgh"},
-		// A Windows directory as a secret value — trailing separator included.
 		{"windows directory value", `client_secret=C:\Users\dev\`, `C:\Users\dev`},
 	} {
 		t.Run(c.name, func(t *testing.T) {
@@ -294,9 +264,6 @@ func TestRedact_ValueEndingInBackslash(t *testing.T) {
 		})
 	}
 
-	// A value that is ONLY backslashes carries no secret material, and stripping
-	// the trailing ones would leave the placeholder covering nothing. Redacting it
-	// would report a redaction that did not happen.
 	t.Run("all-backslash value is left alone", func(t *testing.T) {
 		in := `password=` + strings.Repeat(`\`, 10)
 		out, _, changed := d.Redact(in)
@@ -306,7 +273,6 @@ func TestRedact_ValueEndingInBackslash(t *testing.T) {
 	})
 }
 
-// containsCat reports whether cats contains want.
 func containsCat(cats []string, want string) bool {
 	for _, c := range cats {
 		if c == want {
@@ -317,27 +283,11 @@ func containsCat(cats []string, want string) bool {
 }
 
 // TestRedact_JSONTerminatorsSurvive is the parseability control.
-//
-// The value group excludes quotes and commas but not `}` or `]`, so an UNQUOTED
-// value at the end of an object or array ran its own terminator into the match —
-// and the placeholder ate it. That produced invalid JSON on the wire and, on the
-// enforce path, a file written to disk without its closing brace: the redactor
-// there does not annotate, it REWRITES what the tool is about to write.
-//
-// It only became reachable when the pattern learned to skip the key's quoting
-// (the change that made JSON match at all), so the two belong in one test.
-//
-// Each case asserts three things together, because any one alone passes for a
-// broken implementation: the secret is gone, the terminator survived, and the
-// result still parses.
 func TestRedact_JSONTerminatorsSurvive(t *testing.T) {
 	r := NewRedactor()
-	// parses is false where the ORIGINAL value was unquoted: a bare
-	// ${OPENBOX_REDACTED_*} token cannot stand where a JSON number stood, and no
-	// text redactor can fix that without knowing it is inside JSON. That is a
-	// TYPE change and it is inherent to the placeholder design; the STRUCTURAL
-	// break — a swallowed closer — is the defect this test exists for, and it is
-	// asserted on every case.
+	// That is a type change and it is inherent to the placeholder design; the
+	// structural break; a swallowed closer; is the defect this test exists for,
+	// and it is asserted on every case.
 	for name, tc := range map[string]struct {
 		in, secret string
 		parses     bool
@@ -356,15 +306,6 @@ func TestRedact_JSONTerminatorsSurvive(t *testing.T) {
 			if strings.Contains(out, tc.secret) {
 				t.Errorf("secret %q survived: %s", tc.secret, out)
 			}
-			// The terminators the input ended in must still be there. Counted
-			// rather than suffix-matched, so a swallowed INNER closer is caught too
-			// (the nested and closing-both cases).
-			//
-			// The placeholders are stripped BEFORE counting, and that is the whole
-			// reason this assertion works: `${OPENBOX_REDACTED_…}` ends in `}`
-			// itself, so counting the raw output lets a placeholder stand in for the
-			// closer it just ate — the first version of this test passed a broken
-			// implementation for exactly that reason.
 			bare := placeholderPattern.ReplaceAllString(out, "")
 			for _, closer := range []string{"}", "]"} {
 				if want, got := strings.Count(tc.in, closer), strings.Count(bare, closer); got < want {
@@ -381,6 +322,4 @@ func TestRedact_JSONTerminatorsSurvive(t *testing.T) {
 	}
 }
 
-// placeholderPattern matches an inserted redaction placeholder, so an assertion
-// about the surrounding text is not confounded by the placeholder's own braces.
 var placeholderPattern = regexp.MustCompile(`\$\{OPENBOX_REDACTED_[A-Z0-9_]+\}`)

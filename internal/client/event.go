@@ -2,8 +2,12 @@
 // shared transport every adapter and the git action use to emit a normalized
 // developer event to OpenBox; build the openbox-core GovernanceEventPayload,
 // AIP Ed25519-sign the request, POST it to /api/v1/governance/evaluate, and
-// parse the verdict. Design constraints: - INV-1: the obx_ API key and the
-// Ed25519 signing seed are never logged
+// parse the verdict.
+//   - INV-1: the obx_ API key and the Ed25519 signing seed are never logged or
+//     placed on an argv; they live only in the Client and request headers.
+//   - INV-2: content (prompt/output/file/tool bodies) is stripped before
+//     egress unless content-capture is explicitly enabled for the org.
+//   - INV-3: fail-open.
 package client
 
 // SchemaVersion is the dev-event contract version this client speaks.
@@ -58,9 +62,8 @@ var AllEventTypes = []EventType{
 	EventAPIError,
 }
 
-// Tool-result outcome vocabulary. So the vocabulary is closed and statusFor
-// drops anything outside it rather than forwarding a value core will silently
-// score as a failure.
+// So the vocabulary is closed and statusFor drops anything outside it rather
+// than forwarding a value core will silently score as a failure.
 const (
 	StatusCompleted = "completed"
 	StatusFailed    = "failed"

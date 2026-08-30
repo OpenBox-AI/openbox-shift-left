@@ -43,15 +43,15 @@ func TestSpool_AppendAndFlushSession(t *testing.T) {
 	if strings.Join(got, ",") != "e1,e2,e3" {
 		t.Errorf("delivery order = %v", got)
 	}
-	// Drained: nothing left to deliver, spool file gone.
 	if n, _ := s.FlushSession(context.Background(), "th-1", nil); n != 0 {
 		t.Errorf("re-flush delivered %d, want 0 (at-most-once)", n)
 	}
 }
 
-// A budget-bounded flush persists the undelivered remainder to a recovery file
-// that FlushAll later completes — delivered events are never re-sent (INV-5 /
-// the CC spool contract, AC-6).
+// TestSpool_BudgetCutPersistsRemainderForRecovery a budget-bounded flush
+// persists the undelivered remainder to a recovery file that FlushAll later
+// completes; delivered events are never re-sent (INV-5 / the CC spool
+// contract, AC-6).
 func TestSpool_BudgetCutPersistsRemainderForRecovery(t *testing.T) {
 	dir := t.TempDir()
 	s := hookflow.Spool{Dir: dir}
@@ -72,8 +72,6 @@ func TestSpool_BudgetCutPersistsRemainderForRecovery(t *testing.T) {
 		t.Fatalf("cut flush = (%d, %v), want (1, ctx err)", n, err)
 	}
 
-	// The undelivered tail landed in a .rec<N>-*.jsonl recovery file (the
-	// attempt counter bounds how many times a line may be carried over).
 	entries, _ := os.ReadDir(dir)
 	rec := ""
 	for _, e := range entries {
@@ -104,7 +102,6 @@ func TestSpool_FlushAllSkipsDurationStashSubdir(t *testing.T) {
 	if err := s.Append(spoolEvent("e1", "th-1")); err != nil {
 		t.Fatal(err)
 	}
-	// The E7-S8 stash lives under the spool root as a subdir; FlushAll must skip it.
 	if err := os.MkdirAll(filepath.Join(dir, "durations", "th-1"), 0o700); err != nil {
 		t.Fatal(err)
 	}

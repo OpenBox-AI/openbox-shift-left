@@ -28,7 +28,6 @@ func newTestEmitter(t *testing.T) (*Emitter, hookflow.Spool, *bytes.Buffer) {
 		Spool: spool,
 		DID:   func() string { return testDID },
 		Warn:  func(format string, args ...any) { fmt.Fprintf(&warnings, format, args...) },
-		// nil Flush: the detached flusher must never be spawned from a test.
 	}
 	return em, spool, &warnings
 }
@@ -62,11 +61,9 @@ func capturedWithSession(session string) gateway.Captured {
 	return c
 }
 
-// TestEmitSpoolsUnderTheSessionTheHeaderNames is the join. The gateway and the
-// hooks describe the same session from two vantage points, and they only meet if
-// the gateway files its evidence under the id the hooks already use. Spooling
-// under anything else produces records that look like a session and join to
-// nothing — and, since only hook-driven flushes drain that path, would never be
+// TestEmitSpoolsUnderTheSessionTheHeaderNames is the join. Spooling under
+// anything else produces records that look like a session and join to nothing;
+// and, since only hook-driven flushes drain that path, would never be
 // delivered at all.
 func TestEmitSpoolsUnderTheSessionTheHeaderNames(t *testing.T) {
 	em, spool, _ := newTestEmitter(t)
@@ -88,14 +85,9 @@ func TestEmitSpoolsUnderTheSessionTheHeaderNames(t *testing.T) {
 }
 
 // TestNoSessionHeaderEmitsNothingAndSaysSo is the honest-silence case, and the
-// warning is half the requirement.
-//
-// Whether Claude Code sends x-claude-code-session-id is UNVERIFIED (that decision
-// / probe P0). If it does not, the choice is between inventing a session id and
-// emitting nothing. Inventing one files governance records that claim a session
-// they cannot join, which is the overstatement this product exists to prevent —
-// and they would rot unflushed besides. So the gateway stays silent, and says
-// why, because silence alone is indistinguishable from a broken daemon.
+// warning is half the requirement. Inventing one files governance records that
+// claim a session they cannot join, which is the overstatement this product
+// exists to prevent; and they would rot unflushed besides.
 func TestNoSessionHeaderEmitsNothingAndSaysSo(t *testing.T) {
 	em, spool, warnings := newTestEmitter(t)
 	c := sampleCaptured()
@@ -114,8 +106,8 @@ func TestNoSessionHeaderEmitsNothingAndSaysSo(t *testing.T) {
 	}
 }
 
-// TestWarningIsEmittedOnce keeps a per-call warning from filling the daemon log:
-// ~52 model calls were measured per turn window.
+// TestWarningIsEmittedOnce keeps a per-call warning from filling the daemon
+// log: ~52 model calls were measured per turn window.
 func TestWarningIsEmittedOnce(t *testing.T) {
 	em, _, warnings := newTestEmitter(t)
 	c := sampleCaptured()
@@ -128,13 +120,9 @@ func TestWarningIsEmittedOnce(t *testing.T) {
 	}
 }
 
-// TestEmitSurvivesAnUnwritableSpool is INV-3 at the relay boundary. This runs
-// inside the request goroutine; a governance sensor that panics or propagates an
-// error there breaks the developer's model call, which is a strictly worse
-// outcome than losing one event.
+// TestEmitSurvivesAnUnwritableSpool is INV-3 at the relay boundary.
 func TestEmitSurvivesAnUnwritableSpool(t *testing.T) {
 	em, _, warnings := newTestEmitter(t)
-	// A file where the spool dir should be: MkdirAll fails, Append errors.
 	if err := os.WriteFile(em.Spool.Dir, []byte("not a directory"), 0o600); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
@@ -150,9 +138,9 @@ func TestEmitSurvivesAnUnwritableSpool(t *testing.T) {
 }
 
 // TestSessionHeaderLookupIsCanonical guards the one spelling that works. The
-// capture side canonicalizes with textproto.CanonicalMIMEHeaderKey, so a lookup
-// for the lowercase wire spelling silently misses on every request and the
-// gateway would report "no session id" forever.
+// capture side canonicalizes with textproto.CanonicalMIMEHeaderKey, so a
+// lookup for the lowercase wire spelling silently misses on every request and
+// the gateway would report "no session id" forever.
 func TestSessionHeaderLookupIsCanonical(t *testing.T) {
 	em, spool, _ := newTestEmitter(t)
 	c := sampleCaptured()
@@ -163,8 +151,9 @@ func TestSessionHeaderLookupIsCanonical(t *testing.T) {
 	}
 }
 
-// TestAgentIDIsBoundWhenPresent — Claude Code sends the agent header only when an
-// agent context exists, so its absence is normal and must not read as a fault.
+// TestAgentIDIsBoundWhenPresent; Claude Code sends the agent header only when
+// an agent context exists, so its absence is normal and must not read as a
+// fault.
 func TestAgentIDIsBoundWhenPresent(t *testing.T) {
 	em, spool, warnings := newTestEmitter(t)
 	c := capturedWithSession("sess-agent")
@@ -176,7 +165,6 @@ func TestAgentIDIsBoundWhenPresent(t *testing.T) {
 		t.Fatalf("AgentID not bound: %+v", evs)
 	}
 
-	// And its absence is silent.
 	em2, spool2, warnings2 := newTestEmitter(t)
 	em2.Emit(context.Background(), capturedWithSession("sess-noagent"))
 	if evs := spooledEvents(t, spool2, "sess-noagent"); len(evs) != 1 || evs[0].AgentID != "" {
@@ -187,9 +175,10 @@ func TestAgentIDIsBoundWhenPresent(t *testing.T) {
 	}
 }
 
-// TestAgentIDNeverPerturbsTheActivityID. AgentID feeds the hook path's ":agent:"
-// branch, and the gateway namespace must win regardless — otherwise binding an
-// optional attribution field would silently move requirement 8's boundary.
+// TestAgentIDNeverPerturbsTheActivityID. AgentID feeds the hook path's
+// ":agent:" branch, and the gateway namespace must win regardless; otherwise
+// binding an optional attribution field would silently move requirement 8's
+// boundary.
 func TestAgentIDNeverPerturbsTheActivityID(t *testing.T) {
 	base := mustEvent(LaneGateway, Identity{SessionID: "s", DeveloperDID: testDID}, "req-1", sampleAt, sampleCaptured())
 	withAgent := mustEvent(LaneGateway, Identity{SessionID: "s", DeveloperDID: testDID, AgentID: "agent-7"}, "req-1", sampleAt, sampleCaptured())
@@ -202,8 +191,8 @@ func TestAgentIDNeverPerturbsTheActivityID(t *testing.T) {
 }
 
 // TestUnusableUpstreamRequestIDFallsBack. The upstream id becomes part of
-// activity_id, which core stores and dedupes on, so an oversized or non-printable
-// value must not reach it verbatim.
+// activity_id, which core stores and dedupes on, so an oversized or non-
+// printable value must not reach it verbatim.
 func TestUnusableUpstreamRequestIDFallsBack(t *testing.T) {
 	for name, bad := range map[string]string{
 		"oversized":       strings.Repeat("x", maxRequestIDLen+1),
@@ -232,8 +221,8 @@ func TestUnusableUpstreamRequestIDFallsBack(t *testing.T) {
 	}
 }
 
-// TestUsableUpstreamRequestIDIsPreferred keeps the bound from throwing away the
-// real id — the provider's own id is what makes a stored span joinable to a
+// TestUsableUpstreamRequestIDIsPreferred keeps the bound from throwing away
+// the real id; the provider's own id is what makes a stored span joinable to a
 // support ticket.
 func TestUsableUpstreamRequestIDIsPreferred(t *testing.T) {
 	em, spool, _ := newTestEmitter(t)
@@ -247,8 +236,7 @@ func TestUsableUpstreamRequestIDIsPreferred(t *testing.T) {
 	}
 }
 
-// TestTheWarningReturnsAfterTheInterval. A once-per-process warning is not
-// detection: a daemon runs for weeks, and a standing fault has to keep saying so.
+// TestTheWarningReturnsAfterTheInterval.
 func TestTheWarningReturnsAfterTheInterval(t *testing.T) {
 	em, _, warnings := newTestEmitter(t)
 	now := sampleAt
@@ -270,11 +258,7 @@ func TestTheWarningReturnsAfterTheInterval(t *testing.T) {
 	}
 }
 
-// TestDIDIsResolvedLazilySoAuthTakesEffectWithoutARestart. The gateway is a
-// supervised daemon that can easily be started before `openbox auth` finishes —
-// that is the ordinary order, not an edge case. Resolving the DID once at
-// construction meant such a daemon relayed without recording for its entire life,
-// with a single startup line as the only witness.
+// TestDIDIsResolvedLazilySoAuthTakesEffectWithoutARestart.
 func TestDIDIsResolvedLazilySoAuthTakesEffectWithoutARestart(t *testing.T) {
 	em, spool, warnings := newTestEmitter(t)
 	did := ""
@@ -288,7 +272,6 @@ func TestDIDIsResolvedLazilySoAuthTakesEffectWithoutARestart(t *testing.T) {
 		t.Errorf("the warning does not name the remedy: %q", warnings.String())
 	}
 
-	// `openbox auth` runs in another terminal. No restart.
 	did = testDID
 	em.Emit(context.Background(), capturedWithSession("sess-1"))
 	evs := spooledEvents(t, spool, "sess-1")
@@ -300,8 +283,8 @@ func TestDIDIsResolvedLazilySoAuthTakesEffectWithoutARestart(t *testing.T) {
 	}
 }
 
-// TestDIDIsCachedOnceResolved keeps the lazy read from becoming a per-call file
-// read at ~52 model calls per turn.
+// TestDIDIsCachedOnceResolved keeps the lazy read from becoming a per-call
+// file read at ~52 model calls per turn.
 func TestDIDIsCachedOnceResolved(t *testing.T) {
 	em, _, _ := newTestEmitter(t)
 	calls := 0
@@ -315,17 +298,8 @@ func TestDIDIsCachedOnceResolved(t *testing.T) {
 	}
 }
 
-// TestUnusableSessionHeaderIsRefusedAndReported.
-//
-// The session id comes off a request header, on a loopback listener the package's
-// own doc says "performs no caller authentication" — and it is used as a spool
-// FILENAME, as the per-session flush-debounce key, and as core's run_id. Only the
-// far less load-bearing upstream request id was bounded.
-//
-// Each case is a distinct concrete failure: an over-long id becomes an
-// ENAMETOOLONG filename on every call; a control character lands in a stored key;
-// a path separator escapes the spool directory. All three must be refused with a
-// throttled warning rather than spooled.
+// TestUnusableSessionHeaderIsRefusedAndReported. Only the far less load-
+// bearing upstream request id was bounded.
 func TestUnusableSessionHeaderIsRefusedAndReported(t *testing.T) {
 	for name, id := range map[string]string{
 		"over the length bound": strings.Repeat("s", maxSessionIDLen+1),
@@ -382,14 +356,8 @@ func TestAUsableSessionHeaderStillSpools(t *testing.T) {
 	}
 }
 
-// TestOnlyModelCallsWarnAboutAMissingSession. A healthy install relays calls that
-// legitimately have no session id — Claude Code sends `HEAD /api/hello` on
-// startup — and warning about those announced "no governance events are being
-// sent" on a gateway that was working perfectly. A recurring false alarm in the
-// one channel that reports real gaps is worse than no channel.
-//
-// The SKIP is unconditional; only the WARNING is gated. A non-model call must
-// still produce no event.
+// TestOnlyModelCallsWarnAboutAMissingSession. A non-model call must still
+// produce no event.
 func TestOnlyModelCallsWarnAboutAMissingSession(t *testing.T) {
 	noSession := func(method, url string) gateway.Captured {
 		c := sampleCaptured()
@@ -418,8 +386,6 @@ func TestOnlyModelCallsWarnAboutAMissingSession(t *testing.T) {
 		}
 	})
 
-	// The half that must NOT be suppressed: a real inference request with no
-	// session id is a genuine governance gap and has to stay loud.
 	t.Run("a model call still warns", func(t *testing.T) {
 		em, _, warnings := newTestEmitter(t)
 		em.Emit(context.Background(), noSession(http.MethodPost, "https://api.anthropic.com/v1/messages"))
@@ -428,8 +394,6 @@ func TestOnlyModelCallsWarnAboutAMissingSession(t *testing.T) {
 		}
 	})
 
-	// Permissive in the safe direction: an unrecognised POST path still warns,
-	// because a missed warning hides a real gap while a spurious one is only noise.
 	t.Run("an unknown POST path still warns", func(t *testing.T) {
 		em, _, warnings := newTestEmitter(t)
 		em.Emit(context.Background(), noSession(http.MethodPost, "https://api.anthropic.com/v1/something-new"))
@@ -439,10 +403,8 @@ func TestOnlyModelCallsWarnAboutAMissingSession(t *testing.T) {
 	})
 }
 
-// TestAgentIDIsBounded pins the third caller-supplied id to the same rule as the
-// other two. It is the one that reaches a SIGNED payload's metadata, so an
-// unbounded value does not merely mis-attribute the call — the event grows past
-// what core accepts and the whole record of that model call is lost.
+// TestAgentIDIsBounded pins the third caller-supplied id to the same rule as
+// the other two.
 func TestAgentIDIsBounded(t *testing.T) {
 	if got := usableAgentID(strings.Repeat("a", maxRequestIDLen+1)); got != "" {
 		t.Errorf("an over-long agent id was accepted (%d chars kept); it must be dropped", len(got))

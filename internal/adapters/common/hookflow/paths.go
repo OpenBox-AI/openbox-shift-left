@@ -5,10 +5,8 @@ import (
 	"path/filepath"
 )
 
-// openboxConfigDir is the base directory for the runtime's local governance
-// state; the enforcement/advisory sinks and the session-halt latches: the
-// platform user-config dir, with the classic ~/.config fallback when it cannot
-// be resolved.
+// openboxConfigDir one resolver, so the sinks can never drift onto different
+// bases.
 func openboxConfigDir() string {
 	dir, err := os.UserConfigDir()
 	if err != nil || dir == "" {

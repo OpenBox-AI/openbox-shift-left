@@ -155,8 +155,9 @@ func requestIDFrom(attrs map[string]string) (string, bool) {
 	return "", false
 }
 
-// safeSessionID validates the session id, which is a provider value arriving
-// off the same unauthenticated loopback listener as everything else here.
+// safeSessionID gatewayemit.usableSessionID makes the same refusal for the
+// same reason; the rules are deliberately NOT shared, because that one's
+// printableASCII admits ':' and this lane's namespace argument forbids it.
 func safeSessionID(s string) bool {
 	if s == "." || s == ".." {
 		return false
@@ -179,9 +180,9 @@ func safeRequestID(s string) bool {
 	}) < 0
 }
 
-// tokensFrom reads the four counts. Malformed means a number was reported and
-// could not be read: the field stays nil AND the total is withheld, because a
-// sum that silently omits a component reads as authoritative and is wrong.
+// tokensFrom malformed means a number was reported and could not be read: the
+// field stays nil AND the total is withheld, because a sum that silently omits
+// a component reads as authoritative and is wrong.
 func tokensFrom(attrs map[string]string) *client.Tokens {
 	var (
 		t       client.Tokens
@@ -222,7 +223,6 @@ func tokensFrom(attrs map[string]string) *client.Tokens {
 	return &t
 }
 
-// parseInt reads a count from its string form.
 func parseInt(s string) (int, bool) {
 	if s == "" {
 		return 0, false

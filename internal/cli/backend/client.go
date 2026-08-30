@@ -1,8 +1,14 @@
 // Package backend is the OpenBox control-plane client used only during
-// onboarding. It calls the openbox-backend NestJS API to register a developer
-// agent and to look one up for idempotent re-init. This is not the runtime
-// data-plane client; that is the AIP-signed /api/v1/governance/evaluate
-// transport owned by client/. The two are deliberately separate:
+// onboarding.
+//   - Path is POST /agent/create; the backend sets no global prefix and no
+//     versioning, so there is no /api/v1 here (unlike the core /evaluate
+//     path).
+//   - Auth is a global JwtAuthGuard accepting either a Keycloak Bearer JWT
+//     (which also requires the x-openbox-client header) or an org control-
+//     plane key via X-API-Key (obx_key_...). Organization_id is derived from
+//     the caller identity, never from the body (INV-4).
+//   - A minimal valid body is agent_name + icon + full aivss_config; icon is
+//     @IsNotEmpty on the DTO.
 package backend
 
 import (

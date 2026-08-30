@@ -6,9 +6,10 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/devconfig"
 )
 
-// Posture is session-scoped evidence, so it belongs on the session-start event
-// and nowhere else: repeating it per tool call would inflate every event and
-// invite two events in one session to disagree.
+// TestPosture_OnSessionStartOnly posture is session-scoped evidence, so it
+// belongs on the session-start event and nowhere else: repeating it per tool
+// call would inflate every event and invite two events in one session to
+// disagree.
 func TestPosture_OnSessionStartOnly(t *testing.T) {
 	m := testMapper()
 	p := devconfig.Posture{Enforce: true, DecisionAuthority: devconfig.DecisionAuthorityControlPlane, Adapter: "claude-code/1"}
@@ -39,8 +40,9 @@ func TestPosture_OnSessionStartOnly(t *testing.T) {
 	}
 }
 
-// With no posture supplied — every existing test, the conformance fixtures, and
-// any caller that has not opted in — the emitted metadata is unchanged.
+// TestPosture_AbsentWhenNotSupplied with no posture supplied; every existing
+// test, the conformance fixtures, and any caller that has not opted in; the
+// emitted metadata is unchanged.
 func TestPosture_AbsentWhenNotSupplied(t *testing.T) {
 	m := testMapper() // Posture stays nil
 	ev, _ := m.Map(HookSessionStart, &HookEvent{SessionID: "s1", Source: "startup"})

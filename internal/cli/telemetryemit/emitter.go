@@ -32,7 +32,9 @@ type Emitter struct {
 	lastWarn time.Time
 }
 
-// dropWarnInterval throttles the drop warning.
+// dropWarnInterval unthrottled, the signal that something is wrong would
+// itself be the thing that makes the log unreadable; and this daemon's stdio
+// is the only place a silently-not-recording lane can be noticed at all.
 const dropWarnInterval = 30 * time.Second
 
 var _ telemetry.Emitter = (*Emitter)(nil)
@@ -91,7 +93,9 @@ func reasonName(o Outcome) string {
 	return o.String()
 }
 
-// record counts an outcome, and warns when records are being lost.
+// record skips are counted for the verbose view but never warned about: most
+// records are legitimately uninteresting, and warning on them would train a
+// reader to ignore the log.
 func (e *Emitter) record(o Outcome, rec telemetry.Record) {
 	name := reasonName(o)
 

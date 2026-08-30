@@ -152,6 +152,14 @@ type Outcome struct {
 }
 
 // Apply writes the planned files.
+//   - Idempotent: a file whose contents already match is left alone, so a
+//     config-management loop does not churn timestamps or trigger reload
+//     storms.
+//   - Backed up: an existing different file is copied aside before being
+//     replaced, because this overwrites org security configuration and "I can
+//     put it back" has to be true.
+//   - Refuses to weaken: if what is already there is stricter than the
+//     template, the file is skipped rather than relaxed.
 func Apply(plan Plan, force bool, now func() time.Time) ([]Outcome, error) {
 	if now == nil {
 		now = time.Now
@@ -228,7 +236,6 @@ func writeFile(f File) error {
 	return nil
 }
 
-// strictnessMarkers are the settings whose presence makes a config a mandate.
 var strictnessMarkers = []struct {
 	marker string
 	why    string

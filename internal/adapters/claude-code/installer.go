@@ -115,8 +115,9 @@ func (i Installer) Install(ref CredentialRef) error {
 
 const installLockStale = time.Minute
 
-// acquireInstallLock serializes installs against one plugin bundle, returning
-// the release function.
+// acquireInstallLock past a few dozen writers the queue drains slower than it
+// fills, every arrival makes it worse, and the processes never exit; thousands
+// of them accumulated that way and took a machine down.
 func (i Installer) acquireInstallLock() (release func(), err error) {
 	dir := i.pluginDir()
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -151,9 +152,8 @@ func (i Installer) acquireInstallLock() (release func(), err error) {
 	return func() { _ = os.Remove(lock) }, nil
 }
 
-// placeEngineBinary copies the unified `openbox` engine into the bundle's
-// bin/openbox (0755) so the hooks; which invoke
-// ${CLAUDE_PLUGIN_ROOT}/bin/openbox; resolve to it.
+// placeEngineBinary the copy is atomic (temp + rename) so a re-init never
+// leaves a half-written engine.
 func (i Installer) placeEngineBinary() error {
 	if i.EngineBinary == "" {
 		return nil
@@ -206,14 +206,13 @@ func (i Installer) placeEngineBinary() error {
 	return nil
 }
 
-// engineTempAge is how long a .openbox-*.tmp must have gone untouched before
-// the sweep treats it as residue. The copy it belongs to takes well under a
-// second, so an hour cannot reach a live one while still reclaiming promptly.
+// engineTempAge the copy it belongs to takes well under a second, so an hour
+// cannot reach a live one while still reclaiming promptly.
 const engineTempAge = time.Hour
 
-// sweepStaleEngineTemps deletes abandoned engine temp files from binDir. What
-// defer cannot survive is the process being killed, and a killed init leaves a
-// multi-megabyte partial copy behind with nothing that ever reclaims it.
+// sweepStaleEngineTemps what defer cannot survive is the process being killed,
+// and a killed init leaves a multi-megabyte partial copy behind with nothing
+// that ever reclaims it.
 func sweepStaleEngineTemps(binDir string) {
 	entries, err := os.ReadDir(binDir)
 	if err != nil {
@@ -232,9 +231,9 @@ func sweepStaleEngineTemps(binDir string) {
 	}
 }
 
-// sameContents reports whether a and b are byte-identical. Equal sizes fall
-// through to a full comparison rather than trusting mtime, which a copy
-// rewrites and so can never indicate sameness here.
+// sameContents equal sizes fall through to a full comparison rather than
+// trusting mtime, which a copy rewrites and so can never indicate sameness
+// here.
 func sameContents(a, b string) (bool, error) {
 	ai, err := os.Stat(a)
 	if err != nil {

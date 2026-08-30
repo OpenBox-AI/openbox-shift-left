@@ -14,28 +14,14 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/internal/provider"
 )
 
-// The invariant these tests pin: ONE gated tool call puts exactly ONE
-// ActivityStarted on the wire.
-//
-// A gated PreToolUse has two ways to reach core, and they carry the SAME event
-// (one event_id, because the mapper clock is pinned for the hook invocation):
-// the inline evaluation POSTs it synchronously, and the observe copy is spooled
-// and flushed. Core does not dedupe developer events on their id, so whichever
-// of the two runs, the other must not — otherwise one tool call becomes two
-// stored rows and two Merkle leaves. Both halves used to run, so every escalated
-// call was double-counted.
-//
-// Direction of failure matters: when in doubt, spool. A redundant spool copy is
-// wrong; a missing one loses telemetry outright.
+// Core does not dedupe developer events on their id, so whichever of the two
+// runs, the other must not; otherwise one tool call becomes two stored rows
+// and two Merkle leaves.
 
-// deliveringGate builds the gate under test with a Governor whose Emit outcome
-// the caller chooses, and reports whether the observe copy was spooled.
 func deliveringGate(t *testing.T, gov Governor, tier2Enabled string) (spooled bool) {
 	t.Helper()
 	isolateConfig(t)
 	t.Setenv(devconfig.EnvTier2, tier2Enabled)
-	// A short hold: these tests assert what gets spooled, not how long the gate
-	// is willing to wait for an approver.
 	t.Setenv(devconfig.EnvApprovalHold, "50")
 	t.Setenv(devconfig.EnvEnforcementFile, t.TempDir()+"/enforcements.jsonl")
 	isolateMarkers(t)
@@ -56,14 +42,8 @@ func deliveringGate(t *testing.T, gov Governor, tier2Enabled string) (spooled bo
 	return spooled
 }
 
-// The bug, in one assertion. The escalation delivered the event, so spooling a
-// second copy of it is what produced the duplicate ActivityStarted.
-//
-// fakeGovernor's Emit succeeds but returns an EMPTY evaluation — delivered, yet
-// no usable verdict, so the escalation still degrades to fail-open. That is the
-// case a check on the resulting decision would get wrong: the decision reads
-// "/evaluate returned no verdict" while the event is already stored. Delivery is a
-// property of the transport, not of the answer.
+// TestGate_ObserveCopySkippedWhenEscalationDelivered the bug, in one
+// assertion.
 func TestGate_ObserveCopySkippedWhenEscalationDelivered(t *testing.T) {
 	gov := &fakeGovernor{}
 	if deliveringGate(t, gov, "1") {
@@ -72,9 +52,10 @@ func TestGate_ObserveCopySkippedWhenEscalationDelivered(t *testing.T) {
 	}
 }
 
-// The fail-open safety net, and the reason suppression must key on the transport
-// rather than on "did we try": nothing reached core, so the spool copy is the
-// only remaining path for this telemetry and must survive.
+// TestGate_ObserveCopySpooledWhenEscalationUndelivered the fail-open safety
+// net, and the reason suppression must key on the transport rather than on
+// "did we try": nothing reached core, so the spool copy is the only remaining
+// path for this telemetry and must survive.
 func TestGate_ObserveCopySpooledWhenEscalationUndelivered(t *testing.T) {
 	gov := degradedGovernor{fakeGovernor: &fakeGovernor{}}
 	if !deliveringGate(t, gov, "1") {
@@ -82,9 +63,9 @@ func TestGate_ObserveCopySpooledWhenEscalationUndelivered(t *testing.T) {
 	}
 }
 
-// A REQUIRE_APPROVAL verdict is delivered like any other — it is a filed record,
-// which is precisely a stored row. The hold that follows must not un-suppress
-// the observe copy.
+// TestGate_ObserveCopySkippedWhenApprovalWasFiled a REQUIRE_APPROVAL verdict
+// is delivered like any other; it is a filed record, which is precisely a
+// stored row. The hold that follows must not un-suppress the observe copy.
 func TestGate_ObserveCopySkippedWhenApprovalWasFiled(t *testing.T) {
 	gov := approvalGovernor{fakeGovernor: &fakeGovernor{
 		replies: []func() (client.ApprovalStatus, error){pending(time.Now().Add(time.Hour))},
@@ -94,15 +75,9 @@ func TestGate_ObserveCopySkippedWhenApprovalWasFiled(t *testing.T) {
 	}
 }
 
-// The deprecated tier2 toggle no longer suppresses evaluation : it is still
-// parsed for back-compat but must not change behaviour. So the escalation runs,
-// delivers, and the observe copy is suppressed exactly as with the toggle on —
-// the assertion is that this test reads identically to the delivered case
-// above.
-//
-// It previously asserted the opposite, and that is the point: a config key that
-// silently kept disabling enforcement would be the same silently-ungoverned
-// failure that decision exists to close.
+// TestGate_DeprecatedTier2ToggleNoLongerSuppressesEvaluation the deprecated
+// tier2 toggle no longer suppresses evaluation : it is still parsed for back-
+// compat but must not change behaviour.
 func TestGate_DeprecatedTier2ToggleNoLongerSuppressesEvaluation(t *testing.T) {
 	gov := &fakeGovernor{}
 	if deliveringGate(t, gov, "0") {
@@ -112,9 +87,7 @@ func TestGate_DeprecatedTier2ToggleNoLongerSuppressesEvaluation(t *testing.T) {
 }
 
 // slowGovernor's Emit outlives the escalation budget and only then reports
-// success. It deliberately ignores cancellation, which is the one shape a real
-// transport cannot be asked to have on demand: core committed the row a moment
-// after we stopped waiting, and our cancellation arrived too late to matter.
+// success.
 type slowGovernor struct {
 	*fakeGovernor
 	emitted chan struct{}
@@ -126,20 +99,9 @@ func (s slowGovernor) Emit(context.Context, client.DevEvent) (client.Evaluation,
 	return client.Evaluation{Verdict: client.VerdictAllow}, nil
 }
 
-// The budget-exceeded escalation: Escalate gives up on the transport and returns
-// through its timeout branch, abandoning the goroutine that is still running.
-// Only the result-channel branch carries a happens-before edge back to the gate,
-// so on this path the abandoned goroutine's OnDelivered call and the gate's defer
-// touch the same flag concurrently.
-//
-// Every other test here drives the escalation to completion, which is why the
-// suite stayed green under -race while this path was a live data race. It is
-// reachable today on any Bash or MCP call whose escalation runs out of budget.
-//
-// Two things are pinned: the flag is safe to read (the -race run is the
-// assertion), and a late delivery does not flip the direction of failure — the
-// gate still spools, because an escalation we abandoned may never have been
-// stored and a missing copy loses the event outright.
+// TestGate_ObserveCopySpooledWhenEscalationOutlivesItsBudget the budget-
+// exceeded escalation: Escalate gives up on the transport and returns through
+// its timeout branch, abandoning the goroutine that is still running.
 func TestGate_ObserveCopySpooledWhenEscalationOutlivesItsBudget(t *testing.T) {
 	isolateConfig(t)
 	isolateMarkers(t)
@@ -154,10 +116,7 @@ func TestGate_ObserveCopySpooledWhenEscalationOutlivesItsBudget(t *testing.T) {
 	gate := EnforceGate{
 		Contract: testContract{approval: "ask"},
 		Evaluator: Evaluator{
-			Ceiling: provider.HookCeiling{Gating: 30 * time.Second},
-			// The clamp, not a config knob: the per-evaluation budget stopped
-			// reading tier2_timeout_ms with that decision, so this is now the
-			// only way to reach the timeout branch deliberately.
+			Ceiling:    provider.HookCeiling{Gating: 30 * time.Second},
 			MaxTimeout: 20 * time.Millisecond,
 			NewClient:  func(*log.Logger) (Governor, error) { return gov, nil },
 		},
@@ -166,8 +125,6 @@ func TestGate_ObserveCopySpooledWhenEscalationOutlivesItsBudget(t *testing.T) {
 	}
 	gate.Run(context.Background(), discard(), &out, shellTarget{})
 
-	// Let the abandoned transport finish, which is where the concurrent write
-	// lands. Without this the test can exit before the race is even possible.
 	<-gov.emitted
 
 	if !spooled {
@@ -179,14 +136,9 @@ func TestGate_ObserveCopySpooledWhenEscalationOutlivesItsBudget(t *testing.T) {
 // TestGate_ObserveCopySpooledOnStaleGateEarlyReturn is deleted with the stale
 // gate : there is no local bundle to be stale, so no early return before the
 // evaluation.
-//
-// What it covered — that a path returning BEFORE the escalation still spools
-// its observe copy — is a property of the deferred write itself, which is
-// exercised by every undelivered case above. The direction is unchanged: the
-// default is to spool, and only a confirmed delivery suppresses.
 
-// A nil SpoolObserve is the non-gated caller's shape (it spooled its own copy).
-// The gate must not panic on it.
+// TestGate_NilSpoolObserveIsInert a nil SpoolObserve is the non-gated caller's
+// shape (it spooled its own copy). The gate must not panic on it.
 func TestGate_NilSpoolObserveIsInert(t *testing.T) {
 	isolateConfig(t)
 	isolateMarkers(t)
@@ -203,11 +155,9 @@ func TestGate_NilSpoolObserveIsInert(t *testing.T) {
 	gate.Run(context.Background(), discard(), &out, shellTarget{})
 }
 
-// Suppressing the redundant spool copy must not take the duration stash with it.
-// The stash is what lets the PostToolUse half recover a start time and report a
-// real duration_ms; it is written on the same call that used to do the spooling,
-// so the split has to keep the stash write unconditional. Without this, the fix
-// would silently blank duration_ms for exactly the escalated calls.
+// TestEngine_RecordDeferredThreadsDurationBeforeSpooling suppressing the
+// redundant spool copy must not take the duration stash with it. Without this,
+// the fix would silently blank duration_ms for exactly the escalated calls.
 func TestEngine_RecordDeferredThreadsDurationBeforeSpooling(t *testing.T) {
 	dir := t.TempDir()
 	e := NewEngine(dir)
@@ -225,7 +175,6 @@ func TestEngine_RecordDeferredThreadsDurationBeforeSpooling(t *testing.T) {
 
 	appendObserve := e.RecordDeferred(started)
 
-	// The stash is written immediately, even though nothing has been spooled.
 	if got := e.Durations.TakeStart(started.SessionID, ToolCallStartKey(started)); got != started.StartedAt {
 		t.Errorf("duration stash = %q, want %q — suppressing the spool copy must not "+
 			"cost the call its duration_ms", got, started.StartedAt)
@@ -234,7 +183,6 @@ func TestEngine_RecordDeferredThreadsDurationBeforeSpooling(t *testing.T) {
 		t.Errorf("spool holds %d events before the deferred append ran, want 0", n)
 	}
 
-	// And the returned closure is what actually spools, when the caller decides to.
 	if err := appendObserve(); err != nil {
 		t.Fatalf("deferred append: %v", err)
 	}
@@ -243,9 +191,6 @@ func TestEngine_RecordDeferredThreadsDurationBeforeSpooling(t *testing.T) {
 	}
 }
 
-// spooledLines counts events sitting in the session's live spool file. Distinct
-// from Spool.UndeliveredCount, which reports only carry-over from a failed
-// flush.
 func spooledLines(t *testing.T, e *Engine, sessionID string) int {
 	t.Helper()
 	data, err := os.ReadFile(e.Spool.SessionPath(sessionID))

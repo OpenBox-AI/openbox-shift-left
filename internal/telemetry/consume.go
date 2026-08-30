@@ -51,7 +51,9 @@ func (r *Receiver) consumeMetrics(_ context.Context, md pmetric.Metrics) error {
 	return nil
 }
 
-// deliver hands one record to the emitter and records that it arrived.
+// deliver the count is incremented whether or not the emitter succeeds,
+// deliberately: it answers "is this lane receiving", which is the question
+// doctor asks and the one OD4 turns into a finding.
 func (r *Receiver) deliver(ctx context.Context, rec Record) {
 	r.counts.add(rec.Signal, 1)
 	if r.emitter == nil {

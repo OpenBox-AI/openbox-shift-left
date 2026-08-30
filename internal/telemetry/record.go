@@ -34,16 +34,13 @@ const (
 	SignalMetrics Signal = "metrics"
 )
 
-// eventNameAttr is the attribute Claude Code's enhanced telemetry uses to name
-// the event.
 const eventNameAttr = "event.name"
 
 const (
 	maxAttrs = 128
 
-	// maxAttrValueBytes must stay larger than the wire cap, and the factor of 4
-	// is the worst case for UTF-8: client.capBody bounds egress at 65,536 runes,
-	// which is up to 262,144 bytes.
+	// maxAttrValueBytes real content would truncate ~4x tighter than the ruling
+	// (OD1(c)) blesses, silently.
 	maxAttrValueBytes = MaxAttrValueBytes
 )
 

@@ -9,12 +9,9 @@ import (
 	"time"
 )
 
-// Concurrent installs into one bundle each create a temp file, write the whole
-// engine and rename, in a single directory — work APFS serializes on a lock for
-// that directory. Past a few dozen writers the queue drains slower than it
-// fills and the processes never exit; thousands accumulated that way and took a
-// machine down. So a second install must be REFUSED, not queued: queueing
-// reproduces the pile-up with the waiting moved into userspace.
+// TestConcurrentInstallIsRefusedRatherThanQueued concurrent installs into one
+// bundle each create a temp file, write the whole engine and rename, in a
+// single directory; work apfs serializes on a lock for that directory.
 func TestConcurrentInstallIsRefusedRatherThanQueued(t *testing.T) {
 	pluginDir := t.TempDir()
 	src := engineAt(t, t.TempDir(), "openbox", "engine-v1")
@@ -53,16 +50,12 @@ func TestConcurrentInstallIsRefusedRatherThanQueued(t *testing.T) {
 	if ok == 0 {
 		t.Fatalf("every install was refused; at least one must proceed (refused=%d)", refused)
 	}
-	// Not asserted as a hard minimum: with fast installs the writers can happen
-	// to serialize, and a timing-dependent failure here would be noise. The
-	// refusal itself is pinned deterministically by
+	// The refusal itself is pinned deterministically by
 	// TestStaleInstallLockIsReclaimed's fresh-lock case; what this test pins is
 	// that contention never corrupts the bundle or strands the lock.
 	if ok+refused != writers {
 		t.Errorf("accounted %d of %d installs (ok=%d refused=%d)", ok+refused, writers, ok, refused)
 	}
-	// The bundle must be intact whatever the interleaving, and the lock must not
-	// outlive the run that took it.
 	got, err := os.ReadFile(filepath.Join(pluginDir, "bin", "openbox"))
 	if err != nil {
 		t.Fatalf("engine missing after concurrent installs: %v", err)
@@ -75,9 +68,9 @@ func TestConcurrentInstallIsRefusedRatherThanQueued(t *testing.T) {
 	}
 }
 
-// A lock left behind by a killed install must not wedge the bundle forever —
-// that would turn a crash into a permanently un-installable state, which is a
-// worse failure than the one the lock prevents.
+// TestStaleInstallLockIsReclaimed a lock left behind by a killed install must
+// not wedge the bundle forever; that would turn a crash into a permanently un-
+// installable state, which is a worse failure than the one the lock prevents.
 func TestStaleInstallLockIsReclaimed(t *testing.T) {
 	pluginDir := t.TempDir()
 	src := engineAt(t, t.TempDir(), "openbox", "engine-v1")
@@ -98,7 +91,6 @@ func TestStaleInstallLockIsReclaimed(t *testing.T) {
 		t.Fatalf("a stale lock must be reclaimed, got: %v", err)
 	}
 
-	// A FRESH lock, by contrast, is respected.
 	if err := os.WriteFile(lock, []byte("99999\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -108,7 +100,6 @@ func TestStaleInstallLockIsReclaimed(t *testing.T) {
 	}
 }
 
-// engineAt writes a fake engine binary and returns its path.
 func engineAt(t *testing.T, dir, name, content string) string {
 	t.Helper()
 	path := filepath.Join(dir, name)
@@ -118,10 +109,9 @@ func engineAt(t *testing.T, dir, name, content string) string {
 	return path
 }
 
-// Re-running `init` is expected — new hook keys only register on a re-init — so
-// the common case is that the engine already in place is the one being
-// installed. Rewriting it anyway copied ~10MB per run into the directory Claude
-// Code executes out of, which is how a repeated init became gigabytes of churn.
+// TestReInstallSkipsTheCopyWhenTheEngineIsUnchanged re-running `init` is
+// expected; new hook keys only register on a re-init; so the common case is
+// that the engine already in place is the one being installed.
 func TestReInstallSkipsTheCopyWhenTheEngineIsUnchanged(t *testing.T) {
 	src := engineAt(t, t.TempDir(), "openbox", "engine-v1")
 	pluginDir := t.TempDir()
@@ -132,9 +122,6 @@ func TestReInstallSkipsTheCopyWhenTheEngineIsUnchanged(t *testing.T) {
 	}
 	dst := filepath.Join(pluginDir, "bin", "openbox")
 
-	// Backdate the placed engine: a second copy would stamp it with now, so an
-	// unchanged mtime is proof no write happened. Deterministic, unlike comparing
-	// two timestamps taken microseconds apart.
 	backdated := time.Now().Add(-72 * time.Hour)
 	if err := os.Chtimes(dst, backdated, backdated); err != nil {
 		t.Fatalf("backdate: %v", err)
@@ -155,8 +142,9 @@ func TestReInstallSkipsTheCopyWhenTheEngineIsUnchanged(t *testing.T) {
 	}
 }
 
-// The skip must not be over-eager: a rebuilt engine has to land, or `init`
-// silently keeps governing with the previous build.
+// TestReInstallReplacesTheEngineWhenTheBytesDiffer the skip must not be over-
+// eager: a rebuilt engine has to land, or `init` silently keeps governing with
+// the previous build.
 func TestReInstallReplacesTheEngineWhenTheBytesDiffer(t *testing.T) {
 	srcDir := t.TempDir()
 	src := engineAt(t, srcDir, "openbox", "engine-v1")
@@ -165,7 +153,6 @@ func TestReInstallReplacesTheEngineWhenTheBytesDiffer(t *testing.T) {
 	if err := (Installer{PluginDir: pluginDir, EngineBinary: src}).placeEngineBinary(); err != nil {
 		t.Fatalf("first place: %v", err)
 	}
-	// Same size, different bytes — the comparison must not stop at the size.
 	newer := engineAt(t, srcDir, "openbox2", "engine-v2")
 	if err := (Installer{PluginDir: pluginDir, EngineBinary: newer}).placeEngineBinary(); err != nil {
 		t.Fatalf("second place: %v", err)
@@ -180,11 +167,10 @@ func TestReInstallReplacesTheEngineWhenTheBytesDiffer(t *testing.T) {
 	}
 }
 
-// placeEngineBinary removes its own temp on every ordinary path via defer. What
-// defer cannot survive is the process being killed, and a killed init leaves a
-// multi-megabyte partial copy that nothing ever reclaimed. The sweep must not
-// reach a temp a CONCURRENT install is still writing into, which is why it is
-// age-gated rather than pattern-only.
+// TestPlaceEngineBinarySweepsAbandonedTempsAndSparesLiveOnes placeEngineBinary
+// removes its own temp on every ordinary path via defer. What defer cannot
+// survive is the process being killed, and a killed init leaves a multi-
+// megabyte partial copy that nothing ever reclaimed.
 func TestPlaceEngineBinarySweepsAbandonedTempsAndSparesLiveOnes(t *testing.T) {
 	src := engineAt(t, t.TempDir(), "openbox", "engine-v1")
 	pluginDir := t.TempDir()
@@ -229,8 +215,9 @@ func TestPlaceEngineBinarySweepsAbandonedTempsAndSparesLiveOnes(t *testing.T) {
 	}
 }
 
-// The sweep has to run on the no-op path too, or a re-init against an unchanged
-// engine — the common case — never reclaims anything.
+// TestTheSweepRunsEvenWhenTheCopyIsSkipped the sweep has to run on the no-op
+// path too, or a re-init against an unchanged engine; the common case; never
+// reclaims anything.
 func TestTheSweepRunsEvenWhenTheCopyIsSkipped(t *testing.T) {
 	src := engineAt(t, t.TempDir(), "openbox", "engine-v1")
 	pluginDir := t.TempDir()

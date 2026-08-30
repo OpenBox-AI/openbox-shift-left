@@ -26,7 +26,6 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/internal/client"
 )
 
-// fakeReg implements devinit.Registrar for the command-wiring tests.
 type fakeReg struct {
 	reg    *backend.Registration
 	create int
@@ -40,11 +39,6 @@ func (f *fakeReg) FindByName(context.Context, string) (*backend.AgentSummary, er
 	return nil, nil
 }
 
-// testApp builds an app with in-memory writers and a seam that fails loudly if a
-// path touches the network when it should not.
-//
-// There is no secret-store seam to fake any more. Tests that write credentials
-// call isolateHome so the real write lands in a temp dir.
 func testApp(env map[string]string) (*app, *bytes.Buffer, *bytes.Buffer) {
 	var out, errb bytes.Buffer
 	a := &app{
@@ -59,22 +53,13 @@ func testApp(env map[string]string) (*app, *bytes.Buffer, *bytes.Buffer) {
 }
 
 // isolateHome redirects everything `init` writes to outside its own arguments,
-// so a command under test cannot reach the developer's real machine:
-//
-//   - OPENBOX_HOME / OPENBOX_CONFIG — the credential file and dev.json;
-//   - HOME — the Claude Code plugin bundle. The installer resolves
-//     ~/.claude/plugins/openbox-observe from it and copies the running engine
-//     into that bundle's bin/, so a test that redirects only OPENBOX_HOME still
-//     writes a multi-megabyte binary into the developer's real plugin
-//     directory — the one their live sessions execute out of;
-//   - the working directory. `init` defaults to PROJECT scope and takes the
-//     project from the process cwd, which under `go test` is the package
-//     directory. Redirecting HOME does not help: the hook registrations land
-//     in the source tree instead, at whatever path the engine resolved to.
-//
-// Returns the OPENBOX_HOME dir. The cwd and HOME dirs are deliberately separate
-// temp dirs, so a caller asserting on the contents of the returned directory
-// does not also see a plugin bundle or a .claude project tree.
+// so a command under test cannot reach the developer's real machine: The cwd
+// and HOME dirs are deliberately separate temp dirs, so a caller asserting on
+// the contents of the returned directory does not also see a plugin bundle or
+// a .claude project tree.
+//   - OPENBOX_HOME / OPENBOX_CONFIG; the credential file and dev.json;
+//   - HOME; the Claude Code plugin bundle.
+//   - The working directory.
 func isolateHome(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -83,11 +68,6 @@ func isolateHome(t *testing.T) string {
 	t.Setenv(devconfig.EnvApproverConfigPath, filepath.Join(dir, "approver.json"))
 	t.Setenv("HOME", t.TempDir())
 
-	// OPENBOX_HOME does not reach these three: they resolve from
-	// os.UserConfigDir(), and that split is deliberate (devconfig/paths.go). A
-	// test that runs the enforce path therefore appended to the DEVELOPER'S real
-	// audit sink. Pinned only when unset, so a test that points one of them
-	// somewhere it then reads keeps its own value regardless of call order.
 	sinks := t.TempDir()
 	for env, path := range map[string]string{
 		devconfig.EnvEnforcementFile:    filepath.Join(sinks, "enforcements.jsonl"),
@@ -99,8 +79,6 @@ func isolateHome(t *testing.T) string {
 		}
 	}
 
-	// No test in this package runs in parallel, so a process-wide chdir is safe;
-	// restore it either way, or every later test inherits this one's cwd.
 	wd, err := os.Getwd()
 	if err != nil {
 		t.Fatalf("resolve working directory: %v", err)
@@ -134,11 +112,9 @@ func TestDryRunIsOfflineAndNeedsNoToken(t *testing.T) {
 	}
 }
 
-// `init` no longer needs a control token at all — it makes no control-plane call.
-// What it needs is credentials already on the machine, and when they are absent
-// it must exit non-zero naming `auth` and install NOTHING. A half-install would
-// leave hooks that fire, fail to resolve an identity, and fail open silently: an
-// install that looks finished and governs nothing.
+// `init` no longer needs a control token at all; it makes no control-plane
+// call. What it needs is credentials already on the machine, and when they are
+// absent it must exit non-zero naming `auth` and install nothing.
 func TestInitWithoutCredentialsRefusesAndInstallsNothing(t *testing.T) {
 	home := isolateHome(t)
 	a, _, errb := testApp(nil)
@@ -152,7 +128,6 @@ func TestInitWithoutCredentialsRefusesAndInstallsNothing(t *testing.T) {
 	if !strings.Contains(errb.String(), "Nothing was installed") {
 		t.Errorf("error should state that nothing was installed, got %q", errb.String())
 	}
-	// And nothing may have been written.
 	if entries, err := os.ReadDir(home); err == nil {
 		for _, e := range entries {
 			if e.Name() == ".env" {
@@ -176,13 +151,12 @@ func TestInitDoesNotRegisterEvenWithAnOrgKey(t *testing.T) {
 	}
 }
 
-// The HALT-on-no-secret-store path is gone with the store : there is nothing
-// left to detect and nothing to refuse. What replaces it is the contract below —
-// the flag that selected a backend must FAIL rather than be ignored.
+// What replaces it is the contract below; the flag that selected a backend
+// must fail rather than be ignored.
 
-// A removed flag that is silently accepted is worse than one that errors: a
-// script passing --secret-backend would keep exiting 0 while storing credentials
-// somewhere it did not choose.
+// TestRemovedSecretBackendFlagFailsLoudly a removed flag that is silently
+// accepted is worse than one that errors: a script passing --secret-backend
+// would keep exiting 0 while storing credentials somewhere it did not choose.
 func TestRemovedSecretBackendFlagFailsLoudly(t *testing.T) {
 	for _, args := range [][]string{
 		{"init", "--provider", "claude-code", "--secret-backend", "file"},
@@ -202,13 +176,13 @@ func TestRemovedSecretBackendFlagFailsLoudly(t *testing.T) {
 	}
 }
 
-// A provider whose adapter is not built is a partial success worth its own exit
-// code, so a script can tell it apart from a hard failure.
+// TestConfigManualOnlyExitsTwo a provider whose adapter is not built is a
+// partial success worth its own exit code, so a script can tell it apart from
+// a hard failure.
 func TestConfigManualOnlyExitsTwo(t *testing.T) {
 	home := isolateHome(t)
 	seedCredentials(t)
 	a, _, errb := testApp(nil)
-	// cursor's adapter is not built -> config-manual -> exit 2.
 	code := a.run([]string{"init", "--provider", "cursor"})
 	if code != exitConfigOnly {
 		t.Fatalf("exit = %d, want %d; stderr=%q", code, exitConfigOnly, errb.String())
@@ -216,8 +190,6 @@ func TestConfigManualOnlyExitsTwo(t *testing.T) {
 	if !strings.Contains(errb.String(), "note:") {
 		t.Errorf("expected a note on partial success, got %q", errb.String())
 	}
-	// The credentials seeded above are untouched: `init` reads them to verify the
-	// precondition and never rewrites them.
 	kv, err := devconfig.ParseEnvFile(filepath.Join(home, ".env"))
 	if err != nil {
 		t.Fatalf("read credential file: %v", err)
@@ -227,18 +199,10 @@ func TestConfigManualOnlyExitsTwo(t *testing.T) {
 	}
 }
 
-// TestClaudeCodeInstallsForRealExitsZero proves the SL4-WIRE-1 front door: the
-// CLI registers the real claudecode.Installer (not the SL-2 stub), so
-// `init --provider claude-code` materializes the plugin bundle + dev config
-// and exits 0.
-//
-// It runs the REAL installer against the REAL default paths, so it has to be
-// isolated on every axis `init` writes to — isolateHome covers all three, and
-// this test then re-points HOME and OPENBOX_CONFIG at dirs it wants to assert
-// on. Redirecting only those two is what let an earlier version of this test
-// register hooks into the checked-out source tree: `init` defaults to project
-// scope and takes the project from cwd, which under `go test` is this package's
-// own directory.
+// TestClaudeCodeInstallsForRealExitsZero proves the SL4-wire-1 front door: the
+// CLI registers the real claudecode.Installer (not the SL-2 stub), so `init
+// --provider claude-code` materializes the plugin bundle + dev config and
+// exits 0.
 func TestClaudeCodeInstallsForRealExitsZero(t *testing.T) {
 	isolateHome(t)
 	home := t.TempDir()
@@ -257,13 +221,9 @@ func TestClaudeCodeInstallsForRealExitsZero(t *testing.T) {
 		t.Errorf("expected a config-applied message, got %q", out.String())
 	}
 
-	// Bundle + dev config materialized under the redirected HOME / config path.
 	if _, err := os.Stat(filepath.Join(home, ".claude", "plugins", "openbox-observe", ".claude-plugin", "plugin.json")); err != nil {
 		t.Errorf("plugin bundle not materialized: %v", err)
 	}
-	// STORY-SL4-WIRE-2 AC3, proven through the real `init` front door: the
-	// running engine is placed at bin/openbox (providers.Lookup → os.Executable()
-	// → Installer.EngineBinary), executable, so the hooks' ${…}/bin/openbox resolves.
 	enginePath := filepath.Join(home, ".claude", "plugins", "openbox-observe", "bin", "openbox")
 	if fi, err := os.Stat(enginePath); err != nil {
 		t.Errorf("engine not placed at bin/openbox via init: %v", err)
@@ -274,12 +234,9 @@ func TestClaudeCodeInstallsForRealExitsZero(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read dev config: %v", err)
 	}
-	// INV-1: the written config carries coordinates, never the secret values.
 	if strings.Contains(string(raw), "obx_test_k") || strings.Contains(string(raw), "c2VlZA==") {
 		t.Errorf("dev config leaked a secret value:\n%s", raw)
 	}
-	// The credentials seeded before the run are untouched: `init` reads them to
-	// check its precondition and never writes one.
 	envPath, err := devconfig.EnvFilePath()
 	if err != nil {
 		t.Fatal(err)
@@ -293,10 +250,9 @@ func TestClaudeCodeInstallsForRealExitsZero(t *testing.T) {
 	}
 }
 
-// A claude-code --dry-run must render the real installer's plan but write
-// NOTHING to disk (no bundle, no config), even though claude-code is now a real
-// installer. HOME/OPENBOX_CONFIG are redirected so any accidental write would
-// land — and be caught — under temp dirs.
+// TestClaudeCodeDryRunWritesNothing a claude-code --dry-run must render the
+// real installer's plan but write nothing to disk (no bundle, no config), even
+// though claude-code is now a real installer.
 func TestClaudeCodeDryRunWritesNothing(t *testing.T) {
 	home := t.TempDir()
 	cfgPath := filepath.Join(t.TempDir(), "openbox", "dev.json")
@@ -308,11 +264,9 @@ func TestClaudeCodeDryRunWritesNothing(t *testing.T) {
 	if code != exitOK {
 		t.Fatalf("dry-run exit = %d", code)
 	}
-	// The plan came from the REAL installer (observe-only plugin), not the stub.
 	if !strings.Contains(out.String(), "OpenBox Claude Code plugin (observe-only") {
 		t.Errorf("dry-run did not render the real installer plan:\n%s", out.String())
 	}
-	// Nothing was written.
 	if _, err := os.Stat(filepath.Join(home, ".claude")); !os.IsNotExist(err) {
 		t.Errorf("dry-run created a plugin dir under HOME (err=%v)", err)
 	}
@@ -321,10 +275,6 @@ func TestClaudeCodeDryRunWritesNothing(t *testing.T) {
 	}
 }
 
-// --- STORY-SL4-WIRE-2: unified `openbox hook claude-code <event>` -----------
-
-// setHookEnv points the (os.Getenv-based) hook engine at temp dirs so no real
-// spool/registry/config is touched. Returns the spool dir.
 func setHookEnv(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -333,24 +283,19 @@ func setHookEnv(t *testing.T) string {
 	t.Setenv("OPENBOX_SPOOL_DIR", spool)
 	t.Setenv("OPENBOX_SESSION_DIR", filepath.Join(dir, "sessions"))
 	t.Setenv("OPENBOX_CONFIG", filepath.Join(dir, "none.json"))
-	// The hook path records enforcement decisions, advisories and approval
-	// markers. None of those sinks follow OPENBOX_HOME — they resolve from
-	// os.UserConfigDir() (a deliberate split, devconfig/paths.go) — so a hook
-	// test without these appends to the DEVELOPER'S real audit trail.
 	t.Setenv(devconfig.EnvEnforcementFile, filepath.Join(dir, "enforcements.jsonl"))
 	t.Setenv(devconfig.EnvPendingApprovalDir, filepath.Join(dir, "pending-approvals"))
 	t.Setenv("OPENBOX_ADVISORY_FILE", filepath.Join(dir, "advisories.jsonl"))
-	// Pinned, not inherited. Content capture defaults ON, and since that
-	// decision the observe path carries the tool's input under that gate — so a
-	// hook test that left the posture to the default would silently start
-	// asserting the capture-ON behaviour. Cases that want capture ON set it
-	// themselves.
+	// Content capture defaults ON, and since that decision the observe path
+	// carries the tool's input under that gate; so a hook test that left the
+	// posture to the default would silently start asserting the capture-ON
+	// behaviour.
 	t.Setenv(devconfig.EnvContentCapture, "0")
 	return spool
 }
 
 // TestHookIsObserveOnlyInProcess drives the unified subcommand in-process and
-// asserts the INV-3 contract: exit 0, EMPTY stdout, event spooled, no content
+// asserts the INV-3 contract: exit 0, empty stdout, event spooled, no content
 // (tool_input) leaked into the spool.
 func TestHookIsObserveOnlyInProcess(t *testing.T) {
 	spool := setHookEnv(t)
@@ -371,8 +316,8 @@ func TestHookIsObserveOnlyInProcess(t *testing.T) {
 	}
 }
 
-// TestHookMisuseIsSafe: a bad/missing provider or event still exits 0 with empty
-// stdout (never block, never inject). Diagnostics go to stderr.
+// TestHookMisuseIsSafe: a bad/missing provider or event still exits 0 with
+// empty stdout (never block, never inject).
 func TestHookMisuseIsSafe(t *testing.T) {
 	setHookEnv(t)
 	for _, args := range [][]string{
@@ -393,8 +338,8 @@ func TestHookMisuseIsSafe(t *testing.T) {
 }
 
 // TestUnifiedBinaryHookObserveOnlyContract is the G_SEC re-verify: the SL-4
-// exit-0/empty-stdout contract must survive folding the hook into the
-// multi-command `openbox` binary. It builds and runs the REAL binary.
+// exit-0/empty-stdout contract must survive folding the hook into the multi-
+// command `openbox` binary.
 func TestUnifiedBinaryHookObserveOnlyContract(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds a binary; skipped in -short")
@@ -414,26 +359,11 @@ func TestUnifiedBinaryHookObserveOnlyContract(t *testing.T) {
 		"OPENBOX_AGENT_DID=did:aip:7f3c9b2e-0000-5000-a000-000000000001",
 		"OPENBOX_SPOOL_DIR="+spool,
 		"OPENBOX_CONFIG="+filepath.Join(dir, "none.json"),
-		// OPENBOX_HOME too, or the subprocess reads the DEVELOPER'S real
-		// ~/.openbox/dev.json (that decision moved config there). Pinning
-		// OPENBOX_CONFIG alone is not enough: a base_url resolved from the real
-		// file changes what the hook does, and these assertions then depend on
-		// whether whoever runs them has ever run `openbox auth`. CI has no
-		// ~/.openbox, so this fails only on a real developer's machine — which
-		// is the worst place for a test to start disagreeing with CI.
 		"OPENBOX_HOME="+dir,
-		// The same argument one level deeper: OPENBOX_HOME does NOT relocate the
-		// enforcement, advisory or pending-approval sinks — those resolve from
-		// os.UserConfigDir(), a split devconfig/paths.go makes deliberately. A
-		// child spawned without these appends to the DEVELOPER'S real audit trail
-		// on every run.
 		devconfig.EnvEnforcementFile+"="+filepath.Join(dir, "enforcements.jsonl"),
 		devconfig.EnvPendingApprovalDir+"="+filepath.Join(dir, "pending-approvals"),
 		"OPENBOX_ADVISORY_FILE="+filepath.Join(dir, "advisories.jsonl"),
 		"OPENBOX_SESSION_DIR="+filepath.Join(dir, "sessions"),
-		// See setHookEnv: capture defaults ON and the observe path now carries
-		// tool input under that gate. This case is about the gate CLOSED;
-		// conformance C36 owns the open side.
 		devconfig.EnvContentCapture+"=0",
 	)
 	var stdout, stderr strings.Builder
@@ -450,8 +380,6 @@ func TestUnifiedBinaryHookObserveOnlyContract(t *testing.T) {
 	}
 }
 
-// onlySpoolFile returns the single session .jsonl spool file under dir, ignoring
-// the companion "durations/" subdir (the E7-S8 start-time stash).
 func onlySpoolFile(t *testing.T, dir string) string {
 	t.Helper()
 	entries, err := os.ReadDir(dir)
@@ -474,16 +402,16 @@ func onlySpoolFile(t *testing.T, dir string) string {
 	return found
 }
 
-// TestHookEndToEndSmoke drives all five hooks through the unified subcommand and
-// asserts the whole observe→deliver path on the unified binary (in-process):
-//   - the HOT-PATH hooks (SessionStart..PostToolUse) never block on the network
-//     — they spool locally and cause ZERO egress; delivery happens only at
-//     SessionEnd (AC4 latency budget: the async/no-network-on-hot-path guarantee);
-//   - each hot-path hook returns well within a coarse wall-clock budget;
-//   - SessionEnd flushes the spooled session to /evaluate and drains the spool;
-//   - CONTENT never reaches the wire: a canary planted in tool_input.command is
-//     absent from every body delivered to /evaluate (INV-2 on the egress bytes,
-//     not just the spool).
+// TestHookEndToEndSmoke drives all five hooks through the unified subcommand
+// and asserts the whole observe→deliver path on the unified binary (in-
+// process):
+//   - The HOT-PATH hooks (SessionStart..PostToolUse) never block on the
+//     network; they spool locally and cause zero egress; delivery happens only
+//     at SessionEnd (AC4 latency budget: the async/no-network-on-hot-path
+//     guarantee);
+//   - Each hot-path hook returns well within a coarse wall-clock budget;
+//   - SessionEnd flushes the spooled session to /evaluate and drains the
+//     spool;
 func TestHookEndToEndSmoke(t *testing.T) {
 	const contentCanary = "SECRET-EGRESS-CANARY-do-not-send"
 	var mu sync.Mutex
@@ -513,59 +441,32 @@ func TestHookEndToEndSmoke(t *testing.T) {
 	t.Setenv("OPENBOX_BASE_URL", srv.URL)
 	t.Setenv("OPENBOX_API_KEY", "obx_test_"+strings.Repeat("a", 48))
 	t.Setenv("OPENBOX_ED25519_SEED", "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=")
-	// Same three ambient sinks setHookEnv pins, and for the same reason: they
-	// resolve from os.UserConfigDir() rather than OPENBOX_HOME, so the enforce
-	// path this test drives would append to the developer's real audit trail.
 	t.Setenv(devconfig.EnvEnforcementFile, filepath.Join(dir, "enforcements.jsonl"))
 	t.Setenv(devconfig.EnvPendingApprovalDir, filepath.Join(dir, "pending-approvals"))
 	t.Setenv("OPENBOX_ADVISORY_FILE", filepath.Join(dir, "advisories.jsonl"))
-	// Pin the realtime opt-out: this test's contract is the LEGACY delivery
-	// shape (zero egress before SessionEnd), which is exactly what
-	// OPENBOX_REALTIME=0 must restore. Realtime-on delivery has its own
-	// binary-driven test (TestHookRealtimeDelivery) — it cannot be exercised
-	// in-process, because the trigger refuses to spawn a `*.test` binary.
+	// Realtime-on delivery has its own binary-driven test
+	// (TestHookRealtimeDelivery); it cannot be exercised in-process, because the
+	// trigger refuses to spawn a `*.test` binary.
 	t.Setenv("OPENBOX_REALTIME", "0")
-	// Content capture OFF, so the canary below means what it says.
-	//
-	// The canary proves no tool content reaches the wire. That used to hold on
-	// the default posture because nothing on this path egressed synchronously
-	// and the spooled copy is metadata-only. That decision gates every tool
-	// call inline, and a gated escalation DOES attach content when capture is
-	// on (E7) — so on the default the canary would now be asserting the absence
-	// of something the design deliberately sends, and would fail for the right
-	// reason at the wrong test. With capture off, no content egresses on ANY
-	// path, which is the property this test is here to pin.
+	// The canary proves no tool content reaches the wire.
 	t.Setenv("OPENBOX_CONTENT_CAPTURE", "0")
 
-	// gating separates the two properties that used to be one. Every hot-path
-	// hook must be FAST; only the non-gating ones must be SILENT.
-	//
-	// PreToolUse egresses synchronously now, by design : it is the gate, and
-	// its whole purpose is to obtain a verdict before the tool runs. Asserting
-	// no-egress on it would be asserting that enforcement does not work. The
-	// bound that replaced it is the provider's hook ceiling, pinned per
-	// adapter — see TestEnforceBudgetStaysUnderTheDeclaredCeiling.
+	// Every hot-path hook must be fast; only the non-gating ones must be silent.
 	events := []struct {
 		hook, payload string
 		hotPath       bool // must be fast
 		gating        bool // egresses synchronously by design
 	}{
 		{"SessionStart", `{"hook_event_name":"SessionStart","session_id":"s1","cwd":"/r","source":"startup"}`, true, false},
-		// UserPromptSubmit gates since plan 260818-1714: the prompt gate
-		// legitimately makes one /evaluate call before the prompt is processed.
 		{"UserPromptSubmit", `{"hook_event_name":"UserPromptSubmit","session_id":"s1","cwd":"/r","prompt":"hi"}`, true, true},
 		{"PreToolUse", `{"hook_event_name":"PreToolUse","session_id":"s1","cwd":"/r","tool_name":"Bash","tool_input":{"command":"` + contentCanary + `"}}`, true, true},
 		{"PostToolUse", `{"hook_event_name":"PostToolUse","session_id":"s1","cwd":"/r","tool_name":"Bash","tool_response":{"ok":true}}`, true, false},
 		{"SessionEnd", `{"hook_event_name":"SessionEnd","session_id":"s1","cwd":"/r","reason":"other"}`, false, false},
 	}
-	// A generous hot-path budget: local spool only, so this catches a regression
-	// that introduces synchronous/network work on the hot path without CI flake.
 	const hotPathBudget = 2 * time.Second
 	for _, e := range events {
 		a, out, errb := testApp(nil)
 		a.stdin = strings.NewReader(e.payload)
-		// Per-hook delta: the gate legitimately egresses now, and a cumulative
-		// counter would charge its call to the next hook in the table.
 		mu.Lock()
 		before := got
 		mu.Unlock()
@@ -601,24 +502,17 @@ func TestHookEndToEndSmoke(t *testing.T) {
 	if n == 0 {
 		t.Fatalf("mock /evaluate received no events — SessionEnd flush did not deliver through the unified binary")
 	}
-	// The session's spool FILES must be drained after a successful flush (the
-	// "durations/" subdir — the E7-S8 stash, swept per-session at SessionEnd — is
-	// not a spool file).
 	drained, _ := os.ReadDir(spool)
 	for _, e := range drained {
 		if !e.IsDir() && strings.HasSuffix(e.Name(), ".jsonl") {
 			t.Errorf("spool not drained after SessionEnd flush: %s", e.Name())
 		}
 	}
-	// INV-2 on the wire: no delivered body may carry the tool_input content.
 	for i, b := range delivered {
 		if strings.Contains(b, contentCanary) {
 			t.Fatalf("content canary leaked to /evaluate in delivered body #%d:\n%s", i, b)
 		}
 	}
-	// Activity label survives the spool round-trip to the wire: the Bash tool call
-	// lands activity_type="Bash" (not "Unknown"), and a lifecycle event lands its
-	// event_type. Derived client-side from persisted fields, so spooling keeps it.
 	all := strings.Join(delivered, "\n")
 	if !strings.Contains(all, `"activity_type":"Bash"`) {
 		t.Errorf("no delivered body carried activity_type=Bash (tool label lost across spool):\n%s", all)
@@ -629,9 +523,9 @@ func TestHookEndToEndSmoke(t *testing.T) {
 }
 
 // TestHookRealtimeDelivery proves the near-real-time path end-to-end on the
-// REAL binary (the trigger refuses to spawn a `*.test` binary, so this cannot
+// real binary (the trigger refuses to spawn a `*.test` binary, so this cannot
 // run in-process): a hook spools its event and a detached, debounced flusher
-// delivers it to /evaluate mid-session — no SessionEnd involved — and the
+// delivers it to /evaluate mid-session; no SessionEnd involved; and the
 // SessionEnd that follows delivers exactly the remainder (no loss, no
 // duplicate Idempotency-Keys when realtime and teardown flushes overlap).
 func TestHookRealtimeDelivery(t *testing.T) {
@@ -665,19 +559,7 @@ func TestHookRealtimeDelivery(t *testing.T) {
 		"OPENBOX_AGENT_DID=did:aip:7f3c9b2e-0000-5000-a000-000000000001",
 		"OPENBOX_SPOOL_DIR="+spool,
 		"OPENBOX_CONFIG="+filepath.Join(dir, "none.json"),
-		// OPENBOX_HOME too, or the subprocess reads the DEVELOPER'S real
-		// ~/.openbox/dev.json (that decision moved config there). Pinning
-		// OPENBOX_CONFIG alone is not enough: a base_url resolved from the real
-		// file changes what the hook does, and these assertions then depend on
-		// whether whoever runs them has ever run `openbox auth`. CI has no
-		// ~/.openbox, so this fails only on a real developer's machine — which
-		// is the worst place for a test to start disagreeing with CI.
 		"OPENBOX_HOME="+dir,
-		// The same argument one level deeper: OPENBOX_HOME does NOT relocate the
-		// enforcement, advisory or pending-approval sinks — those resolve from
-		// os.UserConfigDir(), a split devconfig/paths.go makes deliberately. A
-		// child spawned without these appends to the DEVELOPER'S real audit trail
-		// on every run.
 		devconfig.EnvEnforcementFile+"="+filepath.Join(dir, "enforcements.jsonl"),
 		devconfig.EnvPendingApprovalDir+"="+filepath.Join(dir, "pending-approvals"),
 		"OPENBOX_ADVISORY_FILE="+filepath.Join(dir, "advisories.jsonl"),
@@ -685,7 +567,6 @@ func TestHookRealtimeDelivery(t *testing.T) {
 		"OPENBOX_BASE_URL="+srv.URL,
 		"OPENBOX_API_KEY=obx_test_"+strings.Repeat("a", 48),
 		"OPENBOX_ED25519_SEED=AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=",
-		// No OPENBOX_REALTIME: the default-on posture is under test.
 	)
 	runHook := func(hook, payload string) {
 		t.Helper()
@@ -713,21 +594,14 @@ func TestHookRealtimeDelivery(t *testing.T) {
 		}
 	}
 
-	// A single hot-path hook must get its event to core with no further hook
-	// activity and no SessionEnd: this IS the real-time property.
 	runHook("PreToolUse", `{"hook_event_name":"PreToolUse","session_id":"rt","cwd":"/r","tool_name":"Bash","tool_input":{"command":"ls"}}`)
 	waitFor("mid-session delivery of the first event", func() bool { return received() >= 1 })
 
-	// The flusher releases the debounce lock when its drain finishes; the next
-	// spooled event then triggers a fresh flusher immediately. Waiting on the
-	// release (instead of sleeping out the window) keeps this deterministic.
 	lock := filepath.Join(spool, "rt.flushlock")
 	waitFor("debounce lock release", func() bool { _, err := os.Stat(lock); return os.IsNotExist(err) })
 	runHook("PostToolUse", `{"hook_event_name":"PostToolUse","session_id":"rt","cwd":"/r","tool_name":"Bash","tool_response":{"ok":true}}`)
 	waitFor("mid-session delivery of the second event", func() bool { return received() >= 2 })
 
-	// SessionEnd delivers exactly the remainder (its own event): total is
-	// exact, nothing lost to the realtime drains, nothing double-sent.
 	runHook("SessionEnd", `{"hook_event_name":"SessionEnd","session_id":"rt","cwd":"/r","reason":"other"}`)
 	waitFor("SessionEnd delivery", func() bool { return received() >= 3 })
 	waitFor("spool drained", func() bool {
@@ -759,10 +633,11 @@ func TestHookRealtimeDelivery(t *testing.T) {
 	}
 }
 
-// TestUnifiedBinaryGitHookStampsCommit proves the OD17 git-hook fold end-to-end:
-// `openbox hook git install` writes a prepare-commit-msg hook that re-invokes the
-// unified binary as `openbox hook git prepare-commit-msg`, and a real commit gets
-// the OpenBox-Session trailer stamped — with no separate openbox-git-hook binary.
+// TestUnifiedBinaryGitHookStampsCommit proves the od17 git-hook fold end-to-
+// end: `openbox hook git install` writes a prepare-commit-msg hook that re-
+// invokes the unified binary as `openbox hook git prepare-commit-msg`, and a
+// real commit gets the OpenBox-Session trailer stamped; with no separate
+// openbox-git-hook binary.
 func TestUnifiedBinaryGitHookStampsCommit(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds a binary + runs git; skipped in -short")
@@ -794,7 +669,6 @@ func TestUnifiedBinaryGitHookStampsCommit(t *testing.T) {
 	git(gitEnv, "config", "user.email", "t@example.com")
 	git(gitEnv, "config", "user.name", "t")
 
-	// Install the hook via the UNIFIED binary (openbox hook git install).
 	ic := exec.Command(bin, "hook", "git", "install")
 	ic.Dir = repo
 	if out, err := ic.CombinedOutput(); err != nil {
@@ -808,7 +682,6 @@ func TestUnifiedBinaryGitHookStampsCommit(t *testing.T) {
 		t.Fatalf("installed hook does not re-invoke `openbox hook git`:\n%s", hookBody)
 	}
 
-	// A real commit with a session in scope must be stamped by the unified engine.
 	if err := os.WriteFile(filepath.Join(repo, "f.txt"), []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -823,18 +696,10 @@ func TestUnifiedBinaryGitHookStampsCommit(t *testing.T) {
 	}
 }
 
-// --- STORY-SL-11: `openbox dev verify` --------------------------------------
-
-// verifyTestSeed is a known base64 raw 32-byte Ed25519 seed (same fixture the
-// hook E2E test uses). The verify tests drive the real signer through the CLI and
-// check the signature server-side against the public key derived from it.
 const verifyTestSeed = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="
 
 const verifyTestDID = "did:aip:00000000-0000-0000-0000-000000000042"
 
-// coreValidateOK verifies the AIP-signed GET /api/v1/auth/validate exactly as
-// openbox-core would (empty-body SHA, canonical GET string, Ed25519 verify) and
-// answers 200; a bad signature → 401. It stands in for the real core.
 func coreValidateOK(t *testing.T, seedB64 string) *memhttptest.Server {
 	t.Helper()
 	seed, err := base64.StdEncoding.DecodeString(seedB64)
@@ -866,8 +731,6 @@ func coreValidateOK(t *testing.T, seedB64 string) *memhttptest.Server {
 	return srv
 }
 
-// setVerifyCreds points the adapter resolvers at direct-env credentials + a temp
-// (nonexistent) config so no real keychain/config is touched.
 func setVerifyCreds(t *testing.T, baseURL string) {
 	t.Helper()
 	t.Setenv("OPENBOX_CONFIG", filepath.Join(t.TempDir(), "none.json"))
@@ -877,8 +740,8 @@ func setVerifyCreds(t *testing.T, baseURL string) {
 	t.Setenv("OPENBOX_ED25519_SEED", verifyTestSeed)
 }
 
-// TestDevVerifyHappyPath: a valid key + signing round-trip against the mock core
-// prints a ✓ line naming the DID + base_url and exits 0.
+// TestDevVerifyHappyPath: a valid key + signing round-trip against the mock
+// core prints a ✓ line naming the DID + base_url and exits 0.
 func TestDevVerifyHappyPath(t *testing.T) {
 	srv := coreValidateOK(t, verifyTestSeed)
 	setVerifyCreds(t, srv.URL)
@@ -893,17 +756,14 @@ func TestDevVerifyHappyPath(t *testing.T) {
 		!strings.Contains(out.String(), srv.URL) {
 		t.Errorf("expected a ✓ line naming DID + base_url, got %q", out.String())
 	}
-	// INV-1: no secret in the success output.
 	if strings.Contains(out.String(), verifyTestSeed) || strings.Contains(out.String(), "obx_test_") {
 		t.Errorf("INV-1: secret leaked into ✓ output: %q", out.String())
 	}
 }
 
-// TestDevVerifyBadKeyIsMappedFailure: core rejects the identity (401) → a ✗ with
-// the mapped fix hint on stderr and a non-zero exit; no secret leaks.
+// TestDevVerifyBadKeyIsMappedFailure: core rejects the identity (401) → a ✗
+// with the mapped fix hint on stderr and a non-zero exit; no secret leaks.
 func TestDevVerifyBadKeyIsMappedFailure(t *testing.T) {
-	// A server that always 401s, regardless of the signature (simulates a wrong
-	// key / unprovisioned agent).
 	srv := memhttptest.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
 		_, _ = io.WriteString(w, `{"code":401,"message":"invalid token"}`)
@@ -925,7 +785,7 @@ func TestDevVerifyBadKeyIsMappedFailure(t *testing.T) {
 }
 
 // TestDevVerifyDryRunIsOffline: --dry-run prints the plan (method, path,
-// base_url, DID) and makes NO network call — the registrar/store seams panic if
+// base_url, DID) and makes NO network call; the registrar/store seams panic if
 // touched, and no creds are configured.
 func TestDevVerifyDryRunIsOffline(t *testing.T) {
 	t.Setenv("OPENBOX_CONFIG", filepath.Join(t.TempDir(), "none.json"))
@@ -943,7 +803,6 @@ func TestDevVerifyDryRunIsOffline(t *testing.T) {
 			t.Errorf("dry-run plan missing %q; got %q", want, got)
 		}
 	}
-	// --print-plan is an accepted alias.
 	a2, out2, _ := testApp(nil)
 	if code := a2.run([]string{"dev", "verify", "--print-plan"}); code != exitOK {
 		t.Fatalf("--print-plan exit = %d", code)
@@ -957,7 +816,6 @@ func TestDevVerifyDryRunIsOffline(t *testing.T) {
 // non-zero and tells the operator to run `openbox init` (never half-proceeds).
 func TestDevVerifyNoCredsSaysInitFirst(t *testing.T) {
 	t.Setenv("OPENBOX_CONFIG", filepath.Join(t.TempDir(), "none.json"))
-	// Ensure no ambient creds bleed in from the developer's real environment.
 	for _, k := range []string{"OPENBOX_BASE_URL", "OPENBOX_AGENT_DID", "OPENBOX_API_KEY", "OPENBOX_ED25519_SEED", "OPENBOX_SECRET_FILE"} {
 		t.Setenv(k, "")
 	}
@@ -981,26 +839,12 @@ func TestUnknownProviderAndMissingProvider(t *testing.T) {
 	}
 }
 
-// `openbox dev sync` and its tests are gone with that decision: the local
-// policy bundle it fetched no longer exists, so there is nothing to sync. The
-// deleted cases covered properties OF THAT FETCH — a successful sync writing a
-// bundle and pin, a null policy becoming an empty allow bundle, raw rego
-// degrading to a fail-open local bundle with a warning, a mapped 403 hint, and
-// the INV-1 guard refusing the control token as a flag. Only the last outlives
-// the command, and it still holds wherever a control token is read.
-//
-// TestDevSyncIsRetired pins that the command now reports its own removal.
-
-// Coordinate persistence moved from `init` to `auth` : `auth` writes agent_id /
-// backend_url / base_url to dev.json, they survive a re-run, and the resolvers
-// read them back with the environment unset.
-//
-// This used to drive `init`, which registered the agent and persisted what
-// registration returned. `init` no longer registers anything, so the same
-// behaviour is asserted where it now lives.
+// TestAuth_PersistsAgentIDAndBackendURL coordinate persistence moved from
+// `init` to `auth` : `auth` writes agent_id / backend_url / base_url to
+// dev.json, they survive a re-run, and the resolvers read them back with the
+// environment unset.
 func TestAuth_PersistsAgentIDAndBackendURL(t *testing.T) {
 	home := isolateHome(t)
-	// Env-unset for the resolvers, so this proves the CONFIG fallback carries them.
 	t.Setenv("OPENBOX_AGENT_ID", "")
 	t.Setenv("OPENBOX_BACKEND_URL", "")
 
@@ -1032,16 +876,11 @@ func TestAuth_PersistsAgentIDAndBackendURL(t *testing.T) {
 		}
 	}
 	run("after auth")
-	// A re-run must preserve them rather than blank them — a command that cannot
-	// update is the exact failure `auth` exists to fix.
 	run("after re-auth")
 }
 
-// A self-hosted install has to be able to name its own core. The backend's
-// registration reply carries no data-plane URL, so without an explicit core URL
-// an on-prem install configures happily and then signs every request at
-// core.openbox.ai — a 401 that reads as a broken install rather than a missing
-// setting. This pins the flag, the env fallback, and the default.
+// TestAuth_PersistsBaseURLForASelfHostedCore a self-hosted install has to be
+// able to name its own core.
 func TestAuth_PersistsBaseURLForASelfHostedCore(t *testing.T) {
 	run := func(t *testing.T, env map[string]string, args ...string) string {
 		t.Helper()
@@ -1072,14 +911,10 @@ func TestAuth_PersistsBaseURLForASelfHostedCore(t *testing.T) {
 		t.Errorf("ResolveCoordinates() base = %q, want the self-hosted core", got)
 	}
 
-	// The env supplies it too, so an operator who already exports it for the hooks
-	// does not have to pass it twice.
 	if cfg := run(t, map[string]string{"OPENBOX_BASE_URL": "http://core.internal:8086"}); !strings.Contains(cfg, `"base_url": "http://core.internal:8086"`) {
 		t.Errorf("OPENBOX_BASE_URL was not persisted:\n%s", cfg)
 	}
 
-	// Saying nothing takes the hosted defaults — a SaaS install must not have to
-	// pass a flag. Before that decision there was no backend default at all.
 	cfg = run(t, nil)
 	if !strings.Contains(cfg, `"base_url": "`+devconfig.DefaultBaseURL+`"`) {
 		t.Errorf("the hosted core default was not persisted:\n%s", cfg)
@@ -1089,12 +924,6 @@ func TestAuth_PersistsBaseURLForASelfHostedCore(t *testing.T) {
 	}
 }
 
-// --- STORY-SL7-A: unified `openbox hook codex <event>` + real codex installer ---
-
-// setCodexHookEnv isolates the codex hook engine from the real machine —
-// spool, dev.json, CODEX_HOME, and every default-real-path sink (G_SEC SL7-A
-// F3: hermeticity must be structural, never dependent on a mock's verdict
-// values keeping a sink un-written). Returns the spool dir.
 func setCodexHookEnv(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -1110,7 +939,7 @@ func setCodexHookEnv(t *testing.T) string {
 }
 
 // TestCodexHookIsObserveOnlyInProcess mirrors the claude-code routing test for
-// the new provider: exit 0, EMPTY stdout (Codex parses hook stdout as output
+// the new provider: exit 0, empty stdout (Codex parses hook stdout as output
 // JSON), event spooled, no tool_input content in the spool (SL3-SEC-3).
 func TestCodexHookIsObserveOnlyInProcess(t *testing.T) {
 	spool := setCodexHookEnv(t)
@@ -1134,7 +963,8 @@ func TestCodexHookIsObserveOnlyInProcess(t *testing.T) {
 	}
 }
 
-// TestCodexHookMisuseIsSafe: bad/missing event still exits 0 with empty stdout.
+// TestCodexHookMisuseIsSafe: bad/missing event still exits 0 with empty
+// stdout.
 func TestCodexHookMisuseIsSafe(t *testing.T) {
 	setCodexHookEnv(t)
 	for _, args := range [][]string{
@@ -1153,12 +983,9 @@ func TestCodexHookMisuseIsSafe(t *testing.T) {
 }
 
 // TestCodexUnifiedBinaryObserveE2E is the story's real-binary observe E2E
-// (AC-10): build the actual `openbox` binary and drive ALL FIVE wired events
+// (AC-10): build the actual `openbox` binary and drive ALL five wired events
 // through `openbox hook codex <event>` with the v0.145.0-shaped fixture
-// payloads from internal/adapters/codex/testdata. Every invocation must exit 0 with
-// EMPTY stdout; the tool hooks spool; no tool content ever reaches the spool;
-// SessionEnd attempts the flush fail-open (no core configured → events remain
-// spooled, exit still 0).
+// payloads from internal/adapters/codex/testdata.
 func TestCodexUnifiedBinaryObserveE2E(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds a binary; skipped in -short")
@@ -1169,24 +996,13 @@ func TestCodexUnifiedBinaryObserveE2E(t *testing.T) {
 		t.Fatalf("build openbox: %v\n%s", err, out)
 	}
 	spool := filepath.Join(dir, "spool")
-	// Segment-split and relative to this package directory, which means no
-	// text search for a path finds it. Recount the hops whenever either end
-	// moves.
 	fixtures := filepath.Join("..", "..", "internal", "adapters", "codex", "testdata")
 	env := append(os.Environ(),
 		"OPENBOX_AGENT_DID=did:aip:7f3c9b2e-0000-5000-a000-000000000001",
 		"OPENBOX_SPOOL_DIR="+spool,
 		"OPENBOX_CONFIG="+filepath.Join(dir, "none.json"),
-		// OPENBOX_HOME too, or the subprocess reads the DEVELOPER'S real
-		// ~/.openbox/dev.json (that decision moved config there). Pinning
-		// OPENBOX_CONFIG alone is not enough: a base_url resolved from the real
-		// file changes what the hook does, and these assertions then depend on
-		// whether whoever runs them has ever run `openbox auth`. CI has no
-		// ~/.openbox, so this fails only on a real developer's machine — which
-		// is the worst place for a test to start disagreeing with CI.
 		"OPENBOX_HOME="+dir,
 		"CODEX_HOME="+filepath.Join(dir, "codex-home"),
-		// G_SEC SL7-A F3: pin every default-real-path sink for the subprocess too.
 		"OPENBOX_ADVISORY_FILE="+filepath.Join(dir, "advisories.jsonl"),
 		"OPENBOX_FINDINGS_CURSOR="+filepath.Join(dir, "findings.cursor"),
 		"OPENBOX_ENFORCEMENT_FILE="+filepath.Join(dir, "enforcements.jsonl"),
@@ -1216,8 +1032,6 @@ func TestCodexUnifiedBinaryObserveE2E(t *testing.T) {
 		}
 	}
 
-	// All five events spooled (offline flush is fail-open, so they remain), and
-	// the fixtures' tool command / tool output never reached the spool.
 	spoolFile := onlySpoolFile(t, spool)
 	raw, _ := os.ReadFile(filepath.Join(spool, spoolFile))
 	for _, wantType := range []string{"SessionStarted", "PromptSubmitted", "ToolCall", "ToolResult", "SessionEnded"} {
@@ -1232,12 +1046,11 @@ func TestCodexUnifiedBinaryObserveE2E(t *testing.T) {
 	}
 }
 
-// TestCodexInstallsForRealExitsZero proves the STORY-SL7-A registry swap
+// TestCodexInstallsForRealExitsZero proves the story-SL7-A registry swap
 // through the real `init` front door: the CLI registers the real
 // codex.Installer, so `init --provider codex` writes hooks.json (under the
 // redirected CODEX_HOME) + the dev config, surfaces the /hooks trust step, and
-// exits 0. INV-1: neither file carries a secret; hooks.json carries the engine
-// path + event names only.
+// exits 0.
 func TestCodexInstallsForRealExitsZero(t *testing.T) {
 	openboxHome := isolateHome(t)
 	codexHome := filepath.Join(t.TempDir(), "codex-home")
@@ -1255,7 +1068,6 @@ func TestCodexInstallsForRealExitsZero(t *testing.T) {
 	if !strings.Contains(out.String(), "Wrote codex native config") {
 		t.Errorf("expected a config-applied message, got %q", out.String())
 	}
-	// AC-2: the output tells the user to trust the hooks via /hooks in Codex.
 	if !strings.Contains(out.String(), "/hooks") {
 		t.Errorf("expected the /hooks trust step in the output, got %q", out.String())
 	}
@@ -1264,14 +1076,11 @@ func TestCodexInstallsForRealExitsZero(t *testing.T) {
 	if err != nil {
 		t.Fatalf("hooks.json not written under CODEX_HOME: %v", err)
 	}
-	// The five wired events, invoking THIS engine (os.Executable() → the test
-	// binary path) as `hook codex <event>`.
 	for _, ev := range []string{"SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "SessionEnd"} {
 		if !strings.Contains(string(rawHooks), "hook codex "+ev) {
 			t.Errorf("hooks.json missing the %s entry:\n%s", ev, rawHooks)
 		}
 	}
-	// INV-1: hooks.json carries no secret, DID, or URL.
 	for _, banned := range []string{"obx_", "did:aip:x", "https://x"} {
 		if strings.Contains(string(rawHooks), banned) {
 			t.Errorf("hooks.json must not carry %q:\n%s", banned, rawHooks)
@@ -1281,8 +1090,6 @@ func TestCodexInstallsForRealExitsZero(t *testing.T) {
 	if strings.Contains(string(rawCfg), "obx_test_k") || strings.Contains(string(rawCfg), "c2VlZA==") {
 		t.Errorf("dev config leaked a secret value:\n%s", rawCfg)
 	}
-	// Seeded before the run and untouched by it: `init` reads credentials to check
-	// its precondition and never writes one.
 	kv, err := devconfig.ParseEnvFile(filepath.Join(openboxHome, ".env"))
 	if err != nil {
 		t.Fatalf("read credential file: %v", err)
@@ -1292,8 +1099,9 @@ func TestCodexInstallsForRealExitsZero(t *testing.T) {
 	}
 }
 
-// A codex --dry-run renders the real installer's plan (incl. the trust step)
-// but writes NOTHING — no hooks.json under CODEX_HOME, no dev config.
+// TestCodexDryRunWritesNothing a codex --dry-run renders the real installer's
+// plan (incl. The trust step) but writes nothing; no hooks.json under
+// CODEX_HOME, no dev config.
 func TestCodexDryRunWritesNothing(t *testing.T) {
 	codexHome := filepath.Join(t.TempDir(), "codex-home")
 	cfgPath := filepath.Join(t.TempDir(), "openbox", "dev.json")
@@ -1318,12 +1126,8 @@ func TestCodexDryRunWritesNothing(t *testing.T) {
 	}
 }
 
-// Asking for help is not an error. `openbox dev sync -h` exited 0 while
-// `openbox init -h` exited 1, purely because only one call site checked for
-// flag.ErrHelp — the kind of inconsistency scripts and CI trip over.
-// A removed command must SAY it was removed. Falling through to the usage line
-// would leave an operator with a sync script that "works" — exit 0, no output —
-// while enforcement quietly depends on something else entirely.
+// TestDevSyncIsRetired asking for help is not an error. A removed command must
+// SAY it was removed.
 func TestDevSyncIsRetired(t *testing.T) {
 	a, _, errb := testApp(nil)
 	if code := a.run([]string{"dev", "sync"}); code == exitOK {
@@ -1351,7 +1155,7 @@ func TestHelpFlagExitsZeroForEverySubcommand(t *testing.T) {
 	}
 }
 
-// A parse error is still an error.
+// TestUnknownFlagExitsNonZero a parse error is still an error.
 func TestUnknownFlagExitsNonZero(t *testing.T) {
 	a, _, _ := testApp(nil)
 	if got := a.run([]string{"dev", "verify", "--no-such-flag"}); got == exitOK {
@@ -1359,15 +1163,11 @@ func TestUnknownFlagExitsNonZero(t *testing.T) {
 	}
 }
 
-// An install that reports success and governs nothing is the worst outcome
-// available to an onboarding flow: the config is correct, the exit code is 0,
-// and the first evidence of the gap is an empty dashboard, which reads as a
-// broken product rather than an unfinished rollout.
-//
-// Installing the Claude Code plugin does not activate it — its hooks turn on
-// through managed settings or the user enabling the plugin — so `init` has to
-// say which sessions it actually governs. Reported from a real install where
-// global activation appeared to do nothing.
+// TestInit_SaysWhichSessionsAreGoverned an install that reports success and
+// governs nothing is the worst outcome available to an onboarding flow: the
+// config is correct, the exit code is 0, and the first evidence of the gap is
+// an empty dashboard, which reads as a broken product rather than an
+// unfinished rollout.
 func TestInit_SaysWhichSessionsAreGoverned(t *testing.T) {
 	run := func(t *testing.T, extra ...string) string {
 		t.Helper()
@@ -1391,9 +1191,6 @@ func TestInit_SaysWhichSessionsAreGoverned(t *testing.T) {
 		if !strings.Contains(got, "settings.local.json") {
 			t.Errorf("say WHERE the hooks were written so it can be checked; got:\n%s", got)
 		}
-		// The limit matters as much as the scope: a developer who thinks this covers
-		// every project has a false picture of their own coverage, and an auditor
-		// reading the events has a false picture of the developer's.
 		if !strings.Contains(got, "ANY OTHER directory are not governed") {
 			t.Errorf("the default must state what it does NOT cover; got:\n%s", got)
 		}
@@ -1425,18 +1222,12 @@ func TestInit_SaysWhichSessionsAreGoverned(t *testing.T) {
 				t.Errorf("missing the remedy %q; got:\n%s", want, got)
 			}
 		}
-		// It must not have written into the project tree at all.
 		if _, err := os.Stat(filepath.Join(dir, ".claude", "settings.local.json")); !os.IsNotExist(err) {
 			t.Errorf("--scope global wrote a project settings file: %v", err)
 		}
 	})
 }
 
-// seedCredentials writes what `openbox auth` would have written, since `init`
-// now requires credentials and never creates them.
-//
-// It resolves both paths through devconfig rather than taking a directory, so it
-// lands correctly whether a test pinned OPENBOX_HOME, OPENBOX_CONFIG, or just HOME.
 func seedCredentials(t *testing.T) {
 	t.Helper()
 	envPath, err := devconfig.EnvFilePath()

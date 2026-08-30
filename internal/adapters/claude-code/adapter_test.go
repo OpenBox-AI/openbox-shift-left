@@ -14,9 +14,6 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/internal/client"
 )
 
-// fakeEmitter records what would be emitted and can be told to fail (to exercise
-// the fail-open path) or to return a deny evaluation (to prove observe-only
-// ignores it for control flow).
 type fakeEmitter struct {
 	mu   sync.Mutex
 	got  []client.DevEvent
@@ -68,7 +65,6 @@ func TestObserveDropsUnusable(t *testing.T) {
 	if err != nil || spooled {
 		t.Fatalf("observe with bad DID = (%v,%v), want (false,nil)", spooled, err)
 	}
-	// Nothing spooled.
 	entries, _ := os.ReadDir(dir)
 	if len(entries) != 0 {
 		t.Errorf("expected empty spool dir, got %d entries", len(entries))
@@ -76,7 +72,7 @@ func TestObserveDropsUnusable(t *testing.T) {
 }
 
 // TestFlushIsObserveOnly proves the adapter neither blocks nor errors when the
-// emitter returns a deny verdict or a transport error — the whole point of
+// emitter returns a deny verdict or a transport error; the whole point of
 // observe-only + fail-open (INV-3 / D7).
 func TestFlushIsObserveOnly(t *testing.T) {
 	dir := t.TempDir()
@@ -86,8 +82,6 @@ func TestFlushIsObserveOnly(t *testing.T) {
 		t.Fatalf("observe: %v", err)
 	}
 
-	// A BLOCK verdict + a transport error must both be swallowed: neither may
-	// surface as an error the caller could turn into a block (INV-3).
 	em := &fakeEmitter{eval: client.Evaluation{Verdict: client.VerdictBlock}, err: errors.New("network down")}
 	n, err := ad.Flush(context.Background(), "s1", em)
 	if err != nil {
@@ -96,9 +90,6 @@ func TestFlushIsObserveOnly(t *testing.T) {
 	if len(em.got) != 1 {
 		t.Fatalf("emitter should have been called once, got %d", len(em.got))
 	}
-	// The count is DELIVERED, not attempted (E8-S7): an undelivered event is
-	// carried over to a recovery file for a later flush instead of being
-	// silently dropped, so it must not be counted as delivered here.
 	if n != 0 {
 		t.Fatalf("undelivered event counted as delivered: n=%d, want 0", n)
 	}
@@ -108,10 +99,11 @@ func TestFlushIsObserveOnly(t *testing.T) {
 	}
 }
 
-// TestFlushRecordsAdvisory proves the Advisory tier (STORY-SL-9): a flush whose
-// evaluation carries a BLOCK verdict + a guardrail hit writes ONE advisory record
-// (would_block=true, guardrail category present) while the flush neither blocks
-// nor errors, and the record leaks no content/secret (INV-1/INV-2).
+// TestFlushRecordsAdvisory proves the Advisory tier (story-SL-9): a flush
+// whose evaluation carries a BLOCK verdict + a guardrail hit writes ONE
+// advisory record (would_block=true, guardrail category present) while the
+// flush neither blocks nor errors, and the record leaks no content/secret
+// (INV-1/INV-2).
 func TestFlushRecordsAdvisory(t *testing.T) {
 	dir := t.TempDir()
 	secret := "SECRET-COMMAND-do-not-egress"
@@ -119,7 +111,6 @@ func TestFlushRecordsAdvisory(t *testing.T) {
 	advPath := filepath.Join(dir, "advisories.jsonl")
 	ad.Advisory.Path = advPath
 
-	// Observe a tool call carrying content in tool_input (stripped before egress).
 	if _, err := ad.Observe(HookPreToolUse, &HookEvent{
 		SessionID: "s1", ToolName: "Bash", ToolInput: []byte(`{"command":"` + secret + `"}`),
 	}); err != nil {
@@ -164,7 +155,6 @@ func TestFlushRecordsAdvisory(t *testing.T) {
 	if lines != 1 {
 		t.Fatalf("want exactly one advisory record, got %d", lines)
 	}
-	// INV-1/INV-2: no tool content and no secret substring in the sink.
 	if strings.Contains(string(raw), secret) {
 		t.Fatalf("INV-2 violation: content leaked into advisory sink: %s", raw)
 	}

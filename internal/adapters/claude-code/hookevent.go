@@ -116,6 +116,7 @@ type HookEvent struct {
 	// LastAssistantMessage is the text of the assistant message that closed this
 	// turn (Stop / SubagentStop). Still unbound, deliberately: `error_details`,
 	// `background_tasks`, `session_crons`.
+	//   - It is decoded here and copied onto an event only under
 	LastAssistantMessage string `json:"last_assistant_message"`
 
 	// Prompt is the UserPromptSubmit prompt text; content (INV-2), not
@@ -158,8 +159,8 @@ func (e *HookEvent) filePath() string {
 	return in.NotebookPath
 }
 
-// subagentType extracts the agent kind a Task call spawns
-// (tool_input.subagent_type: "code-reviewer", "general-purpose", …).
+// subagentType what is deliberately NOT read from the same tool_input:
+// `prompt` and `description`, which are free text the model composed.
 func (e *HookEvent) subagentType() string {
 	if len(e.ToolInput) == 0 {
 		return ""
@@ -173,7 +174,9 @@ func (e *HookEvent) subagentType() string {
 	return in.SubagentType
 }
 
-// command extracts the shell command string from a Bash tool_input.
+// command local-only (INV-2): this is used solely to populate the enforce-mode
+// decision.DecisionRequest, which is evaluated in-process on this machine; it
+// never egresses to core and is never logged.
 func (e *HookEvent) command() string {
 	if len(e.ToolInput) == 0 {
 		return ""
@@ -187,8 +190,9 @@ func (e *HookEvent) command() string {
 	return in.Command
 }
 
-// fileText extracts the file body a file-write tool carries; Claude Code's
-// Write uses "content", Edit uses "new_string".
+// fileText it is passed in-process to the decider and is never egressed to
+// core and never logged; the observe/telemetry egress path (Mapper) still
+// never decodes it, so the metadata-only-on-the-wire posture is unchanged.
 func (e *HookEvent) fileText() string {
 	if len(e.ToolInput) == 0 {
 		return ""

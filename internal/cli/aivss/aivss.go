@@ -1,10 +1,13 @@
 // Package aivss holds the default aivss risk posture the CLI supplies when
 // registering a developer agent via POST /agent/create.
-//
-//	final aivss_score. A high aivss_score is the safe end.
-//	decision_criticality, adaptability) descend (1 = highest risk) while
-//	model_robustness ascends (5 = highest risk); it is the odd one out.
-//	The values below were chosen with that per-field direction in mind.
+//   - Scoring direction is inverted: higher points => higher risk => lower
+//     final aivss_score.
+//   - Within ai_specific, four fields (data_sensitivity, ethical_impact,
+//     decision_criticality, adaptability) descend (1 = highest risk) while
+//     model_robustness ascends (5 = highest risk); it is the odd one out.
+//   - This exact posture computes to aivss_score ~= 52.74 (mid-band) and, with
+//     the server's default behavioral=100 / alignment=100, a blended trust
+//     score ~= 81 (Tier 2).
 package aivss
 
 // Base group is one aivss parameter group.

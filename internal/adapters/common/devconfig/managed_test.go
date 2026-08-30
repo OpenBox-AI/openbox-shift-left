@@ -16,9 +16,8 @@ func writeJSON(t *testing.T, path, body string) {
 	}
 }
 
-// The point of the managed layer: a locked field beats the environment. If it
-// only beat the user config, OPENBOX_ENFORCE=0 would still disable the gate and
-// the mandate would be theater (report SL-01).
+// TestManaged_LockedFieldBeatsEnvAndUser the point of the managed layer: a
+// locked field beats the environment.
 func TestManaged_LockedFieldBeatsEnvAndUser(t *testing.T) {
 	dir := t.TempDir()
 	managedPath := filepath.Join(dir, "managed.json")
@@ -39,8 +38,9 @@ func TestManaged_LockedFieldBeatsEnvAndUser(t *testing.T) {
 	}
 }
 
-// A field the org sets but does not lock is a default, not a mandate — which is
-// what gives orgs a "we recommend" separate from "we require".
+// TestManaged_UnlockedFieldIsOnlyADefault a field the org sets but does not
+// lock is a default, not a mandate; which is what gives orgs a "we recommend"
+// separate from "we require".
 func TestManaged_UnlockedFieldIsOnlyADefault(t *testing.T) {
 	dir := t.TempDir()
 	managedPath := filepath.Join(dir, "managed.json")
@@ -48,7 +48,6 @@ func TestManaged_UnlockedFieldIsOnlyADefault(t *testing.T) {
 	t.Setenv(EnvManagedConfig, managedPath)
 	t.Setenv(EnvConfigPath, filepath.Join(dir, "absent.json"))
 
-	// With nothing else set, the org default applies.
 	got, src := resolveBoolWithSource("content_capture",
 		func(c DevConfig) *bool { return c.ContentCapture }, true, EnvContentCapture)
 	if got {
@@ -58,7 +57,6 @@ func TestManaged_UnlockedFieldIsOnlyADefault(t *testing.T) {
 		t.Errorf("source = %q, want managed_default", src)
 	}
 
-	// And the developer can still override it.
 	t.Setenv(EnvContentCapture, "1")
 	got, src = resolveBoolWithSource("content_capture",
 		func(c DevConfig) *bool { return c.ContentCapture }, true, EnvContentCapture)
@@ -67,9 +65,9 @@ func TestManaged_UnlockedFieldIsOnlyADefault(t *testing.T) {
 	}
 }
 
-// A field absent from the managed file falls through to today's behaviour
-// unchanged, so deploying a managed file that governs one setting does not
-// silently take over the others.
+// TestManaged_AbsentFieldFallsThrough a field absent from the managed file
+// falls through to today's behaviour unchanged, so deploying a managed file
+// that governs one setting does not silently take over the others.
 func TestManaged_AbsentFieldFallsThrough(t *testing.T) {
 	dir := t.TempDir()
 	managedPath := filepath.Join(dir, "managed.json")
@@ -86,7 +84,8 @@ func TestManaged_AbsentFieldFallsThrough(t *testing.T) {
 	}
 }
 
-// With no managed file at all, behaviour is byte-identical to before the story.
+// TestManaged_NoManagedFileIsUnchangedBehaviour with no managed file at all,
+// behaviour is byte-identical to before the story.
 func TestManaged_NoManagedFileIsUnchangedBehaviour(t *testing.T) {
 	dir := t.TempDir()
 	userPath := filepath.Join(dir, "dev.json")
@@ -104,10 +103,10 @@ func TestManaged_NoManagedFileIsUnchangedBehaviour(t *testing.T) {
 	}
 }
 
-// A malformed managed file must not take the machine down: a hook that cannot
-// resolve config cannot observe either, so the org would lose the very evidence
-// the mandate exists to produce. It degrades to unmanaged and reports
-// present-but-unreadable so an operator can see the machine is misconfigured.
+// TestManaged_MalformedFileDegradesButIsReported a malformed managed file must
+// not take the machine down: a hook that cannot resolve config cannot observe
+// either, so the org would lose the very evidence the mandate exists to
+// produce.
 func TestManaged_MalformedFileDegradesButIsReported(t *testing.T) {
 	dir := t.TempDir()
 	managedPath := filepath.Join(dir, "managed.json")
@@ -126,16 +125,9 @@ func TestManaged_MalformedFileDegradesButIsReported(t *testing.T) {
 	}
 }
 
-// An unknown key is rejected rather than ignored: a typo in a mandate
-// ("enfoce": true) would otherwise read as a file that governs nothing.
-// OD-RF-2 reversed this. An unknown key used to make the whole managed file
-// unreadable, which dropped EVERY mandate — enforce included — and left the
-// machine developer-controlled, reported only in `doctor`. A typo in one field
-// should not un-govern a machine, and where the file is group-writable that
-// downgrade is inducible by appending junk.
-//
-// The key is now ignored and reported instead. The mandates it sits beside
-// still apply.
+// TestManaged_UnknownKeyIsReportedNotFatal an unknown key is rejected rather
+// than ignored: a typo in a mandate ("enfoce": true) would otherwise read as a
+// file that governs nothing.
 func TestManaged_UnknownKeyIsReportedNotFatal(t *testing.T) {
 	dir := t.TempDir()
 	managedPath := filepath.Join(dir, "managed.json")
@@ -150,14 +142,13 @@ func TestManaged_UnknownKeyIsReportedNotFatal(t *testing.T) {
 	if len(st.UnknownKeys) != 1 || st.UnknownKeys[0] != "enfoce" {
 		t.Errorf("UnknownKeys = %v, want [enfoce]", st.UnknownKeys)
 	}
-	// The mandate beside the typo still governs.
 	if !ResolveEnforce() {
 		t.Error("the locked enforce mandate was dropped because of an unrelated typo")
 	}
 }
 
-// Structural damage is still fatal: if the file is not JSON at all, nothing
-// about the mandate can be trusted.
+// TestManaged_MalformedJSONIsStillUnreadable structural damage is still fatal:
+// if the file is not JSON at all, nothing about the mandate can be trusted.
 func TestManaged_MalformedJSONIsStillUnreadable(t *testing.T) {
 	dir := t.TempDir()
 	managedPath := filepath.Join(dir, "managed.json")
@@ -170,8 +161,9 @@ func TestManaged_MalformedJSONIsStillUnreadable(t *testing.T) {
 	}
 }
 
-// The posture's provenance map must cover every flag it reports, or the control
-// plane cannot tell a mandate from a coincidence.
+// TestEffectivePosture_ReportsSourceForEveryFlag the posture's provenance map
+// must cover every flag it reports, or the control plane cannot tell a mandate
+// from a coincidence.
 func TestEffectivePosture_ReportsSourceForEveryFlag(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv(EnvManagedConfig, filepath.Join(dir, "nope.json"))
@@ -196,15 +188,14 @@ func TestEffectivePosture_ReportsSourceForEveryFlag(t *testing.T) {
 	}
 }
 
-// The shipped template must actually load — an ops file that documents itself
-// with "//" keys would be rejected by the strict decode if the exemption broke,
-// and the failure mode (silently unmanaged) is the one this story exists to
-// prevent.
+// TestManaged_ShippedTemplateLoadsAndLocks the shipped template must actually
+// load; an ops file that documents itself with "//" keys would be rejected by
+// the strict decode if the exemption broke, and the failure mode (silently
+// unmanaged) is the one this story exists to prevent.
 func TestManaged_ShippedTemplateLoadsAndLocks(t *testing.T) {
-	// Relative to this package directory. It has to be counted again whenever
-	// this package moves, and a wrong count does not fail -- it SKIPS, which
-	// silently retires a test whose own subject is a failure mode that is
-	// silent. So the skip names the path it could not find.
+	// It has to be counted again whenever this package moves, and a wrong count
+	// does not fail -- it skips, which silently retires a test whose own subject
+	// is a failure mode that is silent.
 	const template = "../../../../deployments/managed/openbox/dev.json"
 	if _, err := os.Stat(template); err != nil {
 		t.Skipf("shipped template not found at %s: %v", template, err)
@@ -216,16 +207,12 @@ func TestManaged_ShippedTemplateLoadsAndLocks(t *testing.T) {
 	if !st.Present || !st.Readable {
 		t.Fatalf("shipped managed template must load, got %+v", st)
 	}
-	// enforce is the mandate the template exists to assert, and it must beat an
-	// env override.
 	t.Setenv(EnvEnforce, "0")
 	got, src := resolveBoolWithSource("enforce",
 		func(c DevConfig) *bool { return c.Enforce }, false, EnvEnforce)
 	if !got || src != SourceManaged {
 		t.Errorf("template enforce = (%v, %q), want (true, managed)", got, src)
 	}
-	// content_capture is deliberately an unlocked org default (OD-E8-1), so a
-	// team can still opt back in.
 	t.Setenv(EnvContentCapture, "1")
 	got, src = resolveBoolWithSource("content_capture",
 		func(c DevConfig) *bool { return c.ContentCapture }, true, EnvContentCapture)
@@ -234,7 +221,8 @@ func TestManaged_ShippedTemplateLoadsAndLocks(t *testing.T) {
 	}
 }
 
-// A "//" documentation key must not be mistaken for the field it documents.
+// TestManaged_DocKeyIsNotASetting a "//" documentation key must not be
+// mistaken for the field it documents.
 func TestManaged_DocKeyIsNotASetting(t *testing.T) {
 	dir := t.TempDir()
 	managedPath := filepath.Join(dir, "managed.json")

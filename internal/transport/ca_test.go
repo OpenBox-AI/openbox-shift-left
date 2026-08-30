@@ -13,12 +13,8 @@ import (
 	"time"
 )
 
-// TestLoadOrCreateCAGeneratesOnceAndPersists.
-//
-// The "once" half is the load-bearing one. A CA regenerated on every start would
-// invalidate the trust the client was configured with, so every model call would
-// fail its TLS handshake after a restart — and the developer would see a broken
-// tool, not a governance message.
+// TestLoadOrCreateCAGeneratesOnceAndPersists. The "once" half is the load-
+// bearing one.
 func TestLoadOrCreateCAGeneratesOnceAndPersists(t *testing.T) {
 	dir := t.TempDir()
 
@@ -38,10 +34,6 @@ func TestLoadOrCreateCAGeneratesOnceAndPersists(t *testing.T) {
 }
 
 // TestCAKeyIsOwnerOnly holds the file-permission half of the security note.
-//
-// The CA can impersonate the provider to this machine. It sits under the same
-// trust boundary as ~/.openbox/.env — anything running as the developer can
-// read it — but that is not a reason to widen it further.
 func TestCAKeyIsOwnerOnly(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("unix file modes; Windows has no at-rest protection for ~/.openbox ")
@@ -69,10 +61,6 @@ func TestCAKeyIsOwnerOnly(t *testing.T) {
 }
 
 // TestLoadOrCreateCARefusesALooseKey is the refuse-to-run half.
-//
-// A key readable by group or other on a shared machine is an impersonation
-// capability handed to another account. Refusing is the only safe answer: a
-// silent chmod would hide that it ever happened.
 func TestLoadOrCreateCARefusesALooseKey(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("unix file modes; Windows has no at-rest protection for ~/.openbox ")
@@ -120,8 +108,6 @@ func TestCAShapeIsWhatThePhaseSpecifies(t *testing.T) {
 	if life < 2*365*24*time.Hour-48*time.Hour || life > 2*365*24*time.Hour+48*time.Hour {
 		t.Errorf("CA lifetime = %v, want ~2 years", life)
 	}
-	// A CA that constrains itself to the host it exists for cannot be repurposed
-	// against another host even if the key leaks.
 	if len(leaf.PermittedDNSDomains) == 0 {
 		t.Error("the CA has no name constraint; a leaked key could then be used to impersonate any host, " +
 			"not just the one this lane intercepts")
@@ -129,7 +115,7 @@ func TestCAShapeIsWhatThePhaseSpecifies(t *testing.T) {
 }
 
 // TestLeafVerifiesAgainstTheCAAlone is the evidence that the minted leaf is
-// actually usable: a pool containing ONLY our CA must verify it for the host.
+// actually usable: a pool containing only our CA must verify it for the host.
 func TestLeafVerifiesAgainstTheCAAlone(t *testing.T) {
 	dir := t.TempDir()
 	ca, err := LoadOrCreateCA(dir)
@@ -164,14 +150,6 @@ func TestLeafVerifiesAgainstTheCAAlone(t *testing.T) {
 }
 
 // TestServerConfigNeverNegotiatesHTTP2 pins the ALPN set.
-//
-// The relay behind this config is HTTP/1.1-only. If ALPN negotiated h2 the
-// client would speak HTTP/2 frames into an HTTP/1.1 server, and the model call
-// would fail — while the failure looked like a provider or network problem.
-//
-// It also pins InsecureSkipVerify off. goproxy's own defaultTLSConfig sets it
-// true (certs.go:27), so a config borrowed from goproxy rather than built here
-// would carry it in.
 func TestServerConfigNeverNegotiatesHTTP2(t *testing.T) {
 	dir := t.TempDir()
 	ca, err := LoadOrCreateCA(dir)
@@ -199,14 +177,9 @@ func TestServerConfigNeverNegotiatesHTTP2(t *testing.T) {
 	}
 }
 
-// TestHandshakeOverAnInMemoryPipe is the one that makes the rest evidence rather
-// than structure-checking: a REAL TLS handshake, client and server, with our CA
-// as the only root — and no socket anywhere.
-//
-// This host denies bind (see memhttptest), so a socket-based version of this
-// test would SKIP and the CA would ship unexercised. net.Pipe carries a TLS
-// handshake perfectly well; what it does not measure is bind, listen or the
-// dialer, and nothing here claims it does.
+// TestHandshakeOverAnInMemoryPipe is the one that makes the rest evidence
+// rather than structure-checking: a real TLS handshake, client and server,
+// with our CA as the only root; and no socket anywhere.
 func TestHandshakeOverAnInMemoryPipe(t *testing.T) {
 	dir := t.TempDir()
 	ca, err := LoadOrCreateCA(dir)
@@ -240,9 +213,6 @@ func TestHandshakeOverAnInMemoryPipe(t *testing.T) {
 	}()
 
 	c := tls.Client(clientConn, &tls.Config{ServerName: host, RootCAs: pool})
-	// A deadline, not a bare read: a handshake failure here would otherwise HANG,
-	// and a stalled `go test` reads as an environment problem rather than an
-	// answer (CLAUDE.md, the goproxy spike).
 	if err := c.SetDeadline(time.Now().Add(10 * time.Second)); err != nil {
 		t.Fatalf("SetDeadline: %v", err)
 	}
@@ -259,11 +229,6 @@ func TestHandshakeOverAnInMemoryPipe(t *testing.T) {
 }
 
 // TestServerConfigRefusesAHostOutsideTheNameConstraint.
-//
-// The CA is name-constrained, so minting a leaf for another host would produce a
-// certificate no verifier accepts. Failing at mint time says so; failing at
-// handshake time would surface as an unexplained TLS error in the developer's
-// tool.
 func TestServerConfigRefusesAHostOutsideTheNameConstraint(t *testing.T) {
 	dir := t.TempDir()
 	ca, err := LoadOrCreateCA(dir)
@@ -275,18 +240,14 @@ func TestServerConfigRefusesAHostOutsideTheNameConstraint(t *testing.T) {
 	}
 }
 
-// TestRemoveCADeletesBothFiles is deleted with RemoveCA, which had no caller.
-//
-// `--remove-all` deletes the CA inline in purgeLaneData, and nothing asserts
-// that it does. `--remove-transport` does not delete it at all, which by this
-// package's own argument leaves a trusted signing key behind after the relay
-// that used it is gone. Both are open, and neither is a regression from this
-// deletion: the helper this test covered was never on either path.
+// `--remove-transport` does not delete it at all, which by this package's own
+// argument leaves a trusted signing key behind after the relay that used it is
+// gone. Both are open, and neither is a regression from this deletion: the
+// helper this test covered was never on either path.
 
-// TestLoadOrCreateCARejectsACorruptFilePairWithoutOverwriting.
-//
-// Silently regenerating over an unreadable CA would destroy the key the client
-// was configured to trust and report success.
+// TestLoadOrCreateCARejectsACorruptFilePairWithoutOverwriting. Silently
+// regenerating over an unreadable CA would destroy the key the client was
+// configured to trust and report success.
 func TestLoadOrCreateCARejectsACorruptFilePairWithoutOverwriting(t *testing.T) {
 	dir := t.TempDir()
 	if _, err := LoadOrCreateCA(dir); err != nil {

@@ -17,11 +17,6 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/devconfig"
 )
 
-// setHookEnv isolates RunHook from the real machine: temp spool + nonexistent
-// dev.json, identity via env, and EVERY default-real-path sink pinned to the
-// temp dir (G_SEC SL7-A F3): hermeticity must be structural, never dependent
-// on a mock's verdict values keeping a sink un-written (the INC-SL7A-DEVJSON
-// failure class). Returns the spool dir.
 func setHookEnv(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -30,7 +25,6 @@ func setHookEnv(t *testing.T) string {
 	t.Setenv("OPENBOX_SPOOL_DIR", spool)
 	t.Setenv("OPENBOX_CONFIG", filepath.Join(dir, "none.json"))
 	t.Setenv("OPENBOX_ADVISORY_FILE", filepath.Join(dir, "advisories.jsonl"))
-	// SL7-B sinks, pinned now so the enforce leg inherits a hermetic helper.
 	t.Setenv("OPENBOX_FINDINGS_CURSOR", filepath.Join(dir, "findings.cursor"))
 	t.Setenv("OPENBOX_ENFORCEMENT_FILE", filepath.Join(dir, "enforcements.jsonl"))
 	return spool
@@ -45,7 +39,7 @@ func runHook(t *testing.T, sub, payload string) (stdout, stderr string) {
 }
 
 // TestRunHook_ObserveOnlyContract (AC-3/AC-7 in-process): a PreToolUse with
-// content in tool_input writes NOTHING to stdout, spools one ToolCall, and the
+// content in tool_input writes nothing to stdout, spools one ToolCall, and the
 // content never reaches the spool.
 func TestRunHook_ObserveOnlyContract(t *testing.T) {
 	spool := setHookEnv(t)
@@ -81,8 +75,8 @@ func TestRunHook_ObserveOnlyContract(t *testing.T) {
 	}
 }
 
-// Misuse (bad hook name, empty payload, missing identity) is safe: no stdout,
-// no panic, nothing spooled.
+// TestRunHook_MisuseIsSafe misuse (bad hook name, empty payload, missing
+// identity) is safe: no stdout, no panic, nothing spooled.
 func TestRunHook_MisuseIsSafe(t *testing.T) {
 	spool := setHookEnv(t)
 	for _, tc := range []struct{ sub, payload string }{
@@ -99,7 +93,6 @@ func TestRunHook_MisuseIsSafe(t *testing.T) {
 		t.Errorf("misuse spooled something: %v", entries)
 	}
 
-	// Missing identity: event dropped fail-open.
 	t.Setenv("OPENBOX_AGENT_DID", "")
 	if stdout, stderr := runHook(t, "PreToolUse", `{"session_id":"th-1","tool_name":"Bash"}`); stdout != "" || !strings.Contains(stderr, "no identity") {
 		t.Errorf("missing identity: stdout=%q stderr=%q", stdout, stderr)
@@ -107,8 +100,8 @@ func TestRunHook_MisuseIsSafe(t *testing.T) {
 }
 
 // TestRunHook_SessionEndFlushesSpool (AC-6): SessionEnd drains the session's
-// spooled events through the real signed client to a loopback core — with no
-// content on the wire — and stdout stays empty throughout.
+// spooled events through the real signed client to a loopback core; with no
+// content on the wire; and stdout stays empty throughout.
 func TestRunHook_SessionEndFlushesSpool(t *testing.T) {
 	setHookEnv(t)
 	var mu bytesBuffer
@@ -122,15 +115,9 @@ func TestRunHook_SessionEndFlushesSpool(t *testing.T) {
 	t.Setenv("OPENBOX_BASE_URL", srv.URL) // loopback http allowed (INV-1 guard)
 	t.Setenv("OPENBOX_API_KEY", "obx_test_key")
 	t.Setenv("OPENBOX_ED25519_SEED", base64.StdEncoding.EncodeToString(make([]byte, 32)))
-	// Content capture OFF, stated rather than inherited, because this case is
-	// about the FLUSH path carrying no content — not about the content posture.
-	//
-	// It used to get that for free: with the gate narrowed to escalating
-	// nothing by default, the spooled metadata-only copy was the only thing
-	// that ever reached the wire. That decision evaluates every gated call
-	// inline, and an escalation DOES attach content when capture is on (E7), so
-	// leaving the default here would assert the absence of something the design
-	// now deliberately sends. That posture belongs to its own tests.
+	// That decision evaluates every gated call inline, and an escalation does
+	// attach content when capture is on (E7), so leaving the default here would
+	// assert the absence of something the design now deliberately sends.
 	t.Setenv(devconfig.EnvContentCapture, "0")
 
 	secret := "FLUSH-SECRET-COMMAND"
@@ -156,11 +143,11 @@ func TestRunHook_SessionEndFlushesSpool(t *testing.T) {
 	}
 }
 
-// Offline flush is fail-open: SessionEnd logs and leaves the events spooled for
-// a later `flush` — never an error surface, never stdout.
+// TestRunHook_OfflineFlushFailsOpen offline flush is fail-open: SessionEnd
+// logs and leaves the events spooled for a later `flush`; never an error
+// surface, never stdout.
 func TestRunHook_OfflineFlushFailsOpen(t *testing.T) {
 	spool := setHookEnv(t)
-	// No API key/seed configured → flush is skipped, spool retained.
 	pre := `{"hook_event_name":"PreToolUse","session_id":"th-off","tool_name":"Bash","tool_use_id":"c1"}`
 	end := `{"hook_event_name":"SessionEnd","session_id":"th-off","reason":"other"}`
 	runHook(t, "PreToolUse", pre)
@@ -171,7 +158,6 @@ func TestRunHook_OfflineFlushFailsOpen(t *testing.T) {
 	if !strings.Contains(stderr, "flush skipped") {
 		t.Errorf("expected fail-open flush diagnostic, got %q", stderr)
 	}
-	// Events remain spooled (both the ToolCall and the SessionEnded line).
 	entries, _ := os.ReadDir(spool)
 	found := false
 	for _, e := range entries {
@@ -184,7 +170,6 @@ func TestRunHook_OfflineFlushFailsOpen(t *testing.T) {
 	}
 }
 
-// bytesBuffer is a tiny mutex-guarded [][]byte for the httptest handler.
 type bytesBuffer struct {
 	mu     sync.Mutex
 	bodies [][]byte

@@ -24,12 +24,10 @@ func newGovernor(g *fakeGovernor) func(*log.Logger) (Governor, error) {
 	return func(*log.Logger) (Governor, error) { return g, nil }
 }
 
-// The grace must outlast the worst case for the gate to file an approval — a
-// full inline evaluation budget plus process startup. Too short and the watcher
-// gives up mid-escalation, and the rewake silently never fires for precisely
-// the slow-control-plane case it exists to cover.
+// TestRewakeMarkerGraceOutlastsTheEscalation the grace must outlast the worst
+// case for the gate to file an approval; a full inline evaluation budget plus
+// process startup.
 func TestRewakeMarkerGraceOutlastsTheEscalation(t *testing.T) {
-	// The largest per-escalation budget any adapter clamps to today.
 	const worstCaseEscalation = 4 * time.Second
 	if rewakeMarkerGrace <= worstCaseEscalation {
 		t.Fatalf("marker grace %v must exceed the %v escalation budget, or the watcher "+
@@ -41,8 +39,9 @@ func TestRewakeMarkerGraceOutlastsTheEscalation(t *testing.T) {
 	}
 }
 
-// The gate files the marker BEFORE it starts holding, so the watcher learns
-// within its grace rather than having to outwait the whole hold.
+// TestAwaitRewake_PicksUpAMarkerFiledAfterItStarted the gate files the marker
+// before it starts holding, so the watcher learns within its grace rather than
+// having to outwait the whole hold.
 func TestAwaitRewake_PicksUpAMarkerFiledAfterItStarted(t *testing.T) {
 	isolateMarkers(t)
 	key := testKey()
@@ -58,9 +57,9 @@ func TestAwaitRewake_PicksUpAMarkerFiledAfterItStarted(t *testing.T) {
 	}
 }
 
-// The common case, and the one that has to be cheap: no approval was filed for
-// this call, so the watcher gives up after its grace period without ever
-// reaching the network.
+// TestAwaitRewake_NoApprovalFiled the common case, and the one that has to be
+// cheap: no approval was filed for this call, so the watcher gives up after
+// its grace period without ever reaching the network.
 func TestAwaitRewake_NoApprovalFiled(t *testing.T) {
 	isolateMarkers(t)
 	g := &fakeGovernor{replies: []func() (client.ApprovalStatus, error){pending(time.Now().Add(time.Hour))}}
@@ -75,9 +74,8 @@ func TestAwaitRewake_NoApprovalFiled(t *testing.T) {
 	}
 }
 
-// The tail the hold refuses to wait for: the gate denied, left the marker, and
-// a human decides minutes later. The watcher announces it and claims the
-// marker, so nothing announces it twice.
+// TestAwaitRewake_WakesOnALateDecision the tail the hold refuses to wait for:
+// the gate denied, left the marker, and a human decides minutes later.
 func TestAwaitRewake_WakesOnALateDecision(t *testing.T) {
 	isolateMarkers(t)
 	key := testKey()
@@ -116,8 +114,9 @@ func TestAwaitRewake_RejectionCarriesThePolicyReason(t *testing.T) {
 	}
 }
 
-// The gate answering during its own hold removes the marker. The watcher must
-// then stay silent: the call already saw the outcome.
+// TestAwaitRewake_SilentWhenTheGateAlreadyHandledIt the gate answering during
+// its own hold removes the marker. The watcher must then stay silent: the call
+// already saw the outcome.
 func TestAwaitRewake_SilentWhenTheGateAlreadyHandledIt(t *testing.T) {
 	isolateMarkers(t)
 	key := testKey()
@@ -136,7 +135,8 @@ func TestAwaitRewake_SilentWhenTheGateAlreadyHandledIt(t *testing.T) {
 	}
 }
 
-// An expired window is not an outcome worth interrupting anyone for.
+// TestAwaitRewake_SilentWhenTheWindowClosed an expired window is not an
+// outcome worth interrupting anyone for.
 func TestAwaitRewake_SilentWhenTheWindowClosed(t *testing.T) {
 	isolateMarkers(t)
 	key := testKey()
@@ -151,8 +151,9 @@ func TestAwaitRewake_SilentWhenTheWindowClosed(t *testing.T) {
 	}
 }
 
-// The marker path is derived from the key, so the gate and the watcher — which
-// never talk — address the same file, and two different calls never collide.
+// TestPendingApprovalPath_KeyedPerCall the marker path is derived from the
+// key, so the gate and the watcher; which never talk; address the same file,
+// and two different calls never collide.
 func TestPendingApprovalPath_KeyedPerCall(t *testing.T) {
 	isolateMarkers(t)
 	a := PendingApprovalPath(testKey())

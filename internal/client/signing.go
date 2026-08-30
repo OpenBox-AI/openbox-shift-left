@@ -11,9 +11,7 @@ import (
 	"time"
 )
 
-// AIP signing header names (verified byte-for-byte against the reference
-// implementation openbox-temporal-sdk-python/openbox/request_signing.py, which
-// the docstring pins to openbox-core agent.go's verifier).
+// The client must match these exactly or core rejects the signature.
 const (
 	headerAuthorization = "Authorization"
 	headerSDKVersion    = "X-OpenBox-SDK-Version"
@@ -32,8 +30,8 @@ const (
 
 const sdkVersion = "openbox-shift-left/0.1.0"
 
-// signer holds an agent's AIP Ed25519 identity. The seed is never logged or
-// exposed (INV-1); only the derived signatures leave this type.
+// signer the seed is never logged or exposed (INV-1); only the derived
+// signatures leave this type.
 type signer struct {
 	did  string
 	priv ed25519.PrivateKey

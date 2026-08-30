@@ -66,9 +66,6 @@ func TestMap_LifecycleAndToolEvents(t *testing.T) {
 			ev:       &HookEvent{SessionID: "s1", ToolName: "Bash", ToolInput: json.RawMessage(`{"command":"rm -rf /"}`)},
 			wantType: client.EventToolCall,
 			wantTool: client.Tool{Name: "Bash", Kind: client.ToolShell},
-			// A shell call's operation identity is the command, hashed — so a
-			// retry of the same command keys to the same activity (and thus the
-			// same approval), while a different command never does.
 			wantSpan: &client.Span{
 				SemanticType: "internal", Stage: "started",
 				OperationID: client.OperationForCommand("rm -rf /"),
@@ -120,7 +117,6 @@ func TestMap_LifecycleAndToolEvents(t *testing.T) {
 			if got.EventID == "" {
 				t.Error("event_id is empty (INV-5)")
 			}
-			// INV-2: content is NEVER populated by the adapter.
 			if got.Content != nil {
 				t.Errorf("content must be nil (metadata-only, INV-2), got %+v", got.Content)
 			}
@@ -130,8 +126,6 @@ func TestMap_LifecycleAndToolEvents(t *testing.T) {
 			case tt.wantSpan != nil && got.Span == nil:
 				t.Errorf("expected span %+v, got nil", tt.wantSpan)
 			case tt.wantSpan != nil:
-				// DeepEqual, not !=: Span carries maps since the gateway's
-				// header capture, so it is no longer comparable.
 				if !reflect.DeepEqual(*got.Span, *tt.wantSpan) {
 					t.Errorf("span = %+v, want %+v", *got.Span, *tt.wantSpan)
 				}
@@ -140,15 +134,10 @@ func TestMap_LifecycleAndToolEvents(t *testing.T) {
 	}
 }
 
-// TestMap_NoContentLeak is the content-gate guard: with capture OFF (testMapper's
-// default), content present in a hook's tool_input must not appear anywhere in
-// the emitted event — not in metadata, not in tool.name, not in a span body. Only
-// the structural file_path is carried.
-//
-// It was the SL3-SEC-3 guard, which held UNCONDITIONALLY. That decision retired
-// that guarantee; what survives is this half, and it is now the posture assertion
-// rather than a structural one. The capture-ON half is
-// TestMap_ToolOutputIsGatedOnContentCapture and conformance C36.
+// TestMap_NoContentLeak is the content-gate guard: with capture OFF
+// (testMapper's default), content present in a hook's tool_input must not
+// appear anywhere in the emitted event; not in metadata, not in tool.name, not
+// in a span body.
 func TestMap_NoContentLeak(t *testing.T) {
 	m := testMapper()
 	secret := "SUPER-SECRET-PAYLOAD-should-not-egress"
@@ -168,24 +157,21 @@ func TestMap_NoContentLeak(t *testing.T) {
 	if strings.Contains(string(raw), secret) {
 		t.Fatalf("content leaked into emitted event: %s", raw)
 	}
-	// The structural path IS carried (it is not content).
 	if got.Span == nil || got.Span.FilePath != "/tmp/x.txt" {
 		t.Fatalf("expected file_path carried, got span=%+v", got.Span)
 	}
-	// Span bodies stay empty (the client would strip them anyway, but the adapter
-	// must not set them in the first place).
 	if got.Span.RequestBody != "" || got.Span.ResponseBody != "" {
 		t.Fatalf("span bodies must be empty (INV-2): %+v", got.Span)
 	}
 }
 
-// STORY-E7-S7 (OD4): the prompt is CONTENT — carried onto the PromptSubmitted
-// event ONLY when content-capture is opted in, never by default.
+// TestMap_PromptCaptureGatedOnContentCapture story-E7-S7 (OD4): the prompt is
+// content; carried onto the PromptSubmitted event only when content-capture is
+// opted in, never by default.
 func TestMap_PromptCaptureGatedOnContentCapture(t *testing.T) {
 	const prompt = "refactor the auth module"
 	e := &HookEvent{SessionID: "s1", PermissionMode: "default", Prompt: prompt}
 
-	// Default (capture off): the prompt must NOT reach the event.
 	off := testMapper()
 	got, ok := off.Map(HookUserPromptSubmit, e)
 	if !ok {
@@ -198,7 +184,6 @@ func TestMap_PromptCaptureGatedOnContentCapture(t *testing.T) {
 		t.Fatalf("content-capture off: prompt leaked into emitted event: %s", raw)
 	}
 
-	// Capture on: the prompt is carried on ev.Content.Prompt (→ signal_args downstream).
 	on := testMapper()
 	on.CaptureContent = true
 	got, ok = on.Map(HookUserPromptSubmit, e)
@@ -209,7 +194,6 @@ func TestMap_PromptCaptureGatedOnContentCapture(t *testing.T) {
 		t.Fatalf("content-capture on: prompt must be captured, got %+v", got.Content)
 	}
 
-	// Capture on but empty prompt ⇒ no Content (nothing to carry).
 	got, _ = on.Map(HookUserPromptSubmit, &HookEvent{SessionID: "s1", PermissionMode: "default"})
 	if got.Content != nil {
 		t.Fatalf("empty prompt must not set Content, got %+v", got.Content)
@@ -230,7 +214,6 @@ func TestMap_MetadataStructuralOnly(t *testing.T) {
 			t.Errorf("metadata[%q] = %v, want %v", k, got.Metadata[k], v)
 		}
 	}
-	// compact drops empty values.
 	got2, _ := m.Map(HookSessionStart, &HookEvent{SessionID: "s1"})
 	if _, present := got2.Metadata["source"]; present {
 		t.Errorf("empty source should be dropped, got %v", got2.Metadata)
@@ -248,7 +231,6 @@ func TestMap_DropsUnusablePayloads(t *testing.T) {
 	if _, ok := m.Map(HookSessionStart, nil); ok {
 		t.Error("nil event should drop")
 	}
-	// Bad DID → drop.
 	bad := NewMapper(Identity{DeveloperDID: "not-a-did"})
 	if _, ok := bad.Map(HookSessionStart, &HookEvent{SessionID: "s1"}); ok {
 		t.Error("non-did:aip identity should drop")
@@ -257,9 +239,6 @@ func TestMap_DropsUnusablePayloads(t *testing.T) {
 
 func TestMap_WorkflowIDIsDIDNotCwd(t *testing.T) {
 	m := testMapper()
-	// Two hooks in the same session, one WITH cwd and one WITHOUT, must produce
-	// the SAME workflow_id (the client derives it from the DID when WorkspaceID
-	// is empty) — so a session never fragments on per-hook cwd presence (F4).
 	withCwd, _ := m.Map(HookSessionStart, &HookEvent{SessionID: "s1", Cwd: "/repo"})
 	noCwd, _ := m.Map(HookUserPromptSubmit, &HookEvent{SessionID: "s1"})
 	if withCwd.WorkspaceID != "" || noCwd.WorkspaceID != "" {
@@ -270,7 +249,6 @@ func TestMap_WorkflowIDIsDIDNotCwd(t *testing.T) {
 
 func TestMap_UnknownEnumsDropped(t *testing.T) {
 	m := testMapper()
-	// A crafted payload with bogus lifecycle enum values must not egress them.
 	ss, _ := m.Map(HookSessionStart, &HookEvent{SessionID: "s1", Source: "evil-source", PermissionMode: "pwn"})
 	if _, ok := ss.Metadata["source"]; ok {
 		t.Errorf("unknown source should be dropped, got %v", ss.Metadata["source"])
@@ -318,8 +296,8 @@ func TestSplitMCPName(t *testing.T) {
 	}
 }
 
-// The assistant-turn content attach. Three conditions, all required; this
-// asserts each one alone is enough to withhold the text.
+// TestMapTurn_AssistantTextIsGatedOnContentCapture the assistant-turn content
+// attach.
 func TestMapTurn_AssistantTextIsGatedOnContentCapture(t *testing.T) {
 	const answer = "I refactored the spool."
 	window := turnWindow{HasUsage: true, Model: "claude-opus-4-8"}
@@ -356,9 +334,8 @@ func TestMapTurn_AssistantTextIsGatedOnContentCapture(t *testing.T) {
 	}
 }
 
-// The text rides the COMPLETED half only. The started half's input is the
-// prompt, which already rides PromptSubmitted under the same gate — attaching it
-// twice would double the egress for no reader.
+// TestMapTurn_StartedHalfNeverCarriesText the text rides the completed half
+// only.
 func TestMapTurn_StartedHalfNeverCarriesText(t *testing.T) {
 	m := testMapper()
 	m.CaptureContent = true
@@ -372,10 +349,9 @@ func TestMapTurn_StartedHalfNeverCarriesText(t *testing.T) {
 	}
 }
 
-// Redaction is a COLLABORATOR, so every attach path goes through it by
-// construction rather than by remembering to call it. A nil redactor is the
-// secret_detection:false case: the text egresses unredacted, which that
-// decision states rather than hides.
+// TestMapTurn_RedactionIsStructural redaction is a collaborator, so every
+// attach path goes through it by construction rather than by remembering to
+// call it.
 func TestMapTurn_RedactionIsStructural(t *testing.T) {
 	const secret = "${OPENBOX_REDACTED_AWS_KEY}"
 	window := turnWindow{HasUsage: true}
@@ -396,7 +372,6 @@ func TestMapTurn_RedactionIsStructural(t *testing.T) {
 		t.Errorf("expected the redaction placeholder, got %q", completed.Content.Output)
 	}
 
-	// Detection off: unredacted, deliberately and documented.
 	off := testMapper()
 	off.CaptureContent = true
 	_, plain, _ := off.MapTurn(&HookEvent{SessionID: "s", LastAssistantMessage: "your key is " + secret}, window, 0)
@@ -406,9 +381,7 @@ func TestMapTurn_RedactionIsStructural(t *testing.T) {
 	}
 }
 
-// The outcome derivation. It is structural: which hook fired IS the answer, so
-// these tests assert the mapping and — more importantly — that nothing was read
-// out of the tool's own output to get there.
+// TestMap_ToolStatusIsDerivedFromWhichHookFired the outcome derivation.
 func TestMap_ToolStatusIsDerivedFromWhichHookFired(t *testing.T) {
 	m := testMapper()
 
@@ -425,7 +398,6 @@ func TestMap_ToolStatusIsDerivedFromWhichHookFired(t *testing.T) {
 			ev.Status, client.StatusCompleted)
 	}
 
-	// The started half has no outcome yet, and must not claim one.
 	call, ok := m.Map(HookPreToolUse, &HookEvent{SessionID: "s", ToolName: "Bash", ToolUseID: "toolu_1"})
 	if !ok {
 		t.Fatal("PreToolUse must map")
@@ -435,8 +407,9 @@ func TestMap_ToolStatusIsDerivedFromWhichHookFired(t *testing.T) {
 	}
 }
 
-// Lifecycle events must never carry an outcome: payload.status writes the row's
-// workflow_status column for any event type, where it means something else.
+// TestMap_LifecycleEventsCarryNoStatus lifecycle events must never carry an
+// outcome: payload.status writes the row's workflow_status column for any
+// event type, where it means something else.
 func TestMap_LifecycleEventsCarryNoStatus(t *testing.T) {
 	m := testMapper()
 	for _, tc := range []struct {
@@ -457,16 +430,8 @@ func TestMap_LifecycleEventsCarryNoStatus(t *testing.T) {
 	}
 }
 
-// `status` is STRUCTURAL: it is derived from which hook fired, never parsed out
-// of what the tool produced. That decision binds tool_response as gated
-// content, which makes the distinction testable rather than structural — so
-// this asserts it on the axis that still holds: the outcome is identical
-// whether or not the hook carried any output at all.
-//
-// It used to assert that a tool_response sentinel was absent from the event
-// while never putting one in the payload, so it proved nothing on that axis and
-// its premise ("the field this adapter deliberately does not bind") is now
-// false. The gate itself is TestMap_ToolOutputIsGatedOnContentCapture.
+// `status` is structural: it is derived from which hook fired, never parsed
+// out of what the tool produced.
 func TestMap_StatusDerivationReadsNoToolOutput(t *testing.T) {
 	m := testMapper() // content capture OFF
 	const sentinel = "SENTINEL-TOOL-OUTPUT-must-not-be-read"
@@ -482,13 +447,10 @@ func TestMap_StatusDerivationReadsNoToolOutput(t *testing.T) {
 	if strings.Contains(string(blob), sentinel) {
 		t.Errorf("tool output reached the event with capture off: %s", blob)
 	}
-	// And the status is present, so the assertion above is not vacuous.
 	if ev.Status != client.StatusCompleted {
 		t.Errorf("status = %q, want %q", ev.Status, client.StatusCompleted)
 	}
 
-	// The same call with capture ON: the OUTCOME must not move. If status were
-	// ever derived from output, this is where it would show.
 	on := testMapper()
 	on.CaptureContent = true
 	got, ok := on.Map(HookPostToolUse, &HookEvent{
@@ -505,7 +467,8 @@ func TestMap_StatusDerivationReadsNoToolOutput(t *testing.T) {
 	}
 }
 
-// The gate on tool output, at the mapper boundary (the wire is C32/C33).
+// TestMap_ToolOutputIsGatedOnContentCapture the gate on tool output, at the
+// mapper boundary (the wire is C32/C33).
 func TestMap_ToolOutputIsGatedOnContentCapture(t *testing.T) {
 	const body = "total 4\ndrwxr-xr-x 2 root root"
 	e := &HookEvent{
@@ -532,17 +495,16 @@ func TestMap_ToolOutputIsGatedOnContentCapture(t *testing.T) {
 	if got.Content == nil || !strings.Contains(got.Content.ToolOutput, "drwxr-xr-x") {
 		t.Fatalf("capture on: tool output not carried on Content.ToolOutput, got %+v", got.Content)
 	}
-	// It must NOT land on Output — that field carries the assistant's turn text
-	// and feeds core's goal-alignment extractor.
 	if got.Content.Output != "" {
 		t.Errorf("tool output landed on Content.Output, which carries TURN text: %q",
 			got.Content.Output)
 	}
 }
 
-// A failed call is the SAME wire event as a successful one — a completed
-// activity with a different outcome — so it pairs with its ActivityStarted and
-// is visible to every consumer that reads ActivityCompleted.
+// TestMap_PostToolUseFailureIsACompletedActivityThatFailed a failed call is
+// the same wire event as a successful one; a completed activity with a
+// different outcome; so it pairs with its ActivityStarted and is visible to
+// every consumer that reads ActivityCompleted.
 func TestMap_PostToolUseFailureIsACompletedActivityThatFailed(t *testing.T) {
 	m := testMapper()
 	ev, ok := m.Map(HookPostToolUseFailure, &HookEvent{
@@ -563,14 +525,14 @@ func TestMap_PostToolUseFailureIsACompletedActivityThatFailed(t *testing.T) {
 	if ev.EndedAt == "" {
 		t.Error("ended_at unset; without it the completed half reports no duration")
 	}
-	// The pairing input the duration stash and activity_id key on.
 	if ev.Span == nil || ev.Span.InvocationID != "toolu_f1" {
 		t.Errorf("invocation id not carried: %+v", ev.Span)
 	}
 }
 
-// is_interrupt is tri-state on purpose: a cancelled call and a broken tool are
-// both `failed`, and "the provider did not say" is a third answer.
+// TestMap_IsInterruptIsTriState is_interrupt is tri-state on purpose: a
+// cancelled call and a broken tool are both `failed`, and "the provider did
+// not say" is a third answer.
 func TestMap_IsInterruptIsTriState(t *testing.T) {
 	m := testMapper()
 	yes, no := true, false
@@ -630,7 +592,6 @@ func TestMap_LifecycleSignals(t *testing.T) {
 		t.Errorf("tool_use_id not carried — the denial cannot be correlated with its call: %v", den.Metadata)
 	}
 
-	// The error class is the provider's own enum, allowlisted.
 	for _, in := range []string{"rate_limit", "billing_error", "max_output_tokens", "unknown"} {
 		ev, ok := m.Map(HookStopFailure, &HookEvent{SessionID: "s", ErrorType: in})
 		if !ok {
@@ -646,18 +607,11 @@ func TestMap_LifecycleSignals(t *testing.T) {
 }
 
 // `error` is the same JSON key on TWO hooks: a closed enum on StopFailure, and
-// free text a tool wrote on PostToolUseFailure. One binding decodes both, so
-// what keeps the free text off the wire is the allowlist — an allowlist, not an
-// impossibility (that decision distinction), which is why it is pinned here
-// rather than left to a comment.
+// free text a tool wrote on PostToolUseFailure.
 func TestMap_FreeTextErrorNeverEgresses(t *testing.T) {
 	m := testMapper() // content capture OFF
 	const leaky = "ENOENT: no such file /home/dev/.ssh/id_rsa"
 
-	// On the failure hook the field is gated content since that decision: with
-	// capture off it is read but never copied onto the event, exactly like the
-	// prompt. The name of this test still holds for the field that matters —
-	// metadata.error_type, the UNGATED enum — which is asserted below.
 	failed, ok := m.Map(HookPostToolUseFailure, &HookEvent{
 		SessionID: "s", ToolName: "Read", ToolUseID: "toolu_e1", ErrorType: leaky,
 	})
@@ -668,10 +622,6 @@ func TestMap_FreeTextErrorNeverEgresses(t *testing.T) {
 		t.Errorf("PostToolUseFailure's free-text error reached the event with capture off: %s", blob)
 	}
 
-	// With capture ON it lands on gated content — and STILL not on the enum.
-	// That split is the whole point: `error` is one JSON key on two hooks, a
-	// closed provider enum on StopFailure and free text here, and only the
-	// routing keeps the free text out of the ungated field.
 	on := testMapper()
 	on.CaptureContent = true
 	captured, ok := on.Map(HookPostToolUseFailure, &HookEvent{
@@ -689,7 +639,6 @@ func TestMap_FreeTextErrorNeverEgresses(t *testing.T) {
 			"gated or not", v)
 	}
 
-	// And on StopFailure, where it IS read, anything outside the enum is dropped.
 	apiErr, ok := m.Map(HookStopFailure, &HookEvent{SessionID: "s", ErrorType: leaky})
 	if !ok {
 		t.Fatal("must map")
@@ -702,9 +651,10 @@ func TestMap_FreeTextErrorNeverEgresses(t *testing.T) {
 	}
 }
 
-// subagent_type names WHICH agent kind was spawned — an identifier chosen from
-// the installed set, not text the model wrote. Its neighbours in the same
-// tool_input, `prompt` and `description`, are free text and must stay unread.
+// TestMap_TaskSubagentTypeIsCarriedButNotItsPrompt subagent_type names which
+// agent kind was spawned; an identifier chosen from the installed set, not
+// text the model wrote. Its neighbours in the same tool_input, `prompt` and
+// `description`, are free text and must stay unread.
 func TestMap_TaskSubagentTypeIsCarriedButNotItsPrompt(t *testing.T) {
 	m := testMapper()
 	const secretPrompt = "SUBAGENT-PROMPT-must-not-egress"
@@ -722,7 +672,6 @@ func TestMap_TaskSubagentTypeIsCarriedButNotItsPrompt(t *testing.T) {
 	if blob, _ := json.Marshal(ev); strings.Contains(string(blob), secretPrompt) {
 		t.Errorf("the subagent prompt egressed: %s", blob)
 	}
-	// A non-Task tool carrying an unrelated input must not grow the key.
 	other, _ := m.Map(HookPreToolUse, &HookEvent{
 		SessionID: "s", ToolName: "Read", ToolUseID: "toolu_t2",
 		ToolInput: json.RawMessage(`{"file_path":"/tmp/a"}`),

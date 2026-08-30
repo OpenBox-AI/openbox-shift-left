@@ -1,9 +1,11 @@
 // Package gatewaycheck inspects the local gateway's posture for `openbox
 // doctor`. Bypass here is visible and attributable, never prevented: a
 // developer can unset one environment variable and their model calls go
-// straight to the provider. Any output implying otherwise would be the
-// overstatement this product exists to prevent, so the strings below say
-// "detectable", never "cannot".
+// straight to the provider.
+//   - Is the gateway alive?
+//   - Does the tool's active configuration actually point at it?
+//   - Who owns that configuration; the developer (base tier) or root (MDM
+//     tier)?
 package gatewaycheck
 
 import (
@@ -173,9 +175,8 @@ func bypassAssessment(r Report, notes []string) (bool, []string) {
 	return capable, notes
 }
 
-// readBaseURL pulls env.ANTHROPIC_BASE_URL out of a settings file. Any read or
-// parse failure is "not configured here": doctor must degrade to less
-// information, never to a wrong claim.
+// readBaseURL any read or parse failure is "not configured here": doctor must
+// degrade to less information, never to a wrong claim.
 func readBaseURL(path string) (string, bool) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
@@ -194,9 +195,8 @@ func readBaseURL(path string) (string, bool) {
 	return v, true
 }
 
-// ownerUID returns the file's owning uid, or -1 when it cannot be determined.
-// Windows has no uid, so tier detection there degrades to "unknown owner"
-// rather than silently reporting the MDM tier.
+// ownerUID windows has no uid, so tier detection there degrades to "unknown
+// owner" rather than silently reporting the MDM tier.
 func ownerUID(path string) int {
 	info, err := os.Stat(path)
 	if err != nil {

@@ -26,26 +26,20 @@ func TestResolveEnforce(t *testing.T) {
 	t.Setenv(envConfigPath, cfgPath)
 	os.Unsetenv(envEnforce) // env genuinely absent → config decides
 
-	// Default: no config field, no env → TRUE (that decision reversed the
-	// observe default). The adapter resolves through devconfig, so this pins
-	// that the facade did not keep a stale default of its own.
 	write(`{"developer_did":"` + testDID + `"}`)
 	if !ResolveEnforce() {
 		t.Error("an absent enforce field must resolve to ON ")
 	}
-	// An explicit false still opts out.
 	write(`{"developer_did":"` + testDID + `","enforce":false}`)
 	if ResolveEnforce() {
 		t.Error("enforce:false in config must opt out")
 	}
 
-	// Config enables enforce mode.
 	write(`{"developer_did":"` + testDID + `","enforce":true}`)
 	if !ResolveEnforce() {
 		t.Error("enforce:true in config should enable enforce mode")
 	}
 
-	// Env overrides config either way.
 	t.Setenv(envEnforce, "false")
 	if ResolveEnforce() {
 		t.Error("env false must override config true")
@@ -121,7 +115,6 @@ func TestBuildDecisionRequest(t *testing.T) {
 	})
 
 	t.Run("content is nil when content-capture is off (INV-2 default)", func(t *testing.T) {
-		// The OD4 default: even a file-write body is never carried when capture is off.
 		ev := &HookEvent{SessionID: "s", ToolName: "Write", ToolInput: []byte(`{"file_path":"/x","content":"secret"}`)}
 		if req := buildDecisionRequest(id, ev, false); req.Content != nil {
 			t.Errorf("Content must stay nil with content-capture off, got %+v", req.Content)
@@ -129,9 +122,10 @@ func TestBuildDecisionRequest(t *testing.T) {
 	})
 }
 
-// TestBuildDecisionRequest_ContentGating covers E6-S4 AC-5: the file BODY is carried
-// on the LOCAL DecisionRequest ONLY when content-capture is on, and ONLY for a file
-// tool; it is never carried for a non-file tool and never with capture off.
+// TestBuildDecisionRequest_ContentGating covers E6-S4 AC-5: the file body is
+// carried on the local DecisionRequest only when content-capture is on, and
+// only for a file tool; it is never carried for a non-file tool and never with
+// capture off.
 func TestBuildDecisionRequest_ContentGating(t *testing.T) {
 	id := Identity{DeveloperDID: testDID}
 
@@ -170,13 +164,9 @@ func TestBuildDecisionRequest_ContentGating(t *testing.T) {
 }
 
 func TestCapCommand_ByteBoundedRuneSafe(t *testing.T) {
-	// A short command passes through unchanged.
 	if got := hookflow.CapCommand("rm -rf /"); got != "rm -rf /" {
 		t.Errorf("short command changed: %q", got)
 	}
-	// A long multibyte command must be bounded by BYTES (not runes) so the
-	// marshaled request cannot overrun the server's byte read-limit (G_SEC LOW-1),
-	// and must never split a rune (valid UTF-8 preserved).
 	long := strings.Repeat("é", hookflow.MaxCommandLen) // 2 bytes/rune → ~2× the byte budget
 	got := hookflow.CapCommand(long)
 	if len(got) > hookflow.MaxCommandLen {
@@ -187,15 +177,9 @@ func TestCapCommand_ByteBoundedRuneSafe(t *testing.T) {
 	}
 }
 
-// TestEnforceDecision_FailOpenWhenSidecarAbsent and
-// TestEnforceDecision_LiveBlock are deleted with the local evaluator.
-//
-// The first asserted that an absent bundle degrades to a prompt fail-open allow
-// rather than blocking; the second, that a loaded BLOCK rule denies the matching
-// call with the policy reason and id. Both were about the decider that no longer
-// exists. The surviving local step decides nothing and cannot block, so the
-// fail-open property holds by construction; the block property moved to the
-// server and is asserted end to end by C1 and C12 against a real /evaluate.
+// The surviving local step decides nothing and cannot block, so the fail-open
+// property holds by construction; the block property moved to the server and
+// is asserted end to end by C1 and C12 against a real /evaluate.
 
 func TestRunHook_EnforceGate(t *testing.T) {
 	isolateConfig(t)
@@ -209,30 +193,26 @@ func TestRunHook_EnforceGate(t *testing.T) {
 		var stderr, stdout bytes.Buffer
 		logger := log.New(&stderr, "", 0)
 		RunHook("PreToolUse", strings.NewReader(payload), &stdout, logger)
-		// A cold-start (bundle-less) sidecar fails open → VerdictUnknown → the apply
-		// emits NOTHING (tighten-only): stdout must stay empty in every case here.
 		if stdout.Len() != 0 {
 			t.Errorf("fail-open/allow decision must not write to stdout; stdout=%q", stdout.String())
 		}
 		return stderr.String()
 	}
 
-	// Enforce OFF → the gate does not run; no enforce diagnostic emitted (the
-	// in-process behavioral analog of "the sidecar was never dialed").
 	t.Setenv(envEnforce, "0")
 	if out := run(); strings.Contains(out, "enforce decision:") {
 		t.Errorf("enforce-off must not run the gate; stderr=%q", out)
 	}
 
-	// Enforce ON → the PreToolUse hook synchronously obtains + logs a decision.
 	t.Setenv(envEnforce, "1")
 	if out := run(); !strings.Contains(out, "enforce decision:") {
 		t.Errorf("enforce-on must obtain + log a decision; stderr=%q", out)
 	}
 }
 
-// TestRunHook_EnforceOnlyPreToolUse guards AC-6: even in enforce mode, a
-// non-PreToolUse hook never dials the sidecar (the gate is a pre-execution concept).
+// TestRunHook_EnforceOnlyPreToolUse guards AC-6: even in enforce mode, a non-
+// PreToolUse hook never dials the sidecar (the gate is a pre-execution
+// concept).
 func TestRunHook_EnforceOnlyPreToolUse(t *testing.T) {
 	isolateConfig(t)
 	t.Setenv(envDID, testDID)
@@ -240,8 +220,6 @@ func TestRunHook_EnforceOnlyPreToolUse(t *testing.T) {
 	t.Setenv("OPENBOX_SESSION_DIR", t.TempDir())
 	t.Setenv(envEnforce, "1")
 
-	// PostToolUse in enforce mode must still only observe: the gate never runs, so no
-	// "enforce decision:" diagnostic is emitted (the in-process analog of "never dialed").
 	payload := `{"hook_event_name":"PostToolUse","session_id":"sess-1","cwd":"/tmp","tool_name":"Bash","tool_input":{"command":"echo hi"}}`
 	var stderr bytes.Buffer
 	logger := log.New(&stderr, "", 0)
@@ -251,10 +229,6 @@ func TestRunHook_EnforceOnlyPreToolUse(t *testing.T) {
 	}
 }
 
-// ── E6-S2: apply(verdict) tests ──────────────────────────────────────────────
-
-// parsePermissionDecision decodes a PreToolUse hook stdout blob and returns the
-// permissionDecision + reason (empty decision when nothing was written).
 func parsePermissionDecision(t *testing.T, out []byte) (decision, reason string) {
 	t.Helper()
 	if len(bytes.TrimSpace(out)) == 0 {
@@ -270,37 +244,28 @@ func parsePermissionDecision(t *testing.T, out []byte) (decision, reason string)
 	return got.HookSpecificOutput.PermissionDecision, got.HookSpecificOutput.PermissionDecisionReason
 }
 
-// TestMapVerdict exercises the full SDK cascade port (OD-ENF-SCOPE):
-// HALT/BLOCK/guardrail-fail → deny; REQUIRE_APPROVAL → ask; CONSTRAIN/ALLOW/
-// UNKNOWN → proceed (no decision). Order matters: a guardrail failure denies
-// regardless of the (non-HALT/BLOCK) verdict, matching verdict_handler.py:84-90.
+// TestMapVerdict exercises the full SDK cascade port (OD-ENF-scope):
+// HALT/BLOCK/guardrail-fail → deny; REQUIRE_APPROVAL → ask; constrain/ALLOW/
+// unknown → proceed (no decision).
 func TestMapVerdict(t *testing.T) {
 	guardFail := &client.GuardrailResult{Passed: false, Reasons: []client.GuardrailReason{{Type: "pii", Reason: "secret detail"}}}
 	guardPass := &client.GuardrailResult{Passed: true}
 
 	cases := []struct {
-		name     string
-		eval     client.Evaluation
-		wantDec  string
-		wantEmit bool
-		// reasonNoLeak asserts the free text below is NOT present in the reason.
+		name         string
+		eval         client.Evaluation
+		wantDec      string
+		wantEmit     bool
 		reasonNoLeak string
 		reasonHas    string
 	}{
-		// HALT maps to the session-terminating literal; ApplyDecision downgrades
-		// it to deny unless the gate marked the decision session-halting (a HALT
-		// the control plane actually returned) — that split is pinned by
-		// TestApplyDecisionSessionHaltSplit.
 		{"halt maps to the session-stop literal", client.Evaluation{Verdict: client.VerdictHalt, Reason: "kill switch"}, hookflow.DecisionHalt, true, "", "kill switch"},
 		{"block denies with policy id", client.Evaluation{Verdict: client.VerdictBlock, Reason: "no rm -rf", PolicyID: "p-1"}, ccDecisionDeny, true, "", "p-1"},
 		{"require_approval asks", client.Evaluation{Verdict: client.VerdictRequireApproval, Reason: "needs review"}, ccDecisionAsk, true, "", "needs review"},
-		// E6-S6: the approval id (server correlation id) is surfaced on the ask reason.
 		{"require_approval surfaces approval id", client.Evaluation{Verdict: client.VerdictRequireApproval, Reason: "needs review", ApprovalID: "appr-42"}, ccDecisionAsk, true, "", "appr-42"},
 		{"constrain proceeds", client.Evaluation{Verdict: client.VerdictConstrain, Reason: "scoped"}, "", false, "", ""},
 		{"allow proceeds", client.Evaluation{Verdict: client.VerdictAllow}, "", false, "", ""},
 		{"unknown (fail-open) proceeds", client.Evaluation{Verdict: client.VerdictUnknown}, "", false, "", ""},
-		// Guardrail failure denies even when the verdict itself would proceed, and
-		// the reason carries only the CATEGORY (pii), never the free text (INV-2).
 		{"guardrail fail denies (category only)", client.Evaluation{Verdict: client.VerdictAllow, Guardrail: guardFail}, ccDecisionDeny, true, "secret detail", "pii"},
 		{"guardrail pass does not deny", client.Evaluation{Verdict: client.VerdictAllow, Guardrail: guardPass}, "", false, "", ""},
 	}
@@ -326,9 +291,8 @@ func TestMapVerdict(t *testing.T) {
 // TestApplyDecisionSessionHaltSplit pins the session-halt discriminator at the
 // apply seam (plan 260818-1714): only a decision the gate marked SessionHalt
 // renders Claude Code's session stop (`continue:false` + stopReason, deny
-// riding along); every synthesized HALT — fail-closed outage, undecided
-// approval — stays a per-call deny with NO session stop. Getting this wrong in
-// the tight direction terminates sessions on hold timeouts and outages.
+// riding along); every synthesized HALT; fail-closed outage, undecided
+// approval; stays a per-call deny with NO session stop.
 func TestApplyDecisionSessionHaltSplit(t *testing.T) {
 	halt := client.Evaluation{Verdict: client.VerdictHalt, Reason: "org kill switch", PolicyID: "p-9"}
 
@@ -372,10 +336,10 @@ func TestApplyDecisionSessionHaltSplit(t *testing.T) {
 	})
 }
 
-// TestPromptContractRender pins the UserPromptSubmit output shapes: any refusal
-// is a top-level decision:"block" (the only literal the hook honours), a
-// session-halting HALT adds continue:false, and the proceed path writes
-// NOTHING — it must leave stdout to the findings surface.
+// TestPromptContractRender pins the UserPromptSubmit output shapes: any
+// refusal is a top-level decision:"block" (the only literal the hook honours),
+// a session-halting HALT adds continue:false, and the proceed path writes
+// nothing; it must leave stdout to the findings surface.
 func TestPromptContractRender(t *testing.T) {
 	t.Run("halt blocks and stops the session", func(t *testing.T) {
 		line, applied := promptContract.Render(hookflow.DecisionHalt, "OpenBox governance: kill switch", nil)
@@ -454,10 +418,6 @@ func TestApplyDecision(t *testing.T) {
 	})
 }
 
-// ── E6-S4/E6-S9: input redaction application (updatedInput) ──────────────────
-
-// contentField extracts a tool_input's content field (content|new_string) for a
-// test assertion.
 func contentField(t *testing.T, raw json.RawMessage) string {
 	t.Helper()
 	var m map[string]json.RawMessage
@@ -474,10 +434,10 @@ func contentField(t *testing.T, raw json.RawMessage) string {
 	return ""
 }
 
-// TestApplyInputRedaction covers the E6-S9 content-field reconstruction and its
-// gates (AC-1/AC-3/AC-5): it rebuilds the ORIGINAL tool_input with ONLY the content
-// field replaced by the redacted body, when local redaction is on and the result
-// differs; otherwise nil (no rewrite).
+// TestApplyInputRedaction covers the E6-S9 content-field reconstruction and
+// its gates (AC-1/AC-3/AC-5): it rebuilds the original tool_input with only
+// the content field replaced by the redacted body, when local redaction is on
+// and the result differs; otherwise nil (no rewrite).
 func TestApplyInputRedaction(t *testing.T) {
 	writeOrig := json.RawMessage(`{"file_path":"/x","content":"api_key=SECRET"}`)
 	editOrig := json.RawMessage(`{"file_path":"/y","old_string":"a","new_string":"tok=SECRET"}`)
@@ -519,10 +479,10 @@ func TestApplyInputRedaction(t *testing.T) {
 }
 
 // TestApplyInputRedaction_StructuralFieldsInviolable covers AC-2 (the E6-S7
-// carry-forward): the emitted updatedInput differs from the original ONLY in the
-// content field; structural locators are carried over verbatim and can never be
-// altered by the sidecar's returned body (the body is a plain string; only the
-// content field can change).
+// carry-forward): the emitted updatedInput differs from the original only in
+// the content field; structural locators are carried over verbatim and can
+// never be altered by the sidecar's returned body (the body is a plain string;
+// only the content field can change).
 func TestApplyInputRedaction_StructuralFieldsInviolable(t *testing.T) {
 	orig := json.RawMessage(`{"file_path":"/etc/app.conf","content":"password=hunter2secret9999","mode":"0644"}`)
 	got := hookflow.ApplyInputRedaction(
@@ -547,12 +507,9 @@ func TestApplyInputRedaction_StructuralFieldsInviolable(t *testing.T) {
 	}
 }
 
-// TestApplyInputRedaction_NonEmptyFieldSelection covers G3 Finding 1 / G_SEC LOW-1:
-// redactToolInput must write the redacted body into the SAME field fileText() reads
-// — the first NON-EMPTY content key. On a degenerate {"content":"","new_string":
-// "<secret>"} (or content:null), the redaction must land on new_string (where the
-// secret is), never into the empty content (which would leave the secret in place
-// AND corrupt the call). This is the field the scanner scanned.
+// TestApplyInputRedaction_NonEmptyFieldSelection covers G3 Finding 1 / G_SEC
+// LOW-1: redactToolInput must write the redacted body into the same field
+// fileText() reads; the first NON-empty content key.
 func TestApplyInputRedaction_NonEmptyFieldSelection(t *testing.T) {
 	redactedBody := "tok=${OPENBOX_REDACTED_SECRET_ASSIGNMENT}"
 	for _, orig := range []json.RawMessage{
@@ -576,10 +533,10 @@ func TestApplyInputRedaction_NonEmptyFieldSelection(t *testing.T) {
 	}
 }
 
-// TestApplyDecision_Redaction covers AC-1/AC-4/AC-5: on the proceed path a redaction
-// is emitted as updatedInput ALONE (no permissionDecision); a deny/ask carries no
-// updatedInput; and with local redaction off the proceed path writes nothing
-// (byte-identical to E6-S3).
+// TestApplyDecision_Redaction covers AC-1/AC-4/AC-5: on the proceed path a
+// redaction is emitted as updatedInput alone (no permissionDecision); a
+// deny/ask carries no updatedInput; and with local redaction off the proceed
+// path writes nothing (byte-identical to E6-S3).
 func TestApplyDecision_Redaction(t *testing.T) {
 	orig := json.RawMessage(`{"file_path":"/x","content":"api_key=SECRET"}`)
 	rc := &client.Content{FileText: "api_key=${OPENBOX_REDACTED_SECRET_ASSIGNMENT}"}
@@ -643,10 +600,10 @@ func TestApplyDecision_Redaction(t *testing.T) {
 	})
 }
 
-// TestRecordEnforcement_NoRedactionLeak covers AC-3: the redacted content lives on
-// the sidecar Decision (LOCAL-only) and must NEVER be serialized into the durable
-// enforcement audit — the audit stays content-free even for a proceed+redaction,
-// carrying only the category NAMES.
+// TestRecordEnforcement_NoRedactionLeak covers AC-3: the redacted content
+// lives on the sidecar Decision (local-only) and must never be serialized into
+// the durable enforcement audit; the audit stays content-free even for a
+// proceed+redaction, carrying only the category names.
 func TestRecordEnforcement_NoRedactionLeak(t *testing.T) {
 	enfFile := filepath.Join(t.TempDir(), "enforcements.jsonl")
 	t.Setenv(envEnforcementFile, enfFile)
@@ -671,21 +628,18 @@ func TestRecordEnforcement_NoRedactionLeak(t *testing.T) {
 			t.Errorf("enforcement audit leaked content %q (INV-2): %s", sentinel, data)
 		}
 	}
-	// The content-free category signal IS recorded.
 	if !strings.Contains(string(data), "secret_assignment") || !strings.Contains(string(data), `"redacted":true`) {
 		t.Errorf("expected content-free redaction signal in audit, got %s", data)
 	}
-	// The redacted body IS applied locally via updatedInput (stdout → CC, on-machine).
 	if !strings.Contains(out.String(), "REDACTION_SENTINEL") {
 		t.Errorf("expected the redacted body to be applied via updatedInput, stdout=%q", out.String())
 	}
 }
 
 // TestRunHook_EnforceApply_Block is the E6-S2 end-to-end guard: enforce ON + a
-// live sidecar whose bundle blocks `rm -rf` → a PreToolUse hook writes a `deny`
-// permissionDecision to stdout AND appends a content-free durable enforcement
-// record. A benign command in the same session writes nothing (tighten-only) and
-// records a proceed. INV-2: neither surface carries the shell command.
+// live sidecar whose bundle blocks `rm -rf` → a PreToolUse hook writes a
+// `deny` permissionDecision to stdout AND appends a content-free durable
+// enforcement record.
 func TestRunHook_EnforceApply_Block(t *testing.T) {
 	isolateConfig(t)
 	t.Setenv(envDID, testDID)
@@ -694,14 +648,6 @@ func TestRunHook_EnforceApply_Block(t *testing.T) {
 	t.Setenv(envEnforce, "1")
 	enfFile := filepath.Join(t.TempDir(), "enforcements.jsonl")
 	t.Setenv(envEnforcementFile, enfFile)
-	// The verdict comes from the control plane now; what this case asserts — the
-	// apply cascade and the durable audit line — is unchanged. The stub answers
-	// per COMMAND, the way the rule it replaces did, so the benign half is still
-	// a genuine proceed rather than an absent server.
-	//
-	// Content capture is on so the stub can see the command it is judging. That
-	// is the real posture for content-aware policy; the INV-2 assertions below
-	// are about stdout and the local audit, which stay content-free either way.
 	t.Setenv(envContentCapture, "1")
 	blockRmRf := memhttptest.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		raw, _ := io.ReadAll(r.Body)
@@ -723,7 +669,6 @@ func TestRunHook_EnforceApply_Block(t *testing.T) {
 		return stdout.String()
 	}
 
-	// Dangerous command → deny on stdout, with the policy reason (never the command).
 	danger := `{"hook_event_name":"PreToolUse","session_id":"s","cwd":"/tmp","tool_name":"Bash","tool_input":{"command":"rm -rf /tmp/x"}}`
 	out := run(danger)
 	d, reason := parsePermissionDecision(t, []byte(out))
@@ -737,13 +682,11 @@ func TestRunHook_EnforceApply_Block(t *testing.T) {
 		t.Errorf("stdout leaked the shell command (INV-2): %q", out)
 	}
 
-	// Benign command → nothing to stdout (governance only tightens).
 	benign := `{"hook_event_name":"PreToolUse","session_id":"s","cwd":"/tmp","tool_name":"Bash","tool_input":{"command":"echo hi"}}`
 	if out := run(benign); strings.TrimSpace(out) != "" {
 		t.Errorf("benign command must not write a decision; stdout=%q", out)
 	}
 
-	// The durable enforcement audit records both decisions, content-free.
 	data, err := os.ReadFile(enfFile)
 	if err != nil {
 		t.Fatalf("enforcement sink not written: %v", err)
@@ -767,11 +710,10 @@ func TestRunHook_EnforceApply_Block(t *testing.T) {
 	}
 }
 
-// ── E6-S3: fail-open / fail-closed failure policy ────────────────────────────
-
-// TestApplyFailurePolicy guards AC-2/AC-3/AC-4: the transform synthesizes a HALT
-// ONLY on a fail-open decision under fail-closed; every other case is a no-op
-// (fail-open proceeds; a real verdict is never overridden under either policy).
+// TestApplyFailurePolicy guards AC-2/AC-3/AC-4: the transform synthesizes a
+// HALT only on a fail-open decision under fail-closed; every other case is a
+// no-op (fail-open proceeds; a real verdict is never overridden under either
+// policy).
 func TestApplyFailurePolicy(t *testing.T) {
 	failOpenDec := decision.Decision{
 		Evaluation: client.Evaluation{Verdict: client.VerdictUnknown, Reason: "sidecar unavailable"},
@@ -797,15 +739,11 @@ func TestApplyFailurePolicy(t *testing.T) {
 		if !strings.Contains(got.Evaluation.Reason, "sidecar unavailable") {
 			t.Errorf("reason should carry the content-free cause, got %q", got.Evaluation.Reason)
 		}
-		// The audit signature of a fail-closed deny: a HALT that is ALSO hookflow.FailOpen
-		// (a real HALT never carries hookflow.FailOpen==true).
 		if !got.FailOpen {
 			t.Error("fail-closed synthetic HALT must retain hookflow.FailOpen==true for the audit")
 		}
 	})
 
-	// A REAL verdict from a reachable sidecar is never overridden — the policy
-	// governs the evaluation-unavailable case only.
 	for _, v := range []client.Verdict{client.VerdictAllow, client.VerdictConstrain, client.VerdictBlock} {
 		t.Run("real "+string(v)+" untouched under fail-closed", func(t *testing.T) {
 			real := decision.Decision{Evaluation: client.Evaluation{Verdict: v}, FailOpen: false}
@@ -817,8 +755,8 @@ func TestApplyFailurePolicy(t *testing.T) {
 }
 
 // TestLogEnforceDecision_PolicyLegible makes a fail-closed deny legible in the
-// stderr diagnostic: a synthesized HALT (would_block=true) that is ALSO fail_open
-// would look contradictory without the policy label.
+// stderr diagnostic: a synthesized HALT (would_block=true) that is also
+// fail_open would look contradictory without the policy label.
 func TestLogEnforceDecision_PolicyLegible(t *testing.T) {
 	if hookflow.FailOpen.String() != "fail_open" || hookflow.FailClosed.String() != "fail_closed" {
 		t.Fatalf("policy String() = %q/%q", hookflow.FailOpen, hookflow.FailClosed)
@@ -835,11 +773,10 @@ func TestLogEnforceDecision_PolicyLegible(t *testing.T) {
 	}
 }
 
-// TestRunHook_EnforceFailClosed is the AC-4 end-to-end guard: with enforce ON and
-// fail_closed ON, an UNREACHABLE sidecar → a `deny` on stdout (a fail-closed deny),
-// while a reachable sidecar's real ALLOW still PROCEEDS (the policy governs outages
-// only). AC-7: enforce-OFF is byte-identical even under fail_closed=1. INV-2: the
-// fail-closed reason carries no tool content.
+// TestRunHook_EnforceFailClosed is the AC-4 end-to-end guard: with enforce ON
+// and fail_closed ON, an unreachable sidecar → a `deny` on stdout (a fail-
+// closed deny), while a reachable sidecar's real ALLOW still proceeds (the
+// policy governs outages only).
 func TestRunHook_EnforceFailClosed(t *testing.T) {
 	isolateConfig(t)
 	t.Setenv(envDID, testDID)
@@ -854,7 +791,6 @@ func TestRunHook_EnforceFailClosed(t *testing.T) {
 		return stdout.String()
 	}
 
-	// enforce ON + fail_closed ON + NO bundle loaded (cold-start fail-open) → deny.
 	t.Setenv(envEnforce, "1")
 	t.Setenv(envFailClosed, "1")
 	out := run()
@@ -869,10 +805,6 @@ func TestRunHook_EnforceFailClosed(t *testing.T) {
 		t.Errorf("fail-closed reason leaked the shell command (INV-2): %q", out)
 	}
 
-	// A reachable /evaluate answering ALLOW → a real verdict → PROCEED even under
-	// fail-closed (the policy does not touch a real allow verdict). The verdict
-	// has to come from the server since; a local allow with nothing reachable is
-	// the outage case asserted just above.
 	serveVerdict(t, `{"verdict":"allow"}`)
 	allowURL, _ := serveEvaluate(t, `{"verdict":"allow"}`, 200, 0)
 	evalCreds(t, allowURL)
@@ -880,17 +812,16 @@ func TestRunHook_EnforceFailClosed(t *testing.T) {
 		t.Errorf("fail-closed must NOT block a real allow; stdout=%q", out)
 	}
 
-	// enforce OFF (still fail_closed=1) → byte-identical to observe: nothing to stdout.
 	t.Setenv(envEnforce, "0")
 	if out := run(); strings.TrimSpace(out) != "" {
 		t.Errorf("enforce-off must not deny even under fail_closed=1; stdout=%q", out)
 	}
 }
 
-// TestRecordEnforcement_GuardrailCategoryOnly guards the durable-audit half of AC-6
-// / INV-2 (G3 LOW-2, G_SEC LOW-1): a guardrail-failure decision records the CATEGORY
-// type only — never the guardrail reason free text (which can describe detected
-// content) or the field name.
+// TestRecordEnforcement_GuardrailCategoryOnly guards the durable-audit half of
+// AC-6 / INV-2 (G3 LOW-2, G_SEC LOW-1): a guardrail-failure decision records
+// the category type only; never the guardrail reason free text (which can
+// describe detected content) or the field name.
 func TestRecordEnforcement_GuardrailCategoryOnly(t *testing.T) {
 	enfFile := filepath.Join(t.TempDir(), "enforcements.jsonl")
 	t.Setenv(envEnforcementFile, enfFile)
@@ -902,7 +833,6 @@ func TestRecordEnforcement_GuardrailCategoryOnly(t *testing.T) {
 			{Type: "pii", Field: "ssn", Reason: "detected 123-45-6789 in the argument"},
 		}},
 	}}
-	// …but a failed guardrail denies (mapVerdict) and the record captures it.
 	res := hookflow.ApplyDecision(&bytes.Buffer{}, dec, false, nil, contract)
 	applied := res.Decision
 	if applied != ccDecisionDeny {
@@ -930,12 +860,11 @@ func TestRecordEnforcement_GuardrailCategoryOnly(t *testing.T) {
 	}
 }
 
-// ── E6-S6: REQUIRE_APPROVAL → CC ask (interactive local HITL prompt) ──────────
-
-// TestApprovalReason guards AC-1 / INV-2: the ask reason surfaces the content-free
-// approval CONTEXT — the policy reason, the policy id, and the server approval id
-// (the one approval-specific evaluate field) — with a generic fallback when the
-// policy carried no reason, and never any tool-content free text.
+// TestApprovalReason guards AC-1 / INV-2: the ask reason surfaces the content-
+// free approval context; the policy reason, the policy id, and the server
+// approval id (the one approval-specific evaluate field); with a generic
+// fallback when the policy carried no reason, and never any tool-content free
+// text.
 func TestApprovalReason(t *testing.T) {
 	t.Run("surfaces reason, policy id, and approval id", func(t *testing.T) {
 		r := hookflow.ApprovalReason(client.Evaluation{
@@ -956,7 +885,6 @@ func TestApprovalReason(t *testing.T) {
 		if !strings.Contains(strings.ToLower(r), "approval") {
 			t.Errorf("empty-reason approval must still say it requires approval, got %q", r)
 		}
-		// No approval/policy id → no dangling "(approval: )" / "(policy: )" fragments.
 		if strings.Contains(r, "(approval:") || strings.Contains(r, "(policy:") {
 			t.Errorf("no ids present, but reason has an id fragment: %q", r)
 		}
@@ -971,11 +899,9 @@ func TestApprovalReason(t *testing.T) {
 }
 
 // TestRecordEnforcement_ApprovalID guards the audit half of AC-1/AC-2: an ask
-// decision carrying a server approval id records approval_ref (a correlation id, not
-// content) so the ask is tie-able to the governance approval — and the audit stays
-// content-free (INV-2). The approval id is injected on the Decision directly,
-// because a LOCAL rule bundle does not mint approval ids (they are server-minted by
-// core); the adapter surfaces one only when the decision carries it (omitempty).
+// decision carrying a server approval id records approval_ref (a correlation
+// id, not content) so the ask is tie-able to the governance approval; and the
+// audit stays content-free (INV-2).
 func TestRecordEnforcement_ApprovalID(t *testing.T) {
 	enfFile := filepath.Join(t.TempDir(), "enforcements.jsonl")
 	t.Setenv(envEnforcementFile, enfFile)
@@ -993,7 +919,6 @@ func TestRecordEnforcement_ApprovalID(t *testing.T) {
 	if applied != ccDecisionAsk {
 		t.Fatalf("require_approval should ask, got %q", applied)
 	}
-	// The stdout ask reason surfaces the approval + policy ids.
 	if _, reason := parsePermissionDecision(t, out.Bytes()); !strings.Contains(reason, "appr-77") || !strings.Contains(reason, "mcp-policy") {
 		t.Errorf("ask reason should carry the approval + policy ids, got %q", reason)
 	}
@@ -1022,10 +947,7 @@ func TestRecordEnforcement_ApprovalID(t *testing.T) {
 
 // TestApprovalRefFallsBackToGovernanceEventID guards E9 §1.3 defect 1: core
 // declares approval_id but never assigns it, so a reference built from that
-// field alone was always empty and the code quoting it was dead. The reference
-// must fall back to governance_event_id — a REQUIRED field of core's verdict
-// response — so the prompt and the audit carry something an approver can
-// actually resolve.
+// field alone was always empty and the code quoting it was dead.
 func TestApprovalRefFallsBackToGovernanceEventID(t *testing.T) {
 	eval := client.Evaluation{
 		Verdict:           client.VerdictRequireApproval,
@@ -1037,20 +959,17 @@ func TestApprovalRefFallsBackToGovernanceEventID(t *testing.T) {
 	if r := hookflow.ApprovalReason(eval); !strings.Contains(r, "ge-42") {
 		t.Errorf("approval reason %q must quote the resolvable reference", r)
 	}
-	// approval_id still wins if core ever starts minting one.
 	eval.ApprovalID = "appr-1"
 	if got := eval.ApprovalRef(); got != "appr-1" {
 		t.Errorf("ApprovalRef = %q, want the approval id to take precedence", got)
 	}
 }
 
-// TestRunHook_EnforceApply_Approval is the E6-S6 end-to-end guard: enforce ON + a
-// live sidecar whose bundle requires approval for an MCP tool → a PreToolUse hook
-// writes an `ask` permissionDecision to stdout with a content-free reason (policy
-// reason + id), the durable audit records the ask, and enforce-OFF is byte-identical
-// (no ask even for the approval-required tool). The local bundle mints no approval
-// id, so the reason/audit gracefully omit it (see TestRecordEnforcement_ApprovalID
-// for the approval-id path).
+// TestRunHook_EnforceApply_Approval is the E6-S6 end-to-end guard: enforce ON
+// + a live sidecar whose bundle requires approval for an MCP tool → a
+// PreToolUse hook writes an `ask` permissionDecision to stdout with a content-
+// free reason (policy reason + id), the durable audit records the ask, and
+// enforce-OFF is byte-identical (no ask even for the approval-required tool).
 func TestRunHook_EnforceApply_Approval(t *testing.T) {
 	isolateConfig(t)
 	t.Setenv(envDID, testDID)
@@ -1058,8 +977,6 @@ func TestRunHook_EnforceApply_Approval(t *testing.T) {
 	t.Setenv("OPENBOX_SESSION_DIR", t.TempDir())
 	enfFile := filepath.Join(t.TempDir(), "enforcements.jsonl")
 	t.Setenv(envEnforcementFile, enfFile)
-	// A short hold: this case is about the verdict and the audit, not about how
-	// long the gate waits for an approver.
 	t.Setenv(devconfig.EnvApprovalHold, "200")
 	serveVerdict(t, `{"verdict":"require_approval","reason":"external repository mutation","policy_id":"mcp-policy"}`)
 
@@ -1070,16 +987,6 @@ func TestRunHook_EnforceApply_Approval(t *testing.T) {
 		return stdout.String()
 	}
 
-	// enforce ON → the request is FILED, held for, and — with no approver in this
-	// test — denied when the hold runs out (OD-E9-1), with the policy reason + id
-	// surfaced content-free.
-	//
-	// It used to render as `ask`, the provider's own prompt. That was the
-	// LOCALLY-derived approval: nothing had been filed, so there was nothing to
-	// wait on and the only sensible move was to let the developer decide. A
-	// server REQUIRE_APPROVAL is a filed record, so the gate holds for a real
-	// answer instead — and an unanswered request denies rather than asking the
-	// developer to approve their own.
 	t.Setenv(envEnforce, "1")
 	out := run()
 	d, reason := parsePermissionDecision(t, []byte(out))
@@ -1094,7 +1001,6 @@ func TestRunHook_EnforceApply_Approval(t *testing.T) {
 		t.Errorf("stdout leaked the tool input (INV-2): %q", out)
 	}
 
-	// The durable audit records the ask, content-free.
 	data, err := os.ReadFile(enfFile)
 	if err != nil {
 		t.Fatalf("enforcement sink not written: %v", err)
@@ -1110,27 +1016,16 @@ func TestRunHook_EnforceApply_Approval(t *testing.T) {
 		t.Errorf("record = %+v, want an unanswered approval recorded as HALT/deny", rec)
 	}
 
-	// enforce OFF → byte-identical to observe: nothing at all for the approval tool.
 	t.Setenv(envEnforce, "0")
 	if out := run(); strings.TrimSpace(out) != "" {
 		t.Errorf("enforce-off must write nothing; stdout=%q", out)
 	}
 }
 
-// The evaluation context (OD-E9-7): a gated call must carry what it is asking to
-// do, or neither the server nor an approver can decide about it — `kind=shell
-// tool_name=Bash` tells them exactly nothing.
-//
-// The two copies are mapped separately, and that split outlived the reason for it.
-// It used to be SL3-SEC-3 — the observe copy carried NOTHING, unconditionally.
-// That decision retired that: the observe copy carries the same extract under the
-// content gate. What the split still buys is the redaction: the gated copy is
-// rebuilt from the enforce gate's own detection result, so the server judges the
-// exact bytes the tool call was rewritten to.
-//
-// This case pins the capture-OFF half — with the gate closed the observe copy is
-// still empty while the gated copy is not, because evaluation is a different
-// question from telemetry. The capture-ON half is conformance C36.
+// TestEscalationCarriesApprovalContext_ObserveNeverDoes the evaluation context
+// (OD-E9-7): a gated call must carry what it is asking to do, or neither the
+// server nor an approver can decide about it; `kind=shell tool_name=Bash`
+// tells them exactly nothing.
 func TestEscalationCarriesApprovalContext_ObserveNeverDoes(t *testing.T) {
 	isolateConfig(t)
 	m := testMapper()
@@ -1153,20 +1048,11 @@ func TestEscalationCarriesApprovalContext_ObserveNeverDoes(t *testing.T) {
 				t.Errorf("escalation lacks the approval context: %+v", escalated.Content)
 			}
 
-			// The observe copy of the very same call stays metadata-only with
-			// the content gate CLOSED (testMapper has capture off), while the
-			// gated copy above carries the body regardless: an org that opted
-			// out of content telemetry still gets decisions made on content.
 			observed, _ := m.Map(HookPreToolUse, hookEv)
 			if observed.Content != nil {
 				t.Errorf("observe copy carries content with capture off: %+v", observed.Content)
 			}
 
-			// …and with the gate OPEN it carries the SAME extract the gated copy
-			// does. Asserting equality rather than mere presence is the point:
-			// two copies of one call that disagreed about what the command was
-			// would be worse than either alone, and nothing else pins them
-			// together.
 			on := m
 			on.CaptureContent = true
 			observedOn, _ := on.Map(HookPreToolUse, hookEv)
@@ -1177,9 +1063,8 @@ func TestEscalationCarriesApprovalContext_ObserveNeverDoes(t *testing.T) {
 		})
 	}
 
-	// Redaction runs before attachment (E8). Given a detection result, the
-	// attached body is the REDACTED one — the same bytes the tool call itself is
-	// rewritten to, never the original.
+	// Given a detection result, the attached body is the redacted one; the same
+	// bytes the tool call itself is rewritten to, never the original.
 	fileEv := &HookEvent{
 		SessionID: "s1", ToolName: "Write",
 		ToolInput: []byte(`{"file_path":"/tmp/a","content":"AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE"}`),
@@ -1195,7 +1080,6 @@ func TestEscalationCarriesApprovalContext_ObserveNeverDoes(t *testing.T) {
 	if !strings.Contains(ev.Content.ToolInput, "OPENBOX_REDACTED") {
 		t.Errorf("the redacted body was not attached: %q", ev.Content.ToolInput)
 	}
-	// The structural locator survives the rebuild verbatim.
 	if !strings.Contains(ev.Content.ToolInput, "/tmp/a") {
 		t.Errorf("file_path lost in the redacted rebuild: %q", ev.Content.ToolInput)
 	}

@@ -115,8 +115,6 @@ func (a *app) removeLane(in laneRemoval) error {
 	return nil
 }
 
-// installLaneUnitFn / uninstallLaneUnitFn are the unit-file seam for the two
-// lanes added here.
 var installLaneUnitFn = func(spec laneservice.Spec, goos, homeDir, binPath string) error {
 	return spec.Reinstall(goos, homeDir, binPath)
 }
@@ -240,7 +238,6 @@ func (a *app) reportDeactivation(label, homeDir, settingsPath string, lane activ
 	return nil
 }
 
-// claudeSettingsPath is the one settings file all three lanes write. Resolved
-// through gatewayservice so the three lanes and doctor cannot disagree about
-// which file they are all editing.
+// claudeSettingsPath resolved through gatewayservice so the three lanes and
+// doctor cannot disagree about which file they are all editing.
 func claudeSettingsPath(homeDir string) string { return gatewaySettingsPath(homeDir) }

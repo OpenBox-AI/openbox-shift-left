@@ -20,29 +20,21 @@ func TestCapabilities(t *testing.T) {
 		byKey[c.Key] = c
 	}
 
-	// Provider-independent floors, the Claude Code surfaces, and the shipped gated
-	// legs (E6 enforce opt-in, that decision usage capture opt-out) are supported.
 	for _, k := range []string{
 		"identity.register", "telemetry.hook", "tool.events", "commit.binding",
 		"telemetry.tokens", "verdict.apply", "enforce.rewrite",
-		// . Pinned TRUE here and FALSE in the Codex profile: the two
-		// providers genuinely diverge, and the divergence must be declared on
-		// both sides rather than discovered from an empty dashboard panel.
+		// Pinned true here and false in the Codex profile: the two providers
+		// genuinely diverge, and the divergence must be declared on both sides
+		// rather than discovered from an empty dashboard panel.
 		"tool.status",
 	} {
 		if !byKey[k].Supported {
 			t.Errorf("capability %q should be supported", k)
 		}
 	}
-	// Every gated leg must state which way it is gated: "supported" is about the
-	// mechanism existing, and a reader of the profile has to be able to tell what
-	// an unconfigured session actually does (INV-3, report SL-07).
-	//
-	// Both are opt-OUT now, and the profile has to say so. verdict.apply read
-	// "opt-in, default observe" long after that decision flipped enforce ON — a
+	// Both are opt-OUT now, and the profile has to say so. Verdict.apply read
+	// "opt-in, default observe" long after that decision flipped enforce ON; a
 	// note telling a reader an unconfigured session cannot block, when it can.
-	// That is the exact failure this check exists to catch, so it now asserts the
-	// direction rather than a fixed word.
 	for _, k := range []string{"verdict.apply"} {
 		if !strings.Contains(byKey[k].How, "default") {
 			t.Errorf("capability %q must state its default, so a reader knows what an "+

@@ -69,7 +69,9 @@ func (t Evaluator) Budget(enforceStart time.Time, configured time.Duration) time
 	return budget
 }
 
-// remaining is what is left of the whole-hook budget.
+// remaining every budget the gate hands out is clamped by it, so the
+// sequential steps can never jointly overrun the provider's hook timeout
+// however they are configured individually.
 func (t Evaluator) remaining(enforceStart time.Time) time.Duration {
 	return EnforceBudget(t.Ceiling) - time.Since(enforceStart)
 }

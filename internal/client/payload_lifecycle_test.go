@@ -5,16 +5,6 @@ import (
 	"testing"
 )
 
-// This file is the E7-S5 wire-shape suite for the lifecycle → Workflow*/
-// SignalReceived mapping (that decision: session=workflow;
-// commit/deploy=signal). It asserts each non-tool DevEvent serializes onto the
-// exact base SDK lifecycle wire shape openbox-sdk-python's
-// validation/event_rules.go requires — every workflow/signal event carries
-// workflow_id/run_id/workflow_type, and a signal additionally carries
-// signal_name — plus that the mapping stays span-less and preserves
-// commit/deploy lineage in the pass-through metadata blob (FR-5/6/7).
-
-// lifecycleEvent builds a minimal non-tool DevEvent of the given type.
 func lifecycleEvent(et EventType) DevEvent {
 	return DevEvent{
 		EventID: "e-" + string(et), EventType: et, SessionID: "sess-1", DeveloperDID: "did:aip:abc",
@@ -23,8 +13,6 @@ func lifecycleEvent(et EventType) DevEvent {
 	}
 }
 
-// agentToolNameForType mirrors the adapter's habit of tagging lifecycle events
-// with the agent/action tool name; irrelevant to the wire type but realistic.
 func agentToolNameForType(et EventType) string {
 	switch et {
 	case EventCommitCreated, EventDeploy:
@@ -34,8 +22,6 @@ func agentToolNameForType(et EventType) string {
 	}
 }
 
-// assertWorkflowFields checks the three fields the base contract requires on
-// EVERY lifecycle and signal event (event_rules.go _REQUIRED_WORKFLOW_FIELDS).
 func assertWorkflowFields(t *testing.T, p governanceEventPayload) {
 	t.Helper()
 	if p.WorkflowID == "" || p.RunID == "" || p.WorkflowType == "" {
@@ -44,9 +30,9 @@ func assertWorkflowFields(t *testing.T, p governanceEventPayload) {
 	}
 }
 
-// TestLifecycle_WireTypes maps each non-tool event onto its base wire event_type
-// (+ signal_name for signals), and proves every one carries the required
-// workflow triple. This is the heart of E7-S5.
+// TestLifecycle_WireTypes maps each non-tool event onto its base wire
+// event_type (+ signal_name for signals), and proves every one carries the
+// required workflow triple.
 func TestLifecycle_WireTypes(t *testing.T) {
 	cases := []struct {
 		et         EventType
@@ -68,8 +54,6 @@ func TestLifecycle_WireTypes(t *testing.T) {
 			if p.SignalName != c.wantSignal {
 				t.Errorf("signal_name = %q, want %q", p.SignalName, c.wantSignal)
 			}
-			// A signal MUST carry signal_name; a workflow event MUST NOT (it is a
-			// workflow discriminator only for the signal kind — event_rules.go).
 			if (c.wantType == "SignalReceived") != (p.SignalName != "") {
 				t.Errorf("signal_name presence (%q) must match SignalReceived (%v)", p.SignalName, c.wantType == "SignalReceived")
 			}
@@ -81,11 +65,12 @@ func TestLifecycle_WireTypes(t *testing.T) {
 	}
 }
 
-// TestLifecycle_RequiredFieldsOnWire asserts the base contract's required fields
-// are PHYSICALLY present on the raw wire (not merely non-empty after decode, which
-// omitempty makes indistinguishable from absent): every lifecycle event ships
-// workflow_id/run_id/workflow_type, and a signal additionally ships signal_name —
-// the exact keys event_rules.go's _REQUIRED_WORKFLOW_FIELDS + signal rule demand.
+// TestLifecycle_RequiredFieldsOnWire asserts the base contract's required
+// fields are physically present on the raw wire (not merely non-empty after
+// decode, which omitempty makes indistinguishable from absent): every
+// lifecycle event ships workflow_id/run_id/workflow_type, and a signal
+// additionally ships signal_name; the exact keys event_rules.go's
+// _REQUIRED_WORKFLOW_FIELDS + signal rule demand.
 func TestLifecycle_RequiredFieldsOnWire(t *testing.T) {
 	signals := map[EventType]bool{EventPromptSubmitted: true, EventCommitCreated: true, EventDeploy: true}
 	for _, et := range []EventType{EventSessionStarted, EventSessionEnded, EventPromptSubmitted, EventCommitCreated, EventDeploy} {
@@ -109,10 +94,11 @@ func TestLifecycle_RequiredFieldsOnWire(t *testing.T) {
 	}
 }
 
-// TestLifecycle_OneWorkflowIdentity is the session=workflow contract: a session's
-// WorkflowStarted, a SignalReceived it carries, and its WorkflowCompleted share
-// one (workflow_id, run_id, workflow_type) triple, so Core resolves them to a
-// single workflow/session row (storage_session.go create → lookup → terminal).
+// TestLifecycle_OneWorkflowIdentity is the session=workflow contract: a
+// session's WorkflowStarted, a SignalReceived it carries, and its
+// WorkflowCompleted share one (workflow_id, run_id, workflow_type) triple, so
+// Core resolves them to a single workflow/session row (storage_session.go
+// create → lookup → terminal).
 func TestLifecycle_OneWorkflowIdentity(t *testing.T) {
 	start := decodePayload(t, lifecycleEvent(EventSessionStarted))
 	sig := decodePayload(t, lifecycleEvent(EventPromptSubmitted))
@@ -125,14 +111,14 @@ func TestLifecycle_OneWorkflowIdentity(t *testing.T) {
 				p.WorkflowID, p.RunID, p.WorkflowType)
 		}
 	}
-	// run_id is the session id; the DID is the workflow_id fallback (no WorkspaceID).
 	if start.RunID != "sess-1" || start.WorkflowID != "did:aip:abc" {
 		t.Errorf("(workflow_id, run_id) = (%q,%q), want DID fallback + session id", start.WorkflowID, start.RunID)
 	}
 }
 
-// TestLifecycle_WorkspaceIDIsWorkflowID asserts an explicit WorkspaceID overrides
-// the DID fallback as the workflow_id (per-workspace grouping, MAPPING.md §1).
+// TestLifecycle_WorkspaceIDIsWorkflowID asserts an explicit WorkspaceID
+// overrides the DID fallback as the workflow_id (per-workspace grouping,
+// mapping.md §1).
 func TestLifecycle_WorkspaceIDIsWorkflowID(t *testing.T) {
 	ev := lifecycleEvent(EventSessionStarted)
 	ev.WorkspaceID = "repo-x"
@@ -141,7 +127,7 @@ func TestLifecycle_WorkspaceIDIsWorkflowID(t *testing.T) {
 	}
 }
 
-// TestLifecycle_SpanLess asserts lifecycle events carry NO span — the base
+// TestLifecycle_SpanLess asserts lifecycle events carry NO span; the base
 // contract rejects a span-bearing non-hook lifecycle event (event_rules
 // HOOK_TRIGGER_FALSE / ACTIVITY_COMPLETED_WITH_SPANS), and only the tool hook
 // path emits spans.
@@ -165,8 +151,8 @@ func TestLifecycle_SpanLess(t *testing.T) {
 }
 
 // TestLifecycle_CommitLineageSurvivesSignal asserts a CommitCreated's lineage
-// keys (no first-class Core column) survive the Signal mapping in the pass-through
-// metadata blob (FR-5).
+// keys (no first-class Core column) survive the Signal mapping in the pass-
+// through metadata blob (FR-5).
 func TestLifecycle_CommitLineageSurvivesSignal(t *testing.T) {
 	ev := lifecycleEvent(EventCommitCreated)
 	ev.Metadata = map[string]any{"commit_sha": "abc123", "repo": "openbox-shift-left", "branch": "main"}
@@ -208,10 +194,10 @@ func TestLifecycle_DeployLineageSurvivesSignal(t *testing.T) {
 	}
 }
 
-// TestLifecycle_ActivityLabelPreserved asserts the DevEvent type is preserved as
-// the dashboard activity_type label (additive pass-through column) even though the
-// wire event_type is rewritten — so the shared dashboard shows "SessionStarted"/
-// "Deploy", never "Unknown".
+// TestLifecycle_ActivityLabelPreserved asserts the DevEvent type is preserved
+// as the dashboard activity_type label (additive pass-through column) even
+// though the wire event_type is rewritten; so the shared dashboard shows
+// "SessionStarted"/ "Deploy", never "Unknown".
 func TestLifecycle_ActivityLabelPreserved(t *testing.T) {
 	for _, et := range []EventType{EventSessionStarted, EventSessionEnded, EventPromptSubmitted, EventCommitCreated, EventDeploy} {
 		if p := decodePayload(t, lifecycleEvent(et)); p.ActivityType != string(et) {

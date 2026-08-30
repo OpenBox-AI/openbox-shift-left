@@ -157,7 +157,6 @@ func (a *app) runAuth(args []string) int {
 	return exitOK
 }
 
-// collectAuthFields prompts for every field in the documented order.
 func collectAuthFields(p prompt.Prompter, f authFields, rotate bool) (authFields, error) {
 	var err error
 	if f.backendURL, err = p.Line("Backend URL (control plane)", f.backendURL); err != nil {
@@ -264,8 +263,9 @@ func (a *app) writeSecrets(envPath string, f authFields, piped map[string]string
 	return exitOK
 }
 
-// writeCoordinates writes only coordinates to dev.json, through a literal
-// devconfig.Update.
+// writeCoordinates deliberately not provider.ConfigUpdate: that always sets
+// InstallGitHook to a non-nil value (provider/config.go), so routing through
+// it would make `auth` write posture.
 func (a *app) writeCoordinates(f authFields) int {
 	path, err := devconfig.DevConfigWritePath()
 	if err != nil {
@@ -283,8 +283,9 @@ func (a *app) writeCoordinates(f authFields) int {
 	return exitOK
 }
 
-// warnShadowedByEnv warns when a real environment variable will win over what
-// was just written, naming the right shadowed file per field.
+// warnShadowedByEnv a real env var beats both files, so writing while one is
+// exported produces a config that silently has no effect; the user changes a
+// credential, sees success, and observes no change in behaviour.
 func (a *app) warnShadowedByEnv(f authFields, envPath string) {
 	type shadow struct{ name, file string }
 	devPath, _ := devconfig.DevConfigWritePath()
@@ -331,8 +332,7 @@ func maskToken(v string) string {
 	return fmt.Sprintf("%s…%s (%d chars)", v[:8], v[len(v)-4:], len(v))
 }
 
-// publicKeyFingerprint derives the Ed25519 public key from the seed and
-// fingerprints that. The seed itself is never hashed or displayed.
+// publicKeyFingerprint the seed itself is never hashed or displayed.
 func publicKeyFingerprint(seedB64 string) string {
 	raw, err := base64.StdEncoding.DecodeString(strings.TrimSpace(seedB64))
 	if err != nil || len(raw) != ed25519.SeedSize {
@@ -372,9 +372,8 @@ func (a *app) readStdinSecrets(apiKey, privateKey, controlToken bool) (map[strin
 	return out, exitOK
 }
 
-// registerForAuth runs the registration half of devinit and nothing else.
-// Devinit.Register, not devinit.Run: Run also invokes the provider installer,
-// and `auth` must never install hooks.
+// registerForAuth devinit.Register, not devinit.Run: Run also invokes the
+// provider installer, and `auth` must never install hooks.
 func (a *app) registerForAuth(f authFields, icon, description, envFileOverride string, force bool) (*devinit.Result, provider.CredentialRef, int) {
 	token := a.getenv(devconfig.EnvControlToken)
 	if token == "" {

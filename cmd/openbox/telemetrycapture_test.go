@@ -16,26 +16,15 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/internal/client/memhttptest"
 )
 
-// TestTelemetryCommandActuallyRecords is the control test, and it is the reason
-// this file exists rather than more unit tests.
-//
-// Package telemetry tested its receiver against a stub Emitter; package
-// telemetryemit tested its mapper against hand-built records. Both suites were
-// green while NOTHING joined them — which is precisely the shape that let the
-// gateway relay perfectly and discard every capture it made. A fake at each end
-// of a seam proves nothing about the seam.
-//
-// So this drives the REAL command: the real receiver binds a real port, a real
-// OTLP/JSON export is POSTed to it, and the assertion reads the resulting
-// governance event back off disk. No fake at either end. It fails if any link in
-// that chain is missing.
+// TestTelemetryCommandActuallyRecords is the control test, and it is the
+// reason this file exists rather than more unit tests. A fake at each end of a
+// seam proves nothing about the seam.
 func TestTelemetryCommandActuallyRecords(t *testing.T) {
 	memhttptest.RequireBind(t)
 
 	spoolDir := t.TempDir()
 	t.Setenv("OPENBOX_SPOOL_DIR", spoolDir)
 	t.Setenv("OPENBOX_AGENT_DID", "did:aip:7f3c9b2e-0000-5000-a000-00000000feed")
-	// The detached flusher must never be spawned from a test binary.
 	t.Setenv("OPENBOX_REALTIME", "0")
 
 	addr := freeLoopbackAddr(t)
@@ -49,7 +38,6 @@ func TestTelemetryCommandActuallyRecords(t *testing.T) {
 	a.telemetryReady = func(bound string) { ready <- bound }
 
 	done := make(chan int, 1)
-	// --elected, because the zero value suppresses every emission on purpose.
 	// Without it this test would pass by recording nothing, which is the exact
 	// failure it exists to catch.
 	go func() { done <- a.runTelemetry([]string{"--addr", addr, "--elected", "--verbose"}) }()
@@ -76,7 +64,6 @@ func TestTelemetryCommandActuallyRecords(t *testing.T) {
 	}
 	post(t, otlpAPIRequest(session, requestID))
 
-	// Stop the daemon so its spool writes are complete before reading.
 	cancel()
 	select {
 	case code := <-done:
@@ -89,11 +76,6 @@ func TestTelemetryCommandActuallyRecords(t *testing.T) {
 
 	ev := readSpooledEvent(t, spoolDir, session)
 
-	// These are DevEvent field names, deliberately. The spool holds the struct;
-	// its translation into activity_type / activity_output / the :otel:
-	// activity_id happens in buildPayload on the way out, and the sentinel test
-	// asserts that on real POSTed bytes. Asserting wire names here is what made
-	// this test claim an empty spool while the lane worked.
 	if got := ev["event_type"]; got != "TurnCompleted" {
 		t.Errorf("event_type = %v, want TurnCompleted", got)
 	}
@@ -125,20 +107,15 @@ func TestTelemetryCommandActuallyRecords(t *testing.T) {
 	} else if got := span["semantic_type"]; got != "llm_completion" {
 		t.Errorf("span.semantic_type = %v", got)
 	}
-	// stderr must SAY it recorded. launchd sends stdio to /dev/null unless told
-	// otherwise, so this line is the only signal a reachable-but-silent lane has.
 	if !strings.Contains(errb.String(), "turns recorded") {
 		t.Errorf("the daemon never reported what it recorded; stderr: %s", errb.String())
 	}
 }
 
-// TestTelemetryCommandRecordsNothingWhenNotElected is the other half, and it is
-// not a formality.
-//
-// The election is a correctness invariant: two lanes emitting the same turn
-// doubles every token count downstream, with no id collision and no error. The
-// default must therefore be silence, and a test that only ever runs with
-// --elected would not notice if the flag stopped being consulted.
+// TestTelemetryCommandRecordsNothingWhenNotElected is the other half, and it
+// is not a formality. The default must therefore be silence, and a test that
+// only ever runs with --elected would not notice if the flag stopped being
+// consulted.
 func TestTelemetryCommandRecordsNothingWhenNotElected(t *testing.T) {
 	memhttptest.RequireBind(t)
 
@@ -172,8 +149,6 @@ func TestTelemetryCommandRecordsNothingWhenNotElected(t *testing.T) {
 	}
 	_, _ = io.Copy(io.Discard, resp.Body)
 	_ = resp.Body.Close()
-	// The export must still be ACCEPTED. Rejecting it would make the tool retry
-	// and eventually surface an error, degrading the session this lane observes.
 	if resp.StatusCode/100 != 2 {
 		t.Fatalf("an unelected receiver REJECTED the export (status %d); this lane must stay additive", resp.StatusCode)
 	}
@@ -193,12 +168,6 @@ func TestTelemetryCommandRecordsNothingWhenNotElected(t *testing.T) {
 	}
 }
 
-// freeLoopbackAddr reserves a port and releases it.
-//
-// The receiver reports its CONFIGURED address, not the bound one, so ":0" would
-// leave the test unable to find the port. The window between close and re-bind is
-// a small race accepted here rather than adding a bound-address accessor to the
-// receiver for a test's benefit.
 func freeLoopbackAddr(t *testing.T) string {
 	t.Helper()
 	l, err := net.Listen("tcp", "127.0.0.1:0")
@@ -210,11 +179,6 @@ func freeLoopbackAddr(t *testing.T) string {
 	return addr
 }
 
-// otlpAPIRequest builds a real OTLP/JSON logs export carrying one api_request.
-//
-// The shape and the attribute names come from a measured desktop corpus
-// (claude-code-desktop 1.37937.3). Values arrive as the provider types them: the
-// token counts as intValue, the model as stringValue.
 func otlpAPIRequest(session, requestID string) string {
 	attr := func(k, v string) string {
 		return fmt.Sprintf(`{"key":%q,"value":{"stringValue":%q}}`, k, v)
@@ -238,7 +202,6 @@ func otlpAPIRequest(session, requestID string) string {
 		attr("service.name", "claude-code-desktop"), now, attrs)
 }
 
-// spoolFiles lists the spool's files, for the negative assertion.
 func spoolFiles(t *testing.T, spoolDir string) []string {
 	t.Helper()
 	var out []string
@@ -253,7 +216,6 @@ func spoolFiles(t *testing.T, spoolDir string) []string {
 	return out
 }
 
-// readSpooledEvent returns the first spooled event for a session, decoded.
 func readSpooledEvent(t *testing.T, spoolDir, session string) map[string]any {
 	t.Helper()
 	files := spoolFiles(t, spoolDir)
@@ -273,11 +235,6 @@ func readSpooledEvent(t *testing.T, spoolDir, session string) map[string]any {
 			if err := json.Unmarshal([]byte(line), &ev); err != nil {
 				continue
 			}
-			// openbox_session_id, NOT session_id. The spool stores the
-			// pre-wire DevEvent; `session_id`/`run_id` are names buildPayload
-			// mints on the way out. Reading the struct with the wire's
-			// vocabulary is what made this test report an empty spool while the
-			// lane was working correctly.
 			if s, _ := ev["openbox_session_id"].(string); s == session {
 				return ev
 			}

@@ -53,9 +53,9 @@ func TestAction_EmitsResolvedDeploy(t *testing.T) {
 }
 
 // TestAction_RecordsAdvisoryNeverGatesDeploy proves the Advisory tier on the
-// deploy path (STORY-SL-9): a BLOCK verdict + guardrail hit writes an advisory
+// deploy path (story-SL-9): a BLOCK verdict + guardrail hit writes an advisory
 // record (would_block=true, category present) yet the deploy still emits and
-// Run returns no error (INV-3). No content/secret in the record.
+// Run returns no error (INV-3).
 func TestAction_RecordsAdvisoryNeverGatesDeploy(t *testing.T) {
 	dir := t.TempDir()
 	advPath := filepath.Join(dir, "advisories.jsonl")
@@ -109,8 +109,6 @@ func TestAction_RecordsAdvisoryNeverGatesDeploy(t *testing.T) {
 }
 
 func TestAction_FailOpenOnEmitError(t *testing.T) {
-	// A transport-ish failure must never break the deploy (INV-3). Run returns
-	// no error and the full Resolution is still available.
 	r := newTestRepo(t)
 	sha := r.commit(trailerMsg("x", "sess-A"))
 	em := &fakeEmitter{err: errors.New("network down")}
@@ -145,7 +143,6 @@ func TestAction_DryRunDoesNotEmit(t *testing.T) {
 }
 
 func TestAction_ResolveErrorIsSurfaced(t *testing.T) {
-	// A bad SHA is a precondition fault, NOT a fail-open drop — it must surface.
 	r := newTestRepo(t)
 	r.commit(trailerMsg("x", "sess-A"))
 	act := &Action{Resolver: r.resolver(nil), Emitter: &fakeEmitter{}, Now: fixedNow}

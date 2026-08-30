@@ -1,7 +1,8 @@
 // Package gatewayservice writes the machine-level configuration the local
 // gateway needs: the user-scope env block that points Claude Code at it, and
-// the OS supervisor unit that keeps it running. - A plain re-run must never
-// revert a deliberate opt-out.
+// the OS supervisor unit that keeps it running.
+//   - Ownership is decided by what we recognise, not by exact-match.
+//   - A plain re-run must never revert a deliberate opt-out.
 package gatewayservice
 
 import (
@@ -25,8 +26,6 @@ func SettingsPath(homeDir string) string {
 	return filepath.Join(homeDir, ".claude", "settings.json")
 }
 
-// priorEnvPath is where the value WriteEnv displaced is remembered, so removal
-// can put it back.
 func priorEnvPath(homeDir string) string {
 	return filepath.Join(homeDir, ".openbox", "gateway-prior-env.json")
 }
@@ -115,8 +114,6 @@ type priorEnv struct {
 	BaseURL string `json:"anthropic_base_url"`
 }
 
-// ourGatewayURL reports whether a displaced value is one WE could have
-// written.
 func ourGatewayURL(raw string) bool {
 	u, err := url.Parse(raw)
 	if err != nil {
@@ -180,8 +177,7 @@ func CurrentEnv(homeDir string) (value string, present bool) {
 	return s, true
 }
 
-// readSettings loads the file as a generic map so unknown keys survive a
-// round-trip. Decoding into a typed struct is how a writer silently deletes
+// readSettings decoding into a typed struct is how a writer silently deletes
 // configuration it was never taught about.
 func readSettings(path string) (map[string]any, error) {
 	raw, err := os.ReadFile(path)

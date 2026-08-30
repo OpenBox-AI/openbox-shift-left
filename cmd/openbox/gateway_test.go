@@ -5,10 +5,7 @@ import (
 	"testing"
 )
 
-// TestGatewayRefusesNonLoopbackListener crosses the CLI seam. The gateway module
-// has its own loopback test, but asserting the module is not asserting the
-// command: a wiring that dropped Validate would expose the relay off-machine
-// while every gateway-module test stayed green.
+// TestGatewayRefusesNonLoopbackListener crosses the CLI seam.
 func TestGatewayRefusesNonLoopbackListener(t *testing.T) {
 	for _, addr := range []string{"0.0.0.0:8788", ":8788", "10.0.0.5:8788"} {
 		t.Run(addr, func(t *testing.T) {
@@ -35,12 +32,9 @@ func TestGatewayRefusesRelativeUpstream(t *testing.T) {
 	}
 }
 
-// TestGatewayIsReachableFromTheDispatcher pins the subcommand into `run`. A
-// command that exists but is not dispatched is the same as no command.
+// TestGatewayIsReachableFromTheDispatcher pins the subcommand into `run`.
 func TestGatewayIsReachableFromTheDispatcher(t *testing.T) {
 	a, _, errb := testApp(nil)
-	// A non-loopback address makes this fail fast instead of serving forever,
-	// while still proving the dispatcher routed to runGateway.
 	if code := a.run([]string{"gateway", "--addr", "0.0.0.0:8788"}); code != exitError {
 		t.Fatalf("exit code: got %d want %d", code, exitError)
 	}
@@ -52,9 +46,7 @@ func TestGatewayIsReachableFromTheDispatcher(t *testing.T) {
 	}
 }
 
-// TestUsageListsGateway keeps the command discoverable. `openbox doctor` and the
-// phase 07 service wrapper both reference it, so an undocumented subcommand is a
-// support problem rather than a cosmetic one.
+// TestUsageListsGateway keeps the command discoverable.
 func TestUsageListsGateway(t *testing.T) {
 	a, _, errb := testApp(nil)
 	a.usage()

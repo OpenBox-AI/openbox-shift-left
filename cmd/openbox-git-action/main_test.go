@@ -23,8 +23,6 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
-// initRepo makes a throwaway repo with one trailer-bearing commit and returns
-// its dir + HEAD sha.
 func initRepo(t *testing.T) (string, string) {
 	t.Helper()
 	dir := t.TempDir()
@@ -60,7 +58,6 @@ func revParse(t *testing.T, dir string) string {
 func TestCLI_DryRunResolvesWithoutCreds(t *testing.T) {
 	dir, sha := initRepo(t)
 	var out, errb bytes.Buffer
-	// No OPENBOX_* creds set: --dry-run must NOT require them.
 	code := run([]string{"--dry-run", "--dir", dir, "--sha", sha, "--repo", "o/r", "--environment", "staging"}, &out, &errb)
 	if code != 0 {
 		t.Fatalf("exit = %d, want 0\nstderr:\n%s", code, errb.String())
@@ -82,9 +79,6 @@ func TestCLI_DryRunResolvesWithoutCreds(t *testing.T) {
 }
 
 func TestCLI_MissingSHAisUsageError(t *testing.T) {
-	// --sha falls back to GITHUB_SHA, which GitHub Actions always sets — so
-	// without clearing it this test asserts nothing in the one environment the
-	// action actually runs in. It passed locally and failed in CI.
 	t.Setenv("GITHUB_SHA", "")
 	var out, errb bytes.Buffer
 	code := run([]string{"--dry-run"}, &out, &errb)
@@ -93,12 +87,9 @@ func TestCLI_MissingSHAisUsageError(t *testing.T) {
 	}
 }
 
-// discardLogger is a logger whose output goes nowhere (test noise control).
 func discardLogger() *log.Logger { return log.New(bytes.NewBuffer(nil), "", 0) }
 
 func TestSelectVerifier_FlagOffIsNoop(t *testing.T) {
-	// Default posture: no flag ⇒ NoopVerifier (byte-identical to today; every
-	// deploy resolves inferred). Even if a URL is set, the flag gates it.
 	t.Setenv("OPENBOX_OWNERSHIP_VERIFY", "")
 	t.Setenv("OPENBOX_OWNERSHIP_API_URL", "https://backend.example/")
 	if _, ok := selectVerifier(false, discardLogger()).(gitaction.NoopVerifier); !ok {
@@ -107,8 +98,6 @@ func TestSelectVerifier_FlagOffIsNoop(t *testing.T) {
 }
 
 func TestSelectVerifier_DryRunNeverVerifies(t *testing.T) {
-	// --dry-run carries no creds to sign the read, so verification is impossible;
-	// it must fall back to Noop even with the flag on.
 	t.Setenv("OPENBOX_OWNERSHIP_VERIFY", "1")
 	t.Setenv("OPENBOX_OWNERSHIP_API_URL", "https://backend.example/")
 	if _, ok := selectVerifier(true, discardLogger()).(gitaction.NoopVerifier); !ok {
@@ -117,7 +106,6 @@ func TestSelectVerifier_DryRunNeverVerifies(t *testing.T) {
 }
 
 func TestSelectVerifier_MisconfiguredDegradesToNoop(t *testing.T) {
-	// Flag on but no URL ⇒ construction fails ⇒ degrade to Noop, never break CI.
 	t.Setenv("OPENBOX_OWNERSHIP_VERIFY", "1")
 	t.Setenv("OPENBOX_OWNERSHIP_API_URL", "")
 	if _, ok := selectVerifier(false, discardLogger()).(gitaction.NoopVerifier); !ok {
@@ -126,8 +114,6 @@ func TestSelectVerifier_MisconfiguredDegradesToNoop(t *testing.T) {
 }
 
 func TestSelectVerifier_FlagOnBuildsRealVerifier(t *testing.T) {
-	// Flag on + a usable backend URL + a matching (agent id, DID) pair + org key ⇒
-	// the real apiVerifier (NOT Noop).
 	const agentID = "11111111-1111-1111-1111-111111111111"
 	did, err := gitaction.DIDForAgent(agentID)
 	if err != nil {
@@ -153,8 +139,6 @@ func TestSelectVerifier_FlagOnBuildsRealVerifier(t *testing.T) {
 
 func TestCLI_MissingCredsIsPreconditionError(t *testing.T) {
 	dir, sha := initRepo(t)
-	// Not a dry-run and no creds ⇒ client.New fails ⇒ exit 2 (operator fixes it),
-	// never a silent success or a CI break disguised as a telemetry drop.
 	for _, k := range []string{"OPENBOX_BASE_URL", "OPENBOX_API_KEY", "OPENBOX_DID", "OPENBOX_SEED"} {
 		t.Setenv(k, "")
 	}

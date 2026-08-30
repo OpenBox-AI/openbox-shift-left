@@ -1,11 +1,10 @@
 // Package devconfig is the provider-neutral developer-runtime configuration
 // and credential resolution shared by every tool adapter (Claude Code, Codex,
-// Cursor). It owns two files (module home, layout in): One store per field:
-// the credential file is never read for a coordinate and dev.json never holds
-// a secret. Before that decision the DID lived in both dev.json and the OS
-// keychain, and a stale keychain entry silently reverted a corrected DID on
-// the next install; this split is what makes that impossible rather than
-// merely fixed.
+// Cursor). One store per field: the credential file is never read for a
+// coordinate and dev.json never holds a secret. Before that decision the DID
+// lived in both dev.json and the OS keychain, and a stale keychain entry
+// silently reverted a corrected DID on the next install; this split is what
+// makes that impossible rather than merely fixed.
 package devconfig
 
 import (
@@ -67,8 +66,8 @@ const (
 	DefaultBackendURL = "https://api.openbox.ai"
 )
 
-// deprecatedPrivateKeyEnvNames are the pre-that decision names for the signing
-// key, honoured for reads (never written) so an existing CI job keeps working.
+// deprecatedPrivateKeyEnvNames reading both costs two map lookups and a
+// warning; breaking them would strand pipelines this repo cannot see.
 var deprecatedPrivateKeyEnvNames = []string{"OPENBOX_ED25519_SEED", "OPENBOX_SEED"}
 
 // DevConfig is the non-secret coordinate file the installers write and the
@@ -439,8 +438,9 @@ func ResolveCredentials() (Credentials, error) {
 	return c, nil
 }
 
-// loadSecretFile reads ~/.openbox/.env, returning the map and the path it
-// tried.
+// loadSecretFile an unresolvable home or an unparseable file IS an error:
+// silently treating either as "no credentials" would send a user hunting for a
+// registration problem they do not have.
 func loadSecretFile() (map[string]string, string, error) {
 	path, err := EnvFilePath()
 	if err != nil {
@@ -475,8 +475,8 @@ func resolvePrivateKey(secrets map[string]string) string {
 	return ""
 }
 
-// warnDeprecatedPrivateKeyName warns once per process, on stderr only. A
-// deprecation notice must never become model input.
+// warnDeprecatedPrivateKeyName a deprecation notice must never become model
+// input.
 func warnDeprecatedPrivateKeyName(alias string) {
 	deprecatedNameWarnOnce.Do(func() {
 		fmt.Fprintf(os.Stderr, "openbox: %s is deprecated — use %s (same value, the name OpenBox documents)\n",

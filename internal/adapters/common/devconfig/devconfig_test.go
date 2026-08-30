@@ -10,10 +10,6 @@ import (
 
 const testDID = "did:aip:7f3c9b2e-0000-5000-a000-000000000001"
 
-// isolateConfig points OPENBOX_CONFIG at a nonexistent temp path so tests never
-// read the developer machine's real ~/.config/openbox/dev.json.
-// isolateConfig points both the dev config and the credential file at empty temp
-// locations, so no test reads (or writes) the developer's real ~/.openbox.
 func isolateConfig(t *testing.T) {
 	t.Helper()
 	t.Setenv(EnvConfigPath, filepath.Join(t.TempDir(), "none.json"))
@@ -23,7 +19,6 @@ func isolateConfig(t *testing.T) {
 	}
 }
 
-// writeEnvFileForTest writes a credential file under the isolated OPENBOX_HOME.
 func writeEnvFileForTest(t *testing.T, kv map[string]string) {
 	t.Helper()
 	path, err := EnvFilePath()
@@ -68,8 +63,9 @@ func TestResolveDIDFromConfigFile(t *testing.T) {
 	}
 }
 
-// The real environment variable beats the credential file — that is what lets CI
-// supply credentials without writing anything to disk.
+// TestResolveCredentials_RealEnvBeatsFile the real environment variable beats
+// the credential file; that is what lets CI supply credentials without writing
+// anything to disk.
 func TestResolveCredentials_RealEnvBeatsFile(t *testing.T) {
 	isolateConfig(t)
 	t.Setenv(EnvDID, testDID)
@@ -97,8 +93,9 @@ func TestResolveCredentials_RealEnvBeatsFile(t *testing.T) {
 	}
 }
 
-// With no environment override, both secrets come from ~/.openbox/.env — the
-// position the deleted OS secret store used to hold.
+// TestResolveCredentials_FromCredentialFile with no environment override, both
+// secrets come from ~/.openbox/.env; the position the deleted OS secret store
+// used to hold.
 func TestResolveCredentials_FromCredentialFile(t *testing.T) {
 	isolateConfig(t)
 	t.Setenv(EnvDID, testDID)
@@ -119,14 +116,10 @@ func TestResolveCredentials_FromCredentialFile(t *testing.T) {
 	}
 }
 
-// THE TRIPWIRE for the second-store bug (that decision, D2). The credential file
-// is for secrets only: a coordinate written into it must be ignored, while the
-// same coordinate as a real environment variable is honoured. Before that
-// decision the DID lived in two stores and a stale copy silently reverted a
-// corrected one.
-//
-// If this test is ever deleted or relaxed, that bug class is back. Adding
-// coordinates to .env is a decision to reopen, not a commit to make.
+// TestEnvFileIsNotACoordinateSource tHE tripwire for the second-store bug
+// (that decision, D2). The credential file is for secrets only: a coordinate
+// written into it must be ignored, while the same coordinate as a real
+// environment variable is honoured.
 func TestEnvFileIsNotACoordinateSource(t *testing.T) {
 	isolateConfig(t)
 	writeEnvFileForTest(t, map[string]string{
@@ -136,13 +129,11 @@ func TestEnvFileIsNotACoordinateSource(t *testing.T) {
 		EnvBaseURL:         "https://wrong.example",
 	})
 
-	// No DID anywhere else ⇒ the one in .env must NOT rescue it.
 	t.Setenv(EnvDID, "")
 	if _, err := ResolveCredentials(); err == nil {
 		t.Fatal("a DID in.env was treated as a coordinate source; that is the two-store bug that decision removed")
 	}
 
-	// The same DID as a real environment variable IS honoured.
 	t.Setenv(EnvDID, testDID)
 	c, err := ResolveCredentials()
 	if err != nil {
@@ -156,8 +147,9 @@ func TestEnvFileIsNotACoordinateSource(t *testing.T) {
 	}
 }
 
-// A .env alone is deliberately NOT enough to run: it carries no DID, so the
-// failure is the clear no-DID error rather than something obscure later.
+// TestCredentialFileAloneIsNotSufficient a .env alone is deliberately NOT
+// enough to run: it carries no DID, so the failure is the clear no-DID error
+// rather than something obscure later.
 func TestCredentialFileAloneIsNotSufficient(t *testing.T) {
 	isolateConfig(t)
 	t.Setenv(EnvDID, "")
@@ -174,8 +166,9 @@ func TestCredentialFileAloneIsNotSufficient(t *testing.T) {
 	}
 }
 
-// A CRLF-authored .env must not leave \r on a base64 signing key: it fails
-// signature verification with an error naming neither the file nor the character.
+// TestResolveCredentials_CRLFStrippedFromCredentialFile a crlf-authored .env
+// must not leave \r on a base64 signing key: it fails signature verification
+// with an error naming neither the file nor the character.
 func TestResolveCredentials_CRLFStrippedFromCredentialFile(t *testing.T) {
 	isolateConfig(t)
 	t.Setenv(EnvDID, testDID)
@@ -199,8 +192,8 @@ func TestResolveCredentials_CRLFStrippedFromCredentialFile(t *testing.T) {
 	}
 }
 
-// The deprecated names keep working so nobody's CI breaks on upgrade. Three names
-// existed for one value and only OPENBOX_AGENT_PRIVATE_KEY was ever documented.
+// TestResolveCredentials_DeprecatedPrivateKeyNames the deprecated names keep
+// working so nobody's CI breaks on upgrade.
 func TestResolveCredentials_DeprecatedPrivateKeyNames(t *testing.T) {
 	for _, alias := range deprecatedPrivateKeyEnvNames {
 		t.Run(alias+"/env", func(t *testing.T) {
@@ -231,7 +224,8 @@ func TestResolveCredentials_DeprecatedPrivateKeyNames(t *testing.T) {
 	}
 }
 
-// The documented name wins over a deprecated alias when both are set.
+// TestResolveCredentials_DocumentedNameBeatsAlias the documented name wins
+// over a deprecated alias when both are set.
 func TestResolveCredentials_DocumentedNameBeatsAlias(t *testing.T) {
 	isolateConfig(t)
 	t.Setenv(EnvDID, testDID)
@@ -254,15 +248,14 @@ func TestResolveCredentials_MissingSecret(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected an error when no api key source is configured")
 	}
-	// The error is where a user upgrading an existing install meets the
-	// no-keychain-migration decision, so it must name the way out.
 	if !strings.Contains(err.Error(), "openbox auth") {
 		t.Errorf("error = %q, want it to name `openbox auth`", err)
 	}
 }
 
-// An unparseable credential file must not read as "no credentials": that would
-// send a user hunting for a registration problem they do not have.
+// TestResolveCredentials_UnparseableFileIsAnError an unparseable credential
+// file must not read as "no credentials": that would send a user hunting for a
+// registration problem they do not have.
 func TestResolveCredentials_UnparseableFileIsAnError(t *testing.T) {
 	isolateConfig(t)
 	t.Setenv(EnvDID, testDID)
@@ -283,19 +276,16 @@ func TestResolveCredentials_UnparseableFileIsAnError(t *testing.T) {
 }
 
 func TestResolveContentCapture_DefaultOn(t *testing.T) {
-	// DEFAULT ON (brian 2026-07-15): absent config field + no env → enabled.
 	isolateConfig(t)
 	if !ResolveContentCapture() {
 		t.Error("ResolveContentCapture default must be ON (absent config)")
 	}
-	// Explicit config opt-out honored (absent vs explicit-false via *bool).
 	cfgPath := filepath.Join(t.TempDir(), "dev.json")
 	_ = os.WriteFile(cfgPath, []byte(`{"developer_did":"`+testDID+`","content_capture":false}`), 0o600)
 	t.Setenv(EnvConfigPath, cfgPath)
 	if ResolveContentCapture() {
 		t.Error("explicit content_capture:false must opt out")
 	}
-	// Env wins over both.
 	t.Setenv(EnvContentCapture, "0")
 	if ResolveContentCapture() {
 		t.Error("OPENBOX_CONTENT_CAPTURE=0 must force OFF")
@@ -303,27 +293,14 @@ func TestResolveContentCapture_DefaultOn(t *testing.T) {
 }
 
 // TestResolveFinops_DefaultOn pins that decision posture flip, and it pins the
-// ABSENT-FIELD case specifically — which is the case the old implementation could
-// not express. `Finops` was a plain bool whose resolver returned `&b`
-// unconditionally, so resolveBool never reached its default: an absent `finops`
-// key and an explicit `finops:false` were the same input, and moving the default
-// would have changed nothing for every config file that already existed while
-// pinning every absent field to false forever.
-//
-// So the first assertion here is not a formality. It is the one that would have
-// failed before `Finops` became a *bool, and the reason a future flip in either
-// direction has to be a deliberate edit to this test.
+// absent-field case specifically; which is the case the old implementation
+// could not express.
 func TestResolveFinops_DefaultOn(t *testing.T) {
-	// Absent config field + no env → ON. Usage capture is an egress posture, so
-	// this is the assertion that says "an unconfigured developer machine sends
-	// token counts and a model id" out loud.
 	isolateConfig(t)
 	if !ResolveFinops() {
 		t.Error("ResolveFinops default must be ON (absent config field)")
 	}
 
-	// A config file that exists but says nothing about finops is still the absent
-	// case — the distinction the *bool exists to draw.
 	cfgPath := filepath.Join(t.TempDir(), "dev.json")
 	_ = os.WriteFile(cfgPath, []byte(`{"developer_did":"`+testDID+`"}`), 0o600)
 	t.Setenv(EnvConfigPath, cfgPath)
@@ -331,13 +308,11 @@ func TestResolveFinops_DefaultOn(t *testing.T) {
 		t.Error("a config file with no finops key must resolve to the default (ON), not to false")
 	}
 
-	// Explicit managed-config opt-out.
 	_ = os.WriteFile(cfgPath, []byte(`{"developer_did":"`+testDID+`","finops":false}`), 0o600)
 	if ResolveFinops() {
 		t.Error("explicit finops:false must opt out")
 	}
 
-	// Env wins over config, in both directions.
 	t.Setenv(EnvFinops, "1")
 	if !ResolveFinops() {
 		t.Error("OPENBOX_FINOPS=1 must override config false")
@@ -349,9 +324,10 @@ func TestResolveFinops_DefaultOn(t *testing.T) {
 	}
 }
 
-// The posture record must report the SAME state the resolver does, or the
-// evidence an auditor reads contradicts what the session actually did — which is
-// worse than having no evidence, because it is trusted.
+// TestPostureReportsEffectiveFinopsState the posture record must report the
+// same state the resolver does, or the evidence an auditor reads contradicts
+// what the session actually did; which is worse than having no evidence,
+// because it is trusted.
 func TestPostureReportsEffectiveFinopsState(t *testing.T) {
 	isolateConfig(t)
 	if got := EffectivePosture().Finops; got != ResolveFinops() {
@@ -371,8 +347,6 @@ func TestPostureReportsEffectiveFinopsState(t *testing.T) {
 	if p.Finops != ResolveFinops() {
 		t.Errorf("posture finops = %t but ResolveFinops() = %t (config opt-out)", p.Finops, ResolveFinops())
 	}
-	// And the flag is reported in the generic map the endpoint/doctor read, not
-	// only on the struct.
 	if got, ok := p.Flags()["finops"]; !ok || got {
 		t.Errorf("Flags()[finops] = (%t, present=%t), want (false, true)", got, ok)
 	}
@@ -384,19 +358,16 @@ func TestPostureReportsEffectiveFinopsState(t *testing.T) {
 }
 
 func TestResolveRealtime_DefaultOn(t *testing.T) {
-	// Default ON: absent config field + no env → real-time delivery enabled.
 	isolateConfig(t)
 	if !ResolveRealtime() {
 		t.Error("ResolveRealtime default must be ON (absent config)")
 	}
-	// Explicit config opt-out honored (absent vs explicit-false via *bool).
 	cfgPath := filepath.Join(t.TempDir(), "dev.json")
 	_ = os.WriteFile(cfgPath, []byte(`{"developer_did":"`+testDID+`","realtime_flush":false}`), 0o600)
 	t.Setenv(EnvConfigPath, cfgPath)
 	if ResolveRealtime() {
 		t.Error("explicit realtime_flush:false must opt out")
 	}
-	// Env wins over config in both directions.
 	t.Setenv(EnvRealtime, "1")
 	if !ResolveRealtime() {
 		t.Error("OPENBOX_REALTIME=1 must override config false")
@@ -414,26 +385,20 @@ func TestBoolFlagPrecedence(t *testing.T) {
 	t.Setenv(EnvConfigPath, cfgPath)
 	os.Unsetenv(EnvEnforce)
 
-	// Default: no config field, no env → TRUE (that decision reversed the
-	// observe default). Safe because enforcement is inert without an org
-	// policy and fail_closed stays off, so an outage never blocks a tool
-	// call.
+	// Safe because enforcement is inert without an org policy and fail_closed
+	// stays off, so an outage never blocks a tool call.
 	write(`{"developer_did":"` + testDID + `"}`)
 	if !ResolveEnforce() {
 		t.Error("an absent enforce field must resolve to ON ")
 	}
-	// And an explicit false must still be honoured, which is the property the
-	// *bool type change bought: as a plain bool it marshalled to nothing.
 	write(`{"developer_did":"` + testDID + `","enforce":false}`)
 	if ResolveEnforce() {
 		t.Error("enforce:false in config must opt out")
 	}
-	// Config enables it.
 	write(`{"developer_did":"` + testDID + `","enforce":true}`)
 	if !ResolveEnforce() {
 		t.Error("enforce:true in config should enable")
 	}
-	// Env overrides config either way.
 	t.Setenv(EnvEnforce, "false")
 	if ResolveEnforce() {
 		t.Error("env false must override config true")
@@ -451,32 +416,23 @@ func TestResolveTimeoutMS(t *testing.T) {
 	os.Unsetenv(EnvTier2Timeout)
 	field := func(c DevConfig) int { return c.Tier2TimeoutMS }
 
-	// Absent everywhere → 0 (caller substitutes its default).
 	_ = os.WriteFile(cfgPath, []byte(`{}`), 0o600)
 	if ms := ResolveTimeoutMS(field, EnvTier2Timeout); ms != 0 {
 		t.Errorf("unset = %d, want 0", ms)
 	}
-	// Config value honored.
 	_ = os.WriteFile(cfgPath, []byte(`{"tier2_timeout_ms":250}`), 0o600)
 	if ms := ResolveTimeoutMS(field, EnvTier2Timeout); ms != 250 {
 		t.Errorf("config = %d, want 250", ms)
 	}
-	// Env overrides config.
 	t.Setenv(EnvTier2Timeout, "500")
 	if ms := ResolveTimeoutMS(field, EnvTier2Timeout); ms != 500 {
 		t.Errorf("env = %d, want 500", ms)
 	}
-	// Unparseable env is ignored (config stands).
 	t.Setenv(EnvTier2Timeout, "not-a-number")
 	if ms := ResolveTimeoutMS(field, EnvTier2Timeout); ms != 250 {
 		t.Errorf("garbage env should fall back to config 250, got %d", ms)
 	}
 }
-
-// The arg-injection guard this used to test is gone with its subject: credential
-// resolution no longer shells out to `security`/`secret-tool` with coordinates
-// taken from config, so there is no argv for a crafted value to be reparsed
-// into. One fewer attack surface, not one fewer check.
 
 func TestSpoolDir(t *testing.T) {
 	t.Setenv(EnvSpoolDir, "/pinned/spool")
@@ -492,12 +448,9 @@ func TestSpoolDir(t *testing.T) {
 }
 
 // TestTelemetryOptOutSurvivesARoundTrip is why Telemetry is a *bool.
-//
 // `omitempty` drops a plain `false`, so an org's deliberate `telemetry:false`
-// would vanish from the file the next time anything rewrote it — and since the
-// default is ON, the lane would silently switch itself back on. That is the bug
-// that decision records for `Enforce`, and the reason every posture key here is
-// a pointer. Drilled 2026-08-28: as a plain bool this marshals to `{}`.
+// would vanish from the file the next time anything rewrote it; and since the
+// default is ON, the lane would silently switch itself back on.
 func TestTelemetryOptOutSurvivesARoundTrip(t *testing.T) {
 	off := false
 	raw, err := json.Marshal(DevConfig{Telemetry: &off})
@@ -519,7 +472,6 @@ func TestTelemetryOptOutSurvivesARoundTrip(t *testing.T) {
 		t.Fatal("the opt-out read back as true")
 	}
 
-	// And absent must stay absent, or every config file grows keys nobody set.
 	bare, err := json.Marshal(DevConfig{})
 	if err != nil {
 		t.Fatalf("marshal bare: %v", err)
@@ -530,11 +482,6 @@ func TestTelemetryOptOutSurvivesARoundTrip(t *testing.T) {
 }
 
 // TestResolveTelemetryDefaultsOnAndEnvWins pins the posture resolution.
-//
-// Default ON is that decision's ResolveFinops lesson: INSTALLING the lane is
-// the opt-in, so a default-off second switch would leave a developer who ran
-// the install command with a daemon that receives everything and records
-// nothing.
 func TestResolveTelemetryDefaultsOnAndEnvWins(t *testing.T) {
 	isolateConfig(t)
 

@@ -9,7 +9,7 @@ import (
 
 // TestDuration_ToolUseIDKeyedPairing proves the E7-S8 stash keyed by
 // tool_use_id (AC-5): the completed event recovers the started event's
-// timestamp, and two CONCURRENT invocations of the same tool never swap start
+// timestamp, and two concurrent invocations of the same tool never swap start
 // times (the CC adapter's documented ambiguity, closed by tool_use_id).
 func TestDuration_ToolUseIDKeyedPairing(t *testing.T) {
 	ad := New(Identity{DeveloperDID: testDID}, t.TempDir())
@@ -17,7 +17,6 @@ func TestDuration_ToolUseIDKeyedPairing(t *testing.T) {
 	tick := t0
 	ad.Mapper.Now = func() time.Time { tick = tick.Add(time.Second); return tick }
 
-	// Two overlapping Bash calls: pre(call-1), pre(call-2), post(call-2), post(call-1).
 	pre1, _ := ad.Mapper.Map(HookPreToolUse, &HookEvent{SessionID: "th-1", ToolName: "Bash", ToolUseID: "call-1"})
 	ad.ThreadDuration(&pre1) // t0+1s
 	pre2, _ := ad.Mapper.Map(HookPreToolUse, &HookEvent{SessionID: "th-1", ToolName: "Bash", ToolUseID: "call-2"})
@@ -39,8 +38,9 @@ func TestDuration_ToolUseIDKeyedPairing(t *testing.T) {
 	}
 }
 
-// A stash miss (unpaired completed) keeps the completed event's own timestamp:
-// duration degrades to 0, never an error (INV-3).
+// TestDuration_StashMissIsGraceful a stash miss (unpaired completed) keeps the
+// completed event's own timestamp: duration degrades to 0, never an error
+// (INV-3).
 func TestDuration_StashMissIsGraceful(t *testing.T) {
 	ad := New(Identity{DeveloperDID: testDID}, t.TempDir())
 	post, _ := ad.Mapper.Map(HookPostToolUse, &HookEvent{SessionID: "th-1", ToolName: "Bash", ToolUseID: "never-started"})
@@ -51,7 +51,8 @@ func TestDuration_StashMissIsGraceful(t *testing.T) {
 	}
 }
 
-// SessionEnd sweeps the session's stash so unpaired records don't accumulate.
+// TestDuration_SessionEndSweeps sessionEnd sweeps the session's stash so
+// unpaired records don't accumulate.
 func TestDuration_SessionEndSweeps(t *testing.T) {
 	ad := New(Identity{DeveloperDID: testDID}, t.TempDir())
 	pre, _ := ad.Mapper.Map(HookPreToolUse, &HookEvent{SessionID: "th-1", ToolName: "Bash", ToolUseID: "call-1"})

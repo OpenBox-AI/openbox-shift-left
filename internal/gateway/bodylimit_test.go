@@ -7,12 +7,7 @@ import (
 	"testing"
 )
 
-// TestOverCapRequestIsRefusedNotTruncated is the control on the body bound. The
-// dangerous outcome is not a refusal, it is a SHORT FORWARD: a relay that sent
-// the first N bytes of a request and reported success would corrupt the call
-// while looking healthy, which is the same silent-mutation class the identity
-// test guards. So this asserts both halves -- the client is refused, and the
-// upstream saw nothing at all.
+// TestOverCapRequestIsRefusedNotTruncated is the control on the body bound.
 func TestOverCapRequestIsRefusedNotTruncated(t *testing.T) {
 	var got recorded
 	var reached bool
@@ -25,7 +20,6 @@ func TestOverCapRequestIsRefusedNotTruncated(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	// Drive the over-cap path without allocating the production 64 MiB.
 	g.maxBody = 128
 	gw := serveGateway(t, g)
 
@@ -52,9 +46,9 @@ func TestOverCapRequestIsRefusedNotTruncated(t *testing.T) {
 	}
 }
 
-// TestAtCapRequestForwardsWhole is the other side of the bound: a body right up
-// to the limit relays intact. Without this, a cap that was off by one -- or that
-// silently dropped the last chunk -- would look correct.
+// TestAtCapRequestForwardsWhole is the other side of the bound: a body right
+// up to the limit relays intact. Without this, a cap that was off by one -- or
+// that silently dropped the last chunk -- would look correct.
 func TestAtCapRequestForwardsWhole(t *testing.T) {
 	var got recorded
 	upstream := upstreamRecorder(t, &got, nil)
@@ -82,10 +76,7 @@ func TestAtCapRequestForwardsWhole(t *testing.T) {
 	}
 }
 
-// TestProductionCapMatchesTheRepoConvention pins the constant itself. The value
-// is a judgement -- large enough that real traffic carrying file contents and
-// base64 media is never refused -- so a future edit that quietly tightened it
-// into the range of ordinary requests should have to change a test.
+// TestProductionCapMatchesTheRepoConvention pins the constant itself.
 func TestProductionCapMatchesTheRepoConvention(t *testing.T) {
 	const want = 64 << 20
 	if maxRequestBody != want {
@@ -95,7 +86,6 @@ func TestProductionCapMatchesTheRepoConvention(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	// A zero maxBody would make MaxBytesReader refuse every request with a body.
 	if g.maxBody != want {
 		t.Errorf("New left maxBody = %d, want %d", g.maxBody, want)
 	}

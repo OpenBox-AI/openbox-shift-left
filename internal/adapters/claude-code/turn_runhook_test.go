@@ -13,14 +13,6 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/internal/client"
 )
 
-// End-to-end tests for the turn boundary through the real RunHook entry point:
-// the hook the provider actually invokes, over a real transcript file, writing to
-// a real spool. The unit tests in usage_test.go prove the window arithmetic; these
-// prove the wiring — that Stop fires the pair, that the cursor makes repeated
-// firings disjoint, and that neither hook can ever block a session.
-
-// turnEnv isolates the spool, config, session registry and identity, turns finops
-// on, and returns the spool dir.
 func turnEnv(t *testing.T, finopsOn bool) string {
 	t.Helper()
 	spool := t.TempDir()
@@ -28,8 +20,6 @@ func turnEnv(t *testing.T, finopsOn bool) string {
 	t.Setenv(envDID, testDID)
 	t.Setenv("OPENBOX_SPOOL_DIR", spool)
 	t.Setenv("OPENBOX_SESSION_DIR", t.TempDir())
-	// Realtime delivery forks a detached flusher; off here so the test observes
-	// the spool rather than racing a drain.
 	t.Setenv(devconfig.EnvRealtime, "0")
 	if finopsOn {
 		t.Setenv(devconfig.EnvFinops, "1")
@@ -39,7 +29,6 @@ func turnEnv(t *testing.T, finopsOn bool) string {
 	return spool
 }
 
-// usageLine renders one assistant transcript line.
 func usageLine(model string, in, out int, sidechain bool) string {
 	return `{"type":"assistant","isSidechain":` + strconv.FormatBool(sidechain) +
 		`,"timestamp":"2026-08-11T09:00:00.000Z","message":{"model":"` + model +
@@ -47,7 +36,6 @@ func usageLine(model string, in, out int, sidechain bool) string {
 		`,"output_tokens":` + strconv.Itoa(out) + `}}}` + "\n"
 }
 
-// spooledEvents reads every DevEvent the spool holds, in file order.
 func spooledEvents(t *testing.T, spool string) []client.DevEvent {
 	t.Helper()
 	var out []client.DevEvent
@@ -104,10 +92,9 @@ func stopPayload(session, transcript, agentID string) string {
 		`,"last_assistant_message":"SENTINEL_LASTMSG do not bind me","stop_reason":"SENTINEL_STOPREASON"}`
 }
 
-// Three Stop firings over a growing transcript produce three pairs with disjoint
-// numbers and contiguous, strictly-increasing indexes. This is the assertion that
-// catches the double-count, the off-by-one cursor, and the missed turn — the
-// counting assertion the Tier-2 duplicate-ActivityStarted bug taught us to write.
+// TestRunHook_StopEmitsOneDisjointPairPerFiring three Stop firings over a
+// growing transcript produce three pairs with disjoint numbers and contiguous,
+// strictly-increasing indexes.
 func TestRunHook_StopEmitsOneDisjointPairPerFiring(t *testing.T) {
 	spool := turnEnv(t, true)
 	transcript := filepath.Join(t.TempDir(), "transcript.jsonl")
@@ -138,7 +125,6 @@ func TestRunHook_StopEmitsOneDisjointPairPerFiring(t *testing.T) {
 		t.Fatalf("got %d turn events, want 6 (3 firings x 2 halves): %+v", len(turns), turns)
 	}
 
-	// Pairing and contiguity, per index.
 	byIndex := map[int][]client.DevEvent{}
 	for _, ev := range turns {
 		if ev.TurnIndex == nil {
@@ -184,8 +170,9 @@ func TestRunHook_StopEmitsOneDisjointPairPerFiring(t *testing.T) {
 	}
 }
 
-// A Stop firing with nothing new in the transcript emits nothing: idempotent
-// locally, so a duplicate firing cannot inflate the pair count.
+// TestRunHook_StopWithNoNewUsageEmitsNothing a Stop firing with nothing new in
+// the transcript emits nothing: idempotent locally, so a duplicate firing
+// cannot inflate the pair count.
 func TestRunHook_StopWithNoNewUsageEmitsNothing(t *testing.T) {
 	spool := turnEnv(t, true)
 	transcript := filepath.Join(t.TempDir(), "transcript.jsonl")
@@ -207,8 +194,8 @@ func TestRunHook_StopWithNoNewUsageEmitsNothing(t *testing.T) {
 	}
 }
 
-// An empty transcript is not a turn. A pair emitted for it would inflate the
-// count Phase 06 asserts against the real turn count.
+// TestRunHook_StopWithEmptyTranscriptEmitsNothing an empty transcript is not a
+// turn.
 func TestRunHook_StopWithEmptyTranscriptEmitsNothing(t *testing.T) {
 	spool := turnEnv(t, true)
 	transcript := filepath.Join(t.TempDir(), "transcript.jsonl")
@@ -225,7 +212,8 @@ func TestRunHook_StopWithEmptyTranscriptEmitsNothing(t *testing.T) {
 	}
 }
 
-// A missing transcript must degrade quietly: no events, no stdout, no failure.
+// TestRunHook_StopWithMissingTranscriptIsQuiet a missing transcript must
+// degrade quietly: no events, no stdout, no failure.
 func TestRunHook_StopWithMissingTranscriptIsQuiet(t *testing.T) {
 	spool := turnEnv(t, true)
 	var out bytes.Buffer
@@ -238,8 +226,9 @@ func TestRunHook_StopWithMissingTranscriptIsQuiet(t *testing.T) {
 	}
 }
 
-// A subagent's window and the main thread's must not consume each other's bytes,
-// and the subagent's tokens must be attributed to it — the no-double-count case.
+// TestRunHook_SubagentStopIsPartitionedFromMainThread a subagent's window and
+// the main thread's must not consume each other's bytes, and the subagent's
+// tokens must be attributed to it; the no-double-count case.
 func TestRunHook_SubagentStopIsPartitionedFromMainThread(t *testing.T) {
 	spool := turnEnv(t, true)
 	transcript := filepath.Join(t.TempDir(), "transcript.jsonl")
@@ -282,8 +271,6 @@ func TestRunHook_SubagentStopIsPartitionedFromMainThread(t *testing.T) {
 	if mainTokens == nil || subTokens == nil {
 		t.Fatalf("missing a Completed half: main=%v sub=%v", mainTokens, subTokens)
 	}
-	// The partition: main sums only its own lines, the subagent only the sidechain
-	// line, and together they equal the whole transcript exactly once.
 	if *mainTokens.Input != 150 || *mainTokens.Output != 15 {
 		t.Errorf("main turn = %d/%d, want 150/15 (sidechain excluded)", *mainTokens.Input, *mainTokens.Output)
 	}
@@ -295,9 +282,8 @@ func TestRunHook_SubagentStopIsPartitionedFromMainThread(t *testing.T) {
 	}
 }
 
-// A SubagentStop with no agent_id would share the main thread's cursor and eat
-// its window. Skipping is the safe answer: the main thread's accounting stays
-// correct, and the subagent's tokens still reach the session rollup.
+// TestRunHook_SubagentStopWithoutAgentIDIsSkipped a SubagentStop with no
+// agent_id would share the main thread's cursor and eat its window.
 func TestRunHook_SubagentStopWithoutAgentIDIsSkipped(t *testing.T) {
 	spool := turnEnv(t, true)
 	transcript := filepath.Join(t.TempDir(), "transcript.jsonl")
@@ -315,7 +301,6 @@ func TestRunHook_SubagentStopWithoutAgentIDIsSkipped(t *testing.T) {
 		t.Errorf("got %d turn events, want 0 (skipped rather than corrupting the main cursor)", len(turns))
 	}
 
-	// The main thread's cursor is untouched, so its own window is still intact.
 	var out2 bytes.Buffer
 	RunHook("Stop", strings.NewReader(stopPayload("sess-noagent", transcript, "")), &out2, nopLogger())
 	if turns := turnEventsOnly(spooledEvents(t, spool)); len(turns) != 0 {
@@ -323,9 +308,8 @@ func TestRunHook_SubagentStopWithoutAgentIDIsSkipped(t *testing.T) {
 	}
 }
 
-// With finops off the turn hooks are completely inert: no events, no stdout, no
-// transcript read. This is also the opt-out assertion — nothing leaks when the
-// posture says no.
+// TestRunHook_StopIsInertWhenFinopsOff with finops off the turn hooks are
+// completely inert: no events, no stdout, no transcript read.
 func TestRunHook_StopIsInertWhenFinopsOff(t *testing.T) {
 	spool := turnEnv(t, false)
 	transcript := filepath.Join(t.TempDir(), "transcript.jsonl")
@@ -344,14 +328,14 @@ func TestRunHook_StopIsInertWhenFinopsOff(t *testing.T) {
 	if turns := turnEventsOnly(evs); len(turns) != 0 {
 		t.Errorf("finops off emitted %d turn events, want 0", len(turns))
 	}
-	// And nothing else either: a turn hook has no lifecycle event of its own.
 	for _, ev := range evs {
 		t.Errorf("finops off spooled an event from a turn hook: %s", ev.EventType)
 	}
 }
 
-// A turn hook must never spool a lifecycle event of its own — Map returns false
-// for these hooks by design, and RunHook must not fall through to Observe.
+// TestRunHook_StopSpoolsOnlyTurnEvents a turn hook must never spool a
+// lifecycle event of its own; Map returns false for these hooks by design, and
+// RunHook must not fall through to Observe.
 func TestRunHook_StopSpoolsOnlyTurnEvents(t *testing.T) {
 	spool := turnEnv(t, true)
 	transcript := filepath.Join(t.TempDir(), "transcript.jsonl")
@@ -368,18 +352,8 @@ func TestRunHook_StopSpoolsOnlyTurnEvents(t *testing.T) {
 	}
 }
 
-// What the Stop payload may and may not put in the spool.
-//
-// This test used to say "the Stop payload's content fields must not reach the
-// spool… a future contributor who adds last_assistant_message to the struct
-// fails here". That decision IS that change, made deliberately and gated — so
-// the guard is re-aimed rather than removed, and it is strictly stronger than
-// it was: it now pins BOTH postures, where before it only ever exercised one.
-//
-// The line that did not move: everything else on that payload stays unbound.
-// `stop_reason` is banned under capture ON as well as OFF — and in this
-// provider version it does not even exist on the payload, so a sentinel
-// appearing would mean the adapter had started binding fields speculatively.
+// TestRunHook_StopPayloadContentIsGated what the Stop payload may and may not
+// put in the spool.
 func TestRunHook_StopPayloadContentIsGated(t *testing.T) {
 	const (
 		message    = "SENTINEL_LASTMSG"

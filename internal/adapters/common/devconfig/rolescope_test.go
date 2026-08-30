@@ -7,13 +7,8 @@ import (
 	"testing"
 )
 
-// The hook path must never be able to reach the approver's config.
-//
-// The whole point of splitting the files is that a developer's runtime and an
-// approver are different principals: a hook that could read approver.json could
-// read an approver's credential coordinates from the machine it is governing.
-// The separation is only structural if nothing on that path names the file, so
-// this pins it.
+// TestAdaptersNeverReadApproverConfig the hook path must never be able to
+// reach the approver's config.
 func TestAdaptersNeverReadApproverConfig(t *testing.T) {
 	root := filepath.Join("..", "..") // adapters/
 	forbidden := []string{"ApproverConfig", "DefaultApproverConfigPath", "approver.json", "RoleApprover"}
@@ -22,9 +17,6 @@ func TestAdaptersNeverReadApproverConfig(t *testing.T) {
 		if err != nil || info.IsDir() || !strings.HasSuffix(path, ".go") {
 			return err
 		}
-		// This package DEFINES the approver config; it is the CLI's approve
-		// command that consumes it. Everything else under adapters/ is hook
-		// path or adapter code.
 		if strings.Contains(filepath.ToSlash(path), "common/devconfig/") {
 			return nil
 		}

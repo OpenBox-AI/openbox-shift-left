@@ -36,9 +36,6 @@ func TestBuildDeployEvent_ShapeAndMetadata(t *testing.T) {
 	if ev.SchemaVersion != client.SchemaVersion {
 		t.Fatalf("schema_version = %s, want %s", ev.SchemaVersion, client.SchemaVersion)
 	}
-	// workflow_id source (WorkspaceID) is the repo; run_id (SessionID) is the
-	// STABLE deploy id — never collapses a fan-in into one dev session and is
-	// idempotent across re-runs (P1).
 	if ev.WorkspaceID != meta.Repo {
 		t.Fatalf("WorkspaceID = %s, want %s", ev.WorkspaceID, meta.Repo)
 	}
@@ -49,7 +46,6 @@ func TestBuildDeployEvent_ShapeAndMetadata(t *testing.T) {
 	if ev.Tool.Name != "openbox-git-action" || ev.Tool.Kind != client.ToolShell {
 		t.Fatalf("tool = %+v, want openbox-git-action/shell", ev.Tool)
 	}
-	// event_id is the stable idempotency key (INV-5) == run_id.
 	if ev.EventID != wantDeployID {
 		t.Fatalf("event_id = %s, want %s", ev.EventID, wantDeployID)
 	}
@@ -74,9 +70,6 @@ func TestBuildDeployEvent_ShapeAndMetadata(t *testing.T) {
 }
 
 func TestBuildDeployEvent_IsIdempotentAcrossRuns(t *testing.T) {
-	// Same commit + environment ⇒ stable event_id AND run_id across CI re-runs
-	// (INV-5 / P1), even though the deploy_did timestamp (a lineage label in
-	// metadata) legitimately differs.
 	res := fixedResolution()
 	meta := DeployMeta{Environment: "staging"}
 	a := BuildDeployEvent(res, meta, time.Unix(1000, 0))
@@ -93,15 +86,10 @@ func TestBuildDeployEvent_IsIdempotentAcrossRuns(t *testing.T) {
 }
 
 func TestBuildDeployEvent_SurvivesClientEmitBuild(t *testing.T) {
-	// The event must round-trip through the SL-3 client's payload builder
-	// without a precondition error (EventID + SessionID non-empty) and produce
-	// JSON that carries our metadata. We assert via the client's public Emit
-	// against a fake transport rather than reaching into unexported builders.
 	ev := BuildDeployEvent(fixedResolution(), DeployMeta{Repo: "r", Environment: "e"}, time.Unix(1, 0))
 	if ev.EventID == "" || ev.SessionID == "" {
 		t.Fatal("event missing required INV-5 idempotency / run_id fields")
 	}
-	// metadata must be JSON-serializable (client marshals it).
 	if _, err := json.Marshal(ev.Metadata); err != nil {
 		t.Fatalf("metadata not serializable: %v", err)
 	}
@@ -115,7 +103,6 @@ func TestBuildDeployEvent_SurvivesClientEmitBuild(t *testing.T) {
 }
 
 func TestDeployDID_MatchesContractSample(t *testing.T) {
-	// The SL-1 deploy.json sample uses did:aip:deploy-<short7>-<unix>.
 	ev := BuildDeployEvent(fixedResolution(), DeployMeta{}, time.Unix(1751890500, 0))
 	if got := ev.Metadata["deploy_did"]; got != "did:aip:deploy-37ec0a3-1751890500" {
 		t.Fatalf("deploy_did = %v, want did:aip:deploy-37ec0a3-1751890500", got)

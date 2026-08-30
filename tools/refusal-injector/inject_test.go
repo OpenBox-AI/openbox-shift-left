@@ -7,12 +7,10 @@ import (
 	"testing"
 )
 
-// inject_test.go — bind-free tests for the matcher and the fabricated response.
-//
-// httptest.NewRecorder needs no listener, which matters: the host that will most
-// likely need to reason about this tool is the same sandboxed one that cannot
-// bind, and a probe whose own logic is untested there is a probe nobody can trust
-// when it finally runs.
+// Httptest.NewRecorder needs no listener, which matters: the host that will
+// most likely need to reason about this tool is the same sandboxed one that
+// cannot bind, and a probe whose own logic is untested there is a probe nobody
+// can trust when it finally runs.
 
 func TestInjectorRefusesOnlyAfterTheConfiguredCount(t *testing.T) {
 	shape, ok := ShapeByName("invalid_request_error")
@@ -40,9 +38,6 @@ func TestInjectorIgnoresOtherPaths(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewInjector: %v", err)
 	}
-	// A session issues far more count_tokens and code/sessions calls than model
-	// calls. Refusing one of those would measure the client's reaction to
-	// something other than a model-call refusal, which is not the question.
 	if inj.Matches(httptest.NewRequest(http.MethodPost, "/v1/messages/count_tokens", nil)) {
 		t.Error("count_tokens qualified for injection; it is not a model call")
 	}
@@ -69,8 +64,6 @@ func TestInjectedResponseIsTheCandidateVerbatim(t *testing.T) {
 		if got := rec.Header().Get("Content-Type"); got != shape.ContentType {
 			t.Errorf("%s: content-type %q, want %q", shape.Name, got, shape.ContentType)
 		}
-		// Without this a retry could be served from a cache and the retry count
-		// the probe exists to measure would be silently wrong.
 		if got := rec.Header().Get("Cache-Control"); !strings.Contains(got, "no-store") {
 			t.Errorf("%s: Cache-Control = %q, want no-store", shape.Name, got)
 		}
@@ -80,11 +73,10 @@ func TestInjectedResponseIsTheCandidateVerbatim(t *testing.T) {
 	}
 }
 
-// TestTheNegativeControlIsStillInTheTable guards the one candidate that exists to
-// be retried.
-//
-// If every shape in the table were terminal, a probe run showing "no retries"
-// would be indistinguishable from a probe that cannot observe retries at all.
+// TestTheNegativeControlIsStillInTheTable guards the one candidate that exists
+// to be retried. If every shape in the table were terminal, a probe run
+// showing "no retries" would be indistinguishable from a probe that cannot
+// observe retries at all.
 func TestTheNegativeControlIsStillInTheTable(t *testing.T) {
 	s, ok := ShapeByName("overloaded_error")
 	if !ok {

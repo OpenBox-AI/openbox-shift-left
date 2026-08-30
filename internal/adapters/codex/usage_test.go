@@ -17,14 +17,11 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/internal/client"
 )
 
-// finopsTestSeed is a 32-byte Ed25519 seed (all-zero, as wire_test.go uses) so
-// the sentinel test can drive the REAL AIP-signing client and inspect the exact
-// bytes that would go on the wire.
 var finopsTestSeed = base64.StdEncoding.EncodeToString(make([]byte, 32))
 
 // sentinels are the unique content markers seeded into every content-bearing
-// location of testdata/rollout-poisoned.jsonl. The finops parser must extract the
-// token NUMBERS and NONE of these strings.
+// location of testdata/rollout-poisoned.jsonl. The finops parser must extract
+// the token numbers and none of these strings.
 var sentinels = []string{
 	"SENTINEL_CWD", "SENTINEL_INSTRUCTIONS", "SENTINEL_PROMPT", "SENTINEL_OUTPUT",
 	"SENTINEL_AGENTMSG", "SENTINEL_CMD", "SENTINEL_STDOUT", "SENTINEL_PATCH", "SENTINEL_ARGS",
@@ -32,21 +29,17 @@ var sentinels = []string{
 
 const poisonedRolloutPath = "testdata/rollout-poisoned.jsonl"
 
-// TestAggregateRolloutUsage_LastCumulativeWinsFromFixture reads the GROUNDED
+// TestAggregateRolloutUsage_LastCumulativeWinsFromFixture reads the grounded
 // testdata rollout (shaped from codex-rs @ rust-v0.145.0) and proves the three
 // Codex-specific aggregation rules:
-//
-//   - total_token_usage is CUMULATIVE, so the rollup is the LAST snapshot, NOT
+//   - Total_token_usage is cumulative, so the rollup is the last snapshot, NOT
 //     the sum of both token_count lines (which would be 260/65/325);
-//   - cached_input_tokens (40) and cache_write_input_tokens (5) are SUB-COUNTS
-//     already inside input_tokens (160), so contract v1.1 reports them in their
-//     own fields and SUBTRACTS them from Input: 160 − 40 − 5 = 115 pure input.
-//     This is the inverse of Claude Code, whose cache counts are additive
-//     siblings — adding them here would double-count the cache on every session.
-//     The evidence is the arithmetic: total_tokens (195) == input + output
-//     (160 + 35), so neither cache count contributes on top;
-//   - reasoning_output_tokens (12) is likewise a sub-count of output_tokens and
-//     is not bound at all, so Output stays 35 (NOT 35 + 12).
+//   - Cached_input_tokens (40) and cache_write_input_tokens (5) are SUB-counts
+//     already inside input_tokens (160), so contract v1.1 reports them in
+//     their own fields and subtracts them from Input: 160 − 40 − 5 = 115 pure
+//     input.
+//   - Reasoning_output_tokens (12) is likewise a sub-count of output_tokens
+//     and is not bound at all, so Output stays 35 (NOT 35 + 12).
 func TestAggregateRolloutUsage_LastCumulativeWinsFromFixture(t *testing.T) {
 	tokens, model, err := readRolloutUsage(poisonedRolloutPath)
 	if err != nil {
@@ -70,26 +63,19 @@ func TestAggregateRolloutUsage_LastCumulativeWinsFromFixture(t *testing.T) {
 	if got := *tokens.Total; got != 195 {
 		t.Errorf("Total = %d, want 195 (reported total_tokens, carried verbatim)", got)
 	}
-	// The invariant that makes both providers comparable: Total == the four parts.
-	// If this ever fails, one of the sub-counts is being double-counted or dropped.
 	if sum := *tokens.Input + *tokens.Output + *tokens.CacheRead + *tokens.CacheCreationInput; sum != *tokens.Total {
 		t.Errorf("Input+Output+caches = %d but Total = %d — a sub-count is double-counted or dropped",
 			sum, *tokens.Total)
 	}
-	// The fixture carries no turn_context, so it names no model. Absence is a
-	// legitimate state, handled by the core-side `unknown` bucket.
 	if model != "" {
 		t.Errorf("model = %q, want empty (the fixture has no turn_context line)", model)
 	}
 }
 
-// The model id lives at turn_context.payload.model, and NOTHING else in that
-// content-rich payload may be reachable. Verified against 12 real rollouts
-// (~/.codex/sessions, codex 0.145.x): payload.model occurs exactly as often as
-// turn_context lines do, so no other line type puts a model there.
+// TestAggregateRolloutUsage_BindsModelFromTurnContextOnly the model id lives
+// at turn_context.payload.model, and nothing else in that content-rich payload
+// may be reachable.
 func TestAggregateRolloutUsage_BindsModelFromTurnContextOnly(t *testing.T) {
-	// A real-shaped turn_context, including the content siblings that must stay
-	// unreachable, plus the nested `model` keys that must NOT be picked up.
 	turnContext := `{"timestamp":"2026-08-11T09:00:00.000Z","type":"turn_context","payload":{` +
 		`"turn_id":"t1","cwd":"/work/SENTINEL_CWD","workspace_roots":["/work/SENTINEL_CWD"],` +
 		`"approval_policy":"never","model":"gpt-5.6-sol","personality":"pragmatic",` +
@@ -108,15 +94,15 @@ func TestAggregateRolloutUsage_BindsModelFromTurnContextOnly(t *testing.T) {
 		t.Errorf("a NESTED model key was bound: %q — the projection reaches too deep", model)
 	}
 
-	// Last non-empty wins: the model in effect when the session ended.
 	switched := body + strings.Replace(turnContext, `"model":"gpt-5.6-sol"`, `"model":"gpt-5.5"`, 1) + "\n"
 	if _, m2 := aggregateRolloutUsage([]byte(switched)); m2 != "gpt-5.5" {
 		t.Errorf("model = %q after a switch, want gpt-5.5 (last non-empty wins)", m2)
 	}
 }
 
-// The session-rollup activity pair: one per session, the pinned id, the four
-// counts, and the model — the same wire shape Claude Code's per-turn pairs use.
+// TestMapUsageRollup_EmitsOnePinnedPair the session-rollup activity pair: one
+// per session, the pinned id, the four counts, and the model; the same wire
+// shape Claude Code's per-turn pairs use.
 func TestMapUsageRollup_EmitsOnePinnedPair(t *testing.T) {
 	m := NewMapper(Identity{DeveloperDID: testDID})
 	m.NewID = nil // exercise the real deterministic derivation
@@ -135,8 +121,6 @@ func TestMapUsageRollup_EmitsOnePinnedPair(t *testing.T) {
 	if !started.SessionRollup || !completed.SessionRollup {
 		t.Error("both halves must be marked SessionRollup, or the activity_id is wrong")
 	}
-	// The rollup covers a session, not a turn, so it must carry NO turn index —
-	// an index would claim a per-turn granularity Codex does not have.
 	if started.TurnIndex != nil || completed.TurnIndex != nil {
 		t.Errorf("a session rollup must not claim a turn index: %v / %v", started.TurnIndex, completed.TurnIndex)
 	}
@@ -149,33 +133,26 @@ func TestMapUsageRollup_EmitsOnePinnedPair(t *testing.T) {
 	if started.Tokens != nil {
 		t.Error("the Started half must carry no usage; the numbers are known at the close")
 	}
-	// Distinct idempotency ids, or a server that dedupes on event_id would drop
-	// one half of the pair as a replay of the other.
 	if started.EventID == completed.EventID {
 		t.Errorf("both halves derived the same event_id %q", started.EventID)
 	}
 
-	// An empty session emits no pair rather than a zero-filled one.
 	m.Finops = nil
 	if _, _, ok := m.MapUsageRollup(&HookEvent{SessionID: "th-rollup"}); ok {
 		t.Error("MapUsageRollup returned a pair with no usage to report")
 	}
 }
 
-// TestFinops_NoContentOnWire is the LOAD-BEARING INV-2 test (SL7-C / SL-16
+// TestFinops_NoContentOnWire is the load-bearing INV-2 test (SL7-C / SL-16
 // acceptance): a rollout seeded with sentinel content must yield usage numbers
-// with NONE of the sentinels reaching the emitted event, its metadata, or the
-// actual signed wire body. It drives the real AIP-signing client with
-// content-capture ON — the adversarial worst case (the client's content stripper
-// is disabled), so any leak would pass straight through to the wire. Only the
-// projection-only parser can be what keeps content off the wire.
+// with none of the sentinels reaching the emitted event, its metadata, or the
+// actual signed wire body.
 func TestFinops_NoContentOnWire(t *testing.T) {
 	tokens, model, err := readRolloutUsage(poisonedRolloutPath)
 	if err != nil {
 		t.Fatalf("readRolloutUsage: %v", err)
 	}
 
-	// Build the SessionEnded event exactly as the flush path does.
 	m := NewMapper(Identity{DeveloperDID: testDID})
 	m.NewID = func() string { return "evt-1" }
 	m.Finops = &FinopsUsage{Tokens: tokens, Model: model}
@@ -187,7 +164,6 @@ func TestFinops_NoContentOnWire(t *testing.T) {
 		t.Fatalf("SessionEnded event missing token rollup: %+v", ev.Tokens)
 	}
 
-	// (a) The normalized event itself carries no sentinel anywhere.
 	evJSON, _ := json.Marshal(ev)
 	for _, s := range sentinels {
 		if strings.Contains(string(evJSON), s) {
@@ -195,8 +171,6 @@ func TestFinops_NoContentOnWire(t *testing.T) {
 		}
 	}
 
-	// (b) The exact SIGNED WIRE BODY carries no sentinel — content-capture ON so
-	// the stripper cannot be what saves us; only the projection-only parser can.
 	var body []byte
 	srv := memhttptest.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ = io.ReadAll(r.Body)
@@ -226,19 +200,18 @@ func TestFinops_NoContentOnWire(t *testing.T) {
 			t.Fatalf("INV-2 breach: sentinel %q on the wire: %s", s, body)
 		}
 	}
-	// Sanity: the numbers DID make it to the wire (feature actually works).
 	if !strings.Contains(string(body), "195") {
 		t.Errorf("expected token total 195 on the wire, got: %s", body)
 	}
 }
 
 // TestFinops_OffByteIdentical: with no finops usage attached (flag off), the
-// SessionEnded event carries no tokens/cost — byte-identical to pre-SL7-C output.
+// SessionEnded event carries no tokens/cost; byte-identical to pre-SL7-C
+// output.
 func TestFinops_OffByteIdentical(t *testing.T) {
 	m := NewMapper(Identity{DeveloperDID: testDID})
 	m.NewID = func() string { return "evt-1" }
 	m.Now = func() time.Time { return time.Unix(0, 0).UTC() }
-	// m.Finops stays nil (the default) — mirrors ResolveFinops()==false.
 	ev, _ := m.Map(HookSessionEnd, &HookEvent{SessionID: "th-1", TranscriptPath: "/should/not/matter", Reason: "other"})
 	if ev.Tokens != nil || ev.Cost != nil {
 		t.Fatalf("finops off must attach nothing, got tokens=%v cost=%v", ev.Tokens, ev.Cost)
@@ -263,8 +236,9 @@ func TestFinops_AttachesOnlyOnSessionEnd(t *testing.T) {
 	}
 }
 
-// TestAggregateRolloutUsage_LastWinsNotSum pins the cumulative rule directly on
-// inline bytes: three ascending cumulative snapshots ⇒ the LAST one, never a sum.
+// TestAggregateRolloutUsage_LastWinsNotSum pins the cumulative rule directly
+// on inline bytes: three ascending cumulative snapshots ⇒ the last one, never
+// a sum.
 func TestAggregateRolloutUsage_LastWinsNotSum(t *testing.T) {
 	body := tokenLine(50, 20, 70) + "\n" + tokenLine(120, 45, 165) + "\n" + tokenLine(200, 60, 260) + "\n"
 	tokens, _ := aggregateRolloutUsage([]byte(body))
@@ -274,9 +248,9 @@ func TestAggregateRolloutUsage_LastWinsNotSum(t *testing.T) {
 	}
 }
 
-// TestAggregateRolloutUsage_MalformedFinalLineSkipped: a truncated/garbage final
-// line is skipped, honestly falling back to the previous COMPLETE cumulative
-// rather than undercounting or erroring (fault-tolerant, INV-3).
+// TestAggregateRolloutUsage_MalformedFinalLineSkipped: a truncated/garbage
+// final line is skipped, honestly falling back to the previous complete
+// cumulative rather than undercounting or erroring (fault-tolerant, INV-3).
 func TestAggregateRolloutUsage_MalformedFinalLineSkipped(t *testing.T) {
 	body := "not json at all\n" +
 		tokenLine(100, 30, 130) + "\n" +
@@ -287,8 +261,8 @@ func TestAggregateRolloutUsage_MalformedFinalLineSkipped(t *testing.T) {
 	}
 }
 
-// TestAggregateRolloutUsage_EmptyNoError: a rollout with no token_count lines is
-// valid — nil rollup, no error (the caller then attaches nothing, same as
+// TestAggregateRolloutUsage_EmptyNoError: a rollout with no token_count lines
+// is valid; nil rollup, no error (the caller then attaches nothing, same as
 // finops-off).
 func TestAggregateRolloutUsage_EmptyNoError(t *testing.T) {
 	body := `{"type":"session_meta","payload":{"id":"x","cwd":"/r"}}` + "\n" +
@@ -302,10 +276,8 @@ func TestAggregateRolloutUsage_EmptyNoError(t *testing.T) {
 	}
 }
 
-// Cost is not merely nil for Codex — the reader has no cost return at all, and
-// no event it feeds carries one. Codex's TokenCountEvent is {info, rate_limits}
-// with no price field (protocol.rs), and a cost derived from a pricing table
-// would be a fabricated number.
+// TestCodexUsage_CostIsNeverCarried cost is not merely nil for Codex; the
+// reader has no cost return at all, and no event it feeds carries one.
 func TestCodexUsage_CostIsNeverCarried(t *testing.T) {
 	tokens, _ := aggregateRolloutUsage([]byte(tokenLine(5, 2, 7) + "\n"))
 	if tokens == nil {
@@ -332,15 +304,15 @@ func TestCodexUsage_CostIsNeverCarried(t *testing.T) {
 // must not produce a number violating the SL-1 schema `minimum: 0`.
 func TestAggregateRolloutUsage_NegativeClamped(t *testing.T) {
 	tokens, _ := aggregateRolloutUsage([]byte(tokenLine(-5, 4, -1) + "\n"))
-	// input clamps to 0, output=4, total clamps to 0 → falls back to in+out=4.
 	if *tokens.Input != 0 || *tokens.Output != 4 || *tokens.Total != 4 {
 		t.Fatalf("negatives must clamp to 0 (total falls back to in+out), got %d/%d/%d",
 			*tokens.Input, *tokens.Output, *tokens.Total)
 	}
 }
 
-// TestAggregateRolloutUsage_TotalFallsBackToSum: a snapshot missing total_tokens
-// (0) derives Total from Input+Output so it is never a spurious 0.
+// TestAggregateRolloutUsage_TotalFallsBackToSum: a snapshot missing
+// total_tokens (0) derives Total from Input+Output so it is never a spurious
+// 0.
 func TestAggregateRolloutUsage_TotalFallsBackToSum(t *testing.T) {
 	body := `{"type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":10,"output_tokens":4}}}}` + "\n"
 	tokens, _ := aggregateRolloutUsage([]byte(body))
@@ -362,8 +334,6 @@ func TestReadRolloutUsage_Errors(t *testing.T) {
 }
 
 func TestReadRolloutUsage_OversizedSkipped(t *testing.T) {
-	// A sparse file larger than the cap is skipped whole (INV-3, bounded read) —
-	// never read into memory, never partially counted.
 	p := filepath.Join(t.TempDir(), "huge.jsonl")
 	f, err := os.Create(p)
 	if err != nil {
@@ -379,11 +349,10 @@ func TestReadRolloutUsage_OversizedSkipped(t *testing.T) {
 }
 
 // TestFinops_SessionEndWiring_ReadsRollout is the wiring / read-only smoke: it
-// drives RunHook end-to-end for a SessionEnd whose transcript_path points at the
-// grounded rollout fixture, finops ON, and asserts (a) stdout stays empty (INV-3),
-// (b) the SessionEnded event spooled with the token total, and (c) no sentinel
-// content leaked into the spool. Substitutes for a live ~/.codex rollout (none
-// exists on this box and one must not be generated — read-only grounding).
+// drives RunHook end-to-end for a SessionEnd whose transcript_path points at
+// the grounded rollout fixture, finops ON, and asserts (a) stdout stays empty
+// (INV-3), (b) the SessionEnded event spooled with the token total, and (c) no
+// sentinel content leaked into the spool.
 func TestFinops_SessionEndWiring_ReadsRollout(t *testing.T) {
 	spool := setHookEnv(t)
 	t.Setenv("OPENBOX_FINOPS", "1")
@@ -422,15 +391,10 @@ func TestFinops_SessionEndWiring_ReadsRollout(t *testing.T) {
 	}
 }
 
-// TestFinops_SessionEndWiring_OffAttachesNothing is the OPT-OUT assertion, and it
-// is a security assertion rather than a feature test: it proves the documented
-// opt-out is real and COMPLETE — no tokens, no model, and no rollup activity.
-//
-// Usage capture is on by DEFAULT as of that decision, so this test must now
-// disable it explicitly. Before the flip it passed by leaving OPENBOX_FINOPS
-// unset, which is exactly why the flip needed `Finops` to become a *bool: with a
-// plain bool an absent field and an explicit false were indistinguishable, so the
-// default could not move at all.
+// TestFinops_SessionEndWiring_OffAttachesNothing is the OPT-OUT assertion, and
+// it is a security assertion rather than a feature test: it proves the
+// documented opt-out is real and complete; no tokens, no model, and no rollup
+// activity.
 func TestFinops_SessionEndWiring_OffAttachesNothing(t *testing.T) {
 	spool := setHookEnv(t)
 	t.Setenv("OPENBOX_FINOPS", "0") // the documented opt-out
@@ -452,9 +416,6 @@ func TestFinops_SessionEndWiring_OffAttachesNothing(t *testing.T) {
 	if !strings.Contains(spooled, "SessionEnded") {
 		t.Fatalf("the opt-out must silence USAGE, not telemetry: %s", spooled)
 	}
-	// Complete silence on the usage path. A disabled flag that still leaked the
-	// model id would be worse than the old default, because it would contradict
-	// its own documentation.
 	for _, forbidden := range []string{`"tokens"`, `"model"`, "TurnStarted", "TurnCompleted", "usage_scope"} {
 		if strings.Contains(spooled, forbidden) {
 			t.Errorf("finops off still emitted %s, spool: %s", forbidden, spooled)
@@ -462,9 +423,8 @@ func TestFinops_SessionEndWiring_OffAttachesNothing(t *testing.T) {
 	}
 }
 
-// The other half of the opt-out matrix: with nothing configured at all, usage
-// capture is ON. Stated as its own test so a future default change is a
-// deliberate edit here rather than a silent behavioural drift.
+// TestFinops_DefaultOnWithNoConfiguration the other half of the opt-out
+// matrix: with nothing configured at all, usage capture is ON.
 func TestFinops_DefaultOnWithNoConfiguration(t *testing.T) {
 	spool := setHookEnv(t) // OPENBOX_FINOPS deliberately unset
 	abs, _ := filepath.Abs(poisonedRolloutPath)
@@ -488,7 +448,6 @@ func TestFinops_DefaultOnWithNoConfiguration(t *testing.T) {
 	if !strings.Contains(spooled, "TurnCompleted") {
 		t.Errorf("an unconfigured session must emit the rollup activity pair: %s", spooled)
 	}
-	// And no rollout content rides along, at the default posture.
 	for _, s := range sentinels {
 		if strings.Contains(spooled, s) {
 			t.Fatalf("INV-2 breach at the default posture: sentinel %q in the spool: %s", s, spooled)
@@ -497,7 +456,8 @@ func TestFinops_DefaultOnWithNoConfiguration(t *testing.T) {
 }
 
 // TestFinops_MissingTranscriptPathSkipped: a null/absent transcript_path with
-// finops on is skipped fail-open (logged, no stdout, SessionEnded still spooled).
+// finops on is skipped fail-open (logged, no stdout, SessionEnded still
+// spooled).
 func TestFinops_MissingTranscriptPathSkipped(t *testing.T) {
 	spool := setHookEnv(t)
 	t.Setenv("OPENBOX_FINOPS", "1")
@@ -523,9 +483,9 @@ func TestFinops_MissingTranscriptPathSkipped(t *testing.T) {
 	}
 }
 
-// TestFinops_ConformanceWithTokens: the SessionEnded event WITH a token rollup
+// TestFinops_ConformanceWithTokens: the SessionEnded event with a token rollup
 // still validates against the SL-1 contract and passes the E7 hook-wire shape
-// through the real client (AC-5 parity — tokens ride metadata, never break the
+// through the real client (AC-5 parity; tokens ride metadata, never break the
 // lifecycle wire type).
 func TestFinops_ConformanceWithTokens(t *testing.T) {
 	tokens, model, err := readRolloutUsage(poisonedRolloutPath)
@@ -540,14 +500,11 @@ func TestFinops_ConformanceWithTokens(t *testing.T) {
 		t.Fatal("Map not ok")
 	}
 
-	// SL-1 contract shape (content-capture disabled), same as conformance_test.go.
 	raw := mustMarshalContractShape(t, ev)
 	if !strings.Contains(string(raw), "195") {
 		t.Errorf("expected token total on the conformance shape: %s", raw)
 	}
 
-	// E7 hook wire shape through the real client: lifecycle stays WorkflowCompleted,
-	// tokens ride metadata.
 	cl, bodies := newWireCapture(t)
 	emit(t, cl, ev)
 	payload := decodeBody(t, (*bodies)[0])
@@ -560,10 +517,6 @@ func TestFinops_ConformanceWithTokens(t *testing.T) {
 	}
 }
 
-// ── test helpers ──
-
-// tokenLine builds one token_count rollout line with the given cumulative
-// total_token_usage (the grounded wire shape).
 func tokenLine(in, out, total int) string {
 	return `{"type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":` +
 		`{"input_tokens":` + itoa(in) + `,"output_tokens":` + itoa(out) + `,"total_tokens":` + itoa(total) + `}}}}`

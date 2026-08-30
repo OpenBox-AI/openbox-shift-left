@@ -34,7 +34,6 @@ func TestConfigMarshalsSnakeCase(t *testing.T) {
 			t.Errorf("missing group %q in marshaled aivss_config", group)
 		}
 	}
-	// Spot-check the accepted posture integers survive the round trip.
 	if m["ai_specific"]["data_sensitivity"] != 4 || m["impact"]["safety_impact"] != 1 {
 		t.Errorf("unexpected posture values: %v", m)
 	}

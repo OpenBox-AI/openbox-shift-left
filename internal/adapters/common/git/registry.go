@@ -8,8 +8,11 @@ import (
 	"time"
 )
 
-// Session registry; the parallel-safe bridge between an adapter (which knows
-// the session id) and the prepare-commit-msg hook (which does not).
+//   - Sessions in different worktrees never collide; the worktree filter is
+//     exact, so each commit resolves to its own repo's session.
+//   - Sessions in the same worktree resolve by recency: the committing session
+//     refreshed its record on the PreToolUse that fired ms before the commit,
+//     so it is the freshest.
 const (
 	EnvSessionDir = "OPENBOX_SESSION_DIR" // overrides the registry location
 	EnvSessionTTL = "OPENBOX_SESSION_TTL" // staleness cutoff, in seconds

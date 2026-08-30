@@ -84,8 +84,16 @@ func (r SessionResolver) ttl() time.Duration {
 // Worktree is the commit's git top-level ("" if it could not be determined;
 // then only the env-based tiers apply).
 func (r SessionResolver) Resolve(worktree string) []string {
-	// A Claude Code session never sets this var, so the CC resolution below is
-	// untouched.
+	//   - Inheritance: any process launched from within a Codex exec (a nested
+	//     agent session, a long-lived shell) inherits the var, so its commits
+	//     attribute to the enclosing Codex thread rather than to the inner
+	//     session / registry tier; and Tier-0 outranks even an explicit
+	//     OPENBOX_SESSION set inside that environment.
+	//   - Suppression: a present-but-garbage value wins Tier-0 here and is then
+	//     dropped by the sink's validation, with no fallback to the remaining
+	//     tiers; the commit lands unattributed rather than mis-guessed
+	//     (INV-6-safe, but an env-writing process can exploit it to suppress
+	//     attribution).
 	if id := strings.TrimSpace(r.getenv(EnvCodexThreadID)); id != "" {
 		return []string{id}
 	}
@@ -101,9 +109,8 @@ func (r SessionResolver) Resolve(worktree string) []string {
 	return nil
 }
 
-// envSessions reads the explicit-override tier: OPENBOX_SESSION plus an
-// optional OPENBOX_SESSION_FILE, unioned and deduped. The file is best-effort
-// (a read error is ignored; observe-only never blocks a commit).
+// envSessions the file is best-effort (a read error is ignored; observe-only
+// never blocks a commit).
 func (r SessionResolver) envSessions() []string {
 	var ids []string
 	ids = append(ids, splitIDs(r.getenv(EnvSession))...)
@@ -115,8 +122,9 @@ func (r SessionResolver) envSessions() []string {
 	return dedupe(ids)
 }
 
-// resolveFromRegistry returns the most-recently-updated live session whose cwd
-// is within worktree, or "" if none.
+// resolveFromRegistry records older than the TTL (crashed sessions that never
+// wrote SessionEnd) are ignored so a later human commit is not falsely
+// attributed.
 func (r SessionResolver) resolveFromRegistry(worktree string) string {
 	entries, err := r.readDir(r.sessionDir())
 	if err != nil {

@@ -6,10 +6,10 @@ import (
 	"testing"
 )
 
-// The assistant-turn span. Every assertion below is against a consumer that
-// fails SILENTLY: core logs and returns "" for a span it cannot read, so a wrong
-// shape here does not error anywhere — it just leaves the Goal Alignment widgets
-// empty exactly as they are today.
+// Every assertion below is against a consumer that fails silently: core logs
+// and returns "" for a span it cannot read, so a wrong shape here does not
+// error anywhere; it just leaves the Goal Alignment widgets empty exactly as
+// they are today.
 
 func turnEvent(text string) DevEvent {
 	idx := 3
@@ -32,7 +32,6 @@ func turnEvent(text string) DevEvent {
 	return ev
 }
 
-// decodeSpans pulls the spans array out of the wire payload as core receives it.
 func decodeSpans(t *testing.T, ev DevEvent) []map[string]any {
 	t.Helper()
 	m := decodeRaw(t, ev)
@@ -55,8 +54,9 @@ func decodeSpans(t *testing.T, ev DevEvent) []map[string]any {
 	return out
 }
 
-// The four conditions core's extractor checks, asserted together, because
-// failing any one of them yields the same symptom: an empty widget.
+// TestTurnSpanSatisfiesTheAlignmentExtractor the four conditions core's
+// extractor checks, asserted together, because failing any one of them yields
+// the same symptom: an empty widget.
 func TestTurnSpanSatisfiesTheAlignmentExtractor(t *testing.T) {
 	const text = "I refactored the spool and all 11 modules are green."
 	spans := decodeSpans(t, turnEvent(text))
@@ -71,8 +71,6 @@ func TestTurnSpanSatisfiesTheAlignmentExtractor(t *testing.T) {
 	if s["semantic_type"] != "llm_completion" {
 		t.Errorf("semantic_type = %v, want llm_completion", s["semantic_type"])
 	}
-	// isLLMCall's inputs. Without both, core classifies the span as something
-	// else and the extractor's semantic_type check fails.
 	attrs, _ := s["attributes"].(map[string]any)
 	if attrs["http.method"] != "POST" {
 		t.Errorf("attributes[http.method] = %v, want POST", attrs["http.method"])
@@ -85,7 +83,6 @@ func TestTurnSpanSatisfiesTheAlignmentExtractor(t *testing.T) {
 		t.Error("the synthetic marker is missing — stored spans would be " +
 			"indistinguishable from observed HTTP traffic")
 	}
-	// The name must not classify as embedding or tool-call.
 	name, _ := s["name"].(string)
 	upper := strings.ToUpper(name)
 	if strings.Contains(upper, "EMBED") || strings.Contains(upper, "TOOL") {
@@ -93,8 +90,6 @@ func TestTurnSpanSatisfiesTheAlignmentExtractor(t *testing.T) {
 			"other than llm_completion (session.go:323-334)", name)
 	}
 
-	// And the body parses back to exactly the text, through the shape core
-	// unmarshals.
 	var parsed struct {
 		Choices []struct {
 			Message struct {
@@ -111,9 +106,7 @@ func TestTurnSpanSatisfiesTheAlignmentExtractor(t *testing.T) {
 	}
 }
 
-// The gate, from the client side. Emit's stripContent nils Content when capture
-// is off; this asserts the consequence — not an empty array, not a zero count,
-// nothing at all.
+// TestTurnSpanAbsentWithoutContent the gate, from the client side.
 func TestTurnSpanAbsentWithoutContent(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -132,8 +125,8 @@ func TestTurnSpanAbsentWithoutContent(t *testing.T) {
 	}
 }
 
-// span_count must agree with the array, or core's own bookkeeping disagrees
-// with what it stored.
+// TestTurnSpanCountIsOne span_count must agree with the array, or core's own
+// bookkeeping disagrees with what it stored.
 func TestTurnSpanCountIsOne(t *testing.T) {
 	m := decodeRaw(t, turnEvent("hello"))
 	if m["span_count"] != float64(1) {
@@ -141,9 +134,9 @@ func TestTurnSpanCountIsOne(t *testing.T) {
 	}
 }
 
-// hook_trigger must never appear. With it true AND spans present the payload
-// enters core's approval-bypass fingerprint path — a model turn is not an
-// approvable operation and must not touch it.
+// TestTurnSpanCarriesNoHookTrigger hook_trigger must never appear. With it
+// true AND spans present the payload enters core's approval-bypass fingerprint
+// path; a model turn is not an approvable operation and must not touch it.
 func TestTurnSpanCarriesNoHookTrigger(t *testing.T) {
 	m := decodeRaw(t, turnEvent("hello"))
 	if v, present := m["hook_trigger"]; present {
@@ -152,11 +145,10 @@ func TestTurnSpanCarriesNoHookTrigger(t *testing.T) {
 	}
 }
 
-// Ids must be a pure function of the event. The turn cursor re-reads a window
-// after a crash on purpose — over-report into a server that deduplicates rather
-// than lose a turn — and core dedupes spans on (span_id, stage). Random ids
-// would turn that safe direction into a second stored copy of the assistant's
-// text.
+// TestTurnSpanIDsAreDeterministic ids must be a pure function of the event.
+// The turn cursor re-reads a window after a crash on purpose; over-report into
+// a server that deduplicates rather than lose a turn; and core dedupes spans
+// on (span_id, stage).
 func TestTurnSpanIDsAreDeterministic(t *testing.T) {
 	a := decodeSpans(t, turnEvent("same turn, reported twice"))[0]
 	b := decodeSpans(t, turnEvent("same turn, reported twice"))[0]
@@ -164,7 +156,6 @@ func TestTurnSpanIDsAreDeterministic(t *testing.T) {
 		t.Errorf("ids are not stable across two derivations: %v/%v vs %v/%v",
 			a["span_id"], a["trace_id"], b["span_id"], b["trace_id"])
 	}
-	// Core's OTel id widths.
 	if id, _ := a["span_id"].(string); len(id) != 16 {
 		t.Errorf("span_id = %q (%d chars), want 16 hex", id, len(id))
 	}
@@ -172,23 +163,20 @@ func TestTurnSpanIDsAreDeterministic(t *testing.T) {
 		t.Errorf("trace_id = %q (%d chars), want 32 hex", id, len(id))
 	}
 
-	// A DIFFERENT turn must get a different span id, or two turns collapse onto
-	// one row under the same dedupe.
 	other := turnEvent("a different turn")
 	idx := 4
 	other.TurnIndex = &idx
 	if c := decodeSpans(t, other)[0]; c["span_id"] == a["span_id"] {
 		t.Error("two different turns derived the same span_id; core would dedupe one away")
 	}
-	// Turns of one session share a trace.
 	if c := decodeSpans(t, other)[0]; c["trace_id"] != a["trace_id"] {
 		t.Error("turns of the same session must share a trace_id")
 	}
 }
 
-// The cap bounds the TEXT, not the envelope — and it is applied before the JSON
-// wrapper, so the body still parses. A cap applied after wrapping could cut
-// mid-escape and produce a response_body core reports as silence.
+// TestTurnSpanCapsTheTextNotTheEnvelope the cap bounds the text, not the
+// envelope; and it is applied before the JSON wrapper, so the body still
+// parses.
 func TestTurnSpanCapsTheTextNotTheEnvelope(t *testing.T) {
 	long := strings.Repeat("x", maxBodySize+5000)
 	s := decodeSpans(t, turnEvent(long))[0]
@@ -209,7 +197,7 @@ func TestTurnSpanCapsTheTextNotTheEnvelope(t *testing.T) {
 	}
 }
 
-// No other event type may grow a span. The carve-out is exactly one carrier.
+// TestNoOtherEventCarriesASpan no other event type may grow a span.
 func TestNoOtherEventCarriesASpan(t *testing.T) {
 	for _, et := range []EventType{
 		EventSessionStarted, EventSessionEnded, EventPromptSubmitted, EventDeploy,

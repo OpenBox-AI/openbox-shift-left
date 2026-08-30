@@ -10,7 +10,6 @@ import (
 	"time"
 )
 
-// recordingEmitter collects what the gateway reported.
 type recordingEmitter struct {
 	mu   sync.Mutex
 	seen []Captured
@@ -28,12 +27,6 @@ func (e *recordingEmitter) all() []Captured {
 	return append([]Captured(nil), e.seen...)
 }
 
-// await waits for n captures.
-//
-// Necessary, not defensive: the client returns from reading the body when the
-// server closes the response, which is BEFORE the handler goroutine has run the
-// emit that follows the relay. Asserting immediately after the client sees EOF is a
-// race on a server-side side effect, and it is one this test lost on the first run.
 func (e *recordingEmitter) await(t *testing.T, n int) []Captured {
 	t.Helper()
 	deadline := time.Now().Add(2 * time.Second)
@@ -48,7 +41,6 @@ func (e *recordingEmitter) await(t *testing.T, n int) []Captured {
 	return got
 }
 
-// wire builds a gateway with capture and/or the gate turned on.
 func wire(t *testing.T, upstream string, em Emitter, ev Evaluator, gated func(*http.Request) bool) *Gateway {
 	t.Helper()
 	g, err := New(Config{Upstream: upstream})
@@ -65,10 +57,7 @@ func wire(t *testing.T, upstream string, em Emitter, ev Evaluator, gated func(*h
 }
 
 // TestRelayIsByteIdenticalWithCaptureOn is the regression that matters most.
-//
-// Capture changes what is REPORTED, never what is forwarded. If turning it on
-// altered a single forwarded byte, the invariant this whole package exists for
-// would hold only in the configuration nobody runs in production.
+// Capture changes what is reported, never what is forwarded.
 func TestRelayIsByteIdenticalWithCaptureOn(t *testing.T) {
 	var withCapture, without recorded
 
@@ -100,8 +89,6 @@ func TestRelayIsByteIdenticalWithCaptureOn(t *testing.T) {
 	if withCapture.target != without.target {
 		t.Errorf("capture altered the request target: %q vs %q", withCapture.target, without.target)
 	}
-	// The credentials in particular must relay untouched with capture on — the
-	// capture copy is redacted, the forward is not.
 	if withCapture.header.Get("Authorization") != fixtureCredential {
 		t.Errorf("capture redacted the FORWARDED Authorization: %q", withCapture.header.Get("Authorization"))
 	}
@@ -155,19 +142,17 @@ func TestCaptureReportsRedactedEvidence(t *testing.T) {
 	if c.ResponseHeaders["Request-Id"] != "req_up" {
 		t.Errorf("response headers not captured: %v", c.ResponseHeaders)
 	}
-	// The whole evidence blob must not contain the raw credential anywhere.
 	if strings.Contains(c.RequestHeaders["Authorization"]+c.RequestBody+c.ResponseBody, "sk-ant-fixture") {
 		t.Error("the raw credential survived into the reported evidence")
 	}
 }
 
-// TestUngatedCallMakesNoRoundTripThroughTheRelay is requirement 5, asserted through
-// the real handler rather than only against Decide.
+// TestUngatedCallMakesNoRoundTripThroughTheRelay is requirement 5, asserted
+// through the real handler rather than only against Decide.
 func TestUngatedCallMakesNoRoundTripThroughTheRelay(t *testing.T) {
 	var got recorded
 	upstream := upstreamRecorder(t, &got, nil)
 	ev := &recordingEvaluator{verdict: "HALT"}
-	// gated returns false for everything: nothing should be evaluated.
 	gw := serveGateway(t, wire(t, upstream.URL, nil, ev, func(*http.Request) bool { return false }))
 
 	req, _ := http.NewRequest(http.MethodPost, gw.URL+"/v1/messages", strings.NewReader(`{}`))
@@ -186,9 +171,9 @@ func TestUngatedCallMakesNoRoundTripThroughTheRelay(t *testing.T) {
 }
 
 // TestNilGatedPredicateGatesNothing pins the safe default. Where the predicate
-// comes from is an open product decision, and until it is made the gateway must not
-// invent one — a gateway that gated everything would add a round-trip to each of
-// the ~52 model calls measured per turn window.
+// comes from is an open product decision, and until it is made the gateway
+// must not invent one; a gateway that gated everything would add a round-trip
+// to each of the ~52 model calls measured per turn window.
 func TestNilGatedPredicateGatesNothing(t *testing.T) {
 	var got recorded
 	upstream := upstreamRecorder(t, &got, nil)
@@ -210,7 +195,8 @@ func TestNilGatedPredicateGatesNothing(t *testing.T) {
 	}
 }
 
-// TestGatedHaltRefusesAndNeverReachesUpstream is the enforcement path end to end.
+// TestGatedHaltRefusesAndNeverReachesUpstream is the enforcement path end to
+// end.
 func TestGatedHaltRefusesAndNeverReachesUpstream(t *testing.T) {
 	var got recorded
 	var reached bool
@@ -243,9 +229,6 @@ func TestGatedHaltRefusesAndNeverReachesUpstream(t *testing.T) {
 	if !strings.Contains(string(body), "secrets policy") {
 		t.Errorf("the server's reason was dropped: %q", body)
 	}
-	// A refused call is exactly the one an auditor needs, so it must be reported.
-	// A refused call is reported synchronously before the handler returns, but wait
-	// anyway rather than depend on that ordering.
 	seen := em.await(t, 1)
 	if seen[0].CredentialFingerprint == "" {
 		t.Error("the refusal's evidence carries no fingerprint")
@@ -255,8 +238,8 @@ func TestGatedHaltRefusesAndNeverReachesUpstream(t *testing.T) {
 	}
 }
 
-// TestCaptureDoesNotBufferTheStream keeps the tee from reintroducing the failure
-// phase 04 exists to prevent. The sink must not delay a byte.
+// TestCaptureDoesNotBufferTheStream keeps the tee from reintroducing the
+// failure phase 04 exists to prevent. The sink must not delay a byte.
 func TestCaptureDoesNotBufferTheStream(t *testing.T) {
 	const stall = 600 * time.Millisecond
 	upstream := sseUpstream(t, func(w http.ResponseWriter, ctl *http.ResponseController) {
@@ -288,9 +271,9 @@ func TestCaptureDoesNotBufferTheStream(t *testing.T) {
 }
 
 // TestCaptureSinkIsBounded keeps a long stream from growing the buffer without
-// limit, and keeps the collection bound LARGER than the wire cap so the cap still
-// has something to truncate — the same relationship, and the same reason, as
-// maxThinkingBytes to capBody.
+// limit, and keeps the collection bound larger than the wire cap so the cap
+// still has something to truncate; the same relationship, and the same reason,
+// as maxThinkingBytes to capBody.
 func TestCaptureSinkIsBounded(t *testing.T) {
 	if maxCaptureSinkBytes <= captureBodyRunes {
 		t.Fatalf("collection bound %d must exceed the wire cap %d, or the cap is vacuous",

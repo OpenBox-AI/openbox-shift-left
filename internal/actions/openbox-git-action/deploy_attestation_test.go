@@ -9,15 +9,9 @@ import (
 	obgit "github.com/openbox-ai/openbox-shift-left/internal/adapters/common/git"
 )
 
-// The attestation must survive the last hop: resolution attaches it to the
-// claim, but only what BuildDeployEvent writes into metadata.sessions[] ever
-// reaches core. Core requires ownership AND an accepted attestation to record
-// verified lineage, so a claim that arrives without its signature pins the link
-// to verified:false no matter how good the signature was.
-//
-// The original E8-S10 gap was exactly here: resolve.go attached, deploy.go
-// dropped, and the end-to-end test stopped at Resolution — so this asserts on
-// the marshaled event, the same bytes the client would sign.
+// TestBuildDeployEvent_CarriesAttestation the attestation must survive the
+// last hop: resolution attaches it to the claim, but only what
+// BuildDeployEvent writes into metadata.sessions[] ever reaches core.
 func TestBuildDeployEvent_CarriesAttestation(t *testing.T) {
 	res := fixedResolution()
 	res.Sessions[0].Attestation = &obgit.Attestation{
@@ -42,9 +36,10 @@ func TestBuildDeployEvent_CarriesAttestation(t *testing.T) {
 	}
 }
 
-// Absence is the common case (notes are not pushed by default) and must stay
-// clean: an explicit null would make core's `len(s.Attestation) > 0` probe log
-// a rejection for every ordinary commit.
+// TestBuildDeployEvent_OmitsAbsentAttestation absence is the common case
+// (notes are not pushed by default) and must stay clean: an explicit null
+// would make core's `len(s.Attestation) > 0` probe log a rejection for every
+// ordinary commit.
 func TestBuildDeployEvent_OmitsAbsentAttestation(t *testing.T) {
 	sessions := deploySessions(t, fixedResolution())
 	if _, present := sessions[0]["attestation"]; present {
@@ -52,8 +47,9 @@ func TestBuildDeployEvent_OmitsAbsentAttestation(t *testing.T) {
 	}
 }
 
-// A git note is attacker-writable and is carried verbatim, so the resolver must
-// refuse to lift an oversized one into the governance record.
+// TestAttachAttestations_RejectsOversized a git note is attacker-writable and
+// is carried verbatim, so the resolver must refuse to lift an oversized one
+// into the governance record.
 func TestAttachAttestations_RejectsOversized(t *testing.T) {
 	huge := &obgit.Attestation{CanonicalB64: strings.Repeat("A", maxAttestationBytes+1)}
 	if withinAttestationSizeLimit(huge) {
@@ -68,9 +64,6 @@ func TestAttachAttestations_RejectsOversized(t *testing.T) {
 	}
 }
 
-// deploySessions builds the deploy event and returns metadata.sessions[] as it
-// would appear on the wire — decoded from the marshaled event, not read off the
-// in-memory map, so json tags and omitempty are exercised.
 func deploySessions(t *testing.T, res Resolution) []map[string]any {
 	t.Helper()
 	ev := BuildDeployEvent(res, DeployMeta{

@@ -39,7 +39,6 @@ func DefaultHaltDir() string {
 	return filepath.Join(openboxConfigDir(), "halted-sessions")
 }
 
-// haltPath is the latch file for one session.
 func haltPath(sessionID string) string {
 	sum := sha256.Sum256([]byte(sessionID))
 	return filepath.Join(DefaultHaltDir(), sanitizeSessionID(sessionID)+"-"+hex.EncodeToString(sum[:4])+".json")

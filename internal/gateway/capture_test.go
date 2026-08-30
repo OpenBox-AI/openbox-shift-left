@@ -6,14 +6,9 @@ import (
 	"testing"
 )
 
-// Fixtures are ASSEMBLED AT RUNTIME from fragments, never written as literals.
-//
-// This is not style. A literal secret-shaped string written into a file here is
-// rewritten to an ${OPENBOX_REDACTED_*} placeholder on save, which leaves the
-// test compiling, passing, and asserting nothing — the fixture it was supposed to
-// catch is already gone before the code under test runs. Two assertions below
-// were vacuous for exactly that reason until a mutation drill exposed them.
-// Fragments are individually low-entropy, so they survive intact.
+// bearerFixture fixtures are assembled AT runtime from fragments, never
+// written as literals. Two assertions below were vacuous for exactly that
+// reason until a mutation drill exposed them.
 func bearerFixture() string {
 	return "Bearer " + "sk-" + "ant-" + "api03-" + strings.Repeat("A", 8) + strings.Repeat("B", 8) + strings.Repeat("C", 8)
 }
@@ -31,9 +26,7 @@ func awsSecretFixture() string {
 func basicAuthFixture() string { return "Basic " + "dXNlcjpw" + "YXNz" }
 
 // TestCredentialHeadersRedactedByKeyName is the header half of the capture
-// contract. Redaction is by KEY NAME, not by pattern-matching the value: a
-// provider credential need not look like anything the secret detector knows, so
-// leaving it to content heuristics would be leaving it to luck.
+// contract.
 func TestCredentialHeadersRedactedByKeyName(t *testing.T) {
 	h := http.Header{}
 	h.Set("Authorization", bearerFixture())
@@ -44,7 +37,6 @@ func TestCredentialHeadersRedactedByKeyName(t *testing.T) {
 	h.Set("Api-Key", "another")
 	h.Set("X-Auth-Token", "yet-another")
 	h.Set("X-Amz-Security-Token", "aws-one")
-	// Not credentials: these have to survive, or the capture is useless.
 	h.Set("Anthropic-Version", "2023-06-01")
 	h.Set("Anthropic-Beta", "some-beta")
 	h.Set("Content-Type", "application/json")
@@ -74,7 +66,6 @@ func TestCredentialHeadersRedactedByKeyName(t *testing.T) {
 		}
 	}
 
-	// The whole map, flattened, must not contain any credential substring.
 	var flat strings.Builder
 	for k, v := range got {
 		flat.WriteString(k)
@@ -87,10 +78,9 @@ func TestCredentialHeadersRedactedByKeyName(t *testing.T) {
 	}
 }
 
-// TestFingerprintIsComputedBeforeRedaction is the ordering control. The
-// fingerprint derives FROM the credential, so it has to be taken while the value
-// is still there. Computed after redaction it would fingerprint the placeholder —
-// identical on every developer, and silently useless for account binding.
+// TestFingerprintIsComputedBeforeRedaction is the ordering control. Computed
+// after redaction it would fingerprint the placeholder; identical on every
+// developer, and silently useless for account binding.
 func TestFingerprintIsComputedBeforeRedaction(t *testing.T) {
 	h := http.Header{}
 	h.Set("Authorization", bearerFixture())
@@ -103,7 +93,6 @@ func TestFingerprintIsComputedBeforeRedaction(t *testing.T) {
 		t.Error("fingerprint matches the one derived from a redacted placeholder: it was computed too late")
 	}
 
-	// One-way and stable.
 	if strings.Contains(fp, "sk-") || strings.Contains(bearerFixture(), fp) {
 		t.Errorf("fingerprint %q leaks part of the credential", fp)
 	}
@@ -111,7 +100,6 @@ func TestFingerprintIsComputedBeforeRedaction(t *testing.T) {
 		t.Errorf("fingerprint is not stable: %q then %q", fp, again)
 	}
 
-	// A different credential must fingerprint differently, or it cannot identify.
 	other := http.Header{}
 	other.Set("Authorization", "Bearer "+strings.Repeat("Z", 24))
 	if credentialFingerprint(other) == fp {
@@ -125,9 +113,9 @@ func redactedOnly() http.Header {
 	return h
 }
 
-// TestFingerprintPrefersAuthorizationThenAPIKey pins which header is fingerprinted
-// when both modes are somehow present, so the value is deterministic rather than
-// map-iteration-dependent.
+// TestFingerprintPrefersAuthorizationThenAPIKey pins which header is
+// fingerprinted when both modes are somehow present, so the value is
+// deterministic rather than map-iteration-dependent.
 func TestFingerprintPrefersAuthorizationThenAPIKey(t *testing.T) {
 	both := http.Header{}
 	both.Set("Authorization", bearerFixture())
@@ -151,9 +139,7 @@ func TestFingerprintPrefersAuthorizationThenAPIKey(t *testing.T) {
 	}
 }
 
-// TestCaptureBodyIsRedactedThenCapped pins the order and both mechanisms. A cap
-// applied before redaction could slice a secret in half and let the halves
-// through; a redaction skipped entirely puts the raw value on the wire.
+// TestCaptureBodyIsRedactedThenCapped pins the order and both mechanisms.
 func TestCaptureBodyIsRedactedThenCapped(t *testing.T) {
 	body := `{"messages":[{"role":"user","content":"deploy with ` + awsKeyFixture() +
 		` and aws_secret_access_key=` + awsSecretFixture() + `"}]}`
@@ -169,7 +155,6 @@ func TestCaptureBodyIsRedactedThenCapped(t *testing.T) {
 		t.Errorf("redaction destroyed the surrounding text: %q", got)
 	}
 
-	// Over-cap input is truncated, counted in runes to match the wire cap.
 	long := strings.Repeat("é", captureBodyRunes+500)
 	capped := captureBody(long)
 	if n := len([]rune(capped)); n != captureBodyRunes {
@@ -184,10 +169,11 @@ func TestCaptureBodyEmptyStaysEmpty(t *testing.T) {
 	}
 }
 
-// TestCaptureOrderingFingerprintThenRedact is the ordering control, and it has to
-// run against the PIPELINE rather than the two functions separately: testing
-// credentialFingerprint and redactHeaders in isolation cannot observe the order
-// they are called in, which is the thing that can actually be got wrong.
+// TestCaptureOrderingFingerprintThenRedact is the ordering control, and it has
+// to run against the pipeline rather than the two functions separately:
+// testing credentialFingerprint and redactHeaders in isolation cannot observe
+// the order they are called in, which is the thing that can actually be got
+// wrong.
 func TestCaptureOrderingFingerprintThenRedact(t *testing.T) {
 	reqHeaders := http.Header{}
 	reqHeaders.Set("Authorization", bearerFixture())
@@ -199,15 +185,12 @@ func TestCaptureOrderingFingerprintThenRedact(t *testing.T) {
 	got := CaptureRequest(http.MethodPost, "https://api.anthropic.com/v1/messages?beta=true",
 		reqHeaders, `{"model":"claude-opus-4"}`).Complete(200, respHeaders, `{"type":"message"}`)
 
-	// Both halves, from one call: the value is gone AND the fingerprint is real.
 	if got.RequestHeaders["Authorization"] != redactedHeaderValue {
 		t.Errorf("Authorization was not redacted: %q", got.RequestHeaders["Authorization"])
 	}
 	if got.CredentialFingerprint == "" {
 		t.Fatal("no fingerprint: it was computed after redaction, from the placeholder")
 	}
-	// The specific failure a reversed order produces: every developer's span
-	// carrying the fingerprint OF THE PLACEHOLDER.
 	placeholderFP := credentialFingerprint(redactedOnly())
 	if got.CredentialFingerprint == placeholderFP {
 		t.Error("fingerprint equals the placeholder's; the order is reversed")
@@ -216,7 +199,6 @@ func TestCaptureOrderingFingerprintThenRedact(t *testing.T) {
 		t.Error("fingerprint does not match the live credential's")
 	}
 
-	// Response credentials are redacted too — Set-Cookie is a credential.
 	if got.ResponseHeaders["Set-Cookie"] != redactedHeaderValue {
 		t.Errorf("Set-Cookie was not redacted: %q", got.ResponseHeaders["Set-Cookie"])
 	}
@@ -224,7 +206,6 @@ func TestCaptureOrderingFingerprintThenRedact(t *testing.T) {
 		t.Errorf("a non-credential response header was lost: %q", got.ResponseHeaders["Request-Id"])
 	}
 
-	// Classification keys, and no query string on the captured URL.
 	if got.HTTPMethod != http.MethodPost || got.HTTPStatus != 200 {
 		t.Errorf("classification keys wrong: method=%q status=%d", got.HTTPMethod, got.HTTPStatus)
 	}
@@ -233,13 +214,9 @@ func TestCaptureOrderingFingerprintThenRedact(t *testing.T) {
 	}
 }
 
-// TestSplitCaptureKeepsTheOrderingAndDoesNotRedoWork is the control on the split.
-//
-// The gate must decide BEFORE a response exists, while the span needs both halves.
-// The danger in splitting is that the response half re-derives the fingerprint from
-// headers the request half already redacted — which yields the placeholder's hash,
-// identical for every developer, and is precisely the inversion the single-function
-// version existed to prevent.
+// TestSplitCaptureKeepsTheOrderingAndDoesNotRedoWork is the control on the
+// split. The gate must decide before a response exists, while the span needs
+// both halves.
 func TestSplitCaptureKeepsTheOrderingAndDoesNotRedoWork(t *testing.T) {
 	reqHeaders := http.Header{}
 	reqHeaders.Set("Authorization", bearerFixture())
@@ -251,7 +228,6 @@ func TestSplitCaptureKeepsTheOrderingAndDoesNotRedoWork(t *testing.T) {
 	rc := CaptureRequest(http.MethodPost, "https://api.anthropic.com/v1/messages?beta=true",
 		reqHeaders, `{"model":"claude-opus-4"}`)
 
-	// Request half: fingerprint real, credential gone.
 	if rc.Fingerprint == "" {
 		t.Fatal("no fingerprint from the request half")
 	}
@@ -262,7 +238,6 @@ func TestSplitCaptureKeepsTheOrderingAndDoesNotRedoWork(t *testing.T) {
 		t.Errorf("URL = %q; the query must be dropped", rc.URL)
 	}
 
-	// The gate's view carries the request evidence and NO invented response.
 	g := rc.ForGate()
 	if g.CredentialFingerprint != rc.Fingerprint {
 		t.Error("the gate's view lost the fingerprint")
@@ -271,7 +246,6 @@ func TestSplitCaptureKeepsTheOrderingAndDoesNotRedoWork(t *testing.T) {
 		t.Error("the gate's view invented response fields that nothing measured")
 	}
 
-	// Completing must NOT re-derive the fingerprint from now-redacted headers.
 	full := rc.Complete(200, respHeaders, `{"type":"message"}`)
 	if full.CredentialFingerprint != rc.Fingerprint {
 		t.Errorf("Complete recomputed the fingerprint (%q vs %q) — from already-redacted headers, so it is the placeholder's hash",

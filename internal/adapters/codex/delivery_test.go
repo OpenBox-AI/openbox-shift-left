@@ -12,12 +12,7 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/internal/client"
 )
 
-// E8-S7. A delivery failure used to end an event's life inside the drain, which
-// made "at most once" a data-loss guarantee rather than a safety one. The event
-// is now carried over to a recovery file and retried on a later flush — safe
-// because the server deduplicates on the Idempotency-Key the event's stable id
-// produces, so a re-send of something that did land returns the original
-// verdict instead of counting it twice.
+// TestDelivery_UndeliveredEventIsRetriedNotDropped e8-S7.
 func TestDelivery_UndeliveredEventIsRetriedNotDropped(t *testing.T) {
 	dir := t.TempDir()
 	s := hookflow.Spool{Dir: dir}
@@ -25,7 +20,6 @@ func TestDelivery_UndeliveredEventIsRetriedNotDropped(t *testing.T) {
 		t.Fatalf("append: %v", err)
 	}
 
-	// First flush: the network is down.
 	n, err := s.FlushAll(context.Background(), func(context.Context, client.DevEvent) error {
 		return errors.New("network down")
 	})
@@ -36,7 +30,6 @@ func TestDelivery_UndeliveredEventIsRetriedNotDropped(t *testing.T) {
 		t.Errorf("undelivered event counted as delivered: n=%d", n)
 	}
 
-	// Second flush: the network is back, and the event is still there.
 	var got []string
 	n, err = s.FlushAll(context.Background(), func(_ context.Context, ev client.DevEvent) error {
 		got = append(got, ev.EventID)
@@ -48,15 +41,14 @@ func TestDelivery_UndeliveredEventIsRetriedNotDropped(t *testing.T) {
 	if n != 1 || len(got) != 1 || got[0] != "evt-1" {
 		t.Fatalf("event was not retried: n=%d got=%v", n, got)
 	}
-	// Delivered events leave nothing behind.
 	if left, _ := filepath.Glob(filepath.Join(dir, "*.jsonl")); len(left) != 0 {
 		t.Errorf("spool should be empty after a successful drain, got %v", left)
 	}
 }
 
-// The retry must be bounded. An event the server will never accept would
-// otherwise be re-sent on every flush forever, costing a request each time on a
-// developer's machine.
+// TestDelivery_RetryIsBounded the retry must be bounded. An event the server
+// will never accept would otherwise be re-sent on every flush forever, costing
+// a request each time on a developer's machine.
 func TestDelivery_RetryIsBounded(t *testing.T) {
 	dir := t.TempDir()
 	s := hookflow.Spool{Dir: dir}
@@ -88,8 +80,9 @@ func TestDelivery_RetryIsBounded(t *testing.T) {
 	}
 }
 
-// The attempt counter is read back from the filename, so the bound survives the
-// process exiting between flushes (the normal case: one flush per session end).
+// TestDelivery_RecoveryAttemptParsing the attempt counter is read back from
+// the filename, so the bound survives the process exiting between flushes (the
+// normal case: one flush per session end).
 func TestDelivery_RecoveryAttemptParsing(t *testing.T) {
 	cases := map[string]int{
 		"s1.jsonl":              0, // a fresh spool file
@@ -108,10 +101,9 @@ func TestDelivery_RecoveryAttemptParsing(t *testing.T) {
 	}
 }
 
-// The Idempotency-Key the server deduplicates on must be identical across a
-// re-send, or the retry above would double-count instead of dedupe. It is the
-// event's own id, and the id is derived from structural fields that survive the
-// spool round-trip — so this locks the property the whole story rests on.
+// TestDelivery_IdempotencyKeyStableAcrossRespool the Idempotency-Key the
+// server deduplicates on must be identical across a re-send, or the retry
+// above would double-count instead of dedupe.
 func TestDelivery_IdempotencyKeyStableAcrossRespool(t *testing.T) {
 	dir := t.TempDir()
 	s := hookflow.Spool{Dir: dir}
@@ -154,7 +146,8 @@ func TestDelivery_IdempotencyKeyStableAcrossRespool(t *testing.T) {
 	}
 }
 
-// A corrupt line must not be retried forever either — it is skipped, as before.
+// TestDelivery_CorruptLineSkipped a corrupt line must not be retried forever
+// either; it is skipped, as before.
 func TestDelivery_CorruptLineSkipped(t *testing.T) {
 	dir := t.TempDir()
 	s := hookflow.Spool{Dir: dir}
@@ -177,10 +170,9 @@ func TestDelivery_CorruptLineSkipped(t *testing.T) {
 	}
 }
 
-// The SessionEnded event reports telemetry completeness as the client can see
-// it: nothing carried over ⇒ complete; a failed earlier flush ⇒ degraded with a
-// count. This is what lets the control plane distinguish a session whose
-// evidence is whole from one whose evidence is still in flight.
+// TestEvidenceState_ReportedOnSessionEnd the SessionEnded event reports
+// telemetry completeness as the client can see it: nothing carried over ⇒
+// complete; a failed earlier flush ⇒ degraded with a count.
 func TestEvidenceState_ReportedOnSessionEnd(t *testing.T) {
 	m := testMapper()
 
@@ -202,7 +194,6 @@ func TestEvidenceState_ReportedOnSessionEnd(t *testing.T) {
 		t.Errorf("degraded session mis-reported: %v", degraded.Metadata)
 	}
 
-	// Session-scoped, like posture: it belongs on SessionEnded and nowhere else.
 	for _, hook := range []HookName{HookSessionStart, HookPreToolUse, HookUserPromptSubmit} {
 		ev, _ := m.Map(hook, &HookEvent{SessionID: "s1", ToolName: "Bash"})
 		if _, present := ev.Metadata["evidence_state"]; present {
@@ -211,9 +202,8 @@ func TestEvidenceState_ReportedOnSessionEnd(t *testing.T) {
 	}
 }
 
-// UndeliveredCount counts carry-over files only. The live session spool holds
-// events that simply have not been flushed yet, which is normal — counting it
-// would mark every healthy session degraded.
+// TestEvidenceState_CountsOnlyCarriedOverEvents undeliveredCount counts carry-
+// over files only.
 func TestEvidenceState_CountsOnlyCarriedOverEvents(t *testing.T) {
 	dir := t.TempDir()
 	s := hookflow.Spool{Dir: dir}
@@ -224,7 +214,6 @@ func TestEvidenceState_CountsOnlyCarriedOverEvents(t *testing.T) {
 		t.Errorf("a not-yet-flushed event is not undelivered evidence, got %d", got)
 	}
 
-	// A failed flush turns it into carry-over.
 	if _, err := s.FlushAll(context.Background(), func(context.Context, client.DevEvent) error {
 		return errors.New("network down")
 	}); err != nil {
@@ -234,7 +223,6 @@ func TestEvidenceState_CountsOnlyCarriedOverEvents(t *testing.T) {
 		t.Errorf("after a failed flush the event is undelivered evidence, got %d", got)
 	}
 
-	// An unreadable spool dir reports 0 rather than failing a session.
 	if got := (hookflow.Spool{Dir: filepath.Join(dir, "nope")}).UndeliveredCount(); got != 0 {
 		t.Errorf("missing dir should report 0, got %d", got)
 	}

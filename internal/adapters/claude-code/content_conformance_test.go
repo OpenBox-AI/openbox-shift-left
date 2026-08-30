@@ -15,29 +15,8 @@ import (
 	"testing"
 )
 
-// Tool-content conformance suite — executable evidence for the content gate on the fields this
-// adapter used to throw away.
-//
-// Same discipline as C18/C26 and for the same reason: every assertion is made on the bytes
-// actually POSTed to /evaluate, never on the mapper's return or on a DevEvent. A redaction
-// applied AFTER attachment, or a gate that filters the struct but not the wire, satisfies
-// every unit test in this package and still leaks — which is the whole failure mode this suite
-// exists to catch.
-//
-// |C32| PostToolUse, capture ON  | tool output reaches activity_output.output      | |C33| the
-// same, capture OFF    | no output text; the ActivityCompleted still ships| |C34| a secret in
-// tool output  | redacted BEFORE attachment                      | |C35| oversized tool output
-// | capped before signing                           | |C36| PreToolUse observe path  | tool
-// input egresses under the gate (SL3-SEC-3 retired) | |C37| PostToolUseFailure       | the
-// free-text error egresses gated, never as error_type | |C38| the two signal free-texts|
-// egress gated as metadata, and NEVER as signal_args      | |C39| a dotenv dump as output  |
-// which credential FORMATS the one control actually catches| |C40| Stop, capture ON          |
-// the turn's THINKING reaches activity_output.thinking     | |C41| the same, capture OFF     |
-// no thinking; the turn pair still ships                   |
-//
-// What these cases deliberately do NOT relax: with capture OFF the tool events must still
-// ship. A case that passed because the client stopped emitting would prove the opposite of the
-// gate.
+// TestContentCaptureConformance tool-content conformance suite; executable
+// evidence for the content gate on the fields this adapter used to throw away.
 func TestContentCaptureConformance(t *testing.T) {
 	isolateConfig(t)
 	t.Setenv(envDID, testDID)
@@ -45,8 +24,6 @@ func TestContentCaptureConformance(t *testing.T) {
 	t.Setenv("OPENBOX_SESSION_DIR", t.TempDir())
 	t.Setenv(envEnforcementFile, filepath.Join(t.TempDir(), "enf.jsonl"))
 
-	// serveCapturing records every body POSTed to /evaluate. Local to this suite
-	// (the enforcement suite's copy is a closure of its own test func).
 	serveCapturing := func(t *testing.T) *[]string {
 		t.Helper()
 		var mu sync.Mutex
@@ -64,19 +41,12 @@ func TestContentCaptureConformance(t *testing.T) {
 		return &bodies
 	}
 
-	// observeThenFlush drives the real observe path for one hook and then the
-	// SessionEnd flush that delivers it, returning what reached /evaluate.
-	//
-	// `capture` is set AFTER serveCapturing, deliberately: serveCapturing calls
-	// evalCreds, which forces content capture OFF. Setting it before would be
-	// silently overwritten and a capture-ON case would pass by proving the
-	// capture-OFF behaviour.
+	// `capture` is set after serveCapturing, deliberately: serveCapturing calls
+	// evalCreds, which forces content capture OFF.
 	observeThenFlush := func(t *testing.T, session, capture, hook, payload string) []string {
 		t.Helper()
 		bodies := serveCapturing(t)
 		t.Setenv(envContentCapture, capture)
-		// The detached realtime flusher would fork a second process mid-test and
-		// race the assertion; SessionEnd's flush is the deterministic delivery.
 		t.Setenv(envRealtime, "0")
 		t.Setenv(envEnforce, "0") // observe path — no gate, no deferred spool
 		var out bytes.Buffer
@@ -87,8 +57,6 @@ func TestContentCaptureConformance(t *testing.T) {
 		return *bodies
 	}
 
-	// activityOutput returns the decoded activity_output of the first body whose
-	// event_type is ActivityCompleted, and whether one was found at all.
 	activityOutput := func(t *testing.T, bodies []string) (map[string]any, bool) {
 		t.Helper()
 		for _, b := range bodies {
@@ -106,7 +74,6 @@ func TestContentCaptureConformance(t *testing.T) {
 		return nil, false
 	}
 
-	// activityInput is the ActivityStarted counterpart.
 	activityInput := func(t *testing.T, bodies []string) (map[string]any, bool) {
 		t.Helper()
 		for _, b := range bodies {
@@ -156,8 +123,8 @@ func TestContentCaptureConformance(t *testing.T) {
 				t.Errorf("tool output egressed with capture OFF in body #%d: %s", i, b)
 			}
 		}
-		// The gate is on CONTENT, not on the event. Without this the case would
-		// pass for a client that stopped emitting tool results entirely.
+		// Without this the case would pass for a client that stopped emitting tool
+		// results entirely.
 		if _, found := activityOutput(t, bodies); !found {
 			t.Errorf("no ActivityCompleted with capture off; the gate is on the tool's "+
 				"OUTPUT, not on the tool event: %v", bodies)
@@ -165,14 +132,7 @@ func TestContentCaptureConformance(t *testing.T) {
 	})
 
 	t.Run("C34 a secret in tool output never reaches /evaluate", func(t *testing.T) {
-		// C18/C26 discipline: redaction must run BEFORE attachment. A redaction
-		// applied to a copy after the body was attached satisfies every other
-		// assertion here and still ships the secret.
 		os.Unsetenv(envSecretDetection) // detection default ON
-		// Assembled at runtime, not written as one literal: a repo-side secret
-		// scanner rewrites a whole AWS key in source, which would silently turn
-		// this case into an assertion about a placeholder. The detector under test
-		// sees the joined value in the hook payload, which is what matters.
 		awsKey := "AKIA" + "IOSFODNN7EXAMPLE"
 		bodies := observeThenFlush(t, "cc-secret", "1", "PostToolUse",
 			postToolUse("cc-secret", `{"stdout":"AWS_ACCESS_KEY_ID=`+awsKey+`","stderr":"","interrupted":false}`))
@@ -195,9 +155,6 @@ func TestContentCaptureConformance(t *testing.T) {
 	})
 
 	t.Run("C35 oversized tool output is capped before signing", func(t *testing.T) {
-		// The signed bytes ARE the transmitted bytes (buildPayload marshals once),
-		// so capping at the client caps what is signed. Without a cap a single
-		// `cat` of a large file would put megabytes on the wire per tool call.
 		const over = 70000 // > maxBodySize (65536)
 		bodies := observeThenFlush(t, "cc-cap", "1", "PostToolUse",
 			postToolUse("cc-cap", `{"stdout":"`+strings.Repeat("x", over)+`","stderr":"","interrupted":false}`))
@@ -216,10 +173,6 @@ func TestContentCaptureConformance(t *testing.T) {
 	})
 
 	t.Run("C36 tool input egresses on the observe path under the gate", func(t *testing.T) {
-		// SL3-SEC-3 ("tool commands and file bodies never egress on observe
-		// events") is retired here by that decision, and it is retired into a
-		// GATE, not into an absence: the same command that egresses with capture
-		// on must be absent with capture off.
 		const cmd = "cat /etc/hosts && echo OBSERVE-INPUT-SENTINEL"
 		payload := func(session string) string {
 			return `{"hook_event_name":"PreToolUse","session_id":"` + session + `","cwd":"/tmp",` +
@@ -249,9 +202,7 @@ func TestContentCaptureConformance(t *testing.T) {
 	})
 
 	t.Run("C37 a failed call's free-text error egresses gated, never as error_type", func(t *testing.T) {
-		// `error` is one JSON key on two hooks: a closed provider enum on
-		// StopFailure, free text a tool wrote on PostToolUseFailure. Binding the
-		// free text as gated content must not widen the enum field — a
+		// Binding the free text as gated content must not widen the enum field; a
 		// non-enum value on metadata.error_type would be ungated egress.
 		const detail = "ENOENT: no such file /home/dev/.ssh/id_rsa"
 		fail := func(session string) string {
@@ -270,7 +221,6 @@ func TestContentCaptureConformance(t *testing.T) {
 			t.Errorf("activity_output.output = %q, want the tool's error text — a failed "+
 				"activity's output IS its error", got)
 		}
-		// The enum field must stay clean on every body.
 		for _, b := range on {
 			var p struct {
 				Metadata map[string]any `json:"metadata"`
@@ -293,13 +243,9 @@ func TestContentCaptureConformance(t *testing.T) {
 	})
 
 	t.Run("C38 signal free text egresses as metadata, never as signal_args", func(t *testing.T) {
-		// signal_args is the constraint that matters here, and it is a
-		// CORRECTNESS one, not a privacy one: core's alignment engine reads any
-		// SignalReceived with non-empty signal_args as a NEW USER GOAL and
-		// overwrites the session's goal with it (age.go:112-137). Routing a
-		// denial reason there would silently replace the developer's prompt as
-		// the thing every later turn is scored against — the failure would look
-		// like drift, not like a bug.
+		// Routing a denial reason there would silently replace the developer's
+		// prompt as the thing every later turn is scored against; the failure would
+		// look like drift, not like a bug.
 		for _, tc := range []struct {
 			name, hook, session, payload, metaKey, sentinel string
 		}{
@@ -354,10 +300,6 @@ func TestContentCaptureConformance(t *testing.T) {
 		}
 	})
 
-	// C40/C41 are the only content cases whose source is the TRANSCRIPT rather
-	// than a hook payload field, which is the whole reason they exist separately:
-	// thinking reaches the wire through that decision projection, so a gate that
-	// works for every hook-sourced field proves nothing about it.
 	stopWithThinking := func(t *testing.T, session, thinking string) string {
 		t.Helper()
 		path := filepath.Join(t.TempDir(), "transcript.jsonl")
@@ -386,9 +328,6 @@ func TestContentCaptureConformance(t *testing.T) {
 		if !strings.Contains(got, thinking) {
 			t.Errorf("activity_output.thinking = %q, want the turn's thinking block", got)
 		}
-		// It must NOT have ridden the assistant span instead: that span feeds
-		// core's alignment extractor as the assistant's REPLY, so thinking there
-		// would score later turns against the model's reasoning. Silent if wrong.
 		for _, b := range bodies {
 			var p struct {
 				Spans []struct {
@@ -418,9 +357,8 @@ func TestContentCaptureConformance(t *testing.T) {
 				t.Errorf("thinking egressed with capture OFF in body #%d: %s", i, b)
 			}
 		}
-		// The gate is on the CONTENT, not on the turn. Without this the case would
-		// pass for a client that stopped emitting turns entirely — and the token
-		// numbers are the reason turns exist.
+		// Without this the case would pass for a client that stopped emitting turns
+		// entirely; and the token numbers are the reason turns exist.
 		out, found := activityOutput(t, bodies)
 		if !found {
 			t.Fatalf("no ActivityCompleted with capture off; the gate is on the turn's "+
@@ -434,19 +372,9 @@ func TestContentCaptureConformance(t *testing.T) {
 		}
 	})
 
-	// C42 — the PROMPT is redacted before it egresses.
-	//
-	// It was the one content field on the observe path that was not. Output,
-	// Thinking, ToolInput, ToolOutput and SignalDetail all passed through
-	// Mapper.redact; `Prompt: e.Prompt` did not — so with secret_detection fully
-	// ON, a credential pasted into a prompt reached the control plane verbatim,
-	// while Map's own doc comment and README both said prompts are "scanned for
-	// secrets and redacted locally first".
-	//
-	// Asserted in three directions on the real outbound bytes. The secret absent
-	// AND the placeholder present, because absence alone also passes for a client
-	// that stopped sending prompts; and the surrounding text intact, because
-	// "redacted" must be distinguishable from "dropped".
+	// The secret absent AND the placeholder present, because absence alone also
+	// passes for a client that stopped sending prompts; and the surrounding text
+	// intact, because "redacted" must be distinguishable from "dropped".
 	t.Run("C42 the prompt is redacted before egress", func(t *testing.T) {
 		const secret = "AKIAIOSFODNN7EXAMPLE"
 		bodies := observeThenFlush(t, "cc-prompt-redact", "1", "UserPromptSubmit",
@@ -469,46 +397,10 @@ func TestContentCaptureConformance(t *testing.T) {
 	})
 }
 
-// C39 is a detection-COVERAGE case, not an ordering case, and it is separate from
-// C34 deliberately.
-//
-// C34 proves redaction runs before attachment, using an AWS key — a format the
-// pattern list covers by name. That says nothing about which formats the detector
-// recognizes at all, and after that decision that question got much more
-// expensive: tool output egresses at TOOL-CALL cadence, and tool output is
-// exactly where credentials surface — an `env` dump, a `cat` of a dotenv file, a
-// token in a stack trace. Local detection is the ONLY in-transit control on that
-// path.
-//
-// So this drives the realistic worst case — a governed session reading OpenBox's
-// OWN credential file — and asserts per format, so a gap is named rather than
-// averaged away. Each secret is assembled at runtime: a repo-side scanner
-// rewrites credential-shaped literals in source, which would turn the case into
-// an assertion about a placeholder.
-//
-// TWO cases assert that a credential DOES leak. That is deliberate — each is an
-// honest limit, pinned so that closing it has to be a decision rather than a side
-// effect:
-//
-// - **Unlabelled hex.** A token with no recognized key name is redacted only if
-// it clears the entropy floor, and hex cannot: 16 symbols cap it at 4.0 bits/char
-// against a 4.5 threshold (decision/secrets.go:50-56). NOT fixable by lowering
-// the floor — below 4.0 every git SHA and UUID matches, and on the enforce path
-// the redactor REWRITES the tool input, so false positives corrupt real files.
-//
-// NESTED JSON used to be a second gap and is now CLOSED — those cases stay in the
-// table as regression guards rather than as documentation of a limit. A
-// tool_response is itself JSON, so a nested value arrives escaped
-// (`{\"key\":\"<tok>\"}`), and both generic mechanisms lost it: the keyword
-// pattern needed adjacency to the `:`, and the entropy pass's
-// precededByAssignment stopped at the backslash. Tool output made that the common
-// shape — an MCP result, a `cat config.json` — so both were widened
-// (decision/secrets.go, pinned by TestRedact_JSONShapedSecrets).
-//
-// The named formats (AWS/GitHub/Stripe/JWT/AI keys) were never affected: they
-// match on the secret's own shape, so surrounding syntax is irrelevant. That
-// asymmetry is what made the gap easy to miss — an AWS key in JSON was caught
-// while a database password was not.
+// TestContentCaptureCredentialCoverage c39 is a detection-coverage case, not
+// an ordering case, and it is separate from C34 deliberately.
+//   - **Unlabelled hex.** A token with no recognized key name is redacted only
+//     if
 func TestContentCaptureCredentialCoverage(t *testing.T) {
 	isolateConfig(t)
 	t.Setenv(envDID, testDID)
@@ -518,13 +410,8 @@ func TestContentCaptureCredentialCoverage(t *testing.T) {
 
 	for _, tc := range []struct {
 		name, line, secret string
-		// caught is what the detector ACTUALLY does today, not what one might
-		// wish. The false case is a characterization of a deliberate design
-		// boundary — see the note above the table.
-		caught bool
-		// by names the mechanism, so a failure says WHICH control moved rather
-		// than only that something changed.
-		by string
+		caught             bool
+		by                 string
 	}{
 		{
 			name:   "obx api key",
@@ -550,9 +437,6 @@ func TestContentCaptureCredentialCoverage(t *testing.T) {
 			secret: strings.Repeat("a1b2c3d4", 8),
 			caught: false, by: "nothing — hex cannot reach the entropy floor, by design",
 		},
-		// NESTED JSON in tool output — the shape an MCP result has, and the shape
-		// `cat config.json` produces. tool_response is itself JSON, so a nested
-		// value arrives ESCAPED, and the backslash is what defeats the scanner.
 		{
 			name:   "high-entropy secret in nested JSON",
 			line:   `{"key":"` + "aB3xQ9vK2mZ7pL4wR8tY6nH1jF5sD0gC" + `"}`,
@@ -565,8 +449,6 @@ func TestContentCaptureCredentialCoverage(t *testing.T) {
 			secret: "hunter2-prod-db-2026",
 			caught: true, by: "secret_assignment — the keyword tolerates the key's closing quote",
 		},
-		// The control that proves the two above are about SHAPE, not about the
-		// secret: the identical token, flat, in the same field, IS caught.
 		{
 			name:   "the same high-entropy token, flat, in the same field",
 			line:   "SESSION_KEY=" + "aB3xQ9vK2mZ7pL4wR8tY6nH1jF5sD0gC",
@@ -624,11 +506,6 @@ func TestContentCaptureCredentialCoverage(t *testing.T) {
 			case tc.caught && leaked:
 				t.Errorf("credential reached /evaluate — %s was expected to catch it", tc.by)
 			case !tc.caught && !leaked:
-				// Not a pass. Something started catching this, which is good news
-				// and MUST be deliberate: the only ways to reach an unlabelled hex
-				// token are a new keyword or a lower entropy floor, and lowering
-				// the floor below 4.0 flags every git SHA and UUID — which, on the
-				// enforce path, means the redactor rewriting real file bodies.
 				t.Errorf("the unlabelled-hex gap has closed. If that was intended, update "+
 					"this case AND docs/data-and-privacy.md; if it was a side effect of "+
 					"tuning the entropy floor, check what else now matches (%s)", tc.by)
@@ -637,7 +514,6 @@ func TestContentCaptureCredentialCoverage(t *testing.T) {
 	}
 }
 
-// jsonQuote JSON-quotes a string for embedding in a hand-built hook payload.
 func jsonQuote(s string) string {
 	b, _ := json.Marshal(s)
 	return string(b)

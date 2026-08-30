@@ -44,8 +44,9 @@ type rolloutLine struct {
 	Payload *rolloutPayload `json:"payload"`
 }
 
-// readRolloutUsage reads a Codex rollout jsonl and returns the session's final
-// cumulative usage numbers plus the model that ran it.
+// readRolloutUsage returns (nil, "", nil) when the rollout carries no token
+// counts at all (a valid session that never recorded usage; the caller then
+// attaches nothing, same as finops-off).
 func readRolloutUsage(path string) (*client.Tokens, string, error) {
 	if path == "" {
 		return nil, "", fmt.Errorf("no transcript_path")
@@ -71,8 +72,9 @@ func readRolloutUsage(path string) (*client.Tokens, string, error) {
 	return tokens, model, nil
 }
 
-// aggregateRolloutUsage parses rollout jsonl bytes into a token rollup using
-// the numbers-only projection.
+// aggregateRolloutUsage empty when the rollout names none, in which case the
+// pair is still emitted and the core-side extractor buckets it as unknown;
+// never substituted from anywhere else.
 func aggregateRolloutUsage(raw []byte) (*client.Tokens, string) {
 	var latest rolloutTokenUsage
 	var seen bool

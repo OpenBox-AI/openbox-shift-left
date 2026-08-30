@@ -8,24 +8,15 @@ import (
 	"testing"
 )
 
-// Two `openbox init` runs against one project used to be able to splice their
+// TestConcurrentWriteLocalHooksNeverPublishesAnUnparsableSettingsFile two
+// `openbox init` runs against one project used to be able to splice their
 // output together: the write was a truncate-then-write, so both truncated to
 // zero and then wrote at their own offsets, and the shorter document landed
-// inside the longer one. The file ended as a complete JSON document followed by
-// the tail of another — invalid, which makes Claude Code drop EVERY hook in it
-// for that project. Governance that reports itself as nothing is the failure
-// this product exists to prevent, so the write commits through a rename now.
-//
-// The reader goroutine is the assertion that matters: it is not enough that the
-// file is valid once the dust settles, because a session starting mid-install
-// reads it exactly then.
+// inside the longer one.
 func TestConcurrentWriteLocalHooksNeverPublishesAnUnparsableSettingsFile(t *testing.T) {
 	project := t.TempDir()
 	settings := filepath.Join(project, ".claude", "settings.local.json")
 
-	// Seed the file so the reader always has something to parse, and give the
-	// writers different engine paths so each produces a DIFFERENT length —
-	// equal-length writes could interleave undetectably.
 	if err := writeLocalHooks(project, "/opt/openbox/bin/openbox"); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
@@ -75,8 +66,6 @@ func TestConcurrentWriteLocalHooksNeverPublishesAnUnparsableSettingsFile(t *test
 			writers.Add(1)
 			go func(engine string) {
 				defer writers.Done()
-				// Errors are not the subject here (concurrent runs may legitimately
-				// fail); publishing an unparsable file is.
 				_ = writeLocalHooks(project, engine)
 			}(engine)
 		}
@@ -103,8 +92,6 @@ func TestConcurrentWriteLocalHooksNeverPublishesAnUnparsableSettingsFile(t *test
 		t.Errorf("last writer left no hooks key:\n%s", raw)
 	}
 
-	// The rename's temp file is an implementation detail that must not survive
-	// into the project the developer has checked out.
 	entries, err := os.ReadDir(filepath.Dir(settings))
 	if err != nil {
 		t.Fatalf("read .claude dir: %v", err)
@@ -116,9 +103,9 @@ func TestConcurrentWriteLocalHooksNeverPublishesAnUnparsableSettingsFile(t *test
 	}
 }
 
-// The atomic write must preserve the mode the previous plain write published —
-// settings.local.json is not a secret, and other tools read it. CreateTemp
-// makes 0600, so this fails without the explicit chmod.
+// TestWriteLocalHooksPublishesAReadableSettingsFile the atomic write must
+// preserve the mode the previous plain write published; settings.local.json is
+// not a secret, and other tools read it.
 func TestWriteLocalHooksPublishesAReadableSettingsFile(t *testing.T) {
 	project := t.TempDir()
 	if err := writeLocalHooks(project, "/opt/openbox/bin/openbox"); err != nil {

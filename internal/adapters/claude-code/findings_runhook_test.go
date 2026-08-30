@@ -14,9 +14,6 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/internal/client"
 )
 
-// mkReasons builds guardrail reasons carrying only a category TYPE (the content-free
-// shape). mkReasonsFull builds one reason with type/field/reason free text (to prove
-// the free text never reaches the surface — INV-2).
 func mkReasons(cats ...string) []client.GuardrailReason {
 	out := make([]client.GuardrailReason, 0, len(cats))
 	for _, c := range cats {
@@ -25,8 +22,6 @@ func mkReasons(cats ...string) []client.GuardrailReason {
 	return out
 }
 
-// findingsEnv isolates the advisory sink + cursor at temp paths and sets the
-// findings flag. Returns (advPath, cursorPath).
 func findingsEnv(t *testing.T, on bool) (string, string) {
 	t.Helper()
 	dir := t.TempDir()
@@ -42,8 +37,6 @@ func findingsEnv(t *testing.T, on bool) (string, string) {
 	return adv, cur
 }
 
-// seedAdvisories appends raw JSONL advisory records (as core+Advisory.Record would
-// have written them) so the consumer parses realistic input.
 func seedAdvisories(t *testing.T, path string, recs ...hookflow.AdvisoryRecord) {
 	t.Helper()
 	var buf bytes.Buffer
@@ -74,22 +67,18 @@ func mkReasonsFull(typ, field, reason string) []client.GuardrailReason {
 
 func nopLogger() *log.Logger { return log.New(&bytes.Buffer{}, "", 0) }
 
-// ── RunHook wiring: flag-gated, correct hooks only ───────────────────────────
-
 func TestRunHook_FindingsSurfacedOnPostToolUseAndPrompt(t *testing.T) {
 	adv, _ := findingsEnv(t, true)
 	isolateConfig(t)
 	t.Setenv(envDID, testDID)
 	t.Setenv("OPENBOX_SPOOL_DIR", t.TempDir())
 	t.Setenv("OPENBOX_SESSION_DIR", t.TempDir())
-	// A guardrail reason free-text carrying a fake secret + a drift record.
 	seedAdvisories(t, adv,
 		hookflow.AdvisoryRecord{Verdict: "ALLOW", GuardrailReasons: mkReasonsFull("secret", "api_key", "leaked AKIAsecretVALUE123")},
 		hookflow.AdvisoryRecord{Verdict: "ALLOW", DriftDetected: true, DriftViolations: 1},
 	)
 
 	for _, hook := range []string{"PostToolUse", "UserPromptSubmit"} {
-		// Reset the cursor per iteration so each hook sees the seeded records.
 		t.Setenv(envFindingsCursor, filepath.Join(t.TempDir(), "cursor"))
 		var out bytes.Buffer
 		payload := `{"hook_event_name":"` + hook + `","session_id":"sess-1","cwd":"/tmp","tool_name":"Bash","tool_input":{"command":"echo hi"},"prompt":"hello"}`
@@ -98,13 +87,11 @@ func TestRunHook_FindingsSurfacedOnPostToolUseAndPrompt(t *testing.T) {
 		if !strings.Contains(s, "OpenBox governance") {
 			t.Errorf("%s with findings ON should surface a summary, got %q", hook, s)
 		}
-		// INV-2: the seeded secret / free text must never reach the surface.
 		for _, banned := range []string{"AKIAsecretVALUE123", "leaked", "api_key"} {
 			if strings.Contains(s, banned) {
 				t.Errorf("%s leaked content %q: %s", hook, banned, s)
 			}
 		}
-		// Guardrail CATEGORY is fine; drift surfaces.
 		if !strings.Contains(s, "guardrails [secret]") || !strings.Contains(s, "goal-drift") {
 			t.Errorf("%s summary missing category/drift: %s", hook, s)
 		}
@@ -130,8 +117,9 @@ func TestRunHook_FindingsOffIsByteIdentical(t *testing.T) {
 	}
 }
 
-// TestRunHook_FindingsNotSurfacedOnOtherHooks: only PostToolUse + UserPromptSubmit
-// surface; PreToolUse/SessionStart/SessionEnd never do (they own other stdout).
+// TestRunHook_FindingsNotSurfacedOnOtherHooks: only PostToolUse +
+// UserPromptSubmit surface; PreToolUse/SessionStart/SessionEnd never do (they
+// own other stdout).
 func TestRunHook_FindingsNotSurfacedOnOtherHooks(t *testing.T) {
 	adv, _ := findingsEnv(t, true)
 	isolateConfig(t)
@@ -140,7 +128,6 @@ func TestRunHook_FindingsNotSurfacedOnOtherHooks(t *testing.T) {
 	t.Setenv("OPENBOX_SESSION_DIR", t.TempDir())
 	seedAdvisories(t, adv, hookflow.AdvisoryRecord{Verdict: "BLOCK", WouldBlock: true})
 
-	// PreToolUse (enforce OFF) must not surface findings.
 	var out bytes.Buffer
 	payload := `{"hook_event_name":"PreToolUse","session_id":"s","cwd":"/tmp","tool_name":"Read","tool_input":{"file_path":"/x"}}`
 	RunHook("PreToolUse", strings.NewReader(payload), &out, nopLogger())
@@ -149,11 +136,6 @@ func TestRunHook_FindingsNotSurfacedOnOtherHooks(t *testing.T) {
 	}
 }
 
-// ── helpers ──────────────────────────────────────────────────────────────────
-
-// assertFindingsShape validates the emitted JSON is exactly the non-blocking
-// findings shape: additionalContext + systemMessage, correct hookEventName, and NO
-// decision/permissionDecision (INV-3).
 func assertFindingsShape(t *testing.T, blob string, hook HookName) {
 	t.Helper()
 	blob = strings.TrimSpace(blob)

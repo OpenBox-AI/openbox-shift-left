@@ -28,6 +28,10 @@ const envFileHeader = `# OpenBox credentials for this machine — written by ` +
 // hand-rolled parser this replaced, all measured against it over an 18-case
 // corpus, and all of them losses rather than neutral changes. They are
 // recorded here because each one is a way a credential can go wrong silently:
+//   - A duplicate key is last-wins, not an error.
+//   - `$VAR` and `${VAR}` are expanded in unquoted and double-quoted values,
+//     and `\n`-style escapes are expanded in double-quoted ones.
+//   - A `#` after a value starts a comment, so `KEY=abc # note` yields `abc`.
 func ParseEnvFile(path string) (map[string]string, error) {
 	if _, err := os.Stat(path); err != nil {
 		if os.IsNotExist(err) {

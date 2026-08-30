@@ -15,8 +15,6 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/internal/client"
 )
 
-// recordingEvaluator records whether it was called, which is what lets the
-// ordering invariant be asserted rather than reviewed.
 type recordingEvaluator struct {
 	calls   int
 	verdict client.Verdict
@@ -33,16 +31,7 @@ func (r *recordingEvaluator) Evaluate(context.Context, Captured) (client.Evaluat
 	return client.Evaluation{Verdict: r.verdict, Reason: r.reason, ApprovalID: r.ref}, nil
 }
 
-// TestNoRefusalWithoutAnEvaluationAttempt is the MERGE BLOCKER.
-//
-// The rule: no refusal may be synthesized before an evaluation has been
-// attempted. Pre-that decision the hook path got this wrong and a fail-closed org
-// denied every gated call without ever asking; here refusal is UNCONDITIONAL on a
-// missing verdict, so the same mistake would turn every control-plane blip into a
-// total model-call outage reported as a policy decision no policy made.
-//
-// It is asserted across every branch rather than on one happy path, because the
-// bug is precisely a branch that returns early.
+// TestNoRefusalWithoutAnEvaluationAttempt is the merge blocker.
 func TestNoRefusalWithoutAnEvaluationAttempt(t *testing.T) {
 	cases := []struct {
 		name string
@@ -53,8 +42,6 @@ func TestNoRefusalWithoutAnEvaluationAttempt(t *testing.T) {
 		{"block", &recordingEvaluator{verdict: client.VerdictBlock, reason: "policy Y"}},
 		{"require approval", &recordingEvaluator{verdict: client.VerdictRequireApproval, ref: "apr-1"}},
 		{"empty verdict", &recordingEvaluator{verdict: ""}},
-		// NOTE: CONSTRAIN is deliberately absent here — it FORWARDS. See
-		// TestConstrainForwardsLikeEverywhereElse.
 		{"unknown verdict", &recordingEvaluator{verdict: client.Verdict("WAT")}},
 	}
 	for _, tc := range cases {
@@ -63,7 +50,6 @@ func TestNoRefusalWithoutAnEvaluationAttempt(t *testing.T) {
 			if d.Forward {
 				t.Fatalf("%s forwarded; every one of these must refuse", tc.name)
 			}
-			// The invariant.
 			if !d.Evaluated {
 				t.Error("REFUSAL WITHOUT AN EVALUATION ATTEMPT — a synthesized refusal fired before asking")
 			}
@@ -77,9 +63,7 @@ func TestNoRefusalWithoutAnEvaluationAttempt(t *testing.T) {
 	}
 }
 
-// TestUngatedCallAddsNoRoundTrip is requirement 5. Roughly 52 model calls per turn
-// window were measured, so a round-trip on the ungated path is not affordable —
-// and "we only evaluate what policy marks" is only true if this holds.
+// TestUngatedCallAddsNoRoundTrip is requirement 5.
 func TestUngatedCallAddsNoRoundTrip(t *testing.T) {
 	ev := &recordingEvaluator{verdict: client.VerdictHalt}
 	d := Decide(context.Background(), ev, false, Captured{})
@@ -95,8 +79,8 @@ func TestUngatedCallAddsNoRoundTrip(t *testing.T) {
 	}
 }
 
-// TestAllowForwards keeps the gate from being a blanket denier — the failure mode
-// the security note calls out, where a bug that refuses everything is
+// TestAllowForwards keeps the gate from being a blanket denier; the failure
+// mode the security note calls out, where a bug that refuses everything is
 // indistinguishable from an outage.
 func TestAllowForwards(t *testing.T) {
 	ev := &recordingEvaluator{verdict: client.VerdictAllow}
@@ -109,10 +93,8 @@ func TestAllowForwards(t *testing.T) {
 	}
 }
 
-// TestUnreachableRefusesRegardlessOfPosture is requirement 4 — the owner's
-// divergence from the hook path. There is no fail_closed input to this gate at
-// all, and that absence IS the decision: a posture key here would be a way to
-// switch the gateway's enforcement off.
+// TestUnreachableRefusesRegardlessOfPosture is requirement 4; the owner's
+// divergence from the hook path.
 func TestUnreachableRefusesRegardlessOfPosture(t *testing.T) {
 	ev := &recordingEvaluator{err: errors.New("no route to host")}
 	d := Decide(context.Background(), ev, true, Captured{})
@@ -123,7 +105,6 @@ func TestUnreachableRefusesRegardlessOfPosture(t *testing.T) {
 	if !d.Unreachable {
 		t.Error("Unreachable not set; a core outage would be indistinguishable from a denial")
 	}
-	// The reason must name the outage, not imply a policy decided anything.
 	if !strings.Contains(strings.ToLower(d.Reason), "unreachable") {
 		t.Errorf("reason does not name the outage: %q", d.Reason)
 	}
@@ -132,8 +113,9 @@ func TestUnreachableRefusesRegardlessOfPosture(t *testing.T) {
 	}
 }
 
-// TestPolicyRefusalNamesPolicy is the other side: a real denial must not read as
-// an outage, or a developer chases an infrastructure problem that does not exist.
+// TestPolicyRefusalNamesPolicy is the other side: a real denial must not read
+// as an outage, or a developer chases an infrastructure problem that does not
+// exist.
 func TestPolicyRefusalNamesPolicy(t *testing.T) {
 	ev := &recordingEvaluator{verdict: client.VerdictBlock, reason: "secrets policy: credential in prompt"}
 	d := Decide(context.Background(), ev, true, Captured{})
@@ -151,10 +133,9 @@ func TestPolicyRefusalNamesPolicy(t *testing.T) {
 
 // TestRefusalShapeIsProbePending exists so nobody mistakes the two provisional
 // constants for a verified answer. What it CAN assert without probe A is the
-// requirement: the shape must not look like a transient provider error, because
-// Claude Code's retry logic matches on upstream error wording.
+// requirement: the shape must not look like a transient provider error,
+// because Claude Code's retry logic matches on upstream error wording.
 func TestRefusalShapeIsProbePending(t *testing.T) {
-	// Not a transience status. Each of these is one the client is built to retry.
 	for _, transient := range []int{
 		http.StatusTooManyRequests, http.StatusInternalServerError,
 		http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout,
@@ -163,7 +144,6 @@ func TestRefusalShapeIsProbePending(t *testing.T) {
 			t.Errorf("refusalStatus %d is a transience signal; a denial would be retried around", refusalStatus)
 		}
 	}
-	// Not one of the provider's own error type literals.
 	for _, providerType := range []string{
 		"overloaded_error", "rate_limit_error", "api_error",
 		"authentication_error", "invalid_request_error", "permission_error",
@@ -178,8 +158,8 @@ func TestRefusalShapeIsProbePending(t *testing.T) {
 	}
 }
 
-// TestWriteRefusalRendersTheReason is requirement 6 on the actual response bytes.
-// A bare status is indistinguishable from the gateway being broken.
+// TestWriteRefusalRendersTheReason is requirement 6 on the actual response
+// bytes.
 func TestWriteRefusalRendersTheReason(t *testing.T) {
 	rec := httptest.NewRecorder()
 	WriteRefusal(rec, Decision{Reason: reasonPolicyRefused("secrets policy triggered")})
@@ -206,7 +186,7 @@ func TestWriteRefusalRendersTheReason(t *testing.T) {
 }
 
 // TestRefusalCarriesNoCapturedContent keeps a refusal from becoming a content
-// leak. It is rendered to the developer and stored; neither may carry the prompt.
+// leak.
 func TestRefusalCarriesNoCapturedContent(t *testing.T) {
 	secret := "the-developers-private-prompt-text"
 	ev := &recordingEvaluator{verdict: client.VerdictHalt, reason: "policy X"}
@@ -225,14 +205,8 @@ func TestRefusalCarriesNoCapturedContent(t *testing.T) {
 	}
 }
 
-// TestConstrainForwardsLikeEverywhereElse pins a verdict that was being refused.
-//
-// CONSTRAIN is non-blocking in every other consumer in this repo (hookflow's
-// cascade groups it with ALLOW and UNKNOWN). It fell to this gate's default branch
-// and was refused, so once wired, one policy verdict would have meant "proceed"
-// for tool calls and "deny" for model calls — a divergence nobody decided. The
-// owner's always-refuse decision is about a MISSING verdict, not about a verdict
-// that says go ahead.
+// TestConstrainForwardsLikeEverywhereElse pins a verdict that was being
+// refused.
 func TestConstrainForwardsLikeEverywhereElse(t *testing.T) {
 	ev := &recordingEvaluator{verdict: client.VerdictConstrain}
 	d := Decide(context.Background(), ev, true, Captured{})
@@ -247,17 +221,13 @@ func TestConstrainForwardsLikeEverywhereElse(t *testing.T) {
 		t.Error("CONSTRAIN flagged as unreachable")
 	}
 
-	// And the asymmetry holds: a verdict this build does not know still refuses.
 	unknown := &recordingEvaluator{verdict: client.Verdict("SOME_FUTURE_VERDICT")}
 	if Decide(context.Background(), unknown, true, Captured{}).Forward {
 		t.Error("an uninterpretable verdict forwarded; a future blocking verdict would be waved through")
 	}
 }
 
-// TestRefuseEverythingIsProbeOnlyAndSaysSo covers the probe affordance. It must be
-// unmistakable in what it returns: a refusal that read like a real policy denial
-// would be indistinguishable from one in whatever the probe records, and knowing
-// which behaviour came from where is the entire point of running the probe.
+// TestRefuseEverythingIsProbeOnlyAndSaysSo covers the probe affordance.
 func TestRefuseEverythingIsProbeOnlyAndSaysSo(t *testing.T) {
 	shape := RefusalShape{Status: 418, ErrorType: "openbox_probe_candidate"}
 	srv := memhttptest.NewServer(t, RefuseEverything(shape))
@@ -287,8 +257,8 @@ func TestRefuseEverythingIsProbeOnlyAndSaysSo(t *testing.T) {
 	}
 }
 
-// TestRefusalShapeValidateRejectsHopelessCandidates keeps a probe run from burning
-// a real session on a shape the requirement already rules out.
+// TestRefusalShapeValidateRejectsHopelessCandidates keeps a probe run from
+// burning a real session on a shape the requirement already rules out.
 func TestRefusalShapeValidateRejectsHopelessCandidates(t *testing.T) {
 	bad := []RefusalShape{
 		{Status: 200, ErrorType: "x"},                    // not a refusal at all
@@ -304,8 +274,6 @@ func TestRefusalShapeValidateRejectsHopelessCandidates(t *testing.T) {
 			t.Errorf("Validate accepted a hopeless candidate: %+v", s)
 		}
 	}
-	// And the provisional default must itself be valid, or the shipped path is
-	// asserting a shape its own validator rejects.
 	if err := DefaultRefusalShape().Validate(); err != nil {
 		t.Errorf("the provisional default fails its own validator: %v", err)
 	}
@@ -314,8 +282,6 @@ func TestRefusalShapeValidateRejectsHopelessCandidates(t *testing.T) {
 	}
 }
 
-// stubEvaluator returns a whole Evaluation, which recordingEvaluator cannot: the
-// guardrail block is a nested struct, not one of its scalar fields.
 type stubEvaluator struct {
 	result client.Evaluation
 	err    error
@@ -329,13 +295,7 @@ func (s *stubEvaluator) Evaluate(context.Context, Captured) (client.Evaluation, 
 }
 
 // TestFailedGuardrailRefusesLikeTheHookPath is the enforcement-parity control.
-//
-// hookflow.MapVerdict treats a failed guardrail as a DENY, in that exact position:
-// after HALT/BLOCK, before REQUIRE_APPROVAL. The gate read only `Verdict`, so one
-// and the same /evaluate response — ALLOW with validation_passed:false — denied
-// the tool call and FORWARDED the model call, credential and prompt included.
-//
-// The reason must name the CATEGORIES and nothing else: a guardrail fires on
+// The reason must name the categories and nothing else: a guardrail fires on
 // content, so its free text is the prompt.
 func TestFailedGuardrailRefusesLikeTheHookPath(t *testing.T) {
 	ev := &stubEvaluator{result: client.Evaluation{
@@ -368,8 +328,8 @@ func TestFailedGuardrailRefusesLikeTheHookPath(t *testing.T) {
 	}
 }
 
-// TestPassingGuardrailStillForwards keeps the fix from becoming a blanket refusal:
-// `Passed` true, and an absent guardrail block, must both proceed.
+// TestPassingGuardrailStillForwards keeps the fix from becoming a blanket
+// refusal: `Passed` true, and an absent guardrail block, must both proceed.
 func TestPassingGuardrailStillForwards(t *testing.T) {
 	for name, g := range map[string]*client.GuardrailResult{
 		"absent":                 nil,
@@ -386,12 +346,6 @@ func TestPassingGuardrailStillForwards(t *testing.T) {
 }
 
 // TestCallerCancellationIsNotReportedAsAnOutage.
-//
-// Decide is handed the REQUEST's context, which net/http cancels the moment the
-// developer interrupts a turn. Mapping that to reasonUnreachable manufactured a
-// durable record saying the control plane was down — and Unreachable is the field
-// an operator reads to tell an outage from a denial, so it was being filled in
-// with the wrong answer on the most ordinary event there is.
 func TestCallerCancellationIsNotReportedAsAnOutage(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -412,7 +366,7 @@ func TestCallerCancellationIsNotReportedAsAnOutage(t *testing.T) {
 	}
 }
 
-// TestARealUnreachableControlPlaneStillReportsAnOutage is the other half — the
+// TestARealUnreachableControlPlaneStillReportsAnOutage is the other half; the
 // cancellation carve-out must not swallow the case it was carved out of.
 func TestARealUnreachableControlPlaneStillReportsAnOutage(t *testing.T) {
 	d := Decide(context.Background(), &stubEvaluator{err: errors.New("dial tcp: connection refused")}, true, Captured{})
@@ -425,17 +379,10 @@ func TestARealUnreachableControlPlaneStillReportsAnOutage(t *testing.T) {
 }
 
 // TestHungEvaluationIsBoundedRatherThanHanging.
-//
-// The gateway's client has no overall timeout on purpose (a streamed completion
-// runs for minutes), so an evaluator that never answers left the gated call
-// hanging: neither forwarded nor refused, which is the one outcome the
-// always-refuse posture claims to have eliminated.
 func TestHungEvaluationIsBoundedRatherThanHanging(t *testing.T) {
 	if evaluateTimeout > 30*time.Second {
 		t.Fatalf("evaluateTimeout is %v — too long to be a bound on a developer's model call", evaluateTimeout)
 	}
-	// Drive the deadline rather than waiting it out: a context already past its
-	// own deadline makes the evaluator observe exactly what a hang produces.
 	ctx, cancel := context.WithTimeout(context.Background(), time.Nanosecond)
 	defer cancel()
 	blocked := &blockingEvaluator{}
@@ -448,8 +395,6 @@ func TestHungEvaluationIsBoundedRatherThanHanging(t *testing.T) {
 	}
 }
 
-// blockingEvaluator answers only when its context ends, which is what a control
-// plane that accepts a connection and never replies looks like from here.
 type blockingEvaluator struct{}
 
 func (blockingEvaluator) Evaluate(ctx context.Context, _ Captured) (client.Evaluation, error) {

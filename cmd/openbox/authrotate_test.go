@@ -17,7 +17,6 @@ import (
 
 const rotateTestDID = "did:aip:3f2504e0-4f89-11d3-9a0c-0305e82c3301"
 
-// rotateBackend serves both rotation endpoints, recording which were called.
 func rotateBackend(t *testing.T, keyBody, identityBody string, keyStatus, identityStatus int) (*memhttptest.Server, *[]string) {
 	t.Helper()
 	var called []string
@@ -71,8 +70,9 @@ func mustReadFile(t *testing.T, path string) []byte {
 	return raw
 }
 
-// The happy path: a new key and signing key land on disk, and the DID is
-// unchanged — which is what makes rotation the recovery that KEEPS the agent.
+// TestRotateWritesNewCredentialsAndPreservesTheDID the happy path: a new key
+// and signing key land on disk, and the DID is unchanged; which is what makes
+// rotation the recovery that keeps the agent.
 func TestRotateWritesNewCredentialsAndPreservesTheDID(t *testing.T) {
 	newSeed := make([]byte, 32)
 	newSeed[0] = 7
@@ -83,7 +83,6 @@ func TestRotateWritesNewCredentialsAndPreservesTheDID(t *testing.T) {
 		http.StatusOK, http.StatusOK)
 
 	a, home := rotateApp(t, srv.URL)
-	// A machine whose credentials are stale but whose coordinates are known.
 	if err := devconfig.WriteConfig(filepath.Join(home, "dev.json"), devconfig.Update{
 		DID: rotateTestDID, AgentID: "agent-1", BackendURL: srv.URL,
 	}); err != nil {
@@ -94,8 +93,6 @@ func TestRotateWritesNewCredentialsAndPreservesTheDID(t *testing.T) {
 		t.Fatalf("exit = %d", code)
 	}
 	if len(*called) != 2 || (*called)[0] != "key" || (*called)[1] != "identity" {
-		// Key first: a failure between the two then leaves a working signing
-		// identity with a dead key, which --rotate can retry.
 		t.Errorf("call order = %v, want [key identity]", *called)
 	}
 	kv := readEnvFile(t, home)
@@ -110,7 +107,8 @@ func TestRotateWritesNewCredentialsAndPreservesTheDID(t *testing.T) {
 	}
 }
 
-// No implicit rotation, ever: without --rotate no rotate endpoint is called.
+// TestNoRotateFlagCallsNoRotateEndpoint no implicit rotation, ever: without
+// --rotate no rotate endpoint is called.
 func TestNoRotateFlagCallsNoRotateEndpoint(t *testing.T) {
 	srv, called := rotateBackend(t, `{"token":"x"}`, `{"did":"d","privateKey":"k"}`, http.StatusOK, http.StatusOK)
 	a, _ := rotateApp(t, srv.URL)
@@ -123,8 +121,9 @@ func TestNoRotateFlagCallsNoRotateEndpoint(t *testing.T) {
 	}
 }
 
-// A 2xx that omits privateKey must produce NO write: a half-valid credential pair
-// on disk looks configured and fails at flush time.
+// TestRotateWritesNothingWhenTheIdentityReplyIsUnusable a 2xx that omits
+// privateKey must produce NO write: a half-valid credential pair on disk looks
+// configured and fails at flush time.
 func TestRotateWritesNothingWhenTheIdentityReplyIsUnusable(t *testing.T) {
 	srv, _ := rotateBackend(t,
 		`{"token":"obx_rotated_key"}`,
@@ -154,9 +153,10 @@ func TestRotateWritesNothingWhenTheIdentityReplyIsUnusable(t *testing.T) {
 	}
 }
 
-// The API key rotation already succeeded by then, so the error must say so —
-// otherwise the user retries and cannot understand why the old key stopped
-// working "before" anything happened.
+// TestRotateSaysTheKeyIsAlreadyInvalidWhenIdentityFails the API key rotation
+// already succeeded by then, so the error must say so; otherwise the user
+// retries and cannot understand why the old key stopped working "before"
+// anything happened.
 func TestRotateSaysTheKeyIsAlreadyInvalidWhenIdentityFails(t *testing.T) {
 	srv, _ := rotateBackend(t,
 		`{"token":"obx_rotated_key"}`,
@@ -181,8 +181,9 @@ func TestRotateSaysTheKeyIsAlreadyInvalidWhenIdentityFails(t *testing.T) {
 	}
 }
 
-// Rotation needs an agent id: there is nothing to rotate without one, and the
-// error must distinguish it from "register a new agent".
+// TestRotateWithoutAnAgentIDExplainsWhatToDo rotation needs an agent id: there
+// is nothing to rotate without one, and the error must distinguish it from
+// "register a new agent".
 func TestRotateWithoutAnAgentIDExplainsWhatToDo(t *testing.T) {
 	srv, called := rotateBackend(t, `{}`, `{}`, http.StatusOK, http.StatusOK)
 	a, _, errb := rotateAppWithErr(t, srv.URL)
@@ -197,8 +198,8 @@ func TestRotateWithoutAnAgentIDExplainsWhatToDo(t *testing.T) {
 	}
 }
 
-// Rotation is destructive server-side, so it needs an org key and must say which
-// kind when it does not have one.
+// TestRotateWithoutAnOrgKeyRefuses rotation is destructive server-side, so it
+// needs an org key and must say which kind when it does not have one.
 func TestRotateWithoutAnOrgKeyRefuses(t *testing.T) {
 	srv, called := rotateBackend(t, `{}`, `{}`, http.StatusOK, http.StatusOK)
 	home := isolateHome(t)
@@ -214,8 +215,6 @@ func TestRotateWithoutAnOrgKeyRefuses(t *testing.T) {
 	if !strings.Contains(errb.String(), devconfig.EnvControlToken) {
 		t.Errorf("error should name the credential it needs:\n%s", errb.String())
 	}
-	// The alternative — register a fresh agent — must be offered, because plenty
-	// of developers have no org key.
 	if !strings.Contains(errb.String(), "register a fresh agent") {
 		t.Errorf("error should offer the no-org-key alternative:\n%s", errb.String())
 	}
@@ -224,9 +223,9 @@ func TestRotateWithoutAnOrgKeyRefuses(t *testing.T) {
 	}
 }
 
-// A rotation that returned a DIFFERENT DID must be refused: the DID is derived
-// from the agent id, so it cannot change, and silently adopting a new one would
-// re-attribute this machine's history.
+// TestRotateRefusesAChangedDID a rotation that returned a different DID must
+// be refused: the DID is derived from the agent id, so it cannot change, and
+// silently adopting a new one would re-attribute this machine's history.
 func TestRotateRefusesAChangedDID(t *testing.T) {
 	srv, _ := rotateBackend(t,
 		`{"token":"obx_rotated_key"}`,
@@ -249,7 +248,6 @@ func TestRotateRefusesAChangedDID(t *testing.T) {
 	if !strings.Contains(errb.String(), "must preserve the DID") {
 		t.Errorf("error should explain the DID invariant:\n%s", errb.String())
 	}
-	// Nothing written.
 	if _, err := devconfig.ParseEnvFile(filepath.Join(home, ".env")); err != nil {
 		t.Fatal(err)
 	}
@@ -258,8 +256,8 @@ func TestRotateRefusesAChangedDID(t *testing.T) {
 	}
 }
 
-// An org key returned in the agent's runtime slot must be refused: it would give
-// the hook org-wide authority.
+// TestRotateRefusesAnOrgKeyInTheRuntimeSlot an org key returned in the agent's
+// runtime slot must be refused: it would give the hook org-wide authority.
 func TestRotateRefusesAnOrgKeyInTheRuntimeSlot(t *testing.T) {
 	srv, _ := rotateBackend(t,
 		`{"token":"obx_key_`+strings.Repeat("f", 48)+`"}`,
@@ -287,8 +285,8 @@ func TestRotateRefusesAnOrgKeyInTheRuntimeSlot(t *testing.T) {
 	}
 }
 
-// Rotation must not silently rewrite posture, exactly as an ordinary auth run
-// must not.
+// TestRotateLeavesPostureAlone rotation must not silently rewrite posture,
+// exactly as an ordinary auth run must not.
 func TestRotateLeavesPostureAlone(t *testing.T) {
 	newSeed := make([]byte, 32)
 	newSeed[1] = 3

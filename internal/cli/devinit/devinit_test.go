@@ -16,8 +16,6 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/internal/provider"
 )
 
-// --- fakes ------------------------------------------------------------------
-
 type fakeRegistrar struct {
 	createCalls, findCalls int
 	reg                    *backend.Registration
@@ -63,12 +61,6 @@ func (f *fakeInstaller) Install(r provider.CredentialRef) error {
 	return nil
 }
 
-// isolateHome points OPENBOX_HOME at a temp dir so a test writes its credential
-// file there instead of the developer's real ~/.openbox.
-//
-// This replaced an injected secret.Store. With credentials in a plaintext file
-// the test can exercise the production write path rather than a stand-in for
-// it, which is why there is no MemStore any more.
 func isolateHome(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -78,7 +70,6 @@ func isolateHome(t *testing.T) string {
 	return dir
 }
 
-// readCredentialFile reads what the run wrote, for assertions.
 func readCredentialFile(t *testing.T) map[string]string {
 	t.Helper()
 	path, err := devconfig.EnvFilePath()
@@ -103,8 +94,6 @@ func validReg() *backend.Registration {
 		TrustScore: "0.81",
 	}
 }
-
-// --- tests ------------------------------------------------------------------
 
 func TestDryRunMakesNoWrites(t *testing.T) {
 	home := isolateHome(t)
@@ -151,14 +140,12 @@ func TestHappyPathStoresCredsNeverPrintsThem(t *testing.T) {
 	res, err := Run(context.Background(), Options{Provider: "claude-code"},
 		Deps{Registrar: reg, Installer: inst, Out: &out})
 
-	// Registration + credential capture succeed; config is manual-only → error.
 	if err == nil || !res.ConfigManualOnly {
 		t.Fatalf("expected manual-config error, got err=%v res=%+v", err, res)
 	}
 	if !res.Registered || res.AgentID != "agent-1" {
 		t.Errorf("res = %+v", res)
 	}
-	// Exactly the two secrets, under the platform's documented names.
 	kv := readCredentialFile(t)
 	if got := kv[devconfig.EnvAPIKeyDirect]; got != "obx_test_SECRETKEYVALUE" {
 		t.Errorf("api key not written, got %q", got)
@@ -166,24 +153,18 @@ func TestHappyPathStoresCredsNeverPrintsThem(t *testing.T) {
 	if got := kv[devconfig.EnvAgentPrivateKey]; got != "PRIVATESEEDVALUE" {
 		t.Errorf("private key not written, got %q", got)
 	}
-	// The DID is a COORDINATE and must not be in the credential file. Writing it
-	// there would recreate the two-store bug that decision removed: a stale copy
-	// beside the secrets that reverts a corrected DID on the next install.
 	if got, ok := kv[devconfig.EnvDID]; ok {
 		t.Errorf("credential file carries the DID (%q); secrets and coordinates must not share a file", got)
 	}
 	if len(kv) != 2 {
 		t.Errorf("credential file holds %d keys, want exactly the 2 secrets: %v", len(kv), kv)
 	}
-	// INV-1: secret values must never appear in output.
 	if strings.Contains(out.String(), "obx_test_SECRETKEYVALUE") || strings.Contains(out.String(), "PRIVATESEEDVALUE") {
 		t.Errorf("secret leaked to output:\n%s", out.String())
 	}
-	// Manual config surfaced.
 	if !strings.Contains(out.String(), "MANUAL-CONFIG") {
 		t.Errorf("manual config not printed:\n%s", out.String())
 	}
-	// Correct contract sent.
 	if reg.lastReq.AgentType != "developer" || reg.lastReq.Icon == "" {
 		t.Errorf("bad create request: %+v", reg.lastReq)
 	}
@@ -214,9 +195,6 @@ func TestIdempotentReuseSkipsRegistration(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	// The DID is a coordinate and lives in dev.json, never beside the secrets —
-	// that split is what stopped a stale credential store from reverting a
-	// corrected DID on every re-init.
 	if err := devconfig.WriteConfig(filepath.Join(dir, "dev.json"), devconfig.Update{DID: "did:aip:existing"}); err != nil {
 		t.Fatal(err)
 	}
@@ -257,8 +235,7 @@ func TestRemoteDuplicateBlocksWithoutForce(t *testing.T) {
 
 func TestRemoteLookupErrorDoesNotFallThroughToCreate(t *testing.T) {
 	isolateHome(t)
-	// F1: a failed agent/list must NOT silently proceed to Create (which would
-	// bypass idempotent detection). It must surface and stop.
+	// It must surface and stop.
 	reg := &fakeRegistrar{reg: validReg(), findErr: errors.New("connection refused")}
 	res, err := Run(context.Background(), Options{Provider: "claude-code", AgentName: "dev-x"},
 		Deps{Registrar: reg, Installer: &fakeInstaller{avail: true}, Out: &bytes.Buffer{}})
@@ -275,8 +252,6 @@ func TestRemoteLookupErrorDoesNotFallThroughToCreate(t *testing.T) {
 
 func TestForceLookupErrorSurfaced(t *testing.T) {
 	isolateHome(t)
-	// F4: under --force, a failed lookup must surface rather than proceed to a
-	// confusing 400 with a name that may be taken.
 	reg := &fakeRegistrar{reg: validReg(), findErr: errors.New("connection refused")}
 	_, err := Run(context.Background(), Options{Provider: "claude-code", AgentName: "dev-x", Force: true},
 		Deps{Registrar: reg, Installer: &fakeInstaller{avail: true}, Out: &bytes.Buffer{}})
@@ -321,9 +296,10 @@ func TestAPIErrorHalts(t *testing.T) {
 	}
 }
 
-// A credential write that fails AFTER the agent exists must name the registered
-// agent and how to resume: its API key and signing key were shown exactly once
-// and are now unreachable, so a bare I/O error would strand the user.
+// TestPartialFailureReportsAgentAndResume a credential write that fails after
+// the agent exists must name the registered agent and how to resume: its API
+// key and signing key were shown exactly once and are now unreachable, so a
+// bare I/O error would strand the user.
 func TestPartialFailureReportsAgentAndResume(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("mode bits do not deny writes on Windows")
@@ -331,8 +307,6 @@ func TestPartialFailureReportsAgentAndResume(t *testing.T) {
 	if os.Geteuid() == 0 {
 		t.Skip("running as root: mode bits do not deny writes")
 	}
-	// An unwritable parent makes the REAL write fail, where the deleted fake
-	// store could only report that it would have.
 	base := t.TempDir()
 	locked := filepath.Join(base, "locked")
 	if err := os.MkdirAll(locked, 0o500); err != nil {
@@ -351,7 +325,6 @@ func TestPartialFailureReportsAgentAndResume(t *testing.T) {
 	if !res.Registered {
 		t.Error("agent was registered; res.Registered should be true")
 	}
-	// Nothing printed may leak the credential itself.
 	if strings.Contains(err.Error(), "obx_test_SECRETKEYVALUE") || strings.Contains(err.Error(), "PRIVATESEEDVALUE") {
 		t.Errorf("error leaked a credential value: %v", err)
 	}
@@ -367,14 +340,12 @@ func TestMissingPrivateKeyErrors(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "signing key") {
 		t.Fatalf("expected signing-key error, got %v", err)
 	}
-	// A half-usable credential pair must never reach disk.
 	if kv := readCredentialFile(t); len(kv) != 0 {
 		t.Errorf("no credentials should be written when the key is missing, got %v", kv)
 	}
 }
 
 func TestTruncateIsRuneSafe(t *testing.T) {
-	// F5: truncation must not split a multibyte rune (invalid UTF-8 would 400).
 	s := strings.Repeat("a", 254) + "é" // 'é' is 2 bytes -> byte 255 is a continuation
 	got := truncate(s, 255)
 	if len(got) > 255 {
@@ -397,12 +368,8 @@ func TestUnknownProviderRejected(t *testing.T) {
 	}
 }
 
-// `--env-file` must reach the REGISTER path, which is the one place credentials are
-// minted. It used to be threaded into the direct-write and rotate paths only, so
-// `openbox auth --env-file /custom` with a blank agent id created a real agent and
-// wrote its once-shown key to the DEFAULT location while reporting the custom one.
-// A once-shown credential written somewhere the user was not told about is
-// unrecoverable by definition.
+// `--env-file` must reach the register path, which is the one place
+// credentials are minted.
 func TestRegisterHonoursTheCredentialFileOverride(t *testing.T) {
 	isolateHome(t)
 	custom := filepath.Join(t.TempDir(), "custom-creds.env")
@@ -422,15 +389,14 @@ func TestRegisterHonoursTheCredentialFileOverride(t *testing.T) {
 	if kv[devconfig.EnvAPIKeyDirect] != "obx_test_SECRETKEYVALUE" {
 		t.Errorf("credentials did not land in the override path: %v", kv)
 	}
-	// And nothing went to the default location.
 	if def := readCredentialFile(t); len(def) != 0 {
 		t.Errorf("credentials also written to the default path: %v", def)
 	}
 }
 
-// A relative override would resolve against the process working directory, so
-// running this inside a repo would drop a plaintext API key and signing key into
-// the source tree. Refused, like OPENBOX_HOME.
+// TestRegisterRefusesARelativeCredentialFileOverride a relative override would
+// resolve against the process working directory, so running this inside a repo
+// would drop a plaintext API key and signing key into the source tree.
 func TestRegisterRefusesARelativeCredentialFileOverride(t *testing.T) {
 	isolateHome(t)
 	reg := &fakeRegistrar{reg: validReg()}

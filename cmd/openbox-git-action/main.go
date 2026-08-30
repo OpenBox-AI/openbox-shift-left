@@ -104,7 +104,6 @@ func envOr(key, def string) string {
 	return def
 }
 
-// selectVerifier picks the OwnershipVerifier.
 func selectVerifier(dryRun bool, logger *log.Logger) gitaction.OwnershipVerifier {
 	if dryRun || os.Getenv("OPENBOX_OWNERSHIP_VERIFY") != "1" {
 		return gitaction.NoopVerifier{}

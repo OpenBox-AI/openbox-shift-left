@@ -4,6 +4,8 @@
 // fail. Behaviour that depends on a write deadline firing against a stalled
 // reader; gateway's writeIdleTimeout, for one; cannot be regression-tested
 // here.
+//   - A child process.
+//   - Code that builds ITS OWN http.Transport.
 package memhttptest
 
 import (
@@ -25,9 +27,9 @@ type TB interface {
 	Skipf(format string, args ...any)
 }
 
-// basePort servers present themselves as loopback on a synthetic port. The
-// ports are never bound, so they cannot collide with anything; the number only
-// has to be unique within the process so two servers stay distinguishable.
+// basePort the ports are never bound, so they cannot collide with anything;
+// the number only has to be unique within the process so two servers stay
+// distinguishable.
 const basePort = 45000
 
 var (
@@ -38,9 +40,8 @@ var (
 	installErr  error
 )
 
-// install swaps http.DefaultTransport for a clone that consults the registry
-// before dialing. The default transport is a process-wide global and this
-// never restores it.
+// install the default transport is a process-wide global and this never
+// restores it.
 func install() error {
 	installOnce.Do(func() {
 		base, ok := http.DefaultTransport.(*http.Transport)

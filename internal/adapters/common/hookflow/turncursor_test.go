@@ -22,8 +22,6 @@ func TestTurnCursor_RoundTrip(t *testing.T) {
 		t.Errorf("read back = %+v, want {4096 3}", got)
 	}
 
-	// A later write replaces, never appends — otherwise a long session's cursor
-	// file grows and the parse becomes ambiguous.
 	if err := c.Write("s1", "", TurnPos{Offset: 8192, Index: 4}); err != nil {
 		t.Fatalf("second write: %v", err)
 	}
@@ -32,9 +30,10 @@ func TestTurnCursor_RoundTrip(t *testing.T) {
 	}
 }
 
-// The main thread's window and a subagent's must never share a cursor: a
-// subagent's Stop fires against its own transcript window, and a shared cursor
-// would hand each the other's tokens.
+// TestTurnCursor_AgentWindowsAreIsolated the main thread's window and a
+// subagent's must never share a cursor: a subagent's Stop fires against its
+// own transcript window, and a shared cursor would hand each the other's
+// tokens.
 func TestTurnCursor_AgentWindowsAreIsolated(t *testing.T) {
 	c := TurnCursor{Dir: t.TempDir()}
 
@@ -58,7 +57,6 @@ func TestTurnCursor_AgentWindowsAreIsolated(t *testing.T) {
 		t.Errorf("agt-b cursor = %+v, want {20 0}", got)
 	}
 
-	// An agent literally named "main" must not land on the main-thread file.
 	if err := c.Write("s1", "main", TurnPos{Offset: 5, Index: 5}); err != nil {
 		t.Fatal(err)
 	}
@@ -83,9 +81,10 @@ func TestTurnCursor_SessionsAreIsolated(t *testing.T) {
 	}
 }
 
-// A corrupt or negative record must read as zero rather than propagating a bad
-// offset: re-reading the window over-reports into a server that deduplicates on
-// the deterministic turn id, whereas trusting garbage skips real turns silently.
+// TestTurnCursor_CorruptRecordReadsAsZero a corrupt or negative record must
+// read as zero rather than propagating a bad offset: re-reading the window
+// over-reports into a server that deduplicates on the deterministic turn id,
+// whereas trusting garbage skips real turns silently.
 func TestTurnCursor_CorruptRecordReadsAsZero(t *testing.T) {
 	c := TurnCursor{Dir: t.TempDir()}
 	if err := c.Write("s1", "", TurnPos{Offset: 500, Index: 5}); err != nil {
@@ -119,9 +118,8 @@ func TestTurnCursor_MissingDirIsInert(t *testing.T) {
 	c.ClearSession("s1") // must not panic
 }
 
-// ClearSession sweeps the main cursor and every subagent's in one call — the
-// SessionEnd contract. A leftover cursor would hand a *reused* session id a
-// stale offset.
+// TestTurnCursor_ClearSessionSweepsEveryAgent clearSession sweeps the main
+// cursor and every subagent's in one call; the SessionEnd contract.
 func TestTurnCursor_ClearSessionSweepsEveryAgent(t *testing.T) {
 	c := TurnCursor{Dir: t.TempDir()}
 	for _, agent := range []string{"", "agt-a", "agt-b"} {
@@ -143,15 +141,13 @@ func TestTurnCursor_ClearSessionSweepsEveryAgent(t *testing.T) {
 	if _, err := os.Stat(c.SessionDir("s1")); !os.IsNotExist(err) {
 		t.Errorf("session cursor dir survived ClearSession (err=%v)", err)
 	}
-	// A different session is untouched.
 	if got := c.Read("s2", ""); got.Offset != 9 {
 		t.Errorf("ClearSession(s1) disturbed s2: %+v", got)
 	}
 }
 
-// The record must hold integers and nothing else (INV-2). A cursor that started
-// carrying, say, the transcript path would put a filesystem locator into a file
-// this invariant claims is content-free.
+// TestTurnCursor_RecordHoldsOnlyNumbers the record must hold integers and
+// nothing else (INV-2).
 func TestTurnCursor_RecordHoldsOnlyNumbers(t *testing.T) {
 	c := TurnCursor{Dir: t.TempDir()}
 	if err := c.Write("s1", "agt-a", TurnPos{Offset: 4096, Index: 2}); err != nil {
@@ -167,8 +163,8 @@ func TestTurnCursor_RecordHoldsOnlyNumbers(t *testing.T) {
 	}
 }
 
-// A crafted session or agent id must not escape the cursor root. Both segments
-// are sanitized; this asserts the resulting path stays inside Dir.
+// TestTurnCursor_IDsCannotTraverse a crafted session or agent id must not
+// escape the cursor root.
 func TestTurnCursor_IDsCannotTraverse(t *testing.T) {
 	root := t.TempDir()
 	c := TurnCursor{Dir: root}
@@ -188,8 +184,8 @@ func TestTurnCursor_IDsCannotTraverse(t *testing.T) {
 	}
 }
 
-// The SessionEnded sweep must reach the turn cursors, not only the duration
-// stash. Without it, cursors accumulate one subdir per session forever.
+// TestEngineSweepsTurnCursorsOnSessionEnd the SessionEnded sweep must reach
+// the turn cursors, not only the duration stash.
 func TestEngineSweepsTurnCursorsOnSessionEnd(t *testing.T) {
 	dir := t.TempDir()
 	e := NewEngine(dir)
@@ -219,8 +215,9 @@ func TestEngineSweepsTurnCursorsOnSessionEnd(t *testing.T) {
 	}
 }
 
-// The cursor dir lives under the spool root but must never be mistaken for a
-// spool file by the drain (the same property the duration stash relies on).
+// TestEngineTurnCursorLivesUnderSpoolRoot the cursor dir lives under the spool
+// root but must never be mistaken for a spool file by the drain (the same
+// property the duration stash relies on).
 func TestEngineTurnCursorLivesUnderSpoolRoot(t *testing.T) {
 	dir := t.TempDir()
 	e := NewEngine(dir)

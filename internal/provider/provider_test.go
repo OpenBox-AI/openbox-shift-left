@@ -34,23 +34,13 @@ func TestStubIsUnavailableAndDescribesManualConfig(t *testing.T) {
 		t.Fatalf("Install = %v, want ErrNotBuilt", err)
 	}
 	plan := s.Plan(ref)
-	// Plan names the identity it would install for, never a secret value (INV-1).
-	// It no longer names a secret-store location: there is no store to name, and
-	// credentials are written by `openbox auth`.
 	if !strings.Contains(plan, "did:aip:abc") {
 		t.Errorf("plan does not name the DID it would install for:\n%s", plan)
 	}
 }
 
-// A CredentialRef must never be able to carry a raw secret value (INV-1). It
-// used to name secret-store coordinates; that decision removed those, so what is
-// left is identity, URLs and posture — and this asserts it stays that way by
-// walking the struct rather than by asserting a non-empty DID, which proved
-// nothing.
-//
-// An installer runs at install time and writes tool config files. A credential
-// field here would mean a secret flowing into that code path, which is the shape
-// that decision's `init`-writes-no-secrets property depends on.
+// TestCredentialRefCarriesOnlySafeFields a CredentialRef must never be able to
+// carry a raw secret value (INV-1).
 func TestCredentialRefCarriesOnlySafeFields(t *testing.T) {
 	allowed := map[string]bool{
 		"DID": true, "BaseURL": true, "ContentCapture": true, "InstallGitHook": true,
@@ -72,8 +62,9 @@ func TestCredentialRefCarriesOnlySafeFields(t *testing.T) {
 	}
 }
 
-// A Stub built without a Manual func must not panic on Plan (the observe/
-// --dry-run path); it falls back to a generic message naming the provider.
+// TestStubPlanFallsBackWhenManualIsNil a Stub built without a Manual func must
+// not panic on Plan (the observe/ --dry-run path); it falls back to a generic
+// message naming the provider.
 func TestStubPlanFallsBackWhenManualIsNil(t *testing.T) {
 	s := Stub{ProviderName: Cursor} // Manual left nil
 	plan := s.Plan(CredentialRef{DID: "did:aip:x"})

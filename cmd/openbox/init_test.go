@@ -40,9 +40,10 @@ func TestExtractRole(t *testing.T) {
 	}
 }
 
-// The default role installs a developer runtime, and it is the ONLY spelling:
-// `openbox dev init` must be gone rather than quietly still working, or there
-// are two onboarding paths to keep true in every doc.
+// TestInitDefaultsToTheDeveloperRole the default role installs a developer
+// runtime, and it is the only spelling: `openbox dev init` must be gone rather
+// than quietly still working, or there are two onboarding paths to keep true
+// in every doc.
 func TestInitDefaultsToTheDeveloperRole(t *testing.T) {
 	a, out, _ := testApp(nil)
 	if code := a.runInit([]string{"--provider", "claude-code", "--dry-run"}); code != exitOK {
@@ -61,13 +62,10 @@ func TestDevInitIsGone(t *testing.T) {
 	if msg := errb.String(); !strings.Contains(msg, "openbox init") {
 		t.Errorf("the error does not point at the surviving spelling:\n%s", msg)
 	}
-	// `dev` keeps the commands that operate on an existing install.
 	b, _, errb2 := testApp(nil)
 	if code := b.runDev([]string{"nope"}); code == exitOK {
 		t.Error("an unknown dev subcommand succeeded")
 	}
-	// `verify` is the only surviving dev subcommand: `sync` went with the local
-	// policy bundle, `init` moved to `openbox init`.
 	if usage := errb2.String(); !strings.Contains(usage, "dev verify") || strings.Contains(usage, "sync") {
 		t.Errorf("dev usage must advertise verify and nothing else:\n%s", usage)
 	}
@@ -84,9 +82,9 @@ func TestApproverInitNeedsAnOrgAndABackend(t *testing.T) {
 	}
 }
 
-// An approver install must not touch the developer's config: they are two
-// principals, and the whole reason for the split is that neither can act as
-// the other.
+// TestApproverInitLeavesTheDeveloperConfigAlone an approver install must not
+// touch the developer's config: they are two principals, and the whole reason
+// for the split is that neither can act as the other.
 func TestApproverInitLeavesTheDeveloperConfigAlone(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", dir)

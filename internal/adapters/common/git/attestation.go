@@ -168,7 +168,9 @@ func (a *Attestation) Verify(pub ed25519.PublicKey, expectCommitSHA string) (Att
 	return payload, nil
 }
 
-// attestationNoteRef is a separate notes ref from the session mirror.
+// attestationNoteRef keeping them apart means the human-readable breadcrumb
+// and the cryptographic artifact can be fetched, pushed and pruned
+// independently; and reading one can never accidentally parse the other.
 const attestationNoteRef = "refs/notes/openbox-attest"
 
 // WriteAttestation stores an attestation as a git note on rev.

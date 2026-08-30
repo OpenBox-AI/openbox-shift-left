@@ -6,9 +6,10 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/devconfig"
 )
 
-// Posture is session-scoped evidence, so it belongs on the session-start event
-// and nowhere else: repeating it per tool call would inflate every event and
-// invite two events in one session to disagree.
+// TestPosture_OnSessionStartOnly posture is session-scoped evidence, so it
+// belongs on the session-start event and nowhere else: repeating it per tool
+// call would inflate every event and invite two events in one session to
+// disagree.
 func TestPosture_OnSessionStartOnly(t *testing.T) {
 	m := testMapper()
 	p := devconfig.Posture{Enforce: true, DecisionAuthority: devconfig.DecisionAuthorityControlPlane, Adapter: "codex/1"}
@@ -39,8 +40,9 @@ func TestPosture_OnSessionStartOnly(t *testing.T) {
 	}
 }
 
-// With no posture supplied — every existing test, the conformance fixtures, and
-// any caller that has not opted in — the emitted metadata is unchanged.
+// TestPosture_AbsentWhenNotSupplied with no posture supplied; every existing
+// test, the conformance fixtures, and any caller that has not opted in; the
+// emitted metadata is unchanged.
 func TestPosture_AbsentWhenNotSupplied(t *testing.T) {
 	m := testMapper() // Posture stays nil
 	ev, _ := m.Map(HookSessionStart, &HookEvent{SessionID: "s1", Source: "startup"})
@@ -49,12 +51,7 @@ func TestPosture_AbsentWhenNotSupplied(t *testing.T) {
 	}
 }
 
-// codexMandated must key on a TOP-LEVEL requirement key. The E8-S8 template
-// listed the mandate keys under a `[hooks]` header, so Codex bound them as
-// `hooks.*` and ignored them — while a `hook codex` substring check still let
-// posture report provider_managed:true. Reporting a mandate that is not in effect
-// is worse than reporting none, because the whole point of the field is that the
-// control plane can stop taking assurance on faith.
+// TestCodexMandated codexMandated must key on a TOP-level requirement key.
 func TestCodexMandated(t *testing.T) {
 	cases := []struct {
 		name string

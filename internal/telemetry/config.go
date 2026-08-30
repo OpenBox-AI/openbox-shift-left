@@ -44,8 +44,6 @@ func (c *Config) Validate() error {
 	return requireLoopback(host)
 }
 
-// requireLoopback rejects any host that is not, or does not resolve to,
-// loopback.
 func requireLoopback(host string) error {
 	if host == "" || host == "0.0.0.0" || host == "::" || host == "*" {
 		return fmt.Errorf("telemetry: listen host %q binds every interface; loopback is required", host)

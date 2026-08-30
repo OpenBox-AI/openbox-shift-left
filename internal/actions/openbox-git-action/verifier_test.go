@@ -11,9 +11,6 @@ import (
 	"time"
 )
 
-// testAgentID is a well-formed agent UUID; testPusherDID is the DID it derives to
-// (computed via didForAgent so the construction bind passes). This models what CI
-// supplies: a matching (OPENBOX_AGENT_ID, OPENBOX_DID) pair.
 const testAgentID = "11111111-1111-1111-1111-111111111111"
 
 func testPusherDID(t *testing.T) string {
@@ -25,9 +22,6 @@ func testPusherDID(t *testing.T) string {
 	return did
 }
 
-// mockBackend is a mock openbox-backend session-read endpoint. It records the
-// last request (to assert the path, query, and X-API-Key), and serves a
-// canned status/body for GET /agent/<agentID>/sessions.
 type mockBackend struct {
 	srv     *memhttptest.Server
 	calls   int32
@@ -54,8 +48,6 @@ func newMockBackend(t *testing.T, status int, body string) *mockBackend {
 	return m
 }
 
-// verifier builds a real apiVerifier pointed at the mock (loopback http is
-// allowed). timeout is optional (0 → default).
 func (m *mockBackend) verifier(t *testing.T, timeout time.Duration) OwnershipVerifier {
 	t.Helper()
 	v, err := NewAPIVerifier(APIVerifierConfig{
@@ -71,9 +63,6 @@ func (m *mockBackend) verifier(t *testing.T, timeout time.Duration) OwnershipVer
 	return v
 }
 
-// sessionsBody builds a body matching the REAL openbox-backend wire shape (verified
-// live 2026-07-13): a global envelope {status, data:<payload>} wrapping the
-// SessionListResponseDto {data:[…]} — so rows are at data.data[].
 func sessionsBody(runIDs ...string) string {
 	return sessionsBodyForAgent(testAgentID, runIDs...)
 }
@@ -91,11 +80,7 @@ func sessionsBodyForAgent(agentID string, runIDs ...string) string {
 	return b.String()
 }
 
-// --- UUIDv5 correctness (the INV-4 bind rests on this) ----------------------
-
 func TestUUIDV5_MatchesReferenceVector(t *testing.T) {
-	// RFC-4122 / canonical `uuid` library vector: v5(NAMESPACE_DNS, "python.org").
-	// If this drifts, didForAgent would reject every real (agentID,DID) pair.
 	const nsDNS = "6ba7b810-9dad-11d1-80b4-00c04fd430c8"
 	got, err := uuidV5(nsDNS, "python.org")
 	if err != nil {
@@ -106,8 +91,6 @@ func TestUUIDV5_MatchesReferenceVector(t *testing.T) {
 		t.Fatalf("uuidV5 = %s, want %s (implementation does not match the uuid lib)", got, want)
 	}
 }
-
-// --- OwnsSession contract ---------------------------------------------------
 
 func TestAPIVerifier_OwnedSessionIsOwned(t *testing.T) {
 	m := newMockBackend(t, 200, sessionsBody("sess-A"))
@@ -128,7 +111,6 @@ func TestAPIVerifier_NotOwnedWhenNoRow(t *testing.T) {
 }
 
 func TestAPIVerifier_MatchesRunIDNotSessionEntityID(t *testing.T) {
-	// The trailer value must match run_id, NOT the SessionEntity `id` PK.
 	m := newMockBackend(t, 200, `{"status":200,"data":{"data":[{"id":"sess-A","run_id":"other-run","agent_id":"`+testAgentID+`"}]}}`)
 	v := m.verifier(t, 0)
 
@@ -138,9 +120,7 @@ func TestAPIVerifier_MatchesRunIDNotSessionEntityID(t *testing.T) {
 }
 
 func TestAPIVerifier_ParsesRealBackendEnvelope(t *testing.T) {
-	// Regression pin for the live finding (2026-07-13): the backend double-nests the
-	// rows under data.data[] (global {status,data} envelope wrapping the DTO). A body
-	// captured verbatim from the running backend must resolve as owned.
+	// A body captured verbatim from the running backend must resolve as owned.
 	body := `{"status":200,"data":{"data":[{"id":"941a5940-b69e-4930-941e-79ae0d5bf943",` +
 		`"agent_id":"` + testAgentID + `","workflow_id":"` + testPusherDID(t) + `",` +
 		`"run_id":"606a02c8-c982-415c-823e-8887b3e8b8b7","status":"completed",` +
@@ -152,8 +132,6 @@ func TestAPIVerifier_ParsesRealBackendEnvelope(t *testing.T) {
 }
 
 func TestAPIVerifier_ForeignAgentRowRejected(t *testing.T) {
-	// INV-4 defense-in-depth: a row whose agent_id is a DIFFERENT agent must not be
-	// accepted even if the run_id matches (guards a mis-scoped server response).
 	m := newMockBackend(t, 200, sessionsBodyForAgent("99999999-9999-9999-9999-999999999999", "sess-A"))
 	v := m.verifier(t, 0)
 
@@ -163,8 +141,6 @@ func TestAPIVerifier_ForeignAgentRowRejected(t *testing.T) {
 }
 
 func TestAPIVerifier_RowMissingAgentIDNotOwned(t *testing.T) {
-	// A row that omits agent_id is not proof of ownership — the INV-4 per-row check
-	// is unconditional (a missing agent_id must not be treated as a match).
 	m := newMockBackend(t, 200, `{"status":200,"data":{"data":[{"run_id":"sess-A"}]}}`)
 	if ok, err := m.verifier(t, 0).OwnsSession(ctx, "sess-A"); ok || err != nil {
 		t.Fatalf("a row without agent_id = (%v,%v), want (false,nil) not-owned (INV-4)", ok, err)
@@ -172,7 +148,6 @@ func TestAPIVerifier_RowMissingAgentIDNotOwned(t *testing.T) {
 }
 
 func TestAPIVerifier_MatchingRowNotFirst(t *testing.T) {
-	// The owned row is not the first in data[]; it must still be found.
 	m := newMockBackend(t, 200, sessionsBody("other-run", "sess-A"))
 	if ok, err := m.verifier(t, 0).OwnsSession(ctx, "sess-A"); !ok || err != nil {
 		t.Fatalf("OwnsSession(sess-A) = (%v,%v), want owned even when not first", ok, err)
@@ -180,8 +155,7 @@ func TestAPIVerifier_MatchingRowNotFirst(t *testing.T) {
 }
 
 func TestAPIVerifier_BroadenedSubstringNotOwned(t *testing.T) {
-	// The ?search= ILIKE is a substring match, so the server may return a run_id
-	// that merely CONTAINS the query. Exact equality must reject it.
+	// Exact equality must reject it.
 	m := newMockBackend(t, 200, sessionsBody("sess-A-extra"))
 	if ok, _ := m.verifier(t, 0).OwnsSession(ctx, "sess-A"); ok {
 		t.Fatal("a superstring run_id must NOT match (exact equality only)")
@@ -189,9 +163,9 @@ func TestAPIVerifier_BroadenedSubstringNotOwned(t *testing.T) {
 }
 
 func TestAPIVerifier_DoesNotForwardKeyOnCrossHostRedirect(t *testing.T) {
-	// G_SEC C1: a 302 to a foreign host must NOT forward the org key. With redirects
-	// disabled the 302 surfaces as a non-2xx → fail-closed, and the foreign host is
-	// never contacted (so the key never leaves the configured origin).
+	// With redirects disabled the 302 surfaces as a non-2xx → fail-closed, and
+	// the foreign host is never contacted (so the key never leaves the configured
+	// origin).
 	var foreignHits int32
 	foreign := memhttptest.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		atomic.AddInt32(&foreignHits, 1)
@@ -308,8 +282,6 @@ func TestAPIVerifier_TimeoutFailsClosed(t *testing.T) {
 	}
 }
 
-// --- Request shape ----------------------------------------------------------
-
 func TestAPIVerifier_SendsKeyedPathAndOrgKey(t *testing.T) {
 	m := newMockBackend(t, 200, sessionsBody("sess-A"))
 	v := m.verifier(t, 0)
@@ -325,15 +297,12 @@ func TestAPIVerifier_SendsKeyedPathAndOrgKey(t *testing.T) {
 	if got := m.lastReq.Header.Get("X-API-Key"); got != "obx_key_test" {
 		t.Errorf("X-API-Key = %q, want obx_key_test", got)
 	}
-	// INV-1: the org key must never appear in the URL/path/query.
 	if strings.Contains(m.lastReq.URL.String(), "obx_key_test") {
 		t.Fatal("org key leaked into the URL")
 	}
 }
 
 func TestAPIVerifier_EscapesUntrustedSessionID(t *testing.T) {
-	// A trailer value with URL-significant chars must be query-escaped, never break
-	// the URL or inject a second param.
 	m := newMockBackend(t, 200, `{"status":200,"data":{"data":[]}}`)
 	v := m.verifier(t, 0)
 	nasty := "a&b=c d%25"
@@ -362,8 +331,6 @@ func TestAPIVerifier_CachesDefinitiveResultPerSession(t *testing.T) {
 	}
 }
 
-// --- Construction guards ----------------------------------------------------
-
 func TestNewAPIVerifier_RejectsBadConfig(t *testing.T) {
 	did := testPusherDID(t)
 	cases := map[string]APIVerifierConfig{
@@ -385,9 +352,6 @@ func TestNewAPIVerifier_RejectsBadConfig(t *testing.T) {
 }
 
 func TestNewAPIVerifier_BindsAgentIDToDID(t *testing.T) {
-	// The happy pair (agentID derives to DID) constructs; swapping the DID for a
-	// different agent's DID must be rejected — the verifier can only ever read the
-	// deploy principal's own sessions (INV-4).
 	if _, err := NewAPIVerifier(APIVerifierConfig{
 		BaseURL: "https://b", AgentID: testAgentID, PusherDID: testPusherDID(t), OrgAPIKey: "k",
 	}); err != nil {
@@ -400,8 +364,6 @@ func TestNewAPIVerifier_BindsAgentIDToDID(t *testing.T) {
 		t.Fatal("an agent id that names a different principal than the DID must be rejected")
 	}
 }
-
-// --- Resolver integration (end-to-end via real git) -------------------------
 
 func TestAPIVerifier_OwnedTrailerResolvesAttributed(t *testing.T) {
 	m := newMockBackend(t, 200, sessionsBody("sess-A"))
@@ -421,8 +383,6 @@ func TestAPIVerifier_OwnedTrailerResolvesAttributed(t *testing.T) {
 }
 
 func TestAPIVerifier_ForgedTrailerStaysInferred(t *testing.T) {
-	// SL5-SEC-1 for real: the pusher's agent owns sess-mine; the commit forges a
-	// victim's id the agent does NOT own (backend returns no matching row).
 	m := newMockBackend(t, 200, `{"data":[]}`) // search for sess-victim finds nothing
 	r := newTestRepo(t)
 	sha := r.commit(trailerMsg("work", "sess-victim"))

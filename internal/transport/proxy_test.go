@@ -20,8 +20,6 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/internal/gateway"
 )
 
-// stubEmitter records what the relay captured, so a test can assert presence or
-// absence without reaching the spool.
 type stubEmitter struct {
 	mu sync.Mutex
 	c  []gateway.Captured
@@ -40,13 +38,8 @@ func (e *stubEmitter) count() int {
 }
 
 // readConnectResponse consumes the CONNECT 200 the way a real client does.
-//
-// It is not ceremony. On an in-memory pipe a write BLOCKS until someone reads,
-// so a test that jumps straight to the TLS handshake deadlocks against the very
-// 200 it is waiting for — and the symptom is a 15-second hang, which reads as an
-// environment problem rather than as an answer. Byte-at-a-time to the blank
-// line, so nothing of the TLS record that follows is swallowed into a buffer the
-// tls.Client cannot see.
+// Byte-at-a-time to the blank line, so nothing of the TLS record that follows
+// is swallowed into a buffer the tls.Client cannot see.
 func readConnectResponse(t *testing.T, c net.Conn) string {
 	t.Helper()
 	var head []byte
@@ -73,17 +66,9 @@ func testCA(t *testing.T) *CA {
 	return ca
 }
 
-// TestNewRefusesAConstructionWithNoEmitter.
-//
-// This is the WithCapture gap, made structurally impossible instead of tested
-// around. The gateway lane shipped with `g.emitter` nil because nothing in the
-// binary opted in: the relay worked perfectly and discarded every capture, while
-// package gateway tested against a stub Emitter and package client tested against
-// a hand-written DevEvent. A fake at each end of a seam with no implementation
-// between them keeps both suites green and proves nothing about the seam.
-//
-// Requiring the emitter at construction means there is no reachable state where
-// this lane relays without recording.
+// TestNewRefusesAConstructionWithNoEmitter. A fake at each end of a seam with
+// no implementation between them keeps both suites green and proves nothing
+// about the seam.
 func TestNewRefusesAConstructionWithNoEmitter(t *testing.T) {
 	_, err := New(Config{}, testCA(t), nil)
 	if err == nil {
@@ -102,19 +87,18 @@ func TestNewRefusesAConstructionWithNoCA(t *testing.T) {
 	}
 }
 
-// TestNewRefusesAnInvalidConfig: Validate's loopback rule has to be enforced at
-// construction, not merely available.
+// TestNewRefusesAnInvalidConfig: Validate's loopback rule has to be enforced
+// at construction, not merely available.
 func TestNewRefusesAnInvalidConfig(t *testing.T) {
 	if _, err := New(Config{Addr: "0.0.0.0:8790"}, testCA(t), &stubEmitter{}); err == nil {
 		t.Fatal("New accepted a non-loopback listen address")
 	}
 }
 
-// TestConnectActionInterceptsOnlyTheAllowlistedHost.
-//
-// The security-critical branch, reachable without a socket. An allowlisted host
-// is hijacked (we terminate TLS); everything else is ACCEPTED, which in goproxy
-// means a blind tunnel: forwarded byte-for-byte, never decrypted, never captured.
+// TestConnectActionInterceptsOnlyTheAllowlistedHost. An allowlisted host is
+// hijacked (we terminate TLS); everything else is accepted, which in goproxy
+// means a blind tunnel: forwarded byte-for-byte, never decrypted, never
+// captured.
 func TestConnectActionInterceptsOnlyTheAllowlistedHost(t *testing.T) {
 	p, err := New(Config{}, testCA(t), &stubEmitter{})
 	if err != nil {
@@ -136,19 +120,9 @@ func TestConnectActionInterceptsOnlyTheAllowlistedHost(t *testing.T) {
 	}
 }
 
-// TestNewClearsInheritedProxyEnv is the self-loop guard.
-//
-// Phase 12 activates this lane by putting HTTPS_PROXY=http://127.0.0.1:<port>
-// into the CLIENT's environment. If the DAEMON's own environment inherits it —
-// a launchd setenv, /etc/environment, a global export — then the relay's own
-// upstream leg dials the proxy, which is this process, and every intercepted
-// call recurses: CONNECT → hijack → serve → upstream Do() → HTTPS_PROXY →
-// CONNECT → … until sockets run out. Both legs read the environment
-// (gateway.New sets Proxy: http.ProxyFromEnvironment on its client, and so does
-// NewIdentityProxy on goproxy's transport), so clearing it is one fix for both.
-//
-// It happens in New rather than being left to the caller because discipline is
-// not a control: a constructor that cannot be used without clearing is.
+// TestNewClearsInheritedProxyEnv is the self-loop guard. It happens in New
+// rather than being left to the caller because discipline is not a control: a
+// constructor that cannot be used without clearing is.
 func TestNewClearsInheritedProxyEnv(t *testing.T) {
 	keys := []string{"HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"}
 	for _, k := range keys {
@@ -164,20 +138,12 @@ func TestNewClearsInheritedProxyEnv(t *testing.T) {
 			t.Errorf("%s is still %q after New; the relay's upstream leg would dial itself", k, v)
 		}
 	}
-	// Reported, not silent: a daemon that quietly dropped the developer's proxy
-	// configuration would be its own mystery.
 	if len(p.ClearedProxyEnv()) != len(keys) {
 		t.Errorf("ClearedProxyEnv() = %v, want all %d keys named", p.ClearedProxyEnv(), len(keys))
 	}
 }
 
 // TestNewAppliesItsOptions.
-//
-// New takes `opts ...Option` and, in its first draft, dropped them on the floor.
-// A variadic option that is accepted and ignored is the worst kind of no-op: every
-// call site reads as configured, and the daemon runs unconfigured — here that
-// meant a --verbose transport logging nothing, which is indistinguishable from a
-// relay nothing reaches.
 func TestNewAppliesItsOptions(t *testing.T) {
 	var lines int
 	p, err := New(Config{}, testCA(t), &stubEmitter{},
@@ -191,14 +157,9 @@ func TestNewAppliesItsOptions(t *testing.T) {
 	}
 }
 
-// TestInterceptedRequestReachesTheHandlerOverRealTLS rehearses the whole CONNECT
-// choreography in memory: write the 200, terminate TLS with a leaf from our CA,
-// and serve HTTP/1.1 over it.
-//
-// It runs over net.Pipe because this host denies bind. That measures the
-// choreography — the 200 line, the handshake, the origin-form request the handler
-// sees, the response framing — and measures NOTHING about bind, listen or the
-// dialer. The socket-level version is TestConnectPathIsByteIdentical, guarded.
+// TestInterceptedRequestReachesTheHandlerOverRealTLS rehearses the whole
+// CONNECT choreography in memory: write the 200, terminate TLS with a leaf
+// from our CA, and serve HTTP/1.1 over it.
 func TestInterceptedRequestReachesTheHandlerOverRealTLS(t *testing.T) {
 	ca := testCA(t)
 	p, err := New(Config{}, ca, &stubEmitter{})
@@ -206,10 +167,6 @@ func TestInterceptedRequestReachesTheHandlerOverRealTLS(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 
-	// A stub handler, because this test is about the tunnel rather than the relay.
-	// The REAL gateway handler is exercised by the guarded socket test; a stub at
-	// both ends would prove nothing about the seam, which is why the production
-	// factory is asserted separately (TestProductionHandlerIsTheGatewayRelay).
 	var gotTarget, gotHost, gotProto string
 	p.handlerFor = func(string) (http.Handler, error) {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -225,8 +182,6 @@ func TestInterceptedRequestReachesTheHandlerOverRealTLS(t *testing.T) {
 	done := make(chan error, 1)
 	go func() { done <- p.interceptConn(serverConn, "api.anthropic.com:443") }()
 
-	// Deadline everywhere: a broken handshake here would otherwise HANG, and a
-	// stalled `go test` reads as an environment problem rather than an answer.
 	if err := clientConn.SetDeadline(time.Now().Add(15 * time.Second)); err != nil {
 		t.Fatalf("SetDeadline: %v", err)
 	}
@@ -262,11 +217,6 @@ func TestInterceptedRequestReachesTheHandlerOverRealTLS(t *testing.T) {
 		t.Errorf("response = %q, want a 200 from the stub handler", resp)
 	}
 
-	// ORIGIN-FORM is the property gateway.ServeHTTP requires: it refuses anything
-	// that does not begin with "/", because the target is concatenated onto the
-	// upstream and a non-origin form would splice into the authority. Over a
-	// hijacked tunnel the client sends origin-form exactly as it would to the real
-	// provider, and this asserts it rather than assuming it.
 	if gotTarget != "/v1/messages?beta=true" {
 		t.Errorf("handler saw RequestURI %q, want the origin-form target", gotTarget)
 	}
@@ -286,11 +236,6 @@ func TestInterceptedRequestReachesTheHandlerOverRealTLS(t *testing.T) {
 }
 
 // TestInterceptedTunnelServesMoreThanOneRequest.
-//
-// Claude Code reuses connections heavily, so one CONNECT carries many requests.
-// Serving only the first would make every call after it hang until the client
-// gave up and reconnected — slow and intermittent, which is the worst way for
-// this to fail.
 func TestInterceptedTunnelServesMoreThanOneRequest(t *testing.T) {
 	ca := testCA(t)
 	p, err := New(Config{}, ca, &stubEmitter{})
@@ -342,11 +287,6 @@ func TestInterceptedTunnelServesMoreThanOneRequest(t *testing.T) {
 }
 
 // TestProductionHandlerIsTheGatewayRelay.
-//
-// handlerFor is a seam a test can replace, so something has to assert that
-// PRODUCTION does not get a stub. This checks the default factory builds a real
-// gateway relay pointed at the intercepted host — the "no fake between the two
-// fakes" control, at construction level.
 func TestProductionHandlerIsTheGatewayRelay(t *testing.T) {
 	em := &stubEmitter{}
 	p, err := New(Config{}, testCA(t), em)
@@ -367,13 +307,9 @@ func TestProductionHandlerIsTheGatewayRelay(t *testing.T) {
 	}
 }
 
-// TestTheGateIsNotWired.
-//
-// Refusal is dormant until probe A names a shape Claude Code does not retry
-// around; a wrong shape silently disables a capability for the rest of the
-// session. Dormancy is asserted STRUCTURALLY — no evaluator is constructed at
-// all — rather than by wiring one and testing that it stays quiet, because the
-// second version is more code and more risk for the same claim.
+// TestTheGateIsNotWired. Refusal is dormant until probe A names a shape Claude
+// Code does not retry around; a wrong shape silently disables a capability for
+// the rest of the session.
 func TestTheGateIsNotWired(t *testing.T) {
 	fset := token.NewFileSet()
 	f, err := parser.ParseFile(fset, "proxy.go", nil, 0)
@@ -394,17 +330,9 @@ func TestTheGateIsNotWired(t *testing.T) {
 	})
 }
 
-// TestGoproxysBundledCAIsNeverReferenced.
-//
-// goproxy ships a built-in CA (GoproxyCa) whose PRIVATE KEY is in the package
-// source, so anyone can mint a certificate it signs. Using it to terminate TLS
-// would mean every intercepted model call could be decrypted by anyone who had
-// read the library — total, and silent.
-//
-// goproxy.OkConnect and goproxy.MitmConnect both carry
-// TLSConfigFromCA(&GoproxyCa). OkConnect's is inert (ConnectAccept never reads
-// TLSConfig) but naming it is one refactor away from using it, so this module
-// names it nowhere.
+// TestGoproxysBundledCAIsNeverReferenced. OkConnect's is inert (ConnectAccept
+// never reads TLSConfig) but naming it is one refactor away from using it, so
+// this module names it nowhere.
 func TestGoproxysBundledCAIsNeverReferenced(t *testing.T) {
 	fset := token.NewFileSet()
 	pkgs, err := parser.ParseDir(fset, ".", func(fi os.FileInfo) bool {
@@ -443,16 +371,14 @@ func TestGoproxysBundledCAIsNeverReferenced(t *testing.T) {
 			})
 		}
 	}
-	// A scan that found no files would pass while measuring nothing — the same
-	// reason gateway's moduleSources refuses an empty file list.
 	if !seen {
 		t.Fatal("parsed no non-test files; this guard would pass without scanning anything")
 	}
 }
 
-// TestNonAllowlistedHostIsNeverCaptured is the promise that makes that decision
-// reversal defensible, asserted rather than described: a host outside the
-// allowlist is not intercepted, so no capture can exist for it.
+// TestNonAllowlistedHostIsNeverCaptured is the promise that makes that
+// decision reversal defensible, asserted rather than described: a host outside
+// the allowlist is not intercepted, so no capture can exist for it.
 func TestNonAllowlistedHostIsNeverCaptured(t *testing.T) {
 	em := &stubEmitter{}
 	p, err := New(Config{}, testCA(t), em)

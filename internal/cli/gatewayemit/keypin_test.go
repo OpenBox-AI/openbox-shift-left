@@ -5,18 +5,8 @@ import (
 	"testing"
 )
 
-// keypin_test.go — the shipped gateway idempotency key did not move.
-//
-// `eventID`'s prefix became lane-scoped so a proxy event's key does not read
-// `gw-`. The gateway lane's key must be BYTE-IDENTICAL to what it emitted before
-// that change: the spool can be drained by a different process long after the
-// daemon that wrote it exited (INV-5), and a redelivery presenting a different
-// key makes core count the same model call twice.
-//
-// The literal below was recomputed INDEPENDENTLY from the pre-change source —
-// `sha256` over the same six fields with the same 0x1f separator, prefixed
-// `gw-` — rather than copied from the new implementation's output. A pin taken
-// from the code it is pinning proves nothing.
+// shippedGatewayEventID keypin_test.go; the shipped gateway idempotency key
+// did not move.
 const shippedGatewayEventID = "gw-70a0eb0b9ffb39fd58af125c32ffd3f7"
 
 func TestGatewayEventIDIsUnchangedByTheLaneWork(t *testing.T) {
@@ -33,13 +23,6 @@ func TestGatewayEventIDIsUnchangedByTheLaneWork(t *testing.T) {
 
 // TestTheLaneNameIsNotHashed is the other half, and it is what makes the pin
 // above achievable at all.
-//
-// Two lanes observing the same exchange produce the same HASH and differ only in
-// the prefix. That is deliberate: hashing the lane would have moved every shipped
-// gateway key. It is safe because the id is already lane-scoped — a fallback id
-// carries its lane's own prefix, and a provider `Request-Id` belongs to one
-// exchange that only one lane observed. Uniqueness comes from the request id, not
-// from the hash input.
 func TestTheLaneNameIsNotHashed(t *testing.T) {
 	gw, err := EventFor(LaneGateway, sampleIdentity(), "req-1", sampleAt, sampleCaptured())
 	if err != nil {

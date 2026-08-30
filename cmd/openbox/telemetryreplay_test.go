@@ -13,32 +13,13 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/internal/telemetry"
 )
 
-// telemetryreplay_test.go — the recorded-traffic replay for the :otel: lane.
-//
-// TestTelemetryCommandActuallyRecords next door is the SOCKET control: it drives
-// the real command over a real port and is skipped on a host that cannot bind.
-// This is the bind-free twin, and it trades exactly one thing for coverage: the
-// OTLP HTTP layer. Everything from the collector's own decode onward is the
-// shipped chain — the production projection, the production mapper, the
-// production emitter, a real spool file read back off disk. No fake anywhere.
-//
-// The entry point is the rule, and it is what separates this from a test that
-// looks the same and proves much less. The fixture is OTLP wire JSON recorded
-// from a real desktop session; it is decoded by the collector's unmarshaler
-// through Receiver.ConsumeLogsJSON. A version of this test that constructed
-// telemetry.Record values and handed them to the mapper would assert arithmetic
-// on our own struct while claiming to prove a mapping of real provider traffic.
+// Telemetryreplay_test.go; the recorded-traffic replay for the :otel: lane.
+// TestTelemetryCommandActuallyRecords next door is the socket control: it
+// drives the real command over a real port and is skipped on a host that
+// cannot bind.
 
-// replayCorpus reads the committed fixture from the telemetry module.
-//
-// It FAILS rather than skips when the file is missing. A replay suite that
-// quietly covers nothing is indistinguishable from one that works, which is the
-// failure this phase exists to remove.
 func replayCorpus(t *testing.T) []byte {
 	t.Helper()
-	// Segment-split and relative to this package directory, which means no
-	// text search for a path finds it. Recount the hops whenever either end
-	// moves.
 	path := filepath.Join("..", "..", "internal", "telemetry", "testdata", "corpus", "otel-logs.json")
 	raw, err := os.ReadFile(path)
 	if err != nil {
@@ -47,8 +28,6 @@ func replayCorpus(t *testing.T) []byte {
 	return raw
 }
 
-// replayThroughChain runs the fixture through the shipped chain and returns every
-// event that reached the spool, plus the emitter's own outcome counters.
 func replayThroughChain(t *testing.T, elected bool) ([]map[string]any, int, map[string]int) {
 	t.Helper()
 	spoolDir := t.TempDir()
@@ -59,8 +38,6 @@ func replayThroughChain(t *testing.T, elected bool) ([]map[string]any, int, map[
 			telemetryemit.Policy{Elected: func() bool { return elected }}),
 		DID:  func() string { return "did:aip:7f3c9b2e-0000-5000-a000-00000000feed" },
 		Warn: func(string, ...any) {},
-		// No Flush: the detached realtime flusher must never be spawned from a
-		// test binary, and delivery is not what this asserts.
 	}
 
 	rec, err := telemetry.New(telemetry.Config{Addr: "127.0.0.1:0"}, telemetry.WithEmitter(em))
@@ -75,12 +52,6 @@ func replayThroughChain(t *testing.T, elected bool) ([]map[string]any, int, map[
 	return readAllSpooled(t, spoolDir), emitted, drops
 }
 
-// readAllSpooled reads every spooled DevEvent, in file order.
-//
-// Field names here are the STRUCT's, not the wire's: the spool holds the pre-wire
-// DevEvent and buildPayload mints session_id/activity_id on the way out. Reading
-// the struct with the wire's vocabulary is what once made a working lane report
-// an empty spool.
 func readAllSpooled(t *testing.T, spoolDir string) []map[string]any {
 	t.Helper()
 	var out []map[string]any
@@ -120,14 +91,10 @@ func TestTelemetryReplayMapsRecordedTrafficToTurns(t *testing.T) {
 		t.Errorf("emitter counted %d emissions but %d events reached the spool", emitted, len(events))
 	}
 
-	// The census fixture carries five api_request records and fifteen other
-	// event types. Exactly the five become turns.
 	if len(events) != 5 {
 		t.Errorf("got %d turns from the recorded export, want 5 (one per recorded api_request)", len(events))
 	}
 
-	// A DROP MUST BE COUNTABLE. Phase 09 inherited that pin for a reason: a lane
-	// failing validation on every record looks identical to a quiet session.
 	// Fifteen records are unhandled event types, so the counter must say so.
 	if drops["unhandled-event"] == 0 {
 		t.Errorf("no unhandled-event drops were counted; a lane that drops silently cannot be told from a quiet session. counters: %v", drops)
@@ -167,12 +134,6 @@ func TestTelemetryReplayMapsRecordedTrafficToTurns(t *testing.T) {
 
 // TestTelemetryReplayCarriesNoRecordedContent is the privacy half, asserted on
 // what actually reached the spool rather than on what the mapper intended.
-//
-// The recorded export carries prompts, assistant responses and tool output on
-// its own attributes — api_request_body and api_response_body are two of the
-// sixteen event types in the fixture. The projection binds identifiers and
-// numbers; nothing in this lane attaches that content today, and this is what
-// says so about the real corpus rather than about a hand-built record.
 func TestTelemetryReplayCarriesNoRecordedContent(t *testing.T) {
 	events, _, _ := replayThroughChain(t, true)
 	if len(events) == 0 {
@@ -184,8 +145,6 @@ func TestTelemetryReplayCarriesNoRecordedContent(t *testing.T) {
 	}
 	body := string(raw)
 
-	// Sentinels drawn from the fixture's own unhandled records. If any appears,
-	// a projection somewhere started binding content without a gate.
 	for _, key := range []string{
 		"api_request_body", "api_response_body", "assistant_response",
 		"user_prompt", "tool_result",
@@ -197,12 +156,9 @@ func TestTelemetryReplayCarriesNoRecordedContent(t *testing.T) {
 }
 
 // TestTelemetryReplayIsSilentWhenNotElected is the negative half, and it is
-// PRESENCE-ANCHORED on purpose.
-//
-// "Nothing arrived" is also what a broken chain produces. So this asserts silence
-// against the SAME fixture that the positive test above proves yields five turns
-// — the only difference between the two runs is the election. Without that
-// anchor, deleting the mapper entirely would leave this test green.
+// presence-anchored on purpose. So this asserts silence against the same
+// fixture that the positive test above proves yields five turns; the only
+// difference between the two runs is the election.
 func TestTelemetryReplayIsSilentWhenNotElected(t *testing.T) {
 	elected, _, _ := replayThroughChain(t, true)
 	if len(elected) == 0 {

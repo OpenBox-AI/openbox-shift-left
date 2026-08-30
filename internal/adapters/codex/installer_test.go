@@ -66,9 +66,6 @@ func TestInstaller_WritesHooksAndConfig(t *testing.T) {
 		if h["command"] != wantCmd {
 			t.Errorf("event %s: command = %q, want %q", ev, h["command"], wantCmd)
 		}
-		// Timeouts in SECONDS (Codex schema): 5 for hot hooks, 15 for SessionEnd,
-		// and the raised ceiling on PreToolUse — the only gating hook, and so the
-		// only one that can hold for an approval decision (E9-S4).
 		wantTimeout := float64(hotHookTimeoutSec)
 		switch ev {
 		case "SessionEnd":
@@ -79,7 +76,6 @@ func TestInstaller_WritesHooksAndConfig(t *testing.T) {
 		if h["timeout"] != wantTimeout {
 			t.Errorf("event %s: timeout = %v, want %v", ev, h["timeout"], wantTimeout)
 		}
-		// Tool hooks match all tools; lifecycle hooks omit the matcher.
 		_, hasMatcher := group["matcher"]
 		if ev == "PreToolUse" || ev == "PostToolUse" {
 			if group["matcher"] != "*" {
@@ -90,16 +86,15 @@ func TestInstaller_WritesHooksAndConfig(t *testing.T) {
 		}
 	}
 
-	// Dev config written with coordinates (shared contract).
 	cfg, err := devconfig.Load(cfgPath)
 	if err != nil || cfg.DID != testDID {
 		t.Errorf("dev config wrong: %+v (err %v)", cfg, err)
 	}
 }
 
-// INV-1 (story NFR "Security"): neither written file may carry a secret; and
-// hooks.json specifically carries the engine path + event names ONLY — no key,
-// DID, or URL.
+// TestInstaller_NoSecretInWrittenFiles iNV-1 (story NFR "Security"): neither
+// written file may carry a secret; and hooks.json specifically carries the
+// engine path + event names only; no key, DID, or URL.
 func TestInstaller_NoSecretInWrittenFiles(t *testing.T) {
 	inst, hooksPath, cfgPath := testInstaller(t)
 	ref := CredentialRef{
@@ -122,15 +117,12 @@ func TestInstaller_NoSecretInWrittenFiles(t *testing.T) {
 	}
 }
 
-// AC-10: double-install never duplicates (byte-identical), and a pre-existing
-// foreign hooks.json entry — including a whole foreign event — is preserved
-// untouched.
+// TestInstaller_IdempotentAndPreservesForeignEntries aC-10: double-install
+// never duplicates (byte-identical), and a pre-existing foreign hooks.json
+// entry; including a whole foreign event; is preserved untouched.
 func TestInstaller_IdempotentAndPreservesForeignEntries(t *testing.T) {
 	inst, hooksPath, _ := testInstaller(t)
 
-	// Pre-existing user file: a foreign PreToolUse handler + a foreign Stop event
-	// + a mangled external-agent-migration import of the OpenBox CC hook
-	// (addendum #12) that must be OWNED (superseded), not duplicated.
 	pre := `{
 	  "description": "my hooks",
 	  "hooks": {
@@ -160,16 +152,12 @@ func TestInstaller_IdempotentAndPreservesForeignEntries(t *testing.T) {
 
 	m := readHooks(t, hooksPath)
 	hooks := m["hooks"].(map[string]any)
-	// Foreign top-level description preserved.
 	if m["description"] != "my hooks" {
 		t.Errorf("foreign description clobbered: %v", m["description"])
 	}
-	// Foreign Stop event untouched.
 	if raw, _ := json.Marshal(hooks["Stop"]); !strings.Contains(string(raw), "notify-done") {
 		t.Errorf("foreign Stop event lost: %s", raw)
 	}
-	// PreToolUse: the foreign linter survives (with its extra fields), the
-	// mangled claude-code import is gone, exactly one openbox codex entry exists.
 	rawPre, _ := json.Marshal(hooks["PreToolUse"])
 	s := string(rawPre)
 	if !strings.Contains(s, "my-linter") || !strings.Contains(s, "statusMessage") {
@@ -182,7 +170,6 @@ func TestInstaller_IdempotentAndPreservesForeignEntries(t *testing.T) {
 		t.Errorf("want exactly one openbox codex PreToolUse handler: %s", s)
 	}
 
-	// Re-install: byte-identical (idempotent, never duplicates).
 	if err := inst.Install(ref); err != nil {
 		t.Fatalf("re-install: %v", err)
 	}
@@ -192,10 +179,11 @@ func TestInstaller_IdempotentAndPreservesForeignEntries(t *testing.T) {
 	}
 }
 
-// G_SEC SL7-A F1 (adversarial): a FOREIGN compound/wrapper handler that merely
-// EMBEDS an openbox invocation must never be claimed — it survives re-install
-// byte-for-byte alongside exactly one genuine OpenBox entry, while an exact
-// stale OpenBox invocation (different engine path) is still owned and replaced.
+// TestInstaller_AnchoredOwnershipNeverClaimsCompoundHandlers g_SEC SL7-A F1
+// (adversarial): a foreign compound/wrapper handler that merely embeds an
+// openbox invocation must never be claimed; it survives re-install byte-for-
+// byte alongside exactly one genuine OpenBox entry, while an exact stale
+// OpenBox invocation (different engine path) is still owned and replaced.
 func TestInstaller_AnchoredOwnershipNeverClaimsCompoundHandlers(t *testing.T) {
 	inst, hooksPath, _ := testInstaller(t)
 
@@ -223,23 +211,18 @@ func TestInstaller_AnchoredOwnershipNeverClaimsCompoundHandlers(t *testing.T) {
 	first, _ := os.ReadFile(hooksPath)
 	s := string(first)
 
-	// The compound wrapper and the echo lookalike survive verbatim (note:
-	// encoding/json writes `&&` as &&, so assert around it).
 	for _, foreign := range []string{"my-audit-log --record", "/usr/local/bin/openbox", "sh -c 'echo hook codex PreToolUse'"} {
 		if !strings.Contains(s, foreign) {
 			t.Errorf("foreign handler embedding an openbox invocation was claimed/deleted (want %q kept):\n%s", foreign, s)
 		}
 	}
-	// The stale exact-shape OpenBox entry (old engine path) was owned & replaced.
 	if strings.Contains(s, "/old/engine/path/openbox") {
 		t.Errorf("stale exact OpenBox invocation not superseded:\n%s", s)
 	}
-	// Exactly one genuine OpenBox handler: our fresh engine path, anchored shape.
 	if n := strings.Count(s, `\"/opt/openbox/bin/openbox\" hook codex PreToolUse`); n != 1 {
 		t.Errorf("want exactly 1 fresh OpenBox PreToolUse handler, got %d:\n%s", n, s)
 	}
 
-	// Idempotent with the foreign compound still present.
 	if err := inst.Install(CredentialRef{DID: testDID}); err != nil {
 		t.Fatalf("re-install: %v", err)
 	}
@@ -295,8 +278,9 @@ func TestInstaller_RefusesUnparsableHooksFile(t *testing.T) {
 	}
 }
 
-// That decision parity: the enforce posture chosen at `init` time persists
-// into dev.json so the SL7-B enforce leg needs no new install surface.
+// TestInstaller_PersistsEnforcePosture that decision parity: the enforce
+// posture chosen at `init` time persists into dev.json so the SL7-B enforce
+// leg needs no new install surface.
 func TestInstaller_PersistsEnforcePosture(t *testing.T) {
 	inst, _, cfgPath := testInstaller(t)
 	tru := true
@@ -316,8 +300,9 @@ func TestInstaller_PersistsEnforcePosture(t *testing.T) {
 	}
 }
 
-// Re-init preserves previously-persisted sync coordinates (agent_id /
-// backend_url) when the ref does not carry them — the idempotent reuse path.
+// TestInstaller_PreservesPriorSyncCoordinates re-init preserves previously-
+// persisted sync coordinates (agent_id / backend_url) when the ref does not
+// carry them; the idempotent reuse path.
 func TestInstaller_PreservesPriorSyncCoordinates(t *testing.T) {
 	inst, _, cfgPath := testInstaller(t)
 	if err := inst.Install(CredentialRef{DID: testDID, AgentID: "agent-1", BackendURL: "https://backend.example.ai"}); err != nil {
@@ -352,8 +337,9 @@ func TestInstaller_RequiresDID(t *testing.T) {
 	}
 }
 
-// The packaging fallback (no EngineBinary) resolves `openbox` on PATH,
-// unquoted; the resolved-engine path is quoted against spaces.
+// TestInstaller_HookCommandShapes the packaging fallback (no EngineBinary)
+// resolves `openbox` on PATH, unquoted; the resolved-engine path is quoted
+// against spaces.
 func TestInstaller_HookCommandShapes(t *testing.T) {
 	withEngine := Installer{EngineBinary: "/opt/open box/openbox"}
 	if got := withEngine.hookCommand("PreToolUse"); got != `"/opt/open box/openbox" hook codex PreToolUse` {
@@ -365,9 +351,8 @@ func TestInstaller_HookCommandShapes(t *testing.T) {
 	}
 }
 
-// Parity with the CC adapter: a re-init that says nothing about posture leaves
-// it alone. Both installers now share one writer, so this pins that they really
-// do (a private writer here would show up as a downgrade).
+// TestInstaller_ReInitKeepsEnforcePosture parity with the CC adapter: a re-
+// init that says nothing about posture leaves it alone.
 func TestInstaller_ReInitKeepsEnforcePosture(t *testing.T) {
 	inst, _, cfgPath := testInstaller(t)
 	tru := true

@@ -8,21 +8,10 @@ import (
 	"testing"
 )
 
-// TestMain is the ASSERTED-hermeticity control from incident INC-SL7A-DEVJSON
-// (G_SEC SL7-A F4): stub-era tests once drove a real installer at DEFAULT
+// TestMain is the asserted-hermeticity control from incident INC-sl7a-devjson
+// (G_SEC SL7-A F4): stub-era tests once drove a real installer at default
 // paths and wrote the developer's actual ~/.codex/hooks.json and
-// ~/.config/openbox/dev.json. Per-test env pinning (t.Setenv in the helpers)
-// remains the first line of defense; this guard makes the property STRUCTURAL
-// for the whole suite:
-//
-//  1. CONTAIN — before any test runs, HOME / XDG_CONFIG_HOME / CODEX_HOME are
-//     pointed at a throwaway sentinel dir, so a test that escapes its own
-//     pinning writes there, never into the developer's real home; and
-//  2. ASSERT — after the run, any file found under the sentinel FAILS the
-//     suite loudly, so the escape is fixed rather than silently contained.
-//
-// Tests that pin their own paths (t.Setenv) override the sentinel per-test as
-// before; this only catches what slips through.
+// ~/.config/openbox/dev.json.
 func TestMain(m *testing.M) {
 	sentinel, err := os.MkdirTemp("", "openbox-hermetic-home-")
 	if err != nil {
@@ -48,9 +37,6 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
-// filesUnder returns every regular file below root (relative paths),
-// best-effort — a walk error is reported as a pseudo-leak so it is never
-// silently ignored.
 func filesUnder(root string) []string {
 	var out []string
 	_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {

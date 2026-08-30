@@ -22,18 +22,8 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/internal/client"
 )
 
-// TestGatewayCommandActuallyCaptures is the seam test.
-//
-// The gateway shipped for a while with capture UNWIRED: package gateway's
-// WithCapture had no production caller at all, so g.emitter was nil, every
-// captured exchange was discarded, and both sides stayed green — the relay was
-// exercised against a stub Emitter, and the span builder against a hand-written
-// DevEvent. A fake at each end of a seam that has no implementation between them
-// proves nothing about the seam.
-//
-// So this test supplies NO fake. It drives the real `openbox gateway` command,
-// through the real relay, into the real emitter and the real spool, and reads the
-// event back off disk. It fails if any link in that chain is missing.
+// TestGatewayCommandActuallyCaptures is the seam test. A fake at each end of a
+// seam that has no implementation between them proves nothing about the seam.
 func TestGatewayCommandActuallyCaptures(t *testing.T) {
 	memhttptest.RequireBind(t)
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -47,7 +37,6 @@ func TestGatewayCommandActuallyCaptures(t *testing.T) {
 	spoolDir := t.TempDir()
 	t.Setenv("OPENBOX_SPOOL_DIR", spoolDir)
 	t.Setenv("OPENBOX_AGENT_DID", "did:aip:7f3c9b2e-0000-5000-a000-00000000feed")
-	// The detached flusher must never be spawned from a test binary.
 	t.Setenv("OPENBOX_REALTIME", "0")
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -121,42 +110,23 @@ func TestGatewayCommandActuallyCaptures(t *testing.T) {
 	if ev.Span.CredentialFingerprint == "" {
 		t.Error("no credential fingerprint — account binding would have nothing to match")
 	}
-	// The credential must be nowhere in the spooled record, and this is asserted
-	// against the RAW LINE rather than one decoded map key: a leak through any
-	// other field — a body, an attribute, a future field nobody thought about —
-	// has to turn this red too.
-	//
-	// The spool is a plaintext file on disk, so this is a check at rest, not only
-	// on the wire.
 	if strings.Contains(string(raw), fakeCredential()) {
 		t.Error("the raw provider credential was written to the spool")
 	}
-	// And the redaction has to be the REASON it is absent, not an accident of
-	// serialization: the key survives with a redacted value, so a reviewer can
-	// still see that a credential was sent.
 	if got := ev.Span.RequestHeaders["Authorization"]; got != "[redacted]" {
 		t.Errorf("Authorization = %q, want exactly %q", got, "[redacted]")
 	}
 }
 
-// fakeCredential builds a stand-in provider credential AT RUNTIME.
-//
-// It is assembled from fragments on purpose. A credential-shaped literal in this
-// file would be rewritten by this repo's own enforce-path redactor before the
-// file was ever written to disk — and the absence assertion would then be
-// checking for a string the test never sent, passing for a reason that has
-// nothing to do with the gateway. That trap has caught this repo before; it
-// caught this test too, in its first version.
-//
-// Low entropy deliberately: the body redactor must not rewrite it either, or the
-// absence check goes vacuous a second way.
+// fakeCredential builds a stand-in provider credential AT runtime. It is
+// assembled from fragments on purpose.
 func fakeCredential() string {
 	return "sk" + "-ant-" + strings.Repeat("q7", 20)
 }
 
-// TestGatewayWithoutADIDStillRelays keeps the governance sensor from becoming a
-// precondition for the developer's model calls. An unconfigured machine must
-// still get a working relay — the same fail-open direction the hook path holds.
+// TestGatewayWithoutADIDStillRelays keeps the governance sensor from becoming
+// a precondition for the developer's model calls. An unconfigured machine must
+// still get a working relay; the same fail-open direction the hook path holds.
 func TestGatewayWithoutADIDStillRelays(t *testing.T) {
 	memhttptest.RequireBind(t)
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -197,9 +167,6 @@ func TestGatewayWithoutADIDStillRelays(t *testing.T) {
 	<-done
 }
 
-// readOneSpooledLine returns the first spooled line's raw bytes. Raw, because the
-// credential-absence assertion has to see everything that was written, not the
-// subset a struct happens to model.
 func readOneSpooledLine(t *testing.T, dir string) []byte {
 	t.Helper()
 	entries, err := os.ReadDir(dir)
@@ -236,18 +203,9 @@ func decodeSpooledEvent(t *testing.T, line []byte) client.DevEvent {
 	return ev
 }
 
-// TestSpooledGatewayEventReachesTheWire closes the last seam a fake could hide.
-//
-// TestGatewayCommandActuallyCaptures proves capture reaches the spool; the client
-// package proves an in-memory event reaches the wire. Between them sits the part
-// neither covers: the spooled LINE a daemon wrote, read back by a separate flush
-// process, rebuilt into a payload and signed. This drives the real dispatcher for
-// both halves and asserts the POSTed bytes.
-//
-// It also pins something no other test can: the "cc-spool" directory and
-// "claude-code" provider that gateway.go names must be the SAME ones the adapter's
-// flush drains. If those drift, the flush finds nothing and this reds — whereas
-// every unit test on either side would stay green.
+// TestSpooledGatewayEventReachesTheWire closes the last seam a fake could
+// hide. TestGatewayCommandActuallyCaptures proves capture reaches the spool;
+// the client package proves an in-memory event reaches the wire.
 func TestSpooledGatewayEventReachesTheWire(t *testing.T) {
 	memhttptest.RequireBind(t)
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -308,7 +266,6 @@ func TestSpooledGatewayEventReachesTheWire(t *testing.T) {
 	cancel()
 	<-done
 
-	// The real flush path, through the real dispatcher.
 	t.Setenv("OPENBOX_FLUSH_SESSION", "wire-seam-session")
 	flush, _, flushErr := testApp(nil)
 	if code := flush.run([]string{"hook", "claude-code", "flush"}); code != exitOK {

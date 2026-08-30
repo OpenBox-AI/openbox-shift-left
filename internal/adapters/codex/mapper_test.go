@@ -20,32 +20,21 @@ func testMapper() Mapper {
 }
 
 // TestClassifyTool_GroundedLiterals is the durable record of the Codex hook
-// tool_name literals (story AC-4: "ground the exact tool_name literals ... and
-// record them in a test"). Source: codex-rs @ tag rust-v0.145.0,
-// core/src/tools/hook_names.rs (HookToolName::bash() == "Bash",
-// HookToolName::apply_patch() == "apply_patch" with Write/Edit as
-// NEVER-serialized matcher aliases) + core/src/tools/handlers/mcp.rs
-// (ensure_mcp_prefix → mcp__<server>__<tool>) + core/src/tools/registry.rs
-// function_hook_tool_name (generic tools serialize their flat name).
+// tool_name literals (story AC-4: "ground the exact tool_name literals ... And
+// record them in a test").
 func TestClassifyTool_GroundedLiterals(t *testing.T) {
 	tests := []struct {
 		name string
 		kind client.ToolKind
 		sem  string
 	}{
-		// Codex's shell-exec paths (shell_command, unified_exec, sandboxing) all
-		// serialize the Claude-compatible literal "Bash".
 		{"Bash", client.ToolShell, "internal"},
 		{"apply_patch", client.ToolFile, "file_write"},
 		{"mcp__github__create_issue", client.ToolMCP, "mcp_tool_call"},
-		// Generic function tools ride their flat names → coarse catch-all.
 		{"web_search", client.ToolShell, "internal"},
 		{"update_plan", client.ToolShell, "internal"},
 		{"view_image", client.ToolShell, "internal"},
 		{"spawn_agent", client.ToolShell, "internal"},
-		// The matcher ALIASES must NOT be treated as file tools: hook_names.rs
-		// documents they are matcher-only and never serialized as tool_name; if
-		// one ever arrives it is an unknown tool → catch-all, honestly.
 		{"Write", client.ToolShell, "internal"},
 		{"Edit", client.ToolShell, "internal"},
 	}
@@ -144,7 +133,6 @@ func TestMap_LifecycleAndToolEvents(t *testing.T) {
 			if got.EventID == "" {
 				t.Error("event_id is empty (INV-5)")
 			}
-			// Content is populated only under the (off in this mapper) capture gate.
 			if got.Content != nil {
 				t.Errorf("content must be nil, got %+v", got.Content)
 			}
@@ -154,8 +142,6 @@ func TestMap_LifecycleAndToolEvents(t *testing.T) {
 			case tt.wantSpan != nil && got.Span == nil:
 				t.Errorf("expected span %+v, got nil", tt.wantSpan)
 			case tt.wantSpan != nil:
-				// DeepEqual, not !=: Span carries maps since the gateway's
-				// header capture, so it is no longer comparable.
 				if !reflect.DeepEqual(*got.Span, *tt.wantSpan) {
 					t.Errorf("span = %+v, want %+v", *got.Span, *tt.wantSpan)
 				}
@@ -164,11 +150,10 @@ func TestMap_LifecycleAndToolEvents(t *testing.T) {
 	}
 }
 
-// TestMap_NoContentLeak is the SL3-SEC-3 guard (story AC-7): content present in
-// a hook's tool_input (command string / apply_patch body) or tool_response must
-// NEVER appear anywhere in the emitted event — not in metadata, not in
-// tool.name, not in a span body. Codex-specific: tool_input carries no
-// structural path either, so NOTHING from it is carried.
+// TestMap_NoContentLeak is the SL3-SEC-3 guard (story AC-7): content present
+// in a hook's tool_input (command string / apply_patch body) or tool_response
+// must never appear anywhere in the emitted event; not in metadata, not in
+// tool.name, not in a span body.
 func TestMap_NoContentLeak(t *testing.T) {
 	m := testMapper()
 	cmdSecret := "SUPER-SECRET-COMMAND-should-not-egress"
@@ -215,14 +200,13 @@ func TestMap_NoContentLeak(t *testing.T) {
 }
 
 // TestMap_PromptCaptureGatedOnContentCapture (story AC-7): the prompt is
-// CONTENT — carried onto PromptSubmitted ONLY when content-capture is on
-// (ON by default at runtime; the mapper default here is off so the gate itself
-// is what is under test — CC-adapter parity).
+// content; carried onto PromptSubmitted only when content-capture is on (ON by
+// default at runtime; the mapper default here is off so the gate itself is
+// what is under test; CC-adapter parity).
 func TestMap_PromptCaptureGatedOnContentCapture(t *testing.T) {
 	const prompt = "refactor the auth module"
 	e := &HookEvent{SessionID: "th-1", PermissionMode: "default", Prompt: prompt}
 
-	// Capture off: the prompt must NOT reach the event.
 	off := testMapper()
 	got, ok := off.Map(HookUserPromptSubmit, e)
 	if !ok {
@@ -235,7 +219,6 @@ func TestMap_PromptCaptureGatedOnContentCapture(t *testing.T) {
 		t.Fatalf("content-capture off: prompt leaked into emitted event: %s", raw)
 	}
 
-	// Capture on: the prompt is carried on ev.Content.Prompt.
 	on := testMapper()
 	on.CaptureContent = true
 	got, ok = on.Map(HookUserPromptSubmit, e)
@@ -246,7 +229,6 @@ func TestMap_PromptCaptureGatedOnContentCapture(t *testing.T) {
 		t.Fatalf("content-capture on: prompt must be captured, got %+v", got.Content)
 	}
 
-	// Capture on but empty prompt ⇒ no Content.
 	got, _ = on.Map(HookUserPromptSubmit, &HookEvent{SessionID: "th-1", PermissionMode: "default"})
 	if got.Content != nil {
 		t.Fatalf("empty prompt must not set Content, got %+v", got.Content)
@@ -267,7 +249,6 @@ func TestMap_MetadataStructuralOnly(t *testing.T) {
 			t.Errorf("metadata[%q] = %v, want %v", k, got.Metadata[k], v)
 		}
 	}
-	// compact drops empty values; provider is always present.
 	got2, _ := m.Map(HookSessionStart, &HookEvent{SessionID: "th-1"})
 	if _, present := got2.Metadata["source"]; present {
 		t.Errorf("empty source should be dropped, got %v", got2.Metadata)
@@ -276,7 +257,6 @@ func TestMap_MetadataStructuralOnly(t *testing.T) {
 		t.Errorf("provider should always be present")
 	}
 
-	// Tool events carry the structural correlation ids.
 	tool, _ := m.Map(HookPreToolUse, &HookEvent{SessionID: "th-1", ToolName: "Bash", ToolUseID: "call-1", TurnID: "turn-9", PermissionMode: "default"})
 	if tool.Metadata["tool_use_id"] != "call-1" || tool.Metadata["turn_id"] != "turn-9" {
 		t.Errorf("tool metadata missing correlation ids: %v", tool.Metadata)
@@ -306,8 +286,6 @@ func TestMap_UnknownEnumsDropped(t *testing.T) {
 	if _, ok := ss.Metadata["permission_mode"]; ok {
 		t.Errorf("unknown permission_mode should be dropped")
 	}
-	// SessionEnd reason is pinned to "other" by the 0.145.0 schema; anything
-	// else is dropped, "other" is carried.
 	se, _ := m.Map(HookSessionEnd, &HookEvent{SessionID: "th-1", Reason: "bogus"})
 	if _, ok := se.Metadata["reason"]; ok {
 		t.Errorf("unknown reason should be dropped")
@@ -333,10 +311,10 @@ func TestMap_IdentifiersBounded(t *testing.T) {
 	}
 }
 
-// TestDeriveID_ToolUseIDDistinguishes pins the INV-5 improvement Codex enables:
-// two otherwise-identical same-instant Bash calls get DISTINCT event ids (the
-// tool_use_id rides the invocation slot that feeds deriveID), while the same
-// logical event always re-derives the same id.
+// TestDeriveID_ToolUseIDDistinguishes pins the INV-5 improvement Codex
+// enables: two otherwise-identical same-instant Bash calls get distinct event
+// ids (the tool_use_id rides the invocation slot that feeds deriveID), while
+// the same logical event always re-derives the same id.
 func TestDeriveID_ToolUseIDDistinguishes(t *testing.T) {
 	m := testMapper()
 	m.NewID = nil // production derivation

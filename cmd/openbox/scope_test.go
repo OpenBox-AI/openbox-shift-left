@@ -10,19 +10,8 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/devinit"
 )
 
-// --- the enforce default and its opt-out ------------------------------------
-
-// (The bare-install case is TestBareInitEnforcesWithoutWritingTheField below. It
-// used to assert that a literal `enforce: true` was written, which asserted the
-// implementation rather than the guarantee — and that spelling was itself the bug:
-// writing the field on every run is what silently reverted an opt-out. The
-// replacement asserts the RESOLVED posture and that nothing was written.)
-
-// THE ROUND-TRIP. This is the whole point of making Enforce a *bool: as a plain
-// bool with `omitempty`, writing false erased the field, and the next read saw an
-// absent field and re-defaulted to ON. The opt-out was silently un-appliable.
-//
-// A default that cannot be turned off is not a default, it is a mandate.
+// TestEnforceOptOutRoundTrips tHE round-trip. The opt-out was silently un-
+// appliable.
 func TestEnforceOptOutRoundTrips(t *testing.T) {
 	for _, flag := range []string{"--enforce=false", "--no-enforce"} {
 		t.Run(flag, func(t *testing.T) {
@@ -33,7 +22,7 @@ func TestEnforceOptOutRoundTrips(t *testing.T) {
 				t.Fatalf("exit = %d; stderr=%q", code, errb.String())
 			}
 
-			// 1. The field must actually be IN the file — not dropped by omitempty.
+			// The field must actually be IN the file; not dropped by omitempty.
 			raw, err := os.ReadFile(filepath.Join(home, "dev.json"))
 			if err != nil {
 				t.Fatal(err)
@@ -41,7 +30,7 @@ func TestEnforceOptOutRoundTrips(t *testing.T) {
 			if !strings.Contains(string(raw), `"enforce": false`) {
 				t.Fatalf("the opt-out was not persisted (this is the omitempty bug):\n%s", raw)
 			}
-			// 2. Re-reading it must still be false.
+			// Re-reading it must still be false.
 			cfg := readDevJSON(t, home)
 			if cfg.Enforce == nil {
 				t.Fatal("enforce came back absent after being written false")
@@ -49,7 +38,7 @@ func TestEnforceOptOutRoundTrips(t *testing.T) {
 			if *cfg.Enforce {
 				t.Error("enforce came back true after being written false")
 			}
-			// 3. And the resolver must agree, despite the default being on.
+			// And the resolver must agree, despite the default being on.
 			if devconfig.ResolveEnforce() {
 				t.Error("ResolveEnforce() reports enforcing after an explicit opt-out")
 			}
@@ -69,13 +58,11 @@ func TestEnforceAndNoEnforceAreMutuallyExclusive(t *testing.T) {
 	}
 }
 
-// Turning enforcement off is announced. Under enforce-by-default the raw field is
-// absent on most configs, so a guard that read it directly would go silent in
-// exactly the common case — which is the case the message exists for.
+// TestTurningEnforceOffIsAnnouncedEvenFromAnAbsentField turning enforcement
+// off is announced.
 func TestTurningEnforceOffIsAnnouncedEvenFromAnAbsentField(t *testing.T) {
 	home := isolateHome(t)
 	seedCredentials(t)
-	// dev.json exists (seedCredentials wrote a DID) but has never written enforce.
 	if cfg := readDevJSON(t, home); cfg.Enforce != nil {
 		t.Fatalf("precondition: enforce should be absent, got %v", cfg.Enforce)
 	}
@@ -88,7 +75,8 @@ func TestTurningEnforceOffIsAnnouncedEvenFromAnAbsentField(t *testing.T) {
 	}
 }
 
-// The env override still wins over the config, in both directions.
+// TestEnforceEnvOverride the env override still wins over the config, in both
+// directions.
 func TestEnforceEnvOverride(t *testing.T) {
 	home := isolateHome(t)
 	f := false
@@ -105,11 +93,9 @@ func TestEnforceEnvOverride(t *testing.T) {
 	}
 }
 
-// --- moved and removed flags ------------------------------------------------
-
-// Silent acceptance of a flag that no longer does anything is worse than removing
-// it loudly: a script passing --base-url would keep exiting 0 while the URL went
-// nowhere.
+// TestEveryMovedFlagErrorsNamingAuth silent acceptance of a flag that no
+// longer does anything is worse than removing it loudly: a script passing
+// --base-url would keep exiting 0 while the URL went nowhere.
 func TestEveryMovedFlagErrorsNamingAuth(t *testing.T) {
 	for _, tc := range []struct{ flag, value string }{
 		{"--org", "acme"},
@@ -187,8 +173,6 @@ func TestLocalHooksIsADeprecatedAliasForScopeLocal(t *testing.T) {
 	if !strings.Contains(errb.String(), "deprecated") {
 		t.Errorf("--local-hooks should warn to stderr:\n%s", errb.String())
 	}
-	// stderr, never stdout: a hook writing to stdout injects context into the
-	// coding agent (INV-3), and the discipline is worth keeping uniform.
 	if strings.Contains(out.String(), "deprecated") {
 		t.Errorf("the deprecation warning must not go to stdout:\n%s", out.String())
 	}
@@ -221,11 +205,9 @@ func TestInvalidScopeIsRejected(t *testing.T) {
 	}
 }
 
-// --- codex scope ------------------------------------------------------------
-
-// Codex hooks are user-wide; a repo-level .codex/hooks.json is a location its
-// installer deliberately does not touch. So project scope ERRORS rather than
-// silently governing everything.
+// TestCodexRejectsLocalScope codex hooks are user-wide; a repo-level
+// .codex/hooks.json is a location its installer deliberately does not touch.
+// So project scope errors rather than silently governing everything.
 func TestCodexRejectsLocalScope(t *testing.T) {
 	isolateHome(t)
 	seedCredentials(t)
@@ -242,9 +224,9 @@ func TestCodexRejectsLocalScope(t *testing.T) {
 	}
 }
 
-// A bare codex install resolves to global and SAYS SO. Silently governing every
-// Codex session when the user asked for one project would over-deliver
-// governance without consent.
+// TestCodexBareInitResolvesGlobalAndSaysSo a bare codex install resolves to
+// global and says SO. Silently governing every Codex session when the user
+// asked for one project would over-deliver governance without consent.
 func TestCodexBareInitResolvesGlobalAndSaysSo(t *testing.T) {
 	isolateHome(t)
 	seedCredentials(t)
@@ -262,10 +244,9 @@ func TestCodexBareInitResolvesGlobalAndSaysSo(t *testing.T) {
 	}
 }
 
-// --- printGovernedScope, pinned ---------------------------------------------
-
-// This string is the one place a user learns the truth about coverage, so its
-// content is pinned rather than left to drift.
+// TestPrintGovernedScopeStatesTheTruth this string is the one place a user
+// learns the truth about coverage, so its content is pinned rather than left
+// to drift.
 func TestPrintGovernedScopeStatesTheTruth(t *testing.T) {
 	t.Run("local names the directory and the gap", func(t *testing.T) {
 		a, out, _ := testApp(nil)
@@ -280,7 +261,6 @@ func TestPrintGovernedScopeStatesTheTruth(t *testing.T) {
 		if !strings.Contains(s, "do not commit") {
 			t.Errorf("must warn against committing the settings file:\n%s", s)
 		}
-		// It must never claim ambient coverage after a project-scoped install.
 		for _, banned := range []string{"ambient", "every project", "machine-wide"} {
 			if strings.Contains(strings.ToLower(s), banned) {
 				t.Errorf("project scope must not imply broader coverage (%q):\n%s", banned, s)
@@ -301,17 +281,12 @@ func TestPrintGovernedScopeStatesTheTruth(t *testing.T) {
 	})
 }
 
-// optionsFor builds the minimum devinit.Options printGovernedScope reads.
 func optionsFor(providerName, projectDir string) devinit.Options {
 	return devinit.Options{Provider: providerName, ProjectDir: projectDir}
 }
 
-// The whole install output must not overstate coverage, not just the scope block.
-//
-// This exists because the closing block said "Governance is ambient from here"
-// while the scope block three lines later said "THIS PROJECT ONLY" — two true
-// halves that read as a contradiction, and the wrong half is the one a hurried
-// reader believes. Asserting on printGovernedScope alone did not catch it.
+// TestNoInstallOutputClaimsAmbientCoverageAfterAProjectScopedInstall the whole
+// install output must not overstate coverage, not just the scope block.
 func TestNoInstallOutputClaimsAmbientCoverageAfterAProjectScopedInstall(t *testing.T) {
 	isolateHome(t)
 	seedCredentials(t)
@@ -325,24 +300,17 @@ func TestNoInstallOutputClaimsAmbientCoverageAfterAProjectScopedInstall(t *testi
 			t.Errorf("a project-scoped install must not imply broader coverage (%q):\n%s", banned, out.String())
 		}
 	}
-	// And it must still say the mechanism needs nothing running, which is the true
-	// half the removed sentence was carrying.
 	if !strings.Contains(out.String(), "Nothing to run") {
 		t.Errorf("the install should still state that nothing needs to be kept running:\n%s", out.String())
 	}
 }
 
-// THE REGRESSION TEST for the bug that shipped past every single-invocation test:
-// a plain `init` re-run silently reverted a deliberate `--enforce=false` back to
-// true, because the flag defaults to true and its value was assigned to o.Enforce
-// unconditionally — so every run wrote enforce:true whether the user had asked
+// TestPlainReInitDoesNotRevertAnEnforceOptOut tHE regression test for the bug
+// that shipped past every single-invocation test: a plain `init` re-run
+// silently reverted a deliberate `--enforce=false` back to true, because the
+// flag defaults to true and its value was assigned to o.Enforce
+// unconditionally; so every run wrote enforce:true whether the user had asked
 // for it or not.
-//
-// One invocation cannot catch this. The bug lives in the SECOND run, which is
-// exactly what a developer does for unrelated reasons: adding --install-git-hook,
-// repairing hooks, or an idempotent setup script re-running init.
-//
-// That decision calls the persisting opt-out load-bearing; this is what holds it.
 func TestPlainReInitDoesNotRevertAnEnforceOptOut(t *testing.T) {
 	home := isolateHome(t)
 	seedCredentials(t)
@@ -361,7 +329,6 @@ func TestPlainReInitDoesNotRevertAnEnforceOptOut(t *testing.T) {
 		t.Fatalf("precondition failed: opt-out not stored, got %v", cfg.Enforce)
 	}
 
-	// A plain re-run that says NOTHING about enforce.
 	run(t)
 	cfg := readDevJSON(t, home)
 	if cfg.Enforce == nil {
@@ -374,17 +341,15 @@ func TestPlainReInitDoesNotRevertAnEnforceOptOut(t *testing.T) {
 		t.Error("ResolveEnforce() reports enforcing after an opt-out survived a re-run")
 	}
 
-	// And the inverse still works: an explicit --enforce turns it back on.
 	run(t, "--enforce")
 	if cfg := readDevJSON(t, home); cfg.Enforce == nil || !*cfg.Enforce {
 		t.Errorf("--enforce did not turn it back on, got %v", cfg.Enforce)
 	}
 }
 
-// A bare install on a machine with no prior config must still ENFORCE — via the
-// resolver default, not by writing a literal true. Both halves matter: writing
-// nothing is what lets the opt-out above survive, and resolving to on is what
-// makes that decision's default real.
+// TestBareInitEnforcesWithoutWritingTheField a bare install on a machine with
+// no prior config must still enforce; via the resolver default, not by writing
+// a literal true.
 func TestBareInitEnforcesWithoutWritingTheField(t *testing.T) {
 	home := isolateHome(t)
 	seedCredentials(t)

@@ -76,9 +76,8 @@ type HookEvent struct {
 	Prompt string `json:"prompt"`
 }
 
-// command decodes the shell command / patch body from tool_input["command"].
-// The observe path never calls it (ToolInput stays an opaque json.RawMessage),
-// so observe egress is unchanged.
+// command the observe path never calls it (ToolInput stays an opaque
+// json.RawMessage), so observe egress is unchanged.
 func (e *HookEvent) command() string {
 	if len(e.ToolInput) == 0 {
 		return ""

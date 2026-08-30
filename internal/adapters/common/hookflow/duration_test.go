@@ -9,7 +9,6 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/internal/client"
 )
 
-// readSpooledEvents reads the events a session spooled (one JSON line each).
 func readSpooledEvents(t *testing.T, spoolDir, sessionID string) []client.DevEvent {
 	t.Helper()
 	data, err := os.ReadFile((Spool{Dir: spoolDir}).SessionPath(sessionID))
@@ -27,8 +26,6 @@ func readSpooledEvents(t *testing.T, spoolDir, sessionID string) []client.DevEve
 	return out
 }
 
-// clockSeq returns a Now func that yields the given times in order, holding the
-// last one (so extra reads never panic).
 func clockSeq(times ...time.Time) func() time.Time {
 	i := 0
 	return func() time.Time {
@@ -40,8 +37,6 @@ func clockSeq(times ...time.Time) func() time.Time {
 	}
 }
 
-// --- DurationStash (direct) ---------------------------------------------------
-
 func TestDurationStash_PutTakeClear(t *testing.T) {
 	d := DurationStash{Dir: t.TempDir()}
 	const sess, key, ts = "s1", "k1", "2026-07-15T12:00:00Z"
@@ -52,7 +47,6 @@ func TestDurationStash_PutTakeClear(t *testing.T) {
 	if got := d.TakeStart(sess, key); got != ts {
 		t.Fatalf("TakeStart = %q, want %q", got, ts)
 	}
-	// take removes the record: a second take is empty.
 	if got := d.TakeStart(sess, key); got != "" {
 		t.Fatalf("second TakeStart = %q, want empty (record removed on read)", got)
 	}
@@ -72,7 +66,6 @@ func TestDurationStash_ClearSessionSweepsUnpaired(t *testing.T) {
 		t.Fatalf("PutStart: %v", err)
 	}
 	d.ClearSession("s1")
-	// The whole session subdir is gone, so a later take finds nothing.
 	if got := d.TakeStart("s1", "orphan"); got != "" {
 		t.Fatalf("TakeStart after clear = %q, want empty", got)
 	}

@@ -6,20 +6,13 @@ import (
 	"testing"
 )
 
-// The observed-span path was gateway-only, and gating it on GatewayRequestID
-// alone became a latent defect the moment that decision declared OtelRequestID
-// and ProxyRequestID. An event carrying one of those plus a populated Span was
-// accepted, spooled, signed and POSTed with NO span attached — the signature
-// failure shape in this repo: a lane that looks like it works and carries none
-// of its evidence.
-//
 // These tests hold the fix in all four directions that can regress: the new
 // lanes get a span, the gateway's own ids did not move, the three lanes never
 // collide, and a turn with no lane still takes the hook path.
 
 // spanOf returns the single span the payload carries, or false when it carries
 // none. It goes through buildPayload rather than calling the builder, because
-// the defect was in the CALL SITE's gate, not in the builder.
+// the defect was in the call site's gate, not in the builder.
 func spanOf(t *testing.T, ev DevEvent) (map[string]any, bool) {
 	t.Helper()
 	b, err := buildPayload(ev)
@@ -42,8 +35,6 @@ func spanOf(t *testing.T, ev DevEvent) (map[string]any, bool) {
 	return p.Spans[0], true
 }
 
-// turnWithLane builds a TurnCompleted carrying observed HTTP evidence, with the
-// lane discriminator the caller names.
 func turnWithLane(lane, id string) DevEvent {
 	ev := DevEvent{
 		SchemaVersion: SchemaVersion,
@@ -76,9 +67,6 @@ func TestObservedSpanShipsForEveryObservingLane(t *testing.T) {
 			if !ok {
 				t.Fatalf("%s turn carries NO span — the lane's evidence is being dropped silently", lane)
 			}
-			// The classification keys are what make core recompute
-			// semantic_type as llm_completion; without them the span stores,
-			// classifies as something else, and every reader goes quiet.
 			if got := span["http_method"]; got != "POST" {
 				t.Errorf("http_method = %v, want POST", got)
 			}
@@ -94,11 +82,6 @@ func TestObservedSpanShipsForEveryObservingLane(t *testing.T) {
 
 // TestGatewaySpanIDDidNotMove pins the gateway derivation against a value
 // computed independently of this code.
-//
-// Generalizing the builder had to leave the gateway's ids byte-identical: they
-// are already stored core-side, and core's span dedupe is (span_id, stage)
-// scoped by session — so a changed derivation would stop absorbing a re-emit and
-// start writing a second row for the same call.
 func TestGatewaySpanIDDidNotMove(t *testing.T) {
 	span, ok := spanOf(t, turnWithLane("gw", "gw-req-1"))
 	if !ok {
@@ -110,18 +93,9 @@ func TestGatewaySpanIDDidNotMove(t *testing.T) {
 	}
 }
 
-// TestObservingLaneSpanIDsAreDisjoint is the control that matters most.
-//
-// Two lanes can describe the SAME turn. If they minted the same span id, core's
-// dedupe would absorb one as a duplicate of the other and half the evidence
-// would vanish with no error anywhere — the same failure the activity_id
-// namespaces exist to prevent, one level down.
-//
-// Two mechanisms carry it — the lane in the hash input and the lane in the
-// prefix — and they are REDUNDANT: drilled 2026-08-28, removing either alone
-// leaves this test green, and only removing both turns it red. So this test
-// pins the property, not either mechanism; do not read a green run as evidence
-// that both are still present.
+// TestObservingLaneSpanIDsAreDisjoint is the control that matters most. So
+// this test pins the property, not either mechanism; do not read a green run
+// as evidence that both are still present.
 func TestObservingLaneSpanIDsAreDisjoint(t *testing.T) {
 	const shared = "same-id"
 	seen := map[string]string{}
@@ -139,15 +113,10 @@ func TestObservingLaneSpanIDsAreDisjoint(t *testing.T) {
 }
 
 // TestLanePrecedenceMatchesActivityID keeps the two namespace decisions from
-// drifting apart.
-//
-// If observedLane and turnActivityIDFor disagreed, one event could take its
-// activity_id from one lane and its span id from another, and core would file
-// half the evidence under a row the other half never joins.
+// drifting apart. If observedLane and turnActivityIDFor disagreed, one event
+// could take its activity_id from one lane and its span id from another, and
+// core would file half the evidence under a row the other half never joins.
 func TestLanePrecedenceMatchesActivityID(t *testing.T) {
-	// A deliberately malformed event carrying all three: the contract's
-	// turnProducer oneOf rejects this shape, so the only thing under test is
-	// that both functions resolve it the SAME way.
 	ev := DevEvent{SessionID: "s1"}
 	ev.ProxyRequestID, ev.GatewayRequestID, ev.OtelRequestID = "p", "g", "o"
 
@@ -190,18 +159,9 @@ func TestNoLaneStillTakesTheHookPath(t *testing.T) {
 	}
 }
 
-// TestOnlyTheTelemetryLaneMarksItsSpanSynthetic pins the honesty control.
-//
-// The in-path lanes SAW the method, URL and status they report. The telemetry
-// lane did not — Claude Code's export carries neither a method nor a URL — so
-// the client synthesizes both to reach core's isLLMCall, which is the only path
-// to an llm_completion classification. An unmarked synthetic span is
-// indistinguishable from real captured traffic in a stored row, and a governance
-// product asserting it observed a request it inferred is the overstatement this
-// product exists to prevent.
-//
-// The marker is derived from the LANE, not set by the caller, so a mapper cannot
-// forget it. Removing the derivation must turn this red in the otel direction.
+// TestOnlyTheTelemetryLaneMarksItsSpanSynthetic pins the honesty control. The
+// marker is derived from the lane, not set by the caller, so a mapper cannot
+// forget it.
 func TestOnlyTheTelemetryLaneMarksItsSpanSynthetic(t *testing.T) {
 	for lane, wantMarked := range map[string]bool{
 		"otel":  true,  // client-asserted: the http.* keys are synthesized
@@ -218,9 +178,6 @@ func TestOnlyTheTelemetryLaneMarksItsSpanSynthetic(t *testing.T) {
 			if marked != wantMarked {
 				t.Errorf("%s: openbox.span_synthetic = %v, want %v", lane, marked, wantMarked)
 			}
-			// Whether observed or synthesized, the classification keys must be
-			// present: without them core classifies the span as something else
-			// and every model-call reader goes quiet, with no error anywhere.
 			if attrs["http.method"] != "POST" {
 				t.Errorf("%s: http.method = %v, want POST", lane, attrs["http.method"])
 			}

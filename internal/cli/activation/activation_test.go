@@ -44,9 +44,9 @@ func activate(t *testing.T, home string, lane Lane, desired map[string]string) A
 }
 
 // TestActivatePreservesEverythingItDoesNotOwn is the ownership rule this repo
-// paid for once already: `init` decided what it owned by exact-match, preserved
-// an entry written under a different HOME as foreign, and every governed tool
-// call was stored twice. Anything outside the desired set is untouched.
+// paid for once already: `init` decided what it owned by exact-match,
+// preserved an entry written under a different HOME as foreign, and every
+// governed tool call was stored twice.
 func TestActivatePreservesEverythingItDoesNotOwn(t *testing.T) {
 	home := t.TempDir()
 	seed(t, home, `{"permissions":{"allow":["Bash"]},"env":{"CORP_TOKEN_PATH":"/etc/corp/token"}}`)
@@ -65,16 +65,9 @@ func TestActivatePreservesEverythingItDoesNotOwn(t *testing.T) {
 	}
 }
 
-// TestTheOriginalIsCapturedOnlyOnce is first-writer-wins, generalized.
-//
-// The gateway learned this the hard way: re-running init with a different
-// --gateway-addr displaced OUR OWN previous URL, which was then recorded as
-// "what the org had", so uninstall restored a loopback address whose daemon it
-// had just unloaded — and a dead localhost fails closed, so the command meant to
-// undo the relay left every model call failing while announcing a restore.
-//
-// In the record model that whole class disappears structurally: the original is
-// whatever was there before the FIRST activation, and later activations of the
+// TestTheOriginalIsCapturedOnlyOnce is first-writer-wins, generalized. In the
+// record model that whole class disappears structurally: the original is
+// whatever was there before the first activation, and later activations of the
 // same lane cannot overwrite it.
 func TestTheOriginalIsCapturedOnlyOnce(t *testing.T) {
 	const orgRelay = "https://llm-proxy.corp.internal"
@@ -118,8 +111,8 @@ func TestDeactivateDeletesAKeyThatWasNotThereBefore(t *testing.T) {
 }
 
 // TestOneLaneNeverDisturbsAnother is the reason the record is per-lane rather
-// than a single managed map. `--remove-gateway` on a machine that also runs the
-// transport lane must leave the transport lane working.
+// than a single managed map. `--remove-gateway` on a machine that also runs
+// the transport lane must leave the transport lane working.
 func TestOneLaneNeverDisturbsAnother(t *testing.T) {
 	home := t.TempDir()
 	activate(t, home, LaneGateway, map[string]string{"ANTHROPIC_BASE_URL": "http://127.0.0.1:8788"})
@@ -143,11 +136,9 @@ func TestOneLaneNeverDisturbsAnother(t *testing.T) {
 	}
 }
 
-// TestDeactivateRefusesWhenAManagedValueChangedUnderneath.
-//
-// Restoring over a value somebody deliberately edited destroys their edit, and
-// the record cannot tell a deliberate edit from drift. Refusing names the key;
-// forcing is a separate, explicit act.
+// TestDeactivateRefusesWhenAManagedValueChangedUnderneath. Restoring over a
+// value somebody deliberately edited destroys their edit, and the record
+// cannot tell a deliberate edit from drift.
 func TestDeactivateRefusesWhenAManagedValueChangedUnderneath(t *testing.T) {
 	home := t.TempDir()
 	activate(t, home, LaneGateway, map[string]string{"ANTHROPIC_BASE_URL": "http://127.0.0.1:8788"})
@@ -164,7 +155,6 @@ func TestDeactivateRefusesWhenAManagedValueChangedUnderneath(t *testing.T) {
 		t.Error("the refusal still rewrote the file")
 	}
 
-	// Forcing is the escape hatch, and it must actually restore.
 	if _, err := Deactivate(home, settingsPath(home), LaneGateway, true); err != nil {
 		t.Fatalf("forced Deactivate: %v", err)
 	}
@@ -174,7 +164,7 @@ func TestDeactivateRefusesWhenAManagedValueChangedUnderneath(t *testing.T) {
 }
 
 // TestDeactivateWithNoRecordIsANoOp: removal must be safe on a machine that
-// never installed the lane. `--remove-all` runs on partial state by design.
+// never installed the lane.
 func TestDeactivateWithNoRecordIsANoOp(t *testing.T) {
 	home := t.TempDir()
 	seed(t, home, `{"env":{"CORP_TOKEN_PATH":"/etc/corp/token"}}`)
@@ -212,9 +202,9 @@ func TestAnEmptyEnvBlockIsDropped(t *testing.T) {
 	}
 }
 
-// TestUnparseableSettingsIsRefusedNotClobbered. A file we cannot parse is a file
-// we cannot safely rewrite; overwriting destroys configuration nobody asked us
-// to touch.
+// TestUnparseableSettingsIsRefusedNotClobbered. A file we cannot parse is a
+// file we cannot safely rewrite; overwriting destroys configuration nobody
+// asked us to touch.
 func TestUnparseableSettingsIsRefusedNotClobbered(t *testing.T) {
 	home := t.TempDir()
 	const broken = `{"env": {`
@@ -229,9 +219,7 @@ func TestUnparseableSettingsIsRefusedNotClobbered(t *testing.T) {
 	}
 }
 
-// TestActivateReportsWhatItReplaced. A developer or their org had that value
-// pointed somewhere; a silent overwrite is how an org's own egress point
-// disappears without anyone noticing.
+// TestActivateReportsWhatItReplaced.
 func TestActivateReportsWhatItReplaced(t *testing.T) {
 	home := t.TempDir()
 	seed(t, home, `{"env":{"ANTHROPIC_BASE_URL":"https://llm-proxy.corp.internal"}}`)
@@ -242,16 +230,14 @@ func TestActivateReportsWhatItReplaced(t *testing.T) {
 	if !contains(res.Replaced[0], "llm-proxy.corp.internal") || !contains(res.Replaced[0], "127.0.0.1:8788") {
 		t.Errorf("the report does not name both values: %q", res.Replaced[0])
 	}
-	// Writing the same value again is not a replacement.
 	res = activate(t, home, LaneGateway, map[string]string{"ANTHROPIC_BASE_URL": "http://127.0.0.1:8788"})
 	if len(res.Replaced) != 0 {
 		t.Errorf("an idempotent re-write reported %v as replaced", res.Replaced)
 	}
 }
 
-// TestTheRecordIsOwnerOnly — it lives beside credentials and names every key we
-// touched. It is integrity evidence rather than a secret, but a displaced value
-// can itself carry a credential (an org relay URL with an embedded token).
+// TestTheRecordIsOwnerOnly; it lives beside credentials and names every key we
+// touched.
 func TestTheRecordIsOwnerOnly(t *testing.T) {
 	home := t.TempDir()
 	activate(t, home, LaneGateway, map[string]string{"ANTHROPIC_BASE_URL": "http://127.0.0.1:8788"})
@@ -264,8 +250,8 @@ func TestTheRecordIsOwnerOnly(t *testing.T) {
 	}
 }
 
-// TestActiveLanesReportsWhatIsInstalled — the election is computed from this, so
-// a lane that was removed must stop counting immediately.
+// TestActiveLanesReportsWhatIsInstalled; the election is computed from this,
+// so a lane that was removed must stop counting immediately.
 func TestActiveLanesReportsWhatIsInstalled(t *testing.T) {
 	home := t.TempDir()
 	if got := ActiveLanes(home); len(got) != 0 {

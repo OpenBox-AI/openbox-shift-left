@@ -11,10 +11,6 @@ import (
 )
 
 func TestParseEnvFile(t *testing.T) {
-	// A real 32-byte Ed25519 seed, base64-encoded: 44 chars ending in '='. It is
-	// in the table permanently because splitting on every '=' rather than the
-	// first would truncate it, and the failure surfaces as a signature error far
-	// from the parser.
 	seed := base64.StdEncoding.EncodeToString(make([]byte, ed25519.SeedSize))
 
 	for _, tc := range []struct {
@@ -69,8 +65,6 @@ func TestParseEnvFile(t *testing.T) {
 			want: map[string]string{"K": "ab+c/d=="},
 		},
 		{
-			// A \r left on a base64 signing key fails verification with an
-			// error naming neither the file nor the character.
 			name: "CRLF is stripped from every value",
 			body: "OPENBOX_API_KEY=obx_abc\r\nOPENBOX_AGENT_PRIVATE_KEY=" + seed + "\r\n",
 			want: map[string]string{"OPENBOX_API_KEY": "obx_abc", "OPENBOX_AGENT_PRIVATE_KEY": seed},
@@ -81,13 +75,6 @@ func TestParseEnvFile(t *testing.T) {
 			want: map[string]string{"K": "a=b"},
 		},
 		{
-			// BEHAVIOUR CHANGE, D-OSS-7: the hand-rolled parser REFUSED a
-			// duplicate key, naming the key and line, because two lines setting
-			// one credential means the user believes something the file does not
-			// say — and the loser surfaces later as an unexplained 401. godotenv
-			// takes the last assignment, and the owner's ruling is to accept the
-			// package's default rather than restore the refusal. Pinned so the
-			// change is visible in the suite, not just in a comment.
 			name: "duplicate key is last-wins, not an error",
 			body: "OPENBOX_API_KEY=obx_first\nOPENBOX_API_KEY=obx_second\n",
 			want: map[string]string{"OPENBOX_API_KEY": "obx_second"},
@@ -98,15 +85,11 @@ func TestParseEnvFile(t *testing.T) {
 			errIs: "unexpected character",
 		},
 		{
-			// BEHAVIOUR CHANGE, D-OSS-7: `=value` was refused as an empty key and
-			// is now accepted. godotenv binds it to the empty name, so the map
-			// gains a "" key rather than the file being rejected.
 			name: "empty key is accepted, bound to the empty name",
 			body: "=value\n",
 			want: map[string]string{"": "value"},
 		},
 		{
-			// BEHAVIOUR CHANGE, D-OSS-7: a `#` after a value now starts a comment.
 			name: "trailing hash starts a comment",
 			body: "OPENBOX_API_KEY=obx_abc # note\n",
 			want: map[string]string{"OPENBOX_API_KEY": "obx_abc"},
@@ -142,8 +125,8 @@ func TestParseEnvFile(t *testing.T) {
 	}
 }
 
-// No credentials configured is a legitimate state the caller reports in its own
-// words, not an I/O failure.
+// TestParseEnvFileMissingIsEmptyAndNoError no credentials configured is a
+// legitimate state the caller reports in its own words, not an I/O failure.
 func TestParseEnvFileMissingIsEmptyAndNoError(t *testing.T) {
 	got, err := ParseEnvFile(filepath.Join(t.TempDir(), "absent.env"))
 	if err != nil {
@@ -201,8 +184,6 @@ func TestWriteEnvFilePermissionsAndHeader(t *testing.T) {
 		t.Fatal(err)
 	}
 	if runtime.GOOS == "windows" {
-		// os.Chmod only toggles the read-only attribute on Windows, so 0600 is
-		// a documented no-op there. The write is still asserted.
 		t.Log("skipping mode assertion: 0600 is a no-op on Windows ")
 	} else if got := st.Mode().Perm(); got != 0o600 {
 		t.Errorf("mode = %04o, want 0600", got)
@@ -213,8 +194,6 @@ func TestWriteEnvFilePermissionsAndHeader(t *testing.T) {
 		t.Fatal(err)
 	}
 	body := string(raw)
-	// The header is a security control: it is where a human learns the file is
-	// plaintext, the only copy, and must not be committed.
 	for _, must := range []string{"PLAINTEXT", "ONLY copy", "DO NOT COMMIT"} {
 		if !strings.Contains(body, must) {
 			t.Errorf("header is missing %q:\n%s", must, body)
@@ -241,7 +220,7 @@ func TestWriteEnvFileCreatesParentDir0700(t *testing.T) {
 
 // `openbox auth` writes three keys, so anything else in the file was put there
 // by a human. Someone who hand-added a coordinate override authored a key the
-// writer must keep — dropping it would silently undo a deliberate choice.
+// writer must keep; dropping it would silently undo a deliberate choice.
 func TestWriteEnvFilePreservesUnknownKeys(t *testing.T) {
 	path := filepath.Join(t.TempDir(), ".env")
 	if err := WriteEnvFile(path, map[string]string{
@@ -251,7 +230,6 @@ func TestWriteEnvFilePreservesUnknownKeys(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	// A second run rewrites only the api key.
 	if err := WriteEnvFile(path, map[string]string{"OPENBOX_API_KEY": "obx_second"}); err != nil {
 		t.Fatal(err)
 	}
@@ -270,14 +248,13 @@ func TestWriteEnvFilePreservesUnknownKeys(t *testing.T) {
 	}
 }
 
-// The file holds the only copy of credentials, so a parse failure must stop the
-// write rather than replace an unreadable file with a fresh one.
+// TestWriteEnvFileRefusesToOverwriteAnUnparseableFile the file holds the only
+// copy of credentials, so a parse failure must stop the write rather than
+// replace an unreadable file with a fresh one.
 func TestWriteEnvFileRefusesToOverwriteAnUnparseableFile(t *testing.T) {
 	path := filepath.Join(t.TempDir(), ".env")
-	// A line with no `=` at all. This used to be a duplicate key, which the
-	// hand-rolled parser refused; under godotenv (D-OSS-7) a duplicate parses
-	// fine as last-wins, so it no longer exercises the refusal. The property
-	// under test is unchanged: an unreadable credential file must stop the write.
+	// The property under test is unchanged: an unreadable credential file must
+	// stop the write.
 	original := "OPENBOX_API_KEY=obx_original\nthis line has no equals sign\n"
 	if err := os.WriteFile(path, []byte(original), 0o600); err != nil {
 		t.Fatal(err)
@@ -295,8 +272,8 @@ func TestWriteEnvFileRefusesToOverwriteAnUnparseableFile(t *testing.T) {
 	}
 }
 
-// Values are written sorted so changing one produces a one-line diff rather than
-// a reordered file.
+// TestWriteEnvFileStableKeyOrder values are written sorted so changing one
+// produces a one-line diff rather than a reordered file.
 func TestWriteEnvFileStableKeyOrder(t *testing.T) {
 	path := filepath.Join(t.TempDir(), ".env")
 	kv := map[string]string{"Z_LAST": "3", "A_FIRST": "1", "M_MID": "2"}
@@ -311,8 +288,9 @@ func TestWriteEnvFileStableKeyOrder(t *testing.T) {
 	}
 }
 
-// The temp file must be gone whether the write succeeded or not: a leftover
-// .env-*.tmp is a plaintext credential copy nobody knows about.
+// TestWriteEnvFileLeavesNoTempFile the temp file must be gone whether the
+// write succeeded or not: a leftover .env-*.tmp is a plaintext credential copy
+// nobody knows about.
 func TestWriteEnvFileLeavesNoTempFile(t *testing.T) {
 	dir := t.TempDir()
 	if err := WriteEnvFile(filepath.Join(dir, ".env"), map[string]string{"K": "v"}); err != nil {
@@ -329,14 +307,8 @@ func TestWriteEnvFileLeavesNoTempFile(t *testing.T) {
 	}
 }
 
-// A value the format cannot represent must be REFUSED, not silently corrupted.
-//
-// The writer used to escape an embedded single quote shell-style (`'"'"'`) while
-// the reader stripped only one outer quote pair and unescaped nothing — so `it's`
-// round-tripped as `it'"'"'s`, wrong, with no error. Worse, every write
-// re-serializes every key, so one hand-added apostrophe got mangled further on
-// each run. This file holds the only copy of credentials; refusing is the correct
-// trade over corrupting.
+// TestWriteEnvFileRefusesAValueItCannotRepresent a value the format cannot
+// represent must be refused, not silently corrupted.
 func TestWriteEnvFileRefusesAValueItCannotRepresent(t *testing.T) {
 	for _, tc := range []struct{ name, value string }{
 		{"single quote", "o'brien"},
@@ -347,7 +319,6 @@ func TestWriteEnvFileRefusesAValueItCannotRepresent(t *testing.T) {
 			path := filepath.Join(t.TempDir(), ".env")
 			err := WriteEnvFile(path, map[string]string{"MY_VAR": tc.value})
 			if err == nil {
-				// Prove the alternative would have been silent corruption.
 				got, _ := ParseEnvFile(path)
 				t.Fatalf("accepted an unrepresentable value; it round-tripped as %q (want %q)",
 					got["MY_VAR"], tc.value)
@@ -362,7 +333,8 @@ func TestWriteEnvFileRefusesAValueItCannotRepresent(t *testing.T) {
 	}
 }
 
-// The refusal must not be able to destroy an existing good file.
+// TestRefusedWriteLeavesAnExistingFileIntact the refusal must not be able to
+// destroy an existing good file.
 func TestRefusedWriteLeavesAnExistingFileIntact(t *testing.T) {
 	path := filepath.Join(t.TempDir(), ".env")
 	if err := WriteEnvFile(path, map[string]string{"OPENBOX_API_KEY": "obx_good"}); err != nil {
@@ -381,21 +353,12 @@ func TestRefusedWriteLeavesAnExistingFileIntact(t *testing.T) {
 	}
 }
 
-// godotenv's parse error ECHOES the offending line, and this file is credentials.
-//
-// The hand-rolled parser named the file and line number and never the content,
-// and this suite asserted that. D-OSS-7 takes the package's default behaviour
-// without working around it, so the disclosure is real: a malformed line that IS
-// a bare secret puts that secret into the error string, and from there into
-// whatever logs or prints it — `openbox auth`, `openbox doctor`, a hook's stderr.
-//
-// Pinned deliberately, in the direction of the truth rather than the direction we
-// would prefer. A test that quietly stopped checking would leave the exposure
-// invisible; this one makes it show up in the suite, so removing it later is a
-// decision. If the ruling changes, this test is what flips.
+// TestParseEnvFileErrorEchoesTheOffendingLine godotenv's parse error echoes
+// the offending line, and this file is credentials. The hand-rolled parser
+// named the file and line number and never the content, and this suite
+// asserted that.
 func TestParseEnvFileErrorEchoesTheOffendingLine(t *testing.T) {
 	path := filepath.Join(t.TempDir(), ".env")
-	// A pasted credential with the `KEY=` accidentally lost.
 	body := "obx_live_SENTINELSECRET\n"
 	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 		t.Fatal(err)

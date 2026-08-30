@@ -55,7 +55,8 @@ func TestSessionResolver_FileUnion(t *testing.T) {
 	}
 }
 
-// A missing/unreadable session file must not error — observe-only never blocks.
+// TestSessionResolver_FileMissingIsBestEffort a missing/unreadable session
+// file must not error; observe-only never blocks.
 func TestSessionResolver_FileMissingIsBestEffort(t *testing.T) {
 	env := map[string]string{EnvSession: "sess-A", EnvSessionFile: "/nope"}
 	r := SessionResolver{

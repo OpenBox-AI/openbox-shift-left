@@ -9,10 +9,8 @@ import (
 )
 
 // TestEmittedEventsAreConformant is the cross-contract acceptance check: every
-// event the Claude Code adapter produces must validate against the SL-1
-// dev-event schema with content-capture DISABLED (the default). This wires the
-// adapter directly to the STORY-SL-1 conformance harness — if the contract
-// tightens, this test breaks here rather than silently at ingest.
+// event the Claude Code adapter produces must validate against the SL-1 dev-
+// event schema with content-capture disabled (the default).
 func TestEmittedEventsAreConformant(t *testing.T) {
 	m := testMapper()
 
@@ -44,9 +42,6 @@ func TestEmittedEventsAreConformant(t *testing.T) {
 	}
 }
 
-// mustMarshalContractShape marshals a DevEvent to its on-the-wire contract JSON.
-// The client strips content before egress; here we assert the adapter's own
-// output (pre-client) is already content-free and conformant.
 func mustMarshalContractShape(t *testing.T, ev client.DevEvent) []byte {
 	t.Helper()
 	raw, err := json.Marshal(ev)

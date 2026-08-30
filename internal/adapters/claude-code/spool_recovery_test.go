@@ -14,8 +14,6 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/internal/client"
 )
 
-// jsonLine and ev build spool file contents directly, so a test can seed a
-// spool or recovery file without going through the mapper.
 func jsonLine(e client.DevEvent) ([]byte, error) {
 	b, err := json.Marshal(e)
 	return append(b, '\n'), err
@@ -33,7 +31,6 @@ func ev(session, id string) client.DevEvent {
 	}
 }
 
-// recoveryNames lists the carry-over files currently in dir.
 func recoveryNames(t *testing.T, dir string) []string {
 	t.Helper()
 	entries, err := os.ReadDir(dir)
@@ -50,19 +47,12 @@ func recoveryNames(t *testing.T, dir string) []string {
 }
 
 // TestFlushSweepsAbandonedRecovery is the E8-S7 regression guard: carry-over
-// left by a session that has already ended MUST be retried by a later session's
-// SessionEnd flush.
-//
-// Before the sweep, the only drain that touched a `.rec*` file was FlushAll,
-// which nothing in the ambient hook lifecycle invokes — so a developer working
-// offline accumulated one recovery file per session and never re-sent any of
-// them. Note the sweeping session has a DIFFERENT id from the one that wrote the
-// carry-over: a session-scoped retry would not have found it.
+// left by a session that has already ended must be retried by a later
+// session's SessionEnd flush.
 func TestFlushSweepsAbandonedRecovery(t *testing.T) {
 	dir := t.TempDir()
 	ad := New(Identity{DeveloperDID: testDID}, dir)
 
-	// Session A: offline. Its whole spool carries over.
 	_, _ = ad.Observe(HookPreToolUse, &HookEvent{SessionID: "sessA", ToolName: "Bash"})
 	offline := &fakeEmitter{err: errors.New("dial tcp: network is unreachable")}
 	if _, err := ad.Flush(context.Background(), "sessA", offline); err != nil {
@@ -72,32 +62,27 @@ func TestFlushSweepsAbandonedRecovery(t *testing.T) {
 		t.Fatalf("session A should have left exactly 1 carry-over file, got %v", got)
 	}
 
-	// Session B, a new session id, comes back online.
 	_, _ = ad.Observe(HookPreToolUse, &HookEvent{SessionID: "sessB", ToolName: "Read", ToolInput: []byte(`{"file_path":"x"}`)})
 	online := &fakeEmitter{}
 	n, err := ad.Flush(context.Background(), "sessB", online)
 	if err != nil {
 		t.Fatalf("flush: %v", err)
 	}
-	// B's own event plus A's carried-over one.
 	if n != 2 || len(online.got) != 2 {
 		t.Fatalf("flush delivered %d (n=%d), want 2 (own + swept carry-over)", len(online.got), n)
 	}
 	if got := recoveryNames(t, dir); len(got) != 0 {
 		t.Fatalf("carry-over should be consumed after a successful sweep, got %v", got)
 	}
-	// The ending session's own telemetry is delivered before other sessions'
-	// backlog, so the ctx budget is never spent on a stranger first.
 	if online.got[0].SessionID != "sessB" {
 		t.Errorf("own session should drain first, got %s", online.got[0].SessionID)
 	}
 }
 
-// TestFlushDoesNotBurnRetriesInOnePass guards the snapshot: a single flush must
-// consume exactly ONE retry attempt, not walk the carry-over all the way to
-// hookflow.MaxRecoveryAttempts because the sweep re-read what the same pass just wrote.
-// Without it, one offline SessionEnd would turn a bounded retry into immediate
-// permanent loss.
+// TestFlushDoesNotBurnRetriesInOnePass guards the snapshot: a single flush
+// must consume exactly ONE retry attempt, not walk the carry-over all the way
+// to hookflow.MaxRecoveryAttempts because the sweep re-read what the same pass
+// just wrote.
 func TestFlushDoesNotBurnRetriesInOnePass(t *testing.T) {
 	dir := t.TempDir()
 	ad := New(Identity{DeveloperDID: testDID}, dir)
@@ -116,7 +101,6 @@ func TestFlushDoesNotBurnRetriesInOnePass(t *testing.T) {
 			t.Fatalf("after flush %d: want a .rec%d- file, got %q", want, want, got[0])
 		}
 	}
-	// The (hookflow.MaxRecoveryAttempts+1)th flush is the bounded give-up.
 	if _, err := ad.Flush(context.Background(), "sess", offline); err != nil {
 		t.Fatalf("give-up flush: %v", err)
 	}
@@ -125,13 +109,7 @@ func TestFlushDoesNotBurnRetriesInOnePass(t *testing.T) {
 	}
 }
 
-// TestSweepIgnoresLiveSpool proves the sweep only claims unowned carry-over. A
-// live `<session>.jsonl` may belong to a session still running, and its events
-// are un-flushed rather than undelivered: claiming it would deliver another
-// session's telemetry out from under it.
-//
-// It drives the production flush rather than the exported sweep wrapper, which
-// had no caller outside this assertion.
+// TestSweepIgnoresLiveSpool proves the sweep only claims unowned carry-over.
 func TestSweepIgnoresLiveSpool(t *testing.T) {
 	dir := t.TempDir()
 	ad := New(Identity{DeveloperDID: testDID}, dir)
@@ -162,12 +140,9 @@ func TestIsRecoveryFile(t *testing.T) {
 	}{
 		{"sess.rec1-cc-abc.jsonl", true},
 		{"sess.rec12-cc-abc.jsonl", true},
-		// Legacy name from before the attempt counter existed: still carry-over.
 		{"sess.rec-cc-abc.jsonl", true},
 		{"sess.jsonl", false},
 		{"sess.jsonl.flushing.cc-abc", false},
-		// `.reclaim.` contains ".rec" but is a drain in flight, not carry-over —
-		// counting it inflated evidence_undelivered with a file being delivered.
 		{"sess.jsonl.flushing.cc-abc.reclaim.cc-def", false},
 		{"sess.reclaim.cc-def.jsonl", false},
 		{"durations", false},

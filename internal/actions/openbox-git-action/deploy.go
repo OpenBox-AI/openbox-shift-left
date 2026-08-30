@@ -16,9 +16,12 @@ type DeployMeta struct {
 }
 
 // BuildDeployEvent maps a Resolution + deploy context onto the normalized
-// DevEvent the client emits (contract event_type = Deploy). Deploy_did
-// (metadata) carries the wall-clock timestamp as the lineage label and so
-// legitimately varies per run.
+// DevEvent the client emits (contract event_type = Deploy).
+//   - The signing identity (client.Config.DID) is the agent's real
+//     did:aip:<uuid>; core validates it.
+//   - Deploy_did is a synthetic lineage label
+//     (`did:aip:deploy-<shortsha>-<unix>`) carried only in metadata; core has
+//     no deploy-DID primitive, so it is never sent as the signing DID.
 func BuildDeployEvent(res Resolution, meta DeployMeta, now time.Time) client.DevEvent {
 	ts := now.UTC()
 	deployDID := "did:aip:deploy-" + short(res.CommitSHA) + "-" + strconv.FormatInt(ts.Unix(), 10)

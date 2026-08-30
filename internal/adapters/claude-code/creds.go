@@ -8,9 +8,8 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/internal/client"
 )
 
-// Credential resolution for the hook binary. INV-1: the obx_ key and signing
-// key are read straight into the client and never logged, printed, or placed
-// on an argv.
+// INV-1: the obx_ key and signing key are read straight into the client and
+// never logged, printed, or placed on an argv.
 const (
 	envBaseURL         = devconfig.EnvBaseURL
 	envDID             = devconfig.EnvDID
@@ -112,9 +111,7 @@ func ResolveFindingsCursor() string { return devconfig.ResolveFindingsCursor("cl
 // ResolveEnforce reports whether the developer runtime is in enforce mode.
 func ResolveEnforce() bool { return devconfig.ResolveEnforce() }
 
-// maxEnforceTimeout correctness bound, not a nicety: Claude Code kills the
-// PreToolUse hook at 5s, and a hook-kill lets the tool proceed; a CC-layer
-// fail-open that would silently defeat a fail-closed org.
+// maxEnforceTimeout provider-specific; deliberately not moved into devconfig.
 const maxEnforceTimeout = 2 * time.Second
 
 // ResolveFailClosed reports the enforce failure policy (default false = fail-

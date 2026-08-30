@@ -1,7 +1,5 @@
 package gateway
 
-// - method, path (never the query: it can carry content or a token, which is
-
 // WithVerbose turns on per-call logging. Observe-only: it changes what is
 // printed, never what is forwarded, captured or evaluated.
 func (g *Gateway) WithVerbose(logf func(format string, args ...any)) *Gateway {

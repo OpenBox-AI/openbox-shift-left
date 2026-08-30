@@ -14,8 +14,7 @@ import (
 
 const evaluatePath = "/api/v1/governance/evaluate"
 
-// Transport defaults. Fail-open (INV-3): these bound delay, never whether Emit
-// proceeds.
+// Fail-open (INV-3): these bound delay, never whether Emit proceeds.
 const (
 	defaultTimeout    = 30 * time.Second
 	defaultMaxRetries = 2
@@ -135,6 +134,8 @@ var ErrUnbuildable = errors.New("client: event could not be built")
 // POSTs it to /evaluate. It is fail-open (INV-3): the Evaluation it returns on
 // any failure is the zero value, which every caller treats as allow, so a
 // failure here can never block a tool call.
+//   - A caller precondition (empty EventID/SessionID), which is a bug to fix;
+//   - ErrDelivery, wrapping a transport failure after retries.
 func (c *Client) Emit(ctx context.Context, ev DevEvent) (Evaluation, error) {
 	// Both must be surfaced, not fail-open dropped; an empty one would silently
 	// corrupt session grouping.
@@ -190,8 +191,9 @@ func (c *Client) post(ctx context.Context, path string, body []byte, idemKey str
 	return nil, lastErr
 }
 
-// attempt performs one signed POST to path. Retryable reports whether a retry
-// could plausibly succeed (network error or 5xx / 429); a 4xx is terminal.
+// attempt path is both the URL suffix and the signed canonical-string PATH
+// component, so the two can never disagree; signing one route and sending to
+// another would fail authentication in a way that reads as an outage.
 func (c *Client) attempt(ctx context.Context, path string, body []byte, idemKey string) (respBody []byte, retryable bool, err error) {
 	sig, err := c.signer.sign(http.MethodPost, path, body, c.now())
 	if err != nil {

@@ -10,8 +10,12 @@ import (
 	"github.com/zricethezav/gitleaks/v8/detect"
 )
 
-// Properties (all load-bearing): - Deterministic + stateless + concurrency-
-// safe: the pattern set is
+//   - Deterministic + stateless + concurrency-safe: the pattern set is
+//     compiled once at package init; Redact reads no shared mutable state, so
+//     the server can call it from parallel connection handlers with no lock
+//     (INV-3b: no I/O either).
+//   - Local-only (INV-1/INV-2): it never logs the content or the secret, never
+//     performs I/O.
 
 const (
 	redactedPrefix = "OPENBOX_REDACTED"
@@ -33,8 +37,7 @@ type secretDetector struct {
 	gitleaks *detect.Detector
 }
 
-// defaultSecretDetector is the process-wide detector (compiled once). Lazy,
-// deliberately.
+// defaultSecretDetector lazy, deliberately.
 var defaultSecretDetector = sync.OnceValue(newSecretDetector)
 
 func newSecretDetector() *secretDetector {
@@ -53,8 +56,8 @@ func newSecretDetector() *secretDetector {
 	}}
 }
 
-// isValueTerminator reports whether b is a byte that ends a value's container
-// rather than being part of the value.
+// isValueTerminator the generic assignment pattern's value group excludes
+// whitespace, quotes, commas and semicolons, so those can never be swallowed.
 func isValueTerminator(b byte) bool {
 	switch b {
 	case '\\', '}', ']', ')':
@@ -102,10 +105,6 @@ func (d *secretDetector) Redact(text string) (redacted string, categories []stri
 			return m[:loc[2*g]] + placeholder(p.category) + m[end:]
 		})
 	}
-	// Our own patterns, then gitleaks, then entropy, and the order is
-	// load-bearing. gitleaks replaces a finding's text wholesale and does not go
-	// through the value-group and terminator-trim path above, so running it
-	// first made JSON parseability depend on how it drew its capture group.
 	out = redactGitleaks(d.gitleaks, out, catSet)
 
 	out = d.redactEntropy(out, catSet)
@@ -145,9 +144,6 @@ func (d *secretDetector) redactEntropy(text string, catSet map[string]struct{}) 
 	return b.String()
 }
 
-// precededByAssignment reports whether the byte at start is in a value
-// position: the nearest non-space, non-quote, non-escape byte before it is an
-// assignment delimiter (`=` or `:`).
 func precededByAssignment(text string, start int) bool {
 	k := start - 1
 	for k >= 0 {
@@ -197,7 +193,6 @@ func shannonEntropy(s string) float64 {
 	return e
 }
 
-// placeholder renders the env-var-ref redaction marker for a category, e.g.
 func placeholder(category string) string {
 	var b strings.Builder
 	b.Grow(len(redactedPrefix) + len(category) + 4)

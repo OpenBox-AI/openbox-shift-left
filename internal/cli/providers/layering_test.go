@@ -6,14 +6,8 @@ import (
 	"testing"
 )
 
-// The CLI must reach adapters only through this registry. Provider-neutral work
-// — resolving config, the policy bundle path, credentials — belongs to the
-// shared modules, but the command wiring used to call claude-code's aliases for
-// all of it, so a Codex-only user's `dev sync` ran through the Claude Code
-// package for no reason.
-//
-// This pins the direction: the composition root imports adapters, and nothing
-// else in cli/ does.
+// TestOnlyTheRegistryImportsAdapters the CLI must reach adapters only through
+// this registry.
 func TestOnlyTheRegistryImportsAdapters(t *testing.T) {
 	for _, pkg := range []string{
 		"github.com/openbox-ai/openbox-shift-left/cmd/openbox",
@@ -23,9 +17,6 @@ func TestOnlyTheRegistryImportsAdapters(t *testing.T) {
 	} {
 		p, err := build.Import(pkg, "", build.FindOnly|build.ImportComment)
 		if err != nil {
-			// Not a skip. A guard that quietly passes because it resolved nothing
-			// reports the same thing as a guard that found nothing wrong, and this
-			// repo has already been bitten by exactly that.
 			t.Fatalf("cannot resolve %s: %v", pkg, err)
 		}
 		full, err := build.ImportDir(p.Dir, 0)

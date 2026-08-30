@@ -7,9 +7,8 @@ import (
 
 var blockTypeRe = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
 
-// typeNamedField is the field a block of each known type must carry. An
-// unknown type is accepted, because a provider adding a block type must not
-// fail this gate.
+// typeNamedField an unknown type is accepted, because a provider adding a
+// block type must not fail this gate.
 var typeNamedField = map[string]string{
 	"text":        "text",
 	"thinking":    "thinking",

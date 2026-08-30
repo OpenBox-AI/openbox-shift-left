@@ -8,18 +8,7 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/internal/conformance"
 )
 
-// The turn activity_id is the second identity in this package a refactor must not
-// move, for the same class of reason as the approval key (approval_key_pin_test.go):
-// both halves of a turn pair onto one row by sharing it, and core's dedupe key
-// includes it — so a derivation that changes between the Started and Completed
-// emission, or between an emission and a post-crash re-emission, either splits one
-// turn across two rows or stops the server from absorbing the duplicate.
-//
-// The failure is silent under tests that build their expectation from the same
-// function they exercise. These cases pin literal bytes instead.
-//
-// Do not regenerate these values. If one fails, the derivation moved and the
-// change is wrong, not the fixture.
+// Do not regenerate these values.
 
 func pinTurnEvent() DevEvent {
 	idx := 3
@@ -52,8 +41,8 @@ const (
 	pinSubagentActivityID = "sess-pin-0001:agent:agt-77:turn:3"
 )
 
-// TestTurnActivityIDIsPinned holds the exact wire id for a fixed turn event, and
-// asserts the pair shares it.
+// TestTurnActivityIDIsPinned holds the exact wire id for a fixed turn event,
+// and asserts the pair shares it.
 func TestTurnActivityIDIsPinned(t *testing.T) {
 	ev := pinTurnEvent()
 
@@ -61,9 +50,6 @@ func TestTurnActivityIDIsPinned(t *testing.T) {
 		t.Errorf("turn activity id = %q, want %q", got, pinTurnActivityID)
 	}
 
-	// The Started half of the same turn addresses the same record. Everything
-	// that differs between the halves (event type, timestamps, output) is
-	// excluded from the derivation by construction.
 	started := ev
 	started.EventID = "ev-turn-pin-0"
 	started.EventType = EventTurnStarted
@@ -73,9 +59,6 @@ func TestTurnActivityIDIsPinned(t *testing.T) {
 		t.Errorf("started half id = %q, want %q (the pair must address one record)", got, pinTurnActivityID)
 	}
 
-	// A subagent's turn is partitioned, so subagent turn 3 and main-thread turn 3
-	// are different records. Without this, a subagent's tokens would land on the
-	// parent's row and one of the two would be deduped away.
 	sub := ev
 	sub.AgentID = "agt-77"
 	if got := turnActivityIDFor(sub); got != pinSubagentActivityID {
@@ -87,9 +70,6 @@ func TestTurnActivityIDIsPinned(t *testing.T) {
 }
 
 // TestTurnActivityIDCannotCollideWithToolCallID pins the two id shapes apart.
-// They live in one column and core's dedupe treats the value as opaque, so a
-// collision would silently merge a turn with a tool call — and, because the
-// tool-call id is the approval key, could make a turn event address an approval.
 func TestTurnActivityIDCannotCollideWithToolCallID(t *testing.T) {
 	turn := turnActivityIDFor(pinTurnEvent())
 	tool := activityIDFor(pinEvent())
@@ -108,9 +88,9 @@ func TestTurnActivityIDCannotCollideWithToolCallID(t *testing.T) {
 	}
 }
 
-// TestTurnActivityIDAbsentWithoutIndex pins the omitted case. A turn event whose
-// index never got set must not mint "<session>:turn:" — an id that would collapse
-// every such turn onto one row.
+// TestTurnActivityIDAbsentWithoutIndex pins the omitted case. A turn event
+// whose index never got set must not mint "<session>:turn:"; an id that would
+// collapse every such turn onto one row.
 func TestTurnActivityIDAbsentWithoutIndex(t *testing.T) {
 	ev := pinTurnEvent()
 	ev.TurnIndex = nil
@@ -132,9 +112,7 @@ func TestTurnActivityIDAbsentWithoutIndex(t *testing.T) {
 }
 
 // TestTurnActivityOutputCarriesNumbersAndOneString is the schema gate on the
-// field core runs Guardrails and OPA over. It asserts the exact key set: four
-// counts under usage, one model string, and nothing else. A field added "while
-// we're here" fails here.
+// field core runs Guardrails and OPA over.
 func TestTurnActivityOutputCarriesNumbersAndOneString(t *testing.T) {
 	raw := turnActivityOutput(pinTurnEvent())
 	if raw == nil {
@@ -175,8 +153,6 @@ func TestTurnActivityOutputCarriesNumbersAndOneString(t *testing.T) {
 		}
 	}
 
-	// Every value under usage must be a number. A string reaching this object is
-	// the exact regression the allowlist exists to prevent.
 	for k, v := range usage {
 		if _, isNum := v.(float64); !isNum {
 			t.Errorf("usage[%q] = %v (%T), want a number — only the model id may be a string", k, v, v)
@@ -185,9 +161,8 @@ func TestTurnActivityOutputCarriesNumbersAndOneString(t *testing.T) {
 }
 
 // TestTurnActivityOutputOmitsWhatIsUnknown: a turn with no usage and no model
-// carries no activity_output at all, rather than an empty or zero-filled object.
-// Zeroes would claim a turn spent nothing, which is a different statement from
-// "not measured".
+// carries no activity_output at all, rather than an empty or zero-filled
+// object.
 func TestTurnActivityOutputOmitsWhatIsUnknown(t *testing.T) {
 	ev := pinTurnEvent()
 	ev.Model = ""
@@ -196,8 +171,6 @@ func TestTurnActivityOutputOmitsWhatIsUnknown(t *testing.T) {
 		t.Errorf("activity_output = %s, want omitted", raw)
 	}
 
-	// A model-less turn still reports its usage: the core-side extractor buckets
-	// it under an unknown model rather than dropping the numbers.
 	ev.Tokens = &Tokens{Input: intp(7)}
 	raw := turnActivityOutput(ev)
 	if raw == nil {
@@ -216,9 +189,9 @@ func TestTurnActivityOutputOmitsWhatIsUnknown(t *testing.T) {
 	}
 }
 
-// TestTurnPairRidesAcceptListedWireTypes pins the INV-8 claim for the new types:
-// they map onto the same two stock activity types a tool call uses, so a stock
-// core accepts them with no patch and no accept-list change.
+// TestTurnPairRidesAcceptListedWireTypes pins the INV-8 claim for the new
+// types: they map onto the same two stock activity types a tool call uses, so
+// a stock core accepts them with no patch and no accept-list change.
 func TestTurnPairRidesAcceptListedWireTypes(t *testing.T) {
 	cases := []struct {
 		et   EventType
@@ -258,16 +231,12 @@ func TestUsageRollupIDIsPinned(t *testing.T) {
 		t.Errorf("rollup activity id = %q, want %q", got, want)
 	}
 
-	// The flag wins over an index, so a rollup that also happens to carry one is
-	// still a rollup rather than silently becoming turn N.
 	idx := 3
 	ev.TurnIndex = &idx
 	if got := turnActivityIDFor(ev); got != want {
 		t.Errorf("rollup with an index = %q, want %q", got, want)
 	}
 
-	// Distinct from an indexed turn and from a tool call: all three shapes share
-	// one column, and core's dedupe treats the value as opaque.
 	if turnActivityIDFor(pinTurnEvent()) == want {
 		t.Error("an indexed turn and a session rollup share an activity_id")
 	}
@@ -276,11 +245,10 @@ func TestUsageRollupIDIsPinned(t *testing.T) {
 	}
 }
 
-// The parity claim, enforced rather than asserted in prose: a Claude Code
-// per-turn pair and a Codex session-rollup pair produce the SAME wire envelope
-// (types, activity_type, output shape) and differ only in activity_id and the
-// numbers. The two adapters are separate Go modules and cannot import each other,
-// so this — plus the golden fixtures — is where the shapes can be compared.
+// TestTurnAndRollupShareOneWireShape the parity claim, enforced rather than
+// asserted in prose: a Claude Code per-turn pair and a Codex session-rollup
+// pair produce the same wire envelope (types, activity_type, output shape) and
+// differ only in activity_id and the numbers.
 func TestTurnAndRollupShareOneWireShape(t *testing.T) {
 	perTurn := pinTurnEvent()
 
@@ -304,8 +272,6 @@ func TestTurnAndRollupShareOneWireShape(t *testing.T) {
 	}
 	a, b := shapeOf(t, perTurn), shapeOf(t, rollup)
 
-	// Same key set: a field present on one carrier and absent on the other would
-	// make a single core-side extractor read one shape and miss the other.
 	if len(a) != len(b) {
 		t.Errorf("payload key sets differ: per-turn %v vs rollup %v", keysOf(a), keysOf(b))
 	}
@@ -315,7 +281,6 @@ func TestTurnAndRollupShareOneWireShape(t *testing.T) {
 		}
 	}
 
-	// Same discriminators.
 	for _, k := range []string{"event_type", "activity_type", "workflow_type", "source"} {
 		if a[k] != b[k] {
 			t.Errorf("%s differs: per-turn %v vs rollup %v", k, a[k], b[k])
@@ -325,7 +290,6 @@ func TestTurnAndRollupShareOneWireShape(t *testing.T) {
 		t.Errorf("activity_type = %v, want llm_completion", a["activity_type"])
 	}
 
-	// Same activity_output shape, different values.
 	outA, _ := a["activity_output"].(map[string]any)
 	outB, _ := b["activity_output"].(map[string]any)
 	if len(outA) == 0 || len(outB) == 0 {
@@ -337,7 +301,6 @@ func TestTurnAndRollupShareOneWireShape(t *testing.T) {
 		}
 	}
 
-	// And the one thing that MUST differ, or the two would collide in one column.
 	if a["activity_id"] == b["activity_id"] {
 		t.Errorf("both carriers minted activity_id %v", a["activity_id"])
 	}
@@ -357,9 +320,7 @@ const (
 )
 
 // TestNewLaneActivityIDsArePinned holds the wire bytes for the two lanes that
-// decision adds. Same reason the shapes above are pinned, and the same
-// instruction: if one of these fails, the derivation moved and the change is
-// wrong, not the fixture.
+// decision adds.
 func TestNewLaneActivityIDsArePinned(t *testing.T) {
 	otel := pinTurnEvent()
 	otel.TurnIndex = nil
@@ -377,30 +338,13 @@ func TestNewLaneActivityIDsArePinned(t *testing.T) {
 }
 
 // turnLanes is the ONE list of model-call producers these tests share.
-//
-// It was two hand-maintained lists — one for disjointness, one for precedence —
-// which is the same shape of unchecked enumeration that
-// conformance.turnDiscriminators has, except that one is bound to the schema by
-// TestDiscriminatorListMatchesTheSchema. Building the safeguard for one list and
-// not these was an inconsistency: a sixth lane added to the schema and to
-// turnActivityIDFor, but not here, would leave both tests green while silently
-// covering one producer fewer. TestTurnLanesMatchTheContract binds this list to
-// the contract so that cannot happen.
-//
-// Order IS the precedence ladder : in-path relay, then gateway, then
-// client-asserted telemetry, then the two non-elected shapes.
 var turnLanes = []struct {
-	name string
-	// field is the contract's discriminator property for this lane.
-	field string
-	// set puts this lane's discriminator on an event.
-	set func(*DevEvent)
-	// clear removes it, so the precedence test can peel one rung at a time.
-	clear func(*DevEvent)
-	// marker is the namespace separator that keeps this lane's ids disjoint.
+	name   string
+	field  string
+	set    func(*DevEvent)
+	clear  func(*DevEvent)
 	marker string
-	// id is the exact activity_id for the fixture below. Pinned bytes.
-	id string
+	id     string
 }{
 	{
 		name: "transport", field: "proxy_request_id",
@@ -440,11 +384,6 @@ func laneEvent() DevEvent {
 
 // TestTurnLanesMatchTheContract binds the list above to the schema, the way
 // conformance.TestDiscriminatorListMatchesTheSchema binds its own.
-//
-// Without it, both tests below rest on a comment. A sixth lane reaching the
-// contract and turnActivityIDFor but not this list would leave them passing while
-// proving less than they did — "stays green and covers one fewer" is precisely the
-// failure this contract has already shipped twice.
 func TestTurnLanesMatchTheContract(t *testing.T) {
 	schema, err := conformance.LoadSchema()
 	if err != nil {
@@ -487,12 +426,6 @@ func TestTurnLanesMatchTheContract(t *testing.T) {
 
 // TestEveryTurnProducerNamespaceIsDisjoint is requirement 8, widened from two
 // producers to all of them.
-//
-// Each lane can observe THE SAME model turn from a different vantage point.
-// Core's dedupe key includes activity_id, so any two that could mint one id
-// would have half their evidence absorbed as a duplicate — no error, no log
-// line, just missing rows. The disjointness is structural (each lane owns a
-// separator no other lane writes), and this is what keeps it that way.
 func TestEveryTurnProducerNamespaceIsDisjoint(t *testing.T) {
 	seen := map[string]string{}
 	check := func(name, id, marker string) {
@@ -520,16 +453,14 @@ func TestEveryTurnProducerNamespaceIsDisjoint(t *testing.T) {
 		check(l.name, got, l.marker)
 	}
 
-	// A subagent's turn is a PARTITION of the hook lane, not a sixth producer:
-	// same discriminator, extra scoping. It belongs here (its ids must stay
-	// disjoint too) and not in turnLanes (it is not a contract branch).
+	// It belongs here (its ids must stay disjoint too) and not in turnLanes (it
+	// is not a contract branch).
 	sub := laneEvent()
 	idx := 3
 	sub.TurnIndex = &idx
 	sub.AgentID = "agt-77"
 	check("subagent", turnActivityIDFor(sub), ":agent:")
 
-	// And none of them can collide with a tool call's id, which contains no colon.
 	tool := activityIDFor(pinEvent())
 	if strings.ContainsRune(tool, ':') {
 		t.Fatalf("tool activity id %q gained a colon; the separation argument above no longer holds", tool)
@@ -539,21 +470,11 @@ func TestEveryTurnProducerNamespaceIsDisjoint(t *testing.T) {
 	}
 }
 
-// The derivation reads exactly one discriminator, so an event carrying two is
-// malformed — the contract's turnProducer oneOf rejects it before it can be sent.
-// This pins what the client does anyway, rung by rung.
-//
-// Pinning only the TOP of the ladder would let any two rungs beneath it be
-// swapped silently. That matters because activity_id is this product's event
-// identity: a reorder shipped in a binary upgrade would re-attribute the same
-// stream mid-session, and core would split one turn across two rows with no error
-// anywhere. The contract makes the order unreachable for a conformant producer,
-// so this pins defence in depth — but it turns a reorder into a decision.
+// TestTurnProducerPrecedenceIsPinned the derivation reads exactly one
+// discriminator, so an event carrying two is malformed; the contract's
+// turnProducer oneOf rejects it before it can be sent. Pinning only the TOP of
+// the ladder would let any two rungs beneath it be swapped silently.
 func TestTurnProducerPrecedenceIsPinned(t *testing.T) {
-	// Each rung gets its OWN event, built from scratch: every lane at or below
-	// this rung set, everything above it absent. Peeling one shared event instead
-	// would make a single wrong closure corrupt every rung after it — five
-	// failures, none naming the one-line mistake.
 	for i, want := range turnLanes {
 		t.Run(want.name, func(t *testing.T) {
 			ev := laneEvent()
@@ -566,8 +487,6 @@ func TestTurnProducerPrecedenceIsPinned(t *testing.T) {
 		})
 	}
 
-	// No discriminator at all: no id, rather than a namespace prefix with nothing
-	// after it. An id like "sess-1:turn:" would collapse every such turn onto one row.
 	t.Run("none", func(t *testing.T) {
 		if got := turnActivityIDFor(laneEvent()); got != "" {
 			t.Errorf("id = %q with no discriminator set, want %q", got, "")
@@ -575,21 +494,8 @@ func TestTurnProducerPrecedenceIsPinned(t *testing.T) {
 	})
 }
 
-// A turn with no producer discriminator must get NO span.
-//
-// turnSpanID hashes turnActivityIDFor's output, and that function returns "" for
-// an event naming no producer. Hashing "" yields sha256("turnspan\x1f") — one
-// fixed value, independent of session and turn. Core dedupes spans on
-// (span_id, stage) scoped by session, so a second such turn in one session is
-// absorbed as a duplicate of the first and its assistant text is dropped with no
-// error anywhere: the exact silent-collision failure the producer namespaces
-// exist to prevent, arriving through the one path that bypasses them.
-//
-// Unreachable from the shipped adapters, which always set an index — but the
-// discriminator set just went from two producers to five, nothing client-side
-// enforces the contract's exactly-one rule (ValidateDevEvent is test-only), and
-// the event already carries no activity_id, so a span for it addresses nothing
-// that exists.
+// TestTurnWithNoProducerGetsNoSpan a turn with no producer discriminator must
+// get NO span.
 func TestTurnWithNoProducerGetsNoSpan(t *testing.T) {
 	ev := laneEvent()
 	ev.Content = &Content{Output: "the assistant's reply"}
@@ -602,8 +508,6 @@ func TestTurnWithNoProducerGetsNoSpan(t *testing.T) {
 			"shares that id and core's dedupe drops all but the first", span.SpanID)
 	}
 
-	// The same turn WITH a producer still gets its span — the guard must not
-	// suppress the shape this span exists for.
 	for _, l := range turnLanes {
 		withLane := ev
 		l.set(&withLane)

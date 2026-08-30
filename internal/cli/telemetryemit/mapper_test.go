@@ -11,16 +11,7 @@ import (
 
 const testDID = "did:aip:openbox:dev:mapper-test"
 
-// apiRequest builds the corpus's api_request shape. The attribute names, and the
-// fact every value arrives as a STRING, come from a real desktop export
-// (claude-code-desktop 1.37937.3, run 20260827T063932Z-225cac) — see
-// reports/measure-260828-otel-attribute-inventory.md.
-//
-// The string-typed values are not a simplification: consume.go flattens every
-// OTLP value type through AsString, deliberately, because the provider types the
-// SAME attribute differently per event (duration_ms is intValue on api_request
-// and stringValue on tool_result). A mapper that parsed from typed values would
-// read zero on one of them, silently.
+// apiRequest builds the corpus's api_request shape.
 func apiRequest(overrides map[string]string) telemetry.Record {
 	attrs := map[string]string{
 		"event.name":            "api_request",
@@ -54,16 +45,10 @@ func elected() *Mapper {
 	return New(testDID, Policy{Elected: func() bool { return true }})
 }
 
-// TestUnelectedMapperEmitsNothing is the single most important test in the file.
-//
-// Two lanes can describe the same model call. If both emit, core does NOT absorb
-// one as a duplicate — the namespaces are disjoint by design — so the dashboards
-// simply double every token count, with no error anywhere. The election (phase
-// 12) is what makes exactly one lane emit, and it does not exist yet.
-//
-// So the zero value of Policy SUPPRESSES. A partially-built lane cannot
-// double-count in the field, because the only policy anyone can construct today
-// without saying "Elected" out loud is the one that emits nothing.
+// TestUnelectedMapperEmitsNothing is the single most important test in the
+// file. A partially-built lane cannot double-count in the field, because the
+// only policy anyone can construct today without saying "Elected" out loud is
+// the one that emits nothing.
 func TestUnelectedMapperEmitsNothing(t *testing.T) {
 	m := New(testDID, Policy{})
 	for _, name := range []string{"api_request", "api_response_body", "tool_result", "tool_decision", "user_prompt"} {
@@ -81,10 +66,6 @@ func TestAPIRequestBecomesTurnCompleted(t *testing.T) {
 		t.Fatal("api_request produced no event")
 	}
 
-	// TurnCompleted is not a choice: buildPayload attaches an observed span only
-	// under that case, and gatewayemit.EventFor takes the same close-only shape
-	// (legitimised by v1.6's $defs.turnProducer repair). A pair would need
-	// turn_index or a second discriminator on the opening half.
 	if ev.EventType != client.EventTurnCompleted {
 		t.Errorf("event type = %s, want TurnCompleted", ev.EventType)
 	}
@@ -101,9 +82,6 @@ func TestAPIRequestBecomesTurnCompleted(t *testing.T) {
 		t.Errorf("model = %q — this is core's aggregation key", ev.Model)
 	}
 
-	// The lane discriminator. Without it turnActivityIDFor falls through to the
-	// hook path's TurnIndex branch and, with no index, returns an EMPTY
-	// activity_id.
 	if ev.OtelRequestID != "req_011CeSoFqW2HfEh9jxCds86Y" {
 		t.Errorf("otel_request_id = %q, want the provider's request_id", ev.OtelRequestID)
 	}
@@ -114,9 +92,6 @@ func TestAPIRequestBecomesTurnCompleted(t *testing.T) {
 	if ev.Tokens == nil {
 		t.Fatal("no tokens — the whole point of this lane")
 	}
-	// input_tokens is PURE input. Measured on the corpus: input=2 alongside
-	// cache_read=90485, so it excludes cache, which is exactly contract v1.1's
-	// redefinition. Summing them here would double-count ~90k tokens per call.
 	for _, c := range []struct {
 		name string
 		got  *int
@@ -137,9 +112,6 @@ func TestAPIRequestBecomesTurnCompleted(t *testing.T) {
 		}
 	}
 
-	// The span exists for exactly one reason: core RECOMPUTES semantic_type, and
-	// isLLMCall's attribute inputs are the only path to llm_completion. Without
-	// it the activity stores and every model-call reader goes quiet.
 	if ev.Span == nil {
 		t.Fatal("no span — core cannot classify this as llm_completion without one")
 	}
@@ -148,16 +120,9 @@ func TestAPIRequestBecomesTurnCompleted(t *testing.T) {
 	}
 }
 
-// TestOtelRequestIDRejectsMalformedProviderValues guards event IDENTITY.
-//
+// TestOtelRequestIDRejectsMalformedProviderValues guards event identity.
 // OtelRequestID becomes part of activity_id, which is this product's event
-// identity and is byte-pinned and load-bearing for core's dedupe. A provider
-// value reaches it straight off the wire, so it is bounded and charset-checked
-// first. ':' matters most: activity_id is "<session>:otel:<id>", and a colon
-// inside the id makes the namespace ambiguous.
-//
-// The safe direction is to emit NOTHING rather than an event with a malformed
-// identity — a dropped turn is a gap, a colliding activity_id corrupts a row.
+// identity and is byte-pinned and load-bearing for core's dedupe.
 func TestOtelRequestIDRejectsMalformedProviderValues(t *testing.T) {
 	cases := map[string]string{
 		"a colon breaks the namespace": "req:with:colons",
@@ -167,7 +132,6 @@ func TestOtelRequestIDRejectsMalformedProviderValues(t *testing.T) {
 	}
 	for name, bad := range cases {
 		t.Run(name, func(t *testing.T) {
-			// Both id sources bad, so there is nothing legitimate to fall back to.
 			rec := apiRequest(map[string]string{"request_id": bad, "client_request_id": bad})
 			if ev, out := elected().EventFor(rec); out == Emitted {
 				t.Errorf("emitted an event with otel_request_id %q (activity_id would be %q…)", ev.OtelRequestID, ev.SessionID+":otel:"+ev.OtelRequestID)
@@ -204,8 +168,8 @@ func TestSessionlessRecordEmitsNothing(t *testing.T) {
 	}
 }
 
-// TestUnknownEventNamesAreIgnoredNotErrors: the export is a provider surface on
-// a beta flag (OD3). An unrecognised event name must be a no-op, never a
+// TestUnknownEventNamesAreIgnoredNotErrors: the export is a provider surface
+// on a beta flag (OD3). An unrecognised event name must be a no-op, never a
 // failure, or a routine upstream addition becomes a lane outage.
 func TestUnknownEventNamesAreIgnoredNotErrors(t *testing.T) {
 	rec := apiRequest(map[string]string{"event.name": "some_future_event"})
@@ -216,7 +180,7 @@ func TestUnknownEventNamesAreIgnoredNotErrors(t *testing.T) {
 }
 
 // TestMalformedNumbersDoNotFabricateZeros: a token count that will not parse
-// must be ABSENT, not zero. Zero is a measurement; absent is "unknown", and
+// must be absent, not zero. Zero is a measurement; absent is "unknown", and
 // reporting a fabricated zero would silently understate spend.
 func TestMalformedNumbersDoNotFabricateZeros(t *testing.T) {
 	rec := apiRequest(map[string]string{"output_tokens": "not-a-number"})
@@ -230,15 +194,13 @@ func TestMalformedNumbersDoNotFabricateZeros(t *testing.T) {
 	if ev.Tokens.Input == nil || *ev.Tokens.Input != 2 {
 		t.Error("one unparseable count discarded the others")
 	}
-	// Total must not silently omit the unknown part either.
 	if ev.Tokens.Total != nil {
 		t.Errorf("total = %d, want absent when a component is unknown", *ev.Tokens.Total)
 	}
 }
 
-// TestDurationDerivesTheTurnWindow: the export gives a duration, not a start, so
-// StartedAt is end - duration_ms. Without a window the span's start and end
-// collapse and every latency reader shows zero.
+// TestDurationDerivesTheTurnWindow: the export gives a duration, not a start,
+// so StartedAt is end - duration_ms.
 func TestDurationDerivesTheTurnWindow(t *testing.T) {
 	ev, out := elected().EventFor(apiRequest(nil))
 	if out != Emitted {
@@ -257,9 +219,7 @@ func TestDurationDerivesTheTurnWindow(t *testing.T) {
 	}
 }
 
-// TestEventIDIsDeterministic: INV-5. The spool can be drained by a different
-// process long after the daemon that wrote it exited, so a redelivery has to
-// present the same idempotency key or core stores a second row.
+// TestEventIDIsDeterministic: INV-5.
 func TestEventIDIsDeterministic(t *testing.T) {
 	a, _ := elected().EventFor(apiRequest(nil))
 	b, _ := elected().EventFor(apiRequest(nil))
@@ -276,15 +236,6 @@ func TestEventIDIsDeterministic(t *testing.T) {
 }
 
 // TestSessionIDIsValidatedLikeAPath is the defect this test was written for.
-//
-// session.id is a provider value off the same unauthenticated loopback listener
-// as everything else, and it does not merely become the activity_id prefix and
-// core's run_id — every spool consumer in this repo turns it into a FILENAME
-// (`<session>.jsonl`, hookflow/spool.go). The mapper originally checked only
-// non-empty, so a local process could have named the file.
-//
-// gatewayemit.usableSessionID already made this refusal; the asymmetry was the
-// bug.
 func TestSessionIDIsValidatedLikeAPath(t *testing.T) {
 	for name, bad := range map[string]string{
 		"parent traversal":  "../../etc/passwd",
@@ -307,19 +258,14 @@ func TestSessionIDIsValidatedLikeAPath(t *testing.T) {
 			}
 		})
 	}
-	// A real session id must still pass, or the guard is just an outage.
 	rec := apiRequest(map[string]string{"session.id": "b3f1c2d4-0000-4000-8000-000000000001"})
 	if _, out := elected().EventFor(rec); out != Emitted {
 		t.Error("a UUID session id was rejected — all 59 in the corpus are UUIDs")
 	}
 }
 
-// TestZeroTimestampIsDropped: record.go binds the record's own time and leaves a
-// zero for "the mapper to decide what to do about". This is the decision.
-//
-// Formatting a zero time yields a VALID RFC3339 string in year 0001, so nothing
-// downstream rejects it — the turn is simply filed a millennium out and every
-// window and latency reader quietly disagrees with every other lane.
+// TestZeroTimestampIsDropped: record.go binds the record's own time and leaves
+// a zero for "the mapper to decide what to do about".
 func TestZeroTimestampIsDropped(t *testing.T) {
 	rec := apiRequest(nil)
 	rec.Timestamp = time.Time{}
@@ -328,15 +274,9 @@ func TestZeroTimestampIsDropped(t *testing.T) {
 	}
 }
 
-// TestOutcomeSeparatesSkipsFromDrops holds phase 10's inherited pin.
-//
-// "Nothing was emitted" covers two very different situations. A SKIP is expected:
-// the export carries 19 event types and this slice binds one. A DROP is a record
-// the lane wanted and could not use. Collapsing them into a bare bool is what the
-// phase-10 report flagged as dangerous — this package's own argument is that
-// erroring on an unfamiliar event NAME would turn upstream drift into a lane
-// outage, and id-format drift is the same class. A lane that goes quiet because
-// every record now fails validation must not look identical to a quiet session.
+// TestOutcomeSeparatesSkipsFromDrops holds phase 10's inherited pin. A lane
+// that goes quiet because every record now fails validation must not look
+// identical to a quiet session.
 func TestOutcomeSeparatesSkipsFromDrops(t *testing.T) {
 	cases := []struct {
 		name     string
@@ -388,23 +328,6 @@ func TestOutcomeSeparatesSkipsFromDrops(t *testing.T) {
 // TestElectionIsAnsweredPerRecordNotAtConstruction is the regression for a
 // defect that reached review: a lane emitting turns it had already lost the
 // right to emit.
-//
-// `openbox init --full` installs telemetry FIRST and transport second. A daemon
-// that resolved the election once, at construction, booted correctly elected —
-// nothing else was routed yet — froze that answer, and went on emitting after
-// the transport lane took the election from it moments later. Both lanes then
-// described the same model call, and because the activity_id namespaces are
-// deliberately disjoint, core stores both rather than rejecting one: every token
-// count and cost figure doubles, silently, with `openbox doctor` still reporting
-// a clean single elected lane because it re-resolves from the settings file.
-//
-// The reverse costs everything instead of doubling it: install telemetry while a
-// stronger lane is routed, remove that lane later, and a snapshot of "not
-// elected" keeps the machine silent forever.
-//
-// A snapshot of derivable state is precisely what deriving the election was
-// meant to eliminate — so the gate is a function, and this test flips the answer
-// under a mapper that is already built.
 func TestElectionIsAnsweredPerRecordNotAtConstruction(t *testing.T) {
 	elected := true
 	m := New(testDID, Policy{Elected: func() bool { return elected }})
@@ -413,24 +336,21 @@ func TestElectionIsAnsweredPerRecordNotAtConstruction(t *testing.T) {
 		t.Fatalf("the mapper refused a record while elected: %v", outcome)
 	}
 
-	// A stronger lane is installed after this mapper was built.
 	elected = false
 	if _, outcome := m.EventFor(apiRequest(nil)); outcome != SkipNotElected {
 		t.Errorf("outcome = %v after losing the election; the lane kept emitting, "+
 			"so two producers now describe the same model call and every token count doubles", outcome)
 	}
 
-	// And back: a lane that regains the election must start emitting again
-	// without a restart, or removing a stronger lane silences the machine.
 	elected = true
 	if _, outcome := m.EventFor(apiRequest(nil)); outcome == SkipNotElected {
 		t.Error("the lane stayed silent after regaining the election; only a daemon restart would fix it")
 	}
 }
 
-// TestAnUnsetElectionGateSuppresses keeps the zero value's guarantee structural
-// now that it is a function: a half-built caller that never names Elected must
-// emit nothing, exactly as it did when this was a bool.
+// TestAnUnsetElectionGateSuppresses keeps the zero value's guarantee
+// structural now that it is a function: a half-built caller that never names
+// Elected must emit nothing, exactly as it did when this was a bool.
 func TestAnUnsetElectionGateSuppresses(t *testing.T) {
 	if _, outcome := New(testDID, Policy{}).EventFor(apiRequest(nil)); outcome != SkipNotElected {
 		t.Errorf("outcome = %v for a policy that never named a gate; the zero value must suppress", outcome)

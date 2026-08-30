@@ -99,8 +99,9 @@ func (g EnforceGate) escalate(ctx context.Context, logger *log.Logger, t Enforce
 	return dec, client.ApprovalKeyFor(ev)
 }
 
-// awaitApproval runs the bounded hold and folds the outcome back into the
-// gate's decision.
+// awaitApproval an unanswered request denies (OD-E9-1): never a silent allow
+// in enforce mode, and never the provider's own approval prompt, which would
+// ask the developer to approve their own filed request.
 func (g EnforceGate) awaitApproval(ctx context.Context, logger *log.Logger, t EnforceTarget, dec decision.Decision, key client.ApprovalKey, enforceStart time.Time) decision.Decision {
 	if !key.Valid() {
 		return ApprovalUndecided(dec, "— this call cannot be tied to an approval record")

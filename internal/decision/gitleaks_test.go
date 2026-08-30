@@ -9,14 +9,9 @@ import (
 	"github.com/zricethezav/gitleaks/v8/detect"
 )
 
-// The detector must actually construct.
-//
-// gitleaksDetector degrades to nil on error rather than panicking, because it runs
-// inside a hook binary and taking the developer's tool down is worse than falling
-// back to the assignment pattern plus the entropy pass. That degradation is
-// invisible at runtime — detection would quietly lose its named-format half — so
-// this test is what makes "cannot happen" checkable. The config is a static
-// embedded string, so if this is green the production path is green too.
+// TestGitleaksDetectorConstructs the detector must actually construct. That
+// degradation is invisible at runtime; detection would quietly lose its named-
+// format half; so this test is what makes "cannot happen" checkable.
 func TestGitleaksDetectorConstructs(t *testing.T) {
 	d := gitleaksDetector()
 	if d == nil {
@@ -27,20 +22,13 @@ func TestGitleaksDetectorConstructs(t *testing.T) {
 	}
 }
 
-// Categories reaching the durable audit must be rule identifiers, never matched
-// text (INV-2). gitleaks rule ids satisfy this by construction — assert it rather
-// than trust it, because RedactionCategories is egressed.
+// TestGitleaksCategoriesCarryNoSecret categories reaching the durable audit
+// must be rule identifiers, never matched text (INV-2). Gitleaks rule ids
+// satisfy this by construction; assert it rather than trust it, because
+// RedactionCategories is egressed.
 func TestGitleaksCategoriesCarryNoSecret(t *testing.T) {
-	// A GitLab PAT: a format the nine restored named patterns do NOT cover, so this
-	// exercises gitleaks specifically rather than our own floor (which runs first
-	// and would otherwise win on, say, an AWS key).
-	//
 	// Assembled from parts, and the variable is NOT named `secret`/`token`/`key`,
-	// deliberately. Writing `secret := "<value>"` on one line got this very file
-	// rewritten on disk: that shape matches the generic assignment pattern, so the
-	// enforce-path redactor replaced the fixture with a placeholder and the test
-	// then asserted nothing. The corruption risk this module documents is real
-	// enough to have hit its own test.
+	// deliberately.
 	fixture := "glpat-" + "ABCdef1234567890abcd"
 	_, cats, changed := newSecretDetector().Redact("gitlab = " + fixture)
 	if !changed {
@@ -65,13 +53,8 @@ func TestGitleaksCategoriesCarryNoSecret(t *testing.T) {
 	}
 }
 
-// The placeholder must stay a usable env-var reference.
-//
-// The whole point of the env-var shape is that a developer can act on it — export
-// the value instead of inlining it. gitleaks rule ids are hyphenated slugs
-// ("aws-access-token", "1password-secret-key"), and a hyphen is not legal in a
-// shell identifier, so emitting one verbatim would produce a placeholder nobody
-// can export. A leading digit needs no handling: the category is appended after
+// TestPlaceholderIsEnvVarSafe the placeholder must stay a usable env-var
+// reference. A leading digit needs no handling: the category is appended after
 // "OPENBOX_REDACTED_", so the name never starts with one.
 func TestPlaceholderIsEnvVarSafe(t *testing.T) {
 	for _, cat := range []string{
@@ -97,19 +80,8 @@ func TestPlaceholderIsEnvVarSafe(t *testing.T) {
 	}
 }
 
-// TestOverlappingFindingsCannotLeaveSecretFragments pins the ORDER findings are
-// applied in, which is a correctness property and not a preference.
-//
-// Two rules can match overlapping spans of one credential — a generic rule on a
-// substring, a named-format rule on the whole thing — and the detector does not
-// return them longest-first. Replacing the SHORT one first destroys the long
-// one's text, so the "already covered by an earlier finding" guard skips it, and
-// the head of a real secret goes out unredacted: measured as
-// `AKIA${OPENBOX_REDACTED_SHORT_TOKEN}` before this was ordered.
-//
-// Two synthetic rules rather than a pair from the 222: the property is about the
-// engine's replacement loop, and pinning it to whichever maintained rules happen
-// to overlap today would make this test a hostage to a rule-pack refresh.
+// TestOverlappingFindingsCannotLeaveSecretFragments pins the order findings
+// are applied in, which is a correctness property and not a preference.
 func TestOverlappingFindingsCannotLeaveSecretFragments(t *testing.T) {
 	const secret = "AKIAABCDEFGHIJKLMNOPTAIL"
 	d := detect.NewDetector(config.Config{Rules: map[string]config.Rule{

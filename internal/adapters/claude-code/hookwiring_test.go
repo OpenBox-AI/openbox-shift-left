@@ -6,18 +6,11 @@ import (
 	"testing"
 )
 
-// The hook set is declared in three places by necessity: the plugin bundle's
-// hooks.json (what Claude Code reads in production), localHookEvents (what
-// `init --local-hooks` merges into a project's settings), and hookNames (what
-// the engine will dispatch). Nothing bound them together, so a hook added to the
-// bundle but not to the engine would be installed, fire, and be rejected as
-// "unknown Claude Code hook" — and one added to the engine but not the bundle
-// would simply never fire. Both failures are silent.
-//
-// These tests pin the three declarations to each other. A hook only counts as
-// wired when it appears in all three.
+// Nothing bound them together, so a hook added to the bundle but not to the
+// engine would be installed, fire, and be rejected as "unknown Claude Code
+// hook"; and one added to the engine but not the bundle would simply never
+// fire.
 
-// pluginHooksJSON is the embedded bundle Claude Code actually loads.
 type pluginHooksJSON struct {
 	Hooks map[string][]struct {
 		Matcher string `json:"matcher"`
@@ -56,8 +49,6 @@ func TestPluginHooksMatchEngineVocabulary(t *testing.T) {
 	}
 	assertSameHookSet(t, "plugin hooks.json", fromBundle, "engine hookNames", fromEngine)
 
-	// Every bundled hook must resolve through the engine's own parser, which is
-	// what the argv subcommand goes through at runtime.
 	for name := range parsed.Hooks {
 		if _, err := ParseHookName(name); err != nil {
 			t.Errorf("bundled hook %q is not dispatchable: %v", name, err)
@@ -80,9 +71,6 @@ func TestLocalHooksMirrorPluginBundle(t *testing.T) {
 	}
 	assertSameHookSet(t, "localHookEvents", fromLocal, "plugin hooks.json", fromBundle)
 
-	// Timeouts must agree too: a local install that killed a hook the plugin
-	// gives more room to would behave differently from production for the same
-	// session, which is the whole thing --local-hooks exists to avoid.
 	for name, entries := range parsed.Hooks {
 		if len(entries) == 0 || len(entries[0].Hooks) == 0 {
 			t.Errorf("bundled hook %q has no handler", name)
@@ -94,10 +82,8 @@ func TestLocalHooksMirrorPluginBundle(t *testing.T) {
 	}
 }
 
-// The turn-boundary hooks are wired with the ordinary non-gating budget and no
-// matcher. A matcher on Stop would be meaningless (there is no tool to match)
-// and a raised timeout would suggest this hook holds for something — it never
-// does; the transcript parse is incremental via the cursor.
+// TestTurnHooksAreWiredAsNonGating the turn-boundary hooks are wired with the
+// ordinary non-gating budget and no matcher.
 func TestTurnHooksAreWiredAsNonGating(t *testing.T) {
 	parsed := loadPluginHooks(t)
 

@@ -5,10 +5,9 @@ import (
 	"testing"
 )
 
-// The mistake this exists for: the dashboard shows an agent's runtime key on the
-// agent page, so that is what people paste. It is minted BY onboarding, and the
-// control plane answers a bare 401 — indistinguishable from an expired key, a
-// missing permission, or a broken install.
+// TestControlTokenProblemNamesTheWrongKey the mistake this exists for: the
+// dashboard shows an agent's runtime key on the agent page, so that is what
+// people paste.
 func TestControlTokenProblemNamesTheWrongKey(t *testing.T) {
 	agentKey := "obx_test_8ab210d6acd7847f3135e4c4a14349fe"
 	problem := controlTokenProblem(agentKey)
@@ -20,7 +19,6 @@ func TestControlTokenProblemNamesTheWrongKey(t *testing.T) {
 			t.Errorf("the message does not mention %q:\n%s", want, problem)
 		}
 	}
-	// INV-1: recognisable, not disclosable.
 	if strings.Contains(problem, agentKey) {
 		t.Error("the message echoes the whole credential")
 	}
@@ -44,9 +42,10 @@ func TestControlTokenProblemAcceptsRealCredentials(t *testing.T) {
 	}
 }
 
-// The other silent one: a self-hosted control plane with the default data plane.
-// Registration succeeds, the config looks right, and `dev verify` then returns 401
-// from a URL the operator never chose.
+// TestSelfHostedWithoutDataPlaneWarns the other silent one: a self-hosted
+// control plane with the default data plane. Registration succeeds, the config
+// looks right, and `dev verify` then returns 401 from a URL the operator never
+// chose.
 func TestSelfHostedWithoutDataPlaneWarns(t *testing.T) {
 	warn := []string{
 		"http://localhost:3000",
@@ -57,11 +56,9 @@ func TestSelfHostedWithoutDataPlaneWarns(t *testing.T) {
 		"https://192.168.1.10:3000",
 		"http://openbox-backend:3000", // single-label service name
 
-		// Self-hosted on a PUBLIC domain — the case this check used to miss
-		// entirely. It asked "does the backend look private?", and none of
-		// these do, so the warning never fired and the install went on to sign
-		// every request against the hosted core. Reported from a real install
-		// at openbox-api.node.lat.
+		// It asked "does the backend look private?", and none of these do, so the
+		// warning never fired and the install went on to sign every request against
+		// the hosted core.
 		"https://openbox-api.node.lat/",
 		"https://openbox.example.com",
 		"https://api.acme.io",
@@ -76,9 +73,6 @@ func TestSelfHostedWithoutDataPlaneWarns(t *testing.T) {
 		}
 	}
 
-	// The hosted deployment shares a registrable domain with the default data
-	// plane, so it needs no --base-url and must stay quiet. An unparseable or
-	// empty backend has nothing to say about the data plane either.
 	for _, u := range []string{
 		"https://api.openbox.ai",
 		"https://core.openbox.ai",

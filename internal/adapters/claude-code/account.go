@@ -11,17 +11,17 @@ const accountStateFile = ".claude.json"
 
 const maxAccountStateBytes = 16 << 20 // 16 MiB
 
-// accountEvidence is the bound subset. The struct IS the allowlist: a field
-// that is not here cannot be egressed by this path, so adding one is a visible
-// change rather than a silent widening.
+// accountEvidence the struct IS the allowlist: a field that is not here cannot
+// be egressed by this path, so adding one is a visible change rather than a
+// silent widening.
 type accountEvidence struct {
 	Email   string
 	OrgUUID string
 }
 
-// localAccount reads the account evidence from the developer's home directory.
-// Every failure is silent and returns the zero value: a session must never
-// fail to report because an optional attribution field was unreadable.
+// localAccount every failure is silent and returns the zero value: a session
+// must never fail to report because an optional attribution field was
+// unreadable.
 func localAccount(homeDir string) accountEvidence {
 	if homeDir == "" {
 		return accountEvidence{}
@@ -50,8 +50,7 @@ func localAccount(homeDir string) accountEvidence {
 	}
 }
 
-// accountMetadata renders the evidence as session metadata keys. Metadata,
-// never signal_args.
+// accountMetadata metadata, never signal_args.
 func accountMetadata(a accountEvidence) map[string]any {
 	return compact(map[string]any{
 		"account_email":    a.Email,

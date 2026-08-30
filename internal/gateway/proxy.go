@@ -5,6 +5,7 @@
 // it IS buffered, because the exact bytes have to be re-readable -- phase 05
 // keeps a copy to capture, and net/http can only auto-retry a stale pooled
 // connection when GetBody can replay the body.
+//   - Inspect without modifying.
 package gateway
 
 import (
@@ -21,8 +22,6 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/internal/gateway/internal/dialhook"
 )
 
-// hopByHopHeaders describe a single connection rather than the message, so a
-// relay drops them instead of forwarding them.
 var hopByHopHeaders = map[string]bool{
 	"Connection":          true,
 	"Keep-Alive":          true,
@@ -37,14 +36,11 @@ var hopByHopHeaders = map[string]bool{
 
 const relayBufferSize = 4 << 10
 
-// maxRequestBody bounds the inbound read, matching the convention every other
-// externally-controlled body read in this repo already follows
-// (maxHookPayload, maxTranscriptBytes, maxRolloutBytes, maxFindingsDelta).
+// maxRequestBody the bound refuses; it never truncates.
 const maxRequestBody = 64 << 20 // 64 MiB
 
-// writeIdleTimeout bounds a single write to the local caller. Generous on
-// purpose: on loopback, a client that has not drained a pending chunk for this
-// long is stuck, not slow.
+// writeIdleTimeout generous on purpose: on loopback, a client that has not
+// drained a pending chunk for this long is stuck, not slow.
 const writeIdleTimeout = 2 * time.Minute
 
 // Emitter receives the evidence one relayed call produced. A seam, so the
@@ -221,9 +217,8 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// capturableBody decides what may be recorded for a body, given its headers.
-// Every guarantee capture.go's header comment makes about redaction evaporated
-// silently, and the stored evidence was destroyed anyway.
+// capturableBody every guarantee capture.go's header comment makes about
+// redaction evaporated silently, and the stored evidence was destroyed anyway.
 func capturableBody(body []byte, h http.Header) string {
 	if isContentEncoded(h) {
 		return "[openbox: not captured — the body was content-encoded, so redaction could not inspect it]"
@@ -239,7 +234,6 @@ func isContentEncoded(h http.Header) bool {
 	return enc != "" && !strings.EqualFold(enc, "identity")
 }
 
-// captureSink accumulates a bounded copy of the relayed response.
 type captureSink struct {
 	buf []byte
 }
@@ -271,9 +265,9 @@ func (s *captureSink) Bytes() []byte {
 	return s.buf
 }
 
-// streamTo relays and, when sink is non-nil, tees a bounded copy. The relay is
-// unchanged by the tee: the write to the client happens first and its error is
-// what ends the loop, so a capture problem can never abort a stream.
+// streamTo the relay is unchanged by the tee: the write to the client happens
+// first and its error is what ends the loop, so a capture problem can never
+// abort a stream.
 func (g *Gateway) streamTo(w http.ResponseWriter, src io.Reader, sink *captureSink) error {
 	ctl := http.NewResponseController(w)
 	defer func() { _ = ctl.SetWriteDeadline(time.Time{}) }()
@@ -307,7 +301,6 @@ func (g *Gateway) relayError(w http.ResponseWriter, status int, reason string) {
 	fmt.Fprintf(w, `{"type":"error","error":{"type":"openbox_gateway_error","message":%q}}`, reason)
 }
 
-// copyHeaders copies every header except the hop-by-hop set.
 func copyHeaders(dst, src http.Header) {
 	perMessage := connectionNamedHeaders(src)
 	for name, values := range src {

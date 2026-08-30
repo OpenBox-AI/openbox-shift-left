@@ -12,9 +12,6 @@ import (
 	"time"
 )
 
-// testPrivateKeyB64 is a known, fixed base64 raw 32-byte Ed25519 seed (the exact form
-// openbox-backend returns as identity.privateKey). Reused across tests so the
-// signer is deterministic apart from its per-request timestamp/nonce.
 const testPrivateKeyB64 = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="
 
 const testDID = "did:aip:00000000-0000-0000-0000-000000000001"
@@ -28,18 +25,11 @@ func mustSigner(t *testing.T) *signer {
 	return s
 }
 
-// verifyLikeCore mirrors openbox-core's ValidateAgentIdentity
-// (services/agent.go:165-184): it recomputes the body SHA-256, compares it to
-// the X-OpenBox-Body-SHA256 header, rebuilds the canonical string via
-// BuildAgentIdentityCanonicalRequest, and verifies the Ed25519 signature. It
-// returns nil iff core would accept the signature.
 func verifyLikeCore(pub ed25519.PublicKey, method, path string, body []byte, h http.Header) error {
 	wantSHA := hex.EncodeToString(sha256Sum(body))
 	if got := h.Get(headerBodySHA256); got != wantSHA {
 		return fmt.Errorf("body sha mismatch: header %q vs computed %q", got, wantSHA)
 	}
-	// core builds the canonical string from method/path + the header timestamp
-	// and nonce + the SERVER-computed body sha (which equals wantSHA).
 	canonical := strings.Join([]string{
 		strings.ToUpper(method),
 		path,
@@ -54,7 +44,6 @@ func verifyLikeCore(pub ed25519.PublicKey, method, path string, body []byte, h h
 	if !ed25519.Verify(pub, []byte(canonical), sig) {
 		return fmt.Errorf("ed25519 verify failed")
 	}
-	// core parses the timestamp with RFC3339Nano and enforces a freshness window.
 	if _, err := time.Parse(time.RFC3339Nano, h.Get(headerAgentTS)); err != nil {
 		return fmt.Errorf("timestamp not RFC3339Nano-parseable: %v", err)
 	}
@@ -77,18 +66,15 @@ func TestSign_VerifiesAgainstKnownKeypair(t *testing.T) {
 		t.Fatalf("sign: %v", err)
 	}
 
-	// Body SHA is lowercase hex of sha256(body).
 	if want := hex.EncodeToString(sha256Sum(body)); sig.bodySHA != want {
 		t.Errorf("bodySHA = %q, want %q", sig.bodySHA, want)
 	}
-	// Timestamp uses a +00:00 UTC offset (matching the reference SDK) and parses.
 	if !strings.HasSuffix(sig.timestamp, "+00:00") {
 		t.Errorf("timestamp %q lacks +00:00 offset", sig.timestamp)
 	}
 	if _, err := time.Parse(time.RFC3339Nano, sig.timestamp); err != nil {
 		t.Errorf("timestamp not RFC3339Nano: %v", err)
 	}
-	// Nonce is base64url-nopad of 24 bytes → 32 chars.
 	if len(sig.nonce) != 32 {
 		t.Errorf("nonce len = %d, want 32", len(sig.nonce))
 	}
@@ -96,7 +82,6 @@ func TestSign_VerifiesAgainstKnownKeypair(t *testing.T) {
 		t.Errorf("nonce not base64url-nopad: %v", err)
 	}
 
-	// The signature verifies exactly as core would rebuild + check it.
 	h := http.Header{}
 	h.Set(headerAgentTS, sig.timestamp)
 	h.Set(headerAgentNonce, sig.nonce)
@@ -121,7 +106,6 @@ func TestSign_TamperedBodyFailsVerification(t *testing.T) {
 	h.Set(headerAgentSig, sig.sig)
 	h.Set(headerBodySHA256, sig.bodySHA)
 
-	// A different body must not verify against the original signature/sha.
 	if err := verifyLikeCore(pub, http.MethodPost, evaluatePath, []byte(`{"a":2}`), h); err == nil {
 		t.Fatal("expected verification failure for tampered body, got nil")
 	}
@@ -131,7 +115,6 @@ func TestNewSigner_RejectsBadSeed(t *testing.T) {
 	if _, err := newSigner(testDID, "not-base64!!"); err == nil {
 		t.Error("expected error for non-base64 seed")
 	}
-	// 31 bytes → wrong length.
 	short := base64.StdEncoding.EncodeToString(make([]byte, 31))
 	if _, err := newSigner(testDID, short); err == nil {
 		t.Error("expected error for 31-byte seed")

@@ -10,7 +10,7 @@ import (
 
 // TestEmittedEventsAreConformant is the cross-contract acceptance check (story
 // AC-10): every event the Codex adapter produces must validate against the
-// SL-1 dev-event schema with content-capture DISABLED. If the contract
+// SL-1 dev-event schema with content-capture disabled. If the contract
 // tightens, this breaks here rather than silently at ingest.
 func TestEmittedEventsAreConformant(t *testing.T) {
 	m := testMapper()
@@ -44,9 +44,6 @@ func TestEmittedEventsAreConformant(t *testing.T) {
 	}
 }
 
-// mustMarshalContractShape marshals a DevEvent to its on-the-wire contract
-// JSON. The client strips content before egress; here we assert the adapter's
-// own output (pre-client) is already content-free and conformant.
 func mustMarshalContractShape(t *testing.T, ev client.DevEvent) []byte {
 	t.Helper()
 	raw, err := json.Marshal(ev)
@@ -57,20 +54,9 @@ func mustMarshalContractShape(t *testing.T, ev client.DevEvent) []byte {
 }
 
 // TestUsageRollupPairIsConformant closes the seam this adapter's rollup fell
-// through: MapUsageRollup does not go through Map, so TestEmittedEventsAreConformant
-// above never covered it, and NO turn shape from either adapter was ever validated
-// as real mapper output.
-//
-// That gap is exactly why the defect lived: contract v1.6 found that the schema
-// had rejected this pair since v1.1 — `session_rollup` was never a declared
-// property while the event object is `additionalProperties: false`, and BOTH turn
-// branches required an index the rollup does not have. Every session of Codex usage
-// has been failing its own contract, and nothing said so, because the only things
-// validated against the schema were hand-built.
-//
-// Hand-built fixtures prove the schema accepts a shape someone wrote by hand. This
-// proves it accepts the shape the adapter actually emits, which is the claim that
-// matters.
+// through: MapUsageRollup does not go through Map, so
+// TestEmittedEventsAreConformant above never covered it, and NO turn shape
+// from either adapter was ever validated as real mapper output.
 func TestUsageRollupPairIsConformant(t *testing.T) {
 	m := testMapper()
 	in, out, cacheRead := 8102, 1440, 41000

@@ -5,11 +5,10 @@ import (
 	"testing"
 )
 
-// Loopback-only is the one invariant this receiver rests on, and it is a security
-// control rather than a preference: prompts, tool inputs and outputs, and full
-// model request bodies all arrive here, over an endpoint with no authentication.
-// There is nothing to add that would make an off-host bind acceptable, so the
-// bind is the control and these cases are what enforce it.
+// TestValidateRequiresLoopback loopback-only is the one invariant this
+// receiver rests on, and it is a security control rather than a preference:
+// prompts, tool inputs and outputs, and full model request bodies all arrive
+// here, over an endpoint with no authentication.
 func TestValidateRequiresLoopback(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -49,9 +48,8 @@ func TestValidateRequiresLoopback(t *testing.T) {
 	}
 }
 
-// An empty address takes the default rather than the OS's "any interface"
-// meaning. Without this, the zero Config would bind every interface — the one
-// outcome Validate exists to prevent, reached by writing nothing at all.
+// TestValidateFillsTheDefault an empty address takes the default rather than
+// the OS's "any interface" meaning.
 func TestValidateFillsTheDefault(t *testing.T) {
 	c := Config{}
 	if err := c.Validate(); err != nil {
@@ -62,12 +60,10 @@ func TestValidateFillsTheDefault(t *testing.T) {
 	}
 }
 
-// The default port must not be the OTLP standard, and must not be the gateway's.
-//
-// 4318 is what any other collector on the machine already has: binding it either
-// fails, or succeeds after that collector dies and silently swallows exports
-// meant for it. Colliding with the gateway's 8788 would be the same failure
-// between two of our own daemons.
+// TestDefaultPortAvoidsTheObviousCollisions the default port must not be the
+// OTLP standard, and must not be the gateway's. 4318 is what any other
+// collector on the machine already has: binding it either fails, or succeeds
+// after that collector dies and silently swallows exports meant for it.
 func TestDefaultPortAvoidsTheObviousCollisions(t *testing.T) {
 	for _, taken := range []string{":4317", ":4318", ":8788"} {
 		if strings.HasSuffix(DefaultAddr, taken) {
@@ -79,11 +75,10 @@ func TestDefaultPortAvoidsTheObviousCollisions(t *testing.T) {
 	}
 }
 
-// The request bound must be set, and must be well under the library's 20MiB
-// default. That default is sized for a fleet collector; here the listener is
-// unauthenticated by construction, so inheriting it hands any local process a
-// large memory budget. It must also stay comfortably above the largest record
-// this lane expects — model request bodies peaked at 566KB in the evidence run.
+// TestRequestBoundIsExplicitAndSane the request bound must be set, and must be
+// well under the library's 20MiB default. It must also stay comfortably above
+// the largest record this lane expects; model request bodies peaked at 566KB
+// in the evidence run.
 func TestRequestBoundIsExplicitAndSane(t *testing.T) {
 	const libraryDefault = 20 * 1024 * 1024
 	const largestObservedBody = 566 * 1024

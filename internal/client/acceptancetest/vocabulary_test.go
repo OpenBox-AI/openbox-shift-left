@@ -8,16 +8,11 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/internal/conformance"
 )
 
-// The event vocabulary is declared in several places by necessity: the JSON
-// Schema is the published contract, client.AllEventTypes is what the code emits,
-// the conformance module keeps its own copy so it can stay dependency-free, and
-// this module orders the types into a coherent session. Nothing bound them
-// together — the one cross-check compared list *lengths*, so renaming a type on
-// one side left every test green.
-//
-// This module is the only one that can see both the schema and the client, so
-// the binding lives here. conformance binds its own list to the schema, so the
-// three declarations are pinned transitively.
+// TestSchemaEnumMatchesClientConstants the event vocabulary is declared in
+// several places by necessity: the JSON Schema is the published contract,
+// client.AllEventTypes is what the code emits, the conformance module keeps
+// its own copy so it can stay dependency-free, and this module orders the
+// types into a coherent session.
 func TestSchemaEnumMatchesClientConstants(t *testing.T) {
 	schema, err := conformance.LoadSchema()
 	if err != nil {
@@ -47,10 +42,9 @@ func TestSchemaEnumMatchesClientConstants(t *testing.T) {
 	assertSameSet(t, "schema event_type enum", fromSchema, "client.AllEventTypes", fromClient)
 }
 
-// devEventTypes deliberately orders the lifecycle for a coherent session, so it
-// is not simply client.AllEventTypes. It must still cover exactly the same set —
-// a type added to the vocabulary but missing here would go un-exercised against
-// a stock core, which is the whole point of this module.
+// TestSessionOrderingCoversWholeVocabulary devEventTypes deliberately orders
+// the lifecycle for a coherent session, so it is not simply
+// client.AllEventTypes.
 func TestSessionOrderingCoversWholeVocabulary(t *testing.T) {
 	ordered := make([]string, 0, len(devEventTypes))
 	for _, t := range devEventTypes {
@@ -63,8 +57,6 @@ func TestSessionOrderingCoversWholeVocabulary(t *testing.T) {
 	assertSameSet(t, "acceptance devEventTypes", ordered, "client.AllEventTypes", all)
 }
 
-// assertSameSet reports each side's extras, so a rename reads as one added and
-// one removed name rather than an opaque mismatch.
 func assertSameSet(t *testing.T, aName string, a []string, bName string, b []string) {
 	t.Helper()
 	index := func(list []string) map[string]bool {

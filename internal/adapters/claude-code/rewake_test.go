@@ -11,11 +11,7 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/internal/client"
 )
 
-// rewakePayload mirrors a REAL Claude Code payload, tool_use_id included.
-// Omitting it is what made TestApprovalKeyIsStableAcrossProcessesAndRetries
-// vacuous: tool_use_id is the one field that differs between a call and its
-// retry, so a fixture without it cannot detect a key that is unstable across
-// retries — which is precisely the failure the test exists to catch.
+// rewakePayload mirrors a real Claude Code payload, tool_use_id included.
 func rewakePayload(tool string) string {
 	return rewakePayloadWithUse(tool, "toolu_01AAAAAAAAAAAAAAAAAAAAAA")
 }
@@ -33,26 +29,17 @@ func runRewake(t *testing.T, tool string) (int, string, time.Duration) {
 	return code, wake.String(), time.Since(start)
 }
 
-// The watcher runs alongside the gate on EVERY tool call, so the cases where it
-// has nothing to do must cost nothing. It must also never wake a session on its
-// own account: exit 0 with no output is the silent path.
+// TestRunRewake_InertWhenNothingCanFileAnApproval the watcher runs alongside
+// the gate on every tool call, so the cases where it has nothing to do must
+// cost nothing. It must also never wake a session on its own account: exit 0
+// with no output is the silent path.
 func TestRunRewake_InertWhenNothingCanFileAnApproval(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		env  map[string]string
 		tool string
 	}{
-		// Enforce must be turned off EXPLICITLY. It defaults on, and this case
-		// used to pass on an empty env only because the tier-2 toggle it also
-		// depended on defaulted off — so it was asserting the inertness of a
-		// gate that was in fact enabled. That decision removed that toggle and
-		// exposed it.
 		{"enforce off — no gate, so no approval", map[string]string{devconfig.EnvEnforce: "0"}, "Bash"},
-		// Enforce-off is the ONLY inert case left. The two that stood beside it
-		// — tier-2 off, and a non-high-risk class — are deleted rather than
-		// fixed, because neither is inert any more: every class evaluates
-		// inline, so every class can hold an approval and every one deserves a
-		// watcher. What bounds that cost is rewakeMarkerGrace, not a class test.
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			isolateConfig(t)
@@ -75,12 +62,10 @@ func TestRunRewake_InertWhenNothingCanFileAnApproval(t *testing.T) {
 	}
 }
 
-// The load-bearing cross-process property (E9 §2.5): the gate and the watcher
-// are separate processes that map the same payload independently, and later a
-// RETRY maps it a third time. All three must derive the same approval key, or
-// the watcher never finds the gate's marker and the retry never finds the
-// grant — a silent failure of the whole loop. The key is therefore built only
-// from stable fields (session, tool, path/function), never the clock.
+// TestApprovalKeyIsStableAcrossProcessesAndRetries the load-bearing cross-
+// process property (E9 §2.5): the gate and the watcher are separate processes
+// that map the same payload independently, and later a retry maps it a third
+// time.
 func TestApprovalKeyIsStableAcrossProcessesAndRetries(t *testing.T) {
 	isolateConfig(t)
 	t.Setenv(envDID, testDID)
@@ -102,8 +87,6 @@ func TestApprovalKeyIsStableAcrossProcessesAndRetries(t *testing.T) {
 		return client.ApprovalKeyFor(devEv)
 	}
 
-	// Same invocation, two processes: the gate and the watcher must agree, or
-	// the watcher never finds the gate's marker.
 	gate := derive("toolu_01AAAAAAAAAAAAAAAAAAAAAA")
 	time.Sleep(2 * time.Millisecond) // a different wall clock, as a real retry has
 	watcher := derive("toolu_01AAAAAAAAAAAAAAAAAAAAAA")
@@ -114,15 +97,7 @@ func TestApprovalKeyIsStableAcrossProcessesAndRetries(t *testing.T) {
 		t.Errorf("key from a real payload is not addressable: %+v", gate)
 	}
 
-	// A RETRY of the same operation. Claude Code mints a fresh tool_use_id for
-	// every tool call, so this is what a retry actually looks like on the wire.
-	//
-	// The key must still match. It addresses the approval record, and core's
-	// bypass grant is keyed on it too, so a key that changes per invocation
-	// means an approver's decision can never be consumed: the retry files a
-	// NEW request, the developer is asked to approve again, and the rewake's
-	// "re-run to proceed" turns that into an unbounded loop. Observed live —
-	// three attempts in one session, three approval ids, no output.
+	// The key must still match.
 	retry := derive("toolu_01BBBBBBBBBBBBBBBBBBBBBB")
 	if retry != gate {
 		t.Errorf("approval key is not stable across a retry — an approved request can never be consumed:\n"+
@@ -130,7 +105,8 @@ func TestApprovalKeyIsStableAcrossProcessesAndRetries(t *testing.T) {
 	}
 }
 
-// A malformed payload is a misconfiguration, not a reason to interrupt anyone.
+// TestRunRewake_SurvivesAnUnusablePayload a malformed payload is a
+// misconfiguration, not a reason to interrupt anyone.
 func TestRunRewake_SurvivesAnUnusablePayload(t *testing.T) {
 	isolateConfig(t)
 	t.Setenv(devconfig.EnvPendingApprovalDir, t.TempDir())

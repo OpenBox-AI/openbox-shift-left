@@ -7,9 +7,9 @@ import (
 )
 
 // TestSyntheticProseIsExactlyTheRequestedLength holds the property the fixture
-// scrub depends on: a replacement must occupy the same rune geometry as what it
-// replaced, or the soak test's oversized-body precondition and the projected
-// per-call cost both move.
+// scrub depends on: a replacement must occupy the same rune geometry as what
+// it replaced, or the soak test's oversized-body precondition and the
+// projected per-call cost both move.
 func TestSyntheticProseIsExactlyTheRequestedLength(t *testing.T) {
 	for _, n := range []int{0, 1, 7, 63, 64, 200, 1024, 23743, 65537} {
 		got := SyntheticProse(n)
@@ -22,8 +22,8 @@ func TestSyntheticProseIsExactlyTheRequestedLength(t *testing.T) {
 	}
 }
 
-// TestSyntheticProseIsDeterministic is what lets Scan re-derive the filler for an
-// observed length and compare, rather than matching a regexp that drifts.
+// TestSyntheticProseIsDeterministic is what lets Scan re-derive the filler for
+// an observed length and compare, rather than matching a regexp that drifts.
 func TestSyntheticProseIsDeterministic(t *testing.T) {
 	for _, n := range []int{100, 5000} {
 		if SyntheticProse(n) != SyntheticProse(n) {
@@ -36,9 +36,10 @@ func TestSyntheticProseIsDeterministic(t *testing.T) {
 	}
 }
 
-// TestSyntheticProseTripsNoSentinel keeps the replacement from becoming a finding
-// of its own: filler that happened to match a home path or a hex identifier would
-// make every regenerated fixture fail the gate that admits it.
+// TestSyntheticProseTripsNoSentinel keeps the replacement from becoming a
+// finding of its own: filler that happened to match a home path or a hex
+// identifier would make every regenerated fixture fail the gate that admits
+// it.
 func TestSyntheticProseTripsNoSentinel(t *testing.T) {
 	body := `{"note":` + quote(SyntheticProse(4096)) + `}`
 	if v := Scan([]byte(body)); len(v) != 0 {

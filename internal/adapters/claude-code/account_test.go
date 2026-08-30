@@ -6,8 +6,6 @@ import (
 	"testing"
 )
 
-// writeAccountFile lays down a .claude.json shaped like the real one, including
-// the sibling keys that must NOT be egressed.
 func writeAccountFile(t *testing.T, dir, body string) {
 	t.Helper()
 	if err := os.WriteFile(filepath.Join(dir, accountStateFile), []byte(body), 0o600); err != nil {
@@ -15,10 +13,7 @@ func writeAccountFile(t *testing.T, dir, body string) {
 	}
 }
 
-// TestLocalAccountBindsOnlyOrgUUIDAndEmail is the allowlist control. The real
-// record exposes name, role, type, tiers and billing alongside the two bound
-// fields; the decided evidence scope is org UUID + email and nothing more, so a
-// widening has to fail here rather than ship quietly.
+// TestLocalAccountBindsOnlyOrgUUIDAndEmail is the allowlist control.
 func TestLocalAccountBindsOnlyOrgUUIDAndEmail(t *testing.T) {
 	dir := t.TempDir()
 	writeAccountFile(t, dir, `{
@@ -43,8 +38,6 @@ func TestLocalAccountBindsOnlyOrgUUIDAndEmail(t *testing.T) {
 		t.Errorf("OrgUUID = %q", got.OrgUUID)
 	}
 
-	// The rendered metadata is the egress surface: exactly two keys, and nothing
-	// from the rest of a file that also holds the developer's prompt history.
 	meta := accountMetadata(got)
 	if len(meta) != 2 {
 		t.Errorf("metadata has %d keys, want exactly 2: %v", len(meta), meta)
@@ -59,8 +52,8 @@ func TestLocalAccountBindsOnlyOrgUUIDAndEmail(t *testing.T) {
 }
 
 // TestLocalAccountFailsSilently keeps an optional attribution field from ever
-// stopping a session from reporting. Absence is itself informative — it is what a
-// machine that never signed in looks like.
+// stopping a session from reporting. Absence is itself informative; it is what
+// a machine that never signed in looks like.
 func TestLocalAccountFailsSilently(t *testing.T) {
 	cases := map[string]func(t *testing.T) string{
 		"no home": func(*testing.T) string { return "" },
@@ -89,8 +82,6 @@ func TestLocalAccountFailsSilently(t *testing.T) {
 			if got.Email != "" || got.OrgUUID != "" {
 				t.Errorf("expected zero evidence, got %+v", got)
 			}
-			// compact drops empties, so nothing is stamped at all rather than
-			// two empty keys.
 			if meta := accountMetadata(got); len(meta) != 0 {
 				t.Errorf("expected no metadata keys, got %v", meta)
 			}
@@ -98,9 +89,7 @@ func TestLocalAccountFailsSilently(t *testing.T) {
 	}
 }
 
-// TestAccountMetadataKeysAreStable pins the two key names. They are what a core
-// query joins on, so a rename is a contract change and should not be reachable by
-// an incidental edit.
+// TestAccountMetadataKeysAreStable pins the two key names.
 func TestAccountMetadataKeysAreStable(t *testing.T) {
 	meta := accountMetadata(accountEvidence{Email: "a@b.c", OrgUUID: "org-1"})
 	if meta["account_email"] != "a@b.c" {
@@ -109,8 +98,6 @@ func TestAccountMetadataKeysAreStable(t *testing.T) {
 	if meta["account_org_uuid"] != "org-1" {
 		t.Errorf("account_org_uuid = %v", meta["account_org_uuid"])
 	}
-	// Never signal_args-shaped: this is a flat metadata map, and core reads a
-	// SignalReceived's signal_args as a NEW USER GOAL.
 	if _, bad := meta["signal_args"]; bad {
 		t.Error("account evidence must never render into signal_args")
 	}
