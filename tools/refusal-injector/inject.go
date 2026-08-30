@@ -9,26 +9,15 @@ import (
 	"sync/atomic"
 )
 
-// Injector forwards every request to the provider except the ones it is told to
-// refuse, which it answers with a candidate shape instead.
-//
-// It is NOT the product's relay and must never be confused for one. It uses
-// httputil.ReverseProxy, which injects X-Forwarded-For and manages
-// Accept-Encoding on the caller's behalf — byte-identity is a property the
-// product's relay must have and this tool deliberately does not. That is fine
-// here: this measures how a CLIENT reacts to a response shape, on a throwaway
-// project, and nothing it observes is evidence about the relay.
+// Injector forwards every request to the provider except the ones it is told
+// to refuse, which it answers with a candidate shape instead. It is NOT the
+// product's relay and must never be confused for one.
 type Injector struct {
 	// Shape is the candidate injected on a match.
 	Shape Shape
 
 	// After is how many matching requests pass through untouched before one is
-	// refused. Zero refuses the first.
-	//
-	// It exists because a session's FIRST model call is not representative: the
-	// client is still establishing context, and a refusal there can look like a
-	// startup failure rather than a policy decision. Refusing mid-conversation is
-	// the case the probe is actually about.
+	// refused.
 	After int64
 
 	// Path is the request path suffix that qualifies for injection.
@@ -76,9 +65,6 @@ func (i *Injector) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	i.injected.Add(1)
 	w.Header().Set("Content-Type", i.Shape.ContentType)
-	// A refusal must never be cached by anything between here and the client, or
-	// a second attempt would be answered from a cache and the retry count this
-	// probe exists to measure would be wrong.
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(i.Shape.Status)
 	_, _ = io.WriteString(w, i.Shape.Body)

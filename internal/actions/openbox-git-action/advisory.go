@@ -10,24 +10,16 @@ import (
 )
 
 // Advisory is the local sink for the Advisory governance tier on the deploy
-// path: it records what OpenBox would enforce for a Deploy event — the
-// verdict, a would_block label, and the trust/risk/guardrail/constraint
-// signals — without ever gating the deploy (INV-3). Records are
-// metadata/categories only (INV-2) and never carry a secret (INV-1).
-//
-// It mirrors the Claude Code adapter's advisory sink; the two live in separate
-// Go modules (each importing only the shared client), so the record shape is
-// duplicated deliberately rather than sharing an adapter-internal type.
+// path: it records what OpenBox would enforce for a Deploy event; the verdict,
+// a would_block label, and the trust/risk/guardrail/constraint signals;
+// without ever gating the deploy (INV-3).
 type Advisory struct {
-	// Path is the JSONL sink. Empty ⇒ DefaultAdvisoryPath().
+	// Path is the jsonl sink.
 	Path string
-	// Log emits one terse, secret-free summary line per record. nil ⇒ silent.
+	// Log emits one terse, secret-free summary line per record. Nil ⇒ silent.
 	Log Logger
 }
 
-// advisoryRecord is one line in the advisories sink, with deploy_id/
-// commit_sha standing in for a single session id (a deploy binds a set of
-// sessions, carried in the Deploy event's metadata, not one).
 type advisoryRecord struct {
 	EventID          string                   `json:"event_id"`
 	DeployID         string                   `json:"deploy_id,omitempty"`
@@ -43,7 +35,7 @@ type advisoryRecord struct {
 }
 
 // DefaultAdvisoryPath is where advisory records are written when no explicit
-// path is set — the same location the adapter uses (~/.config/openbox),
+// path is set; the same location the adapter uses (~/.config/openbox),
 // overridable with OPENBOX_ADVISORY_FILE.
 func DefaultAdvisoryPath() string {
 	if p := os.Getenv("OPENBOX_ADVISORY_FILE"); p != "" {
@@ -57,9 +49,8 @@ func DefaultAdvisoryPath() string {
 }
 
 // Record writes a deploy advisory when the evaluation is worth recording
-// (Evaluation.IsAdvisory) and emits one summary line. A trivial ALLOW or a
-// fail-open drop (VerdictUnknown) records nothing. Best-effort: any failure is
-// logged and swallowed, never returned (INV-3). Safe on a nil sink.
+// (Evaluation.IsAdvisory) and emits one summary line. Best-effort: any failure
+// is logged and swallowed, never returned (INV-3).
 func (a *Advisory) Record(ev client.DevEvent, eval client.Evaluation) {
 	if a == nil || !eval.IsAdvisory() {
 		return
@@ -108,8 +99,6 @@ func (a *Advisory) write(rec advisoryRecord) {
 	}
 }
 
-// summary logs one line carrying only categories/ids/scores (INV-1/INV-2): the
-// guardrail reason TYPES, never the reason free text or any content.
 func (a *Advisory) summary(rec advisoryRecord) {
 	verdict := rec.Verdict
 	if verdict == "" {
@@ -136,8 +125,6 @@ func metaString(m map[string]any, key string) string {
 	return ""
 }
 
-// reasonTypes renders guardrail reason CATEGORIES (the `type` field) as
-// "[pii,validation]" — never the reason free text.
 func reasonTypes(reasons []client.GuardrailReason) string {
 	if len(reasons) == 0 {
 		return "[]"

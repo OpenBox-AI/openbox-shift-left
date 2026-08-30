@@ -9,51 +9,9 @@ import (
 	"strings"
 )
 
-// localhooks.go — PROJECT hook scope (CredentialRef.ProjectDir).
-//
-// This is what `openbox init` does by DEFAULT, because it is the only scope the
-// CLI can complete by itself: Install merges the hook entries into
-// <dir>/.claude/settings.local.json — the per-developer, git-ignored Claude Code
-// settings layer — pointing at the plugin's engine binary, and they take effect
-// on the next session in that directory. Sessions started in any other directory
-// stay ungoverned.
-//
-// Global scope (empty ProjectDir) activates the plugin org-wide through managed
-// settings, which is an administrator's deployment; Install prints the snippet
-// and applies nothing. That asymmetry is why the default inverted: a default the
-// command cannot finish reports success while governing nothing.
-//
-// The merge preserves everything foreign and replaces what is ours. Existing
-// settings keys, and hook entries a developer added themselves, survive
-// untouched; our own entry is recognised by its ARGV SHAPE rather than by an
-// exact command string, so a registration left behind at a DIFFERENT engine path
-// — the residue of an install run with another HOME — is dropped and replaced
-// rather than kept beside the current one.
-//
-// Keeping it is what the exact-string comparison used to do, and the cost was
-// invisible: both engines fired for every event, so every governed tool call was
-// stored twice, for as long as that project lived. A replacement prints a notice
-// naming the engine it retired — silently swapping a governing binary is the
-// same class of problem as the silent duplicate.
-//
-// A repeat of one of our OWN invocations at the CURRENT engine is collapsed for
-// the same reason: it fires twice and stores twice exactly as a second engine
-// does. That case is why the sweep is a de-duplication and not only a
-// replacement — `openbox doctor` reports both conditions and names this command
-// as the remedy for both, so a shape it warned about and this could not repair
-// would leave a developer re-running a command that never clears the warning.
-//
-// One shape stays unrecognised: an UNQUOTED engine path CONTAINING A SPACE,
-// because the leading token ends at the first space. Only a pre-quoting build
-// could have written one, and those hooks never started at all (see
-// localHookCommand), so the leftover is dead weight rather than a second live
-// engine. `openbox doctor` is what surfaces it.
+// That asymmetry is why the default inverted: a default the command cannot
+// finish reports success while governing nothing.
 
-// localHookEvents maps hook event → (matcher, timeoutSeconds, statusMessage).
-// Mirrors the plugin bundle's hooks/hooks.json — including PreToolUse's raised
-// ceiling, so a locally-scoped install gates and holds exactly as the plugin
-// does rather than killing the hook mid-hold. TestLocalHooksMirrorPluginBundle
-// pins the two lists together, so a hook added to one and not the other fails.
 var localHookEvents = []struct {
 	Event         string
 	Matcher       string
@@ -61,9 +19,6 @@ var localHookEvents = []struct {
 	StatusMessage string
 }{
 	{Event: "SessionStart", Timeout: 5},
-	// UserPromptSubmit carries the prompt gate (plan 260818-1714), so it needs
-	// the same raised ceiling as PreToolUse: evaluation + approval hold must
-	// finish under the hook kill, or the gate is killed mid-hold and fails open.
 	{Event: "UserPromptSubmit", Timeout: preToolUseHookTimeoutSec, StatusMessage: "OpenBox governance…"},
 	{Event: "PreToolUse", Matcher: "*", Timeout: preToolUseHookTimeoutSec, StatusMessage: "OpenBox governance…"},
 	{Event: "PostToolUse", Matcher: "*", Timeout: 5},
@@ -76,9 +31,6 @@ var localHookEvents = []struct {
 	{Event: "SessionEnd", Timeout: 15},
 }
 
-// writeLocalHooks merges the plugin hook block into
-// <projectDir>/.claude/settings.local.json. engine is the absolute path of
-// the plugin's bin/openbox.
 func writeLocalHooks(projectDir, engine string) error {
 	dir, err := filepath.Abs(projectDir)
 	if err != nil {
@@ -102,8 +54,6 @@ func writeLocalHooks(projectDir, engine string) error {
 	if hooks == nil {
 		hooks = map[string]any{}
 	}
-	// stale engine path → the events it was still registered for, and the events
-	// that carried one of our invocations more than once at THIS engine.
 	stale := map[string][]string{}
 	var redundant []string
 	for _, ev := range localHookEvents {
@@ -117,14 +67,6 @@ func writeLocalHooks(projectDir, engine string) error {
 			redundant = append(redundant, ev.Event)
 		}
 		if hasLocalHookCommand(entries, command) {
-			// Already ours at this engine — but "ours" is matched by COMMAND, and
-			// the registration SHAPE around that command can still be stale. The
-			// prompt gate raised UserPromptSubmit's timeout to the gating
-			// ceiling; a re-run that merely skipped here kept the old 5s kill, so
-			// Claude Code killed the gate mid-evaluation and failed open —
-			// silently, forever, through the very command the docs name as the
-			// upgrade remedy. Reconcile the fields this installer owns on our
-			// entries (timeout, statusMessage); foreign hooks stay untouched.
 			entries = reconcileLocalHook(entries, command, ev.Timeout, ev.StatusMessage)
 			if ev.Event == "PreToolUse" {
 				entries = reconcileLocalHook(entries, localHookCommand(engine, "rewake claude-code"), rewakeHookTimeoutSec, "")
@@ -138,8 +80,6 @@ func writeLocalHooks(projectDir, engine string) error {
 		}
 		handlers := []any{hook}
 		if ev.Event == "PreToolUse" {
-			// The background approval watcher rides alongside the gate, exactly
-			// as in the plugin bundle (see plugin/hooks/hooks.json).
 			handlers = append(handlers, map[string]any{
 				"type":        "command",
 				"command":     localHookCommand(engine, "rewake claude-code"),
@@ -166,12 +106,6 @@ func writeLocalHooks(projectDir, engine string) error {
 		return fmt.Errorf("local-hooks: write %s: %w", settingsPath, err)
 	}
 
-	// Name what was retired, and only once it is actually retired. A developer
-	// whose events were being stored twice has no other way to learn which build
-	// was running, and a governing binary must not be swapped without saying so —
-	// but "the old engine no longer runs" is a claim about the file on disk, so
-	// announcing it before the write would state it of a write that can still
-	// fail.
 	if len(stale) > 0 {
 		paths := make([]string, 0, len(stale))
 		for p := range stale {
@@ -196,26 +130,9 @@ func writeLocalHooks(projectDir, engine string) error {
 	return nil
 }
 
-// writeFileAtomic replaces path in one step: a temp file in the SAME directory
+// writeFileAtomic replaces path in one step: a temp file in the same directory
 // (so the rename cannot cross a filesystem boundary), then a rename over the
 // target.
-//
-// This was an os.WriteFile, and that is a truncate-then-write — two steps a
-// concurrent writer can interleave with. Two `openbox init` runs against one
-// project both truncated to zero and then wrote at their OWN offsets, so the
-// shorter document landed inside the longer one and the file ended as a
-// complete JSON document followed by the tail of another. Claude Code then
-// cannot parse the settings for that project at all: every hook in the file
-// stops applying, which is a governance failure that reports itself as nothing.
-// Every other durable write in this repo already commits through a rename; this
-// one did not, and it is the only one a developer can trigger twice at once.
-//
-// The guarantee is that a reader sees either the old file or the new one, never
-// a splice of both. It is NOT mutual exclusion: two concurrent runs still race
-// to be last, and the loser's merge is discarded. That is harmless here — both
-// write the same OpenBox registrations for the same engine — and closing it
-// would need a lockfile, which is a bigger contract than the corruption
-// warrants.
 func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
 	tmp, err := os.CreateTemp(filepath.Dir(path), ".settings-*.tmp")
 	if err != nil {
@@ -227,9 +144,6 @@ func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
 		tmp.Close()
 		return err
 	}
-	// CreateTemp makes the file 0600; settings.local.json is not a secret and
-	// the previous WriteFile published it at perm, so match that rather than
-	// silently tightening a file other tools read.
 	if err := tmp.Chmod(perm); err != nil {
 		tmp.Close()
 		return err
@@ -245,29 +159,22 @@ func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
 // registered more than once.
 type LocalHookAudit struct {
 	// SettingsPath is the file inspected, reported whether or not it exists so a
-	// reader can see WHICH directory was audited.
+	// reader can see which directory was audited.
 	SettingsPath string
 	// Present reports whether that file exists. Absent is the normal state for a
 	// global-scope install, or a directory that was never initialized.
 	Present bool
 	// Engines are the distinct engine paths classified as OpenBox-owned, sorted.
-	// More than one means every hook fires once per engine.
 	Engines []string
 	// DuplicateEvents are the events where one invocation is registered more than
-	// once — the same defect within a single engine path.
+	// once; the same defect within a single engine path.
 	DuplicateEvents []string
 }
 
 // AuditLocalHooks reports what OpenBox registrations a project's
 // settings.local.json holds, so `openbox doctor` can surface a second engine.
-//
 // It exists so doctor and the installer cannot hold two opinions about what
-// "ours" means: both classify through ownedLocalHook. Doctor re-deriving its own
-// parse is precisely the divergence that let the duplicate registration survive
-// unnoticed in the first place.
-//
-// Read-only, and diagnostic rather than assurance: it proves what is REGISTERED
-// in one file, never that a hook ran.
+// "ours" means: both classify through ownedLocalHook.
 func AuditLocalHooks(projectDir string) (LocalHookAudit, error) {
 	dir, err := filepath.Abs(projectDir)
 	if err != nil {
@@ -292,9 +199,6 @@ func AuditLocalHooks(projectDir string) (LocalHookAudit, error) {
 	engines := map[string]bool{}
 	for _, ev := range localHookEvents {
 		entries, _ := hooks[ev.Event].([]any)
-		// Count per INVOCATION, not per event: PreToolUse legitimately carries two
-		// of ours (the gate and the approval watcher), so counting handlers would
-		// warn on every healthy install.
 		counts := map[string]int{}
 		for _, e := range entries {
 			entry, _ := e.(map[string]any)
@@ -326,34 +230,11 @@ func AuditLocalHooks(projectDir string) (LocalHookAudit, error) {
 	return audit, nil
 }
 
-// sweepStale reduces one event's entries to at most ONE registration of each of
-// our invocations, at the engine being installed. It reports the distinct other
-// engine paths it dropped, and whether it also collapsed a repeat of an
-// invocation already registered at this engine.
-//
-// Both removals answer the same defect — a hook registered twice fires twice and
-// stores every matching event twice — but they are reported separately because
-// they tell a developer different things: one says which build was also running,
-// the other says the file had our own entry in it twice.
-//
-// Foreign handlers, the first handler of each of our invocations at the engine
-// being installed, and anything it cannot parse are all kept. The direction of
-// error is fixed at over-keep, never over-delete, because the cost of keeping one
-// stale entry is duplicate telemetry while the cost of deleting one foreign hook
-// is breaking a developer's own tooling — and nothing is dropped that is not
-// provably a second copy of a command this file itself generates. An entry whose
-// handlers were ALL ours is removed with them; an entry that was already empty is
-// left exactly as it was.
-//
-// Keep/drop discipline mirrors internal/adapters/codex Installer.mergeEvent, which has
-// always replaced by shape; see ownedLocalHook for why there are two copies.
+// sweepStale reduces one event's entries to at most ONE registration of each
+// of our invocations, at the engine being installed.
 func sweepStale(entries []any, event, engine string) (kept []any, dropped []string, deduped bool) {
 	want := unquoteHookCommand(engine)
 	seen := map[string]bool{}
-	// Which of our invocations are already registered at this engine. Keyed by
-	// invocation, not by event: PreToolUse legitimately carries two of ours (the
-	// gate and the approval watcher), and they must not collapse into each other.
-	// Declared out here because the copies can sit in DIFFERENT entries.
 	registered := map[string]bool{}
 	for _, e := range entries {
 		entry, ok := e.(map[string]any)
@@ -391,34 +272,12 @@ func sweepStale(entries []any, event, engine string) (kept []any, dropped []stri
 		if len(survivors) == 0 && len(inner) > 0 {
 			continue // the entry carried nothing but our redundant handlers
 		}
-		// Mutate in place so matcher and any key we do not know about survive.
 		entry["hooks"] = survivors
 		kept = append(kept, entry)
 	}
 	return kept, dropped, deduped
 }
 
-// ownedLocalHook reports whether one hook handler is OpenBox-owned, and at which
-// engine path, regardless of where that engine lives.
-//
-// Owned means: a `command` handler whose ENTIRE command is one engine token
-// followed by exactly one of the two invocations this file generates —
-// `hook claude-code <the event it is filed under>` or `rewake claude-code`.
-// Anything else is foreign, including a compound command that merely embeds one
-// of those invocations, and including an owned invocation filed under the wrong
-// event key. Exact-remainder matching after a one-token strip is what keeps a
-// developer's own hook safe; a `strings.Contains` here would delete it.
-//
-// Ported from internal/adapters/codex isOpenBoxHandler + stripEngineToken
-// (internal/adapters/codex/installer.go:262-302) rather than shared: this one owns
-// a second invocation (`rewake`) that Codex's anchored regex rejects, and the
-// handlers arrive here as map[string]any instead of json.RawMessage.
-//
-// The original reason also counted the cost of a shared home as "a twelfth
-// module for ~25 lines". THAT COST IS GONE — both adapters sit under
-// internal/adapters/ now, with internal/adapters/common/ already beside them, so
-// only the two behavioural differences above still argue for the port. Revisit
-// when a third adapter needs the same parse.
 func ownedLocalHook(hookType, command, event string) (engine string, ok bool) {
 	if hookType != "command" {
 		return "", false
@@ -430,20 +289,9 @@ func ownedLocalHook(hookType, command, event string) (engine string, ok bool) {
 	if rest != "hook claude-code "+event && rest != "rewake claude-code" {
 		return "", false
 	}
-	// Compare unquoted forms, for the same reason hasLocalHookCommand does: an
-	// install written before localHookCommand quoted must still be recognised as
-	// the same engine.
 	return unquoteHookCommand(token), true
 }
 
-// splitEngineToken splits a command line into its leading engine token and the
-// remainder — a double-quoted path (the shape localHookCommand generates) or a
-// single unquoted word (a pre-quoting install, or the `openbox`-on-PATH
-// fallback). ok=false when there is no well-formed leading token, e.g. an
-// unterminated quote.
-//
-// A bare token with no remainder carries no hook invocation, so it returns an
-// empty rest and lets the caller's exact-match reject it.
 func splitEngineToken(cmd string) (engine, rest string, ok bool) {
 	if cmd == "" {
 		return "", "", false
@@ -461,25 +309,8 @@ func splitEngineToken(cmd string) (engine, rest string, ok bool) {
 	return cmd, "", true
 }
 
-// hasLocalHookCommand reports whether any entry already carries this command
-// (idempotent re-init; never duplicates).
-//
-// The comparison IGNORES QUOTING around the engine path, and that is not
-// cosmetic. When the path started being quoted, an exact-string check stopped
-// recognising the entries earlier versions wrote — so a re-init would have
-// appended a second, quoted handler beside the old unquoted one, and every hook
-// event would fire TWICE for the rest of that project's life. Duplicate events
-// with the same activity_id land in core's dedupe, but the duplicate PreToolUse
-// gate would evaluate and hold twice, which is a real latency and approval
-// defect. Normalising both sides is what keeps the merge idempotent across the
-// format change. reconcileLocalHook updates the registration shape — timeout
-// and statusMessage, the fields this installer owns — on OUR hook entries,
-// matched by exact command under the same identity rule as hasLocalHookCommand.
-// It never touches a foreign hook, another of our invocations (the rewake
-// watcher has its own command), or the group matcher. It exists because
-// ownership matching by command made a re-init SKIP an entry whose command
-// already matched, which pinned every shape change to fresh installs only —
-// found live when that decision ceiling raise did not arrive on a re-init.
+// reconcileLocalHook hasLocalHookCommand reports whether any entry already
+// carries this command (idempotent re-init; never duplicates).
 func reconcileLocalHook(entries []any, command string, timeoutSec int, statusMessage string) []any {
 	want := unquoteHookCommand(command)
 	for _, e := range entries {
@@ -518,27 +349,16 @@ func hasLocalHookCommand(entries []any, command string) bool {
 	return false
 }
 
-// unquoteHookCommand strips double quotes so a quoted and an unquoted spelling of
-// the same command compare equal. Quotes never appear inside an engine path or an
-// event name, so removing them all is sufficient and needs no parsing.
+// unquoteHookCommand strips double quotes so a quoted and an unquoted spelling
+// of the same command compare equal. Quotes never appear inside an engine path
+// or an event name, so removing them all is sufficient and needs no parsing.
 func unquoteHookCommand(command string) string {
 	return strings.ReplaceAll(command, `"`, "")
 }
 
-// localHookCommand builds a hook command line with the engine path QUOTED.
-//
-// Unquoted was a latent bug that that decision promoted to a live one. The engine
-// resolves to ~/.claude/plugins/openbox-observe/bin/openbox, so a home directory
-// containing a space — an ordinary macOS or Windows account named for a person —
-// produced a command a shell splits into two tokens. Every hook in that project
-// then fails to start, silently, with no error at install time.
-//
-// It was survivable while project scope was an opt-in testing flag. It is not now
-// that `openbox init` merges these hooks BY DEFAULT for every install. The plugin
-// bundle's own hooks.json has always quoted (`"${CLAUDE_PLUGIN_ROOT}/bin/openbox"`)
-// and so does the Codex installer's hookCommand; this was the one path that did
-// not, and TestLocalHooksMirrorPluginBundle compares hook LISTS, not command
-// strings, so nothing caught the divergence.
+// localHookCommand builds a hook command line with the engine path quoted.
+// Every hook in that project then fails to start, silently, with no error at
+// install time.
 func localHookCommand(engine, args string) string {
 	return `"` + engine + `" ` + args
 }

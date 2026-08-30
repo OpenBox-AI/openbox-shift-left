@@ -1,27 +1,4 @@
 // Command openbox is the developer-runtime governance CLI.
-//
-// Setup is TWO commands, in this order, and the split is the point:
-//
-// openbox auth    authenticate — collect or register credentials, write
-// ~/.openbox/.env (secrets) and dev.json (coordinates) openbox init    set up —
-// install the provider's hooks at a chosen scope and write posture. Touches no
-// credential, ever.
-//
-// `init` used to be both. Its own package comment described it as registering an
-// agent, capturing credentials, AND delegating the tool config — and splitting on
-// that "and" is what that decision did. What it bought: a command that runs in
-// every developer's shell can no longer read, write or prompt for a secret, and a
-// command that authenticates can now UPDATE, which `init` structurally could not
-// (its reuse path returned before any network call, so "re-run init" was never a
-// way to change a credential).
-//
-// A bare `init` governs the CURRENT DIRECTORY and ENFORCES. Both defaults are
-// deliberate reversals, and both are stated at install time rather than left to
-// be discovered.
-//
-// OD17: single static Go binary, no cgo. Since that decision there is no platform
-// secret-store subprocess either — credentials are a plaintext file, which is why
-// this works identically on Windows.
 package main
 
 import (
@@ -45,56 +22,28 @@ import (
 	"strings"
 )
 
-// version is overridable at build time via -ldflags "-X main.version=...".
 var version = "0.1.0-dev"
 
-// Exit codes: 0 success, 1 error, 2 registered-but-config-manual (partial).
 const (
 	exitOK         = 0
 	exitError      = 1
 	exitConfigOnly = 2
 )
 
-// app holds the CLI's external dependencies behind seams so the command wiring —
-// including the INV-1 credential guards — is testable without touching the real
-// environment or network.
-//
-// There is no secret-store seam any more: credentials live in a plaintext file,
-// so a test points OPENBOX_HOME at a temp dir and exercises the same code
-// production runs.
 type app struct {
 	stdout, stderr io.Writer
 	stdin          io.Reader
 	getenv         func(string) string
 	newRegistrar   func(baseURL, credential, clientID string) devinit.Registrar
 
-	// gatewayReady and gatewayCtx exist so a test can drive the REAL `gateway`
-	// command instead of a stand-in. Both nil in production.
-	//
-	// gatewayCtx is an ADDITIONAL cancellation source, never a replacement for
-	// signal handling — that stays armed unconditionally, so no field can leave a
-	// daemon unable to answer SIGTERM and the branch tests drive is the branch
-	// production runs.
-	//
-	// They are here rather than as flags because the wiring itself is what needs
-	// covering: the gateway once shipped with capture unconnected, and no test
-	// that constructed its own Gateway could have seen that.
+	// gatewayReady and gatewayCtx exist so a test can drive the real `gateway`
+	// command instead of a stand-in.
 	gatewayReady func(net.Addr)
 	gatewayCtx   context.Context
 
-	// telemetryReady and telemetryCtx are the same two seams for the `telemetry`
-	// subcommand, and exist for the same reason: the control test has to drive the
-	// REAL command — receiver, mapper, spool, no fake anywhere — because a fake at
-	// each end of a seam proves nothing about the seam. telemetryCtx is an
-	// ADDITIONAL cancellation source, never a replacement for the signal handler.
 	telemetryReady func(addr string)
 	telemetryCtx   context.Context
 
-	// transportReady and transportCtx are the same two seams for the `transport`
-	// subcommand. Same reason again, and it is the third lane to need it: the
-	// control test drives the REAL command into the REAL spool, because the one
-	// failure this family of daemons keeps having is a relay that works perfectly
-	// and records nothing.
 	transportReady func(addr string)
 	transportCtx   context.Context
 }
@@ -162,17 +111,11 @@ func (a *app) runDev(args []string) int {
 	}
 	switch args[0] {
 	case "init":
-		// Onboarding is `openbox init` — there is one spelling, and this is
-		// not it. Saying where it went is an error message, not an alias: the
-		// command does not run.
 		return a.errorf("`openbox dev init` no longer exists — use `openbox init` (same flags), " +
 			"or `openbox init --role approver` to install an approver")
 	case "verify":
 		return a.runDevVerify(args[1:])
 	case "sync":
-		// That decision deleted the local policy bundle, and with it the pull
-		// half of the distribution model this command was. Saying so is an
-		// error message, not an alias — there is nothing left for it to do.
 		return a.errorf("`openbox dev sync` no longer exists — policy is evaluated by OpenBox " +
 			"on every gated tool call, so there is no local bundle to fetch. " +
 			"Any leftover policy-bundle.json on this machine is inert and can be deleted.")
@@ -181,12 +124,6 @@ func (a *app) runDev(args []string) int {
 	}
 }
 
-// runDevVerify is the read-only data-plane preflight: `openbox dev verify`
-// resolves the finished dev.json + creds (reusing the adapter's resolvers),
-// then a signed GET /api/v1/auth/validate against the actual core it emits
-// to confirms the obx_ key + Ed25519 signing round-trip work. It is
-// strictly read-only — no mint, no config write, no secret printed (INV-1)
-// — and prints one ✓ line or a ✗ with the mapped fix hint.
 func (a *app) runDevVerify(args []string) int {
 	fs := a.newFlagSet("openbox dev verify")
 	var dryRun bool
@@ -196,8 +133,6 @@ func (a *app) runDevVerify(args []string) int {
 		return code
 	}
 
-	// --dry-run is fully offline: resolve only the NON-SECRET coordinates (no
-	// credential-file read, no network) and print what the real run would call.
 	if dryRun {
 		baseURL, did := devconfig.ResolveCoordinates()
 		fmt.Fprintln(a.stdout, "DRY RUN — openbox dev verify would call (no network, no secret access):")
@@ -207,41 +142,32 @@ func (a *app) runDevVerify(args []string) int {
 		return exitOK
 	}
 
-	// Reuse the shared resolvers (dev.json for coordinates, env > ~/.openbox/.env
-	// for the secrets). A missing identity means onboarding hasn't run — say so,
-	// don't half-proceed.
 	creds, err := devconfig.ResolveCredentials()
 	if err != nil {
 		return a.errorf("cannot verify — %v.\n"+
 			"  Run `openbox init --provider <claude-code|codex|cursor>` first, then retry.", err)
 	}
 
-	// client.New enforces the INV-1 TLS guard (refuses plaintext http:// to a
-	// non-loopback core) and validates the identity shape before any network I/O.
 	c, err := client.New(client.Config{
 		BaseURL:       creds.BaseURL,
 		APIKey:        creds.APIKey,
 		DID:           creds.DID,
 		PrivateKeyB64: creds.PrivateKeyB64,
-		// No Logger: Validate returns its diagnostic directly (not fail-open).
 	})
 	if err != nil {
 		return a.errorf("%v", err)
 	}
 
 	if err := c.Validate(context.Background()); err != nil {
-		// ✗ to stderr; the message is the mapped reason + fix hint. It never
-		// contains the key/seed/nonce/signature (INV-1) — only status + guidance.
+		// It never contains the key/seed/nonce/signature (INV-1); only status +
+		// guidance.
 		fmt.Fprintf(a.stderr, "✗ %v\n", err)
 		return exitError
 	}
-	// ✓ names only the DID + base_url (INV-1: no secret in output).
 	fmt.Fprintf(a.stdout, "✓ verified: %s @ %s\n", creds.DID, creds.BaseURL)
 	return exitOK
 }
 
-// displayOrUnset renders an empty coordinate as an actionable placeholder for the
-// dry-run plan rather than a blank line.
 func displayOrUnset(s string) string {
 	if s == "" {
 		return "(not configured — run `openbox init`)"
@@ -250,32 +176,11 @@ func displayOrUnset(s string) string {
 }
 
 // runHook is the unified observe-only hook entrypoint: `openbox hook
-// <provider> <event>`. The plugin's hooks.json invokes it for every Claude
-// Code hook.
-//
-// INV-3 (the reason this does not go through errorf/usage): the hook path
-// must always return exitOK — a non-zero exit blocks the tool call. In
-// observe mode it also writes nothing to stdout (on
-// SessionStart/UserPromptSubmit an exit-0 hook's stdout is injected into the
-// model's context). So every diagnostic (bad args, unknown provider, and
-// everything inside RunHook) goes to stderr, and we unconditionally return
-// 0. Folding the hook into the multi-command binary must not leak
-// cobra/flag/usage/banner text to stdout.
-//
-// Enforce mode (opt-in) is the sole stdout writer: RunHook may emit a
-// Claude Code PreToolUse permissionDecision (deny/ask) to a.stdout — still
-// exit 0 (the decision travels in the JSON, not the exit code), still
-// tighten-only. The permissionDecision JSON is the only structured stdout
-// this path ever produces.
+// <provider> <event>`.
 func (a *app) runHook(args []string) (code int) {
-	// Belt-and-suspenders for INV-3: default to exitOK and swallow any panic that
-	// escapes RunHook's own recover, so the hook path can NEVER return non-zero
-	// (which would block the tool call).
 	code = exitOK
-	// A panic must never reach the caller's exit path, but swallowing it
-	// silently makes a crashing hook indistinguishable from a working one.
-	// Report it on stderr, which the tool shows as a diagnostic and never
-	// parses as hook output.
+	// Report it on stderr, which the tool shows as a diagnostic and never parses
+	// as hook output.
 	defer func() {
 		if r := recover(); r != nil {
 			fmt.Fprintf(a.stderr, "openbox hook: recovered from panic: %v\n", r)
@@ -286,20 +191,12 @@ func (a *app) runHook(args []string) (code int) {
 		logger.Printf("usage: openbox hook <provider> <event...>  (providers: %s, git)", strings.Join(provider.Supported(), ", "))
 		return exitOK
 	}
-	// git is not a provider adapter — it is this binary re-invoked by the
-	// prepare-commit-msg hook (OD17 folds the standalone git-hook binary in).
 	if args[0] == "git" {
-		// Supply the attestation signing context (E8-S10). The git module never
-		// touches the secret store itself, so the engine injects a resolver;
-		// returning ok=false leaves the commit unattested and the lineage
-		// inferred, which is the pre-E8 behaviour.
 		obgit.SetAttestContext(attestContext)
 		obgit.RunHook(args[1:], []string{"hook", "git", "prepare-commit-msg"}, logger.Printf)
 		return exitOK
 	}
 
-	// Every developer-tool provider dispatches through the registry, so adding
-	// one is a registry entry rather than a case in this switch.
 	engine, err := providers.Engine(args[0])
 	if err != nil {
 		logger.Printf("unknown hook provider %q (supported: %s, git)", args[0], strings.Join(provider.Supported(), ", "))
@@ -315,14 +212,6 @@ func (a *app) runHook(args []string) (code int) {
 
 // runRewake is the background approval watcher (E9 §2.2), invoked by an
 // `asyncRewake` hook handler alongside the gate.
-//
-// It is deliberately NOT under `openbox hook`: that path is contractually
-// exit-0 because a non-zero exit there blocks the tool call. Here the exit code
-// IS the output — 2 wakes the session and shows stderr to the model as a system
-// reminder — so it gets its own command rather than smuggling an exception
-// through a path documented to never return non-zero. It writes nothing to
-// stdout, and never blocks anything: a background handler has no tool call to
-// hold.
 func (a *app) runRewake(args []string) (code int) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -339,9 +228,6 @@ func (a *app) runRewake(args []string) (code int) {
 		fmt.Fprintf(a.stderr, "openbox rewake: unknown provider %q\n", args[0])
 		return exitOK
 	}
-	// Not every host can wake a live session; those that cannot keep the
-	// advisory findings channel. A provider without the capability is a
-	// supported state, so this stays silent and exits 0.
 	rw, ok := engine.(provider.Rewaker)
 	if !ok {
 		return exitOK
@@ -353,27 +239,20 @@ func (a *app) runDevInit(args []string) int {
 	fs := a.newFlagSet("openbox init")
 	var o devinit.Options
 	var scope string
-	// Flags that MOVED to `openbox auth` or were deleted. They are still parsed
-	// so that passing one FAILS: a silently-ignored flag leaves a script
-	// exiting 0 while the value it supplied goes nowhere, which is worse than
-	// an error.
 	var movedOrg, movedAgentName, movedIcon, movedDescription string
 	var movedBaseURL, movedBackendURL string
 	var movedForce bool
 	var goneSecretBackend, goneClientID, goneLocalHooks string
 	var goneManagedEnable bool
 
-	// --- the seven flags `init` actually has --------------------------------
 	fs.StringVar(&o.Provider, "provider", "", "developer tool: claude-code|codex|cursor (required)")
 	fs.StringVar(&scope, "scope", "", "which sessions this install governs: local (default — this directory only) or global (every project, pending a managed-settings deployment)")
 	var enforce, noEnforce bool
 	fs.BoolVar(&enforce, "enforce", true, "ENFORCE mode: the PreToolUse hook blocks/asks/redacts in-process, no daemon and no runtime env. ON BY DEFAULT — inert until your org publishes a policy, and fail-open, so an OpenBox outage never blocks you. Pass --enforce=false to opt out; the opt-out persists.")
 	fs.BoolVar(&noEnforce, "no-enforce", false, "alias for --enforce=false")
 	fs.BoolVar(&o.InstallGitHook, "install-git-hook", false, "enable ambient install of the commit-trailer hook into repos on session start (off by default — it modifies .git/hooks)")
-	// The local gateway. OFF by default, deliberately: unlike
-	// enforcement-by-default, which is inert without an org policy, this redirects
-	// live model traffic. See initgateway.go for the full reasoning and for when
-	// the default should be revisited.
+	// OFF by default, deliberately: unlike enforcement-by-default, which is inert
+	// without an org policy, this redirects live model traffic.
 	var withGateway, removeGateway bool
 	var gatewayAddr, gatewayUpstream string
 	var gatewayVerbose bool
@@ -383,11 +262,6 @@ func (a *app) runDevInit(args []string) int {
 	fs.StringVar(&gatewayUpstream, "gateway-upstream", gateway.DefaultUpstream, "provider base URL the gateway forwards to")
 	fs.BoolVar(&gatewayVerbose, "gateway-verbose", false, "run the gateway with --verbose, logging every relayed call to ~/.openbox/gateway.log (no credentials, headers or bodies)")
 
-	// The two in-path/observation lanes that decision adds, and the one command
-	// each way OD2 ruled for. --full is the front door; the per-lane flags exist
-	// so a developer can back one lane out without --remove-all, which also
-	// deletes the CA, the lane logs and the activation record. The spool is NOT
-	// deleted; see purgeLaneData.
 	var withFull, removeAll bool
 	var withTelemetry, removeTelemetryLane bool
 	var withTransport, removeTransportLane bool
@@ -402,17 +276,11 @@ func (a *app) runDevInit(args []string) int {
 	fs.StringVar(&telemetryAddr, "telemetry-addr", telemetry.DefaultAddr, "loopback address the telemetry receiver listens on")
 	fs.StringVar(&transportAddr, "transport-addr", transport.DefaultAddr, "loopback address the transport relay listens on")
 	fs.BoolVar(&laneVerbose, "lane-verbose", false, "run the telemetry and transport daemons with --verbose, logging to ~/.openbox/<lane>.log")
-	// NOT --force: that name is already taken by the flag that moved to `openbox
-	// auth` and now errors by name, and a flag whose meaning depends on which
-	// other flags are present is how a fleet script does something nobody meant.
 	fs.BoolVar(&forceRestore, "force-restore", false, "during removal, restore env keys even where the value changed after OpenBox set it (the conflict is named either way)")
 	fs.BoolVar(&o.DryRun, "dry-run", false, "print the plan; make no network or filesystem writes")
-	// --role is consumed by runInit before dispatch; declared here so `init -h`
-	// lists it and `--role approver` is not reported as an unknown flag.
 	var role string
 	fs.StringVar(&role, "role", "dev", "dev (default) or approver — an approver is a queue client, not a governed runtime")
 
-	// --- moved to `openbox auth` -------------------------------------------
 	fs.StringVar(&movedOrg, "org", "", "MOVED to `openbox auth`")
 	fs.StringVar(&movedAgentName, "agent-name", "", "MOVED to `openbox auth`")
 	fs.StringVar(&movedIcon, "icon", "", "MOVED to `openbox auth`")
@@ -421,7 +289,6 @@ func (a *app) runDevInit(args []string) int {
 	fs.StringVar(&movedBackendURL, "backend-url", "", "MOVED to `openbox auth`")
 	fs.BoolVar(&movedForce, "force", false, "MOVED to `openbox auth`")
 
-	// --- removed -----------------------------------------------------------
 	fs.StringVar(&goneSecretBackend, "secret-backend", "", "REMOVED — credentials live in ~/.openbox/.env; run `openbox auth`")
 	fs.StringVar(&goneClientID, "client-id", "", "REMOVED — `init` makes no control-plane call")
 	fs.BoolVar(&goneManagedEnable, "managed-enable", false, "REMOVED — recorded a Phase-1 substrate nothing read")
@@ -432,7 +299,6 @@ func (a *app) runDevInit(args []string) int {
 		return code
 	}
 
-	// Every moved flag errors by name, pointing at the command that owns it now.
 	for _, m := range []struct{ flag, value string }{
 		{"--org", movedOrg}, {"--agent-name", movedAgentName}, {"--icon", movedIcon},
 		{"--description", movedDescription}, {"--base-url", movedBaseURL}, {"--backend-url", movedBackendURL},
@@ -466,28 +332,6 @@ func (a *app) runDevInit(args []string) int {
 		return a.errorf("--provider is required (one of: claude-code, codex, cursor)")
 	}
 
-	// --- enforce posture --------------------------------------------------- ON by
-	// default, and the opt-out PERSISTS. Two distinct mechanisms are needed for
-	// that, and getting only one of them was a real bug:
-	//
-	// 1. `Enforce` is a *bool, so an explicit false survives being marshalled. As a
-	// plain bool with `omitempty` it did not. 2. **o.Enforce stays NIL when this
-	// run said nothing about enforce.** Because the flag DEFAULTS to true, its
-	// value alone cannot distinguish "the user asked to enforce" from "the user
-	// said nothing" — so assigning it unconditionally made every plain `init` write
-	// enforce:true, silently reverting a deliberate `--enforce=false` on the next
-	// unrelated re-run (adding --install-git-hook, repairing hooks, an idempotent
-	// setup script). That reintroduced the same bug class as (1), one layer up.
-	// `flagPassed` exists for exactly this distinction; use it.
-	//
-	// nil is what makes the default work in both directions: on a first install
-	// there is no field, so ResolveEnforce returns its default (on); on a re-run
-	// WriteConfig's tri-state merge carries the developer's choice forward. The
-	// guarantee is about the RESOLVED posture, not about a literal true on disk.
-	//
-	// This flips `enforce` ONLY. The tier2/findings writes stay coupled to it as
-	// they were, because the tier concept is being removed wholesale and
-	// redesigning a doomed coupling would be wasted effort.
 	enforceGiven := flagPassed(fs, "enforce")
 	switch {
 	case noEnforce && enforceGiven && enforce:
@@ -499,13 +343,9 @@ func (a *app) runDevInit(args []string) int {
 		v := enforce // honours --enforce=false as well as --enforce
 		o.Enforce, o.Findings = &v, &v
 	}
-	// tier2 is deliberately no longer written. It is deprecated and inert, and
-	// writing it would put a key into every fresh dev.json that exists only to
-	// be ignored and warned about.
 
-	// A posture change is never silent, in either direction. Under enforce-by-
-	// default this compares RESOLVED postures, so it still fires for a config
-	// that never wrote the field.
+	// Under enforce-by- default this compares resolved postures, so it still
+	// fires for a config that never wrote the field.
 	if devconfig.WouldDowngradeEnforce(devconfig.DefaultConfigPath(), o.Enforce) {
 		fmt.Fprintln(a.stdout, "note: turning ENFORCE off — this machine was enforcing (explicitly, or by default).")
 	}
@@ -513,8 +353,6 @@ func (a *app) runDevInit(args []string) int {
 	if withGateway && removeGateway {
 		return a.errorf("--gateway and --remove-gateway are mutually exclusive")
 	}
-	// --full implies both lanes. Expanded here rather than checked everywhere
-	// below, so there is exactly one place that decides what "everything" means.
 	if withFull {
 		withTelemetry, withTransport = true, true
 	}
@@ -531,16 +369,6 @@ func (a *app) runDevInit(args []string) int {
 		}
 	}
 
-	// Every lane here is Claude Code's, and only Claude Code's: they relay or
-	// receive that tool's own traffic and are configured through its settings
-	// file. Without this guard `--provider codex --full` would install two
-	// supervised daemons and rewrite ~/.claude/settings.json on a machine whose
-	// tool reads neither — the exact defect --gateway already shipped and fixed.
-	// An ORDERED slice, not a map. Go randomizes map iteration per process, so
-	// `--provider codex --full` cited whichever lane flag came up first — the
-	// message was never WRONG, but a fleet script grepping for the flag it passed
-	// would match only sometimes. The mutual-exclusion check above already uses a
-	// slice for the same reason.
 	laneFlags := []struct {
 		name string
 		on   bool
@@ -555,12 +383,6 @@ func (a *app) runDevInit(args []string) int {
 		}
 	}
 
-	// The gateway is Claude Code's, and only Claude Code's. Its upstream default,
-	// its session/agent request headers and the settings file it writes are all
-	// that provider's (that decision scopes it there explicitly). Without this
-	// guard `openbox init --provider codex --gateway` installed a supervised
-	// relay to api.anthropic.com and pointed ~/.claude/settings.json at it — on a
-	// machine whose tool is Codex, which reads neither.
 	if (withGateway || removeGateway) && o.Provider != "claude-code" {
 		flag := "--gateway"
 		if removeGateway {
@@ -574,7 +396,6 @@ func (a *app) runDevInit(args []string) int {
 		return a.errorf("%v", err)
 	}
 
-	// --- scope -------------------------------------------------------------
 	if goneLocalHooks != "" {
 		if scope != "" {
 			return a.errorf("--local-hooks and --scope cannot both be given; --local-hooks is the deprecated spelling of --scope local")
@@ -603,19 +424,11 @@ func (a *app) runDevInit(args []string) int {
 
 	d := devinit.Deps{Installer: inst, Out: a.stdout}
 
-	// Dry-run is fully offline: no backend, no credential, no filesystem write.
 	if o.DryRun {
 		if _, err := devinit.Run(context.Background(), o, d); err != nil {
 			return a.errorf("%v", err)
 		}
-		// Whether the plan governs anything is part of the plan, and dry-run is
-		// where a careful operator looks before committing to it.
 		a.printGovernedScope(o, resolvedScope)
-		// The gateway blocks live below this early return, so a plan that omitted
-		// them described everything EXCEPT the one action scope.go calls "the
-		// largest-blast-radius thing this command can do". An operator vetting a
-		// fleet rollout was shown hooks and posture and told nothing about a
-		// supervised daemon and a rewritten ANTHROPIC_BASE_URL.
 		a.printGatewayPlan(withGateway, removeGateway, gatewayAddr, gatewayUpstream)
 		a.printLanePlan(lanePlan{
 			telemetry: withTelemetry, transport: withTransport,
@@ -627,17 +440,6 @@ func (a *app) runDevInit(args []string) int {
 		return exitOK
 	}
 
-	// --- UNINSTALL RUNS BEFORE THE CREDENTIAL GATE -------------------------
-	// Removal must not require the thing being removed to still be usable.
-	// `--remove-gateway` sat below requireCredentials, so a machine whose
-	// credentials had been deleted — an offboarding, a rotation, a wiped
-	// ~/.openbox — could not unset ANTHROPIC_BASE_URL: every model call kept
-	// failing closed against a dead loopback port, `init --remove-gateway` exited
-	// with "no credentials on this machine ... Nothing was installed", and the
-	// only remaining fix was hand-editing the provider's settings file. Removal
-	// touches no backend and needs no secret, so it has no business behind that
-	// gate — and it returns here rather than falling through, because a re-install
-	// of hooks is the opposite of what the flag names.
 	if removeGateway || removeAll || removeTelemetryLane || removeTransportLane {
 		home, code := a.gatewayHome()
 		if code != exitOK {
@@ -652,19 +454,12 @@ func (a *app) runDevInit(args []string) int {
 		})
 	}
 
-	// --- credentials must already exist ------------------------------------
-	// `init` performs NO registration and writes NO credential. When credentials
-	// are absent it exits non-zero naming `auth`; it does not prompt and it does
-	// not half-install. That absence is the security property: a command run in
-	// every developer's shell can no longer read, write or prompt for a secret.
 	a.migrateLegacyConfig()
 	if code := a.requireCredentials(); code != exitOK {
 		return code
 	}
 
 	res, runErr := devinit.Run(context.Background(), o, d)
-	// A registered-but-config-manual result is a real partial success worth a
-	// distinct exit code so scripts can tell it apart from a hard failure.
 	if runErr != nil && res != nil && res.ConfigManualOnly {
 		fmt.Fprintln(a.stderr, "note: "+runErr.Error())
 		return exitConfigOnly
@@ -673,29 +468,10 @@ func (a *app) runDevInit(args []string) int {
 		return a.errorf("%v", runErr)
 	}
 
-	// Codex hash-trusts non-managed hooks — until the user trusts the
-	// freshly-written entries via /hooks inside Codex, they do not run.
-	// Surface that as the explicit next step (re-install re-hashes, so it
-	// applies to re-inits too).
 	if o.Provider == "codex" && res != nil && res.ConfigApplied {
 		fmt.Fprintln(a.stdout, "Next step: open Codex and run /hooks to review and TRUST the new OpenBox hooks — they do not run until trusted (Codex hash-trusts non-managed hooks; re-running init re-hashes them).")
 	}
 
-	// `init`'s last step best-effort pulls the agent's current policy into the
-	// local bundle, so enforce mode has a policy on first run. It matters more now
-	// that enforce is the default : without a bundle, enforcement is inert, which
-	// is safe but also means a fresh install gates nothing.
-	//
-	// One closing block so a first-time user knows what to do next and how to
-	// check it. Onboarding that ends in a wall of notes reads as "did that work?",
-	// and the answer is one command away. NOT "governance is ambient from here" —
-	// it used to say that, and under a project-scoped default it directly
-	// contradicts the scope report below. The ambient part is true of the
-	// MECHANISM (no daemon, nothing to keep running), not of the COVERAGE, and
-	// conflating the two is the overstatement this product exists to avoid. ---
-	// the local gateway (phase 07 req 1) -------------------------------- Opt-in,
-	// and the reasoning is in initgateway.go: this redirects live model traffic,
-	// unlike enforcement-by-default which is inert without a policy.
 	gatewayRunning := false
 	if withGateway {
 		fmt.Fprintf(a.stdout, "\nLocal gateway (model-call governance)\n")
@@ -706,18 +482,10 @@ func (a *app) runDevInit(args []string) int {
 		gatewayRunning = true
 		if err := a.setupGateway(home, gatewayAddr, gatewayUpstream, gatewayVerbose); err != nil {
 			gatewayRunning = false
-			// NOT fatal to the whole install: the hooks are already in place and
-			// governing tool calls. Reporting this as a total failure would tell a
-			// developer to undo work that succeeded.
 			fmt.Fprintf(a.stderr, "warning: gateway setup did not complete: %v\n", err)
 		}
 	}
 
-	// --- the telemetry and transport lanes ----------------------- After the
-	// gateway, deliberately: transport SUPERSEDES the gateway in path, so
-	// installing it while a gateway is routed would leave the developer with two
-	// relays and a precedence they cannot see. setupLanes retires the gateway in
-	// that case and says so.
 	laneReport := a.setupLanes(laneRequest{
 		telemetry:     withTelemetry,
 		transport:     withTransport,
@@ -726,25 +494,10 @@ func (a *app) runDevInit(args []string) int {
 		verbose:       laneVerbose,
 	})
 
-	// The closing line has to be true of THIS invocation. With --gateway it is
-	// not: a supervised daemon is now running and ANTHROPIC_BASE_URL is set, and
-	// telling a developer otherwise is what sends them debugging failing model
-	// calls with no idea a relay exists. The comment block above reasons carefully
-	// about not overstating "ambient" for the same reason.
-	//
-	// Which is why it is gated on the OUTCOME, not on the flag. setupGateway's
-	// failure is deliberately non-fatal — the hooks are in place and governing —
-	// but a warning on stderr followed by "a supervised gateway is running" on
-	// stdout is the same overstatement in the other direction, and the exit code
-	// is 0 either way, so stdout is all a fleet script has to go on.
 	switch {
 	case withGateway && gatewayRunning:
 		fmt.Fprintf(a.stdout, "\nDone. A supervised gateway is running and this machine's model calls now route through it.\n")
 	case withGateway:
-		// Deliberately does not claim where model calls go. This run did not stand
-		// a gateway up, but a PREVIOUS one may have left ANTHROPIC_BASE_URL set, so
-		// "they reach the provider directly" would be its own confident wrong
-		// claim. doctor is the command that actually knows.
 		fmt.Fprintf(a.stdout, "\nDone for the hooks — they are in place and governing tool calls. The gateway did NOT come up; see the warning above, and run `openbox doctor` for where this machine's model calls are pointed.\n")
 	default:
 		fmt.Fprintf(a.stdout, "\nDone. Nothing to run and no environment to keep set — the hooks do the rest.\n")

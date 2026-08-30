@@ -1,27 +1,13 @@
-// Package aivss holds the default AIVSS risk posture the CLI supplies when
+// Package aivss holds the default aivss risk posture the CLI supplies when
 // registering a developer agent via POST /agent/create.
 //
-// The integers were verified at build time against openbox-backend's
-// calc-aivss-score.ts. Verified facts that shaped this file:
-//
-//   - Scoring direction is inverted: higher points => higher risk => lower
-//     final aivss_score. A high aivss_score is the safe end.
-//   - Within ai_specific, four fields (data_sensitivity, ethical_impact,
-//     decision_criticality, adaptability) descend (1 = highest risk) while
-//     model_robustness ascends (5 = highest risk) — it is the odd one out.
-//     The values below were chosen with that per-field direction in mind.
-//   - This exact posture computes to aivss_score ~= 52.74 (mid-band) and,
-//     with the server's default behavioral=100 / alignment=100, a blended
-//     trust score ~= 81 (Tier 2). There is no "moderate" tier enum in the
-//     backend; the trust tiers are numeric (Tier1>=90, Tier2>=75,
-//     Tier3>=50, Tier4>=25, Untrusted<25) and are computed server-side. The
-//     CLI therefore pins only the 14 integers and never asserts a tier
-//     locally.
-//   - All 14 integers validate within the DTO's @Min/@Max bounds.
+//	final aivss_score. A high aivss_score is the safe end.
+//	decision_criticality, adaptability) descend (1 = highest risk) while
+//	model_robustness ascends (5 = highest risk); it is the odd one out.
+//	The values below were chosen with that per-field direction in mind.
 package aivss
 
-// Group is one AIVSS parameter group. Field names are snake_case to marshal
-// straight into the backend's aivss_config JSON.
+// Base group is one aivss parameter group.
 type Base struct {
 	AttackVector       int `json:"attack_vector"`
 	AttackComplexity   int `json:"attack_complexity"`
@@ -45,18 +31,17 @@ type Impact struct {
 	SafetyImpact          int `json:"safety_impact"`
 }
 
-// Config is the full aivss_config payload (all fields required by the backend).
+// Config is the full aivss_config payload (all fields required by the
+// backend).
 type Config struct {
 	BaseSecurity Base       `json:"base_security"`
 	AISpecific   AISpecific `json:"ai_specific"`
 	Impact       Impact     `json:"impact"`
 }
 
-// DefaultDeveloperProfile is the accepted risk posture for a developer
-// coding agent: capable (shell/file/MCP, code that ships) but
-// human-supervised and observe-only by default. Do not edit these integers
-// without re-verifying the resulting score against calc-aivss-score.ts and
-// re-confirming the posture with product/security.
+// DefaultDeveloperProfile is the accepted risk posture for a developer coding
+// agent: capable (shell/file/MCP, code that ships) but human-supervised and
+// observe-only by default.
 func DefaultDeveloperProfile() Config {
 	return Config{
 		BaseSecurity: Base{
@@ -82,14 +67,13 @@ func DefaultDeveloperProfile() Config {
 	}
 }
 
-// bound is an inclusive [min,max] validation range mirroring the backend DTO.
 type bound struct {
 	min, max int
 }
 
 // Validate re-checks every integer against the backend's @Min/@Max bounds so a
 // bad edit fails locally (with a clear field name) instead of as an opaque 400
-// from agent/create. Returns the offending field and false on the first breach.
+// from agent/create.
 func (c Config) Validate() (field string, ok bool) {
 	checks := []struct {
 		name string

@@ -2,17 +2,10 @@ package main
 
 import "net/http"
 
-// Shape is one candidate refusal the probe can inject.
-//
-// That decision is the only thing keeping that decision record in DRAFT, and it
-// asks an empirical question about a provider we do not control: WHICH refusal
-// shape does Claude Code surface to the developer without retrying around it?
-// Answering it by inference is the overstatement this product exists to prevent,
-// so the answer has to be measured — and measuring it needs a way to make a real
-// session receive a candidate shape.
-//
-// Every field here is a guess until the probe runs. The table is the hypothesis
-// space, not a finding.
+// Shape is one candidate refusal the probe can inject. That decision is the
+// only thing keeping that decision record in draft, and it asks an empirical
+// question about a provider we do not control: which refusal shape does Claude
+// Code surface to the developer without retrying around it?
 type Shape struct {
 	// Name is how the runbook and the results table refer to this candidate.
 	Name string
@@ -26,21 +19,19 @@ type Shape struct {
 	// ContentType is the response content type.
 	ContentType string
 
-	// Rationale says why this shape is a candidate — what about it might make the
+	// Rationale says why this shape is a candidate; what about it might make the
 	// client surface it rather than retry.
 	Rationale string
 
-	// Retryable records what the provider's own SDK conventions suggest the client
-	// will do. It is the PREDICTION the probe tests, never the result.
+	// Retryable records what the provider's own SDK conventions suggest the
+	// client will do. It is the prediction the probe tests, never the result.
 	Retryable string
 }
 
-// Shapes is the candidate set.
-//
-// The 4xx family is over-represented on purpose: a 5xx is retried by every SDK
-// this provider ships, so a refusal expressed as one would be invisible to the
-// developer AND would burn the session's retry budget. The interesting question
-// is which 4xx reaches the human intact.
+// Shapes is the candidate set. The 4xx family is over-represented on purpose:
+// a 5xx is retried by every SDK this provider ships, so a refusal expressed as
+// one would be invisible to the developer AND would burn the session's retry
+// budget.
 var Shapes = []Shape{
 	{
 		Name:        "invalid_request_error",

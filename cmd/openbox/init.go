@@ -12,26 +12,6 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/backend"
 )
 
-// `openbox init` — the front door for both roles.
-//
-//	openbox init --provider claude-code --enforce      # role=dev (default)
-//	openbox init --role approver --org acme.example    # role=approver
-//
-// There is one spelling. `openbox init` is gone rather than deprecated —
-// two ways to onboard is two things to keep true in every doc, and `openbox
-// dev` keeps only the commands that operate on an install that already exists
-// (`verify`, `sync`).
-//
-// The two roles write two different files (devconfig.ConfigPathFor) because
-// they are two different principals. A developer's hooks must never resolve an
-// approver's coordinates — that is the same-principal self-approval the key
-// boundary exists to prevent — so role is decided once, here, and the hot path
-// never has to ask.
-
-// probeUUID is a well-formed id that cannot exist. Deciding it exercises the
-// backend's permission guard without touching a real request: a 403 means the
-// credential lacks manage:agent_session, any other status means the guard let
-// it through and only the (absent) row was the problem.
 const probeUUID = "00000000-0000-4000-8000-000000000000"
 
 func (a *app) runInit(args []string) int {
@@ -45,8 +25,6 @@ func (a *app) runInit(args []string) int {
 	return a.runDevInit(rest)
 }
 
-// extractRole pulls --role out of the argument list so each role's own flag set
-// stays exactly what that role accepts.
 func extractRole(args []string) (devconfig.Role, []string, error) {
 	rest := make([]string, 0, len(args))
 	value := ""
@@ -68,10 +46,6 @@ func extractRole(args []string) (devconfig.Role, []string, error) {
 	return role, rest, err
 }
 
-// runApproverInit installs an APPROVER: a credentialed client of the approval
-// queue. It registers no agent and installs no hooks — an approver is not a
-// governed runtime, it is a different person's principal deciding other
-// people's requests (OD-T-3).
 func (a *app) runApproverInit(args []string) int {
 	fs := a.newFlagSet("openbox init --role approver")
 	var orgID, backendURL, clientID, secretBackend, host, envelope string
@@ -79,8 +53,6 @@ func (a *app) runApproverInit(args []string) int {
 	fs.StringVar(&orgID, "org", a.env("OPENBOX_ORG_ID", ""), "organization whose approval queue this approver works (required)")
 	fs.StringVar(&backendURL, "backend-url", a.env(devconfig.EnvBackendURL, ""), "openbox-backend control-plane base URL")
 	fs.StringVar(&clientID, "client-id", a.env("OPENBOX_CLIENT", "openbox-cli"), "value for the x-openbox-client header (Keycloak JWT path)")
-	// Parsed only so passing it fails loudly rather than silently doing nothing
-	// (that decision deleted the store it selected).
 	fs.StringVar(&secretBackend, "secret-backend", "", "REMOVED — the approver credential lives in ~/.openbox/.env")
 	fs.StringVar(&host, "host", "", "agentic host that evaluates a request when running unattended: claude-code|codex (default: none — a human decides)")
 	fs.StringVar(&envelope, "envelope", "", "policy bundle bounding what the host may decide; the host may only narrow it")
@@ -124,9 +96,8 @@ func (a *app) runApproverInit(args []string) int {
 		return exitOK
 	}
 
-	// The approver's credential is its OWN org credential, from the
-	// environment and never a flag (INV-1). It is never the developer agent's
-	// runtime key: holding both is the self-approval the boundary prevents.
+	// It is never the developer agent's runtime key: holding both is the self-
+	// approval the boundary prevents.
 	token := a.getenv(devconfig.EnvControlToken)
 	if token == "" {
 		return a.errorf("set %s (the APPROVER's own organization credential) in the environment; "+
@@ -144,13 +115,6 @@ func (a *app) runApproverInit(args []string) int {
 	}
 	fmt.Fprintf(a.stdout, "✓ credential reads the approval queue for %s\n", orgID)
 
-	// Whether it may DECIDE is checked now rather than at the first decision:
-	// an approver that discovers its own powerlessness mid-incident is worse
-	// than one that refuses to install.
-	//
-	// The probe needs a real agent from this org, because the decide route
-	// answers 403 both for a missing permission AND for an agent outside the
-	// caller's org — a made-up agent id cannot tell those apart.
 	probeAgent, err := cl.FirstAgentID(ctx)
 	if err != nil { //nolint:govet // err is reused deliberately
 		return a.errorf("cannot list %s's agents to verify this credential: %v", orgID, err)
@@ -165,15 +129,10 @@ func (a *app) runApproverInit(args []string) int {
 			if errors.As(err, &apiErr) && (apiErr.StatusCode == http.StatusForbidden || apiErr.StatusCode == http.StatusUnauthorized) {
 				return a.errorf("this credential cannot decide approvals (HTTP %d) — it needs manage:agent_session", apiErr.StatusCode)
 			}
-			// Any other error is the absent probe row, which is what we expect.
 		}
 		fmt.Fprintf(a.stdout, "✓ credential may decide approvals (manage:agent_session)\n")
 	}
 
-	// The org key is persisted so `openbox approve` runs later with no
-	// environment. That is the point of an approver install — and it is also the
-	// largest single exposure this product creates, so the write is announced
-	// rather than silent.
 	if err := devconfig.WriteEnvFile(envPath, map[string]string{devconfig.EnvControlToken: token}); err != nil {
 		return a.errorf("write approver credential: %v", err)
 	}

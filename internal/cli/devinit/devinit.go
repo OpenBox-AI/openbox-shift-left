@@ -1,24 +1,8 @@
-// Package devinit registers a developer agent, captures its once-shown credentials
-// into ~/.openbox/.env, and delegates the tool's native config to the provider
-// installer.
-//
-// Nothing needs to run afterwards — but "ambient" describes the MECHANISM, not the
-// COVERAGE: a default install governs one project directory (that decision, and
-// see Options.ProjectDir). Conflating the two is the overstatement this product
-// exists to prevent.
-//
-// Invariants enforced here: - INV-1: the obx_ key and signing key are written only
-// to the credential file and never printed, logged, or placed on an argv. Output
-// shows the file path, never a value. That decision narrowed what INV-1 claims —
-// that file is plaintext — but not the no-print/no-argv part enforced here. -
-// INV-4: agents are organization-scoped (the backend derives the org from the
-// caller credential). - INV-7: developer agents use the shared did:aip namespace
-// (the backend mints the DID via the same uuidv5 scheme as runtime agents).
-//
-// Safety properties: - --dry-run performs NO network and NO filesystem writes. -
-// re-registration is skipped when credentials already exist locally. - partial
-// failure is reported: if a step fails after the agent is created, the output
-// names the registered agent id and how to resume.
+// Package devinit registers a developer agent, captures its once-shown
+// credentials into ~/.openbox/.env, and delegates the tool's native config to
+// the provider installer. Invariants enforced here: - INV-1: the obx_ key and
+// signing key are written only to the credential file and never printed,
+// logged, or placed on an argv. Output shows the file path, never a value.
 package devinit
 
 import (
@@ -40,7 +24,7 @@ import (
 const developerAgentType = "developer" // free-form agent_type; no migration
 
 // Registrar is the control-plane surface devinit needs (backend.Client
-// implements it). Kept minimal so tests inject a fake.
+// implements it).
 type Registrar interface {
 	Create(ctx context.Context, req backend.CreateAgentRequest) (*backend.Registration, error)
 	FindByName(ctx context.Context, name string) (*backend.AgentSummary, error)
@@ -50,42 +34,25 @@ type Registrar interface {
 type Options struct {
 	Provider   string // claude-code|codex|cursor
 	BackendURL string // openbox-backend control-plane base (persisted for `dev sync`/staleness)
-	// BaseURL is the openbox-core DATA-PLANE base — where events are emitted
-	// and where `dev verify` authenticates. Empty keeps the adapter default
-	// (the SaaS core), which is right for a SaaS install and wrong for every
-	// self-hosted one: the backend's registration reply carries no data-plane
-	// URL, so without this a local deployment onboards successfully and then
-	// signs every request at core.openbox.ai (a 401 that reads as a broken
-	// install).
+	// BaseURL is the openbox-core data-plane base; where events are emitted and
+	// where `dev verify` authenticates.
 	BaseURL     string
 	AgentName   string // override; default derived from user+host
 	Icon        string // non-empty string required by the backend DTO
 	Description string
 	DryRun      bool
 	Force       bool // register a fresh agent even if one exists remotely
-	// EnvFile overrides where credentials are written (`auth --env-file`). Empty
-	// uses devconfig.EnvFilePath(). It is threaded through rather than resolved at
-	// the write site because registration is the ONE path that mints credentials:
-	// ignoring the override here wrote a newly-created agent's once-shown key to
-	// the default location while reporting the custom one.
+	// EnvFile overrides where credentials are written (`auth --env-file`).
 	EnvFile        string
 	ManagedEnable  bool // org-wide force-enable substrate; opt-in
 	InstallGitHook bool // enable ambient commit-trailer hook install (off by default)
-	// ProjectDir selects PROJECT hook scope, which is `openbox init`'s default :
+	// ProjectDir selects project hook scope, which is `openbox init`'s default :
 	// the adapter merges its hook block into <dir>/.claude/settings.local.json,
 	// so sessions in that project are governed and sessions elsewhere are not.
-	// Empty means GLOBAL scope — the bundle is still installed, but activation
-	// waits on a managed-settings deployment.
 	ProjectDir string
 	// Enforce turns enforce mode on or off and persists it (plus its companions,
 	// Findings) into the dev config, so no runtime env var is needed (that
-	// decision for the mechanism). Enforce now defaults ON — it is resolved from
-	// the ABSENCE of the field, not written by every run.
-	//
-	// All three are *bool so nil means "this run did not say", leaving whatever is
-	// on disk untouched. That is load-bearing in both directions: a plain `init`
-	// re-run must not drop a developer out of enforce mode, AND must not silently
-	// re-enable it for someone who chose --enforce=false.
+	// decision for the mechanism).
 	Enforce  *bool
 	Findings *bool
 }
@@ -97,7 +64,8 @@ type Deps struct {
 	Out       io.Writer
 }
 
-// Result summarizes what happened, for the caller to render / pick an exit code.
+// Result summarizes what happened, for the caller to render / pick an exit
+// code.
 type Result struct {
 	AgentID          string
 	DID              string
@@ -108,19 +76,6 @@ type Result struct {
 	ConfigManualOnly bool // adapter not built; manual config was printed
 }
 
-// defaultAgentName derives a stable, per-developer name so a re-run finds the
-// same agent and different developers in one org do not collide.
-//
-// It no longer carries the provider. The agent is a MACHINE identity — one per
-// machine, whatever tools are installed on it — so naming it after a single tool
-// was wrong twice over: it made `init --provider codex` on a claude-code-authed
-// machine label the agent with the wrong tool, and it forced `openbox auth` to
-// take a per-tool flag to create a machine-scoped record. Which adapter a
-// session ran under is per-session data, and the session posture reports it.
-//
-// This CHANGES the derived name, and the name is the FindByName idempotency key:
-// a machine that registered under the old scheme will not match and would
-// register again. --agent-name pins the old value for anyone who needs it.
 func defaultAgentName() string {
 	u := "user"
 	if cu, err := user.Current(); err == nil && cu.Username != "" {
@@ -134,9 +89,6 @@ func defaultAgentName() string {
 	return truncate(name, 255)
 }
 
-// truncate limits s to at most maxBytes bytes without splitting a multibyte
-// rune (the backend DTO caps agent_name at 255; usernames/hostnames may be
-// non-ASCII, so a byte slice could otherwise produce invalid UTF-8).
 func truncate(s string, maxBytes int) string {
 	if len(s) <= maxBytes {
 		return s
@@ -148,30 +100,17 @@ func truncate(s string, maxBytes int) string {
 	return s[:cut]
 }
 
-// Register is the credential half: register a developer agent (or recognize that
-// this machine already has credentials) and write the two secrets to
-// ~/.openbox/.env. It installs nothing and touches no tool config.
-//
-// It exists as its own entry point because `openbox auth` owns authentication
-// while `openbox init` owns setup. auth needs exactly the behaviour proven here
-// — remote duplicate detection, the HALT-on-4xx stop condition, the
-// once-only-credential guard, and the resume error that names the registered
-// agent — with no installer running.
-//
-// The returned CredentialRef carries the coordinates the caller should persist:
-// DID and AgentID are set on the register path. Run wraps this and adds the
-// provider install.
+// Register is the credential half: register a developer agent (or recognize
+// that this machine already has credentials) and write the two secrets to
+// ~/.openbox/.env.
 func Register(ctx context.Context, o Options, d Deps) (*Result, provider.CredentialRef, error) {
 	return register(ctx, o, d)
 }
 
-// Run executes the onboarding flow. It returns a non-nil error when the command
-// should exit non-zero; Result is still populated for reporting on partial
-// success (e.g. registered but config-manual-only).
+// Run executes the onboarding flow.
 func Run(ctx context.Context, o Options, d Deps) (*Result, error) {
-	// The install step is what needs a provider — it writes one tool's native
-	// config. Checked before registration so a missing flag fails immediately
-	// rather than after creating an agent that then cannot be installed for.
+	// Checked before registration so a missing flag fails immediately rather than
+	// after creating an agent that then cannot be installed for.
 	if o.Provider == "" {
 		return nil, errors.New("--provider is required (one of: " + strings.Join(provider.Supported(), ", ") + ")")
 	}
@@ -180,18 +119,12 @@ func Run(ctx context.Context, o Options, d Deps) (*Result, error) {
 		return res, err
 	}
 	if o.DryRun {
-		// planDryRun already printed the plan, including the installer's own
-		// section; there is nothing to apply.
 		return res, nil
 	}
 	return res, applyConfig(o, d, ref, res)
 }
 
-// register is Run without the install step. See Register.
 func register(ctx context.Context, o Options, d Deps) (*Result, provider.CredentialRef, error) {
-	// No provider guard here any more. Registration creates a MACHINE identity
-	// and does not need to know which tool will be installed on it; `Run` checks
-	// for one before the install step, which is the step that actually needs it.
 	profile := aivss.DefaultDeveloperProfile()
 	if field, ok := profile.Validate(); !ok {
 		return nil, provider.CredentialRef{}, fmt.Errorf("default aivss profile field %s out of range (build bug)", field)
@@ -206,63 +139,26 @@ func register(ctx context.Context, o Options, d Deps) (*Result, provider.Credent
 	}
 	ref := provider.CredentialRef{
 		InstallGitHook: o.InstallGitHook,
-		// Persist the control-plane base so `dev sync`/staleness can reach
-		// the policy read without re-supplying OPENBOX_BACKEND_URL. The
-		// agent id is set below on the register path (the reuse path
-		// preserves a prior value — installer.writeConfig).
-		BackendURL: o.BackendURL,
-		// The data-plane base, persisted so the hook and `dev verify` reach the
-		// core this install belongs to. Empty ⇒ the adapter default (SaaS).
-		BaseURL: o.BaseURL,
-		// Project hook scope: govern one project via its
-		// .claude/settings.local.json. Empty = global scope, whose activation is
-		// a managed-settings deployment this command cannot perform.
+		BackendURL:     o.BackendURL,
+		BaseURL:        o.BaseURL,
+		// Empty = global scope, whose activation is a managed-settings deployment
+		// this command cannot perform.
 		ProjectDir: o.ProjectDir,
-		// Persist the enforce posture into dev.json so the runtime hook needs no
-		// env var. Enforce defaults ON.
-		Enforce:  o.Enforce,
-		Findings: o.Findings,
+		Enforce:    o.Enforce,
+		Findings:   o.Findings,
 	}
 	res := &Result{AgentName: name}
 
-	// --- dry-run: describe, write nothing, touch no network ------------------
 	if o.DryRun {
 		return res, ref, planDryRun(o, d, name, icon, profile, ref)
 	}
 
-	// --- idempotency: the local credential file is the source of truth -------
-	// The obx_ key and signing key are shown by agent/create exactly once, so a
-	// prior successful registration is only recoverable locally. If both are
-	// present, reuse them and skip registration entirely.
-	//
-	// The DID comes from dev.json rather than from beside the credentials, which
-	// is that decision split doing its job: before it, the DID lived in the
-	// keychain too and this reuse path read the keychain's copy and wrote it into
-	// dev.json — so a stale keychain entry silently reverted a corrected DID on
-	// every re-init. With one store per field there is nothing to revert from.
-	//
-	// ONE IDENTITY PER MACHINE, and the message must not pretend otherwise. The
-	// deleted keychain namespaced credentials by `<org>/<provider>`, so this check
-	// could ask "are there credentials for THIS org and provider". `.env` holds a
-	// single key pair with no namespace, so all this can honestly report is that
-	// *some* identity is already configured — it cannot know whether it belongs to
-	// the org and provider this run named. Saying "already initialized for
-	// org=beta provider=codex" while describing acme/claude-code's credentials
-	// would be a false statement about identity in a governance tool, which is
-	// worse than the friction of a vaguer message.
 	if existing, err := readLocalCredentials(o.EnvFile); err == nil && existing.apiKey != "" && existing.privateKey != "" {
 		did := devconfig.ResolveDIDOrEmpty()
 		ref.DID = did
 		res.Reused = true
 		res.DID = did
-		// The agent id comes back from dev.json for the same reason the DID does:
-		// this path registers nothing, so the only copy is the local one, and the
-		// caller writes whatever it gets here straight back to dev.json.
-		//
-		// Returning it empty would ERASE it, and it is not decorative —
-		// ResolveAgentID feeds SelfAgentID in the autonomous approver, which is
-		// how a machine refuses to approve its own request. Losing it disables
-		// that check silently.
+		// Losing it disables that check silently.
 		res.AgentID = devconfig.ResolveAgentID()
 		ref.AgentID = res.AgentID
 		fmt.Fprintf(d.Out, "This machine already has credentials in %s — reusing them (DID %s).\n",
@@ -273,10 +169,6 @@ func register(ctx context.Context, o Options, d Deps) (*Result, provider.Credent
 		return res, ref, nil
 	}
 
-	// --- remote duplicate detection (avoid a 400, never duplicate silently) --
-	// A lookup FAILURE must not fall through to Create: we could neither confirm
-	// nor rule out a duplicate, so idempotent detection would be silently bypassed
-	// (F1). Surface it and let the user retry or --force past the check.
 	if !o.Force {
 		existing, err := d.Registrar.FindByName(ctx, name)
 		if err != nil {
@@ -294,8 +186,6 @@ func register(ctx context.Context, o Options, d Deps) (*Result, provider.Credent
 				name, existing.ID, existing.DID)
 		}
 	} else {
-		// Forcing a new registration still needs a free name; a lookup failure
-		// here is surfaced rather than proceeding to a confusing 400 (F4).
 		free, err := freeName(ctx, d, name)
 		if err != nil {
 			return res, ref, fmt.Errorf("could not find a free agent name for --force (agent/list failed: %w)", err)
@@ -304,7 +194,6 @@ func register(ctx context.Context, o Options, d Deps) (*Result, provider.Credent
 		res.AgentName = name
 	}
 
-	// --- register ------------------------------------------------------------
 	req := backend.CreateAgentRequest{
 		AgentName:   name,
 		AgentType:   developerAgentType,
@@ -313,9 +202,6 @@ func register(ctx context.Context, o Options, d Deps) (*Result, provider.Credent
 		Tags:        []string{"openbox-shift-left", "developer-runtime"},
 		AivssConfig: profile,
 		Config: map[string]any{
-			// No "provider" key: a machine can hold several tools, and the agent
-			// record naming one of them was a claim this command cannot make.
-			// Per-session posture carries the adapter that actually ran.
 			"managed_enable": o.ManagedEnable, // substrate only; not activated in Phase 1
 		},
 	}
@@ -323,7 +209,6 @@ func register(ctx context.Context, o Options, d Deps) (*Result, provider.Credent
 	if err != nil {
 		var apiErr *backend.APIError
 		if errors.As(err, &apiErr) {
-			// Stop condition: exact 4xx (agent_type / aivss_config rejection) → HALT.
 			return res, ref, fmt.Errorf("HALT: agent/create rejected registration (%w). "+
 				"Verify agent_type=%q and the default aivss_config are accepted by this OpenBox org",
 				apiErr, developerAgentType)
@@ -341,12 +226,6 @@ func register(ctx context.Context, o Options, d Deps) (*Result, provider.Credent
 			reg.AgentID, reg.DID, missingCreds(reg))
 	}
 
-	// --- capture credentials into ~/.openbox/.env (INV-1) --------------------
-	// One atomic write for both secrets, so there is no half-written credential
-	// pair to reason about. The DID is not written here — it is a coordinate and
-	// goes to dev.json via the installer (that decision's one-store-per-field
-	// split). On failure after the agent exists, the error names the registered
-	// agent id so the operator can resume.
 	if err := writeLocalCredentials(o.EnvFile, reg.APIKey, reg.PrivateKey); err != nil {
 		return res, ref, resumeErr(reg, "write credentials to "+credentialFileLabel(o.EnvFile), err)
 	}
@@ -362,9 +241,6 @@ func register(ctx context.Context, o Options, d Deps) (*Result, provider.Credent
 	return res, ref, nil
 }
 
-// applyConfig delegates provider config writing. When the adapter isn't built,
-// it prints the manual config and returns an error so the command exits
-// non-zero — but the agent + credentials are already durably in place.
 func applyConfig(o Options, d Deps, ref provider.CredentialRef, res *Result) error {
 	if !d.Installer.Available() {
 		res.ConfigManualOnly = true
@@ -380,8 +256,6 @@ func applyConfig(o Options, d Deps, ref provider.CredentialRef, res *Result) err
 	return nil
 }
 
-// describePosture renders a tri-state posture flag for the plan output, so an
-// unspecified setting reads as "left alone" rather than as a chosen false.
 func describePosture(v *bool) string {
 	switch {
 	case v == nil:
@@ -393,7 +267,6 @@ func describePosture(v *bool) string {
 	}
 }
 
-// planDryRun prints the full plan and asserts no writes occur.
 func planDryRun(o Options, d Deps, name, icon string, profile aivss.Config, ref provider.CredentialRef) error {
 	out := d.Out
 	fmt.Fprintf(out, "DRY RUN — no network calls, no secret-store or filesystem writes.\n\n")
@@ -414,10 +287,6 @@ func planDryRun(o Options, d Deps, name, icon string, profile aivss.Config, ref 
 	return nil
 }
 
-// freeName returns a name not already taken remotely, appending -2, -3, ... when
-// forcing a new registration. It returns an error if the remote lookup fails (so
-// the caller does not proceed to a confusing 400) or if no free name is found in
-// a bounded number of attempts.
 func freeName(ctx context.Context, d Deps, name string) (string, error) {
 	for i := 1; i < 100; i++ {
 		candidate := name

@@ -9,32 +9,12 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/devinit"
 )
 
-// scope.go — which sessions an install actually governs.
-//
-// Scope selects ACTIVATION, not location. `Install` unconditionally materializes
-// the plugin bundle, places the engine binary and writes posture; scope decides
-// only whether the project settings merge happens on top. So "local vs global"
-// is not "install here vs there".
-
 const (
-	// scopeLocal governs the current directory only, by merging the hook block
-	// into <dir>/.claude/settings.local.json. It is the DEFAULT because it is the
-	// only scope the CLI can finish by itself.
-	scopeLocal = "local"
-	// scopeGlobal installs the bundle and prints the managed-settings snippet it
-	// cannot apply. Activation is an administrator's action.
+	scopeLocal  = "local"
 	scopeGlobal = "global"
 )
 
 // resolveScope turns the --scope flag into a scope, per provider.
-//
-// Codex has no project scope and pretending otherwise would be the bad kind of
-// default: its hooks live at $CODEX_HOME/hooks.json or ~/.codex/hooks.json, and
-// the repo-level .codex/hooks.json is a location its installer deliberately does
-// not touch. So `--scope local --provider codex` ERRORS, and an unspecified scope
-// resolves to global while SAYING SO. Silently governing every Codex session on
-// the machine when the user asked for one project is worse than an error — it
-// over-delivers governance without consent.
 func (a *app) resolveScope(scope, providerName string) (string, int) {
 	switch scope {
 	case "", scopeLocal, scopeGlobal:
@@ -51,7 +31,6 @@ func (a *app) resolveScope(scope, providerName string) (string, int) {
 				"  Run without --scope to install user-wide, or use claude-code for project scope.")
 		}
 		if scope == "" {
-			// Never infer silently: say which scope was resolved and what it means.
 			fmt.Fprintf(a.stdout, "note: codex hooks are user-wide, so this install uses GLOBAL scope —\n"+
 				"      every Codex session on this machine is governed, not just this directory.\n")
 		}
@@ -65,11 +44,6 @@ func (a *app) resolveScope(scope, providerName string) (string, int) {
 }
 
 // flagPassed reports whether a flag was explicitly given on the command line.
-//
-// It exists for one case that a value cannot answer: `--enforce` defaults to
-// true, so its VALUE alone cannot distinguish "the user asked for enforce" from
-// "the user said nothing". That distinction is what makes `--enforce --no-enforce`
-// an error rather than a silent win for one of them.
 func flagPassed(fs *flag.FlagSet, name string) bool {
 	found := false
 	fs.Visit(func(f *flag.Flag) {
@@ -81,12 +55,6 @@ func flagPassed(fs *flag.FlagSet, name string) bool {
 }
 
 // requireCredentials refuses to install when this machine has no credentials.
-//
-// `init` performs no registration and writes no credential, so absent credentials
-// are a precondition failure rather than something to fix inline. It must not
-// half-install: a bundle installed against no identity produces hooks that fire,
-// fail to resolve credentials, and fail open silently — an install that looks
-// finished and governs nothing.
 func (a *app) requireCredentials() int {
 	envPath, err := devconfig.EnvFilePath()
 	if err != nil {
@@ -113,20 +81,8 @@ func (a *app) requireCredentials() int {
 		devconfig.EnvAPIKeyDirect, devconfig.EnvAgentPrivateKey, envPath)
 }
 
-// printGovernedScope closes `init` by saying which sessions this install actually
-// governs.
-//
-// This string is the one place a user learns the truth about coverage, and it is
-// pinned by a test for that reason. Installing a plugin is not activating it:
-// global scope writes a correct config, reports success, and gates nothing until
-// an administrator deploys managed settings. Silence there is the worst available
-// outcome — the install looks finished, no session is governed, and the first
-// evidence is an empty dashboard that reads as a broken product rather than an
-// unfinished rollout.
 func (a *app) printGovernedScope(o devinit.Options, resolvedScope string) {
 	if o.Provider == "cursor" {
-		// No adapter yet, so there is no scope to report; the manual-config path
-		// already said so.
 		return
 	}
 
@@ -158,28 +114,11 @@ func (a *app) printGovernedScope(o devinit.Options, resolvedScope string) {
 	fmt.Fprintf(a.stdout, "  For one project instead, re-run with --scope local.\n")
 }
 
-// initUsage prints only the flags `init` actually has.
-//
-// The moved and removed flags are still DECLARED on the flagset — that is what
-// lets passing one produce a clear error instead of "flag provided but not
-// defined" — but advertising all eighteen would defeat the point of cutting the
-// surface from seventeen to seven. So they are named in one line as a pointer,
-// not listed as options.
 func (a *app) initUsage(fs *flag.FlagSet) func() {
 	return func() {
 		fmt.Fprintf(a.stderr, "Usage: openbox init --provider <claude-code|codex|cursor> [flags]\n\n")
 		fmt.Fprintf(a.stderr, "Installs the tool's hooks and writes posture. Run `openbox auth` first —\n")
 		fmt.Fprintf(a.stderr, "this command never reads, writes or prompts for a credential.\n\n")
-		// The gateway flags are listed rather than left to the "not listed" pointer:
-		// --gateway changes what a machine sends model traffic to, which is the
-		// largest-blast-radius thing this command can do, and an undiscoverable
-		// flag for it would be a support problem rather than a tidy help screen.
-		// The lane flags are listed for the same reason as the gateway's: they
-		// change what a machine sends model traffic to, and --full additionally
-		// puts a CA on the developer's machine. Those are the
-		// largest-blast-radius things this command does, and an undiscoverable
-		// flag for one of them is a support problem rather than a tidy help
-		// screen.
 		for _, name := range []string{
 			"provider", "scope", "enforce", "no-enforce", "install-git-hook",
 			"full", "remove-all",

@@ -1,16 +1,5 @@
 // Package managed installs the provider-level configuration that turns OpenBox
 // governance from a per-developer opt-in into an org mandate (E8-S8).
-//
-// The distinction matters more than it looks. Without these files, enforcement is
-// a hook in the developer's own config: it prevents mistakes, but it does not
-// withstand someone who does not want it — they delete the hook, edit dev.json,
-// or start the tool with a bypass flag (report SL-01). Every enterprise claim of
-// the form "our coding agents are governed" rests on provider-managed config,
-// because that is what makes a local edit unable to remove the gate.
-//
-// This package does not invent a configuration-management system. MDM
-// distribution is the org's plane; we render the payload and can write it on one
-// machine. Templates and their guarantees live in deployments/managed/.
 package managed
 
 import (
@@ -25,10 +14,6 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/devconfig"
 )
 
-// templates carries the reference configuration into the binary so `managed
-// install` works on a machine that has no checkout — the normal case, since it
-// runs on a developer's or a fleet-imaged laptop.
-//
 //go:embed templates
 var templates embed.FS
 
@@ -40,10 +25,6 @@ const (
 	ProviderCodex      Provider = "codex"
 )
 
-// binPlaceholder is replaced with the absolute path of the deployed openbox
-// binary. A relative command in a managed file would resolve against whatever
-// working directory the provider happens to have, which is not something a
-// mandate can depend on.
 const binPlaceholder = "OPENBOX_BIN"
 
 // File is one rendered managed-config file and where it belongs.
@@ -52,14 +33,11 @@ type File struct {
 	Contents []byte
 	// Mode is deliberately world-readable but owner-only-writable: the developer
 	// must be able to read the config the tool applies, and must not be able to
-	// change it. Ownership (root) is the caller's responsibility — running the
-	// installer under sudo is what supplies it.
+	// change it.
 	Mode os.FileMode
 }
 
-// Plan is what an install would do, without doing any of it. Every path in the
-// CLI goes through a plan first, so --dry-run and the unprivileged fallback
-// print exactly what a real install would write.
+// Plan is what an install would do, without doing any of it.
 type Plan struct {
 	Files []File
 	// Warnings are non-fatal notes for the operator (an unsupported OS, a
@@ -68,7 +46,7 @@ type Plan struct {
 }
 
 // PlanInstall renders the managed configuration for the given providers.
-// openboxBin is the absolute path the hooks should invoke.
+// OpenboxBin is the absolute path the hooks should invoke.
 func PlanInstall(providers []Provider, openboxBin string) (Plan, error) {
 	if strings.TrimSpace(openboxBin) == "" {
 		return Plan{}, fmt.Errorf("the openbox binary path is required (managed hooks cannot use a relative command)")
@@ -134,18 +112,13 @@ func render(name, openboxBin string) ([]byte, error) {
 	return []byte(strings.ReplaceAll(string(raw), binPlaceholder, openboxBin)), nil
 }
 
-// ClaudeCodeManagedDir exposes the managed-settings directory so `openbox doctor`
-// resolves it through THIS package rather than re-deriving the path.
-//
-// Same reason doctor's duplicate-engine warning and init's repair are built on one
-// classifier: a check and the thing it checks must not be able to disagree about
-// where the file lives. Returns "" where this build knows no path for the OS.
+// ClaudeCodeManagedDir exposes the managed-settings directory so `openbox
+// doctor` resolves it through this package rather than re-deriving the path.
 func ClaudeCodeManagedDir() string {
 	dir, _ := claudeCodeDir()
 	return dir
 }
 
-// claudeCodeDir returns the OS-specific managed-settings directory.
 func claudeCodeDir() (dir, warning string) {
 	switch runtime.GOOS {
 	case "linux":
@@ -160,10 +133,6 @@ func claudeCodeDir() (dir, warning string) {
 	}
 }
 
-// codexDir returns the managed-config directory. On macOS the stronger channel is
-// the com.openai.codex preference domain via MDM (see deployments/managed/codex/
-// README-mdm.md); the file path is still honored and is what a single machine can
-// install without MDM.
 func codexDir() (dir, warning string) {
 	switch runtime.GOOS {
 	case "linux", "darwin":
@@ -183,21 +152,6 @@ type Outcome struct {
 }
 
 // Apply writes the planned files.
-//
-// Three properties make this safe to run repeatedly on a fleet:
-//
-//   - Idempotent: a file whose contents already match is left alone, so a
-//     config-management loop does not churn timestamps or trigger reload storms.
-//   - Backed up: an existing different file is copied aside before being
-//     replaced, because this overwrites org security configuration and "I can put
-//     it back" has to be true.
-//   - Refuses to weaken: if what is already there is STRICTER than the template,
-//     the file is skipped rather than relaxed. An installer that quietly downgrades
-//     a mandate is worse than one that fails, because the failure is visible and
-//     the downgrade is not.
-//
-// force overrides the refuse-to-weaken check for the operator who genuinely means
-// to replace a stricter config.
 func Apply(plan Plan, force bool, now func() time.Time) ([]Outcome, error) {
 	if now == nil {
 		now = time.Now
@@ -253,8 +207,6 @@ func writeFile(f File) error {
 	if err := os.MkdirAll(filepath.Dir(f.Path), 0o755); err != nil {
 		return fmt.Errorf("create %s: %w", filepath.Dir(f.Path), err)
 	}
-	// Write via a temp file in the same directory so a crash cannot leave the
-	// provider a half-written security config.
 	tmp, err := os.CreateTemp(filepath.Dir(f.Path), ".openbox-managed-*")
 	if err != nil {
 		return fmt.Errorf("stage %s: %w", f.Path, err)
@@ -276,16 +228,7 @@ func writeFile(f File) error {
 	return nil
 }
 
-// strictnessMarkers are the settings whose presence makes a config a mandate. If
-// the file on disk asserts one and the incoming template does not, replacing it
-// would be a downgrade.
-//
-// This is a substring check over the file text rather than a parse, deliberately:
-// the two providers use different formats (JSON, TOML), the org may have added
-// keys we do not model, and a parse-and-compare would have to understand all of
-// it to be trustworthy. A textual check can only ever be conservative — it may
-// refuse when it did not strictly need to, which is the safe direction for a tool
-// that overwrites security configuration.
+// strictnessMarkers are the settings whose presence makes a config a mandate.
 var strictnessMarkers = []struct {
 	marker string
 	why    string
@@ -300,16 +243,8 @@ var strictnessMarkers = []struct {
 }
 
 // wouldWeaken reports whether replacing existing with incoming would drop a
-// strictness marker.
-//
-// The two sides are matched asymmetrically, and deliberately so. The EXISTING file
-// is matched raw: any mention at all is treated as possibly-in-effect, because
-// wrongly believing the operator's file is strict only costs a refusal. The
-// INCOMING file is matched with comment lines removed: a marker that survives only
-// as commented-out documentation is not in effect, and counting it would let a
-// template silently replace a live mandate with a suggestion. Both choices push
-// toward refusing, which is the safe direction for a tool that overwrites security
-// configuration — and `--force` remains the way through.
+// strictness marker. The two sides are matched asymmetrically, and
+// deliberately so.
 func wouldWeaken(existing, incoming []byte) (bool, string) {
 	have, want := string(existing), uncommented(incoming)
 	for _, m := range strictnessMarkers {
@@ -320,11 +255,6 @@ func wouldWeaken(existing, incoming []byte) (bool, string) {
 	return false, ""
 }
 
-// uncommented drops whole-line comments so a setting that exists only as
-// documentation is not mistaken for one that is in effect. It covers TOML `#` and
-// `//` line comments; a JSON `"//"` documentation KEY is left in place, since that
-// is a value in the document rather than a comment, and leaving it can only make
-// wouldWeaken more willing to refuse.
 func uncommented(raw []byte) string {
 	var b strings.Builder
 	for _, line := range strings.Split(string(raw), "\n") {
@@ -338,10 +268,8 @@ func uncommented(raw []byte) string {
 	return b.String()
 }
 
-// Privileged reports whether this process can write the planned paths, so the CLI
-// can fall back to printing instead of failing. It tests by attempting to create
-// the parent directory rather than by checking uid, which is what actually
-// matters and works for a non-root user with write access to /etc.
+// Privileged reports whether this process can write the planned paths, so the
+// CLI can fall back to printing instead of failing.
 func Privileged(plan Plan) bool {
 	for _, f := range plan.Files {
 		dir := filepath.Dir(f.Path)
@@ -358,22 +286,9 @@ func Privileged(plan Plan) bool {
 	return true
 }
 
-// ProviderState reports whether a provider's managed configuration is deployed on
-// this machine, for `openbox doctor` and for posture.provider_managed (E8-S8).
-//
-// It answers a deliberately narrow question — does a managed file exist at the
-// expected path and does it carry a mandate — because that is what can be checked
-// without the provider's cooperation. It cannot confirm the file is root-owned, or
-// that the provider actually parsed it, so a "managed" answer here is evidence
-// rather than proof.
-//
-// What counts as "carries a mandate" is provider-shaped. Claude Code's
-// managed-settings.json defines the hook itself, so naming our hook is the
-// signal. Codex's requirements.toml cannot define a hook at all — `hooks` is not a
-// requirements key — so the signal is a TOP-LEVEL requirement key. Checking for a
-// substring there is what let a mis-nested template (mandate keys written under a
-// `[hooks]` header, hence bound as `hooks.*` and ignored by Codex) report a machine
-// as managed while no mandate was in effect.
+// ProviderState reports whether a provider's managed configuration is deployed
+// on this machine, for `openbox doctor` and for posture.provider_managed
+// (E8-S8).
 func ProviderState(p Provider) string {
 	var dir string
 	var files []string
@@ -404,16 +319,12 @@ func ProviderState(p Provider) string {
 	return "not managed (no " + filepath.Join(dir, files[0]) + ")"
 }
 
-// codexRequirementKeys are the requirements.toml keys whose presence at the top
-// level means the machine is genuinely constrained: hook exclusivity, or a pin on
-// the approval / sandbox modes a local config may select.
 var codexRequirementKeys = []string{
 	"allow_managed_hooks_only",
 	"allowed_approval_policies",
 	"allowed_sandbox_modes",
 }
 
-// mandates reports whether a managed file body actually imposes something.
 func mandates(p Provider, raw []byte) bool {
 	if p == ProviderCodex {
 		keys := devconfig.TopLevelTOMLKeys(raw)

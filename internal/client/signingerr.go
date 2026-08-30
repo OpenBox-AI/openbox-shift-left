@@ -7,18 +7,9 @@ import (
 	"strings"
 )
 
-// signingReasonGuidance maps a machine reason code — as enumerated by
-// openbox-core's AIP identity verifier and the reference SDK's
-// map_signing_error — to a shift-left-actionable one-line diagnostic.
-// Categories only, never content, never secrets (INV-1/INV-2).
-//
-// Important: stock core does not put these reason codes in the HTTP response
-// body. It collapses every identity failure into 401
-// {"code":401,"message":"invalid token or agent identity"}. So this map is
-// consulted via a forward-compatible body probe (extractReason) that fires
-// only if a future core enriches the envelope with a string reason field.
-// Until then diagnose() maps on the fields that are present (status +
-// message).
+// signingReasonGuidance maps a machine reason code; as enumerated by openbox-
+// core's AIP identity verifier and the reference SDK's map_signing_error; to a
+// shift-left-actionable one-line diagnostic.
 var signingReasonGuidance = map[string]string{
 	"signature_invalid":        "the signed bytes were rejected — a rotated/mismatched Ed25519 key or a body-hash mismatch; re-provision the dev agent (docs/getting-started.md § Troubleshooting)",
 	"nonce_replayed":           "a buffered event was re-sent after a lost 200 (INV-5); safe to ignore unless persistent",
@@ -28,31 +19,19 @@ var signingReasonGuidance = map[string]string{
 	"timestamp_skew":           "the request timestamp is outside core's ±300s window — sync the host clock (NTP)",
 }
 
-// coreError is openbox-core's uniform error envelope (pkg/httpx/response.go
-// body{code,message,data}); every non-2xx /evaluate response is one of these,
-// e.g. {"code":401,"message":"invalid token or agent identity"}. `code` is an
-// integer echo of the HTTP status, not a machine reason code.
 type coreError struct {
 	Code    int    `json:"code"`
 	Message string `json:"message"`
 }
 
-// maxDiagMsg bounds how much of core's message a single diagnostic line echoes.
-// The response body is already capped at 1 MiB upstream (attempt); this keeps
-// the log line readable and can't be inflated by a hostile message.
 const maxDiagMsg = 200
 
 // diagnose returns a single actionable diagnostic string for a non-2xx
 // /evaluate response, given the HTTP status and the (bounded, 1 MiB-capped)
-// response body. It derives its output only from static guidance, core's own
-// status/message, and a core-supplied reason code — never from our
-// key/seed/nonce/signature (INV-1), and never from event content (INV-2).
+// response body.
 func diagnose(status int, body string) string {
 	raw := []byte(body)
 
-	// Forward-compat: if a future core enriches the envelope with a machine
-	// reason code (a string under reason_code|code|reason), map it directly.
-	// Stock core emits an integer `code`, which is skipped here.
 	if reason := extractReason(raw); reason != "" {
 		if g, ok := signingReasonGuidance[reason]; ok {
 			return "reason=" + reason + ": " + g
@@ -82,11 +61,6 @@ func diagnose(status int, body string) string {
 		}
 		return "400 payload rejected (no message)"
 	case 500:
-		// Core surfaces a missing KMS verifier as a 500, not a 401
-		// ("internal server error: agent DID identity verifier
-		// unavailable") — a provisioning problem, not transient, so map it
-		// to the verifier guidance (fix: set signing_required=false). Any
-		// other 500 stays transient.
 		if strings.Contains(msg, "verifier") {
 			return "500 " + signingReasonGuidance["verifier_not_configured"]
 		}
@@ -99,17 +73,6 @@ func diagnose(status int, body string) string {
 	}
 }
 
-// extractReason tracks the reference SDK's config.py _extract_reason_code:
-// parse the body as a JSON object and return the first string value among
-// reason_code, code, reason (in that order). A non-object body, absent keys,
-// or a non-string value (e.g. stock core's integer `code`) yields "".
-// Best-effort: any parse failure degrades to "" so diagnose falls back to
-// the status/message path.
-//
-// One intentional divergence from config.py's `a or b or c` short-circuit:
-// Python stops at a truthy-but-non-string `code` (an int) and returns None,
-// which would mask a valid string `reason` behind it. This loop instead
-// skips a non-string value and keeps looking.
 func extractReason(body []byte) string {
 	var m map[string]json.RawMessage
 	if err := json.Unmarshal(body, &m); err != nil {
@@ -128,12 +91,8 @@ func extractReason(body []byte) string {
 	return ""
 }
 
-// describeDrop turns a fail-open drop error into a single actionable diagnostic
-// line for Emit's drop log. For a core HTTP rejection (*httpError, which already
-// carries the bounded response body from attempt) it appends the mapped
-// signing/response guidance; a transport (network) error is returned verbatim.
-// The result never contains our key/seed/nonce/signature (INV-1): the secret
-// lives only in the Authorization header, never in the request or response body.
+// describeDrop turns a fail-open drop error into a single actionable
+// diagnostic line for Emit's drop log.
 func describeDrop(err error) string {
 	var he *httpError
 	if errors.As(err, &he) {

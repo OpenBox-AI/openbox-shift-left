@@ -7,10 +7,7 @@ import (
 	providerspi "github.com/openbox-ai/openbox-shift-left/internal/provider"
 )
 
-// Engine is this adapter's runtime half of the provider SPI. RunHook and
-// Capabilities already had these signatures as package functions; Engine names
-// them as the contract so the CLI can dispatch through the registry instead of
-// a hard-coded switch.
+// Engine is this adapter's runtime half of the provider SPI.
 type Engine struct{}
 
 // RunHook handles one native hook event. It never fails a tool call (INV-3):

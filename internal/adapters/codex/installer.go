@@ -12,60 +12,29 @@ import (
 	providerspi "github.com/openbox-ai/openbox-shift-left/internal/provider"
 )
 
-// CredentialRef is the install-time seam's credential coordinate type
-// (shared provider SPI — INV-1: it carries coordinates + the non-secret DID
-// only, never the obx_ key or Ed25519 seed value).
+// CredentialRef is the install-time seam's credential coordinate type (shared
+// provider SPI; INV-1: it carries coordinates + the non-secret DID only, never
+// the obx_ key or Ed25519 seed value).
 type CredentialRef = providerspi.CredentialRef
 
 // ownedInvocation identifies a hooks.json command handler as OpenBox-owned by
-// matching the EXACT command shape this installer generates: one engine token
-// (optionally double-quoted) followed by `hook codex <event>` — and nothing
-// else. This is the idempotency key (the Codex HooksFile schema is
-// deny_unknown_fields at the top level, so a custom marker field is not an
-// option): re-install replaces exactly these entries in place and NEVER
-// touches a foreign handler. The match is anchored: a user's
-// compound/wrapper handler that merely EMBEDS an openbox invocation (e.g.
-// `my-audit-log && "/usr/bin/openbox" hook codex PreToolUse`) is foreign — its
-// added functionality must survive re-install — so a substring test is not
-// enough; isOpenBoxHandler parses the command instead of scanning it.
-// `hook claude-code <event>` is deliberately also owned: Codex's external-agent
-// migration (addendum #12) can import the OpenBox Claude Code hooks in mangled
-// form — those are OUR entries pointed at the wrong provider parser, so they
-// are superseded, not duplicated alongside.
+// matching the exact command shape this installer generates: one engine token
+// (optionally double-quoted) followed by `hook codex <event>`; and nothing
+// else.
 var ownedInvocation = regexp.MustCompile(`^hook (?:codex|claude-code) [A-Za-z]+$`)
 
-// Hook timeouts in SECONDS (the Codex `timeout` unit — addendum #8; contrast
-// CC's 5 s hard kill, Codex's default is 600 s). The four hot hooks get a small
-// explicit bound so a wedged hook can never stall a tool call for long; the
-// SessionEnd flush hook gets more headroom (the engine's own flushBudget of
-// 12 s stays under it).
-//
-// PreToolUse is the exception: it is the only gating hook, and so the only one
-// that can hold for an approval decision, so it carries a raised ceiling
-// (E9-S4). The ceiling is not a delay — the engine spends it only when a
-// high-risk class escalated and core filed an approval.
+// Hook timeouts in seconds (the Codex `timeout` unit; addendum #8; contrast
+// CC's 5 s hard kill, Codex's default is 600 s).
 const (
 	hotHookTimeoutSec        = 5
 	preToolUseHookTimeoutSec = 30
 	sessionEndHookTimeoutSec = 15
 )
 
-// hooksDescription is the top-level marker comment written into a fresh
-// hooks.json (the HooksFile schema's only free-text field).
 const hooksDescription = "OpenBox observe hooks (STORY-SL7-A) — managed by `openbox init --provider codex`; re-running updates the openbox entries in place and never touches foreign hooks."
 
-// Installer writes the OpenBox hook entries into Codex's hooks.json and
-// the non-secret dev config, delegated from `openbox init` (the
-// provider seam). It implements provider.Installer and replaces the stub
-// for codex. Zero-value fields default to the standard install
-// locations; tests set them to temp paths.
-//
-// Unlike the Claude Code installer there is no plugin bundle and no
-// engine copy: Codex hooks invoke the engine by absolute path
-// (EngineBinary — the CC EngineBinary precedent, resolved from
-// os.Executable() by the CLI registry), so `init` is the whole
-// install. The Codex plugin channel is a recorded future distribution
-// option.
+// Installer writes the OpenBox hook entries into Codex's hooks.json and the
+// non-secret dev config, delegated from `openbox init` (the provider seam).
 type Installer struct {
 	HooksPath    string // where hooks.json lives (default: defaultHooksPath())
 	ConfigPath   string // where the dev config is written (default: DefaultConfigPath())
@@ -110,8 +79,7 @@ func (i Installer) Plan(ref CredentialRef) string {
 // Install merges the OpenBox hook entries into hooks.json and writes the dev
 // config. Idempotent: re-running updates the OpenBox-owned entries in place
 // (recognized by ownershipMarkers), never duplicates them, and never modifies
-// or removes a foreign/imported entry. It does NOT write managed/requirements
-// config (enterprise mandate is a separate story).
+// or removes a foreign/imported entry.
 func (i Installer) Install(ref CredentialRef) error {
 	if ref.DID == "" {
 		return fmt.Errorf("codex install: CredentialRef.DID is required")
@@ -122,24 +90,16 @@ func (i Installer) Install(ref CredentialRef) error {
 	return i.writeConfig(ref)
 }
 
-// hooksFile mirrors codex-rs HooksFile (config/src/hook_config.rs @
-// rust-v0.145.0): top-level `description` + `hooks` keyed by the PascalCase
-// event name; deny_unknown_fields, so nothing else may be added. Foreign event
-// arrays are preserved as raw bytes.
 type hooksFile struct {
 	Description string                     `json:"description,omitempty"`
 	Hooks       map[string]json.RawMessage `json:"hooks"`
 }
 
-// matcherGroup mirrors codex-rs MatcherGroup. Foreign handlers inside a group
-// are carried as raw bytes so their unknown fields survive the round-trip.
 type matcherGroup struct {
 	Matcher *string           `json:"matcher,omitempty"`
 	Hooks   []json.RawMessage `json:"hooks"`
 }
 
-// commandHandler is the OpenBox handler shape (codex-rs HookHandlerConfig
-// `command` variant; timeout is in SECONDS).
 type commandHandler struct {
 	Type    string `json:"type"`
 	Command string `json:"command"`
@@ -147,7 +107,7 @@ type commandHandler struct {
 }
 
 // writeHooks performs the idempotent merge. A pre-existing file that is not
-// valid JSON is a hard error — never clobber a file we cannot understand.
+// valid JSON is a hard error; never clobber a file we cannot understand.
 func (i Installer) writeHooks() error {
 	path := i.hooksPath()
 
@@ -162,7 +122,6 @@ func (i Installer) writeHooks() error {
 			hf.Hooks = map[string]json.RawMessage{}
 		}
 	case os.IsNotExist(err):
-		// fresh file
 	default:
 		return fmt.Errorf("codex install: read %s: %w", path, err)
 	}
@@ -182,15 +141,9 @@ func (i Installer) writeHooks() error {
 	if err != nil {
 		return err
 	}
-	// 0700: when `init` runs before Codex ever has, this creates
-	// ~/.codex itself — the directory Codex later drops auth.json (OpenAI
-	// credentials) into — so it gets the same owner-only posture as the
-	// config dir, spool, and stash.
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return fmt.Errorf("codex install: hooks dir: %w", err)
 	}
-	// Atomic write (temp in the same dir + rename): Codex re-reading mid-install
-	// sees either the old file or the whole new one, never a truncated merge.
 	tmp, err := os.CreateTemp(filepath.Dir(path), ".hooks-*.tmp")
 	if err != nil {
 		return err
@@ -214,9 +167,6 @@ func (i Installer) writeHooks() error {
 	return nil
 }
 
-// mergeEvent strips every OpenBox-owned handler from the event's existing
-// matcher groups (dropping groups that become empty), preserves everything
-// foreign byte-for-byte, and appends the fresh OpenBox group last.
 func (i Installer) mergeEvent(existing json.RawMessage, ev HookName) (json.RawMessage, error) {
 	var groups []matcherGroup
 	if len(existing) > 0 {
@@ -259,13 +209,6 @@ func (i Installer) mergeEvent(existing json.RawMessage, ev HookName) (json.RawMe
 	return json.Marshal(kept)
 }
 
-// isOpenBoxHandler reports whether a raw handler entry is OpenBox-owned: a
-// `command` handler whose ENTIRE command is one engine token followed by the
-// anchored `hook codex|claude-code <event>` invocation (ownedInvocation) —
-// i.e. exactly the shape hookCommand generates, regardless of which engine
-// path a previous install baked in. Anything else — including a compound
-// command that embeds such an invocation — is foreign (kept). Unparsable
-// entries are foreign (kept).
 func isOpenBoxHandler(raw json.RawMessage) bool {
 	var h struct {
 		Type    string `json:"type"`
@@ -278,12 +221,6 @@ func isOpenBoxHandler(raw json.RawMessage) bool {
 	return ok && ownedInvocation.MatchString(rest)
 }
 
-// stripEngineToken removes the leading engine token from a command line — a
-// double-quoted path (the shape we generate for a resolved engine) or a single
-// unquoted word (the `openbox`-on-PATH fallback; also matches an env-prefixed
-// path like $CLAUDE_PLUGIN_ROOT/bin/openbox from a migrated import) — and
-// returns the space-trimmed remainder. ok=false when the command has no
-// well-formed leading token (e.g. an unterminated quote).
 func stripEngineToken(cmd string) (rest string, ok bool) {
 	if cmd == "" {
 		return "", false
@@ -301,11 +238,6 @@ func stripEngineToken(cmd string) (rest string, ok bool) {
 	return "", true // a bare single token carries no hook invocation
 }
 
-// hookCommand renders the shell command line for one event: the (quoted)
-// absolute engine path + `hook codex <event>`. Codex runs command handlers
-// through the user's shell, so the path is double-quoted against spaces —
-// the same convention as the CC plugin's hooks.json. INV-1: the command
-// carries the engine path + event name ONLY.
 func (i Installer) hookCommand(event string) string {
 	engine := i.EngineBinary
 	if engine == "" {
@@ -325,10 +257,6 @@ func timeoutFor(ev HookName) int {
 	return hotHookTimeoutSec
 }
 
-// writeConfig persists the shared non-secret dev config. The merge policy —
-// what a re-init carries forward versus overwrites — lives in devconfig so it
-// is identical for every provider (that decision posture included). It used to
-// be a port of the CC installer's copy, and the two had already drifted.
 func (i Installer) writeConfig(ref CredentialRef) error {
 	if err := devconfig.WriteConfig(i.configPath(), providerspi.ConfigUpdate(ref)); err != nil {
 		return fmt.Errorf("codex install: %w", err)
@@ -347,14 +275,6 @@ func (i Installer) configPath() string {
 	if i.ConfigPath != "" {
 		return i.ConfigPath
 	}
-	// The WRITE target, deliberately — not DefaultConfigPath(), which is
-	// read-resolved and prefers an existing LEGACY file over a not-yet-created new
-	// one (devconfig.resolveConfigPath). Writing through the read path would let an
-	// install land in the pre-that decision directory whenever migration had not
-	// yet created the new file — and migration is explicitly non-fatal, so that is
-	// reachable, not theoretical. It happens to work today only because
-	// migrateLegacyConfig usually runs first; relying on that ordering is what this
-	// avoids.
 	if p, err := devconfig.DevConfigWritePath(); err == nil {
 		return p
 	}
@@ -362,9 +282,8 @@ func (i Installer) configPath() string {
 }
 
 // defaultHooksPath is Codex's user-level hooks file: $CODEX_HOME/hooks.json
-// when CODEX_HOME is set (Codex's own home override), else ~/.codex/hooks.json.
-// (Repo-level .codex/hooks.json and config.toml [hooks] are alternative
-// locations this installer deliberately does not touch.)
+// when CODEX_HOME is set (Codex's own home override), else
+// ~/.codex/hooks.json.
 func defaultHooksPath() string {
 	if h := os.Getenv("CODEX_HOME"); h != "" {
 		return filepath.Join(h, "hooks.json")
@@ -376,8 +295,6 @@ func defaultHooksPath() string {
 	return filepath.Join(home, ".codex", "hooks.json")
 }
 
-// contentCaptureLabel renders the *bool org content posture for the install
-// preview: nil ⇒ the adapter default (ON as of 2026-07-15), else the pinned value.
 func contentCaptureLabel(b *bool) string {
 	switch {
 	case b == nil:

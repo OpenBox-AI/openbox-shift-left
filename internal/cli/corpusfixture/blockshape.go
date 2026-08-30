@@ -5,14 +5,11 @@ import (
 	"regexp"
 )
 
-// blockTypeRe is what a provider's block discriminator looks like: a lowercase
-// snake_case identifier, never prose.
 var blockTypeRe = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
 
-// typeNamedField is the field a block of each known type must carry.
-//
-// Only the four the substitution rules reach are listed. An unknown type is
-// accepted, because a provider adding a block type must not fail this gate.
+// typeNamedField is the field a block of each known type must carry. An
+// unknown type is accepted, because a provider adding a block type must not
+// fail this gate.
 var typeNamedField = map[string]string{
 	"text":        "text",
 	"thinking":    "thinking",
@@ -20,14 +17,9 @@ var typeNamedField = map[string]string{
 	"tool_result": "content",
 }
 
-// malformedBlocks reports content blocks in a recorded request body whose shape
-// no provider would produce.
-//
-// It is deliberately a different KIND of rule from the substitution check beside
-// it. That check asks whether substituting the body would change it, so a body
-// the substitution itself corrupted answers no and passes: the gate and the
-// thing it gates were one implementation. This one reads the result instead, and
-// it is what catches a discriminator rewritten into prose.
+// malformedBlocks reports content blocks in a recorded request body whose
+// shape no provider would produce. It is deliberately a different kind of rule
+// from the substitution check beside it.
 func malformedBlocks(body string) []string {
 	var top struct {
 		Messages []struct {

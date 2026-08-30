@@ -9,20 +9,6 @@ import (
 	"strings"
 )
 
-// rotate.go — re-issue an existing agent's credentials.
-//
-// This closes a real dead end: the agent exists remotely, its API key and
-// signing key were shown exactly once and are gone, and `init` refuses with
-// "already exists … but no local credentials are stored." Deleting and
-// re-registering loses the agent's history; rotation keeps its id AND its DID.
-//
-// The DID survives by construction, not by luck: both identity providers return
-// `{did: didFor(agentId), privateKey}`, and didFor derives the DID from the agent
-// id — so a rotation cannot change it. KMS mode is not an obstacle either; it
-// generates locally and imports, so the private key still comes back.
-
-// rotateAPIKeyResponse tolerates either a bare body or a {status,data:{…}}
-// envelope, because the control plane uses both shapes across endpoints.
 type rotateAPIKeyResponse struct {
 	Token string `json:"token"`
 	Data  struct {
@@ -37,8 +23,6 @@ func (r rotateAPIKeyResponse) token() string {
 	return r.Data.Token
 }
 
-// rotateIdentityResponse mirrors the identity rotation reply, envelope-tolerant
-// for the same reason.
 type rotateIdentityResponse struct {
 	DID        string `json:"did"`
 	PrivateKey string `json:"privateKey"`
@@ -62,12 +46,8 @@ func (r rotateIdentityResponse) privateKey() string {
 	return r.Data.PrivateKey
 }
 
-// RotateAPIKey issues a new runtime key for an existing agent and invalidates the
-// previous one server-side.
-//
-// A 2xx reply that carries no token FAILS rather than returning an empty string:
-// writing an empty credential over a working one would break the install and look
-// like a successful rotation.
+// RotateAPIKey issues a new runtime key for an existing agent and invalidates
+// the previous one server-side.
 func (c *Client) RotateAPIKey(ctx context.Context, agentID string) (string, error) {
 	if strings.TrimSpace(agentID) == "" {
 		return "", errors.New("rotate api key: no agent id")
@@ -94,12 +74,8 @@ func (c *Client) RotateIdentity(ctx context.Context, agentID string) (did, priva
 	if err := c.do(ctx, http.MethodPost, "/agent/"+agentID+"/identity/rotate", nil, &resp); err != nil {
 		return "", "", rotateError("rotate identity", agentID, err)
 	}
-	// The fail-loud guard exists because of a specific upstream risk:
-	// AgentIdentityResponseDto declares did/key_id/key_arn/public_key but NOT
-	// privateKey, which is what the service actually returns. No serializer
-	// interceptor strips it today, so it arrives — but if one is ever added, every
-	// rotation would silently yield nothing usable. Failing here means a broken
-	// deploy produces a clear error instead of an empty credential on disk.
+	// No serializer interceptor strips it today, so it arrives; but if one is
+	// ever added, every rotation would silently yield nothing usable.
 	if resp.privateKey() == "" {
 		return "", "", fmt.Errorf("rotate identity: the server accepted the request but returned no `privateKey` field. "+
 			"Agent %s may now have a rotated identity this machine cannot sign with — re-run to rotate again, "+
@@ -113,13 +89,6 @@ func (c *Client) RotateIdentity(ctx context.Context, agentID string) (did, priva
 	return resp.did(), resp.privateKey(), nil
 }
 
-// rotateError maps the control plane's failures onto the thing the operator has
-// to change.
-//
-// The 404 case is the one worth the effort: rotateAgentIdentity answers 404 with
-// "Agent identity has not been provisioned" when signing_required is null, which
-// is NOT "no such agent". Reporting them identically sends someone hunting for an
-// agent that exists.
 func rotateError(op, agentID string, err error) error {
 	var apiErr *APIError
 	if !errors.As(err, &apiErr) {
@@ -146,13 +115,10 @@ func rotateError(op, agentID string, err error) error {
 	}
 }
 
-// identityNotProvisioned recognizes the not-provisioned 404 from its message,
-// since the status code alone cannot distinguish it from an unknown agent.
 func identityNotProvisioned(body string) bool {
 	if strings.Contains(strings.ToLower(body), "not been provisioned") {
 		return true
 	}
-	// Same check against a decoded message field, for a body shape that nests it.
 	var wrapper struct {
 		Message string `json:"message"`
 	}

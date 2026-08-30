@@ -13,7 +13,7 @@ import (
 // EnvFlushSession carries the session id from the realtime trigger to the
 // spawned flusher process (`openbox hook <provider> flush`). Env rather than a
 // positional arg so the flush subcommand's argv contract is unchanged; the
-// value is a session id only — structural, never content (INV-2).
+// value is a session id only; structural, never content (INV-2).
 const EnvFlushSession = "OPENBOX_FLUSH_SESSION"
 
 // DefaultRealtimeWindow is the debounce window: at most one flusher is spawned
@@ -24,38 +24,6 @@ const DefaultRealtimeWindow = 2 * time.Second
 // RealtimeTrigger spawns a short-lived detached flusher for a session after an
 // event is spooled, so telemetry reaches core mid-session instead of waiting
 // for SessionEnd (batch-at-end remains the completeness safety net).
-//
-// The hot path stays INV-3 clean: Maybe performs no network I/O — its worst
-// case is one lockfile stat/create plus, at most once per Window, a Start of
-// our own binary. Every fault is logged and swallowed; events then simply wait
-// for SessionEnd exactly as before the trigger existed.
-//
-// Debounce is a per-session lockfile in the spool dir (FlushLockPath): hooks
-// are separate short-lived processes, so the filesystem is the only shared
-// state. The spawned flusher refreshes the lock's mtime when its drain starts
-// and removes it when the drain finishes (TouchFlushLock/ReleaseFlushLock), so
-// the window covers the spawn plus the drain's first Window. A drain slower
-// than that (a slow network, a long backlog) looks stale to a later hook,
-// which takes the lock over and spawns a second flusher alongside it —
-// wasteful under exactly the conditions you would rather not add work, but
-// never incorrect (see the delivery guarantees below). The same staleness is
-// what recovers a lock whose flusher was killed mid-drain. Tail caveat: an
-// event spooled in the instant between a flusher's final drain and its lock
-// release waits for the next hook (or SessionEnd) — bounded staleness, never
-// loss.
-//
-// Redundant flushes are harmless because spool rotation is an atomic rename: a
-// losing drain claims nothing and delivers zero events, so two flushers can
-// never both send one spooled event.
-//
-// That rename is the WHOLE guarantee, and it only covers events that go through
-// the spool. Server-side dedupe on the Idempotency-Key is NOT a second line of
-// defence: core does not dedupe developer events on their id today (E8-S7 is the
-// client half only — a stable, unique id so that eventual dedupe is trivially
-// correct). Anything that reaches core outside the spool therefore has to avoid
-// duplicating itself on its own. The inline evaluation is exactly that case, and
-// assuming a dedupe that did not exist is how it came to store every escalated
-// ActivityStarted twice — see EnforceGate.SpoolObserve.
 type RealtimeTrigger struct {
 	Spool    Spool
 	Provider string // adapter name as the hook subcommand spells it, e.g. "claude-code"
@@ -63,12 +31,9 @@ type RealtimeTrigger struct {
 	Self string
 	// Window is the debounce window; zero ⇒ DefaultRealtimeWindow.
 	Window time.Duration
-	// Enabled gates the trigger; nil ⇒ devconfig.ResolveRealtime. When it
-	// reports false, Maybe returns before any filesystem I/O — byte-identical
-	// to the pre-realtime behavior.
+	// Enabled gates the trigger; nil ⇒ devconfig.ResolveRealtime.
 	Enabled func() bool
-	// Start launches the prepared command; nil ⇒ (*exec.Cmd).Start. Injectable
-	// so unit tests can observe the spawn without executing anything.
+	// Start launches the prepared command; nil ⇒ (*exec.Cmd).Start.
 	Start func(*exec.Cmd) error
 }
 
@@ -85,9 +50,6 @@ func (t RealtimeTrigger) Maybe(logger *log.Logger, sessionID string) {
 		return
 	}
 
-	// Resolve the binary to spawn BEFORE touching the filesystem, so a run
-	// that cannot spawn anyway (no resolvable self, or a test binary) leaves
-	// the spool dir byte-identical to pre-realtime behavior.
 	self := t.Self
 	if self == "" {
 		exe, err := os.Executable()
@@ -95,11 +57,6 @@ func (t RealtimeTrigger) Maybe(logger *log.Logger, sessionID string) {
 			logger.Printf("realtime flush: cannot resolve own binary: %v", err)
 			return
 		}
-		// The trigger may only ever spawn the openbox engine. Under `go test`
-		// the executable is the TEST binary (`*.test`), and spawning it with
-		// hook args would re-run the suite — recursively, since those tests
-		// reach this code again (a fork bomb, not a flusher). Tests that
-		// exercise the spawn itself inject Self explicitly.
 		if strings.HasSuffix(strings.TrimSuffix(exe, ".exe"), ".test") {
 			return
 		}
@@ -112,12 +69,6 @@ func (t RealtimeTrigger) Maybe(logger *log.Logger, sessionID string) {
 	}
 	lock := t.Spool.FlushLockPath(sessionID)
 
-	// Claim the debounce lock. O_EXCL create is the atomic happy path; on
-	// EEXIST the mtime decides between "flush in flight / just ran" (skip)
-	// and "stale claim from a dead spawner" (take over by refreshing the
-	// mtime). The takeover is deliberately best-effort rather than atomic:
-	// two racing hooks can both take over a stale lock and spawn twice, which
-	// costs one redundant drain and can never double-count (see type doc).
 	f, err := os.OpenFile(lock, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 	switch {
 	case err == nil:
@@ -136,19 +87,12 @@ func (t RealtimeTrigger) Maybe(logger *log.Logger, sessionID string) {
 			return
 		}
 	default:
-		// Spool dir may not exist yet (Maybe runs after Append, which creates
-		// it — but stay defensive) or the create failed some other way. Log
-		// and fall back to SessionEnd delivery.
 		logger.Printf("realtime flush: lock claim skipped: %v", err)
 		return
 	}
 
 	cmd := exec.Command(self, "hook", t.Provider, "flush")
 	cmd.Env = append(os.Environ(), EnvFlushSession+"="+sessionID)
-	// The flusher is fire-and-forget: no pipes back to the hook process, so
-	// the hook can exit immediately and the provider never waits on the child.
-	// Its stderr diagnostics are discarded — acceptable, because the flush
-	// path is already fail-open and SessionEnd re-drains whatever it missed.
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = nil, nil, nil
 	cmd.SysProcAttr = detachAttr()
 	start := t.Start
@@ -157,29 +101,10 @@ func (t RealtimeTrigger) Maybe(logger *log.Logger, sessionID string) {
 	}
 	if err := start(cmd); err != nil {
 		logger.Printf("realtime flush: spawn failed (events wait for SessionEnd): %v", err)
-		// Leave no claim behind: with the lock held, every later hook in this
-		// window would skip too, and if spawning is persistently broken the
-		// stale takeover would keep failing the same way.
 		_ = os.Remove(lock)
 		return
 	}
 	if cmd.Process != nil {
-		// REAP IT. Release drops this process's handle on the child; it does not
-		// collect the child's exit status, so the child stays a zombie until its
-		// parent dies. That was invisible while every caller was a hook — a
-		// process that exits in milliseconds, after which init reaps — and became
-		// a resource leak the moment a LONG-LIVED caller appeared: the gateway
-		// daemon runs under launchd KeepAlive / systemd Restart=always for days
-		// and calls Maybe per relayed model call, so at one spawn per debounce
-		// window it accumulates zombies until the per-uid process limit is hit,
-		// at which point nothing on the machine can fork.
-		//
-		// Wait in a goroutine, not Release: the child is already detached
-		// (detachAttr gives it its own session) so waiting does not tie its
-		// lifetime to ours, and there are no pipes to drain — stdin/stdout/stderr
-		// are nil above — so this goroutine blocks only on the child's exit and
-		// then ends. A hook process that exits before the goroutine runs loses
-		// nothing: init reaps, exactly as before.
 		go func() { _ = cmd.Wait() }()
 	}
 }

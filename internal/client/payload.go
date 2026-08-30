@@ -10,21 +10,8 @@ import (
 	"time"
 )
 
-// source tags developer-runtime traffic on the wire. core's `source` field is
-// free-form/unvalidated (MAPPING.md §6); this distinguishes developer events
-// from the SDK's "workflow-telemetry".
 const source = "developer-runtime"
 
-// governanceEventPayload mirrors the subset of openbox-core's
-// GovernanceEventPayload (internal/content/governance.go:186) that the
-// developer-runtime client sets. Fields core populates for Temporal events
-// (task_queue, parent_workflow_id, attempt, …) are intentionally omitted —
-// they stay absent (omitempty), which is additive and INV-8-safe.
-//
-// One struct serializes every developer event. There is no second, map-shaped
-// regime: tool calls are activity events like everything else (decision
-// record: tool call as activity), so field order on the wire is this
-// declaration order, for all of them.
 type governanceEventPayload struct {
 	Source    string `json:"source"`
 	EventType string `json:"event_type"`
@@ -35,78 +22,39 @@ type governanceEventPayload struct {
 	// ActivityID pairs a tool call's ActivityStarted and ActivityCompleted onto
 	// one timeline row, and is the approval key: an approval is filed against
 	// (workflow_id, run_id, activity_id), the hold polls that triple, and core
-	// scopes its bypass grants by it. Set on tool events only — see
-	// activityIDFor for why it must stay operation-derived.
+	// scopes its bypass grants by it.
 	ActivityID string `json:"activity_id,omitempty"`
 	WorkflowID string `json:"workflow_id"`
 	RunID      string `json:"run_id"`
 	// WorkflowType is the base wire contract's required workflow discriminator.
-	// Kept constant per session (workflowType) so WorkflowStarted, its
-	// SignalReceived events, its activity events and WorkflowCompleted all
-	// resolve to one workflow.
 	WorkflowType string `json:"workflow_type,omitempty"`
 	// SignalName is required on a SignalReceived event, empty on
 	// Workflow*/Activity* events.
 	SignalName string `json:"signal_name,omitempty"`
 	// SignalArgs carries a SignalReceived event's arguments (the openbox-fe
-	// Verify-tab "Input" detail reads log.signal_args). Commit/deploy signals
-	// carry structural lineage identifiers (commit_sha/repo/deploy_id/…); a
-	// prompt_submitted signal carries the prompt only under content-capture
-	// (content — INV-2 — gated like a request_body, capped, absent by
-	// default), never a commit-message body or session context. See
-	// buildSignalArgs.
+	// Verify-tab "Input" detail reads log.signal_args).
 	SignalArgs json.RawMessage `json:"signal_args,omitempty"`
 	// ActivityInput rides ActivityStarted; core stores it as the row's `input`
 	// and runs Guardrails stage "0" over it (services/guardrail.go:180).
-	// Structural only, plus the content-gated approval context — see
-	// structuralActivityInput.
 	ActivityInput json.RawMessage `json:"activity_input,omitempty"`
 	// ActivityOutput rides ActivityCompleted; core stores it as the row's
-	// `output` and runs Guardrails stage "1" over it
-	// (services/guardrail.go:192). Counts and an exit code, plus — under the
-	// content gate — the tool's own output text (on a failed call that text is
-	// the tool's error). See structuralActivityOutput.
+	// `output` and runs Guardrails stage "1" over it (services/guardrail.go:192).
 	ActivityOutput json.RawMessage `json:"activity_output,omitempty"`
-	// DurationMs is how long the tool call took, in milliseconds. The client
-	// computes it because there is no longer a span for core to derive it from:
-	// core copies this field straight onto the row
-	// (activities/governance/storage_event.go:292-294) and the dashboard reads
-	// event.duration_ms directly. Absent rather than zero when unknown — see
-	// durationMs.
+	// DurationMs is how long the tool call took, in milliseconds.
 	DurationMs *float64        `json:"duration_ms,omitempty"`
 	Timestamp  string          `json:"timestamp"`
 	Metadata   json.RawMessage `json:"metadata,omitempty"`
 	// Status is the tool call's outcome, and the single field core's per-tool
-	// success metric reads:
-	//
-	// metric.IsSuccess = payload.Status != nil && *payload.Status == "completed"
-	// — openbox-core internal/services/activities/observability/errors.go:333
-	//
-	// It went unwritten by every producer for this field's whole existence, while
-	// `.total` incremented on every ActivityStarted — so each completion scored
-	// as tool.<name>.failed and SUCCESS read 0.0% by construction.
-	//
-	// APPENDED LAST deliberately. Key order on the wire is this struct's
-	// declaration order and the golden fixtures pin it byte-exactly; adding the
-	// field anywhere else would rewrite every fixture and obscure the one-key
-	// diff that shows this change is additive.
+	// success metric reads: appended last deliberately.
 	Status string `json:"status,omitempty"`
-	// Spans carries EXACTLY ONE span, on a TurnCompleted under content capture,
-	// and nothing else ever. It is not a return of the span layer that decision
-	// retired: tool events stay span-less and the deleted files stay deleted.
-	// It exists because core's goal-alignment extractor reads assistant text
-	// from payload.Spans and from no other field, so a span-less session can
-	// never feed it — see client/turnspan.go.
-	//
-	// Both keys are absent unless there is text, which is what makes
-	// content_capture:false emit nothing new at all rather than an empty array.
+	// Spans carries exactly ONE span, on a TurnCompleted under content capture,
+	// and nothing else ever. It exists because core's goal-alignment extractor
+	// reads assistant text from payload.Spans and from no other field, so a span-
+	// less session can never feed it; see client/turnspan.go.
 	Spans     []wireSpan `json:"spans,omitempty"`
 	SpanCount int        `json:"span_count,omitempty"`
 }
 
-// Base wire event types (INV-8: every dev event maps onto one of these stock
-// types, so a stock core accepts it with no patch). All five are on core's
-// accept-list (internal/api/governance.go:273-286).
 const (
 	wireWorkflowStarted   = "WorkflowStarted"
 	wireWorkflowCompleted = "WorkflowCompleted"
@@ -115,30 +63,8 @@ const (
 	wireActivityCompleted = "ActivityCompleted"
 )
 
-// buildPayload maps a normalized DevEvent onto core's GovernanceEventPayload and
-// marshals it to the exact bytes that will be signed and transmitted.
-// Content-stripping (INV-2) has already run in Emit when content-capture is
-// disabled, so any content still present here is authorized.
-//
-// Every developer event takes one path onto stock accept-listed base wire types
-// (INV-8): - SessionStarted/Ended → Workflow* (session = workflow) -
-// PromptSubmitted/CommitCreated/Deploy → SignalReceived(signal_name) - ToolCall →
-// ActivityStarted, ToolResult → ActivityCompleted
-//
-// A tool execution IS an activity: it is the unit of work a developer session
-// performs, it is what an approver decides about, and both halves are evaluated
-// independently by core. Tool events used to ride an ActivityStarted+hook_trigger
-// envelope carrying a hand-fabricated OTel span, because the base SDK reserves
-// ActivityCompleted for hook-less lifecycle events. That rule binds runtimes that
-// HAVE in-process OTel to produce a span with; a hook process has none, so the
-// span was invented to satisfy a shape rather than to record a measurement.
-// Modelling the call at the activity layer instead retires the span layer whole —
-// see that decision for what that costs (no span rows, no span-level Merkle
-// leaves, no server-side semantic_type for dev sessions).
-//
-// The bytes returned here are BOTH hashed for the signature AND sent as the body,
-// so they are produced exactly once — client.go never re-marshals. Key order is
-// this struct's declaration order and the golden fixtures pin it.
+// buildPayload maps a normalized DevEvent onto core's GovernanceEventPayload
+// and marshals it to the exact bytes that will be signed and transmitted.
 func buildPayload(ev DevEvent) ([]byte, error) {
 	wireType, signalName, err := wireTypeFor(ev.EventType)
 	if err != nil {
@@ -159,10 +85,6 @@ func buildPayload(ev DevEvent) ([]byte, error) {
 		p.SignalArgs = buildSignalArgs(ev) // nil (omitted) when there is nothing to show
 	}
 
-	// Activity fields ride tool events only. activity_id is set on BOTH halves
-	// — it is what pairs them onto one row and what an approval addresses —
-	// while input rides the started half and output/duration the completed one,
-	// matching the stage Guardrails evaluates each against.
 	switch ev.EventType {
 	case EventToolCall:
 		p.ActivityID = activityIDFor(ev)
@@ -172,29 +94,13 @@ func buildPayload(ev DevEvent) ([]byte, error) {
 		p.ActivityOutput = structuralActivityOutput(ev)
 		p.DurationMs = durationMs(ev)
 		p.Status = statusFor(ev)
-	// A turn is an activity too. Its id is derived from the turn index rather
-	// than hashed from an operation, because a turn has no operation to key on
-	// and a readable id is worth having in stored rows. The Started half
-	// carries no activity_input: the input to a turn is the prompt, which is
-	// content, and the PromptSubmitted signal already carries it under the
-	// content gate.
 	case EventTurnStarted:
 		p.ActivityID = turnActivityIDFor(ev)
 	case EventTurnCompleted:
 		p.ActivityID = turnActivityIDFor(ev)
 		p.ActivityOutput = turnActivityOutput(ev)
 		p.DurationMs = durationMs(ev)
-		// The assistant's words, when capture left them on the event. Note what
-		// is deliberately NOT set alongside: hook_trigger. A payload with
-		// hook_trigger true AND spans present enters core's approval-bypass
-		// fingerprint path (governance_workflow.go:310-330), and a model turn is
-		// not an approvable operation.
-		// Two producers, one at a time. An OBSERVING lane's turn (gateway,
-		// transport relay or telemetry receiver) carries the observed HTTP
-		// exchange; a hook turn carries the assistant's reply. They never ride the
-		// same event — the lane discriminator is what separates them — so the
-		// extractor that reads the LAST span as assistant text can never be handed
-		// a raw provider response body by accident.
+		// Note what is deliberately NOT set alongside: hook_trigger.
 		if span := observedSpan(ev); span != nil {
 			p.Spans = []wireSpan{*span}
 			p.SpanCount = 1
@@ -213,18 +119,8 @@ func buildPayload(ev DevEvent) ([]byte, error) {
 	return json.Marshal(p)
 }
 
-// workflowType is the base wire contract's required `workflow_type` for a
-// developer session. It's a constant (not the provider name — that rides in
-// metadata) so a session's WorkflowStarted, every SignalReceived and activity
-// event it carries, and its WorkflowCompleted share one (workflow_id, run_id,
-// workflow_type) identity and Core resolves them to the same workflow/session
-// row.
 const workflowType = "developer-session"
 
-// wireTypeFor maps a developer-runtime EventType onto its base wire event_type
-// and, for a signal, its signal_name. The DevEvent EventType is preserved as the
-// dashboard activity_type label (activityLabel); only the wire type is
-// rewritten.
 func wireTypeFor(et EventType) (wireType, signalName string, err error) {
 	switch et {
 	case EventSessionStarted:
@@ -237,11 +133,6 @@ func wireTypeFor(et EventType) (wireType, signalName string, err error) {
 		return wireSignalReceived, "commit_created", nil
 	case EventDeploy:
 		return wireSignalReceived, "deploy", nil
-	// The failure/lifecycle signals. Stock SignalReceived, so a stock core
-	// accepts them with no patch (INV-8). buildSignalArgs deliberately has no arm
-	// for any of them — see the EventSubagentStarted doc comment for why
-	// non-empty signal_args on these would overwrite the goal-alignment session's
-	// user goal.
 	case EventSubagentStarted:
 		return wireSignalReceived, "subagent_started", nil
 	case EventPermissionDenied:
@@ -253,30 +144,12 @@ func wireTypeFor(et EventType) (wireType, signalName string, err error) {
 	case EventToolResult, EventTurnCompleted:
 		return wireActivityCompleted, "", nil
 	}
-	// Emitting the DevEvent's own string here produced a non-accept-listed
-	// event_type: a guaranteed 400 that the fail-open path then swallowed, so a
-	// new event type would go silently undelivered. Failing to build says so.
 	return "", "", fmt.Errorf("client: no base wire type for event_type %q", et)
 }
 
-// activityPairKey identifies the OPERATION a tool call performs: the session,
-// the tool, its structural locator, and the operation discriminator the adapter
-// derived (see Span.OperationID). It excludes the stage and the timestamp — the
-// fields that differ between a call's paired started/completed events — and
-// every field survives the spool round-trip, so the derived ids are stable even
-// after a rehydrated flush.
-//
-// It must be identical across a RETRY of the same operation, because
-// activity_id is derived from it, activity_id is the approval key, and core
-// scopes both of its bypass grants by activity_id. It used to fold in the
-// provider's per-invocation tool_use_id (carried in Span.Function), which made
-// every retry a different activity: the approval an approver had granted could
-// never be consumed, the retry filed a fresh request, and a rewake that said
-// "re-run to proceed" looped indefinitely, burning one human decision per pass.
-//
-// No content feeds the key (INV-2). The file path and function are structural
-// locators, and the operation discriminator is a hash — see client/operation.go
-// for why that is a correlation id rather than a content field.
+// activityPairKey identifies the operation a tool call performs: the session,
+// the tool, its structural locator, and the operation discriminator the
+// adapter derived (see Span.OperationID).
 func activityPairKey(ev DevEvent) string {
 	const sep = 0x1f
 	var b strings.Builder
@@ -295,13 +168,7 @@ func activityPairKey(ev DevEvent) string {
 }
 
 // workflowIDFor is the wire workflow_id: the workspace identity, falling back
-// to the stable per-developer one. Every event uses it, including the tool
-// events, so a session's whole tree resolves to one workflow.
-//
-// It is derived in exactly one place because ApprovalKeyFor calls it too: a
-// poll built from an independently-computed id would address a different row
-// than the escalation created, and the hold would report "never decided" for an
-// approval that was in fact granted.
+// to the stable per-developer one.
 func workflowIDFor(ev DevEvent) string {
 	if ev.WorkspaceID != "" {
 		return ev.WorkspaceID
@@ -309,10 +176,6 @@ func workflowIDFor(ev DevEvent) string {
 	return ev.DeveloperDID
 }
 
-// activityIDFor is the wire activity_id (free-form; not hex-constrained): the
-// pairing key shared by a tool call's ActivityStarted and ActivityCompleted, and
-// the approval key ApprovalKeyFor addresses. Same single-derivation rule as
-// workflowIDFor, for the same reason.
 func activityIDFor(ev DevEvent) string {
 	sum := sha256.Sum256([]byte("act\x1f" + activityPairKey(ev)))
 	return "cc-act-" + hex.EncodeToString(sum[:16])
@@ -321,48 +184,7 @@ func activityIDFor(ev DevEvent) string {
 // turnActivityIDFor is the wire activity_id shared by a turn's ActivityStarted
 // and ActivityCompleted: "<session_id>:turn:<index>", or
 // "<session_id>:agent:<agent_id>:turn:<index>" for a subagent's turn.
-//
-// It is a DIFFERENT derivation from activityIDFor deliberately, on three counts:
-//
-//   - There is nothing to hash. A tool call's id hashes an operation so that a
-//     retry of the same operation addresses the approval already granted for it.
-//     A turn is not retried and is never approved, so a hash would only make the
-//     id unreadable in stored rows for no gain.
-//   - It must be derivable from fields that survive the spool (SessionID,
-//     TurnIndex, AgentID are all persisted), because a flush can happen long
-//     after the hook process that built the event exited.
-//   - It cannot collide with a tool-call id by construction: those are
-//     "cc-act-" + 32 hex chars, and this shape contains ':' and a decimal index.
-//
-// Core treats activity_id as an opaque string and its dedupe key is
-// (agent_id, workflow_id, run_id, activity_id, event_type) — so re-emitting a
-// turn after a crash re-mints this exact id and the server absorbs it rather
-// than storing a second row. That is what makes the cursor's
-// over-report-on-crash direction safe.
-//
-// A SessionRollup turn — Codex's granularity, one usage activity per session —
-// takes "<session_id>:usage:rollup" instead, which cannot collide with an indexed
-// turn because "rollup" is not a decimal number.
-//
-// Returns "" when TurnIndex is unset on a non-rollup turn, which keeps the field
-// omitted rather than minting "<session>:turn:" for something that is not a turn.
-// TestTurnActivityIDIsPinned holds these bytes.
 func turnActivityIDFor(ev DevEvent) string {
-	// Each lane that can observe a model turn takes its own namespace, and the
-	// separators are what keep them apart: ":proxy:", ":otel:" and ":gateway:"
-	// cannot collide with ":turn:<decimal>", with ":usage:rollup", or with a tool
-	// call's "cc-act-<32 hex>" — the last by containing ':' at all. That
-	// disjointness IS requirement 8, and TestEveryTurnProducerNamespaceIsDisjoint
-	// holds it across all five producers.
-	//
-	// The order is the producer election's precedence — in-path relay, then
-	// gateway, then client-asserted telemetry — with the two non-elected shapes
-	// below it, since a rollup and a hook index are what remain when no relay
-	// observed the turn at all. A well-formed event carries exactly ONE of these
-	// (the contract's turnProducer oneOf rejects two), so the order only decides
-	// how a MALFORMED event is attributed; it is pinned anyway, because a silent
-	// reorder would re-attribute the same stream across a binary upgrade and core
-	// would split one turn across two rows with no error.
 	if ev.ProxyRequestID != "" {
 		return ev.SessionID + ":proxy:" + ev.ProxyRequestID
 	}
@@ -389,48 +211,11 @@ func turnActivityIDFor(ev DevEvent) string {
 	return b.String()
 }
 
-// activityTypeLLMCompletion is the activity_type both turn halves carry. The
-// name is not invented here: core already uses "llm_completion" as a semantic
-// type for the AI-Agent runtime's model-call spans
-// (openbox-core internal/content/session.go:105), so one vocabulary spans both
-// runtimes and the core-side extractor keys on a name it already knows.
 const activityTypeLLMCompletion = "llm_completion"
 
 // turnActivityOutput builds the `activity_output` for a turn's
 // ActivityCompleted: the model that ran and the four token counts it spent.
-//
-// The shape mirrors the AI-Agent llm_completion span's response_body ({model,
-// usage{…}}) so a consumer reads one shape regardless of which runtime produced
-// it — which is the whole point of routing the turn through an activity instead
-// of reviving the span layer that decision retired.
-//
-// INV-2, stated exactly: THIS OBJECT carries FOUR NUMBERS, ONE IDENTIFIER, and —
-// since v1.4 — ONE GATED CONTENT FIELD. No prompt, no completion, no stop
-// reason, no tool content. The model id is capStr-bounded by the adapter;
-// `thinking` is gated (stripContent nils Content when the org opted out),
-// redacted at the adapter before attachment, and capped here.
-//
-// This paragraph used to end "the schema must stay numbers plus one bounded
-// identifier", and that is no longer what it is. The reason it changed is worth
-// keeping: core runs Guardrails stage "1" and OPA over this field
-// (internal/services/guardrail.go:191-194, opa.go:529-531), so what lands here
-// is policy-VISIBLE. For token spend that was an intended upside; for thinking
-// it is the point — reasoning a policy can see is reasoning a policy can judge.
-// It also means a body here is inspected content, which is why the cap is not
-// optional.
-//
-// Scope note : the assistant's ANSWER is still not here. It rides the span
-// (buildPayload's EventTurnCompleted arm, client/turnspan.go) because core's
-// alignment extractor reads payload.Spans and nothing else. openbox-core#130
-// asks for it to read this field instead, and when that lands the answer moves
-// HERE as activity_output.message and the span is deleted — beside `thinking`,
-// not merged with it.
-//
-// Cost is deliberately absent. Core and the backend each derive it server-side
-// from a model-keyed pricing table; deriving it here would fabricate a number
-// from a table this client has no business owning.
-//
-// Returns nil (field omitted) when the turn carried neither usage nor a model.
+// Cost is deliberately absent.
 func turnActivityOutput(ev DevEvent) json.RawMessage {
 	m := map[string]any{}
 	if ev.Model != "" {
@@ -454,16 +239,6 @@ func turnActivityOutput(ev DevEvent) json.RawMessage {
 			m["usage"] = usage
 		}
 	}
-	// The turn's extended thinking, when capture left it on the event (v1.4).
-	// Capped HERE — this is the choke point every turn crosses, and the signed
-	// bytes are the bytes buildPayload returns, so capping here caps what is
-	// signed.
-	//
-	// It rides activity_output rather than the assistant span deliberately: that
-	// span exists solely to feed core's alignment extractor, which reads it as
-	// the assistant's REPLY. Putting chain-of-thought there would score every
-	// later turn's drift against the model's reasoning instead of its answer, and
-	// fail silently — core logs nothing when the text is merely the wrong text.
 	if ev.Content != nil && ev.Content.Thinking != "" {
 		m["thinking"] = capBody(ev.Content.Thinking)
 	}
@@ -477,27 +252,11 @@ func turnActivityOutput(ev DevEvent) json.RawMessage {
 	return b
 }
 
-// toolStatuses is the closed wire vocabulary for `status`.
 var toolStatuses = map[string]bool{
 	StatusCompleted: true,
 	StatusFailed:    true,
 }
 
-// statusFor resolves the wire `status` for an event, enforcing BOTH halves of
-// the field's contract at the one boundary every event crosses:
-//
-//   - event-type scope — tool results only. A turn already fails core's tool
-//     metric by exclusion (errors.go:320-322), but a lifecycle event would land
-//     its value in governance_events.workflow_status, a column that means
-//     something else. That is the binding reason, and it is why this is checked
-//     here rather than trusted to each adapter.
-//   - vocabulary — anything but the two literals is DROPPED, not forwarded.
-//     Core scores every non-"completed" value as a failure, so shipping a typo
-//     would report 0% success just as convincingly as shipping nothing, while
-//     looking correct in the payload. Omitting says "unknown", which is true.
-//
-// Returns "" (the field is omitted) for every other event and every unknown
-// value.
 func statusFor(ev DevEvent) string {
 	if ev.EventType != EventToolResult {
 		return ""
@@ -509,20 +268,8 @@ func statusFor(ev DevEvent) string {
 }
 
 // activityLabel resolves the human-readable action label emitted as core's
-// pass-through `activity_type` column (openbox-fe's "Activity" column reads
-// it first and shows "Unknown" when absent). It's derived only from fields
-// that survive the adapter's spool round-trip (EventType + Tool.Name are
-// persisted; a `json:"-"` field would not), so a spooled tool call still
-// lands its specific tool name:
-//   - a tool event (ToolCall/ToolResult) → the specific tool name ("Edit"/
-//     "Bash"/"mcp__…"), the most useful Activity label;
-//   - a turn event → "llm_completion", the same label on BOTH halves, so the
-//     core-side usage extractor has one key to select on and the two runtimes
-//     share one vocabulary;
-//   - everything else (lifecycle, Deploy) → the event_type string.
-//
-// Always non-empty. Identifier-class only — a tool name, a fixed label, or an
-// event type — never content (INV-2).
+// pass-through `activity_type` column (openbox-fe's "Activity" column reads it
+// first and shows "Unknown" when absent).
 func activityLabel(ev DevEvent) string {
 	switch ev.EventType {
 	case EventToolCall, EventToolResult:
@@ -535,70 +282,28 @@ func activityLabel(ev DevEvent) string {
 	return string(ev.EventType)
 }
 
-// buildMetadata merges the caller's per-type metadata with the finops keys
-// (tokens/cost), the true tool name, and the idempotency key (MAPPING.md §1).
-// Never carries content (INV-2) or credentials (INV-1) — those are excluded
-// by construction.
-//
-// event_id goes here deliberately (INV-5): core has no first-class event_id
-// field and does not dedupe the developer event types today, so carrying the
-// key in metadata is the only way it reaches the wire for a future
-// server-side dedupe. Within a single Emit the retried body is
-// byte-identical, so the id is stable across attempts.
-// contentMetadataKeys are metadata keys that carry free text rather than a
-// structural identifier. Adapters are not supposed to put content in metadata,
-// but nothing stopped them: stripContent nulls Content and the span bodies,
-// while buildMetadata copied every adapter-supplied key through untouched. That
-// made INV-2 a convention observed by every adapter rather than a property of
-// the one choke point every event passes through.
-//
-// A key here is dropped when content capture is off, exactly like Content. The
-// list is deliberately small and specific — a backstop against a mistake, not a
-// content classifier.
+// contentMetadataKeys buildMetadata merges the caller's per-type metadata with
+// the finops keys (tokens/cost), the true tool name, and the idempotency key
+// (mapping.md §1).
 var contentMetadataKeys = map[string]bool{
-	"message":   true, // a commit message body
-	"prompt":    true,
-	"output":    true,
-	"content":   true,
-	"file_text": true,
-	"diff":      true,
-	"patch":     true,
-	"body":      true,
-	"stdout":    true,
-	"stderr":    true,
-	// Tool input DOES egress on the observe path since that decision — but
-	// under Content.ToolInput, which stripContent nils. This key stays listed
-	// as the backstop it always was: an adapter that put a command straight
-	// into metadata would route around the gate.
-	"command":    true,
-	"input_text": true,
-	// The signal free-text keys signalDetailKeyFor writes. The client sets them
-	// from Content (already gated), so these entries only matter if an adapter
-	// ever sets them directly — which is exactly what this list is for.
+	"message":       true, // a commit message body
+	"prompt":        true,
+	"output":        true,
+	"content":       true,
+	"file_text":     true,
+	"diff":          true,
+	"patch":         true,
+	"body":          true,
+	"stdout":        true,
+	"stderr":        true,
+	"command":       true,
+	"input_text":    true,
 	"denial_reason": true,
 	"error_details": true,
-	// `arguments` is the MCP class's own key: contentKeyFor(ToolMCP) returns it,
-	// so its siblings `command` and `content` were listed and it was not. An
-	// adapter writing MCP arguments straight into metadata would have routed
-	// around the gate through the one key the list forgot.
-	"arguments": true,
-	// `thinking` is the densest content this client carries — it restates
-	// prompts, file bodies and any credential the turn saw — and it is the newest
-	// class, added after this list was last extended. It rides
-	// activity_output.thinking from Content, which stripContent nils; this is the
-	// same backstop the rest of the list is, for the field that needs it most.
-	"thinking": true,
+	"arguments":     true,
+	"thinking":      true,
 }
 
-// signalDetailKeyFor names the metadata key a signal's gated free text lands in.
-// Per event type rather than one generic key, so the detail sits beside the
-// structural fields a reader already has for that signal: `error_details` next
-// to `error_type` on an APIError, `denial_reason` next to the tool identity on a
-// PermissionDenied.
-//
-// Returns "" for every other event type, which drops the field: a signal detail
-// on a tool result or a lifecycle event has no defined meaning, and inventing a
-// key for it would put free text somewhere no reader expects one.
 func signalDetailKeyFor(t EventType) string {
 	switch t {
 	case EventPermissionDenied:
@@ -617,18 +322,12 @@ func buildMetadata(ev DevEvent) (json.RawMessage, error) {
 		}
 		m[k] = v
 	}
-	// A signal's free text, when capture left it on the event. Capped like every
-	// other gated body — the bytes this map produces are signed.
 	if ev.Content != nil && ev.Content.SignalDetail != "" {
 		if k := signalDetailKeyFor(ev.EventType); k != "" {
 			m[k] = capBody(ev.Content.SignalDetail)
 		}
 	}
 	m["event_id"] = ev.EventID
-	// tool_name is carried here as well as in activity_type/activity_input
-	// because metadata is the one blob every event type keeps: a consumer
-	// grouping a session's events by tool does not have to know which of the
-	// three shapes a given row came from.
 	if ev.Tool.Name != "" {
 		m["tool_name"] = ev.Tool.Name
 	}
@@ -638,22 +337,11 @@ func buildMetadata(ev DevEvent) (json.RawMessage, error) {
 	if ev.Cost != nil {
 		m["cost"] = ev.Cost
 	}
-	// The model that spent the tokens, carried here as well as in the turn's
-	// activity_output for the same reason tool_name is: metadata is the one blob
-	// every event type keeps, so a consumer grouping a session's spend by model
-	// does not have to know which wire shape a row came from. Identifier-class,
-	// bounded at the adapter (INV-2). SessionStarted already sets its own
-	// metadata.model from the hook payload, so an adapter-supplied key wins —
-	// the two agree by construction, since both are the provider's model id.
 	if ev.Model != "" {
 		if _, exists := m["model"]; !exists {
 			m["model"] = ev.Model
 		}
 	}
-	// The subagent a turn belongs to, so per-agent spend is attributable without
-	// parsing the activity_id. Tool events already carry it via the adapter's
-	// toolMetadata; this covers the turn events, whose metadata the mapper builds
-	// from the hook payload's agent fields.
 	if ev.AgentID != "" {
 		if _, exists := m["agent_id"]; !exists {
 			m["agent_id"] = ev.AgentID
@@ -662,24 +350,10 @@ func buildMetadata(ev DevEvent) (json.RawMessage, error) {
 	return json.Marshal(m)
 }
 
-// structuralActivityInput builds the INV-2-safe `activity_input` for an
-// ActivityStarted — the identifiers the openbox-fe Verify-tab "Input" detail
-// renders (log.input), and what core runs Guardrails stage "0" over
-// (services/guardrail.go:180). It carries only structural fields: the tool
-// name/kind and the file/mcp locators. It never carries content — the shell
-// command, file text, or tool arguments — except on a gated call's evaluation
-// event, which attaches the content below. Returns nil (field omitted) when
-// nothing structural is known.
-//
-// That exception used to be one class of call (the approval escalation, shell
-// and MCP only). That decision evaluates every gated class inline, so it now
-// covers every gated call — including file writes, whose content is the file
-// body. The gate is `content_capture`, unchanged: stripContent nils Content
-// before this runs when the org has it off, and the observe copy of the same
-// call never carries content on any path. contentKeyFor names the
-// activity_input field a gated call's content lands in. "command" is kept for
-// shell so the field an approver and every existing dashboard already read does
-// not move.
+// contentKeyFor structuralActivityInput builds the INV-2-safe `activity_input`
+// for an ActivityStarted; the identifiers the openbox-fe Verify-tab "Input"
+// detail renders (log.input), and what core runs Guardrails stage "0" over
+// (services/guardrail.go:180).
 func contentKeyFor(kind ToolKind) string {
 	switch kind {
 	case ToolShell:
@@ -716,15 +390,6 @@ func structuralActivityInput(ev DevEvent) json.RawMessage {
 			}
 		}
 	}
-	// The evaluation context, when the gated call carried one
-	// (Content.ToolInput). It rides activity_input because that is the field
-	// core's Guardrails stage 0, the approvals queue and the dashboard already
-	// read, so content-aware policy and an approver both see it with no
-	// server-side change. Content-gated: stripContent has already nil'd Content
-	// when the org has content capture off, so it is simply absent then.
-	//
-	// The key names what the content IS, per class, because a reviewer reading
-	// `command: <a file body>` would be misled about what was executed.
 	if ev.Content != nil && ev.Content.ToolInput != "" {
 		m[contentKeyFor(ev.Tool.Kind)] = capBody(ev.Content.ToolInput)
 	}
@@ -739,28 +404,8 @@ func structuralActivityInput(ev DevEvent) json.RawMessage {
 }
 
 // structuralActivityOutput builds the INV-2-safe `activity_output` for an
-// ActivityCompleted — what core stores as the row's `output` and runs Guardrails
-// stage "1" over (services/guardrail.go:192).
-//
-// It carries what the tool DID — byte and line counts, and the exit code when an
-// adapter reports one — plus, under the content gate, what it PRODUCED.
-//
-// The result body used to be absent unconditionally, because tool output had no
-// field to land in (SL3-SEC-3). That decision retires that: the body is carried
-// on Content.ToolOutput, which stripContent has already nil'd when the org has
-// content capture off, so "absent" is now a posture rather than a structural
-// property. It is capped here — the bytes this function feeds are the bytes
-// buildPayload signs.
-//
-// The counts are the same Span fields the retired hook span carried at its root,
-// re-homed rather than dropped. exit_code is read from metadata because the
-// normalized event contract (dev-event.schema.json v1.0, frozen) has no field
-// for it; no adapter supplies one today, so in practice it is absent, and a
-// future adapter that sets metadata.exit_code gets it promoted with no client
-// change.
-//
-// Returns nil (field omitted) when nothing is known — which is the honest state
-// for a shell call, whose counts the providers do not expose.
+// ActivityCompleted; what core stores as the row's `output` and runs
+// Guardrails stage "1" over (services/guardrail.go:192).
 func structuralActivityOutput(ev DevEvent) json.RawMessage {
 	m := map[string]any{}
 	if s := ev.Span; s != nil {
@@ -777,9 +422,6 @@ func structuralActivityOutput(ev DevEvent) json.RawMessage {
 	if v, ok := ev.Metadata["exit_code"]; ok {
 		m["exit_code"] = v
 	}
-	// What the tool produced, when capture left it on the event. Capped exactly
-	// like the gated call's activity_input content: a single `cat` of a large
-	// file would otherwise put megabytes on the wire per tool call.
 	if ev.Content != nil && ev.Content.ToolOutput != "" {
 		m["output"] = capBody(ev.Content.ToolOutput)
 	}
@@ -795,21 +437,6 @@ func structuralActivityOutput(ev DevEvent) json.RawMessage {
 
 // durationMs is how long a tool call took, in float milliseconds, for the
 // ActivityCompleted payload.
-//
-// The client computes it because nothing else can any more: core used to derive
-// the row's duration from the stored span, and there is no span. Core copies
-// this field straight onto the row (storage_event.go:292-294) and the dashboard
-// reads event.duration_ms directly, so an absent or wrong value is visible
-// immediately rather than silently.
-//
-// The start time arrives cross-process: a PostToolUse hook has no idea when its
-// PreToolUse fired, so the adapters' duration stash recovers ev.StartedAt and
-// stamps it before the event is spooled (internal/adapters/common/hookflow/duration.go).
-//
-// Returns nil — the field is OMITTED, not zero — when the stash missed, when the
-// timestamps do not parse, or when the arithmetic is not positive. Zero would
-// claim the call took no time, and a negative duration is nonsense; "unknown" is
-// the true statement in all three cases, and omitting says it.
 func durationMs(ev DevEvent) *float64 {
 	start := rfc3339Nanos(firstNonEmpty(ev.StartedAt, ev.Timestamp))
 	end := rfc3339Nanos(firstNonEmpty(ev.EndedAt, ev.Timestamp))
@@ -820,27 +447,10 @@ func durationMs(ev DevEvent) *float64 {
 	return &ms
 }
 
-// buildSignalArgs builds the `signal_args` for a SignalReceived event — what
-// the Verify-tab "Input" detail renders (log.signal_args). The right "input"
-// for a signal depends on the signal:
-//   - prompt_submitted: the prompt is the argument, and it is content
-//     (INV-2), so it's gated exactly like a tool's request_body — carried
-//     (capped) only when content-capture is enabled (ev.Content survives
-//     stripContent; nil by default), never structural session context.
-//   - commit_created / deploy: the arguments are structural lineage
-//     identifiers (commit_sha/repo/deploy_id/…), always safe to surface
-//     (they also ride metadata).
-//
-// Returns nil (field omitted) when there is nothing to show — which, for a
-// prompt under the default metadata-only posture, is the correct/honest
-// state.
 func buildSignalArgs(ev DevEvent) json.RawMessage {
 	m := map[string]any{}
 	switch ev.EventType {
 	case EventPromptSubmitted:
-		// Content-gated: present only when content-capture kept ev.Content
-		// (Emit's stripContent nulls it by default — INV-2). Capped before
-		// egress like any body (capBody).
 		if ev.Content != nil && ev.Content.Prompt != "" {
 			m["prompt"] = capBody(ev.Content.Prompt)
 		}
@@ -859,9 +469,6 @@ func buildSignalArgs(ev DevEvent) json.RawMessage {
 	return b
 }
 
-// copyMetaKeys copies the named keys from src into dst when present. Used to
-// lift the structural lineage identifiers into signal_args (they also stay
-// in metadata).
 func copyMetaKeys(dst, src map[string]any, keys ...string) {
 	for _, k := range keys {
 		if v, ok := src[k]; ok {
@@ -871,8 +478,7 @@ func copyMetaKeys(dst, src map[string]any, keys ...string) {
 }
 
 // stripContent returns a copy of ev with every gated content field removed
-// (INV-2). The caller's event is never mutated. This is the default path
-// (content-capture disabled).
+// (INV-2). The caller's event is never mutated.
 func stripContent(ev DevEvent) DevEvent {
 	ev.contentStripped = true
 	ev.Content = nil
@@ -880,11 +486,6 @@ func stripContent(ev DevEvent) DevEvent {
 		s := *ev.Span // copy so the caller's Span is untouched
 		s.RequestBody = ""
 		s.ResponseBody = ""
-		// Gateway-observed headers are content too, and the riskiest kind: the
-		// developer's live provider credential transits every model call. The
-		// capture side redacts by key name before these are populated; this is
-		// the second of the two mechanisms, and it is the one the org's posture
-		// controls.
 		s.RequestHeaders = nil
 		s.ResponseHeaders = nil
 		ev.Span = &s
@@ -892,27 +493,8 @@ func stripContent(ev DevEvent) DevEvent {
 	return ev
 }
 
-// --- small helpers ---
-
-// maxBodySize caps a gated content body before egress, mirroring the base
-// SDK's PrivacyConfig.max_body_size default (65536 chars). shift-left signs
-// the exact bytes buildPayload returns, so capping here caps the signed
-// bytes — the base SDK applies the same cap before signing.
 const maxBodySize = 65536
 
-// capBody truncates a content body to maxBodySize, the Go mirror of the base
-// SDK's truncate_string: hard cut, no marker, counted in runes to match Python's
-// per-character semantics. Structural identifiers (paths, tool/mcp names) are
-// not capped here — they are already bounded at the adapter (capStr).
-//
-// What it caps has grown, and the old wording did not: this comment used to say
-// "shell_command is never carried on the egress path (INV-2)", which was
-// SL3-SEC-3 and is retired. Tool commands, file bodies, tool output, the turn's
-// reply and the turn's thinking all flow through HERE now, on ordinary
-// telemetry, so this function is one of the three mechanisms standing between a
-// body and the wire — gate, redact, cap. Stating otherwise inside the function
-// the content actually crosses is how a reader concludes a bound does not apply
-// to them.
 func capBody(s string) string {
 	if len(s) <= maxBodySize { // fast path: byte len ≤ cap ⇒ rune count ≤ cap
 		return s
@@ -931,8 +513,6 @@ func firstNonEmpty(a, b string) string {
 	return b
 }
 
-// rfc3339Nanos parses an RFC3339 timestamp to epoch nanoseconds, or 0 if empty
-// or unparseable (core treats 0 as unset).
 func rfc3339Nanos(ts string) int64 {
 	if ts == "" {
 		return 0

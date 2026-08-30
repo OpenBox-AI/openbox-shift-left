@@ -11,34 +11,12 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/backend"
 )
 
-// `openbox approve` — the terminal half of the human approval tier (E9 §2.3).
-//
-// The dashboard's Approvals page is the default surface and needs no build.
-// This exists because the binary is already installed and already
-// cross-platform, so an approver who lives in a terminal gets the queue without
-// a second install — the thing the abandoned approver app cost.
-//
-// It is an API CLIENT and nothing else: it polls and it decides. No listener,
-// no socket, no daemon. And it is meant to run on the APPROVER's machine, not
-// the requester's — a same-machine approver is a convenience control, not
-// four-eyes (E9 §3.7).
-//
-// Its credential is the approver's own org control-plane credential, read from
-// the environment rather than a flag so it cannot leak through argv or shell
-// history (INV-1). It is never the developer agent's obx_ runtime key: holding
-// both would be exactly the self-approval the boundary exists to prevent.
-
-// defaultWatchInterval paces --watch. The queue is a human-latency surface, so
-// the useful cadence is seconds, not milliseconds.
 const defaultWatchInterval = 15 * time.Second
 
 func (a *app) runApprove(args []string) int {
 	if len(args) == 0 {
 		return a.errorf("usage: openbox approve <list|allow|deny> [flags]  |  openbox approve --watch [--auto --host claude-code]")
 	}
-	// `openbox approve --watch …` with no subcommand is the working surface:
-	// watch the queue, and with --auto let the bounded approver decide inside
-	// it. It is `list --watch` plus authority, so it shares that flag set.
 	if strings.HasPrefix(args[0], "-") {
 		return a.runApproveList(args)
 	}
@@ -54,12 +32,6 @@ func (a *app) runApprove(args []string) int {
 	}
 }
 
-// approveClient resolves the approver's credentials and the queue to read.
-//
-// `openbox init --role approver` puts all three — credential, queue, org — in
-// place, so an installed approver needs no environment at all. The environment
-// still wins where it is set: an operator with two queues to work should not
-// have to re-install to switch.
 func (a *app) approveClient(orgID, clientID string) (*backend.Client, string, int) {
 	cfg, _ := devconfig.LoadApprover(devconfig.DefaultApproverConfigPath())
 
@@ -88,12 +60,6 @@ func (a *app) approveClient(orgID, clientID string) (*backend.Client, string, in
 	return backend.New(backendURL, token, clientID), orgID, exitOK
 }
 
-// approverToken reads the credential `init --role approver` wrote to
-// ~/.openbox/.env. An absent file or key is not an error here: the caller
-// reports the one honest message for "no credential at all".
-//
-// The environment still wins over this (see approveClient), which is why the
-// order there is env-then-file rather than the reverse.
 func (a *app) approverToken() string {
 	path, err := devconfig.EnvFilePath()
 	if err != nil {
@@ -166,8 +132,6 @@ func (a *app) printPending(cl *backend.Client, orgID string) int {
 		fmt.Fprintf(a.stdout, "No pending approvals.\n")
 		return exitOK
 	}
-	// Oldest first: the request closest to expiring is the one that needs a
-	// decision, and it should not be at the bottom of the list.
 	sort.SliceStable(pending, func(i, j int) bool {
 		return created(pending[i]).Before(created(pending[j]))
 	})
@@ -180,14 +144,9 @@ func (a *app) printPending(cl *backend.Client, orgID string) int {
 		fmt.Fprintf(a.stdout, "    agent    %s\n", orUnset(ap.Name()))
 		fmt.Fprintf(a.stdout, "    reason   %s\n", orUnset(deref(ap.Reason)))
 
-		// The decisive line. An approver decides on WHAT is being asked, so it
-		// gets its own field rather than being buried among the identifiers.
 		if req := ap.Request(); req != "" {
 			fmt.Fprintf(a.stdout, "    request  %s\n", req)
 		} else {
-			// Never let this read as "nothing notable" — an approval nobody can
-			// evaluate is a control that is not being exercised, and saying so
-			// is the point of the tool.
 			undecidable++
 			fmt.Fprintf(a.stdout, "    request  (not captured — see the note below)\n")
 		}
@@ -206,10 +165,6 @@ func (a *app) printPending(cl *backend.Client, orgID string) int {
 	return exitOK
 }
 
-// structuralInput renders the request's activity_input as sorted key=value
-// pairs. The values are structural identifiers by construction (tool kind, tool
-// name, file path, MCP server); it renders whatever arrived rather than
-// selecting fields, so a new identifier shows up without a code change.
 func structuralInput(in map[string]any) string {
 	if len(in) == 0 {
 		return ""
@@ -231,9 +186,6 @@ func (a *app) runApproveDecide(args []string, action string) int {
 	if action == backend.ApprovalReject {
 		verb = "deny"
 	}
-	// The event id is taken before the flags rather than after: Go's flag
-	// package stops parsing at the first positional argument, so
-	// `approve allow <id> --org x` would otherwise silently drop --org.
 	if len(args) == 0 || strings.HasPrefix(args[0], "-") {
 		return a.errorf("usage: openbox approve %s <event-id> [--org <id>]", verb)
 	}
@@ -257,10 +209,6 @@ func (a *app) runApproveDecide(args []string, action string) int {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	// The decide route is per-agent, and only the queue knows which agent owns
-	// a given event — so the id an approver reads off the list is enough, and
-	// they never have to hunt for an agent id. It also means deciding something
-	// that is no longer pending fails here rather than server-side.
 	pending, err := cl.PendingApprovals(ctx, org)
 	if err != nil {
 		return a.errorf("read approval queue: %v", err)

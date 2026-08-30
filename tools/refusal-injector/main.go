@@ -1,28 +1,7 @@
-// Command refusal-injector is probe A's instrument.
-//
-// It is a loopback reverse proxy the operator points Claude Code at with
-// ANTHROPIC_BASE_URL, which forwards every request to the provider except one:
-// the Nth model call, which it answers with a candidate refusal shape. The
-// operator then reads, from the session itself and from the provider's own
-// per-attempt telemetry, whether the client RETRIED around the refusal or
-// SURFACED it to the developer.
-//
-// That is the whole of that decision, the only thing still keeping that decision
-// record in DRAFT: a refusal shape the client retries around is worse than no
-// refusal at all — the developer sees a slow session instead of a policy
-// decision, and the call goes through on the retry.
-//
-// ── READ THIS BEFORE RUNNING IT ───────────────────────────────────────────────
-//
-// It fabricates provider responses. Run it against a THROWAWAY project in a
-// THROWAWAY session. Never against real work: a refusal injected mid-conversation
-// can leave the session's context in a state the client did not expect, and the
-// point of the exercise is to find out what that state IS.
-//
-// It is a separate module with no product dependency, and it is not built into
-// any release artifact. It also does NOT relay byte-identically — it uses
-// httputil.ReverseProxy — so nothing observed through it is evidence about the
-// product's own relay.
+// Command refusal-injector is probe A's instrument. Never against real work: a
+// refusal injected mid-conversation can leave the session's context in a state
+// the client did not expect, and the point of the exercise is to find out what
+// that state IS.
 package main
 
 import (

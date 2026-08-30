@@ -10,16 +10,9 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/prompt"
 )
 
-// authrotate.go — `openbox auth --rotate`.
-//
-// The recovery path for an agent that exists remotely whose credentials are
-// gone: rotation re-issues both, preserving the agent's id and DID. It is also
-// the documented way out for an install whose credentials are stranded in the OS
-// keychain this release stopped reading.
-//
-// Rotation is DESTRUCTIVE server-side — it invalidates the previous key and
-// writes a SECURITY_EVENT audit entry — so it never happens implicitly. Without
-// --rotate no rotate endpoint is called at all.
+// runAuthRotate authrotate.go; `openbox auth --rotate`. Rotation is
+// destructive server-side; it invalidates the previous key and writes a
+// SECURITY_EVENT audit entry; so it never happens implicitly.
 func (a *app) runAuthRotate(f authFields, piped map[string]string, envPath, backendURLFlag string, yes bool) int {
 	token := a.getenv(devconfig.EnvControlToken)
 	if token == "" {
@@ -49,8 +42,6 @@ func (a *app) runAuthRotate(f authFields, piped map[string]string, envPath, back
 			"  new agent instead is `openbox auth` with a blank agent id.")
 	}
 
-	// The confirm gate precedes the REMOTE call, not just the write: by the time
-	// RotateAPIKey returns, the previous key is already dead.
 	if !yes {
 		fmt.Fprintf(a.stdout, "\nRotate credentials for agent %s?\n", agentID)
 		fmt.Fprintf(a.stdout, "  • the agent's CURRENT API key is invalidated immediately, server-side\n")
@@ -71,25 +62,16 @@ func (a *app) runAuthRotate(f authFields, piped map[string]string, envPath, back
 	cl := backend.New(backendURL, token, "openbox-cli")
 	ctx := context.Background()
 
-	// Key first, then identity. A failure between the two leaves the agent with a
-	// working signing identity and a dead key, which `--rotate` can retry; the
-	// reverse order would leave a working key that cannot sign, which looks
-	// healthy until the first event fails verification.
 	newKey, err := cl.RotateAPIKey(ctx, agentID)
 	if err != nil {
 		return a.errorf("%v", err)
 	}
 	newDID, newPrivateKey, err := cl.RotateIdentity(ctx, agentID)
 	if err != nil {
-		// The key is already rotated at this point, and the error says so, because
-		// otherwise a user retries and cannot understand why the old key stopped
-		// working "before" anything happened.
 		return a.errorf("%v\n  note: the API key rotation already succeeded, so the previous key is invalid. "+
 			"Re-run `openbox auth --rotate` once the identity rotation works.", err)
 	}
 
-	// Guard before ANY write: a half-valid credential pair on disk is worse than
-	// no rotation, because the install looks configured and fails at flush time.
 	if strings.HasPrefix(newKey, "obx_key_") {
 		return a.errorf("the rotated API key looks like an ORGANIZATION key (obx_key_…), not an agent runtime key.\n" +
 			"  Refusing to write it: an org key in the agent's runtime slot would give the hook\n" +
@@ -101,9 +83,8 @@ func (a *app) runAuthRotate(f authFields, piped map[string]string, envPath, back
 			"  re-run `openbox auth --rotate`.", problem, agentID)
 	}
 	if f.did != "" && newDID != f.did {
-		// The DID is derived from the agent id, so it cannot change across a
-		// rotation. If it did, something is wrong upstream and silently adopting
-		// the new one would re-attribute this machine's history.
+		// If it did, something is wrong upstream and silently adopting the new one
+		// would re-attribute this machine's history.
 		return a.errorf("the rotated identity returned DID %s but this agent's DID is %s.\n"+
 			"  Rotation must preserve the DID (it is derived from the agent id), so refusing to write.\n"+
 			"  Nothing was changed locally.", newDID, f.did)

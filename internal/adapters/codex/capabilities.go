@@ -4,8 +4,8 @@ import (
 	providerspi "github.com/openbox-ai/openbox-shift-left/internal/provider"
 )
 
-// Capabilities returns the Codex adapter's capability profile, grounded in
-// the v0.145.0 hooks addendum.
+// Capabilities returns the Codex adapter's capability profile, grounded in the
+// v0.145.0 hooks addendum.
 func Capabilities() []providerspi.Capability {
 	return []providerspi.Capability{
 		{Key: "identity.register", Supported: true, How: "agent/create via `openbox init`; provider-independent"},

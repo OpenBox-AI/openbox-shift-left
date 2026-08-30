@@ -10,17 +10,9 @@ import (
 )
 
 // apiRequestSamples is how many api_request records the telemetry fixture
-// carries. More than one because the mapper mints an activity_id per request id,
-// and a single-record fixture cannot show that two turns stay distinct — which
-// is the property core's dedupe depends on.
+// carries.
 const apiRequestSamples = 5
 
-// extractOTel builds ONE OTLP logs payload out of the recorded export.
-//
-// It carries every event type the corpus contains, not only the one the mapper
-// handles. That is deliberate: "an unrecognized event is skipped, not an error"
-// is a claim about this lane's tolerance of a provider addition (OD3 rides a beta
-// surface), and a fixture containing only api_request could not test it.
 func extractOTel(corpus, out string) error {
 	f, err := os.Open(filepath.Join(corpus, "otel", "logs.jsonl"))
 	if err != nil {
@@ -80,8 +72,6 @@ func extractOTel(corpus, out string) error {
 	}
 	sort.Strings(names)
 
-	// api_request first so a reader of the fixture meets the handled type before
-	// the fifteen it skips.
 	var records []json.RawMessage
 	records = append(records, byType["claude_code.api_request"]...)
 	for _, n := range names {

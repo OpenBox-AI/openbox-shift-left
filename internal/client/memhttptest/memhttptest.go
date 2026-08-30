@@ -1,50 +1,9 @@
-// Package memhttptest serves HTTP over in-memory pipes, for hosts that deny bind.
-//
-// It exists because some sandboxes refuse every `bind` syscall — TCP and unix
-// alike — which makes `httptest.NewServer` PANIC. A panic in one test kills the
-// whole test binary, so every test declared after the panicking one never runs
-// and reports neither pass nor fail. That failure mode is silent in exactly the
-// wrong direction: the package looks like it has two failures when in truth
-// most of its tests produced no verdict at all.
-//
-// What this preserves, and it is the point: the REAL net/http client and the
-// REAL net/http server still run, so the request is genuinely marshalled,
-// framed, transmitted and parsed. The handler observes the same outbound bytes
-// it would observe behind a TCP socket. The only substitution is the net.Conn
-// underneath — a net.Pipe instead of a socket. So an assertion on the received
-// body is evidence about the payload, exactly as it was before; it is NOT
-// evidence about bind, listen, TLS or the dialer, and no test should read it
-// that way.
-//
-// WHEN NOT TO USE THIS, and it is not obvious: the pipe lives in THIS process's
-// address space, so the server is unreachable by anything that does not share it.
-// Two cases, both of which have bitten this repo already (2026-08-28):
-//
-//   - A CHILD PROCESS. A test that compiles the binary and runs it with
-//     exec.Command hands the child a URL it cannot dial. Symptom: the child
-//     reports no traffic at all, so the test times out waiting for delivery and
-//     reads as a broken feature.
-//   - CODE THAT BUILDS ITS OWN http.Transport. The registry is installed on
-//     http.DefaultTransport, so a caller with its own Transport never consults
-//     it. gateway.New is the one in this repo, and it keeps the real dialer on
-//     purpose (see upstreamDialContext). Symptom: the relay 502s because its
-//     upstream "does not exist", and every downstream assertion about the
-//     captured exchange then fails for the wrong reason.
-//
-// Both are guarded by RequireBind, and that is exactly how the mistake hides: the
-// test SKIPS on a bind-denied host, so the port looks clean and only fails on a
-// machine that can bind. If a test needs RequireBind, its servers almost
-// certainly need to be real httptest servers too.
-//
-// One fidelity gap to know about before writing a test against this: writes are
-// BUFFERED (see bufferedPipe), so a write error surfaces one write late and an
-// error on the final write before Close is discarded. Behaviour that depends on
-// a write deadline firing against a stalled reader — gateway's writeIdleTimeout,
-// for one — cannot be regression-tested here. Guard such a test with
-// RequireBind instead.
-//
-// Test-only. Nothing in production imports this package, and
-// TestMemhttptestStaysTestOnly holds that.
+// Package memhttptest serves HTTP over in-memory pipes, for hosts that deny
+// bind. A panic in one test kills the whole test binary, so every test
+// declared after the panicking one never runs and reports neither pass nor
+// fail. Behaviour that depends on a write deadline firing against a stalled
+// reader; gateway's writeIdleTimeout, for one; cannot be regression-tested
+// here.
 package memhttptest
 
 import (
@@ -59,11 +18,6 @@ import (
 )
 
 // TB is the slice of *testing.T these helpers use.
-//
-// Declared locally rather than importing `testing`, because this package lives
-// in the shipped `client` module and importing `testing` from a non-test package
-// registers the test flags on any binary that links it. *testing.T satisfies it
-// structurally, so call sites just pass t.
 type TB interface {
 	Helper()
 	Cleanup(func())
@@ -71,16 +25,9 @@ type TB interface {
 	Skipf(format string, args ...any)
 }
 
-// Servers present themselves as loopback on a synthetic port.
-//
-// The host is a literal 127.0.0.1 rather than a made-up name because the code
-// under test frequently VALIDATES that its target is loopback (gateway's
-// Config.Validate, the CLI's non-loopback flag). A URL like
-// "http://memhttp.invalid" would be rejected by the very check the test exists
-// to exercise, and the test would then pass or fail for the wrong reason.
-//
-// The ports are never bound, so they cannot collide with anything; the number
-// only has to be unique within the process so two servers stay distinguishable.
+// basePort servers present themselves as loopback on a synthetic port. The
+// ports are never bound, so they cannot collide with anything; the number only
+// has to be unique within the process so two servers stay distinguishable.
 const basePort = 45000
 
 var (
@@ -92,17 +39,8 @@ var (
 )
 
 // install swaps http.DefaultTransport for a clone that consults the registry
-// before dialing.
-//
-// The clone matters: every other setting on the default transport is preserved,
-// so a test's behaviour changes only for the synthetic addresses this package
-// handed out. Unknown addresses fall through to the original dialer, which keeps
-// "this host is unreachable" tests failing the way they always did.
-//
-// The default transport is a process-wide global and this never restores it.
-// That is deliberate — restoring it per-server would race tests that share the
-// process — and it is safe because the installed transport is behaviour-
-// preserving for any address not in the registry.
+// before dialing. The default transport is a process-wide global and this
+// never restores it.
 func install() error {
 	installOnce.Do(func() {
 		base, ok := http.DefaultTransport.(*http.Transport)
@@ -123,7 +61,6 @@ func install() error {
 			case l != nil:
 				return l.dial(ctx)
 			case known:
-				// Registered once, now closed. Refuse rather than fall through.
 				return nil, fmt.Errorf("memhttptest: dial %s: connection refused (server closed)", addr)
 			}
 			return fallback(ctx, network, addr)
@@ -133,7 +70,8 @@ func install() error {
 	return installErr
 }
 
-// Server is the drop-in for httptest.Server: URL, Client and Close, same shapes.
+// Server is the drop-in for httptest.Server: URL, Client and Close, same
+// shapes.
 type Server struct {
 	URL string
 
@@ -144,17 +82,14 @@ type Server struct {
 }
 
 // NewServer starts a server on an in-memory listener and registers its
-// synthetic address, so http.DefaultTransport — and therefore any client that
-// did not set its own Transport — reaches it.
+// synthetic address, so http.DefaultTransport; and therefore any client that
+// did not set its own Transport; reaches it.
 func NewServer(t TB, h http.Handler) *Server {
 	t.Helper()
 	if err := install(); err != nil {
 		t.Fatalf("memhttptest: %v", err)
 	}
 	port := basePort + int(seq.Add(1))
-	// All three spellings of loopback map to this one server: code under test
-	// may normalise "127.0.0.1" to "localhost" (or vice versa) before dialing,
-	// and a miss would fall through to a real dial and fail confusingly.
 	addrs := []string{
 		fmt.Sprintf("127.0.0.1:%d", port),
 		fmt.Sprintf("localhost:%d", port),
@@ -179,9 +114,7 @@ func NewServer(t TB, h http.Handler) *Server {
 	return s
 }
 
-// Client returns a client that reaches this server. It is the default transport,
-// which the registry has already taught how to find us — returned as its own
-// method only so call sites can mirror httptest.Server.Client().
+// Client returns a client that reaches this server.
 func (s *Server) Client() *http.Client {
 	return &http.Client{Transport: http.DefaultTransport}
 }
@@ -192,12 +125,6 @@ func (s *Server) Close() {
 	s.closed.Do(func() {
 		mu.Lock()
 		for _, a := range s.addrs {
-			// Leave a REFUSING sentinel rather than deleting the entry. Deleting
-			// it makes a later dial of this URL fall through to a REAL dial of
-			// 127.0.0.1:<synthetic port> — which on a bind-capable machine can
-			// reach an unrelated local service and, worst case, POST a signed
-			// governance payload at it. "Connection refused" is both safer and a
-			// truer emulation of a stopped server.
 			registry[a] = nil
 		}
 		mu.Unlock()
@@ -208,7 +135,6 @@ func (s *Server) Close() {
 	})
 }
 
-// listener hands out one end of a net.Pipe per dial. No syscall is involved.
 type listener struct {
 	conns chan net.Conn
 	done  chan struct{}
@@ -252,13 +178,10 @@ type addr struct{}
 func (addr) Network() string { return "mem" }
 func (addr) String() string  { return "memhttp" }
 
-// RequireBind skips the test when this host denies bind.
-//
-// Some tests genuinely need a real socket: the ones that compile the binary and
-// run it as a CHILD process cannot reach an in-memory listener, because the pipe
-// lives in the parent's address space. For those an in-memory server is not a
-// substitute, and a skip naming the reason is more honest than a failure that
-// reads as a defect in the code under test.
+// RequireBind skips the test when this host denies bind. Some tests genuinely
+// need a real socket: the ones that compile the binary and run it as a child
+// process cannot reach an in-memory listener, because the pipe lives in the
+// parent's address space.
 func RequireBind(t TB) {
 	t.Helper()
 	l, err := net.Listen("tcp", "127.0.0.1:0")
@@ -269,12 +192,6 @@ func RequireBind(t TB) {
 }
 
 // RequireResolvableHost skips the test when the host cannot be resolved.
-//
-// A few checks assert that a REACHABLE provider URL is not described as failing
-// safe — which only means anything if the name resolves. In a sandbox with no
-// DNS the lookup fails, the check correctly reports "unreachable", and the test
-// then fails for the environment's reason rather than the code's. Skipping names
-// that difference instead of hiding it.
 func RequireResolvableHost(t TB, host string) {
 	t.Helper()
 	if _, err := net.LookupHost(host); err != nil {
@@ -283,13 +200,9 @@ func RequireResolvableHost(t TB, host string) {
 }
 
 // DialContext resolves a registered synthetic address to its in-memory pipe,
-// falling back to a real dial for anything else.
-//
-// Exported for the tests whose code under test builds its OWN http.Transport and
-// therefore never consults http.DefaultTransport. Those transports must keep
-// every other setting they have — in the gateway's case DisableCompression and
-// the HTTP/2 attempt are the very things under test — so the call site replaces
-// only the dialer.
+// falling back to a real dial for anything else. Exported for the tests whose
+// code under test builds its OWN http.Transport and therefore never consults
+// http.DefaultTransport.
 func DialContext(ctx context.Context, network, addr string) (net.Conn, error) {
 	mu.RLock()
 	l, known := registry[addr]
@@ -300,33 +213,16 @@ func DialContext(ctx context.Context, network, addr string) (net.Conn, error) {
 	case known:
 		return nil, fmt.Errorf("memhttptest: dial %s: connection refused (server closed)", addr)
 	}
-	// The fallback's timeouts are this package's, not any caller's. A test
-	// asserting DIAL LATENCY would be measuring the wrong constant here —
-	// gateway's production dialer is 10s/30s — so do not write one against this.
+	// A test asserting dial latency would be measuring the wrong constant here;
+	// gateway's production dialer is 10s/30s; so do not write one against this.
 	return (&net.Dialer{Timeout: 30 * time.Second, KeepAlive: 30 * time.Second}).DialContext(ctx, network, addr)
 }
 
-// bufferedPipe is net.Pipe with the send-side buffering a real socket has.
-//
-// A raw net.Pipe is fully synchronous: a Write blocks until the peer Reads. That
-// INVERTS an ordering every HTTP test quietly depends on. Over a socket the
-// handler's final Write lands in the kernel buffer and returns, so the handler
-// runs its post-response work — logging the outcome, recording a metric — while
-// the client is still reading. Over a raw pipe the handler's Write cannot return
-// until the client has consumed the bytes, so that work now happens strictly
-// AFTER the client's read completes, and any test that reads the response and
-// then inspects what the handler recorded becomes a race it did not used to be.
-//
-// Buffering the send side restores the socket's decoupling. It makes the
-// substitution MORE faithful, not less: the thing being emulated is a buffered
-// transport.
 func bufferedPipe() (net.Conn, net.Conn) {
 	a, b := net.Pipe()
 	return newBufferedConn(a), newBufferedConn(b)
 }
 
-// bufferedConn buffers writes and drains them to the underlying pipe from its
-// own goroutine. Reads, deadlines and addresses pass straight through.
 type bufferedConn struct {
 	net.Conn
 

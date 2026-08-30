@@ -8,9 +8,6 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/internal/decision"
 )
 
-// enforceTarget adapts a native hook event to the shared enforce gate. Reading
-// the provider's own event shape is the only provider-specific part of gating
-// a tool call; the order of the gate's steps is shared (hookflow.EnforceGate).
 type enforceTarget struct {
 	id     Identity
 	mapper Mapper
@@ -26,11 +23,10 @@ func (t enforceTarget) DecisionRequest(localRedaction bool) decision.DecisionReq
 	return buildDecisionRequest(t.id, t.ev, localRedaction)
 }
 
-// DevEvent maps the call for the inline evaluation, and — unlike the observe
-// copy of the same call — attaches the content the server needs to judge it. The
-// observe path spools its own separately-mapped copy that never carries one, so
-// SL3-SEC-3 holds by construction. Content-gated at the client choke point. Same
-// rationale as the Claude Code adapter's, which documents it at length.
+// DevEvent maps the call for the inline evaluation, and; unlike the observe
+// copy of the same call; attaches the content the server needs to judge it.
+// The observe path spools its own separately-mapped copy that never carries
+// one, so SL3-SEC-3 holds by construction.
 func (t enforceTarget) DevEvent(redacted *client.Content) (client.DevEvent, bool) {
 	ev, ok := t.mapper.Map(HookPreToolUse, t.ev)
 	if !ok {
@@ -42,16 +38,6 @@ func (t enforceTarget) DevEvent(redacted *client.Content) (client.DevEvent, bool
 	return ev, true
 }
 
-// evaluationContext is what the server needs to decide about this call. Every
-// gated class attaches now, not only shell and MCP, and the bytes are the
-// REDACTED ones: rebuilt through the same RedactToolInput the tool-call rewrite
-// uses, from the same detection result, so the server judges exactly the text
-// the call was rewritten to.
-//
-// Codex's redactable field IS "command" (apply_patch bodies arrive there), so
-// unlike Claude Code the shell branch below really can be rewritten — which is
-// why it reads the command back out of the rebuilt object rather than off the
-// event.
 func evaluationContext(e *HookEvent, redacted *client.Content) string {
 	kind, _, _, _, _ := classifyTool(e.ToolName)
 	input := e.ToolInput

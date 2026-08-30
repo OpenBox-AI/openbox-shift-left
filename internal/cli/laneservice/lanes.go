@@ -2,22 +2,11 @@ package laneservice
 
 import "strconv"
 
-// lanes.go declares the three supervised daemons.
-//
-// One file, so that a reader can see at a glance that they differ only in label,
-// argv, log file and wording — and so that a fourth lane is a Spec rather than a
-// package. Every flag named below is checked against the command's real flag set
-// by TestSpecsUseFlagsThatExist: a unit that passes a flag the binary does not
-// define fails to start on every boot, forever, with the failure visible only in
-// a log the supervisor sends to /dev/null unless the plist says otherwise.
-
-// grace renders the --shutdown-grace value that must match StopTimeout.
 var grace = strconv.Itoa(StopTimeout) + "s"
 
-// The gateway's supervisor identity, exported so internal/cli/gatewayservice can
-// keep its own long-standing constants without a second literal to drift from.
-// Two spellings, because the platforms do not share a convention: a reverse-DNS
-// launchd label and a hyphenated systemd unit.
+// The gateway's supervisor identity, exported so internal/cli/gatewayservice
+// can keep its own long-standing constants without a second literal to drift
+// from.
 const (
 	GatewayLabel       = "ai.openbox.gateway"
 	GatewaySystemdName = "openbox-gateway"
@@ -43,12 +32,6 @@ func Gateway(addr, upstream string, verbose bool) Spec {
 }
 
 // Telemetry is the local OTLP receiver (that decision `:otel:`).
-//
-// It carries no --elected flag. The producer election is DERIVED from where the
-// tool's settings route model calls, so baking a decision into the unit's argv
-// would create a second answer that drifts the moment another lane is installed
-// or removed without rewriting this unit — and the drift is silent in the
-// direction that loses all model-call evidence.
 func Telemetry(addr string, verbose bool) Spec {
 	args := []Arg{
 		Literal("telemetry"),
@@ -66,8 +49,7 @@ func Telemetry(addr string, verbose bool) Spec {
 	}
 }
 
-// Transport is the in-path CONNECT/TLS relay (that decision
-// `:proxy:`).
+// Transport is the in-path CONNECT/TLS relay (that decision `:proxy:`).
 func Transport(addr string, verbose bool) Spec {
 	args := []Arg{
 		Literal("transport"),
@@ -86,17 +68,9 @@ func Transport(addr string, verbose bool) Spec {
 }
 
 // VerboseFlag is the one spelling, referenced by every Spec above and by the
-// test that holds them together. Two platforms drifting on whether a supervised
-// daemon logs would be invisible until someone tried to debug the one that does
-// not.
+// test that holds them together.
 const VerboseFlag = "--verbose"
 
-// withVerbose appends the flag when asked.
-//
-// --verbose belongs in the UNIT, not only on a hand-started daemon. The daemon
-// owns the port, so without this the flag is reachable only by stopping the
-// supervised job and racing it for the port — which is exactly how a developer
-// ends up unable to answer "is anything flowing through this at all?".
 func withVerbose(args []Arg, verbose bool) []Arg {
 	if !verbose {
 		return args

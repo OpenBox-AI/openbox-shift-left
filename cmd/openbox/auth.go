@@ -19,31 +19,9 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/internal/provider"
 )
 
-// auth.go — `openbox auth`, the credential front door.
-//
-// It authenticates: collects (or registers) this machine's identity and writes
-// the secrets to ~/.openbox/.env and the coordinates to dev.json. It installs
-// nothing — `openbox init` does that, and the split is what lets init be a
-// command that cannot touch a secret.
-//
-// Two properties are load-bearing and easy to break by accident:
-//
-// 1. NO FLAG EVER TAKES A SECRET VALUE (INV-1). Flags name a SOURCE
-// (--api-key-stdin) the way `docker login --password-stdin` does. A --api-key
-// <value> flag would put the credential on argv, where `ps` and the shell
-// history both see it.
-//
-// 2. SECRETS AND COORDINATES GO TO DIFFERENT FILES. `.env` gets the two (or
-// three) secrets; dev.json gets the DID, agent id and URLs. Writing a coordinate
-// into `.env` recreates the two-store bug that decision removed, where a stale
-// second copy of the DID reverted a corrected one on every install.
+// It installs nothing; `openbox init` does that, and the split is what lets
+// init be a command that cannot touch a secret.
 
-// authFields is one run's collected values.
-//
-// The field ORDER is a UX contract, not an implementation detail: cheap
-// non-secrets first, then the branch, then secrets last and only when reachable.
-// A first-run user with an org key exported completes this by pressing Enter
-// three times and typing y.
 type authFields struct {
 	backendURL string
 	baseURL    string
@@ -51,10 +29,7 @@ type authFields struct {
 	did        string
 	apiKey     string
 	privateKey string
-	// register is set when the agent id came back blank: the user has no agent,
-	// so auth creates one instead of asking for credentials the server is about
-	// to hand over.
-	register bool
+	register   bool
 }
 
 var didPattern = regexp.MustCompile(`^did:aip:[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
@@ -76,38 +51,17 @@ func (a *app) runAuth(args []string) int {
 	fs.BoolVar(&privateKeyStdin, "private-key-stdin", false, "read the base64 signing key from the NEXT line of stdin")
 	fs.BoolVar(&controlTokenStdin, "control-token-stdin", false, "read an approver's obx_key_ control token from the NEXT line of stdin")
 	fs.StringVar(&envFile, "env-file", "", "write the credential file here instead of ~/.openbox/.env")
-	// Registration flags, moved here from `init` when auth took ownership of
-	// authentication. They configure the agent that gets created; none of them is
-	// a secret.
-	//
-	// --provider, --org and --agent-name are gone. The agent this command creates
-	// is a MACHINE identity — auth says so itself ("a machine holds ONE agent
-	// identity") — so a per-TOOL flag on it was a contradiction: `init --provider
-	// codex` on a machine that authed as claude-code produced an agent labelled
-	// with the wrong tool. Which adapter a session ran under is per-session data
-	// and the session posture already reports it. --provider now belongs to
-	// `init`, which installs one tool's hooks and is the command that knows.
-	//
-	// --org was already dead: nothing ever read devinit.Options.Org. Its doc
-	// mentioned "secret accounts", which was the OS keychain that decision
-	// deleted.
 	fs.StringVar(&icon, "icon", "", "agent icon string (defaults to an emoji; the backend requires non-empty)")
 	fs.StringVar(&description, "description", "OpenBox developer-runtime agent", "agent description")
 	fs.BoolVar(&force, "force", false, "register a new distinctly-named agent even if one exists remotely")
 	fs.StringVar(&baseURL, "base-url", a.env(devconfig.EnvBaseURL, ""), "openbox-core DATA-PLANE base URL (where events go)")
 	fs.StringVar(&backendURL, "backend-url", a.env(devconfig.EnvBackendURL, ""), "openbox-backend CONTROL-PLANE base URL")
-	// The COORDINATES take flag values, unlike the secrets. They are not secret —
-	// a DID and an agent id are public identifiers — so putting them on argv
-	// breaks nothing, and automation needs a way to set them that is not a prompt.
 	fs.StringVar(&did, "did", a.env(devconfig.EnvDID, ""), "this agent's DID (did:aip:<uuid>) — non-secret, so a flag value is fine")
 	fs.StringVar(&agentID, "agent-id", a.env(devconfig.EnvAgentID, ""), "this agent's backend id — non-secret; blank on an interactive run registers a new agent")
 	if code, ok := parseFlags(fs, args); !ok {
 		return code
 	}
 
-	// Carry a pre-that decision config forward BEFORE writing, so the dev.json
-	// write merges over the user's real posture instead of resetting it to
-	// defaults.
 	a.migrateLegacyConfig()
 
 	envPath, err := a.credentialFilePath(envFile)
@@ -116,14 +70,10 @@ func (a *app) runAuth(args []string) int {
 	}
 	existing, err := devconfig.ParseEnvFile(envPath)
 	if err != nil {
-		// Never silently overwrite a credential file we cannot read: it holds the
-		// only copy of values OpenBox showed exactly once.
 		return a.errorf("%v", err)
 	}
 	cfg, _ := devconfig.Load(devconfig.DefaultConfigPath())
 
-	// Non-interactive input is read first, so a piped run never blocks on a
-	// prompt it was never going to be able to answer.
 	piped, code := a.readStdinSecrets(apiKeyStdin, privateKeyStdin, controlTokenStdin)
 	if code != exitOK {
 		return code
@@ -156,17 +106,9 @@ func (a *app) runAuth(args []string) int {
 				f.privateKey = v
 			}
 		}
-		// A non-interactive run cannot answer "register a new agent?", so it
-		// never takes that branch: it configures what it was given.
 		f.register = false
 	}
 
-	// Piped secrets and an interactive confirm cannot coexist: readStdinSecrets
-	// drains stdin through a bufio.Scanner, whose buffering consumes the trailing
-	// confirmation line before the prompt's own reader ever sees it. That surfaced
-	// as an "unexpected end of input" instead of a question. It fails safe — nothing
-	// is written — but the honest fix is to say so, since --yes is what automation
-	// wants anyway.
 	if len(piped) > 0 && !yes {
 		return a.errorf("--api-key-stdin / --private-key-stdin need --yes: the secrets arrive on stdin,\n" +
 			"  so there is no way left to ask for confirmation on it. Add --yes to accept the write.")
@@ -180,15 +122,11 @@ func (a *app) runAuth(args []string) int {
 		return a.errorf("%s", problem)
 	}
 
-	// --- register, when the user has no agent --------------------------------
 	if f.register {
 		res, ref, code := a.registerForAuth(f, icon, description, envFile, force)
 		if code != exitOK {
 			return code
 		}
-		// Registration already wrote the credentials (devinit owns that, with the
-		// resume-on-failure semantics `init` proved). Take the coordinates it
-		// returned so dev.json gets the DID and agent id.
 		f.agentID, f.did = ref.AgentID, ref.DID
 		if f.did == "" {
 			f.did = res.DID
@@ -220,12 +158,6 @@ func (a *app) runAuth(args []string) int {
 }
 
 // collectAuthFields prompts for every field in the documented order.
-//
-// The AGENT ID is the registration trigger, and it SHORT-CIRCUITS: a blank agent
-// id means "I have no agent", so auth registers one and never asks for the DID,
-// API key or signing key — registration returns all three. Prompting for values
-// the server is about to hand over is exactly the friction this command exists
-// to remove.
 func collectAuthFields(p prompt.Prompter, f authFields, rotate bool) (authFields, error) {
 	var err error
 	if f.backendURL, err = p.Line("Backend URL (control plane)", f.backendURL); err != nil {
@@ -234,19 +166,6 @@ func collectAuthFields(p prompt.Prompter, f authFields, rotate bool) (authFields
 	if f.baseURL, err = p.Line("Core URL (data plane)", f.baseURL); err != nil {
 		return f, err
 	}
-	// NOTHING is pre-filled here, deliberately, and that is the whole fix.
-	//
-	// Line() returns its DEFAULT on empty input. While this prompt offered the id
-	// from dev.json, pressing Enter at text reading "blank registers a new agent"
-	// kept the OLD id and dropped the user into collect mode — demanding an API
-	// key they did not have, precisely because they were trying to register. No
-	// input could express blank either: readLine trims only \r\n, so even a space
-	// came back as a non-empty id. The prompt documented an action it could not
-	// accept.
-	//
-	// With no default, Enter means blank means register, which is what the text
-	// has always said. Reusing a specific agent is now the deliberate act — type
-	// its id, or pass --agent-id on a non-interactive run.
 	answered, err := p.Line("Agent id (blank registers a new agent)", "")
 	if err != nil {
 		return f, err
@@ -260,8 +179,6 @@ func collectAuthFields(p prompt.Prompter, f authFields, rotate bool) (authFields
 	if f.did, err = p.Line("Agent DID", f.did); err != nil {
 		return f, err
 	}
-	// Rotation re-issues both secrets from the server, so asking for them would
-	// collect values that are about to be replaced.
 	if rotate {
 		return f, nil
 	}
@@ -282,14 +199,10 @@ func collectAuthFields(p prompt.Prompter, f authFields, rotate bool) (authFields
 	return f, nil
 }
 
-// validateAuthFields catches the mistakes that otherwise surface as a bare 401
-// much later.
 func validateAuthFields(f authFields) string {
 	if f.register {
 		return "" // nothing to validate: the server supplies all of it
 	}
-	// The org/agent key mix-up cost hours of debugging once already. This is the
-	// mirror image of controlTokenProblem.
 	if strings.HasPrefix(strings.TrimSpace(f.apiKey), "obx_key_") {
 		return fmt.Sprintf("that looks like an ORGANIZATION key (%s…), not this agent's runtime key.\n"+
 			"  An obx_key_ key belongs in %s and can create and rotate agents org-wide.\n"+
@@ -315,12 +228,6 @@ func validateAuthFields(f authFields) string {
 	return ""
 }
 
-// privateKeyProblem validates the signing key as base64 of exactly an Ed25519
-// seed.
-//
-// Checked HERE rather than at first use because the failure at first use is a
-// signature rejection from the data plane — a 401 that names neither the key nor
-// its length, arriving hours later on a hook's flush path.
 func privateKeyProblem(v string) string {
 	v = strings.TrimSpace(v)
 	if v == "" {
@@ -329,7 +236,6 @@ func privateKeyProblem(v string) string {
 	}
 	raw, err := base64.StdEncoding.DecodeString(v)
 	if err != nil {
-		// Never echo the value: it is a private key.
 		return "the signing key is not valid base64. Paste the value exactly as OpenBox showed it\n" +
 			"  (it is about 44 characters and usually ends in '=')."
 	}
@@ -340,13 +246,12 @@ func privateKeyProblem(v string) string {
 	return ""
 }
 
-// writeSecrets writes ONLY secrets to the credential file. Never a coordinate.
+// writeSecrets writes only secrets to the credential file. Never a coordinate.
 func (a *app) writeSecrets(envPath string, f authFields, piped map[string]string) int {
 	secrets := map[string]string{
 		devconfig.EnvAPIKeyDirect:    strings.TrimSpace(f.apiKey),
 		devconfig.EnvAgentPrivateKey: strings.TrimSpace(f.privateKey),
 	}
-	// An approver's org control token is persisted only when explicitly supplied.
 	// It is a much larger exposure than the agent seed, so it is never written as
 	// a side effect of an ordinary auth run.
 	if v := piped[devconfig.EnvControlToken]; v != "" {
@@ -359,14 +264,8 @@ func (a *app) writeSecrets(envPath string, f authFields, piped map[string]string
 	return exitOK
 }
 
-// writeCoordinates writes ONLY coordinates to dev.json, through a LITERAL
+// writeCoordinates writes only coordinates to dev.json, through a literal
 // devconfig.Update.
-//
-// Deliberately not provider.ConfigUpdate: that always sets InstallGitHook to a
-// non-nil value (provider/config.go), so routing through it would make `auth`
-// write posture. Every posture pointer here stays nil, and WriteConfig's
-// tri-state merge carries the developer's existing posture forward untouched.
-// The guard test asserts the posture bytes are identical before and after.
 func (a *app) writeCoordinates(f authFields) int {
 	path, err := devconfig.DevConfigWritePath()
 	if err != nil {
@@ -377,7 +276,6 @@ func (a *app) writeCoordinates(f authFields) int {
 		AgentID:    strings.TrimSpace(f.agentID),
 		BackendURL: strings.TrimSpace(f.backendURL),
 		BaseURL:    strings.TrimSpace(f.baseURL),
-		// Posture pointers stay nil: auth authenticates, init sets posture.
 	}); err != nil {
 		return a.errorf("write dev config: %v", err)
 	}
@@ -386,12 +284,7 @@ func (a *app) writeCoordinates(f authFields) int {
 }
 
 // warnShadowedByEnv warns when a real environment variable will win over what
-// was just written, naming the RIGHT shadowed file per field.
-//
-// A real env var beats both files, so writing while one is exported produces a
-// config that silently has no effect — the user changes a credential, sees
-// success, and observes no change in behaviour. Warn loudly; never refuse,
-// because exporting these in CI is a legitimate and documented pattern.
+// was just written, naming the right shadowed file per field.
 func (a *app) warnShadowedByEnv(f authFields, envPath string) {
 	type shadow struct{ name, file string }
 	devPath, _ := devconfig.DevConfigWritePath()
@@ -413,12 +306,6 @@ func (a *app) warnShadowedByEnv(f authFields, envPath string) {
 	_ = f
 }
 
-// printAuthSummary shows what is about to be written, with no secret values.
-//
-// The api key shows its public prefix and length; the signing key shows a
-// fingerprint of the DERIVED PUBLIC KEY. Fingerprinting the seed itself would
-// publish a hash of private key material — cheap to avoid, and the kind of
-// mistake that looks harmless in review.
 func (a *app) printAuthSummary(f authFields, envPath string) {
 	devPath, _ := devconfig.DevConfigWritePath()
 	fmt.Fprintf(a.stdout, "\nAbout to write:\n")
@@ -433,8 +320,6 @@ func (a *app) printAuthSummary(f authFields, envPath string) {
 	fmt.Fprintln(a.stdout)
 }
 
-// maskToken shows enough of a token to recognise which one it is, never enough
-// to use it: the public prefix, the last four characters, and the length.
 func maskToken(v string) string {
 	v = strings.TrimSpace(v)
 	if v == "" {
@@ -446,7 +331,7 @@ func maskToken(v string) string {
 	return fmt.Sprintf("%s…%s (%d chars)", v[:8], v[len(v)-4:], len(v))
 }
 
-// publicKeyFingerprint derives the Ed25519 PUBLIC key from the seed and
+// publicKeyFingerprint derives the Ed25519 public key from the seed and
 // fingerprints that. The seed itself is never hashed or displayed.
 func publicKeyFingerprint(seedB64 string) string {
 	raw, err := base64.StdEncoding.DecodeString(strings.TrimSpace(seedB64))
@@ -461,12 +346,6 @@ func publicKeyFingerprint(seedB64 string) string {
 	return fmt.Sprintf("SHA256:%s (public key)", base64.RawStdEncoding.EncodeToString(sum[:])[:24])
 }
 
-// readStdinSecrets reads the --*-stdin values, one per line, in a FIXED order:
-// api key, then private key, then control token.
-//
-// The order is fixed and documented rather than inferred, and validation catches
-// a value in the wrong slot (an obx_ key where a base64 seed belongs fails the
-// 32-byte check immediately).
 func (a *app) readStdinSecrets(apiKey, privateKey, controlToken bool) (map[string]string, int) {
 	want := make([]string, 0, 3)
 	if apiKey {
@@ -494,12 +373,8 @@ func (a *app) readStdinSecrets(apiKey, privateKey, controlToken bool) (map[strin
 }
 
 // registerForAuth runs the registration half of devinit and nothing else.
-//
-// devinit.Register, not devinit.Run: Run also invokes the provider installer, and
-// `auth` must never install hooks. Reusing Register rather than re-implementing
-// registration keeps the behaviours `init` already proved — remote duplicate
-// detection, --force's free-name search, the HALT-on-4xx stop condition, the
-// once-only-credential guard, and the resume error naming the registered agent.
+// Devinit.Register, not devinit.Run: Run also invokes the provider installer,
+// and `auth` must never install hooks.
 func (a *app) registerForAuth(f authFields, icon, description, envFileOverride string, force bool) (*devinit.Result, provider.CredentialRef, int) {
 	token := a.getenv(devconfig.EnvControlToken)
 	if token == "" {
@@ -517,8 +392,6 @@ func (a *app) registerForAuth(f authFields, icon, description, envFileOverride s
 	if f.backendURL == "" {
 		return nil, provider.CredentialRef{}, a.errorf("no backend URL — pass --backend-url or set %s", devconfig.EnvBackendURL)
 	}
-	// A self-hosted control plane with the default data plane is the one silent
-	// misconfiguration that only surfaces much later, as a 401 from the wrong core.
 	if selfHostedWithoutDataPlane(f.backendURL, f.baseURL) {
 		fmt.Fprintf(a.stderr,
 			"warning: the backend is %s but the core URL is the hosted default (%s).\n"+
@@ -543,15 +416,8 @@ func (a *app) registerForAuth(f authFields, icon, description, envFileOverride s
 	return res, ref, exitOK
 }
 
-// readLines reads exactly n newline-separated values from r.
-//
-// A short read is an error rather than a silent empty value: with --api-key-stdin
-// and --private-key-stdin both set, one supplied line would otherwise write an
-// empty signing key over a working one.
 func readLines(r io.Reader, n int) ([]string, error) {
 	sc := bufio.NewScanner(r)
-	// A pasted key is short, but a generous ceiling costs nothing and avoids a
-	// truncation that would look like a corrupt credential.
 	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	out := make([]string, 0, n)
 	for len(out) < n && sc.Scan() {
@@ -582,12 +448,6 @@ func firstNonEmptyStr(vals ...string) string {
 	return ""
 }
 
-// credentialFilePath resolves where to write credentials: --env-file when given,
-// else ~/.openbox/.env.
-//
-// A relative --env-file is refused, mirroring OPENBOX_HOME: it would resolve
-// against the process working directory, so running this inside a repo would drop
-// a plaintext API key and signing key into the source tree.
 func (a *app) credentialFilePath(override string) (string, error) {
 	override = strings.TrimSpace(override)
 	if override == "" {
@@ -600,9 +460,6 @@ func (a *app) credentialFilePath(override string) (string, error) {
 	return filepath.Clean(override), nil
 }
 
-// stdinFile returns stdin as an *os.File when it is one, so TTY detection can
-// ask the OS. A test injecting a strings.Reader gets nil, which RequireTerminal
-// correctly reports as "not a terminal".
 func (a *app) stdinFile() *os.File {
 	if f, ok := a.stdin.(*os.File); ok {
 		return f
@@ -610,12 +467,7 @@ func (a *app) stdinFile() *os.File {
 	return nil
 }
 
-// printAuthNextSteps closes by naming the command that actually installs
-// governance, because auth on its own governs nothing.
 func (a *app) printAuthNextSteps() {
-	// The tool is named HERE rather than assumed, because auth no longer knows
-	// it: this command authenticates a MACHINE and `init` is what installs one
-	// tool's hooks.
 	fmt.Fprintf(a.stdout, "\nNext: openbox init --provider <claude-code|codex|cursor>\n")
 	fmt.Fprintf(a.stdout, "  That installs the hooks. By default it governs THIS DIRECTORY only —\n")
 	fmt.Fprintf(a.stdout, "  run it in each project you want governed, or use --scope global for a\n")

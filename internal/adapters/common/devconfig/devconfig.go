@@ -1,26 +1,11 @@
-// Package devconfig is the provider-neutral developer-runtime configuration and
-// credential resolution shared by every tool adapter (Claude Code, Codex,
-// Cursor). It owns two files (module home, layout in):
-//
-// ~/.openbox/dev.json   posture + the non-secret coordinates ~/.openbox/.env
-// the credentials, in plaintext, 0600
-//
-// One store per field: the credential file is never read for a coordinate and
-// dev.json never holds a secret. Before that decision the DID lived in both
-// dev.json and the OS keychain, and a stale keychain entry silently reverted a
-// corrected DID on the next install — this split is what makes that impossible
-// rather than merely fixed.
-//
-// It was extracted, behavior-preserving, from
-// internal/adapters/claude-code/creds.go — that adapter keeps thin aliases so its
-// public API and tests are unchanged. Like internal/adapters/common/git, this
-// module is dependency-free: it never imports the client, an adapter, or the CLI.
-//
-// INV-1 is narrowed by that decision and still load-bearing: dev.json carries
-// only non-secret coordinates, and the credential values are read at flush time
-// and never logged, printed, or placed on an argv. What INV-1 no longer claims is
-// that a secret is absent from a plaintext file — that is now the only place one
-// lives, and that decision records what it costs.
+// Package devconfig is the provider-neutral developer-runtime configuration
+// and credential resolution shared by every tool adapter (Claude Code, Codex,
+// Cursor). It owns two files (module home, layout in): One store per field:
+// the credential file is never read for a coordinate and dev.json never holds
+// a secret. Before that decision the DID lived in both dev.json and the OS
+// keychain, and a stale keychain entry silently reverted a corrected DID on
+// the next install; this split is what makes that impossible rather than
+// merely fixed.
 package devconfig
 
 import (
@@ -36,9 +21,6 @@ import (
 	"sync"
 )
 
-// Env vars: non-secret coordinates + optional direct overrides for CI/tests.
-// The names are the cross-adapter contract (the same dev.json serves every
-// provider), so they are exported here and aliased by the adapters.
 const (
 	EnvBaseURL         = "OPENBOX_BASE_URL"
 	EnvDID             = "OPENBOX_AGENT_DID"
@@ -58,21 +40,18 @@ const (
 	EnvRealtime        = "OPENBOX_REALTIME"
 	EnvFindingsCursor  = "OPENBOX_FINDINGS_CURSOR"
 	EnvEnforcementFile = "OPENBOX_ENFORCEMENT_FILE"
-	// EnvPendingApprovalDir relocates the filed-approval markers the gate and
-	// the rewake watcher coordinate through (tests point it at a temp dir).
+	// EnvPendingApprovalDir relocates the filed-approval markers the gate and the
+	// rewake watcher coordinate through (tests point it at a temp dir).
 	EnvPendingApprovalDir = "OPENBOX_PENDING_APPROVAL_DIR"
-	// EnvHaltDir relocates the session-halt latches a HALT verdict writes
-	// (tests point it at a temp dir).
+	// EnvHaltDir relocates the session-halt latches a HALT verdict writes (tests
+	// point it at a temp dir).
 	EnvHaltDir      = "OPENBOX_HALT_DIR"
 	EnvAPIKeyDirect = "OPENBOX_API_KEY"
 	// EnvAgentPrivateKey is the Ed25519 signing key, under the name the OpenBox
-	// platform documents for its own SDK. It replaced OPENBOX_ED25519_SEED,
-	// which no published doc ever mentioned — so a developer following the docs
-	// set a variable this repo ignored. Both old names still read; see
-	// deprecatedPrivateKeyEnvNames.
+	// platform documents for its own SDK.
 	EnvAgentPrivateKey = "OPENBOX_AGENT_PRIVATE_KEY"
 	EnvConfigPath      = "OPENBOX_CONFIG"
-	// Policy-bundle signing key pins (E8-S6). Non-secret; env overrides config.
+	// EnvOrgSigningPubKey policy-bundle signing key pins (E8-S6).
 	EnvOrgSigningPubKey = "OPENBOX_ORG_SIGNING_PUBKEY"
 	EnvOrgSigningKeyID  = "OPENBOX_ORG_SIGNING_KEY_ID"
 	EnvAgentID          = "OPENBOX_AGENT_ID"
@@ -80,177 +59,94 @@ const (
 	EnvControlToken     = "OPENBOX_CONTROL_TOKEN"
 	EnvSpoolDir         = "OPENBOX_SPOOL_DIR"
 
-	// DefaultBaseURL is the core data-plane base used when nothing configures one.
+	// DefaultBaseURL is the core data-plane base used when nothing configures
+	// one.
 	DefaultBaseURL = "https://core.openbox.ai"
 	// DefaultBackendURL is the control-plane base used when nothing configures
-	// one. Until that decision there was no default at all and `init` simply
-	// errored, which made the hosted service the one deployment you had to
-	// configure by hand. Self-hosted installs must still set BOTH URLs: the
-	// control plane cannot tell the CLI where the operator's core lives, so
-	// accepting one default and overriding the other points events at the hosted
-	// core and surfaces much later as a 401.
+	// one.
 	DefaultBackendURL = "https://api.openbox.ai"
 )
 
 // deprecatedPrivateKeyEnvNames are the pre-that decision names for the signing
 // key, honoured for reads (never written) so an existing CI job keeps working.
-//
-// OPENBOX_ED25519_SEED was this repo's name; OPENBOX_SEED was the git action's.
-// Reading both costs two map lookups and a warning; breaking them would strand
-// pipelines this repo cannot see. Removing them needs a decision record
-// amendment.
 var deprecatedPrivateKeyEnvNames = []string{"OPENBOX_ED25519_SEED", "OPENBOX_SEED"}
 
 // DevConfig is the non-secret coordinate file the installers write and the
-// hooks read (INV-1: it holds where the secrets live, never the secret values).
-// Env vars of the same meaning override any field. One file serves every
-// provider — the coordinates, content posture, and that decision enforce
-// posture are org/developer-scoped, not tool-scoped.
-//
-// Field semantics (defaults, opt-in/out rationale) are documented on the
-// resolver functions below; the *bool fields distinguish "absent = adapter
-// default" from an explicit false.
+// hooks read (INV-1: it holds where the secrets live, never the secret
+// values).
 type DevConfig struct {
 	BaseURL string `json:"base_url,omitempty"`
 	DID     string `json:"developer_did,omitempty"`
-	// ContentCapture is the org content posture. Absent means the default,
-	// which is on (reverses metadata-only-by-default).
+	// ContentCapture is the org content posture.
 	ContentCapture *bool `json:"content_capture,omitempty"`
 	// Finops gates per-turn usage capture: token counts AND the model id that
-	// spent them (that decision — the name predates the model binding and is kept
+	// spent them (that decision; the name predates the model binding and is kept
 	// because renaming a config key is a user-visible break; read it as "usage
 	// and model capture", not "token counts only").
-	//
-	// A POINTER, and that is load-bearing rather than stylistic. It was a plain
-	// bool whose resolver returned `&b` unconditionally, so `resolveBool` never
-	// reached its default and an absent `finops` field was indistinguishable from
-	// an explicit `false`. Flipping the default with a plain bool would have
-	// produced a flip that silently did nothing for every existing config file —
-	// and worse, pinned every absent field to false forever. Tri-state is what
-	// makes "absent means the default" true. Compare ContentCapture above.
-	//
-	// Default ON, as of the same reasoning that flipped content capture: absent
-	// means on; `finops:false` or OPENBOX_FINOPS=0 opts out.
 	Finops *bool `json:"finops,omitempty"`
 
 	// Telemetry enables the local OTLP receiver lane (that decision's `:otel:`).
-	//
-	// Default ON, and the reason is that decision's ResolveFinops lesson rather
-	// than a preference: INSTALLING the lane is the opt-in. A second switch
-	// defaulting off would leave a developer who ran the install command with a
-	// daemon that receives every export and records nothing — the failure this
-	// lane is least able to notice about itself.
-	//
-	// A *bool, not a bool, for the reason every other posture key here is one:
-	// `omitempty` drops an explicit `false` on write, so an org's deliberate
-	// opt-out would vanish from the file the next time anything rewrote it.
-	// TestTelemetryOptOutSurvivesARoundTrip holds that.
 	Telemetry *bool `json:"telemetry,omitempty"`
-	// InstallGitHook enables ambient install of the prepare-commit-msg
-	// hook on SessionStart. Default false — it modifies a repo's
-	// .git/hooks.
+	// InstallGitHook enables ambient install of the prepare-commit-msg hook on
+	// SessionStart.
 	InstallGitHook bool `json:"install_git_hook,omitempty"`
-	// Enforce flips the developer runtime from observe/advisory to enforce.
-	// Absent means the default, which is now ON (that decision, reversing the
-	// observe-by-default posture that decision shipped with); `enforce:false`
-	// or OPENBOX_ENFORCE=0 opts out.
-	//
-	// It is a *bool, and that is load-bearing rather than stylistic. As a plain
-	// `bool` with `omitempty`, an explicit false marshalled to NOTHING — so
-	// writing the opt-out erased it from the file and the next read saw an
-	// absent field and re-defaulted to on. The opt-out was silently
-	// un-appliable. (The other half of the same trap, an accessor that cannot
-	// tell absent from false, is already handled upstream by the key-presence
-	// map in resolveBoolWithSource — but that only covers reads, not writes.)
-	// TestEnforceOptOutRoundTrips is the assertion that keeps this honest.
+	// Enforce flips the developer runtime from observe/advisory to enforce. It is
+	// a *bool, and that is load-bearing rather than stylistic.
 	Enforce *bool `json:"enforce,omitempty"`
-	// FailClosed selects the enforce failure policy. Default false =
-	// fail-open: an OpenBox outage never blocks a developer.
+	// FailClosed selects the enforce failure policy. Default false = fail-open:
+	// an OpenBox outage never blocks a developer.
 	FailClosed bool `json:"fail_closed,omitempty"`
-	// EnforceTimeoutMS is inert under the in-process decider; retained
-	// for back-compat parsing. Clamping is adapter-owned.
+	// EnforceTimeoutMS is inert under the in-process decider; retained for back-
+	// compat parsing.
 	EnforceTimeoutMS int `json:"enforce_timeout_ms,omitempty"`
-	// Tier2 is DEPRECATED and inert. It gated the synchronous /evaluate
-	// escalation for high-risk classes, back when the rest was decided locally;
-	// every gated call is evaluated now, so there are no tiers to switch between.
-	//
-	// Parsed so an existing dev.json does not become an error, and deliberately
-	// NOT honoured: an org that set `tier2:false` under the old design would
-	// otherwise stay silently ungoverned after upgrading, which is the failure
-	// this whole change exists to close. ResolveTier2 warns once to stderr when
-	// the key is present — including when it is false, which is exactly the case
-	// worth warning about.
+	// Tier2 is deprecated and inert. Parsed so an existing dev.json does not
+	// become an error, and deliberately NOT honoured: an org that set
+	// `tier2:false` under the old design would otherwise stay silently ungoverned
+	// after upgrading, which is the failure this whole change exists to close.
 	Tier2 *bool `json:"tier2,omitempty"`
-	// Tier2TimeoutMS is DEPRECATED and inert. The per-evaluation budget
-	// derives from the provider's declared hook ceiling now
-	// (provider.HookCeiling → hookflow.EnforceBudget), which is a correctness
-	// bound rather than a tuning knob: latency and capacity are the platform's
-	// scope, not something tuned per developer machine.
+	// Tier2TimeoutMS is deprecated and inert.
 	Tier2TimeoutMS int `json:"tier2_timeout_ms,omitempty"`
 	// ApprovalHoldMS bounds how long the gate holds a tool call while a filed
-	// approval is decided (ms, OD-E9-1). Absent = the engine default. Clamping
-	// is adapter-owned: the hold can never outlive the provider's hook timeout.
+	// approval is decided (ms, OD-E9-1). Clamping is adapter-owned: the hold can
+	// never outlive the provider's hook timeout.
 	ApprovalHoldMS int `json:"approval_hold_ms,omitempty"`
 	// SecretDetection enables Tier-1 local secret/entropy detection.
-	// Absent = default on (opt-out): the detection stays strictly local.
 	SecretDetection *bool `json:"secret_detection,omitempty"`
-	// RequireVerifiedBundle is DEPRECATED and inert. It refused to load a
-	// policy bundle whose signature did not verify; there is no bundle, so
-	// there is nothing to verify or refuse. Parsed so an existing dev.json
-	// does not become an error, and deliberately absent from the reported
-	// posture — a control that cannot engage must not appear as one, or an org
-	// reading `true` would believe a signature check was protecting it.
+	// RequireVerifiedBundle is deprecated and inert. Parsed so an existing
+	// dev.json does not become an error, and deliberately absent from the
+	// reported posture; a control that cannot engage must not appear as one, or
+	// an org reading `true` would believe a signature check was protecting it.
 	RequireVerifiedBundle *bool `json:"require_verified_bundle,omitempty"`
-	// Findings enables the findings loop. Absent = default off
-	// (opt-in: it is the first observe-path stdout writer).
+	// Findings enables the findings loop.
 	Findings *bool `json:"findings,omitempty"`
-	// RealtimeFlush enables the debounced background flush that delivers
-	// spooled events to core mid-session instead of only at SessionEnd.
-	// Absent = default on (opt-out): it changes only delivery timing, never
-	// what egresses, and the hook hot path stays free of network I/O.
+	// RealtimeFlush enables the debounced background flush that delivers spooled
+	// events to core mid-session instead of only at SessionEnd. Absent = default
+	// on (opt-out): it changes only delivery timing, never what egresses, and the
+	// hook hot path stays free of network I/O.
 	RealtimeFlush *bool `json:"realtime_flush,omitempty"`
-	// AgentID is the backend agent id for the policy read. Non-secret.
+	// AgentID is the backend agent id for the policy read.
 	AgentID string `json:"agent_id,omitempty"`
 	// BackendURL is the openbox-backend control-plane base (distinct from
-	// BaseURL, the core data-plane base). Non-secret.
+	// BaseURL, the core data-plane base).
 	BackendURL string `json:"backend_url,omitempty"`
 	// OrgSigningKeyID and OrgSigningPubKey pin the org's policy-bundle signing
-	// key (E8-S6 /). Both are non-secret — a public key and its id — so they live
-	// in plain config alongside the other coordinates rather than in the secret
-	// store (INV-1 concerns private material only).
-	//
-	// Absent means unverifiable rather than untrusted: a signed bundle with no
-	// pinned key reports integrity "no_key", which reads as an incomplete
-	// deployment. Its policy is still loaded and enforced — the same treatment an
-	// unsigned bundle gets, since both mean "this client cannot check the
-	// content" — but Trusted() is false and the session posture says so, so the
-	// control plane can tell an unpinned fleet from a verified one. `openbox
-	// init` pins these once the backend serves them.
+	// key (E8-S6 /).
 	OrgSigningKeyID  string `json:"org_signing_key_id,omitempty"`
 	OrgSigningPubKey string `json:"org_signing_pubkey,omitempty"` // base64 raw Ed25519
 }
 
 // DefaultConfigPath is where the hook looks for the dev config when
-// OPENBOX_CONFIG is unset: ~/.openbox/dev.json, with a read-side fallback to the
-// pre-that decision location while an unmigrated file lives there.
-//
-// It keeps returning a bare string rather than (string, error) because it is
-// called from every hook read path, where there is nothing useful to do with an
-// error but carry on and let the missing-config path fail open (INV-3).
-// DevConfigPath is the same resolution with the error surfaced, for callers that
-// can act on it.
+// OPENBOX_CONFIG is unset: ~/.openbox/dev.json, with a read-side fallback to
+// the pre-that decision location while an unmigrated file lives there.
 func DefaultConfigPath() string {
 	p, err := DevConfigPath()
 	if err != nil {
-		// Unresolvable home: name the legacy location rather than an empty
-		// path, so a read still finds a config written by an older binary.
 		return filepath.Join(legacyConfigDir(), "dev.json")
 	}
 	return p
 }
 
-// Load reads the dev config at path if present. A missing file is not an error
-// (env may supply everything); a malformed file is an error surfaced fail-open.
+// Load reads the dev config at path if present.
 func Load(path string) (DevConfig, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
@@ -266,11 +162,10 @@ func Load(path string) (DevConfig, error) {
 	return c, nil
 }
 
-// load reads the default-path config, swallowing the not-exist case.
 func load() (DevConfig, error) { return Load(DefaultConfigPath()) }
 
 // Credentials is the resolved runtime identity for a hook binary. It carries
-// the secret VALUES (read from the environment or ~/.openbox/.env) — it exists
+// the secret values (read from the environment or ~/.openbox/.env); it exists
 // only in process memory on the flush path and must never be logged or
 // persisted.
 type Credentials struct {
@@ -281,10 +176,10 @@ type Credentials struct {
 	ContentCaptureEnabled bool
 }
 
-// ResolveDID resolves only the developer DID (env, then config file) — no
-// secret-store access. This is the hot path: observe/spool needs the DID
-// to attribute events but never the obx_ key or seed, so a tool-use hook
-// does zero secret I/O (INV-1).
+// ResolveDID resolves only the developer DID (env, then config file); no
+// secret-store access. This is the hot path: observe/spool needs the DID to
+// attribute events but never the obx_ key or seed, so a tool-use hook does
+// zero secret I/O (INV-1).
 func ResolveDID() (string, error) {
 	cfg, err := load()
 	if err != nil {
@@ -299,21 +194,16 @@ func ResolveDID() (string, error) {
 
 // ResolveDIDOrEmpty resolves the developer DID and returns "" when nothing
 // configures one, for callers where an absent DID is a legitimate state to
-// report rather than an error to propagate — the install path, which may be
+// report rather than an error to propagate; the install path, which may be
 // about to write one.
-//
-// ResolveDID stays the hot-path form: a hook with no DID cannot attribute an
-// event, so there it is an error.
 func ResolveDIDOrEmpty() string {
 	cfg, _ := load()
 	return FirstNonEmpty(os.Getenv(EnvDID), cfg.DID)
 }
 
-// ResolveCoordinates resolves the non-secret target coordinates — the
-// core base URL and the developer DID — from env then the dev config,
-// with zero secret-store access (INV-1). Backs read-only previews (`dev
-// verify --dry-run`). A missing/unreadable config degrades to env +
-// defaults; did is "" when nothing configures it.
+// ResolveCoordinates resolves the non-secret target coordinates; the core base
+// URL and the developer DID; from env then the dev config, with zero secret-
+// store access (INV-1).
 func ResolveCoordinates() (baseURL, did string) {
 	cfg, _ := load()
 	baseURL = FirstNonEmpty(os.Getenv(EnvBaseURL), cfg.BaseURL, DefaultBaseURL)
@@ -323,9 +213,6 @@ func ResolveCoordinates() (baseURL, did string) {
 
 // SpoolDir is where hot-path events are spooled before flush: the
 // OPENBOX_SPOOL_DIR override when set, else `<user-config>/openbox/<subdir>`.
-// Each adapter passes its own subdir (cc-spool, codex-spool, …) so concurrent
-// tools never share a spool by accident, while the env override still lets
-// tests (and operators) pin one location.
 func SpoolDir(subdir string) string {
 	if p := os.Getenv(EnvSpoolDir); p != "" {
 		return p
@@ -339,84 +226,52 @@ func SpoolDir(subdir string) string {
 
 // ResolveInstallGitHook reports whether the adapter should install the
 // prepare-commit-msg hook into the session's repo on SessionStart.
-// Default false (it modifies a repo's .git/hooks); config enables; env
-// overrides either way. A missing/unreadable config is false (fail-safe).
 func ResolveInstallGitHook() bool {
 	return resolveBool("install_git_hook", func(c DevConfig) *bool { b := c.InstallGitHook; return &b }, false, EnvInstallGitHook)
 }
 
-// ResolveFinops reports whether usage capture is enabled — per-turn token counts
-// and the model id that spent them.
-//
-// **Default ON.** An absent `finops` field resolves to on, mirroring the
-// 2026-07-15 content-capture reversal; `finops:false` in managed config or
-// OPENBOX_FINOPS=0 opts out, and the env wins either way. With it off,
-// transcript_path is never opened, no turn event is emitted, and no model id
-// reaches the wire beyond the one SessionStarted already carried.
-//
-// The default is an EGRESS-POSTURE decision, not a convenience: four integers and
-// a model id per turn now leave developer machines for orgs that never asked. It
-// gets what content capture got — a documented default, two opt-outs, and the
-// effective state recorded on SessionStarted as posture evidence, so an auditor
-// can tell after the fact which sessions captured. See docs/data-and-privacy.md.
-//
-// Before this was a *bool the flip was impossible to make correctly — see the
-// Finops field comment.
+// ResolveFinops reports whether usage capture is enabled; per-turn token
+// counts and the model id that spent them. With it off, transcript_path is
+// never opened, no turn event is emitted, and no model id reaches the wire
+// beyond the one SessionStarted already carried.
 func ResolveFinops() bool {
 	return resolveBool("finops", func(c DevConfig) *bool { return c.Finops }, true, EnvFinops)
 }
 
 // ResolveTelemetry reports whether the local telemetry lane may record.
-//
-// Config `telemetry` first, then OPENBOX_TELEMETRY, env wins either way. Default
-// ON — see the field comment for why a default-off second switch would be a bug
-// rather than a conservative choice.
-//
-// This gates RECORDING, never RECEIVING. A receiver that rejected exports would
-// make the governed tool retry and eventually surface an error, degrading the
-// session this lane exists to observe; the lane is additive by construction, so
-// "off" means accept and discard.
+// Default ON; see the field comment for why a default-off second switch would
+// be a bug rather than a conservative choice. This gates recording, never
+// receiving.
 func ResolveTelemetry() bool {
 	return resolveBool("telemetry", func(c DevConfig) *bool { return c.Telemetry }, true, EnvTelemetry)
 }
 
 // ResolveContentCapture reports the org content posture: config
 // `content_capture` first, then the env override (env wins either way).
-// Default on — an absent config field yields on; set
-// `content_capture:false` or OPENBOX_CONTENT_CAPTURE=0 to opt back to
-// metadata-only. A missing/unreadable config leaves the default ON. Cheap
-// config+env read, no secret I/O; safe on the hot path.
 func ResolveContentCapture() bool {
 	return resolveBool("content_capture", func(c DevConfig) *bool { return c.ContentCapture }, true, EnvContentCapture)
 }
 
-// ResolveSecretDetection reports whether Tier-1 local secret/entropy
-// detection is on. Default true — opt-out: the body it acts on reaches
-// only the local decider and the redaction stays local (INV-2 is
-// egress-only).
+// ResolveSecretDetection reports whether Tier-1 local secret/entropy detection
+// is on.
 func ResolveSecretDetection() bool {
 	return resolveBool("secret_detection", func(c DevConfig) *bool { return c.SecretDetection }, true, EnvSecretDetection)
 }
 
-// ResolveFindings reports whether the findings loop is on. Default
-// false — opt-in, because it is the first observe-path stdout writer.
+// ResolveFindings reports whether the findings loop is on.
 func ResolveFindings() bool {
 	return resolveBool("findings", func(c DevConfig) *bool { return c.Findings }, false, EnvFindings)
 }
 
-// ResolveRealtime reports whether the debounced background flush is on —
+// ResolveRealtime reports whether the debounced background flush is on;
 // spooled events are delivered to core within a debounce window of each hook
-// instead of waiting for SessionEnd. Default on; set `realtime_flush:false`
-// or OPENBOX_REALTIME=0 to restore batch-at-session-end. Timing-only: the
-// content posture (ResolveContentCapture) is untouched, and with it off the
-// trigger performs zero I/O.
+// instead of waiting for SessionEnd.
 func ResolveRealtime() bool {
 	return resolveBool("realtime_flush", func(c DevConfig) *bool { return c.RealtimeFlush }, true, EnvRealtime)
 }
 
-// ResolveFindingsCursor resolves the findings-loop cursor state file: the
-// env override, else a fixed file next to the advisory sink. It stores
-// only a byte offset (structural, content-free — INV-2).
+// ResolveFindingsCursor resolves the findings-loop cursor state file: the env
+// override, else a fixed file next to the advisory sink.
 func ResolveFindingsCursor(provider string) string {
 	if p := os.Getenv(EnvFindingsCursor); p != "" {
 		return p
@@ -425,14 +280,6 @@ func ResolveFindingsCursor(provider string) string {
 	if err != nil || dir == "" {
 		dir = filepath.Join(os.Getenv("HOME"), ".config")
 	}
-	// One cursor per provider (OD-RF-1). The advisory sink is deliberately
-	// shared — it is developer-scoped, not tool-scoped — but a shared CURSOR
-	// meant whichever tool's hook fired first consumed the delta and advanced
-	// it for both. Findings a Codex session caused could then surface only into
-	// a Claude Code session, and vice versa: cross-tool bleed one way, silence
-	// the other. Per-provider cursors mean each tool sees every finding exactly
-	// once. A finding relevant to both surfaces in both, which is the right
-	// direction to be wrong in for a nudge.
 	name := "findings.cursor"
 	if p := sanitizeProvider(provider); p != "" {
 		name = "findings-" + p + ".cursor"
@@ -440,8 +287,6 @@ func ResolveFindingsCursor(provider string) string {
 	return filepath.Join(dir, "openbox", name)
 }
 
-// sanitizeProvider reduces a provider name to a safe filename component, so a
-// caller cannot steer the cursor path.
 func sanitizeProvider(p string) string {
 	var b strings.Builder
 	for _, r := range p {
@@ -457,37 +302,18 @@ func sanitizeProvider(p string) string {
 
 // ResolveEnforce reports whether the developer runtime is in enforce mode:
 // config field first, then the env override.
-//
-// DEFAULT ON — an absent field means enforce; `enforce:false` or
-// OPENBOX_ENFORCE=0 opts out. Two properties keep that default safe: it is inert
-// until the org publishes a policy (nothing to deny means nothing denied), and
-// fail_closed stays off, so an OpenBox outage never blocks a tool call.
-//
-// A config read error resolves to the default, which now means an unreadable
-// config enforces. That is the right direction: the alternative is that
-// corrupting a file becomes a way to switch governance off.
 func ResolveEnforce() bool {
 	return resolveBool("enforce", func(c DevConfig) *bool { return c.Enforce }, true, EnvEnforce)
 }
 
-// ResolveFailClosed reports the enforce failure policy. Default false =
-// fail-open; an org never becomes fail-closed by accident.
+// ResolveFailClosed reports the enforce failure policy. Default false = fail-
+// open; an org never becomes fail-closed by accident.
 func ResolveFailClosed() bool {
 	return resolveBool("fail_closed", func(c DevConfig) *bool { b := c.FailClosed; return &b }, false, EnvFailClosed)
 }
 
-// deprecationOnce keeps the notice to one line per process. A hook runs per tool
-// call, so warning unconditionally would flood a session's stderr.
 var deprecationOnce sync.Once
 
-// warnDeprecatedKeys tells the developer, once, about config keys that still
-// parse but no longer do anything.
-//
-// It is called from EffectivePosture rather than from each resolver, because
-// that decision removed the last RUNTIME caller of ResolveTier2 — a warning
-// hung off the resolver was unreachable, which is indistinguishable from no
-// warning at all. EffectivePosture runs once per session and on every `openbox
-// doctor`.
 func warnDeprecatedKeys() {
 	dead := deadKeysPresent()
 	if len(dead) == 0 {
@@ -501,11 +327,6 @@ func warnDeprecatedKeys() {
 	})
 }
 
-// deadKeysPresent names the deprecated keys this machine actually sets.
-//
-// Presence is the question, not the value: an explicit `tier2:false` is the case
-// most worth warning about, because that is the setting that used to disable
-// enforcement and silently no longer does.
 func deadKeysPresent() []string {
 	cfg, err := load()
 	ok := err == nil
@@ -522,19 +343,15 @@ func deadKeysPresent() []string {
 	return dead
 }
 
-// ResolveTier2 reads the DEPRECATED, inert `tier2` key. Nothing on the enforce
-// path branches on it; it survives so an existing dev.json parses. The
-// deprecation notice lives in warnDeprecatedKeys, not here.
+// ResolveTier2 reads the deprecated, inert `tier2` key.
 func ResolveTier2() bool {
 	return resolveBool("tier2", func(c DevConfig) *bool { return c.Tier2 }, false, EnvTier2)
 }
 
-// ResolveTimeoutMS resolves a millisecond budget knob: the config field
-// first (via cfgMS), then the env override when present and parseable —
-// a garbage env value is ignored and the config value stands, so a
-// fat-fingered env never silently wipes a valid config. Clamping is
-// deliberately the caller's job: each adapter owns its correctness bound
-// (e.g. Claude Code's 5s hook kill).
+// ResolveTimeoutMS resolves a millisecond budget knob: the config field first
+// (via cfgMS), then the env override when present and parseable; a garbage env
+// value is ignored and the config value stands, so a fat-fingered env never
+// silently wipes a valid config.
 func ResolveTimeoutMS(cfgMS func(DevConfig) int, envKey string) int {
 	ms := 0
 	if cfg, err := load(); err == nil {
@@ -548,11 +365,8 @@ func ResolveTimeoutMS(cfgMS func(DevConfig) int, envKey string) int {
 	return ms
 }
 
-// ResolveAgentID resolves the backend agent id for policy sync/staleness:
-// env first, then the dev config. Empty when unconfigured.
-// ResolveOrgSigningKey returns the pinned policy-bundle signing key (base64 raw
-// Ed25519) and its id. Env overrides config, matching every other coordinate.
-// Both empty ⇒ no key pinned, which verification reports as "no_key".
+// ResolveOrgSigningKey resolveAgentID resolves the backend agent id for policy
+// sync/staleness: env first, then the dev config.
 func ResolveOrgSigningKey() (pubKeyB64, keyID string) {
 	c, _ := load()
 	pubKeyB64, keyID = c.OrgSigningPubKey, c.OrgSigningKeyID
@@ -570,37 +384,25 @@ func ResolveAgentID() string {
 	return FirstNonEmpty(os.Getenv(EnvAgentID), cfg.AgentID)
 }
 
-// ResolveBackendURL resolves the openbox-backend control-plane base URL:
-// env first, then the dev config. Empty when unconfigured.
+// ResolveBackendURL resolves the openbox-backend control-plane base URL: env
+// first, then the dev config.
 func ResolveBackendURL() string {
 	cfg, _ := load()
 	return FirstNonEmpty(os.Getenv(EnvBackendURL), cfg.BackendURL)
 }
 
 // ResolveControlToken resolves the org control-plane credential: the
-// OPENBOX_CONTROL_TOKEN env only. Deliberately not a config field and
-// never read from the runtime secret store — supplied via env only so it
-// cannot leak via a config file or argv (INV-1).
+// OPENBOX_CONTROL_TOKEN env only. Deliberately not a config field and never
+// read from the runtime secret store; supplied via env only so it cannot leak
+// via a config file or argv (INV-1).
 func ResolveControlToken() string {
 	return os.Getenv(EnvControlToken)
 }
 
-// ResolveCredentials assembles Credentials from the environment, the credential
-// file, and the dev config. It returns an error (never a panic) when identity is
-// incomplete; the caller logs it fail-open and exits 0 (INV-3). No secret value
-// is ever included in a returned error.
-//
-// TWO source chains through one funnel, and conflating them is the trap :
-//
-// secrets      (api key, private key)  real env var > ~/.openbox/.env coordinates
-// (DID, base URL)         real env var > dev.json > built-in default
-//
-// The credential file sits exactly where the deleted secret store sat and nowhere
-// else. It is never consulted for a coordinate, so no field has two files that
-// can disagree — which is what makes the pre-that decision two-DID-stores revert
-// loop structurally impossible rather than merely fixed. A DID written into
-// `.env` is ignored; TestEnvFileIsNotACoordinateSource pins that, and relaxing it
-// reopens the bug class.
+// ResolveCredentials assembles Credentials from the environment, the
+// credential file, and the dev config. It returns an error (never a panic)
+// when identity is incomplete; the caller logs it fail-open and exits 0
+// (INV-3).
 func ResolveCredentials() (Credentials, error) {
 	cfg, err := load()
 	if err != nil {
@@ -608,10 +410,8 @@ func ResolveCredentials() (Credentials, error) {
 	}
 
 	c := Credentials{
-		BaseURL: FirstNonEmpty(os.Getenv(EnvBaseURL), cfg.BaseURL, DefaultBaseURL),
-		DID:     FirstNonEmpty(os.Getenv(EnvDID), cfg.DID),
-		// Content capture: default on — an absent config field means on; an
-		// explicit false opts out; env overrides either way (mirrors ResolveContentCapture).
+		BaseURL:               FirstNonEmpty(os.Getenv(EnvBaseURL), cfg.BaseURL, DefaultBaseURL),
+		DID:                   FirstNonEmpty(os.Getenv(EnvDID), cfg.DID),
 		ContentCaptureEnabled: cfg.ContentCapture == nil || *cfg.ContentCapture,
 	}
 	if v, ok := os.LookupEnv(EnvContentCapture); ok {
@@ -631,8 +431,6 @@ func ResolveCredentials() (Credentials, error) {
 		return Credentials{}, missingCredentialError("obx_ API key", EnvAPIKeyDirect, envPath)
 	}
 
-	// The private key is read under its platform-documented name first, then the
-	// two deprecated aliases (see resolvePrivateKey).
 	c.PrivateKeyB64 = resolvePrivateKey(secrets)
 	if c.PrivateKeyB64 == "" {
 		return Credentials{}, missingCredentialError("Ed25519 signing key", EnvAgentPrivateKey, envPath)
@@ -641,19 +439,11 @@ func ResolveCredentials() (Credentials, error) {
 	return c, nil
 }
 
-// loadSecretFile reads ~/.openbox/.env, returning the map and the path it tried.
-//
-// A missing file is an empty map and no error — "no credentials configured" is
-// reported by the caller in its own words, naming what to run. An unresolvable
-// home or an unparseable file IS an error: silently treating either as "no
-// credentials" would send a user hunting for a registration problem they do not
-// have.
+// loadSecretFile reads ~/.openbox/.env, returning the map and the path it
+// tried.
 func loadSecretFile() (map[string]string, string, error) {
 	path, err := EnvFilePath()
 	if err != nil {
-		// No home to resolve. Callers still work if the real env vars are set,
-		// so return an empty map rather than failing outright, and let the
-		// missing-credential error name OPENBOX_HOME.
 		return map[string]string{}, "", nil
 	}
 	kv, err := ParseEnvFile(path)
@@ -663,15 +453,6 @@ func loadSecretFile() (map[string]string, string, error) {
 	return kv, path, nil
 }
 
-// resolvePrivateKey reads the signing key under its current name, then the two
-// deprecated aliases, warning once per process for an alias.
-//
-// Three names existed for one value: OPENBOX_ED25519_SEED here, OPENBOX_SEED
-// in the git action, and OPENBOX_AGENT_PRIVATE_KEY in the platform's own
-// published SDK docs. A developer who followed those docs set a variable this
-// repo ignored — a live defect independent of. The documented name wins; the
-// other two keep working so nobody's CI breaks on upgrade. Retiring them needs
-// its own decision, not a commit.
 func resolvePrivateKey(secrets map[string]string) string {
 	if v := os.Getenv(EnvAgentPrivateKey); v != "" {
 		return v
@@ -694,11 +475,8 @@ func resolvePrivateKey(secrets map[string]string) string {
 	return ""
 }
 
-// warnDeprecatedPrivateKeyName warns once per process, on STDERR only.
-//
-// stderr is not a style choice: a hook writing to stdout injects context into the
-// coding agent's conversation (INV-3). A deprecation notice must never become
-// model input.
+// warnDeprecatedPrivateKeyName warns once per process, on stderr only. A
+// deprecation notice must never become model input.
 func warnDeprecatedPrivateKeyName(alias string) {
 	deprecatedNameWarnOnce.Do(func() {
 		fmt.Fprintf(os.Stderr, "openbox: %s is deprecated — use %s (same value, the name OpenBox documents)\n",
@@ -708,17 +486,6 @@ func warnDeprecatedPrivateKeyName(alias string) {
 
 var deprecatedNameWarnOnce sync.Once
 
-// missingCredentialError names the file, the env var, and how to fix it —
-// including, on macOS/Linux, how to read credentials back out of the OS keychain
-// this release deleted support for.
-//
-// The keychain hint is here because this error is where a user upgrading an
-// existing install actually meets that decision's no-migration decision. Telling
-// them only "run openbox auth" would send someone with working credentials off
-// to register a second agent.
-//
-// It never echoes a value, and never names an account coordinate that no longer
-// exists in this config.
 func missingCredentialError(what, envName, envPath string) error {
 	where := "~/.openbox/.env"
 	if envPath != "" {
@@ -741,29 +508,11 @@ func missingCredentialError(what, envName, envPath string) error {
 	return errors.New(msg)
 }
 
-// resolveBool applies the shared precedence for boolean posture flags: the
-// config field (def when absent/nil or the config is unreadable), then the env
-// override (env wins either way, so env can disable what config enabled).
-// resolveBool resolves one boolean posture field through the full precedence
-// chain. The managed layer (E8-S9) can outrank both the user config and the
-// environment for fields an org locks; see managed.go for why that inversion is
-// necessary rather than merely convenient.
-//
-// fieldName is the JSON name the managed file's "locked" list refers to.
 func resolveBool(fieldName string, field func(DevConfig) *bool, def bool, envKey string) bool {
 	v, _ := resolveBoolWithSource(fieldName, field, def, envKey)
 	return v
 }
 
-// unmarshalStrict decodes config JSON, rejecting unknown fields so a typo in a
-// managed file surfaces as unreadable rather than as a silently-ignored mandate —
-// `{"enfoce": true}` must not look like a file that simply governs nothing.
-//
-// Keys beginning with "//" are allowed through as documentation. JSON has no
-// comments, and an ops file that mandates security settings needs to explain
-// itself where the operator will actually read it; this is the same convention
-// Claude Code's own managed-settings.json uses. Only that prefix is exempt, so a
-// misspelled real field is still caught.
 func unmarshalStrict(raw []byte, v any) error {
 	var all map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &all); err != nil {

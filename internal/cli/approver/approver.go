@@ -13,7 +13,7 @@ import (
 )
 
 // Queue is the control-plane surface an approver works: the same two routes a
-// human uses through `openbox approve`. Narrow on purpose — an autonomous
+// human uses through `openbox approve`. Narrow on purpose; an autonomous
 // approver gets no capability a person does not have.
 type Queue interface {
 	PendingApprovals(ctx context.Context, orgID string) ([]backend.Approval, error)
@@ -26,28 +26,22 @@ type Config struct {
 	Envelope Envelope
 	Host     Host // nil ⇒ nothing is consultable; Consult behaves as Escalate
 
-	// Shadow decides nothing and records what it would have decided. It is the
-	// default everywhere it can be, because an envelope's real auto-approval
-	// rate is the only evidence that its classes are drawn correctly.
+	// Shadow decides nothing and records what it would have decided.
 	Shadow bool
 
-	// Interval paces the poll. The queue is small and human-latency; seconds
-	// are plenty, and the hook's hold is ~20s.
+	// Interval paces the poll.
 	Interval time.Duration
 	// Once runs a single pass (used by tests and by `--once`).
 	Once bool
 
 	// SelfAgentID is this machine's own developer agent, if it has one.
-	// Requests from it are refused unless AllowSelfAgent — approving your own
-	// machine's request is a convenience control, not four-eyes (E9 §3.7).
 	SelfAgentID    string
 	AllowSelfAgent bool
 
 	// MaxPerHour bounds autonomous decisions. 0 ⇒ unbounded.
 	MaxPerHour int
 
-	// EvidencePath is the local audit trail. Every outcome lands here,
-	// including the ones that decided nothing.
+	// EvidencePath is the local audit trail.
 	EvidencePath string
 
 	// Now is injectable so the budget window is testable.
@@ -70,9 +64,7 @@ type Record struct {
 	HostSays   string `json:"host_says,omitempty"` // approve|deny|escalate
 	HostReason string `json:"host_reason,omitempty"`
 	Applied    string `json:"applied"` // the queue's own vocabulary: approve|reject|none
-	// WouldApply is set only in shadow mode: what a deciding run would have
-	// done. Counting these is how an org reads its auto-approval rate before
-	// giving the approver any authority.
+	// WouldApply is set only in shadow mode: what a deciding run would have done.
 	WouldApply string `json:"would_apply,omitempty"`
 	Shadow     bool   `json:"shadow"`
 	SelfAgent  bool   `json:"self_agent,omitempty"`
@@ -120,8 +112,6 @@ func Loop(ctx context.Context, q Queue, cfg Config) error {
 	}
 }
 
-// decide resolves one request. It is the whole authority model in one function:
-// the envelope classifies, the host may only narrow, and shadow applies nothing.
 func decide(ctx context.Context, q Queue, cfg Config, ap backend.Approval, window *[]time.Time) Record {
 	start := cfg.Now()
 	request := ap.Request()
@@ -139,8 +129,6 @@ func decide(ctx context.Context, q Queue, cfg Config, ap backend.Approval, windo
 		Applied:    "none",
 	}
 
-	// Self-approval boundary first: it outranks the envelope, because no rule
-	// an org writes should be able to turn a machine into its own approver.
 	if cfg.SelfAgentID != "" && ap.AgentID == cfg.SelfAgentID {
 		rec.SelfAgent = true
 		if !cfg.AllowSelfAgent {
@@ -173,9 +161,6 @@ func decide(ctx context.Context, q Queue, cfg Config, ap backend.Approval, windo
 		if err != nil {
 			rec.Error = err.Error()
 		}
-		// The narrowing rule: deny always lands; approve lands only because the
-		// envelope already placed this request in the consultable set; anything
-		// else leaves it for a human.
 		switch p.Decision {
 		case "deny":
 			action = backend.ApprovalReject
@@ -200,8 +185,6 @@ func decide(ctx context.Context, q Queue, cfg Config, ap backend.Approval, windo
 	}
 
 	if cfg.Shadow {
-		// Shadow makes no decision and says what it would have made. Keeping
-		// those two fields separate is the whole point of the mode.
 		rec.WouldApply = action
 		rec.LatencyMS = ms(cfg.Now().Sub(start))
 		return rec
@@ -218,7 +201,6 @@ func decide(ctx context.Context, q Queue, cfg Config, ap backend.Approval, windo
 	return rec
 }
 
-// prune drops decisions older than the budget window.
 func prune(window []time.Time, now time.Time) []time.Time {
 	cut := now.Add(-time.Hour)
 	kept := window[:0]

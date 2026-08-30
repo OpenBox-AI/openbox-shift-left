@@ -4,16 +4,7 @@ import (
 	providerspi "github.com/openbox-ai/openbox-shift-left/internal/provider"
 )
 
-// Capabilities returns the Claude Code adapter's capability profile. Two
-// capabilities are provider-independent and always available
-// (identity.register via agent/create, commit.binding via the git trailer).
-//
-// "Supported" means the adapter implements the mechanism, not that it is
-// active in a given session: both verdict.apply and telemetry.tokens are
-// opt-in and default off, so an unconfigured session still observes only
-// (INV-3). Keep this profile in step with docs/COVERAGE.md —
-// a profile that undersells shipped capability is as misleading as one that
-// oversells it (report SL-07).
+// Capabilities returns the Claude Code adapter's capability profile.
 func Capabilities() []providerspi.Capability {
 	return []providerspi.Capability{
 		{Key: "identity.register", Supported: true, How: "agent/create via `openbox init`; provider-independent"},

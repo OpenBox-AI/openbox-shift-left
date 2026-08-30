@@ -9,41 +9,21 @@ import (
 	"time"
 )
 
-// Provider-independent session discovery.
-//
-// This package lives in internal/adapters/common/ precisely because "which session
-// produced this commit" must not depend on any one tool. Resolution has
-// two tiers:
-//
-//  1. Explicit override — OPENBOX_SESSION / OPENBOX_SESSION_FILE. A
-//     provider or CI job that can inject the id into the git environment
-//     (or a human) wins outright. One or more ids => genuine fan-in.
-//  2. Registry (the parallel-safe default for tools that cannot inject
-//     env, like Claude Code) — the adapter writes a per-session liveness
-//     record and the resolver attributes the commit to the
-//     most-recently-updated session whose cwd lies within the commit's
-//     git worktree (see registry.go).
-//
-// Missing on both tiers => no attribution (the commit is left unstamped,
-// which the git action records as unattributed — never a wrong guess,
-// INV-6).
+// Provider-independent session discovery. This package lives in
+// internal/adapters/common/ precisely because "which session produced this
+// commit" must not depend on any one tool.
 const (
 	EnvSession     = "OPENBOX_SESSION"
 	EnvSessionFile = "OPENBOX_SESSION_FILE"
 
-	// EnvCodexThreadID is the session (≡ thread) id Codex itself injects
-	// into every tool/shell exec environment (codex-rs
-	// core/src/exec_env.rs @ rust-v0.145.0) — so a Codex-run `git commit`
-	// sees it in the git-hook env with no liveness registry at all. It's
-	// the highest-precedence source — the tool itself asserting "this
-	// exec belongs to session X" outranks both the operator override and
-	// registry recency. There is no CODEX_SESSION_ID.
+	// EnvCodexThreadID is the session (≡ thread) id Codex itself injects into
+	// every tool/shell exec environment (codex-rs core/src/exec_env.rs @
+	// rust-v0.145.0); so a Codex-run `git commit` sees it in the git-hook env
+	// with no liveness registry at all.
 	EnvCodexThreadID = "CODEX_THREAD_ID"
 )
 
-// SessionResolver reads the session id(s) in scope for a commit. Every external
-// dependency is an injectable field so tests need no real environment, clock, or
-// filesystem; the zero value reads the real ones.
+// SessionResolver reads the session id(s) in scope for a commit.
 type SessionResolver struct {
 	Getenv     func(string) string
 	ReadFile   func(string) ([]byte, error)
@@ -101,47 +81,17 @@ func (r SessionResolver) ttl() time.Duration {
 }
 
 // Resolve returns the session id(s) to attribute a commit in worktree to.
-// worktree is the commit's git top-level ("" if it could not be determined —
+// Worktree is the commit's git top-level ("" if it could not be determined;
 // then only the env-based tiers apply).
 func (r SessionResolver) Resolve(worktree string) []string {
-	// Tier 0 (additive): the provider-injected CODEX_THREAD_ID. Codex
-	// stamps it into the exec env of the very process running `git
-	// commit`, so it is authoritative for this commit — highest
-	// precedence. Validation (length/newline/secret-shape) still happens
-	// at the trailer sink (validateSessionID), same as every other tier.
-	// A Claude Code session never sets this var, so the CC resolution
-	// below is untouched.
-	//
-	// Known, accepted edges, both consequences of "highest precedence"
-	// being env-carried:
-	//   - Inheritance: any process launched from within a Codex exec (a
-	//     nested agent session, a long-lived shell) inherits the var, so
-	//     its commits attribute to the enclosing Codex thread rather than
-	//     to the inner session / registry tier — and Tier-0 outranks even
-	//     an explicit OPENBOX_SESSION set inside that environment.
-	//     Arguably transitively correct; the real OwnershipVerifier still
-	//     downgrades a claim the server can't bind to the caller.
-	//   - Suppression: a present-but-garbage value wins Tier-0 here and is
-	//     then dropped by the sink's validation, with no fallback to the
-	//     remaining tiers — the commit lands unattributed rather than
-	//     mis-guessed (INV-6-safe, but an env-writing process can exploit
-	//     it to suppress attribution).
-	//   - Forked threads: this is a THREAD id, while the Codex event stream is
-	//     keyed by the root SESSION id (a fork keeps the root's session id —
-	//     see internal/adapters/codex/hookevent.go). Under a fork the trailer therefore
-	//     names the thread and no session row shares that id. Deliberately
-	//     unchanged here: the id is still the most precise true statement about
-	//     which thread made the commit, and the Codex adapter emits
-	//     metadata.thread_id/root_session_id on that fork's events so the
-	//     server can join the two (E8-S4).
+	// A Claude Code session never sets this var, so the CC resolution below is
+	// untouched.
 	if id := strings.TrimSpace(r.getenv(EnvCodexThreadID)); id != "" {
 		return []string{id}
 	}
-	// Tier 1: explicit override (env / file). Wins outright, supports fan-in.
 	if env := r.envSessions(); len(env) > 0 {
 		return env
 	}
-	// Tier 2: the freshest live session working within this worktree.
 	if worktree == "" {
 		return nil
 	}
@@ -151,9 +101,9 @@ func (r SessionResolver) Resolve(worktree string) []string {
 	return nil
 }
 
-// envSessions reads the explicit-override tier: OPENBOX_SESSION plus an optional
-// OPENBOX_SESSION_FILE, unioned and deduped. The file is best-effort (a read
-// error is ignored — observe-only never blocks a commit).
+// envSessions reads the explicit-override tier: OPENBOX_SESSION plus an
+// optional OPENBOX_SESSION_FILE, unioned and deduped. The file is best-effort
+// (a read error is ignored; observe-only never blocks a commit).
 func (r SessionResolver) envSessions() []string {
 	var ids []string
 	ids = append(ids, splitIDs(r.getenv(EnvSession))...)
@@ -166,11 +116,7 @@ func (r SessionResolver) envSessions() []string {
 }
 
 // resolveFromRegistry returns the most-recently-updated live session whose cwd
-// is within worktree, or "" if none. Records older than the TTL (crashed
-// sessions that never wrote SessionEnd) are ignored so a later human commit is
-// not falsely attributed. A commit attributes to a SINGLE session — genuine
-// multi-session fan-in comes from squash healing (see StampMessageFile), not
-// from parallel liveness.
+// is within worktree, or "" if none.
 func (r SessionResolver) resolveFromRegistry(worktree string) string {
 	entries, err := r.readDir(r.sessionDir())
 	if err != nil {
@@ -206,12 +152,6 @@ func (r SessionResolver) resolveFromRegistry(worktree string) string {
 	return ""
 }
 
-// resolvePath canonicalizes a path for comparison, resolving symlinks
-// best-effort: a tool's recorded cwd may be under a symlinked path (e.g.
-// macOS /tmp -> /private/tmp) while `rev-parse --show-toplevel` returns
-// the real path, which would otherwise mismatch and drop attribution.
-// Falls back to Clean when the path does not exist (e.g. injected test
-// paths).
 func resolvePath(p string) string {
 	if p == "" {
 		return ""
@@ -222,9 +162,6 @@ func resolvePath(p string) string {
 	return filepath.Clean(p)
 }
 
-// withinWorktree reports whether cwd is the worktree top or a path
-// beneath it. Both sides are symlink-resolved so equivalent real paths
-// match.
 func withinWorktree(cwd, top string) bool {
 	if cwd == "" || top == "" {
 		return false
@@ -233,8 +170,6 @@ func withinWorktree(cwd, top string) bool {
 	return c == top || strings.HasPrefix(c, top+string(os.PathSeparator))
 }
 
-// splitIDs parses ids separated by newlines, commas, or whitespace, trimming
-// each and dropping blanks.
 func splitIDs(s string) []string {
 	fields := strings.FieldsFunc(s, func(r rune) bool {
 		return r == '\n' || r == '\r' || r == ',' || r == ' ' || r == '\t'

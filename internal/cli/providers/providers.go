@@ -1,12 +1,8 @@
-// Package providers is the CLI's composition root for the install-time SPI:
-// it binds each recognized provider name (from the shared `provider`
-// module) to a concrete Installer. This is the one place that imports both
-// the shared SPI and the adapter modules; keeping it in `cli` (not in the
-// shared module) is what breaks the would-be import cycle between the SPI
-// and its adapters.
-//
-// claude-code and codex are real installers (hooks.json/dev.json, no
-// bundle); Cursor stays a stub until it ships.
+// Package providers is the CLI's composition root for the install-time SPI: it
+// binds each recognized provider name (from the shared `provider` module) to a
+// concrete Installer. This is the one place that imports both the shared SPI
+// and the adapter modules; keeping it in `cli` (not in the shared module) is
+// what breaks the would-be import cycle between the SPI and its adapters.
 package providers
 
 import (
@@ -20,11 +16,6 @@ import (
 )
 
 // Engine returns the runtime hook engine for a provider name, or ErrUnknown.
-//
-// This is the other half of what Lookup does for install time. The CLI used to
-// reach the adapters through a hard-coded switch for hook dispatch, so adding a
-// provider meant editing the command wiring as well as registering it here;
-// now the registry is the single place that knows which providers exist.
 func Engine(name string) (provider.HookEngine, error) {
 	switch provider.Name(name) {
 	case provider.ClaudeCode:
@@ -47,13 +38,9 @@ type LocalHookAudit struct {
 }
 
 // AuditProjectHooks reports which OpenBox engines a project's provider-local
-// hook config registers.
-//
-// Only Claude Code has a project-scoped hook file that can accumulate a second
-// registration: its merge preserved anything it could not match by exact
-// command string, so an install run from another HOME left both engines live.
-// Codex has always replaced by argv shape, so it has no equivalent state to
-// report and is deliberately absent here rather than silently returning empty.
+// hook config registers. Codex has always replaced by argv shape, so it has no
+// equivalent state to report and is deliberately absent here rather than
+// silently returning empty.
 func AuditProjectHooks(projectDir string) (LocalHookAudit, error) {
 	a, err := claudecode.AuditLocalHooks(projectDir)
 	return LocalHookAudit{
@@ -64,31 +51,17 @@ func AuditProjectHooks(projectDir string) (LocalHookAudit, error) {
 	}, err
 }
 
-// Lookup returns the Installer for a provider name, or ErrUnknown. Built
-// adapters return a real installer; unbuilt ones a provider.Stub
-// (Available()==false).
+// Lookup returns the Installer for a provider name, or ErrUnknown.
 func Lookup(name string) (provider.Installer, error) {
 	switch provider.Name(name) {
 	case provider.ClaudeCode:
 		inst := claudecode.Installer{} // real installer (default install paths)
-		// Place this running `openbox` engine into the bundle's bin/openbox
-		// so the plugin's hooks resolve to it. Best-effort resolution: if
-		// os.Executable() is unavailable we leave EngineBinary empty and
-		// Install skips the copy (packaging supplies the binary). Once
-		// EngineBinary is set, a copy failure surfaces as an install error
-		// rather than leaving a bundle with no engine — a loud failure
-		// beats a silently broken install.
 		if exe, err := os.Executable(); err == nil {
 			inst.EngineBinary = exe
 		}
 		return inst, nil
 	case provider.Codex:
 		inst := codex.Installer{} // real installer (default install paths)
-		// Same EngineBinary discipline as claude-code, with a different
-		// mechanic: Codex has no plugin bundle to copy into, so the
-		// absolute path of this running engine is baked directly into each
-		// hooks.json command. If os.Executable() is unavailable the
-		// installer falls back to `openbox` on PATH (hookCommand).
 		if exe, err := os.Executable(); err == nil {
 			inst.EngineBinary = exe
 		}

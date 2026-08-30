@@ -1,22 +1,7 @@
 // Command corpusfixture turns a recorded openbox-logger run into the sanitized
-// test fixtures this repository commits.
-//
-// It is a MAINTENANCE command, run by hand, and it is committed rather than kept
-// as a one-off script so that the fixtures are reproducible: the next person to
-// refresh them can see exactly which records were selected and on what basis,
-// instead of inheriting a directory of JSON with no provenance.
-//
-// It is not built into the release binary — .goreleaser.yaml names ./cmd/openbox
-// explicitly — and it reads a corpus that is not part of this repository.
-//
-// Usage:
-//
-//	go run ./cmd/corpusfixture -corpus <run-dir> -out <repo-root>
-//
-// The write is GATED on corpusfixture.Scan reporting nothing, so an unsanitized
-// fixture cannot reach the working tree, let alone git history. That gate is
-// belt-and-braces with the permanent scan test — this one protects the person
-// running the command, that one protects the repository forever.
+// test fixtures this repository commits. The write is gated on
+// corpusfixture.Scan reporting nothing, so an unsanitized fixture cannot reach
+// the working tree, let alone git history.
 package main
 
 import (
@@ -51,7 +36,6 @@ func run(corpus, out string) error {
 	return extractProxy(corpus, out)
 }
 
-// write sanitizes, scans, and only then writes. The scan is the gate.
 func write(path string, doc any) error {
 	raw, err := json.Marshal(doc)
 	if err != nil {

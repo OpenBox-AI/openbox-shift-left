@@ -13,44 +13,14 @@ import (
 	"strings"
 )
 
-// minSSEFrames is how many event-stream frames the streaming fixture must carry.
-//
-// Per-chunk delivery cannot be demonstrated with fewer than two, and the third is
-// margin: the smallest recorded exchange is chosen deliberately, and the very
-// smallest streams are truncated or aborted ones whose framing proves nothing.
+// minSSEFrames is how many event-stream frames the streaming fixture must
+// carry.
 const minSSEFrames = 3
 
-// redactedMarker is this repository's own enforce-path redactor, visible in the
-// recording.
-//
-// The corpus was recorded during governed sessions in this very repo, so a
-// request body can arrive already rewritten — an API-key literal replaced by
-// ${OPENBOX_REDACTED_GENERIC_API_KEY} before it ever left the machine. Such an
-// exchange is skipped rather than committed: a fixture carrying one still parses
-// and still replays, and every assertion built on it would be a statement about
-// that accident instead of about the product.
-//
-// It is worth knowing WHY this was invisible until now. While the fixture carried
-// the response compressed, the marker sat inside gzip and matched nothing — the
-// same reason this repository already documents for a content-encoded body
-// defeating its own detector. Decompressing made it visible on the first run.
 const redactedMarker = "${OPENBOX_REDACTED"
 
-// extractProxy pulls two model-call exchanges out of the recorded proxy stream:
-// one with a JSON response and one with an SSE response.
-//
-// Two honest limits, both recorded in the fixture itself rather than left for a
-// reader to discover.
-//
-// The recorder flattened the response into ONE body, so real chunk boundaries do
-// not exist in the corpus. A replay reconstructs them from SSE frame separators,
-// which is what a client actually sees but is not what the wire did.
-//
-// And the smallest available request is chosen deliberately: 96.75% of recorded
-// model-call request bodies exceed the 65,536-rune egress cap (p50 ~529k runes),
-// so the median request is far too large to commit. Byte-identity is a property
-// of the relay, not of the payload size, so a small real request proves it; the
-// cap is exercised by a synthetic oversized fixture instead.
+// extractProxy pulls two model-call exchanges out of the recorded proxy
+// stream: one with a JSON response and one with an SSE response.
 func extractProxy(corpus, out string) error {
 	f, err := os.Open(filepath.Join(corpus, "proxy", "events.jsonl"))
 	if err != nil {
@@ -90,12 +60,6 @@ func extractProxy(corpus, out string) error {
 			delete(pending, ev.FlowID)
 			cp := ev
 			ex := exchange{req: req, resp: &cp}
-			// A brotli body is skipped rather than carried. The standard library
-			// cannot decompress it, and taking a brotli dependency to widen a
-			// fixture set would be a dependency decision made by a test-data
-			// script. gzip covers every recorded event-stream response and the
-			// uncompressed ones cover JSON; measured on the corpus: gzip 3569
-			// (all event-stream), br 1573 (all JSON), none 5.
 			body, ok := decodedBody(&cp)
 			if !ok {
 				continue
@@ -141,8 +105,6 @@ func extractProxy(corpus, out string) error {
 	return nil
 }
 
-// smaller keeps the smallest request body seen, so the committed fixture is a
-// real exchange rather than a truncated one.
 func smaller(cur, next struct {
 	req, resp *event
 }) struct {
@@ -157,20 +119,6 @@ func smaller(cur, next struct {
 	return cur
 }
 
-// decodedBody returns the body as the wire semantically carried it, and reports
-// whether this exchange is usable at all.
-//
-// The recorder stored the response exactly as it arrived, which means COMPRESSED:
-// every recorded event-stream response is gzip. Committing those bytes produces a
-// fixture with no visible frame boundaries, on which a streaming assertion is
-// vacuous, and on which the capture assertions measure nothing — this repository
-// already documents that a content-encoded body defeats its own detector and is
-// marked rather than scanned.
-//
-// So the fixture carries the DECOMPRESSED body and drops the content-encoding
-// header with it, which is stated in the fixture's own note. What that costs is
-// the ability to replay a compressed response; nothing in this phase needs one,
-// and the gateway's content-encoding marker has its own test.
 func decodedBody(e *event) (string, bool) {
 	raw := e.bodyText()
 	if raw == "" {
@@ -210,8 +158,6 @@ type event struct {
 	} `json:"body"`
 }
 
-// bodyText normalizes the recorder's three encodings into the bytes the wire
-// actually carried.
 func (e *event) bodyText() string {
 	switch e.Body.Encoding {
 	case "base64":
@@ -236,7 +182,6 @@ func (e *event) bodyText() string {
 	return ""
 }
 
-// withoutContentEncoding copies the header map minus the compression claim.
 func withoutContentEncoding(h map[string]string) map[string]string {
 	out := make(map[string]string, len(h))
 	for k, v := range h {
@@ -266,10 +211,7 @@ func fixtureFor(req, resp *event) (any, error) {
 			"body":    req.bodyText(),
 		},
 		"response": map[string]any{
-			"status": resp.Status,
-			// content-encoding is dropped along with the compression: the body
-			// below is the decompressed one, and a fixture whose header claimed
-			// gzip over plaintext would make a replaying client fail to decode.
+			"status":  resp.Status,
 			"headers": withoutContentEncoding(resp.Headers),
 			"body":    resp.decoded,
 		},

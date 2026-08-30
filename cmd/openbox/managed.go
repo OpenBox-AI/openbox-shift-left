@@ -9,13 +9,10 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/managed"
 )
 
-// runManaged installs the provider-level configuration that makes governance an
-// org mandate rather than a per-developer opt-in (E8-S8).
 func (a *app) runManaged(args []string) int {
 	if len(args) == 0 {
 		return a.errorf("usage: openbox managed install --provider <claude-code,codex> [--dry-run] [--force]")
 	}
-	// Asking for help is not an error, at this level or the subcommand's.
 	if args[0] == "-h" || args[0] == "--help" || args[0] == "help" {
 		fmt.Fprintln(a.stdout, "usage: openbox managed install --provider <claude-code,codex> [--dry-run] [--force] [--bin <path>]")
 		return exitOK
@@ -54,8 +51,6 @@ func (a *app) runManaged(args []string) int {
 
 	bin := *binPath
 	if bin == "" {
-		// The running binary is the honest default: whatever invoked this command
-		// is what is actually installed on the machine.
 		exe, err := os.Executable()
 		if err != nil {
 			return a.errorf("could not determine this binary's path; pass --bin: %v", err)
@@ -74,9 +69,6 @@ func (a *app) runManaged(args []string) int {
 		fmt.Fprintf(a.stderr, "warning: %s\n", w)
 	}
 
-	// Printing is a first-class outcome, not a failure mode: on a machine without
-	// privileges the operator's next step is to hand these files to the MDM team,
-	// and exiting non-zero would make that look like an error.
 	if *dryRun || !managed.Privileged(plan) {
 		why := "dry run"
 		if !*dryRun {
