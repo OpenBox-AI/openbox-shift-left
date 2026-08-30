@@ -8,7 +8,7 @@ this commit" must not depend on any one tool (Claude Code, Codex, Cursor).
 
 ```
 git commit / amend / rebase-squash
-   └─ .git/hooks/prepare-commit-msg          # installed by the CLI / adapter
+   └─.git/hooks/prepare-commit-msg          # installed by the CLI / adapter
         └─ openbox-git-hook prepare-commit-msg <msgFile> [source] [sha]
              ├─ resolve session(s)            # env OPENBOX_SESSION / OPENBOX_SESSION_FILE
              ├─ harvest mid-body sessions     # squash healing (see below)
@@ -17,10 +17,10 @@ git commit / amend / rebase-squash
 ```
 
 The durable, authoritative binding is **not** created here. It is resolved
-**server-side at push against the real pushed SHA** by the SL-6 git action (S3
+**server-side at push against the real pushed SHA** by the the git action git action (S3
 R7); git hooks are local and never travel (S3 §1), so this write side is
 best-effort: its only job is to place the opaque session id inside the commit
-object so SL-6 can resolve it later.
+object so the git action can resolve it later.
 
 ## Why a trailer (not git notes)
 
@@ -63,7 +63,7 @@ heals the agent sessions they squashed together. See
 | `--amend` (re-fire) | idempotent, no duplicate | `TestE2E_AmendIsIdempotent` |
 | plain rebase | message copied → trailer survives | `TestE2E_PlainRebasePreservesTrailer` |
 | **squash** | fan-in of all sessions (healed) | `TestE2E_SquashFansInAllSessions` |
-| **fixup** | source message discarded → **session lost** (documented loss; SL-6 detects `trailer-stripped`) | `TestE2E_FixupDropsItsSession` |
+| **fixup** | source message discarded → **session lost** (documented loss detects `trailer-stripped`) | `TestE2E_FixupDropsItsSession` |
 | human commit (no session) | unattributed, unstamped | `TestE2E_HumanCommitIsUnattributed` |
 
 ## Safety: never fail a commit (INV-3, the git analog)
@@ -72,7 +72,7 @@ A `prepare-commit-msg` hook that exits non-zero **aborts the commit**. This
 package never does that: the hook script and `openbox-git-hook` binary **always
 exit 0**, and a missing engine binary degrades to a no-op commit (the hook
 script guards on the binary being resolvable). A stamping failure is logged to
-stderr and the commit proceeds unstamped (SL-6 records it as unattributed).
+stderr and the commit proceeds unstamped (the git action records it as unattributed).
 
 ## Security (INV-1)
 
@@ -105,7 +105,7 @@ has two tiers:
   Bash tool is always immediately preceded by that session's `PreToolUse`, which
   refreshes its record; so the committing session is the freshest. This is
   best-effort (a tight interleaving race is possible); acceptable because
-  Phase-1 is observe-only and SL-6 makes the authoritative binding at push (S3
+  Phase-1 is observe-only and the git action makes the authoritative binding at push (S3
   R7).
 - Stale records (a crashed session that never wrote `SessionEnd`) are ignored
   past a TTL (`OPENBOX_SESSION_TTL`, default 8h), so a much-later human commit
@@ -128,11 +128,10 @@ squash healing, not from parallel liveness.
 Per od17 (single `openbox` engine) the standalone `cmd/openbox-git-hook` binary
 is folded into `openbox hook git prepare-commit-msg` in a follow-up; the hook
 script's command is already parameterized (`HookConfig`) so that move needs no
-change here (mirrors how SL-4 shipped `cmd/openbox-cc-hook`, later absorbed by
-SL4-wire-2).
+change here (mirrors how the Claude Code adapter shipped `cmd/openbox-cc-hook`, later absorbed by.
 
 ## Validate
 
 ```
-go build ./internal/adapters/common/git/... && go vet ./internal/adapters/common/git/... && go test -race ./internal/adapters/common/git/...
+go build./internal/adapters/common/git/... && go vet./internal/adapters/common/git/... && go test -race./internal/adapters/common/git/...
 ```

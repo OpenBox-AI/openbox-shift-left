@@ -7,13 +7,8 @@
 
 **Status: built and green** (`test/`, 2026-08-03). To run it:
 
-```bash
-. test/env.sh          # settings; secrets come from test/.state or your env
-./test/env.sh mint     # once: the org credential the assertions read through
-./test/run-all.sh      # preflight → onboard → capture → enforce → approvals →
-                          # lineage → visibility → approver
-./test/run-all.sh lineage visibility     # or just some phases
-./test/run-all.sh teardown               # hand the box back
+```bash. test/env.sh          # settings; secrets come from test/.state or your env./test/env.sh mint     # once: the org credential the assertions read through./test/run-all.sh      # preflight → onboard → capture → enforce → approvals →
+                          # lineage → visibility → approver./test/run-all.sh lineage visibility     # or just some phases./test/run-all.sh teardown               # hand the box back
 ```
 
 Findings from the first full run are in §8a. The autonomous approver landed on
@@ -77,7 +72,7 @@ rewake watcher works.
 | P2 | **`test/env.sh`** | one place that knows the stack's URLs, the org, and where the credential lives; the predecessor scripts each carried their own copy | New |
 | P3 | **The `everything` MCP server** (§6) | No MCP span exists anywhere in the local data; MCP capture is unproven end to end | New |
 | P4 | **An approver identity**; `openbox init --role approver` (§7) | Scenario F and every approval assertion need a credential that is *not* the developer's runtime key | Needs the CLI change in §8 |
-| P5 | **Mechanism-B seeding** (`projects`, `agent_definitions`) or an explicit skip | `projects` is 0 rows, so the `lineage-architecture.md` §6 convergence is untested either way | Decide (§11 OD-T-2) |
+| P5 | **Mechanism-B seeding** (`projects`, `agent_definitions`) or an explicit skip | `projects` is 0 rows, so the `lineage-architecture.md` §6 convergence is untested either way | Decide (§11 an owner decision) |
 | P6 | Assert **through the read API** where one exists; SQL only where core has none (spans, Merkle leaves) | Otherwise the harness tests the database rather than the product | Convention |
 
 ## 4. Layout
@@ -286,7 +281,7 @@ credential in a second process:
 | C; late approval | rewake watcher exits 2 exactly once; marker file removed exactly once; the re-run is **allowed and does not mint a second approval id** (the operation-identity regression) |
 | D; rejected | blocks immediately on the decision, with the approver's reason |
 | E; nothing to approve | `Read`/`Grep` byte-identical to observe mode; worker log quiet; the 30s ceiling costs nothing |
-| F; MCP approval | an OPA rule gating `mcp__everything__*`; the queue row carries `arguments` (OD-E9-7), and carries `(not captured)` with content capture off |
+| F; MCP approval | an OPA rule gating `mcp__everything__*`; the queue row carries `arguments`, and carries `(not captured)` with content capture off |
 
 ### 50-lineage
 A commit made **inside** the live session, then `openbox-git-action` for staging
@@ -370,7 +365,7 @@ Why this server rather than a hand-rolled one:
 
 It also unlocks Scenario F above: an OPA rule requiring approval for
 `mcp__everything__*` is the only way to test that an MCP escalation carries
-`arguments` in the approval queue (OD-E9-7); a shell command tests the other
+`arguments` in the approval queue; a shell command tests the other
 half.
 
 Confirm the exact roster at build time (`claude mcp list` against the pinned
@@ -439,7 +434,7 @@ openbox init --role approver [--org …]                   # role=approver
 6. **`openbox doctor` reports which role and which file it read**, with
    provenance, like every other posture flag.
 
-**Decided (OD-T-3, brian, 2026-08-03): the approver is a credentialed client,
+**Decided (an owner decision, brian, 2026-08-03): the approver is a credentialed client,
 not a registered agent.** It gets no DID, no runtime key, and no agent row. The
 reasons are that its own actions are not monitored as agent activity, and the
 agentic host that evaluates a request (Claude Code, Codex, …) is free to use; so
@@ -512,7 +507,7 @@ what it exposed:
   text and the file body all egress; with capture off none of them do; both
   halves asserted against every row the session wrote, not just unit-tested.
   (Until v1.3 this read "the command and file body do not egress at
-  all"; that was SL3-SEC-3, and it is retired, not weakened by accident.)
+  all"; that was the retired metadata-only posture, and it is retired, not weakened by accident.)
 - The whole approval loop unattended: approve-inside-hold, timeout→deny,
   late-approval→rewake (the session ends *because* the watcher saw the
   decision), reject, ungated cost, and an MCP escalation carrying its
@@ -568,14 +563,14 @@ egressing under content-capture-on is the documented posture, not a leak.
 
 ## 11. Open decisions
 
-- **OD-T-1**; **decided: `test/` at the repo root.** It is run, not read. Its
+- **an owner decision**; **decided: `test/` at the repo root.** It is run, not read. Its
   local state (`test/.state/`) and any operator secrets (`test/env.local.sh`)
   are git-ignored.
-- **OD-T-2**; Seed Mechanism B (P5) or leave the convergence untested locally?
-- **OD-T-3**; **decided (brian, 2026-08-03): credentialed client.** No DID, no
+- **an owner decision**; Seed Mechanism B (P5) or leave the convergence untested locally?
+- **an owner decision**; **decided (brian, 2026-08-03): credentialed client.** No DID, no
   agent row: the approver's actions are not monitored as agent activity and the
   evaluating host is free to use, so there is nothing to attest or meter.
   Consequences and the additive upgrade path are in §8.
-- **OD-T-4**; Does any of this run in CI? The stack is 24 containers; the honest
+- **an owner decision**; Does any of this run in CI? The stack is 24 containers; the honest
   answer is probably a nightly on a self-hosted runner, with the unit suite
   staying the per-push gate.

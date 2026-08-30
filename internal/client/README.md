@@ -1,7 +1,7 @@
 # OpenBox client; AIP-signed `/evaluate` transport
 
-The shared, reusable data-plane client every developer-runtime adapter (SL-4
-Claude Code, SL-7 Codex, SL-8 Cursor) and the git action (SL-6) use to emit a
+The shared, reusable data-plane client every developer-runtime adapter (the Claude Code adapter
+Claude Code Codex Cursor) and the git action use to emit a
 normalized developer event to OpenBox.
 
 ```
@@ -11,8 +11,7 @@ normalized DevEvent ─▶ strip content (INV-2) ─▶ build GovernanceEventPay
 ```
 
 It is deliberately **not** the control-plane client. Onboarding/registration
-(`POST /agent/create`, human/org credential) lives in `internal/cli/backend`
-(story-SL-2). This package is the **agent's own** runtime transport: auth is the
+(`POST /agent/create`, human/org credential) lives in `internal/cli/backend`. This package is the **agent's own** runtime transport: auth is the
 agent's `obx_` runtime key + an Ed25519 AIP signature.
 
 ## Usage
@@ -23,7 +22,7 @@ c, err := client.New(client.Config{
     APIKey:  obxRuntimeKey,   // obx_(live|test)_…; from the secret store (INV-1)
     DID:     agentDID,        // did:aip:…
     SeedB64: ed25519SeedB64,  // base64 raw 32-byte seed; from the secret store
-    // ContentCaptureEnabled: false  // default: metadata-only (INV-2/OD4)
+    // ContentCaptureEnabled: false  // default: metadata-only (INV-2/an owner decision)
     Logger:  myLogger,        // optional; fail-open drops are logged here
 })
 if err != nil { /* unusable identity; construction fault */ }
@@ -34,7 +33,7 @@ verdict, err := c.Emit(ctx, client.DevEvent{
     EventType:     client.EventToolCall,
     SessionID:     openboxSessionID,   // → core run_id
     DeveloperDID:  agentDID,
-    Timestamp:     time.Now().UTC().Format(time.RFC3339),
+    Timestamp:     time.Now.UTC.Format(time.RFC3339),
     Tool:          client.Tool{Name: "Edit", Kind: client.ToolFile},
     Span:          &client.Span{SemanticType: "file_write", Stage: "started", FilePath: p},
 })
@@ -68,8 +67,7 @@ locators carry that distinction instead. The `DevEvent.Span` struct still exists
 
 ## Idempotency (INV-5): the client half is guaranteed
 
-The client owns **half** the idempotency contract and guarantees it
-(story-SL-14):
+The client owns **half** the idempotency contract and guarantees it:
 
 - **Stable + unique key.** The CC `event_id` is derived deterministically from
   the event's own structural fields (internal/adapters/claude-code `deriveID`),
@@ -129,5 +127,5 @@ have gone silently undelivered.
 ## Test / validate
 
 ```bash
-go build ./internal/client/... && go test ./internal/client/...
+go build./internal/client/... && go test./internal/client/...
 ```

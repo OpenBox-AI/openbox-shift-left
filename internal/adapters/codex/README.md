@@ -2,10 +2,10 @@
 
 The second realization of the generic Provider Adapter Contract (architecture
 §1b), a 1:1 structural port of the Claude Code adapter: it maps Codex CLI's
-native hooks onto the normalized developer event contract (story-SL-1) and emits
-them through the shared AIP-signed transport (story-SL-3) on the E7 flat hook
+native hooks onto the normalized developer event contract and emits
+them through the shared AIP-signed transport on the E7 flat hook
 wire. **Observe-only, fail-open**; this leg can never block, deny, or slow a
-Codex tool call (INV-3; the enforce leg is story-SL7-B).
+Codex tool call (INV-3; the enforce leg is  Codex adapter's enforce leg).
 
 **Version pin: codex-cli >= 0.145.0**; hooks are stable and ON by default (no
 feature flag to flip), `tool_use_id` exists on Pre/PostToolUse, the `SessionEnd`
@@ -17,7 +17,7 @@ hook payload JSON Schemas embedded in the 0.145.0 binary
 ```
 Codex hook (stdin JSON)
    └─ openbox hook codex <event>          # hooks.json wires each event here
-        ├─ map → normalized SL-1 DevEvent # mapper.go (no tool content; SL3-SEC-3)
+        ├─ map → normalized the event contract DevEvent # mapper.go (no tool content)
         ├─ append → local spool           # spool.go (hot path: local I/O only)
         └─ exit 0, empty stdout           # Codex parses hook stdout as output JSON; we emit none
    SessionEnd / `openbox hook codex flush`
@@ -32,7 +32,7 @@ never cross-drains, and the deterministic ids are namespaced `cdx-`.
 
 ## Event mapping
 
-| Codex hook | SL-1 `event_type` | Span (`semantic_type`) |
+| Codex hook | the event contract `event_type` | Span (`semantic_type`) |
 |---|---|---|
 | `SessionStart` | `SessionStarted` |; |
 | `UserPromptSubmit` | `PromptSubmitted` |; |
@@ -68,7 +68,7 @@ The mapper threads it through the client's deterministic id derivation (the
 - A call's started+completed halves share an **exact** `activity_id` (two
   identical sequential Bash calls no longer collide; the CC adapter's documented
   limitation);
-- The E7-S8 duration stash is keyed per invocation (concurrent same-tool calls
+- The an earlier decision duration stash is keyed per invocation (concurrent same-tool calls
   can't swap start times);
 - `event_id` (INV-5) is per-invocation distinct.
 
@@ -95,13 +95,13 @@ the shared prepare-commit-msg hook (`internal/adapters/common/git`) stamps
 registry** (the CC mechanism stays untouched and CC sessions never set the var).
 Ambient hook install on SessionStart is gated by `openbox init
 --install-git-hook`, exactly like CC. Commits typed in the user's own terminal
-are OD-SL7-userterm (deferred).
+are an owner decision (deferred).
 
 ## Credentials & config (INV-1)
 
 Identity comes from the same `openbox init` flow and the same
 `~/.config/openbox/dev.json` + OS/file secret store as every provider, via the
-shared `internal/adapters/common/devconfig` module (OD-SL7-share ruling (a)).
+shared `internal/adapters/common/devconfig` module (an owner decision ruling (a)).
 The hook reads the **DID only** on the hot path; the obx_ key + Ed25519 seed are
 read only at flush, straight into the client. `hooks.json` carries the engine
 path + event names only; no key, DID, or URL.
@@ -114,9 +114,9 @@ into `$CODEX_HOME/hooks.json` (default `~/.codex/hooks.json`), each
 s for SessionEnd, 30 s for PreToolUse; Codex timeouts are in seconds), with
 matcher `"*"` on the tool hooks. PreToolUse alone carries the raised ceiling
 because it is the only gating hook, and so the only one that can hold for an
-approval decision (E9-S4); the ceiling is not a delay; the engine spends it only
+approval decision; the ceiling is not a delay; the engine spends it only
 when a high-risk class escalated and core filed an approval. The engine path is
-this running `openbox` binary (`os.Executable()` via the CLI registry; the CC
+this running `openbox` binary (`os.Executable` via the CLI registry; the CC
 `EngineBinary` precedent; no bundle, no binary copy). The merge is **idempotent
 and ownership-aware**: re-install updates entries whose command invokes `… hook
 codex …` (or a mangled `… hook claude-code …` import; Codex can migrate Claude
@@ -128,7 +128,7 @@ unparsable pre-existing file is refused, not clobbered.
 `--disable hooks` and `--dangerously-bypass-hook-trust` remain user-side bypass
 vectors; acceptable for the observe posture (NFR-5 parity with CC's opt-in
 pilot); requirements.toml-managed hooks and the Codex plugin channel are the
-recorded hardening/distribution options (OD-SL7-dist).
+recorded hardening/distribution options.
 
 ## Finops / token usage
 
@@ -153,7 +153,7 @@ gets per-turn pairs.
 `total_tokens == input_tokens + output_tokens` in both the fixture and 12 real
 rollouts), so the reader subtracts them to report pure input; the inverse of
 Claude Code, whose cache counts are additive. Adding them would double-count the
-cache on every session. `Capabilities()` → `telemetry.tokens=true`,
+cache on every session. `Capabilities` → `telemetry.tokens=true`,
 `telemetry.model=true`. `usage.go` / `usage_test.go`.
 
 **Grounded token shape** (codex-rs @ `rust-v0.145.0`, recorded in
@@ -194,9 +194,9 @@ a fixture rollout, asserted absent from the real signed wire body with
 content-capture ON). INV-3: bounded read (`maxRolloutBytes`, 64 MiB; oversized
 skipped whole), fail-open (missing/null/malformed/partial rollout → logged to
 stderr, skipped; never fails the flush, blocks, or writes stdout). Finops-off is
-byte-identical to the pre-SL7-C path.
+byte-identical to the pre-the Codex adapter's usage leg path.
 
-> **Fallback (OD-SL7C-FALLBACK):** when `transcript_path` is absent/null the read
+> **Fallback:** when `transcript_path` is absent/null the read
 > is skipped fail-open; the adapter does **not** reconstruct a
 > `~/.codex/sessions/…` path from `session_id`. A real SessionEnd always carries
 > `transcript_path` (`session_end.rs` @ `rust-v0.145.0`), and a HOME-derived scan
@@ -213,10 +213,10 @@ byte-identical to the pre-SL7-C path.
 
 **Opt-in, default observe.** Enable at onboarding; `openbox init --provider
 codex --enforce` persists `enforce`/`tier2`/`findings` to `dev.json` (no runtime
-env needed). With enforce **off** the SL7-A observe path is **byte-identical** -
+env needed). With enforce **off** the the Codex adapter's observe leg observe path is **byte-identical** -
 the decider is never invoked (asserted: `TestObserveByteParity_EnforceOff`).
 Enforcement gates **only** the PreToolUse hook, pre-execution, hard-bounded,
-fail-open by default (OD9 / INV-3b). Exit code is always 0; we speak Codex's
+fail-open by default (an owner decision / INV-3b). Exit code is always 0; we speak Codex's
 output JSON, never the exit-2 block signal.
 
 The cascade is the shipped Claude Code E6 stack (`decision/` consumed unchanged,
@@ -226,7 +226,7 @@ on outage only) → **apply** onto Codex's PreToolUse contract, plus inline
 `/evaluate` evaluation of every gated call and the findings loop. Only the two
 provider edges differ from CC; the middle is shared.
 
-### Codex-shaped deltas (each grounded @ `rust-v0.145.0` + the binary output schemas, recorded in the SL7-B probes)
+### Codex-shaped deltas (each grounded @ `rust-v0.145.0` + the binary output schemas, recorded in the the Codex adapter's enforce leg probes)
 
 - **PermissionDecision literals.** Codex's PreToolUse enum is `allow|deny|ask`
   (`schema.rs`), but the runtime output parser **rejects** `ask`, a bare `allow`
@@ -235,7 +235,7 @@ provider edges differ from CC; the middle is shared.
   (probe **P1**: a failed/timed-out PreToolUse hook fails **open**). So the only
   usable levers are **`deny` + reason** (block) and **`allow` + `updatedInput`**
   (redact-and-proceed).
-- **REQUIRE_APPROVAL → `deny`** (ruled **OD-SL7-ASK**). CC maps it to `ask`;
+- **REQUIRE_APPROVAL → `deny`** (ruled **an owner decision**). CC maps it to `ask`;
   Codex rejects `ask`, and a no-decision fallthrough under
   `approval_policy=never` **auto-runs** the tool ungoverned (probe **P3**,
   live). No approval-policy mode could be *proven* to surface a native prompt
@@ -253,7 +253,7 @@ provider edges differ from CC; the middle is shared.
   `updated_input["command"]` (core `ApplyPatchHandler` + `handlers/mod.rs`).
   Local secret detection scans the patch body and rewrites the `"command"` field
   only; every structural field is carried over verbatim.
-- **Tighten-only preserved (OD-SL7-ALLOW-rewrite).**
+- **Tighten-only preserved.**
   `permissionDecision:"allow"` is emitted **only** bundled with a non-empty
   redacting `updatedInput`; a bare allow is structurally impossible here. Codex
   resolves competing hooks by "any deny wins" and offers no approval-bypass hook
@@ -262,8 +262,7 @@ provider edges differ from CC; the middle is shared.
   redacted input"; never a grant. *(Flagged for G3/G_SEC ratification; it
   departs from the CC-derived "never emit allow" wording, which assumed CC's
   updatedInput-alone contract.)*
-- **Timeout clamps derived from the installed hook timeout**
-  (OD-SL7-T2-timeout), **not** copied from CC's 2 s/5 s constants. Probe **P1**
+- **Timeout clamps derived from the installed hook timeout**, **not** copied from CC's 2 s/5 s constants. Probe **P1**
   proved Codex kills a PreToolUse hook at its configured `timeout` and **fails
   open**, so our verdict must land first. The whole-hook budget is
   `installedGateHookTimeout` (the installer's `preToolUseHookTimeoutSec`)
@@ -272,7 +271,7 @@ provider edges differ from CC; the middle is shared.
   per the ruling; only the E9 approval hold spends the extra headroom, and only
   for a request core actually filed.
 
-### Findings channel (OD-SL7-FINDINGS, resolved by probe **P2**)
+### Findings channel (an owner decision, resolved by probe **P2**)
 
 `additionalContext` (→ model) + `systemMessage` (→ user) on UserPromptSubmit +
 PostToolUse; **full CC parity, not the degraded systemMessage-only mode**. The
@@ -298,7 +297,7 @@ invariant set and where Codex's contract forces a documented delta.
 the OpenBox hook; the same opt-in-pilot posture as CC. Only requirements.toml-
 managed hooks (`allow_managed_hooks_only`, `managed_dir`) are non-disablable;
 that enterprise-mandate story and the Codex plugin channel are the recorded
-hardening options (OD-SL7-dist). `PermissionRequest`-event integration (a second
+hardening options. `PermissionRequest`-event integration (a second
 decision surface) is a deferred follow-up.
 
 **`allow` non-bypass; source-confirmed @ rust-v0.145.0 (Sam G_SEC F1, closed).**
@@ -306,9 +305,9 @@ A hook's `permissionDecision:"allow"` on the redaction path merely *continues*
 the call through Codex's own approval/sandbox flow; it never grants approval and
 never overrides another hook's `deny`. Confirmed at the tag in
 `output_parser.rs` (`PreToolUseHookResult = Continue{updated_input} | Blocked`;
-`should_block = should_block && invalid_reason.is_none()`) and
+`should_block = should_block && invalid_reason.is_none`) and
 `pre_tool_use.rs::run` (any-deny-wins aggregation; a blocked result zeroes
-`updated_input`), and independently by the OD-SL7-ASK surface review of the
+`updated_input`), and independently by the an owner decision surface review of the
 Codex source (2026-07-24): Codex approval is resolved solely by the local actor
 via `Op::ExecApproval`/`PatchApproval`, and a hook `allow` is not an approval
 verb. So no live interactive probe is required to close this; the earlier
@@ -325,7 +324,7 @@ only; never the command, patch body, or reason free text (INV-1/INV-2). Deny
 reasons carry the policy-authored text + policy id (local, stdout → Codex, never
 egressed). Redacted content rides only the **local** decision path; the observe
 Mapper egress path is untouched (metadata-only unless content capture is on).
-The `CODEX_THREAD_ID` inherited-env edge (SL7-A G3 F-3): a process launched from
+The `CODEX_THREAD_ID` inherited-env edge (the Codex adapter's observe leg G3 F-3): a process launched from
 within a Codex exec inherits `CODEX_THREAD_ID`, so its commits attribute to the
 Codex thread; arguably transitively correct, rare, and the trailer sink still
 validates the value; noted for a future explicit-override escape hatch.
@@ -333,7 +332,7 @@ validates the value; noted for a future explicit-override escape hatch.
 ## Test / validate
 
 ```bash
-go test -race ./internal/adapters/codex/...
+go test -race./internal/adapters/codex/...
 # plus the cli-level routing + real-binary observe E2E:
-go test ./cmd/openbox -run Codex
+go test./cmd/openbox -run Codex
 ```

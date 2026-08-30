@@ -2,14 +2,13 @@
 
 The first realization of the generic Provider Adapter Contract (architecture
 §1b): it maps Claude Code's native hooks onto the normalized developer event
-contract (story-SL-1) and emits them through the shared AIP-signed transport
-(story-SL-3). **Observe-only, metadata-only, fail-open**; it can never block,
+contract and emits them through the shared AIP-signed transport. **Observe-only, metadata-only, fail-open**; it can never block,
 deny, or slow a Claude Code tool call (Phase-1 / INV-3 / D7).
 
 ```
 Claude Code hook (stdin JSON)
    └─ openbox hook claude-code <event>     # the plugin wires each hook here
-        ├─ map → normalized SL-1 DevEvent  # mapper.go (no content; INV-2)
+        ├─ map → normalized the event contract DevEvent  # mapper.go (no content; INV-2)
         ├─ append → local spool            # spool.go (hot path: local I/O only)
         └─ exit 0, empty stdout            # can't block / inject (D7)
    SessionEnd / `flush`
@@ -25,7 +24,7 @@ maps + appends one JSON line to a per-session spool file (local,
 sub-millisecond), and delivery happens off the hot path at `SessionEnd` (bounded
 to 12 s) or via the `flush` subcommand. Delivery is **best-effort and
 fail-open**: an outage delays telemetry, never a tool call, and an undelivered
-event is retried on a later flush rather than dropped (E8-S7); up to
+event is retried on a later flush rather than dropped; up to
 `maxRecoveryAttempts`, after which loss becomes permanent. A flush cut short by
 its time budget persists the **undelivered remainder** to a recovery file that
 the next `SessionEnd` re-drains (`SweepRecovery`, or an explicit
@@ -43,7 +42,7 @@ and which it does not.
 
 ## Event mapping
 
-| Claude Code hook | SL-1 `event_type` | Span (`semantic_type`) |
+| Claude Code hook | the event contract `event_type` | Span (`semantic_type`) |
 |---|---|---|
 | `SessionStart` | `SessionStarted` |; |
 | `UserPromptSubmit` | `PromptSubmitted` |; |
@@ -90,7 +89,7 @@ reach rather than a guarantee. See
 identifiers, file paths, and lifecycle enums (`source`, `reason`,
 `permission_mode`, `model`, `cwd`), plus the ungated structural `status`.
 
-**SL3-SEC-3 ("commands, file bodies and tool output never egress on observe
+**the retired metadata-only posture ("commands, file bodies and tool output never egress on observe
 events") is retired** by. It was an unconditional guarantee; what replaces it is
 a gate plus a redaction plus a cap, none of which is structural and each of
 which can be got wrong. That is why they are asserted on the **outbound bytes**
@@ -102,7 +101,7 @@ which can be got wrong. That is why they are asserted on the **outbound bytes**
 - **No tokens/cost.** Claude Code hooks do not expose token or cost usage
   (verified). `PromptSubmitted`/`SessionEnded` carry no finops fields. A Phase-2
   enhancement could parse `transcript_path` (content; privacy-gated); Phase-1
-  does not even record the path. See `Capabilities()` →
+  does not even record the path. See `Capabilities` →
   `telemetry.tokens=false`.
 - **At-most-once delivery.** The client's `Emit` is fail-open and does not
   signal delivery success, so a delivered-then-lost event can't be retried
@@ -116,7 +115,7 @@ which can be got wrong. That is why they are asserted on the **outbound bytes**
 
 ## Credentials (INV-1)
 
-Identity is minted by `openbox init` (story-SL-2) and stored in the OS secret
+Identity is minted by `openbox init` and stored in the OS secret
 store. The hook reads the **DID only** on the hot path (no secret I/O); the obx_
 key + Ed25519 seed are read (secret store, or `OPENBOX_API_KEY`/
 `OPENBOX_ED25519_SEED` for CI) only at flush and go straight into the client,
@@ -126,13 +125,13 @@ never logged/printed/argv'd. Non-secret coordinates live in a config file
 ## Packaging & install
 
 `Installer` materializes the plugin bundle (`plugin/`) + writes the dev config,
-and (story-SL4-wire-2) copies the unified engine into `bin/openbox` when
+and copies the unified engine into `bin/openbox` when
 `Installer.EngineBinary` is set; `openbox init` sets it to its own executable.
 The hooks invoke `${CLAUDE_PLUGIN_ROOT}/bin/openbox hook claude-code <event>`.
 Packaging/marketplace builds place the per-platform binary instead:
 
 ```bash
-go build -o plugin/bin/openbox ../../cmd/openbox
+go build -o plugin/bin/openbox../../cmd/openbox
 ```
 
 The standalone `cmd/openbox-cc-hook` alias is **gone**. It was never built by
@@ -147,17 +146,17 @@ the Phase-1 opt-in pilot (NFR-5).
 ## Integration follow-up
 
 `Installer` here is the real installer for the `claude-code` provider. Wiring it
-into the CLI's `provider` registry (replacing the SL-2 `stub`) is a one-line CLI
+into the CLI's `provider` registry (replacing the the CLI `stub`) is a one-line CLI
 change: the `cli` module imports this adapter and registers a
 `provider.Installer` that delegates to `claudecode.Installer`. It is deferred
 because the CLI's `provider.Installer` interface lives under `internal/cli/`
 (not importable across modules); moving it out is a `cli`-scoped edit tracked as
-**SL4-wire-1**.
+****.
 
 ## Test / validate
 
 ```bash
-go build ./internal/adapters/claude-code/... && go vet ./internal/adapters/claude-code/... && go test ./internal/adapters/claude-code/...
-# 54 tests incl. SL-1 conformance of every emitted event + a real-binary
+go build./internal/adapters/claude-code/... && go vet./internal/adapters/claude-code/... && go test./internal/adapters/claude-code/...
+# 54 tests incl. the event contract conformance of every emitted event + a real-binary
 # observe-only end-to-end (exit 0, empty stdout, no content leak).
 ```

@@ -108,7 +108,7 @@ substitutes for the other. `Lane` unset is refused, never defaulted, and the
 `eventID` hash excludes the lane name because adding it would change every
 shipped event's idempotency key. The election is **derived** from the tool's env
 block and resolves per record, not once at startup, so `Policy.Elected` is a
-`func() bool` whose zero value suppresses; loopback is the discriminator, because
+`func bool` whose zero value suppresses; loopback is the discriminator, because
 electing a producer that does not exist silences the one that does.
 
 **Install ordering is a safety property.** Unit, start, prove it listens, then
@@ -128,18 +128,17 @@ is name-constrained at generation, and ALPN is http/1.1 only.
 `json.RawMessage` because it is a string on user lines and an array on assistant
 ones, and a typed slice drops the line's token counts silently.
 `kardianos/service` ignores `$HOME` and derives the unit path from
-`user.Current()`, so `installUnitFn`/`uninstallUnitFn` in `initgateway.go` are
-the seam tests use; without it `go test ./...` installs a daemon into the
+`user.Current`, so `installUnitFn`/`uninstallUnitFn` in `initgateway.go` are
+the seam tests use; without it `go test./...` installs a daemon into the
 runner's home. And `.env` parsing is godotenv at its defaults: last-wins on
 duplicates, with a parse error that echoes the offending line.
 
 ## Build and test
 
 ```bash
-go build ./... && go vet ./...   # everything, from the root, one module
-go test -race -count=1 ./...     # -count=1 is required: see internal/depguard
-GOOS=windows GOARCH=amd64 go build ./... && GOOS=linux GOARCH=arm64 go build ./...
-./test/run-all.sh                # end to end, needs a local OpenBox stack
+go build./... && go vet./...   # everything, from the root, one module
+go test -race -count=1./...     # -count=1 is required: see internal/depguard
+GOOS=windows GOARCH=amd64 go build./... && GOOS=linux GOARCH=arm64 go build./..../test/run-all.sh                # end to end, needs a local OpenBox stack
 ```
 
 `-count=1` is not optional: the conformance guard shells out to `go list`, whose

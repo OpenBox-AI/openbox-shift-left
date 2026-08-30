@@ -135,7 +135,7 @@ can be on without the others:
   the redacted body (redact-and-continue) rather than being blocked. On by
   default (`secret_detection`). Detection is two layers: **231 format rules**,
   nine hand-rolled regexes (`decision/secrets.go`) beneath gitleaks' 222
-  (`decision/gitleaks.go`, D-OSS-4), then a keyword-and-entropy layer for values
+  (`decision/gitleaks.go`), then a keyword-and-entropy layer for values
   in no known format. What that reaches, and the two shapes it does not, is
   measured in
   [data-and-privacy.md](data-and-privacy.md#what-the-scanner-catches--and-where-it-stops).
@@ -277,7 +277,7 @@ Being precise here is part of the product.
     the caller boundary, and for *relaying* that is defensible; a caller
     supplies its own credential, so it gains no access it did not already have.
     But loopback is not a user boundary on a shared machine, and it is not a
-    browser boundary at all: a page the developer visits can `fetch()`
+    browser boundary at all: a page the developer visits can `fetch`
     `http://127.0.0.1:8788/v1/messages` as a CORS-simple request, which is *sent*
     even though the reply cannot be read cross-origin. **Capture is now wired
     (2026-08-26), so the "bounded because it stores nothing" clause this bullet
@@ -329,7 +329,7 @@ Being precise here is part of the product.
     until a real client is put behind them.
   - **The telemetry lane is suppressible by the thing it observes.** It is the
     governed tool reporting its own calls; the weakest claim in this product, and it
-    must never be averaged with the two in-path lanes. OD4 is the compensating
+    must never be averaged with the two in-path lanes. an owner decision is the compensating
     control: telemetry silence on an otherwise-active session is a **finding**, not
     an absence. `openbox doctor` names the elected producer and warns when the
     elected lane has nothing listening behind it.
@@ -343,8 +343,7 @@ Being precise here is part of the product.
   - **Neither in-path lane refuses a call.** Both carry a written, tested
     refusal
     path that nothing calls, for the same reason the gateway's is dormant: the
-    refusal shape Claude Code does not retry around is unprobed
-    . `tools/refusal-injector/`
+    refusal shape Claude Code does not retry around is unprobed. `tools/refusal-injector/`
     is the instrument; it needs a bind-capable host, a real install and credentials.
   - **The transport lane installs a CA on the developer's machine, and that is a
     real
@@ -368,7 +367,7 @@ Being precise here is part of the product.
     not
     estimated: 96.75% of 5,049 recorded request bodies exceed the 65,536-rune cap
     (p50 529,175, max 2,566,660; run `20260827T063932Z-225cac`). Response bodies:
-    0.06%. Under OD1(c) the tail of an oversized body exists nowhere org-side, so
+    0.06%. Under an owner decision(c) the tail of an oversized body exists nowhere org-side, so
     content-based policy and every reader see the head only. This is accepted, not a
     defect; but a reader must not assume a captured call is a complete call.
 - **Local secret detection has a measured reach, and two shapes fall outside
@@ -439,7 +438,7 @@ fail**. That is the same named loss, seen from the dependency side.
 
 The binary is the visible half. Phase 09 measured a minimal `main` linking the
 receiver at **18.8 MB against a 2.3 MB baseline; +16.5 MB**, which is the number
-OD5 accepted, on a shipped binary that was then **17.0 MB**. The delivered
+an owner decision accepted, on a shipped binary that was then **17.0 MB**. The delivered
 binary is **40,311,474 bytes (38.4 MB)** on darwin/arm64, measured 2026-08-30
 after the collapse; it was 40,287,986 before, so the layout change cost
 **+0.06%**. (The earlier figure was measured with `GOWORK=off`, a mode that no
@@ -593,7 +592,7 @@ session produced no block (no prompt can make a model think a chosen phrase),
 while absence is strict, because absence needs no cooperation from a model.
 
 That used to read "tool commands and file bodies never egress on an **observe**
-event", which was SL3-SEC-3; an unconditional, structural guarantee, because
+event", which was the retired metadata-only posture; an unconditional, structural guarantee, because
 tool content had no field to land in. That decision retired it. What replaces it
 is a gate plus a redaction plus a cap, none of them structural, which is why the
 suite asserts the closed direction as explicitly as the open one. See

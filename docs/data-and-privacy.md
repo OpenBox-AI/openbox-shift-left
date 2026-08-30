@@ -429,7 +429,7 @@ liability with no corresponding evidence, since this lane ingests no bodies.
 recorded calls: 96.75% of request bodies exceed the 65,536-rune cap (p50 529,175
 runes, max 2,566,660). Response bodies: 0.06%. So for an in-path lane the org
 typically holds the *head* of a prompt, not the prompt. That is accepted policy
-(OD1(c)), and it cuts both ways; less of your content leaves, and less of it is
+(an owner decision(c)), and it cuts both ways; less of your content leaves, and less of it is
 reviewable.
 
 ### What `--remove-all` destroys
@@ -531,7 +531,7 @@ event and asserts the flushed bytes):
 
 The format layer is two sets that stack: nine hand-rolled regexes
 (`decision/secrets.go`) beneath gitleaks' 222 maintained rules
-(`decision/gitleaks.go`, D-OSS-4). The nine are loose where gitleaks is precise,
+(`decision/gitleaks.go`). The nine are loose where gitleaks is precise,
 gitleaks adds charset, length and entropy floors and allowlists published
 documentation keys, so deleting them in favour of it regressed six conformance
 cases and they were restored as a floor. Both layers run before the

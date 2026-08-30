@@ -39,7 +39,7 @@ content-capturing turn, to feed a reader that accepts no other shape.
 
 **Two layers.** The *adapter-facing* contract
 ([schema](../api/dev-event.schema.json)) is what a provider adapter produces via
-SPI `emit()`; its `event_type` enum is the 12 dev-runtime lifecycle names. The
+SPI `emit`; its `event_type` enum is the 12 dev-runtime lifecycle names. The
 *wire* layer below is what the shared `client/` translates that into. Adding a
 provider never touches either layer (PRD FR-4, architecture §1b). That the span
 retirement required **zero** edits under the contract is the split working as
@@ -60,7 +60,7 @@ body) and the base contract
 | `event_type` | `event_type` | **Re-mapped**, not passed through; see §2. Resolves to one of the five base wire types. |
 | `openbox_session_id` | `run_id` | Session keyed by `(workflow_id, run_id, workflow_type)`. |
 | `developer_did` (or workspace/repo id) | `workflow_id` | Stable per-workspace identity so `(workflow_id, run_id)` is unique per session. One derivation, `workflowIDFor`; shared with `ApprovalKeyFor` (§2). |
-|; (constant) | `workflow_type` = `"developer-session"` | **Required** by the base contract on `Workflow*` and `SignalReceived` events (`event_rules.py` `_REQUIRED_WORKFLOW_FIELDS`; core reads it into a dedicated column, `storage_event.go`). The *constant* value keeps a session's whole tree on one `(workflow_id, run_id, workflow_type)` identity so core resolves it to **one** session row. Now present on **tool events too**; the old hook envelope omitted it, diverging from the base SDK's `ActivityContext.to_payload_fields()`; routing tool events through the same struct fixed that at no cost. |
+|; (constant) | `workflow_type` = `"developer-session"` | **Required** by the base contract on `Workflow*` and `SignalReceived` events (`event_rules.py` `_REQUIRED_WORKFLOW_FIELDS`; core reads it into a dedicated column, `storage_event.go`). The *constant* value keeps a session's whole tree on one `(workflow_id, run_id, workflow_type)` identity so core resolves it to **one** session row. Now present on **tool events too**; the old hook envelope omitted it, diverging from the base SDK's `ActivityContext.to_payload_fields`; routing tool events through the same struct fixed that at no cost. |
 |; (per signal) | `signal_name` | Set **only** on `SignalReceived` (`prompt_submitted`/`commit_created`/`deploy`/`subagent_started`/`permission_denied`/`api_error`); required there (`event_rules.py` raises `ENVELOPE_MISSING_FIELDS` otherwise). |
 |; (activity events) | `activity_id` | Set on **both** halves of a tool call and of a turn. Pairs them onto one row; for a tool call it is additionally the approval key; see §2 "Operation vs invocation identity" and "The turn pair". |
 | `gateway_request_id` |; (feeds `activity_id` and the span id) | **v1.5.** A gateway-observed turn's discriminator: the provider's own `Request-Id`, or a locally minted `gw-` id. Its ONLY job is to keep the turn producers in disjoint `activity_id` namespaces: they describe the same turn, and a shared namespace would let core's dedupe absorb one as a duplicate of the other, losing half the evidence with no error anywhere. Bounded and charset-checked by `gatewayemit.usableRequestID` because it originates upstream and reaches a stored key verbatim; and, since v1.6, declared in the schema too, so all three producer ids sit at one depth. The retrofit was initially declined as a contract break and that reasoning was wrong: this field has ONE production assignment path, already gated at the identical rule, so declaring the bound rejects nothing. `gatewayemit.TestGatewayIDBoundMatchesTheContract` holds the two statements of the rule together. |
@@ -74,13 +74,13 @@ body) and the base contract
 | `started_at` → `ended_at` | `duration_ms` | **Client-computed**, in float milliseconds. Core used to derive the row's duration from the stored span; with no span, the client is the only thing that can. Core copies it onto the row verbatim (`storage_event.go:292-294`) and the dashboard reads `event.duration_ms` directly. **Omitted, never zero**, when unknown; see §3. |
 | `timestamp` | `timestamp` | Core field is a **string** (RFC3339); pass through verbatim. |
 | `metadata` | `metadata` (`json.RawMessage`) | Merged per-type keys below; JSON object. Carries commit/deploy lineage (§2). |
-| `status` | `status` | **`ToolResult` only**, enum `completed`\|`failed`. The field core's per-tool success metric reads, and the only one: `IsSuccess = payload.Status != nil && *payload.Status == "completed"` (`openbox-core .../observability/errors.go:333`). **Not content-gated**; derived from which provider hook fired, so it ships identically with `content_capture:false`. Never on a turn/lifecycle/signal event: `payload.status` also writes the row's `workflow_status` column for **any** event type (`storage_event.go:417`), where it means something else. `client.statusFor` enforces both the vocabulary and the scope; C20–C22 assert it on the outbound bytes. |
+| `status` | `status` | **`ToolResult` only**, enum `completed`\|`failed`. The field core's per-tool success metric reads, and the only one: `IsSuccess = payload.Status != nil && *payload.Status == "completed"` (`openbox-core.../observability/errors.go:333`). **Not content-gated**; derived from which provider hook fired, so it ships identically with `content_capture:false`. Never on a turn/lifecycle/signal event: `payload.status` also writes the row's `workflow_status` column for **any** event type (`storage_event.go:417`), where it means something else. `client.statusFor` enforces both the vocabulary and the scope; C20–C22 assert it on the outbound bytes. |
 | `tokens`, `cost`, `model` | `metadata.tokens`, `metadata.cost`, `metadata.model` | No first-class payload fields; carried in `metadata`. On a turn's `ActivityCompleted` the same model + counts ALSO ride `activity_output`, so they are policy-visible; see §2 "The turn pair". |
 | `developer_did` |; | Identity is via the signed AIP headers + Bearer key, **not** a body field. `from_agent_did`/`multi_agent_session_id` stay empty (Handoff-only). |
 | `span` |; | **Not serialized.** The adapter-facing `span` object is the carrier the client reads locators and counts *out of* (§3); it is never itself emitted, on any event. Do not confuse it with the wire span below, which shares no code and no fields. |
 | `content.output` (turn) | `spans[0].response_body` + `span_count` | **`TurnCompleted` only, content-gated**. ONE span, carrying the assistant turn's text wrapped as `{"choices":[{"message":{"content":…}}]}`; the exact shape core's goal-alignment extractor unmarshals (`goal_alignment_session.go:64-88`), which reads `payload.Spans` and nothing else. Secret-redacted **before** attachment, then `capBody`-capped at 64KB. Both keys **absent** with capture off. `hook_trigger` is still never sent, on any event: true alongside spans routes the payload into core's approval-bypass fingerprint path (`governance_workflow.go:310-330`). See `client/turnspan.go`. |
 | `content.prompt` | `signal_args.prompt` **only when content-capture enabled**, capped to 65536 chars (`capBody`) | Stripped at the client when disabled (INV-2). |
-| `content.tool_input` | `activity_input.command` / `.arguments` / `.content` **only when content-capture enabled**, capped | Key named per tool class (`contentKeyFor`), so a reader is never shown a file body labelled `command`. **v1.3: also on the OBSERVE path**, not gated calls only; the "never the observe path" half of OD-E9-7 is retired. The gated copy overwrites the observe extract with the bytes the tool rewrite produced, so the server judges exactly what the tool was rewritten to. |
+| `content.tool_input` | `activity_input.command` / `.arguments` / `.content` **only when content-capture enabled**, capped | Key named per tool class (`contentKeyFor`), so a reader is never shown a file body labelled `command`. **v1.3: also on the OBSERVE path**, not gated calls only; the "never the observe path" half of an owner decision is retired. The gated copy overwrites the observe extract with the bytes the tool rewrite produced, so the server judges exactly what the tool was rewritten to. |
 | `content.tool_output` | `activity_output.output` **only when content-capture enabled**, capped | **v1.3.** `ToolResult` only. What the tool produced; or, on a failed call, its own free-text error; `status` says which. Core stores it as the row's `output` and runs Guardrails stage "1" over it. Secret-redacted **before** attachment (conformance C34). |
 | `content.thinking` (turn) | `activity_output.thinking` **only when content-capture enabled**, capped | **v1.4.** `TurnCompleted` only. The turn's extended-thinking blocks, concatenated in file order from the transcript window; the only source, since no hook carries thinking and the provider's own OTel export redacts it unconditionally. Deliberately **not** the span in the row above: that span is read as the assistant's REPLY by core's alignment extractor, so chain-of-thought there would score every later turn's drift against the model's reasoning. Secret-redacted **before** attachment, `capBody`-capped, absent with capture off (conformance C40/C41, sentinel `TestFinops_NoContentOnWire`). This is the field that AMENDS v1.1's transcript allowlist; the first free-form content string that projection binds. |
 | `content.signal_detail` | `metadata.denial_reason` / `metadata.error_details` **only when content-capture enabled**, capped | **v1.3.** Per event type (`signalDetailKeyFor`); dropped on every other type. Deliberately **not** `signal_args`; core reads a `SignalReceived` with non-empty `signal_args` as a NEW USER GOAL (`age.go:112-137`). Conformance C38 asserts both halves. **No reader renders these yet**; the Verify tab reads `signal_args`, which this deliberately avoids; so they are stored-and-queryable rather than displayed. Same posture as `metadata.event_id`. |
@@ -172,14 +172,14 @@ id, never content fields (INV-2).
 > retry filed a fresh request, and the rewake's "re-run to proceed" looped.
 | `agent_id`, `agent_type` | Claude Code | Identify the subagent an event occurred inside. Present on *every* payload fired within a subagent, so the subagent tree is reconstructable from tool events alone; which is why the `SubagentStart`/`SubagentStop` boundary markers need no lifecycle type of their own (COVERAGE.md §3.2). |
 | `turn_id` | Codex | Per-turn correlation id. |
-| `thread_id`, `root_session_id` | Codex | Emitted only when a forked thread's id differs from the session id it continues (E8-S4). |
+| `thread_id`, `root_session_id` | Codex | Emitted only when a forked thread's id differs from the session id it continues. |
 
 ### Why a `ToolResult` is an `ActivityCompleted`
 
-This reverses what E7-S4 concluded, so the reasoning is worth stating rather
+This reverses what an earlier decision concluded, so the reasoning is worth stating rather
 than just the table row.
 
-E7-S4 was right about the base SDK: `wire_event_type()` forces `ActivityStarted`
+an earlier decision was right about the base SDK: `wire_event_type` forces `ActivityStarted`
 for **any** `hook_trigger` event regardless of stage, and
 `assert_hook_wire_shape` asserts `ActivityStarted` unconditionally. Emitting
 `ActivityCompleted` *with a hook envelope* would violate that contract.
@@ -198,7 +198,7 @@ is derived from `session/tool/locator/operation` with no stage, timestamp or
 attempt input, so the two separate hook processes, and a rehydrated spool flush,
 mint the same id without threading any state.
 
-> **Supersedes** That decision's `ToolCall`/`ToolResult` rows and E7-S4's correction
+> **Supersedes** That decision's `ToolCall`/`ToolResult` rows and an earlier decision's correction
 > above. That decision remains the true record of why the first answer was chosen;
 > The change is carried
 > in premise and the full trade-off.
@@ -212,7 +212,7 @@ already accept-listed, so INV-8 needs nothing new.
 The shape the AI-Agent runtime uses for this signal is an `llm_completion`
 **span** whose `response_body` is `{model, usage{…}}`. Dev sessions write no
 spans, and core's span-based usage aggregation is gated on `detectLLMProvider`
-reading `span.GetHTTPURL()`; which a hook process has none of. So the turn takes
+reading `span.GetHTTPURL`; which a hook process has none of. So the turn takes
 the activity shape and mirrors the span's `response_body` inside
 `activity_output`:
 
@@ -277,7 +277,7 @@ this is meant to fill:
 | `response_body` | `{"choices":[{"message":{"content":…}}]}` | the exact shape the extractor unmarshals |
 | `span_id`/`trace_id` | sha256-derived, 16/32 hex | core dedupes on `(span_id, stage)` and the turn cursor re-reads a window after a crash; random ids would store the text twice |
 
-The synthesized attributes are **OD-0018-1**, accepted with a named retirement
+The synthesized attributes are **an owner decision**, accepted with a named retirement
 condition: when the control plane moves assistant content onto the
 `llm_completion` `activity_output`, the span and its attributes are deleted.
 Removing them before that lands kills the feature silently.
@@ -299,7 +299,7 @@ overwriting whatever was sent.
   is exactly why the synthesized `http.*` attributes exist (above). The client's
   own `semantic_type` on the wire is ignored.
 
-MAPPING.md previously carried an "E7-S2 dependency (server-side, pending)" claim
+MAPPING.md previously carried an "an earlier decision dependency (server-side, pending)" claim
 that `shell`→`shell_command` and `mcp`→`mcp_tool_call` classification was
 awaiting a core edit. **That claim is deleted, not restated.** It was already
 contradicted by observed data (a live span carried `semantic_type:
@@ -383,7 +383,7 @@ table does not list, one of the two is wrong.
 ## 4. Verdict (parsing the response)
 
 The `/evaluate` response is core's `EvaluationResult`; `verdict` + legacy
-`action` + `fallback_used` (confirmed live, E7-S0 spike). The canonical enum is
+`action` + `fallback_used` (confirmed live spike). The canonical enum is
 `HALT > BLOCK > REQUIRE_APPROVAL > CONSTRAIN > ALLOW`; the wire is
 **lowercase**:
 
@@ -406,11 +406,11 @@ read this response (INV-3b; enforce path untouched by the E7 wire reshape).
 ## 5. INV-8 / conformance statement
 
 The wire model is now the base SDK's **stock** vocabulary; no dev-specific
-`event_type` strings, so **no core accept-list patch is needed** (E7-S0: all
-base types → HTTP 200 on stock core). This is a **net simplification** vs SL-1's
-EXT-core patch, which E7-S2 retires.
+`event_type` strings, so **no core accept-list patch is needed** (an earlier decision: all
+base types → HTTP 200 on stock core). This is a **net simplification** vs the event contract's
+EXT-core patch, which an earlier decision retires.
 
-**Downstream-consumer behavior on the unified shape** (verified E7-S0 live +
+**Downstream-consumer behavior on the unified shape** (verified an earlier decision live +
 cross-repo Explore):
 
 | Consumer | Behavior |

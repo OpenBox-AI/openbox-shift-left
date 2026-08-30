@@ -16,7 +16,7 @@ does not withstand someone who does not want it: they can delete the hook, edit
 form "our coding agents are governed" rests on the files in this directory,
 because they are what stop a local edit from removing the gate.
 
-That is also why `posture.provider_managed` exists (E8-S5): the control plane
+That is also why `posture.provider_managed` exists: the control plane
 can see which sessions actually ran under a mandate instead of taking it on
 faith.
 
@@ -105,7 +105,7 @@ Target paths:
 
 ### Cursor
 
-Not shipped: the SL-8 adapter does not exist yet. Cursor gained a hook surface
+Not shipped: the a Cursor adapter adapter does not exist yet. Cursor gained a hook surface
 in v3.11 (2026-07-10), so this becomes a real template when that adapter lands.
 
 ## Install

@@ -94,9 +94,8 @@ from a hook is not a resident process.
 Two of those sentences have since been overtaken, and they are called out here
 because this page is where an upgrading reader looks:
 
-- The observe path **does** now carry tool commands, file bodies and tool output
-  , so "no bodies on observe events" stopped being true in August 2026;
-- There **is** now an optional daemon; the model-call gateway . It is opt-in per
+- The observe path **does** now carry tool commands, file bodies and tool output, so "no bodies on observe events" stopped being true in August 2026;
+- There **is** now an optional daemon; the model-call gateway. It is opt-in per
   machine (`openbox init --provider claude-code --gateway`), so an existing
   install acquires it only by asking for it.
 

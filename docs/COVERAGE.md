@@ -5,13 +5,13 @@ How the three target coding tools' real event surfaces map onto this contract's
 pass over the tools' official docs (Claude Code hooks + OTel; Cursor hooks +
 Admin API; OpenAI Codex hooks + `notify` + Usage/Cost API). This is the
 reference an adapter author
-implements `emit()` against.
+implements `emit` against.
 
-**Adapter status (keep this line current; report SL-07 was a stale-doc
+**Adapter status (keep this line current; report the adapter status line was a stale-doc
 finding):** Claude Code and Codex adapters are **shipped**, observe + default-on
-enforce + default-on usage capture; each adapter's `Capabilities()` is the
+enforce + default-on usage capture; each adapter's `Capabilities` is the
 authoritative per-provider profile and this document must agree with it. The
-**Cursor** column below is a *surface survey*, not shipped support; SL-8 is
+**Cursor** column below is a *surface survey*, not shipped support is
 unbuilt. Last reconciled 2026-08-26 against
 `internal/adapters/claude-code/capabilities.go` and
 `internal/adapters/codex/capabilities.go`.
@@ -100,7 +100,7 @@ lane's presence in a row will say which one produced the evidence.
 
 ## 1. Lifecycle coverage matrix
 
-| Contract type | Claude Code *(shipped)* | Cursor *(survey only; SL-8 unbuilt)* | Codex *(shipped)* |
+| Contract type | Claude Code *(shipped)* | Cursor *(survey only unbuilt)* | Codex *(shipped)* |
 |---|---|---|---|
 | `SessionStarted` | `SessionStart` hook | `sessionStart` | `SessionStart` hook |
 | `PromptSubmitted` | `UserPromptSubmit` | `beforeSubmitPrompt` | `UserPromptSubmit` |
@@ -159,7 +159,7 @@ liability it has no evidence to justify.
 **"Suppressible" is the row that decides how much a reader may lean on a lane.**
 Telemetry is the governed tool reporting its own calls, so it is suppressible by
 the thing it observes; the weakest claim in the product. It is adopted because
-it is the only lane that even attempts desktop and OAuth coverage today, and OD4
+it is the only lane that even attempts desktop and OAuth coverage today, and an owner decision
 is the compensating control: telemetry silence on an otherwise-active session is
 a **finding**, not an absence.
 
@@ -297,7 +297,7 @@ lineage):
      until 2026-08-26, and it survived review because that one field was
      assigned directly instead of through the collaborator; conformance C42 now
      asserts it on the outbound bytes, and **the same shape is still live for
-     Codex**. The asymmetry widened again with D-OSS-4 (2026-08-28): the scanner
+     Codex**. The asymmetry widened again with a dependency decision (2026-08-28): the scanner
      Claude Code's content passes through gained gitleaks' 222 format rules on
      top of the nine hand-rolled ones, so Claude Code content is now checked
      against 231 formats and Codex's prompt against none. A dedicated
@@ -327,7 +327,7 @@ All three tools have blockable hooks (Claude Code fail-controlled; **Cursor
 fail-open** by default, `failClosed:true` to flip; Codex feature-gated
 `features.hooks`, stable and on by default ≥ 0.145.0).
 
-Enforcement **shipped** in Phase-2 (E6 for Claude Code, SL7-B for Codex) and is
+Enforcement **shipped** in Phase-2 (E6 for Claude Code for Codex) and is
 **on by default**; `openbox init … --enforce=false` opts out, and an observing
 session treats every verdict as allow (INV-3). Two bounds come with that default
 and both must stay true: enforcement is inert until the org publishes a policy,
@@ -338,13 +338,13 @@ one `allow` it may emit rides a redacting rewrite, never a grant.
 
 Verdict mapping differs by provider surface: Claude Code has an hitl prompt so
 `REQUIRE_APPROVAL` → `ask`; Codex's hook parser rejects `ask`, so it maps to
-**deny** with the approval reference in the reason (OD-SL7-ASK; a fallthrough
+**deny** with the approval reference in the reason (an owner decision; a fallthrough
 under `approval_policy=never` would auto-run ungoverned, so deny is the safe
 mapping). The deny-and-retry approval design that makes this a real four-eyes
 control rather than self-approval is described in `docs/architecture.md` §
 Approvals.
 
 **Assurance caveat:** all of the above is enforced by a *user-local* hook. Until
-the managed provider config is deployed (E8-S8/S9), a developer can remove the
+the managed provider config is deployed (an earlier decision), a developer can remove the
 hook or flip the local config, so treat local enforcement as prevention
 **without** assurance. That is a deployment property, not a code gap.

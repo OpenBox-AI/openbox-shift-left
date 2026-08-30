@@ -17,10 +17,10 @@ openbox init --provider <claude-code|codex|cursor> [flags]
    (INV-7) come from the backend.
 2. **Capture credentials**; the once-shown `obx_` API key and the base64 raw
    32-byte Ed25519 seed; into the **OS secret store** (`internal/secret`). These
-   are the runtime credentials SL-3 uses to AIP-sign `/evaluate` calls.
+   are the runtime credentials the client uses to AIP-sign `/evaluate` calls.
 3. **Delegate config** to the selected provider's installer
-   (`internal/provider`). Until an adapter ships (SL-4 Claude Code, SL-7 Codex,
-   SL-8 Cursor) the CLI prints the required manual config and exits non-zero
+   (`internal/provider`). Until an adapter ships for the requested tool, the CLI
+   prints the required manual config and exits non-zero
    (code 2).
 
 ## Flags & environment
@@ -77,5 +77,5 @@ lives at `internal/provider/`, not under `cli`.
 ## Build & test
 
 ```bash
-go build ./... && go vet ./... && go test -race -count=1 ./...
+go build./... && go vet./... && go test -race -count=1./...
 ```

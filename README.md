@@ -219,8 +219,7 @@ Four things to know before turning these on:
 ## Where things live
 
 ```
-~/.openbox/
-  .env          your credentials; API key, signing key (0600, never commit)
+~/.openbox/.env          your credentials; API key, signing key (0600, never commit)
   dev.json      posture (enforce, capture, fail_closed) + coordinates (DID, agent id, URLs)
   approver.json approver config, if you are one
                     ── with --gateway only ──
@@ -231,8 +230,7 @@ Four things to know before turning these on:
   telemetry.log, transport.log   the same, per lane
   activation.json  per lane: the env keys we wrote, and the values that were there
                    first, so --remove-all restores them key by key (0600)
-  transport-ca.pem, transport-ca.key   the transport lane's CA and its private key
-; generated here, never sent, name-constrained to one host, and
+  transport-ca.pem, transport-ca.key   the transport lane's CA and its private key; generated here, never sent, name-constrained to one host, and
                    readable by anything running as you. --remove-all deletes both
 <project>/.claude/settings.local.json    which hooks fire here  (init --scope local)
 ~/.claude/settings.json                  ANTHROPIC_BASE_URL, with --gateway only
@@ -471,9 +469,8 @@ Go 1.27+, no cgo; a `GOTOOLCHAIN=auto` default fetches it for you. The repo is
 one Go module, laid out per `golang-standards/project-layout`:
 
 ```bash
-go build ./...                      # everything, from the root
-go test -race -count=1 ./...        # -count=1 is required; see internal/depguard
-./test/run-all.sh                   # the end-to-end suite (needs a local OpenBox stack)
+go build./...                      # everything, from the root
+go test -race -count=1./...        # -count=1 is required; see internal/depguard./test/run-all.sh                   # the end-to-end suite (needs a local OpenBox stack)
 ```
 
 Anything provider-agnostic belongs in `internal/adapters/common/`. The

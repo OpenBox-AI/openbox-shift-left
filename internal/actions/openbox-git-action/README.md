@@ -2,10 +2,10 @@
 
 Server-side, push-time **deploy-lineage** resolver for OpenBox. At push/deploy
 it binds the pushed commit to the OpenBox session(s) that produced it (reading
-the `OpenBox-Session:` trailers that the SL-5 hook wrote) and emits a
-**`Deploy`** governance event, through the shared SL-3 client, carrying the
+the `OpenBox-Session:` trailers that the the commit trailer hook wrote) and emits a
+**`Deploy`** governance event, through the shared the client client, carrying the
 resolved session set. It is the read/resolve counterpart to the write side in
-[`internal/adapters/common/git`](../../adapters/common/git) (SL-5).
+[`internal/adapters/common/git`](../../adapters/common/git).
 
 ## What it guarantees (INV-6)
 
@@ -26,14 +26,14 @@ Anyone who can author a commit can name **any** session id (including a
 victim's, visible in their pushed commits). A raw trailer is therefore a claim,
 not proof. Each resolved id is passed through an `OwnershipVerifier` that must
 confirm it belongs to a session owned by the **authenticated pusher** before it
-is marked `verified` (→ `attributed`); mirroring how SL-3 cross-binds the DID.
+is marked `verified` (→ `attributed`); mirroring how the client cross-binds the DID.
 
 Phase-1 default is `NoopVerifier` (verifies nothing): a well-formed deploy
 resolves as `inferred` with every claim flagged `verified=false`. Enabling the
 real verifier promotes owned sessions to `attributed` with no change to the
 resolver.
 
-**The real verifier (story-SL-15).** `apiVerifier` (in `verifier.go`) reads
+**The real verifier.** `apiVerifier` (in `verifier.go`) reads
 openbox-backend's existing, org-scoped session endpoint and promotes a claim
 only when a returned session's **`run_id`** equals the trailer value (the field
 a trailer value maps to; *not* the backend session `id` PK):
@@ -61,7 +61,7 @@ It is **OFF by default** and gated by:
 | `OPENBOX_AGENT_ID`           | the deploy agent's UUID (from `POST /agent/create`) |
 | `OPENBOX_ORG_API_KEY`        | org `X-API-Key` (`obx_key_…`) holding `read:agent_session` |
 
-**INV-4 binding (OD-owner-API).** There is no DID→agentId lookup; an agent's DID
+**INV-4 binding.** There is no DID→agentId lookup; an agent's DID
 is `did:aip:uuidv5(agentID, namespace)` (one-way). So CI supplies the agent's
 UUID directly, and at startup the verifier recomputes `uuidv5(OPENBOX_AGENT_ID)`
 and **requires it to equal `OPENBOX_DID`** (the deploy/attribution identity). A
@@ -89,12 +89,12 @@ is disclosed in the resolution note, never silent (SEC-6-1).
 1. **Scope**; a single commit resolves itself; a range resolves `base..target`;
    a merge with no base resolves `<merge> ^<merge>^1` (the reachable originals).
 2. **Read**; authoritative trailing trailer block via
-   `%(trailers:key=OpenBox-Session,…)` (S3 R7). **SL6-scan**: also
+   `%(trailers:key=OpenBox-Session,…)` (S3 R7). ****: also
    full-body-scans for column-0 `OpenBox-Session:` lines to recover ids left
-   mid-body by a squash done *before* SL-5's hook (marked `source: body-scan`).
-3. **Trailer-stripped fallback**; if nothing is found, recover from the SL-5
+   mid-body by a squash done *before* the commit trailer's hook (marked `source: body-scan`).
+3. **Trailer-stripped fallback**; if nothing is found, recover from the the commit trailer
    git-notes mirror (`refs/notes/openbox`) → `inferred` / `trailer-stripped`.
-4. **Bind**; ownership-verify each id (SL5-SEC-1), then classify.
+4. **Bind**; ownership-verify each id, then classify.
 
 ## Usage (CI)
 
@@ -128,7 +128,7 @@ queryable session→commit→deploy join is FR-7, external/deferred). `deploy_di
 (`did:aip:deploy-<shortsha>-<unixts>`) is a synthetic lineage label in metadata;
 the client's **signing** identity stays the agent's real `did:aip:<uuid>`.
 
-Like SL-3/4/5, end-to-end ingestion is gated on **EXT-core**: openbox-core's
+Like the client/4/5, end-to-end ingestion is gated on **EXT-core**: openbox-core's
 `/evaluate` accept-list does not yet include the developer-runtime event types,
 so it currently answers `Deploy` with HTTP 400 (the documented additive core
 extension; architecture D4 / INV-8). Until it lands, the fail-open client
@@ -144,5 +144,5 @@ precondition exit 2) rather than resolving unsafely.
 ## Test
 
 ```sh
-go build ./... && go test ./...   # simulated push incl. squash/fixup/force-push/merge
+go build./... && go test./...   # simulated push incl. squash/fixup/force-push/merge
 ```
