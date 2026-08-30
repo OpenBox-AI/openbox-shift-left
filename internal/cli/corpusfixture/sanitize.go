@@ -335,11 +335,12 @@ func (s *sanitizer) rewrite(key, val string) string {
 	if fixed, ok := fixedKeys[lk]; ok {
 		return fixed
 	}
-	// A recorded request body carries the prompt, so its free text is replaced
-	// before the value patterns run: what survives that substitution is
-	// structure, and the patterns exist for identifiers hiding in structure.
+	// A recorded body carries the prompt on the way out and the model's reply on
+	// the way back, so its free text is replaced before the value patterns run:
+	// what survives the substitution is structure, and the patterns exist for
+	// identifiers hiding in structure.
 	if lk == "body" {
-		val = SubstitutePromptText(val)
+		val = SubstituteSSEDeltas(SubstitutePromptText(val))
 	}
 	return s.scrubText(val)
 }
@@ -490,8 +491,16 @@ func scanString(val, path, key string, out *[]Violation) {
 	// The check is the substitution itself rather than a second description of
 	// what filler looks like: a rule stated twice is a rule that drifts, and the
 	// half that drifts here is the one admitting fixtures.
-	if lk == "body" && SubstitutePromptText(val) != val {
-		*out = append(*out, Violation{Path: path, Kind: "recorded prompt text in a model-call body"})
+	if lk == "body" {
+		if SubstitutePromptText(val) != val {
+			*out = append(*out, Violation{Path: path, Kind: "recorded prompt text in a model-call body"})
+		}
+		if SubstituteSSEDeltas(val) != val {
+			*out = append(*out, Violation{Path: path, Kind: "recorded model reply in an event stream"})
+		}
+		for _, k := range malformedBlocks(val) {
+			*out = append(*out, Violation{Path: path, Kind: k})
+		}
 	}
 	if strings.Contains(val, systemReminder) {
 		*out = append(*out, Violation{Path: path, Kind: "injected-context block (carries whatever the recording machine had open)"})

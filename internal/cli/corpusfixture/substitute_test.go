@@ -154,3 +154,109 @@ func jsonQuote(s string) string {
 	}
 	return string(b)
 }
+
+// TestSubstitutePromptTextDoesNotRewriteKeys is the collision drill, and it is
+// here because the collision happened. A four-rune string leaf inside a tool
+// input matched every `"text"` KEY and every `"type":"text"` discriminator in the
+// body, so a whole-string replace produced valid JSON, held the rune count, and
+// described an exchange no provider would send.
+func TestSubstitutePromptTextDoesNotRewriteKeys(t *testing.T) {
+	body := `{"messages":[{"role":"assistant","content":[` +
+		`{"type":"tool_use","id":"toolu_a","name":"Edit","input":{"mode":"text"}},` +
+		`{"type":"text","text":"a recorded reply"}]}]}`
+	got := SubstitutePromptText(body)
+	var top struct {
+		Messages []struct {
+			Content []map[string]any `json:"content"`
+		} `json:"messages"`
+	}
+	if err := json.Unmarshal([]byte(got), &top); err != nil {
+		t.Fatalf("unmarshal: %v\n%s", err, got)
+	}
+	blocks := top.Messages[0].Content
+	if blocks[0]["type"] != "tool_use" || blocks[1]["type"] != "text" {
+		t.Errorf("block discriminators were rewritten: %v, %v", blocks[0]["type"], blocks[1]["type"])
+	}
+	if _, ok := blocks[1]["text"]; !ok {
+		t.Errorf("the text key was rewritten: %v", blocks[1])
+	}
+	if blocks[1]["text"] == "a recorded reply" {
+		t.Error("the recorded reply survived")
+	}
+}
+
+// TestSubstitutePromptTextRecursesIntoDescriptionObjects covers a schema property
+// literally named "description", where the key holds an object rather than a
+// string and a walker that only handled the string case walked past the prose
+// underneath it.
+func TestSubstitutePromptTextRecursesIntoDescriptionObjects(t *testing.T) {
+	body := `{"messages":[],"tools":[{"name":"Read","input_schema":{"properties":` +
+		`{"description":{"type":"string","description":"recorded schema prose"}}}}]}`
+	if got := SubstitutePromptText(body); strings.Contains(got, "recorded schema prose") {
+		t.Error("prose under a property named description survived")
+	}
+}
+
+// TestSubstituteSSEDeltasRemovesRecordedText covers the response side. A recorded
+// event stream carries the model's reply as deltas, which the request-body rule
+// never sees.
+func TestSubstituteSSEDeltasRemovesRecordedText(t *testing.T) {
+	sse := "event: content_block_delta\n" +
+		`data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"a recorded reply"}}` +
+		"\n\nevent: content_block_start\n" +
+		`data: {"type":"content_block_start","content_block":{"type":"text","text":"more recorded prose"}}` +
+		"\n\n"
+	got := SubstituteSSEDeltas(sse)
+	if utf8.RuneCountInString(got) != utf8.RuneCountInString(sse) {
+		t.Errorf("stream is %d runes, was %d", utf8.RuneCountInString(got), utf8.RuneCountInString(sse))
+	}
+	for _, recorded := range []string{"a recorded reply", "more recorded prose"} {
+		if strings.Contains(got, recorded) {
+			t.Errorf("recorded delta survived: %q", recorded)
+		}
+	}
+	if !strings.Contains(got, `"type":"text_delta"`) || !strings.Contains(got, "event: content_block_delta") {
+		t.Error("frame structure was rewritten")
+	}
+	if got == sse {
+		t.Error("nothing changed")
+	}
+}
+
+// TestScanRejectsAMalformedContentBlock is the second, independent gate. The
+// first rule asks whether substituting the body would change it, so a body the
+// substitution already corrupted answers no and sails through: the check and the
+// thing it checks were the same code. This rule reads the body's shape instead,
+// and it is what would have caught a discriminator rewritten to prose.
+func TestScanRejectsAMalformedContentBlock(t *testing.T) {
+	for name, body := range map[string]string{
+		"discriminator rewritten": `{"messages":[{"role":"user","content":[{"type":"This paragraph is","This":"x"}]}]}`,
+		"type-named field gone":   `{"messages":[{"role":"user","content":[{"type":"text"}]}]}`,
+		"no type at all":          `{"messages":[{"role":"user","content":[{"text":"x"}]}]}`,
+	} {
+		doc := `{"request":{"body":` + jsonQuote(body) + `}}`
+		if v := Scan([]byte(doc)); len(v) == 0 {
+			t.Errorf("%s: Scan accepted a malformed content block", name)
+		}
+	}
+	ok := `{"messages":[{"role":"user","content":[{"type":"text","text":` +
+		jsonQuote(SyntheticProse(12)) + `}]}]}`
+	doc := `{"request":{"body":` + jsonQuote(ok) + `}}`
+	if v := Scan([]byte(doc)); len(v) != 0 {
+		t.Errorf("Scan rejected a well-formed substituted block: %s", v[0])
+	}
+}
+
+// TestScanRejectsRecordedSSEDeltas covers the response side of the same class.
+func TestScanRejectsRecordedSSEDeltas(t *testing.T) {
+	stream := "event: content_block_delta\n" +
+		`data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"a recorded reply"}}` + "\n\n"
+	doc := `{"response":{"body":` + jsonQuote(stream) + `}}`
+	if v := Scan([]byte(doc)); len(v) == 0 {
+		t.Fatal("Scan accepted an event stream carrying the model's recorded reply")
+	}
+	clean := `{"response":{"body":` + jsonQuote(SubstituteSSEDeltas(stream)) + `}}`
+	if v := Scan([]byte(clean)); len(v) != 0 {
+		t.Fatalf("Scan rejected a substituted stream: %s", v[0])
+	}
+}
