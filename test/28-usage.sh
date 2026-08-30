@@ -239,7 +239,7 @@ polluted="$(tb_val "select count(*) from agent_metrics
 if [ -z "$polluted" ]; then
 	tb_skip "tool-metric pollution recorded" "agent_metrics not readable from here"
 elif [ "$polluted" -gt 0 ]; then
-	tb_note "EXPECTED: $polluted tool-metric row(s) for llm_completion — core has not shipped the ExtractToolMetric exclusion yet"
+	tb_note "$polluted tool-metric row(s) for llm_completion — the control plane excludes them, so a row here means the deployed version predates that exclusion"
 	tb_ok "tool-metric pollution present and explained (not a shift-left defect)"
 else
 	tb_note "no llm_completion tool metrics — core may already exclude it; if so, convert this step to assert_eq 0"

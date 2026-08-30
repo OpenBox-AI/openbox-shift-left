@@ -398,12 +398,6 @@ func ResolveSecretDetection() bool {
 	return resolveBool("secret_detection", func(c DevConfig) *bool { return c.SecretDetection }, true, EnvSecretDetection)
 }
 
-// ResolveRequireVerifiedBundle reports whether an unverified policy bundle must
-// be refused rather than enforced (OD-RF-3). Default false.
-func ResolveRequireVerifiedBundle() bool {
-	return resolveBool("require_verified_bundle", func(c DevConfig) *bool { return c.RequireVerifiedBundle }, false, EnvRequireVerified)
-}
-
 // ResolveFindings reports whether the findings loop is on. Default
 // false — opt-in, because it is the first observe-path stdout writer.
 func ResolveFindings() bool {

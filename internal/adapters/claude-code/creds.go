@@ -59,9 +59,6 @@ type DevConfig = devconfig.DevConfig
 // looks for it when OPENBOX_CONFIG is unset.
 func DefaultConfigPath() string { return devconfig.DefaultConfigPath() }
 
-// loadDevConfig reads the dev config if present (missing file is not an error).
-func loadDevConfig(path string) (DevConfig, error) { return devconfig.Load(path) }
-
 // Credentials is the resolved runtime identity for the hook binary.
 type Credentials struct {
 	BaseURL               string

@@ -8,7 +8,6 @@ import (
 	"io"
 	"net"
 	"os"
-	"path/filepath"
 	"runtime"
 	"testing"
 	"time"
@@ -276,29 +275,13 @@ func TestServerConfigRefusesAHostOutsideTheNameConstraint(t *testing.T) {
 	}
 }
 
-// TestRemoveCADeletesBothFiles: `one command out` (OD2) has to leave nothing
-// behind, and what it must not leave behind most is this key.
-func TestRemoveCADeletesBothFiles(t *testing.T) {
-	dir := t.TempDir()
-	if _, err := LoadOrCreateCA(dir); err != nil {
-		t.Fatalf("LoadOrCreateCA: %v", err)
-	}
-	certPath, keyPath := CAPaths(dir)
-
-	if err := RemoveCA(dir); err != nil {
-		t.Fatalf("RemoveCA: %v", err)
-	}
-	for _, p := range []string{certPath, keyPath} {
-		if _, err := os.Stat(p); !os.IsNotExist(err) {
-			t.Errorf("%s still exists after RemoveCA (stat err = %v)", filepath.Base(p), err)
-		}
-	}
-	// Removing twice must not fail: `openbox init --remove-transport` has to be
-	// runnable on a machine where it already ran, exactly like --remove-gateway.
-	if err := RemoveCA(dir); err != nil {
-		t.Errorf("second RemoveCA: %v; removal must be idempotent", err)
-	}
-}
+// TestRemoveCADeletesBothFiles is deleted with RemoveCA, which had no caller.
+//
+// `--remove-all` deletes the CA inline in purgeLaneData, and nothing asserts
+// that it does. `--remove-transport` does not delete it at all, which by this
+// package's own argument leaves a trusted signing key behind after the relay
+// that used it is gone. Both are open, and neither is a regression from this
+// deletion: the helper this test covered was never on either path.
 
 // TestLoadOrCreateCARejectsACorruptFilePairWithoutOverwriting.
 //

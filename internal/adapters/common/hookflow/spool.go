@@ -31,7 +31,7 @@ import (
 // touches a tool call. Loss becomes permanent only past MaxRecoveryAttempts.
 // When a flush is cut short (its time budget or ctx cancellation), the
 // UNDELIVERED remainder is persisted to a recovery file, which the next
-// SessionEnd re-drains via SweepRecovery (or an explicit `flush` / FlushAll) —
+// SessionEnd re-drains via the recovery sweep (or an explicit `flush` / FlushAll) —
 // delivered events are never re-sent, and the tail is not dropped.
 type Spool struct {
 	Dir string
@@ -69,37 +69,9 @@ type FlushFunc func(context.Context, client.DevEvent) error
 // FlushSession drains one session's spool through fn and returns the number of
 // events delivered. It rotates the spool file first (atomic rename) so late
 // appends land in a fresh file. If ctx ends the drain early, the undelivered
-// remainder is persisted to a recovery file, which SweepRecovery re-drains.
+// remainder is persisted to a recovery file, which the next flush re-drains.
 func (s Spool) FlushSession(ctx context.Context, sessionID string, fn FlushFunc) (int, error) {
 	return s.drainFile(ctx, s.SessionPath(sessionID), fn)
-}
-
-// SweepRecovery re-drains carry-over (recovery) files left by earlier flushes —
-// any session's, not just the caller's — and returns the number of events
-// delivered.
-//
-// This is what makes E8-S7's retry real rather than notional. A recovery file is
-// written by a session that has already ended, so that session has no later
-// trigger of its own: without an unowned sweep, `FlushSession` would only ever
-// touch `<session>.jsonl` and every carry-over would sit on disk forever (a
-// developer offline for an afternoon would accumulate one per session and report
-// a degraded evidence state from then on). Sweeping by session would not fix it
-// either — each new session has a new id.
-//
-// Only BARE `.rec<N>-<id>.jsonl` files are claimed, never a live `<session>.jsonl`
-// (which may belong to a session still running, and whose events are merely
-// un-flushed rather than undelivered) and never an in-flight `.flushing.`
-// rotation. That restriction is what makes an unowned sweep safe: nobody holds a
-// bare recovery file open, and drainFile claims it by atomic rename, so a
-// concurrent sweep from another session's teardown loses the race cleanly
-// instead of double-delivering.
-//
-// The directory is listed once up front, so recovery files this sweep itself
-// writes are not re-drained in the same pass — otherwise a single offline flush
-// would burn every remaining attempt (MaxRecoveryAttempts) at once and turn a
-// bounded retry into immediate loss.
-func (s Spool) SweepRecovery(ctx context.Context, fn FlushFunc) (int, error) {
-	return s.sweepRecovery(ctx, s.recoveryFiles(), "", fn)
 }
 
 // recoveryFiles snapshots the carry-over files currently in the spool directory.
@@ -123,6 +95,17 @@ func (s Spool) recoveryFiles() []string {
 // ownSession (if any) first so the ending session's own telemetry gets the
 // budget before other sessions' backlog does. It continues past a single file's
 // error and stops on ctx expiry, leaving the rest for a later sweep.
+//
+// A recovery file is written by a session that has already ended, so that
+// session has no later trigger of its own; a sweep scoped to the caller's
+// session would leave every carry-over on disk forever, one per offline session.
+// Sweeping another session's file is safe only because of what is claimed: bare
+// `.rec<N>-<id>.jsonl` and nothing else. Never a live `<session>.jsonl`, whose
+// events are un-flushed rather than undelivered and may belong to a session
+// still running, and never an in-flight `.flushing.` rotation. Nobody holds a
+// bare recovery file open, and drainFile claims it by atomic rename, so a
+// concurrent sweep from another teardown loses the race cleanly rather than
+// double-delivering.
 func (s Spool) sweepRecovery(ctx context.Context, names []string, ownSession string, fn FlushFunc) (int, error) {
 	if ownSession != "" {
 		own := sanitizeSessionID(ownSession) + ".rec"

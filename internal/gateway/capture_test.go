@@ -196,8 +196,8 @@ func TestCaptureOrderingFingerprintThenRedact(t *testing.T) {
 	respHeaders.Set("Request-Id", "req_abc")
 	respHeaders.Set("Set-Cookie", "s=abc123")
 
-	got := Capture(http.MethodPost, "https://api.anthropic.com/v1/messages?beta=true",
-		reqHeaders, `{"model":"claude-opus-4"}`, 200, respHeaders, `{"type":"message"}`)
+	got := CaptureRequest(http.MethodPost, "https://api.anthropic.com/v1/messages?beta=true",
+		reqHeaders, `{"model":"claude-opus-4"}`).Complete(200, respHeaders, `{"type":"message"}`)
 
 	// Both halves, from one call: the value is gone AND the fingerprint is real.
 	if got.RequestHeaders["Authorization"] != redactedHeaderValue {
@@ -285,16 +285,5 @@ func TestSplitCaptureKeepsTheOrderingAndDoesNotRedoWork(t *testing.T) {
 	}
 	if full.ResponseHeaders["Request-Id"] != "req_x" {
 		t.Errorf("a non-credential response header was lost: %q", full.ResponseHeaders["Request-Id"])
-	}
-
-	// And the convenience path must agree with the split exactly, or two callers
-	// get two different answers for the same exchange.
-	whole := Capture(http.MethodPost, "https://api.anthropic.com/v1/messages?beta=true",
-		reqHeaders, `{"model":"claude-opus-4"}`, 200, respHeaders, `{"type":"message"}`)
-	if whole.CredentialFingerprint != full.CredentialFingerprint ||
-		whole.HTTPURL != full.HTTPURL ||
-		whole.RequestBody != full.RequestBody ||
-		whole.ResponseBody != full.ResponseBody {
-		t.Error("Capture and CaptureRequest+Complete disagree; the two paths have diverged")
 	}
 }

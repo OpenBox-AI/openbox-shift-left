@@ -103,10 +103,13 @@ func TestFlushDoesNotBurnRetriesInOnePass(t *testing.T) {
 	}
 }
 
-// TestSweepRecoveryIgnoresLiveSpool proves the sweep only claims unowned
-// carry-over, never a live spool that may belong to a running session.
-func TestSweepRecoveryIgnoresLiveSpool(t *testing.T) {
+// TestSweepIgnoresLiveSpool proves the sweep only claims unowned carry-over,
+// never a live spool that may belong to a running session. It drives the
+// production flush rather than the exported sweep wrapper, which had no caller
+// outside this assertion.
+func TestSweepIgnoresLiveSpool(t *testing.T) {
 	dir := t.TempDir()
+	ad := New(Identity{DeveloperDID: testDID}, dir)
 	sp := hookflow.Spool{Dir: dir}
 	_ = sp.Append(spoolEvent("l1", "live"))
 	if err := sp.Append(spoolEvent("d1", "dead")); err != nil {
@@ -117,16 +120,17 @@ func TestSweepRecoveryIgnoresLiveSpool(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	var got []string
-	n, err := sp.SweepRecovery(context.Background(), func(_ context.Context, ev client.DevEvent) error {
-		got = append(got, ev.EventID)
-		return nil
-	})
+	online := &recoveryEmitter{}
+	n, err := ad.Flush(context.Background(), "flusher", online)
 	if err != nil {
-		t.Fatalf("sweep: %v", err)
+		t.Fatalf("flush: %v", err)
+	}
+	var got []string
+	for _, e := range online.got {
+		got = append(got, e.EventID)
 	}
 	if n != 1 || strings.Join(got, ",") != "d1" {
-		t.Fatalf("sweep should drain only the carry-over, got n=%d %v", n, got)
+		t.Fatalf("the sweep should drain only the carry-over, got n=%d %v", n, got)
 	}
 	if _, err := os.Stat(sp.SessionPath("live")); err != nil {
 		t.Errorf("live spool must be left alone, stat err=%v", err)

@@ -314,18 +314,6 @@ func (c *CA) mintLeaf(host string) (*tls.Certificate, error) {
 	}, nil
 }
 
-// RemoveCA deletes the CA files. Idempotent: `--remove-transport` has to be
-// runnable on a machine where it already ran, exactly like --remove-gateway.
-func RemoveCA(dir string) error {
-	certPath, keyPath := CAPaths(dir)
-	for _, p := range []string{keyPath, certPath} {
-		if err := os.Remove(p); err != nil && !os.IsNotExist(err) {
-			return fmt.Errorf("transport: remove %s: %w", p, err)
-		}
-	}
-	return nil
-}
-
 // requireOwnerOnly refuses a CA key any other account can read.
 //
 // Windows is exempt, and that is that decision's stated posture rather than an

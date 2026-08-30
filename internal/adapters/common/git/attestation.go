@@ -227,9 +227,6 @@ func (a *Attestation) Verify(pub ed25519.PublicKey, expectCommitSHA string) (Att
 // accidentally parse the other.
 const attestationNoteRef = "refs/notes/openbox-attest"
 
-// AttestationNoteRef is the ref a deploy pipeline must fetch to see attestations.
-func AttestationNoteRef() string { return attestationNoteRef }
-
 // WriteAttestation stores an attestation as a git note on rev. Best-effort by
 // contract: the caller logs a failure and lets the commit stand (INV-3).
 func (g Git) WriteAttestation(rev string, a *Attestation) error {

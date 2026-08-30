@@ -10,13 +10,16 @@ import (
 	"time"
 )
 
-// hookBin is the compiled openbox-git-hook, built once for the whole matrix.
+// hookBin is the compiled `openbox`, built once for the whole matrix.
 //
-// Built by PACKAGE PATH, not by a relative directory: this package and the tool
-// sit at different depths, so a relative build target would have to count `../`
-// hops and would break silently on the next move. This build failing panics
-// TestMain and takes the whole package suite with it, which is the reason the
-// tool still exists at all.
+// It used to be a standalone alias binary that existed for this suite alone.
+// Pointing the matrix at the shipped command instead means what it exercises is
+// what an install actually writes into a hooks directory, invoked the way the
+// installer invokes it.
+//
+// Built by PACKAGE PATH, not by a relative directory: this package and the
+// command sit at different depths, so a relative target would have to count
+// `../` hops and would break silently on the next move.
 var hookBin string
 
 func TestMain(m *testing.M) {
@@ -32,8 +35,8 @@ func TestMain(m *testing.M) {
 	if err != nil {
 		panic(err)
 	}
-	hookBin = filepath.Join(dir, "openbox-git-hook")
-	build := exec.Command("go", "build", "-o", hookBin, "github.com/openbox-ai/openbox-shift-left/tools/openbox-git-hook")
+	hookBin = filepath.Join(dir, "openbox")
+	build := exec.Command("go", "build", "-o", hookBin, "github.com/openbox-ai/openbox-shift-left/cmd/openbox")
 	build.Stderr = os.Stderr
 	if err := build.Run(); err != nil {
 		panic("build hook binary: " + err.Error())

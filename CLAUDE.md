@@ -33,7 +33,7 @@ local working records, git-ignored. Inside `internal/`:
 | `adapters/common/devconfig/`, `adapters/common/git/`, `adapters/claude-code/`, `adapters/codex/` | shared config and posture; trailer, notes, attestation; one thin adapter each |
 | `client/`, `decision/` | core client (payload, AIP signing, verdicts); local secret detection |
 | `gateway/`, `telemetry/`, `transport/` | the three model-call lanes. `gateway/internal/dialhook` keeps a nested `internal/` on purpose |
-| `cli/` | everything behind the `openbox` commands, including `activation`, `laneservice`, `atomicfile` |
+| `cli/` | behind the `openbox` commands: `activation`, `laneservice`, `atomicfile`. The command layer itself is `cmd/openbox/` |
 | `conformance/`, `depguard/`, `actions/` | the event-contract suite; the dependency guards; commit-to-deploy lineage for CI |
 
 ## Working conventions
@@ -47,23 +47,23 @@ what builds. Test files may separate words to name their subject
 reads those exact names. This diverges from generic Go guidance on purpose.
 
 **Dependencies.** One `go.mod`, so a new dependency is one `go mod tidy`; the
-allowlists in `internal/depguard` are scoped by package subtree and adding to one
-is a decision. `renameio` is `!windows`, hence the build-tagged `atomicWriteFile`.
+`internal/depguard` allowlists are scoped by package subtree and adding to one is
+a decision. `renameio` is `!windows`, hence the build-tagged `atomicWriteFile`.
 
 **Credentials are plaintext, on purpose.** `~/.openbox/.env` is `0600` on macOS
 and Linux and unprotected on Windows, and anything running as the developer,
-including the governed agent, can read the signing key. Attestation therefore
-proves origin of config rather than tamper resistance; no document may imply
-otherwise.
+including the governed agent, can read the signing key, so attestation proves
+origin of config rather than tamper resistance. No document may imply otherwise.
 
-**Privacy posture.** Content, usage and thinking capture are on by default, opted
-out per key; prompt text, tool commands, file bodies, tool output and extended
-thinking all egress under the one `content_capture` key. Local secret detection
-redacts a body before it is attached, and that ordering is the only in-transit
-control there is; detection is keyword-driven for assignment shapes, so an
-unlabelled high-entropy value below the entropy floor is invisible to it, and
-`docs/data-and-privacy.md` must stay true to that. The redactor also rewrites
-developer files and has false positives: check any file this repo writes for
+**Privacy posture.** A decision only a human can make (scope, privacy posture,
+priority) is surfaced, never inferred. Content, usage and thinking capture are on
+by default, opted out per key; prompt text, tool commands, file bodies, tool
+output and thinking all egress under the one `content_capture` key. Local secret
+detection redacts a body before it is attached, and that ordering is the only
+in-transit control there is; detection is keyword-driven for assignment shapes,
+so an unlabelled high-entropy value below the floor is invisible to it, and
+`docs/data-and-privacy.md` must stay true. The redactor also rewrites developer
+files and has false positives: check what this repo writes for
 `${OPENBOX_REDACTED_*}`, and derive a base64 test fixture in code.
 
 ## Invariants a contributor would otherwise break

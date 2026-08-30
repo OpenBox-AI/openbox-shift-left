@@ -451,10 +451,3 @@ func missingCreds(reg *backend.Registration) string {
 		return "a signing key"
 	}
 }
-
-func nsOrLocal(org string) string {
-	if org == "" {
-		return "local"
-	}
-	return org
-}

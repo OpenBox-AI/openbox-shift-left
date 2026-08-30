@@ -2,7 +2,6 @@ package hookflow
 
 import (
 	"encoding/json"
-	"testing"
 
 	"github.com/openbox-ai/openbox-shift-left/internal/client"
 	"github.com/openbox-ai/openbox-shift-left/internal/decision"
@@ -26,30 +25,12 @@ func verdictDecision(v client.Verdict) decision.Decision {
 	return decision.Decision{Evaluation: client.Evaluation{Verdict: v}}
 }
 
-func TestShouldEscalate(t *testing.T) {
-	for _, tc := range []struct {
-		name string
-		dec  decision.Decision
-		want bool
-	}{
-		{"allow escalates — Tier-1 would proceed", verdictDecision(client.VerdictAllow), true},
-		{"unknown escalates — no local verdict", verdictDecision(client.VerdictUnknown), true},
-		{"halt does not — already a final answer", verdictDecision(client.VerdictHalt), false},
-		{"block does not — already a final answer", verdictDecision(client.VerdictBlock), false},
-		// E9 §3.4 Step 0: REQUIRE_APPROVAL is a question, not an answer. Without
-		// this the request is never filed with the server and no approver ever
-		// sees it.
-		{"require_approval escalates despite tightening", verdictDecision(client.VerdictRequireApproval), true},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			for _, c := range []testContract{{approval: "ask"}, {approval: DecisionDeny}} {
-				if got := ShouldEscalate(tc.dec, c); got != tc.want {
-					t.Errorf("ShouldEscalate(approval=%q) = %t, want %t", c.approval, got, tc.want)
-				}
-			}
-		})
-	}
-}
+// TestShouldEscalate is deleted with ShouldEscalate.
+//
+// The predicate answered "can a round-trip still change the outcome", which was
+// a real question while a local step produced verdicts. Escalation is
+// unconditional now: every gated class goes to the server because risk is a
+// property of the policy, so the gate has nothing left to ask.
 
 // TestKeepTighterHoldsTheTier1Floor is deleted with KeepTighter.
 //

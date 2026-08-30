@@ -81,3 +81,25 @@ func TestRunPrepareCommitMsg_NoArgsIsNoop(t *testing.T) {
 		t.Fatalf("got n=%d err=%v, want 0,nil", n, err)
 	}
 }
+
+// TestHookConfigDefaultsToTheShippedBinary holds a default that outlived what it
+// named. It once produced `openbox-git-hook`, a dev instrument that shipped in no
+// release and that no installer targeted, so a zero-valued HookConfig wrote a
+// hook invoking a binary present on no machine. Production always sets Command,
+// which is exactly why nothing noticed.
+func TestHookConfigDefaultsToTheShippedBinary(t *testing.T) {
+	var c HookConfig
+	if got := c.command(); got != "openbox" {
+		t.Errorf("default command = %q, want the shipped binary %q", got, "openbox")
+	}
+	want := []string{"hook", "git", "prepare-commit-msg"}
+	got := c.args()
+	if len(got) != len(want) {
+		t.Fatalf("default args = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("default args = %v, want %v", got, want)
+		}
+	}
+}

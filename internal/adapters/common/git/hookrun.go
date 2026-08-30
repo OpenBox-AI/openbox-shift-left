@@ -73,7 +73,7 @@ func runInstall(g Git, installArgs []string, logf func(string, ...any)) {
 	}
 	self, err := os.Executable()
 	if err != nil || self == "" {
-		self = "openbox-git-hook"
+		self = "openbox"
 	}
 	cfg := HookConfig{Command: self, Args: installArgs}
 	// The post-commit hook carries the notes mirror and the signed attestation

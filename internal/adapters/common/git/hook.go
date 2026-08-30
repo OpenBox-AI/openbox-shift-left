@@ -12,24 +12,6 @@ import (
 // clobbered silently.
 const managedMarker = "managed-by: openbox-shift-left (STORY-SL-5)"
 
-// PrepareCommitMsg is the body of the `prepare-commit-msg` hook. git invokes the
-// hook as: <hook> <msgFile> [<source> [<sha>]]. It stamps the in-scope
-// session(s) onto msgFile.
-//
-// SAFETY: it returns an error ONLY for the caller to LOG — the caller (the hook
-// entrypoint) must still exit 0 (see RunPrepareCommitMsg / cmd). A stamping
-// failure must never abort the developer's commit.
-//
-// It does not special-case the commit source: `--amend` (source "commit")
-// and rebase squash (source "squash") re-fire the hook, and
-// addIfDifferent keeps those idempotent/additive. Merge nodes (source
-// "merge") get the current session too, harmlessly — the git action
-// attributes the reachable originals, not the merge node, so an extra
-// merge-node line changes nothing downstream.
-func (g Git) PrepareCommitMsg(msgFile string, sessions []string) error {
-	return g.StampMessageFile(msgFile, sessions)
-}
-
 // RunPrepareCommitMsg is the fail-open entrypoint a hook binary calls. It
 // resolves the in-scope sessions (env + file), stamps them, and reports any
 // error via logf — but it is the CALLER's job to always exit 0. args are the
@@ -80,27 +62,29 @@ func (g Git) Worktree() (string, error) {
 }
 
 // HookConfig describes the command the installed hook script shells out to.
-// Command + Args are prepended to git's hook arguments. Defaults target the
-// standalone cmd/openbox-git-hook binary; the CLI wiring (OD17: single `openbox`
-// engine) points these at `openbox hook git prepare-commit-msg` instead, without
-// this package needing to change.
+// Command + Args are prepended to git's hook arguments.
+//
+// The defaults name the shipped binary. They once named a standalone dev
+// instrument that no release built and no installer targeted, so a zero-valued
+// HookConfig wrote a hook invoking a binary present on no machine; production
+// sets Command explicitly, which is why nothing observed it.
 type HookConfig struct {
-	Command string   // executable to run; "" => "openbox-git-hook"
-	Args    []string // fixed leading args; nil => ["prepare-commit-msg"]
+	Command string   // executable to run; "" => "openbox"
+	Args    []string // fixed leading args; nil => ["hook", "git", "prepare-commit-msg"]
 }
 
 func (c HookConfig) command() string {
 	if c.Command != "" {
 		return c.Command
 	}
-	return "openbox-git-hook"
+	return "openbox"
 }
 
 func (c HookConfig) args() []string {
 	if c.Args != nil {
 		return c.Args
 	}
-	return []string{"prepare-commit-msg"}
+	return []string{"hook", "git", "prepare-commit-msg"}
 }
 
 // InstallHook writes a `prepare-commit-msg` hook into hooksDir (typically

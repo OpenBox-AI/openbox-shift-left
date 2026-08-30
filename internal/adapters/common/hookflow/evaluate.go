@@ -197,24 +197,6 @@ func DecisionTightens(dec decision.Decision, c OutputContract) bool {
 	return d != ""
 }
 
-// ShouldEscalate reports whether a round-trip can still change the outcome.
-// Normally it cannot once the local step has tightened, because the server can
-// only ever be more restrictive — so evaluation fires when the local step would
-// otherwise proceed.
-//
-// REQUIRE_APPROVAL is the one exception, and the reason this predicate exists
-// separately from DecisionTightens: it is not a final answer but a QUESTION,
-// and only the server can file it. Treating it as "already tightened" meant a
-// locally-derived approval was rendered as a local prompt and never reached
-// /evaluate — no governance_events row, no approval window, nothing for any
-// approver to decide (E9 §3.4 Step 0). It therefore escalates like a proceed.
-func ShouldEscalate(dec decision.Decision, c OutputContract) bool {
-	if dec.Evaluation.Verdict == client.VerdictRequireApproval {
-		return true
-	}
-	return !DecisionTightens(dec, c)
-}
-
 // resolveEvaluationTimeout is the per-evaluation budget.
 //
 // It reads no config. `tier2_timeout_ms` is deprecated and inert : the real

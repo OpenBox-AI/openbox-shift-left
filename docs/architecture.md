@@ -76,7 +76,7 @@ is the part that stops a directory quietly becoming a junk drawer.
 | `init/` | **illustrative** copies of the supervisor units, and only that | a `go:embed`, or anything treated as authoritative. `internal/cli/laneservice` renders the real ones |
 | `internal/` | every package this repo does not publish — which is all of them | a package meant for external import. Publishing one reopens the `/pkg` question |
 | `test/` | the mock-free end-to-end suite (shell), see [e2e](test/e2e.md) | Go tests. Those live beside the code they test |
-| `tools/` | supporting dev instruments — `corpusfixture`, `refusal-injector`, `openbox-git-hook` | anything the release builds. `tools/` is not a release surface |
+| `tools/` | supporting dev instruments — `corpusfixture`, `refusal-injector` | anything the release builds. `tools/` is not a release surface |
 
 `install.sh` and `.github/workflows/` stay at the repository root deliberately:
 `curl … | bash` needs a root URL and GitHub demands its own path. Both are

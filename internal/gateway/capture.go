@@ -272,14 +272,6 @@ func (r RequestCapture) Complete(status int, respHeaders http.Header, respBody s
 	}
 }
 
-// Capture is the whole-exchange convenience, for a caller that already has both
-// halves. It is CaptureRequest followed by Complete and nothing else, so the two
-// paths cannot diverge in ordering.
-func Capture(method, url string, reqHeaders http.Header, reqBody string,
-	status int, respHeaders http.Header, respBody string) Captured {
-	return CaptureRequest(method, url, reqHeaders, reqBody).Complete(status, respHeaders, respBody)
-}
-
 // ForGate renders the request half as a Captured for the gate's evaluation, whose
 // verdict must be obtained before a response exists.
 //

@@ -123,9 +123,9 @@ func TestRemoveEnvRemovesOnlyOwnedKeys(t *testing.T) {
 	home := t.TempDir()
 	seed(t, home, `{"env":{"`+EnvKey+`":"http://127.0.0.1:8788","HTTP_PROXY":"http://p:3128"},"permissions":{}}`)
 
-	removed, err := RemoveEnv(home)
+	removed, _, err := RemoveEnvDetailed(home)
 	if err != nil {
-		t.Fatalf("RemoveEnv: %v", err)
+		t.Fatalf("RemoveEnvDetailed: %v", err)
 	}
 	if len(removed) != 1 || removed[0] != EnvKey {
 		t.Errorf("removed = %v, want only %s", removed, EnvKey)
@@ -148,8 +148,8 @@ func TestRemoveEnvDropsAnEmptyEnvBlock(t *testing.T) {
 	home := t.TempDir()
 	seed(t, home, `{"env":{"`+EnvKey+`":"http://127.0.0.1:8788"}}`)
 
-	if _, err := RemoveEnv(home); err != nil {
-		t.Fatalf("RemoveEnv: %v", err)
+	if _, _, err := RemoveEnvDetailed(home); err != nil {
+		t.Fatalf("RemoveEnvDetailed: %v", err)
 	}
 	got := read(t, home)
 	if _, present := got["env"]; present {
@@ -161,9 +161,9 @@ func TestRemoveEnvDropsAnEmptyEnvBlock(t *testing.T) {
 // error when there was nothing to remove.
 func TestRemoveEnvOnAnUntouchedMachineIsANoOp(t *testing.T) {
 	home := t.TempDir()
-	removed, err := RemoveEnv(home)
+	removed, _, err := RemoveEnvDetailed(home)
 	if err != nil {
-		t.Fatalf("RemoveEnv: %v", err)
+		t.Fatalf("RemoveEnvDetailed: %v", err)
 	}
 	if len(removed) != 0 {
 		t.Errorf("removed %v from a machine with no settings", removed)
@@ -207,7 +207,7 @@ func TestCurrentEnvIsTheReadSide(t *testing.T) {
 	if !present || v != "http://127.0.0.1:8788" {
 		t.Errorf("CurrentEnv = %q, %v", v, present)
 	}
-	if _, err := RemoveEnv(home); err != nil {
+	if _, _, err := RemoveEnvDetailed(home); err != nil {
 		t.Fatal(err)
 	}
 	if _, present := CurrentEnv(home); present {

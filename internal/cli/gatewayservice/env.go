@@ -51,7 +51,7 @@ func SettingsPath(homeDir string) string {
 	return filepath.Join(homeDir, ".claude", "settings.json")
 }
 
-// priorEnvPath is where the value WriteEnv displaced is remembered, so RemoveEnv
+// priorEnvPath is where the value WriteEnv displaced is remembered, so removal
 // can put it back.
 //
 // Under homeDir rather than via devconfig.Home() on purpose: every function in
@@ -119,21 +119,15 @@ func WriteEnv(homeDir, addr string) (replaced []string, err error) {
 	return replaced, writeSettings(path, settings)
 }
 
-// RemoveEnv is the uninstall half. It removes ONLY owned keys, and removes the
-// env block itself only when nothing else is left in it — an org that put its own
-// variables there must not lose them because OpenBox was uninstalled.
+// RemoveEnvDetailed is the uninstall half. It removes ONLY owned keys, and
+// removes the env block itself only when nothing else is left in it — an org
+// that put its own variables there must not lose them because OpenBox was
+// uninstalled.
 //
 // A remembered prior value is RESTORED rather than deleted, which is the other
-// half of WriteEnv's record. Returns the keys it removed and the ones it restored
-// so a caller can say which happened; a restore is not a removal and reporting it
-// as one would tell an operator their machine is unconfigured when it is back to
-// what the org configured.
-func RemoveEnv(homeDir string) (removed []string, err error) {
-	removed, _, err = removeEnv(homeDir)
-	return removed, err
-}
-
-// RemoveEnvDetailed is RemoveEnv with the restore reported separately.
+// half of WriteEnv's record. The restore is reported separately from the
+// removals because a restore is not a removal: reporting it as one would tell an
+// operator their machine is unconfigured when it is back to what the org set.
 func RemoveEnvDetailed(homeDir string) (removed []string, restored string, err error) {
 	return removeEnv(homeDir)
 }
