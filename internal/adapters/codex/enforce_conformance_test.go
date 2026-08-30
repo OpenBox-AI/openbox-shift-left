@@ -20,17 +20,15 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/devconfig"
 )
 
-// Enforcement conformance suite for the Codex adapter (STORY-SL7-B; the C1–C11
-// analogue of the shipped Claude Code E6-S7 suite) — executable INV-3b evidence.
+// Enforcement conformance suite for the Codex adapter (STORY-SL7-B; the C1–C11 analogue of the shipped
+// Claude Code E6-S7 suite) — executable INV-3b evidence.
 //
-// It drives the REAL RunHook PreToolUse path end-to-end against a REAL
-// decision.InProcessDecider (or a deliberately-absent bundle) and asserts the exact
-// Codex stdout contract per quadrant of the enforcement carve-out (ADR-0002 /
-// INV-3b). Each case is content-free (INV-1/INV-2): no asserted reason may carry the
-// shell command / patch body. The degraded-state quadrants (LESSON-E6E7-04) are
+// It drives the REAL RunHook PreToolUse path end-to-end against a REAL decision.InProcessDecider (or a
+// deliberately-absent bundle) and asserts the exact Codex stdout contract per quadrant of the
+// enforcement carve-out (that decision / INV-3b). Each case is content-free (INV-1/INV-2): no asserted
+// reason may carry the shell command / patch body. The degraded-state quadrants (LESSON-E6E7-04) are
 // present: reachable-but-unbundled under fail-closed (CDX-C6), stale-policy gate
-// (TestEnforcementConformance_StaleGate_Codex), and the PROBED hook-timeout behavior
-// (CDX-C8).
+// (TestEnforcementConformance_StaleGate_Codex), and the PROBED hook-timeout behavior (CDX-C8).
 //
 // | #   | Enforce | Policy      | Bundle              | Expect  | Proves                              |
 // |-----|---------|-------------|---------------------|---------|-------------------------------------|
@@ -60,8 +58,8 @@ func isolateEnforce(t *testing.T) {
 	t.Setenv(envEnforcementFile, filepath.Join(t.TempDir(), "enf.jsonl"))
 	t.Setenv("OPENBOX_ADVISORY_FILE", filepath.Join(t.TempDir(), "advisories.jsonl"))
 	// A server REQUIRE_APPROVAL files a pending-approval marker before holding
-	// (ADR-0017 put every class on that path), so this sink needs pinning too —
-	// the hermeticity sentinel caught it writing to the real config dir.
+	// (that decision put every class on that path), so this sink needs pinning
+	// too — the hermeticity sentinel caught it writing to the real config dir.
 	t.Setenv(devconfig.EnvPendingApprovalDir, t.TempDir())
 	t.Setenv(devconfig.EnvContentCapture, "0")
 }
@@ -141,9 +139,9 @@ func TestEnforcementConformance_Codex(t *testing.T) {
 	})
 
 	t.Run("CDX-C5 fail-closed never denies a REAL allow", func(t *testing.T) {
-		// "Real" means a SERVER allow since ADR-0017 — the local bundle is no
-		// longer the decider, so a local allow with nothing reachable is the
-		// outage CDX-C4 asserts denies, not an allow.
+		// "Real" means a SERVER allow since that decision — the local bundle
+		// is no longer the decider, so a local allow with nothing reachable
+		// is the outage CDX-C4 asserts denies, not an allow.
 		serveVerdict(t, `{"verdict":"allow"}`)
 		srv := memhttptest.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
@@ -187,9 +185,9 @@ func TestEnforcementConformance_Codex(t *testing.T) {
 	t.Run("CDX-C8 hook-timeout fail-open bound (probe P1, degraded-state)", func(t *testing.T) {
 		// Probe P1 (live, codex-cli 0.145.0): a PreToolUse hook that overruns its
 		// `timeout` is KILLED and Codex FAILS OPEN (tool ran; wall ≈ timeout). There is
-		// no network path to time out in-process (ADR-0006), so the conformance
-		// obligation is the static invariant that our verdict LANDS before Codex's kill:
-		// the whole-hook budget is strictly under the installed gate-hook timeout.
+		// no network path to time out in-process, so the conformance obligation is the
+		// static invariant that our verdict LANDS before Codex's kill: the whole-hook
+		// budget is strictly under the installed gate-hook timeout.
 		if hookflow.EnforceBudget((Engine{}).HookCeilings()) >= (Engine{}).HookCeilings().Gating {
 			t.Fatalf("whole-hook budget %v must be < installed gate-hook timeout %v (else Codex's fail-open kill defeats fail-closed)",
 				hookflow.EnforceBudget((Engine{}).HookCeilings()), (Engine{}).HookCeilings().Gating)
@@ -299,7 +297,7 @@ func TestEnforcementConformance_Codex(t *testing.T) {
 	})
 }
 
-// ── Deleted with the local evaluator (ADR-0017) ──────────────────────────────
+// ── Deleted with the local evaluator ──────────────────────────────
 //
 // TestEnforcementConformance_BuilderPolicy_Codex drove BLOCK / no-match /
 // REQUIRE_APPROVAL through the LOCAL implementation of the backend's

@@ -33,7 +33,7 @@ tb_ok "built $ACTION"
 # it references.
 #
 # Two names, deliberately: the SECRETS come from ~/.openbox/.env and the DID from
-# dev.json, because ADR-0015 keeps them in separate files. Reading the DID from
+# dev.json, because that decision keeps them in separate files. Reading the DID from
 # beside the secrets is the two-store bug that split removed.
 eval "$(python3 - "$TB_ENV_FILE" "$OPENBOX_HOME/dev.json" <<'PY'
 import json, shlex, sys

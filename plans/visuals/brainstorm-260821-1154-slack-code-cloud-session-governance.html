@@ -155,7 +155,7 @@
     <div class="card anim" style="--i:5">
       <div class="tag t-teal">Constraints</div>
       <ul style="margin:0 0 0 18px">
-        <li>Reuse, don't rebuild &mdash; new table/endpoint/service needs an ADR.</li>
+        <li>Reuse, don't rebuild &mdash; new table/endpoint/service needs a decision.</li>
         <li>Cloud VM sees <strong>committed files only</strong>; Ubuntu 24.04 x86_64.</li>
         <li>Org-shared environments have <strong>no secrets store</strong> (documented).</li>
         <li><code>--yagni</code>: cut anything the outcome doesn't need.</li>
@@ -315,7 +315,7 @@
     <p style="margin:0">So a naive install yields: observe events spooled and never delivered; gated calls reaching
     <code>ApplyFailurePolicy</code> with no verdict; and under the default <code>fail_closed:false</code>, <strong>every
     gated call fails open</strong>. A cloud session that reports a successful install and governs nothing. That is
-    precisely the ADR-0016 pattern &mdash; "the old default reported success while governing nothing" &mdash; and this repo
+    precisely that decision pattern &mdash; "the old default reported success while governing nothing" &mdash; and this repo
     has been bitten by that shape before.</p>
   </div>
 
@@ -376,7 +376,7 @@
       <p class="kv">Depends on &mdash; a third-party Code Channel surface. Launch coverage mentions only
       "APIs to third-party agents and harnesses"; <strong>no public SDK was found</strong>.<br>
       Fails first &mdash; the surface turns out to be partner-gated and the work is unbuildable. And it buys
-      <em>no governance coverage</em> beyond B &mdash; only approval UX. New service &#8658; ADR &#8658; against
+      <em>no governance coverage</em> beyond B &mdash; only approval UX. New service &#8658; decision record &#8658; against
       reuse-don't-rebuild.</p>
     </div>
   </div>
@@ -519,7 +519,7 @@
         <div class="av" style="background:var(--red)">C</div>
         <div class="msg-b"><span class="who">Claude</span><span class="when">11:58</span>
           <div>Session stopped — a policy decision ended this session.</div>
-          <div class="note"><b>Callout 2 — a HALT is visible here, for free.</b> ADR-0020 renders a server HALT as
+          <div class="note"><b>Callout 2 — a HALT is visible here, for free.</b> that decision renders a server HALT as
           <code>continue:false</code>, so the turn stops and the channel shows it. The team sees the stop without us
           integrating anything. <span style="color:var(--green)">Evidence for A2/A3.</span></div></div>
       </div>
@@ -528,7 +528,7 @@
         <div class="msg-b"><span class="who">An approval hold</span><span class="when">—</span>
           <div style="color:var(--text-dim)">…has no surface in this channel.</div>
           <div class="note"><b>Callout 3 — the honest degradation.</b> The E9 approver
-          (<code>cli/internal/approver</code>, ADR-0012) is a process on a developer's machine. A cloud VM has no
+          (<code>cli/internal/approver</code>,) is a process on a developer's machine. A cloud VM has no
           approver and no TTY, so a <code>REQUIRE_APPROVAL</code> hold runs to timeout and <strong>denies</strong>.
           That is the repo's own stated safe direction — over-ask, never over-grant — and it must be
           <em>documented</em>, not fixed with a Slack UI.</div></div>
@@ -572,8 +572,8 @@
   <p>One item here is a genuine <code>OD*</code>: it is a privacy and attribution choice, not something to infer.</p>
   <div class="card anim">
     <div class="tag t-amber">OD &middot; identity in a shared environment</div>
-    <p>This repo's agent is <strong>machine-scoped</strong> (<code>kind=developer</code>, one per machine, ADR-0015 /
-    ADR-0016). A cloud session has no durable machine, and under Claude Tag it does not run as any member &mdash; it runs
+    <p>This repo's agent is <strong>machine-scoped</strong> (<code>kind=developer</code>, one per machine, that decision /
+    ). A cloud session has no durable machine, and under Claude Tag it does not run as any member &mdash; it runs
     as the organization. So:</p>
     <ul>
       <li><strong>One agent per shared environment.</strong> Every member's Slack-initiated session signs as the same
@@ -583,7 +583,7 @@
     </ul>
     <p style="margin-bottom:0">The workable answer is the first, stated honestly. And a runtime key placed in a shared
     environment's variables is a <strong>fleet-wide plaintext key</strong> readable by every session in that
-    environment and by the agent itself. ADR-0015 accepts plaintext for one machine; this is the larger blast radius
+    environment and by the agent itself. That decision accepts plaintext for one machine; this is the larger blast radius
     CLAUDE.md already names for approver installs. If we go here, it should be a dedicated
     <strong>low-privilege cloud agent key</strong> — never the org or approver key.</p>
   </div>
@@ -607,7 +607,7 @@
         session end, events are <em>lost</em>, not queued. <code>OPENBOX_REALTIME</code> is therefore mandatory in the
         cloud, not an optimization, and a hard teardown still loses the SessionEnd tail.</li>
         <li><strong>A REQUIRE_APPROVAL policy without the autonomous approver is effectively bricked:</strong> it
-        taxes every prompt for the hold timeout, then denies. ADR-0012's approver is headless by design, so the
+        taxes every prompt for the hold timeout, then denies. That decision's approver is headless by design, so the
         recommendation is <em>approver-or-no-approval-policy</em>, not "approval is unfixable in cloud."</li>
         <li><strong>HALT latch lost on resume:</strong> <code>halted-sessions/</code> holds within one VM, but a
         resumed session gets a fresh VM. Narrow, real, needs naming.</li>
@@ -636,10 +636,10 @@
     <li>Does Claude Code merge hook layers <em>additively</em> across a committed and a local settings file? The
     cross-file double-store risk depends entirely on this. Verify it in Phase 0 alongside the trust question.</li>
     <li>Do we accept environment-scoped agent identity, losing per-developer attribution for Slack-initiated work?
-    This needs an <strong>ADR-0015 amendment</strong>, not a footnote: one org-shared key means one agent id and one
+    This needs an <strong>that decision amendment</strong>, not a footnote: one org-shared key means one agent id and one
     signing key for every cloud session, readable by every member and by every governed agent. (<code>OD</code>.)</li>
     <li>Should the cloud posture default to <code>fail_closed:true</code>, accepting that an unreachable core denies
-    every gated call? And should a cloud environment be required to run the ADR-0012 approver before any
+    every gated call? And should a cloud environment be required to run that decision approver before any
     <code>REQUIRE_APPROVAL</code> policy is allowed to apply to it?</li>
     <li>Who owns the org-shared environment config in a customer org, and can OpenBox verify the allowlist step
     remotely or only advise?</li>

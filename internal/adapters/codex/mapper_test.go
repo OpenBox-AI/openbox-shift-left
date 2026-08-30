@@ -155,7 +155,7 @@ func TestMap_LifecycleAndToolEvents(t *testing.T) {
 				t.Errorf("expected span %+v, got nil", tt.wantSpan)
 			case tt.wantSpan != nil:
 				// DeepEqual, not !=: Span carries maps since the gateway's
-				// header capture (ADR-0021), so it is no longer comparable.
+				// header capture, so it is no longer comparable.
 				if !reflect.DeepEqual(*got.Span, *tt.wantSpan) {
 					t.Errorf("span = %+v, want %+v", *got.Span, *tt.wantSpan)
 				}

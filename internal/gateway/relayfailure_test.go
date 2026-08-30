@@ -24,7 +24,7 @@ import (
 // time this fails the prompt has already left the machine. Returning without an
 // emit made that call invisible — and because a caller controls when it hangs up,
 // it was a supported way for any local process to relay a prompt and suppress its
-// own record. ADR-0021 §2 rests on a bypass leaving a HOLE in the record; this
+// own record. That decision rests on a bypass leaving a HOLE in the record; this
 // left nothing at all.
 func TestUnreachableUpstreamStillProducesEvidence(t *testing.T) {
 	memhttptest.RequireBind(t)

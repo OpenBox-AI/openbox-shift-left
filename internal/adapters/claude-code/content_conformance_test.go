@@ -15,29 +15,29 @@ import (
 	"testing"
 )
 
-// Tool-content conformance suite (ADR-0019 P1) — executable evidence for the
-// content gate on the fields this adapter used to throw away.
+// Tool-content conformance suite — executable evidence for the content gate on the fields this
+// adapter used to throw away.
 //
-// Same discipline as C18/C26 and for the same reason: every assertion is made on
-// the bytes actually POSTed to /evaluate, never on the mapper's return or on a
-// DevEvent. A redaction applied AFTER attachment, or a gate that filters the
-// struct but not the wire, satisfies every unit test in this package and still
-// leaks — which is the whole failure mode this suite exists to catch.
+// Same discipline as C18/C26 and for the same reason: every assertion is made on the bytes
+// actually POSTed to /evaluate, never on the mapper's return or on a DevEvent. A redaction
+// applied AFTER attachment, or a gate that filters the struct but not the wire, satisfies
+// every unit test in this package and still leaks — which is the whole failure mode this suite
+// exists to catch.
 //
-// |C32| PostToolUse, capture ON  | tool output reaches activity_output.output      |
-// |C33| the same, capture OFF    | no output text; the ActivityCompleted still ships|
-// |C34| a secret in tool output  | redacted BEFORE attachment                      |
-// |C35| oversized tool output    | capped before signing                           |
-// |C36| PreToolUse observe path  | tool input egresses under the gate (SL3-SEC-3 retired) |
-// |C37| PostToolUseFailure       | the free-text error egresses gated, never as error_type |
-// |C38| the two signal free-texts| egress gated as metadata, and NEVER as signal_args      |
-// |C39| a dotenv dump as output  | which credential FORMATS the one control actually catches|
-// |C40| Stop, capture ON          | the turn's THINKING reaches activity_output.thinking     |
-// |C41| the same, capture OFF     | no thinking; the turn pair still ships                   |
+// |C32| PostToolUse, capture ON  | tool output reaches activity_output.output      | |C33| the
+// same, capture OFF    | no output text; the ActivityCompleted still ships| |C34| a secret in
+// tool output  | redacted BEFORE attachment                      | |C35| oversized tool output
+// | capped before signing                           | |C36| PreToolUse observe path  | tool
+// input egresses under the gate (SL3-SEC-3 retired) | |C37| PostToolUseFailure       | the
+// free-text error egresses gated, never as error_type | |C38| the two signal free-texts|
+// egress gated as metadata, and NEVER as signal_args      | |C39| a dotenv dump as output  |
+// which credential FORMATS the one control actually catches| |C40| Stop, capture ON          |
+// the turn's THINKING reaches activity_output.thinking     | |C41| the same, capture OFF     |
+// no thinking; the turn pair still ships                   |
 //
-// What these cases deliberately do NOT relax: with capture OFF the tool events
-// must still ship. A case that passed because the client stopped emitting would
-// prove the opposite of the gate.
+// What these cases deliberately do NOT relax: with capture OFF the tool events must still
+// ship. A case that passed because the client stopped emitting would prove the opposite of the
+// gate.
 func TestContentCaptureConformance(t *testing.T) {
 	isolateConfig(t)
 	t.Setenv(envDID, testDID)
@@ -217,9 +217,9 @@ func TestContentCaptureConformance(t *testing.T) {
 
 	t.Run("C36 tool input egresses on the observe path under the gate", func(t *testing.T) {
 		// SL3-SEC-3 ("tool commands and file bodies never egress on observe
-		// events") is retired here by ADR-0019 P1, and it is retired into a GATE,
-		// not into an absence: the same command that egresses with capture on
-		// must be absent with capture off.
+		// events") is retired here by that decision, and it is retired into a
+		// GATE, not into an absence: the same command that egresses with capture
+		// on must be absent with capture off.
 		const cmd = "cat /etc/hosts && echo OBSERVE-INPUT-SENTINEL"
 		payload := func(session string) string {
 			return `{"hook_event_name":"PreToolUse","session_id":"` + session + `","cwd":"/tmp",` +
@@ -356,7 +356,7 @@ func TestContentCaptureConformance(t *testing.T) {
 
 	// C40/C41 are the only content cases whose source is the TRANSCRIPT rather
 	// than a hook payload field, which is the whole reason they exist separately:
-	// thinking reaches the wire through the ADR-0014 projection, so a gate that
+	// thinking reaches the wire through that decision projection, so a gate that
 	// works for every hook-sourced field proves nothing about it.
 	stopWithThinking := func(t *testing.T, session, thinking string) string {
 		t.Helper()
@@ -474,10 +474,11 @@ func TestContentCaptureConformance(t *testing.T) {
 //
 // C34 proves redaction runs before attachment, using an AWS key — a format the
 // pattern list covers by name. That says nothing about which formats the detector
-// recognizes at all, and after ADR-0019 P1 that question got much more expensive:
-// tool output egresses at TOOL-CALL cadence, and tool output is exactly where
-// credentials surface — an `env` dump, a `cat` of a dotenv file, a token in a
-// stack trace. Local detection is the ONLY in-transit control on that path.
+// recognizes at all, and after that decision that question got much more
+// expensive: tool output egresses at TOOL-CALL cadence, and tool output is
+// exactly where credentials surface — an `env` dump, a `cat` of a dotenv file, a
+// token in a stack trace. Local detection is the ONLY in-transit control on that
+// path.
 //
 // So this drives the realistic worst case — a governed session reading OpenBox's
 // OWN credential file — and asserts per format, so a gap is named rather than
@@ -486,15 +487,14 @@ func TestContentCaptureConformance(t *testing.T) {
 // an assertion about a placeholder.
 //
 // TWO cases assert that a credential DOES leak. That is deliberate — each is an
-// honest limit, pinned so that closing it has to be a decision rather than a
-// side effect:
+// honest limit, pinned so that closing it has to be a decision rather than a side
+// effect:
 //
-//   - **Unlabelled hex.** A token with no recognized key name is redacted only
-//     if it clears the entropy floor, and hex cannot: 16 symbols cap it at 4.0
-//     bits/char against a 4.5 threshold (decision/secrets.go:50-56). NOT fixable
-//     by lowering the floor — below 4.0 every git SHA and UUID matches, and on
-//     the enforce path the redactor REWRITES the tool input, so false positives
-//     corrupt real files.
+// - **Unlabelled hex.** A token with no recognized key name is redacted only if
+// it clears the entropy floor, and hex cannot: 16 symbols cap it at 4.0 bits/char
+// against a 4.5 threshold (decision/secrets.go:50-56). NOT fixable by lowering
+// the floor — below 4.0 every git SHA and UUID matches, and on the enforce path
+// the redactor REWRITES the tool input, so false positives corrupt real files.
 //
 // NESTED JSON used to be a second gap and is now CLOSED — those cases stay in the
 // table as regression guards rather than as documentation of a limit. A

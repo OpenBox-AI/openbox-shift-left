@@ -115,8 +115,8 @@ re-assert both invariants.
 
 otlpreceiver pulls ~98 module requires (gRPC, confmap, pdata) into a repo with one
 external dependency today. Binary stays single (library import), one-command shape
-survives. **Action:** record the size in ADR-0022 as an accepted cost; keep it
-inside `telemetry/` only, guard-tested.
+survives. **Action:** record the size in that decision as an accepted cost; keep
+it inside `telemetry/` only, guard-tested.
 
 ### 4.6 kardianos/service does not cover the hard parts
 
@@ -128,10 +128,10 @@ does not change the "Windows build-verified only" claim without a real run.
 
 ## 5. Plan revisions required (phase files NOT modified — this is the list)
 
-- **phase-01** — ADR-0022 must record all three adoptions, the two version pins with
-  reasons, the floor constraint, and D-OSS-1 as a second amendment to ADR-0021's
-  §5 area (OD2 said "no mitmproxy/Docker"; goproxy is neither, but the ADR must say
-  so explicitly rather than leave it inferred).
+- **phase-01** — that decision must record all three adoptions, the two version pins with
+reasons, the floor constraint, and D-OSS-1 as a second amendment to that decision's
+§5 area (OD2 said "no mitmproxy/Docker"; goproxy is neither, but that decision must
+say so explicitly rather than leave it inferred).
 - **phase-02** — replace the hand-thin receiver + "vendor a protobuf decoder"
   fallback with otlpreceiver v0.120.0; validation-round-1's protobuf fallback
   ruling is **superseded** (the collector handles both encodings, so the
@@ -156,8 +156,8 @@ owner's and recorded — but because three of them change phase inputs materiall
 ruling from validation round 1. Implementing against the current phase text would
 build the guard breach in 4.2 and discover 4.3 late.
 
-Order: phase-01 ADR first (it now carries three adoptions + two pins), then re-cut
-02/04/05, then 06/07.
+Order: phase-01 decision record first (it now carries three adoptions + two pins),
+then re-cut 02/04/05, then 06/07.
 
 ## Unresolved questions
 

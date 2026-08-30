@@ -7,10 +7,10 @@
 # provenance, and the findings channel. Each runs a real session; none of them
 # mocks anything.
 #
-# The raw-rego cases are the point since ADR-0017. Under the old design a
+# The raw-rego cases are the point since. Under the old design a
 # hand-written rego policy "cannot be evaluated locally" and the decider served
 # it fail-open — so these exact sessions PROCEEDED, ungoverned, and no local
-# bundle rule could have caught it. If A or A2 fails, ADR-0017 headline claim is
+# bundle rule could have caught it. If A or A2 fails, that decision headline claim is
 # not true on this stack.
 set -uo pipefail
 
@@ -77,8 +77,8 @@ fi
 assert_contains "the denial reached the model as governance" "$(tb_session_text)" "OpenBox"
 
 # ── A2. the same policy denies a class that NEVER used to be escalated ────────
-tb_step "A2 · a Write is decided inline (ADR-0017)"
-# Write was decided locally and never reached the server before ADR-0017. This
+tb_step "A2 · a Write is decided inline "
+# Write was decided locally and never reached the server before. This
 # is where "every gated class" stops being a claim and becomes an observation,
 # and it is what catches a regression to a risk-selected subset.
 before="$(tb_audit_size)"
@@ -93,7 +93,7 @@ if [ -n "$sid" ]; then
 	assert_eq "one ActivityStarted per gated Write" 1 "$started"
 fi
 
-# ── A3. a HALT ends the session: turn stop, latch, no re-evaluation (ADR-0020) ─
+# ── A3. a HALT ends the session: turn stop, latch, no re-evaluation ─
 tb_step "A3 · HALT ends the session"
 HALT_MARK="OBXHALT$run"
 halt_rego() { # <marker>
@@ -151,7 +151,7 @@ fi
 if [ -n "$sid" ]; then
 	uuid="$(tb_session_uuid "$sid")"
 	# governance_events is the substantive half — dev sessions write no spans
-	# (ADR-0013), so the spans query returns nothing. It is kept so that if a span
+	#, so the spans query returns nothing. It is kept so that if a span
 	# ever reappears its contents are scanned rather than silently skipped.
 	egress="$(tb_sql "select row_to_json(e)::text from governance_events e where run_id='$sid';")
 $(tb_sql "select row_to_json(s)::text from spans s where session_id='${uuid:-none}';")"
@@ -210,7 +210,7 @@ trap - EXIT
 # ── D. posture reports who decides ───────────────────────────────────────────
 tb_step "D · posture provenance"
 # The stale-bundle + `dev sync` section that stood here is gone with the bundle
-# (ADR-0017): there is no local artifact that can fall behind, and the command
+# : there is no local artifact that can fall behind, and the command
 # that refreshed it is retired. What replaced it as evidence is the posture
 # stating WHO decides and what happens when they cannot be reached.
 sid="$(tb_session "Run the shell command: echo posture-check" "Bash")"

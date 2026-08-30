@@ -16,42 +16,36 @@ import (
 
 // Base-SDK conformance parity matrix (STORY-E7-S6).
 //
-// ADR-0004 unified shift-left telemetry onto the base SDK's Activity/hook wire
-// model so we "can adopt the base conformance kit." This file is the durable,
-// executable record of HOW our Go conformance coverage lines up with the base
-// SDK's canonical conformance matrix — and, just as importantly, where it does
-// NOT (Go-adapter-only extensions the base SDK has no concept of, and base cases
-// we deliberately do not mirror). If a reviewer asks "does shift-left pass the
-// base conformance behaviors?", this matrix is the answer, and TestConformanceParityMatrix
-// guards it from silently drifting out of date.
+// That decision unified shift-left telemetry onto the base SDK's Activity/hook wire model so we "can
+// adopt the base conformance kit." This file is the durable, executable record of HOW our Go
+// conformance coverage lines up with the base SDK's canonical conformance matrix — and, just as
+// importantly, where it does NOT (Go-adapter-only extensions the base SDK has no concept of, and
+// base cases we deliberately do not mirror). If a reviewer asks "does shift-left pass the base
+// conformance behaviors?", this matrix is the answer, and TestConformanceParityMatrix guards it from
+// silently drifting out of date.
 //
-// The base matrix is openbox-sdk-python/tests/conformance/test_required_cases.py
-// (READ-ONLY reference), backed by openbox_core/conformance/fake_core.py
-// (assert_hook_wire_shape) and the fail-mode suites
-// tests/client/test_fail_modes.py + tests/instrumentation/test_hook_failclosed_and_sync_approval.py.
-// (The base "conformance matrix" proper covers verdict enforcement + wire shape;
-// fail-open/fail-closed live in the adjacent fail-mode suites — parity draws from both.)
+// The base matrix is openbox-sdk-python/tests/conformance/test_required_cases.py (READ-ONLY
+// reference), backed by openbox_core/conformance/fake_core.py (assert_hook_wire_shape) and the
+// fail-mode suites tests/client/test_fail_modes.py +
+// tests/instrumentation/test_hook_failclosed_and_sync_approval.py. (The base "conformance matrix"
+// proper covers verdict enforcement + wire shape; fail-open/fail-closed live in the adjacent
+// fail-mode suites — parity draws from both.)
 //
-// Our Go coverage, by file:
-//   - enforce_conformance_test.go  — C1..C9, the enforcement carve-out (INV-3b).
-//   - TestWire_ToolEventsAreActivityPairs (this file) — the activity envelope
-//     every tool event must satisfy on the wire, plus the client's golden
-//     fixtures which pin it byte-exactly.
-//   - conformance_test.go (TestEmittedEventsAreConformant) — the shift-left-only
-//     adapter-facing dev-event schema check (no base analog).
+// Our Go coverage, by file: - enforce_conformance_test.go  — C1..C9, the enforcement carve-out
+// (INV-3b). - TestWire_ToolEventsAreActivityPairs (this file) — the activity envelope every tool
+// event must satisfy on the wire, plus the client's golden fixtures which pin it byte-exactly. -
+// conformance_test.go (TestEmittedEventsAreConformant) — the shift-left-only adapter-facing
+// dev-event schema check (no base analog).
 //
-// NOTE (tool-call-as-activity): shift-left used to carry a Go mirror of the base
-// SDK's assert_hook_wire_shape in client/hookspan.go. It is gone, because the
-// shape it guarded is gone: a tool call is now an Activity
-// (ToolCall→ActivityStarted, ToolResult→ActivityCompleted) and no shift-left
-// payload carries a hook envelope or a span. The rows below record that as a
-// base case we no longer mirror, rather than quietly leaving a parity claim that
-// stopped being true.
+// NOTE (tool-call-as-activity): shift-left used to carry a Go mirror of the base SDK's
+// assert_hook_wire_shape in client/hookspan.go. It is gone, because the shape it guarded is gone: a
+// tool call is now an Activity (ToolCall→ActivityStarted, ToolResult→ActivityCompleted) and no
+// shift-left payload carries a hook envelope or a span. The rows below record that as a base case we
+// no longer mirror, rather than quietly leaving a parity claim that stopped being true.
 //
-// status values:
-//   parity        — a base required-case (or fail-mode case) asserts the same behavior.
-//   go-extension  — a behavior the base SDK has NO concept of; shift-left-only.
-//   base-unmapped — a base case with no Go conformance case yet (why is in note).
+// status values: parity        — a base required-case (or fail-mode case) asserts the same behavior.
+// go-extension  — a behavior the base SDK has NO concept of; shift-left-only. base-unmapped — a base
+// case with no Go conformance case yet (why is in note).
 
 type parityStatus string
 
@@ -132,13 +126,13 @@ var conformanceParity = []parityRow{
 		goCase:   "TestWire_ToolEventsAreActivityPairs (+ client/testdata/golden/activity_*.json)",
 		baseCase: "",
 		status:   statusGoExtension,
-		note:     "The activity envelope for a tool call: ToolCall->ActivityStarted, ToolResult->ActivityCompleted sharing one activity_id, workflow_type set, no spans/span_count/hook_trigger, no client-set semantic_type. No base analog — the base SDK reserves ActivityCompleted for hook-LESS lifecycle events, so this shape is a deliberate shift-left divergence (see the tool-call-as-activity ADR). internal/adapters/codex/wire_test.go asserts the identical contract; the two are independent copies so a drift in one adapter cannot pass by moving a shared helper.",
+		note:     "The activity envelope for a tool call: ToolCall->ActivityStarted, ToolResult->ActivityCompleted sharing one activity_id, workflow_type set, no spans/span_count/hook_trigger, no client-set semantic_type. No base analog — the base SDK reserves ActivityCompleted for hook-LESS lifecycle events, so this shape is a deliberate shift-left divergence (see the tool-call-as-activity decision record). internal/adapters/codex/wire_test.go asserts the identical contract; the two are independent copies so a drift in one adapter cannot pass by moving a shared helper.",
 	},
 	{
 		goCase:   "",
 		baseCase: "assert_hook_wire_shape (fake_core.py); test_started_and_completed_wire_shape",
 		status:   statusBaseUnmapped,
-		note:     "No longer mirrored, by design. The base assertion checks a flat hook SpanData under ActivityStarted+hook_trigger. shift-left emits no hook events and no spans: a hook process has no in-process OTel, so the span it used to send was fabricated to satisfy a shape rather than to record a measurement. Retiring it also dissolved ADR-0004's standing obligation to hand-maintain the mirror against upstream. Cost: no span rows, no span-level Merkle leaves, no server-side semantic_type for dev sessions.",
+		note:     "No longer mirrored, by design. The base assertion checks a flat hook SpanData under ActivityStarted+hook_trigger. shift-left emits no hook events and no spans: a hook process has no in-process OTel, so the span it used to send was fabricated to satisfy a shape rather than to record a measurement. Retiring it also dissolved that decision's standing obligation to hand-maintain the mirror against upstream. Cost: no span rows, no span-level Merkle leaves, no server-side semantic_type for dev sessions.",
 	},
 
 	// --- shift-left-only (no base analog) ---
@@ -336,7 +330,7 @@ var codexConformanceParity = []parityRow{
 	{goCase: "CDX-C2 fail-open + outage proceeds (OD9)", baseCase: "C2 fail-open + outage proceeds (OD9)", status: statusParity,
 		note: "Cold-start/no-bundle fail-open proceeds under both; bounded by the derived whole-hook budget (probe P1: Codex fails open past the installed hook timeout)."},
 	{goCase: "CDX-C3 fail-open + unbundled/no-match proceeds", baseCase: "C3 fail-open + unbundled proceeds (default unchanged)", status: statusParity,
-		note: "Same fail-open default; both evaluate a local bundle in-process (ADR-0006)."},
+		note: "Same fail-open default; both evaluate a local bundle in-process."},
 	{goCase: "CDX-C4 fail-closed + outage denies", baseCase: "C4 fail-closed + outage denies", status: statusParity,
 		note: "Synthesized HALT → deny under fail-closed on a no-verdict outage; content-free fail-closed reason."},
 	{goCase: "CDX-C5 fail-closed never denies a REAL allow", baseCase: "C5 fail-closed never denies a REAL allow", status: statusParity,
@@ -346,7 +340,7 @@ var codexConformanceParity = []parityRow{
 	{goCase: "CDX-C7 observe mode never blocks (byte-parity)", baseCase: "C7 observe mode never blocks (INV-3 verbatim)", status: statusParity,
 		note: "Enforce off ⇒ empty stdout even for a BLOCK-worthy tool, regardless of fail_closed. Codex parses hook stdout as output JSON, so the empty-stdout guarantee is load-bearing."},
 	{goCase: "CDX-C8 hook-timeout fail-open bound (probe P1)", baseCase: "C8 slow decision fails open within the bound", status: statusParity,
-		note: "Degraded state (LESSON-E6E7-04): both providers FAIL OPEN on a hook timeout (CC 5s kill; Codex kills at the installed `timeout` — probe P1, live). CC bounds a network wait; Codex has no in-process network path (ADR-0006), so the case asserts the static invariant that the derived whole-hook budget lands before Codex's kill."},
+		note: "Degraded state (LESSON-E6E7-04): both providers FAIL OPEN on a hook timeout (CC 5s kill; Codex kills at the installed `timeout` — probe P1, live). CC bounds a network wait; Codex has no in-process network path, so the case asserts the static invariant that the derived whole-hook budget lands before Codex's kill."},
 	{goCase: "CDX-C9 fail-closed + STALE real verdict proceeds", baseCase: "C9 fail-closed + STALE real verdict proceeds", status: statusParity,
 		note: "Staleness never triggers fail-closed (keys on source, not Stale) — identical to CC."},
 	{goCase: "CDX-C10 secret in apply_patch body → redact-and-continue", baseCase: "C10 secret in Write body → redact-and-continue (E6-S9)", status: statusParity,

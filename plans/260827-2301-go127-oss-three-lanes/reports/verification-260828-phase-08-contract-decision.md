@@ -1,10 +1,10 @@
-# Phase 08 verification — ADR-0022, contract v1.6, ADR-0021 amendments
+# Phase 08 verification — that decision, contract v1.6, that decision amendments
 
 **Date:** 2026-08-28 · **Host:** macOS 25.0.0 darwin/arm64, go1.27.0 ·
 **Branch:** `feat/tool-content-capture` · **Gates:** phases 09–14
 
-Decisions before code. **ADR: [ADR-0022](../../../docs/adr/ADR-0022-native-telemetry-and-transport-lanes.md)**
-(accepted); ADR-0021 §5 reversed, §8 completed, §10 decided.
+Decisions before code. **decision record: that decision** (accepted); that decision reversed, §8 completed,
+§10 decided.
 
 ## Verdict
 
@@ -68,9 +68,9 @@ mapper-seam test now do.
 
 | Surface | Change |
 |---|---|
-| `docs/adr/ADR-0022-…md` | **NEW**, accepted — lanes as claims, the election, both namespaces, OD1(c)/OD2/OD3/OD4 with dates, D-OSS-1/2/3 + D-GO-1, the goproxy-is-not-Docker/mitmproxy statement, the `transport/` module consequence, and the 8 sentinel tests later phases must satisfy |
-| `docs/adr/ADR-0021-…md` | §5 **reversed** (original kept, with what changed and why); §8 coverage question **completed** with the 2026-08-27 measurement; §10 **decided** (detection-only for OAuth, fingerprint refusal for API keys); header rewritten — 3 TBDs → 1 (§9 alone) |
-| `docs/adr/README.md` | 0022 row added; 0021's status row corrected |
+| `that decision-…md` | **NEW**, accepted — lanes as claims, the election, both namespaces, OD1(c)/OD2/OD3/OD4 with dates, D-OSS-1/2/3 + D-GO-1, the goproxy-is-not-Docker/mitmproxy statement, the `transport/` module consequence, and the 8 sentinel tests later phases must satisfy |
+| `that decision-…md` | §5 **reversed** (original kept, with what changed and why); §8 coverage question **completed** with the 2026-08-27 measurement; §10 **decided** (detection-only for OAuth, fingerprint refusal for API keys); header rewritten — 3 TBDs → 1 (§9 alone) |
+| `README.md` | 0022 row added; 0021's status row corrected |
 | `schema/dev-event.schema.json` | `x-schema-version`/`$id`/`schema_version.const` → **1.6**; `x-changelog["1.6"]`; **3 new properties** (`session_rollup`, `otel_request_id`, `proxy_request_id`); **NEW `$defs.turnProducer`** (5-branch `oneOf`) `$ref`'d from **both** turn branches |
 | `client/event.go` | `OtelRequestID`/`ProxyRequestID` (`omitempty`, declared last before `WorkspaceID`); `SchemaVersion` → `1.6` |
 | `client/payload.go` | `turnActivityIDFor` gains `:proxy:` and `:otel:` branches |
@@ -80,7 +80,7 @@ mapper-seam test now do.
 | `adapters/codex/conformance_test.go` | **+`TestUsageRollupPairIsConformant`** — closes the mapper→schema seam; no adapter test validated ANY turn shape as real mapper output before this |
 | `reports/bind-blocked-tests-260828.txt` | **NEW** — the 322 tests this host could not run, by name |
 | `conformance/schema_guard_test.go` | `maxLength` added to the reviewed keyword set, with the review recorded |
-| `MAPPING.md` | ADR-0022 banner; **+4 field rows**; §7 items **31–33** |
+| `MAPPING.md` | that decision banner; **+4 field rows**; §7 items **31–33** |
 | `COVERAGE.md` | both lanes recorded as **contracted, not built**, with the claim asymmetry stated |
 
 ## Evidence
@@ -190,10 +190,10 @@ independently before acting, and all are fixed:
   (`TestDiscriminatorListMatchesTheSchema`): a sixth lane added to one side alone
   fails immediately instead of silently reducing coverage.
 - **Two prose overstatements corrected.** The changelog claimed "every 1.5 event
-  that passed still passes", which is false modulo the const-pinned version marker
-  itself. And ADR-0022 implied v1.5's half-repair broke the gateway's opening half —
-  it did not: `gatewayemit.EventFor` is `TurnCompleted`-only by deliberate design,
-  so what v1.5 actually broke was the **Codex rollup** pair. Both corrected.
+that passed still passes", which is false modulo the const-pinned version marker
+itself. And that decision implied v1.5's half-repair broke the gateway's opening
+half — it did not: `gatewayemit.EventFor` is `TurnCompleted`-only by deliberate
+design, so what v1.5 actually broke was the **Codex rollup** pair. Both corrected.
 - **The unrunnable set is now a named artifact**, not a count:
   [`bind-blocked-tests-260828.txt`](bind-blocked-tests-260828.txt) lists **322
   tests** by name across the six modules, `TestContentCaptureConformance` among
@@ -210,12 +210,12 @@ declined with reasons:
   `turnLanes` list, bound to the contract by `TestTurnLanesMatchTheContract`. Drilled:
   a sixth lane added to the schema alone now fails **both** self-checks by name.
 - **Two tests my change superseded were left standing.**
-  `TestGatewayAndHookTurnIDsNeverCollide` became a strict subset of the new
-  6-shape disjointness test, and `TestOneOfDiscriminatorSemantics` was a
-  self-described throwaway "on the shape phase 08 will use" — phase 08 shipped.
-  Both retired, each replaced by a comment saying where the coverage went. Leaving
-  them would have re-created, at the Go level, the same "restated in two places,
-  drifted apart" failure this ADR repairs in the schema.
+`TestGatewayAndHookTurnIDsNeverCollide` became a strict subset of the new 6-shape
+disjointness test, and `TestOneOfDiscriminatorSemantics` was a self-described
+throwaway "on the shape phase 08 will use" — phase 08 shipped. Both retired, each
+replaced by a comment saying where the coverage went. Leaving them would have
+re-created, at the Go level, the same "restated in two places, drifted apart"
+failure this decision record repairs in the schema.
 - **A fourth copy of the gateway overstatement, in `MAPPING.md`.** My own report
   above claimed it was "both corrected" — it was not; the banner still said the
   gateway's opening half failed. Corrected, and this bullet exists because the
@@ -234,20 +234,20 @@ declined with reasons:
   pairwise test grows as 2·C(n,2) — the fix is a `sync.Once` and nothing here blocks
   it.
 - **A test binding the schema's declared id bound to `gatewayemit.printableASCII`.**
-  Real risk, but **no producer sets either id yet**, so the coupling does not exist
-  to test. Recorded instead as ADR-0022 sentinel **#9**, owned by whichever phase
-  adds the first producer — where it will actually bite.
+Real risk, but **no producer sets either id yet**, so the coupling does not exist
+to test. Recorded instead as that decision sentinel **#9**, owned by whichever
+phase adds the first producer — where it will actually bite.
 - ~~**Retrofitting `gateway_request_id`'s declarative bound**~~ — **REVERSED on
-  evidence.** A later pass traced every assignment: the field has exactly ONE
-  production path (`gatewayemit.EventFor` <- `Emitter.requestID`), already gated by
-  `usableRequestID` at `maxRequestIDLen` = **128**, the same number. So "tightening
-  would reject what a shipped gateway emits" was false, and leaving it out put three
-  fields of one kind at two contract depths with the oldest as the copy template.
-  Retrofitted, and `gatewayemit.TestGatewayIDBoundMatchesTheContract` now holds the
-  declarative and imperative bounds together for **all three** ids — so phases 09/11
-  inherit a live check instead of an obligation. Reversing it meant correcting four
-  artifacts that recorded the old call (schema changelog, schema property, MAPPING.md,
-  ADR-0022 §4 + sentinel 9); a fifth cited a test name that no longer existed.
+evidence.** A later pass traced every assignment: the field has exactly ONE production
+path (`gatewayemit.EventFor` <- `Emitter.requestID`), already gated by
+`usableRequestID` at `maxRequestIDLen` = **128**, the same number. So "tightening
+would reject what a shipped gateway emits" was false, and leaving it out put three
+fields of one kind at two contract depths with the oldest as the copy template.
+Retrofitted, and `gatewayemit.TestGatewayIDBoundMatchesTheContract` now holds the
+declarative and imperative bounds together for **all three** ids — so phases 09/11
+inherit a live check instead of an obligation. Reversing it meant correcting four
+artifacts that recorded the old call (schema changelog, schema property, MAPPING.md,
+that decision + sentinel 9); a fifth cited a test name that no longer existed.
 - **Making the client presence-based on `SessionRollup`**: unchanged; it would move
   when `:usage:rollup` is minted.
 

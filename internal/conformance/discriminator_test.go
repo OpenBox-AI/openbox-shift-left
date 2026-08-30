@@ -19,8 +19,8 @@ import (
 // attributed to a producer that did not observe it.
 //
 // The contract mistake this guards has shipped once already: v1.5 required
-// turn_index unconditionally, so every gateway event failed its own schema
-// (ADR-0021 records it). v1.6 adds two producers and repairs a third, which is
+// turn_index unconditionally, so every gateway event failed its own schema (that
+// decision records it). v1.6 adds two producers and repairs a third, which is
 // three more chances to make it.
 
 // turnDiscriminators is every field that names a turn's producer. A new lane adds

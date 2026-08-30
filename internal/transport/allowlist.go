@@ -7,8 +7,8 @@ import (
 
 // Allowlist decides which CONNECT targets this lane may terminate TLS for.
 //
-// Interception is allowlisted to a single host, and that bound is what makes the
-// ADR-0021 §5 reversal defensible (OD2, phase 11): every other CONNECT is
+// Interception is allowlisted to a single host, and that bound is what makes
+// that decision reversal defensible (OD2, phase 11): every other CONNECT is
 // blind-tunnelled — forwarded byte-for-byte, never decrypted, never captured.
 // Widening it is a decision, not a config tweak.
 //

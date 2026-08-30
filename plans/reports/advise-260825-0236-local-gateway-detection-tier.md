@@ -19,7 +19,7 @@ New requirement: org-account-only usage enforced as CORE POLICY from sensor evid
 3. Synchronous refusal stays: core verdict pre-forward; HALT/BLOCK renders as refusal.
 4. Pass-through auth: developer's own credential relays untouched; OpenBox holds zero provider secrets.
 5. Account evidence on the wire: credential fingerprint (one-way hash, computed at capture BEFORE header redaction; raw credential never egresses) + local account metadata (email/org UUID from Claude Code local state).
-6. Org-account-only is core policy, not gateway logic: core matches evidence → HALT/BLOCK → gateway refuses / session halts (ADR-0020 semantics). No local allowlists (ADR-0017 dogma).
+6. Org-account-only is core policy, not gateway logic: core matches evidence → HALT/BLOCK → gateway refuses / session halts (that decision semantics). No local allowlists (that decision dogma).
 7. Base claim = tamper-EVIDENT: hook-events-without-gateway-spans mismatch signal; doctor checks (liveness, base-url target, config ownership). Docs never claim prevention.
 8. MDM enablement, not ownership: root-ownable daemon, managed-settings template, pushable package; operating MDM/egress = org-side.
 9. Hosting-agnostic listener retained; no central deployment work built now (YAGNI).
@@ -65,7 +65,7 @@ hosting-agnostic listener keeps true custody reachable if a customer ever demand
    before the authorization-header redaction; conformance case asserts raw credential absent
    on outbound bytes); 06 — unchanged; 07 — rewrite as local daemon + MDM enablement + doctor
    checks; 08 — add account-HALT case and bypass-visibility assertion.
-4. **ADR-0021 rewrite**: local topology, pass-through auth, tiered assurance table
+4. **that decision rewrite**: local topology, pass-through auth, tiered assurance table
    (base=evident, MDM=hardened, central=custody-if-ever), availability section flips —
    inversion dissolves to per-developer blast radius; dead gateway = fail-closed-by-accident
    (dead localhost), the safe direction.
@@ -83,7 +83,7 @@ hosting-agnostic listener keeps true custody reachable if a customer ever demand
 
 - **Don't keep the obx_-swap path "just in case".** Custody residue; two auth modes double the
   test surface for an unconfirmed need. Re-add only with a paying reason.
-- **Don't put account allowlists or verdict caches in the gateway.** ADR-0017's lesson is the
+- **Don't put account allowlists or verdict caches in the gateway.** That decision's lesson is the
   repo's scar tissue: local deciders second-guessing `/evaluate` is how orgs went ungoverned.
 - **Don't let any doc/pitch say "cannot bypass".** Base tier is tamper-evident. The repo's own
   principle: overstating governance is the failure the product exists to prevent.
@@ -138,7 +138,7 @@ hosting-agnostic listener keeps true custody reachable if a customer ever demand
 - [ ] P1 probe: org-id matchability from OAuth token / response headers; report written
 - [ ] Verify Claude Code local account state shape (email/org UUID) on this machine
 - [ ] Amend plan 260825-0027 phases 03/04/05/07/08 per above; 06 untouched
-- [ ] Rewrite ADR-0021 draft: local topology, pass-through, tiered assurance, availability flip
+- [ ] Rewrite that decision draft: local topology, pass-through, tiered assurance, availability flip
 - [ ] Schema: credential_fingerprint + account metadata fields (v1.4 scope); conformance case — raw credential absent on outbound bytes
 - [ ] Hook-side SessionStart account stamping
 - [ ] Daemon packaging: launchd + systemd + init/doctor wiring; root-ownable layout
@@ -162,5 +162,6 @@ hosting-agnostic listener keeps true custody reachable if a customer ever demand
    afflicted the central design — never probed.)
 2. P1: org id matchable from token/response headers? (OAuth refusal vs detection.)
 3. Where does account-registry state live in the backend (policy data vs new surface)? Backend
-   owner's call; new-service rule may demand an ADR there.
+owner's call; new-service rule may demand a decision
+record there.
 4. Fleet update channel for per-machine daemons — deferred, unowned.

@@ -23,7 +23,7 @@ const (
 	GatewaySystemdName = "openbox-gateway"
 )
 
-// Gateway is the loopback base-URL relay (ADR-0021).
+// Gateway is the loopback base-URL relay.
 func Gateway(addr, upstream string, verbose bool) Spec {
 	args := []Arg{
 		Literal("gateway"),
@@ -35,14 +35,14 @@ func Gateway(addr, upstream string, verbose bool) Spec {
 		Label:              GatewayLabel,
 		SystemdName:        GatewaySystemdName,
 		DisplayName:        "OpenBox local gateway",
-		ServiceDescription: "Relays model calls through OpenBox for governance (ADR-0021).",
+		ServiceDescription: "Relays model calls through OpenBox for governance.",
 		UnitDescription:    "OpenBox local gateway (model-call governance)",
 		LogFile:            "gateway.log",
 		Args:               withVerbose(args, verbose),
 	}
 }
 
-// Telemetry is the local OTLP receiver (ADR-0022 `:otel:`).
+// Telemetry is the local OTLP receiver (that decision `:otel:`).
 //
 // It carries no --elected flag. The producer election is DERIVED from where the
 // tool's settings route model calls, so baking a decision into the unit's argv
@@ -59,14 +59,15 @@ func Telemetry(addr string, verbose bool) Spec {
 		Label:              "ai.openbox.telemetry",
 		SystemdName:        "openbox-telemetry",
 		DisplayName:        "OpenBox telemetry receiver",
-		ServiceDescription: "Receives the developer tool's own OTLP exports for governance (ADR-0022).",
+		ServiceDescription: "Receives the developer tool's own OTLP exports for governance.",
 		UnitDescription:    "OpenBox telemetry receiver (model-call observation)",
 		LogFile:            "telemetry.log",
 		Args:               withVerbose(args, verbose),
 	}
 }
 
-// Transport is the in-path CONNECT/TLS relay (ADR-0022 `:proxy:`).
+// Transport is the in-path CONNECT/TLS relay (that decision
+// `:proxy:`).
 func Transport(addr string, verbose bool) Spec {
 	args := []Arg{
 		Literal("transport"),
@@ -77,7 +78,7 @@ func Transport(addr string, verbose bool) Spec {
 		Label:              "ai.openbox.transport",
 		SystemdName:        "openbox-transport",
 		DisplayName:        "OpenBox transport relay",
-		ServiceDescription: "Relays model calls in-path through OpenBox for governance (ADR-0022).",
+		ServiceDescription: "Relays model calls in-path through OpenBox for governance.",
 		UnitDescription:    "OpenBox transport relay (in-path model-call observation)",
 		LogFile:            "transport.log",
 		Args:               withVerbose(args, verbose),

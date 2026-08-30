@@ -295,8 +295,8 @@ func TestInstaller_RefusesUnparsableHooksFile(t *testing.T) {
 	}
 }
 
-// ADR-0006 parity: the enforce posture chosen at `init` time persists into
-// dev.json so the SL7-B enforce leg needs no new install surface.
+// That decision parity: the enforce posture chosen at `init` time persists
+// into dev.json so the SL7-B enforce leg needs no new install surface.
 func TestInstaller_PersistsEnforcePosture(t *testing.T) {
 	inst, _, cfgPath := testInstaller(t)
 	tru := true

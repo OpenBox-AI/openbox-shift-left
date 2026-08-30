@@ -10,9 +10,9 @@ import (
 //
 // It is a hard kill, not a latency preference: a hook that overruns is killed
 // mid-flight and both shipped providers then let the tool run. On the gating
-// hook that is a silently ungoverned execution, which no org setting can
-// prevent — so the engine must always write its verdict before Gating elapses.
-// Since ADR-0017 every gated call waits on a network verdict, which turns this
+// hook that is a silently ungoverned execution, which no org setting can prevent
+// — so the engine must always write its verdict before Gating elapses. Since
+// that decision every gated call waits on a network verdict, which turns this
 // from an arithmetic detail into the enforce path's outer failure boundary.
 //
 // The ceiling is not always the provider's own limit. Where a provider lets the

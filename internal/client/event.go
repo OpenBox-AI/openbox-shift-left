@@ -22,30 +22,30 @@ package client
 // SchemaVersion is the dev-event contract version this client speaks. Track
 // api/dev-event.schema.json's x-schema-version.
 //
-// 1.1 added the turn pair (ADR-0014) and widened Tokens, re-defining Input as
-// pure input. The schema's x-changelog records what changed and why the Tokens
-// semantic made it a bump rather than a silent edit.
+// 1.1 added the turn pair and widened Tokens, re-defining Input as pure input. The
+// schema's x-changelog records what changed and why the Tokens semantic made it a
+// bump rather than a silent edit.
 //
-// 1.2 added Status on tool results and the failure/lifecycle event types
-// (ADR-0018). Purely additive — every 1.1 event is a valid 1.2 event.
+// 1.2 added Status on tool results and the failure/lifecycle event types. Purely
+// additive — every 1.1 event is a valid 1.2 event.
 //
 // 1.3 added Content.ToolOutput and documented Content.ToolInput, which now also
 // rides the OBSERVE ToolCall rather than only a gated call's evaluation event
-// (ADR-0019 P1 — the change that retires SL3-SEC-3). Purely additive: both are
-// gated fields on an already-gated object, so every 1.2 event is a valid 1.3
-// event and an org with content capture off sends byte-identical payloads.
+// (that decision — the change that retires SL3-SEC-3). Purely additive: both are
+// gated fields on an already-gated object, so every 1.2 event is a valid 1.3 event
+// and an org with content capture off sends byte-identical payloads.
 //
 // 1.4 added Content.Thinking — the turn's extended-thinking text, in
-// activity_output.thinking on a TurnCompleted (ADR-0019 P3, which amends
-// ADR-0014's transcript allowlist to permit it). Purely additive and gated the
+// activity_output.thinking on a TurnCompleted (that decision, which amends that
+// decision's transcript allowlist to permit it). Purely additive and gated the
 // same way, so an org with content capture off again sends byte-identical
 // payloads.
 //
-// 1.5 added the LOCAL GATEWAY's span fields (ADR-0021): request/response headers,
-// the HTTP classification keys, and credential_fingerprint on Span, plus
-// GatewayRequestID on the event. Purely additive — the header pair is gated like
-// every other content field and the rest is structural, so a hook-only install
-// sends byte-identical payloads and every 1.4 event is a valid 1.5 event.
+// 1.5 added the LOCAL GATEWAY's span fields : request/response headers, the HTTP
+// classification keys, and credential_fingerprint on Span, plus GatewayRequestID
+// on the event. Purely additive — the header pair is gated like every other
+// content field and the rest is structural, so a hook-only install sends
+// byte-identical payloads and every 1.4 event is a valid 1.5 event.
 //
 // 1.6 added two model-call producers — OtelRequestID (local telemetry receiver)
 // and ProxyRequestID (local transport relay) — and declared SessionRollup, which
@@ -54,9 +54,9 @@ package client
 // TurnStarted had kept requiring turn_index unconditionally, and 1.5 repaired only
 // the close. What that actually broke is the Codex ROLLUP pair, whose opening half
 // carries no index — not the gateway, which emits no TurnStarted at all. It would
-// equally have broken any later lane emitting a pair (ADR-0022). Additive: no
-// existing field moved, no emitted bytes changed, and the shapes that begin to
-// validate are ones this client already sent.
+// equally have broken any later lane emitting a pair. Additive: no existing field
+// moved, no emitted bytes changed, and the shapes that begin to validate are ones
+// this client already sent.
 const SchemaVersion = "1.6"
 
 // EventType is a developer-runtime lifecycle event type. Each maps 1:1 onto
@@ -79,9 +79,8 @@ const (
 	// the unit a coding agent spends tokens in. They ride the same activity
 	// carrier as a tool call (ActivityStarted/ActivityCompleted with
 	// activity_type "llm_completion"), because a dev session writes no spans
-	// (ADR-0013) and the AI-Agent runtime's equivalent signal lives in an
-	// llm_completion span's response_body. Same shape, different carrier — see
-	// ADR-0014.
+	// and the AI-Agent runtime's equivalent signal lives in an llm_completion
+	// span's response_body. Same shape, different carrier —.
 	//
 	// Both halves are emitted from ONE provider hook firing (Claude Code's
 	// Stop), so the pair is atomic: there is no cross-hook index to race and no
@@ -90,19 +89,19 @@ const (
 	EventTurnStarted   EventType = "TurnStarted"
 	EventTurnCompleted EventType = "TurnCompleted"
 
-	// The failure/lifecycle signals (ADR-0018). All three ride stock
-	// SignalReceived (INV-8) — no new endpoint, no new table, per the repo's
-	// reuse rule — and all three are metadata-only.
+	// The failure/lifecycle signals. All three ride stock SignalReceived (INV-8)
+	// — no new endpoint, no new table, per the repo's reuse rule — and all three
+	// are metadata-only.
 	//
 	// They carry NO signal_args, and that is a correctness constraint rather
 	// than a minimalism preference. Core's goal-alignment engine treats ANY
 	// SignalReceived with non-empty signal_args as a new user goal: it runs an
 	// alignment check against the assistant messages accumulated so far and then
-	// OVERWRITES the session's goal with the stringified args
-	// (openbox-core internal/services/age.go:112-137). Putting the denied tool's
-	// name in signal_args would therefore replace the developer's actual prompt
-	// as the thing every later turn is scored against, silently wrecking the
-	// feature the turn span exists to feed. Structural detail rides metadata.
+	// OVERWRITES the session's goal with the stringified args (openbox-core
+	// internal/services/age.go:112-137). Putting the denied tool's name in
+	// signal_args would therefore replace the developer's actual prompt as the
+	// thing every later turn is scored against, silently wrecking the feature
+	// the turn span exists to feed. Structural detail rides metadata.
 	// TestNewSignalsCarryNoSignalArgs holds this.
 
 	// EventSubagentStarted marks a subagent spawning. Until this existed a
@@ -110,8 +109,8 @@ const (
 	// that spawned and did nothing left no trace.
 	EventSubagentStarted EventType = "SubagentStarted"
 	// EventPermissionDenied records that a policy or classifier refused a tool
-	// call — that a decision happened, which tool it was about, and, under the
-	// content gate, why (ADR-0019 P1: the provider's free-text `reason` rides
+	// call — that a decision happened, which tool it was about and under the
+	// content gate, why (that decision: the provider's free-text `reason` rides
 	// Content.SignalDetail → metadata.denial_reason). Never the tool's content.
 	EventPermissionDenied EventType = "PermissionDenied"
 	// EventAPIError records a turn that ended in a provider-side error rather
@@ -140,15 +139,15 @@ var AllEventTypes = []EventType{
 	EventAPIError,
 }
 
-// Tool-result outcome vocabulary (ADR-0018 Decision 1). Two literals, closed.
+// Tool-result outcome vocabulary. Two literals, closed.
 //
 // The strings are not ours to choose: core compares the wire value against the
-// literal "completed" and nothing else
-// (openbox-core internal/services/activities/observability/errors.go:333). A
-// near-miss — "success", "COMPLETED", "complete" — does not degrade the metric,
-// it pins it at 0%, which is exactly the state this field exists to fix. So the
-// vocabulary is closed and statusFor drops anything outside it rather than
-// forwarding a value core will silently score as a failure.
+// literal "completed" and nothing else (openbox-core
+// internal/services/activities/observability/errors.go:333). A near-miss —
+// "success", "COMPLETED", "complete" — does not degrade the metric, it pins it
+// at 0%, which is exactly the state this field exists to fix. So the vocabulary
+// is closed and statusFor drops anything outside it rather than forwarding a
+// value core will silently score as a failure.
 const (
 	StatusCompleted = "completed"
 	StatusFailed    = "failed"
@@ -244,11 +243,11 @@ type Span struct {
 	ResponseBody string `json:"response_body,omitempty"`
 
 	// RequestHeaders/ResponseHeaders carry a model call's HTTP headers, observed
-	// by the local gateway (ADR-0021). GATED content, and the highest-risk class
-	// this client has: the developer's live provider credential is on every
-	// request. Two mechanisms stand between it and the wire and BOTH are
-	// mandatory — the capture side redacts by key name before these are ever
-	// populated, and stripContent empties them here when the org opted out.
+	// by the local gateway. GATED content, and the highest-risk class this
+	// client has: the developer's live provider credential is on every request.
+	// Two mechanisms stand between it and the wire and BOTH are mandatory — the
+	// capture side redacts by key name before these are ever populated, and
+	// stripContent empties them here when the org opted out.
 	//
 	// Header values are already-redacted strings, joined per key. A map rather
 	// than a typed http.Header because this package must not import net/http
@@ -259,9 +258,9 @@ type Span struct {
 	// HTTPMethod/HTTPURL/HTTPStatus are the classification keys. Core RECOMPUTES
 	// semantic_type per span and isLLMCall reads http.method plus an LLM domain
 	// in http.url, so a gateway span without these stores as something else and
-	// alignment silently dies — the same trap ADR-0018's synthesized attributes
-	// documented. Structural, not content: a method, a status and a URL whose
-	// query is dropped at capture.
+	// alignment silently dies — the same trap that decision's synthesized
+	// attributes documented. Structural, not content: a method, a status and a
+	// URL whose query is dropped at capture.
 	HTTPMethod string `json:"http_method,omitempty"`
 	HTTPURL    string `json:"http_url,omitempty"`
 	HTTPStatus int    `json:"http_status,omitempty"`
@@ -292,20 +291,20 @@ type Content struct {
 	//
 	// It is set on an inline evaluation — where the adapter rebuilds it from
 	// the enforce gate's own detection result, so the server judges the exact
-	// bytes the tool call was rewritten to — AND, since ADR-0019 P1, on the
+	// bytes the tool call was rewritten to — AND, since that decision, on the
 	// observe path under the same content gate.
 	//
 	// This comment used to say it was "never set on the observe path, so
 	// SL3-SEC-3 is unchanged". That guarantee is retired: ordinary tool
 	// telemetry does gain the command now, when the org has content capture on.
 	//
-	// Why it exists: an approval request that reads `kind=shell
-	// tool_name=Bash` is not decidable. Neither a human nor an autonomous
-	// approver can act on it, so the gate manufactures an audit trail
-	// asserting a control ran while the control was decorative — the exact
-	// failure the design warns about. An org that turned on Tier-2 AND wrote a
-	// require_approval policy has asked to be shown these calls; showing the
-	// tool's name alone does not answer the question it asked.
+	// Why it exists: an approval request that reads `kind=shell tool_name=Bash`
+	// is not decidable. Neither a human nor an autonomous approver can act on
+	// it, so the gate manufactures an audit trail asserting a control ran while
+	// the control was decorative — the exact failure the design warns about. An
+	// org that turned on Tier-2 AND wrote a require_approval policy has asked
+	// to be shown these calls; showing the tool's name alone does not answer
+	// the question it asked.
 	//
 	// It is content, and gated like all content: with content capture off,
 	// stripContent drops it at the client choke point and the approver sees
@@ -319,10 +318,10 @@ type Content struct {
 	// runs Guardrails stage "1" over.
 	//
 	// It is a separate field from Output rather than a reuse of it, and the
-	// distinction is load-bearing: Output carries the assistant's turn text
-	// (ADR-0018), which rides a TurnCompleted's span. Overloading one field
-	// across both would put turn text on tool events and tool output in the
-	// alignment extractor the moment either mapping slipped.
+	// distinction is load-bearing: Output carries the assistant's turn text,
+	// which rides a TurnCompleted's span. Overloading one field across both
+	// would put turn text on tool events and tool output in the alignment
+	// extractor the moment either mapping slipped.
 	//
 	// Gated like every other Content field — stripContent nils Content when the
 	// org has content capture off — redacted for secrets by the adapter BEFORE
@@ -355,7 +354,7 @@ type Content struct {
 	// Thinking is the model's extended-thinking text for a turn — its
 	// `thinking` content blocks, concatenated in file order across the turn's
 	// transcript window. It lands in `activity_output.thinking` on a
-	// TurnCompleted (v1.4, ADR-0019 P3 / the ADR-0014 amendment).
+	// TurnCompleted (v1.4, that decision / that decision amendment).
 	//
 	// It is a separate field from Output for the same reason ToolOutput is:
 	// Output is the assistant's ANSWER and rides the one span core's alignment
@@ -367,8 +366,7 @@ type Content struct {
 	// Claude Code's own OTel export redacts it unconditionally with every
 	// content flag enabled. Capturing it therefore goes FURTHER than the
 	// provider will, on the org's own machine, by the org's own decision —
-	// recorded in the ADR-0014 amendment rather than inferred from "capture
-	// everything".
+	// amendment rather than inferred from "capture everything".
 	//
 	// It is also the densest content this client carries: thinking restates
 	// prompts, file bodies, and any credential the turn saw earlier. Gate,
@@ -443,8 +441,8 @@ type DevEvent struct {
 
 	// SessionRollup marks a turn activity that covers the WHOLE SESSION rather
 	// than one turn, giving it activity_id <session_id>:usage:rollup. It is
-	// Codex's granularity: its per-turn hook exists but is deliberately unwired
-	// (ADR-0014), so its usage arrives once, at SessionEnd.
+	// Codex's granularity: its per-turn hook exists but is deliberately
+	// unwired, so its usage arrives once, at SessionEnd.
 	//
 	// It is an explicit flag rather than "a turn event with no TurnIndex"
 	// deliberately. Inferring it from an absent index would turn a Claude Code
@@ -455,35 +453,35 @@ type DevEvent struct {
 	SessionRollup bool `json:"session_rollup,omitempty"`
 
 	// GatewayRequestID marks a turn event produced by the LOCAL GATEWAY rather
-	// than by a hook, and supplies that turn's id (ADR-0021).
+	// than by a hook, and supplies that turn's id.
 	//
 	// It exists to keep the producers' activity ids in disjoint namespaces, which
 	// is the whole of requirement 8. It was two producers when this field was
-	// added and is five since ADR-0022 (see OtelRequestID below); the argument did
-	// not change, only its arity. Each describes the same model turn from a
-	// different vantage point; if any two could mint the same activity_id, core's
-	// dedupe — keyed on (agent_id, workflow_id, run_id, activity_id, event_type)
-	// — would absorb one as a duplicate of the other and silently drop half the
-	// evidence.
+	// added and is five since that decision (see OtelRequestID below); the
+	// argument did not change, only its arity. Each describes the same model turn
+	// from a different vantage point; if any two could mint the same activity_id,
+	// core's dedupe — keyed on (agent_id, workflow_id, run_id, activity_id,
+	// event_type) — would absorb one as a duplicate of the other and silently drop
+	// half the evidence.
 	//
 	// The id is opaque to core. It has to be derivable from fields that survive
-	// the spool, for the same reason TurnIndex does: a flush can happen long
-	// after the process that built the event exited.
+	// the spool, for the same reason TurnIndex does: a flush can happen long after
+	// the process that built the event exited.
 	GatewayRequestID string `json:"gateway_request_id,omitempty"`
 
 	// OtelRequestID marks a turn event produced by the LOCAL TELEMETRY RECEIVER
 	// — the OTLP intake the governed tool exports to — and supplies that turn's
-	// id (ADR-0022). ProxyRequestID does the same for the LOCAL TRANSPORT RELAY,
-	// which observes the call in path rather than being told about it.
+	// id. ProxyRequestID does the same for the LOCAL TRANSPORT RELAY, which
+	// observes the call in path rather than being told about it.
 	//
 	// They exist for exactly the reason GatewayRequestID does, and the reason
 	// scales with each lane added: five producers now describe the same model
-	// turn from different vantage points, and core's dedupe key is
-	// (agent_id, workflow_id, run_id, activity_id, event_type). Two producers
-	// able to mint one id would have half their evidence absorbed as a duplicate
-	// — silently, since dedupe is the server behaving correctly. The namespaces
-	// make the ids disjoint; the producer election (one lane per session) makes
-	// the COUNT right. Both are needed: disjoint ids still double-report a turn.
+	// turn from different vantage points, and core's dedupe key is (agent_id,
+	// workflow_id, run_id, activity_id, event_type). Two producers able to mint
+	// one id would have half their evidence absorbed as a duplicate — silently,
+	// since dedupe is the server behaving correctly. The namespaces make the ids
+	// disjoint; the producer election (one lane per session) makes the COUNT
+	// right. Both are needed: disjoint ids still double-report a turn.
 	//
 	// Both values originate upstream — a provider request id relayed through an
 	// OTLP payload, or read off a relayed response — and reach a stored key

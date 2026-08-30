@@ -8,13 +8,13 @@
 #   FILE marker    must be PRESENT     all egress under that one gate.
 #
 # SHELL and FILE used to be ABSENT assertions (INV-2 / SL3-SEC-3: "a tool command
-# never egresses on an observe event"). **ADR-0019 P1 retired that guarantee** —
+# never egresses on an observe event"). **that decision retired that guarantee**
 # tool input and output now ride ordinary tool events under `content_capture`,
 # redacted and capped. The assertion is inverted rather than deleted, because
 # "the marker is nowhere" and "the runtime emitted nothing at all" are the same
 # observation, and only the positive form can tell them apart.
 #
-# ADR-0019 P3 adds one more class under the same gate — the turn's THINKING — and
+# that decision adds one more class under the same gate — the turn's THINKING — and
 # it is checked differently on purpose: no prompt can make a model think a chosen
 # phrase, so a marker assertion there would test the model's compliance rather
 # than the pipeline. Presence of the `thinking` KEY is the check, and it is a skip
@@ -81,14 +81,14 @@ assert_eq "session sealed as completed" completed "$(tb_val "select status from 
 assert_eq "WorkflowStarted stored" 1 "$(tb_count "governance_events where run_id='$sid' and event_type='WorkflowStarted'")"
 assert_eq "WorkflowCompleted stored" 1 "$(tb_count "governance_events where run_id='$sid' and event_type='WorkflowCompleted'")"
 
-# A tool call is TWO events sharing one activity_id (ADR-0013): ActivityStarted
+# A tool call is TWO events sharing one activity_id : ActivityStarted
 # then ActivityCompleted, each its own row and each independently evaluated.
 # Under the old hook shape both halves were ActivityStarted with the same
 # activity_id, which matched core's whole dedupe key
 # (agent_id, workflow_id, run_id, activity_id, event_type) — so the completed
 # half never became a row at all. This step is what proves it does now.
 tb_step "tool calls are activity pairs"
-# Scoped to TOOL activities. Since ADR-0014 a session also emits model-turn
+# Scoped to TOOL activities. Since that decision a session also emits model-turn
 # activities (activity_type = llm_completion), which ride the same two wire types
 # — so an unscoped count here would silently include turns and let "4 tool calls
 # captured" pass on two tool calls plus two turns. Turn pairing is asserted in
@@ -152,7 +152,7 @@ assert_ge "MCP call captured with its server+tool" 1 \
 	"$(tb_count "governance_events where run_id='$sid' and event_type='ActivityStarted' and input->>'mcp_server' is not null and input->>'mcp_tool' is not null")"
 
 tb_step "zero spans — the accepted trade-off, asserted on purpose"
-# KNOWN TENSION, unresolved until this suite first runs: ADR-0018 put ONE span on
+# KNOWN TENSION, unresolved until this suite first runs: that decision put ONE span on
 # a content-capturing TurnCompleted, and 35-telemetry.sh:122 positively asserts
 # that span's row exists. This session captures content too, so on the first live
 # run exactly one of the two assertions is wrong. Left as-is rather than guessed
@@ -161,11 +161,11 @@ tb_step "zero spans — the accepted trade-off, asserted on purpose"
 # this first should expect to resolve it, not to be surprised by it.
 # NOT a bug and NOT something to "fix" by re-adding a span. A hook process has no
 # in-process OpenTelemetry, so the spans shift-left used to send were fabricated
-# by hand to satisfy a wire shape. ADR-0013 retired them. The cost is real and is
+# by hand to satisfy a wire shape. That decision retired them. The cost is real and is
 # recorded there: no span-level Merkle leaves and no server-side semantic_type
 # for developer sessions. If this assertion ever fails, the span layer grew a
-# caller again — read the ADR before changing it.
-assert_eq "no spans rows for a dev session (ADR-0013)" 0 "$(tb_count "spans where session_id='$uuid'")"
+# caller again — read that decision before changing it.
+assert_eq "no spans rows for a dev session " 0 "$(tb_count "spans where session_id='$uuid'")"
 
 tb_step "merkle — event leaves, no span leaves"
 assert_ge "event leaves written" 2 \
@@ -209,13 +209,13 @@ egress="$(tb_sql "select row_to_json(e)::text from governance_events e where run
 $(tb_sql "select row_to_json(s)::text from spans s where session_id='$uuid';")"
 assert_nonempty "egress captured for inspection" "$egress"
 assert_contains "prompt content egressed (content_capture on)" "$egress" "$PROMPT_MARK"
-# ADR-0019 P1: tool input and output egress under the same gate. Both markers are
+# that decision: tool input and output egress under the same gate. Both markers are
 # reachable two ways — as the tool's input and as what it printed — so either
 # path satisfies these; the capture-off half is 35-telemetry.sh's job.
 assert_contains "shell command text egressed (content_capture on)" "$egress" "$SHELL_MARK"
 assert_contains "file body egressed (content_capture on)" "$egress" "$FILE_MARK"
 
-# ADR-0019 P3: the turn's THINKING, on the llm_completion row's activity_output.
+# that decision: the turn's THINKING, on the llm_completion row's activity_output.
 # Asserted as presence of the KEY rather than of a marker string, because nothing
 # in a prompt can make a model think a chosen phrase — a marker assertion here
 # would be a test of the model's compliance, not of the pipeline.
@@ -233,7 +233,7 @@ else
 fi
 
 # ── the negative: an ungoverned directory produces NOTHING ───────────────────
-# ADR-0016's accepted cost, demonstrated end to end rather than asserted. This is
+# that decision's accepted cost, demonstrated end to end rather than asserted. This is
 # the assertion that makes "absence of events is not evidence of absence of work"
 # a measured property of the product instead of a caveat in a document.
 tb_step "a real session in a directory where init was not run"

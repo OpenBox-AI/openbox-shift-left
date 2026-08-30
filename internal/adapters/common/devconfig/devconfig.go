@@ -1,28 +1,26 @@
-// Package devconfig is the provider-neutral developer-runtime
-// configuration and credential resolution shared by every tool adapter
-// (Claude Code, Codex, Cursor). It owns two files (module home recorded in
-// ADR-0007, layout in ADR-0015):
+// Package devconfig is the provider-neutral developer-runtime configuration and
+// credential resolution shared by every tool adapter (Claude Code, Codex,
+// Cursor). It owns two files (module home, layout in):
 //
-//	~/.openbox/dev.json   posture + the non-secret coordinates
-//	~/.openbox/.env       the credentials, in plaintext, 0600
+// ~/.openbox/dev.json   posture + the non-secret coordinates ~/.openbox/.env
+// the credentials, in plaintext, 0600
 //
 // One store per field: the credential file is never read for a coordinate and
-// dev.json never holds a secret. Before ADR-0015 the DID lived in both dev.json
-// and the OS keychain, and a stale keychain entry silently reverted a corrected
-// DID on the next install — this split is what makes that impossible rather than
-// merely fixed.
+// dev.json never holds a secret. Before that decision the DID lived in both
+// dev.json and the OS keychain, and a stale keychain entry silently reverted a
+// corrected DID on the next install — this split is what makes that impossible
+// rather than merely fixed.
 //
 // It was extracted, behavior-preserving, from
 // internal/adapters/claude-code/creds.go — that adapter keeps thin aliases so its
 // public API and tests are unchanged. Like internal/adapters/common/git, this
-// module is dependency-free: it never imports the client, an adapter, or
-// the CLI.
+// module is dependency-free: it never imports the client, an adapter, or the CLI.
 //
-// INV-1 is narrowed by ADR-0015 and still load-bearing: dev.json carries only
-// non-secret coordinates, and the credential values are read at flush time and
-// never logged, printed, or placed on an argv. What INV-1 no longer claims is
+// INV-1 is narrowed by that decision and still load-bearing: dev.json carries
+// only non-secret coordinates, and the credential values are read at flush time
+// and never logged, printed, or placed on an argv. What INV-1 no longer claims is
 // that a secret is absent from a plaintext file — that is now the only place one
-// lives, and ADR-0015 records what it costs.
+// lives, and that decision records what it costs.
 package devconfig
 
 import (
@@ -70,8 +68,8 @@ const (
 	// EnvAgentPrivateKey is the Ed25519 signing key, under the name the OpenBox
 	// platform documents for its own SDK. It replaced OPENBOX_ED25519_SEED,
 	// which no published doc ever mentioned — so a developer following the docs
-	// set a variable this repo ignored (ADR-0015). Both old names still read;
-	// see deprecatedPrivateKeyEnvNames.
+	// set a variable this repo ignored. Both old names still read; see
+	// deprecatedPrivateKeyEnvNames.
 	EnvAgentPrivateKey = "OPENBOX_AGENT_PRIVATE_KEY"
 	EnvConfigPath      = "OPENBOX_CONFIG"
 	// Policy-bundle signing key pins (E8-S6). Non-secret; env overrides config.
@@ -85,28 +83,29 @@ const (
 	// DefaultBaseURL is the core data-plane base used when nothing configures one.
 	DefaultBaseURL = "https://core.openbox.ai"
 	// DefaultBackendURL is the control-plane base used when nothing configures
-	// one. Until ADR-0015 there was no default at all and `init` simply errored,
-	// which made the hosted service the one deployment you had to configure by
-	// hand. Self-hosted installs must still set BOTH URLs: the control plane
-	// cannot tell the CLI where the operator's core lives, so accepting one
-	// default and overriding the other points events at the hosted core and
-	// surfaces much later as a 401.
+	// one. Until that decision there was no default at all and `init` simply
+	// errored, which made the hosted service the one deployment you had to
+	// configure by hand. Self-hosted installs must still set BOTH URLs: the
+	// control plane cannot tell the CLI where the operator's core lives, so
+	// accepting one default and overriding the other points events at the hosted
+	// core and surfaces much later as a 401.
 	DefaultBackendURL = "https://api.openbox.ai"
 )
 
-// deprecatedPrivateKeyEnvNames are the pre-ADR-0015 names for the signing key,
-// honoured for reads (never written) so an existing CI job keeps working.
+// deprecatedPrivateKeyEnvNames are the pre-that decision names for the signing
+// key, honoured for reads (never written) so an existing CI job keeps working.
 //
 // OPENBOX_ED25519_SEED was this repo's name; OPENBOX_SEED was the git action's.
 // Reading both costs two map lookups and a warning; breaking them would strand
-// pipelines this repo cannot see. Removing them needs an ADR amendment.
+// pipelines this repo cannot see. Removing them needs a decision record
+// amendment.
 var deprecatedPrivateKeyEnvNames = []string{"OPENBOX_ED25519_SEED", "OPENBOX_SEED"}
 
 // DevConfig is the non-secret coordinate file the installers write and the
 // hooks read (INV-1: it holds where the secrets live, never the secret values).
 // Env vars of the same meaning override any field. One file serves every
-// provider — the coordinates, content posture, and ADR-0006 enforce posture are
-// org/developer-scoped, not tool-scoped.
+// provider — the coordinates, content posture, and that decision enforce
+// posture are org/developer-scoped, not tool-scoped.
 //
 // Field semantics (defaults, opt-in/out rationale) are documented on the
 // resolver functions below; the *bool fields distinguish "absent = adapter
@@ -118,7 +117,7 @@ type DevConfig struct {
 	// which is on (reverses metadata-only-by-default).
 	ContentCapture *bool `json:"content_capture,omitempty"`
 	// Finops gates per-turn usage capture: token counts AND the model id that
-	// spent them (ADR-0014 — the name predates the model binding and is kept
+	// spent them (that decision — the name predates the model binding and is kept
 	// because renaming a config key is a user-visible break; read it as "usage
 	// and model capture", not "token counts only").
 	//
@@ -134,13 +133,13 @@ type DevConfig struct {
 	// means on; `finops:false` or OPENBOX_FINOPS=0 opts out.
 	Finops *bool `json:"finops,omitempty"`
 
-	// Telemetry enables the local OTLP receiver lane (ADR-0022's `:otel:`).
+	// Telemetry enables the local OTLP receiver lane (that decision's `:otel:`).
 	//
-	// Default ON, and the reason is ADR-0016's ResolveFinops lesson rather than a
-	// preference: INSTALLING the lane is the opt-in. A second switch defaulting
-	// off would leave a developer who ran the install command with a daemon that
-	// receives every export and records nothing — the failure this lane is least
-	// able to notice about itself.
+	// Default ON, and the reason is that decision's ResolveFinops lesson rather
+	// than a preference: INSTALLING the lane is the opt-in. A second switch
+	// defaulting off would leave a developer who ran the install command with a
+	// daemon that receives every export and records nothing — the failure this
+	// lane is least able to notice about itself.
 	//
 	// A *bool, not a bool, for the reason every other posture key here is one:
 	// `omitempty` drops an explicit `false` on write, so an org's deliberate
@@ -152,9 +151,9 @@ type DevConfig struct {
 	// .git/hooks.
 	InstallGitHook bool `json:"install_git_hook,omitempty"`
 	// Enforce flips the developer runtime from observe/advisory to enforce.
-	// Absent means the default, which is now ON (ADR-0016, reversing the
-	// observe-by-default posture ADR-0006 shipped with); `enforce:false` or
-	// OPENBOX_ENFORCE=0 opts out.
+	// Absent means the default, which is now ON (that decision, reversing the
+	// observe-by-default posture that decision shipped with); `enforce:false`
+	// or OPENBOX_ENFORCE=0 opts out.
 	//
 	// It is a *bool, and that is load-bearing rather than stylistic. As a plain
 	// `bool` with `omitempty`, an explicit false marshalled to NOTHING — so
@@ -168,13 +167,12 @@ type DevConfig struct {
 	// FailClosed selects the enforce failure policy. Default false =
 	// fail-open: an OpenBox outage never blocks a developer.
 	FailClosed bool `json:"fail_closed,omitempty"`
-	// EnforceTimeoutMS is inert under the in-process decider (ADR-0006);
-	// retained for back-compat parsing. Clamping is adapter-owned.
+	// EnforceTimeoutMS is inert under the in-process decider; retained
+	// for back-compat parsing. Clamping is adapter-owned.
 	EnforceTimeoutMS int `json:"enforce_timeout_ms,omitempty"`
-	// Tier2 is DEPRECATED and inert (ADR-0017). It gated the synchronous
-	// /evaluate escalation for high-risk classes, back when the rest was decided
-	// locally; every gated call is evaluated now, so there are no tiers to switch
-	// between.
+	// Tier2 is DEPRECATED and inert. It gated the synchronous /evaluate
+	// escalation for high-risk classes, back when the rest was decided locally;
+	// every gated call is evaluated now, so there are no tiers to switch between.
 	//
 	// Parsed so an existing dev.json does not become an error, and deliberately
 	// NOT honoured: an org that set `tier2:false` under the old design would
@@ -183,8 +181,8 @@ type DevConfig struct {
 	// the key is present — including when it is false, which is exactly the case
 	// worth warning about.
 	Tier2 *bool `json:"tier2,omitempty"`
-	// Tier2TimeoutMS is DEPRECATED and inert (ADR-0017). The per-evaluation
-	// budget derives from the provider's declared hook ceiling now
+	// Tier2TimeoutMS is DEPRECATED and inert. The per-evaluation budget
+	// derives from the provider's declared hook ceiling now
 	// (provider.HookCeiling → hookflow.EnforceBudget), which is a correctness
 	// bound rather than a tuning knob: latency and capacity are the platform's
 	// scope, not something tuned per developer machine.
@@ -196,9 +194,9 @@ type DevConfig struct {
 	// SecretDetection enables Tier-1 local secret/entropy detection.
 	// Absent = default on (opt-out): the detection stays strictly local.
 	SecretDetection *bool `json:"secret_detection,omitempty"`
-	// RequireVerifiedBundle is DEPRECATED and inert (ADR-0017). It refused to
-	// load a policy bundle whose signature did not verify; there is no bundle,
-	// so there is nothing to verify or refuse. Parsed so an existing dev.json
+	// RequireVerifiedBundle is DEPRECATED and inert. It refused to load a
+	// policy bundle whose signature did not verify; there is no bundle, so
+	// there is nothing to verify or refuse. Parsed so an existing dev.json
 	// does not become an error, and deliberately absent from the reported
 	// posture — a control that cannot engage must not appear as one, or an org
 	// reading `true` would believe a signature check was protecting it.
@@ -217,24 +215,24 @@ type DevConfig struct {
 	// BaseURL, the core data-plane base). Non-secret.
 	BackendURL string `json:"backend_url,omitempty"`
 	// OrgSigningKeyID and OrgSigningPubKey pin the org's policy-bundle signing
-	// key (E8-S6 / ADR-0008). Both are non-secret — a public key and its id —
-	// so they live in plain config alongside the other coordinates rather than
-	// in the secret store (INV-1 concerns private material only).
+	// key (E8-S6 /). Both are non-secret — a public key and its id — so they live
+	// in plain config alongside the other coordinates rather than in the secret
+	// store (INV-1 concerns private material only).
 	//
 	// Absent means unverifiable rather than untrusted: a signed bundle with no
 	// pinned key reports integrity "no_key", which reads as an incomplete
 	// deployment. Its policy is still loaded and enforced — the same treatment an
 	// unsigned bundle gets, since both mean "this client cannot check the
 	// content" — but Trusted() is false and the session posture says so, so the
-	// control plane can tell an unpinned fleet from a verified one.
-	// `openbox init` pins these once the backend serves them.
+	// control plane can tell an unpinned fleet from a verified one. `openbox
+	// init` pins these once the backend serves them.
 	OrgSigningKeyID  string `json:"org_signing_key_id,omitempty"`
 	OrgSigningPubKey string `json:"org_signing_pubkey,omitempty"` // base64 raw Ed25519
 }
 
 // DefaultConfigPath is where the hook looks for the dev config when
-// OPENBOX_CONFIG is unset: ~/.openbox/dev.json (ADR-0015), with a read-side
-// fallback to the pre-ADR-0015 location while an unmigrated file lives there.
+// OPENBOX_CONFIG is unset: ~/.openbox/dev.json, with a read-side fallback to the
+// pre-that decision location while an unmigrated file lives there.
 //
 // It keeps returning a bare string rather than (string, error) because it is
 // called from every hook read path, where there is nothing useful to do with an
@@ -348,7 +346,7 @@ func ResolveInstallGitHook() bool {
 }
 
 // ResolveFinops reports whether usage capture is enabled — per-turn token counts
-// and the model id that spent them (ADR-0014).
+// and the model id that spent them.
 //
 // **Default ON.** An absent `finops` field resolves to on, mirroring the
 // 2026-07-15 content-capture reversal; `finops:false` in managed config or
@@ -466,7 +464,7 @@ func sanitizeProvider(p string) string {
 // ResolveEnforce reports whether the developer runtime is in enforce mode:
 // config field first, then the env override.
 //
-// DEFAULT ON (ADR-0016) — an absent field means enforce; `enforce:false` or
+// DEFAULT ON — an absent field means enforce; `enforce:false` or
 // OPENBOX_ENFORCE=0 opts out. Two properties keep that default safe: it is inert
 // until the org publishes a policy (nothing to deny means nothing denied), and
 // fail_closed stays off, so an OpenBox outage never blocks a tool call.
@@ -492,9 +490,10 @@ var deprecationOnce sync.Once
 // parse but no longer do anything.
 //
 // It is called from EffectivePosture rather than from each resolver, because
-// ADR-0017 removed the last RUNTIME caller of ResolveTier2 — a warning hung off
-// the resolver was unreachable, which is indistinguishable from no warning at
-// all. EffectivePosture runs once per session and on every `openbox doctor`.
+// that decision removed the last RUNTIME caller of ResolveTier2 — a warning
+// hung off the resolver was unreachable, which is indistinguishable from no
+// warning at all. EffectivePosture runs once per session and on every `openbox
+// doctor`.
 func warnDeprecatedKeys() {
 	dead := deadKeysPresent()
 	if len(dead) == 0 {
@@ -502,7 +501,7 @@ func warnDeprecatedKeys() {
 	}
 	deprecationOnce.Do(func() {
 		fmt.Fprintf(os.Stderr, "openbox: %s set but ignored — every gated tool call is "+
-			"evaluated by OpenBox (ADR-0017), so there are no tiers to switch between and no "+
+			"evaluated by OpenBox, so there are no tiers to switch between and no "+
 			"local bundle to verify. Remove from dev.json / the environment to silence this.\n",
 			strings.Join(dead, ", "))
 	})
@@ -529,9 +528,9 @@ func deadKeysPresent() []string {
 	return dead
 }
 
-// ResolveTier2 reads the DEPRECATED, inert `tier2` key (ADR-0017). Nothing on
-// the enforce path branches on it; it survives so an existing dev.json parses.
-// The deprecation notice lives in warnDeprecatedKeys, not here.
+// ResolveTier2 reads the DEPRECATED, inert `tier2` key. Nothing on the enforce
+// path branches on it; it survives so an existing dev.json parses. The
+// deprecation notice lives in warnDeprecatedKeys, not here.
 func ResolveTier2() bool {
 	return resolveBool("tier2", func(c DevConfig) *bool { return c.Tier2 }, false, EnvTier2)
 }
@@ -597,18 +596,17 @@ func ResolveControlToken() string {
 // incomplete; the caller logs it fail-open and exits 0 (INV-3). No secret value
 // is ever included in a returned error.
 //
-// TWO source chains through one funnel, and conflating them is the trap
-// (ADR-0015):
+// TWO source chains through one funnel, and conflating them is the trap :
 //
-//	secrets      (api key, private key)  real env var > ~/.openbox/.env
-//	coordinates  (DID, base URL)         real env var > dev.json > built-in default
+// secrets      (api key, private key)  real env var > ~/.openbox/.env coordinates
+// (DID, base URL)         real env var > dev.json > built-in default
 //
 // The credential file sits exactly where the deleted secret store sat and nowhere
 // else. It is never consulted for a coordinate, so no field has two files that
-// can disagree — which is what makes the pre-ADR-0015 two-DID-stores revert loop
-// structurally impossible rather than merely fixed. A DID written into `.env` is
-// ignored; TestEnvFileIsNotACoordinateSource pins that, and relaxing it reopens
-// the bug class.
+// can disagree — which is what makes the pre-that decision two-DID-stores revert
+// loop structurally impossible rather than merely fixed. A DID written into
+// `.env` is ignored; TestEnvFileIsNotACoordinateSource pins that, and relaxing it
+// reopens the bug class.
 func ResolveCredentials() (Credentials, error) {
 	cfg, err := load()
 	if err != nil {
@@ -674,12 +672,12 @@ func loadSecretFile() (map[string]string, string, error) {
 // resolvePrivateKey reads the signing key under its current name, then the two
 // deprecated aliases, warning once per process for an alias.
 //
-// Three names existed for one value: OPENBOX_ED25519_SEED here,
-// OPENBOX_SEED in the git action, and OPENBOX_AGENT_PRIVATE_KEY in the
-// platform's own published SDK docs. A developer who followed those docs set a
-// variable this repo ignored — a live defect independent of ADR-0015. The
-// documented name wins; the other two keep working so nobody's CI breaks on
-// upgrade. Retiring them needs its own decision, not a commit.
+// Three names existed for one value: OPENBOX_ED25519_SEED here, OPENBOX_SEED
+// in the git action, and OPENBOX_AGENT_PRIVATE_KEY in the platform's own
+// published SDK docs. A developer who followed those docs set a variable this
+// repo ignored — a live defect independent of. The documented name wins; the
+// other two keep working so nobody's CI breaks on upgrade. Retiring them needs
+// its own decision, not a commit.
 func resolvePrivateKey(secrets map[string]string) string {
 	if v := os.Getenv(EnvAgentPrivateKey); v != "" {
 		return v
@@ -721,9 +719,9 @@ var deprecatedNameWarnOnce sync.Once
 // this release deleted support for.
 //
 // The keychain hint is here because this error is where a user upgrading an
-// existing install actually meets ADR-0015's no-migration decision. Telling them
-// only "run openbox auth" would send someone with working credentials off to
-// register a second agent.
+// existing install actually meets that decision's no-migration decision. Telling
+// them only "run openbox auth" would send someone with working credentials off
+// to register a second agent.
 //
 // It never echoes a value, and never names an account coordinate that no longer
 // exists in this config.

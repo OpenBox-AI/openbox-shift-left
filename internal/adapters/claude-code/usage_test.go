@@ -48,11 +48,11 @@ const poisonedTranscript = `{"type":"user","isSidechain":false,"timestamp":"2026
 `
 
 // sentinels are the transcript strings that must NEVER egress, at any posture.
-// SENTINEL_THINKING is deliberately absent from this list — the ADR-0014
-// amendment (ADR-0019 P3) authorised exactly that one field, so it egresses under
-// the content gate and has its own two-directional assertions below. Everything
-// here stays unreachable whether capture is on or off, which is how the sentinel
-// proves the widening is one field wide rather than "content is fine now".
+// SENTINEL_THINKING is deliberately absent from this list — that decision
+// amendment authorised exactly that one field, so it egresses under the content
+// gate and has its own two-directional assertions below. Everything here stays
+// unreachable whether capture is on or off, which is how the sentinel proves the
+// widening is one field wide rather than "content is fine now".
 var sentinels = []string{
 	"SENTINEL_PROMPT", "SENTINEL_OUTPUT", "SENTINEL_CMD",
 	"SENTINEL_TOOLRESULT", "SENTINEL_FILE",
@@ -221,7 +221,8 @@ func TestTurnWindow_ModelIsLastNonEmptyInWindow(t *testing.T) {
 	}
 }
 
-// --- thinking blocks (ADR-0019 P3 / the ADR-0014 amendment) ---
+// --- thinking blocks (that decision / that decision amendment)
+// ---
 
 // Thinking is lifted from `message.content[]` blocks of type "thinking", in file
 // order, across the whole window — not one block per turn. Everything else in
@@ -639,16 +640,16 @@ func TestTurnWindow_NegativeCountsClamped(t *testing.T) {
 	}
 }
 
-// TestFinops_NoContentOnWire is the LOAD-BEARING INV-2 test, and ADR-0014
+// TestFinops_NoContentOnWire is the LOAD-BEARING INV-2 test, and that decision
 // NARROWED what it proves. It used to assert "no content anywhere", which the
 // projection guaranteed structurally: the structs held only numbers, so content
 // had nowhere to land. The projection now binds three non-numeric fields, so the
 // claim this test must prove is the exact allowlist:
 //
-//	sentinel content        → ABSENT from the signed wire body (4 field classes)
-//	message.model           → PRESENT (the one string authorised to egress)
-//	the raw timestamp string→ ABSENT (bound, parsed to a time, discarded)
-//	sidechain sums + model  → ABSENT from a main-thread turn (the partition)
+// sentinel content        → ABSENT from the signed wire body (4 field classes)
+// message.model           → PRESENT (the one string authorised to egress) the raw
+// timestamp string→ ABSENT (bound, parsed to a time, discarded) sidechain sums +
+// model  → ABSENT from a main-thread turn (the partition)
 //
 // It drives the real AIP-signing client with content-capture ON — the adversarial
 // worst case, because the client's stripper is then disabled and only the
@@ -785,16 +786,16 @@ func TestFinops_NoContentOnWire(t *testing.T) {
 		t.Errorf("expected token total %d on the SessionEnded wire body, got: %s", wantTotal, bodies[0])
 	}
 
-	// (f) Capture ON — the direction the ADR-0014 amendment changed, and the half
-	// where every remaining guarantee lives. Without this section the strongest
-	// failure modes are untested and the test passes trivially for the change
-	// that introduced them.
+	// (f) Capture ON — the direction that decision amendment changed, and the
+	// half where every remaining guarantee lives. Without this section the
+	// strongest failure modes are untested and the test passes trivially for the
+	// change that introduced them.
 	//
 	// The adversarial setup: content capture ON, the same poisoned transcript, a
 	// hook payload carrying its own assistant message. Three claims must hold at
-	// once — the assistant text still comes from the HOOK FIELD (ADR-0018), the
-	// ONE amended transcript field egresses, and every OTHER transcript sentinel
-	// stays as unreachable as it was.
+	// once — the assistant text still comes from the HOOK FIELD, the ONE amended
+	// transcript field egresses, and every OTHER transcript sentinel stays as
+	// unreachable as it was.
 	const hookMessage = "the hook-supplied assistant answer"
 	capturing := NewMapper(Identity{DeveloperDID: testDID})
 	capturing.NewID = func() string { return "evt-2" }
@@ -816,7 +817,7 @@ func TestFinops_NoContentOnWire(t *testing.T) {
 	for _, s := range sentinels {
 		if strings.Contains(capturedBody, s) {
 			t.Fatalf("INV-2 breach: transcript sentinel %q reached the wire on a "+
-				"content-capturing turn — the ADR-0014 amendment authorised thinking and "+
+				"content-capturing turn — that decision amendment authorised thinking and "+
 				"NOTHING else, so the projection must still be unable to see this: %s",
 				s, capturedBody)
 		}

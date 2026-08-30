@@ -3,8 +3,9 @@
 ## Context links
 
 - Parent: [plan.md](plan.md) · Depends on: [phase 02](phase-02-package-scoped-guards.md)
-- Supersedes in effect: [ADR-0011](../../docs/adr/ADR-0011-multi-module-layout.md)
-  (the ADR itself is rewritten in phase 06)
+- Supersedes in effect
+(that decision itself is rewritten in phase
+06)
 - Source: `/tmp/project-layout` README §`/cmd`, §`/internal`
 
 ## Overview
@@ -199,7 +200,7 @@ Gate inputs: `cli/cmd/openbox/main_test.go:764` · `adapters/claude-code/hookrun
 - Deleting the five go.mod guards is safe **only because** phase 02 landed. Verify
   the replacements are green in the same run that deletes the originals; do not split
   those across commits.
-- ADR-0023's bound changes shape here (module → subtree). The amendment is phase 06,
+- that decision's bound changes shape here (module → subtree). The amendment is phase 06,
   but the change of fact happens in this phase — do not let the two drift.
 - Bulk-rewrite corruption check after steps 3 and 5:
   `grep -rn '\${OPENBOX_REDACTED_' .` clean outside `plans/` and `docs/`.

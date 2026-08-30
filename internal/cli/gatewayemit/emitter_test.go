@@ -90,8 +90,8 @@ func TestEmitSpoolsUnderTheSessionTheHeaderNames(t *testing.T) {
 // TestNoSessionHeaderEmitsNothingAndSaysSo is the honest-silence case, and the
 // warning is half the requirement.
 //
-// Whether Claude Code sends x-claude-code-session-id is UNVERIFIED (ADR-0021 §8 /
-// probe P0). If it does not, the choice is between inventing a session id and
+// Whether Claude Code sends x-claude-code-session-id is UNVERIFIED (that decision
+// / probe P0). If it does not, the choice is between inventing a session id and
 // emitting nothing. Inventing one files governance records that claim a session
 // they cannot join, which is the overstatement this product exists to prevent —
 // and they would rot unflushed besides. So the gateway stays silent, and says

@@ -104,7 +104,7 @@ The cause is narrow and worth recording: `detect.NewDetectorDefaultConfig`
 (`detect.go:135-145`) uses viper *purely* to unmarshal a static `//go:embed`ed
 TOML string. That is why a config loader, a filesystem abstraction and a
 file-watcher end up linked into the module that redacts secrets — the module
-`gateway` imports, whose transitive surface ADR-0023 had just accepted as
+`gateway` imports, whose transitive surface that decision had just accepted as
 "bounded by no test".
 
 Reported to the owner with these numbers before any swap code was written, per

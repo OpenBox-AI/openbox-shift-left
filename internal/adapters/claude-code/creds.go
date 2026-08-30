@@ -9,19 +9,18 @@ import (
 )
 
 // Credential resolution for the hook binary. The provider-neutral
-// config/credential machinery — the dev.json `DevConfig` contract, the
-// Resolve* precedence rules, and the OS/file secret-store readers — lives
-// in the shared module internal/adapters/common/devconfig, consumed by every
-// adapter (ADR-0007). This file is the Claude Code adapter's thin,
-// behavior-preserving facade over it: every symbol below keeps its
-// pre-extraction name, signature, and semantics (the full original
-// documentation now lives on the devconfig definitions). Only the
-// enforce-budget clamps stay here — they encode Claude Code's own
+// config/credential machinery — the dev.json `DevConfig` contract, the Resolve*
+// precedence rules, and the OS/file secret-store readers — lives in the shared
+// module internal/adapters/common/devconfig, consumed by every adapter. This
+// file is the Claude Code adapter's thin, behavior-preserving facade over it:
+// every symbol below keeps its pre-extraction name, signature, and semantics
+// (the full original documentation now lives on the devconfig definitions).
+// Only the enforce-budget clamps stay here — they encode Claude Code's own
 // correctness bound (the 5s hook kill), which is provider-specific.
 //
 // Identity is minted by `openbox auth`, which writes it to ~/.openbox/.env; the
-// hook reads it here (ADR-0015). INV-1: the obx_ key and signing key are read
-// straight into the client and never logged, printed, or placed on an argv. See
+// hook reads it here. INV-1: the obx_ key and signing key are read straight
+// into the client and never logged, printed, or placed on an argv. See
 // devconfig for the full env/config contract.
 const (
 	envBaseURL         = devconfig.EnvBaseURL
@@ -110,7 +109,7 @@ func DefaultSpoolDir() string { return devconfig.SpoolDir("cc-spool") }
 func ResolveInstallGitHook() bool { return devconfig.ResolveInstallGitHook() }
 
 // ResolveFinops reports whether transcript usage extraction is enabled.
-// DEFAULT ON since ADR-0014; `finops: false` or OPENBOX_FINOPS=0 opts out.
+// DEFAULT ON since; `finops: false` or OPENBOX_FINOPS=0 opts out.
 func ResolveFinops() bool { return devconfig.ResolveFinops() }
 
 // ResolveContentCapture reports the org content posture (default on,
@@ -130,8 +129,8 @@ func ResolveFindings() bool { return devconfig.ResolveFindings() }
 func ResolveFindingsCursor() string { return devconfig.ResolveFindingsCursor("claude-code") }
 
 // ResolveEnforce reports whether the developer runtime is in enforce mode.
-// DEFAULT ON (ADR-0016 reversed the observe default; ADR-0006 governs the
-// in-process mechanism, not the default value).
+// DEFAULT ON (that decision reversed the observe default; that decision
+// governs the in-process mechanism, not the default value).
 func ResolveEnforce() bool { return devconfig.ResolveEnforce() }
 
 // correctness bound, not a nicety: Claude Code kills the PreToolUse hook at
@@ -146,13 +145,13 @@ const maxEnforceTimeout = 2 * time.Second
 // fail-open).
 func ResolveFailClosed() bool { return devconfig.ResolveFailClosed() }
 
-// ResolveTier2 reads the DEPRECATED, inert `tier2` key (ADR-0017).
-// It changes nothing: every gated call is evaluated. It is retained so an
-// existing dev.json parses, and it warns once to stderr when present. See
-// devconfig.ResolveTier2 for why an explicit false is deliberately not honoured.
-// Historic note: `openbox init` used to couple tier2 to the
-// enforce posture and enforce now defaults on — so a bare install writes
-// tier2: true. There is no standalone flag; it follows enforce.
+// ResolveTier2 reads the DEPRECATED, inert `tier2` key. It changes nothing:
+// every gated call is evaluated. It is retained so an existing dev.json parses,
+// and it warns once to stderr when present. See devconfig.ResolveTier2 for why
+// an explicit false is deliberately not honoured. Historic note: `openbox init`
+// used to couple tier2 to the enforce posture and enforce now defaults on — so a
+// bare install writes tier2: true. There is no standalone flag; it follows
+// enforce.
 func ResolveTier2() bool { return devconfig.ResolveTier2() }
 
 // ResolveEvaluationTimeout resolves the in-binary budget for one

@@ -51,7 +51,7 @@ the directory list — it is *every directory states what belongs in it*.
 | `/build` | packaging + CI | `.goreleaser.yaml`, `.github/workflows/` | **EXISTS** (tool-mandated locations) |
 | `/deployments` | deploy configs | `deploy/` | **EXISTS** (source accepts `/deploy` as an alias) |
 | `/test` | external tests + data | `testbed/`, `*/testdata/` | **EXISTS** (renamed) |
-| `/docs` | design + user docs | `docs/`, `docs/adr/` | **EXISTS** |
+| `/docs` | design + user docs | `docs/`,  | **EXISTS** |
 | `/tools`, `/examples`, `/third_party`, `/assets`, `/web`, `/website`, `/githooks` | — | none | N/A for a CLI + daemon product |
 | `.editorconfig` | whitespace policy | **absent** | **NEW — adopt, adapted** |
 | `.gitattributes` | line endings | **absent** | NEW — **reject** (see D7) |
@@ -66,8 +66,8 @@ gap is documentation, not structure.
 14 Go modules in a `go.work` workspace (`go.mod` on disk = 14, `use` entries = 14).
 Module boundaries do architectural enforcement work: `provider` and `devconfig` being
 separate modules is what makes "adapters must not import each other, and the CLI
-reaches them only through the registry" mechanical rather than aspirational
-(ADR-0011, `TestOnlyTheRegistryImportsAdapters`).
+reaches them only through the registry" mechanical rather than aspirational (that
+decision, `TestOnlyTheRegistryImportsAdapters`).
 
 ### Measured file-naming convention (not written down anywhere today)
 
@@ -80,7 +80,7 @@ convention. One exists in practice and is near-uniform:
   All 6 current `_GOOS.go` files *also* carry an explicit `//go:build` line, so the
   suffix is belt-and-braces rather than the sole constraint.
 - **Non-Go: kebab-case** — `dev-event.schema.json`, `managed-settings.json`,
-  `00-preflight.sh`, `data-and-privacy.md`, `ADR-0021-openbox-local-gateway.md`.
+`00-preflight.sh`, `data-and-privacy.md`, `that decision`.
 - **Exception: provider-mandated filenames kept verbatim** — `managed_config.toml`,
   `requirements.toml` (Codex reads those exact names; renaming breaks the provider).
 
@@ -102,15 +102,15 @@ stateful record and is out of scope.)
 ## The three documentation defects this exercise found
 
 1. **`telemetry/` and `transport/` appear in neither canonical layout map.** Not in
-   `CLAUDE.md`'s "Where things live" table, not in `docs/architecture.md` §Modules.
-   Two of fourteen modules are invisible in both places a reader would look — and they
-   are the ADR-0022 lanes, the newest and least understood code in the repo.
+`CLAUDE.md`'s "Where things live" table, not in `docs/architecture.md` §Modules. Two
+of fourteen modules are invisible in both places a reader would look — and they are
+that decision lanes, the newest and least understood code in the repo.
 2. **8 of 14 modules have no `README.md`**: `devconfig`, `hookflow`, `decision`,
    `gateway`, `provider`, `telemetry`, `transport`, `conformance`.
 3. **One live stale count.** `CLAUDE.md:800` — "across `go.work` and all twelve
-   modules" — is wrong; there are 14. The `11 modules green` lines at :216, :325, :402,
-   :452, :487, :520, :572 are dated status records and must **not** be rewritten; same
-   for ADR-0011's "eleven Go modules" Context line and `ci.yml:7`.
+modules" — is wrong; there are 14. The `11 modules green` lines :216, :325, :402, :452,
+:487, :520, :572 are dated status records and must **not** be rewritten; same for that
+decision's "eleven Go modules" Context line and `ci.yml:7`.
 
 ## Challenge
 
@@ -124,7 +124,7 @@ stateful record and is out of scope.)
 
 ### C2 — Does adoption reverse an accepted decision? **(critical)**
 - **Source:** single module; `/cmd`, `/internal`, `/pkg` at the repository root.
-- **Local:** ADR-0011 (Accepted, 2026-07-31) considered exactly this and rejected it on
+- **Local:** That decision (Accepted, 2026-07-31) considered exactly this and rejected it on
   three grounds, all of which still hold:
   1. GoReleaser builds from `cli` with its own `replace` graph and **the release path
      still has no test coverage** — "the testbed has NOT run" appears eight times in
@@ -134,7 +134,7 @@ stateful record and is out of scope.)
      `TestOnlyTheRegistryImportsAdapters`.
   3. The cost the original review priced — no whole-repo build, no CI — is already paid
      by `go.work` + `ci.yml`.
-- ADR-0011 names its own revisit condition: *"If the release path ever gains real
+- that decision names its own revisit condition: *"If the release path ever gains real
   coverage, collapsing becomes a cheap follow-up."* **That condition is not met.**
 - **Risk if wrong:** import-path rewrite across 14 modules under an untested release
   path — a broken release, well over two days of rework.
@@ -162,15 +162,15 @@ stateful record and is out of scope.)
 - **Local:** a written convention with no enforcement rots — proven three times over in
   this very repo (2 undocumented modules, 1 stale count, 3 filename deviations, none of
   which any test or CI step would catch).
-- **Risk if wrong:** we write a convention doc and it is stale within two ADRs.
+- **Risk if wrong:** we write a convention doc and it is stale within two decision records.
   → **Every convention shipped here comes with a check, or is explicitly accepted as
   unenforced.**
 
 ### C6 — Dependency chain: what does this introduce?
 - **Source:** nothing — docs and empty directories.
 - **Local:** `.editorconfig` adds zero dependencies; a CI drift check is shell + grep.
-  No module gains a `require`, so **no dependency-guard allowlist needs widening**
-  (ADR-0023) and no `go mod tidy` cascade. → **Green.**
+No module gains a `require`, so **no dependency-guard allowlist needs widening**
+and no `go mod tidy` cascade. → **Green.**
 
 ### C7 — Is there a naming convention to codify, or would we be inventing one?
 - **Source:** specifies none; defers to `gofmt` / `staticcheck`.
@@ -183,7 +183,7 @@ stateful record and is out of scope.)
 
 | # | Decision | Source's way | Our way | Hybrid | Risk | Choice |
 |---|---|---|---|---|---|---|
-| 1 | Module topology | single module, root `/cmd` `/internal` `/pkg` | 14 modules (ADR-0011) | — | **critical** | **local** — reject collapse; owner decision, revisit condition unmet |
+| 1 | Module topology | single module, root `/cmd` `/internal` `/pkg` | 14 modules | — | **critical** | **local** — reject collapse; owner decision, revisit condition unmet |
 | 2 | Directory vocabulary | `/test` `/deployments` `/api` `/configs` | `testbed/` `deploy/` `contracts/.../schema/` `deploy/managed/` | — | low | **local** — source accepts `/deploy`; renames are pure churn |
 | 3 | `/pkg` | present | absent | — | low | **local** — source itself calls it contested |
 | 4 | Per-directory README | every directory | 6 of 14 modules | README only where the module has no entry anywhere; module-specific content only | low | **hybrid** |
@@ -210,11 +210,12 @@ Residual risks in what *is* planned:
 
 ## Owner decision surfaced, not taken
 
-**Collapse the 14-module workspace into a single module?** ADR-0011 says no, and its
-stated revisit condition — the release path gaining real test coverage — is still unmet
-(`testbed/run-all.sh` has never run against a live stack). The source layout assumes a
-single module, so full conformance is unreachable without reversing that ADR.
-Recommendation: leave ADR-0011 standing; revisit if and when the testbed runs.
+**Collapse the 14-module workspace into a single module?** That decision says no, and
+its stated revisit condition — the release path gaining real test coverage — is still
+unmet (`testbed/run-all.sh` has never run against a live stack). The source layout
+assumes a single module, so full conformance is unreachable without reversing that
+decision record. Recommendation: leave that decision standing; revisit if and when the
+testbed runs.
 
 ## Unresolved questions
 

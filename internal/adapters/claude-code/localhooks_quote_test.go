@@ -10,8 +10,8 @@ import (
 
 // A home directory with a space is ordinary — an account named for a person on
 // macOS or Windows. Unquoted, the shell splits the command and every hook in the
-// project silently fails to start. Since ADR-0016 made project scope the DEFAULT,
-// that would break governance for those users on a plain `openbox init`.
+// project silently fails to start. Since that decision made project scope the
+// DEFAULT, that would break governance for those users on a plain `openbox init`.
 func TestLocalHookCommandQuotesTheEnginePath(t *testing.T) {
 	dir := t.TempDir()
 	engine := filepath.Join("/Users/John Doe/.claude/plugins/openbox-observe/bin", "openbox")
@@ -83,18 +83,18 @@ func TestLocalHooksIdempotentAgainstAnUnquotedLegacyEntry(t *testing.T) {
 	}
 }
 
-// Every install that exists today predates the ADR-0018 hooks, so the FIRST
+// Every install that exists today predates that decision hooks, so the FIRST
 // thing this change meets in the field is a settings file holding the old seven
 // and none of the new four. Re-init has to add exactly the four and touch
 // nothing else — and that is a property of the SECOND invocation, which is the
-// case fifteen green enforce tests missed once already (ADR-0016,
+// case fifteen green enforce tests missed once already (that decision,
 // TestPlainReInitDoesNotRevertAnEnforceOptOut).
 func TestReInitAddsTheNewHooksExactlyOnce(t *testing.T) {
 	dir := t.TempDir()
 	engine := filepath.Join(dir, "bin", "openbox")
 
-	// An install from before this change: the pre-ADR-0018 hook set only.
-	preADR0018 := map[string]bool{
+	// An install from before this change: the earlier hook set only.
+	preStatusHooks := map[string]bool{
 		"SessionStart": true, "UserPromptSubmit": true, "PreToolUse": true,
 		"PostToolUse": true, "Stop": true, "SubagentStop": true, "SessionEnd": true,
 	}
@@ -104,7 +104,7 @@ func TestReInitAddsTheNewHooksExactlyOnce(t *testing.T) {
 	}
 	old := map[string]any{"hooks": map[string]any{}}
 	for _, ev := range localHookEvents {
-		if !preADR0018[ev.Event] {
+		if !preStatusHooks[ev.Event] {
 			continue
 		}
 		old["hooks"].(map[string]any)[ev.Event] = []any{map[string]any{

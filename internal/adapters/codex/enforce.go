@@ -10,69 +10,57 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/internal/decision"
 )
 
-// Enforcement — the synchronous pre-execution gate for the Codex adapter,
-// the port of the shipped Claude Code enforce cascade.
+// Enforcement — the synchronous pre-execution gate for the Codex adapter, the port of the
+// shipped Claude Code enforce cascade.
 //
-// This is the provider-shaped edge of the shared enforce stack: obtain a
-// local decision, apply the per-org failure policy, then apply the
-// verdict onto Codex's PreToolUse hook output contract. The middle —
-// decision.InProcessDecider (ADR-0006, no socket/daemon, fail-open on
-// every fault), the native policy evaluator (ADR-0005) and the local detection
-// secret detector — is consumed unchanged from decision/. This file adds
-// nothing to decision/; it only maps its Decision onto Codex's wire shape.
+// This is the provider-shaped edge of the shared enforce stack: obtain a local decision, apply
+// the per-org failure policy, then apply the verdict onto Codex's PreToolUse hook output
+// contract. The middle — decision.InProcessDecider (that decision, no socket/daemon, fail-open
+// on every fault), the native policy evaluator and the local detection secret detector — is
+// consumed unchanged from decision/. This file adds nothing to decision/; it only maps its
+// Decision onto Codex's wire shape.
 //
-// INV-3b (the carve-out to "observe never blocks"): an enforce PreToolUse
-// hook may block, but only pre-execution, hard-bounded, and fail-open by
-// default. The T1 decision takes no network I/O — it evaluates the synced
-// local bundle in-process (microseconds). With enforce off (ResolveEnforce
-// false) none of this runs and the observe path is byte-identical.
+// INV-3b (the carve-out to "observe never blocks"): an enforce PreToolUse hook may block, but
+// only pre-execution, hard-bounded, and fail-open by default. The T1 decision takes no network
+// I/O — it evaluates the synced local bundle in-process (microseconds). With enforce off
+// (ResolveEnforce false) none of this runs and the observe path is byte-identical.
 //
-// ── Codex-shaped deltas from the Claude Code port (each grounded @
-//    rust-v0.145.0 + the binary-embedded per-event JSON Schemas):
+// ── Codex-shaped deltas from the Claude Code port (each grounded @ rust-v0.145.0 + the
+// binary-embedded per-event JSON Schemas):
 //
-//   1. permissionDecision literals. Codex's PreToolUse output enum is
-//      allow|deny|ask (schema.rs PreToolUsePermissionDecisionWire), but
-//      the runtime output parser (hooks/src/engine/output_parser.rs
-//      unsupported_pre_tool_use_hook_specific_output) rejects:
-//        - "ask"                              → "unsupported permissionDecision:ask"
-//        - "allow" without updatedInput       → "unsupported permissionDecision:allow"
-//        - updatedInput without "allow"       → "updatedInput without permissionDecision:allow"
-//      A rejected output marks the hook Failed and the decision is
-//      discarded → the tool proceeds (a failed/timed-out PreToolUse hook
-//      fails open). So the only usable levers are: deny+reason (block),
-//      and allow+updatedInput (redact-and-proceed). This is the inverse
-//      of Claude Code, which emits updatedInput alone on the proceed
-//      path.
+// 1. permissionDecision literals. Codex's PreToolUse output enum is allow|deny|ask (schema.rs
+// PreToolUsePermissionDecisionWire), but the runtime output parser
+// (hooks/src/engine/output_parser.rs unsupported_pre_tool_use_hook_specific_output) rejects: -
+// "ask"                              → "unsupported permissionDecision:ask" - "allow" without
+// updatedInput       → "unsupported permissionDecision:allow" - updatedInput without "allow"
+// → "updatedInput without permissionDecision:allow" A rejected output marks the hook Failed and
+// the decision is discarded → the tool proceeds (a failed/timed-out PreToolUse hook fails
+// open). So the only usable levers are: deny+reason (block), and allow+updatedInput
+// (redact-and-proceed). This is the inverse of Claude Code, which emits updatedInput alone on
+// the proceed path.
 //
-//   2. REQUIRE_APPROVAL → deny. Claude Code maps it to `ask`; Codex
-//      rejects `ask` (delta 1) and a no-decision fallthrough under
-//      approval_policy=never auto-runs the tool ungoverned. No
-//      approval-policy mode could be proven to surface a native prompt
-//      within the harness (codex exec is non-interactive), so every
-//      REQUIRE_APPROVAL quadrant emits a content-free deny — strictly
-//      tighter, never a silent proceed.
+// 2. REQUIRE_APPROVAL → deny. Claude Code maps it to `ask`; Codex rejects `ask` (delta 1) and a
+// no-decision fallthrough under approval_policy=never auto-runs the tool ungoverned. No
+// approval-policy mode could be proven to surface a native prompt within the harness (codex
+// exec is non-interactive), so every REQUIRE_APPROVAL quadrant emits a content-free deny
+// strictly tighter, never a silent proceed.
 //
-//   3. Redaction content field is "command" (delta from CC's
-//      content/new_string). apply_patch's PreToolUse tool_input is
-//      {"command":<raw patch text>} (core registry
-//      ApplyPatchHandler.pre_tool_use_payload) and updatedInput is
-//      re-parsed via updated_hook_command → tool_input["command"] as a
-//      string. So the redactable file body rides "command" and the
-//      rewrite swaps "command".
+// 3. Redaction content field is "command" (delta from CC's content/new_string). apply_patch's
+// PreToolUse tool_input is {"command":<raw patch text>} (core registry
+// ApplyPatchHandler.pre_tool_use_payload) and updatedInput is re-parsed via
+// updated_hook_command → tool_input["command"] as a string. So the redactable file body rides
+// "command" and the rewrite swaps "command".
 //
-//   4. allow+updatedInput does not loosen (tighten-only preserved). Codex
-//      resolves competing hooks by "any deny wins" (hook_runtime
-//      should_block = any) and updated_input is taken only when not
-//      blocked; an allow from us cannot override another hook's deny,
-//      and there is no "approve/bypass approval" hook lever
-//      (PreToolUseHookResult is Continue{updated_input} | Blocked) — so
-//      allow+updatedInput is "proceed via Codex's own approval/sandbox
-//      flow, with redacted input", never a grant. We emit "allow" only
-//      bundled with a non-empty redacting updatedInput; a bare allow is
-//      structurally impossible here.
+// 4. allow+updatedInput does not loosen (tighten-only preserved). Codex resolves competing
+// hooks by "any deny wins" (hook_runtime should_block = any) and updated_input is taken only
+// when not blocked; an allow from us cannot override another hook's deny, and there is no
+// "approve/bypass approval" hook lever (PreToolUseHookResult is Continue{updated_input} |
+// Blocked) — so allow+updatedInput is "proceed via Codex's own approval/sandbox flow, with
+// redacted input", never a grant. We emit "allow" only bundled with a non-empty redacting
+// updatedInput; a bare allow is structurally impossible here.
 //
-// Exit code is always 0 (we speak JSON, not Codex's exit-2 block signal),
-// so a non-blocking verdict is byte-identical to observe mode.
+// Exit code is always 0 (we speak JSON, not Codex's exit-2 block signal), so a non-blocking
+// verdict is byte-identical to observe mode.
 
 // EnforceDecision is the PreToolUse enforce gate: it synchronously obtains
 // a governance decision from the in-process decider for the tool about to

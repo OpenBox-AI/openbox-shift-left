@@ -20,12 +20,12 @@ func TestCapabilities(t *testing.T) {
 		byKey[c.Key] = c
 	}
 
-	// Provider-independent floors, the Claude Code surfaces, and the shipped
-	// gated legs (E6 enforce opt-in, ADR-0014 usage capture opt-out) are supported.
+	// Provider-independent floors, the Claude Code surfaces, and the shipped gated
+	// legs (E6 enforce opt-in, that decision usage capture opt-out) are supported.
 	for _, k := range []string{
 		"identity.register", "telemetry.hook", "tool.events", "commit.binding",
 		"telemetry.tokens", "verdict.apply", "enforce.rewrite",
-		// ADR-0018. Pinned TRUE here and FALSE in the Codex profile: the two
+		// . Pinned TRUE here and FALSE in the Codex profile: the two
 		// providers genuinely diverge, and the divergence must be declared on
 		// both sides rather than discovered from an empty dashboard panel.
 		"tool.status",
@@ -39,9 +39,9 @@ func TestCapabilities(t *testing.T) {
 	// an unconfigured session actually does (INV-3, report SL-07).
 	//
 	// Both are opt-OUT now, and the profile has to say so. verdict.apply read
-	// "opt-in, default observe" long after ADR-0016 flipped enforce ON — a note
-	// telling a reader an unconfigured session cannot block, when it can. That is
-	// the exact failure this check exists to catch, so it now asserts the
+	// "opt-in, default observe" long after that decision flipped enforce ON — a
+	// note telling a reader an unconfigured session cannot block, when it can.
+	// That is the exact failure this check exists to catch, so it now asserts the
 	// direction rather than a fixed word.
 	for _, k := range []string{"verdict.apply"} {
 		if !strings.Contains(byKey[k].How, "default") {
@@ -49,7 +49,7 @@ func TestCapabilities(t *testing.T) {
 				"unconfigured session does; got %q", k, byKey[k].How)
 		}
 		if strings.Contains(byKey[k].How, "opt-in") {
-			t.Errorf("capability %q claims opt-in; enforce is ON by default (ADR-0016), and a "+
+			t.Errorf("capability %q claims opt-in; enforce is ON by default, and a "+
 				"profile that understates what a session does is as misleading as one that "+
 				"oversells it; got %q", k, byKey[k].How)
 		}

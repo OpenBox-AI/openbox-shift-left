@@ -7,15 +7,17 @@ import (
 	"path/filepath"
 )
 
-// migrate.go — carry dev.json and approver.json from the pre-ADR-0015 location.
+// migrate.go — carry dev.json and approver.json from the pre-that decision
+// location.
 //
 // Config migrates itself; credentials do not. That asymmetry is deliberate and
 // worth naming here, because it is the first thing a reader wonders: copying a
 // JSON file needs no platform-specific code, whereas reading the OS keychain
-// would mean shipping the very `security`/`secret-tool` paths ADR-0015 deletes,
-// for one run per machine. So keychain credentials stay stranded by decision
-// (recovery is `auth --rotate`, a manual keychain read, or re-registration) while
-// the config a user spent time tuning follows them automatically.
+// would mean shipping the very `security`/`secret-tool` paths that decision
+// deletes, for one run per machine. So keychain credentials stay stranded by
+// decision (recovery is `auth --rotate`, a manual keychain read, or
+// re-registration) while the config a user spent time tuning follows them
+// automatically.
 //
 // Non-destructive on purpose: the legacy file is READ and left in place. Deleting
 // it would make a rollback to an older binary lossy — the old binary reads the
@@ -89,8 +91,9 @@ func MigrateLegacyConfig() ([]string, error) {
 	return migrated, nil
 }
 
-// LegacyConfigPaths reports where the pre-ADR-0015 files live, for docs, the
-// migration note and `openbox doctor`. It states locations; it reads nothing.
+// LegacyConfigPaths reports where the pre-that decision files live, for docs,
+// the migration note and `openbox doctor`. It states locations; it reads
+// nothing.
 //
 // Callers (and the migration note in docs/getting-started.md) enumerate legacy
 // paths from here rather than from memory, so the two cannot drift.

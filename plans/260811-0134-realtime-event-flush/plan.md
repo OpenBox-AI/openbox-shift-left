@@ -79,6 +79,6 @@ became the accurate "local and bounded".
 
 ## Non-goals
 
-- No long-lived daemon, no new endpoint, no new table (reuse rule / ADR gate).
+- No long-lived daemon, no new endpoint, no new table (reuse rule / decision record gate).
 - No change to what egresses (content posture untouched — timing only).
 - Enforce-path latency unchanged (Tier-2 sync escalation already exists).

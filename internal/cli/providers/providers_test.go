@@ -54,7 +54,7 @@ func TestStubPlanNamesTheIdentityNeverASecret(t *testing.T) {
 	}
 	plan := inst.Plan(ref)
 	// The plan names the identity and where credentials come from — never a
-	// secret-store location, since ADR-0015 deleted the store.
+	// secret-store location, since that decision deleted the store.
 	if !strings.Contains(plan, "did:aip:abc") || !strings.Contains(plan, ".env") {
 		t.Errorf("plan should name the DID and the credential file:\n%s", plan)
 	}

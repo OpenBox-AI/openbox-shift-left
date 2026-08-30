@@ -21,9 +21,9 @@
   client already parses it into the verdict (`client/verdict.go:116,195,275`). Nothing
   server-side has to change for the basic replacement.
 - **Without this, phase 6 is a silent assurance downgrade.** `openbox doctor` and session
-  posture report bundle identity and integrity today (`doctor.go:30-47`); delete the bundle
-  with no replacement and the control plane loses the ability to answer "which policy is this
-  endpoint actually enforcing?" That is the question ADR-0008 exists for.
+posture report bundle identity and integrity today (`doctor.go:30-47`); delete the bundle
+with no replacement and the control plane loses the ability to answer "which policy is this
+endpoint actually enforcing?" That is the question that decision exists for.
 - **`policy_id` is an identity, not a version.** Only `policy_id` was found on the wire — no
   epoch, no updated-at. So the new posture can answer "which policy decided" but **not**
   "which revision of it". If the control plane needs revision-level evidence (drift over
@@ -47,8 +47,8 @@
 4. The absent case is explicit: a session that never reached core reports that its calls were
    decided locally by `fail_closed`, not an empty field.
 5. Decide and record whether `policy_id` alone is sufficient evidence. If not, file the
-   backend ask for a version/epoch with the concrete use case, and note in the ADR that the
-   evidence is identity-only until then.
+backend ask for a version/epoch with the concrete use case, and note in that decision that
+the evidence is identity-only until then.
 6. No new config surface.
 
 ## Architecture
@@ -77,7 +77,7 @@ no verdict obtained ──▶ posture: decided_by = failure_policy (fail_open|fa
    script parsing it, and note the change in phase 7's docs.
 4. Test: a session with a verdict reports the policy identity; a session with core
    unreachable reports failure-policy-decided; neither reports an empty field.
-5. Write the sufficiency decision into the ADR; file the backend ask if the answer is no.
+5. Write the sufficiency decision into that decision; file the backend ask if the answer is no.
 6. All 11 modules green.
 
 ## Todo list
@@ -103,7 +103,7 @@ no verdict obtained ──▶ posture: decided_by = failure_policy (fail_open|fa
 | Bundle fields deleted before this lands | M×H | posture has no policy provenance at all | **Stop:** phase 6 depends on this phase for exactly this reason. |
 | The new field inherits "verified" phrasing | M×H | posture implies a signature that does not exist | **Adjust:** rename. This is the overstatement class `CLAUDE.md` forbids. |
 | Absent identity read as "no policy" rather than "no verdict" | M×M | dashboards show unenforced sessions as unpoliced | **Adjust:** the failure-policy marker exists precisely to distinguish them. |
-| `policy_id` proves insufficient after release | L×M | control plane cannot answer revision questions | **Accepted, disclosed:** the ADR states evidence is identity-only; the backend ask is filed with a use case. |
+| `policy_id` proves insufficient after release | L×M | control plane cannot answer revision questions | **Accepted, disclosed:** That decision states evidence is identity-only; the backend ask is filed with a use case. |
 
 ## Security Considerations
 

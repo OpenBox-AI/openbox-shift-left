@@ -135,8 +135,8 @@ func (a *app) runTelemetry(args []string) int {
 	if !emitting {
 		// Said once, loudly, at startup, and it names the WINNER. A lane that is
 		// listening and recording nothing looks identical to a broken one, and an
-		// automatic precedence the developer cannot see is exactly the state
-		// ADR-0021 promised would always be detectable.
+		// automatic precedence the developer cannot see is exactly the state that
+		// decision promised would always be detectable.
 		logger.Printf("openbox telemetry: NOT elected — the producer is %s (%s); receiving exports but emitting no model-call turns",
 			orNone(string(election.Elected)), election.Reason)
 	}

@@ -185,7 +185,7 @@ func containsStr(ss []string, want string) bool {
 	return false
 }
 
-// JSON shape. Until ADR-0019 P1 this scanner only ever saw natural language and
+// JSON shape. Until that decision this scanner only ever saw natural language and
 // flat KEY=VALUE lines, so nothing exercised what happens when a secret is nested
 // inside JSON. Tool output made that the common case: a tool's response IS JSON,
 // so a nested value arrives ESCAPED — `{\"key\":\"<tok>\"}` — and an MCP result or
@@ -194,14 +194,14 @@ func containsStr(ss []string, want string) bool {
 // Both generic mechanisms used to miss it, for the same underlying reason and in
 // two different places:
 //
-//   - secretAssignment required the keyword ADJACENT to the `:`/`=`, and a JSON
-//     key's closing quote (plus its escaping backslash) sits in between.
-//   - precededByAssignment walked back over spaces and quotes to decide whether a
-//     high-entropy token sits in a value position, but stopped at a backslash.
+// - secretAssignment required the keyword ADJACENT to the `:`/`=`, and a JSON
+// key's closing quote (plus its escaping backslash) sits in between. -
+// precededByAssignment walked back over spaces and quotes to decide whether a
+// high-entropy token sits in a value position, but stopped at a backslash.
 //
-// The named formats were never affected — they match on the secret's own shape,
-// so surrounding syntax is irrelevant. That asymmetry is what made this easy to
-// miss: an AWS key in JSON was caught, and a database password was not.
+// The named formats were never affected — they match on the secret's own shape, so
+// surrounding syntax is irrelevant. That asymmetry is what made this easy to miss:
+// an AWS key in JSON was caught, and a database password was not.
 func TestRedact_JSONShapedSecrets(t *testing.T) {
 	d := newSecretDetector()
 	const entropyTok = "aB3xQ9vK2mZ7pL4wR8tY6nH1jF5sD0gC"

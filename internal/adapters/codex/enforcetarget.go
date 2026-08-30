@@ -43,10 +43,10 @@ func (t enforceTarget) DevEvent(redacted *client.Content) (client.DevEvent, bool
 }
 
 // evaluationContext is what the server needs to decide about this call. Every
-// gated class attaches now (ADR-0017), not only shell and MCP, and the bytes are
-// the REDACTED ones: rebuilt through the same RedactToolInput the tool-call
-// rewrite uses, from the same detection result, so the server judges exactly the
-// text the call was rewritten to.
+// gated class attaches now, not only shell and MCP, and the bytes are the
+// REDACTED ones: rebuilt through the same RedactToolInput the tool-call rewrite
+// uses, from the same detection result, so the server judges exactly the text
+// the call was rewritten to.
 //
 // Codex's redactable field IS "command" (apply_patch bodies arrive there), so
 // unlike Claude Code the shell branch below really can be rewritten — which is

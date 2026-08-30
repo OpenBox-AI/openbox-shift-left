@@ -33,7 +33,7 @@
    `capabilities.go` strings, `docs/data-and-privacy.md` (one line: status/lifecycle enums added, still no content
    on observe path), CLAUDE.md "Current state" paragraph, `adapters/claude-code/README.md` known-limitations
    (Codex success-unknown parity gap).
-6. Verification report `plans/260813-2241-p0-tool-status-content-adr/reports/verification-{date}-p0.md`
+6. Verification report `plans/260813-2241-p0-tool-status-content/reports/verification-{date}-p0.md`
    splitting every claim by evidence strength (unit / binary / testbed-pending).
 
 ## Architecture
@@ -72,7 +72,7 @@ over PTY/stub → testbed (pending stack).
 
 ## Risk Assessment
 
-- Stack unavailable (likely): acceptable — plan completes with testbed-pending status, matching ADR-0013/0014/0017 precedent.
+- Stack unavailable (likely): acceptable — plan completes with testbed-pending status, matching that decision/0014/0017 precedent.
 - Live experiment shows both PostToolUse+Failure fire → duplicate completed rows: document, lean on server-dedupe ask; no client suppression hack (cross-process state not worth it for over-reporting).
 
 ## Security Considerations
@@ -81,4 +81,5 @@ over PTY/stub → testbed (pending stack).
 
 ## Next steps
 
-Phase 04 (ADR draft) — independent, sequenced last per user request.
+Phase 04 (decision record draft) — independent, sequenced last per
+user request.

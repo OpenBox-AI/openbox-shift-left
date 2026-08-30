@@ -43,7 +43,7 @@ than invented:
 |---|---|
 | step 2, "prototype the streaming tee" | **moot** — `gateway.streamTo` already tees to `captureSink` |
 | step 7, "export the gateway seam" | **no-op** — `New`, `Config`, `WithCapture`, `WithVerbose`, `ServeHTTP`, `Captured`, `Emitter` were already exported and sufficient |
-| "edit `client/` for the `:proxy:` span/emit path" | **no-op** — landed in phase 08/ADR-0022; `observedLane`, `observedSpanID` and `turnActivityIDFor` already branch on `ProxyRequestID` |
+| "edit `client/` for the `:proxy:` span/emit path" | **no-op** — landed in phase 08/; `observedLane`, `observedSpanID` and `turnActivityIDFor` already branch on `ProxyRequestID` |
 
 The credential-path surface is therefore **smaller** than the phase anticipated:
 `{goproxy, gateway}`, not `{goproxy, gateway, client, decision}`. Nothing in

@@ -2,7 +2,7 @@ package client
 
 import "testing"
 
-// The three failure/lifecycle signals (ADR-0018): SubagentStarted,
+// The three failure/lifecycle signals : SubagentStarted,
 // PermissionDenied, APIError. All ride stock SignalReceived (INV-8).
 
 func signalEvent(t EventType) DevEvent {

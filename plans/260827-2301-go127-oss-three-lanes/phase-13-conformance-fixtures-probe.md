@@ -91,9 +91,9 @@ credential leak into git history.
    latency, truncation rate; record the numbers in `plans/reports/`.
 7. Testbed scripts, dormant, documenting at the point of failure what needs a stack.
 8. Probe A runbook: candidate refusal shapes, how retries are counted from
-   per-attempt telemetry, and the pre-decided outcomes — a qualifying shape fills
-   ADR-0021 §9's two constants; none qualifying descopes refusal and the dormancy
-   test becomes permanent.
+per-attempt telemetry, and the pre-decided outcomes — a qualifying shape fills
+that decision's two constants; none qualifying descopes refusal and the dormancy
+test becomes permanent.
 
 ## Todo
 
@@ -169,7 +169,7 @@ already been rewritten by this repo's own redactor. Real is also better evidence
 | Replay passes but live behaviour differs | Replay is explicitly capture-half only; live claims stay in the dormant scripts | — | None; the split is stated, not blurred |
 | Control test passes with a fake sneaking in | Drill it: unwire the emitter and confirm red | Test stays green when unwired | The test is worthless until it fails; fix before merge |
 | A goproxy upgrade reintroduces a byte mutation | The identity suite is permanent CI, not a one-time spike | Identity case red after a dependency bump | Treat as a blocking regression; pin the finding in the bump's review |
-| **Assumption: probe A finds a qualifying refusal shape** | Pre-decided both ways in the runbook | Every candidate triggers client retry | **Adjust, don't stop**: refusal descopes to observe-only, dormancy test becomes permanent, ADR-0021 §9 records the negative result |
+| **Assumption: probe A finds a qualifying refusal shape** | Pre-decided both ways in the runbook | Every candidate triggers client retry | **Adjust, don't stop**: refusal descopes to observe-only, dormancy test becomes permanent, that decision records the negative result |
 | Volume soak reveals the realtime flusher cannot keep up | Measure before shipping the default-on flip | Latency or spool growth unbounded | Adjust cadence/batching in phase 10; if unfixable, raise OD1 again with numbers |
 | Testbed scripts rot while dormant | Compile-check them in CI (`bash -n`) | — | Cheap; do it |
 

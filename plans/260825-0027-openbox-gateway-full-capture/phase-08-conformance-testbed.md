@@ -33,11 +33,10 @@
   no error; a failed `/v1/models` discovery falls back silently. None of these throw. All
   need explicit assertions.
 - **Both existing dormant assertions land here too.** `testbed/30-enforce.sh` §A (raw-rego
-  deny) and §A3 (halt → turn stop + latch) have been waiting on a stack since ADR-0017 and
-  ADR-0020. Run them in the same pass.
+deny) and §A3 (halt → turn stop + latch) have been waiting on a stack since that decision.
+Run them in the same pass.
 - **Backend asks are deliverables, not footnotes.** Retention for body-class volume and
-  server-side dedupe on developer events both block at the backend and have been open since
-  ADR-0019.
+server-side dedupe on developer events both block at the backend and have been open since.
 
 ## Requirements
 
@@ -134,7 +133,7 @@ contract change rather than on a broken session weeks later.
 |---|---|---|---|
 | No stack reachable, again | secure the stack before phase 08 starts | phase blocked | do not mark phases verified; say testbed has NOT run, as CLAUDE.md does today |
 | Silent failures pass unnoticed | explicit assertions per failure mode | testbed green, real sessions degraded | add the assertion that would have caught it |
-| Volume unacceptable at real cadence | measured here before any wider rollout | ingest latency, storage growth | build the deferred body sink (phase-05 contingency, ADR-0021 amendment first); hold rollout |
+| Volume unacceptable at real cadence | measured here before any wider rollout | ingest latency, storage growth | build the deferred body sink (phase-05 contingency, that decision amendment first); hold rollout |
 | `/protocol` drifts between releases | CI job is the detector | job fails | update passthrough; never allowlist |
 | Duplicate rows from two producers | collision test in phase 05, verified here | duplicated turns | server-side dedupe ask becomes blocking |
 

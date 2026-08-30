@@ -6,10 +6,10 @@ import (
 	"testing"
 )
 
-// The assistant-turn span (ADR-0018 Decision 2). Every assertion below is
-// against a consumer that fails SILENTLY: core logs and returns "" for a span it
-// cannot read, so a wrong shape here does not error anywhere — it just leaves
-// the Goal Alignment widgets empty exactly as they are today.
+// The assistant-turn span. Every assertion below is against a consumer that
+// fails SILENTLY: core logs and returns "" for a span it cannot read, so a wrong
+// shape here does not error anywhere — it just leaves the Goal Alignment widgets
+// empty exactly as they are today.
 
 func turnEvent(text string) DevEvent {
 	idx := 3

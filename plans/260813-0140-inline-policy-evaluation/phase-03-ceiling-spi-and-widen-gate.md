@@ -2,8 +2,8 @@
 
 ## Context links
 
-- Parent: [plan.md](plan.md) · Depends on: phase 2 (ADR-0017 authorizes it)
-- Blocks: phases 4, 5 · Authorized by: ADR-0017
+- Parent: [plan.md](plan.md) · Depends on: phase 2 (that decision authorizes it)
+- Blocks: phases 4, 5 · Authorized by
 - **The behavioural heart of the plan.** After this phase every gated call is decided by
   OpenBox; the deletion in phase 6 is then just removing what nothing calls.
 

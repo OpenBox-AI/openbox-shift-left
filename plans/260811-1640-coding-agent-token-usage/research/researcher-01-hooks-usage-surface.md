@@ -76,9 +76,9 @@ The agent-runtime side carries model + usage inside a span:
 `response_body.usage.{prompt_tokens,completion_tokens,total_tokens}` — one span
 per LLM call.
 
-Dev sessions have **no spans**: ADR-0013 (2026-08-11) retired the span layer and
-`client/hookspan.go`/`spanbuilder.go` are deleted. So parity must be of
-**information**, not of shape: model + usage on event metadata, not on an
+Dev sessions have **no spans**: that decision (2026-08-11) retired the span
+layer and `client/hookspan.go`/`spanbuilder.go` are deleted. So parity must be
+of **information**, not of shape: model + usage on event metadata, not on an
 `llm_completion` span. Any dashboard or query that reads spans to find LLM usage
 will not see developer sessions regardless of what this plan ships.
 

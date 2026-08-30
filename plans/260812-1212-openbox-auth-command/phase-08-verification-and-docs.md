@@ -46,8 +46,8 @@
    events arrive for the configured agent. The scope default is new behaviour, so
    the testbed must exercise the default rather than passing `--scope` explicitly.
 3. A negative scope assertion: a session driven from a directory where `init` was
-   **not** run produces **no** events. This is the governance gap ADR-0016 records,
-   and it should be demonstrated rather than assumed.
+**not** run produces **no** events. This is the governance gap that decision
+records, and it should be demonstrated rather than assumed.
 4. Manual acceptance checklist, per OS, in the plan's `reports/`: fresh install
    (`auth` then `init`), re-run/update, `--rotate`, env-shadow warning, migration
    from a legacy `os.UserConfigDir()` layout, and `--scope global`.
@@ -63,9 +63,9 @@
      so a user can copy values into `auth` and keep their agent, and name
      `auth --rotate` as the alternative for anyone holding an org key.
 7. Docs must state the project-local scope default **and** what it leaves
-   ungoverned, in getting-started where a user will actually read it — not only in
-   ADR-0016. Include how to govern everything (`--scope global` + managed
-   settings), and that Codex is user-scoped only.
+ungoverned, in getting-started where a user will actually read it — not only in.
+Include how to govern everything (`--scope global` + managed settings), and that
+Codex is user-scoped only.
 8. `docs/data-and-privacy.md` and `docs/architecture.md` cross-checked against what
    actually shipped — phase 1 wrote them ahead of the code; reconcile any drift.
 9. State explicitly, in docs, which platforms were exercised live and which were
@@ -115,7 +115,7 @@ Verification splits three ways, and the docs must not blur them:
    and when. Unrun rows stay unrun.
 6. Update `getting-started.md` to the `auth` → `init` flow, `README.md`, and add the
    migration note covering both legacy stores.
-7. Reconcile phase 1's docs (ADR-0015 **and** ADR-0016) against shipped behaviour;
+7. Reconcile phase 1's docs (that decision **and**) against shipped behaviour;
    fix drift.
 8. Final sweep: `go build ./... && go vet ./... && go test -race ./...` for all 11
    modules, plus the Windows cross-compile.
@@ -131,7 +131,7 @@ Verification splits three ways, and the docs must not blur them:
 - [x] `getting-started.md` leads with `auth` → `init` and states the scope gap
 - [x] migration note covers `secrets.json` **and** the keychain read commands
 - [x] `README.md` quickstart updated
-- [x] phase-1 docs (both ADRs) reconciled with shipped behaviour
+- [x] phase-1 docs (both decision records) reconciled with shipped behaviour
 - [x] all 11 modules green + Windows cross-compile green
 
 ## Success Criteria
@@ -157,14 +157,14 @@ Verification splits three ways, and the docs must not blur them:
 | Docs drift from phase 1 (written before the code) | M×M | a doc claim contradicts shipped behaviour | **Adjust:** step 6 exists for this; treat any contradiction as a release blocker. |
 | Migration note misses a legacy path | M×M | a user is left with two configs and silent no-delivery | **Adjust:** enumerate legacy paths from phase 2's `migrate.go` rather than from memory. |
 | Existing users hit the stranded-keychain wall with no way out | M×H | a working install breaks and the only advice is "re-register" | **Mitigated:** the keychain read commands are in both the migration note and phase 3's error text. If they prove wrong on a real machine, fix the commands — this is the one migration path D1 leaves. |
-| Docs describe project-local scope as full coverage | M×H | a reader concludes their machine is governed after a default `init` | **Stop:** this is the overstatement `CLAUDE.md` forbids. ADR-0016 and getting-started must agree, and phase 7's `printGovernedScope` is the runtime echo of the same fact. |
+| Docs describe project-local scope as full coverage | M×H | a reader concludes their machine is governed after a default `init` | **Stop:** this is the overstatement `CLAUDE.md` forbids. That decision and getting-started must agree, and phase 7's `printGovernedScope` is the runtime echo of the same fact. |
 | CI runner budget rejects a macOS job | L×L | matrix reduced | **Accepted:** ubuntu + windows-cross is the floor; macOS is covered by dev-host runs. |
 
 ## Security Considerations
 
 - Docs must state the plaintext posture and the per-OS asymmetry in the place a
-  user will actually read (getting-started), not only in the ADR. Same for the
-  org control token's larger blast radius on approver installs.
+user will actually read (getting-started), not only in that decision. Same for
+the org control token's larger blast radius on approver installs.
 - Docs must state the project-local scope default and what it leaves ungoverned, in
   the same place, for the same reason.
 - The migration note must tell users to **delete** the old `secrets.json` — leaving
@@ -177,8 +177,8 @@ Verification splits three ways, and the docs must not blur them:
 ## Next steps
 
 Plan complete. Optional follow-ups, each needing its own decision: retiring the
-deprecated `OPENBOX_ED25519_SEED`/`OPENBOX_SEED` aliases (needs an ADR amendment);
-project-local hook scope for Codex (`.codex/hooks.json`, ruled out in this plan);
-restoring `--managed-enable` if the org force-enable substrate is still wanted;
-shipping a Windows release binary plus a PowerShell installer; and filing the
-openbox-backend DTO-drift ticket from phase 6.
+deprecated `OPENBOX_ED25519_SEED`/`OPENBOX_SEED` aliases (needs a decision record
+amendment); project-local hook scope for Codex (`.codex/hooks.json`, ruled out in
+this plan); restoring `--managed-enable` if the org force-enable substrate is
+still wanted; shipping a Windows release binary plus a PowerShell installer; and
+filing the openbox-backend DTO-drift ticket from phase 6.

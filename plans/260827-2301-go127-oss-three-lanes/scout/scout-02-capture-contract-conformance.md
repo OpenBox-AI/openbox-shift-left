@@ -104,4 +104,5 @@ caps at egress. → Telemetry mappers bind at their OWN edge and must not touch 
 ## Unresolved
 
 - Exact count/shape of the TurnCompleted `oneOf` branches — confirm in-file at
-  phase-08 (ADR/contract) execution time before editing.
+phase-08 (contract) execution time
+before editing.

@@ -46,7 +46,7 @@
    (`internal/content/session.go:41-49`). An appended leaf is therefore the only thing that could
    invalidate a signed root — skipping the attestation start is what makes store-and-mark safe.
 5. **Block 2 has zero tests today** (researcher-01 Q5: `IsAttested` in the workflow test → 0 hits).
-6. **The client is not touched** — truthfulness is the decider's obligation (ADR-0017).
+6. **The client is not touched** — truthfulness is the decider's obligation.
 
 ## Requirements
 

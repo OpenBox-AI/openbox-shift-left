@@ -3,9 +3,9 @@
 ## Context links
 
 - Parent: [plan.md](plan.md) · Previous: [phase-06](phase-06-gateway-enforcement.md)
-- Scope amendment: [phase-03](phase-03-decisions-and-adrs.md) → ADR-0016
+- Scope amendment: [phase-03](phase-03-decisions.md) →
 - Settings precedence: https://code.claude.com/docs/en/settings
-- Assurance tiers: ADR-0021 (phase 03)
+- Assurance tiers: that decision (phase 03)
 - Depends on: 06
 
 ## Overview
@@ -24,9 +24,9 @@
 ## Key insights
 
 - **Project scope still does not work for this config.** `ANTHROPIC_BASE_URL` is read from
-  managed settings and `~/.claude/settings.json` where the Desktop app manages the
-  connection; background agents need settings, not shell exports. The ADR-0016 amendment
-  stands — the value now points at `127.0.0.1`, not an org host.
+managed settings and `~/.claude/settings.json` where the Desktop app manages the
+connection; background agents need settings, not shell exports. The that decision
+amendment stands — the value now points at `127.0.0.1`, not an org host.
 - **The env block shrinks to one owned key.** Pass-through deleted `ANTHROPIC_AUTH_TOKEN`;
   `forceLoginMethod` dropped to optional org-side hardening. Less to write is less to
   revert wrongly — but the `flagPassed` lesson still applies to what remains.
@@ -92,7 +92,7 @@ ownership, so OpenBox needs no tier flag.
 | `cli/internal/managed/templates/` | managed settings template (BASE_URL only) |
 | `cli/cmd/openbox/doctor.go` | liveness, scope/target, ownership, bypass exposure |
 | `docs/` | install/runbook + MDM enablement recipe |
-| `docs/adr/ADR-0016-default-install-posture.md` | amendment applied |
+| — | amendment applied |
 
 ## Implementation steps
 
@@ -249,11 +249,11 @@ the listener's existence are separate gates.
 
 ### `--gateway` is OPT-IN, and that is an OD-class call worth the owner's eye
 
-ADR-0016's lesson — a default-off headline feature stays off — argues for defaulting this
-ON. It is off anyway, because the two cases are not alike: **enforcement-by-default is INERT
-without an org policy, so flipping it could not break anyone.** This redirects live model
-traffic through a process that has never run against a real stack, whose refusal shape is
-still unprobed, and which has no daemon packaging on Windows at all.
+That decision's lesson — a default-off headline feature stays off — argues for defaulting
+this ON. It is off anyway, because the two cases are not alike: **enforcement-by-default is
+INERT without an org policy, so flipping it could not break anyone.** This redirects live
+model traffic through a process that has never run against a real stack, whose refusal shape
+is still unprobed, and which has no daemon packaging on Windows at all.
 
 Revisit once phase 08 has run the end-to-end path. `TestGatewayIsOffByDefault` reads `init`'s
 own help text, so flipping the default is a deliberate edit rather than a silent one.

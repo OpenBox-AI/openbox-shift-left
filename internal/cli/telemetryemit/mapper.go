@@ -11,9 +11,9 @@
 // What this lane is FOR, and its honest standing: it is the only lane that
 // reaches the desktop app and subscription-OAuth sessions, because it rides the
 // env block of ~/.claude/settings.json rather than per-client routing. It is
-// also the WEAKEST claim in the product (ADR-0022) — it is the governed tool
-// reporting its own calls, suppressible by the thing it observes. Never average
-// it together with the in-path lanes into "model calls are governed". OD4 is the
+// also the WEAKEST claim in the product — it is the governed tool reporting its
+// own calls, suppressible by the thing it observes. Never average it together
+// with the in-path lanes into "model calls are governed". OD4 is the
 // compensating control: telemetry silence on an otherwise-active session is a
 // finding.
 package telemetryemit
@@ -225,9 +225,9 @@ func (m *Mapper) turnFor(rec telemetry.Record) (client.DevEvent, Outcome) {
 		// event from this machine already reports. Same choice gatewayemit makes.
 		Tool:  client.Tool{Name: "claude-code", Kind: client.ToolShell},
 		Model: rec.Attrs["model"],
-		// The lane discriminator (ADR-0022). Without it turnActivityIDFor falls
-		// through to the hook path's TurnIndex branch and, with no index, returns
-		// an EMPTY activity_id.
+		// The lane discriminator. Without it turnActivityIDFor falls through to
+		// the hook path's TurnIndex branch and, with no index, returns an EMPTY
+		// activity_id.
 		OtelRequestID: reqID,
 		Tokens:        tokensFrom(rec.Attrs),
 		// The span exists for ONE reader: core recomputes semantic_type per span,

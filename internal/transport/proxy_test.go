@@ -450,7 +450,7 @@ func TestGoproxysBundledCAIsNeverReferenced(t *testing.T) {
 	}
 }
 
-// TestNonAllowlistedHostIsNeverCaptured is the promise that makes the ADR-0021 §5
+// TestNonAllowlistedHostIsNeverCaptured is the promise that makes that decision
 // reversal defensible, asserted rather than described: a host outside the
 // allowlist is not intercepted, so no capture can exist for it.
 func TestNonAllowlistedHostIsNeverCaptured(t *testing.T) {

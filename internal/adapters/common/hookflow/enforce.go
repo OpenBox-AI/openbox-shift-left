@@ -238,10 +238,10 @@ func TruncateBytes(s string, n int) string {
 // redaction, and nothing else.
 //
 // It used to construct the in-process policy evaluator over a signed local
-// bundle. ADR-0017 made OpenBox the decider, so what remains here is content
-// protection — deliberately still local, because it must run BEFORE the content
-// leaves the machine and it sees the whole body where the server sees at most
-// the first 64KB.
+// bundle. That decision made OpenBox the decider, so what remains here is
+// content protection — deliberately still local, because it must run BEFORE the
+// content leaves the machine and it sees the whole body where the server sees
+// at most the first 64KB.
 func NewDecider() decision.Decider { return decision.NewRedactor() }
 
 // ApplyFailurePolicy is the Go analog of the SDK's _handle_api_error,

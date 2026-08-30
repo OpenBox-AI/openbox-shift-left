@@ -2,7 +2,7 @@
 
 ## Context links
 
-- Parent: [plan.md](plan.md) · Depends on: [phase 06](phase-06-adrs-and-layout-maps.md)
+- Parent: [plan.md](plan.md) · Depends on: [phase 06](phase-06-decisions-and-layout-maps.md)
 - Inherits phases 02/04/05 of the superseded plan
   [260829-0304](../260829-0304-layout-conventions-and-module-docs/plan.md), whose
   analysis stays valid because it was measured rather than borrowed.
@@ -87,7 +87,7 @@ for each top-level dir (excluding dotfiles, docs, plans):
 ```
 
 **Per-subtree docs — the three-question form**, and nothing else: what this subtree
-owns; what must *not* go in it; the ADR that governs it. Skip any subtree with
+owns; what must *not* go in it; that decision that governs it. Skip any subtree with
 nothing to say beyond its table row, and record the skip in the phase report — three
 copies of one table is the drift surface this phase exists to prevent.
 

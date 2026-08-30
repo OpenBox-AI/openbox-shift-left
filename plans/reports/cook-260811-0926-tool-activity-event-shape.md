@@ -46,9 +46,9 @@ not merely asserted.
 reads `payload.Error` only for `WorkflowFailed` (`storage_event.go:281-286`), so
 an `ActivityCompleted.error` is decoded and discarded. Core's `Error` is also
 `*ErrorInfo`, a struct, not a string. **Consequence: a failed tool call is
-indistinguishable from a successful one on the wire.** Recorded in ADR-0013
-rather than shipping a field with neither producer nor consumer. Closing it needs
-a failure signal in the adapter schema — its own decision.
+indistinguishable from a successful one on the wire.** rather than shipping a
+field with neither producer nor consumer. Closing it needs a failure signal in
+the adapter schema — its own decision.
 
 **`attempt` is not sent.** Permanently null in a stateless hook process.
 
@@ -59,14 +59,14 @@ Core's dedupe key is `(agent_id, workflow_id, run_id, activity_id, event_type)`
 halves matched on **all five** — same `activity_id` by design, both
 `ActivityStarted` — so the `ToolResult` POST hit the existing-event branch
 (`governance_workflow.go:228-231`) and never created a row. The shared `span_id`
-ADR-0004 chose as the pairing mechanism was also what made the span-dedup check
-see nothing new.
+that decision chose as the pairing mechanism was also what made the span-dedup
+check see nothing new.
 
 So the completed half of every tool call was substantially a no-op. Because
-`event_type` is in the key, the new shape recovers it — an independently
-evaluated row with its own OPA pass and Guardrails stage 1 over `activity_output`.
-This reframes the change from cosmetic to a recovery of governance coverage, and
-is now the lead item in ADR-0013's Context and Consequences.
+`event_type` is in the key, the new shape recovers it — an independently evaluated
+row with its own OPA pass and Guardrails stage 1 over `activity_output`. This
+reframes the change from cosmetic to a recovery of governance coverage, and is now
+the lead item in that decision's Context and Consequences.
 
 Still source-reading, not running. Phase 04 is what settles it.
 
@@ -83,22 +83,21 @@ attempt**, exactly the path `operation_id` exists to support: the poll may resol
 the completed row, whose `approval_expiration_time` is NULL, so `Decided()` reads
 false and a real grant goes unconsumed.
 
-Out of this plan's scope (non-goals forbid openbox-core changes). Recorded in
-ADR-0013 Consequences and MAPPING.md §7 item 6, and spun off as a task.
+Out of this plan's scope (non-goals forbid openbox-core changes).
+Consequences and MAPPING.md §7 item 6, and spun off as a task.
 
 ## Files
 
 **Deleted** `client/hookspan.go`, `client/spanbuilder.go` + tests,
-`client/payload_hook_test.go`, 4 `hook_*.json` fixtures.
-**New** `client/approval_key_pin_test.go`, 6 `activity_*.json` fixtures,
-`docs/adr/ADR-0013-tool-call-as-activity.md`.
+`client/payload_hook_test.go`, 4 `hook_*.json` fixtures. **New**
+`client/approval_key_pin_test.go`, 6 `activity_*.json` fixtures,.
 **Rewritten** `client/payload.go` (one serializer, was two),
-`contracts/dev-event/MAPPING.md` §1/§2/§3/§5/§7.
-**Corrected** `client/README.md`, `CLAUDE.md`, root `README.md`,
-`docs/architecture.md`, `docs/data-and-privacy.md`, `docs/testbed/e2e.md`,
-`contracts/dev-event/{README,COVERAGE}.md`, `ext-core/README.md`,
-`docs/adr/{ADR-0004,README}.md`, three adapter comment-only fixes.
-**Testbed** `20-capture.sh`, `25-realtime.sh`, `30-enforce.sh`.
+`contracts/dev-event/MAPPING.md` §1/§2/§3/§5/§7. **Corrected**
+`client/README.md`, `CLAUDE.md`, root `README.md`, `docs/architecture.md`,
+`docs/data-and-privacy.md`, `docs/testbed/e2e.md`,
+`contracts/dev-event/{README,COVERAGE}.md`, `ext-core/README.md`, `{that
+decision,README}.md`, three adapter comment-only fixes. **Testbed**
+`20-capture.sh`, `25-realtime.sh`, `30-enforce.sh`.
 
 `contracts/dev-event/schema/` untouched — no `schema_version` bump.
 
@@ -127,7 +126,7 @@ ADR-0013 Consequences and MAPPING.md §7 item 6, and spun off as a task.
 
 Then write the artifact to `plans/260811-0245-tool-activity-event-shape/reports/`
 and release the gated claims: `MAPPING.md` §7's "NOT YET RUN" header,
-`CLAUDE.md`'s current-state paragraph, ADR-0013's "Not yet proven".
+`CLAUDE.md`'s current-state paragraph, that decision's "Not yet proven".
 
 ## Unresolved
 

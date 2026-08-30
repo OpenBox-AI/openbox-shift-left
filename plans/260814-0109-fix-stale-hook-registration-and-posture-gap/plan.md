@@ -5,14 +5,14 @@ status: complete
 priority: P1
 effort: 6.5h
 branch: main
-tags: [bugfix, hooks, installer, posture, adr-0017, doctor, docs]
+tags: [bugfix, hooks, installer, posture, the decision record, doctor, docs]
 created: 2026-08-14
 ---
 
 # Goal
 
-Two verified defects from the first post-ADR-0018 live session. No new table/endpoint/service ⇒ no
-new ADR (CLAUDE.md "Core principle").
+Two verified defects from the first post-that decision live session. No new table/endpoint/service
+⇒ no new decision record (CLAUDE.md "Core principle").
 
 **Issue 1 (high).** `init` matches its own hook entries by exact command string
 (`adapters/claude-code/localhooks.go:133-147`), so an entry from a different engine path reads as
@@ -20,8 +20,8 @@ foreign and is kept; re-init appends beside it (`:100-104`), both engines fire, 
 tool call stores twice. Fix: recognize by argv shape, replace, print.
 
 **Issue 2 (low-moderate).** `Posture.Metadata()` (`adapters/common/devconfig/posture.go:242-271`),
-the only path onto the wire, omits `decision_authority`/`failure_policy` that ADR-0017:237-239
-promises, and still lists five dead bundle-era keys. Fix: add two, delete five.
+the only path onto the wire, omits `decision_authority`/`failure_policy` that that
+decision:237-239 promises, and still lists five dead bundle-era keys. Fix: add two, delete five.
 
 **Context:** `plans/reports/issue-260814-0106-stale-hook-registration-and-posture-gap.md`;
 `research/researcher-01-hook-registration.md`; `research/researcher-02-posture-wire.md`
@@ -44,9 +44,10 @@ promises, and still lists five dead bundle-era keys. Fix: add two, delete five.
   matching `devconfig.warnDeprecatedKeys` (`devconfig.go:466-477`) and init's plaintext-key
   warning (`cli/cmd/openbox/init.go:197-199`).
 - **D2 (user-confirmable): `failure_policy` gets its own key** although `fail_closed` already
-  rides in `Flags()` (`posture.go:204-205`) and the string is derived 1:1 from that bool
-  (`:153-156`) — genuinely redundant as information. Adopted so code matches ADR-0017:237-239
-  literally; the alternative is amending a shipped ADR to promise less.
+rides in `Flags()` (`posture.go:204-205`) and the string is derived 1:1 from that bool
+(`:153-156`) — genuinely redundant as information. Adopted so code matches that
+decision:237-239 literally; the alternative is amending a shipped decision record to promise
+less.
 - **D3: the argv-shape classifier stays adapter-local** (ported from
   `adapters/codex/installer.go:262-302`, not shared). The adapters are separate modules
   (`go.work`), owned vocabularies differ (CC also owns `rewake claude-code`), containers differ

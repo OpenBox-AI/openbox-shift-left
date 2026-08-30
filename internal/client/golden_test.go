@@ -132,10 +132,10 @@ func goldenCases() []goldenCase {
 		span := *call.Span
 		span.Stage = "completed"
 		res.Span = &span
-		// The outcome (ADR-0018). It rides the completed half only, and these
-		// three fixtures are what pins the literal core compares against — a
-		// rename to "success" or "COMPLETED" shows up here as a wire diff rather
-		// than as a dashboard that quietly reads 0%.
+		// The outcome. It rides the completed half only, and these three
+		// fixtures are what pins the literal core compares against — a rename to
+		// "success" or "COMPLETED" shows up here as a wire diff rather than as a
+		// dashboard that quietly reads 0%.
 		res.Status = StatusCompleted
 		return res
 	}
@@ -159,10 +159,10 @@ func goldenCases() []goldenCase {
 
 	// Shell: this fixture carries no Content at all, which is the CAPTURE-OFF
 	// shape — the bytes an org with content_capture:false sends. (It used to be
-	// the unconditional shape: SL3-SEC-3 said a command never egressed. ADR-0019
-	// P1 retired that, so with capture ON both halves do carry content; the
-	// golden set deliberately pins the gated-off bytes, because those are the
-	// ones that must never drift.) The completed half has no counts either —
+	// the unconditional shape: SL3-SEC-3 said a command never egressed. That
+	// decision retired that, so with capture ON both halves do carry content;
+	// the golden set deliberately pins the gated-off bytes, because those are
+	// the ones that must never drift.) The completed half has no counts either —
 	// the providers expose none for a shell call — so its activity_output is
 	// absent rather than an empty object.
 	shellCall := base(EventToolCall, "ev-6")
@@ -193,13 +193,13 @@ func goldenCases() []goldenCase {
 	}
 	mcpResult := completed(mcpCall, "ev-9", "2026-07-31T09:00:00.75Z")
 
-	// The three failure/lifecycle signals (ADR-0018). Their fixtures exist
-	// mainly to pin ONE property that no unit test states as loudly: the wire
-	// payload has NO signal_args key. Core reads a SignalReceived carrying
-	// signal_args as a new user goal and overwrites the alignment session's goal
-	// with it (age.go:112-137), so a well-meaning "let's show the denied tool in
-	// the Verify tab's Input" would silently destroy goal alignment. If these
-	// three fixtures ever gain a signal_args key, that is the bug.
+	// The three failure/lifecycle signals. Their fixtures exist mainly to pin
+	// ONE property that no unit test states as loudly: the wire payload has NO
+	// signal_args key. Core reads a SignalReceived carrying signal_args as a new
+	// user goal and overwrites the alignment session's goal with it
+	// (age.go:112-137), so a well-meaning "let's show the denied tool in the
+	// Verify tab's Input" would silently destroy goal alignment. If these three
+	// fixtures ever gain a signal_args key, that is the bug.
 	subagentStarted := base(EventSubagentStarted, "ev-17")
 	subagentStarted.Tool = Tool{Name: "claude-code", Kind: ToolShell}
 	subagentStarted.AgentID = "agt-code-reviewer-01"
@@ -247,12 +247,12 @@ func goldenCases() []goldenCase {
 	}
 	turnCompleted.Metadata = map[string]any{"provider": "claude-code", "turn_index": turnIndex}
 
-	// The same turn WITH the assistant's text (ADR-0018). This fixture is the
-	// byte-exact record of the one span a developer session emits: the
-	// classification attributes core recomputes semantic_type from, the
-	// synthetic marker, the hash-derived ids, and the OpenAI-chat wrapper its
-	// alignment extractor unmarshals. Every one of those fails SILENTLY if it
-	// drifts — core logs and returns "" — so the fixture is the alarm.
+	// The same turn WITH the assistant's text. This fixture is the byte-exact
+	// record of the one span a developer session emits: the classification
+	// attributes core recomputes semantic_type from, the synthetic marker, the
+	// hash-derived ids, and the OpenAI-chat wrapper its alignment extractor
+	// unmarshals. Every one of those fails SILENTLY if it drifts — core logs and
+	// returns "" — so the fixture is the alarm.
 	//
 	// It carries BOTH content fields a turn can hold, deliberately: the reply on
 	// the span and the thinking in activity_output. One fixture showing them in

@@ -5,8 +5,9 @@
 - Parent: [plan.md](plan.md)
 - Depends on: [Phase 01](phase-01-wire-activity-lifecycle.md) (nothing may reference the
   builders before they are deleted)
-- Dissolves the mirror obligation recorded in `docs/adr/ADR-0004-base-wire-unification.md`
-  §Amendment — the ADR text is updated in [Phase 03](phase-03-contracts-adr-docs.md)
+- Dissolves the mirror obligation recorded
+§Amendment — that decision text is updated in [Phase
+03](phase-03-contracts-and-docs.md)
 
 ## Overview
 
@@ -19,7 +20,7 @@
 
 ## Key insights
 
-1. **This is the single largest simplification available.** ADR-0004 §Amendment names
+1. **This is the single largest simplification available.**
    `client/hookspan.go` as "the known weak point: nothing mechanically compares it
    against upstream, so it guards local edits only." Retiring the span layer retires the
    obligation outright — no upstreaming, no corpus, no push access needed.
@@ -35,9 +36,9 @@
    The one production caller of the *derivations* — `client/approval.go`'s
    `ApprovalKeyFor` — is resolved in Phase 01, which keeps them under new names.
 3. **`contracts/dev-event/conformance/` does not touch the wire span** (grep: zero span
-   references in `schema.go`). It validates the *adapter-facing* schema, which is frozen.
-   So conformance survives untouched — a useful confirmation that the two-layer split
-   ADR-0004 established is real and not just documented.
+references in `schema.go`). It validates the *adapter-facing* schema, which is frozen. So
+conformance survives untouched — a useful confirmation that the two-layer split that
+decision established is real and not just documented.
 4. **Two adapter test files reference the mirror, not the engine.** They assert wire
    parity; they become assertions about the activity shape. No adapter production code
    changes, which is the invariant to protect.
@@ -137,7 +138,7 @@ row (the base assertion we no longer mirror, with the reason). Leaving it as
 Success criterion 1's grep is not literally empty: `AssertHookWireShape` survives
 in **two doc comments**, both saying what the new helper replaced. No code
 references it. Removing the name would cost the next reader the reason the helper
-exists; the ADR names it in prose for the same reason.
+exists; that decision names it in prose for the same reason.
 
 ### Verified
 
@@ -180,6 +181,7 @@ that needs replanning.
 
 ## Next steps
 
-Phase 03 makes the documentation and the ADR record match the code.
+Phase 03 makes the documentation and that decision record match the
+code.
 
 <!-- Updated: Validation Session 1 - reference census hardened (comment-only hits identified, client/approval.go named as the one production caller of the derivations); workflowIDFor/activityIDFor excluded from retirement; Span.Stage retained unread -->

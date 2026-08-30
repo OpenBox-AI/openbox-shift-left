@@ -181,12 +181,11 @@ func selectVerifier(dryRun bool, logger *log.Logger) gitaction.OwnershipVerifier
 // privateKeyFromEnv reads the signing key under the name OpenBox documents, then
 // the two deprecated aliases.
 //
-// This action shipped with OPENBOX_SEED while the CLI used
-// OPENBOX_ED25519_SEED and the platform's own SDK docs said
-// OPENBOX_AGENT_PRIVATE_KEY — three names for one value, so a developer
-// following the docs configured a variable nothing read (ADR-0015). The
-// documented name wins; the aliases keep existing CI workflows green, and
-// retiring them needs its own decision.
+// This action shipped with OPENBOX_SEED while the CLI used OPENBOX_ED25519_SEED
+// and the platform's own SDK docs said OPENBOX_AGENT_PRIVATE_KEY — three names
+// for one value, so a developer following the docs configured a variable nothing
+// read. The documented name wins; the aliases keep existing CI workflows green,
+// and retiring them needs its own decision.
 func privateKeyFromEnv() string {
 	for _, name := range []string{"OPENBOX_AGENT_PRIVATE_KEY", "OPENBOX_SEED", "OPENBOX_ED25519_SEED"} {
 		if v := os.Getenv(name); v != "" {

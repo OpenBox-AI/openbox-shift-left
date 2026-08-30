@@ -1,27 +1,24 @@
-// Package devinit registers a developer agent, captures its once-shown
-// credentials into ~/.openbox/.env, and delegates the tool's native config to
-// the provider installer.
+// Package devinit registers a developer agent, captures its once-shown credentials
+// into ~/.openbox/.env, and delegates the tool's native config to the provider
+// installer.
 //
 // Nothing needs to run afterwards — but "ambient" describes the MECHANISM, not the
-// COVERAGE: a default install governs one project directory (ADR-0016, and see
-// Options.ProjectDir). Conflating the two is the overstatement this product exists
-// to prevent.
+// COVERAGE: a default install governs one project directory (that decision, and
+// see Options.ProjectDir). Conflating the two is the overstatement this product
+// exists to prevent.
 //
-// Invariants enforced here:
-//   - INV-1: the obx_ key and signing key are written only to the credential
-//     file and never printed, logged, or placed on an argv. Output shows the
-//     file path, never a value. ADR-0015 narrowed what INV-1 claims — that file
-//     is plaintext — but not the no-print/no-argv part enforced here.
-//   - INV-4: agents are organization-scoped (the backend derives the org from
-//     the caller credential).
-//   - INV-7: developer agents use the shared did:aip namespace (the backend
-//     mints the DID via the same uuidv5 scheme as runtime agents).
+// Invariants enforced here: - INV-1: the obx_ key and signing key are written only
+// to the credential file and never printed, logged, or placed on an argv. Output
+// shows the file path, never a value. That decision narrowed what INV-1 claims —
+// that file is plaintext — but not the no-print/no-argv part enforced here. -
+// INV-4: agents are organization-scoped (the backend derives the org from the
+// caller credential). - INV-7: developer agents use the shared did:aip namespace
+// (the backend mints the DID via the same uuidv5 scheme as runtime agents).
 //
-// Safety properties:
-//   - --dry-run performs NO network and NO filesystem writes.
-//   - re-registration is skipped when credentials already exist locally.
-//   - partial failure is reported: if a step fails after the agent is created,
-//     the output names the registered agent id and how to resume.
+// Safety properties: - --dry-run performs NO network and NO filesystem writes. -
+// re-registration is skipped when credentials already exist locally. - partial
+// failure is reported: if a step fails after the agent is created, the output
+// names the registered agent id and how to resume.
 package devinit
 
 import (
@@ -74,16 +71,16 @@ type Options struct {
 	EnvFile        string
 	ManagedEnable  bool // org-wide force-enable substrate; opt-in
 	InstallGitHook bool // enable ambient commit-trailer hook install (off by default)
-	// ProjectDir selects PROJECT hook scope, which is `openbox init`'s default
-	// (ADR-0016): the adapter merges its hook block into
-	// <dir>/.claude/settings.local.json, so sessions in that project are governed
-	// and sessions elsewhere are not. Empty means GLOBAL scope — the bundle is
-	// still installed, but activation waits on a managed-settings deployment.
+	// ProjectDir selects PROJECT hook scope, which is `openbox init`'s default :
+	// the adapter merges its hook block into <dir>/.claude/settings.local.json,
+	// so sessions in that project are governed and sessions elsewhere are not.
+	// Empty means GLOBAL scope — the bundle is still installed, but activation
+	// waits on a managed-settings deployment.
 	ProjectDir string
 	// Enforce turns enforce mode on or off and persists it (plus its companions,
-	// Findings) into the dev config, so no runtime env var is needed
-	// (ADR-0006 for the mechanism). Enforce now defaults ON (ADR-0016) — it is
-	// resolved from the ABSENCE of the field, not written by every run.
+	// Findings) into the dev config, so no runtime env var is needed (that
+	// decision for the mechanism). Enforce now defaults ON — it is resolved from
+	// the ABSENCE of the field, not written by every run.
 	//
 	// All three are *bool so nil means "this run did not say", leaving whatever is
 	// on disk untouched. That is load-bearing in both directions: a plain `init`
@@ -156,10 +153,10 @@ func truncate(s string, maxBytes int) string {
 // ~/.openbox/.env. It installs nothing and touches no tool config.
 //
 // It exists as its own entry point because `openbox auth` owns authentication
-// while `openbox init` owns setup (ADR-0015/ADR-0016). auth needs exactly the
-// behaviour proven here — remote duplicate detection, the HALT-on-4xx stop
-// condition, the once-only-credential guard, and the resume error that names the
-// registered agent — with no installer running.
+// while `openbox init` owns setup. auth needs exactly the behaviour proven here
+// — remote duplicate detection, the HALT-on-4xx stop condition, the
+// once-only-credential guard, and the resume error that names the registered
+// agent — with no installer running.
 //
 // The returned CredentialRef carries the coordinates the caller should persist:
 // DID and AgentID are set on the register path. Run wraps this and adds the
@@ -222,7 +219,7 @@ func register(ctx context.Context, o Options, d Deps) (*Result, provider.Credent
 		// a managed-settings deployment this command cannot perform.
 		ProjectDir: o.ProjectDir,
 		// Persist the enforce posture into dev.json so the runtime hook needs no
-		// env var. Enforce defaults ON (ADR-0016).
+		// env var. Enforce defaults ON.
 		Enforce:  o.Enforce,
 		Findings: o.Findings,
 	}
@@ -239,7 +236,7 @@ func register(ctx context.Context, o Options, d Deps) (*Result, provider.Credent
 	// present, reuse them and skip registration entirely.
 	//
 	// The DID comes from dev.json rather than from beside the credentials, which
-	// is the ADR-0015 split doing its job: before it, the DID lived in the
+	// is that decision split doing its job: before it, the DID lived in the
 	// keychain too and this reuse path read the keychain's copy and wrote it into
 	// dev.json — so a stale keychain entry silently reverted a corrected DID on
 	// every re-init. With one store per field there is nothing to revert from.
@@ -264,8 +261,8 @@ func register(ctx context.Context, o Options, d Deps) (*Result, provider.Credent
 		//
 		// Returning it empty would ERASE it, and it is not decorative —
 		// ResolveAgentID feeds SelfAgentID in the autonomous approver, which is
-		// how a machine refuses to approve its own request (ADR-0012). Losing it
-		// disables that check silently.
+		// how a machine refuses to approve its own request. Losing it disables
+		// that check silently.
 		res.AgentID = devconfig.ResolveAgentID()
 		ref.AgentID = res.AgentID
 		fmt.Fprintf(d.Out, "This machine already has credentials in %s — reusing them (DID %s).\n",
@@ -347,9 +344,9 @@ func register(ctx context.Context, o Options, d Deps) (*Result, provider.Credent
 	// --- capture credentials into ~/.openbox/.env (INV-1) --------------------
 	// One atomic write for both secrets, so there is no half-written credential
 	// pair to reason about. The DID is not written here — it is a coordinate and
-	// goes to dev.json via the installer (ADR-0015's one-store-per-field split).
-	// On failure after the agent exists, the error names the registered agent id
-	// so the operator can resume.
+	// goes to dev.json via the installer (that decision's one-store-per-field
+	// split). On failure after the agent exists, the error names the registered
+	// agent id so the operator can resume.
 	if err := writeLocalCredentials(o.EnvFile, reg.APIKey, reg.PrivateKey); err != nil {
 		return res, ref, resumeErr(reg, "write credentials to "+credentialFileLabel(o.EnvFile), err)
 	}
@@ -408,10 +405,10 @@ func planDryRun(o Options, d Deps, name, icon string, profile aivss.Config, ref 
 	fmt.Fprintf(out, "  aivss_config: base_security/ai_specific/impact (accepted developer posture; server computes score/tier)\n")
 	fmt.Fprintf(out, "  managed_enable: %t (substrate only; not activated in Phase 1)\n", o.ManagedEnable)
 	fmt.Fprintf(out, "  install_git_hook: %t (ambient commit-trailer hook; off by default — modifies .git/hooks)\n", o.InstallGitHook)
-	fmt.Fprintf(out, "  enforce: %s (ADR-0016: ON by default — inert until your org publishes a policy, and\n", describePosture(o.Enforce))
+	fmt.Fprintf(out, " enforce: %s (that decision: ON by default — inert until your org publishes a policy, and\n", describePosture(o.Enforce))
 	fmt.Fprintf(out, "           fail-open regardless. --enforce=false opts out and persists. Enforce also\n")
 	fmt.Fprintf(out, "           carries tier2 + findings, all persisted to dev.json — no runtime env)\n")
-	fmt.Fprintf(out, "\nWould write credentials to %s (0600, plaintext — ADR-0015):\n", credentialFileLabel(o.EnvFile))
+	fmt.Fprintf(out, "\nWould write credentials to %s (0600, plaintext):\n", credentialFileLabel(o.EnvFile))
 	fmt.Fprintf(out, "  %s  (obx_ API key)\n  %s  (Ed25519 signing key)\n", devconfig.EnvAPIKeyDirect, devconfig.EnvAgentPrivateKey)
 	fmt.Fprintf(out, "\nProvider config:\n%s\n", d.Installer.Plan(ref))
 	return nil

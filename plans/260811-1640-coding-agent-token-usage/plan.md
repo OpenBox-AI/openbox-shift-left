@@ -5,7 +5,7 @@ status: implemented-pending-live-verification
 priority: P2
 effort: 14h
 branch: fix/tier2-duplicate-activity-started
-tags: [finops, telemetry, privacy, adapters, contract, adr]
+tags: [finops, telemetry, privacy, adapters, contract, decision record]
 created: 2026-08-11
 ---
 
@@ -38,7 +38,7 @@ usage, widen the wire, and turn it on.
 | `activity_id` | **`<session_id>:turn:<index>`**, pinned by a byte-identity test |
 | Subagents | **`SubagentStop`** as a second hook; separate per-subagent records; sidechain partition (one bound bool) if measurement shows subagent usage in the parent transcript |
 | Codex | **SessionEnd rollup activity** (`<session_id>:usage:rollup`) + per-turn limit documented as deliberate scope (its `Stop` hook exists, unwired) |
-| INV-2 posture | **Curated identifier allowlist** — `model` becomes the one string the projection egresses; needs an ADR |
+| INV-2 posture | **Curated identifier allowlist** — `model` becomes the one string the projection egresses; needs a decision record |
 | Default | **ON**, mirroring the 2026-07-15 content-capture reversal; requires `Finops` → `*bool` first |
 | Cost | **Absent from the client** — never derived here; core/backend already derive it server-side from model-keyed metrics |
 | Cross-repo | **One issue, openbox-core only** — backend and fe confirmed no-change |
@@ -46,8 +46,8 @@ usage, widen the wire, and turn it on.
 ## Shape constraint, stated plainly
 
 The AI-Agent signal lives in an `llm_completion` span (`response_body.model`,
-`response_body.usage.*`). Dev sessions write **no spans** (ADR-0013), so the turn
-rides the activity shape instead: an `ActivityStarted`/`ActivityCompleted` pair with
+`response_body.usage.*`). Dev sessions write **no spans**, so the turn rides the
+activity shape instead: an `ActivityStarted`/`ActivityCompleted` pair with
 `activity_type: "llm_completion"` and `activity_output` mirroring the span's
 `response_body`. Both wire types are already accept-listed (INV-8 needs nothing
 new), and the name matches core's existing `SemanticTypeLLMCompletion` vocabulary
@@ -64,7 +64,7 @@ model call.
 
 | # | Phase | Effort | Status | Depends on |
 |---|---|---|---|---|
-| 01 | [Contract: turn-as-activity and the ADR](phase-01-decisions-and-contract.md) | 2h | **complete** (core issue filed + implemented) | — |
+| 01 | [Contract: turn-as-activity and that decision](phase-01-decisions-and-contract.md) | 2h | **complete** (core issue filed + implemented) | — |
 | 02 | [Turn boundary: Stop + SubagentStop](phase-02-turn-boundary-stop-hook.md) | 3h | **complete** | 01 |
 | 03 | [Per-turn usage and model extraction](phase-03-usage-and-model-extraction.md) | 3.5h | **complete** | 01, 02 |
 | 04 | [Codex: session-rollup activity](phase-04-codex-parity.md) | 2h | **complete** | 03 |
@@ -144,11 +144,11 @@ Measurement evidence: [reports/measure-260811-transcript-turn-surface.md](report
 
 ## Non-goals
 
-Reviving spans or the `llm_completion` *span* shape (ADR-0013 stands unamended; the
-`llm_completion` **name** is adopted as an `activity_type`) · per-LLM-call
-granularity (unreachable via hooks) · client-side cost derivation (server-side
-derivation already exists and is out of scope here) · compaction metrics
-(`PostCompact` sizes — adjacent, separate plan) · backfilling history.
+Reviving spans or the `llm_completion` *span* shape (that decision stands
+unamended; the `llm_completion` **name** is adopted as an `activity_type`) ·
+per-LLM-call granularity (unreachable via hooks) · client-side cost derivation
+(server-side derivation already exists and is out of scope here) · compaction
+metrics (`PostCompact` sizes — adjacent, separate plan) · backfilling history.
 
 ## Evidence
 
@@ -166,7 +166,7 @@ pass before implementation.
 | Decision | Choice |
 |---|---|
 | Carrier | **Turn-as-activity.** `ActivityStarted` + `ActivityCompleted` with `activity_type: "llm_completion"`; usage in `activity_output`, shaped like the LLM span's `response_body` (`{model, usage{…}}`). Not a span, not `SignalReceived` |
-| Span revival | **Rejected.** ADR-0013 stands unamended; no `client/hookspan.go` restoration, no synthesized `http_url` |
+| Span revival | **Rejected.** That decision stands unamended; no `client/hookspan.go` restoration, no synthesized `http_url` |
 | Granularity | **Started + Completed pair**, symmetric with every other dev activity |
 | `activity_type` | **`llm_completion`** — one vocabulary across both runtimes |
 | Cache tokens | **Keep the widening.** All four counts on the wire |
@@ -220,9 +220,9 @@ provider URL exists on an activity, so that gate never applies.
       `SignalReceived("turn_completed")`; emit `ActivityStarted`/`ActivityCompleted`
       with `activity_type: "llm_completion"` and usage in `activity_output`. Both
       types are already accept-listed, so INV-8 needs nothing new.
-- [x] **Phase 01 — retarget the ADR.** Subject is now turn-as-activity plus the
-      INV-2 identifier allowlist. ADR-0013 is *not* amended; state that spans stay
-      retired and this rides the activity shape ADR-0013 established.
+- [x] **Phase 01 — retarget that decision.** Subject is now turn-as-activity plus the
+      INV-2 identifier allowlist. That decision is *not* amended; state that spans stay
+      retired and this rides the activity shape that decision established.
 - [x] **Phase 01 — `activity_id` must be unique and deterministic per turn**, never
       colliding with tool-call ids, and derivable at both the turn-open and turn-close
       hooks so the pair correlates. Recommend `<session_id>:turn:<index>` from the
@@ -287,7 +287,7 @@ could not decide. All round-1 citations re-confirmed at their stated locations.
 | Subagent contingency (Q3) | If measurement shows sidechain usage in the parent transcript: **partition by a sidechain discriminator** (bind one bool, e.g. `isSidechain`); parent turn sums exclude sidechain lines, `SubagentStop` records carry them. Round-1 SubagentStop decision stands. INV-2 cost: a bool, not a string |
 | Cache counts | **Core issue adds `<model>.cache_creation_tokens` / `<model>.cache_read_tokens`** composite keys beside the existing ones — same upsert path. Cache-aware pricing in the backend is an optional follow-up, not blocking |
 | Cross-repo filing (Q5) | **One issue, openbox-core only** — backend and fe confirmed no-change (evidence below) |
-| Attestation/spans (Q4) | **Closed by scout**: nothing in `adapters/common/git/`, `actions/`, `cli/` reads activity events; dev sessions write no spans rows (ADR-0013). The activity route touches only `governance_events` |
+| Attestation/spans (Q4) | **Closed by scout**: nothing in `adapters/common/git/`, `actions/`, `cli/` reads activity events; dev sessions write no spans rows. The activity route touches only `governance_events` |
 
 #### New evidence from openbox-core
 
@@ -342,7 +342,7 @@ could not decide. All round-1 citations re-confirmed at their stated locations.
 
 - [x] Revise phase files 01–06 to the turn-as-activity carrier; round-1 items
       stand: drop `EventTurnCompleted`-as-signal + `SignalReceived`, retarget the
-      ADR, `Finops *bool`, pairing-guard extension, non-goal wording.
+      decision record, `Finops *bool`, pairing-guard extension, non-goal wording.
       *(Applied 2026-08-11 — all six phase files rewritten.)*
 - [x] Phase 02: both halves from `Stop`; `activity_id = <session_id>:turn:<index>`
       with a byte-identity pin test; turn-open parsed locally for `duration_ms`;

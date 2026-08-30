@@ -1,16 +1,16 @@
-# Phase 05 verification — credential-guard scope (ADR-0023)
+# Phase 05 verification — credential-guard scope
 
 **Date:** 2026-08-28 · **Host:** macOS 25.0.0 darwin/arm64, go1.27.0 ·
 **Branch:** `feat/tool-content-capture` · **Blocks:** phase 06
 
 Deliberately weakens a security test, lands alone, and records why.
-**ADR: [ADR-0023](../../../docs/adr/ADR-0023-credential-guard-scope.md).**
+**decision record.**
 
 ## Verdict
 
 Done. The narrowing is in, the pre-existing host-matching gap is closed,
-`decision/` has its own guard, and the ADR states the reduction in its title
-rather than softening it into "clarified scope".
+`decision/` has its own guard, and that decision states the reduction in its
+title rather than softening it into "clarified scope".
 
 Both directions drilled **on the live `gateway/go.mod`**, not just on fixtures:
 a direct unreviewed require ⇒ red; an indirect one ⇒ green.
@@ -23,12 +23,12 @@ a direct unreviewed require ⇒ red; an indirect one ⇒ green.
 | `gateway/guard_test.go` (allowlist comment) | states the boundary: direct bounded here, transitive bounded at the dependency's own module |
 | `gateway/guardscope_test.go` | NEW — 7 seeded fixture cases + 2 live-file cases |
 | `decision/guard_test.go` | NEW — its own allowlist + 5 seeded cases |
-| `docs/adr/ADR-0023-…md` | NEW; indexed in `docs/adr/README.md` |
+| `that decision-…md` | NEW; indexed in `README.md` |
 | `scanSource`, `forbiddenCalls`, `forbiddenLiterals`, the import half | **untouched — verified by diff** |
 
-ADR numbered **0023**, not 0022: the plan reserves 0022 for phase 08's OSS-adoption
-ADR. Numbering follows the plan rather than creation order, and the code comment
-cites 0023 so the two cannot disagree.
+decision record numbered **0023**, not 0022: the plan reserves 0022 for phase 08's
+OSS-adoption decision record. Numbering follows the plan rather than creation
+order, and the code comment cites 0023 so the two cannot disagree.
 
 ## Evidence
 
@@ -78,14 +78,15 @@ transitive tree into gateway's go.mod, which is the whole reason this phase exis
 ## What the guarantee is now
 
 One broad claim replaced by narrower ones, each enforced where it is checkable —
-the full table is in the ADR. The honest summary:
+the full table is in that decision. The honest summary:
 
 - gateway's own files resolve no credential — **unchanged**;
 - gateway imports nothing outside two modules — **unchanged**;
 - gateway *requires* nothing outside two modules **directly** — narrowed;
 - `decision`'s direct dependencies are reviewed — **new**;
 - arbitrary transitive code resolves no provider credential — **bounded by no
-  test**. Accepted residual risk, named in the ADR.
+test**. Accepted residual risk, named in that
+decision.
 
 That last one **was already true**. The old check matched only lines starting
 `github.com/`, so a direct `golang.org/x/…` require was invisible to it even
@@ -101,11 +102,11 @@ value here.
    The seeded direct case is what keeps that honest. Flagging in case a future
    `go mod` format change is considered likely enough to justify the heavier check.
 2. **`unallowedDirectRequires` is duplicated** in `gateway` and `decision` rather
-   than shared. Sharing it would invert the module dependency direction (ADR-0003),
-   and it is test-only in a module that must not grow dependencies. The two copies
-   are pinned by carrying the same seeded cases, not by sharing code — if a third
-   module needs it (phases 09 and 11 will), that trade should be revisited rather
-   than copied a third time.
+than shared. Sharing it would invert the module dependency direction, and it is
+test-only in a module that must not grow dependencies. The two copies are pinned by
+carrying the same seeded cases, not by sharing code — if a third module needs it
+(phases 09 and 11 will), that trade should be revisited rather than copied a third
+time.
 3. **`decision`'s allowlist lists a sibling module explicitly** rather than
    pattern-excluding the repo's own prefix, to match how gateway's allowlist is
    written. It means an in-repo module still has to be listed, which the seeded

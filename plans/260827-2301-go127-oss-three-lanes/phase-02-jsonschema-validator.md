@@ -38,7 +38,7 @@
 - `$ref: "#/$defs/…"` and `oneOf` branch trials are core spec features, not
   extensions. The hand-rolled `resolve()` (validator.go:20-36) handled only local
   `$defs` refs; the library handles the whole draft. **This is the correctness
-  gain** — and it matters now, because [phase 08](phase-08-adr-contract-decision.md)'s
+  gain** — and it matters now, because [phase 08](phase-08-contract-decision.md)'s
   contract bump adds `oneOf` discriminator branches (`otel_request_id` /
   `proxy_request_id` / `gateway_request_id`) that the hand-rolled trial logic has
   never been stressed on.
@@ -116,7 +116,7 @@ The two passes stay separate and stay in this order, for the reason
 ## Success criteria
 
 - C1–C41 pass unmodified.
-- The `oneOf` discriminator cases [phase 08](phase-08-adr-contract-decision.md)
+- The `oneOf` discriminator cases [phase 08](phase-08-contract-decision.md)
   will add can be expressed and validated — sanity-check with a throwaway
   two-branch `oneOf`.
 - A structurally-invalid **and** content-gated instance reports the content
@@ -150,7 +150,7 @@ The two passes stay separate and stay in this order, for the reason
 ## Next steps
 
 Phase 03 swaps the config parsers. Phase 05 must precede phase 06. Landing this
-phase before [phase 08](phase-08-adr-contract-decision.md) is strongly
+phase before [phase 08](phase-08-contract-decision.md) is strongly
 recommended, so the contract's new `oneOf` branches are validated by the library
 from their first commit.
 

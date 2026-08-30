@@ -32,18 +32,17 @@ import (
 //
 // ── WHY --gateway IS OPT-IN (an OD-class call, flagged not buried) ────────────
 //
-// ADR-0016's lesson is that a default-off headline feature stays off, and that
-// argues for defaulting this ON. It is deliberately off anyway, because the two
-// cases are not alike: enforcement-by-default is INERT without an org policy, so
-// flipping it could not break anyone. This redirects live model traffic through a
-// process that has never run against a real stack, whose refusal shape is still
-// unprobed, and which has no daemon packaging on Windows at all. A default that
-// can break the developer's tool before the path is proven end to end is the
-// opposite of the caution this repo applies everywhere else.
+// That decision's lesson is that a default-off headline feature stays off, and
+// that argues for defaulting this ON. It is deliberately off anyway, because the
+// two cases are not alike: enforcement-by-default is INERT without an org policy,
+// so flipping it could not break anyone. This redirects live model traffic
+// through a process that has never run against a real stack, whose refusal shape
+// is still unprobed, and which has no daemon packaging on Windows at all. A
+// default that can break the developer's tool before the path is proven end to
+// end is the opposite of the caution this repo applies everywhere else.
 //
 // Revisit the default when phase 08 has run the end-to-end path. That is the
-// owner's call, and it should be made with evidence rather than by symmetry with
-// ADR-0016.
+// owner's call, and it should be made with evidence rather than by symmetry with.
 
 // gatewayReadyTimeout bounds how long init waits for the supervisor to bring the
 // daemon up before deciding it did not.

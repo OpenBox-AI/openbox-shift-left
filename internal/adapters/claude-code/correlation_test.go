@@ -62,9 +62,9 @@ func TestCorrelation_ToolUseIDRidesTheInvocationSlot(t *testing.T) {
 // can hold an approval, and an approval is keyed on activity_id — so every such
 // class must have an operation identity that survives a retry.
 //
-// Since ADR-0017 the gate escalates EVERY class, so the name no longer means
-// "the only classes that can hold an approval". These two are the classes with a
-// real structural discriminator, and they are the ones that must stay
+// Since that decision the gate escalates EVERY class, so the name no longer
+// means "the only classes that can hold an approval". These two are the classes
+// with a real structural discriminator, and they are the ones that must stay
 // retry-stable; the rest are pinned by
 // TestUngatedClassesKeepInvocationScopedIdentity below, which records a known
 // limitation rather than an invariant.
@@ -101,7 +101,7 @@ func TestHighRiskClassesHaveAStableOperationID(t *testing.T) {
 	}
 }
 
-// A known limitation, asserted so it stays deliberate. ADR-0017 gates every
+// A known limitation, asserted so it stays deliberate. That decision gates every
 // class, but only shell and MCP have a structural discriminator; the rest key on
 // the invocation, so their approval identity moves on every retry. An approval
 // granted for one of these calls is therefore never consumed — the developer

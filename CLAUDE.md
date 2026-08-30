@@ -21,13 +21,11 @@ than a parallel one:
 - emit events through the **same** `/api/v1/governance/evaluate` with the **same**
   auth (`Bearer obx_` + AIP signing);
 - store in the **same** tables (`sessions` → `governance_events`, plus Merkle
-  leaves) and read through the **same** services. Dev sessions write no `spans`
-  rows for tool calls (ADR-0013) — with exactly ONE exception: a content-capturing
-  model turn carries one span, because core's alignment reader accepts no other
-  shape (ADR-0018).
+leaves) and read through the **same** services. Dev sessions write no `spans` rows
+for tool calls — with exactly ONE exception: a content-capturing model turn
+carries one span, because core's alignment reader accepts no other shape.
 
-**Rule:** prefer reusing an existing table/endpoint/service over adding one. A new
-table, endpoint or service requires an ADR in `docs/adr/`.
+**Rule:** prefer reusing an existing table/endpoint/service over adding one.
 
 ## Architecture in one line
 
@@ -47,7 +45,7 @@ reintroduce that: if something is provider-agnostic it goes in `hookflow` or
 
 ## Where things live
 
-One module (ADR-0024, superseding ADR-0011). Top level first:
+One module (that decision, superseding). Top level first:
 
 | Path | What |
 |---|---|
@@ -59,7 +57,7 @@ One module (ADR-0024, superseding ADR-0011). Top level first:
 | `deployments/` | managed-settings templates for MDM |
 | `init/` | ILLUSTRATIVE supervisor units + README. `internal/cli/laneservice` renders the real ones — never embed these |
 | `test/` | the mock-free end-to-end suite (`docs/test/e2e.md`) |
-| `docs/` | user documentation and ADRs — keep it true, and keep it short |
+| `docs/` | user documentation and decision records — keep it true, and keep it short |
 | `install.sh`, `.github/workflows/` | at the root deliberately: `curl \| bash` needs a root URL, GitHub demands its own path |
 
 Inside `internal/`:
@@ -71,11 +69,11 @@ Inside `internal/`:
 | `internal/adapters/common/devconfig/`, `internal/adapters/common/git/` | shared config/posture; trailer, notes, attestation |
 | `internal/adapters/claude-code/`, `internal/adapters/codex/` | one thin adapter each |
 | `internal/client/` | core client: payload, AIP signing, verdicts |
-| `internal/decision/` | local secret detection + redaction — all that survives ADR-0017 |
-| `internal/gateway/` | the local model-call relay: byte-identical forward, capture, the gate (ADR-0021). Its `internal/dialhook` keeps a NESTED internal/ on purpose |
-| `internal/telemetry/` | the local OTLP receiver — the `:otel:` lane's intake (ADR-0022) |
-| `internal/transport/` | the in-path CONNECT/TLS relay — the `:proxy:` lane. Allowlist, CA, and the hijack that hands an intercepted connection to `gateway` (ADR-0022) |
-| `internal/cli/` | everything behind the `openbox` commands, incl. `approver` (ADR-0012), `prompt` (masked input), the gateway's install/inspect/emit halves (`gatewayservice`, `gatewaycheck`, `gatewayemit` — the last of which serves BOTH in-path lanes via its `Lane`), and the three-lane install machinery: `activation` (settings-env record + the derived producer election + the per-lane key sets), `laneservice` (every supervisor unit, one `Spec` per lane), `atomicfile` |
+| `internal/decision/` | local secret detection + redaction — all that survives that decision |
+| `internal/gateway/` | the local model-call relay: byte-identical forward, capture, the gate. Its `internal/dialhook` keeps a NESTED internal/ on purpose |
+| `internal/telemetry/` | the local OTLP receiver — the `:otel:` lane's intake |
+| `internal/transport/` | the in-path CONNECT/TLS relay — the `:proxy:` lane. Allowlist, CA, and the hijack that hands an intercepted connection to `gateway` |
+| `internal/cli/` | everything behind the `openbox` commands, incl. `approver`, `prompt` (masked input), the gateway's install/inspect/emit halves (`gatewayservice`, `gatewaycheck`, `gatewayemit` — the last of which serves BOTH in-path lanes via its `Lane`), and the three-lane install machinery: `activation` (settings-env record + the derived producer election + the per-lane key sets), `laneservice` (every supervisor unit, one `Spec` per lane), `atomicfile` |
 | `internal/conformance/` | the event contract's conformance suite |
 | `internal/actions/openbox-git-action/` | commit→deploy lineage for CI |
 | `internal/depguard/` | the dependency and layering guards. **Run these with `-count=1`** — see below |
@@ -120,115 +118,74 @@ Inside `internal/`:
   first save. Unifying shell indentation is its own change.
 
 - **Credentials are plaintext, deliberately.** `~/.openbox/.env`, `0600` on
-  macOS/Linux and with **no at-rest protection on Windows** (ADR-0015). Anything
-  running as the developer — including the governed agent — can read the signing
-  key, so attestation proves origin-of-config, not tamper-resistance. On an approver
-  install the same file holds an org key with fleet-wide create/rotate authority: a
-  strictly larger blast radius, named separately in the ADR for that reason. Do not
-  let a doc imply the file is protected.
+macOS/Linux and with **no at-rest protection on Windows**. Anything running as the
+developer — including the governed agent — can read the signing key, so attestation
+proves origin-of-config, not tamper-resistance. On an approver install the same file
+holds an org key with fleet-wide create/rotate authority: a strictly larger blast
+radius, named separately in that decision for that reason. Do not let a doc imply
+the file is protected.
 - **Privacy and security are first-class.** Content capture is **ON by default**
-  (2026-07-15, reversing the original metadata-only posture): prompt text egresses
-  unless an org opts out (`content_capture:false` / `OPENBOX_CONTENT_CAPTURE=0`).
-  Usage capture is **also ON by default** (2026-08-11, ADR-0014): four token counts
-  plus a model id per turn, opt out with `finops:false` / `OPENBOX_FINOPS=0`.
-  Guardrail redaction at source is **not wired yet**, so prompt text egresses
-  unredacted. **Thinking capture is ON by default too** (2026-08-25, ADR-0019 P3 /
-  the ADR-0014 amendment): the turn's extended-thinking text egresses under the
-  same `content_capture` key — which goes FURTHER than the provider's own telemetry,
-  since Anthropic's OTel export redacts extended thinking unconditionally. **SL3-SEC-3 is retired** (ADR-0019 P1, 2026-08-25): tool commands,
-  file bodies, tool output and the refusal free text now egress on ORDINARY tool
-  events, not only on a gated call — all under the one `content_capture` key. Local
-  secret detection redacts the body **before** it is attached, and that ordering is
-  the only in-transit control there is (pinned on outbound bytes by C18/C26/C34).
-  The server sees at most the first 65,536 RUNES (`capBody` counts characters, not
-  bytes, so non-ASCII content can exceed 64KB on the wire). What that control catches is
-  measured, not assumed (C39 + `TestRedact_JSONShapedSecrets`): **the keyword
-  decides, not the charset** — a high-entropy value beside an unrecognized key name
-  is invisible, because hex cannot clear the 4.5-bit entropy floor.
-  **gitleaks ADDS 222 maintained rules BENEATH which the nine hand-rolled named
-  formats REMAIN as a floor** (D-OSS-4, 2026-08-28). Deleting the nine was tried and
-  regressed six conformance cases (C18/C26/C34/C42, CDX-C10, the finops thinking
-  sentinel), because gitleaks **allowlists published documentation keys** — AWS's
-  `AKIA…IOSFODNN7EXAMPLE`, the fixture in all six — and `AWS_ACCESS_KEY_ID=` is
-  invisible to `secret_assignment` since `_ID` sits between the keyword and the
-  delimiter. The nine are LOOSE where gitleaks is PRECISE, and that looseness is
-  what covers values gitleaks intentionally skips. Our floor runs FIRST, so audit
-  categories stay `aws_key`/`private_key`/`jwt` for formats that already had them;
-  gitleaks rule ids appear only where it alone matches. Three more things.
-  (a) The order is our patterns → gitleaks → entropy and it is LOAD-BEARING —
-  gitleaks replaces a finding's text wholesale and does not go through the
-  value-group + terminator-trim path, so running it first made JSON parseability
-  depend on how it drew its capture group. (b) A verdict-set diff over tests that CANNOT RUN is not evidence: the
-  six cases above are listener-dependent, never executed in a sandbox that denies
-  binds, and were reported green by omission.
-  (c) gitleaks is PRECISE where ours was LOOSE: it adds charset, length and
-  entropy on top of format, and allowlists AWS's published doc key — so
-  format-only fixtures stopped matching, and a provider changing its key length
-  silently stops matching until the pack is refreshed. `secret_assignment` and
-  `redactEntropy` are the backstop for exactly that, which is why they were kept.
-  **The false-positive soak did NOT clear the enforce path:** `generic-api-key`
-  matched a Go identifier and a credential FINGERPRINT (deliberately egressed,
-  deliberately not secret) in this repo's own tree, and the enforce-path redactor
-  rewrites developer files. Open item; disabling that one rule removes both. Lowering that
-  floor is NOT the fix: below 4.0 every git SHA and UUID matches, and the
-  enforce-path redactor REWRITES file bodies, so false positives corrupt files.
-  **This is not theoretical and it is not confined to `go.sum`.** Three victim
-  classes are now demonstrated in this repo: a Go identifier, a credential
-  fingerprint, `go.sum` checksums (two real base64 hashes replaced by
-  `${OPENBOX_REDACTED_ENTROPY}`, after which the build failed on a mismatch) and
-  — 2026-08-28 — **a Go source file written during a session**, where an Ed25519
-  TEST VECTOR became `${OPENBOX_REDACTED_ENTROPY}=` and an `APIKey:` literal
-  became `${OPENBOX_REDACTED_SECRET_ASSIGNMENT}`, silently, on the write. The
-  file did not compile and the cause was two steps removed from the symptom.
-  **The blast radius is now MEASURED** (2026-08-29), and the three numbers must be
-  kept apart or the finding overstates one thing and understates another. Of 5,340
-  recorded model calls from real governed sessions in this repo, **2,820 (52.8%)
-  carry `${OPENBOX_REDACTED_*}` in their context**, from **22,060 occurrences**
-  traced to only **~200 distinct rewrite SITES** — roughly 200 corrupted places
-  amplified ~110x by context replay, because one rewritten file read early poisons
-  every later call. **The attribution is the part that changes a decision: by
-  distinct site, `redactEntropy` is 28% and `secret_assignment` 27% — our own two
-  generic rules are 55% — while gitleaks' `generic-api-key` is 13%.** Disabling
-  that one rule, the narrow option on the table, leaves the majority in place. Not
-  every marker is a false positive, and nothing distinguishes them without
-  inspecting the ~200 sites; what makes the FP reading likely is the category mix,
-  `ENTROPY` leading over a tree full of git SHAs, UUIDs, base64 test vectors and
-  `go.sum` hashes. It was also **invisible until the
-  bodies were decompressed** — while a response was gzipped the marker matched
-  nothing, the same mechanism this file already names for a content-encoded body
-  defeating the detector, observed on our own artifacts. Two
-  practical consequences until the rule is fixed: **check any file this repo
-  writes for that placeholder**, and prefer DERIVING a base64 test fixture in
-  code (`base64.StdEncoding.EncodeToString(seed)`) over writing the literal —
-  `internal/cli/telemetryemit/sentinel_test.go` does exactly that, and says why.
-  `internal/cli/corpusfixture` now REFUSES to commit any fixture carrying the
-  marker, for the reason that generalizes: a corrupted fixture still parses and
-  still replays, so every assertion built on it silently becomes a statement
-  about the accident rather than about the product.
-  Nested-JSON blindness WAS a second gap and is closed (2026-08-25) — both generic
-  patterns now tolerate JSON quoting/escaping, which matters because a
-  `tool_response` is JSON and every MCP result arrives escaped. **The JSON-escape
-  boundary lives in the REPLACEMENT step, not in the pattern, and moving it back
-  would reopen a hole.** Expressing "the value must not end in a backslash" as a
-  regex made a value of exactly 8 characters ending in one match NOTHING — no
-  split satisfies both the 8-char floor and a non-backslash tail — so a real
-  secret went out unredacted while the JSON case looked fixed.
-  `TestRedact_ValueEndingInBackslash` and
-  `TestRedact_JSONShapedSecrets/escaping_survives` pin the two directions
-  together; a change that satisfies one alone has shipped once already. One deliberate
-  exception stands: **a gated shell/MCP call sends its command VERBATIM**, because
-  policy must judge the command that will actually run (ADR-0017 §Content, amended).
-  Keep `docs/data-and-privacy.md` true.
+(2026-07-15, reversing the original metadata-only posture): prompt text egresses unless an org opts out (`content_capture:false` /
+`OPENBOX_CONTENT_CAPTURE=0`). Usage capture is **also ON by default** (2026-08-11): four token counts plus a model id per turn, opt out with
+`finops:false` / `OPENBOX_FINOPS=0`. Guardrail redaction at source is **not wired yet**, so prompt text egresses unredacted. **Thinking
+capture is ON by default too** (2026-08-25, that decision / that decision amendment): the turn's extended-thinking text egresses under the
+same `content_capture` key — which goes FURTHER than the provider's own telemetry, since Anthropic's OTel export redacts extended thinking
+unconditionally. **SL3-SEC-3 is retired** (that decision, 2026-08-25): tool commands, file bodies, tool output and the refusal free text now
+egress on ORDINARY tool events, not only on a gated call — all under the one `content_capture` key. Local secret detection redacts the body
+**before** it is attached, and that ordering is the only in-transit control there is (pinned on outbound bytes by C18/C26/C34). The server
+sees at most the first 65,536 RUNES (`capBody` counts characters, not bytes, so non-ASCII content can exceed 64KB on the wire). What that
+control catches is measured, not assumed (C39 + `TestRedact_JSONShapedSecrets`): **the keyword decides, not the charset** — a high-entropy
+value beside an unrecognized key name is invisible, because hex cannot clear the 4.5-bit entropy floor. **gitleaks ADDS 222 maintained rules
+BENEATH which the nine hand-rolled named formats REMAIN as a floor** (D-OSS-4, 2026-08-28). Deleting the nine was tried and regressed six
+conformance cases (C18/C26/C34/C42, CDX-C10, the finops thinking sentinel), because gitleaks **allowlists published documentation keys** —
+AWS's `AKIA…IOSFODNN7EXAMPLE`, the fixture in all six — and `AWS_ACCESS_KEY_ID=` is invisible to `secret_assignment` since `_ID` sits between
+the keyword and the delimiter. The nine are LOOSE where gitleaks is PRECISE, and that looseness is what covers values gitleaks intentionally
+skips. Our floor runs FIRST, so audit categories stay `aws_key`/`private_key`/`jwt` for formats that already had them; gitleaks rule ids
+appear only where it alone matches. Three more things. (a) The order is our patterns → gitleaks → entropy and it is LOAD-BEARING — gitleaks
+replaces a finding's text wholesale and does not go through the value-group + terminator-trim path, so running it first made JSON
+parseability depend on how it drew its capture group. (b) A verdict-set diff over tests that CANNOT RUN is not evidence: the six cases above
+are listener-dependent, never executed in a sandbox that denies binds, and were reported green by omission. (c) gitleaks is PRECISE where
+ours was LOOSE: it adds charset, length and entropy on top of format, and allowlists AWS's published doc key — so format-only fixtures
+stopped matching, and a provider changing its key length silently stops matching until the pack is refreshed. `secret_assignment` and
+`redactEntropy` are the backstop for exactly that, which is why they were kept. **The false-positive soak did NOT clear the enforce path:**
+`generic-api-key` matched a Go identifier and a credential FINGERPRINT (deliberately egressed, deliberately not secret) in this repo's own
+tree, and the enforce-path redactor rewrites developer files. Open item; disabling that one rule removes both. Lowering that floor is NOT the
+fix: below 4.0 every git SHA and UUID matches, and the enforce-path redactor REWRITES file bodies, so false positives corrupt files. **This
+is not theoretical and it is not confined to `go.sum`.** Three victim classes are now demonstrated in this repo: a Go identifier, a
+credential fingerprint, `go.sum` checksums (two real base64 hashes replaced by `${OPENBOX_REDACTED_ENTROPY}`, after which the build failed on
+a mismatch) and — 2026-08-28 — **a Go source file written during a session**, where an Ed25519 TEST VECTOR became
+`${OPENBOX_REDACTED_ENTROPY}=` and an `APIKey:` literal became `${OPENBOX_REDACTED_SECRET_ASSIGNMENT}`, silently, on the write. The file did
+not compile and the cause was two steps removed from the symptom. **The blast radius is now MEASURED** (2026-08-29), and the three numbers
+must be kept apart or the finding overstates one thing and understates another. Of 5,340 recorded model calls from real governed sessions in
+this repo, **2,820 (52.8%) carry `${OPENBOX_REDACTED_*}` in their context**, from **22,060 occurrences** traced to only **~200 distinct
+rewrite SITES** — roughly 200 corrupted places amplified ~110x by context replay, because one rewritten file read early poisons every later
+call. **The attribution is the part that changes a decision: by distinct site, `redactEntropy` is 28% and `secret_assignment` 27% — our own
+two generic rules are 55% — while gitleaks' `generic-api-key` is 13%.** Disabling that one rule, the narrow option on the table, leaves the
+majority in place. Not every marker is a false positive, and nothing distinguishes them without inspecting the ~200 sites; what makes the FP
+reading likely is the category mix, `ENTROPY` leading over a tree full of git SHAs, UUIDs, base64 test vectors and `go.sum` hashes. It was
+also **invisible until the bodies were decompressed** — while a response was gzipped the marker matched nothing, the same mechanism this file
+already names for a content-encoded body defeating the detector, observed on our own artifacts. Two practical consequences until the rule is
+fixed: **check any file this repo writes for that placeholder**, and prefer DERIVING a base64 test fixture in code
+(`base64.StdEncoding.EncodeToString(seed)`) over writing the literal — `internal/cli/telemetryemit/sentinel_test.go` does exactly that, and
+says why. `internal/cli/corpusfixture` now REFUSES to commit any fixture carrying the marker, for the reason that generalizes: a corrupted
+fixture still parses and still replays, so every assertion built on it silently becomes a statement about the accident rather than about the
+product. Nested-JSON blindness WAS a second gap and is closed (2026-08-25) — both generic patterns now tolerate JSON quoting/escaping, which
+matters because a `tool_response` is JSON and every MCP result arrives escaped. **The JSON-escape boundary lives in the REPLACEMENT step, not
+in the pattern, and moving it back would reopen a hole.** Expressing "the value must not end in a backslash" as a regex made a value of
+exactly 8 characters ending in one match NOTHING — no split satisfies both the 8-char floor and a non-backslash tail — so a real secret went
+out unredacted while the JSON case looked fixed. `TestRedact_ValueEndingInBackslash` and `TestRedact_JSONShapedSecrets/escaping_survives` pin
+the two directions together; a change that satisfies one alone has shipped once already. One deliberate exception stands: **a gated shell/MCP
+call sends its command VERBATIM**, because policy must judge the command that will actually run. Keep `docs/data-and-privacy.md` true.
 - **`usage.go`'s INV-2 guarantee is an allowlist now, not an impossibility.** It
-  used to hold structurally — the transcript projection bound only numeric fields,
-  so content had nowhere to land. Binding `message.model` (required: the model id is
-  the backend's aggregation key) replaced that with a curated allowlist enforced by
-  the sentinel test. **That test is load-bearing.** A change that makes it pass
-  trivially is a defect, and a second bound string needs an ADR amendment, not a
-  commit. One has since been added THAT WAY: `message.content[].thinking`, under
-  the ADR-0014 amendment (2026-08-25) — and it is CONTENT, not an identifier, so
-  the allowlist's contents stopped being self-limiting at the same time. A fifth
-  bound field needs its own amendment for the same reason.
+used to hold structurally — the transcript projection bound only numeric fields, so
+content had nowhere to land. Binding `message.model` (required: the model id is the
+backend's aggregation key) replaced that with a curated allowlist enforced by the
+sentinel test. **That test is load-bearing.** A change that makes it pass trivially
+is a defect, and a second bound string needs a decision record amendment, not a
+commit. One has since been added THAT WAY: `message.content[].thinking`, under that
+decision amendment (2026-08-25) — and it is CONTENT, not an identifier, so the
+allowlist's contents stopped being self-limiting at the same time. A fifth bound
+field needs its own amendment for the same reason.
 - **Decisions only a human can make** (scope, privacy posture, priority) are `OD*`
   decisions: surface them, never infer them.
 - **Cite sources in docs** — the repo symbol/path or upstream doc URL behind each
@@ -243,7 +200,7 @@ Inside `internal/`:
 ## Build and test
 
 ```bash
-go build ./...                     # everything, from the root — one module (ADR-0024)
+go build ./... # everything, from the root — one module
 go test -race -count=1 ./...       # -count=1 is required: see internal/depguard
 ./test/run-all.sh                  # end to end, needs a local OpenBox stack
 ```
@@ -251,15 +208,15 @@ go test -race -count=1 ./...       # -count=1 is required: see internal/depguard
 ## Current state
 
 Shipped and verified end to end: observe telemetry, enforcement, the E9 approval
-loop with hold + rewake, the autonomous approver (ADR-0012), lineage (trailer →
-signed attestation → deploy → queryable links) including its read side, and the
+loop with hold + rewake, the autonomous approver, lineage (trailer → signed
+attestation → deploy → queryable links) including its read side, and the
 managed-config posture layer.
 
-**`/evaluate` is the only decider** (ADR-0017, 2026-08-13). The local Go policy
-evaluator, the bundle, its signature check, `policysync`, `openbox dev sync` and
-the session-start staleness gate are deleted. Enforcement is three independent
-named things now, not three tiers: local secret redaction, inline evaluation,
-findings. Four things about it are worth not re-litigating:
+**`/evaluate` is the only decider** (that decision, 2026-08-13). The local Go
+policy evaluator, the bundle, its signature check, `policysync`, `openbox dev
+sync` and the session-start staleness gate are deleted. Enforcement is three
+independent named things now, not three tiers: local secret redaction, inline
+evaluation, findings. Four things about it are worth not re-litigating:
 
 - **The gate consults nothing local.** `ShouldEscalate` is the only condition;
   every gated class goes to the server, because risk is a property of the POLICY
@@ -274,11 +231,11 @@ findings. Four things about it are worth not re-litigating:
   reads as "already tightened" and suppresses the round-trip — **a fail-closed org
   would deny every gated call without ever asking.** Conformance case C1 caught it.
 - **Deprecated keys must stay reachable to warn.** `tier2`, `tier2_timeout_ms` and
-  `require_verified_bundle` still parse and do nothing. `tier2` is deliberately NOT
-  honoured: an org that set `tier2:false` under the old design would otherwise
-  upgrade into silent enforcement. The warning lives in `EffectivePosture`, not on
-  the resolver — ADR-0017 removed the last runtime caller of `ResolveTier2`, so a
-  notice hung there could never fire, which is the same as no notice.
+`require_verified_bundle` still parse and do nothing. `tier2` is deliberately NOT
+honoured: an org that set `tier2:false` under the old design would otherwise
+upgrade into silent enforcement. The warning lives in `EffectivePosture`, not on
+the resolver — that decision removed the last runtime caller of `ResolveTier2`, so
+a notice hung there could never fire, which is the same as no notice.
 - **Approval identity did NOT move, deliberately.** Only shell and MCP have a
   retry-stable operation id; every other class keys on the invocation, so an
   approval for a `Write` cannot be matched after a retry and the call is re-asked.
@@ -288,21 +245,20 @@ findings. Four things about it are worth not re-litigating:
   direction: over-ask, never over-grant.
 
 **Status: implemented, unit-verified, all 11 modules green under `-race` plus both
-cross-compiles — the test has NOT run.** The conformance cases drive the real
-hook against a real `/evaluate` stub over HTTP, so deny/allow, redact-before-send
-(asserted on the outbound bytes) and both failure-policy branches are strongly
-covered. What that cannot reach is the claim the ADR rests on: **that a raw-rego
-org is now enforced.** `test/30-enforce.sh` §A publishes a raw-rego deny through
-the backend to prove it and is waiting on a stack. The lost-200 double-store window
-is also still open and irreducible client-side — closing it needs server-side
-dedupe on developer events, a backend ask.
+cross-compiles — the test has NOT run.** The conformance cases drive the real hook against a
+real `/evaluate` stub over HTTP, so deny/allow, redact-before-send (asserted on the outbound
+bytes) and both failure-policy branches are strongly covered. What that cannot reach is the
+claim that decision rests on: **that a raw-rego org is now enforced.** `test/30-enforce.sh`
+§A publishes a raw-rego deny through the backend to prove it and is waiting on a stack. The
+lost-200 double-store window is also still open and irreducible client-side — closing it
+needs server-side dedupe on developer events, a backend ask.
 `plans/260813-0140-inline-policy-evaluation/reports/verification-260813-inline-evaluation.md`
 splits every claim by evidence strength;
 `plans/260813-0140-inline-policy-evaluation/manual-test-guide.md` is the stack-free
 walkthrough.
 
-**Setup is two commands** (ADR-0015 + ADR-0016, 2026-08-13): `openbox auth`
-authenticates a MACHINE — collects or registers credentials and writes
+**Setup is two commands** (that decision + that decision, 2026-08-13): `openbox
+auth` authenticates a MACHINE — collects or registers credentials and writes
 `~/.openbox/.env` (secrets) plus `dev.json` (coordinates) — then `openbox init
 --provider <tool>` sets up hooks at a scope and writes posture. `auth` takes no
 `--provider`, `--org` or `--agent-name`: the agent is machine-scoped, so a
@@ -310,24 +266,23 @@ per-tool flag on it was a contradiction, and nothing ever read `Org`. The
 agent-id prompt **never prefills**, because `prompt.Line` returns its default on
 empty input — offering the stored id made "blank registers a new agent"
 unachievable and demanded a key the user did not have. Blanking it would erase
-`agent_id`, which feeds `SelfAgentID` in the autonomous approver (ADR-0012), so
-the credential-reuse path returns it from `dev.json` like it already did the DID.
+`agent_id`, which feeds `SelfAgentID` in the autonomous approver, so the
+credential-reuse path returns it from `dev.json` like it already did the DID.
 Four things changed with the original split, and each has a reason worth not
 re-litigating:
 
 - **The OS keychain is deleted, not demoted.** Credentials are one plaintext file,
-  `0600` on unix and unprotected on Windows. This is a real security downgrade and
-  ADR-0015 argues it against the prior rationale rather than around it: the store
-  was unlocked for the whole desktop session and readable by `security`, so it never
-  defended against the agent this product governs — while costing three config
-  paths, a build-tag split, and the two-DID-stores revert bug. **`init` can no
-  longer read, write or prompt for a secret at all**, which is the compensating
-  gain.
+`0600` on unix and unprotected on Windows. This is a real security downgrade, argued
+against the prior rationale rather than around it: the store
+was unlocked for the whole desktop session and readable by `security`, so it never
+defended against the agent this product governs — while costing three config paths,
+a build-tag split, and the two-DID-stores revert bug. **`init` can no longer read,
+write or prompt for a secret at all**, which is the compensating gain.
 - **One store per field.** `.env` holds only secrets; `dev.json` only coordinates.
   `TestEnvFileIsNotACoordinateSource` is the tripwire — a DID in `.env` must stay
   ignored. Relaxing it reopens the bug where a stale second copy reverted a
   corrected DID on every install.
-- **`init` defaults to project scope and to ENFORCE** (ADR-0016). Project scope
+- **`init` defaults to project scope and to ENFORCE**. Project scope
   because it is the only scope the CLI can actually activate — global needs a
   managed-settings deployment — so the old default reported success while governing
   nothing. Enforce because a default-off headline feature stays off; `ResolveFinops`
@@ -366,43 +321,40 @@ the binary level (`TestHookRealtimeDelivery` drives the real binary against a mo
 core); its test phase (`test/25-realtime.sh`) exists but has not yet run
 against a live local stack.
 
-**Model turns are Activities too** (ADR-0014, 2026-08-11): `TurnStarted`/
-`TurnCompleted` → `ActivityStarted`/`ActivityCompleted` with
-`activity_type: "llm_completion"` and `{model, usage{4 counts}}` in
-`activity_output` — the AI-Agent `llm_completion` span's `response_body` shape on
-the activity carrier, because dev sessions wrote no spans at the time (ADR-0018
-later added one to this same event, for the assistant TEXT; the usage numbers
-stayed on `activity_output`). Claude Code emits one pair
-per turn from new `Stop`/`SubagentStop` hooks over a byte-offset cursor
-(`hookflow.TurnCursor`, agent-scoped, spool-then-cursor ordering so a crash
-over-reports into core's dedupe rather than losing a turn); Codex emits one
-`<session>:usage:rollup` pair at SessionEnd, its `Stop` deliberately unwired.
-`client.Tokens` gained both cache counts and **`Input` is now pure input** — the
-one non-additive change, which is why the contract is **v1.1**. `Finops` became
-`*bool` before the default could flip: as a plain bool an absent config field and
-an explicit `false` were indistinguishable, so the flip would have been a silent
-no-op. **Status: implemented, unit-verified, reviewed, NOT yet run against a live
-stack.** The core-side extractor has since **merged** — `ExtractModelMetricsFromActivity`
-is on `develop` (PR #125 / PROD-296, merged as `0643ad3`, verified at 68f0398), and
-the same change excludes `llm_completion` from core's *tool* metrics. This
-paragraph used to say "write-only, awaiting merge" and that the tool-metric
-pollution was live; both are retired.
+**Model turns are Activities too** (that decision, 2026-08-11): `TurnStarted`/
+`TurnCompleted` → `ActivityStarted`/`ActivityCompleted` with `activity_type:
+"llm_completion"` and `{model, usage{4 counts}}` in `activity_output` — the AI-Agent
+`llm_completion` span's `response_body` shape on the activity carrier, because dev
+sessions wrote no spans at the time (that decision later added one to this same event,
+for the assistant TEXT; the usage numbers stayed on `activity_output`). Claude Code emits
+one pair per turn from new `Stop`/`SubagentStop` hooks over a byte-offset cursor
+(`hookflow.TurnCursor`, agent-scoped, spool-then-cursor ordering so a crash over-reports
+into core's dedupe rather than losing a turn); Codex emits one `<session>:usage:rollup`
+pair at SessionEnd, its `Stop` deliberately unwired. `client.Tokens` gained both cache
+counts and **`Input` is now pure input** — the one non-additive change, which is why the
+contract is **v1.1**. `Finops` became `*bool` before the default could flip: as a plain
+bool an absent config field and an explicit `false` were indistinguishable, so the flip
+would have been a silent no-op. **Status: implemented, unit-verified, reviewed, NOT yet
+run against a live stack.** The core-side extractor has since **merged** —
+`ExtractModelMetricsFromActivity` is on `develop` (PR #125 / PROD-296, merged as
+`0643ad3`, verified at 68f0398), and the same change excludes `llm_completion` from
+core's *tool* metrics. This paragraph used to say "write-only, awaiting merge" and that
+the tool-metric pollution was live; both are retired.
 
-**Tool events are Activities** (ADR-0013, 2026-08-11): `ToolCall` →
-`ActivityStarted`, `ToolResult` → `ActivityCompleted`, both span-less and
-hook-less — still true for TOOL events after ADR-0018, which added a span to one
-turn carrier only. `client/hookspan.go` and `client/spanbuilder.go` are deleted, and with
-them ADR-0004's standing mirror obligation. The adapter-facing schema did not
-change. **Status: implemented and unit-verified, NOT yet run against a live
-stack.** `activity_id` is byte-identical to the old shape (pinned in
-`client/approval_key_pin_test.go`), the golden fixtures pin the new wire bytes,
-and all 11 modules are green — but core's ingest behavior was established by
-reading openbox-core, and this repo's own rule is that reading is not evidence.
-The load-bearing unverified claim is that core stores the `ActivityCompleted` as
-its own row; its dedupe key includes `event_type`
-(`activities/governance/validation.go:96`), which says it should. The test
-assertions are updated and waiting for a run; `MAPPING.md` §7 lists exactly what
-that run must confirm.
+**Tool events are Activities** (that decision, 2026-08-11): `ToolCall` →
+`ActivityStarted`, `ToolResult` → `ActivityCompleted`, both span-less and hook-less —
+still true for TOOL events after that decision, which added a span to one turn carrier
+only. `client/hookspan.go` and `client/spanbuilder.go` are deleted, and with them that
+decision's standing mirror obligation. The adapter-facing schema did not change.
+**Status: implemented and unit-verified, NOT yet run against a live stack.**
+`activity_id` is byte-identical to the old shape (pinned in
+`client/approval_key_pin_test.go`), the golden fixtures pin the new wire bytes, and all
+11 modules are green — but core's ingest behavior was established by reading
+openbox-core, and this repo's own rule is that reading is not evidence. The load-bearing
+unverified claim is that core stores the `ActivityCompleted` as its own row; its dedupe
+key includes `event_type` (`activities/governance/validation.go:96`), which says it
+should. The test assertions are updated and waiting for a run; `MAPPING.md` §7 lists
+exactly what that run must confirm.
 
 Known limits, documented in
 `docs/architecture.md#assurance--what-the-evidence-proves`: the signing key is
@@ -434,7 +386,7 @@ double-count in any case; its worst case is a subagent reporting nothing). The
 static measurement behind both is in
 `plans/260811-1640-coding-agent-token-usage/reports/measure-260811-transcript-turn-surface.md`.
 
-**Tool outcome, failure signals, and one content-bearing span** (ADR-0018,
+**Tool outcome, failure signals, and one content-bearing span** (that decision,
 2026-08-13, contract **v1.2**): `status` (`completed`|`failed`) on tool
 `ActivityCompleted`; `PostToolUseFailure`/`SubagentStart`/`PermissionDenied`/
 `StopFailure` wired; and ONE span on a `TurnCompleted` carrying the assistant's
@@ -479,10 +431,10 @@ is the stack-free walkthrough; `plans/reports/probe-260813-2329-claude-code-hook
 is the hook-surface evidence.
 
 **`init` replaces its own stale-path registrations; posture reports who decides**
-(2026-08-14, no ADR — no new table, endpoint or service). Two defects found
-verifying ADR-0018 against the first real session's 66 events:
+(2026-08-14, no decision record — no new table, endpoint or service). Two defects
+found verifying that decision against the first real session's 66 events:
 
-- **The double-count was two engines, not an ADR-0018 defect.** `writeLocalHooks`
+- **The double-count was two engines, not an that decision defect.** `writeLocalHooks`
   matched its own entries by exact command string, so an entry written by an
   install run with a different `HOME` read as a FOREIGN hook and was preserved;
   re-init appended beside it and reported success. Both engines fired, every
@@ -509,19 +461,19 @@ verifying ADR-0018 against the first real session's 66 events:
   no approval hold would ever wake. The general rule: **when a diagnostic names a
   remedy, run the remedy in the state it warns about** — a check and a fix built
   on one classifier can still disagree about what the fix covers.
-- **`decision_authority` never reached the wire.** ADR-0017:237-239 says posture
-  carries it; `Posture.Metadata()` — the only path onto the wire — omitted it and
-  `failure_policy` both, while `openbox doctor` printed both off the struct. Local
-  view complete, remote view silent: the inverse of what that ADR argues. The gap
-  shipped because `TestPostureReportsDecisionProvenance` asserted the STRUCT and
-  never called `.Metadata()`; the new subtest crosses that seam, and the rule
-  generalizes — **asserting the struct is not asserting the wire.** The five
-  bundle-era keys (`bundle_version`, `bundle_policy_id`, `bundle_sha256`,
-  `staleness`, `bundle_integrity`), the `Staleness` type and its 7 consts are
-  deleted outright, per the `require_verified_bundle` precedent; absence is
-  asserted rather than left to the empty-value guard. `internal/adapters/common/git`
-  defines its OWN `BundlePolicyID`/`BundleSHA256` for the attestation envelope —
-  different struct, shipping feature, do not rename repo-wide.
+- **`decision_authority` never reached the wire.** That decision:237-239 says posture
+carries it; `Posture.Metadata()` — the only path onto the wire — omitted it and
+`failure_policy` both, while `openbox doctor` printed both off the struct. Local
+view complete, remote view silent: the inverse of what that decision record argues.
+The gap shipped because `TestPostureReportsDecisionProvenance` asserted the STRUCT
+and never called `.Metadata()`; the new subtest crosses that seam, and the rule
+generalizes — **asserting the struct is not asserting the wire.** The five
+bundle-era keys (`bundle_version`, `bundle_policy_id`, `bundle_sha256`, `staleness`,
+`bundle_integrity`), the `Staleness` type and its 7 consts are deleted outright, per
+the `require_verified_bundle` precedent; absence is asserted rather than left to the
+empty-value guard. `internal/adapters/common/git` defines its OWN
+`BundlePolicyID`/`BundleSHA256` for the attestation envelope — different struct,
+shipping feature, do not rename repo-wide.
 
 **Status: implemented, unit-verified, all 11 modules green under `-race` plus both
 cross-compiles; `doctor`'s warning exercised against the real binary on a seeded
@@ -532,11 +484,12 @@ double-count disappears end to end, and that `decision_authority` lands in
 and failed before this change. `test/10-onboard.sh` gained the dormant
 stale-path replacement assertions.
 
-**Prompts gate, and HALT ends the session** (ADR-0020, 2026-08-18): UserPromptSubmit
-runs the SAME shared EnforceGate as PreToolUse (block/erase on HALT/BLOCK, hold on
-REQUIRE_APPROVAL), and a HALT the control plane returns renders `continue:false` +
-a local latch (`halted-sessions/`) that refuses every later gated hook in that
-session with no re-evaluation — resume included. Four things not to re-litigate:
+**Prompts gate, and HALT ends the session** (that decision, 2026-08-18):
+UserPromptSubmit runs the SAME shared EnforceGate as PreToolUse (block/erase on
+HALT/BLOCK, hold on REQUIRE_APPROVAL), and a HALT the control plane returns renders
+`continue:false` + a local latch (`halted-sessions/`) that refuses every later gated
+hook in that session with no re-evaluation — resume included. Four things not to
+re-litigate:
 
 - **The kill discriminator is exact:** `Verdict==HALT && Source==evaluate &&
   !FailOpen`, marked AFTER the approval hold. `ApprovalUndecided` got its own
@@ -562,12 +515,12 @@ stdout bytes), all 11 modules green under `-race` plus both cross-compiles — t
 test has NOT run.** `test/30-enforce.sh` §A3 (raw-rego halt → turn stop +
 latch) is dormant, waiting on a stack.
 
-**Tool content capture; SL3-SEC-3 retired** (ADR-0019 P1, contract **v1.3**,
-2026-08-25 — phase 01 of plan 260825-0027, which ships alone). The Claude Code
-adapter bound `tool_response`, tool input on the **observe** path,
-`PostToolUseFailure.error`, `PermissionDenied.reason` and `StopFailure.error_details`;
-all gated on the SAME `content_capture` key, redacted before attach, capped at 64KB.
-Four things not to re-litigate:
+**Tool content capture; SL3-SEC-3 retired** (that decision, contract **v1.3**,
+2026-08-25 — phase 01 of plan 260825-0027, which ships alone). The Claude Code adapter
+bound `tool_response`, tool input on the **observe** path, `PostToolUseFailure.error`,
+`PermissionDenied.reason` and `StopFailure.error_details`; all gated on the SAME
+`content_capture` key, redacted before attach, capped at 64KB. Four things not to
+re-litigate:
 
 - **`Content.Output` is turn text and must stay that.** Tool output got its own
   `Content.ToolOutput` → `activity_output.output`. One shared field would put turn
@@ -599,21 +552,21 @@ tool-call cadence through the realtime flusher. Codex is untouched and binds non
 this, so the two providers now send different amounts of content under one posture
 (stated in `COVERAGE.md` §3.4 rather than averaged away).
 
-**Thinking capture; the allowlist is amended** (ADR-0019 P3, contract **v1.4**,
+**Thinking capture; the allowlist is amended** (that decision, contract **v1.4**,
 2026-08-25 — phase 02 of plan 260825-0027, Track A complete). The turn's
 extended-thinking blocks egress as `activity_output.thinking` on `TurnCompleted`,
 under the same `content_capture` key, redacted before attach, capped at 64KB.
 Five things not to re-litigate:
 
-- **This is the amendment ADR-0014 warned about, and it changed KIND.** The three
-  fields that ADR-0014 bound were an identifier, a timestamp and a bool — none
-  could carry a secret, so the allowlist's *contents* were self-limiting even
-  after its *form* stopped being structural. `thinking` is the first free-form
-  content string in that projection, and the densest content this client carries:
-  it restates prompts, file bodies, and any credential the turn saw. What protects
-  it is three fallible mechanisms in a fixed order — gate, redact, cap — each
-  asserted on outbound bytes. The amendment section at the end of ADR-0014 is the
-  decision; the code is the consequence.
+- **This is the amendment that decision warned about, and it changed KIND.** The three
+fields that that decision bound were an identifier, a timestamp and a bool — none
+could carry a secret, so the allowlist's *contents* were self-limiting even after
+its *form* stopped being structural. `thinking` is the first free-form content
+string in that projection, and the densest content this client carries: it
+restates prompts, file bodies, and any credential the turn saw. What protects it
+is three fallible mechanisms in a fixed order — gate, redact, cap — each asserted
+on outbound bytes. The amendment section at the end of that decision is the
+decision; the code is the consequence.
 - **The sentinel turned around and is mutation-tested, literally.** `TestFinops_NoContentOnWire`
   now asserts absence with capture off (thinking included) and PRESENCE with it on,
   in the decoded `activity_output.thinking`, with every other transcript sentinel
@@ -638,19 +591,19 @@ Five things not to re-litigate:
   constants" commit cannot kill it silently.
 
 Two deliberate narrowings from the plan: intermediate assistant text was NOT bound
-(the final reply already egresses from the hook field ADR-0018 bound), and the LIFT
-is ungated — only the attachment is gated, because gating a pure parser buys
+(the final reply already egresses from the hook field that decision bound), and the
+LIFT is ungated — only the attachment is gated, because gating a pure parser buys
 nothing on the wire and would duplicate the posture decision.
 
 **Status: implemented, unit- and conformance-verified (C40/C41 on real POSTed
-bytes), all 11 modules green under `-race` plus both cross-compiles — the test
-has NOT run.** Unproven without a stack (`MAPPING.md` §7 items 22–24): that core
+bytes), all 11 modules green under `-race` plus both cross-compiles — the test has
+NOT run.** Unproven without a stack (`MAPPING.md` §7 items 22–24): that core
 stores `activity_output.thinking` as its own key, that the sibling key does not
 perturb `ExtractModelMetricsFromActivity`, and the volume question. A pre-existing
-FALSE claim in `README.md` left over from ADR-0019 P1 ("tool commands and file
+FALSE claim in `README.md` left over from that decision ("tool commands and file
 bodies are never sent on ordinary telemetry") was corrected in the same change.
 
-**The local model-call gateway** (ADR-0021, contract **v1.5**, 2026-08-25/26): a
+**The local model-call gateway** (that decision, contract **v1.5**, 2026-08-25/26): a
 per-developer loopback daemon that Claude Code is pointed at via
 `ANTHROPIC_BASE_URL`, relays every model call byte-identically, and captures the
 exchange as a `TurnCompleted` carrying a real observed span. `openbox init --provider
@@ -660,7 +613,7 @@ production caller because probe A has not named a refusal shape, and a wrong one
 silently disables a Claude Code capability for the rest of the session. Ten things
 worth not re-litigating:
 
-- **Opt-in, and Claude Code only.** ADR-0016's default-on lesson does NOT transfer:
+- **Opt-in, and Claude Code only.** That decision's default-on lesson does NOT transfer:
   enforcement-by-default is inert without an org policy, this redirects live model
   traffic through a path that has never run against a real stack. And
   `--provider codex --gateway` used to install an Anthropic relay and point
@@ -686,16 +639,16 @@ worth not re-litigating:
   the receiving type*). The fingerprint rides `attributes["openbox.credential_fingerprint"]`
   because core has no field for the top-level key.
 - **There is no `fail_closed` input to the gate at all, and that absence IS §7.** A
-  posture key there would be a switch to turn the gateway's enforcement off. An
-  uninterpretable verdict REFUSES — ADR-0020's Codex trap in a new place.
+posture key there would be a switch to turn the gateway's enforcement off. An
+uninterpretable verdict REFUSES — that decision's Codex trap in a new place.
 - **`Decision.Evaluated` makes "no synthesized refusal before an evaluation attempt"
-  checkable.** The pre-ADR-0017 `ApplyFailurePolicy` bug, worse here: refusal on a
-  missing verdict is unconditional, so the mistake turns every control-plane blip
-  into a total model-call outage reported as a policy decision no policy made. The
-  10s evaluate deadline is part of it — "never answers" is not "unreachable", and
-  only a deadline converts the first into the second. A cancelled CALLER is a third
-  case (`reasonCallerGone`): every Esc otherwise wrote a durable record blaming the
-  control plane.
+checkable.** The pre-that decision `ApplyFailurePolicy` bug, worse here: refusal on
+a missing verdict is unconditional, so the mistake turns every control-plane blip
+into a total model-call outage reported as a policy decision no policy made. The
+10s evaluate deadline is part of it — "never answers" is not "unreachable", and
+only a deadline converts the first into the second. A cancelled CALLER is a third
+case (`reasonCallerGone`): every Esc otherwise wrote a durable record blaming the
+control plane.
 - **The two turn producers must never share an `activity_id`.** Both describe the
   same turn; core's dedupe would absorb one as a duplicate and half the evidence
   would vanish with no error. Hence `gateway_request_id` and the disjoint `:gateway:`
@@ -730,20 +683,21 @@ control: it drives the real command into the real spool with no fake anywhere.
 
 **Status: implemented, unit- and conformance-verified, green under `-race` plus both
 cross-compiles — the test has NOT run.** `test/45-gateway.sh` is written and
-dormant; `MAPPING.md` §7 items 25–30 list what a live run must confirm. ADR-0021
-stays **DRAFT**, but as of 2026-08-28 only **§9** keeps it there: what refusal shape
-Claude Code does not retry around is still an empirical question about a provider we
-do not control, and filling it in by inference is the overstatement this product
-exists to prevent. §5 is **reversed** (OD2 — an in-path TLS relay is now a product
-decision), §8's coverage question is **answered by measurement**, and §10 is
-**decided** (detection-only for OAuth, fingerprint refusal for API keys) — all three
-by ADR-0022 below.
+dormant; `MAPPING.md` §7 items 25–30 list what a live run must confirm. That
+decision stays **DRAFT**, but as of 2026-08-28 only **§9** keeps it there: what
+refusal shape Claude Code does not retry around is still an empirical question about
+a provider we do not control, and filling it in by inference is the overstatement
+this product exists to prevent. §5 is **reversed** (OD2 — an in-path TLS relay is
+now a product decision), §8's coverage question is **answered by measurement**, and
+§10 is **decided** (detection-only for OAuth, fingerprint refusal for API keys) —
+all three by that decision below.
 
 **The transport lane is BUILT — capture live, refusal dormant, install not yet**
-(ADR-0022's `:proxy:`, 2026-08-29). `openbox transport` is a loopback CONNECT
-proxy: goproxy parses the CONNECT, an allowlisted host is TLS-terminated with a
-project CA, and the connection is served by the **existing** `gateway.Gateway`.
-Everything else is blind-tunnelled. Eight things worth not re-litigating:
+(that decision's `:proxy:`, 2026-08-29). `openbox transport` is a loopback
+CONNECT proxy: goproxy parses the CONNECT, an allowlisted host is TLS-terminated
+with a project CA, and the connection is served by the **existing**
+`gateway.Gateway`. Everything else is blind-tunnelled. Eight things worth not
+re-litigating:
 
 - **The relay is REUSED, not forked, and that decided the design.** The plan
   specified a hand-built streaming tee on goproxy's MITM response hooks. That
@@ -775,13 +729,13 @@ Everything else is blind-tunnelled. Eight things worth not re-litigating:
   NOT include the lane name: adding it would change every shipped gateway event's
   idempotency key, after which core double-counts a redelivery.
 - **The CA is name-constrained to the intercepted host at GENERATION**, so a
-  leaked key cannot mint a usable certificate for anything else — the control
-  that survives the trust boundary ADR-0015 already concedes. Leaves are minted
-  with stdlib x509, not `goproxy.TLSConfigFromCA`, because that helper clones a
-  `defaultTLSConfig` carrying `InsecureSkipVerify: true` (certs.go:27) and no
-  ALPN of ours. ALPN is **http/1.1 only**: the relay behind it speaks HTTP/1.1,
-  so a negotiated h2 fails every request in a way that looks like a network
-  fault.
+leaked key cannot mint a usable certificate for anything else — the control
+that survives the trust boundary that decision already concedes. Leaves are
+minted with stdlib x509, not `goproxy.TLSConfigFromCA`, because that helper
+clones a `defaultTLSConfig` carrying `InsecureSkipVerify: true` (certs.go:27)
+and no ALPN of ours. ALPN is **http/1.1 only**: the relay behind it speaks
+HTTP/1.1, so a negotiated h2 fails every request in a way that looks like a
+network fault.
 - **Host matching folds ASCII ONLY, and that is a security property.**
   `strings.ToLower` folds Unicode and some non-ASCII runes fold INTO ASCII
   letters — U+212A KELVIN SIGN lowercases to `k` — so a Unicode-aware fold can
@@ -829,10 +783,10 @@ one lane erasing another are what let this survive.** The election therefore has
 to be an activation-time mutual exclusion across processes, never a client-side
 dedupe.
 
-**Two more model-call lanes: contracted here, BUILT in phases 09–13** (ADR-0022,
+**Two more model-call lanes: contracted here, BUILT in phases 09–13** (that decision,
 contract **v1.6**, 2026-08-28 — phase 08 of plan 260827-2301, which gates 09–14).
-*This paragraph records the CONTRACT decision; the lanes' current status is the
-phase 13 block below, which supersedes it.* A local OTLP **telemetry** receiver
+*This paragraph records the CONTRACT decision; the lanes' current status is the phase
+13 block below, which supersedes it.* A local OTLP **telemetry** receiver
 (`otel_request_id`, `:otel:`) and a local in-path TLS **transport** relay
 (`proxy_request_id`, `:proxy:`) were built to cover what the gateway lane cannot: the
 desktop app and subscription-OAuth sessions, both measured capturable by the sibling
@@ -876,19 +830,19 @@ re-litigate:
   gateway's, since `gatewayemit.EventFor` emits `TurnCompleted` only. The exactly-one rule now lives ONCE, in `$defs.turnProducer`, `$ref`'d by
   both halves. **Restating a rule per branch is how the two halves drifted apart;
   structure, not diligence, is what stops it recurring.**
-- **A CA on the developer's machine is the accepted cost** (ADR-0021 §5's risk
-  assessment was not disproven, its *alternative-coverage* clause was), and under
-  OD1(c) ~95% of model-call bodies truncate at 65,536 runes, so their tails exist
-  nowhere org-side. Both stated in ADR-0022's Consequences, neither softened.
+- **A CA on the developer's machine is the accepted cost** (that decision's risk
+assessment was not disproven, its *alternative-coverage* clause was), and under
+OD1(c) ~95% of model-call bodies truncate at 65,536 runes, so their tails exist
+nowhere org-side. Both's Consequences, neither softened.
 
-**Status: contract + ADRs only; no lane exists. Unit-verified, both mutation drills
-red-on-deletion, all 12 modules build/vet/cross-compile green. C1–C41 now RUN** —
-38 cases, 38 pass, 0 fail (2026-08-28; C8/C9 do not exist, both deliberately deleted
-under ADR-0006). The v1.6 bump moving zero outbound bytes was an *inference* here
-("the payload carries no `schema_version` key at all and no Go file hardcodes a
-version, so it *should* move nothing"); it is now measured on real POSTed payloads.
-`MAPPING.md` §7 items 31–33 still list what a **live stack** must confirm — that is
-unchanged, and unrelated.
+**Status: contract + decision records only; no lane exists. Unit-verified, both
+mutation drills red-on-deletion, all 12 modules build/vet/cross-compile green.
+C1–C41 now RUN** — 38 cases, 38 pass, 0 fail (2026-08-28; C8/C9 do not exist, both
+deliberately deleted under). The v1.6 bump moving zero outbound bytes was an
+*inference* here ("the payload carries no `schema_version` key at all and no Go file
+hardcodes a version, so it *should* move nothing"); it is now measured on real
+POSTed payloads. `MAPPING.md` §7 items 31–33 still list what a **live stack** must
+confirm — that is unchanged, and unrelated.
 
 **How the tests came to be unrunnable is worth more than the fix.** The claim above
 used to read "~334 listener-dependent tests could not execute". Both halves were
@@ -1071,15 +1025,14 @@ the plain-HTTP path only". Six things worth not re-litigating:
   case sending NO `Accept-Encoding`. **Without the drill, an assertion that reads
   exactly like a control would have shipped as one.**
 - **OD1(c) is measured, not estimated: 96.75%** of 5,049 recorded request bodies
-  exceed the 65,536-rune cap (p50 529,175, max 2,566,660); responses 0.06%. Spool cost
-  is **70,080 bytes per model call**, ~334 MB per 5,000-call session — the number the
-  backend dedupe ask now carries. **Three denominators appear in that corpus and they
-  are different populations** (5,340 recorded requests / 5,231 carrying the retry
-  header / 5,049 flow-paired), all from run `20260827T063932Z-225cac`: one machine,
-  one workload, all subscription-OAuth. **The all-zero `x-stainless-retry-count` is
-  evidence the header EXISTS, not evidence about retry-around behaviour** — probe A
-  stays the only source for ADR-0021 §9, and `tools/refusal-injector/` is its
-  instrument.
+exceed the 65,536-rune cap (p50 529,175, max 2,566,660); responses 0.06%. Spool cost
+is **70,080 bytes per model call**, ~334 MB per 5,000-call session — the number the
+backend dedupe ask now carries. **Three denominators appear in that corpus and they
+are different populations** (5,340 recorded requests / 5,231 carrying the retry header
+/ 5,049 flow-paired), all from run `20260827T063932Z-225cac`: one machine, one
+workload, all subscription-OAuth. **The all-zero `x-stainless-retry-count` is evidence
+the header EXISTS, not evidence about retry-around behaviour** — probe A stays the
+only source for that decision, and `tools/refusal-injector/` is its instrument.
 - **Four self-inflicted measurement errors are recorded rather than quietly fixed**,
   because the shape recurs: a drill that reported RED with `-run` pointed at the wrong
   package; a revert whose ambiguous anchor corrupted `gateway/proxy.go`; an OD1(c)
@@ -1126,50 +1079,44 @@ ruling; no fix is chosen.**
 
 Next: the Cursor adapter; policy template packs; and the live half of everything above —
 the dormant test phases (35, 45, 46, 47) and probe A, which additionally needs a
-bind-capable host, a real install and credentials. The language floor is
-`go 1.27.0` in the repository's one `go.mod`, so every dependency resolves at
-latest with no pin. **Dependencies are repo-wide now** — that inverted on
-2026-08-30 with the collapse (ADR-0024), and the sentence that stood here said the
-opposite. **What is still SUBTREE-scoped is the GUARD**, not the dependency:
-`internal/depguard` holds the allowlists, and only four subtrees have one. Which
-subtree takes which is still worth knowing, because it is what the allowlists
-assert: `internal/cli` + `cmd/` have `golang.org/x/term` (masked input, ADR-0015),
+bind-capable host, a real install and credentials. The language floor is `go 1.27.0` in
+the repository's one `go.mod`, so every dependency resolves at latest with no pin.
+**Dependencies are repo-wide now** — that inverted on 2026-08-30 with the collapse, and
+the sentence that stood here said the opposite. **What is still SUBTREE-scoped is the
+GUARD**, not the dependency: `internal/depguard` holds the allowlists, and only four
+subtrees have one. Which subtree takes which is still worth knowing, because it is what
+the allowlists assert: `internal/cli` + `cmd/` have `golang.org/x/term` (masked input),
 `google/renameio/v2` and `kardianos/service` (D-OSS-3), **and no guard**;
 `internal/conformance` has `santhosh-tekuri/jsonschema/v6` (+ `golang.org/x/text`,
-D-OSS-5), which reaches the test graphs of both adapters and `client`, and is the
-one guarded by CLOSURE rather than by direct import — `x/text` arrives through
-jsonschema and no import walk can see it; `internal/adapters/common/devconfig` has
+D-OSS-5), which reaches the test graphs of both adapters and `client`, and is the one
+guarded by CLOSURE rather than by direct import — `x/text` arrives through jsonschema
+and no import walk can see it; `internal/adapters/common/devconfig` has
 `pelletier/go-toml/v2` (D-OSS-6) and `joho/godotenv` (D-OSS-7), **no guard**;
-`internal/adapters/common/hookflow` has `google/renameio/v2` (D-OSS-8), **no
-guard**; `internal/telemetry` has **eleven** (eight
-`go.opentelemetry.io/collector/*` including `receiver/otlpreceiver`, plus
-`otel/metric`, `otel/trace` and `go.uber.org/zap`, D-OSS-2); `internal/transport`
-has `elazarl/goproxy` (D-OSS-1); `internal/decision` has
-`zricethezav/gitleaks/v8` (D-OSS-4); `internal/gateway` has **zero external**,
-which is what makes its lexical credential scan sufficient rather than lucky.
-**Nineteen DISTINCT external modules, in one `go.mod`** — the per-module count of
-20 is retired with the modules, since `renameio` no longer has two entries — and
-the number that is actually paid is transitive: phase 09 measured
-`telemetry`'s tree at **492 transitive packages / 124 modules in graph** (against
-`gateway`'s 381 / 206), with a **leak check of zero** — no collector require reaches
-`gateway`, `decision`, `client`, `cli` or either adapter. The binary
-is **40,311,474 bytes (38.4 MB) on darwin/arm64, measured 2026-08-30 after the
-collapse** — it was 40,287,986 before, so the layout change cost +0.06%; the
-earlier figure was taken with `GOWORK=off`, a mode that no longer means anything.
-Against
-the 17 MB recorded while the mapper was unlinked; OD5 accepted +16.5 MB, so the
-delivered total is ~5 MB above the number the decision was made on. Three things
-follow.
-**A new dependency is now one `go mod tidy` in one place**, which retires the
-whole class where a shared module's new require made `GOWORK=off` fail on a
-missing go.sum entry while the workspace build stayed green. **`renameio` is
-`!windows` on every file**, so it still sits behind a build-tagged
-`atomicWriteFile` helper: unix fsyncs, Windows keeps the prior temp+rename. The
-allowlists live in `internal/depguard` — one file, four subtrees plus the
-conformance closure — and adding to one is a decision, which is why they fail
-first. **Run them with `-count=1`**: the conformance guard shells out to `go list`,
-and a child process's file reads never reach the test cache's log, so without the
-flag it can serve a stale pass.
+`internal/adapters/common/hookflow` has `google/renameio/v2` (D-OSS-8), **no guard**;
+`internal/telemetry` has **eleven** (eight `go.opentelemetry.io/collector/*` including
+`receiver/otlpreceiver`, plus `otel/metric`, `otel/trace` and `go.uber.org/zap`,
+D-OSS-2); `internal/transport` has `elazarl/goproxy` (D-OSS-1); `internal/decision` has
+`zricethezav/gitleaks/v8` (D-OSS-4); `internal/gateway` has **zero external**, which is
+what makes its lexical credential scan sufficient rather than lucky. **Nineteen DISTINCT
+external modules, in one `go.mod`** — the per-module count of 20 is retired with the
+modules, since `renameio` no longer has two entries — and the number that is actually
+paid is transitive: phase 09 measured `telemetry`'s tree at **492 transitive packages /
+124 modules in graph** (against `gateway`'s 381 / 206), with a **leak check of zero** —
+no collector require reaches `gateway`, `decision`, `client`, `cli` or either adapter.
+The binary is **40,311,474 bytes (38.4 MB) on darwin/arm64, measured 2026-08-30 after
+the collapse** — it was 40,287,986 before, so the layout change cost +0.06%; the earlier
+figure was taken with `GOWORK=off`, a mode that no longer means anything. Against the 17
+MB recorded while the mapper was unlinked; OD5 accepted +16.5 MB, so the delivered total
+is ~5 MB above the number the decision was made on. Three things follow. **A new
+dependency is now one `go mod tidy` in one place**, which retires the whole class where
+a shared module's new require made `GOWORK=off` fail on a missing go.sum entry while the
+workspace build stayed green. **`renameio` is `!windows` on every file**, so it still
+sits behind a build-tagged `atomicWriteFile` helper: unix fsyncs, Windows keeps the
+prior temp+rename. The allowlists live in `internal/depguard` — one file, four subtrees
+plus the conformance closure — and adding to one is a decision, which is why they fail
+first. **Run them with `-count=1`**: the conformance guard shells out to `go list`, and
+a child process's file reads never reach the test cache's log, so without the flag it
+can serve a stale pass.
 
 **`kardianos/service` owns the gateway's unit file but NOT its path, and that has a
 test consequence** (D-OSS-3): on darwin it derives the home from `user.Current()`
@@ -1184,27 +1131,25 @@ stale-unit bug where a moved binary left launchd restarting a path that no longe
 existed. `launchctl` start/stop stayed ours: the library uses the older `load`/
 `unload` where this repo uses `bootstrap`/`bootout`.
 
-**The credential guard bounds DIRECT requires only** (ADR-0023). Its go.mod half
-used to reject every requirement outside gateway's two-entry allowlist, transitive
-ones included; that was untenable once an allowlisted module grew its own tree, and
-enumerating the closure would make the allowlist unreadable — the one thing it
-exists to be. So the bound moved: direct requires were checked at each module, and
-transitive code bounded at the module that took the dependency. **ADR-0024 moved
-it again** — with one module the bound is the package SUBTREE, and the allowlists
-live in `internal/depguard`. **What is no
-longer bounded by any test is arbitrary transitive code**, and that was already true
-before — the old check matched only lines starting `github.com/`, so a direct
-`golang.org/x/…` require was invisible to it. The host gap is closed while the scope
-narrowed. Do not widen an allowlist to make a direct import pass; that inverts the
-ADR's reasoning.
+**The credential guard bounds DIRECT requires only**. Its go.mod half used to reject
+every requirement outside gateway's two-entry allowlist, transitive ones included;
+that was untenable once an allowlisted module grew its own tree, and enumerating the
+closure would make the allowlist unreadable — the one thing it exists to be. So the
+bound moved: direct requires were checked at each module, and transitive code
+bounded at the module that took the dependency. **that decision moved it again** —
+with one module the bound is the package SUBTREE, and the allowlists live in
+`internal/depguard`. **What is no longer bounded by any test is arbitrary transitive
+code**, and that was already true before — the old check matched only lines starting
+`github.com/`, so a direct `golang.org/x/…` require was invisible to it. The host
+gap is closed while the scope narrowed. Do not widen an allowlist to make a direct
+import pass; that inverts that decision's reasoning.
 
-**`.env` parsing is godotenv's, at its defaults, and that removed two controls**
-(D-OSS-7): a duplicate key is last-wins rather than an error, `$VAR` and `\n`
-expand inside values, and **its parse error echoes the offending line**, so a
-malformed line that is a bare secret leaks it into logs. Owner-ruled, pinned by
-tests, recorded in ADR-0015 — do not "fix" it without reopening that ruling. (Upstreaming the
-`shell`/`mcp`/`tool` hook types to `openbox-sdk-python` is no longer needed —
-ADR-0013 retired the Go mirror by deleting the span layer it mirrored.)
+**`.env` parsing is godotenv's, at its defaults, and that removed two controls** (D-OSS-7): a
+duplicate key is last-wins rather than an error, `$VAR` and `\n` expand inside values, and
+**its parse error echoes the offending line**, so a malformed line that is a bare secret
+leaks it into logs. Owner-ruled, pinned by tests — do not "fix" it without reopening that
+ruling. (Upstreaming the `shell`/`mcp`/`tool` hook types to `openbox-sdk-python` is no longer
+needed — that decision retired the Go mirror by deleting the span layer it mirrored.)
 
 The epic-by-epic history is in git, not in the tree: read commit messages and the
-ADRs for *why*, and the code for *what is true now*.
+decision records for *why*, and the code for *what is true now*.

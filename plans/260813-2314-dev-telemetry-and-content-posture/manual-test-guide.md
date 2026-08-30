@@ -1,7 +1,7 @@
 # Manual verification — tool status, failure signals, and the assistant-turn span
 
-What ADR-0018 changed, checked by hand. **No OpenBox stack, no Docker, no network**
-for the first section; ~15 minutes.
+What that decision changed, checked by hand. **No OpenBox stack, no Docker, no
+network** for the first section; ~15 minutes.
 
 You are verifying four things:
 
@@ -184,9 +184,9 @@ Then confirm the tool's own error text did **not** ride along:
 curl -s http://127.0.0.1:8098/ | grep -c "exit code 3"
 ```
 
-**Expect `0`.** Free-text failure detail is deliberately unbound (ADR-0019 owns
-it); `is_interrupt` is the structural half, and it is what separates a user
-cancellation from a broken tool.
+**Expect `0`.** Free-text failure detail is deliberately unbound (that decision
+owns it); `is_interrupt` is the structural half, and it is what separates a
+user cancellation from a broken tool.
 
 ### T3 — a model turn carries the assistant's reply ⭐
 
@@ -404,7 +404,7 @@ touched your real `~/.openbox` **provided you exported `OPENBOX_HOME` and
 `<os-config-dir>/openbox/`.
 
 Never `cat ~/.openbox/.env` as a debugging step. It is plaintext by design
-(ADR-0015) and the habit is the problem.
+and the habit is the problem.
 
 ---
 

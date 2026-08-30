@@ -4,7 +4,7 @@
 
 - Parent: [plan.md](plan.md)
 - Depends on: [Phase 01](phase-01-wire-activity-lifecycle.md), [Phase 02](phase-02-retire-hook-span-machinery.md)
-- Closes the unverified claims in [Phase 03](phase-03-contracts-adr-docs.md)
+- Closes the unverified claims in [Phase 03](phase-03-contracts-and-docs.md)
 - Suite docs: `docs/testbed/e2e.md`; entry point `testbed/run-all.sh`
 
 ## Overview
@@ -129,7 +129,7 @@ suite themselves.
 **Nothing downstream of the run was faked.** Phase 03's gated claims are NOT
 released: `MAPPING.md` §7 opens with "NOT YET RUN", `CLAUDE.md`'s current-state
 paragraph says implemented-and-unit-verified rather than verified end to end, and
-ADR-0013's consequences carry the load-bearing assumption as unproven.
+that decision's consequences carry the load-bearing assumption as unproven.
 
 ## To run it
 
@@ -165,8 +165,8 @@ a second attempt at an already-completed operation shares its `activity_id`, and
 if the poll returns the completed row (NULL `approval_expiration_time`),
 `ApprovalStatus.Decided()` reads false and a real grant goes unconsumed.
 
-Added to MAPPING.md §7 item 6 as something the live run must exercise, and to
-ADR-0013's Consequences with the core-side fix. **Not reproduced — found by
+Added to MAPPING.md §7 item 6 as something the live run must exercise, and to that
+decision's Consequences with the core-side fix. **Not reproduced — found by
 reading.** It is out of scope here (the plan's non-goals forbid openbox-core
 changes) but it is a direct consequence of this shape and should be fixed core-side
 before this ships to anyone relying on retry-after-completion approvals.
@@ -197,11 +197,11 @@ documented degradation rather than on a defect.
 
 | Risk | Mitigation | Signal it broke | Pre-decided response |
 |---|---|---|---|
-| Core merges or rejects the `ActivityCompleted` instead of creating its own row (the phase's central unverified assumption) | This phase tests it first, before docs are released | One row per tool call, or a non-2xx on the completed POST | **Proceed to the 3-POST fallback — pre-authorized (validation decision 3), no new decision needed:** `ActivityStarted` → `ActivityCompleted` → `ActivityCompleted`+`hook_trigger` with the span, which core's event_type-agnostic span gate does support. Phase 03's ADR records that shape and its base-SDK divergence instead |
+| Core merges or rejects the `ActivityCompleted` instead of creating its own row (the phase's central unverified assumption) | This phase tests it first, before docs are released | One row per tool call, or a non-2xx on the completed POST | **Proceed to the 3-POST fallback — pre-authorized (validation decision 3), no new decision needed:** `ActivityStarted` → `ActivityCompleted` → `ActivityCompleted`+`hook_trigger` with the span, which core's event_type-agnostic span gate does support. Phase 03's record records that shape and its base-SDK divergence instead |
 | The approval loop breaks because the span-based bypass no longer fires | `40-approvals.sh` / `70-approver-auto.sh` run unchanged and are not softened | Rewake loops, or a granted approval is never consumed | Stop. The approval loop is shipped behavior; reshaping the wire to keep it is preferable to shipping a broken gate |
 | `duration_ms` is absent, zero or negative | It is the only timing field sent (validation decision 2), it has one consumer, and step 4 asserts it is > 0 | Assertion fails, or the dashboard row shows blank / a nonsense duration | Fix the arithmetic in Phase 01 step 8 and re-run — the failure is visible, not silent |
 | A realtime-flush failure is mistaken for a shape failure, or vice versa | Run `20-capture.sh` (session-end flush) green before `25-realtime.sh` | Both fail together with the same symptom | Bisect by setting `OPENBOX_REALTIME=0` and re-running capture |
-| A dashboard surface that read dev-session spans goes blank | Step 9 looks at the real UI, not just the DB | An empty panel or a broken span view | Record as a known limit in the ADR; raise with the dashboard owner |
+| A dashboard surface that read dev-session spans goes blank | Step 9 looks at the real UI, not just the DB | An empty panel or a broken span view | Record as a known limit in that decision; raise with the dashboard owner |
 
 **Assumption that may break:** that the scripted testbed session's tool-call count is
 stable enough to assert equality rather than `>=`. Signal: flaky counts across runs.

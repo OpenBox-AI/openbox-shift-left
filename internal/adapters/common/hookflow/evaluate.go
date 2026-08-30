@@ -51,8 +51,8 @@ func EnforceBudget(c provider.HookCeiling) time.Duration {
 // bounded, synchronous /evaluate round-trip, run before the tool does.
 //
 // It was Tier2, the upper half of a two-tier scheme whose lower half evaluated
-// policy locally. ADR-0017 deleted the tiers rather than the escalation, so what
-// remains is not "tier 2" of anything — it is the evaluation.
+// policy locally. That decision deleted the tiers rather than the escalation, so
+// what remains is not "tier 2" of anything — it is the evaluation.
 //
 // The two providers differ in exactly one value — the wall-clock ceiling the
 // tool kills the hook at. That is now declared through the SPI
@@ -146,8 +146,8 @@ func (t Evaluator) Escalate(ctx context.Context, logger *log.Logger, ev client.D
 func (t Evaluator) run(cctx context.Context, logger *log.Logger, ev client.DevEvent) decision.Decision {
 	// A missing transport is a misconfiguration, but it must degrade like any
 	// other fault rather than panic: this runs on every gated tool call since
-	// ADR-0017, so a nil here would be a guaranteed crash on the enforce path
-	// instead of the latent one it was when only shell and MCP escalated.
+	// that decision, so a nil here would be a guaranteed crash on the enforce
+	// path instead of the latent one it was when only shell and MCP escalated.
 	// RunHook would recover it, but recovering a panic per tool call is not the
 	// same as failing open.
 	if t.NewClient == nil {
@@ -217,10 +217,10 @@ func ShouldEscalate(dec decision.Decision, c OutputContract) bool {
 
 // resolveEvaluationTimeout is the per-evaluation budget.
 //
-// It reads no config. `tier2_timeout_ms` is deprecated and inert (ADR-0017):
-// the real bound is the provider's declared hook ceiling, applied in Budget,
-// and that is a correctness boundary rather than a tuning knob — latency and
-// capacity are the platform's scope, not something tuned per machine. Honouring
-// a per-machine override would let a developer shorten their own enforcement
+// It reads no config. `tier2_timeout_ms` is deprecated and inert : the real
+// bound is the provider's declared hook ceiling, applied in Budget, and that is
+// a correctness boundary rather than a tuning knob — latency and capacity are
+// the platform's scope, not something tuned per machine. Honouring a
+// per-machine override would let a developer shorten their own enforcement
 // window.
 func resolveEvaluationTimeout() time.Duration { return DefaultEvaluationTimeout }

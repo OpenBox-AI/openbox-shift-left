@@ -172,10 +172,10 @@ func (s Spec) LaunchdPlist(homeDir, binPath string) string {
 // SystemdUnit renders the Linux USER unit.
 //
 // A user unit, not a system one: the base tier is user-owned by definition, and
-// a system unit would need root for an install ADR-0016 puts in the developer's
-// hands. An org hardening to the MDM tier deploys the same content root-owned —
-// identical bytes, different ownership, which is exactly what doctor reads the
-// tier from.
+// a system unit would need root for an install that decision puts in the
+// developer's hands. An org hardening to the MDM tier deploys the same content
+// root-owned — identical bytes, different ownership, which is exactly what
+// doctor reads the tier from.
 func (s Spec) SystemdUnit(binPath string) string {
 	return strings.Join([]string{
 		"[Unit]",

@@ -206,7 +206,7 @@ prefer referencing the guide over duplicating steps.
   real key) and the guide must say so, so nobody pastes a live token to test masking.
 - Captured request bodies contain prompt and assistant text: tell the reader the capture file is
   content-bearing and to delete it in Cleanup.
-- Do not print `~/.openbox/.env` contents in any step; the file is plaintext by design (ADR-0015)
+- Do not print `~/.openbox/.env` contents in any step; the file is plaintext by design
   and a guide that cats it teaches the wrong habit.
 
 ## Next steps

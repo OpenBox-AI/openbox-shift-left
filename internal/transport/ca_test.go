@@ -41,11 +41,11 @@ func TestLoadOrCreateCAGeneratesOnceAndPersists(t *testing.T) {
 // TestCAKeyIsOwnerOnly holds the file-permission half of the security note.
 //
 // The CA can impersonate the provider to this machine. It sits under the same
-// trust boundary as ~/.openbox/.env (ADR-0015) — anything running as the
-// developer can read it — but that is not a reason to widen it further.
+// trust boundary as ~/.openbox/.env — anything running as the developer can
+// read it — but that is not a reason to widen it further.
 func TestCAKeyIsOwnerOnly(t *testing.T) {
 	if runtime.GOOS == "windows" {
-		t.Skip("unix file modes; Windows has no at-rest protection for ~/.openbox (ADR-0015)")
+		t.Skip("unix file modes; Windows has no at-rest protection for ~/.openbox ")
 	}
 	dir := t.TempDir()
 	if _, err := LoadOrCreateCA(dir); err != nil {
@@ -76,7 +76,7 @@ func TestCAKeyIsOwnerOnly(t *testing.T) {
 // silent chmod would hide that it ever happened.
 func TestLoadOrCreateCARefusesALooseKey(t *testing.T) {
 	if runtime.GOOS == "windows" {
-		t.Skip("unix file modes; Windows has no at-rest protection for ~/.openbox (ADR-0015)")
+		t.Skip("unix file modes; Windows has no at-rest protection for ~/.openbox ")
 	}
 	for _, mode := range []os.FileMode{0o640, 0o604, 0o644, 0o666} {
 		dir := t.TempDir()

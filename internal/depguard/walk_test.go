@@ -16,22 +16,21 @@ import (
 // depguard holds the dependency guards that used to live in five modules'
 // go.mod-reading tests.
 //
-// WHY THEY MOVED. Each guard read its own `go.mod` and asserted a short
-// allowlist of direct requires. With one module that file names every external
-// dependency in the repository at once, so every allowlist would either fail
-// outright or be "fixed" by widening it to the union — which looks like a fix and
-// removes the control. ADR-0023's premise is that transitive code is bounded at
-// the module that took the dependency; one module means one bound, so the bound
-// moves to the package subtree.
+// WHY THEY MOVED. Each guard read its own `go.mod` and asserted a short allowlist
+// of direct requires. With one module that file names every external dependency in
+// the repository at once, so every allowlist would either fail outright or be
+// "fixed" by widening it to the union — which looks like a fix and removes the
+// control. That decision's premise is that transitive code is bounded at the
+// module that took the dependency; one module means one bound, so the bound moves
+// to the package subtree.
 //
 // WHY ONE PACKAGE AND NOT SIX. While the modules still exist, a helper shared
 // across them would need a `require`, a `replace`, AND an allowlist entry in each
 // of the six — the exact widening this file exists to prevent. So the guards walk
 // subtrees by FILESYSTEM PATH from the repo root, which needs no module
-// relationship at all. `internal/cli/corpusfixture/committed_test.go` already
-// does this, and `cli/cmd/openbox/modulewiring_test.go` did too until the
-// collapse deleted it -- the workspace-resolution bug it guarded became
-// unrepresentable.
+// relationship at all. `internal/cli/corpusfixture/committed_test.go` already does
+// this, and `cli/cmd/openbox/modulewiring_test.go` did too until the collapse
+// deleted it -- the workspace-resolution bug it guarded became unrepresentable.
 //
 // DO NOT DELETE THIS PACKAGE AS UNUSED. Every file here is a _test.go, so it has
 // no non-test source, no importer, and no POSSIBLE importer -- which makes it
@@ -66,9 +65,9 @@ import (
 // is for afterwards; do not remove it to save CI minutes.
 //
 // That test is named for its SUBJECT and lives in THIS package, not in
-// internal/conformance. If the flag is ever narrowed from `./...`, it has to
-// cover `./internal/depguard/...` -- scoping it to `./internal/conformance/...`
-// reads correct and protects nothing.
+// internal/conformance. If the flag is ever narrowed from `./...`, it has to cover
+// `./internal/depguard/...` -- scoping it to `./internal/conformance/...` reads
+// correct and protects nothing.
 
 // repoPrefix is the module namespace this repo publishes under.
 const repoPrefix = "github.com/openbox-ai/openbox-shift-left"
@@ -198,8 +197,8 @@ func sorted(m map[string]bool) []string {
 // `pdata/pmetric`, `pdata/pcommon`; decision allows `gitleaks/v8` and imports
 // `gitleaks/v8/{config,detect,report}`. Under equality every one of those is red
 // on the first run, and the obvious "fix" — rewriting entries to package paths —
-// grows both lists, which is precisely what ADR-0023 forbids. Prefix matching is
-// also what a `require` already meant.
+// grows both lists, which is precisely what that decision forbids. Prefix
+// matching is also what a `require` already meant.
 func unallowed(got []string, allow map[string]bool) []string {
 	var bad []string
 	for _, p := range got {

@@ -8,7 +8,7 @@
 #   live apart from the developer's.
 #
 #   AUTHORITY. `openbox approve --watch --auto --host claude-code` works the
-#   queue inside an org envelope (ADR-0012): the envelope decides the classes it
+# queue inside an org envelope : the envelope decides the classes it
 #   covers, a headless Claude Code reviews the consultable ones and may only
 #   NARROW, and anything uncovered is left for a human. Asserted here against
 #   real gated sessions — the approver answers inside the hook's hold, so the
@@ -34,7 +34,7 @@ AUDIT="$OPENBOX_ENFORCEMENT_FILE"
 tb_audit_size() { [ -r "$AUDIT" ] && wc -c <"$AUDIT" | tr -d ' ' || echo 0; }
 tb_audit_since() { tail -c "+$(($1 + 1))" "$AUDIT" 2>/dev/null; }
 
-# Both configs live under OPENBOX_HOME since ADR-0015.
+# Both configs live under OPENBOX_HOME since.
 DEV_CONFIG="$OPENBOX_HOME/dev.json"
 APPROVER_CONFIG="$OPENBOX_HOME/approver.json"
 
@@ -62,7 +62,7 @@ assert_eq "the queue is recorded" "$OPENBOX_ORG_ID" "$(tb_json "$cfg" org_id)"
 assert_eq "the backend is recorded" "$OPENBOX_BACKEND_URL" "$(tb_json "$cfg" backend_url)"
 assert_eq "the host is recorded" "claude-code" "$(tb_json "$cfg" host)"
 assert_eq "it decides nothing until told to" true "$(tb_json "$cfg" shadow)"
-# The token no longer has a coordinate to reference: ADR-0015 deleted the secret
+# The token no longer has a coordinate to reference: that decision deleted the secret
 # store, so it is written to ~/.openbox/.env and approver.json stays
 # credential-free. Both halves are asserted, because "no coordinate" must not
 # quietly become "no credential anywhere".
@@ -70,7 +70,7 @@ assert_absent "the token itself is not in approver.json (INV-1)" "$cfg" "${OPENB
 assert_contains "the token went to the credential file" "$(cat "$TB_ENV_FILE" 2>/dev/null)" "OPENBOX_CONTROL_TOKEN="
 # It is an ORGANIZATION key with fleet-wide create/rotate authority, in plaintext.
 # The install must say so, because it is a strictly larger exposure than the agent
-# signing key and easy to miss (ADR-0015).
+# signing key and easy to miss.
 assert_contains "the install warns about the org key's blast radius" "$out" "ORGANIZATION key"
 assert_eq "the config is not world-readable" 600 "$(stat -c '%a' "$APPROVER_CONFIG")"
 

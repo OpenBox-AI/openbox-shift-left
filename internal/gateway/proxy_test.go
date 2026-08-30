@@ -161,7 +161,7 @@ func TestForwardIdentity(t *testing.T) {
 	// Both credential headers named explicitly: pass-through auth is the invariant
 	// this phase exists for, and the two auth modes use different carriers --
 	// Authorization for OAuth, x-api-key for a console key. Whether OAuth even
-	// follows ANTHROPIC_BASE_URL is still unresolved (ADR-0021 8), so the
+	// follows ANTHROPIC_BASE_URL is still unresolved (that decision 8), so the
 	// x-api-key path may be the one that carries production traffic.
 	if forwarded := got.header.Get("Authorization"); forwarded != fixtureCredential {
 		t.Errorf("Authorization did not pass through verbatim: got %q want %q", forwarded, fixtureCredential)

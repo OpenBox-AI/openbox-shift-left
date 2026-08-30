@@ -41,15 +41,15 @@ import (
 // keeps producing from the lane it started with. The count stays right — one
 // producer per call — but the lane is the old one until that session ends.
 
-// lanePrecedence is ADR-0022's ruling, highest assurance first.
+// lanePrecedence is that decision's ruling, highest assurance first.
 //
 // In-path relays see the real bytes and could refuse a call; telemetry is the
 // governed tool reporting on itself and can be suppressed by the very thing it
 // observes. So the strongest ROUTED lane wins automatically, without the
 // developer having to hold the ordering in their head — which is exactly why
 // doctor has to print the winner and the reason. An automatic precedence nobody
-// can see is the "configured but not in force" shape ADR-0021 promised would
-// always be detectable.
+// can see is the "configured but not in force" shape that decision promised
+// would always be detectable.
 var lanePrecedence = []Lane{LaneTransport, LaneGateway, LaneTelemetry}
 
 // Election is the resolved answer plus the evidence for it.
@@ -146,14 +146,14 @@ func containsLane(lanes []Lane, want Lane) bool {
 	return false
 }
 
-// candidateLanes filters the routed set down to the lanes that CAN see the
-// call, whatever the precedence says.
+// candidateLanes filters the routed set down to the lanes that CAN see the call,
+// whatever the precedence says.
 //
 // ── WHY PRECEDENCE ALONE IS NOT ENOUGH ───────────────────────────────────────
 //
-// ADR-0022 ranks transport above gateway because an in-path relay observes real
-// bytes. That ranking answers "which lane should an org prefer to install". This
-// function answers a different question — "which lane will actually see THIS
+// That decision ranks transport above gateway because an in-path relay observes
+// real bytes. That ranking answers "which lane should an org prefer to install".
+// This function answers a different question — "which lane will actually see THIS
 // machine's model call" — and in one state the two disagree.
 //
 // A base URL pointing somewhere other than the provider defeats the transport

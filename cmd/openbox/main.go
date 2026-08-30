@@ -2,24 +2,24 @@
 //
 // Setup is TWO commands, in this order, and the split is the point:
 //
-//	openbox auth    authenticate — collect or register credentials, write
-//	                ~/.openbox/.env (secrets) and dev.json (coordinates)
-//	openbox init    set up — install the provider's hooks at a chosen scope
-//	                and write posture. Touches no credential, ever.
+// openbox auth    authenticate — collect or register credentials, write
+// ~/.openbox/.env (secrets) and dev.json (coordinates) openbox init    set up —
+// install the provider's hooks at a chosen scope and write posture. Touches no
+// credential, ever.
 //
 // `init` used to be both. Its own package comment described it as registering an
 // agent, capturing credentials, AND delegating the tool config — and splitting on
-// that "and" is what ADR-0015 did. What it bought: a command that runs in every
-// developer's shell can no longer read, write or prompt for a secret, and a
+// that "and" is what that decision did. What it bought: a command that runs in
+// every developer's shell can no longer read, write or prompt for a secret, and a
 // command that authenticates can now UPDATE, which `init` structurally could not
 // (its reuse path returned before any network call, so "re-run init" was never a
 // way to change a credential).
 //
-// A bare `init` governs the CURRENT DIRECTORY and ENFORCES (ADR-0016). Both
-// defaults are deliberate reversals, and both are stated at install time rather
-// than left to be discovered.
+// A bare `init` governs the CURRENT DIRECTORY and ENFORCES. Both defaults are
+// deliberate reversals, and both are stated at install time rather than left to
+// be discovered.
 //
-// OD17: single static Go binary, no cgo. Since ADR-0015 there is no platform
+// OD17: single static Go binary, no cgo. Since that decision there is no platform
 // secret-store subprocess either — credentials are a plaintext file, which is why
 // this works identically on Windows.
 package main
@@ -55,13 +55,13 @@ const (
 	exitConfigOnly = 2
 )
 
-// app holds the CLI's external dependencies behind seams so the command wiring
-// — including the INV-1 credential guards — is testable without touching the
-// real environment or network.
+// app holds the CLI's external dependencies behind seams so the command wiring —
+// including the INV-1 credential guards — is testable without touching the real
+// environment or network.
 //
-// There is no secret-store seam any more: credentials live in a plaintext file
-// (ADR-0015), so a test points OPENBOX_HOME at a temp dir and exercises the same
-// code production runs.
+// There is no secret-store seam any more: credentials live in a plaintext file,
+// so a test points OPENBOX_HOME at a temp dir and exercises the same code
+// production runs.
 type app struct {
 	stdout, stderr io.Writer
 	stdin          io.Reader
@@ -170,11 +170,11 @@ func (a *app) runDev(args []string) int {
 	case "verify":
 		return a.runDevVerify(args[1:])
 	case "sync":
-		// ADR-0017 deleted the local policy bundle, and with it the pull half
-		// of the distribution model this command was. Saying so is an error
-		// message, not an alias — there is nothing left for it to do.
+		// That decision deleted the local policy bundle, and with it the pull
+		// half of the distribution model this command was. Saying so is an
+		// error message, not an alias — there is nothing left for it to do.
 		return a.errorf("`openbox dev sync` no longer exists — policy is evaluated by OpenBox " +
-			"on every gated tool call (ADR-0017), so there is no local bundle to fetch. " +
+			"on every gated tool call, so there is no local bundle to fetch. " +
 			"Any leftover policy-bundle.json on this machine is inert and can be deleted.")
 	default:
 		return a.errorf("usage: openbox dev verify [flags]")
@@ -208,8 +208,8 @@ func (a *app) runDevVerify(args []string) int {
 	}
 
 	// Reuse the shared resolvers (dev.json for coordinates, env > ~/.openbox/.env
-	// for the secrets — ADR-0015).
-	// A missing identity means onboarding hasn't run — say so, don't half-proceed.
+	// for the secrets). A missing identity means onboarding hasn't run — say so,
+	// don't half-proceed.
 	creds, err := devconfig.ResolveCredentials()
 	if err != nil {
 		return a.errorf("cannot verify — %v.\n"+
@@ -353,10 +353,10 @@ func (a *app) runDevInit(args []string) int {
 	fs := a.newFlagSet("openbox init")
 	var o devinit.Options
 	var scope string
-	// Flags that MOVED to `openbox auth` (ADR-0015) or were deleted. They are
-	// still parsed so that passing one FAILS: a silently-ignored flag leaves a
-	// script exiting 0 while the value it supplied goes nowhere, which is worse
-	// than an error.
+	// Flags that MOVED to `openbox auth` or were deleted. They are still parsed
+	// so that passing one FAILS: a silently-ignored flag leaves a script
+	// exiting 0 while the value it supplied goes nowhere, which is worse than
+	// an error.
 	var movedOrg, movedAgentName, movedIcon, movedDescription string
 	var movedBaseURL, movedBackendURL string
 	var movedForce bool
@@ -367,10 +367,10 @@ func (a *app) runDevInit(args []string) int {
 	fs.StringVar(&o.Provider, "provider", "", "developer tool: claude-code|codex|cursor (required)")
 	fs.StringVar(&scope, "scope", "", "which sessions this install governs: local (default — this directory only) or global (every project, pending a managed-settings deployment)")
 	var enforce, noEnforce bool
-	fs.BoolVar(&enforce, "enforce", true, "ENFORCE mode: the PreToolUse hook blocks/asks/redacts in-process, no daemon and no runtime env. ON BY DEFAULT (ADR-0016) — inert until your org publishes a policy, and fail-open, so an OpenBox outage never blocks you. Pass --enforce=false to opt out; the opt-out persists.")
+	fs.BoolVar(&enforce, "enforce", true, "ENFORCE mode: the PreToolUse hook blocks/asks/redacts in-process, no daemon and no runtime env. ON BY DEFAULT — inert until your org publishes a policy, and fail-open, so an OpenBox outage never blocks you. Pass --enforce=false to opt out; the opt-out persists.")
 	fs.BoolVar(&noEnforce, "no-enforce", false, "alias for --enforce=false")
 	fs.BoolVar(&o.InstallGitHook, "install-git-hook", false, "enable ambient install of the commit-trailer hook into repos on session start (off by default — it modifies .git/hooks)")
-	// The local gateway (ADR-0021). OFF by default, deliberately: unlike
+	// The local gateway. OFF by default, deliberately: unlike
 	// enforcement-by-default, which is inert without an org policy, this redirects
 	// live model traffic. See initgateway.go for the full reasoning and for when
 	// the default should be revisited.
@@ -383,11 +383,11 @@ func (a *app) runDevInit(args []string) int {
 	fs.StringVar(&gatewayUpstream, "gateway-upstream", gateway.DefaultUpstream, "provider base URL the gateway forwards to")
 	fs.BoolVar(&gatewayVerbose, "gateway-verbose", false, "run the gateway with --verbose, logging every relayed call to ~/.openbox/gateway.log (no credentials, headers or bodies)")
 
-	// The two in-path/observation lanes ADR-0022 adds, and the one command each
-	// way OD2 ruled for. --full is the front door; the per-lane flags exist so a
-	// developer can back one lane out without --remove-all, which also deletes the
-	// CA, the lane logs and the activation record. The spool is NOT deleted; see
-	// purgeLaneData.
+	// The two in-path/observation lanes that decision adds, and the one command
+	// each way OD2 ruled for. --full is the front door; the per-lane flags exist
+	// so a developer can back one lane out without --remove-all, which also
+	// deletes the CA, the lane logs and the activation record. The spool is NOT
+	// deleted; see purgeLaneData.
 	var withFull, removeAll bool
 	var withTelemetry, removeTelemetryLane bool
 	var withTransport, removeTransportLane bool
@@ -438,7 +438,7 @@ func (a *app) runDevInit(args []string) int {
 		{"--description", movedDescription}, {"--base-url", movedBaseURL}, {"--backend-url", movedBackendURL},
 	} {
 		if m.value != "" {
-			return a.errorf("%s moved to `openbox auth` — `init` no longer registers agents or touches credentials (ADR-0015).\n"+
+			return a.errorf("%s moved to `openbox auth` — `init` no longer registers agents or touches credentials.\n"+
 				"  Run:  openbox auth %s %s\n"+
 				"  then: openbox init --provider %s", m.flag, m.flag, m.value, orDefault(o.Provider, "<tool>"))
 		}
@@ -449,7 +449,7 @@ func (a *app) runDevInit(args []string) int {
 	}
 	if goneSecretBackend != "" {
 		return a.errorf("--secret-backend was removed: there is no secret store to choose any more.\n" +
-			"  Credentials live in ~/.openbox/.env (plaintext, 0600 — see docs/adr/ADR-0015-plaintext-credential-file.md).\n" +
+			" Credentials live in ~/.openbox/.env (plaintext, 0600 — see.\n" +
 			"  Write them with `openbox auth`, then re-run `openbox init` without this flag.")
 	}
 	if goneClientID != "" {
@@ -466,20 +466,19 @@ func (a *app) runDevInit(args []string) int {
 		return a.errorf("--provider is required (one of: claude-code, codex, cursor)")
 	}
 
-	// --- enforce posture ---------------------------------------------------
-	// ON by default (ADR-0016), and the opt-out PERSISTS. Two distinct mechanisms
-	// are needed for that, and getting only one of them was a real bug:
+	// --- enforce posture --------------------------------------------------- ON by
+	// default, and the opt-out PERSISTS. Two distinct mechanisms are needed for
+	// that, and getting only one of them was a real bug:
 	//
-	//  1. `Enforce` is a *bool, so an explicit false survives being marshalled.
-	//     As a plain bool with `omitempty` it did not.
-	//  2. **o.Enforce stays NIL when this run said nothing about enforce.** Because
-	//     the flag DEFAULTS to true, its value alone cannot distinguish "the user
-	//     asked to enforce" from "the user said nothing" — so assigning it
-	//     unconditionally made every plain `init` write enforce:true, silently
-	//     reverting a deliberate `--enforce=false` on the next unrelated re-run
-	//     (adding --install-git-hook, repairing hooks, an idempotent setup script).
-	//     That reintroduced the same bug class as (1), one layer up. `flagPassed`
-	//     exists for exactly this distinction; use it.
+	// 1. `Enforce` is a *bool, so an explicit false survives being marshalled. As a
+	// plain bool with `omitempty` it did not. 2. **o.Enforce stays NIL when this
+	// run said nothing about enforce.** Because the flag DEFAULTS to true, its
+	// value alone cannot distinguish "the user asked to enforce" from "the user
+	// said nothing" — so assigning it unconditionally made every plain `init` write
+	// enforce:true, silently reverting a deliberate `--enforce=false` on the next
+	// unrelated re-run (adding --install-git-hook, repairing hooks, an idempotent
+	// setup script). That reintroduced the same bug class as (1), one layer up.
+	// `flagPassed` exists for exactly this distinction; use it.
 	//
 	// nil is what makes the default work in both directions: on a first install
 	// there is no field, so ResolveEnforce returns its default (on); on a re-run
@@ -500,9 +499,9 @@ func (a *app) runDevInit(args []string) int {
 		v := enforce // honours --enforce=false as well as --enforce
 		o.Enforce, o.Findings = &v, &v
 	}
-	// tier2 is deliberately no longer written. It is deprecated and inert
-	// (ADR-0017), and writing it would put a key into every fresh dev.json that
-	// exists only to be ignored and warned about.
+	// tier2 is deliberately no longer written. It is deprecated and inert, and
+	// writing it would put a key into every fresh dev.json that exists only to
+	// be ignored and warned about.
 
 	// A posture change is never silent, in either direction. Under enforce-by-
 	// default this compares RESOLVED postures, so it still fires for a config
@@ -558,10 +557,10 @@ func (a *app) runDevInit(args []string) int {
 
 	// The gateway is Claude Code's, and only Claude Code's. Its upstream default,
 	// its session/agent request headers and the settings file it writes are all
-	// that provider's (ADR-0021 scopes it there explicitly). Without this guard
-	// `openbox init --provider codex --gateway` installed a supervised relay to
-	// api.anthropic.com and pointed ~/.claude/settings.json at it — on a machine
-	// whose tool is Codex, which reads neither.
+	// that provider's (that decision scopes it there explicitly). Without this
+	// guard `openbox init --provider codex --gateway` installed a supervised
+	// relay to api.anthropic.com and pointed ~/.claude/settings.json at it — on a
+	// machine whose tool is Codex, which reads neither.
 	if (withGateway || removeGateway) && o.Provider != "claude-code" {
 		flag := "--gateway"
 		if removeGateway {
@@ -654,11 +653,10 @@ func (a *app) runDevInit(args []string) int {
 	}
 
 	// --- credentials must already exist ------------------------------------
-	// `init` performs NO registration and writes NO credential (ADR-0015). When
-	// credentials are absent it exits non-zero naming `auth`; it does not prompt
-	// and it does not half-install. That absence is the security property: a
-	// command run in every developer's shell can no longer read, write or prompt
-	// for a secret.
+	// `init` performs NO registration and writes NO credential. When credentials
+	// are absent it exits non-zero naming `auth`; it does not prompt and it does
+	// not half-install. That absence is the security property: a command run in
+	// every developer's shell can no longer read, write or prompt for a secret.
 	a.migrateLegacyConfig()
 	if code := a.requireCredentials(); code != exitOK {
 		return code
@@ -685,20 +683,19 @@ func (a *app) runDevInit(args []string) int {
 
 	// `init`'s last step best-effort pulls the agent's current policy into the
 	// local bundle, so enforce mode has a policy on first run. It matters more now
-	// that enforce is the default (ADR-0016): without a bundle, enforcement is
-	// inert, which is safe but also means a fresh install gates nothing.
+	// that enforce is the default : without a bundle, enforcement is inert, which
+	// is safe but also means a fresh install gates nothing.
 	//
 	// One closing block so a first-time user knows what to do next and how to
-	// check it. Onboarding that ends in a wall of notes reads as "did that
-	// work?", and the answer is one command away.
-	// NOT "governance is ambient from here" — it used to say that, and under a
-	// project-scoped default it directly contradicts the scope report below. The
-	// ambient part is true of the MECHANISM (no daemon, nothing to keep running),
-	// not of the COVERAGE, and conflating the two is the overstatement this
-	// product exists to avoid.
-	// --- the local gateway (phase 07 req 1) --------------------------------
-	// Opt-in, and the reasoning is in initgateway.go: this redirects live model
-	// traffic, unlike enforcement-by-default which is inert without a policy.
+	// check it. Onboarding that ends in a wall of notes reads as "did that work?",
+	// and the answer is one command away. NOT "governance is ambient from here" —
+	// it used to say that, and under a project-scoped default it directly
+	// contradicts the scope report below. The ambient part is true of the
+	// MECHANISM (no daemon, nothing to keep running), not of the COVERAGE, and
+	// conflating the two is the overstatement this product exists to avoid. ---
+	// the local gateway (phase 07 req 1) -------------------------------- Opt-in,
+	// and the reasoning is in initgateway.go: this redirects live model traffic,
+	// unlike enforcement-by-default which is inert without a policy.
 	gatewayRunning := false
 	if withGateway {
 		fmt.Fprintf(a.stdout, "\nLocal gateway (model-call governance)\n")
@@ -716,11 +713,11 @@ func (a *app) runDevInit(args []string) int {
 		}
 	}
 
-	// --- the telemetry and transport lanes (ADR-0022) -----------------------
-	// After the gateway, deliberately: transport SUPERSEDES the gateway in path,
-	// so installing it while a gateway is routed would leave the developer with
-	// two relays and a precedence they cannot see. setupLanes retires the gateway
-	// in that case and says so.
+	// --- the telemetry and transport lanes ----------------------- After the
+	// gateway, deliberately: transport SUPERSEDES the gateway in path, so
+	// installing it while a gateway is routed would leave the developer with two
+	// relays and a precedence they cannot see. setupLanes retires the gateway in
+	// that case and says so.
 	laneReport := a.setupLanes(laneRequest{
 		telemetry:     withTelemetry,
 		transport:     withTransport,
@@ -789,7 +786,7 @@ Usage:
   openbox managed install --provider <claude-code,codex> [--dry-run] [--force]
   openbox approve list [--org <id>] [--watch]
   openbox approve <allow|deny> <event-id> [--org <id>]
-  openbox approve --watch --auto [--host claude-code] [--decide]   (ADR-0012)
+  openbox approve --watch --auto [--host claude-code] [--decide]
   openbox gateway [--addr <loopback host:port>] [--upstream <provider base URL>]
   openbox doctor
   openbox version
@@ -804,7 +801,7 @@ Environment (needed only at 'auth' time, and only to register a new agent):
                           hosted core and surfaces later as a 401.
   OPENBOX_ORG             organization namespace, used to derive the agent name
 
-Credentials live in ~/.openbox/.env (plaintext, 0600 — ADR-0015); posture and
+Credentials live in ~/.openbox/.env (plaintext, 0600); posture and
 coordinates in ~/.openbox/dev.json. OPENBOX_HOME relocates both. A real
 environment variable always wins over either file.
 

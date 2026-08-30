@@ -23,12 +23,13 @@ is routed" and "who may emit" are one question — and a stored copy drifts in t
 worst direction: remove a lane without rewriting the field and the machine
 reports no model calls at all while looking perfectly configured.
 
-**Precedence needed one correction a pure ranking gets wrong.** ADR-0022 ranks
-transport above gateway. That answers "what should an org install". The election
-answers "what will actually see this call", and a base URL takes the relay out of
-the path — loopback is not proxied, anything else is blind-tunnelled. With both
-configured, the gateway is the emitter. The count was never at risk; the
-attribution was. Hence `Routed` and `Candidates` as separate fields.
+**Precedence needed one correction a pure ranking gets wrong.** That decision
+ranks transport above gateway. That answers "what should an org install". The
+election answers "what will actually see this call", and a base URL takes the
+relay out of the path — loopback is not proxied, anything else is
+blind-tunnelled. With both configured, the gateway is the emitter. The count was
+never at risk; the attribution was. Hence `Routed` and `Candidates` as separate
+fields.
 
 **Cut the gateway env port; kept the unit port.** The env port is a
 zero-behavior-change refactor of the only socket-verified lane here and serves
@@ -84,4 +85,4 @@ only steady state. The highest-consequence unverified claim remains that the 13
 telemetry env keys are the ones the client actually reads: every test asserts
 JSON we wrote, and the client silently drops names it does not recognize.
 
-> Historical work record — not durable authority. Prefer docs/specs/ADRs for current decisions.
+> Historical work record — not durable authority. Prefer docs/specs for current decisions.

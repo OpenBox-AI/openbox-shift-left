@@ -54,32 +54,31 @@ type Mapper struct {
 	// guarantee that Map never touches content.
 	Finops *FinopsUsage
 	// CaptureContent authorizes copying the (content) prompt text onto the
-	// emitted PromptSubmitted event. Default false = metadata-only
-	// (INV-2): the prompt is never egressed. Set from
-	// ResolveContentCapture() in RunHook, the same opt-in the client's
-	// Emit uses to decide whether to strip content — so capture and
-	// egress always agree. Redaction at source is a separate layer
-	// ([EXT-guardrail-redaction], inert locally); the prompt is capped
+	// emitted PromptSubmitted event. Default false = metadata-only (INV-2): the
+	// prompt is never egressed. Set from ResolveContentCapture() in RunHook,
+	// the same opt-in the client's Emit uses to decide whether to strip content
+	// — so capture and egress always agree. Redaction at source is a separate
+	// layer ([EXT-guardrail-redaction], inert locally); the prompt is capped
 	// before egress (capBody, buildSignalArgs).
 	//
 	// It gates every content field, not just the prompt: the assistant's turn
-	// text (ADR-0018) and, since ADR-0019 P1, tool input on the observe path,
-	// tool output, and the lifecycle signals' free text. One flag for all of
-	// them is deliberate — a second posture key would let an org believe it had
-	// opted out of content while one class kept egressing.
+	// text and, since that decision, tool input on the observe path, tool
+	// output, and the lifecycle signals' free text. One flag for all of them is
+	// deliberate — a second posture key would let an org believe it had opted
+	// out of content while one class kept egressing.
 	CaptureContent bool
 	// RedactContent redacts a content body for secrets before it is attached to
 	// an event. nil ⇒ identity, which is the honest `secret_detection:false`
-	// case: the text egresses unredacted (ADR-0018 says so rather than hiding
-	// it).
+	// case: the text egresses unredacted (that decision says so rather than
+	// hiding it).
 	//
 	// It is a COLLABORATOR rather than something MapTurn remembers to call,
 	// which is the point: with the redactor on the Mapper, every path that
 	// attaches text goes through it by construction. A function the mapper had
-	// to remember to invoke would be one refactor away from a path that
-	// forgot, and the failure would be a secret at the control plane — the
-	// hardest place to purge anything from. Same idiom as Now / NewID / Finops
-	// / Posture; wired in RunHook from ResolveSecretDetection().
+	// to remember to invoke would be one refactor away from a path that forgot,
+	// and the failure would be a secret at the control plane — the hardest
+	// place to purge anything from. Same idiom as Now / NewID / Finops /
+	// Posture; wired in RunHook from ResolveSecretDetection().
 	RedactContent func(string) string
 	// Posture, when non-nil, is the session's effective posture (E8-S5),
 	// attached to the SessionStarted event's metadata only. RunHook resolves
@@ -136,16 +135,15 @@ func NewMapper(id Identity) Mapper {
 	return Mapper{Identity: id, Now: time.Now}
 }
 
-// Map converts one hook payload into a normalized DevEvent. The bool
-// reports whether an event should be emitted at all: it is false when the
-// payload is unusable (no session id, or no valid developer DID) — in
-// which case the caller drops it fail-open (INV-3), never blocking the
-// tool call.
+// Map converts one hook payload into a normalized DevEvent. The bool reports
+// whether an event should be emitted at all: it is false when the payload is
+// unusable (no session id, or no valid developer DID) — in which case the caller
+// drops it fail-open (INV-3), never blocking the tool call.
 //
 // Map copies content onto an event ONLY under CaptureContent, and only after
 // RedactContent has run over it (INV-2). With capture off it carries structural
 // metadata alone — the tool identity, file paths, and lifecycle enums — which is
-// the same shape it always produced. What changed with ADR-0019 P1 is that the
+// the same shape it always produced. What changed with that decision is that the
 // with-capture-on shape now includes tool input on the observe path, tool
 // output, and the signals' free text; the gate, not the absence of a field, is
 // what keeps them off the wire.
@@ -186,10 +184,11 @@ func (m Mapper) Map(hook HookName, e *HookEvent) (client.DevEvent, bool) {
 		ev.Tool = client.Tool{Name: agentToolName, Kind: client.ToolShell}
 		ev.Metadata = mergeMetadata(
 			sessionStartMetadata(e),
-			// Account attribution, once per session (ADR-0021 req 6). Read from
-			// the client's own local record, so a session is attributable to an
-			// org even where the gateway is not running. Silent on any failure:
-			// an optional attribution field must never stop a session reporting.
+			// Account attribution, once per session (that decision req 6). Read
+			// from the client's own local record, so a session is attributable
+			// to an org even where the gateway is not running. Silent on any
+			// failure: an optional attribution field must never stop a session
+			// reporting.
 			accountMetadata(localAccount(homeDir())))
 		// Effective posture as evidence (E8-S5): structural booleans and
 		// opaque ids only, so it is INV-1/INV-2 safe to egress.
@@ -286,8 +285,8 @@ func (m Mapper) Map(hook HookName, e *HookEvent) (client.DevEvent, bool) {
 		// because it is believable. The probe is the standing evidence, and the
 		// pairing is re-checked whenever the hook surface changes.
 		ev.Status = client.StatusCompleted
-		// What the call PRODUCED (ADR-0019 P1). Gated, redacted, then capped by
-		// the client — see gatedToolOutput.
+		// What the call PRODUCED. Gated, redacted, then capped by the client —
+		// see gatedToolOutput.
 		ev.Content = m.gatedToolOutput(e.toolOutputText())
 
 	case HookPostToolUseFailure:
@@ -332,8 +331,8 @@ func (m Mapper) Map(hook HookName, e *HookEvent) (client.DevEvent, bool) {
 		// PreToolUse that preceded it by tool_use_id.
 		//
 		// The reason is free text a classifier wrote, so it rides gated content
-		// (ADR-0019 P1) and reaches metadata.denial_reason. It must never reach
-		// signal_args — see Content.SignalDetail for what core would do with it.
+		// and reaches metadata.denial_reason. It must never reach signal_args —
+		// see Content.SignalDetail for what core would do with it.
 		ev.EventType = client.EventPermissionDenied
 		ev.Tool, ev.Span = mapTool(e, "completed")
 		ev.Metadata = toolMetadata(e)
@@ -391,7 +390,7 @@ func (m Mapper) Map(hook HookName, e *HookEvent) (client.DevEvent, bool) {
 }
 
 // MapTurn builds one model turn's ActivityStarted/ActivityCompleted pair from a
-// Stop/SubagentStop firing and the transcript window it delimits (ADR-0014).
+// Stop/SubagentStop firing and the transcript window it delimits.
 //
 // BOTH halves come from this one call, because both come from one hook firing.
 // Stop fires at turn *end*, so the alternative was to open the pair from
@@ -406,9 +405,9 @@ func (m Mapper) Map(hook HookName, e *HookEvent) (client.DevEvent, bool) {
 // former case — a fabricated duration from a fallback start would be a made-up
 // measurement, and the client omits the field rather than claiming zero.
 //
-// Returns ok=false when the payload is unusable or the window carried no usage:
-// a Stop that opened no new tokens is not a turn, and emitting an empty pair
-// would inflate the pair count Phase 06 asserts against the real turn count.
+// Returns ok=false when the payload is unusable or the window carried no usage: a
+// Stop that opened no new tokens is not a turn, and emitting an empty pair would
+// inflate the pair count Phase 06 asserts against the real turn count.
 //
 // Like Map, this is pure: RunHook does the transcript I/O and hands the result
 // in, so the mapper still cannot touch content.
@@ -463,19 +462,18 @@ func (m Mapper) MapTurn(e *HookEvent, w turnWindow, index int) (started, complet
 	// The one egressing string, bounded here at the untrusted boundary exactly as
 	// metadata.model is (sessionStartMetadata).
 	completed.Model = capStr(w.Model)
-	// The assistant's answer, on the COMPLETED half only (ADR-0018 Decision 2).
-	// Three conditions, all required: the org opted into content capture, the
-	// hook actually carried the field, and the redactor has run over it. The
-	// client then wraps it into the one span core's alignment extractor reads,
-	// caps it at 64KB, and — independently — drops it entirely if capture is off
-	// at flush time.
+	// The assistant's answer, on the COMPLETED half only. Three conditions, all
+	// required: the org opted into content capture, the hook actually carried
+	// the field, and the redactor has run over it. The client then wraps it into
+	// the one span core's alignment extractor reads, caps it at 64KB, and —
+	// independently — drops it entirely if capture is off at flush time.
 	//
 	// Deliberately NOT on the started half: a turn's input is the prompt, which
 	// already rides PromptSubmitted under the same gate. Duplicating it here
 	// would double the egress for no reader.
 	//
-	// Thinking joins it on the same half and under the same gate (v1.4, the
-	// ADR-0014 amendment), from the transcript window rather than a hook field —
+	// Thinking joins it on the same half and under the same gate (v1.4, that
+	// decision amendment), from the transcript window rather than a hook field —
 	// no hook carries thinking. Two fields on ONE Content, built together: two
 	// separate assignments would have the second silently discard the first.
 	if m.CaptureContent {
@@ -515,33 +513,30 @@ func turnMetadata(e *HookEvent, index int) map[string]any {
 // Two identities, deliberately separate (client.Span.InvocationID /
 // OperationID):
 //
-//   - InvocationID = tool_use_id, which Claude Code mints per call. It keys
-//     the cross-process duration stash, so the completed hook recovers when
-//     the started one fired.
-//   - OperationID = what is being done, identical across a retry. activity_id
-//     derives from it, and activity_id is the approval key.
+// - InvocationID = tool_use_id, which Claude Code mints per call. It keys the
+// cross-process duration stash, so the completed hook recovers when the started
+// one fired. - OperationID = what is being done, identical across a retry.
+// activity_id derives from it, and activity_id is the approval key.
 //
-// These used to be the same value — tool_use_id was carried on span.function
-// and fed both — so every retry became a different activity. An approver's
-// decision could never be consumed: the retry filed a fresh approval request,
-// and the rewake's "re-run to proceed" looped, burning one human decision per
-// pass. Seen live: three attempts in one session, three approval ids, no
-// output.
+// These used to be the same value — tool_use_id was carried on span.function and
+// fed both — so every retry became a different activity. An approver's decision
+// could never be consumed: the retry filed a fresh approval request, and the
+// rewake's "re-run to proceed" looped, burning one human decision per pass. Seen
+// live: three attempts in one session, three approval ids, no output.
 //
 // The discriminator is per class, and matches what core's own
 // ComputeApprovalFingerprint keys on, so the two agree about what "the same
 // operation" means:
 //
-//   - shell → the command, hashed. Approving `ls` must not grant `rm -rf /`.
-//   - MCP   → the argument shape, hashed, beside the real function name.
-//     Core states the rule outright: "same tool with different arguments must
-//     require fresh approval".
-//   - anything else → the invocation, because those classes expose no
-//     structural discriminator to key on.
+// - shell → the command, hashed. Approving `ls` must not grant `rm -rf /`. - MCP
+// → the argument shape, hashed, beside the real function name. Core states the
+// rule outright: "same tool with different arguments must require fresh
+// approval". - anything else → the invocation, because those classes expose no
+// structural discriminator to key on.
 //
 // That fallback used to be free: those classes were never escalated, so they
 // could never hold an approval, and one event per call was the whole
-// requirement. ADR-0017 gates every class, so they CAN hold one now, and an
+// requirement. That decision gates every class, so they CAN hold one now, and an
 // invocation-scoped key means an approval does not survive a retry — the
 // developer re-runs the tool, the id moves, and a fresh request is filed rather
 // than the granted one being found.
@@ -810,7 +805,7 @@ func (m Mapper) clock() time.Time {
 }
 
 // redact applies the injected content redactor, or returns the text unchanged
-// when none is wired (secret detection off — the honest degradation, ADR-0018).
+// when none is wired (secret detection off — the honest degradation).
 // gatedToolOutput wraps a tool's produced text as gated content: the org's
 // opt-in first, the redactor second, attachment last (the client caps it).
 //

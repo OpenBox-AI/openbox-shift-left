@@ -53,11 +53,10 @@ history. Re-run `auth` any time to change any of it.
 **3. Govern a project.** `openbox init` installs the hooks. It governs **the current
 directory only**, and it **enforces** — blocking, ask-for-approval and secret
 redaction are on by default, on tool calls and on submitted prompts alike, and a
-HALT verdict ends the whole session, not just the call
-([ADR-0020](docs/adr/ADR-0020-prompt-gate-and-halt-session-stop.md)). Blocking and
-approval come from OpenBox, so they need it reachable; secret redaction is local
-and does not. It never touches credentials; if they are missing it stops and
-points you back at `auth`.
+HALT verdict ends the whole session, not just the call. Blocking and approval come
+from OpenBox, so they need it reachable; secret redaction is local and does not. It
+never touches credentials; if they are missing it stops and points you back at
+`auth`.
 
 ```bash
 cd ~/code/my-project
@@ -137,20 +136,18 @@ listens and where it forwards. Add `--gateway-verbose` and the daemon logs every
 relayed call, and whether it was recorded, to `~/.openbox/gateway.log` — the only way
 to tell a governed gateway from a bypassed one without querying stored data.
 
-**It governs the terminal CLI, and not the desktop app** (measured 2026-08-27, not
-inferred: with the daemon listening and configured, `claude` in a terminal produced
-`POST /v1/messages` lines and captured events, while a desktop-app session produced
-nothing at all). The CLI reads `ANTHROPIC_BASE_URL` from `~/.claude/settings.json`,
-which is what `--gateway` writes; the desktop app routes through its own
-[third-party inference configuration](https://claude.com/docs/third-party/claude-desktop/gateway)
-instead and ignores that file. So on a machine where the developer works in the
-desktop app, **`--gateway` governs no model calls and says nothing about it** —
-`openbox doctor` reports the file it wrote, not what the app resolved. Pointing the
-desktop app at the gateway is possible (`inferenceGatewayBaseUrl`, MDM-distributable)
-but collides with pass-through auth: that mode replaces the claude.ai login with a
-credential you supply, so there is no provider credential left for the gateway to
-relay unless your org has an Anthropic API key. See
-[ADR-0021 §8](docs/adr/ADR-0021-openbox-local-gateway.md).
+**It governs the terminal CLI, and not the desktop app** (measured 2026-08-27, not inferred: with
+the daemon listening and configured, `claude` in a terminal produced `POST /v1/messages` lines
+and captured events, while a desktop-app session produced nothing at all). The CLI reads
+`ANTHROPIC_BASE_URL` from `~/.claude/settings.json`, which is what `--gateway` writes; the
+desktop app routes through its own [third-party inference
+configuration](https://claude.com/docs/third-party/claude-desktop/gateway) instead and ignores
+that file. So on a machine where the developer works in the desktop app, **`--gateway` governs no
+model calls and says nothing about it** — `openbox doctor` reports the file it wrote, not what
+the app resolved. Pointing the desktop app at the gateway is possible (`inferenceGatewayBaseUrl`,
+MDM-distributable) but collides with pass-through auth: that mode replaces the claude.ai login
+with a credential you supply, so there is no provider credential left for the gateway to relay
+unless your org has an Anthropic API key.
 
 Three things to know before you turn it on:
 
@@ -159,9 +156,8 @@ Three things to know before you turn it on:
   queryable shape, and `openbox doctor` reports the exposure — but it is not stopped.
   Prevention is your MDM's job: [the MDM recipe](docs/gateway-mdm-recipe.md).
 - **It captures, it does not yet refuse.** The refusal path is written and tested but
-  nothing calls it, deliberately: the status code a refusal should use is unprobed, and
-  a wrong one silently disables a Claude Code capability for the rest of the session
-  ([ADR-0021](docs/adr/ADR-0021-openbox-local-gateway.md) §9).
+nothing calls it, deliberately: the status code a refusal should use is unprobed, and a
+wrong one silently disables a Claude Code capability for the rest of the session.
 - **It is a second process to run and diagnose**, and it has never run against a live
   stack. `openbox doctor` reports whether it is alive, whether this machine actually
   points at it, and what could bypass it.
@@ -260,13 +256,13 @@ coordinates  OPENBOX_AGENT_DID, OPENBOX_AGENT_ID, …       env var  >  dev.json
 | | |
 |---|---|
 | **Session telemetry** | every session, prompt, tool call and MCP call as normalized governance events |
-| **Per-turn finops** | which model spent how many tokens, per turn — the same signal the agent runtime reports, on by default ([ADR-0014](docs/adr/ADR-0014-turn-as-activity-and-identifier-allowlist.md)) |
-| **Enforcement** | block, ask-for-approval, or redact secrets *before* a tool runs, from your org policy — **on by default** ([ADR-0016](docs/adr/ADR-0016-default-install-posture.md)) |
+| **Per-turn finops** | which model spent how many tokens, per turn — the same signal the agent runtime reports, on by default |
+| **Enforcement** | block, ask-for-approval, or redact secrets *before* a tool runs, from your org policy — **on by default** |
 | **Human approval** | a risky call pauses the session; an approver answers from the dashboard or `openbox approve` |
-| **Autonomous approval** | a bounded approver answers inside the pause, so routine work never waits ([ADR-0012](docs/adr/ADR-0012-autonomous-approver.md)) |
+| **Autonomous approval** | a bounded approver answers inside the pause, so routine work never waits |
 | **Lineage** | `session → commit → deploy`, with a signed commit attestation |
 | **Evidence** | each session reports its own effective posture, so the control plane never has to trust the endpoint's word |
-| **Model-call capture** | the request the tool actually sent the model, and the response — via an opt-in local relay, Claude Code only ([ADR-0021](docs/adr/ADR-0021-openbox-local-gateway.md)). Two further opt-in lanes exist for the calls that relay cannot see, both verified by replay and **never run against a live stack** ([ADR-0022](docs/adr/ADR-0022-native-telemetry-and-transport-lanes.md)) |
+| **Model-call capture** | the request the tool actually sent the model, and the response — via an opt-in local relay, Claude Code only. Two further opt-in lanes exist for the calls that relay cannot see, both verified by replay and **never run against a live stack** |
 
 ## How it works
 
@@ -281,14 +277,12 @@ coordinates  OPENBOX_AGENT_DID, OPENBOX_AGENT_ID, …       env var  >  dev.json
 ```
 
 A single static binary is the whole runtime: the CLI, the hook engine and the git
-hook. **OpenBox decides every gated tool call** — the hook asks `/evaluate` and
-waits for the verdict before the tool runs
-([ADR-0017](docs/adr/ADR-0017-inline-policy-evaluation.md)). There is one policy
-implementation, on the server; nothing evaluates policy on your machine. The hook
-path adds no daemon and no socket ([ADR-0006](docs/adr/ADR-0006-in-process-decider.md)
-stands — a bounded outbound call is not a resident process); the opt-in
-[gateway](#governing-the-model-call-itself) is a resident process, which is why it is
-a separate flag rather than part of the default install.
+hook. **OpenBox decides every gated tool call** — the hook asks `/evaluate` and waits
+for the verdict before the tool runs. There is one policy implementation, on the
+server; nothing evaluates policy on your machine. The hook path adds no daemon and no
+socket (a bounded outbound call is not a resident process); the
+opt-in [gateway](#governing-the-model-call-itself) is a resident process, which is why
+it is a separate flag rather than part of the default install.
 
 That is a trade, and it cuts both ways: enforcement now depends on reaching
 OpenBox, and under the default `fail_closed:false` a gated call proceeds when it
@@ -338,16 +332,13 @@ Two things are **on by default**, and both are opt-out:
 Two of those lines used to read the other way, and both changed in August 2026:
 
 - **Tool commands, file bodies and tool output now ride ordinary telemetry**, not
-  only a gated call ([ADR-0019](docs/adr/ADR-0019-full-content-capture.md) P1).
-  They still ride a gated call too — OpenBox decides every gated call now
-  ([ADR-0017](docs/adr/ADR-0017-inline-policy-evaluation.md)) and cannot decide on
-  content it cannot see — but "never on observe events" is no longer true.
+only a gated call. They still ride a gated call too — OpenBox decides every gated
+call now and cannot decide on content it cannot see — but "never on observe
+events" is no longer true.
 - **The assistant's thinking is captured** — the turn's thinking blocks,
-  concatenated in file order, under the same
-  switch. This goes further than Anthropic's own telemetry: their OpenTelemetry
-  export redacts extended thinking unconditionally, and no hook carries it, so the
-  session transcript is the only source
-  ([the ADR-0014 amendment](docs/adr/ADR-0014-turn-as-activity-and-identifier-allowlist.md)).
+concatenated in file order, under the same switch. This goes further than Anthropic's own
+telemetry: their OpenTelemetry export redacts extended thinking unconditionally, and no hook
+carries it, so the session transcript is the only source.
 
 With the opt-in [gateway](#governing-the-model-call-itself) there is a third and much
 larger class: **the whole model request and response**, which includes the system
@@ -369,43 +360,38 @@ A governance tool that overstates its guarantees is the failure it exists to
 prevent, so the limits are documented as first-class:
 
 - **Your credentials sit in a plaintext file.** `~/.openbox/.env` is `0600` on
-  macOS/Linux, but anything running as you — including the coding agent under
-  governance — can read your signing key and sign events as you. On Windows `0600`
-  is a no-op and other local accounts can read it. Attestation therefore proves
-  origin-of-config, not tamper-resistance against the developer
-  ([ADR-0015](docs/adr/ADR-0015-plaintext-credential-file.md)).
+macOS/Linux, but anything running as you — including the coding agent under
+governance — can read your signing key and sign events as you. On Windows `0600`
+is a no-op and other local accounts can read it. Attestation therefore proves
+origin-of-config, not tamper-resistance against the developer.
 - **Project scope means partial coverage.** With the default `init`, only the
-  initialized directory is governed, and sessions elsewhere produce no events at
-  all — so absence of events is not evidence of absence of work
-  ([ADR-0016](docs/adr/ADR-0016-default-install-posture.md)).
+initialized directory is governed, and sessions elsewhere produce no events at
+all — so absence of events is not evidence of absence of work.
 - **Commit attribution is an inferred claim** unless the pipeline fetches the
   signed attestation note — then it is cryptographically verified.
 - **Enforcement prevents mistakes, not motivated bypass**, for two independent
-  reasons. The hook lives in the developer's own config until the provider's managed
-  configuration is deployed (`deployments/managed/`) — and every gated call now asks the
-  control plane, so under the default `fail_closed:false` blocking one hostname
-  disables enforcement for that machine. An org that needs enforcement to survive a
-  developer who does not want it must set `fail_closed`, and accept that a
-  control-plane outage then blocks work
-  ([ADR-0017](docs/adr/ADR-0017-inline-policy-evaluation.md)).
+reasons. The hook lives in the developer's own config until the provider's managed
+configuration is deployed (`deployments/managed/`) — and every gated call now asks the
+control plane, so under the default `fail_closed:false` blocking one hostname disables
+enforcement for that machine. An org that needs enforcement to survive a developer who
+does not want it must set `fail_closed`, and accept that a control-plane outage then
+blocks work.
 - **A control-plane HALT is applied even when no policy authored it.** Core can
-  express an operational failure — its record of a session gone terminal while the
-  session was still live — as a HALT verdict with no policy id, and the client
-  applies it, even in an org that has published no policy. Since
-  [ADR-0020](docs/adr/ADR-0020-prompt-gate-and-halt-session-stop.md) a HALT ends
-  the session outright (turn stops, later prompts and calls refused locally), so
-  this defect now ends sessions rather than denying calls until the record clears
-  — an accepted consequence of trusting every server HALT uniformly. Fail-open
-  does not engage, because it covers *no verdict*, not *a HALT verdict*. Diagnosed
-  live, core-side fix in flight
-  ([diagnosis](plans/reports/debug-260814-1231-session-no-longer-active-halt.md)).
+express an operational failure — its record of a session gone terminal while the
+session was still live — as a HALT verdict with no policy id, and the client
+applies it, even in an org that has published no policy. A
+HALT now ends the session outright (turn stops, later prompts and calls refused
+locally), so this defect now ends sessions rather than denying calls until the
+record clears — an accepted consequence of trusting every server HALT uniformly.
+Fail-open does not engage, because it covers *no verdict*, not *a HALT verdict*.
+Diagnosed live, core-side fix in flight
+([diagnosis](plans/reports/debug-260814-1231-session-no-longer-active-halt.md)).
 - **Egress is observed, not controlled.** With no lane installed, OpenBox does not
-  carry the coding tool's traffic to its model provider at all; it records that
-  posture as evidence. With `--gateway` or `--transport` it relays and records every
-  model call — but it still does not *refuse* one: the refusal path is written and
-  unwired on **both** in-path lanes, so a model call that reaches either is forwarded
-  ([ADR-0021](docs/adr/ADR-0021-openbox-local-gateway.md) §9). Nothing anywhere
-  allow-lists the tool's other destinations.
+carry the coding tool's traffic to its model provider at all; it records that posture
+as evidence. With `--gateway` or `--transport` it relays and records every model call
+— but it still does not *refuse* one: the refusal path is written and unwired on
+**both** in-path lanes, so a model call that reaches either is forwarded. Nothing
+anywhere allow-lists the tool's other destinations.
 - **The two newer lanes have never run against a live stack, and their reason for
   existing is unconfirmed.** `--telemetry` and `--transport` are verified by replaying
   real recorded traffic through the shipped code on a host that cannot bind a socket.
@@ -456,7 +442,7 @@ Details and current status: **[Assurance](docs/architecture.md#assurance--what-t
 | [Upgrading to inline evaluation](docs/upgrading-to-inline-evaluation.md) | what changes for an existing install, incl. file bodies now egressing |
 | [Lineage](docs/lineage.md) | `session → commit → deploy` and how it is verified |
 | [Gateway MDM recipe](docs/gateway-mdm-recipe.md) | the artifacts to push if you need the gateway prevented-from, not just detected-around |
-| [ADRs](docs/adr/) | the decisions, and why |
+| decision records | the decisions, and why |
 | [Event contract](api/dev-event.schema.json) | the normalized event schema |
 | [Wire mapping](docs/MAPPING.md) | how each field lands in core's columns |
 | [End-to-end tests](docs/test/e2e.md) | `test/` — a mock-free suite against a real stack |
@@ -464,8 +450,7 @@ Details and current status: **[Assurance](docs/architecture.md#assurance--what-t
 ## Contributing
 
 Go 1.27+, no cgo — a `GOTOOLCHAIN=auto` default fetches it for you. The repo is
-one Go module ([ADR-0024](docs/adr/ADR-0024-single-module-layout.md)), laid out
-per `golang-standards/project-layout`:
+one Go module, laid out per `golang-standards/project-layout`:
 
 ```bash
 go build ./...                      # everything, from the root
@@ -473,10 +458,10 @@ go test -race -count=1 ./...        # -count=1 is required; see internal/depguar
 ./test/run-all.sh                   # the end-to-end suite (needs a local OpenBox stack)
 ```
 
-Anything provider-agnostic belongs in `internal/adapters/common/`; a new table, endpoint or
-service needs an ADR. The end-to-end suite needs an OpenBox stack it can reach —
-`test/00-preflight.sh` tells you whether the one you have is healthy enough to
-trust the results.
+Anything provider-agnostic belongs in `internal/adapters/common/`. The end-to-end
+suite needs an OpenBox stack it can reach —
+`test/00-preflight.sh` tells you whether the one you have is healthy enough to trust the
+results.
 
 ## License
 

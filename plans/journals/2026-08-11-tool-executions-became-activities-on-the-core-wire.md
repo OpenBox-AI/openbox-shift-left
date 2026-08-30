@@ -12,7 +12,7 @@ Executed the four-phase plan `260811-0245-tool-activity-event-shape`. Tool event
 moved off the base SDK's hook-span envelope onto the activity lifecycle:
 `ToolCall` → `ActivityStarted`, `ToolResult` → `ActivityCompleted`, both span-less
 and hook-less. `client/hookspan.go` and `client/spanbuilder.go` deleted, and with
-them ADR-0004's standing obligation to hand-maintain a Go mirror of a Python
+them that decision's standing obligation to hand-maintain a Go mirror of a Python
 contract nothing could mechanically check.
 
 The premise that made it defensible: the base SDK's "hooks are always
@@ -32,8 +32,8 @@ core's idempotency check keys on
 Under the old shape a tool call's two halves matched on **all five** — same
 `activity_id` by design, both `ActivityStarted`. So the `ToolResult` POST hit the
 existing-event branch (`governance_workflow.go:228-231`) and never created a row.
-The shared `span_id` that ADR-0004 chose deliberately as the pairing mechanism
-was also what made the span-dedup check see nothing new.
+The shared `span_id` that that decision chose deliberately as the pairing
+mechanism was also what made the span-dedup check see nothing new.
 
 The completed half of every tool call was substantially a no-op: no row, no
 independent evaluation. This wasn't a bug in core — it was core's idempotency
@@ -48,9 +48,9 @@ blockers: the frozen adapter schema has no failure field, and core reads
 `payload.Error` only for `WorkflowFailed` (`storage_event.go:281-286`) — an
 `ActivityCompleted.error` is decoded and discarded. Shipping it would have been a
 field with neither producer nor consumer. The honest consequence — a failed tool
-call is indistinguishable from a successful one on the wire — is recorded in
-ADR-0013 instead of being papered over. `attempt` omitted for the same class of
-reason: permanently null in a stateless hook process.
+call is indistinguishable from a successful one on the wire — is instead of being
+papered over. `attempt` omitted for the same class of reason: permanently null in
+a stateless hook process.
 
 **MAPPING.md's E7-S2 `semantic_type` claim deleted, not restated.** It had no
 owner, was already contradicted by observed data, and is now moot — no span means
@@ -73,7 +73,7 @@ completed row doesn't exist yet. The exposure is the retry after a completed
 attempt, which is exactly the path `operation_id` exists to support: the poll may
 resolve the completed row, whose `approval_expiration_time` is NULL, so
 `Decided()` reads false and a real grant goes unconsumed. Out of scope here (the
-plan forbids openbox-core changes); recorded in ADR-0013 and spun off.
+plan forbids openbox-core changes); and spun off.
 
 ## What went right
 
@@ -92,8 +92,8 @@ describe the narrowing as measured instead of hoped.
 
 Phase 04's live run did not happen — the seven-container local stack wasn't
 available. All gated claims are explicitly unreleased: MAPPING.md §7 opens with
-"NOT YET RUN", CLAUDE.md says implemented-and-unit-verified, ADR-0013 carries the
-load-bearing assumption as unproven.
+"NOT YET RUN", CLAUDE.md says implemented-and-unit-verified, that decision
+carries the load-bearing assumption as unproven.
 
 ```bash
 ./testbed/env.sh mint && ./testbed/run-all.sh
@@ -101,4 +101,4 @@ load-bearing assumption as unproven.
 
 Then release those claims, and decide who owns the openbox-core approval-poll fix.
 
-> Historical work record — not durable authority. Prefer docs/specs/ADRs for current decisions.
+> Historical work record — not durable authority. Prefer docs/specs for current decisions.

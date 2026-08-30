@@ -30,10 +30,10 @@ func attestContext() (obgit.AttestContext, bool) {
 	}
 
 	// The bundle pin and hash that used to ride here are gone with the local
-	// bundle (ADR-0017). They recorded which policy was in force, which the
-	// endpoint could only answer while it was the decider; the control plane is
-	// the decider now and holds its own record of the policy it applied, per
-	// call. Carrying a stale local id would be attesting to something this
-	// process no longer knows.
+	// bundle. They recorded which policy was in force, which the endpoint could
+	// only answer while it was the decider; the control plane is the decider
+	// now and holds its own record of the policy it applied, per call. Carrying
+	// a stale local id would be attesting to something this process no longer
+	// knows.
 	return ctx, true
 }

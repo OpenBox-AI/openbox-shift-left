@@ -103,8 +103,8 @@ The phase asked for a doc where a subtree has a boundary worth stating, and to
 skip the rest. Five guarded subtrees got a **dependency-boundary signpost**
 appended to their existing package comment (`internal/{gateway, decision,
 conformance, telemetry, transport}`) saying the allowlist lives in
-`internal/depguard` and that widening it to make an import pass inverts ADR-0023.
-The signpost is not the enforcement, and it says so.
+`internal/depguard` and that widening it to make an import pass inverts. The
+signpost is not the enforcement, and it says so.
 
 Appended to the **existing** package comment rather than added as a new `doc.go`:
 a second package comment in the same package is a `go vet` finding.

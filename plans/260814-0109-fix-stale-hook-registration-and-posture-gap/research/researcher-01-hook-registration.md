@@ -34,12 +34,12 @@ JSON shape: `settings["hooks"][EventName] = []entry`, `entry = {"matcher":str, "
 | UserPromptSubmit | — | 5 | |
 | PreToolUse | `*` | `preToolUseHookTimeoutSec` | statusMessage; **+ 2nd handler** |
 | PostToolUse | `*` | 5 | |
-| PostToolUseFailure | `*` | 5 | (ADR-0018) |
+| PostToolUseFailure | `*` | 5 | |
 | Stop | — | 5 | |
 | SubagentStop | — | 5 | |
-| SubagentStart | — | 5 | (ADR-0018) |
-| PermissionDenied | `*` | 5 | (ADR-0018) |
-| StopFailure | — | 5 | (ADR-0018) |
+| SubagentStart | — | 5 | |
+| PermissionDenied | `*` | 5 | |
+| StopFailure | — | 5 | |
 | SessionEnd | — | 15 | |
 
 PreToolUse gets a 2nd handler (localhooks.go:90-98): `rewake claude-code`, `asyncRewake:true`,
@@ -58,12 +58,12 @@ File is `adapters/claude-code/localhooks_quote_test.go` (not `localhooks_test.go
   1 handler (line 81-83). This only exercises quote-normalization on an identical engine string — it
   does NOT cover a differing engine path, so it does not currently guard against the reported bug.
 - `TestReInitAddsTheNewHooksExactlyOnce` (line 92, named in the issue context) — the load-bearing one:
-  seeds a pre-ADR-0018 hook set (7 events) plus a foreign `PostToolUse` handler `"my-own-linter"` (no
-  args, not our shape) (lines 119-122), all using **one fixed** `engine` value (line 94), then re-inits
-  with that **same** engine and asserts (a) every event registered exactly once — `n==0` and `n>1` both
-  fail (lines 153-157) — and (b) `"my-own-linter"` survives untouched (lines 160-171). **It never
-  varies the engine path across the two writes**, so it currently says nothing about stale-path
-  replacement; it does pin "same-path re-init stays 1-to-1" and "literal foreign command untouched."
+seeds a pre-that decision hook set (7 events) plus a foreign `PostToolUse` handler `"my-own-linter"`
+(no args, not our shape) (lines 119-122), all using **one fixed** `engine` value (line 94), then
+re-inits with that **same** engine and asserts (a) every event registered exactly once — `n==0` and
+`n>1` both fail (lines 153-157) — and (b) `"my-own-linter"` survives untouched (lines 160-171). **It
+never varies the engine path across the two writes**, so it currently says nothing about stale-path
+replacement; it does pin "same-path re-init stays 1-to-1" and "literal foreign command untouched."
 
 No test in this file constructs the two-different-engine-paths scenario from the issue — the fix needs
 a new test for that.
@@ -71,14 +71,14 @@ a new test for that.
 ## Q4 — Other surfaces with the same failure mode
 
 - **(a) Global/managed-settings path** — `cli/internal/managed/managed.go`: `PlanInstall`(72),
-  `planProvider`(95), `render`(129), `claudeCodeDir`(138), `codexDir`(156), `Apply`(190),
-  `applyFile`(205), `writeFile`(241), `wouldWeaken`(302), `uncommented`(317), `Privileged`(334),
-  `ProviderState`(366), `mandates`(406). Grep for `settings.local.json|ProjectDir` in this file: **zero
-  hits** — confirms this is the separate global/org-managed surface (ADR-0016), structurally a
-  whole-file template render + anti-downgrade guard (`wouldWeaken`), not a JSON hook-array merge with
-  string-dedup. The exact "additive-merge, string-match" failure mode in Q1 does not apply here in the
-  same shape. Whether `wouldWeaken`/`applyFile`'s force logic can itself leave a stale engine path baked
-  into a deployed managed file (a different failure mode) is **not verified** — bodies not read (budget).
+`planProvider`(95), `render`(129), `claudeCodeDir`(138), `codexDir`(156), `Apply`(190), `applyFile`(205),
+`writeFile`(241), `wouldWeaken`(302), `uncommented`(317), `Privileged`(334), `ProviderState`(366),
+`mandates`(406). Grep for `settings.local.json|ProjectDir` in this file: **zero hits** — confirms this is
+the separate global/org-managed surface, structurally a whole-file template render + anti-downgrade guard
+(`wouldWeaken`), not a JSON hook-array merge with string-dedup. The exact "additive-merge, string-match"
+failure mode in Q1 does not apply here in the same shape. Whether `wouldWeaken`/`applyFile`'s force logic
+can itself leave a stale engine path baked into a deployed managed file (a different failure mode) is
+**not verified** — bodies not read (budget).
 - **(b) Codex adapter — already fixed, is the precedent to port.** `adapters/codex/installer.go` does
   NOT use exact-string matching. `isOpenBoxHandler(raw json.RawMessage) bool` (line 269) + helper
   `stripEngineToken(cmd string) (rest string, ok bool)` (line 287) recognize an owned handler by **argv

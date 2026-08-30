@@ -5,7 +5,7 @@ status: complete — testbed run outstanding
 priority: P1
 effort: 28h
 branch: feat/inline-policy-evaluation — branched off feat/dev-runtime-auth-and-init, must land after it
-tags: [enforcement, policy, adr, breaking-change, deletion, privacy]
+tags: [enforcement, policy, decision record, breaking-change, deletion, privacy]
 created: 2026-08-13
 advice: plans/reports/advise-260813-0103-inline-evaluation-vs-tiers.md, plans/reports/advise-260813-0140-unresolved-inline-evaluation.md
 ---
@@ -23,13 +23,13 @@ consumed, and the sync/staleness/signing machinery around it are deleted. Local
    place the developer runtime **forked**, reimplementing the backend's OPA semantics in
    Go. Collapsing it means one home for policy semantics, and every backend policy
    feature works here immediately.
-2. **The parity obligation is permanent and already leaking.** ADR-0005 names it: "the
+2. **The parity obligation is permanent and already leaking.** That decision names it: "the
    local evaluator must agree with what the backend's OPA would decide," with known
    deviations "documented rather than assumed away."
 3. **Raw rego is a live silent-fail-open hole.** `policysync.go:149` — hand-written rego
    "cannot be evaluated locally", so those orgs' gates simply open.
 4. **The Cursor adapter gets enforcement free** — no bundle plumbing to port.
-5. **ADR-0008's bundle signing becomes unnecessary here**, deleting a workstream blocked
+5. **that decision's bundle signing becomes unnecessary here**, deleting a workstream blocked
    on the backend (`require_verified_bundle` still defaults off because nothing signs).
 6. Deletion of ~2,200 non-test LOC is the *consequence*, not the argument.
 
@@ -52,7 +52,7 @@ consumed, and the sync/staleness/signing machinery around it are deleted. Local
 | # | Phase | Status | Effort | Depends on |
 |---|---|---|---|---|
 | 1 | [Gate: dedupe under universal escalation + Codex ceiling](phase-01-gate-dedupe-and-ceilings.md) | done — stack run waived | 3h | — |
-| 2 | [ADR-0017 + honest docs ahead of the code](phase-02-adr-and-docs.md) | done | 3h | 1 |
+| 2 | [that decision + honest docs ahead of the code](phase-02-decision-and-docs.md) | done | 3h | 1 |
 | 3 | [Hook-ceiling capability in the SPI; widen the gate to all classes](phase-03-ceiling-spi-and-widen-gate.md) | done | 5h | 2 |
 | 4 | [Content: redact locally, then send](phase-04-redact-then-send.md) | done | 3h | 3 |
 | 5 | [Evidence: verdict `policy_id` into posture](phase-05-policy-identity-evidence.md) | done | 2h | 3 |
@@ -61,14 +61,14 @@ consumed, and the sync/staleness/signing machinery around it are deleted. Local
 | 8 | [Verify against the real thing](phase-08-verification.md) | done — stack run waived | 3h | 7 |
 
 Phase 1 is a **blocking investigation** — it can invalidate the approach, so it runs
-before the ADR. 4 ‖ 5 after 3. Everything else is sequential.
+before that decision. 4 ‖ 5 after 3. Everything else is sequential.
 
 ## File ownership
 
 | Phase | Owns |
 |---|---|
 | 1 | nothing — investigation; writes `reports/` only |
-| 2 | `docs/adr/ADR-0017-*.md`, `docs/adr/README.md` |
+| 2 | `that decision-*.md`, `README.md` |
 | 3 | `provider/provider.go`, `adapters/{claude-code,codex}/capabilities.go`, `adapters/common/hookflow/{gate.go,tier2.go→evaluate.go}` |
 | 4 | `adapters/common/hookflow/gate.go` (content path), `client/payload.go` |
 | 5 | `adapters/common/devconfig/posture.go`, `cli/cmd/openbox/doctor.go` |
@@ -87,7 +87,7 @@ before the ADR. 4 ‖ 5 after 3. Everything else is sequential.
 - Local secret redaction still applies with core unreachable.
 - Exactly one `ActivityStarted` per gated call, with every class escalating.
 - Session posture carries the deciding `policy_id`.
-- `grep -ric "tier"` over `*.go`/`*.md` outside ADR history returns 0.
+- `grep -ric "tier"` over `*.go`/`*.md` outside decision record history returns 0.
 - All 11 modules: build, vet, `-race` green ✅ (+ Windows and linux/arm64 cross-compile). Testbed against a live stack: **NOT RUN** — waived by the operator; see reports/verification-260813-inline-evaluation.md.
 
 ## Out of scope
@@ -116,10 +116,9 @@ collision points are already patched in that plan; see its Validation Summary.
    [phase 1's finding](reports/finding-260813-dedupe-and-ceilings.md).
    *Question 2 below is answered by the same finding and is retained for history.*
 1. **RESOLVED (phase 5): no backend ask.** Policy provenance belongs to whoever decides,
-   and that is the control plane now — it already holds the identity of the policy it
-   applied, so having the endpoint report it back would be one party attesting to
-   another's record. Posture carries `decision_authority` + `failure_policy` instead. See
-   ADR-0017 §Policy provenance as evidence.
+and that is the control plane now — it already holds the identity of the policy it
+applied, so having the endpoint report it back would be one party attesting to another's
+record. Posture carries `decision_authority` + `failure_policy` instead. evidence.
 2. **Codex's hook ceiling is unverified.** Phase 1 must read it; Codex enforcement is
    blocked until it is known.
 3. **Notification obligation** for existing `content_capture:true` orgs whose file bodies

@@ -49,8 +49,9 @@ func parsePreToolUse(t *testing.T, out []byte) (decisionVal, reason string, upda
 // ── unit tests ──
 
 // serveVerdict stands up the control plane for a case and points the adapter at
-// it. It replaces setBundleEnv: since ADR-0017 a case's expected outcome is a
-// SERVER verdict, not a local bundle, so the setup names the verdict directly.
+// it. It replaces setBundleEnv: since that decision a case's expected outcome
+// is a SERVER verdict, not a local bundle, so the setup names the verdict
+// directly.
 func serveVerdict(t *testing.T, verdictJSON string) {
 	t.Helper()
 	srv := memhttptest.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -69,12 +70,12 @@ func TestResolveEnforce_Codex(t *testing.T) {
 	t.Setenv(devconfig.EnvConfigPath, cfgPath)
 	os.Unsetenv(devconfig.EnvEnforce)
 
-	// Default ON (ADR-0016 reversed the observe default). This adapter resolves
-	// through devconfig, so the assertion pins that its facade kept no stale
-	// default of its own.
+	// Default ON (that decision reversed the observe default). This adapter
+	// resolves through devconfig, so the assertion pins that its facade kept no
+	// stale default of its own.
 	write(`{"developer_did":"` + testDID + `"}`)
 	if !ResolveEnforce() {
-		t.Error("an absent enforce field must resolve to ON (ADR-0016)")
+		t.Error("an absent enforce field must resolve to ON ")
 	}
 	// An explicit false still opts out — the property the *bool change bought.
 	write(`{"developer_did":"` + testDID + `","enforce":false}`)
@@ -287,9 +288,9 @@ func TestApplyFailurePolicy_Codex(t *testing.T) {
 }
 
 // TestEnforceDecision_ObtainsRealVerdict is deleted with the local evaluator
-// (ADR-0017): EnforceDecision now runs secret redaction and produces no
-// verdict at all, so "obtains a real BLOCK" has no local meaning. CDX-C1
-// asserts the same outcome end to end against a real /evaluate.
+// : EnforceDecision now runs secret redaction and produces no verdict at
+// all, so "obtains a real BLOCK" has no local meaning. CDX-C1 asserts the
+// same outcome end to end against a real /evaluate.
 
 // The adapter-owned clamps are DERIVED from the installed gate-hook timeout, not
 // copied from Claude Code's constants (OD-SL7-T2-TIMEOUT).

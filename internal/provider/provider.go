@@ -1,37 +1,35 @@
 // Package provider is the shared SPI between the `openbox` CLI and the per-tool
 // adapters (Claude Code, Codex, Cursor). It has two halves:
 //
-//   - Installer — install time: what `openbox init` delegates to an adapter
-//     to write that tool's native config.
-//   - HookEngine — runtime: what the adapter does when its tool fires a hook,
-//     plus the capability profile it declares.
+// - Installer — install time: what `openbox init` delegates to an adapter to
+// write that tool's native config. - HookEngine — runtime: what the adapter does
+// when its tool fires a hook, plus the capability profile it declares.
 //
 // The package doc used to advertise "register / emit / apply / capabilities"
 // while only Installer existed; emit and apply were per-adapter free functions
-// the CLI reached through a hard-coded switch, and Capability was declared
-// twice with no shared type. The interfaces here are now the ones the code
-// actually has.
+// the CLI reached through a hard-coded switch, and Capability was declared twice
+// with no shared type. The interfaces here are now the ones the code actually
+// has.
 //
 // It lives in its own module, importable by both the CLI module and every
 // adapter module, so an adapter can implement the Installer interface without
 // crossing the CLI's `internal/` boundary, and the CLI can register an adapter
-// without adapter internals leaking the other way. The concrete registry
-// (which names map to which installers) lives in the CLI's composition root,
-// not here: putting it in this package would force it to import the adapters,
-// while the adapters import this package — an import cycle. This module
-// therefore has zero dependencies.
+// without adapter internals leaking the other way. The concrete registry (which
+// names map to which installers) lives in the CLI's composition root, not here:
+// putting it in this package would force it to import the adapters, while the
+// adapters import this package — an import cycle. This module therefore has zero
+// dependencies.
 //
 // `init` owns setup — hooks at a chosen scope, plus posture. It does NOT own
-// credentials (that is `openbox auth`, ADR-0015) and it does not own provider
-// config *content*. Each adapter registers an Installer that writes its tool's
-// native config. Until an adapter is built, its slot is a Stub:
-// Available()==false, Plan() only prints the manual config the user must
-// apply, and Install() returns ErrNotBuilt so `init` exits non-zero for
-// that provider.
+// credentials (that is `openbox auth`) and it does not own provider config
+// *content*. Each adapter registers an Installer that writes its tool's native
+// config. Until an adapter is built, its slot is a Stub: Available()==false,
+// Plan() only prints the manual config the user must apply, and Install()
+// returns ErrNotBuilt so `init` exits non-zero for that provider.
 //
 // An Installer receives only non-secret install-time context (the DID, URLs and
-// posture); it must never receive or embed a credential value. Since ADR-0015 it
-// does not even receive a credential ADDRESS: credentials live in
+// posture); it must never receive or embed a credential value. Since that
+// decision it does not even receive a credential ADDRESS: credentials live in
 // ~/.openbox/.env, written by `openbox auth`, and are resolved at read time.
 package provider
 
@@ -60,11 +58,11 @@ var ErrUnknown = errors.New("unknown provider")
 // identity this machine governs as, and the org posture to persist into the
 // tool's dev config. It never carries a credential value (INV-1).
 //
-// It no longer carries secret-store coordinates. Before ADR-0015 it named a
+// It no longer carries secret-store coordinates. Before that decision it named a
 // keychain service and two account paths, because the credential lived in the OS
 // store and only its address was safe to pass around. Credentials now resolve
-// from ~/.openbox/.env at read time, so there is no address to hand an
-// installer — and `openbox auth`, not `openbox init`, is what writes them.
+// from ~/.openbox/.env at read time, so there is no address to hand an installer
+// — and `openbox auth`, not `openbox init`, is what writes them.
 type CredentialRef struct {
 	DID            string // did:aip:... (not secret)
 	BaseURL        string // optional core base URL; empty ⇒ adapter default
@@ -82,7 +80,7 @@ type CredentialRef struct {
 	BackendURL string
 
 	// ProjectDir selects PROJECT hook scope, which is what `openbox init` does
-	// by default (ADR-0016): the adapter merges its hook block into
+	// by default : the adapter merges its hook block into
 	// <dir>/.claude/settings.local.json, so sessions in that project are
 	// governed and sessions anywhere else are not.
 	//
@@ -93,16 +91,16 @@ type CredentialRef struct {
 	//
 	// It was LocalHooksDir, described as an opt-in for local testing, back when
 	// project scope was the exception and the flag text said "never set this in
-	// production". ADR-0016 inverted that, so the name and the comment had to
-	// stop describing the default as an escape hatch. Non-secret.
+	// production". That decision inverted that, so the name and the comment had
+	// to stop describing the default as an escape hatch. Non-secret.
 	ProjectDir string
 
 	// Enforce / Tier2 / Findings persist the enforce-mode posture chosen at
-	// `openbox init` time (via --enforce and its granular siblings) into
-	// the dev config, so the runtime hook reads them from dev.json and needs
-	// no runtime environment variable. Enforce now DEFAULTS ON (ADR-0016), so a
-	// first install with none of these set enforces; `--enforce=false` opts out
-	// and the opt-out persists.
+	// `openbox init` time (via --enforce and its granular siblings) into the
+	// dev config, so the runtime hook reads them from dev.json and needs no
+	// runtime environment variable. Enforce now DEFAULTS ON, so a first install
+	// with none of these set enforces; `--enforce=false` opts out and the
+	// opt-out persists.
 	//
 	// All three are *bool because nil has to mean "this run did not say",
 	// distinct from "this run said false". nil preserves what is already on

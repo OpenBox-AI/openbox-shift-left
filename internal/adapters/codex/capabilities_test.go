@@ -15,13 +15,13 @@ func TestCapabilitiesProfile(t *testing.T) {
 		"telemetry.hook":    true,
 		"tool.events":       true,
 		"commit.binding":    true,
-		"telemetry.tokens":  true, // rollout-JSONL finops extraction; per SESSION (ADR-0014)
-		"telemetry.model":   true, // session-level model id from turn_context (ADR-0014)
+		"telemetry.tokens":  true, // rollout-JSONL finops extraction; per SESSION
+		"telemetry.model":   true, // session-level model id from turn_context
 		"verdict.apply":     true, // STORY-SL7-B: PreToolUse deny gate (opt-in)
 		"enforce.rewrite":   true, // STORY-SL7-B: local secret redaction via allow+updatedInput
-		// ADR-0018: Claude Code reports per-tool success, Codex does not. Pinned
-		// FALSE so the divergence is a declared limit rather than a gap someone
-		// closes later with a heuristic over tool_response.
+		// That decision: Claude Code reports per-tool success, Codex does not.
+		// Pinned FALSE so the divergence is a declared limit rather than a gap
+		// someone closes later with a heuristic over tool_response.
 		"tool.status": false,
 	}
 	got := Capabilities()

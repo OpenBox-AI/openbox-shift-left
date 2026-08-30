@@ -7,7 +7,7 @@ updated: 2026-08-30
 priority: P2
 effort: ~35h (7 phases)
 branch: feat/tool-content-capture
-tags: [layout, refactor, module-collapse, project-layout, adr-0011, adr-0023, release-path]
+tags: [layout, refactor, module-collapse, project-layout, the decision record, the decision record, release-path]
 created: 2026-08-30
 ---
 
@@ -22,7 +22,7 @@ owner decision (2026-08-30); the old plan's phases 04/05 survive here as phase 0
 
 | # | Decision | Consequence |
 |---|---|---|
-| D1 | **Full collapse to one module** | 15 `go.mod` → 1, 444 import lines rewritten across 203 files, 45 `replace` directives deleted, `go.work` deleted. ADR-0011 superseded. |
+| D1 | **Full collapse to one module** | 15 `go.mod` → 1, 444 import lines rewritten across 203 files, 45 `replace` directives deleted, `go.work` deleted. That decision superseded. |
 | D2 | **`/internal` only — no `/pkg`** | Nothing is published today (every inter-module require is `v0.0.0` + relative `replace`), so the compiler-enforced form is the right one. Matches the source's own advice. |
 | D3 | **All four root renames** — *amended 2026-08-30* | `testbed/`→`test/`, `deploy/`→`deployments/`, schema→`api/` + unit templates→`init/`, `.goreleaser.yaml`→`build/`. **`install.sh` stays at the repo root and `scripts/` is not created** — see D4. |
 | D4 | **`install.sh` stays at root; no `scripts/`** | The source's `/build` README blesses root placement when a tool demands the path ("don't worry if it's … keeping those files in the root directory makes your life easier"); `curl \| bash` demands a root URL exactly that way. `install.sh` is also the only shell script outside the testbed, so `scripts/` would hold one file — against "keep what you need and delete everything else". Avoids a second network and trust hop on a script whose job is verifying release checksums. |
@@ -36,8 +36,8 @@ owner decision (2026-08-30); the old plan's phases 04/05 survive here as phase 0
 `contracts/dev-event/conformance/deps_test.go` all call `os.ReadFile("go.mod")` and
 assert a short allowlist of direct requires. Under one module that file lists all 19
 external dependencies at once, so every allowlist either fails outright or gets
-"fixed" by widening to the union — which **silently destroys the control**.
-ADR-0023's premise is that transitive code is bounded *at the module that took the
+"fixed" by widening to the union — which **silently destroys the control**. That
+decision's premise is that transitive code is bounded *at the module that took the
 dependency*; one module means one bound.
 
 So the guards are rebuilt as **package-subtree direct-import allowlists** in
@@ -48,11 +48,11 @@ precondition. If a phase-02 mutation drill comes back green, phase 03 does not s
 ## What collapse costs and what it buys — stated, not averaged
 
 - **Buys:** the `GOWORK=off` divergence class disappears entirely. This repo has
-  already shipped that bug once (`cli` imported `transport` with a `require` and no
-  `replace`; all 14 modules green in the workspace, the release path — the only path
-  `.goreleaser.yaml` runs — could not resolve the import). No workspace, no
-  `replace`, no divergence. This is an argument ADR-0011 did not have available.
-- **Costs:** ADR-0011 reason 2 — "adapters must not import each other" was mechanical
+already shipped that bug once (`cli` imported `transport` with a `require` and no
+`replace`; all 14 modules green in the workspace, the release path — the only path
+`.goreleaser.yaml` runs — could not resolve the import). No workspace, no `replace`,
+no divergence. This is an argument that decision did not have available.
+- **Costs:** That decision reason 2 — "adapters must not import each other" was mechanical
   because they were separate modules. `/internal` cannot express it (both adapters
   land under `internal/adapters/`), so it becomes a test. Phase 02 extends
   `layering_test.go` to hold it. Recorded as a real downgrade, not a wash.
@@ -66,7 +66,7 @@ precondition. If a phase-02 mutation drill comes back green, phase 03 does not s
 | 03 | [Dead-tree gate, then the collapse](phase-03-the-collapse.md) ✅ | ~10h | 02 |
 | 04 | [Release path](phase-04-release-and-install-path.md) ✅ | ~3h | 03 |
 | 05 | [Non-Go directory moves](phase-05-non-go-directory-moves.md) ✅ | ~4h | 03 |
-| 06 | [ADRs and the layout maps](phase-06-adrs-and-layout-maps.md) ✅ | ~4h | 04, 05 |
+| 06 | [decision records and the layout maps](phase-06-decisions-and-layout-maps.md) ✅ | ~4h | 04, 05 |
 | 07 | [Conventions and drift check](phase-07-conventions-and-drift-check.md) ✅ | ~3h | 06 |
 
 ## Target tree
@@ -105,7 +105,7 @@ rejected.
 7. `cmd/` contains exactly the binaries GoReleaser builds, plus any of the three the
    phase-03 gate proved live. No entry is unaccounted for.
 8. `testbed`/`test` suite unchanged in behaviour; every path reference updated.
-9. ADR-0011 superseded and ADR-0023 amended, both recording what was lost.
+9. That decision superseded and that decision amended, both recording what was lost.
 
 ## Out of scope
 
@@ -131,10 +131,10 @@ which re-read all 19 of the source's per-directory READMEs. Answers are folded i
 D3–D6 and the phases; the report carries the reasoning. Remaining:
 
 1. **`ext-core/` disposition.** `contracts/dev-event/ext-core/README.md` is a
-   tombstone ("RETIRED 2026-07-15") whose retirement is already recorded in ADR-0004.
-   It is not a contract artefact, so it does not belong in `api/`. Plan assumes
-   **delete**, ADR-0004 being the surviving record — a duplicated retirement note is
-   a drift surface, not a safeguard. Flipping to "move to `docs/`" costs nothing.
+tombstone ("RETIRED 2026-07-15") whose retirement is already. It is not a contract
+artefact, so it does not belong in `api/`. Plan assumes **delete**, that decision
+being the surviving record — a duplicated retirement note is a drift surface, not a
+safeguard. Flipping to "move to `docs/`" costs nothing.
 2. **If phase 03's gate finds one of the three suspect binaries reachable**, does it
    stay in `cmd/` or move to `tools/`? Decide on what reaches it: a product path keeps
    it in `cmd/`, a test or dev path moves it to `tools/`.

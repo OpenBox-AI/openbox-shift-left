@@ -1,4 +1,4 @@
-# Phase 01 — ADR-0018: the dev-turn content carrier
+# Phase 01 — that decision: the dev-turn content carrier
 
 ## Context links
 
@@ -6,38 +6,38 @@
 - Evidence: [scout-01](scout/scout-01-read-side-fe-backend.md) (read chains),
   [scout-02](scout/scout-02-write-side-core-sdk-shiftleft.md) (write chains),
   [research 260813-2215](../reports/research-260813-2215-session-content-capture-gaps.md)
-- ADRs this amends: `docs/adr/ADR-0013-tool-call-as-activity.md` (deleted the span layer),
-  `docs/adr/ADR-0014-turn-as-activity-and-identifier-allowlist.md` (INV-2 allowlist rule),
-  `docs/adr/ADR-0017-inline-policy-evaluation.md` (last ADR; next number is 0018)
-- Index to update: `docs/adr/README.md`
+- decision records this amends:  (deleted the span layer),
+(INV-2 allowlist rule), (last decision record; next number is 0018)
+- Index to update: `README.md`
 
 ## Overview
 
 - **Date:** 2026-08-13
-- **Description:** Write `docs/adr/ADR-0018-dev-turn-content-carrier.md` — the decision record
-  authorising (a) a top-level `status` on tool `ActivityCompleted`, (b) ONE minimal wire span on
-  `TurnCompleted` carrying the assistant turn text as `response_body`, content_capture-gated, and
-  (c) the INV-2 / ADR-0013 amendments both require. No code.
+- **Description:** Write  — the decision record
+authorising (a) a top-level `status` on tool `ActivityCompleted`, (b) ONE minimal wire span on
+`TurnCompleted` carrying the assistant turn text as `response_body`, content_capture-gated, and
+(c) the INV-2 / that decision amendments both require. No code.
 - **Priority:** P1 within this plan — phases 2 and 3 are unmergeable without it (repo rule:
-  a new content class and a reversal of a shipped ADR are ADR-territory, not commit-territory).
+a new content class and a reversal of a shipped decision record are decision territory,
+not commit-territory).
 - **Implementation status:** pending
 - **Review status:** pending
 
 ## Key Insights
 
-1. **This is a partial reversal, not an extension.** ADR-0013 deleted `client/hookspan.go` +
-   `client/spanbuilder.go` and declared dev sessions span-less; `contracts/dev-event/MAPPING.md:239-245`
-   lists `status`, `span_id`, `trace_id`, `attributes` as "Retired with the span layer". Both
-   statements stop being true. An ADR that only adds fields would leave two authoritative
-   documents contradicting the code.
+1. **This is a partial reversal, not an extension.** That decision deleted `client/hookspan.go` +
+`client/spanbuilder.go` and declared dev sessions span-less; `contracts/dev-event/MAPPING.md:239-245`
+lists `status`, `span_id`, `trace_id`, `attributes` as "Retired with the span layer". Both statements
+stop being true. a decision record that only adds fields would leave two authoritative documents
+contradicting the code.
 2. **`semantic_type` is not assertable.** Core overwrites it for every span before policy
-   evaluation (`openbox-core internal/services/governance_workflow.go:302-304`:
-   `Spans[i].SemanticType = ComputeSemanticTypeFromSpan(&Spans[i])`). The only classifier paths
-   returning `llm_completion` are `isLLMCall` (attributes `http.method=="POST"` +
-   `http.url` containing an LLM domain — `internal/content/session.go:451-476`) and the root-field
-   twin (`session.go:236-256`). So the span must carry **synthesized transport attributes** to be
-   classified. That is a claim about a request the hook never observed → the ADR must name it as a
-   classification key, not an observation. This is the decision's real cost and OD-0018-1.
+evaluation (`openbox-core internal/services/governance_workflow.go:302-304`:
+`Spans[i].SemanticType = ComputeSemanticTypeFromSpan(&Spans[i])`). The only classifier paths
+returning `llm_completion` are `isLLMCall` (attributes `http.method=="POST"` + `http.url`
+containing an LLM domain — `internal/content/session.go:451-476`) and the root-field twin
+(`session.go:236-256`). So the span must carry **synthesized transport attributes** to be
+classified. That is a claim about a request the hook never observed → that decision must name it
+as a classification key, not an observation. This is the decision's real cost and OD-0018-1.
 3. **The response body shape is dictated, not chosen.** Core's extractor unmarshals
    `{"choices":[{"message":{"content":"…"}}]}` and returns `choices[0].message.content`
    (`openbox-core internal/services/goal_alignment_session.go:73-88`). Any other shape logs
@@ -50,14 +50,14 @@
    absence is the safeguard" argument for `last_assistant_message` is deliberately retired for
    that one field (`stop_reason` stays unbound).
 5. **`status` is NOT content-gated.** It is an enum derived from hook identity / a structural
-   marker. With content capture off, `status` still ships and Tool Health still works; only the
-   span disappears. Stating this crisply in the ADR prevents a later "gate everything" edit.
+marker. With content capture off, `status` still ships and Tool Health still works; only the
+span disappears. Stating this crisply in that decision prevents a later "gate everything" edit.
 
 ## Requirements
 
-- R1: ADR follows the house shape of ADR-0013/0014/0017 (Status/Date/Context/Decision/
-  Consequences/Alternatives/What this does NOT change), cites repo `file:line` or upstream URLs
-  for every load-bearing claim (repo rule), and is added to `docs/adr/README.md`.
+- R1: decision record follows the house shape of that decision/0014/0017 (Status/Date/Context/Decision/
+Consequences/Alternatives/What this does NOT change), cites repo `file:line` or upstream URLs
+for every load-bearing claim (repo rule), and is added to `README.md`.
 - R2: Covers all five subjects the plan needs authority for:
   (i) the turn-span content carrier + why (AGE feeder; core unchangeable per scope decision);
   (ii) reviving span rows server-side as an accepted side effect;
@@ -80,7 +80,8 @@
 
 ## Architecture
 
-Data flow the ADR must describe (both are one-way, additive to existing events):
+Data flow that decision must describe (both are one-way, additive to existing
+events):
 
 ```
 status (P2):
@@ -112,7 +113,8 @@ order, is what a Claude Code session naturally produces.
 
 ## Related code files
 
-Read-only for this phase; every claim in the ADR must cite one of these.
+Read-only for this phase; every claim in that decision must cite one of
+these.
 
 | Path | Why |
 |---|---|
@@ -122,20 +124,20 @@ Read-only for this phase; every claim in the ADR must cite one of these.
 | `client/payload.go:694-715` | `capBody` / 64KB cap |
 | `client/event.go:130-199` | `Span` (already has `ResponseBody`), `Content.Output` (already declared) |
 | `adapters/claude-code/hookevent.go:119-136` | the "absence is the safeguard" comment being retired for one field |
-| `adapters/claude-code/usage.go:30-54` | the INV-2 allowlist this ADR does **not** widen |
+| `adapters/claude-code/usage.go:30-54` | the INV-2 allowlist this decision record does **not** widen |
 | `adapters/claude-code/hookrun.go:172-184,273-320` | finops gate + `emitTurn` step order |
 | `adapters/codex/capabilities.go:15`, `adapters/codex/hookevent.go:69-76` | Codex deferral evidence |
 | `contracts/dev-event/MAPPING.md:239-245` | "Retired with the span layer" text to amend (phase 4) |
 | `docs/data-and-privacy.md:5-25` | the egress table this changes |
-| `docs/adr/ADR-0013…md`, `…ADR-0014…md` | the two ADRs amended |
+| `that decision…md`, `…that decision…md` | the two decision records amended |
 
 ## Implementation Steps
 
-1. Read `docs/adr/ADR-0017-inline-policy-evaluation.md` end to end for the house shape (it is the
+1. Read  end to end for the house shape (it is the
    closest analogue: a reversal with named non-re-litigable consequences).
-2. Draft `docs/adr/ADR-0018-dev-turn-content-carrier.md`:
-   - **Status:** Accepted · **Date:** 2026-08-13 · Amends ADR-0013 (span layer, partially) and
-     ADR-0014 (INV-2 allowlist statement).
+2. Draft :
+   - **Status:** Accepted · **Date:** 2026-08-13 · Amends that decision (span layer, partially) and
+     That decision (INV-2 allowlist statement).
    - **Context:** the three empty widgets + the two producer gaps, each with its core-side
      `file:line`; the scope decision (shift-left only) and what that forecloses.
    - **Decision 1 — `status`:** enum {`completed`,`failed`}, tool `ActivityCompleted` only,
@@ -166,27 +168,28 @@ Read-only for this phase; every claim in the ADR must cite one of these.
      (assistant text is not tool output).
    - **Unverified:** testbed has not run; AGE needs `LlamaFirewallHost` set or nothing is ever
      checked (`openbox-core internal/services/llama_firewall.go:31-34`).
-3. Add the row to `docs/adr/README.md` in the existing format.
+3. Add the row to `README.md` in the existing format.
 4. Re-verify every citation by opening the cited line (repo rule: reading is the minimum, and a
-   stale citation in an ADR outlives the code).
+stale citation in a decision record outlives
+the code).
 
 ## Todo list
 
-- [ ] Read ADR-0017 for shape; skim ADR-0013 §consequences and ADR-0014 §INV-2
-- [ ] Draft ADR-0018 with all four decisions + consequences + alternatives + non-changes
+- [ ] Read that decision for shape; skim that decision
+- [ ] Draft that decision with all four decisions + consequences + alternatives + non-changes
 - [ ] Name OD-0018-1 explicitly and record the preferred long-term core fix
 - [ ] Record gate composition (finops ∧ content_capture; redaction under secret_detection)
 - [ ] Record the Codex deferral and its reason
-- [ ] Add to `docs/adr/README.md`
+- [ ] Add to `README.md`
 - [ ] Verify every `file:line` citation resolves
 
 ## Success Criteria
 
-- `docs/adr/ADR-0018-dev-turn-content-carrier.md` exists, Accepted, dated 2026-08-13, listed in
-  `docs/adr/README.md`.
+-  exists, Accepted, dated 2026-08-13, listed in
+`README.md`.
 - Every claim carries a repo `file:line` or an upstream URL; each citation resolves to the
   asserted content (spot-check all core-side ones — they are the ones this repo cannot test).
-- A reader who knows only ADR-0013 can answer, from ADR-0018 alone: what egresses now, under
+- A reader who knows only that decision can answer, from that decision alone: what egresses now, under
   which gates, what returns server-side, why `semantic_type` is not simply asserted, and which
   test protects the INV-2 line that did NOT move.
 - Contains no implementation detail that phases 2/3 would have to keep in sync (no code, no
@@ -196,14 +199,14 @@ Read-only for this phase; every claim in the ADR must cite one of these.
 
 | Risk | L×I | Mitigation / signal & pre-decided response |
 |---|---|---|
-| ADR asserts core behaviour that later proves wrong (all core evidence is read, not run) | M×H | Every core claim tagged with its `file:line` and marked "verified by reading openbox-core @ develop 68f0398, not by a run". **Signal:** phase 5's live check shows `goal_alignment` rows still absent with LlamaFirewall up. **Response:** adjust in-plan — amend ADR with the observed behaviour; do not delete the ADR |
-| OD-0018-1 rejected after the ADR is written | L×M | ADR is structured so decision 3 is a separable section. **Signal:** user rejects synthesized keys. **Response:** stop-and-replan phase 3 only; phases 2/4/5 survive unchanged |
-| ADR grows into a design doc and drifts from the code | M×M | Field names + JSON keys only, no Go. Phase 4 owns the contract docs |
-| "Amends ADR-0013" read as "reverts ADR-0013" | M×M | Explicit scope sentence: spans return for ONE carrier, tool events stay span-less, `hookspan.go`/`spanbuilder.go` stay deleted |
+| decision record asserts core behaviour that later proves wrong (all core evidence is read, not run) | M×H | Every core claim tagged with its `file:line` and marked "verified by reading openbox-core @ develop 68f0398, not by a run". **Signal:** phase 5's live check shows `goal_alignment` rows still absent with LlamaFirewall up. **Response:** adjust in-plan — amend decision record with the observed behaviour; do not delete that decision |
+| OD-0018-1 rejected after that decision is written | L×M | decision record is structured so decision 3 is a separable section. **Signal:** user rejects synthesized keys. **Response:** stop-and-replan phase 3 only; phases 2/4/5 survive unchanged |
+| decision record grows into a design doc and drifts from the code | M×M | Field names + JSON keys only, no Go. Phase 4 owns the contract docs |
+| "Amends that decision" read as "reverts that decision" | M×M | Explicit scope sentence: spans return for ONE carrier, tool events stay span-less, `hookspan.go`/`spanbuilder.go` stay deleted |
 
 ## Security Considerations
 
-- The ADR is the security artifact for this plan: it is where the new egress class is recorded.
+- that decision is the security artifact for this plan: it is where the new egress class is recorded.
   Understating it (e.g. "adds telemetry fields") is the failure mode this repo names explicitly —
   prefer the honest limit.
 - Must state that the assistant text is redacted by local secret detection **before** attach

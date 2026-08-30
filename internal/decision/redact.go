@@ -6,9 +6,9 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/internal/client"
 )
 
-// This file is what is left of the decision module after ADR-0017. Policy is
-// evaluated by OpenBox on every gated tool call, so the local evaluator, the
-// bundle it read, and the signature machinery around it are all gone.
+// This file is what is left of the decision module after. Policy is evaluated by
+// OpenBox on every gated tool call, so the local evaluator, the bundle it read,
+// and the signature machinery around it are all gone.
 //
 // What survives is secret redaction, and it survives for a reason that is not
 // inertia: it is content PROTECTION, not policy evaluation. It runs before the
@@ -98,17 +98,17 @@ func (r *Redactor) Decide(_ context.Context, req DecisionRequest) Decision {
 // anything changed.
 //
 // Decide is shaped around a tool call — it reads Content.FileText and returns a
-// Decision — which fits nothing but the enforce gate. ADR-0018 added a second
-// content class with no tool call anywhere near it: the assistant's turn text,
-// redacted before it is attached to a turn event. This is the same scanner
-// reached directly, deliberately NOT a second detector: two redaction
+// Decision — which fits nothing but the enforce gate. That decision added a
+// second content class with no tool call anywhere near it: the assistant's turn
+// text, redacted before it is attached to a turn event. This is the same
+// scanner reached directly, deliberately NOT a second detector: two redaction
 // implementations would drift, and the one that drifted would be discovered by
 // a secret arriving at the control plane.
 //
 // A nil Redactor returns the text unchanged. That is the honest degradation for
 // `secret_detection:false` — the caller wires nil and the text egresses
-// unredacted, which ADR-0018 states rather than hides — and it means no caller
-// needs a nil check to stay correct.
+// unredacted, which that decision states rather than hides — and it means no
+// caller needs a nil check to stay correct.
 func (r *Redactor) RedactText(s string) (redacted string, categories []string, changed bool) {
 	if r == nil || r.scanner == nil || s == "" {
 		return s, nil, false

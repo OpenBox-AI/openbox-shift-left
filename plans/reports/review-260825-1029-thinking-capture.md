@@ -10,11 +10,10 @@ docs-only commit); working tree is clean, so `6c2e504`'s diff against its parent
 
 ### Scope
 - Files reviewed (45 changed, +1005/-153): `adapters/claude-code/{usage.go,mapper.go,usage_test.go,content_conformance_test.go}`,
-  `client/{event.go,payload.go,turnspan.go,golden_test.go}`, `client/testdata/golden/activity_turn_completed_content.json`,
-  `contracts/dev-event/{schema/dev-event.schema.json,MAPPING.md,COVERAGE.md,conformance/testdata/**}`,
-  `docs/adr/{ADR-0014-turn-as-activity-and-identifier-allowlist.md,ADR-0019-full-content-capture.md}`,
-  `docs/{data-and-privacy.md,architecture.md,testbed/e2e.md}`, `README.md`, `CLAUDE.md`,
-  `testbed/{20-capture.sh,35-telemetry.sh}`.
+`client/{event.go,payload.go,turnspan.go,golden_test.go}`, `client/testdata/golden/activity_turn_completed_content.json`,
+`contracts/dev-event/{schema/dev-event.schema.json,MAPPING.md,COVERAGE.md,conformance/testdata/**}`, `{that decision,that
+decision}`, `docs/{data-and-privacy.md,architecture.md,testbed/e2e.md}`, `README.md`, `CLAUDE.md`,
+`testbed/{20-capture.sh,35-telemetry.sh}`.
 - Lines analyzed: ~1150 (diff) + surrounding context in `usage.go` (594 lines), `payload.go` (867), `mapper.go`, `turnspan.go` (176) read in full.
 - Review focus: correctness, security/privacy-doc accuracy, and the 6 acceptance criteria in the delegation prompt.
 - Updated plans: `plans/260825-0027-openbox-gateway-full-capture/phase-02-thinking-capture.md` (Review status line only).

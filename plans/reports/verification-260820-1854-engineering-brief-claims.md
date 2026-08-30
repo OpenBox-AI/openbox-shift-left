@@ -84,7 +84,7 @@ correctly; the audit-durability concern that follows is sound.
 **Missed by the brief:** the same file sets `"tier2": true`, a deprecated no-op.
 Loading it emits, to stderr:
 
-> ``openbox: `tier2` set but ignored — every gated tool call is evaluated by OpenBox (ADR-0017)… Remove from dev.json / the environment to silence this.``
+> ``openbox: `tier2` set but ignored — every gated tool call is evaluated by OpenBox … Remove from dev.json / the environment to silence this.``
 
 So the reference enterprise profile makes every developer on it see a deprecation
 warning naming a root-owned file they cannot edit. Same file, same fix pass as the
@@ -108,12 +108,12 @@ So `spool.go:28` and `client/client.go:163` are now **correct**, and
 `realtime.go:53` is the stale one. Consequences:
 
 1. **Option A is done.** Nothing to implement in core.
-2. **"An ADR is warranted" — ADR-0009 already exists.** *Server-side idempotency
-   and delivery receipts*, `Status: Accepted — reconstructed 2026-07-31`. Written
-   **two days after** core shipped the half it says is outstanding. Line 40 —
-   *"Until core ships its half, a retry after a lost 200 can double-count"* — is
-   now false, and line 42 already prescribes the fix: *"the client comments should
-   say which half is live."* Amend ADR-0009; do not write a new one.
+2. **"a decision record is warranted" — that decision already exists.** *Server-side idempotency
+and delivery receipts*, `Status: Accepted — reconstructed 2026-07-31`. Written
+**two days after** core shipped the half it says is outstanding. Line 40 — *"Until
+core ships its half, a retry after a lost 200 can double-count"* — is now false,
+and line 42 already prescribes the fix: *"the client comments should say which
+half is live."* Amend; do not write a new one.
 3. **The guarantee is conditional, not unconditional.** Redis-backed, `idempotencyTTL
    = 24h`, and **fails open** on cache miss/absence (*"refusing the event would turn
    a telemetry-durability feature into an outage"*). A Redis outage or a >24h
@@ -136,7 +136,7 @@ So `spool.go:28` and `client/client.go:163` are now **correct**, and
 | `client/payload.go:493` | `codex/enforce_evaluate_test.go:80` |
 | `claude-code/mapper.go:758` | |
 | `claude-code/hookrun.go:128` ("even after… lands") | |
-| docs: ADR-0009:40, ADR-0017:206, ADR-0019:184, CLAUDE.md:158 | |
+| docs: that decision:40, that decision:206, that decision:184, CLAUDE.md:158 | |
 
 **Do not blanket-edit.** The distinction is load-bearing: the client still *sends*
 two copies on a gated call by design, and core now collapses them. Comments
@@ -178,8 +178,9 @@ as new.
 - **SL-6 TRUE.** 6 `krnl-labs.atlassian.net` links across 5 files; both named
   incident/journal files exist; personal attribution in `dev.json` confirmed.
 - **SL-7 TRUE.** Zero `crypto/ecdsa` imports repo-wide; `ed25519.Sign` at
-  `client/signing.go:106` exactly as cited; ADR-0015's *"the coding agent under
-  governance"* and *"origin-of-config, not tamper-resistance"* both accurate.
+`client/signing.go:106` exactly as cited; that decision's *"the coding agent
+under governance"* and *"origin-of-config, not tamper-resistance"* both
+accurate.
 - **SL-8** cited comment present verbatim at `actions/openbox-git-action/resolve.go:80-84`.
   Per owner the capability claim is retired — note that the comment itself is
   accurate code rationale; what goes is the external claim, not this text.
@@ -187,13 +188,13 @@ as new.
 ## What actually changes
 
 1. **SL-4 is a documentation-reconciliation task, not a core feature request.**
-   ~8 code sites + 4 doc sites + an ADR-0009 amendment. Cheapest high-value item
-   in the brief, and the brief would have sent the work to the wrong repo.
+~8 code sites + 4 doc sites + an that decision amendment. Cheapest high-value
+item in the brief, and the brief would have sent the work to the wrong repo.
 2. **SL-1 and SL-2 stand exactly as written** — both now backed by executed proof
    rather than reading. SL-1 remains the top item.
 3. Two additions worth folding in: the `receipt_key`/`duplicate` integration gap
    (SL-4) and the `tier2` deprecation warning in the enterprise profile (SL-2).
-4. Two brief suggestions to drop: "write an ADR" for SL-4 (ADR-0009 exists) and
+4. Two brief suggestions to drop: "write a decision record" for SL-4 (that decision exists) and
    client-side HALT discrimination for SL-5 (decided, rejected).
 
 ## Unresolved

@@ -17,8 +17,8 @@
 ```
 
 Findings from the first full run are in §8a. The autonomous approver landed on
-2026-08-04 (ADR-0012) and `70-approver-auto.sh` exercises it, so the only
-remaining documented skip is the backend read-side gap.
+2026-08-04 and `70-approver-auto.sh` exercises it, so the only remaining
+documented skip is the backend read-side gap.
 
 ## 1. Why this doc exists
 
@@ -138,7 +138,7 @@ One headless session that uses **Read, Grep, Bash, Edit, and the `everything` MC
 server**. Asserts:
 
 - `sessions` +1, `WorkflowStarted` → `WorkflowCompleted` present;
-- **tool calls are activity pairs** (ADR-0013): every tool call is an
+- **tool calls are activity pairs** : every tool call is an
   `ActivityStarted` **and** an `ActivityCompleted` sharing one `activity_id`,
   counts equal, no unpaired completed row. Under the old hook shape both halves
   were `ActivityStarted` with the same `activity_id`, which matched core's whole
@@ -158,12 +158,12 @@ server**. Asserts:
   evaluation;
 - spool drains at SessionEnd inside the flush budget;
 - **the privacy assertion (INV-2):** with content capture on, the prompt is
-  present on the `prompt_submitted` signal **and so are the tool command and file
-  body** — ADR-0019 P1 retired SL3-SEC-3, so this phase asserts the gate OPEN and
-  35-telemetry.sh asserts it CLOSED on a capture-off session. Inverting rather
-  than deleting matters: "the marker is nowhere" and "the runtime emitted nothing"
-  are the same observation, and only the positive form separates them;
-- **the turn's thinking (ADR-0019 P3)**, checked by KEY presence rather than by a
+present on the `prompt_submitted` signal **and so are the tool command and file
+body** — that decision retired SL3-SEC-3, so this phase asserts the gate OPEN and
+35-telemetry.sh asserts it CLOSED on a capture-off session. Inverting rather than
+deleting matters: "the marker is nowhere" and "the runtime emitted nothing" are
+the same observation, and only the positive form separates them;
+- **the turn's thinking **, checked by KEY presence rather than by a
   marker string, and **skipped rather than failed** when the session produced no
   block. No prompt can make a model think a chosen phrase, and extended thinking
   is a client setting this suite does not control — so a marker assertion here
@@ -187,13 +187,12 @@ so an overlapping realtime drain and end-of-session drain never double-count
 (server-side `Idempotency-Key` dedupe).
 
 ### 28-usage
-Per-turn model + token usage (ADR-0014), and the arithmetic that makes it worth
-having. **Counting is the assertion here, not existence** — every failure mode that
-matters (a double-counted turn, an off-by-one cursor, a missed turn, a subagent
-whose tokens are claimed twice) passes an existence check and fails a count. The
-standing lesson is the duplicate-`ActivityStarted` bug on the escalation path, which shipped
-because the only assertion that would have caught it ran in a mode where the bug
-could not occur.
+Per-turn model + token usage, and the arithmetic that makes it worth having. **Counting is
+the assertion here, not existence** — every failure mode that matters (a double-counted
+turn, an off-by-one cursor, a missed turn, a subagent whose tokens are claimed twice) passes
+an existence check and fails a count. The standing lesson is the duplicate-`ActivityStarted`
+bug on the escalation path, which shipped because the only assertion that would have caught
+it ran in a mode where the bug could not occur.
 
 One session with a deterministic step sequence and one subagent task, at the
 default posture (`OPENBOX_FINOPS` deliberately unset, so the phase also proves the
@@ -221,10 +220,10 @@ default). Asserts:
   settle (whether `SubagentStop`'s window carries `isSidechain` lines; see
   `plans/260811-1640-coding-agent-token-usage/reports/measure-260811-transcript-turn-surface.md`);
 - **INV-2, end to end**: the shell, file and prompt markers appear on **no** turn
-  row, and no raw transcript timestamp does either. This is the only end-to-end
-  proof that INV-2 holds after ADR-0014 replaced the projection's structural
-  impossibility with an allowlist — the unit sentinel test is necessary, not
-  sufficient, and this is the assertion a privacy reviewer should be pointed at;
+row, and no raw transcript timestamp does either. This is the only end-to-end
+proof that INV-2 holds after that decision replaced the projection's structural
+impossibility with an allowlist — the unit sentinel test is necessary, not
+sufficient, and this is the assertion a privacy reviewer should be pointed at;
 - **tool-metric pollution**: recorded, not asserted away. core's
   `ExtractToolMetric` accepts any non-empty `activity_type`, so until the
   core-side exclusion ships, `llm_completion` also appears in the dashboards **as a
@@ -241,19 +240,17 @@ default). Asserts:
 
 ### 30-enforce
 A **raw-rego** org policy that denies — the shape the deleted local evaluator
-served fail-open, so these sessions used to proceed ungoverned
-([ADR-0017](../adr/ADR-0017-inline-policy-evaluation.md)); a file containing a
-synthetic `AKIA…` and `sk-ant-…`; core killed for both failure-policy branches;
-findings channel on. Asserts: the deny is sourced from `evaluate` with a
-`policy_id`; a class that never used to escalate (`Write`) is decided by the
-server and stored once; the written file contains `OPENBOX_REDACTED` and the
-secret never egresses; fail-closed synthesizes a HALT while fail-open proceeds
-**and is recorded** as ungoverned; redaction survives the outage; findings
-surface in-session. Two later additions ride the same phase: a published
-raw-rego **HALT ends the session**
-([ADR-0020](../adr/ADR-0020-prompt-gate-and-halt-session-stop.md)) — applied as
-a session stop, the turn stops before its follow-up write, the latch file
-appears under `OPENBOX_HALT_DIR`, and a same-session replay is audited as
+served fail-open, so these sessions used to proceed ungoverned; a file
+containing a synthetic `AKIA…` and `sk-ant-…`; core killed for both
+failure-policy branches; findings channel on. Asserts: the deny is sourced from
+`evaluate` with a `policy_id`; a class that never used to escalate (`Write`) is
+decided by the server and stored once; the written file contains
+`OPENBOX_REDACTED` and the secret never egresses; fail-closed synthesizes a
+HALT while fail-open proceeds **and is recorded** as ungoverned; redaction
+survives the outage; findings surface in-session. Two later additions ride the
+same phase: a published raw-rego **HALT ends the session** — applied as a
+session stop, the turn stops before its follow-up write, the latch file appears
+under `OPENBOX_HALT_DIR`, and a same-session replay is audited as
 `source:"session-halt"`; and the `SessionStarted` posture names **who decides**
 (`control_plane`) and the failure policy while making no bundle-integrity
 claim, `doctor` agrees, and the retired `dev sync` fails loudly rather than
@@ -261,21 +258,20 @@ appearing to succeed.
 
 ### 35-telemetry
 Tool outcome, the failure/lifecycle signals, and the one content-bearing turn
-span ([ADR-0018](../adr/ADR-0018-dev-turn-content-carrier.md)). Its own phase
-because it needs a session that **fails** a tool call and one that spawns a
-subagent — neither `20-capture` nor `28-usage` drives either, and bending them
-into it would make their own counts noisier. The load-bearing checks, in the
-order their failures matter: `status` on the completed row (Tool Health can
-compute at all); a failed call stored `failed` (SUCCESS% means something); ONE
-span, `llm_completion` (Goal Alignment has text to score); capture off ⇒ **no**
-span rows (the gate is real server-side, not just on the wire); `signal_args`
-NULL on the new signals (the alignment goal is not overwritten); and capture off
-⇒ **no `thinking` key** on any row, while the turn's token numbers survive
-(ADR-0019 P3 — otherwise "no content" would pass for a client that stopped
-emitting turns). The single list a live run must confirm is
-[`MAPPING.md`](../../docs/MAPPING.md) §7 items 15–24 — the
-script is that list's executable form and defers to it. **Dormant: written,
-never run** — its own header says not to cite it as evidence until it has.
+span. Its own phase because it needs a session that **fails** a tool call and
+one that spawns a subagent — neither `20-capture` nor `28-usage` drives either,
+and bending them into it would make their own counts noisier. The load-bearing
+checks, in the order their failures matter: `status` on the completed row (Tool
+Health can compute at all); a failed call stored `failed` (SUCCESS% means
+something); ONE span, `llm_completion` (Goal Alignment has text to score);
+capture off ⇒ **no** span rows (the gate is real server-side, not just on the
+wire); `signal_args` NULL on the new signals (the alignment goal is not
+overwritten); and capture off ⇒ **no `thinking` key** on any row, while the
+turn's token numbers survive (that decision — otherwise "no content" would pass
+for a client that stopped emitting turns). The single list a live run must
+confirm is [`MAPPING.md`](../../docs/MAPPING.md) §7 items 15–24 — the script is
+that list's executable form and defers to it. **Dormant: written, never run** —
+its own header says not to cite it as evidence until it has.
 
 ### 40-approvals
 The five approval scenarios, scripted with timing, using the P4 approver
@@ -319,10 +315,10 @@ org scoping (a second org's credential sees none of it) and the `agent_lineage`
 feature gate.
 
 ### 70-approver-auto
-The approver as its own install, and the autonomous tier (ADR-0012). With
-`openbox approve --watch --auto --host claude-code` running, a gated call the
-envelope covers completes with **no visible pause** — the decision lands inside
-the hook's hold — and the audit shows `approval:decided`.
+The approver as its own install, and the autonomous tier. With `openbox approve
+--watch --auto --host claude-code` running, a gated call the envelope covers
+completes with **no visible pause** — the decision lands inside the hook's hold
+— and the audit shows `approval:decided`.
 
 Asserted, against real gated sessions: `auto_approve` (no model in the loop, and
 the evidence says so), `auto_deny`, a `consult` request the host reviews and may
@@ -410,13 +406,13 @@ openbox init --role approver [--org …]                   # role=approver
 **Rules that keep this safe and cheap**
 
 1. **`openbox dev init` is removed, not deprecated** (decided 2026-08-03). Two
-   onboarding spellings means two things to keep true in every doc and every
-   message, which is how docs drift from the code. Typing it now fails with a
-   pointer to `openbox init` — an error, not a fallback. The ~160 references
-   across code comments, docs, `install.sh` and the ADRs were rewritten rather
-   than left naming a command that no longer runs, and
-   `TestDevInitIsGone` pins both halves (it must fail, and `dev` must advertise
-   only `verify|sync`).
+onboarding spellings means two things to keep true in every doc and every
+message, which is how docs drift from the code. Typing it now fails with a
+pointer to `openbox init` — an error, not a fallback. The ~160 references
+across code comments, docs, `install.sh` and the decision records were
+rewritten rather than left naming a command that no longer runs, and
+`TestDevInitIsGone` pins both halves (it must fail, and `dev` must advertise
+only `verify|sync`).
 2. **The hook path never resolves `approver.json`.** Role is not a runtime
    ambiguity: `devconfig` gains `ConfigPathFor(role)`, and the hook path keeps
    calling the dev resolver. A test should assert that no adapter can reach the
@@ -497,15 +493,15 @@ it exposed:
 
 **Now proven end to end for the first time**
 - MCP capture: a real `mcp__everything__echo` call reaches core. Before this
-  there were no MCP calls on the stack at all. (This originally asserted an
-  `mcp_tool_call` **span**; since ADR-0013 tool calls carry no span, and the assertion
-  moved to `activity_input.mcp_server`/`mcp_tool`. The finding stands — what is
-  captured did not change, only where it is carried.)
+there were no MCP calls on the stack at all. (This originally asserted an
+`mcp_tool_call` **span**; since that decision tool calls carry no span, and the
+assertion moved to `activity_input.mcp_server`/`mcp_tool`. The finding stands — what
+is captured did not change, only where it is carried.)
 - INV-2 in the observe posture: with capture on the prompt, the shell command
-  text and the file body all egress; with capture off none of them do — both
-  halves asserted against every row the session wrote, not just unit-tested.
-  (Until ADR-0019 P1 this read "the command and file body do not egress at all";
-  that was SL3-SEC-3, and it is retired, not weakened by accident.)
+text and the file body all egress; with capture off none of them do — both
+halves asserted against every row the session wrote, not just unit-tested.
+(Until that decision this read "the command and file body do not egress at all";
+that was SL3-SEC-3, and it is retired, not weakened by accident.)
 - The whole approval loop unattended: approve-inside-hold, timeout→deny,
   late-approval→rewake (the session ends *because* the watcher saw the decision),
   reject, ungated cost, and an MCP escalation carrying its `arguments`.

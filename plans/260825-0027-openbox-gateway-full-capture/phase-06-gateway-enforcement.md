@@ -4,7 +4,7 @@
 
 - Parent: [plan.md](plan.md) · Previous: [phase-05](phase-05-gateway-capture-pipeline.md)
 - HALT probe: phase 03 probe A
-- Prior art: `adapters/common/hookflow/gate.go`, `sessionhalt.go`, ADR-0020
+- Prior art: `adapters/common/hookflow/gate.go`, `sessionhalt.go`
 - Depends on: 05, and probe A's answer
 
 ## Overview
@@ -35,8 +35,8 @@
   resolves, but the event-level watchdog wants *parsed events*, not just bytes. Treat as
   optional and prove it before depending on it.
 - **Reuse `hookflow`'s cascade shape, not its code path.** The gate sequence, failure policy
-  ordering, and `ApplyFailurePolicy`-runs-after-evaluation lesson all transfer. Re-deriving
-  them here is how the pre-ADR-0017 fail-closed bug comes back.
+ordering, and `ApplyFailurePolicy`-runs-after-evaluation lesson all transfer. Re-deriving
+them here is how the pre-that decision fail-closed bug comes back.
 - **Account binding costs this phase nothing.** A core HALT on a non-org credential
   fingerprint (phase 05 evidence, core-side registry) arrives as an ordinary verdict and
   renders through the same refusal path. Build no account-specific machinery here — no
@@ -72,7 +72,7 @@ proceeds ungoverned is worse than an over-ask.
 | `gateway/gate.go` | new — evaluate → forward \| refuse |
 | `gateway/refuse.go` | new — probe-A refusal shape |
 | `adapters/common/hookflow/failurepolicy.go` | reuse; do not fork |
-| `docs/adr/ADR-0021-openbox-local-gateway.md` | enforcement semantics |
+| — | enforcement semantics |
 | `docs/architecture.md` | Approvals + assurance sections |
 
 ## Implementation steps
@@ -90,7 +90,7 @@ proceeds ungoverned is worse than an over-ask.
 ## Todo
 
 - [ ] **A refused call must not be reported as a completed turn.** `ServeHTTP` emits a refusal as evidence (correctly — a stopped call is the one an auditor needs), and since 2026-08-26 there is a live emitter to receive it. But `gatewayemit.EventFor` maps every `Captured` to `TurnCompleted` with `Stage: "completed"`; the only hint a refusal happened is `refusalStatus`, and 403 is also a real upstream answer. **Latent, not live** — `WithGate` has no production caller, so nothing is gated and the branch cannot fire — but it becomes wrong the moment this phase wires the gate. Deliberately NOT invented ahead of time: `status` is tool-only (`client.statusFor` enforces the event-type scope), so representing a refusal on the wire is a real contract decision that belongs here, with the refusal shape it describes. Marked at the emit site in `emitter.go`.
-- [x] `/evaluate` on the gated path only — `gateway/gate.go`. Gated-ness comes from policy, never from this engine: ADR-0017's lesson that the engine second-guessing the decider is why raw-rego orgs went ungoverned.
+- [x] `/evaluate` on the gated path only — `gateway/gate.go`. Gated-ness comes from policy, never from this engine: that decision's lesson that the engine second-guessing the decider is why raw-rego orgs went ungoverned.
 - [~] Refusal RENDERING implemented (`gateway/refuse.go`); the two constants that define the shape — `refusalStatus`, `refusalErrorType` — are **PROVISIONAL, probe A owns them**. What is asserted without the probe is the REQUIREMENT: `TestRefusalShapeIsProbePending` fails if the status is any transience code the client retries, or if the error type collides with one of the provider's own literals. Verifying against a live session is still a user action.
 - [x] **MERGE BLOCKER built and drilled.** `Decision.Evaluated` makes the invariant checkable rather than reviewable, and `TestNoRefusalWithoutAnEvaluationAttempt` asserts it across all six refusing branches. Drilled: synthesizing the refusal before the evaluation turns it red with the exact diagnostic.
 - [x] Ungated path makes NO round-trip — asserted on the evaluator's call count, not on a timing measurement, so it cannot pass on a fast machine. Drilled.
@@ -126,7 +126,7 @@ proceeds ungoverned is worse than an over-ask.
 - The gateway sees full conversations before deciding. Evaluation payloads are content and
   ride the same content gate — the gate applies to what OpenBox *sends onward*, not to what
   it transiently holds.
-- Do not add local verdict caching. The `ShouldEscalate`-only lesson from ADR-0017 applies:
+- Do not add local verdict caching. The `ShouldEscalate`-only lesson from that decision applies:
   the engine second-guessing the decider is how raw-rego orgs went ungoverned.
 
 ## Next steps
@@ -144,8 +144,8 @@ Built, and each of these drilled (removing the mechanism turns a named test red)
   at all, and that absence IS the owner's decision — a posture key here would be a way to
   switch the gateway's enforcement off.
 - **An uninterpretable verdict refuses.** An empty or unrecognized literal is NOT an allow.
-  This is the ADR-0020 trap in a new place: Codex's renderer wrote nothing for an unknown
-  literal, which would have made HALT silently PROCEED.
+This is that decision trap in a new place: Codex's renderer wrote nothing for an unknown
+literal, which would have made HALT silently PROCEED.
 - **Ungated calls make no round-trip**, asserted on call count rather than on timing.
 
 ### Deliberately NOT reused: `hookflow.ApplyFailurePolicy`

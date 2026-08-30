@@ -122,28 +122,26 @@ func RunHook(sub string, stdin io.Reader, stdout io.Writer, logger *log.Logger) 
 	ad.Mapper.Now = func() time.Time { return pinnedNow }
 
 	// On SessionEnd, behind the finops gate (default ON, opt-out), read the
-	// session's rollout JSONL for usage numbers only and hand them to the
-	// Mapper, which attaches them to the SessionEnded event. This is the
-	// only place transcript_path is opened, and only when
-	// ResolveFinops() is set — with finops off it is never dereferenced.
-	// SessionEnd is teardown (off the Pre/PostToolUse hot path), and
-	// Codex flushes the transcript before the SessionEnd hook runs, so
-	// the counts are complete. Best-effort (INV-3): any error —
-	// missing/null/oversized/malformed rollout — is logged to stderr and
-	// skipped; it never fails the flush, blocks, or writes stdout. Only
-	// the projection-only parser (usage.go) touches the file, so no
-	// content can enter the event (INV-2). When transcript_path is
-	// absent/null the read simply errors and is skipped — the adapter
-	// does not reconstruct a ~/.codex/sessions path (a real SessionEnd
-	// always carries transcript_path — session_end.rs @ rust-v0.145.0 —
-	// and a HOME-derived scan would fight the read-only/hermeticity
-	// posture).
+	// session's rollout JSONL for usage numbers only and hand them to the Mapper,
+	// which attaches them to the SessionEnded event. This is the only place
+	// transcript_path is opened, and only when ResolveFinops() is set — with
+	// finops off it is never dereferenced. SessionEnd is teardown (off the
+	// Pre/PostToolUse hot path), and Codex flushes the transcript before the
+	// SessionEnd hook runs, so the counts are complete. Best-effort (INV-3): any
+	// error — missing/null/oversized/malformed rollout — is logged to stderr and
+	// skipped; it never fails the flush, blocks, or writes stdout. Only the
+	// projection-only parser (usage.go) touches the file, so no content can enter
+	// the event (INV-2). When transcript_path is absent/null the read simply
+	// errors and is skipped — the adapter does not reconstruct a
+	// ~/.codex/sessions path (a real SessionEnd always carries transcript_path —
+	// session_end.rs @ rust-v0.145.0 — and a HOME-derived scan would fight the
+	// read-only/hermeticity posture).
 	//
-	// Since ADR-0014 the same read also feeds the session-rollup `llm_completion`
-	// activity pair (emitted after the SessionEnded event is spooled, below) and
-	// binds the model id from `turn_context.payload.model`. Cost is not read at
-	// all: Codex's token path carries no cost field, and cost is never derived
-	// from a pricing table here.
+	// Since that decision the same read also feeds the session-rollup
+	// `llm_completion` activity pair (emitted after the SessionEnded event is
+	// spooled, below) and binds the model id from `turn_context.payload.model`.
+	// Cost is not read at all: Codex's token path carries no cost field, and cost
+	// is never derived from a pricing table here.
 	if hook == HookSessionEnd && ResolveFinops() {
 		if tokens, model, err := readRolloutUsage(ev.TranscriptPath); err != nil {
 			logger.Printf("finops: rollout usage skipped: %v", err)
@@ -263,11 +261,11 @@ func RunHook(sub string, stdin io.Reader, stdout io.Writer, logger *log.Logger) 
 	}
 
 	// SessionEnd additionally emits the session-rollup `llm_completion` activity
-	// pair (ADR-0014) — Codex's granularity for the model+usage signal, since its
-	// per-turn Stop hook is deliberately unwired. Spooled BEFORE the flush below,
-	// so the pair rides the same drain as the SessionEnded event rather than
-	// waiting for a later session's flush. Best-effort: a spool failure is logged
-	// and the flush proceeds with whatever is there.
+	// pair — Codex's granularity for the model+usage signal, since its per-turn
+	// Stop hook is deliberately unwired. Spooled BEFORE the flush below, so the
+	// pair rides the same drain as the SessionEnded event rather than waiting for
+	// a later session's flush. Best-effort: a spool failure is logged and the
+	// flush proceeds with whatever is there.
 	//
 	// It rides the same Finops read that populated the SessionEnded rollup, so the
 	// two agree by construction; nothing is read twice.

@@ -22,9 +22,9 @@ const source = "developer-runtime"
 // they stay absent (omitempty), which is additive and INV-8-safe.
 //
 // One struct serializes every developer event. There is no second, map-shaped
-// regime: tool calls are activity events like everything else (ADR: tool call
-// as activity), so field order on the wire is this declaration order, for all
-// of them.
+// regime: tool calls are activity events like everything else (decision
+// record: tool call as activity), so field order on the wire is this
+// declaration order, for all of them.
 type governanceEventPayload struct {
 	Source    string `json:"source"`
 	EventType string `json:"event_type"`
@@ -64,8 +64,8 @@ type governanceEventPayload struct {
 	// ActivityOutput rides ActivityCompleted; core stores it as the row's
 	// `output` and runs Guardrails stage "1" over it
 	// (services/guardrail.go:192). Counts and an exit code, plus — under the
-	// content gate — the tool's own output text (ADR-0019 P1; on a failed call
-	// that text is the tool's error). See structuralActivityOutput.
+	// content gate — the tool's own output text (on a failed call that text is
+	// the tool's error). See structuralActivityOutput.
 	ActivityOutput json.RawMessage `json:"activity_output,omitempty"`
 	// DurationMs is how long the tool call took, in milliseconds. The client
 	// computes it because there is no longer a span for core to derive it from:
@@ -79,12 +79,12 @@ type governanceEventPayload struct {
 	// Status is the tool call's outcome, and the single field core's per-tool
 	// success metric reads:
 	//
-	//	metric.IsSuccess = payload.Status != nil && *payload.Status == "completed"
-	//	  — openbox-core internal/services/activities/observability/errors.go:333
+	// metric.IsSuccess = payload.Status != nil && *payload.Status == "completed"
+	// — openbox-core internal/services/activities/observability/errors.go:333
 	//
 	// It went unwritten by every producer for this field's whole existence, while
 	// `.total` incremented on every ActivityStarted — so each completion scored
-	// as tool.<name>.failed and SUCCESS read 0.0% by construction (ADR-0018).
+	// as tool.<name>.failed and SUCCESS read 0.0% by construction.
 	//
 	// APPENDED LAST deliberately. Key order on the wire is this struct's
 	// declaration order and the golden fixtures pin it byte-exactly; adding the
@@ -92,11 +92,11 @@ type governanceEventPayload struct {
 	// diff that shows this change is additive.
 	Status string `json:"status,omitempty"`
 	// Spans carries EXACTLY ONE span, on a TurnCompleted under content capture,
-	// and nothing else ever (ADR-0018 Decision 2). It is not a return of the
-	// span layer ADR-0013 retired: tool events stay span-less and the deleted
-	// files stay deleted. It exists because core's goal-alignment extractor
-	// reads assistant text from payload.Spans and from no other field, so a
-	// span-less session can never feed it — see client/turnspan.go.
+	// and nothing else ever. It is not a return of the span layer that decision
+	// retired: tool events stay span-less and the deleted files stay deleted.
+	// It exists because core's goal-alignment extractor reads assistant text
+	// from payload.Spans and from no other field, so a span-less session can
+	// never feed it — see client/turnspan.go.
 	//
 	// Both keys are absent unless there is text, which is what makes
 	// content_capture:false emit nothing new at all rather than an empty array.
@@ -115,31 +115,30 @@ const (
 	wireActivityCompleted = "ActivityCompleted"
 )
 
-// buildPayload maps a normalized DevEvent onto core's GovernanceEventPayload
-// and marshals it to the exact bytes that will be signed and transmitted.
+// buildPayload maps a normalized DevEvent onto core's GovernanceEventPayload and
+// marshals it to the exact bytes that will be signed and transmitted.
 // Content-stripping (INV-2) has already run in Emit when content-capture is
 // disabled, so any content still present here is authorized.
 //
 // Every developer event takes one path onto stock accept-listed base wire types
-// (INV-8):
-//   - SessionStarted/Ended → Workflow* (session = workflow)
-//   - PromptSubmitted/CommitCreated/Deploy → SignalReceived(signal_name)
-//   - ToolCall → ActivityStarted, ToolResult → ActivityCompleted
+// (INV-8): - SessionStarted/Ended → Workflow* (session = workflow) -
+// PromptSubmitted/CommitCreated/Deploy → SignalReceived(signal_name) - ToolCall →
+// ActivityStarted, ToolResult → ActivityCompleted
 //
 // A tool execution IS an activity: it is the unit of work a developer session
 // performs, it is what an approver decides about, and both halves are evaluated
 // independently by core. Tool events used to ride an ActivityStarted+hook_trigger
 // envelope carrying a hand-fabricated OTel span, because the base SDK reserves
-// ActivityCompleted for hook-less lifecycle events. That rule binds runtimes
-// that HAVE in-process OTel to produce a span with; a hook process has none, so
-// the span was invented to satisfy a shape rather than to record a measurement.
-// Modelling the call at the activity layer instead retires the span layer whole
-// — see the ADR for what that costs (no span rows, no span-level Merkle leaves,
-// no server-side semantic_type for dev sessions).
+// ActivityCompleted for hook-less lifecycle events. That rule binds runtimes that
+// HAVE in-process OTel to produce a span with; a hook process has none, so the
+// span was invented to satisfy a shape rather than to record a measurement.
+// Modelling the call at the activity layer instead retires the span layer whole —
+// see that decision for what that costs (no span rows, no span-level Merkle
+// leaves, no server-side semantic_type for dev sessions).
 //
-// The bytes returned here are BOTH hashed for the signature AND sent as the
-// body, so they are produced exactly once — client.go never re-marshals. Key
-// order is this struct's declaration order and the golden fixtures pin it.
+// The bytes returned here are BOTH hashed for the signature AND sent as the body,
+// so they are produced exactly once — client.go never re-marshals. Key order is
+// this struct's declaration order and the golden fixtures pin it.
 func buildPayload(ev DevEvent) ([]byte, error) {
 	wireType, signalName, err := wireTypeFor(ev.EventType)
 	if err != nil {
@@ -173,12 +172,12 @@ func buildPayload(ev DevEvent) ([]byte, error) {
 		p.ActivityOutput = structuralActivityOutput(ev)
 		p.DurationMs = durationMs(ev)
 		p.Status = statusFor(ev)
-	// A turn is an activity too (ADR-0014). Its id is derived from the turn
-	// index rather than hashed from an operation, because a turn has no
-	// operation to key on and a readable id is worth having in stored rows.
-	// The Started half carries no activity_input: the input to a turn is the
-	// prompt, which is content, and the PromptSubmitted signal already carries
-	// it under the content gate.
+	// A turn is an activity too. Its id is derived from the turn index rather
+	// than hashed from an operation, because a turn has no operation to key on
+	// and a readable id is worth having in stored rows. The Started half
+	// carries no activity_input: the input to a turn is the prompt, which is
+	// content, and the PromptSubmitted signal already carries it under the
+	// content gate.
 	case EventTurnStarted:
 		p.ActivityID = turnActivityIDFor(ev)
 	case EventTurnCompleted:
@@ -238,9 +237,9 @@ func wireTypeFor(et EventType) (wireType, signalName string, err error) {
 		return wireSignalReceived, "commit_created", nil
 	case EventDeploy:
 		return wireSignalReceived, "deploy", nil
-	// The failure/lifecycle signals (ADR-0018). Stock SignalReceived, so a stock
-	// core accepts them with no patch (INV-8). buildSignalArgs deliberately has
-	// no arm for any of them — see the EventSubagentStarted doc comment for why
+	// The failure/lifecycle signals. Stock SignalReceived, so a stock core
+	// accepts them with no patch (INV-8). buildSignalArgs deliberately has no arm
+	// for any of them — see the EventSubagentStarted doc comment for why
 	// non-empty signal_args on these would overwrite the goal-alignment session's
 	// user goal.
 	case EventSubagentStarted:
@@ -356,14 +355,14 @@ func turnActivityIDFor(ev DevEvent) string {
 	// disjointness IS requirement 8, and TestEveryTurnProducerNamespaceIsDisjoint
 	// holds it across all five producers.
 	//
-	// The order is the producer election's precedence (ADR-0022 §3) — in-path
-	// relay, then gateway, then client-asserted telemetry — with the two
-	// non-elected shapes below it, since a rollup and a hook index are what remain
-	// when no relay observed the turn at all. A well-formed event carries exactly
-	// ONE of these (the contract's turnProducer oneOf rejects two), so the order
-	// only decides how a MALFORMED event is attributed; it is pinned anyway,
-	// because a silent reorder would re-attribute the same stream across a binary
-	// upgrade and core would split one turn across two rows with no error.
+	// The order is the producer election's precedence — in-path relay, then
+	// gateway, then client-asserted telemetry — with the two non-elected shapes
+	// below it, since a rollup and a hook index are what remain when no relay
+	// observed the turn at all. A well-formed event carries exactly ONE of these
+	// (the contract's turnProducer oneOf rejects two), so the order only decides
+	// how a MALFORMED event is attributed; it is pinned anyway, because a silent
+	// reorder would re-attribute the same stream across a binary upgrade and core
+	// would split one turn across two rows with no error.
 	if ev.ProxyRequestID != "" {
 		return ev.SessionID + ":proxy:" + ev.ProxyRequestID
 	}
@@ -400,13 +399,13 @@ const activityTypeLLMCompletion = "llm_completion"
 // turnActivityOutput builds the `activity_output` for a turn's
 // ActivityCompleted: the model that ran and the four token counts it spent.
 //
-// The shape mirrors the AI-Agent llm_completion span's response_body
-// ({model, usage{…}}) so a consumer reads one shape regardless of which runtime
-// produced it — which is the whole point of routing the turn through an activity
-// instead of reviving the span layer ADR-0013 retired.
+// The shape mirrors the AI-Agent llm_completion span's response_body ({model,
+// usage{…}}) so a consumer reads one shape regardless of which runtime produced
+// it — which is the whole point of routing the turn through an activity instead
+// of reviving the span layer that decision retired.
 //
-// INV-2, stated exactly: THIS OBJECT carries FOUR NUMBERS, ONE IDENTIFIER, and
-// — since v1.4 — ONE GATED CONTENT FIELD. No prompt, no completion, no stop
+// INV-2, stated exactly: THIS OBJECT carries FOUR NUMBERS, ONE IDENTIFIER, and —
+// since v1.4 — ONE GATED CONTENT FIELD. No prompt, no completion, no stop
 // reason, no tool content. The model id is capStr-bounded by the adapter;
 // `thinking` is gated (stripContent nils Content when the org opted out),
 // redacted at the adapter before attachment, and capped here.
@@ -420,12 +419,12 @@ const activityTypeLLMCompletion = "llm_completion"
 // It also means a body here is inspected content, which is why the cap is not
 // optional.
 //
-// Scope note (ADR-0018): the assistant's ANSWER is still not here. It rides the
-// span (buildPayload's EventTurnCompleted arm, client/turnspan.go) because
-// core's alignment extractor reads payload.Spans and nothing else.
-// openbox-core#130 asks for it to read this field instead, and when that lands
-// the answer moves HERE as activity_output.message and the span is deleted —
-// beside `thinking`, not merged with it.
+// Scope note : the assistant's ANSWER is still not here. It rides the span
+// (buildPayload's EventTurnCompleted arm, client/turnspan.go) because core's
+// alignment extractor reads payload.Spans and nothing else. openbox-core#130
+// asks for it to read this field instead, and when that lands the answer moves
+// HERE as activity_output.message and the span is deleted — beside `thinking`,
+// not merged with it.
 //
 // Cost is deliberately absent. Core and the backend each derive it server-side
 // from a model-keyed pricing table; deriving it here would fabricate a number
@@ -455,10 +454,10 @@ func turnActivityOutput(ev DevEvent) json.RawMessage {
 			m["usage"] = usage
 		}
 	}
-	// The turn's extended thinking, when capture left it on the event (v1.4,
-	// ADR-0019 P3). Capped HERE — this is the choke point every turn crosses, and
-	// the signed bytes are the bytes buildPayload returns, so capping here caps
-	// what is signed.
+	// The turn's extended thinking, when capture left it on the event (v1.4).
+	// Capped HERE — this is the choke point every turn crosses, and the signed
+	// bytes are the bytes buildPayload returns, so capping here caps what is
+	// signed.
 	//
 	// It rides activity_output rather than the assistant span deliberately: that
 	// span exists solely to feed core's alignment extractor, which reads it as
@@ -478,7 +477,7 @@ func turnActivityOutput(ev DevEvent) json.RawMessage {
 	return b
 }
 
-// toolStatuses is the closed wire vocabulary for `status` (ADR-0018).
+// toolStatuses is the closed wire vocabulary for `status`.
 var toolStatuses = map[string]bool{
 	StatusCompleted: true,
 	StatusFailed:    true,
@@ -567,10 +566,10 @@ var contentMetadataKeys = map[string]bool{
 	"body":      true,
 	"stdout":    true,
 	"stderr":    true,
-	// Tool input DOES egress on the observe path since ADR-0019 P1 — but under
-	// Content.ToolInput, which stripContent nils. This key stays listed as the
-	// backstop it always was: an adapter that put a command straight into
-	// metadata would route around the gate.
+	// Tool input DOES egress on the observe path since that decision — but
+	// under Content.ToolInput, which stripContent nils. This key stays listed
+	// as the backstop it always was: an adapter that put a command straight
+	// into metadata would route around the gate.
 	"command":    true,
 	"input_text": true,
 	// The signal free-text keys signalDetailKeyFor writes. The client sets them
@@ -673,14 +672,14 @@ func buildMetadata(ev DevEvent) (json.RawMessage, error) {
 // nothing structural is known.
 //
 // That exception used to be one class of call (the approval escalation, shell
-// and MCP only). ADR-0017 evaluates every gated class inline, so it now covers
-// every gated call — including file writes, whose content is the file body. The
-// gate is `content_capture`, unchanged: stripContent nils Content before this
-// runs when the org has it off, and the observe copy of the same call never
-// carries content on any path.
-// contentKeyFor names the activity_input field a gated call's content lands in.
-// "command" is kept for shell so the field an approver and every existing
-// dashboard already read does not move.
+// and MCP only). That decision evaluates every gated class inline, so it now
+// covers every gated call — including file writes, whose content is the file
+// body. The gate is `content_capture`, unchanged: stripContent nils Content
+// before this runs when the org has it off, and the observe copy of the same
+// call never carries content on any path. contentKeyFor names the
+// activity_input field a gated call's content lands in. "command" is kept for
+// shell so the field an approver and every existing dashboard already read does
+// not move.
 func contentKeyFor(kind ToolKind) string {
 	switch kind {
 	case ToolShell:
@@ -747,8 +746,8 @@ func structuralActivityInput(ev DevEvent) json.RawMessage {
 // adapter reports one — plus, under the content gate, what it PRODUCED.
 //
 // The result body used to be absent unconditionally, because tool output had no
-// field to land in (SL3-SEC-3). ADR-0019 P1 retires that: the body is carried on
-// Content.ToolOutput, which stripContent has already nil'd when the org has
+// field to land in (SL3-SEC-3). That decision retires that: the body is carried
+// on Content.ToolOutput, which stripContent has already nil'd when the org has
 // content capture off, so "absent" is now a posture rather than a structural
 // property. It is capped here — the bytes this function feeds are the bytes
 // buildPayload signs.
@@ -902,18 +901,18 @@ func stripContent(ev DevEvent) DevEvent {
 const maxBodySize = 65536
 
 // capBody truncates a content body to maxBodySize, the Go mirror of the base
-// SDK's truncate_string: hard cut, no marker, counted in runes to match
-// Python's per-character semantics. Structural identifiers (paths, tool/mcp
-// names) are not capped here — they are already bounded at the adapter (capStr).
+// SDK's truncate_string: hard cut, no marker, counted in runes to match Python's
+// per-character semantics. Structural identifiers (paths, tool/mcp names) are
+// not capped here — they are already bounded at the adapter (capStr).
 //
 // What it caps has grown, and the old wording did not: this comment used to say
 // "shell_command is never carried on the egress path (INV-2)", which was
-// SL3-SEC-3 and is retired (ADR-0019 P1). Tool commands, file bodies, tool
-// output, the turn's reply and the turn's thinking all flow through HERE now, on
-// ordinary telemetry, so this function is one of the three mechanisms standing
-// between a body and the wire — gate, redact, cap. Stating otherwise inside the
-// function the content actually crosses is how a reader concludes a bound does
-// not apply to them.
+// SL3-SEC-3 and is retired. Tool commands, file bodies, tool output, the turn's
+// reply and the turn's thinking all flow through HERE now, on ordinary
+// telemetry, so this function is one of the three mechanisms standing between a
+// body and the wire — gate, redact, cap. Stating otherwise inside the function
+// the content actually crosses is how a reader concludes a bound does not apply
+// to them.
 func capBody(s string) string {
 	if len(s) <= maxBodySize { // fast path: byte len ≤ cap ⇒ rune count ≤ cap
 		return s

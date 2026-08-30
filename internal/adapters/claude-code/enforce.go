@@ -12,24 +12,24 @@ import (
 // Enforcement — the synchronous pre-execution gate.
 //
 // In enforce mode (ResolveEnforce), a PreToolUse hook must obtain a
-// governance decision from the local decision engine before the tool runs
-// — the INV-3b carve-out to INV-3 ("observation never blocks"): an enforce
+// governance decision from the local decision engine before the tool runs —
+// the INV-3b carve-out to INV-3 ("observation never blocks"): an enforce
 // path may block, but only pre-execution and fail-open by default. This
 // mirrors the reference SDK's activity-boundary gate, which awaits
 // GovernanceClient.evaluate_event on ActivityStarted and then runs
 // enforce_verdict before the activity executes. The decisive difference: a
 // synchronous round-trip to core's /evaluate is ~0.8-1.6s (a Temporal
-// workflow) — far over budget — so the decision is computed in-process
-// from a synced local policy bundle (microseconds, no socket, no daemon;
-// ADR-0006), never a network call.
+// workflow) — far over budget — so the decision is computed in-process from
+// a synced local policy bundle (microseconds, no socket, no daemon), never
+// a network call.
 //
 // Scope of this file: obtain + record the decision only. It returns the
 // decision.Decision (carrying the client.Evaluation) and never writes a
-// blocking signal — turning a BLOCK/HALT verdict into an actual Claude
-// Code `deny`/`ask` (the enforce_verdict cascade) is the apply path, which
+// blocking signal — turning a BLOCK/HALT verdict into an actual Claude Code
+// `deny`/`ask` (the enforce_verdict cascade) is the apply path, which
 // consumes this Decision. So enforce mode here is safe by construction: the
-// tool always proceeds, exactly as observe mode does, while the sync path
-// + fail-open + latency bound are exercised and validated.
+// tool always proceeds, exactly as observe mode does, while the sync path +
+// fail-open + latency bound are exercised and validated.
 
 // EnforceDecision is the PreToolUse enforce gate: it synchronously obtains
 // a governance decision from the in-process decider for the tool that is

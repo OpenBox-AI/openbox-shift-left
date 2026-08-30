@@ -24,10 +24,9 @@ Three producers, all in this repo:
 1. **The session** emits its events as it runs. When it ends, core seals it — a Merkle
    root over its leaves, signed.
 2. **The commit hook** (`prepare-commit-msg`) stamps `OpenBox-Session: <id>` into the
-   commit message, mirrors it into `refs/notes/openbox`, and signs an attestation
-   envelope into `refs/notes/openbox-attest` covering the commit sha, the tree sha
-   and the session ids
-   ([ADR-0010](adr/ADR-0010-signed-commit-attestation.md)).
+commit message, mirrors it into `refs/notes/openbox`, and signs an attestation
+envelope into `refs/notes/openbox-attest` covering the commit sha, the tree sha
+and the session ids.
 3. **The deploy action** (`openbox-git-action`) resolves the pushed range back to
    sessions, carries the attestation, and emits one Deploy event per environment —
    idempotent on `deploy-<env>-<sha>`, so re-running a pipeline does not duplicate.

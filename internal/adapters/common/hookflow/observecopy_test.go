@@ -94,15 +94,15 @@ func TestGate_ObserveCopySkippedWhenApprovalWasFiled(t *testing.T) {
 	}
 }
 
-// The deprecated tier2 toggle no longer suppresses evaluation (ADR-0017): it is
-// still parsed for back-compat but must not change behaviour. So the escalation
-// runs, delivers, and the observe copy is suppressed exactly as with the toggle
-// on — the assertion is that this test reads identically to the delivered case
+// The deprecated tier2 toggle no longer suppresses evaluation : it is still
+// parsed for back-compat but must not change behaviour. So the escalation runs,
+// delivers, and the observe copy is suppressed exactly as with the toggle on —
+// the assertion is that this test reads identically to the delivered case
 // above.
 //
 // It previously asserted the opposite, and that is the point: a config key that
 // silently kept disabling enforcement would be the same silently-ungoverned
-// failure the ADR exists to close.
+// failure that decision exists to close.
 func TestGate_DeprecatedTier2ToggleNoLongerSuppressesEvaluation(t *testing.T) {
 	gov := &fakeGovernor{}
 	if deliveringGate(t, gov, "0") {
@@ -156,8 +156,8 @@ func TestGate_ObserveCopySpooledWhenEscalationOutlivesItsBudget(t *testing.T) {
 		Evaluator: Evaluator{
 			Ceiling: provider.HookCeiling{Gating: 30 * time.Second},
 			// The clamp, not a config knob: the per-evaluation budget stopped
-			// reading tier2_timeout_ms with ADR-0017, so this is now the only
-			// way to reach the timeout branch deliberately.
+			// reading tier2_timeout_ms with that decision, so this is now the
+			// only way to reach the timeout branch deliberately.
 			MaxTimeout: 20 * time.Millisecond,
 			NewClient:  func(*log.Logger) (Governor, error) { return gov, nil },
 		},
@@ -177,8 +177,8 @@ func TestGate_ObserveCopySpooledWhenEscalationOutlivesItsBudget(t *testing.T) {
 }
 
 // TestGate_ObserveCopySpooledOnStaleGateEarlyReturn is deleted with the stale
-// gate (ADR-0017): there is no local bundle to be stale, so no early return
-// before the evaluation.
+// gate : there is no local bundle to be stale, so no early return before the
+// evaluation.
 //
 // What it covered — that a path returning BEFORE the escalation still spools
 // its observe copy — is a property of the deferred write itself, which is

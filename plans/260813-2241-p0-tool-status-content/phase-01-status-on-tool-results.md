@@ -17,7 +17,7 @@
 
 - Core payload field exists: `content.GovernanceEventPayload.Status *string` (governance.go:206). Documented
   for Workflow events, but `ExtractToolMetric` explicitly reads it on `ActivityCompleted` — reuse, don't invent.
-- `status` is a lifecycle enum, not content → INV-2-clean, no gate, no ADR.
+- `status` is a lifecycle enum, not content → INV-2-clean, no gate, no decision record.
 - MAPPING.md lists `status` retired with the span layer (was per-span OTel status). Re-introducing it is a
   deliberate un-retire at payload level — document why in the MAPPING row, not a silent add.
 - Goldens pin wire bytes: adding a key changes fixtures on purpose. `deriveID` inputs unchanged → event ids stable.

@@ -6,12 +6,13 @@ import (
 )
 
 // This file is the E7-S5 wire-shape suite for the lifecycle → Workflow*/
-// SignalReceived mapping (ADR-0004: session=workflow; commit/deploy=signal). It
-// asserts each non-tool DevEvent serializes onto the exact base SDK lifecycle
-// wire shape openbox-sdk-python's validation/event_rules.go requires — every
-// workflow/signal event carries workflow_id/run_id/workflow_type, and a signal
-// additionally carries signal_name — plus that the mapping stays span-less and
-// preserves commit/deploy lineage in the pass-through metadata blob (FR-5/6/7).
+// SignalReceived mapping (that decision: session=workflow;
+// commit/deploy=signal). It asserts each non-tool DevEvent serializes onto the
+// exact base SDK lifecycle wire shape openbox-sdk-python's
+// validation/event_rules.go requires — every workflow/signal event carries
+// workflow_id/run_id/workflow_type, and a signal additionally carries
+// signal_name — plus that the mapping stays span-less and preserves
+// commit/deploy lineage in the pass-through metadata blob (FR-5/6/7).
 
 // lifecycleEvent builds a minimal non-tool DevEvent of the given type.
 func lifecycleEvent(et EventType) DevEvent {

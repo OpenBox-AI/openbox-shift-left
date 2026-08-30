@@ -3,7 +3,7 @@
 // module) to a concrete Installer. This is the one place that imports both
 // the shared SPI and the adapter modules; keeping it in `cli` (not in the
 // shared module) is what breaks the would-be import cycle between the SPI
-// and its adapters (ADR-0001).
+// and its adapters.
 //
 // claude-code and codex are real installers (hooks.json/dev.json, no
 // bundle); Cursor stays a stub until it ships.

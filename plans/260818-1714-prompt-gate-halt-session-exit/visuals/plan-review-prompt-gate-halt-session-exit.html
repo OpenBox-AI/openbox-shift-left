@@ -515,7 +515,7 @@ details.collapsible .collapsible__body { padding: 18px 20px; border-top: 1px sol
       </p>
       <div class="meta-row">
         <span>Plan status <b>implemented</b></span>
-        <span>ADR <b>0020</b></span>
+        <span>decision record <b>0020</b></span>
         <span>Merged <b>PR #7</b></span>
         <span>Effort <b>6h</b></span>
         <span>Priority <b>P1</b></span>
@@ -612,7 +612,7 @@ details.collapsible .collapsible__body { padding: 18px 20px; border-top: 1px sol
 
     <p>
       Two mechanisms, one shared engine. Neither adds a table, an endpoint or a service &mdash; which is why
-      ADR-0020 extends ADR-0017 rather than competing with it.
+      That decision extends that decision rather than competing with it.
     </p>
 
     <div class="card-grid" style="margin-bottom:18px">
@@ -735,11 +735,11 @@ adapters/codex/outputcontract.go                103 lines   <span class="cm">—
     </div>
 
     <div class="callout callout--info">
-      <div class="callout__title">Why this is an ADR and not a patch</div>
+      <div class="callout__title">Why this is a decision record and not a patch</div>
       <p style="margin-bottom:0">
         HALT and BLOCK now <em>mean different things</em> on the developer runtime, which gives policy authors the
         same escalation ladder the agent runtime already had. That is a semantics change to a governance
-        contract, so it is recorded &mdash; ADR-0020, accepted 2026-08-18, 80 lines, no new table/endpoint/service.
+        contract, so it is recorded &mdash; that decision, accepted 2026-08-18, 80 lines, no new table/endpoint/service.
       </p>
     </div>
 
@@ -789,7 +789,7 @@ adapters/codex/outputcontract.go                103 lines   <span class="cm">—
       <p style="margin-bottom:0">
         <code>ApplyFailurePolicy</code> runs <strong>after</strong> the evaluation, and <code>SessionHalt</code> is
         marked <strong>after</strong> the approval hold. Move either and the failure mode is not a wrong log line
-        &mdash; it is a fail-closed org denying every gated call without ever asking (the ADR-0017 lesson C1
+        &mdash; it is a fail-closed org denying every gated call without ever asking (that decision lesson C1
         caught), or every approval timeout terminating a session. Both directions are pinned by tests, and both
         tests pass.
       </p>
@@ -823,7 +823,7 @@ adapters/codex/outputcontract.go                103 lines   <span class="cm">—
       <li class="ladder__step">
         <div class="ladder__body">
           <div class="ladder__label">Local step &mdash; redacts, never decides</div>
-          <div class="ladder__note">Secret detection only. ADR-0017 removed its verdict; it returns
+          <div class="ladder__note">Secret detection only. That decision removed its verdict; it returns
             &ldquo;no verdict&rdquo; by design.</div>
         </div>
       </li>
@@ -965,9 +965,9 @@ sequenceDiagram
       <div class="ve-card">
         <div class="ve-card__label lb-plum">It is a faithful-client mechanism, not tamper-proof</div>
         <p style="font-size:15px;margin-bottom:0">
-          Deleting the file un-halts the machine's view. That is consistent with the ADR-0015 threat model &mdash;
+          Deleting the file un-halts the machine's view. That is consistent with that decision threat model &mdash;
           everything client-side here is readable and writable by the developer, including the signing key &mdash;
-          and the server-side record still shows every verdict. The ADR says so in as many words; the docs must keep
+          and the server-side record still shows every verdict. That decision says so in as many words; the docs must keep
           saying it.
         </p>
       </div>
@@ -1065,13 +1065,13 @@ sequenceDiagram
             <tr>
               <td><code>claude-code/capabilities.go</code><small>29 lines</small></td>
               <td><code>verdict.apply</code> text: prompt gate + session stop</td>
-              <td>rewritten; names ADR-0017 + ADR-0020, the latch, and the re-init requirement</td>
+              <td>rewritten; names that decision + that decision, the latch, and the re-init requirement</td>
               <td><span class="status status--match">Match</span></td>
             </tr>
             <tr>
-              <td>docs &times; 6 + ADR-0020 + CLAUDE.md<small>docs surfaces</small></td>
+              <td>docs &times; 6 + that decision + CLAUDE.md<small>docs surfaces</small></td>
               <td>semantics, re-init, prompt inline egress, limits</td>
-              <td>architecture (<span class="mono">:112-118</span>), getting-started, data-and-privacy, README, adr/README, CLAUDE.md, testbed/e2e.md</td>
+              <td>architecture (<span class="mono">:112-118</span>), getting-started, data-and-privacy, README, README, CLAUDE.md, testbed/e2e.md</td>
               <td><span class="status status--match">Match</span></td>
             </tr>
             <tr>
@@ -1154,7 +1154,7 @@ sequenceDiagram
             <tr>
               <td><strong>9</strong></td>
               <td>Docs updated; testbed assertions added dormant</td>
-              <td>7 doc surfaces carry the semantics; &sect;A3 is written and unexecuted &mdash; the same status discipline as the ADR-0017/0018 work</td>
+              <td>7 doc surfaces carry the semantics; &sect;A3 is written and unexecuted &mdash; the same status discipline as that decision/0018 work</td>
               <td><span class="status status--match">Verified</span></td>
             </tr>
           </tbody>
@@ -1181,7 +1181,7 @@ sequenceDiagram
       <h2 class="prose-h" style="font-size:25px">The plan's upgrade remedy was inert</h2>
       <p>
         The Registration section ends: <em>&ldquo;Existing installs need <code>openbox init</code> re-run (same as
-        ADR-0018 hooks).&rdquo;</em> True as an instruction. False as a remedy &mdash; and the failure was silent
+        That decision hooks).&rdquo;</em> True as an instruction. False as a remedy &mdash; and the failure was silent
         in the worst direction.
       </p>
       <p>
@@ -1222,7 +1222,7 @@ sequenceDiagram
         <div class="ve-card__label lb-amber">F3 &middot; discoverability &mdash; the C-series numbering is adapter-local</div>
         <p style="font-size:15px;margin-bottom:0">
           C27&ndash;C31 live in <code>adapters/claude-code/enforce_conformance_test.go</code>, not under
-          <span class="mono">contracts/</span>. Since the plan, the ADR and CLAUDE.md all cite &ldquo;C&hellip;&rdquo;
+          <span class="mono">contracts/</span>. Since the plan, that decision and CLAUDE.md all cite &ldquo;C&hellip;&rdquo;
           numbers alongside <span class="mono">contracts/dev-event</span> conformance language, a reader who greps
           <span class="mono">contracts/</span> for C27 finds nothing. Cosmetic, but it costs a newcomer a few
           minutes at exactly the moment they are trying to trust the evidence.
@@ -1301,7 +1301,7 @@ sequenceDiagram
               <strong>pending</strong>, with phase-02 targeting core; no landed fix found on any local core branch.
             </p>
             <p style="margin-bottom:0">
-              Before ADR-0020 that defect denied calls until the record cleared. After it, <em>it ends the
+              Before that decision that defect denied calls until the record cleared. After it, <em>it ends the
               session</em> &mdash; and the latch means resume does not help. This is the single largest
               behaviour-change risk in the plan, it is documented, and it is not a bug in this repo.
             </p>
@@ -1325,7 +1325,7 @@ sequenceDiagram
               <strong>raw-rego</strong> halt through the real backend and asserts the turn stopped, the file was
               never written, the latch exists and replays are audited. Until it runs, the claim &ldquo;a policy
               author can stop a session&rdquo; is inferred from the client half only. Same status discipline as the
-              ADR-0017/0018 work &mdash; consistent, and still a gap.
+              That decision/0018 work &mdash; consistent, and still a gap.
             </p>
             <div class="risk__tags"><span class="status status--warn">Dormant</span><span class="tag">needs a live stack</span></div>
           </div>
@@ -1339,7 +1339,7 @@ sequenceDiagram
           <div class="risk__body">
             <p style="margin-bottom:0">
               No session-stop lever and no prompt hook, so HALT there is a per-call deny with no latch. Deliberate
-              and validated (&ldquo;ignore codex for now&rdquo;), documented in the ADR's consequences &mdash; but it
+              and validated (&ldquo;ignore codex for now&rdquo;), documented in that decision's consequences &mdash; but it
               means the same org policy governs two tools with materially different force, and no follow-up is
               queued.
             </p>
@@ -1365,7 +1365,7 @@ sequenceDiagram
                 de-scope; <span class="mono">enforcements.jsonl</span> + the refusal reason + the documented file
                 path are the whole surface.</li>
               <li><code>statusMessage</code> on <code>UserPromptSubmit</code> is <em>assumed</em>
-                ignored-if-unknown on older Claude Code, by analogy with the ADR-0018 hook-key probe. Not
+                ignored-if-unknown on older Claude Code, by analogy with that decision hook-key probe. Not
                 re-probed.</li>
             </ul>
             <div class="risk__tags"><span class="status status--info">Documented</span></div>
@@ -1436,7 +1436,7 @@ sequenceDiagram
     <div class="footer">
       Plan review &middot; <span class="mono">plans/260818-1714-prompt-gate-halt-session-exit/plan.md</span><br>
       Reviewed against <span class="mono">d27efbb</span> on branch <span class="mono">main</span> &middot; 2026-08-21 &middot;
-      ADR-0020 accepted 2026-08-18 &middot; merged as PR #7<br>
+      That decision accepted 2026-08-18 &middot; merged as PR #7<br>
       Evidence: fresh <span class="mono">-race</span> runs (claude-code, hookflow, decision, codex), C27&ndash;C31 verbose pass,
       cross-target <span class="mono">go vet</span>, symbol-level file audit &middot; not re-run: full 11-module sweep, real cross-compiles, testbed
     </div>

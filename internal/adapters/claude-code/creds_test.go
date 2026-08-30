@@ -9,8 +9,8 @@ import (
 )
 
 // TestResolveCredentials_FromCredentialFile proves the hook reads
-// ~/.openbox/.env, which is where `openbox auth` writes credentials (ADR-0015)
-// and the position the deleted OS secret store used to hold.
+// ~/.openbox/.env, which is where `openbox auth` writes credentials and the
+// position the deleted OS secret store used to hold.
 func TestResolveCredentials_FromCredentialFile(t *testing.T) {
 	isolateConfig(t)
 	t.Setenv(envDID, testDID)
@@ -33,7 +33,7 @@ func TestResolveCredentials_FromCredentialFile(t *testing.T) {
 //
 // This replaced an injectable secretLookup seam: with credentials in a plaintext
 // file, a test can drive the same code path production does instead of
-// substituting a function for it (ADR-0015).
+// substituting a function for it.
 func isolateConfig(t *testing.T) {
 	t.Helper()
 	t.Setenv(envConfigPath, filepath.Join(t.TempDir(), "none.json"))

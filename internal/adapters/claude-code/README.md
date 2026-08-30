@@ -58,13 +58,11 @@ else (`Glob`, `Grep`, `WebFetch`, `Task`, …) → the coarse catch-all
 `shell`/`internal`. The real tool name always rides on `tool.name` +
 `metadata.tool_name`, so nothing is lost to the 3-value `kind` enum.
 
-`semantic_type` is now **adapter-local**. It used to be a hint core recomputed
-server-side from the span it received; since [ADR-0013](../../docs/adr/ADR-0013-tool-call-as-activity.md)
-no span is sent, so nothing classifies it and the field never reaches the wire.
-`tool.kind` is what carries the distinction downstream. The mapper still sets
-`semantic_type` because the adapter contract is frozen at schema v1.0 — see
-[MAPPING.md](../../docs/MAPPING.md) §3 for which `span` fields the
-client still reads and which are inert.
+`semantic_type` is now **adapter-local**. It used to be a hint core recomputed server-side from the span
+it received; since that decision no span is sent, so nothing classifies it and the field never reaches
+the wire. `tool.kind` is what carries the distinction downstream. The mapper still sets `semantic_type`
+because the adapter contract is frozen at schema v1.0 — see [MAPPING.md](../../docs/MAPPING.md) §3 for
+which `span` fields the client still reads and which are inert.
 
 ## Privacy (INV-2)
 
@@ -74,12 +72,12 @@ gates every content class this adapter binds:
 | Class | Since | Redacted before attach? |
 |---|---|---|
 | prompt text (`UserPromptSubmit`) | 2026-07-15 | **no** — redaction-at-source (`[EXT-guardrail-redaction]`) is still inert |
-| enforced-call body (`Write`/`Edit`) | ADR-0017 | yes |
-| assistant reply (`Stop`/`SubagentStop`) | ADR-0018 | yes |
-| tool input on the **observe** path | ADR-0019 P1 | yes |
-| tool output (`tool_response`), incl. a failed call's `error` | ADR-0019 P1 | yes |
-| **the turn's thinking** (`Stop`/`SubagentStop` transcript) | ADR-0019 P3 | yes |
-| refusal free text (`PermissionDenied.reason`, `StopFailure.error_details`) | ADR-0019 P1 | yes |
+| enforced-call body (`Write`/`Edit`) | that decision | yes |
+| assistant reply (`Stop`/`SubagentStop`) | that decision | yes |
+| tool input on the **observe** path | that decision | yes |
+| tool output (`tool_response`), incl. a failed call's `error` | that decision | yes |
+| **the turn's thinking** (`Stop`/`SubagentStop` transcript) | that decision | yes |
+| refusal free text (`PermissionDenied.reason`, `StopFailure.error_details`) | that decision | yes |
 
 **Opt out** with `content_capture:false` in `~/.openbox/dev.json` or
 `OPENBOX_CONTENT_CAPTURE=0` to restore the metadata-only projection: tool
@@ -87,12 +85,11 @@ identifiers, file paths, and lifecycle enums (`source`, `reason`,
 `permission_mode`, `model`, `cwd`), plus the ungated structural `status`.
 
 **SL3-SEC-3 ("commands, file bodies and tool output never egress on observe
-events") is retired** by ADR-0019 P1. It was an unconditional guarantee; what
-replaces it is a gate plus a redaction plus a cap, none of which is structural
-and each of which can be got wrong. That is why they are asserted on the
-**outbound bytes** — conformance C32–C38, plus C18/C26 for the ordering — rather
-than on the mapper's return. `TestMap_NoContentLeak` still holds the capture-OFF
-half.
+events") is retired** by. It was an unconditional guarantee; what replaces it is
+a gate plus a redaction plus a cap, none of which is structural and each of
+which can be got wrong. That is why they are asserted on the **outbound bytes**
+— conformance C32–C38, plus C18/C26 for the ordering — rather than on the
+mapper's return. `TestMap_NoContentLeak` still holds the capture-OFF half.
 
 ## Known Phase-1 limitations (honest, no silent caps)
 

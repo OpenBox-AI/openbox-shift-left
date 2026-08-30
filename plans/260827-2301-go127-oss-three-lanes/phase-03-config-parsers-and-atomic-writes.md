@@ -28,10 +28,9 @@
   mode is a mandated install silently reading as unmandated. Write the failing
   test against the current code *first*, so the fix is proven rather than assumed.
 - **godotenv replaces the parse side only.** `WriteEnvFile` keeps 0600 and the
-  `TestEnvFileIsNotACoordinateSource` invariant — a DID in `.env` must stay
-  ignored, because relaxing it reopens the bug where a stale second copy reverted
-  a corrected DID on every install (ADR-0015). godotenv has no opinion about that;
-  it must not acquire one.
+`TestEnvFileIsNotACoordinateSource` invariant — a DID in `.env` must stay ignored,
+because relaxing it reopens the bug where a stale second copy reverted a corrected
+DID on every install. godotenv has no opinion about that; it must not acquire one.
 - **renameio is hygiene, and the plan should say so honestly.** The four sites do
   `CreateTemp → write → Close → Rename` with no `f.Sync()` and no directory fsync,
   so contents can be lost on crash while the rename looks durable. But the design
@@ -131,7 +130,7 @@ paths, the hook engine) are not part of this phase.
 |---|---|---|---|
 | **go-toml's notion of "top level" differs from the scanner's** on real files | Run both implementations over every existing fixture and diff the key sets before deleting the scanner | Key sets differ on a fixture that is not the bug case | **Investigate before deleting.** A difference may be the bug or may be a new one — decide which, don't assume |
 | godotenv's quoting/escaping differs from `unquote` | Round-trip every existing `.env` fixture through both | A fixture parses to a different value | Keep `unquote` for the divergent case, or reject the swap for `.env` and keep ours — say which in the phase report |
-| **renameio changes file mode or ownership** | Assert modes explicitly in tests after each write | A 0600 file appears as 0644 | Stop — a world-readable `~/.openbox/.env` is a credential exposure (ADR-0015) |
+| **renameio changes file mode or ownership** | Assert modes explicitly in tests after each write | A 0600 file appears as 0644 | Stop — a world-readable `~/.openbox/.env` is a credential exposure |
 | renameio behaves differently on Windows | Cross-compile + review its Windows path | Cross-compile fails, or Windows-only code path diverges | Windows is build-verified only; keep it that way and state the limit |
 | Swap changes `.env` write behavior | Write side explicitly out of scope | `WriteEnvFile` appears in the diff | Revert that hunk |
 | A "dead" helper is still referenced by a test | Compile before deleting | Build error naming `unquote` | Keep it; deletion is not the goal |
@@ -139,9 +138,10 @@ paths, the hook engine) are not part of this phase.
 ## Security considerations
 
 - `envfile.go` handles `~/.openbox/.env` — the **plaintext credential store**
-  (ADR-0015: 0600 on unix, unprotected on Windows). A parser swap must not change
-  which keys are honoured. `TestEnvFileIsNotACoordinateSource` is the tripwire:
-  a DID in `.env` must stay ignored, or the two-DID-stores revert bug reopens.
+(that decision: 0600 on unix, unprotected on Windows). A parser swap must not
+change which keys are honoured. `TestEnvFileIsNotACoordinateSource` is the
+tripwire: a DID in `.env` must stay ignored, or the two-DID-stores revert bug
+reopens.
 - godotenv must not gain the ability to *expand* variables or read a second file;
   either would widen what the credential store can express. Use its plain `Read`.
 - renameio touches files under `~/.openbox/` and the session spool. Modes are the
@@ -168,11 +168,11 @@ continuation line whose own first character is `[`.
 owner ruled: follow the package default, do not work around anything.**
 
 - **D-OSS-7:** the plan's mitigation ("use its plain `Read`") does not exist —
-  godotenv expands variables unconditionally. Measured 5 divergences, all losses,
-  and found a 6th while implementing: its parse error ECHOES the offending line,
-  so a malformed credential line leaks the secret into logs. All accepted per the
-  ruling; the duplicate-key refusal ADR-0015 defended is gone. Everything is
-  pinned by tests, including the disclosure.
+godotenv expands variables unconditionally. Measured 5 divergences, all losses,
+and found a 6th while implementing: its parse error ECHOES the offending line, so
+a malformed credential line leaks the secret into logs. All accepted per the
+ruling; the duplicate-key refusal that decision defended is gone. Everything is
+pinned by tests, including the disclosure.
 - **D-OSS-8:** `renameio/v2` is `!windows` on every file, so the Windows
   cross-compile broke — invisible to the workspace build and to every test. Taken
   as honouring the package's own declared scope: renameio on unix, prior code on

@@ -233,10 +233,9 @@ func (m Mapper) Map(hook HookName, e *HookEvent) (client.DevEvent, bool) {
 	return ev, true
 }
 
-// MapUsageRollup builds Codex's session-rollup `llm_completion` activity pair
-// (ADR-0014): the same wire carrier and the same activity_output shape Claude
-// Code's per-turn pairs use, at the granularity Codex's wired hook surface
-// offers.
+// MapUsageRollup builds Codex's session-rollup `llm_completion` activity pair :
+// the same wire carrier and the same activity_output shape Claude Code's per-turn
+// pairs use, at the granularity Codex's wired hook surface offers.
 //
 // **Why session granularity, precisely.** Codex v0.145.0 exposes a `Stop` hook
 // and this adapter deliberately does not wire it — that is scope, not

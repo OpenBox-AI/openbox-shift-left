@@ -7,24 +7,23 @@ import (
 	"unicode/utf8"
 )
 
-// gatewayspan.go builds the span a LOCAL GATEWAY turn carries (ADR-0021).
+// gatewayspan.go builds the span a LOCAL GATEWAY turn carries.
 //
 // It is a second span producer alongside turnspan.go, and the two are kept apart
 // on purpose:
 //
-//   - turnspan.go carries the assistant's REPLY, for exactly one reader — core's
-//     goal-alignment extractor, which takes the LAST entry of payload.Spans and
-//     reads response_body as the assistant's words. Nothing else may look like
-//     that to it.
-//   - this file carries an OBSERVED HTTP exchange: the real headers, the real
-//     bodies, a real status. Its response_body is the provider's actual response,
-//     not a synthesized chat wrapper.
+// - turnspan.go carries the assistant's REPLY, for exactly one reader — core's
+// goal-alignment extractor, which takes the LAST entry of payload.Spans and reads
+// response_body as the assistant's words. Nothing else may look like that to it.
+// - this file carries an OBSERVED HTTP exchange: the real headers, the real
+// bodies, a real status. Its response_body is the provider's actual response, not
+// a synthesized chat wrapper.
 //
 // Both cannot ride one event, which is why a gateway turn is its own activity in
 // its own id namespace (see turnActivityIDFor). If they shared an activity_id,
 // core's dedupe — (agent_id, workflow_id, run_id, activity_id, event_type) —
-// would absorb one as a duplicate of the other and half the evidence would
-// vanish with no error anywhere.
+// would absorb one as a duplicate of the other and half the evidence would vanish
+// with no error anywhere.
 
 // gatewaySpanAttributes carries the classification keys, and they are NOT
 // decorative.
@@ -33,11 +32,11 @@ import (
 // only path to llm_completion: it reads attributes["http.method"] and looks for
 // an LLM domain in attributes["http.url"]. A gateway span without these still
 // stores — it just classifies as something else, and every reader that filters on
-// llm_completion goes quiet. That is the same silent-failure shape ADR-0018's
-// synthesized attributes documented, so the keys are set from OBSERVED values
-// here rather than fabricated.
+// llm_completion goes quiet. That is the same silent-failure shape that
+// decision's synthesized attributes documented, so the keys are set from OBSERVED
+// values here rather than fabricated.
 //
-// Note what is absent: the "synthesized" marker ADR-0018 added. This span is
+// Note what is absent: the "synthesized" marker that decision added. This span is
 // genuinely observed — a real request, a real response — so claiming otherwise
 // would be false, and the marker exists to flag the hook path's fabrication.
 // observedSpanAttributes builds the classification keys, and marks the ones that
@@ -46,8 +45,8 @@ import (
 // The in-path lanes — the gateway and the transport relay — SAW the method, URL
 // and status they report. The telemetry lane did not: Claude Code's export
 // carries neither a method nor a URL, so this client synthesizes both to reach
-// core's isLLMCall (the only path to an llm_completion classification). That is
-// a described request, not an observed one, and `openbox.span_synthetic` is what
+// core's isLLMCall (the only path to an llm_completion classification). That is a
+// described request, not an observed one, and `openbox.span_synthetic` is what
 // keeps the two distinguishable in stored rows — the same marker and the same
 // reason as turnSpanAttributes.
 //
@@ -73,9 +72,9 @@ func observedSpanAttributes(lane string, s *Span) map[string]any {
 	}
 	// The fingerprint's ONLY route into core. Core's SpanData has no
 	// credential_fingerprint field, and an unrecognized key is dropped silently on
-	// Unmarshal — so without this, account binding (ADR-0021 §6) had no evidence
-	// to match on and could never have fired. `attributes` is carried and stored,
-	// so it is where derived evidence has to live until core grows the field.
+	// Unmarshal — so without this, account binding had no evidence to match on and
+	// could never have fired. `attributes` is carried and stored, so it is where
+	// derived evidence has to live until core grows the field.
 	//
 	// Namespaced `openbox.` so it cannot collide with an OTel convention.
 	if s.CredentialFingerprint != "" {
@@ -162,7 +161,7 @@ func capHeaderValue(v string) string {
 // observedLane names the producer that OBSERVED this turn, and its request id.
 //
 // The precedence is turnActivityIDFor's, deliberately and not coincidentally:
-// proxy, then gateway, then otel (ADR-0022 §3 — in-path relay outranks a
+// proxy, then gateway, then otel (that decision — in-path relay outranks a
 // client-asserted lane). If the two disagreed, an event could take its
 // activity_id from one lane and its span id from another, and core would file
 // half the evidence under a row the other half never joins.
@@ -210,19 +209,18 @@ func observedSpanID(ev DevEvent) string {
 	return lane + "-" + hex.EncodeToString(sum[:16])
 }
 
-// observedSpan builds the span for a model call one of the OBSERVING lanes saw
-// — the local gateway, the local transport relay, or the local telemetry
-// receiver.
+// observedSpan builds the span for a model call one of the OBSERVING lanes saw —
+// the local gateway, the local transport relay, or the local telemetry receiver.
 //
 // Returns nil when the event is not one of those turns or carries no observed
 // evidence, so a hook-only install emits exactly what it emitted before.
 //
 // It was gateway-only, and gating on GatewayRequestID alone was a latent defect
-// the moment ADR-0022 declared the other two discriminators: an event carrying
-// OtelRequestID or ProxyRequestID plus a populated Span was accepted, spooled,
-// signed and POSTed with NO span attached. That failure is this repo's signature
-// shape — a working-looking lane carrying none of its evidence — and it is
-// exactly what deleting the http.* keys would also cause.
+// the moment that decision declared the other two discriminators: an event
+// carrying OtelRequestID or ProxyRequestID plus a populated Span was accepted,
+// spooled, signed and POSTed with NO span attached. That failure is this repo's
+// signature shape — a working-looking lane carrying none of its evidence — and
+// it is exactly what deleting the http.* keys would also cause.
 func observedSpan(ev DevEvent) *wireSpan {
 	lane, _ := observedLane(ev)
 	if lane == "" || ev.Span == nil {

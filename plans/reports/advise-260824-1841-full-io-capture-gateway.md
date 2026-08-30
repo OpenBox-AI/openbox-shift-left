@@ -154,7 +154,7 @@ the real tree.
 1. **Bind `tool_response` + failure free-text in `mapper.go`** — hours. Zero references in
    the adapter today; data already on hook stdin. Closes tool AND MCP output (MCP flows
    through the same hooks). Do regardless of every other decision.
-2. **Transcript tail for thinking** — extends existing `hookflow.TurnCursor` (ADR-0014).
+2. **Transcript tail for thinking** — extends existing `hookflow.TurnCursor`.
    Thinking confirmed present in 5/6 real sessions on this machine. Meets req 3 WITHOUT
    the gateway. Undocumented format = accepted risk.
 3. **OTel receiver** — `OTEL_LOG_RAW_API_BODIES=file:<dir>` gives untruncated full request
@@ -168,7 +168,8 @@ Items 1–2 are weeks, independent of the gateway, and must not wait for it.
 ## What NOT to do
 
 - **Do not build the MITM proxy.** CA key = universal TLS forgery on the dev machine,
-  stored beside the signing key (ADR-0015 posture), and buys no assurance.
+stored beside the signing key (that decision posture), and buys no
+assurance.
 - **Do not redact or rewrite forwarded bodies.** Breaks beta pairing → hard 400s.
 - **Do not buffer streams or strip pings.** Watchdog aborts.
 - **Do not allowlist `anthropic-beta` values or body fields.** Breaks on the next release.
@@ -201,13 +202,13 @@ layer is kept independent of the transport.
 
 - [ ] Bind `tool_response` → `activity_output.output` in `adapters/claude-code/mapper.go`, content-gated, redact-before-attach, conformance case on outbound bytes
 - [ ] Bind `PostToolUseFailure.error`, `PermissionDenied.reason`, `StopFailure.error_details` (free text, gated)
-- [ ] Extend `hookflow.TurnCursor` to lift `thinking` blocks; amend ADR-0014 allowlist; evolve `TestFinops_NoContentOnWire` to assert present-redacted-capped (must not pass trivially)
-- [ ] ADR: OpenBox gateway as a new service (repo rule: new service ⇒ ADR)
-- [ ] ADR amendment: gateway config install scope — user/managed, not project (conflicts ADR-0016)
+- [ ] Extend `hookflow.TurnCursor` to lift `thinking` blocks; amend that decision allowlist; evolve `TestFinops_NoContentOnWire` to assert present-redacted-capped (must not pass trivially)
+- [ ] decision record: OpenBox gateway as a new service (repo rule: new service ⇒ decision record)
+- [ ] decision record amendment: gateway config install scope — user/managed, not project (conflicts)
 - [ ] Prototype: `POST /v1/messages` passthrough + SSE tee + ping forwarding; assert forwarded bytes byte-identical and `system` array unchanged
 - [ ] Gateway auth: accept `obx_` bearer from `ANTHROPIC_AUTH_TOKEN`, resolve to DID
 - [ ] Map capture → `SpanData` (`request_headers`, `response_headers`, `request_body`, `response_body`, `http_*`)
-- [ ] Set `attributes["http.method"]="POST"` + `attributes["http.url"]` — core's `isLLMCall` reads attributes, not root fields; retire `openbox.span_synthetic` and ADR-0018's fabricated attributes
+- [ ] Set `attributes["http.method"]="POST"` + `attributes["http.url"]` — core's `isLLMCall` reads attributes, not root fields; retire `openbox.span_synthetic` and that decision's fabricated attributes
 - [ ] Identity mapping: `x-claude-code-session-id` → session, `x-claude-code-parent-agent-id` → agent tree
 - [ ] `/evaluate` integration + verdict → forward | refuse; decide HALT rendering (status + body) against CC's retry-on-error-wording
 - [ ] Conformance case: forwarded bytes unmodified while captured copy is redacted
@@ -239,5 +240,5 @@ layer is kept independent of the transport.
    *parsed events* not just bytes) abort it? Needs empirical test.
 3. Does the org have managed-settings distribution? The whole assurance argument depends
    on it; repo notes E8-S8/S9 unshipped.
-4. Retention posture for body-class volume — unmade backend decision since ADR-0019.
+4. Retention posture for body-class volume — unmade backend decision since.
 5. Codex: no gateway equivalent. Parity path unaddressed by this design.

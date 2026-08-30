@@ -19,29 +19,27 @@ import (
 // up (kept under the SessionEnd hook timeout in plugin/hooks.json).
 const flushBudget = 12 * time.Second
 
-// RunHook executes the observe-only path for one Claude Code hook
-// invocation. It is the single engine behind `openbox hook claude-code
-// <event>`, which is the only way in: the standalone alias binary it once
-// also served was never released and is gone.
+// RunHook executes the observe-only path for one Claude Code hook invocation. It
+// is the single engine behind `openbox hook claude-code <event>`, which is the
+// only way in: the standalone alias binary it once also served was never released
+// and is gone.
 //
-// Safety contract (INV-3 — observe-only, never block):
-//   - In observe mode (the default) it writes nothing to stdout. On
-//     SessionStart/UserPromptSubmit, stdout from an exit-0 hook is
-//     injected into the model's context — so all diagnostics go to
-//     `logger` (stderr) only, terse and secret-free (INV-1).
-//   - It never returns a blocking signal in observe mode: any failure (bad
-//     payload, missing identity, unreachable OpenBox, even a panic) is
-//     logged and swallowed. The caller must exit 0 regardless.
+// Safety contract (INV-3 — observe-only, never block): - In observe mode (the
+// default) it writes nothing to stdout. On SessionStart/UserPromptSubmit, stdout
+// from an exit-0 hook is injected into the model's context — so all diagnostics go
+// to `logger` (stderr) only, terse and secret-free (INV-1). - It never returns a
+// blocking signal in observe mode: any failure (bad payload, missing identity,
+// unreachable OpenBox, even a panic) is logged and swallowed. The caller must exit
+// 0 regardless.
 //
-// Enforce mode (ResolveEnforce, default ON since ADR-0016) is the sole
-// exception to "nothing to stdout": on a PreToolUse hook it may write a
-// Claude Code permissionDecision (deny/ask), on a UserPromptSubmit hook a
-// prompt block, and for a session-halting HALT either may add
-// `continue:false` (plan 260818-1714) — the INV-3b carve-out. It still
-// only ever tightens (deny/ask/block, never allow) and still exits 0, so
-// a non-blocking verdict is byte-identical to observe mode. Every other
-// hook, and observe mode, write nothing to stdout (the findings surface,
-// gated on ResolveFindings, adds only additionalContext — never a
+// Enforce mode (ResolveEnforce, default ON since) is the sole exception to
+// "nothing to stdout": on a PreToolUse hook it may write a Claude Code
+// permissionDecision (deny/ask), on a UserPromptSubmit hook a prompt block, and
+// for a session-halting HALT either may add `continue:false` (plan 260818-1714) —
+// the INV-3b carve-out. It still only ever tightens (deny/ask/block, never allow)
+// and still exits 0, so a non-blocking verdict is byte-identical to observe mode.
+// Every other hook, and observe mode, write nothing to stdout (the findings
+// surface, gated on ResolveFindings, adds only additionalContext — never a
 // decision).
 //
 // `sub` is the hook name (SessionStart/UserPromptSubmit/PreToolUse/PostToolUse/
@@ -111,10 +109,10 @@ func RunHook(sub string, stdin io.Reader, stdout io.Writer, logger *log.Logger) 
 	// Emit uses to strip content, so capture and egress agree. Resolved once
 	// (cheap config+env, no secret I/O).
 	ad.Mapper.CaptureContent = ResolveContentCapture()
-	// Secret redaction for any content the mapper attaches (ADR-0018). Wired as
-	// a collaborator so it cannot be forgotten by a future attach path; left nil
-	// when the org opted out, which means that content egresses unredacted —
-	// the documented, deliberate degradation, not an oversight.
+	// Secret redaction for any content the mapper attaches. Wired as a
+	// collaborator so it cannot be forgotten by a future attach path; left nil
+	// when the org opted out, which means that content egresses unredacted — the
+	// documented, deliberate degradation, not an oversight.
 	if ResolveSecretDetection() {
 		redactor := decision.NewRedactor()
 		ad.Mapper.RedactContent = func(s string) string { return hookflow.RedactText(redactor, s) }
@@ -181,12 +179,12 @@ func RunHook(sub string, stdin io.Reader, stdout io.Writer, logger *log.Logger) 
 		hookflow.RealtimeTrigger{Spool: ad.Spool, Provider: "claude-code"}.Maybe(logger, ev.SessionID)
 	}
 
-	// Turn boundary (ADR-0014): Stop closes a main-thread turn, SubagentStop a
-	// subagent's. Both emit the TurnStarted/TurnCompleted pair for the transcript
-	// window that has appeared since this window's cursor last advanced, then
-	// return — neither hook observes a lifecycle event of its own (Map returns
-	// false for them by design) and neither may ever write stdout, because both
-	// can block a session via `decision: "block"`.
+	// Turn boundary : Stop closes a main-thread turn, SubagentStop a subagent's.
+	// Both emit the TurnStarted/TurnCompleted pair for the transcript window that
+	// has appeared since this window's cursor last advanced, then return —
+	// neither hook observes a lifecycle event of its own (Map returns false for
+	// them by design) and neither may ever write stdout, because both can block a
+	// session via `decision: "block"`.
 	if hook == HookStop || hook == HookSubagentStop {
 		if ResolveFinops() {
 			emitTurn(ad, logger, hook, ev)
@@ -322,16 +320,14 @@ func RunHook(sub string, stdin io.Reader, stdout io.Writer, logger *log.Logger) 
 }
 
 // emitTurn reads the transcript window this turn-boundary hook delimits and
-// spools the TurnStarted/TurnCompleted pair for it (ADR-0014).
+// spools the TurnStarted/TurnCompleted pair for it.
 //
 // The step order is the correctness argument, not a style choice:
 //
-//  1. read the cursor for THIS window — (session, agent), so a subagent's
-//     window and the main thread's never consume each other's bytes;
-//  2. read the transcript from that offset, taking this side of the sidechain
-//     partition only;
-//  3. spool both halves;
-//  4. advance the cursor — LAST.
+// 1. read the cursor for THIS window — (session, agent), so a subagent's window
+// and the main thread's never consume each other's bytes; 2. read the transcript
+// from that offset, taking this side of the sidechain partition only; 3. spool
+// both halves; 4. advance the cursor — LAST.
 //
 // A crash between 3 and 4 re-reads one window on the next firing, which re-mints
 // the same `<session>:turn:<n>` activity_id; core's dedupe key includes

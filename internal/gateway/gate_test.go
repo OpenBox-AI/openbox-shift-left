@@ -36,7 +36,7 @@ func (r *recordingEvaluator) Evaluate(context.Context, Captured) (client.Evaluat
 // TestNoRefusalWithoutAnEvaluationAttempt is the MERGE BLOCKER.
 //
 // The rule: no refusal may be synthesized before an evaluation has been
-// attempted. Pre-ADR-0017 the hook path got this wrong and a fail-closed org
+// attempted. Pre-that decision the hook path got this wrong and a fail-closed org
 // denied every gated call without ever asking; here refusal is UNCONDITIONAL on a
 // missing verdict, so the same mistake would turn every control-plane blip into a
 // total model-call outage reported as a policy decision no policy made.

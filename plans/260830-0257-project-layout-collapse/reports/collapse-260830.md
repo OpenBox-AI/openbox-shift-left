@@ -219,7 +219,7 @@ in a fixture is a value, and correcting it changes a result. The three instances
 
 1. the `${OPENBOX_REDACTED_*}` corruption this repo already documents, where the
    redactor rewrote a literal on write;
-2. phase 05's sweep damaging eight ADRs, which are dated records rather than live
+2. phase 05's sweep damaging eight decision records, which are dated records rather than live
    claims;
 3. this one, where the path was an argument to a hash.
 

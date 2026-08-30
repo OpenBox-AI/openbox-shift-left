@@ -6,14 +6,14 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/devconfig"
 )
 
-// migrateLegacyConfig carries dev.json / approver.json from the pre-ADR-0015
+// migrateLegacyConfig carries dev.json / approver.json from the pre-that decision
 // location into ~/.openbox/, and says so once when it does.
 //
 // Every command that WRITES config calls this first. The order matters: the
-// config writers merge over whatever is already at the target path, so writing
-// to a fresh ~/.openbox/dev.json while the user's real posture still sat in the
-// legacy file would reset enforce, capture and the signing pins to defaults —
-// a silent posture downgrade performed by a repair command.
+// config writers merge over whatever is already at the target path, so writing to
+// a fresh ~/.openbox/dev.json while the user's real posture still sat in the
+// legacy file would reset enforce, capture and the signing pins to defaults — a
+// silent posture downgrade performed by a repair command.
 //
 // Read paths do not need it: they fall back to the legacy location on their own
 // (devconfig.DefaultConfigPath), so an upgraded binary keeps governing a machine

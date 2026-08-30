@@ -119,10 +119,11 @@ func TestResolveCredentials_FromCredentialFile(t *testing.T) {
 	}
 }
 
-// THE TRIPWIRE for the second-store bug (ADR-0015, D2). The credential file is
-// for secrets only: a coordinate written into it must be ignored, while the same
-// coordinate as a real environment variable is honoured. Before ADR-0015 the DID
-// lived in two stores and a stale copy silently reverted a corrected one.
+// THE TRIPWIRE for the second-store bug (that decision, D2). The credential file
+// is for secrets only: a coordinate written into it must be ignored, while the
+// same coordinate as a real environment variable is honoured. Before that
+// decision the DID lived in two stores and a stale copy silently reverted a
+// corrected one.
 //
 // If this test is ever deleted or relaxed, that bug class is back. Adding
 // coordinates to .env is a decision to reopen, not a commit to make.
@@ -138,7 +139,7 @@ func TestEnvFileIsNotACoordinateSource(t *testing.T) {
 	// No DID anywhere else ⇒ the one in .env must NOT rescue it.
 	t.Setenv(EnvDID, "")
 	if _, err := ResolveCredentials(); err == nil {
-		t.Fatal("a DID in .env was treated as a coordinate source; that is the two-store bug ADR-0015 removed")
+		t.Fatal("a DID in.env was treated as a coordinate source; that is the two-store bug that decision removed")
 	}
 
 	// The same DID as a real environment variable IS honoured.
@@ -301,7 +302,7 @@ func TestResolveContentCapture_DefaultOn(t *testing.T) {
 	}
 }
 
-// TestResolveFinops_DefaultOn pins the ADR-0014 posture flip, and it pins the
+// TestResolveFinops_DefaultOn pins that decision posture flip, and it pins the
 // ABSENT-FIELD case specifically — which is the case the old implementation could
 // not express. `Finops` was a plain bool whose resolver returned `&b`
 // unconditionally, so resolveBool never reached its default: an absent `finops`
@@ -413,12 +414,13 @@ func TestBoolFlagPrecedence(t *testing.T) {
 	t.Setenv(EnvConfigPath, cfgPath)
 	os.Unsetenv(EnvEnforce)
 
-	// Default: no config field, no env → TRUE (ADR-0016 reversed the observe
-	// default). Safe because enforcement is inert without an org policy and
-	// fail_closed stays off, so an outage never blocks a tool call.
+	// Default: no config field, no env → TRUE (that decision reversed the
+	// observe default). Safe because enforcement is inert without an org
+	// policy and fail_closed stays off, so an outage never blocks a tool
+	// call.
 	write(`{"developer_did":"` + testDID + `"}`)
 	if !ResolveEnforce() {
-		t.Error("an absent enforce field must resolve to ON (ADR-0016)")
+		t.Error("an absent enforce field must resolve to ON ")
 	}
 	// And an explicit false must still be honoured, which is the property the
 	// *bool type change bought: as a plain bool it marshalled to nothing.
@@ -473,8 +475,8 @@ func TestResolveTimeoutMS(t *testing.T) {
 
 // The arg-injection guard this used to test is gone with its subject: credential
 // resolution no longer shells out to `security`/`secret-tool` with coordinates
-// taken from config, so there is no argv for a crafted value to be reparsed into
-// (ADR-0015). One fewer attack surface, not one fewer check.
+// taken from config, so there is no argv for a crafted value to be reparsed
+// into. One fewer attack surface, not one fewer check.
 
 func TestSpoolDir(t *testing.T) {
 	t.Setenv(EnvSpoolDir, "/pinned/spool")
@@ -494,8 +496,8 @@ func TestSpoolDir(t *testing.T) {
 // `omitempty` drops a plain `false`, so an org's deliberate `telemetry:false`
 // would vanish from the file the next time anything rewrote it — and since the
 // default is ON, the lane would silently switch itself back on. That is the bug
-// ADR-0016 records for `Enforce`, and the reason every posture key here is a
-// pointer. Drilled 2026-08-28: as a plain bool this marshals to `{}`.
+// that decision records for `Enforce`, and the reason every posture key here is
+// a pointer. Drilled 2026-08-28: as a plain bool this marshals to `{}`.
 func TestTelemetryOptOutSurvivesARoundTrip(t *testing.T) {
 	off := false
 	raw, err := json.Marshal(DevConfig{Telemetry: &off})
@@ -529,9 +531,10 @@ func TestTelemetryOptOutSurvivesARoundTrip(t *testing.T) {
 
 // TestResolveTelemetryDefaultsOnAndEnvWins pins the posture resolution.
 //
-// Default ON is ADR-0016's ResolveFinops lesson: INSTALLING the lane is the
-// opt-in, so a default-off second switch would leave a developer who ran the
-// install command with a daemon that receives everything and records nothing.
+// Default ON is that decision's ResolveFinops lesson: INSTALLING the lane is
+// the opt-in, so a default-off second switch would leave a developer who ran
+// the install command with a daemon that receives everything and records
+// nothing.
 func TestResolveTelemetryDefaultsOnAndEnvWins(t *testing.T) {
 	isolateConfig(t)
 

@@ -9,7 +9,7 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/devinit"
 )
 
-// scope.go — which sessions an install actually governs (ADR-0016).
+// scope.go — which sessions an install actually governs.
 //
 // Scope selects ACTIVATION, not location. `Install` unconditionally materializes
 // the plugin bundle, places the engine binary and writes posture; scope decides
@@ -82,11 +82,11 @@ func flagPassed(fs *flag.FlagSet, name string) bool {
 
 // requireCredentials refuses to install when this machine has no credentials.
 //
-// `init` performs no registration and writes no credential (ADR-0015), so absent
-// credentials are a precondition failure rather than something to fix inline. It
-// must not half-install: a bundle installed against no identity produces hooks
-// that fire, fail to resolve credentials, and fail open silently — an install that
-// looks finished and governs nothing.
+// `init` performs no registration and writes no credential, so absent credentials
+// are a precondition failure rather than something to fix inline. It must not
+// half-install: a bundle installed against no identity produces hooks that fire,
+// fail to resolve credentials, and fail open silently — an install that looks
+// finished and governs nothing.
 func (a *app) requireCredentials() int {
 	envPath, err := devconfig.EnvFilePath()
 	if err != nil {
@@ -108,7 +108,7 @@ func (a *app) requireCredentials() int {
 	}
 	return a.errorf("no credentials on this machine — run `openbox auth` first.\n"+
 		"  `init` installs hooks and writes posture; it never registers an agent or writes a\n"+
-		"  credential (ADR-0015). Nothing was installed.\n"+
+		" credential. Nothing was installed.\n"+
 		"  Expected %s and %s in %s, or as environment variables.",
 		devconfig.EnvAPIKeyDirect, devconfig.EnvAgentPrivateKey, envPath)
 }
@@ -135,7 +135,7 @@ func (a *app) printGovernedScope(o devinit.Options, resolvedScope string) {
 		fmt.Fprintf(a.stdout, "\nGoverned: THIS PROJECT ONLY — %s\n", o.ProjectDir)
 		fmt.Fprintf(a.stdout, "  Hooks were merged into %s, so the next session started here is governed.\n", settings)
 		fmt.Fprintf(a.stdout, "  Sessions started in ANY OTHER directory are not governed and produce no events,\n")
-		fmt.Fprintf(a.stdout, "  so absence of events is not evidence of absence of work (ADR-0016).\n")
+		fmt.Fprintf(a.stdout, " so absence of events is not evidence of absence of work.\n")
 		fmt.Fprintf(a.stdout, "  Run `openbox init` in each project you want governed, or `--scope global` for a fleet.\n")
 		fmt.Fprintf(a.stdout, "  That settings file is per-developer and git-ignored by convention — do not commit it,\n")
 		fmt.Fprintf(a.stdout, "  or your engine path lands on the whole team.\n")

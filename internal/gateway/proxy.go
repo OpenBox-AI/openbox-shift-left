@@ -4,18 +4,17 @@
 //
 // Two invariants define it, and both are tested rather than described:
 //
-//   - Inspect without modifying. Forwarded bytes are the received bytes, the
-//     Authorization header included. The gateway resolves, stores and injects no
-//     credential of its own -- the developer's own credential relays untouched,
-//     which is why this binary holds no provider secret anywhere.
-//   - Never buffer a RESPONSE. Claude Code counts every relayed byte against a
-//     180s watchdog and SSE ping/comment lines are what keep a long thinking
-//     pause alive, so the response is teed straight through with a flush per
-//     chunk. The request direction is deliberately the opposite: it IS buffered,
-//     because the exact bytes have to be re-readable -- phase 05 keeps a copy to
-//     capture, and net/http can only auto-retry a stale pooled connection when
-//     GetBody can replay the body. One-way streaming is a property of the
-//     response, not of the relay.
+// - Inspect without modifying. Forwarded bytes are the received bytes, the
+// Authorization header included. The gateway resolves, stores and injects no
+// credential of its own -- the developer's own credential relays untouched, which
+// is why this binary holds no provider secret anywhere. - Never buffer a
+// RESPONSE. Claude Code counts every relayed byte against a 180s watchdog and SSE
+// ping/comment lines are what keep a long thinking pause alive, so the response
+// is teed straight through with a flush per chunk. The request direction is
+// deliberately the opposite: it IS buffered, because the exact bytes have to be
+// re-readable -- phase 05 keeps a copy to capture, and net/http can only
+// auto-retry a stale pooled connection when GetBody can replay the body. One-way
+// streaming is a property of the response, not of the relay.
 //
 // The relay is hand-rolled, and the reason needs stating precisely because the
 // obvious version of it is wrong. It is NOT that httputil.ReverseProxy cannot be
@@ -36,10 +35,10 @@
 // flips the framing to chunked.
 //
 // DEPENDENCY BOUNDARY. This subtree's imports are held to an allowlist in
-// internal/depguard, both external and repo-local (ADR-0023 as amended by
-// ADR-0024). Adding an import outside it fails there first, which is the
-// point — widening the list to make an import pass inverts the ADR's
-// reasoning. This comment is the signpost; depguard is the enforcement.
+// internal/depguard, both external and repo-local. Adding an import outside it
+// fails there first, which is the point — widening the list to make an import
+// pass inverts that decision's reasoning. This comment is the signpost; depguard
+// is the enforcement.
 package gateway
 
 import (
@@ -144,11 +143,12 @@ func (g *Gateway) WithCapture(em Emitter) *Gateway {
 // WithGate turns on synchronous refusal.
 //
 // `gated` decides which calls get a verdict, and it is INJECTED rather than
-// decided here on purpose. ADR-0017's lesson is that the engine second-guessing
-// the decider is how a raw-rego org went ungoverned — and separately, ~52 model
-// calls were measured per turn window, so gating everything is a round-trip per
-// call. Where that predicate comes from is an open product decision; until it is
-// made, a nil `gated` means nothing is gated and no round-trip happens.
+// decided here on purpose. That decision's lesson is that the engine
+// second-guessing the decider is how a raw-rego org went ungoverned — and
+// separately, ~52 model calls were measured per turn window, so gating
+// everything is a round-trip per call. Where that predicate comes from is an
+// open product decision; until it is made, a nil `gated` means nothing is gated
+// and no round-trip happens.
 func (g *Gateway) WithGate(ev Evaluator, gated func(*http.Request) bool) *Gateway {
 	g.evaluator = ev
 	g.gated = gated
@@ -219,19 +219,18 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// The target below is built by CONCATENATION (g.upstream + r.RequestURI), so
 	// a request-target that does not begin with "/" splices into the AUTHORITY
 	// rather than onto the path. Measured, not theorized: net/http hands the
-	// handler r.RequestURI == "evil.com:443" for an authority-form line
-	// (`CONNECT evil.com:443`), which concatenates to
+	// handler r.RequestURI == "evil.com:443" for an authority-form line (`CONNECT
+	// evil.com:443`), which concatenates to
 	// "https://api.anthropic.comevil.com:443" — a syntactically valid URL whose
 	// host is a DIFFERENT, registrable domain. Two things follow, and the second
 	// is the one that matters here:
 	//
-	//   - copyHeaders relays the developer's live Authorization header, so the
-	//     credential would egress to that host.
-	//   - the capture records http.url as g.upstream + r.URL.Path, i.e.
-	//     "https://api.anthropic.com". A call that went somewhere else would be
-	//     stored as though it went to the provider — which breaks ADR-0021 §2's
-	//     assurance claim at its root: a bypass is supposed to leave a HOLE in
-	//     the record, and a misrecorded destination leaves none.
+	// - copyHeaders relays the developer's live Authorization header, so the
+	// credential would egress to that host. - the capture records http.url as
+	// g.upstream + r.URL.Path, i.e. "https://api.anthropic.com". A call that went
+	// somewhere else would be stored as though it went to the provider — which
+	// breaks that decision's assurance claim at its root: a bypass is supposed to
+	// leave a HOLE in the record, and a misrecorded destination leaves none.
 	//
 	// Refusing is correct rather than merely convenient. Every form this rejects
 	// is already unusable here: absolute-form would have to be re-encoded from
@@ -351,7 +350,7 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		// has already sent its whole prompt to the provider and left ZERO evidence
 		// (measured). It is client-controlled and deterministic — any local process,
 		// the governed agent included, could suppress its own record by not waiting
-		// for the response. ADR-0021 §2 rests on a bypass leaving a HOLE in the
+		// for the response. That decision rests on a bypass leaving a HOLE in the
 		// record; this left no hole at all.
 		//
 		// Status 0, not a synthesized code: `omitempty` drops it, and a span

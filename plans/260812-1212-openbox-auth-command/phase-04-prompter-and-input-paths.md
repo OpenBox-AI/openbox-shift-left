@@ -29,7 +29,8 @@
   For automation, name a **source** not a value — `docker login --password-stdin`
   is the precedent.
 - Masking here defends against terminal scrollback, screen sharing and tmux
-  buffers. It does **not** protect the secret at rest — phase 1's ADR says so.
+buffers. It does **not** protect the secret at rest — phase 1's decision
+record says so.
 
 ## Requirements
 
@@ -100,7 +101,7 @@ Phase 5 takes a `Prompter` in its command constructor and never touches
 | `ReadPassword` misbehaves in a non-standard terminal (IDE console, mintty) | M×M | no prompt shown, or input echoed | **Accepted, mitigated:** `IsTerminal` gates it; a non-TTY falls back to plain read. Document that IDE consoles may not mask. |
 | Fail-fast text sends users to a flag that phase 5 renames | M×L | error names a flag that does not exist | **Adjust:** phase 5 owns flag names; keep the message in one constant and have phase 5 update it. |
 | `x/term` unavailable for a target | L×H | build fails for GOOS/GOARCH | **Stop and replan:** x/term supports darwin/linux/windows; a failure means the target is outside plan scope. |
-| Masking gives false reassurance | M×M | reviewer assumes the secret is protected | **Adjust:** the package doc comment states it defends scrollback only, pointing at ADR-0015. |
+| Masking gives false reassurance | M×M | reviewer assumes the secret is protected | **Adjust:** the package doc comment states it defends scrollback only. |
 
 ## Security Considerations
 

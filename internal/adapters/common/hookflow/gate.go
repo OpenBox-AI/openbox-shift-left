@@ -24,8 +24,8 @@ type EnforceTarget interface {
 	// replacement. Never egressed.
 	ToolInput() json.RawMessage
 	// HighRisk reports whether this class is shell execution or an MCP call.
-	// The gate no longer consults it (ADR-0017 evaluates every class); it
-	// survives for the adapters' own classification.
+	// The gate no longer consults it (that decision evaluates every class);
+	// it survives for the adapters' own classification.
 	HighRisk() bool
 	// DecisionRequest builds the local decision request. Metadata axes only
 	// (INV-2); content is carried solely for local redaction.
@@ -122,7 +122,7 @@ func (g EnforceGate) Run(ctx context.Context, logger *log.Logger, stdout io.Writ
 	// observe baseline.
 	localRedaction := devconfig.ResolveSecretDetection() || devconfig.ResolveContentCapture()
 
-	// The local step redacts; it does not decide (ADR-0017).
+	// The local step redacts; it does not decide.
 	local := NewDecider().Decide(ctx, t.DecisionRequest(localRedaction))
 
 	// Evaluate. Unconditional, because there is no local verdict that could

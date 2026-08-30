@@ -42,10 +42,10 @@ func TestRunRewake_InertWhenNothingCanFileAnApproval(t *testing.T) {
 		env  map[string]string
 		tool string
 	}{
-		// Enforce must be turned off EXPLICITLY. It defaults on (ADR-0016), and
-		// this case used to pass on an empty env only because the tier-2 toggle
-		// it also depended on defaulted off — so it was asserting the inertness
-		// of a gate that was in fact enabled. ADR-0017 removed that toggle and
+		// Enforce must be turned off EXPLICITLY. It defaults on, and this case
+		// used to pass on an empty env only because the tier-2 toggle it also
+		// depended on defaulted off — so it was asserting the inertness of a
+		// gate that was in fact enabled. That decision removed that toggle and
 		// exposed it.
 		{"enforce off — no gate, so no approval", map[string]string{devconfig.EnvEnforce: "0"}, "Bash"},
 		// Enforce-off is the ONLY inert case left. The two that stood beside it

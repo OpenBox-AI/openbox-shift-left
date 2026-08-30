@@ -191,8 +191,8 @@ func TestTier2Budget(t *testing.T) {
 	}
 }
 
-// The verdict-before-ceiling pin. Since ADR-0017 every gated call waits on a
-// network verdict, so this is a security control rather than arithmetic
+// The verdict-before-ceiling pin. Since that decision every gated call waits on
+// a network verdict, so this is a security control rather than arithmetic
 // hygiene: a hook killed before it writes lets the tool run, and no org setting
 // — not even fail_closed — can stop it, because there is no hook left to deny
 // with.
@@ -327,10 +327,10 @@ func serveEvaluate(t *testing.T, verdictJSON string, status int, delay time.Dura
 }
 
 // evalCreds points the hot-path credential resolver at a fake core with a valid
-// signing seed (no secret store).
-// serveVerdict stands up the control plane for a case and points the adapter at
-// it. It replaces setBundleEnv: since ADR-0017 a case's expected outcome is a
-// SERVER verdict, not a local bundle, so the setup names the verdict directly.
+// signing seed (no secret store). serveVerdict stands up the control plane for
+// a case and points the adapter at it. It replaces setBundleEnv: since that
+// decision a case's expected outcome is a SERVER verdict, not a local bundle,
+// so the setup names the verdict directly.
 func serveVerdict(t *testing.T, verdictJSON string) {
 	t.Helper()
 	url, _ := serveEvaluate(t, verdictJSON, 200, 0)
@@ -497,7 +497,7 @@ func TestEnforcementConformance_Tier2(t *testing.T) {
 		}
 	})
 
-	t.Run("C14 every gated class evaluates inline, incl. Edit (ADR-0017)", func(t *testing.T) {
+	t.Run("C14 every gated class evaluates inline, incl. Edit ", func(t *testing.T) {
 		// The inverse of what this asserted before. Edit used to be decided
 		// locally and never reached the server, which is precisely how a
 		// raw-rego org — whose policy cannot be evaluated locally at all — was

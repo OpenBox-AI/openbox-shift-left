@@ -40,9 +40,9 @@ func TestPostureFields_CoverEveryConfigControl(t *testing.T) {
 	// repo's .git), not a governance posture an org would attest to.
 	//
 	// require_verified_bundle is parsed for back-compat and reports nothing: it
-	// guarded a local policy bundle, and ADR-0017 deleted the bundle. A control
-	// that cannot engage must not appear in the posture, or an org reading
-	// `true` would believe a signature check was protecting it.
+	// guarded a local policy bundle, and that decision deleted the bundle. A
+	// control that cannot engage must not appear in the posture, or an org
+	// reading `true` would believe a signature check was protecting it.
 	notPosture := map[string]bool{
 		"install_git_hook":        true,
 		"require_verified_bundle": true,
@@ -153,23 +153,23 @@ func TestEffectivePosture_MatchesResolvers(t *testing.T) {
 		t.Error("Flags disagrees with the resolved posture — doctor would report a control that is not in force")
 	}
 	// require_verified_bundle must NOT be reported: it guarded a local bundle
-	// that no longer exists (ADR-0017), so an org reading `true` would believe a
-	// signature check was protecting it.
+	// that no longer exists, so an org reading `true` would believe a signature
+	// check was protecting it.
 	if _, reported := p.Flags()["require_verified_bundle"]; reported {
 		t.Error("require_verified_bundle is still reported — it cannot engage, so reporting it overstates")
 	}
-	// The documented defaults: ENFORCE (ADR-0016), with secret detection and
-	// content capture on (content capture default-ON is the 2026-07-15 decision).
+	// The documented defaults: ENFORCE, with secret detection and content capture
+	// on (content capture default-ON is the 2026-07-15 decision).
 	//
 	// This assertion used to read "enforce must default off — enforcement never
-	// turns on by omission (INV-3)". ADR-0016 reversed the default deliberately,
-	// and the INV-3 property it cited is preserved elsewhere and unchanged: a
-	// FAILURE never blocks a tool call, because fail_closed defaults off and the
-	// gate fails open on error. "Never enforce by omission" was a default, not an
-	// invariant; "never BLOCK by failure" is the invariant, and it still holds —
-	// see the fail_closed assertion below.
+	// turns on by omission (INV-3)". That decision reversed the default
+	// deliberately, and the INV-3 property it cited is preserved elsewhere and
+	// unchanged: a FAILURE never blocks a tool call, because fail_closed defaults
+	// off and the gate fails open on error. "Never enforce by omission" was a
+	// default, not an invariant; "never BLOCK by failure" is the invariant, and
+	// it still holds — see the fail_closed assertion below.
 	if !p.Enforce {
-		t.Error("enforce must default ON (ADR-0016)")
+		t.Error("enforce must default ON ")
 	}
 	if p.FailClosed {
 		t.Error("fail_closed must stay off — enforce-by-default is only defensible while an outage cannot block a developer")
@@ -211,14 +211,14 @@ func TestPostureReportsDecisionProvenance(t *testing.T) {
 	// asserting the wire. That seam is how the gap shipped: population and
 	// serialization were each tested, in isolation, and for months the control
 	// plane was told neither field while `openbox doctor` printed both — the exact
-	// inverse of the ADR-0017 argument, which is about what the control plane
+	// inverse of that decision argument, which is about what the control plane
 	// knows. Build through EffectivePosture, not Posture{}: an empty string is
 	// dropped by the unknown-value guard, so a zero value would pass vacuously.
 	t.Run("both reach the emitted metadata, and no bundle key does", func(t *testing.T) {
 		isolateConfig(t)
 		m := EffectivePosture().Metadata()
 		if m["decision_authority"] != DecisionAuthorityControlPlane {
-			t.Errorf("decision_authority = %v, want %q — ADR-0017 makes this posture's policy-provenance evidence",
+			t.Errorf("decision_authority = %v, want %q — that decision makes this posture's policy-provenance evidence",
 				m["decision_authority"], DecisionAuthorityControlPlane)
 		}
 		if m["failure_policy"] != FailurePolicyFailOpen {
@@ -228,7 +228,7 @@ func TestPostureReportsDecisionProvenance(t *testing.T) {
 		// an empty-value guard would hide a field that a later edit repopulates.
 		for k := range m {
 			if strings.HasPrefix(k, "bundle_") || k == "staleness" {
-				t.Errorf("%q is still emitted — it reports a subsystem ADR-0017 deleted", k)
+				t.Errorf("%q is still emitted — it reports a subsystem that decision deleted", k)
 			}
 		}
 	})
@@ -258,10 +258,10 @@ func TestPostureReportsDecisionProvenance(t *testing.T) {
 	})
 }
 
-// A deprecation notice that cannot fire is the same as no notice. ADR-0017
-// removed the last runtime caller of ResolveTier2, so a warning hung off that
-// resolver was unreachable — found by driving the real binary, not by a test,
-// which is why this one exists.
+// A deprecation notice that cannot fire is the same as no notice. That
+// decision removed the last runtime caller of ResolveTier2, so a warning hung
+// off that resolver was unreachable — found by driving the real binary, not
+// by a test, which is why this one exists.
 func TestDeprecatedKeysAreDetectedWherePostureIsRead(t *testing.T) {
 	t.Run("silent when nothing deprecated is set", func(t *testing.T) {
 		isolateConfig(t)

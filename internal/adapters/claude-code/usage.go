@@ -12,67 +12,55 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/internal/client"
 )
 
-// Transcript usage extraction — per turn (Stop/SubagentStop) and as a
-// SessionEnd rollup.
+// Transcript usage extraction — per turn (Stop/SubagentStop) and as a SessionEnd rollup.
 //
-// Claude Code hooks expose no token/cost usage (capabilities.go / README
-// known limitations), but the session's `transcript_path` — a JSONL file,
-// one line per assistant/user event — carries a `message.usage` object
-// with token counts. Behind the finops gate (ResolveFinops), the adapter
-// reads it at two granularities:
+// Claude Code hooks expose no token/cost usage (capabilities.go / README known limitations),
+// but the session's `transcript_path` — a JSONL file, one line per assistant/user event —
+// carries a `message.usage` object with token counts. Behind the finops gate (ResolveFinops),
+// the adapter reads it at two granularities:
 //
-//   - per turn, from a cursor position, on Stop/SubagentStop → the
-//     TurnStarted/TurnCompleted pair (ADR-0014);
-//   - whole-session, on SessionEnd → the rollup on SessionEnded, retained
-//     because it is the independent second derivation Phase 06's
-//     reconciliation compares the per-turn sum against.
+// - per turn, from a cursor position, on Stop/SubagentStop → the TurnStarted/TurnCompleted
+// pair; - whole-session, on SessionEnd → the rollup on SessionEnded, retained because it is the
+// independent second derivation Phase 06's reconciliation compares the per-turn sum against.
 //
 // # INV-2: this projection is an allowlist now, not an impossibility
 //
-// It used to be enforceable structurally: the projection structs held only
-// numeric fields, so every content-bearing field in the transcript (prompt
-// text, tool inputs, tool_result bodies, file contents, the assistant's
-// message `content`, thinking blocks) had nowhere to land and could not
-// enter memory at all. ADR-0014 narrowed that, and its 2026-08-25 amendment
-// (ADR-0019 P3) widened it once more. `turnLine` binds four non-numeric
-// fields, and two of them egress:
+// It used to be enforceable structurally: the projection structs held only numeric fields, so
+// every content-bearing field in the transcript (prompt text, tool inputs, tool_result bodies,
+// file contents, the assistant's message `content`, thinking blocks) had nowhere to land and
+// could not enter memory at all. That decision narrowed that, and its 2026-08-25 amendment
+// widened it once more. `turnLine` binds four non-numeric fields, and two of them egress:
 //
-//	message.model                 identifier → EGRESSES (capStr-bounded)
-//	message.content[].thinking    CONTENT    → EGRESSES, GATED (see below)
-//	timestamp                     timestamp  → parsed to a time.Time for duration_ms, discarded
-//	isSidechain                   bool       → partitions subagent lines out of the parent's sums
+// message.model                 identifier → EGRESSES (capStr-bounded)
+// message.content[].thinking    CONTENT    → EGRESSES, GATED (see below) timestamp
+// timestamp  → parsed to a time.Time for duration_ms, discarded isSidechain
+// bool       → partitions subagent lines out of the parent's sums
 //
-// Everything else still has nowhere to land. `text`, `tool_input`,
-// `tool_result`, `cwd`, `service_tier`, `inference_geo` and `speed` are
-// unbound, and so are two numeric siblings that would double-count if bound:
-// `usage.cache_creation.ephemeral_*` (sums to cache_creation_input_tokens)
-// and `usage.iterations[]` (a per-model-call breakdown of the same line).
-// `message.content` is bound only as raw JSON, decoded no further than the
-// thinking blocks — so its siblings stay unreachable rather than unused.
+// Everything else still has nowhere to land. `text`, `tool_input`, `tool_result`, `cwd`,
+// `service_tier`, `inference_geo` and `speed` are unbound, and so are two numeric siblings that
+// would double-count if bound: `usage.cache_creation.ephemeral_*` (sums to
+// cache_creation_input_tokens) and `usage.iterations[]` (a per-model-call breakdown of the same
+// line). `message.content` is bound only as raw JSON, decoded no further than the thinking
+// blocks — so its siblings stay unreachable rather than unused.
 //
-// Thinking is the first genuinely FREE-FORM content string here, and what
-// protects it is no longer a property of the type. It is three fallible
-// mechanisms in a fixed order — gate (Mapper.CaptureContent, then the
-// client's stripContent), redact (Mapper.RedactContent, before attachment),
-// cap (capBody, 65,536 runes) — and all three are asserted on outbound
-// bytes, because a redaction applied after attachment passes every unit test
-// in this package and still ships the secret.
+// Thinking is the first genuinely FREE-FORM content string here, and what protects it is no
+// longer a property of the type. It is three fallible mechanisms in a fixed order — gate
+// (Mapper.CaptureContent, then the client's stripContent), redact (Mapper.RedactContent, before
+// attachment), cap (capBody, 65,536 runes) — and all three are asserted on outbound bytes,
+// because a redaction applied after attachment passes every unit test in this package and still
+// ships the secret.
 //
-// TestFinops_NoContentOnWire proves the CURRENT claim, in both directions:
-// with capture off every sentinel is absent from the real signed wire body,
-// including the thinking one; with capture on the thinking sentinel is
-// present in activity_output.thinking, redacted and capped, and every OTHER
-// transcript sentinel is still absent — so the widening is exactly one field
-// wide. It is load-bearing rather than supplementary: a change that makes it
-// pass trivially is a defect, because the guarantee no longer defends
-// itself. Its two mutation controls are the proof — deleting the redaction,
-// or deleting the cap, must each turn it red.
+// TestFinops_NoContentOnWire proves the CURRENT claim, in both directions: with capture off
+// every sentinel is absent from the real signed wire body, including the thinking one; with
+// capture on the thinking sentinel is present in activity_output.thinking, redacted and capped,
+// and every OTHER transcript sentinel is still absent — so the widening is exactly one field
+// wide. It is load-bearing rather than supplementary: a change that makes it pass trivially is
+// a defect, because the guarantee no longer defends itself. Its two mutation controls are the
+// proof — deleting the redaction, or deleting the cap, must each turn it red.
 //
-// INV-3: best-effort. A missing / oversized / malformed /
-// partially-written transcript yields an error the caller logs and skips;
-// it never fails the flush, blocks a tool call, or writes stdout. The read
-// is bounded (maxTranscriptBytes) so a giant transcript cannot exhaust
-// memory.
+// INV-3: best-effort. A missing / oversized / malformed / partially-written transcript yields
+// an error the caller logs and skips; it never fails the flush, blocks a tool call, or writes
+// stdout. The read is bounded (maxTranscriptBytes) so a giant transcript cannot exhaust memory.
 
 // maxTranscriptBytes bounds the transcript read so a pathological/huge transcript
 // cannot exhaust memory (INV-3). A transcript larger than this is skipped whole
@@ -104,9 +92,9 @@ type transcriptLine struct {
 }
 
 // turnLine is the per-turn projection: transcriptLine's numbers plus the three
-// fields ADR-0014 authorised, and nothing else. The struct IS the allowlist —
-// see the INV-2 section in this file's doc comment for what each field costs and
-// which one egresses.
+// fields that decision authorised, and nothing else. The struct IS the allowlist
+// — see the INV-2 section in this file's doc comment for what each field costs
+// and which one egresses.
 type turnLine struct {
 	// Timestamp is parsed to a time.Time to compute the turn's duration_ms and
 	// then DISCARDED. The string never reaches an event, metadata, or the wire —
@@ -127,16 +115,16 @@ type turnLine struct {
 		// rewriting it would fabricate an attribution.
 		Model string `json:"model"`
 		// Content is the message's content blocks, bound as RAW JSON and decoded
-		// no further than thinkingFrom needs (the ADR-0014 amendment,
+		// no further than thinkingFrom needs (that decision amendment,
 		// 2026-08-25). Two reasons it is a RawMessage rather than a typed slice:
 		//
-		//  1. Correctness. `message.content` is a STRING on user lines and an
-		//     ARRAY on assistant ones. A typed slice fails the whole line's
-		//     unmarshal on a string, which would silently drop that line's token
-		//     counts — a finops regression with no error anywhere.
-		//  2. Scope. Decoding on demand keeps every sibling block type (`text`,
-		//     `tool_use`, `tool_result`) unreachable rather than merely unused,
-		//     which is what the amendment authorised and no more.
+		// 1. Correctness. `message.content` is a STRING on user lines and an
+		// ARRAY on assistant ones. A typed slice fails the whole line's
+		// unmarshal on a string, which would silently drop that line's token
+		// counts — a finops regression with no error anywhere. 2. Scope.
+		// Decoding on demand keeps every sibling block type (`text`, `tool_use`,
+		// `tool_result`) unreachable rather than merely unused, which is what
+		// the amendment authorised and no more.
 		Content json.RawMessage `json:"content"`
 		Usage   *usageNumbers   `json:"usage"`
 	} `json:"message"`
@@ -244,8 +232,8 @@ type turnWindow struct {
 	// window without it is not a turn worth emitting.
 	HasUsage bool
 	// Thinking is the window's `thinking` content blocks, concatenated in file
-	// order and bounded at maxThinkingBytes (the ADR-0014 amendment). It is the
-	// first genuinely free-form CONTENT string this projection lifts.
+	// order and bounded at maxThinkingBytes. It is the first genuinely free-form
+	// CONTENT string this projection lifts.
 	//
 	// The lift is deliberately UNGATED and the gate sits at attachment
 	// (Mapper.MapTurn's CaptureContent, then the client's stripContent). Gating

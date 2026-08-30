@@ -131,7 +131,7 @@ func TestMap_LifecycleAndToolEvents(t *testing.T) {
 				t.Errorf("expected span %+v, got nil", tt.wantSpan)
 			case tt.wantSpan != nil:
 				// DeepEqual, not !=: Span carries maps since the gateway's
-				// header capture (ADR-0021), so it is no longer comparable.
+				// header capture, so it is no longer comparable.
 				if !reflect.DeepEqual(*got.Span, *tt.wantSpan) {
 					t.Errorf("span = %+v, want %+v", *got.Span, *tt.wantSpan)
 				}
@@ -142,12 +142,12 @@ func TestMap_LifecycleAndToolEvents(t *testing.T) {
 
 // TestMap_NoContentLeak is the content-gate guard: with capture OFF (testMapper's
 // default), content present in a hook's tool_input must not appear anywhere in
-// the emitted event — not in metadata, not in tool.name, not in a span body.
-// Only the structural file_path is carried.
+// the emitted event — not in metadata, not in tool.name, not in a span body. Only
+// the structural file_path is carried.
 //
-// It was the SL3-SEC-3 guard, which held UNCONDITIONALLY. ADR-0019 P1 retired
-// that guarantee; what survives is this half, and it is now the posture
-// assertion rather than a structural one. The capture-ON half is
+// It was the SL3-SEC-3 guard, which held UNCONDITIONALLY. That decision retired
+// that guarantee; what survives is this half, and it is now the posture assertion
+// rather than a structural one. The capture-ON half is
 // TestMap_ToolOutputIsGatedOnContentCapture and conformance C36.
 func TestMap_NoContentLeak(t *testing.T) {
 	m := testMapper()
@@ -318,8 +318,8 @@ func TestSplitMCPName(t *testing.T) {
 	}
 }
 
-// The assistant-turn content attach (ADR-0018 Decision 2). Three conditions,
-// all required; this asserts each one alone is enough to withhold the text.
+// The assistant-turn content attach. Three conditions, all required; this
+// asserts each one alone is enough to withhold the text.
 func TestMapTurn_AssistantTextIsGatedOnContentCapture(t *testing.T) {
 	const answer = "I refactored the spool."
 	window := turnWindow{HasUsage: true, Model: "claude-opus-4-8"}
@@ -374,8 +374,8 @@ func TestMapTurn_StartedHalfNeverCarriesText(t *testing.T) {
 
 // Redaction is a COLLABORATOR, so every attach path goes through it by
 // construction rather than by remembering to call it. A nil redactor is the
-// secret_detection:false case: the text egresses unredacted, which ADR-0018
-// states rather than hides.
+// secret_detection:false case: the text egresses unredacted, which that
+// decision states rather than hides.
 func TestMapTurn_RedactionIsStructural(t *testing.T) {
 	const secret = "${OPENBOX_REDACTED_AWS_KEY}"
 	window := turnWindow{HasUsage: true}
@@ -406,9 +406,9 @@ func TestMapTurn_RedactionIsStructural(t *testing.T) {
 	}
 }
 
-// The outcome derivation (ADR-0018 Decision 1). It is structural: which hook
-// fired IS the answer, so these tests assert the mapping and — more importantly
-// — that nothing was read out of the tool's own output to get there.
+// The outcome derivation. It is structural: which hook fired IS the answer, so
+// these tests assert the mapping and — more importantly — that nothing was read
+// out of the tool's own output to get there.
 func TestMap_ToolStatusIsDerivedFromWhichHookFired(t *testing.T) {
 	m := testMapper()
 
@@ -458,10 +458,10 @@ func TestMap_LifecycleEventsCarryNoStatus(t *testing.T) {
 }
 
 // `status` is STRUCTURAL: it is derived from which hook fired, never parsed out
-// of what the tool produced. ADR-0019 P1 binds tool_response as gated content,
-// which makes the distinction testable rather than structural — so this asserts
-// it on the axis that still holds: the outcome is identical whether or not the
-// hook carried any output at all.
+// of what the tool produced. That decision binds tool_response as gated
+// content, which makes the distinction testable rather than structural — so
+// this asserts it on the axis that still holds: the outcome is identical
+// whether or not the hook carried any output at all.
 //
 // It used to assert that a tool_response sentinel was absent from the event
 // while never putting one in the payload, so it proved nothing on that axis and
@@ -533,7 +533,7 @@ func TestMap_ToolOutputIsGatedOnContentCapture(t *testing.T) {
 		t.Fatalf("capture on: tool output not carried on Content.ToolOutput, got %+v", got.Content)
 	}
 	// It must NOT land on Output — that field carries the assistant's turn text
-	// (ADR-0018) and feeds core's goal-alignment extractor.
+	// and feeds core's goal-alignment extractor.
 	if got.Content.Output != "" {
 		t.Errorf("tool output landed on Content.Output, which carries TURN text: %q",
 			got.Content.Output)
@@ -648,13 +648,13 @@ func TestMap_LifecycleSignals(t *testing.T) {
 // `error` is the same JSON key on TWO hooks: a closed enum on StopFailure, and
 // free text a tool wrote on PostToolUseFailure. One binding decodes both, so
 // what keeps the free text off the wire is the allowlist — an allowlist, not an
-// impossibility (the ADR-0014 distinction), which is why it is pinned here
+// impossibility (that decision distinction), which is why it is pinned here
 // rather than left to a comment.
 func TestMap_FreeTextErrorNeverEgresses(t *testing.T) {
 	m := testMapper() // content capture OFF
 	const leaky = "ENOENT: no such file /home/dev/.ssh/id_rsa"
 
-	// On the failure hook the field is gated content since ADR-0019 P1: with
+	// On the failure hook the field is gated content since that decision: with
 	// capture off it is read but never copied onto the event, exactly like the
 	// prompt. The name of this test still holds for the field that matters —
 	// metadata.error_type, the UNGATED enum — which is asserted below.

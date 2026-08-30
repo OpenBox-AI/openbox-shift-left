@@ -605,18 +605,18 @@
 
 <!-- ══════════════ 2. SETUP ══════════════ -->
 <div id="s2" class="sec-head"><span class="num">02</span><span class="ttl">Setup — two commands, then forget it</span></div>
-<p class="sec-sub">Setup deliberately splits machine identity from project wiring (ADR-0015/0016). You authenticate a machine once; you initialize each project you want governed.</p>
+<p class="sec-sub">Setup deliberately splits machine identity from project wiring (that decision/0016). You authenticate a machine once; you initialize each project you want governed.</p>
 
 <div class="card-grid">
   <div class="ve-card ve-card--ink animate" style="--i:0">
     <div class="ve-card__label">once per machine</div>
     <span class="cmd"><span class="p">$</span> openbox auth</span>
-    <div class="mini-body">Registers (or reuses) this machine as an OpenBox agent. Writes <strong>two files with one job each</strong>: <code>~/.openbox/.env</code> holds secrets — the runtime key and signing key, plaintext, <code>0600</code> on macOS/Linux, deliberately (ADR-0015) — and <code>~/.openbox/dev.json</code> holds coordinates: your DID, agent id, backend URL. A DID in <code>.env</code> is ignored by design.</div>
+    <div class="mini-body">Registers (or reuses) this machine as an OpenBox agent. Writes <strong>two files with one job each</strong>: <code>~/.openbox/.env</code> holds secrets — the runtime key and signing key, plaintext, <code>0600</code> on macOS/Linux, deliberately — and <code>~/.openbox/dev.json</code> holds coordinates: your DID, agent id, backend URL. A DID in <code>.env</code> is ignored by design.</div>
   </div>
   <div class="ve-card ve-card--green animate" style="--i:1">
     <div class="ve-card__label">once per project</div>
     <span class="cmd"><span class="p">$</span> openbox init --provider claude-code</span>
-    <div class="mini-body">Installs the 11 hook registrations into the project's <code>.claude/settings.json</code> (project scope, enforce ON — both defaults, ADR-0016) and writes posture. It only ever touches entries it owns — ownership is decided by argv shape, and stale registrations from old installs are replaced, never duplicated. <span class="tag-plan">full-capture plan</span> Also writes the gateway routing (<code>ANTHROPIC_BASE_URL</code>, <code>ANTHROPIC_AUTH_TOKEN</code>) at <strong>user scope</strong>, because project files can't carry it; fleets distribute the same block via managed settings.</div>
+    <div class="mini-body">Installs the 11 hook registrations into the project's <code>.claude/settings.json</code> (project scope, enforce ON — both defaults) and writes posture. It only ever touches entries it owns — ownership is decided by argv shape, and stale registrations from old installs are replaced, never duplicated. <span class="tag-plan">full-capture plan</span> Also writes the gateway routing (<code>ANTHROPIC_BASE_URL</code>, <code>ANTHROPIC_AUTH_TOKEN</code>) at <strong>user scope</strong>, because project files can't carry it; fleets distribute the same block via managed settings.</div>
   </div>
   <div class="ve-card ve-card--teal animate" style="--i:2">
     <div class="ve-card__label">when something looks off</div>
@@ -689,12 +689,12 @@ flowchart TD
 <p class="diagram-shell__hint">Ctrl/Cmd + wheel to zoom &middot; drag to pan &middot; double-click to fit &middot; &#x26F6; for fullscreen.</p>
 
 <div class="ve-card ve-card--recessed">
-  <div class="mini-body"><strong>Architecture in one line:</strong> a provider-agnostic engine (<code>adapters/common/hookflow</code>) plus one thin adapter per tool behind a normalized event contract (<code>contracts/dev-event</code>). Adding a tool is an adapter, not an engine change. The gateway is deliberately <em>not</em> a second decider: like the hooks, it asks <code>/evaluate</code> and does what it's told (ADR-0017's rule — local code never second-guesses the policy engine).</div>
+  <div class="mini-body"><strong>Architecture in one line:</strong> a provider-agnostic engine (<code>adapters/common/hookflow</code>) plus one thin adapter per tool behind a normalized event contract (<code>contracts/dev-event</code>). Adding a tool is an adapter, not an engine change. The gateway is deliberately <em>not</em> a second decider: like the hooks, it asks <code>/evaluate</code> and does what it's told (that decision's rule — local code never second-guesses the policy engine).</div>
 </div>
 
 <!-- ══════════════ 4. ONE GOVERNED TURN ══════════════ -->
 <div id="s4" class="sec-head"><span class="num">04</span><span class="ttl">One governed turn, end to end</span></div>
-<p class="sec-sub">What actually happens when you send a prompt that leads to a gated tool call. Numbers 1–3 are the prompt gate (ADR-0020), 4–11 the model path <span class="tag-plan">full-capture plan</span>, 12–15 a tool approval, 16–19 the telemetry that closes the turn.</p>
+<p class="sec-sub">What actually happens when you send a prompt that leads to a gated tool call. Numbers 1–3 are the prompt gate, 4–11 the model path <span class="tag-plan">full-capture plan</span>, 12–15 a tool approval, 16–19 the telemetry that closes the turn.</p>
 
 <section class="diagram-shell">
   <div class="mermaid-wrap">
@@ -744,8 +744,8 @@ sequenceDiagram
   <div class="ve-card animate" style="--i:0">
     <div class="ve-card__label">what the events become</div>
     <ul class="node-list">
-      <li>Tool call/result → <code>ActivityStarted</code>/<code>ActivityCompleted</code>, span-less (ADR-0013), with <code>status: completed|failed</code></li>
-      <li>Model turn → an <code>llm_completion</code> activity pair with token usage + model id (ADR-0014), the assistant text on one span (ADR-0018)</li>
+      <li>Tool call/result → <code>ActivityStarted</code>/<code>ActivityCompleted</code>, span-less, with <code>status: completed|failed</code></li>
+      <li>Model turn → an <code>llm_completion</code> activity pair with token usage + model id, the assistant text on one span </li>
       <li>Denials, subagent starts, API errors → metadata-only signals — never <code>signal_args</code>, which core would read as a new user goal</li>
       <li><span class="tag-plan">full-capture plan</span> Model request/response → <code>SpanData</code> with <code>request_headers</code>, <code>response_headers</code>, bodies, <code>http_*</code></li>
     </ul>
@@ -763,7 +763,7 @@ sequenceDiagram
 
 <!-- ══════════════ 5. WHAT GETS CAPTURED ══════════════ -->
 <div id="s5" class="sec-head"><span class="num">05</span><span class="ttl">What gets captured</span></div>
-<p class="sec-sub">Full capture is the org's default posture — an owner decision (ADR-0019). One gate governs all content classes: <code>content_capture</code>, ON by default. Everything content-bearing is secret-scanned and redacted locally before it leaves your machine, then capped at 64KB.</p>
+<p class="sec-sub">Full capture is the org's default posture — an owner decision. One gate governs all content classes: <code>content_capture</code>, ON by default. Everything content-bearing is secret-scanned and redacted locally before it leaves your machine, then capped at 64KB.</p>
 
 <div class="table-wrap">
   <div class="table-scroll">
@@ -785,13 +785,13 @@ sequenceDiagram
         </tr>
         <tr>
           <td class="mid">Assistant reply</td>
-          <td class="wide">One span on the turn's <code>TurnCompleted</code> (ADR-0018)</td>
+          <td class="wide">One span on the turn's <code>TurnCompleted</code> </td>
           <td><span class="status status--on">on</span></td>
           <td class="mid">content gate · redact · cap</td>
         </tr>
         <tr>
           <td class="mid">Thinking <span class="tag-plan">plan</span></td>
-          <td class="wide">Turn <code>activity_output</code>, lifted from the session transcript <small>content Anthropic's own telemetry always redacts — capturing it is a signed org decision (ADR-0014 amendment)</small></td>
+          <td class="wide">Turn <code>activity_output</code>, lifted from the session transcript <small>content Anthropic's own telemetry always redacts — capturing it is a signed org decision </small></td>
           <td><span class="status status--on">on</span></td>
           <td class="mid">content gate · redact · cap</td>
         </tr>
@@ -821,7 +821,7 @@ sequenceDiagram
         </tr>
         <tr>
           <td class="mid">Token usage + model id</td>
-          <td class="wide">Turn <code>activity_output</code>: four counts + model (ADR-0014) — feeds finops and goal alignment</td>
+          <td class="wide">Turn <code>activity_output</code>: four counts + model — feeds finops and goal alignment</td>
           <td><span class="status status--on">on</span></td>
           <td class="mid"><code>finops</code> gate (separate)</td>
         </tr>
@@ -851,13 +851,13 @@ sequenceDiagram
 
 <!-- ══════════════ 6. WHAT CAN STOP YOU ══════════════ -->
 <div id="s6" class="sec-head"><span class="num">06</span><span class="ttl">What can stop you — enforcement</span></div>
-<p class="sec-sub">Every verdict comes from the control plane (<code>/evaluate</code> is the only decider — ADR-0017 deleted the local policy engine on purpose). Your machine renders verdicts; it never makes them. Four levers, in the order you'd meet them:</p>
+<p class="sec-sub">Every verdict comes from the control plane (<code>/evaluate</code> is the only decider — that decision deleted the local policy engine on purpose). Your machine renders verdicts; it never makes them. Four levers, in the order you'd meet them:</p>
 
 <div class="card-grid">
   <div class="ve-card ve-card--ink animate" style="--i:0">
     <div class="ve-card__label">1 · prompt gate</div>
     <div class="mini-title">Your prompt is evaluated before the agent sees it</div>
-    <div class="mini-body"><code>UserPromptSubmit</code> runs the same gate as tool calls (ADR-0020). <strong>BLOCK</strong> erases the prompt with a reason; <strong>HALT</strong> ends the session on the spot.</div>
+    <div class="mini-body"><code>UserPromptSubmit</code> runs the same gate as tool calls. <strong>BLOCK</strong> erases the prompt with a reason; <strong>HALT</strong> ends the session on the spot.</div>
   </div>
   <div class="ve-card ve-card--teal animate" style="--i:1">
     <div class="ve-card__label">2 · tool gate</div>
@@ -867,28 +867,28 @@ sequenceDiagram
   <div class="ve-card ve-card--amber animate" style="--i:2">
     <div class="ve-card__label">3 · approvals</div>
     <div class="mini-title">REQUIRE_APPROVAL holds, then resumes</div>
-    <div class="mini-body">The call parks while a human — or the autonomous approver (ADR-0012) — decides; the rewake watcher resumes the session on a decision. Approval identity is deliberately conservative: shell and MCP approvals survive a retry, every other class re-asks. Over-ask, never over-grant.</div>
+    <div class="mini-body">The call parks while a human — or the autonomous approver — decides; the rewake watcher resumes the session on a decision. Approval identity is deliberately conservative: shell and MCP approvals survive a retry, every other class re-asks. Over-ask, never over-grant.</div>
   </div>
   <div class="ve-card ve-card--red animate" style="--i:3">
     <div class="ve-card__label">4 · halt</div>
     <div class="mini-title">HALT ends the session — and keeps it ended</div>
-    <div class="mini-body">A server HALT stops the turn and writes a local latch: every later gated hook in that session is refused with no re-evaluation, resume included (ADR-0020). On Codex, HALT renders as a deny (session kill is a follow-up).</div>
+    <div class="mini-body">A server HALT stops the turn and writes a local latch: every later gated hook in that session is refused with no re-evaluation, resume included. On Codex, HALT renders as a deny (session kill is a follow-up).</div>
   </div>
   <div class="ve-card ve-card--green animate" style="--i:4">
     <div class="ve-card__label">5 · model-call gate <span class="tag-plan" style="margin-left:6px">full-capture plan</span></div>
     <div class="mini-title">A model call can be refused before it leaves the machine</div>
-    <div class="mini-body">The gateway asks <code>/evaluate</code> for policy-marked calls and refuses on verdict — with a response shape chosen so the tool surfaces the reason instead of retrying. The gateway can forward or refuse, nothing in between: it never rewrites or sanitizes a request (inspect-without-modifying, ADR-0021).</div>
+    <div class="mini-body">The gateway asks <code>/evaluate</code> for policy-marked calls and refuses on verdict — with a response shape chosen so the tool surfaces the reason instead of retrying. The gateway can forward or refuse, nothing in between: it never rewrites or sanitizes a request (inspect-without-modifying).</div>
   </div>
   <div class="ve-card animate" style="--i:5">
     <div class="ve-card__label">the trade you accepted</div>
     <div class="mini-title">Availability inversion</div>
-    <div class="mini-body">With the gateway holding the org's provider credential, bypass fails — no gateway, no key, no model access. The flip side is deliberate: <strong>a gateway outage stops development</strong>. Tamper-resistance and fail-open are mutually exclusive; the org signed this trade in ADR-0021.</div>
+    <div class="mini-body">With the gateway holding the org's provider credential, bypass fails — no gateway, no key, no model access. The flip side is deliberate: <strong>a gateway outage stops development</strong>. Tamper-resistance and fail-open are mutually exclusive; the org signed this trade in.</div>
   </div>
 </div>
 
 <!-- ══════════════ 7. LINEAGE ══════════════ -->
 <div id="s7" class="sec-head"><span class="num">07</span><span class="ttl">Proving it happened — lineage</span></div>
-<p class="sec-sub">Governance that stops at the session boundary can't answer "which deploy contains agent-written code?" The lineage chain does (ADR-0010, <code>actions/openbox-git-action</code>):</p>
+<p class="sec-sub">Governance that stops at the session boundary can't answer "which deploy contains agent-written code?" The lineage chain does (that decision, <code>actions/openbox-git-action</code>):</p>
 
 <div class="ve-card">
   <div class="pipeline">
@@ -925,7 +925,7 @@ sequenceDiagram
 </div>
 
 <div class="callout callout--info" style="margin-top:16px">
-  <strong>What the signature proves — and doesn't:</strong> the signing key lives in a file readable by anything running as you, including the governed agent itself. Attestation therefore proves <em>origin of configuration</em>, not tamper-resistance (ADR-0015). Tamper-resistance for model calls comes from credential custody at the gateway, not from this key.
+  <strong>What the signature proves — and doesn't:</strong> the signing key lives in a file readable by anything running as you, including the governed agent itself. Attestation therefore proves <em>origin of configuration</em>, not tamper-resistance. Tamper-resistance for model calls comes from credential custody at the gateway, not from this key.
 </div>
 
 <!-- ══════════════ 8. LIMITS ══════════════ -->
@@ -960,7 +960,7 @@ sequenceDiagram
         <tr><td class="mid"><code>openbox auth</code></td><td class="wide">Authenticate this machine; write <code>~/.openbox/.env</code> + <code>dev.json</code></td><td><span class="status status--ink">once</span></td></tr>
         <tr><td class="mid"><code>openbox init --provider claude-code</code></td><td class="wide">Install hooks + posture in this project (also <code>--provider codex</code>); re-run after upgrades — new hooks and gateway config need a re-init</td><td><span class="status status--ink">per project</span></td></tr>
         <tr><td class="mid"><code>openbox doctor</code></td><td class="wide">Diagnose: credentials, reachability, scope, duplicate engines, bypass exposure</td><td><span class="status status--gated">on demand</span></td></tr>
-        <tr><td class="mid"><code>openbox approve</code></td><td class="wide">Approver side of the loop — list and decide held calls (the autonomous approver automates this, ADR-0012)</td><td><span class="status status--gated">approvers</span></td></tr>
+        <tr><td class="mid"><code>openbox approve</code></td><td class="wide">Approver side of the loop — list and decide held calls (the autonomous approver automates this)</td><td><span class="status status--gated">approvers</span></td></tr>
         <tr><td class="mid"><code>openbox gateway</code> <span class="tag-plan">plan</span></td><td class="wide">Run the model-path gateway service (org infra, not per-developer)</td><td><span class="status status--gated">org infra</span></td></tr>
         <tr><td class="mid"><code>openbox hook</code> / <code>openbox rewake</code></td><td class="wide">Internal — invoked by the coding tool's hook registrations, never by you</td><td><span class="status status--warn">internal</span></td></tr>
       </tbody>
@@ -1004,7 +1004,7 @@ sequenceDiagram
 
 <!-- ══════════════ 10. REPO MAP ══════════════ -->
 <div id="s10" class="sec-head"><span class="num">10</span><span class="ttl">Where things live</span></div>
-<p class="sec-sub">Eleven Go modules under one workspace (twelve with the gateway), tied together by <code>go.work</code> (ADR-0011). The history lives in git and <code>docs/adr/</code> — read ADRs for <em>why</em>, code for <em>what is true now</em>.</p>
+<p class="sec-sub">Eleven Go modules under one workspace (twelve with the gateway), tied together by <code>go.work</code>. The history lives in git and <code></code> — read decision records for <em>why</em>, code for <em>what is true now</em>.</p>
 
 <pre class="dir-tree">openbox-shift-left/
 ├── <span class="hl">provider/</span>                    <span class="ann">— the SPI: Installer + HookEngine</span>
@@ -1022,14 +1022,14 @@ sequenceDiagram
 ├── contracts/dev-event/           <span class="ann">— event schema v1.x, wire mapping, conformance</span>
 ├── actions/openbox-git-action/    <span class="ann">— commit → deploy lineage for CI</span>
 ├── testbed/                       <span class="ann">— mock-free e2e against a real local stack</span>
-└── docs/                          <span class="ann">— architecture, data-and-privacy, ADRs 0001–0021</span></pre>
+└── docs/ <span class="ann">— architecture, data-and-privacy, decision records 0001–0021</span></pre>
 
 <div class="callout callout--info">
   <strong>The repo's evidence culture, in one sentence:</strong> unit tests are not evidence that a hook works — <code>testbed/run-all.sh</code> drives real headless sessions against a real local stack and asserts what actually arrived, and every feature's docs say plainly which claims that run has and hasn't yet proven.
 </div>
 
 <p class="footnote">
-  Sources: CLAUDE.md, docs/architecture.md, docs/data-and-privacy.md, ADR-0010–0021, contracts/dev-event, plan 260825-0027 (full-capture) and its review.
+  Sources: CLAUDE.md, docs/architecture.md, docs/data-and-privacy.md, that decision–0021, contracts/dev-event, plan 260825-0027 (full-capture) and its review.
   Items tagged <span class="tag-plan" style="vertical-align:0">full-capture plan</span> describe that plan's target state — everything else is shipped today.
   Draft README source — verify tagged items against the tree before publishing. Generated 2026-08-25.
 </p>

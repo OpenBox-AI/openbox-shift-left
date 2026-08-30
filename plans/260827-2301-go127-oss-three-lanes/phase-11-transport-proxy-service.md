@@ -3,14 +3,14 @@
 ## Context links
 
 - Parent: [plan.md](plan.md) · Depends: [phase-10](phase-10-telemetry-mappers.md)
-  (contract from [phase-08](phase-08-adr-contract-decision.md); sequenced after the
+  (contract from [phase-08](phase-08-contract-decision.md); sequenced after the
   telemetry lane by validation ruling 2026-08-27 — not parallel) and
   [phase-04](phase-04-launchd-service-lifecycle.md) (service lifecycle)
 - Scout: [scout-01](scout/scout-01-gateway-service-lifecycle.md)
 - Rulings: **OD2 (2026-08-27)** — product, not lab; native service, not Docker;
-  one command in, one command out. Formally reverses ADR-0021 §5.
-  **D-OSS-1** — the CONNECT/TLS/CA front-end is `github.com/elazarl/goproxy`
-  (latest under D-GO-1), not hand-rolled.
+one command in, one command out. Formally reverses. **D-OSS-1** — the
+CONNECT/TLS/CA front-end is `github.com/elazarl/goproxy` (latest under
+D-GO-1), not hand-rolled.
 
 ## Overview
 
@@ -76,7 +76,7 @@ Three amendments to this phase as written, from the spike:
 
 ## Key insights
 
-- **This is a deliberate, owner-ruled reversal of a standing ADR.** ADR-0021 §5
+- **This is a deliberate, owner-ruled reversal of a standing decision record.**
   rejected MITM because a substituting gateway bought the same assurance; §8 then
   measured that it does not (desktop ignores base-url). The premise changed; the
   ruling followed. Phase 08 records it — the code must not be the only place the
@@ -265,10 +265,10 @@ goproxy's hooks to the capture path, config, service wiring.
 ## Security considerations
 
 - This phase creates the highest-value secret this product has held on a developer
-  machine after the signing key: **a CA that can impersonate the provider to this
-  host**. It lives under the same trust boundary as `~/.openbox/.env` (ADR-0015):
-  anything running as the developer can read it, including the agent being governed.
-  Say so in `docs/data-and-privacy.md` (phase 14) — do not let a doc imply otherwise.
+machine after the signing key: **a CA that can impersonate the provider to this
+host**. It lives under the same trust boundary as `~/.openbox/.env` : anything
+running as the developer can read it, including the agent being governed. Say so in
+`docs/data-and-privacy.md` (phase 14) — do not let a doc imply otherwise.
 - Single-host interception is the bound that makes the ruling defensible. Widening
   the allowlist is a separate decision, not a config tweak.
 - Credential headers are redacted **by key name before the content gate is

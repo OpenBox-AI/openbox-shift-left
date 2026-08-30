@@ -35,9 +35,9 @@ whether OAuth traffic follows a *changed* value** — which is the entire questi
 It does mean the API-key half of P0 cannot run here without a key being supplied.
 
 **Consequence.** If OAuth does not redirect, pass-through covers API-key/console
-orgs only, and ADR-0021 plus the product docs must say so in those words. Track B
-still proceeds — this scopes the gateway tier, it does not cancel it (plan risk
-table).
+orgs only, and that decision plus the product docs must say so in those words.
+Track B still proceeds — this scopes the gateway tier, it does not cancel it
+(plan risk table).
 
 ### Headers observed (non-sensitive values verbatim)
 
@@ -186,8 +186,8 @@ three headers with source `"claude-code"`.
 - **P1 §2:** provider response headers — unresolvable from a throwaway server by
   construction; carried into phase 04.
 - **Is the local `oauthAccount` record trustworthy as evidence?** It is written by
-  the client this product governs and is readable and writable by anything running
-  as the developer (same posture ADR-0015 already concedes for the signing key).
-  So it is *evidence of origin-of-config*, not a tamper-resistant account claim —
-  the same honest limit the rest of this product states. ADR-0021's account rule
-  should say so rather than imply the local read is authoritative.
+the client this product governs and is readable and writable by anything running
+as the developer (same posture that decision already concedes for the signing
+key). So it is *evidence of origin-of-config*, not a tamper-resistant account
+claim — the same honest limit the rest of this product states. That decision's
+account rule should say so rather than imply the local read is authoritative.

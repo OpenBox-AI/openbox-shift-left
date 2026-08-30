@@ -6,9 +6,8 @@
 // shares, recorded sessions and tmux buffers, and — because a credential is
 // typed rather than passed as a flag — off argv and out of shell history
 // (INV-1). It does NOT protect the value at rest. The next thing that happens
-// to it is being written to a plaintext file, by design
-// (docs/adr/ADR-0015-plaintext-credential-file.md). A masked prompt is not
-// evidence of a protected secret.
+// to it is being written to a plaintext file, by design. A masked prompt is
+// not evidence of a protected secret.
 //
 // The interface exists because term.ReadPassword takes a raw file descriptor
 // rather than an io.Reader, so there is no way to test the real implementation

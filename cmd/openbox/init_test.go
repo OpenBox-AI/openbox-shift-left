@@ -67,7 +67,7 @@ func TestDevInitIsGone(t *testing.T) {
 		t.Error("an unknown dev subcommand succeeded")
 	}
 	// `verify` is the only surviving dev subcommand: `sync` went with the local
-	// policy bundle (ADR-0017), `init` moved to `openbox init`.
+	// policy bundle, `init` moved to `openbox init`.
 	if usage := errb2.String(); !strings.Contains(usage, "dev verify") || strings.Contains(usage, "sync") {
 		t.Errorf("dev usage must advertise verify and nothing else:\n%s", usage)
 	}

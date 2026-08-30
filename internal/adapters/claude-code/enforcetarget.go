@@ -26,38 +26,36 @@ func (t enforceTarget) DecisionRequest(localRedaction bool) decision.DecisionReq
 	return buildDecisionRequest(t.id, t.ev, localRedaction)
 }
 
-// DevEvent maps the call for the inline evaluation and attaches the content the
-// server needs to judge it.
+// DevEvent maps the call for the inline evaluation and attaches the content the server
+// needs to judge it.
 //
-// This used to be the ONLY place a tool's input reached an outbound event, and
-// the observe copy's emptiness was what made SL3-SEC-3 hold by construction.
-// ADR-0019 P1 retires that: Mapper.Map now attaches the same extract to the
-// observe copy under the content gate, and this method OVERWRITES it here.
+// This used to be the ONLY place a tool's input reached an outbound event, and the
+// observe copy's emptiness was what made SL3-SEC-3 hold by construction. That decision
+// retires that: Mapper.Map now attaches the same extract to the observe copy under the
+// content gate, and this method OVERWRITES it here.
 //
 // **What is attached differs by class, and the difference is not cosmetic:**
 //
-//   - A FILE write carries the REDACTED body — rebuilt through the same
-//     RedactToolInput the tool-call rewrite uses, from the same detection
-//     result, so the server judges exactly the bytes the developer's file was
-//     written with. That is why the overwrite exists at all.
-//   - A SHELL or MCP call carries the command/arguments VERBATIM. buildDecisionRequest
-//     populates DecisionRequest.Content only for a file semantic, so `redacted`
-//     is nil here for these classes and no rebuild happens. A token on a `curl`
-//     command line reaches /evaluate in the clear.
+// - A FILE write carries the REDACTED body — rebuilt through the same RedactToolInput
+// the tool-call rewrite uses, from the same detection result, so the server judges
+// exactly the bytes the developer's file was written with. That is why the overwrite
+// exists at all. - A SHELL or MCP call carries the command/arguments VERBATIM.
+// buildDecisionRequest populates DecisionRequest.Content only for a file semantic, so
+// `redacted` is nil here for these classes and no rebuild happens. A token on a `curl`
+// command line reaches /evaluate in the clear.
 //
-// That asymmetry predates ADR-0019 and is arguably deliberate — a policy matching
-// on a dangerous command should see the true command, and unlike a file body
-// nothing here is replayed into the developer's machine. But ADR-0019 makes it
-// VISIBLE in a new way: the observe copy of the very same call now runs the text
-// redactor (Mapper.Map), so ordinary telemetry is better protected than the copy
-// sent for a governance decision. Recorded, not silently fixed — changing it
-// changes what policy can match on, which is an owner decision, not a cleanup.
+// That asymmetry predates that decision and is arguably deliberate — a policy matching
+// on a dangerous command should see the true command, and unlike a file body nothing
+// here is replayed into the developer's machine. But that decision makes it VISIBLE in
+// a new way: the observe copy of the very same call now runs the text redactor
+// (Mapper.Map), so ordinary telemetry is better protected than the copy sent for a
+// governance decision. Recorded, not silently fixed — changing it changes what policy
+// can match on, which is an owner decision, not a cleanup.
 //
-// Evaluation is a different question from telemetry. The org has asked OpenBox
-// to decide about this call; it cannot decide on content it cannot see.
-// Content-gated all the same — the client's stripContent drops it when the org
-// has content capture off (INV-2 at the choke point, not by adapter
-// convention).
+// Evaluation is a different question from telemetry. The org has asked OpenBox to
+// decide about this call; it cannot decide on content it cannot see. Content-gated all
+// the same — the client's stripContent drops it when the org has content capture off
+// (INV-2 at the choke point, not by adapter convention).
 func (t enforceTarget) DevEvent(redacted *client.Content) (client.DevEvent, bool) {
 	ev, ok := t.mapper.Map(HookPreToolUse, t.ev)
 	if !ok {
@@ -73,24 +71,24 @@ func (t enforceTarget) DevEvent(redacted *client.Content) (client.DevEvent, bool
 // command for a shell tool, the arguments for an MCP one, the file body for a
 // write.
 //
-// It covered only shell and MCP while those were the only escalated classes.
-// ADR-0017 evaluates every gated class, so a Write's content is attached now —
-// which is a real change in what leaves the machine, disclosed in the ADR and
-// gated on content capture.
+// It covered only shell and MCP while those were the only escalated classes. That
+// decision evaluates every gated class, so a Write's content is attached now —
+// which is a real change in what leaves the machine, disclosed in that decision
+// and gated on content capture.
 //
 // **Redaction happens first, and this returns the redacted bytes.** The body is
 // rebuilt through the same RedactToolInput the tool-call rewrite uses, from the
 // same detection result, so the server judges exactly the text the developer's
-// tool was rewritten to — not the original, and not a second redaction that
-// could differ from it. When nothing was scanned or nothing matched, redacted is
-// nil and the original stands.
-// The bound is MaxRedactBody, not MaxCommandLen. MaxCommandLen (8 KiB) is
-// documented as bounding the LOCAL DecisionRequest command and being "never
-// egressed"; this string IS egressed, on Content.ToolInput, so using it here made
-// the gated copy 8x smaller than the 64KB every document describes — and tied
-// what the server can see to a constant chosen for local matching. MaxRedactBody
-// is the bound the observe copy already lands on (m.redact truncates there), so
-// the two copies of one call stay the same size as well as the same text.
+// tool was rewritten to — not the original, and not a second redaction that could
+// differ from it. When nothing was scanned or nothing matched, redacted is nil
+// and the original stands. The bound is MaxRedactBody, not MaxCommandLen.
+// MaxCommandLen (8 KiB) is documented as bounding the LOCAL DecisionRequest
+// command and being "never egressed"; this string IS egressed, on
+// Content.ToolInput, so using it here made the gated copy 8x smaller than the
+// 64KB every document describes — and tied what the server can see to a constant
+// chosen for local matching. MaxRedactBody is the bound the observe copy already
+// lands on (m.redact truncates there), so the two copies of one call stay the
+// same size as well as the same text.
 func evaluationContext(e *HookEvent, redacted *client.Content) string {
 	return hookflow.TruncateBytes(toolInputExtract(e, redacted), hookflow.MaxRedactBody)
 }

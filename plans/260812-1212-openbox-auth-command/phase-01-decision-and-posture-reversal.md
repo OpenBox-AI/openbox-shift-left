@@ -1,23 +1,24 @@
-# Phase 01 — ADR-0015 + ADR-0016 + docs: plaintext posture, install defaults
+# Phase 01 — that decision + that decision + docs: plaintext posture, install defaults
 
 ## Context links
 
 - Parent: [plan.md](plan.md)
 - Depends on: nothing. **Blocks every code phase** — it authorizes both reversals.
 - Repo rules: `CLAUDE.md` ("Cite sources in docs"; "prefer an honest limit over a
-  confident sentence"; a new posture needs an ADR)
+confident sentence"; a new posture needs a
+decision record)
 - Docs to change: `docs/data-and-privacy.md`, `docs/architecture.md`
   (`#assurance--what-the-evidence-proves`)
-- Prior ADRs: `docs/adr/ADR-0011..0014` ⇒ these are **ADR-0015** and **ADR-0016**
+- Prior decision records: `.0014` ⇒ these are **that decision** and **that decision**
 
 ## Overview
 
 - **Date:** 2026-08-12 (validated and expanded 2026-08-13)
-- **Description:** Two ADRs. **ADR-0015** reverses the "keychain default, halt
-  rather than fall back to plaintext" posture and records `golang.org/x/term` as
-  the repo's first external dependency. **ADR-0016** records what a bare
-  `openbox init` now does — project-local scope **and** enforce ON — and what each
-  default costs. Then make the user-facing docs true about both.
+- **Description:** Two decision records. **that decision** reverses the "keychain default, halt
+rather than fall back to plaintext" posture and records `golang.org/x/term` as the
+repo's first external dependency. **that decision** records what a bare `openbox
+init` now does — project-local scope **and** enforce ON — and what each default
+costs. Then make the user-facing docs true about both.
 - **Priority:** P1 — no code phase may land before this
 - **Implementation status:** implemented 2026-08-13
 - **Review status:** self-reviewed; awaiting code-reviewer
@@ -47,57 +48,57 @@
   secret lands in plaintext anyway, so masking defends against terminal
   scrollback, screen sharing and tmux buffers — not against disk access.
 - **The org control token is the bigger exposure, and it is easy to miss** (D3).
-  `.env` also holds `OPENBOX_CONTROL_TOKEN` on approver installs — an `obx_key_`
-  ORGANIZATION key that can create and rotate agents org-wide, keychain-protected
-  today (`approve.go:96-114` reads it from the store as a fallback). An agent seed
-  compromises one agent; this compromises the org's agent fleet. The ADR must name
-  it separately from the seed, not fold it into one sentence about "credentials".
+`.env` also holds `OPENBOX_CONTROL_TOKEN` on approver installs — an `obx_key_`
+ORGANIZATION key that can create and rotate agents org-wide, keychain-protected
+today (`approve.go:96-114` reads it from the store as a fallback). An agent seed
+compromises one agent; this compromises the org's agent fleet. That decision must
+name it separately from the seed, not fold it into one sentence about
+"credentials".
 - **Existing keychain credentials are stranded, by decision** (D1). Nothing reads
-  the keychain before it is deleted, so an existing macOS/Linux install must
-  `auth --rotate` (needs an org key) or re-register. The ADR states this as a
-  consequence rather than leaving a reader to discover it.
+the keychain before it is deleted, so an existing macOS/Linux install must
+`auth --rotate` (needs an org key) or re-register. That decision states this
+as a consequence rather than leaving a reader to discover it.
 - **Local-by-default scope is a governance regression on paper, and the honest
-  default in practice** (D6, ADR-0016). It leaves sessions in every other
-  directory ungoverned (`adapters/claude-code/localhooks.go:18`) — and today's
-  `--local-hooks` flag text calls project scope "LOCAL TESTING … never set this in
-  production". The argument for it anyway: `Install` **cannot** activate global
-  scope by itself; it only prints the `{"enabledPlugins": ["openbox-observe"]}`
-  snippet for managed settings (`installer.go:99-101`). So project-local is the
-  only scope the CLI can actually complete, and defaulting to it stops `init` from
-  claiming an activation it did not perform. Enterprise deployment stays managed
-  settings + global.
-- **Enforce-by-default reverses ADR-0006's observe default, and pairs naturally with
-  local scope.** The two are one decision — a governed *project* that actually
-  enforces is a coherent default, where a governed *machine* that silently enforces
-  would not be. Two honest mitigations belong in the ADR: enforcement is inert until
-  the org publishes a policy, and `fail_closed` stays off, so an OpenBox outage never
-  blocks a developer. The ADR must also record the mechanical precondition —
-  `Enforce` becomes `*bool` before the default flips, for the reason `Finops` did
-  (commit `42011e0`) — because a reader who sees the flip without that context will
-  reintroduce the silent-no-op bug the next time a default changes.
+default in practice** (D6). It leaves sessions in every other directory ungoverned
+(`adapters/claude-code/localhooks.go:18`) — and today's `--local-hooks` flag text
+calls project scope "LOCAL TESTING … never set this in production". The argument
+for it anyway: `Install` **cannot** activate global scope by itself; it only
+prints the `{"enabledPlugins": ["openbox-observe"]}` snippet for managed settings
+(`installer.go:99-101`). So project-local is the only scope the CLI can actually
+complete, and defaulting to it stops `init` from claiming an activation it did not
+perform. Enterprise deployment stays managed settings + global.
+- **Enforce-by-default reverses that decision's observe default, and pairs naturally with
+local scope.** The two are one decision — a governed *project* that actually enforces
+is a coherent default, where a governed *machine* that silently enforces would not
+be. Two honest mitigations belong in that decision: enforcement is inert until the
+org publishes a policy, and `fail_closed` stays off, so an OpenBox outage never
+blocks a developer. That decision must also record the mechanical precondition —
+`Enforce` becomes `*bool` before the default flips, for the reason `Finops` did
+(commit `42011e0`) — because a reader who sees the flip without that context will
+reintroduce the silent-no-op bug the next time a default changes.
 
 ## Requirements
 
-1. `docs/adr/ADR-0015-plaintext-credential-file.md` recording: the decision, the
+1.  recording: the decision, the
    context (cross-platform simplicity vs at-rest protection), what is deleted,
    consequences incl. the Windows asymmetry, and the rejected alternatives
    (keychain-default, DPAPI, Credential Manager) with why each was rejected.
-2. ADR-0015 names **two** distinct exposures, not one: the agent signing seed, and
+2. That decision names **two** distinct exposures, not one: the agent signing seed, and
    the org `OPENBOX_CONTROL_TOKEN` with its org-wide create/rotate authority (D3).
-3. ADR-0015 records that **existing keychain credentials are not migrated** (D1),
+3. That decision records that **existing keychain credentials are not migrated** (D1),
    and states the recovery path: `auth --rotate`, or re-register, or the manual
    keychain read documented in phase 8's migration note.
-4. ADR-0015 records the file split: `.env` holds secrets only, `dev.json` keeps the
+4. That decision records the file split: `.env` holds secrets only, `dev.json` keeps the
    non-secret coordinates (D2) — one store per field, and the reason (a second DID
    store is the bug class this avoids).
-5. `docs/adr/ADR-0016-default-install-posture.md` recording **both** defaults a bare
+5.  recording **both** defaults a bare
    `openbox init` now applies, because they are one decision — what an install does
    when the developer says nothing:
    - **project-local scope:** what stays ungoverned, and why local anyway (global
      cannot be self-activated — `installer.go:99-101`). Enterprise deployment is
      managed settings + `--scope global`. Alternatives rejected: default-global, and
      default-by-managed-config-presence.
-   - **enforce ON:** reversing ADR-0006's observe-by-default. Note that enforcement
+   - **enforce ON:** reversing that decision's observe-by-default. Note that enforcement
      is inert until the org publishes a policy, and that `fail_closed` stays **off**
      so an OpenBox outage still never blocks a developer. Record that `Enforce` had
      to become `*bool` first, for the reason `Finops` did (commit `42011e0`) — a
@@ -106,10 +107,10 @@
    - state explicitly that this flip covers **`enforce` only** — the `tier2` and
      `findings` fields keep whatever `init` writes today, because
      [inline policy evaluation](../260813-0140-inline-policy-evaluation/plan.md)
-     removes the tier concept and deprecates those fields. ADR-0016 should note that
-     ADR-0017 supersedes this area rather than describing a tier model that is about
+     removes the tier concept and deprecates those fields. That decision should note that
+     That decision supersedes this area rather than describing a tier model that is about
      to go.
-6. `docs/adr/README.md` index updated with both.
+6. `README.md` index updated with both.
 7. `docs/data-and-privacy.md` updated: credentials now live in a plaintext file;
    remove/replace any claim of OS-keychain protection.
 8. `docs/architecture.md#assurance--what-the-evidence-proves` gains two limits:
@@ -119,30 +120,30 @@
    of absence of activity.
 9. `cli/go.mod` + `go.sum` gain `golang.org/x/term` (and `golang.org/x/sys`
    transitively), pinned. `go.work.sum` updated.
-10. ADR-0015 records the dependency decision in the same document (one deliberate
+10. That decision records the dependency decision in the same document (one deliberate
     departure, not two).
 
 ## Architecture
 
-No code behaviour. Three artifacts: two ADRs, and truthful edits to two
-user-facing docs. `cli/go.mod` changes here so no later phase has to touch a
-module file that a parallel phase also edits.
+No code behaviour. Three artifacts: two decision records, and truthful edits
+to two user-facing docs. `cli/go.mod` changes here so no later phase has to
+touch a module file that a parallel phase also edits.
 
-Two ADRs rather than one long one because they answer different questions for
-different readers: ADR-0015 is "where do my credentials live and who can read them",
-ADR-0016 is "what does a bare `openbox init` do to my machine". The two install
-defaults share one document because they are one question — what happens when the
-developer says nothing.
+Two decision records rather than one long one because they answer different
+questions for different readers: that decision is "where do my credentials live and
+who can read them", that decision is "what does a bare `openbox init` do to my
+machine". The two install defaults share one document because they are one question
+— what happens when the developer says nothing.
 
 ## Related code files
 
 | Path | Why |
 |---|---|
-| `cli/internal/secret/file.go:12-32` | the posture being reversed, quoted in the ADR |
+| `cli/internal/secret/file.go:12-32` | the posture being reversed, quoted in that decision |
 | `cli/internal/secret/secret.go:13,30-32` | the HALT rationale being deleted |
-| `cli/cmd/openbox/approve.go:67,96-114` | the org token's current store-backed path, which ADR-0015 moves to plaintext |
-| `adapters/claude-code/localhooks.go:10-18` | "sessions in any other directory stay ungoverned" — quote it in ADR-0016 |
-| `adapters/claude-code/installer.go:90-101` | global activation is a printed snippet, not an action — ADR-0016's core argument |
+| `cli/cmd/openbox/approve.go:67,96-114` | the org token's current store-backed path, which that decision moves to plaintext |
+| `adapters/claude-code/localhooks.go:10-18` | "sessions in any other directory stay ungoverned" — quote it in that decision |
+| `adapters/claude-code/installer.go:90-101` | global activation is a printed snippet, not an action — that decision's core argument |
 | `docs/data-and-privacy.md` | must stop claiming keychain protection |
 | `docs/architecture.md` | assurance limits section |
 | `cli/go.mod`, `go.work.sum` | dependency pin |
@@ -150,18 +151,19 @@ developer says nothing.
 ## Implementation Steps
 
 1. Read `file.go:12-32` and `secret.go:1-35` and quote the exact prior rationale
-   in the ADR's Context — the ADR must argue against the real prior reasoning.
-2. Draft ADR-0015: Status accepted, Date 2026-08-12, Decision, Context,
+in that decision's Context — that decision must argue against the real prior
+reasoning.
+2. Draft that decision: Status accepted, Date 2026-08-12, Decision, Context,
    Consequences (incl. per-OS table), Alternatives rejected, and a
    "What this weakens" section naming **both** the seed and the org token, plus
    the stranded-keychain consequence and the two-file split.
 3. Add the dependency subsection: `x/term` for masked input + TTY detection,
    why no stdlib option works on Windows, and that storage needs no dependency.
-4. Draft ADR-0016 the same way: quote `localhooks.go:18` for what is ungoverned,
+4. Draft that decision the same way: quote `localhooks.go:18` for what is ungoverned,
    and `installer.go:99-101` for why global is not self-activating. Reject
    default-global (claims an activation it cannot perform) and
    default-on-managed-config-presence (two defaults to explain and test).
-5. Update `docs/adr/README.md` with both entries.
+5. Update `README.md` with both entries.
 6. Rewrite the credential-storage paragraphs of `docs/data-and-privacy.md`.
 7. Add both assurance limits to `docs/architecture.md`, matching the existing
    known-limits list style.
@@ -170,16 +172,16 @@ developer says nothing.
 
 ## Todo list
 
-- [x] ADR-0015 written, prior rationale quoted, alternatives recorded
-- [x] ADR-0015 names the org token separately from the seed
-- [x] ADR-0015 states the stranded-keychain consequence + recovery path
-- [x] ADR-0015 records the `.env`/`dev.json` split and why
-- [x] Dependency decision inside ADR-0015
-- [x] ADR-0016 written: scope default, what is ungoverned, why local anyway
-- [x] ADR-0016 covers the enforce default: the reversal of ADR-0006's observe
+- [x] that decision written, prior rationale quoted, alternatives recorded
+- [x] that decision names the org token separately from the seed
+- [x] that decision states the stranded-keychain consequence + recovery path
+- [x] that decision records the `.env`/`dev.json` split and why
+- [x] Dependency decision inside
+- [x] that decision written: scope default, what is ungoverned, why local anyway
+- [x] that decision covers the enforce default: the reversal of that decision's observe
       default, the two mitigations, the `*bool` precondition, and that the flip is
-      `enforce`-only because ADR-0017 removes the tier model
-- [x] `docs/adr/README.md` index updated with both
+      `enforce`-only because that decision removes the tier model
+- [x] `README.md` index updated with both
 - [x] `docs/data-and-privacy.md` no longer claims keychain protection
 - [x] `docs/architecture.md` gains both assurance limits
 - [x] `x/term` pinned; `cli` builds; `go.work.sum` updated
@@ -187,13 +189,13 @@ developer says nothing.
 ## Success Criteria
 
 - Grep for "keychain" across `docs/` returns no stale claim of protection.
-- ADR-0015 states the Windows asymmetry explicitly.
-- ADR-0015 makes the org-token exposure findable on its own — a reader searching
+- that decision states the Windows asymmetry explicitly.
+- that decision makes the org-token exposure findable on its own — a reader searching
   for `OPENBOX_CONTROL_TOKEN` lands on the escalation, not on a generic sentence.
-- ADR-0016 exists and a reader can answer both "why is my colleague's other project
+- that decision exists and a reader can answer both "why is my colleague's other project
   ungoverned?" and "why did a tool call just get blocked on a fresh install?" from it
   alone.
-- ADR-0016 states the `Enforce *bool` precondition explicitly enough that the next
+- that decision states the `Enforce *bool` precondition explicitly enough that the next
   person to flip a default does not repeat the plain-bool mistake.
 - `cd cli && go build ./...` green with the new pin.
 - A reader of `docs/data-and-privacy.md` can tell, without reading code, that the
@@ -203,12 +205,12 @@ developer says nothing.
 
 | Risk | L×I | Observable signal it broke | Pre-decided response |
 |---|---|---|---|
-| ADR written as a rubber stamp, not a real argument | M×M | ADR has no Alternatives section or does not quote the prior rationale | **Adjust:** rewrite. An ADR that does not engage the prior decision is worse than none. |
-| Org-token escalation folded into one sentence about "credentials" | M×H | grep for `OPENBOX_CONTROL_TOKEN` in ADR-0015 returns nothing | **Adjust:** it gets its own subsection. An org-wide credential in plaintext is a different decision from an agent seed in plaintext, and a reader must be able to find it. |
-| ADR-0016 reads as an excuse rather than a decision | M×M | it states the default without stating what is ungoverned | **Adjust:** rewrite. The regression is the point of the document; quote `localhooks.go:18` verbatim. |
+| decision record written as a rubber stamp, not a real argument | M×M | decision record has no Alternatives section or does not quote the prior rationale | **Adjust:** rewrite. a decision record that does not engage the prior decision is worse than none. |
+| Org-token escalation folded into one sentence about "credentials" | M×H | grep for `OPENBOX_CONTROL_TOKEN` in that decision returns nothing | **Adjust:** it gets its own subsection. An org-wide credential in plaintext is a different decision from an agent seed in plaintext, and a reader must be able to find it. |
+| that decision reads as an excuse rather than a decision | M×M | it states the default without stating what is ungoverned | **Adjust:** rewrite. The regression is the point of the document; quote `localhooks.go:18` verbatim. |
 | Docs updated optimistically, understating the weakening | M×H | reviewer cannot tell from docs that the seed is readable | **Stop and replan:** this is the exact failure `CLAUDE.md` names ("a governance product that overstates itself is the failure it exists to prevent"). |
-| `x/term` pulls more than `x/sys` | L×L | `go mod graph` shows extra nodes | **Adjust:** record the actual set in the ADR; if it is more than x/sys, re-evaluate masking vs no-masking before phase 4. |
-| Later phase needs a second dependency | L×M | phase 2-6 wants a dotenv or ACL library | **Stop:** amend ADR-0015 first. Dotenv parsing is hand-rolled by decision. |
+| `x/term` pulls more than `x/sys` | L×L | `go mod graph` shows extra nodes | **Adjust:** record the actual set in that decision; if it is more than x/sys, re-evaluate masking vs no-masking before phase 4. |
+| Later phase needs a second dependency | L×M | phase 2-6 wants a dotenv or ACL library | **Stop:** amend that decision first. Dotenv parsing is hand-rolled by decision. |
 
 ## Security Considerations
 

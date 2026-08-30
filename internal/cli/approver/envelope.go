@@ -47,7 +47,7 @@ const (
 // this answers "may a machine decide this request, and which way" with four
 // outcomes whose default must be *escalate*. Reusing a format whose unmatched
 // case means "allow" to express one whose unmatched case means "ask a human" is
-// exactly the kind of near-miss that makes a gate decorative (ADR-0012).
+// exactly the kind of near-miss that makes a gate decorative.
 type Envelope struct {
 	Version string `json:"version,omitempty"`
 

@@ -6,10 +6,10 @@ Date: 2026-08-13 · Driver: **maintenance cost** · Status: advice, not a plan
 
 3-tier enforce model costs more to maintain than it returns. Local Go evaluator
 duplicates backend OPA semantics (2,198 non-test LOC in `decision/`) under a
-**permanent parity obligation** ADR-0005 itself admits deviations from; **cannot
-evaluate raw rego at all** (`policysync.go:149` → silent fail-open); drags bundle
-sync + staleness + signing that backend hasn't finished (`require_verified_bundle`
-defaults off).
+**permanent parity obligation** That decision itself admits deviations from;
+**cannot evaluate raw rego at all** (`policysync.go:149` → silent fail-open);
+drags bundle sync + staleness + signing that backend hasn't finished
+(`require_verified_bundle` defaults off).
 
 ## Confirmed requirements
 
@@ -69,7 +69,7 @@ overstatement `CLAUDE.md` forbids.
 Session posture + `openbox doctor` report `bundle_version`, `bundle_integrity`,
 `policy_id`, `bundle_sha256` (`doctor.go:30-47`). No bundle ⇒ those fields vanish ⇒
 control plane loses "this endpoint runs policy X at epoch N" — a documented feature
-("posture as evidence"), and the point of ADR-0008.
+("posture as evidence"), and the point of.
 
 **Replacement required:** `/evaluate` returns policy identity/epoch; session posture
 reports the last-seen value. Not optional — without it this is a silent assurance
@@ -105,10 +105,11 @@ and *enforcement is the one place shift-left forked*. Collapsing to inline gives
   second implementation, no parity fuzzing;
 - the **Cursor adapter (next on the roadmap) gets enforcement for free** — no bundle
   plumbing to port;
-- ADR-0008 signed-bundle work becomes unnecessary here, deleting a workstream blocked
+- that decision signed-bundle work becomes unnecessary here, deleting a workstream blocked
   on the backend.
 
-Lead the ADR with this, not with LOC.
+Lead that decision with this, not with
+LOC.
 
 ## Easiest model for developers — three named features, zero numbers
 
@@ -156,8 +157,8 @@ enforce — findings are advisory feedback in both observe and enforce sessions.
 session from existing transcripts; compute added wall clock per session. Go/no-go, and
 the number that sets the timeout.
 
-**Phase 1 — ADR-0017.** Inline evaluation as the single decision path. Retire ADR-0005
-D1+D2 and INV-3b explicitly. Record: content egress change, bypass change, evidence
+**Phase 1.** Inline evaluation as the single decision path. Retire that decision D1+D2
+and INV-3b explicitly. Record: content egress change, bypass change, evidence
 replacement, and the measured latency.
 
 **Phase 2 — widen, don't rewrite.** Remove the high-risk narrowing so every gated call
@@ -185,7 +186,7 @@ local; no content egress when `content_capture:false` (or documented otherwise).
 - Raw-rego orgs become enforceable — closes a live silent-fail-open hole.
 - One policy semantics, one evaluation path, shared with the agent runtime.
 - Cursor adapter gets enforcement free.
-- ADR-0008 bundle-signing workstream no longer needed here.
+- that decision bundle-signing workstream no longer needed here.
 - `REQUIRE_APPROVAL` becomes available for **any** tool, not just shell/MCP.
 - Enforcement model explainable in three sentences.
 
@@ -207,7 +208,7 @@ local; no content egress when `content_capture:false` (or documented otherwise).
 - [ ] Measure tool-calls-per-session from real transcripts; compute added wall clock
 - [ ] Go/no-go on inline-everything using those numbers; set the timeout from data
 - [ ] Decide the `content_capture:false` × enforcement conflict, explicitly
-- [ ] Write ADR-0017; retire ADR-0005 D1+D2 and INV-3b by name
+- [ ] Write; retire that decision D1+D2 and INV-3b by name
 - [ ] Widen escalation to all gated tool classes, reusing `hookflow` machinery
 - [ ] Keep `maxEnforceHookBudget` strictly under the platform hook ceiling
 - [ ] Add server-returned policy id/epoch to session posture + `openbox doctor`
@@ -225,14 +226,14 @@ local; no content egress when `content_capture:false` (or documented otherwise).
 | Metric | Target |
 |---|---|
 | Non-test LOC deleted from `decision/` + `policysync` | ≥ 2,000 |
-| `grep -ric "tier" --include=*.go --include=*.md` outside ADR history | 0 |
+| `grep -ric "tier" --include=*.go --include=*.md` outside decision record history | 0 |
 | Added p95 wall clock per tool call | < 200ms (set real target from Phase 0) |
 | Added wall clock per session | < 10s at p95 tool-call volume |
 | Raw-rego org: gated call correctly denied | passes (today: fails open) |
 | Hook exceeding platform ceiling | never — pinned by test |
 | Session posture carries policy identity | 100% of sessions with a reachable core |
 | Local secret redaction still applies with core unreachable | yes |
-| Write body egress when `content_capture:false` | 0 bytes, or documented + ADR'd |
+| Write body egress when `content_capture:false` | 0 bytes, or documented + decision record'd |
 
 ## Unresolved
 

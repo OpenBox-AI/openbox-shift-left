@@ -12,8 +12,8 @@ import (
 // This replaced an injectable secret.Store seam. The seam existed because the
 // OS keychain could not be exercised in a test; a plaintext file in a temp
 // directory can, so tests point OPENBOX_HOME at t.TempDir() and drive the real
-// code path (ADR-0015). An interface over two function calls would be
-// indirection with nothing behind it.
+// code path. An interface over two function calls would be indirection with
+// nothing behind it.
 
 // localCredentials is the pair `agent/create` reveals exactly once.
 type localCredentials struct {

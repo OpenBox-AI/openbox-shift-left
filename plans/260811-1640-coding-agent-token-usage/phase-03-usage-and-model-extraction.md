@@ -6,7 +6,7 @@
 - Existing parser: `adapters/claude-code/usage.go` (`transcriptLine`,
   `usageNumbers`, `readTranscriptUsage` — the SessionEnd rollup)
 - The invariant at stake: [scout/scout-01-existing-finops-surface.md](scout/scout-01-existing-finops-surface.md) §"structurally content-proof"
-- ADR from Phase 01 authorises the change made here
+- decision record from Phase 01 authorises the change made here
 
 ## Overview
 
@@ -74,7 +74,7 @@
 ## Architecture
 
 ```go
-// The projection allowlist, authorised by ADR-00NN. Everything else in the
+// The projection allowlist, authorised by the decision record. Everything else in the
 // transcript still has nowhere to land and is dropped by encoding/json.
 type turnLine struct {
     Timestamp   string `json:"timestamp"`   // parsed → time, feeds duration_ms; NEVER egressed raw
@@ -159,7 +159,7 @@ partitioned); model = last non-empty in window; open = first parsable timestamp.
 
 | Risk | Likelihood | Impact | Mitigation |
 |---|---|---|---|
-| A second egressing string is added later "while we're here" | medium | **high** — the allowlist stops meaning anything | ADR names `model` as the sole entry; sentinel test fails on any other bound string reaching bytes |
+| A second egressing string is added later "while we're here" | medium | **high** — the allowlist stops meaning anything | decision record names `model` as the sole entry; sentinel test fails on any other bound string reaching bytes |
 | Timestamp string leaks to the wire via a careless refactor | low | medium | Sentinel test asserts its absence from payload bytes explicitly |
 | Model mis-attributed on a mid-session switch | medium | medium | Last-non-empty within the window; never cross windows; tested |
 | Tokens attributed to the wrong window | medium | high | Cursor tested in Phase 02; window tests here |

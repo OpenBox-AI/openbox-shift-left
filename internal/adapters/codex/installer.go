@@ -93,7 +93,7 @@ func (i Installer) Plan(ref CredentialRef) string {
 	fmt.Fprintf(&b, "      base_url=%s\n", devconfig.BaseURLLabel(ref.BaseURL))
 	fmt.Fprintf(&b, "      content_capture=%s (default ON as of 2026-07-15; set false to restore metadata-only)\n", contentCaptureLabel(ref.ContentCapture))
 	fmt.Fprintf(&b, "  - Credentials are NOT touched here: `openbox auth` wrote them to ~/.openbox/.env and\n")
-	fmt.Fprintf(&b, "    the hook reads them at runtime (ADR-0015) — hooks.json carries the engine path +\n")
+	fmt.Fprintf(&b, " the hook reads them at runtime — hooks.json carries the engine path +\n")
 	fmt.Fprintf(&b, "    event names ONLY (no key, DID, or URL).\n")
 	fmt.Fprintf(&b, "\nTrust step (Codex hash-trusts non-managed hooks):\n")
 	fmt.Fprintf(&b, "  After install, run /hooks inside Codex to review and TRUST the new OpenBox hooks —\n")
@@ -327,8 +327,8 @@ func timeoutFor(ev HookName) int {
 
 // writeConfig persists the shared non-secret dev config. The merge policy —
 // what a re-init carries forward versus overwrites — lives in devconfig so it
-// is identical for every provider (ADR-0006 posture included). It used to be a
-// port of the CC installer's copy, and the two had already drifted.
+// is identical for every provider (that decision posture included). It used to
+// be a port of the CC installer's copy, and the two had already drifted.
 func (i Installer) writeConfig(ref CredentialRef) error {
 	if err := devconfig.WriteConfig(i.configPath(), providerspi.ConfigUpdate(ref)); err != nil {
 		return fmt.Errorf("codex install: %w", err)
@@ -350,8 +350,8 @@ func (i Installer) configPath() string {
 	// The WRITE target, deliberately — not DefaultConfigPath(), which is
 	// read-resolved and prefers an existing LEGACY file over a not-yet-created new
 	// one (devconfig.resolveConfigPath). Writing through the read path would let an
-	// install land in the pre-ADR-0015 directory whenever migration had not yet
-	// created the new file — and migration is explicitly non-fatal, so that is
+	// install land in the pre-that decision directory whenever migration had not
+	// yet created the new file — and migration is explicitly non-fatal, so that is
 	// reachable, not theoretical. It happens to work today only because
 	// migrateLegacyConfig usually runs first; relying on that ordering is what this
 	// avoids.

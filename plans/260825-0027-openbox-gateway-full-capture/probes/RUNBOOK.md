@@ -57,9 +57,9 @@ cd /tmp/obx-probe-proj && ANTHROPIC_BASE_URL=http://127.0.0.1:8787 claude -p "sa
 ```
 
 Record the same three things. **If nothing arrives**, that is the P0-negative
-branch: the gateway tier covers API-key/console orgs only, and ADR-0021 plus the
-product docs must say so in those words. Per the plan's risk table, Track B still
-proceeds — this scopes it, it does not cancel it.
+branch: the gateway tier covers API-key/console orgs only, and that decision plus
+the product docs must say so in those words. Per the plan's risk table, Track B
+still proceeds — this scopes it, it does not cancel it.
 
 ### 1c. Also record
 
@@ -171,5 +171,6 @@ Two files, from the templates beside this one:
 - `plans/reports/probe-260825-baseurl-auth-coverage.md` — P0 and P1
 - `plans/reports/probe-260825-halt-rendering.md` — probe A
 
-Then phase 03's remaining steps unblock: fill ADR-0021's `TBD(probe)` slots, and
-phase 04 can start against a recorded interface instead of a guessed one.
+Then phase 03's remaining steps unblock: fill that decision's `TBD(probe)`
+slots, and phase 04 can start against a recorded interface instead of a guessed
+one.

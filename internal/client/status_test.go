@@ -2,10 +2,10 @@ package client
 
 import "testing"
 
-// The wire `status` field (ADR-0018 Decision 1). Its whole value is that core
-// compares it against one literal, so these tests are about the two ways it can
-// be wrong without looking wrong: a value core scores as a failure, and a value
-// on an event type where the column means something else.
+// The wire `status` field. Its whole value is that core compares it against one
+// literal, so these tests are about the two ways it can be wrong without
+// looking wrong: a value core scores as a failure, and a value on an event type
+// where the column means something else.
 
 func statusEvent(t EventType, status string) DevEvent {
 	ev := DevEvent{

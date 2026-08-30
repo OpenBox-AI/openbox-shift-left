@@ -4,7 +4,7 @@
 
 - Parent: [plan.md](plan.md)
 - Design: [advise-260824-1841](../reports/advise-260824-1841-full-io-capture-gateway.md)
-- Authority: `docs/adr/ADR-0019-full-content-capture.md` P1 (Proposed — accept in phase 03)
+- Authority:  P1 (Proposed — accept in phase 03)
 - Hook surface evidence: `plans/reports/probe-260813-2329-claude-code-hook-surface.md`
 - Verification: [verification-260825-0328](../reports/verification-260825-0328-tool-content-capture.md)
   — every claim filed by evidence strength
@@ -61,7 +61,7 @@ this phase routes the same string to a *gated content* field instead of dropping
 |---|---|
 | `adapters/claude-code/hookevent.go` | bind `tool_response`, `error` free text, `reason`, `error_details` |
 | `adapters/claude-code/mapper.go` | map to `Content.Output` / `activity_output`, observe-path input |
-| `client/event.go` | add `Content.ToolOutput` — decided, not conditional: `Content.Output` is already occupied by ADR-0018 turn text (`mapper.go:397`), confirmed in plan review |
+| `client/event.go` | add `Content.ToolOutput` — decided, not conditional: `Content.Output` is already occupied by that decision turn text (`mapper.go:397`), confirmed in plan review |
 | `client/payload.go` | `structuralActivityOutput` gains the gated branch |
 | `contracts/dev-event/schema/dev-event.schema.json` | v1.3 |
 | `contracts/dev-event/conformance/` | new cases; C19 updated |
@@ -133,7 +133,7 @@ Added beyond the original list, and why:
 | Redaction after attach | conformance asserts outbound bytes | a case passes with secret present | stop, fix ordering before merge |
 | Free-text `error` leaks onto `error_type` | `enumOr` unchanged; separate field | `error_type` carries non-enum value | revert binding, re-scope |
 | Volume rises at tool-call cadence | 64KB cap; measure in testbed | spool growth or core rejects | file backend retention ask (phase 08) |
-| `Content.Output` collides with ADR-0018 turn text | decided: distinct `Content.ToolOutput` field (collision confirmed live, `mapper.go:397`) | turn text appears on tool events | the field split is the fix; never overload `Output` |
+| `Content.Output` collides with that decision turn text | decided: distinct `Content.ToolOutput` field (collision confirmed live, `mapper.go:397`) | turn text appears on tool events | the field split is the fix; never overload `Output` |
 
 ## Security considerations
 
@@ -168,7 +168,7 @@ Three things worth not re-litigating:
   now a gate plus a redaction plus a cap, each of which can be got wrong. That is
   why all three are asserted on outbound bytes rather than inferred from a missing
   field, and why the capture-OFF half is asserted everywhere the capture-ON half is.
-- **`Content.Output` must never carry tool output.** It carries the ADR-0018 turn
+- **`Content.Output` must never carry tool output.** It carries that decision turn
   text that feeds core's goal-alignment extractor. The distinct `Content.ToolOutput`
   field is the fix; overloading one would put turn text on tool events and tool
   output into alignment the moment either mapping slipped.
@@ -183,14 +183,14 @@ Three things worth not re-litigating:
 ## Owner decisions from the review — both RESOLVED (2026-08-25)
 
 - **OD-1 — the escalated shell/MCP `/evaluate` copy carries the command verbatim.**
-  **Decided: deliberate, document it.** A policy deciding whether a command is
-  dangerous must see the command that will actually run; redacting first would have
-  the server judge text that differs from what executes, and a rule matching a
-  credential-shaped argument would stop firing. Nothing here is written back to the
-  machine, so there is no reconstruction to keep faithful. Recorded in ADR-0017
-  §Content (amended) and in `docs/data-and-privacy.md`. The asymmetry it creates is
-  stated rather than hidden: the OBSERVE copy of that same call IS redacted, so
-  ordinary telemetry is better protected than the enforcement copy.
+**Decided: deliberate, document it.** A policy deciding whether a command is
+dangerous must see the command that will actually run; redacting first would have
+the server judge text that differs from what executes, and a rule matching a
+credential-shaped argument would stop firing. Nothing here is written back to the
+machine, so there is no reconstruction to keep faithful. (amended) and in
+`docs/data-and-privacy.md`. The asymmetry it creates is stated rather than hidden:
+the OBSERVE copy of that same call IS redacted, so ordinary telemetry is better
+protected than the enforcement copy.
 - **OD-2 — nested JSON defeated BOTH generic detection mechanisms.**
   **Decided: fixed.** `secret_assignment` now tolerates quoting/escaping between
   the keyword and the separator, and `precededByAssignment` skips the JSON escape.

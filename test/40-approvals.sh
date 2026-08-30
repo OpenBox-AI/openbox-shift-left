@@ -35,7 +35,7 @@ export OPENBOX_ENFORCE=1
 AUDIT="$OPENBOX_ENFORCEMENT_FILE"
 PENDING_DIR="$OPENBOX_PENDING_APPROVAL_DIR"
 
-# No local bundle to keep permissive any more (ADR-0017): the server is the only
+# No local bundle to keep permissive any more : the server is the only
 # decider, so core's policy is the only thing that can gate — which is what this
 # phase was always really testing.
 
@@ -228,7 +228,7 @@ if [ "${dupes:-0}" != "0" ]; then
 		group by activity_id, event_type having count(*) > 1 limit 5;" | tr '\n' ' ')"
 fi
 
-# Since ADR-0014 a session carries TWO kinds of activity: tool calls (activity_type
+# Since that decision a session carries TWO kinds of activity: tool calls (activity_type
 # = the tool name) and model turns (activity_type = llm_completion). The check
 # above is deliberately global, so it still covers both — but a single aggregate
 # number cannot say WHICH kind duplicated, and the two have entirely different

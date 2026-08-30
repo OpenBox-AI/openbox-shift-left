@@ -62,7 +62,7 @@
 | `deploy/managed/**` (6 files) | `deployments/managed/**` | inert rename + 6 refs |
 | `contracts/dev-event/schema/*.json` | `api/` | **code change** (`schemaRelPath`) |
 | `contracts/dev-event/{MAPPING,COVERAGE,README}.md` | `docs/` | inert |
-| `contracts/dev-event/ext-core/` | **deleted** | tombstone; ADR-0004 is the record |
+| `contracts/dev-event/ext-core/` | **deleted** | tombstone; that decision is the record |
 | unit reference copies | `init/` | **docs-only — no code change** |
 
 **Why the prose does not follow the schema.** `/api` is defined narrowly by the
@@ -75,7 +75,7 @@ if contract-version bumps start touching both in lockstep.
 
 **`ext-core/` is deleted, not moved.** `contracts/dev-event/ext-core/README.md` is a
 tombstone — "RETIRED 2026-07-15" — for a directory that once patched openbox-core's
-event-type accept-list. ADR-0004 already records that retirement. A duplicated
+event-type accept-list. That decision already records that retirement. A duplicated
 retirement note in a directory whose parent is disappearing is a drift surface, not a
 safeguard. Flagged as parent unresolved question 1; flipping it to "move to `docs/`"
 costs nothing if you prefer belt-and-braces.
@@ -146,7 +146,7 @@ another route.
 |---|---|---|---|
 | Schema path wrong; conformance cases stop executing but suite reports green | count executed cases (38), do not read pass/fail | fewer than 38 cases run | fix before proceeding; this is the repo's known "invisible tests" failure mode |
 | `init/`'s reference copies drift from what `laneservice` renders and someone treats them as authority | copies are labelled illustrative; README names `laneservice`; no `go:embed` | a copy is edited as if it were the source, or an embed appears | delete the copy rather than syncing it — the whole point of docs-only is having one authority |
-| A later change "improves" `init/` by embedding the templates | the rationale is recorded here and in ADR-0024 | a PR adds `go:embed` under `init/` | point at the phase-12 election precedent; this needs a decision, not a commit |
+| A later change "improves" `init/` by embedding the templates | the rationale is recorded here and in that decision | a PR adds `go:embed` under `init/` | point at the phase-12 election precedent; this needs a decision, not a commit |
 | A testbed script builds a path by string concatenation the sed misses | run preflight; grep for `testbed` after the move | runtime "no such file" in a dormant script | fix; dormant scripts get no CI cover, so grep is the only net |
 | MDM recipe stale, org deployments break | walk `docs/gateway-mdm-recipe.md` literally | a documented path 404s | fix doc in the same commit as the move |
 

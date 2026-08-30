@@ -8,8 +8,8 @@ import (
 )
 
 // account.go stamps the developer's provider ACCOUNT onto a session, so a stored
-// session can be attributed to an org even where the gateway is not running
-// (ADR-0021, phase 05 requirement 6).
+// session can be attributed to an org even where the gateway is not running (that
+// decision, phase 05 requirement 6).
 //
 // Two independent sources exist by design. The gateway attaches a credential
 // fingerprint per model call; this attaches the account the local client is
@@ -27,8 +27,8 @@ import (
 // Honest limit, stated because a governance product that overstates itself is the
 // failure it exists to prevent: this file is written by the client this product
 // governs and is readable and writable by anything running as the developer — the
-// posture ADR-0015 already concedes for the signing key. So it is evidence of
-// origin-of-config, not a tamper-resistant account claim.
+// posture that decision already concedes for the signing key. So it is evidence
+// of origin-of-config, not a tamper-resistant account claim.
 
 // accountStateFile is where Claude Code keeps its local account record. Verified
 // on 2026-08-25 against the installed 2.1.229 (probe P1 §3).

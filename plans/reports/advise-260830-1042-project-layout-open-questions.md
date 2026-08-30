@@ -57,10 +57,10 @@ identity transform today; embedding puts a second authority beside it.
 ### `ext-core/` — a disposition, not a destination
 
 `contracts/dev-event/ext-core/README.md` is a tombstone: "RETIRED 2026-07-15", whose
-retirement is already recorded in ADR-0004. It is not a contract artifact and does
-not belong in `api/`. **Recommend deleting it**, ADR-0004 being the surviving record —
-a duplicated retirement note is the drift surface, not a safeguard. Flagged rather
-than assumed; flipping this to "move to `docs/`" costs nothing.
+retirement is already. It is not a contract artifact and does not belong in `api/`.
+**Recommend deleting it**, that decision being the surviving record — a duplicated
+retirement note is the drift surface, not a safeguard. Flagged rather than assumed;
+flipping this to "move to `docs/`" costs nothing.
 
 ## What you should do
 
@@ -100,9 +100,9 @@ Ranked by effort-to-impact:
    discipline, and it restores `git log --follow` on the moved files and lets a
    reviewer check "is this dead?" separately from "did the move preserve it?".
 2. **Cheap:** if step 2 proves all three binaries dead, `cmd/` holds exactly one
-   entry — which is what OD17 has claimed all along ("one static binary that is
-   CLI + hook + sidecar + git-hook"). The tree then documents the decision instead
-   of contradicting it. Worth calling out in ADR-0024.
+entry — which is what OD17 has claimed all along ("one static binary that is CLI +
+hook + sidecar + git-hook"). The tree then documents the decision instead of
+contradicting it. Worth calling out in.
 3. **Moderate:** deleting three modules before the collapse removes them from the
    444-line import rewrite. You chose deletion inside phase 03 rather than before it,
    so this saving is partly available anyway — sequence the deletion first within the
@@ -116,8 +116,8 @@ Take all five answers as written. The route:
    `scripts/`).
 2. Amend phase 03: verification gate → delete → move, two commits.
 3. Amend phase 04: drop the installer move and the shim question; keep the
-   `build/.goreleaser.yaml` move and the snapshot-build coverage, which is the part
-   that discharges ADR-0011 reason 1.
+`build/.goreleaser.yaml` move and the snapshot-build coverage, which is the part
+that discharges that decision reason 1.
 4. Amend phase 05: `api/` takes the schema only; `docs/` takes the prose; `init/` is
    docs-only; add the `ext-core/` deletion.
 5. Close all four plan-level unresolved questions and phase-04's; carry forward only
@@ -164,7 +164,7 @@ Take all five answers as written. The route:
 - [ ] phase 03: split into commit (a) verify+delete, commit (b) move+rewrite
 - [ ] phase 04: drop the installer move and its unresolved question; keep `build/` move + snapshot-build coverage
 - [ ] phase 05: `api/` = schema only; prose → `docs/`; `init/` docs-only; add `ext-core/` deletion
-- [ ] phase 06: ADR-0024 notes `cmd/` now matches OD17's one-binary claim
+- [ ] phase 06: that decision notes `cmd/` now matches OD17's one-binary claim
 - [ ] phase 07: restate that the source's `.gitattributes` and `[*.md] tab` are rejected on measurement
 
 ## Success metrics
@@ -183,7 +183,7 @@ Take all five answers as written. The route:
 
 ## Unresolved questions
 
-1. `ext-core/` tombstone — delete (ADR-0004 is the surviving record, recommended) or
+1. `ext-core/` tombstone — delete (that decision is the surviving record, recommended) or
    relocate to `docs/`? Low stakes either way.
 2. If the phase-03 gate finds one of the three binaries **is** reachable, does it stay
    in `cmd/` or move to `tools/`? Depends on what reaches it; decide on the evidence.

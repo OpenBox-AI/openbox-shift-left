@@ -52,7 +52,7 @@ So the reported symptom is **the designed behavior**, not a regression.
   `ToolResult` is **not** `ActivityCompleted`". Rationale given: the base SDK's
   `wire_event_type()` forces `ActivityStarted` for any `hook_trigger` event, and
   `ActivityCompleted` must not carry spans.
-- `docs/adr/ADR-0004-base-wire-unification.md:25-30` — Accepted; explicitly
+- `:25-30` — Accepted; explicitly
   *reverses* an earlier draft that mapped `ToolResult`→`ActivityCompleted`.
 - `client/hookspan.go:102-126` — `AssertHookWireShape` **fails** any hook payload
   whose `event_type != "ActivityStarted"`. Shift-left's own conformance gate
@@ -66,7 +66,7 @@ Base-SDK corroboration (read-only reference `openbox-sdk-python`):
 - `openbox_core/validation/event_rules.py:112-118` raises `HOOK_WRONG_WIRE_TYPE`
   for any hook event that is not `ActivityStarted`.
 
-## 5. The gap the ADR did *not* consider
+## 5. The gap that decision did *not* consider
 
 The base SDK's hook events are **attachments to an activity that something else
 declares**. `activity_started()`/`activity_completed()` exist as first-class
@@ -77,7 +77,7 @@ Consequence: for a developer session, core/the dashboard receive hook spans boun
 to an `activity_id` for which **no activity lifecycle pair was ever emitted**. The
 tool execution is treated as an activity by `activity_id` alone. That is the
 substance of the user's objection, and it is a real modeling gap distinct from the
-"which wire type carries the completed span" question the ADR settled.
+"which wire type carries the completed span" question that decision settled.
 
 ## 6. Second, independent divergence found: `workflow_type` missing on the hook path
 

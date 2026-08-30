@@ -23,7 +23,7 @@ manually. Every claim below is split by evidence strength. **Nothing in the
 | Local redaction still applies with core unreachable | `testbed/30-enforce.sh` §C | **unrun** |
 | Exactly one `ActivityStarted` per gated call | client-side suppression is unit-tested incl. the timeout path; the stored-row count is `30-enforce.sh` §A2 | **unrun** for the count that matters |
 | Posture carries decision provenance | `TestPostureReportsDecisionProvenance` + `30-enforce.sh` §D | strong (unit) / unrun (wire) |
-| **A raw-rego org is enforced** — the headline fix | `testbed/30-enforce.sh` §A publishes a raw-rego deny through the backend and asserts the call is denied | **UNRUN — the headline claim of ADR-0017 is not empirically proven** |
+| **A raw-rego org is enforced** — the headline fix | `testbed/30-enforce.sh` §A publishes a raw-rego deny through the backend and asserts the call is denied | **UNRUN — the headline claim of that decision is not empirically proven** |
 | No tier vocabulary in user docs | CI gate, verified with a negative control (reintroducing "Tier-2" in `architecture.md` fails it) | **strong** |
 | Windows | cross-compile only | **not verified** |
 | Codex enforcement | ceiling read from source; no Codex session driven | **not verified at runtime** |
@@ -71,7 +71,7 @@ conformance suites was worth more than deleting them:
 
 ## Unresolved
 
-1. **The raw-rego enforcement claim is unproven.** It is ADR-0017's headline
+1. **The raw-rego enforcement claim is unproven.** It is that decision's headline
    argument and the strongest reason the change is worth its costs. `30-enforce.sh`
    §A is written to prove it and has not run.
 2. **The stored `ActivityStarted` count under universal escalation is still

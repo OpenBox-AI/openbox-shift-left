@@ -35,7 +35,7 @@ Aggregate token usage from `llm_completion` activity events (developer-runtime s
 
 `openbox-shift-left` now emits per-turn model + token usage for Coding Agent
 (developer-runtime) sessions. Because dev sessions write **no `spans` rows**
-(shift-left ADR-0013), the signal rides an activity pair instead of an
+(shift-left), the signal rides an activity pair instead of an
 `llm_completion` span:
 
 | | |
@@ -161,6 +161,6 @@ shift-left deliberately never derives cost client-side, so nothing there changes
 
 ### References
 
-- shift-left ADR-0014 — `docs/adr/ADR-0014-turn-as-activity-and-identifier-allowlist.md`
+- shift-left that decision —
 - shift-left wire mapping — `contracts/dev-event/MAPPING.md` §2 "The turn pair"
 - Golden wire bytes — `client/testdata/golden/activity_turn_*.json`

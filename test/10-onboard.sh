@@ -12,10 +12,10 @@
 #   * `auth` non-interactively via the stdin path — the automation contract, with
 #     no secret on argv (INV-1);
 #   * `init` at its DEFAULT scope, run from inside the project. The default is new
-#     (ADR-0016), so passing --scope explicitly would test something no user does.
+#, so passing --scope explicitly would test something no user does.
 #
 # It also asserts the NEGATIVE: a directory where `init` was not run has no hook
-# config, so sessions there are ungoverned. That gap is what ADR-0016 accepts, and
+# config, so sessions there are ungoverned. That gap is what that decision accepts, and
 # a governance product should demonstrate its own limits rather than assert them.
 set -uo pipefail
 
@@ -94,7 +94,7 @@ env_body="$(cat "$TB_ENV_FILE")"
 assert_contains "credential file is test-scoped, not ~/.openbox" "$TB_ENV_FILE" "$TB_STATE"
 assert_contains "api key written under the documented name" "$env_body" "OPENBOX_API_KEY="
 assert_contains "signing key written under the documented name" "$env_body" "OPENBOX_AGENT_PRIVATE_KEY="
-# ADR-0015's one-store-per-field split: a coordinate in the credential file is the
+# that decision's one-store-per-field split: a coordinate in the credential file is the
 # two-store bug that made a stale DID revert a corrected one on every install.
 assert_absent "no DID in the credential file (secrets and coordinates never share)" "$env_body" "OPENBOX_AGENT_DID="
 assert_absent "no agent id in the credential file" "$env_body" "OPENBOX_AGENT_ID="
@@ -120,7 +120,7 @@ done
 assert_contains "auth names init as the next step" "$auth_out" "openbox init"
 
 tb_step "openbox init (DEFAULT scope, from inside the project)"
-# No --scope: project scope is the default since ADR-0016, and the default is what
+# No --scope: project scope is the default since that decision, and the default is what
 # a user gets. Running from inside $TB_PROJECT is how that default resolves.
 (cd "$TB_PROJECT" && "$TB_BIN" init \
 	--provider claude-code \
@@ -148,7 +148,7 @@ tb_step "the config it wrote"
 assert_contains "config is test-scoped, not the real home" "$CONFIG" "$TB_STATE"
 assert_nonempty "agent_id persisted" "$agent_id"
 assert_nonempty "developer_did persisted" "$did"
-# ENFORCE BY DEFAULT (ADR-0016): nothing above passed --enforce.
+# ENFORCE BY DEFAULT : nothing above passed --enforce.
 assert_eq "enforce persisted with no flag asking for it" true "$(tb_json "$cfg" enforce)"
 # And no secret leaked into the coordinate file.
 assert_absent "dev.json carries no api key" "$cfg" "obx_"
@@ -244,7 +244,7 @@ enabled="$(cat "$HOME/.claude/settings.json" 2>/dev/null || echo '{}')"
 assert_absent "plugin not globally enabled — scope holds" "$enabled" "openbox-observe"
 
 tb_step "the negative: a directory where init was not run"
-# ADR-0016's accepted cost, demonstrated rather than asserted. A session started
+# that decision's accepted cost, demonstrated rather than asserted. A session started
 # here produces NOTHING — no session row, no events — so on a machine set up this
 # way, absence of events is not evidence of absence of work.
 [ -e "$TB_UNGOVERNED/.claude/settings.local.json" ] &&

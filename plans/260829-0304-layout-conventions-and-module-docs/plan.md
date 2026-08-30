@@ -1,15 +1,6 @@
----
-title: "Layout conventions written down, module docs made true, drift made detectable"
-description: "Port the one portable idea from golang-standards/project-layout — every directory states what belongs in it — into a 14-module workspace, without touching the module topology ADR-0011 protects. Closes two undocumented modules, one stale count, and the absence of any written naming convention."
-status: superseded
-progress: "0 of 6 phases"
-updated: 2026-08-30
-priority: P3
-effort: ~8h (6 phases; phase 06 droppable)
-branch: feat/tool-content-capture
-tags: [docs, layout, conventions, naming, ci, editorconfig, no-code-change]
-created: 2026-08-29
----
+--- title: "Layout conventions written down, module docs made true, drift made detectable" description: "Port the one portable idea from golang-standards/project-layout — every directory states what belongs in it — into a 14-module workspace, without touching the module topology that decision protects.
+Closes two undocumented modules, one stale count, and the absence of any written naming convention." status: superseded progress: "0 of 6 phases" updated: 2026-08-30 priority: P3 effort: ~8h (6 phases; phase 06 droppable) branch: feat/tool-content-capture tags: [docs, layout, conventions, naming, ci,
+editorconfig, no-code-change] created: 2026-08-29 ---
 
 # Layout conventions written down, module docs made true, drift made detectable
 
@@ -29,24 +20,22 @@ Analysis, dependency matrix, challenge and decision matrix:
 
 **What this plan is not.** It does **not** adopt the source's directory vocabulary
 and it does **not** touch the module topology. The source assumes a single module
-with root-level `/cmd`, `/internal`, `/pkg`; this repo is 14 modules by
-[ADR-0011](../../docs/adr/ADR-0011-multi-module-layout.md), whose three reasons for
-rejecting a collapse all still hold and whose stated revisit condition — the release
-path gaining real coverage — is unmet. Collapsing is surfaced in the report as an
-owner decision and deliberately left untaken. Every applicable source directory
-already exists here under a local name; renaming `testbed/`→`test/` or
-`deploy/`→`deployments/` would break every doc and CI reference for no behavioural
-gain. The source's own README disclaims wholesale adoption
-("**`NOT an official standard defined by the core Go dev team`**"; "keep what you
-need and delete everything else").
+with root-level `/cmd`, `/internal`, `/pkg`; this repo is 14 modules by that
+decision, whose three reasons for rejecting a collapse all still hold and whose
+stated revisit condition — the release path gaining real coverage — is unmet.
+Collapsing is surfaced in the report as an owner decision and deliberately left
+untaken. Every applicable source directory already exists here under a local name;
+renaming `testbed/`→`test/` or `deploy/`→`deployments/` would break every doc and CI
+reference for no behavioural gain. The source's own README disclaims wholesale
+adoption ("**`NOT an official standard defined by the core Go dev team`**"; "keep
+what you need and delete everything else").
 
 **What this plan is.** The source's one portable idea — *every directory states what
 belongs in it* — applied to the three places this repo currently fails it, plus the
 check that stops it failing again.
 
 No Go code changes except three compile-safe file renames in the final, droppable
-phase. No new dependency, so no allowlist widening (ADR-0023) and no `go mod tidy`
-cascade.
+phase. No new dependency, so no allowlist widening and no `go mod tidy` cascade.
 
 ## Phases
 
@@ -65,7 +54,7 @@ cascade.
 
 **Why.** `telemetry/` and `transport/` appear in neither `CLAUDE.md`'s "Where things
 live" table nor `docs/architecture.md` §Modules. Two of fourteen modules are
-invisible in both places a reader would look, and they are the ADR-0022 lanes — the
+invisible in both places a reader would look, and they are that decision lanes — the
 newest code in the repo.
 
 **Files.**
@@ -74,15 +63,15 @@ newest code in the repo.
 
 **Steps.**
 1. Add rows to `docs/architecture.md` §Modules for `gateway/`, `telemetry/`,
-   `transport/`. Match the existing one-line "what it owns" style; cite the governing
-   ADR (0021 for gateway, 0022 for telemetry and transport).
+`transport/`. Match the existing one-line "what it owns" style; cite the governing
+decision record (0021 for gateway, 0022 for telemetry and transport).
 2. Add `telemetry/` and `transport/` to the `CLAUDE.md` "Where things live" table.
 3. Correct `CLAUDE.md:800` — "all twelve modules" → **fourteen**.
 
 **Do not touch.** The dated status lines `all 11 modules green` at CLAUDE.md :216,
-:325, :402, :452, :487, :520, :572; ADR-0011's "eleven Go modules" Context line;
-`ci.yml:7`. These are stateful records, correct as of their date — this repo's docs
-rule says a completed phase does not make a record wrong.
+:325, :402, :452, :487, :520, :572; that decision's "eleven Go modules" Context
+line; `ci.yml:7`. These are stateful records, correct as of their date — this
+repo's docs rule says a completed phase does not make a record wrong.
 
 **Validation.** Every `use ./x` in `go.work` has a row in `docs/architecture.md`
 §Modules. Phase 02 makes this mechanical.
@@ -134,7 +123,7 @@ all three model-call lanes.
 2. **What must NOT go in it** — the boundary that makes the module worth having.
    `hookflow`: anything provider-specific. `conformance`: any `require` or `replace`
    (a test already pins this). `provider`: any adapter import.
-3. **The ADR that governs it**, linked.
+3. **that decision that governs it**, linked.
 
 **Constraint.** A module README must not restate the `architecture.md` §Modules row.
 Three copies of one table is the drift surface C4 rejects. If a module has nothing
@@ -167,7 +156,7 @@ asset, with exactly three deviations.
   line, so the suffix is belt-and-braces — keep both.
 - **Non-Go: kebab-case.** `dev-event.schema.json`, `managed-settings.json`,
   `00-preflight.sh`, `data-and-privacy.md`.
-- **ADRs:** `ADR-NNNN-kebab-slug.md`. **Plans:** `{YYMMDD-HHMM}-{slug}/`.
+- **Plans:** `{YYMMDD-HHMM}-{slug}/`.
   **Testbed:** `NN-kebab.sh`, ordered by prefix.
 - **Exception, load-bearing:** provider-mandated filenames are kept verbatim —
   `managed_config.toml`, `requirements.toml`. Codex reads those exact names; renaming
@@ -264,7 +253,7 @@ this is expected to be a no-op to the compiler — confirm it, do not assume it.
 
 ## Out of scope, with reasons
 
-- **Collapsing the module topology** — ADR-0011, revisit condition unmet. Owner
+- **Collapsing the module topology** — that decision, revisit condition unmet. Owner
   decision, surfaced in the report.
 - **Directory renames** to the source's vocabulary — churn across every doc and CI
   reference, zero behavioural gain; the source itself accepts `/deploy`.

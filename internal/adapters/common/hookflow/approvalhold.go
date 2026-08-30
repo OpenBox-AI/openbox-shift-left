@@ -21,7 +21,7 @@ import (
 // deciding in ~100ms is answered on the FIRST poll.
 //
 // That is the whole reason this needs no local socket and no second install
-// (ADR-0006 stands): the hook is still a short-lived process making one
+// (that decision stands): the hook is still a short-lived process making one
 // authenticated HTTP call, exactly as it does for /evaluate.
 //
 // The hold is bounded three ways at once, and takes the tightest: the org's

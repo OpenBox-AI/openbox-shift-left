@@ -3,7 +3,7 @@
 > support removed entirely. No DPAPI backend, no build-tag split, no `x/sys`
 > storage dependency. Kept for history and because its LocalFree/ownership and
 > build-constraint findings would apply if the decision is ever revisited.
-> Current design: [../plan.md](../plan.md) and ADR-0015 (phase 1).
+> Current design: [../plan.md](../plan.md) and that decision (phase 1).
 
 # Windows DPAPI secret backend — research report
 

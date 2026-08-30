@@ -426,11 +426,11 @@ func TestFinops_SessionEndWiring_ReadsRollout(t *testing.T) {
 // is a security assertion rather than a feature test: it proves the documented
 // opt-out is real and COMPLETE — no tokens, no model, and no rollup activity.
 //
-// Usage capture is on by DEFAULT as of ADR-0014, so this test must now disable it
-// explicitly. Before the flip it passed by leaving OPENBOX_FINOPS unset, which is
-// exactly why the flip needed `Finops` to become a *bool: with a plain bool an
-// absent field and an explicit false were indistinguishable, so the default could
-// not move at all.
+// Usage capture is on by DEFAULT as of that decision, so this test must now
+// disable it explicitly. Before the flip it passed by leaving OPENBOX_FINOPS
+// unset, which is exactly why the flip needed `Finops` to become a *bool: with a
+// plain bool an absent field and an explicit false were indistinguishable, so the
+// default could not move at all.
 func TestFinops_SessionEndWiring_OffAttachesNothing(t *testing.T) {
 	spool := setHookEnv(t)
 	t.Setenv("OPENBOX_FINOPS", "0") // the documented opt-out

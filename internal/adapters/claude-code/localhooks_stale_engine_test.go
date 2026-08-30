@@ -382,7 +382,7 @@ func captureStderr(t *testing.T, fn func()) string {
 }
 
 // A re-init at the SAME engine path must reconcile the registration SHAPE, not
-// just skip on the command match. Found live: the ADR-0020 UserPromptSubmit
+// just skip on the command match. Found live: that decision UserPromptSubmit
 // ceiling raise (5s → the gating ceiling) never arrived on a re-init, so the
 // prompt gate was killed by Claude Code's old 5s timeout mid-evaluation and
 // failed open — through the very `openbox init` the docs name as the upgrade
@@ -395,9 +395,10 @@ func TestReInitReconcilesRegistrationShape(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(settingsPath), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	// Our entries at the CURRENT engine path, but in the pre-ADR-0020 shape:
-	// UserPromptSubmit still at 5s with no statusMessage, plus a stale watcher
-	// timeout — and one foreign hook whose shape must survive untouched.
+	// Our entries at the CURRENT engine path, but in the pre-that decision
+	// shape: UserPromptSubmit still at 5s with no statusMessage, plus a stale
+	// watcher timeout — and one foreign hook whose shape must survive
+	// untouched.
 	old := map[string]any{"hooks": map[string]any{
 		"UserPromptSubmit": []any{map[string]any{
 			"matcher": "",

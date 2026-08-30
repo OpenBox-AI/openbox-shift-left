@@ -85,4 +85,4 @@ real gap, not a formality.
 
 Branch `feat/realtime-event-delivery`, pushed. No PR opened.
 
-> Historical work record — not durable authority. Prefer docs/specs/ADRs for current decisions.
+> Historical work record — not durable authority. Prefer docs/specs for current decisions.

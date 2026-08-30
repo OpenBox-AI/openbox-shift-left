@@ -1,28 +1,29 @@
-# Phase 04 — ADR-0018 content-posture draft
+# Phase 04 — that decision content-posture draft
 
 ## Context links
 
 - Parent: [plan.md](plan.md) · Depends: none (doc work; sequenced after P0 per user request)
 - Decision source: `plans/reports/research-260813-2215-session-content-capture-gaps.md` §"Decision update (2026-08-13 22:34)"
-- Style/argument precedent: ADR-0015 (argues against the prior rationale, not around it), ADR-0014 (allowlist amendment mechanics), ADR-0017 (posture change disclosure)
+- Style/argument precedent: that decision (argues against the prior rationale, not around it), that decision (allowlist amendment mechanics), that decision (posture change disclosure)
 
 ## Overview
 
 - Date: 2026-08-13 · Priority: P1 · Status: pending · Review: n/a
-- Draft `docs/adr/ADR-0018-full-content-capture.md` (status: **Proposed**) authorizing P1–P3 capture.
+- Draft  (status: **Proposed**) authorizing P1–P3 capture.
   DRAFT ONLY — no P1–P3 implementation in this plan.
 
 ## Key Insights
 
-- The ADR's hard job is retiring SL3-SEC-3 and restating INV-2 honestly: from "content has no field to land in"
-  to "content egresses only under the org gate, always secret-redacted first, always 64KB-capped". Must argue
-  against the original metadata-only rationale (ADR-0015 style), citing the owner's org-deployment trust model.
-- Thinking capture requires amending ADR-0014's transcript allowlist — fold the amendment INTO ADR-0018
-  (one decision record for one posture change) rather than a sibling; ADR-0014's sentinel-test rule stays:
-  the test evolves to assert redaction+cap instead of absence, and a trivially-passing version remains a defect.
-- data-and-privacy.md rows flip from "never" to gated — the doc rewrite is part of the ADR's Consequences, listed file by file.
+- that decision's hard job is retiring SL3-SEC-3 and restating INV-2 honestly: from "content has no field to land in"
+to "content egresses only under the org gate, always secret-redacted first, always 64KB-capped". Must argue
+against the original metadata-only rationale (that decision style), citing the owner's org-deployment trust
+model.
+- Thinking capture requires amending that decision's transcript allowlist — fold the amendment INTO
+(one decision record for one posture change) rather than a sibling; that decision's sentinel-test rule stays:
+the test evolves to assert redaction+cap instead of absence, and a trivially-passing version remains a defect.
+- data-and-privacy.md rows flip from "never" to gated — the doc rewrite is part of that decision's Consequences, listed file by file.
 
-## Requirements (ADR content outline)
+## Requirements (decision record content outline)
 
 1. **Context**: org-governance deployment model (company machine/code); owner decision 2026-08-13; what evaluation
    needs the data (policy /evaluate, Guardrails stage 0/1, AGE goal alignment) — cite research report.
@@ -49,44 +50,45 @@
 
 ## Architecture
 
-Doc-only. `docs/adr/ADR-0018-full-content-capture.md` + `docs/adr/README.md` index row.
+Doc-only. + `README.md` index row.
 
 ## Related code files
 
-- `docs/adr/ADR-0018-full-content-capture.md` (new), `docs/adr/README.md`
+-  (new), `README.md`
 - Referenced (unmodified this phase): `client/event.go` Content, `client/payload.go` stripContent/capBody,
   `adapters/claude-code/{hookevent,mapper,usage}.go`, `decision/`, `contracts/dev-event/MAPPING.md`
 
 ## Implementation Steps
 
-1. Draft ADR per outline; every claim cites repo symbol/path or the research report (repo doc rule).
-2. Cross-check no contradiction with ADR-0013/0014/0015/0016/0017 "worth not re-litigating" lists; where ADR-0014 is
+1. Draft decision record per outline; every claim cites repo symbol/path or the research report (repo doc rule).
+2. Cross-check no contradiction with that decision/0014/0015/0016/0017 "worth not re-litigating" lists; where that decision is
    amended, say so explicitly in both files (amendment note in 0014 header pointing to 0018).
-3. Index row in README.md; keep ADR ≤ house length (~0017 size).
+3. Index row in README.md; keep decision record ≤ house length (~0017 size).
 4. Present to owner for acceptance (status stays Proposed until then).
 
 ## Todo list
 
-- [ ] ADR-0018 drafted per outline
-- [ ] ADR-0014 amendment cross-note
+- [ ] that decision drafted per outline
+- [ ] that decision amendment cross-note
 - [ ] README index
 - [ ] Owner review requested
 
 ## Success Criteria
 
-- ADR self-consistent with research report + decision memory; names every retired guarantee and every updated test;
+- decision record self-consistent with research report + decision memory; names every retired guarantee and every updated test;
   P1–P3 implementable from it without re-deciding anything.
 
 ## Risk Assessment
 
-- Scope creep into implementation — guard: this phase produces exactly two file changes under `docs/adr/`.
-- Over-promising: ADR must carry the "cannot get" section so docs never claim fuller capture than surfaces allow.
+- Scope creep into implementation — guard: this phase produces exactly two file changes.
+- Over-promising: decision record must carry the "cannot get" section so docs never claim fuller capture than surfaces allow.
 
 ## Security Considerations
 
-- The ADR itself makes redaction the load-bearing control — it must state the ordering requirement (detect → redact →
+- that decision itself makes redaction the load-bearing control — it must state the ordering requirement (detect → redact →
   attach → sign) per class and require a conformance case per class before any flush code merges.
 
 ## Next steps
 
-After owner accepts ADR-0018 → new plan for P1 (tool output) implementation.
+After owner accepts that decision → new plan for P1 (tool output)
+implementation.

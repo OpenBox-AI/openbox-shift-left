@@ -112,7 +112,7 @@ allowlist: that makes the allowlist unreviewable, which is the one thing it exis
 to be.
 
 Two things to record while touching it:
-- this weakens a load-bearing security test → **ADR-worthy**, not a quiet commit;
+- this weakens a load-bearing security test → **decision-worthy**, not a quiet commit;
 - pre-existing gap found while reading it: the go.mod scan only matches
   `github.com/` prefixes, so a `golang.org/x/…` or `go.opentelemetry.io/…`
   requirement is invisible to it today. Fix in the same change or the guard keeps
@@ -157,7 +157,8 @@ them into one changes which error a failing branch reports.
    dependency. Good first swap.
 3. **D-OSS-6, D-OSS-7, D-OSS-8** — small, independent, low risk.
 4. **D-OSS-4** (gitleaks) **last**, with §4.2's guard change as its own reviewed
-   commit + ADR, and §4.4's soak gating the enforce path.
+commit + decision record, and §4.4's soak gating the
+enforce path.
 5. Then the three-lanes plan re-cut, now unpinned.
 
 ## 6. Effect on plan 260827-1602-three-lanes-convergence
@@ -175,7 +176,8 @@ them into one changes which error a failing branch reports.
 ## Unresolved questions
 
 1. **§4.2 guard fix** — skip `// indirect` (recommended), or another shape? It
-   weakens a security test either way and wants an ADR.
+weakens a security test either way and wants a decision
+record.
 2. **Toolchain directive** — pin an exact `toolchain go1.27.0` line alongside
    `go 1.27.0`, or leave toolchain selection to the developer? Exact pin makes CI
    and local builds identical; it also forces every contributor onto that patch.

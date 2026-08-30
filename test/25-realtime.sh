@@ -70,7 +70,7 @@ tb_note "status at first sighting: ${status_now:-<none>}"
 # in its sleep, not just the turn-start burst.
 #
 # Counts BOTH activity types. A tool call is an ActivityStarted plus an
-# ActivityCompleted (ADR-0013), and the completed half is often what arrives on
+# ActivityCompleted, and the completed half is often what arrives on
 # the debounced flush — counting only starts would under-report the progress
 # signal this phase exists to observe.
 mid_activity() { tb_count "governance_events where run_id='$sid' and event_type like 'Activity%'"; }

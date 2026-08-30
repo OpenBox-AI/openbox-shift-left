@@ -26,12 +26,12 @@ func TestResolveEnforce(t *testing.T) {
 	t.Setenv(envConfigPath, cfgPath)
 	os.Unsetenv(envEnforce) // env genuinely absent → config decides
 
-	// Default: no config field, no env → TRUE (ADR-0016 reversed the observe
-	// default). The adapter resolves through devconfig, so this pins that the
-	// facade did not keep a stale default of its own.
+	// Default: no config field, no env → TRUE (that decision reversed the
+	// observe default). The adapter resolves through devconfig, so this pins
+	// that the facade did not keep a stale default of its own.
 	write(`{"developer_did":"` + testDID + `"}`)
 	if !ResolveEnforce() {
-		t.Error("an absent enforce field must resolve to ON (ADR-0016)")
+		t.Error("an absent enforce field must resolve to ON ")
 	}
 	// An explicit false still opts out.
 	write(`{"developer_did":"` + testDID + `","enforce":false}`)
@@ -188,8 +188,7 @@ func TestCapCommand_ByteBoundedRuneSafe(t *testing.T) {
 }
 
 // TestEnforceDecision_FailOpenWhenSidecarAbsent and
-// TestEnforceDecision_LiveBlock are deleted with the local evaluator
-// (ADR-0017).
+// TestEnforceDecision_LiveBlock are deleted with the local evaluator.
 //
 // The first asserted that an absent bundle degrades to a prompt fail-open allow
 // rather than blocking; the second, that a loaded BLOCK rule denies the matching
@@ -695,10 +694,10 @@ func TestRunHook_EnforceApply_Block(t *testing.T) {
 	t.Setenv(envEnforce, "1")
 	enfFile := filepath.Join(t.TempDir(), "enforcements.jsonl")
 	t.Setenv(envEnforcementFile, enfFile)
-	// The verdict comes from the control plane now (ADR-0017); what this case
-	// asserts — the apply cascade and the durable audit line — is unchanged. The
-	// stub answers per COMMAND, the way the rule it replaces did, so the benign
-	// half is still a genuine proceed rather than an absent server.
+	// The verdict comes from the control plane now; what this case asserts — the
+	// apply cascade and the durable audit line — is unchanged. The stub answers
+	// per COMMAND, the way the rule it replaces did, so the benign half is still
+	// a genuine proceed rather than an absent server.
 	//
 	// Content capture is on so the stub can see the command it is judging. That
 	// is the real posture for content-aware policy; the INV-2 assertions below
@@ -872,8 +871,8 @@ func TestRunHook_EnforceFailClosed(t *testing.T) {
 
 	// A reachable /evaluate answering ALLOW → a real verdict → PROCEED even under
 	// fail-closed (the policy does not touch a real allow verdict). The verdict
-	// has to come from the server since ADR-0017; a local allow with nothing
-	// reachable is the outage case asserted just above.
+	// has to come from the server since; a local allow with nothing reachable is
+	// the outage case asserted just above.
 	serveVerdict(t, `{"verdict":"allow"}`)
 	allowURL, _ := serveEvaluate(t, `{"verdict":"allow"}`, 200, 0)
 	evalCreds(t, allowURL)
@@ -1118,13 +1117,13 @@ func TestRunHook_EnforceApply_Approval(t *testing.T) {
 	}
 }
 
-// The evaluation context (OD-E9-7): a gated call must carry what it is asking
-// to do, or neither the server nor an approver can decide about it — `kind=shell
+// The evaluation context (OD-E9-7): a gated call must carry what it is asking to
+// do, or neither the server nor an approver can decide about it — `kind=shell
 // tool_name=Bash` tells them exactly nothing.
 //
-// The two copies are mapped separately, and that split outlived the reason for
-// it. It used to be SL3-SEC-3 — the observe copy carried NOTHING, unconditionally.
-// ADR-0019 P1 retired that: the observe copy carries the same extract under the
+// The two copies are mapped separately, and that split outlived the reason for it.
+// It used to be SL3-SEC-3 — the observe copy carried NOTHING, unconditionally.
+// That decision retired that: the observe copy carries the same extract under the
 // content gate. What the split still buys is the redaction: the gated copy is
 // rebuilt from the enforce gate's own detection result, so the server judges the
 // exact bytes the tool call was rewritten to.
@@ -1188,7 +1187,7 @@ func TestEscalationCarriesApprovalContext_ObserveNeverDoes(t *testing.T) {
 	red := &client.Content{FileText: "AWS_ACCESS_KEY_ID=OPENBOX_REDACTED"}
 	ev, _ := enforceTarget{id: Identity{DeveloperDID: testDID}, mapper: m, ev: fileEv}.DevEvent(red)
 	if ev.Content == nil {
-		t.Fatal("a gated Write must carry its body for evaluation (ADR-0017 E7)")
+		t.Fatal("a gated Write must carry its body for evaluation (that decision E7)")
 	}
 	if strings.Contains(ev.Content.ToolInput, "AKIAIOSFODNN7EXAMPLE") {
 		t.Errorf("the RAW body was attached — redaction must precede attachment (E8): %q", ev.Content.ToolInput)

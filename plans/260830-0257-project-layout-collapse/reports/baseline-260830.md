@@ -334,9 +334,9 @@ class phase 03's key insight says the collapse eliminates. With one module there
 are no intra-repo module imports, no `replace`, and no workspace, so the property
 is not weakened — it becomes **unrepresentable**. Deleting the test is correct;
 lowering its `< 10` threshold to make it pass would leave a vacuous guard behind,
-which is the failure mode this repo names repeatedly. **ADR-0024 (phase 06) should
-cite this file by name as the concrete evidence for R1's inversion** — it is the
-artefact of the bug, and its deletion is the bug class closing.
+which is the failure mode this repo names repeatedly. **that decision (phase 06)
+should cite this file by name as the concrete evidence for R1's inversion** — it
+is the artefact of the bug, and its deletion is the bug class closing.
 
 ### F6 — the collapse **gains** two compiler-enforced boundaries, which the plan's cost/benefit does not record
 
@@ -358,8 +358,8 @@ production-import prohibition each walk enforces could instead be structural.
 
 This is **not** proposed as work — it is out of scope, and `--yagni` applies. It is
 recorded because the plan's honest-accounting standard requires the ledger to have
-both columns, and ADR-0024's "what it costs" section currently has only one. R2 is
-a real loss; these are real gains available on the same day.
+both columns, and that decision's "what it costs" section currently has only one.
+R2 is a real loss; these are real gains available on the same day.
 
 ### F7 — the corruption check every phase mandates is red on a clean tree
 

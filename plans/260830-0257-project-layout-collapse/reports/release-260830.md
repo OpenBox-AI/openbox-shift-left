@@ -1,14 +1,14 @@
 # Phase 04 — the release path
 
-2026-08-30. This is where ADR-0011's strongest objection is discharged rather than
-argued with.
+2026-08-30. This is where that decision's strongest objection is discharged rather
+than argued with.
 
-## ADR-0011 reason 1, settled
+## that decision reason 1, settled
 
-The ADR's first reason not to collapse was that GoReleaser builds from `cli` with
-its own `replace` graph and **the release path has no test coverage**. After the
-collapse there is no `replace` graph and no `GOWORK=off` divergence, so the config
-gets simpler — but "simpler" is not "verified". So it was run:
+That decision's first reason not to collapse was that GoReleaser builds from `cli`
+with its own `replace` graph and **the release path has no test coverage**. After
+the collapse there is no `replace` graph and no `GOWORK=off` divergence, so the
+config gets simpler — but "simpler" is not "verified". So it was run:
 
 ```
 goreleaser build --snapshot --clean --single-target --config build/.goreleaser.yaml
@@ -19,8 +19,8 @@ goreleaser build --snapshot --clean --single-target --config build/.goreleaser.y
 ```
 
 **Executing it is the requirement; a successful build is not the same claim.** The
-binary runs and both commands produce real output. That is the coverage the ADR
-said did not exist.
+binary runs and both commands produce real output. That is the coverage that
+decision said did not exist.
 
 ## What changed
 
@@ -52,7 +52,7 @@ That third one is the interesting deletion, because it is the gate whose absence
 let a broken release ship green — and it is removed on the grounds that the
 collapse eliminated the bug class it caught, not on the grounds that it is
 inconvenient. **A vacuous guard is worse than none: it reads as coverage.** The
-argument belongs in ADR-0024 (phase 06), not only in a commit message.
+argument belongs in that decision (phase 06), not only in a commit message.
 
 ## Two CI comments were describing a world that no longer exists
 

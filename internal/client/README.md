@@ -54,10 +54,9 @@ verdict, err := c.Emit(ctx, client.DevEvent{
 
 ## No spans, so no semantic_type
 
-The client sends **no spans** ([ADR-0013](../docs/adr/ADR-0013-tool-call-as-activity.md)).
-A tool call is two activity events — `ToolCall` → `ActivityStarted`, `ToolResult`
-→ `ActivityCompleted` — sharing an `activity_id`, and neither carries `spans`,
-`span_count` or `hook_trigger`.
+The client sends **no spans**. A tool call is two activity events — `ToolCall` →
+`ActivityStarted`, `ToolResult` → `ActivityCompleted` — sharing an `activity_id`, and
+neither carries `spans`, `span_count` or `hook_trigger`.
 
 core computes `semantic_type` from a span (`ComputeSemanticTypeFromSpan`), so for
 developer sessions it computes none. `tool.kind` and the `activity_input`

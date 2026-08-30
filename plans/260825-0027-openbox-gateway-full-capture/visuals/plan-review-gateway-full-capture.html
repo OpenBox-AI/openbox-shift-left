@@ -594,7 +594,7 @@
 <div class="ve-card ve-card--hero animate" style="--i:4">
   <div class="verdict-line">Stronger plan than rev 1 — three loose ends, all ten-minute edits, none architectural.</div>
   <div class="verdict-body">
-    <p>The local-gateway pivot landed the way the advice predicted: phases 04–06 survived nearly verbatim, the custody machinery (org credential, KMS, HA, fleet rollout) is deleted rather than deferred, and the old kill switch (probe B) is defused into a tier question. Both collisions from review rev 1 are <strong>fixed and re-verified in the tree</strong>: <code>testbed/45-gateway.sh</code> targets a genuinely free slot, and <code>Content.ToolOutput</code> is pre-decided (grep confirms the name is unclaimed; <code>Content.Output</code> stays with ADR-0018 turn text). One assumption got upgraded to fact this pass: Claude Code's local account state on this machine carries <code>emailAddress</code>, <code>organizationUuid</code>, <code>organizationName</code>, and <code>organizationRole</code> — phase 05's account-stamping source is real, and richer than the plan assumed.</p>
+    <p>The local-gateway pivot landed the way the advice predicted: phases 04–06 survived nearly verbatim, the custody machinery (org credential, KMS, HA, fleet rollout) is deleted rather than deferred, and the old kill switch (probe B) is defused into a tier question. Both collisions from review rev 1 are <strong>fixed and re-verified in the tree</strong>: <code>testbed/45-gateway.sh</code> targets a genuinely free slot, and <code>Content.ToolOutput</code> is pre-decided (grep confirms the name is unclaimed; <code>Content.Output</code> stays with that decision turn text). One assumption got upgraded to fact this pass: Claude Code's local account state on this machine carries <code>emailAddress</code>, <code>organizationUuid</code>, <code>organizationName</code>, and <code>organizationRole</code> — phase 05's account-stamping source is real, and richer than the plan assumed.</p>
     <p>The loose ends are self-inflicted and known: the four validation action items are recorded in plan.md but <strong>not yet applied to the phase files</strong> — most importantly, phase 06 still says the fail posture "defaults to forward" while the validated owner decision is <strong>always refuse</strong>, and phase 05 still builds the sink that validation deferred. Plus one carry-over from rev 1 that the update pass missed: <strong>the Codex non-goal sentence is still absent from plan.md</strong>. Apply those, then Track A and the three probes start in parallel as validated.</p>
   </div>
   <div class="decided">
@@ -807,11 +807,11 @@ flowchart TD
         </tr>
         <tr style="--i:2">
           <td><span class="status status--gate">GATE</span> 03</td>
-          <td class="mid">Decisions, ADRs, probes</td>
+          <td class="mid">Decisions, decision records, probes</td>
           <td class="num">2d</td>
           <td>—</td>
           <td class="wide">Three probes (P0 first, reusing probe A's server); probe B demoted to tier question; account-registry ask filed here</td>
-          <td class="wide">ADR-0021 must state the three assurance tiers — a blurred claim is a blocked merge</td>
+          <td class="wide">that decision must state the three assurance tiers — a blurred claim is a blocked merge</td>
         </tr>
         <tr style="--i:3">
           <td><span class="status status--pending">B</span> 04</td>
@@ -898,7 +898,7 @@ flowchart TD
           <td><span class="status status--verified">Verified</span></td>
         </tr>
         <tr>
-          <td class="wide"><code>Content.ToolOutput</code> is unclaimed; <code>Content.Output</code> stays with ADR-0018 turn text <small>rev-1 collision fix</small></td>
+          <td class="wide"><code>Content.ToolOutput</code> is unclaimed; <code>Content.Output</code> stays with that decision turn text <small>rev-1 collision fix</small></td>
           <td class="wide">grep: zero <code>ToolOutput</code> references in <code>client/</code>; <code>mapper.go:397</code> still owns <code>Output</code></td>
           <td><span class="status status--verified">Verified</span></td>
         </tr>
@@ -980,7 +980,7 @@ flowchart TD
       <div class="pipeline-arrow">→</div>
       <div class="pipeline-step pipeline-step--amber">
         <div class="step-num">THEN</div>
-        <div class="step-name">ADRs close 03</div>
+        <div class="step-name">decision records close 03</div>
         <div class="step-detail">0019 accept · 0021 local<br>· 0016 amend</div>
       </div>
       <div class="pipeline-arrow">→</div>
@@ -1012,7 +1012,7 @@ flowchart TD
   <div class="ve-card ve-card--plum animate" style="--i:3">
     <div class="ve-card__label">Backend ask 1 · new</div>
     <div class="mini-title">Account registry as policy input</div>
-    <div class="mini-body">Org key fingerprints + allowed org UUIDs, matched server-side → HALT. May be a new surface on core's side — their ADR rule, their call. The evidence contract ships from phase 05 regardless.</div>
+    <div class="mini-body">Org key fingerprints + allowed org UUIDs, matched server-side → HALT. May be a new surface on core's side — their decision record rule, their call. The evidence contract ships from phase 05 regardless.</div>
   </div>
   <div class="ve-card ve-card--plum animate" style="--i:4">
     <div class="ve-card__label">Backend ask 2 · new</div>
@@ -1022,7 +1022,7 @@ flowchart TD
   <div class="ve-card ve-card--plum animate" style="--i:5">
     <div class="ve-card__label">Backend asks 3–4 · carried</div>
     <div class="mini-title">Retention + server-side dedupe</div>
-    <div class="mini-body">Open since ADR-0019/0013 era, unchanged by the pivot. Phase 08 attaches measured volume numbers; retention now covers per-machine spool/sink surfaces instead of one org service.</div>
+    <div class="mini-body">Open since that decision/0013 era, unchanged by the pivot. Phase 08 attaches measured volume numbers; retention now covers per-machine spool/sink surfaces instead of one org service.</div>
   </div>
 </div>
 
@@ -1051,7 +1051,7 @@ flowchart TD
           <td class="mid">Prevention weaker than custody (local admin can bypass)</td>
           <td><span class="status status--drift">accepted</span></td>
           <td class="wide">Detection-tier base claim (owner decision); MDM tier documented; mismatch evidence + doctor visibility</td>
-          <td class="wide">Decided — the review's only add: enterprise sales will probe this line; keep the tier table in ADR-0021 blunt.</td>
+          <td class="wide">Decided — the review's only add: enterprise sales will probe this line; keep the tier table in that decision blunt.</td>
         </tr>
         <tr>
           <td class="mid">Both channels disabled ⇒ only absence remains</td>
@@ -1096,7 +1096,7 @@ flowchart TD
     <div class="ve-card__label">Good — keep exactly as is</div>
     <ul class="node-list">
       <li><strong>The pivot deleted more than it added</strong> — custody, KMS, HA, fleet ops gone; one phase rewritten, two lightly touched, Track A untouched.</li>
-      <li><strong>Account binding respects the ADR-0017 dogma</strong>: sensors attach evidence, core decides, the gateway renders — phase 06 explicitly forbids building account machinery.</li>
+      <li><strong>Account binding respects that decision dogma</strong>: sensors attach evidence, core decides, the gateway renders — phase 06 explicitly forbids building account machinery.</li>
       <li><strong>Fingerprint-then-redact ordering has its own conformance case</strong>, asserted on outbound bytes — the C26 discipline extended to the one derived-from-a-secret field.</li>
       <li><strong>Validation captured real owner decisions</strong> (fail posture, PII scope, sink deferral) instead of rubber-stamping — and recorded the cost of the one that diverges from house posture.</li>
       <li><strong>Doctor detects the assurance tier by file ownership</strong> — no tier flag to lie.</li>
@@ -1123,8 +1123,8 @@ flowchart TD
   <div class="ve-card ve-card--blue animate" style="--i:3">
     <div class="ve-card__label">Questions — for the owner</div>
     <ul class="node-list">
-      <li><strong>Always-refuse and offline work:</strong> a developer on a plane gets zero gated model calls. Is that the intent (it follows from the decision), or does an explicit "offline grace" ever enter the picture? Recording "no grace, by design" in ADR-0021 pre-empts the first support ticket.</li>
-      <li><strong>Account registry ownership:</strong> who on the backend owns the registry ask, and does it need their ADR? Blocks nothing client-side, but the HALT criterion in phase 08 can't pass without it.</li>
+      <li><strong>Always-refuse and offline work:</strong> a developer on a plane gets zero gated model calls. Is that the intent (it follows from the decision), or does an explicit "offline grace" ever enter the picture? Recording "no grace, by design" in that decision pre-empts the first support ticket.</li>
+      <li><strong>Account registry ownership:</strong> who on the backend owns the registry ask, and does it need their decision record? Blocks nothing client-side, but the HALT criterion in phase 08 can't pass without it.</li>
     </ul>
   </div>
 </div>
@@ -1145,7 +1145,7 @@ flowchart TD
   <summary>Evidence base — what this review actually checked</summary>
   <div class="collapsible__body">
     <ul>
-      <li><strong>Carried from rev 1</strong> (tree unchanged at d27efbb): all 24 code-level verifications — hookevent/mapper binding gaps, stripContent choke point, TurnCursor, sentinel, INV-2 allowlist, redaction, Spool.Append, C19/C26, schema v1.2, ADR states, hookflow reuse surface, dormant testbed §A/§A3, E8-S8/S9, core SpanData + span-dedupe key (sibling repo).</li>
+      <li><strong>Carried from rev 1</strong> (tree unchanged at d27efbb): all 24 code-level verifications — hookevent/mapper binding gaps, stripContent choke point, TurnCursor, sentinel, INV-2 allowlist, redaction, Spool.Append, C19/C26, schema v1.2, decision record states, hookflow reuse surface, dormant testbed §A/§A3, E8-S8/S9, core SpanData + span-dedupe key (sibling repo).</li>
       <li><strong>New this pass:</strong> <code>ToolOutput</code> unclaimed in <code>client/</code> (grep); testbed 4x range holds only <code>40-approvals.sh</code> (ls); <code>oauthAccount</code> keys read live on this machine (keys only, no values): emailAddress, organizationUuid, organizationName, organizationRole, accountUuid + 15 others; git baseline re-confirmed.</li>
       <li><strong>Inspected, not executed:</strong> all eight phase files post-update; plan.md incl. Validation Summary; both advise reports.</li>
       <li><strong>Deliberately unverified (probe-owned):</strong> BASE_URL auth-mode coverage (P0), refusal/retry behavior (probe A), in-flight org-id matchability (P1), <code>x-claude-code-*</code> headers (phase 04 assertion).</li>

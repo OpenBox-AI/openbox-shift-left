@@ -1,6 +1,6 @@
 # Competitive landscape — governance for agentic coding tools
 
-Date: 2026-08-26. Branch: `feat/tool-content-capture` (hook governance + ADR-0021 gateway).
+Date: 2026-08-26. Branch: `feat/tool-content-capture` (hook governance + that decision gateway).
 Method: web research only. No vendor was run; maturity claims are the vendors' own unless noted.
 
 ## Verdict
@@ -28,7 +28,7 @@ The closest thing to this repo's hook engine that exists as a shipping product.
 | Their design | This repo |
 |---|---|
 | single binary `endorctl ai-audit` wired as handler for every hook event | `openbox` engine, same pattern |
-| server-side policy eval; **Block / Alert / Ask Permission** | `/evaluate` only decider; deny / findings / approval (ADR-0017) |
+| server-side policy eval; **Block / Alert / Ask Permission** | `/evaluate` only decider; deny / findings / approval |
 | local redactor masks "secret-named keys and known credential formats" before egress, and states plainly that "a secret in an unknown format can still reach the backend" | keyword-driven `decision/secrets.go` with the identical documented limit (C39) |
 | MDM + managed settings, in-browser generator, public `endorlabs/mdm-scripts` | `deploy/managed/`, `--scope global` |
 | 29 default policies; shell allow/deny, sensitive-file patterns, MCP allowlists, env-var rules | org policy, no shipped template packs (on the roadmap) |
@@ -38,9 +38,9 @@ The closest thing to this repo's hook engine that exists as a shipping product.
 Two hard divergences, both in this repo's favour or against it depending on buyer:
 
 - **"Prompt text stays local."** Endor deliberately does not egress prompts. This
-  repo egresses prompts, tool I/O, assistant text and extended thinking by default
-  (ADR-0019). Strictly more evidence, strictly more privacy surface — and it is the
-  axis a security buyer will interrogate first.
+repo egresses prompts, tool I/O, assistant text and extended thinking by default.
+Strictly more evidence, strictly more privacy surface — and it is the axis a
+security buyer will interrogate first.
 - **No model-call capture, no token/cost capture, no attestation/lineage** in their
   product. Those are three of this repo's five differentiators.
 
@@ -50,7 +50,8 @@ the compliance-framework mapping is a sales surface they occupy and this repo do
 
 ### Proofpane
 
-Same architectural bet as ADR-0021, arrived at independently:
+Same architectural bet as that decision, arrived at
+independently:
 
 - runtime governance gateway for **Claude Code, Cursor, Codex** (plus Claude Desktop,
   MCP clients, n8n/UiPath/Zapier/Make/Power Automate, OpenAI-compatible agents)
@@ -64,10 +65,10 @@ Same architectural bet as ADR-0021, arrived at independently:
   SOC 2, pentest and case studies stage-gated on a first enterprise customer that
   does not exist yet
 
-Read that list against ADR-0021 §§1–7. Local-first daemon, refusal in path, redact
-the captured copy, signed offline-verifiable evidence, hooks *and* gateway in one
-product. The differences that remain are the pipeline topology, per-turn finops,
-and lineage.
+Read that list against that decision–7. Local-first daemon, refusal in path,
+redact the captured copy, signed offline-verifiable evidence, hooks *and* gateway
+in one product. The differences that remain are the pipeline topology, per-turn
+finops, and lineage.
 
 ## Tier 2 — direct competitors on one slice
 
@@ -77,9 +78,9 @@ and lineage.
   DLP + per-MCP-tool policy before upstream; BSL-1.1 source-available. *Only found via
   curated lists — repo not independently located; treat maturity as unverified.*
 - **Coder AI Governance Add-On** — LLM gateway auditing prompts/tokens/tool
-  invocations, central MCP administration, **process-level agent firewall** limiting
-  reachable domains. That firewall is the MDM-tier prevention ADR-0021 §2 defers to an
-  org's MDM; Coder ships it.
+invocations, central MCP administration, **process-level agent firewall** limiting
+reachable domains. That firewall is the MDM-tier prevention that decision defers to an
+org's MDM; Coder ships it.
 - **Bifrost, Portkey, LiteLLM, TrueFoundry, Speakeasy, MintMCP** — general AI
   gateways with guardrails/RBAC/budget/audit, all documented for Claude Code via
   `ANTHROPIC_BASE_URL`. Not coding-agent governance, but they own the transport this
@@ -114,9 +115,9 @@ and lineage.
 
 **Per-turn finops / AI attribution**
 - **aGiTrack** — wraps Claude Code / Codex / OpenCode, commits each agent turn to git
-  recording prompt, backend, model, and **input/output/cache-read/cache-write token
-  counts** in the commit message, sub-agents counted separately. This is ADR-0014's
-  four counts plus the git trailer idea, shipped, cross-platform incl. native Windows.
+recording prompt, backend, model, and **input/output/cache-read/cache-write token
+counts** in the commit message, sub-agents counted separately. This is that decision's
+four counts plus the git trailer idea, shipped, cross-platform incl. native Windows.
 - **ccusage**, **TokenTracker** (31 tools, "never reads prompts"), **Git AI**,
   **Exceeds.ai** (line-level AI attribution), **Crash Override** (commit metadata
   conventions, GPG/Sigstore signing, CI gates on agent-commit metadata), **DX**, **Faros AI**.
@@ -129,10 +130,11 @@ and lineage.
 
 ## Finding that bears on the current branch
 
-**ADR-0021's capture premise is now only partly true, and the doc should say so.**
+**that decision's capture premise is now only partly true, and the doc should say
+so.**
 
-The ADR states hooks cannot see the model call, so "a gateway is the surface where
-[headers and bodies] exist." Claude Code's own OTel export now emits:
+That decision states hooks cannot see the model call, so "a gateway is the surface
+where [headers and bodies] exist." Claude Code's own OTel export now emits:
 
 - `claude_code.api_request_body` — Messages API request JSON **including system prompt,
   messages and tools**
@@ -144,16 +146,16 @@ The ADR states hooks cannot see the model call, so "a gateway is the surface whe
   prompt → API request → tool execution
 - lockable fleet-wide through managed settings
 
-The ADR's literal sentence — uncapturable *from hooks* — survives. The product framing
-does not: **request and response bodies are reachable first-party today, without a
-gateway.** What the gateway still uniquely reaches:
+That decision's literal sentence — uncapturable *from hooks* — survives. The product
+framing does not: **request and response bodies are reachable first-party today,
+without a gateway.** What the gateway still uniquely reaches:
 
 1. **request headers** (not logged by OTel)
 2. **the credential fingerprint / account binding** (§6) — nothing else sees it
 3. **synchronous refusal of the inference** (§7) — OTel is an exporter, not a gate
 4. **extended thinking** — OTel redacts it from bodies *unconditionally*; this repo
-   captures it from the transcript (ADR-0019 P3), so the full-capture claim relative to
-   first-party telemetry still holds, and is now the sharpest version of that claim
+captures it from the transcript, so the full-capture claim relative to first-party
+telemetry still holds, and is now the sharpest version of that claim
 
 Also: OTel is developer-redirectable unless managed settings lock the collector, and
 carries no signing or Merkle chain — so §2's tamper-evidence tiering remains a real
@@ -196,8 +198,8 @@ evidence**, not capture. Capture is now a commodity on this provider.
 ## Unresolved questions
 
 1. Does the owner want to keep pitching gateway *capture* now that
-   `OTEL_LOG_RAW_API_BODIES` exists — or repitch the gateway on refusal + account binding
-   alone? ADR-0021 §Context #1 needs an amendment either way.
+`OTEL_LOG_RAW_API_BODIES` exists — or repitch the gateway on refusal + account binding
+alone? That decision #1 needs an amendment either way.
 2. Is Cursor still the right next adapter, given Endor and Proofpane both already cover
    it and neither covers this repo's lineage story? Copilot is the larger unserved seat count.
 3. Does the full-content-capture default survive contact with a security buyer who has

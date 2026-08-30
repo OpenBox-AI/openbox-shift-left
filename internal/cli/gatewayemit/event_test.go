@@ -52,9 +52,9 @@ func TestEventTypeIsTurnCompleted(t *testing.T) {
 }
 
 // TestGatewayRequestIDIsSet keeps the two turn producers in disjoint activity-id
-// namespaces (ADR-0021 requirement 8). Empty here means turnActivityIDFor falls
-// through to the hook path's TurnIndex branch, and with no index it returns "" —
-// so the event would carry no activity_id at all.
+// namespaces (that decision requirement 8). Empty here means turnActivityIDFor
+// falls through to the hook path's TurnIndex branch, and with no index it
+// returns "" — so the event would carry no activity_id at all.
 func TestGatewayRequestIDIsSet(t *testing.T) {
 	ev := mustEvent(LaneGateway, sampleIdentity(), "req-1", sampleAt, sampleCaptured())
 	if ev.GatewayRequestID != "req-1" {
@@ -147,8 +147,8 @@ func TestObservedExchangeReachesTheWire(t *testing.T) {
 }
 
 // TestCaptureOffStripsBodiesAndHeadersButKeepsTheFingerprint is the other half of
-// the gate, asserted on outbound bytes for the same reason. ADR-0021 §3 makes the
-// fingerprint deliberately UNGATED: it is derived evidence for a governance
+// the gate, asserted on outbound bytes for the same reason. That decision makes
+// the fingerprint deliberately UNGATED: it is derived evidence for a governance
 // control, and letting an org opt out of being identified is not a privacy
 // setting. The raw credential must be absent either way.
 func TestCaptureOffStripsBodiesAndHeadersButKeepsTheFingerprint(t *testing.T) {
@@ -164,7 +164,7 @@ func TestCaptureOffStripsBodiesAndHeadersButKeepsTheFingerprint(t *testing.T) {
 		t.Error("headers egressed with content capture OFF")
 	}
 	if !strings.Contains(got, "a1b2c3d4e5f60718") {
-		t.Error("credential fingerprint disappeared under the content gate — ADR-0021 §3 keeps it ungated")
+		t.Error("credential fingerprint disappeared under the content gate — that decision keeps it ungated")
 	}
 }
 

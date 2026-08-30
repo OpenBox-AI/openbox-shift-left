@@ -449,11 +449,11 @@ hr.rule { border: none; border-top: 1px solid var(--border); margin: 34px 0; }
   </div>
 </div>
 
-<h3>The one argument ADR-0011 did not have available</h3>
+<h3>The one argument that decision did not have available</h3>
 <p>The plan's strongest claim is empirical rather than aesthetic, and it checks out: <code>cli</code> imported <code>transport</code> with a <code>require</code> and no <code>replace</code>; all 14 modules reported green in the workspace while <code>GOWORK=off</code> — <em>the only path <code>.goreleaser.yaml</code> takes</em> — could not resolve the import at all. Deleting <code>go.work</code> deletes that entire divergence class, not one instance of it. That belongs in the commit message exactly as the plan says.</p>
 
 <div class="callout callout--accent">
-  <p><strong>And the honest counterweight is stated, not averaged.</strong> ADR-0011 reason 2 — "adapters must not import each other" — was mechanical because they were separate modules. Under <code>internal/adapters/</code> both are siblings and the compiler permits the import. It becomes a test in <code>layering_test.go</code> or it becomes nothing. The plan records this as a real downgrade rather than a wash, which is the standard this repo holds itself to.</p>
+  <p><strong>And the honest counterweight is stated, not averaged.</strong> that decision reason 2 — "adapters must not import each other" — was mechanical because they were separate modules. Under <code>internal/adapters/</code> both are siblings and the compiler permits the import. It becomes a test in <code>layering_test.go</code> or it becomes nothing. The plan records this as a real downgrade rather than a wash, which is the standard this repo holds itself to.</p>
 </div>
 
 <div id="s4" class="sec-head"><span class="num">4</span> Phase graph and the gate</div>
@@ -481,7 +481,7 @@ graph TD
   P3B["Phase 03b<br/>git mv + import rewrite<br/>15 modules → 1"]
   P4["Phase 04<br/>release path<br/>build/ · snapshot EXECUTED"]
   P5["Phase 05<br/>non-Go moves<br/>test/ deployments/ api/ init/"]
-  P6["Phase 06<br/>ADR-0024 · supersede 0011<br/>amend 0023"]
+  P6["Phase 06<br/>that decision · supersede 0011<br/>amend 0023"]
   P7["Phase 07<br/>conventions + drift check<br/><i>droppable</i>"]
 
   P1 --> P2 --> GATE
@@ -571,7 +571,7 @@ adapters/common/devconfig/managed_test.go:204
 
   <p>This is the repo's own documented failure mode, in a new place: a capability guard that makes a test honest also blinds its author. <code>TestManaged_ShippedTemplateLoadsAndLocks</code> exists to prove the shipped managed template loads and asserts <code>enforce</code> — its own comment says the failure it prevents is "silently unmanaged". After the move it would stop proving that, report SKIP, and the suite would stay green. Phase 01's baseline records skips separately, so a skip-count delta <em>would</em> surface it — but only if someone reads the skip column, and phase 03's success criterion 4 is written against declared and verdict counts, where a skip still counts as a verdict.</p>
 
-  <p><strong>The <code>gatewayemit</code> one survives by luck.</strong> <code>cli/internal/gatewayemit</code> &rarr; <code>internal/cli/gatewayemit</code> keeps the same depth, so <code>../../../</code> still lands at the repo root — but its <em>target</em> moves to <code>api/</code> in phase 05, so the constant still needs editing. It resolves through <code>runtime.Caller</code>, so it fails loudly rather than silently. Note its comment explains it reads the schema with stdlib precisely <em>because</em> the conformance package "is not a dependency of this module" — an argument the collapse dissolves, which is worth a line in ADR-0024.</p>
+  <p><strong>The <code>gatewayemit</code> one survives by luck.</strong> <code>cli/internal/gatewayemit</code> &rarr; <code>internal/cli/gatewayemit</code> keeps the same depth, so <code>../../../</code> still lands at the repo root — but its <em>target</em> moves to <code>api/</code> in phase 05, so the constant still needs editing. It resolves through <code>runtime.Caller</code>, so it fails loudly rather than silently. Note its comment explains it reads the schema with stdlib precisely <em>because</em> the conformance package "is not a dependency of this module" — an argument the collapse dissolves, which is worth a line in.</p>
 
   <h4>Why the plan's own sweep does not catch these</h4>
   <p>Phase 05 criterion 1 ("no path reference anywhere names <code>testbed/</code>, <code>deploy/</code>, or the old schema location") <em>would</em> catch both — but the sweep that implements it, in phase 06 step 6, is scoped to <code>*.md</code>, <code>*.sh</code>, <code>*.yaml</code>, <code>*.json</code>. <strong><code>*.go</code> is not in the list.</strong></p>
@@ -613,7 +613,7 @@ adapters/common/devconfig/managed_test.go:204
   <p>The three prescribed drills do not separate the two either: delete-the-guard &rarr; red, add an <em>unreviewed direct</em> import &rarr; red, add a repo-local import &rarr; green. None adds an unreviewed <em>indirect</em> dependency.</p>
 
   <div class="callout callout--red">
-    <p><strong>Recommended correction.</strong> Add a fourth drill case for this guard only: pull in a package whose dependency arrives transitively, and confirm the replacement fires. If it does not — the likely outcome — then either keep a root-<code>go.mod</code> allowlist alongside the subtree scan for the conformance dependency floor, or record in the ADR-0023 amendment that the indirect half of that floor was retired with the module boundary. Both are defensible; silently narrowing it is not, and this repo's rule is that an added or removed allowlist entry needs the ADR amendment first.</p>
+    <p><strong>Recommended correction.</strong> Add a fourth drill case for this guard only: pull in a package whose dependency arrives transitively, and confirm the replacement fires. If it does not — the likely outcome — then either keep a root-<code>go.mod</code> allowlist alongside the subtree scan for the conformance dependency floor, or record in that decision amendment that the indirect half of that floor was retired with the module boundary. Both are defensible; silently narrowing it is not, and this repo's rule is that an added or removed allowlist entry needs that decision amendment first.</p>
   </div>
 </div>
 
@@ -686,7 +686,7 @@ adapters/common/devconfig/managed_test.go:204
   </div>
   <div class="card card--elevated">
     <div class="card-label"><span class="dot" style="background:var(--green)"></span><span style="color:var(--green)">Phase 04 discharges R1 honestly</span></div>
-    <p style="font-size:16px;margin-bottom:0">Executing the snapshot binary, not merely building it, is the coverage ADR-0011 said did not exist. And phase 06 requires ADR-0024 to say the revisit condition was met <em>concurrently</em> rather than as a precondition — an owner decision, not a technical discharge. That distinction is what keeps the ADR from reading as a pure win.</p>
+    <p style="font-size:16px;margin-bottom:0">Executing the snapshot binary, not merely building it, is the coverage that decision said did not exist. And phase 06 requires that decision to say the revisit condition was met <em>concurrently</em> rather than as a precondition — an owner decision, not a technical discharge. That distinction is what keeps that decision from reading as a pure win.</p>
   </div>
   <div class="card card--elevated">
     <div class="card-label"><span class="dot" style="background:var(--green)"></span><span style="color:var(--green)">D4's three independent arguments</span></div>
@@ -722,13 +722,13 @@ adapters/common/devconfig/managed_test.go:204
 
 <h3>Carried from the plan, still open</h3>
 <ol>
-  <li><strong><code>ext-core/</code> disposition.</strong> Plan assumes delete, ADR-0004 being the surviving record. Verified: it is a single <code>README.md</code> tombstone. Delete is the right call — a duplicated retirement note in a disappearing directory is a drift surface. No objection.</li>
+  <li><strong><code>ext-core/</code> disposition.</strong> Plan assumes delete, that decision being the surviving record. Verified: it is a single <code>README.md</code> tombstone. Delete is the right call — a duplicated retirement note in a disappearing directory is a drift surface. No objection.</li>
   <li><strong>If the phase-03 gate finds a suspect binary reachable</strong>, does it stay in <code>cmd/</code> or move to <code>tools/</code>? The plan's rule ("a product path keeps it in <code>cmd/</code>, a test or dev path moves it to <code>tools/</code>") is sound and needs no further decision now.</li>
 </ol>
 
 <h3>Raised by this review</h3>
 <ol>
-  <li><strong>Does the conformance dependency floor keep its indirect half?</strong> (G2) Keeping it means one root-<code>go.mod</code> allowlist survives the collapse alongside the six subtree scans. Retiring it means the ADR-0023 amendment says so explicitly. This is a security-control scope question, so it is an owner call, not an implementation detail.</li>
+  <li><strong>Does the conformance dependency floor keep its indirect half?</strong> (G2) Keeping it means one root-<code>go.mod</code> allowlist survives the collapse alongside the six subtree scans. Retiring it means that decision amendment says so explicitly. This is a security-control scope question, so it is an owner call, not an implementation detail.</li>
   <li><strong>Should the two unnamed relative paths be made loud rather than merely corrected?</strong> (G1) Switching <code>managed_test.go</code> from <code>os.Stat</code>+<code>Skipf</code> to a <code>runtime.Caller</code> resolution and a hard failure is a behaviour change to a surviving test — technically outside "this is a move-and-rename refactor". It is the difference between fixing this instance and closing the failure mode.</li>
   <li><strong>Phase 07's third filename deviation</strong> resolves to a file inside <code>plans/</code>, which phase 06 protects. Drop the count to two, or state the exception.</li>
   <li><strong>Should the corruption check become a differential?</strong> (G4) It is repeated as a security step in all seven phases, so the form it takes is worth settling once, in phase 01, rather than being re-copied six more times.</li>

@@ -68,9 +68,9 @@ internal/cli/devinit/     the dev-init orchestration
 internal/cli/providers/   the adapter registry — the only place the CLI reaches an adapter
 ```
 
-`internal/secret/` is gone: ADR-0015 deleted the OS keychain, and credentials are
-one plaintext file. `internal/provider/` is the SPI itself and lives at
-`internal/provider/`, not under `cli`.
+`internal/secret/` is gone: that decision deleted the OS keychain, and
+credentials are one plaintext file. `internal/provider/` is the SPI itself and
+lives at `internal/provider/`, not under `cli`.
 
 ## Build & test
 

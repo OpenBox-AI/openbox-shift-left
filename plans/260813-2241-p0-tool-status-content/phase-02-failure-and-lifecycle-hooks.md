@@ -10,8 +10,8 @@
 
 - Date: 2026-08-13 · Priority: P1 · Status: pending · Review: n/a
 - Wire four new hook events, structural fields ONLY (free-text `denial_reason`/`error_message` deferred to
-  ADR-0018 content phases): `PostToolUseFailure` → failed ToolResult; `SubagentStart`/`PermissionDenied`/
-  `StopFailure` → new DevEvent types riding stock `SignalReceived` (INV-8). Plus Task `subagent_type` extraction.
+That decision content phases): `PostToolUseFailure` → failed ToolResult; `SubagentStart`/`PermissionDenied`/
+`StopFailure` → new DevEvent types riding stock `SignalReceived` (INV-8). Plus Task `subagent_type` extraction.
 
 ## Key Insights
 

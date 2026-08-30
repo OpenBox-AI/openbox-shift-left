@@ -356,9 +356,10 @@ const (
 	pinProxyActivityID = "sess-pin-0001:proxy:px-4f2a9c1e7b30"
 )
 
-// TestNewLaneActivityIDsArePinned holds the wire bytes for the two lanes ADR-0022
-// adds. Same reason the shapes above are pinned, and the same instruction: if one
-// of these fails, the derivation moved and the change is wrong, not the fixture.
+// TestNewLaneActivityIDsArePinned holds the wire bytes for the two lanes that
+// decision adds. Same reason the shapes above are pinned, and the same
+// instruction: if one of these fails, the derivation moved and the change is
+// wrong, not the fixture.
 func TestNewLaneActivityIDsArePinned(t *testing.T) {
 	otel := pinTurnEvent()
 	otel.TurnIndex = nil
@@ -386,7 +387,7 @@ func TestNewLaneActivityIDsArePinned(t *testing.T) {
 // covering one producer fewer. TestTurnLanesMatchTheContract binds this list to
 // the contract so that cannot happen.
 //
-// Order IS the precedence ladder (ADR-0022 §3): in-path relay, then gateway, then
+// Order IS the precedence ladder : in-path relay, then gateway, then
 // client-asserted telemetry, then the two non-elected shapes.
 var turnLanes = []struct {
 	name string

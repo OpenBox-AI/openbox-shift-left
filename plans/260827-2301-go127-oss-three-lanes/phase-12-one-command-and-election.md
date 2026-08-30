@@ -68,8 +68,8 @@ the others still emit their non-turn evidence (tool decisions, engine health)
 because those do not collide.
 
 `doctor` must print the elected producer **and why** — an automatic precedence the
-developer cannot see is the "configured but not in force" shape ADR-0021 §2 promised
-would be detectable.
+developer cannot see is the "configured but not in force" shape that decision
+promised would be detectable.
 
 Activation record (`~/.openbox/activation.json`, 0600):
 

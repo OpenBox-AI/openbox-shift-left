@@ -13,9 +13,10 @@
 
 - **Date:** 2026-08-13 · **Priority:** P1 · **Status:** pending · **Effort:** 5h
 - Wire four hooks, **structural fields ONLY** (free-text `denial_reason`/`error_message` deferred
-  to ADR-0019 phases): `PostToolUseFailure` → failed `ToolResult` (`status:"failed"`);
-  `SubagentStart`/`PermissionDenied`/`StopFailure` → new DevEvent types riding stock
-  `SignalReceived` (INV-8, no core change). Plus Task `subagent_type` extraction.
+to that decision phases): `PostToolUseFailure` → failed `ToolResult`
+(`status:"failed"`); `SubagentStart`/`PermissionDenied`/`StopFailure` → new DevEvent
+types riding stock `SignalReceived` (INV-8, no core change). Plus Task `subagent_type`
+extraction.
 
 ## Key Insights
 
@@ -50,7 +51,7 @@
   billing_error, invalid_request, model_not_found, server_error, max_output_tokens, unknown}.
   **NO `error_message`** in this plan.
 - R5: Task tool calls (`classifyTool` catch-all): extract `subagent_type` from `tool_input`
-  (identifier, capStr) → ToolCall metadata. No `prompt`/`description` egress (ADR-0019 P1).
+(identifier, capStr) → ToolCall metadata. No `prompt`/`description` egress.
 - R6: Installer registers the new hook keys at both scopes it manages; absence on older versions
   degrades fail-open; INV-3 preserved (no stdout on any new hook).
 - R7: Schema: new DevEvent types added to the enum the guard pins
@@ -97,7 +98,7 @@ pin tests, `usage.go`, `go.mod`.
    forced API error — if not producible, wire from the documented shape and mark it
    docs-only-verified).
 2. Hook consts + structural bindings in `hookevent.go` (bools/ints/identifier strings only; every
-   free-text field left unbound with a comment pointing at ADR-0019).
+free-text field left unbound with a comment).
 3. Mapper cases + Task `subagent_type` extraction; `enumOr` for `error_type`; `*bool` tri-state
    for `classifier_verdict`.
 4. Client: DevEvent consts + `SignalReceived` name mapping; golden fixtures.
@@ -139,12 +140,13 @@ pin tests, `usage.go`, `go.mod`.
 | StopFailure not empirically producible | M×L | Wire from documented shape, mark docs-only-verified; phase 06 lists it under "not covered" |
 | Hook payload field names drift from docs | M×M | Empirical capture in step 1 is the authority; docs are the map, the spool is the territory |
 | New settings keys break older versions | L×H | Degrade check in step 7; unknown keys are documented as never-invoked (fail-open) |
-| `classifier_verdict` bound as bool loses the null case | M×L | `*bool` tri-state, mirrored from the `Enforce *bool` lesson (ADR-0016) |
+| `classifier_verdict` bound as bool loses the null case | M×L | `*bool` tri-state, mirrored from the `Enforce *bool` lesson |
 
 ## Security Considerations
 
 - Structural-only is the line: `denial_reason` and `error_message` are free text a model or user
-  wrote — they egress only under ADR-0019's phases with redaction, not here.
+wrote — they egress only under that decision's phases with redaction, not
+here.
 - INV-3: none of the new hooks may write stdout (StopFailure's is ignored by the provider, but
   discipline is uniform).
 - The permission-denied event reveals that a policy denied something (metadata), not what the

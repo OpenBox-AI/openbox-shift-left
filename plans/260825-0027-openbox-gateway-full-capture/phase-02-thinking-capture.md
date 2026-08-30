@@ -3,7 +3,7 @@
 ## Context links
 
 - Parent: [plan.md](plan.md) · Previous: [phase-01](phase-01-tool-content-capture.md)
-- Authority: `docs/adr/ADR-0019-full-content-capture.md` P3 + **ADR-0014 amendment**
+- Authority:  P3 + **that decision amendment**
 - Transcript evidence: [researcher-02](research/researcher-02-claude-code-interception-surfaces.md)
 - Depends on: 01 (shares the content-gate plumbing)
 
@@ -11,7 +11,7 @@
 
 - Date: 2026-08-25
 - Description: lift thinking blocks from the session transcript via the existing byte-offset
-  cursor, and amend the ADR-0014 allowlist that currently forbids them.
+cursor, and amend that decision allowlist that currently forbids them.
 - Priority: P1
 - Implementation status: **implemented** (testbed dormant)
 - Review status: **reviewed 2026-08-25 (code-reviewer) — DONE, no blocking findings.**
@@ -38,25 +38,25 @@
 ## Key insights
 
 - **The transcript is the only source, and it already works.** `hookflow.TurnCursor`
-  (ADR-0014) tails the session JSONL over a byte offset today for token counts. Content
-  block types `text`, `thinking`, `tool_use`, `tool_result` confirmed present in 5 of 6 real
-  sessions on this machine.
+tails the session JSONL over a byte offset today for token counts. Content block types
+`text`, `thinking`, `tool_use`, `tool_result` confirmed present in 5 of 6 real sessions on
+this machine.
 - **OTel can never substitute.** Anthropic redacts extended thinking unconditionally in
   every telemetry path — *"Extended-thinking content is redacted"* — with no flag.
 - **The gateway would also get thinking**, from the raw API response. This phase exists so
   thinking does not wait for Track B, and remains the fallback if Track B is descoped.
 - **The sentinel is load-bearing and changes direction.** `TestFinops_NoContentOnWire`
-  evolves from *content absent* to *content present, redacted, capped*. **A version that
-  passes trivially is a defect** — same rule ADR-0014 set, carried forward.
+evolves from *content absent* to *content present, redacted, capped*. **A version that
+passes trivially is a defect** — same rule that decision set, carried forward.
 - **INV-2's allowlist is the thing being amended.** `usage.go` binds numeric fields plus
-  `message.model`. Thinking is the first genuinely free-form transcript string. The
-  amendment must be explicit in the ADR, not implied by the code.
+`message.model`. Thinking is the first genuinely free-form transcript string. The
+amendment must be explicit in that decision, not implied by the code.
 - Format is undocumented and Anthropic-internal — accepted risk, stated in docs.
 
 ## Requirements
 
 1. Thinking blocks from the `Stop`/`SubagentStop` transcript window → gated content field.
-2. ADR-0014 allowlist amended in writing before the binding merges.
+2. That decision allowlist amended in writing before the binding merges.
 3. Sentinel evolved to assert redacted-and-capped presence, non-trivially.
 4. Same ordering: detect → redact → attach → cap → sign.
 5. Partition unchanged: `isSidechain` handling must not double-count a subagent's turn.
@@ -77,12 +77,12 @@ Thinking rides the turn's `activity_output`, not a new event type.
 | `adapters/common/hookflow/turncursor.go` | window unchanged; verify sidechain partition |
 | `adapters/claude-code/usage_test.go` | sentinel evolves direction |
 | `client/payload.go` | `turnActivityOutput` gains gated thinking |
-| `docs/adr/ADR-0014-turn-as-activity-and-identifier-allowlist.md` | amendment |
+| — | amendment |
 | `docs/data-and-privacy.md` | "thinking: never" → gated row |
 
 ## Implementation steps
 
-1. Amend ADR-0014 first — the allowlist change is the decision, the code is the consequence.
+1. Amend that decision first — the allowlist change is the decision, the code is the consequence.
 2. Evolve the sentinel with an adversarial section: capture ON + poisoned transcript ⇒ only
    the permitted fields egress, thinking redacted and capped.
 3. Widen the projection to lift `thinking` blocks inside the existing window.
@@ -92,8 +92,9 @@ Thinking rides the turn's `activity_output`, not a new event type.
 
 ## Todo
 
-- [x] ADR-0014 amendment written first — the amendment section at the end of the
-  ADR carries the mechanism table (gate/redact/cap), the scope limit, and the cost
+- [x] that decision amendment written first — the amendment section at the end of the
+decision record carries the mechanism table (gate/redact/cap), the scope limit,
+and the cost
 - [x] Sentinel evolved: `sentinels` split so `SENTINEL_THINKING` is posture-
   dependent, capture-OFF half tightened to include it, capture-ON half asserts
   presence in the decoded `activity_output.thinking`
@@ -132,13 +133,13 @@ Thinking rides the turn's `activity_output`, not a new event type.
 | Sentinel weakened into a trivial pass | mutation-test it: delete redaction, delete cap, expect failures | both deletions still green | block merge; the test is the control |
 | Transcript format changes on a CC release | version-tolerant projection; absence degrades to no-thinking, never an error | thinking silently stops | accept degradation; alarm in testbed, not in the hook |
 | Volume: thinking is large | 64KB cap, same as other classes | spool growth | measure in phase 08 before widening the cap |
-| Capturing further than the provider will | owner decision, recorded in ADR | — | do not reverse silently |
+| Capturing further than the provider will | owner decision, recorded in decision record | — | do not reverse silently |
 
 ## Security considerations
 
 - This captures content **Anthropic's own telemetry refuses to export**. That is the org's
-  call to make on its own machine, but it must be a decision someone made and signed, not a
-  consequence of "capture everything". Record it in the ADR amendment explicitly.
+call to make on its own machine, but it must be a decision someone made and signed, not a
+consequence of "capture everything". Record it in that decision amendment explicitly.
 - Thinking is high-density: it restates prompts, file contents, and credentials seen earlier
   in the turn. Redaction matters more here than anywhere else.
 
@@ -149,10 +150,10 @@ Track A complete. Thinking and tool I/O are captured without any new service.
 **What shipped differently from this plan, and why.** Two deliberate narrowings:
 
 - **Intermediate assistant text was NOT bound.** The phase file paired it with
-  thinking ("thinking blocks and intermediate assistant text"). The final reply
-  already egresses from the hook field ADR-0018 bound, so a second text source
-  would have widened the allowlist twice for one reader. ADR-0019 P3 records it as
-  still open, needing its own amendment.
+thinking ("thinking blocks and intermediate assistant text"). The final reply
+already egresses from the hook field that decision bound, so a second text source
+would have widened the allowlist twice for one reader. That decision records it as
+still open, needing its own amendment.
 - **The lift is ungated; only the attachment is gated.** Gating the parser too was
   considered and cut: it buys nothing on the wire (the chunk the text was read from
   was already resident) and would put a second copy of the posture decision inside

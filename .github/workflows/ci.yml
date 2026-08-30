@@ -155,8 +155,8 @@ jobs:
           fi
 
       - name: Cross-compile for Windows
-        # ADR-0015 made Windows a supported target for the first time: credentials
-        # are a plaintext file, so there is no platform secret-store subprocess to
+        # Windows became a supported target when credentials moved to a plaintext
+        # file, so there is no platform secret-store subprocess to
         # port. Nothing in CI RUNS on Windows, and a cross-compile is not runtime
         # verification — but it catches the most likely regression class by far, a
         # stray unix-only call (syscall.Umask, /dev/null, os/exec of `security`),
@@ -177,7 +177,7 @@ jobs:
         # shallow cases on every change; the corpus persists in testdata for
         # anything found.
         #
-        # The two rego-path fuzzers went with the local evaluator (ADR-0017).
+        # The two rego-path fuzzers went with the local evaluator.
         # FuzzRedact was defined in the same file and had to be deliberately
         # kept: it covers code that still runs on every gated call with a body.
         run: |
@@ -185,7 +185,7 @@ jobs:
           go test -run XXX -fuzz FuzzRedact -fuzztime 20s ./
 
       - name: No tier vocabulary in user-facing docs
-        # ADR-0017 replaced the tier model with three named features. This gate
+        # The tier model was replaced with three named features. This gate
         # covers the documents a USER reads, where "Tier 2" would describe a
         # layering the product does not have.
         #
@@ -195,15 +195,13 @@ jobs:
         # deprecated key exists at all. A gate failing on those would be pressure
         # to delete the explanation, which is the opposite of what is wanted.
         #
-        # ADRs are records and keep their own words; the upgrade note names the
-        # deprecated keys on purpose.
+        # The upgrade note names the deprecated keys on purpose.
         run: |
           hits=$(grep -rniE '\btier[- ]?[123]\b' docs README.md \
-            | grep -v '^docs/adr/' \
             | grep -v '^docs/upgrading-to-inline-evaluation.md' \
             || true)
           if [ -n "$hits" ]; then
-            echo "tier vocabulary in user-facing docs (ADR-0017 retired it):"
+            echo "tier vocabulary in user-facing docs (the tier model is retired):"
             echo "$hits"
             exit 1
           fi
@@ -241,7 +239,7 @@ jobs:
         # either.
         run: |
           hits=$(grep -rniE 'cannot be bypassed|cannot bypass|bypass is prevented|impossible to bypass|tamper-proof' \
-            docs README.md 2>/dev/null | grep -v '^docs/adr/' || true)
+            docs README.md 2>/dev/null || true)
           if [ -n "$hits" ]; then
             echo "prevention claim about bypass in user-facing docs:"
             echo "$hits"

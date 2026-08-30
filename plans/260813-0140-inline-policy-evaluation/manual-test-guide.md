@@ -11,8 +11,8 @@ hooks, see real payloads, and check real verdicts.
 
 **What this cannot tell you:** whether OpenBox's actual policy engine agrees with
 the stub, and in particular whether a **raw-rego org policy** is now enforced.
-That is ADR-0017's headline claim and it needs the real backend. Everything else
-below is genuinely checkable.
+That is that decision's headline claim and it needs the real backend. Everything
+else below is genuinely checkable.
 
 ---
 
@@ -87,7 +87,7 @@ mkdir -p /tmp/obx-test/proj && cd /tmp/obx-test/proj
 ```
 
 Expect it to say **`mode: ENFORCE`** and **`Governed: THIS PROJECT ONLY`**. Both
-are ADR-0016 defaults and worth confirming you saw.
+are that decision defaults and worth confirming you saw.
 
 Finally, keep the audit out of your real config dir:
 
@@ -106,7 +106,8 @@ the hook payload on stdin.
 
 **Why it matters:** before this change, a `Write` was decided by a local
 evaluator and never reached the server at all. This is the behavioural heart of
-ADR-0017, and it is the test that catches a regression to a risk-selected subset.
+that decision, and it is the test that catches a regression to a risk-selected
+subset.
 
 Restart the stub with a deny:
 
@@ -181,8 +182,9 @@ the honest trade: enforcement gets coarser, not broken.
 
 ### T4 — both outage branches ⭐
 
-**Why it matters:** this is the trade ADR-0017 makes, and the limit the README
-documents. Stop the stub first — an unreachable control plane is the whole point.
+**Why it matters:** this is the trade that decision makes, and the limit the
+README documents. Stop the stub first — an unreachable control plane is the whole
+point.
 
 ```bash
 pkill -f obx-test/stub.py; sleep 1
@@ -247,8 +249,8 @@ appear to work.
 /tmp/obx-test/openbox dev sync; echo "exit=$?"
 ```
 
-**Expect** exit **1** and a message naming ADR-0017 and saying the leftover
-`policy-bundle.json` is inert.
+**Expect** exit **1** and a message naming that decision and saying the
+leftover `policy-bundle.json` is inert.
 
 ### T7 — deprecated keys say so
 
@@ -312,7 +314,7 @@ check `<os-config-dir>/openbox/enforcements.jsonl` for stray lines.
 
 | Not covered | Why | Needs |
 |---|---|---|
-| **A raw-rego org policy is enforced** | the stub is not OPA; this is ADR-0017's headline claim | the real backend + OPA |
+| **A raw-rego org policy is enforced** | the stub is not OPA; this is that decision's headline claim | the real backend + OPA |
 | One `ActivityStarted` stored per gated call | the stub counts requests, not stored rows | core + its database |
 | The approval hold and rewake | needs a real approval record to poll | full stack |
 | Codex | same shape, but no Codex session was driven | a Codex install |

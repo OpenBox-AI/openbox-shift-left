@@ -10,10 +10,10 @@ import (
 	"github.com/joho/godotenv"
 )
 
-// envfile.go — the dotenv codec for ~/.openbox/.env (ADR-0015).
+// envfile.go — the dotenv codec for ~/.openbox/.env.
 //
-// The READ side is joho/godotenv at its defaults (D-OSS-7). That reverses
-// ADR-0015's "hand-rolled rather than a dependency", deliberately and with the
+// The READ side is joho/godotenv at its defaults (D-OSS-7). That reverses that
+// decision's "hand-rolled rather than a dependency", deliberately and with the
 // consequences measured rather than assumed — see ParseEnvFile's comment for
 // exactly what changed. The WRITE side is still ours: it has to emit the header
 // below and merge unknown keys, neither of which the library does.
@@ -28,12 +28,12 @@ import (
 //
 // It is a security control, not decoration. This file is the ONLY copy of
 // credentials the backend shows exactly once, and it is plaintext — a human who
-// opens it should learn both facts here rather than from an ADR they will not
-// read.
+// opens it should learn both facts here rather than from a decision record they
+// will not read.
 const envFileHeader = `# OpenBox credentials for this machine — written by ` + "`openbox auth`" + `.
 #
 # PLAINTEXT. 0600 on macOS/Linux; on Windows 0600 is a no-op and other local
-# accounts can read this file (ADR-0015). Anything running as you can read the
+# accounts can read this file. Anything running as you can read the
 # signing key below and sign governance events as this agent.
 #
 # This is the ONLY copy. OpenBox shows the API key and signing key once, at
@@ -100,11 +100,11 @@ func ParseEnvFile(path string) (map[string]string, error) {
 // atomically, 0600, under a 0700 parent.
 //
 // Merge, not replace, and that matters more under the secrets-only split than it
-// would otherwise (ADR-0015). `openbox auth` writes exactly three keys, so any
-// other key in the file was put there by a human — someone who hand-added
-// OPENBOX_AGENT_DID to override a coordinate has authored a key this writer must
-// keep, even though nothing here will ever write it. Dropping it would silently
-// undo a deliberate override.
+// would otherwise. `openbox auth` writes exactly three keys, so any other key in
+// the file was put there by a human — someone who hand-added OPENBOX_AGENT_DID
+// to override a coordinate has authored a key this writer must keep, even though
+// nothing here will ever write it. Dropping it would silently undo a deliberate
+// override.
 //
 // Comments are not preserved: the header is rewritten from the constant above
 // and a user's own comments are lost. That is the documented limit of "preserve

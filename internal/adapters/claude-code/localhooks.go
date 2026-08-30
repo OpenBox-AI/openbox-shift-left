@@ -11,8 +11,8 @@ import (
 
 // localhooks.go — PROJECT hook scope (CredentialRef.ProjectDir).
 //
-// This is what `openbox init` does by DEFAULT (ADR-0016), because it is the only
-// scope the CLI can complete by itself: Install merges the hook entries into
+// This is what `openbox init` does by DEFAULT, because it is the only scope the
+// CLI can complete by itself: Install merges the hook entries into
 // <dir>/.claude/settings.local.json — the per-developer, git-ignored Claude Code
 // settings layer — pointing at the plugin's engine binary, and they take effect
 // on the next session in that directory. Sessions started in any other directory
@@ -26,9 +26,9 @@ import (
 // The merge preserves everything foreign and replaces what is ours. Existing
 // settings keys, and hook entries a developer added themselves, survive
 // untouched; our own entry is recognised by its ARGV SHAPE rather than by an
-// exact command string, so a registration left behind at a DIFFERENT engine
-// path — the residue of an install run with another HOME — is dropped and
-// replaced rather than kept beside the current one.
+// exact command string, so a registration left behind at a DIFFERENT engine path
+// — the residue of an install run with another HOME — is dropped and replaced
+// rather than kept beside the current one.
 //
 // Keeping it is what the exact-string comparison used to do, and the cost was
 // invisible: both engines fired for every event, so every governed tool call was
@@ -119,9 +119,9 @@ func writeLocalHooks(projectDir, engine string) error {
 		if hasLocalHookCommand(entries, command) {
 			// Already ours at this engine — but "ours" is matched by COMMAND, and
 			// the registration SHAPE around that command can still be stale. The
-			// prompt gate raised UserPromptSubmit's timeout to the gating ceiling
-			// (ADR-0020); a re-run that merely skipped here kept the old 5s kill,
-			// so Claude Code killed the gate mid-evaluation and failed open —
+			// prompt gate raised UserPromptSubmit's timeout to the gating
+			// ceiling; a re-run that merely skipped here kept the old 5s kill, so
+			// Claude Code killed the gate mid-evaluation and failed open —
 			// silently, forever, through the very command the docs name as the
 			// upgrade remedy. Reconcile the fields this installer owns on our
 			// entries (timeout, statusMessage); foreign hooks stay untouched.
@@ -472,15 +472,14 @@ func splitEngineToken(cmd string) (engine, rest string, ok bool) {
 // with the same activity_id land in core's dedupe, but the duplicate PreToolUse
 // gate would evaluate and hold twice, which is a real latency and approval
 // defect. Normalising both sides is what keeps the merge idempotent across the
-// format change.
-// reconcileLocalHook updates the registration shape — timeout and
-// statusMessage, the fields this installer owns — on OUR hook entries, matched
-// by exact command under the same identity rule as hasLocalHookCommand. It
-// never touches a foreign hook, another of our invocations (the rewake watcher
-// has its own command), or the group matcher. It exists because ownership
-// matching by command made a re-init SKIP an entry whose command already
-// matched, which pinned every shape change to fresh installs only — found live
-// when the ADR-0020 ceiling raise did not arrive on a re-init.
+// format change. reconcileLocalHook updates the registration shape — timeout
+// and statusMessage, the fields this installer owns — on OUR hook entries,
+// matched by exact command under the same identity rule as hasLocalHookCommand.
+// It never touches a foreign hook, another of our invocations (the rewake
+// watcher has its own command), or the group matcher. It exists because
+// ownership matching by command made a re-init SKIP an entry whose command
+// already matched, which pinned every shape change to fresh installs only —
+// found live when that decision ceiling raise did not arrive on a re-init.
 func reconcileLocalHook(entries []any, command string, timeoutSec int, statusMessage string) []any {
 	want := unquoteHookCommand(command)
 	for _, e := range entries {
@@ -528,7 +527,7 @@ func unquoteHookCommand(command string) string {
 
 // localHookCommand builds a hook command line with the engine path QUOTED.
 //
-// Unquoted was a latent bug that ADR-0016 promoted to a live one. The engine
+// Unquoted was a latent bug that that decision promoted to a live one. The engine
 // resolves to ~/.claude/plugins/openbox-observe/bin/openbox, so a home directory
 // containing a space — an ordinary macOS or Windows account named for a person —
 // produced a command a shell splits into two tokens. Every hook in that project

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # 28-usage.sh — per-turn model + token usage, and the arithmetic that makes it
-# worth having (ADR-0014).
+# worth having.
 #
 # The design of this phase is that COUNTING is the assertion, not existence.
 # "Usage arrived" is nearly worthless here: every interesting failure mode —
@@ -29,7 +29,7 @@ TB_DIR="$(cd "$(dirname "$0")" && pwd)"
 # would only add noise to the counts.
 export OPENBOX_ENFORCE=0
 # Default posture for the capture itself — deliberately NOT setting OPENBOX_FINOPS,
-# so this phase also proves the ADR-0014 default: an unconfigured session captures.
+# so this phase also proves that decision default: an unconfigured session captures.
 unset OPENBOX_FINOPS 2>/dev/null || true
 [ -d "$TB_PROJECT/.claude" ] || tb_fatal "project not governed — run 10-onboard.sh first"
 
@@ -206,7 +206,7 @@ fi
 
 # ── F. no content on the usage path ───────────────────────────────────────────
 tb_step "F. INV-2 end to end — the narrowed claim"
-# This is the only END-TO-END proof that INV-2 still holds after ADR-0014 replaced
+# This is the only END-TO-END proof that INV-2 still holds after that decision replaced
 # the transcript projection's structural impossibility with an allowlist. The unit
 # sentinel test is necessary, not sufficient; this is the assertion a privacy
 # reviewer should be pointed at.

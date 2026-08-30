@@ -13,7 +13,7 @@ whole phase changed **no test outcome**: 1277 declared, 1861 verdicts, 28 skips,
 | `contracts/dev-event/schema/*.json` | `api/` | **two code changes**, see below |
 | `contracts/dev-event/{MAPPING,COVERAGE}.md` | `docs/` | inert |
 | `contracts/dev-event/README.md` | `docs/dev-event-contract.md` | inert, renamed to avoid colliding with the idea of a docs README |
-| `contracts/dev-event/ext-core/` | **deleted** | tombstone; ADR-0004 is the record |
+| `contracts/dev-event/ext-core/` | **deleted** | tombstone; that decision is the record |
 | `docs/testbed/` | `docs/test/` | **not in the plan** — see below |
 | — | `init/` | new, documentation-only |
 
@@ -69,9 +69,9 @@ The sweep of `.go` files found eleven, and they were not all comments:
   `main.go:462` each print a path for the reader to go and look at. Left alone,
   they would have sent users to `deploy/managed/`, which no longer exists.
 - **a reference to something this phase deleted** —
-  `internal/client/acceptancetest/acceptance_test.go:9` pointed at
-  `ext-core/README.md`. Replaced with the fact it carried (retired 2026-07-15)
-  and the surviving record (ADR-0004), rather than a link to nothing.
+`internal/client/acceptancetest/acceptance_test.go:9` pointed at
+`ext-core/README.md`. Replaced with the fact it carried (retired 2026-07-15)
+and the surviving record, rather than a link to nothing.
 - the rest are package comments naming the contract, the schema, or `COVERAGE.md`.
 
 ## `init/` is documentation-only, and the copies are real

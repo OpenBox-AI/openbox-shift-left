@@ -7,10 +7,10 @@
 // per-attempt telemetry, whether the client RETRIED around the refusal or
 // SURFACED it to the developer.
 //
-// That is the whole of ADR-0021 §9, the only thing still keeping that ADR in
-// DRAFT: a refusal shape the client retries around is worse than no refusal at
-// all — the developer sees a slow session instead of a policy decision, and the
-// call goes through on the retry.
+// That is the whole of that decision, the only thing still keeping that decision
+// record in DRAFT: a refusal shape the client retries around is worse than no
+// refusal at all — the developer sees a slow session instead of a policy
+// decision, and the call goes through on the retry.
 //
 // ── READ THIS BEFORE RUNNING IT ───────────────────────────────────────────────
 //

@@ -51,7 +51,7 @@ func TestShouldEscalate(t *testing.T) {
 	}
 }
 
-// TestKeepTighterHoldsTheTier1Floor is deleted with KeepTighter (ADR-0017).
+// TestKeepTighterHoldsTheTier1Floor is deleted with KeepTighter.
 //
 // It covered the one thing that function existed for: a degraded evaluation
 // must not replace a LOCAL deny/ask with VerdictUnknown and let the call

@@ -3,8 +3,8 @@
 Operation: `/ak-docs update`. Scope confirmed with the owner: user route + architecture/privacy
 corrections + contract docs + `CLAUDE.md`. `docs/testbed/e2e.md` deliberately out of scope.
 
-Trigger: ADR-0021 shipped (contract v1.5) and the docs route had never caught up; the working tree
-also carried ~1800 lines of fixes, **committed mid-session** by a parallel session (`3e4527f`
+Trigger: that decision shipped (contract v1.5) and the docs route had never caught up; the working
+tree also carried ~1800 lines of fixes, **committed mid-session** by a parallel session (`3e4527f`
 → `5192ce5`), so every claim below now describes committed code rather than a dirty tree.
 
 ## What was false, and is not any more
@@ -14,7 +14,7 @@ also carried ~1800 lines of fixes, **committed mid-session** by a parallel sessi
 | "No daemon, no proxy" | `README.md` headline, quickstart step 4, How-it-works | `gateway/proxy.go` + `gatewayservice.WriteUnit` (launchd/systemd) |
 | "OpenBox does not proxy … traffic to its model provider" | `README.md` limits, `architecture.md` §Egress | the gateway does exactly that |
 | "There is still no daemon and no socket" | `architecture.md`, `upgrading-to-inline-evaluation.md` | same — `architecture.md` contradicted its own gateway section 150 lines later |
-| "the observe path … still carries no tool commands or file bodies" | `upgrading-to-inline-evaluation.md` | ADR-0019 P1 (v1.3), and the README's own index entry for that file said the opposite |
+| "the observe path … still carries no tool commands or file bodies" | `upgrading-to-inline-evaluation.md` | that decision (v1.3), and the README's own index entry for that file said the opposite |
 | "With `content_capture: false` there are no span rows at all" | `architecture.md` | gateway span's `http_*` + fingerprint ship with capture OFF |
 | adapter-facing `span.request_body/response_body` "not an egress channel … no adapter has ever populated either" | `MAPPING.md` §1, §3 | `gatewayObservedSpan` reads both |
 | contract **v1.2** | `MAPPING.md` header | `x-schema-version: 1.5` |

@@ -150,7 +150,7 @@ credential guard only scans this module". That premise is false for a subpackage
 the module — `moduleSources` already walks it. The exemption is exactly one module
 prefix with a trailing slash, and `TestSelfModuleExemptionIsNarrow` pins that
 `client`, `decision`, `transport` and a lookalike `gatewayfoo` stay outside it.
-This is not the allowlist widening ADR-0023 forbids.
+This is not the allowlist widening that decision forbids.
 
 ## Drills — run, not claimed
 

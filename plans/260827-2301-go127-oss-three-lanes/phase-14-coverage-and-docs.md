@@ -23,11 +23,11 @@
   per signal, per lane, what is seen, what is authoritative, what is absent.
   COVERAGE.md §3.4 already refuses to average the two providers; extend that habit
   to lanes.
-- `README.md` has carried a false claim before (the ADR-0019 leftover). Grep for
+- `README.md` has carried a false claim before (that decision leftover). Grep for
   claims about what is "never sent" and re-verify each against current code.
 - The CA is a real security downgrade in exchange for desktop coverage. Document it
-  the way ADR-0015 documents plaintext credentials: argue it against the prior
-  rationale, not around it.
+the way that decision documents plaintext credentials: argue it against the
+prior rationale, not around it.
 - **The dependency story changes shape again here** (validation round 2): phase 07
   documented the stage-A set (six module-scoped dependencies); stage B adds
   goproxy (in `transport/`) and otlpreceiver (in `telemetry/`). Document
@@ -61,8 +61,8 @@ Documentation ownership, to avoid the duplication this repo warns about:
 
 | Document | Owns |
 |---|---|
-| ADR-0022 | why the lanes exist; the four rulings; the adoptions |
-| ADR-0021 (amended) | the gateway, and §5's reversal |
+| that decision | why the lanes exist; the four rulings; the adoptions |
+| that decision (amended) | the gateway, and §5's reversal |
 | COVERAGE.md | what each lane sees, per provider |
 | architecture.md | assurance limits |
 | data-and-privacy.md | what egresses and what is stored locally |
@@ -123,10 +123,10 @@ machine-owned artifacts rather than copying their content.
 | Risk | Mitigation | Signal it broke | Response |
 |---|---|---|---|
 | Docs claim more than phase 13 proved | Write from phase reports, not from plan text; the verification report forces the split | A claim with no evidence label | Downgrade the claim; this is the product's founding rule |
-| A false claim survives (the ADR-0019 README precedent) | Explicit absolute-claim sweep | An absolute claim contradicted by code | Fix and note it in the verification report |
-| Duplication drifts between ADR, COVERAGE and CLAUDE.md | Ownership table above; link rather than copy | The same fact stated differently in two files | Delete the copy, keep the owner |
+| A false claim survives (that decision README precedent) | Explicit absolute-claim sweep | An absolute claim contradicted by code | Fix and note it in the verification report |
+| Duplication drifts between decision record, COVERAGE and CLAUDE.md | Ownership table above; link rather than copy | The same fact stated differently in two files | Delete the copy, keep the owner |
 | **Assumption: phases 09–13 all landed.** If a lane descoped, the docs must say so | Write last, from reality | A phase report says descoped | **Adjust**: document the descope as a stated limit — that is a valid outcome, not a failure |
-| The privacy doc implies the CA is protected | Mirror ADR-0015's honesty about plaintext credentials | Any sentence implying at-rest protection | Rewrite; do not soften |
+| The privacy doc implies the CA is protected | Mirror that decision's honesty about plaintext credentials | Any sentence implying at-rest protection | Rewrite; do not soften |
 | The dependency cost gets averaged into a reassuring sentence | Per-module table with numbers; the accepted-cost framing is the record | "lightweight dependencies" or similar appears | Replace with the measured numbers |
 
 ## Security considerations
@@ -166,7 +166,7 @@ Three companion rules:
    the retry-count census generalize no further than that, and the three
    denominators (5,340 / 5,231 / 5,049) are different populations — the
    verification report explains which.
-2. **The all-zero `x-stainless-retry-count` must never appear near ADR-0021 §9.**
+2. **The all-zero `x-stainless-retry-count` must never appear near.**
    A corpus containing no refusals is evidence that the header exists, not
    evidence about retry-around behaviour. Probe A remains the only source for §9,
    and `probes/refusal-injector/` + its runbook are now the instrument.
@@ -182,6 +182,6 @@ and the backend ask gains a capacity number — roughly **334 MB of spool per
 
 ## Next steps
 
-Plan complete. Remaining open items — probe A's outcome, ADR-0021 §10's OAuth
+Plan complete. Remaining open items — probe A's outcome, that decision's OAuth
 branch, and the live-stack claims — are tracked in the verification report, not in
 this plan.

@@ -49,14 +49,16 @@ Conclusion: adding `decision_authority`/`failure_policy` or removing the 5 dead 
 
 ## Q5 — Doc surface
 
-**ADR-0017** `docs/adr/ADR-0017-inline-policy-evaluation.md:222-252`, section "## Policy provenance as evidence". Exact promise (237-239):
+**that decision** `:222-252`, section "## Policy provenance as evidence". Exact promise (237-239):
 > "Posture therefore carries **who decides** (`decision_authority: control_plane`) and **what happens when they cannot be reached** (`failure_policy: fail_open | fail_closed`)."
 
-Same section (224-227) is the ADR's own justification for the bundle fields' removal from posture's *reported* surface ("Deleting the bundle removes what posture used to report... version, id, content hash, signature-verification outcome... the question has changed rather than gone unanswered") — i.e., the ADR text already treats `bundle_*`/`staleness` as gone from reporting; code just never followed through in `Metadata()`.
+Same section (224-227) is that decision's own justification for the bundle fields' removal from posture's *reported* surface ("Deleting the bundle removes what posture used to report.. version, id, content hash, signature-verification outcome.. the question has changed rather than gone unanswered") — i.e., that decision text already treats `bundle_*`/`staleness` as gone from reporting; code just never followed through in
+`Metadata()`.
 
 Other docs: `docs/architecture.md:128` and `docs/data-and-privacy.md:99` mention "posture" generically (reports "effective posture" / "which state was in effect") — no key-level promises, nothing to reconcile beyond staying generally accurate. `contracts/dev-event/MAPPING.md` — zero mentions of posture/bundle_*/staleness/decision_authority/failure_policy; not a blocker, just an existing documentation gap (out of requested scope). `testbed/50-lineage.sh` / `docs/testbed/e2e.md:247` `bundle_policy_id`/`bundle_sha256` mentions are the attestation feature (see Q3), unrelated.
 
-**Redundancy question** (fail_closed bool vs failure_policy string): `fail_closed` bool is already on the wire via `Flags()`→`Metadata()` (posture.go:204-205, 244-246). `FailurePolicy` is derived 1:1 from it (154-157: `if p.FailClosed { ... FailClosed } else FailOpen`) — same bit, two encodings, genuinely redundant as *information*. ADR-0017 (237-239, 243-248) frames `failure_policy` as the deliberate paired vocabulary term beside `decision_authority` (a human/`doctor`-readable enum-string pair, "who decides" + "what happens when unreachable"), not as filling an information gap `fail_closed` left open. Read as intentional design, not oversight — worth noting, not blocking.
+**Redundancy question** (fail_closed bool vs failure_policy string): `fail_closed` bool is already on the wire via `Flags()`→`Metadata()` (posture.go:204-205, 244-246). `FailurePolicy` is derived 1:1 from it (154-157: `if p.FailClosed { ... FailClosed } else FailOpen`) — same bit, two encodings, genuinely redundant as *information*. That decision (237-239, 243-248) frames `failure_policy` as the deliberate paired vocabulary term beside `decision_authority` (a human/`doctor`-readable enum-string pair, "who decides" + "what happens when unreachable"), not as filling an information gap `fail_closed` left open. Read as intentional design, not oversight — worth noting, not
+blocking.
 
 ## Constraints for the fix
 

@@ -20,11 +20,12 @@ cuts, 7 findings (1 minor correctness, 6 cleanup) — all 7 fixed in-tree and re
 
 ## YAGNI audit (no cuts)
 
-ADR-0020/docs: required by repo truth rules + semantics-ADR precedent. Testbed §A3 +
-`OPENBOX_HALT_DIR`: verification infra the repo's evidence discipline demands. Latch `TS`:
-kept on evidence (plan 260814-2235 phase-03 exists because enforcement records lacking ts
-hurt the Aug-14 diagnosis). Deliberately not built (validated de-scopes): doctor listing,
-unlatch cmd, Codex latch, hard-kill. New exports all consumed.
+That decision/docs: required by repo truth rules + semantics-decision record precedent.
+Testbed §A3 + `OPENBOX_HALT_DIR`: verification infra the repo's evidence discipline
+demands. Latch `TS`: kept on evidence (plan 260814-2235 phase-03 exists because
+enforcement records lacking ts hurt the Aug-14 diagnosis). Deliberately not built
+(validated de-scopes): doctor listing, unlatch cmd, Codex latch, hard-kill. New exports
+all consumed.
 
 ## Findings (all fixed)
 

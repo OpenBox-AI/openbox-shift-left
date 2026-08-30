@@ -95,10 +95,10 @@ form:
 ### CONFORMANCE
 
 38 numbered cases run, 38 pass (C8/C9 and C17 do not exist — deliberately deleted
-under ADR-0006 and ADR-0017; C39 runs as `TestContentCaptureCredentialCoverage`
-rather than as a subtest). These assert on real POSTed bytes and cover the content
-gate, redact-before-send ordering, both failure-policy branches, the enforce cascade,
-HALT rendering and the capture-off half of every content class.
+under that decision and; C39 runs as `TestContentCaptureCredentialCoverage` rather
+than as a subtest). These assert on real POSTed bytes and cover the content gate,
+redact-before-send ordering, both failure-policy branches, the enforce cascade, HALT
+rendering and the capture-off half of every content class.
 
 The v1.6 contract bump moving **zero** outbound bytes is measured here rather than
 inferred, which it was when phase 08 shipped.
@@ -178,16 +178,16 @@ contains the label as a substring.
    a record. Copied verbatim from the run that produced the corpus and pinned as a
    literal list.
 4. **The desktop-app and subscription-OAuth coverage both lanes exist for.** This is
-   the motivating claim of ADR-0022 and it is **intent, not measurement**. Do not
-   read "built for it" as "covers it".
+the motivating claim of that decision and it is **intent, not measurement**. Do
+not read "built for it" as "covers it".
 5. **A real `launchctl`/systemd install.** No supervisor has run one of these units.
 6. **Bind, listen, TLS to a real socket, the real dialer.** Everything above runs over
    `net.Pipe` and an in-memory upstream.
 7. **Refusal, on all three in-path lanes.** Written, tested, and called by nothing.
-   Probe A is the only source for ADR-0021 §9; `probes/refusal-injector/` is now its
-   instrument and needs a bind-capable host, a real install and credentials.
-   **The all-zero `x-stainless-retry-count` in the corpus is evidence the header
-   exists, not evidence about retry-around behaviour.**
+Probe A is the only source for; `probes/refusal-injector/` is now its instrument and
+needs a bind-capable host, a real install and credentials. **The all-zero
+`x-stainless-retry-count` in the corpus is evidence the header exists, not evidence
+about retry-around behaviour.**
 8. **Brotli-encoded exchanges.** Excluded from fixtures (1,573 of the recorded JSON
    responses) because the standard library cannot decode them.
 9. **`GOWORK=off` for `transport/`.** Unverifiable on the dev host — `x/net v0.50.0`
@@ -239,7 +239,7 @@ and the binary-size figure had never been measured after the telemetry link.
 3. **The backend ask is unchanged and now carries a capacity number:** server-side
    dedupe on developer events (the lost-200 double-store window is irreducible
    client-side), against ~334 MB of spool per 5,000-call session.
-4. **ADR-0021 stays DRAFT on §9 alone** — what refusal shape Claude Code does not
+4. **that decision stays DRAFT on §9 alone** — what refusal shape Claude Code does not
    retry around. §5 is reversed (OD2), §8 is answered by measurement, §10 is decided.
    Filling §9 in by inference is the overstatement this product exists to prevent.
 

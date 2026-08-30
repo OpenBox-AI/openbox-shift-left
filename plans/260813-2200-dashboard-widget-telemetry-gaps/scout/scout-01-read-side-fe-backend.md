@@ -25,7 +25,7 @@ Hook `useMonitor.ts:126-161` → API `api.ts:1348-1374` → `GET /agent/{agentId
 
 Backend: `agent.controller.ts:1039-1051` → `agent.service.ts:1584-1597` → `observability.service.ts:27-100` (`getToolStats` line 68, attached as `tools` 86). `getToolStats` (244-303) unions two CTEs:
 - `metric_tools` (254-267): `observability_metrics WHERE metric_type='tool'`, `tool_name=SPLIT_PART(metric_key,'.',1)`, sums keys `%.total/%.success/%.failed/%.latency_sum_ms/%.latency_count`
-- `span_tools` (269-284): `spans JOIN sessions WHERE span_type='mcp_tool_call'` — contributes nothing for dev sessions (span-less, ADR-0013)
+- `span_tools` (269-284): `spans JOIN sessions WHERE span_type='mcp_tool_call'` — contributes nothing for dev sessions (span-less)
 
 Zero condition: `SUM(.success)=0` while `.total>0` and `.latency_*>0` → FE 0.0% → status "error". Exactly observed.
 

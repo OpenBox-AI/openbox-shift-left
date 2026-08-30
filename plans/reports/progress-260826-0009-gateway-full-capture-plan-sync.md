@@ -12,7 +12,7 @@ Verification standing on every commit: 12/12 modules green under `-race`,
 |---|---|---|---|
 | 01 | Tool content capture | implemented | testbed dormant |
 | 02 | Thinking capture | implemented | testbed dormant |
-| 03 | Decisions, ADRs, probes | **artifacts done; 5 items are USER** | P0, probe A, P1 §1, ADR-0019 acceptance, backend filing |
+| 03 | Decisions, decision records, probes | **artifacts done; 5 items are USER** | P0, probe A, P1 §1, that decision acceptance, backend filing |
 | 04 | Gateway passthrough core | **complete, reviewed** | — |
 | 05 | Capture, identity, account evidence | implemented **except req 5** | req 5 needs P0 |
 | 06 | Gateway enforcement | implemented **except the refusal shape** | 2 constants need probe A |
@@ -43,7 +43,7 @@ Three invariants, each mutation-drilled:
 **What remains open is the gating PREDICATE, and it is a product decision, not
 missing code.** `WithGate` takes `gated func(*http.Request) bool`; a nil predicate
 gates nothing and makes no round-trip. Where it should come from is genuinely
-undecided: ADR-0017 says the engine must not second-guess the decider, and ~52
+undecided: that decision says the engine must not second-guess the decider, and ~52
 model calls were measured per turn window, so gating everything is a round-trip per
 call. The gateway deliberately does not invent an answer.
 
@@ -70,9 +70,10 @@ remains for the wiring is calling these from `ServeHTTP`.
 **1. Outbound-byte assertions cannot see the receiving type.** Two span keys were
 being silently dropped by core's `SpanData` on `Unmarshal`: `http_status` (core
 spells it `http_status_code`) and `credential_fingerprint` (core has no such field
-— zero matches across openbox-core). Account binding, ADR-0021 §6's whole purpose,
-could never have fired. Every mutation drill, golden fixture and conformance case
-here passed throughout, because all of them assert what this client SENDS.
+— zero matches across openbox-core). Account binding, that decision's whole
+purpose, could never have fired. Every mutation drill, golden fixture and
+conformance case here passed throughout, because all of them assert what this
+client SENDS.
 
 Fixed: correct key name, plus the fingerprint on
 `attributes["openbox.credential_fingerprint"]` (a real `SpanData` field that
@@ -121,13 +122,13 @@ commands. A full sweep found zero remaining — the only hits were disclaimers.
 
 | Item | Needs | Unblocks |
 |---|---|---|
-| **P0** — does `ANTHROPIC_BASE_URL` redirect, per auth mode | a human + both auth modes; API-key half needs a key this machine lacks | phase 05 req 5, ADR-0021 §8, the tier's scope statement |
-| **probe A** — a refusal shape that does not trip capability-rejection retry | an INTERACTIVE session: the "disabled for the rest of the session" signal needs ≥2 turns in one process | phase 06's 2 constants, ADR-0021 §9 |
+| **P0** — does `ANTHROPIC_BASE_URL` redirect, per auth mode | a human + both auth modes; API-key half needs a key this machine lacks | phase 05 req 5, the tier's scope statement |
+| **probe A** — a refusal shape that does not trip capability-rejection retry | an INTERACTIVE session: the "disabled for the rest of the session" signal needs ≥2 turns in one process | phase 06's 2 constants, that decision |
 | **probe A2** — ping-based approval hold | same | whether REQUIRE_APPROVAL can hold instead of refuse |
-| **P1 §1** — org id from the OAuth bearer | gated behind P0 1b arriving | ADR-0021 §10's branch |
-| **ADR-0019 acceptance** | owner signature | nothing in code |
+| **P1 §1** — org id from the OAuth bearer | gated behind P0 1b arriving | that decision's branch |
+| **that decision acceptance** | owner signature | nothing in code |
 | **Backend asks** | outward-facing, cross-repo | account binding matching server-side |
-| **A live stack** | infrastructure | phase 08, and Track A's dormant assertions since ADR-0017 |
+| **A live stack** | infrastructure | phase 08, and Track A's dormant assertions since that decision |
 
 P1 §3 was run (it needs no credential, network or quota):
 `oauthAccount.organizationUuid` and `emailAddress` are readable locally, which is
@@ -156,7 +157,7 @@ these stay a tool.
 
 ## Decisions made in-flight that an owner should confirm
 
-1. **`--gateway` is OPT-IN.** ADR-0016's lesson argues for on-by-default;
+1. **`--gateway` is OPT-IN.** That decision's lesson argues for on-by-default;
    enforcement-by-default is inert without a policy, whereas this redirects live
    model traffic through a path never run against a real stack, with no Windows
    packaging. `TestGatewayIsOffByDefault` reads `init`'s help, so flipping it is a

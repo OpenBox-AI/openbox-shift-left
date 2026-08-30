@@ -33,20 +33,17 @@ flowchart LR
 Two paths, deliberately separate:
 
 - **A gated tool call waits for OpenBox to decide it.** Every gated PreToolUse call
-  is evaluated by `/evaluate` before the tool runs
-  ([ADR-0017](adr/ADR-0017-inline-policy-evaluation.md)). One policy
-  implementation, on the server. This path has no daemon and no socket
-  ([ADR-0006](adr/ADR-0006-in-process-decider.md) is untouched — a bounded outbound
-  call is not a resident process). The model-call gateway
-  ([ADR-0021](adr/ADR-0021-openbox-local-gateway.md)) is a resident process, and it
-  is a third path rather than a change to this one: opt-in, per machine, and
-  reaching a surface no hook can see.
+is evaluated by `/evaluate` before the tool runs. One policy implementation, on the
+server. This path has no daemon and no socket (a bounded outbound call is not a
+resident process). The model-call gateway is a
+resident process, and it is a third path rather than a change to this one: opt-in,
+per machine, and reaching a surface no hook can see.
 
-  This is the trade the ADR argues: enforcement now depends on reaching the control
-  plane, and under the default `fail_closed:false` a gated call PROCEEDS when it
-  cannot be reached. What it buys is that an org whose policy is hand-written rego
-  is actually enforced — the local evaluator could never evaluate that at all, so
-  those gates simply opened.
+That is the trade: enforcement now depends on reaching the
+control plane, and under the default `fail_closed:false` a gated call PROCEEDS when
+it cannot be reached. What it buys is that an org whose policy is hand-written rego
+is actually enforced — the local evaluator could never evaluate that at all, so
+those gates simply opened.
 
   The one thing that stays local is **secret redaction**: it must run before content
   leaves the machine, and it sees the whole body where the server sees at most the
@@ -65,8 +62,7 @@ Two paths, deliberately separate:
 
 ## Layout
 
-One Go module, `github.com/openbox-ai/openbox-shift-left`
-([ADR-0024](adr/ADR-0024-single-module-layout.md)). One row per top-level
+One Go module, `github.com/openbox-ai/openbox-shift-left`. One row per top-level
 directory, each saying what belongs in it **and what does not** — the second half
 is the part that stops a directory quietly becoming a junk drawer.
 
@@ -76,7 +72,7 @@ is the part that stops a directory quietly becoming a junk drawer.
 | `build/` | packaging and release configuration (`.goreleaser.yaml`) | anything a build produces. Artefacts are git-ignored |
 | `cmd/` | one directory per **shipped** executable, `main` package only | a binary nothing ships. A dev instrument belongs in `tools/` |
 | `deployments/` | managed-settings templates an org deploys (MDM) | anything read at runtime by this repo's own code |
-| `docs/` | design and user documents, and the ADRs | anything a program parses |
+| `docs/` | design and user documents, and the decision records | anything a program parses |
 | `init/` | **illustrative** copies of the supervisor units, and only that | a `go:embed`, or anything treated as authoritative. `internal/cli/laneservice` renders the real ones |
 | `internal/` | every package this repo does not publish — which is all of them | a package meant for external import. Publishing one reopens the `/pkg` question |
 | `plans/` | stateful delivery records: plans, phases, reports, journals | evergreen documentation. A plan is true on its date and is never rewritten |
@@ -97,14 +93,14 @@ documented install command.
 | `internal/adapters/claude-code/`, `internal/adapters/codex/` | one thin adapter each: native event shape, mapper, `OutputContract`, installer |
 | `internal/adapters/common/devconfig/`, `internal/adapters/common/git/` | shared config/posture resolution; commit trailer, notes and attestation |
 | `client/` | the openbox-core client: wire payload, AIP signing, verdict parsing |
-| `decision/` | local secret detection and redaction (all that survives [ADR-0017](adr/ADR-0017-inline-policy-evaluation.md)) |
-| `gateway/` | the local model-call relay: byte-identical forward, capture, the gate ([ADR-0021](adr/ADR-0021-openbox-local-gateway.md)) |
-| `telemetry/` | the local OTLP receiver — the `:otel:` lane's intake ([ADR-0022](adr/ADR-0022-native-telemetry-and-transport-lanes.md)) |
+| `decision/` | local secret detection and redaction (all that survives) |
+| `gateway/` | the local model-call relay: byte-identical forward, capture, the gate |
+| `telemetry/` | the local OTLP receiver — the `:otel:` lane's intake |
 | `transport/` | the in-path CONNECT/TLS relay — the `:proxy:` lane |
 | `cli/` | everything behind the `openbox` commands: `approver`, `prompt`, the gateway's install/inspect/emit halves, and the three-lane install machinery (`activation`, `laneservice`, `atomicfile`) |
 | `conformance/` | the event contract's conformance suite |
 | `internal/actions/openbox-git-action/` | commit → deploy lineage for CI |
-| `depguard/` | the dependency and layering guards ([ADR-0024](adr/ADR-0024-single-module-layout.md)) |
+| `depguard/` | the dependency and layering guards |
 
 `internal/gateway/internal/dialhook` keeps its **nested** `internal/`
 deliberately: it restricts importers to the `internal/gateway` subtree, which is
@@ -120,7 +116,7 @@ enforcement path.
 **Layering is enforced by tests now, not by the compiler.** Fifteen modules used
 to make "no adapter imports another, and the CLI reaches them only through the
 registry" mechanical; `internal/depguard` carries it instead, and a test is weaker
-than a compiler. ADR-0024 records that as the price of the collapse.
+than a compiler. That decision records that as the price of the collapse.
 
 ## Governance levels
 
@@ -130,7 +126,7 @@ Each install runs at exactly one level, and reports which:
 |---|---|---|
 | **Observe** (default) | normalized telemetry, lineage, cost. Never blocks. | none — spooled |
 | **Advisory** | verdicts and guardrail findings are recorded and surfaced back into the session, never applied | none |
-| **Enforce** (default since [ADR-0016](adr/ADR-0016-default-install-posture.md)) | the PreToolUse and UserPromptSubmit gates apply the verdict: deny/block, ask, or redact — and a HALT stops the whole session ([ADR-0020](adr/ADR-0020-prompt-gate-and-halt-session-stop.md)) | one round-trip to `/evaluate` per gated hook, bounded by the provider's hook ceiling |
+| **Enforce** (default since) | the PreToolUse and UserPromptSubmit gates apply the verdict: deny/block, ask, or redact — and a HALT stops the whole session | one round-trip to `/evaluate` per gated hook, bounded by the provider's hook ceiling |
 
 Enforce is three named things, not three tiers. They are independent — any one can
 be on without the others:
@@ -144,14 +140,11 @@ be on without the others:
   no known format. What that reaches, and the two shapes it does not, is measured in
   [data-and-privacy.md](data-and-privacy.md#what-the-scanner-catches--and-where-it-stops).
 - **Inline evaluation.** The gated call is sent to `/evaluate` and the verdict is
-  applied before the tool runs. Every gated class, not a risk-selected subset —
-  risk is a property of the policy. Prompts gate the same way: `UserPromptSubmit`
-  evaluates the `PromptSubmitted` event before the prompt is processed, and a
-  HALT/BLOCK blocks (and erases) the prompt ([ADR-0020](adr/ADR-0020-prompt-gate-and-halt-session-stop.md)).
-  If the control plane cannot be reached, the
-  org's `fail_closed` decides: fail-open proceeds (the default), fail-closed denies.
-  No retry: one hiccup must not become a client-side amplifier across every tool
-  call of every session.
+applied before the tool runs. Every gated class, not a risk-selected subset — risk is a property of the
+policy. Prompts gate the same way: `UserPromptSubmit` evaluates the `PromptSubmitted` event before the
+prompt is processed, and a HALT/BLOCK blocks (and erases) the prompt. If the control plane cannot be
+reached, the org's `fail_closed` decides: fail-open proceeds (the default), fail-closed denies. No retry:
+one hiccup must not become a client-side amplifier across every tool call of every session.
 - **HALT ends the session.** A HALT the control plane returns is a session
   verdict, not a call verdict: the response carries Claude Code's
   `continue:false` (the turn stops immediately) and a local latch
@@ -176,9 +169,8 @@ with the approval reference in the reason — and if the decision lands later, a
 background watcher wakes the session with the outcome.
 
 An approver is a separate principal with its own credential: the dashboard,
-`openbox approve`, or a bounded autonomous approver
-([ADR-0012](adr/ADR-0012-autonomous-approver.md)). Approving on the machine that
-filed the request is refused by default.
+`openbox approve`, or a bounded autonomous approver. Approving on the machine
+that filed the request is refused by default.
 
 ## Posture as evidence
 
@@ -193,26 +185,23 @@ provenance of each value (default, your config, environment, or org mandate).
 Being precise here is part of the product.
 
 - **Commit attribution.** The `OpenBox-Session` trailer records which session was
-  live when a commit was made. That is an *inferred claim*, and a trailer can be
-  hand-written. Server-side ownership verification raises it to `attributed`.
-  Cryptographic `verified` requires the signed attestation note
-  ([ADR-0010](adr/ADR-0010-signed-commit-attestation.md)): the commit hook signs an
-  envelope into `refs/notes/openbox-attest`, the deploy action carries it, and core
-  marks `verified` only when ownership **and** an accepted attestation both hold. CI
-  must fetch that ref, which is not the default.
+live when a commit was made. That is an *inferred claim*, and a trailer can be
+hand-written. Server-side ownership verification raises it to `attributed`.
+Cryptographic `verified` requires the signed attestation note : the commit hook
+signs an envelope into `refs/notes/openbox-attest`, the deploy action carries it,
+and core marks `verified` only when ownership **and** an accepted attestation both
+hold. CI must fetch that ref, which is not the default.
 - **The signing key is readable by anything running as the developer.** It sits in
-  plaintext at `~/.openbox/.env` — `0600` on macOS/Linux, and on Windows `0600` is
-  a no-op so other local accounts can read it too
-  ([ADR-0015](adr/ADR-0015-plaintext-credential-file.md)). The coding agent under
-  governance runs arbitrary commands as that user, so it can read the key it is
-  being attested with. Attestation therefore proves **origin-of-config** — a
-  machine holding this agent's key produced this event or commit — and **not**
-  tamper-resistance against the developer or against the agent they run. The OS
-  keychain this replaced did not actually change that (it was unlocked for the
-  desktop session and readable by the same processes); the plaintext file makes it
-  legible. On an approver install the same file also holds an org key that can
-  create and rotate agents fleet-wide, which is a strictly larger blast radius
-  than one agent's seed.
+plaintext at `~/.openbox/.env` — `0600` on macOS/Linux, and on Windows `0600` is a
+no-op so other local accounts can read it too. The coding agent under governance
+runs arbitrary commands as that user, so it can read the key it is being attested
+with. Attestation therefore proves **origin-of-config** — a machine holding this
+agent's key produced this event or commit — and **not** tamper-resistance against
+the developer or against the agent they run. The OS keychain this replaced did not
+actually change that (it was unlocked for the desktop session and readable by the
+same processes); the plaintext file makes it legible. On an approver install the
+same file also holds an org key that can create and rotate agents fleet-wide,
+which is a strictly larger blast radius than one agent's seed.
 - **A project can hold a registration from an older engine until the next
   `init`.** Hooks live in a file on the developer's machine, so an install run
   with a different `HOME` used to leave a second OpenBox entry beside the current
@@ -230,11 +219,11 @@ Being precise here is part of the product.
   mandated — a `requirements.toml` cannot define one — so the shipped mandate pins
   approval and sandbox modes instead.
 - **Model calls are governed only if the local gateway is installed, and it is
-  OPT-IN.** `openbox init --gateway` (ADR-0021) points this machine's
-  `ANTHROPIC_BASE_URL` at a loopback daemon that relays every model call and can
-  refuse one on a policy verdict. Without it, tool calls are governed and model
-  calls are not — the hooks never see a model request. Three limits are worth
-  stating plainly rather than discovering:
+OPT-IN.** `openbox init --gateway` points this machine's `ANTHROPIC_BASE_URL` at
+a loopback daemon that relays every model call and can refuse one on a policy
+verdict. Without it, tool calls are governed and model calls are not — the hooks
+never see a model request. Three limits are worth stating plainly rather than
+discovering:
   - **The base claim is DETECTION, not prevention.** A developer can unset one
     environment variable. That is *visible* — a session with model turns and no
     gateway spans is queryable, and `openbox doctor` reports the exposure at every
@@ -246,17 +235,17 @@ Being precise here is part of the product.
     error body a refusal uses are provisional: Claude Code's retry logic matches on
     upstream error wording, so a wrong shape makes a policy denial look transient
     and get retried around, or disables a capability for the rest of the session.
-    ADR-0021 §9 holds that open, and phase 06 descopes to observe-only if no shape
+    That decision holds that open, and phase 06 descopes to observe-only if no shape
     qualifies.
   - **Whether subscription-OAuth traffic follows `ANTHROPIC_BASE_URL` is still
-    unresolved for THIS lane** (ADR-0021 §8). If it does not, the gateway covers
+    unresolved for THIS lane**. If it does not, the gateway covers
     API-key/console orgs only.
     What *has* been measured (2026-08-27) is the bigger question behind it: the
     terminal CLI follows the variable and **the desktop app does not**, and
     subscription-OAuth model calls are capturable by two other means that need no
     base-URL change at all — 97 calls observed, every one carrying OAuth
     authorization and none carrying `x-api-key` (openbox-logger run
-    `20260827T063932Z-225cac`). [ADR-0022](adr/ADR-0022-native-telemetry-and-transport-lanes.md)
+    `20260827T063932Z-225cac`).
     builds both lanes, so the open question is now about this lane's reach rather
     than about a class of developer being ungoverned. **Both lanes now exist and
     are installable** (2026-08-30) — see the bullet below for what that does and
@@ -274,8 +263,8 @@ Being precise here is part of the product.
     record by not waiting for the answer, and the bypass-detection argument above
     rests on a bypass leaving a hole rather than leaving no trace.
   - **Anything that can reach loopback can call the gateway, including a web page.**
-    The daemon performs no caller authentication; ADR-0021 names the loopback bind
-    as the caller boundary, and for *relaying* that is defensible — a caller
+    The daemon performs no caller authentication; the loopback bind is
+    the caller boundary, and for *relaying* that is defensible — a caller
     supplies its own credential, so it gains no access it did not already have.
     But loopback is not a user boundary on a shared machine, and it is not a
     browser boundary at all: a page the developer visits can `fetch()`
@@ -296,7 +285,7 @@ Being precise here is part of the product.
       header and have its content redacted, signed with the developer's key and
       stored as that developer's governance evidence — evidence forgery by an
       unauthenticated local caller, exactly as this bullet predicted. It is the
-      same trust boundary ADR-0015 already concedes for the signing key (anything
+      same trust boundary already conceded for the signing key (anything
       running as the developer can read it), so it grants no new *capability* — but
       it does make forgery cheaper, and a governance record that can be written by
       any local process should say so.
@@ -307,11 +296,10 @@ Being precise here is part of the product.
     buffers up to 64 MiB per in-flight request with no concurrency cap, so the same
     unauthenticated listener is a local memory-pressure lever.
 - **Two more model-call lanes exist, and both are verified by REPLAY rather than by
-  running** ([ADR-0022](adr/ADR-0022-native-telemetry-and-transport-lanes.md)).
-  `openbox init --provider claude-code --full` installs a local OTLP **telemetry**
-  receiver (`:otel:`) and an in-path CONNECT/TLS **transport** relay (`:proxy:`)
-  alongside the hooks; `--remove-all` backs every lane out. What that buys, and what
-  it does not:
+running**. `openbox init --provider claude-code --full` installs a local OTLP
+**telemetry** receiver (`:otel:`) and an in-path CONNECT/TLS **transport** relay
+(`:proxy:`) alongside the hooks; `--remove-all` backs every lane out. What that
+buys, and what it does not:
   - **The evidence is replay, not operation.** Real recorded traffic runs through the
     shipped code path on a host that cannot bind a socket, with the relay's upstream
     dial substituted. That proves the bytes forwarded and captured, the mapping, the
@@ -342,13 +330,13 @@ Being precise here is part of the product.
   - **Neither in-path lane refuses a call.** Both carry a written, tested refusal
     path that nothing calls, for the same reason the gateway's is dormant: the
     refusal shape Claude Code does not retry around is unprobed
-    ([ADR-0021](adr/ADR-0021-openbox-local-gateway.md) §9). `tools/refusal-injector/`
+    . `tools/refusal-injector/`
     is the instrument; it needs a bind-capable host, a real install and credentials.
   - **The transport lane installs a CA on the developer's machine, and that is a real
     downgrade accepted for coverage.** It is generated once, stored beside the
     credentials under `~/.openbox/` with no more protection than they have, and
     anything running as the developer can read it — the same boundary
-    [ADR-0015](adr/ADR-0015-plaintext-credential-file.md) already concedes for the
+    That decision already concedes for the
     signing key. What bounds it is **name constraint at generation**: the CA is
     constrained to the single intercepted host, so a leaked key cannot mint a usable
     certificate for anything else, and the allowlist holds that one host
@@ -380,19 +368,18 @@ Being precise here is part of the product.
   The same redactor also fires on a base64 literal in a source assignment, which
   rewrote three of this repo's own test files during the gitleaks adoption.
 - **The dependency guard bounds a package subtree's direct imports, not
-  transitive code** ([ADR-0023](adr/ADR-0023-credential-guard-scope.md), amended by
-  [ADR-0024](adr/ADR-0024-single-module-layout.md)). `internal/gateway` must never
-  read the developer's provider credential; its own files are scanned for that and
-  its imports are held to a two-entry allowlist. What no test bounds is arbitrary
-  transitive code linked into the binary — accepted, and named, because the
-  alternative was an allowlist too long to read.
+transitive code**. `internal/gateway` must never read the developer's provider
+credential; its own files are scanned for that and its imports are held to a
+two-entry allowlist. What no test bounds is arbitrary transitive code linked into
+the binary — accepted, and named, because the alternative was an allowlist too long
+to read.
 
-  The bound used to be the module, and until 2026-08-30 there were fifteen of them.
-  With one module, `go.mod` names every external dependency in the repository at
-  once, so a `go.mod`-reading allowlist would either fail outright or be "fixed" by
-  widening to the union — which looks like a fix and removes the control. The
-  allowlists moved to `internal/depguard`, scoped by directory. **Do not widen one
-  to make an import pass**; that inverts the ADR's reasoning.
+The bound used to be the module, and until 2026-08-30 there were fifteen of them.
+With one module, `go.mod` names every external dependency in the repository at
+once, so a `go.mod`-reading allowlist would either fail outright or be "fixed" by
+widening to the union — which looks like a fix and removes the control. The
+allowlists moved to `internal/depguard`, scoped by directory. **Do not widen one to
+make an import pass**; that inverts the reasoning behind them.
 
   **Four subtrees are guarded; the rest are not, and that is a named loss.**
   Measured 2026-08-30:
@@ -409,12 +396,12 @@ Being precise here is part of the product.
   | `internal/adapters/common/hookflow` | **1** — `google/renameio/v2` | **nothing** |
   | everything else | **0** | **nothing** |
 
-  The rows saying **nothing** are the loss ADR-0024 records: those subtrees never
-  had a guard, and what used to bound them was that adding a dependency meant
-  editing their own small `go.mod`. Now anything already in the union graph is
-  importable from them with no diff outside a `.go` file. `internal/conformance` is
-  the one checked by closure rather than by direct import, because `x/text` arrives
-  through `jsonschema` and an import walk cannot see it.
+The rows saying **nothing** are the accepted loss: those subtrees
+never had a guard, and what used to bound them was that adding a dependency meant
+editing their own small `go.mod`. Now anything already in the union graph is
+importable from them with no diff outside a `.go` file. `internal/conformance` is
+the one checked by closure rather than by direct import, because `x/text` arrives
+through `jsonschema` and an import walk cannot see it.
 
   The whole repository has **19 direct external requires** in one `go.mod`, which
   is the union of what the fifteen modules declared.
@@ -443,122 +430,105 @@ Being precise here is part of the product.
   carries goproxy and the transport lane as well as telemetry. Recorded rather than
   rounded: the decision was made on the smaller number.
 - **The inline-evaluation path has not been exercised against a live stack.**
-  Every claim below about enforcement rests on tests that drive the real hook
-  against a local `/evaluate` stub — which is real HTTP and the real gate, but not
-  a real control plane. In particular, **that a raw-rego org is now enforced is
-  unproven**, and that is the headline argument for the change
-  ([ADR-0017](adr/ADR-0017-inline-policy-evaluation.md)). The test phase that
-  would prove it exists and has not run.
+Every claim below about enforcement rests on tests that drive the real hook
+against a local `/evaluate` stub — which is real HTTP and the real gate, but not a
+real control plane. In particular, **that a raw-rego org is now enforced is
+unproven**, and that is the headline argument for the change. The test phase that
+would prove it exists and has not run.
 - **Enforcement depends on reaching the control plane, and under the default it
-  is bypassable.** Every gated tool call is decided by a synchronous `/evaluate`
-  call ([ADR-0017](adr/ADR-0017-inline-policy-evaluation.md)); there is no local
-  policy to fall back on. If the control plane cannot be reached, the org's
-  `fail_closed` setting decides, and it defaults to **fail-open** — so blocking a
-  single hostname disables enforcement for that developer. An org that needs
-  enforcement to survive a developer who does not want it must set `fail_closed`,
-  and accept that a control-plane outage then blocks work. This replaced a local
-  evaluator that kept deciding while offline; the trade is deliberate, and the
-  reason it was worth making is that hand-written rego could never be evaluated
-  locally at all, so those orgs' gates simply opened.
+is bypassable.** Every gated tool call is decided by a synchronous `/evaluate`
+call; there is no local policy to fall back on. If the control plane cannot be
+reached, the org's `fail_closed` setting decides, and it defaults to
+**fail-open** — so blocking a single hostname disables enforcement for that
+developer. An org that needs enforcement to survive a developer who does not want
+it must set `fail_closed`, and accept that a control-plane outage then blocks
+work. This replaced a local evaluator that kept deciding while offline; the trade
+is deliberate, and the reason it was worth making is that hand-written rego could
+never be evaluated locally at all, so those orgs' gates simply opened.
 - **A control-plane verdict is applied even when no policy authored it.** The
-  enforce path trusts every `/evaluate` HALT as a policy decision, and core can
-  express an operational precondition failure as one: once its record of a session
-  goes terminal — observed when a `SessionEnded` was recorded while the session was
-  still live — it answers every later event `HALT` ("Session is no longer active")
-  with **no policy id and no governance event**. Both default-posture mitigations
-  miss it: "inert until your org publishes a policy" is falsified directly, and
-  fail-open never engages because the failure policy covers *no verdict*, not *a
-  HALT verdict*. One such HALT latches the server-side session, so the remainder of
-  that session denies until a new session restores a pending record — and the
-  denial itself stores no governance event, so the control plane holds no record of
-  the blocking it did. Since [ADR-0020](adr/ADR-0020-prompt-gate-and-halt-session-stop.md)
-  the client treats every server HALT as a session stop, so this precondition
-  failure now **ends the session outright** rather than denying calls until the
-  server record clears — a deliberately accepted consequence (the owner chose
-  uniform HALT trust over client-side discrimination), remedied when the core-side
-  fix lands (plan 260814-2235). The live diagnosis and
-  the options are in
-  [`debug-260814-1231-session-no-longer-active-halt.md`](../plans/reports/debug-260814-1231-session-no-longer-active-halt.md).
+enforce path trusts every `/evaluate` HALT as a policy decision, and core can express an operational precondition failure as
+one: once its record of a session goes terminal — observed when a `SessionEnded` was recorded while the session was still live
+— it answers every later event `HALT` ("Session is no longer active") with **no policy id and no governance event**. Both
+default-posture mitigations miss it: "inert until your org publishes a policy" is falsified directly, and fail-open never
+engages because the failure policy covers *no verdict*, not *a HALT verdict*. One such HALT latches the server-side session,
+so the remainder of that session denies until a new session restores a pending record — and the denial itself stores no
+governance event, so the control plane holds no record of the blocking it did. The client now treats every
+server HALT as a session stop, so this precondition failure now **ends the session outright** rather than denying calls until
+the server record clears — a deliberately accepted consequence (the owner chose uniform HALT trust over client-side
+discrimination), remedied when the core-side fix lands (plan 260814-2235). The live diagnosis and the options are in
+[`debug-260814-1231-session-no-longer-active-halt.md`](../plans/reports/debug-260814-1231-session-no-longer-active-halt.md).
 - **Content-based policy sees at most the first 64KB of a write.** Bodies are
   truncated by `capBody` (`client/payload.go`) before egress, so a rule that would
   match past that offset does not fire. Content-based policy is not a complete
   check on large files. Local secret detection is not subject to this — it runs
   before the cap and sees the whole body.
 - **Absence of events is not evidence of absence of activity.** A bare
-  `openbox init` governs the current directory only
-  ([ADR-0016](adr/ADR-0016-default-install-posture.md)), because that is the only
-  scope the CLI can actually activate by itself — global activation is a
-  managed-settings deployment an administrator performs. Sessions started anywhere
-  else produce **no rows at all**, so an auditor cannot distinguish an
-  uninitialized project from an idle week, and enforcement applies only where
-  `init` ran. Fleet coverage requires `--scope global` plus managed settings;
-  Codex is user-scoped either way. `printGovernedScope` names the governed
-  directory at install time so the gap is visible at the moment it is created
-  rather than discovered from an empty dashboard.
+`openbox init` governs the current directory only, because that is the only scope
+the CLI can actually activate by itself — global activation is a managed-settings
+deployment an administrator performs. Sessions started anywhere else produce **no
+rows at all**, so an auditor cannot distinguish an uninitialized project from an
+idle week, and enforcement applies only where `init` ran. Fleet coverage requires
+`--scope global` plus managed settings; Codex is user-scoped either way.
+`printGovernedScope` names the governed directory at install time so the gap is
+visible at the moment it is created rather than discovered from an empty
+dashboard.
 - **Egress.** OpenBox chooses where *its own* telemetry goes. Without the gateway it
-  does not proxy, intercept or allow-list the coding tool's traffic to its model
-  provider — that is the provider's plane plus your network controls, and OpenBox
-  records that posture as evidence. With the gateway
-  ([ADR-0021](adr/ADR-0021-openbox-local-gateway.md)) it carries and records the
-  model call, but it still allow-lists nothing and still refuses nothing: the
-  refusal path is unwired. Everything else the tool talks to is untouched either
-  way.
+does not proxy, intercept or allow-list the coding tool's traffic to its model
+provider — that is the provider's plane plus your network controls, and OpenBox
+records that posture as evidence. With the gateway it carries and records the
+model call, but it still allow-lists nothing and still refuses nothing: the
+refusal path is unwired. Everything else the tool talks to is untouched either
+way.
 - **Policy integrity is no longer a client-side claim.** There is no local bundle to
-  sign, hash or verify ([ADR-0017](adr/ADR-0017-inline-policy-evaluation.md)), so
-  the client makes no integrity claim about policy at all — the control plane holds
-  the policy it applied and its own record of applying it.
-  `require_verified_bundle` still parses and does nothing; it is deliberately absent
-  from the reported posture, because a control that cannot engage must not appear as
-  one.
+sign, hash or verify, so the client makes no integrity claim about policy at all —
+the control plane holds the policy it applied and its own record of applying it.
+`require_verified_bundle` still parses and does nothing; it is deliberately absent
+from the reported posture, because a control that cannot engage must not appear as
+one.
 - **Telemetry evidence is event-level, plus one span per captured model turn.** A
-  developer session produces `governance_events` rows and their Merkle leaves. A
-  tool call is two events — `ActivityStarted` then `ActivityCompleted`, sharing an
-  `activity_id` — each independently evaluated and each with its own leaf, and
-  **no `spans` row** ([ADR-0013](adr/ADR-0013-tool-call-as-activity.md)). The
-  spans shift-left used to send for tool calls were fabricated by hand to satisfy
-  a wire shape; removing them removed a layer of evidence that was never measuring
-  anything, but it is a removal, and the tree is shallower than an agent-runtime
-  session's.
+developer session produces `governance_events` rows and their Merkle leaves. A
+tool call is two events — `ActivityStarted` then `ActivityCompleted`, sharing an
+`activity_id` — each independently evaluated and each with its own leaf, and **no
+`spans` row**. The spans shift-left used to send for tool calls were fabricated by
+hand to satisfy a wire shape; removing them removed a layer of evidence that was
+never measuring anything, but it is a removal, and the tree is shallower than an
+agent-runtime session's.
 
-  One exception, added deliberately
-  ([ADR-0018](adr/ADR-0018-dev-turn-content-carrier.md)): with content capture on,
-  a model turn carries **one** span whose response body is the assistant's reply,
-  because core's goal-alignment engine reads assistant text from `payload.Spans`
-  and from no other field. Those spans get span-level Merkle leaves and
-  server-side `semantic_type` classification, and their text is retained
-  server-side. Two honesty notes on that span: its classification attributes are
-  **synthesized** — they describe an HTTP request the client never made, because
-  that is the only input core's classifier accepts, and every such span carries
-  `openbox.span_synthetic: true` so an auditor can tell — and it is a stopgap,
-  retired by [openbox-core#130](https://github.com/OpenBox-AI/openbox-core/issues/130).
-  With `content_capture: false` the hook path writes no span rows at all.
+One exception, added deliberately : with content capture on, a model turn carries
+**one** span whose response body is the assistant's reply, because core's
+goal-alignment engine reads assistant text from `payload.Spans` and from no other
+field. Those spans get span-level Merkle leaves and server-side `semantic_type`
+classification, and their text is retained server-side. Two honesty notes on that span:
+its classification attributes are **synthesized** — they describe an HTTP request the
+client never made, because that is the only input core's classifier accepts, and every
+such span carries `openbox.span_synthetic: true` so an auditor can tell — and it is a
+stopgap, retired by
+[openbox-core#130](https://github.com/OpenBox-AI/openbox-core/issues/130). With
+`content_capture: false` the hook path writes no span rows at all.
 
-  **The gateway is a second span producer, and it behaves differently in both
-  respects** ([ADR-0021](adr/ADR-0021-openbox-local-gateway.md)). Its span describes a
-  real observed HTTP exchange, so nothing about it is synthesized — and part of it
-  ships with capture **off**: the method, URL, status and credential fingerprint are
-  structural evidence for account binding, so a privacy switch does not remove them.
-  Only the headers and bodies are gated. The two producers ride mutually exclusive
-  events and their activity ids are in disjoint namespaces, so neither absorbs the
-  other in core's dedupe. One consequence is a silent gap rather than an error:
-  a gateway span carries the provider's **raw** response body, which is not the shape
-  core's alignment extractor parses, so a gateway-observed turn contributes nothing to
-  goal alignment. Alignment for those turns comes from the hook path or not at all.
+**The gateway is a second span producer, and it behaves differently in both
+respects**. Its span describes a real observed HTTP exchange, so nothing about it is
+synthesized — and part of it ships with capture **off**: the method, URL, status and
+credential fingerprint are structural evidence for account binding, so a privacy
+switch does not remove them. Only the headers and bodies are gated. The two producers
+ride mutually exclusive events and their activity ids are in disjoint namespaces, so
+neither absorbs the other in core's dedupe. One consequence is a silent gap rather
+than an error: a gateway span carries the provider's **raw** response body, which is
+not the shape core's alignment extractor parses, so a gateway-observed turn
+contributes nothing to goal alignment. Alignment for those turns comes from the hook
+path or not at all.
 - **Token usage is stored, aggregated and queryable.** Per-turn model + usage is
-  emitted as an `llm_completion` activity pair
-  ([ADR-0014](adr/ADR-0014-turn-as-activity-and-identifier-allowlist.md)), and the
-  core-side extractor that aggregates activities has **merged**
-  (`ExtractModelMetricsFromActivity`, verified at `develop` 68f0398; PR #125
-  merged as `0643ad3`). The same change excludes `llm_completion` from core's
-  **tool** metrics, so turn events no longer appear as a fictional tool. This
-  paragraph previously said the work was "awaiting merge" and that the pollution
-  was live; both statements are retired.
+emitted as an `llm_completion` activity pair, and the core-side extractor that
+aggregates activities has **merged** (`ExtractModelMetricsFromActivity`, verified
+at `develop` 68f0398; PR #125 merged as `0643ad3`). The same change excludes
+`llm_completion` from core's **tool** metrics, so turn events no longer appear as
+a fictional tool. This paragraph previously said the work was "awaiting merge" and
+that the pollution was live; both statements are retired.
 - **Tool success is reported.** An `ActivityCompleted` carries `status`
-  (`completed`/`failed`), derived from which provider hook fired and not gated on
-  content — it is the field core's per-tool success metric reads, and no producer
-  had ever written it. Claude Code only: Codex exposes no failure hook and no exit
-  code, so its tool success stays unknown rather than assumed
-  (ADR-0018).
+(`completed`/`failed`), derived from which provider hook fired and not gated on
+content — it is the field core's per-tool success metric reads, and no producer
+had ever written it. Claude Code only: Codex exposes no failure hook and no exit
+code, so its tool success stays unknown rather than assumed.
 - **Neither cost table prices the current models, and they fail differently.**
   `claude-opus-5`, `claude-fable-5`, `claude-opus-4-8`, `gpt-5.6-sol` and
   `gpt-5.5` are absent from core's Go table and the backend's TS one. core falls
@@ -572,15 +542,14 @@ Being precise here is part of the product.
   one `<session>:usage:rollup` activity. Scope, not a provider limit — the upgrade
   path is to subscribe `Stop` and delta the cumulative total.
 - **The transcript projection's INV-2 guarantee is now an allowlist, and it
-  carries content.** It used to be structural: the parser bound only numeric
-  fields, so content could not enter memory. Binding the model id — required,
-  because the model is the backend's aggregation key — replaced that with a curated
-  allowlist enforced by a test. The 2026-08-25 amendment added the turn's
-  **thinking**, which is the first free-form content in it, so the allowlist's
-  contents stopped being self-limiting as well as its form. The test is
-  load-bearing and mutation-tested against the removal of either the redaction or
-  the cap; ADR-0014 and its amendment say so rather than leaving an older, stronger
-  claim in place.
+carries content.** It used to be structural: the parser bound only numeric fields,
+so content could not enter memory. Binding the model id — required, because the
+model is the backend's aggregation key — replaced that with a curated allowlist
+enforced by a test. The 2026-08-25 amendment added the turn's **thinking**, which
+is the first free-form content in it, so the allowlist's contents stopped being
+self-limiting as well as its form. The test is load-bearing and mutation-tested
+against the removal of either the redaction or the cap; this is recorded rather
+than leaving an older, stronger claim in place.
 - **Thinking capture goes further than the provider's own telemetry.** Anthropic's
   OpenTelemetry export redacts extended thinking unconditionally, with every
   content flag enabled, and no hook carries it — so the session transcript is the
@@ -599,7 +568,7 @@ because absence needs no cooperation from a model.
 
 That used to read "tool commands and file bodies never egress on an **observe**
 event", which was SL3-SEC-3 — an unconditional, structural guarantee, because tool
-content had no field to land in. [ADR-0019](adr/ADR-0019-full-content-capture.md)
-P1 retired it. What replaces it is a gate plus a redaction plus a cap, none of them
-structural, which is why the suite asserts the closed direction as explicitly as the
-open one. See [end-to-end tests](test/e2e.md).
+content had no field to land in. That decision retired it. What replaces it is a
+gate plus a redaction plus a cap, none of them structural, which is why the suite
+asserts the closed direction as explicitly as the open one. See [end-to-end
+tests](test/e2e.md).

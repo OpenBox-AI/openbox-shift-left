@@ -137,11 +137,10 @@ func TestNoContentOnWireAtEitherPosture(t *testing.T) {
 			}
 			// The absence above must not be because the event failed to ship.
 			// "The marker is nowhere" and "nothing was emitted" are the same
-			// observation, and only this distinguishes them.
-			// TurnCompleted becomes ActivityCompleted on the wire and the model
-			// rides activity_output, both per ADR-0013/ADR-0014 — asserting the
-			// event-struct spelling here would be asserting the struct, not the
-			// wire.
+			// observation, and only this distinguishes them. TurnCompleted
+			// becomes ActivityCompleted on the wire and the model rides
+			// activity_output, both/that decision — asserting the event-struct
+			// spelling here would be asserting the struct, not the wire.
 			var p struct {
 				EventType      string `json:"event_type"`
 				ActivityType   string `json:"activity_type"`

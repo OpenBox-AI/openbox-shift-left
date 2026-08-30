@@ -8,7 +8,7 @@ import (
 
 // paths.go — one config directory on every operating system.
 //
-// Configuration lives in ~/.openbox/ (ADR-0015). Before this, it lived under
+// Configuration lives in ~/.openbox/. Before this, it lived under
 // os.UserConfigDir(), which resolves to three different places —
 // ~/Library/Application Support/openbox, ~/.config/openbox, %AppData%\openbox —
 // for one product with one config file. ~/.aws, ~/.kube and ~/.docker all put a
@@ -69,9 +69,9 @@ func ensureHome() (string, error) {
 	return dir, nil
 }
 
-// EnvFilePath is ~/.openbox/.env — the credential file (ADR-0015). An error
-// resolving Home() yields an empty path, so a caller that ignores the error
-// gets "no file" rather than a wrong file.
+// EnvFilePath is ~/.openbox/.env — the credential file. An error resolving
+// Home() yields an empty path, so a caller that ignores the error gets "no
+// file" rather than a wrong file.
 func EnvFilePath() (string, error) {
 	dir, err := Home()
 	if err != nil {
@@ -133,15 +133,15 @@ func ApproverConfigWritePath() (string, error) {
 	return filepath.Join(dir, "approver.json"), nil
 }
 
-// resolveConfigPath picks between the new location and the legacy one for a
-// READ, and always returns the new one for a write.
+// resolveConfigPath picks between the new location and the legacy one for a READ,
+// and always returns the new one for a write.
 //
 // This exists because upgrading the binary must not silently ungovern a machine.
 // MigrateLegacyConfig runs from `auth` and `init` — write commands — so between
 // installing a new binary and running one of them, every hook would resolve
-// ~/.openbox/dev.json, find nothing, and fail open into an unconfigured state:
-// no DID, no credentials, no events, exit 0. The install would look fine and
-// produce nothing, which is the exact failure mode ADR-0016 objects to elsewhere.
+// ~/.openbox/dev.json, find nothing, and fail open into an unconfigured state: no
+// DID, no credentials, no events, exit 0. The install would look fine and produce
+// nothing, which is the exact failure mode that decision objects to elsewhere.
 //
 // So a read prefers the new file, falls back to an existing legacy file, and
 // otherwise returns the new path (a missing file is not an error anywhere in this
@@ -172,9 +172,9 @@ func resolveConfigPath(name string) (string, error) {
 	return newPath, nil
 }
 
-// legacyConfigDir is where dev.json and approver.json lived before ADR-0015:
-// <os.UserConfigDir()>/openbox. Kept for migration (migrate.go) and for the
-// runtime-state files that still live there.
+// legacyConfigDir is where dev.json and approver.json lived before that
+// decision: <os.UserConfigDir()>/openbox. Kept for migration (migrate.go) and
+// for the runtime-state files that still live there.
 //
 // The HOME/.config fallback mirrors what DefaultConfigPath did, so a machine
 // where os.UserConfigDir() fails still finds a file written by an older binary.

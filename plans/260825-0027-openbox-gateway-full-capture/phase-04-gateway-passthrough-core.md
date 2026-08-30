@@ -2,10 +2,10 @@
 
 ## Context links
 
-- Parent: [plan.md](plan.md) · Gate: [phase-03](phase-03-decisions-and-adrs.md)
+- Parent: [plan.md](plan.md) · Gate: [phase-03](phase-03-decisions.md)
 - Contract: https://code.claude.com/docs/en/llm-gateway-protocol
 - Streaming limits: https://code.claude.com/docs/en/network-config
-- Depends on: 03 (probe A shape + P0 auth coverage recorded, ADR-0021 signed)
+- Depends on: 03 (probe A shape + P0 auth coverage recorded, that decision signed)
 
 ## Overview
 
@@ -52,8 +52,8 @@
 
 ## Architecture
 
-New module under `gateway/` with its own `go.mod` (ADR-0011 layout). Reuses `client/`
-(phase 05) and `decision/` (phase 05); imports no adapter.
+New module under `gateway/` with its own `go.mod` (that decision layout). Reuses
+`client/` (phase 05) and `decision/` (phase 05); imports no adapter.
 
 Streaming is a pure relay with a tee into a capture buffer (phase 05). Buffer-then-forward
 is forbidden by the watchdogs. Request bodies teed the same way — read once, forward the
@@ -137,9 +137,9 @@ Phase 05 attaches the tee to the pipeline and adds identity + account evidence.
 Six review angles ran. Findings applied:
 
 - **`x-api-key` was never exercised** though requirement 1 names it. Added to the identity
-  test and to the explicit named assertion, and mutation-drilled. This mattered more than a
-  coverage nit: ADR-0021 §8 leaves OAuth-via-`ANTHROPIC_BASE_URL` unresolved, so the
-  API-key carrier may be the path that actually carries traffic.
+test and to the explicit named assertion, and mutation-drilled. This mattered more than a
+coverage nit: that decision leaves OAuth-via-`ANTHROPIC_BASE_URL` unresolved, so the
+API-key carrier may be the path that actually carries traffic.
 - **The request read was unbounded**, breaking an 11-site repo convention of named caps.
   Now `maxRequestBody` (64 MiB, the largest existing precedent) via `http.MaxBytesReader`.
   It **refuses, never truncates** — a short forward would corrupt a request while reporting

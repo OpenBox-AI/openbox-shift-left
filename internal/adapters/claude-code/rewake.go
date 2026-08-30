@@ -56,10 +56,11 @@ func RunRewake(stdin io.Reader, wake io.Writer, logger *log.Logger) int {
 	if err != nil {
 		return 0
 	}
-	// Every gated class evaluates inline since ADR-0017, so any of them can have
-	// filed an approval. The high-risk narrowing that used to stand here would
-	// now silently drop the watcher for exactly the classes that newly gained
-	// approval holds — a call held, denied at the budget, and then never woken.
+	// Every gated class evaluates inline since that decision, so any of them can
+	// have filed an approval. The high-risk narrowing that used to stand here
+	// would now silently drop the watcher for exactly the classes that newly
+	// gained approval holds — a call held, denied at the budget, and then never
+	// woken.
 	devEv, ok := New(id, DefaultSpoolDir()).Mapper.Map(HookPreToolUse, ev)
 	if !ok {
 		return 0

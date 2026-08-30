@@ -23,42 +23,38 @@ import (
 
 // Enforcement conformance suite (STORY-E6-S7) — executable INV-3b evidence.
 //
-// This drives the REAL RunHook PreToolUse path end-to-end against a REAL
-// /evaluate stub (or a deliberately-unreachable one) and asserts the exact Claude
-// Code stdout contract per quadrant of the enforcement carve-out (ADR-0002 /
-// INV-3b). It is the durable proof the carve-out holds: a regression to enforce
-// mode, the failure policy, or the fail-open default breaks HERE rather than
-// silently in the field. Each case is content-free (INV-1/INV-2): no asserted
-// reason may carry the shell command / file body / tool output.
+// This drives the REAL RunHook PreToolUse path end-to-end against a REAL /evaluate stub (or a
+// deliberately-unreachable one) and asserts the exact Claude Code stdout contract per quadrant of
+// the enforcement carve-out (that decision / INV-3b). It is the durable proof the carve-out holds:
+// a regression to enforce mode, the failure policy, or the fail-open default breaks HERE rather
+// than silently in the field. Each case is content-free (INV-1/INV-2): no asserted reason may
+// carry the shell command / file body / tool output.
 //
-// | # | Enforce | Policy      | Control plane      | Expect | Proves                          |
-// |---|---------|-------------|--------------------|--------|---------------------------------|
-// | C1| on      | both        | up + BLOCK rule    | deny   | enforced BLOCK denies pre-exec  |
-// | C2| on      | fail-open   | absent socket      | proceed| outage fails open (OD9)         |
-// | C3| on      | fail-open   | up, NO bundle      | proceed| unbundled fails open (default)  |
-// | C4| on      | fail-closed | absent socket      | deny   | fail-closed denies on outage    |
-// | C5| on      | fail-closed | up + ALLOW default | proceed| fail-closed never denies allow  |
-// | C6| on      | fail-closed | up, NO bundle      | deny   | INFO-1: the closed hole         |
-// | C7| off     | —           | up + BLOCK rule    | proceed| INV-3 verbatim (observe)        |
-// | C8| — (removed: in-process decision had no network timeout — ADR-0006)          |
-// | C9| — (removed: nothing local can be stale — ADR-0017)                          |
-// |C10| on      | fail-open   | up + secret in Write| redact | Tier-1 redact-and-continue (E6-S9)|
-// |C11| on      | fail-open   | up, detection OFF  | proceed| opt-out → no redaction (E6-S9)  |
+// | # | Enforce | Policy | Control plane | Expect | Proves |
+// |---|---------|-------------|--------------------|--------|---------------------------------| |
+// C1| on | both | up + BLOCK rule | deny | enforced BLOCK denies pre-exec | | C2| on | fail-open |
+// absent socket | proceed| outage fails open (OD9) | | C3| on | fail-open | up, NO bundle |
+// proceed| unbundled fails open (default) | | C4| on | fail-closed | absent socket | deny |
+// fail-closed denies on outage | | C5| on | fail-closed | up + ALLOW default | proceed|
+// fail-closed never denies allow | | C6| on | fail-closed | up, NO bundle | deny | INFO-1: the
+// closed hole | | C7| off | — | up + BLOCK rule | proceed| INV-3 verbatim (observe) | | C8| —
+// (removed: in-process decision had no network timeout) | | C9| — (removed: nothing local can be
+// stale) | |C10| on | fail-open | up + secret in Write| redact | Tier-1 redact-and-continue
+// (E6-S9)| |C11| on | fail-open | up, detection OFF | proceed| opt-out → no redaction (E6-S9) |
 //
-// C18–C19 assert the content gate on the bytes POSTed to /evaluate. C20–C26 do
-// the same for ADR-0018, driving the real observe/turn paths and the flush that
-// delivers them:
+// C18–C19 assert the content gate on the bytes POSTed to /evaluate. C20–C26 do the same for that
+// decision, driving the real observe/turn paths and the flush that delivers them:
 //
-// |C20| PostToolUse            | status:"completed" on the wire                  |
-// |C21| the same, capture OFF  | status is structural, not gated                 |
-// |C22| PostToolUseFailure     | status:"failed" + a duration paired across hooks|
-// |C23| the three new signals  | signal_name present, free text and signal_args absent |
-// |C24| Stop, capture ON       | ONE span core's alignment extractor can read    |
-// |C25| Stop, capture OFF      | no span, no span_count, no text — turns still ship |
-// |C26| Stop + a secret        | redacted BEFORE attachment (C18 discipline)     |
+// |C20| PostToolUse            | status:"completed" on the wire                  | |C21| the same,
+// capture OFF  | status is structural, not gated                 | |C22| PostToolUseFailure     |
+// status:"failed" + a duration paired across hooks| |C23| the three new signals  | signal_name
+// present, free text and signal_args absent | |C24| Stop, capture ON       | ONE span core's
+// alignment extractor can read    | |C25| Stop, capture OFF      | no span, no span_count, no text
+// — turns still ship | |C26| Stop + a secret        | redacted BEFORE attachment (C18 discipline)
+// |
 
-// The local bundle helpers are gone with the evaluator they fed (ADR-0017). A
-// case's expected outcome is a SERVER verdict now, so setup names the verdict
+// The local bundle helpers are gone with the evaluator they fed. A case's
+// expected outcome is a SERVER verdict now, so setup names the verdict
 // directly through serveVerdict rather than building a rule the client would
 // have evaluated itself.
 
@@ -158,11 +154,10 @@ func TestEnforcementConformance(t *testing.T) {
 		// The crux clause: fail-closed denies only when no real verdict could be
 		// obtained, never a verdict that says allow.
 		//
-		// "Real" moved with ADR-0017. It used to mean a local bundle's allow;
-		// the decider is the server now, so a reachable /evaluate returning
-		// allow is what has to proceed. A local allow with the server
-		// unreachable is no longer a real verdict — it is an outage, and C4/C6
-		// cover that it denies.
+		// "Real" moved with. It used to mean a local bundle's allow; the decider
+		// is the server now, so a reachable /evaluate returning allow is what
+		// has to proceed. A local allow with the server unreachable is no longer
+		// a real verdict — it is an outage, and C4/C6 cover that it denies.
 		serveVerdict(t, `{"verdict":"allow"}`)
 		url, hits := serveEvaluate(t, `{"verdict":"allow"}`, 200, 0)
 		evalCreds(t, url)
@@ -210,8 +205,8 @@ func TestEnforcementConformance(t *testing.T) {
 	// control plane; every verdict comes from the control plane now, so there is
 	// nothing that can be stale. Nothing replaces it — the condition cannot arise.
 
-	// C8 removed: in-process decision has no network timeout (ADR-0006). The old case
-	// exercised the socket Client's hard timeout tripping and failing open; with the
+	// C8 removed: in-process decision has no network timeout. The old case exercised
+	// the socket Client's hard timeout tripping and failing open; with the
 	// synchronous in-memory decider there is no latency path to bound.
 
 	// A Write whose body contains a real-shaped AWS key. The secret string must never
@@ -259,10 +254,10 @@ func TestEnforcementConformance(t *testing.T) {
 		return &bodies
 	}
 
-	// THE tripwire for ADR-0017's E8. Write bodies egress now, so the local
-	// redaction is the one control standing between a secret in a file and the
-	// control plane's event storage — which is the hardest place to purge
-	// anything from.
+	// THE tripwire for that decision's E8. Write bodies egress now, so the
+	// local redaction is the one control standing between a secret in a file
+	// and the control plane's event storage — which is the hardest place to
+	// purge anything from.
 	//
 	// It asserts on the bytes actually POSTed, not on the decision or the
 	// rewrite: a correct redaction applied to the tool call while the ORIGINAL
@@ -278,7 +273,7 @@ func TestEnforcementConformance(t *testing.T) {
 		run(t, secretWrite)
 
 		if len(*bodies) == 0 {
-			t.Fatal("no /evaluate call — a gated Write must be evaluated (ADR-0017)")
+			t.Fatal("no /evaluate call — a gated Write must be evaluated ")
 		}
 		for i, b := range *bodies {
 			if strings.Contains(b, awsSecret) {
@@ -333,11 +328,12 @@ func TestEnforcementConformance(t *testing.T) {
 		}
 	})
 
-	// ── ADR-0018: the outcome field ────────────────────────────────────────────
+	// ── that decision: the outcome field
+	// ────────────────────────────────────────────
 	//
 	// Core's per-tool success metric reads ONE thing:
 	//
-	//	metric.IsSuccess = payload.Status != nil && *payload.Status == "completed"
+	// metric.IsSuccess = payload.Status != nil && *payload.Status == "completed"
 	//
 	// so these two cases assert the literal on the bytes actually POSTed, not on
 	// the DevEvent or the mapper's return. A field that is correct in the struct
@@ -445,7 +441,7 @@ func TestEnforcementConformance(t *testing.T) {
 		}
 		// The provider's free-text error must not have ridden along.
 		if strings.Contains(failed, "exit code 3") {
-			t.Errorf("the tool's free-text error egressed (ADR-0019 owns it): %s", failed)
+			t.Errorf("the tool's free-text error egressed (that decision owns it): %s", failed)
 		}
 	})
 
@@ -486,13 +482,13 @@ func TestEnforcementConformance(t *testing.T) {
 		}
 	})
 
-	// ── ADR-0018 Decision 2: the assistant-turn span ───────────────────────────
+	// ── that decision: the assistant-turn span ───────────────────────────
 	//
 	// The egress change. These drive a REAL Stop hook — transcript read, turn
 	// window, mapper, spool, flush — and assert on what reached /evaluate,
 	// because every failure mode here is silent: core logs and returns "" for a
-	// span it cannot read, which is indistinguishable from the empty widgets
-	// this change exists to fill.
+	// span it cannot read, which is indistinguishable from the empty widgets this
+	// change exists to fill.
 	//
 	// A minimal transcript with usage, so the Stop hook has a turn to report.
 	turnTranscript := func(t *testing.T) string {
@@ -681,13 +677,13 @@ func TestEnforcementConformance(t *testing.T) {
 	})
 }
 
-// ── Deleted with the local evaluator (ADR-0017) ──────────────────────────────
+// ── Deleted with the local evaluator ──────────────────────────────
 //
 // TestEnforcementConformance_BuilderPolicy drove BLOCK / no-match /
 // REQUIRE_APPROVAL through the LOCAL implementation of the backend's
 // policy_builder semantics — the reimplementation whose permanent parity
-// obligation is ADR-0017's central argument. Those three outcomes belong to the
-// server now, and C12 / C13 / C14 assert them end to end against a real
+// obligation is that decision's central argument. Those three outcomes belong to
+// the server now, and C12 / C13 / C14 assert them end to end against a real
 // /evaluate.
 //
 // TestEnforcementConformance_StaleGate asserted that a stale-marked session

@@ -23,7 +23,7 @@ Diagnosis this responds to: [debug-260818-1656](../reports/debug-260818-1656-hal
 
 ## Validated decisions (AskUserQuestion, 2026-08-18)
 
-- **Every server HALT kills** — no authored/unauthored discrimination (keeps ADR-0017 trust
+- **Every server HALT kills** — no authored/unauthored discrimination (keeps that decision trust
   boundary + plan 260814-2235's no-discrimination stance). Consequence accepted: until the
   core precondition fix deploys, an unauthored HALT terminates sessions.
 - **Protocol stop + latch** — `continue:false` + `stopReason` (documented, overrides
@@ -112,7 +112,8 @@ ToolInput nil ⇒ no rewrite path; audit `tool_kind:"prompt"`. `EnforceGate.Run`
 `UserPromptSubmit` timeout 5→`preToolUseHookTimeoutSec` (30s) + gating statusMessage, in BOTH
 `localhooks.go` and `plugin/hooks/hooks.json` (`TestLocalHooksMirrorPluginBundle` pins them).
 Ceiling: prompt gate reuses the evaluator's declared 30s Gating ceiling — registered timeout
-must equal it. **Existing installs need `openbox init` re-run** (same as ADR-0018 hooks).
+must equal it. **Existing installs need `openbox init` re-run** (same as that decision
+hooks).
 
 ## Files
 
@@ -130,7 +131,7 @@ must equal it. **Existing installs need `openbox init` re-run** (same as ADR-001
 | adapters/claude-code/localhooks.go + plugin/hooks/hooks.json | UserPromptSubmit 30s + statusMessage |
 | adapters/codex/outputcontract.go | explicit halt→deny case |
 | adapters/claude-code/capabilities.go | verdict.apply text: prompt gate + session stop |
-| docs/architecture.md, getting-started.md, data-and-privacy.md, README.md, docs/adr/ADR-0020, CLAUDE.md | semantics, re-init, prompt inline egress, limits |
+| docs/architecture.md, getting-started.md, data-and-privacy.md, README.md, CLAUDE.md | semantics, re-init, prompt inline egress, limits |
 
 ## Acceptance criteria
 
@@ -146,7 +147,7 @@ must equal it. **Existing installs need `openbox init` re-run** (same as ADR-001
 7. Gated prompt ALLOW + findings on ⇒ findings line still emitted, single stdout writer.
 8. All 11 modules green under `-race`; windows + linux-arm64 cross-compiles pass.
 9. Docs updated; testbed assertions added dormant (stack not reachable — same status
-   discipline as ADR-0017/0018 work).
+discipline as that decision/0018 work).
 
 ## Known limits (to state in docs)
 

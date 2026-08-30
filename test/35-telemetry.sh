@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # 35-telemetry.sh — tool outcome, failure/lifecycle signals, and the assistant
-# turn span (ADR-0018).
+# turn span.
 #
 # ═══ STATUS: DORMANT — WRITTEN, NEVER RUN ════════════════════════════════════
 # No local stack has been reachable since these assertions were written. They are
@@ -98,7 +98,7 @@ else
 	assert_eq "the failed row carries a duration" 0 \
 		"$(tb_count "governance_events where run_id='$sid_f' and workflow_status='failed' and duration_ms is null")"
 fi
-# The tool's own error text is free-form and deliberately unbound (ADR-0019).
+# The tool's own error text is free-form and deliberately unbound.
 assert_eq "no free-text tool error egressed" 0 \
 	"$(tb_val "select count(*) from governance_events e where e.run_id='$sid_f' and row_to_json(e)::text like '%exit code 3%';")"
 
@@ -122,7 +122,7 @@ assert_eq "no span classified as something else" 0 \
 assert_ge "the assistant text reached the span body" 1 \
 	"$(tb_val "select count(*) from spans s where s.session_id='$uuid' and s.response_body like '%$FAIL_MARK%';")"
 
-# ADR-0019 P3: thinking must NOT also be in that span. This is the assertion for
+# that decision: thinking must NOT also be in that span. This is the assertion for
 # the failure mode with no error anywhere — core reads this body as the
 # assistant's REPLY, so chain-of-thought here would score every later turn's drift
 # against the model's reasoning instead of its answer, and nothing would log.
@@ -205,7 +205,7 @@ assert_eq "no span rows with capture off" 0 "$(tb_count "spans where session_id=
 assert_ge "status still recorded with capture off" 1 \
 	"$(tb_count "governance_events where run_id='$sid_off' and workflow_status='completed'")"
 
-# …and neither does the tool content ADR-0019 P1 added. This is the closing half
+# …and neither does the tool content that decision added. This is the closing half
 # of the gate 20-capture.sh proves open: the same classes, the same session shape,
 # the opposite posture. Without it, "capture off" would be verified for spans only
 # while four newer content classes went unchecked end to end.
@@ -221,7 +221,7 @@ assert_eq "no tool output text on any row with capture off" 0 \
 	"$(tb_count "governance_events where run_id='$sid_off' and output is not null and output ? 'output'")"
 assert_eq "no refusal free text on any row with capture off" 0 \
 	"$(tb_count "governance_events where run_id='$sid_off' and metadata is not null and (metadata ? 'denial_reason' or metadata ? 'error_details')")"
-# ADR-0019 P3: thinking is the newest content class and the only one sourced from
+# that decision: thinking is the newest content class and the only one sourced from
 # the TRANSCRIPT rather than a hook field, so a gate that holds for every
 # hook-sourced field above proves nothing about it. Same JSONB key test, same
 # reason: `output` is a column that renders on every row.

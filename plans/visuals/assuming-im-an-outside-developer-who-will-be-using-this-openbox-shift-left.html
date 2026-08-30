@@ -605,7 +605,7 @@ flowchart TD
   <div class="inner-grid">
     <div class="inner-card">
       <div class="title">Gated calls block on a verdict</div>
-      <div class="desc">Every gated <code>PreToolUse</code> call and every submitted prompt is evaluated by <code>/evaluate</code> <strong>before</strong> the tool runs. One policy implementation, on the server — nothing evaluates policy on your machine (ADR-0017). If OpenBox is unreachable, <code>fail_closed</code> decides: the default is <strong>fail-open</strong>, so an outage never blocks work.</div>
+      <div class="desc">Every gated <code>PreToolUse</code> call and every submitted prompt is evaluated by <code>/evaluate</code> <strong>before</strong> the tool runs. One policy implementation, on the server — nothing evaluates policy on your machine. If OpenBox is unreachable, <code>fail_closed</code> decides: the default is <strong>fail-open</strong>, so an outage never blocks work.</div>
     </div>
     <div class="inner-card t-teal">
       <div class="title">Telemetry never blocks anything</div>
@@ -694,14 +694,14 @@ sequenceDiagram
     Enforcement acts on <em>your org's policy</em>. No policy published → nothing is blocked, and you get full observability either way. One diagnosed core defect escapes this ("Session is no longer active" — see <a href="#s10">troubleshooting</a>).
   </div>
 </div>
-<p class="src">source: docs/architecture.md §governance-levels · ADR-0017 · ADR-0020</p>
+<p class="src">source: docs/architecture.md §governance-levels · that decision · that decision</p>
 
 <!-- ============ 4. GATEWAY ============ -->
 <div id="s4" class="sec-head"><span class="n">04</span> Governing the model call itself — the opt-in gateway</div>
 
 <div class="section" style="--i:0">
   <div class="section-label section--plum-l"><span class="dot"></span> Why hooks are not enough</div>
-  <p style="font-size:14px;max-width:76ch">Hooks see what the agent <em>does</em>. They cannot see the model call itself — no hook carries the request headers, the request body, or the response — so system prompts, raw request/response bodies, and <strong>which account paid for a call</strong> are all structurally unreachable from the hook path. The gateway (ADR-0021) is the surface where those exist: a <strong>per-developer loopback daemon</strong> that Claude Code is pointed at via <code>ANTHROPIC_BASE_URL</code>. Every model call relays through it to Anthropic; the gateway reports to the same <code>/evaluate</code> as everything else. It is <strong>off by default</strong> — it redirects live model traffic, so turning it on is your call:</p>
+  <p style="font-size:14px;max-width:76ch">Hooks see what the agent <em>does</em>. They cannot see the model call itself — no hook carries the request headers, the request body, or the response — so system prompts, raw request/response bodies, and <strong>which account paid for a call</strong> are all structurally unreachable from the hook path. The gateway is the surface where those exist: a <strong>per-developer loopback daemon</strong> that Claude Code is pointed at via <code>ANTHROPIC_BASE_URL</code>. Every model call relays through it to Anthropic; the gateway reports to the same <code>/evaluate</code> as everything else. It is <strong>off by default</strong> — it redirects live model traffic, so turning it on is your call:</p>
   <div class="code-block">openbox init --provider claude-code --gateway          <span class="c"># install + start it, and point this machine at it</span>
 openbox init --provider claude-code --remove-gateway   <span class="c"># undo — restores direct provider traffic</span>
 openbox gateway                                        <span class="c"># the daemon itself: foreground, supervised by launchd/systemd</span></div>
@@ -755,10 +755,10 @@ openbox gateway                                        <span class="c"># the dae
   </div>
   <div class="callout callout--warn">
     <div class="ct">Status — read before relying on it</div>
-    ADR-0021 is a <strong>draft, deliberately</strong>: the relay, capture, gate, refusal and account evidence are built and conformance-tested, but <strong>the daemon a default install runs today is a pure relay</strong> — the CLI does not yet wire the evidence emitter or the evaluator into it, and <em>which</em> calls get gated is an open product decision (~52 model calls were measured per turn window; gating everything is a round-trip per call). Three probe questions bound the whole tier: whether subscription-OAuth traffic follows <code>ANTHROPIC_BASE_URL</code> at all (if not, this covers API-key/console orgs only); the refusal's exact HTTP shape (provisional <code>403</code> — a wrong shape reads as transient and Claude Code retries around it; if no shape qualifies, refusal descopes to observe-only); and whether an OAuth credential can be matched to an org (else the account rule is detection-only for OAuth). Also out of scope: Codex (deferred), CI machines, non-Anthropic wire formats — and nothing has run against a live stack.
+    That decision is a <strong>draft, deliberately</strong>: the relay, capture, gate, refusal and account evidence are built and conformance-tested, but <strong>the daemon a default install runs today is a pure relay</strong> — the CLI does not yet wire the evidence emitter or the evaluator into it, and <em>which</em> calls get gated is an open product decision (~52 model calls were measured per turn window; gating everything is a round-trip per call). Three probe questions bound the whole tier: whether subscription-OAuth traffic follows <code>ANTHROPIC_BASE_URL</code> at all (if not, this covers API-key/console orgs only); the refusal's exact HTTP shape (provisional <code>403</code> — a wrong shape reads as transient and Claude Code retries around it; if no shape qualifies, refusal descopes to observe-only); and whether an OAuth credential can be matched to an org (else the account rule is detection-only for OAuth). Also out of scope: Codex (deferred), CI machines, non-Anthropic wire formats — and nothing has run against a live stack.
   </div>
 </div>
-<p class="src">source: docs/adr/ADR-0021-openbox-local-gateway.md · gateway/ · cli/internal/gatewaycheck · docs/data-and-privacy.md</p>
+<p class="src">source: · gateway/ · cli/internal/gatewaycheck · docs/data-and-privacy.md</p>
 
 <!-- ============ 5. CORE CONCEPTS ============ -->
 <div id="s5" class="sec-head"><span class="n">05</span> Core concepts</div>
@@ -767,7 +767,7 @@ openbox gateway                                        <span class="c"># the dae
   <div class="inner-grid">
     <div class="inner-card">
       <div class="title">Governance levels</div>
-      <div class="desc">Each install runs at exactly one level and reports which: <strong>Observe</strong> (telemetry, lineage, cost — never blocks) · <strong>Advisory</strong> (verdicts recorded and surfaced, never applied) · <strong>Enforce</strong> (verdicts applied — the default since ADR-0016). Only enforce costs a tool call anything: one round-trip per gated hook.</div>
+      <div class="desc">Each install runs at exactly one level and reports which: <strong>Observe</strong> (telemetry, lineage, cost — never blocks) · <strong>Advisory</strong> (verdicts recorded and surfaced, never applied) · <strong>Enforce</strong> (verdicts applied — the default since). Only enforce costs a tool call anything: one round-trip per gated hook.</div>
     </div>
     <div class="inner-card t-green">
       <div class="title">Enforcement is three switches, not tiers</div>
@@ -775,7 +775,7 @@ openbox gateway                                        <span class="c"># the dae
     </div>
     <div class="inner-card t-amber">
       <div class="title">Approvals are four-eyes</div>
-      <div class="desc">An approver is a <strong>separate principal</strong> with its own credential: the dashboard, <code>openbox approve</code>, or a bounded autonomous approver (ADR-0012) that decides inside an org envelope, starts in shadow mode, and records every outcome. Approving on the machine that filed the request is refused by default.</div>
+      <div class="desc">An approver is a <strong>separate principal</strong> with its own credential: the dashboard, <code>openbox approve</code>, or a bounded autonomous approver that decides inside an org envelope, starts in shadow mode, and records every outcome. Approving on the machine that filed the request is refused by default.</div>
     </div>
     <div class="inner-card t-teal">
       <div class="title">Lineage: session → commit → deploy</div>
@@ -928,10 +928,10 @@ claude                <span class="c"># nothing to run, no env vars to keep set<
   </div></div>
   <div class="callout callout--warn">
     <div class="ct">One deliberate exception</div>
-    A <strong>gated</strong> shell/MCP call sends its command <strong>verbatim</strong> regardless of <code>content_capture</code> — policy must judge the command that will actually run (ADR-0017). And the two providers send different amounts under one posture: Codex captures neither tool content nor thinking, and reports usage per session rather than per turn.
+    A <strong>gated</strong> shell/MCP call sends its command <strong>verbatim</strong> regardless of <code>content_capture</code> — policy must judge the command that will actually run. And the two providers send different amounts under one posture: Codex captures neither tool content nor thinking, and reports usage per session rather than per turn.
   </div>
 </div>
-<p class="src">source: README.md §what-leaves-your-machine · docs/data-and-privacy.md · ADR-0019 · ADR-0014</p>
+<p class="src">source: README.md §what-leaves-your-machine · docs/data-and-privacy.md · that decision · that decision</p>
 
 <!-- ============ 7. COMMANDS & FILES ============ -->
 <div id="s8" class="sec-head"><span class="n">08</span> Day-to-day commands &amp; where things live</div>
@@ -976,7 +976,7 @@ claude                <span class="c"># nothing to run, no env vars to keep set<
   <div class="section-label section--red-l"><span class="dot"></span> Documented as first-class, not fine print</div>
   <p style="font-size:14px;color:var(--text-dim)">The project's own position: a governance tool that overstates its guarantees is the failure it exists to prevent. Know these before you rely on it.</p>
   <ul class="node-list node-list--red">
-    <li><strong>Your credentials sit in a plaintext file.</strong> <code>~/.openbox/.env</code> is <code>0600</code> on macOS/Linux, but anything running <em>as you</em> — including the coding agent under governance — can read the signing key and sign events as you. On Windows <code>0600</code> is a no-op. Attestation proves <strong>origin-of-config</strong>, not tamper-resistance against the developer (ADR-0015).</li>
+    <li><strong>Your credentials sit in a plaintext file.</strong> <code>~/.openbox/.env</code> is <code>0600</code> on macOS/Linux, but anything running <em>as you</em> — including the coding agent under governance — can read the signing key and sign events as you. On Windows <code>0600</code> is a no-op. Attestation proves <strong>origin-of-config</strong>, not tamper-resistance against the developer .</li>
     <li><strong>Project scope means partial coverage.</strong> A default <code>init</code> governs one directory; sessions anywhere else produce <em>no events at all</em> — so absence of events is not evidence of absence of work. Fleet coverage needs <code>--scope global</code> plus a managed-settings deployment.</li>
     <li><strong>Enforcement prevents mistakes, not motivated bypass.</strong> The hook lives in the developer's own config until managed settings are deployed, and under the default <code>fail_closed:false</code> blocking one hostname disables enforcement for that machine. Orgs that need it to survive an unwilling developer set <code>fail_closed</code> — and accept that an outage then blocks work.</li>
     <li><strong>Content-based policy sees at most the first 64KB of a body.</strong> A rule that would match past that offset does not fire. Local secret detection is exempt — it runs before the cap and sees the whole body.</li>
@@ -1016,7 +1016,7 @@ claude                <span class="c"># nothing to run, no env vars to keep set<
 
 <div class="section" style="--i:0">
   <div class="section-label section--plum-l"><span class="dot"></span> Repo shape</div>
-  <p style="font-size:14px;color:var(--text-dim)">A Go 1.23+ workspace of small modules, no cgo (ADR-0011). The standing rule: anything provider-agnostic belongs in <code>adapters/common/</code>; a new table, endpoint or service needs an ADR — the engine was once copy-pasted per adapter and the copies drifted on the enforcement path, so it won't be again.</p>
+  <p style="font-size:14px;color:var(--text-dim)">A Go 1.23+ workspace of small modules, no cgo. The standing rule: anything provider-agnostic belongs in <code>adapters/common/</code>; a new table, endpoint or service needs a decision record — the engine was once copy-pasted per adapter and the copies drifted on the enforcement path, so it won't be again.</p>
   <div class="table-wrap"><div class="table-scroll">
     <table class="data-table">
       <thead><tr><th>Module</th><th>What it owns</th></tr></thead>
@@ -1045,7 +1045,7 @@ cd cli &amp;&amp; go test ./...     <span class="c"># per module — go.work lis
         <li><code>docs/architecture.md</code> — engine, adapters, enforcement, approvals, assurance</li>
         <li><code>docs/data-and-privacy.md</code> — exactly what is captured and sent, field by field</li>
         <li><code>docs/lineage.md</code> — session → commit → deploy and how it's verified</li>
-        <li><code>docs/adr/</code> — the decisions and why; <code>contracts/dev-event/</code> — the event schema</li>
+        <li><code></code> — the decisions and why; <code>contracts/dev-event/</code> — the event schema</li>
         <li>License: Apache-2.0</li>
       </ul>
     </div>
@@ -1054,7 +1054,7 @@ cd cli &amp;&amp; go test ./...     <span class="c"># per module — go.work lis
 <p class="src">source: docs/architecture.md §modules · README.md §contributing</p>
 
 <footer>
-  generated 2026-08-26 from README.md, docs/getting-started.md, docs/architecture.md, docs/data-and-privacy.md and ADR-0021 at feat/tool-content-capture · openbox-shift-left · Apache-2.0
+  generated 2026-08-26 from README.md, docs/getting-started.md, docs/architecture.md, docs/data-and-privacy.md and that decision at feat/tool-content-capture · openbox-shift-left · Apache-2.0
 </footer>
 
 </div><!-- /main -->

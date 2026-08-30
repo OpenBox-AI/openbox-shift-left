@@ -6,21 +6,19 @@ import (
 	"encoding/json"
 )
 
-// turnspan.go builds the ONE span a developer session emits (ADR-0018
-// Decision 2). It is not a revival of the span layer ADR-0013 retired —
-// client/hookspan.go and client/spanbuilder.go stay deleted, tool events stay
-// span-less, and nothing here mints ids at random or reconstructs a family
-// tuple. It is one carrier, with the minimum fields one reader demands.
+// turnspan.go builds the ONE span a developer session emits. It is not a
+// revival of the span layer that decision retired — client/hookspan.go and
+// client/spanbuilder.go stay deleted, tool events stay span-less, and nothing
+// here mints ids at random or reconstructs a family tuple. It is one carrier,
+// with the minimum fields one reader demands.
 //
 // That reader is openbox-core's goal-alignment extractor, and it accepts
 // nothing else. extractAssistantContentFromLatestSpan
 // (internal/services/goal_alignment_session.go:64-88) takes the LAST entry of
 // payload.Spans and returns "" unless all four hold:
 //
-//	stage == "completed"
-//	semantic_type == llm_completion
-//	response_body != nil
-//	response_body unmarshals as {"choices":[{"message":{"content":"…"}}]}
+// stage == "completed" semantic_type == llm_completion response_body != nil
+// response_body unmarshals as {"choices":[{"message":{"content":"…"}}]}
 //
 // Dev sessions write no spans, so that extractor has always returned "" for
 // them and Goal Alignment Trend / Recent Drift have always been empty. This is
@@ -33,7 +31,7 @@ import (
 //
 // Absent by construction: parent_span_id, duration_ns, status, events,
 // hook_type, request_body, and every family root tuple. They were part of the
-// hand-fabricated shape ADR-0013 deleted, and nothing reads them.
+// hand-fabricated shape that decision deleted, and nothing reads them.
 type wireSpan struct {
 	SpanID  string `json:"span_id"`
 	TraceID string `json:"trace_id"`
@@ -58,7 +56,7 @@ type wireSpan struct {
 	// is overwritten by ComputeSemanticTypeFromSpan.
 	SemanticType string `json:"semantic_type"`
 
-	// --- Gateway-only fields (ADR-0021, schema 1.5). ---
+	// --- Gateway-only fields (that decision, schema 1.5). ---
 	//
 	// APPENDED, and all omitempty, so the assistant turn span above serializes to
 	// byte-identical bytes and its golden fixture does not churn. Key order on the
@@ -89,7 +87,7 @@ type wireSpan struct {
 	// attributes["openbox.credential_fingerprint"] — `attributes` is a real
 	// SpanData field that survives ingest and is stored, so that is the copy
 	// account binding can actually match on. Sending only the top-level key would
-	// have made ADR-0021 §6 unimplementable while looking finished.
+	// have made that decision unimplementable while looking finished.
 	CredentialFingerprint string `json:"credential_fingerprint,omitempty"`
 }
 

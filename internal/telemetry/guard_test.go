@@ -18,9 +18,9 @@ import (
 // bound what credential-path code can execute. A module boundary is a real
 // control only while something checks it — otherwise it is a directory name.
 //
-// Scope, per ADR-0023: DIRECT requires only. Transitive code is bounded at the
-// module that took the dependency. Enumerating the closure here would make the
-// allowlist unreadable, which is the one thing it must not be.
+// Scope: DIRECT requires only. Transitive code is bounded at the module that
+// took the dependency. Enumerating the closure here would make the allowlist
+// unreadable, which is the one thing it must not be.
 
 // forbiddenCalls are the ways this module could start reading a credential or the
 // developer's files, keyed by IMPORT PATH rather than by the identifier at the

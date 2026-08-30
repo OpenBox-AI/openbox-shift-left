@@ -55,8 +55,8 @@ func ConfigPathFor(r Role) string {
 	return DefaultConfigPath()
 }
 
-// DefaultApproverConfigPath is ~/.openbox/approver.json (ADR-0015), with the
-// same read-side legacy fallback DefaultConfigPath has.
+// DefaultApproverConfigPath is ~/.openbox/approver.json, with the same
+// read-side legacy fallback DefaultConfigPath has.
 func DefaultApproverConfigPath() string {
 	p, err := ApproverConfigPath()
 	if err != nil {
@@ -68,10 +68,10 @@ func DefaultApproverConfigPath() string {
 // ApproverConfig is the non-secret half of an approver install: where the queue
 // is, and how this approver is meant to work it.
 //
-// The control token itself lives in ~/.openbox/.env under OPENBOX_CONTROL_TOKEN
-// (ADR-0015), not here — this file stays credential-free. On an approver install
-// that token is an org key with fleet-wide create/rotate authority, which is why
-// ADR-0015 names it separately from the agent signing key.
+// The control token itself lives in ~/.openbox/.env under OPENBOX_CONTROL_TOKEN,
+// not here — this file stays credential-free. On an approver install that token
+// is an org key with fleet-wide create/rotate authority, which is why that
+// decision names it separately from the agent signing key.
 type ApproverConfig struct {
 	// BackendURL and OrgID name the queue to read.
 	BackendURL string `json:"backend_url,omitempty"`

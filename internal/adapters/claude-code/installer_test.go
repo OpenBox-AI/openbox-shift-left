@@ -59,7 +59,7 @@ func TestInstaller_MaterializesBundleAndConfig(t *testing.T) {
 	}
 }
 
-// TestInstaller_PersistsEnforcePosture proves the ADR-0006 onboarding change: the
+// TestInstaller_PersistsEnforcePosture proves that decision onboarding change: the
 // enforce posture chosen at `init` time (ref.Enforce/Tier2/Findings, set by
 // --enforce) is written to dev.json, so the runtime hook reads it with NO env var.
 func TestInstaller_PersistsEnforcePosture(t *testing.T) {
@@ -97,8 +97,8 @@ func TestInstaller_PersistsEnforcePosture(t *testing.T) {
 	}
 
 	// The runtime resolvers must read the persisted posture with NO env override
-	// (OPENBOX_ENFORCE etc. unset) — the whole point of ADR-0006. Point the config
-	// loader at the file just written and ensure the env overrides are truly absent
+	// (OPENBOX_ENFORCE etc. unset) — the whole point of. Point the config loader at
+	// the file just written and ensure the env overrides are truly absent
 	// (LookupEnv must report !ok, so config wins).
 	t.Setenv(envConfigPath, cfgPath)
 	for _, k := range []string{envEnforce, envTier2, envFindings} {

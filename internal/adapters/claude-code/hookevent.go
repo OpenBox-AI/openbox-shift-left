@@ -18,11 +18,10 @@ const (
 	HookPreToolUse       HookName = "PreToolUse"
 	HookPostToolUse      HookName = "PostToolUse"
 	HookSessionEnd       HookName = "SessionEnd"
-	// HookStop / HookSubagentStop are the turn boundaries (ADR-0014). They are
-	// the only per-turn signal the hook surface offers, and their value is
-	// purely that they FIRE: the token numbers come from the transcript, not
-	// from the payload, which carries only content fields this adapter refuses
-	// to bind.
+	// HookStop / HookSubagentStop are the turn boundaries. They are the only
+	// per-turn signal the hook surface offers, and their value is purely that
+	// they FIRE: the token numbers come from the transcript, not from the
+	// payload, which carries only content fields this adapter refuses to bind.
 	//
 	// Both can block a session via `decision: "block"`, so both are treated as
 	// stdout-forbidden on every path (INV-3) — see RunHook.
@@ -36,10 +35,10 @@ const (
 	// (plans/reports/probe-260813-2329-claude-code-hook-surface.md).
 	//
 	// That exclusivity is what makes the outcome structural rather than inferred,
-	// and it is the whole basis for status on a tool result (ADR-0018). If a
-	// future version fired both, one failed call would produce two completed-side
-	// events sharing an activity_id — a success and a failure counted against one
-	// total — and SUCCESS% would be corrupt rather than merely wrong. That is a
+	// and it is the whole basis for status on a tool result. If a future version
+	// fired both, one failed call would produce two completed-side events sharing
+	// an activity_id — a success and a failure counted against one total — and
+	// SUCCESS% would be corrupt rather than merely wrong. That is a
 	// stop-and-replan signal, not something to paper over.
 	HookPostToolUseFailure HookName = "PostToolUseFailure"
 
@@ -95,8 +94,8 @@ func ParseHookName(s string) (HookName, error) {
 // It captures structural fields (INV-2) — session id, working directory, tool
 // identity, lifecycle enums — plus a named, deliberately small set of CONTENT
 // fields, every one of them gated: Prompt (UserPromptSubmit),
-// LastAssistantMessage (Stop/SubagentStop, ADR-0018), and ToolResponse plus the
-// free-text failure fields (ADR-0019 P1).
+// LastAssistantMessage (Stop/SubagentStop,), and ToolResponse plus the
+// free-text failure fields.
 //
 // The gated fields are decoded here but are copied onto an emitted event only
 // under the content-capture opt-in (Mapper.CaptureContent) — with capture off
@@ -118,11 +117,11 @@ type HookEvent struct {
 	PermissionMode string `json:"permission_mode"`
 
 	// TranscriptPath is the filesystem path to this session's JSONL
-	// transcript. It is a structural locator (like Cwd), not content —
-	// INV-2 permits it. The file it points at is content-bearing, so it is
-	// opened only on the turn boundaries (Stop/SubagentStop) and SessionEnd,
-	// only when the finops gate is set (ResolveFinops — default ON as of
-	// ADR-0014, opt-OUT via finops:false / OPENBOX_FINOPS=0), and even then
+	// transcript. It is a structural locator (like Cwd), not content — INV-2
+	// permits it. The file it points at is content-bearing, so it is opened
+	// only on the turn boundaries (Stop/SubagentStop) and SessionEnd, only
+	// when the finops gate is set (ResolveFinops — default ON as of that
+	// decision, opt-OUT via finops:false / OPENBOX_FINOPS=0), and even then
 	// only an allowlist projection touches it, extracting the four token
 	// counts plus the model id. With finops off this field is decoded but
 	// never dereferenced.
@@ -145,8 +144,8 @@ type HookEvent struct {
 	ToolUseID string `json:"tool_use_id"`
 
 	// ToolResponse is what the tool PRODUCED, on PostToolUse. It is CONTENT,
-	// and it is bound here by ADR-0019 P1 — the change that retires SL3-SEC-3's
-	// "tool output never egresses" for the observe path.
+	// and it is bound here by that decision — the change that retires
+	// SL3-SEC-3's "tool output never egresses" for the observe path.
 	//
 	// Kept as raw bytes rather than a decoded shape because there isn't one:
 	// Bash returns {stdout,stderr,interrupted}, a file read returns a string,
@@ -190,9 +189,9 @@ type HookEvent struct {
 	Reason string `json:"reason"`
 
 	// ErrorDetails is StopFailure's free-text elaboration of ErrorType — what
-	// the provider said beyond the enum ("retry after 60s"). CONTENT, gated
-	// (ADR-0019 P1); it lands beside error_type in metadata so a reader gets the
-	// class and the explanation together.
+	// the provider said beyond the enum ("retry after 60s"). CONTENT, gated; it
+	// lands beside error_type in metadata so a reader gets the class and the
+	// explanation together.
 	ErrorDetails string `json:"error_details"`
 
 	// IsInterrupt separates "the user cancelled this" from "the tool failed"
@@ -203,10 +202,10 @@ type HookEvent struct {
 	//
 	// A *bool, so absent stays absent: older versions and the ordinary hooks
 	// omit the key, and false ("a real failure") is a different statement from
-	// "not reported". Same lesson as Enforce in ADR-0016.
+	// "not reported". Same lesson as Enforce in.
 	//
 	// PostToolUseFailure's OTHER field, `error`, is free text a tool wrote and
-	// is deliberately unbound here — ADR-0019 P1 owns it.
+	// is deliberately unbound here — that decision owns it.
 	IsInterrupt *bool `json:"is_interrupt"`
 
 	// ErrorType is StopFailure's error class — a closed provider enum, verified
@@ -221,10 +220,10 @@ type HookEvent struct {
 	// enumOr(e.ErrorType, apiErrorTypes) on the StopFailure arm, and enumOr
 	// returns "" for anything outside the ten values, so a free-text error has
 	// no path to metadata.error_type — the UNGATED field. That is an allowlist,
-	// not an impossibility (the ADR-0014 distinction), so it is pinned by a test
-	// rather than left to this comment: TestMap_FreeTextErrorNeverEgresses.
+	// not an impossibility (that decision distinction), so it is pinned by a
+	// test rather than left to this comment: TestMap_FreeTextErrorNeverEgresses.
 	//
-	// What changed with ADR-0019 P1: the free text is no longer dropped
+	// What changed with that decision: the free text is no longer dropped
 	// outright, it is routed to GATED content (Content.ToolOutput on the failure
 	// arm). The enum field is unaffected, which is the half this comment is
 	// about.
@@ -239,18 +238,17 @@ type HookEvent struct {
 	//
 	// This comment used to say the opposite — that Stop and SubagentStop
 	// "deliberately bind NOTHING of their own", and that the absence was the
-	// safeguard. ADR-0018 changed that for this ONE field, and the honest
+	// safeguard. That decision changed that for this ONE field, and the honest
 	// version of the argument is:
 	//
-	//   - It is decoded here and copied onto an event only under
-	//     Mapper.CaptureContent, then redacted for secrets BEFORE attachment,
-	//     then capped at 64KB by the client. With capture off it is inert,
-	//     exactly like Prompt.
-	//   - The safeguard is no longer structural for this field. It is a gate
-	//     plus a redaction plus a cap, each of which can be got wrong, which is
-	//     why each is asserted on the outbound bytes rather than trusted.
-	//   - With `secret_detection:false` the text egresses UNREDACTED. Stated,
-	//     not mitigated.
+	// - It is decoded here and copied onto an event only under
+	// Mapper.CaptureContent, then redacted for secrets BEFORE attachment, then
+	// capped at 64KB by the client. With capture off it is inert, exactly like
+	// Prompt. - The safeguard is no longer structural for this field. It is a
+	// gate plus a redaction plus a cap, each of which can be got wrong, which is
+	// why each is asserted on the outbound bytes rather than trusted. - With
+	// `secret_detection:false` the text egresses UNREDACTED. Stated, not
+	// mitigated.
 	//
 	// Why this field and not the transcript: the provider itself recommends it
 	// ("Avoids the need to read and parse the transcript file" — 2.1.229 schema
@@ -334,7 +332,7 @@ func (e *HookEvent) filePath() string {
 //
 // What is deliberately NOT read from the same tool_input: `prompt` and
 // `description`, which are free text the model composed. Extracting those is
-// ADR-0019 P1 territory, not a side effect of naming the agent.
+// that decision territory, not a side effect of naming the agent.
 //
 // Returns "" for any other tool, or an absent/unparsable field.
 func (e *HookEvent) subagentType() string {
@@ -409,7 +407,7 @@ func (e *HookEvent) fileText() string {
 }
 
 // toolOutputText flattens PostToolUse's tool_response to text for the gated
-// content path (ADR-0019 P1).
+// content path.
 //
 // There is no single shape to decode: Bash returns an object
 // ({stdout,stderr,interrupted}), a file read returns a bare JSON string, and an

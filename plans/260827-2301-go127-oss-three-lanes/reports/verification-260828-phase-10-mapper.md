@@ -58,9 +58,9 @@ spans[0]         attributes {"http.method":"POST","http.url":"…/v1/messages",
                   "openbox.span_synthetic":true}
 ```
 
-That is the shape ADR-0014 specifies and core's extractor reads, in the `:otel:`
-namespace ADR-0022 declared, with the classification keys that make core
-recompute `semantic_type` as `llm_completion`.
+That is the shape that decision specifies and core's extractor reads, in the
+`:otel:` namespace that decision declared, with the classification keys that
+make core recompute `semantic_type` as `llm_completion`.
 
 ## The nine drills
 
@@ -178,11 +178,11 @@ Both measured, not assumed (see
   address did. The bind-free variant points at a dead port, so it covers the
   not-answering branch too: broader, not weaker.
 - **The conformance census in the previous report was incomplete.** It named C8
-  and C9 as deleted but not **C17** (ADR-0017,
-  `enforce_evaluate_test.go:573`), and did not say that **C39 is not a subtest**
-  — it runs as `TestContentCaptureCredentialCoverage`, and it passes. The count
-  of 38 was right; the explanation was not, which matters in a report whose
-  thesis is careful counting.
+and C9 as deleted but not **C17** (that decision,
+`enforce_evaluate_test.go:573`), and did not say that **C39 is not a subtest** —
+it runs as `TestContentCaptureCredentialCoverage`, and it passes. The count of
+38 was right; the explanation was not, which matters in a report whose thesis is
+careful counting.
 - **The bound relation is a test now, not a comment.** `MaxAttrValueBytes` is
   exported and `TestAttrValueBoundExceedsTheWireCap` **measures** the wire cap
   rather than copying it. The worst case is exact rather than comfortable:

@@ -9,14 +9,14 @@ import (
 	"time"
 )
 
-// Signed commit attestation (E8-S10, ADR-0010).
+// Signed commit attestation (E8-S10).
 //
 // The OpenBox-Session trailer is a claim anyone can write: `git commit -m "...
-// OpenBox-Session: <someone-else's-id>"` produces a commit that looks
-// attributed. Server-side ownership verification upgrades a claim to
-// `attributed` — the session id belongs to the caller's agent — but that still
-// does not tie the session to *this* commit, so a developer could stamp a real
-// session of their own onto an unrelated commit (report SL-05).
+// OpenBox-Session: <someone-else's-id>"` produces a commit that looks attributed.
+// Server-side ownership verification upgrades a claim to `attributed` — the
+// session id belongs to the caller's agent — but that still does not tie the
+// session to *this* commit, so a developer could stamp a real session of their
+// own onto an unrelated commit (report SL-05).
 //
 // An attestation closes that specific gap: the session keyholder signs the
 // commit's own identity (its sha, tree and parents) together with the session and
@@ -46,8 +46,8 @@ const AttestationVersion = 1
 // Attestation is the signed statement about one commit.
 type Attestation struct {
 	// CanonicalB64 is the exact bytes that were signed, base64. Carried verbatim
-	// for the same reason as the policy bundle's (ADR-0008): a verifier that
-	// re-serializes its own input eventually disagrees with the signer.
+	// for the same reason as the policy bundle's : a verifier that re-serializes
+	// its own input eventually disagrees with the signer.
 	CanonicalB64 string `json:"canonical_b64"`
 	SigB64       string `json:"sig_b64"`
 	// DID identifies the signing key so the verifier can resolve it. It is also

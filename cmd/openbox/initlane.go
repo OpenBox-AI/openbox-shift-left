@@ -350,7 +350,7 @@ func (a *app) reportDeactivation(label, homeDir, settingsPath string, lane activ
 
 // claudeSettingsPath is the one settings file all three lanes write.
 //
-// USER scope, not project scope, and that is the ADR-0016 amendment rather than
+// USER scope, not project scope, and that is that decision amendment rather than
 // a preference: these variables are read from managed settings and
 // ~/.claude/settings.json, and background agents need settings rather than shell
 // exports. A project-scoped write would report success while governing nothing.

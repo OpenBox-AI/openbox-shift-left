@@ -17,12 +17,12 @@ import (
 // admit their own subpackages, which is what a `require` already meant --
 // telemetry allows `collector/pdata` and imports `pdata/plog`; gateway allows
 // `.../client` and imports `client/memhttptest`. Nothing was added to make a
-// list pass; if one ever needs to be, that is an ADR-0023 amendment and not a
-// commit.
+// list pass; if one ever needs to be, that is an that decision amendment and not
+// a commit.
 //
-// Two directions per guard, because two of the originals carry both:
-// nothing unreviewed enters, and no reviewed entry is stale. An entry nobody
-// imports is a standing claim of review with nothing behind it.
+// Two directions per guard, because two of the originals carry both: nothing
+// unreviewed enters, and no reviewed entry is stale. An entry nobody imports is
+// a standing claim of review with nothing behind it.
 //
 // NO PATH HERE IS IN A FORM AUTOMATION CAN FIND.
 //
@@ -63,10 +63,11 @@ func guards() []subtreeGuard {
 				"github.com/zricethezav/gitleaks/v8": true,
 			},
 			repoLocal: map[string]bool{
-				// ADR-0003: the decision module depends on client, never the reverse.
+				// That decision: the decision module depends on client, never the
+				// reverse.
 				repoPrefix + "/internal/client": true,
 			},
-			why: "the load-bearing half of ADR-0023's compensating control",
+			why: "the load-bearing half of that decision's compensating control",
 		},
 		{
 			name: "internal/telemetry",
@@ -115,7 +116,7 @@ func guards() []subtreeGuard {
 				repoPrefix + "/internal/client":   true,
 				repoPrefix + "/internal/decision": true,
 			},
-			why: "ADR-0023's subject; the allowlist bounds what the lexical scan cannot follow",
+			why: "that decision's subject; the allowlist bounds what the lexical scan cannot follow",
 		},
 	}
 }
@@ -132,7 +133,7 @@ func TestSubtreeDependenciesAreReviewed(t *testing.T) {
 			for _, p := range unallowed(got.external, g.external) {
 				t.Errorf("%s imports external %q, which its allowlist does not name (%s). "+
 					"Add it deliberately -- widening a list to make an import pass is what "+
-					"ADR-0023 forbids -- or move whatever needs it to a caller.", g.name, p, g.why)
+					"that decision forbids -- or move whatever needs it to a caller.", g.name, p, g.why)
 			}
 			for _, p := range unallowed(got.repoLocal, g.repoLocal) {
 				t.Errorf("%s imports repo-local %q, which its allowlist does not name. "+
@@ -169,11 +170,11 @@ func TestSubtreeAllowlistsHaveNoDeadEntries(t *testing.T) {
 // The distinction is the whole guard. `golang.org/x/text` is not imported by any
 // file here -- it arrives through jsonschema -- so a direct-import check cannot
 // see it and would silently drop the entry. That would not be equivalence, and
-// this is the one guard ADR-0023 deliberately left closure-wide: its closure is
-// two entries, which is readable, and the reason the bound is tight is that
-// three adapters import this package in their TESTS, so anything reaching here
-// links into their test binaries too. Link-time spread follows the import graph,
-// not go.mod, so collapsing the modules does not relax it.
+// this is the one guard that decision deliberately left closure-wide: its
+// closure is two entries, which is readable, and the reason the bound is tight
+// is that three adapters import this package in their TESTS, so anything
+// reaching here links into their test binaries too. Link-time spread follows the
+// import graph, not go.mod, so collapsing the modules does not relax it.
 var conformanceAllowed = map[string]bool{
 	"github.com/santhosh-tekuri/jsonschema/v6": true,
 	"golang.org/x/text":                        true,
@@ -310,14 +311,14 @@ func mustRel(root, path string) string {
 	return path
 }
 
-// TestAdaptersDoNotImportEachOther is the rule ADR-0011's reason 2 used to get
-// from the compiler.
+// TestAdaptersDoNotImportEachOther is the rule that decision's reason 2 used to
+// get from the compiler.
 //
 // While the adapters are separate modules, one importing the other needs a
 // `require` and a `replace` -- mechanical, and nobody has to remember it. Under
 // one module they are siblings under internal/adapters/ and the compiler permits
 // it, so this test is the whole control. That is a real downgrade from a compiler
-// guarantee to a test, and the ADR records it as one.
+// guarantee to a test, and that decision records it as one.
 //
 // A negative rule rather than a positive allowlist, deliberately: neither adapter
 // has an allowlist today, and inventing two would be a new control rather than a

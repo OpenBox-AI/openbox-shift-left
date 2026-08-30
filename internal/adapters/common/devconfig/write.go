@@ -83,11 +83,11 @@ func WriteConfig(path string, u Update) error {
 // change happen quietly. next is the tri-state Update.Enforce: nil never
 // downgrades, which is the point.
 //
-// It compares RESOLVED postures, not the raw field. Under enforce-by-default
-// (ADR-0016) the field is absent on exactly the configs most people have, so
-// reading prior.Enforce directly would see "not enforcing" and report no
-// downgrade — going silent in the common case, which is the one case this
-// message exists for. Absent means enforcing, so turning it off IS a downgrade.
+// It compares RESOLVED postures, not the raw field. Under enforce-by-default the
+// field is absent on exactly the configs most people have, so reading
+// prior.Enforce directly would see "not enforcing" and report no downgrade —
+// going silent in the common case, which is the one case this message exists
+// for. Absent means enforcing, so turning it off IS a downgrade.
 func WouldDowngradeEnforce(path string, next *bool) bool {
 	if next == nil || *next {
 		return false

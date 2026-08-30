@@ -7,8 +7,8 @@ import (
 )
 
 // The observed-span path was gateway-only, and gating it on GatewayRequestID
-// alone became a latent defect the moment ADR-0022 declared OtelRequestID and
-// ProxyRequestID. An event carrying one of those plus a populated Span was
+// alone became a latent defect the moment that decision declared OtelRequestID
+// and ProxyRequestID. An event carrying one of those plus a populated Span was
 // accepted, spooled, signed and POSTed with NO span attached — the signature
 // failure shape in this repo: a lane that looks like it works and carries none
 // of its evidence.

@@ -1,4 +1,4 @@
-# Phase 05 — credential-guard scope: direct vs indirect requires (ADR)
+# Phase 05 — credential-guard scope: direct vs indirect requires (decision record)
 
 ## Context links
 
@@ -12,11 +12,11 @@
 
 - Date: 2026-08-27 · Priority: P1 · Effort: 3h
 - Implementation status: **done** · Review status: pending
-- Report: [verification-260828-phase-05](reports/verification-260828-phase-05-credential-guard-scope.md) · ADR: [ADR-0023](../../docs/adr/ADR-0023-credential-guard-scope.md)
+- Report: [verification-260828-phase-05](reports/verification-260828-phase-05-credential-guard-scope.md) · decision record
 - Narrow `gateway/guard_test.go`'s go.mod check from *every* requirement to
-  *direct* requirements, and record why in an ADR. This deliberately weakens a
-  load-bearing security test, so it lands alone and reviewed — never bundled into
-  the change that needs it.
+*direct* requirements, and record why in a decision record. This deliberately
+weakens a load-bearing security test, so it lands alone and reviewed — never
+bundled into the change that needs it.
 
 ## Key insights
 
@@ -47,11 +47,11 @@
   so "gateway's imports are confined" happened to bound everything. After phase 06
   that is no longer true, and the promise has to be re-established one module down.
 - The same per-module pattern extends to stage B: `telemetry/`
-  ([phase 09](phase-09-telemetry-receiver-daemon.md)) and `transport/`
-  ([phase 11](phase-11-transport-proxy-service.md)) each arrive with their own
-  guard allowlist, enumerating their own direct requires. This ADR's boundary —
-  direct requires bounded at each module, transitive bounded at the dependency's
-  own module — is what makes those additions reviewable.
+([phase 09](phase-09-telemetry-receiver-daemon.md)) and `transport/` ([phase
+11](phase-11-transport-proxy-service.md)) each arrive with their own guard
+allowlist, enumerating their own direct requires. This decision record's
+boundary — direct requires bounded at each module, transitive bounded at the
+dependency's own module — is what makes those additions reviewable.
 
 ## Requirements
 
@@ -62,7 +62,7 @@
 4. A test proves it now passes with an indirect unreviewed require.
 5. `decision/` gains its own `guard_test.go` allowlist, mirroring gateway's, so
    the bound is re-established at the module that actually grows the dependency.
-6. **ADR** recording the narrowing: what the guard promised before, what it
+6. **decision record** recording the narrowing: what the guard promised before, what it
    promises now, and why the difference is acceptable.
 
 ## Architecture
@@ -85,7 +85,7 @@ hermetically in the test; otherwise match the comment and say so.
 - edit: `gateway/guard_test.go:225-244` (the go.mod half only — leave the source
   scan and `scanSource` alone)
 - new: `decision/guard_test.go` (allowlist + go.mod check, ported from gateway's)
-- new: `docs/adr/ADR-00XX-credential-guard-scope.md`
+- new: the decision record
 - reference: `gateway/guard_test.go:179-197` (the allowlist and its rationale
   comment — extend it to state the direct/indirect boundary)
 
@@ -103,7 +103,7 @@ hermetically in the test; otherwise match the comment and say so.
    dependency's own module.
 5. Add `decision/guard_test.go` with its own allowlist. Today it is empty; phase
    06 adds gitleaks to it deliberately, which is the point.
-6. Write the ADR. It must state plainly that this is a **reduction** in what the
+6. Write that decision. It must state plainly that this is a **reduction** in what the
    guard proves, and what compensates (the import half, plus decision's new guard).
 7. Run both modules' tests; confirm gateway's credential *source* scan
    (`scanSource`) is untouched by diffing that function.
@@ -116,7 +116,7 @@ hermetically in the test; otherwise match the comment and say so.
 - [x] seeded direct-require case still fails — drilled on the LIVE go.mod, both directions
 - [x] allowlist comment states the new boundary
 - [x] `decision/guard_test.go` added — no EXTERNAL entry; the one line is a sibling, listed like gateway's
-- [x] ADR-0023 written, indexed, and cited from `gateway/guard_test.go`
+- [x] that decision written, indexed, and cited from `gateway/guard_test.go`
 - [x] `scanSource` unchanged (verified by diff)
 
 ## Success criteria
@@ -128,14 +128,14 @@ hermetically in the test; otherwise match the comment and say so.
   require.
 - The credential source scan (`scanSource`) and the import half are byte-identical
   to before.
-- The ADR exists and is referenced from the test.
+- that decision exists and is referenced from the test.
 
 ## Risk assessment
 
 | Risk | Mitigation | Signal it broke | Response |
 |---|---|---|---|
-| **The narrowing hides a real credential path** — an indirect dep reads the developer's provider credential | The import half still bounds gateway's own source; `decision`'s new guard bounds the next hop. Neither is a *proof* about arbitrary transitive code | A dependency is found reading the provider credential env var | **This is the accepted residual risk and the ADR must name it.** Response is dependency review, not a guard tweak |
-| Guard is weakened further later, citing this ADR as precedent | ADR states the boundary and that moving it again is a new decision | A future change widens the allowlist instead of justifying a direct import | Reject; the allowlist's value is being short |
+| **The narrowing hides a real credential path** — an indirect dep reads the developer's provider credential | The import half still bounds gateway's own source; `decision`'s new guard bounds the next hop. Neither is a *proof* about arbitrary transitive code | A dependency is found reading the provider credential env var | **This is the accepted residual risk and that decision must name it.** Response is dependency review, not a guard tweak |
+| Guard is weakened further later, citing this decision record as precedent | decision record states the boundary and that moving it again is a new decision | A future change widens the allowlist instead of justifying a direct import | Reject; the allowlist's value is being short |
 | `// indirect` comment parsing is fragile (`go mod tidy` reformatting) | Prefer `go list -m` if hermetic; else assert on a fixture go.mod | Guard silently passes everything | **Mutation control** — the seeded direct case going green is the alarm |
 | Bundling this into phase 06 | Separate phase, separate commit, separate review | The gitleaks diff contains guard_test.go | Split it out before review |
 | `decision`'s guard is added but never enforced (empty allowlist reads as "nothing to check") | Seed test proving it fails on an unlisted direct require | Seeded case green | Fix before phase 06 lands |
@@ -143,8 +143,8 @@ hermetically in the test; otherwise match the comment and say so.
 ## Security considerations
 
 - This phase **reduces** what an existing security control proves. That is the
-  whole change; it must be visible in the ADR title and in the test's own comment,
-  not softened into "clarified scope".
+whole change; it must be visible in that decision title and in the test's own
+comment, not softened into "clarified scope".
 - The compensating controls are: (a) gateway's source scan, untouched — its own
   files still resolve no credential; (b) gateway's import half, untouched — its
   direct surface stays two modules; (c) `decision`'s new guard, bounding the next
@@ -163,9 +163,8 @@ Phase 06 (gitleaks) may proceed only after this is green and reviewed.
 
 ## Outcome (2026-08-28)
 
-Done — see the
-[verification report](reports/verification-260828-phase-05-credential-guard-scope.md)
-and [ADR-0023](../../docs/adr/ADR-0023-credential-guard-scope.md).
+Done — see the [verification
+report](reports/verification-260828-phase-05-credential-guard-scope.md).
 
 Numbered **0023**, not 0022: the plan reserves 0022 for phase 08.
 

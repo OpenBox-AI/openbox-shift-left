@@ -64,10 +64,10 @@ func TestNoGatedContentEgressesWhenCaptureIsOff(t *testing.T) {
 			canaries: []string{canaryOutput, canaryRespBody},
 		},
 		{
-			// ADR-0018's new content class. The turn span is the one place the
-			// client puts assistant text on the wire, so it is the one place a
-			// gate regression would put it there unconditionally — and unlike the
-			// cases above, this one is NEW, so no prior test covers it.
+			// That decision's new content class. The turn span is the one place
+			// the client puts assistant text on the wire, so it is the one place
+			// a gate regression would put it there unconditionally — and unlike
+			// the cases above, this one is NEW, so no prior test covers it.
 			name: "turn carrying the assistant message",
 			event: func() DevEvent {
 				idx := 0
@@ -154,11 +154,11 @@ func TestNoGatedContentEgressesWhenCaptureIsOff(t *testing.T) {
 //
 // It used to be framed as SL3-SEC-3: "a shell command must never egress,
 // content-capture on or off", holding structurally because no field carried a
-// command on the observe path. ADR-0019 P1 retired that — Content.ToolInput now
+// command on the observe path. That decision retired that — Content.ToolInput now
 // rides the observe ToolCall under the gate, and the command DOES egress with
 // capture on. This test still passes because its canary sits on Span.Function
-// rather than on Content, so re-read the name as being about the FIELD, not
-// about commands in general.
+// rather than on Content, so re-read the name as being about the FIELD, not about
+// commands in general.
 func TestShellCommandNeverEgressesEvenWithCaptureOn(t *testing.T) {
 	ev := DevEvent{
 		SchemaVersion: SchemaVersion, EventID: "ev-4", EventType: EventToolCall,

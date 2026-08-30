@@ -1,4 +1,4 @@
-// Package transport is the in-path model-call lane (ADR-0022, `:proxy:`).
+// Package transport is the in-path model-call lane (that decision, `:proxy:`).
 //
 // It grew out of a goproxy spike whose only output was byte-identical
 // forwarding. That is no longer what this is: the lane now carries the host
@@ -13,10 +13,10 @@
 // original sin already happened once.
 //
 // DEPENDENCY BOUNDARY. This subtree's imports are held to an allowlist in
-// internal/depguard, both external and repo-local (ADR-0023 as amended by
-// ADR-0024). Adding an import outside it fails there first, which is the
-// point — widening the list to make an import pass inverts the ADR's
-// reasoning. This comment is the signpost; depguard is the enforcement.
+// internal/depguard, both external and repo-local. Adding an import outside it
+// fails there first, which is the point — widening the list to make an import
+// pass inverts that decision's reasoning. This comment is the signpost; depguard
+// is the enforcement.
 package transport
 
 import (

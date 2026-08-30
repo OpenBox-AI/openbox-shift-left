@@ -372,9 +372,9 @@ func TestRunHook_StopSpoolsOnlyTurnEvents(t *testing.T) {
 //
 // This test used to say "the Stop payload's content fields must not reach the
 // spool… a future contributor who adds last_assistant_message to the struct
-// fails here". ADR-0018 IS that change, made deliberately and gated — so the
-// guard is re-aimed rather than removed, and it is strictly stronger than it
-// was: it now pins BOTH postures, where before it only ever exercised one.
+// fails here". That decision IS that change, made deliberately and gated — so
+// the guard is re-aimed rather than removed, and it is strictly stronger than
+// it was: it now pins BOTH postures, where before it only ever exercised one.
 //
 // The line that did not move: everything else on that payload stays unbound.
 // `stop_reason` is banned under capture ON as well as OFF — and in this

@@ -52,7 +52,8 @@ The binary's own hook table says the same: `PostToolUse` — "Run after **succes
    in the 2.1.229 bundle. Phase 03 R3's `*bool` tri-state has nothing to bind; the event ships with
    tool identity + `tool_use_id` only. The tri-state lesson is re-homed to `is_interrupt` (below).
 2. **`Stop` carries no `stop_reason`** in 2.1.229 (empirically absent; absent from the schema).
-   ADR-0018/0019 must say "the field does not exist on this hook", not "deferred".
+That decision/0019 must say "the field does not exist on this hook", not
+"deferred".
 3. **`PostToolUseFailure.is_interrupt` (bool) exists** and is structural. It separates "the user
    interrupted" from "the tool failed" — both are `status:"failed"`, and without it a cancelled
    call is indistinguishable from a defect. Bound as `*bool` so absent stays absent.

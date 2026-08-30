@@ -5,7 +5,7 @@
 - Plan: [plan.md](plan.md) · Depends: phases [02](phase-02-status-on-tool-results.md),
   [03](phase-03-failure-and-lifecycle-hooks.md), [04](phase-04-assistant-turn-span.md)
   (documents what SHIPPED, not what was planned)
-- Authority: `docs/adr/ADR-0018-dev-turn-content-carrier.md` (phase 01)
+- Authority:  (phase 01)
 - Design owner: superseded plan 2200 phase-04, widened for the phase-03 events
 
 ## Overview
@@ -40,7 +40,7 @@
 ## Requirements
 
 - R1: Every "no spans / no status / tool output never / usage write-only" claim either still true
-  or rewritten with the ADR-0018 link.
+or rewritten with that decision link.
 - R2: MAPPING.md gains: `status` envelope row (tool completed only, ungated); the turn-span rows
   (`content.output` → `spans[0].response_body`, gated + redacted + capped; deterministic ids;
   `hook_trigger` deliberately absent); the three new signal rows + failed-ToolResult row; the
@@ -49,14 +49,14 @@
   `tool.<name>.success`; spans row `span_type='llm_completion'`; `age_evaluations` row;
   `goal_alignment` metric keys; the new signal names in `governance_events`.
 - R3: COVERAGE.md §2 gains the derivations: status (per the verified branch), assistant text →
-  span response_body (gate chain finops ∧ content_capture ∧ window-has-usage; redaction ordering),
-  error_type enumOr, classifier_verdict tri-state. §3 bounded non-goals: Codex alignment feed +
-  Codex tool-success; `denial_reason`/`error_message`/`stop_reason`/thinking → ADR-0019.
+span response_body (gate chain finops ∧ content_capture ∧ window-has-usage; redaction ordering),
+error_type enumOr, classifier_verdict tri-state. §3 bounded non-goals: Codex alignment feed +
+Codex tool-success; `denial_reason`/`error_message`/`stop_reason`/thinking →.
 - R4: `docs/data-and-privacy.md`: table row **Assistant response text — yes, with capture on (per
-  model turn), redacted, 64KB cap**; "Tool output: never" row unchanged (still true — ADR-0019 P1
-  is the change that would touch it); the span paragraph rewritten honestly (a response-body
-  channel exists again for ONE carrier; `secret_detection:false` ⇒ unredacted); capture-on/off
-  lists updated; new signal events noted as metadata-only.
+model turn), redacted, 64KB cap**; "Tool output: never" row unchanged (still true — that decision
+is the change that would touch it); the span paragraph rewritten honestly (a response-body
+channel exists again for ONE carrier; `secret_detection:false` ⇒ unredacted); capture-on/off
+lists updated; new signal events noted as metadata-only.
 - R5: `docs/architecture.md` assurance: event-level plus ONE span per model turn under capture;
   span leaves return for those; `semantic_type` server-computed; usage-extractor status corrected.
 - R6: CLAUDE.md: the span-less line (`:23-25`), PR-#125 note, known limits (alignment requires
@@ -87,8 +87,8 @@ Current state, known limits) · `README.md` (only if asserting).
    stay deleted).
 3. COVERAGE.md §2/§3.
 4. data-and-privacy.md: table row first, then the paragraph rewrite — it must read as a
-   deliberate widening with three mitigations (gate, redaction, cap), not an improvement. Cite
-   ADR-0018; name the `secret_detection:false` case.
+deliberate widening with three mitigations (gate, redaction, cap), not an improvement. Cite;
+name the `secret_detection:false` case.
 5. architecture.md assurance bullets; correct the extractor status against the sibling checkout
    (record sha).
 6. README grep + minimal edits.
@@ -97,7 +97,7 @@ Current state, known limits) · `README.md` (only if asserting).
    (because `payload.Status` also writes `workflow_status`); INV-2 transcript line did NOT move;
    new hooks need re-init; the filed core ask retires the span. Honest status line.
 8. Verify every citation resolves; `go test ./...` still green (contracts module reads the schema).
-9. Commits: `docs: reconcile the span-less and status claims with ADR-0018` +
+9. Commits: `docs: reconcile the span-less and status claims with that decision` +
    `docs(contracts): map status, failure signals and the turn content span`.
 
 ## Todo list
@@ -129,7 +129,7 @@ Current state, known limits) · `README.md` (only if asserting).
 | Privacy claim softened into overstatement | M×H | Every mitigation sentence pairs with a limit sentence; `secret_detection:false` named |
 | Core-status correction itself stale by edit time | M×M | Re-verify sibling checkout, record sha, date the claim |
 | Retired-list amendment read as span-layer revival | M×M | Bounding sentence (one carrier, minimal fields) |
-| CLAUDE.md grows past usefulness | M×L | One paragraph, four bullets, one status line (ADR-0013/14/17 shape) |
+| CLAUDE.md grows past usefulness | M×L | One paragraph, four bullets, one status line (that decision/14/17 shape) |
 
 ## Security Considerations
 

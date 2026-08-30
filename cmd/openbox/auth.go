@@ -23,20 +23,20 @@ import (
 //
 // It authenticates: collects (or registers) this machine's identity and writes
 // the secrets to ~/.openbox/.env and the coordinates to dev.json. It installs
-// nothing — `openbox init` does that (ADR-0015/ADR-0016), and the split is what
-// lets init be a command that cannot touch a secret.
+// nothing — `openbox init` does that, and the split is what lets init be a
+// command that cannot touch a secret.
 //
 // Two properties are load-bearing and easy to break by accident:
 //
-//  1. NO FLAG EVER TAKES A SECRET VALUE (INV-1). Flags name a SOURCE
-//     (--api-key-stdin) the way `docker login --password-stdin` does. A
-//     --api-key <value> flag would put the credential on argv, where `ps` and
-//     the shell history both see it.
+// 1. NO FLAG EVER TAKES A SECRET VALUE (INV-1). Flags name a SOURCE
+// (--api-key-stdin) the way `docker login --password-stdin` does. A --api-key
+// <value> flag would put the credential on argv, where `ps` and the shell
+// history both see it.
 //
-//  2. SECRETS AND COORDINATES GO TO DIFFERENT FILES. `.env` gets the two (or
-//     three) secrets; dev.json gets the DID, agent id and URLs. Writing a
-//     coordinate into `.env` recreates the two-store bug ADR-0015 removed, where
-//     a stale second copy of the DID reverted a corrected one on every install.
+// 2. SECRETS AND COORDINATES GO TO DIFFERENT FILES. `.env` gets the two (or
+// three) secrets; dev.json gets the DID, agent id and URLs. Writing a coordinate
+// into `.env` recreates the two-store bug that decision removed, where a stale
+// second copy of the DID reverted a corrected one on every install.
 
 // authFields is one run's collected values.
 //
@@ -77,8 +77,8 @@ func (a *app) runAuth(args []string) int {
 	fs.BoolVar(&controlTokenStdin, "control-token-stdin", false, "read an approver's obx_key_ control token from the NEXT line of stdin")
 	fs.StringVar(&envFile, "env-file", "", "write the credential file here instead of ~/.openbox/.env")
 	// Registration flags, moved here from `init` when auth took ownership of
-	// authentication (ADR-0015). They configure the agent that gets created; none
-	// of them is a secret.
+	// authentication. They configure the agent that gets created; none of them is
+	// a secret.
 	//
 	// --provider, --org and --agent-name are gone. The agent this command creates
 	// is a MACHINE identity — auth says so itself ("a machine holds ONE agent
@@ -89,7 +89,8 @@ func (a *app) runAuth(args []string) int {
 	// `init`, which installs one tool's hooks and is the command that knows.
 	//
 	// --org was already dead: nothing ever read devinit.Options.Org. Its doc
-	// mentioned "secret accounts", which was the OS keychain ADR-0015 deleted.
+	// mentioned "secret accounts", which was the OS keychain that decision
+	// deleted.
 	fs.StringVar(&icon, "icon", "", "agent icon string (defaults to an emoji; the backend requires non-empty)")
 	fs.StringVar(&description, "description", "OpenBox developer-runtime agent", "agent description")
 	fs.BoolVar(&force, "force", false, "register a new distinctly-named agent even if one exists remotely")
@@ -104,8 +105,9 @@ func (a *app) runAuth(args []string) int {
 		return code
 	}
 
-	// Carry a pre-ADR-0015 config forward BEFORE writing, so the dev.json write
-	// merges over the user's real posture instead of resetting it to defaults.
+	// Carry a pre-that decision config forward BEFORE writing, so the dev.json
+	// write merges over the user's real posture instead of resetting it to
+	// defaults.
 	a.migrateLegacyConfig()
 
 	envPath, err := a.credentialFilePath(envFile)
@@ -345,15 +347,15 @@ func (a *app) writeSecrets(envPath string, f authFields, piped map[string]string
 		devconfig.EnvAgentPrivateKey: strings.TrimSpace(f.privateKey),
 	}
 	// An approver's org control token is persisted only when explicitly supplied.
-	// It is a much larger exposure than the agent seed (ADR-0015), so it is never
-	// written as a side effect of an ordinary auth run.
+	// It is a much larger exposure than the agent seed, so it is never written as
+	// a side effect of an ordinary auth run.
 	if v := piped[devconfig.EnvControlToken]; v != "" {
 		secrets[devconfig.EnvControlToken] = v
 	}
 	if err := devconfig.WriteEnvFile(envPath, secrets); err != nil {
 		return a.errorf("write credentials: %v", err)
 	}
-	fmt.Fprintf(a.stdout, "✓ wrote %s  (0600 — plaintext; see ADR-0015)\n", envPath)
+	fmt.Fprintf(a.stdout, "✓ wrote %s (0600 — plaintext;)\n", envPath)
 	return exitOK
 }
 
@@ -617,5 +619,5 @@ func (a *app) printAuthNextSteps() {
 	fmt.Fprintf(a.stdout, "\nNext: openbox init --provider <claude-code|codex|cursor>\n")
 	fmt.Fprintf(a.stdout, "  That installs the hooks. By default it governs THIS DIRECTORY only —\n")
 	fmt.Fprintf(a.stdout, "  run it in each project you want governed, or use --scope global for a\n")
-	fmt.Fprintf(a.stdout, "  fleet rollout (see ADR-0016).\n")
+	fmt.Fprintf(a.stdout, " fleet rollout.\n")
 }

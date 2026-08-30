@@ -13,19 +13,20 @@
 - **Description:** Move the release config to `build/`, simplify CI now that there is
   no workspace to discover, and give the release path its first automated coverage.
 - **Priority:** P1 — the release path is the one thing in this repo with no automated
-  coverage; ADR-0011 named that as reason 1 for not collapsing.
+coverage; that decision named that as reason 1 for not
+collapsing.
 - **Implementation status:** COMPLETE (2026-08-30) · **Review:** self-verified; report at `reports/release-260830.md`
 
 ## Key insights
 
-- **This phase is where ADR-0011's strongest objection is either discharged or
-  confirmed.** Reason 1 was that GoReleaser builds from `cli` with its own `replace`
-  graph and the release path has no test coverage. After the collapse there is no
-  `replace` graph and no `GOWORK=off` divergence — the config gets *simpler*. But
-  "simpler" is not "verified": run `goreleaser build --snapshot` and **execute** the
-  resulting binary. That is the coverage the ADR said was missing, and it is cheap
-  now. It is also the thing that makes the collapse defensible rather than merely
-  tidy.
+- **This phase is where that decision's strongest objection is either discharged or
+confirmed.** Reason 1 was that GoReleaser builds from `cli` with its own `replace`
+graph and the release path has no test coverage. After the collapse there is no
+`replace` graph and no `GOWORK=off` divergence — the config gets *simpler*. But
+"simpler" is not "verified": run `goreleaser build --snapshot` and **execute** the
+resulting binary. That is the coverage that decision said was missing, and it is
+cheap now. It is also the thing that makes the collapse defensible rather than
+merely tidy.
 - **`GOWORK=off` becomes meaningless and must be deleted, not kept "for safety".** A
   stale env var that no longer expresses anything is how a reader later concludes a
   workspace still exists. Its comment ("all 12 modules at once") is already stale by
@@ -130,7 +131,7 @@ unchanged)
 
 | Risk | Mitigation | Signal it broke | Pre-decided response |
 |---|---|---|---|
-| Release path breaks and is only discovered at tag time | step 5 executes a snapshot binary — the coverage ADR-0011 said did not exist | snapshot build fails or binary won't run | fix before merging; never tag to find out |
+| Release path breaks and is only discovered at tag time | step 5 executes a snapshot binary — the coverage that decision said did not exist | snapshot build fails or binary won't run | fix before merging; never tag to find out |
 | `main:` path stale after phase 03 | step 2 checks it explicitly | goreleaser cannot find the main package | fix the path, not the layout |
 | Archive name drifts from what `install.sh` constructs | step 6 compares the two | installer 404s on the snapshot name | fix `name_template`, not `install.sh` — the template is the contract |
 | A CI step deleted that was doing real work | diff the workflow and justify each removal in the PR body | a class of failure stops being caught | restore it in `./...` form |

@@ -358,8 +358,8 @@ func TestSecretsAndCoordinatesGoToDifferentFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// No coordinate key in .env — the tripwire for the two-store bug ADR-0015
-	// removed. Relaxing this reopens it.
+	// No coordinate key in.env — the tripwire for the two-store bug that
+	// decision removed. Relaxing this reopens it.
 	for _, coord := range []string{devconfig.EnvDID, devconfig.EnvAgentID, devconfig.EnvBaseURL, devconfig.EnvBackendURL} {
 		if strings.Contains(string(envRaw), coord+"=") {
 			t.Errorf(".env carries the coordinate %s; secrets and coordinates must not share a file:\n%s", coord, envRaw)
@@ -599,7 +599,7 @@ func TestAuthSuccessNamesInitAsTheNextStep(t *testing.T) {
 		t.Errorf("success output should name `openbox init`:\n%s", s)
 	}
 	// And it must state the scope default, which is the thing users are most
-	// likely to be surprised by (ADR-0016).
+	// likely to be surprised by.
 	if !strings.Contains(s, "THIS DIRECTORY") {
 		t.Errorf("success output should state the project-local scope default:\n%s", s)
 	}

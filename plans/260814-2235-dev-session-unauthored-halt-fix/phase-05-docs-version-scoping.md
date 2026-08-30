@@ -24,10 +24,10 @@
 2. **The troubleshooting row is not a bug report — it is a runbook entry.** A developer on an older
    core will still hit this and still needs the recovery. Version-scope it; do not delete it.
 3. **Two of the three blocks make a claim about the CLIENT that is no longer the whole story.**
-   README and architecture both frame it as "the client applies a HALT no policy authored". After
-   the fix the client is unchanged and still would — the reason it no longer happens is that core
-   stopped emitting one for dev sessions. Word it that way; do not imply a client-side guard that
-   does not exist (ADR-0017 trust boundary).
+README and architecture both frame it as "the client applies a HALT no policy authored". After
+the fix the client is unchanged and still would — the reason it no longer happens is that core
+stopped emitting one for dev sessions. Word it that way; do not imply a client-side guard that
+does not exist (that decision trust boundary).
 4. **`init`'s promise becomes true again without touching its text.** `cli/cmd/openbox/main.go:330`
    and `cli/internal/devinit/devinit.go:411` both print "inert until your org publishes a policy,
    and fail-open" — the exact guarantee the defect falsified. Leave them; a re-word would imply the

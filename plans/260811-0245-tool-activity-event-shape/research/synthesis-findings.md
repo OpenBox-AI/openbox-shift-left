@@ -77,9 +77,9 @@ Not a style objection — it loses data, provably, in three independent places:
    `SpanIDs` returned by the hook path (`attestation/merkle.go:34`). No span stored ⇒
    no leaf ⇒ the evidence chain loses the tool call.
 3. **Two contracts reject it before the wire.** `event_rules.py:79-85`
-   (`ACTIVITY_COMPLETED_WITH_SPANS`) and shift-left's own
-   `AssertHookWireShape` (`client/hookspan.go:103`). ADR-0004 already reversed this
-   exact proposal once.
+(`ACTIVITY_COMPLETED_WITH_SPANS`) and shift-left's own `AssertHookWireShape`
+(`client/hookspan.go:103`). That decision already reversed this exact proposal
+once.
 
 ## 4. Corrections to the research (do not propagate)
 

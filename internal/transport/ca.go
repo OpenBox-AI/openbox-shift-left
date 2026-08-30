@@ -23,17 +23,16 @@ import (
 //
 // This is the highest-value secret this product places on a developer machine
 // after the signing key: a CA that can impersonate the provider to THIS HOST. It
-// lives under the same trust boundary as ~/.openbox/.env (ADR-0015) — anything
-// running as the developer, the governed agent included, can read it — so the
-// controls here are about not making that boundary WORSE, not about pretending
-// it is tamper-proof. Four of them:
+// lives under the same trust boundary as ~/.openbox/.env — anything running as
+// the developer, the governed agent included, can read it — so the controls here
+// are about not making that boundary WORSE, not about pretending it is
+// tamper-proof. Four of them:
 //
-//   - the key is 0600 and the loader REFUSES to run when it is looser;
-//   - the CA is NAME-CONSTRAINED to the intercepted host, so even a leaked key
-//     cannot mint a usable certificate for anything else;
-//   - it is never added to any system trust store — the client is pointed at the
-//     PEM directly (phase 11 requirement 5, "trusted by the client only");
-//   - removal deletes it (OD2, one command out).
+// - the key is 0600 and the loader REFUSES to run when it is looser; - the CA is
+// NAME-CONSTRAINED to the intercepted host, so even a leaked key cannot mint a
+// usable certificate for anything else; - it is never added to any system trust
+// store — the client is pointed at the PEM directly (phase 11 requirement 5,
+// "trusted by the client only"); - removal deletes it (OD2, one command out).
 //
 // Leaves are minted HERE with stdlib crypto/x509 rather than through goproxy's
 // TLSConfigFromCA, for two measured reasons. goproxy's helper clones a
@@ -329,7 +328,7 @@ func RemoveCA(dir string) error {
 
 // requireOwnerOnly refuses a CA key any other account can read.
 //
-// Windows is exempt, and that is ADR-0015's stated posture rather than an
+// Windows is exempt, and that is that decision's stated posture rather than an
 // oversight: ~/.openbox has no at-rest protection there, and a unix-mode check
 // against a Windows file mode would refuse to start on every Windows machine
 // while protecting nothing.

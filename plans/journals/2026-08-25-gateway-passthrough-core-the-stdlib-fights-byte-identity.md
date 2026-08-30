@@ -81,10 +81,10 @@ strings, unblocking phase 05's account evidence.
 ## Next steps
 
 - USER: P0 (both auth modes), probe A (needs an interactive session for the
-  capability-disable signal), P1 §1; accept ADR-0019; file the backend ask.
+capability-disable signal), P1 §1; accept; file the backend ask.
 - Phase 05 is startable except requirement 5 — identity from `x-claude-code-session-id`.
   Phase 04 proved that header *relays* verbatim, which is silent on whether Claude Code
   *sends* it. That needs P0 positive.
 - Phase 06 is hard-blocked: the refusal shape IS the phase.
 
-> Historical work record — not durable authority. Prefer docs/specs/ADRs for current decisions.
+> Historical work record — not durable authority. Prefer docs/specs for current decisions.

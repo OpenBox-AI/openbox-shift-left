@@ -67,8 +67,8 @@ func (f *fakeInstaller) Install(r provider.CredentialRef) error {
 // file there instead of the developer's real ~/.openbox.
 //
 // This replaced an injected secret.Store. With credentials in a plaintext file
-// the test can exercise the production write path rather than a stand-in for it
-// (ADR-0015), which is why there is no MemStore any more.
+// the test can exercise the production write path rather than a stand-in for
+// it, which is why there is no MemStore any more.
 func isolateHome(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -167,7 +167,7 @@ func TestHappyPathStoresCredsNeverPrintsThem(t *testing.T) {
 		t.Errorf("private key not written, got %q", got)
 	}
 	// The DID is a COORDINATE and must not be in the credential file. Writing it
-	// there would recreate the two-store bug ADR-0015 removed: a stale copy
+	// there would recreate the two-store bug that decision removed: a stale copy
 	// beside the secrets that reverts a corrected DID on the next install.
 	if got, ok := kv[devconfig.EnvDID]; ok {
 		t.Errorf("credential file carries the DID (%q); secrets and coordinates must not share a file", got)
@@ -216,7 +216,7 @@ func TestIdempotentReuseSkipsRegistration(t *testing.T) {
 	}
 	// The DID is a coordinate and lives in dev.json, never beside the secrets —
 	// that split is what stopped a stale credential store from reverting a
-	// corrected DID on every re-init (ADR-0015).
+	// corrected DID on every re-init.
 	if err := devconfig.WriteConfig(filepath.Join(dir, "dev.json"), devconfig.Update{DID: "did:aip:existing"}); err != nil {
 		t.Fatal(err)
 	}

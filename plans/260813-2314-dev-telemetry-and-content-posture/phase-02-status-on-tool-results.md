@@ -2,7 +2,7 @@
 
 ## Context links
 
-- Plan: [plan.md](plan.md) · Depends: [phase 01](phase-01-adr-0018-dev-turn-content-carrier.md)
+- Plan: [plan.md](plan.md) · Depends: [phase 01](phase-01-dev-turn-content-carrier.md)
 - Design owner: superseded plan 2241 phase-01 (merge decision 1); contract rigor from superseded
   plan 2200 phase-02
 - Core consumer (read-only): `openbox-core internal/services/activities/observability/errors.go:301-337`
@@ -47,7 +47,7 @@
 - R3: NOT content-gated — ships identically with `content_capture:false`.
 - R4: Closed vocabulary `completed`|`failed`; client omits anything else (a typo must not zero a
   shipped metric).
-- R5: Adapter-facing contract → additive **v1.2** with version note (ADR-0014 v1.1 precedent);
+- R5: Adapter-facing contract → additive **v1.2** with version note (that decision v1.1 precedent);
   every fixture pinning the version const updated. Phase 03's new event types land in the same
   1.2 (one bump for the plan).
 - R6: `activity_id`/`event_id`/approval keys byte-unchanged; 11 modules green `-race`; both
@@ -150,14 +150,14 @@ Do **not** touch: pin tests, `adapters/claude-code/usage.go`+`usage_test.go`,
 | `PostToolUse` fires on failure and completed-unconditional shipped ⇒ SUCCESS reads 100% while failing | M×H | Step 1 gates. Signal: phase 6 shows 100.0% with a known-failing call. Response: stop-and-replan (B1b/B3); never "tune" the metric |
 | Wrong literal (`"success"`, `"COMPLETED"`) keeps metric at 0% | M×H | Closed vocab + C20 asserts the literal on bytes; core comparison quoted in comment |
 | Schema bump misses a fixture | M×L | 17 files enumerated; run contracts tests immediately after step 4 |
-| `workflow_status` on activity rows changes a downstream rendering | L×M | Reader inventory done (compliance export only); response: already ToolResult-scoped, note in ADR |
+| `workflow_status` on activity rows changes a downstream rendering | L×M | Reader inventory done (compliance export only); response: already ToolResult-scoped, note in decision record |
 | Codex divergence read as a bug | M×L | `capabilities.go` entry + phase 05 MAPPING note |
 
 ## Security Considerations
 
 - No new content class. Structural derivation only; a bound `is_error` bool / exit int is
-  INV-2-safe by the same argument `isSidechain` is (`usage.go:104-106`). Binding `tool_response`
-  as a string is ADR-0019 P1 territory, not this phase.
+INV-2-safe by the same argument `isSidechain` is (`usage.go:104-106`). Binding `tool_response`
+as a string is that decision territory, not this phase.
 - Two-literal enum cannot encode content; `metadata.exit_code` stays an integer — a message
   alongside it goes to `contentMetadataKeys` (`client/payload.go:419-432`), never promoted.
 

@@ -10,77 +10,65 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/internal/client"
 )
 
-// Codex finops / token-usage extraction (default ON; opt out with
-// finops:false or OPENBOX_FINOPS=0).
+// Codex finops / token-usage extraction (default ON; opt out with finops:false or
+// OPENBOX_FINOPS=0).
 //
-// Codex hooks expose no token/cost usage (capabilities.go), but the
-// session's on-disk rollout JSONL — the file `transcript_path` points at
-// on SessionEnd — carries running token counts. Behind the finops gate
-// (ResolveFinops — the same separate flag Claude Code uses, not
-// content_capture; default ON as of ADR-0014), the adapter reads it on
-// SessionEnd (off the hot path, after Codex has flushed the transcript) to
-// populate client.Tokens on the SessionEnded event AND the session-rollup
-// llm_completion activity pair.
+// Codex hooks expose no token/cost usage (capabilities.go), but the session's on-disk
+// rollout JSONL — the file `transcript_path` points at on SessionEnd — carries running
+// token counts. Behind the finops gate (ResolveFinops — the same separate flag Claude
+// Code uses, not content_capture; default ON as of), the adapter reads it on SessionEnd
+// (off the hot path, after Codex has flushed the transcript) to populate client.Tokens
+// on the SessionEnded event AND the session-rollup llm_completion activity pair.
 //
-// Grounded wire shape (real source, codex-rs @ rust-v0.145.0 — recorded in
-// the testdata fixture, not guessed; the box carried no live rollout to
-// sample so the shape was pinned from the shipped structs and the
-// 0.145.0 binary strings):
+// Grounded wire shape (real source, codex-rs @ rust-v0.145.0 — recorded in the testdata
+// fixture, not guessed; the box carried no live rollout to sample so the shape was
+// pinned from the shipped structs and the 0.145.0 binary strings):
 //
-//	rollout line   = {"timestamp":..,"type":"event_msg","payload":<EventMsg>}
-//	                 (RolloutItem is #[serde(tag="type",content="payload")]; the
-//	                  token line's item tag is "event_msg")
-//	EventMsg       = {"type":"token_count","info":<TokenUsageInfo>,"rate_limits":..}
-//	                 (EventMsg is #[serde(tag="type",rename_all="snake_case")])
-//	TokenUsageInfo = {"total_token_usage":<TokenUsage>,"last_token_usage":<TokenUsage>,
-//	                  "model_context_window":<int|null>}
-//	TokenUsage     = {"input_tokens","cached_input_tokens","cache_write_input_tokens",
-//	                  "output_tokens","reasoning_output_tokens","total_tokens"}  (all i64)
+// rollout line   = {"timestamp":..,"type":"event_msg","payload":<EventMsg>} (RolloutItem
+// is #[serde(tag="type",content="payload")]; the token line's item tag is "event_msg")
+// EventMsg       = {"type":"token_count","info":<TokenUsageInfo>,"rate_limits":..}
+// (EventMsg is #[serde(tag="type",rename_all="snake_case")]) TokenUsageInfo =
+// {"total_token_usage":<TokenUsage>,"last_token_usage":<TokenUsage>,
+// "model_context_window":<int|null>} TokenUsage     =
+// {"input_tokens","cached_input_tokens","cache_write_input_tokens",
+// "output_tokens","reasoning_output_tokens","total_tokens"}  (all i64)
 //
-// Two Codex-specific facts drive the aggregation (both source-verified,
-// and the deliberate divergence from the Claude Code reader):
+// Two Codex-specific facts drive the aggregation (both source-verified, and the
+// deliberate divergence from the Claude Code reader):
 //
-//  1. `total_token_usage` is a cumulative running session total, not a
-//     per-turn delta: TokenUsageInfo::append_last_usage does
-//     `total_token_usage.add_assign(last)` (protocol.rs @ rust-v0.145.0).
-//     Each successive token_count line carries a larger cumulative
-//     snapshot. So the rollup is the last valid snapshot — not a sum
-//     across lines (summing would multiply-count every prior turn). CC,
-//     by contrast, sums per-turn usages.
-//  2. `cached_input_tokens` / `cache_write_input_tokens` /
-//     `reasoning_output_tokens` are subsets already folded inside
-//     input_tokens / output_tokens (OpenAI accounting):
-//     TokenUsage::non_cached_input == input_tokens - cached_input_tokens
-//     (protocol.rs). total_tokens is Codex's own independently-summed
-//     field (we carry it verbatim, not recomputed). So we carry
-//     input_tokens / output_tokens / total_tokens directly and must not
-//     add the cache/reasoning sub-counts (adding would double-count).
-//     CC's cache tokens are additive and folded into Input; Codex's are
-//     already inside it.
+// 1. `total_token_usage` is a cumulative running session total, not a per-turn delta:
+// TokenUsageInfo::append_last_usage does `total_token_usage.add_assign(last)`
+// (protocol.rs @ rust-v0.145.0). Each successive token_count line carries a larger
+// cumulative snapshot. So the rollup is the last valid snapshot — not a sum across lines
+// (summing would multiply-count every prior turn). CC, by contrast, sums per-turn
+// usages. 2. `cached_input_tokens` / `cache_write_input_tokens` /
+// `reasoning_output_tokens` are subsets already folded inside input_tokens /
+// output_tokens (OpenAI accounting): TokenUsage::non_cached_input == input_tokens -
+// cached_input_tokens (protocol.rs). total_tokens is Codex's own independently-summed
+// field (we carry it verbatim, not recomputed). So we carry input_tokens / output_tokens
+// / total_tokens directly and must not add the cache/reasoning sub-counts (adding would
+// double-count). CC's cache tokens are additive and folded into Input; Codex's are
+// already inside it.
 //
-// Cost: the token path carries no cost/price field at all —
-// TokenCountEvent is only {info, rate_limits} (protocol.rs). So Cost is
-// always nil for Codex (even more strongly than CC, whose costUSD field
-// merely happens to be absent). Cost is never derived from a pricing
-// table (that would be a fabricated number).
+// Cost: the token path carries no cost/price field at all — TokenCountEvent is only
+// {info, rate_limits} (protocol.rs). So Cost is always nil for Codex (even more strongly
+// than CC, whose costUSD field merely happens to be absent). Cost is never derived from
+// a pricing table (that would be a fabricated number).
 //
-// INV-2 (the load-bearing invariant) is enforced structurally, not by
-// filtering: the rollout is decoded into `rolloutLine` /
-// `rolloutTokenInfo` / `rolloutTokenUsage` — structs that contain only
-// numeric fields (and nested structs of numeric fields). Because
-// encoding/json silently ignores unknown keys, every content-bearing
-// location in the rollout (session_meta instructions, the agent_message
-// text, response_item content, apply_patch bodies, shell commands, tool
-// output, cwd, …) has nowhere to land — content cannot enter memory
-// through this path, let alone reach an event, metadata, span, or the
-// wire. The sentinel-content-absent test (usage_test.go) proves this
-// end-to-end against the real signed wire body with content-capture on
-// (stripper disabled).
+// INV-2 (the load-bearing invariant) is enforced structurally, not by filtering: the
+// rollout is decoded into `rolloutLine` / `rolloutTokenInfo` / `rolloutTokenUsage` —
+// structs that contain only numeric fields (and nested structs of numeric fields).
+// Because encoding/json silently ignores unknown keys, every content-bearing location in
+// the rollout (session_meta instructions, the agent_message text, response_item content,
+// apply_patch bodies, shell commands, tool output, cwd, …) has nowhere to land — content
+// cannot enter memory through this path, let alone reach an event, metadata, span, or
+// the wire. The sentinel-content-absent test (usage_test.go) proves this end-to-end
+// against the real signed wire body with content-capture on (stripper disabled).
 //
-// INV-3: best-effort. A missing / null / oversized / malformed /
-// partially-written rollout yields an error the caller logs and skips; it
-// never fails the flush, blocks a tool call, or writes stdout. The read
-// is bounded (maxRolloutBytes) so a giant rollout cannot exhaust memory.
+// INV-3: best-effort. A missing / null / oversized / malformed / partially-written
+// rollout yields an error the caller logs and skips; it never fails the flush, blocks a
+// tool call, or writes stdout. The read is bounded (maxRolloutBytes) so a giant rollout
+// cannot exhaust memory.
 
 // maxRolloutBytes bounds the rollout read so a pathological/huge rollout
 // cannot exhaust memory (INV-3). A rollout larger than this is skipped

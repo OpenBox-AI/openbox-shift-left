@@ -6,7 +6,7 @@
 # The engine lives in cmd/openbox + internal/cli. One module, no `replace`
 # directives and no workspace, so the build needs neither a `dir:` nor a
 # GOWORK override — it resolves from the repository root exactly as a consumer
-# would (ADR-0024).
+# would.
 #
 # Release: push a tag `vX.Y.Z`; the release workflow runs `goreleaser release`.
 version: 2

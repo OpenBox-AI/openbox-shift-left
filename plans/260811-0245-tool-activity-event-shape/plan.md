@@ -5,7 +5,7 @@ status: implemented — live verification pending
 priority: P1
 effort: 9h
 branch: feat/realtime-event-delivery
-tags: [wire-contract, telemetry, adr, breaking-observability]
+tags: [wire-contract, telemetry, decision record, breaking-observability]
 created: 2026-08-11
 ---
 
@@ -30,8 +30,8 @@ Evidence and the rejected alternatives: [synthesis-findings.md](research/synthes
 Dev sessions will produce **zero `spans` rows**. Lost: `semantic_type` classification,
 span-level Merkle leaves, and the span as a field carrier. Gained: a wire that matches
 the model, `workflow_type` present on tool events for the first time, and the retirement
-of `client/hookspan.go` — the hand-maintained mirror of the base hook contract that
-ADR-0004 flags as a standing unverifiable obligation.
+of `client/hookspan.go` — the hand-maintained mirror of the base hook contract that that
+decision flags as a standing unverifiable obligation.
 
 Event volume is unchanged (2 POSTs per tool call, as today).
 
@@ -51,7 +51,7 @@ Event volume is unchanged (2 POSTs per tool call, as today).
 |---|---|---|---|
 | 01 | [Wire: tool events onto the activity lifecycle](phase-01-wire-activity-lifecycle.md) | 3h | complete |
 | 02 | [Retire the hook-span machinery](phase-02-retire-hook-span-machinery.md) | 1.5h | complete |
-| 03 | [Contracts, ADR and docs](phase-03-contracts-adr-docs.md) | 2h | complete |
+| 03 | [Contracts, decision record and docs](phase-03-contracts-and-docs.md) | 2h | complete |
 | 04 | [Prove it on a live stack](phase-04-testbed-verification.md) | 2.5h | scripts done · live run pending |
 
 Dependencies: 01 → 02 → 03; 04 depends on 01+02 and closes 03's claims.
@@ -83,12 +83,12 @@ below); 1, 6, 7 need the live run.
 Two deviations, both recorded in the phase files:
 
 1. **`error` is not sent**, so acceptance criterion 3 is partially unmet by
-   design. It has no source (the frozen adapter contract has no failure field)
-   **and** no consumer (core reads `payload.Error` only for `WorkflowFailed`,
-   `storage_event.go:281-286`). A failed tool call is therefore indistinguishable
-   from a successful one on the wire — a real gap, recorded in ADR-0013 rather
-   than papered over with a field that does nothing. Closing it needs a failure
-   signal in the adapter schema, which is its own decision.
+design. It has no source (the frozen adapter contract has no failure field)
+**and** no consumer (core reads `payload.Error` only for `WorkflowFailed`,
+`storage_event.go:281-286`). A failed tool call is therefore indistinguishable
+from a successful one on the wire — a real gap rather than papered over with a
+field that does nothing. Closing it needs a failure signal in the adapter schema,
+which is its own decision.
 2. **`attempt` is not sent** — permanently null in a stateless hook process.
 
 ## Found in review, not in the plan
@@ -99,7 +99,7 @@ was unique per tool call before this change; two rows now share it. The primary
 hold is unaffected (it polls pre-execution), but a **retry after a completed
 attempt** — the path `operation_id` exists to support — may resolve the completed
 row and read a real grant as undecided. Fix is core-side and out of this plan's
-scope; recorded in ADR-0013 Consequences and MAPPING.md §7 item 6.
+scope; Consequences and MAPPING.md §7 item 6.
 
 ## Open questions
 
@@ -166,10 +166,10 @@ Correction: `activityLabel` is at `payload.go:497`, not `:498` as
    no known consumer, and `duration_ms` is the field the dashboard reads
    (`workflow-tree-view.tsx:643,703`). The unit-verification step is dropped.
 3. **Phase 04 fallback pre-authorized:** if the live run shows core merging or rejecting
-   the second row, implementation proceeds directly to the 3-POST fallback
-   (`ActivityStarted` → `ActivityCompleted` → `ActivityCompleted`+`hook_trigger` with the
-   span) without a new decision. It needs its own ADR entry, since it diverges from the
-   base SDK's hook rule.
+the second row, implementation proceeds directly to the 3-POST fallback
+(`ActivityStarted` → `ActivityCompleted` → `ActivityCompleted`+`hook_trigger` with the
+span) without a new decision. It needs its own decision record entry, since it diverges
+from the base SDK's hook rule.
 4. **Frozen schema:** `contracts/dev-event/schema/` is untouched, no `schema_version`
    bump. `Span.Stage` becomes an unread field and is retained deliberately; MAPPING.md
    §3's field-home table is the authority on what the serializer actually reads.
@@ -178,7 +178,7 @@ Correction: `activityLabel` is at `payload.go:497`, not `:498` as
 
 - [x] Propagate decisions 1-4 to phase files
 - [ ] Phase 01: pin `activity_id` + `workflow_id` values in a test *before* refactoring
-- [ ] Phase 03: the 3-POST fallback needs an ADR entry if Phase 04 triggers it
+- [ ] Phase 03: the 3-POST fallback needs a decision record entry if Phase 04 triggers it
 
 ### Whole-Plan Consistency Sweep
 

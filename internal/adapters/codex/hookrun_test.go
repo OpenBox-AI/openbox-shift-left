@@ -127,10 +127,10 @@ func TestRunHook_SessionEndFlushesSpool(t *testing.T) {
 	//
 	// It used to get that for free: with the gate narrowed to escalating
 	// nothing by default, the spooled metadata-only copy was the only thing
-	// that ever reached the wire. ADR-0017 evaluates every gated call inline,
-	// and an escalation DOES attach content when capture is on (E7), so leaving
-	// the default here would assert the absence of something the design now
-	// deliberately sends. That posture belongs to its own tests.
+	// that ever reached the wire. That decision evaluates every gated call
+	// inline, and an escalation DOES attach content when capture is on (E7), so
+	// leaving the default here would assert the absence of something the design
+	// now deliberately sends. That posture belongs to its own tests.
 	t.Setenv(devconfig.EnvContentCapture, "0")
 
 	secret := "FLUSH-SECRET-COMMAND"

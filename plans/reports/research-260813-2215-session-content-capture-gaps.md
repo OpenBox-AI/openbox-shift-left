@@ -5,20 +5,20 @@ Related: `plans/260813-2200-dashboard-widget-telemetry-gaps/scout/` (widget root
 
 ## Executive Summary
 
-The events look thin **by design, not by accident**. Shift-left's posture is INV-2 metadata-only:
-every field you miss in the OpenBox UI — tool output, assistant response text, thinking, subagent
-prompts, success/failure — is *available* at the Claude Code hook boundary or in the transcript,
-and the adapter **deliberately refuses to bind it** ([hookevent.go:119-128](../../adapters/claude-code/hookevent.go),
+The events look thin **by design, not by accident**. Shift-left's posture is INV-2 metadata-only: every field you
+miss in the OpenBox UI — tool output, assistant response text, thinking, subagent prompts, success/failure — is
+*available* at the Claude Code hook boundary or in the transcript, and the adapter **deliberately refuses to bind
+it** ([hookevent.go:119-128](../../adapters/claude-code/hookevent.go),
 [mapper.go:429-431](../../adapters/claude-code/mapper.go), [usage.go:30-54](../../adapters/claude-code/usage.go)).
-Enriching is therefore a **privacy-posture decision first, code second** — and the repo's own rules
-route that through an ADR + OD decision, not a commit.
+Enriching is therefore a **privacy-posture decision first, code second** — and the repo's own rules route that
+through a decision record + OD decision, not a commit.
 
 Three tiers, by cost:
 
-1. **Structural wins — no privacy change, no ADR** (recommend now): `status` on `ActivityCompleted`
+1. **Structural wins — no privacy change, no decision record** (recommend now): `status` on `ActivityCompleted`
    (this alone fixes the Tool Health Matrix 0% widget), wire `PostToolUseFailure`/`SubagentStart`/
    `PermissionDenied` hooks, map the `Task` tool's `subagent_type`. All identifiers/enums, INV-2-clean.
-2. **Content-class extensions — ADR + OD decision required**: tool output (`tool_response`) and
+2. **Content-class extensions — decision record + OD decision required**: tool output (`tool_response`) and
    assistant response text (`last_assistant_message`) as content-gated, redacted, capped fields.
    Assistant text is also the **prerequisite for the Goal Alignment / Drift widgets** — but needs a
    matching openbox-core change (AGE reads assistant content only from spans, which dev sessions never write).
@@ -82,14 +82,15 @@ capture does **not** require widening the transcript allowlist. That materially 
 ### 3. Why it is this way — constraints any enrichment must respect
 
 - **INV-2 / SL3-SEC-3** ("commands, file bodies, tool output never egress on observe events") holds
-  *by construction*: fields are unbound in `HookEvent`, `stripContent` is the client choke point,
-  `TestFinops_NoContentOnWire` is a load-bearing sentinel. `docs/data-and-privacy.md:15` promises
-  "Tool output: **never**" — enrichment changes a published promise, hence ADR territory.
+*by construction*: fields are unbound in `HookEvent`, `stripContent` is the client choke point,
+`TestFinops_NoContentOnWire` is a load-bearing sentinel. `docs/data-and-privacy.md:15` promises
+"Tool output: **never**" — enrichment changes a published promise, hence decision record
+territory.
 - **The `input` you see today is the gated /evaluate copy.** With `enforce: true`, the inline
   evaluation delivers the event (with content) and suppresses the duplicate observe copy
   (evaluate.go:167-172). An observe-only org gets NO command text at all. Any "input looks fine"
   conclusion from your sample only holds while enforce is on.
-- **New transcript-bound string = ADR amendment**, not a commit (ADR-0014 rule; the allowlist "IS the
+- **New transcript-bound string = decision record amendment**, not a commit (that decision rule; the allowlist "IS the
   struct"). Corollary: prefer hook-payload fields (last_assistant_message) over transcript binding.
 - **Redact-before-attach must extend to outputs** (conformance C18 pins ordering for inputs). Outputs
   are where secrets actually surface — `env` dumps, `cat .env`, tokens in stderr. Local secret
@@ -124,7 +125,7 @@ Per-class flags + off-ish defaults + hard truncation + thinking-never is the ind
 | Empty widget | Root cause (scout 02) | Which enrichment unblocks it |
 |---|---|---|
 | Tool Health SUCCESS 0% | core `ExtractToolMetric` needs top-level `Status=="completed"` on ActivityCompleted; no producer sends one → `.failed` incremented every call | **P0 `status` field** (client-only fix; core already reads it) |
-| Goal Alignment Trend | core AGE accumulates assistant content **only from `payload.Spans[]`** (`Stage=="completed" && SemanticType==llm_completion && ResponseBody!=nil`); dev sessions are span-less (ADR-0013) and never send text (INV-2) → `GoalAlignmentChecked` never true | **P2 assistant text** on the turn's `activity_output` **+ a core-side change** to read it from the llm_completion Activity, not only spans |
+| Goal Alignment Trend | core AGE accumulates assistant content **only from `payload.Spans[]`** (`Stage=="completed" && SemanticType==llm_completion && ResponseBody!=nil`); dev sessions are span-less and never send text (INV-2) → `GoalAlignmentChecked` never true | **P2 assistant text** on the turn's `activity_output` **+ a core-side change** to read it from the llm_completion Activity, not only spans |
 | Recent Drift Events | same accumulator, further gated on LlamaFirewall replay | same as above |
 
 Client-side capture alone fixes Tool Health; alignment/drift additionally needs the openbox-core ask.
@@ -135,14 +136,14 @@ Client-side capture alone fixes Tool Health; alignment/drift additionally needs 
 |---|---|---|---|---|
 | A. `status`/`error_type` on ToolResult + wire `PostToolUseFailure` | Tool Health widget; failure visibility | none (enums) | S | **do first** |
 | B. Task/subagent structural mapping (`subagent_type`, wire `SubagentStart`) | legible session tree | none | S | do with A |
-| C. `tool_response` → `activity_output.output` (gated, redacted, capped) | "what did the tool return" in UI; Guardrails stage-1 gets real content | new content class — reverses a published "never" | M (ADR + conformance + testbed) | recommend, behind flag |
-| D. `last_assistant_message` + `stop_reason` → turn `activity_output` | assistant text in UI; **unblocks AGE**/alignment | new content class (provider ships a separate flag for it) | M (ADR; no transcript change needed) | recommend, behind flag |
+| C. `tool_response` → `activity_output.output` (gated, redacted, capped) | "what did the tool return" in UI; Guardrails stage-1 gets real content | new content class — reverses a published "never" | M (decision record + conformance + testbed) | recommend, behind flag |
+| D. `last_assistant_message` + `stop_reason` → turn `activity_output` | assistant text in UI; **unblocks AGE**/alignment | new content class (provider ships a separate flag for it) | M (decision record; no transcript change needed) | recommend, behind flag |
 | E. Thinking capture (transcript) | "thoughts" in UI | exceeds provider's own export; widens transcript allowlist | L | **don't** |
 | F. Full per-message trace (parse transcript content[]) | sub-turn fidelity, tool_use/result pairing | largest egress ever; storage cost; duplicates A–D | L | defer; A–D covers 90% of the visible gap |
 
 ## Implementation Recommendations (phased)
 
-### P0 — structural, ship without ADR
+### P0 — structural, ship without decision record
 - `hookevent.go`: bind nothing new for status — success is implied by which hook fired once
   `PostToolUseFailure` is wired; map PostToolUse → `status:"completed"`, PostToolUseFailure →
   `status:"failed"` + `error_type` enum. Emit as top-level payload `status` (core reads it,
@@ -154,7 +155,7 @@ Client-side capture alone fixes Tool Health; alignment/drift additionally needs 
   scout-02 flagged the reuse. Confirm no side effect on workflow status handling.
 - Installer/plugin `hooks.json` + capabilities.go + MAPPING.md rows + conformance cases.
 
-### P1 — tool output (ADR: new content class)
+### P1 — tool output (decision record: new content class)
 - Bind `tool_response` (capped at parse boundary), attach via existing unused plumbing:
   `Content.Output` → `activity_output.output` (payload.go `structuralActivityOutput` gains one
   content-gated key, mirroring `activity_input.command`).
@@ -163,7 +164,7 @@ Client-side capture alone fixes Tool Health; alignment/drift additionally needs 
 - `stripContent` already nils `Content` — the choke point needs no change.
 - Update `docs/data-and-privacy.md` "Tool output: never" row honestly.
 
-### P2 — assistant text + stop_reason (ADR, same or sibling)
+### P2 — assistant text + stop_reason (decision record, same or sibling)
 - Bind `last_assistant_message`/`stop_reason` in `HookEvent` **under the content gate** (pattern:
   existing `Prompt` field). Attach on `TurnCompleted` → `activity_output.message`. Transcript
   projection and its sentinel test stay untouched.
@@ -176,7 +177,7 @@ Follow the provider: per-class `*bool` keys — `capture_tool_output`, `capture_
 hard-won lessons: `*bool` (omitempty drops explicit false) and test the second `init` invocation.
 
 ### Common pitfalls (from this repo's own history)
-- Don't bind new strings in the transcript projection to "save a hook field" — that's an ADR-0014
+- Don't bind new strings in the transcript projection to "save a hook field" — that's an
   allowlist widening with a load-bearing sentinel test.
 - Don't let a new content field bypass `stripContent`/`capBody` by riding metadata — metadata is
   never content (payload.go comment at 411 exists because two fields once tried).
@@ -196,7 +197,7 @@ hard-won lessons: `*bool` (omitempty drops explicit false) and test the second `
 
 1. Decide the OD questions below (privacy posture — human call).
 2. `/ak:plan` P0 (status + failure hooks + subagent mapping) — client-only, fixes Tool Health.
-3. Draft ADR for P1/P2 content classes; file the openbox-core AGE ask (read assistant content from
+3. Draft decision record for P1/P2 content classes; file the openbox-core AGE ask (read assistant content from
    llm_completion activities) alongside the existing server-side-dedupe ask.
 4. Codex parity check when P1/P2 land (Codex adapter: what's its output/assistant-text surface?).
 
@@ -210,7 +211,8 @@ hard-won lessons: `*bool` (omitempty drops explicit false) and test the second `
 2. **One gate or per-class flags**: single `content_capture` governs all, or
    `capture_tool_output`/`capture_assistant_text` sub-flags (recommended above)?
 3. **Thinking**: accept "never captured" as product stance (recommended), or fight for it against
-   provider precedent in a dedicated ADR?
+provider precedent in a dedicated
+decision record?
 4. **Core asks priority**: AGE activity_output read path (needed for alignment widgets) — file now or
    after P2 ships client-side?
 5. `Status`-field reuse semantics on activities (workflow-documented field) — confirm with core team
@@ -228,14 +230,14 @@ so OpenBox has complete input for evaluation (policy /evaluate, Guardrails stage
 alignment, finops). This resolves the OD questions:
 
 1. **Defaults: ON.** All content classes captured by default, consistent with the 2026-07-15
-   content_capture flip and the ADR-0014 finops flip ("a default-off headline feature stays off").
-   Org opt-out remains `content_capture:false` / `OPENBOX_CONTENT_CAPTURE=0`.
+content_capture flip and that decision finops flip ("a default-off headline feature stays off").
+Org opt-out remains `content_capture:false` / `OPENBOX_CONTENT_CAPTURE=0`.
 2. **Gate: single master gate.** Reuse the existing `content_capture` key for every content class —
    no new config keys (KISS; per-class narrowing flags only if a customer asks).
 3. **Thinking: IN SCOPE.** Org-owned trust model makes it the org's call; the transcript on the
-   developer machine holds thinking in plaintext already (same trust boundary as the signing key,
-   ADR-0015). Requires the ADR-0014 allowlist amendment — staged last because the sentinel test is
-   load-bearing.
+developer machine holds thinking in plaintext already (same trust boundary as the signing key).
+Requires that decision allowlist amendment — staged last because the sentinel test is
+load-bearing.
 
 ### Full-capture target state (all fields content_capture-gated, secret-redacted BEFORE attach, 64KB-capped)
 
@@ -243,12 +245,12 @@ alignment, finops). This resolves the OD questions:
 |---|---|---|
 | `ActivityStarted` — every tool, **observe path too** | `activity_input` command / MCP args / file body; Task `prompt`+`description`+`subagent_type` | `PreToolUse.tool_input` (already parsed; today attached only on the gated /evaluate copy) |
 | `ActivityCompleted` — every tool | `status: completed\|failed`, `error_type`, `activity_output.output` (tool_response text), structured `tool_output` passthrough | `PostToolUse` / `PostToolUseFailure` |
-| `TurnCompleted` (`llm_completion`) | `activity_output.message` (final assistant text), `stop_reason`; `activity_output.thinking[]` + intermediate assistant text blocks for the turn window | `Stop/SubagentStop.last_assistant_message` (final text); transcript window via existing TurnCursor (thinking + intermediates — ADR amendment) |
+| `TurnCompleted` (`llm_completion`) | `activity_output.message` (final assistant text), `stop_reason`; `activity_output.thinking[]` + intermediate assistant text blocks for the turn window | `Stop/SubagentStop.last_assistant_message` (final text); transcript window via existing TurnCursor (thinking + intermediates — decision record amendment) |
 | `PromptSubmitted` | already full | — |
 | New wire events | failed ToolResult (PostToolUseFailure), SubagentStart (spawn marker), PermissionDenied (`denial_reason`, `classifier_verdict`), StopFailure (api error taxonomy: rate_limit/billing/…) | unwired hooks |
 
 Consequences owned by this posture:
-- **SL3-SEC-3 is retired by ADR** ("commands/file bodies never egress on observe events") — replaced
+- **SL3-SEC-3 is retired by decision record** ("commands/file bodies never egress on observe events") — replaced
   by: *content egresses on every path under the org gate, always redacted-first, always capped*.
   `docs/data-and-privacy.md` "never" rows rewritten honestly. INV-2 transforms from "metadata-only"
   to "gate + redact + cap at the choke points" (stripContent/capBody already are those choke points).
@@ -274,9 +276,9 @@ Consequences owned by this posture:
 
 P0 structural (status/failures/subagent — fixes Tool Health) → P1 tool output → P2 assistant text +
 stop_reason (+ core AGE ask: read assistant content from llm_completion `activity_output` for
-span-less sessions) → P3 thinking + observe-path input attach + ADR-0014 allowlist amendment.
-One ADR can cover the whole content-posture change (P1–P3) with the retirement of SL3-SEC-3 argued
-against its original rationale, ADR-0015-style; P0 needs no ADR.
+span-less sessions) → P3 thinking + observe-path input attach + that decision allowlist amendment.
+One decision record can cover the whole content-posture change (P1–P3) with the retirement of
+SL3-SEC-3 argued against its original rationale, that decision-style; P0 needs no decision record.
 
 Remaining open (engineering, not posture): Q4 core AGE ask timing, Q5 `Status`-field reuse semantics
 (verify in testbed), Q6 server-side retention/storage for 64KB-class events.

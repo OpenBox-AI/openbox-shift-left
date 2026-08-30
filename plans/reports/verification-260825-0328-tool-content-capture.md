@@ -1,4 +1,4 @@
-# Verification — phase 01, tool content capture (ADR-0019 P1, contract v1.3)
+# Verification — phase 01, tool content capture (that decision, contract v1.3)
 
 Date: 2026-08-25. Plan: [260825-0027](../260825-0027-openbox-gateway-full-capture/plan.md),
 [phase 01](../260825-0027-openbox-gateway-full-capture/phase-01-tool-content-capture.md).
@@ -137,8 +137,8 @@ and `testbed/35-telemetry.sh` (gate CLOSED, on its existing capture-off session)
 ## Decisions taken during implementation
 
 - **`Content.ToolOutput` is a NEW field, not a reuse of `Content.Output`.** `Output`
-  carries the ADR-0018 turn text that feeds core's alignment extractor. Confirmed
-  live at `mapper.go` — the collision is real, not theoretical.
+carries that decision turn text that feeds core's alignment extractor. Confirmed
+live at `mapper.go` — the collision is real, not theoretical.
 - **The failure hook's `error` shares `ToolOutput` with `tool_response`.** A failed
   activity's output IS its error text, and `status` already discriminates. The two
   never compete: the probe established `PostToolUse` / `PostToolUseFailure` are
@@ -183,8 +183,8 @@ in `COVERAGE.md` §3.4 rather than averaged away.
 
 Both were surfaced rather than inferred; both are now decided and applied.
 
-**OD-1 — DECIDED: deliberate, documented.** Kept verbatim. Recorded in ADR-0017
-§Content (amended) and `docs/data-and-privacy.md`. No code change.
+**OD-1 — DECIDED: deliberate, documented.** Kept verbatim. (amended) and
+`docs/data-and-privacy.md`. No code change.
 
 **OD-2 — DECIDED: fixed.** Two widenings in `decision/secrets.go`:
 `secret_assignment` tolerates quoting/escaping between the keyword and the
@@ -203,13 +203,13 @@ The original argument for each, kept for the record:
 `buildDecisionRequest` (`adapters/claude-code/enforce.go:115`) sets
 `DecisionRequest.Content` only for a file semantic, so `evaluationContext` gets
 `redacted=nil` for shell and MCP and returns the raw text. A token on a `curl`
-command line reaches the control plane in the clear. This predates ADR-0019 and is
-arguably deliberate — a policy matching on a dangerous command should see the TRUE
-command, and unlike a file body nothing is replayed onto the machine. What ADR-0019
-changes is the optics: the observe copy of the same call now runs the redactor, so
-ordinary telemetry is better protected than the copy sent for a governance
-decision. Fixing it narrows what policy can match on; leaving it means the raw
-command egresses. Either way it wants a sentence in ADR-0017 or ADR-0019.
+command line reaches the control plane in the clear. This predates that decision
+and is arguably deliberate — a policy matching on a dangerous command should see
+the TRUE command, and unlike a file body nothing is replayed onto the machine. What
+that decision changes is the optics: the observe copy of the same call now runs the
+redactor, so ordinary telemetry is better protected than the copy sent for a
+governance decision. Fixing it narrows what policy can match on; leaving it means
+the raw command egresses. Either way it wants a sentence in that decision or.
 
 **OD-2 — the nested-JSON detector gap.** Two widenings would close it. Both can
 only widen matching, and every additional match is unambiguously a secret
@@ -225,6 +225,6 @@ under a default-ON posture.
    it forces a body sink, `Content.ToolOutput` is the field that would gain a
    `body_ref` sibling.
 2. Superseded by OD-2 above, which is the larger version of the same question.
-3. ADR-0019 is still **Proposed**. Phase 03 accepts it. Phase 01 implements its P1
-   ahead of that acceptance, which the plan sanctions ("ships alone") but which
-   leaves the ADR's status trailing the code until phase 03 runs.
+3. That decision is still **Proposed**. Phase 03 accepts it. Phase 01 implements its P1
+ahead of that acceptance, which the plan sanctions ("ships alone") but which
+leaves that decision's status trailing the code until phase 03 runs.

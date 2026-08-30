@@ -32,12 +32,11 @@ not.
 
 A tool call used to be reported as a hand-built telemetry span, and that span had
 two fields — a request body and a response body — which *could* have carried a
-tool's input or output text. Nothing ever put anything in them, and
-[ADR-0013](adr/ADR-0013-tool-call-as-activity.md) removed the span from tool
-events entirely. What a completed tool call reports instead is counts — bytes
-read, bytes written, lines changed, and an exit code if the tool provides one —
-plus, since [ADR-0018](adr/ADR-0018-dev-turn-content-carrier.md), whether it
-**succeeded or failed**. Never the output itself.
+tool's input or output text. Nothing ever put anything in them, and the span was
+removed from tool events entirely. What a completed tool call reports
+instead is counts — bytes read, bytes written, lines changed, and an exit code if
+the tool provides one — plus whether it **succeeded or
+failed**. Never the output itself.
 
 **One span came back, deliberately, and it carries content.** This page
 previously said the response-body channel "cannot be re-opened by an adapter
@@ -54,16 +53,15 @@ larger widening than the first. The gateway observes real HTTP exchanges, so its
 span's request body is the whole request the tool sent the model — system prompt,
 message history, tool definitions — and its response body is the model's reply.
 Unlike the turn span, this one is a genuine measurement rather than a synthesized
-carrier, which is why it is the only span here without ADR-0018's `synthesized`
-marker. It is bounded by the same three mechanisms, it exists only while the
-gateway is running, and it records nothing at all for a call that names no
-session. Two further limits on it, both deliberate: a body the provider sent
+carrier, which is why it is the only span here without the
+`synthesized` marker. It is bounded by the same three mechanisms, it exists only
+while the gateway is running, and it records nothing at all for a call that names
+no session. Two further limits on it, both deliberate: a body the provider sent
 **compressed is not captured at all** — a marker is stored instead, because
 compressed bytes are opaque to the secret detector and attaching them would satisfy
 every redaction guarantee vacuously — and a call whose transport fails after the
 request was already sent is recorded **with no response and no status**, so a
-suppressed answer still leaves a trace. See
-[ADR-0021](adr/ADR-0021-openbox-local-gateway.md).
+suppressed answer still leaves a trace.
 
 **Part of the gateway span is not content-gated.** The observed method, URL (query
 dropped), status and the credential fingerprint ship with `content_capture: false`
@@ -152,10 +150,8 @@ defensible if you can tell afterwards which sessions it applied to.
 > **all of them are absent with capture off**, and that with capture on exactly one
 > — thinking — is present, redacted and capped, while the rest are still absent. It
 > is also mutation-tested: deleting the redaction, or deleting the cap, must each
-> make it fail. See
-> [ADR-0014](adr/ADR-0014-turn-as-activity-and-identifier-allowlist.md) and its
-> 2026-08-25 amendment, which record the narrowing and then the widening rather
-> than leaving an older, stronger claim standing.
+> make it fail. The narrowing and the subsequent widening are both recorded here
+> rather than leaving an older, stronger claim standing.
 
 ## Content capture
 
@@ -205,10 +201,9 @@ came from.
 
 ## What a model turn sends
 
-**This section describes a change in what leaves your machine.** Since
-[ADR-0018](adr/ADR-0018-dev-turn-content-carrier.md), a model turn carries the
-**assistant's reply text** — one message per turn, the same text you saw in your
-terminal.
+**This section describes a change in what leaves your machine.** Since that
+decision, a model turn carries the **assistant's reply text** — one message per
+turn, the same text you saw in your terminal.
 
 Why it is sent at all: OpenBox's goal-alignment and drift detection score what the
 agent said against what you asked for. Those two dashboard panels were empty for
@@ -232,12 +227,10 @@ What bounds it:
 worth knowing rather than discovering:
 
 - **This goes further than the provider will.** Claude Code's own OpenTelemetry
-  export redacts extended thinking unconditionally, with every content flag
-  enabled. There is no hook that carries it either; the session transcript is the
-  only source. Capturing it is a decision an org makes about its own machine,
-  recorded in the [ADR-0014 amendment](adr/ADR-0014-turn-as-activity-and-identifier-allowlist.md)
-  rather than inherited from "capture everything". `content_capture: false` turns
-  it off with everything else.
+export redacts extended thinking unconditionally, with every content flag enabled. There is no
+hook that carries it either; the session transcript is the only source. Capturing it is a
+decision an org makes about its own machine amendment rather than inherited from "capture
+everything". `content_capture: false` turns it off with everything else.
 - **It is the densest content here.** Thinking restates prompts, file contents,
   and any credential the turn saw earlier in its reasoning, so the local secret
   scan matters more on this field than anywhere else. That scan is the same
@@ -259,10 +252,10 @@ Two consequences worth knowing rather than discovering:
 
 ## What an enforced call sends
 
-**This section describes a change in what leaves your machine.** Until
-[ADR-0017](adr/ADR-0017-inline-policy-evaluation.md), only shell and MCP calls were
-sent for a decision, and a file body never was. Every gated call is now decided by
-OpenBox, so a **Write or Edit body is sent** — when content capture is on.
+**This section describes a change in what leaves your machine.** Until that
+decision, only shell and MCP calls were sent for a decision, and a file body never
+was. Every gated call is now decided by OpenBox, so a **Write or Edit body is
+sent** — when content capture is on.
 
 An enforced call sends, in this order:
 
@@ -300,11 +293,11 @@ Three limits, stated rather than implied:
 
 The observe copy of the same call used to be the reassurance here: mapped
 separately, carrying no content, so ordinary telemetry was unaffected either way.
-**That is no longer true.** Since [ADR-0019](adr/ADR-0019-full-content-capture.md)
-the observe copy carries the same input under the same `content_capture` switch,
-and the tool's *output* with it. The gate is now the only thing separating
-ordinary telemetry from an enforced call's payload — which is why it is one
-switch, asserted on the outbound bytes rather than assumed.
+**That is no longer true.** The observe copy now carries the same
+input under the same `content_capture` switch, and the tool's *output* with it.
+The gate is now the only thing separating ordinary telemetry from an enforced
+call's payload — which is why it is one switch, asserted on the outbound bytes
+rather than assumed.
 
 ## What a tool call sends
 
@@ -333,14 +326,13 @@ Three consequences worth knowing rather than discovering:
 - **`content_capture: false` removes all of it** and returns tool telemetry to
   structural fields alone — tool name, kind, path, timing, outcome.
 
-**Prompts gate too** ([ADR-0020](adr/ADR-0020-prompt-gate-and-halt-session-stop.md)):
-in enforce mode the `PromptSubmitted` event is sent for a decision **at submit
-time**, before the prompt is processed, instead of riding the near-real-time flush
-a moment later. What the event carries did not change — prompt text only under
-`content_capture`, and the prompt remains the one content path with **no local
-redaction** (the asymmetry above, unchanged). What changed is only the timing and
-that the verdict is applied: HALT/BLOCK refuses the prompt, and a HALT ends the
-session.
+**Prompts gate too** : in enforce mode the `PromptSubmitted` event is sent for a
+decision **at submit time**, before the prompt is processed, instead of riding the
+near-real-time flush a moment later. What the event carries did not change — prompt
+text only under `content_capture`, and the prompt remains the one content path with
+**no local redaction** (the asymmetry above, unchanged). What changed is only the
+timing and that the verdict is applied: HALT/BLOCK refuses the prompt, and a HALT
+ends the session.
 
 ## Account attribution
 
@@ -362,11 +354,10 @@ short of not signing in; say so rather than assume one exists.
 
 **What this evidence is worth.** `~/.claude.json` is written by the tool this
 product governs and is readable and writable by anything running as you — the same
-posture [ADR-0015](adr/ADR-0015-plaintext-credential-file.md) already concedes for
-the signing key. So it proves origin-of-config, not tamper-resistance. A determined
-developer can edit it. Pair it with the gateway's credential fingerprint, which is
-derived from the credential actually presented on the wire, if you need the
-stronger signal.
+posture already conceded for the signing key. So it proves
+origin-of-config, not tamper-resistance. A determined developer can edit it. Pair
+it with the gateway's credential fingerprint, which is derived from the credential
+actually presented on the wire, if you need the stronger signal.
 
 If you are not signed in, or the file is unreadable, nothing is stamped at all —
 and that absence is itself informative.
@@ -399,13 +390,13 @@ Both are readable only by you.
 
 | File | What it holds |
 |---|---|
-| `policy-bundle.json` | **inert leftover.** There is no local policy bundle since [ADR-0017](adr/ADR-0017-inline-policy-evaluation.md); nothing reads this file and it can be deleted |
+| `policy-bundle.json` | **inert leftover.** There is no local policy bundle since; nothing reads this file and it can be deleted |
 | `enforcements.jsonl` | what enforcement did: verdict, source, whether it blocked, redaction *categories* — never the secret, never the body |
 | `advisories.jsonl` | advisory verdicts and guardrail findings |
 | `cc-spool/` | events awaiting flush. With content capture on (the default) these hold the same bodies the events carry — commands, file contents, tool output — already secret-redacted, in plaintext files readable by you |
 | `cc-spool/turns/` | how far each turn window has been read: a byte offset and a turn index, nothing else |
 | `pending-approvals/`, `stale/` | content-free markers keyed by session id |
-| `halted-sessions/` | one small file per HALTed session — the policy reason, policy id and a timestamp, never tool content. It is what keeps a halted session refused ([ADR-0020](adr/ADR-0020-prompt-gate-and-halt-session-stop.md)); deleting it un-halts only this machine's view, and every verdict is already recorded server-side |
+| `halted-sessions/` | one small file per HALTed session — the policy reason, policy id and a timestamp, never tool content. It is what keeps a halted session refused; deleting it un-halts only this machine's view, and every verdict is already recorded server-side |
 | `approvals-auto.jsonl` | an autonomous approver's decisions, if you run one |
 
 ### The three model-call lanes send different amounts, and one sends no content at all
@@ -459,8 +450,7 @@ silent about it; delete it by hand if you mean to discard that evidence.
 ## Where credentials live
 
 `~/.openbox/.env`, in **plaintext**. Nothing is sent to OpenBox — but there is no
-encryption at rest either, and the difference matters, so here it is plainly
-([ADR-0015](adr/ADR-0015-plaintext-credential-file.md)):
+encryption at rest either, and the difference matters, so here it is plainly :
 
 ```
 OPENBOX_API_KEY='obx_…'                 # your agent's runtime key

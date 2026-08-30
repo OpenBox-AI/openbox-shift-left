@@ -22,7 +22,7 @@ func TestAllowlistMatchesTheExactHost(t *testing.T) {
 	}
 }
 
-// TestAllowlistRefusesEverythingElse is the half that makes the ADR-0021 §5
+// TestAllowlistRefusesEverythingElse is the half that makes that decision
 // reversal defensible: every other host is blind-tunnelled, uninspected.
 //
 // The confusables are the point. A CA that can impersonate the provider to this

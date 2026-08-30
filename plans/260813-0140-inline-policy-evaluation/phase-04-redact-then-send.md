@@ -3,7 +3,7 @@
 ## Context links
 
 - Parent: [plan.md](plan.md) · Depends on: phase 3 (all classes gated)
-- Parallel-safe with: phase 5 · Authorized by: ADR-0017 (E7 + E8)
+- Parallel-safe with: phase 5 · Authorized by: that decision (E7 + E8)
 - **The privacy-sensitive phase.** Everything here is about what leaves the machine.
 
 ## Overview
@@ -128,7 +128,7 @@ One body, redacted once, used for both the verdict request and the applied redac
 - Never log the attached content, at any level.
 - `content_capture:false` must remain a hard gate, not a best-effort filter: assert absence,
   not "usually absent".
-- This phase widens what egresses. It must not ship before ADR-0017 (phase 2) and must not
+- This phase widens what egresses. It must not ship before that decision (phase 2) and must not
   reach users before phase 7's privacy-doc rewrite and release note.
 
 ## Next steps

@@ -49,8 +49,9 @@ Its own doc comment states the guarantee:
 **`message.model` is a string.** Reading it adds the first string field to these
 structs and converts the guarantee from *structurally impossible* to *audited
 allowlist*. That is the central design decision of this plan, and the reason it
-needs an ADR rather than a patch. A sentinel test (`usage_test.go`) currently
-proves content-absence end-to-end and will need to prove the narrower claim.
+needs a decision record rather than a patch. A sentinel test (`usage_test.go`)
+currently proves content-absence end-to-end and will need to prove the narrower
+claim.
 
 Other properties worth preserving: read bounded at `maxTranscriptBytes` (64 MiB,
 skip-whole rather than truncate), best-effort per INV-3, cost never derived.
@@ -96,6 +97,6 @@ adapters/common/{devconfig/devconfig,devconfig/posture}.go
 adapters/common/hookflow/  (cursor, if shared)
 client/{event,payload}.go + client/testdata/golden/*
 contracts/dev-event/{schema/dev-event.schema.json,MAPPING.md}
-docs/{data-and-privacy,architecture}.md, docs/adr/ADR-00NN-*.md
+docs/{data-and-privacy,architecture}.md, the decision record*.md
 testbed/
 ```

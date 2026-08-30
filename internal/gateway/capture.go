@@ -199,7 +199,7 @@ func capRunes(s string) string {
 // whole output besides the relay itself.
 //
 // Content-bearing fields are populated unconditionally and gated downstream by
-// the client's stripContent, following the precedent ADR-0019 P3 set for
+// the client's stripContent, following the precedent that decision set for
 // thinking: gating a pure transform buys nothing on the wire and duplicates the
 // posture decision in a second place, where the two can disagree.
 // CredentialFingerprint is the exception and stays present either way — it is

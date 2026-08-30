@@ -15,11 +15,11 @@ import (
 
 // lane_test.go — the two in-path model-call producers share this emitter.
 //
-// ADR-0022's central correctness invariant is that exactly one producer emits a
-// given turn, and that the producers' activity_id namespaces are DISJOINT. The
-// namespaces are client's (turnActivityIDFor); what this file pins is the half
-// that lives here: which discriminator field a lane writes, and that a lane
-// nobody configured cannot silently borrow another lane's.
+// That decision's central correctness invariant is that exactly one producer
+// emits a given turn, and that the producers' activity_id namespaces are
+// DISJOINT. The namespaces are client's (turnActivityIDFor); what this file
+// pins is the half that lives here: which discriminator field a lane writes,
+// and that a lane nobody configured cannot silently borrow another lane's.
 
 // TestEachLaneWritesOnlyItsOwnDiscriminator.
 //

@@ -17,7 +17,7 @@ import (
 // watchdog to abort a call nobody decided on.
 const evaluateTimeout = 10 * time.Second
 
-// gate.go decides whether a model call is forwarded or refused (ADR-0021 §7).
+// gate.go decides whether a model call is forwarded or refused.
 //
 // It reuses hookflow's cascade SHAPE and deliberately not its code path — the
 // phase's own instruction, and correct: hookflow's ApplyFailurePolicy returns
@@ -31,9 +31,9 @@ const evaluateTimeout = 10 * time.Second
 // grace — a grace window is a local verdict cache under another name.
 //
 // THE ORDERING RULE IS THE MERGE BLOCKER. No refusal may be synthesized before an
-// evaluation has been ATTEMPTED. Pre-ADR-0017 this exact mistake shipped on the
-// hook path: ApplyFailurePolicy ran before the evaluation, which was harmless only
-// while the local step still produced verdicts, and the moment it stopped a
+// evaluation has been ATTEMPTED. Pre-that decision this exact mistake shipped on
+// the hook path: ApplyFailurePolicy ran before the evaluation, which was harmless
+// only while the local step still produced verdicts, and the moment it stopped a
 // fail-closed org denied every gated call WITHOUT EVER ASKING. Here the same
 // mistake is worse, because refusal is unconditional: every blip in the control
 // plane would become a total model-call outage that reports itself as a policy
@@ -73,10 +73,10 @@ type Decision struct {
 
 // Decide runs the gate for one captured model call.
 //
-// gated comes from policy, never from this engine second-guessing it. ADR-0017's
-// lesson applies verbatim: the narrowing that let the engine decide which calls
-// deserved a real verdict is why a raw-rego org was ungoverned on everything but
-// shell and MCP. Risk is a property of the POLICY.
+// gated comes from policy, never from this engine second-guessing it. That
+// decision's lesson applies verbatim: the narrowing that let the engine decide
+// which calls deserved a real verdict is why a raw-rego org was ungoverned on
+// everything but shell and MCP. Risk is a property of the POLICY.
 func Decide(ctx context.Context, ev Evaluator, gated bool, c Captured) Decision {
 	// Ungated: no round-trip at all. Requirement 5, and the reason per-call
 	// gating does not tank latency — roughly 52 model calls per turn window were
@@ -126,7 +126,7 @@ func Decide(ctx context.Context, ev Evaluator, gated bool, c Captured) Decision 
 	// after HALT/BLOCK, before REQUIRE_APPROVAL. Reading only `Verdict` meant one
 	// /evaluate response — ALLOW with guardrails_result.passed:false — denied the
 	// tool call on the hook path and FORWARDED the model call here, credential and
-	// prompt included, on the surface ADR-0021 §7 calls the stronger enforcement
+	// prompt included, on the surface that decision calls the stronger enforcement
 	// point. The reference SDK's enforce_verdict treats it as a block too
 	// (client/verdict.go:132-134 records that), so this was an omission rather
 	// than the deliberate divergence the header comment enumerates.
@@ -178,9 +178,9 @@ func Decide(ctx context.Context, ev Evaluator, gated bool, c Captured) Decision 
 		// cannot interpret refuses. Folding the two together in either direction
 		// would either block a legitimate CONSTRAIN or wave through a future
 		// blocking verdict this build has never heard of. Rendering nothing for
-		// an unknown literal is how Codex would have made HALT silently proceed
-		// (ADR-0020); the same trap is avoided here by defaulting to refusal on a
-		// verdict this build cannot interpret.
+		// an unknown literal is how Codex would have made HALT silently proceed;
+		// the same trap is avoided here by defaulting to refusal on a verdict
+		// this build cannot interpret.
 		return Decision{
 			Forward:   false,
 			Evaluated: true,

@@ -43,7 +43,7 @@ Two crashes, same root cause, different failure modes.
 
 - Correct the 03:23 incident report's "no session active" inference.
 - Investigate: after re-init, a live session is hard-denied with "Session is no longer active" on every tool call — contradicts the documented inert/fail-open guarantee.
-- Stale `init --dry-run` banner still claims it registers an agent and writes credentials (both moved to `auth` in ADR-0015).
+- Stale `init --dry-run` banner still claims it registers an agent and writes credentials (both moved to `auth` in).
 - Driver of the ~400 init runs still unidentified across both incidents.
 
-> Historical work record — not durable authority. Prefer docs/specs/ADRs for current decisions.
+> Historical work record — not durable authority. Prefer docs/specs for current decisions.

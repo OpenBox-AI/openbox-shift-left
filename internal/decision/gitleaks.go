@@ -14,25 +14,26 @@ import (
 //
 // What it does NOT replace, deliberately:
 //
-//   - the generic `secret_assignment` value-group pattern, because gitleaks
-//     REPORTS findings and does not structurally rewrite a JSON body. Our
-//     replacement keeps the key and its quoting and trims trailing structural
-//     terminators back out of the placeholder — logic whose two directions have
-//     already shipped broken together once, pinned by
-//     TestRedact_ValueEndingInBackslash and TestRedact_JSONShapedSecrets;
-//   - `redactEntropy`, because gitleaks' entropy is a per-rule threshold layered
-//     on a regex match, not a standalone high-entropy scan. Dropping our generic
-//     fallback would LOSE coverage on the exact axis adopting gitleaks was meant
-//     to improve: an unlabelled high-entropy value beside an unrecognized key.
+// - the generic `secret_assignment` value-group pattern, because gitleaks REPORTS
+// findings and does not structurally rewrite a JSON body. Our replacement keeps
+// the key and its quoting and trims trailing structural terminators back out of
+// the placeholder — logic whose two directions have already shipped broken
+// together once, pinned by TestRedact_ValueEndingInBackslash and
+// TestRedact_JSONShapedSecrets; - `redactEntropy`, because gitleaks' entropy is a
+// per-rule threshold layered on a regex match, not a standalone high-entropy
+// scan. Dropping our generic fallback would LOSE coverage on the exact axis
+// adopting gitleaks was meant to improve: an unlabelled high-entropy value beside
+// an unrecognized key.
 //
-// Cost, measured before this was written rather than after (phase 06 step 2):
-// the CLI binary grows 8,528,818 → 11,258,962 bytes (+32%), and this module's
+// Cost, measured before this was written rather than after (phase 06 step 2): the
+// CLI binary grows 8,528,818 → 11,258,962 bytes (+32%), and this module's
 // reachable package set grows 200 → 379, linking viper, afero, fsnotify,
 // mholt/archives, lipgloss, termenv and zerolog. viper is reachable because
 // NewDetectorDefaultConfig uses it purely to unmarshal a static //go:embed-ed
 // TOML string. That is an accepted cost, ruled on by the owner with the numbers
-// in hand; ADR-0023 is where the widened transitive surface of THIS module is
-// argued, and decision/guard_test.go is what keeps its direct surface enumerated.
+// in hand; that decision is where the widened transitive surface of THIS module
+// is argued, and decision/guard_test.go is what keeps its direct surface
+// enumerated.
 
 // gitleaksDetector returns the process-wide detector, built exactly once.
 //

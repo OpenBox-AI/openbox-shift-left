@@ -15,17 +15,17 @@ belongs to this org?" — which needs org-side data core does not have today.
 
 ## Why this is your call, not ours
 
-Account binding is **policy**, by our own architecture rule (ADR-0017: `/evaluate`
-is the only decider). Our sensors attach evidence; they must not hold allowlists or
-cache verdicts. So the matching data has to live where policy is evaluated. That
-may be a new surface on your side, which is your ADR rule and your decision — this
-issue is the ask plus the exact evidence contract, so the shape of the data is
-settled before anyone builds either half.
+Account binding is **policy**, by our own architecture rule (that decision:
+`/evaluate` is the only decider). Our sensors attach evidence; they must not hold
+allowlists or cache verdicts. So the matching data has to live where policy is
+evaluated. That may be a new surface on your side, which is your decision record
+rule and your decision — this issue is the ask plus the exact evidence contract, so
+the shape of the data is settled before anyone builds either half.
 
 ## What our sensors will send
 
-Per model call, on the gateway span's event
-(ADR-0021, `plans/260825-0027-openbox-gateway-full-capture/`):
+Per model call, on the gateway span's event (that decision,
+`plans/260825-0027-openbox-gateway-full-capture/`):
 
 | Field | Type | Notes |
 |---|---|---|
@@ -65,10 +65,10 @@ enforceable rule.
 
 ## Cross-references
 
-- `docs/adr/ADR-0021-openbox-local-gateway.md` §6 (why matching is policy, not
+-  §6 (why matching is policy, not
   gateway logic) and §7 (our always-refuse posture, which interacts with your
   availability)
-- `docs/adr/ADR-0017-inline-policy-evaluation.md` (the rule this follows from)
+-  (the rule this follows from)
 - Phase 05: `plans/260825-0027-openbox-gateway-full-capture/phase-05-gateway-capture-pipeline.md`
 
 ## Unresolved questions

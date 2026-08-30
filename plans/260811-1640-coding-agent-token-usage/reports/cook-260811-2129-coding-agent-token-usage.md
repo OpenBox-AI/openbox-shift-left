@@ -1,4 +1,4 @@
-# Report — per-turn model and token usage (ADR-0014)
+# Report — per-turn model and token usage
 
 Date 2026-08-11 · plan `260811-1640-coding-agent-token-usage` · branch
 `fix/tier2-duplicate-activity-started` · mode `/ak:cook --auto`
@@ -13,8 +13,8 @@ Coding-agent sessions now emit which model spent how many tokens, per turn. A tu
 rides an activity pair (`ActivityStarted`/`ActivityCompleted`, `activity_type:
 llm_completion`, `{model, usage{4 counts}}` in `activity_output`) — the AI-Agent
 `llm_completion` span's `response_body` shape on the activity carrier, because dev
-sessions write no spans (ADR-0013). Both wire types were already accept-listed, so
-INV-8 needed nothing.
+sessions write no spans. Both wire types were already accept-listed, so INV-8
+needed nothing.
 
 ## What landed
 
@@ -25,7 +25,7 @@ INV-8 needed nothing.
 | Claude Code | `Stop` + `SubagentStop` hooks; `hookflow.TurnCursor` (offset+index, agent-scoped); `turnLine` allowlist; streaming `readTurnUsage`; `MapTurn`; rollup un-folded |
 | Codex | `MapUsageRollup` at SessionEnd; four-count mapping (**inverse** arithmetic — see below); model from `turn_context.payload.model` |
 | Posture | `Finops` `bool` → `*bool`, default **flipped ON**; posture record + resolver pinned to each other |
-| Docs | ADR-0014; `data-and-privacy.md` usage section; `MAPPING.md` §2 + §7 items 8–14; `architecture.md` 4 new limits; `COVERAGE.md`, both adapter READMEs, `README.md`, `CLAUDE.md` |
+| Docs |; `data-and-privacy.md` usage section; `MAPPING.md` §2 + §7 items 8–14; `architecture.md` 4 new limits; `COVERAGE.md`, both adapter READMEs, `README.md`, `CLAUDE.md` |
 | Testbed | `28-usage.sh`; `40-approvals` step G per activity kind; `20-capture` counts scoped |
 
 ## Verification

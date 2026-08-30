@@ -4,12 +4,12 @@ import "net/http"
 
 // Shape is one candidate refusal the probe can inject.
 //
-// ADR-0021 §9 is the only thing keeping that ADR in DRAFT, and it asks an
-// empirical question about a provider we do not control: WHICH refusal shape does
-// Claude Code surface to the developer without retrying around it? Answering it
-// by inference is the overstatement this product exists to prevent, so the answer
-// has to be measured — and measuring it needs a way to make a real session
-// receive a candidate shape.
+// That decision is the only thing keeping that decision record in DRAFT, and it
+// asks an empirical question about a provider we do not control: WHICH refusal
+// shape does Claude Code surface to the developer without retrying around it?
+// Answering it by inference is the overstatement this product exists to prevent,
+// so the answer has to be measured — and measuring it needs a way to make a real
+// session receive a candidate shape.
 //
 // Every field here is a guess until the probe runs. The table is the hypothesis
 // space, not a finding.

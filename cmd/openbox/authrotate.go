@@ -15,7 +15,7 @@ import (
 // The recovery path for an agent that exists remotely whose credentials are
 // gone: rotation re-issues both, preserving the agent's id and DID. It is also
 // the documented way out for an install whose credentials are stranded in the OS
-// keychain this release stopped reading (ADR-0015).
+// keychain this release stopped reading.
 //
 // Rotation is DESTRUCTIVE server-side — it invalidates the previous key and
 // writes a SECURITY_EVENT audit entry — so it never happens implicitly. Without

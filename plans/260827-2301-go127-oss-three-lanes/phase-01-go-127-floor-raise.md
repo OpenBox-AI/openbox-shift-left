@@ -123,7 +123,7 @@ CLAUDE.md                       x/term pin paragraph deleted
 - [x] `go.work` + 12 `go.mod` → `go 1.27.0`, spellings normalized
 - [x] toolchain directive applied (`go.work` only)
 - [x] ci.yml + release.yml → "1.27" (+ stale floor comment reconciled)
-- [x] `x/term` v0.34.0 → v0.45.0; pin comment + CLAUDE.md paragraph deleted; ADR-0015 marked superseded (pin only)
+- [x] `x/term` v0.34.0 → v0.45.0; pin comment + CLAUDE.md paragraph deleted; that decision marked superseded (pin only)
 - [x] verdict set IDENTICAL to HEAD (540 PASS / 19 FAIL / 1 SKIP); all 19 failures are sandbox listener blocks
 - [x] `-race`: no data race; same set
 - [x] both cross-compiles green

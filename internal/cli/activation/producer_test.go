@@ -56,8 +56,8 @@ func TestElectionPrecedenceIsInPathFirst(t *testing.T) {
 // TestABaseURLTakesTransportOutOfThePath is the correction to a pure precedence
 // ranking, and it protects ATTRIBUTION rather than the count.
 //
-// ADR-0022 ranks transport above gateway because an in-path relay observes real
-// bytes — which answers "what should an org install". This asks "what will
+// That decision ranks transport above gateway because an in-path relay observes
+// real bytes — which answers "what should an org install". This asks "what will
 // actually see THIS call", and a base URL pointing anywhere other than the
 // provider defeats the relay: loopback bypasses the proxy, and any other host is
 // blind-tunnelled because it is not the provider's. Exactly one lane emits in
@@ -90,8 +90,8 @@ func TestABaseURLTakesTransportOutOfThePath(t *testing.T) {
 }
 
 // TestTheElectionNamesWhatItOutranked. An automatic precedence the developer
-// cannot see is the "configured but not in force" shape ADR-0021 promised would
-// always be detectable, so the reason has to name the losers.
+// cannot see is the "configured but not in force" shape that decision promised
+// would always be detectable, so the reason has to name the losers.
 func TestTheElectionNamesWhatItOutranked(t *testing.T) {
 	e := electionFrom(map[string]string{
 		"HTTPS_PROXY":                      "http://127.0.0.1:8790",

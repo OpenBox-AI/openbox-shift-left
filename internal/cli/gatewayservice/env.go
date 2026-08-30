@@ -42,11 +42,11 @@ var ownedEnvKeys = map[string]bool{EnvKey: true}
 
 // SettingsPath is the user-scope settings file the gateway config goes in.
 //
-// User scope, not project scope, and that is the ADR-0016 amendment rather than a
-// preference: ANTHROPIC_BASE_URL is read from managed settings and
+// User scope, not project scope, and that is that decision amendment rather than
+// a preference: ANTHROPIC_BASE_URL is read from managed settings and
 // ~/.claude/settings.json, and background agents need settings rather than shell
 // exports. A project-scoped write would report success while governing nothing —
-// the same failure mode ADR-0016 fixed for the default install scope.
+// the same failure mode that decision fixed for the default install scope.
 func SettingsPath(homeDir string) string {
 	return filepath.Join(homeDir, ".claude", "settings.json")
 }

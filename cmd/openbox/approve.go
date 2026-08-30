@@ -19,9 +19,9 @@ import (
 // a second install — the thing the abandoned approver app cost.
 //
 // It is an API CLIENT and nothing else: it polls and it decides. No listener,
-// no socket, no daemon (ADR-0006). And it is meant to run on the APPROVER's
-// machine, not the requester's — a same-machine approver is a convenience
-// control, not four-eyes (E9 §3.7).
+// no socket, no daemon. And it is meant to run on the APPROVER's machine, not
+// the requester's — a same-machine approver is a convenience control, not
+// four-eyes (E9 §3.7).
 //
 // Its credential is the approver's own org control-plane credential, read from
 // the environment rather than a flag so it cannot leak through argv or shell
@@ -116,7 +116,7 @@ func (a *app) runApproveList(args []string) int {
 	fs.StringVar(&clientID, "client-id", a.env("OPENBOX_CLIENT", "openbox-cli"), "value for the x-openbox-client header (Keycloak JWT path)")
 	fs.BoolVar(&watch, "watch", false, "keep polling and reprint the queue as it changes")
 	fs.DurationVar(&interval, "interval", 0, "poll interval for --watch (default 15s watching, 1s with --auto)")
-	fs.BoolVar(&auto, "auto", false, "work the queue autonomously inside the org envelope (ADR-0012). Records what it would do; decides only with --decide")
+	fs.BoolVar(&auto, "auto", false, "work the queue autonomously inside the org envelope. Records what it would do; decides only with --decide")
 	fs.BoolVar(&decide, "decide", false, "let --auto actually decide, instead of shadow-recording what it would decide")
 	fs.StringVar(&host, "host", "", "agentic host consulted for requests the envelope marks consultable: claude-code (default: the host in approver.json)")
 	fs.StringVar(&envelope, "envelope", "", "envelope file bounding what may be decided (default: the envelope in approver.json)")

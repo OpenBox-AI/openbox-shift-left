@@ -2,11 +2,12 @@
 //
 // HISTORY: this test began (STORY-SL-13) as proof that the EXT-core accept-list
 // patch was applied — it POSTed the 7 developer-runtime event types and expected
-// a 400 "invalid event_type" on stock (un-patched) core. ADR-0004 / E7 RETIRED
-// that patch: the client no longer emits developer-specific event_type strings;
-// it maps every dev event onto a base wire type openbox-core already accept-lists
-// (Workflow*/SignalReceived/ActivityStarted/ActivityCompleted, all span-less).
-// The ext-core patch set was retired 2026-07-15; ADR-0004 is the record.
+// a 400 "invalid event_type" on stock (un-patched) core. That decision / E7
+// RETIRED that patch: the client no longer emits developer-specific event_type
+// strings; it maps every dev event onto a base wire type openbox-core already
+// accept-lists (Workflow*/SignalReceived/ActivityStarted/ActivityCompleted, all
+// span-less). The ext-core patch set was retired 2026-07-15; that decision is the
+// record.
 //
 // The test is now the INVERSE guarantee: shift-left emits ONLY stock base wire
 // types, so a STOCK core accepts every event with NO 400 — no external patch
@@ -16,9 +17,9 @@
 // dependency-free and offline) so it can reuse the SL-3 client's AIP signing via
 // a local `replace` — no new external dependency, no change to client/ egress.
 //
-// The LIVE test skips cleanly when OPENBOX_URL / creds are absent, so
-// `go test ./...` stays green offline. The offline case pins the emit-only-stock-
-// types guarantee against a fake stock core with no un-patched core required.
+// The LIVE test skips cleanly when OPENBOX_URL / creds are absent, so `go test
+// ./...` stays green offline. The offline case pins the emit-only-stock- types
+// guarantee against a fake stock core with no un-patched core required.
 package acceptancetest
 
 import (

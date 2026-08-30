@@ -75,7 +75,7 @@ was set explicitly. Harmless here, but it is a live example of the gating.
 | `.goreleaser.yaml` | comment "all 11 modules" → 12 |
 | `install.sh` | **`MIN_GO_MINOR=23` → 27** + 2 comments |
 | `README.md`, `docs/getting-started.md` | "Go 1.23+" → "Go 1.27+" (3 places) |
-| `docs/adr/ADR-0015` | superseded marker, **pin only**; reasoning left as written history |
+| `that decision` | superseded marker, **pin only**; reasoning left as written history |
 
 `install.sh` and the two docs were **not in the phase's file list**. They are the
 same class of claim as CLAUDE.md's paragraph, and `MIN_GO_MINOR` is not merely
@@ -86,10 +86,10 @@ reading `go 1.27.0` fetches 1.27 and builds fine, so the hard failure needs
 `GOTOOLCHAIN=local` or an unreachable proxy. The reason to fix it is that the
 gate states a false minimum, which is enough on its own.
 
-ADR-0015 got a marker rather than a rewrite — it is a decision record, and its
-plaintext-credential and dependency-budget reasoning still stands. Phase 08's
-ADR-0022 is the forward-looking record; the marker cites D-GO-1 by name so it
-carries no dangling link.
+That decision got a marker rather than a rewrite — it is a decision record,
+and its plaintext-credential and dependency-budget reasoning still stands.
+Phase 08's that decision is the forward-looking record; the marker cites
+D-GO-1 by name so it carries no dangling link.
 
 No `.go` file was touched. `plans/**` left alone — stateful history.
 
@@ -178,10 +178,10 @@ identity still held. Recorded because the first number was the misleading one.
   rest on one of those. Module fetching *does* work with the env above, so the
   OSS-adoption phases are not blocked on dependencies — only on proof.
 - **Finding, spun off, not fixed here:** `cli/go.mod` declares a direct require
-  on the `decision` module with a comment explaining why, but **no file under
-  `cli/` imports it** — ADR-0017 deleted the local evaluator that did.
-  `go mod tidy` correctly demotes it to `// indirect`; that was reverted to keep
-  this phase declaration-only.
+on the `decision` module with a comment explaining why, but **no file under
+`cli/` imports it** — that decision deleted the local evaluator that did. `go
+mod tidy` correctly demotes it to `// indirect`; that was reverted to keep this
+phase declaration-only.
 - `toolchain go1.27.0` sits in `go.work` only, leaving member modules free
   (open question 1's stated default). Under `GOWORK=off` each module's own
   `go 1.27.0` directive governs, and `GOTOOLCHAIN=auto` fetches 1.27 for a

@@ -370,7 +370,7 @@
       <div class="meta-row">
         <span>repos <b>openbox-shift-left · openbox-logger</b></span>
         <span>evidence run <b>20260827T063932Z-225cac</b></span>
-        <span>touches <b>ADR-0021 §§5,8,9,10 · proposes ADR-0022</b></span>
+        <span>touches <b>that decision,8,9,10 · proposes that decision</b></span>
       </div>
     </header>
 
@@ -378,7 +378,7 @@
       <div class="sec-head"><span class="sec-num">§0</span><h2>The finding, in one paragraph</h2></div>
       <p>
         Shift-left's gateway observes model calls by redirecting <code>ANTHROPIC_BASE_URL</code> — a lane the desktop app
-        ignores and subscription OAuth may not follow (ADR-0021 §8). The logger observes the same calls through
+        ignores and subscription OAuth may not follow. The logger observes the same calls through
         <strong>environment lanes the embedded engine honors everywhere</strong>: Claude Code's enhanced-telemetry beta
         (<code>OTEL_LOG_RAW_API_BODIES</code>, <code>OTEL_LOG_TOOL_CONTENT</code>, <code>tool_decision</code> events) and, on
         the transport side, a loopback TLS proxy scoped to <code>api.anthropic.com</code>. Today's run captured a
@@ -413,7 +413,7 @@
             config and never consults <code>settings.json</code> for routing. Pointing desktop at a gateway replaces the claude.ai
             login with an org-supplied credential — incompatible with §3 pass-through for subscription developers. Model-call
             coverage on desktop machines: zero, while every local check reports healthy.</p>
-            <span class="src">ADR-0021 §8 · plans/reports/probe-260825-baseurl-auth-coverage.md</span>
+            <span class="src">that decision · plans/reports/probe-260825-baseurl-auth-coverage.md</span>
           </div>
         </div>
         <div class="ledger-row">
@@ -423,7 +423,7 @@
             <p><code>gate.Decide</code>/<code>WriteRefusal</code> exist with no production caller. A wrong status/body pair trips
             Claude Code's capability-rejection matcher and silently disables a capability for the session — worse than not refusing.
             Probe A has no instrument to answer it.</p>
-            <span class="src">ADR-0021 §9 · plans/reports/probe-260825-halt-rendering.md</span>
+            <span class="src">that decision · plans/reports/probe-260825-halt-rendering.md</span>
           </div>
         </div>
         <div class="ledger-row">
@@ -431,8 +431,8 @@
           <div class="body">
             <span class="t">No org identity is derivable from an OAuth credential <span class="chip open">unresolved</span></span>
             <p>The gateway fingerprints credentials, but whether an org is matchable from an OAuth token is open — so the account
-            rule cannot decide between refusing and detection-only, and ADR-0021 §10 cannot be written.</p>
-            <span class="src">ADR-0021 §10 · probe P1</span>
+            rule cannot decide between refusing and detection-only, and that decision cannot be written.</p>
+            <span class="src">that decision · probe P1</span>
           </div>
         </div>
         <div class="ledger-row">
@@ -441,7 +441,7 @@
             <span class="t">Gateway-observed turns contribute nothing to goal alignment <span class="chip dead">silent gap</span></span>
             <p>The gateway span carries the provider's raw response body, not the shape core's alignment extractor parses. No error
             anywhere; the widgets just stay quiet for those turns.</p>
-            <span class="src">ADR-0021 · openbox-core#130</span>
+            <span class="src">that decision · openbox-core#130</span>
           </div>
         </div>
         <div class="ledger-row">
@@ -449,8 +449,8 @@
           <div class="body">
             <span class="t">The volume question was unmeasured <span class="chip open">open</span></span>
             <p>Whether 64&nbsp;KiB bodies at tool-call cadence survive the realtime flusher — and what a full model-call body even
-            weighs — had no numbers. Every content ADR shipped with this listed as unproven.</p>
-            <span class="src">MAPPING.md §7 · ADR-0019, ADR-0021 status blocks</span>
+            weighs — had no numbers. Every content decision record shipped with this listed as unproven.</p>
+            <span class="src">MAPPING.md §7 · that decision status blocks</span>
           </div>
         </div>
         <div class="ledger-row">
@@ -556,7 +556,7 @@
           and is not seen — including “permission decisions: transcript not authoritative, <code>tool_decision</code> is.” The same
           stated-not-averaged posture as COVERAGE.md §3.4.</li>
         <li><strong>Start ordering as a safety property.</strong> Collector up → health-checked → proxy up → CA exists → watcher
-          ready → <em>only then</em> is activation offered. The same invariant ADR-0021 encodes for the gateway unit.</li>
+          ready → <em>only then</em> is activation offered. The same invariant that decision encodes for the gateway unit.</li>
       </ul>
     </section>
 
@@ -580,7 +580,7 @@
             <td><strong>D1</strong> desktop coverage</td>
             <td>Telemetry + raw-body lanes observed a desktop, subscription-OAuth session end to end today.</td>
             <td>Model-call <em>observation</em> for CLI and desktop, OAuth included, without touching base-url routing. The gateway
-              narrows to what it honestly governs: CLI enforcement. ADR-0021 §8's missing sentence can be written. OD2 (ruled)
+              narrows to what it honestly governs: CLI enforcement. That decision's missing sentence can be written. OD2 (ruled)
               goes further: the transport proxy as a product service puts an in-path point on the desktop route too.</td>
             <td><span class="chip measured">measured</span></td>
           </tr>
@@ -634,7 +634,7 @@
             <td><code>tool_use_id</code> observed on <code>tool_decision</code> and <code>tool_result</code> — a per-invocation id
               that joins decision to result.</td>
             <td>If the hook payload carries it too (probe), a retry-stable identity exists for every class. Adopting it changes
-              <code>activity_id</code> — byte-pinned — so it stays its own ADR. Until then the pinned limit stands.</td>
+              <code>activity_id</code> — byte-pinned — so it stays its own decision record. Until then the pinned limit stands.</td>
             <td><span class="chip open">probe</span></td>
           </tr>
         </tbody>
@@ -780,7 +780,7 @@
             <td>Provider quirks stay quarantined at the edge: Codex rejects <code>ask</code>, CC accepts <code>updatedInput</code> — the engine never learns either.</td></tr>
           <tr><td><strong>Enforce cascade + gate</strong> <span class="mono">hookflow/enforce.go</span></td>
             <td>The synchronous verdict path: <code>ShouldEscalate</code> → <code>/evaluate</code> → <code>MapVerdict</code>; failure policy applied <em>after</em> evaluation.</td>
-            <td>This <em>is</em> interception. No local second-guessing of policy (ADR-0017) — the raw-rego lesson.</td></tr>
+            <td>This <em>is</em> interception. No local second-guessing of policy — the raw-rego lesson.</td></tr>
           <tr><td><strong>Secret detection + redaction</strong> <span class="mono">decision/</span></td>
             <td>Redact content before it is attached; rewrite proceed-path inputs via <code>allow + updatedInput</code>.</td>
             <td>The only in-transit content control; its reach is measured (C39), not assumed — keyword decides, not charset.</td></tr>
@@ -797,7 +797,7 @@
             <td>Surface non-blocking evaluations (CONSTRAIN, risk, guardrail hits) back into the session.</td>
             <td>The after-side feedback channel — how monitored evidence reaches the developer without blocking.</td></tr>
           <tr><td><strong>Approval hold + rewake</strong> <span class="mono">hookflow · cli/internal/approver</span></td>
-            <td>Hold REQUIRE_APPROVAL where no native prompt exists (prompts); wake when the decision lands; ADR-0012 approver can answer autonomously.</td>
+            <td>Hold REQUIRE_APPROVAL where no native prompt exists (prompts); wake when the decision lands; that decision approver can answer autonomously.</td>
             <td>Approvals resolve without polling; undecided fails closed to block — over-ask, never over-grant.</td></tr>
           <tr><td><strong>HALT latch</strong> <span class="mono">halted-sessions/</span></td>
             <td>After a server HALT: refuse every later gated hook in the session, no re-evaluation, resume included.</td>
@@ -824,7 +824,7 @@
       <h3>Rules that survive unchanged</h3>
       <ul>
         <li><strong>One model-call evidence producer per session.</strong> Election at <code>init</code>: telemetry, gateway, or
-          transport — exactly one captures, never two — extending ADR-0021's disjoint-namespace rule
+          transport — exactly one captures, never two — extending that decision's disjoint-namespace rule
           (<code>:gateway:</code> / <code>:otel:</code> / <code>:proxy:</code>) so core's dedupe never absorbs half the evidence.</li>
         <li><strong>Signals carry no <code>signal_args</code>;</strong> free text rides metadata keys — the core goal-overwrite trap
           (<code>age.go:112-137</code>) applies to telemetry-sourced events identically.</li>
@@ -874,7 +874,7 @@
           <!-- gates -->
           <rect x="88" y="40" width="144" height="52" rx="6" style="fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.8"/>
           <text x="160" y="61" text-anchor="middle">UserPromptSubmit</text>
-          <text x="160" y="77" text-anchor="middle" class="s">prompt gate · ADR-0020</text>
+          <text x="160" y="77" text-anchor="middle" class="s">prompt gate · that decision</text>
 
           <rect x="308" y="40" width="144" height="52" rx="6" class="dash" style="fill:none;stroke:var(--open);stroke-width:1.8"/>
           <text x="380" y="61" text-anchor="middle" style="fill:var(--open)">gateway · transport</text>
@@ -958,14 +958,14 @@
             <td><strong>Yes.</strong> UserPromptSubmit gate: BLOCK erases the prompt, REQUIRE_APPROVAL holds (undecided ⇒ block, no kill),
               HALT ends the session + latch.</td>
             <td>The reply is observed (turn carrier) and evaluated; it cannot be un-shown. Findings feed the next turn; HALT binds at the next hop.</td>
-            <td><span class="chip decided">shipped · ADR-0020</span></td>
+            <td><span class="chip decided">shipped · that decision</span></td>
           </tr>
           <tr>
             <td><strong>Tool call</strong> <span class="dim">(shell, file, web — every class)</span></td>
             <td><strong>Yes.</strong> PreToolUse gate, full verdict set; shell command judged verbatim; local redaction can rewrite input
               (<code>allow + updatedInput</code>).</td>
             <td>PostToolUse observes status, output, failure signals — redacted, capped, evaluated. The side effect is not revocable.</td>
-            <td><span class="chip decided">shipped · ADR-0017/18/19</span></td>
+            <td><span class="chip decided">shipped · that decision/18/19</span></td>
           </tr>
           <tr>
             <td><strong>MCP call</strong></td>
@@ -979,7 +979,7 @@
             <td><strong>In-path point exists</strong> (gateway relay). Refusal path built and isolated to two constants — dormant until probe A
               proves a shape the client won't retry around. Until then: capture only.</td>
             <td>Full exchange passes through the relay — inspectable and captured as an observed span. Modification is excluded by decision
-              (ADR-0021 §4: byte-identical is load-bearing).</td>
+              (that decision: byte-identical is load-bearing).</td>
             <td><span class="chip open">capture live · refusal probe A</span></td>
           </tr>
           <tr>
@@ -1002,7 +1002,7 @@
           <tr>
             <td><strong>Thinking / server-side generation</strong></td>
             <td><strong>No pre-point exists anywhere</strong> — it is generated upstream, inside the provider.</td>
-            <td>Monitor-only via transcript lift (ADR-0019 P3); Anthropic's own OTel redacts thinking unconditionally.</td>
+            <td>Monitor-only via transcript lift; Anthropic's own OTel redacts thinking unconditionally.</td>
             <td><span class="chip decided">shipped · monitor-only</span></td>
           </tr>
         </tbody>
@@ -1010,7 +1010,7 @@
       <p class="dim" style="font-size:15px; max-width:80ch">
         Fail posture footnote: gated hooks default fail-open (<code>fail_closed:false</code> — an unreachable control plane proceeds, and
         <code>ApplyFailurePolicy</code> runs only <em>after</em> an evaluation attempt). The gateway is deliberately the opposite: no
-        interpretable verdict ⇒ refuse, always, with no posture switch to turn that off (ADR-0021 §7). A failed guardrail also denies.
+        interpretable verdict ⇒ refuse, always, with no posture switch to turn that off. A failed guardrail also denies.
       </p>
 
       <figure class="fig">
@@ -1067,7 +1067,7 @@
           <line x1="400" y1="420" x2="150" y2="420" class="msg" marker-end="url(#fbA)"/>
           <text x="275" y="412" text-anchor="middle" class="lab">ask → native permission prompt (Codex: deny — tighter)</text>
           <path class="msg" d="M150,440 h34 v14 h-34" marker-end="url(#fbA)"/>
-          <text x="192" y="450" class="lab">developer or ADR-0012 approver resolves; unanswered ⇒ deny</text>
+          <text x="192" y="450" class="lab">developer or that decision approver resolves; unanswered ⇒ deny</text>
 
           <line x1="60" y1="474" x2="910" y2="474" class="dash" style="stroke:var(--line-strong)"/>
           <text x="74" y="494" class="g" style="fill:var(--dead)">[HALT]</text>
@@ -1188,12 +1188,12 @@
             <td>Proceeds; <code>constraints[]</code> recorded → advisory sink + findings. Rewrite mechanism exists
               (<code>updatedInput</code>, used today for local redaction); applying server constraints = W4 follow-up.</td>
             <td>Proceeds + recorded.</td>
-            <td>Cannot apply in-path — byte-identical forward is load-bearing for both relays (ADR-0021 §4); would need its own ADR.</td>
+            <td>Cannot apply in-path — byte-identical forward is load-bearing for both relays; would need its own decision.</td>
             <td>Recorded, advisory.</td>
           </tr>
           <tr>
             <td><strong>REQUIRE_APPROVAL</strong></td>
-            <td>CC: native <code>ask</code> prompt, resolved synchronously by the developer or the ADR-0012 approver.
+            <td>CC: native <code>ask</code> prompt, resolved synchronously by the developer or that decision approver.
               Codex: deny (its runtime rejects <code>ask</code> — strictly tighter).</td>
             <td>Hold + rewake; undecided ⇒ block (<code>approval:undecided</code> — never a session kill).</td>
             <td>Dormant with the rest of the gate.</td>
@@ -1226,25 +1226,25 @@
         <div class="ws-row">
           <span class="wid">W1</span>
           <div>
-            <span class="t">ADR-0022 — native telemetry as an evidence lane</span>
+            <span class="t">that decision — native telemetry as an evidence lane</span>
             <p>The decision document: lane tiers (T1/T2/T3 as claims, not marketing), the one-producer election
             (telemetry | gateway | transport), the <code>:otel:</code> and <code>:proxy:</code> namespaces, posture keys
             (<code>telemetry</code> under the existing <code>content_capture</code> and <code>finops</code> gates), the beta-flag
             dependency accepted by ruling (OD3), OD1(c)'s truncation posture, and the sentinel-test list. New lane = new
-            component = ADR, per the repo's own rule.</p>
-            <span class="files">docs/adr/ADR-0022-*.md · contracts/dev-event (v1.6 if any field is added)</span>
+            component = decision record, per the repo's own rule.</p>
+            <span class="files">that decision-*.md · contracts/dev-event (v1.6 if any field is added)</span>
           </div>
         </div>
         <div class="ws-row">
           <span class="wid">W2</span>
           <div>
-            <span class="t">ADR-0021 amendments — write the three missing sentences</span>
+            <span class="t">that decision amendments — write the three missing sentences</span>
             <p>§8: the desktop mechanism and the env-lane answer, with today's run as the citation. §10: the branch named —
             detection-tier org binding from asserted telemetry for OAuth; fingerprint refusal for API keys. §5: <strong>formally
             reversed by owner ruling (OD2, 2026-08-27)</strong> — the amendment records the reversal, its safeguards (loopback
             only, single-host allowlist, credential-grade CA, never the system trust store), and the one-command
             install/removal contract.</p>
-            <span class="files">docs/adr/ADR-0021-openbox-local-gateway.md (DRAFT → closable)</span>
+            <span class="files"> (DRAFT → closable)</span>
           </div>
         </div>
         <div class="ws-row">
@@ -1333,7 +1333,7 @@
         <code>api.anthropic.com</code>, CA handled as a credential under <code>~/.openbox/</code>. Contract: <strong>one command
         installs, configures, and enables everything; one command removes it all</strong> — services unloaded, every displaced
         setting restored from the activation record, CA and local captures deleted — the system as close to untouched as possible.
-        This formally reverses ADR-0021 §5 (W2 records it) and gives desktop/OAuth model calls an in-path point: D1's enforcement
+        This formally reverses that decision (W2 records it) and gives desktop/OAuth model calls an in-path point: D1's enforcement
         half closes once probe A lands.</p>
       </div>
       <div class="odblock">
@@ -1352,9 +1352,9 @@
       <h3>Limits that stay true</h3>
       <ul>
         <li><strong>T3 is suppressible.</strong> Anything that edits env kills the lane silently. Telemetry is detection with the
-          same claim tier ADR-0021 §2 already argues — never prevention.</li>
+          same claim tier that decision already argues — never prevention.</li>
         <li><strong>Thinking does not ride OTel.</strong> Anthropic's export redacts extended thinking unconditionally; the
-          transcript lift (ADR-0019 P3) remains the only thinking source. No change.</li>
+          transcript lift remains the only thinking source. No change.</li>
         <li><strong>Desktop model-call enforcement now has a path — through W5's transport proxy only, and only after probe A.</strong>
           Until both land, hooks still enforce that session's tools and prompts, telemetry watches its model calls, and whether
           desktop honors <code>continue:false</code> session kill is a probe, not a claim.</li>
@@ -1362,7 +1362,7 @@
           content-based policy and the org record see at most the first 65,536 runes of a model call; the truncated remainder
           exists nowhere org-side.</li>
         <li><strong>The transport CA can impersonate <code>api.anthropic.com</code> to this machine.</strong> It is a credential
-          with the same trust boundary as the signing key (ADR-0015): anything running as the developer can read it. Single-host
+          with the same trust boundary as the signing key : anything running as the developer can read it. Single-host
           interception and loopback-only listening bound the blast radius; they do not remove it.</li>
         <li><strong>Asserted identity is not proven identity.</strong> <code>organization.id</code> from the client binds sessions
           for detection; only a credential fingerprint at an in-path point supports refusal.</li>
@@ -1409,8 +1409,8 @@
         <li>openbox-logger/docs/CAPTURE_MODEL.md · SCHEMA.md · SECURITY.md</li>
         <li>openbox-logger/data/runs/20260827T063932Z-225cac/ — the evidence run (local, private)</li>
         <li>openbox-logger/data/api-bodies/ — 98 untruncated request/response files</li>
-        <li>openbox-shift-left/docs/adr/ADR-0021-openbox-local-gateway.md §§5, 8, 9, 10</li>
-        <li>openbox-shift-left/docs/adr/ADR-0013 · 0014 · 0017 · 0018 · 0019 · 0020</li>
+        <li>openbox-shift-left/ §§5, 8, 9, 10</li>
+        <li>openbox-shift-left/that decision · 0014 · 0017 · 0018 · 0019 · 0020</li>
         <li>openbox-shift-left/plans/reports/probe-260825-baseurl-auth-coverage.md</li>
         <li>openbox-shift-left/plans/reports/probe-260825-halt-rendering.md</li>
         <li>openbox-shift-left/CLAUDE.md — status blocks and pinned limits</li>
@@ -1422,7 +1422,7 @@
         <span class="chip inferred">inferred</span> mechanism read from code/docs, not yet exercised ·
         <span class="chip open">open</span> needs a probe ·
         <span class="chip od">od</span> owner decision ·
-        <span class="chip decided">decided</span> already pinned by an ADR or test.
+        <span class="chip decided">decided</span> already pinned by a decision record or test.
       </p>
     </section>
   </main>

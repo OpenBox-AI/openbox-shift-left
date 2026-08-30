@@ -43,8 +43,8 @@ func (f *fakeReg) FindByName(context.Context, string) (*backend.AgentSummary, er
 // testApp builds an app with in-memory writers and a seam that fails loudly if a
 // path touches the network when it should not.
 //
-// There is no secret-store seam to fake any more (ADR-0015). Tests that write
-// credentials call isolateHome so the real write lands in a temp dir.
+// There is no secret-store seam to fake any more. Tests that write credentials
+// call isolateHome so the real write lands in a temp dir.
 func testApp(env map[string]string) (*app, *bytes.Buffer, *bytes.Buffer) {
 	var out, errb bytes.Buffer
 	a := &app{
@@ -134,11 +134,11 @@ func TestDryRunIsOfflineAndNeedsNoToken(t *testing.T) {
 	}
 }
 
-// `init` no longer needs a control token at all — it makes no control-plane call
-// (ADR-0015). What it needs is credentials already on the machine, and when they
-// are absent it must exit non-zero naming `auth` and install NOTHING. A
-// half-install would leave hooks that fire, fail to resolve an identity, and fail
-// open silently: an install that looks finished and governs nothing.
+// `init` no longer needs a control token at all — it makes no control-plane call.
+// What it needs is credentials already on the machine, and when they are absent
+// it must exit non-zero naming `auth` and install NOTHING. A half-install would
+// leave hooks that fire, fail to resolve an identity, and fail open silently: an
+// install that looks finished and governs nothing.
 func TestInitWithoutCredentialsRefusesAndInstallsNothing(t *testing.T) {
 	home := isolateHome(t)
 	a, _, errb := testApp(nil)
@@ -176,9 +176,9 @@ func TestInitDoesNotRegisterEvenWithAnOrgKey(t *testing.T) {
 	}
 }
 
-// The HALT-on-no-secret-store path is gone with the store (ADR-0015): there is
-// nothing left to detect and nothing to refuse. What replaces it is the contract
-// below — the flag that selected a backend must FAIL rather than be ignored.
+// The HALT-on-no-secret-store path is gone with the store : there is nothing
+// left to detect and nothing to refuse. What replaces it is the contract below —
+// the flag that selected a backend must FAIL rather than be ignored.
 
 // A removed flag that is silently accepted is worse than one that errors: a
 // script passing --secret-backend would keep exiting 0 while storing credentials
@@ -279,7 +279,7 @@ func TestClaudeCodeInstallsForRealExitsZero(t *testing.T) {
 		t.Errorf("dev config leaked a secret value:\n%s", raw)
 	}
 	// The credentials seeded before the run are untouched: `init` reads them to
-	// check its precondition and never writes one (ADR-0015).
+	// check its precondition and never writes one.
 	envPath, err := devconfig.EnvFilePath()
 	if err != nil {
 		t.Fatal(err)
@@ -340,10 +340,11 @@ func setHookEnv(t *testing.T) string {
 	t.Setenv(devconfig.EnvEnforcementFile, filepath.Join(dir, "enforcements.jsonl"))
 	t.Setenv(devconfig.EnvPendingApprovalDir, filepath.Join(dir, "pending-approvals"))
 	t.Setenv("OPENBOX_ADVISORY_FILE", filepath.Join(dir, "advisories.jsonl"))
-	// Pinned, not inherited. Content capture defaults ON, and since ADR-0019 P1
-	// the observe path carries the tool's input under that gate — so a hook test
-	// that left the posture to the default would silently start asserting the
-	// capture-ON behaviour. Cases that want capture ON set it themselves.
+	// Pinned, not inherited. Content capture defaults ON, and since that
+	// decision the observe path carries the tool's input under that gate — so a
+	// hook test that left the posture to the default would silently start
+	// asserting the capture-ON behaviour. Cases that want capture ON set it
+	// themselves.
 	t.Setenv(devconfig.EnvContentCapture, "0")
 	return spool
 }
@@ -414,7 +415,7 @@ func TestUnifiedBinaryHookObserveOnlyContract(t *testing.T) {
 		"OPENBOX_SPOOL_DIR="+spool,
 		"OPENBOX_CONFIG="+filepath.Join(dir, "none.json"),
 		// OPENBOX_HOME too, or the subprocess reads the DEVELOPER'S real
-		// ~/.openbox/dev.json (ADR-0015 moved config there). Pinning
+		// ~/.openbox/dev.json (that decision moved config there). Pinning
 		// OPENBOX_CONFIG alone is not enough: a base_url resolved from the real
 		// file changes what the hook does, and these assertions then depend on
 		// whether whoever runs them has ever run `openbox auth`. CI has no
@@ -431,8 +432,8 @@ func TestUnifiedBinaryHookObserveOnlyContract(t *testing.T) {
 		"OPENBOX_ADVISORY_FILE="+filepath.Join(dir, "advisories.jsonl"),
 		"OPENBOX_SESSION_DIR="+filepath.Join(dir, "sessions"),
 		// See setHookEnv: capture defaults ON and the observe path now carries
-		// tool input under that gate (ADR-0019 P1). This case is about the gate
-		// CLOSED; conformance C36 owns the open side.
+		// tool input under that gate. This case is about the gate CLOSED;
+		// conformance C36 owns the open side.
 		devconfig.EnvContentCapture+"=0",
 	)
 	var stdout, stderr strings.Builder
@@ -528,10 +529,10 @@ func TestHookEndToEndSmoke(t *testing.T) {
 	//
 	// The canary proves no tool content reaches the wire. That used to hold on
 	// the default posture because nothing on this path egressed synchronously
-	// and the spooled copy is metadata-only. ADR-0017 gates every tool call
-	// inline, and a gated escalation DOES attach content when capture is on
-	// (E7) — so on the default the canary would now be asserting the absence of
-	// something the design deliberately sends, and would fail for the right
+	// and the spooled copy is metadata-only. That decision gates every tool
+	// call inline, and a gated escalation DOES attach content when capture is
+	// on (E7) — so on the default the canary would now be asserting the absence
+	// of something the design deliberately sends, and would fail for the right
 	// reason at the wrong test. With capture off, no content egresses on ANY
 	// path, which is the property this test is here to pin.
 	t.Setenv("OPENBOX_CONTENT_CAPTURE", "0")
@@ -539,11 +540,11 @@ func TestHookEndToEndSmoke(t *testing.T) {
 	// gating separates the two properties that used to be one. Every hot-path
 	// hook must be FAST; only the non-gating ones must be SILENT.
 	//
-	// PreToolUse egresses synchronously now, by design (ADR-0017): it is the
-	// gate, and its whole purpose is to obtain a verdict before the tool runs.
-	// Asserting no-egress on it would be asserting that enforcement does not
-	// work. The bound that replaced it is the provider's hook ceiling, pinned
-	// per adapter — see TestEnforceBudgetStaysUnderTheDeclaredCeiling.
+	// PreToolUse egresses synchronously now, by design : it is the gate, and
+	// its whole purpose is to obtain a verdict before the tool runs. Asserting
+	// no-egress on it would be asserting that enforcement does not work. The
+	// bound that replaced it is the provider's hook ceiling, pinned per
+	// adapter — see TestEnforceBudgetStaysUnderTheDeclaredCeiling.
 	events := []struct {
 		hook, payload string
 		hotPath       bool // must be fast
@@ -665,7 +666,7 @@ func TestHookRealtimeDelivery(t *testing.T) {
 		"OPENBOX_SPOOL_DIR="+spool,
 		"OPENBOX_CONFIG="+filepath.Join(dir, "none.json"),
 		// OPENBOX_HOME too, or the subprocess reads the DEVELOPER'S real
-		// ~/.openbox/dev.json (ADR-0015 moved config there). Pinning
+		// ~/.openbox/dev.json (that decision moved config there). Pinning
 		// OPENBOX_CONFIG alone is not enough: a base_url resolved from the real
 		// file changes what the hook does, and these assertions then depend on
 		// whether whoever runs them has ever run `openbox auth`. CI has no
@@ -980,19 +981,19 @@ func TestUnknownProviderAndMissingProvider(t *testing.T) {
 	}
 }
 
-// `openbox dev sync` and its tests are gone with ADR-0017: the local policy
-// bundle it fetched no longer exists, so there is nothing to sync. The deleted
-// cases covered properties OF THAT FETCH — a successful sync writing a bundle
-// and pin, a null policy becoming an empty allow bundle, raw rego degrading to
-// a fail-open local bundle with a warning, a mapped 403 hint, and the INV-1
-// guard refusing the control token as a flag. Only the last outlives the
-// command, and it still holds wherever a control token is read.
+// `openbox dev sync` and its tests are gone with that decision: the local
+// policy bundle it fetched no longer exists, so there is nothing to sync. The
+// deleted cases covered properties OF THAT FETCH — a successful sync writing a
+// bundle and pin, a null policy becoming an empty allow bundle, raw rego
+// degrading to a fail-open local bundle with a warning, a mapped 403 hint, and
+// the INV-1 guard refusing the control token as a flag. Only the last outlives
+// the command, and it still holds wherever a control token is read.
 //
 // TestDevSyncIsRetired pins that the command now reports its own removal.
 
-// Coordinate persistence moved from `init` to `auth` (ADR-0015): `auth` writes
-// agent_id / backend_url / base_url to dev.json, they survive a re-run, and the
-// resolvers read them back with the environment unset.
+// Coordinate persistence moved from `init` to `auth` : `auth` writes agent_id /
+// backend_url / base_url to dev.json, they survive a re-run, and the resolvers
+// read them back with the environment unset.
 //
 // This used to drive `init`, which registered the agent and persisted what
 // registration returned. `init` no longer registers anything, so the same
@@ -1078,7 +1079,7 @@ func TestAuth_PersistsBaseURLForASelfHostedCore(t *testing.T) {
 	}
 
 	// Saying nothing takes the hosted defaults — a SaaS install must not have to
-	// pass a flag. Before ADR-0015 there was no backend default at all.
+	// pass a flag. Before that decision there was no backend default at all.
 	cfg = run(t, nil)
 	if !strings.Contains(cfg, `"base_url": "`+devconfig.DefaultBaseURL+`"`) {
 		t.Errorf("the hosted core default was not persisted:\n%s", cfg)
@@ -1177,7 +1178,7 @@ func TestCodexUnifiedBinaryObserveE2E(t *testing.T) {
 		"OPENBOX_SPOOL_DIR="+spool,
 		"OPENBOX_CONFIG="+filepath.Join(dir, "none.json"),
 		// OPENBOX_HOME too, or the subprocess reads the DEVELOPER'S real
-		// ~/.openbox/dev.json (ADR-0015 moved config there). Pinning
+		// ~/.openbox/dev.json (that decision moved config there). Pinning
 		// OPENBOX_CONFIG alone is not enough: a base_url resolved from the real
 		// file changes what the hook does, and these assertions then depend on
 		// whether whoever runs them has ever run `openbox auth`. CI has no
@@ -1281,7 +1282,7 @@ func TestCodexInstallsForRealExitsZero(t *testing.T) {
 		t.Errorf("dev config leaked a secret value:\n%s", rawCfg)
 	}
 	// Seeded before the run and untouched by it: `init` reads credentials to check
-	// its precondition and never writes one (ADR-0015).
+	// its precondition and never writes one.
 	kv, err := devconfig.ParseEnvFile(filepath.Join(openboxHome, ".env"))
 	if err != nil {
 		t.Fatalf("read credential file: %v", err)
@@ -1328,7 +1329,7 @@ func TestDevSyncIsRetired(t *testing.T) {
 	if code := a.run([]string{"dev", "sync"}); code == exitOK {
 		t.Error("`dev sync` exited 0 — a retired command must fail, not no-op")
 	}
-	for _, want := range []string{"no longer exists", "ADR-0017", "inert"} {
+	for _, want := range []string{"no longer exists", "evaluated by OpenBox", "inert"} {
 		if !strings.Contains(errb.String(), want) {
 			t.Errorf("stderr %q must mention %q, so an operator learns what replaced it and "+
 				"that the leftover bundle file on disk is harmless", errb.String(), want)

@@ -20,16 +20,16 @@ const (
 	envStaleDir        = "OPENBOX_STALE_DIR"      // per-session stale-marker dir; enforce-only
 )
 
-// Credential/config resolution for the Codex hook path — thin bindings
-// over the shared internal/adapters/common/devconfig module (ADR-0007). Codex reads the
-// same `~/.openbox/dev.json` posture `openbox init` writes and the same
-// `~/.openbox/.env` credentials `openbox auth` writes, for every provider;
-// nothing here is Codex-specific except the spool subdir name.
+// Credential/config resolution for the Codex hook path — thin bindings over the shared
+// internal/adapters/common/devconfig module. Codex reads the same `~/.openbox/dev.json`
+// posture `openbox init` writes and the same `~/.openbox/.env` credentials `openbox
+// auth` writes, for every provider; nothing here is Codex-specific except the spool
+// subdir name.
 //
-// INV-1: the hook reads the DID only on the hot path (no secret I/O); the obx_
-// key + signing key are read (from ~/.openbox/.env, or the OPENBOX_API_KEY /
-// OPENBOX_AGENT_PRIVATE_KEY env overrides) only at flush and go straight into
-// the client, never logged/printed/argv'd.
+// INV-1: the hook reads the DID only on the hot path (no secret I/O); the obx_ key +
+// signing key are read (from ~/.openbox/.env, or the OPENBOX_API_KEY /
+// OPENBOX_AGENT_PRIVATE_KEY env overrides) only at flush and go straight into the
+// client, never logged/printed/argv'd.
 
 // DevConfig is the shared non-secret coordinate file contract.
 type DevConfig = devconfig.DevConfig
@@ -117,22 +117,22 @@ func ResolveCoordinates() (baseURL, did string) { return devconfig.ResolveCoordi
 //    contract; identical names/semantics to the Claude Code adapter). ──
 
 // ResolveEnforce reports whether the developer runtime is in enforce mode.
-// DEFAULT ON (ADR-0016 reversed the observe default; ADR-0006 governs the
-// in-process mechanism, not the default value). A config read error never turns
-// enforcement on (INV-3 fail-safe).
+// DEFAULT ON (that decision reversed the observe default; that decision governs
+// the in-process mechanism, not the default value). A config read error never
+// turns enforcement on (INV-3 fail-safe).
 func ResolveEnforce() bool { return devconfig.ResolveEnforce() }
 
 // ResolveFailClosed reports the enforce failure policy (default false =
 // fail-open — an org never becomes fail-closed by accident).
 func ResolveFailClosed() bool { return devconfig.ResolveFailClosed() }
 
-// ResolveTier2 reads the DEPRECATED, inert `tier2` key (ADR-0017).
-// It changes nothing: every gated call is evaluated. It is retained so an
-// existing dev.json parses, and it warns once to stderr when present. See
-// devconfig.ResolveTier2 for why an explicit false is deliberately not honoured.
-// Historic note: `openbox init` used to couple tier2 to the
-// enforce posture and enforce now defaults on — so a bare install writes
-// tier2: true. There is no standalone flag; it follows enforce.
+// ResolveTier2 reads the DEPRECATED, inert `tier2` key. It changes nothing:
+// every gated call is evaluated. It is retained so an existing dev.json parses,
+// and it warns once to stderr when present. See devconfig.ResolveTier2 for why
+// an explicit false is deliberately not honoured. Historic note: `openbox init`
+// used to couple tier2 to the enforce posture and enforce now defaults on — so a
+// bare install writes tier2: true. There is no standalone flag; it follows
+// enforce.
 func ResolveTier2() bool { return devconfig.ResolveTier2() }
 
 // ResolveSecretDetection reports whether local secret detection is

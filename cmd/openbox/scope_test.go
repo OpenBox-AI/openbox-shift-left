@@ -334,15 +334,15 @@ func TestNoInstallOutputClaimsAmbientCoverageAfterAProjectScopedInstall(t *testi
 
 // THE REGRESSION TEST for the bug that shipped past every single-invocation test:
 // a plain `init` re-run silently reverted a deliberate `--enforce=false` back to
-// true, because the flag defaults to true and its value was assigned to
-// o.Enforce unconditionally — so every run wrote enforce:true whether the user
-// had asked for it or not.
+// true, because the flag defaults to true and its value was assigned to o.Enforce
+// unconditionally — so every run wrote enforce:true whether the user had asked
+// for it or not.
 //
 // One invocation cannot catch this. The bug lives in the SECOND run, which is
 // exactly what a developer does for unrelated reasons: adding --install-git-hook,
 // repairing hooks, or an idempotent setup script re-running init.
 //
-// ADR-0016 calls the persisting opt-out load-bearing; this is what holds it.
+// That decision calls the persisting opt-out load-bearing; this is what holds it.
 func TestPlainReInitDoesNotRevertAnEnforceOptOut(t *testing.T) {
 	home := isolateHome(t)
 	seedCredentials(t)
@@ -368,7 +368,7 @@ func TestPlainReInitDoesNotRevertAnEnforceOptOut(t *testing.T) {
 		t.Fatal("the opt-out was erased by a plain re-run — an absent field re-defaults to ON")
 	}
 	if *cfg.Enforce {
-		t.Error("a plain re-run silently turned enforcement back on; the opt-out must persist (ADR-0016)")
+		t.Error("a plain re-run silently turned enforcement back on; the opt-out must persist ")
 	}
 	if devconfig.ResolveEnforce() {
 		t.Error("ResolveEnforce() reports enforcing after an opt-out survived a re-run")
@@ -384,7 +384,7 @@ func TestPlainReInitDoesNotRevertAnEnforceOptOut(t *testing.T) {
 // A bare install on a machine with no prior config must still ENFORCE — via the
 // resolver default, not by writing a literal true. Both halves matter: writing
 // nothing is what lets the opt-out above survive, and resolving to on is what
-// makes ADR-0016's default real.
+// makes that decision's default real.
 func TestBareInitEnforcesWithoutWritingTheField(t *testing.T) {
 	home := isolateHome(t)
 	seedCredentials(t)
@@ -396,7 +396,7 @@ func TestBareInitEnforcesWithoutWritingTheField(t *testing.T) {
 		t.Errorf("a bare init wrote enforce=%v; it must say nothing so an opt-out can survive", *cfg.Enforce)
 	}
 	if !devconfig.ResolveEnforce() {
-		t.Error("a bare init must resolve to ENFORCE (ADR-0016), via the default")
+		t.Error("a bare init must resolve to ENFORCE, via the default")
 	}
 	if !strings.Contains(out.String(), "ENFORCE") {
 		t.Errorf("the install must report the enforcing posture:\n%s", out.String())

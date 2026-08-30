@@ -18,8 +18,8 @@ events store and evaluate normally; (b) never latch on a HALT — a verdict appl
 Agent-runtime (non-developer) semantics unchanged, pinned by tests.
 
 **CORE-ONLY.** Phases 02/04 planned here, executed in `../openbox-core`. Client verdict handling
-untouched — no discrimination, no `fallback_used` wiring, no failure-policy change. ADR-0017's
-trust boundary holds: **truthfulness is the decider's obligation.**
+untouched — no discrimination, no `fallback_used` wiring, no failure-policy change. That
+decision's trust boundary holds: **truthfulness is the decider's obligation.**
 
 ## Evidence
 

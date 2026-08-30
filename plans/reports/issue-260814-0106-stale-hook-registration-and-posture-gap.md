@@ -1,7 +1,7 @@
-# Two issues found verifying ADR-0018 against live OpenBox data
+# Two issues found verifying that decision against live OpenBox data
 
 Date: 2026-08-14 · Repo: openbox-shift-left @ `3ec812f` · Found while checking the first
-real session's events after ADR-0018 shipped.
+real session's events after that decision shipped.
 
 Both are written to be pasted as GitHub issues. Neither has been filed.
 
@@ -26,8 +26,8 @@ PreToolUse:
            "…/openbox" rewake claude-code
 ```
 
-Entry 1's binary was **18 hours older than the ADR-0017 merge**. Entry 2 was current. Every hook
-fired twice, once per engine, for weeks-old code and current code simultaneously.
+Entry 1's binary was **18 hours older than that decision merge**. Entry 2 was current. Every
+hook fired twice, once per engine, for weeks-old code and current code simultaneously.
 
 ### Why `init` does not clean it up
 
@@ -47,17 +47,17 @@ foreign — it is ours, and it is wrong.
 |---|---|
 | Every tool call stored **two** `ActivityStarted` rows | same `activity_id`, same `tool_use_id`, different `event_id`, same millisecond |
 | Prompt stored twice | two `prompt_submitted` rows, identical `signal_args` |
-| `status` on only ~6 of 23 `ActivityCompleted` | the pre-ADR-0018 engine does not send the field |
+| `status` on only ~6 of 23 `ActivityCompleted` | the pre-that decision engine does not send the field |
 | `SessionStarted` posture described a world that no longer exists | carried `bundle_sha256`, `bundle_version: "no-policy"`, `staleness: "skipped_no_token"` — fields the current adapter never populates, so that event provably came from the stale engine |
 
 The two `ActivityStarted` rows differ in a way that pins the version gap exactly: for a `Read`,
-one carries `input.content` and the other does not — the pre-ADR-0017 engine escalated only
-shell/MCP, the current one gates every class. For `Bash`, both carry `command`, because shell
-always escalated.
+one carries `input.content` and the other does not — the pre-that decision engine escalated
+only shell/MCP, the current one gates every class. For `Bash`, both carry `command`, because
+shell always escalated.
 
 **Downstream:** `.total` increments twice per call, so Tool Health SUCCESS% is meaningless, and
-latency percentiles and per-tool call counts are inflated ~2×. An operator would read this as the
-ADR-0018 status work being broken. It is not — it is two engines.
+latency percentiles and per-tool call counts are inflated ~2×. An operator would read this as
+that decision status work being broken. It is not — it is two engines.
 
 ### Proposed fix
 
@@ -85,15 +85,15 @@ it in seconds. Optional, but this failure mode is invisible without it.
 
 ---
 
-## Issue 2 — `decision_authority` never reaches the control plane, though ADR-0017 says posture carries it
+## Issue 2 — `decision_authority` never reaches the control plane, though that decision says posture carries it
 
 **Severity: low-moderate.** Not a data-loss bug; a governance product describing evidence it does
 not actually send.
 
 ### The claim
 
-ADR-0017 §"Policy provenance as evidence" argues that deleting the bundle removes what posture
-used to report about policy, and that the replacement is deliberately smaller:
+That decision §"Policy provenance as evidence" argues that deleting the bundle removes what
+posture used to report about policy, and that the replacement is deliberately smaller:
 
 > Posture therefore carries **who decides** (`decision_authority: control_plane`) and **what
 > happens when they cannot be reached** (`failure_policy: fail_open | fail_closed`).
@@ -115,13 +115,13 @@ Confirmed in the live `SessionStarted` metadata: neither key present.
 
 Precisely how bad: `fail_closed` **is** reported, as a boolean in `Flags()`, so the failure-policy
 *information* does reach the control plane under a different name. `decision_authority` is absent
-outright. So the local view is complete and the remote view is not — the inverse of what the ADR
-argues for.
+outright. So the local view is complete and the remote view is not — the inverse of what that
+decision argues for.
 
 ### Second-order: the map still lists four dead keys
 
 `bundle_version`, `bundle_policy_id`, `bundle_sha256`, `bundle_integrity` (and `staleness`) survive
-in `Metadata()`. Harmless today only because nothing populates them post-ADR-0017 —
+in `Metadata()`. Harmless today only because nothing populates them post-that decision —
 `effectivePosture()` sets only adapter/provider fields, so they are `""` and the `if v == ""` guard
 drops them. But they are live code paths for a deleted subsystem, and the live data above shows
 exactly what they look like when an older binary is in play.
@@ -130,10 +130,12 @@ exactly what they look like when an older binary is in play.
 
 1. Add `decision_authority` and `failure_policy` to `Metadata()`'s string map.
 2. Delete the four bundle keys and `staleness` from it, and from `Posture` if nothing else reads
-   them. ADR-0017's own reasoning applies: "a control that cannot engage must not appear as one."
+them. That decision's own reasoning applies: "a control that cannot engage must not appear as
+one."
 3. One test asserting the emitted posture contains `decision_authority` and no `bundle_*` key.
 
-Either fix the code or amend ADR-0017 — but the two must agree.
+Either fix the code or amend that decision — but the two must
+agree.
 
 ---
 
@@ -149,5 +151,5 @@ Either fix the code or amend ADR-0017 — but the two must agree.
    engine path ever moved — including everyone who tested from a temp dir — is silently
    double-counting.
 4. **Does `failure_policy` need its own key at all**, given `fail_closed` already carries the
-   information? Naming it would match the ADR; leaving it is defensible. Decide, then make the doc
-   match.
+information? Naming it would match that decision; leaving it is defensible. Decide, then make the
+doc match.

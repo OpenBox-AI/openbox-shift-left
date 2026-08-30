@@ -118,8 +118,7 @@ wins over the file.
 ### Where your credentials live, and what that costs
 
 `~/.openbox/.env`, in **plaintext**. Relocate the whole directory with
-`OPENBOX_HOME`. This is a deliberate trade, recorded in
-[ADR-0015](adr/ADR-0015-plaintext-credential-file.md), and it is worth
+`OPENBOX_HOME`. This is a deliberate trade, and it is worth
 understanding rather than skipping:
 
 - **macOS/Linux:** `0600` under a `0700` directory, so other local users cannot
@@ -169,28 +168,27 @@ project you want governed. `init` prints which directory it governed, every time
 default — on tool calls AND on prompts: every gated tool call and every submitted
 prompt is decided by your org's policy before it runs, and a **HALT verdict ends
 the session on the spot** (the current turn stops, and every later prompt or tool
-call in that session is refused locally until you start a new session —
-[ADR-0020](adr/ADR-0020-prompt-gate-and-halt-session-stop.md)). BLOCK refuses just
-the one call or prompt. Two things keep that from being a surprise you cannot
-recover from: enforcement acts on *your org's policy*, so until your org publishes
-one nothing is blocked and you get observability either way; and `fail_closed`
-stays **off**, so an OpenBox outage never blocks a tool call. One diagnosed defect
-escapes both today — a control-plane precondition failure expressed as a HALT,
-which since ADR-0020 ends the session rather than denying calls; the symptom and
-the recovery are in [Troubleshooting](#troubleshooting) under `Session is no
-longer active`. Want telemetry without enforcement:
+call in that session is refused locally until you start a new session). BLOCK
+refuses just the one call or prompt. Two things keep that from being a surprise
+you cannot recover from: enforcement acts on *your org's policy*, so until your
+org publishes one nothing is blocked and you get observability either way; and
+`fail_closed` stays **off**, so an OpenBox outage never blocks a tool call. One
+diagnosed defect escapes both today — a control-plane precondition failure
+expressed as a HALT, which now ends the session rather than
+denying calls; the symptom and the recovery are in
+[Troubleshooting](#troubleshooting) under `Session is no longer active`. Want
+telemetry without enforcement:
 
 ```bash
 openbox init --provider claude-code --enforce=false
 ```
 
-Both defaults are recorded in
-[ADR-0016](adr/ADR-0016-default-install-posture.md), including what each one costs.
+Both defaults are, including what each one costs.
 
 **What happens when OpenBox is unreachable** is one setting, and it is worth knowing
-before you need it. Every gated tool call is decided by OpenBox
-([ADR-0017](adr/ADR-0017-inline-policy-evaluation.md)) — there is no local policy to
-fall back on — so `fail_closed` decides what an unreachable control plane means:
+before you need it. Every gated tool call is decided by OpenBox — there is no local
+policy to fall back on — so `fail_closed` decides what an unreachable control plane
+means:
 
 ```jsonc
 // ~/.openbox/dev.json
@@ -263,8 +261,7 @@ Four things to know:
   it says it is running but recording nothing (a missing DID, or relayed calls that
   carry no session header).
 - **It captures; it does not refuse.** A relayed call is always forwarded. The refusal
-  path exists and is unwired on purpose
-  ([ADR-0021](adr/ADR-0021-openbox-local-gateway.md) §9).
+path exists and is unwired on purpose.
 - **The assurance is detection.** Unsetting the variable is enough to route around it,
   and nothing here stops that; what you get is a queryable hole in the record. See
   [the MDM recipe](gateway-mdm-recipe.md) if you need more.
@@ -282,9 +279,8 @@ openbox init --provider claude-code --remove-gateway
 ### The other two lanes, and one command for all of them
 
 The gateway only sees calls that go through `ANTHROPIC_BASE_URL`. That misses the
-desktop app and subscription-OAuth sessions, so there are two more lanes
-([ADR-0022](adr/ADR-0022-native-telemetry-and-transport-lanes.md)) and one command
-that installs everything:
+desktop app and subscription-OAuth sessions, so there are two more lanes and one
+command that installs everything:
 
 ```bash
 openbox init --provider claude-code --full        # hooks + telemetry + transport
@@ -393,9 +389,8 @@ openbox approve allow <id>
 ```
 
 An approver install registers no agent and installs no hooks — it is a queue
-client. To let one answer routinely without a person, see
-[ADR-0012](adr/ADR-0012-autonomous-approver.md): it decides only inside an org
-envelope, starts in shadow mode, and records every outcome.
+client. To let one answer routinely without a person: it decides only inside
+an org envelope, starts in shadow mode, and records every outcome.
 
 **An approver install stores a bigger credential.** It writes
 `OPENBOX_CONTROL_TOKEN` to `~/.openbox/.env` so `openbox approve` works with
@@ -407,8 +402,8 @@ deployment allows it, and do not put an approver install on a shared host.
 ## Upgrading an existing install
 
 Credentials used to live in your OS keychain. **They are not migrated** — keychain
-support is gone entirely ([ADR-0015](adr/ADR-0015-plaintext-credential-file.md)), so
-the new binary cannot see them. Three ways out, best first:
+support is gone entirely, so the new binary cannot see them. Three ways out, best
+first:
 
 **1. Re-issue them, keeping the same agent and DID.** Needs an org key with
 `update:agent`:
@@ -460,7 +455,7 @@ and enforcement is on by default.
 |---|---|
 | Turn enforcement off | `openbox init --provider <tool> --enforce=false`, or `"enforce": false` in `~/.openbox/dev.json` |
 | Turn it back on | re-run `init` — enforce is the default |
-| Get the prompt gate + HALT session stop on an existing install | re-run `openbox init --provider <tool>` in each governed project — the prompt gate and its raised hook timeout are installer-registered ([ADR-0020](adr/ADR-0020-prompt-gate-and-halt-session-stop.md)), so an old registration keeps the old behavior until then |
+| Get the prompt gate + HALT session stop on an existing install | re-run `openbox init --provider <tool>` in each governed project — the prompt gate and its raised hook timeout are installer-registered, so an old registration keeps the old behavior until then |
 | Change a credential | `openbox auth` (re-run it any time) |
 | Re-issue credentials | `openbox auth --rotate` |
 | Govern another project | `cd` there and `openbox init --provider <tool>` |
@@ -485,7 +480,7 @@ list). Specific to setup:
 | Windows | **build-verified only** — CI cross-compiles every change; no automated suite runs there, and `install.sh` is bash |
 | `--scope global` activation | **not verifiable by us** — it needs a managed-settings deployment in a real fleet |
 | Credential at rest | not protected on any platform; `0600` on macOS/Linux, nothing on Windows |
-| `--gateway` | **never run against a live stack.** It governs the terminal CLI and **not** the desktop app — that much is measured (2026-08-27). Whether subscription-OAuth traffic follows `ANTHROPIC_BASE_URL` for *this* lane is still open, so who it covers is not fully settled ([ADR-0021](adr/ADR-0021-openbox-local-gateway.md) §8/§10); the two lanes below exist for the gap |
+| `--gateway` | **never run against a live stack.** It governs the terminal CLI and **not** the desktop app — that much is measured (2026-08-27). Whether subscription-OAuth traffic follows `ANTHROPIC_BASE_URL` for *this* lane is still open, so who it covers is not fully settled (see the lane notes); the two lanes below exist for the gap |
 | `--telemetry`, `--transport` | **verified by replay only, and never run against a live stack.** Real recorded model calls run through the shipped code on a host that cannot bind a socket: that proves the bytes, the mapping, the gate and the caps, and proves nothing about bind, listen, TLS to a real socket, or what the control plane stores. The desktop-app and OAuth coverage they exist for is **unconfirmed**. The OTLP intake itself is not in that list — a synthetic export has crossed it end to end on a bind-capable host. But that export was **JSON** and the tool is configured to send **protobuf**, so the decoder real traffic will use is untested, and the real client has never exported to this lane |
 | The telemetry lane's env keys | **unconfirmed against the client.** They are copied verbatim from a set proven in a sibling lab run and pinned as a literal list, but every test asserts JSON we wrote and Claude Code silently ignores a name it does not recognise — so a rename gives a green suite and a receiver that never gets a record |
 
@@ -512,7 +507,7 @@ events" has not been re-confirmed against a live stack since the flow changed.
 | Hooks never fire | The session was started before `init`, or you are in a directory where `init` was not run (project scope is the default). Restart the tool; for Codex run `/hooks` and trust them. |
 | No events at all, and `doctor` looks fine | Almost always scope: `init` governs one directory. Check which one it named, or use `--scope global` plus managed settings. |
 | Everything is denied | `fail_closed` is on and OpenBox cannot be reached, so every gated call denies. `openbox doctor` shows the failure policy and the last decision. Restore connectivity, or set `fail_closed:false` to proceed ungoverned instead. |
-| `OpenBox governance: Session is no longer active` — the session stops, and every prompt after it is refused | Not your org's policy — a policy verdict names its policy in a `(policy: …)` suffix, and this one has none. The control plane's record of this session went terminal (e.g. a `SessionEnded` was recorded while the session was live) and it answers the next event with a HALT; since [ADR-0020](adr/ADR-0020-prompt-gate-and-halt-session-stop.md) a HALT ends the session — the turn stops and a local latch refuses every later prompt/tool call in it. Fail-open does not apply, because a HALT is a verdict rather than an outage. **Start a new session** — the latch is per-session and a fresh session restores the server-side record. Known core defect, fix in flight ([diagnosis](../plans/reports/debug-260814-1231-session-no-longer-active-halt.md)). |
+| `OpenBox governance: Session is no longer active` — the session stops, and every prompt after it is refused | Not your org's policy — a policy verdict names its policy in a `(policy: …)` suffix, and this one has none. The control plane's record of this session went terminal (e.g. a `SessionEnded` was recorded while the session was live) and it answers the next event with a HALT; since a HALT ends the session — the turn stops and a local latch refuses every later prompt/tool call in it. Fail-open does not apply, because a HALT is a verdict rather than an outage. **Start a new session** — the latch is per-session and a fresh session restores the server-side record. Known core defect, fix in flight ([diagnosis](../plans/reports/debug-260814-1231-session-no-longer-active-halt.md)). |
 | A session refuses everything with `session halted by a governance HALT verdict` | Your org's policy (or the defect above) HALTed this session earlier; the latch under `~/Library/Application Support/openbox/halted-sessions/` (Linux: `~/.config/openbox/`) is replaying it, by design. Start a new session. The halting verdict and every refusal are in `enforcements.jsonl` (`source:"evaluate"` for the verdict, `source:"session-halt"` for the replays). |
 | A session hangs on a tool call | An approval is filed and undecided. `openbox approve list` shows it; deciding it releases the session. |
 | Every tool call appears twice; success rates and latencies look wrong | The directory has an OpenBox hook registered twice — usually a second engine left by an `init` once run with a different `HOME`. `openbox doctor` reports both that and a repeat at one path; re-running `openbox init` there removes the extra registration. Events already stored stay duplicated. |

@@ -2,7 +2,7 @@
 
 ## Context links
 
-- Plan: [plan.md](plan.md) · Depends: [phase 01](phase-01-adr-0018-dev-turn-content-carrier.md)
+- Plan: [plan.md](plan.md) · Depends: [phase 01](phase-01-dev-turn-content-carrier.md)
   (authority), [phase 02](phase-02-status-on-tool-results.md) + [phase 03](phase-03-failure-and-lifecycle-hooks.md)
   (same struct, same golden dir)
 - Design owner: superseded plan 2200 phase-03 (full detail there; this file is the executable
@@ -39,9 +39,9 @@
 4. **`hook_trigger` stays unset** — with it true + spans present the payload enters the
    approval-bypass fingerprint path (`governance_workflow.go:310-330`).
 5. **Text source = `Stop`/`SubagentStop.last_assistant_message`** (docs-recommended; transcript
-   lags). Leaves `usage.go`'s transcript allowlist and sentinel `TestFinops_NoContentOnWire`
-   (`usage_test.go:485`) untouched. `stop_reason` stays unbound — **deferred to ADR-0019 P2**,
-   not "unneeded". Thinking: not in this carrier — ADR-0019 P3 owns it (owner posture).
+lags). Leaves `usage.go`'s transcript allowlist and sentinel `TestFinops_NoContentOnWire`
+(`usage_test.go:485`) untouched. `stop_reason` stays unbound — **deferred to that decision**,
+not "unneeded". Thinking: not in this carrier — that decision owns it (owner posture).
 6. **Gates compose both directions.** Turn events exist only under `ResolveFinops()`
    (`hookrun.go:174-183`) + window-has-usage (`mapper.go:262-264`); the span only when `Content`
    survives capture (`stripContent`). Core's goal session is CREATED by `SignalReceived` with
@@ -65,8 +65,8 @@
 - R8: Codex unchanged; non-support documented in `capabilities.go`.
 - R9: 11 modules `-race` green; both cross-compiles.
 - R10: **openbox-core issue filed** (gh, OpenBox-AI/openbox-core): AGE reads assistant content
-  from the `llm_completion` activity_output for span-less dev sessions — named as the change that
-  deletes the synthesized keys; link it in ADR-0018 and phase 05 docs.
+from the `llm_completion` activity_output for span-less dev sessions — named as the change that
+deletes the synthesized keys; link it in that decision and phase 05 docs.
 
 ## Architecture
 
@@ -104,7 +104,7 @@ racy ordering. Sourcing from rollout JSONL would widen a numbers-only projection
 | `client/payload.go:28-78,154-160,319-370` | `Spans`/`SpanCount` fields; `EventTurnCompleted` arm; amend `turnActivityOutput`'s INV-2 doc block (turn MAY carry gated text — in the span, not here) |
 | `decision/redact.go:60-90` | exported `RedactText` |
 | `adapters/common/hookflow/enforce.go:125-155` | bounded `RedactText` helper |
-| `adapters/claude-code/hookevent.go:119-136` | bind `LastAssistantMessage`; rewrite the "absence is the safeguard" comment honestly (what changed; `stop_reason` unbound → ADR-0019 P2; thinking → ADR-0019 P3) |
+| `adapters/claude-code/hookevent.go:119-136` | bind `LastAssistantMessage`; rewrite the "absence is the safeguard" comment honestly (what changed; `stop_reason` unbound →; thinking →) |
 | `adapters/claude-code/mapper.go:37-77,262-318` | `RedactContent` field; `MapTurn` attaches gated+redacted `Content.Output` to the completed half only |
 | `adapters/claude-code/hookrun.go:109` | wire redactor from `ResolveSecretDetection()` |
 | `adapters/codex/capabilities.go` | alignment-feed non-support entry |
@@ -143,7 +143,7 @@ Do **not** touch: `usage.go`, `client/hookspan.go`/`spanbuilder.go` (stay delete
 10. `go test ./... -race` per module; both cross-compiles.
 11. **File the core ask**: gh issue on openbox-core — "AGE: read assistant content from
     `llm_completion` activity_output for span-less dev sessions" citing
-    `goal_alignment_session.go:64-88` + ADR-0018; link it back into ADR-0018's OD-0018-1 section.
+    `goal_alignment_session.go:64-88` +; link it back into that decision's OD-0018-1 section.
 12. Commits: `feat(client): carry the assistant turn text on one wire span`,
     `feat(claude-code): bind the assistant turn message under the content gate`,
     `feat(decision): expose text redaction for content bodies`.
@@ -151,7 +151,7 @@ Do **not** touch: `usage.go`, `client/hookspan.go`/`spanbuilder.go` (stay delete
 ## Todo list
 
 - [ ] `decision.RedactText` + `hookflow.RedactText` + tests
-- [ ] `LastAssistantMessage` bound + honest comment (stop_reason/thinking → ADR-0019)
+- [ ] `LastAssistantMessage` bound + honest comment (stop_reason/thinking →)
 - [ ] `Mapper.RedactContent` + gated `MapTurn` attach + hookrun wiring
 - [ ] `client/turnspan.go` + payload arm (cap-before-wrap, deterministic ids)
 - [ ] Codex non-support entry
@@ -167,16 +167,16 @@ Do **not** touch: `usage.go`, `client/hookspan.go`/`spanbuilder.go` (stay delete
 - Byte-identical ids across two builds of the same turn.
 - Pin tests green with zero edits; sentinel strictly stronger (diff shows added assertions only).
 - No `spans` key on tool/signal/lifecycle payloads; Codex goldens unchanged.
-- Core issue exists with citations; ADR-0018 links it.
+- Core issue exists with citations; that decision links it.
 
 ## Risk Assessment
 
 | Risk | L×I | Mitigation / pre-decided response |
 |---|---|---|
 | `last_assistant_message` absent on `SubagentStop` | M×M | Gate is `!= ""` ⇒ no span, no error. Signal: phase 6 shows main-thread-only alignment. Response: document subagent turns as unfed; do NOT reach into the transcript |
-| Field absent on BOTH hooks (provider changed) | L×H | Signal: step 8 test against a real captured payload binds nothing. Response: stop-and-replan onto transcript source — needs ADR-0018 amendment first |
+| Field absent on BOTH hooks (provider changed) | L×H | Signal: step 8 test against a real captured payload binds nothing. Response: stop-and-replan onto transcript source — needs that decision amendment first |
 | Core classifies ≠ `llm_completion` ⇒ AGE silent | M×H | Path traced (`ComputeSemanticTypeFromSpan`→`classifyLLMType`). Signal: `spans.span_type != 'llm_completion'` live. Response: add the root `http_method`/`http_url` twin (`session.go:236-256`) |
-| Synthesized `http.url` trips an org policy on HTTP egress | M×M | Named in ADR-0018; turns never gate (`Stop` writes no stdout) so nothing blocks. Response: switch to root-field variant |
+| Synthesized `http.url` trips an org policy on HTTP egress | M×M |; turns never gate (`Stop` writes no stdout) so nothing blocks. Response: switch to root-field variant |
 | Re-reported turn stores a second span row | M×M | Deterministic ids + core `(span_id,stage)` dedupe; lost-200 window stays the documented server-side ask |
 | Redaction forgotten on a future path | M×H | Structural (Mapper collaborator) + C25 on outbound bytes |
 | Alignment still silent (LlamaFirewall unset) | M×M | Precondition, phase 06 P0 — not a defect of this phase |
@@ -187,9 +187,9 @@ Do **not** touch: `usage.go`, `client/hookspan.go`/`spanbuilder.go` (stay delete
   (better than the prompt today — known limit, unchanged here), 64KB-capped, absent when off.
 - Redact-before-attach asserted on outbound bytes (C25), never on intermediates.
 - Exactly ONE new string on `HookEvent`. `stop_reason`, `tool_response`, transcript fields: each
-  is its own ADR-0019 decision.
+is its own that decision decision.
 - Server-side the text becomes Guardrails/OPA-visible and lands in `spans` + Merkle leaves — a
-  real retention increase, named in ADR-0018, out of shift-left's control.
+real retention increase, out of shift-left's control.
 
 ## Next steps
 

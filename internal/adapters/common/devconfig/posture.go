@@ -45,18 +45,18 @@ type Posture struct {
 	// Adapter-supplied: which adapter, and which provider build it drove.
 	//
 	// The bundle coordinates and the freshness outcome that used to sit here went
-	// with the bundle itself (ADR-0017). They are deleted rather than kept as
-	// empty fields, following require_verified_bundle below: a reporting surface
-	// for a subsystem that no longer exists can only ever overstate, and while
-	// they lingered an OLDER binary could still populate them — which is exactly
-	// how a session was observed reporting a bundle_sha256 that nothing in this
-	// tree can produce.
+	// with the bundle itself. They are deleted rather than kept as empty fields,
+	// following require_verified_bundle below: a reporting surface for a
+	// subsystem that no longer exists can only ever overstate, and while they
+	// lingered an OLDER binary could still populate them — which is exactly how a
+	// session was observed reporting a bundle_sha256 that nothing in this tree
+	// can produce.
 	Adapter         string
 	AdapterVersion  string
 	ProviderVersion string
 
 	// DecisionAuthority names what decides this session's gated tool calls:
-	// "control_plane" since ADR-0017, when /evaluate answers.
+	// "control_plane" since that decision, when /evaluate answers.
 	//
 	// It replaces the bundle coordinates above as the posture's policy-provenance
 	// evidence, and it deliberately answers a smaller question. The bundle fields
@@ -110,9 +110,9 @@ func EffectivePosture() Posture {
 	// to hear that a key they set does nothing.
 	//
 	// It was on the resolver itself first, which was wrong in a way worth
-	// recording: ADR-0017 removed the last runtime caller of ResolveTier2, so the
-	// warning existed and could never fire. A deprecation notice nothing reaches
-	// is the same as no notice.
+	// recording: that decision removed the last runtime caller of ResolveTier2,
+	// so the warning existed and could never fire. A deprecation notice nothing
+	// reaches is the same as no notice.
 	warnDeprecatedKeys()
 
 	// Who decides, and what happens when it cannot be reached. Both are
@@ -188,15 +188,15 @@ func postureFields() []struct {
 		{"telemetry", func(c DevConfig) *bool { return c.Telemetry }, true, EnvTelemetry,
 			func(p *Posture) *bool { return &p.Telemetry }},
 		// require_verified_bundle is gone from this table with the bundle it
-		// guarded (ADR-0017). Reporting it would be reporting a control that
-		// cannot engage: there is nothing to verify, so an org reading `true`
-		// would believe a signature check was protecting it.
-		// Reported because it is an EGRESS posture, and default-on since ADR-0014:
-		// with it on, four token counts and a model id leave the machine per turn.
-		// The posture record is what lets an auditor tell, after the fact, whether a
-		// given session captured — which is what makes the default defensible.
-		// Pass-through (not `&b`) so an absent field resolves to the default; see
-		// DevConfig.Finops for why the plain-bool version made the flip a no-op.
+		// guarded. Reporting it would be reporting a control that cannot engage:
+		// there is nothing to verify, so an org reading `true` would believe a
+		// signature check was protecting it. Reported because it is an EGRESS
+		// posture, and default-on since that decision: with it on, four token counts
+		// and a model id leave the machine per turn. The posture record is what lets
+		// an auditor tell, after the fact, whether a given session captured — which
+		// is what makes the default defensible. Pass-through (not `&b`) so an absent
+		// field resolves to the default; see DevConfig.Finops for why the plain-bool
+		// version made the flip a no-op.
 		{"finops", func(c DevConfig) *bool { return c.Finops }, true, EnvFinops,
 			func(p *Posture) *bool { return &p.Finops }},
 		// Reported because it decides WHEN a session's evidence exists at all:
@@ -224,12 +224,13 @@ func (p Posture) Metadata() map[string]any {
 		"adapter":          p.Adapter,
 		"adapter_version":  p.AdapterVersion,
 		"provider_version": p.ProviderVersion,
-		// Policy provenance. ADR-0017 argues these two ARE posture's evidence
-		// about policy now that the bundle coordinates are gone — so omitting
-		// them left the local view (`openbox doctor` prints both off the struct)
-		// complete and the remote view silent, the inverse of what that ADR
-		// claims. They share this map deliberately, to inherit its
-		// looksLikeSecret/truncate guards rather than growing a second path.
+		// Policy provenance. That decision argues these two ARE posture's
+		// evidence about policy now that the bundle coordinates are gone — so
+		// omitting them left the local view (`openbox doctor` prints both off
+		// the struct) complete and the remote view silent, the inverse of what
+		// that decision record claims. They share this map deliberately, to
+		// inherit its looksLikeSecret/truncate guards rather than growing a
+		// second path.
 		"decision_authority": p.DecisionAuthority,
 		"failure_policy":     p.FailurePolicy,
 		"provider_managed":   p.ProviderManaged,

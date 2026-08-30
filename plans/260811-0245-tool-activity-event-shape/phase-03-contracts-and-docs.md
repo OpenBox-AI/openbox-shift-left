@@ -1,4 +1,4 @@
-# Phase 03 — Contracts, ADR and docs
+# Phase 03 — Contracts, decision record and docs
 
 ## Context links
 
@@ -6,13 +6,14 @@
 - Depends on: [Phase 01](phase-01-wire-activity-lifecycle.md), [Phase 02](phase-02-retire-hook-span-machinery.md)
 - Closed by: [Phase 04](phase-04-testbed-verification.md) (claims made here must be
   live-verified before they are asserted as fact)
-- Rewrites: `contracts/dev-event/MAPPING.md`, `docs/adr/ADR-0004-base-wire-unification.md`
+- Rewrites: `contracts/dev-event/MAPPING.md`,
 
 ## Overview
 
 - **Date:** 2026-08-11
-- **Description:** Record the new wire mapping, supersede ADR-0004's tool rows with a new
-  ADR, and correct the docs that assert span-level evidence and semantic classification.
+- **Description:** Record the new wire mapping, supersede that decision's tool rows with a new
+decision record, and correct the docs that assert span-level evidence and semantic
+classification.
 - **Priority:** P1 — the repo's own rule is that a governance product that overstates
   itself is the failure it exists to prevent. Leaving `MAPPING.md` describing hook spans
   would be exactly that.
@@ -26,11 +27,12 @@
    enough to flip the table rows — the reasoning must be replaced, or the next reader
    re-litigates a decided question. State plainly: the base SDK's rule binds *hook*
    events, and shift-left no longer emits any.
-2. **A new ADR, not an edit to ADR-0004.** ADR-0004 is Accepted and its reversal of the
-   earlier `ToolResult→ActivityCompleted` draft is part of the record. Overwriting it
-   erases why the question was settled the first way. The new ADR supersedes those rows
-   and states what changed in the premise: no OTel in a hook-process runtime means no
-   span layer to attach to, so the tool call is modelled at the activity layer instead.
+2. **A new decision record, not an edit to.** That decision is Accepted and its reversal of the
+earlier `ToolResult→ActivityCompleted` draft is part of the record. Overwriting it
+erases why the question was settled the first way. The new decision record supersedes
+those rows and states what changed in the premise: no OTel in a hook-process runtime
+means no span layer to attach to, so the tool call is modelled at the activity layer
+instead.
 3. **Two doc claims become false and one becomes unverifiable.**
    - Span-level Merkle leaves no longer exist for dev sessions →
      `docs/architecture.md#assurance--what-the-evidence-proves` must say what the
@@ -50,9 +52,10 @@
 
 - MAPPING.md §1-§3, §5, §7 rewritten to the activity mapping; §4 (verdict) and §6
   (transport/signing) unchanged and re-confirmed.
-- New ADR in `docs/adr/` superseding ADR-0004's `ToolCall`/`ToolResult` rows and its
-  §Amendment mirror obligation; ADR-0004 gains a one-line forward pointer only.
-- `docs/adr/README.md` index updated.
+- New decision record in  superseding that decision's `ToolCall`/`ToolResult` rows and its
+§Amendment mirror obligation; that decision gains a one-line forward pointer
+only.
+- `README.md` index updated.
 - `docs/architecture.md` assurance section states event-leaf-only evidence for dev
   sessions and drops any span-level claim.
 - `docs/data-and-privacy.md` reflects that span `request_body`/`response_body` are gone
@@ -63,11 +66,11 @@
 ## Architecture
 
 Documentation ownership stays where it is: the adapter-facing schema is the contract, the
-`MAPPING.md` wire layer is the serialization, and ADRs carry the *why*. This phase only
-moves text between those homes — it introduces no new doc surface.
+`MAPPING.md` wire layer is the serialization, and decision records carry the *why*. This
+phase only moves text between those homes — it introduces no new doc surface.
 
-The accepted trade-off gets one authoritative home (the new ADR) that the other documents
-link to, rather than being re-explained in each.
+The accepted trade-off gets one authoritative home (the new decision record) that the
+other documents link to, rather than being re-explained in each.
 
 ## Related code files
 
@@ -76,28 +79,28 @@ link to, rather than being re-explained in each.
 | `contracts/dev-event/MAPPING.md` | rewrite §1 (envelope), §2 (per-type + drop the "key correction" argument), §3 (replace flat-SpanData with activity_input/activity_output field homes), §5 (consumer behavior), §7 (live verification section) |
 | `contracts/dev-event/COVERAGE.md` | re-check the subagent-boundary argument; update any span reference |
 | `contracts/dev-event/README.md` | re-check the two-layer description |
-| `docs/adr/ADR-00NN-tool-call-as-activity.md` | **new** |
-| `docs/adr/ADR-0004-base-wire-unification.md` | forward pointer only; do not rewrite history |
-| `docs/adr/README.md` | index entry |
+| the decision record | **new** |
+| — | forward pointer only; do not rewrite history |
+| `README.md` | index entry |
 | `docs/architecture.md` | assurance section: event leaves only for dev sessions |
 | `docs/data-and-privacy.md` | span content channel removed; `activity_output` scope |
 | `CLAUDE.md` | "Current state" paragraph, once Phase 04 passes |
 
 ## Implementation steps
 
-1. Draft the new ADR first — Context (no OTel in a hook-process runtime; the span was
-   fabricated by hand), Decision (tool call = Activity; `ToolCall`→`ActivityStarted`,
-   `ToolResult`→`ActivityCompleted`; span layer retired), Consequences (zero span rows,
-   no span Merkle leaves, no `semantic_type` for dev sessions, the ADR-0004 mirror
-   obligation dissolved, event volume unchanged), and the alternatives rejected with
-   their evidence.
-   **If Phase 04 triggered the pre-authorized 3-POST fallback** (validation decision 3),
-   the ADR records that shape instead, plus its own consequence: shift-left knowingly
-   diverges from the base SDK's "hooks are always `ActivityStarted`" rule, which is a
-   local divergence and not a cross-repo contract change.
-2. Add the one-line supersession pointer to ADR-0004 and the index entry.
+1. Draft the new decision record first — Context (no OTel in a hook-process runtime; the span was
+fabricated by hand), Decision (tool call = Activity; `ToolCall`→`ActivityStarted`,
+`ToolResult`→`ActivityCompleted`; span layer retired), Consequences (zero span rows, no
+span Merkle leaves, no `semantic_type` for dev sessions, that decision mirror obligation
+dissolved, event volume unchanged), and the alternatives rejected with their evidence.
+**If Phase 04 triggered the pre-authorized 3-POST fallback** (validation decision 3),
+that decision records that shape instead, plus its own consequence: shift-left knowingly
+diverges from the base SDK's "hooks are always `ActivityStarted`" rule, which is a local
+divergence and not a cross-repo contract change.
+2. Add the one-line supersession and the index entry.
 3. Rewrite MAPPING.md §2's table and delete the "key correction" subsection, replacing it
-   with a short statement of the new premise and a link to the ADR.
+with a short statement of the new premise and a link to that
+decision.
 4. Replace MAPPING.md §3 with a field-home table: every `DevEvent.Span` field → its
    destination (`activity_input`, `activity_output`, `metadata`, or unread). This table is
    the **authority on what the serializer reads** (validation decision 4) and the contract
@@ -118,8 +121,8 @@ link to, rather than being re-explained in each.
 
 ## Todo list
 
-- [x] New ADR drafted with alternatives and evidence — `docs/adr/ADR-0013-tool-call-as-activity.md`
-- [x] ADR-0004 forward pointer + `docs/adr/README.md` index (ADR-0012 was also missing from the index; added)
+- [x] New decision record drafted with alternatives and evidence —
+- [x] that decision forward pointer + `README.md` index (that decision was also missing from the index; added)
 - [x] MAPPING.md §1/§2/§5/§7 rewritten
 - [x] MAPPING.md §3 → field-home table
 - [x] MAPPING.md:110 semantic_type claim **deleted as unowned** — see below
@@ -130,19 +133,18 @@ link to, rather than being re-explained in each.
 
 ### The finding that reframed the change
 
-Core's idempotency check keys on
-`(agent_id, workflow_id, run_id, activity_id, event_type)`
-(`activities/governance/validation.go:96`). Under the hook shape a tool call's two
-halves matched on **all five** — same `activity_id` by design, both
-`ActivityStarted` — so the `ToolResult` POST hit the existing-event branch
+Core's idempotency check keys on `(agent_id, workflow_id, run_id, activity_id,
+event_type)` (`activities/governance/validation.go:96`). Under the hook shape a
+tool call's two halves matched on **all five** — same `activity_id` by design,
+both `ActivityStarted` — so the `ToolResult` POST hit the existing-event branch
 (`governance_workflow.go:228-231`) and never created a row. The shared `span_id`
-ADR-0004 chose as the pairing mechanism was also what made the span-dedup check
-see nothing new.
+that decision chose as the pairing mechanism was also what made the span-dedup
+check see nothing new.
 
 So the completed half of every tool call was substantially a no-op: no row, no
 independent evaluation. Because `event_type` is in the dedupe key, the new shape
 recovers it. This is the strongest source-level argument for the change and it is
-now the lead item in ADR-0013's Context and Consequences — but it is still
+now the lead item in that decision's Context and Consequences — but it is still
 *reading*, and Phase 04 is what proves it.
 
 ### Step 6 resolved: the `semantic_type` claim is deleted
@@ -161,11 +163,11 @@ The phase's related-code table did not list these, but leaving them would have
 left false statements behind:
 
 - `client/README.md` — its `semantic_type is set indirectly` section and its
-  `[EXT-core] dependency` section were both false (the latter already false
-  before this plan: it claimed dev event types are not accept-listed, which
-  ADR-0004 retired). Rewritten. Its idempotency section also claimed core cannot
-  dedupe dev events "because they have no activity_id" — tool events do, so it
-  now states which events dedupe and which do not.
+`[EXT-core] dependency` section were both false (the latter already false before
+this plan: it claimed dev event types are not accept-listed, which that decision
+retired). Rewritten. Its idempotency section also claimed core cannot dedupe dev
+events "because they have no activity_id" — tool events do, so it now states
+which events dedupe and which do not.
 - `CLAUDE.md`, root `README.md`, `docs/architecture.md` diagram — `spans` removed
   from the storage path.
 - `contracts/dev-event/ext-core/README.md`, `adapters/codex/README.md`,
@@ -187,7 +189,7 @@ left false statements behind:
    exactly one authoritative place and linked from the others.
 3. Every field a `DevEvent.Span` used to carry has a documented destination or an explicit
    "dropped, because —".
-4. ADR-0004 still reads as a true historical record, with a pointer forward.
+4. That decision still reads as a true historical record, with a pointer forward.
 5. No sentence claims live verification that Phase 04 has not produced.
 
 ## Risk assessment
@@ -195,14 +197,14 @@ left false statements behind:
 | Risk | Mitigation | Signal it broke | Pre-decided response |
 |---|---|---|---|
 | Docs overstate the new posture (e.g. imply a privacy improvement, or that pairing is fixed) before evidence exists | Step 8 gates the current-state claim on Phase 04; §5/§7 claims likewise | A reviewer cannot trace a sentence to a symbol, test, or run | Downgrade the sentence to a stated limit — the repo prefers an honest limit to a confident one |
-| Rewriting ADR-0004 instead of superseding it, erasing why the first answer was chosen | Step 2 restricts ADR-0004 to a pointer | ADR-0004's diff touches Context/Decision | Revert; supersession only |
+| Rewriting that decision instead of superseding it, erasing why the first answer was chosen | Step 2 restricts that decision to a pointer | that decision's diff touches Context/Decision | Revert; supersession only |
 | MAPPING.md §3's field-home table drifts from the implementation | It is authored as the contract Phase 01 step 6 implements, and the golden fixtures pin the result | A golden fixture has a field the table does not | Fix whichever is wrong, in the same change |
 | The `semantic_type` question stays unresolved and gets restated as fact | Step 6 forces verify-or-delete | The claim survives with no citation | Delete it — an unowned claim in a governance product is worse than a gap |
 
 **Assumption that may break:** that no downstream consumer depends on dev-session span
 rows (dashboard span views, analytics, an openbox-backend query). Signal: Phase 04 finds a
-dashboard surface that goes blank. Response: record it as a known limit in the ADR and
-raise it with the dashboard owner — do not reshape the wire to feed a UI.
+dashboard surface that goes blank. Response: record it as a known limit in that decision
+and raise it with the dashboard owner — do not reshape the wire to feed a UI.
 
 ## Security considerations
 
@@ -220,4 +222,5 @@ raise it with the dashboard owner — do not reshape the wire to feed a UI.
 
 Phase 04 runs the real thing and converts these claims into evidence — or sends them back.
 
-<!-- Updated: Validation Session 1 - MAPPING.md §3 field-home table is the authority on what the serializer reads, records Span.Stage unread + schema frozen at v1.0 + duration_ms-only timing; ADR gains a conditional 3-POST-fallback branch -->
+<!-- Updated: Validation Session 1 - MAPPING.md §3 field-home table is the authority on what the serializer reads, records Span.Stage unread + schema frozen at v1.0 + duration_ms-only timing; decision record gains a conditional
+3-POST-fallback branch -->

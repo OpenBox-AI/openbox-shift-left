@@ -85,8 +85,8 @@ func pointOSConfigDirAt(t *testing.T, dir string) {
 	}
 }
 
-// legacyConfigSubdir is the path under the OS config dir that pre-ADR-0015
-// versions wrote to.
+// legacyConfigSubdir is the path under the OS config dir that pre-that
+// decision versions wrote to.
 func legacyConfigSubdir() string {
 	if runtime.GOOS == "darwin" {
 		return filepath.Join("Library", "Application Support", "openbox")

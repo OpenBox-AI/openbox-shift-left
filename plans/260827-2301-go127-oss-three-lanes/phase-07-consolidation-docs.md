@@ -48,7 +48,7 @@
    "local secret detection is keyword-driven so an unlabelled high-entropy value
    is invisible" limit is **re-measured**, not assumed — phase 06's soak decides
    whether it still reads that way.
-5. ADR index updated with phase 05's guard-scope ADR.
+5. decision record index updated with phase 05's guard-scope decision record.
 6. `.goreleaser.yaml`'s "all 11 modules" comment corrected to 12.
 7. Every changed claim cites its source (repo symbol/path or upstream URL).
 
@@ -61,14 +61,14 @@ CLAUDE.md                     agent working context — pin instruction, deps, g
 docs/data-and-privacy.md      what egresses and what protects it
 COVERAGE.md §3                per-provider coverage + detection differences
 docs/architecture.md          the assurance/limits section
-docs/adr/                     phase 05's ADR + index
+ phase 05's decision record + index
 .goreleaser.yaml              stale module count in a comment
 ```
 
 ## Related code files
 
 - edit: `CLAUDE.md`, `docs/data-and-privacy.md`, `COVERAGE.md`,
-  `docs/architecture.md`, `docs/adr/` (index), `.goreleaser.yaml`
+`docs/architecture.md`, (index), `.goreleaser.yaml`
 - reference: each phase's report in `reports/`
 
 ## Implementation steps
@@ -87,7 +87,7 @@ docs/adr/                     phase 05's ADR + index
    not be smoothed away).
 5. `docs/architecture.md`: update the assurance limits list for the new detection
    reach and the guard's stated scope.
-6. ADR index: add phase 05's ADR.
+6. decision record index: add phase 05's decision record.
 7. `.goreleaser.yaml`: 11 → 12 modules.
 8. Verify every link and every claim against source. No claim without a citation.
 
@@ -99,9 +99,9 @@ docs/adr/                     phase 05's ADR + index
 - [x] `data-and-privacy.md` mechanism + limit RE-MEASURED (20 shapes); table validated; +1 new limit, +1 false-positive class; "only the prompt is exempt" corrected
 - [x] `COVERAGE.md` detection-difference row updated; **it has NO dependency section — reported, not invented**
 - [x] `architecture.md` mechanism + 2 new assurance limits (detection reach, guard scope)
-- [x] ADR index updated (phase 05); verified
+- [x] decision record index updated (phase 05); verified
 - [x] `.goreleaser.yaml` 11 → 12 (phase 01); verified
-- [x] every changed claim cites a repo path or ADR; **45 relative links checked, 0 broken**
+- [x] every changed claim cites a repo path or decision record; **45 relative links checked, 0 broken**
 
 ## Success criteria
 
@@ -119,7 +119,7 @@ docs/adr/                     phase 05's ADR + index
 |---|---|---|---|
 | **A stale limit is copied forward** and the docs describe a detector that no longer exists | Re-derive the limit from phase 06's soak; cite it | The doc's wording matches the pre-gitleaks text verbatim | Rewrite from the measurement |
 | Docs overstate the new detection ("now catches all secrets") | Every claim cites the soak's actual numbers | A claim with no citation | Remove or measure it |
-| The guard-scope reduction gets softened in prose | Phase 05's ADR is the authority; docs must match its framing | Docs say "clarified" where the ADR says "reduced" | Use the ADR's words |
+| The guard-scope reduction gets softened in prose | Phase 05's decision record is the authority; docs must match its framing | Docs say "clarified" where that decision says "reduced" | Use that decision's words |
 | CLAUDE.md grows instead of being corrected | Net-neutral or shorter is the target | File length grows materially | Cut; this file is agent context, not a changelog |
 | Docs updated before the code settles | Phase depends on 01–06 complete | A phase report is missing | Wait; do not document intent as fact |
 
@@ -131,14 +131,14 @@ docs/adr/                     phase 05's ADR + index
 - Do not remove the Codex asymmetry from `COVERAGE.md` §3.4 (Codex's mapper has no
   redactor; its prompt is the only content it sends). Nothing in stage A changes
   it, so it must survive the edit.
-- Phase 05's ADR reduces a security control's scope. The docs must say so in the
+- Phase 05's decision record reduces a security control's scope. The docs must say so in the
   same terms, so a reader auditing the product is not misled about what the guard
   proves.
 
 ## Next steps
 
 Stage A complete. Stage B — the convergence phases
-([08](phase-08-adr-contract-decision.md)–[14](phase-14-coverage-and-docs.md)) —
+([08](phase-08-contract-decision.md)–[14](phase-14-coverage-and-docs.md))
 proceeds on this foundation, with its version pins retired by phase 01, its
 service lifecycle settled by phase 04, and its contract branches validated by
 phase 02's library validator.

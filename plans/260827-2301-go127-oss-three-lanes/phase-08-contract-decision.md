@@ -1,10 +1,10 @@
-# Phase 08 — ADR-0022, contract v1.6, ADR-0021 amendments
+# Phase 08 — that decision, contract v1.6, that decision amendments
 
 ## Context links
 
 - Parent: [plan.md](plan.md) · Proposal: `plans/visuals/260827-1439-three-lanes-one-pipeline.html`
 - Scouts: [scout-01](scout/scout-01-gateway-service-lifecycle.md) · [scout-02](scout/scout-02-capture-contract-conformance.md)
-- Touches: `docs/adr/ADR-0021-openbox-local-gateway.md`, `contracts/dev-event/`
+- Touches:, `contracts/dev-event/`
 - Depends on: [phase-01](phase-01-go-127-floor-raise.md) (D-GO-1 lands first, by
   validation ruling); run [phase-02](phase-02-jsonschema-validator.md) first so
   the library validator is what the new branches are stressed on. **Gates phases
@@ -14,28 +14,29 @@
 
 - Date: 2026-08-27 · Priority: P1 · Effort: 4h
 - Implementation status: **done (2026-08-28)** · Review status: **reviewed** (advisory + 5 review angles; all substantive findings applied)
-- Report: [verification-260828-phase-08](reports/verification-260828-phase-08-adr-contract-decision.md)
+- Report: [verification-260828-phase-08](reports/verification-260828-phase-08-contract-decision.md)
 - Write the decisions before the code. Two new local services + two new producer
-  namespaces = new components, which the repo rule says require an ADR.
+namespaces = new components, which the repo rule says require a
+decision record.
 
 ## Key insights
 
-- The repo's own rule: a new table/endpoint/service needs an ADR. Two new local
+- The repo's own rule: a new table/endpoint/service needs a decision record. Two new local
   services qualify; no control-plane surface is added.
 - `turnActivityIDFor` (`client/payload.go:350–373`) already namespaces four
-  producers. Adding two is a small, well-precedented edit — but the schema's
-  nested `oneOf` (branch index 8, `TurnCompleted`) must gain matching branches, or
-  every new event fails its own contract. **That exact mistake already shipped
-  once** for the gateway (ADR-0021 records it).
+producers. Adding two is a small, well-precedented edit — but the schema's nested
+`oneOf` (branch index 8, `TurnCompleted`) must gain matching branches, or every
+new event fails its own contract. **That exact mistake already shipped once** for
+the gateway (that decision records it).
 - **Latent bug found while planning:** the Codex rollup sets `session_rollup`
   (`adapters/codex/mapper.go:273–275`) and no `turn_index`, yet the schema's two
   branches require `turn_index` **or** `gateway_request_id`, and `session_rollup`
   is absent from the schema entirely. **Validation ruled this in-scope for this
   phase** (2026-08-27): it owns that exact edit surface, and adding two branches
   beside a broken third is worse than repairing all three at once.
-- ADR-0021 stays DRAFT on §9/§10 (probes), but §5 is now **reversed by owner
+- that decision stays DRAFT on §9/§10 (probes), but §5 is now **reversed by owner
   ruling** and §8 has a measured answer. Amend, don't rewrite.
-- **ADR-0022 also records the build-on decisions** (validation round 2): the
+- **that decision also records the build-on decisions** (validation round 2): the
   three stage-B-relevant adoptions — goproxy (D-OSS-1), otlpreceiver (D-OSS-2),
   kardianos/service (D-OSS-3) — and the go 1.27 floor raise that retired the
   version-pin scheme (D-GO-1, executed by phase 01). It must state explicitly
@@ -45,7 +46,7 @@
 
 ## Requirements
 
-1. `docs/adr/ADR-0022-native-telemetry-and-transport-lanes.md` — accepted, covering:
+1.  — accepted, covering:
    lane tiers T1/T2/T3 as *claims*; the one-producer election; the `:otel:` and
    `:proxy:` namespaces; posture keys under the existing `content_capture`/`finops`
    gates; OD1(c), OD2, OD3, OD4 recorded as owner rulings with their dates; the
@@ -55,7 +56,7 @@
 2. Contract **v1.6** — additive only: `x-schema-version`, `x-changelog` entry, two
    new discriminator properties, two new `oneOf` branches (+ the `session_rollup`
    repair).
-3. ADR-0021 amendments — §5 reversed (record the ruling, its safeguards, the
+3. That decision amendments — §5 reversed (record the ruling, its safeguards, the
    one-command contract), §8 completed with the 2026-08-27 measurement, §10 branch
    named (detection-tier binding from asserted telemetry for OAuth; fingerprint
    refusal for API keys).
@@ -91,13 +92,13 @@ presence, which is how the gateway branch avoids ambiguity today.
   `x-changelog`, `oneOf[8]` nested branches
 - `contracts/dev-event/MAPPING.md`, `COVERAGE.md`
 - `client/turn_key_pin_test.go:48–51, 91–107` — extend pins, don't change existing
-- `docs/adr/ADR-0021-openbox-local-gateway.md` §§5, 8, 10
+-  §§5, 8, 10
 
 ## Implementation steps
 
 1. Read `oneOf[8]` in full and confirm the branch count (2 at planning time) before
    editing.
-2. Write ADR-0022. Record the four rulings verbatim with dates; record D-OSS-1/2/3
+2. Write. Record the four rulings verbatim with dates; record D-OSS-1/2/3
    + D-GO-1 with the OD2-intact statement and the `transport/` module consequence;
    state the T3 suppressibility limit and the OD1(c) truncation cost in the
    Consequences section.
@@ -109,13 +110,13 @@ presence, which is how the gateway branch avoids ambiguity today.
    `session_rollup` and its property (the repair).
 6. Extend `turn_key_pin_test.go` with pins for the two new namespaces and extend the
    collision test to cover all five shapes.
-7. Amend ADR-0021 §§5, 8, 10.
+7. Amend that decision, 8, 10.
 8. Update `MAPPING.md` (producer rows + §7 live-stack list).
 
 ## Todo
 
 - [x] confirm `oneOf[8]` shape in-file — 2 branches, as planned
-- [x] ADR-0022 written and marked accepted (incl. adoptions + floor raise +
+- [x] that decision written and marked accepted (incl. adoptions + floor raise +
       OD2-intact statement)
 - [x] `DevEvent` fields + `turnActivityIDFor` branches
 - [x] schema v1.6 (2 new branches + `session_rollup` repair) — **and the
@@ -123,7 +124,7 @@ presence, which is how the gateway branch avoids ambiguity today.
       unconditionally, so the OPENING half of every non-hook turn also failed.
       Both halves now `$ref` one `$defs.turnProducer`.**
 - [x] pin tests extended (6 shapes incl. subagent, no existing pin changed)
-- [x] ADR-0021 §§5/8/10 amended (§9 remains the only TBD)
+- [x] that decision §§5/8/10 amended (§9 remains the only TBD)
 - [x] MAPPING.md + COVERAGE.md rows
 - [x] `client` and conformance modules green — **BUT C1-C41 did NOT run: this
       sandbox denies every TCP bind. Acceptance criterion 2 is unverified until
@@ -136,9 +137,9 @@ presence, which is how the gateway branch avoids ambiguity today.
 - A hand-built event for each of the five producers validates against v1.6;
   an event carrying **two** discriminators fails.
 - `session_rollup` event validates (it does not today).
-- ADR-0022 states each ruling with its date, names the three adoptions and the
-  floor raise, and says explicitly that goproxy keeps OD2 intact; ADR-0021 §5
-  records the reversal.
+- that decision states each ruling with its date, names the three adoptions and the
+floor raise, and says explicitly that goproxy keeps OD2 intact; that decision
+records the reversal.
 
 ## Risk assessment
 

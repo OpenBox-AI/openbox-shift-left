@@ -34,18 +34,18 @@
   uninstall mechanics plus a future Linux/Windows story. That is still worth
   having; it is just much less than "delete `unit.go`".
 - **`~/.openbox/gateway.log` is not cosmetic.** launchd sends stdio to
-  `/dev/null` by default, and those throttled warnings are the ONLY signal that a
-  perfectly working relay is recording nothing (no DID, or no session header).
-  `doctor` reports alive/configured/bypass and never "is it recording". A swap
-  that quietly redirects logs to a nonexistent `/usr/local/var/log` re-opens
-  exactly the blindness ADR-0021 closed.
+`/dev/null` by default, and those throttled warnings are the ONLY signal that a
+perfectly working relay is recording nothing (no DID, or no session header).
+`doctor` reports alive/configured/bypass and never "is it recording". A swap that
+quietly redirects logs to a nonexistent `/usr/local/var/log` re-opens exactly the
+blindness that decision closed.
 - **Install ordering is a safety property and the library does not know it.**
   unit → start → **prove it listens** → only then write the env var; uninstall
   reverses. Any failure after `WriteUnit` must also remove the unit, because
   `KeepAlive`/`Restart=always` would otherwise restart-loop a gateway the
   developer was never told about. kardianos supplies `Install`/`Start`/`Stop`/
   `Uninstall`; the *proof step* and the *rollback* stay ours.
-- **`UserService: true` is almost certainly correct** — ADR-0021 specifies a
+- **`UserService: true` is almost certainly correct** — that decision specifies a
   per-developer loopback daemon, so `~/Library/LaunchAgents` with no root, not
   `/Library/LaunchDaemons`. Confirm in step 1 rather than assume.
 - Uninstall semantics (does it unload before removing the plist?) are unverified
@@ -148,7 +148,7 @@ replace the ordering, the proof, the rollback, or the activation record.
 | Risk | Mitigation | Signal it broke | Response |
 |---|---|---|---|
 | **The library cannot pin our log path** (issue #281; PR #307 unread) | Step 1 gate before any code | `go doc` shows no option and `LaunchdConfig` is template-only | Pre-decided: template branch, or **stop** if even that fails. Never accept `/usr/local/var/log` |
-| Logs silently go to a nonexistent dir | Assert on the generated plist **and** on real output reaching the file | `gateway.log` empty while the gateway runs | Treat as a bug in the unit, not the daemon (ADR-0021's own rule) |
+| Logs silently go to a nonexistent dir | Assert on the generated plist **and** on real output reaching the file | `gateway.log` empty while the gateway runs | Treat as a bug in the unit, not the daemon (that decision's own rule) |
 | **Uninstall does not unload before removing the plist** (unverified) | Real-binary install/uninstall test asserting `launchctl list` | A unit remains loaded after removal | Add an explicit stop before uninstall; do not rely on library ordering |
 | Library's Install writes to `/Library/LaunchDaemons` and demands root | Confirm `UserService` in step 1; test as non-root | Permission denied on install | Set `UserService: true`; a root-requiring install is a product regression |
 | Proof-order or rollback lost in the refactor | They stay ours; diff the install path | Install writes env before proving listening | **Stop** — this is the safety property, not a detail |
@@ -163,9 +163,9 @@ replace the ordering, the proof, the rollback, or the activation record.
   a system daemon would run this as root for every user on the machine. Do not
   let a library default silently promote it.
 - The plist path and the log path both live under the developer's own trust
-  boundary (ADR-0015): readable by anything running as the developer, including
-  the agent being governed. That is unchanged by this swap and must not be
-  described as hardened by it.
+boundary : readable by anything running as the developer, including the agent
+being governed. That is unchanged by this swap and must not be described as
+hardened by it.
 - `gateway.log` may contain throttled warnings about missing DIDs or session
   headers. It must not gain request/response content — `verbose.go`'s rule
   (method/route/status/duration only) still governs what is written.

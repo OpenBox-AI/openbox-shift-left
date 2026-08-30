@@ -248,21 +248,21 @@ func parseAgentList(raw json.RawMessage) ([]AgentSummary, error) {
 	return nil, fmt.Errorf("agent list: unrecognized response shape (neither an array, {items:[…]}, nor {data:[…]})")
 }
 
-// Policy is the current per-agent policy read from the control plane
-// (ADR-0005). It is the subset of openbox-backend's PolicyEntity the CLI
-// needs to translate into a local policy bundle: the pin (ID + UpdatedAt),
-// the structured config.policy_builder (when the policy was authored in the
-// builder UI), and whether raw rego is present (the fidelity-residual
-// case). RegoCode is intentionally not exposed as a field beyond a presence
-// signal — it is never printed/logged (INV-1) and cannot be localized.
+// Policy is the current per-agent policy read from the control plane. It is
+// the subset of openbox-backend's PolicyEntity the CLI needs to translate
+// into a local policy bundle: the pin (ID + UpdatedAt), the structured
+// config.policy_builder (when the policy was authored in the builder UI),
+// and whether raw rego is present (the fidelity-residual case). RegoCode is
+// intentionally not exposed as a field beyond a presence signal — it is
+// never printed/logged (INV-1) and cannot be localized.
 type Policy struct {
 	ID            string
 	UpdatedAt     string
 	PolicyBuilder json.RawMessage // config.policy_builder, or nil when absent
 	HasRawRego    bool            // rego_code present but no policy_builder → unlocalized
 	// Signed is the backend's signature over the authoritative policy, when it
-	// serves one (E8-S6 / ADR-0008). nil from a backend that does not sign yet,
-	// which `dev sync` treats as the compatibility path rather than an error.
+	// serves one (E8-S6 /). nil from a backend that does not sign yet, which
+	// `dev sync` treats as the compatibility path rather than an error.
 	Signed *SignedPolicy
 }
 

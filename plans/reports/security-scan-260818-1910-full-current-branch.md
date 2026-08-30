@@ -13,7 +13,7 @@
 | .env exposure | 0 | 0 | 0 | 0 |
 
 No critical, high or medium findings. Working-tree changes introduce no new risk surface
-beyond what their ADRs document.
+beyond what their decision records document.
 
 ## Secrets — clean
 
@@ -67,10 +67,10 @@ Checked and clean:
 ## Documented-by-design (not findings)
 
 Listed so they are not re-reported as discoveries: plaintext `~/.openbox/.env` 0600 with no
-at-rest protection on Windows (ADR-0015 — outside the repo); enforcement fail-open default
-(`fail_closed:false`, ADR-0016/0017); prompt text egresses unredacted under content capture
-(known limit, restated in ADR-0020-adjacent docs); the halt latch is developer-deletable
-client state, not tamper-proof enforcement (ADR-0020).
+at-rest protection on Windows (that decision — outside the repo); enforcement fail-open
+default (`fail_closed:false`, that decision/0017); prompt text egresses unredacted under
+content capture (known limit, re-adjacent docs); the halt latch is developer-deletable
+client state, not tamper-proof enforcement.
 
 ## Recommendations
 

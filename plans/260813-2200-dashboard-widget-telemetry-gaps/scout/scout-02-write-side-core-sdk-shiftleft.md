@@ -12,7 +12,7 @@ Chain: FE SUCCESS% ← `observability_metrics` rows `tool.<name>.success` / `too
 - `Status` field (`internal/content/governance.go:206`): `*string`, documented for **Workflow** events (completed/failed/cancelled/terminated). A workflow-status field read for an activity-success decision.
 
 Missing link — no producer sets it:
-- shift-left `client/payload.go` never writes a `status` key on any event. `contracts/dev-event/MAPPING.md:239-241` lists `status` among fields "Retired with the span layer" (ADR-0013 — it was per-span OTel status).
+- shift-left `client/payload.go` never writes a `status` key on any event. `contracts/dev-event/MAPPING.md:239-241` lists `status` among fields "Retired with the span layer" (that decision — it was per-span OTel status).
 - Base SDK `openbox_core/contracts/events.py:277-313` `activity_completed()` takes `result`/`error`/`attempt`/`extra` — **no `status` param**; `workflow_completed()` (204-221) none either.
 - Net: `payload.Status == nil` on every dev `ActivityCompleted` → `IsSuccess` always false → `tool.<name>.failed` increments each completion → SUCCESS = 0.0% for every tool. Matches symptom exactly.
 
@@ -28,7 +28,7 @@ Both derive from `content.AGEResult.GoalAlignmentChecked` / `.GoalDrifted`, set 
 
 Assistant content is fed **only** by `extractAssistantContentFromLatestSpan(payload.Spans)` (`internal/services/goal_alignment_session.go:64-88`), fallthrough branch `age.go:165-169`, requiring a **span** with `Stage=="completed" && SemanticType==llm_completion && ResponseBody!=nil`.
 
-Missing link: shift-left is span-less by design (ADR-0013; `MAPPING.md:10` — dev sessions produce zero spans rows). Its model-turn signal is `TurnCompleted`→`ActivityCompleted` `activity_type:"llm_completion"` — an Activity, not a span, and its `activity_output` is {model, usage} only (INV-2: no completion text). So `payload.Spans` is always empty → assistant content never accumulates → `GoalAlignmentChecked` always false for shift-left traffic. shift-left DOES emit the trigger events (`prompt_submitted` SignalReceived, WorkflowCompleted) — span gap blocks regardless.
+Missing link: shift-left is span-less by design (`MAPPING.md:10` — dev sessions produce zero spans rows). Its model-turn signal is `TurnCompleted`→`ActivityCompleted` `activity_type:"llm_completion"` — an Activity, not a span, and its `activity_output` is {model, usage} only (INV-2: no completion text). So `payload.Spans` is always empty → assistant content never accumulates → `GoalAlignmentChecked` always false for shift-left traffic. shift-left DOES emit the trigger events (`prompt_submitted` SignalReceived, WorkflowCompleted) — span gap blocks regardless.
 
 - Widget 1: `UpdateGoalAlignmentMetricsActivity` (`internal/services/activities/observability/compliance.go:336-381`) skips writing when `!GoalAlignmentChecked` (`compliance.go:344-347`) → keys `evaluation_count`/`aligned_count`/`drifted_count` (const.go:146-148, `MetricTypeGoalAlignment` const.go:69) never written → "No alignment data available".
 - Widget 2: `GoalDrifted` only from `newGoalDriftResult` (`age.go:182-192`) in the same two branches, additionally gated on LlamaFirewall `/scan_replay` `!IsAligned` (`performTraceCheck`). Never reached → `age_evaluations.goal_drift` always false (`buildEventEvaluation`, `activities/governance/age.go:439-457`), `KeyGoalDriftedCount` never incremented → 0 events.

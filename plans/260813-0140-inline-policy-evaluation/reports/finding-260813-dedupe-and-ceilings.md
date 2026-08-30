@@ -120,7 +120,7 @@ to the *non-gating* hooks only. Phase 3 should correct it while touching this fi
   before removing the `HighRisk()` narrowing. Sequencing, not scope change.
 - **Phase 3's ceiling SPI shrinks:** both providers are 30s and both derive from an
   installed constant. Codex enforcement is **not** blocked.
-- **Phase 2's ADR** can state the ceiling as fact with citations, and must not repeat the
+- **Phase 2's decision record** can state the ceiling as fact with citations, and must not repeat the
   "core dedupes on event_type" claim — it does not, for developer events.
 - **Phase 8 inherits the unrun assertions:** per-call row count under universal escalation,
   and the mid-call-failure case.

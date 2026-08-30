@@ -5,9 +5,9 @@ throwaway project, and provider credentials. Nothing else in this plan blocks on
 
 ## Why this exists
 
-ADR-0021 is **DRAFT**, and as of 2026-08-28 exactly one thing keeps it there: §9.
-The gateway can refuse a model call, but *what a refusal should look like on the
-wire* is an empirical question about a client we do not control.
+That decision is **DRAFT**, and as of 2026-08-28 exactly one thing keeps it
+there: §9. The gateway can refuse a model call, but *what a refusal should look
+like on the wire* is an empirical question about a client we do not control.
 
 The failure it guards against is specific and quiet. **A refusal the client retries
 around is worse than no refusal at all**: the developer sees a slow session rather
@@ -121,16 +121,16 @@ A shape qualifies when **all** of these hold:
 Both directions are decided in advance, so the run cannot be argued with after the
 fact.
 
-**A shape qualifies.** Fill in ADR-0021 §9's two constants — `refusalStatus` and
-`refusalErrorType` in `gateway/refuse.go` — with the measured pair, record the run
-in the ADR, and move ADR-0021 from DRAFT to ACCEPTED. Wiring a production caller
-for `gate.Decide`/`WriteRefusal` is then its own change with its own review; this
-probe answers the shape question, not the enablement question. `testbed/45-gateway.sh`
-case D becomes live.
+**A shape qualifies.** Fill in that decision's two constants — `refusalStatus` and
+`refusalErrorType` in `gateway/refuse.go` — with the measured pair, record the run in
+that decision, and move that decision from DRAFT to ACCEPTED. Wiring a production
+caller for `gate.Decide`/`WriteRefusal` is then its own change with its own review;
+this probe answers the shape question, not the enablement question.
+`testbed/45-gateway.sh` case D becomes live.
 
 **No shape qualifies.** Refusal **descopes to observe-only**. Record the negative
-result in ADR-0021 §9 — it is a finding about the client, not a gap in this plan —
-make the dormancy test permanent rather than temporary, delete case D from
+result in that decision — it is a finding about the client, not a gap in this plan
+— make the dormancy test permanent rather than temporary, delete case D from
 `testbed/45-gateway.sh` rather than leaving it to rot, and state in `COVERAGE.md`
 that the in-path lanes observe and do not refuse. Do not iterate on new shapes
 without a reason to expect a different answer: the candidate table already spans

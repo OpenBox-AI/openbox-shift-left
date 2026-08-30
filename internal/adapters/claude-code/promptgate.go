@@ -47,7 +47,7 @@ func (t promptTarget) HighRisk() bool { return false }
 // redactor for tool bodies; prompt text is attached (and capture-gated) by the
 // Mapper on the event itself, so there is nothing here for the local step to
 // scan — it reports no verdict and the gate escalates, as it does for every
-// gated call (ADR-0017).
+// gated call.
 func (t promptTarget) DecisionRequest(bool) decision.DecisionRequest {
 	return decision.DecisionRequest{
 		SessionID:    t.ev.SessionID,

@@ -100,11 +100,11 @@ terminal are OD-SL7-USERTERM (deferred).
 ## Credentials & config (INV-1)
 
 Identity comes from the same `openbox init` flow and the same
-`~/.config/openbox/dev.json` + OS/file secret store as every provider, via the
-shared `internal/adapters/common/devconfig` module (OD-SL7-SHARE ruling (a), ADR-0007).
-The hook reads the **DID only** on the hot path; the obx_ key + Ed25519 seed
-are read only at flush, straight into the client. `hooks.json` carries the
-engine path + event names only — no key, DID, or URL.
+`~/.config/openbox/dev.json` + OS/file secret store as every provider, via the shared
+`internal/adapters/common/devconfig` module (OD-SL7-SHARE ruling (a)). The hook reads
+the **DID only** on the hot path; the obx_ key + Ed25519 seed are read only at flush,
+straight into the client. `hooks.json` carries the engine path + event names only — no
+key, DID, or URL.
 
 ## Packaging & install
 
@@ -139,9 +139,8 @@ Behind the **default-on** `finops` flag (`dev.json` / `OPENBOX_FINOPS=0` to opt
 out — a **separate** flag from `content_capture`), the adapter reads it on
 SessionEnd (off the hot path, after the spool flush) and emits two things: the
 `client.Tokens` rollup on the `SessionEnded` event, and a session-rollup
-`llm_completion` activity pair (`activity_id <session>:usage:rollup`,
-[ADR-0014](../../docs/adr/ADR-0014-turn-as-activity-and-identifier-allowlist.md))
-carrying the four counts plus the model id read from `turn_context.payload.model`.
+`llm_completion` activity pair (`activity_id <session>:usage:rollup`) carrying the
+four counts plus the model id read from `turn_context.payload.model`.
 
 **Session, not per turn — by choice.** Codex v0.145.0 exposes a `Stop` hook and
 this adapter does not wire it, so usage arrives once per session. That is scope,
@@ -213,20 +212,19 @@ byte-identical to the pre-SL7-C path.
 ## Enforce leg (STORY-SL7-B)
 
 **Opt-in, default observe.** Enable at onboarding — `openbox init --provider
-codex --enforce` persists `enforce`/`tier2`/`findings` to `dev.json` (ADR-0006;
-no runtime env needed). With enforce **off** the SL7-A observe path is
-**byte-identical** — the decider is never invoked (asserted:
-`TestObserveByteParity_EnforceOff`). Enforcement gates **only** the PreToolUse
-hook, pre-execution, hard-bounded, fail-open by default (OD9 / INV-3b). Exit code
-is always 0 — we speak Codex's output JSON, never the exit-2 block signal.
+codex --enforce` persists `enforce`/`tier2`/`findings` to `dev.json` (no runtime
+env needed). With enforce **off** the SL7-A observe path is **byte-identical** —
+the decider is never invoked (asserted: `TestObserveByteParity_EnforceOff`).
+Enforcement gates **only** the PreToolUse hook, pre-execution, hard-bounded,
+fail-open by default (OD9 / INV-3b). Exit code is always 0 — we speak Codex's
+output JSON, never the exit-2 block signal.
 
 The cascade is the shipped Claude Code E6 stack (`decision/` consumed unchanged,
-ADR-0006 in-process decider — no socket, no daemon, microseconds, no network on
-the T1 path): **obtain** → **failure policy** (fail-open default / opt-in
-fail-closed on outage only) → **apply** onto Codex's PreToolUse contract, plus
-inline `/evaluate` evaluation of every gated call (ADR-0017) and the findings
-loop. Only the two provider EDGES differ from CC; the middle is
-shared.
+an in-process decider — no socket, no daemon, microseconds, no
+network on the T1 path): **obtain** → **failure policy** (fail-open default /
+opt-in fail-closed on outage only) → **apply** onto Codex's PreToolUse contract,
+plus inline `/evaluate` evaluation of every gated call and the findings loop.
+Only the two provider EDGES differ from CC; the middle is shared.
 
 ### Codex-shaped deltas (each grounded @ `rust-v0.145.0` + the binary output schemas, recorded in the SL7-B probes)
 

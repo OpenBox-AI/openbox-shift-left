@@ -54,9 +54,10 @@ plist assembled by string concatenation, `unit.go:73-88`: `Label`,
 `ProgramArguments`, `KeepAlive`, `RunAtLoad`, `ExitTimeOut`, plus hand-rolled
 `xmlEscape`. Load-bearing: `StandardOutPath`/`StandardErrorPath` →
 `~/.openbox/gateway.log`, because launchd sends stdio to `/dev/null` and a
-silently-not-recording daemon looks healthy (ADR-0021 lesson). Researcher 02 is
-verifying whether kardianos can target a custom log path without a full custom
-template — **if it cannot, that is a plan-shaping result, not a detail.**
+silently-not-recording daemon looks healthy (that decision lesson). Researcher
+02 is verifying whether kardianos can target a custom log path without a full
+custom template — **if it cannot, that is a plan-shaping result, not a
+detail.**
 
 ## D-OSS-6 · go-toml → `adapters/common/devconfig/toml.go`
 

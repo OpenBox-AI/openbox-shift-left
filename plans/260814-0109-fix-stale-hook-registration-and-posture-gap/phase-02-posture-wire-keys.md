@@ -5,7 +5,7 @@
 - Plan: [plan.md](plan.md)
 - Issue §2: `plans/reports/issue-260814-0106-stale-hook-registration-and-posture-gap.md:88-136`
 - Research: `research/researcher-02-posture-wire.md`
-- The claim being honoured: `docs/adr/ADR-0017-inline-policy-evaluation.md:222-252` (promise at 237-239)
+- The claim being honoured: `:222-252` (promise at 237-239)
 
 ## Overview
 
@@ -110,9 +110,9 @@ Blast radius = 3 modules, all `_test.go` except `posture.go`:
 1. `posture.go`: delete the `Staleness` type + 7 consts (`:28-55`) and the five struct fields
    (`:78-87`). Keep the surrounding doc comment's honest framing of what posture may carry.
 2. Replace the five map entries (`:251-255`) with
-   `"decision_authority": p.DecisionAuthority, "failure_policy": p.FailurePolicy`. Add a short
-   comment: reported because ADR-0017 makes them posture's policy-provenance evidence, and the
-   bundle coordinates they replaced are gone rather than empty.
+`"decision_authority": p.DecisionAuthority, "failure_policy": p.FailurePolicy`. Add a short
+comment: reported because that decision makes them posture's policy-provenance evidence, and
+the bundle coordinates they replaced are gone rather than empty.
 3. `devconfig/posture_test.go`: trim the omitted-key list (`:80`) to the three adapter strings;
    rebuild `full` (`:89-90`) from `Adapter/AdapterVersion/ProviderVersion` and assert
    `provider_version` only.
@@ -151,7 +151,7 @@ Blast radius = 3 modules, all `_test.go` except `posture.go`:
   enforced by absence assertions, not by an empty-value guard.
 - `grep -rn "BundleVersion\|BundleIntegrity\|Staleness" adapters/common/devconfig adapters/claude-code adapters/codex` returns only prose in comments/notes.
 - Three modules green under `-race`; both cross-compiles green.
-- ADR-0017:237-239 becomes a true statement about shipped behavior with no ADR edit (D2).
+- that decision:237-239 becomes a true statement about shipped behavior with no decision record edit (D2).
 
 ## Risk Assessment
 
@@ -170,13 +170,15 @@ Blast radius = 3 modules, all `_test.go` except `posture.go`:
   load-bearing — but they stay, because they are what makes the map safe for the adapter-supplied
   strings sharing it (INV-1, `TestPostureMetadata_NoSecretShapedValues`).
 - Deleting the bundle keys removes a reporting surface that could only ever have overstated:
-  "a control that cannot engage must not appear as one" (ADR-0017:224-227).
+"a control that cannot engage must not appear as one" (that
+decision:224-227).
 - `failure_policy: fail_open` is an honest admission that enforcement is reachability-dependent
   (`docs/architecture.md#assurance--what-the-evidence-proves`); reporting it does not weaken
   anything, it names an existing limit to the control plane.
 
 ## Next steps
 
-Phase 04 verifies ADR-0017:222-252 needs no amendment under D2, checks the generic posture
-sentences at `docs/architecture.md:128` and `docs/data-and-privacy.md:99`, and records that
-`testbed/30-enforce.sh:185-187` is the dormant end-to-end proof for this phase.
+Phase 04 verifies that decision:222-252 needs no amendment under D2, checks the generic
+posture sentences at `docs/architecture.md:128` and `docs/data-and-privacy.md:99`, and
+records that `testbed/30-enforce.sh:185-187` is the dormant end-to-end proof for this
+phase.

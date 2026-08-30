@@ -7,7 +7,7 @@ updated: 2026-08-30
 priority: P1
 effort: ~89h (14 phases: stage A ~36h, stage B ~53h)
 branch: feat/tool-content-capture
-tags: [go-version, dependencies, oss, refactor, secret-detection, json-schema, launchd, gateway, telemetry, transport-proxy, otel, adr, convergence, single-repo]
+tags: [go-version, dependencies, oss, refactor, secret-detection, json-schema, launchd, gateway, telemetry, transport-proxy, otel, decision record, convergence, single-repo]
 created: 2026-08-27
 ---
 
@@ -50,8 +50,8 @@ Phase reports land in `reports/`.
   redact→cap leg; ~95% truncate at 65,536 runes, accepted. No digest/excerpt
   scheme; no local evidence store.
 - **OD2** the transport proxy is a **product**, a **native launchd service** (no
-  Docker, no mitmproxy at runtime), **one command in / one command out**.
-  Formally reverses ADR-0021 §5.
+Docker, no mitmproxy at runtime), **one command in / one command out**.
+Formally reverses
 - **OD3** ride the beta surface now (`CLAUDE_CODE_ENHANCED_TELEMETRY_BETA`,
   `OTEL_LOG_RAW_API_BODIES`) with version-pinned probes + doctor silence
   detection.
@@ -200,10 +200,10 @@ by any of this.
 | 02 | [JSON Schema validator](phase-02-jsonschema-validator.md) | — (floor-independent) | **done** | 5h |
 | 03 | [Config parsers & atomic writes](phase-03-config-parsers-and-atomic-writes.md) | 01 | **done** | 5h |
 | 04 | [launchd service lifecycle](phase-04-launchd-service-lifecycle.md) | 01 | **done\*** | 6h |
-| 05 | [Credential-guard scope (ADR)](phase-05-credential-guard-scope.md) | 01 | **done** | 3h |
+| 05 | [Credential-guard scope (decision record)](phase-05-credential-guard-scope.md) | 01 | **done** | 3h |
 | 06 | [gitleaks detection engine](phase-06-gitleaks-detection-engine.md) | 01, **05** | **done\*\*** | 10h |
 | 07 | [Stage-A docs reconciliation](phase-07-consolidation-docs.md) | 02–06 | **done** | 3h |
-| 08 | [ADR-0022 + contract v1.6 + ADR-0021 amendments](phase-08-adr-contract-decision.md) | 01 (02 strongly recommended first) | **done\*\*\*** | 4h |
+| 08 | [that decision + contract v1.6 + that decision amendments](phase-08-contract-decision.md) | 01 (02 strongly recommended first) | **done\*\*\*** | 4h |
 | 09 | [Telemetry receiver daemon (otlpreceiver, loopback)](phase-09-telemetry-receiver-daemon.md) | 04, 08 | **mostly done†** | 8h |
 | 10 | [Telemetry mappers → contract (`:otel:`)](phase-10-telemetry-mappers.md) | 09 | **partial‡** | 8h |
 | 11 | [Transport proxy as native service (`:proxy:`, goproxy)](phase-11-transport-proxy-service.md) | 04, 10 | **done§** | 15h |
@@ -221,14 +221,12 @@ false-positive soak did not clear the enforce path (2 false positives from
 The false positive is no longer hypothetical — see the note under "Cross-cutting"
 below. See its report.
 
-\*\*\* **Phase 08** is implemented, its own tests green with both mutation drills
-red-on-deletion. Its "**C1–C41 did not run**" caveat is **RETIRED (2026-08-28)**:
-38 numbered conformance cases run and pass, so acceptance criterion 2 moved from
-an inference to a measurement. Three numbers do not exist — C8/C9 (ADR-0006) and
-**C17** (ADR-0017) — and **C39 is not a subtest**; it runs as
-`TestContentCaptureCredentialCoverage`, also passing. The blocked-test count in
-that caveat was also wrong: **635, not ~334, and they were INVISIBLE rather than
-failing.**
+\*\*\* **Phase 08** is implemented, its own tests green with both mutation drills red-on-deletion. Its
+"**C1–C41 did not run**" caveat is **RETIRED (2026-08-28)**: 38 numbered conformance cases run and pass,
+so acceptance criterion 2 moved from an inference to a measurement. Three numbers do not exist — C8/C9
+and **C17** — and **C39 is not a subtest**; it runs as `TestContentCaptureCredentialCoverage`, also
+passing. The blocked-test count in that caveat was also wrong: **635, not ~334, and they were INVISIBLE
+rather than failing.**
 [verification-260828-test-visibility-restored](reports/verification-260828-test-visibility-restored.md).
 It also repaired `TurnStarted`, beyond the phase's written scope.
 
@@ -557,21 +555,21 @@ Stage A — foundation:
 1. Every module declares `go 1.27.0`; no pin instruction for `x/term` survives
    anywhere; per-module `GOWORK=off` builds pass.
 2. Conformance C1–C41 pass **unmodified** against the library validator, with the
-   `x-content-gated` pass still separate. **MET 2026-08-28, on an in-memory
-   transport.** 38 numbered cases run and pass (C8/C9 deleted under ADR-0006,
-   C17 under ADR-0017; C39 runs separately as
-   `TestContentCaptureCredentialCoverage`, also passing). Assertions unmodified,
-   made on real POSTed bytes — so this measures payload, framing, gate,
-   redaction and cap, **not** bind, listen, TLS or the dialer. Socket-based
-   confirmation is CI's job and **has not happened: this branch has no
-   upstream** (owner-deferred 2026-08-28), so no run of these 1140 tests over a
-   real socket exists anywhere.
+`x-content-gated` pass still separate. **MET 2026-08-28, on an in-memory
+transport.** 38 numbered cases run and pass (C8/C9 deleted under that decision,
+C17 under; C39 runs separately as `TestContentCaptureCredentialCoverage`, also
+passing). Assertions unmodified, made on real POSTed bytes — so this measures
+payload, framing, gate, redaction and cap, **not** bind, listen, TLS or the
+dialer. Socket-based confirmation is CI's job and **has not happened: this
+branch has no upstream** (owner-deferred 2026-08-28), so no run of these 1140
+tests over a real socket exists anywhere.
 3. The TOML regression test fails on the old scanner and passes on go-toml;
    `codexMandated` is correct on the new fixture.
 4. `~/.openbox/gateway.log` receives real output from a running gateway, asserted
    on the generated plist and on the file.
 5. The credential guard is red on a direct unreviewed require (any host), green
-   on an indirect one, and its reduction is recorded in an ADR.
+on an indirect one, and its reduction is recorded in a decision
+record.
 6. The three pinned redaction tests pass **unmodified**; both mutation drills
    still go red when their mechanism is deleted; the false-positive soak gates
    the enforce path.
@@ -629,9 +627,10 @@ Stage B — convergence:
   real behavior moved across four Go releases — stop and split it out, don't
   re-bless a golden.
 - **Phase 04's library may not be able to pin our log path** (kardianos issue
-  #281 verified; its fix unread). Step 1 is a gate with three pre-decided
-  branches, including **stop and escalate** — `/usr/local/var/log` is not
-  acceptable, because silent not-recording is the blindness ADR-0021 closed.
+#281 verified; its fix unread). Step 1 is a gate with three pre-decided
+branches, including **stop and escalate** — `/usr/local/var/log` is not
+acceptable, because silent not-recording is the blindness that decision
+closed.
 - **Phase 06 can lose coverage while looking like an upgrade.** gitleaks' entropy
   is a per-rule threshold on a regex match, not a standalone high-entropy scan —
   keep the existing generic entropy fallback and measure both directions.
@@ -715,7 +714,7 @@ Whole-plan: `-race`, both cross-compiles, per-module `GOWORK=off` build.
 4. ~~Toolchain directive~~ — resolved in phase 01: workspace only, `toolchain
    go1.27.0` in `go.work`.
 5. ~~Phase 05's guard fix shape~~ — resolved: direct requires bounded per module,
-   recorded in ADR-0023.
+.
 6. ~~Phase 04 gate~~ — resolved at implementation; kardianos supplies the unit,
    the log path stayed ours.
 7. **Phase 11 spike outcome** — still pre-decided, still pending: goproxy failing
@@ -739,8 +738,8 @@ Progress above.
   receiver handles both encodings; the probe informs config, not lane survival).
 - **Build order:** telemetry before transport, serial.
 - **Telemetry default:** **on once installed** — installing is the opt-in;
-  content still rides the existing `content_capture` gate (ADR-0016's
-  default-off lesson).
+content still rides the existing `content_capture` gate (that
+decision's default-off lesson).
 - **Commands (now phase 12):** `openbox init --full` / `openbox init
   --remove-all` — extends the known verb, parallels `--remove-gateway`.
 - **Codex rollup bug:** repaired **inside phase 08**, same commit as the two new
@@ -765,7 +764,7 @@ D-GO-1 lands first, alone and green (phase 01), before everything else.
 The two plans were merged into this one. Round 2's re-cut action items are
 **done in this merge**:
 
-- [x] phase 08: ADR-0022 records the three adoptions and the go 1.27 floor
+- [x] phase 08: that decision records the three adoptions and the go 1.27 floor
       raise (pins retired), and states explicitly that goproxy is neither
       Docker nor mitmproxy (OD2 intact)
 - [x] D-GO-1 floor raise is phase 01, blocking, first and alone

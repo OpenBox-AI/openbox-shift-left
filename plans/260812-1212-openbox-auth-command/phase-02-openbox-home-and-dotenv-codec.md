@@ -2,7 +2,7 @@
 
 ## Context links
 
-- Parent: [plan.md](plan.md) · Depends on: phase 1 (ADR authorizes the posture)
+- Parent: [plan.md](plan.md) · Depends on: phase 1 (decision record authorizes the posture)
 - Blocks: phase 3 (rewire needs the codec + paths)
 - Parallel-safe with: phase 4
 - Prior art to reuse: `cli/internal/secret/file.go:80-111` (atomic temp+rename,

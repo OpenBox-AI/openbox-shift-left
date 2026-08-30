@@ -13,8 +13,8 @@ Mode: audit + `--fix`.
 | Low | 2 | 1 | 1 (OD-class, documented) |
 | Info | 1 | 0 | 1 (accepted, noted) |
 
-Weight landed on `gateway/` (ADR-0021) — newest code, only network-facing
-surface, least reviewed. Everything else audited clean on the classes checked.
+Weight landed on `gateway/` — newest code, only network-facing surface, least
+reviewed. Everything else audited clean on the classes checked.
 
 **Verification:** every fix carries a test; each of the three code fixes was
 mutation-drilled (guard removed ⇒ red, restored ⇒ green). Full suite green under
@@ -36,11 +36,11 @@ syntactically valid URL on a different, registrable host (`comevil.com` is
 registrable; `api.anthropic.comevil.com` then resolves to attacker infra).
 
 Two consequences. `copyHeaders` relays the live `Authorization` header, so the
-credential egresses to that host. And capture records `http.url` as
-`g.upstream + r.URL.Path` = `https://api.anthropic.com` — a call that went
-elsewhere stored as though it reached the provider. That breaks ADR-0021 §2 at
-its root: a bypass is supposed to leave a **hole** in the record; a misrecorded
-destination leaves none.
+credential egresses to that host. And capture records `http.url` as `g.upstream
++ r.URL.Path` = `https://api.anthropic.com` — a call that went elsewhere stored
+as though it reached the provider. That breaks that decision at its root: a
+bypass is supposed to leave a **hole** in the record; a misrecorded destination
+leaves none.
 
 Fix: require origin-form. Every refused form was already unusable here —
 absolute-form would need re-encoding from `r.URL`, which is exactly the
@@ -174,12 +174,12 @@ reconcile. Rune-boundary cuts; truncation marked.
 `gateway/config.go`, `cli/cmd/openbox/gateway.go` — **documented, not fixed**
 (`421821c`). Spoofing / Repudiation.
 
-ADR-0021 names the loopback bind as the caller boundary. For *relaying* that is
-defensible — a caller supplies its own credential, gaining nothing it did not
-have. Two things it does not cover: loopback is not a user boundary on a shared
-machine, and **not a browser boundary at all**. A page the developer visits can
-`fetch()` `http://127.0.0.1:8788/v1/messages` as a CORS-simple request — *sent*
-even though the reply cannot be read cross-origin.
+That decision names the loopback bind as the caller boundary. For *relaying*
+that is defensible — a caller supplies its own credential, gaining nothing it
+did not have. Two things it does not cover: loopback is not a user boundary on
+a shared machine, and **not a browser boundary at all**. A page the developer
+visits can `fetch()` `http://127.0.0.1:8788/v1/messages` as a CORS-simple
+request — *sent* even though the reply cannot be read cross-origin.
 
 Impact bounded **today**: verified `WithCapture`/`WithGate` have **zero
 production callers**, so shipping `openbox gateway` is a pure relay. Unbounded the
@@ -221,8 +221,8 @@ test-pinned.
   every session-id→path site (spool, halt latch, turn cursor, duration stash).
   Installer writes come from an embedded FS.
 - **File permissions** — credentials `0600` + `0700` dirs, atomic temp+rename
-  with explicit `Chmod` (`CreateTemp`'s 0600 not relied on). Non-secret configs
-  `0644` deliberately. Matches ADR-0015, incl. the stated Windows no-op.
+with explicit `Chmod` (`CreateTemp`'s 0600 not relied on). Non-secret configs
+`0644` deliberately. Matches that decision, incl. the stated Windows no-op.
 - **Supply chain** — **one** third-party dependency repo-wide
   (`golang.org/x/term v0.34.0`, pinned). Nothing else to audit.
 - **Gate ordering** — `Decide` attempts evaluation before any synthesized
@@ -245,9 +245,9 @@ test-pinned.
 3. **Pin 1.26 or 1.27?** 1.26 chosen because it is the version with *complete*
    evidence. 1.27 passes everything except a govulncheck run blocked by tooling.
 4. **Does `refusalStatus` (403) survive Claude Code's retry logic?** Untouched —
-   probe A owns it, ADR-0021 §9 open. Not a finding, but the refusal path's
-   effectiveness is unverified and finding 1 now adds a second refusal shape
-   (400, non-origin-form) on the same client.
+probe A owns it, that decision open. Not a finding, but the refusal path's
+effectiveness is unverified and finding 1 now adds a second refusal shape
+(400, non-origin-form) on the same client.
 5. **Testbed unrun.** Every claim here is unit/measurement-level. The
    host-splice and the CPU bound were measured directly; nothing was verified
    against a live stack or a real Claude Code session.

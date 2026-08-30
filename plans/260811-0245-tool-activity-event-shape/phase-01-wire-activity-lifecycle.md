@@ -4,7 +4,7 @@
 
 - Parent: [plan.md](plan.md)
 - Evidence: [synthesis-findings.md](research/synthesis-findings.md), [scout-01](scout/scout-01-shift-left-current-shape.md)
-- Supersedes the tool rows of `docs/adr/ADR-0004-base-wire-unification.md` (recorded in Phase 03)
+- Supersedes the tool rows of  (recorded in Phase 03)
 - Dependencies: none. Blocks Phase 02, 03, 04.
 
 ## Overview
@@ -28,8 +28,8 @@
    (`internal/content/governance.go:186-236`) — which is why no core change is needed.
    Of those, this phase *sends* everything except `start_time`/`end_time` (insight 4).
 2. **The adapter-facing contract does not move.** `DevEvent`, `Span`, the schema, the
-   mappers, the spool and the duration stash are untouched — only the client→core
-   serialization changes. Same separation ADR-0004 established.
+mappers, the spool and the duration stash are untouched — only the client→core
+serialization changes. Same separation that decision established.
 3. **`activity_id` and `workflow_id` must not change, and `ApprovalKeyFor` shares their
    derivation.** `activity_id` is operation-derived (`hookActivityID:472` ←
    `Span.OperationID`), it is the approval key, and core scopes its bypass grants by it.
@@ -219,10 +219,10 @@ also removes the reason the golden fixtures had to pin two orders.
 | A dev-event field silently loses its home when the span goes away | Steps 5-6 enumerate every `Span` field and its destination; golden fixtures pin the result | A field present in today's goldens has no counterpart | Re-home to `metadata` (free-form, already the carrier for tokens/cost/lineage) |
 
 **Assumption that may break:** that core stores an `ActivityCompleted` for an
-`activity_id` whose `ActivityStarted` exists without merging or rejecting it. Verified
-by reading, not by running. Signal: Phase 04 finds one row instead of two. Response:
-proceed directly to the 3-POST fallback — **pre-authorized, validation decision 3** — and
-add its ADR entry in Phase 03. No new decision needed.
+`activity_id` whose `ActivityStarted` exists without merging or rejecting it. Verified by
+reading, not by running. Signal: Phase 04 finds one row instead of two. Response: proceed
+directly to the 3-POST fallback — **pre-authorized, validation decision 3** — and add its
+decision record entry in Phase 03. No new decision needed.
 
 ## Security considerations
 

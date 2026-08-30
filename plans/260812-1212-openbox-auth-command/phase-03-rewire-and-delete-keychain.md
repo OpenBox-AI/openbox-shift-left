@@ -4,7 +4,6 @@
 
 - Parent: [plan.md](plan.md) · Depends on: phase 2 (codec + paths)
 - Blocks: phase 5 (`auth` writes what this reads)
-- Authorized by: ADR-0015 (phase 1)
 - **Largest and riskiest phase.** Cross-module; touches 7 of 11 modules.
 
 ## Overview
@@ -83,9 +82,9 @@
    `init`'s flag surface is phase 7's** — this phase touches only the flag whose
    backing code it deletes.
 6. Approver: `approve.go` reads its control token from `~/.openbox/.env`
-   (`OPENBOX_CONTROL_TOKEN`), `approver.json` keeps the non-secret config. Writing
-   that token becomes `auth`'s job (phase 5), not `init --role approver`'s.
-   ADR-0015 must already name this escalation (phase 1, req 2).
+(`OPENBOX_CONTROL_TOKEN`), `approver.json` keeps the non-secret config. Writing
+that token becomes `auth`'s job (phase 5), not `init --role approver`'s. That
+decision must already name this escalation (phase 1, req 2).
 7. All 11 modules build, vet and test green.
 
 ## Architecture
@@ -169,8 +168,8 @@ seam any more. Tests inject via `OPENBOX_HOME` pointing at `t.TempDir()` plus
 - Setting `OPENBOX_AGENT_PRIVATE_KEY` as a real env var overrides the file.
 - Setting only the deprecated `OPENBOX_ED25519_SEED` still works and warns once.
 - `grep -rn "keychain\|secret-tool\|security find-generic-password" --include=*.go`
-  returns nothing outside tests, the ADR, and the one error string that tells a
-  stranded user how to read their own keychain.
+returns nothing outside tests, that decision, and the one error string that
+tells a stranded user how to read their own keychain.
 - `openbox approve list` works with no keychain present.
 - `openbox init --secret-backend file` fails with a message naming `openbox auth`.
 
@@ -183,7 +182,7 @@ seam any more. Tests inject via `OPENBOX_HOME` pointing at `t.TempDir()` plus
 | `.env` quietly becomes a coordinate source too (habit, or a "helpful" fallback) | M×H | the DID-in-`.env`-is-ignored test is deleted or relaxed | **Stop:** that test is the tripwire for the second-store bug this plan claims to have avoided. Adding coordinates to `.env` is a D2 reversal and needs the decision reopened, not a commit. |
 | Deleting `SecretLookup` removes the seam tests relied on | H×L | many `_test.go` files fail to compile | **Accepted, planned:** migrate those tests to `OPENBOX_HOME` + `t.Setenv`. Budgeted inside this phase's 5h. |
 | `devinit`'s HALT-on-4xx / once-only-credential semantics regress | M×H | existing devinit tests fail | **Stop and replan:** those are safety behaviours. Never ship a green build with changed `init` semantics. |
-| A 3rd-party consumer depends on `OPENBOX_ED25519_SEED` | L×M | external report after release | **Accepted, mitigated:** aliases kept indefinitely; removal needs its own ADR. |
+| A 3rd-party consumer depends on `OPENBOX_ED25519_SEED` | L×M | external report after release | **Accepted, mitigated:** aliases kept indefinitely; removal needs its own decision record. |
 | `actions/openbox-git-action` is a separate release artifact | M×M | CI action breaks while the CLI is green | **Adjust:** include the action in the all-modules gate; it is easy to forget because it is not in `go.work`'s main flow. |
 
 ## Security Considerations

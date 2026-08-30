@@ -51,15 +51,17 @@ import (
 type Lane string
 
 const (
-	// LaneGateway is the loopback base-URL relay (ADR-0021).
+	// LaneGateway is the loopback base-URL relay.
 	//
 	// Its env writes still go through internal/cli/gatewayservice, which shipped
 	// and is socket-verified. The lane identity exists here so the election and
 	// `--remove-all` can reason about all three lanes uniformly.
 	LaneGateway Lane = "gateway"
-	// LaneTelemetry is the local OTLP receiver (ADR-0022 `:otel:`).
+	// LaneTelemetry is the local OTLP receiver (that decision
+	// `:otel:`).
 	LaneTelemetry Lane = "telemetry"
-	// LaneTransport is the in-path CONNECT/TLS relay (ADR-0022 `:proxy:`).
+	// LaneTransport is the in-path CONNECT/TLS relay (that decision
+	// `:proxy:`).
 	LaneTransport Lane = "transport"
 )
 

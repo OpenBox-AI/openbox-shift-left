@@ -116,8 +116,8 @@ terminal EVENT arrived — the question is who sent it and when.
 
 Read-only SQL exclusively; use a read-only role if one exists. Session ids, DIDs and workflow ids
 are identifiers, safe for the report; do NOT paste org policy content, tokens, or `~/.openbox/.env`
-material into it. The credentials file is plaintext and unprotected on Windows (ADR-0015) — treat
-any secret encountered as already exposed and do not widen its reach by copying it.
+material into it. The credentials file is plaintext and unprotected on Windows — treat any secret
+encountered as already exposed and do not widen its reach by copying it.
 
 ## Next steps
 

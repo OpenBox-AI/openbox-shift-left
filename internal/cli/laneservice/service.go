@@ -91,8 +91,9 @@ func (s Spec) New(goos, homeDir, binPath string) (service.Service, error) {
 		Arguments: argv[1:],
 		Option: service.KeyValue{
 			// A per-developer agent, never a system daemon: the base tier is
-			// user-owned by definition and ADR-0016 puts the install in the
-			// developer's hands, so needing root would be the wrong shape.
+			// user-owned by definition and that decision puts the install in
+			// the developer's hands, so needing root would be the wrong
+			// shape.
 			"UserService": true,
 			// Both bodies are ours. They contain no template actions, so the
 			// library's text/template render is an identity transform — pinned by

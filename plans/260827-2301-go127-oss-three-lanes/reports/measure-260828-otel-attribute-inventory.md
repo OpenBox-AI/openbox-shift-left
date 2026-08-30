@@ -44,7 +44,7 @@ first live run.
 | `skill_activated` | 15 | — |
 | `retention_sweep` | 11 | **relevant**: the client deletes its own artifacts (see body_ref) |
 | `at_mention` | 4 | — |
-| `api_refusal` | 2 | **see ADR-0021 §9 below** |
+| `api_refusal` | 2 | ** below** |
 | `api_error` | 2 | failure signal |
 | `compaction` | 1 | — |
 
@@ -148,7 +148,7 @@ level. `consume.go`'s merge order (resource, scope, record; record wins) already
 handles both, so this is a documentation correction, not a code change.
 
 It stays **client-asserted** either way: usable to bind sessions for detection,
-never as proof for a refusal (ADR-0021 §10).
+never as proof for a refusal.
 
 ### 5. The lane is per-API-CALL, not per-turn — so its numbers will never match the hook lane
 
@@ -163,11 +163,11 @@ Also: `claude_code.llm_request` **traces** describe the same calls as
 no namespace or election protects against. Traces and metrics stay
 accept-and-count (phase 09's decision), now with a measured reason.
 
-### 6. `api_refusal` exists — direct evidence toward ADR-0021 §9
+### 6. `api_refusal` exists — direct evidence toward
 
 Two occurrences, carrying `attempt` and `server_fallback_hop`. §9 — what refusal
 shape Claude Code does not retry around — is the **only** thing still keeping
-ADR-0021 in DRAFT, and it has been treated as unanswerable without a probe.
+that decision in DRAFT, and it has been treated as unanswerable without a probe.
 These records are observational evidence about the client's own retry behaviour.
 
 Recorded, not acted on: two samples is not an answer, and phase 13 owns the

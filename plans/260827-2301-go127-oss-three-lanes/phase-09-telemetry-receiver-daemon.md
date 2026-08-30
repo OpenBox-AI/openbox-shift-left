@@ -2,7 +2,7 @@
 
 ## Context links
 
-- Parent: [plan.md](plan.md) · Depends: [phase-08](phase-08-adr-contract-decision.md)
+- Parent: [plan.md](plan.md) · Depends: [phase-08](phase-08-contract-decision.md)
   (contract + namespaces), [phase-04](phase-04-launchd-service-lifecycle.md)
   (settled service lifecycle; otlpreceiver also needs phase 01's go 1.25+ floor)
 - Decision: **D-OSS-2** — OTLP intake via
@@ -63,13 +63,13 @@
    `KeepAlive`, stdio to `~/.openbox/telemetry.log`, install/rollback/uninstall.
 5. `openbox doctor` reports the lane: configured / reachable / **recording**.
 6. Posture: a `telemetry` key resolved by the existing `resolveBoolWithSource`
-   tri-state pattern, **on by default once the lane is installed** (validation
-   ruling 2026-08-27 — installing is the opt-in; a second switch would leave the
-   lane inert, the ADR-0016 `ResolveFinops` lesson). Content still rides the
-   existing `content_capture` gate. Two mechanisms are required, per the ADR-0016
-   precedent: `*bool` so `omitempty` cannot drop an explicit `false`, and
-   `flagPassed` so a plain re-run never reverts a deliberate opt-out — with the
-   **second-invocation** test that catches the latter.
+tri-state pattern, **on by default once the lane is installed** (validation
+ruling 2026-08-27 — installing is the opt-in; a second switch would leave the
+lane inert, that decision `ResolveFinops` lesson). Content still rides the
+existing `content_capture` gate. Two mechanisms are required precedent: `*bool`
+so `omitempty` cannot drop an explicit `false`, and `flagPassed` so a plain
+re-run never reverts a deliberate opt-out — with the **second-invocation** test
+that catches the latter.
 7. `telemetry/` has its own `guard_test.go`: direct requires enumerated
    (otlpreceiver + collector companions + `client` + `decision`), so the
    constraint is enforced, not remembered.

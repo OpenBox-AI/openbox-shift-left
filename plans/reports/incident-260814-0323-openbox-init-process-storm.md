@@ -72,8 +72,8 @@ like a tight respawn loop and is not one.
 
 ### 1. Tests wrote into the developer's real machine
 
-`init` defaults to PROJECT scope from process cwd (`cli/cmd/openbox/main.go:459-464`, ADR-0016).
-Helpers pinned `OPENBOX_HOME`/`OPENBOX_CONFIG` but **not `HOME` and not cwd**:
+`init` defaults to PROJECT scope from process cwd (`cli/cmd/openbox/main.go:459-464`). Helpers
+pinned `OPENBOX_HOME`/`OPENBOX_CONFIG` but **not `HOME` and not cwd**:
 
 | Leak | Destination | Evidence |
 |---|---|---|
@@ -254,6 +254,6 @@ recurrence should now be invisible rather than fatal.
    `managed.go:247` is already temp+rename so the corruption class does not apply; the engine-copy
    amplification and a concurrency bound were not checked there.
 5. `init --dry-run` still prints that it would "register developer agent" and "write credentials" —
-   both moved to `auth` in ADR-0015. Stale text, harmless, misleading.
+both moved to `auth` in. Stale text, harmless, misleading.
 6. `adapters/claude-code/posture_test.go` is unformatted — belongs to concurrent in-flight work,
    left untouched.

@@ -41,14 +41,14 @@
 3. Testbed: core unreachable ⇒ `fail_closed:false` proceeds **and records the failure**;
    `fail_closed:true` denies. Both asserted.
 4. Testbed: core hostname blocked ⇒ the documented behaviour occurs, matching what the README
-   and ADR-0017 claim.
+and that decision claim.
 5. Testbed: a known secret in a `Write` body never appears in anything that egressed;
    redaction still applied to the tool call with core unreachable.
 6. Testbed: session posture carries the deciding policy identity; a no-verdict session reports
    failure-policy-decided.
 7. Raw-rego org: gated call denied. If the local stack cannot host a raw-rego policy, record
    "not verified" with the reason — do not mark the headline fix proven.
-8. CI: grep gate failing the build on tier vocabulary outside `docs/adr/`.
+8. CI: grep gate failing the build on tier vocabulary outside.
 9. Final sweep: build, vet, `-race` for all 11 modules, plus the Windows cross-compile.
 10. Record the run in `reports/`, per platform, including what was not exercised.
 
@@ -117,7 +117,7 @@
 | Risk | L×I | Observable signal it broke | Pre-decided response |
 |---|---|---|---|
 | Testbed cannot run (no local stack) | M×H | phase closes with no live evidence | **Adjust:** record "not run" in `reports/` and in docs. This repo's rule is that reading is not evidence — an unverified enforcement change is not shippable. |
-| Raw-rego case unstageable locally | M×M | the headline fix is unproven | **Accepted, disclosed:** record it as unverified; do not let the ADR or README claim it as proven. |
+| Raw-rego case unstageable locally | M×M | the headline fix is unproven | **Accepted, disclosed:** record it as unverified; do not let that decision or README claim it as proven. |
 | fail-open path passes trivially (call proceeds, nothing recorded) | M×H | no failure record in the events | **Adjust:** the assertion is proceed **and** record. A silent allow is the failure mode. |
 | Codex runtime never exercised | M×M | a Codex-only enforcement bug ships | **Accepted, disclosed:** state that Codex is verified to the extent phase 1's ceiling allows, and name what is untested. |
 | Docs updated to match a partial run | M×H | assurance table overstates | **Stop:** step 10 is the last gate; any row that overstates blocks the release. |

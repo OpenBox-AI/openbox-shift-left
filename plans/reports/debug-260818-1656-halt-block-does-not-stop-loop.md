@@ -34,7 +34,7 @@ Enforcement sink (`enforcements.jsonl`, 4565 rows):
 |---|---|---|---|
 | ALLOW | proceed | evaluate | 1908 |
 | (none) | proceed | evaluate:fail-open | 757 |
-| (none) | proceed | tier2:fail-open (pre-ADR-0017 engine) | 745 |
+| (none) | proceed | tier2:fail-open (pre-that decision engine) | 745 |
 | ALLOW | proceed | local-bundle / tier2:evaluate (old engine) | 1142 |
 | **HALT** | **deny** | evaluate | **13** |
 
@@ -63,7 +63,7 @@ carrying on — exactly the reported symptom.
 
 Posture: live config `~/.openbox/dev.json` has `enforce:true`, `findings:true`; default
 `fail_closed:false`. (`~/Library/Application Support/openbox/dev.json` is a stale
-pre-ADR-0015 leftover — keychain-era fields — not read; `OPENBOX_CONFIG` unset ⇒
+pre-that decision leftover — keychain-era fields — not read; `OPENBOX_CONFIG` unset ⇒
 `~/.openbox/dev.json` per devconfig.go:217-227.)
 
 ## Why each guarantee reads as "it didn't stop"

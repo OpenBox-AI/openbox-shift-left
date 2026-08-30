@@ -64,7 +64,7 @@ else
 fi
 
 # ── 47.1  the CA exists and is name-constrained ───────────────────────────────
-# The constraint is what survives the trust boundary ADR-0015 already concedes:
+# The constraint is what survives the trust boundary that decision already concedes:
 # the key is readable by anything running as the developer, so a leaked key must
 # not be able to mint a certificate for anything but the intercepted host.
 tb_step "47.1  the project CA is name-constrained to the provider host"

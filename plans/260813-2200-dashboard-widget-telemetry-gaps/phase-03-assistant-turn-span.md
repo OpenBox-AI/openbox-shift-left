@@ -2,7 +2,7 @@
 
 ## Context links
 
-- Plan: [plan.md](plan.md) · Blocked on: [phase 01 (ADR-0018)](phase-01-adr-0018-dev-turn-content-carrier.md),
+- Plan: [plan.md](plan.md) · Blocked on: [phase 01 ](phase-01-dev-turn-content-carrier.md),
   [phase 02](phase-02-activity-status-field.md) (same struct, same golden dir)
 - Evidence: [scout-02 §Widgets 1 & 2](scout/scout-02-write-side-core-sdk-shiftleft.md),
   [scout-01 §1-2](scout/scout-01-read-side-fe-backend.md),
@@ -276,10 +276,10 @@ Do **not** touch: `adapters/claude-code/usage.go` (the projection), `client/hook
 | Risk | L×I | Mitigation / signal & pre-decided response |
 |---|---|---|
 | `last_assistant_message` absent on `SubagentStop` (or renamed) | M×M | Gate is `!= ""`, so absence ⇒ no span, no error. **Signal:** phase 5 live check shows alignment rows for main-thread turns only. **Response:** adjust in-plan — document subagent turns as unfed; do NOT reach into the transcript to compensate |
-| Field absent on BOTH hooks (provider changed) | L×H | **Signal:** step 8 unit test against a real captured `Stop` payload finds nothing to bind. **Response:** stop-and-replan onto the brief's original source (transcript projection + INV-2 allowlist amendment), which then needs an ADR-0018 amendment before coding |
+| Field absent on BOTH hooks (provider changed) | L×H | **Signal:** step 8 unit test against a real captured `Stop` payload finds nothing to bind. **Response:** stop-and-replan onto the brief's original source (transcript projection + INV-2 allowlist amendment), which then needs an that decision amendment before coding |
 | Core classifies the span as something other than `llm_completion` ⇒ AGE still silent | M×H | Classification traced through `ComputeSemanticTypeFromSpan` → `ComputeSemanticType` → `classifyMCPType`(skip) → `classifyLLMType`(hit). **Signal:** `spans.span_type != 'llm_completion'` in the live check. **Response:** adjust in-plan — add the root `http_method`/`http_url` twin (`session.go:236-256`), the documented second path |
-| Synthesized `http.url` triggers an org policy keyed on HTTP egress | M×M | Named in ADR-0018; turn events are never gated (`Stop` writes no stdout, `hookrun.go:176-184`), so a verdict on them cannot block. **Signal:** noisy violations on turn events. **Response:** adjust in-plan — drop `http.url` to the root-field variant or revisit OD-0018-1 |
-| Span rows + Merkle span leaves + `age_span_evaluations` reappear unexpectedly for dev sessions | H×L | Accepted and pre-recorded in ADR-0018 consequences (`openbox-core .../storage_event.go:146,189-197`). Tool Health is unaffected: its `span_tools` CTE selects `span_type='mcp_tool_call'` only (scout-01:269-284), so no double counting |
+| Synthesized `http.url` triggers an org policy keyed on HTTP egress | M×M |; turn events are never gated (`Stop` writes no stdout, `hookrun.go:176-184`), so a verdict on them cannot block. **Signal:** noisy violations on turn events. **Response:** adjust in-plan — drop `http.url` to the root-field variant or revisit OD-0018-1 |
+| Span rows + Merkle span leaves + `age_span_evaluations` reappear unexpectedly for dev sessions | H×L | Accepted and pre- consequences (`openbox-core .../storage_event.go:146,189-197`). Tool Health is unaffected: its `span_tools` CTE selects `span_type='mcp_tool_call'` only (scout-01:269-284), so no double counting |
 | Re-reported turn stores a second span row | M×M | Deterministic ids + core's `(span_id, stage)` dedupe. **Signal:** duplicate spans for one `activity_id`. **Response:** adjust in-plan; the irreducible lost-200 window stays a documented server-side ask |
 | Redaction forgotten on a future path | M×H | Structural: redaction lives on the `Mapper` collaborator, so every `MapTurn` output is redacted by construction; C25 asserts on outbound bytes |
 | Alignment still silent because LlamaFirewall is unset | M×M | `performTraceCheck` returns nil when `LlamaFirewallHost==""` (`llama_firewall.go:31-34`). Documented in phase 5 as a precondition, not a defect of this phase |
@@ -295,11 +295,11 @@ Do **not** touch: `adapters/claude-code/usage.go` (the projection), `client/hook
   anything from the transcript in this phase; each would be its own decision.
 - Thinking blocks are never captured — `last_assistant_message` is the final text only, and the
   provider's own OTel export redacts thinking unconditionally. Keep that stance in code comments.
-- With `secret_detection:false` the text egresses unredacted: state it in the ADR and in
+- With `secret_detection:false` the text egresses unredacted: state it in that decision and in
   `docs/data-and-privacy.md` (phase 4), never imply otherwise.
 - Server-side, the assistant text becomes visible to Guardrails/OPA and is stored in `spans` +
-  hashed into Merkle leaves. That is a real retention increase, named in ADR-0018 consequences and
-  out of shift-left's control (backend question).
+hashed into Merkle leaves. That is a real retention increase consequences and out of shift-left's
+control (backend question).
 
 ## Next steps
 

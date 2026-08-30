@@ -96,13 +96,13 @@ and "who may emit" are the same question:
 then precedence transport > gateway > telemetry — **corrected by one rule that a pure
 ranking gets wrong.**
 
-**ROUTED and IN PATH are different facts.** ADR-0022 ranks transport above gateway because
-an in-path relay observes real bytes; that answers "what should an org install". The election
-answers "what will actually see THIS call", and a base URL pointing anywhere other than the
-provider defeats the relay — a loopback URL is not proxied at all (`NO_PROXY` carries
-127.0.0.1, which this package writes), and any other host is blind-tunnelled because it is
-not the provider's. So with both in-path lanes configured, the **gateway** is the emitter and
-naming transport would attribute every turn to a lane that saw none.
+**ROUTED and IN PATH are different facts.** That decision ranks transport above gateway
+because an in-path relay observes real bytes; that answers "what should an org install". The
+election answers "what will actually see THIS call", and a base URL pointing anywhere other
+than the provider defeats the relay — a loopback URL is not proxied at all (`NO_PROXY`
+carries 127.0.0.1, which this package writes), and any other host is blind-tunnelled because
+it is not the provider's. So with both in-path lanes configured, the **gateway** is the
+emitter and naming transport would attribute every turn to a lane that saw none.
 
 The count was never at risk — exactly one lane emits in every one of these states. What was
 at risk is the ATTRIBUTION, which is the election's other job. `Election` therefore carries

@@ -3,7 +3,6 @@
 ## Context links
 
 - Parent: [plan.md](plan.md) · Depends on: phase 5 (`auth` must exist to point at)
-- Authorized by: **ADR-0016** (phase 1) for the scope default
 - Blocks: phase 8 (verification exercises the two-command flow)
 - Created by validation on 2026-08-13 (D5, D6) — this phase did not exist in the
   original plan.
@@ -50,10 +49,10 @@
   --provider codex` resolves to global while saying so. Silently governing every
   Codex session when the user asked for one project is worse than an error.
 - **`--local-hooks`'s flag text is evidence, not just prose.** It reads "LOCAL
-  TESTING opt-in … production posture is managed-settings/global activation; never
-  set this in production" (`main.go:359`). Promoting that path to the default
-  directly contradicts shipped guidance, which is exactly why ADR-0016 must land
-  first and why this phase rewrites the text rather than leaving it to rot.
+TESTING opt-in … production posture is managed-settings/global activation; never
+set this in production" (`main.go:359`). Promoting that path to the default
+directly contradicts shipped guidance, which is exactly why that decision must
+land first and why this phase rewrites the text rather than leaving it to rot.
 - **`--enforce` must keep working after the split.** Enforce is posture, posture is
   `init`'s, and `--no-enforce` exists precisely because "a plain re-init leaves an
   existing posture alone rather than silently downgrading it" (`main.go:362`). Do
@@ -210,7 +209,7 @@ can write a secret, and `devinit`'s registration entry point is reachable only f
 | Risk | L×I | Observable signal it broke | Pre-decided response |
 |---|---|---|---|
 | A moved flag is silently ignored instead of erroring | M×H | a script passing `--base-url` to `init` keeps exiting 0 while the URL goes nowhere | **Adjust:** every moved flag gets an explicit error test. Silent acceptance of a flag that no longer does anything is worse than removing it loudly. |
-| Default-local ships without ADR-0016 | L×H | the scope default changes with no document explaining what is ungoverned | **Stop:** phase 1 blocks this phase for exactly this reason. |
+| Default-local ships without that decision | L×H | the scope default changes with no document explaining what is ungoverned | **Stop:** phase 1 blocks this phase for exactly this reason. |
 | Codex users get global scope thinking they got local | M×H | events from every Codex session on the machine after asking for one project | **Mitigated by design:** unspecified scope prints the resolved scope; `--scope local` errors. Never infer silently. |
 | Slimming removes `--managed-enable` and an org needed the substrate it records | L×M | an org force-enable rollout has no local record | **Flagged, unresolved:** listed in plan.md's Unresolved — confirm before this phase lands. Restoring it is one flag, not a redesign. |
 | The enforce default flips while `Enforce` is still a plain `bool` | M×H | the new default has no effect on existing configs, and `--enforce=false` does not persist | **Stop:** this is the `Finops` bug verbatim (`CLAUDE.md`, commit `42011e0`). The type change is step 1a and is not optional. |
@@ -222,7 +221,7 @@ can write a secret, and `devinit`'s registration entry point is reachable only f
 
 ## Security Considerations
 
-- The scope default is a governance downgrade recorded in ADR-0016; this phase must
+- The scope default is a governance downgrade; this phase must
   not soften how it is reported. `printGovernedScope` naming exactly one governed
   directory is the compensating control.
 - `init` losing all credential handling is a security *improvement*: after this

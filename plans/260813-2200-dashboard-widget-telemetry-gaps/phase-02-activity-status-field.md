@@ -2,7 +2,7 @@
 
 ## Context links
 
-- Plan: [plan.md](plan.md) · Blocked on: [phase 01 (ADR-0018)](phase-01-adr-0018-dev-turn-content-carrier.md)
+- Plan: [plan.md](plan.md) · Blocked on: [phase 01 ](phase-01-dev-turn-content-carrier.md)
 - Evidence: [scout-02 §Widget 3](scout/scout-02-write-side-core-sdk-shiftleft.md),
   [scout-01 §3](scout/scout-01-read-side-fe-backend.md)
 - Core-side target (read-only): `openbox-core internal/services/activities/observability/errors.go:301-337`
@@ -59,7 +59,7 @@
 - R3: `status` is NOT content-gated — it ships identically with `content_capture:false`.
 - R4: Value vocabulary is closed: `completed` | `failed`. The client omits anything else
   (defence against a typo silently zeroing the metric).
-- R5: Adapter-facing contract updated as an additive v1.2 with a version note (ADR-0014 v1.1
+- R5: Adapter-facing contract updated as an additive v1.2 with a version note (that decision v1.1
   precedent), including every fixture that pins the version const.
 - R6: `activity_id`, `event_id`, approval keys byte-unchanged; all 11 modules green under
   `-race`; both cross-compiles (windows/amd64, linux/arm64) still build.
@@ -207,7 +207,7 @@ Do **not** touch: `client/approval_key_pin_test.go`, `client/turn_key_pin_test.g
 | `PostToolUse` fires on failure and B2 was chosen ⇒ SUCCESS reads 100% while calls fail | M×H | Step 1 gates the phase. **Signal:** phase 5 live check shows SUCCESS=100.0% with a known-failing call in the session. **Response:** stop-and-replan — switch to B1 or withdraw the field for that provider; do not "tune" the metric |
 | Wrong string (`"success"`, `"COMPLETED"`) silently keeps the metric at 0% | M×H | Client-side allowlist + a conformance case asserting the literal on the outbound bytes; core's comparison quoted in the code comment |
 | Schema bump misses a fixture ⇒ conformance red late | M×L | Enumerated: 17 files listed above; run the contracts module tests immediately after step 5 |
-| `workflow_status` on activity rows changes a UI/compliance rendering | L×M | Reader inventory taken (backend grep: only compliance evidence export + demo seeder). **Signal:** an activity row renders as a session status somewhere. **Response:** adjust in-plan — restrict to `ToolResult` (already the design) and note in ADR consequences |
+| `workflow_status` on activity rows changes a UI/compliance rendering | L×M | Reader inventory taken (backend grep: only compliance evidence export + demo seeder). **Signal:** an activity row renders as a session status somewhere. **Response:** adjust in-plan — restrict to `ToolResult` (already the design) and note in decision record consequences |
 | Adding a field reorders keys and churns every fixture | L×M | Field appended last, deliberately; step 8 reads the diff before accepting |
 | Codex diverges from Claude Code and looks like a bug | M×L | `capabilities.go` entry + MAPPING note (phase 4) state it explicitly |
 

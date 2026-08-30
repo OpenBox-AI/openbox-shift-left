@@ -202,8 +202,8 @@ func TestWriteEnvFilePermissionsAndHeader(t *testing.T) {
 	}
 	if runtime.GOOS == "windows" {
 		// os.Chmod only toggles the read-only attribute on Windows, so 0600 is
-		// a documented no-op there (ADR-0015). The write is still asserted.
-		t.Log("skipping mode assertion: 0600 is a no-op on Windows (ADR-0015)")
+		// a documented no-op there. The write is still asserted.
+		t.Log("skipping mode assertion: 0600 is a no-op on Windows ")
 	} else if got := st.Mode().Perm(); got != 0o600 {
 		t.Errorf("mode = %04o, want 0600", got)
 	}

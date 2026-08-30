@@ -1,8 +1,7 @@
 # Upgrading: inline policy evaluation
 
-What changes for an existing install when
-[ADR-0017](adr/ADR-0017-inline-policy-evaluation.md) lands. Read the two starred
-items even if you read nothing else.
+What changes for an existing install when inline evaluation lands. Read the two
+starred items even if you read nothing else.
 
 ## ⚠️ File bodies now leave the machine on a gated call
 
@@ -11,7 +10,7 @@ items even if you read nothing else.
 
 Until now, only shell commands and MCP arguments were sent for a decision, and only
 for those two classes. Every gated tool call is decided by OpenBox now, so a **Write
-or Edit body is sent** as part of asking for that decision.
+or Edit body is sent** as part of asking for that verdict.
 
 What bounds it:
 
@@ -96,12 +95,10 @@ Two of those sentences have since been overtaken, and they are called out here b
 this page is where an upgrading reader looks:
 
 - the observe path **does** now carry tool commands, file bodies and tool output
-  ([ADR-0019](adr/ADR-0019-full-content-capture.md) P1), so "no bodies on observe
-  events" stopped being true in August 2026;
+, so "no bodies on observe events" stopped being true in August 2026;
 - there **is** now an optional daemon — the model-call gateway
-  ([ADR-0021](adr/ADR-0021-openbox-local-gateway.md)). It is opt-in per machine
-  (`openbox init --provider claude-code --gateway`), so an existing install acquires
-  it only by asking for it.
+. It is opt-in per machine (`openbox init --provider claude-code --gateway`), so an
+existing install acquires it only by asking for it.
 
 One approval behaviour did shift: a `REQUIRE_APPROVAL` verdict is now always a
 *filed* record, so the hook holds briefly for a real decision instead of falling

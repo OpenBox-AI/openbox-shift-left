@@ -20,8 +20,8 @@ import (
 // The gateway files its evidence in the Claude Code adapter's spool, under the
 // session id the request carried, so the hook path's existing flushers deliver it
 // — no second delivery mechanism, and the two producers' events for one session
-// travel together. ADR-0021 scopes the gateway to Claude Code; a second provider
-// needs its own resolution here, not a rename.
+// travel together. That decision scopes the gateway to Claude Code; a second
+// provider needs its own resolution here, not a rename.
 const (
 	gatewaySpoolSubdir   = "cc-spool"
 	gatewaySpoolProvider = "claude-code"

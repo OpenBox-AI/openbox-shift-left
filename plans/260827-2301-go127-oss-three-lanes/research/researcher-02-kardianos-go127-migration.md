@@ -50,13 +50,12 @@ source. Get this from `go doc -all` per (a) once the module is fetchable in a
 normal (non-sandboxed) shell.
 
 **(c) User agent vs system daemon — GENERAL, moderate-high confidence, not
-re-verified.** `UserService` (bool) Option controls install target:
-`true` → `~/Library/LaunchAgents/<label>.plist` (no root, runs as the logged-in
-user); `false`/default → `/Library/LaunchDaemons/<label>.plist` (root required
-to write + `launchctl bootstrap`/`load` at the system level). For a
-per-developer gateway daemon (ADR-0021: "per-developer loopback daemon"),
-`UserService: true` is almost certainly the correct choice — confirm alongside
-(a)/(b).
+re-verified.** `UserService` (bool) Option controls install target: `true` →
+`~/Library/LaunchAgents/<label>.plist` (no root, runs as the logged-in user);
+`false`/default → `/Library/LaunchDaemons/<label>.plist` (root required to
+write + `launchctl bootstrap`/`load` at the system level). For a per-developer
+gateway daemon (that decision: "per-developer loopback daemon"), `UserService:
+true` is almost certainly the correct choice — confirm alongside (a)/(b).
 
 **(d) Install/Uninstall/Start/Stop — UNVERIFIED, general expectation only.**
 Typical kardianos/service shape: `Install()` writes the plist only (does not

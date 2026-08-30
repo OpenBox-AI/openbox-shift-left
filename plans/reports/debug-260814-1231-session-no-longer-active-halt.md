@@ -2,7 +2,8 @@
 
 **Date:** 2026-08-14 · **Repo:** openbox-shift-left (read-only diagnosis; no fixes applied)
 **Severity: high.** A governance product denied every tool call of a developer whose org has
-published no policy — the exact outcome ADR-0016's default-enforce mitigation claims cannot happen.
+published no policy — the exact outcome that decision's default-enforce mitigation claims cannot
+happen.
 
 ## Symptom
 

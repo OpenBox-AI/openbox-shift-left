@@ -141,8 +141,7 @@ coordinates  OPENBOX_AGENT_DID, OPENBOX_AGENT_ID, …       env var  >  dev.json
                                         (AIP-signed, same endpoint as agent runtime)
 ```
 
-Enforcement decides **in-process** in microseconds
-([ADR-0006](docs/adr/ADR-0006-in-process-decider.md)); telemetry is spooled and
+Enforcement decides **in-process** in microseconds; telemetry is spooled and
 delivered off the hot path (a detached, debounced flusher drains within ~2s of each
 tool call; SessionEnd is the completeness safety net). A slow or absent OpenBox never
 slows a tool call and never blocks one.
@@ -156,10 +155,10 @@ behind one SPI. Adding a tool is an adapter, not a fork.
 | | |
 |---|---|
 | **Session telemetry** | every session, prompt, tool call and MCP call as normalized governance events |
-| **Per-turn finops** | which model spent how many tokens, per turn, on by default ([ADR-0014](docs/adr/ADR-0014-turn-as-activity-and-identifier-allowlist.md)) |
+| **Per-turn finops** | which model spent how many tokens, per turn, on by default |
 | **Enforcement** | block, ask-for-approval, or redact secrets *before* a tool runs, from your org policy — **on by default** |
 | **Human approval** | a risky call pauses the session; an approver answers from the dashboard or `openbox approve` |
-| **Autonomous approval** | a bounded approver answers inside the pause, so routine work never waits ([ADR-0012](docs/adr/ADR-0012-autonomous-approver.md)) |
+| **Autonomous approval** | a bounded approver answers inside the pause, so routine work never waits |
 | **Lineage** | `session → commit → deploy`, with a signed commit attestation |
 | **Evidence** | each session reports its own effective posture, so the control plane never trusts the endpoint's word |
 
@@ -206,13 +205,12 @@ A governance tool that overstates its guarantees is the failure it exists to pre
 so the limits are first-class:
 
 - **Your credentials sit in a plaintext file.** `~/.openbox/.env` is `0600` on
-  macOS/Linux, but anything running as you — including the coding agent under
-  governance — can read your signing key and sign events as you. On Windows `0600` is
-  a no-op and other local accounts can read it. Attestation therefore proves
-  origin-of-config, not tamper-resistance against the developer
-  ([ADR-0015](docs/adr/ADR-0015-plaintext-credential-file.md)).
+macOS/Linux, but anything running as you — including the coding agent under
+governance — can read your signing key and sign events as you. On Windows `0600` is a
+no-op and other local accounts can read it. Attestation therefore proves
+origin-of-config, not tamper-resistance against the developer.
 - **Project scope means partial coverage.** With the default `init`, only the
-  initialized directory is governed ([ADR-0016](docs/adr/ADR-0016-default-install-posture.md)).
+initialized directory is governed.
 - **Local enforcement prevents mistakes, not motivated bypass**, until the provider's
   managed configuration is deployed (`deploy/managed/`).
 - **Egress is recorded, not controlled.** OpenBox does not proxy or allow-list the
@@ -250,8 +248,7 @@ afterwards: it is a stale plaintext copy of live credentials.
 
 ## Contributing
 
-Go 1.23+, no cgo. A Go workspace of small modules
-([ADR-0011](docs/adr/ADR-0011-multi-module-layout.md)):
+Go 1.23+, no cgo. A Go workspace of small modules :
 
 ```bash
 go build ./cli/...                  # the binary
@@ -260,8 +257,8 @@ cd cli && go test ./...             # one module
 ```
 
 Anything provider-agnostic belongs in `adapters/common/`; a new table, endpoint or
-service needs an ADR. `testbed/00-preflight.sh` tells you whether the stack you have
-is healthy enough to trust the results.
+service needs a decision record. `testbed/00-preflight.sh` tells you whether the
+stack you have is healthy enough to trust the results.
 
 ## Documentation
 
@@ -271,7 +268,7 @@ is healthy enough to trust the results.
 | [Architecture](docs/architecture.md) | engine, adapters, enforcement tiers, approvals, assurance |
 | [Data and privacy](docs/data-and-privacy.md) | exactly what is captured and sent |
 | [Lineage](docs/lineage.md) | `session → commit → deploy` and how it is verified |
-| [ADRs](docs/adr/) | the decisions, and why |
+| decision records | the decisions, and why |
 | [Event contract](contracts/dev-event/) | the normalized event schema and its wire mapping |
 | [End-to-end tests](docs/testbed/e2e.md) | `testbed/` — a mock-free suite against a real stack |
 

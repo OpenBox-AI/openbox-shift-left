@@ -3,7 +3,7 @@
 ## Context links
 
 - Parent: [plan.md](plan.md) · Depends on: phase 6 (docs describe what shipped)
-- Blocks: phase 8 · Authorized by: ADR-0017
+- Blocks: phase 8 · Authorized by
 - Repo rule (`CLAUDE.md`): "a governance product that overstates itself is the failure it
   exists to prevent, so prefer an honest limit over a confident sentence."
 
@@ -44,7 +44,8 @@
 ## Requirements
 
 1. Tier vocabulary removed from code comments, CLI help, config docs and all user docs.
-   ADR history keeps its own words — ADRs are records, not current docs.
+decision record history keeps its own words — decision records are
+records, not current docs.
 2. `docs/architecture.md`: rewrite the enforcement section to the three named features; fix
    the findings-orthogonality error; keep the mode table (observe / advisory / enforce) since
    modes still exist.
@@ -59,18 +60,18 @@
    truthful, including reachability-dependent enforcement and the fail-open bypass.
 7. `docs/getting-started.md`: no `dev sync` step; explain the failure policy in one sentence
    and where to edit it (`fail_closed` in dev.json, org-lockable).
-8. `docs/adr/ADR-0008-signed-policy-bundles.md`: mark superseded-in-part, pointing at
-   ADR-0017. Do not edit its reasoning.
+8. : mark superseded-in-part, pointing at
+. Do not edit its reasoning.
 9. Release note: content egress change, `dev sync` removal, deprecated config fields, and
    that leftover bundle/pin files on disk are inert and may be deleted.
-10. Reconcile ADR-0017 and the phase-2 assurance limits against what actually shipped; fix any
+10. Reconcile that decision and the phase-2 assurance limits against what actually shipped; fix any
     drift.
 
 ## Architecture
 
-Documentation only. The one structural decision is which document owns which claim: the ADR
-owns *why*, `architecture.md` owns the model, `data-and-privacy.md` owns the field-level
-truth, README owns the summary and the limits, getting-started owns the flow.
+Documentation only. The one structural decision is which document owns which claim: that
+decision owns *why*, `architecture.md` owns the model, `data-and-privacy.md` owns the
+field-level truth, README owns the summary and the limits, getting-started owns the flow.
 
 ## Related code files
 
@@ -80,7 +81,7 @@ truth, README owns the summary and the limits, getting-started owns the flow.
 | `docs/data-and-privacy.md` | content section rewrite |
 | `README.md` | "never sent" claim; limits list |
 | `docs/getting-started.md` | drop `dev sync`; failure policy in one sentence |
-| `docs/adr/ADR-0008-*.md` | superseded-in-part header |
+| `that decision-*.md` | superseded-in-part header |
 | `cli/cmd/openbox/main.go` usage/help | tier vocabulary out |
 | `adapters/common/hookflow/*.go` comments | tier vocabulary out |
 
@@ -94,9 +95,9 @@ truth, README owns the summary and the limits, getting-started owns the flow.
    detection-off combination.
 4. Fix README's privacy claim and limits list.
 5. Update getting-started; remove `dev sync`.
-6. Mark ADR-0008 superseded-in-part.
+6. Mark that decision superseded-in-part.
 7. Write the release note.
-8. Re-read ADR-0017 against the shipped code; fix drift in either direction.
+8. Re-read that decision against the shipped code; fix drift in either direction.
 
 ## Todo list
 
@@ -106,13 +107,13 @@ truth, README owns the summary and the limits, getting-started owns the flow.
 - [x] 64KB cap disclosed; detection-off combination disclosed
 - [x] README "never sent" claim fixed; limits list truthful
 - [x] getting-started drops `dev sync`; failure policy explained
-- [x] ADR-0008 marked superseded-in-part
+- [x] that decision marked superseded-in-part
 - [x] Release note written (content egress, `dev sync`, deprecated fields, inert files)
-- [x] ADR-0017 reconciled with shipped behaviour
+- [x] that decision reconciled with shipped behaviour
 
 ## Success Criteria
 
-- `grep -ric "tier" --include=*.go --include=*.md` outside `docs/adr/` returns 0.
+- `grep -ric "tier" --include=*.go --include=*.md` outside  returns 0.
 - A developer can state the enforcement model in three sentences after reading
   `architecture.md`.
 - A privacy reviewer can determine from `data-and-privacy.md` alone whether their file bodies

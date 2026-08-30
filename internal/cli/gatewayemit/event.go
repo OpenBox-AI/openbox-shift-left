@@ -1,11 +1,11 @@
 // Package gatewayemit turns a relayed model call into a governance event.
 //
 // It serves BOTH in-path model-call lanes: the base-URL gateway it is named for
-// (`:gateway:`, ADR-0021) and the transport relay (`:proxy:`, ADR-0022). The name
-// is the first lane's, kept rather than churned — this sits on the credential
-// path, and renaming it buys readability at the cost of touching every import of
-// a package whose behaviour did not change. What DID change is that the lane is
-// now a required parameter: see Lane.
+// (`:gateway:`) and the transport relay (`:proxy:`). The name is the first
+// lane's, kept rather than churned — this sits on the credential path, and
+// renaming it buys readability at the cost of touching every import of a package
+// whose behaviour did not change. What DID change is that the lane is now a
+// required parameter: see Lane.
 //
 // It is the connector between two halves that were each built and tested against
 // a fake of the other: gateway.Captured on one side, client.DevEvent and its wire
@@ -48,9 +48,9 @@ const ProxyIDPrefix = "px-"
 // gateway was here first — and it would mean a transport emitter someone forgot
 // to configure files its evidence under `:gateway:`, where core's dedupe absorbs
 // it against the real gateway lane's event. Half the evidence would vanish with
-// no error anywhere, which is exactly the failure ADR-0022's disjoint namespaces
-// exist to prevent. So an unset Lane is refused, loudly, at both levels:
-// EventFor returns an error and Emitter.Emit warns and drops.
+// no error anywhere, which is exactly the failure that decision's disjoint
+// namespaces exist to prevent. So an unset Lane is refused, loudly, at both
+// levels: EventFor returns an error and Emitter.Emit warns and drops.
 type Lane struct {
 	// Name is the activity_id namespace segment, and it must agree with client's
 	// turnActivityIDFor. Agreement is asserted on POSTed bytes rather than on this
@@ -105,10 +105,10 @@ type Identity struct {
 	// header. It cannot perturb the activity id — client.turnActivityIDFor returns
 	// from its ":gateway:" branch before it ever reaches the ":agent:" one — so
 	// this is attribution detail, not identity. (Cited by symbol, not line: the
-	// branch moved when ADR-0022 added the ":proxy:" and ":otel:" lanes, and a
-	// line number is a citation that rots silently.) ":proxy:" now precedes
-	// ":gateway:", which does not affect this: a gateway-built event sets no
-	// proxy id.
+	// branch moved when that decision added the ":proxy:" and ":otel:" lanes, and
+	// a line number is a citation that rots silently.) ":proxy:" now precedes
+	// ":gateway:", which does not affect this: a gateway-built event sets no proxy
+	// id.
 	AgentID string
 }
 
@@ -151,10 +151,10 @@ func EventFor(lane Lane, id Identity, requestID string, at time.Time, c gateway.
 			ResponseBody:          c.ResponseBody,
 		},
 	}
-	// The lane's namespace for activity_id (ADR-0021 requirement 8, generalized by
-	// ADR-0022). Without a discriminator turnActivityIDFor falls through to the
-	// hook path's TurnIndex branch and, with no index, returns an EMPTY id — on a
-	// payload that is still spooled, signed and POSTed.
+	// The lane's namespace for activity_id (that decision requirement 8,
+	// generalized by). Without a discriminator turnActivityIDFor falls through to
+	// the hook path's TurnIndex branch and, with no index, returns an EMPTY id —
+	// on a payload that is still spooled, signed and POSTed.
 	lane.setDiscriminator(&ev, requestID)
 
 	// The lane name is NOT in the hash. The id is already lane-scoped (the fallback

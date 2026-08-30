@@ -4,7 +4,7 @@
 
 - Parent: [plan.md](plan.md) · Depends: [phase-09](phase-09-telemetry-receiver-daemon.md)
 - Scout: [scout-02](scout/scout-02-capture-contract-conformance.md) (the contract path)
-- Contract: v1.6 from [phase-08](phase-08-adr-contract-decision.md)
+- Contract: v1.6 from [phase-08](phase-08-contract-decision.md)
 
 ## Overview
 
@@ -106,8 +106,8 @@ an unauthenticated loopback listener is a local-file-read oracle and needs
   present, else a locally minted id — bounded and charset-checked before it reaches
   `activity_id`.
 - Identity from resource attributes (`organization.id`, `user.email`,
-  `session.id`, `service.version`) is **client-asserted**: it may bind sessions for
-  detection; it must never be presented as proof for refusal (ADR-0021 §10 branch).
+`session.id`, `service.version`) is **client-asserted**: it may bind sessions for
+detection; it must never be presented as proof for refusal (that decision branch).
 
 ## Related code files
 
@@ -130,7 +130,7 @@ an unauthenticated loopback listener is a local-file-read oracle and needs
    appears in `signal_args`.
 5. Add every new content key to `contentMetadataKeys` in the same commit.
 6. Implement the silence detector + finding; make its window configurable and its
-   default explicit in ADR-0022.
+default explicit in.
 7. Write the sentinel: capture OFF ⇒ no telemetry content on the wire; capture ON ⇒
    exactly the intended fields, every unrelated sentinel still absent.
 8. Run the two mutation drills by hand and record the result in the phase report.

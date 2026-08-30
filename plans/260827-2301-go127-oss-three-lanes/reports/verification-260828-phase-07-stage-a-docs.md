@@ -83,12 +83,12 @@ credential syntax is subject to it too. The row is rebuilt from split literals.
 | `docs/data-and-privacy.md` | detection mechanism (two layers, 231 rules); table gains a gitleaks-families row + the adjacency row; `OPENBOX_AGENT_PRIVATE_KEY` reason corrected to its measured cause; new limit 1b; new false-positive class; "only the prompt is exempt" corrected; heading "and the one gap" → "and where it stops" |
 | `docs/architecture.md` | the enforce-triad's redaction bullet states the two layers; **two new assurance limits** — detection reach with both misses, and the credential guard's direct-requires scope |
 | `contracts/dev-event/COVERAGE.md` §3.4 | the Claude-Code-vs-Codex redaction asymmetry now records that D-OSS-4 **widened** it: 231 formats vs none. C42 cited. Not smoothed away, per the phase's instruction |
-| `CLAUDE.md` | the credential guard's scope stated for the first time (ADR-0023, direct requires only, and what is no longer bounded); `decision/guard_test.go` added to the allowlist-test list |
+| `CLAUDE.md` | the credential guard's scope stated for the first time (that decision, direct requires only, and what is no longer bounded); `decision/guard_test.go` added to the allowlist-test list |
 
 Already true from earlier phases, verified rather than re-done: the `x/term` pin
 paragraph (phase 01), the dependency story (phases 01/03/06), the secret-detection
-paragraph (phase 06 + its correction), the ADR index entry for ADR-0023 (phase 05),
-`.goreleaser.yaml`'s 11 → 12 (phase 01).
+paragraph (phase 06 + its correction), that decision index entry for that decision
+(phase 05), `.goreleaser.yaml`'s 11 → 12 (phase 01).
 
 ## Dependency inventory, verified against go.mod
 
@@ -119,9 +119,8 @@ Reported rather than satisfied by invention:
    provider-coverage document would put the fact where nobody looks for it;
    `CLAUDE.md` already owns it.
 2. **Requirements 1 and 5 say to "correct" the credential-guard scope sentence.
-   No such sentence existed** in `CLAUDE.md` or `docs/architecture.md` — the guard's
-   scope was never documented, before or after ADR-0023. Added to both rather than
-   corrected.
+No such sentence existed** in `CLAUDE.md` or `docs/architecture.md` — the guard's
+scope was never documented, before or after. Added to both rather than corrected.
 
 ## Evidence
 
@@ -129,8 +128,8 @@ Reported rather than satisfied by invention:
 |---|---|
 | `.go` files touched by this phase | **none** — markdown only |
 | relative links in the 4 edited docs | **45 checked, 0 broken** |
-| ADR-0023 file + index entry | both present |
-| live-tree `x/term` pin instruction | **none** — the only mention is ADR-0015's historical record, which carries a "Superseded … pin only" marker |
+| that decision file + index entry | both present |
+| live-tree `x/term` pin instruction | **none** — the only mention is that decision's historical record, which carries a "Superseded … pin only" marker |
 | `.goreleaser.yaml` module count | 12 |
 | dependency inventory vs `go.mod` | exact, table above |
 | detection boundary | re-measured, 20 shapes, table above |

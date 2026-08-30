@@ -180,8 +180,8 @@ func (g countingGovernor) Emit(context.Context, client.DevEvent) (client.Evaluat
 }
 
 // The gate must not retry a failed evaluation. It runs on EVERY gated tool call
-// since ADR-0017, so a retry loop here would turn one control-plane hiccup into
-// a client-side amplifier — every developer's every tool call hammering a
+// since that decision, so a retry loop here would turn one control-plane hiccup
+// into a client-side amplifier — every developer's every tool call hammering a
 // struggling core, and each call delayed by the full retry sequence while doing
 // it. A failed evaluation applies the org's failure policy and returns.
 //
@@ -218,8 +218,8 @@ func TestGate_DoesNotRetryAFailedEvaluation(t *testing.T) {
 // A REQUIRE_APPROVAL that survived a DEGRADED escalation was never sent, so
 // there is no record to poll for. Holding on it would spend the entire budget
 // on not-founds and then deny a call the org only asked to prompt about.
-// TestGate_DoesNotHoldForAnUnfiledApproval is deleted with the local evaluator
-// (ADR-0017).
+// TestGate_DoesNotHoldForAnUnfiledApproval is deleted with the local
+// evaluator.
 //
 // It covered a state that can no longer exist: a LOCAL bundle returning
 // REQUIRE_APPROVAL while the escalation that would file it could not deliver,
@@ -228,6 +228,6 @@ func TestGate_DoesNotRetryAFailedEvaluation(t *testing.T) {
 // REQUIRE_APPROVAL can only come from the server, which means it was filed by
 // definition.
 //
-// The guard that outlived it is in the gate itself and still reads
-// `dec.Source == SourceEvaluate` before holding, so a hold still requires a
-// server verdict rather than merely a REQUIRE_APPROVAL-shaped decision.
+// The guard that outlived it is in the gate itself and still reads `dec.Source
+// == SourceEvaluate` before holding, so a hold still requires a server verdict
+// rather than merely a REQUIRE_APPROVAL-shaped decision.

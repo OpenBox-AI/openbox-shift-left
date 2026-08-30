@@ -17,29 +17,29 @@ import (
 // people who would rather stay in a terminal.
 //
 // It is deliberately a client and nothing more: no listener, no socket, no
-// daemon (ADR-0006). And it runs on the APPROVER's machine, which is a
-// different person's machine than the one that made the request — the property
-// a local approver app could never have (E9 §3.7).
+// daemon. And it runs on the APPROVER's machine, which is a different person's
+// machine than the one that made the request — the property a local approver
+// app could never have (E9 §3.7).
 
 // Approval is one pending request in the org's queue.
 //
 // The fields are taken from the LIVE response, not from the backend's
-// ApprovalItemResponseDto — the two disagree, and the wire is richer: it
-// carries `activity_type` and the structural `input`, which the DTO does not
-// declare. E9 §3.5 flagged the shape as something to verify against a real
-// envelope before depending on it; this is that verification.
+// ApprovalItemResponseDto — the two disagree, and the wire is richer: it carries
+// `activity_type` and the structural `input`, which the DTO does not declare. E9
+// §3.5 flagged the shape as something to verify against a real envelope before
+// depending on it; this is that verification.
 //
 // What the queue gives an approver is the agent, the tool, its structural
 // identifiers, and the policy's own reason. Whether it can also show the command
 // depends on the org's posture, not on this DTO: a gated call has carried
-// Content.ToolInput since ADR-0017, so with content capture ON the command IS on
-// the envelope this reads. With capture off it is absent and the queue cannot
-// show what was never sent.
+// Content.ToolInput since that decision, so with content capture ON the command
+// IS on the envelope this reads. With capture off it is absent and the queue
+// cannot show what was never sent.
 //
 // This comment used to say the runtime "never egresses tool commands or file
-// bodies on an observe event" — which was SL3-SEC-3, retired by ADR-0019 P1, and
-// was in any case the wrong invariant to cite here: the queue is fed by GATED
-// events, not observe ones.
+// bodies on an observe event" — which was SL3-SEC-3, and was in any case the
+// wrong invariant to cite here: the queue is fed by GATED events, not observe
+// ones.
 type Approval struct {
 	ID string `json:"id"`
 	// AgentID owns the request; the decide route is per-agent.
@@ -57,9 +57,9 @@ type Approval struct {
 	//
 	// This said "never the command or a file body (INV-2)", contradicting the type
 	// comment four lines above it, which records the opposite: a gated call has
-	// carried Content.ToolInput since ADR-0017. Request() reads Input["command"]
-	// precisely because it is the field an approval is decided on, so the old
-	// wording described the one thing this struct exists to show.
+	// carried Content.ToolInput since. Request() reads Input["command"] precisely
+	// because it is the field an approval is decided on, so the old wording
+	// described the one thing this struct exists to show.
 	Input     map[string]any `json:"input"`
 	Reason    *string        `json:"reason"`
 	ExpiresAt *time.Time     `json:"approval_expired_at"`

@@ -11,11 +11,11 @@
 #   and dev.json via OPENBOX_HOME, and each runtime-state file via its own
 #   override (see below; XDG_CONFIG_HOME alone does NOT isolate them on macOS).
 #   Nothing touches the developer's real ~/.openbox or OS config dir. Enforcement
-#   is now ON by default (ADR-0016), which makes this load-bearing rather than
+# is now ON by default, which makes this load-bearing rather than
 #   tidy: a test posture leaking into the real config would govern every
 #   Claude Code session on the box.
 #
-#   Hooks are installed into one scratch project only, which since ADR-0016 is
+# Hooks are installed into one scratch project only, which since that decision is
 #   simply `init`'s default scope — the phase runs it from inside $TB_PROJECT.
 #   Sessions started anywhere else stay ungoverned, and 10-onboard.sh asserts
 #   that rather than assuming it.
@@ -41,7 +41,7 @@ export OPENBOX_ORG="${OPENBOX_ORG:-$OPENBOX_ORG_ID}"
 
 # Isolation (see the header). Runtime state — spool, bundle, audit logs — still
 # resolves through XDG_CONFIG_HOME; configuration and credentials resolve through
-# OPENBOX_HOME (ADR-0015).
+# OPENBOX_HOME.
 export XDG_CONFIG_HOME="${XDG_CONFIG_HOME_OVERRIDE:-$TB_STATE/config}"
 mkdir -p "$XDG_CONFIG_HOME"
 
@@ -58,7 +58,7 @@ mkdir -p "$XDG_CONFIG_HOME"
 # os.UserConfigDir() per platform, and it fails visibly if a new state file
 # appears without an override.
 export OPENBOX_SPOOL_DIR="${OPENBOX_SPOOL_DIR:-$TB_STATE/state/spool}"
-# The local policy bundle is gone (ADR-0017). The path is left unset rather
+# The local policy bundle is gone. The path is left unset rather
 # than pinned: nothing reads it, and pinning a dead path invites a future reader
 # to assume it still matters.
 export OPENBOX_ENFORCEMENT_FILE="${OPENBOX_ENFORCEMENT_FILE:-$TB_STATE/state/enforcements.jsonl}"
@@ -76,7 +76,7 @@ export OPENBOX_HOME="${OPENBOX_HOME_OVERRIDE:-$TB_STATE/openbox-home}"
 mkdir -p "$OPENBOX_HOME"
 chmod 700 "$OPENBOX_HOME" 2>/dev/null || true
 
-# Credentials are a plaintext 0600 file inside OPENBOX_HOME (ADR-0015). There is
+# Credentials are a plaintext 0600 file inside OPENBOX_HOME. There is
 # no keyring to unlock and no backend to select any more, which is what makes a
 # headless run possible without a prompt — the old harness had to opt into a file
 # backend explicitly to get here.

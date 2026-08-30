@@ -17,15 +17,15 @@ import (
 // `openbox approve --watch --auto --host claude-code` — the autonomous tier.
 //
 // It is a CLIENT of the same queue a person works, under the approver's own
-// credential, and it holds no authority the envelope did not give it
-// (ADR-0012). Two things about the shape are deliberate:
+// credential, and it holds no authority the envelope did not give it. Two
+// things about the shape are deliberate:
 //
-//   - It runs on the APPROVER's machine, not the requester's, and refuses a
-//     request from this machine's own developer agent unless told otherwise.
-//   - It starts in SHADOW mode. Deciding takes `--decide` (or `--allow-decide`
-//     at install time), because the only honest way to learn whether an
-//     envelope's classes are drawn correctly is to watch what it would have
-//     done against real traffic first.
+// - It runs on the APPROVER's machine, not the requester's, and refuses a
+// request from this machine's own developer agent unless told otherwise. - It
+// starts in SHADOW mode. Deciding takes `--decide` (or `--allow-decide` at
+// install time), because the only honest way to learn whether an envelope's
+// classes are drawn correctly is to watch what it would have done against real
+// traffic first.
 
 type autoFlags struct {
 	host        string
@@ -67,12 +67,13 @@ func (a *app) runApproveAuto(cl *backend.Client, orgID string, f autoFlags) int 
 	// exists to prevent.
 	//
 	// OrgID is the "an install actually happened" marker. It used to be
-	// ControlTokenAccount, which ADR-0015 removed along with the secret-store
-	// coordinates; OrgID replaces it exactly, because `init --role approver`
-	// requires --org and so never writes a config without one. The load-bearing
-	// part is that SOME required field is checked: a zero-value ApproverConfig
-	// from an absent file has Shadow == false, so testing !Shadow alone would
-	// grant decide authority to an approver nobody installed.
+	// ControlTokenAccount, which that decision removed along with the
+	// secret-store coordinates; OrgID replaces it exactly, because `init --role
+	// approver` requires --org and so never writes a config without one. The
+	// load-bearing part is that SOME required field is checked: a zero-value
+	// ApproverConfig from an absent file has Shadow == false, so testing
+	// !Shadow alone would grant decide authority to an approver nobody
+	// installed.
 	installedMayDecide := installed.OrgID != "" && !installed.Shadow
 	shadow := !(f.decide || installedMayDecide)
 

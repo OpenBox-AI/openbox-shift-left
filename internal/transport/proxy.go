@@ -15,7 +15,7 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/internal/gateway"
 )
 
-// proxy.go — the in-path model-call lane (`:proxy:`, ADR-0022).
+// proxy.go — the in-path model-call lane (`:proxy:`).
 //
 // THE SHAPE, and why it is not the one phase 11 sketched. The phase proposed
 // goproxy's MITM action plus a hand-built "streaming tee" into gateway's capture

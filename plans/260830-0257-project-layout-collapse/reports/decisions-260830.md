@@ -1,31 +1,33 @@
-# Phase 06 — the ADRs and the layout maps
+# Phase 06 — the decision records and the layout maps
 
-2026-08-30. Two ADR changes, two layout maps rewritten, one repo-wide sweep, and
-**one defect of my own to undo first.**
+2026-08-30. Two decision record changes, two layout maps rewritten, one
+repo-wide sweep, and **one defect of my own to undo first.**
 
-## The defect: phase 05's sweep damaged eight ADRs
+## The defect: phase 05's sweep damaged eight decision records
 
 Phase 05's reference sweep excluded `plans/` as stateful and **did not exclude
-`docs/adr/`**. It rewrote eight ADRs, and in `ADR-0011` it produced literal
-nonsense — `api//acceptance` and `api//conformance`, where a substitution left a
-double slash.
+**. It rewrote eight decision records, and in `that decision` it produced
+literal nonsense — `api//acceptance` and `api//conformance`, where a
+substitution left a double slash.
 
-ADRs are stateful records in exactly the way plans are: each describes a decision
-that was correct on its date. Phase 06's own do-not-touch list names ADR-0011's
-body explicitly, and the sweep had already violated it before this phase started.
+decision records are stateful records in exactly the way plans are: each
+describes a decision that was correct on its date. Phase 06's own do-not-touch
+list names that decision's body explicitly, and the sweep had already violated it
+before this phase started.
 
-All eight were reverted to their pre-sweep state. The net ADR change in this phase
-is **additions only**: a supersession header and note on ADR-0011 (its body
-untouched), an amendment section on ADR-0023, and two index rows.
+All eight were reverted to their pre-sweep state. The net decision record change
+in this phase is **additions only**: a supersession header and note on that
+decision (its body untouched), an amendment section on that decision, and two
+index rows.
 
 **The transferable rule: an exclusion list for "stateful" has to name every
 stateful surface, and `plans/` is not the only one.** The sweep's own report said
 "plans/ excluded — stateful" as if that settled it.
 
-## ADR-0024
+##
 
-Written to the outline, with each of ADR-0011's three reasons given a **named
-disposition** rather than a summary that averages them:
+Written to the outline, with each of that decision's three reasons given a
+**named disposition** rather than a summary that averages them:
 
 - **R1 (release-path risk) — INVERTED.** The `replace` graph is gone and phase 04
   gave the release path the snapshot coverage R1 said it lacked.
@@ -34,26 +36,26 @@ disposition** rather than a summary that averages them:
   compiler used to. **A test is weaker than a compiler and that is the price.**
 - **R3 (no whole-repo build) — already neutral**, paid by `go.work` and `ci.yml`.
 
-**ADR-0011's revisit condition was met CONCURRENTLY, and the ADR says so.** It
-reads "if the release path ever gains real coverage, collapsing becomes a cheap
-follow-up"; that coverage arrived in the same change. Writing it as a satisfied
-precondition would misrepresent how the decision was made — it was an owner
-decision, and the ADR names it as one.
+**that decision's revisit condition was met CONCURRENTLY, and that decision
+says so.** It reads "if the release path ever gains real coverage, collapsing
+becomes a cheap follow-up"; that coverage arrived in the same change. Writing
+it as a satisfied precondition would misrepresent how the decision was made —
+it was an owner decision, and that decision names it as one.
 
 Four costs are recorded beyond R2: any package may now import any other; the
 `cli/internal/*` flattening is a **real widening** and is **forced** rather than
 stylistic (`cmd/openbox` imports twelve of those packages from outside the
-subtree); ADR-0023's bound changes shape; and **nine modules lose their `go.mod`
-as a review surface** — the named loss the owner chose over a new root-level
-allowlist.
+subtree); that decision's bound changes shape; and **nine modules lose their
+`go.mod` as a review surface** — the named loss the owner chose over a new
+root-level allowlist.
 
-Three things ADR-0024 records beyond topology, each because someone would
+Three things that decision records beyond topology, each because someone would
 otherwise reverse it as tidying: the gate outcome that put two binaries in `cmd/`
 and one in `tools/`; the two deliberate root-level exceptions (`install.sh`,
 `.github/workflows/`) with the reason `curl | bash` cannot use a shim; and that
 `init/` is documentation-only with `laneservice` as the sole authority.
 
-## ADR-0023's amendment
+## that decision's amendment
 
 Its scope sentence — "transitive code is bounded at the module that took the
 dependency" — had no referent with one module, and **a guard whose documentation
@@ -92,15 +94,14 @@ in `architecture.md` got the same treatment: the "Bounded by" column now says
 ## The sweep, and the two things it caught
 
 Live code pointers were rewritten mechanically across `README.md`, `CLAUDE.md` and
-`docs/**` (excluding `docs/adr/`), restricted to **multi-segment paths** — a bare
-`gateway/` is prose as often as a path, and a mechanical rewrite of it would
-corrupt English.
+`docs/**` (excluding ), restricted to **multi-segment paths** — a bare `gateway/`
+is prose as often as a path, and a mechanical rewrite of it would corrupt English.
 
 A markdown link check over every live document then found **18 dangling links**,
 all of them consequences of moving the contract prose from `contracts/dev-event/`
-to `docs/`: `../../docs/adr/…` was correct two levels down and is not correct at
-one; `schema/dev-event.schema.json` and `conformance/` were siblings and are not
-any more; and one link pointed at the `ext-core` tombstone phase 05 deleted. All
+to `docs/`: `…` was correct two levels down and is not correct at one;
+`schema/dev-event.schema.json` and `conformance/` were siblings and are not any
+more; and one link pointed at the `ext-core` tombstone phase 05 deleted. All
 fixed; **0 dangling links** now.
 
 ## Verified
@@ -110,8 +111,8 @@ fixed; **0 dangling links** now.
 | every live markdown link in `README.md`, `CLAUDE.md`, `docs/**` resolves | **0 dangling** |
 | no dated `N modules green` line changed | PASS |
 | no `plans/**/reports/` file changed | PASS |
-| ADR bodies unchanged (additions only) | PASS — verified against the pre-damage commit |
-| ADR-0011 marked superseded; index updated | PASS |
+| decision record bodies unchanged (additions only) | PASS — verified against the pre-damage commit |
+| that decision marked superseded; index updated | PASS |
 | build, vet, gofmt | PASS |
 | redaction-marker count | 20 → 20, none introduced |
 

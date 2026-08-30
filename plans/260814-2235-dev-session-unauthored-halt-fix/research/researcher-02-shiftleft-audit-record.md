@@ -80,6 +80,6 @@ Extending for `ts`/`reason`: add positive assertions to `TestRecordEnforcement_A
 
 ## Unresolved questions
 
-1. No single canonical INV-1/INV-2/INV-3 glossary entry found (repo-wide grep hit ~90 files using the labels inline); meaning inferred from repeated comments, not from one definition site — could not fully verify within budget whether a formal ADR-level definition exists elsewhere (e.g. an early ADR not surfaced by my greps).
+1. No single canonical INV-1/INV-2/INV-3 glossary entry found (repo-wide grep hit ~90 files using the labels inline); meaning inferred from repeated comments, not from one definition site — could not fully verify within budget whether a formal decision-level definition exists elsewhere (e.g. an early decision record not surfaced by my greps).
 2. Whether the plan intends `reason` to be `dec.Evaluation.Reason` verbatim, or a synthesized string (e.g. via existing `GovReason`/`ApprovalReason` helpers, which add "OpenBox governance: "/policy-id framing) — both are available at the write site; I did not find a stated preference in code.
 3. Whether `hookflow` needs a test-injectable clock for the new `ts` field (none exists today in this package, unlike `mapper.go`'s `m.clock`) — a judgment call for the implementer, not something the current tests require.

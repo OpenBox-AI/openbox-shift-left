@@ -213,12 +213,12 @@ a machine that binds.
 report arguing "count declared tests against verdicts" cannot carry an
 off-by-one of its own: exactly 38 `t.Run("C…")` subtests exist — C1–C7,
 C10–C16, C18–C38, C40–C42. **Three numbers do not exist**: C8 and C9 were
-deliberately deleted under ADR-0006 (`enforce_conformance_test.go:208,213`) and
-**C17 under ADR-0017** (`enforce_evaluate_test.go:573` — there is no local
-verdict left to short-circuit on). **C39 is not a subtest at all**: it runs as
-`TestContentCaptureCredentialCoverage`
-(`content_conformance_test.go:512`), and it passes. The assertions are
-**unmodified**; what changed is the listener
+deliberately deleted under that decision
+(`enforce_conformance_test.go:208,213`) and **C17 under that decision**
+(`enforce_evaluate_test.go:573` — there is no local verdict left to
+short-circuit on). **C39 is not a subtest at all**: it runs as
+`TestContentCaptureCredentialCoverage` (`content_conformance_test.go:512`), and
+it passes. The assertions are **unmodified**; what changed is the listener
 underneath them, which is the caveat to carry rather than round off.
 
 That retires the standing "C1–C41 DID NOT RUN" caveat on **phase 08**, whose
@@ -272,13 +272,13 @@ cross-compile `windows/amd64` **and** `linux/arm64`, and `GOWORK=off` build (the
 release path). Re-run after the 6-copies→1-package consolidation.
 
 Guard tests unaffected and green: `gateway/guard_test.go`,
-`decision/guard_test.go`, `telemetry/guard_test.go`,
-`conformance/deps_test.go`. No `go.mod` in the repo changed, so no allowlist was
-widened — which matters, because ADR-0023's rule is that widening an allowlist to
-make an import pass inverts its reasoning. `client` was already a direct,
-allowlisted requirement of every affected module, and
-`gateway/guard_test.go`'s `moduleSources` excludes `_test.go`
-(`guard_test.go:132`), so a test-only import is outside its scope by design.
+`decision/guard_test.go`, `telemetry/guard_test.go`, `conformance/deps_test.go`.
+No `go.mod` in the repo changed, so no allowlist was widened — which matters,
+because that decision's rule is that widening an allowlist to make an import pass
+inverts its reasoning. `client` was already a direct, allowlisted requirement of
+every affected module, and `gateway/guard_test.go`'s `moduleSources` excludes
+`_test.go` (`guard_test.go:132`), so a test-only import is outside its scope by
+design.
 
 ## Decisions worth not re-litigating
 

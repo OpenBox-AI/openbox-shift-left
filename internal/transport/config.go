@@ -10,7 +10,7 @@ import (
 
 // DefaultInterceptHost is the one host this lane terminates TLS for.
 //
-// Single-host interception is the bound that makes ADR-0021 §5's reversal
+// Single-host interception is the bound that makes that decision's reversal
 // defensible (OD2): every other CONNECT is blind-tunnelled, never decrypted.
 // Widening this is a decision, not a config tweak — and note that the CA's name
 // constraint is derived from this constant at generation time, so widening the

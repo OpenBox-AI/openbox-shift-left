@@ -12,8 +12,8 @@
 
 - **Date:** 2026-08-13
 - **Description:** Two empirical questions that can invalidate the whole direction. Answer
-  both before the ADR is written, because an ADR that assumes a broken premise is worse
-  than no ADR.
+both before that decision is written, because a decision record that assumes a broken
+premise is worse than no decision record.
 - **Priority:** P1 — blocking gate
 - **Implementation status:** done, minus the waived stack run · **Review status:** pending
 - **Finding:** [reports/finding-260813-dedupe-and-ceilings.md](reports/finding-260813-dedupe-and-ceilings.md)
@@ -116,4 +116,5 @@ session.
 
 ## Next steps
 
-Phase 2 writes ADR-0017 with these two numbers in it.
+Phase 2 writes that decision with these two numbers
+in it.

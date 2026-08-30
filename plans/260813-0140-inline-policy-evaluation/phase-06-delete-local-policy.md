@@ -3,7 +3,7 @@
 ## Context links
 
 - Parent: [plan.md](plan.md) · Depends on: phases 4 and 5
-- Blocks: phase 7 · Authorized by: ADR-0017
+- Blocks: phase 7 · Authorized by
 - **Largest deletion in the repo's history.** Nothing here changes behaviour — phase 3
   already made this code unreachable. If a deletion changes behaviour, something was still
   wired and that is a finding, not a merge conflict.
@@ -37,11 +37,11 @@
 - **`require_verified_bundle` and `org_signing_key_id`/`org_signing_pubkey` become dead
   config.** Removing them is a user-visible config break: parse-and-ignore with a once-only
   stderr warning for one release, then remove. Same treatment as `tier2*` from phase 3.
-- **ADR-0008 becomes historical.** It is not wrong, and it should not be deleted or edited —
-  phase 7 marks it superseded-in-part with a pointer to ADR-0017.
+- **that decision becomes historical.** It is not wrong, and it should not be deleted or edited
+phase 7 marks it superseded-in-part with a.
 - The `decision` module may end up small enough to fold into `hookflow`. **Do not** — merging
-  modules is a separate decision (ADR-0011 governs the layout) and it would hide this
-  deletion inside a refactor.
+modules is a separate decision (that decision governs the layout) and it would hide
+this deletion inside a refactor.
 
 ## Requirements
 
@@ -53,8 +53,8 @@
 3. Delete `adapters/common/hookflow/staleness.go` and `StaleGateDecision`'s call site.
 4. Delete `KeepTighter` and the local-policy verdict path in `gate.go`.
 5. Config: `require_verified_bundle`, `org_signing_key_id`, `org_signing_pubkey`, `tier2`,
-   `tier2_timeout_ms`, and the bundle-path resolution — parse-and-ignore with a once-only
-   **stderr** warning naming ADR-0017. Remove the resolvers.
+`tier2_timeout_ms`, and the bundle-path resolution — parse-and-ignore with a once-only
+**stderr** warning naming. Remove the resolvers.
 6. Delete bundle-path resolution from `hookflow` and any epoch-pin/stale-marker files it
    wrote; document in phase 7 that leftover files on disk are inert and can be removed.
 7. No behaviour change. Any test that fails is either testing deleted behaviour (delete it
@@ -81,7 +81,7 @@ responsibility — secret redaction — and it runs before the call.
 | `adapters/common/hookflow/evaluate.go` | delete `KeepTighter` |
 | `adapters/common/devconfig/devconfig.go` | deprecate then remove the bundle/signing/tier2 fields and resolvers |
 | `cli/cmd/openbox/doctor.go` | bundle block already replaced in phase 5 |
-| `docs/adr/ADR-0008-signed-policy-bundles.md` | untouched here; phase 7 marks it superseded-in-part |
+| — | untouched here; phase 7 marks it superseded-in-part |
 
 ## Implementation Steps
 
@@ -109,13 +109,13 @@ responsibility — secret redaction — and it runs before the call.
 
 ## Success Criteria
 
-- `grep -rn "rego\|bundle" --include=*.go` returns nothing outside ADR history, the
+- `grep -rn "rego\|bundle" --include=*.go` returns nothing outside decision record history, the
   deprecated config parse, and comments explaining the deprecation.
 - Local secret redaction still applies with core unreachable — the same assertion as phase 4,
   re-run after the deletion.
 - No behaviour test changed its expectations in this phase.
 - Non-test LOC deleted from `decision/` + `policysync` ≥ 2,000.
-- `openbox dev sync` reports that it no longer exists, pointing at ADR-0017 — it does not
+- `openbox dev sync` reports that it no longer exists — it does not
   silently vanish for anyone with it in a script.
 
 ## Risk Assessment
@@ -127,7 +127,7 @@ responsibility — secret redaction — and it runs before the call.
 | Tests deleted wholesale to get green | M×H | large test-file deletions with no explanation | **Adjust:** each removal is named in a commit message. Untracked coverage loss is how a deletion becomes a regression. |
 | `dev sync` in someone's CI script breaks | M×M | external pipeline fails after upgrade | **Accepted, mitigated:** the command errors with a pointer rather than vanishing; phase 7's release note names it. |
 | Deleted config causes a hard failure on an existing dev.json | M×H | hooks fail on upgrade | **Adjust:** parse-and-ignore for one release is non-negotiable; never make an old config file fatal. |
-| The `decision` module gets folded into `hookflow` for tidiness | L×M | module layout changes in this phase | **Stop:** ADR-0011 governs layout; that is a separate decision. |
+| The `decision` module gets folded into `hookflow` for tidiness | L×M | module layout changes in this phase | **Stop:** That decision governs layout; that is a separate decision. |
 
 ## Security Considerations
 

@@ -12,9 +12,9 @@
 
 - Date: 2026-08-25 (local-gateway revision)
 - Description: turn the passthrough tee into `SpanData` on the existing pipeline — headers,
-  bodies, session/agent identity — attach **account evidence** (credential fingerprint +
-  local account metadata), and retire ADR-0018's fabricated span attributes where the span
-  is genuinely observed.
+bodies, session/agent identity — attach **account evidence** (credential fingerprint +
+local account metadata), and retire that decision's fabricated span attributes where the
+span is genuinely observed.
 - Priority: P1
 - Implementation status: **implemented** (2026-08-26). Requirement 7 was NOT built when
   this line first said "implemented except requirement 5", and the gap was invisible
@@ -52,9 +52,9 @@
   join key: `x-claude-code-session-id` header → `DevEvent.SessionID` (`openbox_session_id`
   + `run_id` on the wire), asserted equal to the hook-observed id in phase 08.
 - **Classification reads attributes, not root fields.** `isLLMCall` checks
-  `attributes["http.method"]` + LLM domain in `attributes["http.url"]`. Set both the
-  attributes and the root fields. ADR-0018's synthetic marker retires only where the span
-  is genuinely observed; hook-sourced turn spans keep it until openbox-core#130.
+`attributes["http.method"]` + LLM domain in `attributes["http.url"]`. Set both the
+attributes and the root fields. That decision's synthetic marker retires only where the
+span is genuinely observed; hook-sourced turn spans keep it until openbox-core#130.
 - **Redact the copy, never the forward.** Ordering is the control: fingerprint → redact →
   attach → cap → sign. Volume: v1 ships **cap-only** (64KB); the `body_ref` sink is a
   phase-08 contingency, built only if measured volume demands it (validated 2026-08-25).
@@ -78,10 +78,9 @@
 7. Events enter through `Spool.Append` — same client, auth, signing, idempotency.
 8. Gateway spans and hook turn events never claim the same `activity_id`.
 9. Schema **v1.5**: span header/body/http fields + `credential_fingerprint` + account
-   metadata. Purely additive. **Not v1.4** — this phase was written before phase 02 landed,
-   and `schema_version`'s `const` is already `"1.4"` (thinking capture, ADR-0019 P3). The
-   bump rewrites the golden fixtures that pin wire bytes, so it is a step of its own rather
-   than a field edit.
+metadata. Purely additive. **Not v1.4** — this phase was written before phase 02 landed,
+and `schema_version`'s `const` is already `"1.4"` (thinking capture). The bump rewrites the
+golden fixtures that pin wire bytes, so it is a step of its own rather than a field edit.
 
 ## Architecture
 
@@ -109,7 +108,7 @@ by session_id.
 | `client/turnspan.go` | retire synthesized attributes where the span is observed |
 | `adapters/claude-code/mapper.go` | SessionStart account stamping (metadata, not signal_args) |
 | `contracts/dev-event/schema/` | v1.5 (v1.4 is taken) |
-| `docs/adr/ADR-0018-dev-turn-content-carrier.md` | note which half retires |
+| — | note which half retires |
 
 ## Implementation steps
 
@@ -132,7 +131,7 @@ by session_id.
 - [x] Header redaction at capture, by KEY NAME — asserted at the pipeline AND on outbound bytes, in both postures. Drilled.
 - [x] Body cap (65,536 RUNES, after redaction never before) — both drilled.
 - [x] Privacy doc: six new summary rows plus an **Account attribution** section — email as PII, the fingerprint, and the seven sibling fields deliberately NOT sent, with the origin-of-config-not-tamper-resistance limit stated.
-- [x] Classification attributes set from OBSERVED values (`http.method`, `http.url`, `http.status_code`) AND the root fields. Drilled: emptying the attributes turns the test red. ADR-0018's "synthesized" marker deliberately absent — this span really is observed.
+- [x] Classification attributes set from OBSERVED values (`http.method`, `http.url`, `http.status_code`) AND the root fields. Drilled: emptying the attributes turns the test red. That decision's "synthesized" marker deliberately absent — this span really is observed.
 - [~] **Coded; header presence STATICALLY EVIDENCED, live equality pending.** Identity is read from `X-Claude-Code-Session-Id` (canonical spelling — the capture side canonicalizes every key, and a lowercase lookup would miss on every request; `TestSessionHeaderLookupIsCanonical` holds it). A static probe of the installed 2.1.229 found it in the UNCONDITIONAL default header map beside `x-app`/`User-Agent`, so this is no longer blocked on P0 — see the 2026-08-26 amendment in [the probe report](../../reports/probe-260825-baseurl-auth-coverage.md). Two things stay unproven: that the bundled value EQUALS the hook-observed session id (inference from `Wt(){return KD()?.sessionId??Z9.id}`), and P0 itself (whether OAuth traffic follows a changed base URL — that bounds tier COVERAGE, not this emitter). `x-claude-code-agent-id` is bound to `DevEvent.AgentID`; it is CONDITIONAL on an agent context, so absence is normal. **`x-claude-code-parent-agent-id` is deliberately NOT bound** — `DevEvent` has no field for it, and adding one is a schema decision, not a wiring detail. **When the session header is absent the gateway emits NOTHING and warns, hourly.** A synthesized id was rejected deliberately: it fabricates a session core never saw start, and anything can reach a loopback port — curl, health checks, probes — none of which deserves a session record.
 - [x] SessionStart account stamping — `account_email` + `account_org_uuid` from the local record, metadata only. The bound struct IS the allowlist; a test asserts exactly two keys and that none of the seven sibling fields (name/role/type/tiers/billing) can escape. Every read failure is silent.
 - [x] `Spool.Append` wiring — **this is the one that was missing, and deferring it to phase 06 is how it got lost.** `cli/internal/gatewayemit.Emitter` files each relayed call into the Claude Code adapter's spool under the session the request named, so the existing hook-driven flushers deliver it; signing and idempotency are inherited unchanged. A consequence worth keeping: the daemon does ZERO secret I/O — the flusher owns the key. `EventID` is `gw-` + sha256 over structural fields only (INV-5), because a redelivery long after the daemon exited must present the same key. With no DID configured the relay runs WITHOUT capture and says so, since those events could never be flushed.
@@ -169,8 +168,8 @@ by session_id.
 - The fingerprint is one-way over a high-entropy secret; store no salt material that would
   narrow it. It exists to answer "which registered credential was this" — nothing else.
 - If phase 08's volume evidence forces the body sink, it becomes a new at-rest surface on
-  the developer machine holding full conversations — location, rotation, and retention get
-  named in an ADR-0021 amendment before it is built, not defaulted.
+the developer machine holding full conversations — location, rotation, and retention get
+named in an that decision amendment before it is built, not defaulted.
 
 ## Next steps
 
@@ -205,11 +204,11 @@ low-entropy fragments. Only a mutation drill exposed this — the tests looked f
 The earlier note here said the mapping was contract-gated and the `client.Span`
 fields were inert. That was too conservative, and re-reading the existing code
 settled it: `turnActivityIDFor` already documents how a disjoint id namespace is
-added, and ADR-0013/0014 already established the activity carrier. So the shape was
-determined by precedent rather than undetermined — the gateway turn takes
+added, and that decision/0014 already established the activity carrier. So the shape
+was determined by precedent rather than undetermined — the gateway turn takes
 `<session>:gateway:<request-id>`, which cannot collide with `:turn:<n>`,
-`:usage:rollup`, or `cc-act-<hex>`. No new table, endpoint or service, so no new ADR
-is required by the repo's own rule.
+`:usage:rollup`, or `cc-act-<hex>`. No new table, endpoint or service, so no new
+decision record is required by the repo's own rule.
 
 `client/gatewayspan.go` builds it, `buildPayload` attaches it, and the two span
 producers are kept on separate events on purpose: core's alignment extractor reads
@@ -222,9 +221,9 @@ response body must never be handed to it.
 the adapter-facing type and is never serialized — only `wireSpan` reaches `payload.Spans`.
 Making the capture egress needs a decision this phase cannot make alone: which event type
 carries a gateway span, and how its `activity_id` is derived so it cannot collide with the
-hook path's turn (requirement 8). That is a contract decision **ADR-0021 owns**, and
-ADR-0021 is a draft whose three `TBD(probe)` slots block acceptance. Inventing it here is
-what the plan's own gate exists to prevent, so the fields stop at the struct — stated
+hook path's turn (requirement 8). That is a contract decision **that decision owns**, and
+that decision is a draft whose three `TBD(probe)` slots block acceptance. Inventing it here
+is what the plan's own gate exists to prevent, so the fields stop at the struct — stated
 plainly, because this repo's rule is that asserting the struct is not asserting the wire.
 
 Consequently requirements **7** (`Spool.Append`), **8** (`activity_id` collision) and **9**

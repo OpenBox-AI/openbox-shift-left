@@ -153,8 +153,9 @@ its session; decide by reading them, prefer extending over a new file unless pha
 - Fake credentials + fake DID only (INV-1); redaction test uses a synthetic AKIA-shaped literal
   and says so — nobody pastes a live token to test masking.
 - Captured bodies contain prompt + assistant text: named content-bearing, deleted in Cleanup.
-- Never `cat ~/.openbox/.env` in a step (plaintext by design, ADR-0015 — don't teach the habit).
+- Never `cat ~/.openbox/.env` in a step (plaintext by design, that decision — don't teach the habit).
 
 ## Next steps
 
-Phase 07 — ADR-0019 full-content-capture posture draft.
+Phase 07 — that decision full-content-capture posture
+draft.

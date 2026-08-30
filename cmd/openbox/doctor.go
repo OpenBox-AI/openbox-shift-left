@@ -107,7 +107,7 @@ func (a *app) runDoctor(args []string) int {
 	// Policy provenance, in place of the bundle block. The heading changed
 	// because the claim changed: there is no local artifact to hash or verify,
 	// so reporting a "bundle integrity" would be describing a check that no
-	// longer runs (ADR-0017).
+	// longer runs.
 	fmt.Fprintf(a.stdout, "\nPolicy decisions\n")
 	fmt.Fprintf(a.stdout, "  decided by      %s\n", orUnset(p.DecisionAuthority))
 	fmt.Fprintf(a.stdout, "  if unreachable  %s\n", orUnset(p.FailurePolicy))
@@ -220,8 +220,8 @@ func withPresence(path string) string {
 	return path + "  (absent)"
 }
 
-// reportGateway prints the local gateway's detection-tier posture (ADR-0021,
-// phase 07 requirement 4).
+// reportGateway prints the local gateway's detection-tier posture (that
+// decision, phase 07 requirement 4).
 //
 // Four separate questions, kept separate on purpose. "Alive" and "actually used"
 // are not the same claim — a gateway can be running perfectly while the tool is
@@ -310,15 +310,15 @@ func managedSettingsPathForDoctor() string {
 	return filepath.Join(dir, "managed-settings.json")
 }
 
-// reportLanes prints the model-call producer election and the two lanes ADR-0022
-// added, per lane and separately from each other.
+// reportLanes prints the model-call producer election and the two lanes that
+// decision added, per lane and separately from each other.
 //
 // THE ELECTION LINE IS THE POINT. The precedence is automatic and the developer
 // never chose it, so a lane can be perfectly installed, perfectly reachable, and
 // emitting nothing — which is exactly the "configured but not in force" shape
-// ADR-0021 promised would always be detectable. It resolves through the SAME
-// function the telemetry daemon uses, deliberately: a check and the thing it
-// checks must not be able to disagree about what "elected" means. That is the
+// that decision promised would always be detectable. It resolves through the
+// SAME function the telemetry daemon uses, deliberately: a check and the thing
+// it checks must not be able to disagree about what "elected" means. That is the
 // lesson from the duplicate-hook-engine repair, where the diagnostic and the fix
 // were built on one classifier on purpose.
 //

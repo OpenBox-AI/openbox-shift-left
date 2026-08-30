@@ -3,9 +3,8 @@
 ## Context links
 
 - Parent: [plan.md](plan.md) · Depends on: [phase 01](phase-01-baseline-and-rewrite-instrument.md)
-- Governing: [ADR-0023](../../docs/adr/ADR-0023-credential-guard-scope.md),
-  [ADR-0011](../../docs/adr/ADR-0011-multi-module-layout.md) reason 2,
-  [ADR-0001](../../docs/adr/ADR-0001-provider-spi-registry.md)
+- Governing: that decision,
+That decision reason 2
 
 ## Overview
 
@@ -25,21 +24,21 @@
   all do `os.ReadFile("go.mod")` and assert a short allowlist. After the collapse
   that file names all 19 external modules. Widening the allowlists to make them pass
   is the failure mode — it looks like a fix and removes the control.
-- **The replacement must stay at *direct* granularity.** ADR-0023 deliberately
-  narrowed from transitive to direct because enumerating the closure "would make the
-  allowlist unreadable — the one thing it exists to be." A `go list -deps` transitive
-  version reintroduces exactly what that ADR rejected. The correct analogue of
-  "direct requires of a module" is **the non-stdlib, non-repo import paths appearing
-  in the files of a subtree**. `gateway/guard_test.go` already walks ASTs; extend
-  that machinery rather than inventing a second one.
+- **The replacement must stay at *direct* granularity.** That decision deliberately
+narrowed from transitive to direct because enumerating the closure "would make the
+allowlist unreadable — the one thing it exists to be." A `go list -deps` transitive
+version reintroduces exactly what that decision record rejected. The correct analogue
+of "direct requires of a module" is **the non-stdlib, non-repo import paths appearing
+in the files of a subtree**. `gateway/guard_test.go` already walks ASTs; extend that
+machinery rather than inventing a second one.
 - **`gateway`'s credential guard survives almost unchanged** — it is an AST walk over
   a directory, and a directory is exactly what it will still have. Only its *scope
   expression* changes: module-path prefix → path prefix. `TestSelfModuleExemptionIsNarrow`
   keeps its `gatewayfoo` lookalike case, now as `internal/gatewayfoo`.
 - **One rule has no `/internal` expression at all.** "No adapter imports another
-  adapter" was free while they were separate modules; under `internal/adapters/`
-  both are siblings and the compiler permits the import. It becomes a test or it
-  becomes nothing. This is the honest downgrade ADR-0011 reason 2 predicted.
+adapter" was free while they were separate modules; under `internal/adapters/`
+both are siblings and the compiler permits the import. It becomes a test or it
+becomes nothing. This is the honest downgrade that decision reason 2 predicted.
 
 ## Requirements
 
@@ -111,8 +110,8 @@ their path literals, which is what makes phase 03 mechanical here too.
 package actually takes, so a dependency required but unused no longer passes, and a
 test-only import is now visible to the same list. Weaker: a subtree can reach an
 external module *through* a repo-local package without naming it — the transitive
-hole ADR-0023 already accepts and already documents. Do not widen the allowlist to
-close it; that trade is already decided.
+hole that decision already accepts and already documents. Do not widen the
+allowlist to close it; that trade is already decided.
 
 ## Related code files
 
@@ -200,12 +199,12 @@ close it; that trade is already decided.
 |---|---|---|---|
 | Replacement passes for a reason other than the one it names | run all three drill cases per guard, incl. the negative | the "unreviewed import" drill is green | **stop; do not begin phase 03** |
 | Walker misses build-tagged files, so a `_windows.go` import is invisible | parse with no build-constraint filtering; fixture-test a `//go:build windows` file | drill on a tagged file is green | fix the walker; the six `_GOOS.go` files make this concrete, not hypothetical |
-| Allowlist quietly widened to make a test pass | criterion 3 diffs allowlist contents | any new entry | revert; an added entry needs the ADR-0023 amendment first, not a commit |
+| Allowlist quietly widened to make a test pass | criterion 3 diffs allowlist contents | any new entry | revert; an added entry needs that decision amendment first, not a commit |
 | Adapter↔adapter rule written so loosely it never fires | drill: make codex import claude-code | drill green | rewrite before proceeding |
 
 ## Security considerations
 
-- These *are* the security controls. The credential guard (ADR-0023) and the
+- These *are* the security controls. The credential guard and the
   conformance dependency floor are the two mechanisms bounding what code can reach a
   credential or enter three adapters' test graphs. Losing one silently is the worst
   outcome available in this whole plan, which is why the phase precedes the collapse
@@ -230,15 +229,16 @@ review surface, so any module already in the union graph — `viper`, `afero`,
 with no diff outside a `.go` file.
 
 It is declined here on `--yagni`: it is a **new** control, not a rebuild of one
-that the module boundary carried, and this phase's scope is conversion. Recorded
-as a **named loss** for the ADR-0023 amendment (phase 06), where the owner can take
-it — the cheapest form is ~19 entries with their D-OSS citations plus a CI
-`go mod tidy -diff` step, which phase 07 is already opening CI for.
+that the module boundary carried, and this phase's scope is conversion. Recorded as
+a **named loss** for that decision amendment (phase 06), where the owner can take
+it — the cheapest form is ~19 entries with their D-OSS citations plus a CI `go mod
+tidy -diff` step, which phase 07 is already opening CI for.
 
 ## Unresolved questions
 
 1. Take the root direct-require allowlist, or accept the nine-module dissolution as
-   a recorded loss? Deferred to the owner; ADR-0023's amendment must say which.
+a recorded loss? Deferred to the owner; that decision's amendment must say
+which.
 2. `conformance`'s closure check runs `go list` as a subprocess from a test. If the
    owner refuses any subprocess in a guard, the fallback is a direct-import list of
    `{jsonschema}` alone, `x/text` dropped with a comment and the retired closure pin
