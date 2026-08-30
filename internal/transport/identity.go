@@ -1,9 +1,16 @@
 // Package transport is the in-path model-call lane (ADR-0022, `:proxy:`).
 //
-// Right now it contains ONLY the goproxy spike's output: the proxy
-// configuration that forwards byte-identically, and nothing else. The spike is a
-// GATE (plan 260827-2301 phase 11) — no service code, no CA, no allowlist, no
-// capture until the gate answer is recorded.
+// It grew out of a goproxy spike whose only output was byte-identical
+// forwarding. That is no longer what this is: the lane now carries the host
+// allowlist (allowlist.go), the name-constrained project CA (ca.go), and the
+// hijack in proxy.go that hands an intercepted connection to gateway.Gateway,
+// which owns every byte and every piece of evidence. Capture is REQUIRED at
+// construction — there is no state in which this lane relays without recording.
+//
+// The relay is REUSED, not forked. A second implementation of byte-identical
+// forwarding, per-chunk SSE, the fingerprint-before-redact ordering and the 64KB
+// cap would sit on the enforcement path, which is where this repo's copy-paste
+// original sin already happened once.
 //
 // DEPENDENCY BOUNDARY. This subtree's imports are held to an allowlist in
 // internal/depguard, both external and repo-local (ADR-0023 as amended by

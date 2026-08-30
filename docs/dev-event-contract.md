@@ -89,7 +89,7 @@ tighten-only. See COVERAGE.md §4.
 ## Validate
 
 ```bash
-cd conformance && go build ./... && go vet ./... && go test ./...
+go build ./internal/conformance/... && go vet ./internal/conformance/... && go test ./internal/conformance/...
 ```
 
 The harness is intentionally offline/zero-dependency, so this runs anywhere with a Go
@@ -101,6 +101,6 @@ toolchain and no module downloads.
   package to validate outbound events before signing/POST.
 - **Adapters (SL-4/7/8):** map native tool payloads onto this schema in `emit()`.
 - **EXT-core — RETIRED (ADR-0004 / E7-S2):** dev events now map to stock base wire types that
-  openbox-core already accept-lists; no patch is needed. See `ext-core/README.md` (retired 2026-07-15; [ADR-0004](adr/ADR-0004-base-wire-unification.md) is the record).
+  openbox-core already accept-lists; no patch is needed. The ext-core patch set was retired 2026-07-15 and its tombstone deleted; [ADR-0004](adr/ADR-0004-base-wire-unification.md) is the record.
   The one additive core change E7 keeps is the semantic classifier (`shell`→`shell_command`,
   `mcp`→`mcp_tool_call`), not an accept-list.

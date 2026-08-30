@@ -150,7 +150,7 @@ modules); moving it out is a `cli`-scoped edit tracked as **SL4-WIRE-1**.
 ## Test / validate
 
 ```bash
-cd internal/adapters/claude-code && go build ./... && go vet ./... && go test ./...
+go build ./internal/adapters/claude-code/... && go vet ./internal/adapters/claude-code/... && go test ./internal/adapters/claude-code/...
 # 54 tests incl. SL-1 conformance of every emitted event + a real-binary
 # observe-only end-to-end (exit 0, empty stdout, no content leak).
 ```

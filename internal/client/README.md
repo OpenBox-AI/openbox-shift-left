@@ -127,5 +127,5 @@ have gone silently undelivered.
 ## Test / validate
 
 ```bash
-cd client && go build ./... && go test ./...
+go build ./internal/client/... && go test ./internal/client/...
 ```

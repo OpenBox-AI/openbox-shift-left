@@ -129,5 +129,5 @@ SL4-WIRE-2).
 ## Validate
 
 ```
-cd internal/adapters/common/git && go build ./... && go vet ./... && go test -race ./...
+go build ./internal/adapters/common/git/... && go vet ./internal/adapters/common/git/... && go test -race ./internal/adapters/common/git/...
 ```

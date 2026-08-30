@@ -332,7 +332,7 @@ validates the value; noted for a future explicit-override escape hatch.
 ## Test / validate
 
 ```bash
-cd internal/adapters/codex && go build ./... && go vet ./... && go test -race ./...
+go test -race ./internal/adapters/codex/...
 # plus the cli-level routing + real-binary observe E2E:
-cd ../../cli && go test ./cmd/openbox -run Codex
+go test ./cmd/openbox -run Codex
 ```
