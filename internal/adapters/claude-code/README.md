@@ -2,14 +2,14 @@
 
 The first realization of the generic Provider Adapter Contract (architecture
 §1b): it maps Claude Code's native hooks onto the normalized developer event
-contract (STORY-SL-1) and emits them through the shared AIP-signed transport
-(STORY-SL-3). **Observe-only, metadata-only, fail-open** — it can never block,
+contract (story-SL-1) and emits them through the shared AIP-signed transport
+(story-SL-3). **Observe-only, metadata-only, fail-open**; it can never block,
 deny, or slow a Claude Code tool call (Phase-1 / INV-3 / D7).
 
 ```
 Claude Code hook (stdin JSON)
    └─ openbox hook claude-code <event>     # the plugin wires each hook here (SL4-WIRE-2)
-        ├─ map → normalized SL-1 DevEvent  # mapper.go (no content — INV-2)
+        ├─ map → normalized SL-1 DevEvent  # mapper.go (no content; INV-2)
         ├─ append → local spool            # spool.go (hot path: local I/O only)
         └─ exit 0, empty stdout            # can't block / inject (D7)
    SessionEnd / `flush`
@@ -18,26 +18,26 @@ Claude Code hook (stdin JSON)
 
 ## Why a spool instead of emitting inline
 
-Claude Code command hooks are synchronous — a slow hook delays the tool call.
+Claude Code command hooks are synchronous; a slow hook delays the tool call.
 Doing network I/O on `PreToolUse`/`PostToolUse` would blow the NFR-2 `<50 ms`
 budget and couple the tool call to OpenBox reachability. So the hot path only
-maps + appends one JSON line to a per-session spool file (local, sub-millisecond),
-and delivery happens off the hot path at `SessionEnd` (bounded to 12 s) or via
-the `flush` subcommand. Delivery is **best-effort and fail-open**: an outage
-delays telemetry, never a tool call, and an undelivered event is retried on a
-later flush rather than dropped (E8-S7) — up to `maxRecoveryAttempts`, after
-which loss becomes permanent. A flush cut short by its time
-budget persists the **undelivered remainder** to a recovery file that the next
-`SessionEnd` re-drains (`SweepRecovery`, or an explicit `flush`/`FlushAll`) — the
-tail is not dropped, and delivered events are never re-sent. The sweep is not
-scoped to the ending session: a recovery file belongs to a session that has
-already finished, so nothing else would ever retry it.
+maps + appends one JSON line to a per-session spool file (local,
+sub-millisecond), and delivery happens off the hot path at `SessionEnd` (bounded
+to 12 s) or via the `flush` subcommand. Delivery is **best-effort and
+fail-open**: an outage delays telemetry, never a tool call, and an undelivered
+event is retried on a later flush rather than dropped (E8-S7); up to
+`maxRecoveryAttempts`, after which loss becomes permanent. A flush cut short by
+its time budget persists the **undelivered remainder** to a recovery file that
+the next `SessionEnd` re-drains (`SweepRecovery`, or an explicit
+`flush`/`FlushAll`); the tail is not dropped, and delivered events are never
+re-sent. The sweep is not scoped to the ending session: a recovery file belongs
+to a session that has already finished, so nothing else would ever retry it.
 
 Each event's `event_id` is derived deterministically from its structural fields
 (`deriveID` in `mapper.go`): the same logical event always hashes to the same id
 and two distinct events never collide, so the id is stable through the whole
 spool → rotate → flush → recovery lifecycle (INV-5). That is the client half of
-idempotency. The server-side half is partial and lives outside this adapter —
+idempotency. The server-side half is partial and lives outside this adapter -
 [`client/README.md`](../../client/README.md) owns which events core deduplicates
 and which it does not.
 
@@ -45,11 +45,11 @@ and which it does not.
 
 | Claude Code hook | SL-1 `event_type` | Span (`semantic_type`) |
 |---|---|---|
-| `SessionStart` | `SessionStarted` | — |
-| `UserPromptSubmit` | `PromptSubmitted` | — |
+| `SessionStart` | `SessionStarted` |; |
+| `UserPromptSubmit` | `PromptSubmitted` |; |
 | `PreToolUse` | `ToolCall` | by tool (`stage=started`) |
 | `PostToolUse` | `ToolResult` | by tool (`stage=completed`) |
-| `SessionEnd` | `SessionEnded` | — |
+| `SessionEnd` | `SessionEnded` |; |
 
 Tool classification (`classifyTool`): `Write`/`Edit`/`MultiEdit`/`NotebookEdit`
 → `file`/`file_write`; `Read`/`NotebookRead` → `file`/`file_read`; `Bash` →
@@ -58,11 +58,13 @@ else (`Glob`, `Grep`, `WebFetch`, `Task`, …) → the coarse catch-all
 `shell`/`internal`. The real tool name always rides on `tool.name` +
 `metadata.tool_name`, so nothing is lost to the 3-value `kind` enum.
 
-`semantic_type` is now **adapter-local**. It used to be a hint core recomputed server-side from the span
-it received; since that decision no span is sent, so nothing classifies it and the field never reaches
-the wire. `tool.kind` is what carries the distinction downstream. The mapper still sets `semantic_type`
-because the adapter contract is frozen at schema v1.0 — see [MAPPING.md](../../docs/MAPPING.md) §3 for
-which `span` fields the client still reads and which are inert.
+`semantic_type` is now **adapter-local**. It used to be a hint core recomputed
+server-side from the span it received; since that decision no span is sent, so
+nothing classifies it and the field never reaches the wire. `tool.kind` is what
+carries the distinction downstream. The mapper still sets `semantic_type`
+because the adapter contract is frozen at schema v1.0; see
+[MAPPING.md](../../../docs/MAPPING.md) §3 for which `span` fields the client still
+reads and which are inert.
 
 ## Privacy (INV-2)
 
@@ -71,7 +73,7 @@ gates every content class this adapter binds:
 
 | Class | Since | Redacted before attach? |
 |---|---|---|
-| prompt text (`UserPromptSubmit`) | 2026-07-15 | **no** — redaction-at-source (`[EXT-guardrail-redaction]`) is still inert |
+| prompt text (`UserPromptSubmit`) | 2026-07-15 | **no**; redaction-at-source (`[EXT-guardrail-redaction]`) is still inert |
 | enforced-call body (`Write`/`Edit`) | that decision | yes |
 | assistant reply (`Stop`/`SubagentStop`) | that decision | yes |
 | tool input on the **observe** path | that decision | yes |
@@ -88,27 +90,29 @@ identifiers, file paths, and lifecycle enums (`source`, `reason`,
 events") is retired** by. It was an unconditional guarantee; what replaces it is
 a gate plus a redaction plus a cap, none of which is structural and each of
 which can be got wrong. That is why they are asserted on the **outbound bytes**
-— conformance C32–C38, plus C18/C26 for the ordering — rather than on the
-mapper's return. `TestMap_NoContentLeak` still holds the capture-OFF half.
+- Conformance C32–C38, plus C18/C26 for the ordering; rather than on the
+  mapper's return. `TestMap_NoContentLeak` still holds the capture-OFF half.
 
 ## Known Phase-1 limitations (honest, no silent caps)
 
 - **No tokens/cost.** Claude Code hooks do not expose token or cost usage
   (verified). `PromptSubmitted`/`SessionEnded` carry no finops fields. A Phase-2
-  enhancement could parse `transcript_path` (content — privacy-gated); Phase-1
-  does not even record the path. See `Capabilities()` → `telemetry.tokens=false`.
-- **At-most-once delivery.** The client's `Emit` is fail-open and does not signal
-  delivery success, so a delivered-then-lost event can't be retried without risk
-  of a double-send. (The undelivered *remainder* of a budget-bounded flush IS
-  preserved and re-drained.) True durable retry awaits a client success signal.
+  enhancement could parse `transcript_path` (content; privacy-gated); Phase-1
+  does not even record the path. See `Capabilities()` →
+  `telemetry.tokens=false`.
+- **At-most-once delivery.** The client's `Emit` is fail-open and does not
+  signal delivery success, so a delivered-then-lost event can't be retried
+  without risk of a double-send. (The undelivered *remainder* of a
+  budget-bounded flush IS preserved and re-drained.) True durable retry awaits a
+  client success signal.
 - **[EXT-core] not yet live.** The 7 developer `event_type` strings are not yet
   in core's accept-list, so a live POST returns HTTP 400 → a fail-open drop.
   Tests run against a fake `Emitter`; end-to-end delivery lands when EXT-core's
-  3 additive edits ship (assumed-satisfied, OD14).
+  3 additive edits ship (assumed-satisfied, od14).
 
 ## Credentials (INV-1)
 
-Identity is minted by `openbox init` (STORY-SL-2) and stored in the OS secret
+Identity is minted by `openbox init` (story-SL-2) and stored in the OS secret
 store. The hook reads the **DID only** on the hot path (no secret I/O); the obx_
 key + Ed25519 seed are read (secret store, or `OPENBOX_API_KEY`/
 `OPENBOX_ED25519_SEED` for CI) only at flush and go straight into the client,
@@ -118,10 +122,10 @@ never logged/printed/argv'd. Non-secret coordinates live in a config file
 ## Packaging & install
 
 `Installer` materializes the plugin bundle (`plugin/`) + writes the dev config,
-and (STORY-SL4-WIRE-2) copies the unified engine into `bin/openbox` when
-`Installer.EngineBinary` is set — `openbox init` sets it to its own
-executable. The hooks invoke `${CLAUDE_PLUGIN_ROOT}/bin/openbox hook claude-code
-<event>`. Packaging/marketplace builds place the per-platform binary instead:
+and (story-SL4-wire-2) copies the unified engine into `bin/openbox` when
+`Installer.EngineBinary` is set; `openbox init` sets it to its own executable.
+The hooks invoke `${CLAUDE_PLUGIN_ROOT}/bin/openbox hook claude-code <event>`.
+Packaging/marketplace builds place the per-platform binary instead:
 
 ```bash
 go build -o plugin/bin/openbox ../../cmd/openbox
@@ -129,20 +133,22 @@ go build -o plugin/bin/openbox ../../cmd/openbox
 
 The standalone `cmd/openbox-cc-hook` alias is **gone**. It was never built by
 `.goreleaser.yaml`, so no release ever carried it, and nothing outside its own
-tests invoked it — the plugin manifest and every installer name the engine
+tests invoked it; the plugin manifest and every installer name the engine
 (`bin/openbox hook claude-code <event>`), which is the only entrypoint now.
 
-Org-wide force-enable via managed settings (`{"enabledPlugins":["openbox-observe"]}`)
-is **verified, not activated** for the Phase-1 opt-in pilot (NFR-5).
+Org-wide force-enable via managed settings
+(`{"enabledPlugins":["openbox-observe"]}`) is **verified, not activated** for
+the Phase-1 opt-in pilot (NFR-5).
 
 ## Integration follow-up (SL-4 ↔ SL-2 seam)
 
 `Installer` here is the real installer for the `claude-code` provider. Wiring it
 into the CLI's `provider` registry (replacing the SL-2 `stub`) is a one-line CLI
-change: the `cli` module imports this adapter and registers a `provider.Installer`
-that delegates to `claudecode.Installer`. It is deferred because the CLI's
-`provider.Installer` interface lives under `internal/cli/` (not importable across
-modules); moving it out is a `cli`-scoped edit tracked as **SL4-WIRE-1**.
+change: the `cli` module imports this adapter and registers a
+`provider.Installer` that delegates to `claudecode.Installer`. It is deferred
+because the CLI's `provider.Installer` interface lives under `internal/cli/`
+(not importable across modules); moving it out is a `cli`-scoped edit tracked as
+**SL4-wire-1**.
 
 ## Test / validate
 

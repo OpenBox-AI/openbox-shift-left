@@ -33,6 +33,11 @@ testbed/env.local.sh
 # Local agent tooling state (never project content)
 .fab7/
 
+# Local code-index state. The tool writes a self-ignoring .gitignore into its
+# own directory, which is enough for git status and not enough for a clone: the
+# file itself is still tracked, so every clone carries the directory.
+.codegraph/
+
 # Delivery records: plans, phases, reports, journals. Kept on disk because they
 # are how the work is run, untracked because they are internal process rather
 # than product — a clone should check out the thing, not the paperwork behind it.

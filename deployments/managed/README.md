@@ -1,27 +1,28 @@
 # Managed provider configuration
 
-Reference configuration that makes OpenBox governance an **org mandate** rather than
-a per-developer opt-in. These are the files an MDM/config-management system deploys;
-`openbox managed install` writes them for a single machine.
+Reference configuration that makes OpenBox governance an **org mandate** rather
+than a per-developer opt-in. These are the files an MDM/config-management system
+deploys; `openbox managed install` writes them for a single machine.
 
-Everything here is the *provider's* mechanism, not OpenBox's. We ship the payload;
-distributing it is your fleet-management plane's job.
+Everything here is the *provider's* mechanism, not OpenBox's. We ship the
+payload; distributing it is your fleet-management plane's job.
 
 ## Why this matters more than it looks
 
-Without managed configuration, OpenBox enforcement is a hook in the developer's own
-config file. It prevents mistakes, and it is genuinely useful for that. It does not
-withstand someone who does not want it: they can delete the hook, edit `dev.json`,
-or start the tool with bypass flags. Any enterprise claim of the form "our coding
-agents are governed" rests on the files in this directory, because they are what
-stop a local edit from removing the gate.
+Without managed configuration, OpenBox enforcement is a hook in the developer's
+own config file. It prevents mistakes, and it is genuinely useful for that. It
+does not withstand someone who does not want it: they can delete the hook, edit
+`dev.json`, or start the tool with bypass flags. Any enterprise claim of the
+form "our coding agents are governed" rests on the files in this directory,
+because they are what stop a local edit from removing the gate.
 
-That is also why `posture.provider_managed` exists (E8-S5): the control plane can
-see which sessions actually ran under a mandate instead of taking it on faith.
+That is also why `posture.provider_managed` exists (E8-S5): the control plane
+can see which sessions actually ran under a mandate instead of taking it on
+faith.
 
-## What each file guarantees — and does not
+## What each file guarantees; and does not
 
-### Claude Code — `claude-code/managed-settings.json`
+### Claude Code; `claude-code/managed-settings.json`
 
 | Setting | Guarantee |
 |---|---|
@@ -36,75 +37,76 @@ see which sessions actually ran under a mandate instead of taking it on faith.
 | `permissions.deny` | Belt-and-braces deny rules that do not depend on OpenBox policy being fresh. |
 
 **Not a guarantee.** `minimumVersion` / `requiredMinimumVersion` **fail open by
-design** upstream — an invalid or unmet value is stripped rather than enforced. Treat
-version floors as hygiene, never as a control. Deploy this file with filesystem
-permissions that make it root-owned and user-unwritable; a managed settings file the
-user can edit is not managed.
+design** upstream; an invalid or unmet value is stripped rather than enforced.
+Treat version floors as hygiene, never as a control. Deploy this file with
+filesystem permissions that make it root-owned and user-unwritable; a managed
+settings file the user can edit is not managed.
 
 Target paths (deploy read-only, root-owned):
 
-- Linux — `/etc/claude-code/managed-settings.json`
-- macOS — `/Library/Application Support/ClaudeCode/managed-settings.json`
-- Windows — `C:\ProgramData\ClaudeCode\managed-settings.json`
+- Linux; `/etc/claude-code/managed-settings.json`
+- MacOS; `/Library/Application Support/ClaudeCode/managed-settings.json`
+- Windows; `C:\ProgramData\ClaudeCode\managed-settings.json`
 
 Orgs on a plan with **server-managed settings** should prefer that channel: it
-refreshes hourly and, with `forceRemoteSettingsRefresh: true`, the CLI exits rather
-than starting without policy — a stronger property than any local file, because it
-fails closed at startup.
+refreshes hourly and, with `forceRemoteSettingsRefresh: true`, the CLI exits
+rather than starting without policy; a stronger property than any local file,
+because it fails closed at startup.
 
-### Codex — `codex/requirements.toml` and `codex/managed_config.toml`
+### Codex; `codex/requirements.toml` and `codex/managed_config.toml`
 
 | Setting | Where | Guarantee |
 |---|---|---|
-| `allowed_approval_policies` | requirements, top level | Pins which approval modes are selectable — the important one, since `never` would let tool calls auto-run. |
+| `allowed_approval_policies` | requirements, top level | Pins which approval modes are selectable; the important one, since `never` would let tool calls auto-run. |
 | `allowed_sandbox_modes` | requirements, top level | Pins sandboxing so a session cannot opt out. `danger-full-access` is excluded. |
 | `approval_policy`, `sandbox_mode` | managed_config | The defaults a session starts with, inside the allowed sets above. |
-| `[features] hooks = true` | managed_config | Hooks are on by default. A *default*, not a pin — see the gap below. |
+| `[features] hooks = true` | managed_config | Hooks are on by default. A *default*, not a pin; see the gap below. |
 
-**Every requirement key must be top level.** TOML binds a bare key written after a
-table header to that table, so keys listed below a `[hooks]` header are loaded as
-`hooks.allow_managed_hooks_only` and silently ignored. An earlier revision of this
-template did exactly that: the mandate was inert while `openbox doctor` and session
-posture both reported `managed`. `openbox doctor` now decides from top-level keys
-(`devconfig.TopLevelTOMLKeys`), so a mis-nested file reports *"present but imposes
-no OpenBox mandate"* instead of claiming assurance it does not have.
+**Every requirement key must be top level.** TOML binds a bare key written after
+a table header to that table, so keys listed below a `[hooks]` header are loaded
+as `hooks.allow_managed_hooks_only` and silently ignored. An earlier revision of
+this template did exactly that: the mandate was inert while `openbox doctor` and
+session posture both reported `managed`. `openbox doctor` now decides from
+top-level keys (`devconfig.TopLevelTOMLKeys`), so a mis-nested file reports
+*"present but imposes no OpenBox mandate"* instead of claiming assurance it does
+not have.
 
-#### Remaining gap — the hook itself is not yet mandated
+#### Remaining gap; the hook itself is not yet mandated
 
-`allow_managed_hooks_only = true` is shipped **commented out**, and this is the honest
-state of the Codex mandate rather than an oversight:
+`allow_managed_hooks_only = true` is shipped **commented out**, and this is the
+honest state of the Codex mandate rather than an oversight:
 
-- `hooks` is **not** a `requirements.toml` key. The accepted top-level set in Codex
-  0.145.0 is `allowed_approval_policies`, `allowed_approvals_reviewers`,
+- `hooks` is **not** a `requirements.toml` key. The accepted top-level set in
+  Codex 0.145.0 is `allowed_approval_policies`, `allowed_approvals_reviewers`,
   `allowed_sandbox_modes`, `allowed_permission_profiles`, `default_permissions`,
-  `remote_sandbox_config`, `allowed_web_search_modes`, `allow_managed_hooks_only`,
-  `allow_appshots`, `allow_remote_control`, `computer_use`, `windows`,
-  `feature_requirements`, `mcp_servers`, `plugins`, `marketplaces`, `rules`,
-  `enforce_residency`, `experimental_network`, `permissions`, `models`,
-  `guardian_policy_config`. Hook *definitions* live in a config layer
-  (`hooks.managed_dir` → a managed hooks file in codex-rs `HooksFile` shape) or in a
-  cloud requirements bundle.
+  `remote_sandbox_config`, `allowed_web_search_modes`,
+  `allow_managed_hooks_only`, `allow_appshots`, `allow_remote_control`,
+  `computer_use`, `windows`, `feature_requirements`, `mcp_servers`, `plugins`,
+  `marketplaces`, `rules`, `enforce_residency`, `experimental_network`,
+  `permissions`, `models`, `guardian_policy_config`. Hook *definitions* live in
+  a config layer (`hooks.managed_dir` → a managed hooks file in codex-rs
+  `HooksFile` shape) or in a cloud requirements bundle.
 - So enabling hook exclusivity today would make Codex ignore the
   `~/.codex/hooks.json` that `openbox init --provider codex` writes and run **no
-  OpenBox hook at all** — governance off, with posture still reporting a mandate.
+  OpenBox hook at all**; governance off, with posture still reporting a mandate.
   Strictly worse than not mandating.
 
-Until a managed hook definition ships, the Codex mandate constrains **approval and
-sandbox modes**, and the hook remains user-level and removable. Claude Code has no
-equivalent gap: its `managed-settings.json` defines the hook directly.
+Until a managed hook definition ships, the Codex mandate constrains **approval
+and sandbox modes**, and the hook remains user-level and removable. Claude Code
+has no equivalent gap: its `managed-settings.json` defines the hook directly.
 
 Target paths:
 
-- Linux/macOS — `/etc/codex/requirements.toml`, `/etc/codex/managed_config.toml`
-- macOS MDM — the `com.openai.codex` preference domain, base64-encoded TOML
+- Linux/macOS; `/etc/codex/requirements.toml`, `/etc/codex/managed_config.toml`
+- MacOS MDM; the `com.openai.codex` preference domain, base64-encoded TOML
   (Jamf/Fleet/Kandji); see `codex/README-mdm.md`
-- Cloud-managed requirement bundles are the stronger channel where available, for
-  the same reason as Claude Code's server-managed settings.
+- Cloud-managed requirement bundles are the stronger channel where available,
+  for the same reason as Claude Code's server-managed settings.
 
 ### Cursor
 
-Not shipped: the SL-8 adapter does not exist yet. Cursor gained a hook surface in
-v3.11 (2026-07-10), so this becomes a real template when that adapter lands.
+Not shipped: the SL-8 adapter does not exist yet. Cursor gained a hook surface
+in v3.11 (2026-07-10), so this becomes a real template when that adapter lands.
 
 ## Install
 
@@ -118,17 +120,17 @@ sudo openbox managed install --provider claude-code,codex
 
 The installer is deliberately conservative:
 
-- **Idempotent** — re-running with the same templates changes nothing.
-- **Backs up** — an existing file is copied to `<name>.openbox-backup-<timestamp>`
-  before being replaced.
-- **Refuses to weaken** — if the file already present has a stricter setting than the
-  template (managed-hooks-only already on, sandbox already required), the install
-  aborts rather than relaxing it. Overriding that is a deliberate `--force`. A marker
-  that appears only as a *comment* in the template does not count as strict, so
-  shipping `allow_managed_hooks_only` commented out cannot silently replace an
-  operator's live setting.
-- **Unprivileged is not a failure** — without permission to write, it prints the exact
-  paths and contents for the MDM team and exits 0.
+- **Idempotent**; re-running with the same templates changes nothing.
+- **Backs up**; an existing file is copied to
+  `<name>.openbox-backup-<timestamp>` before being replaced.
+- **Refuses to weaken**; if the file already present has a stricter setting than
+  the template (managed-hooks-only already on, sandbox already required), the
+  install aborts rather than relaxing it. Overriding that is a deliberate
+  `--force`. A marker that appears only as a *comment* in the template does not
+  count as strict, so shipping `allow_managed_hooks_only` commented out cannot
+  silently replace an operator's live setting.
+- **Unprivileged is not a failure**; without permission to write, it prints the
+  exact paths and contents for the MDM team and exits 0.
 
 ## Verify
 
@@ -136,5 +138,6 @@ The installer is deliberately conservative:
 openbox doctor      # effective posture, and whether provider config is managed
 ```
 
-`openbox doctor` reports `provider_managed` per provider, which is the same value the
-session posture carries — so what you see locally is what the control plane sees.
+`openbox doctor` reports `provider_managed` per provider, which is the same
+value the session posture carries; so what you see locally is what the control
+plane sees.
