@@ -79,7 +79,7 @@ func TestLocalHooksIdempotentAgainstAnUnquotedLegacyEntry(t *testing.T) {
 		n += len(entry.Hooks)
 	}
 	if n != 1 {
-		t.Errorf("SessionStart has %d handlers, want 1 — a re-init duplicated the hook across the quoting change", n)
+		t.Errorf("SessionStart has %d handlers, want 1; a re-init duplicated the hook across the quoting change", n)
 	}
 }
 
@@ -146,7 +146,7 @@ func TestReInitAddsTheNewHooksExactlyOnce(t *testing.T) {
 		}
 		switch {
 		case n == 0:
-			t.Errorf("%s is not registered after re-init — an existing install never fires it", ev.Event)
+			t.Errorf("%s is not registered after re-init; an existing install never fires it", ev.Event)
 		case n > 1:
 			t.Errorf("%s registered %d times; re-init must be additive AND idempotent", ev.Event, n)
 		}

@@ -64,7 +64,7 @@ func credentialPath(override string) (string, error) {
 
 func didOrNone(did string) string {
 	if did == "" {
-		return fmt.Sprintf("no DID in dev.json — run `openbox auth` to set one, or export %s", devconfig.EnvDID)
+		return fmt.Sprintf("no DID in dev.json; run `openbox auth` to set one, or export %s", devconfig.EnvDID)
 	}
 	return did
 }

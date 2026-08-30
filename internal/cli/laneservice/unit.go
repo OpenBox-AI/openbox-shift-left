@@ -183,7 +183,7 @@ func (s Spec) RemoveUnit(goos, homeDir string) (string, error) {
 // packaging, so every lane's refusal names the foreground command to run
 // instead rather than leaving the developer with nothing.
 func (s Spec) UnsupportedPlatform(goos string) error {
-	return fmt.Errorf("laneservice: no daemon packaging for %s yet — run `%s` in the foreground, "+
+	return fmt.Errorf("laneservice: no daemon packaging for %s yet; run `%s` in the foreground, "+
 		"or supervise it with the platform's own service manager", goos, s.foregroundCommand())
 }
 

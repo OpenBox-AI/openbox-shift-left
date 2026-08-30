@@ -51,7 +51,7 @@ func TestGatewayIDBoundMatchesTheContract(t *testing.T) {
 			continue
 		}
 		if *p.MaxLength != maxRequestIDLen {
-			t.Errorf("%s: contract maxLength is %d but this producer bounds at %d — "+
+			t.Errorf("%s: contract maxLength is %d but this producer bounds at %d; "+
 				"one of the two is now emitting or accepting what the other refuses",
 				field, *p.MaxLength, maxRequestIDLen)
 		}
@@ -75,7 +75,7 @@ func TestGatewayIDBoundMatchesTheContract(t *testing.T) {
 			byProducer := usableRequestID(v)
 			byContract := re.MatchString(v) && len([]rune(v)) <= *p.MaxLength
 			if byProducer != byContract {
-				t.Errorf("%s: producer accepts=%v but contract accepts=%v for %q — the two bounds disagree",
+				t.Errorf("%s: producer accepts=%v but contract accepts=%v for %q; the two bounds disagree",
 					field, byProducer, byContract, v)
 			}
 		}

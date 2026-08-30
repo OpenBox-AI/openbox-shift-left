@@ -125,7 +125,7 @@ func TestOriginFormStillRelaysVerbatim(t *testing.T) {
 
 			status, _ := rawRequestLine(t, addr, "GET "+target+" HTTP/1.1")
 			if status != http.StatusOK {
-				t.Fatalf("status = %d, want 200 — origin-form must still relay", status)
+				t.Fatalf("status = %d, want 200; origin-form must still relay", status)
 			}
 			if got != target {
 				t.Errorf("upstream received %q, want %q (byte-identical)", got, target)

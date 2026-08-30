@@ -26,7 +26,7 @@ func TestAdaptersNeverReadApproverConfig(t *testing.T) {
 		}
 		for _, name := range forbidden {
 			if strings.Contains(string(raw), name) {
-				t.Errorf("%s references %q — the approver config must stay out of the hook path; "+
+				t.Errorf("%s references %q; the approver config must stay out of the hook path; "+
 					"if a hook needs this value, it belongs in dev.json", path, name)
 			}
 		}

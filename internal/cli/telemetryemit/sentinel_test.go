@@ -119,16 +119,16 @@ func TestNoContentOnWireAtEitherPosture(t *testing.T) {
 				t.Fatalf("unmarshal: %v", err)
 			}
 			if p.EventType != "ActivityCompleted" {
-				t.Errorf("event_type = %q — the turn did not ship, so the absences above prove nothing", p.EventType)
+				t.Errorf("event_type = %q; the turn did not ship, so the absences above prove nothing", p.EventType)
 			}
 			if p.ActivityType != "llm_completion" {
 				t.Errorf("activity_type = %q, want llm_completion", p.ActivityType)
 			}
 			if !strings.Contains(p.ActivityID, ":otel:") {
-				t.Errorf("activity_id = %q, want the :otel: namespace — without it two lanes' evidence can merge", p.ActivityID)
+				t.Errorf("activity_id = %q, want the :otel: namespace; without it two lanes' evidence can merge", p.ActivityID)
 			}
 			if p.ActivityOutput.Model == "" {
-				t.Error("activity_output.model is absent — it is core's aggregation key")
+				t.Error("activity_output.model is absent; it is core's aggregation key")
 			}
 			if p.ActivityOutput.Usage.Input == nil || p.ActivityOutput.Usage.Output == nil ||
 				p.ActivityOutput.Usage.CacheRead == nil || p.ActivityOutput.Usage.CacheCreation == nil {
@@ -149,17 +149,17 @@ func TestContentFieldsAreUnsetOnTheEvent(t *testing.T) {
 		t.Fatal("no event")
 	}
 	if ev.Content != nil {
-		t.Errorf("Content is populated (%+v) — this slice binds no content", ev.Content)
+		t.Errorf("Content is populated (%+v); this slice binds no content", ev.Content)
 	}
 	if ev.Span != nil {
 		if ev.Span.RequestBody != "" || ev.Span.ResponseBody != "" {
-			t.Error("span carries a body — body attachment is deferred pending the confinement root")
+			t.Error("span carries a body; body attachment is deferred pending the confinement root")
 		}
 		if len(ev.Span.RequestHeaders) != 0 || len(ev.Span.ResponseHeaders) != 0 {
-			t.Error("span carries headers — this lane observes none")
+			t.Error("span carries headers; this lane observes none")
 		}
 	}
 	if len(ev.Metadata) != 0 {
-		t.Errorf("metadata is populated (%v) — every content key would route around the gate", ev.Metadata)
+		t.Errorf("metadata is populated (%v); every content key would route around the gate", ev.Metadata)
 	}
 }

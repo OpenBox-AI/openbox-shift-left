@@ -92,7 +92,7 @@ func TestSpool_BudgetCutPersistsRemainderForRecovery(t *testing.T) {
 		t.Fatalf("recovery flush = (%d, %v), want (2, nil)", n, err)
 	}
 	if strings.Join(first, ",") != "e1" || strings.Join(recovered, ",") != "e2,e3" {
-		t.Errorf("first=%v recovered=%v — delivered events must never re-send, tail must survive", first, recovered)
+		t.Errorf("first=%v recovered=%v; delivered events must never re-send, tail must survive", first, recovered)
 	}
 }
 

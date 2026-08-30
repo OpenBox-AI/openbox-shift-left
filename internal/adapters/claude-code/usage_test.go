@@ -43,6 +43,10 @@ var sentinels = []string{
 	"SENTINEL_SIDEMODEL", "SENTINEL_SIDETEXT", "SENTINEL_SIDETHINKING",
 }
 
+// thinkingSentinel is deliberately absent from the never-egress list above: the
+// amendment authorised exactly this one field, so the test asserts it PRESENT
+// with capture on while every other sentinel stays absent. Folding it into that
+// list makes the widening unmeasurable and both directions vacuous.
 const thinkingSentinel = "SENTINEL_THINKING"
 
 func writeTranscript(t *testing.T, body string) string {
@@ -120,7 +124,7 @@ func TestTurnWindow_PartitionsSidechainOut(t *testing.T) {
 	// meaningful if the block is genuinely there to be leaked, which is what this
 	// pair proves.
 	if !strings.Contains(side.Thinking, "SENTINEL_SIDETHINKING") {
-		t.Errorf("the sidechain window did not lift its own thinking (%q) — every "+
+		t.Errorf("the sidechain window did not lift its own thinking (%q); every "+
 			"main-thread assertion about its absence is then vacuous", side.Thinking)
 	}
 	if strings.Contains(main.Thinking, "SENTINEL_SIDETHINKING") {
@@ -141,7 +145,7 @@ func TestTurnWindow_PartitionsSidechainOut(t *testing.T) {
 		{"cache_read", main.CacheRead + side.CacheRead, *rollup.CacheRead},
 	} {
 		if c.part != c.want {
-			t.Errorf("Σ(main,sidechain) %s = %d, rollup = %d — the partitions are not exhaustive", c.name, c.part, c.want)
+			t.Errorf("Σ(main,sidechain) %s = %d, rollup = %d; the partitions are not exhaustive", c.name, c.part, c.want)
 		}
 	}
 }
@@ -350,7 +354,7 @@ func TestReadTurnUsage_SuccessiveWindowsAreDisjoint(t *testing.T) {
 		t.Fatalf("second read: %v", err)
 	}
 	if w2.Input != 5 || w2.Output != 7 {
-		t.Errorf("second window = %d/%d, want 5/7 — the cursor did not isolate the window", w2.Input, w2.Output)
+		t.Errorf("second window = %d/%d, want 5/7; the cursor did not isolate the window", w2.Input, w2.Output)
 	}
 	if pos2.Offset <= pos1.Offset {
 		t.Errorf("cursor did not advance: %d → %d", pos1.Offset, pos2.Offset)
@@ -435,11 +439,11 @@ func TestReadTurnUsage_WindowSpanningManyChunksIsAggregatedWhole(t *testing.T) {
 		t.Fatalf("read: %v", err)
 	}
 	if w.Input != lines || w.Output != 2*lines || w.CacheRead != 3*lines || w.CacheCreationInput != 4*lines {
-		t.Errorf("window = %d/%d/%d/%d, want %d/%d/%d/%d — the window was split at a chunk boundary",
+		t.Errorf("window = %d/%d/%d/%d, want %d/%d/%d/%d; the window was split at a chunk boundary",
 			w.Input, w.Output, w.CacheRead, w.CacheCreationInput, lines, 2*lines, 3*lines, 4*lines)
 	}
 	if pos.Offset != int64(len(body)) {
-		t.Errorf("cursor = %d, want %d (EOF) — part of the window was left unread", pos.Offset, len(body))
+		t.Errorf("cursor = %d, want %d (EOF); part of the window was left unread", pos.Offset, len(body))
 	}
 	if w.Model != "claude-sonnet-4-8" {
 		t.Errorf("model = %q, want the LAST non-empty across chunks", w.Model)
@@ -479,7 +483,7 @@ func TestReadTurnUsage_LineStraddlingAChunkBoundaryIsIntact(t *testing.T) {
 		t.Fatalf("read: %v", err)
 	}
 	if w.Input != 18 || w.Output != 5 {
-		t.Errorf("window = %d/%d, want 18/5 — a line straddling the chunk boundary was lost or split", w.Input, w.Output)
+		t.Errorf("window = %d/%d, want 18/5; a line straddling the chunk boundary was lost or split", w.Input, w.Output)
 	}
 	if w.Model != "m2" {
 		t.Errorf("model = %q, want m2", w.Model)
@@ -569,9 +573,12 @@ func TestTurnWindow_NegativeCountsClamped(t *testing.T) {
 	}
 }
 
-// TestFinops_NoContentOnWire is the load-bearing INV-2 test, and that decision
-// narrowed what it proves. The projection now binds three non-numeric fields,
-// so the claim this test must prove is the exact allowlist:
+// TestFinops_NoContentOnWire is the load-bearing INV-2 test, and what it proves
+// is an exact allowlist rather than an impossibility: sentinel content absent
+// from the signed body, the model id present as the one string authorised to
+// egress, the raw timestamp absent, and a sidechain turn's sums absent from a
+// main-thread one. It runs with capture on, the adversarial case, because the
+// client's stripper is then disabled.
 func TestFinops_NoContentOnWire(t *testing.T) {
 	path := writeTranscript(t, poisonedTranscript)
 
@@ -715,13 +722,13 @@ func TestFinops_NoContentOnWire(t *testing.T) {
 	for _, s := range sentinels {
 		if strings.Contains(capturedBody, s) {
 			t.Fatalf("INV-2 breach: transcript sentinel %q reached the wire on a "+
-				"content-capturing turn — that decision amendment authorised thinking and "+
+				"content-capturing turn; that decision amendment authorised thinking and "+
 				"NOTHING else, so the projection must still be unable to see this: %s",
 				s, capturedBody)
 		}
 	}
 	if got := activityOutputThinking(t, capturedBody); !strings.Contains(got, thinkingSentinel) {
-		t.Fatalf("activity_output.thinking = %q, want the transcript's thinking block — "+
+		t.Fatalf("activity_output.thinking = %q, want the transcript's thinking block; "+
 			"the amendment costs a privacy narrowing and must buy the field: %s",
 			got, capturedBody)
 	}
@@ -737,7 +744,7 @@ func TestFinops_NoContentOnWire(t *testing.T) {
 	}
 	if strings.Contains(span, thinkingSentinel) {
 		t.Errorf("thinking rode the assistant span, where core reads it as the turn's "+
-			"REPLY — it belongs in activity_output.thinking and nowhere else: %q", span)
+			"REPLY; it belongs in activity_output.thinking and nowhere else: %q", span)
 	}
 
 	// Deleting the redaction, or deleting the cap, must each turn this test red.
@@ -792,7 +799,7 @@ func TestFinops_NoContentOnWire(t *testing.T) {
 		body := string(got[0])
 
 		if strings.Contains(body, awsKey) {
-			t.Errorf("the raw credential reached the wire inside a thinking block — "+
+			t.Errorf("the raw credential reached the wire inside a thinking block; "+
 				"redaction must run BEFORE attachment: %s", body)
 		}
 		thinking := activityOutputThinking(t, body)

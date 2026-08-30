@@ -19,7 +19,7 @@ func approveBackend(t *testing.T, pending []map[string]any) (*memhttptest.Server
 	var decided []string
 	srv := memhttptest.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if got := r.Header.Get("X-API-Key"); got != testOrgKey {
-			t.Errorf("X-API-Key = %q — the approver acts under its own org credential", got)
+			t.Errorf("X-API-Key = %q; the approver acts under its own org credential", got)
 		}
 		switch {
 		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/approvals"):
@@ -79,7 +79,7 @@ func TestApproveList(t *testing.T) {
 	}
 	for _, want := range []string{
 		"ge-1", "dev-brian", "production shell command", "openbox approve allow ge-1",
-		"Bash",          // the tool — nested in the wire, absent from the DTO
+		"Bash",          // the tool; nested in the wire, absent from the DTO
 		"kind=shell",    // structural context
 		"rm -rf /tmp/x", // THE thing the approval is decided on
 	} {
@@ -174,7 +174,7 @@ func TestApproveRefusesAnExpiredRequest(t *testing.T) {
 		t.Error("deciding an expired request must fail")
 	}
 	if len(*decided) != 0 {
-		t.Errorf("sent %v — an expired request must not reach the decide route", *decided)
+		t.Errorf("sent %v; an expired request must not reach the decide route", *decided)
 	}
 	if !strings.Contains(errb.String(), "expired") {
 		t.Errorf("error should say the window closed, got %q", errb.String())

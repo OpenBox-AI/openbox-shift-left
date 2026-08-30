@@ -152,7 +152,7 @@ func TestNonLoopbackTargetIsFlagged(t *testing.T) {
 		t.Errorf("the note does not name the mismatch: %v", r.BypassNotes)
 	}
 	if !r.Alive {
-		t.Errorf("api.anthropic.com reported unreachable (%s) — the port was not defaulted from the scheme, so a working ungoverned config reads as failing safe", r.AliveErr)
+		t.Errorf("api.anthropic.com reported unreachable (%s); the port was not defaulted from the scheme, so a working ungoverned config reads as failing safe", r.AliveErr)
 	}
 	if strings.Contains(strings.Join(r.BypassNotes, " "), "safe direction") {
 		t.Errorf("a reachable provider URL is being described as failing safe: %v", r.BypassNotes)

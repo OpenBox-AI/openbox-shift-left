@@ -178,7 +178,7 @@ func decide(ctx context.Context, q Queue, cfg Config, ap backend.Approval, windo
 	if cfg.MaxPerHour > 0 {
 		*window = prune(*window, cfg.Now())
 		if len(*window) >= cfg.MaxPerHour {
-			rec.Error = fmt.Sprintf("hourly budget of %d autonomous decisions reached — left for a human", cfg.MaxPerHour)
+			rec.Error = fmt.Sprintf("hourly budget of %d autonomous decisions reached; left for a human", cfg.MaxPerHour)
 			rec.LatencyMS = ms(cfg.Now().Sub(start))
 			return rec
 		}
@@ -253,7 +253,7 @@ func orDash(s string) string {
 
 func shadowNote(shadow bool) string {
 	if shadow {
-		return " (shadow — nothing was decided)"
+		return " (shadow; nothing was decided)"
 	}
 	return ""
 }

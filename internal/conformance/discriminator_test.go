@@ -96,7 +96,7 @@ func TestRollupFalseIsNotADiscriminator(t *testing.T) {
 		ev := turnBase(et)
 		ev["session_rollup"] = false
 		if err := ValidateDevEvent(marshalEvent(t, ev), false); err == nil {
-			t.Errorf("%s with session_rollup:false alone: want rejection, got nil — "+
+			t.Errorf("%s with session_rollup:false alone: want rejection, got nil; "+
 				"the client would derive no activity_id for this event", et)
 		}
 
@@ -151,7 +151,7 @@ func TestDiscriminatorListMatchesTheSchema(t *testing.T) {
 	producer, _ := defs["turnProducer"].(map[string]any)
 	branches, _ := producer["oneOf"].([]any)
 	if len(branches) == 0 {
-		t.Fatal("$defs.turnProducer has no oneOf branches — the exactly-one rule is gone")
+		t.Fatal("$defs.turnProducer has no oneOf branches; the exactly-one rule is gone")
 	}
 
 	inSchema := map[string]bool{}
@@ -159,7 +159,7 @@ func TestDiscriminatorListMatchesTheSchema(t *testing.T) {
 		m, _ := b.(map[string]any)
 		req, _ := m["required"].([]any)
 		if len(req) != 1 {
-			t.Errorf("branch %q requires %d fields, want exactly 1 — a branch requiring two "+
+			t.Errorf("branch %q requires %d fields, want exactly 1; a branch requiring two "+
 				"discriminators, or none, is not a producer", m["title"], len(req))
 		}
 		for _, r := range req {
@@ -170,13 +170,13 @@ func TestDiscriminatorListMatchesTheSchema(t *testing.T) {
 
 	for name := range inSchema {
 		if _, ok := turnDiscriminators[name]; !ok {
-			t.Errorf("schema declares producer %q but turnDiscriminators does not — "+
+			t.Errorf("schema declares producer %q but turnDiscriminators does not; "+
 				"every case in this file silently skips it", name)
 		}
 	}
 	for name := range turnDiscriminators {
 		if !inSchema[name] {
-			t.Errorf("turnDiscriminators has %q but no schema branch requires it — "+
+			t.Errorf("turnDiscriminators has %q but no schema branch requires it; "+
 				"the tests assert a producer the contract does not have", name)
 		}
 	}

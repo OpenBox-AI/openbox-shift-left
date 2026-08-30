@@ -89,7 +89,7 @@ func AwaitRewake(ctx context.Context, logger *log.Logger, key client.ApprovalKey
 	}
 	marker, ok := awaitMarker(ctx, key)
 	if !ok {
-		return "", false // this call needed no approval — the common case
+		return "", false // this call needed no approval; the common case
 	}
 
 	cl, err := newClient(logger)
@@ -136,7 +136,7 @@ func awaitMarker(ctx context.Context, key client.ApprovalKey) (PendingApproval, 
 			if json.Unmarshal(raw, &p) == nil {
 				return p, true
 			}
-			return PendingApproval{}, false // corrupt marker — nothing safe to say
+			return PendingApproval{}, false // corrupt marker; nothing safe to say
 		}
 		if !time.Now().Before(deadline) {
 			return PendingApproval{}, false
@@ -155,7 +155,7 @@ func awaitMarker(ctx context.Context, key client.ApprovalKey) (PendingApproval, 
 func rewakeMessage(tool string, st client.ApprovalStatus) string {
 	msg := "OpenBox governance: the approval for " + OrDash(tool)
 	if st.Verdict == client.VerdictAllow {
-		msg += " was granted — re-run it to proceed"
+		msg += " was granted; re-run it to proceed"
 	} else {
 		msg += " was refused"
 		if st.Reason != "" {

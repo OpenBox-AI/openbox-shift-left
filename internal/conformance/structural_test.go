@@ -32,7 +32,7 @@ func TestSchemaCompilesWithoutFetching(t *testing.T) {
 	}
 	_, err = compileSchema(external)
 	if err == nil {
-		t.Error("a schema with an external $ref compiled — the refusing loader is not " +
+		t.Error("a schema with an external $ref compiled; the refusing loader is not " +
 			"installed, so a conformance run can be influenced from off-host")
 	} else if !strings.Contains(err.Error(), "refused to fetch") {
 		t.Errorf("external $ref failed, but not through the refusing loader: %v", err)
@@ -75,7 +75,7 @@ func TestDateTimeFormatIsAsserted(t *testing.T) {
 
 	inst["timestamp"] = "not-a-date-time"
 	if err := sch.Validate(inst); err == nil {
-		t.Error("a malformed date-time validated — format assertions are OFF. " +
+		t.Error("a malformed date-time validated; format assertions are OFF. " +
 			"compileSchema must call Compiler.AssertFormat().")
 	}
 }
@@ -91,7 +91,7 @@ func TestContentGateIsItsOwnPass(t *testing.T) {
 		t.Fatalf("read %s: %v", dir, err)
 	}
 	if len(entries) == 0 {
-		t.Fatal("no content fixtures — this test would assert nothing")
+		t.Fatal("no content fixtures; this test would assert nothing")
 	}
 
 	for _, e := range entries {
@@ -109,7 +109,7 @@ func TestContentGateIsItsOwnPass(t *testing.T) {
 			continue
 		}
 		if strings.Contains(err.Error(), "oneOf") || strings.Contains(err.Error(), "not conformant") {
-			t.Errorf("%s: the content violation was reported through a structural error (%v) — "+
+			t.Errorf("%s: the content violation was reported through a structural error (%v); "+
 				"the two passes have been folded together", e.Name(), err)
 		}
 
@@ -213,7 +213,7 @@ func TestOneOfDiscriminatorSemantics(t *testing.T) {
 			t.Errorf("%s: want valid, got %v", c.name, err)
 		}
 		if !c.valid && err == nil {
-			t.Errorf("%s: want rejected, got valid — oneOf is not enforcing exactly-one", c.name)
+			t.Errorf("%s: want rejected, got valid; oneOf is not enforcing exactly-one", c.name)
 		}
 	}
 }

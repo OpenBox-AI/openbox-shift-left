@@ -61,7 +61,7 @@ func TestCodexMandated(t *testing.T) {
 		{"top-level pin", "allowed_sandbox_modes = [\"read-only\"]\n", true},
 		{"top-level exclusivity", "allow_managed_hooks_only = true\n", true},
 		{"pins above a table", "allowed_approval_policies = [\"untrusted\"]\n\n[experimental_network]\nenabled = true\n", true},
-		{"nested under [hooks] — inert", "[hooks]\nallow_managed_hooks_only = true\nallowed_sandbox_modes = [\"read-only\"]\n", false},
+		{"nested under [hooks]; inert", "[hooks]\nallow_managed_hooks_only = true\nallowed_sandbox_modes = [\"read-only\"]\n", false},
 		{"names our hook but mandates nothing", "[hooks]\nPreToolUse = \"openbox hook codex PreToolUse\"\n", false},
 		{"commented out", "# allowed_sandbox_modes = [\"read-only\"]\n", false},
 		{"empty", "", false},

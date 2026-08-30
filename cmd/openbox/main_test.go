@@ -167,7 +167,7 @@ func TestRemovedSecretBackendFlagFailsLoudly(t *testing.T) {
 			isolateHome(t)
 			a, _, errb := testApp(map[string]string{"OPENBOX_CONTROL_TOKEN": "obx_key_x", "OPENBOX_BACKEND_URL": "https://x"})
 			if code := a.run(args); code != exitError {
-				t.Fatalf("exit = %d, want %d — a removed flag must not be silently accepted", code, exitError)
+				t.Fatalf("exit = %d, want %d; a removed flag must not be silently accepted", code, exitError)
 			}
 			if !strings.Contains(errb.String(), "openbox auth") {
 				t.Errorf("error should point at `openbox auth`, got %q", errb.String())
@@ -481,14 +481,14 @@ func TestHookEndToEndSmoke(t *testing.T) {
 		}
 		if e.hotPath {
 			if elapsed > hotPathBudget {
-				t.Errorf("%s hot-path hook took %v (> budget %v) — is it blocking on the network?", e.hook, elapsed, hotPathBudget)
+				t.Errorf("%s hot-path hook took %v (> budget %v); is it blocking on the network?", e.hook, elapsed, hotPathBudget)
 			}
 			if !e.gating {
 				mu.Lock()
 				n := got - before
 				mu.Unlock()
 				if n != 0 {
-					t.Fatalf("non-gating hot-path hook %s caused egress (%d /evaluate calls) — "+
+					t.Fatalf("non-gating hot-path hook %s caused egress (%d /evaluate calls); "+
 						"only the gate may block on the network (NFR-2)", e.hook, n)
 				}
 			}
@@ -500,7 +500,7 @@ func TestHookEndToEndSmoke(t *testing.T) {
 	delivered := append([]string(nil), bodies...)
 	mu.Unlock()
 	if n == 0 {
-		t.Fatalf("mock /evaluate received no events — SessionEnd flush did not deliver through the unified binary")
+		t.Fatalf("mock /evaluate received no events; SessionEnd flush did not deliver through the unified binary")
 	}
 	drained, _ := os.ReadDir(spool)
 	for _, e := range drained {
@@ -627,7 +627,7 @@ func TestHookRealtimeDelivery(t *testing.T) {
 			t.Error("a delivery carried no Idempotency-Key")
 		}
 		if seen[k] {
-			t.Errorf("duplicate Idempotency-Key %q — an event was double-sent", k)
+			t.Errorf("duplicate Idempotency-Key %q; an event was double-sent", k)
 		}
 		seen[k] = true
 	}
@@ -1131,7 +1131,7 @@ func TestCodexDryRunWritesNothing(t *testing.T) {
 func TestDevSyncIsRetired(t *testing.T) {
 	a, _, errb := testApp(nil)
 	if code := a.run([]string{"dev", "sync"}); code == exitOK {
-		t.Error("`dev sync` exited 0 — a retired command must fail, not no-op")
+		t.Error("`dev sync` exited 0; a retired command must fail, not no-op")
 	}
 	for _, want := range []string{"no longer exists", "evaluated by OpenBox", "inert"} {
 		if !strings.Contains(errb.String(), want) {
@@ -1150,7 +1150,7 @@ func TestHelpFlagExitsZeroForEverySubcommand(t *testing.T) {
 	} {
 		a, _, _ := testApp(nil)
 		if got := a.run(args); got != exitOK {
-			t.Errorf("openbox %v exited %d, want 0 — asking for help is not an error", args, got)
+			t.Errorf("openbox %v exited %d, want 0; asking for help is not an error", args, got)
 		}
 	}
 }

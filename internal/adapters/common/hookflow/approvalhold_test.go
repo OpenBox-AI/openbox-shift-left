@@ -123,7 +123,7 @@ func TestAwaitApproval_StopsWhenTheWindowCloses(t *testing.T) {
 		t.Fatal("a closed window must not report a decision")
 	}
 	if elapsed := time.Since(start); elapsed > time.Second {
-		t.Errorf("hold ran %v after the window closed — it should stop immediately", elapsed)
+		t.Errorf("hold ran %v after the window closed; it should stop immediately", elapsed)
 	}
 }
 
@@ -134,7 +134,7 @@ func TestAwaitApproval_UndecidedWithinBudget(t *testing.T) {
 		t.Fatal("an undecided request must not report a decision")
 	}
 	if g.polls < 2 {
-		t.Errorf("hold polled %d times in ~700ms — it should poll on its cadence, not once", g.polls)
+		t.Errorf("hold polled %d times in ~700ms; it should poll on its cadence, not once", g.polls)
 	}
 }
 
@@ -186,7 +186,7 @@ func TestApprovalUndecided_DeniesWithTheReference(t *testing.T) {
 	var buf bytes.Buffer
 	res := ApplyDecision(&buf, out, false, nil, testContract{approval: "ask"})
 	if res.Decision != DecisionDeny {
-		t.Errorf("applied decision = %q, want deny — never the provider's self-approval prompt", res.Decision)
+		t.Errorf("applied decision = %q, want deny; never the provider's self-approval prompt", res.Decision)
 	}
 	_, reason := MapVerdict(out.Evaluation, testContract{approval: "ask"})
 	if !strings.Contains(reason, "ge-42") {

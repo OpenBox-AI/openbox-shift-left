@@ -258,7 +258,7 @@ func TestOversizedAttributeIsTruncatedOnARuneBoundary(t *testing.T) {
 		t.Errorf("value is %d bytes, over the %d bound", len(got), maxAttrValueBytes)
 	}
 	if got == "" {
-		t.Fatal("value was dropped; it should be truncated — a value that arrived is evidence even clipped")
+		t.Fatal("value was dropped; it should be truncated; a value that arrived is evidence even clipped")
 	}
 	if !utf8Valid(got) {
 		t.Error("truncation produced invalid UTF-8; json.Marshal would rewrite it to U+FFFD")

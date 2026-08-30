@@ -53,10 +53,10 @@ func measureWireCapRunes(t *testing.T) int {
 	}
 	got := utf8.RuneCountInString(p.ActivityOutput.Thinking)
 	if got == 0 {
-		t.Fatal("no content on the wire — the probe cannot measure the cap it needs")
+		t.Fatal("no content on the wire; the probe cannot measure the cap it needs")
 	}
 	if got >= oversize {
-		t.Fatalf("content was NOT capped (%d runes of %d) — the cap is gone, which is a defect in itself", got, oversize)
+		t.Fatalf("content was NOT capped (%d runes of %d); the cap is gone, which is a defect in itself", got, oversize)
 	}
 	return got
 }

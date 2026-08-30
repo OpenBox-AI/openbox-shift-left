@@ -64,7 +64,7 @@ func TestAggregateRolloutUsage_LastCumulativeWinsFromFixture(t *testing.T) {
 		t.Errorf("Total = %d, want 195 (reported total_tokens, carried verbatim)", got)
 	}
 	if sum := *tokens.Input + *tokens.Output + *tokens.CacheRead + *tokens.CacheCreationInput; sum != *tokens.Total {
-		t.Errorf("Input+Output+caches = %d but Total = %d — a sub-count is double-counted or dropped",
+		t.Errorf("Input+Output+caches = %d but Total = %d; a sub-count is double-counted or dropped",
 			sum, *tokens.Total)
 	}
 	if model != "" {
@@ -91,7 +91,7 @@ func TestAggregateRolloutUsage_BindsModelFromTurnContextOnly(t *testing.T) {
 		t.Errorf("model = %q, want gpt-5.6-sol from turn_context.payload.model", model)
 	}
 	if strings.Contains(model, "SENTINEL") {
-		t.Errorf("a NESTED model key was bound: %q — the projection reaches too deep", model)
+		t.Errorf("a NESTED model key was bound: %q; the projection reaches too deep", model)
 	}
 
 	switched := body + strings.Replace(turnContext, `"model":"gpt-5.6-sol"`, `"model":"gpt-5.5"`, 1) + "\n"

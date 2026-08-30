@@ -296,7 +296,7 @@ func TestSurfaceFindings_EachProviderSeesEveryFinding(t *testing.T) {
 		t.Error("claude-code saw no finding")
 	}
 	if codex.Len() == 0 {
-		t.Error("codex saw no finding — the other tool consumed the delta (shared cursor)")
+		t.Error("codex saw no finding; the other tool consumed the delta (shared cursor)")
 	}
 }
 

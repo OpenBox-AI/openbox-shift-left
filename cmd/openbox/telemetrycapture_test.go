@@ -80,10 +80,10 @@ func TestTelemetryCommandActuallyRecords(t *testing.T) {
 		t.Errorf("event_type = %v, want TurnCompleted", got)
 	}
 	if got := ev["otel_request_id"]; got != requestID {
-		t.Errorf("otel_request_id = %v, want %q — without it turnActivityIDFor returns an EMPTY activity_id", got, requestID)
+		t.Errorf("otel_request_id = %v, want %q; without it turnActivityIDFor returns an EMPTY activity_id", got, requestID)
 	}
 	if got := ev["model"]; got != "claude-opus-4-8" {
-		t.Errorf("model = %v — core's aggregation key", got)
+		t.Errorf("model = %v; core's aggregation key", got)
 	}
 	tokens, _ := ev["tokens"].(map[string]any)
 	if tokens == nil {
@@ -103,7 +103,7 @@ func TestTelemetryCommandActuallyRecords(t *testing.T) {
 	}
 	span, _ := ev["span"].(map[string]any)
 	if span == nil {
-		t.Error("no span — core cannot classify the turn as llm_completion without one")
+		t.Error("no span; core cannot classify the turn as llm_completion without one")
 	} else if got := span["semantic_type"]; got != "llm_completion" {
 		t.Errorf("span.semantic_type = %v", got)
 	}
@@ -161,7 +161,7 @@ func TestTelemetryCommandRecordsNothingWhenNotElected(t *testing.T) {
 	}
 
 	if files := spoolFiles(t, spoolDir); len(files) != 0 {
-		t.Errorf("an UNELECTED lane wrote %d spool file(s): %v — this doubles every token count wherever another lane is also emitting", len(files), files)
+		t.Errorf("an UNELECTED lane wrote %d spool file(s): %v; this doubles every token count wherever another lane is also emitting", len(files), files)
 	}
 	if !strings.Contains(errb.String(), "NOT elected") {
 		t.Errorf("startup did not announce the unelected state; a silent non-recording lane is indistinguishable from a broken one. stderr: %s", errb.String())
@@ -220,7 +220,7 @@ func readSpooledEvent(t *testing.T, spoolDir, session string) map[string]any {
 	t.Helper()
 	files := spoolFiles(t, spoolDir)
 	if len(files) == 0 {
-		t.Fatalf("the spool is EMPTY — the receiver accepted the export and recorded nothing, which is the seam this test exists to prove")
+		t.Fatalf("the spool is EMPTY; the receiver accepted the export and recorded nothing, which is the seam this test exists to prove")
 	}
 	for _, rel := range files {
 		raw, err := os.ReadFile(filepath.Join(spoolDir, rel))

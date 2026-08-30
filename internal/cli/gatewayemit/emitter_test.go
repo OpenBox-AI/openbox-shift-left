@@ -80,7 +80,7 @@ func TestEmitSpoolsUnderTheSessionTheHeaderNames(t *testing.T) {
 		t.Error("the observed exchange did not survive the spool round-trip")
 	}
 	if evs[0].GatewayRequestID == "" {
-		t.Error("GatewayRequestID lost — activity_id would be empty on delivery")
+		t.Error("GatewayRequestID lost; activity_id would be empty on delivery")
 	}
 }
 
@@ -95,7 +95,7 @@ func TestNoSessionHeaderEmitsNothingAndSaysSo(t *testing.T) {
 	em.Emit(context.Background(), c)
 
 	if entries, _ := os.ReadDir(spool.Dir); len(entries) != 0 {
-		t.Errorf("spooled %d files with no session id — a synthesized session joins to nothing", len(entries))
+		t.Errorf("spooled %d files with no session id; a synthesized session joins to nothing", len(entries))
 	}
 	got := warnings.String()
 	if got == "" {
@@ -254,7 +254,7 @@ func TestTheWarningReturnsAfterTheInterval(t *testing.T) {
 	now = now.Add(warnInterval + time.Minute)
 	em.Emit(context.Background(), c)
 	if n := strings.Count(strings.ToLower(warnings.String()), "x-claude-code-session-id"); n != 2 {
-		t.Errorf("warned %d times after the interval elapsed, want 2 — a standing fault went silent", n)
+		t.Errorf("warned %d times after the interval elapsed, want 2; a standing fault went silent", n)
 	}
 }
 
@@ -266,7 +266,7 @@ func TestDIDIsResolvedLazilySoAuthTakesEffectWithoutARestart(t *testing.T) {
 
 	em.Emit(context.Background(), capturedWithSession("sess-1"))
 	if entries, _ := os.ReadDir(spool.Dir); len(entries) != 0 {
-		t.Fatal("spooled an event with no DID — nothing could have attributed it")
+		t.Fatal("spooled an event with no DID; nothing could have attributed it")
 	}
 	if !strings.Contains(warnings.String(), "openbox auth") {
 		t.Errorf("the warning does not name the remedy: %q", warnings.String())
@@ -276,7 +276,7 @@ func TestDIDIsResolvedLazilySoAuthTakesEffectWithoutARestart(t *testing.T) {
 	em.Emit(context.Background(), capturedWithSession("sess-1"))
 	evs := spooledEvents(t, spool, "sess-1")
 	if len(evs) != 1 {
-		t.Fatalf("spooled %d events after the DID appeared, want 1 — a restart should not be required", len(evs))
+		t.Fatalf("spooled %d events after the DID appeared, want 1; a restart should not be required", len(evs))
 	}
 	if evs[0].DeveloperDID != testDID {
 		t.Errorf("DeveloperDID = %q", evs[0].DeveloperDID)

@@ -280,7 +280,7 @@ func TestInterceptedTunnelServesMoreThanOneRequest(t *testing.T) {
 		}
 		want := fmt.Sprintf("reply-%d", i)
 		if !strings.Contains(string(buf[:n]), want) {
-			t.Fatalf("request %d got %q, want it to contain %q — the tunnel stopped serving after "+
+			t.Fatalf("request %d got %q, want it to contain %q; the tunnel stopped serving after "+
 				"the first request", i, buf[:n], want)
 		}
 	}
@@ -299,7 +299,7 @@ func TestProductionHandlerIsTheGatewayRelay(t *testing.T) {
 	}
 	g, ok := h.(*gateway.Gateway)
 	if !ok {
-		t.Fatalf("the production handler is %T, want *gateway.Gateway — this lane must reuse the "+
+		t.Fatalf("the production handler is %T, want *gateway.Gateway; this lane must reuse the "+
 			"proven relay rather than fork it", h)
 	}
 	if g == nil {

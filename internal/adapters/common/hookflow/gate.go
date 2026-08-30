@@ -104,7 +104,7 @@ func (g EnforceGate) escalate(ctx context.Context, logger *log.Logger, t Enforce
 // ask the developer to approve their own filed request.
 func (g EnforceGate) awaitApproval(ctx context.Context, logger *log.Logger, t EnforceTarget, dec decision.Decision, key client.ApprovalKey, enforceStart time.Time) decision.Decision {
 	if !key.Valid() {
-		return ApprovalUndecided(dec, "— this call cannot be tied to an approval record")
+		return ApprovalUndecided(dec, "- this call cannot be tied to an approval record")
 	}
 	RecordPendingApproval(logger, key, t.ToolName())
 

@@ -117,7 +117,7 @@ func TestInstaller_NoSecretInWrittenFiles(t *testing.T) {
 	}
 }
 
-// TestInstaller_IdempotentAndPreservesForeignEntries aC-10: double-install
+// TestInstaller_IdempotentAndPreservesForeignEntries AC-10: double-install
 // never duplicates (byte-identical), and a pre-existing foreign hooks.json
 // entry; including a whole foreign event; is preserved untouched.
 func TestInstaller_IdempotentAndPreservesForeignEntries(t *testing.T) {

@@ -48,7 +48,7 @@ func TestContentCaptureConformance(t *testing.T) {
 		bodies := serveCapturing(t)
 		t.Setenv(envContentCapture, capture)
 		t.Setenv(envRealtime, "0")
-		t.Setenv(envEnforce, "0") // observe path — no gate, no deferred spool
+		t.Setenv(envEnforce, "0") // observe path; no gate, no deferred spool
 		var out bytes.Buffer
 		RunHook(hook, strings.NewReader(payload), &out, log.New(&bytes.Buffer{}, "", 0))
 		RunHook("SessionEnd", strings.NewReader(
@@ -108,7 +108,7 @@ func TestContentCaptureConformance(t *testing.T) {
 		}
 		got, _ := out["output"].(string)
 		if !strings.Contains(got, output) {
-			t.Errorf("activity_output.output = %q, want it to carry the tool's output — "+
+			t.Errorf("activity_output.output = %q, want it to carry the tool's output; "+
 				"the field core stores as the row's `output` and runs Guardrails stage 1 over", got)
 		}
 	})
@@ -139,7 +139,7 @@ func TestContentCaptureConformance(t *testing.T) {
 
 		for i, b := range bodies {
 			if strings.Contains(b, awsKey) {
-				t.Errorf("the raw secret reached /evaluate in body #%d — redaction must run "+
+				t.Errorf("the raw secret reached /evaluate in body #%d; redaction must run "+
 					"BEFORE attachment: %s", i, b)
 			}
 		}
@@ -165,7 +165,7 @@ func TestContentCaptureConformance(t *testing.T) {
 		}
 		got, _ := out["output"].(string)
 		if got == "" {
-			t.Fatal("activity_output.output empty — a capped body must still be sent")
+			t.Fatal("activity_output.output empty; a capped body must still be sent")
 		}
 		if len([]rune(got)) > 65536 {
 			t.Errorf("activity_output.output is %d runes, want ≤ 65536 (maxBodySize)", len([]rune(got)))
@@ -218,7 +218,7 @@ func TestContentCaptureConformance(t *testing.T) {
 		}
 		got, _ := out["output"].(string)
 		if !strings.Contains(got, "ENOENT") {
-			t.Errorf("activity_output.output = %q, want the tool's error text — a failed "+
+			t.Errorf("activity_output.output = %q, want the tool's error text; a failed "+
 				"activity's output IS its error", got)
 		}
 		for _, b := range on {
@@ -277,7 +277,7 @@ func TestContentCaptureConformance(t *testing.T) {
 						continue
 					}
 					if len(p.SignalArgs) > 0 {
-						t.Errorf("signal %q carries signal_args %s — core would overwrite the "+
+						t.Errorf("signal %q carries signal_args %s; core would overwrite the "+
 							"alignment goal with it", p.SignalName, p.SignalArgs)
 					}
 					if v, ok := p.Metadata[tc.metaKey].(string); ok && strings.Contains(v, tc.sentinel) {
@@ -389,7 +389,7 @@ func TestContentCaptureConformance(t *testing.T) {
 			t.Errorf("the prompt's credential reached the wire unredacted:\n%s", joined)
 		}
 		if !strings.Contains(joined, "OPENBOX_REDACTED") {
-			t.Errorf("no redaction placeholder on the wire — the prompt was never scanned:\n%s", joined)
+			t.Errorf("no redaction placeholder on the wire; the prompt was never scanned:\n%s", joined)
 		}
 		if !strings.Contains(joined, "deploy with key") {
 			t.Errorf("the prompt's non-secret text did not egress, so this proves nothing about redaction:\n%s", joined)
@@ -420,7 +420,7 @@ func TestContentCaptureCredentialCoverage(t *testing.T) {
 			caught: true, by: "secret_assignment (keyword api_key)",
 		},
 		{
-			name:   "agent signing key — no private_key keyword, so entropy carries it alone",
+			name:   "agent signing key; no private_key keyword, so entropy carries it alone",
 			line:   "OPENBOX_AGENT_PRIVATE_KEY=" + "aB3xQ9vK2mZ7pL4wR8tY6nH1jF5sD0gC" + "uE7iO2yA4k=",
 			secret: "aB3xQ9vK2mZ7pL4wR8tY6nH1jF5sD0gC" + "uE7iO2yA4k=",
 			caught: true, by: "entropy fallback (base64 clears 4.5 bits/char)",
@@ -429,31 +429,31 @@ func TestContentCaptureCredentialCoverage(t *testing.T) {
 			name:   "hex token WITH a recognized keyword",
 			line:   "API_KEY=" + strings.Repeat("a1b2c3d4", 8),
 			secret: strings.Repeat("a1b2c3d4", 8),
-			caught: true, by: "secret_assignment — charset-agnostic, so hex is fine here",
+			caught: true, by: "secret_assignment; charset-agnostic, so hex is fine here",
 		},
 		{
-			name:   "hex token with NO recognized keyword — the documented gap",
+			name:   "hex token with NO recognized keyword; the documented gap",
 			line:   "DEPLOY_HEX=" + strings.Repeat("a1b2c3d4", 8),
 			secret: strings.Repeat("a1b2c3d4", 8),
-			caught: false, by: "nothing — hex cannot reach the entropy floor, by design",
+			caught: false, by: "nothing; hex cannot reach the entropy floor, by design",
 		},
 		{
 			name:   "high-entropy secret in nested JSON",
 			line:   `{"key":"` + "aB3xQ9vK2mZ7pL4wR8tY6nH1jF5sD0gC" + `"}`,
 			secret: "aB3xQ9vK2mZ7pL4wR8tY6nH1jF5sD0gC",
-			caught: true, by: "entropy fallback — precededByAssignment skips the JSON escape",
+			caught: true, by: "entropy fallback; precededByAssignment skips the JSON escape",
 		},
 		{
 			name:   "low-entropy secret under a keyword, in nested JSON",
 			line:   `{"password":"hunter2-prod-db-2026"}`,
 			secret: "hunter2-prod-db-2026",
-			caught: true, by: "secret_assignment — the keyword tolerates the key's closing quote",
+			caught: true, by: "secret_assignment; the keyword tolerates the key's closing quote",
 		},
 		{
 			name:   "the same high-entropy token, flat, in the same field",
 			line:   "SESSION_KEY=" + "aB3xQ9vK2mZ7pL4wR8tY6nH1jF5sD0gC",
 			secret: "aB3xQ9vK2mZ7pL4wR8tY6nH1jF5sD0gC",
-			caught: true, by: "entropy fallback — `=` puts the token in a value position",
+			caught: true, by: "entropy fallback; `=` puts the token in a value position",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -504,7 +504,7 @@ func TestContentCaptureCredentialCoverage(t *testing.T) {
 			}
 			switch {
 			case tc.caught && leaked:
-				t.Errorf("credential reached /evaluate — %s was expected to catch it", tc.by)
+				t.Errorf("credential reached /evaluate; %s was expected to catch it", tc.by)
 			case !tc.caught && !leaked:
 				t.Errorf("the unlabelled-hex gap has closed. If that was intended, update "+
 					"this case AND docs/data-and-privacy.md; if it was a side effect of "+

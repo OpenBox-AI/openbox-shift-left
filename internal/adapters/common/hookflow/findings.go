@@ -156,7 +156,7 @@ func (s findingsSummary) render() string {
 	if len(parts) > 0 {
 		detail = ": " + strings.Join(parts, "; ")
 	}
-	return fmt.Sprintf("OpenBox governance — %d finding(s) from recent activity%s. Review detail in the OpenBox dashboard.",
+	return fmt.Sprintf("OpenBox governance; %d finding(s) from recent activity%s. Review detail in the OpenBox dashboard.",
 		s.total, detail)
 }
 

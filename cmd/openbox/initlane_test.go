@@ -108,7 +108,7 @@ func TestLaneEnvIsWrittenOnlyAfterTheDaemonIsProvenUp(t *testing.T) {
 		t.Fatal("setupTransport reported success though nothing was listening")
 	}
 	if env := laneSettings(t, h.home); env["HTTPS_PROXY"] != "" {
-		t.Errorf("HTTPS_PROXY was written with no relay listening (%q) — every model call on this machine would now fail", env["HTTPS_PROXY"])
+		t.Errorf("HTTPS_PROXY was written with no relay listening (%q); every model call on this machine would now fail", env["HTTPS_PROXY"])
 	}
 	if len(h.units) != 0 {
 		t.Errorf("a failed install left units behind: %v", h.units)
@@ -142,7 +142,7 @@ func TestLaneEnvIsWrittenAfterReadiness(t *testing.T) {
 		t.Fatalf("output missing one of the two steps:\n%s", s)
 	}
 	if iListen > iEnv {
-		t.Errorf("env was reported before readiness — the order is the safety property:\n%s", s)
+		t.Errorf("env was reported before readiness; the order is the safety property:\n%s", s)
 	}
 }
 
@@ -455,8 +455,8 @@ func TestDryRunNamesTheLanesItWouldInstall(t *testing.T) {
 	}
 	s := out.String()
 	for _, want := range []string{
-		"Telemetry receiver — PLANNED",
-		"Transport relay — PLANNED",
+		"Telemetry receiver; PLANNED",
+		"Transport relay; PLANNED",
 		"CLAUDE_CODE_ENABLE_TELEMETRY",
 		"NODE_EXTRA_CA_CERTS",
 		"INTERCEPTS",
@@ -503,7 +503,7 @@ func TestDoctorNamesAnElectedLaneThatIsNotThere(t *testing.T) {
 		t.Fatalf("doctor did not report the elected lane:\n%s", s)
 	}
 	if !strings.Contains(s, "ELECTED but nothing is listening") {
-		t.Errorf("doctor reported an elected lane with no daemon behind it as healthy — "+
+		t.Errorf("doctor reported an elected lane with no daemon behind it as healthy; "+
 			"this machine emits NO model-call turns and every line above reads as fine:\n%s", s)
 	}
 }

@@ -75,7 +75,7 @@ func electionFrom(env map[string]string) Election {
 	}
 	if len(notInPath) > 0 {
 		parts = append(parts, strings.Join(notInPath, ", ")+
-			" is routed but cannot see the call — the base URL sends it elsewhere")
+			" is routed but cannot see the call; the base URL sends it elsewhere")
 	}
 	e.Reason = strings.Join(parts, "; ")
 	return e

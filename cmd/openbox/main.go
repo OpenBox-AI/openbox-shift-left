@@ -109,12 +109,12 @@ func (a *app) runDev(args []string) int {
 	}
 	switch args[0] {
 	case "init":
-		return a.errorf("`openbox dev init` no longer exists — use `openbox init` (same flags), " +
+		return a.errorf("`openbox dev init` no longer exists; use `openbox init` (same flags), " +
 			"or `openbox init --role approver` to install an approver")
 	case "verify":
 		return a.runDevVerify(args[1:])
 	case "sync":
-		return a.errorf("`openbox dev sync` no longer exists — policy is evaluated by OpenBox " +
+		return a.errorf("`openbox dev sync` no longer exists; policy is evaluated by OpenBox " +
 			"on every gated tool call, so there is no local bundle to fetch. " +
 			"Any leftover policy-bundle.json on this machine is inert and can be deleted.")
 	default:
@@ -133,7 +133,7 @@ func (a *app) runDevVerify(args []string) int {
 
 	if dryRun {
 		baseURL, did := devconfig.ResolveCoordinates()
-		fmt.Fprintln(a.stdout, "DRY RUN — openbox dev verify would call (no network, no secret access):")
+		fmt.Fprintln(a.stdout, "DRY RUN; openbox dev verify would call (no network, no secret access):")
 		fmt.Fprintf(a.stdout, "  request:  GET %s%s\n", baseURL, client.AuthValidatePath)
 		fmt.Fprintf(a.stdout, "  base_url: %s\n", baseURL)
 		fmt.Fprintf(a.stdout, "  did:      %s\n", displayOrUnset(did))
@@ -142,7 +142,7 @@ func (a *app) runDevVerify(args []string) int {
 
 	creds, err := devconfig.ResolveCredentials()
 	if err != nil {
-		return a.errorf("cannot verify — %v.\n"+
+		return a.errorf("cannot verify; %v.\n"+
 			"  Run `openbox init --provider <claude-code|codex|cursor>` first, then retry.", err)
 	}
 
@@ -168,7 +168,7 @@ func (a *app) runDevVerify(args []string) int {
 
 func displayOrUnset(s string) string {
 	if s == "" {
-		return "(not configured — run `openbox init`)"
+		return "(not configured; run `openbox init`)"
 	}
 	return s
 }
@@ -244,11 +244,11 @@ func (a *app) runDevInit(args []string) int {
 	var goneManagedEnable bool
 
 	fs.StringVar(&o.Provider, "provider", "", "developer tool: claude-code|codex|cursor (required)")
-	fs.StringVar(&scope, "scope", "", "which sessions this install governs: local (default — this directory only) or global (every project, pending a managed-settings deployment)")
+	fs.StringVar(&scope, "scope", "", "which sessions this install governs: local (default; this directory only) or global (every project, pending a managed-settings deployment)")
 	var enforce, noEnforce bool
-	fs.BoolVar(&enforce, "enforce", true, "ENFORCE mode: the PreToolUse hook blocks/asks/redacts in-process, no daemon and no runtime env. ON BY DEFAULT — inert until your org publishes a policy, and fail-open, so an OpenBox outage never blocks you. Pass --enforce=false to opt out; the opt-out persists.")
+	fs.BoolVar(&enforce, "enforce", true, "ENFORCE mode: the PreToolUse hook blocks/asks/redacts in-process, no daemon and no runtime env. ON BY DEFAULT; inert until your org publishes a policy, and fail-open, so an OpenBox outage never blocks you. Pass --enforce=false to opt out; the opt-out persists.")
 	fs.BoolVar(&noEnforce, "no-enforce", false, "alias for --enforce=false")
-	fs.BoolVar(&o.InstallGitHook, "install-git-hook", false, "enable ambient install of the commit-trailer hook into repos on session start (off by default — it modifies .git/hooks)")
+	fs.BoolVar(&o.InstallGitHook, "install-git-hook", false, "enable ambient install of the commit-trailer hook into repos on session start (off by default; it modifies .git/hooks)")
 	// OFF by default, deliberately: unlike enforcement-by-default, which is inert
 	// without an org policy, this redirects live model traffic.
 	var withGateway, removeGateway bool
@@ -266,7 +266,7 @@ func (a *app) runDevInit(args []string) int {
 	var telemetryAddr, transportAddr string
 	var laneVerbose, forceRestore bool
 	fs.BoolVar(&withFull, "full", false, "install and enable everything: hooks, the telemetry receiver and the in-path transport relay")
-	fs.BoolVar(&removeAll, "remove-all", false, "remove every OpenBox lane: restore all managed env keys, unload and delete all units, and delete the CA, the logs and the activation record. The spool is KEPT — it is shared with the hook path, which this does not remove")
+	fs.BoolVar(&removeAll, "remove-all", false, "remove every OpenBox lane: restore all managed env keys, unload and delete all units, and delete the CA, the logs and the activation record. The spool is KEPT; it is shared with the hook path, which this does not remove")
 	fs.BoolVar(&withTelemetry, "telemetry", false, "install and start the local OTLP telemetry receiver, and point the tool's own telemetry at it")
 	fs.BoolVar(&removeTelemetryLane, "remove-telemetry", false, "stop the telemetry receiver and restore the env keys it displaced")
 	fs.BoolVar(&withTransport, "transport", false, "install and start the in-path transport relay, and point the tool's proxy and CA trust at it")
@@ -277,7 +277,7 @@ func (a *app) runDevInit(args []string) int {
 	fs.BoolVar(&forceRestore, "force-restore", false, "during removal, restore env keys even where the value changed after OpenBox set it (the conflict is named either way)")
 	fs.BoolVar(&o.DryRun, "dry-run", false, "print the plan; make no network or filesystem writes")
 	var role string
-	fs.StringVar(&role, "role", "dev", "dev (default) or approver — an approver is a queue client, not a governed runtime")
+	fs.StringVar(&role, "role", "dev", "dev (default) or approver; an approver is a queue client, not a governed runtime")
 
 	fs.StringVar(&movedOrg, "org", "", "MOVED to `openbox auth`")
 	fs.StringVar(&movedAgentName, "agent-name", "", "MOVED to `openbox auth`")
@@ -287,10 +287,10 @@ func (a *app) runDevInit(args []string) int {
 	fs.StringVar(&movedBackendURL, "backend-url", "", "MOVED to `openbox auth`")
 	fs.BoolVar(&movedForce, "force", false, "MOVED to `openbox auth`")
 
-	fs.StringVar(&goneSecretBackend, "secret-backend", "", "REMOVED — credentials live in ~/.openbox/.env; run `openbox auth`")
-	fs.StringVar(&goneClientID, "client-id", "", "REMOVED — `init` makes no control-plane call")
-	fs.BoolVar(&goneManagedEnable, "managed-enable", false, "REMOVED — recorded a Phase-1 substrate nothing read")
-	fs.StringVar(&goneLocalHooks, "local-hooks", "", "DEPRECATED — use --scope local (accepted for one release)")
+	fs.StringVar(&goneSecretBackend, "secret-backend", "", "REMOVED; credentials live in ~/.openbox/.env; run `openbox auth`")
+	fs.StringVar(&goneClientID, "client-id", "", "REMOVED; `init` makes no control-plane call")
+	fs.BoolVar(&goneManagedEnable, "managed-enable", false, "REMOVED; recorded a Phase-1 substrate nothing read")
+	fs.StringVar(&goneLocalHooks, "local-hooks", "", "DEPRECATED; use --scope local (accepted for one release)")
 
 	fs.Usage = a.initUsage(fs)
 	if code, ok := parseFlags(fs, args); !ok {
@@ -302,7 +302,7 @@ func (a *app) runDevInit(args []string) int {
 		{"--description", movedDescription}, {"--base-url", movedBaseURL}, {"--backend-url", movedBackendURL},
 	} {
 		if m.value != "" {
-			return a.errorf("%s moved to `openbox auth` — `init` no longer registers agents or touches credentials.\n"+
+			return a.errorf("%s moved to `openbox auth`; `init` no longer registers agents or touches credentials.\n"+
 				"  Run:  openbox auth %s %s\n"+
 				"  then: openbox init --provider %s", m.flag, m.flag, m.value, orDefault(o.Provider, "<tool>"))
 		}
@@ -313,7 +313,7 @@ func (a *app) runDevInit(args []string) int {
 	}
 	if goneSecretBackend != "" {
 		return a.errorf("--secret-backend was removed: there is no secret store to choose any more.\n" +
-			" Credentials live in ~/.openbox/.env (plaintext, 0600 — see.\n" +
+			" Credentials live in ~/.openbox/.env (plaintext, 0600; see.\n" +
 			"  Write them with `openbox auth`, then re-run `openbox init` without this flag.")
 	}
 	if goneClientID != "" {
@@ -323,7 +323,7 @@ func (a *app) runDevInit(args []string) int {
 	if goneManagedEnable {
 		return a.errorf("--managed-enable was removed. It recorded a Phase-1 force-enable substrate in the agent's\n" +
 			"  backend config that nothing ever read. Org-wide activation is a managed-settings\n" +
-			"  deployment — see `openbox managed install` and deployments/managed/.")
+			"  deployment; see `openbox managed install` and deployments/managed/.")
 	}
 
 	if o.Provider == "" {
@@ -345,7 +345,7 @@ func (a *app) runDevInit(args []string) int {
 	// Under enforce-by- default this compares resolved postures, so it still
 	// fires for a config that never wrote the field.
 	if devconfig.WouldDowngradeEnforce(devconfig.DefaultConfigPath(), o.Enforce) {
-		fmt.Fprintln(a.stdout, "note: turning ENFORCE off — this machine was enforcing (explicitly, or by default).")
+		fmt.Fprintln(a.stdout, "note: turning ENFORCE off; this machine was enforcing (explicitly, or by default).")
 	}
 
 	if withGateway && removeGateway {
@@ -398,7 +398,7 @@ func (a *app) runDevInit(args []string) int {
 		if scope != "" {
 			return a.errorf("--local-hooks and --scope cannot both be given; --local-hooks is the deprecated spelling of --scope local")
 		}
-		fmt.Fprintf(a.stderr, "warning: --local-hooks is deprecated — use --scope local (this release still accepts it).\n"+
+		fmt.Fprintf(a.stderr, "warning: --local-hooks is deprecated; use --scope local (this release still accepts it).\n"+
 			"         Project scope is now the DEFAULT, so in most cases the flag can be dropped entirely.\n")
 		scope = scopeLocal
 		o.ProjectDir = goneLocalHooks
@@ -467,7 +467,7 @@ func (a *app) runDevInit(args []string) int {
 	}
 
 	if o.Provider == "codex" && res != nil && res.ConfigApplied {
-		fmt.Fprintln(a.stdout, "Next step: open Codex and run /hooks to review and TRUST the new OpenBox hooks — they do not run until trusted (Codex hash-trusts non-managed hooks; re-running init re-hashes them).")
+		fmt.Fprintln(a.stdout, "Next step: open Codex and run /hooks to review and TRUST the new OpenBox hooks; they do not run until trusted (Codex hash-trusts non-managed hooks; re-running init re-hashes them).")
 	}
 
 	gatewayRunning := false
@@ -496,16 +496,16 @@ func (a *app) runDevInit(args []string) int {
 	case withGateway && gatewayRunning:
 		fmt.Fprintf(a.stdout, "\nDone. A supervised gateway is running and this machine's model calls now route through it.\n")
 	case withGateway:
-		fmt.Fprintf(a.stdout, "\nDone for the hooks — they are in place and governing tool calls. The gateway did NOT come up; see the warning above, and run `openbox doctor` for where this machine's model calls are pointed.\n")
+		fmt.Fprintf(a.stdout, "\nDone for the hooks; they are in place and governing tool calls. The gateway did NOT come up; see the warning above, and run `openbox doctor` for where this machine's model calls are pointed.\n")
 	default:
-		fmt.Fprintf(a.stdout, "\nDone. Nothing to run and no environment to keep set — the hooks do the rest.\n")
+		fmt.Fprintf(a.stdout, "\nDone. Nothing to run and no environment to keep set; the hooks do the rest.\n")
 	}
 	fmt.Fprintf(a.stdout, "  openbox dev verify     confirm this machine can reach and authenticate to OpenBox\n")
 	fmt.Fprintf(a.stdout, "  openbox doctor         the effective posture, and where each value came from\n")
 	if o.Enforce != nil && !*o.Enforce {
-		fmt.Fprintf(a.stdout, "  mode: OBSERVE — telemetry and lineage only, by your explicit --enforce=false.\n")
+		fmt.Fprintf(a.stdout, "  mode: OBSERVE; telemetry and lineage only, by your explicit --enforce=false.\n")
 	} else {
-		fmt.Fprintf(a.stdout, "  mode: ENFORCE — tool calls are gated in-process. Inert until your org publishes a\n")
+		fmt.Fprintf(a.stdout, "  mode: ENFORCE; tool calls are gated in-process. Inert until your org publishes a\n")
 		fmt.Fprintf(a.stdout, "        policy, and fail-open, so an OpenBox outage never blocks you. `--enforce=false` opts out.\n")
 	}
 	a.printGovernedScope(o, resolvedScope)
@@ -521,7 +521,7 @@ func (a *app) env(key, def string) string {
 }
 
 func (a *app) usage() {
-	fmt.Fprint(a.stderr, `openbox — OpenBox developer-runtime governance CLI
+	fmt.Fprint(a.stderr, `openbox; OpenBox developer-runtime governance CLI
 
 Setup is two commands, in this order:
   openbox auth                                        credentials for this machine
@@ -556,7 +556,7 @@ Credentials live in ~/.openbox/.env (plaintext, 0600); posture and
 coordinates in ~/.openbox/dev.json. OPENBOX_HOME relocates both. A real
 environment variable always wins over either file.
 
-Nothing to run after 'init' — no daemon, no runtime env. Coverage is a separate
+Nothing to run after 'init'; no daemon, no runtime env. Coverage is a separate
 question from mechanism: a bare 'init' governs ONE directory (see --scope).
 Run 'openbox auth -h' or 'openbox init -h' for flags.
 `)

@@ -143,7 +143,7 @@ func TestEnvFileIsNotACoordinateSource(t *testing.T) {
 		t.Errorf("DID = %q, want the environment value %q", c.DID, testDID)
 	}
 	if c.BaseURL != DefaultBaseURL {
-		t.Errorf("base URL = %q, want the built-in default — .env must not supply a coordinate", c.BaseURL)
+		t.Errorf("base URL = %q, want the built-in default; .env must not supply a coordinate", c.BaseURL)
 	}
 }
 

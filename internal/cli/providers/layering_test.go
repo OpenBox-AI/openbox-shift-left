@@ -25,7 +25,7 @@ func TestOnlyTheRegistryImportsAdapters(t *testing.T) {
 		}
 		for _, imp := range full.Imports {
 			if strings.Contains(imp, "/internal/adapters/claude-code") || strings.Contains(imp, "/internal/adapters/codex") {
-				t.Errorf("%s imports the adapter %q directly — route it through internal/cli/providers, "+
+				t.Errorf("%s imports the adapter %q directly; route it through internal/cli/providers, "+
 					"or use the shared devconfig/hookflow package if the need is provider-neutral", pkg, imp)
 			}
 		}

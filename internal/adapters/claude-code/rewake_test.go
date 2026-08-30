@@ -39,7 +39,7 @@ func TestRunRewake_InertWhenNothingCanFileAnApproval(t *testing.T) {
 		env  map[string]string
 		tool string
 	}{
-		{"enforce off — no gate, so no approval", map[string]string{devconfig.EnvEnforce: "0"}, "Bash"},
+		{"enforce off; no gate, so no approval", map[string]string{devconfig.EnvEnforce: "0"}, "Bash"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			isolateConfig(t)
@@ -53,10 +53,10 @@ func TestRunRewake_InertWhenNothingCanFileAnApproval(t *testing.T) {
 				t.Errorf("exit = %d, want 0 (a non-zero exit interrupts the session)", code)
 			}
 			if wake != "" {
-				t.Errorf("wrote %q — the silent path must say nothing", wake)
+				t.Errorf("wrote %q; the silent path must say nothing", wake)
 			}
 			if elapsed > time.Second {
-				t.Errorf("took %v — the no-op path must not wait", elapsed)
+				t.Errorf("took %v; the no-op path must not wait", elapsed)
 			}
 		})
 	}
@@ -100,7 +100,7 @@ func TestApprovalKeyIsStableAcrossProcessesAndRetries(t *testing.T) {
 	// The key must still match.
 	retry := derive("toolu_01BBBBBBBBBBBBBBBBBBBBBB")
 	if retry != gate {
-		t.Errorf("approval key is not stable across a retry — an approved request can never be consumed:\n"+
+		t.Errorf("approval key is not stable across a retry; an approved request can never be consumed:\n"+
 			"first attempt %+v\nretry         %+v", gate, retry)
 	}
 }

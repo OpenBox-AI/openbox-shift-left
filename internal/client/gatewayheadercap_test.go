@@ -58,7 +58,7 @@ func TestGatewayHeaderCapIsDeterministic(t *testing.T) {
 		}
 		for k := range first {
 			if _, ok := got[k]; !ok {
-				t.Fatalf("attempt %d dropped %q, which the first attempt kept — the cap is not deterministic", attempt, k)
+				t.Fatalf("attempt %d dropped %q, which the first attempt kept; the cap is not deterministic", attempt, k)
 			}
 		}
 	}
@@ -118,14 +118,14 @@ func TestGatewayHeaderCapIsAByteBound(t *testing.T) {
 
 			body := strings.TrimSuffix(got, "…[truncated]")
 			if len(body) > maxHeaderValueBytes {
-				t.Errorf("value kept %d bytes, over the %d-byte bound — the cap did not hold",
+				t.Errorf("value kept %d bytes, over the %d-byte bound; the cap did not hold",
 					len(body), maxHeaderValueBytes)
 			}
 			if !strings.HasSuffix(got, "…[truncated]") {
 				t.Error("an over-bound value was not marked as truncated; a reader cannot tell a short header from a shortened one")
 			}
 			if !utf8.ValidString(got) {
-				t.Error("the cut produced invalid UTF-8 — json.Marshal would rewrite it to U+FFFD")
+				t.Error("the cut produced invalid UTF-8; json.Marshal would rewrite it to U+FFFD")
 			}
 		})
 	}

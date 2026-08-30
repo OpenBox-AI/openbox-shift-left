@@ -308,7 +308,7 @@ func TestApplyDecisionSessionHaltSplit(t *testing.T) {
 			t.Fatalf("stdout is not valid PreToolUse JSON: %v (%q)", err, out.Bytes())
 		}
 		if got.Continue == nil || *got.Continue {
-			t.Errorf("continue = %v, want false — the session stop", got.Continue)
+			t.Errorf("continue = %v, want false; the session stop", got.Continue)
 		}
 		if !strings.Contains(got.StopReason, "org kill switch") || !strings.Contains(got.StopReason, "p-9") {
 			t.Errorf("stopReason %q must carry the policy reason and id", got.StopReason)
@@ -1075,7 +1075,7 @@ func TestEscalationCarriesApprovalContext_ObserveNeverDoes(t *testing.T) {
 		t.Fatal("a gated Write must carry its body for evaluation (that decision E7)")
 	}
 	if strings.Contains(ev.Content.ToolInput, "AKIAIOSFODNN7EXAMPLE") {
-		t.Errorf("the RAW body was attached — redaction must precede attachment (E8): %q", ev.Content.ToolInput)
+		t.Errorf("the RAW body was attached; redaction must precede attachment (E8): %q", ev.Content.ToolInput)
 	}
 	if !strings.Contains(ev.Content.ToolInput, "OPENBOX_REDACTED") {
 		t.Errorf("the redacted body was not attached: %q", ev.Content.ToolInput)

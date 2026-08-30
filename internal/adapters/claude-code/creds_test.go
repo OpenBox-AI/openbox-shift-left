@@ -235,7 +235,7 @@ func TestResolveFailClosed(t *testing.T) {
 
 	write(`{"developer_did":"` + testDID + `"}`)
 	if ResolveFailClosed() {
-		t.Error("default must be fail-open (false) — never fail-closed by accident")
+		t.Error("default must be fail-open (false); never fail-closed by accident")
 	}
 
 	write(`{"developer_did":"` + testDID + `","fail_closed":true}`)

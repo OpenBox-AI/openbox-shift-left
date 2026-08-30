@@ -119,7 +119,7 @@ func TestEnforcementConformance(t *testing.T) {
 			t.Errorf("fail-closed must NOT block a real allow; got %q", out)
 		}
 		if atomic.LoadInt32(hits) != 1 {
-			t.Errorf("/evaluate hits = %d, want 1 — the allow must come from the server", atomic.LoadInt32(hits))
+			t.Errorf("/evaluate hits = %d, want 1; the allow must come from the server", atomic.LoadInt32(hits))
 		}
 	})
 
@@ -200,11 +200,11 @@ func TestEnforcementConformance(t *testing.T) {
 		run(t, secretWrite)
 
 		if len(*bodies) == 0 {
-			t.Fatal("no /evaluate call — a gated Write must be evaluated ")
+			t.Fatal("no /evaluate call; a gated Write must be evaluated ")
 		}
 		for i, b := range *bodies {
 			if strings.Contains(b, awsSecret) {
-				t.Errorf("the raw secret reached /evaluate in body #%d — redaction must "+
+				t.Errorf("the raw secret reached /evaluate in body #%d; redaction must "+
 					"run BEFORE attachment: %s", i, b)
 			}
 		}
@@ -233,7 +233,7 @@ func TestEnforcementConformance(t *testing.T) {
 			run(t, payload)
 		}
 		if len(*bodies) == 0 {
-			t.Fatal("no /evaluate calls — every class is gated")
+			t.Fatal("no /evaluate calls; every class is gated")
 		}
 		for i, b := range *bodies {
 			if strings.Contains(b, canary) {
@@ -249,7 +249,7 @@ func TestEnforcementConformance(t *testing.T) {
 		t.Helper()
 		bodies := serveCapturing(t, `{"verdict":"allow"}`)
 		t.Setenv(envRealtime, "0")
-		t.Setenv(envEnforce, "0") // observe path — no gate, no deferred spool
+		t.Setenv(envEnforce, "0") // observe path; no gate, no deferred spool
 		var out bytes.Buffer
 		RunHook(hook, strings.NewReader(payload), &out, log.New(&bytes.Buffer{}, "", 0))
 		RunHook("SessionEnd", strings.NewReader(
@@ -292,7 +292,7 @@ func TestEnforcementConformance(t *testing.T) {
 			}
 		}
 		if !found {
-			t.Errorf("status absent with capture off — it is structural, not content: %v", bodies)
+			t.Errorf("status absent with capture off; it is structural, not content: %v", bodies)
 		}
 	})
 
@@ -330,7 +330,7 @@ func TestEnforcementConformance(t *testing.T) {
 			t.Errorf("failed call does not report status \"failed\": %s", failed)
 		}
 		if !strings.Contains(failed, `"duration_ms"`) {
-			t.Errorf("failed call carries no duration_ms — the stash did not pair "+
+			t.Errorf("failed call carries no duration_ms; the stash did not pair "+
 				"PreToolUse with PostToolUseFailure: %s", failed)
 		}
 		if strings.Contains(failed, "exit code 3") {
@@ -435,7 +435,7 @@ func TestEnforcementConformance(t *testing.T) {
 			`"openbox.span_synthetic":true`,
 		} {
 			if !strings.Contains(turn, want) {
-				t.Errorf("turn span missing %s — core would classify it as something else and "+
+				t.Errorf("turn span missing %s; core would classify it as something else and "+
 					"the extractor would silently yield \"\": %s", want, turn)
 			}
 		}
@@ -481,7 +481,7 @@ func TestEnforcementConformance(t *testing.T) {
 				turn = b
 			}
 			if strings.Contains(b, awsSecret) {
-				t.Errorf("the raw secret reached /evaluate — redaction must run BEFORE "+
+				t.Errorf("the raw secret reached /evaluate; redaction must run BEFORE "+
 					"attachment: %s", b)
 			}
 		}
@@ -610,7 +610,7 @@ func TestSessionHaltConformance(t *testing.T) {
 			t.Errorf("latched UserPromptSubmit render = %+v, want continue:false + decision:block", gotP)
 		}
 		if after := atomic.LoadInt32(hits); after != before {
-			t.Errorf("latched session made %d further /evaluate calls, want 0 — the latch is the decided state", after-before)
+			t.Errorf("latched session made %d further /evaluate calls, want 0; the latch is the decided state", after-before)
 		}
 
 		enf, err := os.ReadFile(os.Getenv(envEnforcementFile))

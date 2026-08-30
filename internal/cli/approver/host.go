@@ -137,7 +137,7 @@ func prompt(req Request) string {
 		defuseFence(req.Tool), defuseFence(req.Agent), defuseFence(req.Reason))
 	b.WriteString(fenceBegin + "\n")
 	if strings.TrimSpace(req.Request) == "" {
-		b.WriteString("(not captured — the runtime egressed no request text)\n")
+		b.WriteString("(not captured; the runtime egressed no request text)\n")
 	} else {
 		b.WriteString(defuseFence(req.Request) + "\n")
 	}

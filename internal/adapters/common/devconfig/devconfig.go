@@ -319,7 +319,7 @@ func warnDeprecatedKeys() {
 		return
 	}
 	deprecationOnce.Do(func() {
-		fmt.Fprintf(os.Stderr, "openbox: %s set but ignored — every gated tool call is "+
+		fmt.Fprintf(os.Stderr, "openbox: %s set but ignored; every gated tool call is "+
 			"evaluated by OpenBox, so there are no tiers to switch between and no "+
 			"local bundle to verify. Remove from dev.json / the environment to silence this.\n",
 			strings.Join(dead, ", "))
@@ -479,7 +479,7 @@ func resolvePrivateKey(secrets map[string]string) string {
 // input.
 func warnDeprecatedPrivateKeyName(alias string) {
 	deprecatedNameWarnOnce.Do(func() {
-		fmt.Fprintf(os.Stderr, "openbox: %s is deprecated — use %s (same value, the name OpenBox documents)\n",
+		fmt.Fprintf(os.Stderr, "openbox: %s is deprecated; use %s (same value, the name OpenBox documents)\n",
 			alias, EnvAgentPrivateKey)
 	})
 }
@@ -493,7 +493,7 @@ func missingCredentialError(what, envName, envPath string) error {
 	}
 	msg := fmt.Sprintf("no %s available: set %s, or run `openbox auth` to write %s", what, envName, where)
 	if envPath == "" {
-		msg += fmt.Sprintf(" (no home directory could be resolved — set %s to an absolute path)", EnvHome)
+		msg += fmt.Sprintf(" (no home directory could be resolved; set %s to an absolute path)", EnvHome)
 	}
 	switch runtime.GOOS {
 	case "darwin":

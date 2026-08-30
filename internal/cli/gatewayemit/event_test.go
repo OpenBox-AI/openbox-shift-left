@@ -45,7 +45,7 @@ var sampleAt = time.Date(2026, 8, 26, 12, 0, 0, 0, time.UTC)
 func TestEventTypeIsTurnCompleted(t *testing.T) {
 	ev := mustEvent(LaneGateway, sampleIdentity(), "req-1", sampleAt, sampleCaptured())
 	if ev.EventType != client.EventTurnCompleted {
-		t.Fatalf("EventType = %q, want %q — no other type attaches the span", ev.EventType, client.EventTurnCompleted)
+		t.Fatalf("EventType = %q, want %q; no other type attaches the span", ev.EventType, client.EventTurnCompleted)
 	}
 }
 
@@ -65,14 +65,14 @@ func TestEventIDIsDeterministicPerCall(t *testing.T) {
 	a := mustEvent(LaneGateway, sampleIdentity(), "req-1", sampleAt, sampleCaptured())
 	b := mustEvent(LaneGateway, sampleIdentity(), "req-1", sampleAt, sampleCaptured())
 	if a.EventID == "" {
-		t.Fatal("EventID empty — client.Emit rejects the event outright")
+		t.Fatal("EventID empty; client.Emit rejects the event outright")
 	}
 	if a.EventID != b.EventID {
 		t.Errorf("EventID not stable: %q vs %q", a.EventID, b.EventID)
 	}
 	c := mustEvent(LaneGateway, sampleIdentity(), "req-2", sampleAt, sampleCaptured())
 	if a.EventID == c.EventID {
-		t.Error("two distinct calls share one idempotency key — the second would be absorbed as a duplicate")
+		t.Error("two distinct calls share one idempotency key; the second would be absorbed as a duplicate")
 	}
 }
 
@@ -112,17 +112,17 @@ func TestObservedExchangeReachesTheWire(t *testing.T) {
 		t.Fatalf("unmarshal posted payload: %v", err)
 	}
 	if p.SpanCount != 1 || len(p.Spans) != 1 {
-		t.Fatalf("span_count=%d spans=%d, want exactly one — the capture never reached the wire", p.SpanCount, len(p.Spans))
+		t.Fatalf("span_count=%d spans=%d, want exactly one; the capture never reached the wire", p.SpanCount, len(p.Spans))
 	}
 	s := p.Spans[0]
 	if s.HTTPMethod != "POST" || s.HTTPStatus != 200 {
 		t.Errorf("classification fields wrong: method=%q status=%d (core recomputes semantic_type from these)", s.HTTPMethod, s.HTTPStatus)
 	}
 	if !strings.Contains(s.HTTPURL, "api.anthropic.com") {
-		t.Errorf("http_url = %q — isLLMCall needs an LLM domain here or the span classifies as something else", s.HTTPURL)
+		t.Errorf("http_url = %q; isLLMCall needs an LLM domain here or the span classifies as something else", s.HTTPURL)
 	}
 	if s.CredentialFingerprint == "" || s.Attributes["openbox.credential_fingerprint"] == nil {
-		t.Error("credential fingerprint absent — account binding has nothing to match on")
+		t.Error("credential fingerprint absent; account binding has nothing to match on")
 	}
 	if s.RequestHeaders["Anthropic-Version"] != "2023-06-01" {
 		t.Errorf("request headers did not reach the wire: %v", s.RequestHeaders)
@@ -134,7 +134,7 @@ func TestObservedExchangeReachesTheWire(t *testing.T) {
 		t.Errorf("bodies did not reach the wire: req=%q resp=%q", s.RequestBody, s.ResponseBody)
 	}
 	if !strings.Contains(p.ActivityID, ":gateway:") {
-		t.Errorf("activity_id %q is not in the gateway namespace — it could collide with a hook turn", p.ActivityID)
+		t.Errorf("activity_id %q is not in the gateway namespace; it could collide with a hook turn", p.ActivityID)
 	}
 }
 
@@ -153,7 +153,7 @@ func TestCaptureOffStripsBodiesAndHeadersButKeepsTheFingerprint(t *testing.T) {
 		t.Error("headers egressed with content capture OFF")
 	}
 	if !strings.Contains(got, "a1b2c3d4e5f60718") {
-		t.Error("credential fingerprint disappeared under the content gate — that decision keeps it ungated")
+		t.Error("credential fingerprint disappeared under the content gate; that decision keeps it ungated")
 	}
 }
 

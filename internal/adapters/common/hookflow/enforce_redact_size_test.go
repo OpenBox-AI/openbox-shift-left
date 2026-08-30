@@ -22,7 +22,7 @@ func TestRedactTextScansOversizedBodies(t *testing.T) {
 
 	out := RedactText(r, body)
 	if strings.Contains(out, secret) {
-		t.Error("an oversized body egressed unscanned — the first 64K of it is exactly " +
+		t.Error("an oversized body egressed unscanned; the first 64K of it is exactly " +
 			"what capBody then puts on the wire")
 	}
 	if !strings.Contains(out, "OPENBOX_REDACTED") {

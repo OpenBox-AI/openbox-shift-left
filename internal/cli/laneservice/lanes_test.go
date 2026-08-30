@@ -47,7 +47,7 @@ func TestSpecsUseFlagsThatExist(t *testing.T) {
 				plain := strings.NewReplacer("<string>", " ", "</string>", " ").Replace(body)
 				for _, field := range strings.Fields(plain) {
 					if strings.HasPrefix(field, "--") && !lane.flags[field] {
-						t.Errorf("%s %s unit passes %q, which `openbox %s` does not define — it would fail to start on every boot",
+						t.Errorf("%s %s unit passes %q, which `openbox %s` does not define; it would fail to start on every boot",
 							lane.name, platform, field, lane.name)
 					}
 				}

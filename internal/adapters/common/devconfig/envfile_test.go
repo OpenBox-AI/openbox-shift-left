@@ -368,7 +368,7 @@ func TestParseEnvFileErrorEchoesTheOffendingLine(t *testing.T) {
 		t.Fatal("a line with no '=' should be a parse error")
 	}
 	if !strings.Contains(err.Error(), "SENTINELSECRET") {
-		t.Skipf("godotenv no longer echoes the offending line (%v) — the disclosure "+
+		t.Skipf("godotenv no longer echoes the offending line (%v); the disclosure "+
 			"documented in ParseEnvFile's comment is gone and that comment should be "+
 			"updated", err)
 	}

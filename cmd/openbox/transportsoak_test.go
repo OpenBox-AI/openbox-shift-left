@@ -105,7 +105,7 @@ func TestTransportSoakMeasuresSpoolCostPerModelCall(t *testing.T) {
 	perEvent := size / int64(lines)
 	t.Logf("SOAK: %d model call(s), request body %d runes, %v total (%v/call)",
 		lines, reqRunes, elapsed.Round(time.Millisecond), (elapsed / time.Duration(soakIterations)).Round(time.Millisecond))
-	t.Logf("SOAK: spool grew to %d bytes — %d bytes per model call", size, perEvent)
+	t.Logf("SOAK: spool grew to %d bytes; %d bytes per model call", size, perEvent)
 
 	if perEvent >= int64(reqRunes) {
 		t.Errorf("the spool carries the full %d-rune request body (%d bytes/event). "+

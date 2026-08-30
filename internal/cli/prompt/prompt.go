@@ -44,7 +44,7 @@ var ErrNotATerminal = errors.New("stdin is not a terminal")
 // changed together.
 const NonInteractiveHelp = `openbox auth needs a terminal to prompt for values.
 For automation, name a SOURCE for each secret instead of a value (no secret ever
-goes on argv — INV-1):
+goes on argv; INV-1):
 
   printf '%s\n%s\n' "$OBX_KEY" "$OBX_PRIVATE_KEY" |
     openbox auth --api-key-stdin --private-key-stdin --yes

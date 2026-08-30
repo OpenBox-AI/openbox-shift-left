@@ -47,7 +47,7 @@ func (a *app) runAuth(args []string) int {
 	)
 	fs.BoolVar(&rotate, "rotate", false, "re-issue credentials for an agent that already exists remotely, preserving its id and DID")
 	fs.BoolVar(&yes, "yes", false, "skip the confirmation prompt (for automation)")
-	fs.BoolVar(&apiKeyStdin, "api-key-stdin", false, "read the obx_ API key from the FIRST line of stdin (never a flag value — INV-1)")
+	fs.BoolVar(&apiKeyStdin, "api-key-stdin", false, "read the obx_ API key from the FIRST line of stdin (never a flag value; INV-1)")
 	fs.BoolVar(&privateKeyStdin, "private-key-stdin", false, "read the base64 signing key from the NEXT line of stdin")
 	fs.BoolVar(&controlTokenStdin, "control-token-stdin", false, "read an approver's obx_key_ control token from the NEXT line of stdin")
 	fs.StringVar(&envFile, "env-file", "", "write the credential file here instead of ~/.openbox/.env")
@@ -56,8 +56,8 @@ func (a *app) runAuth(args []string) int {
 	fs.BoolVar(&force, "force", false, "register a new distinctly-named agent even if one exists remotely")
 	fs.StringVar(&baseURL, "base-url", a.env(devconfig.EnvBaseURL, ""), "openbox-core DATA-PLANE base URL (where events go)")
 	fs.StringVar(&backendURL, "backend-url", a.env(devconfig.EnvBackendURL, ""), "openbox-backend CONTROL-PLANE base URL")
-	fs.StringVar(&did, "did", a.env(devconfig.EnvDID, ""), "this agent's DID (did:aip:<uuid>) — non-secret, so a flag value is fine")
-	fs.StringVar(&agentID, "agent-id", a.env(devconfig.EnvAgentID, ""), "this agent's backend id — non-secret; blank on an interactive run registers a new agent")
+	fs.StringVar(&did, "did", a.env(devconfig.EnvDID, ""), "this agent's DID (did:aip:<uuid>); non-secret, so a flag value is fine")
+	fs.StringVar(&agentID, "agent-id", a.env(devconfig.EnvAgentID, ""), "this agent's backend id; non-secret; blank on an interactive run registers a new agent")
 	if code, ok := parseFlags(fs, args); !ok {
 		return code
 	}
@@ -259,7 +259,7 @@ func (a *app) writeSecrets(envPath string, f authFields, piped map[string]string
 	if err := devconfig.WriteEnvFile(envPath, secrets); err != nil {
 		return a.errorf("write credentials: %v", err)
 	}
-	fmt.Fprintf(a.stdout, "✓ wrote %s (0600 — plaintext;)\n", envPath)
+	fmt.Fprintf(a.stdout, "✓ wrote %s (0600; plaintext;)\n", envPath)
 	return exitOK
 }
 
@@ -279,7 +279,7 @@ func (a *app) writeCoordinates(f authFields) int {
 	}); err != nil {
 		return a.errorf("write dev config: %v", err)
 	}
-	fmt.Fprintf(a.stdout, "✓ wrote %s  (agent id, DID, URLs — no secrets)\n", path)
+	fmt.Fprintf(a.stdout, "✓ wrote %s  (agent id, DID, URLs; no secrets)\n", path)
 	return exitOK
 }
 
@@ -339,7 +339,7 @@ func publicKeyFingerprint(seedB64 string) string {
 		if strings.TrimSpace(seedB64) == "" {
 			return "(none)"
 		}
-		return "(unreadable — validation will reject it)"
+		return "(unreadable; validation will reject it)"
 	}
 	pub := ed25519.NewKeyFromSeed(raw).Public().(ed25519.PublicKey)
 	sum := sha256.Sum256(pub)
@@ -389,7 +389,7 @@ func (a *app) registerForAuth(f authFields, icon, description, envFileOverride s
 		return nil, provider.CredentialRef{}, a.errorf("%s", problem)
 	}
 	if f.backendURL == "" {
-		return nil, provider.CredentialRef{}, a.errorf("no backend URL — pass --backend-url or set %s", devconfig.EnvBackendURL)
+		return nil, provider.CredentialRef{}, a.errorf("no backend URL; pass --backend-url or set %s", devconfig.EnvBackendURL)
 	}
 	if selfHostedWithoutDataPlane(f.backendURL, f.baseURL) {
 		fmt.Fprintf(a.stderr,
@@ -468,7 +468,7 @@ func (a *app) stdinFile() *os.File {
 
 func (a *app) printAuthNextSteps() {
 	fmt.Fprintf(a.stdout, "\nNext: openbox init --provider <claude-code|codex|cursor>\n")
-	fmt.Fprintf(a.stdout, "  That installs the hooks. By default it governs THIS DIRECTORY only —\n")
+	fmt.Fprintf(a.stdout, "  That installs the hooks. By default it governs THIS DIRECTORY only -\n")
 	fmt.Fprintf(a.stdout, "  run it in each project you want governed, or use --scope global for a\n")
 	fmt.Fprintf(a.stdout, " fleet rollout.\n")
 }

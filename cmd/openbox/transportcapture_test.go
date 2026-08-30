@@ -242,7 +242,7 @@ func readOneSpooledEvent(t *testing.T, spoolDir, sessionID string) client.DevEve
 		for _, e := range entries {
 			names = append(names, e.Name())
 		}
-		t.Fatalf("no spool file for session %s (dir holds %v): %v — the relay answered, so the "+
+		t.Fatalf("no spool file for session %s (dir holds %v): %v; the relay answered, so the "+
 			"break is between the capture and the spool", sessionID, names, err)
 	}
 	lines := strings.Split(strings.TrimSpace(string(raw)), "\n")

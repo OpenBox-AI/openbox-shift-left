@@ -43,7 +43,7 @@ func TestUnitsUseFlagsThatExist(t *testing.T) {
 	} {
 		for _, field := range strings.Fields(strings.NewReplacer("<string>", " ", "</string>", " ").Replace(body)) {
 			if strings.HasPrefix(field, "--") && !valid[field] {
-				t.Errorf("%s unit passes %q, which `openbox gateway` does not define — it would fail to start on every boot", name, field)
+				t.Errorf("%s unit passes %q, which `openbox gateway` does not define; it would fail to start on every boot", name, field)
 			}
 		}
 		if strings.Contains(body, "--config") {

@@ -31,7 +31,7 @@ const (
 	sessionEndHookTimeoutSec = 15
 )
 
-const hooksDescription = "OpenBox observe hooks (STORY-SL7-A) — managed by `openbox init --provider codex`; re-running updates the openbox entries in place and never touches foreign hooks."
+const hooksDescription = "OpenBox observe hooks (STORY-SL7-A); managed by `openbox init --provider codex`; re-running updates the openbox entries in place and never touches foreign hooks."
 
 // Installer writes the OpenBox hook entries into Codex's hooks.json and the
 // non-secret dev config, delegated from `openbox init` (the provider seam).
@@ -51,10 +51,10 @@ func (Installer) Available() bool { return true }
 // and the onboarding summary). It never prints a secret value (INV-1).
 func (i Installer) Plan(ref CredentialRef) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "OpenBox Codex hooks (observe-only, STORY-SL7-A; requires codex-cli >= 0.145.0 — hooks are stable and ON by default):\n")
-	fmt.Fprintf(&b, "  - Write OpenBox hook entries → %s (merged in place, idempotent — foreign entries untouched)\n", i.hooksPath())
+	fmt.Fprintf(&b, "OpenBox Codex hooks (observe-only, STORY-SL7-A; requires codex-cli >= 0.145.0; hooks are stable and ON by default):\n")
+	fmt.Fprintf(&b, "  - Write OpenBox hook entries → %s (merged in place, idempotent; foreign entries untouched)\n", i.hooksPath())
 	fmt.Fprintf(&b, "      SessionStart, UserPromptSubmit, SessionEnd (matcher omitted)   timeout %ds/%ds\n", hotHookTimeoutSec, sessionEndHookTimeoutSec)
-	fmt.Fprintf(&b, "      PostToolUse (matcher \"*\" — Bash, apply_patch, mcp__*)          timeout %ds\n", hotHookTimeoutSec)
+	fmt.Fprintf(&b, "      PostToolUse (matcher \"*\"; Bash, apply_patch, mcp__*)          timeout %ds\n", hotHookTimeoutSec)
 	fmt.Fprintf(&b, "      PreToolUse  (matcher \"*\"; the gating hook, may hold for approval) timeout %ds\n", preToolUseHookTimeoutSec)
 	fmt.Fprintf(&b, "      each: { \"type\": \"command\", \"command\": %q }\n", i.hookCommand("<Event>"))
 	fmt.Fprintf(&b, "  - Write dev config (non-secret coordinates) → %s\n", i.configPath())
@@ -62,13 +62,13 @@ func (i Installer) Plan(ref CredentialRef) string {
 	fmt.Fprintf(&b, "      base_url=%s\n", devconfig.BaseURLLabel(ref.BaseURL))
 	fmt.Fprintf(&b, "      content_capture=%s (default ON as of 2026-07-15; set false to restore metadata-only)\n", contentCaptureLabel(ref.ContentCapture))
 	fmt.Fprintf(&b, "  - Credentials are NOT touched here: `openbox auth` wrote them to ~/.openbox/.env and\n")
-	fmt.Fprintf(&b, " the hook reads them at runtime — hooks.json carries the engine path +\n")
+	fmt.Fprintf(&b, " the hook reads them at runtime; hooks.json carries the engine path +\n")
 	fmt.Fprintf(&b, "    event names ONLY (no key, DID, or URL).\n")
 	fmt.Fprintf(&b, "\nTrust step (Codex hash-trusts non-managed hooks):\n")
-	fmt.Fprintf(&b, "  After install, run /hooks inside Codex to review and TRUST the new OpenBox hooks —\n")
+	fmt.Fprintf(&b, "  After install, run /hooks inside Codex to review and TRUST the new OpenBox hooks -\n")
 	fmt.Fprintf(&b, "  until trusted they do not run. (`--dangerously-bypass-hook-trust` and `--disable hooks`\n")
 	fmt.Fprintf(&b, "  remain user-side bypass vectors; requirements.toml-managed hooks are the future\n")
-	fmt.Fprintf(&b, "  non-disablable option — OD-SL7-DIST.)\n")
+	fmt.Fprintf(&b, "  non-disablable option; OD-SL7-DIST.)\n")
 	fmt.Fprintf(&b, "\nCommit attribution: a Codex-run `git commit` is stamped `OpenBox-Session:` from the\n")
 	fmt.Fprintf(&b, "CODEX_THREAD_ID env Codex injects into every exec (no liveness registry). Enable the\n")
 	fmt.Fprintf(&b, "ambient prepare-commit-msg hook install with `openbox init --install-git-hook`,\n")
@@ -180,12 +180,12 @@ func (i Installer) mergeEvent(existing json.RawMessage, ev HookName) (json.RawMe
 		var foreign []json.RawMessage
 		for _, h := range g.Hooks {
 			if isOpenBoxHandler(h) {
-				continue // ours (possibly stale/mangled-import) — superseded below
+				continue // ours (possibly stale/mangled-import); superseded below
 			}
 			foreign = append(foreign, h)
 		}
 		if len(foreign) == 0 {
-			continue // the group only carried our handlers — drop it
+			continue // the group only carried our handlers; drop it
 		}
 		g.Hooks = foreign
 		kept = append(kept, g)
@@ -228,7 +228,7 @@ func stripEngineToken(cmd string) (rest string, ok bool) {
 	if cmd[0] == '"' {
 		end := strings.IndexByte(cmd[1:], '"')
 		if end < 0 {
-			return "", false // unterminated quote — not our shape
+			return "", false // unterminated quote; not our shape
 		}
 		return strings.TrimSpace(cmd[end+2:]), true
 	}

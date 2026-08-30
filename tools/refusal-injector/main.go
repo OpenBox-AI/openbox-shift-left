@@ -46,7 +46,7 @@ func main() {
 
 	fmt.Fprintf(os.Stderr, "refusal-injector: listening on %s, forwarding to %s\n", *addr, *upstream)
 	fmt.Fprintf(os.Stderr, "refusal-injector: will inject %q after %d %s call(s)\n", shape.Name, *after, *path)
-	fmt.Fprintf(os.Stderr, "refusal-injector: THROWAWAY SESSIONS ONLY — this fabricates provider responses\n")
+	fmt.Fprintf(os.Stderr, "refusal-injector: THROWAWAY SESSIONS ONLY; this fabricates provider responses\n")
 	fmt.Fprintf(os.Stderr, "refusal-injector: point the tool at it with ANTHROPIC_BASE_URL=http://%s\n", *addr)
 
 	srv := &http.Server{

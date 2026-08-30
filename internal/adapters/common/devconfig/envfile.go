@@ -10,7 +10,7 @@ import (
 	"github.com/joho/godotenv"
 )
 
-const envFileHeader = `# OpenBox credentials for this machine — written by ` + "`openbox auth`" + `.
+const envFileHeader = `# OpenBox credentials for this machine; written by ` + "`openbox auth`" + `.
 #
 # PLAINTEXT. 0600 on macOS/Linux; on Windows 0600 is a no-op and other local
 # accounts can read this file. Anything running as you can read the
@@ -20,11 +20,11 @@ const envFileHeader = `# OpenBox credentials for this machine — written by ` +
 # registration, and does not store them. If you lose this file, re-issue with
 # ` + "`openbox auth --rotate`" + ` or register again with ` + "`openbox auth`" + `.
 #
-# DO NOT COMMIT THIS FILE. Sourcing it is never required — the tools read it
+# DO NOT COMMIT THIS FILE. Sourcing it is never required; the tools read it
 # directly. A real environment variable always wins over a value here.
 `
 
-// ParseEnvFile reads a dotenv file into a map. Four behaviours differ from the
+// ParseEnvFile reads a dotenv file into a map. Several behaviours differ from the
 // hand-rolled parser this replaced, all measured against it over an 18-case
 // corpus, and all of them losses rather than neutral changes. They are
 // recorded here because each one is a way a credential can go wrong silently:

@@ -10,12 +10,12 @@ import (
 // signingReasonGuidance categories only, never content, never secrets
 // (INV-1/INV-2).
 var signingReasonGuidance = map[string]string{
-	"signature_invalid":        "the signed bytes were rejected — a rotated/mismatched Ed25519 key or a body-hash mismatch; re-provision the dev agent (docs/getting-started.md § Troubleshooting)",
+	"signature_invalid":        "the signed bytes were rejected; a rotated/mismatched Ed25519 key or a body-hash mismatch; re-provision the dev agent (docs/getting-started.md § Troubleshooting)",
 	"nonce_replayed":           "a buffered event was re-sent after a lost 200 (INV-5); safe to ignore unless persistent",
-	"did_agent_mismatch":       "the agent DID does not match the key the obx_ credential was provisioned for — re-run `openbox init` for this provider (INV-7)",
+	"did_agent_mismatch":       "the agent DID does not match the key the obx_ credential was provisioned for; re-run `openbox init` for this provider (INV-7)",
 	"verifier_not_configured":  "the dev agent has no KMS verifier; register signing-off or set signing_required=false (docs/getting-started.md § Troubleshooting)",
-	"timestamp_outside_window": "the request timestamp is outside core's ±300s window — sync the host clock (NTP)",
-	"timestamp_skew":           "the request timestamp is outside core's ±300s window — sync the host clock (NTP)",
+	"timestamp_outside_window": "the request timestamp is outside core's ±300s window; sync the host clock (NTP)",
+	"timestamp_skew":           "the request timestamp is outside core's ±300s window; sync the host clock (NTP)",
 }
 
 type coreError struct {
@@ -36,7 +36,7 @@ func diagnose(status int, body string) string {
 			return "reason=" + reason + ": " + g
 		}
 		return "reason=" + reason + " (status " + strconv.Itoa(status) +
-			"): unrecognized reason code — re-confirm the core error envelope"
+			"): unrecognized reason code; re-confirm the core error envelope"
 	}
 
 	var ce coreError
@@ -46,14 +46,14 @@ func diagnose(status int, body string) string {
 	switch status {
 	case 401:
 		if strings.Contains(msg, "missing authorization") {
-			return "401 no Authorization bearer — the obx_ credential is missing/empty; re-run `openbox init`"
+			return "401 no Authorization bearer; the obx_ credential is missing/empty; re-run `openbox init`"
 		}
-		return "401 identity rejected — core does not disclose the specific reason over HTTP; " +
+		return "401 identity rejected; core does not disclose the specific reason over HTTP; " +
 			"likely no KMS verifier (set signing_required=false), a rotated/mismatched key, or host clock skew (docs/getting-started.md § Troubleshooting)"
 	case 400:
 		if strings.HasPrefix(msg, "invalid event_type") {
 			return "400 " + truncate(msg, maxDiagMsg) +
-				" — core has not accept-listed the dev event types yet; events fail-open drop until it does (INV-8)"
+				"; core has not accept-listed the dev event types yet; events fail-open drop until it does (INV-8)"
 		}
 		if msg != "" {
 			return "400 payload rejected: " + truncate(msg, maxDiagMsg)
@@ -63,7 +63,7 @@ func diagnose(status int, body string) string {
 		if strings.Contains(msg, "verifier") {
 			return "500 " + signingReasonGuidance["verifier_not_configured"]
 		}
-		return "500 core-side verifier/replay-cache unavailable (transient); retried and still failed — safe to ignore unless persistent"
+		return "500 core-side verifier/replay-cache unavailable (transient); retried and still failed; safe to ignore unless persistent"
 	default:
 		if msg != "" {
 			return "status " + strconv.Itoa(status) + ": " + truncate(msg, maxDiagMsg)
@@ -96,7 +96,7 @@ func extractReason(body []byte) string {
 func describeDrop(err error) string {
 	var he *httpError
 	if errors.As(err, &he) {
-		return he.Error() + " — " + diagnose(he.status, he.body)
+		return he.Error() + "; " + diagnose(he.status, he.body)
 	}
 	return err.Error()
 }

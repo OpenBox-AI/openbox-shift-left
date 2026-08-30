@@ -54,9 +54,9 @@ func (a *app) runDoctor(args []string) int {
 		note := ""
 		switch devconfig.Source(source) {
 		case devconfig.SourceManaged:
-			note = "  (org mandate — not overridable here)"
+			note = "  (org mandate; not overridable here)"
 		case devconfig.SourceManagedDefault:
-			note = "  (org default — overridable)"
+			note = "  (org default; overridable)"
 		}
 		fmt.Fprintf(a.stdout, "  %-*s %-5v  from %s%s\n", width, n, flags[n], source, note)
 	}
@@ -65,25 +65,25 @@ func (a *app) runDoctor(args []string) int {
 	m := devconfig.Managed()
 	switch {
 	case !m.Present:
-		fmt.Fprintf(a.stdout, "  %s: absent — every setting above is developer-controlled\n", m.Path)
+		fmt.Fprintf(a.stdout, "  %s: absent; every setting above is developer-controlled\n", m.Path)
 	case !m.Readable:
-		fmt.Fprintf(a.stdout, "  %s: PRESENT BUT UNREADABLE — this machine is meant to be managed and is not.\n", m.Path)
+		fmt.Fprintf(a.stdout, "  %s: PRESENT BUT UNREADABLE; this machine is meant to be managed and is not.\n", m.Path)
 		fmt.Fprintf(a.stdout, "    Sessions fall back to developer-controlled settings. Fix the file (an unknown\n")
 		fmt.Fprintf(a.stdout, "    key makes it unreadable, so check for typos in field names).\n")
 	default:
 		fmt.Fprintf(a.stdout, "  %s: active\n", m.Path)
 		if len(m.Locked) == 0 {
-			fmt.Fprintf(a.stdout, "    locked: (none) — values act as org defaults the developer may override\n")
+			fmt.Fprintf(a.stdout, "    locked: (none); values act as org defaults the developer may override\n")
 		} else {
 			fmt.Fprintf(a.stdout, "    locked: %v\n", m.Locked)
 		}
 		if len(m.UnknownKeys) > 0 {
 			fmt.Fprintf(a.stdout, "    WARNING: unrecognized keys, ignored: %v\n", m.UnknownKeys)
 			fmt.Fprintf(a.stdout, "      They set nothing. Check the spelling against dev.json's field\n")
-			fmt.Fprintf(a.stdout, "      names — an org that misspells a field believes it mandated something.\n")
+			fmt.Fprintf(a.stdout, "      names; an org that misspells a field believes it mandated something.\n")
 		}
 		if len(m.UnknownLocked) > 0 {
-			fmt.Fprintf(a.stdout, "    WARNING: locked names no setting recognizes: %v — these lock NOTHING.\n", m.UnknownLocked)
+			fmt.Fprintf(a.stdout, "    WARNING: locked names no setting recognizes: %v; these lock NOTHING.\n", m.UnknownLocked)
 			fmt.Fprintf(a.stdout, "      Check the spelling against the dev.json field names; a typo here is a\n")
 			fmt.Fprintf(a.stdout, "      mandate the org believes is in force and is not.\n")
 		}
@@ -107,12 +107,12 @@ func (a *app) runDoctor(args []string) int {
 
 	fmt.Fprintf(a.stdout, "\nProject hook registration\n")
 	if wd, err := os.Getwd(); err != nil {
-		fmt.Fprintf(a.stdout, "  current directory unreadable (%v) — check skipped\n", err)
+		fmt.Fprintf(a.stdout, "  current directory unreadable (%v); check skipped\n", err)
 	} else {
 		audit, err := providers.AuditProjectHooks(wd)
 		switch {
 		case err != nil:
-			fmt.Fprintf(a.stdout, "  %s: could not be read — %v\n", audit.SettingsPath, err)
+			fmt.Fprintf(a.stdout, "  %s: could not be read; %v\n", audit.SettingsPath, err)
 		case !audit.Present:
 			fmt.Fprintf(a.stdout, "  %s  (absent)\n", audit.SettingsPath)
 			fmt.Fprintf(a.stdout, "    No project hook config in THIS directory. A global-scope install governs\n")
@@ -132,7 +132,7 @@ func (a *app) runDoctor(args []string) int {
 				fmt.Fprintf(a.stdout, "      directory: it replaces registrations left at another engine path.\n")
 			}
 			if len(audit.DuplicateEvents) > 0 {
-				fmt.Fprintf(a.stdout, "    WARNING: registered more than once for: %s — same duplication.\n", strings.Join(audit.DuplicateEvents, ", "))
+				fmt.Fprintf(a.stdout, "    WARNING: registered more than once for: %s; same duplication.\n", strings.Join(audit.DuplicateEvents, ", "))
 				fmt.Fprintf(a.stdout, "      Run `openbox init` in this directory.\n")
 			}
 		}
@@ -170,7 +170,7 @@ func lastDecisionSummary() string {
 		return "(unreadable)"
 	}
 	if rec.PolicyID == "" {
-		return fmt.Sprintf("%s via %s — NO policy decided this call", orUnset(rec.Verdict), orUnset(rec.Source))
+		return fmt.Sprintf("%s via %s; NO policy decided this call", orUnset(rec.Verdict), orUnset(rec.Source))
 	}
 	return fmt.Sprintf("policy %s (%s via %s)", rec.PolicyID, orUnset(rec.Verdict), orUnset(rec.Source))
 }
@@ -195,7 +195,7 @@ func (a *app) reportGateway() {
 	fmt.Fprintf(a.stdout, "\nLocal gateway (model-call governance)\n")
 
 	if r.SettingsPath == "" {
-		fmt.Fprintf(a.stdout, "  configured   no — ANTHROPIC_BASE_URL is not set in any settings file\n")
+		fmt.Fprintf(a.stdout, "  configured   no; ANTHROPIC_BASE_URL is not set in any settings file\n")
 	} else {
 		fmt.Fprintf(a.stdout, "  configured   %s\n", r.ConfiguredAddr)
 		fmt.Fprintf(a.stdout, "  from         %s\n", r.SettingsPath)
@@ -209,12 +209,12 @@ func (a *app) reportGateway() {
 		fmt.Fprintf(a.stdout, "  owned by     %s\n", owner)
 		fmt.Fprintf(a.stdout, "  tier         %s\n", r.Tier)
 		if !r.TargetsGateway {
-			fmt.Fprintf(a.stdout, "  target       NOT loopback — this machine is pointed at something else\n")
+			fmt.Fprintf(a.stdout, "  target       NOT loopback; this machine is pointed at something else\n")
 		}
 		if r.Alive {
 			fmt.Fprintf(a.stdout, "  reachable    yes\n")
 		} else {
-			fmt.Fprintf(a.stdout, "  reachable    NO — %s\n", r.AliveErr)
+			fmt.Fprintf(a.stdout, "  reachable    NO; %s\n", r.AliveErr)
 			fmt.Fprintf(a.stdout, "               model calls will FAIL rather than escape, which is the safe\n")
 			fmt.Fprintf(a.stdout, "               direction. Start the gateway: `openbox gateway`\n")
 		}
@@ -227,7 +227,7 @@ func (a *app) reportGateway() {
 		} else if r.EnvValue != "" {
 			fmt.Fprintf(a.stdout, "  environment  agrees (ANTHROPIC_BASE_URL=%s)\n", r.EnvValue)
 		} else {
-			fmt.Fprintf(a.stdout, "  verify with  `/status` in a Claude Code session — it prints the base URL\n")
+			fmt.Fprintf(a.stdout, "  verify with  `/status` in a Claude Code session; it prints the base URL\n")
 			fmt.Fprintf(a.stdout, "               actually in force. doctor reads the file, which is the source\n")
 			fmt.Fprintf(a.stdout, "               that wins, but only the session can confirm what it resolved.\n")
 		}
@@ -257,7 +257,7 @@ func (a *app) reportLanes() {
 
 	fmt.Fprintf(a.stdout, "\nModel-call producer (which lane emits turn events)\n")
 	if election.Elected == "" {
-		fmt.Fprintf(a.stdout, "  elected      (none) — %s\n", election.Reason)
+		fmt.Fprintf(a.stdout, "  elected      (none); %s\n", election.Reason)
 		fmt.Fprintf(a.stdout, "               No lane emits model-call turns, so token counts and costs for this\n")
 		fmt.Fprintf(a.stdout, "               machine are ABSENT rather than merely incomplete.\n")
 	} else {
@@ -265,12 +265,12 @@ func (a *app) reportLanes() {
 		fmt.Fprintf(a.stdout, "  because      %s\n", election.Reason)
 	}
 	if len(election.Routed) > 1 {
-		fmt.Fprintf(a.stdout, "  routed       %v — exactly one of these emits; the others still send their own\n", election.Routed)
+		fmt.Fprintf(a.stdout, "  routed       %v; exactly one of these emits; the others still send their own\n", election.Routed)
 		fmt.Fprintf(a.stdout, "               non-turn evidence, which does not collide.\n")
 	}
 	for _, lane := range election.Routed {
 		if !containsLaneName(election.Candidates, lane) {
-			fmt.Fprintf(a.stdout, "  NOT IN PATH  %s is configured but cannot see this machine's model calls —\n", lane)
+			fmt.Fprintf(a.stdout, "  NOT IN PATH  %s is configured but cannot see this machine's model calls -\n", lane)
 			fmt.Fprintf(a.stdout, "               ANTHROPIC_BASE_URL sends them somewhere it does not intercept.\n")
 		}
 	}
@@ -294,12 +294,12 @@ func (a *app) reportLanes() {
 			fmt.Fprintf(a.stdout, "  unit         not installed\n")
 		}
 		routed := containsLaneName(election.Routed, activation.Lane(lane.name))
-		fmt.Fprintf(a.stdout, "  configured   %s\n", map[bool]string{true: "yes — " + settingsPath, false: "no — the tool is not pointed at it"}[routed])
+		fmt.Fprintf(a.stdout, "  configured   %s\n", map[bool]string{true: "yes; " + settingsPath, false: "no; the tool is not pointed at it"}[routed])
 		occupied, _ := portOccupied(lane.addr)
 		if occupied {
 			fmt.Fprintf(a.stdout, "  reachable    yes (%s)\n", lane.addr)
 		} else {
-			fmt.Fprintf(a.stdout, "  reachable    NO — nothing is listening on %s\n", lane.addr)
+			fmt.Fprintf(a.stdout, "  reachable    NO; nothing is listening on %s\n", lane.addr)
 			if routed {
 				fmt.Fprintf(a.stdout, "               The tool is pointed at a port with nothing behind it.\n")
 			}
@@ -307,14 +307,14 @@ func (a *app) reportLanes() {
 		if election.Elected == activation.Lane(lane.name) && !occupied {
 			fmt.Fprintf(a.stdout, "  WARNING      this lane is ELECTED but nothing is listening, so NO lane is emitting\n")
 			fmt.Fprintf(a.stdout, "               model-call turns on this machine. If you did not install it, something\n")
-			fmt.Fprintf(a.stdout, "               else set its env keys — the election reads where the tool is routed,\n")
+			fmt.Fprintf(a.stdout, "               else set its env keys; the election reads where the tool is routed,\n")
 			fmt.Fprintf(a.stdout, "               not what OpenBox installed. `openbox init --provider claude-code --full`\n")
 			fmt.Fprintf(a.stdout, "               installs it, or --remove-all clears the routing.\n")
 		}
 		fmt.Fprintf(a.stdout, "  log          %s\n", laneLogPath(lane.spec, home))
 	}
 	fmt.Fprintf(a.stdout, "\n  Installed is not recording. A lane can be reachable, configured and elected\n")
-	fmt.Fprintf(a.stdout, "  while emitting nothing — no developer DID, or a posture key off. The log above\n")
+	fmt.Fprintf(a.stdout, "  while emitting nothing; no developer DID, or a posture key off. The log above\n")
 	fmt.Fprintf(a.stdout, "  is the only place that says so.\n")
 }
 

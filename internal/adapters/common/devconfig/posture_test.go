@@ -52,7 +52,7 @@ func TestPostureFields_CoverEveryConfigControl(t *testing.T) {
 			continue
 		}
 		if !reported[name] {
-			t.Errorf("DevConfig.%s (%q) is a boolean control but is not in postureFields() — "+
+			t.Errorf("DevConfig.%s (%q) is a boolean control but is not in postureFields(); "+
 				"add it so `openbox doctor` and the session posture can report it, "+
 				"or add it to notPosture here with the reason", fld.Name, name)
 		}
@@ -99,7 +99,7 @@ func TestPostureMetadata_NoSecretShapedValues(t *testing.T) {
 	probe := regexp.MustCompile(`obx_live_|obx_key_|BEGIN [A-Z ]*PRIVATE KEY|sk-proj-|ghp_`)
 	if got := probe.FindString(string(raw)); got != "" {
 		t.Errorf("secret-shaped value %q reached the posture metadata: %s\n"+
-			"posture egresses on every session start — no field may be wired to a credential source (INV-1)",
+			"posture egresses on every session start; no field may be wired to a credential source (INV-1)",
 			got, raw)
 	}
 }
@@ -133,10 +133,10 @@ func TestEffectivePosture_MatchesResolvers(t *testing.T) {
 		t.Errorf("EffectivePosture drifted from the resolvers: %+v", p)
 	}
 	if p.Flags()["content_capture"] != p.ContentCapture {
-		t.Error("Flags disagrees with the resolved posture — doctor would report a control that is not in force")
+		t.Error("Flags disagrees with the resolved posture; doctor would report a control that is not in force")
 	}
 	if _, reported := p.Flags()["require_verified_bundle"]; reported {
-		t.Error("require_verified_bundle is still reported — it cannot engage, so reporting it overstates")
+		t.Error("require_verified_bundle is still reported; it cannot engage, so reporting it overstates")
 	}
 	// That decision reversed the default deliberately, and the INV-3 property it
 	// cited is preserved elsewhere and unchanged: a failure never blocks a tool
@@ -145,7 +145,7 @@ func TestEffectivePosture_MatchesResolvers(t *testing.T) {
 		t.Error("enforce must default ON ")
 	}
 	if p.FailClosed {
-		t.Error("fail_closed must stay off — enforce-by-default is only defensible while an outage cannot block a developer")
+		t.Error("fail_closed must stay off; enforce-by-default is only defensible while an outage cannot block a developer")
 	}
 	if !p.SecretDetection || !p.ContentCapture {
 		t.Errorf("secret_detection and content_capture default on, got %+v", p)
@@ -163,7 +163,7 @@ func TestPostureReportsDecisionProvenance(t *testing.T) {
 			t.Errorf("decision authority = %q, want %q", p.DecisionAuthority, DecisionAuthorityControlPlane)
 		}
 		if p.FailurePolicy != FailurePolicyFailOpen {
-			t.Errorf("failure policy = %q, want %q — the default must not overstate", p.FailurePolicy, FailurePolicyFailOpen)
+			t.Errorf("failure policy = %q, want %q; the default must not overstate", p.FailurePolicy, FailurePolicyFailOpen)
 		}
 	})
 
@@ -181,7 +181,7 @@ func TestPostureReportsDecisionProvenance(t *testing.T) {
 		isolateConfig(t)
 		m := EffectivePosture().Metadata()
 		if m["decision_authority"] != DecisionAuthorityControlPlane {
-			t.Errorf("decision_authority = %v, want %q — that decision makes this posture's policy-provenance evidence",
+			t.Errorf("decision_authority = %v, want %q; that decision makes this posture's policy-provenance evidence",
 				m["decision_authority"], DecisionAuthorityControlPlane)
 		}
 		if m["failure_policy"] != FailurePolicyFailOpen {
@@ -189,7 +189,7 @@ func TestPostureReportsDecisionProvenance(t *testing.T) {
 		}
 		for k := range m {
 			if strings.HasPrefix(k, "bundle_") || k == "staleness" {
-				t.Errorf("%q is still emitted — it reports a subsystem that decision deleted", k)
+				t.Errorf("%q is still emitted; it reports a subsystem that decision deleted", k)
 			}
 		}
 	})

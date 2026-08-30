@@ -519,7 +519,7 @@ func deriveID(ev client.DevEvent) string {
 	b.WriteByte(sep)
 	b.WriteString(ev.Tool.Name)
 	b.WriteByte(sep)
-	b.WriteString(ev.Timestamp) // RFC3339Nano — the per-event distinguisher
+	b.WriteString(ev.Timestamp) // RFC3339Nano; the per-event distinguisher
 	if ev.Span != nil {
 		b.WriteByte(sep)
 		b.WriteString(ev.Span.FilePath)

@@ -64,7 +64,7 @@ func TestReInitReplacesAnOpenBoxEntryAtAStaleEnginePath(t *testing.T) {
 		t.Fatal(err)
 	}
 	if strings.Contains(string(got), stale+`" hook claude-code`) {
-		t.Error("a stale-engine OpenBox registration survived re-init — both engines still fire")
+		t.Error("a stale-engine OpenBox registration survived re-init; both engines still fire")
 	}
 	if strings.Contains(string(got), stale+`" rewake`) {
 		t.Error("the stale-engine rewake handler survived re-init")
@@ -192,7 +192,7 @@ func TestTheAuditAgreesWithWhatReInitRepairs(t *testing.T) {
 		t.Fatalf("audit after repair: %v", err)
 	}
 	if len(after.Engines) != 1 || after.Engines[0] != engine {
-		t.Errorf("after one re-init the audit still reports %v, want exactly [%s] — "+
+		t.Errorf("after one re-init the audit still reports %v, want exactly [%s]; "+
 			"doctor would keep warning after the command it recommends", after.Engines, engine)
 	}
 	if len(after.DuplicateEvents) != 0 {
@@ -240,7 +240,7 @@ func TestReInitCollapsesADuplicateRegistrationAtTheSameEngine(t *testing.T) {
 		t.Fatalf("audit after repair: %v", err)
 	}
 	if len(after.DuplicateEvents) != 0 {
-		t.Errorf("after the remedy doctor recommends, the audit still reports %v — "+
+		t.Errorf("after the remedy doctor recommends, the audit still reports %v; "+
 			"the warning would never clear", after.DuplicateEvents)
 	}
 	if len(after.Engines) != 1 || after.Engines[0] != engine {
@@ -289,7 +289,7 @@ func TestAuditLocalHooksOnAbsentAndUnparsableFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := AuditLocalHooks(dir); err == nil {
-		t.Error("invalid JSON must surface as an error, not as zero engines — silently reporting none reads as governed-and-clean")
+		t.Error("invalid JSON must surface as an error, not as zero engines; silently reporting none reads as governed-and-clean")
 	}
 }
 
@@ -440,7 +440,7 @@ func TestReInitReconcilesRegistrationShape(t *testing.T) {
 	}
 	foreign := hookFields(got, "UserPromptSubmit", "my-prompt-linter")
 	if ts, _ := foreign["timeout"].(float64); int(ts) != 7 {
-		t.Errorf("foreign hook timeout = %v, want its own 7 — reconcile must not touch foreign hooks", foreign["timeout"])
+		t.Errorf("foreign hook timeout = %v, want its own 7; reconcile must not touch foreign hooks", foreign["timeout"])
 	}
 
 	first, err := os.ReadFile(settingsPath)
@@ -455,6 +455,6 @@ func TestReInitReconcilesRegistrationShape(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !bytes.Equal(first, second) {
-		t.Error("second re-init changed the file — reconcile is not idempotent")
+		t.Error("second re-init changed the file; reconcile is not idempotent")
 	}
 }

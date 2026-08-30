@@ -111,7 +111,7 @@ func TestEveryMovedFlagErrorsNamingAuth(t *testing.T) {
 			a, _, errb := testApp(nil)
 			code := a.run([]string{"init", "--provider", "claude-code", tc.flag, tc.value})
 			if code != exitError {
-				t.Fatalf("exit = %d, want an error — a moved flag must not be silently accepted", code)
+				t.Fatalf("exit = %d, want an error; a moved flag must not be silently accepted", code)
 			}
 			s := errb.String()
 			if !strings.Contains(s, tc.flag) {
@@ -332,7 +332,7 @@ func TestPlainReInitDoesNotRevertAnEnforceOptOut(t *testing.T) {
 	run(t)
 	cfg := readDevJSON(t, home)
 	if cfg.Enforce == nil {
-		t.Fatal("the opt-out was erased by a plain re-run — an absent field re-defaults to ON")
+		t.Fatal("the opt-out was erased by a plain re-run; an absent field re-defaults to ON")
 	}
 	if *cfg.Enforce {
 		t.Error("a plain re-run silently turned enforcement back on; the opt-out must persist ")

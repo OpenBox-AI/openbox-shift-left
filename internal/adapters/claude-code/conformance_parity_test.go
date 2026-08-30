@@ -67,7 +67,7 @@ var conformanceParity = []parityRow{
 		goCase:   "C6 fail-closed + unbundled denies (INFO-1 hole closed)",
 		baseCase: "test_contract_error_fails_closed_even_when_fail_open",
 		status:   statusParity,
-		note:     "Partial parity: base hard-fails-closed on a ContractError even under fail-open (a 'no real verdict' input). C6 is the sidecar-specific instance — a reachable-but-unbundled daemon yields no real verdict, so fail-closed denies rather than being silently ungoverned.",
+		note:     "Partial parity: base hard-fails-closed on a ContractError even under fail-open (a 'no real verdict' input). C6 is the sidecar-specific instance; a reachable-but-unbundled daemon yields no real verdict, so fail-closed denies rather than being silently ungoverned.",
 	},
 	{
 		goCase:   "C7 observe mode never blocks (INV-3 verbatim)",
@@ -85,14 +85,14 @@ var conformanceParity = []parityRow{
 		goCase:   "C9 fail-closed + STALE real verdict proceeds",
 		baseCase: "",
 		status:   statusGoExtension,
-		note:     "Base has no verdict-staleness/TTL concept. C9 pins that a stale-but-real bundle verdict (sourceLocalBundle) proceeds under fail-closed — staleness never triggers fail-closed.",
+		note:     "Base has no verdict-staleness/TTL concept. C9 pins that a stale-but-real bundle verdict (sourceLocalBundle) proceeds under fail-closed; staleness never triggers fail-closed.",
 	},
 
 	{
 		goCase:   "TestWire_ToolEventsAreActivityPairs (+ client/testdata/golden/activity_*.json)",
 		baseCase: "",
 		status:   statusGoExtension,
-		note:     "The activity envelope for a tool call: ToolCall->ActivityStarted, ToolResult->ActivityCompleted sharing one activity_id, workflow_type set, no spans/span_count/hook_trigger, no client-set semantic_type. No base analog — the base SDK reserves ActivityCompleted for hook-LESS lifecycle events, so this shape is a deliberate shift-left divergence (see the tool-call-as-activity decision record). internal/adapters/codex/wire_test.go asserts the identical contract; the two are independent copies so a drift in one adapter cannot pass by moving a shared helper.",
+		note:     "The activity envelope for a tool call: ToolCall->ActivityStarted, ToolResult->ActivityCompleted sharing one activity_id, workflow_type set, no spans/span_count/hook_trigger, no client-set semantic_type. No base analog; the base SDK reserves ActivityCompleted for hook-LESS lifecycle events, so this shape is a deliberate shift-left divergence (see the tool-call-as-activity decision record). internal/adapters/codex/wire_test.go asserts the identical contract; the two are independent copies so a drift in one adapter cannot pass by moving a shared helper.",
 	},
 	{
 		goCase:   "",
@@ -130,7 +130,7 @@ var conformanceParity = []parityRow{
 		goCase:   "",
 		baseCase: "TestContextCases (bind before hooks / reset after / trace lookup / executor thread)",
 		status:   statusBaseUnmapped,
-		note:     "N/A by design. The base SDK threads an in-process ActivityContext across hooks; shift-left hooks are stateless separate processes that derive ids deterministically (client/payload.go activityIDFor) + share state via the SL-4 spool — there is no per-activity context store to bind/reset.",
+		note:     "N/A by design. The base SDK threads an in-process ActivityContext across hooks; shift-left hooks are stateless separate processes that derive ids deterministically (client/payload.go activityIDFor) + share state via the SL-4 spool; there is no per-activity context store to bind/reset.",
 	},
 }
 
@@ -147,7 +147,7 @@ func TestConformanceParityMatrix(t *testing.T) {
 			t.Errorf("row %d: invalid status %q", i, r.status)
 		}
 		if !hexNote.MatchString(r.note) {
-			t.Errorf("row %d (%q/%q): empty note — every mapping must justify itself", i, r.goCase, r.baseCase)
+			t.Errorf("row %d (%q/%q): empty note; every mapping must justify itself", i, r.goCase, r.baseCase)
 		}
 		switch r.status {
 		case statusParity:
@@ -275,23 +275,23 @@ var codexConformanceParity = []parityRow{
 	{goCase: "CDX-C4 fail-closed + outage denies", baseCase: "C4 fail-closed + outage denies", status: statusParity,
 		note: "Synthesized HALT → deny under fail-closed on a no-verdict outage; content-free fail-closed reason."},
 	{goCase: "CDX-C5 fail-closed never denies a REAL allow", baseCase: "C5 fail-closed never denies a REAL allow", status: statusParity,
-		note: "Fail-closed engages on no-verdict ONLY (isRealVerdictSource), never a real allow — identical to CC."},
+		note: "Fail-closed engages on no-verdict ONLY (isRealVerdictSource), never a real allow; identical to CC."},
 	{goCase: "CDX-C6 fail-closed + unbundled denies", baseCase: "C6 fail-closed + unbundled denies (INFO-1 hole closed)", status: statusParity,
 		note: "Reachable-but-unbundled degraded state (LESSON-E6E7-04): fail-closed denies rather than being silently ungoverned."},
 	{goCase: "CDX-C7 observe mode never blocks (byte-parity)", baseCase: "C7 observe mode never blocks (INV-3 verbatim)", status: statusParity,
 		note: "Enforce off ⇒ empty stdout even for a BLOCK-worthy tool, regardless of fail_closed. Codex parses hook stdout as output JSON, so the empty-stdout guarantee is load-bearing."},
 	{goCase: "CDX-C8 hook-timeout fail-open bound (probe P1)", baseCase: "C8 slow decision fails open within the bound", status: statusParity,
-		note: "Degraded state (LESSON-E6E7-04): both providers FAIL OPEN on a hook timeout (CC 5s kill; Codex kills at the installed `timeout` — probe P1, live). CC bounds a network wait; Codex has no in-process network path, so the case asserts the static invariant that the derived whole-hook budget lands before Codex's kill."},
+		note: "Degraded state (LESSON-E6E7-04): both providers FAIL OPEN on a hook timeout (CC 5s kill; Codex kills at the installed `timeout`; probe P1, live). CC bounds a network wait; Codex has no in-process network path, so the case asserts the static invariant that the derived whole-hook budget lands before Codex's kill."},
 	{goCase: "CDX-C9 fail-closed + STALE real verdict proceeds", baseCase: "C9 fail-closed + STALE real verdict proceeds", status: statusParity,
-		note: "Staleness never triggers fail-closed (keys on source, not Stale) — identical to CC."},
+		note: "Staleness never triggers fail-closed (keys on source, not Stale); identical to CC."},
 	{goCase: "CDX-C10 secret in apply_patch body → redact-and-continue", baseCase: "C10 secret in Write body → redact-and-continue (E6-S9)", status: statusParity,
 		note: "DELTA: the redactable body rides tool_input[\"command\"] (apply_patch patch text) not content/new_string, and Codex requires permissionDecision:allow + updatedInput to carry a rewrite (CC emits updatedInput alone). Same structural guarantee: content-only field swap, raw secret never egresses (INV-2)."},
 	{goCase: "CDX-C11 secret detection OFF → no redaction", baseCase: "C11 secret detection OFF → no redaction (opt-out, E6-S9)", status: statusParity,
-		note: "Opt-out + capture off ⇒ proceed path writes nothing — identical to CC."},
+		note: "Opt-out + capture off ⇒ proceed path writes nothing; identical to CC."},
 	{goCase: "CDX-C12 REQUIRE_APPROVAL → deny (OD-SL7-ASK)", baseCase: "", status: statusGoExtension,
-		note: "Codex-only DELTA: CC maps REQUIRE_APPROVAL→ask (native prompt). Codex's runtime REJECTS permissionDecision:ask (output_parser.rs 'unsupported permissionDecision:ask') and a no-decision under approval_policy=never auto-runs (probe P3), so per the ruled OD-SL7-ASK every REQUIRE_APPROVAL quadrant DENIES with a content-free reason — strictly tighter. This is the base-unmapped 'require_approval' row the CC matrix noted, now covered on Codex."},
+		note: "Codex-only DELTA: CC maps REQUIRE_APPROVAL→ask (native prompt). Codex's runtime REJECTS permissionDecision:ask (output_parser.rs 'unsupported permissionDecision:ask') and a no-decision under approval_policy=never auto-runs (probe P3), so per the ruled OD-SL7-ASK every REQUIRE_APPROVAL quadrant DENIES with a content-free reason; strictly tighter. This is the base-unmapped 'require_approval' row the CC matrix noted, now covered on Codex."},
 	{goCase: "CDX tighten-only: allow never bare", baseCase: "", status: statusGoExtension,
-		note: "Codex-only structural invariant: permissionDecision:allow is emitted ONLY bundled with a redacting updatedInput (never a grant — OD-SL7-ALLOW-REWRITE); a plain allow writes NOTHING. Codex itself rejects a bare allow ('unsupported permissionDecision:allow'), and any-deny-wins + no approval-bypass lever means allow+updatedInput cannot loosen."},
+		note: "Codex-only structural invariant: permissionDecision:allow is emitted ONLY bundled with a redacting updatedInput (never a grant; OD-SL7-ALLOW-REWRITE); a plain allow writes NOTHING. Codex itself rejects a bare allow ('unsupported permissionDecision:allow'), and any-deny-wins + no approval-bypass lever means allow+updatedInput cannot loosen."},
 }
 
 // TestCrossAdapterParityMatrix_SL7B guards the CC↔Codex parity record: every

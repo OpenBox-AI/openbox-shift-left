@@ -1,11 +1,14 @@
 // Package gateway is the OpenBox local gateway: an Anthropic-Messages-format
 // reverse proxy that runs on the developer's own machine, substitutes for the
-// provider base URL, and forwards every request onward byte-identically. -
-// Never buffer a response. The request direction is deliberately the opposite:
-// it IS buffered, because the exact bytes have to be re-readable -- phase 05
-// keeps a copy to capture, and net/http can only auto-retry a stale pooled
-// connection when GetBody can replay the body.
+// provider base URL, and forwards every request onward byte-identically.
+//
+// Two rules govern the relay:
+//   - Never buffer a response, so a stream reaches the client per chunk.
 //   - Inspect without modifying.
+//
+// The request direction is deliberately the opposite: it is buffered, because
+// the exact bytes have to be re-readable. Capture keeps a copy, and net/http can
+// only auto-retry a stale pooled connection when GetBody can replay the body.
 package gateway
 
 import (
@@ -221,7 +224,7 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // redaction evaporated silently, and the stored evidence was destroyed anyway.
 func capturableBody(body []byte, h http.Header) string {
 	if isContentEncoded(h) {
-		return "[openbox: not captured — the body was content-encoded, so redaction could not inspect it]"
+		return "[openbox: not captured; the body was content-encoded, so redaction could not inspect it]"
 	}
 	if len(body) > maxCaptureInputBytes {
 		body = body[:maxCaptureInputBytes]

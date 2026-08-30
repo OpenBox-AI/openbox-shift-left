@@ -110,7 +110,7 @@ func WriteApprover(path string, c ApproverConfig) error {
 // BaseURLLabel renders a resolved data-plane base for an install plan.
 func BaseURLLabel(baseURL string) string {
 	if baseURL == "" {
-		return DefaultBaseURL + "  (default — the SaaS core; pass --base-url for a self-hosted one)"
+		return DefaultBaseURL + "  (default; the SaaS core; pass --base-url for a self-hosted one)"
 	}
 	return baseURL
 }

@@ -35,7 +35,7 @@ func (r laneReport) print(a *app) {
 		}
 	}
 	for _, lane := range r.failed {
-		fmt.Fprintf(a.stdout, "  lane %s did NOT come up — see the warning above; `openbox doctor` reports where this machine's model calls go.\n", lane)
+		fmt.Fprintf(a.stdout, "  lane %s did NOT come up; see the warning above; `openbox doctor` reports where this machine's model calls go.\n", lane)
 	}
 	if len(r.installed) > 0 {
 		fmt.Fprintf(a.stdout, "  note: the tool reads these settings at SESSION START, so a session that is\n")
@@ -61,7 +61,7 @@ func (a *app) setupLanes(req laneRequest) laneReport {
 
 	if req.transport {
 		if value, present := gatewayservice.CurrentEnv(home); present && laneRouted(home, activation.LaneGateway) {
-			fmt.Fprintf(a.stdout, "\nRetiring the local gateway — the transport relay supersedes it\n")
+			fmt.Fprintf(a.stdout, "\nRetiring the local gateway; the transport relay supersedes it\n")
 			if err := a.removeGateway(home); err != nil {
 				fmt.Fprintf(a.stderr, "warning: could not retire the gateway at %s: %v\n", value, err)
 			} else {
@@ -92,7 +92,7 @@ func (a *app) setupLanes(req laneRequest) laneReport {
 
 	e := activation.ResolveElection(gatewayservice.SettingsPath(home))
 	if e.Elected != "" {
-		fmt.Fprintf(a.stdout, "\n  model-call producer: %s — %s\n", e.Elected, e.Reason)
+		fmt.Fprintf(a.stdout, "\n  model-call producer: %s; %s\n", e.Elected, e.Reason)
 	}
 	return report
 }
@@ -145,7 +145,7 @@ func (a *app) runRemovals(home string, req removalRequest) int {
 	}
 
 	if len(failures) > 0 {
-		return a.errorf("removal did not complete for: %v — the rest was removed. "+
+		return a.errorf("removal did not complete for: %v; the rest was removed. "+
 			"A value that changed after OpenBox set it is not overwritten without --force-restore", failures)
 	}
 	fmt.Fprintf(a.stdout, "\nDone. `openbox doctor` reports what is left.\n")
@@ -202,7 +202,7 @@ func (a *app) printLanePlan(p lanePlan) {
 	if p.telemetry {
 		spec := laneservice.Telemetry(p.telemetryAddr, false)
 		keys := activation.TelemetryKeys(p.telemetryAddr)
-		fmt.Fprintf(a.stdout, "\nTelemetry receiver — PLANNED\n")
+		fmt.Fprintf(a.stdout, "\nTelemetry receiver; PLANNED\n")
 		fmt.Fprintf(a.stdout, "  unit         %s\n", orNoPackaging(spec.UnitPath(runtime.GOOS, home), home))
 		fmt.Fprintf(a.stdout, "  listen       %s  (loopback only)\n", p.telemetryAddr)
 		fmt.Fprintf(a.stdout, "  settings     %s  sets %d keys: %v\n", settings, len(keys), activation.KeyNames(keys))
@@ -215,7 +215,7 @@ func (a *app) printLanePlan(p lanePlan) {
 		openboxHome, _ := devconfig.Home()
 		caPath, _ := transport.CAPaths(openboxHome)
 		keys := activation.TransportKeys(p.transportAddr, caPath, nil)
-		fmt.Fprintf(a.stdout, "\nTransport relay — PLANNED\n")
+		fmt.Fprintf(a.stdout, "\nTransport relay; PLANNED\n")
 		fmt.Fprintf(a.stdout, "  unit         %s\n", orNoPackaging(spec.UnitPath(runtime.GOOS, home), home))
 		fmt.Fprintf(a.stdout, "  listen       %s  (loopback only)\n", p.transportAddr)
 		fmt.Fprintf(a.stdout, "  CA           %s  (generated on first start)\n", caPath)
@@ -224,7 +224,7 @@ func (a *app) printLanePlan(p lanePlan) {
 		fmt.Fprintf(a.stdout, "               TLS. Every other host is tunnelled uninspected.\n")
 	}
 	if p.removeTelemetry || p.removeTransport {
-		fmt.Fprintf(a.stdout, "\nRemoving lane configuration — PLANNED\n")
+		fmt.Fprintf(a.stdout, "\nRemoving lane configuration; PLANNED\n")
 		for _, lane := range []struct {
 			on   bool
 			name string
@@ -244,7 +244,7 @@ func (a *app) printLanePlan(p lanePlan) {
 		openboxHome, _ := devconfig.Home()
 		caCert, _ := transport.CAPaths(openboxHome)
 		fmt.Fprintf(a.stdout, "  DELETES      %s, the lane logs and %s\n", caCert, activation.RecordPath(home))
-		fmt.Fprintf(a.stdout, "  KEEPS        the spool at %s — it is shared with the hook path,\n", devconfig.SpoolDir(transportSpoolSubdir))
+		fmt.Fprintf(a.stdout, "  KEEPS        the spool at %s; it is shared with the hook path,\n", devconfig.SpoolDir(transportSpoolSubdir))
 		fmt.Fprintf(a.stdout, "               which this command does not remove.\n")
 	}
 }

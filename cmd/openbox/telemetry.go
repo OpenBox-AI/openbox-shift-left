@@ -87,10 +87,10 @@ func (a *app) runTelemetry(args []string) int {
 		a.telemetryReady(rec.Addr())
 	}
 	if !recording {
-		logger.Printf("openbox telemetry: posture telemetry=false — receiving exports and recording NOTHING (config `telemetry` or %s)", devconfig.EnvTelemetry)
+		logger.Printf("openbox telemetry: posture telemetry=false; receiving exports and recording NOTHING (config `telemetry` or %s)", devconfig.EnvTelemetry)
 	}
 	if !emitting {
-		logger.Printf("openbox telemetry: NOT elected — the producer is %s (%s); receiving exports but emitting no model-call turns",
+		logger.Printf("openbox telemetry: NOT elected; the producer is %s (%s); receiving exports but emitting no model-call turns",
 			orNone(string(election.Elected)), election.Reason)
 	}
 
@@ -101,6 +101,6 @@ func (a *app) runTelemetry(args []string) int {
 	if err := rec.Shutdown(shutdown); err != nil && !errors.Is(err, context.Canceled) {
 		logger.Printf("openbox telemetry: shutdown: %v", err)
 	}
-	logger.Printf("openbox telemetry: stopped — %s", em)
+	logger.Printf("openbox telemetry: stopped; %s", em)
 	return exitOK
 }

@@ -155,7 +155,7 @@ func TestRunHook_StopEmitsOneDisjointPairPerFiring(t *testing.T) {
 			continue
 		}
 		if completed.Tokens == nil || *completed.Tokens.Input != wantIn {
-			t.Errorf("index %d input = %v, want %d — the windows overlap or the cursor did not advance",
+			t.Errorf("index %d input = %v, want %d; the windows overlap or the cursor did not advance",
 				i, completed.Tokens, wantIn)
 		}
 		if *completed.Tokens.Output != i+1 {
@@ -190,7 +190,7 @@ func TestRunHook_StopWithNoNewUsageEmitsNothing(t *testing.T) {
 
 	turns := turnEventsOnly(spooledEvents(t, spool))
 	if len(turns) != 2 {
-		t.Errorf("got %d turn events across 3 firings, want 2 (one pair — the later firings had no new usage)", len(turns))
+		t.Errorf("got %d turn events across 3 firings, want 2 (one pair; the later firings had no new usage)", len(turns))
 	}
 }
 
@@ -278,7 +278,7 @@ func TestRunHook_SubagentStopIsPartitionedFromMainThread(t *testing.T) {
 		t.Errorf("subagent turn = %d/%d, want 7000/700", *subTokens.Input, *subTokens.Output)
 	}
 	if got, want := *mainTokens.Input+*subTokens.Input, 7150; got != want {
-		t.Errorf("Σ input = %d, want %d — tokens counted twice or dropped", got, want)
+		t.Errorf("Σ input = %d, want %d; tokens counted twice or dropped", got, want)
 	}
 }
 
@@ -364,8 +364,8 @@ func TestRunHook_StopPayloadContentIsGated(t *testing.T) {
 		capture     string
 		wantMessage bool
 	}{
-		{"capture off — nothing from the payload egresses", "0", false},
-		{"capture on — the assistant message, and only it", "1", true},
+		{"capture off; nothing from the payload egresses", "0", false},
+		{"capture on; the assistant message, and only it", "1", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			spool := turnEnv(t, true)
@@ -381,7 +381,7 @@ func TestRunHook_StopPayloadContentIsGated(t *testing.T) {
 			for _, ev := range spooledEvents(t, spool) {
 				raw, _ := json.Marshal(ev)
 				if strings.Contains(string(raw), stopReason) {
-					t.Errorf("INV-2 breach: stop_reason reached the spool — it is not bound, "+
+					t.Errorf("INV-2 breach: stop_reason reached the spool; it is not bound, "+
 						"and does not exist on this provider's Stop payload: %s", raw)
 				}
 				if strings.Contains(string(raw), message) {
@@ -394,7 +394,7 @@ func TestRunHook_StopPayloadContentIsGated(t *testing.T) {
 			}
 			if sawMessage != tc.wantMessage {
 				if tc.wantMessage {
-					t.Errorf("capture ON but the assistant message never reached the spool — " +
+					t.Errorf("capture ON but the assistant message never reached the spool; " +
 						"the other assertions here would then be vacuous")
 				} else {
 					t.Errorf("capture OFF and the assistant message reached the spool anyway")

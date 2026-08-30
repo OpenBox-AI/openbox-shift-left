@@ -52,7 +52,7 @@ func TestResolve_FlagsShareOneViewOfTheFile(t *testing.T) {
 	tier2 := ResolveTier2()
 
 	if enforce != tier2 {
-		t.Errorf("enforce=%t but tier2=%t — the two flags came from different versions of dev.json", enforce, tier2)
+		t.Errorf("enforce=%t but tier2=%t; the two flags came from different versions of dev.json", enforce, tier2)
 	}
 }
 

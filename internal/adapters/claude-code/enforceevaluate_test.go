@@ -26,9 +26,9 @@ func TestIsHighRiskClass(t *testing.T) {
 		"Bash":                      true,  // arbitrary shell execution
 		"mcp__github__create_issue": true,  // MCP tool call
 		"mcp__db__query":            true,  // MCP tool call
-		"Edit":                      false, // file — T1 only
-		"Write":                     false, // file — T1 only
-		"Read":                      false, // file — T1 only
+		"Edit":                      false, // file; T1 only
+		"Write":                     false, // file; T1 only
+		"Read":                      false, // file; T1 only
 		"WebFetch":                  false, // shell-catch-all, not arbitrary exec
 		"Task":                      false, // shell-catch-all
 		"TodoWrite":                 false, // shell-catch-all
@@ -162,7 +162,7 @@ func TestPinnedClockStableEventID(t *testing.T) {
 	time.Sleep(2 * time.Millisecond)
 	u2, _ := mu.Map(HookPreToolUse, ev)
 	if u1.EventID == u2.EventID {
-		t.Errorf("unpinned clock unexpectedly produced identical ids (%q) — the pin fix would be moot", u1.EventID)
+		t.Errorf("unpinned clock unexpectedly produced identical ids (%q); the pin fix would be moot", u1.EventID)
 	}
 }
 
@@ -228,7 +228,7 @@ func TestInstalledHookTimeoutMatchesThePlugin(t *testing.T) {
 	gate, watcher := groups[0].Hooks[0], groups[0].Hooks[1]
 
 	if gate.AsyncRewake {
-		t.Fatal("the GATE must be synchronous — an asyncRewake handler cannot block a tool call")
+		t.Fatal("the GATE must be synchronous; an asyncRewake handler cannot block a tool call")
 	}
 	if gate.Timeout != preToolUseHookTimeoutSec {
 		t.Errorf("hooks.json PreToolUse timeout = %d, want preToolUseHookTimeoutSec = %d", gate.Timeout, preToolUseHookTimeoutSec)
@@ -238,7 +238,7 @@ func TestInstalledHookTimeoutMatchesThePlugin(t *testing.T) {
 	}
 
 	if !watcher.AsyncRewake {
-		t.Error("the watcher must set asyncRewake — that is the only channel that wakes a session on exit 2")
+		t.Error("the watcher must set asyncRewake; that is the only channel that wakes a session on exit 2")
 	}
 	if !strings.Contains(watcher.Command, "rewake claude-code") {
 		t.Errorf("watcher command = %q, want the rewake subcommand", watcher.Command)
@@ -266,7 +266,7 @@ func TestInstalledHookTimeoutMatchesThePlugin(t *testing.T) {
 		for _, g := range gs {
 			for _, hh := range g.Hooks {
 				if hh.Timeout >= preToolUseHookTimeoutSec {
-					t.Errorf("%s timeout = %d — only the gating hook may carry the raised ceiling", event, hh.Timeout)
+					t.Errorf("%s timeout = %d; only the gating hook may carry the raised ceiling", event, hh.Timeout)
 				}
 			}
 		}
@@ -509,7 +509,7 @@ func TestEnforcementConformance_Tier2(t *testing.T) {
 			t.Fatalf("tier2=0 must not suppress the verdict; permissionDecision = %q, want deny (stdout=%q)", d, out)
 		}
 		if atomic.LoadInt32(hits) != 1 {
-			t.Errorf("/evaluate hits = %d, want 1 — the opt-out is ignored", atomic.LoadInt32(hits))
+			t.Errorf("/evaluate hits = %d, want 1; the opt-out is ignored", atomic.LoadInt32(hits))
 		}
 	})
 

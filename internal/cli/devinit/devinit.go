@@ -161,7 +161,7 @@ func register(ctx context.Context, o Options, d Deps) (*Result, provider.Credent
 		// Losing it disables that check silently.
 		res.AgentID = devconfig.ResolveAgentID()
 		ref.AgentID = res.AgentID
-		fmt.Fprintf(d.Out, "This machine already has credentials in %s — reusing them (DID %s).\n",
+		fmt.Fprintf(d.Out, "This machine already has credentials in %s; reusing them (DID %s).\n",
 			credentialFileLabel(o.EnvFile), didOrNone(did))
 		fmt.Fprintf(d.Out, "  Nothing was registered. A machine holds ONE agent identity: if these belong to a\n")
 		fmt.Fprintf(d.Out, "  different org or tool than you intended, `openbox auth` overwrites them, and\n")
@@ -221,7 +221,7 @@ func register(ctx context.Context, o Options, d Deps) (*Result, provider.Credent
 
 	if reg.APIKey == "" || reg.PrivateKey == "" {
 		return res, ref, fmt.Errorf(
-			"agent registered (id %s, DID %s) but the response did not include %s — "+
+			"agent registered (id %s, DID %s) but the response did not include %s; "+
 				"cannot store runtime credentials; rotate the key or re-provision the identity",
 			reg.AgentID, reg.DID, missingCreds(reg))
 	}
@@ -235,7 +235,7 @@ func register(ctx context.Context, o Options, d Deps) (*Result, provider.Credent
 	fmt.Fprintf(d.Out, "Credentials written to %s (0600); values are not printed (INV-1).\n",
 		credentialFileLabel(o.EnvFile))
 	if o.ManagedEnable {
-		fmt.Fprintln(d.Out, "Managed force-enable substrate recorded (verified, not activated — Phase-1 pilot is opt-in).")
+		fmt.Fprintln(d.Out, "Managed force-enable substrate recorded (verified, not activated; Phase-1 pilot is opt-in).")
 	}
 
 	return res, ref, nil
@@ -244,14 +244,14 @@ func register(ctx context.Context, o Options, d Deps) (*Result, provider.Credent
 func applyConfig(o Options, d Deps, ref provider.CredentialRef, res *Result) error {
 	if !d.Installer.Available() {
 		res.ConfigManualOnly = true
-		fmt.Fprintf(d.Out, "\nProvider config not applied — %s\n\n%s\n", o.Provider, d.Installer.Plan(ref))
+		fmt.Fprintf(d.Out, "\nProvider config not applied; %s\n\n%s\n", o.Provider, d.Installer.Plan(ref))
 		return fmt.Errorf("provider %q config not applied: adapter not built yet (see manual config above)", o.Provider)
 	}
 	if err := d.Installer.Install(ref); err != nil {
 		return fmt.Errorf("agent ready but writing %s config failed: %w", o.Provider, err)
 	}
 	res.ConfigApplied = true
-	fmt.Fprintf(d.Out, "Wrote %s native config (no secrets inline — the hook reads %s at runtime).\n",
+	fmt.Fprintf(d.Out, "Wrote %s native config (no secrets inline; the hook reads %s at runtime).\n",
 		o.Provider, credentialFileLabel(o.EnvFile))
 	return nil
 }
@@ -269,7 +269,7 @@ func describePosture(v *bool) string {
 
 func planDryRun(o Options, d Deps, name, icon string, profile aivss.Config, ref provider.CredentialRef) error {
 	out := d.Out
-	fmt.Fprintf(out, "DRY RUN — no network calls, no secret-store or filesystem writes.\n\n")
+	fmt.Fprintf(out, "DRY RUN; no network calls, no secret-store or filesystem writes.\n\n")
 	fmt.Fprintf(out, "Would register developer agent:\n")
 	fmt.Fprintf(out, "  provider:    %s\n", o.Provider)
 	fmt.Fprintf(out, "  agent_name:  %s\n", name)
@@ -277,10 +277,10 @@ func planDryRun(o Options, d Deps, name, icon string, profile aivss.Config, ref 
 	fmt.Fprintf(out, "  icon:        %s\n", icon)
 	fmt.Fprintf(out, "  aivss_config: base_security/ai_specific/impact (accepted developer posture; server computes score/tier)\n")
 	fmt.Fprintf(out, "  managed_enable: %t (substrate only; not activated in Phase 1)\n", o.ManagedEnable)
-	fmt.Fprintf(out, "  install_git_hook: %t (ambient commit-trailer hook; off by default — modifies .git/hooks)\n", o.InstallGitHook)
-	fmt.Fprintf(out, " enforce: %s (that decision: ON by default — inert until your org publishes a policy, and\n", describePosture(o.Enforce))
+	fmt.Fprintf(out, "  install_git_hook: %t (ambient commit-trailer hook; off by default; modifies .git/hooks)\n", o.InstallGitHook)
+	fmt.Fprintf(out, " enforce: %s (that decision: ON by default; inert until your org publishes a policy, and\n", describePosture(o.Enforce))
 	fmt.Fprintf(out, "           fail-open regardless. --enforce=false opts out and persists. Enforce also\n")
-	fmt.Fprintf(out, "           carries tier2 + findings, all persisted to dev.json — no runtime env)\n")
+	fmt.Fprintf(out, "           carries tier2 + findings, all persisted to dev.json; no runtime env)\n")
 	fmt.Fprintf(out, "\nWould write credentials to %s (0600, plaintext):\n", credentialFileLabel(o.EnvFile))
 	fmt.Fprintf(out, "  %s  (obx_ API key)\n  %s  (Ed25519 signing key)\n", devconfig.EnvAPIKeyDirect, devconfig.EnvAgentPrivateKey)
 	fmt.Fprintf(out, "\nProvider config:\n%s\n", d.Installer.Plan(ref))
@@ -305,7 +305,7 @@ func freeName(ctx context.Context, d Deps, name string) (string, error) {
 }
 
 func resumeErr(reg *backend.Registration, step string, err error) error {
-	return fmt.Errorf("agent registered (id %s, DID %s) but failed to %s: %w — "+
+	return fmt.Errorf("agent registered (id %s, DID %s) but failed to %s: %w; "+
 		"the API key and signing key were shown only once; rotate the key and re-run, or complete the step manually",
 		reg.AgentID, reg.DID, step, err)
 }

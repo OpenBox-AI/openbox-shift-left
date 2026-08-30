@@ -199,7 +199,7 @@ func TestTransportRelaysARecordedExchangeByteIdentically(t *testing.T) {
 		t.Errorf("the relay injected X-Forwarded-For: %q", v)
 	}
 	if got, want := gotReq.Header.Get("Accept-Encoding"), sent["Accept-Encoding"]; want != "" && got != want {
-		t.Errorf("Accept-Encoding arrived as %q, client sent %q — the relay's own Transport settings "+
+		t.Errorf("Accept-Encoding arrived as %q, client sent %q; the relay's own Transport settings "+
 			"(DisableCompression) are no longer in the path", got, want)
 	}
 
@@ -410,7 +410,7 @@ func TestTransportAddsNoCompressionHeaderOfItsOwn(t *testing.T) {
 		t.Fatal("the request never reached the upstream; the assertion below would be vacuous")
 	}
 	if v := got.Get("Accept-Encoding"); v != "" {
-		t.Errorf("the relay advertised Accept-Encoding: %q on a request that carried none — "+
+		t.Errorf("the relay advertised Accept-Encoding: %q on a request that carried none; "+
 			"DisableCompression is no longer in the path, so the provider sees different bytes "+
 			"than the client sent and net/http will silently decompress the response the relay "+
 			"is meant to forward untouched", v)

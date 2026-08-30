@@ -32,7 +32,7 @@ func DefaultRefusalShape() RefusalShape {
 // cannot waste a session on a shape the requirement already rules out.
 func (r RefusalShape) Validate() error {
 	if r.Status < 400 || r.Status > 499 {
-		return fmt.Errorf("gateway: refusal status %d is not a 4xx — a 5xx or a 2xx tells the client something other than \"refused\"", r.Status)
+		return fmt.Errorf("gateway: refusal status %d is not a 4xx; a 5xx or a 2xx tells the client something other than \"refused\"", r.Status)
 	}
 	for _, transient := range []int{
 		http.StatusRequestTimeout, http.StatusTooManyRequests,
@@ -49,7 +49,7 @@ func (r RefusalShape) Validate() error {
 		"invalid_request_error", "permission_error", "not_found_error", "request_too_large",
 	} {
 		if r.ErrorType == providerType {
-			return fmt.Errorf("gateway: refusal error type %q is the provider's own literal — a wording-based retry rule could match it", r.ErrorType)
+			return fmt.Errorf("gateway: refusal error type %q is the provider's own literal; a wording-based retry rule could match it", r.ErrorType)
 		}
 	}
 	return nil
@@ -57,7 +57,7 @@ func (r RefusalShape) Validate() error {
 
 const (
 	reasonUnreachable = "OpenBox governance: this model call was refused because no governance " +
-		"decision could be obtained — the control plane was unreachable. This is an OUTAGE, " +
+		"decision could be obtained; the control plane was unreachable. This is an OUTAGE, " +
 		"not a policy denial, and it is refused deliberately: the gateway has no offline grace."
 
 	// reasonCallerGone decision.Unreachable exists so an operator can tell a
@@ -151,7 +151,7 @@ func RefuseEverything(shape RefusalShape) http.Handler {
 		WriteRefusalAs(w, Decision{
 			Forward:   false,
 			Evaluated: false,
-			Reason: "OpenBox governance: PROBE MODE — every model call is being refused to " +
+			Reason: "OpenBox governance: PROBE MODE; every model call is being refused to " +
 				"measure how this client reacts to the refusal shape. No policy was consulted.",
 		}, shape)
 	})

@@ -121,7 +121,7 @@ func TestGatewaySpanOnWireWithCaptureOn(t *testing.T) {
 		t.Error(`span carries "http_status"; core's SpanData field is "http_status_code" and drops the other silently`)
 	}
 	if s.Attributes["openbox.credential_fingerprint"] == nil {
-		t.Error("fingerprint absent from attributes — core has no credential_fingerprint field, so the top-level key alone is dropped and account binding can never match")
+		t.Error("fingerprint absent from attributes; core has no credential_fingerprint field, so the top-level key alone is dropped and account binding can never match")
 	}
 	if s.CredentialFingerprint == "" {
 		t.Error("credential_fingerprint absent from the wire")
@@ -238,7 +238,7 @@ func TestGatewaySpanKeysMatchCoreSpanData(t *testing.T) {
 	}
 	for key := range p.Spans[0] {
 		if !coreKnows[key] {
-			t.Errorf("span key %q is not a field on core's SpanData — it will be dropped silently on ingest", key)
+			t.Errorf("span key %q is not a field on core's SpanData; it will be dropped silently on ingest", key)
 		}
 	}
 }

@@ -30,7 +30,7 @@ func RunHook(args []string, installArgs []string, logf func(string, ...any)) {
 	switch sub {
 	case "prepare-commit-msg":
 		if _, err := g.RunPrepareCommitMsg(rest, resolver, logf); err != nil {
-			logf("%v", err) // logged only — the caller still exits 0
+			logf("%v", err) // logged only; the caller still exits 0
 		}
 	case "post-commit":
 		sessions := g.ResolveSessions(resolver)

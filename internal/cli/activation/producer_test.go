@@ -256,7 +256,7 @@ func TestTheReasonDoesNotClaimAnOutrankingThatDidNotHappen(t *testing.T) {
 		t.Fatalf("elected %q", e.Elected)
 	}
 	if contains(e.Reason, "outranks") {
-		t.Errorf("telemetry claims to outrank the relay; it did not — the relay was never in the path: %q", e.Reason)
+		t.Errorf("telemetry claims to outrank the relay; it did not; the relay was never in the path: %q", e.Reason)
 	}
 	if !contains(e.Reason, "cannot see the call") {
 		t.Errorf("the reason does not say why the relay lost: %q", e.Reason)

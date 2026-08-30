@@ -55,7 +55,7 @@ func envelope() Envelope {
 	return Envelope{
 		AutoDeny:    []Rule{{Tool: "Bash", RequestContains: "rm -rf", Note: "destructive"}},
 		AutoApprove: []Rule{{Tool: "Bash", RequestContains: "git status", Note: "read-only shell"}},
-		Consult:     []Rule{{Tool: "Bash", Note: "other shell — ask the host"}},
+		Consult:     []Rule{{Tool: "Bash", Note: "other shell; ask the host"}},
 	}
 }
 
@@ -236,7 +236,7 @@ func TestEnvelopeFileMustSaySomething(t *testing.T) {
 	empty := filepath.Join(t.TempDir(), "e.json")
 	os.WriteFile(empty, []byte(`{"version":"1"}`), 0o600)
 	if _, err := LoadEnvelope(empty); err == nil {
-		t.Error("an envelope with no rules was accepted — it would escalate everything while looking configured")
+		t.Error("an envelope with no rules was accepted; it would escalate everything while looking configured")
 	}
 	good := filepath.Join(t.TempDir(), "g.json")
 	os.WriteFile(good, []byte(`{"auto_approve":[{"tool":"Read"}]}`), 0o600)
@@ -265,7 +265,7 @@ func TestToolGlobMatches(t *testing.T) {
 func TestParseProposalIsStrict(t *testing.T) {
 	for _, tc := range []struct{ in, want string }{
 		{`{"decision":"approve","reason":"ok"}`, "approve"},
-		{"Sure — here you go:\n{\"decision\":\"deny\",\"reason\":\"destructive\"}", "deny"},
+		{"Sure; here you go:\n{\"decision\":\"deny\",\"reason\":\"destructive\"}", "deny"},
 		{"I think it's fine", "escalate"},
 		{`{"decision":"APPROVE"}`, "approve"},
 		{`{"decision":"maybe"}`, "escalate"},

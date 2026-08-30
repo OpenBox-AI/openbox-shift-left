@@ -86,6 +86,9 @@ func TestRedact_AssignmentValueOnly(t *testing.T) {
 // position.
 func TestRedact_Entropy(t *testing.T) {
 	tok := "aB3xK9pLmQ7rT2vW8yZ1cD4fG6hJ0nS5uE7iO3q"
+	// The keys are chosen NOT to collide with a named-pattern key (api_key,
+	// token and the rest), so what fires is the generic entropy fallback rather
+	// than secret_assignment.
 	for _, in := range []string{"value: " + tok, `blobval=` + tok, `nonce = "` + tok + `"`} {
 		out, cats, changed := newSecretDetector().Redact(in)
 		if !changed || strings.Contains(out, tok) {
@@ -301,7 +304,7 @@ func TestRedact_JSONTerminatorsSurvive(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			out, _, changed := r.RedactText(tc.in)
 			if !changed {
-				t.Fatalf("nothing was redacted in %q — the secret shipped", tc.in)
+				t.Fatalf("nothing was redacted in %q; the secret shipped", tc.in)
 			}
 			if strings.Contains(out, tc.secret) {
 				t.Errorf("secret %q survived: %s", tc.secret, out)

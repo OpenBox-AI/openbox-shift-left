@@ -185,8 +185,10 @@ func RunHook(sub string, stdin io.Reader, stdout io.Writer, logger *log.Logger) 
 	}
 }
 
-// emitTurn read the transcript from that offset, taking this side of the
-// sidechain partition only; 3. Spool both halves; 4. Advance the cursor; last.
+// emitTurn reads the transcript from the cursor's offset, taking this side of
+// the sidechain partition only, spools both halves of the pair, and advances the
+// cursor last: a crash then over-reports into the control plane's dedupe rather
+// than losing a turn.
 func emitTurn(ad *Adapter, logger *log.Logger, hook HookName, ev *HookEvent) {
 	agentID := ev.AgentID
 	sidechain := hook == HookSubagentStop
@@ -237,7 +239,7 @@ func maybeInstallGitHook(logger *log.Logger, cwd string) {
 	}
 	hooksDir, err := obgit.Git{Dir: cwd}.HooksDirDefault()
 	if err != nil {
-		return // not a git repo / detached worktree — nothing to install into
+		return // not a git repo / detached worktree; nothing to install into
 	}
 	cfg := obgit.HookConfig{Command: self, Args: []string{"hook", "git", "prepare-commit-msg"}}
 	if err := obgit.InstallPostCommitHook(hooksDir, cfg); err != nil {

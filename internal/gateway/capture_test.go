@@ -62,7 +62,7 @@ func TestCredentialHeadersRedactedByKeyName(t *testing.T) {
 		"Content-Type":      "application/json",
 	} {
 		if got[name] != want {
-			t.Errorf("%s: got %q want %q — a non-credential header was redacted", name, got[name], want)
+			t.Errorf("%s: got %q want %q; a non-credential header was redacted", name, got[name], want)
 		}
 	}
 
@@ -248,7 +248,7 @@ func TestSplitCaptureKeepsTheOrderingAndDoesNotRedoWork(t *testing.T) {
 
 	full := rc.Complete(200, respHeaders, `{"type":"message"}`)
 	if full.CredentialFingerprint != rc.Fingerprint {
-		t.Errorf("Complete recomputed the fingerprint (%q vs %q) — from already-redacted headers, so it is the placeholder's hash",
+		t.Errorf("Complete recomputed the fingerprint (%q vs %q); from already-redacted headers, so it is the placeholder's hash",
 			full.CredentialFingerprint, rc.Fingerprint)
 	}
 	if full.CredentialFingerprint == credentialFingerprint(redactedOnly()) {

@@ -63,7 +63,7 @@ func TestNoCredentialOrFileReads(t *testing.T) {
 			}
 			for _, fn := range forbiddenCalls[local[ident.Name]] {
 				if sel.Sel.Name == fn {
-					t.Errorf("%s: calls %s.%s — this module takes its configuration as a struct "+
+					t.Errorf("%s: calls %s.%s; this module takes its configuration as a struct "+
 						"and emits through the Emitter seam; environment and filesystem access "+
 						"belong in the CLI, where credential handling is already scanned",
 						filepath.Join(".", fset.Position(call.Pos()).String()), local[ident.Name], fn)

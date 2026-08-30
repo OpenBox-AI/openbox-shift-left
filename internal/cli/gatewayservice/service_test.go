@@ -61,7 +61,7 @@ func TestServiceNameMatchesTheRepoPaths(t *testing.T) {
 		t.Errorf("library would write %q, SystemdPath says %q", want, SystemdPath(home))
 	}
 	if linuxName+".service" != SystemdUnitName {
-		t.Errorf("unit name %q does not match SystemdUnitName %q — `systemctl --user enable` "+
+		t.Errorf("unit name %q does not match SystemdUnitName %q; `systemctl --user enable` "+
 			"names the latter", linuxName+".service", SystemdUnitName)
 	}
 }
@@ -102,8 +102,10 @@ type stringError struct{ s string }
 
 func (e *stringError) Error() string { return e.s }
 
-// TestRealInstallWritesTheExpectedArtifact requirement 2, the artifact
-// assertion; OPT-IN, and here is why. Run it deliberately:
+// TestRealInstallWritesTheExpectedArtifact is opt-in because it writes a real
+// unit into the runner's home directory. Run it deliberately with
+// OPENBOX_TEST_REAL_SERVICE_INSTALL=1; it installs, reads the unit off disk,
+// asserts and uninstalls, and never starts the job.
 func TestRealInstallWritesTheExpectedArtifact(t *testing.T) {
 	if os.Getenv("OPENBOX_TEST_REAL_SERVICE_INSTALL") != "1" {
 		t.Skip("opt-in: writes a real unit into your home directory. " +
@@ -118,7 +120,7 @@ func TestRealInstallWritesTheExpectedArtifact(t *testing.T) {
 	}
 	unitPath := UnitPath(runtime.GOOS, home)
 	if _, err := os.Stat(unitPath); err == nil {
-		t.Skipf("%s already exists — refusing to disturb a real install", unitPath)
+		t.Skipf("%s already exists; refusing to disturb a real install", unitPath)
 	}
 
 	if err := Reinstall(runtime.GOOS, home, "/usr/local/bin/openbox",

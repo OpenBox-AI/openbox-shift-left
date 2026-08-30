@@ -16,6 +16,10 @@ import (
 )
 
 // Spool decouples the tool-call hot path from the network.
+//
+// The control plane does not dedupe developer events on their id, so anything
+// that reaches it outside this spool has to avoid duplicating itself on its own.
+// That is the rule the double-store bug broke.
 type Spool struct {
 	Dir string
 }

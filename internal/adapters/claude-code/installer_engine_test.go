@@ -208,7 +208,7 @@ func TestPlaceEngineBinarySweepsAbandonedTempsAndSparesLiveOnes(t *testing.T) {
 		t.Errorf("residue from a killed run was not reclaimed (err=%v)", err)
 	}
 	if _, err := os.Stat(inFlight); err != nil {
-		t.Errorf("a fresh temp was deleted — that breaks a concurrent install's rename: %v", err)
+		t.Errorf("a fresh temp was deleted; that breaks a concurrent install's rename: %v", err)
 	}
 	if _, err := os.Stat(foreign); err != nil {
 		t.Errorf("a file that is not ours was deleted: %v", err)

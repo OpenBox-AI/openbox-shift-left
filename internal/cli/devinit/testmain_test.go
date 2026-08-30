@@ -26,7 +26,7 @@ func TestMain(m *testing.M) {
 	code := m.Run()
 
 	if leaks := filesUnder(sentinel); len(leaks) > 0 {
-		fmt.Fprintf(os.Stderr, "HERMETICITY VIOLATION (INC-SL7A-DEVJSON guard): %d file(s) written under the sentinel HOME — a test escaped its path pinning and would have touched the real home dir:\n", len(leaks))
+		fmt.Fprintf(os.Stderr, "HERMETICITY VIOLATION (INC-SL7A-DEVJSON guard): %d file(s) written under the sentinel HOME; a test escaped its path pinning and would have touched the real home dir:\n", len(leaks))
 		for _, l := range leaks {
 			fmt.Fprintf(os.Stderr, "  %s\n", l)
 		}

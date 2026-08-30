@@ -96,7 +96,7 @@ func TestGatewayCommandActuallyCaptures(t *testing.T) {
 		t.Errorf("GatewayRequestID = %q, want the provider's own request id", ev.GatewayRequestID)
 	}
 	if ev.Span == nil {
-		t.Fatal("no span — the observed exchange was not recorded")
+		t.Fatal("no span; the observed exchange was not recorded")
 	}
 	if ev.Span.HTTPStatus != 200 || ev.Span.HTTPMethod != "POST" {
 		t.Errorf("classification fields wrong: %s %d", ev.Span.HTTPMethod, ev.Span.HTTPStatus)
@@ -108,11 +108,14 @@ func TestGatewayCommandActuallyCaptures(t *testing.T) {
 		t.Errorf("response body not captured: %q", ev.Span.ResponseBody)
 	}
 	if ev.Span.CredentialFingerprint == "" {
-		t.Error("no credential fingerprint — account binding would have nothing to match")
+		t.Error("no credential fingerprint; account binding would have nothing to match")
 	}
 	if strings.Contains(string(raw), fakeCredential()) {
 		t.Error("the raw provider credential was written to the spool")
 	}
+	// The redaction has to be the REASON it is absent, not an accident of
+	// serialization: the key survives with a redacted value, so a reviewer can
+	// still see that a credential was sent.
 	if got := ev.Span.RequestHeaders["Authorization"]; got != "[redacted]" {
 		t.Errorf("Authorization = %q, want exactly %q", got, "[redacted]")
 	}
@@ -190,7 +193,7 @@ func readOneSpooledLine(t *testing.T, dir string) []byte {
 			return line
 		}
 	}
-	t.Fatalf("no event was spooled — capture is not wired into the gateway command (files: %v)", entries)
+	t.Fatalf("no event was spooled; capture is not wired into the gateway command (files: %v)", entries)
 	return nil
 }
 
@@ -272,7 +275,7 @@ func TestSpooledGatewayEventReachesTheWire(t *testing.T) {
 		t.Fatalf("flush exited %d: %s", code, flushErr.String())
 	}
 	if len(posted) == 0 {
-		t.Fatal("the flush delivered nothing — the gateway's spool and the adapter's flush do not agree on a location")
+		t.Fatal("the flush delivered nothing; the gateway's spool and the adapter's flush do not agree on a location")
 	}
 
 	var p struct {
@@ -292,7 +295,7 @@ func TestSpooledGatewayEventReachesTheWire(t *testing.T) {
 		t.Errorf("activity_id = %q, want the gateway namespace", p.ActivityID)
 	}
 	if p.SpanCount != 1 || len(p.Spans) != 1 {
-		t.Fatalf("span_count=%d — the observed exchange did not survive the spool round-trip", p.SpanCount)
+		t.Fatalf("span_count=%d; the observed exchange did not survive the spool round-trip", p.SpanCount)
 	}
 	if p.Spans[0].SemanticType != "llm_completion" {
 		t.Errorf("semantic_type = %q; core's readers filter on llm_completion", p.Spans[0].SemanticType)
@@ -304,7 +307,7 @@ func TestSpooledGatewayEventReachesTheWire(t *testing.T) {
 		t.Errorf("request body lost between spool and wire: %q", p.Spans[0].RequestBody)
 	}
 	if p.Spans[0].Attributes["openbox.credential_fingerprint"] == nil {
-		t.Error("fingerprint absent from attributes — account binding has no route into core")
+		t.Error("fingerprint absent from attributes; account binding has no route into core")
 	}
 	if strings.Contains(string(posted), fakeCredential()) {
 		t.Error("the raw provider credential reached the wire")

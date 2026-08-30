@@ -304,7 +304,7 @@ func TestEmit_RetryReusesSameEventID(t *testing.T) {
 		t.Fatalf("payloads seen = %d, want 2", len(*payloads))
 	}
 	if string((*payloads)[0].Metadata) != string((*payloads)[1].Metadata) {
-		t.Error("retry body differed from original — idempotency broken")
+		t.Error("retry body differed from original; idempotency broken")
 	}
 }
 

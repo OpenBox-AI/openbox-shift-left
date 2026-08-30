@@ -44,7 +44,7 @@ func writeLocalHooks(projectDir, engine string) error {
 	settings := map[string]any{}
 	if raw, err := os.ReadFile(settingsPath); err == nil {
 		if err := json.Unmarshal(raw, &settings); err != nil {
-			return fmt.Errorf("local-hooks: %s exists but is not valid JSON — fix or remove it first: %w", settingsPath, err)
+			return fmt.Errorf("local-hooks: %s exists but is not valid JSON; fix or remove it first: %w", settingsPath, err)
 		}
 	} else if !os.IsNotExist(err) {
 		return fmt.Errorf("local-hooks: read %s: %w", settingsPath, err)
@@ -299,7 +299,7 @@ func splitEngineToken(cmd string) (engine, rest string, ok bool) {
 	if cmd[0] == '"' {
 		end := strings.IndexByte(cmd[1:], '"')
 		if end < 0 {
-			return "", "", false // unterminated quote — not our shape
+			return "", "", false // unterminated quote; not our shape
 		}
 		return cmd[1 : end+1], strings.TrimSpace(cmd[end+2:]), true
 	}

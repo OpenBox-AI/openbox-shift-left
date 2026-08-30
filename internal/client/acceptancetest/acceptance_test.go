@@ -143,7 +143,7 @@ func TestAcceptanceStockCoreAcceptsEmittedEvents(t *testing.T) {
 
 	if err := c.Validate(ctx); err != nil {
 		if ve, ok := client.AsValidateError(err); ok {
-			t.Fatalf("preflight auth/validate failed (fix creds/core first): HTTP %d — %s", ve.Status, ve.Diagnostic)
+			t.Fatalf("preflight auth/validate failed (fix creds/core first): HTTP %d; %s", ve.Status, ve.Diagnostic)
 		}
 		t.Fatalf("preflight auth/validate could not reach core (fix the stack first): %v", err)
 	}
@@ -151,18 +151,18 @@ func TestAcceptanceStockCoreAcceptsEmittedEvents(t *testing.T) {
 	rejected, inconclusive := probeTypes(t, ctx, c, did)
 
 	if len(rejected) > 0 {
-		t.Errorf("stock core rejected %d/%d emitted events with 400 \"invalid event_type\" (%s) — "+
+		t.Errorf("stock core rejected %d/%d emitted events with 400 \"invalid event_type\" (%s); "+
 			"the client is emitting a NON-stock wire type; the base-wire mapping (MAPPING.md §2) is broken. "+
 			"Every dev event must map to a stock base type (Workflow*/SignalReceived/ActivityStarted).",
 			len(rejected), len(devEventTypes), strings.Join(rejected, ", "))
 	}
 	if len(inconclusive) > 0 {
-		t.Errorf("%d event(s) dropped for a reason other than 400 event_type — acceptance could not be "+
+		t.Errorf("%d event(s) dropped for a reason other than 400 event_type; acceptance could not be "+
 			"proven; resolve these first:\n  - %s\n\nclient drop log:\n%s",
 			len(inconclusive), strings.Join(inconclusive, "\n  - "), log)
 	}
 	if len(rejected) == 0 && len(inconclusive) == 0 {
-		t.Logf("✓ all %d dev events accepted (non-400) by STOCK core at %s — EXT-core retired, base-wire mapping holds", len(devEventTypes), baseURL)
+		t.Logf("✓ all %d dev events accepted (non-400) by STOCK core at %s; EXT-core retired, base-wire mapping holds", len(devEventTypes), baseURL)
 	}
 }
 
@@ -214,7 +214,7 @@ func TestAcceptanceEmitsOnlyStockWireTypes(t *testing.T) {
 	rejected, inconclusive := probeTypes(t, ctx, c, did)
 
 	if len(rejected) != 0 {
-		t.Fatalf("stock-core fake rejected %v — the client emitted a non-stock wire type (EXT-core would still be needed). "+
+		t.Fatalf("stock-core fake rejected %v; the client emitted a non-stock wire type (EXT-core would still be needed). "+
 			"Every dev event must map to a base type in stockWireTypes.", rejected)
 	}
 	if len(inconclusive) != 0 {
@@ -224,7 +224,7 @@ func TestAcceptanceEmitsOnlyStockWireTypes(t *testing.T) {
 	seenTypes.Range(func(k, _ any) bool {
 		et := k.(string)
 		if !stockWireTypes[et] {
-			t.Errorf("client emitted non-stock wire event_type %q — must be one of the base accept-listed types", et)
+			t.Errorf("client emitted non-stock wire event_type %q; must be one of the base accept-listed types", et)
 		}
 		return true
 	})

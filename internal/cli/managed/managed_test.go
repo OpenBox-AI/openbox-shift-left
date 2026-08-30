@@ -88,7 +88,7 @@ func TestPlanInstall_CodexMandatesAreTopLevel(t *testing.T) {
 		}
 	}
 	if keys["allow_managed_hooks_only"] {
-		t.Error("allow_managed_hooks_only is enabled but this template ships no managed hook definition — " +
+		t.Error("allow_managed_hooks_only is enabled but this template ships no managed hook definition; " +
 			"Codex would ignore the user-level hooks.json and run no OpenBox hook (see the template comment)")
 	}
 }
@@ -240,7 +240,7 @@ func TestTemplates_AllProvidersRender(t *testing.T) {
 		}
 		for _, f := range plan.Files {
 			if len(f.Contents) < 200 {
-				t.Errorf("%s: %s rendered only %d bytes — template probably missing",
+				t.Errorf("%s: %s rendered only %d bytes; template probably missing",
 					p, f.Path, len(f.Contents))
 			}
 		}

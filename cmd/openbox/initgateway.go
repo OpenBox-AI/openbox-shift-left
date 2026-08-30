@@ -173,7 +173,7 @@ func (a *app) printGatewayPlan(withGateway, removeGateway bool, addr, upstream s
 	home := a.homeDir()
 	switch {
 	case withGateway:
-		fmt.Fprintf(a.stdout, "\nLocal gateway (model-call governance) — PLANNED\n")
+		fmt.Fprintf(a.stdout, "\nLocal gateway (model-call governance); PLANNED\n")
 		fmt.Fprintf(a.stdout, "  unit         %s\n", unitPathForPlan(home))
 		fmt.Fprintf(a.stdout, "  listen       %s  (loopback only)\n", addr)
 		fmt.Fprintf(a.stdout, "  upstream     %s\n", upstream)
@@ -182,7 +182,7 @@ func (a *app) printGatewayPlan(withGateway, removeGateway bool, addr, upstream s
 		fmt.Fprintf(a.stdout, "               this REDIRECTS every model call this machine makes.\n")
 		fmt.Fprintf(a.stdout, "               The settings write happens last and only once the daemon is proven up.\n")
 	case removeGateway:
-		fmt.Fprintf(a.stdout, "\nRemoving local gateway configuration — PLANNED\n")
+		fmt.Fprintf(a.stdout, "\nRemoving local gateway configuration; PLANNED\n")
 		fmt.Fprintf(a.stdout, "  unit         %s  (stopped and removed)\n", unitPathForPlan(home))
 		fmt.Fprintf(a.stdout, "  settings     %s  unsets %s\n",
 			gatewayservice.SettingsPath(home), gatewayservice.EnvKey)

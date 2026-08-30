@@ -39,7 +39,7 @@ func TestCaptureBodyBoundsRedactorInput(t *testing.T) {
 
 	const budget = 2 * time.Second
 	if elapsed > budget {
-		t.Errorf("captureBody over a %d-byte body took %s, over the %s budget — "+
+		t.Errorf("captureBody over a %d-byte body took %s, over the %s budget; "+
 			"the redactor input bound is not being applied",
 			len(body), elapsed.Round(time.Millisecond), budget)
 	}
@@ -84,7 +84,7 @@ func TestCaptureBodyRepairsABodyAlreadyCutAtTheBound(t *testing.T) {
 
 	got := captureBody(preCut)
 	if n := utf8.RuneCountInString(got); n >= captureBodyRunes {
-		t.Fatalf("precondition: result is %d runes, at or over the %d-rune cap — capRunes would mask the defect", n, captureBodyRunes)
+		t.Fatalf("precondition: result is %d runes, at or over the %d-rune cap; capRunes would mask the defect", n, captureBodyRunes)
 	}
 	if !strings.Contains(got, "OPENBOX_REDACTED") {
 		t.Fatal("precondition: nothing was redacted, so the body never shrank under the cap")
@@ -117,7 +117,7 @@ func TestCaptureBodyStillRedactsWithinTheBound(t *testing.T) {
 		t.Error("an assigned password inside the bounded window survived redaction")
 	}
 	if !strings.Contains(got, "OPENBOX_REDACTED") {
-		t.Errorf("no redaction placeholder — the body was truncated, not scanned:\n%.200s", got)
+		t.Errorf("no redaction placeholder; the body was truncated, not scanned:\n%.200s", got)
 	}
 	if !strings.Contains(got, strings.Repeat("x", 1024)) {
 		t.Error("the non-secret prefix did not survive; this proves nothing about redaction")

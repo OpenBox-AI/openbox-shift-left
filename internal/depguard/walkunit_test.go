@@ -108,7 +108,7 @@ func TestSubtreeImports_WalksSubdirectories(t *testing.T) {
 	got, _ := subtreeImports(root, "none")
 	want := []string{"github.com/deep/dep", "github.com/deeper/dep"}
 	if !reflect.DeepEqual(got.external, want) {
-		t.Errorf("got %v, want %v — a one-level glob stops covering the subtree the day it grows a package", got.external, want)
+		t.Errorf("got %v, want %v; a one-level glob stops covering the subtree the day it grows a package", got.external, want)
 	}
 }
 

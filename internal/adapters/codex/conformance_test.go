@@ -67,7 +67,7 @@ func TestUsageRollupPairIsConformant(t *testing.T) {
 
 	started, completed, ok := m.MapUsageRollup(&HookEvent{SessionID: "th-1", Reason: "other"})
 	if !ok {
-		t.Fatal("MapUsageRollup ok=false — the rollup this test exists to validate was not produced")
+		t.Fatal("MapUsageRollup ok=false; the rollup this test exists to validate was not produced")
 	}
 
 	for _, tc := range []struct {

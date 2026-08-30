@@ -98,8 +98,8 @@ type Registration struct {
 	AgentID    string
 	AgentName  string
 	DID        string
-	APIKey     string // obx_(live|test)_+48hex — shown once
-	PrivateKey string // base64 raw 32-byte Ed25519 seed — shown once
+	APIKey     string // obx_(live|test)_+48hex; shown once
+	PrivateKey string // base64 raw 32-byte Ed25519 seed; shown once
 	Tier       string
 	TrustScore string
 }

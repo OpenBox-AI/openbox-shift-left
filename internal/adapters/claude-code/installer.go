@@ -61,10 +61,10 @@ func (i Installer) Plan(ref CredentialRef) string {
 	fmt.Fprintf(&b, " the hook reads them at runtime. This command cannot read or write a secret.\n")
 	fmt.Fprintf(&b, "\nCommit-trailer stamping (STORY-SL-5, session→commit binding):\n")
 	fmt.Fprintf(&b, "  - The session hook maintains a per-session liveness registry (%s) so a git\n", obgit.DefaultSessionDir())
-	fmt.Fprintf(&b, "    commit is attributed to the session that made it — parallel-safe across concurrent\n")
+	fmt.Fprintf(&b, "    commit is attributed to the session that made it; parallel-safe across concurrent\n")
 	fmt.Fprintf(&b, "    sessions (worktree-scoped, INV-2 metadata-only).\n")
 	fmt.Fprintf(&b, "  - The prepare-commit-msg hook runs `bin/openbox hook git prepare-commit-msg` (the same\n")
-	fmt.Fprintf(&b, "    unified engine — STORY-SL4-WIRE-2; no separate git-hook binary).\n")
+	fmt.Fprintf(&b, "    unified engine; STORY-SL4-WIRE-2; no separate git-hook binary).\n")
 	fmt.Fprintf(&b, "  - Ambient install of that hook is %s (it modifies a repo's .git/hooks). Enable at\n", onOff(ref.InstallGitHook))
 	fmt.Fprintf(&b, "    onboarding with `openbox init --install-git-hook` (persisted to dev config);\n")
 	fmt.Fprintf(&b, "    OPENBOX_INSTALL_GIT_HOOK overrides either way; or install per repo with\n")
@@ -78,7 +78,7 @@ func (i Installer) Plan(ref CredentialRef) string {
 		fmt.Fprintf(&b, "  - Touch no project file. Activation awaits the managed-settings step below,\n")
 		fmt.Fprintf(&b, "    which this command cannot perform, so nothing is governed until it lands.\n")
 	}
-	fmt.Fprintf(&b, "\nOrg-wide force-enable (managed settings; VERIFIED, not activated for the pilot — NFR-5):\n")
+	fmt.Fprintf(&b, "\nOrg-wide force-enable (managed settings; VERIFIED, not activated for the pilot; NFR-5):\n")
 	fmt.Fprintf(&b, "  add to the managed settings.json: {\"enabledPlugins\": [\"openbox-observe\"]}\n")
 	return b.String()
 }

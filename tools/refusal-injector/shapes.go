@@ -39,7 +39,7 @@ var Shapes = []Shape{
 		ContentType: "application/json",
 		Body:        `{"type":"error","error":{"type":"invalid_request_error","message":"Blocked by OpenBox policy."}}`,
 		Rationale:   "the provider's own error envelope; most likely to render in the client's error path rather than a crash",
-		Retryable:   "predicted NO — 400 is terminal in the provider's SDK retry table",
+		Retryable:   "predicted NO; 400 is terminal in the provider's SDK retry table",
 	},
 	{
 		Name:        "permission_error",
@@ -55,7 +55,7 @@ var Shapes = []Shape{
 		ContentType: "application/json",
 		Body:        `{"type":"error","error":{"type":"authentication_error","message":"Blocked by OpenBox policy."}}`,
 		Rationale:   "included to be RULED OUT: if 401 makes the client discard or re-request credentials, the shape is disqualified no matter how well it renders",
-		Retryable:   "predicted NO retry, but predicted credential side effects — a disqualifier",
+		Retryable:   "predicted NO retry, but predicted credential side effects; a disqualifier",
 	},
 	{
 		Name:        "overloaded_error",
@@ -63,7 +63,7 @@ var Shapes = []Shape{
 		ContentType: "application/json",
 		Body:        `{"type":"error","error":{"type":"rate_limit_error","message":"Blocked by OpenBox policy."}}`,
 		Rationale:   "the control. It SHOULD be retried; if the probe cannot distinguish this from the candidates above, the instrument is not measuring retries at all",
-		Retryable:   "predicted YES — this is the negative control, not a candidate",
+		Retryable:   "predicted YES; this is the negative control, not a candidate",
 	},
 	{
 		Name:        "sse_error_event",
@@ -71,7 +71,7 @@ var Shapes = []Shape{
 		ContentType: "text/event-stream",
 		Body:        "event: error\ndata: {\"type\":\"error\",\"error\":{\"type\":\"invalid_request_error\",\"message\":\"Blocked by OpenBox policy.\"}}\n\n",
 		Rationale:   "a streamed refusal on a 200. The client is already committed to a stream, so there is nothing to retry; the open question is whether the message reaches the human or is swallowed as a malformed stream",
-		Retryable:   "unknown — the shape most worth measuring and least predictable",
+		Retryable:   "unknown; the shape most worth measuring and least predictable",
 	},
 }
 

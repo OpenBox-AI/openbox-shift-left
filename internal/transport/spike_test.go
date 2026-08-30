@@ -120,7 +120,7 @@ func TestGoproxyForwardsIdentically(t *testing.T) {
 	}
 	_ = resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status %d — the upstream was not reached, so nothing below is meaningful", resp.StatusCode)
+		t.Fatalf("status %d; the upstream was not reached, so nothing below is meaningful", resp.StatusCode)
 	}
 
 	if got.method != http.MethodPost {
@@ -187,7 +187,7 @@ func TestClientAcceptEncodingSurvives(t *testing.T) {
 	_ = resp.Body.Close()
 
 	if fwd := got.header.Get("Accept-Encoding"); fwd != "identity" {
-		t.Errorf("Accept-Encoding: got %q want %q — KeepAcceptEncoding is not holding", fwd, "identity")
+		t.Errorf("Accept-Encoding: got %q want %q; KeepAcceptEncoding is not holding", fwd, "identity")
 	}
 }
 
@@ -211,7 +211,7 @@ func TestGoproxyDefaultsBreakByteIdentity(t *testing.T) {
 	_ = resp.Body.Close()
 
 	if got.header.Get("Accept-Encoding") == "identity" {
-		t.Error("a STOCK goproxy preserved Accept-Encoding — then NewIdentityProxy's settings prove nothing and this control is vacuous. Re-read goproxy's RemoveProxyHeaders before trusting either test.")
+		t.Error("a STOCK goproxy preserved Accept-Encoding; then NewIdentityProxy's settings prove nothing and this control is vacuous. Re-read goproxy's RemoveProxyHeaders before trusting either test.")
 	}
 }
 
@@ -270,7 +270,7 @@ func TestGoproxyStreamsPerChunk(t *testing.T) {
 		}
 		want := "data: chunk-" + string(rune('0'+i)) + "\n"
 		if line != want {
-			t.Fatalf("chunk %d: got %q want %q — boundaries were coalesced", i, line, want)
+			t.Fatalf("chunk %d: got %q want %q; boundaries were coalesced", i, line, want)
 		}
 		if _, err := readLineBy(t, br, chunkDeadline); err != nil { // blank separator
 			t.Fatalf("chunk %d separator: %v", i, err)
@@ -342,7 +342,7 @@ func TestStreamingTeeDoesNotBuffer(t *testing.T) {
 		}
 		line, err := readLineBy(t, br, chunkDeadline)
 		if err != nil {
-			t.Fatalf("chunk %d: %v — the tee is buffering the stream", i, err)
+			t.Fatalf("chunk %d: %v; the tee is buffering the stream", i, err)
 		}
 		if want := "data: t" + string(rune('0'+i)) + "\n"; line != want {
 			t.Fatalf("chunk %d: got %q want %q", i, line, want)
@@ -384,7 +384,7 @@ func readLineBy(t *testing.T, br *bufio.Reader, within time.Duration) (string, e
 	case r := <-ch:
 		return r.line, r.err
 	case <-time.After(within):
-		return "", errors.New("no chunk within " + within.String() + " — the relay is buffering the stream rather than flushing per chunk")
+		return "", errors.New("no chunk within " + within.String() + "; the relay is buffering the stream rather than flushing per chunk")
 	}
 }
 

@@ -35,7 +35,7 @@ func (nopLogger) Printf(string, ...any) {}
 type Config struct {
 	BaseURL       string // openbox-core base, e.g. https://core.openbox.ai
 	APIKey        string // obx_(live|test)_… runtime key (INV-1)
-	DID           string // did:aip:… — the developer agent's DID (INV-7)
+	DID           string // did:aip:…; the developer agent's DID (INV-7)
 	PrivateKeyB64 string // base64 raw 32-byte Ed25519 seed (INV-1)
 
 	// ContentCaptureEnabled is the org's content posture; default false strips
@@ -220,7 +220,7 @@ func (c *Client) attempt(ctx context.Context, path string, body []byte, idemKey 
 
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return nil, true, err // network/transport error — retryable
+		return nil, true, err // network/transport error; retryable
 	}
 	defer resp.Body.Close()
 	rb, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
@@ -253,7 +253,7 @@ func checkBaseURL(raw string) error {
 		if isLoopbackHost(u.Hostname()) {
 			return nil
 		}
-		return fmt.Errorf("client: refusing plaintext http:// to non-loopback host %q — "+
+		return fmt.Errorf("client: refusing plaintext http:// to non-loopback host %q; "+
 			"the bearer key would be sent in the clear (INV-1); use https", u.Hostname())
 	default:
 		return fmt.Errorf("client: BaseURL scheme must be https (or http on loopback), got %q", u.Scheme)

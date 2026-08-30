@@ -40,7 +40,7 @@ func TestMain(m *testing.M) {
 	code := m.Run()
 
 	if leaks := filesUnder(sentinel, goConfigDirs(sentinel, xdgConfig)); len(leaks) > 0 {
-		fmt.Fprintf(os.Stderr, "HERMETICITY VIOLATION: %d file(s) written under the sentinel HOME — "+
+		fmt.Fprintf(os.Stderr, "HERMETICITY VIOLATION: %d file(s) written under the sentinel HOME; "+
 			"a test escaped isolateHome and would have written into the developer's real home:\n", len(leaks))
 		for _, l := range leaks {
 			fmt.Fprintf(os.Stderr, "  %s\n", l)

@@ -56,7 +56,7 @@ func TestTopLevelTOMLKeys_Edges(t *testing.T) {
 	// file defines the latter.
 	got := TopLevelTOMLKeys([]byte("hooks.allow_managed_hooks_only = true\n"))
 	if got["allow_managed_hooks_only"] {
-		t.Error("a dotted key must not match its leaf name — it is not a top-level mandate")
+		t.Error("a dotted key must not match its leaf name; it is not a top-level mandate")
 	}
 	if got["hooks.allow_managed_hooks_only"] {
 		t.Error("a dotted key is bound as nesting, so its verbatim spelling is not a top-level key")

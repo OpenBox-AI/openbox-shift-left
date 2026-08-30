@@ -19,7 +19,7 @@ func TestForgedFenceTerminatorStaysInsideTheFence(t *testing.T) {
 	})
 
 	if n := strings.Count(got, fenceEnd); n != 1 {
-		t.Errorf("found %d closing markers, want 1 — a forged terminator splits the fence", n)
+		t.Errorf("found %d closing markers, want 1; a forged terminator splits the fence", n)
 	}
 	if n := strings.Count(got, fenceBegin); n != 1 {
 		t.Errorf("found %d opening markers, want 1", n)
@@ -125,7 +125,7 @@ func TestFenceForgeryViaControlCharacterInMarker(t *testing.T) {
 			})
 
 			if n := strings.Count(got, fenceEnd); n != 1 {
-				t.Errorf("found %d closing markers, want 1 — the sanitizer reassembled a terminator", n)
+				t.Errorf("found %d closing markers, want 1; the sanitizer reassembled a terminator", n)
 			}
 			if n := strings.Count(got, fenceBegin); n != 1 {
 				t.Errorf("found %d opening markers, want 1", n)
@@ -166,7 +166,7 @@ func TestFenceForgeryViaZeroWidthCharacterInMarker(t *testing.T) {
 			}, got)
 
 			if n := strings.Count(rendered, fenceEnd); n != 1 {
-				t.Errorf("the reader sees %d closing markers, want 1 — an invisible character carried a forged terminator through", n)
+				t.Errorf("the reader sees %d closing markers, want 1; an invisible character carried a forged terminator through", n)
 			}
 			if n := strings.Count(rendered, fenceBegin); n != 1 {
 				t.Errorf("the reader sees %d opening markers, want 1", n)

@@ -128,7 +128,7 @@ func claudeCodeDir() (dir, warning string) {
 	case "windows":
 		return `C:\ProgramData\ClaudeCode`, ""
 	default:
-		return "", fmt.Sprintf("claude-code: no known managed-settings path for %s — "+
+		return "", fmt.Sprintf("claude-code: no known managed-settings path for %s; "+
 			"deploy the template by hand", runtime.GOOS)
 	}
 }
@@ -138,7 +138,7 @@ func codexDir() (dir, warning string) {
 	case "linux", "darwin":
 		return "/etc/codex", ""
 	default:
-		return "", fmt.Sprintf("codex: no known managed-config path for %s — "+
+		return "", fmt.Sprintf("codex: no known managed-config path for %s; "+
 			"deploy the template by hand", runtime.GOOS)
 	}
 }
@@ -187,7 +187,7 @@ func applyFile(f File, force bool, now func() time.Time) (Outcome, error) {
 				return Outcome{
 					Path:   f.Path,
 					Action: "skipped",
-					Detail: why + " — re-run with --force to replace it anyway",
+					Detail: why + "; re-run with --force to replace it anyway",
 				}, nil
 			}
 		}

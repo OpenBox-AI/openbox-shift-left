@@ -183,7 +183,7 @@ func checkOwnershipBaseURL(raw string) error {
 		case "localhost", "127.0.0.1", "::1":
 			return nil
 		}
-		return fmt.Errorf("refusing plaintext http:// to non-loopback host %q — the org key "+
+		return fmt.Errorf("refusing plaintext http:// to non-loopback host %q; the org key "+
 			"would be sent in the clear (INV-1); use https", u.Hostname())
 	default:
 		return fmt.Errorf("backend URL scheme must be https (or http on loopback), got %q", u.Scheme)

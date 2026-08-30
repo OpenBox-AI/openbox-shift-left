@@ -51,7 +51,7 @@ func TestNoRefusalWithoutAnEvaluationAttempt(t *testing.T) {
 				t.Fatalf("%s forwarded; every one of these must refuse", tc.name)
 			}
 			if !d.Evaluated {
-				t.Error("REFUSAL WITHOUT AN EVALUATION ATTEMPT — a synthesized refusal fired before asking")
+				t.Error("REFUSAL WITHOUT AN EVALUATION ATTEMPT; a synthesized refusal fired before asking")
 			}
 			if tc.ev.calls != 1 {
 				t.Errorf("evaluator called %d times, want exactly 1 before any refusal", tc.ev.calls)
@@ -312,7 +312,7 @@ func TestFailedGuardrailRefusesLikeTheHookPath(t *testing.T) {
 	d := Decide(context.Background(), ev, true, Captured{HTTPMethod: "POST"})
 
 	if d.Forward {
-		t.Fatal("a failed guardrail FORWARDED the model call — the hook path denies the same verdict")
+		t.Fatal("a failed guardrail FORWARDED the model call; the hook path denies the same verdict")
 	}
 	if !d.Evaluated {
 		t.Error("Evaluated is false on a refusal that followed a real evaluation")
@@ -381,7 +381,7 @@ func TestARealUnreachableControlPlaneStillReportsAnOutage(t *testing.T) {
 // TestHungEvaluationIsBoundedRatherThanHanging.
 func TestHungEvaluationIsBoundedRatherThanHanging(t *testing.T) {
 	if evaluateTimeout > 30*time.Second {
-		t.Fatalf("evaluateTimeout is %v — too long to be a bound on a developer's model call", evaluateTimeout)
+		t.Fatalf("evaluateTimeout is %v; too long to be a bound on a developer's model call", evaluateTimeout)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Nanosecond)
 	defer cancel()

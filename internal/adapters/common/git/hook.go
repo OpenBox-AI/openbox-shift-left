@@ -164,7 +164,7 @@ func hookScript(cfg HookConfig) string {
 	return "#!/bin/sh\n" +
 		"# OpenBox commit-trailer hook (STORY-SL-5). Stamps OpenBox-Session trailers\n" +
 		"# so pushed commits can be bound to their session(s) server-side (SL-6).\n" +
-		"# OBSERVE-ONLY: this hook MUST NEVER fail a commit — every path exits 0.\n" +
+		"# OBSERVE-ONLY: this hook MUST NEVER fail a commit; every path exits 0.\n" +
 		"# " + managedMarker + "\n" +
 		"if [ -z \"$OPENBOX_GIT_HOOK\" ]; then\n" +
 		"  OPENBOX_GIT_HOOK=" + shellQuote(cfg.command()) + "\n" +

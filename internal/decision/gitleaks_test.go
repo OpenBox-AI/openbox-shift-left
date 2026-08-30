@@ -15,7 +15,7 @@ import (
 func TestGitleaksDetectorConstructs(t *testing.T) {
 	d := gitleaksDetector()
 	if d == nil {
-		t.Fatal("gitleaks detector is nil — named-format detection is silently OFF")
+		t.Fatal("gitleaks detector is nil; named-format detection is silently OFF")
 	}
 	if n := len(d.Config.Rules); n < 100 {
 		t.Errorf("only %d rules loaded; the embedded default config should carry 200+", n)
@@ -39,7 +39,7 @@ func TestGitleaksCategoriesCarryNoSecret(t *testing.T) {
 	}
 	for _, c := range cats {
 		if strings.Contains(c, fixture) || strings.Contains(fixture, c) {
-			t.Errorf("category %q carries secret material — INV-2 violation", c)
+			t.Errorf("category %q carries secret material; INV-2 violation", c)
 		}
 		for i := 0; i < len(c); i++ {
 			b := c[i]

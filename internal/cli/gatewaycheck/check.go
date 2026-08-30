@@ -114,7 +114,7 @@ func Inspect(homeDir, managedPath string, dialTimeout time.Duration, getenv func
 					"this build simply cannot see it. Verify ownership by hand.", r.SettingsPath))
 		} else {
 			r.BypassNotes = append(r.BypassNotes,
-				fmt.Sprintf("%s sits at the managed path but is owned by uid %d, not root — "+
+				fmt.Sprintf("%s sits at the managed path but is owned by uid %d, not root; "+
 					"the developer can rewrite it, so this is the base tier, not the MDM tier", r.SettingsPath, r.OwnerUID))
 		}
 	}
@@ -158,18 +158,18 @@ func bypassAssessment(r Report, notes []string) (bool, []string) {
 	case TierMDM:
 		capable = true
 		notes = append(notes, "configuration is root-owned, which stops the developer "+
-			"rewriting the file — but an environment variable set in a shell still takes "+
+			"rewriting the file; but an environment variable set in a shell still takes "+
 			"precedence for a process launched from it. Egress control is what closes that, "+
 			"and it is the org's to deploy")
 	}
 
 	if r.ConfiguredAddr != "" && !r.TargetsGateway {
-		notes = append(notes, envKey+" is set to "+r.ConfiguredAddr+", which is not loopback — "+
+		notes = append(notes, envKey+" is set to "+r.ConfiguredAddr+", which is not loopback; "+
 			"this machine is configured to talk to something other than its local gateway")
 	}
 	if r.ConfiguredAddr != "" && !r.Alive {
 		notes = append(notes, "the configured gateway is not answering ("+r.AliveErr+"). Model "+
-			"calls will FAIL rather than escape, which is the safe direction — but a developer "+
+			"calls will FAIL rather than escape, which is the safe direction; but a developer "+
 			"debugging that failure may work around it by unsetting "+envKey)
 	}
 	return capable, notes

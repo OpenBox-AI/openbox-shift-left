@@ -32,7 +32,7 @@ func TestConfigPathForKeepsTheRolesApart(t *testing.T) {
 	dev := devconfig.ConfigPathFor(devconfig.RoleDev)
 	approver := devconfig.ConfigPathFor(devconfig.RoleApprover)
 	if dev == approver {
-		t.Fatalf("both roles resolve to %s — one principal's config would overwrite the other's", dev)
+		t.Fatalf("both roles resolve to %s; one principal's config would overwrite the other's", dev)
 	}
 	if got, want := filepath.Base(dev), "dev.json"; got != want {
 		t.Errorf("dev config = %s, want %s", got, want)

@@ -78,7 +78,7 @@ func (c *Client) RotateIdentity(ctx context.Context, agentID string) (did, priva
 	// ever added, every rotation would silently yield nothing usable.
 	if resp.privateKey() == "" {
 		return "", "", fmt.Errorf("rotate identity: the server accepted the request but returned no `privateKey` field. "+
-			"Agent %s may now have a rotated identity this machine cannot sign with — re-run to rotate again, "+
+			"Agent %s may now have a rotated identity this machine cannot sign with; re-run to rotate again, "+
 			"and report it upstream if it persists (the response DTO does not declare privateKey, so a newly added "+
 			"response serializer would strip it)", agentID)
 	}
@@ -97,7 +97,7 @@ func rotateError(op, agentID string, err error) error {
 	switch apiErr.StatusCode {
 	case http.StatusUnauthorized:
 		return fmt.Errorf("%s: the control plane rejected this credential (401). "+
-			"Rotation needs an ORGANIZATION key — `obx_key_…`, from dashboard → Organization → API Keys. "+
+			"Rotation needs an ORGANIZATION key; `obx_key_…`, from dashboard → Organization → API Keys. "+
 			"An agent runtime key (`obx_…`, no `key_`) is not a control-plane credential", op)
 	case http.StatusForbidden:
 		return fmt.Errorf("%s: this organization key lacks the `update:agent` permission (403). "+

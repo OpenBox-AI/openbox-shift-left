@@ -23,7 +23,7 @@ func TestCorrelation_ToolUseIDRidesTheInvocationSlot(t *testing.T) {
 			t.Errorf("%s: tool_use_id should ride span.invocation_id, got %q", hook, ev.Span.InvocationID)
 		}
 		if ev.Span.OperationID == "toolu_01" {
-			t.Errorf("%s: operation id is the invocation — an approval could not survive a retry", hook)
+			t.Errorf("%s: operation id is the invocation; an approval could not survive a retry", hook)
 		}
 		if ev.Metadata["tool_use_id"] != "toolu_01" {
 			t.Errorf("%s: tool_use_id should be audit-visible in metadata, got %v", hook, ev.Metadata)
@@ -63,7 +63,7 @@ func TestHighRiskClassesHaveAStableOperationID(t *testing.T) {
 	}
 	for _, g := range gated {
 		if !isHighRiskClass(g.tool) {
-			t.Fatalf("%s lost its structural discriminator — update this table to match operationID", g.tool)
+			t.Fatalf("%s lost its structural discriminator; update this table to match operationID", g.tool)
 		}
 		first, ok := m.Map(HookPreToolUse, &HookEvent{
 			SessionID: "s1", ToolName: g.tool, ToolUseID: "toolu_first", ToolInput: []byte(g.input),
@@ -75,12 +75,12 @@ func TestHighRiskClassesHaveAStableOperationID(t *testing.T) {
 			SessionID: "s1", ToolName: g.tool, ToolUseID: "toolu_retry", ToolInput: []byte(g.input),
 		})
 		if first.Span.OperationID == "" || first.Span.OperationID != retry.Span.OperationID {
-			t.Errorf("%s: gated class has no retry-stable operation id (%q vs %q) — "+
+			t.Errorf("%s: gated class has no retry-stable operation id (%q vs %q); "+
 				"an approved request could never be consumed",
 				g.tool, first.Span.OperationID, retry.Span.OperationID)
 		}
 		if first.Span.OperationID == first.Span.InvocationID {
-			t.Errorf("%s: operation id is the invocation — see the fallback in operationID", g.tool)
+			t.Errorf("%s: operation id is the invocation; see the fallback in operationID", g.tool)
 		}
 	}
 }
@@ -109,7 +109,7 @@ func TestUngatedClassesKeepInvocationScopedIdentity(t *testing.T) {
 		}
 		if first.Span.OperationID == retry.Span.OperationID {
 			t.Errorf("%s: identity survived a retry, which contradicts the documented "+
-				"limitation — update the comment on operationID", tool)
+				"limitation; update the comment on operationID", tool)
 		}
 	}
 }
@@ -131,7 +131,7 @@ func TestGatedOperationsAreDistinctPerRequest(t *testing.T) {
 			SessionID: "s1", ToolName: c.tool, ToolUseID: "toolu_2", ToolInput: []byte(c.b),
 		})
 		if first.Span.OperationID == other.Span.OperationID {
-			t.Errorf("%s: two different requests share an operation id — approving one would grant the other", c.name)
+			t.Errorf("%s: two different requests share an operation id; approving one would grant the other", c.name)
 		}
 	}
 
@@ -144,7 +144,7 @@ func TestGatedOperationsAreDistinctPerRequest(t *testing.T) {
 		ToolInput: []byte(`{ "body" : "y" ,  "title" : "x" }`),
 	})
 	if a.Span.OperationID != b.Span.OperationID {
-		t.Error("semantically identical MCP arguments produced different operation ids — a retry would re-ask")
+		t.Error("semantically identical MCP arguments produced different operation ids; a retry would re-ask")
 	}
 }
 

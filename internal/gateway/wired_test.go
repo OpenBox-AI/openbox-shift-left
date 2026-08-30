@@ -221,7 +221,7 @@ func TestGatedHaltRefusesAndNeverReachesUpstream(t *testing.T) {
 		t.Errorf("status = %d want the refusal status %d", resp.StatusCode, refusalStatus)
 	}
 	if reached {
-		t.Error("the upstream was contacted for a refused call — refusal must stop it before it leaves")
+		t.Error("the upstream was contacted for a refused call; refusal must stop it before it leaves")
 	}
 	if !strings.Contains(string(body), "refused by policy") {
 		t.Errorf("the developer is not told why: %q", body)

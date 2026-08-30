@@ -69,7 +69,7 @@ func (g Git) StampMessageFile(msgFile string, sessions []string) error {
 	}
 	ids := validSessionIDs(append(scanSessionLines(data), sessions...))
 	if len(ids) == 0 {
-		return nil // nothing to attribute — leave the message untouched
+		return nil // nothing to attribute; leave the message untouched
 	}
 
 	args := []string{

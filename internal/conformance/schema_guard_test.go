@@ -71,7 +71,7 @@ func TestSchemaUsesOnlySupportedKeywords(t *testing.T) {
 			switch {
 			case schemaKeywords[k], annotationKeywords[k]:
 			default:
-				t.Errorf("%s: keyword %q is outside the contract's reviewed keyword set — "+
+				t.Errorf("%s: keyword %q is outside the contract's reviewed keyword set; "+
 					"add it to schemaKeywords deliberately (checking whether it needs a "+
 					"Compiler setting to take effect) or express the constraint differently", path, k)
 			}
@@ -150,7 +150,7 @@ func TestSchemaVersionMarkersAgree(t *testing.T) {
 
 	id, _ := schema["$id"].(string)
 	if !strings.Contains(id, "/"+version+"/") {
-		t.Errorf("$id %q does not name the declared version %q — a consumer resolving the id gets a different contract than the one it validated against", id, version)
+		t.Errorf("$id %q does not name the declared version %q; a consumer resolving the id gets a different contract than the one it validated against", id, version)
 	}
 
 	props, _ := schema["properties"].(map[string]any)
@@ -172,7 +172,7 @@ func TestSchemaVersionMarkersAgree(t *testing.T) {
 			continue
 		}
 		if !declared[name] {
-			t.Errorf("the %s changelog claims field %q, which is not declared in properties — an event carrying it is rejected by additionalProperties:false", version, claimed)
+			t.Errorf("the %s changelog claims field %q, which is not declared in properties; an event carrying it is rejected by additionalProperties:false", version, claimed)
 		}
 	}
 }

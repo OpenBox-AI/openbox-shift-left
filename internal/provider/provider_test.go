@@ -51,7 +51,7 @@ func TestCredentialRefCarriesOnlySafeFields(t *testing.T) {
 	for i := 0; i < rt.NumField(); i++ {
 		name := rt.Field(i).Name
 		if !allowed[name] {
-			t.Errorf("CredentialRef gained field %q — if it carries a credential value it breaks INV-1; "+
+			t.Errorf("CredentialRef gained field %q; if it carries a credential value it breaks INV-1; "+
 				"if it is genuinely non-secret, add it to this allowlist deliberately", name)
 		}
 		for _, banned := range []string{"APIKey", "PrivateKey", "Secret", "Token", "Password", "Seed"} {

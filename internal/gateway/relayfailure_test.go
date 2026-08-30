@@ -45,10 +45,10 @@ func TestUnreachableUpstreamStillProducesEvidence(t *testing.T) {
 		t.Errorf("evidence does not identify the call: method=%q url=%q", got.HTTPMethod, got.HTTPURL)
 	}
 	if got.HTTPStatus != 0 {
-		t.Errorf("HTTPStatus = %d, want 0 — no response was observed, so none may be claimed", got.HTTPStatus)
+		t.Errorf("HTTPStatus = %d, want 0; no response was observed, so none may be claimed", got.HTTPStatus)
 	}
 	if got.CredentialFingerprint == "" {
-		t.Error("no credential fingerprint — the call cannot be attributed")
+		t.Error("no credential fingerprint; the call cannot be attributed")
 	}
 }
 
@@ -209,7 +209,7 @@ func TestFragmentInRequestTargetIsRefused(t *testing.T) {
 		t.Errorf("a fragment in the request target was not refused: %q", firstLine(string(raw)))
 	}
 	if got.target != "" {
-		t.Errorf("the upstream was reached with %q — the fragment was silently dropped instead of refused", got.target)
+		t.Errorf("the upstream was reached with %q; the fragment was silently dropped instead of refused", got.target)
 	}
 }
 

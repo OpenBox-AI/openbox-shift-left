@@ -80,7 +80,7 @@ func TestTurnSpanSatisfiesTheAlignmentExtractor(t *testing.T) {
 		t.Errorf("attributes[http.url] = %q, must contain an LLM domain core knows", url)
 	}
 	if attrs["openbox.span_synthetic"] != true {
-		t.Error("the synthetic marker is missing — stored spans would be " +
+		t.Error("the synthetic marker is missing; stored spans would be " +
 			"indistinguishable from observed HTTP traffic")
 	}
 	name, _ := s["name"].(string)

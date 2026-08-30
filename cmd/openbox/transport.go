@@ -90,7 +90,7 @@ func (a *app) runTransport(args []string) int {
 		logger.Printf("openbox transport: cleared inherited proxy settings in this process (%s) so the "+
 			"relay's own upstream leg does not dial itself", strings.Join(cleared, ", "))
 	}
-	logger.Printf("openbox transport: observe-only — model calls are recorded, never refused (probe A pending)")
+	logger.Printf("openbox transport: observe-only; model calls are recorded, never refused (probe A pending)")
 
 	if a.transportReady != nil {
 		a.transportReady(cfg.Addr)

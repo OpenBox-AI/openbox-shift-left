@@ -103,7 +103,7 @@ func (m Mapper) Map(hook HookName, e *HookEvent) (client.DevEvent, bool) {
 
 	ev := client.DevEvent{
 		SchemaVersion: client.SchemaVersion,
-		SessionID:     e.SessionID, // the root/continuity id — correct under forks too (E8-S4)
+		SessionID:     e.SessionID, // the root/continuity id; correct under forks too (E8-S4)
 		DeveloperDID:  m.Identity.DeveloperDID,
 		Timestamp:     ts,
 	}
@@ -377,7 +377,7 @@ func deriveID(ev client.DevEvent) string {
 	b.WriteByte(sep)
 	b.WriteString(ev.Tool.Name)
 	b.WriteByte(sep)
-	b.WriteString(ev.Timestamp) // RFC3339Nano — the per-event distinguisher
+	b.WriteString(ev.Timestamp) // RFC3339Nano; the per-event distinguisher
 	if ev.Span != nil {
 		b.WriteByte(sep)
 		b.WriteString(ev.Span.FilePath)

@@ -29,7 +29,7 @@ func TestNewSignalsMapToStockWireTypes(t *testing.T) {
 	} {
 		p := decodePayload(t, signalEvent(tc.et))
 		if p.EventType != wireSignalReceived {
-			t.Errorf("%s: event_type = %q, want %q — a non-accept-listed type is a 400 the "+
+			t.Errorf("%s: event_type = %q, want %q; a non-accept-listed type is a 400 the "+
 				"fail-open path then swallows", tc.et, p.EventType, wireSignalReceived)
 		}
 		if p.SignalName != tc.name {
@@ -63,7 +63,7 @@ func TestPromptSignalStillCarriesItsArgs(t *testing.T) {
 	ev.Content = &Content{Prompt: "refactor the spool"}
 	p := decodePayload(t, ev)
 	if len(p.SignalArgs) == 0 {
-		t.Fatal("prompt_submitted lost its signal_args — this is what creates the " +
+		t.Fatal("prompt_submitted lost its signal_args; this is what creates the " +
 			"goal-alignment session; without it alignment has no goal at all")
 	}
 }

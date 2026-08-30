@@ -87,7 +87,7 @@ func TestDoctorWarnsWhenOneInvocationIsRegisteredTwice(t *testing.T) {
 func TestDoctorReportsAnAbsentProjectHookFileAsAFact(t *testing.T) {
 	out, code := runDoctorIn(t, t.TempDir())
 	if code != exitOK {
-		t.Errorf("doctor exit = %d, want %d — an optional check must not change the exit code", code, exitOK)
+		t.Errorf("doctor exit = %d, want %d; an optional check must not change the exit code", code, exitOK)
 	}
 	if !strings.Contains(out, "(absent)") {
 		t.Errorf("absent settings file not reported:\n%s", out)

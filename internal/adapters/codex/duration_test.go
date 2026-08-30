@@ -34,7 +34,7 @@ func TestDuration_ToolUseIDKeyedPairing(t *testing.T) {
 		t.Errorf("post(call-2) StartedAt = %q, want its own pre's %q", post2.StartedAt, pre2.StartedAt)
 	}
 	if post1.StartedAt == post2.StartedAt {
-		t.Error("concurrent same-tool calls swapped/shared start times — tool_use_id keying broken")
+		t.Error("concurrent same-tool calls swapped/shared start times; tool_use_id keying broken")
 	}
 }
 

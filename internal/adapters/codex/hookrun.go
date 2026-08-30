@@ -161,7 +161,7 @@ func maybeInstallGitHook(logger *log.Logger, cwd string) {
 	}
 	hooksDir, err := obgit.Git{Dir: cwd}.HooksDirDefault()
 	if err != nil {
-		return // not a git repo / detached worktree — nothing to install into
+		return // not a git repo / detached worktree; nothing to install into
 	}
 	cfg := obgit.HookConfig{Command: self, Args: []string{"hook", "git", "prepare-commit-msg"}}
 	if err := obgit.InstallPostCommitHook(hooksDir, cfg); err != nil {

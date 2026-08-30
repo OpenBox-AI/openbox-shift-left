@@ -54,7 +54,7 @@ func TestBlankAgentIDShortCircuitsTheCredentialPrompts(t *testing.T) {
 		t.Errorf("register path read credentials it should have skipped: %+v", got)
 	}
 	if p.Remaining() != 2 {
-		t.Errorf("Remaining = %d, want 2 — the DID and secret prompts must not be shown", p.Remaining())
+		t.Errorf("Remaining = %d, want 2; the DID and secret prompts must not be shown", p.Remaining())
 	}
 	want := []string{"Backend URL (control plane)", "Core URL (data plane)", "Agent id (blank registers a new agent)"}
 	if len(p.Prompts) != len(want) {
@@ -290,7 +290,7 @@ func TestAuthNeverTouchesPosture(t *testing.T) {
 	}
 	for _, field := range []string{"enforce", "tier2", "findings", "content_capture", "install_git_hook"} {
 		if postureBefore[field] != postureAfter[field] {
-			t.Errorf("posture field %q changed: %v → %v — auth must not write posture",
+			t.Errorf("posture field %q changed: %v → %v; auth must not write posture",
 				field, postureBefore[field], postureAfter[field])
 		}
 	}
@@ -597,7 +597,7 @@ func TestRegisterWithoutAnOrgKeyExplainsWhatIsNeeded(t *testing.T) {
 		t.Errorf("error must say which KIND of key (an org key):\n%s", s)
 	}
 	if !strings.Contains(s, "agent id") {
-		t.Errorf("error must offer the alternative — give an existing agent id:\n%s", s)
+		t.Errorf("error must offer the alternative; give an existing agent id:\n%s", s)
 	}
 }
 
@@ -646,7 +646,7 @@ func TestAgentIDPromptNeverPrefills(t *testing.T) {
 			t.Fatal(err)
 		}
 		if !got.register {
-			t.Fatal("blank must register — that is what the prompt says it does")
+			t.Fatal("blank must register; that is what the prompt says it does")
 		}
 		if got.agentID != "" {
 			t.Errorf("agentID = %q, want it cleared for registration", got.agentID)

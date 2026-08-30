@@ -199,7 +199,7 @@ func fixtureFor(req, resp *event) (any, error) {
 			"event-stream deltas. No recorded prose is committed, and every consumer is content-agnostic. " +
 			"The response body is DECOMPRESSED and its content-encoding header removed: " +
 			"every recorded event-stream response was gzip. " +
-			"Chunk boundaries are NOT recorded either — the recorder flattened the response " +
+			"Chunk boundaries are NOT recorded either; the recorder flattened the response " +
 			"into one body, so a replay reconstructs them from SSE frame separators, " +
 			"which is what a client sees but not what the wire did.",
 		"request": map[string]any{

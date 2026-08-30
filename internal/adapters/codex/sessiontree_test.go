@@ -77,7 +77,7 @@ func TestSessionTree_ForkEventIDsDoNotCollide(t *testing.T) {
 	rootEv, _ := root.Map(HookPreToolUse, payload())
 	forkEv, _ := fork.Map(HookPreToolUse, payload())
 	if rootEv.EventID == forkEv.EventID {
-		t.Errorf("root and fork events share event_id %q — the fork linkage must feed the derivation",
+		t.Errorf("root and fork events share event_id %q; the fork linkage must feed the derivation",
 			rootEv.EventID)
 	}
 }

@@ -33,7 +33,7 @@ func TestMain(m *testing.M) {
 	code := m.Run()
 
 	if leaks := filesUnder(sentinel); len(leaks) > 0 {
-		fmt.Fprintf(os.Stderr, "HERMETICITY VIOLATION: %d file(s) written under the sentinel HOME/cwd — "+
+		fmt.Fprintf(os.Stderr, "HERMETICITY VIOLATION: %d file(s) written under the sentinel HOME/cwd; "+
 			"a test escaped its path pinning and would have written into the developer's real home or source tree:\n", len(leaks))
 		for _, l := range leaks {
 			fmt.Fprintf(os.Stderr, "  %s\n", l)

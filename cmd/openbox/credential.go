@@ -19,7 +19,7 @@ func controlTokenProblem(token string) string {
 		return "" // an org key: the right kind
 	case strings.HasPrefix(t, "obx_"):
 		return fmt.Sprintf("%s looks like an AGENT RUNTIME key (%s…), not an organization credential.\n"+
-			"  That key is what onboarding MINTS for the agent — it is never an input to it, and the\n"+
+			"  That key is what onboarding MINTS for the agent; it is never an input to it, and the\n"+
 			"  control plane will reject it.\n"+
 			"  Use an organization key instead: dashboard → Organization → API Keys (starts obx_key_),\n"+
 			"  with create:agent + read:agent to onboard. A Keycloak JWT from your dashboard session\n"+

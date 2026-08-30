@@ -120,7 +120,7 @@ func TestGate_UndecidedApprovalDenies(t *testing.T) {
 		t.Errorf("deny reason %q must name the approval reference so the model can say what it is waiting on", rec.Evaluation.Reason)
 	}
 	if g.polls == 0 {
-		t.Error("the gate never polled — the request was filed but nobody waited for it")
+		t.Error("the gate never polled; the request was filed but nobody waited for it")
 	}
 }
 
@@ -136,7 +136,7 @@ func TestGate_MarkerHandoffToTheWatcher(t *testing.T) {
 		g := &fakeGovernor{replies: []func() (client.ApprovalStatus, error){pending(expiry)}}
 		runGate(t, g, "600")
 		if _, err := os.Stat(PendingApprovalPath(key)); err != nil {
-			t.Errorf("no marker after an exhausted hold: %v — the late decision would land unannounced", err)
+			t.Errorf("no marker after an exhausted hold: %v; the late decision would land unannounced", err)
 		}
 	})
 
@@ -144,7 +144,7 @@ func TestGate_MarkerHandoffToTheWatcher(t *testing.T) {
 		g := &fakeGovernor{replies: []func() (client.ApprovalStatus, error){decided(client.VerdictAllow, expiry)}}
 		runGate(t, g, "5000")
 		if _, err := os.Stat(PendingApprovalPath(key)); err == nil {
-			t.Error("marker survived a hold that answered — the watcher would repeat the outcome")
+			t.Error("marker survived a hold that answered; the watcher would repeat the outcome")
 		}
 	})
 }
@@ -199,7 +199,7 @@ func TestGate_DoesNotRetryAFailedEvaluation(t *testing.T) {
 	gate.Run(context.Background(), discard(), &out, shellTarget{})
 
 	if n := atomic.LoadInt32(&emits); n != 1 {
-		t.Errorf("gate asked for a verdict %d times, want exactly 1 — a retry inside the "+
+		t.Errorf("gate asked for a verdict %d times, want exactly 1; a retry inside the "+
 			"gate amplifies a core outage across every tool call of every session", n)
 	}
 }

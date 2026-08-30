@@ -30,7 +30,7 @@ func (a *app) resolveScope(scope, providerName string) (string, int) {
 				"  Run without --scope to install user-wide, or use claude-code for project scope.")
 		}
 		if scope == "" {
-			fmt.Fprintf(a.stdout, "note: codex hooks are user-wide, so this install uses GLOBAL scope —\n"+
+			fmt.Fprintf(a.stdout, "note: codex hooks are user-wide, so this install uses GLOBAL scope -\n"+
 				"      every Codex session on this machine is governed, not just this directory.\n")
 		}
 		return scopeGlobal, exitOK
@@ -75,7 +75,7 @@ func (a *app) requireCredentials() int {
 	if haveKey && havePrivateKey {
 		return exitOK
 	}
-	return a.errorf("no credentials on this machine — run `openbox auth` first.\n"+
+	return a.errorf("no credentials on this machine; run `openbox auth` first.\n"+
 		"  `init` installs hooks and writes posture; it never registers an agent or writes a\n"+
 		" credential. Nothing was installed.\n"+
 		"  Expected %s and %s in %s, or as environment variables.",
@@ -89,24 +89,24 @@ func (a *app) printGovernedScope(o devinit.Options, resolvedScope string) {
 
 	if resolvedScope == scopeLocal && o.ProjectDir != "" {
 		settings := filepath.Join(o.ProjectDir, ".claude", "settings.local.json")
-		fmt.Fprintf(a.stdout, "\nGoverned: THIS PROJECT ONLY — %s\n", o.ProjectDir)
+		fmt.Fprintf(a.stdout, "\nGoverned: THIS PROJECT ONLY; %s\n", o.ProjectDir)
 		fmt.Fprintf(a.stdout, "  Hooks were merged into %s, so the next session started here is governed.\n", settings)
 		fmt.Fprintf(a.stdout, "  Sessions started in ANY OTHER directory are not governed and produce no events,\n")
 		fmt.Fprintf(a.stdout, " so absence of events is not evidence of absence of work.\n")
 		fmt.Fprintf(a.stdout, "  Run `openbox init` in each project you want governed, or `--scope global` for a fleet.\n")
-		fmt.Fprintf(a.stdout, "  That settings file is per-developer and git-ignored by convention — do not commit it,\n")
+		fmt.Fprintf(a.stdout, "  That settings file is per-developer and git-ignored by convention; do not commit it,\n")
 		fmt.Fprintf(a.stdout, "  or your engine path lands on the whole team.\n")
 		return
 	}
 
 	if o.Provider == "codex" {
 		fmt.Fprintf(a.stdout, "\nGoverned: EVERY CODEX SESSION on this machine (user-wide hooks).\n")
-		fmt.Fprintf(a.stdout, "  One more step inside Codex: run /hooks and TRUST the new OpenBox hooks —\n")
+		fmt.Fprintf(a.stdout, "  One more step inside Codex: run /hooks and TRUST the new OpenBox hooks -\n")
 		fmt.Fprintf(a.stdout, "  until trusted they do not run.\n")
 		return
 	}
 
-	fmt.Fprintf(a.stdout, "\nGoverned: NOTHING YET — activation is pending.\n")
+	fmt.Fprintf(a.stdout, "\nGoverned: NOTHING YET; activation is pending.\n")
 	fmt.Fprintf(a.stdout, "  The bundle, engine and posture are installed, but global scope activates through\n")
 	fmt.Fprintf(a.stdout, "  managed settings, which is an administrator's deployment and not something this\n")
 	fmt.Fprintf(a.stdout, "  command can perform. Until that lands, no session is governed.\n")
@@ -118,7 +118,7 @@ func (a *app) printGovernedScope(o devinit.Options, resolvedScope string) {
 func (a *app) initUsage(fs *flag.FlagSet) func() {
 	return func() {
 		fmt.Fprintf(a.stderr, "Usage: openbox init --provider <claude-code|codex|cursor> [flags]\n\n")
-		fmt.Fprintf(a.stderr, "Installs the tool's hooks and writes posture. Run `openbox auth` first —\n")
+		fmt.Fprintf(a.stderr, "Installs the tool's hooks and writes posture. Run `openbox auth` first -\n")
 		fmt.Fprintf(a.stderr, "this command never reads, writes or prompts for a credential.\n\n")
 		for _, name := range []string{
 			"provider", "scope", "enforce", "no-enforce", "install-git-hook",

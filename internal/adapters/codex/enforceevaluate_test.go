@@ -15,7 +15,7 @@ func TestIsHighRiskClass_Codex(t *testing.T) {
 	cases := map[string]bool{
 		"Bash":                   true,  // arbitrary shell
 		"mcp__github__create_pr": true,  // MCP execution
-		"apply_patch":            false, // file edit — T1 only (no /evaluate latency)
+		"apply_patch":            false, // file edit; T1 only (no /evaluate latency)
 		"web_search":             false, // catch-all shell, not arbitrary exec
 		"update_plan":            false,
 	}

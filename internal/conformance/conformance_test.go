@@ -17,8 +17,11 @@ func read(t *testing.T, rel string) []byte {
 	return raw
 }
 
-// TestValidSamples aC: a well-formed sample of each lifecycle event type
+// TestValidSamples AC: a well-formed sample of each lifecycle event type
 // validates.
+// The count is derived from contractEventTypes rather than written as a
+// literal, so adding a type to the vocabulary without a sample fails here
+// instead of leaving the type silently unexercised.
 func TestValidSamples(t *testing.T) {
 	dir := "testdata/valid"
 	entries, err := os.ReadDir(dir)
@@ -52,7 +55,7 @@ func TestValidSamples(t *testing.T) {
 	}
 }
 
-// TestInvalidSamplesRejected aC (a): malformed / unknown-type events are
+// TestInvalidSamplesRejected AC (a): malformed / unknown-type events are
 // rejected.
 func TestInvalidSamplesRejected(t *testing.T) {
 	dir := "testdata/invalid"
@@ -71,8 +74,11 @@ func TestInvalidSamplesRejected(t *testing.T) {
 	}
 }
 
-// TestContentGate aC (b): any event carrying content is rejected when content-
+// TestContentGate AC (b): any event carrying content is rejected when content-
 // capture is disabled, and accepted when it is enabled (INV-2 / OD4).
+// The fixture set is read from the directory rather than listed here: a
+// hardcoded list means a fixture added for a new gated field is never
+// validated, and "no test ran it" is indistinguishable from "it passed".
 func TestContentGate(t *testing.T) {
 	dir := "testdata/content"
 	entries, err := os.ReadDir(dir)
@@ -80,7 +86,7 @@ func TestContentGate(t *testing.T) {
 		t.Fatalf("read dir: %v", err)
 	}
 	if len(entries) == 0 {
-		t.Fatal("no content fixtures — the gate would be asserted against nothing")
+		t.Fatal("no content fixtures; the gate would be asserted against nothing")
 	}
 	for _, e := range entries {
 		if e.IsDir() {

@@ -29,7 +29,7 @@ type Scripted struct {
 func (s *Scripted) next(promptText string) (string, error) {
 	s.Prompts = append(s.Prompts, promptText)
 	if s.i >= len(s.Answers) {
-		return "", fmt.Errorf("scripted prompter exhausted at %q (%d answers supplied) — "+
+		return "", fmt.Errorf("scripted prompter exhausted at %q (%d answers supplied); "+
 			"the code asked for more input than the test scripted", promptText, len(s.Answers))
 	}
 	v := s.Answers[s.i]

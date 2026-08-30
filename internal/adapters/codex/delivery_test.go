@@ -76,7 +76,7 @@ func TestDelivery_RetryIsBounded(t *testing.T) {
 		t.Errorf("retried %d times, want at most %d", attempts, hookflow.MaxRecoveryAttempts+1)
 	}
 	if attempts < 2 {
-		t.Errorf("gave up after %d attempt(s) — a transient failure deserves a retry", attempts)
+		t.Errorf("gave up after %d attempt(s); a transient failure deserves a retry", attempts)
 	}
 }
 

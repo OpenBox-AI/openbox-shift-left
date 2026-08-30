@@ -31,7 +31,7 @@ func (a *app) runAuthRotate(f authFields, piped map[string]string, envPath, back
 	}
 	backendURL := firstNonEmptyStr(backendURLFlag, f.backendURL, devconfig.ResolveBackendURL(), devconfig.DefaultBackendURL)
 	if backendURL == "" {
-		return a.errorf("no backend URL — pass --backend-url or set %s", devconfig.EnvBackendURL)
+		return a.errorf("no backend URL; pass --backend-url or set %s", devconfig.EnvBackendURL)
 	}
 
 	agentID := strings.TrimSpace(f.agentID)
@@ -75,7 +75,7 @@ func (a *app) runAuthRotate(f authFields, piped map[string]string, envPath, back
 	if strings.HasPrefix(newKey, "obx_key_") {
 		return a.errorf("the rotated API key looks like an ORGANIZATION key (obx_key_…), not an agent runtime key.\n" +
 			"  Refusing to write it: an org key in the agent's runtime slot would give the hook\n" +
-			"  org-wide authority. Report this — the endpoint returned the wrong credential type.")
+			"  org-wide authority. Report this; the endpoint returned the wrong credential type.")
 	}
 	if problem := privateKeyProblem(newPrivateKey); problem != "" {
 		return a.errorf("the rotated signing key is unusable: %s\n"+
@@ -97,7 +97,7 @@ func (a *app) runAuthRotate(f authFields, piped map[string]string, envPath, back
 	if code := a.writeCoordinates(f); code != exitOK {
 		return code
 	}
-	fmt.Fprintf(a.stdout, "\n✓ rotated agent %s — new API key and signing key, same DID %s\n", agentID, newDID)
+	fmt.Fprintf(a.stdout, "\n✓ rotated agent %s; new API key and signing key, same DID %s\n", agentID, newDID)
 	a.warnShadowedByEnv(f, envPath)
 	fmt.Fprintf(a.stdout, "\nIf this machine's hooks are already installed, nothing further is needed.\n")
 	return exitOK

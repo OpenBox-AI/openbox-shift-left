@@ -171,7 +171,7 @@ func ApplyFailurePolicy(dec decision.Decision, policy FailurePolicy) decision.De
 // cold-start fail-open today); a fixed, content-free string, never tool
 // content (INV-2).
 func failClosedReason(cause string) string {
-	r := "request denied — no governance decision could be obtained and this session is fail-closed"
+	r := "request denied; no governance decision could be obtained and this session is fail-closed"
 	if cause != "" {
 		r += " (" + cause + ")"
 	}
@@ -206,7 +206,7 @@ func CompactAny(m map[string]any) map[string]any {
 func LogEnforceDecision(logger *log.Logger, toolName string, dec decision.Decision, policy FailurePolicy) {
 	verdict := string(dec.Evaluation.Verdict)
 	if verdict == "" {
-		verdict = "UNKNOWN" // VerdictUnknown ("") — a fail-open / unevaluated decision
+		verdict = "UNKNOWN" // VerdictUnknown (""); a fail-open / unevaluated decision
 	}
 	logger.Printf("enforce decision: tool=%s verdict=%s would_block=%t source=%s fail_open=%t policy=%s session_halt=%t",
 		CapIdent(toolName), verdict, dec.Evaluation.WouldBlock(), OrDash(dec.Source), dec.FailOpen, policy, dec.SessionHalt)
@@ -409,7 +409,7 @@ type EnforcementRecord struct {
 	ToolKind            string           `json:"tool_kind,omitempty"`
 	Verdict             string           `json:"verdict"`
 	WouldBlock          bool             `json:"would_block"`
-	AppliedDecision     string           `json:"applied_decision,omitempty"` // deny|ask|block|halt|"" (proceed) — the provider literal that was applied
+	AppliedDecision     string           `json:"applied_decision,omitempty"` // deny|ask|block|halt|"" (proceed); the provider literal that was applied
 	Source              string           `json:"source,omitempty"`
 	FailOpen            bool             `json:"fail_open"`
 	Stale               bool             `json:"stale,omitempty"`

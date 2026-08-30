@@ -59,7 +59,7 @@ func TestTheUpstreamLegWouldNotDialThisRelay(t *testing.T) {
 	t.Run("with the fix, no proxy resolves", func(t *testing.T) {
 		out, code := runProbe(t, "cleared", selfAddr)
 		if code != 0 {
-			t.Errorf("the upstream leg would still route through %s — the relay would dial itself "+
+			t.Errorf("the upstream leg would still route through %s; the relay would dial itself "+
 				"and recurse until sockets run out. probe exit=%d output=%q", selfAddr, code, out)
 		}
 	})
@@ -88,7 +88,7 @@ func TestTheClearedKeysAreTheOnesNetHTTPReads(t *testing.T) {
 		}
 	}
 	if clearsKey("NO_PROXY") || clearsKey("no_proxy") {
-		t.Error("NO_PROXY is in proxyEnvKeys. It is an EXCLUSION list — clearing it sends MORE " +
+		t.Error("NO_PROXY is in proxyEnvKeys. It is an EXCLUSION list; clearing it sends MORE " +
 			"traffic through a proxy, which is the opposite of what this guard is for.")
 	}
 }

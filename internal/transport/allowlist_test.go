@@ -17,7 +17,7 @@ func TestAllowlistMatchesTheExactHost(t *testing.T) {
 	} {
 		if !a.Allows(host) {
 			t.Errorf("Allows(%q) = false, want true: this is the host the lane exists to intercept, "+
-				"and a miss here is a silent governance hole — the call is blind-tunnelled and never recorded", host)
+				"and a miss here is a silent governance hole; the call is blind-tunnelled and never recorded", host)
 		}
 	}
 }

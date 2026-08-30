@@ -376,7 +376,7 @@ func TestMapTurn_RedactionIsStructural(t *testing.T) {
 	off.CaptureContent = true
 	_, plain, _ := off.MapTurn(&HookEvent{SessionID: "s", LastAssistantMessage: "your key is " + secret}, window, 0)
 	if !strings.Contains(plain.Content.Output, secret) {
-		t.Error("with no redactor wired the text must pass through unchanged — a silent " +
+		t.Error("with no redactor wired the text must pass through unchanged; a silent " +
 			"partial redaction would be worse than the documented opt-out")
 	}
 }
@@ -393,7 +393,7 @@ func TestMap_ToolStatusIsDerivedFromWhichHookFired(t *testing.T) {
 		t.Fatal("PostToolUse must map")
 	}
 	if ev.Status != client.StatusCompleted {
-		t.Errorf("PostToolUse status = %q, want %q — Claude Code fires this hook only "+
+		t.Errorf("PostToolUse status = %q, want %q; Claude Code fires this hook only "+
 			"after a SUCCESSFUL tool (2.1.229 hook table; failures fire PostToolUseFailure)",
 			ev.Status, client.StatusCompleted)
 	}
@@ -462,7 +462,7 @@ func TestMap_StatusDerivationReadsNoToolOutput(t *testing.T) {
 		t.Fatal("must map")
 	}
 	if got.Status != client.StatusCompleted {
-		t.Errorf("status = %q with capture on, want %q — the outcome comes from WHICH "+
+		t.Errorf("status = %q with capture on, want %q; the outcome comes from WHICH "+
 			"hook fired, never from what the tool printed", got.Status, client.StatusCompleted)
 	}
 }
@@ -516,7 +516,7 @@ func TestMap_PostToolUseFailureIsACompletedActivityThatFailed(t *testing.T) {
 		t.Fatal("PostToolUseFailure must map")
 	}
 	if ev.EventType != client.EventToolResult {
-		t.Errorf("event type = %q, want %q — a failed call still completed",
+		t.Errorf("event type = %q, want %q; a failed call still completed",
 			ev.EventType, client.EventToolResult)
 	}
 	if ev.Status != client.StatusFailed {
@@ -589,7 +589,7 @@ func TestMap_LifecycleSignals(t *testing.T) {
 		t.Errorf("event type = %q, want %q", den.EventType, client.EventPermissionDenied)
 	}
 	if den.Metadata["tool_use_id"] != "toolu_d1" {
-		t.Errorf("tool_use_id not carried — the denial cannot be correlated with its call: %v", den.Metadata)
+		t.Errorf("tool_use_id not carried; the denial cannot be correlated with its call: %v", den.Metadata)
 	}
 
 	for _, in := range []string{"rate_limit", "billing_error", "max_output_tokens", "unknown"} {
@@ -666,7 +666,7 @@ func TestMap_TaskSubagentTypeIsCarriedButNotItsPrompt(t *testing.T) {
 		t.Fatal("Task call must map")
 	}
 	if ev.Metadata["subagent_type"] != "code-reviewer" {
-		t.Errorf("subagent_type not carried — every Task call reads as an anonymous "+
+		t.Errorf("subagent_type not carried; every Task call reads as an anonymous "+
 			"`tool_name: Task`: %v", ev.Metadata)
 	}
 	if blob, _ := json.Marshal(ev); strings.Contains(string(blob), secretPrompt) {

@@ -82,7 +82,7 @@ func TestStatusSurvivesContentStripping(t *testing.T) {
 
 	stripped := decodeRaw(t, stripContent(ev))
 	if stripped["status"] != StatusFailed {
-		t.Errorf("status = %v after stripContent, want %q — status is structural, not gated",
+		t.Errorf("status = %v after stripContent, want %q; status is structural, not gated",
 			stripped["status"], StatusFailed)
 	}
 	if in, _ := stripped["activity_input"].(map[string]any); in != nil {

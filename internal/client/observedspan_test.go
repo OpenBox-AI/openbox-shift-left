@@ -65,7 +65,7 @@ func TestObservedSpanShipsForEveryObservingLane(t *testing.T) {
 		t.Run(lane, func(t *testing.T) {
 			span, ok := spanOf(t, turnWithLane(lane, lane+"-req-1"))
 			if !ok {
-				t.Fatalf("%s turn carries NO span — the lane's evidence is being dropped silently", lane)
+				t.Fatalf("%s turn carries NO span; the lane's evidence is being dropped silently", lane)
 			}
 			if got := span["http_method"]; got != "POST" {
 				t.Errorf("http_method = %v, want POST", got)
@@ -89,7 +89,7 @@ func TestGatewaySpanIDDidNotMove(t *testing.T) {
 	}
 	const want = "gw-ed6bb44e646a179c7357a51108c3fc32"
 	if got := span["span_id"]; got != want {
-		t.Errorf("gateway span_id = %v, want %s — a moved derivation orphans every stored id", got, want)
+		t.Errorf("gateway span_id = %v, want %s; a moved derivation orphans every stored id", got, want)
 	}
 }
 
@@ -106,7 +106,7 @@ func TestObservingLaneSpanIDsAreDisjoint(t *testing.T) {
 			t.Fatalf("%s: no span id", lane)
 		}
 		if prev, dup := seen[id]; dup {
-			t.Fatalf("%s and %s mint the SAME span id %q for the same turn — core's dedupe would drop one lane's evidence", lane, prev, id)
+			t.Fatalf("%s and %s mint the SAME span id %q for the same turn; core's dedupe would drop one lane's evidence", lane, prev, id)
 		}
 		seen[id] = lane
 	}
@@ -125,7 +125,7 @@ func TestLanePrecedenceMatchesActivityID(t *testing.T) {
 		t.Fatalf("observedLane = (%q,%q), want (proxy,p)", lane, id)
 	}
 	if got := turnActivityIDFor(ev); got != "s1:proxy:p" {
-		t.Fatalf("turnActivityIDFor = %q, want s1:proxy:p — the two precedences have drifted", got)
+		t.Fatalf("turnActivityIDFor = %q, want s1:proxy:p; the two precedences have drifted", got)
 	}
 
 	ev.ProxyRequestID = ""
@@ -182,7 +182,7 @@ func TestOnlyTheTelemetryLaneMarksItsSpanSynthetic(t *testing.T) {
 				t.Errorf("%s: http.method = %v, want POST", lane, attrs["http.method"])
 			}
 			if attrs["http.url"] == nil {
-				t.Errorf("%s: no http.url — isLLMCall needs it", lane)
+				t.Errorf("%s: no http.url; isLLMCall needs it", lane)
 			}
 		})
 	}

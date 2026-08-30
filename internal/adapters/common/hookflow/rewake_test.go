@@ -107,7 +107,7 @@ func TestAwaitRewake_RejectionCarriesThePolicyReason(t *testing.T) {
 	}}
 	msg, ok := AwaitRewake(context.Background(), discard(), key, newGovernor(g))
 	if !ok {
-		t.Fatal("a rejection must wake the session too — silence reads as still-waiting")
+		t.Fatal("a rejection must wake the session too; silence reads as still-waiting")
 	}
 	if !strings.Contains(msg, "refused") || !strings.Contains(msg, "approver said so") {
 		t.Errorf("wake message %q should say it was refused and why", msg)

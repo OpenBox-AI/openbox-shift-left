@@ -187,7 +187,7 @@ func Deactivate(homeDir, settingsPath string, lane Lane, force bool) (Reverted, 
 		todo = append(todo, action{key: key, original: original})
 	}
 	if len(out.Conflicts) > 0 && !force {
-		return out, fmt.Errorf("activation: %s changed since OpenBox set %s — refusing to overwrite. "+
+		return out, fmt.Errorf("activation: %s changed since OpenBox set %s; refusing to overwrite. "+
 			"Review the value, or re-run with --force-restore to restore what was there before",
 			strings.Join(out.Conflicts, ", "), plural(len(out.Conflicts), "it", "them"))
 	}

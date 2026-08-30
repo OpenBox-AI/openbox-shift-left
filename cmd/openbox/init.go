@@ -53,8 +53,8 @@ func (a *app) runApproverInit(args []string) int {
 	fs.StringVar(&orgID, "org", a.env("OPENBOX_ORG_ID", ""), "organization whose approval queue this approver works (required)")
 	fs.StringVar(&backendURL, "backend-url", a.env(devconfig.EnvBackendURL, ""), "openbox-backend control-plane base URL")
 	fs.StringVar(&clientID, "client-id", a.env("OPENBOX_CLIENT", "openbox-cli"), "value for the x-openbox-client header (Keycloak JWT path)")
-	fs.StringVar(&secretBackend, "secret-backend", "", "REMOVED — the approver credential lives in ~/.openbox/.env")
-	fs.StringVar(&host, "host", "", "agentic host that evaluates a request when running unattended: claude-code|codex (default: none — a human decides)")
+	fs.StringVar(&secretBackend, "secret-backend", "", "REMOVED; the approver credential lives in ~/.openbox/.env")
+	fs.StringVar(&host, "host", "", "agentic host that evaluates a request when running unattended: claude-code|codex (default: none; a human decides)")
 	fs.StringVar(&envelope, "envelope", "", "policy bundle bounding what the host may decide; the host may only narrow it")
 	fs.BoolVar(&decide, "allow-decide", false, "let this approver DECIDE, not just observe. Off by default: an approver starts in shadow mode until its envelope has been read against real traffic")
 	fs.BoolVar(&dryRun, "dry-run", false, "print the plan; make no network or filesystem writes")
@@ -63,12 +63,12 @@ func (a *app) runApproverInit(args []string) int {
 	}
 	if secretBackend != "" {
 		return a.errorf("--secret-backend was removed: there is no secret store to choose any more.\n" +
-			"  The approver credential is written to ~/.openbox/.env (plaintext, 0600 — see\n" +
+			"  The approver credential is written to ~/.openbox/.env (plaintext, 0600; see\n" +
 			", by this command or by `openbox auth`.\n" +
 			"  Re-run without this flag.")
 	}
 	if orgID == "" {
-		return a.errorf("--org is required (or OPENBOX_ORG_ID) — it names the approval queue this approver works")
+		return a.errorf("--org is required (or OPENBOX_ORG_ID); it names the approval queue this approver works")
 	}
 	if backendURL == "" {
 		return a.errorf("set --backend-url or %s to the openbox-backend base URL", devconfig.EnvBackendURL)
@@ -85,7 +85,7 @@ func (a *app) runApproverInit(args []string) int {
 	}
 
 	if dryRun {
-		fmt.Fprintf(a.stdout, "DRY RUN — no network calls, no filesystem writes.\n\n")
+		fmt.Fprintf(a.stdout, "DRY RUN; no network calls, no filesystem writes.\n\n")
 		fmt.Fprintf(a.stdout, "Would install an APPROVER (a queue client; no agent is registered, no hooks are installed):\n")
 		fmt.Fprintf(a.stdout, "  org:          %s\n  backend:      %s\n  host:         %s\n  envelope:     %s\n  mode:         %s\n",
 			orgID, backendURL, orNone(host), orNone(envelope), shadowLabel(!decide))
@@ -127,7 +127,7 @@ func (a *app) runApproverInit(args []string) int {
 		if err := cl.DecideApproval(ctx, probeAgent, probeUUID, backend.ApprovalApprove); err != nil {
 			var apiErr *backend.APIError
 			if errors.As(err, &apiErr) && (apiErr.StatusCode == http.StatusForbidden || apiErr.StatusCode == http.StatusUnauthorized) {
-				return a.errorf("this credential cannot decide approvals (HTTP %d) — it needs manage:agent_session", apiErr.StatusCode)
+				return a.errorf("this credential cannot decide approvals (HTTP %d); it needs manage:agent_session", apiErr.StatusCode)
 			}
 		}
 		fmt.Fprintf(a.stdout, "✓ credential may decide approvals (manage:agent_session)\n")
@@ -154,7 +154,7 @@ func (a *app) runApproverInit(args []string) int {
 	fmt.Fprintf(a.stdout, "\nApprover installed.\n")
 	fmt.Fprintf(a.stdout, "  config    %s\n  queue     %s (org %s)\n  mode      %s\n", path, backendURL, orgID, shadowLabel(cfg.Shadow))
 	fmt.Fprintf(a.stderr, "\nwarning: %s now holds an ORGANIZATION key in plaintext. It can create and rotate\n", envPath)
-	fmt.Fprintf(a.stderr, "         agents across %s — a far larger blast radius than one agent's signing key.\n", orgID)
+	fmt.Fprintf(a.stderr, "         agents across %s; a far larger blast radius than one agent's signing key.\n", orgID)
 	fmt.Fprintf(a.stderr, " Do not run an approver install on a shared host.\n")
 	if host != "" {
 		fmt.Fprintf(a.stdout, "  host      %s\n", host)

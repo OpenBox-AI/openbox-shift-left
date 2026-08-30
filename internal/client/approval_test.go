@@ -21,7 +21,7 @@ func approvalServer(t *testing.T, pub ed25519.PublicKey, respond func() (int, st
 			t.Errorf("path = %q, want %q", r.URL.Path, approvalPath)
 		}
 		if h := r.Header.Get(headerAuthorization); h != "Bearer "+testAPIKey {
-			t.Errorf("Authorization = %q — the poll must be agent-authenticated like /evaluate", h)
+			t.Errorf("Authorization = %q; the poll must be agent-authenticated like /evaluate", h)
 		}
 		body, _ := io.ReadAll(r.Body)
 		if err := verifyLikeCore(pub, r.Method, r.URL.Path, body, r.Header); err != nil {
@@ -128,7 +128,7 @@ func TestApprovalStatus_DecidedRequiresTheWindow(t *testing.T) {
 		{"approved inside a window", ApprovalStatus{Verdict: VerdictAllow, ExpiresAt: window}, true},
 		{"rejected inside a window", ApprovalStatus{Verdict: VerdictHalt, ExpiresAt: window}, true},
 		{"still pending", ApprovalStatus{Verdict: VerdictRequireApproval, ExpiresAt: window}, false},
-		{"allow with no window — never governed, not approved", ApprovalStatus{Verdict: VerdictAllow}, false},
+		{"allow with no window; never governed, not approved", ApprovalStatus{Verdict: VerdictAllow}, false},
 		{"unrecognized verdict", ApprovalStatus{Verdict: VerdictUnknown, ExpiresAt: window}, false},
 	} {
 		if got := tc.st.Decided(); got != tc.want {
@@ -146,7 +146,7 @@ func TestPollApproval_NotFoundIsDistinctFromAnOutage(t *testing.T) {
 		t.Errorf("err = %v, want ErrApprovalNotFound", err)
 	}
 	if errors.Is(err, ErrDelivery) {
-		t.Error("not-found must not read as a delivery failure — they mean opposite things to a hold")
+		t.Error("not-found must not read as a delivery failure; they mean opposite things to a hold")
 	}
 }
 

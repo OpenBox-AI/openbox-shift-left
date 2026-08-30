@@ -41,7 +41,7 @@ func (a *app) runManaged(args []string) int {
 		case "codex":
 			wanted = append(wanted, managed.ProviderCodex)
 		case "cursor":
-			return a.errorf("cursor has no managed template yet — it lands with the SL-8 adapter")
+			return a.errorf("cursor has no managed template yet; it lands with the SL-8 adapter")
 		case "":
 			continue
 		default:

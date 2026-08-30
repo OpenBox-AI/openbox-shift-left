@@ -37,7 +37,7 @@ func TestBuildConstructsAllThreeSignals(t *testing.T) {
 func TestReceiverSettingsHasNoNilFields(t *testing.T) {
 	set := receiverSettings(&bytes.Buffer{})
 	if set.Logger == nil {
-		t.Error("Logger is nil — otlpreceiver's factory clones it during creation and panics")
+		t.Error("Logger is nil; otlpreceiver's factory clones it during creation and panics")
 	}
 	if set.TracerProvider == nil {
 		t.Error("TracerProvider is nil")

@@ -98,7 +98,7 @@ func (e *Emitter) Emit(ctx context.Context, c gateway.Captured) {
 	// this path cannot fire.
 
 	if !e.Lane.valid() {
-		e.vlog("  capture: DROPPED — this emitter has no lane configured")
+		e.vlog("  capture: DROPPED; this emitter has no lane configured")
 		e.warn("openbox: a model-call emitter was constructed with no lane, so captured calls " +
 			"cannot be attributed to a producer and are being DROPPED. This is a wiring defect, not a setting.")
 		return
@@ -106,20 +106,20 @@ func (e *Emitter) Emit(ctx context.Context, c gateway.Captured) {
 
 	did := e.developerDID()
 	if did == "" {
-		e.vlog("  capture: SKIPPED — no developer DID configured (run `openbox auth`)")
+		e.vlog("  capture: SKIPPED; no developer DID configured (run `openbox auth`)")
 		e.warnThrottled(&e.lastNoDIDWarn, "openbox gateway: no developer DID configured, so relayed model calls are NOT being recorded. Run `openbox auth`; no restart is needed.")
 		return
 	}
 
 	sessionID := c.RequestHeaders[sessionHeader]
 	if sessionID != "" && !usableSessionID(sessionID) {
-		e.vlog("  capture: SKIPPED — %s is not a usable session id", sessionHeader)
+		e.vlog("  capture: SKIPPED; %s is not a usable session id", sessionHeader)
 		e.warnThrottled(&e.lastBadSessionWarn, "openbox gateway: relayed calls carry a %s header that is not a usable session id "+
 			"(too long, or not printable ASCII), so nothing can be attributed to a session. The model calls themselves are unaffected.", sessionHeader)
 		return
 	}
 	if sessionID == "" {
-		e.vlog("  capture: SKIPPED — the call carries no %s header, so it cannot be attributed to a session", sessionHeader)
+		e.vlog("  capture: SKIPPED; the call carries no %s header, so it cannot be attributed to a session", sessionHeader)
 		if isModelCall(c) {
 			e.warnThrottled(&e.lastNoSessionWarn, "openbox gateway: relayed model calls carry no %s header, so nothing can be attributed to a session and no governance events are being sent. "+
 				"The model calls themselves are unaffected.", sessionHeader)
@@ -134,12 +134,12 @@ func (e *Emitter) Emit(ctx context.Context, c gateway.Captured) {
 	}
 	ev, err := EventFor(e.Lane, id, e.requestID(c), e.now(), c)
 	if err != nil {
-		e.vlog("  capture: DROPPED — %v", err)
+		e.vlog("  capture: DROPPED; %v", err)
 		e.warn("openbox: dropped a captured call: %v", err)
 		return
 	}
 	if err := e.Spool.Append(ev); err != nil {
-		e.vlog("  capture: DROPPED — %v", err)
+		e.vlog("  capture: DROPPED; %v", err)
 		e.warn("openbox gateway: dropped event %s: %v", ev.EventID, err)
 		return
 	}

@@ -155,7 +155,7 @@ func TestTurnActivityOutputCarriesNumbersAndOneString(t *testing.T) {
 
 	for k, v := range usage {
 		if _, isNum := v.(float64); !isNum {
-			t.Errorf("usage[%q] = %v (%T), want a number — only the model id may be a string", k, v, v)
+			t.Errorf("usage[%q] = %v (%T), want a number; only the model id may be a string", k, v, v)
 		}
 	}
 }
@@ -393,7 +393,7 @@ func TestTurnLanesMatchTheContract(t *testing.T) {
 	producer, _ := defs["turnProducer"].(map[string]any)
 	branches, _ := producer["oneOf"].([]any)
 	if len(branches) == 0 {
-		t.Fatal("$defs.turnProducer has no branches — the exactly-one rule is gone")
+		t.Fatal("$defs.turnProducer has no branches; the exactly-one rule is gone")
 	}
 
 	inContract := map[string]bool{}
@@ -412,13 +412,13 @@ func TestTurnLanesMatchTheContract(t *testing.T) {
 
 	for f := range inContract {
 		if !inTests[f] {
-			t.Errorf("contract declares producer %q but turnLanes omits it — "+
+			t.Errorf("contract declares producer %q but turnLanes omits it; "+
 				"its disjointness and precedence are unasserted", f)
 		}
 	}
 	for f := range inTests {
 		if !inContract[f] {
-			t.Errorf("turnLanes has %q but no contract branch requires it — "+
+			t.Errorf("turnLanes has %q but no contract branch requires it; "+
 				"these tests assert a producer the contract does not have", f)
 		}
 	}
@@ -435,7 +435,7 @@ func TestEveryTurnProducerNamespaceIsDisjoint(t *testing.T) {
 			return
 		}
 		if !strings.Contains(id, marker) {
-			t.Errorf("%s lane id %q lost its %q namespace marker — disjointness is by separator, not by luck", name, id, marker)
+			t.Errorf("%s lane id %q lost its %q namespace marker; disjointness is by separator, not by luck", name, id, marker)
 		}
 		if prev, dup := seen[id]; dup {
 			t.Errorf("%s and %s lanes share activity_id %q; core dedupe would absorb one and half the evidence would vanish", prev, name, id)

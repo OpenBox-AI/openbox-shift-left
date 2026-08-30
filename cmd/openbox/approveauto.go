@@ -56,7 +56,7 @@ func (a *app) runApproveAuto(cl *backend.Client, orgID string, f autoFlags) int 
 	var host approver.Host
 	switch hostName {
 	case "":
-		fmt.Fprintln(a.stdout, "note: no --host configured — consultable requests will be left for a human")
+		fmt.Fprintln(a.stdout, "note: no --host configured; consultable requests will be left for a human")
 	case "claude-code":
 		scratch, err := os.MkdirTemp("", "openbox-approver-")
 		if err != nil {
@@ -71,11 +71,11 @@ func (a *app) runApproveAuto(cl *backend.Client, orgID string, f autoFlags) int 
 	evidence := a.env("OPENBOX_APPROVER_EVIDENCE", filepath.Join(filepath.Dir(cfgPath), "approvals-auto.jsonl"))
 	selfAgent := devconfig.ResolveAgentID() // this machine's developer agent, if any
 
-	fmt.Fprintf(a.stdout, "Autonomous approver — %s\n", modeLabel(shadow))
+	fmt.Fprintf(a.stdout, "Autonomous approver; %s\n", modeLabel(shadow))
 	fmt.Fprintf(a.stdout, "  queue     %s\n  envelope  %s\n  host      %s\n  evidence  %s\n",
 		orgID, envelopePath, orNone(hostName), evidence)
 	if selfAgent != "" && !f.allowSelf {
-		fmt.Fprintf(a.stdout, "  refusing requests from this machine's own agent (%s) — pass --allow-same-agent to override\n", selfAgent)
+		fmt.Fprintf(a.stdout, "  refusing requests from this machine's own agent (%s); pass --allow-same-agent to override\n", selfAgent)
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

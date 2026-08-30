@@ -14,10 +14,15 @@ const schemaResourceURL = "mem://openbox/dev-event.schema.json"
 type refusingLoader struct{}
 
 func (refusingLoader) Load(url string) (any, error) {
-	return nil, fmt.Errorf("conformance: refused to fetch %q — the schema is pinned in memory and must resolve entirely from it", url)
+	return nil, fmt.Errorf("conformance: refused to fetch %q; the schema is pinned in memory and must resolve entirely from it", url)
 }
 
-// compileSchema two settings are load-bearing:
+// compileSchema compiles the contract schema for structural validation. Two
+// settings are load-bearing:
+//   - AssertFormat: in draft/2020-12 `format` is an annotation by default, so
+//     `"format": "date-time"` would parse, report as satisfied and enforce
+//     nothing. Without it the contract silently loosens.
+//   - UseLoader: see refusingLoader.
 func compileSchema(doc map[string]any) (*jsonschema.Schema, error) {
 	c := jsonschema.NewCompiler()
 	c.AssertFormat()

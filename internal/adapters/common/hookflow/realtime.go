@@ -57,6 +57,10 @@ func (t RealtimeTrigger) Maybe(logger *log.Logger, sessionID string) {
 			logger.Printf("realtime flush: cannot resolve own binary: %v", err)
 			return
 		}
+		// The trigger may only ever spawn the openbox engine. Under `go test` the
+		// executable is the test binary, and spawning it with hook args would
+		// re-run the suite recursively, since those tests reach this code again:
+		// a fork bomb, not a flusher.
 		if strings.HasSuffix(strings.TrimSuffix(exe, ".exe"), ".test") {
 			return
 		}
@@ -105,6 +109,10 @@ func (t RealtimeTrigger) Maybe(logger *log.Logger, sessionID string) {
 		return
 	}
 	if cmd.Process != nil {
+		// Reap the child, or a long-lived caller accumulates zombies until the
+		// per-uid process limit is reached and nothing on the machine can fork.
+		// Wait in a goroutine rather than Release: the child is already detached
+		// and there are no pipes to drain, so this blocks only on its exit.
 		go func() { _ = cmd.Wait() }()
 	}
 }

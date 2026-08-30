@@ -28,7 +28,7 @@ func writeAttestation(g Git, sessions []string, logf func(string, ...any)) {
 		return // no engine wired (standalone hook binary); nothing to say
 	}
 	if len(validSessionIDs(sessions)) == 0 {
-		return // an unattributed commit — honest, and the trailer says so too
+		return // an unattributed commit; honest, and the trailer says so too
 	}
 	ctx, ok := attestContext()
 	if !ok {

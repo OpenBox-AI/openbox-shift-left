@@ -132,7 +132,7 @@ func (p Posture) Metadata() map[string]any {
 		"provider_managed":   p.ProviderManaged,
 	} {
 		if v == "" || looksLikeSecret(v) {
-			continue // unknown, or refused — see looksLikeSecret
+			continue // unknown, or refused; see looksLikeSecret
 		}
 		m[k] = truncate(v, maxPostureValueLen)
 	}

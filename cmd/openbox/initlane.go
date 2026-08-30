@@ -41,14 +41,14 @@ func (a *app) setupLane(in laneInstall) error {
 	// daemon from a stranger: it is a bare TCP connect.
 	if occupied, who := portOccupied(in.addr); occupied {
 		if !unitDescribesAddr(in.unitPath, in.addr) {
-			return fmt.Errorf("%s is already in use%s — refusing to continue, because the readiness check "+
+			return fmt.Errorf("%s is already in use%s; refusing to continue, because the readiness check "+
 				"cannot tell our %s from whatever is listening. Stop it, or choose another address",
 				in.addr, who, in.label)
 		}
 		fmt.Fprintf(a.stdout, "  replacing      the %s already installed at %s (%s)\n", in.label, in.addr, in.unitPath)
 		a.unloadUnit(in.laneIdentity)
 		if !waitForPortFreeFn(in.addr, gatewayStopTimeout) {
-			return fmt.Errorf("the %s already running on %s did not stop within %s — nothing was changed. "+
+			return fmt.Errorf("the %s already running on %s did not stop within %s; nothing was changed. "+
 				"Stop it by hand and re-run init", in.label, in.addr, gatewayStopTimeout)
 		}
 	}
@@ -60,13 +60,13 @@ func (a *app) setupLane(in laneInstall) error {
 
 	if err := a.loadUnit(in.laneIdentity); err != nil {
 		a.rollbackLaneUnit(in)
-		return fmt.Errorf("wrote %s but could not start it (%w) — %s. Start it by hand with "+
+		return fmt.Errorf("wrote %s but could not start it (%w); %s. Start it by hand with "+
 			"`openbox %s`, then re-run init", in.unitPath, err, in.envNotSet, in.label)
 	}
 
 	if !waitForListenerFn(in.addr, gatewayReadyTimeout) {
 		a.rollbackLaneUnit(in)
-		return fmt.Errorf("the %s did not start listening on %s within %s — %s. Check the service logs, "+
+		return fmt.Errorf("the %s did not start listening on %s within %s; %s. Check the service logs, "+
 			"or run `openbox %s` in the foreground to see why", in.label, in.addr, gatewayReadyTimeout, in.envNotSet, in.label)
 	}
 	fmt.Fprintf(a.stdout, "  %-14s listening on %s\n", in.label, in.addr)
@@ -191,7 +191,7 @@ func (a *app) setupTransport(homeDir, addr string, verbose bool) error {
 			"directly and are unobserved by this lane",
 		activate: func() ([]string, error) {
 			if !fileExists(caPath) {
-				return nil, fmt.Errorf("the transport relay is listening on %s but its CA certificate is not at %s — "+
+				return nil, fmt.Errorf("the transport relay is listening on %s but its CA certificate is not at %s; "+
 					"refusing to set NODE_EXTRA_CA_CERTS to a file that does not exist, because every intercepted "+
 					"handshake would then fail and look like the provider being down. Check %s",
 					addr, caPath, spec.LogPath(homeDir))

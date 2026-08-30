@@ -90,7 +90,7 @@ func (e Envelope) Classify(tool, request string) (Outcome, Rule) {
 // LoadEnvelope reads an envelope file.
 func LoadEnvelope(path string) (Envelope, error) {
 	if strings.TrimSpace(path) == "" {
-		return Envelope{}, fmt.Errorf("no envelope configured — an autonomous approver without one decides nothing; " +
+		return Envelope{}, fmt.Errorf("no envelope configured; an autonomous approver without one decides nothing; " +
 			"set `envelope` in approver.json or pass --envelope")
 	}
 	raw, err := os.ReadFile(path)
@@ -102,7 +102,7 @@ func LoadEnvelope(path string) (Envelope, error) {
 		return Envelope{}, fmt.Errorf("parse envelope %s: %w", filepath.Clean(path), err)
 	}
 	if len(e.AutoApprove)+len(e.AutoDeny)+len(e.Consult) == 0 {
-		return Envelope{}, fmt.Errorf("envelope %s has no rules — it would escalate everything", filepath.Clean(path))
+		return Envelope{}, fmt.Errorf("envelope %s has no rules; it would escalate everything", filepath.Clean(path))
 	}
 	return e, nil
 }

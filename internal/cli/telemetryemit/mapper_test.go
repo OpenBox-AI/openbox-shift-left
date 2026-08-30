@@ -55,7 +55,7 @@ func TestUnelectedMapperEmitsNothing(t *testing.T) {
 		rec := apiRequest(map[string]string{"event.name": name})
 		rec.EventName = name
 		if ev, out := m.EventFor(rec); out == Emitted {
-			t.Errorf("%s: an UNELECTED mapper emitted %s — this doubles every token count on every dashboard", name, ev.EventType)
+			t.Errorf("%s: an UNELECTED mapper emitted %s; this doubles every token count on every dashboard", name, ev.EventType)
 		}
 	}
 }
@@ -79,18 +79,18 @@ func TestAPIRequestBecomesTurnCompleted(t *testing.T) {
 		t.Errorf("did = %q", ev.DeveloperDID)
 	}
 	if ev.Model != "claude-opus-4-8" {
-		t.Errorf("model = %q — this is core's aggregation key", ev.Model)
+		t.Errorf("model = %q; this is core's aggregation key", ev.Model)
 	}
 
 	if ev.OtelRequestID != "req_011CeSoFqW2HfEh9jxCds86Y" {
 		t.Errorf("otel_request_id = %q, want the provider's request_id", ev.OtelRequestID)
 	}
 	if ev.GatewayRequestID != "" || ev.ProxyRequestID != "" {
-		t.Error("an otel event set another lane's discriminator — the contract's turnProducer oneOf requires exactly one")
+		t.Error("an otel event set another lane's discriminator; the contract's turnProducer oneOf requires exactly one")
 	}
 
 	if ev.Tokens == nil {
-		t.Fatal("no tokens — the whole point of this lane")
+		t.Fatal("no tokens; the whole point of this lane")
 	}
 	for _, c := range []struct {
 		name string
@@ -113,7 +113,7 @@ func TestAPIRequestBecomesTurnCompleted(t *testing.T) {
 	}
 
 	if ev.Span == nil {
-		t.Fatal("no span — core cannot classify this as llm_completion without one")
+		t.Fatal("no span; core cannot classify this as llm_completion without one")
 	}
 	if ev.Span.SemanticType != "llm_completion" {
 		t.Errorf("span semantic_type = %q", ev.Span.SemanticType)
@@ -154,7 +154,7 @@ func TestOtelRequestIDFallsBackToClientRequestID(t *testing.T) {
 func TestNoIDAtAllEmitsNothing(t *testing.T) {
 	rec := apiRequest(map[string]string{"request_id": "", "client_request_id": ""})
 	if _, out := elected().EventFor(rec); out == Emitted {
-		t.Error("emitted a turn with no provider id — a minted id would break idempotency across a re-flush")
+		t.Error("emitted a turn with no provider id; a minted id would break idempotency across a re-flush")
 	}
 }
 
@@ -189,7 +189,7 @@ func TestMalformedNumbersDoNotFabricateZeros(t *testing.T) {
 		t.Fatal("no event")
 	}
 	if ev.Tokens.Output != nil {
-		t.Errorf("output = %d, want absent — a fabricated zero understates spend", *ev.Tokens.Output)
+		t.Errorf("output = %d, want absent; a fabricated zero understates spend", *ev.Tokens.Output)
 	}
 	if ev.Tokens.Input == nil || *ev.Tokens.Input != 2 {
 		t.Error("one unparseable count discarded the others")
@@ -231,7 +231,7 @@ func TestEventIDIsDeterministic(t *testing.T) {
 	}
 	c, _ := elected().EventFor(apiRequest(map[string]string{"request_id": "req_different"}))
 	if c.EventID == a.EventID {
-		t.Error("different calls share an idempotency key — core would drop one")
+		t.Error("different calls share an idempotency key; core would drop one")
 	}
 }
 
@@ -254,13 +254,13 @@ func TestSessionIDIsValidatedLikeAPath(t *testing.T) {
 				rec.Attrs["session.id"] = bad
 			}
 			if ev, out := elected().EventFor(rec); out == Emitted {
-				t.Errorf("emitted an event whose session id is %q — it reaches a path join as %q.jsonl", bad, ev.SessionID)
+				t.Errorf("emitted an event whose session id is %q; it reaches a path join as %q.jsonl", bad, ev.SessionID)
 			}
 		})
 	}
 	rec := apiRequest(map[string]string{"session.id": "b3f1c2d4-0000-4000-8000-000000000001"})
 	if _, out := elected().EventFor(rec); out != Emitted {
-		t.Error("a UUID session id was rejected — all 59 in the corpus are UUIDs")
+		t.Error("a UUID session id was rejected; all 59 in the corpus are UUIDs")
 	}
 }
 
@@ -316,7 +316,7 @@ func TestOutcomeSeparatesSkipsFromDrops(t *testing.T) {
 				t.Errorf("outcome = %v (%s), want %v (%s)", int(out), out, int(c.want), c.want)
 			}
 			if out.IsDrop() != c.wantDrop {
-				t.Errorf("IsDrop() = %v, want %v — the daemon warns on drops and stays quiet on skips, so this classification decides whether a broken lane is noticed", out.IsDrop(), c.wantDrop)
+				t.Errorf("IsDrop() = %v, want %v; the daemon warns on drops and stays quiet on skips, so this classification decides whether a broken lane is noticed", out.IsDrop(), c.wantDrop)
 			}
 			if out.String() == "unknown" {
 				t.Errorf("outcome %d has no name; it reaches operator-facing output", int(out))

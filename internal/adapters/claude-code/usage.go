@@ -164,7 +164,7 @@ func readTurnUsage(path string, from hookflow.TurnPos, sidechain bool) (turnWind
 		offset = 0
 	}
 	if fi.Size() <= offset {
-		return turnWindow{}, next, nil // nothing new — not an error
+		return turnWindow{}, next, nil // nothing new; not an error
 	}
 	if _, err := f.Seek(offset, io.SeekStart); err != nil {
 		return turnWindow{}, next, fmt.Errorf("seek transcript: %w", err)

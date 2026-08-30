@@ -40,8 +40,8 @@ func (a *app) approveClient(orgID, clientID string) (*backend.Client, string, in
 		token = a.approverToken()
 	}
 	if token == "" {
-		return nil, "", a.errorf("no approver credential — run `openbox init --role approver --org <id>`, "+
-			"or set %s in the environment (never a flag, so it cannot leak via argv/shell history — INV-1)",
+		return nil, "", a.errorf("no approver credential; run `openbox init --role approver --org <id>`, "+
+			"or set %s in the environment (never a flag, so it cannot leak via argv/shell history; INV-1)",
 			devconfig.EnvControlToken)
 	}
 	backendURL := devconfig.ResolveBackendURL()
@@ -49,13 +49,13 @@ func (a *app) approveClient(orgID, clientID string) (*backend.Client, string, in
 		backendURL = cfg.BackendURL
 	}
 	if backendURL == "" {
-		return nil, "", a.errorf("no backend URL configured — set %s", devconfig.EnvBackendURL)
+		return nil, "", a.errorf("no backend URL configured; set %s", devconfig.EnvBackendURL)
 	}
 	if orgID == "" {
 		orgID = cfg.OrgID
 	}
 	if orgID == "" {
-		return nil, "", a.errorf("set --org <organization-id> (or OPENBOX_ORG_ID) — it names the approval queue to read")
+		return nil, "", a.errorf("set --org <organization-id> (or OPENBOX_ORG_ID); it names the approval queue to read")
 	}
 	return backend.New(backendURL, token, clientID), orgID, exitOK
 }
@@ -148,7 +148,7 @@ func (a *app) printPending(cl *backend.Client, orgID string) int {
 			fmt.Fprintf(a.stdout, "    request  %s\n", req)
 		} else {
 			undecidable++
-			fmt.Fprintf(a.stdout, "    request  (not captured — see the note below)\n")
+			fmt.Fprintf(a.stdout, "    request  (not captured; see the note below)\n")
 		}
 		if s := structuralInput(ap.Context()); s != "" {
 			fmt.Fprintf(a.stdout, "    context  %s\n", s)
@@ -159,7 +159,7 @@ func (a *app) printPending(cl *backend.Client, orgID string) int {
 	if undecidable > 0 {
 		fmt.Fprintf(a.stdout, "%d request(s) carry no command or arguments, so there is nothing to judge\n", undecidable)
 		fmt.Fprintf(a.stdout, "them on. The developer runtime only sends them under content capture; with it\n")
-		fmt.Fprintf(a.stdout, "off (`content_capture:false`), approving here is a rubber stamp — deny, or turn\n")
+		fmt.Fprintf(a.stdout, "off (`content_capture:false`), approving here is a rubber stamp; deny, or turn\n")
 		fmt.Fprintf(a.stdout, "capture on for the escalation path. See OD-E9-7.\n")
 	}
 	return exitOK
@@ -199,7 +199,7 @@ func (a *app) runApproveDecide(args []string, action string) int {
 		return code
 	}
 	if fs.NArg() != 0 {
-		return a.errorf("usage: openbox approve %s <event-id> [--org <id>] — unexpected extra argument %q", verb, fs.Arg(0))
+		return a.errorf("usage: openbox approve %s <event-id> [--org <id>]; unexpected extra argument %q", verb, fs.Arg(0))
 	}
 
 	cl, org, code := a.approveClient(orgID, clientID)
@@ -221,16 +221,16 @@ func (a *app) runApproveDecide(args []string, action string) int {
 		}
 	}
 	if target == nil {
-		return a.errorf("%s is not in the pending queue — it may already be decided or expired", eventID)
+		return a.errorf("%s is not in the pending queue; it may already be decided or expired", eventID)
 	}
 	if target.Expired() {
-		return a.errorf("%s expired at %s — its window has closed and the decision would be refused",
+		return a.errorf("%s expired at %s; its window has closed and the decision would be refused",
 			eventID, target.ExpiresAt.Format(time.RFC3339))
 	}
 	if err := cl.DecideApproval(ctx, target.AgentID, target.ID, action); err != nil {
 		return a.errorf("decide approval: %v", err)
 	}
-	fmt.Fprintf(a.stdout, "%s %s — %s on %s\n", decidedLabel(action), target.ID,
+	fmt.Fprintf(a.stdout, "%s %s; %s on %s\n", decidedLabel(action), target.ID,
 		orUnset(target.ActivityType), orUnset(target.Name()))
 	return exitOK
 }

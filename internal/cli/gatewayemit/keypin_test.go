@@ -34,7 +34,7 @@ func TestTheLaneNameIsNotHashed(t *testing.T) {
 	}
 
 	if !strings.HasPrefix(px.EventID, ProxyIDPrefix) {
-		t.Errorf("proxy event_id = %q, want the %q prefix — a proxy event's key must not read as "+
+		t.Errorf("proxy event_id = %q, want the %q prefix; a proxy event's key must not read as "+
 			"the gateway's in a log or in storage", px.EventID, ProxyIDPrefix)
 	}
 	if strings.TrimPrefix(gw.EventID, GatewayIDPrefix) != strings.TrimPrefix(px.EventID, ProxyIDPrefix) {

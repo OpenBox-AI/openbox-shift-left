@@ -92,7 +92,7 @@ func TestGatewayEnvIsNotWrittenWhenTheDaemonDoesNotStart(t *testing.T) {
 		t.Fatal("setupGateway reported success though the daemon never started")
 	}
 	if _, present := gatewayservice.CurrentEnv(home); present {
-		t.Error("ANTHROPIC_BASE_URL was written with no gateway listening — every model call on this machine would now fail")
+		t.Error("ANTHROPIC_BASE_URL was written with no gateway listening; every model call on this machine would now fail")
 	}
 	if !strings.Contains(err.Error(), "NOT set") {
 		t.Errorf("the error does not say the env var was left alone: %v", err)
@@ -151,7 +151,7 @@ func TestGatewaySetupWritesEnvOnlyAfterTheListenerIsUp(t *testing.T) {
 		t.Fatalf("output missing one of the two steps:\n%s", s)
 	}
 	if iListen > iEnv {
-		t.Errorf("env was reported before readiness — the order is the safety property:\n%s", s)
+		t.Errorf("env was reported before readiness; the order is the safety property:\n%s", s)
 	}
 }
 
@@ -360,7 +360,7 @@ func TestAFailedInstallLeavesNoUnitBehind(t *testing.T) {
 	}
 	if path := gatewayservice.UnitPath(runtime.GOOS, home); path != "" {
 		if _, err := os.Stat(path); err == nil {
-			t.Errorf("%s survived a failed install — the supervisor will restart-loop a gateway "+
+			t.Errorf("%s survived a failed install; the supervisor will restart-loop a gateway "+
 				"the developer was never told about, and the port pre-check will then block the re-run", path)
 		}
 	}

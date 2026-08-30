@@ -183,6 +183,7 @@ func activityIDFor(ev DevEvent) string {
 // turnActivityIDFor is the wire activity_id shared by a turn's ActivityStarted
 // and ActivityCompleted: "<session_id>:turn:<index>", or
 // "<session_id>:agent:<agent_id>:turn:<index>" for a subagent's turn.
+// Three properties, and the id is built rather than hashed for the first:
 //   - There is nothing to hash.
 //   - It must be derivable from fields that survive the spool (SessionID,
 //     TurnIndex, AgentID are all persisted), because a flush can happen long
@@ -290,9 +291,13 @@ func activityLabel(ev DevEvent) string {
 	return string(ev.EventType)
 }
 
-// contentMetadataKeys buildMetadata merges the caller's per-type metadata with
-// the finops keys (tokens/cost), the true tool name, and the idempotency key
-// (mapping.md §1).
+// contentMetadataKeys are metadata keys that carry free text rather than a
+// structural identifier.
+//
+// A key here is dropped when content capture is off, exactly like Content. It is
+// a backstop against an adapter putting content in metadata, not a content
+// classifier, and it must name every content key or an adapter writing one there
+// routes around the gate.
 var contentMetadataKeys = map[string]bool{
 	"message":       true, // a commit message body
 	"prompt":        true,
@@ -358,10 +363,9 @@ func buildMetadata(ev DevEvent) (json.RawMessage, error) {
 	return json.Marshal(m)
 }
 
-// contentKeyFor structuralActivityInput builds the INV-2-safe `activity_input`
-// for an ActivityStarted; the identifiers the openbox-fe Verify-tab "Input"
-// detail renders (log.input), and what core runs Guardrails stage "0" over
-// (services/guardrail.go:180).
+// structuralActivityInput builds the INV-2-safe `activity_input` for an
+// ActivityStarted: the identifiers the Verify tab's "Input" detail renders, and
+// what the control plane runs its first Guardrails stage over.
 func contentKeyFor(kind ToolKind) string {
 	switch kind {
 	case ToolShell:
