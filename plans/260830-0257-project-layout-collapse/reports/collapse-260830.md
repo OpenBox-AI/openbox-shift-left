@@ -17,8 +17,22 @@ Criteria 5, 6, 8, 9 belong to phases 04–06.
 
 ## The test ledger — every dropped test named
 
-1288 → 1277 declared, 1884 → 1861 verdicts, **0 failures**, skips unchanged at 28,
-same 35 packages. All eleven dropped tests are `go.mod`-reading guards whose
+**The 1288 below is the post-commit-(a) measurement, not the phase-01 baseline**,
+and the chain matters or the subtraction does not reconcile:
+
+| point | declared | verdicts | skips |
+|---|---|---|---|
+| phase-01 baseline | 1278 | 1860 | 29 |
+| + phase 02's `depguard` | 1293 | 1889 | 29 |
+| − commit (a), the alias binary (5 tests, 1 of them a skip) | **1288** | **1884** | **28** |
+| − commit (b), 11 guards | **1277** | **1861** | 28 |
+
+So **this phase's total subtraction is 16 tests**: the 5 named in
+`gate-260830-dead-tree-verdicts.md` and the 11 below. A reader of this report
+alone would conclude 11.
+
+Commit (b): 1288 → 1277 declared, 1884 → 1861 verdicts, **0 failures**, skips
+unchanged at 28, same 35 packages. All eleven are `go.mod`-reading guards whose
 replacements landed in phase 02:
 
 | file deleted | tests |

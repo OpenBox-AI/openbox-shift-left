@@ -82,9 +82,15 @@ Fifteen packages that only the `cli` module could import are now importable by
 everything. The flattening is **forced, not stylistic**: `cmd/openbox` imports
 twelve of them and sits outside the subtree, so a preserved
 `internal/cli/internal/*` would put them beyond the reach of the binary's own main
-package. What compensates is the repo-local axis of the subtree guards, and the
-drill that proves it is `internal/gateway` importing `internal/cli/devinit` — the
-package that reads `~/.openbox/.env`.
+package. What compensates — **for the four guarded subtrees, and only those** — is the
+repo-local axis of their allowlists, and the drill that proves it is
+`internal/gateway` importing `internal/cli/devinit`, the package that reads
+`~/.openbox/.env`. Every other package's reach into `internal/cli/*` is part of
+this cost, not covered by it. Several such inversions happen to be blocked today
+because `devinit` sits high in the import graph and the compiler would see a
+cycle — **that is an accident of what `devinit` currently imports, not a
+control**, and extracting `credfile.go` into a leaf package would dissolve it
+silently.
 
 **ADR-0023's bound changes shape.** See the amendment below.
 
@@ -93,7 +99,10 @@ package that reads `~/.openbox/.env`.
 never had a dependency guard; what bounded them was that adding a dependency meant
 editing their own small `go.mod`. Under one module, anything already in the union
 graph — `viper`, `afero`, `zerolog`, the whole gitleaks tree — becomes importable
-from `client` or `provider` **with no diff outside a `.go` file**. This is
+from `client` or `provider` **with no diff outside a `.go` file**. The same
+dissolution took the intra-repo lattice for those nine — what each could import
+from the rest of this repo was pinned by its own `require` list and is now pinned
+by nothing. This is
 accepted as a named loss (owner decision, 2026-08-30) rather than answered with a
 new root-level allowlist. The cheapest future answer, if it is ever wanted, is
 ~19 entries with their D-OSS citations plus a CI `go mod tidy -diff`.

@@ -44,8 +44,14 @@ measurement:
 
 | | count |
 |---|---|
-| non-test Go files, flat lowercase | **356 — no exceptions** |
-| files with an underscore as a word separator | **25 — every one a `_test.go`** |
+| `.go` files in the tree (excluding `plans/`) | 381 |
+| **non-test** files whose stem uses a separator | **0 of 180 — no exceptions** |
+| files whose stem uses a separator | **25 — every one a `_test.go`** |
+
+(An earlier draft said "356 — no exceptions" for the non-test row. 356 is 381
+minus the 25 separator files, which is the wrong population: the claim was true,
+the denominator was not. Two of the 25 were then renamed to restore a
+`foo.go`/`foo_test.go` pairing, leaving 23.)
 
 So the rule is narrower than written: **non-test files are exceptionlessly flat;
 test files may separate words to name the subject they cover**
@@ -122,7 +128,7 @@ file was deleted in the collapse. Corrected to name `internal/depguard`.
 | a missing `## Layout` section fails rather than passing vacuously | PASS |
 | `.editorconfig` produces no reformat diff | PASS — spot-checked across `.go`, `.md`, `.yml` |
 | the naming rule survives a spot-check | **FAILED as first written; rule corrected against 381 files** |
-| no non-test Go filename uses a separator | PASS — 356/356 |
+| no non-test Go filename uses a separator | PASS — **180/180** |
 | build, vet, gofmt, both cross-compiles after the renames | PASS |
 | full suite | 1277 / 1861 / 28 skips / **0 fails** — unchanged |
 

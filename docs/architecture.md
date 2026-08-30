@@ -421,16 +421,25 @@ Being precise here is part of the product.
 
   **otlpreceiver's transitive tree is an accepted cost, stated with the numbers
   phase 09 measured** rather than smoothed into "a few libraries": **492 transitive
-  packages and 124 modules in the graph** for `telemetry/`, against 381 and 206 for
-  `gateway/` — and a **leak check of zero**, since `gateway`, `decision`, `client`,
-  `cli` and both adapters have no collector require at all. The module boundary is
-  what holds that, and each guard is what holds the boundary.
+  packages and 124 modules in the graph** for `internal/telemetry`, against 381 and
+  206 for `internal/gateway`. The **leak check of zero** was measured while the
+  repo was fifteen modules, and the module boundary is what held it.
+
+  **That boundary is gone and the sentence that stood here claimed otherwise.**
+  One `go.mod` requires the collector, so what holds the separation now is the
+  import allowlists — and only for the four guarded subtrees in the table above.
+  `internal/client`, `internal/cli`, `hookflow` and both adapters could import
+  `go.opentelemetry.io/collector/*`, gitleaks or goproxy today and **nothing would
+  fail**. That is the same named loss, seen from the dependency side.
 
   The binary is the visible half. Phase 09 measured a minimal `main` linking the
   receiver at **18.8 MB against a 2.3 MB baseline — +16.5 MB**, which is the number
   OD5 accepted, on a shipped binary that was then **17.0 MB**. The delivered binary
-  is **40,287,986 bytes (38.4 MB)**, measured on darwin/arm64 via the release path
-  (`GOWORK=off`) on 2026-08-30 — roughly **5 MB more than that estimate**, and it
+  is **40,311,474 bytes (38.4 MB)** on darwin/arm64, measured 2026-08-30 after the
+  collapse; it was 40,287,986 before, so the layout change cost **+0.06%**. (The
+  earlier figure was measured with `GOWORK=off`, a mode that no longer means
+  anything — there is no workspace to switch off.) Either way it is roughly
+  **5 MB more than the estimate**, and it
   carries goproxy and the transport lane as well as telemetry. Recorded rather than
   rounded: the decision was made on the smaller number.
 - **The inline-evaluation path has not been exercised against a live stack.**

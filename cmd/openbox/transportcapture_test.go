@@ -60,7 +60,7 @@ const refusedUpstream = "https://127.0.0.1:1"
 // ${OPENBOX_REDACTED_AI_API_KEY} silently, after which the assertion below was
 // looking for a string the request no longer carried. CLAUDE.md names the
 // mitigation: derive the fixture in code. Same reasoning as
-// cli/internal/telemetryemit/sentinel_test.go.
+// internal/cli/telemetryemit/sentinel_test.go.
 var fakeKey = "sk-" + "ant-" + strings.Repeat("0123456789", 4)
 
 // TestTransportLaneRecordsThroughTheRealChain.

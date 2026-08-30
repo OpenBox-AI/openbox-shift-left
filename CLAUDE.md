@@ -1153,8 +1153,10 @@ the number that is actually paid is transitive: phase 09 measured
 `telemetry`'s tree at **492 transitive packages / 124 modules in graph** (against
 `gateway`'s 381 / 206), with a **leak check of zero** — no collector require reaches
 `gateway`, `decision`, `client`, `cli` or either adapter. The binary
-is **40,287,986 bytes (38.4 MB) on darwin/arm64 via the release path
-(`GOWORK=off`), measured 2026-08-30**, against
+is **40,311,474 bytes (38.4 MB) on darwin/arm64, measured 2026-08-30 after the
+collapse** — it was 40,287,986 before, so the layout change cost +0.06%; the
+earlier figure was taken with `GOWORK=off`, a mode that no longer means anything.
+Against
 the 17 MB recorded while the mapper was unlinked; OD5 accepted +16.5 MB, so the
 delivered total is ~5 MB above the number the decision was made on. Three things
 follow.

@@ -3,9 +3,10 @@
 # + a checksums.txt that install.sh downloads and verifies, so `curl … | bash`
 # drops a prebuilt binary with NO Go toolchain on the developer's machine.
 #
-# The engine lives in cmd/openbox + internal/cli (github.com/openbox-ai/openbox-shift-left),
-# which uses relative `replace` directives to its sibling modules in this repo — so
-# the build runs from `dir: cli` where those replaces resolve.
+# The engine lives in cmd/openbox + internal/cli. One module, no `replace`
+# directives and no workspace, so the build needs neither a `dir:` nor a
+# GOWORK override — it resolves from the repository root exactly as a consumer
+# would (ADR-0024).
 #
 # Release: push a tag `vX.Y.Z`; the release workflow runs `goreleaser release`.
 version: 2
