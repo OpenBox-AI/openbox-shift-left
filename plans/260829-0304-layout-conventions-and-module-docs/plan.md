@@ -1,9 +1,9 @@
 ---
 title: "Layout conventions written down, module docs made true, drift made detectable"
 description: "Port the one portable idea from golang-standards/project-layout — every directory states what belongs in it — into a 14-module workspace, without touching the module topology ADR-0011 protects. Closes two undocumented modules, one stale count, and the absence of any written naming convention."
-status: ready
+status: superseded
 progress: "0 of 6 phases"
-updated: 2026-08-29
+updated: 2026-08-30
 priority: P3
 effort: ~8h (6 phases; phase 06 droppable)
 branch: feat/tool-content-capture
@@ -12,6 +12,16 @@ created: 2026-08-29
 ---
 
 # Layout conventions written down, module docs made true, drift made detectable
+
+> **Superseded 2026-08-30 by
+> [260830-0257-project-layout-collapse](../260830-0257-project-layout-collapse/plan.md).**
+> Owner decision reversed this plan's central refusal: the module topology *is* being
+> collapsed and the source's directory vocabulary *is* being adopted. The measurement
+> below — the naming survey, the `.editorconfig` evidence, the three filename
+> deviations — remains valid and is carried into that plan's phase 07. The "What this
+> plan is not" section is kept as the record of what was decided against, and why the
+> reversal is a decision rather than an oversight.
+
 
 Source: `golang-standards/project-layout` @ `a9d6fae` (master, 2026-04-29).
 Analysis, dependency matrix, challenge and decision matrix:

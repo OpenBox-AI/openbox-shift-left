@@ -23,7 +23,10 @@ func TestOnlyTheRegistryImportsAdapters(t *testing.T) {
 	} {
 		p, err := build.Import(pkg, "", build.FindOnly|build.ImportComment)
 		if err != nil {
-			t.Skipf("cannot resolve %s in this environment: %v", pkg, err)
+			// Not a skip. A guard that quietly passes because it resolved nothing
+			// reports the same thing as a guard that found nothing wrong, and this
+			// repo has already been bitten by exactly that.
+			t.Fatalf("cannot resolve %s: %v", pkg, err)
 		}
 		full, err := build.ImportDir(p.Dir, 0)
 		if err != nil {

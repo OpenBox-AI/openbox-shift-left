@@ -83,7 +83,20 @@ jobs:
         # cursor are all concurrently-written files with existing race tests.
         # No -short: the tests that exec the real built binary are the ones
         # that pin the INV-3 hook contract (exit 0, empty stdout).
-        run: go test -race $MODS
+        #
+        # -count=1 is a CORRECTNESS flag, not a speed knob, and removing it
+        # silently disables five guards.
+        #
+        # Go's test cache does not verify reads that land in a SIBLING WORKSPACE
+        # MODULE -- measured 2026-08-30 both ways: a violating file planted in the
+        # same module but a different package invalidates correctly, while the
+        # same file in a sibling go.work module returns a stale `ok`. Every guard
+        # here that walks across modules has it: cli/internal/depguard,
+        # client/memhttptest, gateway/gatewaytest,
+        # cli/internal/corpusfixture/committed_test.go and
+        # cli/cmd/openbox/modulewiring_test.go. actions/setup-go restores the
+        # build cache by default, so CI is exposed exactly as a laptop is.
+        run: go test -race -count=1 $MODS
 
       - name: Build every module WITHOUT the workspace
         # The gate whose absence let a broken release ship green.

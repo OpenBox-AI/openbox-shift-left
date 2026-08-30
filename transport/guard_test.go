@@ -99,17 +99,3 @@ func directRequires(mod string) []string {
 	}
 	return out
 }
-
-// forbiddenCalls are the ways this module could start reading a credential or the
-// developer's files, keyed by IMPORT PATH rather than by the identifier at the
-// call site — an alias defeats identifier matching (`import os2 "os"`).
-//
-// This module runs as a daemon with content flowing through it. It has no reason
-// to read the environment or the filesystem: its configuration arrives as a
-// struct and its output leaves through the Emitter. Anything else is the CLI's
-// job, where the credential handling already lives and is already scanned.
-var forbiddenCalls = map[string][]string{
-	"os":        {"Getenv", "LookupEnv", "Environ", "ReadFile", "Open", "OpenFile", "UserHomeDir", "UserConfigDir"},
-	"syscall":   {"Getenv", "Environ", "Open", "Read"},
-	"io/ioutil": {"ReadFile", "ReadDir"},
-}
