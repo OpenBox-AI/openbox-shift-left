@@ -5,7 +5,7 @@
 #
 # This is not a fixture: the same commands a developer runs, against the same
 # backend, writing the same files. What the harness changes is only WHERE they
-# write — every path is pinned into testbed/.state by env.sh.
+# write — every path is pinned into test/.state by env.sh.
 #
 # Two things this phase proves that unit tests cannot:
 #
@@ -27,7 +27,7 @@ TB_DIR="$(cd "$(dirname "$0")" && pwd)"
 CONFIG="$OPENBOX_HOME/dev.json"
 HOOKS="$TB_PROJECT/.claude/settings.local.json"
 # A second project, never initialized, for the negative scope assertion.
-TB_UNGOVERNED="${TB_UNGOVERNED:-/tmp/openbox-testbed-ungoverned}"
+TB_UNGOVERNED="${TB_UNGOVERNED:-/tmp/openbox-test-ungoverned}"
 
 tb_step "build the binary under test"
 go build -o "$TB_BIN" "$TB_REPO/cmd/openbox" || tb_fatal "go build failed"
@@ -43,22 +43,22 @@ mkdir -p "$OPENBOX_HOME"
 mkdir -p "$TB_PROJECT"
 git -C "$TB_PROJECT" init -q -b main || tb_fatal "git init failed"
 git -C "$TB_PROJECT" config user.name "OpenBox Testbed"
-git -C "$TB_PROJECT" config user.email "testbed@openbox.ai"
+git -C "$TB_PROJECT" config user.email "test@openbox.ai"
 git -C "$TB_PROJECT" config commit.gpgsign false
-printf '# OpenBox testbed project\n\nA scratch project whose Claude Code sessions are governed.\n' >"$TB_PROJECT/README.md"
-git -C "$TB_PROJECT" add README.md && git -C "$TB_PROJECT" commit -qm "chore: init testbed project"
+printf '# OpenBox test project\n\nA scratch project whose Claude Code sessions are governed.\n' >"$TB_PROJECT/README.md"
+git -C "$TB_PROJECT" add README.md && git -C "$TB_PROJECT" commit -qm "chore: init test project"
 # The ungoverned twin: a real project, deliberately never initialized.
 mkdir -p "$TB_UNGOVERNED"
 git -C "$TB_UNGOVERNED" init -q -b main || tb_fatal "git init failed"
 git -C "$TB_UNGOVERNED" config user.name "OpenBox Testbed"
-git -C "$TB_UNGOVERNED" config user.email "testbed@openbox.ai"
+git -C "$TB_UNGOVERNED" config user.email "test@openbox.ai"
 git -C "$TB_UNGOVERNED" config commit.gpgsign false
 printf '# Ungoverned twin\n\nNo `openbox init` was run here. Sessions started here must produce nothing.\n' >"$TB_UNGOVERNED/README.md"
 git -C "$TB_UNGOVERNED" add README.md && git -C "$TB_UNGOVERNED" commit -qm "chore: init ungoverned twin"
 tb_ok "governed project at $TB_PROJECT; ungoverned twin at $TB_UNGOVERNED"
 
 tb_step "openbox auth (registers the agent, writes credentials)"
-[ -n "${OPENBOX_CONTROL_TOKEN:-}" ] || tb_fatal "no control token — run ./testbed/env.sh mint"
+[ -n "${OPENBOX_CONTROL_TOKEN:-}" ] || tb_fatal "no control token — run ./test/env.sh mint"
 
 # One stable agent per machine, so repeated runs do not sprawl the org's seats.
 #
@@ -91,7 +91,7 @@ fi
 tb_step "the credential file it wrote"
 [ -r "$TB_ENV_FILE" ] || tb_fatal "no credential file at $TB_ENV_FILE — $(tail -3 "$TB_STATE/auth.out")"
 env_body="$(cat "$TB_ENV_FILE")"
-assert_contains "credential file is testbed-scoped, not ~/.openbox" "$TB_ENV_FILE" "$TB_STATE"
+assert_contains "credential file is test-scoped, not ~/.openbox" "$TB_ENV_FILE" "$TB_STATE"
 assert_contains "api key written under the documented name" "$env_body" "OPENBOX_API_KEY="
 assert_contains "signing key written under the documented name" "$env_body" "OPENBOX_AGENT_PRIVATE_KEY="
 # ADR-0015's one-store-per-field split: a coordinate in the credential file is the
@@ -145,7 +145,7 @@ tb_state_set agent_id "$agent_id"
 tb_state_set did "$did"
 
 tb_step "the config it wrote"
-assert_contains "config is testbed-scoped, not the real home" "$CONFIG" "$TB_STATE"
+assert_contains "config is test-scoped, not the real home" "$CONFIG" "$TB_STATE"
 assert_nonempty "agent_id persisted" "$agent_id"
 assert_nonempty "developer_did persisted" "$did"
 # ENFORCE BY DEFAULT (ADR-0016): nothing above passed --enforce.
@@ -238,7 +238,7 @@ assert_absent "the warning doctor raised is now clear" "$doctor_out" "more than 
 
 # The plugin bundle is materialised into ~/.claude/plugins but activation is a
 # separate, deliberate step. If it were enabled here, every session on this
-# machine would be governed by the testbed's config — the exact accident
+# machine would be governed by the test's config — the exact accident
 # a global enforce posture causes.
 enabled="$(cat "$HOME/.claude/settings.json" 2>/dev/null || echo '{}')"
 assert_absent "plugin not globally enabled — scope holds" "$enabled" "openbox-observe"

@@ -1,4 +1,4 @@
-# `contracts/dev-event` — normalized developer-runtime event contract
+# `api/` — normalized developer-runtime event contract
 
 **Story:** STORY-SL-1 · **Version:** the `schema_version` `const` in
 [the schema](schema/dev-event.schema.json) is the authority — v1.1 added the turn pair

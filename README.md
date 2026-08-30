@@ -109,7 +109,7 @@ of events is not evidence of absence of work.
 **Global scope** is the real fleet rollout, and `init` cannot finish it alone: Claude
 Code activates a plugin org-wide through managed settings, which is an
 administrator's action, not a CLI's. `--scope global` installs the bundle and prints
-the exact snippet to deploy (see `deploy/managed/`). It tells you activation is
+the exact snippet to deploy (see `deployments/managed/`). It tells you activation is
 pending rather than pretending it happened.
 
 Codex is **user-scoped only** — its hooks live at `~/.codex/hooks.json`, so
@@ -319,7 +319,7 @@ adapter behind one SPI. Adding a tool is an adapter, not a fork.
 The two providers also send **different amounts of content under one posture**: Claude
 Code captures tool input, tool output, the failure detail and the turn's thinking;
 Codex captures none of them. Stated rather than averaged, in
-[COVERAGE](contracts/dev-event/COVERAGE.md) §3.
+[COVERAGE](docs/COVERAGE.md) §3.
 
 Two capabilities are provider-independent and work with any tool: OpenBox
 registration and the git-trailer commit binding — so lineage and cost tracking
@@ -382,7 +382,7 @@ prevent, so the limits are documented as first-class:
   signed attestation note — then it is cryptographically verified.
 - **Enforcement prevents mistakes, not motivated bypass**, for two independent
   reasons. The hook lives in the developer's own config until the provider's managed
-  configuration is deployed (`deploy/managed/`) — and every gated call now asks the
+  configuration is deployed (`deployments/managed/`) — and every gated call now asks the
   control plane, so under the default `fail_closed:false` blocking one hostname
   disables enforcement for that machine. An org that needs enforcement to survive a
   developer who does not want it must set `fail_closed`, and accept that a
@@ -457,8 +457,8 @@ Details and current status: **[Assurance](docs/architecture.md#assurance--what-t
 | [Lineage](docs/lineage.md) | `session → commit → deploy` and how it is verified |
 | [Gateway MDM recipe](docs/gateway-mdm-recipe.md) | the artifacts to push if you need the gateway prevented-from, not just detected-around |
 | [ADRs](docs/adr/) | the decisions, and why |
-| [Event contract](contracts/dev-event/) | the normalized event schema and its wire mapping |
-| [End-to-end tests](docs/testbed/e2e.md) | `testbed/` — a mock-free suite against a real stack |
+| [Event contract](api//) | the normalized event schema and its wire mapping |
+| [End-to-end tests](docs/test/e2e.md) | `test/` — a mock-free suite against a real stack |
 
 ## Contributing
 
@@ -469,12 +469,12 @@ repo is a Go workspace of small modules
 ```bash
 go build ./cli/...                  # the binary
 cd cli && go test ./...             # one module
-./testbed/run-all.sh                # the end-to-end suite (needs a local OpenBox stack)
+./test/run-all.sh                # the end-to-end suite (needs a local OpenBox stack)
 ```
 
 Anything provider-agnostic belongs in `adapters/common/`; a new table, endpoint or
 service needs an ADR. The end-to-end suite needs an OpenBox stack it can reach —
-`testbed/00-preflight.sh` tells you whether the one you have is healthy enough to
+`test/00-preflight.sh` tells you whether the one you have is healthy enough to
 trust the results.
 
 ## License

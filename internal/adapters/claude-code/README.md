@@ -63,7 +63,7 @@ server-side from the span it received; since [ADR-0013](../../docs/adr/ADR-0013-
 no span is sent, so nothing classifies it and the field never reaches the wire.
 `tool.kind` is what carries the distinction downstream. The mapper still sets
 `semantic_type` because the adapter contract is frozen at schema v1.0 — see
-[MAPPING.md](../../contracts/dev-event/MAPPING.md) §3 for which `span` fields the
+[MAPPING.md](../../docs/MAPPING.md) §3 for which `span` fields the
 client still reads and which are inert.
 
 ## Privacy (INV-2)

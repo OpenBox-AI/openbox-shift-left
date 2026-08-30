@@ -11,7 +11,7 @@ import (
 // "Supported" means the adapter implements the mechanism, not that it is
 // active in a given session: both verdict.apply and telemetry.tokens are
 // opt-in and default off, so an unconfigured session still observes only
-// (INV-3). Keep this profile in step with contracts/dev-event/COVERAGE.md —
+// (INV-3). Keep this profile in step with docs/COVERAGE.md —
 // a profile that undersells shipped capability is as misleading as one that
 // oversells it (report SL-07).
 func Capabilities() []providerspi.Capability {

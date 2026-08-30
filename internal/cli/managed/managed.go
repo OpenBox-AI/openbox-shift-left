@@ -10,7 +10,7 @@
 //
 // This package does not invent a configuration-management system. MDM
 // distribution is the org's plane; we render the payload and can write it on one
-// machine. Templates and their guarantees live in deploy/managed/.
+// machine. Templates and their guarantees live in deployments/managed/.
 package managed
 
 import (
@@ -161,7 +161,7 @@ func claudeCodeDir() (dir, warning string) {
 }
 
 // codexDir returns the managed-config directory. On macOS the stronger channel is
-// the com.openai.codex preference domain via MDM (see deploy/managed/codex/
+// the com.openai.codex preference domain via MDM (see deployments/managed/codex/
 // README-mdm.md); the file path is still honored and is what a single machine can
 // install without MDM.
 func codexDir() (dir, warning string) {

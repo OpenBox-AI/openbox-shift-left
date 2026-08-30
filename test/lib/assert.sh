@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# testbed/lib/assert.sh — assertions, and the two shared helpers every phase
+# test/lib/assert.sh — assertions, and the two shared helpers every phase
 # needs (JSON extraction, an authenticated backend call).
 #
 # Phase scripts do NOT use `set -e`: a failed assertion has to be recorded and

@@ -86,7 +86,7 @@ func (a *app) runManaged(args []string) int {
 		for _, f := range plan.Files {
 			fmt.Fprintf(a.stdout, "--- %s (mode %04o) ---\n%s\n", f.Path, f.Mode, f.Contents)
 		}
-		fmt.Fprintf(a.stdout, "See deploy/managed/README.md for what each setting does and does not guarantee.\n")
+		fmt.Fprintf(a.stdout, "See deployments/managed/README.md for what each setting does and does not guarantee.\n")
 		return exitOK
 	}
 

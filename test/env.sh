@@ -1,18 +1,18 @@
 #!/usr/bin/env bash
-# testbed/env.sh — the one place that knows where the local stack is.
+# test/env.sh — the one place that knows where the local stack is.
 #
-#   . testbed/env.sh          # source it: every phase script does this first
-#   ./testbed/env.sh mint     # run it: mint the read credential (P1), once
-#   ./testbed/env.sh drop     # deactivate that credential again
+#   . test/env.sh          # source it: every phase script does this first
+#   ./test/env.sh mint     # run it: mint the read credential (P1), once
+#   ./test/env.sh drop     # deactivate that credential again
 #
 # Two things make this harness safe to run on a working machine:
 #
-#   Every path openbox writes is pinned into testbed/.state — the credential file
+#   Every path openbox writes is pinned into test/.state — the credential file
 #   and dev.json via OPENBOX_HOME, and each runtime-state file via its own
 #   override (see below; XDG_CONFIG_HOME alone does NOT isolate them on macOS).
 #   Nothing touches the developer's real ~/.openbox or OS config dir. Enforcement
 #   is now ON by default (ADR-0016), which makes this load-bearing rather than
-#   tidy: a testbed posture leaking into the real config would govern every
+#   tidy: a test posture leaking into the real config would govern every
 #   Claude Code session on the box.
 #
 #   Hooks are installed into one scratch project only, which since ADR-0016 is
@@ -21,11 +21,11 @@
 #   that rather than assuming it.
 #
 # Secrets are never written here. `mint` stores the control token in
-# testbed/.state/control-token (git-ignored, 0600) and sourcing picks it up.
+# test/.state/control-token (git-ignored, 0600) and sourcing picks it up.
 
 TB_REPO="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." && pwd)"
 export TB_REPO
-export TB_DIR="$TB_REPO/testbed"
+export TB_DIR="$TB_REPO/test"
 export TB_STATE="${TB_STATE:-$TB_DIR/.state}"
 mkdir -p "$TB_STATE"
 
@@ -83,16 +83,16 @@ chmod 700 "$OPENBOX_HOME" 2>/dev/null || true
 export TB_ENV_FILE="$OPENBOX_HOME/.env"
 
 # The governed scratch project, the binary under test, and the driver's model.
-export TB_PROJECT="${TB_PROJECT:-/tmp/openbox-testbed-project}"
+export TB_PROJECT="${TB_PROJECT:-/tmp/openbox-test-project}"
 export TB_BIN="${TB_BIN:-$TB_STATE/openbox}"
 export TB_MODEL="${TB_MODEL:-sonnet}"
-export TB_KEY_NAME="${TB_KEY_NAME:-openbox-testbed}"
-export TB_AGENT_NAME="${TB_AGENT_NAME:-openbox-testbed-claude-code}"
+export TB_KEY_NAME="${TB_KEY_NAME:-openbox-test}"
+export TB_AGENT_NAME="${TB_AGENT_NAME:-openbox-test-claude-code}"
 # The MCP fixture. A phase that wants it exports TB_MCP_CONFIG="$TB_MCP";
 # sessions elsewhere pay nothing for it.
 export TB_MCP="${TB_MCP:-$TB_DIR/mcp/everything.json}"
 
-# The control token: minted by `./testbed/env.sh mint`, or supplied by the
+# The control token: minted by `./test/env.sh mint`, or supplied by the
 # operator. Never a flag and never committed (INV-1).
 if [ -z "${OPENBOX_CONTROL_TOKEN:-}" ] && [ -r "$TB_STATE/control-token" ]; then
 	OPENBOX_CONTROL_TOKEN="$(cat "$TB_STATE/control-token")"
@@ -138,7 +138,7 @@ case "${BASH_SOURCE[0]:-}" in
 	case "${1:-}" in
 	mint) tb_mint_key ;;
 	drop) tb_drop_key ;;
-	*) echo "usage: ./testbed/env.sh <mint|drop>   (to use the settings: . testbed/env.sh)" >&2; exit 2 ;;
+	*) echo "usage: ./test/env.sh <mint|drop>   (to use the settings: . test/env.sh)" >&2; exit 2 ;;
 	esac
 	;;
 esac

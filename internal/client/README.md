@@ -65,7 +65,7 @@ locators carry that distinction instead. The `DevEvent.Span` struct still exists
 — the adapter contract is frozen at schema v1.0 and adapters still populate it —
 but the client now reads locators and counts *out* of it into
 `activity_input`/`activity_output` rather than serializing it.
-`contracts/dev-event/MAPPING.md` §3 is the authority on which fields it reads.
+`docs/MAPPING.md` §3 is the authority on which fields it reads.
 
 ## Idempotency (INV-5): the client half is guaranteed
 
@@ -108,7 +108,7 @@ dedupe on the `event_id` / `Idempotency-Key` value.
   `source="developer-runtime"`, `run_id`=session, `workflow_id`=workspace/DID,
   `duration_ms` as float milliseconds, `metadata` as `json.RawMessage`. Fields
   core populates for Temporal events (`task_queue`, `parent_workflow_id`,
-  `attempt`) are deliberately omitted. See `contracts/dev-event/MAPPING.md`.
+  `attempt`) are deliberately omitted. See `docs/MAPPING.md`.
 - **Response** is core's public `GovernanceVerdictPublicResponse`: `verdict` is a
   plain lowercase string (`allow|constrain|require_approval|block|halt`) with a
   legacy `action` fallback — parsed in `verdict.go`.

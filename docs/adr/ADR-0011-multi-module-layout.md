@@ -26,12 +26,12 @@ discovers modules from it and fails if a `go.mod` on disk is missing from it, so
 a new module cannot slip through unverified. The `replace` directives remain
 authoritative for anyone building a module on its own.
 
-`contracts/dev-event/acceptance` is folded into `client` as
+`api//acceptance` is folded into `client` as
 `client/acceptancetest`. It exported nothing, was imported by nothing, and
 existed only to host two tests — a module's worth of ceremony for a package's
 worth of content.
 
-`contracts/dev-event/conformance` stays a module and stays dependency-free, with
+`api//conformance` stays a module and stays dependency-free, with
 a test asserting its `go.mod` gains no `require` or `replace`. That property is
 the point: adapters import it from their tests, and it must never pull anything
 in.

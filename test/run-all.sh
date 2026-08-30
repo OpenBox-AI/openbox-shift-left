@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# testbed/run-all.sh — run the phases, in order.
+# test/run-all.sh — run the phases, in order.
 #
-#   ./testbed/run-all.sh                      # preflight → … → approver-auto
-#   ./testbed/run-all.sh capture lineage      # preflight, then just those
-#   ./testbed/run-all.sh teardown             # give the box back
+#   ./test/run-all.sh                      # preflight → … → approver-auto
+#   ./test/run-all.sh capture lineage      # preflight, then just those
+#   ./test/run-all.sh teardown             # give the box back
 #
 # Preflight always runs: a green suite against a half-dead stack (OPA bound to
 # its own localhost, say) is worse than no suite at all.

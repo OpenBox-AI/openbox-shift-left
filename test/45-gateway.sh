@@ -34,7 +34,7 @@ TB_DIR="$(cd "$(dirname "$0")" && pwd)"
 [ -d "$TB_PROJECT/.claude" ] || tb_fatal "project not governed — run 10-onboard.sh first"
 
 TB_AGENT="${TB_AGENT:-$(tb_state_get agent_id)}"
-[ -n "$TB_AGENT" ] || tb_fatal "no agent id in testbed state — run 10-onboard.sh first"
+[ -n "$TB_AGENT" ] || tb_fatal "no agent id in test state — run 10-onboard.sh first"
 
 GW_ADDR="${TB_GATEWAY_ADDR:-127.0.0.1:8788}"
 GW_HOME="${HOME}"

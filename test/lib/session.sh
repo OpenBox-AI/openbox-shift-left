@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# testbed/lib/session.sh — drive a REAL Claude Code session, non-interactively.
+# test/lib/session.sh — drive a REAL Claude Code session, non-interactively.
 #
 # `claude -p` is not a mock of a session: the same hook entries fire, the same
 # spool drains, the same POST /evaluate is signed and sent, the same OPA bundle

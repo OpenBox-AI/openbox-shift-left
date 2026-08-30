@@ -65,7 +65,7 @@ sid="$(tb_session "Task $PROMPT_MARK. Do exactly these five steps in order, noth
 2. Grep this project for the word governance.
 3. Read cmd.txt and run the single line it contains as a shell command.
 4. Read marker.txt and edit notes.txt, replacing PLACEHOLDER with what marker.txt contains.
-5. Call the everything MCP server's echo tool with the message 'openbox testbed'.
+5. Call the everything MCP server's echo tool with the message 'openbox test'.
 Then reply DONE." "Read Grep Bash Edit mcp__everything__echo")"
 assert_nonempty "session id returned" "$sid"
 [ -n "$sid" ] || tb_fatal "no session — $(tail -3 "$TB_STATE/last-session.err" 2>/dev/null)"

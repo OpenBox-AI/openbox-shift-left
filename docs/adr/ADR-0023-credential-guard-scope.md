@@ -56,7 +56,7 @@ actually checkable:
 | The gateway imports nothing outside two modules | the import half of `TestGatewayImportsAreConfined` | **unchanged** |
 | The gateway *requires* nothing outside two modules, directly | `unallowedDirectRequires` | **narrowed** — indirect skipped |
 | `decision`'s direct dependencies are reviewed | `decision/guard_test.go` | **new** |
-| `contracts/dev-event/conformance`'s are reviewed | `conformance/deps_test.go` | added by D-OSS-5 |
+| `api//conformance`'s are reviewed | `conformance/deps_test.go` | added by D-OSS-5 |
 | Arbitrary transitive code resolves no provider credential | — | **not bounded by any test** |
 
 The last row is the accepted residual risk. It is named rather than softened.

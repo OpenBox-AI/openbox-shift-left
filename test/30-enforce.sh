@@ -37,7 +37,7 @@ tb_audit_since() { # <offset>
 tb_audit_size() { [ -r "$AUDIT" ] && wc -c <"$AUDIT" | tr -d ' ' || echo 0; }
 
 TB_AGENT="${TB_AGENT:-$(tb_state_get agent_id)}"
-[ -n "$TB_AGENT" ] || tb_fatal "no agent id in testbed state — run 10-onboard.sh first"
+[ -n "$TB_AGENT" ] || tb_fatal "no agent id in test state — run 10-onboard.sh first"
 
 # A raw-rego policy denying one marked command and any Write. Raw rego is
 # deliberate: it is the exact shape the deleted local evaluator could never
@@ -45,13 +45,13 @@ TB_AGENT="${TB_AGENT:-$(tb_state_get agent_id)}"
 deny_rego() { # <marker>
 	printf '%s' 'default result := {"decision": "allow", "reason": "no rule matched"}
 
-result := {"decision": "block", "reason": "testbed raw-rego deny"} if {
+result := {"decision": "block", "reason": "test raw-rego deny"} if {
 	input.event_type == "ActivityStarted"
 	input.activity_type == "Bash"
 	contains(object.get(input, ["activity_input", "command"], ""), "'\"$1\"'")
 }
 
-result := {"decision": "block", "reason": "testbed raw-rego file deny"} if {
+result := {"decision": "block", "reason": "test raw-rego file deny"} if {
 	input.event_type == "ActivityStarted"
 	input.activity_type == "Write"
 }'
@@ -60,7 +60,7 @@ result := {"decision": "block", "reason": "testbed raw-rego file deny"} if {
 # ── A. a RAW-REGO org policy denies a shell call ──────────────────────────────
 tb_step "A · raw-rego deny (the case that used to fail open)"
 DENY_MARK="OBXDENY$run"
-tb_policy_apply "openbox testbed — raw-rego deny" "$(deny_rego "$DENY_MARK")" >/dev/null
+tb_policy_apply "openbox test — raw-rego deny" "$(deny_rego "$DENY_MARK")" >/dev/null
 if tb_wait_for_opa Bash block; then
 	before="$(tb_audit_size)"
 	tb_session "Run the shell command: echo $DENY_MARK" "Bash" >/dev/null
@@ -99,13 +99,13 @@ HALT_MARK="OBXHALT$run"
 halt_rego() { # <marker>
 	printf '%s' 'default result := {"decision": "allow", "reason": "no rule matched"}
 
-result := {"decision": "halt", "reason": "testbed raw-rego halt"} if {
+result := {"decision": "halt", "reason": "test raw-rego halt"} if {
 	input.event_type == "ActivityStarted"
 	input.activity_type == "Bash"
 	contains(object.get(input, ["activity_input", "command"], ""), "'"$1"'")
 }'
 }
-tb_policy_apply "openbox testbed — raw-rego halt" "$(halt_rego "$HALT_MARK")" >/dev/null
+tb_policy_apply "openbox test — raw-rego halt" "$(halt_rego "$HALT_MARK")" >/dev/null
 if tb_wait_for_opa Bash halt; then
 	before="$(tb_audit_size)"
 	rm -f "$TB_PROJECT/after-halt.txt"
@@ -127,7 +127,7 @@ else
 	tb_bad "OPA serves the raw-rego halt" "halt" "$(tb_opa_decision Bash)"
 fi
 
-tb_policy_apply "openbox testbed — ungated" "$TB_ALLOW_REGO" >/dev/null
+tb_policy_apply "openbox test — ungated" "$TB_ALLOW_REGO" >/dev/null
 tb_wait_for_opa Bash allow || tb_bad "policy reset to allow" "allow" "$(tb_opa_decision Bash)"
 
 # ── B. secret redaction rewrites the body ─────────────────────────────────────

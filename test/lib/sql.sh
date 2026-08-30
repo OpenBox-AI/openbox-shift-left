@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# testbed/lib/sql.sh — read the stack's database.
+# test/lib/sql.sh — read the stack's database.
 #
 # SQL is the fallback, not the default: assert through the backend read API
 # wherever one exists (plan §3 P6). It is used for what core exposes no read

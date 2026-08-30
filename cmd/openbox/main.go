@@ -459,7 +459,7 @@ func (a *app) runDevInit(args []string) int {
 	if goneManagedEnable {
 		return a.errorf("--managed-enable was removed. It recorded a Phase-1 force-enable substrate in the agent's\n" +
 			"  backend config that nothing ever read. Org-wide activation is a managed-settings\n" +
-			"  deployment — see `openbox managed install` and deploy/managed/.")
+			"  deployment — see `openbox managed install` and deployments/managed/.")
 	}
 
 	if o.Provider == "" {

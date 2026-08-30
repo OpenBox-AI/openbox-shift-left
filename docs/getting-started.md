@@ -213,7 +213,7 @@ openbox init --provider claude-code --scope global
 `init` **cannot finish this alone**, and says so rather than implying otherwise:
 Claude Code activates a plugin org-wide through **managed settings**, which is an
 administrator's deployment. `--scope global` installs the bundle and prints the
-exact snippet to deploy (see `deploy/managed/` and `openbox managed install`).
+exact snippet to deploy (see `deployments/managed/` and `openbox managed install`).
 Until that lands, no session is governed.
 
 For a real rollout, use managed settings — so removing the hook is not a
@@ -481,7 +481,7 @@ list). Specific to setup:
 
 | | Status |
 |---|---|
-| macOS, Linux | unit-tested, and the CLI driven by hand; the end-to-end suite (`testbed/`) has **not been run** against a live stack for this flow |
+| macOS, Linux | unit-tested, and the CLI driven by hand; the end-to-end suite (`test/`) has **not been run** against a live stack for this flow |
 | Windows | **build-verified only** — CI cross-compiles every change; no automated suite runs there, and `install.sh` is bash |
 | `--scope global` activation | **not verifiable by us** — it needs a managed-settings deployment in a real fleet |
 | Credential at rest | not protected on any platform; `0600` on macOS/Linux, nothing on Windows |

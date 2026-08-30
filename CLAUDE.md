@@ -60,8 +60,8 @@ reintroduce that: if something is provider-agnostic it goes in `hookflow` or
 | `transport/` | the in-path CONNECT/TLS relay — the `:proxy:` lane. Allowlist, CA, and the hijack that hands an intercepted connection to `gateway` (ADR-0022) |
 | `cli/` | the `openbox` CLI, incl. `cli/internal/approver` (ADR-0012), `cli/internal/prompt` (masked input), the gateway's install/inspect/emit halves (`gatewayservice`, `gatewaycheck`, `gatewayemit` — the last of which serves BOTH in-path lanes via its `Lane`), and the three-lane install machinery: `activation` (settings-env record + the derived producer election + the per-lane key sets), `laneservice` (every supervisor unit, one `Spec` per lane), `atomicfile` |
 | `actions/openbox-git-action/` | commit→deploy lineage for CI |
-| `contracts/dev-event/` | event schema, wire mapping, conformance |
-| `testbed/` | the mock-free end-to-end suite (`docs/testbed/e2e.md`) |
+| `api//` | event schema, wire mapping, conformance |
+| `test/` | the mock-free end-to-end suite (`docs/test/e2e.md`) |
 | `docs/` | user documentation — keep it true, and keep it short |
 
 `.claude/` and `.fab7/` are local tooling and git-ignored — do not commit them.
@@ -183,7 +183,7 @@ reintroduce that: if something is provider-agnostic it goes in `hookflow` or
 - **Cite sources in docs** — the repo symbol/path or upstream doc URL behind each
   claim. A governance product that overstates itself is the failure it exists to
   prevent, so prefer an honest limit over a confident sentence.
-- **Verify against the real thing.** `testbed/run-all.sh` drives real headless
+- **Verify against the real thing.** `test/run-all.sh` drives real headless
   sessions against a real local stack and asserts what arrived; unit tests are not
   evidence that a hook works.
 - Sibling repos: **openbox-backend** (NestJS control plane), **openbox-core** (Go data
@@ -194,7 +194,7 @@ reintroduce that: if something is provider-agnostic it goes in `hookflow` or
 ```bash
 go build ./cli/...                 # the binary
 cd <module> && go test ./...        # per module (go.work lists them all, ADR-0011)
-./testbed/run-all.sh               # end to end, needs a local OpenBox stack
+./test/run-all.sh               # end to end, needs a local OpenBox stack
 ```
 
 ## Current state
@@ -237,11 +237,11 @@ findings. Four things about it are worth not re-litigating:
   direction: over-ask, never over-grant.
 
 **Status: implemented, unit-verified, all 11 modules green under `-race` plus both
-cross-compiles — the testbed has NOT run.** The conformance cases drive the real
+cross-compiles — the test has NOT run.** The conformance cases drive the real
 hook against a real `/evaluate` stub over HTTP, so deny/allow, redact-before-send
 (asserted on the outbound bytes) and both failure-policy branches are strongly
 covered. What that cannot reach is the claim the ADR rests on: **that a raw-rego
-org is now enforced.** `testbed/30-enforce.sh` §A publishes a raw-rego deny through
+org is now enforced.** `test/30-enforce.sh` §A publishes a raw-rego deny through
 the backend to prove it and is waiting on a stack. The lost-200 double-store window
 is also still open and irreducible client-side — closing it needs server-side
 dedupe on developer events, a backend ask.
@@ -303,7 +303,7 @@ action's `OPENBOX_SEED`) still read, warning once to stderr.
 
 **Status: implemented, unit-verified, exercised against the real binary over a PTY,
 Windows/linux-arm64 cross-compile added to CI and proven to catch a unix-only call —
-but the testbed has NOT run.** No local stack was reachable. What that leaves
+but the test has NOT run.** No local stack was reachable. What that leaves
 unproven is the thing that matters most: that a real session after `auth` → `init`
 produces events, and that a session in an uninitialized directory produces none.
 `plans/260812-1212-openbox-auth-command/reports/verification-260813-auth-init.md`
@@ -312,7 +312,7 @@ splits every claim by evidence strength and carries the per-OS manual checklist.
 Near-real-time delivery (`hookflow.RealtimeTrigger`: debounced detached flusher per
 session, default on, `OPENBOX_REALTIME=0` opt-out) is implemented and verified at
 the binary level (`TestHookRealtimeDelivery` drives the real binary against a mock
-core); its testbed phase (`testbed/25-realtime.sh`) exists but has not yet run
+core); its test phase (`test/25-realtime.sh`) exists but has not yet run
 against a live local stack.
 
 **Model turns are Activities too** (ADR-0014, 2026-08-11): `TurnStarted`/
@@ -349,7 +349,7 @@ and all 11 modules are green — but core's ingest behavior was established by
 reading openbox-core, and this repo's own rule is that reading is not evidence.
 The load-bearing unverified claim is that core stores the `ActivityCompleted` as
 its own row; its dedupe key includes `event_type`
-(`activities/governance/validation.go:96`), which says it should. The testbed
+(`activities/governance/validation.go:96`), which says it should. The test
 assertions are updated and waiting for a run; `MAPPING.md` §7 lists exactly what
 that run must confirm.
 
@@ -375,7 +375,7 @@ additionally requires `finops` ∧ `content_capture` (both default-ON, a user
 constraint) plus a reachable LlamaFirewall and Redis — without those the widgets
 stay empty with a perfect client — and Windows is build-verified only.
 
-Two things about the turn feature stay empirically open until the testbed runs, and
+Two things about the turn feature stay empirically open until the test runs, and
 both are pre-decided either way rather than blocking: whether `Stop` fires on a
 tool-only turn (window sums are exact regardless of cadence), and whether
 `SubagentStop`'s transcript window carries `isSidechain` lines (the partition cannot
@@ -423,7 +423,7 @@ Three of the plan's assumptions did not survive the probe against the installed
 `stop_reason`, and `PostToolUseFailure` does carry a structural `is_interrupt`.
 **Status: implemented, unit- and conformance-verified (C20–C26 assert on the real
 outbound bytes), all 11 modules green under `-race` plus both cross-compiles — the
-testbed has NOT run.** `plans/260813-2314-dev-telemetry-and-content-posture/manual-test-guide.md`
+test has NOT run.** `plans/260813-2314-dev-telemetry-and-content-posture/manual-test-guide.md`
 is the stack-free walkthrough; `plans/reports/probe-260813-2329-claude-code-hook-surface.md`
 is the hook-surface evidence.
 
@@ -474,11 +474,11 @@ verifying ADR-0018 against the first real session's 66 events:
 
 **Status: implemented, unit-verified, all 11 modules green under `-race` plus both
 cross-compiles; `doctor`'s warning exercised against the real binary on a seeded
-two-engine project — the testbed has NOT run.** Unproven without a live stack:
+two-engine project — the test has NOT run.** Unproven without a live stack:
 that a re-inited settings file still produces events in a real session, that the
 double-count disappears end to end, and that `decision_authority` lands in
-`governance_events` — `testbed/30-enforce.sh:185-186` already asserts the last one
-and failed before this change. `testbed/10-onboard.sh` gained the dormant
+`governance_events` — `test/30-enforce.sh:185-186` already asserts the last one
+and failed before this change. `test/10-onboard.sh` gained the dormant
 stale-path replacement assertions.
 
 **Prompts gate, and HALT ends the session** (ADR-0020, 2026-08-18): UserPromptSubmit
@@ -508,7 +508,7 @@ session with no re-evaluation — resume included. Four things not to re-litigat
 
 **Status: implemented, unit- and conformance-verified (C27–C31 on real RunHook
 stdout bytes), all 11 modules green under `-race` plus both cross-compiles — the
-testbed has NOT run.** `testbed/30-enforce.sh` §A3 (raw-rego halt → turn stop +
+test has NOT run.** `test/30-enforce.sh` §A3 (raw-rego halt → turn stop +
 latch) is dormant, waiting on a stack.
 
 **Tool content capture; SL3-SEC-3 retired** (ADR-0019 P1, contract **v1.3**,
@@ -532,7 +532,7 @@ Four things not to re-litigate:
 - **The guarantee got weaker in kind, not just in scope.** SL3-SEC-3 held
   structurally (content had no field to land in); what replaces it is a gate + a
   redaction + a cap, each fallible. So the capture-OFF half is asserted wherever the
-  ON half is, on outbound bytes (C32–C39), and the testbed was INVERTED rather than
+  ON half is, on outbound bytes (C32–C39), and the test was INVERTED rather than
   deleted — `20-capture.sh` asserts the gate open, `35-telemetry.sh` closed. "The
   marker is nowhere" and "the runtime emitted nothing" are the same observation.
 - **C39 measures detector REACH, which C34's ordering case does not.** The boundary
@@ -541,7 +541,7 @@ Four things not to re-litigate:
   fixable by lowering the entropy floor (see the privacy bullet above).
 
 **Status: implemented, unit- and conformance-verified, all 11 modules green under
-`-race` plus both cross-compiles — the testbed has NOT run.** Unproven without a
+`-race` plus both cross-compiles — the test has NOT run.** Unproven without a
 stack: that core stores `activity_output.output` as the row's `output`, that the two
 new metadata keys survive ingest, and the volume question — 64KB bodies at
 tool-call cadence through the realtime flusher. Codex is untouched and binds none of
@@ -592,7 +592,7 @@ is ungated — only the attachment is gated, because gating a pure parser buys
 nothing on the wire and would duplicate the posture decision.
 
 **Status: implemented, unit- and conformance-verified (C40/C41 on real POSTed
-bytes), all 11 modules green under `-race` plus both cross-compiles — the testbed
+bytes), all 11 modules green under `-race` plus both cross-compiles — the test
 has NOT run.** Unproven without a stack (`MAPPING.md` §7 items 22–24): that core
 stores `activity_output.thinking` as its own key, that the sibling key does not
 perturb `ExtractModelMetricsFromActivity`, and the volume question. A pre-existing
@@ -678,7 +678,7 @@ proves nothing about the seam.** `cli/cmd/openbox/gatewaycapture_test.go` is the
 control: it drives the real command into the real spool with no fake anywhere.
 
 **Status: implemented, unit- and conformance-verified, green under `-race` plus both
-cross-compiles — the testbed has NOT run.** `testbed/45-gateway.sh` is written and
+cross-compiles — the test has NOT run.** `test/45-gateway.sh` is written and
 dormant; `MAPPING.md` §7 items 25–30 list what a live run must confirm. ADR-0021
 stays **DRAFT**, but as of 2026-08-28 only **§9** keeps it there: what refusal shape
 Claude Code does not retry around is still an empirical question about a provider we
@@ -1052,7 +1052,7 @@ does NOT prove: bind, listen, TLS to a real socket, the real dialer, brotli exch
 (excluded — stdlib cannot decode them), and anything stack-dependent. **No launchd
 install has ever run and no control plane has ever received an event from either
 lane**; the desktop/OAuth coverage both were built for is INTENT, not measurement.
-`testbed/46-otel-lane.sh` and `47-transport.sh` hold the live claims, dormant. One
+`test/46-otel-lane.sh` and `47-transport.sh` hold the live claims, dormant. One
 thing outside the replay HAS run: a **synthetic** OTLP export crossed the receiver's
 real HTTP intake end to end on a bind-capable host (phase 09). **That export was
 JSON, and `activation.TelemetryKeys` sets `OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf`
@@ -1074,13 +1074,13 @@ nothing distinguishes them without inspecting the ~200 sites. **Awaiting an owne
 ruling; no fix is chosen.**
 
 Next: the Cursor adapter; policy template packs; and the live half of everything above —
-the dormant testbed phases (35, 45, 46, 47) and probe A, which additionally needs a
+the dormant test phases (35, 45, 46, 47) and probe A, which additionally needs a
 bind-capable host, a real install and credentials. The language floor is
 `go 1.27.0` across `go.work` and all fifteen modules (`transport`, `telemetry` and
 `probes/refusal-injector` joined since), so every dependency resolves at latest
 with no pin. **Dependencies are module-scoped now, not "one for the
 repo"**: `cli` has `golang.org/x/term` (masked input, ADR-0015) and
-`google/renameio/v2`; `contracts/dev-event/conformance` has
+`google/renameio/v2`; `api//conformance` has
 `santhosh-tekuri/jsonschema/v6` (+ `golang.org/x/text`, D-OSS-5), which reaches
 the test graphs of both adapters and `client`; `adapters/common/devconfig` has
 `pelletier/go-toml/v2` (D-OSS-6) and `joho/godotenv` (D-OSS-7);

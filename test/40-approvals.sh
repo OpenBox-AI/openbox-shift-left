@@ -42,7 +42,7 @@ PENDING_DIR="$OPENBOX_PENDING_APPROVAL_DIR"
 tb_audit_size() { [ -r "$AUDIT" ] && wc -c <"$AUDIT" | tr -d ' ' || echo 0; }
 tb_audit_since() { tail -c "+$(($1 + 1))" "$AUDIT" 2>/dev/null; }
 
-# ── the org policy + the queue: testbed/lib/policy.sh ─────────────────────────
+# ── the org policy + the queue: test/lib/policy.sh ─────────────────────────
 # tb_gate_on / tb_gate_off, tb_pending_first, tb_settle and friends live there
 # because 70-approver-auto.sh needs exactly the same gate.
 pending_first() { tb_pending_first; }
@@ -88,7 +88,7 @@ rm -f "$TB_STATE/decided-id"
 # counts below are about THIS run. Start from an empty queue.
 for _ in 1 2 3 4 5; do [ -n "$(pending_first)" ] || break; release_pending; done
 rm -f "$PENDING_DIR"/*.json 2>/dev/null
-path="$(tb_policy_apply "openbox testbed — approvals" "$TB_GATE_REGO")"
+path="$(tb_policy_apply "openbox test — approvals" "$TB_GATE_REGO")"
 assert_nonempty "policy created" "$path"
 if tb_wait_for_opa Bash require_approval; then
 	tb_ok "OPA serves require_approval for Bash"

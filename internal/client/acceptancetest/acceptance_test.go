@@ -6,7 +6,7 @@
 // that patch: the client no longer emits developer-specific event_type strings;
 // it maps every dev event onto a base wire type openbox-core already accept-lists
 // (Workflow*/SignalReceived/ActivityStarted/ActivityCompleted, all span-less).
-// See ../../contracts/dev-event/ext-core/README.md.
+// The ext-core patch set was retired 2026-07-15; ADR-0004 is the record.
 //
 // The test is now the INVERSE guarantee: shift-left emits ONLY stock base wire
 // types, so a STOCK core accepts every event with NO 400 — no external patch

@@ -46,7 +46,7 @@ real recorded traffic through the shipped code path, bind-free, with the relay's
 upstream dial substituted (`gateway/gatewaytest`) and no socket anywhere. That proves
 the bytes the relay forwards and captures, the mapping, the gate and the caps — it
 proves nothing about bind, listen, TLS to a real socket, the OTLP HTTP intake, or what
-core stores. Those live only in the dormant `testbed/46-otel-lane.sh` and
+core stores. Those live only in the dormant `test/46-otel-lane.sh` and
 `47-transport.sh`.
 
 - **`:proxy:` (transport)** — a CONNECT to the allowlisted host is TLS-terminated
@@ -160,7 +160,7 @@ compensating control: telemetry silence on an otherwise-active session is a
 
 **The two ⬜ columns are the honest centre of this table.** Desktop and OAuth coverage
 is the reason both lanes were built, and neither has been confirmed against a real
-client — the desktop cell is intent, and only `testbed/46-otel-lane.sh` and
+client — the desktop cell is intent, and only `test/46-otel-lane.sh` and
 `47-transport.sh` can turn it into a measurement. Do not read "built for it" as
 "covers it".
 

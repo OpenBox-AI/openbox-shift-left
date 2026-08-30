@@ -205,7 +205,7 @@ func TestManaged_ShippedTemplateLoadsAndLocks(t *testing.T) {
 	// this package moves, and a wrong count does not fail -- it SKIPS, which
 	// silently retires a test whose own subject is a failure mode that is
 	// silent. So the skip names the path it could not find.
-	const template = "../../../../deploy/managed/openbox/dev.json"
+	const template = "../../../../deployments/managed/openbox/dev.json"
 	if _, err := os.Stat(template); err != nil {
 		t.Skipf("shipped template not found at %s: %v", template, err)
 	}

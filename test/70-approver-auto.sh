@@ -28,7 +28,7 @@ TB_DIR="$(cd "$(dirname "$0")" && pwd)"
 . "$TB_DIR/lib/policy.sh"
 
 [ -x "$TB_BIN" ] || tb_fatal "no binary at $TB_BIN — run 10-onboard.sh first"
-[ -n "${OPENBOX_CONTROL_TOKEN:-}" ] || tb_fatal "no control token — run ./testbed/env.sh mint"
+[ -n "${OPENBOX_CONTROL_TOKEN:-}" ] || tb_fatal "no control token — run ./test/env.sh mint"
 
 AUDIT="$OPENBOX_ENFORCEMENT_FILE"
 tb_audit_size() { [ -r "$AUDIT" ] && wc -c <"$AUDIT" | tr -d ' ' || echo 0; }
@@ -103,10 +103,10 @@ run="$(date +%s)"
 
 cat >"$ENVELOPE" <<JSON
 {
-  "version": "testbed-$run",
-  "auto_deny":    [{"tool": "Bash", "request_contains": "auto-no",  "note": "testbed: denied by envelope"}],
-  "auto_approve": [{"tool": "Bash", "request_contains": "auto-ok",  "note": "testbed: approved by envelope"}],
-  "consult":      [{"tool": "Bash", "request_contains": "consult-", "note": "testbed: ask the host"}]
+  "version": "test-$run",
+  "auto_deny":    [{"tool": "Bash", "request_contains": "auto-no",  "note": "test: denied by envelope"}],
+  "auto_approve": [{"tool": "Bash", "request_contains": "auto-ok",  "note": "test: approved by envelope"}],
+  "consult":      [{"tool": "Bash", "request_contains": "consult-", "note": "test: ask the host"}]
 }
 JSON
 tb_ok "envelope written (auto_deny → auto_approve → consult; everything else escalates)"

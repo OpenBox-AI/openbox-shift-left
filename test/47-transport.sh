@@ -37,7 +37,7 @@ TB_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 [ -d "$TB_PROJECT/.claude" ] || tb_fatal "project not governed — run 10-onboard.sh first"
 TB_AGENT="${TB_AGENT:-$(tb_state_get agent_id)}"
-[ -n "$TB_AGENT" ] || tb_fatal "no agent id in testbed state — run 10-onboard.sh first"
+[ -n "$TB_AGENT" ] || tb_fatal "no agent id in test state — run 10-onboard.sh first"
 
 PX_ADDR="${TB_TRANSPORT_ADDR:-127.0.0.1:8790}"
 SETTINGS="${HOME}/.claude/settings.json"

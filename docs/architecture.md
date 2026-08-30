@@ -75,7 +75,7 @@ Two paths, deliberately separate:
 | `decision/` | local secret detection and redaction (all that survives [ADR-0017](adr/ADR-0017-inline-policy-evaluation.md)) |
 | `cli/` | the `openbox` CLI — `auth`, `init`, `dev verify`, `hook`, `approve`, `doctor`, `managed` |
 | `actions/openbox-git-action/` | commit → deploy lineage for CI |
-| `contracts/dev-event/` | the normalized event contract + wire mapping + conformance suite |
+| `api//` | the normalized event contract + wire mapping + conformance suite |
 
 An adapter is only four things: its native hook shape, its mapper, an
 `OutputContract` (how it spells a hook response, where a redactable body lives, what
@@ -187,7 +187,7 @@ Being precise here is part of the product.
   not corrected — so a fleet's history can contain duplicates that no client-side
   change removes.
 - **Enforcement.** The gate is a hook in the developer's own config. Until the
-  provider's managed configuration is deployed (`deploy/managed/`), a developer can
+  provider's managed configuration is deployed (`deployments/managed/`), a developer can
   remove it: prevention without assurance. For Codex the hook itself cannot yet be
   mandated — a `requirements.toml` cannot define one — so the shipped mandate pins
   approval and sandbox modes instead.
@@ -284,7 +284,7 @@ Being precise here is part of the product.
     (phase 09). Two limits on that: the export was **JSON**, while production is
     configured for `http/protobuf` — so **no test drives the protobuf decoder, which
     is the only path real traffic takes** — and the real client has never exported
-    to this lane at all. The dormant `testbed/46-otel-lane.sh` and `47-transport.sh`
+    to this lane at all. The dormant `test/46-otel-lane.sh` and `47-transport.sh`
     are what would change that.
   - **The desktop and OAuth coverage these lanes were built for is unconfirmed.**
     That is the whole reason they exist, and it is intent rather than measurement
@@ -351,7 +351,7 @@ Being precise here is part of the product.
   `golang.org/x/…` one was invisible to it. Each module that takes a dependency now
   carries its own allowlist — `gateway/guard_test.go`, `decision/guard_test.go`,
   `telemetry/guard_test.go`, `transport/guard_test.go`,
-  `contracts/dev-event/conformance/deps_test.go` — and adding to one is a decision,
+  `api//conformance/deps_test.go` — and adding to one is a decision,
   which is why they fail first. **Do not widen an allowlist to make a direct import
   pass**; that inverts the ADR's reasoning.
 
@@ -366,7 +366,7 @@ Being precise here is part of the product.
   | `cli/` | **3** — `kardianos/service` v1.3.0, `google/renameio/v2`, `golang.org/x/term` | 625 | — |
   | `adapters/common/devconfig/` | **2** — `pelletier/go-toml/v2`, `joho/godotenv` | — | — |
   | `adapters/common/hookflow/` | **1** — `google/renameio/v2` | — | — |
-  | `contracts/dev-event/conformance/` | **1** — `santhosh-tekuri/jsonschema/v6` v6.0.3 | — | `deps_test.go` |
+  | `api//conformance/` | **1** — `santhosh-tekuri/jsonschema/v6` v6.0.3 | — | `deps_test.go` |
   | `gateway/` | **0** external | 420 | `gateway/guard_test.go` |
   | every other module | **0** | — | — |
 
@@ -389,7 +389,7 @@ Being precise here is part of the product.
   against a local `/evaluate` stub — which is real HTTP and the real gate, but not
   a real control plane. In particular, **that a raw-rego org is now enforced is
   unproven**, and that is the headline argument for the change
-  ([ADR-0017](adr/ADR-0017-inline-policy-evaluation.md)). The testbed phase that
+  ([ADR-0017](adr/ADR-0017-inline-policy-evaluation.md)). The test phase that
   would prove it exists and has not run.
 - **Enforcement depends on reaching the control plane, and under the default it
   is bypassable.** Every gated tool call is decided by a synchronous `/evaluate`
@@ -531,7 +531,7 @@ Being precise here is part of the product.
 
 ## Verification
 
-`testbed/` is a mock-free end-to-end suite: it drives real headless sessions against
+`test/` is a mock-free end-to-end suite: it drives real headless sessions against
 a real local OpenBox and asserts what arrived — including the content gate in BOTH
 directions: with capture on, the tool command, the file body, the tool output and
 the turn's thinking all egress; with capture off, none of them do. The thinking
@@ -544,4 +544,4 @@ event", which was SL3-SEC-3 — an unconditional, structural guarantee, because 
 content had no field to land in. [ADR-0019](adr/ADR-0019-full-content-capture.md)
 P1 retired it. What replaces it is a gate plus a redaction plus a cap, none of them
 structural, which is why the suite asserts the closed direction as explicitly as the
-open one. See [end-to-end tests](testbed/e2e.md).
+open one. See [end-to-end tests](test/e2e.md).

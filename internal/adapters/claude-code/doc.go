@@ -4,7 +4,7 @@
 //
 // It maps Claude Code's native hook payloads (SessionStart /
 // UserPromptSubmit / PreToolUse / PostToolUse / SessionEnd) onto the
-// normalized developer event contract (contracts/dev-event) and emits them
+// normalized developer event contract (api/dev-event.schema.json) and emits them
 // through the shared AIP-signed transport (client/). It adds no governance
 // pipeline: the developer runtime is onboarded onto the existing one,
 // exactly as the base SDK's create_openbox_worker() onboards an agent

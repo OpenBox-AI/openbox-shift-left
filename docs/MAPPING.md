@@ -19,7 +19,7 @@
 >
 > **[ADR-0014](../../docs/adr/ADR-0014-turn-as-activity-and-identifier-allowlist.md)** is the first change that DID touch this contract, which is why it is v1.1: it adds the model-turn pair (`TurnStarted`/`TurnCompleted`, riding the same two activity wire types with `activity_type: llm_completion`) and the fields it needs (`model`, `turn_index`, `agent_id`), and it **re-defines `tokens.input` as pure input** — v1.0's Claude Code rollup folded both cache counts into it. Everything else is additive; that one semantic is what makes it a version bump rather than a silent edit. **Cost, stated plainly:** the transcript projection's INV-2 guarantee is now a curated allowlist enforced by a test, not a structural impossibility, because the model id is a bound string.
 
-**Two layers.** The *adapter-facing* contract ([schema](schema/dev-event.schema.json)) is what a provider adapter produces via SPI `emit()` — its `event_type` enum is the 12 dev-runtime lifecycle names. The *wire* layer below is what the shared `client/` translates that into. Adding a provider never touches either layer (PRD FR-4, architecture §1b). That the span retirement required **zero** edits under `contracts/dev-event/` is the split working as designed — and that the turn pair DID require edits here is the same split saying, correctly, that this one is a contract change.
+**Two layers.** The *adapter-facing* contract ([schema](schema/dev-event.schema.json)) is what a provider adapter produces via SPI `emit()` — its `event_type` enum is the 12 dev-runtime lifecycle names. The *wire* layer below is what the shared `client/` translates that into. Adding a provider never touches either layer (PRD FR-4, architecture §1b). That the span retirement required **zero** edits under `api//` is the split working as designed — and that the turn pair DID require edits here is the same split saying, correctly, that this one is a contract change.
 
 ---
 
@@ -401,10 +401,10 @@ Verified against the SDK's `request_signing.py` — the client matches core exac
 
 **Status: NOT YET RUN for the ADR-0013 shape, nor for the ADR-0014 turn pair.**
 Everything above about core's ingest was established by reading openbox-core, and
-reading is not running. The claims below are what `testbed/run-all.sh` must
+reading is not running. The claims below are what `test/run-all.sh` must
 confirm against a live local stack before any of them is asserted as fact.
 
-The suite's assertions are in place (`testbed/20-capture.sh`, `25-realtime.sh`,
+The suite's assertions are in place (`test/20-capture.sh`, `25-realtime.sh`,
 `28-usage.sh`); what is missing is a run. Until then, treat §5's row behavior as
 *derived from core's source*, not as observed.
 
@@ -512,7 +512,7 @@ The suite's assertions are in place (`testbed/20-capture.sh`, `25-realtime.sh`,
     `ActivityCompleted` row. Core's merged `ExtractModelMetricsFromActivity`
     unmarshals `{model, usage}` from this object, so a sibling key should be
     ignored by the Go decoder and the whole object stored as the row's output.
-    Both halves are **read, not run** — the testbed is what settles whether the
+    Both halves are **read, not run** — the test is what settles whether the
     key is stored and whether the extra field perturbs usage extraction.
 23. **Thinking is NOT in the turn's span**, on the same rows: the span's
     `response_body` carries the reply and only the reply. If thinking appears
@@ -524,7 +524,7 @@ The suite's assertions are in place (`testbed/20-capture.sh`, `25-realtime.sh`,
 
 ### Additionally, for ADR-0021 (the gateway span)
 
-Driven by `testbed/45-gateway.sh`, which is written and has never run.
+Driven by `test/45-gateway.sh`, which is written and has never run.
 
 25. **A gateway span is stored as its own `spans` row**, with the observed
     `http_method` / `http_url` / `http_status_code`. The rename matters more than
@@ -578,7 +578,7 @@ claims belong to phases 09–13 and are listed in their plan, not here.
 The paragraph above used to say the lanes' behavioural claims "belong to phases
 09–13 and are listed in their plan, not here." Both lanes now exist and emit, so
 their live-stack items belong with the rest. Items 34–39 are held by the dormant
-`testbed/46-otel-lane.sh` and `47-transport.sh`.
+`test/46-otel-lane.sh` and `47-transport.sh`.
 
 Everything below is unproven for one shared reason: both lanes are verified by
 **replay** — real recorded traffic through the shipped code path on a host that

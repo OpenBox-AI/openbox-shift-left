@@ -15,12 +15,12 @@
 //     so retries and buffered flushes are never double-counted by core.
 //
 // This package mirrors the normalized event contract
-// (contracts/dev-event/schema/dev-event.schema.json v1.0) as Go types, and
-// maps them onto the core wire shape per contracts/dev-event/MAPPING.md.
+// (api/dev-event.schema.json v1.0) as Go types, and maps them onto the core
+// wire shape per docs/MAPPING.md.
 package client
 
 // SchemaVersion is the dev-event contract version this client speaks. Track
-// contracts/dev-event/schema/dev-event.schema.json's x-schema-version.
+// api/dev-event.schema.json's x-schema-version.
 //
 // 1.1 added the turn pair (ADR-0014) and widened Tokens, re-defining Input as
 // pure input. The schema's x-changelog records what changed and why the Tokens

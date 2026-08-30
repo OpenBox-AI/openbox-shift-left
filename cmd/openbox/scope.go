@@ -154,7 +154,7 @@ func (a *app) printGovernedScope(o devinit.Options, resolvedScope string) {
 	fmt.Fprintf(a.stdout, "  managed settings, which is an administrator's deployment and not something this\n")
 	fmt.Fprintf(a.stdout, "  command can perform. Until that lands, no session is governed.\n")
 	fmt.Fprintf(a.stdout, "  Add to the managed settings.json:  {\"enabledPlugins\": [\"openbox-observe\"]}\n")
-	fmt.Fprintf(a.stdout, "  See `openbox managed install` and deploy/managed/.\n")
+	fmt.Fprintf(a.stdout, "  See `openbox managed install` and deployments/managed/.\n")
 	fmt.Fprintf(a.stdout, "  For one project instead, re-run with --scope local.\n")
 }
 

@@ -9,7 +9,7 @@
 
 Status: Accepted — **reconstructed 2026-07-31**, amended, and superseded in part
 (see the note above).
-Reconstructed from: `contracts/dev-event/MAPPING.md`, `client/payload.go`,
+Reconstructed from: `docs/MAPPING.md`, `client/payload.go`,
 `client/hookspan.go`, `client/acceptancetest/acceptance_test.go`.
 
 ## Context

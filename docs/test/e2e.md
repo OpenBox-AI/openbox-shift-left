@@ -5,15 +5,15 @@
 > OPA, real Postgres, real MCP server, real commits, real deploys, real approvals.
 > This is the plan; the partial testbeds it replaced are described in §1.
 
-**Status: built and green** (`testbed/`, 2026-08-03). To run it:
+**Status: built and green** (`test/`, 2026-08-03). To run it:
 
 ```bash
-. testbed/env.sh          # settings; secrets come from testbed/.state or your env
-./testbed/env.sh mint     # once: the org credential the assertions read through
-./testbed/run-all.sh      # preflight → onboard → capture → enforce → approvals →
+. test/env.sh          # settings; secrets come from test/.state or your env
+./test/env.sh mint     # once: the org credential the assertions read through
+./test/run-all.sh      # preflight → onboard → capture → enforce → approvals →
                           # lineage → visibility → approver
-./testbed/run-all.sh lineage visibility     # or just some phases
-./testbed/run-all.sh teardown               # hand the box back
+./test/run-all.sh lineage visibility     # or just some phases
+./test/run-all.sh teardown               # hand the box back
 ```
 
 Findings from the first full run are in §8a. The autonomous approver landed on
@@ -72,8 +72,8 @@ watcher works.
 
 | # | Prerequisite | Why | Status |
 |---|---|---|---|
-| P1 | **A read credential for assertions** — org key with `read:agent`, `read:agent_session`, `read:agent_log` | `60-visibility` and half of `50-lineage` assert through the backend read API, not SQL. This is the step that blocks a cold run today. | Minted once by `testbed/env.sh`, deactivated in `99-teardown` |
-| P2 | **`testbed/env.sh`** | one place that knows the stack's URLs, the org, and where the credential lives — the predecessor scripts each carried their own copy | New |
+| P1 | **A read credential for assertions** — org key with `read:agent`, `read:agent_session`, `read:agent_log` | `60-visibility` and half of `50-lineage` assert through the backend read API, not SQL. This is the step that blocks a cold run today. | Minted once by `test/env.sh`, deactivated in `99-teardown` |
+| P2 | **`test/env.sh`** | one place that knows the stack's URLs, the org, and where the credential lives — the predecessor scripts each carried their own copy | New |
 | P3 | **The `everything` MCP server** (§6) | No MCP span exists anywhere in the local data — MCP capture is unproven end to end | New |
 | P4 | **An approver identity** — `openbox init --role approver` (§7) | Scenario F and every approval assertion need a credential that is *not* the developer's runtime key | Needs the CLI change in §8 |
 | P5 | **Mechanism-B seeding** (`projects`, `agent_definitions`) or an explicit skip | `projects` is 0 rows, so the `lineage-architecture.md` §6 convergence is untested either way | Decide (§11 OD-T-2) |
@@ -82,7 +82,7 @@ watcher works.
 ## 4. Layout
 
 ```
-testbed/
+test/
   env.sh              # stack URLs, org id, credentials, MCP config path (P1, P2)
   lib/assert.sh       # assert_eq / assert_gt / assert_json / assert_absent
   lib/sql.sh          # psql through the container, one row per call
@@ -122,7 +122,7 @@ run on a half-dead stack is worse than no run.
 Real `openbox auth` then `openbox init --provider claude-code` (default scope, enforce by default) against `http://localhost:3000`
 (the only onboarding spelling — §8). Asserts: `agents` row with
 `agent_type=developer` and `signing_required=t`; config written; hooks installed
-**scoped to the testbed project only**; `openbox dev verify` succeeds;
+**scoped to the test project only**; `openbox dev verify` succeeds;
 `openbox doctor` reports every posture flag with provenance. A planted
 stale-engine copy of our own hook (the residue of an `init` once run under a
 different `HOME`) is **replaced** on re-init and the swap names what it
@@ -273,7 +273,7 @@ NULL on the new signals (the alignment goal is not overwritten); and capture off
 ⇒ **no `thinking` key** on any row, while the turn's token numbers survive
 (ADR-0019 P3 — otherwise "no content" would pass for a client that stopped
 emitting turns). The single list a live run must confirm is
-[`MAPPING.md`](../../contracts/dev-event/MAPPING.md) §7 items 15–24 — the
+[`MAPPING.md`](../../docs/MAPPING.md) §7 items 15–24 — the
 script is that list's executable form and defers to it. **Dormant: written,
 never run** — its own header says not to cite it as evidence until it has.
 
@@ -347,7 +347,7 @@ The reference server from `modelcontextprotocol/servers` (`src/everything`), run
 stdio with no infrastructure:
 
 ```jsonc
-// testbed/mcp/everything.json  — used via --mcp-config, with --strict-mcp-config
+// test/mcp/everything.json  — used via --mcp-config, with --strict-mcp-config
 { "mcpServers": { "everything": {
     "command": "npx",
     "args": ["-y", "@modelcontextprotocol/server-everything@<pinned>"] } } }
@@ -359,7 +359,7 @@ tool roster is the fixture, and the harness should fail if it drifts.
 
 Why this server rather than a hand-rolled one:
 
-| Tool | What it buys the testbed |
+| Tool | What it buys the test |
 |---|---|
 | `echo` (verified in the server source, `tools/echo.ts`) | the deterministic happy path: a real `mcp__everything__echo` tool name exercising the adapter's `mcp_server`/`mcp_tool` extraction and core's span classification |
 | `add` | a second tool, so "which MCP tool" is a real discriminator in policy and in the approval queue |
@@ -377,7 +377,7 @@ version) rather than trusting this table; the README is the source, and it moves
 
 ## 7. Identity: `openbox init` with `--role`
 
-The testbed needs **two identities on possibly one machine** — a developer runtime
+The test needs **two identities on possibly one machine** — a developer runtime
 and an approver — and the CLI could only express the first. This is also the
 smaller half of the autonomous-approver work.
 
@@ -478,7 +478,7 @@ the capture and lineage paths have never been asserted against, only observed.
 
 ## 8a. Findings from the first run
 
-Full-suite result (2026-08-03, `./testbed/run-all.sh`):
+Full-suite result (2026-08-03, `./test/run-all.sh`):
 
 | Phase | Result |
 |---|---|
@@ -559,8 +559,8 @@ the documented posture, not a leak.
 
 ## 11. Open decisions
 
-- **OD-T-1** — **DECIDED: `testbed/` at the repo root.** It is run, not read. Its
-  local state (`testbed/.state/`) and any operator secrets (`testbed/env.local.sh`)
+- **OD-T-1** — **DECIDED: `test/` at the repo root.** It is run, not read. Its
+  local state (`test/.state/`) and any operator secrets (`test/env.local.sh`)
   are git-ignored.
 - **OD-T-2** — Seed Mechanism B (P5) or leave the convergence untested locally?
 - **OD-T-3** — **DECIDED (brian, 2026-08-03): credentialed client.** No DID, no agent

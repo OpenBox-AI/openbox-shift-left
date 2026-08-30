@@ -43,14 +43,14 @@ for _ in $(seq 1 30); do
 done
 assert_eq "no openbox process is left running" 0 "$(watchers)"
 
-tb_step "deactivate the testbed policy"
+tb_step "deactivate the test policy"
 if [ -n "$AGENT" ]; then
 	docker exec -i "$TB_PG" psql -U postgres -d "$TB_PG_DB" -q -c \
 		"update policies set is_active=false, is_current_version=false where agent_id='$AGENT';" >/dev/null 2>&1
-	assert_eq "no current policy remains for the testbed agent" 0 "$(tb_count "policies where agent_id='$AGENT' and is_current_version=true")"
+	assert_eq "no current policy remains for the test agent" 0 "$(tb_count "policies where agent_id='$AGENT' and is_current_version=true")"
 	tb_note "OPA keeps serving the last compiled bundle until the backend rebuilds it; nothing else on this stack uses this agent"
 else
-	tb_skip "deactivate the testbed policy" "no agent id in state"
+	tb_skip "deactivate the test policy" "no agent id in state"
 fi
 
 tb_step "remove the scratch project"

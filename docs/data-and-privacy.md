@@ -184,7 +184,7 @@ sends no content of its own, so turning content off does not turn usage off, and
 vice versa.
 
 An org can pin the setting so a developer cannot change it, via the managed config
-(`deploy/managed/`). `openbox doctor` always reports the effective value and where it
+(`deployments/managed/`). `openbox doctor` always reports the effective value and where it
 came from.
 
 > **Redaction at source is not implemented yet.** The server-side Guardrail
@@ -586,7 +586,7 @@ assigned directly instead of through the mapper's redactor, so it egressed unsca
 with `secret_detection` fully on; that was fixed on 2026-08-26 and conformance C42
 asserts it on the outbound bytes (`adapters/claude-code/mapper.go:225`). The same
 shape is **still live for Codex**, whose mapper has no redactor at all — see
-[COVERAGE.md §3.4](../contracts/dev-event/COVERAGE.md). Redaction runs **before**
+[COVERAGE.md §3.4](../docs/COVERAGE.md). Redaction runs **before**
 attachment in all cases — a redaction applied
 afterwards would pass every code-level test and still ship the secret, so the
 ordering is asserted on the outbound bytes (conformance C18, C26, C34).
@@ -598,4 +598,4 @@ file containing a synthetic AWS key and runs a shell command containing a marker
 both sourced from files so neither appears in the prompt. It then asserts the prompt
 marker **is** present in what reached OpenBox and the command and file markers are
 **absent from every row** the session produced. See
-[`docs/testbed/e2e.md`](testbed/e2e.md) § capture.
+[`docs/test/e2e.md`](test/e2e.md) § capture.

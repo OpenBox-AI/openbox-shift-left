@@ -20,7 +20,7 @@ import (
 // jsonschema tree into cli's go.mod for one test — a real dependency edge, and
 // this repo's rule is that adding one is a decision. Reading two declared values
 // out of the document needs neither.
-const schemaRelPath = "../../../contracts/dev-event/schema/dev-event.schema.json"
+const schemaRelPath = "../../../api/dev-event.schema.json"
 
 // The contract declares a bound on gateway_request_id (maxLength + a printable-
 // ASCII pattern); this package enforces the same rule imperatively in

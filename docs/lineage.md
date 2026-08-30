@@ -77,7 +77,7 @@ five hops with per-hop evidence. Two things to expect:
 - **A deployed commit with no authoring session has no chain** — the deploy appears in
   the feed, but the commit-anchored view returns 404 rather than a chain whose session
   hop reads "missing". That is a read-side gap, tracked in
-  [`docs/testbed/e2e.md`](testbed/e2e.md) §9a.
+  [`docs/test/e2e.md`](test/e2e.md) §9a.
 
 ## Doing it yourself
 

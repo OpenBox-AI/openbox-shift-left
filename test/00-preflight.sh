@@ -37,7 +37,7 @@ assert_nonempty "OPA is serving an org bundle" "$(tb_json "$opa" result.org)"
 
 tb_step "harness credential (P1)"
 if [ -z "${OPENBOX_CONTROL_TOKEN:-}" ]; then
-	tb_bad "control token available" "a token" "unset — run: ./testbed/env.sh mint"
+	tb_bad "control token available" "a token" "unset — run: ./test/env.sh mint"
 else
 	tb_api "/organization/$OPENBOX_ORG_ID/approvals?status=pending" >/dev/null
 	assert_eq "credential can read the org" 200 "$(tb_status)"

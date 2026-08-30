@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# testbed/lib/policy.sh — author the org policy that makes approvals happen.
+# test/lib/policy.sh — author the org policy that makes approvals happen.
 #
 # The SERVER's verdict is what mints an approval window; a local bundle saying
 # require_approval only causes the escalation. So a phase that needs approvals
@@ -24,7 +24,7 @@ result := {"decision": "require_approval", "reason": "MCP tool call requires hum
 	startswith(input.activity_type, "mcp__")
 }'
 
-TB_ALLOW_REGO='default result := {"decision": "allow", "reason": "testbed: no gate"}'
+TB_ALLOW_REGO='default result := {"decision": "allow", "reason": "test: no gate"}'
 
 # tb_policy_apply publishes a new current policy version for TB_AGENT and prints
 # its OPA path.
@@ -32,7 +32,7 @@ tb_policy_apply() { # <name> <rego>
 	python3 - "$OPENBOX_BACKEND_URL" "$TB_AGENT" "$OPENBOX_CONTROL_TOKEN" "$1" "$2" <<'PY'
 import json, sys, urllib.request, urllib.error
 backend, agent, token, name, rego = sys.argv[1:6]
-body = json.dumps({"name": name, "description": "openbox testbed policy", "rego_code": rego}).encode()
+body = json.dumps({"name": name, "description": "openbox test policy", "rego_code": rego}).encode()
 req = urllib.request.Request(f"{backend}/agent/{agent}/policies", data=body,
     headers={"Content-Type": "application/json", "X-API-Key": token}, method="POST")
 try:
@@ -71,12 +71,12 @@ tb_wait_for_opa() { # <tool> <want>
 # policy leaves the compiled bundle in place, so going back to ungated means
 # publishing an allow-only version — that is what forces OPA to rebuild.
 tb_gate_on() { # <phase-name>
-	tb_policy_apply "openbox testbed — $1" "$TB_GATE_REGO" >/dev/null
+	tb_policy_apply "openbox test — $1" "$TB_GATE_REGO" >/dev/null
 	tb_wait_for_opa Bash require_approval
 }
 
 tb_gate_off() {
-	tb_policy_apply "openbox testbed — ungated" "$TB_ALLOW_REGO" >/dev/null
+	tb_policy_apply "openbox test — ungated" "$TB_ALLOW_REGO" >/dev/null
 	tb_wait_for_opa Bash allow
 }
 

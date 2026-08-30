@@ -48,7 +48,7 @@ unset OPENBOX_FINOPS OPENBOX_CONTENT_CAPTURE 2>/dev/null || true
 # failures. A phase that reports a red alignment assertion because Redis is down
 # has told the reader something false.
 tb_step "preconditions"
-# TB_LLAMAFIREWALL_HOST is supplied by whoever runs the testbed; it mirrors the
+# TB_LLAMAFIREWALL_HOST is supplied by whoever runs the test; it mirrors the
 # stack's own LlamaFirewallHost setting and exists only so this phase can tell
 # "alignment is broken" from "alignment was never going to run".
 if [ -z "${TB_LLAMAFIREWALL_HOST:-}" ]; then

@@ -209,7 +209,7 @@ jobs:
         # them. A dormant script with a syntax error is discovered at the worst
         # possible moment — the first time someone finally has a stack.
         run: |
-          for f in testbed/*.sh testbed/lib/*.sh; do
+          for f in test/*.sh test/lib/*.sh; do
             bash -n "$f" || { echo "syntax error in $f"; exit 1; }
           done
 
@@ -226,7 +226,7 @@ jobs:
         # at — a gate that reports false positives gets disabled.
         run: |
           bad=""
-          for f in testbed/*.sh; do
+          for f in test/*.sh; do
             while IFS= read -r line; do
               case "$line" in
                 *'tb_skip "'*)

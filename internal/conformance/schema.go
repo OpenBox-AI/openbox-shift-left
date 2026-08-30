@@ -1,5 +1,5 @@
 // Package conformance validates OpenBox normalized developer-runtime events
-// against the versioned JSON Schema in contracts/dev-event/schema/.
+// against the versioned JSON Schema in api/.
 //
 // Structural validation is performed by santhosh-tekuri/jsonschema/v6, which
 // covers the whole draft. The package shipped a hand-rolled subset covering only
@@ -18,7 +18,7 @@ import (
 )
 
 // schemaRelPath is the contract schema location relative to this source file.
-const schemaRelPath = "../../contracts/dev-event/schema/dev-event.schema.json"
+const schemaRelPath = "../../api/dev-event.schema.json"
 
 // LoadSchema reads and parses the dev-event JSON Schema as a generic tree.
 // The path is resolved relative to this source file so it works regardless of

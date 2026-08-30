@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  ILLUSTRATIVE COPY. NOT LOADED, NOT INSTALLED, NOT AUTHORITATIVE.
+
+  The unit actually installed on a machine is RENDERED at install time by
+  internal/cli/laneservice with that machine's binary path, HOME, chosen address
+  and an ExitTimeOut matched to the daemon's own shutdown-grace flag. This file was
+  produced by that same renderer with placeholder values, so it shows the SHAPE
+  and nothing more. See README.md in this directory.
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>ai.openbox.telemetry</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/dev/.local/bin/openbox</string>
+    <string>telemetry</string>
+    <string>--addr</string>
+    <string>127.0.0.1:8789</string>
+    <string>--shutdown-grace</string>
+    <string>30s</string>
+  </array>
+  <key>KeepAlive</key>
+  <true/>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>ExitTimeOut</key>
+  <integer>30</integer>
+  <key>StandardOutPath</key>
+  <string>/Users/dev/.openbox/telemetry.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/dev/.openbox/telemetry.log</string>
+</dict>
+</plist>
