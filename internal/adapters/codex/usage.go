@@ -80,7 +80,7 @@ func aggregateRolloutUsage(raw []byte) (*client.Tokens, string) {
 	var seen bool
 	var model string
 
-	for _, line := range bytes.Split(raw, []byte{'\n'}) {
+	for line := range bytes.SplitSeq(raw, []byte{'\n'}) {
 		line = bytes.TrimSpace(line)
 		if len(line) == 0 {
 			continue

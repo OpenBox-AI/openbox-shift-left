@@ -97,7 +97,7 @@ type findingsSummary struct {
 // text or content (INV-2).
 func summarizeFindings(delta []byte) string {
 	s := findingsSummary{verdicts: map[string]bool{}, guardrailCats: map[string]bool{}}
-	for _, line := range bytes.Split(delta, []byte{'\n'}) {
+	for line := range bytes.SplitSeq(delta, []byte{'\n'}) {
 		if len(bytes.TrimSpace(line)) == 0 {
 			continue
 		}

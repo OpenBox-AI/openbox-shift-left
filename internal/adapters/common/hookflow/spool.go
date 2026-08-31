@@ -361,9 +361,13 @@ func (s Spool) writeRecovery(basePath string, lines [][]byte, attempt int) {
 	}
 }
 
+// NonEmptyLines the returned slice is the caller's to index -- drainRotated
+// carries `lines[i:]` into a recovery file on cancellation -- so the signature
+// stays. SplitSeq only removes the intermediate index of every line including
+// the empty ones, which on a spool of small lines is most of the allocation.
 func NonEmptyLines(data []byte) [][]byte {
 	var out [][]byte
-	for _, l := range bytes.Split(data, []byte{'\n'}) {
+	for l := range bytes.SplitSeq(data, []byte{'\n'}) {
 		if len(l) > 0 {
 			out = append(out, l)
 		}

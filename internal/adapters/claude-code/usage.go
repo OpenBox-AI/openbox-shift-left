@@ -225,7 +225,7 @@ func aggregateTurnWindow(raw []byte, sidechain bool) turnWindow {
 }
 
 func aggregateTurnWindowInto(w *turnWindow, raw []byte, sidechain bool) {
-	for _, line := range bytes.Split(raw, []byte{'\n'}) {
+	for line := range bytes.SplitSeq(raw, []byte{'\n'}) {
 		line = bytes.TrimSpace(line)
 		if len(line) == 0 {
 			continue
@@ -288,7 +288,7 @@ func aggregateUsage(raw []byte) (*client.Tokens, *client.Cost, error) {
 	var costUSD float64
 	var sawUsage, sawCost bool
 
-	for _, line := range bytes.Split(raw, []byte{'\n'}) {
+	for line := range bytes.SplitSeq(raw, []byte{'\n'}) {
 		line = bytes.TrimSpace(line)
 		if len(line) == 0 {
 			continue
