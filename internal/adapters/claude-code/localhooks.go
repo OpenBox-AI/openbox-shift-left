@@ -1,12 +1,16 @@
 package claudecode
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/tidwall/gjson"
+	"github.com/tidwall/sjson"
 )
 
 // That asymmetry is why the default inverted: a default the command cannot
@@ -31,6 +35,69 @@ var localHookEvents = []struct {
 	{Event: "SessionEnd", Timeout: 15},
 }
 
+// localHookPath addresses one event's matcher-group array. The event names are
+// closed Go constants in localHookEvents and none carries gjson path syntax,
+// which TestLocalHookEventNamesCarryNoPathSyntax holds rather than an escaper
+// nothing would ever exercise.
+func localHookPath(event string) string { return "hooks." + event }
+
+// localHookEntries decodes one event's array into the []any shape sweepStale,
+// reconcileLocalHook and hasLocalHookCommand already work on. Only the touched
+// event is decoded; the rest of the document stays as the developer's bytes.
+func localHookEntries(raw []byte, event string) ([]any, error) {
+	r := gjson.GetBytes(raw, localHookPath(event))
+	if !r.Exists() || r.Type == gjson.Null {
+		return nil, nil
+	}
+	if !r.IsArray() {
+		// The old code read a non-array as absent and then overwrote it. Refusing
+		// is the same posture as refusing an unparsable file: a shape somebody
+		// chose is not ours to replace.
+		return nil, fmt.Errorf("hooks.%s is not a JSON array; refusing to rewrite it", event)
+	}
+	var entries []any
+	if err := json.Unmarshal([]byte(r.Raw), &entries); err != nil {
+		return nil, fmt.Errorf("parse hooks.%s: %w", event, err)
+	}
+	return entries, nil
+}
+
+// setLocalHookEntries splices one event's array back in, leaving every other
+// byte of the document alone -- and leaves the array alone too when it already
+// says what it should. Without that check a re-run of `openbox init` reformats
+// every event it owns and puts a diff in the developer's working tree for no
+// change at all, which is the same unasked-for edit as reordering the document.
+//
+// The entries are re-encoded when they do change, so a foreign matcher group
+// inside a touched event keeps its content but not the key order within its own
+// objects. That is the bound of what path editing buys here.
+func setLocalHookEntries(raw []byte, event string, entries []any) ([]byte, error) {
+	encoded, err := json.Marshal(entries)
+	if err != nil {
+		return nil, fmt.Errorf("encode hooks.%s: %w", event, err)
+	}
+	if canonicalJSONEqual([]byte(gjson.GetBytes(raw, localHookPath(event)).Raw), encoded) {
+		return raw, nil
+	}
+	return sjson.SetRawBytes(raw, localHookPath(event), encoded)
+}
+
+// canonicalJSONEqual compares two JSON values by content rather than by bytes.
+// Both sides go through the same encoder, which sorts object keys, so a
+// difference in formatting or key order is not a difference.
+func canonicalJSONEqual(a, b []byte) bool {
+	if len(a) == 0 || len(b) == 0 {
+		return false
+	}
+	var av, bv any
+	if json.Unmarshal(a, &av) != nil || json.Unmarshal(b, &bv) != nil {
+		return false
+	}
+	ac, aErr := json.Marshal(av)
+	bc, bErr := json.Marshal(bv)
+	return aErr == nil && bErr == nil && bytes.Equal(ac, bc)
+}
+
 func writeLocalHooks(projectDir, engine string) error {
 	dir, err := filepath.Abs(projectDir)
 	if err != nil {
@@ -41,24 +108,41 @@ func writeLocalHooks(projectDir, engine string) error {
 	}
 	settingsPath := filepath.Join(dir, ".claude", "settings.local.json")
 
-	settings := map[string]any{}
-	if raw, err := os.ReadFile(settingsPath); err == nil {
-		if err := json.Unmarshal(raw, &settings); err != nil {
-			return fmt.Errorf("local-hooks: %s exists but is not valid JSON; fix or remove it first: %w", settingsPath, err)
+	// The whole document stays as bytes and only the events below are rewritten.
+	// A map[string]any round trip preserved every key but alphabetised and
+	// reindented all of them, in a file inside the developer's own repository.
+	//
+	// The validity check is explicit rather than a side effect of Unmarshal
+	// failing: sjson edits a malformed document without complaint, and Claude
+	// Code cannot parse a project's settings at all if this file is broken --
+	// every hook in it stops applying, which is a governance failure that
+	// reports itself as nothing.
+	before, err := os.ReadFile(settingsPath)
+	switch {
+	case err == nil:
+		if !gjson.ValidBytes(before) {
+			detail := json.Unmarshal(before, new(any))
+			return fmt.Errorf("local-hooks: %s exists but is not valid JSON; fix or remove it first: %w",
+				settingsPath, detail)
 		}
-	} else if !os.IsNotExist(err) {
+	case os.IsNotExist(err):
+		before = nil
+	default:
 		return fmt.Errorf("local-hooks: read %s: %w", settingsPath, err)
 	}
-
-	hooks, _ := settings["hooks"].(map[string]any)
-	if hooks == nil {
-		hooks = map[string]any{}
+	out := before
+	if len(out) == 0 {
+		out = []byte("{}")
 	}
+
 	stale := map[string][]string{}
 	var redundant []string
 	for _, ev := range localHookEvents {
 		command := localHookCommand(engine, "hook claude-code "+ev.Event)
-		entries, _ := hooks[ev.Event].([]any)
+		entries, err := localHookEntries(out, ev.Event)
+		if err != nil {
+			return fmt.Errorf("local-hooks: %s in %s: %w", ev.Event, settingsPath, err)
+		}
 		entries, dropped, deduped := sweepStale(entries, ev.Event, engine)
 		for _, path := range dropped {
 			stale[path] = append(stale[path], ev.Event)
@@ -66,43 +150,48 @@ func writeLocalHooks(projectDir, engine string) error {
 		if deduped {
 			redundant = append(redundant, ev.Event)
 		}
-		if hasLocalHookCommand(entries, command) {
+		if !hasLocalHookCommand(entries, command) {
+			hook := map[string]any{"type": "command", "command": command, "timeout": ev.Timeout}
+			if ev.StatusMessage != "" {
+				hook["statusMessage"] = ev.StatusMessage
+			}
+			handlers := []any{hook}
+			if ev.Event == "PreToolUse" {
+				handlers = append(handlers, map[string]any{
+					"type":        "command",
+					"command":     localHookCommand(engine, "rewake claude-code"),
+					"asyncRewake": true,
+					"timeout":     rewakeHookTimeoutSec,
+				})
+			}
+			entries = append(entries, map[string]any{"matcher": ev.Matcher, "hooks": handlers})
+		} else {
 			entries = reconcileLocalHook(entries, command, ev.Timeout, ev.StatusMessage)
 			if ev.Event == "PreToolUse" {
 				entries = reconcileLocalHook(entries, localHookCommand(engine, "rewake claude-code"), rewakeHookTimeoutSec, "")
 			}
-			hooks[ev.Event] = entries
-			continue
 		}
-		hook := map[string]any{"type": "command", "command": command, "timeout": ev.Timeout}
-		if ev.StatusMessage != "" {
-			hook["statusMessage"] = ev.StatusMessage
+		if out, err = setLocalHookEntries(out, ev.Event, entries); err != nil {
+			return fmt.Errorf("local-hooks: %s in %s: %w", ev.Event, settingsPath, err)
 		}
-		handlers := []any{hook}
-		if ev.Event == "PreToolUse" {
-			handlers = append(handlers, map[string]any{
-				"type":        "command",
-				"command":     localHookCommand(engine, "rewake claude-code"),
-				"asyncRewake": true,
-				"timeout":     rewakeHookTimeoutSec,
-			})
-		}
-		entries = append(entries, map[string]any{
-			"matcher": ev.Matcher,
-			"hooks":   handlers,
-		})
-		hooks[ev.Event] = entries
 	}
-	settings["hooks"] = hooks
+	if len(before) == 0 {
+		// Nothing of the developer's to preserve in a file this created, and sjson
+		// splices compactly, so give it the indentation a person can read.
+		var doc any
+		if json.Unmarshal(out, &doc) == nil {
+			if pretty, mErr := json.MarshalIndent(doc, "", "  "); mErr == nil {
+				out = append(pretty, '\n')
+			}
+		}
+	} else if before[len(before)-1] == '\n' && (len(out) == 0 || out[len(out)-1] != '\n') {
+		out = append(out, '\n') // sjson's splice can consume the trailing newline
+	}
 
 	if err := os.MkdirAll(filepath.Dir(settingsPath), 0o755); err != nil {
 		return fmt.Errorf("local-hooks: mkdir %s: %w", filepath.Dir(settingsPath), err)
 	}
-	out, err := json.MarshalIndent(settings, "", "  ")
-	if err != nil {
-		return fmt.Errorf("local-hooks: marshal settings: %w", err)
-	}
-	if err := writeFileAtomic(settingsPath, append(out, '\n'), 0o644); err != nil {
+	if err := writeFileAtomic(settingsPath, out, 0o644); err != nil {
 		return fmt.Errorf("local-hooks: write %s: %w", settingsPath, err)
 	}
 

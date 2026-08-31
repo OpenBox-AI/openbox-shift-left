@@ -1,6 +1,7 @@
 package codex
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -10,6 +11,8 @@ import (
 
 	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/devconfig"
 	providerspi "github.com/openbox-ai/openbox-shift-left/internal/provider"
+	"github.com/tidwall/gjson"
+	"github.com/tidwall/sjson"
 )
 
 // CredentialRef is the install-time seam's credential coordinate type (shared
@@ -90,9 +93,32 @@ func (i Installer) Install(ref CredentialRef) error {
 	return i.writeConfig(ref)
 }
 
-type hooksFile struct {
-	Description string                     `json:"description,omitempty"`
-	Hooks       map[string]json.RawMessage `json:"hooks"`
+// hookedEvents are the five Codex events this installer maintains entries for.
+// Every other key in the file, at any depth, is somebody else's.
+var hookedEvents = []HookName{
+	HookSessionStart, HookUserPromptSubmit, HookPreToolUse, HookPostToolUse, HookSessionEnd,
+}
+
+// hooksEventPath addresses one event inside the hooks object. The names are
+// closed Go constants and none carries gjson path syntax, which
+// TestHookedEventNamesCarryNoPathSyntax holds rather than an escaper nothing
+// would ever exercise.
+func hooksEventPath(ev HookName) string { return "hooks." + string(ev) }
+
+// canonicalJSONEqual compares two JSON values by content rather than by bytes.
+// Both sides go through the same encoder, which sorts object keys, so a
+// difference in formatting or key order is not a difference.
+func canonicalJSONEqual(a, b []byte) bool {
+	if len(a) == 0 || len(b) == 0 {
+		return false
+	}
+	var av, bv any
+	if json.Unmarshal(a, &av) != nil || json.Unmarshal(b, &bv) != nil {
+		return false
+	}
+	ac, aErr := json.Marshal(av)
+	bc, bErr := json.Marshal(bv)
+	return aErr == nil && bErr == nil && bytes.Equal(ac, bc)
 }
 
 type matcherGroup struct {
@@ -111,36 +137,62 @@ type commandHandler struct {
 func (i Installer) writeHooks() error {
 	path := i.hooksPath()
 
-	hf := hooksFile{Hooks: map[string]json.RawMessage{}}
-	raw, err := os.ReadFile(path)
+	// Path edits rather than a decode/re-encode round trip. This is Codex's file,
+	// not ours: binding it to a struct dropped every top-level key the struct
+	// does not name, and re-marshalling the hooks map alphabetised the event
+	// order Codex itself wrote. Editing the bytes in place touches only the five
+	// events below.
+	before, err := os.ReadFile(path)
 	switch {
 	case err == nil:
-		if err := json.Unmarshal(raw, &hf); err != nil {
-			return fmt.Errorf("codex install: refusing to modify unparsable %s: %w", path, err)
-		}
-		if hf.Hooks == nil {
-			hf.Hooks = map[string]json.RawMessage{}
+		if !gjson.ValidBytes(before) {
+			detail := json.Unmarshal(before, new(any))
+			return fmt.Errorf("codex install: refusing to modify unparsable %s: %w", path, detail)
 		}
 	case os.IsNotExist(err):
+		before = nil
 	default:
 		return fmt.Errorf("codex install: read %s: %w", path, err)
 	}
-	if hf.Description == "" {
-		hf.Description = hooksDescription
+
+	out := before
+	if len(out) == 0 {
+		out = []byte("{}")
+	}
+	if !gjson.GetBytes(out, "description").Exists() {
+		if out, err = sjson.SetBytes(out, "description", hooksDescription); err != nil {
+			return fmt.Errorf("codex install: hooks.json description: %w", err)
+		}
 	}
 
-	for _, ev := range []HookName{HookSessionStart, HookUserPromptSubmit, HookPreToolUse, HookPostToolUse, HookSessionEnd} {
-		merged, err := i.mergeEvent(hf.Hooks[string(ev)], ev)
+	for _, ev := range hookedEvents {
+		existing := gjson.GetBytes(out, hooksEventPath(ev))
+		merged, err := i.mergeEvent(json.RawMessage(existing.Raw), ev)
 		if err != nil {
 			return fmt.Errorf("codex install: hooks.json event %s: %w", ev, err)
 		}
-		hf.Hooks[string(ev)] = merged
+		// Skip the splice when the event already says what it should. Without
+		// this, a re-run of `openbox init` reformats every event it owns and puts
+		// a diff in Codex's file for no change at all.
+		if canonicalJSONEqual([]byte(existing.Raw), merged) {
+			continue
+		}
+		if out, err = sjson.SetRawBytes(out, hooksEventPath(ev), merged); err != nil {
+			return fmt.Errorf("codex install: hooks.json event %s: %w", ev, err)
+		}
 	}
+	if len(before) == 0 {
+		// Nothing of Codex's to preserve in a file this install created, and sjson
+		// splices compactly, so give it the indentation a person can read.
+		var doc any
+		if json.Unmarshal(out, &doc) == nil {
+			if pretty, mErr := json.MarshalIndent(doc, "", "  "); mErr == nil {
+				out = pretty
+			}
+		}
+	}
+	out = bytes.TrimRight(out, "\n")
 
-	out, err := json.MarshalIndent(hf, "", "  ")
-	if err != nil {
-		return err
-	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return fmt.Errorf("codex install: hooks dir: %w", err)
 	}

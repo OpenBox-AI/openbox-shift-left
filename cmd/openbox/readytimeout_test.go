@@ -76,8 +76,13 @@ func TestWaitForPortFreeGivesUpAtItsDeadline(t *testing.T) {
 		if waitForPortFree(held, gatewayReadyTimeout) {
 			t.Fatalf("waitForPortFree reported %s free while a listener held it", held)
 		}
-		if d := time.Since(start); d != gatewayReadyTimeout {
-			t.Errorf("gave up after %v, want exactly %v", d, gatewayReadyTimeout)
+		// The loop checks the port, then the deadline, then sleeps, so it can
+		// overshoot by one poll interval and no more. Asserting an exact instant
+		// would be asserting the wrong thing; asserting only "eventually" would
+		// not notice the deadline being ignored.
+		const poll = 100 * time.Millisecond
+		if d := time.Since(start); d < gatewayReadyTimeout || d >= gatewayReadyTimeout+2*poll {
+			t.Errorf("gave up after %v, want %v plus at most one %v poll", d, gatewayReadyTimeout, poll)
 		}
 	})
 }

@@ -26,6 +26,8 @@ require (
 	github.com/kardianos/service v1.3.0
 	github.com/pelletier/go-toml/v2 v2.4.3
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.3
+	github.com/tidwall/gjson v1.19.0
+	github.com/tidwall/sjson v1.2.5
 	github.com/zricethezav/gitleaks/v8 v8.30.1
 	go.opentelemetry.io/collector/component v1.65.0
 	go.opentelemetry.io/collector/config/configgrpc v1.65.0
@@ -114,6 +116,8 @@ require (
 	github.com/subosito/gotenv v1.6.0 // indirect
 	github.com/tetratelabs/wazero v1.9.0 // indirect
 	github.com/therootcompany/xz v1.0.1 // indirect
+	github.com/tidwall/match v1.1.1 // indirect
+	github.com/tidwall/pretty v1.2.0 // indirect
 	github.com/ulikunitz/xz v0.5.12 // indirect
 	github.com/wasilibs/go-re2 v1.9.0 // indirect
 	github.com/wasilibs/wazero-helpers v0.0.0-20240620070341-3dff1577cd52 // indirect

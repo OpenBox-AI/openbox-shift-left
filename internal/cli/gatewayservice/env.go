@@ -13,6 +13,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/tidwall/gjson"
+	"github.com/tidwall/sjson"
 )
 
 // EnvKey is the one variable this package owns in a settings env block. It is
@@ -35,20 +38,18 @@ func priorEnvPath(homeDir string) string {
 // than claiming success silently.
 func WriteEnv(homeDir, addr string) (replaced []string, err error) {
 	path := SettingsPath(homeDir)
-	settings, err := readSettings(path)
+	before, err := readSettings(path)
 	if err != nil {
 		return nil, err
 	}
-
-	env, _ := settings["env"].(map[string]any)
-	if env == nil {
-		env = map[string]any{}
+	if err := checkEnvShape(before, path); err != nil {
+		return nil, err
 	}
 
 	want := "http://" + addr
-	if existing, present := env[EnvKey]; present {
-		if s, _ := existing.(string); s != want {
-			replaced = append(replaced, fmt.Sprintf("%s: %v -> %s", EnvKey, existing, want))
+	if existing := gjson.GetBytes(before, envPath(EnvKey)); existing.Exists() {
+		if s := existing.String(); s != want {
+			replaced = append(replaced, fmt.Sprintf("%s: %v -> %s", EnvKey, s, want))
 			if s != "" && !ourGatewayURL(s) && !hasPriorEnv(homeDir) {
 				if err := savePriorEnv(homeDir, s); err != nil {
 					return replaced, err
@@ -56,10 +57,12 @@ func WriteEnv(homeDir, addr string) (replaced []string, err error) {
 			}
 		}
 	}
-	env[EnvKey] = want
-	settings["env"] = env
+	after, err := sjson.SetBytes(before, envPath(EnvKey), want)
+	if err != nil {
+		return replaced, fmt.Errorf("gatewayservice: setting %s in %s: %w", EnvKey, path, err)
+	}
 
-	return replaced, writeSettings(path, settings)
+	return replaced, writeSettings(path, finishSettings(indentIfNew(after, before), before))
 }
 
 // RemoveEnvDetailed is the uninstall half. It removes only owned keys, and
@@ -72,36 +75,45 @@ func RemoveEnvDetailed(homeDir string) (removed []string, restored string, err e
 
 func removeEnv(homeDir string) (removed []string, restored string, err error) {
 	path := SettingsPath(homeDir)
-	settings, err := readSettings(path)
+	before, err := readSettings(path)
 	if err != nil {
 		return nil, "", err
 	}
-	env, _ := settings["env"].(map[string]any)
-	if env == nil {
+	if err := checkEnvShape(before, path); err != nil {
+		return nil, "", err
+	}
+	if !gjson.GetBytes(before, "env").Exists() {
 		return nil, "", nil
 	}
+	after := before
 	prior := loadPriorEnv(homeDir)
 	for key := range ownedEnvKeys {
-		if _, present := env[key]; !present {
+		if !gjson.GetBytes(after, envPath(key)).Exists() {
 			continue
 		}
 		if key == EnvKey && prior != "" {
-			env[key] = prior
+			if after, err = sjson.SetBytes(after, envPath(key), prior); err != nil {
+				return nil, "", fmt.Errorf("gatewayservice: restoring %s in %s: %w", key, path, err)
+			}
 			restored = prior
 			continue
 		}
-		delete(env, key)
+		if after, err = sjson.DeleteBytes(after, envPath(key)); err != nil {
+			return nil, "", fmt.Errorf("gatewayservice: removing %s from %s: %w", key, path, err)
+		}
 		removed = append(removed, key)
 	}
-	if len(env) == 0 {
-		delete(settings, "env")
-	} else {
-		settings["env"] = env
+	// An org that put its own variables in the env block must not lose it, and a
+	// file that had none must not gain an empty one.
+	if envKeyCount(after) == 0 {
+		if after, err = sjson.DeleteBytes(after, "env"); err != nil {
+			return nil, "", fmt.Errorf("gatewayservice: removing the empty env block from %s: %w", path, err)
+		}
 	}
 	if len(removed) == 0 && restored == "" {
 		return nil, "", nil
 	}
-	if err := writeSettings(path, settings); err != nil {
+	if err := writeSettings(path, finishSettings(after, before)); err != nil {
 		return nil, "", err
 	}
 	if restored != "" {
@@ -161,55 +173,125 @@ func loadPriorEnv(homeDir string) string {
 // CurrentEnv reports what the settings file currently sets, so a caller can
 // decide whether it has anything to say; the read side of the opt-out rule.
 func CurrentEnv(homeDir string) (value string, present bool) {
-	settings, err := readSettings(SettingsPath(homeDir))
+	raw, err := readSettings(SettingsPath(homeDir))
 	if err != nil {
 		return "", false
 	}
-	env, _ := settings["env"].(map[string]any)
-	if env == nil {
+	v := gjson.GetBytes(raw, envPath(EnvKey))
+	if !v.Exists() {
 		return "", false
 	}
-	v, ok := env[EnvKey]
-	if !ok {
-		return "", false
-	}
-	s, _ := v.(string)
-	return s, true
+	return v.String(), true
 }
 
-// readSettings decoding into a typed struct is how a writer silently deletes
-// configuration it was never taught about.
-func readSettings(path string) (map[string]any, error) {
+// readSettings returns the file's bytes. Decoding into a typed struct is how a
+// writer silently deletes configuration it was never taught about; decoding
+// into map[string]any is how it silently alphabetises and reindents the whole
+// document, because Go marshals a map in sorted key order.
+//
+// The validity check is explicit now rather than a side effect of Unmarshal
+// failing: sjson edits a malformed document without complaint, and this file is
+// one this package refuses to rewrite when it cannot parse it. gjson's
+// validator on purpose -- what decides a document is safe to edit has to be
+// what edits it -- with encoding/json used only to explain a rejection.
+func readSettings(path string) ([]byte, error) {
 	raw, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
-		return map[string]any{}, nil
+		return nil, nil
 	}
 	if err != nil {
 		return nil, fmt.Errorf("gatewayservice: reading %s: %w", path, err)
 	}
-	if len(raw) == 0 {
-		return map[string]any{}, nil
+	if len(strings.TrimSpace(string(raw))) == 0 {
+		return nil, nil
 	}
-	var settings map[string]any
-	if err := json.Unmarshal(raw, &settings); err != nil {
-		return nil, fmt.Errorf("gatewayservice: %s is not valid JSON, refusing to rewrite it: %w", path, err)
+	if !gjson.ValidBytes(raw) {
+		if detail := json.Unmarshal(raw, new(any)); detail != nil {
+			return raw, fmt.Errorf("gatewayservice: %s is not valid JSON, refusing to rewrite it: %w", path, detail)
+		}
+		return raw, fmt.Errorf("gatewayservice: %s is not valid JSON, refusing to rewrite it", path)
 	}
-	if settings == nil {
-		settings = map[string]any{}
-	}
-	return settings, nil
+	return raw, nil
 }
 
-func writeSettings(path string, settings map[string]any) error {
+// envPath, checkEnvShape, envKeyCount, finishSettings and indentIfNew are the
+// same four lines of path handling internal/cli/activation carries. They are
+// duplicated rather than shared: a package for thirty lines would be a new
+// layout boundary for no gain, and the two callers edit the same document for
+// different reasons.
+//
+// The escape matters even though EnvKey holds no path syntax today: gjson reads
+// `.` as a separator and `*?#|@` as query syntax, and ownedEnvKeys is a set
+// somebody will add to.
+func envPath(key string) string {
+	var b strings.Builder
+	b.WriteString("env.")
+	for _, r := range key {
+		switch r {
+		case '.', '*', '?', '#', '|', '@', '\\':
+			b.WriteByte('\\')
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
+}
+
+func checkEnvShape(raw []byte, path string) error {
+	env := gjson.GetBytes(raw, "env")
+	if !env.Exists() || env.Type == gjson.Null {
+		return nil
+	}
+	if !env.IsObject() {
+		return fmt.Errorf("gatewayservice: `env` in %s is not a JSON object; refusing to rewrite it", path)
+	}
+	return nil
+}
+
+func envKeyCount(raw []byte) int {
+	n := 0
+	gjson.GetBytes(raw, "env").ForEach(func(gjson.Result, gjson.Result) bool {
+		n++
+		return true
+	})
+	return n
+}
+
+// finishSettings makes the bytes about to be written end the way the ones read
+// did; sjson's splice can consume a trailing newline.
+func finishSettings(raw, before []byte) []byte {
+	endedWithNewline := len(before) == 0 || before[len(before)-1] == '\n'
+	has := len(raw) > 0 && raw[len(raw)-1] == '\n'
+	switch {
+	case endedWithNewline && !has:
+		return append(raw, '\n')
+	case !endedWithNewline && has:
+		return raw[:len(raw)-1]
+	}
+	return raw
+}
+
+// indentIfNew reindents a document this package created from nothing; there are
+// no developer bytes in it to preserve, and sjson splices compactly.
+func indentIfNew(raw, before []byte) []byte {
+	if len(before) != 0 {
+		return raw
+	}
+	var doc any
+	if json.Unmarshal(raw, &doc) != nil {
+		return raw
+	}
+	out, err := json.MarshalIndent(doc, "", "  ")
+	if err != nil {
+		return raw
+	}
+	return append(out, '\n')
+}
+
+func writeSettings(path string, raw []byte) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return fmt.Errorf("gatewayservice: creating %s: %w", filepath.Dir(path), err)
 	}
-	out, err := json.MarshalIndent(settings, "", "  ")
-	if err != nil {
-		return fmt.Errorf("gatewayservice: encoding settings: %w", err)
-	}
-	out = append(out, '\n')
-	if err := writeFileAtomic(path, out, 0o644); err != nil {
+	if err := writeFileAtomic(path, raw, 0o644); err != nil {
 		return fmt.Errorf("gatewayservice: writing %s: %w", path, err)
 	}
 	return nil
