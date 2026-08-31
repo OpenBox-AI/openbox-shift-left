@@ -27,8 +27,8 @@ probes/refusal-injector/refusal-injector
 !.env.example
 
 # Testbed local state (config isolation, minted credentials, session output)
-testbed/.state/
-testbed/env.local.sh
+test/.state/
+test/env.local.sh
 
 # Local agent tooling state (never project content)
 .fab7/
