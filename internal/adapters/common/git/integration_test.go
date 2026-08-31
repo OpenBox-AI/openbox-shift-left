@@ -4,10 +4,11 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"reflect"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/google/go-cmp/cmp"
 )
 
 // hookBin is the compiled `openbox`, built once for the whole matrix.
@@ -97,8 +98,8 @@ func sess(id string) []string { return []string{"OPENBOX_SESSION=" + id} }
 func TestE2E_PlainCommitStamps(t *testing.T) {
 	r := newRepo(t)
 	r.git(sess("sess-A"), "commit", "--allow-empty", "-m", "work")
-	if got := r.headSessions(); !reflect.DeepEqual(got, []string{"sess-A"}) {
-		t.Fatalf("HEAD sessions = %v, want [sess-A]", got)
+	if diff := cmp.Diff([]string{"sess-A"}, r.headSessions()); diff != "" {
+		t.Fatalf("HEAD sessions (-want +got):\n%s", diff)
 	}
 }
 
@@ -106,8 +107,8 @@ func TestE2E_AmendIsIdempotent(t *testing.T) {
 	r := newRepo(t)
 	r.git(sess("sess-A"), "commit", "--allow-empty", "-m", "work")
 	r.git(sess("sess-A"), "commit", "--amend", "--allow-empty", "--no-edit")
-	if got := r.headSessions(); !reflect.DeepEqual(got, []string{"sess-A"}) {
-		t.Fatalf("after amend, HEAD sessions = %v, want [sess-A]", got)
+	if diff := cmp.Diff([]string{"sess-A"}, r.headSessions()); diff != "" {
+		t.Fatalf("after amend, HEAD sessions (-want +got):\n%s", diff)
 	}
 }
 
@@ -128,8 +129,8 @@ func TestE2E_PlainRebasePreservesTrailer(t *testing.T) {
 	r.git(sess("sess-main"), "commit", "--allow-empty", "-m", "main moves on")
 	r.git(nil, "checkout", "-q", "feature")
 	r.git(nil, "rebase", "main")
-	if got := r.headSessions(); !reflect.DeepEqual(got, []string{"sess-A"}) {
-		t.Fatalf("after rebase, HEAD sessions = %v, want [sess-A]", got)
+	if diff := cmp.Diff([]string{"sess-A"}, r.headSessions()); diff != "" {
+		t.Fatalf("after rebase, HEAD sessions (-want +got):\n%s", diff)
 	}
 }
 
@@ -168,9 +169,8 @@ func TestE2E_FixupDropsItsSession(t *testing.T) {
 		"GIT_EDITOR=true",
 	}, "rebase", "-i", "HEAD~2")
 
-	got := r.headSessions()
-	if !reflect.DeepEqual(got, []string{"sess-A"}) {
-		t.Fatalf("after fixup, HEAD sessions = %v, want [sess-A] (sess-B is the documented loss)", got)
+	if diff := cmp.Diff([]string{"sess-A"}, r.headSessions()); diff != "" {
+		t.Fatalf("after fixup, HEAD sessions (-want +got):\n%s\nsess-B is the documented loss", diff)
 	}
 }
 
@@ -196,8 +196,8 @@ func TestE2E_NotesMirror(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []string{"sess-A", "sess-B"}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("note mirror = %v, want %v", got, want)
+	if diff := cmp.Diff(want, got); diff != "" {
+		t.Fatalf("note mirror (-want +got):\n%s", diff)
 	}
 	r.git(nil, "commit", "--allow-empty", "-m", "second")
 	if got, err := r.g.ReadNoteMirror("HEAD"); err != nil || len(got) != 0 {
@@ -220,8 +220,8 @@ func TestE2E_RegistryAttributesCommit(t *testing.T) {
 		t.Fatal(err)
 	}
 	r.git([]string{"OPENBOX_SESSION_DIR=" + regDir}, "commit", "--allow-empty", "-m", "agent work")
-	if got := r.headSessions(); !reflect.DeepEqual(got, []string{"sess-reg"}) {
-		t.Fatalf("registry attribution: HEAD sessions = %v, want [sess-reg]", got)
+	if diff := cmp.Diff([]string{"sess-reg"}, r.headSessions()); diff != "" {
+		t.Fatalf("registry attribution: HEAD sessions (-want +got):\n%s", diff)
 	}
 }
 
@@ -242,11 +242,11 @@ func TestE2E_RegistryParallelTwoRepos(t *testing.T) {
 	rA.git(env, "commit", "--allow-empty", "-m", "work in A")
 	rB.git(env, "commit", "--allow-empty", "-m", "work in B")
 
-	if got := rA.headSessions(); !reflect.DeepEqual(got, []string{"sess-A"}) {
-		t.Fatalf("repo A → %v, want [sess-A]", got)
+	if diff := cmp.Diff([]string{"sess-A"}, rA.headSessions()); diff != "" {
+		t.Fatalf("repo A (-want +got):\n%s", diff)
 	}
-	if got := rB.headSessions(); !reflect.DeepEqual(got, []string{"sess-B"}) {
-		t.Fatalf("repo B → %v, want [sess-B]", got)
+	if diff := cmp.Diff([]string{"sess-B"}, rB.headSessions()); diff != "" {
+		t.Fatalf("repo B (-want +got):\n%s", diff)
 	}
 }
 

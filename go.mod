@@ -18,6 +18,7 @@ go 1.27.0
 // the pre-collapse set instead of trusted.
 require (
 	github.com/elazarl/goproxy v1.9.0
+	github.com/google/go-cmp v0.7.0
 	github.com/google/renameio/v2 v2.0.2
 	github.com/joho/godotenv v1.5.1
 	github.com/kardianos/service v1.3.0

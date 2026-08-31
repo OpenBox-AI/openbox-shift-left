@@ -3,8 +3,9 @@ package depguard
 import (
 	"os"
 	"path/filepath"
-	"reflect"
 	"testing"
+
+	"github.com/google/go-cmp/cmp"
 )
 
 // The walker replaces five guards, so its failure modes are the phase's failure
@@ -40,12 +41,12 @@ import (
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := []string{"github.com/example/dep"}; !reflect.DeepEqual(got.external, want) {
-		t.Errorf("external: got %v, want %v", got.external, want)
+	if diff := cmp.Diff([]string{"github.com/example/dep"}, got.external); diff != "" {
+		t.Errorf("external (-want +got):\n%s", diff)
 	}
 	want := []string{repoPrefix + "/client", repoPrefix + "/decision/sub"}
-	if !reflect.DeepEqual(got.repoLocal, want) {
-		t.Errorf("repoLocal: got %v, want %v (the self-subtree import must be dropped)", got.repoLocal, want)
+	if diff := cmp.Diff(want, got.repoLocal); diff != "" {
+		t.Errorf("repoLocal (-want +got):\n%s\nthe self-subtree import must be dropped", diff)
 	}
 }
 
@@ -70,8 +71,8 @@ func TestSubtreeImports_SeesBuildTaggedFiles(t *testing.T) {
 		"u_unix.go":    "//go:build !windows\n\npackage a\nimport \"github.com/unix/only\"\n",
 	})
 	got, _ := subtreeImports(root, "none")
-	if want := []string{"github.com/unix/only", "github.com/win/only"}; !reflect.DeepEqual(got.external, want) {
-		t.Errorf("got %v, want %v", got.external, want)
+	if diff := cmp.Diff([]string{"github.com/unix/only", "github.com/win/only"}, got.external); diff != "" {
+		t.Errorf("external (-want +got):\n%s", diff)
 	}
 }
 
@@ -83,8 +84,8 @@ func TestSubtreeImports_IncludesTestFiles(t *testing.T) {
 		"a_test.go": "package a\nimport \"github.com/test/only\"\n",
 	})
 	got, _ := subtreeImports(root, "none")
-	if want := []string{"github.com/test/only"}; !reflect.DeepEqual(got.external, want) {
-		t.Errorf("got %v, want %v", got.external, want)
+	if diff := cmp.Diff([]string{"github.com/test/only"}, got.external); diff != "" {
+		t.Errorf("external (-want +got):\n%s", diff)
 	}
 }
 
@@ -94,8 +95,8 @@ func TestSubtreeImports_AliasedBlankAndDotImportsCount(t *testing.T) {
 	})
 	got, _ := subtreeImports(root, "none")
 	want := []string{"github.com/a/one", "github.com/b/two", "github.com/c/three"}
-	if !reflect.DeepEqual(got.external, want) {
-		t.Errorf("got %v, want %v", got.external, want)
+	if diff := cmp.Diff(want, got.external); diff != "" {
+		t.Errorf("external (-want +got):\n%s", diff)
 	}
 }
 
@@ -107,8 +108,8 @@ func TestSubtreeImports_WalksSubdirectories(t *testing.T) {
 	})
 	got, _ := subtreeImports(root, "none")
 	want := []string{"github.com/deep/dep", "github.com/deeper/dep"}
-	if !reflect.DeepEqual(got.external, want) {
-		t.Errorf("got %v, want %v; a one-level glob stops covering the subtree the day it grows a package", got.external, want)
+	if diff := cmp.Diff(want, got.external); diff != "" {
+		t.Errorf("external (-want +got):\n%s\na one-level glob stops covering the subtree the day it grows a package", diff)
 	}
 }
 
@@ -127,8 +128,8 @@ func TestSubtreeImports_DotInFirstSegmentIsTheStdlibRule(t *testing.T) {
 		"a.go": "package a\nimport (\n\t\"internal/thing\"\n\t\"example.com/x\"\n)\n",
 	})
 	got, _ := subtreeImports(root, "none")
-	if want := []string{"example.com/x"}; !reflect.DeepEqual(got.external, want) {
-		t.Errorf("got %v, want %v", got.external, want)
+	if diff := cmp.Diff([]string{"example.com/x"}, got.external); diff != "" {
+		t.Errorf("external (-want +got):\n%s", diff)
 	}
 }
 
@@ -148,8 +149,11 @@ func TestUnallowed_PrefixSemanticsAndItsBoundary(t *testing.T) {
 			[]string{repoPrefix + "/gatewayfoo"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := unallowed(tc.in, allow); !reflect.DeepEqual(got, tc.want) {
-				t.Errorf("got %v, want %v", got, tc.want)
+			// No EquateEmpty: nil and []string{} are different answers here. A
+			// guard that returns an empty slice where it means "nothing
+			// unallowed" is still a different shape from returning nothing.
+			if diff := cmp.Diff(tc.want, unallowed(tc.in, allow)); diff != "" {
+				t.Errorf("unallowed (-want +got):\n%s", diff)
 			}
 		})
 	}
@@ -158,7 +162,7 @@ func TestUnallowed_PrefixSemanticsAndItsBoundary(t *testing.T) {
 func TestDead_ReportsAnEntryNothingImports(t *testing.T) {
 	allow := map[string]bool{"github.com/used/x": true, "github.com/unused/y": true}
 	got := dead([]string{"github.com/used/x/sub"}, allow)
-	if want := []string{"github.com/unused/y"}; !reflect.DeepEqual(got, want) {
-		t.Errorf("got %v, want %v", got, want)
+	if diff := cmp.Diff([]string{"github.com/unused/y"}, got); diff != "" {
+		t.Errorf("dead (-want +got):\n%s", diff)
 	}
 }

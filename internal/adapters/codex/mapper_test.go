@@ -2,11 +2,11 @@ package codex
 
 import (
 	"encoding/json"
-	"reflect"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/google/go-cmp/cmp"
 	"github.com/openbox-ai/openbox-shift-left/internal/client"
 )
 
@@ -142,8 +142,11 @@ func TestMap_LifecycleAndToolEvents(t *testing.T) {
 			case tt.wantSpan != nil && got.Span == nil:
 				t.Errorf("expected span %+v, got nil", tt.wantSpan)
 			case tt.wantSpan != nil:
-				if !reflect.DeepEqual(*got.Span, *tt.wantSpan) {
-					t.Errorf("span = %+v, want %+v", *got.Span, *tt.wantSpan)
+				// No EquateEmpty: Span carries RequestHeaders/ResponseHeaders as
+				// maps, and an absent header map is not an empty one. The mapper
+				// never sets either here, so nil is the shape being asserted.
+				if diff := cmp.Diff(*tt.wantSpan, *got.Span); diff != "" {
+					t.Errorf("span mismatch (-want +got):\n%s", diff)
 				}
 			}
 		})

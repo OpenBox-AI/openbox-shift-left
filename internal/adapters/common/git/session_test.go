@@ -2,8 +2,9 @@ package git
 
 import (
 	"fmt"
-	"reflect"
 	"testing"
+
+	"github.com/google/go-cmp/cmp"
 )
 
 func TestSessionResolver_Env(t *testing.T) {
@@ -27,8 +28,10 @@ func TestSessionResolver_Env(t *testing.T) {
 				}
 				return ""
 			}}
-			if got := r.Resolve(""); !reflect.DeepEqual(got, c.want) {
-				t.Fatalf("Resolve() = %v, want %v", got, c.want)
+			// No EquateEmpty: a resolver returning no ids and one returning an
+			// empty slice are different answers about whether it found a session.
+			if diff := cmp.Diff(c.want, r.Resolve("")); diff != "" {
+				t.Fatalf("Resolve() (-want +got):\n%s", diff)
 			}
 		})
 	}
@@ -50,8 +53,8 @@ func TestSessionResolver_FileUnion(t *testing.T) {
 	}
 	got := r.Resolve("")
 	want := []string{"sess-A", "sess-B", "sess-C"} // env first, file union, deduped
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("Resolve() = %v, want %v", got, want)
+	if diff := cmp.Diff(want, got); diff != "" {
+		t.Fatalf("Resolve() (-want +got):\n%s", diff)
 	}
 }
 
@@ -63,8 +66,8 @@ func TestSessionResolver_FileMissingIsBestEffort(t *testing.T) {
 		Getenv:   func(k string) string { return env[k] },
 		ReadFile: func(string) ([]byte, error) { return nil, fmt.Errorf("boom") },
 	}
-	if got := r.Resolve(""); !reflect.DeepEqual(got, []string{"sess-A"}) {
-		t.Fatalf("Resolve() = %v, want [sess-A]", got)
+	if diff := cmp.Diff([]string{"sess-A"}, r.Resolve("")); diff != "" {
+		t.Fatalf("Resolve() (-want +got):\n%s", diff)
 	}
 }
 

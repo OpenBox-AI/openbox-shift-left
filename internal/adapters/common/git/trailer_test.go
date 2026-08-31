@@ -3,9 +3,10 @@ package git
 import (
 	"os"
 	"path/filepath"
-	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/google/go-cmp/cmp"
 )
 
 func writeMsg(t *testing.T, body string) string {
@@ -27,8 +28,8 @@ func TestStamp_AddsTrailer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(got, []string{"sess-A"}) {
-		t.Fatalf("trailers = %v, want [sess-A]", got)
+	if diff := cmp.Diff([]string{"sess-A"}, got); diff != "" {
+		t.Fatalf("trailers (-want +got):\n%s", diff)
 	}
 }
 
@@ -43,8 +44,8 @@ func TestStamp_IdempotentOnReStamp(t *testing.T) {
 		}
 	}
 	got, _ := g.ReadTrailers(msg)
-	if !reflect.DeepEqual(got, []string{"sess-A"}) {
-		t.Fatalf("re-stamp duplicated: %v", got)
+	if diff := cmp.Diff([]string{"sess-A"}, got); diff != "" {
+		t.Fatalf("re-stamp duplicated (-want +got):\n%s", diff)
 	}
 }
 
@@ -61,8 +62,8 @@ func TestStamp_MultiSessionFanIn(t *testing.T) {
 	}
 	got, _ := g.ReadTrailers(msg)
 	want := []string{"sess-A", "sess-B", "sess-C"}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("fan-in = %v, want %v", got, want)
+	if diff := cmp.Diff(want, got); diff != "" {
+		t.Fatalf("fan-in (-want +got):\n%s", diff)
 	}
 }
 
@@ -75,8 +76,8 @@ func TestStamp_HealsSquashConcatenation(t *testing.T) {
 	g := Git{}
 
 	pre, _ := g.ReadTrailers(msg)
-	if !reflect.DeepEqual(pre, []string{"sess-B"}) {
-		t.Fatalf("precondition: parser should see only sess-B, got %v", pre)
+	if diff := cmp.Diff([]string{"sess-B"}, pre); diff != "" {
+		t.Fatalf("precondition: parser should see only sess-B (-want +got):\n%s", diff)
 	}
 
 	if err := g.StampMessageFile(msg, nil); err != nil {
@@ -84,8 +85,8 @@ func TestStamp_HealsSquashConcatenation(t *testing.T) {
 	}
 	got, _ := g.ReadTrailers(msg)
 	want := []string{"sess-B", "sess-A"} // trailing block: existing sess-B, then harvested sess-A
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("healed fan-in = %v, want %v", got, want)
+	if diff := cmp.Diff(want, got); diff != "" {
+		t.Fatalf("healed fan-in (-want +got):\n%s", diff)
 	}
 }
 
@@ -179,16 +180,16 @@ func TestStamp_DropsInvalidNeverWritesSecret(t *testing.T) {
 		t.Fatalf("secret leaked into commit message:\n%s", got)
 	}
 	got, _ := g.ReadTrailers(msg)
-	if !reflect.DeepEqual(got, []string{"sess-good"}) {
-		t.Fatalf("trailers = %v, want [sess-good]", got)
+	if diff := cmp.Diff([]string{"sess-good"}, got); diff != "" {
+		t.Fatalf("trailers (-want +got):\n%s", diff)
 	}
 }
 
 func TestValidSessionIDs_DedupePreservesOrder(t *testing.T) {
 	got := validSessionIDs([]string{"b", "a", "b", "obx_x", "a", "c"})
 	want := []string{"b", "a", "c"}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("validSessionIDs = %v, want %v", got, want)
+	if diff := cmp.Diff(want, got); diff != "" {
+		t.Fatalf("validSessionIDs (-want +got):\n%s", diff)
 	}
 }
 
@@ -198,7 +199,7 @@ func TestValidSessionIDs_DedupePreservesOrder(t *testing.T) {
 func TestValidSessionIDs_DropsProseAndSecrets(t *testing.T) {
 	got := validSessionIDs([]string{"good-id", "prose with spaces", "obx_secret", "also\tbad"})
 	want := []string{"good-id"}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("validSessionIDs = %v, want %v", got, want)
+	if diff := cmp.Diff(want, got); diff != "" {
+		t.Fatalf("validSessionIDs (-want +got):\n%s", diff)
 	}
 }

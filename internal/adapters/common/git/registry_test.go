@@ -3,10 +3,11 @@ package git
 import (
 	"os"
 	"path/filepath"
-	"reflect"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/google/go-cmp/cmp"
 )
 
 func at(t0 time.Time) func() time.Time { return func() time.Time { return t0 } }
@@ -18,8 +19,8 @@ func TestRegistry_WriteReadRemove(t *testing.T) {
 		t.Fatal(err)
 	}
 	r := SessionResolver{SessionDir: dir, Now: at(now)}
-	if got := r.Resolve("/repo/a"); !reflect.DeepEqual(got, []string{"sess-A"}) {
-		t.Fatalf("Resolve = %v, want [sess-A]", got)
+	if diff := cmp.Diff([]string{"sess-A"}, r.Resolve("/repo/a")); diff != "" {
+		t.Fatalf("Resolve (-want +got):\n%s", diff)
 	}
 	if err := RemoveSessionRecord(dir, "sess-A"); err != nil {
 		t.Fatal(err)
@@ -42,11 +43,11 @@ func TestRegistry_ParallelSessionsDifferentWorktrees(t *testing.T) {
 	WriteSessionRecord(dir, "sess-B", "/work/repoB", now)
 	r := SessionResolver{SessionDir: dir, Now: at(now)}
 
-	if got := r.Resolve("/work/repoA"); !reflect.DeepEqual(got, []string{"sess-A"}) {
-		t.Fatalf("repoA → %v, want [sess-A]", got)
+	if diff := cmp.Diff([]string{"sess-A"}, r.Resolve("/work/repoA")); diff != "" {
+		t.Fatalf("repoA (-want +got):\n%s", diff)
 	}
-	if got := r.Resolve("/work/repoB"); !reflect.DeepEqual(got, []string{"sess-B"}) {
-		t.Fatalf("repoB → %v, want [sess-B]", got)
+	if diff := cmp.Diff([]string{"sess-B"}, r.Resolve("/work/repoB")); diff != "" {
+		t.Fatalf("repoB (-want +got):\n%s", diff)
 	}
 	if got := r.Resolve("/work/repoC"); len(got) != 0 {
 		t.Fatalf("repoC → %v, want empty", got)
@@ -62,8 +63,8 @@ func TestRegistry_SameWorktreeMostRecentWins(t *testing.T) {
 	WriteSessionRecord(dir, "sess-old", "/repo", base)
 	WriteSessionRecord(dir, "sess-fresh", "/repo", base.Add(30*time.Second))
 	r := SessionResolver{SessionDir: dir, Now: at(base.Add(time.Minute))}
-	if got := r.Resolve("/repo"); !reflect.DeepEqual(got, []string{"sess-fresh"}) {
-		t.Fatalf("same-worktree → %v, want [sess-fresh]", got)
+	if diff := cmp.Diff([]string{"sess-fresh"}, r.Resolve("/repo")); diff != "" {
+		t.Fatalf("same-worktree (-want +got):\n%s", diff)
 	}
 }
 
@@ -99,8 +100,8 @@ func TestRegistry_EnvOverrideWins(t *testing.T) {
 			return ""
 		},
 	}
-	if got := r.Resolve("/repo"); !reflect.DeepEqual(got, []string{"sess-explicit"}) {
-		t.Fatalf("override → %v, want [sess-explicit]", got)
+	if diff := cmp.Diff([]string{"sess-explicit"}, r.Resolve("/repo")); diff != "" {
+		t.Fatalf("override (-want +got):\n%s", diff)
 	}
 }
 
@@ -157,8 +158,8 @@ func TestRegistry_SymlinkedCwd(t *testing.T) {
 	now := time.Unix(1_700_000_000, 0)
 	WriteSessionRecord(dir, "sess-A", link, now) // recorded via the symlink
 	r := SessionResolver{SessionDir: dir, Now: at(now)}
-	if got := r.Resolve(real); !reflect.DeepEqual(got, []string{"sess-A"}) { // resolved via the real path
-		t.Fatalf("symlinked cwd not matched: %v, want [sess-A]", got)
+	if diff := cmp.Diff([]string{"sess-A"}, r.Resolve(real)); diff != "" { // resolved via the real path
+		t.Fatalf("symlinked cwd not matched (-want +got):\n%s", diff)
 	}
 }
 
@@ -171,8 +172,8 @@ func TestRegistry_SubSecondRecency(t *testing.T) {
 	WriteSessionRecord(dir, "sess-old", "/repo", base)
 	WriteSessionRecord(dir, "sess-new", "/repo", base.Add(5*time.Millisecond))
 	r := SessionResolver{SessionDir: dir, Now: at(base.Add(time.Second))}
-	if got := r.Resolve("/repo"); !reflect.DeepEqual(got, []string{"sess-new"}) {
-		t.Fatalf("sub-second recency: %v, want [sess-new]", got)
+	if diff := cmp.Diff([]string{"sess-new"}, r.Resolve("/repo")); diff != "" {
+		t.Fatalf("sub-second recency (-want +got):\n%s", diff)
 	}
 }
 

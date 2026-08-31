@@ -3,10 +3,10 @@ package gitaction
 import (
 	"context"
 	"os"
-	"reflect"
 	"strings"
 	"testing"
 
+	"github.com/google/go-cmp/cmp"
 	obgit "github.com/openbox-ai/openbox-shift-left/internal/adapters/common/git"
 )
 
@@ -23,8 +23,8 @@ func TestResolve_PlainTrailerCommit(t *testing.T) {
 	if res.CommitSHA != sha {
 		t.Fatalf("CommitSHA = %s, want %s (real pushed SHA)", res.CommitSHA, sha)
 	}
-	if got := res.SessionIDs(); !reflect.DeepEqual(got, []string{"sess-A"}) {
-		t.Fatalf("sessions = %v, want [sess-A]", got)
+	if diff := cmp.Diff([]string{"sess-A"}, res.SessionIDs()); diff != "" {
+		t.Fatalf("sessions (-want +got):\n%s", diff)
 	}
 	if res.Sessions[0].Source != SourceTrailer {
 		t.Fatalf("source = %s, want trailer", res.Sessions[0].Source)
@@ -65,8 +65,8 @@ func TestResolve_SquashFanInFromTrailerBlock(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := map[string]bool{"sess-A": true, "sess-B": true, "sess-C": true}
-	if got := ids(res.Sessions); !reflect.DeepEqual(got, want) {
-		t.Fatalf("fan-in = %v, want %v", got, want)
+	if diff := cmp.Diff(want, ids(res.Sessions)); diff != "" {
+		t.Fatalf("fan-in (-want +got):\n%s", diff)
 	}
 	for _, s := range res.Sessions {
 		if s.Source != SourceTrailer {
@@ -91,8 +91,8 @@ func TestResolve_PreInstallSquashRecoveredByBodyScan(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := res.SessionIDs(); !reflect.DeepEqual(got, []string{"sess-old"}) {
-		t.Fatalf("body-scan recovery = %v, want [sess-old]", got)
+	if diff := cmp.Diff([]string{"sess-old"}, res.SessionIDs()); diff != "" {
+		t.Fatalf("body-scan recovery (-want +got):\n%s", diff)
 	}
 	if res.Sessions[0].Source != SourceBodyScan {
 		t.Fatalf("source = %s, want body-scan (SL6-SCAN)", res.Sessions[0].Source)
@@ -112,8 +112,8 @@ func TestResolve_TrailerBlockBeatsBodyScanForSameID(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := res.SessionIDs(); !reflect.DeepEqual(got, []string{"sess-A"}) {
-		t.Fatalf("sessions = %v, want [sess-A] (deduped)", got)
+	if diff := cmp.Diff([]string{"sess-A"}, res.SessionIDs()); diff != "" {
+		t.Fatalf("sessions (-want +got):\n%s\ndeduped", diff)
 	}
 	if res.Sessions[0].Source != SourceTrailer {
 		t.Fatalf("source = %s, want trailer (higher trust wins)", res.Sessions[0].Source)
@@ -132,8 +132,8 @@ func TestResolve_TrailerBeatsBodyScanAcrossCommits(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := res.SessionIDs(); !reflect.DeepEqual(got, []string{"sess-X"}) {
-		t.Fatalf("sessions = %v, want [sess-X] (deduped across commits)", got)
+	if diff := cmp.Diff([]string{"sess-X"}, res.SessionIDs()); diff != "" {
+		t.Fatalf("sessions (-want +got):\n%s\ndeduped across commits", diff)
 	}
 	if res.Sessions[0].Source != SourceTrailer {
 		t.Fatalf("source = %s, want trailer (higher trust wins across scope)", res.Sessions[0].Source)
@@ -159,8 +159,8 @@ func TestResolve_MixedRangeRecoversStrippedSibling(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := map[string]bool{"sess-A": true, "sess-N": true}
-	if got := ids(res.Sessions); !reflect.DeepEqual(got, want) {
-		t.Fatalf("mixed range = %v, want %v (sibling not dropped)", got, want)
+	if diff := cmp.Diff(want, ids(res.Sessions)); diff != "" {
+		t.Fatalf("mixed range (-want +got):\n%s\nsibling not dropped", diff)
 	}
 	var nClaim SessionClaim
 	for _, s := range res.Sessions {
@@ -206,8 +206,8 @@ func TestResolve_MergeAttributesReachableOriginals(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := map[string]bool{"sess-A": true, "sess-B": true}
-	if got := ids(res.Sessions); !reflect.DeepEqual(got, want) {
-		t.Fatalf("merge fan-in = %v, want %v", got, want)
+	if diff := cmp.Diff(want, ids(res.Sessions)); diff != "" {
+		t.Fatalf("merge fan-in (-want +got):\n%s", diff)
 	}
 }
 
@@ -221,8 +221,8 @@ func TestResolve_RangeBaseToTarget(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := res.SessionIDs(); !reflect.DeepEqual(got, []string{"sess-B"}) {
-		t.Fatalf("range sessions = %v, want [sess-B]", got)
+	if diff := cmp.Diff([]string{"sess-B"}, res.SessionIDs()); diff != "" {
+		t.Fatalf("range sessions (-want +got):\n%s", diff)
 	}
 	if res.ScopeWalked != 2 {
 		t.Fatalf("scope walked = %d, want 2 (c2,c3)", res.ScopeWalked)
@@ -244,15 +244,15 @@ func TestResolve_ForcePushResolvesRealPushedSHA(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := resAfter.SessionIDs(); !reflect.DeepEqual(got, []string{"sess-B"}) {
-		t.Fatalf("pushed SHA %s → %v, want [sess-B]", after, got)
+	if diff := cmp.Diff([]string{"sess-B"}, resAfter.SessionIDs()); diff != "" {
+		t.Fatalf("pushed SHA %s (-want +got):\n%s", after, diff)
 	}
 	resBefore, err := r.resolver(nil).Resolve(ctx, before, "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := resBefore.SessionIDs(); !reflect.DeepEqual(got, []string{"sess-A"}) {
-		t.Fatalf("pre-push SHA %s → %v, want [sess-A]", before, got)
+	if diff := cmp.Diff([]string{"sess-A"}, resBefore.SessionIDs()); diff != "" {
+		t.Fatalf("pre-push SHA %s (-want +got):\n%s", before, diff)
 	}
 }
 
@@ -282,8 +282,8 @@ func TestResolve_TrailerStrippedRecoveredFromNoteMirror(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := res.SessionIDs(); !reflect.DeepEqual(got, []string{"sess-N"}) {
-		t.Fatalf("note recovery = %v, want [sess-N]", got)
+	if diff := cmp.Diff([]string{"sess-N"}, res.SessionIDs()); diff != "" {
+		t.Fatalf("note recovery (-want +got):\n%s", diff)
 	}
 	if res.Status != StatusInferred || res.Reason != ReasonTrailerStripped {
 		t.Fatalf("status/reason = %s/%s, want inferred/trailer-stripped", res.Status, res.Reason)
@@ -305,8 +305,8 @@ func TestResolve_RejectsMalformedAndSecretTrailers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := res.SessionIDs(); !reflect.DeepEqual(got, []string{"sess-A"}) {
-		t.Fatalf("sessions = %v, want [sess-A] (secret + whitespace dropped)", got)
+	if diff := cmp.Diff([]string{"sess-A"}, res.SessionIDs()); diff != "" {
+		t.Fatalf("sessions (-want +got):\n%s\nsecret + whitespace dropped", diff)
 	}
 }
 

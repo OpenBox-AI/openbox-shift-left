@@ -1,9 +1,10 @@
 package activation
 
 import (
-	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/google/go-cmp/cmp"
 )
 
 // TestNobodyIsElectedOnAnUnroutedMachine is the invariant stated in the
@@ -163,8 +164,8 @@ func TestTelemetryKeysAreTheProvenSet(t *testing.T) {
 		"OTEL_TRACES_EXPORTER",
 	}
 	got := KeyNames(TelemetryKeys("127.0.0.1:8789"))
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("telemetry key set drifted from the set that produced the evidence corpus.\n got %v\nwant %v", got, want)
+	if diff := cmp.Diff(want, got); diff != "" {
+		t.Fatalf("telemetry key set drifted from the set that produced the evidence corpus (-want +got):\n%s", diff)
 	}
 
 	keys := TelemetryKeys("127.0.0.1:8789")
@@ -197,10 +198,10 @@ func TestTransportKeysMergeTheDevelopersNoProxy(t *testing.T) {
 			t.Errorf("NO_PROXY = %q, missing %q", keys["NO_PROXY"], want)
 		}
 	}
-	if got := KeyNames(TransportKeys("127.0.0.1:8790", "/x/ca.pem", nil)); !reflect.DeepEqual(got, []string{
+	if diff := cmp.Diff([]string{
 		"CLAUDE_CODE_CERT_STORE", "HTTPS_PROXY", "HTTP_PROXY", "NODE_EXTRA_CA_CERTS", "NO_PROXY",
-	}) {
-		t.Fatalf("transport key set = %v", got)
+	}, KeyNames(TransportKeys("127.0.0.1:8790", "/x/ca.pem", nil))); diff != "" {
+		t.Fatalf("transport key set (-want +got):\n%s", diff)
 	}
 	first := TransportKeys("127.0.0.1:8790", "/x/ca.pem", nil)["NO_PROXY"]
 	second := TransportKeys("127.0.0.1:8790", "/x/ca.pem", map[string]string{"NO_PROXY": first})["NO_PROXY"]
