@@ -294,20 +294,15 @@ func saveRecord(homeDir string, rec Record) error {
 	return os.Chmod(path, 0o600)
 }
 
-// readSettings returns the file's bytes, and nothing else, because every byte
-// in it that this tool did not write belongs to the developer. Decoding into a
-// typed struct is how a writer silently deletes configuration it was never
-// taught about; decoding into map[string]any is how it silently reorders and
-// reindents the whole document, which Go does because it marshals a map in
-// sorted key order.
+// readSettings returns bytes and nothing else: a typed struct silently deletes
+// configuration it was never taught about, and map[string]any alphabetises and
+// reindents the whole document, because Go marshals a map in sorted key order.
 //
-// The validity check has to be spelled out now. It used to be a side effect of
-// json.Unmarshal failing; sjson will edit a malformed document without
-// complaint, and this file is one every reader here refuses to rewrite when it
-// cannot parse it -- so a malformed file written back would block its own
-// repair. It is gjson's validator on purpose: the thing that decides a document
-// is safe to edit has to be the thing that edits it. encoding/json is used only
-// to explain a rejection, where its byte offset is worth having.
+// The validity check is explicit now rather than a side effect of Unmarshal
+// failing, because sjson edits a malformed document without complaint and this
+// file is one every reader refuses to rewrite when it cannot parse it. gjson's
+// validator on purpose: what decides a document is safe to edit must be what
+// edits it. encoding/json only explains a rejection, where its offset helps.
 func readSettings(path string) ([]byte, error) {
 	raw, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
@@ -328,10 +323,9 @@ func readSettings(path string) ([]byte, error) {
 	return raw, nil
 }
 
-// envPath is the gjson/sjson path for one key inside the env block. The escape
-// matters: gjson reads `.` as a separator and `*?#|@` as query syntax, so a
-// developer's key holding any of them would address something that is not
-// there -- reading empty, and writing a nested object beside the real key.
+// envPath is the gjson/sjson path for one env key. The escape matters: gjson
+// reads `.` as a separator and `*?#|@` as query syntax, so a developer's key
+// holding one would read empty and write a nested object beside the real key.
 func envPath(key string) string {
 	var b strings.Builder
 	b.WriteString("env.")
@@ -345,9 +339,8 @@ func envPath(key string) string {
 	return b.String()
 }
 
-// checkEnvShape refuses a settings file whose `env` is not an object. Absent
-// and null are both fine -- the writer creates it -- but replacing a string or
-// an array with an object would be destroying a shape somebody chose.
+// checkEnvShape refuses a settings file whose `env` is not an object. Absent and
+// null are fine; replacing a string or array would destroy a chosen shape.
 func checkEnvShape(raw []byte, path string) error {
 	env := gjson.GetBytes(raw, "env")
 	if !env.Exists() || env.Type == gjson.Null {
@@ -359,9 +352,8 @@ func checkEnvShape(raw []byte, path string) error {
 	return nil
 }
 
-// envKeyCount is how the writer knows whether removing its own keys emptied the
-// block, which it then deletes rather than leaving `"env": {}` in a file that
-// never had one.
+// envKeyCount tells the writer whether removing its keys emptied the block,
+// which it then deletes rather than leaving `"env": {}` where there was none.
 func envKeyCount(raw []byte) int {
 	n := 0
 	gjson.GetBytes(raw, "env").ForEach(func(gjson.Result, gjson.Result) bool {
@@ -371,10 +363,9 @@ func envKeyCount(raw []byte) int {
 	return n
 }
 
-// finishSettings makes the bytes about to be written end the way the ones read
-// did. sjson's splice can consume a trailing newline, and a settings file
-// silently losing its last byte on every activation is the same class of
-// unasked-for edit this phase exists to stop.
+// finishSettings makes the written bytes end the way the read ones did: sjson's
+// splice can consume a trailing newline, and losing the last byte of a settings
+// file on every activation is the same unasked-for edit as reordering it.
 func finishSettings(raw, before []byte) []byte {
 	endedWithNewline := len(before) > 0 && before[len(before)-1] == '\n'
 	if len(before) == 0 {
@@ -390,9 +381,8 @@ func finishSettings(raw, before []byte) []byte {
 	return raw
 }
 
-// indentIfNew reindents a document this tool created from nothing. There are no
-// developer bytes in it to preserve at that point, and sjson splices compactly,
-// so without this a fresh machine gets its settings.json as a single line.
+// indentIfNew reindents a document created from nothing: no developer bytes to
+// preserve, and without it a fresh machine gets settings.json as one line.
 func indentIfNew(raw, before []byte) []byte {
 	if len(before) != 0 {
 		return raw

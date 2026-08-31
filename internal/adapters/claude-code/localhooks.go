@@ -41,9 +41,8 @@ var localHookEvents = []struct {
 // nothing would ever exercise.
 func localHookPath(event string) string { return "hooks." + event }
 
-// localHookEntries decodes one event's array into the []any shape sweepStale,
-// reconcileLocalHook and hasLocalHookCommand already work on. Only the touched
-// event is decoded; the rest of the document stays as the developer's bytes.
+// localHookEntries decodes one event's array into the []any shape sweepStale and
+// reconcileLocalHook work on. Only the touched event; the rest stays as bytes.
 func localHookEntries(raw []byte, event string) ([]any, error) {
 	r := gjson.GetBytes(raw, localHookPath(event))
 	if !r.Exists() || r.Type == gjson.Null {
@@ -62,15 +61,11 @@ func localHookEntries(raw []byte, event string) ([]any, error) {
 	return entries, nil
 }
 
-// setLocalHookEntries splices one event's array back in, leaving every other
-// byte of the document alone -- and leaves the array alone too when it already
-// says what it should. Without that check a re-run of `openbox init` reformats
-// every event it owns and puts a diff in the developer's working tree for no
-// change at all, which is the same unasked-for edit as reordering the document.
-//
-// The entries are re-encoded when they do change, so a foreign matcher group
-// inside a touched event keeps its content but not the key order within its own
-// objects. That is the bound of what path editing buys here.
+// setLocalHookEntries splices one event's array back in and leaves the rest of
+// the document alone -- including the array itself when it already says what it
+// should, because otherwise a re-run of `openbox init` reformats every event it
+// owns for no change at all. When entries do change they are re-encoded, so a
+// foreign matcher group keeps its content but not its own key order.
 func setLocalHookEntries(raw []byte, event string, entries []any) ([]byte, error) {
 	encoded, err := json.Marshal(entries)
 	if err != nil {
@@ -82,9 +77,8 @@ func setLocalHookEntries(raw []byte, event string, entries []any) ([]byte, error
 	return sjson.SetRawBytes(raw, localHookPath(event), encoded)
 }
 
-// canonicalJSONEqual compares two JSON values by content rather than by bytes.
-// Both sides go through the same encoder, which sorts object keys, so a
-// difference in formatting or key order is not a difference.
+// canonicalJSONEqual compares two JSON values by content, not bytes: both go
+// through the same key-sorting encoder, so formatting is not a difference.
 func canonicalJSONEqual(a, b []byte) bool {
 	if len(a) == 0 || len(b) == 0 {
 		return false
@@ -108,15 +102,11 @@ func writeLocalHooks(projectDir, engine string) error {
 	}
 	settingsPath := filepath.Join(dir, ".claude", "settings.local.json")
 
-	// The whole document stays as bytes and only the events below are rewritten.
-	// A map[string]any round trip preserved every key but alphabetised and
-	// reindented all of them, in a file inside the developer's own repository.
-	//
-	// The validity check is explicit rather than a side effect of Unmarshal
-	// failing: sjson edits a malformed document without complaint, and Claude
-	// Code cannot parse a project's settings at all if this file is broken --
-	// every hook in it stops applying, which is a governance failure that
-	// reports itself as nothing.
+	// Only the events below are rewritten. A map[string]any round trip kept every
+	// key and alphabetised and reindented all of them, in a file inside the
+	// developer's own repository. The validity check is explicit because sjson
+	// edits a malformed document without complaint, and a broken settings file
+	// stops every hook in it applying -- a governance failure reporting nothing.
 	before, err := os.ReadFile(settingsPath)
 	switch {
 	case err == nil:

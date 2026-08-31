@@ -50,27 +50,17 @@ func (a Allowlist) Hosts() []string {
 	return out
 }
 
-// normalizeHost four reductions, each because the same host legitimately
-// arrives in more than one shape, and a miss is a silent governance hole; an
-// unmatched host is blind-tunnelled, so the model call succeeds and is simply
-// never recorded:
-//   - The port is dropped ("api.anthropic.com:443" and ":8443" are one host);
-//   - One trailing root dot is dropped (the fqdn form of the same name);
-//   - ASCII letters are lowercased (DNS is case-insensitive);
-//   - An IP literal is reduced to netip's canonical text, which is what makes
-//     "[::1]", "[::1]:443", "::1" and "0:0:0:0:0:0:0:1" one key rather than
-//     four. Keying on the written form is how the bracket -- a delimiter for a
-//     port that is not there -- became part of the identity of the host.
-//     Unmap folds the IPv4-mapped form in with it: "::ffff:127.0.0.1" reaches
-//     the same endpoint as "127.0.0.1" on any dual-stack host, so leaving them
-//     as two keys leaves the same hole in a different spelling.
+// normalizeHost four reductions, each because one host arrives in more than one
+// shape and a miss is a silent governance hole: an unmatched host is
+// blind-tunnelled, so the call succeeds and is never recorded. The port goes,
+// one trailing root dot goes, ASCII letters lowercase, and an IP literal
+// reduces to netip's canonical text -- which is what makes "[::1]", "[::1]:443"
+// and "0:0:0:0:0:0:0:1" one key rather than three. Unmap folds
+// "::ffff:127.0.0.1" in with "127.0.0.1", which reaches the same endpoint.
 //
-// Names keep the ASCII fold and never reach a Unicode one: U+212A KELVIN SIGN
-// lowercases to 'k' under Unicode rules, so strings.ToLower would let
-// "anthropiK" match "anthropick".
-//
-// A zone deliberately survives: fe80::1%eth0 and fe80::1%eth1 are different
-// interfaces, not two spellings of one host.
+// Names keep the ASCII fold: U+212A KELVIN SIGN lowercases to 'k' under Unicode
+// rules, so strings.ToLower would let "anthropiK" match "anthropick". A zone
+// survives on purpose, because fe80::1%eth0 and %eth1 are two interfaces.
 func normalizeHost(target string) string {
 	if ap, err := netip.ParseAddrPort(target); err == nil {
 		return ap.Addr().Unmap().String()

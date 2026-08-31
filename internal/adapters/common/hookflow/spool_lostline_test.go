@@ -10,21 +10,13 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/internal/client"
 )
 
-// TestSpoolNeverLosesALineToAConcurrentDrain.
-//
-// Append opens the session path and writes through that descriptor. drainFile
-// renames the same path aside, reads the renamed file, delivers what it found
-// and removes it. Nothing sequences the two, so an Append whose open resolved
-// before the rename and whose write landed after the read puts its line into a
-// file that is then unlinked: the event is never delivered, never written to a
-// recovery file, and nothing anywhere records that it existed. A tool call that
-// happened has no evidence, and the audit trail under-reports in silence.
-//
-// This is the defect the spool lock is for. Append's comment used to claim
-// instead that "a single write of a small line is atomic under O_APPEND
-// (posix), so concurrent hook processes for the same session never interleave"
-// -- true about interleaving, and beside the point: these lines are not torn,
-// they are gone.
+// TestSpoolNeverLosesALineToAConcurrentDrain. Append writes through a
+// descriptor it opened by path; drainFile renames that path aside, reads it and
+// removes it. A write landing between the read and the remove goes into a file
+// nothing reads again: never delivered, never written to a recovery file, and
+// nowhere recorded. Append's old comment claimed O_APPEND made this safe -- true
+// about interleaving, beside the point here. These lines are not torn, they are
+// gone.
 func TestSpoolNeverLosesALineToAConcurrentDrain(t *testing.T) {
 	const (
 		writers   = 8

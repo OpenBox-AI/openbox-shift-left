@@ -28,16 +28,14 @@ type Spool struct {
 
 // Append writes one event as a single JSON line to the session's spool file.
 //
-// What O_APPEND actually guarantees is the atomic offset update, so two hook
-// processes never interleave within a line. What it does not guarantee, and
-// what the lock is for, is that the line survives: Append writes through a
-// descriptor it opened by path, and a concurrent drain renames that path aside,
-// reads the renamed file and removes it. A write that landed between the read
-// and the remove went into a file nothing will ever read again -- a tool call
-// with no evidence and an audit trail that under-reports in silence.
+// O_APPEND guarantees the atomic offset update, so two hook processes never
+// interleave within a line. What it does not guarantee, and what the lock is
+// for, is that the line survives: a concurrent drain renames this path aside,
+// reads it and removes it, so a write landing between the read and the remove
+// goes into a file nothing reads again -- a tool call with no evidence.
 //
-// The lock is a sidecar, never the JSONL file itself: the drain sweep and the
-// recovery pass open that path too, and locking it would deadlock against them.
+// The lock is a sidecar, never the JSONL file: drainFile and the recovery sweep
+// open that path too, and locking it would deadlock against them.
 func (s Spool) Append(ev client.DevEvent) error {
 	if err := os.MkdirAll(s.Dir, 0o700); err != nil {
 		return fmt.Errorf("spool mkdir: %w", err)
@@ -62,23 +60,17 @@ func (s Spool) Append(ev client.DevEvent) error {
 	return nil
 }
 
-// SpoolLockName is the sidecar every append and every rotate in the directory
-// serializes on. One file for the whole directory rather than one per session:
-// a per-session lock would accumulate a file per session forever, and the hold
-// is a single write or a single rename either way, so cross-session contention
-// costs microseconds. The leading dot and the absent `.jsonl` suffix keep it out
-// of every sweep that reads this directory.
+// SpoolLockName is the sidecar every append and rotate serializes on. One file
+// for the directory, not one per session, which would accumulate forever; the
+// hold is one write or one rename either way. The leading dot and absent
+// `.jsonl` suffix keep it out of every sweep that reads this directory.
 const SpoolLockName = ".spool.lock"
 
 // lockSpool takes the directory's sidecar lock and returns its release. It
-// blocks, which is what INV-3 wants here: a hook that gave up on the lock would
-// drop the event rather than pause a moment for it, and the hold is never more
-// than one write or one rename.
-//
-// A filesystem that cannot lock at all -- an NFS mount with no lock daemon --
-// yields a no-op release rather than an error. That is the same fail-open
-// posture as the installer's "cannot lock here", and it leaves such a mount
-// exactly where it is today rather than refusing to spool on it.
+// blocks, which is what INV-3 wants: a hook that gave up would drop the event
+// rather than pause, and the hold is never more than one write or one rename.
+// A filesystem that cannot lock at all yields a no-op release rather than an
+// error -- the same fail-open posture as the installer's "cannot lock here".
 func (s Spool) lockSpool() func() {
 	fl := flock.New(filepath.Join(s.Dir, SpoolLockName))
 	if err := fl.Lock(); err != nil {
@@ -346,11 +338,9 @@ func (s Spool) writeRecovery(basePath string, lines [][]byte, attempt int) {
 		buf.WriteByte('\n')
 	}
 	// Written under a name no sweep matches, then renamed in. Writing straight to
-	// the `.jsonl` name publishes the file to FlushAll the instant the directory
-	// entry appears, so a concurrent sweep could rename it aside and read a
-	// prefix: the torn tail parses as corrupt and is skipped, the file is
-	// removed, and the rest of the carry-over follows it into the removed inode.
-	// Same loss as the append race the sidecar lock closes, in a narrower window.
+	// the `.jsonl` name publishes it to FlushAll as soon as the entry appears, so
+	// a sweep could read a prefix, skip the torn tail as corrupt, remove the
+	// file, and the rest would follow into the removed inode.
 	tmp := stem + ".partial"
 	if os.WriteFile(tmp, buf.Bytes(), 0o600) != nil {
 		_ = os.Remove(tmp)

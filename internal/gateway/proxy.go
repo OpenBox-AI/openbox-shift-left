@@ -27,14 +27,10 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/internal/gateway/internal/dialhook"
 )
 
-// hopByHopHeaders describe this connection rather than the message, so
-// forwarding one corrupts the next hop's framing.
-//
-// Trailer is deliberately absent: it announces which fields arrive after the
-// body, and dropping it wholesale is how trailers stopped propagating at all.
-// Te is here, but the one value that matters is forwarded explicitly below --
-// Te is hop-by-hop as a mechanism and end-to-end as an intent, and dropping it
-// entirely tells the upstream nobody downstream can take trailers.
+// hopByHopHeaders describe this connection rather than the message. Trailer is
+// deliberately absent: it announces which fields arrive after the body, and
+// dropping it wholesale is how trailers stopped propagating. Te stays, but its
+// one end-to-end value is forwarded explicitly below.
 var hopByHopHeaders = map[string]bool{
 	"Connection":          true,
 	"Keep-Alive":          true,
@@ -361,18 +357,16 @@ func announceTrailers(dst http.Header, trailer http.Header) {
 	dst.Set("Trailer", strings.Join(names, ", "))
 }
 
-// copyTrailers publishes the upstream's trailers to the client. The
-// TrailerPrefix form works for a trailer that was never announced, which is
-// legal and which an announced-only copy would silently drop.
+// copyTrailers publishes the upstream's trailers. TrailerPrefix also carries a
+// trailer that was never announced, which is legal and would otherwise drop.
 func copyTrailers(dst http.Header, trailer http.Header) {
 	for name, values := range trailer {
 		dst[http.TrailerPrefix+name] = append([]string(nil), values...)
 	}
 }
 
-// forward1xx relays an informational response to the client instead of
-// swallowing it. Without this a 100-continue or a 103 early-hints answer the
-// provider sent simply never happened as far as the client is concerned.
+// forward1xx relays an informational response instead of swallowing it: a
+// 100-continue or 103 early-hints the provider sent otherwise never happened.
 func forward1xx(w http.ResponseWriter) func(int, textproto.MIMEHeader) error {
 	return func(code int, header textproto.MIMEHeader) error {
 		h := w.Header()

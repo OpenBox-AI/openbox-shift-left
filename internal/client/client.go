@@ -172,14 +172,11 @@ func (c *Client) Emit(ctx context.Context, ev DevEvent) (Evaluation, error) {
 	return parseEvaluation(respBody), nil
 }
 
-// retryBudget is the delay budget the linear schedule this replaced would have
-// spent: sum(i*retryBase) for i in 1..maxRetries. Derived rather than
-// configured, so "no longer than before" holds for whatever MaxRetries and
-// RetryBase a caller sets and there is no knob to grow it through by accident.
-//
-// It bounds the delays only, never the attempts. Counting request time toward
-// it would silently drop a retry whenever the control plane was slow, which is
-// exactly when the retry is worth having.
+// retryBudget is what the linear schedule this replaced would have spent:
+// sum(i*retryBase) for i in 1..maxRetries. Derived rather than configured, so
+// the bound holds for whatever a caller sets and has no knob to grow through.
+// It bounds delays only: counting request time would drop a retry against a
+// slow control plane, which is when the retry is worth having.
 func (c *Client) retryBudget() time.Duration {
 	n := time.Duration(c.maxRetries)
 	return n * (n + 1) / 2 * c.retryBase
@@ -187,16 +184,14 @@ func (c *Client) retryBudget() time.Duration {
 
 // post delivers one signed request, retrying a retryable failure.
 //
-// The delays are exponential with full jitter rather than the arithmetic ramp
-// they replaced. Every hook process on every concurrent session used to retry
-// on the same deterministic 150/300ms schedule, so a control plane coming back
-// from an outage met the whole fleet in lockstep; jitter is what spreads it.
+// Exponential with full jitter, not the arithmetic ramp it replaced: every hook
+// on every session used to retry on the same 150/300ms schedule, so a
+// recovering control plane met the whole fleet in lockstep.
 //
-// Retry-After is honoured as a stop signal, not as a sleep. A server asking
-// for longer than the budget gets what it actually wants -- no more requests
-// -- while the event returns ErrDelivery and the caller re-spools it for the
-// next flush. Waiting it out inline would buy nothing the spool does not
-// already provide, and INV-3 says a hook must not hold the tool call open.
+// Retry-After is a stop signal, not a sleep. Asking for longer than the budget
+// gets what the server actually wants -- no more requests -- while ErrDelivery
+// re-spools the event. Waiting inline buys nothing the spool does not, and
+// INV-3 says a hook must not hold the tool call open.
 func (c *Client) post(ctx context.Context, path string, body []byte, idemKey string) ([]byte, error) {
 	// Each delay is drawn from [0, 2*interval], and the intervals are
 	// retryBase/2 then retryBase thereafter, so the worst-case sum is
@@ -238,14 +233,11 @@ func (c *Client) post(ctx context.Context, path string, body []byte, idemKey str
 	)
 }
 
-// budgetedBackOff spends a fixed delay budget and then stops.
-//
-// The clamp has to be cumulative, not per-signal. Checking each Retry-After
-// against the whole budget lets a server spend it once per attempt --
-// maxRetries times over at the worst -- and backoff/v5 resets the exponential
-// ramp on every RetryAfterError, so the drawn delays do not bound it either.
-// Since Retry-After is attacker-influenceable when the control plane is
-// impersonated, this is also the DoS bound, and a bound that resets is not one.
+// budgetedBackOff spends a fixed delay budget and then stops. The clamp has to
+// be cumulative: checking each Retry-After against the whole budget lets a
+// server spend it once per attempt, and backoff/v5 resets its ramp on every
+// RetryAfterError. Retry-After is attacker-influenceable under an impersonated
+// control plane, so this is the DoS bound, and a bound that resets is not one.
 type budgetedBackOff struct {
 	remaining time.Duration
 	inner     *backoff.ExponentialBackOff

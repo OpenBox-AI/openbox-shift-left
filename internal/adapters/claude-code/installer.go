@@ -116,15 +116,14 @@ func (i Installer) Install(ref CredentialRef) error {
 
 // acquireInstallLock past a few dozen writers the queue drains slower than it
 // fills, every arrival makes it worse, and the processes never exit; thousands
-// of them accumulated that way and took a machine down. So this refuses rather
-// than queues, and TryLock is what keeps that true: a blocking acquire would
-// rebuild the queue with kernel-grade reliability.
+// accumulated that way and took a machine down. So this refuses rather than
+// queues, and TryLock keeps that true where a blocking acquire would rebuild
+// the queue with kernel-grade reliability.
 //
-// Liveness is the kernel's now, not the filesystem clock's. An advisory lock is
-// released when the holding process dies, which deletes the whole staleness
-// window and every bug in it: a crash used to hold the lock for a full minute,
-// an NTP step moved it, 1s mtime granularity blurred a 60s comparison, and the
-// os.Stat/os.Chtimes reclaim raced with itself.
+// Liveness is the kernel's now, not the filesystem clock's: an advisory lock is
+// released when its holder dies, which deletes the staleness window and every
+// bug in it -- the full-minute hold after a crash, the NTP step, 1s mtime
+// granularity against a 60s comparison, the Stat/Chtimes reclaim racing.
 func (i Installer) acquireInstallLock() (release func(), err error) {
 	dir := i.pluginDir()
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -144,15 +143,10 @@ func (i Installer) acquireInstallLock() (release func(), err error) {
 				"the lock is released when that process exits, however it exits",
 			dir, lock)
 	}
-	// The lock file stays on disk, which is gofrs' own documented contract:
-	// "It will not remove the file from disk, that's up to your application."
-	// Removing it reintroduces a by-name hole in a mechanism adopted for kernel
-	// truth. Unlinking the name while a second init already has the inode open
-	// lets that init's flock succeed on an inode nobody can reach any more,
-	// while a third creates a fresh file at the path and locks that -- two
-	// processes both believing they hold it. Unlocking first only moves the
-	// race. An empty dot-file in the plugin bundle costs nothing, and the
-	// refusal message says so rather than telling anyone to delete it.
+	// The lock file stays, per gofrs' own contract. Removing it reopens a
+	// by-name hole: unlinking the name while a second init has the inode open
+	// lets that flock succeed on an unreachable inode while a third creates a
+	// fresh file and locks that -- two holders. Unlocking first only moves it.
 	return func() { _ = fl.Unlock() }, nil
 }
 

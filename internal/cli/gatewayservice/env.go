@@ -184,16 +184,11 @@ func CurrentEnv(homeDir string) (value string, present bool) {
 	return v.String(), true
 }
 
-// readSettings returns the file's bytes. Decoding into a typed struct is how a
-// writer silently deletes configuration it was never taught about; decoding
-// into map[string]any is how it silently alphabetises and reindents the whole
-// document, because Go marshals a map in sorted key order.
-//
-// The validity check is explicit now rather than a side effect of Unmarshal
-// failing: sjson edits a malformed document without complaint, and this file is
-// one this package refuses to rewrite when it cannot parse it. gjson's
-// validator on purpose -- what decides a document is safe to edit has to be
-// what edits it -- with encoding/json used only to explain a rejection.
+// readSettings returns bytes: a typed struct deletes configuration it was never
+// taught about, and map[string]any alphabetises and reindents the document.
+// The validity check is explicit because sjson edits a malformed document
+// without complaint. gjson's validator on purpose -- what decides a document is
+// safe to edit must be what edits it -- with encoding/json only explaining.
 func readSettings(path string) ([]byte, error) {
 	raw, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
@@ -214,15 +209,11 @@ func readSettings(path string) ([]byte, error) {
 	return raw, nil
 }
 
-// envPath, checkEnvShape, envKeyCount, finishSettings and indentIfNew are the
-// same four lines of path handling internal/cli/activation carries. They are
-// duplicated rather than shared: a package for thirty lines would be a new
-// layout boundary for no gain, and the two callers edit the same document for
-// different reasons.
-//
-// The escape matters even though EnvKey holds no path syntax today: gjson reads
-// `.` as a separator and `*?#|@` as query syntax, and ownedEnvKeys is a set
-// somebody will add to.
+// The helpers below duplicate internal/cli/activation's rather than sharing
+// them: a package for thirty lines would be a layout boundary for no gain. The
+// escape matters even though EnvKey holds no path syntax today, because gjson
+// reads `.` as a separator and `*?#|@` as query syntax, and ownedEnvKeys is a
+// set somebody will add to.
 func envPath(key string) string {
 	var b strings.Builder
 	b.WriteString("env.")
@@ -256,8 +247,8 @@ func envKeyCount(raw []byte) int {
 	return n
 }
 
-// finishSettings makes the bytes about to be written end the way the ones read
-// did; sjson's splice can consume a trailing newline.
+// finishSettings ends the written bytes the way the read ones did; sjson's
+// splice can consume a trailing newline.
 func finishSettings(raw, before []byte) []byte {
 	endedWithNewline := len(before) == 0 || before[len(before)-1] == '\n'
 	has := len(raw) > 0 && raw[len(raw)-1] == '\n'
@@ -270,8 +261,8 @@ func finishSettings(raw, before []byte) []byte {
 	return raw
 }
 
-// indentIfNew reindents a document this package created from nothing; there are
-// no developer bytes in it to preserve, and sjson splices compactly.
+// indentIfNew reindents a document created from nothing: no developer bytes to
+// preserve, and sjson splices compactly.
 func indentIfNew(raw, before []byte) []byte {
 	if len(before) != 0 {
 		return raw

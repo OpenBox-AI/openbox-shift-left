@@ -105,9 +105,8 @@ var hookedEvents = []HookName{
 // would ever exercise.
 func hooksEventPath(ev HookName) string { return "hooks." + string(ev) }
 
-// canonicalJSONEqual compares two JSON values by content rather than by bytes.
-// Both sides go through the same encoder, which sorts object keys, so a
-// difference in formatting or key order is not a difference.
+// canonicalJSONEqual compares two JSON values by content, not bytes: both go
+// through the same key-sorting encoder, so formatting is not a difference.
 func canonicalJSONEqual(a, b []byte) bool {
 	if len(a) == 0 || len(b) == 0 {
 		return false
@@ -137,11 +136,9 @@ type commandHandler struct {
 func (i Installer) writeHooks() error {
 	path := i.hooksPath()
 
-	// Path edits rather than a decode/re-encode round trip. This is Codex's file,
-	// not ours: binding it to a struct dropped every top-level key the struct
-	// does not name, and re-marshalling the hooks map alphabetised the event
-	// order Codex itself wrote. Editing the bytes in place touches only the five
-	// events below.
+	// Path edits, not a decode/re-encode round trip. This is Codex's file:
+	// binding it to a struct dropped every top-level key the struct does not
+	// name, and re-marshalling alphabetised the event order Codex wrote.
 	before, err := os.ReadFile(path)
 	switch {
 	case err == nil:
