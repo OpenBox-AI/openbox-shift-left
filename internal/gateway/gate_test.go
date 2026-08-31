@@ -6,11 +6,12 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/openbox-ai/openbox-shift-left/internal/client/memhttptest"
 	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/openbox-ai/openbox-shift-left/internal/client/memhttptest"
 
 	"github.com/openbox-ai/openbox-shift-left/internal/client"
 )

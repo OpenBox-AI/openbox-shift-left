@@ -5,10 +5,11 @@ import (
 	"io"
 	"net/http"
 
-	"github.com/openbox-ai/openbox-shift-left/internal/client/memhttptest"
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/openbox-ai/openbox-shift-left/internal/client/memhttptest"
 )
 
 type verboseRecorder struct {

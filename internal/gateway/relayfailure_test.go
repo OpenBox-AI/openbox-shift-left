@@ -7,10 +7,11 @@ import (
 	"net"
 	"net/http"
 
-	"github.com/openbox-ai/openbox-shift-left/internal/client/memhttptest"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/openbox-ai/openbox-shift-left/internal/client/memhttptest"
 )
 
 // Relayfailure_test.go covers the paths where the relay does NOT complete

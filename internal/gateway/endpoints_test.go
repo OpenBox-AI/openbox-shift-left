@@ -4,9 +4,10 @@ import (
 	"io"
 	"net/http"
 
-	"github.com/openbox-ai/openbox-shift-left/internal/client/memhttptest"
 	"strings"
 	"testing"
+
+	"github.com/openbox-ai/openbox-shift-left/internal/client/memhttptest"
 )
 
 func sseUpstream(t *testing.T, write func(w http.ResponseWriter, ctl *http.ResponseController)) *memhttptest.Server {

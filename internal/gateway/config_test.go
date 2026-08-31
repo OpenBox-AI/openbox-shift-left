@@ -1,10 +1,11 @@
 package gateway
 
 import (
-	"github.com/openbox-ai/openbox-shift-left/internal/client/memhttptest"
 	"net"
 	"strings"
 	"testing"
+
+	"github.com/openbox-ai/openbox-shift-left/internal/client/memhttptest"
 )
 
 // TestListenerMustBeLoopback holds the caller boundary.

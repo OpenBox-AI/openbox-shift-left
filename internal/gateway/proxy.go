@@ -18,13 +18,23 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptrace"
 	"net/textproto"
+	"slices"
 	"strings"
 	"time"
 
 	"github.com/openbox-ai/openbox-shift-left/internal/gateway/internal/dialhook"
 )
 
+// hopByHopHeaders describe this connection rather than the message, so
+// forwarding one corrupts the next hop's framing.
+//
+// Trailer is deliberately absent: it announces which fields arrive after the
+// body, and dropping it wholesale is how trailers stopped propagating at all.
+// Te is here, but the one value that matters is forwarded explicitly below --
+// Te is hop-by-hop as a mechanism and end-to-end as an intent, and dropping it
+// entirely tells the upstream nobody downstream can take trailers.
 var hopByHopHeaders = map[string]bool{
 	"Connection":          true,
 	"Keep-Alive":          true,
@@ -32,7 +42,6 @@ var hopByHopHeaders = map[string]bool{
 	"Proxy-Authorization": true,
 	"Proxy-Connection":    true,
 	"Te":                  true,
-	"Trailer":             true,
 	"Transfer-Encoding":   true,
 	"Upgrade":             true,
 }
@@ -172,6 +181,13 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	outbound.ContentLength = int64(len(body))
 	copyHeaders(outbound.Header, r.Header)
+	// The one Te value with end-to-end meaning. Without it the upstream is told
+	// nothing downstream can take trailers, so it will not send any.
+	if requestsTrailers(r.Header) {
+		outbound.Header.Set("Te", "trailers")
+	}
+	outbound = outbound.WithContext(httptrace.WithClientTrace(outbound.Context(),
+		&httptrace.ClientTrace{Got1xxResponse: forward1xx(w)}))
 
 	resp, err := g.client.Do(outbound)
 	if err != nil {
@@ -187,6 +203,7 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	defer resp.Body.Close()
 
 	copyHeaders(w.Header(), resp.Header)
+	announceTrailers(w.Header(), resp.Trailer)
 	w.WriteHeader(resp.StatusCode)
 
 	_ = http.NewResponseController(w).Flush()
@@ -198,6 +215,9 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		sink = &captureSink{}
 	}
 	streamErr := g.streamTo(w, resp.Body, sink)
+	// resp.Trailer is only populated once the body has been read to EOF, which
+	// is why this cannot happen with the header copy above.
+	copyTrailers(w.Header(), resp.Trailer)
 
 	if g.verbose() {
 		outcome := "ok"
@@ -312,6 +332,59 @@ func copyHeaders(dst, src http.Header) {
 			continue
 		}
 		dst[name] = append([]string(nil), values...)
+	}
+}
+
+// requestsTrailers reports whether the client said it can take trailers.
+func requestsTrailers(h http.Header) bool {
+	for _, value := range h["Te"] {
+		for part := range strings.SplitSeq(value, ",") {
+			if strings.EqualFold(strings.TrimSpace(part), "trailers") {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// announceTrailers names the trailer fields before the body, which is what lets
+// a client know to wait for them.
+func announceTrailers(dst http.Header, trailer http.Header) {
+	if len(trailer) == 0 {
+		return
+	}
+	names := make([]string, 0, len(trailer))
+	for name := range trailer {
+		names = append(names, name)
+	}
+	slices.Sort(names) // stable across runs; the set is unordered
+	dst.Set("Trailer", strings.Join(names, ", "))
+}
+
+// copyTrailers publishes the upstream's trailers to the client. The
+// TrailerPrefix form works for a trailer that was never announced, which is
+// legal and which an announced-only copy would silently drop.
+func copyTrailers(dst http.Header, trailer http.Header) {
+	for name, values := range trailer {
+		dst[http.TrailerPrefix+name] = append([]string(nil), values...)
+	}
+}
+
+// forward1xx relays an informational response to the client instead of
+// swallowing it. Without this a 100-continue or a 103 early-hints answer the
+// provider sent simply never happened as far as the client is concerned.
+func forward1xx(w http.ResponseWriter) func(int, textproto.MIMEHeader) error {
+	return func(code int, header textproto.MIMEHeader) error {
+		h := w.Header()
+		for name, values := range header {
+			h[name] = append([]string(nil), values...)
+		}
+		w.WriteHeader(code)
+		// The 1xx headers are that response's, not the final one's.
+		for name := range header {
+			h.Del(name)
+		}
+		return nil
 	}
 }
 

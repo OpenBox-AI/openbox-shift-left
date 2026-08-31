@@ -6,11 +6,12 @@ import (
 	"io"
 	"net/http"
 
-	"github.com/openbox-ai/openbox-shift-left/internal/client/memhttptest"
 	"net/textproto"
 	"sort"
 	"strings"
 	"testing"
+
+	"github.com/openbox-ai/openbox-shift-left/internal/client/memhttptest"
 )
 
 const fixtureCredential = "Bearer sk-ant-fixture-not-a-real-credential"
