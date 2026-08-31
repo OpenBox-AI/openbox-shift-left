@@ -2,7 +2,7 @@ package client
 
 import (
 	"context"
-	"fmt"
+	"errors"
 	"io"
 	"net/http"
 	"strings"
@@ -15,21 +15,26 @@ import (
 // network at all. A RoundTripper rather than a memhttptest server because the
 // schedule assertions below run inside a synctest bubble: everything that
 // blocks has to block on something the bubble owns, and this way the only
-// thing that blocks is post's own time.After.
+// thing that blocks is post's own backoff wait.
 type alwaysRetryable struct {
-	status int
-	calls  *int
-	at     *[]time.Duration
-	start  time.Time
+	status     int
+	retryAfter string // Retry-After header value; empty ⇒ header absent
+	calls      *int
+	at         *[]time.Duration
+	start      time.Time
 }
 
 func (rt alwaysRetryable) RoundTrip(r *http.Request) (*http.Response, error) {
 	*rt.calls++
 	*rt.at = append(*rt.at, time.Since(rt.start))
+	h := make(http.Header)
+	if rt.retryAfter != "" {
+		h.Set("Retry-After", rt.retryAfter)
+	}
 	return &http.Response{
 		StatusCode: rt.status,
 		Body:       io.NopCloser(strings.NewReader(`{"error":"try later"}`)),
-		Header:     make(http.Header),
+		Header:     h,
 		Request:    r,
 	}, nil
 }
@@ -47,22 +52,34 @@ func scheduleClient(t *testing.T, rt http.RoundTripper) *Client {
 	return c
 }
 
-// TestRetryScheduleIsWhatItIsToday pins the delays post() actually waits,
-// against a clock that costs nothing to advance. It asserts the schedule, not
-// the outcome: a test that only checks "three attempts happened" cannot tell a
-// 150/300 linear ramp from an exponential one, so replacing the ramp would be
-// an unverified swap rather than a reviewed diff.
+func retryHarness(t *testing.T, status, retryAfter string) (*Client, *int, *[]time.Duration) {
+	t.Helper()
+	calls := 0
+	at := []time.Duration{}
+	code := http.StatusServiceUnavailable
+	if status == "429" {
+		code = http.StatusTooManyRequests
+	}
+	return scheduleClient(t, alwaysRetryable{
+		status: code, retryAfter: retryAfter, calls: &calls, at: &at, start: time.Now(),
+	}), &calls, &at
+}
+
+// TestRetryStaysInsideTheBudgetTheLinearRampSpent. The schedule this replaced
+// was `time.After(attempt * retryBase)` -- 150ms then 300ms, three attempts,
+// 450ms total, and identical in every hook process on every concurrent session.
+// A control plane coming back from an outage met the whole fleet in lockstep.
 //
-// Recorded because the plan's own arithmetic was wrong. It budgeted
-// 150+300+450 = 900ms at the default MaxRetries; the loop is
-// `for attempt := 0; attempt <= maxRetries` with maxRetries = 2, so it waits
-// 1*base and 2*base and stops -- three attempts, 450ms. Anything that treats
-// 900ms as "today's budget" doubles it.
-func TestRetryScheduleIsWhatItIsToday(t *testing.T) {
+// The replacement is exponential with full jitter, and the property that must
+// not move is the ceiling: retryBudget is defined as exactly what the old ramp
+// would have spent, sum(i*retryBase), so this asserts the new schedule cannot
+// cost the developer more than the old one did.
+//
+// (The plan budgeted 900ms here, counting a third wait the loop never took.
+// The bound is 450ms.)
+func TestRetryStaysInsideTheBudgetTheLinearRampSpent(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		calls := 0
-		var at []time.Duration
-		c := scheduleClient(t, alwaysRetryable{status: http.StatusServiceUnavailable, calls: &calls, at: &at, start: time.Now()})
+		c, calls, at := retryHarness(t, "503", "")
 
 		start := time.Now()
 		if _, err := c.post(t.Context(), evaluatePath, []byte(`{}`), "idem-1"); err == nil {
@@ -70,31 +87,117 @@ func TestRetryScheduleIsWhatItIsToday(t *testing.T) {
 		}
 		elapsed := time.Since(start)
 
-		if calls != defaultMaxRetries+1 {
-			t.Errorf("attempts = %d, want %d (one initial + %d retries)", calls, defaultMaxRetries+1, defaultMaxRetries)
+		const wantBudget = 3 * defaultRetryBase // 450ms: 150 + 300
+		if got := c.retryBudget(); got != wantBudget {
+			t.Errorf("retryBudget() = %v, want %v (what the linear ramp spent)", got, wantBudget)
 		}
-		// Cumulative, not per-delay: the waits are 1*base then 2*base, so the
-		// attempts land at 0, base, 3*base.
-		want := []time.Duration{0, defaultRetryBase, 3 * defaultRetryBase}
-		if got := fmt.Sprint(at); got != fmt.Sprint(want) {
-			t.Errorf("attempt times = %v, want %v: the delay is linear in the attempt number "+
-				"(150ms, then 300ms), unjittered and uncapped", at, want)
+		if elapsed > wantBudget {
+			t.Errorf("post spent %v, over the %v the ramp it replaced would have spent. A hook that "+
+				"blocks longer hurts the developer more than a lost event does", elapsed, wantBudget)
 		}
-		if elapsed != 3*defaultRetryBase {
-			t.Errorf("total retry time = %v, want %v (150ms + 300ms). This is the budget Phase 05 "+
-				"must not exceed; the plan's 900ms figure counts a third wait that never happens", elapsed, 3*defaultRetryBase)
+		if *calls < 1 || *calls > defaultMaxRetries+1 {
+			t.Errorf("attempts = %d, want between 1 and %d", *calls, defaultMaxRetries+1)
+		}
+		for i, d := range *at {
+			if d > wantBudget {
+				t.Errorf("attempt %d began at %v, past the whole budget %v", i, d, wantBudget)
+			}
 		}
 	})
 }
 
-// TestRetryStopsImmediatelyOnAnUnretryableStatus is the other half of the
-// schedule: a 4xx that is not 429 must cost zero waiting. Under a real clock
-// this is indistinguishable from a fast machine.
+// TestRetryDelaysAreJittered is the point of the change and cannot be asserted
+// by watching one run: two fleets retrying on the same deterministic schedule
+// synchronise, and synchronised load is what stops a recovering control plane
+// from recovering. Distinct sequences across runs are the evidence that the
+// delays are drawn rather than computed.
+func TestRetryDelaysAreJittered(t *testing.T) {
+	seen := map[string]int{}
+	for range 40 {
+		synctest.Test(t, func(t *testing.T) {
+			c, _, at := retryHarness(t, "503", "")
+			_, _ = c.post(t.Context(), evaluatePath, []byte(`{}`), "idem-j")
+			var b strings.Builder
+			for _, d := range *at {
+				b.WriteString(d.String())
+				b.WriteByte(' ')
+			}
+			seen[b.String()]++
+		})
+	}
+	if len(seen) < 2 {
+		t.Errorf("40 runs produced %d distinct delay sequence(s): %v\nthe schedule is still "+
+			"deterministic, so every hook in the fleet still retries in lockstep", len(seen), seen)
+	}
+}
+
+// TestRetryAfterBeyondTheBudgetStopsRatherThanSleeps. Retry-After appeared
+// nowhere in this repo, so a 429 asking for a minute was retried 150ms later.
+// It is honoured now -- as a stop signal. Sleeping it out inline would hold a
+// tool call open for as long as the server asked (INV-3), and would buy
+// nothing: ErrDelivery re-spools the event and the next flush delivers it.
+// Refusing to send again is the half of Retry-After that protects the server,
+// and it is the half that is kept.
+func TestRetryAfterBeyondTheBudgetStopsRatherThanSleeps(t *testing.T) {
+	for _, header := range []string{"600", "5", "60"} {
+		t.Run("Retry-After: "+header, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				c, calls, _ := retryHarness(t, "429", header)
+
+				start := time.Now()
+				_, err := c.post(t.Context(), evaluatePath, []byte(`{}`), "idem-ra")
+				elapsed := time.Since(start)
+
+				if err == nil {
+					t.Fatal("post succeeded against a server that only 429s")
+				}
+				if *calls != 1 {
+					t.Errorf("attempts = %d, want 1: the server said do not come back yet", *calls)
+				}
+				if elapsed > c.retryBudget() {
+					t.Errorf("post slept %v honouring Retry-After: %s. The budget is %v and the "+
+						"header is attacker-influenceable if the control plane is impersonated, so it "+
+						"is also the DoS bound", elapsed, header, c.retryBudget())
+				}
+			})
+		})
+	}
+}
+
+// TestRetryAfterInsideTheBudgetIsWaitedOut is the other side: a server asking
+// for a pause it can actually have gets it, and the attempt happens after.
+func TestRetryAfterInsideTheBudgetIsWaitedOut(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		c, calls, at := retryHarness(t, "429", "")
+		c.retryBase = time.Second // budget becomes 3s, comfortably over the 1s below
+		c.http = &http.Client{Transport: alwaysRetryable{
+			status: http.StatusTooManyRequests, retryAfter: "1", calls: calls, at: at, start: time.Now(),
+		}}
+
+		if _, err := c.post(t.Context(), evaluatePath, []byte(`{}`), "idem-ra2"); err == nil {
+			t.Fatal("post succeeded against a server that only 429s")
+		}
+		if *calls < 2 {
+			t.Fatalf("attempts = %d, want at least 2: a one-second pause fits inside a %v budget",
+				*calls, c.retryBudget())
+		}
+		if got := (*at)[1]; got != time.Second {
+			t.Errorf("second attempt began at %v, want exactly 1s: Retry-After replaces the computed "+
+				"delay rather than being added to it", got)
+		}
+	})
+}
+
+// TestRetryStopsImmediatelyOnAnUnretryableStatus: a 4xx that is not 429 must
+// cost zero waiting. Under a real clock this is indistinguishable from a fast
+// machine.
 func TestRetryStopsImmediatelyOnAnUnretryableStatus(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		calls := 0
-		var at []time.Duration
-		c := scheduleClient(t, alwaysRetryable{status: http.StatusBadRequest, calls: &calls, at: &at, start: time.Now()})
+		at := []time.Duration{}
+		c := scheduleClient(t, alwaysRetryable{
+			status: http.StatusBadRequest, calls: &calls, at: &at, start: time.Now(),
+		})
 
 		start := time.Now()
 		if _, err := c.post(t.Context(), evaluatePath, []byte(`{}`), "idem-2"); err == nil {
@@ -109,33 +212,60 @@ func TestRetryStopsImmediatelyOnAnUnretryableStatus(t *testing.T) {
 	})
 }
 
-// TestRetryAbortsMidBackoffOnContextCancel. The wait is a select on ctx.Done()
-// and a timer, and the hook path depends on the cancel arm winning: INV-3 says
-// a hook must never hold the developer's tool call open. Under a real clock a
-// 150ms wait is too short to interrupt reliably; under a fake one the
-// cancellation lands at an exact instant.
-func TestRetryAbortsMidBackoffOnContextCancel(t *testing.T) {
+// TestRetryAbortsOnContextCancel. The hook path depends on cancellation
+// winning: INV-3 says a hook must never hold the developer's tool call open,
+// and the enforcement caller cancels at its evaluation budget. The instant is
+// no longer assertable now that the delays are drawn rather than computed, so
+// what is asserted is the contract -- the error, and that nothing is sent
+// after the cancel.
+func TestRetryAbortsOnContextCancel(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		calls := 0
-		var at []time.Duration
-		c := scheduleClient(t, alwaysRetryable{status: http.StatusServiceUnavailable, calls: &calls, at: &at, start: time.Now()})
+		c, calls, _ := retryHarness(t, "503", "")
 
 		ctx, cancel := context.WithCancel(t.Context())
 		go func() {
-			time.Sleep(defaultRetryBase / 2) // mid-way through the first backoff
+			time.Sleep(defaultRetryBase / 8) // inside even the shortest drawn delay
 			cancel()
 		}()
 
 		start := time.Now()
 		_, err := c.post(ctx, evaluatePath, []byte(`{}`), "idem-3")
-		if err != context.Canceled {
-			t.Errorf("post error = %v, want context.Canceled: the cancel arm of the backoff select must win", err)
+		if !errors.Is(err, context.Canceled) {
+			t.Errorf("post error = %v, want context.Canceled", err)
 		}
-		if d := time.Since(start); d != defaultRetryBase/2 {
-			t.Errorf("post returned after %v, want %v: it waited out the backoff instead of aborting", d, defaultRetryBase/2)
+		if d := time.Since(start); d > c.retryBudget() {
+			t.Errorf("post returned after %v, past the whole budget %v", d, c.retryBudget())
 		}
-		if calls != 1 {
-			t.Errorf("attempts = %d, want 1: no attempt may start after cancellation", calls)
+		if *calls > 1 {
+			t.Errorf("attempts = %d, want 1: no request may be sent after cancellation", *calls)
 		}
 	})
+}
+
+// TestRetryAfterParsesBothFormsRFC9110Allows. delta-seconds and HTTP-date are
+// both legal, and a server picking the date form must not read as "no header
+// at all" -- which is what an Atoi-only parse would have made it.
+func TestRetryAfterParsesBothForms(t *testing.T) {
+	now := time.Date(2026, 8, 31, 12, 0, 0, 0, time.UTC)
+	for _, tc := range []struct {
+		header string
+		want   time.Duration
+		ok     bool
+	}{
+		{"5", 5 * time.Second, true},
+		{"  5  ", 5 * time.Second, true},
+		{"Mon, 31 Aug 2026 12:00:30 GMT", 30 * time.Second, true},
+		{"Monday, 31-Aug-26 12:00:30 GMT", 30 * time.Second, true}, // RFC 850
+		{"Mon Aug 31 12:00:30 2026", 30 * time.Second, true},       // ANSI C asctime
+		{"", 0, false},
+		{"0", 0, false},
+		{"-3", 0, false},
+		{"soon", 0, false},
+		{"Mon, 31 Aug 2026 11:59:30 GMT", 0, false}, // already past
+	} {
+		got, ok := parseRetryAfter(tc.header, now)
+		if ok != tc.ok || got != tc.want {
+			t.Errorf("parseRetryAfter(%q) = (%v, %v), want (%v, %v)", tc.header, got, ok, tc.want, tc.ok)
+		}
+	}
 }

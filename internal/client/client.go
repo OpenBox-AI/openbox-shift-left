@@ -9,7 +9,10 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 	"time"
+
+	"github.com/cenkalti/backoff/v5"
 )
 
 const evaluatePath = "/api/v1/governance/evaluate"
@@ -169,26 +172,65 @@ func (c *Client) Emit(ctx context.Context, ev DevEvent) (Evaluation, error) {
 	return parseEvaluation(respBody), nil
 }
 
+// retryBudget is the delay budget the linear schedule this replaced would have
+// spent: sum(i*retryBase) for i in 1..maxRetries. Derived rather than
+// configured, so "no longer than before" holds for whatever MaxRetries and
+// RetryBase a caller sets and there is no knob to grow it through by accident.
+//
+// It bounds the delays only, never the attempts. Counting request time toward
+// it would silently drop a retry whenever the control plane was slow, which is
+// exactly when the retry is worth having.
+func (c *Client) retryBudget() time.Duration {
+	n := time.Duration(c.maxRetries)
+	return n * (n + 1) / 2 * c.retryBase
+}
+
+// post delivers one signed request, retrying a retryable failure.
+//
+// The delays are exponential with full jitter rather than the arithmetic ramp
+// they replaced. Every hook process on every concurrent session used to retry
+// on the same deterministic 150/300ms schedule, so a control plane coming back
+// from an outage met the whole fleet in lockstep; jitter is what spreads it.
+//
+// Retry-After is honoured as a stop signal, not as a sleep. A server asking
+// for longer than the budget gets what it actually wants -- no more requests
+// -- while the event returns ErrDelivery and the caller re-spools it for the
+// next flush. Waiting it out inline would buy nothing the spool does not
+// already provide, and INV-3 says a hook must not hold the tool call open.
 func (c *Client) post(ctx context.Context, path string, body []byte, idemKey string) ([]byte, error) {
-	var lastErr error
-	for attempt := 0; attempt <= c.maxRetries; attempt++ {
-		if attempt > 0 {
-			select {
-			case <-ctx.Done():
-				return nil, ctx.Err()
-			case <-time.After(time.Duration(attempt) * c.retryBase):
-			}
-		}
+	// Each delay is drawn from [0, 2*interval], and the intervals are
+	// retryBase/2 then retryBase thereafter, so the worst-case sum is
+	// base*(2n-1) against the ramp's base*n(n+1)/2 -- equal at the default two
+	// retries, below it for more. The expected sum is half the old schedule.
+	b := backoff.NewExponentialBackOff()
+	b.InitialInterval = c.retryBase / 2
+	b.RandomizationFactor = 1
+	b.Multiplier = 2
+	b.MaxInterval = c.retryBase
+
+	return backoff.Retry(ctx, func() ([]byte, error) {
 		respBody, retryable, err := c.attempt(ctx, path, body, idemKey)
-		if err == nil {
+		switch {
+		case err == nil:
 			return respBody, nil
+		case !retryable:
+			return nil, backoff.Permanent(err)
 		}
-		lastErr = err
-		if !retryable {
-			return nil, err
+		var he *httpError
+		if errors.As(err, &he) && he.retryAfter > 0 {
+			if he.retryAfter > c.retryBudget() {
+				// Longer than this client will ever pause. Giving up is the half of
+				// Retry-After that protects the server, and it is the half that
+				// matters: ErrDelivery re-spools the event for the next flush.
+				return nil, backoff.Permanent(err)
+			}
+			return nil, &backoff.RetryAfterError{Duration: he.retryAfter}
 		}
-	}
-	return nil, lastErr
+		return nil, err
+	},
+		backoff.WithBackOff(b),
+		backoff.WithMaxTries(uint(c.maxRetries)+1),
+	)
 }
 
 // attempt path is both the URL suffix and the signed canonical-string PATH
@@ -228,13 +270,42 @@ func (c *Client) attempt(ctx context.Context, path string, body []byte, idemKey 
 		return rb, false, nil
 	}
 	retryable = resp.StatusCode >= 500 || resp.StatusCode == http.StatusTooManyRequests
-	return nil, retryable, &httpError{path: path, status: resp.StatusCode, body: string(rb)}
+	ra, _ := parseRetryAfter(resp.Header.Get("Retry-After"), c.now())
+	return nil, retryable, &httpError{path: path, status: resp.StatusCode, body: string(rb), retryAfter: ra}
+}
+
+// parseRetryAfter reads both forms RFC 9110 allows: delta-seconds, and an
+// HTTP-date. The header was read nowhere in this repo, so a 429 saying "come
+// back in a minute" was retried 150ms later.
+func parseRetryAfter(h string, now time.Time) (time.Duration, bool) {
+	h = strings.TrimSpace(h)
+	if h == "" {
+		return 0, false
+	}
+	if secs, err := strconv.Atoi(h); err == nil {
+		if secs <= 0 {
+			return 0, false
+		}
+		return time.Duration(secs) * time.Second, true
+	}
+	if t, err := http.ParseTime(h); err == nil {
+		if d := t.Sub(now); d > 0 {
+			return d, true
+		}
+		return 0, false
+	}
+	return 0, false
 }
 
 type httpError struct {
 	path   string
 	status int
 	body   string
+	// retryAfter is what the server asked for, zero when it asked for nothing.
+	// It is never trusted as a duration to sleep: post clamps it against the
+	// retry budget, which is also the bound on what an impersonated control
+	// plane could make a hook wait.
+	retryAfter time.Duration
 }
 
 func (e *httpError) Error() string {

@@ -17,6 +17,7 @@ go 1.27.0
 // would make. Written out rather than derived so the merge can be diffed against
 // the pre-collapse set instead of trusted.
 require (
+	github.com/cenkalti/backoff/v5 v5.0.3
 	github.com/elazarl/goproxy v1.9.0
 	github.com/google/go-cmp v0.7.0
 	github.com/google/renameio/v2 v2.0.2
