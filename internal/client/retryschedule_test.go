@@ -295,3 +295,32 @@ func TestRetryAfterParsesBothForms(t *testing.T) {
 		}
 	}
 }
+
+// TestRetryAfterCannotSpendTheBudgetTwice. The clamp has to be cumulative. A
+// per-attempt check compares each Retry-After against the whole budget, so a
+// server can spend it once per attempt -- and backoff/v5 resets the exponential
+// ramp on every RetryAfterError, so the drawn delays do not bound it either.
+// Retry-After is attacker-influenceable when the control plane is impersonated,
+// which makes this the DoS bound, and a bound that resets is not one.
+func TestRetryAfterCannotSpendTheBudgetTwice(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		c, calls, _ := retryHarness(t, "429", "")
+		// Budget 30s, and a server that asks for 20s every single time: honouring
+		// the first is fine, honouring a second would double it.
+		c.retryBase = 10 * time.Second
+		c.maxRetries = 5
+		c.http = &http.Client{Transport: alwaysRetryable{
+			status: http.StatusTooManyRequests, retryAfter: "20", calls: calls, at: new([]time.Duration), start: time.Now(),
+		}}
+		budget := c.retryBudget()
+
+		start := time.Now()
+		if _, err := c.post(t.Context(), evaluatePath, []byte(`{}`), "idem-cum"); err == nil {
+			t.Fatal("post succeeded against a server that only 429s")
+		}
+		if d := time.Since(start); d > budget {
+			t.Errorf("post waited %v against a %v budget: %d attempts each honoured a %s Retry-After, "+
+				"so the bound reset instead of being spent", d, budget, *calls, "20s")
+		}
+	})
+}

@@ -63,8 +63,17 @@ func TestConcurrentInstallIsRefusedRatherThanQueued(t *testing.T) {
 	if string(got) != "engine-v1" {
 		t.Errorf("engine = %q, want a complete copy", got)
 	}
-	if _, err := os.Stat(filepath.Join(pluginDir, ".install.lock")); !os.IsNotExist(err) {
-		t.Errorf("install lock outlived the install (err=%v)", err)
+	// The lock FILE outlives the install by design now -- unlinking it reopens a
+	// by-name hole where two processes can both believe they hold the lock. What
+	// must not outlive the install is the lock itself, so assert it is takeable.
+	if _, err := os.Stat(filepath.Join(pluginDir, ".install.lock")); err != nil {
+		t.Errorf("the lock file should persist between installs: %v", err)
+	}
+	release, err := (Installer{PluginDir: pluginDir}).acquireInstallLock()
+	if err != nil {
+		t.Errorf("the lock was still held after every install finished: %v", err)
+	} else {
+		release()
 	}
 }
 

@@ -202,11 +202,11 @@ func (c *Client) post(ctx context.Context, path string, body []byte, idemKey str
 	// retryBase/2 then retryBase thereafter, so the worst-case sum is
 	// base*(2n-1) against the ramp's base*n(n+1)/2 -- equal at the default two
 	// retries, below it for more. The expected sum is half the old schedule.
-	b := backoff.NewExponentialBackOff()
-	b.InitialInterval = c.retryBase / 2
-	b.RandomizationFactor = 1
-	b.Multiplier = 2
-	b.MaxInterval = c.retryBase
+	b := &budgetedBackOff{remaining: c.retryBudget(), inner: backoff.NewExponentialBackOff()}
+	b.inner.InitialInterval = c.retryBase / 2
+	b.inner.RandomizationFactor = 1
+	b.inner.Multiplier = 2
+	b.inner.MaxInterval = c.retryBase
 
 	return backoff.Retry(ctx, func() ([]byte, error) {
 		respBody, retryable, err := c.attempt(ctx, path, body, idemKey)
@@ -218,19 +218,50 @@ func (c *Client) post(ctx context.Context, path string, body []byte, idemKey str
 		}
 		var he *httpError
 		if errors.As(err, &he) && he.retryAfter > 0 {
-			if he.retryAfter > c.retryBudget() {
-				// Longer than this client will ever pause. Giving up is the half of
+			if he.retryAfter > b.remaining {
+				// Longer than what is left of the budget. Giving up is the half of
 				// Retry-After that protects the server, and it is the half that
 				// matters: ErrDelivery re-spools the event for the next flush.
 				return nil, backoff.Permanent(err)
 			}
+			b.remaining -= he.retryAfter
 			return nil, &backoff.RetryAfterError{Duration: he.retryAfter}
 		}
 		return nil, err
 	},
 		backoff.WithBackOff(b),
 		backoff.WithMaxTries(uint(c.maxRetries)+1),
+		// Off explicitly. It bounds total elapsed, request time included, which
+		// would drop a retry against a slow control plane -- when the retry is
+		// worth having. The budget below bounds the delays and nothing else.
+		backoff.WithMaxElapsedTime(0),
 	)
+}
+
+// budgetedBackOff spends a fixed delay budget and then stops.
+//
+// The clamp has to be cumulative, not per-signal. Checking each Retry-After
+// against the whole budget lets a server spend it once per attempt --
+// maxRetries times over at the worst -- and backoff/v5 resets the exponential
+// ramp on every RetryAfterError, so the drawn delays do not bound it either.
+// Since Retry-After is attacker-influenceable when the control plane is
+// impersonated, this is also the DoS bound, and a bound that resets is not one.
+type budgetedBackOff struct {
+	remaining time.Duration
+	inner     *backoff.ExponentialBackOff
+}
+
+func (b *budgetedBackOff) Reset() { b.inner.Reset() }
+
+// NextBackOff returns backoff.Stop once the budget cannot cover another delay,
+// which ends the retry loop with the last error rather than waiting anyway.
+func (b *budgetedBackOff) NextBackOff() time.Duration {
+	next := b.inner.NextBackOff()
+	if next == backoff.Stop || next > b.remaining {
+		return backoff.Stop
+	}
+	b.remaining -= next
+	return next
 }
 
 // attempt path is both the URL suffix and the signed canonical-string PATH

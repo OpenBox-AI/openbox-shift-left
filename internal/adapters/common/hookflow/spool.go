@@ -339,13 +339,26 @@ func (s Spool) writeRecovery(basePath string, lines [][]byte, attempt int) {
 	if next > MaxRecoveryAttempts {
 		return
 	}
-	rec := recoveryStem(basePath) + ".rec" + strconv.Itoa(next) + "-" + rand.Text() + ".jsonl"
+	stem := recoveryStem(basePath) + ".rec" + strconv.Itoa(next) + "-" + rand.Text()
 	var buf bytes.Buffer
 	for _, l := range lines {
 		buf.Write(l)
 		buf.WriteByte('\n')
 	}
-	_ = os.WriteFile(rec, buf.Bytes(), 0o600)
+	// Written under a name no sweep matches, then renamed in. Writing straight to
+	// the `.jsonl` name publishes the file to FlushAll the instant the directory
+	// entry appears, so a concurrent sweep could rename it aside and read a
+	// prefix: the torn tail parses as corrupt and is skipped, the file is
+	// removed, and the rest of the carry-over follows it into the removed inode.
+	// Same loss as the append race the sidecar lock closes, in a narrower window.
+	tmp := stem + ".partial"
+	if os.WriteFile(tmp, buf.Bytes(), 0o600) != nil {
+		_ = os.Remove(tmp)
+		return
+	}
+	if os.Rename(tmp, stem+".jsonl") != nil {
+		_ = os.Remove(tmp)
+	}
 }
 
 func NonEmptyLines(data []byte) [][]byte {

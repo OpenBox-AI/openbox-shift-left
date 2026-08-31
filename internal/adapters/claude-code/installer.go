@@ -144,12 +144,16 @@ func (i Installer) acquireInstallLock() (release func(), err error) {
 				"the lock is released when that process exits, however it exits",
 			dir, lock)
 	}
-	// Unlink before unlocking, so the window in which another init can take the
-	// lock opens only after this install is finished with it.
-	return func() {
-		_ = os.Remove(lock)
-		_ = fl.Unlock()
-	}, nil
+	// The lock file stays on disk, which is gofrs' own documented contract:
+	// "It will not remove the file from disk, that's up to your application."
+	// Removing it reintroduces a by-name hole in a mechanism adopted for kernel
+	// truth. Unlinking the name while a second init already has the inode open
+	// lets that init's flock succeed on an inode nobody can reach any more,
+	// while a third creates a fresh file at the path and locks that -- two
+	// processes both believing they hold it. Unlocking first only moves the
+	// race. An empty dot-file in the plugin bundle costs nothing, and the
+	// refusal message says so rather than telling anyone to delete it.
+	return func() { _ = fl.Unlock() }, nil
 }
 
 // placeEngineBinary the copy is atomic (temp + rename) so a re-init never
