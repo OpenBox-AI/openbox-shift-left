@@ -170,7 +170,7 @@ id, never content fields (INV-2).
 > Conflating the two shipped and was found in a live session: every retry became
 > a different activity, so an approver's decision could not be consumed, each
 > retry filed a fresh request, and the rewake's "re-run to proceed" looped.
-| `agent_id`, `agent_type` | Claude Code | Identify the subagent an event occurred inside. Present on *every* payload fired within a subagent, so the subagent tree is reconstructable from tool events alone; which is why the `SubagentStart`/`SubagentStop` boundary markers need no lifecycle type of their own (COVERAGE.md §3.2). |
+| `agent_id`, `agent_type` | Claude Code | Identify the subagent an event occurred inside. Present on *every* payload fired within a subagent, so the subagent tree is reconstructable from tool events alone; which is why the `SubagentStart`/`SubagentStop` boundary markers need no lifecycle type of their own (coverage.md §3.2). |
 | `turn_id` | Codex | Per-turn correlation id. |
 | `thread_id`, `root_session_id` | Codex | Emitted only when a forked thread's id differs from the session id it continues. |
 
@@ -299,7 +299,7 @@ overwriting whatever was sent.
   is exactly why the synthesized `http.*` attributes exist (above). The client's
   own `semantic_type` on the wire is ignored.
 
-MAPPING.md previously carried an "an earlier decision dependency (server-side, pending)" claim
+mapping.md previously carried an "an earlier decision dependency (server-side, pending)" claim
 that `shell`→`shell_command` and `mcp`→`mcp_tool_call` classification was
 awaiting a core edit. **That claim is deleted, not restated.** It was already
 contradicted by observed data (a live span carried `semantic_type:

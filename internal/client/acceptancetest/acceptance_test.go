@@ -152,7 +152,7 @@ func TestAcceptanceStockCoreAcceptsEmittedEvents(t *testing.T) {
 
 	if len(rejected) > 0 {
 		t.Errorf("stock core rejected %d/%d emitted events with 400 \"invalid event_type\" (%s); "+
-			"the client is emitting a NON-stock wire type; the base-wire mapping (MAPPING.md §2) is broken. "+
+			"the client is emitting a NON-stock wire type; the base-wire mapping (mapping.md §2) is broken. "+
 			"Every dev event must map to a stock base type (Workflow*/SignalReceived/ActivityStarted).",
 			len(rejected), len(devEventTypes), strings.Join(rejected, ", "))
 	}

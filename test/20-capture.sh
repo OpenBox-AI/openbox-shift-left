@@ -157,7 +157,7 @@ tb_step "zero spans — the accepted trade-off, asserted on purpose"
 # that span's row exists. This session captures content too, so on the first live
 # run exactly one of the two assertions is wrong. Left as-is rather than guessed
 # at: which one depends on whether core stores an embedded spans[] entry as a
-# spans row, which nobody in this repo has observed (MAPPING.md §7). Whoever runs
+# spans row, which nobody in this repo has observed (mapping.md §7). Whoever runs
 # this first should expect to resolve it, not to be surprised by it.
 # NOT a bug and NOT something to "fix" by re-adding a span. A hook process has no
 # in-process OpenTelemetry, so the spans shift-left used to send were fabricated
@@ -229,7 +229,7 @@ if [ "$(tb_count "governance_events where run_id='$sid' and activity_type='llm_c
 		"$(tb_count "governance_events where run_id='$sid' and output ? 'thinking'")"
 	tb_note "thinking bytes: $(tb_val "select length(output->>'thinking') from governance_events where run_id='$sid' and output ? 'thinking' order by created_at desc limit 1;")"
 else
-	tb_skip "turn thinking egressed" "no thinking block in this session (extended thinking may be off — see MAPPING.md §7 item 22)"
+	tb_skip "turn thinking egressed" "no thinking block in this session (extended thinking may be off — see mapping.md §7 item 22)"
 fi
 
 # ── the negative: an ungoverned directory produces NOTHING ───────────────────

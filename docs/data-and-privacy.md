@@ -585,8 +585,8 @@ one field assigned directly instead of through the mapper's redactor, so it
 egressed unscanned with `secret_detection` fully on; that was fixed on
 2026-08-26 and conformance C42 asserts it on the outbound bytes
 (`internal/adapters/claude-code/mapper.go:225`). The same shape is **still live
-for Codex**, whose mapper has no redactor at all; see [COVERAGE.md
-§3.4](../docs/COVERAGE.md). Redaction runs **before** attachment in all cases; a
+for Codex**, whose mapper has no redactor at all; see [coverage.md
+§3.4](coverage.md). Redaction runs **before** attachment in all cases; a
 redaction applied afterwards would pass every code-level test and still ship the
 secret, so the ordering is asserted on the outbound bytes (conformance C18, C26,
 C34).

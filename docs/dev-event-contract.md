@@ -11,7 +11,7 @@ The single, versioned, **tool-agnostic** event schema that every coding-tool
 adapter maps its native payload onto (SPI `emit`). The OpenBox client then
 re-expresses it onto the base SDK's unified wire model (`Workflow*` /
 `SignalReceived` / `ActivityStarted` / `ActivityCompleted`; span-less apart from
-the one content-gated turn span) for openbox-core; see MAPPING.md. Adding a
+the one content-gated turn span) for openbox-core; see mapping.md. Adding a
 provider (Claude Code, Codex, Cursor, …) never changes this contract or the wire
 model (PRD **FR-4**, architecture **§1b**).
 
@@ -19,15 +19,15 @@ model (PRD **FR-4**, architecture **§1b**).
 
 | Path | What |
 |---|---|
-| [`schema/dev-event.schema.json`](../api/dev-event.schema.json) | The contract; JSON Schema (draft 2020-12), language-neutral. 7 lifecycle event types, common envelope, `tool{}`, `span`, gated `content`, canonical `verdict` enum. |
-| [`MAPPING.md`](MAPPING.md) | How the contract maps onto the base-SDK unified wire model on openbox-core. the client builds payloads from this without guessing. §3's field-home table is the authority on what the serializer reads; also carries the downstream-consumer sweep (INV-8) and client signing/transport notes. |
-| [`COVERAGE.md`](COVERAGE.md) | How Claude Code / Cursor / Codex real event surfaces map onto the lifecycle types, field-derivation rules, and the bounded non-goals. The reference for adapter authors (the Claude Code adapter/7/8). |
+| [`api/dev-event.schema.json`](../api/dev-event.schema.json) | The contract; JSON Schema (draft 2020-12), language-neutral. 7 lifecycle event types, common envelope, `tool{}`, `span`, gated `content`, canonical `verdict` enum. |
+| [`mapping.md`](mapping.md) | How the contract maps onto the base-SDK unified wire model on openbox-core. the client builds payloads from this without guessing. §3's field-home table is the authority on what the serializer reads; also carries the downstream-consumer sweep (INV-8) and client signing/transport notes. |
+| [`coverage.md`](coverage.md) | How Claude Code / Cursor / Codex real event surfaces map onto the lifecycle types, field-derivation rules, and the bounded non-goals. The reference for adapter authors (the Claude Code adapter/7/8). |
 | [`conformance/`](../internal/conformance/) | Go conformance harness. Dependency-free; validates samples against the schema and enforces the INV-2 content gate. |
 
 ## The lifecycle event types
 
 The `event_type` enum in [the schema](../api/dev-event.schema.json) is the list,
-and COVERAGE.md §1 maps each one onto the providers' native hooks. V1.0's
+and coverage.md §1 maps each one onto the providers' native hooks. V1.0's
 original seven have since been joined by the turn pair and by `SubagentStarted`
 / `PermissionDenied` / `APIError`.
 
@@ -46,7 +46,7 @@ computes no `semantic_type` for one, and
 dev sessions. `tool.kind` is what carries that distinction now. The one span
 that does reach core is minted by the *client* on a captured turn: no adapter
 populates it, it carries no locator, and it exists because the alignment reader
-accepts no other shape. See MAPPING.md §3.
+accepts no other shape. See mapping.md §3.
 
 ## Privacy (INV-2)
 
@@ -89,9 +89,9 @@ redacts Write/Edit bodies in enforce mode only, and only while
 Canonical (priority): `HALT > BLOCK > REQUIRE_APPROVAL > CONSTRAIN > ALLOW`.
 Openbox-core serializes the response `verdict` field as lowercase
 (`halt|block|require_approval|constrain|allow`) plus a legacy `action` field;
-see `$defs.verdict` and MAPPING.md §4. Observe mode treats every verdict as
+see `$defs.verdict` and mapping.md §4. Observe mode treats every verdict as
 allow (INV-3); enforce mode, **on by default**, acts on
-them, tighten-only. See COVERAGE.md §4.
+them, tighten-only. See coverage.md §4.
 
 ## Validate
 
@@ -104,7 +104,7 @@ a Go toolchain and no module downloads.
 
 ## Consuming the contract
 
-- **the client (client):** build the base-SDK wire payload per MAPPING.md; `import`
+- **the client (client):** build the base-SDK wire payload per mapping.md; `import`
   the `conformance` package to validate outbound events before signing/POST.
 - **Adapters (the Claude Code adapter/7/8):** map native tool payloads onto this schema in
   `emit`.

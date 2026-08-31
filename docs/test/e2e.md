@@ -266,7 +266,7 @@ wire); `signal_args` null on the new signals (the alignment goal is not
 overwritten); and capture off ⇒ **no `thinking` key** on any row, while the
 turn's token numbers survive (otherwise "no content" would pass
 for a client that stopped emitting turns). The single list a live run must
-confirm is [`MAPPING.md`](../../docs/MAPPING.md) §7 items 15–24; the script is
+confirm is [`mapping.md`](../mapping.md) §7 items 15–24; the script is
 that list's executable form and defers to it. **Dormant: written, never run**;
 its own header says not to cite it as evidence until it has.
 

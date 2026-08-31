@@ -68,7 +68,7 @@ is the part that stops a directory quietly becoming a junk drawer.
 
 | Directory | What belongs | What must not go here |
 |---|---|---|
-| `api/` | machine-readable contract artefacts; today, the dev-event JSON Schema | prose *about* the wire. `MAPPING.md` and `COVERAGE.md` are documents, and they live in `docs/` |
+| `api/` | machine-readable contract artefacts; today, the dev-event JSON Schema | prose *about* the wire. `mapping.md` and `coverage.md` are documents, and they live in `docs/` |
 | `build/` | packaging and release configuration (`.goreleaser.yaml`) | anything a build produces. Artefacts are git-ignored |
 | `cmd/` | one directory per **shipped** executable, `main` package only | a binary nothing ships. A dev instrument belongs in `tools/` |
 | `deployments/` | managed-settings templates an org deploys (MDM) | anything read at runtime by this repo's own code |

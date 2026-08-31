@@ -10,7 +10,7 @@
 # real defect. Do not cite this file as evidence until it has run.
 # ═════════════════════════════════════════════════════════════════════════════
 #
-# The single list of what a live run must confirm is MAPPING.md §7 items 15-21.
+# The single list of what a live run must confirm is mapping.md §7 items 15-21.
 # This file is the executable form of that list and deliberately does not restate
 # it — if the two disagree, MAPPING is the contract.
 #

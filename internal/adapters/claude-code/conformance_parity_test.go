@@ -112,7 +112,7 @@ var conformanceParity = []parityRow{
 		goCase:   "",
 		baseCase: "test_http_started_halt_not_sent_and_halt_shaped_error",
 		status:   statusBaseUnmapped,
-		note:     "HALT-specific mapping. shift-left maps HALT->deny/stop (schema $defs.verdict; MAPPING.md §4) but the C1..C9 suite has no dedicated HALT case (C1 covers BLOCK). Follow-up: a C-case that a HALT verdict denies with the halt reason.",
+		note:     "HALT-specific mapping. shift-left maps HALT->deny/stop (schema $defs.verdict; mapping.md §4) but the C1..C9 suite has no dedicated HALT case (C1 covers BLOCK). Follow-up: a C-case that a HALT verdict denies with the halt reason.",
 	},
 	{
 		goCase:   "",

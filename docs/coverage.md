@@ -20,7 +20,7 @@ unbuilt. Last reconciled 2026-08-26 against
 any provider adapter or hook; it observes the HTTP exchange itself. It is Claude
 Code only, opt-in per machine, and nothing in this document's matrix describes
 it: a lifecycle matrix maps hooks, and the gateway has none. Its fields are in
-[MAPPING.md](MAPPING.md) §3 and its own §7 verification items.
+[mapping.md](mapping.md) §3 and its own §7 verification items.
 
 **Narrower than "Claude Code": the terminal CLI only.** Measured 2026-08-27; a
 CLI session relayed and was captured; a desktop-app session over the same
@@ -237,7 +237,7 @@ not read "built for it" as "covers it".
   new adapter must also supply `span.operation_id` for any class it lets the
   gate escalate, or an approval cannot survive a retry; `activity_id` derives
   from it, and an approval granted against one activity cannot be consumed by a
-  retry that addresses another; see MAPPING.md "Operation vs invocation
+  retry that addresses another; see mapping.md "Operation vs invocation
   identity".
 
 ## 3. Bounded non-goals (Phase-1 v1.0); documented, not gaps

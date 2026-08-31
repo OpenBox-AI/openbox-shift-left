@@ -319,7 +319,7 @@ adapter behind one SPI. Adding a tool is an adapter, not a fork. →
 The two providers also send **different amounts of content under one posture**:
 Claude Code captures tool input, tool output, the failure detail and the turn's
 thinking; Codex captures none of them. Stated rather than averaged, in
-[COVERAGE](docs/COVERAGE.md) §3.
+[coverage.md](docs/coverage.md) §3.
 
 Two capabilities are provider-independent and work with any tool: OpenBox
 registration and the git-trailer commit binding; so lineage and cost tracking
@@ -458,8 +458,9 @@ Details and current status:
 | [Upgrading to inline evaluation](docs/upgrading-to-inline-evaluation.md) | what changes for an existing install, incl. file bodies now egressing |
 | [Lineage](docs/lineage.md) | `session → commit → deploy` and how it is verified |
 | [Gateway MDM recipe](docs/gateway-mdm-recipe.md) | the artifacts to push if you need the gateway prevented-from, not just detected-around |
-| [Event contract](api/dev-event.schema.json) | the normalized event schema |
-| [Wire mapping](docs/MAPPING.md) | how each field lands in core's columns |
+| [Event contract](docs/dev-event-contract.md) | the normalized event schema in `api/`, its lifecycle types, and the INV-2 content gate |
+| [Wire mapping](docs/mapping.md) | how each field lands in core's columns |
+| [Provider coverage](docs/coverage.md) | what each provider's native surface does and does not supply, and the bounded non-goals |
 | [End-to-end tests](docs/test/e2e.md) | `test/`; a mock-free suite against a real stack |
 
 ## Contributing
