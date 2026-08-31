@@ -12,7 +12,10 @@ import "testing"
 func TestAllowlistTreatsOneIPLiteralAsOneHost(t *testing.T) {
 	for _, class := range [][]string{
 		{"[::1]", "[::1]:443", "::1", "[0:0:0:0:0:0:0:1]:8443", "0:0:0:0:0:0:0:1"},
-		{"127.0.0.1", "127.0.0.1:443", "127.0.0.1:8443"},
+		// The IPv4-mapped forms belong here: on a dual-stack host they reach the
+		// same endpoint, so keeping them apart leaves the same hole in another
+		// spelling.
+		{"127.0.0.1", "127.0.0.1:443", "127.0.0.1:8443", "[::ffff:127.0.0.1]:443", "::ffff:127.0.0.1", "[::ffff:7f00:1]:443"},
 		{"[2001:db8::1]", "[2001:DB8::1]:443", "2001:db8:0:0:0:0:0:1"},
 	} {
 		for _, configured := range class {
@@ -32,7 +35,9 @@ func TestAllowlistTreatsOneIPLiteralAsOneHost(t *testing.T) {
 // that merely looks like one is not an address at all.
 func TestAllowlistKeepsIPLiteralsApart(t *testing.T) {
 	a := NewAllowlist("[::1]")
-	for _, wire := range []string{"127.0.0.1:443", "::2", "[::2]:443", "localhost:443", "1:443"} {
+	// fe80::1%lo0 stays distinct from fe80::1: a zone names an interface, and
+	// two interfaces are two hosts, not two spellings of one.
+	for _, wire := range []string{"127.0.0.1:443", "::2", "[::2]:443", "localhost:443", "1:443", "[fe80::1%lo0]:443"} {
 		if a.Allows(wire) {
 			t.Errorf("NewAllowlist(\"[::1]\").Allows(%q) = true, want false: normalizing the written "+
 				"form must not widen what is intercepted", wire)

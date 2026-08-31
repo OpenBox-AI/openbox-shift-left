@@ -98,9 +98,29 @@ func (a *app) runTelemetry(args []string) int {
 
 	shutdown, cancel := context.WithTimeout(context.Background(), *grace)
 	defer cancel()
-	if err := rec.Shutdown(shutdown); err != nil && !errors.Is(err, context.Canceled) {
+	// Not errors.Is: Shutdown joins every receiver's error, and errors.Is
+	// matches if ANY of them is a cancellation -- which would swallow a genuine
+	// failure that happened alongside one, in the shutdown an operator most
+	// needs to read about.
+	if err := rec.Shutdown(shutdown); err != nil && !onlyCancellation(err) {
 		logger.Printf("openbox telemetry: shutdown: %v", err)
 	}
 	logger.Printf("openbox telemetry: stopped; %s", em)
 	return exitOK
+}
+
+// onlyCancellation reports whether err is cancellation and nothing else,
+// descending through errors.Join's tree. A shutdown that was cancelled is
+// routine and says nothing; a shutdown where one receiver failed is worth a
+// line even if another was cancelled at the same moment.
+func onlyCancellation(err error) bool {
+	if joined, ok := err.(interface{ Unwrap() []error }); ok {
+		for _, e := range joined.Unwrap() {
+			if !onlyCancellation(e) {
+				return false
+			}
+		}
+		return true
+	}
+	return errors.Is(err, context.Canceled)
 }

@@ -61,13 +61,19 @@ func (a Allowlist) Hosts() []string {
 //     "[::1]", "[::1]:443", "::1" and "0:0:0:0:0:0:0:1" one key rather than
 //     four. Keying on the written form is how the bracket -- a delimiter for a
 //     port that is not there -- became part of the identity of the host.
+//     Unmap folds the IPv4-mapped form in with it: "::ffff:127.0.0.1" reaches
+//     the same endpoint as "127.0.0.1" on any dual-stack host, so leaving them
+//     as two keys leaves the same hole in a different spelling.
 //
 // Names keep the ASCII fold and never reach a Unicode one: U+212A KELVIN SIGN
 // lowercases to 'k' under Unicode rules, so strings.ToLower would let
 // "anthropiK" match "anthropick".
+//
+// A zone deliberately survives: fe80::1%eth0 and fe80::1%eth1 are different
+// interfaces, not two spellings of one host.
 func normalizeHost(target string) string {
 	if ap, err := netip.ParseAddrPort(target); err == nil {
-		return ap.Addr().String()
+		return ap.Addr().Unmap().String()
 	}
 	h := target
 	if host, _, err := net.SplitHostPort(target); err == nil {
@@ -78,7 +84,7 @@ func normalizeHost(target string) string {
 		h = h[1 : len(h)-1] // bare literal written with the port's brackets
 	}
 	if addr, err := netip.ParseAddr(h); err == nil {
-		return addr.String()
+		return addr.Unmap().String()
 	}
 	return asciiLower(h)
 }
