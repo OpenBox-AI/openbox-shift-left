@@ -81,8 +81,6 @@ func (r *testRepo) resolver(v OwnershipVerifier) *Resolver {
 	return NewResolver(r.dir, v)
 }
 
-func contains(s, sub string) bool { return strings.Contains(s, sub) }
-
 func ids(claims []SessionClaim) map[string]bool {
 	m := map[string]bool{}
 	for _, c := range claims {

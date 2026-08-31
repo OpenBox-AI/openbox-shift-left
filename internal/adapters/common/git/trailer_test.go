@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -174,7 +175,7 @@ func TestStamp_DropsInvalidNeverWritesSecret(t *testing.T) {
 		t.Fatal(err)
 	}
 	data, _ := os.ReadFile(msg)
-	if got := string(data); contains(got, "obx_") {
+	if got := string(data); strings.Contains(got, "obx_") {
 		t.Fatalf("secret leaked into commit message:\n%s", got)
 	}
 	got, _ := g.ReadTrailers(msg)
@@ -200,13 +201,4 @@ func TestValidSessionIDs_DropsProseAndSecrets(t *testing.T) {
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("validSessionIDs = %v, want %v", got, want)
 	}
-}
-
-func contains(s, sub string) bool {
-	for i := 0; i+len(sub) <= len(s); i++ {
-		if s[i:i+len(sub)] == sub {
-			return true
-		}
-	}
-	return false
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 
 	obgit "github.com/openbox-ai/openbox-shift-left/internal/adapters/common/git"
@@ -405,7 +406,7 @@ func (r *Resolver) attachAttestations(claims []SessionClaim) {
 		if err != nil || payload.CommitSHA != commit {
 			continue
 		}
-		if !containsString(payload.SessionIDs, claims[i].SessionID) {
+		if !slices.Contains(payload.SessionIDs, claims[i].SessionID) {
 			continue
 		}
 		claims[i].Attestation = att
@@ -420,13 +421,4 @@ func withinAttestationSizeLimit(a *obgit.Attestation) bool {
 	}
 	b, err := json.Marshal(a)
 	return err == nil && len(b) <= maxAttestationBytes
-}
-
-func containsString(list []string, want string) bool {
-	for _, v := range list {
-		if v == want {
-			return true
-		}
-	}
-	return false
 }

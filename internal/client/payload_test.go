@@ -2,6 +2,7 @@ package client
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -289,7 +290,7 @@ func TestStripContent_Default_RemovesAllContent(t *testing.T) {
 	}
 
 	b, _ := buildPayload(stripped)
-	if s := string(b); contains(s, "secret prompt") || contains(s, "diff") || contains(s, "file body") {
+	if s := string(b); strings.Contains(s, "secret prompt") || strings.Contains(s, "diff") || strings.Contains(s, "file body") {
 		t.Errorf("INV-2 violation: content leaked into payload: %s", s)
 	}
 }
@@ -307,7 +308,7 @@ func TestSpanBodiesAreNoLongerAnEgressChannel(t *testing.T) {
 	if err != nil {
 		t.Fatalf("buildPayload: %v", err)
 	}
-	if s := string(b); contains(s, "the-diff") || contains(s, "the-result") {
+	if s := string(b); strings.Contains(s, "the-diff") || strings.Contains(s, "the-result") {
 		t.Errorf("span bodies reached the wire: %s", s)
 	}
 }
@@ -322,13 +323,4 @@ func decodeJSON(t *testing.T, raw json.RawMessage) map[string]any {
 		t.Fatalf("unmarshal: %v", err)
 	}
 	return m
-}
-
-func contains(s, sub string) bool {
-	for i := 0; i+len(sub) <= len(s); i++ {
-		if s[i:i+len(sub)] == sub {
-			return true
-		}
-	}
-	return false
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"reflect"
+	"strings"
 	"testing"
 
 	obgit "github.com/openbox-ai/openbox-shift-left/internal/adapters/common/git"
@@ -185,7 +186,7 @@ func TestResolve_MaxSessionsCapIsRecorded(t *testing.T) {
 	if len(got.Sessions) != 2 {
 		t.Fatalf("claims = %d, want 2 (capped)", len(got.Sessions))
 	}
-	if got.Note == "" || !contains(got.Note, "MaxSessions") {
+	if got.Note == "" || !strings.Contains(got.Note, "MaxSessions") {
 		t.Fatalf("cap not disclosed in Note: %q", got.Note)
 	}
 }

@@ -12,9 +12,10 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strings"
 	"time"
 
@@ -104,7 +105,7 @@ func Activate(homeDir, settingsPath string, lane Lane, desired map[string]string
 		entry.Original = map[string]Original{}
 	}
 
-	for _, key := range sortedKeys(desired) {
+	for _, key := range slices.Sorted(maps.Keys(desired)) {
 		want := desired[key]
 		if existing, present := env[key]; present {
 			if s := asString(existing); s != want {
@@ -169,7 +170,7 @@ func Deactivate(homeDir, settingsPath string, lane Lane, force bool) (Reverted, 
 		original Original
 	}
 	var todo []action
-	for _, key := range sortedKeys(entry.Managed) {
+	for _, key := range slices.Sorted(maps.Keys(entry.Managed)) {
 		original := entry.Original[key]
 		current, present := env[key]
 		switch {
@@ -353,15 +354,6 @@ func asString(v any) string {
 	default:
 		return fmt.Sprint(t)
 	}
-}
-
-func sortedKeys[V any](m map[string]V) []string {
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	return keys
 }
 
 func copyOf(m map[string]string) map[string]string {

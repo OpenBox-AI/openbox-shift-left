@@ -2,6 +2,7 @@ package activation
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -86,7 +87,7 @@ func TestTheElectionNamesWhatItOutranked(t *testing.T) {
 	if len(e.Routed) != 2 {
 		t.Fatalf("Routed = %v, want both routed lanes", e.Routed)
 	}
-	if !contains(e.Reason, string(LaneTelemetry)) {
+	if !strings.Contains(e.Reason, string(LaneTelemetry)) {
 		t.Errorf("the reason does not name the lane that lost: %q", e.Reason)
 	}
 }
@@ -192,7 +193,7 @@ func TestTransportKeysMergeTheDevelopersNoProxy(t *testing.T) {
 		"NO_PROXY": "internal.corp, .corp.internal",
 	})
 	for _, want := range []string{"internal.corp", ".corp.internal", "localhost", "127.0.0.1", "::1"} {
-		if !contains(keys["NO_PROXY"], want) {
+		if !strings.Contains(keys["NO_PROXY"], want) {
 			t.Errorf("NO_PROXY = %q, missing %q", keys["NO_PROXY"], want)
 		}
 	}
@@ -255,10 +256,10 @@ func TestTheReasonDoesNotClaimAnOutrankingThatDidNotHappen(t *testing.T) {
 	if e.Elected != LaneTelemetry {
 		t.Fatalf("elected %q", e.Elected)
 	}
-	if contains(e.Reason, "outranks") {
+	if strings.Contains(e.Reason, "outranks") {
 		t.Errorf("telemetry claims to outrank the relay; it did not; the relay was never in the path: %q", e.Reason)
 	}
-	if !contains(e.Reason, "cannot see the call") {
+	if !strings.Contains(e.Reason, "cannot see the call") {
 		t.Errorf("the reason does not say why the relay lost: %q", e.Reason)
 	}
 }

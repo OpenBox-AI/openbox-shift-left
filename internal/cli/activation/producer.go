@@ -3,6 +3,7 @@ package activation
 import (
 	"net"
 	"net/url"
+	"slices"
 	"strings"
 )
 
@@ -62,7 +63,7 @@ func electionFrom(env map[string]string) Election {
 	for _, lane := range routed {
 		switch {
 		case lane == e.Elected:
-		case containsLane(candidates, lane):
+		case slices.Contains(candidates, lane):
 			outranked = append(outranked, string(lane))
 		default:
 			notInPath = append(notInPath, string(lane))
@@ -79,15 +80,6 @@ func electionFrom(env map[string]string) Election {
 	}
 	e.Reason = strings.Join(parts, "; ")
 	return e
-}
-
-func containsLane(lanes []Lane, want Lane) bool {
-	for _, l := range lanes {
-		if l == want {
-			return true
-		}
-	}
-	return false
 }
 
 // candidateLanes so with both lanes routed the call goes straight to the

@@ -2,6 +2,7 @@ package transport
 
 import (
 	"net"
+	"net/netip"
 	"strings"
 )
 
@@ -49,19 +50,36 @@ func (a Allowlist) Hosts() []string {
 	return out
 }
 
-// normalizeHost three reductions, each because the same DNS name legitimately
+// normalizeHost four reductions, each because the same host legitimately
 // arrives in more than one shape, and a miss is a silent governance hole; an
 // unmatched host is blind-tunnelled, so the model call succeeds and is simply
 // never recorded:
 //   - The port is dropped ("api.anthropic.com:443" and ":8443" are one host);
 //   - One trailing root dot is dropped (the fqdn form of the same name);
-//   - ASCII letters are lowercased (DNS is case-insensitive).
+//   - ASCII letters are lowercased (DNS is case-insensitive);
+//   - An IP literal is reduced to netip's canonical text, which is what makes
+//     "[::1]", "[::1]:443", "::1" and "0:0:0:0:0:0:0:1" one key rather than
+//     four. Keying on the written form is how the bracket -- a delimiter for a
+//     port that is not there -- became part of the identity of the host.
+//
+// Names keep the ASCII fold and never reach a Unicode one: U+212A KELVIN SIGN
+// lowercases to 'k' under Unicode rules, so strings.ToLower would let
+// "anthropiK" match "anthropick".
 func normalizeHost(target string) string {
+	if ap, err := netip.ParseAddrPort(target); err == nil {
+		return ap.Addr().String()
+	}
 	h := target
 	if host, _, err := net.SplitHostPort(target); err == nil {
 		h = host
 	}
 	h = strings.TrimSuffix(h, ".")
+	if len(h) > 1 && h[0] == '[' && h[len(h)-1] == ']' {
+		h = h[1 : len(h)-1] // bare literal written with the port's brackets
+	}
+	if addr, err := netip.ParseAddr(h); err == nil {
+		return addr.String()
+	}
 	return asciiLower(h)
 }
 

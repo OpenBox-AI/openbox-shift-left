@@ -5,9 +5,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -132,15 +133,15 @@ func summarizeFindings(delta []byte) string {
 func (s findingsSummary) render() string {
 	var parts []string
 	if s.wouldBlock > 0 {
-		if v := sortedKeys(s.verdicts); len(v) > 0 {
+		if v := slices.Sorted(maps.Keys(s.verdicts)); len(v) > 0 {
 			parts = append(parts, fmt.Sprintf("%d would-block [%s]", s.wouldBlock, strings.Join(v, ",")))
 		} else {
 			parts = append(parts, fmt.Sprintf("%d would-block", s.wouldBlock))
 		}
-	} else if v := sortedKeys(s.verdicts); len(v) > 0 {
+	} else if v := slices.Sorted(maps.Keys(s.verdicts)); len(v) > 0 {
 		parts = append(parts, fmt.Sprintf("verdicts [%s]", strings.Join(v, ",")))
 	}
-	if g := sortedKeys(s.guardrailCats); len(g) > 0 {
+	if g := slices.Sorted(maps.Keys(s.guardrailCats)); len(g) > 0 {
 		parts = append(parts, fmt.Sprintf("guardrails [%s]", joinCapped(g, maxCategoriesShown)))
 	}
 	if s.driftFindings > 0 {
@@ -241,13 +242,4 @@ func joinCapped(items []string, n int) string {
 		return strings.Join(items, ",")
 	}
 	return strings.Join(items[:n], ",") + fmt.Sprintf(",+%d more", len(items)-n)
-}
-
-func sortedKeys(m map[string]bool) []string {
-	out := make([]string, 0, len(m))
-	for k := range m {
-		out = append(out, k)
-	}
-	sort.Strings(out)
-	return out
 }

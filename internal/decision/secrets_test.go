@@ -3,6 +3,7 @@ package decision
 import (
 	"encoding/json"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -40,7 +41,7 @@ func TestRedact_NamedPatterns(t *testing.T) {
 			if !strings.Contains(out, "${"+redactedPrefix) {
 				t.Errorf("%s: no env-var placeholder in %q", c.name, out)
 			}
-			if !containsStr(cats, c.cat) {
+			if !slices.Contains(cats, c.cat) {
 				t.Errorf("%s: categories = %v, want to include %q", c.name, cats, c.cat)
 			}
 		})
@@ -57,7 +58,7 @@ func TestRedact_PEMBlock(t *testing.T) {
 	if !strings.HasPrefix(out, "before\n") || !strings.HasSuffix(out, "\nafter") {
 		t.Errorf("surrounding text not preserved: %q", out)
 	}
-	if !containsStr(cats, "private_key") {
+	if !slices.Contains(cats, "private_key") {
 		t.Errorf("categories = %v, want private_key", cats)
 	}
 }
@@ -77,7 +78,7 @@ func TestRedact_AssignmentValueOnly(t *testing.T) {
 	if !strings.Contains(out, "password") || !strings.Contains(out, `"`) {
 		t.Errorf("key/quote not preserved: %q", out)
 	}
-	if !containsStr(cats, "secret_assignment") {
+	if !slices.Contains(cats, "secret_assignment") {
 		t.Errorf("categories = %v", cats)
 	}
 }
@@ -94,7 +95,7 @@ func TestRedact_Entropy(t *testing.T) {
 		if !changed || strings.Contains(out, tok) {
 			t.Fatalf("assigned high-entropy token not redacted: %q → %q", in, out)
 		}
-		if !containsStr(cats, "entropy") {
+		if !slices.Contains(cats, "entropy") {
 			t.Errorf("categories = %v, want entropy", cats)
 		}
 	}
@@ -178,15 +179,6 @@ func TestRedact_ConcurrentSafe(t *testing.T) {
 		}()
 	}
 	wg.Wait()
-}
-
-func containsStr(ss []string, want string) bool {
-	for _, s := range ss {
-		if s == want {
-			return true
-		}
-	}
-	return false
 }
 
 // TestRedact_JSONShapedSecrets jSON shape.

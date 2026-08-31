@@ -2,6 +2,7 @@ package telemetry
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -176,15 +177,16 @@ func (r *Receiver) Shutdown(ctx context.Context) error {
 	if !r.started {
 		return nil
 	}
-	var firstErr error
+	// Every receiver's shutdown failure, not just the first: the traces, logs
+	// and metrics receivers fail independently and an operator reading one
+	// message has no way to know the other two also refused to stop.
+	var errs []error
 	for _, c := range r.receivers {
-		if err := c.Shutdown(ctx); err != nil && firstErr == nil {
-			firstErr = err
-		}
+		errs = append(errs, c.Shutdown(ctx))
 	}
 	r.receivers = nil
 	r.started = false
-	return firstErr
+	return errors.Join(errs...)
 }
 
 // Counts reports how many records have arrived per signal since start. The

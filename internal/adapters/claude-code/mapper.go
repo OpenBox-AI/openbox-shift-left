@@ -1,7 +1,6 @@
 package claudecode
 
 import (
-	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"strconv"
@@ -538,15 +537,4 @@ func deriveID(ev client.DevEvent) string {
 	}
 	sum := sha256.Sum256([]byte(b.String()))
 	return "cc-" + hex.EncodeToString(sum[:])
-}
-
-// randomID is a source of filesystem-unique suffixes for the spool (rotate /
-// recovery / reclaim file names). It is NOT the event idempotency id (that is
-// deriveID); it must stay random so concurrent drains never collide on a name.
-func randomID() string {
-	var b [16]byte
-	if _, err := rand.Read(b[:]); err != nil {
-		return "sfx-fallback"
-	}
-	return hex.EncodeToString(b[:])
 }

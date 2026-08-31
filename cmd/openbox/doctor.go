@@ -3,14 +3,16 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/hookflow"
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/hookflow"
 
 	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/devconfig"
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/activation"
@@ -269,7 +271,7 @@ func (a *app) reportLanes() {
 		fmt.Fprintf(a.stdout, "               non-turn evidence, which does not collide.\n")
 	}
 	for _, lane := range election.Routed {
-		if !containsLaneName(election.Candidates, lane) {
+		if !slices.Contains(election.Candidates, lane) {
 			fmt.Fprintf(a.stdout, "  NOT IN PATH  %s is configured but cannot see this machine's model calls -\n", lane)
 			fmt.Fprintf(a.stdout, "               ANTHROPIC_BASE_URL sends them somewhere it does not intercept.\n")
 		}
@@ -293,7 +295,7 @@ func (a *app) reportLanes() {
 		default:
 			fmt.Fprintf(a.stdout, "  unit         not installed\n")
 		}
-		routed := containsLaneName(election.Routed, activation.Lane(lane.name))
+		routed := slices.Contains(election.Routed, activation.Lane(lane.name))
 		fmt.Fprintf(a.stdout, "  configured   %s\n", map[bool]string{true: "yes; " + settingsPath, false: "no; the tool is not pointed at it"}[routed])
 		occupied, _ := portOccupied(lane.addr)
 		if occupied {
@@ -316,13 +318,4 @@ func (a *app) reportLanes() {
 	fmt.Fprintf(a.stdout, "\n  Installed is not recording. A lane can be reachable, configured and elected\n")
 	fmt.Fprintf(a.stdout, "  while emitting nothing; no developer DID, or a posture key off. The log above\n")
 	fmt.Fprintf(a.stdout, "  is the only place that says so.\n")
-}
-
-func containsLaneName(lanes []activation.Lane, want activation.Lane) bool {
-	for _, l := range lanes {
-		if l == want {
-			return true
-		}
-	}
-	return false
 }

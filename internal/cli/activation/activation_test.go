@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -227,7 +228,7 @@ func TestActivateReportsWhatItReplaced(t *testing.T) {
 	if len(res.Replaced) != 1 {
 		t.Fatalf("Replaced = %v, want the one displaced key", res.Replaced)
 	}
-	if !contains(res.Replaced[0], "llm-proxy.corp.internal") || !contains(res.Replaced[0], "127.0.0.1:8788") {
+	if !strings.Contains(res.Replaced[0], "llm-proxy.corp.internal") || !strings.Contains(res.Replaced[0], "127.0.0.1:8788") {
 		t.Errorf("the report does not name both values: %q", res.Replaced[0])
 	}
 	res = activate(t, home, LaneGateway, map[string]string{"ANTHROPIC_BASE_URL": "http://127.0.0.1:8788"})
@@ -269,17 +270,4 @@ func TestActiveLanesReportsWhatIsInstalled(t *testing.T) {
 	if len(got) != 1 || got[0] != LaneTelemetry {
 		t.Fatalf("ActiveLanes after removing transport = %v, want just telemetry", got)
 	}
-}
-
-func contains(s, sub string) bool {
-	return len(sub) == 0 || (len(s) >= len(sub) && indexOf(s, sub) >= 0)
-}
-
-func indexOf(s, sub string) int {
-	for i := 0; i+len(sub) <= len(s); i++ {
-		if s[i:i+len(sub)] == sub {
-			return i
-		}
-	}
-	return -1
 }

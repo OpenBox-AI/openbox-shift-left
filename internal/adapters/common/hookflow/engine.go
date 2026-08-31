@@ -2,8 +2,6 @@ package hookflow
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"path/filepath"
 
 	"github.com/openbox-ai/openbox-shift-left/internal/client"
@@ -111,12 +109,4 @@ func (e *Engine) emitFunc(em Emitter) FlushFunc {
 		e.Advisory.Record(ev, eval)
 		return err
 	}
-}
-
-func randomID() string {
-	var b [16]byte
-	if _, err := rand.Read(b[:]); err != nil {
-		return "sfx-fallback"
-	}
-	return hex.EncodeToString(b[:])
 }

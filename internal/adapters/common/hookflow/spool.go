@@ -3,6 +3,7 @@ package hookflow
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -90,18 +91,19 @@ func (s Spool) sweepRecovery(ctx context.Context, names []string, ownSession str
 		names = append(mine, theirs...)
 	}
 	total := 0
-	var firstErr error
+	var errs []error
 	for _, name := range names {
 		if ctx.Err() != nil {
 			return total, ctx.Err()
 		}
 		n, err := s.drainFile(ctx, filepath.Join(s.Dir, name), fn)
 		total += n
-		if err != nil && firstErr == nil {
-			firstErr = err
-		}
+		errs = append(errs, err)
 	}
-	return total, firstErr
+	// Every file's failure, not the first: a sweep that hit one unreadable
+	// carry-over and then three more reported one, and the caller had no way to
+	// see the rest. errors.Join drops the nils.
+	return total, errors.Join(errs...)
 }
 
 // IsRecoveryFile reports whether name is a carry-over file;
@@ -141,7 +143,7 @@ func (s Spool) FlushAll(ctx context.Context, fn FlushFunc) (int, error) {
 		return 0, fmt.Errorf("spool readdir: %w", err)
 	}
 	total := 0
-	var firstErr error
+	var errs []error
 	for _, e := range entries {
 		if e.IsDir() {
 			continue
@@ -153,7 +155,7 @@ func (s Spool) FlushAll(ctx context.Context, fn FlushFunc) (int, error) {
 		var n int
 		switch {
 		case strings.Contains(name, ".flushing."):
-			claimed := filepath.Join(s.Dir, name) + ".reclaim." + randomID()
+			claimed := filepath.Join(s.Dir, name) + ".reclaim." + rand.Text()
 			if os.Rename(filepath.Join(s.Dir, name), claimed) != nil {
 				continue // lost the race to another drain, or already gone
 			}
@@ -164,15 +166,15 @@ func (s Spool) FlushAll(ctx context.Context, fn FlushFunc) (int, error) {
 			continue
 		}
 		total += n
-		if err != nil && firstErr == nil {
-			firstErr = err
-		}
+		errs = append(errs, err)
 	}
-	return total, firstErr
+	// One session's spool failing must not hide the next one's; errors.Join
+	// drops the nils, so a clean pass still returns nil.
+	return total, errors.Join(errs...)
 }
 
 func (s Spool) drainFile(ctx context.Context, path string, fn FlushFunc) (int, error) {
-	rotated := path + ".flushing." + randomID()
+	rotated := path + ".flushing." + rand.Text()
 	if err := os.Rename(path, rotated); err != nil {
 		if os.IsNotExist(err) {
 			return 0, nil // already drained / nothing spooled
@@ -288,7 +290,7 @@ func (s Spool) writeRecovery(basePath string, lines [][]byte, attempt int) {
 	if next > MaxRecoveryAttempts {
 		return
 	}
-	rec := recoveryStem(basePath) + ".rec" + strconv.Itoa(next) + "-" + randomID() + ".jsonl"
+	rec := recoveryStem(basePath) + ".rec" + strconv.Itoa(next) + "-" + rand.Text() + ".jsonl"
 	var buf bytes.Buffer
 	for _, l := range lines {
 		buf.Write(l)

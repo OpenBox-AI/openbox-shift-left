@@ -2,6 +2,8 @@ package client
 
 import (
 	"encoding/json"
+	"maps"
+	"slices"
 	"strings"
 	"testing"
 
@@ -124,7 +126,7 @@ func TestTurnActivityOutputCarriesNumbersAndOneString(t *testing.T) {
 	}
 
 	if len(out) != 2 {
-		t.Errorf("activity_output has %d top-level keys %v, want exactly {model, usage}", len(out), keysOf(out))
+		t.Errorf("activity_output has %d top-level keys %v, want exactly {model, usage}", len(out), slices.Sorted(maps.Keys(out)))
 	}
 	if got := out["model"]; got != "claude-opus-4-8" {
 		t.Errorf("model = %v, want claude-opus-4-8", got)
@@ -140,7 +142,7 @@ func TestTurnActivityOutputCarriesNumbersAndOneString(t *testing.T) {
 		"cache_read_input_tokens":     16384,
 	}
 	if len(usage) != len(want) {
-		t.Errorf("usage has keys %v, want exactly %d counts", keysOf(usage), len(want))
+		t.Errorf("usage has keys %v, want exactly %d counts", slices.Sorted(maps.Keys(usage)), len(want))
 	}
 	for k, v := range want {
 		got, ok := usage[k].(float64)
@@ -273,7 +275,7 @@ func TestTurnAndRollupShareOneWireShape(t *testing.T) {
 	a, b := shapeOf(t, perTurn), shapeOf(t, rollup)
 
 	if len(a) != len(b) {
-		t.Errorf("payload key sets differ: per-turn %v vs rollup %v", keysOf(a), keysOf(b))
+		t.Errorf("payload key sets differ: per-turn %v vs rollup %v", slices.Sorted(maps.Keys(a)), slices.Sorted(maps.Keys(b)))
 	}
 	for k := range a {
 		if _, ok := b[k]; !ok {
@@ -304,14 +306,6 @@ func TestTurnAndRollupShareOneWireShape(t *testing.T) {
 	if a["activity_id"] == b["activity_id"] {
 		t.Errorf("both carriers minted activity_id %v", a["activity_id"])
 	}
-}
-
-func keysOf(m map[string]any) []string {
-	out := make([]string, 0, len(m))
-	for k := range m {
-		out = append(out, k)
-	}
-	return out
 }
 
 const (
