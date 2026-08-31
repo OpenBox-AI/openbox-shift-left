@@ -6,6 +6,11 @@
 // that truncation would block its own repair. Atomicity bounds the damage to a
 // lost update rather than a corrupt file; a lock is what would close the race,
 // and this package deliberately does not claim to have one.
+//
+// Both branches write a temporary file, fsync it, and rename. Neither fsyncs
+// the parent directory, so a power failure can lose the rename -- which leaves
+// the previous file whole, and a lost update is the bound above. The split is
+// two implementations of one guarantee, not two guarantees; see write_windows.go.
 package atomicfile
 
 import (
