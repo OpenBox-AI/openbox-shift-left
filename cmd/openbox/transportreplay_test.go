@@ -376,9 +376,10 @@ func TestTransportAddsNoCompressionHeaderOfItsOwn(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadOrCreateCA: %v", err)
 	}
+	spoolDir := t.TempDir()
 	em := &gatewayemit.Emitter{
 		Lane:  gatewayemit.LaneProxy,
-		Spool: hookflow.Spool{Dir: t.TempDir()},
+		Spool: hookflow.Spool{Dir: spoolDir},
 		DID:   func() string { return "did:aip:7f3c9b2e-0000-5000-a000-00000000feed" },
 		Warn:  func(string, ...any) {},
 	}
@@ -406,6 +407,12 @@ func TestTransportAddsNoCompressionHeaderOfItsOwn(t *testing.T) {
 	_, _ = io.Copy(io.Discard, resp.Body)
 	resp.Body.Close()
 
+	// The relay emits after the client has finished reading, so without this the
+	// test can return while the handler is still spooling and t.TempDir's cleanup
+	// races the files being written into it. Waiting for the spooled event both
+	// closes that race and says the lane actually recorded the call.
+	waitForSpooledEvent(t, spoolDir)
+
 	if got == nil {
 		t.Fatal("the request never reached the upstream; the assertion below would be vacuous")
 	}
@@ -415,4 +422,25 @@ func TestTransportAddsNoCompressionHeaderOfItsOwn(t *testing.T) {
 			"than the client sent and net/http will silently decompress the response the relay "+
 			"is meant to forward untouched", v)
 	}
+}
+
+// waitForSpooledEvent blocks until the emitter has written a spool line, or
+// fails the test. The spool file is the only observable the emitter offers.
+func waitForSpooledEvent(t *testing.T, dir string) {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		entries, err := os.ReadDir(dir)
+		if err == nil {
+			for _, e := range entries {
+				if strings.HasSuffix(e.Name(), ".jsonl") {
+					if info, statErr := e.Info(); statErr == nil && info.Size() > 0 {
+						return
+					}
+				}
+			}
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatalf("no spooled event appeared in %s; the lane recorded nothing for a call it relayed", dir)
 }

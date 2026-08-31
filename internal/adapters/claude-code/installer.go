@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gofrs/flock"
 	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/devconfig"
 	obgit "github.com/openbox-ai/openbox-shift-left/internal/adapters/common/git"
 	providerspi "github.com/openbox-ai/openbox-shift-left/internal/provider"
@@ -113,11 +114,17 @@ func (i Installer) Install(ref CredentialRef) error {
 	return nil
 }
 
-const installLockStale = time.Minute
-
 // acquireInstallLock past a few dozen writers the queue drains slower than it
 // fills, every arrival makes it worse, and the processes never exit; thousands
-// of them accumulated that way and took a machine down.
+// of them accumulated that way and took a machine down. So this refuses rather
+// than queues, and TryLock is what keeps that true: a blocking acquire would
+// rebuild the queue with kernel-grade reliability.
+//
+// Liveness is the kernel's now, not the filesystem clock's. An advisory lock is
+// released when the holding process dies, which deletes the whole staleness
+// window and every bug in it: a crash used to hold the lock for a full minute,
+// an NTP step moved it, 1s mtime granularity blurred a 60s comparison, and the
+// os.Stat/os.Chtimes reclaim raced with itself.
 func (i Installer) acquireInstallLock() (release func(), err error) {
 	dir := i.pluginDir()
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -125,31 +132,24 @@ func (i Installer) acquireInstallLock() (release func(), err error) {
 	}
 	lock := filepath.Join(dir, ".install.lock")
 
-	f, err := os.OpenFile(lock, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	fl := flock.New(lock)
+	held, lockErr := fl.TryLock()
 	switch {
-	case err == nil:
-		fmt.Fprintf(f, "%d\n", os.Getpid())
-		f.Close()
-	case os.IsExist(err):
-		info, statErr := os.Stat(lock)
-		if statErr != nil {
-			break
-		}
-		if time.Since(info.ModTime()) < installLockStale {
-			return func() {}, fmt.Errorf(
-				"claude-code install: another `openbox init` is already installing into %s "+
-					"(lock held since %s). Wait for it to finish and re-run; if no other init is "+
-					"running, delete %s",
-				dir, info.ModTime().Format(time.RFC3339), lock)
-		}
-		now := time.Now()
-		if chErr := os.Chtimes(lock, now, now); chErr != nil {
-			return func() {}, fmt.Errorf("claude-code install: cannot reclaim stale lock %s: %w", lock, chErr)
-		}
-	default:
+	case lockErr != nil:
 		return func() {}, nil // cannot lock here; do not block a legitimate install
+	case !held:
+		return func() {}, fmt.Errorf(
+			"claude-code install: another `openbox init` is already installing into %s "+
+				"(%s is held). Wait for it to finish and re-run. Nothing needs deleting by hand: "+
+				"the lock is released when that process exits, however it exits",
+			dir, lock)
 	}
-	return func() { _ = os.Remove(lock) }, nil
+	// Unlink before unlocking, so the window in which another init can take the
+	// lock opens only after this install is finished with it.
+	return func() {
+		_ = os.Remove(lock)
+		_ = fl.Unlock()
+	}, nil
 }
 
 // placeEngineBinary the copy is atomic (temp + rename) so a re-init never

@@ -117,8 +117,15 @@ func TestSpool_SanitizesSessionID(t *testing.T) {
 	if err := s.Append(spoolEvent("e1", "../../evil/../id")); err != nil {
 		t.Fatal(err)
 	}
+	// Every name the spool writes, not just the first: the directory also holds
+	// the sidecar lock, and an unsanitized id would escape through any of them.
 	entries, _ := os.ReadDir(dir)
-	if len(entries) != 1 || strings.Contains(entries[0].Name(), "..") || strings.Contains(entries[0].Name(), "/") {
-		t.Fatalf("session id not sanitized for the filesystem: %v", entries)
+	if len(entries) == 0 {
+		t.Fatal("Append wrote nothing")
+	}
+	for _, e := range entries {
+		if strings.Contains(e.Name(), "..") || strings.Contains(e.Name(), "/") {
+			t.Fatalf("session id not sanitized for the filesystem: %q", e.Name())
+		}
 	}
 }

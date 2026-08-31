@@ -71,6 +71,10 @@ func TestConcurrentInstallIsRefusedRatherThanQueued(t *testing.T) {
 // TestStaleInstallLockIsReclaimed a lock left behind by a killed install must
 // not wedge the bundle forever; that would turn a crash into a permanently un-
 // installable state, which is a worse failure than the one the lock prevents.
+// The mtime is now beside the point, and that is the improvement: the file's
+// age never said whether a process was still installing. An advisory lock is
+// released when its holder dies, so a lock file nobody holds is not a lock at
+// any age, and a lock somebody holds is one at any age.
 func TestStaleInstallLockIsReclaimed(t *testing.T) {
 	pluginDir := t.TempDir()
 	src := engineAt(t, t.TempDir(), "openbox", "engine-v1")
@@ -81,22 +85,24 @@ func TestStaleInstallLockIsReclaimed(t *testing.T) {
 	if err := os.WriteFile(lock, []byte("99999\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	old := time.Now().Add(-2 * installLockStale)
-	if err := os.Chtimes(lock, old, old); err != nil {
+	fresh := time.Now()
+	if err := os.Chtimes(lock, fresh, fresh); err != nil {
 		t.Fatal(err)
 	}
 
 	inst := Installer{PluginDir: pluginDir, ConfigPath: filepath.Join(t.TempDir(), "dev.json"), EngineBinary: src}
 	if err := inst.Install(CredentialRef{DID: testDID}); err != nil {
-		t.Fatalf("a stale lock must be reclaimed, got: %v", err)
+		t.Fatalf("a lock file nobody holds must not block an install, however new it looks: %v", err)
 	}
 
-	if err := os.WriteFile(lock, []byte("99999\n"), 0o600); err != nil {
-		t.Fatal(err)
+	release, err := inst.acquireInstallLock()
+	if err != nil {
+		t.Fatalf("acquire for the held half: %v", err)
 	}
-	err := inst.Install(CredentialRef{DID: testDID})
-	if err == nil || !strings.Contains(err.Error(), "already installing") {
-		t.Errorf("a fresh lock must refuse the install, got: %v", err)
+	defer release()
+	if err := inst.Install(CredentialRef{DID: testDID}); err == nil ||
+		!strings.Contains(err.Error(), "already installing") {
+		t.Errorf("a held lock must refuse the install, got: %v", err)
 	}
 }
 

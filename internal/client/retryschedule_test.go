@@ -25,6 +25,11 @@ type alwaysRetryable struct {
 }
 
 func (rt alwaysRetryable) RoundTrip(r *http.Request) (*http.Response, error) {
+	// http.Transport refuses a request whose context is already done, and a stub
+	// that did not would make "no request after cancellation" unassertable.
+	if err := r.Context().Err(); err != nil {
+		return nil, err
+	}
 	*rt.calls++
 	*rt.at = append(*rt.at, time.Since(rt.start))
 	h := make(http.Header)
@@ -214,17 +219,20 @@ func TestRetryStopsImmediatelyOnAnUnretryableStatus(t *testing.T) {
 
 // TestRetryAbortsOnContextCancel. The hook path depends on cancellation
 // winning: INV-3 says a hook must never hold the developer's tool call open,
-// and the enforcement caller cancels at its evaluation budget. The instant is
-// no longer assertable now that the delays are drawn rather than computed, so
-// what is asserted is the contract -- the error, and that nothing is sent
-// after the cancel.
+// and the enforcement caller cancels at its own evaluation budget.
+//
+// The attempt count is deliberately not asserted. The delays are drawn now, so
+// whether a cancel scheduled a fixed distance out lands before or after the next
+// attempt is a coin toss -- asserting it would be asserting the coin. What holds
+// either way is the contract: the error is a cancellation, and post returns
+// inside the budget rather than sitting out a full delay after being cancelled.
 func TestRetryAbortsOnContextCancel(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		c, calls, _ := retryHarness(t, "503", "")
 
 		ctx, cancel := context.WithCancel(t.Context())
 		go func() {
-			time.Sleep(defaultRetryBase / 8) // inside even the shortest drawn delay
+			time.Sleep(defaultRetryBase / 8)
 			cancel()
 		}()
 
@@ -236,8 +244,26 @@ func TestRetryAbortsOnContextCancel(t *testing.T) {
 		if d := time.Since(start); d > c.retryBudget() {
 			t.Errorf("post returned after %v, past the whole budget %v", d, c.retryBudget())
 		}
-		if *calls > 1 {
-			t.Errorf("attempts = %d, want 1: no request may be sent after cancellation", *calls)
+		if *calls > defaultMaxRetries+1 {
+			t.Errorf("attempts = %d, want at most %d", *calls, defaultMaxRetries+1)
+		}
+	})
+}
+
+// TestRetryMakesNoRequestOnAnAlreadyCancelledContext is the deterministic half
+// of the same contract: an enforcement caller whose budget has already expired
+// must not put a request on the wire on its way out.
+func TestRetryMakesNoRequestOnAnAlreadyCancelledContext(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		c, calls, _ := retryHarness(t, "503", "")
+		ctx, cancel := context.WithCancel(t.Context())
+		cancel()
+
+		if _, err := c.post(ctx, evaluatePath, []byte(`{}`), "idem-4"); !errors.Is(err, context.Canceled) {
+			t.Errorf("post error = %v, want context.Canceled", err)
+		}
+		if *calls != 0 {
+			t.Errorf("the transport was reached %d time(s) under an already-cancelled context", *calls)
 		}
 	})
 }

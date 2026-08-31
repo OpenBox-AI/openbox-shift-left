@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gofrs/flock"
 	"github.com/openbox-ai/openbox-shift-left/internal/client"
 )
 
@@ -25,9 +26,18 @@ type Spool struct {
 	Dir string
 }
 
-// Append writes one event as a single JSON line to the session's spool file. A
-// single write of a small line is atomic under O_APPEND (posix), so concurrent
-// hook processes for the same session never interleave.
+// Append writes one event as a single JSON line to the session's spool file.
+//
+// What O_APPEND actually guarantees is the atomic offset update, so two hook
+// processes never interleave within a line. What it does not guarantee, and
+// what the lock is for, is that the line survives: Append writes through a
+// descriptor it opened by path, and a concurrent drain renames that path aside,
+// reads the renamed file and removes it. A write that landed between the read
+// and the remove went into a file nothing will ever read again -- a tool call
+// with no evidence and an audit trail that under-reports in silence.
+//
+// The lock is a sidecar, never the JSONL file itself: the drain sweep and the
+// recovery pass open that path too, and locking it would deadlock against them.
 func (s Spool) Append(ev client.DevEvent) error {
 	if err := os.MkdirAll(s.Dir, 0o700); err != nil {
 		return fmt.Errorf("spool mkdir: %w", err)
@@ -38,6 +48,9 @@ func (s Spool) Append(ev client.DevEvent) error {
 	}
 	line = append(line, '\n')
 
+	unlock := s.lockSpool()
+	defer unlock()
+
 	f, err := os.OpenFile(s.SessionPath(ev.SessionID), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
 		return fmt.Errorf("spool open: %w", err)
@@ -47,6 +60,31 @@ func (s Spool) Append(ev client.DevEvent) error {
 		return fmt.Errorf("spool write: %w", err)
 	}
 	return nil
+}
+
+// SpoolLockName is the sidecar every append and every rotate in the directory
+// serializes on. One file for the whole directory rather than one per session:
+// a per-session lock would accumulate a file per session forever, and the hold
+// is a single write or a single rename either way, so cross-session contention
+// costs microseconds. The leading dot and the absent `.jsonl` suffix keep it out
+// of every sweep that reads this directory.
+const SpoolLockName = ".spool.lock"
+
+// lockSpool takes the directory's sidecar lock and returns its release. It
+// blocks, which is what INV-3 wants here: a hook that gave up on the lock would
+// drop the event rather than pause a moment for it, and the hold is never more
+// than one write or one rename.
+//
+// A filesystem that cannot lock at all -- an NFS mount with no lock daemon --
+// yields a no-op release rather than an error. That is the same fail-open
+// posture as the installer's "cannot lock here", and it leaves such a mount
+// exactly where it is today rather than refusing to spool on it.
+func (s Spool) lockSpool() func() {
+	fl := flock.New(filepath.Join(s.Dir, SpoolLockName))
+	if err := fl.Lock(); err != nil {
+		return func() {}
+	}
+	return func() { _ = fl.Unlock() }
 }
 
 // FlushFunc delivers one spooled event.
@@ -173,9 +211,20 @@ func (s Spool) FlushAll(ctx context.Context, fn FlushFunc) (int, error) {
 	return total, errors.Join(errs...)
 }
 
+// drainFile rotates the session's spool aside and drains the rotated copy.
+//
+// The lock covers the rename and nothing else. Holding it across delivery would
+// put a network round trip between a hook and its own Append, which is exactly
+// what INV-3 forbids; and it is not needed, because once the file is renamed no
+// later Append can reach it.
 func (s Spool) drainFile(ctx context.Context, path string, fn FlushFunc) (int, error) {
 	rotated := path + ".flushing." + rand.Text()
-	if err := os.Rename(path, rotated); err != nil {
+	err := func() error {
+		unlock := s.lockSpool()
+		defer unlock()
+		return os.Rename(path, rotated)
+	}()
+	if err != nil {
 		if os.IsNotExist(err) {
 			return 0, nil // already drained / nothing spooled
 		}

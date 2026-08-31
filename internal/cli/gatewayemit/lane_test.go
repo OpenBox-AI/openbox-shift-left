@@ -160,9 +160,12 @@ func spoolEntryCount(t *testing.T, dir string) int {
 		}
 		t.Fatalf("read spool dir: %v", err)
 	}
+	// Spool files only. The directory also holds the sidecar lock the append and
+	// the rotate serialize on, and counting that as an event made "did the
+	// emitter file anything" answer yes for a directory holding no events at all.
 	n := 0
 	for _, e := range entries {
-		if !e.IsDir() {
+		if !e.IsDir() && strings.HasSuffix(e.Name(), ".jsonl") {
 			n++
 		}
 	}
