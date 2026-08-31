@@ -410,7 +410,7 @@ openbox init --role approver [--org …]                   # role=approver
    onboarding spellings means two things to keep true in every doc and every
    message, which is how docs drift from the code. Typing it now fails with a
    pointer to `openbox init`; an error, not a fallback. The ~160 references
-   across code comments, docs, `install.sh` and the decision records were
+   across code comments, docs and `install.sh` were
    rewritten rather than left naming a command that no longer runs, and
    `TestDevInitIsGone` pins both halves (it must fail, and `dev` must advertise
    only `verify|sync`).

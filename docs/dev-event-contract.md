@@ -5,7 +5,7 @@ schema](../api/dev-event.schema.json) is the authority; v1.1 added the turn
 pair, v1.2 tool `status`, the subagent/denial/error types and the turn span,
 v1.3 tool content and the signals' free text, v1.4 the turn's thinking ·
 **Status:** built + validated (v1.0 carried G1_READY + G3_REVIEW, 2026-07-07;
-the later bumps are additive and were reviewed with their decision records)
+the later bumps are additive)
 
 The single, versioned, **tool-agnostic** event schema that every coding-tool
 adapter maps its native payload onto (SPI `emit`). The OpenBox client then

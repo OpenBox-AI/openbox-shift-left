@@ -458,7 +458,6 @@ Details and current status:
 | [Upgrading to inline evaluation](docs/upgrading-to-inline-evaluation.md) | what changes for an existing install, incl. file bodies now egressing |
 | [Lineage](docs/lineage.md) | `session → commit → deploy` and how it is verified |
 | [Gateway MDM recipe](docs/gateway-mdm-recipe.md) | the artifacts to push if you need the gateway prevented-from, not just detected-around |
-| decision records | the decisions, and why |
 | [Event contract](api/dev-event.schema.json) | the normalized event schema |
 | [Wire mapping](docs/MAPPING.md) | how each field lands in core's columns |
 | [End-to-end tests](docs/test/e2e.md) | `test/`; a mock-free suite against a real stack |

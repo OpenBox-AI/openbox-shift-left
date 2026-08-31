@@ -72,7 +72,7 @@ is the part that stops a directory quietly becoming a junk drawer.
 | `build/` | packaging and release configuration (`.goreleaser.yaml`) | anything a build produces. Artefacts are git-ignored |
 | `cmd/` | one directory per **shipped** executable, `main` package only | a binary nothing ships. A dev instrument belongs in `tools/` |
 | `deployments/` | managed-settings templates an org deploys (MDM) | anything read at runtime by this repo's own code |
-| `docs/` | design and user documents, and the decision records | anything a program parses |
+| `docs/` | design and user documents | anything a program parses |
 | `init/` | **illustrative** copies of the supervisor units, and only that | a `go:embed`, or anything treated as authoritative. `internal/cli/laneservice` renders the real ones |
 | `internal/` | every package this repo does not publish; which is all of them | a package meant for external import. Publishing one reopens the `/pkg` question |
 | `test/` | the mock-free end-to-end suite (shell), see [e2e](test/e2e.md) | Go tests. Those live beside the code they test |
@@ -115,7 +115,7 @@ the enforcement path.
 **Layering is enforced by tests now, not by the compiler.** Fifteen modules used
 to make "no adapter imports another, and the CLI reaches them only through the
 registry" mechanical; `internal/depguard` carries it instead, and a test is
-weaker than a compiler. That decision records that as the price of the collapse.
+weaker than a compiler. That is the accepted price of the collapse.
 
 ## Governance levels
 
