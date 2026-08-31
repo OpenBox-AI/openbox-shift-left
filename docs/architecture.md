@@ -398,7 +398,10 @@ control. The allowlists moved to `internal/depguard`, scoped by directory. **Do
 not widen one to make an import pass**; that inverts the reasoning behind them.
 
 **Four subtrees are guarded; the rest are not, and that is a named loss.**
-Measured 2026-08-30:
+Measured 2026-08-31, after the stdlib-and-OSS hardening pass added five direct
+requires. Not one of them landed in a guarded subtree, so not one needed an
+allowlist amendment -- which is the loss below, stated in numbers rather than in
+principle:
 
   | Subtree | Direct external imports | Bounded by |
   |---|---|---|
@@ -407,9 +410,11 @@ Measured 2026-08-30:
   | `internal/decision` | **1**; `zricethezav/gitleaks/v8` v8.30.1 | `internal/depguard` |
   | `internal/gateway` | **0** external; and that is the strongest statement available, not a vacuous one | `internal/depguard`, plus its own credential scan |
   | `internal/conformance` | **1**; `santhosh-tekuri/jsonschema/v6` v6.0.3, plus `golang.org/x/text` transitively | `internal/depguard`, by package **closure** |
-  | `internal/cli` + `cmd/` | **3**; `kardianos/service` v1.3.0, `google/renameio/v2`, `golang.org/x/term` | **nothing** |
+  | `internal/cli` + `cmd/` | **5**; `kardianos/service` v1.3.0, `google/renameio/v2`, `golang.org/x/term`, `tidwall/gjson`, `tidwall/sjson`; plus `google/go-cmp` in tests | **nothing** |
   | `internal/adapters/common/devconfig` | **2**; `pelletier/go-toml/v2`, `joho/godotenv` | **nothing** |
-  | `internal/adapters/common/hookflow` | **1**; `google/renameio/v2` | **nothing** |
+  | `internal/adapters/common/hookflow` | **2**; `google/renameio/v2`, `gofrs/flock` | **nothing** |
+  | `internal/adapters/claude-code`, `internal/adapters/codex` | **3**; `gofrs/flock`, `tidwall/gjson`, `tidwall/sjson`; plus `google/go-cmp` in tests | **nothing** |
+  | `internal/client` | **2**; `cenkalti/backoff/v5`, and `grpc/test/bufconn` inside `memhttptest`, which its own guard test forbids any non-test file to import | **nothing** |
   | everything else | **0** | **nothing** |
 
 The rows saying **nothing** are the accepted loss: those subtrees never had a
@@ -419,8 +424,11 @@ from them with no diff outside a `.go` file. `internal/conformance` is the one
 checked by closure rather than by direct import, because `x/text` arrives
 through `jsonschema` and an import walk cannot see it.
 
-The whole repository has **19 direct external requires** in one `go.mod`, which
-is the union of what the fifteen modules declared.
+The whole repository has **25 direct external requires** in one `go.mod`. The
+first 19 were the union of what the fifteen modules declared; the six added
+since are `google/go-cmp` (tests only), `cenkalti/backoff/v5`, `gofrs/flock`,
+`tidwall/gjson`, `tidwall/sjson`, and `google.golang.org/grpc` promoted from
+indirect for `test/bufconn`.
 
 **Otlpreceiver's transitive tree is an accepted cost, stated with the numbers
 phase 09 measured** rather than smoothed into "a few libraries": **492

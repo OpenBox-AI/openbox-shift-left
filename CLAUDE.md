@@ -48,7 +48,8 @@ reads those exact names. This diverges from generic Go guidance on purpose.
 
 **Dependencies.** One `go.mod`, so a new dependency is one `go mod tidy`; the
 `internal/depguard` allowlists are scoped by package subtree and adding to one is
-a decision. `renameio` is `!windows`, hence the build-tagged `atomicWriteFile`.
+a decision, though only four subtrees are guarded. `renameio` is `!windows`,
+hence **two** `atomicWriteFile` copies: grep the pattern, not the importer.
 
 **Credentials are plaintext, on purpose.** `~/.openbox/.env` is `0600` on macOS
 and Linux and unprotected on Windows, and anything running as the developer,
@@ -121,8 +122,8 @@ credential gate: it cannot require the thing being removed to still work.
 variables *in the constructor*, because `net/http` caches the environment behind
 a `sync.Once`. `ConnState` must close the one-shot listener or `Serve` blocks
 forever in its second `Accept`, leaking a goroutine and fd per tunnel. Host
-matching folds ASCII only, since Unicode folding makes U+212A equal `k`; the CA
-is name-constrained at generation, and ALPN is http/1.1 only.
+matching folds ASCII only (Unicode makes U+212A equal `k`) and reduces an IP
+literal through netip; the CA is name-constrained, and ALPN is http/1.1 only.
 
 **Three shapes are pinned by tests.** `message.content` is bound as
 `json.RawMessage` because it is a string on user lines and an array on assistant
