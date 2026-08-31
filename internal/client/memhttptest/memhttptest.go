@@ -10,13 +10,14 @@ package memhttptest
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net"
 	"net/http"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"google.golang.org/grpc/test/bufconn"
 )
 
 // TB is the slice of *testing.T these helpers use.
@@ -34,11 +35,19 @@ const basePort = 45000
 
 var (
 	mu          sync.RWMutex
-	registry    = map[string]*listener{}
+	registry    = map[string]*bufconn.Listener{}
 	seq         atomic.Uint64
 	installOnce sync.Once
 	installErr  error
 )
+
+// bufSize is the capacity of each direction of a connection. It is flow
+// control, not a cliff: a body past it makes the writer wait for the reader,
+// and both halves of an HTTP exchange are pumped concurrently, so it resolves.
+// 1 MiB is above every bound the suite can put on the wire -- MaxRedactBody is
+// 512 KiB, maxThinkingBytes 256 KiB, and the client itself reads at most
+// io.LimitReader(resp.Body, 1<<20) -- so nothing in it ever has to wait.
+const bufSize = 1 << 20
 
 // install the default transport is a process-wide global and this never
 // restores it.
@@ -60,7 +69,7 @@ func install() error {
 			mu.RUnlock()
 			switch {
 			case l != nil:
-				return l.dial(ctx)
+				return l.DialContext(ctx)
 			case known:
 				return nil, fmt.Errorf("memhttptest: dial %s: connection refused (server closed)", addr)
 			}
@@ -77,7 +86,7 @@ type Server struct {
 	URL string
 
 	addrs  []string
-	lis    *listener
+	lis    *bufconn.Listener
 	srv    *http.Server
 	closed sync.Once
 }
@@ -96,7 +105,7 @@ func NewServer(t TB, h http.Handler) *Server {
 		fmt.Sprintf("localhost:%d", port),
 		fmt.Sprintf("[::1]:%d", port),
 	}
-	lis := &listener{conns: make(chan net.Conn), done: make(chan struct{})}
+	lis := bufconn.Listen(bufSize)
 
 	mu.Lock()
 	for _, a := range addrs {
@@ -136,49 +145,6 @@ func (s *Server) Close() {
 	})
 }
 
-type listener struct {
-	conns chan net.Conn
-	done  chan struct{}
-	once  sync.Once
-}
-
-func (l *listener) Accept() (net.Conn, error) {
-	select {
-	case c := <-l.conns:
-		return c, nil
-	case <-l.done:
-		return nil, errors.New("memhttptest: listener closed")
-	}
-}
-
-func (l *listener) Close() error {
-	l.once.Do(func() { close(l.done) })
-	return nil
-}
-
-func (l *listener) Addr() net.Addr { return addr{} }
-
-func (l *listener) dial(ctx context.Context) (net.Conn, error) {
-	client, server := bufferedPipe()
-	select {
-	case l.conns <- server:
-		return client, nil
-	case <-l.done:
-		_ = client.Close()
-		_ = server.Close()
-		return nil, errors.New("memhttptest: connection refused (server closed)")
-	case <-ctx.Done():
-		_ = client.Close()
-		_ = server.Close()
-		return nil, ctx.Err()
-	}
-}
-
-type addr struct{}
-
-func (addr) Network() string { return "mem" }
-func (addr) String() string  { return "memhttp" }
-
 // RequireBind skips the test when this host denies bind. Some tests genuinely
 // need a real socket: the ones that compile the binary and run it as a child
 // process cannot reach an in-memory listener, because the pipe lives in the
@@ -210,95 +176,11 @@ func DialContext(ctx context.Context, network, addr string) (net.Conn, error) {
 	mu.RUnlock()
 	switch {
 	case l != nil:
-		return l.dial(ctx)
+		return l.DialContext(ctx)
 	case known:
 		return nil, fmt.Errorf("memhttptest: dial %s: connection refused (server closed)", addr)
 	}
 	// A test asserting dial latency would be measuring the wrong constant here;
 	// gateway's production dialer is 10s/30s; so do not write one against this.
 	return (&net.Dialer{Timeout: 30 * time.Second, KeepAlive: 30 * time.Second}).DialContext(ctx, network, addr)
-}
-
-func bufferedPipe() (net.Conn, net.Conn) {
-	a, b := net.Pipe()
-	return newBufferedConn(a), newBufferedConn(b)
-}
-
-type bufferedConn struct {
-	net.Conn
-
-	mu       sync.Mutex
-	cond     *sync.Cond
-	pending  []byte
-	closing  bool
-	writeErr error
-	drained  chan struct{}
-}
-
-func newBufferedConn(c net.Conn) *bufferedConn {
-	bc := &bufferedConn{Conn: c, drained: make(chan struct{})}
-	bc.cond = sync.NewCond(&bc.mu)
-	go bc.pump()
-	return bc
-}
-
-func (bc *bufferedConn) Write(p []byte) (int, error) {
-	bc.mu.Lock()
-	defer bc.mu.Unlock()
-	if bc.writeErr != nil {
-		return 0, bc.writeErr
-	}
-	if bc.closing {
-		return 0, net.ErrClosed
-	}
-	bc.pending = append(bc.pending, p...)
-	bc.cond.Signal()
-	return len(p), nil
-}
-
-func (bc *bufferedConn) pump() {
-	defer close(bc.drained)
-	for {
-		bc.mu.Lock()
-		for len(bc.pending) == 0 && !bc.closing {
-			bc.cond.Wait()
-		}
-		chunk := bc.pending
-		bc.pending = nil
-		closing := bc.closing
-		bc.mu.Unlock()
-
-		if len(chunk) > 0 {
-			if _, err := bc.Conn.Write(chunk); err != nil {
-				bc.mu.Lock()
-				bc.writeErr = err
-				bc.pending = nil
-				bc.mu.Unlock()
-				return
-			}
-		}
-		if closing && len(chunk) == 0 {
-			return
-		}
-	}
-}
-
-// Close drains what is already buffered before closing the pipe, so a response
-// written just before the handler returns is not lost. The wait is bounded: a
-// peer that stopped reading must not wedge a test.
-func (bc *bufferedConn) Close() error {
-	bc.mu.Lock()
-	if bc.closing {
-		bc.mu.Unlock()
-		return nil
-	}
-	bc.closing = true
-	bc.cond.Signal()
-	bc.mu.Unlock()
-
-	select {
-	case <-bc.drained:
-	case <-time.After(2 * time.Second):
-	}
-	return bc.Conn.Close()
 }
