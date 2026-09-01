@@ -11,7 +11,7 @@
 package client
 
 // SchemaVersion is the dev-event contract version this client speaks.
-const SchemaVersion = "1.6"
+const SchemaVersion = "1.7"
 
 // EventType is a developer-runtime lifecycle event type.
 type EventType string
@@ -68,6 +68,30 @@ const (
 	StatusCompleted = "completed"
 	StatusFailed    = "failed"
 )
+
+// The activity_type vocabulary; docs/mapping.md §2 is its authority. The three
+// beyond llm_completion exist because classifying by HTTP method filed every POST
+// as a completion.
+const (
+	// ActivityTypeLLMCompletion is a real model turn.
+	ActivityTypeLLMCompletion = "llm_completion"
+	// ActivityTypeTokenCount is a token-count probe: auditable, not a completion.
+	ActivityTypeTokenCount = "token_count"
+	// ActivityTypeToolTelemetry is the governed tool reporting on itself.
+	ActivityTypeToolTelemetry = "tool_telemetry"
+	// ActivityTypeProviderRequest is a provider path this client has never heard
+	// of. Emitted, never dropped: unknown traffic is what an auditor wants.
+	ActivityTypeProviderRequest = "provider_request"
+)
+
+// AllActivityTypes is the closed vocabulary, read from the constants rather than
+// re-typed by every caller that enumerates it.
+var AllActivityTypes = []string{
+	ActivityTypeLLMCompletion,
+	ActivityTypeTokenCount,
+	ActivityTypeToolTelemetry,
+	ActivityTypeProviderRequest,
+}
 
 // ToolKind is the provider-agnostic tool class ($defs.tool.kind).
 type ToolKind string
@@ -196,6 +220,10 @@ type DevEvent struct {
 	// Model is the provider model id that spent this event's tokens ("claude-
 	// opus-4-8", "gpt-5-codex", …).
 	Model string `json:"model,omitempty"`
+
+	// ActivityType overrides activityLabel's, from AllActivityTypes only. It must
+	// survive the spool.
+	ActivityType string `json:"activity_type,omitempty"`
 
 	// TurnIndex is the zero-based index of the turn this event belongs to within
 	// its session (or within its subagent).

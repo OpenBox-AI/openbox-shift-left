@@ -54,14 +54,14 @@ func TestUnelectedMapperEmitsNothing(t *testing.T) {
 	for _, name := range []string{"api_request", "api_response_body", "tool_result", "tool_decision", "user_prompt"} {
 		rec := apiRequest(map[string]string{"event.name": name})
 		rec.EventName = name
-		if ev, out := m.EventFor(rec); out == Emitted {
+		if ev, out := completedHalf(m.EventsFor(rec)); out == Emitted {
 			t.Errorf("%s: an UNELECTED mapper emitted %s; this doubles every token count on every dashboard", name, ev.EventType)
 		}
 	}
 }
 
 func TestAPIRequestBecomesTurnCompleted(t *testing.T) {
-	ev, out := elected().EventFor(apiRequest(nil))
+	ev, out := completedHalf(elected().EventsFor(apiRequest(nil)))
 	if out != Emitted {
 		t.Fatal("api_request produced no event")
 	}
@@ -133,7 +133,7 @@ func TestOtelRequestIDRejectsMalformedProviderValues(t *testing.T) {
 	for name, bad := range cases {
 		t.Run(name, func(t *testing.T) {
 			rec := apiRequest(map[string]string{"request_id": bad, "client_request_id": bad})
-			if ev, out := elected().EventFor(rec); out == Emitted {
+			if ev, out := completedHalf(elected().EventsFor(rec)); out == Emitted {
 				t.Errorf("emitted an event with otel_request_id %q (activity_id would be %q…)", ev.OtelRequestID, ev.SessionID+":otel:"+ev.OtelRequestID)
 			}
 		})
@@ -142,7 +142,7 @@ func TestOtelRequestIDRejectsMalformedProviderValues(t *testing.T) {
 
 func TestOtelRequestIDFallsBackToClientRequestID(t *testing.T) {
 	rec := apiRequest(map[string]string{"request_id": ""})
-	ev, out := elected().EventFor(rec)
+	ev, out := completedHalf(elected().EventsFor(rec))
 	if out != Emitted {
 		t.Fatal("no event; client_request_id should have served as the id")
 	}
@@ -153,7 +153,7 @@ func TestOtelRequestIDFallsBackToClientRequestID(t *testing.T) {
 
 func TestNoIDAtAllEmitsNothing(t *testing.T) {
 	rec := apiRequest(map[string]string{"request_id": "", "client_request_id": ""})
-	if _, out := elected().EventFor(rec); out == Emitted {
+	if _, out := completedHalf(elected().EventsFor(rec)); out == Emitted {
 		t.Error("emitted a turn with no provider id; a minted id would break idempotency across a re-flush")
 	}
 }
@@ -163,7 +163,7 @@ func TestNoIDAtAllEmitsNothing(t *testing.T) {
 // fails later, further from the cause.
 func TestSessionlessRecordEmitsNothing(t *testing.T) {
 	rec := apiRequest(map[string]string{"session.id": ""})
-	if _, out := elected().EventFor(rec); out == Emitted {
+	if _, out := completedHalf(elected().EventsFor(rec)); out == Emitted {
 		t.Error("emitted an event with no session id")
 	}
 }
@@ -174,7 +174,7 @@ func TestSessionlessRecordEmitsNothing(t *testing.T) {
 func TestUnknownEventNamesAreIgnoredNotErrors(t *testing.T) {
 	rec := apiRequest(map[string]string{"event.name": "some_future_event"})
 	rec.EventName = "some_future_event"
-	if _, out := elected().EventFor(rec); out == Emitted {
+	if _, out := completedHalf(elected().EventsFor(rec)); out == Emitted {
 		t.Error("an unknown event name produced an event")
 	}
 }
@@ -184,7 +184,7 @@ func TestUnknownEventNamesAreIgnoredNotErrors(t *testing.T) {
 // reporting a fabricated zero would silently understate spend.
 func TestMalformedNumbersDoNotFabricateZeros(t *testing.T) {
 	rec := apiRequest(map[string]string{"output_tokens": "not-a-number"})
-	ev, out := elected().EventFor(rec)
+	ev, out := completedHalf(elected().EventsFor(rec))
 	if out != Emitted {
 		t.Fatal("no event")
 	}
@@ -202,7 +202,7 @@ func TestMalformedNumbersDoNotFabricateZeros(t *testing.T) {
 // TestDurationDerivesTheTurnWindow: the export gives a duration, not a start,
 // so StartedAt is end - duration_ms.
 func TestDurationDerivesTheTurnWindow(t *testing.T) {
-	ev, out := elected().EventFor(apiRequest(nil))
+	ev, out := completedHalf(elected().EventsFor(apiRequest(nil)))
 	if out != Emitted {
 		t.Fatal("no event")
 	}
@@ -221,15 +221,15 @@ func TestDurationDerivesTheTurnWindow(t *testing.T) {
 
 // TestEventIDIsDeterministic: INV-5.
 func TestEventIDIsDeterministic(t *testing.T) {
-	a, _ := elected().EventFor(apiRequest(nil))
-	b, _ := elected().EventFor(apiRequest(nil))
+	a, _ := completedHalf(elected().EventsFor(apiRequest(nil)))
+	b, _ := completedHalf(elected().EventsFor(apiRequest(nil)))
 	if a.EventID == "" {
 		t.Fatal("no event id (INV-5)")
 	}
 	if a.EventID != b.EventID {
 		t.Errorf("event ids differ across identical records: %q vs %q", a.EventID, b.EventID)
 	}
-	c, _ := elected().EventFor(apiRequest(map[string]string{"request_id": "req_different"}))
+	c, _ := completedHalf(elected().EventsFor(apiRequest(map[string]string{"request_id": "req_different"})))
 	if c.EventID == a.EventID {
 		t.Error("different calls share an idempotency key; core would drop one")
 	}
@@ -253,13 +253,13 @@ func TestSessionIDIsValidatedLikeAPath(t *testing.T) {
 			} else {
 				rec.Attrs["session.id"] = bad
 			}
-			if ev, out := elected().EventFor(rec); out == Emitted {
+			if ev, out := completedHalf(elected().EventsFor(rec)); out == Emitted {
 				t.Errorf("emitted an event whose session id is %q; it reaches a path join as %q.jsonl", bad, ev.SessionID)
 			}
 		})
 	}
 	rec := apiRequest(map[string]string{"session.id": "b3f1c2d4-0000-4000-8000-000000000001"})
-	if _, out := elected().EventFor(rec); out != Emitted {
+	if _, out := completedHalf(elected().EventsFor(rec)); out != Emitted {
 		t.Error("a UUID session id was rejected; all 59 in the corpus are UUIDs")
 	}
 }
@@ -269,7 +269,7 @@ func TestSessionIDIsValidatedLikeAPath(t *testing.T) {
 func TestZeroTimestampIsDropped(t *testing.T) {
 	rec := apiRequest(nil)
 	rec.Timestamp = time.Time{}
-	if ev, out := elected().EventFor(rec); out == Emitted {
+	if ev, out := completedHalf(elected().EventsFor(rec)); out == Emitted {
 		t.Errorf("emitted a turn stamped %q", ev.Timestamp)
 	}
 }
@@ -311,7 +311,7 @@ func TestOutcomeSeparatesSkipsFromDrops(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			_, out := c.mapper.EventFor(c.rec)
+			_, out := completedHalf(c.mapper.EventsFor(c.rec))
 			if out != c.want {
 				t.Errorf("outcome = %v (%s), want %v (%s)", int(out), out, int(c.want), c.want)
 			}
@@ -332,18 +332,18 @@ func TestElectionIsAnsweredPerRecordNotAtConstruction(t *testing.T) {
 	elected := true
 	m := New(testDID, Policy{Elected: func() bool { return elected }})
 
-	if _, outcome := m.EventFor(apiRequest(nil)); outcome == SkipNotElected {
+	if _, outcome := completedHalf(m.EventsFor(apiRequest(nil))); outcome == SkipNotElected {
 		t.Fatalf("the mapper refused a record while elected: %v", outcome)
 	}
 
 	elected = false
-	if _, outcome := m.EventFor(apiRequest(nil)); outcome != SkipNotElected {
+	if _, outcome := completedHalf(m.EventsFor(apiRequest(nil))); outcome != SkipNotElected {
 		t.Errorf("outcome = %v after losing the election; the lane kept emitting, "+
 			"so two producers now describe the same model call and every token count doubles", outcome)
 	}
 
 	elected = true
-	if _, outcome := m.EventFor(apiRequest(nil)); outcome == SkipNotElected {
+	if _, outcome := completedHalf(m.EventsFor(apiRequest(nil))); outcome == SkipNotElected {
 		t.Error("the lane stayed silent after regaining the election; only a daemon restart would fix it")
 	}
 }
@@ -352,7 +352,16 @@ func TestElectionIsAnsweredPerRecordNotAtConstruction(t *testing.T) {
 // structural now that it is a function: a half-built caller that never names
 // Elected must emit nothing, exactly as it did when this was a bool.
 func TestAnUnsetElectionGateSuppresses(t *testing.T) {
-	if _, outcome := New(testDID, Policy{}).EventFor(apiRequest(nil)); outcome != SkipNotElected {
+	if _, outcome := New(testDID, Policy{}).EventsFor(apiRequest(nil)); outcome != SkipNotElected {
 		t.Errorf("outcome = %v for a policy that never named a gate; the zero value must suppress", outcome)
 	}
+}
+
+// completedHalf adapts the pair to a test that means "the event": the closing
+// half, which is the one carrying the usage and the duration.
+func completedHalf(events []client.DevEvent, outcome Outcome) (client.DevEvent, Outcome) {
+	if len(events) == 0 {
+		return client.DevEvent{}, outcome
+	}
+	return events[len(events)-1], outcome
 }

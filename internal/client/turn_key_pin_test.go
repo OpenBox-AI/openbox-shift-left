@@ -113,9 +113,18 @@ func TestTurnActivityIDAbsentWithoutIndex(t *testing.T) {
 	}
 }
 
-// TestTurnActivityOutputCarriesNumbersAndOneString is the schema gate on the
-// field core runs Guardrails and OPA over.
-func TestTurnActivityOutputCarriesNumbersAndOneString(t *testing.T) {
+// TestAHookTurnActivityOutputCarriesNumbersAndOneString is the schema gate on
+// the field core runs Guardrails and OPA over, for a HOOK turn.
+//
+// The scope is the change. This object used to be "four numbers and one bounded
+// identifier; nothing else may enter" for every turn, and that is no longer
+// true: an in-path turn now carries the provider's response body here, because
+// it is the only field that persists and is readable. What survives is the
+// narrower claim -- a turn with nothing observed adds nothing -- and the reason
+// it still matters is that this object is a policy-visible surface, so token
+// spend and model content now share it deliberately rather than by accident.
+// See modelcallcontent_test.go for the in-path shape.
+func TestAHookTurnActivityOutputCarriesNumbersAndOneString(t *testing.T) {
 	raw := turnActivityOutput(pinTurnEvent())
 	if raw == nil {
 		t.Fatal("turnActivityOutput returned nil for an event carrying model and usage")
@@ -488,25 +497,26 @@ func TestTurnProducerPrecedenceIsPinned(t *testing.T) {
 	})
 }
 
-// TestTurnWithNoProducerGetsNoSpan a turn with no producer discriminator must
-// get NO span.
-func TestTurnWithNoProducerGetsNoSpan(t *testing.T) {
+// TestTurnWithNoProducerGetsNoActivityID a turn naming no producer -- no lane
+// discriminator, no turn index, no rollup flag -- cannot be placed on a
+// timeline, and must not be given an id that every such turn in the session
+// would share. Core's dedupe would then drop all but the first.
+//
+// This assertion used to be about the assistant span, which is gone; the
+// identity half is what it was really protecting.
+func TestTurnWithNoProducerGetsNoActivityID(t *testing.T) {
 	ev := laneEvent()
 	ev.Content = &Content{Output: "the assistant's reply"}
 
 	if got := turnActivityIDFor(ev); got != "" {
-		t.Fatalf("fixture is wrong: it names a producer (%q), so it cannot exercise the empty-id path", got)
-	}
-	if span := turnAssistantSpan(ev); span != nil {
-		t.Errorf("a turn naming no producer got span_id %q; every such turn in a session "+
-			"shares that id and core's dedupe drops all but the first", span.SpanID)
+		t.Errorf("a turn naming no producer got activity_id %q", got)
 	}
 
 	for _, l := range turnLanes {
 		withLane := ev
 		l.set(&withLane)
-		if turnAssistantSpan(withLane) == nil {
-			t.Errorf("%s turn carrying assistant text got no span", l.name)
+		if turnActivityIDFor(withLane) == "" {
+			t.Errorf("%s turn got no activity_id, so neither half of its pair can be placed", l.name)
 		}
 	}
 }

@@ -45,35 +45,47 @@ func (e *Emitter) Emit(_ context.Context, rec telemetry.Record) error {
 	if e == nil {
 		return nil
 	}
-	ev, outcome := e.Mapper.EventFor(rec)
-	if outcome != Emitted {
+	events, outcome := e.Mapper.EventsFor(rec)
+	if outcome != Emitted || len(events) == 0 {
 		e.record(outcome, rec)
 		return nil
 	}
 
+	did := events[0].DeveloperDID
 	if e.DID != nil {
-		ev.DeveloperDID = e.DID()
+		did = e.DID()
 	}
-	if ev.DeveloperDID == "" {
+	if did == "" {
 		e.record(dropNoDID, rec)
 		return nil
 	}
 
-	if err := e.Spool.Append(ev); err != nil {
-		e.record(dropSpoolFailed, rec)
-		e.warnThrottled("openbox telemetry: cannot spool a model-call turn: %v", err)
+	// Both halves in order, and the loop STOPS on a failure: appending Completed
+	// after Started failed files the single-sided activity this pairing eliminates.
+	appended := 0
+	for i := range events {
+		events[i].DeveloperDID = did
+		if err := e.Spool.Append(events[i]); err != nil {
+			e.record(dropSpoolFailed, rec)
+			e.warnThrottled("openbox telemetry: cannot spool a model-call turn (%s) for activity %s: "+
+				"%v. %s", events[i].EventType, events[i].OtelRequestID, err, abandonNote(appended))
+			break
+		}
+		appended++
+		e.mu.Lock()
+		e.emitted++
+		e.mu.Unlock()
+	}
+	if appended < len(events) {
 		return nil
 	}
 
-	e.mu.Lock()
-	e.emitted++
-	e.mu.Unlock()
-
 	if e.Verbose != nil {
-		e.Verbose("  telemetry: recorded %s turn %s", rec.EventName, ev.OtelRequestID)
+		e.Verbose("  telemetry: recorded %s turn %s as %d event(s)",
+			rec.EventName, events[0].OtelRequestID, len(events))
 	}
 	if e.Flush != nil {
-		e.Flush(ev.SessionID)
+		e.Flush(events[0].SessionID)
 	}
 	return nil
 }
@@ -147,7 +159,7 @@ func (e *Emitter) Stats() (emitted int, drops map[string]int) {
 func (e *Emitter) String() string {
 	emitted, drops := e.Stats()
 	if len(drops) == 0 {
-		return fmt.Sprintf("%d turns recorded", emitted)
+		return fmt.Sprintf("%d event(s) recorded", emitted)
 	}
 	keys := make([]string, 0, len(drops))
 	for k := range drops {
@@ -158,5 +170,14 @@ func (e *Emitter) String() string {
 	for _, k := range keys {
 		parts = append(parts, fmt.Sprintf("%s=%d", k, drops[k]))
 	}
-	return fmt.Sprintf("%d turns recorded, other outcomes: %s", emitted, strings.Join(parts, " "))
+	return fmt.Sprintf("%d event(s) recorded, other outcomes: %s", emitted, strings.Join(parts, " "))
+}
+
+// abandonNote says what a failed append cost; see gatewayemit, which states the
+// same reasoning rather than sharing an import for one string.
+func abandonNote(appended int) string {
+	if appended == 0 {
+		return "the whole activity is abandoned, so no half-record is stored"
+	}
+	return "its opening half is already spooled and will store UNPAIRED"
 }

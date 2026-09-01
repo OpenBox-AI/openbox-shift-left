@@ -84,7 +84,7 @@ func TestNoContentOnWireAtEitherPosture(t *testing.T) {
 	}
 	rec := apiRequest(attrs)
 
-	ev, out := elected().EventFor(rec)
+	ev, out := completedHalf(elected().EventsFor(rec))
 	if out != Emitted {
 		t.Fatal("no event")
 	}
@@ -144,7 +144,7 @@ func TestContentFieldsAreUnsetOnTheEvent(t *testing.T) {
 	for k, v := range sentinels {
 		attrs[k] = v
 	}
-	ev, out := elected().EventFor(apiRequest(attrs))
+	ev, out := completedHalf(elected().EventsFor(apiRequest(attrs)))
 	if out != Emitted {
 		t.Fatal("no event")
 	}

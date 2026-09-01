@@ -1,0 +1,210 @@
+package gatewayemit
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"strings"
+	"testing"
+
+	"github.com/openbox-ai/openbox-shift-left/internal/client"
+	"github.com/openbox-ai/openbox-shift-left/internal/gateway"
+)
+
+// TestClassifyPath is the table, asserted directly. Classifying on the HTTP
+// method filed every POST as a completion, and roughly 40% of `llm_completion`
+// rows were token-count probes.
+func TestClassifyPath(t *testing.T) {
+	for _, tc := range []struct {
+		url  string
+		want PathClass
+	}{
+		{"https://api.anthropic.com/v1/messages", ClassCompletion},
+		{"https://api.anthropic.com/v1/messages/", ClassCompletion},
+		{"https://api.anthropic.com/v1/messages/count_tokens", ClassTokenCount},
+		{"https://api.anthropic.com/api/event_logging/v2/batch", ClassToolTelemetry},
+		{"https://api.anthropic.com/api/claude_code/metrics", ClassToolTelemetry},
+		{"https://api.anthropic.com/api/claude_code/policy_limits", ClassToolTelemetry},
+		{"https://api.anthropic.com/api/claude_cli/bootstrap", ClassToolTelemetry},
+		{"https://api.anthropic.com/v1/models", ClassUnknown},
+		{"https://api.anthropic.com/v1/something-new", ClassUnknown},
+		{"/v1/messages", ClassCompletion},
+	} {
+		if got := classifyPath(tc.url); got != tc.want {
+			t.Errorf("classifyPath(%q) = %v, want %v", tc.url, got, tc.want)
+		}
+	}
+}
+
+// TestClassificationIsQueryIndependentAndHostInsensitive the capture already
+// strips the query, but classification must not depend on that having happened
+// upstream, and a host that differs only in case is the same host.
+func TestClassificationIsQueryIndependentAndHostInsensitive(t *testing.T) {
+	for _, url := range []string{
+		"https://api.anthropic.com/v1/messages?beta=true",
+		"https://API.ANTHROPIC.COM/v1/messages",
+		"https://Api.Anthropic.Com/v1/messages?a=1&b=2",
+	} {
+		if got := classifyPath(url); got != ClassCompletion {
+			t.Errorf("classifyPath(%q) = %v, want ClassCompletion", url, got)
+		}
+	}
+	if got := classifyPath("https://API.ANTHROPIC.COM/v1/messages/count_tokens?x=1"); got != ClassTokenCount {
+		t.Errorf("a query-carrying, upper-case-host probe classified as %v", got)
+	}
+}
+
+// TestActivityTypesComeFromTheClosedVocabulary a class inventing a name outside
+// AllActivityTypes would reach the dashboard's Activity column as an unknown
+// value with nothing to reject it.
+func TestActivityTypesComeFromTheClosedVocabulary(t *testing.T) {
+	known := map[string]bool{}
+	for _, a := range client.AllActivityTypes {
+		known[a] = true
+	}
+	for _, class := range []PathClass{ClassCompletion, ClassTokenCount, ClassToolTelemetry, ClassUnknown} {
+		if got := class.ActivityType(); !known[got] {
+			t.Errorf("%v yields activity_type %q, which is not in client.AllActivityTypes", class, got)
+		}
+	}
+}
+
+// TestCompletionIsTheOnlyLLMCompletion is criterion 3 of the plan, asserted at
+// the level that decides it.
+func TestCompletionIsTheOnlyLLMCompletion(t *testing.T) {
+	if got := ClassCompletion.ActivityType(); got != client.ActivityTypeLLMCompletion {
+		t.Errorf("a completion stores as %q", got)
+	}
+	for _, class := range []PathClass{ClassTokenCount, ClassToolTelemetry, ClassUnknown} {
+		if got := class.ActivityType(); got == client.ActivityTypeLLMCompletion {
+			t.Errorf("%v stores as llm_completion; only a real completion may", class)
+		}
+	}
+}
+
+// capturedFor builds a session-bearing capture for one path.
+func capturedFor(session, url string) gateway.Captured {
+	c := capturedWithSession(session)
+	c.HTTPMethod = http.MethodPost
+	c.HTTPURL = url
+	return c
+}
+
+// TestEmittedActivityTypeFollowsThePath asserts the classification survives all
+// the way onto the wire payload, not merely onto the struct: the whole defect
+// was that a value nobody checked reached storage.
+func TestEmittedActivityTypeFollowsThePath(t *testing.T) {
+	for _, tc := range []struct {
+		url  string
+		want string
+	}{
+		{"https://api.anthropic.com/v1/messages", client.ActivityTypeLLMCompletion},
+		{"https://api.anthropic.com/v1/messages/count_tokens", client.ActivityTypeTokenCount},
+		{"https://api.anthropic.com/v1/something-new", client.ActivityTypeProviderRequest},
+	} {
+		t.Run(tc.want, func(t *testing.T) {
+			// Both halves, because a class that reached only one of them would
+			// classify half of every model call.
+			for _, ev := range mustPair(LaneProxy, sampleIdentity(), "px-1", sampleAt, capturedFor("sess-1", tc.url)) {
+				if ev.ActivityType != tc.want {
+					t.Errorf("%s: DevEvent.ActivityType = %q, want %q", ev.EventType, ev.ActivityType, tc.want)
+				}
+				if got := wireActivityType(t, ev); got != tc.want {
+					t.Errorf("%s: wire activity_type = %q, want %q", ev.EventType, got, tc.want)
+				}
+			}
+		})
+	}
+}
+
+// wireActivityType reads the field off the bytes the client would POST.
+func wireActivityType(t *testing.T, ev client.DevEvent) string {
+	t.Helper()
+	raw := postThroughRealClient(t, ev, true)
+	var p struct {
+		ActivityType string `json:"activity_type"`
+	}
+	if err := json.Unmarshal(raw, &p); err != nil {
+		t.Fatalf("payload is not JSON: %v", err)
+	}
+	return p.ActivityType
+}
+
+// TestTheToolsOwnTelemetryDoesNotWarnAboutAMissingSession is 3b: the warning
+// said "no governance events are being sent", which reads as "completions are
+// being dropped", on hundreds of headerless telemetry POSTs a day. It is what
+// sent a whole investigation to the wrong lane.
+func TestTheToolsOwnTelemetryDoesNotWarnAboutAMissingSession(t *testing.T) {
+	headerless := func(url string) gateway.Captured {
+		c := sampleCaptured()
+		c.HTTPMethod = http.MethodPost
+		c.HTTPURL = url
+		c.RequestHeaders = map[string]string{"Anthropic-Version": "2023-06-01"}
+		return c
+	}
+
+	for _, url := range []string{
+		"https://api.anthropic.com/api/event_logging/v2/batch",
+		"https://api.anthropic.com/api/claude_code/metrics",
+		"https://api.anthropic.com/api/claude_code/settings",
+		"https://api.anthropic.com/api/claude_cli/bootstrap",
+	} {
+		t.Run(url, func(t *testing.T) {
+			em, _, warnings := newTestEmitter(t)
+			em.Emit(context.Background(), headerless(url))
+			if got := warnings.String(); got != "" {
+				t.Errorf("the tool's own telemetry produced a governance warning: %q", got)
+			}
+		})
+	}
+
+	t.Run("a headerless completion is still loud", func(t *testing.T) {
+		em, _, warnings := newTestEmitter(t)
+		em.Emit(context.Background(), headerless("https://api.anthropic.com/v1/messages"))
+		got := warnings.String()
+		if !strings.Contains(strings.ToLower(got), "x-claude-code-session-id") {
+			t.Errorf("a headerless completion did not warn: %q", got)
+		}
+		if !strings.Contains(got, "model calls") {
+			t.Errorf("the warning does not say a MODEL CALL was affected: %q", got)
+		}
+	})
+
+	t.Run("an unknown headerless POST names its path", func(t *testing.T) {
+		em, _, warnings := newTestEmitter(t)
+		em.Emit(context.Background(), headerless("https://api.anthropic.com/v1/something-new"))
+		got := warnings.String()
+		if got == "" {
+			t.Fatal("an unrecognised POST was silently ignored; the predicate must err toward warning")
+		}
+		if !strings.Contains(got, "/v1/something-new") {
+			t.Errorf("the warning does not name the path that had no header: %q", got)
+		}
+	})
+}
+
+// TestAProbeWarningCannotSilenceACompletionWarning the throttles are separate
+// on purpose: sharing one clock would let an hour of probe noise suppress the
+// single case that means governance evidence is being lost.
+func TestAProbeWarningCannotSilenceACompletionWarning(t *testing.T) {
+	var warnings bytes.Buffer
+	em, _, _ := newTestEmitter(t)
+	em.Warn = func(format string, args ...any) { fmt.Fprintf(&warnings, format+"\n", args...) }
+
+	headerless := func(url string) gateway.Captured {
+		c := sampleCaptured()
+		c.HTTPMethod = http.MethodPost
+		c.HTTPURL = url
+		c.RequestHeaders = map[string]string{"Anthropic-Version": "2023-06-01"}
+		return c
+	}
+
+	em.Emit(context.Background(), headerless("https://api.anthropic.com/v1/messages/count_tokens"))
+	em.Emit(context.Background(), headerless("https://api.anthropic.com/v1/messages"))
+
+	if !strings.Contains(warnings.String(), "model calls") {
+		t.Errorf("a probe warning suppressed the completion warning: %q", warnings.String())
+	}
+}

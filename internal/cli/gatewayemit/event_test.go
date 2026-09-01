@@ -39,6 +39,18 @@ func sampleIdentity() Identity {
 
 var sampleAt = time.Date(2026, 8, 26, 12, 0, 0, 0, time.UTC)
 
+// measuredCaptured is a relayed call the relay actually timed, which is every
+// real one. sampleCaptured deliberately carries no timing: it is the
+// unmeasured fallback path (a refusal, an unreachable upstream), and keeping it
+// that way is what lets keypin_test.go pin the shipped idempotency key, since
+// the key hashes the event timestamp.
+func measuredCaptured() gateway.Captured {
+	c := sampleCaptured()
+	c.StartedAt = sampleAt
+	c.EndedAt = sampleAt.Add(2200 * time.Millisecond)
+	return c
+}
+
 // TestEventTypeIsTurnCompleted is not a taste assertion. Client/payload.go
 // attaches a gateway span only under `case EventTurnCompleted`; every other
 // event type drops Span on the floor with no error anywhere.
@@ -90,70 +102,97 @@ func TestSessionAndDIDAreCarried(t *testing.T) {
 
 // TestObservedExchangeReachesTheWire is the assertion that counts.
 func TestObservedExchangeReachesTheWire(t *testing.T) {
-	body := postThroughRealClient(t, mustEvent(LaneGateway, sampleIdentity(), "req-1", sampleAt, sampleCaptured()), true)
+	pair := mustPair(LaneGateway, sampleIdentity(), "req-1", sampleAt, measuredCaptured())
 
-	var p struct {
-		ActivityID string `json:"activity_id"`
-		SpanCount  int    `json:"span_count"`
-		Spans      []struct {
-			SpanID                string            `json:"span_id"`
-			HTTPMethod            string            `json:"http_method"`
-			HTTPURL               string            `json:"http_url"`
-			HTTPStatus            int               `json:"http_status_code"`
-			CredentialFingerprint string            `json:"credential_fingerprint"`
-			RequestHeaders        map[string]string `json:"request_headers"`
-			ResponseHeaders       map[string]string `json:"response_headers"`
-			RequestBody           string            `json:"request_body"`
-			ResponseBody          string            `json:"response_body"`
-			Attributes            map[string]any    `json:"attributes"`
-		} `json:"spans"`
+	type payload struct {
+		ActivityID     string          `json:"activity_id"`
+		ActivityType   string          `json:"activity_type"`
+		ActivityInput  json.RawMessage `json:"activity_input"`
+		ActivityOutput json.RawMessage `json:"activity_output"`
+		DurationMs     *float64        `json:"duration_ms"`
+		Metadata       struct {
+			CredentialFingerprint string `json:"credential_fingerprint"`
+		} `json:"metadata"`
+		SpanCount int   `json:"span_count"`
+		Spans     []any `json:"spans"`
 	}
-	if err := json.Unmarshal(body, &p); err != nil {
-		t.Fatalf("unmarshal posted payload: %v", err)
+	decode := func(ev client.DevEvent) payload {
+		var p payload
+		if err := json.Unmarshal(postThroughRealClient(t, ev, true), &p); err != nil {
+			t.Fatalf("unmarshal posted payload: %v", err)
+		}
+		return p
 	}
-	if p.SpanCount != 1 || len(p.Spans) != 1 {
-		t.Fatalf("span_count=%d spans=%d, want exactly one; the capture never reached the wire", p.SpanCount, len(p.Spans))
+	started, completed := decode(pair[0]), decode(pair[1])
+
+	// The bodies, in the fields that actually persist. They used to ride spans[],
+	// which core parses on the normal path and then discards, so every one of
+	// these assertions passed while nothing was stored.
+	if !strings.Contains(string(started.ActivityInput), "claude-opus-4") {
+		t.Errorf("the request body did not reach activity_input: %s", started.ActivityInput)
 	}
-	s := p.Spans[0]
-	if s.HTTPMethod != "POST" || s.HTTPStatus != 200 {
-		t.Errorf("classification fields wrong: method=%q status=%d (core recomputes semantic_type from these)", s.HTTPMethod, s.HTTPStatus)
+	if !strings.Contains(string(completed.ActivityOutput), "assistant") {
+		t.Errorf("the response body did not reach activity_output: %s", completed.ActivityOutput)
 	}
-	if !strings.Contains(s.HTTPURL, "api.anthropic.com") {
-		t.Errorf("http_url = %q; isLLMCall needs an LLM domain here or the span classifies as something else", s.HTTPURL)
+
+	// The measured call, which the relay used to compute and throw away.
+	if completed.DurationMs == nil {
+		t.Fatal("duration_ms is null on the completed half; the relay measured the call")
 	}
-	if s.CredentialFingerprint == "" || s.Attributes["openbox.credential_fingerprint"] == nil {
-		t.Error("credential fingerprint absent; account binding has nothing to match on")
+	if want := 2200.0; *completed.DurationMs != want {
+		t.Errorf("duration_ms = %v, want the relay's measured %v -- not the governance round trip, "+
+			"which api_response_ms already reports and which is easily mistaken for this", *completed.DurationMs, want)
 	}
-	if s.RequestHeaders["Anthropic-Version"] != "2023-06-01" {
-		t.Errorf("request headers did not reach the wire: %v", s.RequestHeaders)
+	if started.DurationMs != nil {
+		t.Errorf("the opening half carries duration_ms = %v, which claims the call was already over", *started.DurationMs)
 	}
-	if s.ResponseHeaders["Request-Id"] != "req_upstream_1" {
-		t.Errorf("response headers did not reach the wire: %v", s.ResponseHeaders)
+
+	for name, p := range map[string]payload{"started": started, "completed": completed} {
+		if p.ActivityType != client.ActivityTypeLLMCompletion {
+			t.Errorf("%s: activity_type = %q", name, p.ActivityType)
+		}
+		if !strings.Contains(p.ActivityID, ":gateway:") {
+			t.Errorf("%s: activity_id %q is not in the gateway namespace; it could collide with a hook turn",
+				name, p.ActivityID)
+		}
+		// Rehomed from the span's attributes, which never persisted for a developer
+		// session -- so account binding has in fact never had anything to match on.
+		if p.Metadata.CredentialFingerprint == "" {
+			t.Errorf("%s: credential fingerprint absent from metadata; account binding has nothing to match on", name)
+		}
+		if p.SpanCount != 0 || len(p.Spans) != 0 {
+			t.Errorf("%s: posted span_count=%d spans=%d, want none", name, p.SpanCount, len(p.Spans))
+		}
 	}
-	if !strings.Contains(s.RequestBody, "claude-opus-4") || !strings.Contains(s.ResponseBody, "assistant") {
-		t.Errorf("bodies did not reach the wire: req=%q resp=%q", s.RequestBody, s.ResponseBody)
-	}
-	if !strings.Contains(p.ActivityID, ":gateway:") {
-		t.Errorf("activity_id %q is not in the gateway namespace; it could collide with a hook turn", p.ActivityID)
+	if started.ActivityID != completed.ActivityID {
+		t.Errorf("the pair split across activity_ids %q and %q", started.ActivityID, completed.ActivityID)
 	}
 }
 
-// TestCaptureOffStripsBodiesAndHeadersButKeepsTheFingerprint is the other half
-// of the gate, asserted on outbound bytes for the same reason.
-func TestCaptureOffStripsBodiesAndHeadersButKeepsTheFingerprint(t *testing.T) {
+// TestCaptureOffStripsBodiesButKeepsTheFingerprint is the other half of the
+// gate, asserted on outbound bytes for the same reason, and on BOTH halves of
+// the pair: a gate that held on one would leak on every model call.
+//
+// The headers are no longer part of this test's subject because they no longer
+// egress at all. They only ever reached core inside spans[], which is discarded,
+// and they were the highest-risk class this client carried -- the developer's
+// live provider credential is on every model request.
+func TestCaptureOffStripsBodiesButKeepsTheFingerprint(t *testing.T) {
 	c := sampleCaptured()
 	c.RequestHeaders = map[string]string{"Authorization": "[redacted]", "Anthropic-Version": "2023-06-01"}
-	raw := postThroughRealClient(t, mustEvent(LaneGateway, sampleIdentity(), "req-1", sampleAt, c), false)
-	got := string(raw)
 
-	if strings.Contains(got, "claude-opus-4") || strings.Contains(got, `"role":"assistant"`) {
-		t.Error("bodies egressed with content capture OFF")
-	}
-	if strings.Contains(got, "Anthropic-Version") {
-		t.Error("headers egressed with content capture OFF")
-	}
-	if !strings.Contains(got, "a1b2c3d4e5f60718") {
-		t.Error("credential fingerprint disappeared under the content gate; that decision keeps it ungated")
+	for _, ev := range mustPair(LaneGateway, sampleIdentity(), "req-1", sampleAt, c) {
+		got := string(postThroughRealClient(t, ev, false))
+
+		if strings.Contains(got, "claude-opus-4") || strings.Contains(got, `"role":"assistant"`) {
+			t.Errorf("%s: bodies egressed with content capture OFF", ev.EventType)
+		}
+		if strings.Contains(got, "Anthropic-Version") {
+			t.Errorf("%s: headers egressed", ev.EventType)
+		}
+		if !strings.Contains(got, "a1b2c3d4e5f60718") {
+			t.Errorf("%s: credential fingerprint disappeared under the content gate; that decision keeps it ungated", ev.EventType)
+		}
 	}
 }
 

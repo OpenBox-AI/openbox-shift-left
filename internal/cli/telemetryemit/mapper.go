@@ -84,14 +84,15 @@ func New(did string, p Policy) *Mapper {
 	return &Mapper{did: did, policy: p}
 }
 
-// EventFor maps one record to one event, or reports false when the record maps
-// to nothing.
-func (m *Mapper) EventFor(rec telemetry.Record) (client.DevEvent, Outcome) {
+// EventsFor maps one record to the PAIR one model turn is -- BOTH halves, which is
+// the point. Until 1.7 this lane returned the close alone, so every row it
+// produced was unpaired; returning one event again reintroduces that.
+func (m *Mapper) EventsFor(rec telemetry.Record) ([]client.DevEvent, Outcome) {
 	if m == nil || !m.policy.elected() {
-		return client.DevEvent{}, SkipNotElected
+		return nil, SkipNotElected
 	}
 	if rec.EventName != eventAPIRequest {
-		return client.DevEvent{}, SkipUnhandledEvent
+		return nil, SkipUnhandledEvent
 	}
 	return m.turnFor(rec)
 }
@@ -102,17 +103,17 @@ const maxRequestIDLen = 128
 
 const synthesizedLLMURL = "https://api.anthropic.com/v1/messages"
 
-func (m *Mapper) turnFor(rec telemetry.Record) (client.DevEvent, Outcome) {
+func (m *Mapper) turnFor(rec telemetry.Record) ([]client.DevEvent, Outcome) {
 	session := rec.Attrs["session.id"]
 	if !safeSessionID(session) {
-		return client.DevEvent{}, DropBadSession
+		return nil, DropBadSession
 	}
 	if rec.Timestamp.IsZero() {
-		return client.DevEvent{}, DropNoTimestamp
+		return nil, DropNoTimestamp
 	}
 	reqID, ok := requestIDFrom(rec.Attrs)
 	if !ok {
-		return client.DevEvent{}, DropNoRequestID
+		return nil, DropNoRequestID
 	}
 
 	end := rec.Timestamp.UTC()
@@ -121,27 +122,38 @@ func (m *Mapper) turnFor(rec telemetry.Record) (client.DevEvent, Outcome) {
 		start = end.Add(-time.Duration(d) * time.Millisecond)
 	}
 
-	ev := client.DevEvent{
-		SchemaVersion: client.SchemaVersion,
-		EventType:     client.EventTurnCompleted,
-		SessionID:     session,
-		DeveloperDID:  m.did,
-		Timestamp:     end.Format(time.RFC3339Nano),
-		StartedAt:     start.Format(time.RFC3339Nano),
-		EndedAt:       end.Format(time.RFC3339Nano),
-		Tool:          client.Tool{Name: "claude-code", Kind: client.ToolShell},
-		Model:         rec.Attrs["model"],
-		OtelRequestID: reqID,
-		Tokens:        tokensFrom(rec.Attrs),
-		Span: &client.Span{
-			SemanticType: "llm_completion",
-			Stage:        "completed",
-			HTTPMethod:   "POST",
-			HTTPURL:      synthesizedLLMURL,
-		},
+	half := func(eventType client.EventType, stage string, ts time.Time) client.DevEvent {
+		ev := client.DevEvent{
+			SchemaVersion: client.SchemaVersion,
+			EventType:     eventType,
+			SessionID:     session,
+			DeveloperDID:  m.did,
+			Timestamp:     ts.Format(time.RFC3339Nano),
+			StartedAt:     start.Format(time.RFC3339Nano),
+			Tool:          client.Tool{Name: "claude-code", Kind: client.ToolShell},
+			ActivityType:  client.ActivityTypeLLMCompletion,
+			Model:         rec.Attrs["model"],
+			OtelRequestID: reqID,
+			Span: &client.Span{
+				SemanticType: client.ActivityTypeLLMCompletion,
+				Stage:        stage,
+				HTTPMethod:   "POST",
+				HTTPURL:      synthesizedLLMURL,
+			},
+		}
+		// Usage is known only at the close; zero-filling would claim no spend.
+		if eventType == client.EventTurnCompleted {
+			ev.EndedAt = end.Format(time.RFC3339Nano)
+			ev.Tokens = tokensFrom(rec.Attrs)
+		}
+		ev.EventID = eventID(session, reqID, string(ev.EventType), ev.Timestamp)
+		return ev
 	}
-	ev.EventID = eventID(session, reqID, string(ev.EventType), ev.Timestamp)
-	return ev, Emitted
+
+	return []client.DevEvent{
+		half(client.EventTurnStarted, "started", start),
+		half(client.EventTurnCompleted, "completed", end),
+	}, Emitted
 }
 
 // requestIDFrom picks the id that becomes part of activity_id, and validates

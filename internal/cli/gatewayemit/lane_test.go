@@ -3,6 +3,7 @@ package gatewayemit
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -21,7 +22,7 @@ import (
 // TestEachLaneWritesOnlyItsOwnDiscriminator.
 func TestEachLaneWritesOnlyItsOwnDiscriminator(t *testing.T) {
 	t.Run("gateway", func(t *testing.T) {
-		ev, err := EventFor(LaneGateway, sampleIdentity(), "req-1", sampleAt, sampleCaptured())
+		ev, err := onlyCompleted(EventsFor(LaneGateway, sampleIdentity(), "req-1", sampleAt, sampleCaptured()))
 		if err != nil {
 			t.Fatalf("EventFor: %v", err)
 		}
@@ -35,7 +36,7 @@ func TestEachLaneWritesOnlyItsOwnDiscriminator(t *testing.T) {
 	})
 
 	t.Run("proxy", func(t *testing.T) {
-		ev, err := EventFor(LaneProxy, sampleIdentity(), "req-1", sampleAt, sampleCaptured())
+		ev, err := onlyCompleted(EventsFor(LaneProxy, sampleIdentity(), "req-1", sampleAt, sampleCaptured()))
 		if err != nil {
 			t.Fatalf("EventFor: %v", err)
 		}
@@ -51,7 +52,7 @@ func TestEachLaneWritesOnlyItsOwnDiscriminator(t *testing.T) {
 
 // TestAnUnsetLaneIsRefusedRatherThanDefaulted.
 func TestAnUnsetLaneIsRefusedRatherThanDefaulted(t *testing.T) {
-	_, err := EventFor(Lane{}, sampleIdentity(), "req-1", sampleAt, sampleCaptured())
+	_, err := EventsFor(Lane{}, sampleIdentity(), "req-1", sampleAt, sampleCaptured())
 	if err == nil {
 		t.Fatal("EventFor accepted a zero Lane; an unconfigured lane must be refused, never defaulted")
 	}
@@ -83,31 +84,34 @@ func TestLaneNamesMatchTheActivityIDNamespaces(t *testing.T) {
 		{LaneGateway, ":gateway:req-1"},
 		{LaneProxy, ":proxy:req-1"},
 	} {
-		ev, err := EventFor(tc.lane, sampleIdentity(), "req-1", sampleAt, sampleCaptured())
-		if err != nil {
-			t.Fatalf("EventFor(%s): %v", tc.lane.Name, err)
-		}
-		body := postThroughRealClient(t, ev, true)
+		var ids []string
+		for _, ev := range mustPair(tc.lane, sampleIdentity(), "req-1", sampleAt, sampleCaptured()) {
+			body := postThroughRealClient(t, ev, true)
 
-		var p struct {
-			ActivityID string `json:"activity_id"`
-			SpanCount  int    `json:"span_count"`
-			Spans      []struct {
-				SpanID string `json:"span_id"`
-			} `json:"spans"`
+			var p struct {
+				ActivityID string `json:"activity_id"`
+				SpanCount  int    `json:"span_count"`
+				Spans      []any  `json:"spans"`
+			}
+			if err := json.Unmarshal(body, &p); err != nil {
+				t.Fatalf("unmarshal posted payload: %v", err)
+			}
+			if !strings.HasSuffix(p.ActivityID, tc.want) {
+				t.Errorf("lane %s %s produced activity_id %q, want it to end in %q",
+					tc.lane.Name, ev.EventType, p.ActivityID, tc.want)
+			}
+			// No span, on either half. `llm_completion` IS the activity here, so a
+			// span nested inside it would represent one call twice -- and core
+			// discards embedded spans on the normal path anyway.
+			if p.SpanCount != 0 || len(p.Spans) != 0 {
+				t.Errorf("lane %s %s posted span_count=%d spans=%d, want none",
+					tc.lane.Name, ev.EventType, p.SpanCount, len(p.Spans))
+			}
+			ids = append(ids, p.ActivityID)
 		}
-		if err := json.Unmarshal(body, &p); err != nil {
-			t.Fatalf("unmarshal posted payload: %v", err)
-		}
-		if !strings.HasSuffix(p.ActivityID, tc.want) {
-			t.Errorf("lane %s produced activity_id %q, want it to end in %q",
-				tc.lane.Name, p.ActivityID, tc.want)
-		}
-		// A lane whose span went missing would file half its evidence under a row
-		// the other half never joins.
-		if p.SpanCount != 1 || len(p.Spans) != 1 || p.Spans[0].SpanID == "" {
-			t.Errorf("lane %s posted span_count=%d spans=%d; the observed span did not reach the wire",
-				tc.lane.Name, p.SpanCount, len(p.Spans))
+		// The two halves must land on ONE timeline row.
+		if ids[0] != ids[1] {
+			t.Errorf("lane %s split its pair across activity_ids %q and %q", tc.lane.Name, ids[0], ids[1])
 		}
 	}
 }
@@ -139,10 +143,11 @@ func TestEmitRefusesAnUnconfiguredLane(t *testing.T) {
 func TestEmitFilesUnderTheConfiguredLane(t *testing.T) {
 	dir := t.TempDir()
 	em := &Emitter{
-		Lane:  LaneProxy,
-		Spool: hookflow.Spool{Dir: dir},
-		DID:   func() string { return "did:openbox:dev" },
-		Warn:  func(string, ...any) {},
+		Lane:    LaneProxy,
+		Spool:   hookflow.Spool{Dir: dir},
+		DID:     func() string { return "did:openbox:dev" },
+		Warn:    func(string, ...any) {},
+		Elected: func() bool { return true },
 	}
 	em.Emit(context.Background(), capturedWithSession("sess-1"))
 
@@ -172,11 +177,40 @@ func spoolEntryCount(t *testing.T, dir string) int {
 	return n
 }
 
-// mustEvent is EventFor for tests that are not about the lane.
-func mustEvent(lane Lane, id Identity, requestID string, at time.Time, c gateway.Captured) client.DevEvent {
-	ev, err := EventFor(lane, id, requestID, at, c)
+// mustPair is EventsFor for tests that are not about the pairing itself. It
+// asserts the shape every caller depends on: exactly two halves, opening first.
+func mustPair(lane Lane, id Identity, requestID string, at time.Time, c gateway.Captured) []client.DevEvent {
+	events, err := EventsFor(lane, id, requestID, at, c)
 	if err != nil {
 		panic(err)
 	}
-	return ev
+	if len(events) != 2 {
+		panic(fmt.Sprintf("EventsFor returned %d events, want the Started/Completed pair", len(events)))
+	}
+	if events[0].EventType != client.EventTurnStarted || events[1].EventType != client.EventTurnCompleted {
+		panic(fmt.Sprintf("EventsFor returned %s then %s, want TurnStarted then TurnCompleted; "+
+			"the spool delivers in append order and core looks a completion's start up at ingest",
+			events[0].EventType, events[1].EventType))
+	}
+	return events
+}
+
+// mustEvent is the COMPLETED half, which is what a test not about the pair
+// means by "the event": it is the half that carries the status, the duration and
+// the response.
+func mustEvent(lane Lane, id Identity, requestID string, at time.Time, c gateway.Captured) client.DevEvent {
+	return mustPair(lane, id, requestID, at, c)[1]
+}
+
+// mustStarted is the opening half.
+func mustStarted(lane Lane, id Identity, requestID string, at time.Time, c gateway.Captured) client.DevEvent {
+	return mustPair(lane, id, requestID, at, c)[0]
+}
+
+// onlyCompleted adapts the pair to a test that means the completed half.
+func onlyCompleted(events []client.DevEvent, err error) (client.DevEvent, error) {
+	if err != nil {
+		return client.DevEvent{}, err
+	}
+	return events[len(events)-1], nil
 }

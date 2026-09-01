@@ -5,9 +5,11 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 const source = "developer-runtime"
@@ -47,12 +49,7 @@ type governanceEventPayload struct {
 	// Status is the tool call's outcome, and the single field core's per-tool
 	// success metric reads: appended last deliberately.
 	Status string `json:"status,omitempty"`
-	// Spans carries exactly ONE span, on a TurnCompleted under content capture,
-	// and nothing else ever. It exists because core's goal-alignment extractor
-	// reads assistant text from payload.Spans and from no other field, so a span-
-	// less session can never feed it; see client/turnspan.go.
-	Spans     []wireSpan `json:"spans,omitempty"`
-	SpanCount int        `json:"span_count,omitempty"`
+	// No spans: core parses spans[] and discards it. docs/mapping.md §2.
 }
 
 const (
@@ -97,18 +94,13 @@ func buildPayload(ev DevEvent) ([]byte, error) {
 		p.Status = statusFor(ev)
 	case EventTurnStarted:
 		p.ActivityID = turnActivityIDFor(ev)
+		p.ActivityInput = turnActivityInput(ev)
 	case EventTurnCompleted:
 		p.ActivityID = turnActivityIDFor(ev)
 		p.ActivityOutput = turnActivityOutput(ev)
 		p.DurationMs = durationMs(ev)
-		// Note what is deliberately NOT set alongside: hook_trigger.
-		if span := observedSpan(ev); span != nil {
-			p.Spans = []wireSpan{*span}
-			p.SpanCount = 1
-		} else if span := turnAssistantSpan(ev); span != nil {
-			p.Spans = []wireSpan{*span}
-			p.SpanCount = 1
-		}
+		// Deliberately NOT set: hook_trigger, which would route a model turn onto
+		// core's approval-bypass path.
 	}
 
 	meta, err := buildMetadata(ev)
@@ -217,8 +209,6 @@ func turnActivityIDFor(ev DevEvent) string {
 	return b.String()
 }
 
-const activityTypeLLMCompletion = "llm_completion"
-
 // turnActivityOutput cost is deliberately absent.
 func turnActivityOutput(ev DevEvent) json.RawMessage {
 	m := map[string]any{}
@@ -245,6 +235,14 @@ func turnActivityOutput(ev DevEvent) json.RawMessage {
 	}
 	if ev.Content != nil && ev.Content.Thinking != "" {
 		m["thinking"] = capBody(ev.Content.Thinking)
+	}
+	// What the model said; the two sources are mutually exclusive.
+	switch {
+	case ev.Span != nil && ev.Span.ResponseBody != "":
+		// Verbatim, SSE frames and all: reassembly belongs with the consumer.
+		m[modelCallContentKey] = capModelCallBody(ev.Span.ResponseBody)
+	case ev.Content != nil && ev.Content.Output != "":
+		m[modelCallContentKey] = capModelCallBody(ev.Content.Output)
 	}
 	if len(m) == 0 {
 		return nil
@@ -280,13 +278,18 @@ func statusFor(ev DevEvent) string {
 //     share one vocabulary;
 //   - Everything else (lifecycle, Deploy) → the event_type string.
 func activityLabel(ev DevEvent) string {
+	// Only from the closed vocabulary: this column is pass-through, so a typo would
+	// reach the dashboard unfiltered.
+	if slices.Contains(AllActivityTypes, ev.ActivityType) {
+		return ev.ActivityType
+	}
 	switch ev.EventType {
 	case EventToolCall, EventToolResult:
 		if ev.Tool.Name != "" {
 			return ev.Tool.Name
 		}
 	case EventTurnStarted, EventTurnCompleted:
-		return activityTypeLLMCompletion
+		return ActivityTypeLLMCompletion
 	}
 	return string(ev.EventType)
 }
@@ -358,6 +361,20 @@ func buildMetadata(ev DevEvent) (json.RawMessage, error) {
 	if ev.AgentID != "" {
 		if _, exists := m["agent_id"]; !exists {
 			m["agent_id"] = ev.AgentID
+		}
+	}
+	// Rehomed from span attributes, which never persisted. NOT in
+	// contentMetadataKeys: derived evidence, not content.
+	if s := ev.Span; s != nil {
+		if s.CredentialFingerprint != "" {
+			if _, exists := m["credential_fingerprint"]; !exists {
+				m["credential_fingerprint"] = s.CredentialFingerprint
+			}
+		}
+		if s.HTTPStatus != 0 {
+			if _, exists := m["http_status"]; !exists {
+				m["http_status"] = s.HTTPStatus
+			}
 		}
 	}
 	return json.Marshal(m)
@@ -531,4 +548,78 @@ func rfc3339Nanos(ts string) int64 {
 		return 0
 	}
 	return t.UnixNano()
+}
+
+// modelCallContentKey is load-bearing: Goal Alignment's cap emits a fixed
+// priority list, then unlisted keys, then breaks. `content` is in the list.
+const modelCallContentKey = "content"
+
+// maxModelCallBodyBytes bounds a relayed body in BYTES, and the unit is the decision:
+// capBody tests bytes then cuts runes, so a 64Ki-rune CJK body reaches 192 KB, while
+// this bounds core's synchronous evaluation cost. One constant, so the pending live
+// measurement changes one line. Its own literal, NOT `= maxBodySize`: that one is a
+// RUNE bound, so raising it for longer thinking would silently change this byte cap
+// too. Equal today, and that is a coincidence worth keeping visible.
+const maxModelCallBodyBytes = 65536
+
+func capModelCallBody(s string) string {
+	if len(s) <= maxModelCallBodyBytes {
+		return s
+	}
+	return trimTrailingPartialRune(s[:maxModelCallBodyBytes-len(truncationMark)]) + truncationMark
+}
+
+// truncationMark makes a shortened body distinguishable from a complete one: a
+// clipped reply otherwise reaches OPA and an auditor looking finished.
+const truncationMark = "…[openbox: truncated]"
+
+func trimTrailingPartialRune(s string) string {
+	for i := len(s); i > 0 && i > len(s)-utf8.UTFMax; i-- {
+		if r, size := utf8.DecodeLastRuneInString(s[:i]); r != utf8.RuneError || size > 1 {
+			return s[:i]
+		}
+	}
+	return s
+}
+
+// turnActivityInput is the observed request on the opening half, and IS an
+// in-path lane's alignment input. A hook turn yields nil, which is required.
+func turnActivityInput(ev DevEvent) json.RawMessage {
+	s := ev.Span
+	if s == nil || s.RequestBody == "" {
+		// A non-empty activity_input is what makes core judge an operation, and the
+		// http_* pair alone would file a probe as work that never happened.
+		return nil
+	}
+	m := map[string]any{modelCallContentKey: capModelCallRequest(s.RequestBody)}
+	// Unlisted, so the judge's cap drops these before `content`.
+	if s.HTTPMethod != "" {
+		m["http_method"] = s.HTTPMethod
+	}
+	if s.HTTPURL != "" {
+		m["http_url"] = s.HTTPURL
+	}
+	if len(m) == 0 {
+		return nil
+	}
+	b, err := json.Marshal(m)
+	if err != nil {
+		return nil
+	}
+	return b
+}
+
+// capModelCallRequest keeps the TAIL: a /v1/messages body is a conversation whose
+// NEWEST turn is at the end, so a head cut keeps only the boilerplate.
+func capModelCallRequest(s string) string {
+	if len(s) <= maxModelCallBodyBytes {
+		return s
+	}
+	tail := s[len(s)-(maxModelCallBodyBytes-len(truncationMark)):]
+	for i := 0; i < len(tail) && i < utf8.UTFMax; i++ {
+		if utf8.RuneStart(tail[i]) {
+			return truncationMark + tail[i:]
+		}
+	}
+	return truncationMark + tail
 }

@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/hookflow"
-	"github.com/openbox-ai/openbox-shift-left/internal/client"
 	"github.com/openbox-ai/openbox-shift-left/internal/gateway"
 )
 
@@ -56,12 +55,38 @@ type Emitter struct {
 	// Now is injectable so a test can pin a timestamp; nil ⇒ time.Now.
 	Now func() time.Time
 
+	// Elected stops two lanes describing the same turn. Resolved PER RECORD (see
+	// electedFn); nil is a WIRING DEFECT, not a setting, and is reported as one.
+	Elected func() bool
+
+	// ElectionProblem reports why the election could not be RESOLVED, or "".
+	ElectionProblem func() string
+
 	mu                 sync.Mutex
 	lastBadSessionWarn time.Time
 	lastNoSessionWarn  time.Time
-	lastNoDIDWarn      time.Time
-	cachedDID          string
-	fallbackSeq        uint64
+	// lastNoSessionOtherWarn throttles every class EXCEPT a completion separately, so
+	// probe noise cannot silence the one case that is a real defect.
+	lastNoSessionOtherWarn time.Time
+	lastNoDIDWarn          time.Time
+	lastNoElectionWarn     time.Time
+	lastUndecidedWarn      time.Time
+	cachedDID              string
+	fallbackSeq            uint64
+}
+
+func (e *Emitter) electionProblem() string {
+	if e.ElectionProblem == nil {
+		return ""
+	}
+	return e.ElectionProblem()
+}
+
+func (e *Emitter) noSessionWarnClock(class PathClass) *time.Time {
+	if class == ClassCompletion {
+		return &e.lastNoSessionWarn
+	}
+	return &e.lastNoSessionOtherWarn
 }
 
 func (e *Emitter) developerDID() string {
@@ -104,6 +129,27 @@ func (e *Emitter) Emit(ctx context.Context, c gateway.Captured) {
 		return
 	}
 
+	if e.Elected == nil {
+		e.vlog("  capture: DROPPED; this emitter has no election gate configured")
+		e.warnThrottled(&e.lastNoElectionWarn, "openbox: a model-call emitter was constructed with no election gate, "+
+			"so it cannot know whether it is this machine's producer and captured calls are being DROPPED. "+
+			"This is a wiring defect, not a setting.")
+		return
+	}
+	if !e.Elected() {
+		if problem := e.electionProblem(); problem != "" {
+			e.vlog("  capture: DROPPED; the election cannot be resolved: %s", problem)
+			e.warnThrottled(&e.lastUndecidedWarn, "openbox: %s. Until that is readable this lane "+
+				"cannot know whether it is this machine's producer, so captured model calls are "+
+				"being DROPPED -- which is NOT the same as another lane winning. Re-run `openbox "+
+				"init` so the unit carries --settings, or pass --elected. The model calls "+
+				"themselves are unaffected.", problem)
+			return
+		}
+		e.vlog("  capture: SKIPPED; another lane is this machine's elected model-call producer")
+		return
+	}
+
 	did := e.developerDID()
 	if did == "" {
 		e.vlog("  capture: SKIPPED; no developer DID configured (run `openbox auth`)")
@@ -120,9 +166,10 @@ func (e *Emitter) Emit(ctx context.Context, c gateway.Captured) {
 	}
 	if sessionID == "" {
 		e.vlog("  capture: SKIPPED; the call carries no %s header, so it cannot be attributed to a session", sessionHeader)
-		if isModelCall(c) {
-			e.warnThrottled(&e.lastNoSessionWarn, "openbox gateway: relayed model calls carry no %s header, so nothing can be attributed to a session and no governance events are being sent. "+
-				"The model calls themselves are unaffected.", sessionHeader)
+		// isModelCall stays permissive for the WARN decision; the class decides care.
+		if class := classifyPath(c.HTTPURL); isModelCall(c) && class.WarnsOnMissingSession() {
+			e.warnThrottled(e.noSessionWarnClock(class), "openbox gateway: no %s header on %s, so nothing can be attributed to a session and no governance event is being sent. "+
+				"The model calls themselves are unaffected.", sessionHeader, class.Subject(c.HTTPURL))
 		}
 		return
 	}
@@ -132,18 +179,31 @@ func (e *Emitter) Emit(ctx context.Context, c gateway.Captured) {
 		DeveloperDID: did,
 		AgentID:      usableAgentID(c.RequestHeaders[agentHeader]),
 	}
-	ev, err := EventFor(e.Lane, id, e.requestID(c), e.now(), c)
+	requestID := e.requestID(c)
+	events, err := EventsFor(e.Lane, id, requestID, e.now(), c)
 	if err != nil {
 		e.vlog("  capture: DROPPED; %v", err)
 		e.warn("openbox: dropped a captured call: %v", err)
 		return
 	}
-	if err := e.Spool.Append(ev); err != nil {
-		e.vlog("  capture: DROPPED; %v", err)
-		e.warn("openbox gateway: dropped event %s: %v", ev.EventID, err)
+	// Order matters twice: the spool delivers in append order, so Started lands
+	// first; and the loop STOPS on a failure, because appending Completed after
+	// Started failed files the single-sided activity this pairing eliminates.
+	appended := 0
+	for _, ev := range events {
+		if err := e.Spool.Append(ev); err != nil {
+			e.vlog("  capture: DROPPED; %v", err)
+			e.warn("openbox gateway: dropped event %s (%s) for activity %s: %v. %s",
+				ev.EventID, ev.EventType, requestID, err, abandonNote(appended))
+			break
+		}
+		appended++
+	}
+	if appended < len(events) {
 		return
 	}
-	e.vlog("  capture: recorded session=%s activity=%s:%s:%s", sessionID, sessionID, e.Lane.Name, requestIDOf(ev))
+	e.vlog("  capture: recorded session=%s activity=%s:%s:%s as %d event(s) in %s",
+		sessionID, sessionID, e.Lane.Name, requestID, len(events), c.Elapsed().Round(time.Millisecond))
 	if e.Flush != nil {
 		e.Flush(sessionID)
 	}
@@ -168,17 +228,6 @@ func (e *Emitter) requestID(c gateway.Captured) string {
 			"-" + strconv.FormatInt(e.now().UTC().UnixNano(), 36)
 	}
 	return e.Lane.IDPrefix + hex.EncodeToString(b[:])
-}
-
-func requestIDOf(ev client.DevEvent) string {
-	switch {
-	case ev.ProxyRequestID != "":
-		return ev.ProxyRequestID
-	case ev.GatewayRequestID != "":
-		return ev.GatewayRequestID
-	default:
-		return ""
-	}
 }
 
 func (e *Emitter) now() time.Time {
@@ -244,4 +293,12 @@ func printableASCII(s string, n int) bool {
 		}
 	}
 	return true
+}
+
+// abandonNote says what a failed append cost, which differs by which half failed.
+func abandonNote(appended int) string {
+	if appended == 0 {
+		return "the whole activity is abandoned, so no half-record is stored"
+	}
+	return "its opening half is already spooled and will store UNPAIRED"
 }

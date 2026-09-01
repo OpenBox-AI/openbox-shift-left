@@ -68,40 +68,91 @@ type Identity struct {
 	AgentID string
 }
 
-// EventFor builds the governance event for one relayed model call.
-// Client/payload.go attaches a gateway span only under that case; any other
-// event type is accepted, spooled and POSTed while silently carrying none of
-// the evidence; the failure would look exactly like a working gateway.
-func EventFor(lane Lane, id Identity, requestID string, at time.Time, c gateway.Captured) (client.DevEvent, error) {
+// EventsFor builds one relayed call's two events from one call site, so there is
+// no orphan half. The Started half is retroactive, which is safe: core pairs on
+// activity_id at ingest, never on arrival order.
+func EventsFor(lane Lane, id Identity, requestID string, at time.Time, c gateway.Captured) ([]client.DevEvent, error) {
 	if !lane.valid() {
-		return client.DevEvent{}, fmt.Errorf("gatewayemit: no lane configured; "+
+		return nil, fmt.Errorf("gatewayemit: no lane configured; "+
 			"an event cannot be attributed to a producer (%+v)", lane)
 	}
-	ev := client.DevEvent{
-		SchemaVersion: client.SchemaVersion,
-		EventType:     client.EventTurnCompleted,
-		SessionID:     id.SessionID,
-		DeveloperDID:  id.DeveloperDID,
-		AgentID:       id.AgentID,
-		Timestamp:     at.UTC().Format(time.RFC3339Nano),
-		Tool:          client.Tool{Name: "claude-code", Kind: client.ToolShell},
-		Span: &client.Span{
-			SemanticType:          "llm_completion",
-			Stage:                 "completed",
+	class := classifyPath(c.HTTPURL)
+	started, ended := boundsOf(c, at)
+
+	// Note what is NOT here: the HEADERS. Nothing read them, and they were the
+	// highest-risk class this client carried.
+	span := func(stage string) *client.Span {
+		return &client.Span{
+			SemanticType:          semanticTypeFor(class),
+			Stage:                 stage,
 			HTTPMethod:            c.HTTPMethod,
 			HTTPURL:               c.HTTPURL,
 			HTTPStatus:            c.HTTPStatus,
 			CredentialFingerprint: c.CredentialFingerprint,
-			RequestHeaders:        c.RequestHeaders,
-			ResponseHeaders:       c.ResponseHeaders,
-			RequestBody:           c.RequestBody,
-			ResponseBody:          c.ResponseBody,
-		},
+		}
 	}
-	lane.setDiscriminator(&ev, requestID)
+	half := func(eventType client.EventType, stage string, ts time.Time) client.DevEvent {
+		return client.DevEvent{
+			SchemaVersion: client.SchemaVersion,
+			EventType:     eventType,
+			SessionID:     id.SessionID,
+			DeveloperDID:  id.DeveloperDID,
+			AgentID:       id.AgentID,
+			Tool:          client.Tool{Name: "claude-code", Kind: client.ToolShell},
+			ActivityType:  class.ActivityType(),
+			Timestamp:     ts.Format(time.RFC3339Nano),
+			StartedAt:     started.Format(time.RFC3339Nano),
+			Span:          span(stage),
+		}
+	}
 
-	ev.EventID = eventID(lane.IDPrefix, id.SessionID, requestID, string(ev.EventType), ev.Timestamp, c.HTTPMethod, c.HTTPURL)
-	return ev, nil
+	startEv := half(client.EventTurnStarted, "started", started)
+	doneEv := half(client.EventTurnCompleted, "completed", ended)
+	doneEv.EndedAt = ended.Format(time.RFC3339Nano)
+
+	// Request on Started, response on Completed: where core stores them.
+	if class.CarriesContent() {
+		startEv.Span.RequestBody = c.RequestBody
+		doneEv.Span.ResponseBody = c.ResponseBody
+	}
+
+	return finishPair(lane, requestID, startEv, doneEv), nil
+}
+
+// boundsOf takes both ends from the relay's clock, falling back to the emit time
+// where it measured none.
+func boundsOf(c gateway.Captured, at time.Time) (started, ended time.Time) {
+	started, ended = c.StartedAt, c.EndedAt
+	if started.IsZero() {
+		started = at
+	}
+	if !ended.After(started) {
+		ended = at
+	}
+	if !ended.After(started) {
+		ended = started
+	}
+	return started.UTC(), ended.UTC()
+}
+
+// finishPair stamps the discriminator, which makes both halves share one
+// activity_id, and the idempotency key, which the event type keeps distinct.
+func finishPair(lane Lane, requestID string, halves ...client.DevEvent) []client.DevEvent {
+	out := make([]client.DevEvent, 0, len(halves))
+	for _, ev := range halves {
+		lane.setDiscriminator(&ev, requestID)
+		ev.EventID = eventID(lane.IDPrefix, ev.SessionID, requestID, string(ev.EventType),
+			ev.Timestamp, ev.Span.HTTPMethod, ev.Span.HTTPURL)
+		out = append(out, ev)
+	}
+	return out
+}
+
+func semanticTypeFor(class PathClass) string {
+	if class == ClassCompletion {
+		return client.ActivityTypeLLMCompletion
+	}
+	return "internal"
 }
 
 // eventID derives the idempotency key (INV-5). Only structural fields feed the

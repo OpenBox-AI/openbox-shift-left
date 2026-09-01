@@ -28,6 +28,10 @@ func newTestEmitter(t *testing.T) (*Emitter, hookflow.Spool, *bytes.Buffer) {
 		Spool: spool,
 		DID:   func() string { return testDID },
 		Warn:  func(format string, args ...any) { fmt.Fprintf(&warnings, format, args...) },
+		// Elected must be set explicitly, here and in production: a nil gate is a
+		// wiring defect rather than a setting, because an emitter that cannot tell
+		// whether it is this machine's producer must not guess in either direction.
+		Elected: func() bool { return true },
 	}
 	return em, spool, &warnings
 }
@@ -70,13 +74,16 @@ func TestEmitSpoolsUnderTheSessionTheHeaderNames(t *testing.T) {
 	em.Emit(context.Background(), capturedWithSession("sess-from-header"))
 
 	evs := spooledEvents(t, spool, "sess-from-header")
-	if len(evs) != 1 {
-		t.Fatalf("spooled %d events under the header's session, want 1", len(evs))
+	// Two, and in this order: one relayed call is one activity with two halves,
+	// and the spool delivers in append order, so the Started half reaches the
+	// control plane before its Completed half is looked up by activity_id.
+	if len(evs) != 2 {
+		t.Fatalf("spooled %d events under the header's session, want the pair", len(evs))
 	}
-	if evs[0].EventType != client.EventTurnCompleted {
-		t.Errorf("EventType = %q", evs[0].EventType)
+	if evs[0].EventType != client.EventTurnStarted || evs[1].EventType != client.EventTurnCompleted {
+		t.Errorf("EventTypes = %q then %q, want TurnStarted then TurnCompleted", evs[0].EventType, evs[1].EventType)
 	}
-	if evs[0].Span == nil || evs[0].Span.HTTPStatus != 200 {
+	if evs[1].Span == nil || evs[1].Span.HTTPStatus != 200 {
 		t.Error("the observed exchange did not survive the spool round-trip")
 	}
 	if evs[0].GatewayRequestID == "" {
@@ -146,7 +153,7 @@ func TestSessionHeaderLookupIsCanonical(t *testing.T) {
 	c := sampleCaptured()
 	c.RequestHeaders = map[string]string{"X-Claude-Code-Session-Id": "sess-canon"}
 	em.Emit(context.Background(), c)
-	if len(spooledEvents(t, spool, "sess-canon")) != 1 {
+	if len(spooledEvents(t, spool, "sess-canon")) != 2 {
 		t.Error("canonical header key was not matched")
 	}
 }
@@ -161,13 +168,19 @@ func TestAgentIDIsBoundWhenPresent(t *testing.T) {
 	em.Emit(context.Background(), c)
 
 	evs := spooledEvents(t, spool, "sess-agent")
-	if len(evs) != 1 || evs[0].AgentID != "agent-7" {
-		t.Fatalf("AgentID not bound: %+v", evs)
+	if len(evs) != 2 {
+		t.Fatalf("spooled %d events, want the pair", len(evs))
+	}
+	for _, ev := range evs {
+		// Both halves, or the two rows of one activity disagree about whose it is.
+		if ev.AgentID != "agent-7" {
+			t.Errorf("%s: AgentID not bound: %+v", ev.EventType, ev)
+		}
 	}
 
 	em2, spool2, warnings2 := newTestEmitter(t)
 	em2.Emit(context.Background(), capturedWithSession("sess-noagent"))
-	if evs := spooledEvents(t, spool2, "sess-noagent"); len(evs) != 1 || evs[0].AgentID != "" {
+	if evs := spooledEvents(t, spool2, "sess-noagent"); len(evs) != 2 || evs[0].AgentID != "" || evs[1].AgentID != "" {
 		t.Errorf("a call with no agent header did not emit cleanly: %+v", evs)
 	}
 	if warnings.String() != "" || warnings2.String() != "" {
@@ -208,14 +221,21 @@ func TestUnusableUpstreamRequestIDFallsBack(t *testing.T) {
 			em.Emit(context.Background(), c)
 
 			evs := spooledEvents(t, spool, "sess-bad-id")
-			if len(evs) != 1 {
-				t.Fatalf("spooled %d events", len(evs))
+			if len(evs) != 2 {
+				t.Fatalf("spooled %d events, want the pair", len(evs))
 			}
-			if evs[0].GatewayRequestID == bad {
-				t.Errorf("unusable upstream id was used verbatim: %q", bad)
+			for _, ev := range evs {
+				if ev.GatewayRequestID == bad {
+					t.Errorf("%s: unusable upstream id was used verbatim: %q", ev.EventType, bad)
+				}
+				if !strings.HasPrefix(ev.GatewayRequestID, "gw-") {
+					t.Errorf("%s: no fallback id was minted: %q", ev.EventType, ev.GatewayRequestID)
+				}
 			}
-			if !strings.HasPrefix(evs[0].GatewayRequestID, "gw-") {
-				t.Errorf("no fallback id was minted: %q", evs[0].GatewayRequestID)
+			// One minted id for the call, not one per half, or the two halves land in
+			// different activities and neither is ever paired.
+			if evs[0].GatewayRequestID != evs[1].GatewayRequestID {
+				t.Errorf("the halves got different fallback ids (%q, %q)", evs[0].GatewayRequestID, evs[1].GatewayRequestID)
 			}
 		})
 	}
@@ -231,8 +251,13 @@ func TestUsableUpstreamRequestIDIsPreferred(t *testing.T) {
 	em.Emit(context.Background(), c)
 
 	evs := spooledEvents(t, spool, "sess-good-id")
-	if len(evs) != 1 || evs[0].GatewayRequestID != "req_011CSabcDEF123" {
-		t.Errorf("provider request id not used: %+v", evs)
+	if len(evs) != 2 {
+		t.Fatalf("spooled %d events, want the pair", len(evs))
+	}
+	for _, ev := range evs {
+		if ev.GatewayRequestID != "req_011CSabcDEF123" {
+			t.Errorf("%s: provider request id not used: %+v", ev.EventType, ev)
+		}
 	}
 }
 
@@ -275,11 +300,13 @@ func TestDIDIsResolvedLazilySoAuthTakesEffectWithoutARestart(t *testing.T) {
 	did = testDID
 	em.Emit(context.Background(), capturedWithSession("sess-1"))
 	evs := spooledEvents(t, spool, "sess-1")
-	if len(evs) != 1 {
-		t.Fatalf("spooled %d events after the DID appeared, want 1; a restart should not be required", len(evs))
+	if len(evs) != 2 {
+		t.Fatalf("spooled %d events after the DID appeared, want the pair; a restart should not be required", len(evs))
 	}
-	if evs[0].DeveloperDID != testDID {
-		t.Errorf("DeveloperDID = %q", evs[0].DeveloperDID)
+	for _, ev := range evs {
+		if ev.DeveloperDID != testDID {
+			t.Errorf("%s: DeveloperDID = %q", ev.EventType, ev.DeveloperDID)
+		}
 	}
 }
 
@@ -340,11 +367,12 @@ func TestUnusableSessionHeaderIsRefusedAndReported(t *testing.T) {
 func TestAUsableSessionHeaderStillSpools(t *testing.T) {
 	spool := hookflow.Spool{Dir: t.TempDir()}
 	e := &Emitter{
-		Lane:  LaneGateway,
-		Spool: spool,
-		DID:   func() string { return "did:aip:x" },
-		Warn:  func(string, ...any) {},
-		Now:   func() time.Time { return time.Unix(0, 0).UTC() },
+		Lane:    LaneGateway,
+		Spool:   spool,
+		DID:     func() string { return "did:aip:x" },
+		Warn:    func(string, ...any) {},
+		Now:     func() time.Time { return time.Unix(0, 0).UTC() },
+		Elected: func() bool { return true },
 	}
 	e.Emit(context.Background(), gateway.Captured{
 		HTTPMethod:     "POST",

@@ -7,6 +7,7 @@
   "run_id": "sess-golden-0001",
   "workflow_type": "developer-session",
   "activity_output": {
+    "content": "I refactored the spool; all 11 modules are green.",
     "model": "claude-opus-4-8",
     "thinking": "The spool writer is called from two hooks, so the lock has to be held across the rename.",
     "usage": {
@@ -31,24 +32,5 @@
     },
     "tool_name": "claude-code",
     "turn_index": 0
-  },
-  "spans": [
-    {
-      "span_id": "d194640197263e33",
-      "trace_id": "2c7ecf96574db5a80a23592c4573d446",
-      "name": "llm_completion",
-      "kind": "CLIENT",
-      "stage": "completed",
-      "start_time": 1785488400000000000,
-      "end_time": 1785488412000000000,
-      "attributes": {
-        "http.method": "POST",
-        "http.url": "https://api.anthropic.com/v1/messages",
-        "openbox.span_synthetic": true
-      },
-      "response_body": "{\"choices\":[{\"message\":{\"content\":\"I refactored the spool; all 11 modules are green.\"}}]}",
-      "semantic_type": "llm_completion"
-    }
-  ],
-  "span_count": 1
+  }
 }
