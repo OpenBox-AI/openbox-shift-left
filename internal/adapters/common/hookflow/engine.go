@@ -3,6 +3,7 @@ package hookflow
 import (
 	"context"
 	"path/filepath"
+	"time"
 
 	"github.com/openbox-ai/openbox-shift-left/internal/client"
 )
@@ -29,6 +30,14 @@ type Engine struct {
 	// consumed for per-turn usage extraction, so repeated turn-boundary hook
 	// firings never re-report the same turn's tokens.
 	Turns TurnCursor
+	// Log reports what delivery could not do. Nil ⇒ silent, never in production.
+	Log func(format string, args ...any)
+}
+
+func (e *Engine) logf(format string, args ...any) {
+	if e.Log != nil {
+		e.Log(format, args...)
+	}
 }
 
 // NewEngine builds an Engine spooling under dir and writing Advisory records
@@ -81,21 +90,118 @@ func (e *Engine) ThreadDuration(ev *client.DevEvent) {
 // sweeps carry-over (recovery) files left undelivered by earlier flushes. It
 // is bounded by ctx (the caller caps session-end flush so teardown is never
 // delayed unduly).
+//
+// It owns the session's debounce lock, moved here from the two adapter callers
+// because nothing could hold the choreography while it was duplicated: drainFile
+// renames the file aside BEFORE delivering and Maybe returns silently on a fresh
+// lock, so an append during a drain is invisible to both. 81 events sat that way.
 func (e *Engine) Flush(ctx context.Context, sessionID string, em Emitter) (int, error) {
 	fn := e.emitFunc(em)
 	carried := e.Spool.recoveryFiles()
-	n, err := e.Spool.FlushSession(ctx, sessionID, fn)
-	swept, sweepErr := e.Spool.sweepRecovery(ctx, carried, sessionID, fn)
+
+	total, err := e.drainUntilEmpty(ctx, sessionID, fn)
+
+	swept, sweepErr := e.speaking().sweepRecovery(ctx, carried, sessionID, fn)
 	if err == nil {
 		err = sweepErr
 	}
-	return n + swept, err
+	return total + swept, err
 }
 
-// FlushAll drains every spooled session (the `flush` subcommand / CLI catch-
-// up).
+func (e *Engine) drainUntilEmpty(ctx context.Context, sessionID string, fn FlushFunc) (int, error) {
+	spool := e.speaking()
+	total := 0
+	var err error
+	// Its own scope so the release is DEFERRED: a panic would strand the lock.
+	func() {
+		defer e.Spool.ReleaseFlushLock(sessionID)
+		for pass := 1; ; pass++ {
+			// Per pass, not once: a drain outliving the debounce window would otherwise
+			// let Maybe's stale-lock takeover spawn a competing flusher mid-drain.
+			e.Spool.TouchFlushLock(sessionID)
+
+			var n int
+			n, err = spool.FlushSession(ctx, sessionID, fn)
+			total += n
+			if err != nil {
+				return
+			}
+			remaining := e.Spool.PendingCount(sessionID)
+			if remaining == 0 {
+				return
+			}
+			if pass >= MaxDrainPasses {
+				e.logf("spool: %s: %d event(s) remain after %d drain passes; they stay spooled for the sweep",
+					sessionID, remaining, MaxDrainPasses)
+				return
+			}
+		}
+	}()
+
+	// One pass AFTER the release closes the sliver; a double drain is harmless.
+	if err == nil && e.Spool.PendingCount(sessionID) > 0 {
+		n, lateErr := spool.FlushSession(ctx, sessionID, fn)
+		total += n
+		err = lateErr
+	}
+	return total, err
+}
+
+// FlushAll drains every spooled session, each until empty as Flush does.
 func (e *Engine) FlushAll(ctx context.Context, em Emitter) (int, error) {
-	return e.Spool.FlushAll(ctx, e.emitFunc(em))
+	return e.speaking().FlushAll(ctx, e.emitFunc(em))
+}
+
+// speaking attaches the engine's voice to a COPY of its spool: two flushes can
+// run concurrently, so assigning to e.Spool would be a data race.
+func (e *Engine) speaking() Spool {
+	s := e.Spool
+	s.Log = e.Log
+	return s
+}
+
+// FlushOrSweep is the whole of what a `flush` invocation does, so an adapter does
+// not re-derive it. An empty sessionID sweeps every session, THEN retires: a
+// deliverable file must be delivered rather than deleted for being old.
+func (e *Engine) FlushOrSweep(ctx context.Context, sessionID string, em Emitter) (int, error) {
+	if sessionID != "" {
+		return e.Flush(ctx, sessionID, em)
+	}
+	n, err := e.FlushAll(ctx, em)
+	if err != nil {
+		e.logf("spool: the sweep ended early (%v); skipping retirement, because a file "+
+			"this pass never reached must not be deleted for being old", err)
+		return n, err
+	}
+
+	// Retirement gets its OWN budget: sharing one deadline meant a heavy backlog
+	// spent it all, so the machines that most needed retirement never got it.
+	retireCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), retireBudget)
+	defer cancel()
+	if _, retireErr := e.Retire(retireCtx); retireErr != nil {
+		err = retireErr
+	}
+	return n, err
+}
+
+// retireBudget bounds the retirement pass. Generous for what it does -- a ReadDir,
+// a line count and an unlink per stale file -- and unrelated to the flush budget.
+const retireBudget = 5 * time.Second
+
+// Retire deletes spool files too old to deliver, loudly.
+func (e *Engine) Retire(ctx context.Context) (int, error) {
+	if ctx.Err() != nil {
+		return 0, ctx.Err()
+	}
+	retired, err := e.speaking().RetireStale(time.Now(), RetireSpoolAfter)
+	for _, r := range retired {
+		e.logf("spool: RETIRED %s: past the %d-day retention age, the events in it were never delivered "+
+			"and are now gone", r, int(RetireSpoolAfter.Hours()/24))
+	}
+	if err != nil {
+		e.logf("spool: retirement incomplete: %v", err)
+	}
+	return len(retired), err
 }
 
 // emitFunc adapts an Emitter to a FlushFunc. It emits the event and then

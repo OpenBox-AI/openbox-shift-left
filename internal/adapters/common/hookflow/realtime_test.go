@@ -51,8 +51,28 @@ func TestRealtimeMaybe_ClaimsLockAndSpawns(t *testing.T) {
 	if sessEnv != EnvFlushSession+"=sess-1" {
 		t.Errorf("flusher env = %q, want session id via %s", sessEnv, EnvFlushSession)
 	}
-	if cmd.Stdin != nil || cmd.Stdout != nil || cmd.Stderr != nil {
-		t.Error("flusher must be fully detached from the hook's stdio")
+	// The flusher must never touch the HOOK's stdio -- a SessionStart or
+	// UserPromptSubmit hook's stdout injects whatever appears on it (INV-3) -- but
+	// it does need a voice. Discarding its output entirely made a flusher that
+	// died before its rename indistinguishable from one that was never spawned,
+	// which is why two missed flush triggers had to be diagnosed from file
+	// birthtimes. A file, not the parent's descriptors: this child is detached and
+	// outlives the hook process.
+	if cmd.Stdin != nil {
+		t.Error("flusher stdin must stay closed")
+	}
+	if cmd.Stdout == os.Stdout || cmd.Stderr == os.Stderr || cmd.Stdout == os.Stderr {
+		t.Error("flusher stdio is wired to the hook's own descriptors; a hook's stdout injects what appears on it")
+	}
+	for name, w := range map[string]any{"stdout": cmd.Stdout, "stderr": cmd.Stderr} {
+		f, ok := w.(*os.File)
+		if !ok {
+			t.Errorf("flusher %s is %T, want the spool's flusher log", name, w)
+			continue
+		}
+		if f.Name() != tr.Spool.FlusherLogPath() {
+			t.Errorf("flusher %s writes to %q, want %q", name, f.Name(), tr.Spool.FlusherLogPath())
+		}
 	}
 	if _, err := os.Stat(tr.Spool.FlushLockPath("sess-1")); err != nil {
 		t.Errorf("debounce lock not left in place: %v", err)

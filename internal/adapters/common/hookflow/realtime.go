@@ -97,7 +97,15 @@ func (t RealtimeTrigger) Maybe(logger *log.Logger, sessionID string) {
 
 	cmd := exec.Command(self, "hook", t.Provider, "flush")
 	cmd.Env = append(os.Environ(), EnvFlushSession+"="+sessionID)
-	cmd.Stdin, cmd.Stdout, cmd.Stderr = nil, nil, nil
+	cmd.Stdin = nil
+	// The flusher gets a voice: a file, not the parent's stderr, because this child
+	// outlives the hook process.
+	if log := t.Spool.openFlusherLog(); log != nil {
+		defer log.Close()
+		cmd.Stdout, cmd.Stderr = log, log
+	} else {
+		cmd.Stdout, cmd.Stderr = nil, nil
+	}
 	cmd.SysProcAttr = detachAttr()
 	start := t.Start
 	if start == nil {

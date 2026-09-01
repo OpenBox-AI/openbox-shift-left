@@ -24,6 +24,15 @@ import (
 // That is the rule the double-store bug broke.
 type Spool struct {
 	Dir string
+	// Log reports a loss the spool cannot avoid. Nil ⇒ silent. Reported here rather
+	// than diffed by a caller: the discard log is size-capped and RESTARTS.
+	Log func(format string, args ...any)
+}
+
+func (s Spool) logf(format string, args ...any) {
+	if s.Log != nil {
+		s.Log(format, args...)
+	}
 }
 
 // Append writes one event as a single JSON line to the session's spool file.
@@ -185,13 +194,18 @@ func (s Spool) FlushAll(ctx context.Context, fn FlushFunc) (int, error) {
 		var n int
 		switch {
 		case strings.Contains(name, ".flushing."):
+			// A live drain holds its rotated file all through delivery, and nothing dedupes.
+			if info, statErr := e.Info(); statErr != nil || time.Since(info.ModTime()) < ReclaimOrphanAfter {
+				continue
+			}
 			claimed := filepath.Join(s.Dir, name) + ".reclaim." + rand.Text()
 			if os.Rename(filepath.Join(s.Dir, name), claimed) != nil {
 				continue // lost the race to another drain, or already gone
 			}
 			n, err = s.drainRotated(ctx, orphanBasePath(s.Dir, name), claimed, fn)
 		case strings.HasSuffix(name, ".jsonl"):
-			n, err = s.drainFile(ctx, filepath.Join(s.Dir, name), fn)
+			// Until empty: a sweep is a drain, and the window does not care who opened it.
+			n, err = s.drainFileUntilEmpty(ctx, filepath.Join(s.Dir, name), fn)
 		default:
 			continue
 		}
@@ -222,7 +236,29 @@ func (s Spool) drainFile(ctx context.Context, path string, fn FlushFunc) (int, e
 		}
 		return 0, fmt.Errorf("spool rotate: %w", err)
 	}
+	now := time.Now()
+	_ = os.Chtimes(rotated, now, now)
 	return s.drainRotated(ctx, path, rotated, fn)
+}
+
+func (s Spool) drainFileUntilEmpty(ctx context.Context, path string, fn FlushFunc) (int, error) {
+	total := 0
+	for pass := 1; pass <= MaxDrainPasses; pass++ {
+		n, err := s.drainFile(ctx, path, fn)
+		total += n
+		if err != nil {
+			return total, err
+		}
+		remaining := countLines(path)
+		if remaining == 0 {
+			return total, nil
+		}
+		if pass == MaxDrainPasses {
+			s.logf("spool: %s: %d event(s) remain after %d drain passes; they stay spooled for the next sweep",
+				filepath.Base(path), remaining, MaxDrainPasses)
+		}
+	}
+	return total, nil
 }
 
 func (s Spool) drainRotated(ctx context.Context, basePath, file string, fn FlushFunc) (int, error) {
@@ -241,6 +277,7 @@ func (s Spool) drainRotated(ctx context.Context, basePath, file string, fn Flush
 	var undelivered [][]byte
 	for i, line := range lines {
 		if ctx.Err() != nil {
+			// The SAME attempt: a deadline refused nothing, and advancing deletes backlogs.
 			s.writeRecovery(basePath, append(undelivered, lines[i:]...), attempt)
 			return n, ctx.Err()
 		}
@@ -257,7 +294,7 @@ func (s Spool) drainRotated(ctx context.Context, basePath, file string, fn Flush
 		}
 		n++
 	}
-	s.writeRecovery(basePath, undelivered, attempt)
+	s.writeRecovery(basePath, undelivered, attempt+1)
 	return n, nil
 }
 
@@ -266,6 +303,9 @@ func (s Spool) drainRotated(ctx context.Context, basePath, file string, fn Flush
 // client cannot see, or referencing a deleted agent; would be retried on every
 // flush forever, and each retry costs a request on a developer's machine.
 const MaxRecoveryAttempts = 5
+
+// ReclaimOrphanAfter bounds "no drain could still hold this"; drains take seconds.
+const ReclaimOrphanAfter = 5 * time.Minute
 
 // RecoveryAttempt reads the attempt count encoded in a recovery filename
 // (`<session>.rec<N>-<id>.jsonl`). A spool or orphan file that has never been
@@ -292,13 +332,17 @@ func RecoveryAttempt(name string) int {
 // Best-effort; an unreadable directory reports 0, because this feeds a
 // telemetry field and must never fail a session.
 func (s Spool) UndeliveredCount() int {
+	return s.sumLines(IsRecoveryFile)
+}
+
+func (s Spool) sumLines(match func(name string) bool) int {
 	entries, err := os.ReadDir(s.Dir)
 	if err != nil {
 		return 0
 	}
 	total := 0
 	for _, e := range entries {
-		if e.IsDir() || !IsRecoveryFile(e.Name()) {
+		if e.IsDir() || !match(e.Name()) {
 			continue
 		}
 		data, err := os.ReadFile(filepath.Join(s.Dir, e.Name()))
@@ -323,12 +367,17 @@ func recoveryStem(basePath string) string {
 
 // writeRecovery best-effort (observe): a write failure only loses telemetry,
 // never blocks anything.
-func (s Spool) writeRecovery(basePath string, lines [][]byte, attempt int) {
+func (s Spool) writeRecovery(basePath string, lines [][]byte, next int) {
 	if len(lines) == 0 {
 		return
 	}
-	next := attempt + 1
+	if next < 1 {
+		next = 1
+	}
 	if next > MaxRecoveryAttempts {
+		// The bound is right; discarding in silence was not.
+		s.recordDiscard(basePath, len(lines),
+			fmt.Sprintf("past %d delivery attempts", MaxRecoveryAttempts))
 		return
 	}
 	stem := recoveryStem(basePath) + ".rec" + strconv.Itoa(next) + "-" + rand.Text()
@@ -342,12 +391,16 @@ func (s Spool) writeRecovery(basePath string, lines [][]byte, attempt int) {
 	// a sweep could read a prefix, skip the torn tail as corrupt, remove the
 	// file, and the rest would follow into the removed inode.
 	tmp := stem + ".partial"
-	if os.WriteFile(tmp, buf.Bytes(), 0o600) != nil {
+	if err := os.WriteFile(tmp, buf.Bytes(), 0o600); err != nil {
 		_ = os.Remove(tmp)
+		s.recordDiscard(basePath, len(lines),
+			fmt.Sprintf("the carry-over file could not be written: %v", err))
 		return
 	}
-	if os.Rename(tmp, stem+".jsonl") != nil {
+	if err := os.Rename(tmp, stem+".jsonl"); err != nil {
 		_ = os.Remove(tmp)
+		s.recordDiscard(basePath, len(lines),
+			fmt.Sprintf("the carry-over file could not be renamed in: %v", err))
 	}
 }
 

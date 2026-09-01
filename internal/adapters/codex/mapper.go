@@ -9,6 +9,7 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/internal/client"
 
 	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/devconfig"
+	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/hookflow"
 )
 
 const provider = "codex"
@@ -50,23 +51,8 @@ type Mapper struct {
 	Evidence *EvidenceState
 }
 
-// EvidenceState is the completeness of a session's telemetry as the client can
-// see it at session end.
-type EvidenceState struct {
-	Undelivered int
-}
-
-func (e EvidenceState) metadata() map[string]any {
-	state := "complete"
-	if e.Undelivered > 0 {
-		state = "degraded"
-	}
-	m := map[string]any{"evidence_state": state}
-	if e.Undelivered > 0 {
-		m["evidence_undelivered"] = e.Undelivered
-	}
-	return m
-}
+// EvidenceState is a session's telemetry completeness. An alias, not a copy.
+type EvidenceState = hookflow.EvidenceState
 
 // FinopsUsage is the usage rollup the finops reader produces from a rollout:
 // the four token counts, plus the model id; the ONE string the projection
@@ -150,7 +136,7 @@ func (m Mapper) Map(hook HookName, e *HookEvent) (client.DevEvent, bool) {
 			ev.Model = capStr(m.Finops.Model)
 		}
 		if m.Evidence != nil {
-			ev.Metadata = mergeMetadata(ev.Metadata, m.Evidence.metadata())
+			ev.Metadata = mergeMetadata(ev.Metadata, m.Evidence.Metadata())
 		}
 
 	default:

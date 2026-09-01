@@ -413,37 +413,43 @@ func TestEnforcementConformance(t *testing.T) {
 		return *bodies
 	}
 
-	t.Run("C24 a turn span carries the assistant text only with content capture on", func(t *testing.T) {
+	// The subject moved, and it moved because the old one never worked: the
+	// assistant text rode a synthesized span in spans[], and core parses that
+	// array on the normal path and then DISCARDS it -- persistence is gated on
+	// hook_trigger plus a pre-existing event row, which this client deliberately
+	// never sets. So this case used to assert, in detail, the shape of something
+	// that was thrown away on arrival. The text now rides activity_output, which
+	// maps to a dedicated column and round-trips.
+	t.Run("C24 a turn carries the assistant text on activity_output only with content capture on", func(t *testing.T) {
 		const answer = "I refactored the spool and all 11 modules are green."
 		bodies := stopThenFlush(t, "s-span", turnTranscript(t), answer, "1")
 
 		var turn string
 		for _, b := range bodies {
-			if strings.Contains(b, `"activity_type":"llm_completion"`) && strings.Contains(b, `"spans"`) {
+			if strings.Contains(b, `"event_type":"ActivityCompleted"`) &&
+				strings.Contains(b, `"activity_type":"llm_completion"`) {
 				turn = b
 			}
 		}
 		if turn == "" {
-			t.Fatalf("no turn payload carried a span; bodies=%v", bodies)
-		}
-		for _, want := range []string{
-			`"span_count":1`,
-			`"stage":"completed"`,
-			`"semantic_type":"llm_completion"`,
-			`"http.method":"POST"`,
-			`api.anthropic.com`,
-			`"openbox.span_synthetic":true`,
-		} {
-			if !strings.Contains(turn, want) {
-				t.Errorf("turn span missing %s; core would classify it as something else and "+
-					"the extractor would silently yield \"\": %s", want, turn)
-			}
+			t.Fatalf("no completed turn payload was sent; bodies=%v", bodies)
 		}
 		if !strings.Contains(turn, answer) {
-			t.Errorf("the assistant text is not in the span: %s", turn)
+			t.Errorf("the assistant text did not reach the wire: %s", turn)
 		}
-		if strings.Contains(turn, `"hook_trigger"`) {
-			t.Errorf("turn payload carries hook_trigger alongside spans: %s", turn)
+		if !strings.Contains(turn, `"activity_output":{"content":"`) {
+			t.Errorf("the assistant text is not under activity_output.content, which is the "+
+				"only field that persists: %s", turn)
+		}
+		if strings.Contains(turn, `"spans"`) || strings.Contains(turn, `"span_count"`) {
+			t.Errorf("a span still ships; the activity IS the span for a model turn: %s", turn)
+		}
+
+		// The other half of "only with content capture on".
+		for _, b := range stopThenFlush(t, "s-span-off", turnTranscript(t), answer, "0") {
+			if strings.Contains(b, answer) {
+				t.Errorf("the assistant text egressed with content capture OFF: %s", b)
+			}
 		}
 	})
 
@@ -477,7 +483,7 @@ func TestEnforcementConformance(t *testing.T) {
 
 		var turn string
 		for _, b := range bodies {
-			if strings.Contains(b, `"spans"`) {
+			if strings.Contains(b, `"activity_output":{"content":"`) {
 				turn = b
 			}
 			if strings.Contains(b, awsSecret) {
@@ -486,10 +492,10 @@ func TestEnforcementConformance(t *testing.T) {
 			}
 		}
 		if turn == "" {
-			t.Fatal("no span was sent at all; the case proves nothing if the text never egressed")
+			t.Fatal("the assistant text never egressed at all, so the case proves nothing")
 		}
 		if !strings.Contains(turn, "OPENBOX_REDACTED") {
-			t.Errorf("no redaction placeholder in the span body: %s", turn)
+			t.Errorf("no redaction placeholder where the assistant text landed: %s", turn)
 		}
 	})
 

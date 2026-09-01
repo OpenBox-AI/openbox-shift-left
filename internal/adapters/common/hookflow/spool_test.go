@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/openbox-ai/openbox-shift-left/internal/client"
 )
@@ -145,13 +146,19 @@ func TestSpoolCtxCancelPersistsRemainder(t *testing.T) {
 }
 
 // TestSpoolAdoptsOrphan is the F2 guard: a `.flushing.<id>` file orphaned by a
-// killed drain is re-drained by FlushAll, not stranded forever.
+// killed drain is re-drained by FlushAll, not stranded forever. Aged past
+// ReclaimOrphanAfter, because that is now what makes it an orphan rather than
+// somebody's live drain; the sibling below holds the other half.
 func TestSpoolAdoptsOrphan(t *testing.T) {
 	dir := t.TempDir()
 	sp := Spool{Dir: dir}
 	orphan := filepath.Join(dir, "sess.jsonl.flushing.cc-deadbeef")
 	line, _ := jsonLine(ev("sess", "orphan1"))
 	if err := os.WriteFile(orphan, line, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	aged := time.Now().Add(-2 * ReclaimOrphanAfter)
+	if err := os.Chtimes(orphan, aged, aged); err != nil {
 		t.Fatal(err)
 	}
 	fn, got := drainCollect()
@@ -164,6 +171,65 @@ func TestSpoolAdoptsOrphan(t *testing.T) {
 	}
 	if _, err := os.Stat(orphan); !os.IsNotExist(err) {
 		t.Errorf("orphan should be consumed, stat err=%v", err)
+	}
+}
+
+// TestASweepDoesNotReclaimALiveDrainsFile is the other half of the orphan rule,
+// and it is a duplicate-delivery guard rather than a tidiness one. drainFile
+// holds its rotated file for the whole delivery loop; a sweep that renames it
+// away re-delivers every line, and the control plane does not dedupe on event
+// id, so those are duplicate governance rows and an activity_id with four.
+func TestASweepDoesNotReclaimALiveDrainsFile(t *testing.T) {
+	dir := t.TempDir()
+	sp := Spool{Dir: dir}
+	// Exactly what drainFile leaves behind mid-delivery: freshly stamped.
+	live := filepath.Join(dir, "sess.jsonl.flushing.cc-inflight")
+	line, _ := jsonLine(ev("sess", "inflight1"))
+	if err := os.WriteFile(live, line, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	fn, got := drainCollect()
+	n, err := sp.FlushAll(context.Background(), fn)
+	if err != nil {
+		t.Fatalf("flushall: %v", err)
+	}
+	if n != 0 || len(*got) != 0 {
+		t.Fatalf("a sweep re-delivered %d event(s) from a drain still holding them: %v", n, *got)
+	}
+	if _, err := os.Stat(live); err != nil {
+		t.Errorf("the live drain's file was taken from under it: %v", err)
+	}
+}
+
+// TestADeadlineDoesNotBurnADeliveryAttempt: the bound exists for events the
+// server will never accept. A budget expiry refused nothing, so counting it
+// turns a retry cap into a timer that deletes any backlog too big for one
+// budget -- which is every backlog the sweep exists to rescue.
+func TestADeadlineDoesNotBurnADeliveryAttempt(t *testing.T) {
+	dir := t.TempDir()
+	sp := Spool{Dir: dir}
+	for _, id := range []string{"a", "b", "c"} {
+		if err := sp.Append(ev("sess", id)); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Far more passes than MaxRecoveryAttempts, every one of them timing out with
+	// nothing refused.
+	for pass := range MaxRecoveryAttempts * 3 {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel() // expired before the first line, as a spent budget is
+		if _, err := sp.FlushAll(ctx, func(context.Context, client.DevEvent) error { return nil }); err == nil {
+			t.Fatalf("pass %d: expected the deadline error", pass)
+		}
+	}
+
+	if got := sp.DiscardedCount(); got != 0 {
+		t.Errorf("%d event(s) discarded by deadlines alone; nothing ever refused them", got)
+	}
+	if got := sp.BacklogCount(); got != 3 {
+		t.Errorf("backlog = %d, want the 3 events still waiting", got)
 	}
 }
 

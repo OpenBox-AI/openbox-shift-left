@@ -74,7 +74,10 @@ func RunHook(sub string, stdin io.Reader, stdout io.Writer, logger *log.Logger) 
 	}
 
 	if hook == HookSessionEnd {
-		ad.Mapper.Evidence = &EvidenceState{Undelivered: ad.Spool.UndeliveredCount()}
+		ad.Mapper.Evidence = &EvidenceState{
+			Undelivered: ad.Spool.UndeliveredCount(),
+			Discarded:   ad.Spool.DiscardedCount(),
+		}
 	}
 
 	if hook == HookSessionStart {
@@ -188,16 +191,12 @@ func runFlush(logger *log.Logger, sessionID string) {
 	defer cancel()
 
 	ad := New(creds.Identity(), DefaultSpoolDir())
+	// The engine's own voice, on the same stderr the flusher's log now captures:
+	ad.Log = logger.Printf
 	// Diagnostics only; stderr, never stdout.
 	ad.Advisory.Log = logger
-	var n int
-	if sessionID == "" {
-		n, err = ad.FlushAll(ctx, cl)
-	} else {
-		ad.Spool.TouchFlushLock(sessionID)
-		defer ad.Spool.ReleaseFlushLock(sessionID)
-		n, err = ad.Flush(ctx, sessionID, cl)
-	}
+	// One engine call: the lock, the drain loop and the retire ordering are its.
+	n, err := ad.FlushOrSweep(ctx, sessionID, cl)
 	if err != nil {
 		logger.Printf("flush ended early after %d event(s): %v", n, err)
 	}

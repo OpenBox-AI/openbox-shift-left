@@ -1,0 +1,113 @@
+package hookflow
+
+import (
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
+)
+
+// RetireSpoolAfter is how long an undeliverable file is kept. It errs long:
+// deleting evidence is irreversible.
+const RetireSpoolAfter = 30 * 24 * time.Hour
+
+const MaxDrainPasses = 8
+
+func (s Spool) PendingCount(sessionID string) int {
+	return countLines(s.SessionPath(sessionID))
+}
+
+func countLines(path string) int {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return 0
+	}
+	return len(NonEmptyLines(data))
+}
+
+// BacklogCount reports every waiting event; UndeliveredCount read 71 while 118
+// sat invisible to it.
+func (s Spool) BacklogCount() int {
+	return s.sumLines(IsBacklogFile)
+}
+
+// IsBacklogFile reports whether a spool filename holds waiting events. The
+// `.flushing.` case is not a detail: a flusher killed mid-drain leaves events in a
+// file that does NOT end in `.jsonl`, which made the sweeper's gate read zero.
+func IsBacklogFile(name string) bool {
+	return strings.HasSuffix(name, ".jsonl") || strings.Contains(name, ".flushing.")
+}
+
+type Retired struct {
+	Name   string
+	Events int
+	Age    time.Duration
+}
+
+func (r Retired) String() string {
+	return fmt.Sprintf("%s (%d event(s), %d days old)", r.Name, r.Events, int(r.Age.Hours()/24))
+}
+
+func (s Spool) RetireStale(now time.Time, age time.Duration) ([]Retired, error) {
+	entries, err := os.ReadDir(s.Dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("spool readdir: %w", err)
+	}
+	var out []Retired
+	var errs []error
+	for _, e := range entries {
+		name := e.Name()
+		if e.IsDir() || !strings.HasSuffix(name, ".jsonl") || strings.Contains(name, ".flushing.") {
+			continue
+		}
+		info, err := e.Info()
+		if err != nil {
+			continue
+		}
+		if now.Sub(info.ModTime()) < age {
+			continue
+		}
+		path := filepath.Join(s.Dir, name)
+		events, elapsed, removed, err := s.retireOne(path, now, age)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("spool retire %s: %w", name, err))
+			continue
+		}
+		if !removed {
+			continue
+		}
+		s.recordDiscard(path, events,
+			fmt.Sprintf("past the %d-day retention age, never delivered", int(age.Hours()/24)))
+		out = append(out, Retired{Name: name, Events: events, Age: elapsed})
+	}
+	return out, errors.Join(errs...)
+}
+
+// retireOne re-checks the age and unlinks under the SPOOL LOCK every other
+// mutator takes; without it an Append after the scan is deleted, uncounted.
+func (s Spool) retireOne(path string, now time.Time, age time.Duration) (events int, elapsed time.Duration, removed bool, err error) {
+	unlock := s.lockSpool()
+	defer unlock()
+
+	info, err := os.Stat(path)
+	if err != nil {
+		return 0, 0, false, nil // delivered or retired by someone else: benign
+	}
+	elapsed = now.Sub(info.ModTime())
+	if elapsed < age {
+		return 0, 0, false, nil // appended to since the scan, so it is live again
+	}
+	events = countLines(path)
+	if err := os.Remove(path); err != nil {
+		if os.IsNotExist(err) {
+			return 0, 0, false, nil
+		}
+		return 0, 0, false, err
+	}
+	return events, elapsed, true, nil
+}

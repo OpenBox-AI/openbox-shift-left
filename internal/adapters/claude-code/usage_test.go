@@ -738,13 +738,17 @@ func TestFinops_NoContentOnWire(t *testing.T) {
 	}
 	// Chain-of-thought there corrupts the reader silently: core logs nothing when
 	// the text is merely the wrong text.
-	span := assistantSpanBody(t, capturedBody)
-	if !strings.Contains(span, hookMessage) {
-		t.Errorf("the assistant span lost its own text: %q", span)
+	reply := activityOutputContent(t, capturedBody)
+	if !strings.Contains(reply, hookMessage) {
+		t.Errorf("the assistant reply lost its own text: %q", reply)
 	}
-	if strings.Contains(span, thinkingSentinel) {
-		t.Errorf("thinking rode the assistant span, where core reads it as the turn's "+
-			"REPLY; it belongs in activity_output.thinking and nowhere else: %q", span)
+	// Still separate keys, and still for the original reason: the two are
+	// different things, and a reader that conflates chain-of-thought with the
+	// answer is corrupted silently -- nothing logs when text is merely the wrong
+	// text.
+	if strings.Contains(reply, thinkingSentinel) {
+		t.Errorf("thinking rode activity_output.content, which carries the turn's REPLY; "+
+			"it belongs under activity_output.thinking and nowhere else: %q", reply)
 	}
 
 	// Deleting the redaction, or deleting the cap, must each turn this test red.
@@ -819,20 +823,25 @@ func TestFinops_NoContentOnWire(t *testing.T) {
 	})
 }
 
-func assistantSpanBody(t *testing.T, body string) string {
+// activityOutputContent is where the assistant's reply lives now. It rode a
+// synthesized span until that carrier was removed: core parses spans[] on the
+// normal path and then discards it, so the text this helper reads was, until the
+// move, never stored anywhere at all.
+func activityOutputContent(t *testing.T, body string) string {
 	t.Helper()
 	var p struct {
-		Spans []struct {
-			ResponseBody string `json:"response_body"`
-		} `json:"spans"`
+		ActivityOutput struct {
+			Content string `json:"content"`
+		} `json:"activity_output"`
+		Spans []any `json:"spans"`
 	}
 	if err := json.Unmarshal([]byte(body), &p); err != nil {
 		t.Fatalf("decode wire body: %v (%s)", err, body)
 	}
-	if len(p.Spans) == 0 {
-		return ""
+	if len(p.Spans) != 0 {
+		t.Errorf("a span still ships on a turn payload: %s", body)
 	}
-	return p.Spans[len(p.Spans)-1].ResponseBody // the extractor reads the LAST entry
+	return p.ActivityOutput.Content
 }
 
 func activityOutputThinking(t *testing.T, body string) string {
