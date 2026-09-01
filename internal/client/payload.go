@@ -320,6 +320,32 @@ var contentMetadataKeys = map[string]bool{
 	"thinking":      true,
 }
 
+// observesAResponse is which half of an activity may assert an HTTP status.
+//
+// A Started row represents a request that has not been answered, so a status code
+// on one is a claim about a response that did not exist when the row was made --
+// and 116 of 116 live Started rows asserted `200`. The cause was structural:
+// gatewayemit builds both halves from one shared `span(stage)` closure
+// (`internal/cli/gatewayemit/event.go:84-93`) that copies HTTPStatus onto each.
+// So the condition lives here, in the one funnel every adapter passes through,
+// rather than in the adapter that exposed it.
+//
+// It gates the metadata KEY and not only the span field, because buildMetadata
+// copies caller metadata in first: an adapter writing `http_status` by hand would
+// otherwise reinstate exactly the assertion this removes.
+//
+// Removing it from the Started half removes a falsehood, not a control. The
+// Completed half still carries it, ungated by content capture, which is what lets
+// a 5xx and a transport failure store differently from a success whose reply was
+// not captured.
+func observesAResponse(et EventType) bool {
+	switch et {
+	case EventToolResult, EventTurnCompleted:
+		return true
+	}
+	return false
+}
+
 func signalDetailKeyFor(t EventType) string {
 	switch t {
 	case EventPermissionDenied:
@@ -335,6 +361,9 @@ func buildMetadata(ev DevEvent) (json.RawMessage, error) {
 	for k, v := range ev.Metadata {
 		if ev.contentStripped && contentMetadataKeys[k] {
 			continue // INV-2: gated content never rides the metadata blob either
+		}
+		if k == "http_status" && !observesAResponse(ev.EventType) {
+			continue // see observesAResponse; the key is barred by the ROW's meaning
 		}
 		m[k] = v
 	}
@@ -371,7 +400,7 @@ func buildMetadata(ev DevEvent) (json.RawMessage, error) {
 				m["credential_fingerprint"] = s.CredentialFingerprint
 			}
 		}
-		if s.HTTPStatus != 0 {
+		if s.HTTPStatus != 0 && observesAResponse(ev.EventType) {
 			if _, exists := m["http_status"]; !exists {
 				m["http_status"] = s.HTTPStatus
 			}

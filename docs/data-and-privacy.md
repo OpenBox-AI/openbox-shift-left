@@ -195,6 +195,29 @@ An org can pin the setting so a developer cannot change it, via the managed
 config (`deployments/managed/`). `openbox doctor` always reports the effective
 value and where it came from.
 
+> **Turning content capture off also turns off command-matching enforcement.**
+> This is a real trade-off rather than a footnote, so it is stated here instead of
+> being discovered from an audit log.
+>
+> A policy can only match text that reached the control plane. The shell command a
+> tool ran is content: it travels as `activity_input.command` and is dropped when
+> content capture is off, exactly like a prompt. The file a tool touched is
+> **structural**: `activity_input.file_path` and `activity_input.file_operation`
+> are identifiers, not content, so they are always sent.
+>
+> With content capture **off**, an org therefore keeps every control expressed as
+> "which file was touched, and how" -- the self-governance protections over
+> `CLAUDE.md`, `.mcp.json`, CI configuration and lockfiles, and the
+> credential-file-access controls -- and loses every control expressed as "what
+> did the command say", which includes the pipe-to-shell, credential-sweep,
+> recursive-delete, destructive-SQL and permission-bypass classes. Of the seeded
+> control pack's 104 conditions, 33 keep working and 71 go quiet.
+>
+> They go quiet **silently**, and that is the part worth knowing: an unmatched
+> condition is fail-safe, so nothing errors, nothing is denied, and no warning is
+> emitted. `openbox doctor` reports whether content capture is on; it cannot report
+> which of your org's policies stopped being able to fire because of it.
+
 > **Redaction at source is not implemented yet.** The server-side Guardrail
 > redaction layer is not wired anywhere in this product. Local secret detection is
 > the only control on content in transit, and what it catches is

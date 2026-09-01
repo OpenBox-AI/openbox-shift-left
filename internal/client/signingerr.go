@@ -72,6 +72,21 @@ func diagnose(status int, body string) string {
 	}
 }
 
+// extractReason finds a machine-readable reason code, and returns "" for every
+// shape core currently emits -- which is the correct answer, not a dead branch.
+//
+// Worth stating plainly, because it has now misread twice as a defect. Core's
+// envelope is `{Code int, Message string}` (`openbox-core/pkg/httpx/response.go:12-16`),
+// so `code` arrives as a JSON NUMBER; each candidate below is unmarshalled into a
+// `string`, so a numeric `code` fails to bind and is skipped, and the caller falls
+// through to its status-plus-message diagnosis. All 555 observed 401s took that
+// path, correctly. The `code` key still earns its place: a STRING `code` binds and
+// is pinned by signingerr_test.go's "string code key" case, while the numeric case
+// is pinned by "401 identity". `reason_code` and `reason` are forward-compatible
+// with the SDK's codes and are labelled as such in the test names.
+//
+// So: do not delete this, and do not "fix" the key list to match core's numeric
+// field. Both directions are already tested, and the fall-through is the design.
 func extractReason(body []byte) string {
 	var m map[string]json.RawMessage
 	if err := json.Unmarshal(body, &m); err != nil {

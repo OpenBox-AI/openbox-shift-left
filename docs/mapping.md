@@ -147,6 +147,19 @@ shape is unchanged and the version `const` marks breaking changes only. All are
 structural identifiers (INV-2 permits them; INV-1 still forbids secrets) and all
 are optional; a provider that does not expose one simply omits it.
 
+> **`metadata` has no reader in core or in the backend.** Verified across both:
+> not OPA policy input, not guardrails, not goal alignment. It is merged into the
+> stored row and is therefore queryable in SQL, which is exactly what
+> `credential_fingerprint` and `http_status` were rehomed here for -- forensics a
+> reviewer can run after the fact. That was the stated purpose and it is met.
+>
+> The reason to write it down is the corollary: **`metadata` cannot be a product
+> surface, and it cannot be an enforcement surface.** Anything that needs a
+> consumer belongs on `activity_input` / `activity_output`, which map to dedicated
+> columns and which OPA and the judge actually read. Stop growing `metadata`; a
+> key added here in the expectation that something will evaluate it will simply
+> sit unread.
+
 | Key | Providers | Meaning |
 |---|---|---|
 | `tool_use_id` | Claude Code, Codex | Per-invocation id for a `ToolCall`/`ToolResult` pair. It rides `span.invocation_id`, a *local* field (spooled, never emitted) that keys the cross-process duration stash. The wire pairing itself is `activity_id`. `span.function` is the MCP function name only. |
@@ -401,6 +414,13 @@ carrying non-empty `activity_input`, resolved to a judgeable *operation*
 extractor survives only as a **fallback** for events with no activity input
 (`:298`). So the request body on the opening half feeds alignment natively.
 
+How much of it, precisely, because it changes what is worth storing: the judge
+sees roughly **390-444 bytes** of that body, and keeps them as **head 3/5 + tail
+2/5** with the middle elided (`elideMiddle`, `goal_alignment_session.go:773-786`).
+The window is core-side and not ours to set. What *is* ours is which bytes land in
+it, which is why the stored request document puts `messages` last -- see
+[The request window is a SELECTION](#the-request-window-is-a-selection-and-what-it-contains).
+
 What that gives up, stated rather than glossed: with no spans, alignment judges
 **operations** and never the model's reply text, because that path still reads
 only `payload.Spans`. Restoring it is a core-side change, not a client one, and
@@ -459,9 +479,57 @@ than useless.
 | `span.semantic_type` |; |; | the client has never sent this field, and there is no wire span to recompute it from either (§2) |
 | `span.stage` |; |; | **retained, read by nothing on the wire.** Kept deliberately: the adapter contract is frozen, adapters still set it, and it now says which half of a pair a local event is, which a reader of the spool wants. |
 | `span.module` |; |; | never had a wire home |
-| `span.request_body` | `activity_input.content` | started | **In-path lanes only.** No hook adapter sets it, and none may; that is what §1's "span-less" means. The observed model REQUEST, content-gated by `stripContent`, capped by `capModelCallRequest` (which keeps the TAIL). The key is `content` and not `request_body` because the alignment judge's per-operation cap orders by a fixed priority list and drops unlisted keys first |
+| `span.request_body` | `activity_input.content` | started | **In-path lanes only.** No hook adapter sets it, and none may; that is what §1's "span-less" means. The observed model REQUEST, content-gated by `stripContent`. **SELECTED, not truncated** -- see the note below; `capModelCallRequest` (which keeps the TAIL) remains the net but the wired path no longer reaches its cut. The key is `content` and not `request_body` because the alignment judge's per-operation cap orders by a fixed priority list and drops unlisted keys first |
 | `span.response_body` | `activity_output.content` | completed | **In-path lanes only.** The observed model RESPONSE, verbatim SSE frames and all, content-gated and capped by `capModelCallBody` |
-| `span.http_status` | `metadata.http_status` | completed | structural, ungated, **absent when no response was observed at all** -- a relayed call whose transport failed before one existed. Rehomed alongside `credential_fingerprint` for the same reason: without it a 5xx stores identically to a success whose reply was not captured |
+| `span.http_status` | `metadata.http_status` | completed | structural, ungated, **absent when no response was observed at all** -- a relayed call whose transport failed before one existed. Rehomed alongside `credential_fingerprint` for the same reason: without it a 5xx stores identically to a success whose reply was not captured. "completed" here is now enforced rather than described: it shipped on **both** halves until v1.8, and 116 of 116 live `ActivityStarted` rows asserted `200` on a request nothing had answered yet. `observesAResponse` bounds it, and it bounds the metadata KEY as well as the span field, so an adapter cannot reinstate the assertion by writing `http_status` itself |
+
+#### The request window is a SELECTION, and what it contains
+
+Until v1.8 a stored model-call request body was **a constant**. Three caps
+composed head/head/tail -- `capturableBody` head-cut 256 KiB, `capRunes` head-cut
+65,536 **runes**, then `capModelCallRequest` tail-cut 65,536 **bytes** -- so the net
+was the *tail of the head*: exactly 65,536 bytes on all 27 measured rows, dropping
+only the first few hundred. Since the head is the part that does not change between
+calls, 28 calls stored 4 distinct bodies and `"messages"` appeared in 0 of 27. The
+truncation marker stated the opposite of what happened: it claimed the start was
+dropped, when the END had gone two layers earlier. And for an all-ASCII body,
+65,536 runes equals 65,536 bytes, so the byte cap returned its input unchanged and
+**no marker appeared at all** -- a head window presented as a complete body.
+
+No byte window could have fixed it. Measured over the recorded corpus: `messages`
+is p50 **82.1%** of a request body, **95.3%** of bodies exceed 64 KiB, and key
+order varies (65.5% put `messages` second with `tools` trailing, 27.1% put it
+after `system`). So neither end reliably contains the newest turn.
+
+`internal/gateway` therefore **selects**. It binds tolerantly -- one key name on a
+top-level object, never a schema -- and stores a synthetic document:
+
+| Field | What |
+|---|---|
+| `model` | verbatim |
+| `system` | head window, ~4 KiB, re-encoded with an elision note (a truncated `RawMessage` would not parse) |
+| `openbox_selection` | `{dropped_messages, dropped_keys, original_bytes}`; absent when nothing was dropped |
+| `messages` | **last**, the newest entries greedily from the end until the budget |
+
+`tools` is dropped entirely -- it is the boilerplate that was being stored on every
+call, and dropping it is the one change here that *reduces* egress.
+
+Two properties are load-bearing and easy to undo by accident:
+
+- **`messages` is last because the document is a Go struct, not a map.**
+  `json.Marshal` sorts a map's keys, which would emit `messages` first, into the
+  exact middle core's `elideMiddle` discards (it keeps head 3/5 + tail 2/5 of a
+  ~390-444 byte window, `goal_alignment_session.go:773-786`). Declaring it last is
+  what puts the newest turn in the tail the judge keeps.
+- **The selection budget (48 KiB) sits deliberately below the 65,536-byte net.**
+  Redaction runs *after* selection and can grow a body, and one byte of growth
+  hands `capRunes` a head cut that removes the newest turn again. The headroom is
+  pinned by a test against a secret-dense body, not left as arithmetic.
+
+Anything that is not a conversation -- non-JSON, a missing or non-array `messages`,
+a truncated body -- degrades to a tail window carrying a marker that names the
+*selector*, so it can be told apart from a downstream truncation. It never errors:
+this runs in the request path of the component that must not break the tool.
 
 **In-path-lane-only span fields** (v1.5, rehomed in v1.7). Set by the gateway and
 transport lanes; a hook event carries none of them. They used to ride
@@ -474,7 +542,7 @@ ones worth keeping onto fields that persist and dropped the rest.
 | `span.response_headers` | ; | ; | same |
 | `span.http_method` | `activity_input.http_method` | no | structural, and a COMPANION to the body rather than an operation of its own: `turnActivityInput` returns nothing at all when there is no `request_body`, because a non-empty `activity_input` is what makes core judge an operation, and a probe or a synthesized record would otherwise ship one describing no work |
 | `span.http_url` | `activity_input.http_url` | no | structural, **query dropped**, and gated on a body for the same reason as `http_method` |
-| `span.http_status` | `metadata.http_status` | no | see the row above; ungated because a status code is not content |
+| `span.http_status` | `metadata.http_status` | no | see the row above; ungated because a status code is not content, and **completed-half only** |
 | `span.credential_fingerprint` | `metadata.credential_fingerprint` | no | Rehomed in v1.7. Core has no span field for it and never stored the span anyway, so account binding has in fact never had anything to match on; `metadata` is merged into the stored row. Ungated because a privacy switch must not let an org opt out of being identified |
 
 Retired with the span layer: `parent_span_id`, `hook_type`, `duration_ns`,
@@ -636,6 +704,30 @@ what closed it.
 | 22 | `activity_output.thinking` survives ingest as its own key |
 
 ### Enforcement and approvals
+
+> **`activity_input` is the enforcement surface for a developer session.
+> `input.spans` is agent-runtime-only.**
+>
+> Core's OPA input carries both: `addSpansToInput` fills `input.spans` from
+> `payload.Spans` (`opa.go:610`) and `addActivityInputOutput` fills
+> `input.activity_input` (`opa.go:744`). This client sends no `spans[]` at all --
+> see §"No spans at all" -- so for a dev session `input.spans` is *absent*, not
+> empty, and any rule matching `input.spans[_]` is permanently undefined. An
+> undefined path is fail-safe in Rego, so such a rule raises nothing and blocks
+> nothing; it is silently inert.
+>
+> That matters because all 30 seeded `sl-*` control templates were authored
+> against `input.spans[_]` -- 104 conditions over exactly three paths
+> (`attributes.command` 71, `file_path` 21, `file_operation` 12). Written down here
+> because the failure is invisible from this side of the wire: nothing in this
+> repository can detect it, and the three key names the re-pointed paths depend on
+> are pinned by `internal/client/enforcementkeys_test.go` for exactly that reason.
+> A rename there disarms up to 17 templates with every other test still green.
+>
+> Coverage consequence, stated rather than inferred: `command` is gated content,
+> while `file_path` and `file_operation` are structural. An org that turns
+> `content_capture` off therefore keeps the file-path controls and loses every
+> command-matching control. See `docs/data-and-privacy.md`.
 
 | # | What a run must confirm |
 |---|---|
