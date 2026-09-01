@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+
+	"github.com/openbox-ai/openbox-shift-left/internal/client"
 )
 
 // corpusShapedRequest reproduces the modal provider request from the recorded
@@ -360,20 +362,31 @@ func TestTheNewestTurnSurvivesTheWholeCapturePath(t *testing.T) {
 // TestRedactionGrowthDoesNotCostTheNewestTurn pins the headroom that
 // selectionBudget claims, rather than leaving it as arithmetic in a comment.
 //
-// Redaction runs AFTER selection and can GROW a body -- a ${OPENBOX_REDACTED_*}
-// placeholder is longer than the shortest value it replaces. If growth pushes the
-// captured body past 65,536 bytes, capRunes head-cuts and takes the newest turn
-// back off, which is the exact failure selection exists to prevent. So the
-// adversarial case is a secret-dense conversation, not a large one.
+// The fixture is the whole test, and the first version of it was a placebo worth
+// recording. It used a 43-character AWS key, which the redactor replaces with a
+// 37-character placeholder: net MINUS six bytes per message. It asserted that a
+// placeholder appeared, which it did, and concluded the headroom was tested. The
+// body had shrunk. Measured, not reasoned about:
+//
+//	43-char AWS value   in=287 out=281  -6 bytes  x0.98
+//	`pwd:` + 8 chars    in= 13 out= 42  +29 bytes x3.23
+//	`token:` + 12 chars in= 19 out= 44  +25 bytes x2.32
+//
+// Growth comes from SHORT secrets, because the placeholder is a fixed ~37 bytes
+// whatever it replaces. So the adversarial body is one dense in short
+// keyword-adjacent values -- a pasted .env, a k8s secrets manifest -- and not a
+// large one. Below the fix, this fixture selected 49,115 bytes which redaction
+// grew to 83,770, and the stored result was 65,536 bytes of invalid JSON cut
+// mid-token with NO marker: the unmarked-head-window mode this phase exists to
+// kill, resurrected inside the fix for it.
 func TestRedactionGrowthDoesNotCostTheNewestTurn(t *testing.T) {
 	const newest = "NEWEST_AFTER_REDACTION_GROWTH"
-	// Every message carries a detectable secret, so the redactor rewrites the
-	// whole selected history rather than a line of it.
-	msgs := make([]string, 0, 400)
-	for i := range 400 {
-		text := fmt.Sprintf("export AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY%03d and more text %s",
-			i, strings.Repeat("g", 200))
-		if i == 399 {
+	// Short secrets, so redaction actually grows the document. 1,400 of them puts
+	// growth well past the headroom rather than just inside it.
+	msgs := make([]string, 0, 1400)
+	for i := range 1400 {
+		text := fmt.Sprintf("pwd:aaaaaaa%d", i%10)
+		if i == 1399 {
 			text = newest
 		}
 		one, err := json.Marshal(map[string]any{"role": "user", "content": text})
@@ -398,17 +411,127 @@ func TestRedactionGrowthDoesNotCostTheNewestTurn(t *testing.T) {
 	resp.Body.Close()
 
 	captured := em.await(t, 1)[0].RequestBody
-	if !strings.Contains(captured, newest) {
-		t.Errorf("redaction growth cost the newest turn: captured %d bytes; selectionBudget's %d bytes "+
-			"of headroom under the 65,536 net was not enough for this body",
-			len(captured), 65536-selectionBudget)
+
+	// The redactor must actually have fired AND grown the body, or this fixture
+	// has regressed to the placebo it replaced.
+	if !strings.Contains(captured, "OPENBOX_REDACTED") {
+		t.Fatal("no redaction placeholder in the captured body; this fixture no longer exercises growth")
 	}
 	if len(captured) >= 65536 {
-		t.Errorf("captured %d bytes after redaction growth, at or over the 65,536 net", len(captured))
+		t.Errorf("captured %d bytes, at or over the 65,536 net: redaction growth outran the recovery "+
+			"and capRunes will have head-cut the tail away", len(captured))
 	}
-	// The redactor must actually have fired, or this test proves nothing about growth.
-	if !strings.Contains(captured, "OPENBOX_REDACTED") {
-		t.Error("no redaction placeholder in the captured body; this fixture no longer exercises growth " +
-			"and the headroom claim is untested")
+	if !json.Valid([]byte(captured)) {
+		t.Errorf("captured body is not valid JSON -- a head cut through a token, which is what an "+
+			"unrecovered overrun looks like: %q", captured[max(0, len(captured)-60):])
+	}
+	if !strings.Contains(captured, newest) {
+		t.Errorf("redaction growth cost the newest turn; captured %d bytes", len(captured))
+	}
+	// And the loss must be REPORTED, not merely survived.
+	if !strings.Contains(captured, "dropped_messages") {
+		t.Error("messages were dropped to absorb redaction growth and nothing says so")
+	}
+}
+
+// TestTheSelectionBudgetStaysBelowTheClientsByteNet is the guard that makes the
+// downstream caps unreachable BY CONSTRUCTION rather than by arithmetic in a
+// comment.
+//
+// It asserts against client.MaxModelCallBodyBytes, the constant the client
+// actually cuts on, not a copy of its value. A duplicated literal would red only
+// if someone edited the copy as well -- which is to say it would pass whether or
+// not the invariant held. Import direction allows the real thing: gateway already
+// imports client, and depguard names it.
+//
+// If these ever meet, capRunes head-cuts a selected document and the newest turn
+// is dropped again. captureRequestBody's post-redaction re-select is what handles
+// growth; this is what handles the budget itself.
+func TestTheSelectionBudgetStaysBelowTheClientsByteNet(t *testing.T) {
+	if selectionBudget >= client.MaxModelCallBodyBytes {
+		t.Fatalf("selectionBudget is %d and the client cuts at %d; a selected document at or over "+
+			"the net gets head-cut by capRunes, which is the defect this phase removed",
+			selectionBudget, client.MaxModelCallBodyBytes)
+	}
+	// And the gap must be big enough to be a real margin rather than a rounding
+	// accident, since it is the single-pass headroom for redaction growth.
+	if gap := client.MaxModelCallBodyBytes - selectionBudget; gap < 8*1024 {
+		t.Errorf("only %d bytes of headroom under the net; that is thin enough that ordinary "+
+			"redaction growth would push every large body onto the recovery path", gap)
+	}
+}
+
+// TestAnEmptyHistoryStillReportsADroppedKey the early return for an empty
+// `messages` array once discarded the note entirely, so
+// `{"messages":[],"tools":[...]}` dropped the tool definitions and stored a
+// document claiming nothing had gone. An empty conversation is a complete
+// document; a dropped key is still a loss, and the two are independent.
+func TestAnEmptyHistoryStillReportsADroppedKey(t *testing.T) {
+	got := selectModelCallRequest(`{"model":"m","messages":[],"tools":[{"name":"Bash"}],"max_tokens":10}`)
+
+	var doc struct {
+		Selection *struct {
+			DroppedMessages int      `json:"dropped_messages"`
+			DroppedKeys     []string `json:"dropped_keys"`
+		} `json:"openbox_selection"`
+	}
+	if err := json.Unmarshal([]byte(got), &doc); err != nil {
+		t.Fatalf("selected document is not valid JSON: %v", err)
+	}
+	if doc.Selection == nil {
+		t.Fatalf("no selection note on a document that dropped tools and max_tokens: %q", got)
+	}
+	if len(doc.Selection.DroppedKeys) != 2 {
+		t.Errorf("dropped_keys = %v, want both dropped keys named", doc.Selection.DroppedKeys)
+	}
+	if doc.Selection.DroppedMessages != 0 {
+		t.Errorf("dropped_messages = %d; no messages existed to drop", doc.Selection.DroppedMessages)
+	}
+}
+
+// TestTheRecoveryPassCarriesTheFirstPassAccountingForward the second selection --
+// the one that runs when redaction grew the first result past the budget -- sees
+// only the redacted copy of the first pass's OUTPUT. If it reset the note, the
+// stored record would report that intermediate as `original_bytes` and file the
+// first note under `dropped_keys`, understating the loss it exists to report.
+func TestTheRecoveryPassCarriesTheFirstPassAccountingForward(t *testing.T) {
+	// A first-pass document: 200 dropped messages out of a 541,631-byte original.
+	first := `{"model":"m","openbox_selection":{"dropped_messages":200,"dropped_keys":["tools"],"original_bytes":541631},` +
+		`"messages":[` + strings.Repeat(`{"role":"user","content":"`+strings.Repeat("z", 400)+`"},`, 200) +
+		`{"role":"user","content":"NEWEST"}]}`
+
+	got := selectModelCallRequest(first)
+
+	var doc struct {
+		Selection *struct {
+			DroppedMessages int      `json:"dropped_messages"`
+			DroppedKeys     []string `json:"dropped_keys"`
+			OriginalBytes   int      `json:"original_bytes"`
+		} `json:"openbox_selection"`
+	}
+	if err := json.Unmarshal([]byte(got), &doc); err != nil {
+		t.Fatalf("not valid JSON: %v", err)
+	}
+	if doc.Selection == nil {
+		t.Fatal("the recovery pass dropped the note entirely")
+	}
+	if doc.Selection.OriginalBytes != 541631 {
+		t.Errorf("original_bytes = %d, want the FIRST pass's 541631; this pass only saw the "+
+			"intermediate", doc.Selection.OriginalBytes)
+	}
+	if doc.Selection.DroppedMessages <= 200 {
+		t.Errorf("dropped_messages = %d, want more than the first pass's 200: this pass dropped "+
+			"more on top", doc.Selection.DroppedMessages)
+	}
+	for _, k := range doc.Selection.DroppedKeys {
+		if k == "openbox_selection" {
+			t.Error("the first pass's note was filed as a dropped key rather than carried forward")
+		}
+	}
+	if !strings.Contains(got, "tools") {
+		t.Error("the first pass's dropped_keys were lost in the merge")
+	}
+	if !strings.Contains(got, "NEWEST") {
+		t.Error("the recovery pass lost the newest turn")
 	}
 }

@@ -24,12 +24,18 @@ const markerPrefix = "[openbox: "
 // growth hands capRunes a head cut that takes the newest turn -- the one thing
 // selection exists to keep -- straight back off.
 //
-// 48 KiB leaves 16 KiB of redaction headroom, about 33%. The residual case is a
-// body redaction grows by more than that, which means hundreds of detected
-// secrets in one prompt; there capRunes still head-cuts and the note at the head
-// survives while the newest messages do not.
-// TestRedactionGrowthDoesNotCostTheNewestTurn pins the headroom against a
-// deliberately secret-dense body rather than leaving it as arithmetic.
+// 48 KiB leaves 16 KiB of headroom under that net, about 33%, which covers the
+// ordinary case in one pass.
+//
+// It is NOT a sufficient bound, and an earlier version of this comment claimed it
+// was. The placeholder is a fixed ~37 bytes whatever it replaces, so growth scales
+// with the NUMBER of secrets, not their length: `pwd:` plus eight characters goes
+// from 13 bytes to 42, a factor of 3.23. Enough short secrets outrun any fixed
+// headroom, and 1,400 of them did -- 49,115 bytes selected, 83,770 after
+// redaction. So the guarantee comes from captureRequestBody re-selecting once on
+// the redacted text rather than from this number, and
+// TestRedactionGrowthDoesNotCostTheNewestTurn exercises real growth rather than
+// asserting that a placeholder appeared.
 const selectionBudget = 48 * 1024
 
 // systemBudget caps the system prompt to a head window. It is the most valuable
@@ -90,11 +96,11 @@ func selectModelCallRequest(body string) string {
 
 	fields := map[string]json.RawMessage{}
 	if err := json.Unmarshal([]byte(body), &fields); err != nil {
-		return fallbackWindow(body, "the body is not a JSON object")
+		return fallbackWindow(body, "what reached the selector did not parse as a JSON object")
 	}
 	rawMessages, ok := fields["messages"]
 	if !ok {
-		return fallbackWindow(body, "the body carries no messages array")
+		return fallbackWindow(body, "no messages array in what reached the selector")
 	}
 	var messages []json.RawMessage
 	if err := json.Unmarshal(rawMessages, &messages); err != nil {
@@ -106,11 +112,15 @@ func selectModelCallRequest(body string) string {
 		System: cappedSystem(fields["system"]),
 	}
 	dropped := droppedKeys(fields)
+	// A SECOND pass over an already-selected document -- the recovery pass that runs
+	// when redaction grew the first result past the budget -- has to carry the first
+	// pass's accounting forward instead of resetting it.
+	prior := priorNote(fields["openbox_selection"])
 
 	// Overhead first, so the message budget is what is actually left rather than
 	// an estimate. Marshalling the document with an empty history costs one small
 	// allocation and removes the guesswork.
-	kept, note, ok := keepNewestMessages(&doc, messages, len(body), dropped)
+	kept, note, ok := keepNewestMessages(&doc, messages, len(body), dropped, prior)
 	if !ok {
 		// The budget could not be established, so any document built here would be
 		// bounded by nothing. Falling back is the only answer that stays honest:
@@ -145,19 +155,20 @@ func selectModelCallRequest(body string) string {
 // decoration: without it a marshal failure here returned a nil slice, which
 // json.Marshal renders as `"messages":null` -- a silently emptied conversation
 // carrying no marker, in the one function whose job is to make loss visible.
-func keepNewestMessages(doc *selectedRequest, messages []json.RawMessage, originalBytes int, dropped []string) ([]json.RawMessage, *selectionNote, bool) {
-	// An empty history is a complete document, not a truncated one.
+func keepNewestMessages(doc *selectedRequest, messages []json.RawMessage, originalBytes int, dropped []string, prior *selectionNote) ([]json.RawMessage, *selectionNote, bool) {
+	// An empty history is a complete document -- but a dropped KEY is a loss too,
+	// and so is a prior pass's. Reporting only the message count would let
+	// `{"messages":[],"tools":[...]}` drop `tools` while claiming nothing went.
 	if len(messages) == 0 {
-		return []json.RawMessage{}, nil, true
+		if len(dropped) == 0 && prior == nil {
+			return []json.RawMessage{}, nil, true
+		}
+		return []json.RawMessage{}, mergeNote(prior, 0, dropped, originalBytes), true
 	}
 
 	probe := *doc
 	probe.Messages = []json.RawMessage{}
-	probe.Selection = &selectionNote{
-		DroppedMessages: len(messages),
-		DroppedKeys:     dropped,
-		OriginalBytes:   originalBytes,
-	}
+	probe.Selection = mergeNote(prior, len(messages), dropped, originalBytes)
 	skeleton, err := json.Marshal(probe)
 	if err != nil {
 		return nil, nil, false
@@ -187,16 +198,12 @@ func keepNewestMessages(doc *selectedRequest, messages []json.RawMessage, origin
 		keep = append(keep, tailAsJSONString(messages[len(messages)-1], room))
 	}
 
-	if len(keep) == len(messages) && len(dropped) == 0 {
+	if len(keep) == len(messages) && len(dropped) == 0 && prior == nil {
 		// Nothing was dropped, so a note would claim a loss that did not happen --
 		// the same class of defect as a marker claiming a cut that did not happen.
 		return keep, nil, true
 	}
-	return keep, &selectionNote{
-		DroppedMessages: len(messages) - len(keep),
-		DroppedKeys:     dropped,
-		OriginalBytes:   originalBytes,
-	}, true
+	return keep, mergeNote(prior, len(messages)-len(keep), dropped, originalBytes), true
 }
 
 // tailAsJSONString re-encodes an over-budget message as a marked JSON string. It
@@ -242,9 +249,58 @@ func droppedKeys(fields map[string]json.RawMessage) []string {
 	var out []string
 	for k := range fields {
 		switch k {
-		case "model", "system", "messages":
+		case "model", "system", "messages", "openbox_selection":
 		default:
 			out = append(out, k)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// priorNote reads the note a previous selection pass left behind. Without it the
+// recovery pass would report the REDACTED document's size as `original_bytes` and
+// file the first pass's note under `dropped_keys` -- so the record would
+// understate the very loss it exists to report.
+func priorNote(raw json.RawMessage) *selectionNote {
+	if len(raw) == 0 {
+		return nil
+	}
+	var note selectionNote
+	if err := json.Unmarshal(raw, &note); err != nil {
+		return nil
+	}
+	return &note
+}
+
+// mergeNote folds this pass's losses into any earlier pass's, so two passes
+// produce one cumulative account rather than the second overwriting the first.
+func mergeNote(prior *selectionNote, droppedNow int, dropped []string, originalBytes int) *selectionNote {
+	note := &selectionNote{
+		DroppedMessages: droppedNow,
+		DroppedKeys:     dropped,
+		OriginalBytes:   originalBytes,
+	}
+	if prior == nil {
+		return note
+	}
+	note.DroppedMessages += prior.DroppedMessages
+	// The first pass saw the real request; this pass only saw the redacted copy of
+	// its own output.
+	note.OriginalBytes = prior.OriginalBytes
+	note.DroppedKeys = unionKeys(prior.DroppedKeys, dropped)
+	return note
+}
+
+func unionKeys(a, b []string) []string {
+	seen := make(map[string]bool, len(a)+len(b))
+	out := make([]string, 0, len(a)+len(b))
+	for _, list := range [][]string{a, b} {
+		for _, k := range list {
+			if !seen[k] {
+				seen[k] = true
+				out = append(out, k)
+			}
 		}
 	}
 	sort.Strings(out)

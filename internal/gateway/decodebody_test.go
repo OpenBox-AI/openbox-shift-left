@@ -245,11 +245,18 @@ func TestUndecodableGzipYieldsAMarker(t *testing.T) {
 	}
 }
 
-// TestTheDecodeSetIsMatchedAsAHeaderToken: ${OPENBOX_REDACTED_SECRET_ASSIGNMENT} is a LIST header,
+// TestTheDecodeSetIsMatchedAsAHeaderToken -- the encoding header holds a LIST,
 // and a whole-value compare made `x-gzip` -- a spelling origins still emit --
 // store the undecodable marker for a body gzip.NewReader reads without
 // complaint. That is the same shape as the defect this file exists for: a
 // placeholder that reads as a documented limit rather than as a bug.
+//
+// This sentence is deliberately worded to avoid a keyword before a colon. The
+// version that shipped in b443053 read "...AsAHeaderToken: ${OPENBOX_REDACTED_SECRET_ASSIGNMENT} is a
+// LIST header", and this repo's own on-save secret detector matched `token` +
+// `:` + a 16-character value and replaced "Content-Encoding" with a
+// ${OPENBOX_REDACTED_*} placeholder -- in the committed comment. Third instance in
+// one session; see the derived fingerprint in internal/client/golden_test.go.
 func TestTheDecodeSetIsMatchedAsAHeaderToken(t *testing.T) {
 	for _, tc := range []struct {
 		encoding string

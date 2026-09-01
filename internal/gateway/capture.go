@@ -87,6 +87,45 @@ func captureBody(body string) string {
 	return capRunes(redacted)
 }
 
+// captureRequestBody is the request path's funnel. It differs from captureBody by
+// one step, and that step is a repair rather than a refinement.
+//
+// Redaction runs after selection and can GROW a body, because the
+// ${OPENBOX_REDACTED_*} placeholder is a fixed ~37 bytes whatever it replaces. So
+// growth comes from SHORT secrets, not long ones -- measured, `pwd:` plus eight
+// characters goes 13 bytes to 42, x3.23 -- and a conversation dense in short
+// keyword-adjacent values (a pasted .env, a secrets manifest) can outrun any fixed
+// headroom. It did: a document selected to 49,115 bytes redacted to 83,770, and
+// capRunes then head-kept 65,536 of them with no marker, leaving invalid JSON cut
+// mid-token. That is the unmarked-head-window mode selection exists to remove,
+// reappearing one layer downstream of it.
+//
+// A bigger budget cannot fix that -- it is an arms race against a multiplier --
+// and giving this path a tail-preserving cap instead would cut a JSON document at
+// a byte boundary and move the client's net. So the recovery is to SELECT AGAIN,
+// once, on the redacted text: placeholders are plain ASCII inside string values,
+// so the redacted document still binds, and re-selecting drops the messages that
+// no longer fit and says so in the note. If redaction ever did break the JSON, the
+// second pass degrades to its marked tail window, which is still honest.
+//
+// One pass suffices: the second selection measures already-redacted bytes, so
+// nothing can grow after it. That makes both downstream caps unreachable rather
+// than merely unlikely.
+func captureRequestBody(body string) string {
+	if body == "" {
+		return ""
+	}
+	if len(body) > maxCaptureInputBytes {
+		body = body[:maxCaptureInputBytes]
+	}
+	body = trimPartialRune(body)
+	redacted, _, _ := bodyRedactor.RedactText(body)
+	if len(redacted) > selectionBudget {
+		redacted = selectModelCallRequest(redacted)
+	}
+	return capRunes(redacted)
+}
+
 func trimPartialRune(s string) string {
 	for i := len(s) - 1; i >= 0 && i > len(s)-utf8.UTFMax; i-- {
 		if !utf8.RuneStart(s[i]) {
@@ -152,11 +191,11 @@ type RequestCapture struct {
 func CaptureRequest(method, url string, reqHeaders http.Header, reqBody string, at time.Time) RequestCapture {
 	fingerprint := credentialFingerprint(reqHeaders)
 
-	// Cap; inside captureBody, after its redaction, never before.
+	// Cap; inside captureRequestBody, after its redaction, never before.
 	return RequestCapture{
 		Fingerprint: fingerprint,
 		Headers:     redactHeaders(reqHeaders),
-		Body:        captureBody(reqBody),
+		Body:        captureRequestBody(reqBody),
 		Method:      method,
 		URL:         stripQuery(url),
 		At:          at,
@@ -182,6 +221,15 @@ func (r RequestCapture) Complete(status int, respHeaders http.Header, respBody s
 
 // ForGate renders the request half as a Captured for the gate's evaluation,
 // whose verdict must be obtained before a response exists.
+//
+// Note what changed underneath it: RequestBody is now the SELECTED document, so
+// the gate -- and core's alignment judge downstream of it -- evaluates the newest
+// turns rather than the head window of boilerplate they used to see. That is the
+// point of selecting, and it is strictly better input, but it is a change to
+// enforcement INPUT and not only to stored evidence. No shipped policy matches
+// model-call content today (the seeded pack matches `command`, `file_path` and
+// `file_operation`, none of which a relayed call carries), so nothing changes
+// verdict today.
 func (r RequestCapture) ForGate() Captured {
 	return Captured{
 		CredentialFingerprint: r.Fingerprint,

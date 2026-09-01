@@ -589,7 +589,16 @@ const modelCallContentKey = "content"
 // measurement changes one line. Its own literal, NOT `= maxBodySize`: that one is a
 // RUNE bound, so raising it for longer thinking would silently change this byte cap
 // too. Equal today, and that is a coincidence worth keeping visible.
-const maxModelCallBodyBytes = 65536
+//
+// MaxModelCallBodyBytes is exported so internal/gateway can assert its own
+// selection budget stays strictly below this, in the package that owns the number.
+// The alternative was a duplicated literal in a gateway test, which reds only if
+// someone edits the copy too -- a guard that passes whether or not the invariant
+// holds. Import direction allows this: gateway already imports client, never the
+// reverse.
+const MaxModelCallBodyBytes = 65536
+
+const maxModelCallBodyBytes = MaxModelCallBodyBytes
 
 func capModelCallBody(s string) string {
 	if len(s) <= maxModelCallBodyBytes {

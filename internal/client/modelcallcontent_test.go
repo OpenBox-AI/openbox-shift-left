@@ -309,27 +309,23 @@ func TestRequestBodyTruncationKeepsTheTail(t *testing.T) {
 }
 
 // TestTheWiredPathDoesNotReachTheTruncationBranch closes the loop the test above
-// left open.
+// left open: a selected document passes this cap untouched -- no truncation mark,
+// no cut, byte-identical.
 //
-// internal/gateway now selects a model-call request body to a budget strictly
-// below this cap, so a selected document passes through untouched: no truncation
-// mark, no cut, byte-identical. That is the property that makes the composition
-// of caps safe, and asserting it here -- in the package that owns the cap -- is
-// what keeps a future change to either bound from silently putting the stored
-// body back on the boundary. If the gateway's selectionBudget ever rises to or
-// above maxModelCallBodyBytes, this test goes red.
+// What this test does NOT do, deliberately, is police the gateway's budget. An
+// earlier version duplicated `48 * 1024` here as a local const and claimed to go
+// red if the gateway's budget ever reached this cap. It would not have: it reds
+// only if someone edits the copy too, so it passed whether or not the invariant
+// held -- the same shape of placebo as the test above it. The real guard lives in
+// internal/gateway, asserting `selectionBudget < client.MaxModelCallBodyBytes`
+// against the exported constant, in the package that can see both numbers.
+//
+// So this asserts the local half only: a document sized like a selected one is
+// not cut here.
 func TestTheWiredPathDoesNotReachTheTruncationBranch(t *testing.T) {
-	// The selector's output shape, at the largest size it can emit: a 48 KiB
-	// budget, well inside this package's 65,536-byte cap.
-	const gatewaySelectionBudget = 48 * 1024
-	if gatewaySelectionBudget >= maxModelCallBodyBytes {
-		t.Fatalf("the gateway selects to %d bytes and this cap is %d; selection at or above the cap "+
-			"means capRunes head-cuts and the newest turn is dropped again",
-			gatewaySelectionBudget, maxModelCallBodyBytes)
-	}
 	selected := `{"model":"claude-opus-5","openbox_selection":{"dropped_messages":198,"original_bytes":541631},` +
 		`"messages":[{"role":"user","content":"` +
-		strings.Repeat("m", gatewaySelectionBudget-160) + `THE_NEWEST_TURN"}]}`
+		strings.Repeat("m", 48*1024-160) + `THE_NEWEST_TURN"}]}`
 
 	got := capModelCallRequest(selected)
 
