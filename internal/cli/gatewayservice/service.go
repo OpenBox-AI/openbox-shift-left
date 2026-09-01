@@ -19,18 +19,18 @@ func serviceName(goos string) (string, error) {
 
 // New returns the supervisor handle for the gateway on this platform.
 func New(goos, homeDir, binPath, addr, upstream string, verbose bool) (service.Service, error) {
-	return spec(addr, upstream, verbose).New(goos, homeDir, binPath)
+	return spec(addr, upstream, SettingsPath(homeDir), verbose).New(goos, homeDir, binPath)
 }
 
 // Install writes the unit through the library.
 func Install(goos, homeDir, binPath, addr, upstream string, verbose bool) error {
-	return spec(addr, upstream, verbose).Install(goos, homeDir, binPath)
+	return spec(addr, upstream, SettingsPath(homeDir), verbose).Install(goos, homeDir, binPath)
 }
 
 // Reinstall writes the unit, replacing one that is already there; the path by
 // which a unit written by an older binary gets refreshed.
 func Reinstall(goos, homeDir, binPath, addr, upstream string, verbose bool) error {
-	return spec(addr, upstream, verbose).Reinstall(goos, homeDir, binPath)
+	return spec(addr, upstream, SettingsPath(homeDir), verbose).Reinstall(goos, homeDir, binPath)
 }
 
 // Uninstall removes the unit. Absent is success: `--remove-gateway` must be

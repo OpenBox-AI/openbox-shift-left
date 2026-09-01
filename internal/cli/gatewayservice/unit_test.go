@@ -23,7 +23,7 @@ func TestUnitStopTimeoutMatchesTheGracePeriod(t *testing.T) {
 		t.Errorf("plist does not raise ExitTimeOut to %s; launchd's 20s default would SIGKILL mid-drain:\n%s", grace, plist)
 	}
 
-	unit := SystemdUnit("/usr/local/bin/openbox", "127.0.0.1:8788", "https://api.anthropic.com", false)
+	unit := SystemdUnit("/home/dev", "/usr/local/bin/openbox", "127.0.0.1:8788", "https://api.anthropic.com", false)
 	if !strings.Contains(unit, "TimeoutStopSec="+grace) {
 		t.Errorf("systemd unit does not set TimeoutStopSec=%s:\n%s", grace, unit)
 	}
@@ -35,11 +35,18 @@ func TestUnitStopTimeoutMatchesTheGracePeriod(t *testing.T) {
 // TestUnitsUseFlagsThatExist is the guard for the defect that would have
 // broken every boot.
 func TestUnitsUseFlagsThatExist(t *testing.T) {
-	valid := map[string]bool{"--addr": true, "--upstream": true, "--shutdown-grace": true}
+	// Hand-written on purpose: deriving this from the Spec under test would make
+	// the test agree with any spelling. `--settings` carries the tool's settings
+	// path INTO the unit, because a daemon cannot re-derive it -- launchd gives it
+	// no HOME, so the derivation yields a relative path resolved against /.
+	valid := map[string]bool{
+		"--addr": true, "--upstream": true, "--shutdown-grace": true,
+		"--settings": true, "--verbose": true, "--elected": true, "--refuse-all": true,
+	}
 
 	for name, body := range map[string]string{
 		"launchd": LaunchdPlist(t.TempDir(), "/bin/openbox", "127.0.0.1:8788", "https://api.anthropic.com", false),
-		"systemd": SystemdUnit("/bin/openbox", "127.0.0.1:8788", "https://api.anthropic.com", false),
+		"systemd": SystemdUnit("/home/dev", "/bin/openbox", "127.0.0.1:8788", "https://api.anthropic.com", false),
 	} {
 		for _, field := range strings.Fields(strings.NewReplacer("<string>", " ", "</string>", " ").Replace(body)) {
 			if strings.HasPrefix(field, "--") && !valid[field] {
@@ -76,7 +83,7 @@ func TestSupervisorRestartsACrashedGateway(t *testing.T) {
 	if !strings.Contains(plist, "<key>KeepAlive</key>") || !strings.Contains(plist, "<key>RunAtLoad</key>") {
 		t.Errorf("plist does not keep the gateway alive across crashes or logins:\n%s", plist)
 	}
-	unit := SystemdUnit("/bin/openbox", "127.0.0.1:8788", "https://x", false)
+	unit := SystemdUnit("/home/dev", "/bin/openbox", "127.0.0.1:8788", "https://x", false)
 	if !strings.Contains(unit, "Restart=always") {
 		t.Errorf("systemd unit does not restart on crash:\n%s", unit)
 	}
@@ -158,8 +165,8 @@ func TestBothUnitsCarryVerboseOnlyWhenAsked(t *testing.T) {
 		},
 		{
 			name: "systemd",
-			off:  SystemdUnit("/bin/openbox", "127.0.0.1:8788", "https://api.anthropic.com", false),
-			on:   SystemdUnit("/bin/openbox", "127.0.0.1:8788", "https://api.anthropic.com", true),
+			off:  SystemdUnit("/home/dev", "/bin/openbox", "127.0.0.1:8788", "https://api.anthropic.com", false),
+			on:   SystemdUnit("/home/dev", "/bin/openbox", "127.0.0.1:8788", "https://api.anthropic.com", true),
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

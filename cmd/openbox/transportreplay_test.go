@@ -139,10 +139,11 @@ func TestTransportRelaysARecordedExchangeByteIdentically(t *testing.T) {
 		t.Fatalf("LoadOrCreateCA: %v", err)
 	}
 	em := &gatewayemit.Emitter{
-		Lane:  gatewayemit.LaneProxy,
-		Spool: hookflow.Spool{Dir: spoolDir},
-		DID:   func() string { return "did:aip:7f3c9b2e-0000-5000-a000-00000000feed" },
-		Warn:  warn.record,
+		Elected: func() bool { return true },
+		Lane:    gatewayemit.LaneProxy,
+		Spool:   hookflow.Spool{Dir: spoolDir},
+		DID:     func() string { return "did:aip:7f3c9b2e-0000-5000-a000-00000000feed" },
+		Warn:    warn.record,
 	}
 	p, err := transport.New(transport.Config{Upstream: upstream.URL}, ca, em)
 	if err != nil {
@@ -259,10 +260,11 @@ func TestTransportStreamsARecordedSSEResponsePerChunk(t *testing.T) {
 		t.Fatalf("LoadOrCreateCA: %v", err)
 	}
 	em := &gatewayemit.Emitter{
-		Lane:  gatewayemit.LaneProxy,
-		Spool: hookflow.Spool{Dir: t.TempDir()},
-		DID:   func() string { return "did:aip:7f3c9b2e-0000-5000-a000-00000000feed" },
-		Warn:  func(string, ...any) {},
+		Elected: func() bool { return true },
+		Lane:    gatewayemit.LaneProxy,
+		Spool:   hookflow.Spool{Dir: t.TempDir()},
+		DID:     func() string { return "did:aip:7f3c9b2e-0000-5000-a000-00000000feed" },
+		Warn:    func(string, ...any) {},
 	}
 	p, err := transport.New(transport.Config{Upstream: upstream.URL}, ca, em)
 	if err != nil {
@@ -378,10 +380,11 @@ func TestTransportAddsNoCompressionHeaderOfItsOwn(t *testing.T) {
 	}
 	spoolDir := t.TempDir()
 	em := &gatewayemit.Emitter{
-		Lane:  gatewayemit.LaneProxy,
-		Spool: hookflow.Spool{Dir: spoolDir},
-		DID:   func() string { return "did:aip:7f3c9b2e-0000-5000-a000-00000000feed" },
-		Warn:  func(string, ...any) {},
+		Elected: func() bool { return true },
+		Lane:    gatewayemit.LaneProxy,
+		Spool:   hookflow.Spool{Dir: spoolDir},
+		DID:     func() string { return "did:aip:7f3c9b2e-0000-5000-a000-00000000feed" },
+		Warn:    func(string, ...any) {},
 	}
 	p, err := transport.New(transport.Config{Upstream: upstream.URL}, ca, em)
 	if err != nil {

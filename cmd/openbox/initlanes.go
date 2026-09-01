@@ -164,8 +164,8 @@ func (a *app) purgeLaneData(home string) {
 	caCert, caKey := transport.CAPaths(openboxHome)
 	paths := []string{
 		caCert, caKey,
-		laneservice.Telemetry("", false).LogPath(home),
-		laneservice.Transport("", false).LogPath(home),
+		laneservice.Telemetry("", "", false).LogPath(home),
+		laneservice.Transport("", "", false).LogPath(home),
 		gatewayservice.LogPath(home),
 		activation.RecordPath(home),
 	}
@@ -200,7 +200,7 @@ func (a *app) printLanePlan(p lanePlan) {
 	home := a.homeDir()
 	settings := gatewayservice.SettingsPath(home)
 	if p.telemetry {
-		spec := laneservice.Telemetry(p.telemetryAddr, false)
+		spec := laneservice.Telemetry(p.telemetryAddr, claudeSettingsPath(home), false)
 		keys := activation.TelemetryKeys(p.telemetryAddr)
 		fmt.Fprintf(a.stdout, "\nTelemetry receiver; PLANNED\n")
 		fmt.Fprintf(a.stdout, "  unit         %s\n", orNoPackaging(spec.UnitPath(runtime.GOOS, home), home))
@@ -211,7 +211,7 @@ func (a *app) printLanePlan(p lanePlan) {
 		fmt.Fprintf(a.stdout, "               gated by the content_capture posture.\n")
 	}
 	if p.transport {
-		spec := laneservice.Transport(p.transportAddr, false)
+		spec := laneservice.Transport(p.transportAddr, claudeSettingsPath(home), false)
 		openboxHome, _ := devconfig.Home()
 		caPath, _ := transport.CAPaths(openboxHome)
 		keys := activation.TransportKeys(p.transportAddr, caPath, nil)
@@ -230,8 +230,8 @@ func (a *app) printLanePlan(p lanePlan) {
 			name string
 			spec laneservice.Spec
 		}{
-			{p.removeTransport, "transport", laneservice.Transport("", false)},
-			{p.removeTelemetry, "telemetry", laneservice.Telemetry("", false)},
+			{p.removeTransport, "transport", laneservice.Transport("", "", false)},
+			{p.removeTelemetry, "telemetry", laneservice.Telemetry("", "", false)},
 		} {
 			if !lane.on {
 				continue

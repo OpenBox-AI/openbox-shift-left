@@ -16,22 +16,22 @@ const StopTimeout = laneservice.StopTimeout
 
 const verboseFlag = laneservice.VerboseFlag
 
-func spec(addr, upstream string, verbose bool) laneservice.Spec {
-	return laneservice.Gateway(addr, upstream, verbose)
+func spec(addr, upstream, settingsPath string, verbose bool) laneservice.Spec {
+	return laneservice.Gateway(addr, upstream, settingsPath, verbose)
 }
 
 func probeSpec() laneservice.Spec {
-	return laneservice.Gateway(DefaultProbeAddr, DefaultProbeUpstream, false)
+	return laneservice.Gateway(DefaultProbeAddr, DefaultProbeUpstream, "", false)
 }
 
 // LaunchdPlist renders the macOS unit.
 func LaunchdPlist(homeDir, binPath, addr, upstream string, verbose bool) string {
-	return spec(addr, upstream, verbose).LaunchdPlist(homeDir, binPath)
+	return spec(addr, upstream, SettingsPath(homeDir), verbose).LaunchdPlist(homeDir, binPath)
 }
 
-// SystemdUnit renders the Linux user unit.
-func SystemdUnit(binPath, addr, upstream string, verbose bool) string {
-	return spec(addr, upstream, verbose).SystemdUnit(binPath)
+// SystemdUnit renders the Linux user unit; homeDir is for the settings path.
+func SystemdUnit(homeDir, binPath, addr, upstream string, verbose bool) string {
+	return spec(addr, upstream, SettingsPath(homeDir), verbose).SystemdUnit(binPath)
 }
 
 // LogPath is where a supervised gateway's stdio is kept.
@@ -48,7 +48,7 @@ func UnitPath(goos, homeDir string) string { return probeSpec().UnitPath(goos, h
 
 // WriteUnit writes the unit for the given OS and returns its path.
 func WriteUnit(goos, homeDir, binPath, addr, upstream string, verbose bool) (string, error) {
-	return spec(addr, upstream, verbose).WriteUnit(goos, homeDir, binPath)
+	return spec(addr, upstream, SettingsPath(homeDir), verbose).WriteUnit(goos, homeDir, binPath)
 }
 
 // RemoveUnit is the uninstall half.

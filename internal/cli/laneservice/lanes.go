@@ -12,13 +12,14 @@ const (
 )
 
 // Gateway is the loopback base-URL relay.
-func Gateway(addr, upstream string, verbose bool) Spec {
+func Gateway(addr, upstream, settingsPath string, verbose bool) Spec {
 	args := []Arg{
 		Literal("gateway"),
 		Literal("--addr"), Value(addr),
 		Literal("--upstream"), Value(upstream),
 		Literal("--shutdown-grace"), Literal(grace),
 	}
+	args = withSettings(args, settingsPath)
 	return Spec{
 		Label:              GatewayLabel,
 		SystemdName:        GatewaySystemdName,
@@ -31,12 +32,13 @@ func Gateway(addr, upstream string, verbose bool) Spec {
 }
 
 // Telemetry is the local OTLP receiver (that decision `:otel:`).
-func Telemetry(addr string, verbose bool) Spec {
+func Telemetry(addr, settingsPath string, verbose bool) Spec {
 	args := []Arg{
 		Literal("telemetry"),
 		Literal("--addr"), Value(addr),
 		Literal("--shutdown-grace"), Literal(grace),
 	}
+	args = withSettings(args, settingsPath)
 	return Spec{
 		Label:              "ai.openbox.telemetry",
 		SystemdName:        "openbox-telemetry",
@@ -49,12 +51,13 @@ func Telemetry(addr string, verbose bool) Spec {
 }
 
 // Transport is the in-path CONNECT/TLS relay (that decision `:proxy:`).
-func Transport(addr string, verbose bool) Spec {
+func Transport(addr, settingsPath string, verbose bool) Spec {
 	args := []Arg{
 		Literal("transport"),
 		Literal("--addr"), Value(addr),
 		Literal("--shutdown-grace"), Literal(grace),
 	}
+	args = withSettings(args, settingsPath)
 	return Spec{
 		Label:              "ai.openbox.transport",
 		SystemdName:        "openbox-transport",
@@ -69,6 +72,17 @@ func Transport(addr string, verbose bool) Spec {
 // VerboseFlag is the one spelling, referenced by every Spec above and by the
 // test that holds them together.
 const VerboseFlag = "--verbose"
+
+// SettingsFlag carries the settings path INTO the unit at install time, because
+// a daemon cannot re-derive it: launchd gives it no HOME.
+const SettingsFlag = "--settings"
+
+func withSettings(args []Arg, settingsPath string) []Arg {
+	if settingsPath == "" {
+		return args
+	}
+	return append(args, Literal(SettingsFlag), Value(settingsPath))
+}
 
 func withVerbose(args []Arg, verbose bool) []Arg {
 	if !verbose {

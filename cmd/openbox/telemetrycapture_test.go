@@ -79,6 +79,18 @@ func TestTelemetryCommandActuallyRecords(t *testing.T) {
 	if got := ev["event_type"]; got != "TurnCompleted" {
 		t.Errorf("event_type = %v, want TurnCompleted", got)
 	}
+	// And its opening half, sharing the request id that makes them one activity.
+	// This lane used to emit only the close, so every model-call row it produced
+	// was unpaired -- outside the only pairing guard the suite had, which filters
+	// every query to tool activity types.
+	started := readSpooledEventOfType(t, spoolDir, session, "TurnStarted")
+	if started["otel_request_id"] != ev["otel_request_id"] {
+		t.Errorf("the pair split across request ids (%v, %v)",
+			started["otel_request_id"], ev["otel_request_id"])
+	}
+	if _, present := started["tokens"]; present {
+		t.Error("the opening half carries tokens, claiming a spend before the turn ran")
+	}
 	if got := ev["otel_request_id"]; got != requestID {
 		t.Errorf("otel_request_id = %v, want %q; without it turnActivityIDFor returns an EMPTY activity_id", got, requestID)
 	}
@@ -107,7 +119,10 @@ func TestTelemetryCommandActuallyRecords(t *testing.T) {
 	} else if got := span["semantic_type"]; got != "llm_completion" {
 		t.Errorf("span.semantic_type = %v", got)
 	}
-	if !strings.Contains(errb.String(), "turns recorded") {
+	// "event(s)", not "turns": one api_request now spools BOTH halves of its
+	// activity, and the counter follows the spool. Calling that a turn count
+	// reported 2x the turns on the daemon's one operator-facing line.
+	if !strings.Contains(errb.String(), "2 event(s) recorded") {
 		t.Errorf("the daemon never reported what it recorded; stderr: %s", errb.String())
 	}
 }
@@ -163,7 +178,10 @@ func TestTelemetryCommandRecordsNothingWhenNotElected(t *testing.T) {
 	if files := spoolFiles(t, spoolDir); len(files) != 0 {
 		t.Errorf("an UNELECTED lane wrote %d spool file(s): %v; this doubles every token count wherever another lane is also emitting", len(files), files)
 	}
-	if !strings.Contains(errb.String(), "NOT elected") {
+	// Every lane now says this in the same words, from one reporter, so the state
+	// that must never be phrased as a routing decision -- "the settings could not
+	// be read at all" -- cannot be worded differently per lane.
+	if !strings.Contains(errb.String(), "NOT the elected producer") {
 		t.Errorf("startup did not announce the unelected state; a silent non-recording lane is indistinguishable from a broken one. stderr: %s", errb.String())
 	}
 }
@@ -216,7 +234,15 @@ func spoolFiles(t *testing.T, spoolDir string) []string {
 	return out
 }
 
+// readSpooledEvent returns the COMPLETED half of a session's model-call
+// activity: one relayed or exported call is now one activity with two rows, and
+// the closing half is the one carrying the usage a caller means by "the event".
 func readSpooledEvent(t *testing.T, spoolDir, session string) map[string]any {
+	t.Helper()
+	return readSpooledEventOfType(t, spoolDir, session, "TurnCompleted")
+}
+
+func readSpooledEventOfType(t *testing.T, spoolDir, session, eventType string) map[string]any {
 	t.Helper()
 	files := spoolFiles(t, spoolDir)
 	if len(files) == 0 {
@@ -235,11 +261,13 @@ func readSpooledEvent(t *testing.T, spoolDir, session string) map[string]any {
 			if err := json.Unmarshal([]byte(line), &ev); err != nil {
 				continue
 			}
-			if s, _ := ev["openbox_session_id"].(string); s == session {
+			s, _ := ev["openbox_session_id"].(string)
+			et, _ := ev["event_type"].(string)
+			if s == session && et == eventType {
 				return ev
 			}
 		}
 	}
-	t.Fatalf("no spooled event for session %q; files: %v", session, files)
+	t.Fatalf("no spooled %s event for session %q; files: %v", eventType, session, files)
 	return nil
 }

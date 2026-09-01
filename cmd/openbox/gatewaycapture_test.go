@@ -16,6 +16,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -48,7 +49,9 @@ func TestGatewayCommandActuallyCaptures(t *testing.T) {
 	a.gatewayReady = func(addr net.Addr) { ready <- addr }
 
 	done := make(chan int, 1)
-	go func() { done <- a.runGateway([]string{"--addr", "127.0.0.1:0", "--upstream", upstream.URL}) }()
+	go func() {
+		done <- a.runGateway([]string{"--addr", "127.0.0.1:0", "--upstream", upstream.URL, "--elected"})
+	}()
 
 	var addr net.Addr
 	select {
@@ -84,10 +87,12 @@ func TestGatewayCommandActuallyCaptures(t *testing.T) {
 		t.Fatal("runGateway did not return after its context ended")
 	}
 
-	raw := readOneSpooledLine(t, spoolDir)
+	// The COMPLETED half: one relayed call is one activity with two rows, and this
+	// is the one carrying the response and the duration.
+	raw := readSpooledLine(t, spoolDir, client.EventTurnCompleted)
 	ev := decodeSpooledEvent(t, raw)
 	if ev.EventType != client.EventTurnCompleted {
-		t.Errorf("EventType = %q, want TurnCompleted (nothing else attaches the span)", ev.EventType)
+		t.Errorf("EventType = %q, want TurnCompleted", ev.EventType)
 	}
 	if ev.SessionID != "seam-session" {
 		t.Errorf("SessionID = %q, want the id the request header named", ev.SessionID)
@@ -101,9 +106,9 @@ func TestGatewayCommandActuallyCaptures(t *testing.T) {
 	if ev.Span.HTTPStatus != 200 || ev.Span.HTTPMethod != "POST" {
 		t.Errorf("classification fields wrong: %s %d", ev.Span.HTTPMethod, ev.Span.HTTPStatus)
 	}
-	if !strings.Contains(ev.Span.RequestBody, "claude-opus-4") {
-		t.Errorf("request body not captured: %q", ev.Span.RequestBody)
-	}
+	// The response on the closing half; the REQUEST is asserted on the opening half
+	// below, because that is the only half that carries it. Duplicating it here
+	// doubled the spooled bytes for a value nothing reads.
 	if !strings.Contains(ev.Span.ResponseBody, "assistant") {
 		t.Errorf("response body not captured: %q", ev.Span.ResponseBody)
 	}
@@ -116,8 +121,26 @@ func TestGatewayCommandActuallyCaptures(t *testing.T) {
 	// The redaction has to be the REASON it is absent, not an accident of
 	// serialization: the key survives with a redacted value, so a reviewer can
 	// still see that a credential was sent.
-	if got := ev.Span.RequestHeaders["Authorization"]; got != "[redacted]" {
-		t.Errorf("Authorization = %q, want exactly %q", got, "[redacted]")
+	// Asserted on the CAPTURE rather than on the wire, because the observed
+	// headers no longer egress: they only ever reached core inside spans[], which
+	// the normal path parses and discards, and they are the highest-risk class
+	// this client handles since the developer's live credential is on every model
+	// request. The redaction still has to be the REASON the value is absent, not
+	// an accident of serialization, so the key survives with a redacted value.
+	if got := ev.Span.RequestHeaders["Authorization"]; got != "" {
+		t.Errorf("Authorization = %q; the headers must not reach the spool at all now", got)
+	}
+	if strings.Contains(string(raw), "Anthropic-Version") {
+		t.Errorf("observed headers reached the spool: %s", raw)
+	}
+
+	// Both halves are there, sharing one request id.
+	started := decodeSpooledEvent(t, readSpooledLine(t, spoolDir, client.EventTurnStarted))
+	if started.GatewayRequestID != ev.GatewayRequestID {
+		t.Errorf("the pair split across request ids (%q, %q)", started.GatewayRequestID, ev.GatewayRequestID)
+	}
+	if !strings.Contains(started.Span.RequestBody, "claude-opus-4") {
+		t.Errorf("the opening half did not carry the request body: %q", started.Span.RequestBody)
 	}
 }
 
@@ -150,7 +173,9 @@ func TestGatewayWithoutADIDStillRelays(t *testing.T) {
 	a.gatewayReady = func(addr net.Addr) { ready <- addr }
 
 	done := make(chan int, 1)
-	go func() { done <- a.runGateway([]string{"--addr", "127.0.0.1:0", "--upstream", upstream.URL}) }()
+	go func() {
+		done <- a.runGateway([]string{"--addr", "127.0.0.1:0", "--upstream", upstream.URL, "--elected"})
+	}()
 
 	var addr net.Addr
 	select {
@@ -168,6 +193,51 @@ func TestGatewayWithoutADIDStillRelays(t *testing.T) {
 	}
 	cancel()
 	<-done
+}
+
+// readSpooledLine returns the spooled line for one half of the pair. It replaced
+// a helper that took the FIRST line, which stopped being unambiguous when one
+// relayed call began producing two rows.
+func readSpooledLine(t *testing.T, dir string, want client.EventType) []byte {
+	t.Helper()
+	for _, line := range readSpooledLines(t, dir) {
+		var probe struct {
+			EventType client.EventType `json:"event_type"`
+		}
+		if json.Unmarshal(line, &probe) == nil && probe.EventType == want {
+			return line
+		}
+	}
+	t.Fatalf("no spooled %s event in %s", want, dir)
+	return nil
+}
+
+// readSpooledLines returns every spooled line across every file in the spool.
+func readSpooledLines(t *testing.T, dir string) [][]byte {
+	t.Helper()
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("read spool dir: %v", err)
+	}
+	var out [][]byte
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		f, err := os.Open(filepath.Join(dir, e.Name()))
+		if err != nil {
+			t.Fatalf("open spool file: %v", err)
+		}
+		sc := bufio.NewScanner(f)
+		sc.Buffer(make([]byte, 0, 1<<20), 8<<20)
+		for sc.Scan() {
+			line := make([]byte, len(sc.Bytes()))
+			copy(line, sc.Bytes())
+			out = append(out, line)
+		}
+		f.Close()
+	}
+	return out
 }
 
 func readOneSpooledLine(t *testing.T, dir string) []byte {
@@ -218,9 +288,16 @@ func TestSpooledGatewayEventReachesTheWire(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	var posted []byte
+	// Every payload, not the last one: a relayed call posts both halves of its
+	// activity, and keeping only the most recent would assert half the evidence
+	// and silently ignore whether the other half went at all.
+	var mu sync.Mutex
+	var postedAll [][]byte
 	core := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		posted, _ = io.ReadAll(r.Body)
+		body, _ := io.ReadAll(r.Body)
+		mu.Lock()
+		postedAll = append(postedAll, body)
+		mu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
 		io.WriteString(w, `{"decision":"ALLOW"}`)
 	}))
@@ -247,7 +324,9 @@ func TestSpooledGatewayEventReachesTheWire(t *testing.T) {
 	a.gatewayReady = func(addr net.Addr) { ready <- addr }
 
 	done := make(chan int, 1)
-	go func() { done <- a.runGateway([]string{"--addr", "127.0.0.1:0", "--upstream", upstream.URL}) }()
+	go func() {
+		done <- a.runGateway([]string{"--addr", "127.0.0.1:0", "--upstream", upstream.URL, "--elected"})
+	}()
 
 	var addr net.Addr
 	select {
@@ -274,42 +353,72 @@ func TestSpooledGatewayEventReachesTheWire(t *testing.T) {
 	if code := flush.run([]string{"hook", "claude-code", "flush"}); code != exitOK {
 		t.Fatalf("flush exited %d: %s", code, flushErr.String())
 	}
-	if len(posted) == 0 {
+	mu.Lock()
+	defer mu.Unlock()
+	if len(postedAll) == 0 {
 		t.Fatal("the flush delivered nothing; the gateway's spool and the adapter's flush do not agree on a location")
 	}
 
-	var p struct {
-		ActivityID string `json:"activity_id"`
-		SpanCount  int    `json:"span_count"`
-		Spans      []struct {
-			SemanticType string         `json:"semantic_type"`
-			HTTPStatus   int            `json:"http_status_code"`
-			RequestBody  string         `json:"request_body"`
-			Attributes   map[string]any `json:"attributes"`
-		} `json:"spans"`
+	// Every posted payload, because one relayed call is now two rows and the
+	// evidence is split across them by design: the request opens the activity and
+	// the response closes it.
+	type payload struct {
+		EventType      string          `json:"event_type"`
+		ActivityID     string          `json:"activity_id"`
+		ActivityType   string          `json:"activity_type"`
+		ActivityInput  json.RawMessage `json:"activity_input"`
+		ActivityOutput json.RawMessage `json:"activity_output"`
+		DurationMs     *float64        `json:"duration_ms"`
+		Metadata       struct {
+			CredentialFingerprint string `json:"credential_fingerprint"`
+		} `json:"metadata"`
+		SpanCount int   `json:"span_count"`
+		Spans     []any `json:"spans"`
 	}
-	if err := json.Unmarshal(posted, &p); err != nil {
-		t.Fatalf("unmarshal posted payload: %v", err)
+	var halves []payload
+	for _, raw := range postedAll {
+		var p payload
+		if err := json.Unmarshal(raw, &p); err != nil {
+			t.Fatalf("unmarshal posted payload: %v", err)
+		}
+		halves = append(halves, p)
 	}
-	if p.ActivityID != "wire-seam-session:gateway:req_wire_seam" {
-		t.Errorf("activity_id = %q, want the gateway namespace", p.ActivityID)
+	if len(halves) != 2 {
+		t.Fatalf("the flush posted %d payload(s), want the pair", len(halves))
 	}
-	if p.SpanCount != 1 || len(p.Spans) != 1 {
-		t.Fatalf("span_count=%d; the observed exchange did not survive the spool round-trip", p.SpanCount)
+
+	var sawRequest, sawDuration bool
+	for _, p := range halves {
+		if p.ActivityID != "wire-seam-session:gateway:req_wire_seam" {
+			t.Errorf("%s: activity_id = %q, want the gateway namespace", p.EventType, p.ActivityID)
+		}
+		if p.ActivityType != client.ActivityTypeLLMCompletion {
+			t.Errorf("%s: activity_type = %q; core's readers filter on llm_completion", p.EventType, p.ActivityType)
+		}
+		// Rehomed from the span's attributes, which never persisted at all for a
+		// developer session, so account binding has never had a route into core.
+		if p.Metadata.CredentialFingerprint == "" {
+			t.Errorf("%s: fingerprint absent from metadata; account binding has no route into core", p.EventType)
+		}
+		if p.SpanCount != 0 || len(p.Spans) != 0 {
+			t.Errorf("%s: span_count=%d spans=%d, want none", p.EventType, p.SpanCount, len(p.Spans))
+		}
+		if strings.Contains(string(p.ActivityInput), "claude-opus-4") {
+			sawRequest = true
+		}
+		if p.DurationMs != nil {
+			sawDuration = true
+		}
 	}
-	if p.Spans[0].SemanticType != "llm_completion" {
-		t.Errorf("semantic_type = %q; core's readers filter on llm_completion", p.Spans[0].SemanticType)
+	if !sawRequest {
+		t.Errorf("the request body was lost between spool and wire: %s", postedAll)
 	}
-	if p.Spans[0].HTTPStatus != 200 {
-		t.Errorf("http_status_code = %d", p.Spans[0].HTTPStatus)
+	if !sawDuration {
+		t.Errorf("no half carried duration_ms; the relay measured the call: %s", postedAll)
 	}
-	if !strings.Contains(p.Spans[0].RequestBody, "claude-opus-4") {
-		t.Errorf("request body lost between spool and wire: %q", p.Spans[0].RequestBody)
-	}
-	if p.Spans[0].Attributes["openbox.credential_fingerprint"] == nil {
-		t.Error("fingerprint absent from attributes; account binding has no route into core")
-	}
-	if strings.Contains(string(posted), fakeCredential()) {
-		t.Error("the raw provider credential reached the wire")
+	for _, raw := range postedAll {
+		if strings.Contains(string(raw), fakeCredential()) {
+			t.Error("the raw provider credential reached the wire")
+		}
 	}
 }

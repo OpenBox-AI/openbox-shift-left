@@ -1,8 +1,10 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -142,6 +144,8 @@ func (a *app) runDoctor(args []string) int {
 
 	a.reportGateway()
 	a.reportLanes()
+	a.reportCoverage()
+	a.reportSpool()
 
 	fmt.Fprintf(a.stdout, "\nWhat this does and does not prove\n")
 	fmt.Fprintf(a.stdout, "  Settings sourced from `user` or `env` can be changed by whoever runs this\n")
@@ -258,11 +262,20 @@ func (a *app) reportLanes() {
 	election := activation.ResolveElection(settingsPath)
 
 	fmt.Fprintf(a.stdout, "\nModel-call producer (which lane emits turn events)\n")
-	if election.Elected == "" {
+	undecidable := election.SettingsProblem != ""
+	switch {
+	case undecidable:
+		fmt.Fprintf(a.stdout, "  elected      CANNOT BE DECIDED; %s\n", election.SettingsProblem)
+		fmt.Fprintf(a.stdout, "               This is NOT the same as no lane being routed. Nothing here knows\n")
+		fmt.Fprintf(a.stdout, "               what this machine is configured to do, so treat every lane line\n")
+		fmt.Fprintf(a.stdout, "               below as unverified. They are still printed: whether a unit is\n")
+		fmt.Fprintf(a.stdout, "               installed and whether anything is listening do not come from the\n")
+		fmt.Fprintf(a.stdout, "               settings file, and they are what recovery starts from.\n")
+	case election.Elected == "":
 		fmt.Fprintf(a.stdout, "  elected      (none); %s\n", election.Reason)
 		fmt.Fprintf(a.stdout, "               No lane emits model-call turns, so token counts and costs for this\n")
 		fmt.Fprintf(a.stdout, "               machine are ABSENT rather than merely incomplete.\n")
-	} else {
+	default:
 		fmt.Fprintf(a.stdout, "  elected      %s\n", election.Elected)
 		fmt.Fprintf(a.stdout, "  because      %s\n", election.Reason)
 	}
@@ -282,8 +295,8 @@ func (a *app) reportLanes() {
 		spec laneservice.Spec
 		addr string
 	}{
-		{"telemetry", laneservice.Telemetry(telemetry.DefaultAddr, false), telemetry.DefaultAddr},
-		{"transport", laneservice.Transport(transport.DefaultAddr, false), transport.DefaultAddr},
+		{"telemetry", laneservice.Telemetry(telemetry.DefaultAddr, "", false), telemetry.DefaultAddr},
+		{"transport", laneservice.Transport(transport.DefaultAddr, "", false), transport.DefaultAddr},
 	} {
 		fmt.Fprintf(a.stdout, "\n%s lane\n", strings.ToUpper(lane.name[:1])+lane.name[1:])
 		unit := lane.spec.UnitPath(runtime.GOOS, home)
@@ -318,4 +331,88 @@ func (a *app) reportLanes() {
 	fmt.Fprintf(a.stdout, "\n  Installed is not recording. A lane can be reachable, configured and elected\n")
 	fmt.Fprintf(a.stdout, "  while emitting nothing; no developer DID, or a posture key off. The log above\n")
 	fmt.Fprintf(a.stdout, "  is the only place that says so.\n")
+}
+
+// reportSpool is where the machine-wide backlog is actionable, which
+// `evidence_undelivered` is not: it counts carry-over files only.
+func (a *app) reportSpool() {
+	spool := hookflow.Spool{Dir: devconfig.SpoolDir(transportSpoolSubdir)}
+
+	fmt.Fprintf(a.stdout, "\nSpooled evidence (waiting to reach the control plane)\n")
+	fmt.Fprintf(a.stdout, "  directory    %s\n", spool.Dir)
+
+	backlog := spool.BacklogCount()
+	switch {
+	case backlog == 0:
+		fmt.Fprintf(a.stdout, "  waiting      0; delivery is self-triggering, so an empty queue is the healthy state\n")
+	default:
+		fmt.Fprintf(a.stdout, "  waiting      %d event(s), of which %d are in carry-over files from a failed\n", backlog, spool.UndeliveredCount())
+		fmt.Fprintf(a.stdout, "               delivery. A lane daemon sweeps every %s; `openbox hook claude-code\n", hookflow.DefaultSweepInterval)
+		fmt.Fprintf(a.stdout, "               flush` does it now.\n")
+	}
+
+	if discarded := spool.DiscardedCount(); discarded > 0 {
+		fmt.Fprintf(a.stdout, "  DISCARDED    at least %d event(s) were given up on and are GONE: past %d delivery\n", discarded, hookflow.MaxRecoveryAttempts)
+		fmt.Fprintf(a.stdout, "               attempts, or past the %d-day retention age. This is real loss of\n", int(hookflow.RetireSpoolAfter.Hours()/24))
+		fmt.Fprintf(a.stdout, "               governance evidence, recorded in %s. \"At least\" because\n", spool.DiscardPath())
+		fmt.Fprintf(a.stdout, "               that record is size-capped and restarts, so it is a floor.\n")
+	}
+	if backlog > 0 || spool.DiscardedCount() > 0 {
+		fmt.Fprintf(a.stdout, "  flusher log  %s\n", spool.FlusherLogPath())
+	}
+}
+
+// reportCoverage answers what absence cannot; docs/coverage.md §1b.
+func (a *app) reportCoverage() {
+	home := a.homeDir()
+	settingsPath := gatewayservice.SettingsPath(home)
+
+	fmt.Fprintf(a.stdout, "\nRouting durability (has anything un-routed a lane?)\n")
+	switch coverage, err := activation.CoverageOf(home); {
+	case err != nil:
+		fmt.Fprintf(a.stdout, "  unknown      %v\n", err)
+		fmt.Fprintf(a.stdout, "               Treat the lane lines above as unverified.\n")
+	case len(coverage) == 0:
+		fmt.Fprintf(a.stdout, "  n/a          no lane has written env keys on this machine\n")
+	default:
+		for _, c := range coverage {
+			if c.Intact() {
+				fmt.Fprintf(a.stdout, "  %-12s intact; all %d managed key(s) still as installed\n", c.Lane, len(c.Managed))
+				continue
+			}
+			label := "CHANGED"
+			if c.Vanished() {
+				label = "UN-ROUTED"
+			}
+			fmt.Fprintf(a.stdout, "  %-12s %s: %s\n", c.Lane, label, c.Describe())
+			fmt.Fprintf(a.stdout, "               `openbox init --provider claude-code --full` rewrites them.\n")
+			fmt.Fprintf(a.stdout, "               Note: during an install this state is normal for a few seconds -\n")
+			fmt.Fprintf(a.stdout, "               the daemon is started BEFORE its env keys are written, on purpose.\n")
+		}
+	}
+
+	fmt.Fprintf(a.stdout, "\nClaude desktop app (a governed surface with no lane of its own)\n")
+	// The machine's OWN port: the default would call a routed app unrouted.
+	relayPort := activation.RelayPortFrom(activation.ReadSettingsEnv(settingsPath).Env)
+	relayAddr := transport.DefaultAddr
+	if relayPort == "" {
+		relayPort = portOf(transport.DefaultAddr)
+	} else {
+		relayAddr = "127.0.0.1:" + relayPort
+	}
+	desktop := activation.InspectDesktop(context.Background(), relayPort)
+	fmt.Fprintf(a.stdout, "  coverage     %s\n", desktop.Describe(relayAddr))
+	if desktop.Note != "" {
+		fmt.Fprintf(a.stdout, "  note         %s\n", desktop.Note)
+	}
+	fmt.Fprintf(a.stdout, "               Routing the desktop app is NOT implemented: how it resolves proxy\n")
+	fmt.Fprintf(a.stdout, "               settings and a trust anchor is still an open question, so this line\n")
+	fmt.Fprintf(a.stdout, "               reports coverage and claims nothing about how to fix it.\n")
+}
+
+func portOf(addr string) string {
+	if _, port, err := net.SplitHostPort(addr); err == nil {
+		return port
+	}
+	return ""
 }

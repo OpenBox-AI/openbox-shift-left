@@ -13,6 +13,7 @@ import (
 
 	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/devconfig"
 	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/hookflow"
+	"github.com/openbox-ai/openbox-shift-left/internal/cli/activation"
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/gatewayemit"
 	"github.com/openbox-ai/openbox-shift-left/internal/gateway"
 )
@@ -29,6 +30,8 @@ func (a *app) runGateway(args []string) int {
 	grace := fs.Duration("shutdown-grace", 30*time.Second, "how long to let in-flight streams drain after a stop signal")
 	verbose := fs.Bool("verbose", false, "log every relayed call and whether it was recorded (no credentials, headers or bodies are printed)")
 	refuseAll := fs.Bool("refuse-all", false, "PROBE A ONLY: refuse every model call, to measure how Claude Code reacts to the refusal shape")
+	elected := fs.Bool("elected", false, "force this lane to emit model-call turns, overriding the automatic producer election. Normally unnecessary: the election is derived from where the tool's settings route model calls")
+	settings := fs.String("settings", "", "absolute path to the governed tool's settings file, written into the unit at install time. Empty falls back to deriving it from $HOME, which a daemon does not reliably have")
 	refuseStatus := fs.Int("refusal-status", 0, "PROBE A ONLY: override the refusal status code (default: the provisional 403)")
 	refuseType := fs.String("refusal-error-type", "", "PROBE A ONLY: override the refusal error type string")
 	if code, ok := parseFlags(fs, args); !ok {
@@ -48,8 +51,11 @@ func (a *app) runGateway(args []string) int {
 	// Probe-A mode replaces the handler wholesale below, so `g`; and the emitter
 	// wired onto it; would never be served.
 	logger := log.New(a.stderr, "", 0)
+	settingsPath := a.laneSettingsPath(*settings)
+	spool := hookflow.Spool{Dir: devconfig.SpoolDir(gatewaySpoolSubdir)}
+	// The completeness net (see Sweeper); out here because probe-A mode still spools.
+	sweeper := hookflow.Sweeper{Spool: spool, Provider: gatewaySpoolProvider}
 	if !*refuseAll {
-		spool := hookflow.Spool{Dir: devconfig.SpoolDir(gatewaySpoolSubdir)}
 		trigger := hookflow.RealtimeTrigger{Spool: spool, Provider: gatewaySpoolProvider}
 		em := &gatewayemit.Emitter{
 			Lane:  gatewayemit.LaneGateway,
@@ -57,11 +63,20 @@ func (a *app) runGateway(args []string) int {
 			DID:   devconfig.ResolveDIDOrEmpty,
 			Warn:  logger.Printf,
 			Flush: func(sessionID string) { trigger.Maybe(logger, sessionID) },
+			// See transport.go: derived per record, not cached at startup.
+			Elected: electedFn(settingsPath, activation.LaneGateway, elected),
+			// Not derivable from Elected(): a false there means either "another lane
+			// won" or "nothing could be read", and only the second is a defect.
+			ElectionProblem: electionProblemFn(settingsPath, elected),
 		}
 		if *verbose {
 			em.Verbose = logger.Printf
 		}
 		g = g.WithCapture(em)
+		// ~40% of relayed POSTs are probes, whose bodies CarriesContent() discards.
+		g = g.WithBodyCapture(func(r *http.Request) bool {
+			return gatewayemit.CapturesBody(r.URL.Path)
+		})
 	}
 	if *verbose {
 		g = g.WithVerbose(logger.Printf)
@@ -112,6 +127,10 @@ func (a *app) runGateway(args []string) int {
 	}
 	if a.gatewayReady != nil {
 		a.gatewayReady(listener.Addr())
+	}
+	go sweeper.Run(ctx, logger)
+	if !*refuseAll {
+		reportElection(logger, "gateway", settingsPath, activation.LaneGateway, *elected)
 	}
 
 	serveErr := make(chan error, 1)

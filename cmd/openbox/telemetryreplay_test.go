@@ -91,8 +91,13 @@ func TestTelemetryReplayMapsRecordedTrafficToTurns(t *testing.T) {
 		t.Errorf("emitter counted %d emissions but %d events reached the spool", emitted, len(events))
 	}
 
-	if len(events) != 5 {
-		t.Errorf("got %d turns from the recorded export, want 5 (one per recorded api_request)", len(events))
+	// Two rows per api_request, not one: every activity_id must carry exactly one
+	// ActivityStarted and one ActivityCompleted, and this lane used to emit only
+	// the closing half, so every model-call row it produced was unpaired by
+	// construction.
+	const recorded = 5
+	if len(events) != recorded*2 {
+		t.Errorf("got %d rows from %d recorded api_request(s), want the pair for each", len(events), recorded)
 	}
 
 	// Fifteen records are unhandled event types, so the counter must say so.
@@ -100,34 +105,55 @@ func TestTelemetryReplayMapsRecordedTrafficToTurns(t *testing.T) {
 		t.Errorf("no unhandled-event drops were counted; a lane that drops silently cannot be told from a quiet session. counters: %v", drops)
 	}
 
-	ids := map[string]bool{}
+	// Per request id, so the assertion is about DISTINCT CALLS not sharing an id --
+	// which is what it always meant. The two halves of one call share it on
+	// purpose: that shared id is what makes them one timeline row.
+	halves := map[string]map[string]int{}
 	for _, ev := range events {
-		if got := ev["event_type"]; got != "TurnCompleted" {
-			t.Errorf("event_type = %v, want TurnCompleted", got)
-		}
 		reqID, _ := ev["otel_request_id"].(string)
 		if reqID == "" {
 			t.Error("otel_request_id is empty; without the lane discriminator turnActivityIDFor returns an EMPTY activity_id")
+			continue
 		}
-		if ids[reqID] {
-			t.Errorf("two turns share otel_request_id %q; core's dedupe would absorb one and half the evidence would vanish", reqID)
+		if halves[reqID] == nil {
+			halves[reqID] = map[string]int{}
 		}
-		ids[reqID] = true
+		eventType, _ := ev["event_type"].(string)
+		halves[reqID][eventType]++
 
 		if model, _ := ev["model"].(string); model == "" {
 			t.Error("no model on the turn; it is core's aggregation key")
 		}
-		tokens, _ := ev["tokens"].(map[string]any)
-		if tokens == nil {
-			t.Errorf("no tokens on the turn, which is this lane's whole payload: %v", ev)
-		}
 		span, _ := ev["span"].(map[string]any)
 		if span == nil {
-			t.Error("no span; core recomputes semantic_type per span and this is the only path to llm_completion")
+			t.Error("no span on the normalized event; the http_* keys travel on it")
 			continue
 		}
 		if got := span["semantic_type"]; got != "llm_completion" {
 			t.Errorf("span.semantic_type = %v, want llm_completion", got)
+		}
+		// The usage is known only at the close, and zero-filling the opening half
+		// would claim a turn that spent nothing.
+		tokens, _ := ev["tokens"].(map[string]any)
+		switch eventType {
+		case "TurnCompleted":
+			if tokens == nil {
+				t.Errorf("no tokens on the completed turn, which is this lane's whole payload: %v", ev)
+			}
+		case "TurnStarted":
+			if tokens != nil {
+				t.Errorf("the opening half carries tokens, claiming a spend before the turn ran: %v", tokens)
+			}
+		}
+	}
+
+	if len(halves) != recorded {
+		t.Errorf("%d distinct request id(s) from %d recorded api_request(s)", len(halves), recorded)
+	}
+	for reqID, got := range halves {
+		if got["TurnStarted"] != 1 || got["TurnCompleted"] != 1 {
+			t.Errorf("request %s produced %d Started and %d Completed, want exactly one of each",
+				reqID, got["TurnStarted"], got["TurnCompleted"])
 		}
 	}
 }

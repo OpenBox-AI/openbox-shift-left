@@ -27,6 +27,12 @@ import (
 
 const soakIterations = 8
 
+// eventsPerModelCall is the pair: one relayed call produces an ActivityStarted
+// and an ActivityCompleted. Named rather than inlined because every figure this
+// file reports is per CALL, and dividing spool bytes by ROWS silently halves all
+// of them.
+const eventsPerModelCall = 2
+
 // TestTransportSoakMeasuresSpoolCostPerModelCall records what the lane costs.
 func TestTransportSoakMeasuresSpoolCostPerModelCall(t *testing.T) {
 	ex := loadExchange(t, "messages-json.json")
@@ -50,10 +56,11 @@ func TestTransportSoakMeasuresSpoolCostPerModelCall(t *testing.T) {
 		t.Fatalf("LoadOrCreateCA: %v", err)
 	}
 	em := &gatewayemit.Emitter{
-		Lane:  gatewayemit.LaneProxy,
-		Spool: hookflow.Spool{Dir: spoolDir},
-		DID:   func() string { return "did:aip:7f3c9b2e-0000-5000-a000-00000000feed" },
-		Warn:  func(string, ...any) {},
+		Elected: func() bool { return true },
+		Lane:    gatewayemit.LaneProxy,
+		Spool:   hookflow.Spool{Dir: spoolDir},
+		DID:     func() string { return "did:aip:7f3c9b2e-0000-5000-a000-00000000feed" },
+		Warn:    func(string, ...any) {},
 	}
 	p, err := transport.New(transport.Config{Upstream: upstream.URL}, ca, em)
 	if err != nil {
@@ -92,7 +99,7 @@ func TestTransportSoakMeasuresSpoolCostPerModelCall(t *testing.T) {
 			raw, _ := os.ReadFile(path)
 			lines = strings.Count(strings.TrimSpace(string(raw)), "\n") + 1
 			size = fi.Size()
-			if lines >= soakIterations {
+			if lines >= soakIterations*eventsPerModelCall {
 				break
 			}
 		}
@@ -102,9 +109,16 @@ func TestTransportSoakMeasuresSpoolCostPerModelCall(t *testing.T) {
 		t.Fatal("nothing reached the spool; there is no cost to measure")
 	}
 
-	perEvent := size / int64(lines)
-	t.Logf("SOAK: %d model call(s), request body %d runes, %v total (%v/call)",
-		lines, reqRunes, elapsed.Round(time.Millisecond), (elapsed / time.Duration(soakIterations)).Round(time.Millisecond))
+	// Per CALL, not per row. Since each relayed call became a paired activity this
+	// distinction is the difference between the real figure and half of it, and
+	// this test exists precisely to produce the real one.
+	calls := lines / eventsPerModelCall
+	if calls == 0 {
+		t.Fatalf("%d spooled row(s) is fewer than one whole model call", lines)
+	}
+	perEvent := size / int64(calls)
+	t.Logf("SOAK: %d model call(s) as %d spooled row(s), request body %d runes, %v total (%v/call)",
+		calls, lines, reqRunes, elapsed.Round(time.Millisecond), (elapsed / time.Duration(soakIterations)).Round(time.Millisecond))
 	t.Logf("SOAK: spool grew to %d bytes; %d bytes per model call", size, perEvent)
 
 	if perEvent >= int64(reqRunes) {

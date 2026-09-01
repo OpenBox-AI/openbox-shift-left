@@ -18,7 +18,7 @@ func TestSuppliedTemplatesSurviveRendering(t *testing.T) {
 		"launchd": LaunchdPlist(home, "/usr/local/bin/openbox", "127.0.0.1:8788", "https://api.anthropic.com", false),
 		"launchd verbose": LaunchdPlist(home, "/usr/local/bin/openbox", "127.0.0.1:8788",
 			"https://api.anthropic.com", true),
-		"systemd": SystemdUnit("/usr/local/bin/openbox", "127.0.0.1:8788", "https://api.anthropic.com", false),
+		"systemd": SystemdUnit("/home/dev", "/usr/local/bin/openbox", "127.0.0.1:8788", "https://api.anthropic.com", false),
 	} {
 		t.Run(name, func(t *testing.T) {
 			if strings.Contains(body, "{{") {

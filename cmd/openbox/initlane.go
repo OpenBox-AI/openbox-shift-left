@@ -126,7 +126,8 @@ var uninstallLaneUnitFn = func(spec laneservice.Spec, goos, homeDir string) erro
 // setupTelemetry installs the local OTLP receiver and points the tool's own
 // telemetry at it.
 func (a *app) setupTelemetry(homeDir, addr string, verbose bool) error {
-	spec := laneservice.Telemetry(addr, verbose)
+	// The settings path goes INTO the unit: only the install path knows the real home.
+	spec := laneservice.Telemetry(addr, claudeSettingsPath(homeDir), verbose)
 	binPath, err := a.selfPath()
 	if err != nil {
 		return err
@@ -155,7 +156,7 @@ func (a *app) setupTelemetry(homeDir, addr string, verbose bool) error {
 }
 
 func (a *app) removeTelemetry(homeDir string, force bool) error {
-	spec := laneservice.Telemetry(telemetry.DefaultAddr, false)
+	spec := laneservice.Telemetry(telemetry.DefaultAddr, "", false)
 	settings := claudeSettingsPath(homeDir)
 	return a.removeLane(laneRemoval{
 		label:         "telemetry",
@@ -168,7 +169,7 @@ func (a *app) removeTelemetry(homeDir string, force bool) error {
 }
 
 func (a *app) setupTransport(homeDir, addr string, verbose bool) error {
-	spec := laneservice.Transport(addr, verbose)
+	spec := laneservice.Transport(addr, claudeSettingsPath(homeDir), verbose)
 	binPath, err := a.selfPath()
 	if err != nil {
 		return err
@@ -212,7 +213,7 @@ func (a *app) setupTransport(homeDir, addr string, verbose bool) error {
 }
 
 func (a *app) removeTransport(homeDir string, force bool) error {
-	spec := laneservice.Transport(transport.DefaultAddr, false)
+	spec := laneservice.Transport(transport.DefaultAddr, "", false)
 	settings := claudeSettingsPath(homeDir)
 	return a.removeLane(laneRemoval{
 		label:         "transport",

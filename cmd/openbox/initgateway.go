@@ -160,7 +160,9 @@ func (a *app) homeDir() string {
 	return ""
 }
 
-func portOccupied(addr string) (bool, string) {
+// portOccupied is a var like installUnitFn: it reaches the real network, which the
+// machine running this suite has its own lanes on.
+var portOccupied = func(addr string) (bool, string) {
 	conn, err := net.DialTimeout("tcp", addr, 300*time.Millisecond)
 	if err != nil {
 		return false, ""

@@ -3,6 +3,7 @@ package laneservice
 import (
 	"encoding/xml"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -18,19 +19,22 @@ var allLanes = []struct {
 	flags map[string]bool
 }{
 	{
-		name:  "gateway",
-		spec:  Gateway("127.0.0.1:8788", "https://api.anthropic.com", false),
-		flags: map[string]bool{"--addr": true, "--upstream": true, "--shutdown-grace": true, "--verbose": true},
+		name: "gateway",
+		spec: Gateway("127.0.0.1:8788", "https://api.anthropic.com", "", false),
+		flags: map[string]bool{"--addr": true, "--upstream": true, "--shutdown-grace": true, "--verbose": true,
+			"--elected": true, "--settings": true, "--refuse-all": true},
 	},
 	{
-		name:  "telemetry",
-		spec:  Telemetry("127.0.0.1:8789", false),
-		flags: map[string]bool{"--addr": true, "--shutdown-grace": true, "--verbose": true, "--elected": true},
+		name: "telemetry",
+		spec: Telemetry("127.0.0.1:8789", "", false),
+		flags: map[string]bool{"--addr": true, "--shutdown-grace": true, "--verbose": true, "--elected": true,
+			"--settings": true},
 	},
 	{
-		name:  "transport",
-		spec:  Transport("127.0.0.1:8790", false),
-		flags: map[string]bool{"--addr": true, "--shutdown-grace": true, "--verbose": true},
+		name: "transport",
+		spec: Transport("127.0.0.1:8790", "", false),
+		flags: map[string]bool{"--addr": true, "--shutdown-grace": true, "--verbose": true,
+			"--elected": true, "--settings": true},
 	},
 }
 
@@ -131,9 +135,9 @@ func TestEveryLaneCarriesVerboseOnlyWhenAsked(t *testing.T) {
 		name    string
 		off, on Spec
 	}{
-		{"gateway", Gateway("127.0.0.1:8788", "https://x", false), Gateway("127.0.0.1:8788", "https://x", true)},
-		{"telemetry", Telemetry("127.0.0.1:8789", false), Telemetry("127.0.0.1:8789", true)},
-		{"transport", Transport("127.0.0.1:8790", false), Transport("127.0.0.1:8790", true)},
+		{"gateway", Gateway("127.0.0.1:8788", "https://x", "", false), Gateway("127.0.0.1:8788", "https://x", "", true)},
+		{"telemetry", Telemetry("127.0.0.1:8789", "", false), Telemetry("127.0.0.1:8789", "", true)},
+		{"transport", Transport("127.0.0.1:8790", "", false), Transport("127.0.0.1:8790", "", true)},
 	} {
 		home := t.TempDir()
 		for platform, pair := range map[string][2]string{
@@ -166,7 +170,7 @@ func TestPlistsAreWellFormedXML(t *testing.T) {
 
 // TestSystemdQuotingIsExplicitPerArgument.
 func TestSystemdQuotingIsExplicitPerArgument(t *testing.T) {
-	unit := Gateway("127.0.0.1:8788", "https://relay.example/%s/v1", false).
+	unit := Gateway("127.0.0.1:8788", "https://relay.example/%s/v1", "", false).
 		SystemdUnit(`/Users/a b/bin/openbox`)
 	if !strings.Contains(unit, `"/Users/a b/bin/openbox"`) {
 		t.Errorf("a binary path with a space was not quoted:\n%s", unit)
@@ -246,6 +250,51 @@ func TestSuppliedTemplatesSurviveRendering(t *testing.T) {
 			if out.String() != body {
 				t.Errorf("%s: body is not render-stable", name)
 			}
+		}
+	}
+}
+
+// TestEveryLaneUnitCarriesTheSettingsPath is the fix for defect 6a asserted where
+// it lands: in the unit.
+//
+// A daemon cannot re-derive this path. kardianos/service writes no HOME into the
+// launchd plist, so $HOME is empty inside the daemon and SettingsPath("") yields
+// the RELATIVE ".claude/settings.json", which launchd resolves against /. The
+// read fails silently, and the producer election then reports "no lane is routed"
+// -- the one outcome that reads as a configuration choice rather than a bug. The
+// install path is the only place that knows the real home for certain, so it puts
+// the answer in the argv.
+func TestEveryLaneUnitCarriesTheSettingsPath(t *testing.T) {
+	const settings = "/Users/dev/.claude/settings.json"
+	for name, spec := range map[string]Spec{
+		"gateway":   Gateway("127.0.0.1:8788", "https://api.anthropic.com", settings, false),
+		"telemetry": Telemetry("127.0.0.1:4318", settings, false),
+		"transport": Transport("127.0.0.1:8790", settings, false),
+	} {
+		argv := strings.Join(spec.Argv("/usr/local/bin/openbox"), " ")
+		if !strings.Contains(argv, SettingsFlag+" "+settings) {
+			t.Errorf("%s argv does not carry %s: %s", name, SettingsFlag, argv)
+		}
+		// A relative path in the unit would reintroduce the whole defect.
+		if !filepath.IsAbs(settings) {
+			t.Fatal("the fixture itself is not absolute")
+		}
+	}
+}
+
+// TestALaneUnitOmitsTheFlagWhenThereIsNoPath the identity-only Specs (log path,
+// unit path) carry no addresses either, and an empty --settings on an argv would
+// be worse than none: the daemon's own fallback is at least honest about being
+// one.
+func TestALaneUnitOmitsTheFlagWhenThereIsNoPath(t *testing.T) {
+	for name, spec := range map[string]Spec{
+		"gateway":   Gateway("", "", "", false),
+		"telemetry": Telemetry("", "", false),
+		"transport": Transport("", "", false),
+	} {
+		argv := strings.Join(spec.Argv("/usr/local/bin/openbox"), " ")
+		if strings.Contains(argv, SettingsFlag) {
+			t.Errorf("%s argv carries an empty %s: %s", name, SettingsFlag, argv)
 		}
 	}
 }

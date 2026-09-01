@@ -46,10 +46,11 @@ func TestTransportLaneRecordsThroughTheRealChain(t *testing.T) {
 
 	// Nil Flush: the detached flusher must never be spawned from a test binary.
 	em := &gatewayemit.Emitter{
-		Lane:  gatewayemit.LaneProxy,
-		Spool: hookflow.Spool{Dir: spoolDir},
-		DID:   func() string { return "did:aip:7f3c9b2e-0000-5000-a000-00000000feed" },
-		Warn:  func(string, ...any) {},
+		Elected: func() bool { return true },
+		Lane:    gatewayemit.LaneProxy,
+		Spool:   hookflow.Spool{Dir: spoolDir},
+		DID:     func() string { return "did:aip:7f3c9b2e-0000-5000-a000-00000000feed" },
+		Warn:    func(string, ...any) {},
 	}
 
 	p, err := transport.New(transport.Config{Upstream: refusedUpstream}, ca, em)
@@ -130,8 +131,7 @@ func TestTransportLaneRecordsThroughTheRealChain(t *testing.T) {
 		t.Errorf("proxy_request_id %q does not carry the lane's prefix", ev.ProxyRequestID)
 	}
 	if ev.EventType != client.EventTurnCompleted {
-		t.Errorf("event_type = %q; client/payload.go attaches the observed span only on TurnCompleted, "+
-			"so any other type ships with none of the evidence", ev.EventType)
+		t.Errorf("event_type = %q, want the completed half", ev.EventType)
 	}
 	if ev.Span == nil {
 		t.Fatal("no span on the spooled event")
@@ -140,15 +140,25 @@ func TestTransportLaneRecordsThroughTheRealChain(t *testing.T) {
 		t.Error("no credential fingerprint; account binding has nothing to match on")
 	}
 	// Both directions, because only one of them is a control: "the secret is
-	// absent" passes trivially if the header never reached the record at all, so
-	// the header's presence is asserted too.
-	if _, ok := ev.Span.RequestHeaders["X-Api-Key"]; !ok {
-		t.Errorf("X-Api-Key is missing from the record entirely (headers: %v). The absence check "+
-			"below would then pass without measuring anything.", ev.Span.RequestHeaders)
+	// absent" passes trivially if nothing about the credential reached the record
+	// at all. The header map used to be the non-vacuity witness; the headers no
+	// longer reach the spool (they only ever egressed inside spans[], which core
+	// discards, and they are the highest-risk class this client handles), so the
+	// fingerprint is the witness now -- it is present precisely when a credential
+	// was sent, and it is derived rather than carried.
+	if ev.Span.CredentialFingerprint == "" {
+		t.Error("nothing about the credential reached the record, so the absence check below " +
+			"would pass without measuring anything")
 	}
-	for k, v := range ev.Span.RequestHeaders {
-		if strings.Contains(v, fakeKey) {
-			t.Errorf("header %s carries the live credential verbatim: %q", k, v)
+	if len(ev.Span.RequestHeaders) != 0 || len(ev.Span.ResponseHeaders) != 0 {
+		t.Errorf("observed headers reached the spool: req=%v resp=%v",
+			ev.Span.RequestHeaders, ev.Span.ResponseHeaders)
+	}
+	if raw := readSpooledLines(t, spoolDir); len(raw) > 0 {
+		for _, line := range raw {
+			if strings.Contains(string(line), fakeKey) {
+				t.Error("the live credential was written to the spool verbatim")
+			}
 		}
 	}
 	if ev.SessionID != sessionID {
@@ -183,7 +193,7 @@ func TestTransportCommandListensAndRecords(t *testing.T) {
 	a.transportReady = func(bound string) { ready <- bound }
 
 	done := make(chan int, 1)
-	go func() { done <- a.runTransport([]string{"--addr", addr, "--verbose"}) }()
+	go func() { done <- a.runTransport([]string{"--addr", addr, "--verbose", "--elected"}) }()
 
 	select {
 	case <-ready:
@@ -246,14 +256,29 @@ func readOneSpooledEvent(t *testing.T, spoolDir, sessionID string) client.DevEve
 			"break is between the capture and the spool", sessionID, names, err)
 	}
 	lines := strings.Split(strings.TrimSpace(string(raw)), "\n")
-	if len(lines) != 1 {
-		t.Fatalf("spool holds %d events, want exactly 1", len(lines))
+	// One relayed call is one activity with TWO rows, an ActivityStarted and an
+	// ActivityCompleted sharing an activity_id. Every in-path row used to be
+	// single-sided, which is a contract violation rather than a documentable
+	// choice: the dashboard timeline pairs the two, so what a reader saw as "one
+	// Started, many Completed" was exactly this.
+	if len(lines) != 2 {
+		t.Fatalf("spool holds %d events, want the Started/Completed pair", len(lines))
 	}
-	var ev client.DevEvent
-	if err := json.Unmarshal([]byte(lines[0]), &ev); err != nil {
+	var started, completed client.DevEvent
+	if err := json.Unmarshal([]byte(lines[0]), &started); err != nil {
 		t.Fatalf("unmarshal spooled event: %v", err)
 	}
-	return ev
+	if err := json.Unmarshal([]byte(lines[1]), &completed); err != nil {
+		t.Fatalf("unmarshal spooled event: %v", err)
+	}
+	if started.EventType != client.EventTurnStarted || completed.EventType != client.EventTurnCompleted {
+		t.Fatalf("spooled %s then %s, want TurnStarted then TurnCompleted; the spool delivers in "+
+			"append order and core looks a completion's start up at ingest",
+			started.EventType, completed.EventType)
+	}
+	// The completed half is what a caller means by "the event": it carries the
+	// status, the duration and the response.
+	return completed
 }
 
 func countSpoolFiles(t *testing.T, dir string) int {
@@ -275,3 +300,133 @@ func countSpoolFiles(t *testing.T, dir string) int {
 }
 
 var _ = gateway.Captured{}
+
+// TestTheTransportDaemonResolvesItsOwnElection is the whole of phase 06 in one
+// assertion: the unit's --settings value reaches the daemon, the daemon reads
+// that file, the election answers from it, and the emitter's gate is wired to
+// the answer.
+//
+// It is worth an integration test rather than three unit ones because each link
+// fails by going quiet. A daemon that cannot read the settings reported "no lane
+// is routed" -- indistinguishable from a machine nobody configured -- for the
+// whole life of the feature, and an emitter with no gate at all would silence
+// the only lane that works.
+func TestTheTransportDaemonResolvesItsOwnElection(t *testing.T) {
+	memhttptest.RequireBind(t)
+
+	for _, tc := range []struct {
+		name        string
+		settings    string
+		wantElected bool
+	}{
+		{
+			name:        "routed at loopback: this lane is the producer",
+			settings:    `{"env":{"HTTPS_PROXY":"http://127.0.0.1:8790"}}`,
+			wantElected: true,
+		},
+		{
+			name: "a base URL takes this relay out of the path",
+			settings: `{"env":{"HTTPS_PROXY":"http://127.0.0.1:8790",` +
+				`"ANTHROPIC_BASE_URL":"http://127.0.0.1:8788"}}`,
+			wantElected: false,
+		},
+		{
+			name:        "nothing routed: no lane is the producer",
+			settings:    `{"hooks":{}}`,
+			wantElected: false,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			home := t.TempDir()
+			settingsPath := filepath.Join(home, ".claude", "settings.json")
+			if err := os.MkdirAll(filepath.Dir(settingsPath), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(settingsPath, []byte(tc.settings), 0o644); err != nil {
+				t.Fatal(err)
+			}
+
+			t.Setenv("OPENBOX_SPOOL_DIR", t.TempDir())
+			t.Setenv("OPENBOX_HOME", t.TempDir())
+			t.Setenv("OPENBOX_AGENT_DID", "did:aip:7f3c9b2e-0000-5000-a000-00000000feed")
+			t.Setenv("OPENBOX_REALTIME", "0")
+
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			ready := make(chan string, 1)
+			a, _, errb := testApp(nil)
+			a.transportCtx = ctx
+			a.transportReady = func(bound string) { ready <- bound }
+
+			done := make(chan int, 1)
+			// No --elected: the point is that the daemon works this out for itself
+			// from the path the unit handed it.
+			go func() {
+				done <- a.runTransport([]string{"--addr", freeLoopbackAddr(t), "--settings", settingsPath})
+			}()
+			select {
+			case <-ready:
+			case <-time.After(15 * time.Second):
+				t.Fatalf("the transport never reported ready; stderr: %s", errb.String())
+			}
+			cancel()
+			select {
+			case <-done:
+			case <-time.After(20 * time.Second):
+				t.Fatal("runTransport did not return after cancellation")
+			}
+
+			log := errb.String()
+			if strings.Contains(log, "CANNOT DECIDE") {
+				t.Fatalf("the daemon could not read the settings path it was given: %s", log)
+			}
+			elected := strings.Contains(log, "transport: elected producer")
+			if elected != tc.wantElected {
+				t.Errorf("elected=%v, want %v; log: %s", elected, tc.wantElected, log)
+			}
+			if !elected && !strings.Contains(log, "NOT the elected producer") {
+				t.Errorf("an unelected lane did not say so: %s", log)
+			}
+		})
+	}
+}
+
+// TestADaemonWithNoUsableSettingsPathSaysSo is the diagnostic that would have
+// caught defect 6a, asserted at the daemon. A relative path is what
+// SettingsPath("") produces, and launchd resolves it against /.
+func TestADaemonWithNoUsableSettingsPathSaysSo(t *testing.T) {
+	memhttptest.RequireBind(t)
+
+	t.Setenv("OPENBOX_SPOOL_DIR", t.TempDir())
+	t.Setenv("OPENBOX_HOME", t.TempDir())
+	t.Setenv("OPENBOX_REALTIME", "0")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ready := make(chan string, 1)
+	a, _, errb := testApp(nil)
+	a.transportCtx = ctx
+	a.transportReady = func(bound string) { ready <- bound }
+
+	done := make(chan int, 1)
+	go func() {
+		done <- a.runTransport([]string{"--addr", freeLoopbackAddr(t),
+			"--settings", filepath.Join(".claude", "settings.json")})
+	}()
+	select {
+	case <-ready:
+	case <-time.After(15 * time.Second):
+		t.Fatalf("the transport never reported ready; stderr: %s", errb.String())
+	}
+	cancel()
+	<-done
+
+	log := errb.String()
+	if !strings.Contains(log, "CANNOT DECIDE") {
+		t.Errorf("a daemon reading an unreachable settings path did not say so, which is exactly "+
+			"how this went unnoticed: %s", log)
+	}
+	if strings.Contains(log, "no lane is routed") {
+		t.Errorf("the daemon still reports a configuration answer it cannot have: %s", log)
+	}
+}

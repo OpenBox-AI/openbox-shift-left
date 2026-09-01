@@ -201,8 +201,8 @@ func TestEachLaneIsAddressedByItsOwnSupervisorIdentity(t *testing.T) {
 		label string
 		unit  string
 	}{
-		{laneservice.Telemetry("127.0.0.1:8789", false), "ai.openbox.telemetry", "openbox-telemetry.service"},
-		{laneservice.Transport("127.0.0.1:8790", false), "ai.openbox.transport", "openbox-transport.service"},
+		{laneservice.Telemetry("127.0.0.1:8789", "", false), "ai.openbox.telemetry", "openbox-telemetry.service"},
+		{laneservice.Transport("127.0.0.1:8790", "", false), "ai.openbox.transport", "openbox-transport.service"},
 	} {
 		id := identityOf(tc.spec, h.home)
 		if id.launchdLabel != tc.label || id.systemdUnit != tc.unit {
@@ -280,8 +280,8 @@ func TestRemovalRestoresAForeignValueByteIdentically(t *testing.T) {
 		t.Errorf("units survived removal: %v", h.units)
 	}
 	for _, spec := range []laneservice.Spec{
-		laneservice.Telemetry("", false),
-		laneservice.Transport("", false),
+		laneservice.Telemetry("", "", false),
+		laneservice.Transport("", "", false),
 	} {
 		if path := spec.UnitPath(runtime.GOOS, h.home); path != "" && fileExists(path) {
 			t.Errorf("%s survived removal", path)
@@ -470,7 +470,7 @@ func TestDryRunNamesTheLanesItWouldInstall(t *testing.T) {
 // TestUnsupportedPlatformIsReportedNotSkipped keeps the refusal reachable from
 // the install path rather than only from the renderer.
 func TestUnsupportedPlatformIsReportedNotSkipped(t *testing.T) {
-	spec := laneservice.Telemetry("127.0.0.1:8789", false)
+	spec := laneservice.Telemetry("127.0.0.1:8789", "", false)
 	if _, err := spec.WriteUnit("windows", t.TempDir(), "openbox.exe"); err == nil {
 		t.Fatal("windows reported a successful unit write")
 	} else if !errors.Is(err, err) || !strings.Contains(err.Error(), "openbox telemetry") {
@@ -486,6 +486,10 @@ func TestDoctorNamesAnElectedLaneThatIsNotThere(t *testing.T) {
 	isolateHome(t)
 	t.Setenv("HOME", h.home)
 	a, out, _ := testApp(map[string]string{"HOME": h.home})
+	// The developer machine that builds this feature has these lanes listening on
+	// these ports, so a real dial reports the opposite of what this test is
+	// about. Pin the answer rather than depending on the host being idle.
+	nothingIsListening(t)
 
 	settingsPath := gatewayservice.SettingsPath(h.home)
 	if err := os.MkdirAll(filepath.Dir(settingsPath), 0o755); err != nil {
@@ -609,4 +613,13 @@ func TestFullRetiresARoutedGateway(t *testing.T) {
 	if got := activation.ResolveElection(gatewayservice.SettingsPath(h.home)).Elected; got != activation.LaneTransport {
 		t.Errorf("after the swap the elected producer is %q, want the in-path relay", got)
 	}
+}
+
+// nothingIsListening pins portOccupied for the duration of one test, so an
+// assertion about an absent daemon does not depend on the host's own ports.
+func nothingIsListening(t *testing.T) {
+	t.Helper()
+	prev := portOccupied
+	portOccupied = func(string) (bool, string) { return false, "" }
+	t.Cleanup(func() { portOccupied = prev })
 }

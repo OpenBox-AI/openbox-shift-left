@@ -250,6 +250,10 @@ func CurrentEnv(settingsPath string) map[string]string {
 	if err != nil {
 		return nil
 	}
+	return envFromRaw(raw)
+}
+
+func envFromRaw(raw []byte) map[string]string {
 	out := map[string]string{}
 	gjson.GetBytes(raw, "env").ForEach(func(k, v gjson.Result) bool {
 		out[k.String()] = v.String()

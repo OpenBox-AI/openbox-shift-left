@@ -12,7 +12,6 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/devconfig"
 	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/hookflow"
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/activation"
-	"github.com/openbox-ai/openbox-shift-left/internal/cli/gatewayservice"
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/telemetryemit"
 	"github.com/openbox-ai/openbox-shift-left/internal/telemetry"
 )
@@ -28,6 +27,7 @@ func (a *app) runTelemetry(args []string) int {
 	grace := fs.Duration("shutdown-grace", 10*time.Second, "how long to let in-flight exports finish after a stop signal")
 	verbose := fs.Bool("verbose", false, "report the outcome of every record (recorded, skipped, dropped)")
 	elected := fs.Bool("elected", false, "force this lane to emit model-call turns, overriding the automatic producer election. Normally unnecessary: the election is derived from where the tool's settings route model calls")
+	settings := fs.String("settings", "", "absolute path to the governed tool's settings file, written into the unit at install time. Empty falls back to deriving it from $HOME, which a daemon does not reliably have")
 	if code, ok := parseFlags(fs, args); !ok {
 		return code
 	}
@@ -41,13 +41,14 @@ func (a *app) runTelemetry(args []string) int {
 
 	spool := hookflow.Spool{Dir: devconfig.SpoolDir(telemetrySpoolSubdir)}
 	trigger := hookflow.RealtimeTrigger{Spool: spool, Provider: telemetrySpoolProvider}
+	// The completeness net (see Sweeper); the spool is shared, so any daemon sweeps.
+	sweeper := hookflow.Sweeper{Spool: spool, Provider: telemetrySpoolProvider}
 	// The election is the producer's: it stops two lanes emitting the same turn.
 	// Either one alone must silence emission.
-	settingsPath := gatewayservice.SettingsPath(a.homeDir())
-	electedNow := func() bool {
-		return devconfig.ResolveTelemetry() &&
-			(*elected || activation.ResolveElection(settingsPath).Elected == activation.LaneTelemetry)
-	}
+	settingsPath := a.laneSettingsPath(*settings)
+	// electedFn, not a second copy: hand-writing it is how the three diverge.
+	elect := electedFn(settingsPath, activation.LaneTelemetry, elected)
+	electedNow := func() bool { return devconfig.ResolveTelemetry() && elect() }
 	recording := devconfig.ResolveTelemetry()
 	election := activation.ResolveElection(settingsPath)
 	emitting := electedNow()
@@ -79,6 +80,8 @@ func (a *app) runTelemetry(args []string) int {
 		defer context.AfterFunc(a.telemetryCtx, cancel)()
 	}
 
+	go sweeper.Run(ctx, logger)
+
 	if err := rec.StartStandalone(ctx); err != nil {
 		return a.errorf("starting the telemetry receiver: %v", err)
 	}
@@ -89,9 +92,10 @@ func (a *app) runTelemetry(args []string) int {
 	if !recording {
 		logger.Printf("openbox telemetry: posture telemetry=false; receiving exports and recording NOTHING (config `telemetry` or %s)", devconfig.EnvTelemetry)
 	}
-	if !emitting {
-		logger.Printf("openbox telemetry: NOT elected; the producer is %s (%s); receiving exports but emitting no model-call turns",
-			orNone(string(election.Elected)), election.Reason)
+	// One reporter for every lane, so an unreadable file reads the same in each.
+	reportElection(logger, "telemetry", settingsPath, activation.LaneTelemetry, *elected)
+	if !emitting && election.Usable() {
+		logger.Printf("openbox telemetry: receiving exports but emitting no model-call turns")
 	}
 
 	<-ctx.Done()

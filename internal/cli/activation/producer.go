@@ -22,13 +22,22 @@ type Election struct {
 	Candidates []Lane
 	// Reason is one sentence for `openbox doctor`.
 	Reason string
+	// SettingsProblem is non-empty when the answer above is not an answer at all:
+	SettingsProblem string
 }
 
-// ResolveElection reads the tool's settings file and decides. Deliberately
-// tolerant of an unreadable or absent file: that is the state of a machine
-// with nothing installed, and it elects nobody.
+func (e Election) Usable() bool { return e.SettingsProblem == "" }
+
+// ResolveElection reads the tool's settings and decides. An ABSENT file elects
+// nobody, quietly. A file that cannot be READ says so: see SettingsProblem.
 func ResolveElection(settingsPath string) Election {
-	return electionFrom(CurrentEnv(settingsPath))
+	read := ReadSettingsEnv(settingsPath)
+	e := electionFrom(read.Env)
+	if problem := read.Problem(); problem != "" {
+		e.SettingsProblem = problem
+		e.Reason = problem + ", so no lane can be elected"
+	}
+	return e
 }
 
 // electionFrom one classifier, two callers; the lesson from the duplicate-
@@ -144,4 +153,18 @@ func isTruthy(v string) bool {
 		return true
 	}
 	return false
+}
+
+// RelayPortFrom is the port the transport lane is actually routed at, or "".
+func RelayPortFrom(env map[string]string) string {
+	for _, key := range []string{"HTTPS_PROXY", "HTTP_PROXY"} {
+		raw := env[key]
+		if !isLoopbackURL(raw) {
+			continue
+		}
+		if u, err := url.Parse(raw); err == nil && u.Port() != "" {
+			return u.Port()
+		}
+	}
+	return ""
 }
