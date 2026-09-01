@@ -265,13 +265,21 @@ Being precise here is part of the product.
     than about a class of developer being ungoverned. **Both lanes now exist and
     are installable** (2026-08-30); see the bullet below for what that does and
     does not buy.
-  - **A compressed body is recorded as a marker, not as content.** The client's
-    own
-    `Accept-Encoding` is relayed verbatim, so a provider may legitimately answer
-    `gzip`; and compressed bytes are opaque to the secret detector, which would
-    attach an unredacted, unreadable body while every redaction guarantee held
-    vacuously. So such a body is not captured at all. The honest limit is preferred to
-    decompressing an upstream-controlled body on an unauthenticated loopback listener.
+  - **A compressed body is decompressed in the capture path; an undecodable one
+    is recorded as a marker naming its encoding.** The client's own
+    `Accept-Encoding` is relayed verbatim (`gzip, deflate, br, zstd`), so the
+    provider chooses, and it chooses `br` for 89.5% of responses and `gzip` for
+    the remaining 8.9% -- measured over 83,190 recorded responses, zero
+    exceptions. Both are decoded, on the teed copy only, so the bytes forwarded to
+    the tool stay identical. Compressed bytes are opaque to the secret detector,
+    which would otherwise attach an unredacted unreadable body while every
+    redaction guarantee held vacuously, so an encoding outside the decode set is
+    still not captured at all: the honest marker is preferred. The decode set is
+    pinned to what the recorded corpus advertises by
+    `TestTheDecodeSetCoversEveryEncodingTheCorpusAdvertises`, because the
+    gzip-only set that preceded it rested on an unfalsifiable claim -- the
+    measurement it cited recorded only that `Content-Encoding` was present, never
+    which one.
   - **A relayed call that never gets a response still leaves a record.** The
     request
     body reaches the provider before the transport reports failure, so a caller that

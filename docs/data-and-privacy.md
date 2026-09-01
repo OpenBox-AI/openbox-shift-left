@@ -19,7 +19,7 @@ What leaves the machine, what never does, and the one setting that changes it.
 | **Your provider account's email** | yes, if you are signed in | **new**; one field per session, read from Claude Code's own local account record. This is PII, and it egresses as governance evidence like your DID. Not gated by `content_capture`: it is attribution, not content. See [Account attribution](#account-attribution) |
 | **Your provider organization's UUID** | yes, if you are signed in | **new**; same source, same session field |
 | **Your provider organization's NAME, role, tier, billing** | **never** | all four sit in the same local file beside the two rows above, and none of them is sent. The evidence scope is org UUID + email, deliberately |
-| **Model-call request and response bodies** | only with an **in-path lane** running (gateway or transport), and only when the call names a session | **new**; the whole request the tool sent the model, which includes the **system prompt**, the full message history and every tool definition, plus the model's response. This is the largest content class OpenBox collects. Three bounds apply and all three are fallible: the `content_capture` switch, local secret redaction before anything is attached, and a 64KB cap. A body the provider sent **compressed is not captured at all**; redaction cannot inspect it, so a marker is stored instead. Same session caveat as the row below |
+| **Model-call request and response bodies** | only with an **in-path lane** running (gateway or transport), and only when the call names a session | **new**; the whole request the tool sent the model, which includes the **system prompt**, the full message history and every tool definition, plus the model's response. This is the largest content class OpenBox collects. Three bounds apply and all three are fallible: the `content_capture` switch, local secret redaction before anything is attached, and a 64KB cap. A body the provider sent **compressed is decompressed in the capture path** so redaction can inspect it before attachment: `gzip` and `br` are decoded, which between them is every encoding observed across 83,190 recorded responses. An encoding outside that set (`zstd`, `deflate` -- advertised by the tool, returned by no provider) stores a marker naming it instead. Same session caveat as the row below |
 | **Model-call HTTP headers** | only with an **in-path lane** running (gateway or transport), and only when the call names a session | **new**; and only the non-credential ones: `Authorization`, `x-api-key`, `Cookie`, `Set-Cookie` and four more are replaced with `[redacted]` by name before anything is attached. The KEY is kept so a reviewer can see one was sent. Gated by `content_capture`. A relayed call that carries no `x-claude-code-session-id` header is recorded NOWHERE; the gateway declines to invent a session, so this is a real gap in the record rather than a silent attribution |
 | **A one-way fingerprint of your provider credential** | only with an **in-path lane** running (gateway or transport), and only when the call names a session | **new**; a truncated SHA-256, so OpenBox can tell WHICH registered credential made a call without holding it. Not gated by `content_capture`: it is the account-binding control, and a privacy switch that removed it would let an org opt out of being identified |
 | **Credentials** | **never** | they stay on your machine; in a plaintext file readable by you, see [Where credentials live](#where-credentials-live). The gateway relays yours to the provider byte-for-byte and stores none of it |
@@ -64,9 +64,12 @@ synthesized carrier, which is why it is the only span here without the
 `synthesized` marker. It is bounded by the same three mechanisms, it exists only
 while the gateway is running, and it records nothing at all for a call that
 names no session. Two further limits on it, both deliberate: a body the provider
-sent **compressed is not captured at all**, a marker is stored instead, because
-compressed bytes are opaque to the secret detector and attaching them would
-satisfy every redaction guarantee vacuously, and a call whose transport fails
+sent under an encoding this relay cannot decode is **not captured at all**, a
+marker naming that encoding is stored instead, because compressed bytes are
+opaque to the secret detector and attaching them would satisfy every redaction
+guarantee vacuously -- the decode set is `gzip` and `br`, which is every encoding
+observed across 83,190 recorded responses, so in practice the marker is now the
+rare case rather than the universal one -- and a call whose transport fails
 after the request was already sent is recorded **with no response and no
 status**, so a suppressed answer still leaves a trace.
 
@@ -439,8 +442,19 @@ is larger than the table above can show in one row.
     now leaves the machine where it previously did not. It is decompressed in the
     capture path only -- the bytes forwarded to your tool are untouched -- and the
     local secret scan runs over the decompressed text before attachment, which is
-    the first time that scan has ever seen provider response content at all. Only
-    gzip is decoded; any other encoding still yields an honest marker naming it.
+    the first time that scan has ever seen provider response content at all.
+    `gzip` and `br` are decoded; any other encoding still yields an honest marker
+    naming it. **Adding `br` was the larger half of this change by volume.** The
+    decode set was gzip-only at first, on the stated belief that `br` was
+    unobserved -- and a recorded 8.4 GB corpus then showed `br` on 74,477 of
+    83,190 responses (89.5%), gzip on 7,378 (8.9%), and nothing else at all. So
+    roughly nine in ten response bodies had been storing a marker, and now store
+    provider text. The volume of provider text leaving the machine rises by about
+    an order of magnitude, under the same `content_capture` gate and the same
+    keyword-floor redactor that gzip already shipped under. That is the existing
+    posture reaching the encoding that carries most of the traffic, not a new
+    one, but it is a real change in volume and it is stated here rather than left
+    to be discovered.
   - **The request and response now reach a field that is stored.** They used to
     travel inside a `spans[]` array which the control plane parses and then
     discards, so they were evaluated and retained nowhere. They now ride

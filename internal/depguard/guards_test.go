@@ -90,12 +90,24 @@ func guards() []subtreeGuard {
 		},
 		{
 			name: "internal/gateway",
-			// Empty is the strongest statement available here, not a vacuous one:
-			// the relay imports NO external code at all, which is what makes the
-			// lexical credential scan in gateway/guard_test.go sufficient rather
-			// than lucky; there is no third-party package for a credential read
-			// to hide in.
-			external: map[string]bool{},
+			// One reviewed external, and the entry IS the review: a pure
+			// decompressor, no I/O, no credential surface, reachable only from the
+			// teed capture copy. It was added because `br` is the modal response
+			// encoding (74,477 of 83,190 recorded responses) and a gzip-only
+			// decode set stored a marker for every one of them.
+			//
+			// The empty set this replaces was the strongest statement available at
+			// the time, and it is worth being precise about what changed and what
+			// did not. What made the lexical credential scan in
+			// gateway/guard_test.go sufficient was never that the count was zero;
+			// it was that nothing here could reach a credential the scan cannot
+			// follow. brotli reads bytes and returns bytes. What the scan still
+			// cannot follow is bounded by this list, which is why the deliberate
+			// move was a named entry here rather than an internal/bodycodec hop:
+			// depguard resolves DIRECT imports only, so a one-consumer indirection
+			// would have kept this list lexically empty while hiding the
+			// dependency from every guard in the repo.
+			external: map[string]bool{"github.com/andybalholm/brotli": true},
 			repoLocal: map[string]bool{
 				repoPrefix + "/internal/client":   true,
 				repoPrefix + "/internal/decision": true,

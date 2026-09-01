@@ -17,6 +17,7 @@ go 1.27.0
 // would make. Written out rather than derived so the merge can be diffed against
 // the pre-collapse set instead of trusted.
 require (
+	github.com/andybalholm/brotli v1.1.2-0.20250424173009-453214e765f3
 	github.com/cenkalti/backoff/v5 v5.0.3
 	github.com/elazarl/goproxy v1.9.0
 	github.com/gofrs/flock v0.13.1
@@ -52,7 +53,6 @@ require (
 	github.com/Masterminds/sprig/v3 v3.3.0 // indirect
 	github.com/Microsoft/go-winio v0.6.2 // indirect
 	github.com/STARRY-S/zip v0.2.1 // indirect
-	github.com/andybalholm/brotli v1.1.2-0.20250424173009-453214e765f3 // indirect
 	github.com/aymanbagabas/go-osc52/v2 v2.0.1 // indirect
 	github.com/bodgit/plumbing v1.3.0 // indirect
 	github.com/bodgit/sevenzip v1.6.0 // indirect

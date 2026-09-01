@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/andybalholm/brotli"
+
 	"github.com/openbox-ai/openbox-shift-left/internal/client/memhttptest"
 )
 
@@ -139,8 +141,12 @@ func TestCompressedBodyIsBoundedByDecompressedBytes(t *testing.T) {
 // TestUnknownContentEncodingYieldsAMarkerNamingIt an encoding the relay cannot
 // decode must say which one, or the next investigation cannot tell an
 // unsupported codec from a corrupt stream.
+// `br` is deliberately NOT in this list any more: it is the modal response
+// encoding, and marking it was the defect. `zstd` and `deflate` stay -- the
+// corpus client advertises both and no origin has ever returned either, so an
+// honest marker beats a dependency this relay has not earned.
 func TestUnknownContentEncodingYieldsAMarkerNamingIt(t *testing.T) {
-	for _, encoding := range []string{"br", "zstd", "gzip, br"} {
+	for _, encoding := range []string{"zstd", "deflate", "gzip, br"} {
 		t.Run(encoding, func(t *testing.T) {
 			upstream := encodedUpstream(t, encoding, []byte("whatever these bytes are"))
 
@@ -239,12 +245,12 @@ func TestUndecodableGzipYieldsAMarker(t *testing.T) {
 	}
 }
 
-// TestGzipIsMatchedAsAHeaderToken: Content-Encoding is a LIST header, and a
-// whole-value compare made `x-gzip` -- a spelling origins still emit -- store the
-// undecodable marker for a body gzip.NewReader reads without complaint. That is
-// the same shape as the defect this file exists for: a placeholder that reads as
-// a documented limit rather than as a bug.
-func TestGzipIsMatchedAsAHeaderToken(t *testing.T) {
+// TestTheDecodeSetIsMatchedAsAHeaderToken: ${OPENBOX_REDACTED_SECRET_ASSIGNMENT} is a LIST header,
+// and a whole-value compare made `x-gzip` -- a spelling origins still emit --
+// store the undecodable marker for a body gzip.NewReader reads without
+// complaint. That is the same shape as the defect this file exists for: a
+// placeholder that reads as a documented limit rather than as a bug.
+func TestTheDecodeSetIsMatchedAsAHeaderToken(t *testing.T) {
 	for _, tc := range []struct {
 		encoding string
 		want     bool
@@ -254,14 +260,17 @@ func TestGzipIsMatchedAsAHeaderToken(t *testing.T) {
 		{"GZIP", true},
 		{" gzip ", true},
 		{"X-Gzip", true},
-		{"br", false},
+		{"br", true},
+		{"BR", true},
+		{" br ", true},
 		{"zstd", false},
 		{"deflate", false},
 		// Two layers, one decoder: refusing is honest, claiming to have decoded is not.
 		{"gzip, gzip", false},
+		{"br, gzip", false},
 	} {
-		if got := isGzip(tc.encoding); got != tc.want {
-			t.Errorf("isGzip(%q) = %v, want %v", tc.encoding, got, tc.want)
+		if got := isDecodable(tc.encoding); got != tc.want {
+			t.Errorf("isDecodable(%q) = %v, want %v", tc.encoding, got, tc.want)
 		}
 	}
 }
@@ -273,5 +282,100 @@ func TestALegacyGzipSpellingIsDecodedNotMarked(t *testing.T) {
 	got := decodeCapturable(gzipOf(t, plain), "x-gzip")
 	if got != plain {
 		t.Errorf("decodeCapturable(x-gzip) = %q, want the decoded body %q", got, plain)
+	}
+}
+
+// brotliOf is the modal provider shape, not an edge case: across the recorded
+// 8.4 GB corpus every one of 74,477 `application/json` replies came back
+// brotli-encoded, with zero exceptions. The gzip fixtures above cover
+// `text/event-stream` and nothing else.
+func brotliOf(t *testing.T, plain string) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	bw := brotli.NewWriter(&buf)
+	if _, err := bw.Write([]byte(plain)); err != nil {
+		t.Fatalf("brotli write: %v", err)
+	}
+	if err := bw.Close(); err != nil {
+		t.Fatalf("brotli close: %v", err)
+	}
+	return buf.Bytes()
+}
+
+// TestBrotliResponseRelaysCompressedAndCapturesDecoded is this phase's
+// load-bearing test, and it is deliberately the wired one: decodeCapturable
+// passing in isolation is what the gzip pair already proves. What was broken is
+// the whole path -- 89.5% of stored response bodies were a marker naming `br` --
+// so the assertion has to run through the relay, on both halves of the same
+// trade the gzip test makes: the client still receives the provider's exact
+// compressed bytes, and the capture holds text the redactor can inspect.
+func TestBrotliResponseRelaysCompressedAndCapturesDecoded(t *testing.T) {
+	const plain = `{"type":"message","content":[{"type":"text","text":"hello from brotli"}]}`
+	compressed := brotliOf(t, plain)
+	upstream := encodedUpstream(t, "br", compressed)
+
+	em := &recordingEmitter{}
+	srv := serveGateway(t, wire(t, upstream.URL, em, nil, nil))
+
+	resp, err := probeClient().Get(srv.URL + "/v1/messages")
+	if err != nil {
+		t.Fatalf("request through gateway: %v", err)
+	}
+	relayed, err := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if err != nil {
+		t.Fatalf("reading the relayed body: %v", err)
+	}
+
+	if !bytes.Equal(relayed, compressed) {
+		t.Errorf("the relay altered the forwarded bytes: got %d bytes, want the provider's %d", len(relayed), len(compressed))
+	}
+	if got := resp.Header.Get("Content-Encoding"); got != "br" {
+		t.Errorf("Content-Encoding reaching the client = %q, want br; the client must decode what it was told it got", got)
+	}
+
+	got := em.await(t, 1)[0].ResponseBody
+	if got != plain {
+		t.Errorf("captured response body = %q, want the decompressed %q", got, plain)
+	}
+}
+
+// TestBrotliRequestBodyIsCapturedDecoded the request direction runs through the
+// same funnel, so the two encodings cannot drift apart by direction.
+func TestBrotliRequestBodyIsCapturedDecoded(t *testing.T) {
+	const plain = `{"model":"claude-opus-5","messages":[]}`
+	var got recorded
+	upstream := upstreamRecorder(t, &got, nil)
+
+	em := &recordingEmitter{}
+	srv := serveGateway(t, wire(t, upstream.URL, em, nil, nil))
+
+	compressed := brotliOf(t, plain)
+	req, _ := http.NewRequest(http.MethodPost, srv.URL+"/v1/messages", bytes.NewReader(compressed))
+	req.Header.Set("Content-Encoding", "br")
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := probeClient().Do(req)
+	if err != nil {
+		t.Fatalf("request through gateway: %v", err)
+	}
+	resp.Body.Close()
+
+	if captured := em.await(t, 1)[0].RequestBody; captured != plain {
+		t.Errorf("captured request body = %q, want the decompressed %q", captured, plain)
+	}
+}
+
+// TestACorruptBrotliStreamIsMarkedNotStoredAsGarbage brotli.NewReader has no
+// constructor error -- a corrupt stream only fails on the first Read -- so the
+// gzip path's constructor check does not cover this codec. Without the
+// empty-and-errored branch below a truncated body would store as "" and read as
+// a 204.
+func TestACorruptBrotliStreamIsMarkedNotStoredAsGarbage(t *testing.T) {
+	got := decodeCapturable([]byte{0x1f, 0x8b, 0x08, 0x00, 0xde, 0xad, 0xbe, 0xef}, "br")
+	if !strings.Contains(got, "openbox:") {
+		t.Errorf("a corrupt br body was captured as bytes rather than marked: %q", got)
+	}
+	if !strings.Contains(got, "br") {
+		t.Errorf("the marker does not name the encoding: %q", got)
 	}
 }
