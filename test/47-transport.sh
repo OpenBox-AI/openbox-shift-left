@@ -111,17 +111,49 @@ else
 	tb_note "running Claude Code actually trusts."
 fi
 
-# ── 47.4  the response body is captured, not just the request ─────────────────
-# The in-memory replay proves a body traverses the lane; only a live provider can
-# show what a REAL response body does to the capture — including the one shape
-# that defeats it, a content-encoded body, which is MARKED rather than decoded.
-tb_step "47.4  the captured span carries a response body or its encoding marker"
-n=$(tb_count "spans where session_id='$sid' and semantic_type='llm_completion'")
-if [ "${n:-0}" -gt 0 ]; then
-	tb_ok "$n llm_completion span(s) from the relay"
-else
-	tb_bad "no llm_completion span for session $sid"
-fi
+# ── 47.4  the response body is captured, DECOMPRESSED, and stored ─────────────
+# This assertion used to accept "a response body OR its encoding marker", and
+# only counted SPANS -- it never inspected a body. That is why nothing failed
+# while every response body OpenBox ever captured was an 88-byte placeholder:
+# the provider sits behind Cloudflare and Content-Encoding was present on 118 of
+# 118 captures, so the documented edge case was 100% of production traffic.
+#
+# It also counted the wrong thing. Core discards embedded spans[] on the normal
+# path, so `spans` rows are zero for a developer session however the capture went.
+tb_step "47.4  the relayed response body is stored, decompressed"
+assert_eq "no spans rows for a dev session" 0 "$(tb_count "spans where session_id='$sid'")"
+
+completed="$(tb_count "governance_events where run_id='$sid' and activity_type='llm_completion' and event_type='ActivityCompleted'")"
+assert_ge "a relayed completion was stored" 1 "$completed"
+
+# The body itself, on the field that persists. A placeholder here means the decode
+# path regressed; an absent key means the carrier did.
+assert_ge "the response body reached activity_output.content" 1 \
+	"$(tb_count "governance_events where run_id='$sid' and event_type='ActivityCompleted' and output ? 'content'")"
+assert_eq "no response body is still the not-captured placeholder" 0 \
+	"$(tb_val "select count(*) from governance_events e where e.run_id='$sid'
+		and e.output->>'content' like '%openbox: not captured%';")"
+# And the request half, on the opening row, under the key the alignment judge's
+# per-operation cap keeps rather than drops.
+assert_ge "the request body reached activity_input.content" 1 \
+	"$(tb_count "governance_events where run_id='$sid' and event_type='ActivityStarted' and input ? 'content'")"
+# The relay measured the call, so the duration is the model's latency and not the
+# control plane's own api_response_ms.
+assert_ge "a relayed row carries a real duration" 1 \
+	"$(tb_count "governance_events where run_id='$sid' and activity_type='llm_completion' and duration_ms > 0")"
+
+# ── 47.4b  a probe is not filed as a completion ───────────────────────────────
+# ~40% of llm_completion rows used to be POST /v1/messages/count_tokens.
+tb_step "47.4b  token-count probes are not completions"
+assert_eq "no completion row has a count_tokens URL" 0 \
+	"$(tb_val "select count(*) from governance_events e where e.run_id='$sid'
+		and e.activity_type='llm_completion'
+		and (e.input->>'http_url' like '%count_tokens%' or e.output->>'http_url' like '%count_tokens%');")"
+tb_note "activity types this session: $(tb_sql "select distinct activity_type from governance_events where run_id='$sid' order by 1;" | tr '\n' ' ')"
+# A probe carries no bodies at all: it holds the whole conversation minus the
+# reply, and the client fires one per keystroke-triggered recount.
+assert_eq "a token_count row carries no request body" 0 \
+	"$(tb_count "governance_events where run_id='$sid' and activity_type='token_count' and input ? 'content'")"
 
 # ── 47.5  one command out ─────────────────────────────────────────────────────
 # OD2's second half, and the only case here that is about the SYSTEM rather than a

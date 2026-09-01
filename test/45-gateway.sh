@@ -68,24 +68,35 @@ tb_ok "daemon up AND config written — install ordering held"
 run="$(date +%s)"
 
 # ── A. the gateway sees a real model call ─────────────────────────────────────
-tb_step "45.A  a real session's model call arrives as a gateway span"
+# The evidence is ACTIVITY ROWS in the :gateway: namespace, not span rows. This
+# case used to count `spans` and could never have passed: core parses an embedded
+# spans[] on the normal path and then discards it, gating persistence on
+# hook_trigger, which this client deliberately never sets.
+tb_step "45.A  a real session's model call arrives as a :gateway: activity pair"
 uuid_a="$(tb_session "say exactly: gateway-a-$run")"
 [ -n "$uuid_a" ] || tb_fatal "session A produced no run id"
 
-spans="$(tb_count "spans where session_id='$uuid_a' and name like '%llm%'")"
-if [ "${spans:-0}" -gt 0 ]; then
-	tb_ok "gateway spans stored for the session ($spans)"
+assert_eq "no spans rows for a dev session" 0 "$(tb_count "spans where session_id='$uuid_a'")"
+relayed="$(tb_count "governance_events where run_id='$uuid_a' and activity_id like '%:gateway:%'")"
+if [ "${relayed:-0}" -gt 0 ]; then
+	tb_ok "relayed model-call rows stored for the session ($relayed)"
 else
-	tb_bad "no gateway spans for session $uuid_a — the relay ran but nothing reached core"
+	tb_bad "no :gateway: rows for session $uuid_a — the relay ran but nothing reached core"
 fi
+# Two rows per call, and no orphan halves: that is the invariant, not a detail.
+unpaired="$(tb_val "select count(*) from (
+	select activity_id from governance_events
+	where run_id='$uuid_a' and activity_id like '%:gateway:%'
+	group by activity_id having count(*) <> 2) q;")"
+assert_eq "every relayed call carries exactly two rows" 0 "$unpaired"
 
 # Requirement 4: ONE session row receives BOTH producers. This is the join that
 # makes the two vantage points one record rather than two half-records.
-acts="$(tb_count "governance_events where run_id='$uuid_a' and event_type like 'Activity%'")"
-if [ "${spans:-0}" -gt 0 ] && [ "${acts:-0}" -gt 0 ]; then
-	tb_ok "session join proven: hook activities ($acts) AND gateway spans ($spans) on one session"
+hook_acts="$(tb_count "governance_events where run_id='$uuid_a' and event_type like 'Activity%' and activity_id not like '%:gateway:%'")"
+if [ "${relayed:-0}" -gt 0 ] && [ "${hook_acts:-0}" -gt 0 ]; then
+	tb_ok "session join proven: hook activities ($hook_acts) AND relayed rows ($relayed) on one session"
 else
-	tb_bad "session join NOT proven: activities=$acts spans=$spans on $uuid_a"
+	tb_bad "session join NOT proven: hook=$hook_acts relayed=$relayed on $uuid_a"
 fi
 
 # And the two producers must not have collided on activity_id, or core's dedupe
@@ -113,44 +124,53 @@ tb_step "45.B  the raw provider credential is in zero stored bytes; the fingerpr
 # to 0, it would have printed a GREEN TICK for "no credential leaked" the first
 # time anyone ran it. A broken query must never be indistinguishable from a clean
 # result on the one assertion that matters most.
-if ! leaked="$(tb_count_strict "spans where session_id='$uuid_a' and (data::text ilike '%sk-ant-%' or data::text ilike '%bearer sk-%' or attributes::text ilike '%sk-ant-%')")"; then
+# The subject is `governance_events` now, not `spans`. A broken query must never
+# be indistinguishable from a clean result on the assertion that matters most,
+# which is why this uses the STRICT reader.
+if ! leaked="$(tb_count_strict "governance_events where run_id='$uuid_a' and (input::text ilike '%sk-ant-%' or output::text ilike '%sk-ant-%' or metadata::text ilike '%sk-ant-%' or input::text ilike '%bearer sk-%')")"; then
 	tb_bad "credential-leak query FAILED — this is an inconclusive assertion, not a pass"
 elif [ "$leaked" = "0" ]; then
-	tb_ok "no raw credential in stored span data"
+	tb_ok "no raw credential in stored rows"
 else
 	tb_bad "RAW CREDENTIAL IN STORED ROWS ($leaked) — treat as an incident, not a bug"
 fi
 
-# The fingerprint's route into core is attributes["openbox.credential_fingerprint"]:
-# core's SpanData has no credential_fingerprint field at all (verified against
-# openbox-core), so the top-level key is dropped on ingest and `attributes` is the
-# only copy that survives to be matched on.
-if ! fp="$(tb_count_strict "spans where session_id='$uuid_a' and attributes::text like '%openbox.credential_fingerprint%'")"; then
+# REHOMED: the fingerprint used to ride attributes["openbox.credential_fingerprint"]
+# on a span, and spans never persisted for a developer session -- so account
+# binding has in fact never had anything to match on. It is metadata now, which
+# core does merge into the stored row, and it stays UNGATED.
+if ! fp="$(tb_count_strict "governance_events where run_id='$uuid_a' and metadata ? 'credential_fingerprint'")"; then
 	tb_bad "fingerprint query FAILED — inconclusive"
 elif [ "$fp" -gt 0 ]; then
-	tb_ok "credential fingerprint present in span attributes ($fp)"
+	tb_ok "credential fingerprint present in metadata ($fp)"
 else
-	tb_bad "no credential fingerprint in attributes — account binding has nothing to match on"
+	tb_bad "no credential fingerprint in metadata — account binding has nothing to match on"
 fi
 
 # ── C. the silent failures ───────────────────────────────────────────────────
 # None of these throw. That is exactly why they are asserted.
 tb_step "45.C  silent-failure assertions: beta passthrough, system-array identity, discovery"
 
-beta="$(tb_val "select count(*) from spans where session_id='$uuid_a' and data::text ilike '%anthropic-beta%'")"
+# The stored subject is the relayed REQUEST BODY on the opening half now. The
+# headers themselves no longer egress at all (they only reached core inside the
+# discarded spans[], and they were the highest-risk class this client carried), so
+# what remains queryable end to end is the body -- and relay header transparency
+# is covered by internal/gateway/relaycharacterization_test.go, which needs no
+# live stack.
+beta="$(tb_val "select count(*) from governance_events where run_id='$uuid_a' and input->>'content' ilike '%anthropic-beta%'")"
 if [ "${beta:-0}" -gt 0 ]; then
-	tb_ok "anthropic-beta survived the relay (a stripped value makes a capability quietly unavailable)"
+	tb_ok "anthropic-beta appears in a captured request body"
 else
-	tb_skip "anthropic-beta survived the relay" "no anthropic-beta on this session's calls — inconclusive, not a pass"
+	tb_skip "anthropic-beta in a captured body" "beta rides a HEADER, which no longer egresses; relay transparency is asserted in relaycharacterization_test.go instead"
 fi
 
 # The system array must still be an ARRAY with the attribution block first. A
 # reordered or stringified system block poisons the prompt-cache key with no error.
-sysfirst="$(tb_val "select count(*) from spans where session_id='$uuid_a' and data::text like '%\"system\":[%'")"
+sysfirst="$(tb_val "select count(*) from governance_events where run_id='$uuid_a' and input->>'content' like '%\"system\":[%'")"
 if [ "${sysfirst:-0}" -gt 0 ]; then
 	tb_ok "system block relayed as a positional array"
 else
-	tb_bad "system block is not an array in stored request bodies — prompt cache and attribution both break silently"
+	tb_bad "system block is not an array in the stored request body — prompt cache and attribution both break silently"
 fi
 
 # Discovery: a redirect on /v1/models makes the model picker silently lose the
@@ -174,7 +194,7 @@ else
 	uuid_d="$(tb_session "say exactly: gateway-d-$run")"
 	after="$(tb_count "governance_events where agent_id='$TB_AGENT'")"
 	# A retry loop shows up as many near-identical calls for one prompt.
-	calls="$(tb_count "spans where session_id='$uuid_d' and name like '%llm%'")"
+	calls="$(tb_count "governance_events where run_id='$uuid_d' and activity_type='llm_completion' and event_type='ActivityCompleted'")"
 	if [ "${calls:-0}" -le 2 ]; then
 		tb_ok "refused without a retry storm ($calls model call(s) for one prompt)"
 	else
@@ -194,13 +214,21 @@ else
 	tb_ok "uninstall removed the owned key"
 fi
 
+# REBUILT, not patched. The premise here was "a session with activity and zero
+# gateway SPANS proves bypass", and that was already vacuous before the spans
+# were removed: no developer session ever got span rows, so this passed whether
+# the relay was in the path or not.
+#
+# What still distinguishes the two states is the activity_id NAMESPACE: a relayed
+# call's rows carry :gateway: (or :proxy:), a hook-derived turn carries
+# <session>:turn:<n>. So the signal is hook turns present AND zero in-path rows.
 uuid_e="$(tb_session "say exactly: gateway-e-$run")"
-turns_e="$(tb_count "governance_events where run_id='$uuid_e' and event_type like 'Activity%'")"
-spans_e="$(tb_count "spans where session_id='$uuid_e' and name like '%llm%'")"
-if [ "${turns_e:-0}" -gt 0 ] && [ "${spans_e:-0}" = "0" ]; then
-	tb_ok "BYPASS IS QUERYABLE: session has activity ($turns_e) and zero gateway spans"
+turns_e="$(tb_count "governance_events where run_id='$uuid_e' and activity_id like '%:turn:%'")"
+inpath_e="$(tb_count "governance_events where run_id='$uuid_e' and (activity_id like '%:gateway:%' or activity_id like '%:proxy:%')")"
+if [ "${turns_e:-0}" -gt 0 ] && [ "${inpath_e:-0}" = "0" ]; then
+	tb_ok "BYPASS IS QUERYABLE: session made $turns_e model turn(s) and no in-path lane saw one"
 else
-	tb_bad "bypass not detectable as designed: activities=$turns_e spans=$spans_e"
+	tb_bad "bypass not detectable as designed: hook turns=$turns_e in-path rows=$inpath_e"
 fi
 
 if "$OPENBOX_BIN" doctor 2>&1 | grep -qi 'bypass'; then
@@ -226,8 +254,8 @@ else
 	if [ -z "$uuid_f" ]; then
 		tb_ok "a dead gateway blocked the session outright (no run id was produced)"
 		spans_f=0
-	elif ! spans_f="$(tb_count_strict "spans where session_id='$uuid_f' and name like '%llm%'")"; then
-		tb_bad "dead-gateway span query FAILED — inconclusive"
+	elif ! spans_f="$(tb_count_strict "governance_events where run_id='$uuid_f' and activity_id like '%:gateway:%'")"; then
+		tb_bad "dead-gateway query FAILED — inconclusive"
 		spans_f=-1
 	fi
 	if [ "${spans_f:-0}" = "0" ]; then

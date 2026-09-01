@@ -116,6 +116,43 @@ orphans="$(tb_val "select count(*) from governance_events c
 # kind, and this is the cheapest place to notice it.
 assert_eq "no unpaired ActivityCompleted" 0 "$orphans"
 
+tb_step "session-wide lifecycle pairing"
+# THE assertion this suite was missing, and the one that would have caught every
+# defect in the model-call capture repair. Everything above is filtered by
+# $tool_pred to TOOL activity types, so the llm_completion rows sat outside the
+# only guard there was -- and every in-path model call produced an
+# ActivityCompleted with no ActivityStarted for the life of the feature.
+#
+# Unscoped, per activity_id, and it must return zero rows. Not a parity COUNT:
+# that is fooled by two compensating errors, one missing Started plus one orphan
+# Started netting to even. Not `total % 2` either: the total is even only when
+# W + S is, so a one-prompt ended session is legitimately odd.
+unpaired="$(tb_val "select count(*) from (
+	select activity_id from governance_events
+	where run_id='$sid' and event_type in ('ActivityStarted','ActivityCompleted')
+	group by activity_id having count(*) <> 2) q;")"
+if [ "${unpaired:-0}" != "0" ]; then
+	tb_note "offending activity_ids: $(tb_sql "select activity_id || ' x' || count(*) from governance_events
+		where run_id='$sid' and event_type in ('ActivityStarted','ActivityCompleted')
+		group by activity_id having count(*) <> 2 limit 8;" | tr '\n' ' ')"
+fi
+assert_eq "every activity_id carries exactly two rows" 0 "$unpaired"
+
+# The two companions. W is 2 for an ENDED session; a live one legitimately has
+# WorkflowStarted and no WorkflowCompleted yet, which is why a naive check
+# false-alarms on anything still running. This session has ended.
+assert_eq "exactly one WorkflowStarted" 1 \
+	"$(tb_count "governance_events where run_id='$sid' and event_type='WorkflowStarted'")"
+assert_eq "exactly one WorkflowCompleted" 1 \
+	"$(tb_count "governance_events where run_id='$sid' and event_type='WorkflowCompleted'")"
+# total = W + 2A + S, so anything left over is an event type nobody decided about.
+w="$(tb_count "governance_events where run_id='$sid' and event_type like 'Workflow%'")"
+a="$(tb_val "select count(distinct activity_id) from governance_events where run_id='$sid' and event_type in ('ActivityStarted','ActivityCompleted');")"
+sig="$(tb_count "governance_events where run_id='$sid' and event_type='SignalReceived'")"
+total="$(tb_count "governance_events where run_id='$sid'")"
+tb_note "W=$w A=$a S=$sig total=$total"
+assert_eq "total = W + 2A + S" "$total" "$(( w + 2 * a + sig ))"
+
 assert_nonempty "activity_type is the tool name" \
 	"$(tb_val "select activity_type from governance_events where run_id='$sid' and event_type='ActivityStarted' and $tool_pred and activity_type is not null limit 1;")"
 tb_note "activity types: $(tb_sql "select distinct activity_type from governance_events where run_id='$sid' and event_type like 'Activity%' order by 1;" | tr '\n' ' ')"
@@ -151,20 +188,20 @@ assert_ge "a file locator reached core" 1 \
 assert_ge "MCP call captured with its server+tool" 1 \
 	"$(tb_count "governance_events where run_id='$sid' and event_type='ActivityStarted' and input->>'mcp_server' is not null and input->>'mcp_tool' is not null")"
 
-tb_step "zero spans — the accepted trade-off, asserted on purpose"
-# KNOWN TENSION, unresolved until this suite first runs: that decision put ONE span on
-# a content-capturing TurnCompleted, and 35-telemetry.sh:122 positively asserts
-# that span's row exists. This session captures content too, so on the first live
-# run exactly one of the two assertions is wrong. Left as-is rather than guessed
-# at: which one depends on whether core stores an embedded spans[] entry as a
-# spans row, which nobody in this repo has observed (mapping.md §7). Whoever runs
-# this first should expect to resolve it, not to be surprised by it.
-# NOT a bug and NOT something to "fix" by re-adding a span. A hook process has no
-# in-process OpenTelemetry, so the spans shift-left used to send were fabricated
-# by hand to satisfy a wire shape. That decision retired them. The cost is real and is
-# recorded there: no span-level Merkle leaves and no server-side semantic_type
-# for developer sessions. If this assertion ever fails, the span layer grew a
-# caller again — read that decision before changing it.
+tb_step "zero spans, and the tension above it is now RESOLVED"
+# The KNOWN TENSION this block used to carry is answered, by reading core rather
+# than by running this suite: an embedded spans[] entry is parsed on the normal
+# path and then DISCARDED. Persistence is gated on hook_trigger plus a
+# pre-existing event row (governance_workflow.go:234, validation.go:154-174),
+# which this client deliberately never sets, because that would put a model turn
+# on core's approval-bypass fingerprint path. So the answer is zero spans either
+# way, and the assertion that a turn span's ROW exists could never have passed.
+#
+# The client now sends no spans[] at all. NOT something to "fix" by re-adding
+# one: a span describes work nested INSIDE an activity, and for a model call
+# llm_completion IS the activity. See mapping.md §2. The cost is real and
+# recorded there: no span-level Merkle leaves, no server-side semantic_type.
+# The content moved to activity_input / activity_output, which do persist.
 assert_eq "no spans rows for a dev session " 0 "$(tb_count "spans where session_id='$uuid'")"
 
 tb_step "merkle — event leaves, no span leaves"

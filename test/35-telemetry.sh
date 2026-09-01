@@ -102,47 +102,43 @@ fi
 assert_eq "no free-text tool error egressed" 0 \
 	"$(tb_val "select count(*) from governance_events e where e.run_id='$sid_f' and row_to_json(e)::text like '%exit code 3%';")"
 
-# ── the turn span ────────────────────────────────────────────────────────────
-tb_step "one span per captured model turn, carrying the assistant text"
+# ── the turn's assistant text ────────────────────────────────────────────────
+# This block used to assert one SPAN row per captured turn and read
+# spans.response_body. It could never have passed: core parses an embedded
+# spans[] on the normal path and then DISCARDS it, gating persistence on
+# hook_trigger plus a pre-existing event row, which this client deliberately
+# never sets. The client now sends no spans[] at all, and the assistant text
+# rides activity_output.content, which maps to a dedicated column.
+tb_step "the assistant text reaches activity_output, and no span row exists"
 turns="$(tb_count "governance_events where run_id='$sid' and activity_type='llm_completion' and event_type='ActivityCompleted'")"
-spans="$(tb_count "spans where session_id='$uuid'")"
 assert_ge "at least one turn" 1 "$turns"
-# Exactly one span per turn. More means the ids are not deduping; fewer means
-# capture or the hook field is missing.
-assert_eq "one span per completed turn" "$turns" "$spans"
-assert_eq "every span classified as llm_completion" "$spans" \
-	"$(tb_count "spans where session_id='$uuid' and span_type='llm_completion'")"
-# If the row exists but the type is wrong, the synthesized http.* attributes
-# stopped satisfying isLLMCall and alignment is silently dead — the failure mode
-# with no error anywhere.
-assert_eq "no span classified as something else" 0 \
-	"$(tb_count "spans where session_id='$uuid' and span_type<>'llm_completion'")"
-# The assistant actually said the mark, so its presence proves the text made the
-# whole trip rather than an empty span having been stored.
-assert_ge "the assistant text reached the span body" 1 \
-	"$(tb_val "select count(*) from spans s where s.session_id='$uuid' and s.response_body like '%$FAIL_MARK%';")"
+assert_eq "no spans rows for a dev session" 0 "$(tb_count "spans where session_id='$uuid'")"
 
-# that decision: thinking must NOT also be in that span. This is the assertion for
-# the failure mode with no error anywhere — core reads this body as the
-# assistant's REPLY, so chain-of-thought here would score every later turn's drift
-# against the model's reasoning instead of its answer, and nothing would log.
+# The assistant actually said the mark, so its presence proves the text made the
+# whole trip rather than an empty field having been stored.
+assert_ge "the assistant text reached activity_output.content" 1 \
+	"$(tb_val "select count(*) from governance_events e where e.run_id='$sid'
+		and e.output->>'content' like '%$FAIL_MARK%';")"
+
+# Thinking must NOT also be in the reply field. This is the assertion for the
+# failure mode with no error anywhere: core reads that text as the assistant's
+# REPLY, so chain-of-thought there would score every later turn's drift against
+# the model's reasoning instead of its answer, and nothing would log.
 #
-# Asserted HERE and not in 20-capture.sh because this is the phase where a span is
-# expected to EXIST; a non-leak check against zero spans proves nothing.
+# The subject moved from spans[0].response_body to activity_output.content, which
+# is where the reply lives now; the separation is unchanged and so is its reason.
 #
 # Cross-field rather than marker-based: no prompt can make a model think a chosen
 # phrase, so the needle is the stored thinking itself. It stays entirely inside
-# SQL — the model's own text is never interpolated through the shell.
+# SQL -- the model's own text is never interpolated through the shell.
 if [ "$(tb_count "governance_events where run_id='$sid' and output ? 'thinking'")" -gt 0 ]; then
-	assert_eq "thinking did not ride the assistant span" 0 		"$(tb_val "select count(*) from spans s
-			where s.session_id='$uuid'
+	assert_eq "thinking did not ride the reply field" 0 \
+		"$(tb_val "select count(*) from governance_events e
+			where e.run_id='$sid' and e.output ? 'content'
 			  and position(
 			        left((select output->>'thinking' from governance_events
-			              where run_id='$sid' and output ? 'thinking'
-			              order by created_at desc limit 1), 60)
-			        in coalesce(s.response_body,'')) > 0;")"
-else
-	tb_skip "thinking did not ride the assistant span" "no thinking block in this session (extended thinking may be off)"
+			              where run_id='$sid' and output ? 'thinking' limit 1), 40)
+			        in e.output->>'content') > 0;")"
 fi
 
 # ── alignment ────────────────────────────────────────────────────────────────

@@ -97,20 +97,29 @@ else
 	tb_note "which says it should, but reading core is not evidence."
 fi
 
-# ── 46.3  the span survives ingest ────────────────────────────────────────────
-# Core RECOMPUTES semantic_type per span and isLLMCall is the only path to
-# llm_completion. Deleting the synthesized http_* attributes does not error: the
-# span still stores, classifies as something else, and every model-call reader
-# goes quiet.
-tb_step "46.3  the turn's span classifies as llm_completion"
-n=$(tb_count "spans where session_id='$sid' and semantic_type='llm_completion'")
+# ── 46.3  the turn survives ingest as a paired activity ──────────────────────
+# This case used to assert a SPAN row classified as llm_completion, and it could
+# never have passed: core parses an embedded spans[] on the normal path and then
+# discards it. No span ships at all now, and `activity_type` is a pass-through
+# column, so the classification is the client's and does not depend on core
+# recomputing anything from synthesized http_* attributes.
+tb_step "46.3  the turn stores as an :otel: activity pair"
+assert_eq "no spans rows for a dev session" 0 "$(tb_count "spans where session_id='$sid'")"
+n=$(tb_count "governance_events where run_id='$sid' and activity_id like '%:otel:%'")
 if [ "${n:-0}" -gt 0 ]; then
-	tb_ok "$n llm_completion span(s)"
+	tb_ok "$n :otel: model-call row(s)"
 else
-	tb_bad "no llm_completion span for session $sid"
-	tb_note "NEEDS A STACK. The synthesized http_method/http_url are the only path"
-	tb_note "to this classification, and their absence is silent."
+	tb_bad "no :otel: rows for session $sid"
+	tb_note "NEEDS A STACK. Without the lane discriminator the activity_id is EMPTY,"
+	tb_note "and an empty one is silently unjoinable."
 fi
+# Two rows per turn: this lane emitted only the closing half until the pairing
+# repair, so every model-call row it produced was unpaired by construction.
+unpaired="$(tb_val "select count(*) from (
+	select activity_id from governance_events
+	where run_id='$sid' and activity_id like '%:otel:%'
+	group by activity_id having count(*) <> 2) q;")"
+assert_eq "every :otel: turn carries exactly two rows" 0 "$unpaired"
 
 # ── 46.4  EXACTLY ONE producer ────────────────────────────────────────────────
 # The correctness invariant, and the only case here that cannot be inferred from
