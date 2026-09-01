@@ -195,14 +195,16 @@ func (s Spool) FlushAll(ctx context.Context, fn FlushFunc) (int, error) {
 		switch {
 		case strings.Contains(name, ".flushing."):
 			// A live drain holds its rotated file all through delivery, and nothing dedupes.
-			if info, statErr := e.Info(); statErr != nil || time.Since(info.ModTime()) < ReclaimOrphanAfter {
+			info, statErr := e.Info()
+			if statErr != nil || time.Since(info.ModTime()) < ReclaimOrphanAfter {
 				continue
 			}
 			claimed := filepath.Join(s.Dir, name) + ".reclaim." + rand.Text()
 			if os.Rename(filepath.Join(s.Dir, name), claimed) != nil {
 				continue // lost the race to another drain, or already gone
 			}
-			n, err = s.drainRotated(ctx, orphanBasePath(s.Dir, name), claimed, fn)
+			// An orphan's own mtime IS its age; it is what qualified it above.
+			n, err = s.drainRotated(ctx, orphanBasePath(s.Dir, name), claimed, fn, info.ModTime())
 		case strings.HasSuffix(name, ".jsonl"):
 			// Until empty: a sweep is a drain, and the window does not care who opened it.
 			n, err = s.drainFileUntilEmpty(ctx, filepath.Join(s.Dir, name), fn)
@@ -225,9 +227,18 @@ func (s Spool) FlushAll(ctx context.Context, fn FlushFunc) (int, error) {
 // later Append can reach it.
 func (s Spool) drainFile(ctx context.Context, path string, fn FlushFunc) (int, error) {
 	rotated := path + ".flushing." + rand.Text()
+	// born is how long this data has already waited, which the rotate is about to
+	// erase: the Chtimes below must stamp the rotated file `now` so a concurrent
+	// sweep cannot reclaim a live drain as an orphan, and a carry-over is a
+	// brand-new file. Unless it is carried forward, a churning lineage is reborn
+	// every pass and the retention age never comes due.
+	var born time.Time
 	err := func() error {
 		unlock := s.lockSpool()
 		defer unlock()
+		if fi, statErr := os.Stat(path); statErr == nil {
+			born = fi.ModTime()
+		}
 		return os.Rename(path, rotated)
 	}()
 	if err != nil {
@@ -238,7 +249,7 @@ func (s Spool) drainFile(ctx context.Context, path string, fn FlushFunc) (int, e
 	}
 	now := time.Now()
 	_ = os.Chtimes(rotated, now, now)
-	return s.drainRotated(ctx, path, rotated, fn)
+	return s.drainRotated(ctx, path, rotated, fn, born)
 }
 
 func (s Spool) drainFileUntilEmpty(ctx context.Context, path string, fn FlushFunc) (int, error) {
@@ -261,7 +272,7 @@ func (s Spool) drainFileUntilEmpty(ctx context.Context, path string, fn FlushFun
 	return total, nil
 }
 
-func (s Spool) drainRotated(ctx context.Context, basePath, file string, fn FlushFunc) (int, error) {
+func (s Spool) drainRotated(ctx context.Context, basePath, file string, fn FlushFunc, born time.Time) (int, error) {
 	data, err := os.ReadFile(file)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -274,28 +285,68 @@ func (s Spool) drainRotated(ctx context.Context, basePath, file string, fn Flush
 	attempt := RecoveryAttempt(filepath.Base(file))
 	lines := NonEmptyLines(data)
 	n := 0
-	var undelivered [][]byte
+	// refused spent an attempt; held did not. Keeping them apart is the fix: one
+	// file carries one attempt number in its name, so two meanings need two files.
+	var refused, held [][]byte
+	var stopped error
 	for i, line := range lines {
 		if ctx.Err() != nil {
-			// The SAME attempt: a deadline refused nothing, and advancing deletes backlogs.
-			s.writeRecovery(basePath, append(undelivered, lines[i:]...), attempt)
-			return n, ctx.Err()
+			if i == 0 {
+				// Nothing on this file was even attempted, so nothing about it can
+				// advance. Said out loud, because a file that is always starved this
+				// way is indistinguishable from one that is refused every pass.
+				s.logf("spool: %s: the budget was spent before a single delivery was attempted; "+
+					"%d event(s) carried over unchanged at attempt %d",
+					filepath.Base(basePath), len(lines), attempt)
+			}
+			held = append(held, lines[i:]...)
+			stopped = ctx.Err()
+			break
 		}
 		var ev client.DevEvent
 		if json.Unmarshal(line, &ev) != nil {
 			continue // skip a corrupt line; never fail the whole drain
 		}
-		if err := fn(ctx, ev); err != nil {
-			if errors.Is(err, client.ErrUnbuildable) {
-				continue
-			}
-			undelivered = append(undelivered, line)
-			continue
+		switch err := fn(ctx, ev); {
+		case err == nil:
+			n++
+		case errors.Is(err, client.ErrUnbuildable):
+			// Never sent, and re-sending it verbatim cannot help.
+		case errors.Is(err, client.ErrRefused):
+			// The server judged THIS event and said no: the only thing that may
+			// spend one of its attempts.
+			refused = append(refused, line)
+		default:
+			// A transport fault, an exhausted 5xx, a 401 (which core also answers
+			// for a datastore failure) or a budget that expired inside the POST --
+			// Emit flattens that last cause to text, so errors.Is can never see it.
+			// None of these judged the event, so none may cost it an attempt.
+			held = append(held, line)
 		}
-		n++
 	}
-	s.writeRecovery(basePath, undelivered, attempt+1)
-	return n, nil
+	// A budget that dies inside the LAST delivery leaves by the door, not the
+	// break, and the caller still has to hear the pass was cut short.
+	if stopped == nil {
+		stopped = ctx.Err()
+	}
+	s.carryOver(basePath, refused, held, attempt, born)
+	return n, stopped
+}
+
+// carryOver splits what a drain leaves behind by whether a delivery attempt was
+// actually spent on it. A refused line advances: without that, a file bigger
+// than one budget never finishes its loop, the count never advances, and a
+// permanently-rejected backlog churns forever at one attempt, a whole budget per
+// pass. A line the budget never reached keeps its number: advancing it turns the
+// retry cap into a timer that deletes any backlog too big for one budget.
+//
+// Two files, not one, because the number lives in the filename. held is written
+// FIRST, so a second write that fails costs the half already tried rather than
+// the half that never was. Both inherit born: a lineage that keeps being
+// rewritten would otherwise be young forever and never come due for retirement.
+func (s Spool) carryOver(basePath string, refused, held [][]byte, attempt int, born time.Time) {
+	s.writeRecovery(basePath, held, attempt, born)
+	s.writeRecovery(basePath, refused, attempt+1, born)
 }
 
 // MaxRecoveryAttempts bounds how many drains a line may survive undelivered.
@@ -367,7 +418,7 @@ func recoveryStem(basePath string) string {
 
 // writeRecovery best-effort (observe): a write failure only loses telemetry,
 // never blocks anything.
-func (s Spool) writeRecovery(basePath string, lines [][]byte, next int) {
+func (s Spool) writeRecovery(basePath string, lines [][]byte, next int, born time.Time) {
 	if len(lines) == 0 {
 		return
 	}
@@ -397,10 +448,18 @@ func (s Spool) writeRecovery(basePath string, lines [][]byte, next int) {
 			fmt.Sprintf("the carry-over file could not be written: %v", err))
 		return
 	}
-	if err := os.Rename(tmp, stem+".jsonl"); err != nil {
+	published := stem + ".jsonl"
+	if err := os.Rename(tmp, published); err != nil {
 		_ = os.Remove(tmp)
 		s.recordDiscard(basePath, len(lines),
 			fmt.Sprintf("the carry-over file could not be renamed in: %v", err))
+		return
+	}
+	// The data is as old as it ever was; only the file is new. Retirement reads
+	// this, and nothing else does -- the orphan-reclaim clock lives on
+	// `.flushing.` names, which this never touches.
+	if !born.IsZero() {
+		_ = os.Chtimes(published, born, born)
 	}
 }
 

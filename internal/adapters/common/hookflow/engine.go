@@ -2,6 +2,7 @@ package hookflow
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"time"
 
@@ -168,18 +169,33 @@ func (e *Engine) FlushOrSweep(ctx context.Context, sessionID string, em Emitter)
 		return e.Flush(ctx, sessionID, em)
 	}
 	n, err := e.FlushAll(ctx, em)
-	if err != nil {
+	if ctx.Err() != nil {
+		// The walk stopped partway, so files behind it were never opened -- and a
+		// stale mtime on one of those means nobody TRIED for the retention age, not
+		// that the age was spent failing to deliver. A flusher that was simply down
+		// for a month leaves exactly that, and its first pass back would delete
+		// still-deliverable evidence without ever attempting it.
 		e.logf("spool: the sweep ended early (%v); skipping retirement, because a file "+
 			"this pass never reached must not be deleted for being old", err)
 		return n, err
+	}
+	if err != nil {
+		// A completed walk opened every file, and a refusal never arrives here at all
+		// -- drainRotated re-spools and reports only a cut pass -- so this is a
+		// rotate or read fault on one file. It is no reason to skip the others:
+		// gating on it was the half of the old rule that protected nothing.
+		e.logf("spool: the sweep reported %v; retirement still runs, because the walk "+
+			"completed and every file got its attempt", err)
 	}
 
 	// Retirement gets its OWN budget: sharing one deadline meant a heavy backlog
 	// spent it all, so the machines that most needed retirement never got it.
 	retireCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), retireBudget)
 	defer cancel()
+	// Joined, not assigned: this line is now reachable with err already non-nil,
+	// and the flush failure is the one that explains the partial pass.
 	if _, retireErr := e.Retire(retireCtx); retireErr != nil {
-		err = retireErr
+		err = errors.Join(err, retireErr)
 	}
 	return n, err
 }

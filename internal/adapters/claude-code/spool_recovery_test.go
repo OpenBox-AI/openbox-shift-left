@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -88,9 +89,12 @@ func TestFlushDoesNotBurnRetriesInOnePass(t *testing.T) {
 	ad := New(Identity{DeveloperDID: testDID}, dir)
 	_, _ = ad.Observe(HookPreToolUse, &HookEvent{SessionID: "sess", ToolName: "Bash"})
 
-	offline := &fakeEmitter{err: errors.New("offline")}
+	// A REFUSAL, not merely a failure. Only a refusal spends a delivery attempt
+	// now -- an offline emitter is held at the same attempt on purpose -- and it is
+	// attempt progression that this test measures.
+	refusing := &fakeEmitter{err: fmt.Errorf("%w: %w: the control plane refuses this event", client.ErrDelivery, client.ErrRefused)}
 	for want := 1; want <= hookflow.MaxRecoveryAttempts; want++ {
-		if _, err := ad.Flush(context.Background(), "sess", offline); err != nil {
+		if _, err := ad.Flush(context.Background(), "sess", refusing); err != nil {
 			t.Fatalf("flush %d: %v", want, err)
 		}
 		got := recoveryNames(t, dir)
@@ -101,7 +105,7 @@ func TestFlushDoesNotBurnRetriesInOnePass(t *testing.T) {
 			t.Fatalf("after flush %d: want a .rec%d- file, got %q", want, want, got[0])
 		}
 	}
-	if _, err := ad.Flush(context.Background(), "sess", offline); err != nil {
+	if _, err := ad.Flush(context.Background(), "sess", refusing); err != nil {
 		t.Fatalf("give-up flush: %v", err)
 	}
 	if got := recoveryNames(t, dir); len(got) != 0 {

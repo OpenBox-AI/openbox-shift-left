@@ -133,6 +133,43 @@ var ErrDelivery = errors.New("client: event delivery failed")
 // ErrDelivery on purpose.
 var ErrUnbuildable = errors.New("client: event could not be built")
 
+// ErrRefused reports that the control plane refused this event ON ITS MERITS: a
+// non-retryable 4xx that is neither 401 nor 429. Re-sending it verbatim will be
+// refused again, so a durable caller may spend one of its delivery attempts on
+// it. It rides ALONGSIDE ErrDelivery, never instead of it, so a caller that only
+// knows ErrDelivery keeps working.
+//
+// It exists because the alternative -- treating every failure as a refusal --
+// makes a retry cap into a timer: a transport fault or an outage would spend an
+// event's whole allowance without the server ever having judged it, and the
+// spool is the only copy.
+//
+// 401 is deliberately NOT a refusal. Core answers "invalid token or agent
+// identity" for a genuinely rejected identity AND for any datastore failure
+// while looking the token up, so the two are indistinguishable on the wire.
+// Burning attempts on 401 would let a database hiccup delete governance
+// evidence; a permanently rejected identity instead costs one cheap request per
+// event per sweep, bounded by the retention age.
+var ErrRefused = errors.New("client: control plane refused the event")
+
+// isRefusal reports whether err is a proven, event-specific refusal. Anything
+// this cannot prove -- a transport error, an exhausted 5xx, a 401, a context
+// that expired mid-POST -- is not one.
+func isRefusal(err error) bool {
+	var he *httpError
+	if !errors.As(err, &he) {
+		return false // transport, or a budget that died inside the request
+	}
+	switch {
+	case he.status == http.StatusUnauthorized: // see ErrRefused
+		return false
+	case he.status == http.StatusTooManyRequests: // retryable; exhausted, not refused
+		return false
+	default:
+		return he.status >= 400 && he.status < 500
+	}
+}
+
 // Emit builds the core payload from a normalized dev event, signs it, and
 // POSTs it to /evaluate. It is fail-open (INV-3): the Evaluation it returns on
 // any failure is the zero value, which every caller treats as allow, so a
@@ -167,6 +204,11 @@ func (c *Client) Emit(ctx context.Context, ev DevEvent) (Evaluation, error) {
 		// Surfacing ErrDelivery lets a durable caller re-spool the event instead of
 		// losing it; callers that cannot retry ignore it (see the doc comment).
 		c.log.Printf("openbox: delivery failed for event %s (%s): %s", ev.EventID, ev.EventType, describeDrop(err))
+		if isRefusal(err) {
+			// Both sentinels: ErrDelivery for every caller that re-spools, ErrRefused
+			// for the one that also decides whether this cost an attempt.
+			return Evaluation{}, fmt.Errorf("%w: %w: %s", ErrDelivery, ErrRefused, describeDrop(err))
+		}
 		return Evaluation{}, fmt.Errorf("%w: %s", ErrDelivery, describeDrop(err))
 	}
 	return parseEvaluation(respBody), nil

@@ -235,11 +235,15 @@ func TestADiscardedBatchIsCountedAndReported(t *testing.T) {
 	}
 }
 
-// refusingSink fails every delivery, so lines are always re-queued.
+// refusingSink REFUSES every delivery, which is not the same as failing it: only
+// a refusal spends a delivery attempt, so the sentinel is what makes these tests
+// exercise the discard bound at all. A bare error here would be held forever,
+// which is the point of the classification, not a gap in it.
 type refusingSink struct{}
 
 func (refusingSink) Emit(context.Context, client.DevEvent) (client.Evaluation, error) {
-	return client.Evaluation{}, fmt.Errorf("sink refuses everything")
+	return client.Evaluation{}, fmt.Errorf("%w: %w: sink refuses everything",
+		client.ErrDelivery, client.ErrRefused)
 }
 
 // TestAFilePastTheRetirementAgeIsDeletedAndReported deleting evidence is
@@ -365,5 +369,124 @@ func TestADiscardIsReportedEvenWhenTheLogRolledOver(t *testing.T) {
 
 	if got := logged.String(); !strings.Contains(got, "DISCARDED") {
 		t.Errorf("a discard at the log's rollover was swallowed: %q", got)
+	}
+}
+
+// TestASweepThatEndedEarlyDoesNotRetireWhatItNeverReached: a stale mtime proves
+// only that nobody TRIED for the retention age, never that the age was spent
+// failing to deliver. A flusher that was down for a month leaves exactly that, so
+// retiring on a cut pass would delete still-deliverable evidence unattempted --
+// measured near-miss: a 20-day-old backlog on this machine drained successfully
+// once its identity was repaired.
+func TestASweepThatEndedEarlyDoesNotRetireWhatItNeverReached(t *testing.T) {
+	e := testEngine(t)
+	var logged strings.Builder
+	e.Log = func(format string, args ...any) { fmt.Fprintf(&logged, format+"\n", args...) }
+
+	// ReadDir sorts, so "aaa-busy" spends the budget and "zzz-ancient" is never
+	// reached by this pass -- the case the old early return refused to retire.
+	spoolEvent(t, e, "aaa-busy", "busy-1")
+	spoolEvent(t, e, "aaa-busy", "busy-2")
+	spoolEvent(t, e, "zzz-ancient", "old-1")
+	ancient := e.Spool.SessionPath("zzz-ancient")
+	old := time.Now().Add(-RetireSpoolAfter - time.Hour)
+	if err := os.Chtimes(ancient, old, old); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	sink := &deliverySink{during: func(i int) {
+		if i == 0 {
+			cancel()
+		}
+	}}
+
+	if _, err := e.FlushOrSweep(ctx, "", sink); err == nil {
+		t.Fatal("the sweep's own failure must still reach the adapter that logs it")
+	}
+	if _, err := os.Stat(ancient); err != nil {
+		t.Errorf("a file this pass never reached was retired unattempted: %v", err)
+	}
+	got := logged.String()
+	if !strings.Contains(got, "skipping retirement") {
+		t.Errorf("the skip was not reported: %q", got)
+	}
+	if strings.Contains(got, "RETIRED") {
+		t.Errorf("something was retired on a pass that ended early: %q", got)
+	}
+}
+
+// TestAChurningCarryOverAgesOutAndIsRetired is what carry-over mtime inheritance
+// buys. Once a transport fault stops spending attempts, nothing else bounds it:
+// writeRecovery mints a new file every pass, so without inheriting the data's own
+// age the 30-day gate could never come due and the retry would be unbounded.
+func TestAChurningCarryOverAgesOutAndIsRetired(t *testing.T) {
+	e := testEngine(t)
+	var logged strings.Builder
+	e.Log = func(format string, args ...any) { fmt.Fprintf(&logged, format+"\n", args...) }
+
+	spoolEvent(t, e, "stale", "stale-1")
+	path := e.Spool.SessionPath("stale")
+	old := time.Now().Add(-RetireSpoolAfter - time.Hour)
+	if err := os.Chtimes(path, old, old); err != nil {
+		t.Fatal(err)
+	}
+
+	// A transport fault: held, never a refusal, so it spends no attempt.
+	held := func(context.Context, client.DevEvent) (client.Evaluation, error) {
+		return client.Evaluation{}, fmt.Errorf("%w: dial tcp: connection refused", client.ErrDelivery)
+	}
+	if _, err := e.FlushOrSweep(context.Background(), "", emitFunc(held)); err != nil {
+		t.Fatalf("FlushOrSweep: %v", err)
+	}
+
+	if got := e.Spool.BacklogCount(); got != 0 {
+		t.Errorf("backlog = %d; a carry-over as old as the retention age must be retired", got)
+	}
+	if got := e.Spool.DiscardedCount(); got != 1 {
+		t.Errorf("DiscardedCount = %d, want 1", got)
+	}
+	if got := logged.String(); !strings.Contains(got, "RETIRED") {
+		t.Errorf("the retirement was not reported: %q", got)
+	}
+}
+
+// emitFunc adapts a plain function to Emitter, so a test can pick its own
+// failure class without declaring a sink type per class.
+type emitFunc func(context.Context, client.DevEvent) (client.Evaluation, error)
+
+func (f emitFunc) Emit(ctx context.Context, ev client.DevEvent) (client.Evaluation, error) {
+	return f(ctx, ev)
+}
+
+// TestAFileThisPassDrainedIsNeverRetired is the property that licenses the test
+// above: flush-first ordering. A deliverable file gets its delivery, never its
+// age judged -- so retirement running after an early sweep cannot eat evidence
+// the same pass just handled.
+func TestAFileThisPassDrainedIsNeverRetired(t *testing.T) {
+	e := testEngine(t)
+	var logged strings.Builder
+	e.Log = func(format string, args ...any) { fmt.Fprintf(&logged, format+"\n", args...) }
+
+	spoolEvent(t, e, "ancient-but-reachable", "old-1")
+	path := e.Spool.SessionPath("ancient-but-reachable")
+	old := time.Now().Add(-RetireSpoolAfter - time.Hour)
+	if err := os.Chtimes(path, old, old); err != nil {
+		t.Fatal(err)
+	}
+
+	sink := &deliverySink{}
+	if _, err := e.FlushOrSweep(context.Background(), "", sink); err != nil {
+		t.Fatalf("FlushOrSweep: %v", err)
+	}
+	if got := sink.delivered(); len(got) != 1 || got[0] != "old-1" {
+		t.Errorf("delivered %v, want the event delivered before its age was judged", got)
+	}
+	if got := e.Spool.DiscardedCount(); got != 0 {
+		t.Errorf("%d event(s) discarded; a file this pass drained must never be retired", got)
+	}
+	if strings.Contains(logged.String(), "RETIRED") {
+		t.Error("a file this pass drained was retired")
 	}
 }

@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // TestSpoolSuffixesStayUnique. The spool's rotate, reclaim and recovery names
@@ -29,7 +30,7 @@ func TestSpoolSuffixesStayUnique(t *testing.T) {
 
 	const writes = 1000
 	for range writes {
-		s.writeRecovery(filepath.Join(dir, "sess.jsonl"), [][]byte{line}, 0)
+		s.writeRecovery(filepath.Join(dir, "sess.jsonl"), [][]byte{line}, 0, time.Time{})
 	}
 
 	entries, err := os.ReadDir(dir)

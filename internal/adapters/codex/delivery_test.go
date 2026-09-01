@@ -3,6 +3,7 @@ package codex
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -56,14 +57,18 @@ func TestDelivery_RetryIsBounded(t *testing.T) {
 		t.Fatalf("append: %v", err)
 	}
 
-	alwaysFails := func(context.Context, client.DevEvent) error { return errors.New("rejected") }
+	// "will never accept" is a refusal, which is the only class that spends an
+	// attempt; a transport failure is retried without cost until the retention age.
+	alwaysRefuses := func(context.Context, client.DevEvent) error {
+		return fmt.Errorf("%w: %w: the control plane refuses this event", client.ErrDelivery, client.ErrRefused)
+	}
 	attempts := 0
 	for i := 0; i < hookflow.MaxRecoveryAttempts+3; i++ {
 		before, _ := filepath.Glob(filepath.Join(dir, "*.jsonl"))
 		if len(before) == 0 {
 			break // given up, as intended
 		}
-		if _, err := s.FlushAll(context.Background(), alwaysFails); err != nil {
+		if _, err := s.FlushAll(context.Background(), alwaysRefuses); err != nil {
 			t.Fatalf("flush %d: %v", i, err)
 		}
 		attempts++
