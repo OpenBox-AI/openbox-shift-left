@@ -162,7 +162,7 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if capturing {
 		captured := ""
 		if keepBodies {
-			captured = capturableBody(body, r.Header)
+			captured = capturableRequestBody(body, r.Header)
 		}
 		reqCapture = CaptureRequest(r.Method, g.upstream+r.RequestURI, r.Header, captured, start)
 	}
@@ -260,6 +260,10 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 // capturableBody renders the body redaction will see. A content-encoded body is
 // decoded from the teed copy only: forwarded bytes are never touched.
+//
+// This is the RESPONSE path. A reply starts at its beginning, so a head window is
+// the right window and truncation is the right tool; see capturableRequestBody
+// for why the request direction cannot use it.
 func capturableBody(body []byte, h http.Header) string {
 	if enc := contentEncoding(h); enc != "" {
 		return decodeCapturable(body, enc)
@@ -268,6 +272,25 @@ func capturableBody(body []byte, h http.Header) string {
 		body = body[:maxCaptureInputBytes]
 	}
 	return string(body)
+}
+
+// capturableRequestBody is the request path, and it SELECTS where the response
+// path truncates.
+//
+// It must see the whole body, which is why it does not reuse capturableBody: that
+// function's 256 KiB head cut lands inside the message array of a p50 520 KB
+// request, so selecting afterwards would only ever be choosing among the OLDEST
+// turns. Bounding is the selector's own job instead, and its budget is smaller
+// than this one.
+func capturableRequestBody(body []byte, h http.Header) string {
+	if enc := contentEncoding(h); enc != "" {
+		// A compressed request is unobserved in the corpus, and decodeCapturable's
+		// bound applies before selection can see the plaintext -- so a large
+		// compressed body arrives already head-cut and falls back to a marked
+		// window, which is the honest outcome rather than a silent one.
+		return selectModelCallRequest(decodeCapturable(body, enc))
+	}
+	return selectModelCallRequest(string(body))
 }
 
 func contentEncoding(h http.Header) string {

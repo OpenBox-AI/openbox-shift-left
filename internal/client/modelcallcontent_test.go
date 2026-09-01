@@ -283,6 +283,18 @@ func TestObservedHeadersDoNotEgress(t *testing.T) {
 // whose newest turn is at the END; head-truncating one stores the system prompt
 // and the boilerplate and discards the actual user turn -- keeping precisely the
 // part that does not change between calls.
+//
+// Read what this test does NOT prove, because for a long time it was read as
+// proving it. It exercises capModelCallRequest in ISOLATION, and the wired path
+// never reached the branch below: upstream, capturableBody head-cut 256 KiB and
+// capRunes head-cut 65,536 RUNES, so what arrived here was already exactly
+// 65,536 bytes -- at the cap, not over it -- and the function returned its input
+// unchanged. Every stored body was the tail of the head, identical across calls,
+// and this test stayed green throughout. The tail direction is still correct and
+// still worth pinning; it is now the fallback path's cap rather than the normal
+// one, because internal/gateway selects the newest messages before this layer
+// sees the body. TestTheWiredPathDoesNotReachTheTruncationBranch below is the
+// assertion that was missing.
 func TestRequestBodyTruncationKeepsTheTail(t *testing.T) {
 	const newest = "THE_NEWEST_TURN"
 	body := strings.Repeat("x", maxModelCallBodyBytes) + newest
@@ -293,6 +305,42 @@ func TestRequestBodyTruncationKeepsTheTail(t *testing.T) {
 	}
 	if !strings.HasSuffix(got, newest) {
 		t.Error("the newest turn was truncated away; a request body must keep its tail")
+	}
+}
+
+// TestTheWiredPathDoesNotReachTheTruncationBranch closes the loop the test above
+// left open.
+//
+// internal/gateway now selects a model-call request body to a budget strictly
+// below this cap, so a selected document passes through untouched: no truncation
+// mark, no cut, byte-identical. That is the property that makes the composition
+// of caps safe, and asserting it here -- in the package that owns the cap -- is
+// what keeps a future change to either bound from silently putting the stored
+// body back on the boundary. If the gateway's selectionBudget ever rises to or
+// above maxModelCallBodyBytes, this test goes red.
+func TestTheWiredPathDoesNotReachTheTruncationBranch(t *testing.T) {
+	// The selector's output shape, at the largest size it can emit: a 48 KiB
+	// budget, well inside this package's 65,536-byte cap.
+	const gatewaySelectionBudget = 48 * 1024
+	if gatewaySelectionBudget >= maxModelCallBodyBytes {
+		t.Fatalf("the gateway selects to %d bytes and this cap is %d; selection at or above the cap "+
+			"means capRunes head-cuts and the newest turn is dropped again",
+			gatewaySelectionBudget, maxModelCallBodyBytes)
+	}
+	selected := `{"model":"claude-opus-5","openbox_selection":{"dropped_messages":198,"original_bytes":541631},` +
+		`"messages":[{"role":"user","content":"` +
+		strings.Repeat("m", gatewaySelectionBudget-160) + `THE_NEWEST_TURN"}]}`
+
+	got := capModelCallRequest(selected)
+
+	if got != selected {
+		t.Errorf("a selected document was altered by the cap: %d bytes in, %d out", len(selected), len(got))
+	}
+	if strings.Contains(got, truncationMark) {
+		t.Error("a selected document was marked as truncated; the wired path must not reach that branch")
+	}
+	if !strings.HasSuffix(got, `THE_NEWEST_TURN"}]}`) {
+		t.Error("the newest turn is not at the end of the stored body")
 	}
 }
 

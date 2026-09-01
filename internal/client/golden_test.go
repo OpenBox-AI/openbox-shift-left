@@ -6,6 +6,7 @@ import (
 	"flag"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -247,6 +248,54 @@ func goldenCases() []goldenCase {
 	}
 	rollupCompleted.Metadata = map[string]any{"provider": "codex", "usage_scope": "session"}
 
+	// A RELAYED model call had no golden fixture at all, which is why three
+	// composing caps could turn every stored request body into the same 65,536
+	// bytes without a single byte pin going red. It is the class that carries the
+	// most content and the only one whose `activity_input` is a selected document
+	// rather than a field copy, so it is the class that most needed one.
+	//
+	// The request body here is deliberately the SELECTOR'S OUTPUT SHAPE -- the
+	// synthetic document internal/gateway builds, `messages` last, with the
+	// selection note -- and not a raw provider request. That is what actually
+	// reaches this package on the wire, and pinning the raw shape would pin a
+	// value the wired path stopped producing.
+	relayedStarted := base(EventTurnStarted, "ev-relay-1")
+	relayedStarted.Tool = Tool{Name: "claude-code", Kind: ToolShell}
+	relayedStarted.ActivityType = ActivityTypeLLMCompletion
+	relayedStarted.ProxyRequestID = "px-golden-0001"
+	relayedStarted.Span = &Span{
+		SemanticType: ActivityTypeLLMCompletion,
+		Stage:        "started",
+		HTTPMethod:   "POST",
+		HTTPURL:      "https://api.anthropic.com/v1/messages",
+		// DERIVED, not written as a literal. A real fingerprint is 32 hex
+		// characters (fingerprintHexLen), and this repo's own secret detector
+		// classifies a 32-hex literal in a source file as a generic API key and
+		// rewrites it to ${OPENBOX_REDACTED_*} on save -- which is how the first
+		// draft of this fixture reached disk. Deriving it keeps the byte pin
+		// stable against the editor that would otherwise silently change it.
+		CredentialFingerprint: strings.Repeat("ab12cd34", 4),
+		RequestBody: `{"model":"claude-opus-5","system":"be brief",` +
+			`"openbox_selection":{"dropped_messages":198,"dropped_keys":["max_tokens","stream","tools"],"original_bytes":541631},` +
+			`"messages":[{"role":"user","content":"the newest turn"}]}`,
+	}
+
+	relayedCompleted := relayedStarted
+	relayedCompleted.EventID = "ev-relay-2"
+	relayedCompleted.EventType = EventTurnCompleted
+	relayedCompleted.StartedAt = ts
+	relayedCompleted.EndedAt = "2026-07-31T09:00:03Z"
+	relayedCompleted.Timestamp = "2026-07-31T09:00:03Z"
+	relayedCompleted.Model = "claude-opus-5"
+	relayedSpan := *relayedStarted.Span
+	relayedSpan.Stage = "completed"
+	relayedSpan.HTTPStatus = 200
+	// Decoded from brotli in the capture path; before that change this field was a
+	// marker naming the encoding on 89.5% of relayed calls.
+	relayedSpan.ResponseBody = `{"type":"message","role":"assistant","content":[{"type":"text","text":"done"}]}`
+	relayedCompleted.Span = &relayedSpan
+	relayedCompleted.Status = StatusCompleted
+
 	return []goldenCase{
 		{"lifecycle_session_started", sessionStarted},
 		{"lifecycle_session_ended", sessionEnded},
@@ -268,6 +317,8 @@ func goldenCases() []goldenCase {
 		{"activity_turn_subagent_completed", subagentTurn},
 		{"activity_usage_rollup_started", rollupStarted},
 		{"activity_usage_rollup_completed", rollupCompleted},
+		{"activity_relayed_call_started", relayedStarted},
+		{"activity_relayed_call_completed", relayedCompleted},
 	}
 }
 
