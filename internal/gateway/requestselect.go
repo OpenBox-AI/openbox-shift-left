@@ -110,7 +110,14 @@ func selectModelCallRequest(body string) string {
 	// Overhead first, so the message budget is what is actually left rather than
 	// an estimate. Marshalling the document with an empty history costs one small
 	// allocation and removes the guesswork.
-	kept, note := keepNewestMessages(&doc, messages, len(body), dropped)
+	kept, note, ok := keepNewestMessages(&doc, messages, len(body), dropped)
+	if !ok {
+		// The budget could not be established, so any document built here would be
+		// bounded by nothing. Falling back is the only answer that stays honest:
+		// returning the history unmeasured would be an unmarked loss, which is the
+		// exact class of defect this selector exists to remove.
+		return fallbackWindow(body, "the selection budget could not be established")
+	}
 	doc.Messages = kept
 	doc.Selection = note
 
@@ -133,10 +140,15 @@ func selectModelCallRequest(body string) string {
 // keepNewestMessages fills the budget greedily FROM THE END. Newest-first is the
 // entire ordering argument of this phase: the last entry is the turn that
 // distinguishes this call from the previous one.
-func keepNewestMessages(doc *selectedRequest, messages []json.RawMessage, originalBytes int, dropped []string) ([]json.RawMessage, *selectionNote) {
+//
+// The bool is whether the budget could be established at all. It is not
+// decoration: without it a marshal failure here returned a nil slice, which
+// json.Marshal renders as `"messages":null` -- a silently emptied conversation
+// carrying no marker, in the one function whose job is to make loss visible.
+func keepNewestMessages(doc *selectedRequest, messages []json.RawMessage, originalBytes int, dropped []string) ([]json.RawMessage, *selectionNote, bool) {
 	// An empty history is a complete document, not a truncated one.
 	if len(messages) == 0 {
-		return []json.RawMessage{}, nil
+		return []json.RawMessage{}, nil, true
 	}
 
 	probe := *doc
@@ -148,7 +160,7 @@ func keepNewestMessages(doc *selectedRequest, messages []json.RawMessage, origin
 	}
 	skeleton, err := json.Marshal(probe)
 	if err != nil {
-		return nil, nil
+		return nil, nil, false
 	}
 	room := selectionBudget - len(skeleton)
 
@@ -178,13 +190,13 @@ func keepNewestMessages(doc *selectedRequest, messages []json.RawMessage, origin
 	if len(keep) == len(messages) && len(dropped) == 0 {
 		// Nothing was dropped, so a note would claim a loss that did not happen --
 		// the same class of defect as a marker claiming a cut that did not happen.
-		return keep, nil
+		return keep, nil, true
 	}
 	return keep, &selectionNote{
 		DroppedMessages: len(messages) - len(keep),
 		DroppedKeys:     dropped,
 		OriginalBytes:   originalBytes,
-	}
+	}, true
 }
 
 // tailAsJSONString re-encodes an over-budget message as a marked JSON string. It
