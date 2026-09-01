@@ -69,8 +69,12 @@ type Gateway struct {
 	evaluator Evaluator
 	gated     func(*http.Request) bool
 
+	capturesBody func(*http.Request) bool
+
 	logf func(format string, args ...any)
 }
+
+func (g *Gateway) now() time.Time { return time.Now() }
 
 // WithCapture turns on evidence emission. Observe-only: it changes what is
 // reported, never what is forwarded.
@@ -84,6 +88,13 @@ func (g *Gateway) WithCapture(em Emitter) *Gateway {
 func (g *Gateway) WithGate(ev Evaluator, gated func(*http.Request) bool) *Gateway {
 	g.evaluator = ev
 	g.gated = gated
+	return g
+}
+
+// WithBodyCapture narrows body capture to the classes that keep one; probes are
+// ~40% of relayed POSTs and are scanned only to be dropped.
+func (g *Gateway) WithBodyCapture(capturesBody func(*http.Request) bool) *Gateway {
+	g.capturesBody = capturesBody
 	return g
 }
 
@@ -115,10 +126,10 @@ func New(cfg Config) (*Gateway, error) {
 
 // ServeHTTP relays the request upstream.
 func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	// Path only, never RequestURI: the query can carry content or a token.
-	var start time.Time
+	// Path only, never RequestURI: the query can carry content or a token. The clock
+	// is unconditional: this is the relayed call's start.
+	start := g.now()
 	if g.verbose() {
-		start = time.Now()
 		g.vlog("→ %s %s", r.Method, r.URL.Path)
 	}
 	if !strings.HasPrefix(r.RequestURI, "/") {
@@ -146,17 +157,22 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	var reqCapture RequestCapture
 	capturing := g.emitter != nil || g.evaluator != nil
+	gatedCall := g.evaluator != nil && g.gated != nil && g.gated(r)
+	keepBodies := gatedCall || g.capturesBody == nil || g.capturesBody(r)
 	if capturing {
-		reqCapture = CaptureRequest(r.Method, g.upstream+r.RequestURI, r.Header,
-			capturableBody(body, r.Header))
+		captured := ""
+		if keepBodies {
+			captured = capturableBody(body, r.Header)
+		}
+		reqCapture = CaptureRequest(r.Method, g.upstream+r.RequestURI, r.Header, captured, start)
 	}
 
-	if g.evaluator != nil && g.gated != nil && g.gated(r) {
+	if gatedCall {
 		decision := Decide(r.Context(), g.evaluator, true, reqCapture.ForGate())
 		if !decision.Forward {
 			WriteRefusal(w, decision)
 			if g.emitter != nil {
-				g.emitter.Emit(r.Context(), reqCapture.Complete(refusalStatus, nil, ""))
+				g.emitter.Emit(r.Context(), reqCapture.Complete(refusalStatus, nil, "", g.now()))
 			}
 			return
 		}
@@ -188,7 +204,7 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	resp, err := g.client.Do(outbound)
 	if err != nil {
 		if g.emitter != nil {
-			g.emitter.Emit(r.Context(), reqCapture.Complete(0, nil, ""))
+			g.emitter.Emit(r.Context(), reqCapture.Complete(0, nil, "", g.now()))
 		}
 		if errors.Is(err, context.Canceled) {
 			return
@@ -207,10 +223,13 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Bounded by the same rune cap the wire has, so a long stream cannot grow
 	// this without limit.
 	var sink *captureSink
-	if g.emitter != nil {
+	if g.emitter != nil && keepBodies {
 		sink = &captureSink{}
 	}
 	streamErr := g.streamTo(w, resp.Body, sink)
+	// End of stream is where the clock stops. Not at WriteHeader: that would report
+	// time-to-first-byte as the call's latency.
+	end := g.now()
 	// resp.Trailer is only populated once the body has been read to EOF, which
 	// is why this cannot happen with the header copy above.
 	copyTrailers(w.Header(), resp.Trailer)
@@ -221,12 +240,15 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			outcome = "stream aborted"
 		}
 		g.vlog("← %s %s %d in %s (%s)", r.Method, r.URL.Path, resp.StatusCode,
-			time.Since(start).Round(time.Millisecond), outcome)
+			end.Sub(start).Round(time.Millisecond), outcome)
 	}
 
 	if g.emitter != nil {
-		g.emitter.Emit(r.Context(), reqCapture.Complete(resp.StatusCode, resp.Header,
-			capturableBody(sink.Bytes(), resp.Header)))
+		respBody := ""
+		if keepBodies {
+			respBody = capturableBody(sink.Bytes(), resp.Header)
+		}
+		g.emitter.Emit(r.Context(), reqCapture.Complete(resp.StatusCode, resp.Header, respBody, end))
 	}
 
 	// After the emit, deliberately: the evidence of a failed call is exactly the
@@ -236,11 +258,11 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// capturableBody every guarantee capture.go's header comment makes about
-// redaction evaporated silently, and the stored evidence was destroyed anyway.
+// capturableBody renders the body redaction will see. A content-encoded body is
+// decoded from the teed copy only: forwarded bytes are never touched.
 func capturableBody(body []byte, h http.Header) string {
-	if isContentEncoded(h) {
-		return "[openbox: not captured; the body was content-encoded, so redaction could not inspect it]"
+	if enc := contentEncoding(h); enc != "" {
+		return decodeCapturable(body, enc)
 	}
 	if len(body) > maxCaptureInputBytes {
 		body = body[:maxCaptureInputBytes]
@@ -248,9 +270,12 @@ func capturableBody(body []byte, h http.Header) string {
 	return string(body)
 }
 
-func isContentEncoded(h http.Header) bool {
+func contentEncoding(h http.Header) string {
 	enc := strings.TrimSpace(h.Get("Content-Encoding"))
-	return enc != "" && !strings.EqualFold(enc, "identity")
+	if enc == "" || strings.EqualFold(enc, "identity") {
+		return ""
+	}
+	return enc
 }
 
 type captureSink struct {

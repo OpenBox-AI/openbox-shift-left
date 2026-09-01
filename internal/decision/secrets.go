@@ -80,6 +80,10 @@ func (d *secretDetector) Redact(text string) (redacted string, categories []stri
 
 	for i := range d.patterns {
 		p := d.patterns[i]
+		// MatchString first: ReplaceAllStringFunc allocates even when it replaces nothing.
+		if !p.re.MatchString(out) {
+			continue
+		}
 		out = p.re.ReplaceAllStringFunc(out, func(m string) string {
 			if p.valueGroup == 0 {
 				catSet[p.category] = struct{}{}

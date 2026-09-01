@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 )
 
 // bearerFixture fixtures are assembled AT runtime from fragments, never
@@ -183,7 +184,8 @@ func TestCaptureOrderingFingerprintThenRedact(t *testing.T) {
 	respHeaders.Set("Set-Cookie", "s=abc123")
 
 	got := CaptureRequest(http.MethodPost, "https://api.anthropic.com/v1/messages?beta=true",
-		reqHeaders, `{"model":"claude-opus-4"}`).Complete(200, respHeaders, `{"type":"message"}`)
+		reqHeaders, `{"model":"claude-opus-4"}`, fixedStart).
+		Complete(200, respHeaders, `{"type":"message"}`, fixedStart.Add(2*time.Second))
 
 	if got.RequestHeaders["Authorization"] != redactedHeaderValue {
 		t.Errorf("Authorization was not redacted: %q", got.RequestHeaders["Authorization"])
@@ -226,7 +228,7 @@ func TestSplitCaptureKeepsTheOrderingAndDoesNotRedoWork(t *testing.T) {
 	respHeaders.Set("Request-Id", "req_x")
 
 	rc := CaptureRequest(http.MethodPost, "https://api.anthropic.com/v1/messages?beta=true",
-		reqHeaders, `{"model":"claude-opus-4"}`)
+		reqHeaders, `{"model":"claude-opus-4"}`, fixedStart)
 
 	if rc.Fingerprint == "" {
 		t.Fatal("no fingerprint from the request half")
@@ -246,7 +248,7 @@ func TestSplitCaptureKeepsTheOrderingAndDoesNotRedoWork(t *testing.T) {
 		t.Error("the gate's view invented response fields that nothing measured")
 	}
 
-	full := rc.Complete(200, respHeaders, `{"type":"message"}`)
+	full := rc.Complete(200, respHeaders, `{"type":"message"}`, fixedStart.Add(2*time.Second))
 	if full.CredentialFingerprint != rc.Fingerprint {
 		t.Errorf("Complete recomputed the fingerprint (%q vs %q); from already-redacted headers, so it is the placeholder's hash",
 			full.CredentialFingerprint, rc.Fingerprint)
@@ -259,5 +261,40 @@ func TestSplitCaptureKeepsTheOrderingAndDoesNotRedoWork(t *testing.T) {
 	}
 	if full.ResponseHeaders["Request-Id"] != "req_x" {
 		t.Errorf("a non-credential response header was lost: %q", full.ResponseHeaders["Request-Id"])
+	}
+}
+
+// fixedStart pins the relayed call's start so a test can assert a duration
+// rather than tolerate whatever the clock said.
+var fixedStart = time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
+
+// TestCompleteCarriesTheMeasuredCall the relay always knew how long the call
+// took and threw it away, so every stored model-call row had a null duration.
+func TestCompleteCarriesTheMeasuredCall(t *testing.T) {
+	rc := CaptureRequest(http.MethodPost, "https://api.anthropic.com/v1/messages",
+		http.Header{}, "{}", fixedStart)
+	got := rc.Complete(200, http.Header{}, "{}", fixedStart.Add(2200*time.Millisecond))
+
+	if !got.StartedAt.Equal(fixedStart) {
+		t.Errorf("StartedAt = %v, want the request half's %v", got.StartedAt, fixedStart)
+	}
+	if want := 2200 * time.Millisecond; got.Elapsed() != want {
+		t.Errorf("Elapsed() = %v, want %v", got.Elapsed(), want)
+	}
+}
+
+// TestElapsedIsZeroWhenUnmeasured a refusal and an unreachable upstream produce
+// a Captured with no honest end, and reporting a duration for one would be worse
+// than reporting none.
+func TestElapsedIsZeroWhenUnmeasured(t *testing.T) {
+	for name, c := range map[string]Captured{
+		"no start":         {EndedAt: fixedStart},
+		"no end":           {StartedAt: fixedStart},
+		"end before start": {StartedAt: fixedStart, EndedAt: fixedStart.Add(-time.Second)},
+		"same instant":     {StartedAt: fixedStart, EndedAt: fixedStart},
+	} {
+		if got := c.Elapsed(); got != 0 {
+			t.Errorf("%s: Elapsed() = %v, want 0", name, got)
+		}
 	}
 }

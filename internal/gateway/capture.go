@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/textproto"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/openbox-ai/openbox-shift-left/internal/decision"
@@ -120,6 +121,17 @@ type Captured struct {
 	HTTPMethod            string
 	HTTPURL               string
 	HTTPStatus            int
+
+	// StartedAt and EndedAt bound the RELAYED call, request capture to end-of-stream.
+	StartedAt time.Time
+	EndedAt   time.Time
+}
+
+func (c Captured) Elapsed() time.Duration {
+	if c.StartedAt.IsZero() || !c.EndedAt.After(c.StartedAt) {
+		return 0
+	}
+	return c.EndedAt.Sub(c.StartedAt)
 }
 
 // RequestCapture is the request half of the evidence, done before forwarding.
@@ -131,10 +143,13 @@ type RequestCapture struct {
 	Body        string
 	Method      string
 	URL         string
+	// At is when the request half was taken; a side channel would be a second place
+	// for the two ends to disagree.
+	At time.Time
 }
 
 // CaptureRequest does the request half, in the one order that works.
-func CaptureRequest(method, url string, reqHeaders http.Header, reqBody string) RequestCapture {
+func CaptureRequest(method, url string, reqHeaders http.Header, reqBody string, at time.Time) RequestCapture {
 	fingerprint := credentialFingerprint(reqHeaders)
 
 	// Cap; inside captureBody, after its redaction, never before.
@@ -144,11 +159,13 @@ func CaptureRequest(method, url string, reqHeaders http.Header, reqBody string) 
 		Body:        captureBody(reqBody),
 		Method:      method,
 		URL:         stripQuery(url),
+		At:          at,
 	}
 }
 
-// Complete joins the response half onto an already-captured request.
-func (r RequestCapture) Complete(status int, respHeaders http.Header, respBody string) Captured {
+// Complete joins the response half on. `at` must be end-of-stream, not response
+// headers: a streamed completion runs for seconds afterwards.
+func (r RequestCapture) Complete(status int, respHeaders http.Header, respBody string, at time.Time) Captured {
 	return Captured{
 		CredentialFingerprint: r.Fingerprint,
 		RequestHeaders:        r.Headers,
@@ -158,6 +175,8 @@ func (r RequestCapture) Complete(status int, respHeaders http.Header, respBody s
 		HTTPMethod:            r.Method,
 		HTTPURL:               r.URL,
 		HTTPStatus:            status,
+		StartedAt:             r.At,
+		EndedAt:               at,
 	}
 }
 
@@ -170,6 +189,7 @@ func (r RequestCapture) ForGate() Captured {
 		RequestBody:           r.Body,
 		HTTPMethod:            r.Method,
 		HTTPURL:               r.URL,
+		StartedAt:             r.At,
 	}
 }
 

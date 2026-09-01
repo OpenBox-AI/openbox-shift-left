@@ -38,6 +38,8 @@ type Proxy struct {
 	engine  *goproxy.ProxyHttpServer
 	logf    func(format string, args ...any)
 
+	capturesBody func(*http.Request) bool
+
 	clearedEnv []string
 
 	// handlerFor production must never get a stub, so
@@ -82,6 +84,11 @@ func New(cfg Config, ca *CA, emitter gateway.Emitter, opts ...Option) (*Proxy, e
 type Option func(*Proxy)
 
 // WithVerbose turns on per-connection commentary.
+// WithBodyCapture forwards gateway.WithBodyCapture to every per-host relay.
+func WithBodyCapture(capturesBody func(*http.Request) bool) Option {
+	return func(p *Proxy) { p.capturesBody = capturesBody }
+}
+
 func WithVerbose(logf func(format string, args ...any)) Option {
 	return func(p *Proxy) { p.logf = logf }
 }
@@ -211,6 +218,9 @@ func (p *Proxy) newRelay(host string) (http.Handler, error) {
 		return nil, fmt.Errorf("transport: build relay for %s: %w", host, err)
 	}
 	g = g.WithCapture(p.emitter)
+	if p.capturesBody != nil {
+		g = g.WithBodyCapture(p.capturesBody)
+	}
 	if p.logf != nil {
 		g = g.WithVerbose(p.logf)
 	}

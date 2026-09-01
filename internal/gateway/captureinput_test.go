@@ -124,7 +124,7 @@ func TestCaptureBodyStillRedactsWithinTheBound(t *testing.T) {
 	}
 
 	h := http.Header{"Authorization": []string{"Bearer " + awsKey}}
-	rc := CaptureRequest("POST", "https://api.anthropic.com/v1/messages", h, body)
+	rc := CaptureRequest("POST", "https://api.anthropic.com/v1/messages", h, body, fixedStart)
 	if rc.Fingerprint == "" {
 		t.Error("no credential fingerprint; it must be taken before header redaction")
 	}

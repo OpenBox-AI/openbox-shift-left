@@ -124,11 +124,16 @@ func TestBrokenStreamIsNotRelayedAsACleanEnd(t *testing.T) {
 	}
 }
 
-// TestContentEncodedBodyIsNotFedToTheRedactor is the redaction guarantee.
+// TestContentEncodedBodyIsRedactedAfterDecoding is the redaction guarantee, and
+// it now asserts the stronger property: a compressed body is decoded, so the
+// redactor does inspect it, and a credential inside one is replaced rather than
+// merely absent because nothing was captured. Declining to decode used to
+// satisfy the weaker half of this test while destroying the evidence.
+//
 // DisableCompression stops the transport asking for gzip, but the client's own
 // Accept-Encoding is relayed verbatim (TestClientAcceptEncodingSurvives
 // asserts that on purpose), so an upstream can legitimately answer compressed.
-func TestContentEncodedBodyIsNotFedToTheRedactor(t *testing.T) {
+func TestContentEncodedBodyIsRedactedAfterDecoding(t *testing.T) {
 	const secret = "AKIAIOSFODNN7EXAMPLE"
 	upstream := memhttptest.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Encoding", "gzip")
@@ -153,8 +158,11 @@ func TestContentEncodedBodyIsNotFedToTheRedactor(t *testing.T) {
 	if strings.Contains(body, secret) {
 		t.Errorf("the credential was captured unredacted out of a compressed body: %q", body)
 	}
-	if !strings.Contains(body, "content-encoded") {
-		t.Errorf("a compressed body was captured as bytes rather than declined: %q", body)
+	if !strings.Contains(body, "OPENBOX_REDACTED") {
+		t.Errorf("the redactor never ran over the compressed body; a decoded body must reach it: %q", body)
+	}
+	if !strings.Contains(body, `"text":"here is the key `) {
+		t.Errorf("the surrounding body was not captured, so only the placeholder survived: %q", body)
 	}
 }
 
