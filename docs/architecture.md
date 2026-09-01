@@ -232,9 +232,17 @@ Being precise here is part of the product.
   governed and model calls are not, because the hooks never see a model request. Three limits are worth stating plainly
   rather than discovering:
   - **The base claim is detection, not prevention.** A developer can unset one
-    environment variable. That is *visible*; a session with model turns and no
-    gateway spans is queryable, and `openbox doctor` reports the exposure at every
-    tier including the healthy one. It is not prevented. Root-owning the config via
+    environment variable. That is *visible*, and the signal that makes it visible
+    had to be rebuilt: it used to be "model turns with no gateway **spans**", which
+    is now trivially true of every session, because no session gets span rows at
+    all. It was in fact already vacuous before the spans were removed. The signal
+    that can still tell the two states apart is the **`activity_id` namespace**: a
+    session carrying hook-derived turns (`<session>:turn:<n>`) and **zero**
+    `:gateway:` or `:proxy:` activity ids made model calls the relay never saw.
+    `openbox doctor` reports the exposure at every tier including the healthy one,
+    and now also reports a lane whose managed env keys have gone missing while its
+    unit is installed and listening -- the case where routing was removed by
+    something other than OpenBox. It is not prevented. Root-owning the config via
     MDM stops the developer editing the FILE; a shell export still wins for a
     process launched from that shell. Only egress control closes it, and that is
     the org's to deploy; see [the MDM recipe](gateway-mdm-recipe.md).
@@ -516,26 +524,42 @@ was made on the smaller number.
   record of applying it. `require_verified_bundle` still parses and does
   nothing; it is deliberately absent from the reported posture, because a
   control that cannot engage must not appear as one.
-- **Telemetry evidence is event-level, plus one span per captured model turn.**
-  A developer session produces `governance_events` rows and their Merkle leaves.
-  A tool call is two events, `ActivityStarted` then `ActivityCompleted`, sharing
-  an `activity_id`, each independently evaluated and each with its own leaf, and
-  **no `spans` row**. The spans shift-left used to send for tool calls were
-  fabricated by hand to satisfy a wire shape; removing them removed a layer of
-  evidence that was never measuring anything, but it is a removal, and the tree
-  is shallower than an agent-runtime session's.
+- **Telemetry evidence is event-level, and nothing else.** A developer session
+  produces `governance_events` rows and their Merkle leaves. Every activity is two
+  events, `ActivityStarted` then `ActivityCompleted`, sharing an `activity_id`,
+  each independently evaluated and each with its own leaf, and **no `spans` row**.
+  The spans shift-left used to send for tool calls were fabricated by hand to
+  satisfy a wire shape; removing them removed a layer of evidence that was never
+  measuring anything, but it is a removal, and the tree is shallower than an
+  agent-runtime session's.
 
-One exception, added deliberately: with content capture on, a model turn
-carries **one** span whose response body is the assistant's reply, because
-core's goal-alignment engine reads assistant text from `payload.Spans` and from
-no other field. Those spans get span-level Merkle leaves and server-side
-`semantic_type` classification, and their text is retained server-side. Two
-honesty notes on that span: its classification attributes are **synthesized**,
-they describe an HTTP request the client never made, because that is the only
-input core's classifier accepts, and every such span carries
-`openbox.span_synthetic: true` so an auditor can tell, and it is a stopgap,
-retired once the control plane carries assistant content on the activity itself.
-With `content_capture: false` the hook path writes no span rows at all.
+**There is no longer an exception.** A model turn used to carry one span holding
+the assistant's reply, on the reasoning that core's goal-alignment engine read
+assistant text from `payload.Spans` and from no other field. That span is gone,
+and the two things that justified it both turned out to be wrong:
+
+- **It was never stored.** Core parses `spans[]` on the normal path and then
+  discards it; persistence is gated on `hook_trigger` plus a pre-existing event
+  row, and this client deliberately never sets `hook_trigger`, because that would
+  put a model turn on core's approval-bypass fingerprint path. So the span got no
+  Merkle leaf, no server-side classification, and no retention -- the opposite of
+  what this paragraph used to claim. Its synthesized `http.*` attributes, and the
+  `openbox.span_synthetic: true` marker that made them honest, were feeding a
+  classifier whose output was thrown away. Both are gone, and nothing
+  fabricated took their place on a field that persists: the `http_*` pair rides
+  `activity_input` only for the lanes that really observed it, because that
+  field is emitted only alongside a captured request body.
+- **Alignment no longer needs it.** Its primary path is now an `ActivityStarted`
+  carrying non-empty `activity_input`, resolved to a judgeable operation; the
+  span-based extractor survives only as a fallback for events with no activity
+  input.
+
+The reply text now rides `activity_output.content`, which maps to a dedicated
+column and does persist -- so it is retained server-side for the first time, and
+`docs/data-and-privacy.md` says so. What is given up, stated rather than glossed:
+alignment judges **operations** and not the model's reply text, because that path
+still reads only `payload.Spans`. Restoring it is a core-side change, and is
+deferred.
 
 **The gateway is a second span producer, and it behaves differently in both
 respects**. Its span describes a real observed HTTP exchange, so nothing about

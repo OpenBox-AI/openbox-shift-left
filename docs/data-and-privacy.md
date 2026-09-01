@@ -37,15 +37,23 @@ removed from tool events entirely. What a completed tool call reports instead is
 counts, bytes read, bytes written, lines changed, and an exit code if the tool
 provides one, plus whether it **succeeded or failed**. Never the output itself.
 
-**One span came back, deliberately, and it carries content.** This page
-previously said the response-body channel "cannot be re-opened by an adapter
-mistake plus a content-capture opt-in". That is no longer true, and the honest
-version is: a model turn now carries exactly one span whose response body is the
-assistant's reply, because OpenBox's goal-alignment engine reads assistant text
-from that field and from nowhere else. It is a deliberate widening with three
-bounds, the `content_capture` switch, local secret redaction before it is sent,
-and a 64KB cap, and it applies to **one** carrier. Tool calls remain span-less
-and carry no bodies at all.
+**A model turn carries content, and it is stored.** This page has said two
+different things here over time, and both are now wrong. It first said the
+response-body channel "cannot be re-opened by an adapter mistake plus a
+content-capture opt-in"; it then said a model turn carries exactly one span whose
+response body is the assistant's reply.
+
+The honest version: **nothing carries a span any more.** A model turn's content --
+the assistant's reply, its extended thinking, and on a relayed call the provider's
+own request and response -- rides `activity_output` and `activity_input`, the
+fields the control plane stores in dedicated columns. The span it used to ride was
+parsed and then discarded on arrival, so for the whole time this page described
+that carrier, the content was evaluated and retained nowhere.
+
+That makes this a real increase in what is kept, not a relabelling, and the bounds
+are unchanged: the `content_capture` switch, local secret redaction before the text
+is attached, and a size cap. Tool calls still carry no bodies at all beyond the
+tool input and output described above.
 
 **A second body-carrying span exists once the local gateway runs**, and it is a
 larger widening than the first. The gateway observes real HTTP exchanges, so its
@@ -214,8 +222,8 @@ the feature reads the assistant's words or it reads nothing.
 What bounds it:
 
 - **The `content_capture` switch**, the same one that governs prompt text. With
-  it off, no reply text is sent; not truncated, not summarized: the field and
-  the span carrying it are absent from the payload entirely.
+  it off, no reply text is sent; not truncated, not summarized: the field is
+  absent from the payload entirely.
 - **`finops: false` also removes it**, since the reply rides the turn event and
   turn events exist only under usage capture.
 - **Local secret detection runs first**, over the whole message, before it is
@@ -247,8 +255,17 @@ describes.
 
 Two consequences worth knowing rather than discovering:
 
-- **The reply is stored server-side** as a span row, with its own integrity
-  leaf. That is a real increase in what OpenBox retains about a session.
+- **The reply is stored server-side**, on the turn's own row, under
+  `activity_output.content`. That is a real increase in what OpenBox retains about
+  a session -- and it is a larger increase than this document previously described.
+  The reply used to travel inside a `spans[]` array which the control plane parses
+  and then **discards**, so it was evaluated in memory and stored nowhere. It is
+  now genuinely retained.
+- **Token spend and model content now share one policy-visible object.** The
+  control plane runs its policy engine and its guardrails over
+  `activity_output`, synchronously, before answering. That was already true of
+  thinking; it is now true of the reply and, on a relayed call, of the provider's
+  raw response too.
 - **`secret_detection: false` with capture on sends replies unredacted**, the
   same way it does for enforced-call bodies.
 
@@ -397,7 +414,9 @@ Both are readable only by you.
 | `policy-bundle.json` | **inert leftover.** There is no local policy bundle since; nothing reads this file and it can be deleted |
 | `enforcements.jsonl` | what enforcement did: verdict, source, whether it blocked, redaction *categories*; never the secret, never the body |
 | `advisories.jsonl` | advisory verdicts and guardrail findings |
-| `cc-spool/` | events awaiting flush. With content capture on (the default) these hold the same bodies the events carry; commands, file contents, tool output; already secret-redacted, in plaintext files readable by you |
+| `cc-spool/` | events awaiting flush. With content capture on (the default) these hold the same bodies the events carry; commands, file contents, tool output, and now decompressed provider responses; already secret-redacted, in plaintext files readable by you. Roughly **67 KB per model call**, drained continuously, so this is an empty queue unless delivery is failing |
+| `cc-spool/flusher.log` | what the delivery processes said. New, and it exists because they used to say nothing at all: a flusher that died before delivering was indistinguishable from one that was never started, which is why two missed flushes had to be diagnosed from file timestamps. Diagnostics only, capped, no bodies |
+| `cc-spool/.discarded` | one line per batch this machine gave up on: a timestamp, the session, and how many events were lost. Never the events themselves. It exists because the give-up was previously silent |
 | `cc-spool/turns/` | how far each turn window has been read: a byte offset and a turn index, nothing else |
 | `pending-approvals/`, `stale/` | content-free markers keyed by session id |
 | `halted-sessions/` | one small file per HALTed session; the policy reason, policy id and a timestamp, never tool content. It is what keeps a halted session refused; deleting it un-halts only this machine's view, and every verdict is already recorded server-side |
@@ -409,16 +428,46 @@ A model call can be observed three ways, and the privacy difference between them
 is larger than the table above can show in one row.
 
 - **`--gateway` and `--transport` are in-path relays.** They see the whole
-  exchange, so they are what the three body/header/fingerprint rows above
-  describe. Same `content_capture` gate, same local redaction before attachment,
-  same 64KB cap.
+  exchange. Same `content_capture` gate, same local redaction before attachment,
+  same 64KB cap. Three things about them changed and each changes what leaves your
+  machine:
+
+  - **A compressed response body is now decompressed before it is inspected and
+    attached.** The provider sits behind Cloudflare and compresses everything, so
+    in practice *every* response body OpenBox had ever captured was an 88-byte
+    "not captured; the body was content-encoded" placeholder. Real response text
+    now leaves the machine where it previously did not. It is decompressed in the
+    capture path only -- the bytes forwarded to your tool are untouched -- and the
+    local secret scan runs over the decompressed text before attachment, which is
+    the first time that scan has ever seen provider response content at all. Only
+    gzip is decoded; any other encoding still yields an honest marker naming it.
+  - **The request and response now reach a field that is stored.** They used to
+    travel inside a `spans[]` array which the control plane parses and then
+    discards, so they were evaluated and retained nowhere. They now ride
+    `activity_input` / `activity_output`, which map to dedicated columns.
+  - **The observed HTTP headers no longer leave the machine at all.** This is the
+    one change in the safer direction, and it is the largest: your live provider
+    credential is on every model request, and while capture always replaced
+    credential values by key name before the gate was consulted, the header maps
+    were still the highest-risk class this client handled. Nothing ever read them
+    (they only reached the control plane inside the discarded array), so they are
+    no longer sent. The `credential_fingerprint` -- a one-way digest, never the
+    credential -- still is.
+
+  A **token-count probe** (`POST /v1/messages/count_tokens`) sends **no bodies at
+  all**, and that asymmetry is deliberate rather than incidental. A probe carries
+  the same conversation a real call does, minus the reply, and the tool fires one
+  on every keystroke-triggered recount -- so attaching bodies there would egress
+  your whole conversation repeatedly for an event that describes no work.
 - **`--telemetry` sends no content whatsoever.** It receives the tool's own
   OpenTelemetry export and binds exactly one record type to seven values: the
   model id, four token counts, a duration and one request id. No cost; the
   server derives that from a pricing table, and fabricating it here would invent
   a number. No prompt, no completion, no body, no headers, no credential
   fingerprint. Its mapper takes **no redactor**, because there is nothing to
-  redact (`internal/cli/telemetryemit/mapper.go`).
+  redact (`internal/cli/telemetryemit/mapper.go`). This lane now sends **two rows**
+  per model call rather than one -- an opening and a closing half of the same
+  activity -- which changes the row count and not the content.
 
 **One environment key is deliberately withheld.** Claude Code supports
 `OTEL_LOG_RAW_API_BODIES`, which makes the client write raw prompt and
@@ -426,11 +475,25 @@ completion bodies to disk. OpenBox does **not** set it. It would create a local
 liability with no corresponding evidence, since this lane ingests no bodies.
 
 **~97% of captured model-call requests are truncated.** Measured on 5,049
-recorded calls: 96.75% of request bodies exceed the 65,536-rune cap (p50 529,175
-runes, max 2,566,660). Response bodies: 0.06%. So for an in-path lane the org
-typically holds the *head* of a prompt, not the prompt. That is accepted policy
-(an owner decision(c)), and it cuts both ways; less of your content leaves, and less of it is
-reviewable.
+recorded calls: 96.75% of request bodies exceed the 65,536 cap (p50 529,175 runes,
+max 2,566,660). Response bodies: 0.06%. So for an in-path lane the org typically
+holds a *fragment* of a prompt, not the prompt. That is accepted policy, and it
+cuts both ways; less of your content leaves, and less of it is reviewable.
+
+**Which fragment changed, and it is the more revealing one.** Truncation used to
+keep the **head** of a request body. A `/v1/messages` request is a conversation
+array whose newest turn is at the *end*, so keeping the head stored the system
+prompt and the boilerplate -- the part that does not change between calls -- and
+discarded what you had just typed. Request bodies now keep the **tail**. Given
+that ~97% of them are truncated, this means the captured fragment is now usually
+your most recent turn rather than the preamble: strictly more governance-useful,
+and strictly more revealing about the current conversation. Response bodies still
+keep the head, because a reply starts at its beginning.
+
+Both caps are measured in **bytes** for a model call, not characters. The bound
+exists to bound what the control plane must evaluate synchronously, and 64Ki runes
+of CJK is 192 KB on the wire -- so a byte bound is the honest one, and it is
+strictly tighter than the character bound it replaced.
 
 ### What `--remove-all` destroys
 
@@ -454,6 +517,21 @@ undelivered governed tool-call evidence belonging to a component that is still
 installed and still running. The command names the directory and the file count
 rather than staying silent about it; delete it by hand if you mean to discard
 that evidence.
+
+### Undelivered evidence is now retired after 30 days, and the deletion is reported
+
+A spool file nothing can deliver used to accumulate indefinitely -- one on the
+development machine held 1,048 events untouched for eighteen days. Two changes
+follow, and they point in opposite directions, so both are stated:
+
+- **A lane daemon now sweeps the spool periodically**, which means evidence that
+  had never left your machine will be **delivered** the first time a sweep runs
+  after an upgrade, including whatever content was captured at the time. If you
+  have a backlog you do not want egressed, delete it before installing.
+- **A file older than 30 days is deleted**, with its event count recorded in
+  `.discarded`. Deleting evidence is irreversible in a governance product, so the
+  age errs long and the deletion is loud rather than silent. Nothing inside the
+  age is touched.
 
 ## Where credentials live
 

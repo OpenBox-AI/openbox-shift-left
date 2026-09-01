@@ -12,8 +12,7 @@ than a parallel one: a tool install registers as an agent (`kind=developer`) wit
 the session as a child record, events go through the same
 `/api/v1/governance/evaluate` with the same auth, storage is the same tables.
 Prefer reusing an existing table, endpoint or service over adding one. Dev
-sessions write no `spans` rows for tool calls, with one exception: a
-content-capturing turn carries a single span, the only shape alignment accepts.
+sessions write no `spans` rows at all, and send no `spans[]`: see the invariant.
 
 The shape is a provider-agnostic engine plus one thin adapter per tool behind a
 normalized event contract, so adding a provider is an adapter rather than an
@@ -59,13 +58,13 @@ origin of config rather than tamper resistance. No document may imply otherwise.
 **Privacy posture.** A decision only a human can make (scope, privacy posture,
 priority) is surfaced, never inferred. Content, usage and thinking capture are on
 by default, opted out per key; prompt text, tool commands, file bodies, tool
-output and thinking all egress under the one `content_capture` key. Local secret
-detection redacts a body before it is attached, and that ordering is the only
-in-transit control there is; detection is keyword-driven for assignment shapes,
-so an unlabelled high-entropy value below the floor is invisible to it, and
-`docs/data-and-privacy.md` must stay true. The redactor also rewrites developer
-files and has false positives: check what this repo writes for
-`${OPENBOX_REDACTED_*}`, and derive a base64 test fixture in code.
+output, thinking and a relayed call's bodies all egress under the one
+`content_capture` key. Local secret detection redacts a body before it is
+attached, and that ordering is the only in-transit control there is; detection is
+keyword-driven, so an unlabelled high-entropy value below the floor is invisible
+to it, and `docs/data-and-privacy.md` must stay true. The redactor also rewrites
+developer files: check what this repo writes for `${OPENBOX_REDACTED_*}`, and
+derive a base64 test fixture in code.
 
 ## Invariants a contributor would otherwise break
 
@@ -76,63 +75,64 @@ evaluation: before it, under `fail_closed`, it synthesizes a HALT that reads as
 without asking. Deprecated keys (`tier2`, `tier2_timeout_ms`,
 `require_verified_bundle`) stay parseable so they can warn; `tier2` is not
 honoured. **One store per field**: `.env` holds only secrets and `dev.json` only
-coordinates, and relaxing `TestEnvFileIsNotACoordinateSource` reopens the bug
-where a stale second copy reverted a corrected DID on every install.
+coordinates; relaxing `TestEnvFileIsNotACoordinateSource` reopens the stale-copy
+bug that reverted a corrected DID on every install.
 
 **A flag defaulting to true cannot express "said nothing".** `Enforce` is a
-`*bool` and must stay nil when a run says nothing about it; `flagPassed` makes
-the distinction. Check reads and writes separately and test the *second*
-invocation: fifteen green tests missed this because each ran `init` once. Like
-`usage.go`'s INV-2 allowlist, which a sentinel test holds rather than structure,
-a change making that test pass trivially is a defect.
+`*bool` and must stay nil when a run says nothing about it; `flagPassed` makes the
+distinction. Check reads and writes separately and test the *second* invocation:
+fifteen green tests missed this because each ran `init` once. Like `usage.go`'s
+INV-2 allowlist, a change making that test pass trivially is a defect.
 
-**The turn span's synthesized `http.*` attributes must stay.** The control plane
-recomputes `semantic_type` and `isLLMCall` is the only path to `llm_completion`,
-so deleting them does not error: the span classifies as something else and
-alignment dies silently. `http_status` must serialize as `http_status_code`,
-because the receiving type spells it that way and `encoding/json` drops an
-unrecognized key without a word. **Signals must carry no `signal_args`**, read as
-a new user goal that overwrites the alignment session's, and **thinking must not
-ride the assistant span**, which the alignment extractor reads as the reply.
+**No event carries `spans[]`, and re-adding one is a regression.** The control
+plane *parses* it and then **discards** it (persistence is gated on
+`hook_trigger`, which this client never sets, because that routes a model turn
+onto the approval-bypass path), and alignment feeds from `activity_input` on the
+`ActivityStarted` half instead. So a span is neither stored nor needed, and for a
+model call `llm_completion` *is* the activity. **Signals carry no `signal_args`**,
+read as a new user goal, and **thinking keeps its own `activity_output` key**.
+And **every `activity_id` carries exactly two rows** (`Workflow*` one each;
+`SignalReceived` alone is unpaired): every in-path row was single-sided for the
+life of the feature, because the live pairing check filters to *tool* types. Check
+per `activity_id`, never by parity.
 
-**Bounds have owners.** `MaxCommandLen` bounds a local decision request and is
-never an egress bound; egress is `MaxRedactBody` then `capBody`, and
-`maxThinkingBytes` must stay larger than `capBody`. Test a cap in the unit it
-claims: one measuring bytes and cutting runes declined to truncate a CJK value.
-`contentMetadataKeys` must list every content key, or an adapter writing one
-there routes around the gate.
+**Bounds have owners.** `MaxCommandLen` bounds a local decision request, never
+egress; egress is `MaxRedactBody` then `capBody`, and `maxThinkingBytes` must stay
+larger than `capBody`. Test a cap in the unit it claims: `capBody` measures bytes
+and cuts runes, so it will not truncate a 64Ki-rune CJK value at all -- hence
+`maxModelCallBodyBytes` in bytes. `contentMetadataKeys` must list every content
+key, or an adapter writing one routes around the gate.
 
 **The three model-call lanes must never share an `activity_id`.** Disjoint
 namespaces (`:gateway:`, `:otel:`, `:proxy:`) stop dedupe absorbing one lane as a
-duplicate of another; the election stops two lanes both emitting; neither
-substitutes for the other. `Lane` unset is refused, never defaulted, and the
-`eventID` hash excludes the lane name because adding it would change every
-shipped event's idempotency key. The election is **derived** from the tool's env
-block and resolves per record, not once at startup, so `Policy.Elected` is a
-`func bool` whose zero value suppresses; loopback is the discriminator, because
-electing a producer that does not exist silences the one that does.
+duplicate of another; the election stops two lanes both emitting. `Lane` unset is
+refused, and the `eventID` hash excludes the lane name because adding it would
+move every shipped idempotency key. The election is **derived** from the tool's
+env block and resolves per record; a nil `Elected` is a wiring defect, not a
+setting; loopback is the discriminator, because electing a producer that does not
+exist silences the one that does. The settings path reaches a daemon through its
+unit, never a re-derivation: a daemon has no `$HOME`.
 
 **Install ordering is a safety property.** Unit, start, prove it listens, then
-write the env var; uninstall reverses it. Writing the var first points the tool
-at a dead port, so every model call fails while `init` prints success. Any
-failure after `WriteUnit` must also remove the unit, and removal runs before the
-credential gate: it cannot require the thing being removed to still work.
+write the env var; uninstall reverses it. Writing the var first points the tool at
+a dead port, so every model call fails while `init` prints success -- and it is
+why a startup election legitimately sees no routed lane. Any failure after
+`WriteUnit` must remove the unit, and removal runs before the credential gate.
 
 **Transport specifics.** `transport.New` clears the six proxy environment
-variables *in the constructor*, because `net/http` caches the environment behind
-a `sync.Once`. `ConnState` must close the one-shot listener or `Serve` blocks
-forever in its second `Accept`, leaking a goroutine and fd per tunnel. Host
-matching folds ASCII only (Unicode makes U+212A equal `k`) and reduces an IP
-literal through netip; the CA is name-constrained, and ALPN is http/1.1 only.
+variables *in the constructor*, because `net/http` caches the environment behind a
+`sync.Once`. `ConnState` must close the one-shot listener or `Serve` blocks in its
+second `Accept`, leaking a goroutine and fd per tunnel. Host matching folds ASCII
+only (Unicode makes U+212A equal `k`); the CA is name-constrained, ALPN http/1.1.
 
 **Three shapes are pinned by tests.** `message.content` is bound as
 `json.RawMessage` because it is a string on user lines and an array on assistant
 ones, and a typed slice drops the line's token counts silently.
-`kardianos/service` ignores `$HOME` and derives the unit path from
-`user.Current`, so `installUnitFn`/`uninstallUnitFn` in `initgateway.go` are
-the seam tests use; without it `go test./...` installs a daemon into the
-runner's home. And `.env` parsing is godotenv at its defaults: last-wins on
-duplicates, with a parse error that echoes the offending line.
+`kardianos/service` ignores `$HOME`, which is why `installUnitFn` and
+`portOccupied` are seams (without them `go test./...` installs a daemon and dials
+the developer's own lanes) and why a lane unit carries `--settings`: a daemon
+cannot re-derive that path. And `.env` parsing is godotenv at its defaults:
+last-wins, with a parse error that echoes the offending line.
 
 ## Build and test
 

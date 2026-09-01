@@ -3,15 +3,17 @@
 **Story:**  event contract · **Version:** the `schema_version` `const` in [the
 schema](../api/dev-event.schema.json) is the authority; v1.1 added the turn
 pair, v1.2 tool `status`, the subagent/denial/error types and the turn span,
-v1.3 tool content and the signals' free text, v1.4 the turn's thinking ·
+v1.3 tool content and the signals' free text, v1.4 the turn's thinking, v1.5 the
+gateway's span fields, v1.6 the `:otel:`/`:proxy:` producers, v1.7 `activity_type`
+and the removal of the span carrier ·
 **Status:** built + validated (v1.0 carried G1_READY + G3_REVIEW, 2026-07-07;
 the later bumps are additive)
 
 The single, versioned, **tool-agnostic** event schema that every coding-tool
 adapter maps its native payload onto (SPI `emit`). The OpenBox client then
 re-expresses it onto the base SDK's unified wire model (`Workflow*` /
-`SignalReceived` / `ActivityStarted` / `ActivityCompleted`; span-less apart from
-the one content-gated turn span) for openbox-core; see mapping.md. Adding a
+`SignalReceived` / `ActivityStarted` / `ActivityCompleted`; **entirely span-less**
+as of v1.7) for openbox-core; see mapping.md. Adding a
 provider (Claude Code, Codex, Cursor, …) never changes this contract or the wire
 model (PRD **FR-4**, architecture **§1b**).
 
@@ -38,15 +40,38 @@ schema itself did **not** change, which is the two-layer split working as
 intended.
 
 The `span` object stays in the contract and adapters keep populating it, but it
-is no longer serialized as a span: the client reads locators and counts out of
-it into `activity_input`/`activity_output`. One consequence is worth knowing
-before you write an adapter; no tool event reaches core as a span, so core
-computes no `semantic_type` for one, and
+is no longer serialized as a span: the client reads locators, counts **and
+bodies** out of it into `activity_input`/`activity_output`. One consequence is
+worth knowing before you write an adapter; **no event reaches core as a span at
+all**, so core computes no `semantic_type` for one, and
 `file_write`/`mcp_tool_call`/`shell_command` classification does not happen for
-dev sessions. `tool.kind` is what carries that distinction now. The one span
-that does reach core is minted by the *client* on a captured turn: no adapter
-populates it, it carries no locator, and it exists because the alignment reader
-accepts no other shape. See mapping.md §3.
+dev sessions. `tool.kind` is what carries that distinction now.
+
+v1.7 removed the last span, and the reason is worth stating because the previous
+answer looked like it worked. Core parses `spans[]` on the normal path, uses it in
+memory, and then **discards it**: persistence is gated on `hook_trigger` plus a
+pre-existing event row (`governance_workflow.go:234`, `validation.go:154-174`),
+which this client deliberately never sets, because that would put a model turn on
+core's approval-bypass fingerprint path. So every body sent there was dropped on
+arrival, and every test asserting one "reached the wire" was true and pointless.
+Separately, a span describes work nested *inside* an activity, and for a model
+call `llm_completion` **is** the activity -- so nesting one would represent the same
+call twice. See mapping.md §2.
+
+Two fields changed egress behaviour with it, and neither is a loss:
+
+- `span.credential_fingerprint` moved to `metadata.credential_fingerprint`, still
+  ungated. A **rehoming**, not a regression: span attributes never persisted for a
+  developer session, so account binding has never had anything to match on.
+- `span.request_headers` / `span.response_headers` are **no longer emitted by any
+  producer**. Nothing read them -- they only ever reached core inside the discarded
+  array -- and they were the highest-risk class this client carried, since the
+  developer's live provider credential is on every model request. They stay
+  declared, and capture still redacts them by key name; they simply do not leave
+  the machine. An adapter that later needs one specific header should add one
+  allowlisted metadata key, decided then.
+
+See mapping.md §3 for where every field lands.
 
 ## Privacy (INV-2)
 
@@ -114,3 +139,37 @@ a Go toolchain and no module downloads.
   decision is the record. The one additive core change E7 keeps is the semantic
   classifier (`shell`→`shell_command`, `mcp`→`mcp_tool_call`), not an
   accept-list.
+
+## Session-end evidence completeness
+
+A `SessionEnded` event carries what the client knows about its own delivery, in
+`metadata`. It is the only place a session says whether its telemetry is whole.
+
+| Key | Scope | Means |
+|---|---|---|
+| `evidence_state` | this session | `complete`, or `degraded` when either count below is non-zero |
+| `evidence_undelivered` | this session | events waiting in carry-over (recovery) files: an earlier flush failed and will retry. Omitted when zero |
+| `evidence_discarded` | **machine-wide, cumulative** | events this machine gave up on entirely -- past `MaxRecoveryAttempts`, or past the retention age. Omitted when zero |
+
+Three decisions a reader will otherwise find surprising.
+
+**`evidence_undelivered` stays session-scoped and counts carry-over files only**,
+which is what it has always measured. That is deliberately narrow, and the
+narrowness is what made a real gap invisible: it read **71** on a machine where
+**118** events sat in plain session files, which are not carry-over files and so
+are not counted. The machine-wide backlog is surfaced by `openbox doctor`, where
+it is actionable, rather than by widening a per-session field into something a
+reader would misinterpret.
+
+**`evidence_discarded` is machine-wide on purpose.** Loss is not scoped to the
+session that happens to end next. It exists because the bound was already there
+and silent: `writeRecovery` stopped re-queueing past `MaxRecoveryAttempts` with no
+log line, no counter and no telemetry -- governance evidence discarded with nothing
+said. Every discard is now also recorded, with a timestamp and a count, in
+`.discarded` beside the spool.
+
+**One definition, not one per adapter.** `EvidenceState` lives in
+`internal/adapters/common/hookflow` and both adapters alias it. It was two
+byte-identical copies producing one documented set of wire keys; one definition
+cannot drift, where two copies plus a test asserting they agree can only detect
+that they have.

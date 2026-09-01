@@ -175,10 +175,36 @@ Under the `Local gateway` heading you should see `tier mdm` and `owned by root`.
 If you see `tier base` with a note about ownership, the payload landed but the
 ownership did not; which is the case that looks like success and is not.
 
-Then confirm governance is actually happening rather than merely configured: a
-session with model turns and **no gateway spans** in stored data is what a
-bypass looks like. That query is the detection tier's whole point, and it works
-at both tiers.
+Then confirm governance is actually happening rather than merely configured. The
+query for that changed, and the old one no longer works: "model turns with **no
+gateway spans**" is now true of every session, because a developer session stores
+no span rows at all -- and it was already vacuous before the spans were removed,
+since core never persisted them on this path.
+
+What still distinguishes a relayed call from one the relay never saw is the
+**`activity_id` namespace**. A relayed call's rows carry `:gateway:` or `:proxy:`
+in their `activity_id`; a hook-derived turn carries `<session>:turn:<n>`. So:
+
+```sql
+-- Model calls the relay never saw: turns exist, no in-path lane observed any.
+select run_id,
+       count(*) filter (where activity_id like '%:turn:%')    as hook_turns,
+       count(*) filter (where activity_id like '%:gateway:%'
+                          or activity_id like '%:proxy:%')    as relayed
+from governance_events
+where activity_type = 'llm_completion'
+group by run_id
+having count(*) filter (where activity_id like '%:gateway:%'
+                          or activity_id like '%:proxy:%') = 0
+   and count(*) filter (where activity_id like '%:turn:%') > 0;
+```
+
+Two cautions. A session governed by the **telemetry** lane legitimately has no
+in-path rows, so exclude `:otel:` sessions or you will read a configuration choice
+as a bypass. And `openbox doctor` now reports the local half of this directly: a
+lane whose unit is installed and listening while its managed env keys have gone
+missing from the settings file, which is what un-routing looks like from the
+machine rather than from the database.
 
 ## What OpenBox will not do
 

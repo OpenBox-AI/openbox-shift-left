@@ -131,13 +131,17 @@ not measured-empty.
 |---|---|---|---|
 | Model **request** body (system prompt, full history, tool definitions) | ✅ captured | ✅ captured | ❌ **never**; this lane binds no content at all |
 | Model **response** body | ✅ captured | ✅ captured | ❌ never |
-| Request/response headers | ✅ | ✅ | ❌ |
+| Request/response headers | ❌ **no longer emitted** | ❌ no longer emitted | ❌ |
 | 4 token counts + model id | ✅ | ✅ | ✅ (its whole payload) |
-| Credential fingerprint (one-way) | ✅ | ✅ | ❌ |
-| Compressed (`gzip`/`br`) response body | ⚠️ marker only, never content | ⚠️ marker only | n/a |
+| Credential fingerprint (one-way) | ✅ on `metadata` | ✅ on `metadata` | ❌ |
+| `gzip` response body | ✅ decompressed in the capture path | ✅ decompressed | n/a |
+| `br` / `zstd` response body | ⚠️ marker naming the encoding | ⚠️ marker naming the encoding | n/a |
+| Relayed call **latency** (`duration_ms`) | ✅ measured to end-of-stream | ✅ measured | ✅ from the tool's reported `duration_ms` |
+| Paired `ActivityStarted`/`ActivityCompleted` | ✅ | ✅ | ✅ |
+| Token-count probe told apart from a completion | ✅ `token_count` | ✅ `token_count` | n/a; this lane sees no probes |
 | Refuse a call on a verdict | ⚠️ written, **dormant** | ⚠️ written, **dormant** | ❌ impossible; out of path |
 | Terminal CLI | ✅ | ✅ | ✅ |
-| **Desktop app** | ❌ measured-empty 2026-08-27 | ⬜ intended, **unconfirmed** | ⬜ intended, **unconfirmed** |
+| **Desktop app** | ❌ measured-empty 2026-08-27 | ⬜ intended, **unconfirmed**; not routed, and now **detected** as unrouted | ⬜ intended, **unconfirmed** |
 | Subscription-OAuth session | ⬜ open | ⬜ intended, **unconfirmed** | ⬜ intended, **unconfirmed** |
 | Suppressible by the governed tool | no; in path | no; in path | **yes**; the tool reports its own calls |
 | Strongest evidence to date | socket-verified relay; no live stack | **replay** (bind-free) | **replay** (bind-free), intake's JSON path crossed by a synthetic export, **protobuf path; what production uses; untested** |
@@ -168,6 +172,39 @@ coverage is the reason both lanes were built, and neither has been confirmed
 against a real client; the desktop cell is intent, and only
 `test/46-otel-lane.sh` and `47-transport.sh` can turn it into a measurement. Do
 not read "built for it" as "covers it".
+
+**The desktop app is still not routed, and that is now visible instead of
+silent.** Observed live: the desktop process holds **direct** `:443` connections
+to the provider while the `claude` CLI holds connections only to the relay's
+loopback port. Its model calls are not relayed, not captured, and produce no
+governance events. What changed is only the reporting: `openbox doctor` names a
+desktop app that is running and not routed through the relay, and words it as a
+**coverage gap** rather than as bypass -- a machine where nobody intended desktop
+coverage looks identical to one being evaded, so accusing would be dishonest.
+
+Routing it is **not implemented**, deliberately rather than by omission. How the
+desktop app resolves proxy settings and a trust anchor is unmeasured: it is
+Electron, so an embedded Chromium network stack may read the OS trust store and
+ignore `NODE_EXTRA_CA_CERTS` entirely, and if it honours only the system proxy
+then routing it means touching machine-wide network configuration -- a different
+blast radius from an env block in a dotfile, and arguably MDM territory rather
+than a developer command. Writing a router for a mechanism nobody has measured
+would be worse than writing none. The cheapest path to the answer is recovering
+*how* the 2026-08-27 `openbox-logger` run routed desktop successfully, since that
+measurement has already been paid for once. The detection is macOS-only; Windows
+is in scope for discovery and not for implementation, and `doctor` says
+"unknown", never "covered".
+
+**Environment routing is also not durable against the tool that owns the file**,
+and that too is now detected rather than assumed. Observed during one planning
+session: `~/.claude/settings.json` carried OpenBox's whole `env` block at 00:15
+and by 00:28 held only `hooks`, `statusLine` and `switchModelsOnFlag`, with no
+`--remove-all` run. The already-running CLI kept relaying, because environment
+routing binds at process start, so the un-routing was invisible from inside the
+session. `doctor` now compares each lane's activation record against the settings
+file as it is and names any managed key that has gone missing or changed. This is
+detection, not prevention: prevention belongs to MDM, exactly as the base
+architecture already records.
 
 ## 2. Field-derivation rules
 
@@ -211,7 +248,9 @@ not read "built for it" as "covers it".
   `completed` unconditionally would report success 100% for a session whose
   calls failed, which is worse than the honest 0% it replaces. Not content-gated
   on either provider.
-- **Assistant turn text → `spans[0].response_body`** (v1.2): **Claude Code
+- **Assistant turn text → `activity_output.content`** (v1.2; rehomed in v1.7 from
+  `spans[0].response_body`, which the control plane parses and then discards, so
+  the text was never stored anywhere at all): **Claude Code
   only**, from the `Stop`/`SubagentStop` payload field `last_assistant_message`;
   the provider's own recommended source, and the choice that leaves the
   transcript projection's allowlist untouched. Gate chain, all required:
@@ -231,9 +270,9 @@ not read "built for it" as "covers it".
 - **`ToolCall`↔`ToolResult` correlation**: carry the provider's `tool_use_id` in
   `metadata` (all three expose it) and set `span.invocation_id` from it; a local
   field that never egresses and keys the cross-process duration stash. The two
-  halves pair on the wire by a shared `activity_id` (no tool event carries a
-  `span_id` any more; the one span that still exists is the turn
-  carrier). Both shipped adapters correlate by id rather than by heuristic. A
+  halves pair on the wire by a shared `activity_id` (**no event carries a `span_id`
+  any more, on any lane; see mapping.md §2**). Both shipped adapters correlate by
+  id rather than by heuristic. A
   new adapter must also supply `span.operation_id` for any class it lets the
   gate escalate, or an approval cannot survive a retry; `activity_id` derives
   from it, and an approval granted against one activity cannot be consumed by a
