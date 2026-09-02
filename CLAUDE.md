@@ -424,13 +424,18 @@ of scope. Four things about this lane are worth not re-litigating:
   is cold; a 2GB cold read took 14s against the old shared budget and made the
   lane an availability coin flip.
 
-`cli/internal/assurance/fixture` and `.../securityanalysis` are **deleted**
-(3,626 lines). Phase 0's ledger retained the poison/sink/Ollama-relay and the
-standalone candidate oracle, then Phases 1–4 reimplemented all of it —
-`evaluate/effect_relay.go` is the safe sink, OpenShell's own provider route
-carries inference (the CLI only preflights it), and `securityreport.Prepare`
-owns candidate validation. Nothing imported either package. Do not restore them
-to "reuse the fixtures": they are the retired scenario machinery.
+**There is deliberately no `assurance/fixture` or `assurance/securityanalysis`
+package**, and git history will not show one — both were dropped before the
+lane's first commit, so do not go looking for the deletion. Phase 0's ledger
+(OS-00-03) retained a poison fixture, a safe sink, an in-process Ollama relay
+and a standalone candidate oracle; Phases 1–4 then reimplemented every one of
+them somewhere else and left the originals orphaned at 3,626 lines with zero
+importers. The live owners are `evaluate/effect_relay.go` for the safe sink,
+OpenShell's own provider route for inference (the CLI only *preflights* that
+route), and `securityreport.Prepare` for candidate validation. Do not restore
+the old packages to "reuse the fixtures" — the poison fixture in particular
+belongs to the retired scenario machinery, and the current lane reports
+`retrieval_poison` as a `missing` coverage channel on purpose.
 
 The demo is two scripts under
 `testbed/project-assurance/mastra-security-demo/` — `prepare-demo.zsh` then
