@@ -1,0 +1,17 @@
+id: openbox-local
+display_name: Local OpenBox Core
+description: Bearer authentication for a local OpenBox Core evaluation endpoint.
+category: other
+inference_capable: false
+credentials:
+  - name: api_key
+    description: OpenBox agent runtime API key.
+    env_vars: [OPENBOX_API_KEY]
+    required: true
+    auth_style: bearer
+    header_name: authorization
+    query_param: ""
+discovery:
+  credentials: [api_key]
+endpoints: []
+binaries: []

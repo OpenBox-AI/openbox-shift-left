@@ -1,0 +1,25 @@
+{
+  "name": "openbox-project-assurance-mastra-conformance",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24.10.0"
+  },
+  "scripts": {
+    "check": "node --check src/index.mjs",
+    "image:build": "docker build --tag ai.openbox/mastra-conformance:local .",
+    "image:test": "node image-contract-test.mjs",
+    "typecheck": "tsc --allowJs --checkJs --noEmit --skipLibCheck --module NodeNext --moduleResolution NodeNext --target ES2024 src/index.mjs",
+    "start": "node src/index.mjs"
+  },
+  "dependencies": {
+    "@mastra/core": "1.8.0",
+    "@openbox-ai/openbox-mastra-sdk": "file:vendor/openbox-ai-openbox-mastra-sdk-1.0.0.tgz",
+    "@openbox-ai/openbox-sdk": "file:vendor/openbox-ai-openbox-sdk-ts-1.0.1.tgz",
+    "zod": "4.3.6"
+  },
+  "devDependencies": {
+    "typescript": "5.9.2"
+  }
+}
