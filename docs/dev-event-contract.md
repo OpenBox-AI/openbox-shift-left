@@ -47,6 +47,17 @@ all**, so core computes no `semantic_type` for one, and
 `file_write`/`mcp_tool_call`/`shell_command` classification does not happen for
 dev sessions. `tool.kind` is what carries that distinction now.
 
+One thing the contract does **not** define, and no adapter should read as
+defined: what the newest element of a model call's stored `messages` is. The
+agent runtime appends elements that are not conversation -- the common one is a
+`role:"system"` element carrying `<total_tokens>N tokens left</total_tokens>` --
+and `role:"system"` *inside* `messages` is not documented Anthropic Messages API
+surface, where `system` is a top-level field. It is a client artifact, not a
+provider shape. `internal/gateway` drops such trailing elements so the newest
+stored element is a real turn, and reports how many it dropped under
+`openbox_selection.skipped_trailing_non_turns`; see mapping.md §The request
+window is a SELECTION.
+
 v1.7 removed the last span, and the reason is worth stating because the previous
 answer looked like it worked. Core parses `spans[]` on the normal path, uses it in
 memory, and then **discards it**: persistence is gated on `hook_trigger` plus a

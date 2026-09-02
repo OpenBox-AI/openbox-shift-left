@@ -508,7 +508,7 @@ top-level object, never a schema -- and stores a synthetic document:
 |---|---|
 | `model` | verbatim |
 | `system` | head window, ~4 KiB, re-encoded with an elision note (a truncated `RawMessage` would not parse) |
-| `openbox_selection` | `{dropped_messages, dropped_keys, original_bytes}`; absent when nothing was dropped |
+| `openbox_selection` | `{dropped_messages, skipped_trailing_non_turns, dropped_keys, original_bytes}`; absent when nothing was dropped |
 | `messages` | **last**, the newest entries greedily from the end until the budget |
 
 `tools` is dropped entirely -- it is the boilerplate that was being stored on every
@@ -526,10 +526,47 @@ Two properties are load-bearing and easy to undo by accident:
   hands `capRunes` a head cut that removes the newest turn again. The headroom is
   pinned by a test against a secret-dense body, not left as arithmetic.
 
+- **Trailing non-turns are dropped, so the judged tail carries a turn.** The agent
+  runtime appends elements to `messages` that are not conversation -- most often a
+  51-132 byte `role:"system"` element holding
+  `<total_tokens>N tokens left</total_tokens>`. Since the judge reads the LAST
+  element as the current goal, that is what it read on **67%** of measured calls.
+  Selection now walks back past trailing elements whose `role` is neither `user`
+  nor `assistant` -- at most 4, never emptying the history -- and reports the count
+  under its own `skipped_trailing_non_turns` key rather than folding it into
+  `dropped_messages`: a budget drop and a shape problem are different losses. The
+  predicate reads `role` and **never content**, because the same `<total_tokens>`
+  marker also rides inside real turns (`assistant` 81, `user` 59 of 1,144 measured
+  occurrences), so a content match destroys 140 genuine turns to catch the
+  synthetic ones. A `role:"system"` element inside `messages` is a **client
+  artifact** -- the Anthropic Messages API carries `system` as a top-level field --
+  and no contract this repo publishes defines it.
+
 Anything that is not a conversation -- non-JSON, a missing or non-array `messages`,
 a truncated body -- degrades to a tail window carrying a marker that names the
 *selector*, so it can be told apart from a downstream truncation. It never errors:
 this runs in the request path of the component that must not break the tool.
+
+**A fallback window has two possible sources, and the marker names which.** Where
+the selector could not bind at all -- non-JSON, no `messages`, a non-array
+`messages`, or a budget it could not establish -- no document exists, so the window
+is cut from the **raw body**. Where a document *was* built and then exceeded the
+budget, the window is cut from **that document**, whose `tools` is already dropped
+and whose `system` is already capped. That distinction is not cosmetic: windowing
+the raw body there stored tool boilerplate and zero conversation on **26.5%** of
+measured model calls, because 65.5% of bodies put `tools` after `messages`. The
+two cases carry **different reason strings**, and rows stored before this change
+keep the older wording, so an investigation can tell a window over boilerplate
+from a window over conversation without dating the row.
+
+The over-budget encode that produced those fallbacks is also gone. A message
+larger than the whole budget is re-encoded as a marked JSON string, and that
+re-encode is now **sized by measurement** rather than by a fixed allowance:
+`json.Marshal` expands `"` and `\` 2x and a literal `<`, `>`, `&` or control byte
+6x, so the previous 16-byte margin was outrun by any escaping-heavy message -- an
+HTML paste is enough -- and the element came back larger than the room it had been
+measured against. Sizing for the 6x worst case instead would divide the kept tail
+by six on every ordinary body to serve the pathological one.
 
 **In-path-lane-only span fields** (v1.5, rehomed in v1.7). Set by the gateway and
 transport lanes; a hook event carries none of them. They used to ride
