@@ -45,6 +45,29 @@ and carry no bodies at all.
 Neither paragraph is a privacy improvement claim. The first is a narrowing of
 what *could* egress; the second is a widening of what does.
 
+## Project assurance data
+
+Passive inspection, native-host issue analysis, sealed-pack verification, and
+report rendering read caller-selected local data and make no OpenBox or model
+request. Evaluation is development-only and may transiently process project,
+prompt, tool, model, MCP, network, and effect observations. Its owner-only
+observation pack deliberately retains bounded evidence needed for later
+analysis and can therefore contain sensitive prompts, outputs, paths, and logs.
+The pack retains no credential field.
+
+Finalization verifies its observation and candidate completely before reading a
+credential or making a request. It then uses the existing organization token for
+one bounded local GET-only posture capture. The token, request headers, raw Rego,
+free-form control bodies, write routes, and arbitrary backend responses are not
+retained. The sealed owner-only report remains sensitive because it embeds the
+observation and analyzer assertions. Verification and rendering of that report
+are offline, and the report never applies or approves a recommendation.
+
+Production workloads, identities, credentials, endpoints, and data are not
+accepted. OpenShell isolation gaps and missing authority remain coverage
+limitations rather than production security claims. Full current boundaries
+are in [Project assurance](project-assurance.md).
+
 *When* it leaves: events are delivered in near-real-time by default — a detached
 flusher drains the local spool within ~2 seconds of each tool call
 (`hookflow.RealtimeTrigger`), with a final drain at session end.
@@ -287,6 +310,21 @@ key, it can **create and rotate agents across your whole organization** — the
 signing key above compromises one agent, this one compromises the fleet. Prefer a
 short-lived JWT where your deployment allows it, and do not put an approver
 install on a shared host.
+
+Project security evaluation reuses an exact-scope `OPENBOX_CONTROL_TOKEN` from
+the invoking host environment for GET-only backend collection. `openbox auth`
+validates that key for agent registration/rotation plus the required observation
+reads, but does not persist it during an ordinary developer authentication. The
+token never enters the developer image or OpenShell provider. Because it still
+has organization-wide agent creation and rotation authority, protect the
+invoking environment accordingly.
+
+The shared authentication stage prepares the development project agent with
+`signing_required=false`. That permits the provider-held runtime bearer key to
+emit observable behavior from OpenShell without placing the Ed25519 seed in the
+image. It also means those evaluation requests do not carry cryptographic agent
+attribution; observation packs must disclose that gap and must not promote the
+traffic into signed-identity evidence.
 
 A real environment variable always beats the file, so CI can supply credentials
 without writing anything to disk:

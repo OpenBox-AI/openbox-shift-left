@@ -74,12 +74,25 @@ Two paths, deliberately separate:
 | `actions/openbox-git-action/` | commit → deploy lineage for CI |
 | `contracts/dev-event/` | the normalized event contract + wire mapping + conformance suite |
 
-An adapter is only four things: its native hook shape, its mapper, an
-`OutputContract` (how it spells a hook response, where a redactable body lives, what
-an approval verdict becomes) and its installer. If something is
-provider-agnostic it belongs in `hookflow` or `devconfig` — that rule exists because
-the engine was once copy-pasted per adapter, and the copies drifted on the
-enforcement path.
+## Project assurance lane
+
+Project assurance is separate from the developer hook engine. The CLI provides
+passive inspection, a narrow one-shot local OpenShell image runner, and
+schema-dispatched verification and reporting for historical audit packs,
+sealed observation packs, and advisory security-report packs. No native-host
+project runner, governed rerun, fake SDK receiver, or control Apply path is
+reachable.
+
+The local lane resolves and publishes the exact OCI image, runs its standard
+command in OpenShell, observes matching SDK traffic through local Core, reads
+the terminal backend session, and seals an immutable observation pack. An
+explicit installed native-host skill may create an untrusted issue-only
+candidate. The finalizer independently validates both inputs, captures the
+target's safe GET-only current posture, maps supported issues through a frozen
+inert catalog, and seals matching JSON, Markdown, and SARIF projections.
+OpenShell observations are coverage evidence, not production-enforcement proof,
+and finalization never writes a control. See
+[Project assurance](project-assurance.md).
 
 ## Governance levels
 

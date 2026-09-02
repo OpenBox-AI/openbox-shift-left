@@ -386,6 +386,57 @@ double-count disappears end to end, and that `decision_authority` lands in
 and failed before this change. `testbed/10-onboard.sh` gained the dormant
 stale-path replacement assertions.
 
+**Project assurance runs end to end now** (`plans/260825-1623-lean-openshell-project-assurance/`).
+The public surface is `project inspect`, `evaluate`, `finalize`, `verify`,
+`report`, `propose` — six subcommands, `docs/project-assurance.md` for the user
+view. Codex, Claude/SRT, Seatbelt, governed-rerun and ProjectRun v2 execution
+paths stay retired with no CLI fallback or hidden probe entrypoint; their audit-
+pack v1 objects survive only as historical READ contracts. Phases 1–3 are
+verified and Phase 4 is implemented through OS-04-03; **OS-04-04 is the one open
+task** — a live GET-only finalization and a before/after zero-control-mutation
+proof still need a host-side control token, and human report review remains.
+Production data, credentials, control publication and automatic fixes stay out
+of scope. Four things about this lane are worth not re-litigating:
+
+- **The analyzer is a model, and that is not a contradiction of "no LLM
+  verdicts."** The native-host skill may emit only an *issue candidate*;
+  `securityreport.Prepare` then re-resolves every evidence citation against the
+  sealed pack offline, relabels candidate prose as `*_assertion`, and keeps
+  `observed_facts` limited to cited retained records. `severity` is pinned to
+  the single literal `unavailable` at three independent layers (skill
+  instruction, candidate schema `const`, report schema `const` plus the
+  renderer) and `security_pass` is a hard `false`. Loosening any one of those
+  turns an assertion into a finding.
+- **The offline gate must stay ahead of credentials, network and output.**
+  `Prepare` calls `resolveAbsentOutput` before it reads the pack, and
+  `project_finalize.go` reads `OPENBOX_CONTROL_TOKEN` only after `Prepare`
+  returns. Reordering it means an integrity failure that has already touched a
+  credential.
+- **The control token needs EXACT permissions.** Finalization rejects missing
+  reads and unrelated write/approval authority equally, so
+  `local-stack/scripts/bootstrap.sh` reconciles a retained key rather than only
+  minting a new one. A key minted before that reconcile passes every earlier
+  step and fails at finalize.
+- **The model load has its own 30s budget** (`Dependencies.InferenceHTTP`),
+  deliberately not the shared 10s `HTTP` client — that one is also the Core
+  relay, where a longer per-request budget changes how long a stalled Core holds
+  a relayed SDK call. The preflight requires the model UNLOADED, so every load
+  is cold; a 2GB cold read took 14s against the old shared budget and made the
+  lane an availability coin flip.
+
+`cli/internal/assurance/fixture` and `.../securityanalysis` are **deleted**
+(3,626 lines). Phase 0's ledger retained the poison/sink/Ollama-relay and the
+standalone candidate oracle, then Phases 1–4 reimplemented all of it —
+`evaluate/effect_relay.go` is the safe sink, OpenShell's own provider route
+carries inference (the CLI only preflights it), and `securityreport.Prepare`
+owns candidate validation. Nothing imported either package. Do not restore them
+to "reuse the fixtures": they are the retired scenario machinery.
+
+The demo is two scripts under
+`testbed/project-assurance/mastra-security-demo/` — `prepare-demo.zsh` then
+`launch-claude.zsh`, with `RUNBOOK.md` for the end-to-end sequence and the
+direct-CLI lane. There is no editor-task dependency; `.zed/` is gitignored.
+
 Next: the Cursor adapter; policy template packs. The one dependency this repo now
 has is `golang.org/x/term v0.34.0`, **pinned** — v0.35.0+ declares `go 1.24.0` and
 would raise the language floor across all eleven modules; `go mod tidy` and

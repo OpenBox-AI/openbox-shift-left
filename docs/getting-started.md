@@ -11,6 +11,17 @@ openbox init     set up — install the hooks, in one project or fleet-wide
 `auth` runs first. Each command fails with a pointer to the other if you get the
 order wrong.
 
+Project security evaluation is separate from the developer-runtime setup below.
+The CLI supports passive `project inspect`, one-shot local-image
+`project evaluate`, installed-host `openbox-security-evaluation`, offline-first
+`project finalize`, and schema-dispatched `verify` and `report`.
+Evaluation requires the pinned local OpenShell/OpenBox/Ollama tuple and seals a
+verified observation pack on complete success. The host skill creates an
+untrusted issue-only candidate; finalization then performs a bounded local
+GET-only posture read and seals an advisory report. Historical `propose` remains
+available only for historical audit packs. See
+[Project assurance](project-assurance.md).
+
 Examples use `--provider claude-code`; substitute `--provider codex` and most steps
 are the same. Codex differs in four ways worth knowing up front
 (`adapters/codex/README.md`): it asks you to trust new hooks via `/hooks` before they
@@ -48,21 +59,24 @@ the dashboard shows both.
 | Looks like | `obx_key_…` | `obx_…` / `obx_test_…` |
 | Belongs to | your **organization** | one **agent** |
 | Where you find it | dashboard → **Organization → API Keys** | dashboard → Agent detail (`openbox_api_key`) |
-| Used for | registering an agent, policy sync, approvals, rotation | the runtime itself, read from `~/.openbox/.env` |
+| Used for | shared authentication, agent lifecycle, and host-side security-evaluation reads | the shift-left runtime and OpenShell provider, read from `~/.openbox/.env` |
 | Env var | `OPENBOX_CONTROL_TOKEN` | `OPENBOX_API_KEY`, written for you by `auth` |
 
-**You want the organization key**, and only to *register* — once you have an agent,
-`auth` needs no org key at all. The agent runtime key is *minted by* registration
-and is never an input to it; paste it as a control token and you get a 401, and
-paste it in the API-key field and `auth` tells you which one you used.
+**You want one narrowly scoped organization key** for the shared authentication
+stage and later host-side security-evaluation reads. `openbox auth` validates its
+exact permissions before it creates or rotates an agent, and prepares a newly
+registered project agent with `signing_required=false` so the same runtime key
+can produce observable behavior from inside OpenShell without exposing the
+Ed25519 seed. The agent runtime key is
+*minted by* registration and is never an input to it; paste it as a control token
+and you get a 401, and paste it in the API-key field and `auth` tells you which one
+you used.
 
 Permissions to grant the key, by what you intend to run:
 
 | Command | Needs |
 |---|---|
-| `openbox auth` (registering a new agent) | `create:agent`, `read:agent` |
-| `openbox auth --rotate` | `update:agent` |
-| policy reads (server-side, on every gated call) | `read:agent_policy` |
+| Shared `openbox auth` + `openbox project evaluate` + `openbox project finalize` key | `create:agent`, `read:agent`, `update:agent`, `read:agent_session`, `read:agent_log`, `read:agent_guardrail`, `read:agent_policy`, `read:agent_behavior_rule` — exactly these permissions |
 | `openbox approve …` (human or autonomous) | `read:agent_session`, `manage:agent_session` |
 
 ```bash
@@ -70,7 +84,14 @@ export OPENBOX_CONTROL_TOKEN=obx_key_…
 ```
 
 It is read from the environment and never accepted as a flag, so it cannot leak
-through your shell history or `ps`.
+through `ps`. Keep it available to `openbox project evaluate` and the later
+`openbox project finalize` posture read; ordinary developer hooks use the
+separately minted `OPENBOX_API_KEY` and never receive this org key.
+
+The shift-left client may still attach Ed25519 headers, but Core ignores them for
+this exempt development-observation identity. The retained behavior remains real
+backend evidence; cryptographic request attribution is explicitly absent and must
+be reported as a coverage limitation, not as a failed observation.
 
 ## 3. Authenticate
 
