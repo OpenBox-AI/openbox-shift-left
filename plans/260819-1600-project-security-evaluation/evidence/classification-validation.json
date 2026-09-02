@@ -1,0 +1,71 @@
+{
+  "task": "SE-06-04",
+  "captured_at": "2026-08-22T08:34:08Z",
+  "result": "verified",
+  "toolchain": {
+    "go": "go1.27.0 darwin/arm64"
+  },
+  "inputs": {
+    "cli/internal/assurance/evidence/classify.go": "ab997019465c219977f344411c84973a35a0336643d2d03ad49bc1fdbf39c699",
+    "cli/internal/assurance/evidence/classify_test.go": "a090ea8cc69e9bdf939d811b0ae0d1f68093a7be789160cd7385773afaa99f8f",
+    "cli/internal/assurance/evidence/judge.go": "7ff895b9a17fb72ba34e9037d7b50108283b241be460ac38571cb0583031441e",
+    "cli/internal/assurance/evidence/judge_test.go": "57020d325686ee32fd85a540473f24d28b9880fd8b33240019d5338fd2cd985a"
+  },
+  "commands": [
+    {
+      "command": "cd cli && go test -count=50 ./internal/assurance/evidence",
+      "exit_status": 0,
+      "result": "passed"
+    },
+    {
+      "command": "cd cli && go test -race -count=10 ./internal/assurance/evidence",
+      "exit_status": 0,
+      "result": "passed"
+    },
+    {
+      "command": "cd cli && go test -count=1 ./internal/assurance/... ./cmd/openbox",
+      "exit_status": 0,
+      "result": "passed"
+    },
+    {
+      "command": "cd cli && go vet ./...",
+      "exit_status": 0,
+      "result": "passed"
+    },
+    {
+      "command": "cd cli && GOOS=linux GOARCH=amd64 go test -c -o <task-temp>/evidence-linux.test ./internal/assurance/evidence && GOOS=windows GOARCH=amd64 go test -c -o <task-temp>/evidence-windows.test.exe ./internal/assurance/evidence && GOOS=linux GOARCH=amd64 go test -c -o <task-temp>/openbox-linux.test ./cmd/openbox && GOOS=windows GOARCH=amd64 go test -c -o <task-temp>/openbox-windows.test.exe ./cmd/openbox",
+      "exit_status": 0,
+      "result": "four compile-only outputs passed; task-owned temporary directory moved to Trash"
+    },
+    {
+      "command": "git diff --check",
+      "exit_status": 0,
+      "result": "clean"
+    }
+  ],
+  "classification": {
+    "evidence_level": "The current level is an explicit documented/discovered/callable/observed input; repeated requires at least two distinct run and pack identities under one exact matrix digest, all observed, one repeatable outcome, and no contrary run. This phase cannot assign release_qualified.",
+    "repetition": "The summary retains total, same-outcome, contrary-run, and sorted outcome counts. Duplicate runs, reused packs, conflicting packs, and matrix mismatch are rejected.",
+    "confidence_inputs": "Confidence remains a descriptive input set: complete observation, named SDK/outer channel count, digest count, matched/missing facts, contradictions, limitations, repetitions, and contrary runs. It is not a score and cannot change outcome.",
+    "reachability": "A retained evidence digest binds the capability observation. Pre-effect runtime interception is runtime_enforceable; post-effect runtime interception is observable_only; host-only, missing-integration, and no-observation states map to host_enforceable, code_change_required, and blind respectively."
+  },
+  "adversarial_matrix": {
+    "confidence_outcome_separation": "All five reachability classes and mixed repetition histories leave the judge-owned outcome unchanged.",
+    "contrary_run": "Remains counted and prevents repeated promotion without rewriting the current outcome.",
+    "inconclusive_repetition": "Remains observed and cannot become repeated.",
+    "repetition_inflation": "Duplicate run, conflicting pack, reused pack, and different matrix are rejected.",
+    "unsupported_level": "repeated, release_qualified, and invented base levels are rejected.",
+    "unsupported_control_claim": "Missing evidence identity, invalid stage, and stage/interception contradiction are rejected."
+  },
+  "independent_review": {
+    "result": "approved",
+    "commands": "focused count-25, race count-5, vet, format, and whitespace checks passed",
+    "finding": "No remaining high or medium SE-06-04 blocker."
+  },
+  "limits": [
+    "The classifier validates closed input shape and equality; SE-06-05 must bind its matrix, evidence-level, and reachability digests to verified audit-pack objects.",
+    "release_qualified remains unavailable until Phase 07 supplies pinned supported-release evidence.",
+    "No scalar confidence is computed and no confidence, repetition, or reachability field can upgrade or rewrite outcome.",
+    "No Docker code, project execution, network request, pack publication, or control-plane action occurred."
+  ]
+}

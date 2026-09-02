@@ -1,0 +1,6 @@
+[33m⚠[39m OPENAI_API_KEY looks like a credential passed as a plain environment variable.
+  The agent inside the sandbox can read this value directly.
+
+  To hide it from the agent, use a provider instead of --env.
+  See: https://docs.nvidia.com/openshell/latest/sandboxes/providers-v2
+

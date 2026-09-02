@@ -1,0 +1,54 @@
+{
+  "schema": "openbox.project-assurance.sandbox-run-execution-validation/v1",
+  "task": "SE-03-06",
+  "capturedAt": "2026-08-21T04:54:06Z",
+  "status": "passed_with_limits",
+  "toolchain": {
+    "go": "go1.26.7 darwin/arm64",
+    "os": "macOS 26.5.2",
+    "kernel": "Darwin 25.5.0"
+  },
+  "inputs": {
+    "driverGo": "sha256:83609ba428b056ef951cf9e18be3cccc54aea3f10c394903bd8839a9904f5217",
+    "codexGo": "sha256:f56ce115eb815bc6d98caa872427d26cce7cd2e62688b890fae2892ee7401fff",
+    "probeGo": "sha256:7bec764492c896925df8d43af41c3df8e5c15dce187ce211fd654c2979b251d0",
+    "runGo": "sha256:9972b3acc2432fcbd9342a7b0391eeb30105da608f193a3f037ce2434c61786f",
+    "runTestGo": "sha256:a6eca5f31955eb4221bfd5fa9c740f7bf63d6618f86ad4a418849f4d6a413423",
+    "runUnixTestGo": "sha256:bca47f1ac7b0ce1b0bc7e787e42ba4242e8b18399445d958cdff7fea3ddb23d7",
+    "probeProcessGo": "sha256:6222b19ca20a6a7228dbfb7ffc716deebe64d5a7e948617f9b17d2962e7625bf",
+    "probeProcessUnixGo": "sha256:bdc8f3bcd7152ad8cee7422f14ca2cae81eded6195c809d78f7de9986ce2fe49",
+    "probeProcessOtherGo": "sha256:7e8149f62c0a3efe32b0636e2f0188f3200e979ea6b336a6cde29b64c02df1ab",
+    "adr": "sha256:ece092b5c22eb19aa1f2c81875ea24bf301b8e10b9768c116ca6974358f084d6"
+  },
+  "commands": [
+    "cd cli && go test ./internal/assurance/sandbox -run 'TestExecuteCodexRun|TestRunBoundedProcess' -count=10",
+    "cd cli && go test ./internal/assurance/sandbox -run 'TestRunBoundedProcessKillsSpawnedProcessGroup|TestRunBoundedProcessKillsSpawnedProcessGroupOnOutputLimit|TestRunBoundedProcessKillsChildAfterSuccessfulParentExit' -count=100",
+    "cd cli && go test ./internal/assurance/sandbox ./cmd/openbox -count=1",
+    "cd cli && go test -race ./internal/assurance/sandbox -count=1",
+    "cd cli && go test ./internal/assurance/... -count=1",
+    "cd cli && go vet ./internal/assurance/sandbox ./cmd/openbox",
+    "cd cli && GOOS=darwin GOARCH=arm64 go test -c -o TASK_TEMP/sandbox-darwin-arm64.test ./internal/assurance/sandbox",
+    "cd cli && GOOS=linux GOARCH=amd64 go test -c -o TASK_TEMP/sandbox-linux-amd64.test ./internal/assurance/sandbox",
+    "cd cli && GOOS=windows GOARCH=amd64 go test -c -o TASK_TEMP/sandbox-windows-amd64.exe ./internal/assurance/sandbox",
+    "gofmt -d cli/internal/assurance/sandbox/{probe,run,run_test,run_unix_test,probe_process,probe_process_unix,probe_process_other}.go",
+    "git status --short",
+    "git diff --check"
+  ],
+  "result": {
+    "authorization": "a successful probe creates one private time-bounded authorization; copies share synchronized consumption state, so replay or expiry stops before launch",
+    "correlation": "the run requires the exact probed Codex identity, configuration, probe binding, posture digest, helper inode and bytes, and private Codex state path, inode, and digest",
+    "processOwnership": "each launch receives a new process group; timeout, cancellation, output-cap, nonzero exit, and successful parent exit all perform bounded post-wait group-absence verification",
+    "output": "stdout and stderr are independently stream-capped at caller-declared positive limits up to 16 MiB and truncation is explicit",
+    "duration": "the caller context and a positive run timeout capped at one hour cancel the process group; timeout evidence remains set even if cleanup also fails",
+    "exit": "normal and nonzero application exit codes remain bounded result evidence; launch, timeout, cancellation, output, and cleanup failures retain distinct closed reasons",
+    "environment": "the process receives an exact constructed environment and never os.Environ; SE-03-07 owns the final expected-present and expected-absent policy",
+    "tests": "focused count-10, process-leak count-100, package, race, all-assurance, vet, format, and Darwin/Linux/Windows compile-only checks passed",
+    "independentReview": "approved the one-shot/state-bound launch and classified max-process enforcement as a separate mandatory Phase 03 exit gate; no reviewer writes"
+  },
+  "limits": [
+    "This task proves source and local test behavior. It did not execute Codex, the native sandbox, a project command, the Mastra SDK, a provider/model request, production credentials/endpoints, or an external control-plane operation.",
+    "Process-group ownership and verified cleanup are not a maximum-process-count budget. The Phase 03 exit and support-tuple qualification remain blocked until maxProcesses has real enforcement evidence; no polling-based or cleanup-only surrogate is claimed.",
+    "Darwin and Linux use process-group semantics. The other-platform implementation exists only for compilation and the exported Codex runner rejects every platform except the exact Darwin/arm64 candidate.",
+    "SE-03-08 still owns native denial/config evidence normalization, and SE-03-09 owns full run-owned process, socket, path, and outside-sentinel cleanup evidence."
+  ]
+}

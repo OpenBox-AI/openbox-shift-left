@@ -1,0 +1,63 @@
+{
+  "schema": "openbox.project-assurance.sandbox-environment-validation/v1",
+  "task": "SE-03-07",
+  "capturedAt": "2026-08-21T05:11:59Z",
+  "status": "passed_with_limits",
+  "toolchain": {
+    "go": "go1.26.7 darwin/arm64",
+    "os": "macOS 26.5.2",
+    "kernel": "Darwin 25.5.0",
+    "ajv": "8.17.1",
+    "qualificationLock": "sha256:86bfa5d3e22e4577e92e704cad8ea5026201a0090892b9010ad27446576b9cd7"
+  },
+  "inputs": {
+    "driverGo": "sha256:6f7fdf21ca559fac35454d514ee6f9022b0419affc2746a535dbe1a6f108dabc",
+    "codexGo": "sha256:bcca4b735fefc80964ab6f38191790d20115a11f799fcf73768449baccdafe4e",
+    "probeGo": "sha256:0270dc0a7460a87e88293a5901861d04bdb8624c9f6322ae0678f5888f21c8f2",
+    "runGo": "sha256:9522cbf9d571b37c4842156cd090b1c9266512e8b163ad687918dd5d3e9bd672",
+    "probeProcessGo": "sha256:038bb4ea6030f2e7407c4d5b1b9fdbe96bbb013e1a9bbc70575ad2d634fc0398",
+    "codexTestGo": "sha256:63d43afff0b6e92e33cc7ac7c941801b292eebace0179bedb24868619c367e35",
+    "postureTestGo": "sha256:1ecc60c63345490e13211350d0bfd2e8af7660e5ae7053f8d7f38760fcbb33ab",
+    "runTestGo": "sha256:7e0cb6e6a1dc914122d446397c9186ab4a022bc82511d23beb32b8adae94f6a7",
+    "probeTestGo": "sha256:f8c7bb257e737a8aecfbe71c5c6592e135ee95c55dbf96d9baafbd0dc0b0a481",
+    "probeProcessTestGo": "sha256:aa5087e2e912e24e44183230730250720acc29aaa55bb585d1737ec9dbe7fd44",
+    "sandboxPostureFixture": "sha256:4caaf1f49189aa76420006f82e8c132fee310d844e7e256bc35cc597bca38058",
+    "schemaValidation": "sha256:8f099d9dea8dc085fa1ec9b5a967f140543833a792e8a2ed06bc4df9d1e9a881",
+    "adr": "sha256:ece092b5c22eb19aa1f2c81875ea24bf301b8e10b9768c116ca6974358f084d6"
+  },
+  "commands": [
+    "cd cli && go test ./internal/assurance/sandbox -run 'TestProjectRunEnvironmentPolicy|TestExecuteCodexRunRejectsAmbientProductionCoordinates|TestRunBoundedProcessDoesNotInheritParentEnvironment|TestExecuteCodexProbe|TestExecuteCodexRun|TestBuildCodexStandaloneInvocation|TestPostureObjectMatchesFrozenPublicFixture' -count=10",
+    "cd cli && go test ./internal/assurance/sandbox ./cmd/openbox -count=1",
+    "cd cli && go test -race ./internal/assurance/sandbox -count=1",
+    "cd cli && go test ./internal/assurance/... -count=1",
+    "cd cli && go vet ./internal/assurance/sandbox ./cmd/openbox",
+    "/Users/lebrian/.nvm/versions/node/v22.20.0/bin/npm install --prefix TASK_TEMP --ignore-scripts --no-audit --no-fund --package-lock=false ajv@8.17.1 fast-deep-equal@3.1.3 fast-uri@3.1.0 json-schema-traverse@1.0.0 require-from-string@2.0.2",
+    "shasum -a 256 TASK_TEMP/node_modules/{ajv,fast-deep-equal,fast-uri,json-schema-traverse,require-from-string}/package.json; verify package versions, resolved URLs, and registry integrity values against plans/260819-1600-project-security-evaluation/evidence/ajv-8.17.1.qualification-lock.json",
+    "node plans/260819-1600-project-security-evaluation/evidence/probes/validate_project_assurance_schemas.mjs TASK_TEMP/node_modules/ajv contracts/project-assurance",
+    "node plans/260819-1600-project-security-evaluation/evidence/probes/validate_run_profile_draft.mjs TASK_TEMP/node_modules/ajv contracts/project-assurance/schema/project-run-profile-v1.schema.json contracts/project-assurance/testdata/valid/project-run-profile-v1.json",
+    "cd cli && OPENBOX_AJV_ROOT=TASK_TEMP/node_modules/ajv go test ./internal/assurance/artifact -run TestPinnedProjectAssuranceContractConformance -count=1 -v",
+    "cd cli && GOOS={darwin/arm64,linux/amd64,windows/amd64} go test -c -o TASK_TEMP/OUTPUT ./internal/assurance/sandbox",
+    "gofmt -d cli/internal/assurance/sandbox/{driver,codex,probe,run,probe_process,codex_test,posture_test,run_test,probe_test,probe_process_test}.go",
+    "git status --short",
+    "git diff --check"
+  ],
+  "result": {
+    "presentPolicy": "the closed child environment requires the exact loopback OPENBOX_URL, one generated obx_test_ credential, and a private normalized TMPDIR equal to a declared writable root; descriptor controls are optional here but accept only true/fail_closed/true",
+    "profileBindings": "only the seven frozen generated-binding names and APP_ENV=security-test are accepted; URL-valued fixtures are loopback HTTP and production-looking OpenBox credentials are rejected",
+    "ambientPreflight": "nonempty fixed provider/DID/private-key/control-token coordinates, a non-test OpenBox key, or a nonloopback OpenBox URL abort before probe or project launch and are rechecked at the launch boundary",
+    "absenceProof": "parent and child report the exact ordered name/presence matrix including fixed production credential sentinels; values never enter helper output",
+    "continuity": "probe and run compare the exact private environment value vector, while the public posture binds names only so test credentials are neither retained nor hashed",
+    "inheritance": "subprocess Env is constructed from fixed LANG/PATH, isolated CODEX_HOME, the closed child vector, and no os.Environ input; an ambient credential inheritance regression passes",
+    "bounds": "the child vector has a closed 32-entry and 64 KiB cap, with bounded values and no NUL or duplicate names",
+    "contracts": "the pinned Ajv 8.17.1 replay passed 7 valid contracts, 7/7/7/7/6/7/7 basic negatives, 25 structural adversarials, 10 semantic adversarials, and the run-profile 1 positive plus 16 schema/18 semantic negatives",
+    "tests": "focused count-10, package, race, all-assurance, vet, format, pinned contract replay, and Darwin/Linux/Windows compile-only checks passed",
+    "independentReview": "approved the exact private continuity, ambient rejection, required URL/key/temp invariant, optional safe-control boundary, and no-value-retention design; no reviewer writes"
+  },
+  "limits": [
+    "This task proves source and local test behavior. It did not execute Codex, the native sandbox, a project command, the Mastra SDK, a provider/model request, production credentials/endpoints, or an external control-plane operation.",
+    "Phase 04 must still correlate each absent descriptor-control variable with an exact safe literal at the qualified withOpenBox initializer and bind the URL/key values to the run-owned receiver; Phase 03 has no descriptor or receiver authority.",
+    "The sentinel list is a fixed MVP defense-in-depth matrix. The stronger guarantee is that the child receives only the closed accepted names and never inherits the parent environment.",
+    "The qualified public posture binds environment names and exact private code compares values. Test credential values are deliberately not persisted or hashed.",
+    "The exact Codex tuple remains unsupported until denial normalization, cleanup, max-process enforcement, and the live tuple qualification gates pass."
+  ]
+}

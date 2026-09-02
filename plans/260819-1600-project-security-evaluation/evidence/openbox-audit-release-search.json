@@ -1,0 +1,276 @@
+{
+  "schema": "openbox.project-assurance.release-search/v1",
+  "task": "SE-00-08",
+  "captured_at": "2026-08-20T02:11:07Z",
+  "public_search_window_utc": "2026-08-19T16:02:00Z/2026-08-19T16:15:20Z",
+  "local_refresh_at": "2026-08-20T02:08:29Z",
+  "subject": "openbox-audit",
+  "conclusion": {
+    "public_release_evidence_found": false,
+    "compatibility_shim": "none",
+    "reason": "No local reachable history, public repository, release asset, tag, archive entry, binary string, issue, commit, or relevant package-registry record named openbox-audit was found; the two Shift Left releases contain only the unified openbox binary.",
+    "reopen_condition": "An owner supplies an official released artifact, package coordinate, or distribution record for openbox-audit."
+  },
+  "context7": {
+    "queries": [
+      "openbox-audit",
+      "OpenBox AI"
+    ],
+    "relevant_library_id_found": false,
+    "observed_top_mismatch": "/websites/openbox_wiki",
+    "limit": "The indexed Openbox result is the unrelated window manager, so no documentation query was made against it."
+  },
+  "local_git": {
+    "repository": "OpenBox-AI/openbox-shift-left",
+    "head": "eaea69b8ace33b8900d6ea0138a71e5f18e18fe3",
+    "shallow": false,
+    "reachable_commit_count": 62,
+    "local_tags": [
+      "v0.1.0"
+    ],
+    "pickaxe_openbox_audit_matches": 0,
+    "committed_audit_named_paths": 0,
+    "v0_1_0_release_config": {
+      "project_name": "openbox",
+      "binary": "openbox",
+      "archive_template": "openbox_<version>_<os>_<arch>.tar.gz",
+      "goreleaser_sha256": "16182b8ccfcf266daee520c7f67dd638f606b54b99677168f5cc090d621943cd",
+      "install_sh_sha256": "0dcaf53b2f221f81220862b03e6962c51a8c9f783720a0a2531169b6d6b24cf5"
+    },
+    "limit": "The local refs predate public v0.2.0, so remote release APIs are authoritative for later public release state."
+  },
+  "local_ecosystem": {
+    "repositories": [
+      "local-stack",
+      "openbox-mastra-sdk",
+      "openbox-sandbox",
+      "openbox-sdk-python",
+      "openbox-shift-left"
+    ],
+    "refs_searched": "all local refs and tags",
+    "commands": [
+      "git log --all -Sopenbox-audit",
+      "git log --all -Sopenbox_audit",
+      "commit-tree exact-name grep"
+    ],
+    "exact_name_matches": 0,
+    "only_workspace_occurrence": {
+      "path": "/Users/lebrian/Documents/works/openbox/openbox-agent-audit-brainstorm.md",
+      "tracked": false,
+      "status_markers": [
+        "concept brainstorm",
+        "Status: brainstorm, rev 4",
+        "Working name: OpenBox Agent Assurance",
+        "separate openbox-audit binary and SDK scan-mode design is superseded"
+      ],
+      "decision": "Planning text is not shipped compatibility evidence and is superseded by the existing openbox project lane."
+    },
+    "limits": "Absent local refs, private repositories, and deleted history are not visible."
+  },
+  "github_public": {
+    "repository": {
+      "url": "https://api.github.com/repos/OpenBox-AI/openbox-shift-left",
+      "created_at": "2026-07-03T07:33:34Z",
+      "default_branch": "main",
+      "visibility": "public"
+    },
+    "tags": [
+      {
+        "name": "v0.1.0",
+        "commit": "9ea662fa6abc2592f9664ff417c9085a847d3b34"
+      },
+      {
+        "name": "v0.2.0",
+        "commit": "d27efbbae36e7acca6e7a6c067fbb78f863d5d13"
+      }
+    ],
+    "releases": [
+      {
+        "tag": "v0.1.0",
+        "published_at": "2026-08-04T03:26:25Z",
+        "assets": [
+          "checksums.txt",
+          "openbox_0.1.0_darwin_amd64.tar.gz",
+          "openbox_0.1.0_darwin_arm64.tar.gz",
+          "openbox_0.1.0_linux_amd64.tar.gz",
+          "openbox_0.1.0_linux_arm64.tar.gz"
+        ]
+      },
+      {
+        "tag": "v0.2.0",
+        "published_at": "2026-08-19T02:53:39Z",
+        "assets": [
+          "checksums.txt",
+          "openbox_0.2.0_darwin_amd64.tar.gz",
+          "openbox_0.2.0_darwin_arm64.tar.gz",
+          "openbox_0.2.0_linux_amd64.tar.gz",
+          "openbox_0.2.0_linux_arm64.tar.gz"
+        ]
+      }
+    ],
+    "release_asset_openbox_audit_matches": 0,
+    "exact_repository_status": 404,
+    "public_org_repository_count": 19,
+    "audit_named_public_repositories": [],
+    "organization_release_search": {
+      "repositories_queried": 19,
+      "release_endpoints_http_200": 19,
+      "public_releases_total": 48,
+      "exact_name_tag_asset_hits": 0
+    },
+    "exact_searches": {
+      "repository_total_count": 0,
+      "commit_total_count": 0,
+      "issue_total_count": 0
+    },
+    "pagination": {
+      "releases_next_link_present": false,
+      "tags_next_link_present": false,
+      "org_repositories_next_link_present": false,
+      "per_page": 100
+    },
+    "v0_2_0_tree": {
+      "truncated": false,
+      "entry_count": 595,
+      "openbox_audit_paths": [],
+      "unrelated_audit_paths": [
+        "plans/260814-2235-dev-session-unauthored-halt-fix/research/researcher-02-shiftleft-audit-record.md"
+      ]
+    },
+    "v0_2_0_release_config": {
+      "project_name": "openbox",
+      "binary": "openbox",
+      "archive_template": "openbox_<version>_<os>_<arch>.tar.gz"
+    },
+    "release_archive_verification": [
+      {
+        "tag": "v0.1.0",
+        "asset": "openbox_0.1.0_linux_amd64.tar.gz",
+        "archive_sha256": "f06c30e1dbd27f5b5af6948807c1fea97cc016f9e635f722cee587a196df80d6",
+        "published_checksum_matched": true,
+        "entries": [
+          "LICENSE",
+          "README.md",
+          "openbox"
+        ],
+        "binary_sha256": "2258b4ca80076bf1e783b241fcad6b8c004b1ce6b06420feef992710e412f9d7",
+        "exact_name_readme_hits": 0,
+        "exact_name_binary_string_hits": 0
+      },
+      {
+        "tag": "v0.2.0",
+        "asset": "openbox_0.2.0_linux_amd64.tar.gz",
+        "archive_sha256": "9f8088bf1a4e9ea0d62be47179edeba6599de6d5bf24d5459d5ef10654351ba2",
+        "published_checksum_matched": true,
+        "entries": [
+          "LICENSE",
+          "README.md",
+          "openbox"
+        ],
+        "binary_sha256": "1cc88f50764a82535acbec96ba1c2c36a0399c17c3df6dd847787c25285bc8f1",
+        "exact_name_readme_hits": 0,
+        "exact_name_binary_string_hits": 0
+      }
+    ],
+    "response_sha256": {
+      "releases": "b09e14861d1ec499fbb80a56846d4f5f1f3cdecbd04c5fb5c842227c43963728",
+      "tags": "19b8e2ce3e3536fe83715f0a7c8cc52ac99a7d34ebfd997fd69fd542b9267099",
+      "org_repositories": "02d17c88888f0ffd7974bd79c43857f1212199fcc4a128025d92478e53fede28",
+      "v0_2_0_tree": "0415b6cc335d7c18b59ce2b2529ffd8159cf7f7206cbbc4ad5e510d0896cbdb5",
+      "v0_2_0_goreleaser": "16182b8ccfcf266daee520c7f67dd638f606b54b99677168f5cc090d621943cd"
+    }
+  },
+  "public_registries": [
+    {
+      "registry": "PyPI JSON",
+      "coordinate": "openbox-audit",
+      "url": "https://pypi.org/pypi/openbox-audit/json",
+      "http_status": 404,
+      "response_sha256": "b82014934f66beeb9e05a37f65357c4b50db0349d25d68d818ed0319dd4feb40"
+    },
+    {
+      "registry": "npm",
+      "coordinate": "openbox-audit",
+      "url": "https://registry.npmjs.org/openbox-audit",
+      "http_status": 404,
+      "response_sha256": "c8d3eae160a892e32837db3dcae515e843e5383fef52b8141940c8bcf8b6d59f"
+    },
+    {
+      "registry": "npm",
+      "coordinate": "@openbox-ai/openbox-audit",
+      "url": "https://registry.npmjs.org/@openbox-ai%2fopenbox-audit",
+      "http_status": 404,
+      "response_sha256": "c8d3eae160a892e32837db3dcae515e843e5383fef52b8141940c8bcf8b6d59f"
+    },
+    {
+      "registry": "Homebrew Formulae",
+      "coordinate": "openbox-audit",
+      "url": "https://formulae.brew.sh/api/formula/openbox-audit.json",
+      "http_status": 404,
+      "response_sha256": "b620507312c5e97566a3c6cfaf99144fefc18a0da7d941401dfa0f5f58fb0368"
+    },
+    {
+      "registry": "Go module proxy",
+      "coordinate": "github.com/openbox-ai/openbox-audit",
+      "url": "https://proxy.golang.org/github.com/openbox-ai/openbox-audit/@v/list",
+      "http_status": 404,
+      "response_sha256": "5e67ecb604ae650dcc7ad1f122df52fbf02073b7c2fc309a8a569df6cd397948"
+    }
+  ],
+  "registry_search_summary": {
+    "pypi": {
+      "json_status": 404,
+      "simple_status": 404
+    },
+    "npm": {
+      "coordinates": [
+        "openbox-audit",
+        "@openbox-ai/openbox-audit",
+        "@openboxai/openbox-audit"
+      ],
+      "coordinate_statuses": [
+        404,
+        404,
+        404
+      ],
+      "exact_search_hits": []
+    },
+    "homebrew": {
+      "formula_status": 404,
+      "cask_status": 404,
+      "core_and_cask_current_old_path_commit_hits": 0
+    },
+    "go": {
+      "proxy_status": 404,
+      "pkg_go_dev_status": 404
+    },
+    "crates_io": {
+      "status": 403,
+      "classification": "inconclusive and not relevant to the Python brainstorm delivery form"
+    }
+  },
+  "tooling": {
+    "git": "2.55.0",
+    "curl": "8.7.1",
+    "jq": "1.8.2",
+    "bsdtar": "3.5.3 / libarchive 3.7.4",
+    "shasum": "6.04",
+    "strings": "Apple strings; no version flag"
+  },
+  "commands": [
+    "git log --all --oneline -Sopenbox-audit -- .",
+    "git log --all --format=commit_%H --name-status | rg -i openbox[-_]?audit|audit",
+    "git show v0.1.0:.goreleaser.yaml",
+    "curl GitHub repository, commit, issue, release, tag, organization-repository, and recursive-tree APIs; project relevant fields with jq",
+    "curl all 19 public repository release endpoints and count exact name/tag/asset hits",
+    "stream Shift Left v0.1.0 and v0.2.0 linux-amd64 archives; verify published checksums, list entries, and inspect README/binary strings",
+    "curl each public registry coordinate and search endpoint; record status and exact-name result"
+  ],
+  "limits": [
+    "This is bounded negative evidence from public sources, not proof that no private, deleted, renamed, or manually distributed artifact ever existed.",
+    "Deleted releases, private repositories, private registry publications, direct customer distributions, and absent local refs remain invisible.",
+    "Search-engine results were noisy with the unrelated Openbox window manager and were not treated as OpenBox AI evidence.",
+    "Crates.io returned 403 and is excluded as inconclusive rather than counted as a negative result.",
+    "Release archives were streamed read-only and matched their published checksums; no repository was fetched, package installed, account used, temp file retained, or external state changed."
+  ]
+}

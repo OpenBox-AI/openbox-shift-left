@@ -1,0 +1,93 @@
+{
+  "schema": "openbox.project-assurance.release-validation/v1",
+  "task": "SE-07-09",
+  "capturedAt": "2026-08-22T16:17:39Z",
+  "status": "verified",
+  "releaseClaim": {
+    "implemented": "passive inspection, one exact native-Codex baseline runner, pack verification, validated reports, inert proposals, and the isolated governed release testbed",
+    "observed": "one exact Darwin arm64 Codex/Mastra/local-Ollama/local-OpenBox tuple; five deterministic baselines, five live-model baselines, and one linked real-engine governed pair",
+    "supported": "only the exact tuple in release-support-matrix.json",
+    "unsupported": "Claude standalone/inherited, Linux and Windows runtime, all drifted or unlisted tuples, and a hard maxProcesses ceiling",
+    "dockerBoundary": "Docker Compose is allowed only for the disposable local OpenBox system plane; the evaluated project runs exclusively in native Codex"
+  },
+  "inputs": {
+    "cli/cmd/openbox/main.go": "f5a56de538a49c10b18143cb06d06039371a39f1215b1f5a05560afeaa81feb7",
+    "cli/cmd/openbox/project.go": "4332df9bff4013b05c7d8c65ce23aff026d7d32f7513792c56d75e4bbb5e0968",
+    "docs/project-assurance.md": "e9f448bc06f0abf203668cbeb3b6a3141f0168bbfab68ea202f4012f20bed661",
+    "docs/getting-started.md": "1d3041c3d12354ac6671488cdbb91dc0e77a0c8163a549c1bbe5d297cd24fc41",
+    "docs/data-and-privacy.md": "cbc8b2350aa536fa6c87dd34b6478e7d2b902d3d2a9a53449d85070bacde0958",
+    "docs/architecture.md": "47052243c78e6b5d0900e4ff8af3d1530d74272c674816d2ba81277531a9c670",
+    "evidence/release-support-matrix.json": "e671a52b7c043c7fdf97cdca8264350dd5c971e4bce5cf848be2d5e57eb39374",
+    "evidence/release-support-matrix.md": "81352983b33d3aaf8f3a76713241351e5a618f461abfa7dcadeb678766ebd295",
+    "testbed/project-assurance/mastra-conformance/package-lock.json": "9924ea8ab692ce843bb3908d1ceca39c7c50e4bc6ffb3b930e0f38c7e8dce1e5",
+    "testbed/project-assurance/mastra-conformance/vendor/openbox-ai-openbox-mastra-sdk-1.0.0.tgz": "c6474a1fb58826da23a346d2a5f3967007e537062200632521f032f924369748"
+  },
+  "commands": [
+    {
+      "command": "go test -count=1 ./... in each of the 11 workspace modules",
+      "exitStatus": 0,
+      "result": "Every package in actions, adapters, CLI, client, dev-event conformance, decision, and provider passed."
+    },
+    {
+      "command": "go test -race -count=1 ./... in each of the 11 workspace modules",
+      "exitStatus": 0,
+      "result": "Every package passed under the race detector."
+    },
+    {
+      "command": "go vet ./... in each of the 11 workspace modules",
+      "exitStatus": 0,
+      "result": "All module vet gates passed."
+    },
+    {
+      "command": "GOOS=linux GOARCH=amd64 and GOOS=windows GOARCH=amd64 go test -exec=true -run '^$' ./... in each workspace module",
+      "exitStatus": 0,
+      "result": "Every package compiled for Linux amd64 and Windows amd64 without executing foreign binaries; runtime support is not inferred."
+    },
+    {
+      "command": "fresh private fixture copy; Node 26.7.0/npm 11.19.0 npm ci --ignore-scripts --offline; npm run check; npm run typecheck",
+      "exitStatus": 0,
+      "result": "The exact lock installed 350 packages, audited cleanly, and passed syntax and TypeScript checks. npm retained two known Zod peer-override warnings. The temporary tree was moved recoverably to Trash."
+    },
+    {
+      "command": "go run ./cmd/openbox project verify and project report for both retained governed-pack-pair roots",
+      "exitStatus": 0,
+      "result": "The exact 14-role exploitable baseline and 15-role blocked governed packs independently verified and schema/semantic-rendered."
+    },
+    {
+      "command": "CLI-help and documentation boundary predicates",
+      "exitStatus": 0,
+      "result": "Help, getting-started, privacy, architecture, and the dedicated guide all name native Codex project execution and Compose system-plane-only use."
+    },
+    {
+      "command": "gofmt -d; git diff --check; git status --short",
+      "exitStatus": 0,
+      "result": "Formatting and whitespace were clean; changed and untracked paths were inspected separately and unrelated dc/ and kb/ paths remained untouched."
+    }
+  ],
+  "liveTestbed": {
+    "reexecutedDuringSE0709": false,
+    "reason": "The exact retained SE-07-05 live pack pair already binds the supported tuple and passed independent public verification during this task; repeating the stateful system-plane run would add no new matrix dimension.",
+    "evidence": "governed-pack-pair-validation.json",
+    "evidenceSha256": "9d80bb4b85cdc08e80fad98c07c475c3d7d88a18afd753129a437b78eeb47338",
+    "baseline": "exploitable with one safe-sink receipt",
+    "governed": "real candidate-bound Core BLOCK applied by the SDK before effect with zero safe-sink receipts",
+    "projectSandbox": "native Codex",
+    "composeRole": "disposable local OpenBox system plane only"
+  },
+  "cleanup": {
+    "se07ComposeContainers": 0,
+    "se07ComposeVolumes": 0,
+    "se07ComposeNetworks": 0,
+    "ollamaLoadedModels": 0,
+    "mastraProjectProcesses": 0,
+    "se07TempRoots": 0,
+    "freshFixtureTemp": "moved recoverably to /Users/lebrian/.Trash/openbox-se0709-fixture.XvYyR4"
+  },
+  "limits": [
+    "This is a release qualification for one exact local tuple, not a published release, deployment, or general compatibility claim.",
+    "The final task reused the already retained live governed testbed observation and did not perform another Docker or control-plane mutation.",
+    "The locked dependency install produced known peer-override warnings for Zod 4 versus nested AI SDK Zod 3 peers; syntax, typecheck, prior runtime, and exact lock evidence passed.",
+    "The native tuple binds maxProcesses=32 but does not hard-enforce it.",
+    "No production credential/endpoint, paid/external model, audit upload, commit, publish, or deployment occurred."
+  ]
+}

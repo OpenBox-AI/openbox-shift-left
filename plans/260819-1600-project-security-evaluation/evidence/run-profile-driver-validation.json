@@ -1,0 +1,56 @@
+{
+  "schema": "openbox.project-assurance.run-profile-driver-validation/v1",
+  "task": "SE-04-04",
+  "capturedAt": "2026-08-21T10:30:46Z",
+  "status": "passed_with_limits",
+  "toolchain": {
+    "go": "go1.27.0 darwin/arm64",
+    "platform": "Darwin 25.5.0 arm64"
+  },
+  "inputs": {
+    "driverGo": "sha256:ca98063817ac9c0672cf37b76d43871010747c9cc8f83de54757137156eef1a4",
+    "driverTestGo": "sha256:36290fe5d7666c5b74343a6e75b65c57baeac080ac94ff80cf892ab64e6249a0",
+    "profileGo": "sha256:2ada728ad722f8e86da8de6b76336da0e5585cfbb91759828ec8e46edd2dfa66",
+    "profileTestGo": "sha256:c54b6ffbc75dff5f728a9bd55f94016c5f622f1eb23a0da5c3ac815bd8187703",
+    "shapeGo": "sha256:4868e8346de76cdbf9cf1edf7371e3c755eab43f1bfc6823842fefc2a7937cef",
+    "runProfileSchema": "sha256:0b3550a74ad70b6e8aa7c903f6078d8dfe8c3565775586aff847ab29ed89b5dc",
+    "validRunProfile": "sha256:201edf273c1c4e91eecfd43522e7c077eaed32b5d72078bc94121a2a9adb5470",
+    "frozenSemanticValidator": "sha256:a409ba2b983c88e95b30e0f9400107b2a893f93b4b15d11ff9fb699a5a66f913",
+    "decision": "sha256:49937e5bd1181b736b6709cde0eb300aa68b1a286d4a64641c66230c551e1edc"
+  },
+  "commands": [
+    "cd cli && go test -count=25 ./internal/assurance/runprofile",
+    "cd cli && go test -race ./internal/assurance/runprofile",
+    "cd cli && go vet ./internal/assurance/runprofile",
+    "cd cli && go test -count=1 ./internal/assurance/...",
+    "cd cli && go test -count=1 ./...",
+    "cd cli && go vet ./...",
+    "cd cli && GOOS=darwin GOARCH=amd64 go test -c -o TASK_TEMP/runprofile-darwin-amd64.test ./internal/assurance/runprofile",
+    "cd cli && GOOS=linux GOARCH=amd64 go test -c -o TASK_TEMP/runprofile-linux-amd64.test ./internal/assurance/runprofile",
+    "cd cli && GOOS=windows GOARCH=amd64 go test -c -o TASK_TEMP/runprofile-windows-amd64.test ./internal/assurance/runprofile",
+    "gofmt -d cli/internal/assurance/runprofile/*.go",
+    "git status --short",
+    "git diff --check"
+  ],
+  "result": {
+    "profileReader": "accepted the exact valid v1 fixture and exact byte/depth boundaries; rejected oversize, excessive depth, malformed JSON, duplicate keys, invalid UTF-8, BOM, trailing content, unknown/case-variant keys, and unsafe numeric values",
+    "environment": "enforced the closed source-to-name binding map, direct one-to-one port/poison/sink/model correlations, unique names and sources, APP_ENV-only static input, and runner-owned relay bearer",
+    "templates": "accepted only the five complete-string tokens in values, rejected braces in keys and malformed/interpolated/unknown tokens, substituted typed string values once, and rechecked depth and encoded request size",
+    "budgets": "enforced all v1 bounds, readiness interval, readiness-plus-cleanup duration, deterministic-local zero cost, and positive relay token/cost declarations",
+    "relay": "public parsing rejects authorized relay profiles because no package-owned provider descriptor exists yet; private contract tests prove exact origin, path family, provider, model, bearer, redirect, and budget matching without provider I/O",
+    "driver": "constructed only literal IPv4 loopback URLs, disabled proxies and redirects, pinned dial targets, bounded headers and time, observed configured 3xx statuses without following Location, retained no response body, and reserved cleanup grace from the earliest operation deadline",
+    "determinism": "canonical normalized profiles and rendered request bytes were repeatable and detached from caller mutations",
+    "tests": "focused count-25, race, affected-assurance, full CLI, vet, format, and Darwin/Linux/Windows compile-only checks passed",
+    "independentReview": "approved the frozen five-file hash set with no remaining high or medium SE-04-04 blocker and made no workspace or ledger writes"
+  },
+  "cleanup": {
+    "crossCompileOutputs": "the task-owned compile directory was moved to Trash"
+  },
+  "limits": [
+    "This proof exercised only the parser, renderer, and local HTTP driver against in-process loopback servers. It did not launch a project or sandbox, contact a provider relay, call production OpenBox, or write an external control plane.",
+    "Authorized relay declarations are intentionally not runnable through the public parser until SE-04-08 supplies package-owned provider authority and live bounded evidence.",
+    "The operation deadline reserves cleanup time when a launch-scoped parent context is supplied; SE-04-09 owns wiring that context through service start, project launch, and cleanup.",
+    "A valid profile and successful loopback response do not prove SDK instrumentation, a sandbox posture, a BLOCK decision, effect prevention, or cleanup of a project process.",
+    "Both Phase 03 sandbox tuples remain rejected, so this component proof does not make project execution runnable."
+  ]
+}

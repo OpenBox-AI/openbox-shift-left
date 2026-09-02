@@ -1,0 +1,58 @@
+{
+  "schema": "openbox.project-assurance.sandbox-probe-execution-validation/v1",
+  "task": "SE-03-05",
+  "capturedAt": "2026-08-21T04:33:14Z",
+  "status": "passed_with_limits",
+  "toolchain": {
+    "go": "go1.26.7 darwin/arm64",
+    "os": "macOS 26.5.2",
+    "kernel": "Darwin 25.5.0"
+  },
+  "inputs": {
+    "driverGo": "sha256:83609ba428b056ef951cf9e18be3cccc54aea3f10c394903bd8839a9904f5217",
+    "codexGo": "sha256:f56ce115eb815bc6d98caa872427d26cce7cd2e62688b890fae2892ee7401fff",
+    "helperGo": "sha256:590fd2bb837fddac851628ff3b655320809f1a7fb51dca6e62638e5b2cc157d4",
+    "probeGo": "sha256:da678c7e4f8c2f6cba8f4acfb686e36e65156095b0834bfd06963fe8a82032e3",
+    "probeProcessGo": "sha256:7b0ac61829fd6fa087060276b93d97746096df5e096f2a9e3ce83221cd734ec8",
+    "probeProcessUnixGo": "sha256:0390fa4fe8092f91da2130b486c8e3c9f0e7430d53a122007ea6bd7389efd842",
+    "probeProcessOtherGo": "sha256:bdffbdecb3d0fb56bdf3759881537734310a584ade0eae1b225a61c8a65abb88",
+    "probeTestGo": "sha256:d254d8cb7764ca2c037c8b0d537588b265e0e0d6fc32f82e5c573c63a768aac9",
+    "probeProcessTestGo": "sha256:b0906f52278eaf5ac4ef128fd753b4cc6b2f99af0c4c32aeae82ed0bf5ac6121",
+    "mainGo": "sha256:cc2c9ef0e8f9e30ca4270aa475900ab42c78cdf9e4fc310bcf935cf9c6f643f0",
+    "probeIntegrationTestGo": "sha256:0face8cd469d992db2dc513e155e81f984af904977a070e9796dcb582f8452dc",
+    "sandboxPostureFixture": "sha256:6b3889e2072ed73744426e85232912e7d622e2e111f758eb653d33e572e5e30b",
+    "adr": "sha256:ece092b5c22eb19aa1f2c81875ea24bf301b8e10b9768c116ca6974358f084d6"
+  },
+  "commands": [
+    "cd cli && go test ./internal/assurance/sandbox -run 'TestExecuteCodexProbe|TestRunProbeProcessBoundsAndMapsFailures|TestHelperMain' -count=10",
+    "cd cli && go test ./internal/assurance/sandbox ./cmd/openbox -count=1",
+    "cd cli && go test -race ./internal/assurance/sandbox -count=1",
+    "cd cli && go vet ./internal/assurance/sandbox ./cmd/openbox",
+    "cd cli && GOOS=darwin GOARCH=arm64 go test -c -o TASK_TEMP/{sandbox,openbox}-darwin-arm64.test PACKAGE",
+    "cd cli && GOOS=linux GOARCH=amd64 go test -c -o TASK_TEMP/{sandbox,openbox}-linux-amd64.test PACKAGE",
+    "cd cli && GOOS=windows GOARCH=amd64 go test -c -o TASK_TEMP/{sandbox,openbox}-windows-amd64.exe PACKAGE",
+    "node plans/260819-1600-project-security-evaluation/evidence/probes/validate_project_assurance_schemas.mjs QUALIFIED_AJV_ROOT contracts/project-assurance",
+    "node plans/260819-1600-project-security-evaluation/evidence/probes/validate_run_profile_draft.mjs QUALIFIED_AJV_ROOT contracts/project-assurance/schema/project-run-profile-v1.schema.json contracts/project-assurance/testdata/valid/project-run-profile-v1.json",
+    "gofmt -d cli/internal/assurance/sandbox/{driver,codex,helper,probe,probe_process,probe_process_unix,probe_process_other,probe_test,probe_process_test}.go cli/cmd/openbox/{main,project_assurance_probe_test}.go",
+    "git status --short",
+    "git diff --check"
+  ],
+  "result": {
+    "entrypoint": "the existing openbox binary has one hidden exact-argument helper re-entry; it accepts bounded typed JSON on stdin and cannot receive a project payload argument",
+    "preflight": "zero or invalid probe bindings, oversized helper input, tuple/config/state/helper/backend drift, unsupported platform, and malformed checks fail before the process launcher is called",
+    "filesystem": "parent and child read the expected fixture digest, create marker-digest-bound allowed files, and attempt distinct sentinels inside one declared protected root; the caller proves each sentinel writable then absent before launch and requires absence after every launch outcome",
+    "network": "parent and child separately record allowed managed-proxy reachability, exact managed-proxy 403 denials for declared unapproved loopback/external IP targets, and direct-socket denial to the live allowed loopback target",
+    "identity": "the exact Codex tuple, fixed Seatbelt backend, private empty Codex state, and current openbox helper inode/bytes are rechecked immediately before launch; the helper digest is combined with the effective sandbox configuration digest",
+    "failureMapping": "missing backend, unsupported tuple/platform, profile/probe failure, child inheritance failure, timeout, cancellation, output limit, and fallback use the closed failure vocabulary; a created outside sentinel takes fallback_detected precedence even when launch also errors",
+    "noPayload": "the execution API has no project-payload parameter, no raw-process retry, and no driver-switch path; every tested preflight failure made zero launcher calls",
+    "tests": "focused count-10, package, race, vet, hidden parent/child re-entry, formatting, schema replay, and Darwin/Linux/Windows compile-only checks passed",
+    "independentReview": "approved the final core source with no remaining high or medium correctness or authority blocker; no reviewer writes"
+  },
+  "limits": [
+    "This task proves source and local test behavior. It did not execute Codex, the native sandbox, a project command, the Mastra SDK, a provider/model request, production credentials/endpoints, or an external control-plane operation.",
+    "Environment rows are name-and-presence evidence and must match between parent and child here. SE-03-07 owns the exact expected-present/expected-absent environment policy before live qualification.",
+    "Bounded stderr remains in memory for later normalization. SE-03-08 owns denial/config evidence normalization and persistence; this task makes no native-log availability claim.",
+    "The exact Codex candidate remains unsupported until the remaining process, environment, denial, cleanup, and live qualification gates pass. In particular, the required unapproved-loopback probe may reject this host configuration.",
+    "The helper and Codex identity checks are point-in-time and retain a narrow same-user path-swap window before exec; any observed drift or failed capability remains fail-closed."
+  ]
+}

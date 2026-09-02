@@ -1,0 +1,53 @@
+{
+  "schema": "openbox.project-assurance.poison-fixture-validation/v1",
+  "task": "SE-04-05",
+  "capturedAt": "2026-08-21T10:44:05Z",
+  "status": "passed_with_limits",
+  "toolchain": {
+    "go": "go1.27.0 darwin/arm64",
+    "platform": "Darwin 25.5.0 arm64"
+  },
+  "inputs": {
+    "poisonGo": "sha256:4bdfcab62a65344dbd7682a0663aa4f233ba0a2076cf049c27cdb527247fca59",
+    "poisonTestGo": "sha256:d7e569a53f2648f9ca708c6c5151447968b2f347b7127509ab2de95b90ef3b8b",
+    "securityTestSchema": "sha256:5ffb671e5a6305c4eb388b87645f6e569f0aaaa3ec6dc3e20ba7014ec81b56ba",
+    "securityTestFixture": "sha256:904e7143e194405470effb7e69e660f52f3ef50868edeadb8535f04e05f7c42d",
+    "decision": "sha256:49937e5bd1181b736b6709cde0eb300aa68b1a286d4a64641c66230c551e1edc"
+  },
+  "commands": [
+    "cd cli && go test -count=50 ./internal/assurance/fixture",
+    "cd cli && go test -race -count=10 ./internal/assurance/fixture",
+    "cd cli && go vet ./internal/assurance/fixture",
+    "cd cli && go test -count=1 ./internal/assurance/...",
+    "cd cli && go test -count=1 ./...",
+    "cd cli && go vet ./...",
+    "cd cli && GOOS=darwin GOARCH=amd64 go test -c -o TASK_TEMP/fixture-darwin-amd64.test ./internal/assurance/fixture",
+    "cd cli && GOOS=linux GOARCH=amd64 go test -c -o TASK_TEMP/fixture-linux-amd64.test ./internal/assurance/fixture",
+    "cd cli && GOOS=windows GOARCH=amd64 go test -c -o TASK_TEMP/fixture-windows-amd64.test ./internal/assurance/fixture",
+    "gofmt -d cli/internal/assurance/fixture/*.go",
+    "git status --short",
+    "git diff --check"
+  ],
+  "result": {
+    "authority": "the service binds only tcp4 127.0.0.1:0, generates its own private route, performs no outbound request, and accepts no listener, handler, path, command, filesystem, provider, or external-network authority",
+    "response": "the package-owned canonical JSON response is bounded to 4096 bytes and is byte-identical for the same marker and safe-sink inputs across repeated requests and fresh fixture instances",
+    "attribution": "receipts retain only a marker digest and byte length, response digest and byte count, closed request labels, status, and processing sequence; no raw marker, route capability, request body, query, header value, or error content is retained",
+    "validation": "wrong host, method, path, encoded path, query, body, unsafe sink URL, privileged port, and oversized marker receive no useful poison response or fail before listen",
+    "bounds": "saturating admission retains at most MaxRequests admitted receipts plus one overflow receipt; later overflow requests return immediately without growing evidence",
+    "isolation": "two concurrent fixture instances retained distinct marker and receipt state while each produced contiguous unique sequences and identical per-run response bytes",
+    "lifecycle": "caller cancellation and explicit close stop the listener; cleanup is idempotent and every concurrent caller independently honors its own deadline while one bounded shutdown continues",
+    "tests": "focused count-50, race count-10, affected-assurance, full CLI, vet, format, and Darwin/Linux/Windows compile-only checks passed",
+    "independentReview": "approved the frozen two-file hash set with no remaining high or medium SE-04-05 blocker and made no workspace or ledger writes"
+  },
+  "cleanup": {
+    "crossCompileOutputs": "the task-owned compile directory was moved to Trash",
+    "sdkSourceClone": "the local openbox-mastra-sdk clone remained clean"
+  },
+  "limits": [
+    "The accepted contract does not define a public poisoned-response schema. The exact response remains package-owned fixture wire data and is not an audit artifact or SDK contract.",
+    "A successful response write is server-side poison provenance, not proof that an application, model, or tool consumed or acted on the content.",
+    "Exact sourcing from the later safe-sink instance, launch-context integration, service cleanup evidence, and outcome judgment remain later tasks.",
+    "This task used only in-process loopback traffic. It did not launch a project or sandbox, contact a provider, call production OpenBox, prove a BLOCK decision, or write an external control plane.",
+    "Both Phase 03 sandbox tuples remain rejected, so this component proof does not make project execution runnable."
+  ]
+}

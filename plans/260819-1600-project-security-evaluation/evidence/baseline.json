@@ -1,0 +1,179 @@
+{
+  "schema": "openbox.project-assurance.qualification-baseline/v1",
+  "captured_at": "2026-08-19T10:32:26Z",
+  "task_id": "SE-00-01",
+  "scope": {
+    "repositories": [
+      {
+        "name": "openbox-shift-left",
+        "path": "/Users/lebrian/Documents/works/openbox/openbox-shift-left",
+        "commit": "eaea69b8ace33b8900d6ea0138a71e5f18e18fe3",
+        "branch": "feat/sec_eval",
+        "clean": false,
+        "status_command_id": "shift_left_status",
+        "note": "All reported paths were untracked when baseline collection began; they predate implementation except for in-place ledger updates within the already-untracked plan directory."
+      },
+      {
+        "name": "openbox-sdk-python",
+        "path": "/Users/lebrian/Documents/works/openbox/openbox-sdk-python",
+        "commit": "1f0429d6f0a8025bb9fbd65cff2a401dd730c6ff",
+        "branch": "main",
+        "clean": true,
+        "status_command_id": "sdk_status"
+      },
+      {
+        "name": "openbox-sandbox",
+        "path": "/Users/lebrian/Documents/works/openbox/openbox-sandbox",
+        "commit": "5e88a4548d391e7a0b6c9cb0154e06128f1d00fc",
+        "branch": "main",
+        "clean": true,
+        "status_command_id": "sandbox_status"
+      }
+    ],
+    "installed_tools": [
+      {
+        "name": "Codex CLI",
+        "path": "/opt/homebrew/bin/codex",
+        "version": "codex-cli 0.148.0",
+        "version_command_id": "codex_version"
+      },
+      {
+        "name": "Claude Code",
+        "path": "/Users/lebrian/.local/bin/claude",
+        "version": "2.1.235 (Claude Code)",
+        "version_command_id": "claude_version"
+      }
+    ],
+    "deferred": [
+      {
+        "name": "openbox-langgraph-sdk-python",
+        "reason": "No local checkout or installed tuple was part of the planning baseline; exact release, commit, and package lock are owned by SE-00-04."
+      }
+    ]
+  },
+  "platform": {
+    "os": "macOS",
+    "version": "26.5.2",
+    "build": "25F84",
+    "kernel": "Darwin 25.5.0",
+    "architecture": "arm64",
+    "hardware_release": "ARM64_T6000"
+  },
+  "commands": [
+    {
+      "id": "platform_uname",
+      "command": "uname -a",
+      "cwd": "/Users/lebrian/Documents/works/openbox/openbox-shift-left",
+      "exit_status": 0,
+      "combined_output": "Darwin Brians-MacBook-Pro-Max.local 25.5.0 Darwin Kernel Version 25.5.0: Tue Jun  9 22:18:58 PDT 2026; root:xnu-12377.121.10~1/RELEASE_ARM64_T6000 arm64\n"
+    },
+    {
+      "id": "platform_sw_vers",
+      "command": "sw_vers",
+      "cwd": "/Users/lebrian/Documents/works/openbox/openbox-shift-left",
+      "exit_status": 0,
+      "combined_output": "ProductName:\t\tmacOS\nProductVersion:\t\t26.5.2\nBuildVersion:\t\t25F84\n"
+    },
+    {
+      "id": "shift_left_head",
+      "command": "git rev-parse HEAD",
+      "cwd": "/Users/lebrian/Documents/works/openbox/openbox-shift-left",
+      "exit_status": 0,
+      "combined_output": "eaea69b8ace33b8900d6ea0138a71e5f18e18fe3\n"
+    },
+    {
+      "id": "shift_left_branch",
+      "command": "git branch --show-current",
+      "cwd": "/Users/lebrian/Documents/works/openbox/openbox-shift-left",
+      "exit_status": 0,
+      "combined_output": "feat/sec_eval\n"
+    },
+    {
+      "id": "shift_left_status",
+      "command": "git status --porcelain=v1 --untracked-files=all",
+      "cwd": "/Users/lebrian/Documents/works/openbox/openbox-shift-left",
+      "exit_status": 0,
+      "combined_output": "?? dc/ecosystem-opportunities.md\n?? dc/security-evaluate.md\n?? kb/claude-code.md\n?? kb/codex.md\n?? kb/cursor.md\n?? kb/deepseek-harness.md\n?? plans/260819-1600-project-security-evaluation/codex-goal-prompt.md\n?? plans/260819-1600-project-security-evaluation/phase-00-architecture-and-qualification.md\n?? plans/260819-1600-project-security-evaluation/phase-01-artifacts-and-workspace.md\n?? plans/260819-1600-project-security-evaluation/phase-02-inspection-and-sdk-coverage.md\n?? plans/260819-1600-project-security-evaluation/phase-03-native-sandbox-driver.md\n?? plans/260819-1600-project-security-evaluation/phase-04-receiver-fixtures-run-profile.md\n?? plans/260819-1600-project-security-evaluation/phase-05-langgraph-baseline.md\n?? plans/260819-1600-project-security-evaluation/phase-06-judgment-report-proposal.md\n?? plans/260819-1600-project-security-evaluation/phase-07-governed-rerun-and-release.md\n?? plans/260819-1600-project-security-evaluation/phase-08-openbox-sandbox-v2.md\n?? plans/260819-1600-project-security-evaluation/plan.md\n"
+    },
+    {
+      "id": "sdk_head",
+      "command": "git rev-parse HEAD",
+      "cwd": "/Users/lebrian/Documents/works/openbox/openbox-sdk-python",
+      "exit_status": 0,
+      "combined_output": "1f0429d6f0a8025bb9fbd65cff2a401dd730c6ff\n"
+    },
+    {
+      "id": "sdk_branch",
+      "command": "git branch --show-current",
+      "cwd": "/Users/lebrian/Documents/works/openbox/openbox-sdk-python",
+      "exit_status": 0,
+      "combined_output": "main\n"
+    },
+    {
+      "id": "sdk_status",
+      "command": "git status --porcelain=v1 --untracked-files=all",
+      "cwd": "/Users/lebrian/Documents/works/openbox/openbox-sdk-python",
+      "exit_status": 0,
+      "combined_output": ""
+    },
+    {
+      "id": "sandbox_head",
+      "command": "git rev-parse HEAD",
+      "cwd": "/Users/lebrian/Documents/works/openbox/openbox-sandbox",
+      "exit_status": 0,
+      "combined_output": "5e88a4548d391e7a0b6c9cb0154e06128f1d00fc\n"
+    },
+    {
+      "id": "sandbox_branch",
+      "command": "git branch --show-current",
+      "cwd": "/Users/lebrian/Documents/works/openbox/openbox-sandbox",
+      "exit_status": 0,
+      "combined_output": "main\n"
+    },
+    {
+      "id": "sandbox_status",
+      "command": "git status --porcelain=v1 --untracked-files=all",
+      "cwd": "/Users/lebrian/Documents/works/openbox/openbox-sandbox",
+      "exit_status": 0,
+      "combined_output": ""
+    },
+    {
+      "id": "codex_path",
+      "command": "command -v codex",
+      "cwd": "/Users/lebrian/Documents/works/openbox/openbox-shift-left",
+      "exit_status": 0,
+      "combined_output": "/opt/homebrew/bin/codex\n"
+    },
+    {
+      "id": "codex_version",
+      "command": "codex --version",
+      "cwd": "/Users/lebrian/Documents/works/openbox/openbox-shift-left",
+      "exit_status": 0,
+      "combined_output": "codex-cli 0.148.0\n"
+    },
+    {
+      "id": "claude_path",
+      "command": "command -v claude",
+      "cwd": "/Users/lebrian/Documents/works/openbox/openbox-shift-left",
+      "exit_status": 0,
+      "combined_output": "/Users/lebrian/.local/bin/claude\n"
+    },
+    {
+      "id": "claude_version",
+      "command": "claude --version",
+      "cwd": "/Users/lebrian/Documents/works/openbox/openbox-shift-left",
+      "exit_status": 0,
+      "combined_output": "2.1.235 (Claude Code)\n"
+    }
+  ],
+  "transcript_digest": {
+    "canonicalization": "jq -cS '.commands' baseline.json",
+    "algorithm": "sha256",
+    "value": "63bda136a65223fd8335f8828c170409e97faa6c692c6e6c7a636b4c932ef384"
+  },
+  "limits": [
+    "Repository cleanliness is an observation at collection time, not proof that untracked content is owned by this task.",
+    "This baseline does not qualify sandbox behavior, SDK wire compatibility, or a supported framework tuple.",
+    "The LangGraph SDK pin is intentionally deferred to SE-00-04."
+  ]
+}

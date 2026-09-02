@@ -1,0 +1,152 @@
+{
+  "task": "SE-07-01",
+  "captured_at": "2026-08-22T13:34:22Z",
+  "result": "verified",
+  "decision": "compose_system_authorized_native_project_sandbox_required",
+  "toolchain": {
+    "git": "2.55.0",
+    "shasum": "6.04",
+    "docker_client": "29.7.2",
+    "docker_compose": "5.4.0"
+  },
+  "candidate": {
+    "name": "local-stack",
+    "delivery": "run-owned Docker Compose system plane; native Codex sandbox for evaluated projects",
+    "local_stack_commit": "0f3832f775f3c9c24b6656f5649de9875a0233a6",
+    "backend_commit": "79a5422d324e759bc8a03cbe18477aeda1f4b12e",
+    "core_commit": "6eef3192381b477a7b396ce8d5bd63cc6f0b7049",
+    "worktrees": "clean",
+    "selection_limit": "The existing Compose definition is authorized as the local OpenBox system, but it requires a run-owned project name, fresh resources, loopback-only published ports, exact identity checks, and project-scoped teardown before it can satisfy the governed-run gate."
+  },
+  "inputs": {
+    "local-stack/README.md": "476644e4218298722930320d44c094cdfe893dceeed471a58cd0976d9f9f6313",
+    "local-stack/compose.local.yml": "6f3ff16ee46a24bd16e3ff62c494ca9d14fe90a33c93bcd430899e1b4f76a05d",
+    "local-stack/scripts/bootstrap.sh": "ff73c925fec06f072c82ea2255f0ab7a8da523e9eb83a2eae19a31e2b598107c",
+    "local-stack/scripts/down.sh": "9e729b6692018ad03f000e5a4f8c0cdebb3e57ecaec8819eed880d4e7aab79dd",
+    "backend/src/modules/agent/agent.controller.ts": "f9469fd3670891541ff479a71f1f31cd3a2e265d5c9709c12a39e7b690e6c887",
+    "backend/src/modules/policy/policy.service.ts": "bab5c6b18663cad0e898ae7e367d0ffba9119beedca5d81b687ef556a9657581",
+    "backend/src/modules/policy/entities/policy.entity.ts": "9e3f5cef176e32c538de17fe3a7d3fa11e49e45548e16829c9978cad66b05df6",
+    "backend/src/modules/policy/entities/policy-evaluation.entity.ts": "20b628ddd4f2cd78703334d9d07ed314e4ab5fc6edb7ce7f7f9648cff15b6529",
+    "backend/src/modules/governance-event/entities/governance-event.entity.ts": "57c694a190ccad7186f3c27682fa91231fd3b53fbe2b273c2bf07758d904b4af",
+    "core/internal/api/governance.go": "8c510750608df2a69f79479cd89e5c753827ff492c74ce1698f06900b55e56ca",
+    "core/internal/api/main.go": "021a0c4f7284e597cb4fe28ae35693684ae8f91ecf9c9c241c94b1dc5072ad53",
+    "core/internal/services/opa.go": "89b99f14724324981df44831ef4d88717c523b7c4c503f21de16dd4290a94f34",
+    "core/internal/services/activities/governance/storage_event.go": "92c23dcfea07f4801c932fc965c9d8e4542911b5f837edfabb4b233897d73e97",
+    "core/internal/services/activities/governance/policy.go": "cacdbe3e1af0b82c8c1b0e308b95af86be81a80eb8d42847fb600cc7e67c9c9e",
+    "openbox-shift-left/testbed/00-preflight.sh": "c70513f881731f19f6a13e7061f908a4d7929c6c3fa3ad501c7efbe6b46bf161",
+    "openbox-shift-left/testbed/10-onboard.sh": "4da569cf724827dc2c6190791109c3ec3a82d3b7750d4d80a254b5d6571570e4",
+    "openbox-shift-left/testbed/99-teardown.sh": "836555600982973e5331a77e4489ff64bb5c1eee867e6b355e7506e1fcab15d0",
+    "openbox-shift-left/testbed/env.sh": "0f4029ad8242ca097ec8eb163a6776ebd9d2087170c856b898ae02bb8fca56c3",
+    "openbox-shift-left/testbed/lib/policy.sh": "e6a0df03fb0fa6b6a07b03809f050e4ef534cea313b983bf42fa96a866d428db",
+    "openbox-shift-left/docs/adr/ADR-0017-inline-policy-evaluation.md": "eb02c9cef232ea7d7c57605f701c29d31505f03a7d2ebb6d5432c91d7760d83e",
+    "openbox-shift-left/docs/adr/ADR-0020-project-assurance-native-sandbox.md": "c41119605666500640d6a36b3c1aaae935515aad5f988dc0e9d360fc2fb5a1f2",
+    "openbox-shift-left/testbed/project-assurance/compose.governed.override.yml": "aedbf75c988c389793f03713e3f0ae6f3f158442a1a66cc593c742691e79942a"
+  },
+  "commands": [
+    {
+      "command": "git -C <local-stack|backend|core> rev-parse HEAD; branch --show-current; describe --always --dirty; status --short",
+      "exit_status": 0,
+      "result": "Exact commits recorded; all three candidate worktrees were clean."
+    },
+    {
+      "command": "find/grep/sed over the bounded policy, governance API, OPA, persistence, compose, bootstrap, preflight, and teardown sources listed in inputs",
+      "exit_status": 0,
+      "result": "Static identity, storage, policy publication, event-history, credential, and teardown paths were qualified without executing them."
+    },
+    {
+      "command": "shasum -a 256 <all listed inputs>",
+      "exit_status": 0,
+      "result": "The review is bound to the exact source bytes above."
+    },
+    {
+      "command": "docker compose -p openbox-assurance-se0701 -f compose.local.yml -f compose.governed.override.yml config --format json",
+      "exit_status": 0,
+      "result": "The rendered project has one run-owned network, four run-owned volumes, and only backend, Core, OPA, and Keycloak published on literal 127.0.0.1 ports."
+    },
+    {
+      "command": "docker compose ... up -d; bounded health, database, Redis, Temporal, identity, policy, and OPA probes",
+      "exit_status": 0,
+      "result": "Fresh exact-source services became healthy; one test organization control key registered one signed KMS agent; signed Core identity verification passed; one harmless ALLOW policy propagated to OPA; no evaluated project or model was launched."
+    },
+    {
+      "command": "docker compose ... down -v --remove-orphans; exact resource, listener, and pre-existing-stack identity rechecks",
+      "exit_status": 0,
+      "result": "All run-owned containers, network, volumes, and loopback listeners were removed. Pre-existing openbox-local container and volume identity digests were byte-identical before and after."
+    }
+  ],
+  "threat_review": {
+    "real_decision_path": "Core POST /api/v1/governance/evaluate authenticates an agent token, runs the GovernanceEventWorkflow, evaluates the agent's active policy through OPA, persists the governance event and policy evaluation, and starts observability plus non-ALLOW notification/realtime paths.",
+    "policy_authority": "Backend POST /agent/:agentId/policies is an authenticated control-plane mutation. Creation deactivates prior agent policies, persists a new current version, rebuilds the organization bundle, uploads it to shared MinIO, and OPA polls that shared bundle.",
+    "storage": "The provided environment shares persistent Postgres, Redis, MinIO, Keycloak, and Temporal services. Policy, governance-event, evaluation, session, trust, observability, and attestation state is not scoped to a disposable run store.",
+    "credentials": "The harness control token is organization-scoped and can create/read agents and policies and manage sessions. The project agent receives a persistent API key and signing key; a test-looking prefix is not an isolation proof.",
+    "endpoint_sentinel": "The existing testbed accepts ambient overrides for backend, Core, OPA, database container, database name, and organization. It supplies local defaults but does not fail closed on non-loopback coordinates or fingerprint the service instances before mutation.",
+    "event_history": "Core stores governance_events and policy_evaluations and can create sessions, Merkle leaves, attestations, trust triggers, observability records, realtime events, and notifications. These are product histories, not an ephemeral decision-only transcript.",
+    "teardown": "testbed/99-teardown.sh explicitly keeps every database row and testbed audit/session state, deactivates the credential and database policy flags, and states that OPA keeps serving the last compiled bundle. local-stack/scripts/down.sh preserves all data by default; --volumes deletes the entire shared stack, not one run.",
+    "execution_boundary": "Docker Compose is authorized only for the run-owned local OpenBox system plane. The evaluated Mastra project remains outside Compose and may run only in the exact qualified native Codex sandbox; this qualification did not launch a project or model."
+  },
+  "production_contamination_sentinels": {
+    "result": "verified",
+    "compose_project": "openbox-assurance-se0701",
+    "loopback_ports": {
+      "keycloak": 48080,
+      "backend": 48081,
+      "core": 48086,
+      "opa": 48181
+    },
+    "exact_images": {
+      "backend": "sha256:21ee6395f0f1b0a7c3e9bc5854b9d7ab43e52d2acd9312143620759df0334dd3",
+      "core": "sha256:c94d66297e437183c5dd73935ad68a3f799f29e59cb750e6e81173bafd71dadc"
+    },
+    "fresh_state": "The run began with zero agents, API keys, policies, governance events, policy evaluations, sessions, attestations, spans, and project registrations in its fresh Postgres volume. Temporal returned an empty workflow list.",
+    "test_identity": {
+      "organization": "openbox-assurance-se0701.invalid",
+      "agent_id": "d07c23e1-39b8-401d-bceb-bc52d5526272",
+      "did": "did:aip:d7091e92-34d7-5898-af56-fbaf91a08cd8",
+      "signing_required": true,
+      "attestation_mode": "kms",
+      "credential_files": "Control token, agent environment, and developer identity files were task-owned mode 0600. Credential values and their digests are not retained in this evidence."
+    },
+    "policy": {
+      "id": "7d69381c-0cff-43e4-8326-9c18aadf60ab",
+      "name": "phase07-isolation-allow",
+      "version_hash": "85077321efa49acfcffa09ea2dc224d74745d974ac9b1000e9ee793b5daffd3f",
+      "opa_result": "allow",
+      "candidate_loaded": false
+    },
+    "history": "After the bounded identity/policy proof, governance events, policy evaluations, sessions, attestations, spans, project registrations, and Temporal workflows remained zero. Redis held only bounded queue metadata, the run agent nonce, and its local-KMS public-key entry; no values were retained.",
+    "pre_existing_stack": {
+      "container_identity_digest_before": "sha256:3e6905b012611c99e1abb176ea38e5cb47dc5bf95ea0f95fe110b89fe605a13a",
+      "container_identity_digest_after": "sha256:3e6905b012611c99e1abb176ea38e5cb47dc5bf95ea0f95fe110b89fe605a13a",
+      "volume_identity_digest_before": "sha256:fc7bb0a02ccd1aa829a425574500602483481239717d978203df964fb1e67bf0",
+      "volume_identity_digest_after": "sha256:fc7bb0a02ccd1aa829a425574500602483481239717d978203df964fb1e67bf0"
+    },
+    "cleanup": "Project-scoped down -v --remove-orphans removed every run-owned container, network, and volume. Ports 48080, 48081, 48086, and 48181 had no listener afterward. Task-owned credential files were moved recoverably to Trash after their backing identity and policy stores were deleted. Source-built images were retained for the next phase because they contain no run state or credentials."
+  },
+  "authority": {
+    "compose_system_started": true,
+    "loopback_only_network_requests": true,
+    "test_control_plane_writes": 3,
+    "test_database_queries": true,
+    "credentials_created": 2,
+    "credential_values_retained": false,
+    "candidate_loads": 0,
+    "evaluated_project_launches": 0,
+    "model_invocations": 0,
+    "production_endpoints_used": 0,
+    "docker_used_as_project_sandbox": false
+  },
+  "recommendation": "Reuse the existing local-stack Compose definition under a unique run-owned project name with fresh volumes, loopback-only ports, test-only identities, exact pre/post contamination sentinels, and project-scoped down --volumes cleanup. Keep the Mastra application inside the qualified native Codex sandbox; Docker is not an execution sandbox for the evaluated project.",
+  "independent_review": {
+    "result": "threat_model_accepted; live isolation verified by root",
+    "finding": "The stock shared project is insufficient, but the exact override closes the lifecycle boundary with a unique Compose project, fresh volumes, loopback-only publications, exact-source images, test-only identity, and project-scoped erasure. The project sandbox remains native and separate.",
+    "files_changed": 0,
+    "live_actions": 0
+  },
+  "limits": [
+    "This proves system-plane isolation and cleanup for one macOS Docker Desktop/Compose tuple; it does not prove a governed BLOCK or a project run.",
+    "The harmless ALLOW policy was an isolation/lifecycle sentinel only. No candidate proposal was loaded and no BLOCK was synthesized or claimed.",
+    "The first cached-image attempt exposed source/image drift and was destroyed without registering an agent or policy; only the exact source-built images are accepted for subsequent Phase 07 work.",
+    "The pre-existing openbox-local resources were proven unchanged by identity metadata, not by reading their contents.",
+    "Docker Compose is allowed for the OpenBox system plane only. It is not an evaluated-project sandbox and must not be presented as one."
+  ]
+}

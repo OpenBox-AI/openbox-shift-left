@@ -1,0 +1,97 @@
+{
+  "task": "SE-07-07",
+  "captured_at": "2026-08-22T16:04:56Z",
+  "result": "verified",
+  "decision": "unsupported_exact_tuple",
+  "reason": "The pinned Claude Code 2.1.235 binary is absent, and its retained exact feasibility record does not prove kernel network confinement of the Claude parent.",
+  "pinned_tuple": {
+    "driver": "claude-code",
+    "mode": "inherited",
+    "version": "2.1.235 (Claude Code)",
+    "path": "/Users/lebrian/.local/share/claude/versions/2.1.235",
+    "sha256": "83b8f806f6f2eea316cfe246628e6c23374711d868f1fd0409db551b877b7748",
+    "present": false
+  },
+  "current_drift": {
+    "version": "2.1.240 (Claude Code)",
+    "path": "/Users/lebrian/.local/share/claude/versions/2.1.240",
+    "sha256": "8917e01c99ea0ce6ed887a1729a4cda693c758fe542747be71756987b145c772",
+    "selected": false,
+    "reason": "No mid-qualification version substitution or widened support tuple is permitted."
+  },
+  "retained_exact_evidence": {
+    "artifact": "evidence/claude-sandbox-qualification.json",
+    "artifact_sha256": "c97fd4e8216519ed78aeda52d6dd337eee07123503ad12f510869228c6cc22bc",
+    "configuration": {
+      "sandbox_enabled": true,
+      "fail_if_unavailable": true,
+      "auto_allow_bash_if_sandboxed": true,
+      "allow_unsandboxed_commands": false,
+      "allowed_domains": [
+        "127.0.0.1",
+        "localhost"
+      ],
+      "allow_local_binding": true
+    },
+    "normal_settings_sha256": "a485a658a228470aae8d042f81b06478e4f52b1beac7c206000b12dba4b16303",
+    "escape_settings_sha256": "c18dce6d076b3e88ffa37ba3a87f15cf929b50e6ee91134428bbb4ebb27d403c",
+    "backend_unavailable_settings_sha256": "e1b964249698f9c515ed96fbe387ba88c28e9400007fe646c47246674f6061d7",
+    "parent_child_inheritance": "observed through the deterministic loopback Messages stub",
+    "escape_attempt": "dangerouslyDisableSandbox=true did not create the protected sentinel",
+    "backend_unavailable": "inner sandbox-exec failure was observed as Bash exit 126 and mapped by the qualification wrapper to exit 86",
+    "backend_fallback_sentinel": false,
+    "unexpected_proxy_requests": 0,
+    "claude_process_exit_limit": "Claude itself returned zero after the failed Bash result; a driver must parse and remap the tool failure",
+    "parent_network_limit": "The Claude parent was not kernel-network-confined on macOS because an outer Seatbelt profile prevents the nested Bash Seatbelt profile from applying."
+  },
+  "current_documentation": {
+    "source": "/anthropics/claude-code through Context7",
+    "observed_contract": "Current official settings examples retain sandbox.enabled=true and allowUnsandboxedCommands=false as the Bash confinement and escape-disable controls.",
+    "qualification_rule": "Current documentation does not replace exact executable/config/probe evidence for the pinned tuple."
+  },
+  "commands": [
+    {
+      "command": "claude --version; resolve command path; stat and SHA-256 current and pinned version paths",
+      "exit_status": 0,
+      "result": "The selected symlink resolves to 2.1.240; exact 2.1.235 bytes are absent."
+    },
+    {
+      "command": "jq exact predicates over evidence/claude-sandbox-qualification.json",
+      "exit_status": 0,
+      "result": "The retained 2.1.235 record binds exact binary/settings hashes, failIfUnavailable=true, allowUnsandboxedCommands=false, an absent escape sentinel, mapped backend-failure exit 86, and an absent fallback sentinel."
+    },
+    {
+      "command": "Context7 resolve/query /anthropics/claude-code for current sandbox and strict-settings behavior",
+      "exit_status": 0,
+      "result": "Current official examples preserve sandbox.enabled and allowUnsandboxedCommands=false; no current documentation was promoted into executable proof."
+    },
+    {
+      "command": "SE-07-06 exact standalone common probe",
+      "exit_status": 0,
+      "result": "The same native SRT policy family could not distinguish approved from unapproved loopback ports; inherited mode is not allowed to weaken that common gate."
+    },
+    {
+      "command": "git diff --check; root-task ledger predicate",
+      "exit_status": 0,
+      "result": "Whitespace was clean and inherited qualification remained the sole active root task during review."
+    }
+  ],
+  "boundary": {
+    "native_sandbox_candidate": true,
+    "docker_sandbox": false,
+    "docker_compose": "not used",
+    "claude_model_invoked": false,
+    "anthropic_provider_requests": 0,
+    "production_credentials_or_endpoints": false,
+    "project_launched": false,
+    "external_control_plane_writes": false,
+    "repository_code_changed_for_inherited_mode": false
+  },
+  "limits": [
+    "This is an explicit evidence-backed rejection, not a live qualification of current Claude Code 2.1.240.",
+    "The prior 2.1.235 deterministic loopback-stub record proves Bash inheritance, escape denial, and unavailable-path mapping, but does not prove syscall confinement of the Claude parent.",
+    "The missing pinned binary is not repaired by silently selecting the installed drift version.",
+    "No model call is necessary or authorized to establish an unavailable exact binary and an already-retained parent-confinement gap.",
+    "A future Claude tuple needs a new exact binary/config qualification and the full common allowed-plus-denied-loopback parent/child probe before support can change."
+  ]
+}

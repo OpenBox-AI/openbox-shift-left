@@ -1,0 +1,12 @@
+[33m⚠[39m OPENAI_API_KEY looks like a credential passed as a plain environment variable.
+  The agent inside the sandbox can read this value directly.
+
+  To hide it from the agent, use a provider instead of --env.
+  See: https://docs.nvidia.com/openshell/latest/sandboxes/providers-v2
+
+Error:   × sandbox entered error phase while provisioning: ProvisioningFailed: failed
+  │ to authenticate registry access for vm sandbox image '127.0.0.1:57024/
+  │ ai.openbox/
+  │ evaluation@sha256:54f49be7b21fd90a7d8d26c6e6f9b4cf3c789de64682349a512651d1
+  │ 7f2d90c9': error sending request for url (https://127.0.0.1:57024/v2/)
+

@@ -1,0 +1,65 @@
+{
+  "schema": "openbox.project-assurance.sdk-runtime-readiness-validation/v1",
+  "task": "SE-05-05",
+  "capturedAt": "2026-08-22T07:31:07Z",
+  "status": "verified",
+  "toolchain": {
+    "go": "go1.27.0 darwin/arm64",
+    "node": "26.7.0",
+    "npm": "11.19.0",
+    "codex": "codex-cli 0.149.0",
+    "platform": "macOS 26.5.2 (Darwin 25.5.0 arm64)"
+  },
+  "inputs": {
+    "runtimeReadiness": "sha256:f1e246a2203411d02f743fc033ddab4a077624af0ce760e84674712a5fc4026e",
+    "runtimeReadinessTests": "sha256:8ed2284c5cfb679c073d3f7e7028ef5e91d8edfb1074a03f1d95876d05161da9",
+    "coverageTypes": "sha256:1d52177f55b3318b285f7b0eb9c8f836d93919077c66c0d01d0cb49f6821bc11",
+    "servicePreflight": "sha256:c9d5ca856f37731bcd8ad50759e7f7fbe2fdc4901b76283b4ab7cefddbb1399f",
+    "nativeProbeTest": "sha256:a0ffe5b2f06c52a0f60ed9409e530eead3e7b6129730209fc55c4f002147d6ac",
+    "nativeProbeEntrypoint": "sha256:cdc7d9e3605c90834fb400c1a2a6752abe1f71fcc1067bdd77eaf44fd997a901",
+    "projectTestGate": "sha256:71722a57bc86af4d6095cfb987911243977f14d49677e4d43523ae0a759c8232",
+    "packageJson": "sha256:8e19b240b446999057edeba9a67a85dfd0b64dd86140895925944e37b522d226",
+    "packageLock": "sha256:9924ea8ab692ce843bb3908d1ceca39c7c50e4bc6ffb3b930e0f38c7e8dce1e5",
+    "sdkArchive": "sha256:c6474a1fb58826da23a346d2a5f3967007e537062200632521f032f924369748",
+    "preparedSnapshot": "sha256:19ac354b23c7e37117f4ac7c3e4ca8e73b9202f9930bf391a14f77a1b33e3381"
+  },
+  "documentation": [
+    "Context7 /nodejs/node: current Node ESM documentation for --input-type=module, dynamic import, import.meta.resolve, and package resolution",
+    "https://github.com/nodejs/node/blob/main/doc/api/esm.md",
+    "https://github.com/nodejs/node/blob/main/doc/api/modules.md"
+  ],
+  "commands": [
+    "prepare a fresh task-owned project copy and run npm ci --ignore-scripts --no-audit --no-fund with Node 26.7.0/npm 11.19.0",
+    "OPENBOX_MASTRA_STARTUP_ROOT=TASK_TEMP/snapshot OPENBOX_MASTRA_STARTUP_SNAPSHOT_DIGEST=sha256:19ac354b23c7e37117f4ac7c3e4ca8e73b9202f9930bf391a14f77a1b33e3381 go test -count=5 -run '^TestMastraRecordingToolReadinessInQualifiedCodexSandbox$' ./internal/assurance/fixture",
+    "repeat the prepared-tree tar-stream SHA-256 after the native-sandbox runs and require byte identity",
+    "go test -count=10 ./internal/assurance/sdkdesc ./internal/assurance/fixture ./cmd/openbox",
+    "go test -race -count=1 ./internal/assurance/sdkdesc ./internal/assurance/fixture ./cmd/openbox",
+    "go test -count=1 ./internal/assurance/... ./cmd/openbox",
+    "go vet ./...",
+    "GOOS=linux GOARCH=amd64 and GOOS=windows GOARCH=amd64 go test -run '^$' -c for cmd/openbox, sdkdesc, and fixture",
+    "git status --short",
+    "git diff --check"
+  ],
+  "result": {
+    "observer": "only a successful project-authenticated GET /api/v1/auth/validate and a successful normalized POST /api/v1/governance/evaluate whose event_type is ActivityStarted and activity_type is recordingTool can satisfy the two probes",
+    "enabled": "five exact SDK runs used the one-shot native Codex parent-and-child probe authorization, then authenticated and emitted one qualified recordingTool pre-effect event; readiness was ready with probeCount=2 and eventCount=1",
+    "disabled": "five otherwise identical one-shot native runs with sendActivityStartEvent=false authenticated but emitted zero qualified recordingTool pre-effect events; readiness remained inconclusive with probeCount=1 and eventCount=0",
+    "negativeCoverage": "wrong action class, completion-only, redacted, rejected, missing-auth, duplicate-auth, and oversized evidence inputs cannot become ready",
+    "projectGate": "openbox project test now refuses a successful stimulus unless the service-owned runtime observer is ready; the CLI reports the observed event count without inferring a verdict",
+    "additionalClassesClaimed": [],
+    "preparedBytesUnchanged": true,
+    "npmStdout": "sha256:3b56f614a67eee024c2d71636dd231c6f99954f7351462189acd7f55364ef9b7",
+    "npmStderr": "sha256:8d65238e1259860385027f9edaada91dc5523975bafd5c44b70d360532202e9f"
+  },
+  "cleanup": {
+    "nativeProcesses": "each bounded SDK probe process group exited and its receiver, probe listener, Codex state, and task-owned runtime paths were closed or removed",
+    "preparedProject": "the before/after tar-stream digests matched; the exact task directory was moved to Trash",
+    "workspace": "no test-generated project or dependency bytes were written into the repository"
+  },
+  "limits": [
+    "This task qualifies only the fixed direct top-level recordingTool ActivityStarted pre-effect gate. Agent, model, retrieval, HTTP, workflow, lifecycle, approval, database, file, function, and MCP action classes remain unsupported or unobserved gaps.",
+    "The opt-in SDK probe uses the exact one-shot parent/child probe-to-run authorization against the already qualified Codex 0.149.0 tuple; openbox project test remains the public orchestration boundary.",
+    "The fresh install retains the already-recorded Mastra transitive Zod peer warnings; the warning output is represented only by digests.",
+    "Runtime projection into the final audit pack and cross-stream causal judgment belong to Phase 06. No model inference, poison fixture, sink effect, Ollama request, production endpoint, credential, Docker command, BLOCK verdict, or external control-plane action occurred."
+  ]
+}

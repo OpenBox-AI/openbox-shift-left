@@ -1,0 +1,32 @@
+{
+  "schema": "openbox.project-assurance.implementation-review-validation/v1",
+  "capturedAt": "2026-08-23T10:15:28Z",
+  "status": "blocked_safe",
+  "finding": "The former Codex 0.149.0 tuple cannot isolate an approved loopback TCP port from an undeclared port on the same host.",
+  "resolution": "Every exported Codex probe, posture, invocation, and run boundary plus public project test now fails unsupported. Passive and pack-reading commands remain available.",
+  "inputs": {
+    "cli/internal/assurance/sandbox/codex.go": "1fbe3050abb6e5fe5cf25291e56c57df70f2a29e9e232e7fef4f9dbd091bb09d",
+    "cli/internal/assurance/sandbox/probe.go": "9a202d97b92674a09dbfa878f646c83dac1fe70a8a6735597d81495e4c7e8500",
+    "cli/internal/assurance/sandbox/posture.go": "4ef95835826e2043ca6a3fa73be3b306c5d3fce84d88709fd456db48e71f37b9",
+    "cli/internal/assurance/sandbox/run.go": "b314f93e12fcd4f1118bc121a0cea097a22a8511c2141276241a409ffad13650",
+    "cli/cmd/openbox/project_run.go": "d55429c45715029f1d505b3fd9cd351f0e27c3303c60fdfc866bfa03af4ad22d",
+    "docs/project-assurance.md": "213a3b9c7ac3b3567db011a4777c1163c4fb634b23d494db08d848ec16322aaf",
+    "plans/260819-1600-project-security-evaluation/plan.md": "3d4e12a6c05e98ed8c01bc469b990b98756d64b3388b55de52c2da631ebc03cf",
+    "plans/260819-1600-project-security-evaluation/evidence/release-support-matrix.json": "d379683ccac81db50f4e915d6663c231a78e1140c9df9bca86326cee5087b681",
+    "plans/260819-1600-project-security-evaluation/evidence/release-support-matrix.md": "5192439ce89236870679b9f00184fa0ab7cc5bd81b870115b64dc3902c0e4c3f",
+    "plans/260819-1600-project-security-evaluation/evidence/codex-loopback-port-isolation-review.json": "268c0140a606c7d13d8a97ce9c0e6c3c76dfde2b00ec6744f27a84208f8063d6"
+  },
+  "verification": [
+    "All packages in all 11 Go modules passed go test and go vet.",
+    "All assurance packages and cmd/openbox passed go test -race.",
+    "The CLI module built for Linux amd64 and Windows amd64.",
+    "A real CLI invocation with missing project and profile paths stopped at sandbox: unsupported, proving the support gate runs before either read.",
+    "deadcode -test reported no dead assurance code after three unused helpers were removed; one unrelated pre-existing devinit helper remains.",
+    "git diff --check and JSON parsing passed."
+  ],
+  "limits": [
+    "Historical functional baseline and governed observations are not current sandbox qualification.",
+    "No replacement runner was implemented.",
+    "OpenBox Sandbox ProjectRun v2 remains planned and unauthorized."
+  ]
+}

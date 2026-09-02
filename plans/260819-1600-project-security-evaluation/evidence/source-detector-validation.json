@@ -1,0 +1,73 @@
+{
+  "schema": "openbox.project-assurance.source-detector-validation/v1",
+  "task": "SE-02-03",
+  "capturedAt": "2026-08-20T15:41:35Z",
+  "status": "passed_with_limits",
+  "toolchain": {
+    "go": "go1.26.7 darwin/arm64",
+    "os": "macOS 26.5.2",
+    "kernel": "Darwin 25.5.0",
+    "git": "2.55.0"
+  },
+  "inputs": {
+    "detectGo": "sha256:3cd8ad38694175d28202ca5dfa4b511bf6804aafb599705128ffa6587b27c0e2",
+    "jsonLocationGo": "sha256:1d02d0d5e41db1f712b0cfc7169c4ac4045d56c572aa9650212fa779db81d6d3",
+    "lexerGo": "sha256:1aa6b4e84e6147d40a582b41265bc9a97483bc71108fa173cef9356b979507a9",
+    "sourceDetectGo": "sha256:7e41c84ae17bde79a434cfd1e9dc38c0e319059e188ccc8a207ec75e175d36cc",
+    "detectUnixTestGo": "sha256:6abe1caeebe6845c4b697398ac8c97cfcf593ee1fd139e5a46d15d7a2057afb3",
+    "mastraCloneCommit": "db9863bd6659f8b1ce6a33903ea61e4e564be38b",
+    "mastraCloneTag": "1.0.0",
+    "mastraPackageJSON": "sha256:e11a34c50bb2bd4e4b5538fa9e1f5b638e0ce62ba1b4866d37930de6e06934e6",
+    "mastraPackageLock": "sha256:55f50d943ca7ca386f1e5e0371da02de8e180d9e439c071cb97d0991ba1d2332"
+  },
+  "commands": [
+    "cd cli && go test ./internal/assurance/inspect -run 'TestDetect' -count=1",
+    "cd cli && OPENBOX_MASTRA_SDK_ROOT=/Users/lebrian/Documents/works/openbox/openbox-mastra-sdk go test ./internal/assurance/inspect -count=1",
+    "cd cli && go test -race ./internal/assurance/inspect",
+    "cd cli && go vet ./internal/assurance/inspect",
+    "cd cli && go test ./...",
+    "for each of the 11 go.work modules: go test ./...",
+    "cd cli && GOOS=linux GOARCH=amd64 go test -c -o <task-temp>/inspect-linux.test ./internal/assurance/inspect",
+    "cd cli && GOOS=windows GOARCH=amd64 go test -c -o <task-temp>/inspect-windows.test.exe ./internal/assurance/inspect",
+    "cd cli && gofmt -d internal/assurance/inspect",
+    "git status --short",
+    "git diff --check"
+  ],
+  "result": {
+    "passiveBoundary": "detectors read only exact immutable-snapshot bytes; no importer, evaluator, subprocess, package manager, provider, SDK runtime, model, or network client exists in the detection path",
+    "tripwire": "passed; Python top-level sentinel-writing code and a package.json postinstall sentinel command remained inert",
+    "syntaxMatrix": "passed; JavaScript/TypeScript/Python imports, calls, environment names, credential-like identifiers, HTTP origins, entrypoints, tools, agents, model/retrieval/memory/MCP, filesystem/process/network, persistence, telemetry, approval, and OpenBox surfaces retain detector/path/line/column/digest evidence",
+    "adversarialMatrix": "passed; comments, ordinary strings, Python docstrings, regex bodies, interpolated templates/f-strings, malformed imports, dynamic imports/environment keys, misleading or escaped JSON keys, invalid UTF-8/NUL, malformed strings/comments/regexps, oversized files, excess tokens/facts, and overlong fact values fail or remain explicit uncertainty without false execution claims",
+    "manifestTruth": "package.json dependency and entrypoint locations come from decoded structural JSON tokens; requirements are only partial opaque-line evidence; TOML/YAML/lock semantics remain explicit uncertainty",
+    "secretAndDestinationSafety": "credential evidence retains variable/reference names only; URL evidence retains only scheme and authority, excluding userinfo, path, query, and fragment",
+    "dynamicTruth": "runtime registration is always uncertain for a nonempty snapshot; computed imports, environment keys, template/f-string expressions, ambiguous slash/import/HTTP syntax, opaque manifests, and recognized unsupported source languages receive specific uncertainties",
+    "determinism": "repeated detection of identical snapshot bytes returned deeply equal, path/value/location-sorted facts and uncertainties",
+    "selectedMastraClone": "passed against local tag 1.0.0 at db9863bd6659f8b1ce6a33903ea61e4e564be38b; declared base-SDK dependency, base-SDK imports, Mastra Agent, and createTool evidence were found without importing or executing the clone",
+    "race": "passed",
+    "vet": "passed",
+    "fullCliAndModules": "passed for the CLI and all 11 go.work modules",
+    "crossCompilation": "Linux amd64 and Windows amd64 test binaries compiled; no foreign binary was executed",
+    "formatAndWhitespace": "gofmt diff and git diff --check empty",
+    "independentReadOnlyReview": "approved after adversarial correction of structural locations, interpolation, regex ambiguity, dynamic imports, unsupported-source truth, relative imports, bounded fact values, and ambiguous static import syntax; no reviewer writes"
+  },
+  "limits": {
+    "perSourceBytes": 524288,
+    "aggregateSourceBytes": 16777216,
+    "sourceFileCount": 2048,
+    "tokensPerSource": 200000,
+    "facts": 10000,
+    "uncertainties": 1000,
+    "factValueRunes": 4096,
+    "pathRunes": 4096,
+    "pathComponents": 64
+  },
+  "limitations": [
+    "Detection is lexical, static, and inferred. It does not prove reachability, initialization, runtime coverage, effect, vulnerability, or enforcement, and it emits no observed basis or behavioral verdict.",
+    "The closed source parser covers JavaScript, TypeScript, and Python extensions only. Recognized other source extensions produce one explicit unsupported-language uncertainty; generic runtime-registration uncertainty remains even when an extension is not classified.",
+    "JavaScript slash expressions, template interpolation, Python formatted strings, malformed import syntax, dynamic names, and unknown HTTP method receivers are not evaluated; they are conservatively skipped with an explicit uncertainty.",
+    "Package JSON discovery is limited to dependency sections and main/module/bin entrypoints. Requirements parsing only extracts a leading package-like name and does not validate or resolve requirement syntax. Other selected manifests remain opaque.",
+    "Call-name classification can produce lexical false positives. Confidence is inferred/medium and later graph normalization must preserve provenance and uncertainty rather than upgrade it to observed behavior.",
+    "The selected Mastra scan qualifies only passive source evidence for the MVP clone. SDK descriptor compatibility, expected coverage, CLI model emission, and no-network/no-source-change acceptance remain later Phase 02 tasks.",
+    "No project graph, SDK descriptor, coverage artifact, CLI inspection execution, package installation, sandbox, receiver/Core decision path, production credential/endpoint, external control plane, paid path, or live security evaluation ran."
+  ]
+}

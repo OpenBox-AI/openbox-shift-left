@@ -1,0 +1,147 @@
+{
+  "schema": "openbox.project-assurance.openbox-sandbox-v1-inventory/v1",
+  "task": "SE-08-01",
+  "capturedAt": "2026-08-22T16:22:38Z",
+  "status": "verified",
+  "source": {
+    "repository": "../openbox-sandbox",
+    "commit": "5e88a4548d391e7a0b6c9cb0154e06128f1d00fc",
+    "worktree": "clean before and after qualification",
+    "crate": "openbox-sandbox 0.1.0",
+    "rust": "rustc 1.95.0",
+    "cargo": "cargo 1.95.0",
+    "openShellPin": "f169084923503a02a94425857b938de2841cab0c"
+  },
+  "inputs": {
+    "src/runtime_contract/request.rs": "c572f65084f6180cf9c493886896054b281e70ae3ca628518cddfcc2c0b7c333",
+    "src/protocol/message.rs": "3d8abe3bd5e23f4261e215d94870c57dc846240638bc7c861bcfec7d18f08e1b",
+    "src/protocol/frame.rs": "434c590f0d53d151c60a6c844cdba62d78f597e908fe74af75dfa196ffb7283b",
+    "src/srt/mod.rs": "2632fa864609cd6bacd1852fd116f508a9df8f39d2528ed14d633e4b5a0cb784",
+    "src/lib.rs": "709221cd8f2b326fb979811ddbe383563f159d2a598c832dddd4889ed851c389",
+    "tests/live_srt.rs": "211e3714d0d4368643e4b97d511ebd524de5e7e6ac9afe6b6d08f1a30f309d50",
+    "tests/live_openshell.rs": "5466b93120c8797f5dd9210d6a05163f99ea94ff38e2dbfc799aede7fa8a6bdf",
+    "README.md": "6a6b767430326d140de29298a1b7d3428a2e8989dee868408e834a8994485856",
+    "packaging/launcher/README.md": "a229716f503e28821975c2350da3335887208afc81813520b624714856f20b65",
+    "Cargo.toml": "24a44672db05004eb8f406b690f437b9382298db1a30c0c14d6e9d6b7de074d6",
+    "Cargo.lock": "f9930bc183a2c1901a00084c8ba01903991c89f927e53d7926129a909b26f1e5"
+  },
+  "v1Contract": {
+    "protocolVersion": 1,
+    "requestFrameMaxBytes": 2097152,
+    "responseFrameMaxBytes": 4194304,
+    "operations": [
+      "health",
+      "create",
+      "wait_ready",
+      "prepare_exec",
+      "commit_exec",
+      "delete",
+      "wait_deleted",
+      "cancel",
+      "begin_drain",
+      "drain_status"
+    ],
+    "create": {
+      "fields": [
+        "request_id",
+        "template",
+        "policy_document",
+        "expected_policy"
+      ],
+      "absentByConstruction": [
+        "environment",
+        "provider",
+        "gpu",
+        "secret",
+        "host_mount"
+      ]
+    },
+    "exec": {
+      "fields": [
+        "argv",
+        "timeout",
+        "output_limits"
+      ],
+      "workdir": "/sandbox",
+      "environment": "empty",
+      "stdin": "empty",
+      "tty": false,
+      "commandTimeoutSeconds": {
+        "minimum": 1,
+        "maximum": 300,
+        "default": 30
+      },
+      "shell": "No shell is inserted. A caller may still explicitly name a shell in argv, so a future ProjectRun contract must close bootstrap authority separately."
+    },
+    "lifecycle": "request-owned ID plus consuming capability tokens; create, exact policy readiness, prepare/commit execution, delete, and terminal absence",
+    "serviceBoundary": "strict versioned JSON framing, mTLS caller authorization, asset-bundle identity, durable lifecycle records, restart reconciliation, cancellation, and drain",
+    "result": "real nonnegative exit, bounded raw stdout/stderr, timeout observation, proxy egress decisions, and optional stable OS-denial categories",
+    "providers": {
+      "srt": "OpenBox-owned macOS Seatbelt or Linux bubblewrap adapter with a compiled hash-pinned profile",
+      "openShell": "explicit external gateway adapter pinned to one source revision"
+    },
+    "productionClient": "not exported; SandboxRuntimeClient is cfg(test) only",
+    "launcherBoundary": "obs is a separate operator launcher, not the production sandbox service"
+  },
+  "projectRunGaps": [
+    "no content-addressed project snapshot upload or source manifest",
+    "no dependency preparation, cache identity, or immutable prepared image contract",
+    "no declared non-secret environment or scoped secret references",
+    "no receiver, fixture, model relay, or multi-service topology",
+    "no readiness path, stimulus protocol, or project-level session lifecycle",
+    "no process-count budget in the request",
+    "no project artifact, receipt, or normalized evidence retrieval",
+    "no project-level redaction or retention contract",
+    "no production client surface available to Shift Left"
+  ],
+  "threatAssumptions": [
+    "The service configuration, compiled profile, policy identity, asset bundle, caller certificates, and durable store are trusted deployment inputs.",
+    "V1 creates a fresh empty request-owned workspace and never mounts or copies a developer worktree.",
+    "V1 never inherits ambient environment or secrets; adding those to CreateRequest or ExecRequest would weaken the existing boundary.",
+    "Raw bounded stdout and stderr may contain caller content; V1 does not provide the Shift Left redacted-digests retention guarantee.",
+    "macOS SRT can constrain direct sockets to its exact proxy port; Linux network-enabled SRT cannot provide the same direct-socket guarantee without another kernel control.",
+    "OpenShell live behavior depends on an external provisioned gateway/image/policy/mTLS tuple; source and skipped tests are not live proof.",
+    "Cleanup authority is retained structurally after possible creation/dispatch and must remain fail-closed across any future protocol."
+  ],
+  "testLedger": [
+    {
+      "command": "cargo test --lib --all-features",
+      "result": "passed",
+      "observations": "86 library tests passed, including strict protocol, lifecycle, mTLS boundary, durable reconciliation, failure invariants, and unchanged twenty-scenario conformance suites."
+    },
+    {
+      "command": "cargo test --bin openbox-sandbox --all-features",
+      "result": "passed",
+      "observations": "6 binary/configuration tests passed."
+    },
+    {
+      "command": "cargo test --test live_srt as part of cargo test --all-features",
+      "result": "failed",
+      "observations": "The real native lifecycle/argv/timeout/cleanup test passed. The proxy-denial and denied-write tests failed because sandbox violation evidence was absent: DeniedNetwork was missing and violation Option was None. Confinement effects were not promoted into denial-log proof."
+    },
+    {
+      "command": "cargo test --test live_openshell -- --nocapture",
+      "result": "not_runnable",
+      "observations": "All three test functions returned after explicit SKIP messages because OPENBOX_LIVE_OPENSHELL_ENDPOINT and the exact gateway tuple were not configured; their cargo status 0 is not live evidence."
+    },
+    {
+      "command": "cargo fmt --all -- --check; cargo clippy --all-targets --all-features -- -D warnings",
+      "result": "passed",
+      "observations": "Formatting and lint gates passed on the clean exact commit."
+    }
+  ],
+  "decisionBoundary": {
+    "v1Change": false,
+    "v2Implementation": false,
+    "shiftLeftDriver": false,
+    "liveOpenShellMutation": false,
+    "recommendationAtThisTask": "Preserve v1 byte/behavior compatibility and carry its strict lifecycle/evidence primitives into provider-neutral ProjectRun requirements; do not claim current project fit."
+  },
+  "limits": [
+    "This freezes current source and local conformance evidence; it does not qualify OpenBox Sandbox for the Phase 05 project.",
+    "The passing in-process live_service test uses the service boundary with a test runtime and is not a deployed provider observation.",
+    "The OpenShell integration tests report cargo success when skipped; this record explicitly classifies them not_runnable.",
+    "The two failing macOS SRT tests are retained as current live limitations, not repaired or waived under this discovery phase.",
+    "No source, protocol, provider, launcher, service, v2 prototype, or Shift Left runtime code was changed."
+  ]
+}

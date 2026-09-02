@@ -1,0 +1,74 @@
+{
+  "schema": "openbox.project-assurance.run-directory-lifecycle-validation/v1",
+  "task": "SE-01-03",
+  "capturedAt": "2026-08-20T07:24:33Z",
+  "status": "passed_with_limits",
+  "toolchain": {
+    "go": "go1.26.7 darwin/arm64",
+    "os": "macOS 26.5.2 build 25F84",
+    "kernel": "Darwin 25.5.0 arm64",
+    "filesystem": "APFS with owners enabled",
+    "xSys": {
+      "version": "v0.35.0",
+      "goVersion": "1.23.0",
+      "sum": "h1:vz1N37gP5bs89s7He8XuIYXpyY0+QlsKmzipCbUtyxI=",
+      "goModSum": "h1:BJP2sWEmIv4KK5OTEluFJCKSidICx8ciO85XgH3Ak8k="
+    }
+  },
+  "inputs": {
+    "platformDarwinGo": "sha256:c368e951bd8e826df8f78f28e4e0952c12fa78cfa5e7b083fb73bfd8dd16e9cc",
+    "platformLinuxGo": "sha256:cf19339bd1154493381bc7270e8213bfc31575273c29895031ddb67ec7a1a0c1",
+    "platformOtherGo": "sha256:6e746d589b29cb00c435b01dc72bf0957548194d0a59f03188a681f2779c9dfd",
+    "platformUnixGo": "sha256:5c9b3f8cab4a67591ffee6c61d8f0c4ba9cbf07e8dbf4349802a40f1311ed972",
+    "runfsGo": "sha256:7c953abfa1eecb6c4ff836a66f8a3a30ad9b8bac182cf1390a592178db50efd2",
+    "runfsTestGo": "sha256:57fd138d9b5ecff7ada1158a77dc11baa1af6146d6ce21d181b173e60068d109",
+    "goMod": "sha256:0762783d90b832ef56568f6d520274750a62bbf144485546d959bcdbd7790c79",
+    "goSum": "sha256:38f2bf9e5ba0a5c84860f45f4d50fdf7d4d1d0d21ceed4810d561f7b42a74cd8"
+  },
+  "commands": [
+    "cd cli && go test -count=1 ./internal/assurance/runfs",
+    "cd cli && go test -race -count=1 ./internal/assurance/runfs",
+    "cd cli && go vet ./internal/assurance/runfs",
+    "cd cli && go test -count=1 -run 'Test(AbruptFinalizationAndCleanupRemainRecoverable|HandleRelativeFinalizeDoesNotMutateReplacementRoot|HandleRelativeCleanupDoesNotDeleteReplacementRoot|ArbitraryEmptyDirectoryIsNotAnOrphan|FinalizeRejectsExternalHardLinkWithoutMutatingIt)' -v ./internal/assurance/runfs",
+    "cd cli && go test -count=1 ./...",
+    "cd cli && go vet ./...",
+    "cd cli && GOOS=linux GOARCH=amd64 go test -c -o /dev/null ./internal/assurance/runfs",
+    "cd cli && GOOS=linux GOARCH=arm64 go test -c -o /dev/null ./internal/assurance/runfs",
+    "cd cli && GOOS=darwin GOARCH=amd64 go test -c -o /dev/null ./internal/assurance/runfs",
+    "cd cli && GOOS=windows GOARCH=amd64 go test -c -o /dev/null ./internal/assurance/runfs",
+    "cd cli && go mod tidy -diff"
+  ],
+  "result": {
+    "focusedPackage": "passed",
+    "race": "passed",
+    "vet": "passed",
+    "fullCliModule": "passed",
+    "fullCliVet": "passed",
+    "crossCompilation": {
+      "linuxAmd64": "passed",
+      "linuxArm64": "passed",
+      "darwinAmd64": "passed",
+      "windowsAmd64": "passed; runtime intentionally fails closed before creation"
+    },
+    "moduleGraph": "x/sys v0.35.0 was already pinned transitively and is now direct; no version or go.sum byte changed; tidy diff only reports the pre-existing decision direct-to-indirect annotation drift",
+    "independentReadOnlyReview": "no remaining high finding; one same-UID final-entry race and runtime/xattr proof limits retained",
+    "proved": [
+      "creation uses an exact random staging name, durable incomplete marker, exclusive parent-relative publication, and rollback pinned to the created inode",
+      "manifest publication and lifecycle mutations are no-follow and handle-relative to the verified root, with exclusive manifest rename and manifest-last content",
+      "completed pack entries are closed to objects/sha256/<64 lowercase hex>, regular single-link objects, and the canonical manifest",
+      "recursive sealing and cleanup reject symlinks, special files, hard-linked objects, and filesystem or mount transitions before traversing them",
+      "normal cleanup requires valid lifecycle state, records a durable cleanup sentinel and ownership xattr, removes only through verified directory handles, and reports observed removal truth",
+      "markerless creation and final-cleanup crash residues never gain OpenIncomplete authority and require the separate closed-shape CleanupOrphan call",
+      "abrupt subprocess exits during finalization, recursive cleanup, and the markerless final cleanup window remain conservatively identifiable and recoverable",
+      "path replacement fixtures preserve replacement content and external hard-linked source content and modes"
+    ]
+  },
+  "limits": [
+    "StateManifestCommitted proves only the filesystem transaction. SE-01-07 and SE-01-08 still own audit-pack schema, role, byte-length, object-presence, and CID validation.",
+    "The runtime lifecycle was exercised on Darwin/APFS only. Linux no-mount traversal and exact runtime behavior have compile evidence only; platforms other than Darwin and Linux fail closed before Create or OpenIncomplete.",
+    "Cleanup requires writable durable extended attributes. An unsupported filesystem fails before recursive deletion and leaves the cleanup sentinel recoverable.",
+    "POSIX has no compare-and-remove-directory-by-inode primitive here. A malicious concurrent process with the same OS identity can swap an empty directory between the final Fstatat and Unlinkat; nonempty replacements and all recursive content remain protected. That concurrent same-identity mutation is unsupported.",
+    "Abrupt subprocess exits were observed; sudden power loss and storage-controller durability were not exercised.",
+    "No SDK provider, production endpoint, OpenBox Core, sandbox launch, external control plane, or paid/live path ran."
+  ]
+}

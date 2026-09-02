@@ -1,0 +1,131 @@
+{
+  "schema": "openbox.project-assurance.sdk-tuple-lock/v1",
+  "captured_at": "2026-08-19T11:11:39Z",
+  "task_id": "SE-00-04",
+  "platform": "macOS 26.5.2 arm64",
+  "python": "3.12.9",
+  "resolver": "uv 0.11.32 (3010295ae 2026-07-23 aarch64-apple-darwin)",
+  "requested": [
+    "openbox-langgraph-sdk-python==1.0.0",
+    "openbox-sdk-python==1.2.0"
+  ],
+  "resolved": {
+    "annotated-types": "0.8.0",
+    "anyio": "4.14.2",
+    "certifi": "2026.7.22",
+    "cffi": "2.1.1",
+    "charset-normalizer": "3.5.1",
+    "cryptography": "49.0.0",
+    "distro": "1.9.0",
+    "h11": "0.16.0",
+    "httpcore": "1.0.9",
+    "httpx": "0.28.1",
+    "idna": "3.19",
+    "importlib-metadata": "8.7.1",
+    "jsonpatch": "1.33",
+    "jsonpointer": "3.1.1",
+    "langchain-core": "1.5.6",
+    "langchain-protocol": "0.0.18",
+    "langgraph": "1.2.11",
+    "langgraph-checkpoint": "4.2.0",
+    "langgraph-prebuilt": "1.1.0",
+    "langgraph-sdk": "0.4.2",
+    "langsmith": "0.11.0",
+    "openbox-langchain-sdk-python": "1.0.0",
+    "openbox-langgraph-sdk-python": "1.0.0",
+    "openbox-sdk-python": "1.2.0",
+    "opentelemetry-api": "1.39.1",
+    "opentelemetry-instrumentation": "0.60b1",
+    "opentelemetry-instrumentation-asyncpg": "0.60b1",
+    "opentelemetry-instrumentation-dbapi": "0.60b1",
+    "opentelemetry-instrumentation-httpx": "0.60b1",
+    "opentelemetry-instrumentation-mysql": "0.60b1",
+    "opentelemetry-instrumentation-psycopg2": "0.60b1",
+    "opentelemetry-instrumentation-pymongo": "0.60b1",
+    "opentelemetry-instrumentation-pymysql": "0.60b1",
+    "opentelemetry-instrumentation-redis": "0.60b1",
+    "opentelemetry-instrumentation-requests": "0.60b1",
+    "opentelemetry-instrumentation-sqlalchemy": "0.60b1",
+    "opentelemetry-instrumentation-sqlite3": "0.60b1",
+    "opentelemetry-instrumentation-urllib": "0.60b1",
+    "opentelemetry-instrumentation-urllib3": "0.60b1",
+    "opentelemetry-sdk": "1.39.1",
+    "opentelemetry-semantic-conventions": "0.60b1",
+    "opentelemetry-util-http": "0.60b1",
+    "orjson": "3.12.0",
+    "ormsgpack": "1.12.2",
+    "packaging": "26.3",
+    "pycparser": "3.0",
+    "pydantic": "2.13.4",
+    "pydantic-core": "2.46.4",
+    "pyyaml": "6.0.3",
+    "requests": "2.34.2",
+    "requests-toolbelt": "1.0.0",
+    "sniffio": "1.3.1",
+    "tenacity": "9.1.4",
+    "typing-extensions": "4.16.0",
+    "typing-inspection": "0.4.4",
+    "urllib3": "2.7.0",
+    "uuid-utils": "0.17.0",
+    "websockets": "15.0.1",
+    "wrapt": "1.17.3",
+    "xxhash": "4.0.1",
+    "zipp": "4.1.0",
+    "zstandard": "0.25.0"
+  },
+  "source_pins": [
+    {
+      "package": "openbox-langgraph-sdk-python",
+      "version": "1.0.0",
+      "tag": "1.0.0",
+      "commit": "a24ccc78fcc431510ae4a37749ad10cf26e5e71a",
+      "wheel": "openbox_langgraph_sdk_python-1.0.0-py3-none-any.whl",
+      "wheel_sha256": "2f6c3eae1157e6373a3c03e4a618de513018ac2e576ab7dc283bc19af548a36d"
+    },
+    {
+      "package": "openbox-sdk-python",
+      "version": "1.2.0",
+      "tag": "v1.2.0",
+      "commit": "1f0429d6f0a8025bb9fbd65cff2a401dd730c6ff",
+      "wheel": "openbox_sdk_python-1.2.0-py3-none-any.whl",
+      "wheel_sha256": "9f32929ee28cd626bc25c6a9c83292bc08eb355152baebf113fccb59d0af105a"
+    },
+    {
+      "package": "openbox-langchain-sdk-python",
+      "version": "1.0.0",
+      "tag": "1.0.0",
+      "commit": "b147b39e22677cee322c39584f3d66ed2bc90094",
+      "wheel": "openbox_langchain_sdk_python-1.0.0-py3-none-any.whl",
+      "wheel_sha256": "a84add38c86d932295c903574a7352b159a6016ad337922ec3670a7741ba7a6b"
+    },
+    {
+      "package": "langgraph",
+      "version": "1.2.11",
+      "wheel": "langgraph-1.2.11-py3-none-any.whl",
+      "wheel_sha256": "8bab70de7b2d00b5300fb289bcf38d8b241400f3184c1e95e8ce706fb0e8686b"
+    },
+    {
+      "package": "langchain-core",
+      "version": "1.5.6",
+      "wheel": "langchain_core-1.5.6-py3-none-any.whl",
+      "wheel_sha256": "d6cf37bf695ecc22cddeb8461a684e353190b2ce430d99eb22bc11c0c7c00ea5"
+    },
+    {
+      "package": "httpx",
+      "version": "0.28.1",
+      "wheel": "httpx-0.28.1-py3-none-any.whl",
+      "wheel_sha256": "d909fcccc110f8c7faf814ca82a9a4d816bc5a6dbfea25d6591d6985b8ba59ad"
+    }
+  ],
+  "commands": [
+    "uv venv --python 3.12 .venv",
+    "uv pip install --python .venv/bin/python 'openbox-langgraph-sdk-python==1.0.0' 'openbox-sdk-python==1.2.0'",
+    "uv pip freeze --python .venv/bin/python"
+  ],
+  "upstream_lock_observation": {
+    "framework_uv_lock_sha256": "04105db18eda089e7e05355a55dd3e208ed0c4370403c850e0d90da5de5b8c6b",
+    "framework_uv_lock_base_sdk": "1.0.1",
+    "local_base_uv_lock_sha256": "292f10a128454d593c46b8a71e4704bfaf471ffb64d89b9d2add9a1d0bea7307",
+    "note": "The released LangGraph source lock predates base SDK 1.2.0. This qualification pins and executes the explicit 1.0.0 plus 1.2.0 pair instead of treating the upstream lock as proof for that pair."
+  }
+}

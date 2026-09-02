@@ -1,0 +1,74 @@
+{
+  "task": "SE-03-10",
+  "captured_at": "2026-08-24T00:00:00Z",
+  "current_status": "withdrawn",
+  "superseded_by": "seatbelt-driver-withdrawal.json",
+  "result": "historical_functional_observation_only",
+  "decision": "withdrawn_after_adversarial_review",
+  "reason": "The full project lane ran end to end, but later review proved that the accepted listener rule also permitted a wildcard-interface bind, the profile permitted reads outside the snapshot, the launcher dropped the declared snapshot CWD, and Node 22 outside the claimed tuple produced a verified pack. This record is not current support evidence.",
+  "tuple": {
+    "driver": "openbox-seatbelt",
+    "mode": "standalone",
+    "version": "sandbox-exec (macOS 26.5.2 / Darwin 25.5.0)",
+    "backend": "/usr/bin/sandbox-exec",
+    "backend_sha256": "8290e4be7387a0df83cd1559e86afd880464f269450573d012795761fe298f16",
+    "profile_owner": "OpenBox",
+    "proxy": "none; external egress is denied outright, so there is nothing to mediate"
+  },
+  "toolchain": {
+    "go": "go1.27.0 darwin/arm64",
+    "node": "26.7.0",
+    "npm": "11.19.0",
+    "macos": "26.5.2",
+    "darwin": "25.5.0",
+    "arch": "arm64",
+    "ollama": "0.31.1",
+    "ollama_model": "granite4.1:3b (6fd349357287)"
+  },
+  "inputs": {
+    "cli/internal/assurance/sandbox/seatbelt.go": "2e36bbadc4f63adeddd10b62220ae4c4aa1c1deb683c8ed28fa33f7636fcf998",
+    "testbed/project-assurance/mastra-conformance (src + manifests)": "58a3b3025563551568fa5e4a02c4651af2343771b075a5dcfbc3dbeaaabce064",
+    "run-profile.deterministic.json": "221db4f9eb4e20c1ff7b76728cdb9a393dd79726c4aea723984f1b65b454c103",
+    "prior": "evidence/seatbelt-loopback-isolation-spike.json"
+  },
+  "live_observation": {
+    "deterministic_repetitions": 4,
+    "ollama_relay_repetitions": 1,
+    "stimulus_status": 200,
+    "sdk_readiness": "ready",
+    "recording_tool_events": 1,
+    "source_bytes_changed": false,
+    "denied_root_residue": false,
+    "temp_root_residue": false,
+    "unsandboxed_retry_observed": false,
+    "driver_fallback_observed": false,
+    "example_run": {
+      "run_id": "project-test-a7d20093a3bb930a4958309d1005d890",
+      "snapshot": "sha256:cabd2fc63d1d24959240c92c9de1500e4253191339058f373178191d50252730",
+      "sandbox_posture": "sha256:f1a8427d275197f7698d255690b7509b6ff402f368719d8e8f75aa23f89d9e04",
+      "cleanup": "sha256:2b5744739ed62cc6ce63b2d3b9091cb2403992704d673b0fcf4f3490d6f585df"
+    }
+  },
+  "qualification": {
+    "loopback_endpoint_isolation": "PASSED. The mandatory pre-launch probe declares an approved and an unapproved endpoint on the SAME 127.0.0.1 host. The unapproved one is a live listener whose reachability is proven OUTSIDE the sandbox before the probe runs, so its later denial is falsifiable. Parent and spawned child both reached the approved port and failed the unapproved one.",
+    "filesystem_parent_child": "PASSED. Declared writable root succeeded; the randomized outside sentinel failed and was never created.",
+    "network_external_parent_child": "PASSED. Unapproved external destinations failed for both.",
+    "credentials_parent_child": "PASSED. The child environment carries only the declared closed envelope; no production credential sentinel is present.",
+    "fallback": "PASSED. No unsandboxed retry and no driver substitution exists; an unqualified selection fails the run.",
+    "child_inheritance": "PASSED, and structural: the kernel applies the profile to the whole process tree rather than to a flag the child could drop.",
+    "cleanup": "PASSED. Process group, sockets, temp paths and both sentinels accounted for; no residue after four runs."
+  },
+  "defects_found_and_fixed": [
+    "projectRunEnvironment compared the declared envelope against invocation.RequiredEnvironment[1:], hard-coding Codex's single CODEX_HOME prefix. Any driver owning a different number of variables silently lost its first declared variable. It now matches the declared envelope as an exact suffix, bounded by maxDriverOwnedEnvironment. The SRT driver would have hit this too: it owns two.",
+    "requiredChecksPassed demanded that every denied-network observation be a 403 with a body — the shape a MANAGED PROXY produces. A driver whose policy lives in the kernel has no proxy to answer, so its denial is a connection failure. The check now follows the driver's mediation model, and a real kernel denial is no longer rejected as a failed probe.",
+    "BuildSeatbeltInvocation returned no RequiredEnvironment, so the payload saw none of the declared variables."
+  ],
+  "limits": [
+    "macOS 26.5.2 / Darwin 25.5.0 / arm64 only. Seatbelt has no Linux or Windows equivalent; those platforms are compile-verified and fail closed at the support gate.",
+    "The pinned backend digest is the qualified host's /usr/bin/sandbox-exec. An OS update changes it and invalidates this row, exactly as the pinned kernel release already does.",
+    "/usr/bin/sandbox-exec is deprecated by Apple. This adds no new exposure — both Codex and SRT already depend on it — but it is a standing limit.",
+    "maxProcesses=32 remains declared and correlated, not hard-enforced. The profile expresses no process-count ceiling.",
+    "This run is the Phase 05 baseline. It publishes no audit pack and emits no blocked verdict; Phase 06/07 remain separate.",
+    "Codex 0.149.0 stays withdrawn and SRT 0.0.73 stays unsupported. Their rows are unchanged and neither is reachable as a fallback."
+  ]
+}

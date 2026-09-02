@@ -1,0 +1,101 @@
+{
+  "schema": "openbox.project-assurance.driver-withdrawal/v1",
+  "task": "SE-03-10",
+  "captured_at": "2026-08-25T03:21:43Z",
+  "decision": "support_withdrawn",
+  "current_support": {
+    "supported_project_runner_tuples": 0,
+    "seatbelt": "unsupported",
+    "codex": "unsupported",
+    "fallback": "none"
+  },
+  "reason": "The first-party Seatbelt candidate does not enforce the authority claimed by its historical exact-tuple row. Its accepted local TCP rule permits a wildcard-interface bind on the declared port, its profile permits reads outside the immutable snapshot, its reviewed launcher dropped the declared snapshot CWD, and it accepted a Node 22 runtime outside the claimed tuple.",
+  "historical_adversarial_observations": {
+    "snapshot_cwd": {
+      "result": "failed",
+      "observation": "The same project-test command completed from the Mastra fixture directory but failed from cli because exec.Cmd.Dir was unset. The copied snapshot did not contain node_modules, proving the successful payload resolved dependencies from the ambient original project tree rather than the declared snapshot.",
+      "historical_exact_node26_pack_digest": "sha256:a0c1c3d1dab996d73cf1ca2c36f437ab4fcc7601448155b32733cdbc416b36e4"
+    },
+    "runtime_identity": {
+      "result": "failed",
+      "observation": "Node 22.20.0, outside the claimed exact Node 26.7.0 tuple, completed the public project-test path and produced a structurally verified 14-role pack.",
+      "historical_node22_pack_digest": "sha256:2fd99a58a116b6d2f2469095127a3765e39f0a2cdb731c042c3495a4b9debd5d"
+    },
+    "listener_isolation": {
+      "result": "failed",
+      "observation": "The generated profile permitted Python to bind 0.0.0.0 on a port declared for the required 127.0.0.1 listener. Seatbelt rejected a literal 127.0.0.1 local-rule form; its accepted localhost or wildcard form did not constrain the interface."
+    },
+    "filesystem_read_isolation": {
+      "result": "failed",
+      "observation": "The same sandboxed characterization process read a sentinel outside the snapshot because the generated profile contains allow file-read*."
+    }
+  },
+  "implemented_disposition": {
+    "support_gate": "SeatbeltProjectRunSupport and CodexProjectRunSupport return sandbox: unsupported before project or profile bytes are read.",
+    "snapshot_cwd": "Both retained project launch closures call runBoundedProcessAt with RunSpec.CWD, which validates and applies exec.Cmd.Dir.",
+    "historical_evidence": "The prior qualification record is marked withdrawn and superseded by this record; historical packs remain readable but are not current support evidence.",
+    "documentation": "CLI help, project-assurance documentation, ADR-0020, phase ledgers, and both release support matrices state zero supported tuples."
+  },
+  "fresh_mastra_end_to_end_check": {
+    "binary": "/private/tmp/openbox-seatbelt-disposition.OEif84/openbox",
+    "project": "testbed/project-assurance/mastra-conformance",
+    "profile": "testbed/project-assurance/mastra-conformance/run-profile.deterministic.json",
+    "scenario": "ASI02-INDIRECT-EGRESS-001",
+    "command": "npm start",
+    "seatbelt": {
+      "exit_status": 1,
+      "stderr": "error: project test: inspect failed: sandbox: unsupported",
+      "audit_pack_created": false
+    },
+    "codex": {
+      "exit_status": 1,
+      "stderr": "error: project test: inspect failed: sandbox: unsupported",
+      "audit_pack_created": false
+    },
+    "interpretation": "The current end-to-end result is a pre-execution rejection. No Mastra process, model, fixture service, source snapshot, or audit-pack write is authorized while every runner is unsupported."
+  },
+  "verification": [
+    {
+      "command": "go test ./internal/assurance/sandbox ./cmd/openbox -count=1",
+      "exit_status": 0,
+      "result": "Focused sandbox and public-command tests passed."
+    },
+    {
+      "command": "go test ./... in each of the 11 go.work modules",
+      "exit_status": 0,
+      "result": "All workspace module packages passed."
+    },
+    {
+      "command": "go vet ./...",
+      "exit_status": 0,
+      "result": "No vet findings."
+    },
+    {
+      "command": "go test -race ./internal/assurance/sandbox ./cmd/openbox -count=1",
+      "exit_status": 0,
+      "result": "Focused race checks passed."
+    },
+    {
+      "command": "openbox project verify historical exact-Node-26 and Node-22 review packs",
+      "exit_status": 0,
+      "result": "Both retained 14-role packs remain structurally readable at their recorded manifest digests; this does not restore support."
+    }
+  ],
+  "implementation_sha256": {
+    "cli/internal/assurance/sandbox/seatbelt.go": "22c409aceca4c72953ebc340197ead8450965a14e3dbba8badf9c78977321c0b",
+    "cli/internal/assurance/sandbox/probe_process.go": "321fcf656e98954a80b3f4445630852a3e39a8c5b239ef3008c7e9a88e1bd90a",
+    "cli/internal/assurance/sandbox/run.go": "664411cd2a0dbcf32c9e165cb3f0263b2ae2ed1263b4c2cab29d5a2450e964a4",
+    "cli/internal/assurance/sandbox/run_unix_test.go": "a80db0acb38e75582e7ed89dd04f406f26a64561651158b17b9db174947c5983",
+    "cli/internal/assurance/sandbox/seatbelt_live_darwin_test.go": "222807cd291269885d0c5426f868efd41e1294aca6070269373e9f1edeaeca63",
+    "cli/cmd/openbox/project_run_test.go": "a26e64682bf0bc307fad0c49ddf1514812f1b12ab961b9d06c9ef8ed9d8d2be2",
+    "docs/project-assurance.md": "c99f6b9429086e6c123da112d579f40beb63d3351414d0873ea18b29529cdc66",
+    "docs/adr/ADR-0020-project-assurance-native-sandbox.md": "3e14d5749a535cfdc14a32a9c5931dd5b468169d42ca28befc1c047db22a7aef",
+    "seatbelt-driver-qualification.json": "94ecdf643ad3dea5b56f01f8f197c9cd76bcbceff245273ee74b7fef8d56a888"
+  },
+  "remaining_blockers": [
+    "A future runner must enforce that each declared listener binds only to loopback, not 0.0.0.0 or another host interface.",
+    "A future runner must deny project reads outside the immutable snapshot and explicit runtime dependencies.",
+    "Runtime executable bytes, version, dependency lock, and resolved dependency tree must be bound and checked before payload execution.",
+    "maxProcesses=32 remains declared and observed, not hard-enforced."
+  ]
+}

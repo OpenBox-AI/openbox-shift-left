@@ -1,0 +1,65 @@
+{
+  "schema": "openbox.project-assurance.expected-sdk-coverage-validation/v1",
+  "task": "SE-02-06",
+  "capturedAt": "2026-08-20T18:21:11Z",
+  "status": "passed_with_limits",
+  "toolchain": {
+    "go": "go1.26.7 darwin/arm64",
+    "os": "macOS 26.5.2",
+    "kernel": "Darwin 25.5.0"
+  },
+  "inputs": {
+    "detectGo": "sha256:15b37c8c05172954066a2b86b66d11e248876aa70594672599ebdc58be7ef59c",
+    "detectUnixTestGo": "sha256:4ac9af37e7e9699fdbb1f02639540fa7f21b21fe5c78ed3c46eabe26b7b398f1",
+    "graphGo": "sha256:1ddd4525913c67fa548c71df236ea7b919d6dd20337e239661f3b61e919c573b",
+    "graphTestGo": "sha256:4ae5a6d0b51bf0c46ffb065519cb2384364c049d9722bc2b7d33fb23a11cfc32",
+    "coverageGo": "sha256:27ff7b58cbb6bcd6b6e35f6a06b2c3f085e0941297ae92a7cf711d711a83e08c",
+    "coverageUnixTestGo": "sha256:9cf5d1a54eb7a73373e59247079ac2b15feb14f110aeb21a46c99cd3105d5dc4",
+    "descriptorGo": "sha256:31c77afaa80a1f4d117a60917675fc4d7e68c79dac3c6e106b1e3554143eb005",
+    "validationGo": "sha256:945fe0ded303d8437b96ecd565e17233861c942092ca0fbae5757e9b9a28f04f",
+    "sdkCoverageSchema": "sha256:bc78dbbe82bd9a7c710af76529cf38cae1a9135ed576e17834f944e77088cc54",
+    "descriptorValidation": "sha256:783dd213621c4d9aa92b77b8ead8d68987161d21aafd8dcb7be4a366ac16d27b"
+  },
+  "qualifiedSource": {
+    "path": "/Users/lebrian/Documents/works/openbox/openbox-mastra-sdk",
+    "status": "clean",
+    "head": "db9863bd6659f8b1ce6a33903ea61e4e564be38b",
+    "tag": "1.0.0"
+  },
+  "commands": [
+    "cd cli && OPENBOX_MASTRA_SDK_ROOT=/Users/lebrian/Documents/works/openbox/openbox-mastra-sdk go test -json -count=1 ./internal/assurance/inspect ./internal/assurance/model ./internal/assurance/sdkdesc | jq -s '<pass, skip, and failure counts>'",
+    "cd cli && OPENBOX_MASTRA_SDK_ROOT=/Users/lebrian/Documents/works/openbox/openbox-mastra-sdk go test -count=10 ./internal/assurance/inspect ./internal/assurance/model ./internal/assurance/sdkdesc",
+    "cd cli && OPENBOX_MASTRA_SDK_ROOT=/Users/lebrian/Documents/works/openbox/openbox-mastra-sdk go test -race -count=1 ./internal/assurance/inspect ./internal/assurance/model ./internal/assurance/sdkdesc",
+    "cd cli && go vet ./...",
+    "cd cli && OPENBOX_MASTRA_SDK_ROOT=/Users/lebrian/Documents/works/openbox/openbox-mastra-sdk go test -count=1 ./...",
+    "for each of the 11 go.work modules: go test ./...",
+    "cd cli && for darwin/arm64, linux/amd64, and windows/amd64: go test -exec=true -run '^$' ./internal/assurance/inspect ./internal/assurance/model ./internal/assurance/sdkdesc",
+    "gofmt -d cli/internal/assurance/inspect/detect.go cli/internal/assurance/inspect/detect_unix_test.go cli/internal/assurance/model/graph.go cli/internal/assurance/model/graph_test.go cli/internal/assurance/sdkdesc/coverage.go cli/internal/assurance/sdkdesc/coverage_unix_test.go",
+    "git status --short",
+    "git diff --check"
+  ],
+  "result": {
+    "selectedSDK": "only the clean local openbox-mastra-sdk 1.0.0 clone at the qualified commit is used as the MVP descriptor source; registry or consumer publication bytes are not qualified",
+    "declaredVersionBinding": "package dependency declared values are retained only as SHA-256 digests; exactly 1.0.0 is required for an enabled static integration expectation, and wrong or conflicting declarations produce an unsupported gap",
+    "integrationExpectation": "exact package declaration, SDK node, import, entrypoint, and compatible local-clone candidate can produce enabled as a static expectation only; installed consumer bytes and execution remain unobserved",
+    "requiredInstrumentation": "recordingTool remains unknown with the schema-projectable missing observation because passive detection cannot resolve the exact recording-tool object ID and no event was observed",
+    "readiness": "compatible static evidence remains inconclusive with both exact descriptor probes unexecuted; incompatible descriptor/config evidence is not_runnable; no code path produces ready",
+    "surfaceClassification": "fixtures cover enabled integration expectation, descriptor-disabled file/HTTP/database surfaces, subprocess and external-destination semantic bypass surfaces, unsupported action classes, and unknown dynamic/credential evidence",
+    "evidenceHandling": "evidence digests are deterministic, sorted, deduplicated, capped at 64 with explicit truncation text, and exposed only through defensive copies",
+    "passiveSafety": "snapshot-to-detect-to-normalize-to-coverage fixtures did not execute package scripts or project code; dependency values, credential values, URL credentials, and local dependency paths are not retained",
+    "focusedTests": "96 tests/subtests passed with zero skips and zero failures; ten repeated runs and race passed",
+    "fullCliAndModules": "passed for the CLI and all 11 go.work modules",
+    "crossCompilation": "Darwin arm64, Linux amd64, and Windows amd64 compiled through go test -exec=true without executing foreign binaries",
+    "formatAndWhitespace": "gofmt diff and git diff --check were empty",
+    "independentReadOnlyReview": "approved the final six hashes after exact-version/conflict binding, action-class non-upgrade, schema projection, evidence bounds, deterministic ordering, secret retention, and readiness findings were resolved; no reviewer writes"
+  },
+  "limits": [
+    "This is passive static planning evidence, not a fresh SDK, provider, OpenBox Core, model, network, sandbox, receiver, or behavioral observation.",
+    "An exact 1.0.0 declaration does not prove installed consumer bytes. The selected local clone remains the only qualified MVP source, and runtime launch must independently bind and verify that source rather than accepting registry bytes.",
+    "The compatibility input classifies a candidate initialization but this task does not execute withOpenBox or prove that project-controlled dynamic configuration resolves to it. Ambiguous, dynamic, conflicting, or literal production-coordinate configuration remains not_runnable under the descriptor validator.",
+    "The passive detector sees createTool call sites but not exact object IDs, so it cannot correlate recording-tool to recordingTool. Missing SDK events remain missing or unknown coverage, never no action.",
+    "Subprocess and external-destination bypass classifications describe absence of direct semantic SDK interception only. The graph has no relationship edges, so enclosing-tool reachability and eventual effect execution remain unknown.",
+    "SE-02-07 still owns mechanical projection to openbox.sdk-coverage/v1 with eventCount zero and actual readiness probeCount; it may not upgrade missing to observed or inconclusive to ready.",
+    "No SDK scan mode, SDK fork, compatibility shim, provider hook, endpoint, service, package installation, project-code execution, source mutation, control-plane write, audit upload, production credential/path, or paid/live run was added or used."
+  ]
+}

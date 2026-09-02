@@ -1,0 +1,83 @@
+{
+  "task": "SE-06-07",
+  "captured_at": "2026-08-22T11:13:54Z",
+  "result": "verified",
+  "toolchain": {
+    "go": "go1.27.0 darwin/arm64"
+  },
+  "inputs": {
+    "docs/adr/ADR-0020-project-assurance-native-sandbox.md": "c41119605666500640d6a36b3c1aaae935515aad5f988dc0e9d360fc2fb5a1f2",
+    "cli/internal/assurance/evidence/judge.go": "6b7055f1f18ee984183339f6c23bdb4e2d056086a6178d39a08bd845eb82d8ee",
+    "cli/internal/assurance/report/proposal.go": "adb4326a2ee6385c7109137771c019d638d0401c31f1ad7895bcf5c89ec223eb",
+    "cli/internal/assurance/report/proposal_unix_test.go": "34291edaa16155b4e0f11d0ceb6f0ad5d3ed8efac5f3c9617971c0a384a53a07",
+    "cli/internal/assurance/report/report.go": "f658572f64987dfba32c32569fe5fe7f4dd474ea229c5665d223153a36dc204a",
+    "cli/internal/assurance/report/report_unix_test.go": "6f8b4981d9d4f4c2223d760dc44a8e81c57e10039feb57cd8652f9b1fa957090",
+    "cli/internal/assurance/report/validate.go": "d70e83dffbf92f74272f2f7dda32a0fa5fe1305af7b96829727fbba8eefd644e",
+    "contracts/project-assurance/schema/policy-proposal-v1.schema.json": "2a8ee5e33d23be6cfddfbcbb621cff98853034989b5d2b55241461c2d66255f8",
+    "contracts/project-assurance/schema/sandbox-posture-v1.schema.json": "e6e6a9f17fdfdb28354e7917514fa5ee51bc56a400401bd7e3af20e9eb938ee6"
+  },
+  "outputs": {
+    "runtime_candidate_sha256": "68cf677f320557c4f42aebb675bfc0a61429deb18256767a928dbd44945cda8b",
+    "candidate_type": "runtime_policy",
+    "candidate_target": "recordingTool",
+    "required_verdict": "BLOCK",
+    "governed_repetitions": 3
+  },
+  "commands": [
+    {
+      "command": "cd cli && go test -count=25 ./internal/assurance/report ./internal/assurance/evidence",
+      "exit_status": 0,
+      "result": "passed"
+    },
+    {
+      "command": "cd cli && go test -race -count=5 ./internal/assurance/report ./internal/assurance/evidence",
+      "exit_status": 0,
+      "result": "passed"
+    },
+    {
+      "command": "cd cli && go test ./internal/assurance/... && go test ./... && go vet ./...",
+      "exit_status": 0,
+      "result": "passed"
+    },
+    {
+      "command": "cd cli && go mod tidy -diff && go mod verify",
+      "exit_status": 0,
+      "result": "tidy diff was empty and all modules verified"
+    },
+    {
+      "command": "cd cli && GOOS=<darwin-arm64|linux-amd64|windows-amd64> go test -run '^$' <report and evidence packages>",
+      "exit_status": 0,
+      "result": "all three compile-only matrices passed"
+    },
+    {
+      "command": "gofmt -d <proposal, report, validation, and judgment Go files>; git diff --check; git status --short",
+      "exit_status": 0,
+      "result": "format and whitespace checks were clean; changed and untracked scope was reviewed separately"
+    }
+  ],
+  "verification": {
+    "origin": "Compilation requires the exact schema-valid baseline exploitable finding and cannot originate a finding or scenario.",
+    "posture": "Every proposal requires the retained sandbox posture to be qualified and to name the exact standalone Codex 0.149.0 on macOS 26.5.2 arm64 tuple. Rejected, inconclusive, not-runnable, and drifted tuples are rejected before candidate construction.",
+    "runtime_fields": "A runtime policy is emitted only for one judgment-bound redacted ActivityStarted recordingTool ALLOW event at the exact pre-effect decision route with ready single-action SDK coverage.",
+    "rerun": "Project snapshot, scenario, SDK coverage, sandbox posture, baseline pack, expected blocked outcome, and repetition count are content-bound in the proposal record.",
+    "non_runtime": "host_enforceable, observable_only, code_change_required, and blind classifications emit only code-change or observability guidance with not_applicable failure policy; none contain runtime policy bytes.",
+    "authority": "The compiler owns no process, network, writer, apply, publication, deployment, or external-control-plane path. Returned proposal and candidate bytes are defensive copies."
+  },
+  "adversarial_matrix": {
+    "finding_and_mode": "Governed input and a non-exploitable outcome are rejected.",
+    "runtime_evidence": "Missing, cross-run, duplicated-sequence, wrong-field, unready-coverage, and judgment-unbound SDK events are rejected.",
+    "sandbox_posture": "Rejected, inconclusive, not-runnable, and version-drift postures are rejected.",
+    "reachability": "Every non-runtime reachability class was checked to ensure it cannot fabricate runtime enforcement."
+  },
+  "independent_review": {
+    "result": "approved",
+    "commands": "exact hash replay, focused count-25, race count-3, vet, format, scoped diff, forbidden-import scan, and Darwin/Linux/Windows compile-only checks passed",
+    "finding": "No remaining high- or medium-severity SE-06-07 correctness, security, or authority blocker."
+  },
+  "limits": [
+    "This task validates retained qualified posture bytes and compiles inert data; it does not rerun native-sandbox qualification.",
+    "The additive SE-06-08 JSON and Markdown accessors expose defensive, digest-bound candidate bytes without adding execution or application authority; the full proposal proof was replayed on their final hashes.",
+    "The candidate was not loaded into a decision engine and no governed BLOCK was claimed. That real isolated proof remains later-phase evidence.",
+    "No project, sandbox, SDK, model, provider, network, production coordinate, Docker path, or external control plane ran."
+  ]
+}

@@ -1,0 +1,114 @@
+{
+  "schema": "openbox.project-assurance.mastra-conformance-project-validation/v1",
+  "task": "SE-05-02",
+  "capturedAt": "2026-08-22T05:56:00Z",
+  "status": "verified",
+  "toolchain": {
+    "node": "26.7.0",
+    "npm": "11.19.0",
+    "typescript": "5.9.2",
+    "go": "go1.27.0 darwin/arm64",
+    "git": "2.55.0"
+  },
+  "sdkSource": {
+    "path": "../openbox-mastra-sdk",
+    "commit": "db9863bd6659f8b1ce6a33903ea61e4e564be38b",
+    "tag": "1.0.0",
+    "status": "clean",
+    "packageJson": "sha256:e11a34c50bb2bd4e4b5538fa9e1f5b638e0ce62ba1b4866d37930de6e06934e6",
+    "packageLock": "sha256:55f50d943ca7ca386f1e5e0371da02de8e180d9e439c071cb97d0991ba1d2332"
+  },
+  "inputs": {
+    "packageJson": "sha256:8e19b240b446999057edeba9a67a85dfd0b64dd86140895925944e37b522d226",
+    "packageLock": "sha256:9924ea8ab692ce843bb3908d1ceca39c7c50e4bc6ffb3b930e0f38c7e8dce1e5",
+    "source": "sha256:2006574579373f5e94e73a2da9b3f96f68812d748f7dc8211e434d5cd3c2d2bd",
+    "sdkArchive": "sha256:c6474a1fb58826da23a346d2a5f3967007e537062200632521f032f924369748",
+    "sdkArchiveIntegrity": "sha512-spTTJOL+ik8mMwbpTic7BR0JaGLajqjWpd0wPHw1bzVHq+qRgCxVQcKsnKTVHIkdQ5CWlQoO/luahBdcO9EbzA==",
+    "sdkTupleLockEvidence": "sha256:9e96b3b35b827870c23915d944e38155a5d0318ed96a6d9d370a0433a55dd34d",
+    "sdkWireEvidence": "sha256:9cdf614435e679870cb6d14d16660c11f6aeb6d2eca439a5fb140ff269238486",
+    "sandboxSelectionEvidence": "sha256:94ce65e6997b1a5291b6c84e24e35a6f3b3db28dfe5fa04845119516640e15bf",
+    "sandboxQualificationEvidence": "sha256:4eeb7a517546abdaebd6caf8d7fa778126ef8bc7b23c36368a57c1211818bd8e",
+    "startupTest": "sha256:f79bb85d79f35d6ba83ec9a237ba3a161c9b54d5922f0588772d66597d942997",
+    "receiver": "sha256:ab42d3435863fb0f721748ef0040edce384663932ed69940d6083b4fb4b97392",
+    "sdkEnvironment": "sha256:07d78dd3740c3e266ce309d8b7b1cd7cf0cd08d3148e6d91abcf7970d20b8dee",
+    "decision": "sha256:afe5ab180c86b9bd15f2f3a5eddef37581e9f2a2cf0344b2992f38a6bf9167fd"
+  },
+  "lockedTuple": {
+    "framework": {
+      "name": "@mastra/core",
+      "version": "1.8.0",
+      "integrity": "sha512-AK6Isj21mWlwX1zIZNUxgAQvRfjJmdjsPsKoh1cOvaM+h748S4U48TJ5DsmundSj/8NBeKHmYXqH2RYqwN35nw=="
+    },
+    "frameworkAdapter": {
+      "name": "@openbox-ai/openbox-mastra-sdk",
+      "version": "1.0.0",
+      "source": "file:vendor/openbox-ai-openbox-mastra-sdk-1.0.0.tgz"
+    },
+    "baseSDK": {
+      "name": "@openbox-ai/openbox-sdk-ts",
+      "version": "1.0.1",
+      "integrity": "sha512-UWQ6EBLJYD5XhF3BSflfRHHcL6PMOFj7ubda7I/TW10aCNWPx7DuxoNH/VqGrAtFb0QIKVgUSHlEyBi+isLGgw=="
+    },
+    "zod": {
+      "version": "4.3.6",
+      "integrity": "sha512-rftlrkhHZOcjDwkGlnUtZZkvaPHCsDATp4pGpuOOMDaTdDDXF91wuVDJoWoPsKX/3YPQ5fHuF3STjcYyKr+Qhg=="
+    }
+  },
+  "commands": [
+    "git -C ../openbox-mastra-sdk archive db9863bd6659f8b1ce6a33903ea61e4e564be38b | bsdtar -xf - -C TASK_TEMP/sdk",
+    "cd TASK_TEMP/sdk && PATH=/opt/homebrew/bin:/usr/bin:/bin npm ci --ignore-scripts --no-audit --no-fund && npm run build && npm pack --ignore-scripts --pack-destination PROJECT/vendor",
+    "repeat the exact SDK archive build in a fresh task directory and compare the two archives byte-for-byte",
+    "cd FRESH_PROJECT && PATH=/opt/homebrew/bin:/usr/bin:/bin npm ci --ignore-scripts --no-audit --no-fund && npm run check && npm run typecheck",
+    "cd cli && go run ./cmd/openbox project inspect ../testbed/project-assurance/mastra-conformance --output TASK_TEMP/out",
+    "verify the local SDK archive SHA-512 equals the package-lock integrity",
+    "scan only project-authored source and metadata for production provider coordinates and credential prefixes",
+    "prepare a fresh task-owned project copy with npm ci --ignore-scripts --no-audit --no-fund and hash its exact tar stream before launch",
+    "cd cli && OPENBOX_MASTRA_STARTUP_ROOT=TASK_TEMP/snapshot OPENBOX_MASTRA_STARTUP_SNAPSHOT_DIGEST=sha256:5de5e12ba6a94a083a7c904288fbfd6ead6e086181b7c40b99fea4f925db1fc4 go test -count=10 -run '^TestMastraConformanceStartsInQualifiedCodexSandbox$' ./internal/assurance/fixture",
+    "repeat the prepared-tree tar-stream SHA-256 after the sandboxed startup and require byte identity",
+    "git status --short",
+    "git diff --check"
+  ],
+  "result": {
+    "archive": "the 106-file SDK package was built from the clean exact commit rather than checkout-edited or registry adapter bytes; a second fresh build was byte-identical",
+    "install": "a fresh scripts-disabled npm ci installed 350 packages and the locked direct tuple exactly",
+    "checks": "Node syntax checking, TypeScript checkJs against exact installed declarations, and named-export imports passed without starting the project",
+    "application": "the project uses normal Mastra Agent, Mastra, and createTool APIs; one package-owned model adapter yields a deterministic recording-tool selection, and only the SDK-wrapped top-level recording-tool can call the run-owned safe sink",
+    "sdk": "withOpenBox uses the exact qualified explicit configuration and obtains OpenBox coordinates only from the closed child environment",
+    "inspection": {
+      "projectSnapshot": "sha256:9640e4a4eb6ff804472c6c77c5e1b3ac6b1b7b6e07fa0d2e15a8acccab135cb3",
+      "projectModel": "sha256:3f5426f165a707ad9f7394834ce36fcf3759c13ff86219f30fba10a85f42a513",
+      "sdkCoverage": "sha256:a56a46a6d8422d4632569d30099254fbcba52741ca32492c572a84ecb8df8e2f",
+      "readiness": "inconclusive",
+      "probeCount": 0
+    },
+    "sourceSafety": "project-authored source contains no OpenAI or Anthropic production endpoint, obx_live_ credential, or provider key literal",
+    "startup": {
+      "sandbox": "codex-cli 0.149.0 standalone on macOS 26.5.2 arm64 with allow_local_binding=true and only literal loopback domains allowed",
+      "preparedSnapshotDigest": "sha256:5de5e12ba6a94a083a7c904288fbfd6ead6e086181b7c40b99fea4f925db1fc4",
+      "repetitions": 10,
+      "applicationReadiness": "GET /health returned 200 inside the qualified sandbox",
+      "receiverEvidence": "exactly the preflight readiness 204 followed by the SDK-authenticated GET /api/v1/auth/validate 200",
+      "stimulusSent": false,
+      "modelInvoked": false,
+      "sinkInvoked": false,
+      "fallbackObserved": false
+    },
+    "independentReview": "approved the final project source, package, lock, and SDK archive hashes with no remaining high or medium static blocker after exact environment, route, and stimulus-correlation fixes; the reviewer made no workspace or ledger writes"
+  },
+  "cleanup": {
+    "sdkBuildDirectories": "moved to Trash after each build",
+    "freshInstallDirectory": "moved to Trash after verification",
+    "workingNodeModules": "moved to Trash after verification",
+    "inspectionOutput": "moved to Trash after passive inspection",
+    "projectProcesses": "each sandboxed Node process group was terminated after readiness and no matching process remained",
+    "preparedProject": "before/after tar-stream digests matched and the task directory was moved to Trash",
+    "serviceListeners": "receiver, poison, sink, and deterministic model listeners closed after every repetition"
+  },
+  "limits": [
+    "The exact fresh install emits Mastra transitive peer warnings because @ai-sdk/ui-utils-v5 declares Zod 3 while the supported root and Mastra peer use Zod 4. npm ci and compile checks pass, but npm ls --all reports ELSPROBLEMS; this is not represented as a clean peer tree.",
+    "The passive inspector sees a file: adapter declaration and therefore keeps automatic SDK version compatibility unsupported, recordingTool missing with zero events, and readiness inconclusive. A lockfile or static declaration is not promoted to behavioral coverage.",
+    "This is a bounded startup/readiness receipt only. It does not replace the one-shot probe-to-run authorization and full state machine owned by SE-05-04.",
+    "The native tuple binds maxProcesses=32 but has no hard process-count enforcement surface; no count ceiling is claimed.",
+    "No stimulus, poison retrieval, model request, sink effect, Ollama relay, provider, production endpoint, judgment, or audit pack was executed or claimed."
+  ]
+}

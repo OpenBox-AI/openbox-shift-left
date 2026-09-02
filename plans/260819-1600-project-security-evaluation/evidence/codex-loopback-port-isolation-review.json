@@ -1,0 +1,27 @@
+{
+  "schema": "openbox.project-assurance.implementation-review/v1",
+  "capturedAt": "2026-08-23T10:01:54Z",
+  "status": "rejected",
+  "task": "SE-03-10",
+  "tuple": {
+    "provider": "Codex native Seatbelt sandbox",
+    "version": "codex-cli 0.149.0",
+    "binarySha256": "f4a74117b8142cda581c95ff753abf4508b5636d89682c1ed77e4a9249af8963"
+  },
+  "probe": {
+    "authority": "model-free local-only",
+    "declaredEndpoint": "http://127.0.0.1:43121/",
+    "undeclaredEndpoint": "http://127.0.0.1:43122/",
+    "declaredStatus": 200,
+    "undeclaredStatus": 200,
+    "result": "endpoint isolation failed"
+  },
+  "analysis": {
+    "networkRuleScope": "Codex domain rules match hosts or domains, not destination ports.",
+    "localBindingEffect": "allow_local_binding enables local/private networking and therefore cannot isolate one loopback TCP port from another.",
+    "documentation": "https://github.com/openai/codex/blob/main/codex-rs/network-proxy/README.md"
+  },
+  "conclusion": "The tuple violates the mandatory unapproved-loopback endpoint denial gate and is not a supported project runner.",
+  "fix": "Active project execution now returns sandbox: unsupported before reading profile or project bytes. Historical functional evidence remains labeled historical.",
+  "cleanup": "Both listeners were stopped and the temporary CODEX_HOME was removed."
+}

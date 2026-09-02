@@ -1,0 +1,88 @@
+{
+  "task": "SE-06-08",
+  "captured_at": "2026-08-22T11:13:54Z",
+  "result": "verified",
+  "toolchain": {
+    "go": "go1.27.0 darwin/arm64"
+  },
+  "inputs": {
+    "cli/cmd/openbox/main.go": "b3323fdbc6b1afbd80eaa746176b1656205240cdcbc98da7fe7a25bac9c62192",
+    "cli/cmd/openbox/project.go": "5687ca75d33e862ebec4892b6aa5c867144dc02c6cbeae066f6ded700b157eba",
+    "cli/cmd/openbox/project_report.go": "df18caf7540af974209832536c43642eee3ea26c501e6f5af61d0bb757e93bb5",
+    "cli/cmd/openbox/project_report_unix_test.go": "fa9e888212cad7d16b7a860a857ed9cbc18839f0866590011e1f9336a28dca64",
+    "cli/cmd/openbox/project_test.go": "7ed7399545c680a5b57b3bfb7f8ba24570dfdfe44ddfced991192ce44b87c1bf",
+    "cli/cmd/openbox/project_verify_unix_test.go": "fdd5e8d28de716f9c1b70460e837f712827b39f5e224a270e56a048083ec3627",
+    "cli/internal/assurance/report/proposal.go": "adb4326a2ee6385c7109137771c019d638d0401c31f1ad7895bcf5c89ec223eb",
+    "cli/internal/assurance/report/proposal_unix_test.go": "34291edaa16155b4e0f11d0ceb6f0ad5d3ed8efac5f3c9617971c0a384a53a07",
+    "cli/internal/assurance/report/report.go": "f658572f64987dfba32c32569fe5fe7f4dd474ea229c5665d223153a36dc204a",
+    "cli/internal/assurance/report/report_unix_test.go": "6f8b4981d9d4f4c2223d760dc44a8e81c57e10039feb57cd8652f9b1fa957090",
+    "cli/internal/assurance/report/validate.go": "d70e83dffbf92f74272f2f7dda32a0fa5fe1305af7b96829727fbba8eefd644e"
+  },
+  "commands": [
+    {
+      "command": "cd cli && go test -count=25 -run '^(TestProjectReportAndPropose|TestProjectRouting|TestProjectVerify)' ./cmd/openbox",
+      "exit_status": 0,
+      "result": "passed"
+    },
+    {
+      "command": "cd cli && go test -count=25 -run '^(TestCompileProposal|TestNonRuntime)' ./internal/assurance/report",
+      "exit_status": 0,
+      "result": "passed"
+    },
+    {
+      "command": "cd cli && go test -race -count=5 ./cmd/openbox ./internal/assurance/report",
+      "exit_status": 0,
+      "result": "passed"
+    },
+    {
+      "command": "cd cli && go test ./internal/assurance/... && go test ./... && go vet ./...",
+      "exit_status": 0,
+      "result": "passed"
+    },
+    {
+      "command": "cd cli && go mod tidy -diff && go mod verify",
+      "exit_status": 0,
+      "result": "tidy diff was empty and all modules verified"
+    },
+    {
+      "command": "cd cli && GOOS=<darwin-arm64|linux-amd64|windows-amd64> go test -run '^$' <openbox and report packages>",
+      "exit_status": 0,
+      "result": "all three compile-only matrices passed"
+    },
+    {
+      "command": "gofmt -d <SE-06-08 Go files>; git diff --check; git status --short",
+      "exit_status": 0,
+      "result": "format and whitespace checks were clean; changed and untracked scope was reviewed separately"
+    }
+  ],
+  "verification": {
+    "routing": "The public usage and dispatcher expose only project report --pack DIR with markdown/json/sarif and project propose --pack DIR with json/markdown.",
+    "authority": "Both routes require a structurally verified finalized pack and the internal exact-schema/semantic validated capability before rendering or compilation.",
+    "report": "Markdown is the report default; JSON and SARIF select the exact addressed projections already byte-compared to the authoritative pack.",
+    "proposal": "JSON is the proposal default. JSON and Markdown both carry the schema-valid inert proposal fields and exact candidate document; the test recomputes and matches the candidate document digest.",
+    "output": "Both commands write only to stdout and fail on writer error or short write. They expose no output path, project path, command, endpoint, credential, apply, publish, or deployment option.",
+    "sentinels": "Real command-dispatch tests over a finalized schema-valid pack retained identical pack bytes/modes and source/control-plane sentinel state, did not execute PATH trap binaries, and did not contact configured HTTP/HTTPS/ALL proxy sentinels."
+  },
+  "formats": {
+    "report_default": "markdown",
+    "report_supported": ["markdown", "json", "sarif"],
+    "propose_default": "json",
+    "propose_supported": ["json", "markdown"]
+  },
+  "adversarial_matrix": {
+    "arguments": "Missing/empty pack, unsupported format, positional argument, and help behavior are explicit and bounded.",
+    "pack": "The CLI test uses the real manifest-last finalized-pack filesystem path; the shared verifier's tamper test remains active.",
+    "authority": "Fake codex/curl/docker/git/node/ollama PATH entries, ambient proxy listeners, immutable pack-tree digest, and source/control-plane sentinel directory remained untouched.",
+    "output": "All five formats contain their required IDs and truth fields; three JSON formats parse as JSON and the proposal candidate bytes match their declared digest."
+  },
+  "independent_review": {
+    "result": "approved",
+    "commands": "exact hash replay, focused count-25, race count-3, vet, format, scoped diff, static import scan, and Darwin/Linux/Windows compile-only checks passed",
+    "finding": "No remaining high- or medium-severity SE-06-08 correctness, security, or authority blocker."
+  },
+  "limits": [
+    "The acceptance test invokes the real in-process command dispatcher rather than a separately built CLI subprocess.",
+    "Report and proposal commands read one local pack and emit stdout bytes only; they do not create a durable output artifact.",
+    "No project, sandbox, SDK, model, provider, network, production coordinate, candidate apply, external control plane, or Docker path ran."
+  ]
+}

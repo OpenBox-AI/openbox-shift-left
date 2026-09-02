@@ -1,0 +1,73 @@
+{
+  "schema": "openbox.project-assurance.project-source-selection-validation/v1",
+  "task": "SE-01-04",
+  "capturedAt": "2026-08-20T08:28:35Z",
+  "status": "passed_with_limits",
+  "toolchain": {
+    "go": "go1.26.7 darwin/arm64",
+    "os": "macOS 26.5.2 build 25F84",
+    "kernel": "Darwin 25.5.0 arm64",
+    "filesystem": "APFS with owners enabled",
+    "xSys": {
+      "version": "v0.35.0",
+      "goVersion": "1.23.0",
+      "sum": "h1:vz1N37gP5bs89s7He8XuIYXpyY0+QlsKmzipCbUtyxI=",
+      "goModSum": "h1:BJP2sWEmIv4KK5OTEluFJCKSidICx8ciO85XgH3Ak8k="
+    }
+  },
+  "inputs": {
+    "platformDarwinGo": "sha256:5e5486d95d6b6dc1cedda0eda0bfefa5566ef91743bfcfba6e0101ea60d4ef65",
+    "platformLinuxGo": "sha256:5173c8af3b541674ffe2500bbe49663b160be7db8edd280ed7f3a1e85ef2cafb",
+    "platformOtherGo": "sha256:cb8eee69deeb25c7415ff707ff2b27071ff02eda6f96df5a54080c8297a79872",
+    "snapshotGo": "sha256:3daf7d228ce4351d23c73b1bb8c1282be1728f3022ba4752c1e68ad15f9d8043",
+    "snapshotTestGo": "sha256:6f9e0494d6427563c9a9f4ebe12c9fa179450a33f529dc4cb18e3baff21d39d3",
+    "walkUnixGo": "sha256:b531ca1a5fed032f03626624e20501cc584bc75f626684424f31330984f6c908",
+    "goMod": "sha256:0762783d90b832ef56568f6d520274750a62bbf144485546d959bcdbd7790c79",
+    "goSum": "sha256:38f2bf9e5ba0a5c84860f45f4d50fdf7d4d1d0d21ceed4810d561f7b42a74cd8"
+  },
+  "commands": [
+    "cd cli && go test -count=1 ./internal/assurance/snapshot",
+    "cd cli && go test -race -count=1 ./internal/assurance/snapshot",
+    "cd cli && go vet ./internal/assurance/snapshot",
+    "cd cli && go test -count=1 ./...",
+    "cd cli && go vet ./...",
+    "cd cli && GOOS=linux GOARCH=amd64 go test -c -o /tmp/openbox-snapshot-linux-amd64.test ./internal/assurance/snapshot",
+    "cd cli && GOOS=linux GOARCH=arm64 go test -c -o /tmp/openbox-snapshot-linux-arm64.test ./internal/assurance/snapshot",
+    "cd cli && GOOS=darwin GOARCH=amd64 go test -c -o /tmp/openbox-snapshot-darwin-amd64.test ./internal/assurance/snapshot",
+    "cd cli && GOOS=windows GOARCH=amd64 go test -c -o /tmp/openbox-snapshot-windows-amd64.test.exe ./internal/assurance/snapshot",
+    "cd cli && go mod tidy -diff"
+  ],
+  "result": {
+    "focusedPackage": "passed",
+    "race": "passed",
+    "vet": "passed",
+    "fullCliModule": "passed",
+    "fullCliVet": "passed",
+    "crossCompilation": {
+      "linuxAmd64": "passed",
+      "linuxArm64": "passed",
+      "darwinAmd64": "passed",
+      "windowsAmd64": "passed; runtime source selection intentionally fails closed"
+    },
+    "moduleGraph": "x/sys v0.35.0 was already pinned transitively and is now direct; no version or go.sum byte changed; tidy diff only reports the pre-existing decision direct-to-indirect annotation drift",
+    "independentReadOnlyReview": "no remaining high or medium SE-01-04 issue after the nonblocking regular-file verification fix",
+    "proved": [
+      "project-root aliases resolve to one canonical existing directory identity while filesystem root, home, audit output, temp parent, and roots nested in audit/temp boundaries are rejected",
+      "audit output and temp boundaries nested inside the project are omitted from recursive selection",
+      "directory traversal is sorted, descriptor-relative, no-follow, and rejects filesystem or mount transitions on Darwin and in the Linux implementation",
+      "direct and chained symlinks are read descriptor-relatively; any external hop remains external even if a later component re-enters the project",
+      "unsafe dot-dot after an unresolved target component fails closed while a leading dot-dot that stays under the pinned root is represented as an internal symlink",
+      "regular-file and final symlink-target verification opens are nonblocking, mount-aware, and re-check the opened type, preventing a regular-to-FIFO swap from hanging selection",
+      "relative-path checks reject controls, backslashes, NUL, escape, and over-4096-character paths while accepting schema-valid multibyte paths",
+      "sockets, FIFOs, devices, special files, external mounts, broken links, and external links are classified without reading their contents"
+    ]
+  },
+  "limits": [
+    "This task selects and classifies source candidates only. SE-01-05 owns copying, byte hashes, executable preservation, read-only snapshots, and source-mutation comparison; SE-01-06 owns default/profile exclusions and omission records.",
+    "Runtime behavior was exercised on Darwin/APFS only. Linux openat2 no-symlink/no-mount behavior and mounted-file classification have source and compile evidence but no privileged runtime mount fixture; unsupported platforms fail closed at Select.",
+    "A concurrent same-identity process can still replace one regular file with another, producing a root-confined but time-varying inventory. SE-01-05 must compare source identities and bytes and must not claim an atomic filesystem snapshot.",
+    "Unsafe ambiguous symlink targets fail the whole selection rather than being retained as copyable entries.",
+    "The invalid-UTF-8 path fixture cannot be created on the exercised Darwin filesystem; the implementation rejects invalid UTF-8 before artifact representation.",
+    "No SDK provider, production endpoint, OpenBox Core, sandbox launch, external control plane, or paid/live path ran."
+  ]
+}

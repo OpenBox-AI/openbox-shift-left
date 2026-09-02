@@ -1,0 +1,73 @@
+{
+  "schema": "openbox.project-assurance.mastra-receiver-wire-validation/v1",
+  "task": "SE-04-02",
+  "capturedAt": "2026-08-21T09:21:01Z",
+  "status": "passed_with_limits",
+  "tuple": {
+    "frameworkSdk": "@openbox-ai/openbox-mastra-sdk@1.0.0",
+    "frameworkSdkCommit": "db9863bd6659f8b1ce6a33903ea61e4e564be38b",
+    "baseSdk": "@openbox-ai/openbox-sdk-ts@1.0.1",
+    "framework": "@mastra/core@1.8.0",
+    "node": "v26.7.0",
+    "npm": "11.19.0",
+    "platform": "macOS 26.5.2 arm64"
+  },
+  "inputs": {
+    "receiverGo": "sha256:ea56cdad1c6223344b4e6f03f104c8db6323f7ecd1de82a2d8186cda2468dfb0",
+    "receiverTestGo": "sha256:c44349e1de25ac17143e6e746ad4811186e4d1e39771659809b32c2f06baa8f9",
+    "wireGo": "sha256:e056199c7195947deddc995866c7f491ae823499403fa8bad7c64ac0318ff560",
+    "wireTestGo": "sha256:e4484f0d72533f3663d278a5a43f6c37fef031c38155b0ddb8c7cf08bcc5b323",
+    "sdkTupleLock": "sha256:c32aa6532c93b955ecb72a7bca7b744ff1c0160254afc51f07ab5dec3ee205f0",
+    "priorWireQualification": "sha256:863aacc9162b9499a1c84f249e069d62d0f97504755e71de246db0cf502a28f1",
+    "sdkSourceArchive": "sha256:1e85dfd57ea751846236b01a94972ee58a8569045d9b20788e051092ff6933d1",
+    "nodeBinary": "sha256:1ef99ea25fe70c9b67e7efe768ef8ee22148d3cabc703db6131b57aeb617d040",
+    "npmCli": "sha256:8e5f6f3429f8cdbe693cdc29904e9d5a7b127a494bd15c804bd54c7403bfcbe7",
+    "builtMastraDistTree": "sha256:b788b20dc932207969b0570ebd345b5fb151eb68c0ba80de75fc5e19d1e649a2",
+    "installedBaseSdkTree": "sha256:9cf6375c7a701364f6f667d2244285a5373f0002e6c6e2dfe444e82a12530cf8"
+  },
+  "commands": [
+    "git -C ../openbox-mastra-sdk archive -o TASK_TEMP/source.tar db9863bd6659f8b1ce6a33903ea61e4e564be38b",
+    "shasum -a 256 TASK_TEMP/source.tar /opt/homebrew/Cellar/node/26.7.0/bin/node /opt/homebrew/lib/node_modules/npm/bin/npm-cli.js",
+    "cd TASK_TEMP && PATH=/opt/homebrew/Cellar/node/26.7.0/bin:/usr/bin:/bin npm_config_cache=TASK_TEMP/npm-cache npm_config_userconfig=/dev/null npm_config_update_notifier=false /opt/homebrew/Cellar/node/26.7.0/bin/node /opt/homebrew/lib/node_modules/npm/bin/npm-cli.js ci --ignore-scripts --no-audit --no-fund",
+    "cd TASK_TEMP && PATH=/opt/homebrew/Cellar/node/26.7.0/bin:/usr/bin:/bin /opt/homebrew/Cellar/node/26.7.0/bin/node /opt/homebrew/lib/node_modules/npm/bin/npm-cli.js run build",
+    "cd cli && OPENBOX_NODE_BINARY=/opt/homebrew/Cellar/node/26.7.0/bin/node OPENBOX_MASTRA_SDK_ROOT=TASK_TEMP go test -count=1 -run '^TestPinnedMastraClientAcceptsReceiverResponses$' ./internal/assurance/receiver",
+    "cd cli && go test -count=25 ./internal/assurance/receiver",
+    "cd cli && go test -race ./internal/assurance/receiver",
+    "cd cli && go test -count=1 ./internal/assurance/...",
+    "cd cli && go test -count=1 ./...",
+    "cd cli && go vet ./...",
+    "cd cli && GOOS=darwin GOARCH=arm64 go test -c -o TASK_TEMP/receiver-darwin-arm64.test ./internal/assurance/receiver",
+    "cd cli && GOOS=linux GOARCH=arm64 go test -c -o TASK_TEMP/receiver-linux-arm64.test ./internal/assurance/receiver",
+    "cd cli && GOOS=windows GOARCH=amd64 go test -c -o TASK_TEMP/receiver-windows-amd64.test.exe ./internal/assurance/receiver",
+    "gofmt -d cli/internal/assurance/receiver/*.go",
+    "git status --short",
+    "git diff --check"
+  ],
+  "result": {
+    "auth": "the exact client accepted HTTP 200 with immutable bytes {\"ok\":true} from GET /api/v1/auth/validate",
+    "evaluate": "the exact client accepted HTTP 200 with immutable bytes {\"verdict\":\"allow\"} from POST /api/v1/governance/evaluate and projected action continue",
+    "sequence": "evaluate-before-auth and duplicate auth are rejected; approval polling and unknown routes are absent",
+    "authority": "the handler has no BLOCK response or caller-configurable verdict path",
+    "runtimeBinding": "the test exact-set hashes the complete built Mastra dist and installed base-SDK package trees, rejects symlink/special entries, and caps them at 10000 files and 512 MiB",
+    "network": "a pre-import fetch guard permits only the exact 127.0.0.1 receiver origin and the two qualified paths with no userinfo, query, or fragment",
+    "output": "Node stdout and stderr are separately capped at 65536 bytes; only stdout JSON is parsed and failures expose digests rather than raw output or the synthetic bearer",
+    "tests": "the exact prepared client, focused count-25, race, affected-assurance, full CLI, vet, format, and Darwin/Linux/Windows compile-only checks passed",
+    "independentReview": "approved final source and runtime-tree hashes with no remaining high or medium blocker; reviewer made no writes"
+  },
+  "acquisition": {
+    "source": "clean local Git archive at the accepted commit",
+    "dependencies": "npm registry downloads followed the committed lock with audit, funding, and lifecycle scripts disabled; the cache and install lived only in the task temp directory",
+    "warnings": [
+      "npm repeated the recorded Mastra transitive zod peer override warnings",
+      "npm repeated the recorded glob 10.5.0 deprecation warning"
+    ],
+    "cleanup": "the exact archive, npm cache, node_modules, build output, and test temp were removed; the local SDK clone remained clean"
+  },
+  "limits": [
+    "This is a real local SDK client and loopback-wire observation, not a Mastra project launch, sandbox run, Docker command, provider/model request, production Core decision, or external control-plane action.",
+    "The test calls OpenBoxClient directly. Full withOpenBox initialization and child-environment overlay readiness remain Phase 04/05 integration gates.",
+    "Request schema validation, bounded capture, redaction, digest persistence, and complete adversarial ordering evidence remain SE-04-03.",
+    "The immutable baseline ALLOW response proves SDK compatibility only; it is not an OpenBox policy verdict or blocked-outcome proof.",
+    "Both Phase 03 sandbox tuples remain rejected, so this component proof does not make project execution runnable."
+  ]
+}

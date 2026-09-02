@@ -1,0 +1,106 @@
+{
+  "schema": "openbox.project-assurance.contract-conformance-validation/v1",
+  "task": "SE-01-08",
+  "capturedAt": "2026-08-21T02:59:32Z",
+  "status": "passed_with_limits",
+  "toolchain": {
+    "go": "go1.26.7 darwin/arm64",
+    "node": "22.20.0",
+    "npm": "11.6.2",
+    "ajv": "8.17.1",
+    "os": "macOS 26.5.2 build 25F84",
+    "kernel": "Darwin 25.5.0 arm64"
+  },
+  "inputs": {
+    "conformanceTestGo": "sha256:ef9a6e26c436c639169cb6911fa01479468edab325c256c89166812bbcd8f8bd",
+    "contractIntegrationUnixTestGo": "sha256:7926309a2d3352ad144d5000bac829a24c5bec1c1b562749bc03548d11a19720",
+    "snapshotGo": "sha256:95555dbfacd08538a7d073dcf7736a94ac4e015f57a2e7af7f376ff2734039a7",
+    "pathFuzzTestGo": "sha256:d5b44736e499ab9284c0e1c9b8bde91982bd4df734ed1054b7d5201287d65803",
+    "copyGo": "sha256:0fa0ab50d7121882099caeecba024937509064b30914021eca727970e7e8e549",
+    "copyTestGo": "sha256:1290a7d5b8ad067ef2ca560c10e31139dfa03139397c3cb1fa9c1d5d5ded946a",
+    "inspectionContractIntegrationUnixTestGo": "sha256:1e7516a09f42945ffb7b1652524004a928d976abcf2e1227a61d9f3f3672ebab",
+    "mutationCases": "sha256:fc5279cc157919984b90c7745512fc55ade31c830ca7e715a041c88ec4a7e795",
+    "publicSchemaProbe": "sha256:f9842370402d5a384c47c4805526f1a6d87c98e2d729e21011b008c5ce7f82f8",
+    "runProfileProbe": "sha256:a409ba2b983c88e95b30e0f9400107b2a893f93b4b15d11ff9fb699a5a66f913",
+    "qualificationLock": "sha256:86bfa5d3e22e4577e92e704cad8ea5026201a0090892b9010ad27446576b9cd7",
+    "goMod": "sha256:16df452b9d119396b14f5c8ab9c2ceb7143b5ccdc20271ef40eba15e1613bfea",
+    "goSum": "sha256:38f2bf9e5ba0a5c84860f45f4d50fdf7d4d1d0d21ceed4810d561f7b42a74cd8"
+  },
+  "commands": [
+    "/Users/lebrian/.nvm/versions/node/v22.20.0/bin/npm install --prefix /tmp/openbox-se01-08-ajv.pARGdD --ignore-scripts --no-audit --no-fund --package-lock=false --save-exact ajv@8.17.1 fast-deep-equal@3.1.3 fast-uri@3.1.5 json-schema-traverse@1.0.0 require-from-string@2.0.2",
+    "QUALIFICATION_DIR=/tmp/openbox-se01-08-ajv.pARGdD LOCK_FILE=plans/260819-1600-project-security-evaluation/evidence/ajv-8.17.1.qualification-lock.json /bin/zsh -c 'jq -r --arg root \"$QUALIFICATION_DIR\" ... | shasum -a 256 -c -'",
+    "jq -s -e 'qualification lock package tuples equal installed hidden lock tuples' plans/260819-1600-project-security-evaluation/evidence/ajv-8.17.1.qualification-lock.json /tmp/openbox-se01-08-ajv.pARGdD/node_modules/.package-lock.json",
+    "cd cli && OPENBOX_AJV_ROOT=QUALIFICATION_DIR/node_modules/ajv go test ./internal/assurance/artifact ./internal/assurance/runfs -run 'TestPinnedProjectAssuranceContractConformance|TestSnapshotOmissionsRemainVisibleInValidatedFinalManifest|TestGeneratedInspectionArtifactsConformToPinnedSchemas' -count=1 -v",
+    "cd cli && go test ./internal/assurance/... -count=10",
+    "cd cli && go test -race ./internal/assurance/...",
+    "cd cli && go vet ./internal/assurance/...",
+    "cd cli && go test -run '^$' -fuzz '^FuzzNormalizeRelativePath$' -fuzztime=10s ./internal/assurance/snapshot",
+    "cd cli && go test -run '^$' -fuzz '^FuzzCanonicalizeJSONIdempotent$' -fuzztime=10s ./internal/assurance/artifact",
+    "for each of the 11 go.work modules: go test ./...",
+    "cd cli && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go test -run '^$' -exec=/usr/bin/true ./internal/assurance/...",
+    "cd cli && CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go test -run '^$' -exec=/usr/bin/true ./internal/assurance/...",
+    "cd cli && go mod tidy -diff",
+    "cd cli && gofmt -d internal/assurance",
+    "git status --short",
+    "git diff --check"
+  ],
+  "result": {
+    "qualification": {
+      "freshInstall": "passed; exactly five packages",
+      "packageJsonHashes": "5/5 matched",
+      "registryIntegrityTuples": "matched installed hidden lock",
+      "repositoryGoDependencyDeltaForTask": "none",
+      "temporaryQualificationDirectoryRemoved": true
+    },
+    "publicContracts": {
+      "strictDraft202012Schemas": "7/7 compiled",
+      "validFixtures": "7/7 accepted",
+      "negativeCounts": {
+        "missingRequired": 7,
+        "unknownProperty": 7,
+        "invalidEnum": 7,
+        "unsafeNumber": 7,
+        "malformedDigest": 6,
+        "wrongApiVersion": 7,
+        "wrongType": 7,
+        "adversarial": 25,
+        "semanticAdversarial": 10
+      }
+    },
+    "runProfile": {
+      "positive": "schema-valid, semantic-valid, trusted relay tuple valid",
+      "schemaNegatives": 16,
+      "semanticNegatives": 18,
+      "profileByteLimit": 262144,
+      "profileDepthLimit": 32,
+      "templateByteLimit": 65536,
+      "templateDepthLimit": 16
+    },
+    "manifestIntegration": "passed; actual audit/inspection/cache/secret/external-symlink/FIFO omissions remained in a schema-and-semantic-valid project model, whose exact bytes and CID were referenced by a schema-and-semantic-valid manifest and persisted through FinalizePack",
+    "inspectionArtifactIntegration": "passed; project-model and sdk-coverage canonical bytes remained pinned-Ajv-valid after adding the built-in inspection-output rule and Git-unknown invariant",
+    "auditReaderSemantics": "passed; fixed role media types and inline-judgments canonical byte-count/CID binding are enforced, with schema-valid semantic mutations rejected",
+    "pathBoundary": "passed; host-independent drive prefixes, absolute paths, dot paths, traversal, backslashes, controls, invalid UTF-8, and overlong paths fail closed",
+    "emptyArrays": "passed; empty omission example collections remain JSON arrays rather than null",
+    "boundedHarness": "passed; Node subprocesses have 30-second deadlines and 1048576-byte combined-output caps; dynamic documents are capped at 1048576 bytes before temp persistence",
+    "pathFuzz": "passed; 177067 executions, 103 total interesting inputs, no failure",
+    "canonicalJSONFuzz": "passed; 126467 executions, 130 total interesting inputs, no failure",
+    "assurancePackages": "passed 10 consecutive runs",
+    "race": "passed",
+    "vet": "passed",
+    "allWorkspaceModules": "all 11 go.work modules passed go test ./...",
+    "crossCompilation": "all three assurance packages compiled for linux/amd64 and windows/amd64 through a non-executing wrapper",
+    "format": "gofmt diff empty",
+    "scope": "status shows no new module, backend endpoint, table, service, SDK scan mode, compatibility shim, provider.HookEngine change, or adapters/common/hookflow change",
+    "independentReadOnlyReview": "approved current hashes with no remaining high- or medium-severity SE-01-08 correctness, security, compatibility, or authority blocker; focused/all-assurance/race/vet/format replay passed and no reviewer writes were made",
+    "moduleGraph": "go mod tidy -diff exits nonzero only for the pre-existing decision v0.0.0 direct-to-indirect annotation drift; no module bytes were rewritten",
+    "discardedCrossRun": "an earlier foreign-target go test invocation compiled then failed only when macOS attempted to execute Linux test binaries; it is not counted as cross-runtime evidence and was replaced by the passing non-executing compile proof"
+  },
+  "limits": [
+    "The conformance tests are opt-in and skip unless OPENBOX_AJV_ROOT identifies an offline Ajv package root. The phase proof used the exact environment-bearing commands above after fresh package hash and registry-integrity verification.",
+    "Ajv and its four helper packages are qualification tooling in a task-owned temporary directory, not repository runtime dependencies or a new Go module.",
+    "The dynamic-document integration exercises JSON project-model and audit-pack documents. Canonical JSONL object production is covered by SE-01-07; this task does not invent a generic runtime schema service.",
+    "Darwin exercised filesystem runtime behavior. Linux and Windows results are compile evidence only; no cross-platform runtime claim is made.",
+    "Fuzz execution counts are one bounded run on the recorded toolchain, not exhaustive input proofs.",
+    "No SDK, framework provider, project process, sandbox, model call, OpenBox receiver/Core, production credential or endpoint, external control plane, paid path, or live security evaluation ran."
+  ]
+}

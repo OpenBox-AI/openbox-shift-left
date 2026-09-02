@@ -1,0 +1,283 @@
+{
+  "schema": "openbox.project-assurance.codex-sandbox-qualification/v1",
+  "task_id": "SE-00-05",
+  "captured_at": "2026-08-19T12:27:46Z",
+  "probe": {
+    "command": "PYTHONDONTWRITEBYTECODE=1 /usr/bin/python3 plans/260819-1600-project-security-evaluation/evidence/probes/codex_sandbox_qualification.py",
+    "exit_status": 0,
+    "stdout_sha256": "2fe84c367f48f0cbe5ac1c87aead1706fda8f6509e73b0fb1a26ab218924ae33",
+    "scripts": [
+      {
+        "path": "evidence/probes/codex_sandbox_qualification.py",
+        "sha256": "5da44087a6362e9c6955f6ae27300482adf7d79bf00614de8c4c5e41ef449e07"
+      },
+      {
+        "path": "evidence/probes/codex_sandbox_payload.py",
+        "sha256": "2c34260d931979cee5b0619aec6a0ccdb236825404fb61603a5b9836f809e4b9"
+      }
+    ]
+  },
+  "repeatability": {
+    "command": "PYTHONDONTWRITEBYTECODE=1 /usr/bin/python3 plans/260819-1600-project-security-evaluation/evidence/probes/codex_sandbox_qualification.py | shasum -a 256",
+    "consecutive_runs": 2,
+    "stdout_sha256": [
+      "2fe84c367f48f0cbe5ac1c87aead1706fda8f6509e73b0fb1a26ab218924ae33",
+      "2fe84c367f48f0cbe5ac1c87aead1706fda8f6509e73b0fb1a26ab218924ae33"
+    ]
+  },
+  "primary_sources": [
+    {
+      "kind": "official_documentation",
+      "url": "https://learn.chatgpt.com/docs/sandboxing",
+      "used_for": "macOS Seatbelt, spawned-command inheritance, and sandbox-versus-approval boundaries"
+    },
+    {
+      "kind": "official_documentation",
+      "url": "https://learn.chatgpt.com/docs/non-interactive-mode",
+      "used_for": "non-interactive and explicit sandbox command semantics"
+    },
+    {
+      "kind": "source",
+      "repository": "https://github.com/openai/codex.git",
+      "tag": "rust-v0.148.0",
+      "tag_object": "ab52d1794d47d47ecaeb0ec37fc00fa31593ecf3",
+      "commit": "3ba0f711642a888aec92a611a3f3b2211157ff89",
+      "refs": [
+        "codex-rs/cli/src/debug_sandbox.rs:42-89,188-454",
+        "codex-rs/cli/tests/sandbox_network_proxy.rs:64-173",
+        "codex-rs/protocol/src/models.rs:309-452"
+      ]
+    }
+  ],
+  "qualification_cleanup": {
+    "command": "test -d /tmp/openbox-se00-05-codex-source.3VK4lt && test -f /tmp/openbox-se00-05-codex-source.3VK4lt/repo/codex-rs/cli/src/debug_sandbox.rs && test ! -e /Users/lebrian/.Trash/openbox-se00-05-codex-source.3VK4lt && mv /tmp/openbox-se00-05-codex-source.3VK4lt /Users/lebrian/.Trash/openbox-se00-05-codex-source.3VK4lt && test ! -e /tmp/openbox-se00-05-codex-source.3VK4lt && test -d /tmp/openbox-se00-05-codex.QMK8n3 && test ! -e /Users/lebrian/.Trash/openbox-se00-05-codex.QMK8n3 && mv /tmp/openbox-se00-05-codex.QMK8n3 /Users/lebrian/.Trash/openbox-se00-05-codex.QMK8n3 && test ! -e /tmp/openbox-se00-05-codex.QMK8n3",
+    "exit_status": 0,
+    "result": "The exact task-owned source and exploratory directories were moved to Trash and remain recoverable; their original /tmp paths no longer exist."
+  },
+  "result": {
+    "backend_unavailable_fail_closed": {
+      "command": "\"/usr/bin/sandbox-exec\" \"-p\" \"(version 1) (allow default) (deny process-exec (literal \\\"/usr/bin/sandbox-exec\\\"))\" \"/opt/homebrew/Caskroom/codex/0.148.0/bin/codex\" \"sandbox\" \"--permission-profile\" \"project-assurance-qualification\" \"--cd\" \"$RUN_ROOT/workspace\" \"--enable\" \"network_proxy\" \"-c\" \"permissions.project-assurance-qualification.extends=\\\":workspace\\\"\" \"-c\" \"permissions.project-assurance-qualification.network.enabled=true\" \"-c\" \"permissions.project-assurance-qualification.network.mode=\\\"full\\\"\" \"-c\" \"permissions.project-assurance-qualification.network.allow_local_binding=false\" \"-c\" \"permissions.project-assurance-qualification.network.domains={\\\"127.0.0.1\\\"=\\\"allow\\\",\\\"::1\\\"=\\\"allow\\\",\\\"localhost\\\"=\\\"allow\\\"}\" \"-c\" \"shell_environment_policy.inherit=\\\"all\\\"\" \"--\" \"/usr/bin/touch\" \"$RUN_ROOT/workspace/backend-unavailable-fallback-sentinel\"",
+      "exit_status": 1,
+      "fault_injection": "outer Seatbelt denies process-exec of /usr/bin/sandbox-exec",
+      "payload_executed": false,
+      "stderr_sha256": "b5bd28a8697c502f84e124ef0e690705c19eca1cf10e38f6d12fb0dbd587227b",
+      "unsandboxed_retry_observed": false
+    },
+    "candidate": {
+      "binary": "/opt/homebrew/Caskroom/codex/0.148.0/bin/codex",
+      "binary_sha256": "b0308517b20543012fa2171aa3d46ce455a7456c4eb2a552ab9468ba4eeb1e50",
+      "platform": {
+        "darwin": "25.5.0",
+        "machine": "arm64",
+        "macos": "26.5.2"
+      },
+      "source_commit": "3ba0f711642a888aec92a611a3f3b2211157ff89",
+      "source_tag": "rust-v0.148.0",
+      "source_tag_object": "ab52d1794d47d47ecaeb0ec37fc00fa31593ecf3",
+      "version": "codex-cli 0.148.0"
+    },
+    "cleanup": {
+      "protected_root_exists": false,
+      "run_root_exists": false,
+      "server_thread_alive": false
+    },
+    "configuration": {
+      "allow_local_binding": false,
+      "allowed_domains": [
+        "127.0.0.1",
+        "::1",
+        "localhost"
+      ],
+      "command": "\"/opt/homebrew/Caskroom/codex/0.148.0/bin/codex\" \"sandbox\" \"--permission-profile\" \"project-assurance-qualification\" \"--cd\" \"$RUN_ROOT/workspace\" \"--enable\" \"network_proxy\" \"-c\" \"permissions.project-assurance-qualification.extends=\\\":workspace\\\"\" \"-c\" \"permissions.project-assurance-qualification.network.enabled=true\" \"-c\" \"permissions.project-assurance-qualification.network.mode=\\\"full\\\"\" \"-c\" \"permissions.project-assurance-qualification.network.allow_local_binding=false\" \"-c\" \"permissions.project-assurance-qualification.network.domains={\\\"127.0.0.1\\\"=\\\"allow\\\",\\\"::1\\\"=\\\"allow\\\",\\\"localhost\\\"=\\\"allow\\\"}\" \"-c\" \"shell_environment_policy.inherit=\\\"all\\\"\" \"--log-denials\" \"--\" \"/usr/bin/python3\" \"$PAYLOAD\" \"--mode\" \"parent\" \"--workspace\" \"$RUN_ROOT/workspace\" \"--protected-target\" \"$PROTECTED_ROOT/parent-denied.txt\" \"--read-marker\" \"$PROTECTED_ROOT/read-marker.txt\" \"--loopback-url\" \"$LOOPBACK_URL\" \"--unlisted-url\" \"http://not-allowed.invalid/\"",
+      "cwd": "$RUN_ROOT/workspace",
+      "environment_keys": [
+        "CODEX_HOME",
+        "LANG",
+        "OPENBOX_QUALIFICATION_MARKER",
+        "PATH",
+        "PYTHONDONTWRITEBYTECODE",
+        "TMPDIR"
+      ],
+      "extends": ":workspace",
+      "network_mode": "full",
+      "network_proxy_feature": true,
+      "permission_profile": "project-assurance-qualification"
+    },
+    "denial_reporting": {
+      "flag": "--log-denials",
+      "relevant_denials": [
+        "(Python) file-write-create $PROTECTED_ROOT/parent-denied.txt",
+        "(Python) file-write-create $PROTECTED_ROOT/parent-denied.txt.child",
+        "(Python) network-outbound remote:*:$LOOPBACK_PORT"
+      ]
+    },
+    "invalid_state_fail_closed": {
+      "command": "\"/opt/homebrew/Caskroom/codex/0.148.0/bin/codex\" \"sandbox\" \"--permission-profile\" \"project-assurance-qualification\" \"--cd\" \"$RUN_ROOT/workspace\" \"--enable\" \"network_proxy\" \"-c\" \"permissions.project-assurance-qualification.extends=\\\":workspace\\\"\" \"-c\" \"permissions.project-assurance-qualification.network.enabled=true\" \"-c\" \"permissions.project-assurance-qualification.network.mode=\\\"full\\\"\" \"-c\" \"permissions.project-assurance-qualification.network.allow_local_binding=false\" \"-c\" \"permissions.project-assurance-qualification.network.domains={\\\"127.0.0.1\\\"=\\\"allow\\\",\\\"::1\\\"=\\\"allow\\\",\\\"localhost\\\"=\\\"allow\\\"}\" \"-c\" \"shell_environment_policy.inherit=\\\"all\\\"\" \"--sandbox-state-json\" \"{\" \"--\" \"/usr/bin/touch\" \"$RUN_ROOT/workspace/invalid-state-fallback-sentinel\"",
+      "exit_status": 2,
+      "payload_executed": false,
+      "stderr_sha256": "ee2851f9055fbc368aae08d4d3ad82ebb602ff4b8c92e76f41b49a104fa8bbe4"
+    },
+    "judgment": "qualified_candidate_for_driver_implementation",
+    "limits": [
+      "This invokes the standalone sandbox only; it makes no model or OpenAI API request.",
+      "HTTP loopback succeeds through the managed proxy. Direct loopback sockets remain denied.",
+      "The built-in workspace profile permits broad reads and temporary-directory writes; this probe proves outside-workspace write denial only for the declared protected target.",
+      "Seatbelt backend unavailability is a controlled fault injection: an outer Seatbelt profile denies execution of the inner /usr/bin/sandbox-exec. It proves CLI failure without an unsandboxed payload retry, not a naturally degraded host.",
+      "The standalone command has no native timeout or output cap. The driver must own process-group timeout, streaming byte caps, and cleanup before this candidate can become a support tuple."
+    ],
+    "output": {
+      "command": "\"/opt/homebrew/Caskroom/codex/0.148.0/bin/codex\" \"sandbox\" \"--permission-profile\" \"project-assurance-qualification\" \"--cd\" \"$RUN_ROOT/workspace\" \"--enable\" \"network_proxy\" \"-c\" \"permissions.project-assurance-qualification.extends=\\\":workspace\\\"\" \"-c\" \"permissions.project-assurance-qualification.network.enabled=true\" \"-c\" \"permissions.project-assurance-qualification.network.mode=\\\"full\\\"\" \"-c\" \"permissions.project-assurance-qualification.network.allow_local_binding=false\" \"-c\" \"permissions.project-assurance-qualification.network.domains={\\\"127.0.0.1\\\"=\\\"allow\\\",\\\"::1\\\"=\\\"allow\\\",\\\"localhost\\\"=\\\"allow\\\"}\" \"-c\" \"shell_environment_policy.inherit=\\\"all\\\"\" \"--\" \"/usr/bin/python3\" \"-c\" \"import sys; sys.stdout.write('x' * 70000)\"",
+      "forwarded_stdout_bytes": 70000,
+      "limit": "codex sandbox exposes no output-cap flag; the production driver must cap both streams while reading",
+      "native_cap_available": false,
+      "requested_bytes": 70000,
+      "stdout_sha256": "bca09f4a757d5571c7d9f3341d4301f3c391c090826acc1a3013c6bcb7c01722"
+    },
+    "parent_child": {
+      "child": {
+        "cwd": "$RUN_ROOT/workspace",
+        "direct_loopback_socket": {
+          "connected": false,
+          "errno": 1,
+          "error_type": "PermissionError"
+        },
+        "environment": {
+          "codex_sandbox": "seatbelt",
+          "credential_names_present": [],
+          "network_disabled_marker": null,
+          "proxies": {
+            "ALL_PROXY": {
+              "empty": false,
+              "loopback_host": true,
+              "present": true,
+              "scheme": "socks5h"
+            },
+            "HTTPS_PROXY": {
+              "empty": false,
+              "loopback_host": true,
+              "present": true,
+              "scheme": "http"
+            },
+            "HTTP_PROXY": {
+              "empty": false,
+              "loopback_host": true,
+              "present": true,
+              "scheme": "http"
+            },
+            "NO_PROXY": {
+              "empty": true,
+              "loopback_host": false,
+              "present": true,
+              "scheme": ""
+            }
+          },
+          "qualification_marker": "SE-00-05"
+        },
+        "loopback_http": {
+          "body_sha256": "43c47b20129a8f4c5f62617740abdacbea5be13d2bbadac0b5fb829bf87a7489",
+          "reached": true,
+          "status": 200
+        },
+        "mode": "child",
+        "outside_read": {
+          "read": true,
+          "sha256": "634e4e089dccae461d9f858391c81a6a0e2ca98bc9982d12f4c6b140309461da"
+        },
+        "outside_write": {
+          "errno": 1,
+          "error_type": "PermissionError",
+          "written": false
+        },
+        "unlisted_http": {
+          "error_type": "HTTPError",
+          "reached": false,
+          "status": 403
+        },
+        "workspace_write": {
+          "sha256": "ddc9e669194254cef019a29d3619a2c16592e5d52e1a81e98b01bd52319149a3",
+          "written": true
+        }
+      },
+      "parent": {
+        "cwd": "$RUN_ROOT/workspace",
+        "direct_loopback_socket": {
+          "connected": false,
+          "errno": 1,
+          "error_type": "PermissionError"
+        },
+        "environment": {
+          "codex_sandbox": "seatbelt",
+          "credential_names_present": [],
+          "network_disabled_marker": null,
+          "proxies": {
+            "ALL_PROXY": {
+              "empty": false,
+              "loopback_host": true,
+              "present": true,
+              "scheme": "socks5h"
+            },
+            "HTTPS_PROXY": {
+              "empty": false,
+              "loopback_host": true,
+              "present": true,
+              "scheme": "http"
+            },
+            "HTTP_PROXY": {
+              "empty": false,
+              "loopback_host": true,
+              "present": true,
+              "scheme": "http"
+            },
+            "NO_PROXY": {
+              "empty": true,
+              "loopback_host": false,
+              "present": true,
+              "scheme": ""
+            }
+          },
+          "qualification_marker": "SE-00-05"
+        },
+        "loopback_http": {
+          "body_sha256": "43c47b20129a8f4c5f62617740abdacbea5be13d2bbadac0b5fb829bf87a7489",
+          "reached": true,
+          "status": 200
+        },
+        "mode": "parent",
+        "outside_read": {
+          "read": true,
+          "sha256": "634e4e089dccae461d9f858391c81a6a0e2ca98bc9982d12f4c6b140309461da"
+        },
+        "outside_write": {
+          "errno": 1,
+          "error_type": "PermissionError",
+          "written": false
+        },
+        "unlisted_http": {
+          "error_type": "HTTPError",
+          "reached": false,
+          "status": 403
+        },
+        "workspace_write": {
+          "sha256": "e47125968b3b71049fbc4802d1e40a71ea1359decfabacf70b34588037d4ff0c",
+          "written": true
+        }
+      }
+    },
+    "receiver": {
+      "bind": "127.0.0.1",
+      "requests_seen": 2,
+      "response_body_sha256": "43c47b20129a8f4c5f62617740abdacbea5be13d2bbadac0b5fb829bf87a7489"
+    },
+    "schema": "openbox.project-assurance.codex-sandbox-probe/v1",
+    "timeout": {
+      "codex_exit_status": -15,
+      "command": "\"/opt/homebrew/Caskroom/codex/0.148.0/bin/codex\" \"sandbox\" \"--permission-profile\" \"project-assurance-qualification\" \"--cd\" \"$RUN_ROOT/workspace\" \"--enable\" \"network_proxy\" \"-c\" \"permissions.project-assurance-qualification.extends=\\\":workspace\\\"\" \"-c\" \"permissions.project-assurance-qualification.network.enabled=true\" \"-c\" \"permissions.project-assurance-qualification.network.mode=\\\"full\\\"\" \"-c\" \"permissions.project-assurance-qualification.network.allow_local_binding=false\" \"-c\" \"permissions.project-assurance-qualification.network.domains={\\\"127.0.0.1\\\"=\\\"allow\\\",\\\"::1\\\"=\\\"allow\\\",\\\"localhost\\\"=\\\"allow\\\"}\" \"-c\" \"shell_environment_policy.inherit=\\\"all\\\"\" \"--\" \"/bin/sh\" \"-c\" \"printf '%s' $$ > $RUN_ROOT/workspace/timeout.pid; exec /bin/sleep 60\"",
+      "limit_seconds": 1,
+      "owner": "caller process group; codex sandbox exposes no timeout flag",
+      "sandboxed_process_gone": true,
+      "stderr_bytes": 0,
+      "stdout_bytes": 0,
+      "triggered": true
+    }
+  }
+}

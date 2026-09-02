@@ -1,0 +1,86 @@
+{
+  "schema": "openbox.project-assurance.phase05-run-invariants-validation/v1",
+  "task": "SE-05-09",
+  "capturedAt": "2026-08-22T07:35:01Z",
+  "status": "verified",
+  "toolchain": {
+    "go": "go1.27.0 darwin/arm64",
+    "node": "26.7.0",
+    "codex": "codex-cli 0.149.0",
+    "ollamaServer": "0.31.1",
+    "platform": "macOS 26.5.2 (Darwin 25.5.0 arm64)"
+  },
+  "inputs": {
+    "deterministicRuns": "sha256:8689043129e0ef919f3caab14a5408302ac9e8dd0640a05996418d24c78312cc",
+    "liveModelRuns": "sha256:c805d16766f9042c9fa4c8e6f21a57bcd506d825d4a975658de091cadaf88e93",
+    "negativeVariants": "sha256:9ec85198239513ee2882ba67cc068b6116b643ad3db0f2207d45de08ebc2b05e",
+    "sandboxQualification": "sha256:4eeb7a517546abdaebd6caf8d7fa778126ef8bc7b23c36368a57c1211818bd8e",
+    "servicePreflight": "sha256:f85ef0981bffd9327152ae29baa4f7bec9b18b56c417c6406c8c3322961680d7",
+    "sandboxRunBoundary": "sha256:1de3d2f9601b794f831e1c268424fa5ee32aec9322570d7703574310e800ae83",
+    "serviceBoundary": "sha256:c9d5ca856f37731bcd8ad50759e7f7fbe2fdc4901b76283b4ab7cefddbb1399f",
+    "projectSource": "sha256:388f865045ac7e8ee4fc105c50df324bfd9d13b3f2fa10275dd1e7b708ae3e4a",
+    "liveProfile": "sha256:28627a29c047bf4bcab9b77f4233da5f24b5921a4c37ca88bb2b17ef4cb9f941",
+    "preparedSnapshotBeforeAndAfter": "sha256:19ac354b23c7e37117f4ac7c3e4ca8e73b9202f9930bf391a14f77a1b33e3381"
+  },
+  "commands": [
+    "compare the task-owned prepared source with the workspace project source byte-for-byte",
+    "hash the prepared tree's exact COPYFILE_DISABLE=1 tar stream before and after deterministic, live-model, disabled-hook, and sandbox-denial runs",
+    "scan project-authored source and metadata for production OpenBox/OpenAI/Anthropic endpoints, production credential prefixes, and provider credential variable names; record the count only",
+    "go test -count=25 for ambient-production rejection, minimal child environment, runner-owned relay bearer, and closed Ollama client configuration",
+    "ps exact project/readiness process-pattern scan",
+    "lsof node TCP-listener scan",
+    "find exact run-owned /private/tmp name patterns",
+    "/opt/homebrew/bin/ollama ps immediately after the final matrix",
+    "go test -count=1 ./internal/assurance/... ./cmd/openbox",
+    "go vet ./...",
+    "git status --short",
+    "git diff --check"
+  ],
+  "source": {
+    "workspaceAndPreparedSourceMatch": true,
+    "preparedSnapshotUnchanged": true,
+    "productionCoordinateMatches": 0,
+    "scanScope": "project-authored source and metadata; package-lock and the pinned local SDK archive were excluded from the content scan",
+    "sourceMutatedDuringRuns": false
+  },
+  "networkAndCredentials": {
+    "childAuthority": "only the exact run-owned loopback receiver, poison, sink, model/relay, readiness-probe, and application targets entered the native envelope",
+    "ollamaAuthority": "the child received only the private relay URL and one-time test bearer; the parent retained literal 127.0.0.1:11434 plus version/tags/chat authority",
+    "unapprovedNetwork": "parent and child native probes denied unlisted loopback, direct external, and proxied external requests before project launch",
+    "ambientProductionCoordinates": "service and launch preflight reject known production credentials/endpoints before any listener or child starts; the exact rejection tests passed 25 repetitions",
+    "productionRequests": 0,
+    "productionCredentialsInChild": 0
+  },
+  "budgets": {
+    "completedDeterministicRuns": 5,
+    "completedLiveRuns": 5,
+    "liveInputTokensTotal": 1222,
+    "liveOutputTokensTotal": 362,
+    "liveUpstreamRequestsTotal": 25,
+    "liveCostUsdTotal": "0.00",
+    "receiverRecordsPerCompletedRun": 8,
+    "profileMaxRequestsPerRun": 256,
+    "projectTimeoutMs": 60000,
+    "profileMaxDurationMs": 120000,
+    "projectStdoutBytes": 65536,
+    "projectStderrBytes": 65536,
+    "profileMaxStdoutBytes": 1048576,
+    "profileMaxStderrBytes": 1048576,
+    "maxProcesses": 32,
+    "maxProcessesEnforced": false
+  },
+  "cleanup": {
+    "normalizedCleanupDigests": "one per completed deterministic and live run",
+    "projectProcessesRemaining": 0,
+    "nodeListenersRemaining": 0,
+    "runOwnedTempDirectoriesRemaining": 0,
+    "ollamaModelsLoadedAfterRun": 0,
+    "preparedInput": "retained only until final evidence validation, then moved to Trash"
+  },
+  "limits": [
+    "The accepted native tuple binds maxProcesses=32 but cannot hard-enforce that count. This remains an explicit unsupported tuple property and is not reported as a passing process ceiling.",
+    "The project-authored coordinate scan is not a scan of third-party dependency text. Runtime safety instead comes from the closed child environment, literal-loopback network envelope, and exact parent relay.",
+    "The pre-existing Ollama daemon is outside run-owned cleanup. keep_alive=0s was enforced, no model remained loaded, and only task-owned project processes/listeners/paths are claimed removed.",
+    "No production endpoint, production credential, external provider, BLOCK decision, audit-pack publication, or external control-plane write occurred."
+  ]
+}

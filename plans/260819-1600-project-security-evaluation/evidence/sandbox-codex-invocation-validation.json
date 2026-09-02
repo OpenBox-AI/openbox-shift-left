@@ -1,0 +1,48 @@
+{
+  "schema": "openbox.project-assurance.sandbox-codex-invocation-validation/v1",
+  "task": "SE-03-04",
+  "capturedAt": "2026-08-21T04:08:25Z",
+  "status": "passed_with_limits",
+  "toolchain": {
+    "go": "go1.26.7 darwin/arm64",
+    "os": "macOS 26.5.2",
+    "kernel": "Darwin 25.5.0"
+  },
+  "inputs": {
+    "codexGo": "sha256:a45ee0af386f9714a8fd08c09ec1683dedfdd1d3ddc229bc75f36ed77a205985",
+    "codexTestGo": "sha256:6f15343878e3c48a5938c93b76e98e326a009e8eb7340e0806a25154cffc19d4",
+    "identityGo": "sha256:b17a14ef1f7992e5146f535d13bd412e725cc9b42f292a9d868f39c7b6fba469",
+    "identityTestGo": "sha256:281197d16ef951822fe166a83dec45c07888bcd9f3d5d1429f3abc312b9ea874",
+    "driverGo": "sha256:2b8789da1829b0331f818ddc2d8412e0581101168434b0f62441d1436c47815e",
+    "adr": "sha256:ec9787824660cc9f0d0227a1ae10017cbe2e1794a3cdb3ddbfa81425b40ac3a0",
+    "qualificationEvidence": "sha256:97fb2f2de6fece96f2e1b5394757973df773485d8b807a968e89c98ac4cdf226"
+  },
+  "configurationDigest": "sha256:fac1bf5d34f918d89de95e68a6047dc2fcca35a945db3417b4fe4b44d6ef8cdc",
+  "commands": [
+    "cd cli && go test ./internal/assurance/sandbox -run 'TestBuildCodexStandaloneInvocation|TestEffectiveConfigurationDigestIsExact' -count=10",
+    "cd cli && go test ./internal/assurance/sandbox -count=1",
+    "cd cli && go test -race ./internal/assurance/sandbox -count=1",
+    "cd cli && go vet ./internal/assurance/sandbox",
+    "cd cli && go test ./internal/assurance/... -count=1",
+    "cd cli && GOOS=darwin GOARCH=arm64 go test -c -o TASK_TEMP/sandbox-darwin-arm64.test ./internal/assurance/sandbox",
+    "cd cli && GOOS=linux GOARCH=amd64 go test -c -o TASK_TEMP/sandbox-linux-amd64.test ./internal/assurance/sandbox",
+    "cd cli && GOOS=windows GOARCH=amd64 go test -c -o TASK_TEMP/sandbox-windows-amd64.exe ./internal/assurance/sandbox",
+    "gofmt -d cli/internal/assurance/sandbox/{codex,codex_test,identity,identity_test}.go",
+    "git status --short",
+    "git diff --check"
+  ],
+  "result": {
+    "argv": "the exact qualified Codex 0.148.0 standalone vector is fixed in order, includes the qualified permission profile and configuration flags, inserts the immutable snapshot as cwd, and appends the project payload only after --",
+    "shell": "payload metacharacters remain one argv element; no shell string, interpolation, execution, fallback, or driver switch exists",
+    "state": "CODEX_HOME is a freshly created empty 0700 directory represented by a private typed token; build rechecks resolved path, inode identity, mode, and emptiness, while the canonical empty-state digest is bound into effective configuration",
+    "scope": "only exact HTTP 127.0.0.1 or ::1 loopback targets, the qualified managed proxy mode, snapshot/private-temp writable roots, the exact executable tuple, and nonempty NUL-free payload arguments are accepted",
+    "tests": "focused count-10, package, race, vet, all-assurance, formatting, and Darwin/Linux/Windows compile-only checks passed",
+    "independentReview": "approved the final hashes and found no remaining high or medium correctness or authority blocker; no reviewer writes"
+  },
+  "limits": [
+    "This task constructs invocation data and did not execute Codex, a sandbox, a project command, SDK/provider code, network traffic, a model/API request, or an external control-plane operation.",
+    "State verification is point-in-time. SE-03-05 must use a run-owned temporary parent and recheck the same private state immediately before launching the probe; drift is a configuration mismatch and the payload must remain unlaunched.",
+    "Current public Codex documentation informed vector syntax only. Exact version-specific flags and restriction behavior remain bound to the executable qualification evidence rather than treated as live proof.",
+    "The qualified candidate remains Darwin/arm64 only; cross-platform commands are compile evidence, not runtime qualification or support claims."
+  ]
+}

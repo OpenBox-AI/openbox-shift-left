@@ -1,0 +1,17 @@
+
+[1m[36mCreated sandbox:[39m[0m [1mobx-eval-affe892e67[0m
+
+  [2m[0.0s][0m Requesting compute...
+[2m[0.0s][0m Sandbox allocated
+[2m[0.0s][0m Resolving image
+[2m[0.0s][0m Authenticating registry
+[2m[1.0s][0m Fetching image manifest
+[2m[1.3s][0m Pulling image ghcr.io/nvidia/openshell-community/sandboxes/base:latest
+[2m[1.3s][0m Using cached root disk
+[2m[1.3s][0m Image pulled (3.4 GB)
+[2m[1.3s][0m Preparing image cache
+[2m[1.3s][0m Exporting local image rootfs
+[2m[11.8s][0m Formatting root disk
+[2m[14.4s][0m Preparing rootfs
+[2m[16.0s][0m Preparing overlay disk
+[2m[16.3s][0m Waiting for VM supervisor

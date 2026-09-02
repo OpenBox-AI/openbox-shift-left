@@ -1,0 +1,72 @@
+{
+  "schema": "openbox.project-assurance.service-preflight-validation/v1",
+  "task": "SE-04-09",
+  "capturedAt": "2026-08-22T03:39:06Z",
+  "status": "passed_with_limits",
+  "toolchain": {
+    "go": "go1.27.0 darwin/arm64",
+    "platform": "macOS 26.5.2; Darwin 25.5.0 arm64"
+  },
+  "inputs": {
+    "preflightGo": "sha256:5a492eb7cfe5e2681e1eab97c119bf7991bba6fcfa31b5d733b203f2eacb89e2",
+    "preflightTestGo": "sha256:742bb877c5bef8ae3da645a1086df4f9c1be4a6af1eaf970de2b64766b37cbb1",
+    "sinkGo": "sha256:93156cccc37ba9faa66614eb6497cf20b56827639f7c78e0c452bf1a2a7604bd",
+    "sinkTestGo": "sha256:f61470efd09fb1686c7dec5655da30b6f95ca5dd2a89ed7829a303ca004970ea",
+    "servicePlanGo": "sha256:7f1d141384b0c9d5e34bbb1db03065082da72132875024cd3eaea18688c070b1",
+    "servicePlanTestGo": "sha256:38d84a7023ae33211261f23ea27b71b64b01dd18fd204ddf7feefffd970d307f",
+    "sdkEnvironmentGo": "sha256:3bd97f8641b43ea13577cd4c63a4b39374efc81b116b48bef0e1505b01bb9969",
+    "sdkEnvironmentTestGo": "sha256:016ca0f7b0a08b3b93302ba7f3661d5ef0cef4eb9d724d958384636602cb4d0c",
+    "sandboxRunGo": "sha256:ffff91bcd5cadb81f819fb78db9352fa9394346d2bc4acec3e40728ebdc156d1",
+    "runProfileGo": "sha256:2315e5ca175800b40914c951199734cbc85720a948ea079418eb1d7c92a511a8",
+    "sdkDescriptorGo": "sha256:31c77afaa80a1f4d117a60917675fc4d7e68c79dac3c6e106b1e3554143eb005",
+    "sdkValidationGo": "sha256:945fe0ded303d8437b96ecd565e17233861c942092ca0fbae5757e9b9a28f04f",
+    "decision": "sha256:4248bfdfb4a0680e977bcea21e597c6dcf0743adc21541d35fa5543b8527d7d9"
+  },
+  "priorEvidence": {
+    "receiverLifecycle": "sha256:f5ba93c93b8d53ba88b6c0a79c15a992258965f6ffa7d6ac0e9bcb089af0477c",
+    "receiverValidation": "sha256:24ef1b8056639821efa5e0d49ebc1d0c914c4a1e747a1ee70562019bf793fdfc",
+    "runProfileDriver": "sha256:f6569e9b66029f6f38033c7de72e428d7d3241df80abcc059fc718a87c0e597f",
+    "poisonFixture": "sha256:8cd0d2eb6d3c82f1f88416fc8741473e717cf7e8157bdf6391c83a84e28d585e",
+    "effectSink": "sha256:17d60e042f5b144b893d92054d8f3761c82a3568a282b3cf6825edef55332011",
+    "modelHarness": "sha256:4ebc8bd10bc44d223b6d4b2c1270fbb87bd3d904a1157ebc442a5ed622cb2db6",
+    "ollamaRelay": "sha256:7b8b9f01d197b1cb0d0164d0eb79abcfaba2860394a42824dccef6c19ddf442a",
+    "sandboxEnvironment": "sha256:ffd08bd9c73778905dee9c0785d5d2068c1af24399ef1df54af65943ff4bb481"
+  },
+  "commands": [
+    "cd cli && go test -timeout=90s -count=25 ./internal/assurance/runprofile ./internal/assurance/sdkdesc ./internal/assurance/fixture ./internal/assurance/sandbox",
+    "cd cli && go test -race -timeout=180s -count=5 ./internal/assurance/runprofile ./internal/assurance/sdkdesc ./internal/assurance/fixture ./internal/assurance/sandbox",
+    "cd cli && go test -timeout=60s -count=50 -run '^TestServicePreflightCancellationOwnsCleanup$' ./internal/assurance/fixture",
+    "cd cli && go test -timeout=180s ./internal/assurance/...",
+    "cd cli && go test -timeout=180s -count=1 ./...",
+    "cd cli && go test -timeout=90s -count=10 -run '^TestHookEndToEndSmoke$' ./cmd/openbox",
+    "cd cli && go vet ./...",
+    "cd cli && GOOS={darwin,linux,windows} GOARCH=amd64 go test -c -o TASK_TEMP/OUTPUT ./internal/assurance/{fixture,runprofile,sdkdesc,sandbox}",
+    "cd cli && find internal/assurance -name '*.go' -print0 | xargs -0 gofmt -d",
+    "git status --short",
+    "git diff --check"
+  ],
+  "result": {
+    "preflight": "unsafe or dynamic SDK initialization and nonempty ambient production coordinates reject before any listener starts; no environment value is returned on failure",
+    "services": "the receiver, sink, poison fixture, and deterministic model harness start only on ephemeral literal-loopback listeners and pass bounded readiness before child environment construction",
+    "overlay": "the sorted child environment contains only the closed profile bindings plus runner-owned receiver and optional relay credentials; omitted safe SDK controls are injected, exact safe literals remain absent, and duplicate names reject",
+    "budget": "one non-widenable context reserves cleanupGrace from maxDuration and is shared with every service and exposed for the later project launch/stimulus boundary",
+    "cleanup": "normal close, caller cancellation, every injected start/readiness/environment failure, and a real lost-listener readiness failure close every service and record only fixed lifecycle labels",
+    "retention": "environment and template values are defensively copied, never enter lifecycle receipts, and are cleared when cleanup completes",
+    "sinkAmendment": "the private effect route now contains a hyphenated fixed prefix so the generic redactor cannot join a random route segment to a loopback port as one apparent high-entropy token; credential screening and receipt semantics are unchanged",
+    "tests": "focused count-25, race count-5, cancellation count-50, all-assurance, full CLI, vet, format, and Darwin/Linux/Windows compile-only checks passed",
+    "transient": "the first full CLI replay exceeded the TestHookEndToEndSmoke two-second SessionStart threshold by 0.002201667 seconds; the exact smoke test then passed 10/10 in 1.312 seconds and the immediate full-suite replay passed",
+    "independentReview": "approved the final source hashes with no remaining high or medium correctness, security, or authority blocker and made no workspace or ledger writes"
+  },
+  "cleanup": {
+    "crossCompileOutputs": "the task-owned compile directory was moved to Trash",
+    "listeners": "tests observed all started service addresses unreachable after close, cancellation, and injected failure"
+  },
+  "limits": [
+    "This is the reusable service-preflight seam only. It does not add or execute a project command, sandbox launch, application process, SDK request, judgment, audit pack, or control-plane operation.",
+    "The application port and already-discovered SDK initialization are parent inputs. Phase 05 must bind them to the selected snapshot/entrypoint and exact compatible SDK tuple before launch.",
+    "Deterministic fixture readiness proves only that the package-owned listener accepts loopback connections; it deliberately does not consume one-shot fixture or model routes.",
+    "The Ollama branch was covered by current source tests and the separately bound live relay evidence; this preflight replay did not perform another inference.",
+    "The child overlay contains generated bearers until cleanup and is launch-only sensitive state. Persisted lifecycle and component receipts contain no bearer values.",
+    "Both accepted sandbox tuples remain rejected, so project-launch-dependent Phase 04 exit proof is not runnable and is not inferred from this component proof."
+  ]
+}

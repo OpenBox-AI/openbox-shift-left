@@ -1,0 +1,85 @@
+{
+  "schema": "openbox.project-assurance.provider-relay-validation/v1",
+  "task": "SE-04-08",
+  "capturedAt": "2026-08-22T03:17:52Z",
+  "status": "passed_with_limits",
+  "toolchain": {
+    "go": "go1.27.0 darwin/arm64",
+    "platform": "Darwin 25.5.0 arm64",
+    "ollamaServer": "0.31.1",
+    "ollamaClient": "0.32.15"
+  },
+  "inputs": {
+    "relayGo": "sha256:129031f1d6ccffb927a9e24a091528d5bd285b138a2243a01ee0c28d0595a8dd",
+    "relayTestGo": "sha256:2319afdd7791810f5db3d9c499907e86473bda9cd8fc272171f0c800e86b57d7",
+    "profileGo": "sha256:d94ae93d4034299c0aeb32f1afa27969b001b8539564382a3881bdd808a00f87",
+    "profileTestGo": "sha256:9851c98e5dd7263f306a15ba5a1e6c810a19b41589488f974441335aafc10c6f",
+    "decision": "sha256:4248bfdfb4a0680e977bcea21e597c6dcf0743adc21541d35fa5543b8527d7d9",
+    "runProfileSchema": "sha256:3db0334d7ef355d13cbd8957ed49f5f450dc8a10264f31b986778e7932f6035d",
+    "runProfileValidation": "sha256:77ad5b9cb1a90184d826e12aa2328ad670b95fd032b90f66e12472edb175a9cc",
+    "schemaInventoryValidation": "sha256:20af899c9337d453a7838ab7367fefa70f494ca9f9e6b7e696d8b6ad9f45fa91",
+    "model": "granite4.1:3b",
+    "modelDigest": "sha256:6fd349357287c7ffc9e38189a93b48ea175d24fc566b38f09cfc564fb7f303eb",
+    "modelSizeBytes": 2099520281,
+    "modelFormat": "gguf",
+    "modelFamily": "granite",
+    "modelParameters": "3.4B",
+    "modelQuantization": "Q4_K_M",
+    "modelCapabilities": [
+      "completion",
+      "tools"
+    ]
+  },
+  "primaryDocumentation": [
+    "https://github.com/ollama/ollama/blob/main/docs/api.md",
+    "https://github.com/ollama/ollama/blob/main/api/types.go",
+    "https://github.com/ollama/ollama/blob/main/README.md"
+  ],
+  "commands": [
+    "/opt/homebrew/bin/ollama --version",
+    "curl --fail --silent --show-error --noproxy '*' --max-time 5 http://127.0.0.1:11434/api/version | jq -c .",
+    "curl --fail --silent --show-error --noproxy '*' --max-time 5 http://127.0.0.1:11434/api/tags | jq -c '.models[] | select(.name == \"granite4.1:3b\") | {name,model,digest,size,details,capabilities}'",
+    "cd cli && OPENBOX_OLLAMA_QUALIFICATION=1 go test -timeout=90s -count=1 -run '^TestOllamaRelayLiveQualification$' -v ./internal/assurance/fixture",
+    "cd cli && /opt/homebrew/bin/ollama ps",
+    "cd cli && go test -timeout=180s -count=25 ./internal/assurance/fixture ./internal/assurance/runprofile",
+    "cd cli && go test -timeout=180s -race -count=5 ./internal/assurance/fixture ./internal/assurance/runprofile",
+    "cd cli && go test -timeout=180s ./internal/assurance/...",
+    "cd cli && go test -timeout=180s ./...",
+    "cd cli && go vet ./...",
+    "cd cli && GOOS={darwin,linux,windows} GOARCH=amd64 go test -c TASK_TEMP ./internal/assurance/{fixture,runprofile}",
+    "gofmt -d cli/internal/assurance/fixture/relay.go cli/internal/assurance/fixture/relay_test.go cli/internal/assurance/runprofile/profile.go cli/internal/assurance/runprofile/profile_test.go",
+    "git status --short",
+    "git diff --check"
+  ],
+  "result": {
+    "descriptor": "the package-owned descriptor pins Ollama server 0.31.1, granite4.1:3b, the full model digest, GGUF Granite 3.4B Q4_K_M details, http://127.0.0.1:11434, GET /api/version, GET /api/tags, POST /api/chat, no redirects, zero monetary cost, and exact child URL/bearer environment names",
+    "authority": "the child receives only a generated one-time relay bearer and a random literal-loopback relay URL; it cannot select an upstream destination, model, path, method, tool, streaming mode, persistence, or inspection route",
+    "request": "the relay accepts one canonical fixed synthetic prompt and one exact recording-tool definition; it rejects arbitrary prompts, extra messages, images, unknown fields, secrets, streaming, model persistence, and output widening before POST /api/chat",
+    "network": "the production client disables ambient proxies and retries, dials only tcp 127.0.0.1:11434, rejects redirects, bounds headers and bodies, and shares the request deadline across exact preflight, inference, and postflight calls",
+    "tuple": "GET /api/version and GET /api/tags observed server 0.31.1 and exactly one matching granite4.1:3b entry with the full digest, GGUF Granite 3.4B Q4_K_M details, and completion/tools capabilities before and after inference",
+    "modelObservation": "the exact local exchange returned one recording-tool selection with the synthetic marker and safe loopback sink, no assistant text, prompt_eval_count 218, and eval_count 46",
+    "receipt": {
+      "outcome": "completed",
+      "tupleObservation": "preflight_and_postflight",
+      "upstreamRequests": 5,
+      "requestBytes": 603,
+      "requestDigest": "sha256:43e01300eae42eb5fc2aa1fc6b95763467324df7c7d6c4d06c8cd9e3f8fef984",
+      "responseBytes": 485,
+      "responseDigest": "sha256:6f66ccfceef0cf5b6f5663fdc208963ba3077df64c08aa8bf52a5617c591f915",
+      "inputTokens": 218,
+      "outputTokens": 46,
+      "costUsd": "0.00",
+      "costBasis": "local_zero_cost"
+    },
+    "tests": "tuple drift, generic-proxy inputs, credentials, wrong/replayed bearer, concurrency, admission overflow, proxy environment, redirect, timeout, oversized content, response shape, token bounds, post-use drift and unavailable-state truth, count-25, race count-5, full assurance, full CLI, vet, format, and Darwin/Linux/Windows compile-only checks passed",
+    "cleanup": "the request used keep_alive=0s and the immediate ollama ps observation listed no loaded model"
+  },
+  "limits": [
+    "The owner replaced the previously planned paid external-provider qualification with this local Ollama qualification. No provider credential, paid API, external endpoint, or external control plane was accessed.",
+    "The observed local Ollama server was pre-existing and is not run-owned; the relay unloads the model but does not stop or mutate that server.",
+    "The Ollama client printed a 0.32.15 client / 0.31.1 server version warning. The relay uses the native HTTP API and binds the observed server version; it does not execute the client CLI.",
+    "The Context7 documentation sources are current official Ollama sources, not an independently archived 0.31.1 documentation snapshot; executable qualification relies on the exact observed wire tuple and fail-closed parser.",
+    "The request byte length is used only as a conservative pre-inference upper bound before the server reports prompt_eval_count; the recorded input token count comes from the validated Ollama response.",
+    "This proves one exact local model exchange and the relay's fail-closed mechanics. It does not prove Mastra project integration, SDK interception, sandbox containment, security efficacy, ALLOW or BLOCK behavior, or general model quality."
+  ]
+}

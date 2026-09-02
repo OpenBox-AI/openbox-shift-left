@@ -1,0 +1,8 @@
+[1787719553.571] [gateway] [INFO ] [openshell_server::grpc::sandbox] minted sandbox JWT
+[1787719553.578] [gateway] [INFO ] [openshell_server::grpc::sandbox] CreateSandbox request completed successfully
+[1787719553.841] [gateway] [INFO ] [openshell_server::grpc::policy] GetSandboxConfig served from spec (backfilled version 1)
+[1787719571.772] [sandbox] [INFO ] [openshell_sandbox] Starting sandbox command=["/usr/local/bin/node", "/app/src/index.mjs"]
+[1787719571.773] [sandbox] [INFO ] [openshell_sandbox] Fetching sandbox policy via gRPC endpoint=https://host.openshell.internal:17670/ sandbox_id=b658fe36-d2e3-4ef7-843d-5da4c64a62f7
+[1787719571.718] [gateway] [INFO ] [openshell_server::grpc::policy] GetSandboxProviderEnvironment request completed successfully
+[1787719571.858] [gateway] [INFO ] [openshell_server::grpc::policy] ReportPolicyStatus: sandbox reported policy load result
+[1787719571.861] [gateway] [INFO ] [openshell_server::supervisor_session] supervisor session: accepted

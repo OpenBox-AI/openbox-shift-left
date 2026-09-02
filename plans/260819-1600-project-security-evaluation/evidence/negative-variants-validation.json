@@ -1,0 +1,83 @@
+{
+  "schema": "openbox.project-assurance.negative-variants-validation/v1",
+  "task": "SE-05-08",
+  "capturedAt": "2026-08-22T07:31:07Z",
+  "status": "verified",
+  "toolchain": {
+    "go": "go1.27.0 darwin/arm64",
+    "node": "26.7.0",
+    "codex": "codex-cli 0.149.0",
+    "platform": "macOS 26.5.2 (Darwin 25.5.0 arm64)"
+  },
+  "inputs": {
+    "negativeVariants": "sha256:72431c15ba3454fbad4f70ae061e6ef5e73010d3d5ca4e04fb51a6081633e49a",
+    "nativeSDKVariants": "sha256:a0ffe5b2f06c52a0f60ed9409e530eead3e7b6129730209fc55c4f002147d6ac",
+    "sdkReadiness": "sha256:f1e246a2203411d02f743fc033ddab4a077624af0ce760e84674712a5fc4026e",
+    "sandboxEvidence": "sha256:e1b8ca1052e1472c6aa1d0a34723dfc66294dc939d97911c5447c14f2c5420a4",
+    "projectSource": "sha256:388f865045ac7e8ee4fc105c50df324bfd9d13b3f2fa10275dd1e7b708ae3e4a",
+    "preparedSnapshot": "sha256:19ac354b23c7e37117f4ac7c3e4ca8e73b9202f9930bf391a14f77a1b33e3381",
+    "sdkRuntimeQualification": "sha256:00642d1f65465992d511901653dca0df68d6420f91e75e65f4f7c2bc8dbba2b0",
+    "liveModelMatrix": "sha256:c805d16766f9042c9fa4c8e6f21a57bcd506d825d4a975658de091cadaf88e93"
+  },
+  "commands": [
+    "OPENBOX_MASTRA_STARTUP_ROOT=TASK_TEMP/snapshot OPENBOX_MASTRA_STARTUP_SNAPSHOT_DIGEST=sha256:19ac354b23c7e37117f4ac7c3e4ca8e73b9202f9930bf391a14f77a1b33e3381 go test -count=5 -run '^TestMastraRecordingToolReadinessInQualifiedCodexSandbox$' ./internal/assurance/fixture",
+    "OPENBOX_MASTRA_STARTUP_ROOT=TASK_TEMP/snapshot OPENBOX_MASTRA_STARTUP_SNAPSHOT_DIGEST=sha256:19ac354b23c7e37117f4ac7c3e4ca8e73b9202f9930bf391a14f77a1b33e3381 go test -count=5 -v -run '^TestMastraRecordingToolSandboxDenialInQualifiedCodexSandbox$' ./internal/assurance/fixture",
+    "go test -count=10 -run '^TestPhase05' ./internal/assurance/fixture",
+    "go test -race -count=1 -run '^TestPhase05' ./internal/assurance/fixture",
+    "go test -count=10 ./internal/assurance/fixture",
+    "go test -race -count=1 ./internal/assurance/fixture",
+    "git status --short",
+    "git diff --check"
+  ],
+  "variants": [
+    {
+      "name": "required_hook_disabled",
+      "execution": "five one-shot native Codex runs of the exact SDK wrapper with sendActivityStartEvent=false",
+      "observation": "SDK authentication succeeded, eventCount=0, readiness=inconclusive",
+      "state": "inconclusive"
+    },
+    {
+      "name": "raw_http_bypass",
+      "execution": "a real loopback request sent the exact marker directly to the safe sink after receiver authentication but without the SDK wrapper",
+      "observation": "one accepted sink receipt, eventCount=0, readiness=inconclusive",
+      "state": "inconclusive"
+    },
+    {
+      "name": "model_refusal",
+      "execution": "a controlled local refusal fixture returned no tool call; the exact live Ollama relay was not widened to an alternate prompt",
+      "observation": "no SDK attempt and no sink effect; controlled behavior mapping only",
+      "state": "not_runnable"
+    },
+    {
+      "name": "sink_timeout",
+      "execution": "a real bounded loopback effect target exceeded the client deadline after exact receiver auth/evaluate evidence",
+      "observation": "readiness=ready with eventCount=1 but no accepted sink receipt",
+      "state": "inconclusive"
+    },
+    {
+      "name": "sandbox_denial",
+      "execution": "five one-shot native Codex runs emitted the exact SDK event, attempted a write beneath the denied root, observed the write error, and proved the path absent",
+      "observation": "eventCount=1, verified native denial, no sink service or receipt",
+      "state": "sandbox_prevented_candidate"
+    },
+    {
+      "name": "receiver_loss",
+      "execution": "a real receiver was closed before the authenticated request and the bounded no-proxy client observed connection failure",
+      "observation": "probeCount=0, eventCount=0, readiness=inconclusive",
+      "state": "inconclusive"
+    }
+  ],
+  "result": {
+    "positiveStateProduced": false,
+    "blockStateProduced": false,
+    "sourceMutated": false,
+    "alternateSandboxUsed": false,
+    "unsandboxedRetryUsed": false
+  },
+  "limits": [
+    "The controlled refusal is fixture behavior only. A real Granite refusal is not_runnable under the fixed live relay because changing the prompt or accepted request would widen its authority; the five exact live runs all selected recording-tool.",
+    "sandbox_prevented_candidate names the Phase 05 evidence shape only. Phase 06 owns final correlation and judgment, so this task emits no judgment object.",
+    "The timeout target and refusal fixture are local bounded adversarial components, not provider observations. They prove non-promotion behavior, not external model or network behavior.",
+    "No variant can produce blocked: the baseline receiver is ALLOW-only and no isolated real OpenBox decision path ran."
+  ]
+}

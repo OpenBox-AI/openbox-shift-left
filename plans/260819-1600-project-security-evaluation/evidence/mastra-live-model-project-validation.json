@@ -1,0 +1,76 @@
+{
+  "schema": "openbox.project-assurance.mastra-live-model-project-validation/v1",
+  "task": "SE-05-03",
+  "capturedAt": "2026-08-22T05:53:22Z",
+  "status": "verified",
+  "toolchain": {
+    "node": "26.7.0",
+    "npm": "11.19.0",
+    "typescript": "5.9.2",
+    "go": "go1.27.0 darwin/arm64",
+    "ollamaServer": "0.31.1",
+    "ollamaClient": "0.32.15"
+  },
+  "inputs": {
+    "application": "sha256:2006574579373f5e94e73a2da9b3f96f68812d748f7dc8211e434d5cd3c2d2bd",
+    "liveProfile": "sha256:28627a29c047bf4bcab9b77f4233da5f24b5921a4c37ca88bb2b17ef4cb9f941",
+    "packageJson": "sha256:8e19b240b446999057edeba9a67a85dfd0b64dd86140895925944e37b522d226",
+    "packageLock": "sha256:9924ea8ab692ce843bb3908d1ceca39c7c50e4bc6ffb3b930e0f38c7e8dce1e5",
+    "sdkArchive": "sha256:c6474a1fb58826da23a346d2a5f3967007e537062200632521f032f924369748",
+    "startupTest": "sha256:f79bb85d79f35d6ba83ec9a237ba3a161c9b54d5922f0588772d66597d942997",
+    "servicePreflight": "sha256:8c5ec8b14d13b0d9da5e97f7ac323ac5bd5a02cf8399038ae828ba897e64f00a",
+    "relay": "sha256:129031f1d6ccffb927a9e24a091528d5bd285b138a2243a01ee0c28d0595a8dd",
+    "sandboxEnvironment": "sha256:43fd44a431f871f5c55b9b69c698c29e35da90f6001f5172c8dee9b939add562",
+    "relayQualification": "sha256:7b8b9f01d197b1cb0d0164d0eb79abcfaba2860394a42824dccef6c19ddf442a",
+    "sandboxQualification": "sha256:94ce65e6997b1a5291b6c84e24e35a6f3b3db28dfe5fa04845119516640e15bf",
+    "decision": "sha256:afe5ab180c86b9bd15f2f3a5eddef37581e9f2a2cf0344b2992f38a6bf9167fd"
+  },
+  "modelTuple": {
+    "descriptor": "ollama.chat.granite4.1-3b.6fd349357287",
+    "server": "0.31.1",
+    "model": "granite4.1:3b",
+    "digest": "sha256:6fd349357287c7ffc9e38189a93b48ea175d24fc566b38f09cfc564fb7f303eb",
+    "format": "gguf",
+    "family": "granite",
+    "parameters": "3.4B",
+    "quantization": "Q4_K_M",
+    "capabilities": [
+      "completion",
+      "tools"
+    ]
+  },
+  "commands": [
+    "prepare a fresh task-owned project copy with npm ci --ignore-scripts --no-audit --no-fund",
+    "npm run check and npm run typecheck against the fresh locked install",
+    "OPENBOX_OLLAMA_QUALIFICATION=1 OPENBOX_MASTRA_STARTUP_ROOT=TASK_TEMP/snapshot OPENBOX_MASTRA_STARTUP_SNAPSHOT_DIGEST=sha256:5de5e12ba6a94a083a7c904288fbfd6ead6e086181b7c40b99fea4f925db1fc4 go test -count=5 -run '^TestMastraLiveModelVariantStartsInQualifiedCodexSandbox$' ./internal/assurance/fixture",
+    "/opt/homebrew/bin/ollama --version and /opt/homebrew/bin/ollama ps",
+    "curl --noproxy '*' exact literal-loopback /api/version and /api/tags tuple checks",
+    "repeat the prepared-tree tar-stream SHA-256 after sandboxed startup and require byte identity",
+    "git status --short",
+    "git diff --check"
+  ],
+  "result": {
+    "projectShape": "one pinned application, SDK archive, package lock, agent graph, and recording-tool serves both deterministic and live-model profiles; no duplicate project or engine was added",
+    "profile": "the live profile passed the closed v1 Go parser and selects only the compiled local Ollama descriptor with zero monetary cost",
+    "childAuthority": "the sandboxed project received a random loopback relay URL and one-time obx_relay bearer; no 127.0.0.1:11434 destination, upstream inspection route, external provider credential, or caller-selected model entered the child environment",
+    "relayAuthority": "the parent relay observed exact server/model identity before exposing its child listener and retains the sole upstream URL, route, method, model, tool, prompt, token, and no-redirect authority",
+    "application": "the same Mastra language-model seam builds the relay's closed native Ollama tool request and maps only one validated recording-tool response into the existing SDK-wrapped tool path",
+    "startup": "five fresh service/sandbox/project repetitions reached SDK authentication and GET /health readiness; the relay received zero chat requests during startup",
+    "preparedSnapshotDigest": "sha256:5de5e12ba6a94a083a7c904288fbfd6ead6e086181b7c40b99fea4f925db1fc4",
+    "preparedSnapshotUnchanged": true,
+    "modelInferenceExecuted": false,
+    "stimulusSent": false,
+    "sinkInvoked": false
+  },
+  "cleanup": {
+    "processes": "each sandboxed Node process group terminated after readiness",
+    "listeners": "receiver, fixture, sink, and relay listeners closed after each repetition",
+    "ollama": "ollama ps was empty; startup performed identity inspection only and did not load the model",
+    "preparedProject": "before/after prepared-tree digests matched; the task directory is moved to Trash after final verification"
+  },
+  "limits": [
+    "This task proves the live variant's code, profile, relay confinement, exact tuple preflight, SDK startup, and readiness. It deliberately does not claim a model inference or security outcome.",
+    "The first end-to-end local-model stimulus and effect correlation belongs to SE-05-06/SE-05-07 after the SE-05-04 orchestration and SE-05-05 SDK readiness gates exist.",
+    "The local Ollama server is pre-existing and not run-owned; no external provider, paid API, provider credential, production OpenBox coordinate, Docker, or external control plane was used."
+  ]
+}

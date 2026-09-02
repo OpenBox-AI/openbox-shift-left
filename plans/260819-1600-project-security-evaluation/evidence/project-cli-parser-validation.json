@@ -1,0 +1,58 @@
+{
+  "schema": "openbox.project-assurance.project-cli-parser-validation/v1",
+  "task": "SE-02-01",
+  "capturedAt": "2026-08-20T13:15:43Z",
+  "status": "passed_with_limits",
+  "toolchain": {
+    "go": "go1.26.7 darwin/arm64",
+    "os": "macOS 26.5.2",
+    "kernel": "Darwin 25.5.0"
+  },
+  "inputs": {
+    "mainGo": "sha256:8e39367de573f7b4fb16b52eb5630f916267e09b9694fde89890fc3e4e1b778d",
+    "projectGo": "sha256:b6722447134b2b1f784071bb9a19501d21878d54a9203879e2f3ec12f3b8ceea",
+    "projectInspectGo": "sha256:f7fc7ecd6e2bf1198bf29d588a571a4ff4cd347ef42602fd56a9fdea65c31c02",
+    "projectTestGo": "sha256:62554f5538240002554a83aee813c31b1ac041a8c5880f8c7ee23e5501bcb662",
+    "projectInspectTestGo": "sha256:fe4ed0081f4d36be40b8930c235e4c92c4da3a188e8eb57958a6b9769f72db27"
+  },
+  "commands": [
+    "cd cli && go test ./cmd/openbox -run 'TestProjectRouting|TestParseProjectInspectArgs|TestProjectInspectHelp' -count=1",
+    "cd cli && go run ./cmd/openbox project inspect fixture --output",
+    "cd cli && go test ./cmd/openbox -count=1",
+    "cd cli && go test -race ./cmd/openbox",
+    "cd cli && go vet ./cmd/openbox",
+    "cd cli && go test ./...",
+    "cd cli && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go test -run '^$' -exec=/usr/bin/true ./cmd/openbox",
+    "cd cli && CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go test -run '^$' -exec=/usr/bin/true ./cmd/openbox",
+    "cd cli && go mod tidy -diff",
+    "cd cli && gofmt -d cmd/openbox/project.go cmd/openbox/project_inspect.go cmd/openbox/project_test.go cmd/openbox/project_inspect_test.go cmd/openbox/main.go",
+    "git status --short -- cli/cmd/openbox",
+    "git diff --check"
+  ],
+  "result": {
+    "focusedRoutingAndParser": "passed",
+    "fullCommandPackage": "passed",
+    "race": "passed",
+    "vet": "passed",
+    "fullCliModule": "passed",
+    "linuxWindowsCompilation": "passed",
+    "format": "gofmt diff empty",
+    "whitespace": "git diff --check empty",
+    "documentedSurface": "openbox project inspect [path] [--output DIR]",
+    "parser": "defaults path to '.', accepts --output before or after the path and with equals syntax, preserves a dash-prefixed path after --, and rejects empty path/output, extra positionals, missing flag values before argument reordering, and unknown flags",
+    "pathBeforeMissingOutput": "expected exit 1 with flag-needs-an-argument usage; it did not reach the inert implementation error",
+    "helpPrecedence": "an earlier -h or --help exits zero even when followed by a malformed flag, matching the shared parseFlags contract",
+    "help": "project help and inspect flag help exit zero on the existing stderr usage channel; missing/unknown subcommands exit one",
+    "inertBoundary": "a valid inspect parse exits one with an explicit unavailable message; it performs no discovery, filesystem write, import, execution, package installation, model call, or network call",
+    "futureRoutes": "test, report, and propose are not advertised or aliased",
+    "moduleGraph": "go mod tidy -diff exits nonzero only for the pre-existing decision v0.0.0 direct-to-indirect annotation drift; no module bytes were rewritten",
+    "scope": "only the existing CLI router, two project command files, and their tests changed; no internal inspector, module, endpoint, table, service, provider hook, hookflow path, SDK scan mode, or compatibility shim was added",
+    "independentReadOnlyReview": "approved final hashes with no remaining SE-02-01 blocker; focused/full/race/vet and live missing-value, help-precedence, and dash-path probes passed; no reviewer writes"
+  },
+  "limits": [
+    "This task proves routing and argument semantics only. It intentionally returns an unavailable error after a valid parse until SE-02-02 through SE-02-07 supply passive inspection and artifact production.",
+    "Path and output strings are not resolved, opened, or safety-validated by this parser task; the Phase 01 snapshot and run-workspace boundaries apply when execution is wired.",
+    "Linux and Windows results are compile evidence only.",
+    "No SDK, framework provider, project source, sandbox, model, receiver/Core, production credential or endpoint, external control plane, paid path, or live security evaluation ran."
+  ]
+}

@@ -1,0 +1,58 @@
+{
+  "schema": "openbox.project-assurance.sandbox-cleanup-validation/v1",
+  "task": "SE-03-09",
+  "capturedAt": "2026-08-21T05:38:15Z",
+  "status": "passed_with_limits",
+  "toolchain": {
+    "go": "go1.26.7 darwin/arm64",
+    "os": "macOS 26.5.2",
+    "kernel": "Darwin 25.5.0"
+  },
+  "inputs": {
+    "cleanupGo": "sha256:a29483fb0d56aab2ec39d74c7a8276a7dd96a538421da0a1170f3edd44978fac",
+    "cleanupTestGo": "sha256:c81fe15e759ee81885a0a7aa487762aa2dcc2fd5b5087c493ad813bf2740a3a6",
+    "driverGo": "sha256:dc42b096e8db96b34a2f21a7d78272938d5da0cc6eb21b6e4c7cdd5e289f7597",
+    "codexGo": "sha256:7edbbd957f586011dc147b8f703394447042f795a73e2d14c83afb678c5fd7ff",
+    "codexTestGo": "sha256:35b07cfdb8dc2c84698ff2e0f8171dbdec3ecc13f40eb34862989a06f4c1477d",
+    "probeGo": "sha256:c60762ca5614edd67f227392d6cf50f3411222b09a604eb3ab785a1054df5227",
+    "probeTestGo": "sha256:dd944cb7c164f045344f8ef38ef2bb5e1eef52380931a1686a1957c5af857fc0",
+    "runGo": "sha256:c4e82377504acbbdd23679ddeb322d6b7c7d0889f4ad046f90e72af68f0ec8de",
+    "runTestGo": "sha256:17aed2a48a70231668abc5ade579f8143787ec6b06471e60d545474655894af1",
+    "probeProcessGo": "sha256:a03c6e34ac98cedda539590b6dff33f98e38cf4b30f5db37277ad63f8a358f27",
+    "probeProcessTestGo": "sha256:ed85a2df0a9a50ea34af1414df1b710b4ead411523894767ad1869883d96c635",
+    "runUnixTestGo": "sha256:3442f3368b32b2179ec13c62edfb00e26d00421717d67209f01a66628e004265",
+    "adr": "sha256:ece092b5c22eb19aa1f2c81875ea24bf301b8e10b9768c116ca6974358f084d6"
+  },
+  "commands": [
+    "cd cli && go test ./internal/assurance/sandbox -count=25",
+    "cd cli && go test -race ./internal/assurance/sandbox -count=1",
+    "cd cli && go test ./internal/assurance/... -count=1",
+    "cd cli && go test ./... -count=1",
+    "cd cli && go vet ./...",
+    "cd cli && GOOS=darwin GOARCH=arm64 go test -c -o TASK_TEMP/darwin.test ./internal/assurance/sandbox",
+    "cd cli && GOOS=linux GOARCH=amd64 go test -c -o TASK_TEMP/linux.test ./internal/assurance/sandbox",
+    "cd cli && GOOS=windows GOARCH=amd64 go test -c -o TASK_TEMP/windows.test.exe ./internal/assurance/sandbox",
+    "gofmt -d cli/internal/assurance/sandbox/{driver,codex,codex_test,probe,probe_test,run,run_test,probe_process,probe_process_test,run_unix_test,cleanup,cleanup_test}.go",
+    "git status --short",
+    "git diff --check"
+  ],
+  "result": {
+    "resourceBinding": "the successful probe privately binds the exact loopback socket tuple, sole writable TMPDIR, and parent/child outside sentinels; the exact isolated CODEX_HOME is appended to the run result",
+    "writableSurface": "the concrete Codex MVP rejects more than one writable root and requires that sole root to equal the closed TMPDIR environment value",
+    "processes": "the bounded launcher kills the owned process group on every exit and records absent_after_exit only after ESRCH; a parent that abruptly exits 99 after spawning a child leaves no orphan",
+    "sockets": "cleanup verifies each exact loopback TCP address is available, then closes the verification listener",
+    "paths": "cleanup verifies the bound TMPDIR, CODEX_HOME, and randomized parent/child outside-sentinel paths are absent without deleting caller-selected paths",
+    "evidence": "canonical evidence binds the run ID, exact socket tuple, ordered digests of run-owned paths, historical process-group result, and remaining-resource counts; raw local paths are absent",
+    "projection": "only private clean, run-bound, resource-bound evidence can project cleanup: verified; zero, dirty, mutated-count, unbound, or cross-binding evidence cannot pass",
+    "tests": "sandbox count-25, race, all-assurance, full CLI, vet, format, and Darwin/Linux/Windows compile-only checks passed",
+    "independentReview": "approved the read-only verifier, exact resource binding, private pass provenance, abrupt-parent orphan proof, and truthful absent-after-exit semantics; no reviewer writes"
+  },
+  "limits": [
+    "This task proves local Go subprocess, loopback, and filesystem behavior. It did not execute Codex, Seatbelt, a project command, the Mastra SDK, a receiver, a provider/model request, production coordinates, or an external control-plane operation.",
+    "Socket and path checks are bounded point-in-time observations, not atomic guarantees against later same-UID recreation.",
+    "Process-group absence is the launcher's bounded observation immediately after process exit; cleanup evidence does not claim a later process rescan.",
+    "The crash regression covers an abruptly exiting sandboxed parent and its orphan child. It does not claim recovery if the orchestrator itself dies.",
+    "Resource owners close sockets and remove run-owned paths before verification. The verifier performs no destructive deletion.",
+    "Maximum process-count enforcement remains a separate unresolved Phase 03 support/exit gate."
+  ]
+}

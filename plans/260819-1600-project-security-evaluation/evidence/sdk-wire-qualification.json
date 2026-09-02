@@ -1,0 +1,233 @@
+{
+  "schema": "openbox.project-assurance.sdk-wire-qualification/v1",
+  "task_id": "SE-00-04",
+  "candidate": {
+    "lock": "sdk-tuple.lock.json",
+    "lock_sha256": "9e96b3b35b827870c23915d944e38155a5d0318ed96a6d9d370a0433a55dd34d",
+    "framework_sdk": "openbox-langgraph-sdk-python==1.0.0",
+    "framework_sdk_commit": "a24ccc78fcc431510ae4a37749ad10cf26e5e71a",
+    "base_sdk": "openbox-sdk-python==1.2.0",
+    "base_sdk_commit": "1f0429d6f0a8025bb9fbd65cff2a401dd730c6ff",
+    "langgraph": "1.2.11",
+    "langchain_core": "1.5.6",
+    "python": "3.12.9",
+    "platform": "macOS 26.5.2 arm64"
+  },
+  "configuration": {
+    "public_factory": "create_openbox_graph_handler",
+    "required_explicit_arguments": [
+      "api_url",
+      "api_key"
+    ],
+    "optional_identity_arguments": [
+      "agent_did",
+      "agent_private_key"
+    ],
+    "identity_environment_fallback": [
+      "OPENBOX_AGENT_DID",
+      "OPENBOX_AGENT_PRIVATE_KEY"
+    ],
+    "base_runtime_resolution": {
+      "order": [
+        "explicit factory/global config",
+        "OPENBOX_LANGGRAPH_*",
+        "OPENBOX_*",
+        "defaults"
+      ],
+      "fields": [
+        "API_URL",
+        "API_KEY",
+        "TIMEOUT_SECONDS",
+        "ON_API_ERROR",
+        "AGENT_NAME",
+        "AGENT_DID",
+        "AGENT_PRIVATE_KEY"
+      ]
+    },
+    "error_policy": {
+      "key": "on_api_error",
+      "values": [
+        "fail_open",
+        "fail_closed"
+      ],
+      "default": "fail_open",
+      "qualification_value": "fail_closed"
+    },
+    "instrumentation": {
+      "use_core_instrumentation": true,
+      "false_behavior": "OpenBoxConfigError; no legacy fallback",
+      "base_defaults": {
+        "http": true,
+        "database": true,
+        "file": true,
+        "function": true,
+        "llm_provider_hooks": false,
+        "preflight": true,
+        "completed_telemetry": true
+      },
+      "qualification_shape": {
+        "handler_runtime": "owned",
+        "resolve_subagent_name": null,
+        "strict_activity_context": false,
+        "strict_activity_context_limit": "GovernanceConfig supports this field, but OpenBoxLangGraphHandlerOptions does not expose it and the 1.0.0 factory silently drops unknown handler kwargs. This qualification therefore covers the normal owned-runtime path only."
+      }
+    },
+    "receiver_subset_observed": [
+      "GET /api/v1/auth/validate",
+      "POST /api/v1/governance/evaluate"
+    ],
+    "source_refs": [
+      "openbox-langgraph-sdk-python@a24ccc7:openbox_langgraph/langgraph_handler.py:1973-2033",
+      "openbox-langgraph-sdk-python@a24ccc7:openbox_langgraph/config.py:296-355",
+      "openbox-langgraph-sdk-python@a24ccc7:openbox_langgraph/core_runtime.py:51-56,67-131",
+      "openbox-sdk-python@1f0429d:openbox_core/config.py:44-58,80-145,150-235",
+      "openbox-sdk-python@1f0429d:openbox_core/client.py:1-18,46-48,97-120,168-188"
+    ],
+    "clarification": "OPENBOX_URL is a README/application convention passed into the required api_url argument; it is not a base-SDK environment key."
+  },
+  "pre_effect_contract": {
+    "semantic_event": "ActivityStarted",
+    "activity_type": "recording_tool",
+    "endpoint": "POST /api/v1/governance/evaluate",
+    "observed_before_effect": true,
+    "mock_block_stopped_effect": true,
+    "claim_limit": "The mock response verifies SDK pre-effect application only. It is not an OpenBox blocked outcome or real policy proof."
+  },
+  "observations": {
+    "allow": {
+      "captured_at": "2026-08-19T11:32:31Z",
+      "command": "env -i PATH=/usr/bin:/bin PYTHONHASHSEED=0 /tmp/openbox-se00-04-langgraph.EMSuBg/.venv/bin/python plans/260819-1600-project-security-evaluation/evidence/probes/sdk_wire_probe.py --verdict allow | /usr/bin/jq '{classification,requests:[.requests[] | select(.path == \"/api/v1/auth/validate\" or (.event_type == \"ActivityStarted\" and .activity_type == \"recording_tool\")) | (.headers |= del(.content_type,.signature_sha256)) | if .event_type == null then del(.event_type,.activity_type,.effect_count_at_receive) else . end],tool_effects,observed_exception,non_loopback_attempts}'",
+      "exit_status": 0,
+      "result_sha256": "926c4d1825f58e0fbf192153b3654888baf611573a2293eeef3217540d2fe7cc",
+      "result": {
+        "classification": "baseline_allow_wire_observed",
+        "requests": [
+          {
+            "method": "GET",
+            "path": "/api/v1/auth/validate",
+            "status": 200,
+            "request_body_base64": "",
+            "request_body_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "response_body_base64": "eyJ2YWxpZCI6dHJ1ZX0=",
+            "response_body_sha256": "8daf09a6fc31937457dd77e9c25ce4b21349d605b561a8c5d557841bf964c9a0",
+            "headers": {
+              "authorization": "Bearer obx_test_[REDACTED]",
+              "sdk_version": "openbox-langgraph-python-v1.0.0",
+              "agent_did": "did:aip:12345678-1234-5678-1234-567812345678",
+              "body_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+              "signature_present": true
+            }
+          },
+          {
+            "method": "POST",
+            "path": "/api/v1/governance/evaluate",
+            "status": 200,
+            "event_type": "ActivityStarted",
+            "activity_type": "recording_tool",
+            "effect_count_at_receive": 0,
+            "request_body_base64": "eyJzb3VyY2UiOiJ3b3JrZmxvdy10ZWxlbWV0cnkiLCJldmVudF90eXBlIjoiQWN0aXZpdHlTdGFydGVkIiwid29ya2Zsb3dfaWQiOiJzZGstd2lyZS1xdWFsaWZpY2F0aW9uLTc4OGIyYjlmIiwicnVuX2lkIjoic2RrLXdpcmUtcXVhbGlmaWNhdGlvbi1ydW4tYTdkYTRjMDMiLCJ3b3JrZmxvd190eXBlIjoiTGFuZ0dyYXBoUnVuIiwidGFza19xdWV1ZSI6ImxhbmdncmFwaCIsImFjdGl2aXR5X2lucHV0IjpbeyJ0ZXh0Ijoic3ludGhldGljLWVmZmVjdCJ9XSwiYWN0aXZpdHlfaWQiOiIzOGI0ZGI5ZC0zMzIwLTRiM2EtYTE4Mi01NTJjZmMyYTdkMWEiLCJhY3Rpdml0eV90eXBlIjoicmVjb3JkaW5nX3Rvb2wiLCJ0aW1lc3RhbXAiOiIyMDI2LTA4LTE5VDExOjMyOjMxLjMzOFoifQ==",
+            "request_body_sha256": "7d6453b6badd9e56af5e70e23c10b5dd95d96d00a0e1588ff80d08b3d47fb5e5",
+            "response_body_base64": "eyJ2ZXJkaWN0IjoiYWxsb3cifQ==",
+            "response_body_sha256": "243ea1ee4cc42de6ad92825647ff014b4691c3ef8b02d6301aa7cf54fcde48ce",
+            "headers": {
+              "authorization": "Bearer obx_test_[REDACTED]",
+              "sdk_version": "openbox-langgraph-python-v1.0.0",
+              "agent_did": "did:aip:12345678-1234-5678-1234-567812345678",
+              "body_sha256": "7d6453b6badd9e56af5e70e23c10b5dd95d96d00a0e1588ff80d08b3d47fb5e5",
+              "signature_present": true
+            }
+          }
+        ],
+        "tool_effects": [
+          "synthetic-effect"
+        ],
+        "observed_exception": null,
+        "non_loopback_attempts": []
+      }
+    },
+    "mock_block": {
+      "captured_at": "2026-08-19T11:32:52Z",
+      "command": "env -i PATH=/usr/bin:/bin PYTHONHASHSEED=0 /tmp/openbox-se00-04-langgraph.EMSuBg/.venv/bin/python plans/260819-1600-project-security-evaluation/evidence/probes/sdk_wire_probe.py --verdict mock-block | /usr/bin/jq '{classification,requests:[.requests[] | select(.path == \"/api/v1/auth/validate\" or (.event_type == \"ActivityStarted\" and .activity_type == \"recording_tool\")) | (.headers |= del(.content_type,.signature_sha256)) | if .event_type == null then del(.event_type,.activity_type,.effect_count_at_receive) else . end],tool_effects,observed_exception,non_loopback_attempts}'",
+      "exit_status": 0,
+      "result_sha256": "614351ced98db7b8ae6e4d047bbb8920ac2b1b134553f78c8386f8ad49d574fa",
+      "result": {
+        "classification": "sdk_mock_interception_only_not_openbox_block_proof",
+        "requests": [
+          {
+            "method": "GET",
+            "path": "/api/v1/auth/validate",
+            "status": 200,
+            "request_body_base64": "",
+            "request_body_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "response_body_base64": "eyJ2YWxpZCI6dHJ1ZX0=",
+            "response_body_sha256": "8daf09a6fc31937457dd77e9c25ce4b21349d605b561a8c5d557841bf964c9a0",
+            "headers": {
+              "authorization": "Bearer obx_test_[REDACTED]",
+              "sdk_version": "openbox-langgraph-python-v1.0.0",
+              "agent_did": "did:aip:12345678-1234-5678-1234-567812345678",
+              "body_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+              "signature_present": true
+            }
+          },
+          {
+            "method": "POST",
+            "path": "/api/v1/governance/evaluate",
+            "status": 200,
+            "event_type": "ActivityStarted",
+            "activity_type": "recording_tool",
+            "effect_count_at_receive": 0,
+            "request_body_base64": "eyJzb3VyY2UiOiJ3b3JrZmxvdy10ZWxlbWV0cnkiLCJldmVudF90eXBlIjoiQWN0aXZpdHlTdGFydGVkIiwid29ya2Zsb3dfaWQiOiJzZGstd2lyZS1xdWFsaWZpY2F0aW9uLWU2ZTk3YjBkIiwicnVuX2lkIjoic2RrLXdpcmUtcXVhbGlmaWNhdGlvbi1ydW4tNGJmMTRmYmUiLCJ3b3JrZmxvd190eXBlIjoiTGFuZ0dyYXBoUnVuIiwidGFza19xdWV1ZSI6ImxhbmdncmFwaCIsImFjdGl2aXR5X2lucHV0IjpbeyJ0ZXh0Ijoic3ludGhldGljLWVmZmVjdCJ9XSwiYWN0aXZpdHlfaWQiOiIwMjc5MjA2ZS1hMWVmLTQ3NTEtOGRjZS0zNzYzOTdjNjRkNTUiLCJhY3Rpdml0eV90eXBlIjoicmVjb3JkaW5nX3Rvb2wiLCJ0aW1lc3RhbXAiOiIyMDI2LTA4LTE5VDExOjMyOjUyLjU5MVoifQ==",
+            "request_body_sha256": "cfc2d0624c851ccf48a1eb02a651f44aa933849bb6cee8e4a1f419aa01b065cc",
+            "response_body_base64": "eyJ2ZXJkaWN0IjoiYmxvY2siLCJyZWFzb24iOiJxdWFsaWZpY2F0aW9uIG1vY2sgb25seSJ9",
+            "response_body_sha256": "24b4506d1548d70c1aeea29bcf742b5f8adb81cf15d1b916d7d36f52286f0f3c",
+            "headers": {
+              "authorization": "Bearer obx_test_[REDACTED]",
+              "sdk_version": "openbox-langgraph-python-v1.0.0",
+              "agent_did": "did:aip:12345678-1234-5678-1234-567812345678",
+              "body_sha256": "cfc2d0624c851ccf48a1eb02a651f44aa933849bb6cee8e4a1f419aa01b065cc",
+              "signature_present": true
+            }
+          }
+        ],
+        "tool_effects": [],
+        "observed_exception": "GovernanceBlockedError",
+        "non_loopback_attempts": []
+      }
+    }
+  },
+  "tests": [
+    {
+      "subject": "base SDK 1.2.0 local source",
+      "command": "uv run pytest -q tests/config/test_resolution_order.py tests/client/test_fail_modes.py tests/instrumentation/test_hook_failclosed_and_sync_approval.py tests/instrumentation/test_http_preflight_block.py",
+      "exit_status": 0,
+      "result": "55 passed in 1.25s"
+    },
+    {
+      "subject": "LangGraph SDK 1.0.0 source under the candidate resolved environment",
+      "command": "<venv>/bin/python -m pytest -q repo/tests/test_config_resolution_precedence.py repo/tests/test_langchain_callback_tool_ordering.py repo/tests/test_core_runtime_config.py repo/tests/test_signed_headers_parity.py repo/tests/test_fail_open_block_preserved.py",
+      "exit_status": 0,
+      "result": "24 passed in 0.30s",
+      "warning": "The process emitted pending-task and unawaited-coroutine cleanup warnings from langchain_core event_stream after pytest completed. The focused wire probe itself exited cleanly."
+    }
+  ],
+  "probe": {
+    "path": "evidence/probes/sdk_wire_probe.py",
+    "sha256": "3d7343eb2832f06c69f40901d12262d67b072275e318e6618c390f24400f6e95",
+    "network_posture": "socket connect guard permits loopback addresses only",
+    "credentials": "synthetic obx_test bearer plus deterministic test-only DID/key; key exists only in process memory"
+  },
+  "cleanup": {
+    "command": "test -d /tmp/openbox-se00-04-langgraph.EMSuBg && test -f /tmp/openbox-se00-04-langgraph.EMSuBg/repo/openbox_langgraph/langgraph_handler.py && test ! -e /Users/lebrian/.Trash/openbox-se00-04-langgraph.EMSuBg && mv /tmp/openbox-se00-04-langgraph.EMSuBg /Users/lebrian/.Trash/openbox-se00-04-langgraph.EMSuBg && test ! -e /tmp/openbox-se00-04-langgraph.EMSuBg && test -d /Users/lebrian/.Trash/openbox-se00-04-langgraph.EMSuBg",
+    "exit_status": 0,
+    "result": "The task-owned temporary clone and virtual environment were moved to Trash and remain recoverable; the original /tmp path no longer exists."
+  },
+  "judgment": "qualified_candidate",
+  "limits": [
+    "This is a real installed-SDK and loopback-wire observation, not a real OpenBox Core observation.",
+    "The fake chat model avoids external model traffic and does not establish behavior for a model provider.",
+    "The framework release declares langgraph>=0.2.0 with no upper bound. This record qualifies only langgraph 1.2.11 and langchain-core 1.5.6.",
+    "The framework source lock pins base SDK 1.0.1; this record independently tests base SDK 1.2.0 and does not reinterpret the upstream lock.",
+    "Framework v1.0.0 does not publicly forward strict_activity_context through OpenBoxLangGraphHandlerOptions; the candidate is qualified only for its normal owned-runtime, no-subagent-resolver shape.",
+    "Framework focused tests passed but exposed async cleanup warnings under the candidate transitive versions; release qualification must keep that limitation visible."
+  ]
+}

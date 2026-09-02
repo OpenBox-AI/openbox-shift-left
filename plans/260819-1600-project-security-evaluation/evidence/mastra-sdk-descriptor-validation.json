@@ -1,0 +1,67 @@
+{
+  "schema": "openbox.project-assurance.mastra-sdk-descriptor-validation/v1",
+  "task": "SE-02-05",
+  "capturedAt": "2026-08-20T17:18:58Z",
+  "status": "passed_with_limits",
+  "toolchain": {
+    "go": "go1.26.7 darwin/arm64",
+    "os": "macOS 26.5.2",
+    "kernel": "Darwin 25.5.0"
+  },
+  "inputs": {
+    "descriptorGo": "sha256:31c77afaa80a1f4d117a60917675fc4d7e68c79dac3c6e106b1e3554143eb005",
+    "descriptorTestGo": "sha256:8c73a0a9d6576663c7e2a032fcd305093b0a11ccc09f170f79ebda25300dbe0e",
+    "validationGo": "sha256:945fe0ded303d8437b96ecd565e17233861c942092ca0fbae5757e9b9a28f04f",
+    "validationTestGo": "sha256:5acf4135b703ee347cea4956805241e99dce31b987867494526f51df6b757ec2",
+    "validationUnixTestGo": "sha256:6c443650b828edef1855df8fa247a4d73b4658defcaa6bb281a0d4ce79b8cddc",
+    "sourceQualification": "sha256:c32aa6532c93b955ecb72a7bca7b744ff1c0160254afc51f07ab5dec3ee205f0",
+    "wireQualification": "sha256:863aacc9162b9499a1c84f249e069d62d0f97504755e71de246db0cf502a28f1"
+  },
+  "qualifiedSource": {
+    "path": "/Users/lebrian/Documents/works/openbox/openbox-mastra-sdk",
+    "status": "clean",
+    "head": "db9863bd6659f8b1ce6a33903ea61e4e564be38b",
+    "tag": "1.0.0",
+    "tagCommit": "db9863bd6659f8b1ce6a33903ea61e4e564be38b",
+    "archiveSHA256": "1e85dfd57ea751846236b01a94972ee58a8569045d9b20788e051092ff6933d1",
+    "packageJSONSHA256": "e11a34c50bb2bd4e4b5538fa9e1f5b638e0ce62ba1b4866d37930de6e06934e6",
+    "packageLockSHA256": "55f50d943ca7ca386f1e5e0371da02de8e180d9e439c071cb97d0991ba1d2332"
+  },
+  "commands": [
+    "cd cli && OPENBOX_MASTRA_SDK_ROOT=/Users/lebrian/Documents/works/openbox/openbox-mastra-sdk go test -count=10 ./internal/assurance/sdkdesc",
+    "cd cli && OPENBOX_MASTRA_SDK_ROOT=/Users/lebrian/Documents/works/openbox/openbox-mastra-sdk go test -race -count=1 ./internal/assurance/sdkdesc",
+    "cd cli && go vet ./...",
+    "cd cli && go test ./...",
+    "for each of the 11 go.work modules: go test ./...",
+    "cd cli && GOOS=darwin GOARCH=arm64 go test -run '^$' ./internal/assurance/sdkdesc",
+    "cd cli && GOOS=linux GOARCH=amd64 go test -exec=true ./internal/assurance/sdkdesc",
+    "cd cli && GOOS=windows GOARCH=amd64 go test -exec=true ./internal/assurance/sdkdesc",
+    "cd cli && gofmt -d internal/assurance/sdkdesc",
+    "git -C /Users/lebrian/Documents/works/openbox/openbox-mastra-sdk archive db9863bd6659f8b1ce6a33903ea61e4e564be38b | shasum -a 256",
+    "git status --short",
+    "git diff --check"
+  ],
+  "result": {
+    "descriptor": "the sole MVP descriptor fixes the local Mastra SDK commit/archive/package/lock, base alias resolution, Mastra Core resolution, public withOpenBox integration, configuration envelope, receiver subset, readiness probes, ignored endpoint rule, qualified action class, unsupported classes, and blind spots",
+    "sourceBoundary": "exact local-root package fingerprints plus a trusted commit/archive attestation are required; synthetic same-version roots and consumer/registry Mastra package entries are not compatible",
+    "tuple": "@openbox-ai/openbox-mastra-sdk@1.0.0 local source plus @openbox-ai/openbox-sdk alias to @openbox-ai/openbox-sdk-ts@1.0.1 and @mastra/core@1.8.0; base/Core registry URI and integrity are exact",
+    "configuration": "apiUrl/apiKey accept only omission or OPENBOX_URL/OPENBOX_API_KEY references; validate/onApiError/sendActivityStartEvent accept exact safe literals or trusted-runner omission; the executed retry, timeout, HITL, HTTP capture, database, and file-I/O controls require exact literals",
+    "initialization": "exactly one statically targeted withOpenBox initialization is required; unknown target/options, dynamic bindings, literal coordinates, and unsigned identity fields are not_runnable",
+    "coverage": "recordingTool ActivityStarted on POST /api/v1/governance/evaluate is the sole qualified pre-effect class; package compatibility remains static and does not assert that middleware ran",
+    "diagnostics": "problems are deterministic and do not echo arbitrary package names, credential values, coordinate values, or signed identity references",
+    "focusedTests": "47 tests/subtests passed against the selected clean local clone with zero skips; ten repeated package runs and race passed",
+    "fullCliAndModules": "passed for the CLI and all 11 go.work modules",
+    "crossCompilation": "Darwin arm64 ran; Linux amd64 and Windows amd64 compiled under go test -exec=true without executing foreign binaries",
+    "formatAndWhitespace": "gofmt diff and git diff --check empty",
+    "independentReadOnlyReview": "approved the final five hashes after exact-source, dependency binding, executed-control, diagnostic-retention, readiness, ignored-endpoint, target, and unclassified-option findings were resolved; no reviewer writes"
+  },
+  "limits": [
+    "This is static compatibility evidence, not a fresh SDK, provider, OpenBox Core, model, network, or behavioral observation.",
+    "Commit/archive attestation is trusted caller evidence and must eventually be minted by a trusted local-source qualifier; it may never be accepted from project-controlled data.",
+    "SE-00-04 qualified local source bytes and explicitly did not establish that registry publication bytes equal the local archive; consumer/registry Mastra package forms therefore fail closed.",
+    "Only direct top-level recordingTool ActivityStarted pre-effect handling was qualified. Agent, model, retrieval, HTTP, workflow, lifecycle, approval, database, file, function, MCP, signing, provider, and hook-level behavior remain unsupported or unknown.",
+    "The ignored endpoint rule covers the SDK's automatic suppression of its resolved apiUrl only. Caller-added ignoredUrls are unclassified and not_runnable; the approval receiver route remains unsupported.",
+    "Omitted safe controls are compatible only because the later trusted runner must inject their exact safe environment values. This task did not implement or exercise that runner.",
+    "No SDK scan mode, SDK fork, registry, plugin extension point, provider hook, endpoint, service, package installation, project-code execution, source mutation, control-plane write, audit upload, or production credential/path was added or used."
+  ]
+}

@@ -1,0 +1,94 @@
+{
+  "task": "SE-06-05",
+  "captured_at": "2026-08-22T08:59:03Z",
+  "result": "verified",
+  "toolchain": {
+    "go": "go1.27.0 darwin/arm64"
+  },
+  "inputs": {
+    "cli/internal/assurance/artifact/manifest.go": "09fd347a997d32824d365f153e624feef9fcdbb1c237cb57396819239838fe3d",
+    "cli/internal/assurance/artifact/reader.go": "593fb62d9cfefbf2f9d6fa03010da3d77470012bbccd2388720774fa996ef58b",
+    "cli/internal/assurance/artifact/reader_test.go": "73b9bd8fcd38e4784681d21efcc41c626baf5f2130c1c8445703dc88b6bbd1af",
+    "cli/internal/assurance/runfs/runfs.go": "28506b2fe5ad18868d5a78a94ea92958afb74a9075b73f0f3c410ac061ecd326",
+    "cli/internal/assurance/runfs/pack_reader.go": "1dad5051efe4e0bd4653b7d8fdf73929be2aefd56a5595ccffb802e1fd6f1b97",
+    "cli/internal/assurance/runfs/pack_reader_unix_test.go": "961d5de3937950f440fccfd6fd6ac568514b08cf64edc599ad2d86765e3cf5a3",
+    "cli/internal/assurance/runfs/platform_unix.go": "843d580528812ead8f8215156607734caf5837c8b2d5f7c95eaf83c0700019e9",
+    "cli/internal/assurance/runfs/platform_darwin.go": "a24835931c674bb801b541aea7ef1f88f29cb956cc9c9654aec58e6427093644",
+    "cli/internal/assurance/runfs/platform_linux.go": "239c4190948c1ab04c7204dbebd09cf6b930a93482edb6cda3daef1fbaf28fe1",
+    "cli/internal/assurance/runfs/platform_other.go": "6c21299c2dda3ea5a080634724d14346a377c9463f488e2f7498ed2b5f6c6e43",
+    "cli/cmd/openbox/project_verify.go": "670de02fc40a33af665dd6555e005908d026cbbc496ce45301b1513fc88c8edb",
+    "cli/cmd/openbox/project_verify_unix_test.go": "47f863e30419d77904050df6024f33604e0f6edd0b05597c6072e351a520f9a9",
+    "cli/cmd/openbox/project.go": "95678bb2126084d64ab655d4167bda9a511ec1c561ce4b71bb3bb2ae26f4df82",
+    "cli/cmd/openbox/project_test.go": "e6870909fdf6406087fde77769c8b46efa98731663c8b864b089de560ddb135e",
+    "cli/cmd/openbox/main.go": "2dd4163e5ee3cd16b0c0f52521739ec873ba3616e2c9fdb607f6669d5d61a955"
+  },
+  "commands": [
+    {
+      "command": "cd cli && go test -count=50 -run 'Test(ParseManifestIndex|ManifestIndex|VerifyPack|CommittedPack|ReadDirectoryBounded|ProjectVerifyCommand)' ./internal/assurance/artifact ./internal/assurance/runfs ./cmd/openbox",
+      "exit_status": 0,
+      "result": "passed"
+    },
+    {
+      "command": "cd cli && go test -race -count=10 -run 'Test(ParseManifestIndex|ManifestIndex|VerifyPack|CommittedPack|ReadDirectoryBounded|ProjectVerifyCommand)' ./internal/assurance/artifact ./internal/assurance/runfs ./cmd/openbox",
+      "exit_status": 0,
+      "result": "passed"
+    },
+    {
+      "command": "cd cli && go test -count=1 ./internal/assurance/... ./cmd/openbox",
+      "exit_status": 0,
+      "result": "passed"
+    },
+    {
+      "command": "cd cli && go vet ./...",
+      "exit_status": 0,
+      "result": "passed"
+    },
+    {
+      "command": "cd cli && GOOS=linux GOARCH=amd64 go test -run '^$' -exec=true ./internal/assurance/runfs ./cmd/openbox && GOOS=windows GOARCH=amd64 go test -run '^$' -exec=true ./internal/assurance/runfs ./cmd/openbox",
+      "exit_status": 0,
+      "result": "Linux and Windows compile-only checks passed"
+    },
+    {
+      "command": "gofmt -d <affected Go files>",
+      "exit_status": 0,
+      "result": "empty"
+    },
+    {
+      "command": "git diff --check",
+      "exit_status": 0,
+      "result": "clean"
+    }
+  ],
+  "verification": {
+    "assembly": "The existing typed assembler computes canonical root and object CIDs, and FinalizePack publishes manifest.json only after exact-set object verification.",
+    "reader": "The reader requires canonical closed manifest structure, fixed v1 schema and role inventories, explicit required fields, fixed retention/media/schema mappings, and exact inline-judgment binding.",
+    "filesystem": "Darwin and Linux verification uses bounded descriptor-relative no-follow, nonblocking reads; exact 0500/0400 modes; single-link regular files; same-filesystem directories; exact root/object sets; and a final identity, mode, size, mtime, and ctime recheck.",
+    "cli": "openbox project verify PACK reports only the verified pack digest and role count from immutable in-memory bytes; it performs no project execution, network access, sandbox launch, or control-plane action."
+  },
+  "bounds": {
+    "manifest_bytes": 1048576,
+    "object_bytes": 16777216,
+    "total_object_bytes": 134217728,
+    "directory_enumeration": "root at most 2, objects at most 1, and sha256 entries at most the unique referenced CID count"
+  },
+  "adversarial_matrix": {
+    "changed_object": "rejected, including same-size in-place mutation during verification",
+    "missing_object": "rejected",
+    "extra_object_or_root_entry": "rejected with bounded enumeration",
+    "truncated_or_noncanonical_manifest": "rejected before object acceptance",
+    "incomplete_workspace": "rejected because manifest-committed state and modes are required",
+    "hard_link_symlink_fifo_or_mount_transition": "rejected or failed closed at descriptor-relative open",
+    "returned_bytes_mutation": "cannot mutate the retained verified pack"
+  },
+  "independent_review": {
+    "result": "approved",
+    "commands": "focused count-25, race, vet, format, Darwin runtime, and Linux/Windows compile-only checks passed",
+    "finding": "No remaining high or medium SE-06-05 blocker; the Darwin x/sys Stat_t fields are Mtim and Ctim and compile on the frozen bytes."
+  },
+  "limits": [
+    "Verification is a point-in-time statement over immutable returned bytes; a same-UID actor can mutate the on-disk directory after success.",
+    "The command verifies canonical manifest structure, fixed role encodings, lengths, CIDs, and the exact object set. Public-schema conformance is a separate boundary and this command alone does not claim an ADR-valid pack.",
+    "Darwin runtime behavior and Linux/Windows compilation were executed; privileged live mount adversaries were not exercised.",
+    "No Docker code or path exists in assurance, and no Docker, project, sandbox, network, release, or control-plane action ran."
+  ]
+}

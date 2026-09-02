@@ -1,0 +1,112 @@
+{
+  "task": "SE-06-06",
+  "captured_at": "2026-08-22T10:56:34Z",
+  "result": "verified",
+  "toolchain": {
+    "go": "go1.27.0 darwin/arm64",
+    "jsonschema": "github.com/santhosh-tekuri/jsonschema/v6 v6.0.3 h1:1EYB5IzjZawrrnELUi78f9fPu57HuXjmddZPjrls/28=",
+    "regexp2": "github.com/dlclark/regexp2 v1.11.0 h1:G/nrcoOa7ZXlpoa/91N3X7mM3r8eIlMBBJZvsz/mxKI=",
+    "x_text": "golang.org/x/text v0.14.0 h1:ScX5w1eTa3QqT8oi6+ziP7dTV1S2+ALU0bI+0zXKWiQ=",
+    "sarif": "OASIS SARIF 2.1.0 Errata 01 schema sha256:c3b4bb2d6093897483348925aaa73af03b3e3f4bd4ca38cef26dcb4212a2682e"
+  },
+  "inputs": {
+    "docs/adr/ADR-0020-project-assurance-native-sandbox.md": "c41119605666500640d6a36b3c1aaae935515aad5f988dc0e9d360fc2fb5a1f2",
+    "cli/go.mod": "5f1ee7ca38c50cd0ec5170c63412b592b7eda640ad58ef5d7a6236dffe59c000",
+    "cli/go.sum": "476582984213c3b3fb7c4bb125b8bca88660528684bb4f10cdfd33e3a4f0fd3e",
+    "cli/internal/assurance/evidence/judge.go": "6b7055f1f18ee984183339f6c23bdb4e2d056086a6178d39a08bd845eb82d8ee",
+    "cli/internal/assurance/evidence/judge_test.go": "57020d325686ee32fd85a540473f24d28b9880fd8b33240019d5338fd2cd985a",
+    "cli/internal/assurance/report/report.go": "f658572f64987dfba32c32569fe5fe7f4dd474ea229c5665d223153a36dc204a",
+    "cli/internal/assurance/report/report_test.go": "7815ae519a1979337345a64c2bac7264918da98f3d05b69216f86d5ce4407d26",
+    "cli/internal/assurance/report/report_unix_test.go": "6f8b4981d9d4f4c2223d760dc44a8e81c57e10039feb57cd8652f9b1fa957090",
+    "cli/internal/assurance/report/schema.go": "1a55de638a4fabd4b3cbdb956da3c20a93c0c34f34ca00a1d96956bad78353ff",
+    "cli/internal/assurance/report/validate.go": "d70e83dffbf92f74272f2f7dda32a0fa5fe1305af7b96829727fbba8eefd644e",
+    "schema/audit-pack-v1": "616c1e3fa7cc8c80488dbd23afa5c44e964ab0ea89124015b69e2041a1e772b4",
+    "schema/policy-proposal-v1": "2a8ee5e33d23be6cfddfbcbb621cff98853034989b5d2b55241461c2d66255f8",
+    "schema/project-model-v1": "5b18935414763341b28101bf6d9fe7f746d6530bca68004c896be33883156ca4",
+    "schema/project-run-profile-v1": "3db0334d7ef355d13cbd8957ed49f5f450dc8a10264f31b986778e7932f6035d",
+    "schema/sandbox-posture-v1": "e6e6a9f17fdfdb28354e7917514fa5ee51bc56a400401bd7e3af20e9eb938ee6",
+    "schema/sdk-coverage-v1": "bc78dbbe82bd9a7c710af76529cf38cae1a9135ed576e17834f944e77088cc54",
+    "schema/security-test-v1": "9e65b45d63bb71b4bf1dc8fc7c447d455c966d364cd68ba5bb72c1b4790af1e2"
+  },
+  "commands": [
+    {
+      "command": "cd cli && go test -count=25 ./internal/assurance/report ./internal/assurance/evidence",
+      "exit_status": 0,
+      "result": "passed"
+    },
+    {
+      "command": "cd cli && go test -race -count=5 ./internal/assurance/report ./internal/assurance/evidence",
+      "exit_status": 0,
+      "result": "passed"
+    },
+    {
+      "command": "cd cli && OPENBOX_SARIF_SCHEMA=<qualified-local-schema> go test -count=1 -run '^TestSARIFMatchesPinnedOfficialSchema$' ./internal/assurance/report",
+      "exit_status": 0,
+      "result": "passed after the schema bytes matched the pinned SHA-256"
+    },
+    {
+      "command": "cd cli && go test -count=1 ./internal/assurance/... && go test -count=1 ./...",
+      "exit_status": 0,
+      "result": "passed"
+    },
+    {
+      "command": "cd cli && go vet ./... && go mod tidy -diff && go mod verify",
+      "exit_status": 0,
+      "result": "passed; tidy diff was empty and all modules verified"
+    },
+    {
+      "command": "cd cli && GOOS=<darwin-arm64|linux-amd64|windows-amd64> CGO_ENABLED=0 go test -run '^$' -exec=true ./...",
+      "exit_status": 0,
+      "result": "all three compile-only matrices passed"
+    },
+    {
+      "command": "gofmt -d <report and judge Go files>",
+      "exit_status": 0,
+      "result": "empty"
+    },
+    {
+      "command": "git diff --check",
+      "exit_status": 0,
+      "result": "clean"
+    },
+    {
+      "command": "jq -e . <all project-assurance JSON artifacts>; cmp <public schema> <embedded schema>; reject docker/containerd/podman matches in renderer and judge scope",
+      "exit_status": 0,
+      "result": "all JSON parsed, all seven embedded schemas matched exact public bytes, and no Docker path was present"
+    }
+  ],
+  "verification": {
+    "authority": "Render accepts only an internal schema-validated capability created from a structurally verified pack; the owner-approved ADR amendment restricts the exact pinned validator dependencies to this offline gate.",
+    "schema_validation": "The manifest and every non-null role pass the exact embedded Draft 2020-12 schemas with an empty URL loader and a 25 ms regular-expression timeout. Run-profile, project-model, SDK-coverage, and sole security-scenario semantic checks also pass.",
+    "bindings": "The exact one finding/scenario judgment is bound to the sole executable scenario. Project-snapshot, project-model, run-profile, SDK-coverage, and scenario content digests must agree before rendering.",
+    "judgment": "Every retained outcome reuses the judge-owned predicate. Missing or cross-outcome facts, derived contradictions, baseline BLOCK, repeated evidence digests, insufficient independent BLOCK evidence, unsupported inconclusive claims, and limitation-free not-runnable claims are rejected.",
+    "parity": "JSON, Markdown, console, and SARIF come from one immutable model and agree on finding/scenario IDs, outcome, evidence, evidence level, limitations, reachability, and literal unavailable severity.",
+    "stored_projections": "JSON, Markdown, and SARIF addressed objects are recomputed and byte-compared before any projection is returned.",
+    "sarif": "Canonical SARIF 2.1.0 uses the exact OASIS schema URI, openbox-project-assurance driver, finding ID ruleId, level none, no source location, and retained OpenBox facts only. The exact output passed the pinned official schema offline."
+  },
+  "bounds": {
+    "projection_input_and_each_output_bytes": 16777216,
+    "regexp_match_timeout_ms": 25,
+    "schema_loader": "empty and offline",
+    "scenario_records": 1,
+    "judgments": 1
+  },
+  "adversarial_matrix": {
+    "schema_and_semantics": "Wrong schema digest, schema-invalid project model, duplicate node, run-profile binding alias, duplicate SDK action, scenario invariant drift, and duplicate scenario are rejected.",
+    "cross_role_identity": "Changed snapshot, project-model, run-profile, SDK-coverage, scenario, or judgment bindings are rejected.",
+    "outcome_integrity": "All six exact valid predicates pass; each positive outcome missing a required fact, a cross-outcome fact set, unsupported inconclusive/not-runnable, and duplicate BLOCK evidence fail.",
+    "projection_integrity": "Stored report drift, caller/input/output mutation, raw terminal escapes, and raw Markdown/HTML markup cannot alter or misrepresent returned projections."
+  },
+  "independent_review": {
+    "result": "approved",
+    "commands": "exact hash replay, official SARIF schema validation, focused count-10, race, vet, format, tidy, module verification, and Darwin/Linux/Windows compile-only checks passed",
+    "finding": "No remaining high- or medium-severity SE-06-06 correctness, security, or authority blocker."
+  },
+  "limits": [
+    "V1 defines no severity; every format emits unavailable and SARIF level none rather than deriving severity from outcome.",
+    "V1 reports only classifier fields retained in the audit manifest and does not reconstruct absent confidence, repetition, or reachability evidence details.",
+    "The official SARIF schema is not embedded; repeat qualification must reacquire or retain bytes matching the pinned URL and SHA-256.",
+    "Validation and rendering operate on immutable in-memory pack bytes. The additive SE-06-07 package comment and qualified-posture test fixture did not change renderer behavior, and the full renderer proof was replayed on their final hashes.",
+    "No project, sandbox, model, SDK, network, production coordinate, external control plane, or Docker path ran."
+  ]
+}

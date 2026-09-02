@@ -1,0 +1,55 @@
+{
+  "schema": "openbox.project-assurance.effect-sink-validation/v1",
+  "task": "SE-04-06",
+  "capturedAt": "2026-08-21T10:59:16Z",
+  "status": "passed_with_limits",
+  "toolchain": {
+    "go": "go1.27.0 darwin/arm64",
+    "platform": "Darwin 25.5.0 arm64"
+  },
+  "inputs": {
+    "sinkGo": "sha256:33e83750d5f332d3f85d860bef732ef69ab6b2c5d5b0da4595e7d933de372823",
+    "sinkTestGo": "sha256:e519e0f0a26eb6ff601cbce6f678fe4f09fd505e5f9699f9d3ebebeb8417e189",
+    "sharedFixtureGo": "sha256:4bdfcab62a65344dbd7682a0663aa4f233ba0a2076cf049c27cdb527247fca59",
+    "securityTestSchema": "sha256:5ffb671e5a6305c4eb388b87645f6e569f0aaaa3ec6dc3e20ba7014ec81b56ba",
+    "securityTestFixture": "sha256:904e7143e194405470effb7e69e660f52f3ef50868edeadb8535f04e05f7c42d",
+    "decision": "sha256:49937e5bd1181b736b6709cde0eb300aa68b1a286d4a64641c66230c551e1edc"
+  },
+  "commands": [
+    "cd cli && go test -count=25 ./internal/assurance/fixture",
+    "cd cli && go test -race -count=5 ./internal/assurance/fixture",
+    "cd cli && go vet ./internal/assurance/fixture",
+    "cd cli && go test -count=1 ./internal/assurance/...",
+    "cd cli && go test -count=1 ./...",
+    "cd cli && go vet ./...",
+    "cd cli && GOOS=darwin GOARCH=amd64 go test -c -o TASK_TEMP/fixture-darwin-amd64.test ./internal/assurance/fixture",
+    "cd cli && GOOS=linux GOARCH=amd64 go test -c -o TASK_TEMP/fixture-linux-amd64.test ./internal/assurance/fixture",
+    "cd cli && GOOS=windows GOARCH=amd64 go test -c -o TASK_TEMP/fixture-windows-amd64.test ./internal/assurance/fixture",
+    "gofmt -d cli/internal/assurance/fixture/*.go",
+    "git status --short",
+    "git diff --check"
+  ],
+  "result": {
+    "authority": "the package owns one private random route on an ephemeral literal-loopback listener and performs no outbound request; callers cannot supply a listener, handler, path, response, command, filesystem, provider, or external-network target",
+    "markerState": "the first exact canonical marker request receives 204 and commits one accepted observation; later exact requests receive 409 duplicate, and cross-run markers receive no useful response",
+    "bodyEvidence": "only an exact accepted or duplicate marker body receives a canonical JSON digest; malformed, duplicate-key, wrong-run, extra-field, secret-bearing, and oversized bodies receive no body digest",
+    "headerEvidence": "accepted requests receive a digest of the complete canonical normalized header projection after scanning header names and values, content length, and transfer encoding; raw headers are not retained",
+    "secretSafety": "known credentials, production/test/readiness credential prefixes, sensitive header names, detector matches, and all declared trailers reject before any header/body digest; known credentials overlapping fixed projection vocabulary fail preflight",
+    "ordering": "atomic admission assigns the stable processing ticket and serialized marker state consumes tickets in order, so exactly one concurrent request is accepted and all later exact requests are duplicates",
+    "bounds": "request bodies are read through maxRequestBytes plus one byte, oversize receipts record only the bounded count and truncation flag, and saturation retains at most MaxRequests receipts plus one overflow receipt",
+    "lifecycle": "the sink uses the same bounded, idempotent, per-caller-deadline cleanup posture as the poisoned fixture",
+    "tests": "wrong-run, duplicate, oversize, secret name/value/trailer, wire-shape, concurrent isolation, count-25, race count-5, affected-assurance, full CLI, vet, format, and Darwin/Linux/Windows compile-only checks passed",
+    "independentReview": "approved the frozen sink source/test hashes with no remaining high or medium SE-04-06 blocker and made no workspace or ledger writes"
+  },
+  "cleanup": {
+    "crossCompileOutputs": "the task-owned compile directory was moved to Trash",
+    "sdkSourceClone": "the local openbox-mastra-sdk clone remained clean"
+  },
+  "limits": [
+    "Receipt sequence is handler admission and serialized processing order; it is not an independently measured TCP packet-arrival timestamp.",
+    "A 204 receipt proves the local sink fully processed the exact synthetic marker request. It does not by itself prove which application, model, tool, or SDK event caused the request.",
+    "The default detector is deterministic but cannot prove recognition of every possible secret. Exact run credentials must also be supplied through KnownSecrets; package-known OpenBox credential prefixes reject unconditionally.",
+    "Scenario correlation, project launch, service cleanup evidence, SDK/sandbox ordering, and security judgment remain later tasks.",
+    "This task used only in-process loopback traffic. It did not launch a project or sandbox, contact a provider, call production OpenBox, prove a BLOCK decision, or write an external control plane."
+  ]
+}

@@ -1,0 +1,21 @@
+[33m⚠[39m OPENAI_API_KEY looks like a credential passed as a plain environment variable.
+  The agent inside the sandbox can read this value directly.
+
+  To hide it from the agent, use a provider instead of --env.
+  See: https://docs.nvidia.com/openshell/latest/sandboxes/providers-v2
+
+{"channel":"openbox_http","status":403,"error":"policy_denied"}
+file:///app/node_modules/@openbox-ai/openbox-mastra-sdk/dist/client/openbox-client.js:72
+        throw new OpenBoxAuthError(
+              ^
+
+OpenBoxAuthError: Invalid API key. Check your API key at dashboard.openbox.ai
+    at OpenBoxClient.validateApiKey (file:///app/node_modules/@openbox-ai/openbox-mastra-sdk/dist/client/openbox-client.js:72:15)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async createRuntime (file:///app/node_modules/@openbox-ai/openbox-mastra-sdk/dist/mastra/with-openbox.js:49:5)
+    at async withOpenBox (file:///app/node_modules/@openbox-ai/openbox-mastra-sdk/dist/mastra/with-openbox.js:23:19)
+    at async file:///app/src/index.mjs:55:18
+
+Node.js v26.7.0
+Error:   × ssh exited with status exit status: 1
+

@@ -1,0 +1,54 @@
+{
+  "schema": "openbox.project-assurance.sandbox-identity-validation/v1",
+  "task": "SE-03-02",
+  "capturedAt": "2026-08-21T03:42:16Z",
+  "status": "passed_with_limits",
+  "toolchain": {
+    "go": "go1.26.7 darwin/arm64",
+    "os": "macOS 26.5.2",
+    "kernel": "Darwin 25.5.0"
+  },
+  "inputs": {
+    "identityGo": "sha256:f18d7cb63b43fd339cc0588448d1f534e5486b87b8bd6f1aaf2e5c2b5792a153",
+    "identityOtherGo": "sha256:68fa1fae573799d393070eb8009ad6438462440d91e4ed8b762cf4c964779392",
+    "identityTestGo": "sha256:0a2f68f8a3c225dc710c656b394e27c509e5036d0e15c56c22858be5b4ac9aa8",
+    "identityUnixGo": "sha256:89c1bf05904209ae3574503dddfdd5ec154d9b60446a7bce2f35ba649018faa2",
+    "identityUnixTestGo": "sha256:c7d4c5dc508652d3f6b28f632fe566e03c5b2fb3d4df3349c066211d1a566ea9",
+    "qualificationEvidence": "sha256:97fb2f2de6fece96f2e1b5394757973df773485d8b807a968e89c98ac4cdf226"
+  },
+  "qualifiedCandidate": {
+    "name": "codex",
+    "version": "codex-cli 0.148.0",
+    "mode": "standalone",
+    "path": "/opt/homebrew/Caskroom/codex/0.148.0/bin/codex",
+    "binaryDigest": "sha256:b0308517b20543012fa2171aa3d46ce455a7456c4eb2a552ab9468ba4eeb1e50",
+    "platform": "darwin/arm64"
+  },
+  "commands": [
+    "cd cli && go test ./internal/assurance/sandbox -count=10",
+    "cd cli && OPENBOX_CODEX_BINARY=/opt/homebrew/Caskroom/codex/0.148.0/bin/codex go test ./internal/assurance/sandbox -run TestDiscoverQualifiedCodexIdentity -count=1 -v",
+    "cd cli && go test -race ./internal/assurance/sandbox -count=1",
+    "cd cli && go vet ./internal/assurance/sandbox",
+    "cd cli && OPENBOX_AJV_ROOT=/Users/lebrian/.Trash/openbox-se02-07-ajv.x5OIha/node_modules/ajv OPENBOX_MASTRA_SDK_ROOT=/Users/lebrian/Documents/works/openbox/openbox-mastra-sdk go test ./internal/assurance/... -count=1",
+    "cd cli && GOOS=linux GOARCH=amd64 go test -c ./internal/assurance/sandbox; GOOS=windows GOARCH=amd64 go test -c ./internal/assurance/sandbox",
+    "gofmt -d cli/internal/assurance/sandbox/identity*.go",
+    "git status --short",
+    "git diff --check"
+  ],
+  "result": {
+    "discovery": "the exported MVP path accepts only the exact SE-00-05 absolute Codex tuple; it performs no PATH lookup, alias resolution, version subprocess, model request, or sandbox launch",
+    "binaryProof": "the real 214716336-byte local executable streamed twice through a 512 MiB bound and matched the recorded SHA-256",
+    "versionBinding": "codex-cli 0.148.0 is accepted only with the evidence-qualified exact binary digest rather than inferred from an alias or fresh untrusted execution",
+    "raceChecks": "Darwin/Linux use no-follow, nonblocking descriptor opens; named identity is checked before and after hashing; alias, FIFO, replacement, in-place mutation, and byte drift fail closed",
+    "configuration": "ordered argv and isolated configuration-file content digests form one canonical effective-configuration digest; argument or file drift changes it",
+    "tests": "focused count-10, exact local candidate, package race, all assurance packages, vet, and Linux/Windows compilation passed",
+    "independentReview": "approved the final source hashes and exact local candidate proof; no reviewer writes"
+  },
+  "limits": [
+    "Identity is a point-in-time read. Launch code must repeat exact tuple verification immediately before use and reject any mismatch.",
+    "The qualified tuple is Darwin-only. The non-Unix helper is compile-only and must remain unsupported/fail-closed for this candidate.",
+    "Configuration-file digests are typed identities here; later argv/config construction must derive them from immutable run-owned bytes.",
+    "This task did not execute `codex --version`, `codex sandbox`, a project command, SDK/provider code, a model/API request, production endpoint, or external control-plane operation.",
+    "No support tuple, confinement result, project verdict, provider hook, or hookflow change is claimed."
+  ]
+}

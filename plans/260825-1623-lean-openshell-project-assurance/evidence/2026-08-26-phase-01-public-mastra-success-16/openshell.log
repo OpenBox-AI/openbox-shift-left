@@ -1,0 +1,67 @@
+[1787720681.729] [gateway] [INFO ] [openshell_server::grpc::sandbox] minted sandbox JWT
+[1787720681.731] [gateway] [INFO ] [openshell_server::grpc::sandbox] CreateSandbox request completed successfully
+[1787720682.000] [gateway] [INFO ] [openshell_server::grpc::policy] GetSandboxConfig served from spec (backfilled version 1)
+[1787720683.812] [sandbox] [INFO ] [openshell_sandbox] Starting sandbox command=["/usr/local/bin/node", "/app/src/index.mjs"]
+[1787720683.814] [sandbox] [INFO ] [openshell_sandbox] Fetching sandbox policy via gRPC endpoint=https://host.openshell.internal:17670/ sandbox_id=8838ebb1-16ff-4e2f-a01a-137cb4b7629a
+[1787720683.910] [gateway] [INFO ] [openshell_server::grpc::policy] GetSandboxProviderEnvironment request completed successfully
+[1787720684.073] [gateway] [INFO ] [openshell_server::grpc::policy] ReportPolicyStatus: sandbox reported policy load result
+[1787720684.084] [gateway] [INFO ] [openshell_server::supervisor_session] supervisor session: accepted
+[1787720684.136] [gateway] [INFO ] [openshell_server::supervisor_session] supervisor session: relay opened successfully
+[1787720684.136] [gateway] [INFO ] [openshell_server::supervisor_session] relay stream: claimed pending relay, bridging
+[1787720683.826] [sandbox] [OCSF ] [ocsf] CONFIG:ENRICHED [INFO] Enriched policy with baseline filesystem paths for proxy mode
+[1787720683.833] [sandbox] [INFO ] [openshell_sandbox] Creating OPA engine from proto policy data
+[1787720683.835] [sandbox] [INFO ] [openshell_supervisor_network::opa] Configured OPA runtime binary identity mode require_binary_identity=true source=proto
+[1787720683.837] [sandbox] [OCSF ] [ocsf] CONFIG:CONFIGURED [INFO] OPA runtime binary identity mode configured [source:proto require_binary_identity:true] [source:proto]
+[1787720683.848] [sandbox] [OCSF ] [ocsf] CONFIG:LOADED [INFO] Fetched provider environment [env_count:1]
+[1787720683.849] [sandbox] [OCSF ] [ocsf] CONFIG:CREATING [INFO] Creating network namespace [ns:sandbox-284974fb host_veth:veth-h-284974fb sandbox_veth:veth-s-284974fb]
+[1787720683.964] [sandbox] [OCSF ] [ocsf] CONFIG:CREATED [INFO] Network namespace created [ns:sandbox-284974fb host_ip:10.200.0.1 sandbox_ip:10.200.0.2]
+[1787720683.995] [sandbox] [OCSF ] [ocsf] CONFIG:INSTALLED [INFO] Bypass detection rules installed [ns:sandbox-284974fb]
+[1787720683.999] [sandbox] [OCSF ] [ocsf] CONFIG:ENABLED [INFO] TLS termination enabled: ephemeral CA generated
+[1787720683.999] [sandbox] [INFO ] [openshell_supervisor_network::inference_routes] Fetching inference route bundle from gateway endpoint=https://host.openshell.internal:17670/
+[1787720684.002] [sandbox] [OCSF ] [ocsf] CONFIG:LOADED [INFO] Loaded inference route bundle [route_count:1 revision:3724d81ba11cfb74]
+[1787720684.002] [sandbox] [OCSF ] [ocsf] CONFIG:ENABLED [INFO] Inference routing enabled with local execution [route_count:1]
+[1787720684.004] [sandbox] [OCSF ] [ocsf] NET:LISTEN [INFO] 10.200.0.1:3128
+[1787720684.004] [sandbox] [WARN ] [openshell_supervisor_network::proxy] host.openshell.internal maps to a non-link-local IP; trusted-gateway SSRF exemption disabled ip=192.168.127.254
+[1787720684.004] [sandbox] [OCSF ] [ocsf] CONFIG:VALIDATED [INFO] Accepted numeric UID 1000 (no passwd entry required)
+[1787720684.004] [sandbox] [OCSF ] [ocsf] CONFIG:VALIDATED [INFO] Accepted numeric GID 1000 (no group entry required)
+[1787720684.011] [sandbox] [WARN ] [openshell_supervisor_process::process] runtime cgroup pids.max is unavailable (No such file or directory (os error 2)); configure the compute driver or container runtime to enforce a PID limit
+[1787720684.012] [sandbox] [OCSF ] [ocsf] CONFIG:LOADED [INFO] Acknowledged initial policy revision as loaded [version:2] [hash:05c0162a507147e42e6613b36c1e8758ec240bd3fce63ab6dfeab355e5ccf272]
+[1787720684.012] [sandbox] [OCSF ] [ocsf] FINDING:CREATE [HIGH] "Landlock Filesystem Sandbox Unavailable" [type:landlock-unavailable confidence:high]
+[1787720684.012] [sandbox] [OCSF ] [ocsf] FINDING:CREATE [HIGH] "Landlock Filesystem Sandbox Unavailable" [type:landlock-unavailable confidence:high]
+[1787720684.020] [sandbox] [OCSF ] [ocsf] SSH:LISTEN [INFO]
+[1787720684.020] [sandbox] [OCSF ] [ocsf] LIFECYCLE:INSTALL [INFO] OpenShell Sandbox Supervisor success
+[1787720684.021] [sandbox] [INFO ] [openshell_supervisor_process::run] supervisor session task spawned
+[1787720684.021] [sandbox] [OCSF ] [ocsf] PROC:LAUNCH [INFO] /usr/local/bin/node(383)
+[1787720684.024] [sandbox] [OCSF ] [ocsf] NET:OPEN [INFO] host.openshell.internal:17670
+[1787720684.074] [sandbox] [OCSF ] [ocsf] NET:OPEN [INFO] [msg:ssh relay open (channel_id=3f62ed12-5cf5-4f9b-8bf3-1a34370df454, target=unix:/run/openshell/ssh.sock)]
+[1787720684.074] [sandbox] [OCSF ] [ocsf] SSH:OPEN [INFO] ALLOWED
+[1787720684.756] [sandbox] [INFO ] [openshell_supervisor_network::run] Container filesystem accessible, resolving policy binary symlinks attempt=1 pid=383
+[1787720684.756] [sandbox] [INFO ] [openshell_supervisor_network::opa] Configured OPA runtime binary identity mode require_binary_identity=true source=proto
+[1787720684.757] [sandbox] [OCSF ] [ocsf] CONFIG:CONFIGURED [INFO] OPA runtime binary identity mode configured [source:proto require_binary_identity:true] [source:proto]
+[1787720684.762] [sandbox] [INFO ] [openshell_supervisor_network::run] Policy binary symlink resolution complete (check logs above for per-binary results) pid=383
+[1787720687.175] [sandbox] [OCSF ] [ocsf] HTTP:GET [INFO] ALLOWED /usr/local/bin/node(383) -> GET http://host.openshell.internal:59550/api/v1/auth/validate [policy:openbox_core_relay engine:l7]
+[1787720687.182] [sandbox] [OCSF ] [ocsf] HTTP:GET [INFO] ALLOWED /usr/local/bin/node(383) -> GET http://host.openshell.internal:59550/api/v1/auth/validate [policy:openbox_core_relay engine:opa]
+[1787720687.213] [sandbox] [OCSF ] [ocsf] HTTP:POST [INFO] ALLOWED /usr/local/bin/node(383) -> POST http://host.openshell.internal:59550/api/v1/governance/evaluate [policy:openbox_core_relay engine:l7]
+[1787720687.355] [sandbox] [OCSF ] [ocsf] HTTP:POST [INFO] ALLOWED /usr/local/bin/node(383) -> POST http://host.openshell.internal:59550/api/v1/governance/evaluate [policy:openbox_core_relay engine:opa]
+[1787720687.361] [sandbox] [OCSF ] [ocsf] HTTP:POST [INFO] ALLOWED /usr/local/bin/node(383) -> POST http://host.openshell.internal:59550/api/v1/governance/evaluate [policy:openbox_core_relay engine:l7]
+[1787720687.829] [sandbox] [OCSF ] [ocsf] HTTP:POST [INFO] ALLOWED /usr/local/bin/node(383) -> POST http://host.openshell.internal:59550/api/v1/governance/evaluate [policy:openbox_core_relay engine:opa]
+[1787720687.857] [sandbox] [OCSF ] [ocsf] NET:OPEN [INFO] ALLOWED inference.local:443
+[1787720687.857] [sandbox] [INFO ] [openshell_router] routing proxy inference request (streaming) endpoint=http://127.0.0.1:11434/v1 method=POST path=/v1/chat/completions protocols=openai_chat_completions,openai_completions,openai_responses,openai_embeddings,model_discovery
+[1787720687.858] [sandbox] [OCSF ] [ocsf] API:INFERENCE [INFO] Failure granite4.1:3b via http://127.0.0.1:11434/v1 0ms [POST\u{20}/v1/chat/completions]
+[1787720687.858] [sandbox] [OCSF ] [ocsf] NET:FAIL [LOW] inference.local:443
+[1787720691.675] [sandbox] [OCSF ] [ocsf] NET:OPEN [INFO] ALLOWED inference.local:443
+[1787720691.676] [sandbox] [INFO ] [openshell_router] routing proxy inference request (streaming) endpoint=http://127.0.0.1:11434/v1 method=POST path=/v1/chat/completions protocols=openai_chat_completions,openai_completions,openai_responses,openai_embeddings,model_discovery
+[1787720691.677] [sandbox] [OCSF ] [ocsf] API:INFERENCE [INFO] Failure granite4.1:3b via http://127.0.0.1:11434/v1 1ms [POST\u{20}/v1/chat/completions]
+[1787720691.677] [sandbox] [OCSF ] [ocsf] NET:FAIL [LOW] inference.local:443
+[1787720694.060] [sandbox] [INFO ] [openshell_sandbox] Flushed activity summary to gateway denied_action_count=0 network_activity_count=3 sandbox_name=obx-eval-0ec839b090
+[1787720695.742] [sandbox] [OCSF ] [ocsf] NET:OPEN [INFO] ALLOWED inference.local:443
+[1787720695.750] [sandbox] [INFO ] [openshell_router] routing proxy inference request (streaming) endpoint=http://127.0.0.1:11434/v1 method=POST path=/v1/chat/completions protocols=openai_chat_completions,openai_completions,openai_responses,openai_embeddings,model_discovery
+[1787720695.751] [sandbox] [OCSF ] [ocsf] API:INFERENCE [INFO] Failure granite4.1:3b via http://127.0.0.1:11434/v1 8ms [POST\u{20}/v1/chat/completions]
+[1787720695.751] [sandbox] [OCSF ] [ocsf] NET:FAIL [LOW] inference.local:443
+[1787720695.778] [sandbox] [OCSF ] [ocsf] HTTP:POST [INFO] ALLOWED /usr/local/bin/node(383) -> POST http://host.openshell.internal:59550/api/v1/governance/evaluate [policy:openbox_core_relay engine:l7]
+[1787720695.932] [sandbox] [OCSF ] [ocsf] HTTP:POST [INFO] ALLOWED /usr/local/bin/node(383) -> POST http://host.openshell.internal:59550/api/v1/governance/evaluate [policy:openbox_core_relay engine:opa]
+[1787720695.934] [sandbox] [OCSF ] [ocsf] HTTP:POST [INFO] ALLOWED /usr/local/bin/node(383) -> POST http://host.openshell.internal:59550/api/v1/governance/evaluate [policy:openbox_core_relay engine:l7]
+[1787720696.634] [gateway] [INFO ] [openshell_server::supervisor_session] supervisor session: stream closed by supervisor
+[1787720696.634] [gateway] [INFO ] [openshell_server::supervisor_session] supervisor session: ended
+Error:   × code: 'The operation was cancelled', message: "stream closed"
+

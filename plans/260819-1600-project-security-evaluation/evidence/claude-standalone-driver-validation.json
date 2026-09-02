@@ -1,0 +1,136 @@
+{
+  "task": "SE-07-06",
+  "captured_at": "2026-08-22T16:01:03Z",
+  "result": "verified",
+  "decision": "unsupported_exact_tuple",
+  "reason": "The exact standalone SRT tuple cannot deny an unapproved loopback port while permitting the required project listener and receiver ports.",
+  "toolchain": {
+    "go": "go1.27.0 darwin/arm64",
+    "node": "22.20.0",
+    "npm": "11.19.0",
+    "macos": "26.5.2",
+    "darwin": "25.5.0"
+  },
+  "tuple": {
+    "driver": "claude-sandbox-runtime",
+    "mode": "standalone",
+    "package": "@anthropic-ai/sandbox-runtime",
+    "package_version": "0.0.73",
+    "package_tarball_sha256": "15555a1e919f6f114ba6b6e4d93289df0d77f72ae92a1236778d4421b17a66ce",
+    "node_path": "/Users/lebrian/.nvm/versions/node/v22.20.0/bin/node",
+    "node_sha256": "49161ba4e67afda85c25b2daa1f0e91d1bffc023d2dbc4886eda7a9ba38bca62",
+    "installation_inventory_digest": "sha256:ce1f33c28464ce74dd87f9e8651105b68821a4458d3f3b477a3a1e8210151d60",
+    "package_json_sha256": "ad97824b4fd394211dd4af1902675a50861bcf14dc8497d02dd9aa7ea09fcbf4",
+    "package_lock_sha256": "9ce9626c834cbab2cef334f1e614fefab159c45c0ef669f90a165b1ca09b230c",
+    "transitive_packages": {
+      "@pondwader/socks5-server": "1.0.10",
+      "commander": "12.1.0",
+      "node-forge": "1.4.0",
+      "zod": "3.25.76"
+    }
+  },
+  "inputs": {
+    "cli/internal/assurance/sandbox/claude.go": "aa3828a1bf69532360175c082bf18f77ddd2fde75a5c02f7ef4055df88b089c0",
+    "cli/internal/assurance/sandbox/claude_test.go": "b7242da9e99015c18632a7300d11c65c5f62065b7997ba6a822bdd16f2d4b7fb",
+    "cli/internal/assurance/sandbox/claude_live_darwin_test.go": "6355bb5e0f400e1f7f3d8f823f5838840405d463343360dcbc0e9591658f960b",
+    "cli/internal/assurance/sandbox/main_test.go": "842db07d1dc0b078c4d28cb42d8a467517da1f4f821558d657286ba62709ef8c",
+    "cli/internal/assurance/sandbox/codex.go": "a91192f17cf989304d61e4558d24804f03524f71037e7782628a2dc355919bb7",
+    "cli/internal/assurance/sandbox/run.go": "f37887238b6c345e07962ef39a6d3a987e1c202defa29539fd2675da71ca7ed7",
+    "evidence/claude-srt-0.0.73.package.json": "ad97824b4fd394211dd4af1902675a50861bcf14dc8497d02dd9aa7ea09fcbf4",
+    "evidence/claude-srt-0.0.73.package-lock.json": "9ce9626c834cbab2cef334f1e614fefab159c45c0ef669f90a165b1ca09b230c",
+    "evidence/claude-sandbox-qualification.json": "c97fd4e8216519ed78aeda52d6dd337eee07123503ad12f510869228c6cc22bc",
+    "docs/adr/ADR-0020-project-assurance-native-sandbox.md": "ee32d78d489fe98f71654104c209001e04606b4dcde1f16f7a6c09e07e2dfe28"
+  },
+  "implementation": {
+    "scope": "one exact standalone SRT candidate adapter inside cli/internal/assurance/sandbox",
+    "common_contracts": [
+      "ProbeSpec",
+      "HelperRequest and the built-in parent/child helper",
+      "bounded process-group execution",
+      "closed FailureReason values",
+      "production-coordinate preflight"
+    ],
+    "state": "fresh runfs-owned HOME plus one canonical exact settings file",
+    "installation": "opaque exact Node and full node_modules inventory binding, rechecked before launch",
+    "fallback": "no unsandboxed retry",
+    "project_run_api": "not exposed because the mandatory common probe did not qualify"
+  },
+  "live_observation": {
+    "fresh_offline_npm_ci": true,
+    "installation_digest_reproduced": true,
+    "parent_allowed_loopback_hits": 1,
+    "child_allowed_loopback_hits": 1,
+    "parent_unapproved_loopback_hits": 2,
+    "child_unapproved_loopback_hits": 2,
+    "common_probe_result": "probe_failed",
+    "outside_write_sentinels": 0,
+    "backend_fault_exit": "probe_failed",
+    "backend_fault_payload_executed": false,
+    "unsandboxed_retry_observed": false,
+    "model_requests": 0,
+    "provider_requests": 0,
+    "docker_actions": 0
+  },
+  "qualification": {
+    "filesystem_parent_child": "observed before the fail-safe aggregate rejection; allowed writes succeeded and outside sentinels remained absent",
+    "network_external_parent_child": "unlisted external HTTP was denied and direct external sockets failed",
+    "network_loopback_allowed_parent_child": "observed",
+    "network_loopback_unapproved_parent_child": "failed: all four unapproved-port requests reached the second loopback listener",
+    "credentials_parent_child": "the explicit child environment omitted every production credential sentinel, including CLAUDE_CODE_OAUTH_TOKEN",
+    "fallback": "backend fault executed no sentinel and SRT did not retry unsandboxed",
+    "timeout_cleanup": "the shared bounded process-group implementation remains covered by repeated/race tests, but cannot promote this rejected tuple"
+  },
+  "commands": [
+    {
+      "command": "Context7 resolve/query /anthropic-experimental/sandbox-runtime for current standalone API, configuration, platform, inheritance, fallback, and cleanup documentation",
+      "exit_status": 0,
+      "result": "Current official source confirms SRT uses native Seatbelt/bubblewrap, requires explicit settings for fail-closed loading, sets POSIX loopback in NO_PROXY, and exposes no per-loopback-port sandbox rule."
+    },
+    {
+      "command": "npm pack @anthropic-ai/sandbox-runtime@0.0.73; shasum -a 256 archive; inspect package metadata/source",
+      "exit_status": 0,
+      "result": "The published archive matched the ADR-pinned SHA-256 and package version. No package code ran during source inspection."
+    },
+    {
+      "command": "copy pinned qualification package.json/package-lock.json to a fresh private temp root; npm ci --ignore-scripts --install-strategy=hoisted --offline",
+      "exit_status": 0,
+      "result": "Five exact packages installed from the local npm cache; the compiled bounded inventory digest reproduced."
+    },
+    {
+      "command": "OPENBOX_CLAUDE_SRT_ROOT=[fresh exact install] go test -count=3 -v -run '^TestClaudeStandalone(CommonProbeRejectsUnapprovedLoopback|BackendUnavailableDoesNotFallback)$|^TestQualifiedClaudeInstallationDigest$' ./internal/assurance/sandbox",
+      "exit_status": 0,
+      "result": "Three live repetitions observed two allowed-loopback hits and four unapproved-loopback hits per common probe, rejected the tuple, reproduced the installation identity, and proved backend failure did not run the fallback sentinel."
+    },
+    {
+      "command": "go test -count=25 ./internal/assurance/sandbox; go test -race -count=5 ./internal/assurance/sandbox; go vet ./internal/assurance/sandbox",
+      "exit_status": 0,
+      "result": "Candidate adapter, common helper, state, installation identity, process bounds, cleanup, and existing Codex behavior passed repeated/race/vet gates."
+    },
+    {
+      "command": "go test -count=1 ./internal/assurance/...; go test -count=1 ./cmd/openbox; go vet ./internal/assurance/... ./cmd/openbox",
+      "exit_status": 0,
+      "result": "All assurance packages and the full CLI passed affected module tests and vet."
+    },
+    {
+      "command": "GOOS=linux GOARCH=amd64 and GOOS=windows GOARCH=amd64 go test -exec=true -run '^$' ./internal/assurance/sandbox; gofmt -d; git diff --check",
+      "exit_status": 0,
+      "result": "The package compiled on Linux and Windows without executing foreign binaries; formatting and whitespace checks were clean. Runtime support is not claimed on those platforms."
+    }
+  ],
+  "boundary": {
+    "native_sandbox": true,
+    "docker_sandbox": false,
+    "docker_compose": "not used by this qualification",
+    "anthropic_model": "not invoked",
+    "production_credentials_or_endpoints": false,
+    "external_control_plane_writes": false,
+    "repository_dependency_added": false
+  },
+  "limits": [
+    "This exact Darwin arm64 SRT 0.0.73 tuple is unsupported for project assurance because allowLocalBinding grants direct access to every local port; the accepted gate requires allowed and unapproved loopback to be distinguished.",
+    "No weaker profile, Docker fallback, unsandboxed retry, driver switch, or project Run API was added to turn the rejection into a pass.",
+    "The current documentation covers newer cross-platform capabilities, but only the exact ADR-pinned 0.0.73 package and Node 22.20.0 bytes were executed here.",
+    "The shared process timeout/output/cleanup mechanisms passed, but cannot qualify a tuple that fails its network boundary.",
+    "Inherited Claude Code mode remains separately owned by SE-07-07."
+  ]
+}

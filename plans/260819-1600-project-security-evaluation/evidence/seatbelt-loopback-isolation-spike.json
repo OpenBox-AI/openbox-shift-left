@@ -1,0 +1,70 @@
+{
+  "task": "S-00",
+  "captured_at": "2026-08-24T00:00:00Z",
+  "result": "verified",
+  "decision": "mechanism_proven",
+  "reason": "A first-party Seatbelt profile distinguishes approved from unapproved loopback ports on one host, for both outbound connections and listener binds, and the kernel applies it to spawned children. This is the exact SE-03-10 stop condition that Codex 0.149.0 and SRT 0.0.73 could not satisfy.",
+  "scope": "Mechanism spike only. This proves the OS capability the driver will depend on. It is not a driver, a tuple qualification, or a support row.",
+  "host": {
+    "macos": "26.5.2",
+    "darwin": "25.5.0",
+    "arch": "arm64",
+    "backend": "/usr/bin/sandbox-exec",
+    "backend_sha256": "8290e4be7387a0df83cd1559e86afd880464f269450573d012795761fe298f16"
+  },
+  "prior_art": {
+    "source": "/usr/share/sandbox/*.sb on this host",
+    "observed_forms": [
+      "(remote ip \"localhost:62078\")",
+      "(remote ip \"localhost:631\")",
+      "(local tcp \"*:445\")"
+    ],
+    "note": "Apple's own shipped profiles use per-port loopback filters. SRT uses the same outbound form internally to reach its proxy ports; it exposes no user-facing per-port rule, and its allowLocalBinding setting is an all-or-nothing widening."
+  },
+  "profile_under_test": [
+    "(version 1)",
+    "(deny default)",
+    "(allow process-exec) (allow process-fork) (allow file-read*)",
+    "(allow file-write-data (literal \"/dev/null\") (literal \"/dev/stdout\") (literal \"/dev/stderr\"))",
+    "(allow sysctl-read) (allow mach-lookup) (allow signal (target self))",
+    "(allow network-bind    (local tcp \"*:<appPort>\"))",
+    "(allow network-inbound (local tcp \"*:<appPort>\"))",
+    "(allow network-outbound (remote ip \"localhost:<allowedPort>\"))"
+  ],
+  "observations": {
+    "sanity_both_listeners_live_unsandboxed": {
+      "allowed_port": 204,
+      "denied_port": 204,
+      "note": "Load-bearing. The 2026-08-23 SE-03-10 reopening turned on a denied target where nothing listened, so a refusal was indistinguishable from a denial. Both listeners answer 204 outside the sandbox."
+    },
+    "outbound_parent": {
+      "allowed_same_host_port": "204",
+      "unapproved_same_host_port": "000, curl exit 7 (CURLE_COULDNT_CONNECT)",
+      "external_192_0_2_1": "000, curl exit 7"
+    },
+    "outbound_child": {
+      "spawned_via": "/bin/sh -c",
+      "allowed_same_host_port": "204, exit 0",
+      "unapproved_same_host_port": "000, exit 7",
+      "note": "Confinement is applied by the kernel to the whole process tree, so child inheritance is structural rather than a flag to trust."
+    },
+    "bind": {
+      "declared_port": "OK",
+      "undeclared_port": "DENIED (EPERM)"
+    },
+    "filesystem": {
+      "write_outside_allowed_roots": "DENIED (Operation not permitted); file was not created"
+    }
+  },
+  "findings": [
+    "network-bind alone is insufficient for a listener: listen() also requires network-inbound. A profile granting only network-bind denies the bind with EPERM, which reads as a filter-syntax failure but is not.",
+    "The bind filter takes the (local tcp \"*:PORT\") form, not (local ip \"...\"). The outbound filter takes (remote ip \"localhost:PORT\").",
+    "No proxy is required. Because external egress is denied outright, there is nothing for a domain allowlist to mediate, which removes SRT's entire proxy layer from the design."
+  ],
+  "limits": [
+    "Spike only: no OpenBox driver code was exercised, and no tuple is qualified or supported by this record.",
+    "macOS/arm64 only. Seatbelt has no Linux or Windows equivalent; those platforms remain compile-only.",
+    "/usr/bin/sandbox-exec is deprecated by Apple. This adds no new exposure, since both Codex and SRT already depend on it, but it is a named limit.",
+    "Ad-hoc listeners and curl were used as the payload. The real driver must reproduce these observations through the built-in probe helper and its typed HelperResult envelope."
+  ]
+}

@@ -1,0 +1,68 @@
+{
+  "schema": "openbox.project-assurance.project-test-orchestration-validation/v1",
+  "task": "SE-05-04",
+  "capturedAt": "2026-08-22T06:27:49Z",
+  "status": "verified",
+  "toolchain": {
+    "go": "go1.27.0 darwin/arm64",
+    "codex": "codex-cli 0.149.0",
+    "python": "3.9.6",
+    "platform": "macOS 26.5.2 (Darwin 25.5.0 arm64)"
+  },
+  "inputs": {
+    "projectRun": "sha256:fad89acf2e4e4f59d743905588935dd0d66e7da82f6a429bee1210909f3f9fb0",
+    "projectRunTests": "sha256:3fcae2c0cc1526411340a6798013990ee09051d8d20b824c3af767d36ee871da",
+    "projectRunOpenUnix": "sha256:cd451b2c60b43727f0b25f27bca73fa1602e717aa6fcdb00e383b1ffd1907a21",
+    "projectRunOpenOther": "sha256:d856199171983f5e24c3268b6fac83e3ee9eb1f59c9d14f5b46c27f0525efc35",
+    "projectCommand": "sha256:8154291432ddb732c69414b54e1f44a03d5bfd3479190d87fcf6ce6acd68bd52",
+    "projectInspect": "sha256:a74df68e8bd5d7a7b777a2201db672875342b31d86379d7cef2a90c119b36db0",
+    "main": "sha256:30a02c28db87afc26cd6e7b27d519c995b10e4f5bea0c23ef05378396fe59ed3",
+    "codexState": "sha256:efa5022af90f624294b2dba22d125747edc584ee200d5e1330bf15dacb5385a7",
+    "sandboxProbe": "sha256:f825b33d5d71383c971d79b2d76e8a3d1d5cd70eb9fd57831c21d7c4cefe97ee",
+    "sandboxPosture": "sha256:80a7856b50593434dbe0967272ccfb94db7f5a02c8c4ff66270969011b7fb4ce",
+    "platformDarwin": "sha256:a189182579a9dced650209c67fe182e4c2aae0b546ced6a6968575b029d9bc7e",
+    "platformOther": "sha256:a4879e5eba41d7e8bcac56e9350dff65e2d987b05f1566fffc0a2eaded93ad7f",
+    "sandboxRun": "sha256:1de3d2f9601b794f831e1c268424fa5ee32aec9322570d7703574310e800ae83",
+    "sdkDescriptor": "sha256:26a531cc383bbe23c4c52c4f17d95c8363e12b3ea0c297d4d8307dcae4f299c3",
+    "servicePlan": "sha256:9e4fc137318d398aceb1769cd19f9198a02ce599ef94684436ca6c0638205782",
+    "decision": "sha256:2d350b9ef63361486e0e8345f592584d19d648740f9e4697e0f6f0dd65199fc7",
+    "deterministicProfile": "sha256:201edf273c1c4e91eecfd43522e7c077eaed32b5d72078bc94121a2a9adb5470",
+    "mastraApplication": "sha256:2006574579373f5e94e73a2da9b3f96f68812d748f7dc8211e434d5cd3c2d2bd"
+  },
+  "commands": [
+    "go test -count=10 ./cmd/openbox ./internal/assurance/sandbox ./internal/assurance/sdkdesc ./internal/assurance/runprofile ./internal/assurance/runfs",
+    "go test -race -count=1 ./cmd/openbox ./internal/assurance/sandbox ./internal/assurance/sdkdesc ./internal/assurance/runprofile ./internal/assurance/runfs",
+    "go test -count=1 ./internal/assurance/... ./cmd/openbox",
+    "go vet ./...",
+    "GOOS=linux GOARCH=amd64 and GOOS=windows GOARCH=amd64 go test -run '^$' -c for cmd/openbox, sandbox, sdkdesc, runprofile, and runfs",
+    "build openbox with go build -trimpath, then run project test with the accepted deterministic profile and /usr/bin/false as the exact child command",
+    "run project test with a task-owned fixed Python literal-loopback /health and /invoke helper solely to prove the success/cleanup state path",
+    "check task-owned process, listener, workspace, Codex-state, protected-path, and proof-path absence after each run",
+    "git status --short",
+    "git diff --check"
+  ],
+  "result": {
+    "cli": "project test requires an explicit profile, the sole ASI02-INDIRECT-EGRESS-001 scenario, sandbox=codex, and an explicit -- command boundary; arguments remain data and no shell is inserted",
+    "profileRead": "the profile reader is bounded and rejects symlink, hard-link, FIFO, non-regular, and replacement inputs",
+    "stateMachine": "tests inject failure at inspect, snapshot, services, probe, launch, stimulus, cleanup, and source verification; cleanup is attempted exactly once and release always follows",
+    "nativeProbe": "the exact Codex 0.149.0 native parent/child probe completed before either observed child launch; no fallback or alternate driver exists",
+    "nativeFailurePath": "the sandboxed /usr/bin/false child exited before stimulus; the command failed closed with no stdout and one stable error line, then left no run-owned residue",
+    "nativeSuccessPath": "a fixed task-owned Python loopback helper completed readiness and stimulus status 200, proving orchestration and cleanup only",
+    "builtOpenbox": "sha256:4fe71e80b8da9673802aca4c738314497a020b2f64c574e5e306467baadf278b",
+    "pythonBinary": "sha256:179301dcb41ea78accc3fa0048a7e6f6710d891945a751a34addd622020c1818",
+    "failureStdout": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "failureStderr": "sha256:dd891c900c630d45f13c9d980133b0e18808578accfa44085c1fa3915158fc2d",
+    "successStdout": "sha256:a6150a5113167ce491c43c2ce0fa89ffb8d27253b4570ca37625b04dbe888d71",
+    "successStderr": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "sourceUnchanged": true,
+    "runOwnedResourcesRemoved": true,
+    "dockerPresent": false,
+    "fallbackPresent": false
+  },
+  "limits": [
+    "The success helper proves only the native orchestration, cancellation, source recheck, and cleanup path. It is not the Mastra project and emits no SDK, model, fixture, sink, scenario, or security evidence.",
+    "The accepted maxProcesses value is declared and correlated but is not a hard native enforcement surface; the command reports that limitation and no process-count support claim is made.",
+    "No model inference, provider request, production OpenBox coordinate, production credential, Docker command, external control-plane action, BLOCK verdict, or audit-pack publication occurred.",
+    "Run IDs and posture/cleanup digests intentionally include volatile run binding and are not asserted byte-identical across different executions."
+  ]
+}

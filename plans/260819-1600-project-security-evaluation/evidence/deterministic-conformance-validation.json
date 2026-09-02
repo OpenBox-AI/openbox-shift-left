@@ -1,0 +1,71 @@
+{
+  "schema": "openbox.project-assurance.deterministic-conformance-validation/v1",
+  "task": "SE-05-06",
+  "capturedAt": "2026-08-22T07:21:00Z",
+  "status": "verified",
+  "toolchain": {
+    "go": "go1.27.0 darwin/arm64",
+    "node": "26.7.0",
+    "npm": "11.19.0",
+    "codex": "codex-cli 0.149.0",
+    "platform": "macOS 26.5.2 (Darwin 25.5.0 arm64)"
+  },
+  "inputs": {
+    "conformanceTest": "sha256:2a8bb5a9c9975af01b726be4b5b3bee1b4e03ca88490ef7e3ec9abe55d77a48f",
+    "servicePreflight": "sha256:c9d5ca856f37731bcd8ad50759e7f7fbe2fdc4901b76283b4ab7cefddbb1399f",
+    "poisonFixture": "sha256:4bdfcab62a65344dbd7682a0663aa4f233ba0a2076cf049c27cdb527247fca59",
+    "modelHarness": "sha256:7b049c476f8380ae39c9a8695e35f4e51e60e37348868d3238d8448b1f607ccb",
+    "safeSink": "sha256:93156cccc37ba9faa66614eb6497cf20b56827639f7c78e0c452bf1a2a7604bd",
+    "receiver": "sha256:ab42d3435863fb0f721748ef0040edce384663932ed69940d6083b4fb4b97392",
+    "sdkReadiness": "sha256:f1e246a2203411d02f743fc033ddab4a077624af0ce760e84674712a5fc4026e",
+    "runProfile": "sha256:2315e5ca175800b40914c951199734cbc85720a948ea079418eb1d7c92a511a8",
+    "profileFixture": "sha256:201edf273c1c4e91eecfd43522e7c077eaed32b5d72078bc94121a2a9adb5470",
+    "projectSource": "sha256:388f865045ac7e8ee4fc105c50df324bfd9d13b3f2fa10275dd1e7b708ae3e4a",
+    "packageJson": "sha256:8e19b240b446999057edeba9a67a85dfd0b64dd86140895925944e37b522d226",
+    "packageLock": "sha256:9924ea8ab692ce843bb3908d1ceca39c7c50e4bc6ffb3b930e0f38c7e8dce1e5",
+    "preparedSnapshot": "sha256:19ac354b23c7e37117f4ac7c3e4ca8e73b9202f9930bf391a14f77a1b33e3381",
+    "sandboxSelectionEvidence": "sha256:94ce65e6997b1a5291b6c84e24e35a6f3b3db28dfe5fa04845119516640e15bf",
+    "sandboxQualificationEvidence": "sha256:4eeb7a517546abdaebd6caf8d7fa778126ef8bc7b23c36368a57c1211818bd8e",
+    "decision": "sha256:2d350b9ef63361486e0e8345f592584d19d648740f9e4697e0f6f0dd65199fc7"
+  },
+  "commands": [
+    "copy the project into a task-owned directory and run npm ci --ignore-scripts --no-audit --no-fund with the locked tree",
+    "PATH=/opt/homebrew/bin:/usr/bin:/bin npm run check && npm run typecheck",
+    "hash the prepared tree's exact COPYFILE_DISABLE=1 tar stream before execution",
+    "OPENBOX_MASTRA_STARTUP_ROOT=TASK_TEMP/snapshot OPENBOX_MASTRA_STARTUP_SNAPSHOT_DIGEST=sha256:19ac354b23c7e37117f4ac7c3e4ca8e73b9202f9930bf391a14f77a1b33e3381 go test -count=5 -v -run '^TestMastraDeterministicConformanceRunInQualifiedCodexSandbox$' ./internal/assurance/fixture",
+    "repeat the prepared-tree tar-stream SHA-256 and require byte identity",
+    "go test -count=10 ./internal/assurance/fixture ./internal/assurance/sdkdesc ./cmd/openbox",
+    "go test -race -count=1 ./internal/assurance/fixture ./internal/assurance/sdkdesc ./cmd/openbox",
+    "go test -count=1 ./internal/assurance/... ./cmd/openbox",
+    "go vet ./...",
+    "GOOS=linux GOARCH=amd64 and GOOS=windows GOARCH=amd64 go test -run '^$' -c for cmd/openbox, fixture, and sdkdesc",
+    "git status --short",
+    "git diff --check"
+  ],
+  "result": {
+    "repetitions": 5,
+    "sandbox": "every run used the exact one-shot native Codex parent-and-child probe authorization before launching the project; no alternate driver or unsandboxed retry exists",
+    "profileDigest": "sha256:61786505d6a1d2fe1e0bcb77d049f528b0d26a7e959fd104ac932ed8019c39df",
+    "receiver": "eight bounded normalized receiver records per run; the exact SDK auth plus one direct recordingTool ActivityStarted event produced ready with eventCount=1",
+    "poisonFixture": "one exact poisoned-dependency receipt per run with a nonempty marker digest and response digest",
+    "modelHarness": "one exact harness_only scripted_tool_selection receipt per run with a nonempty response digest",
+    "safeSink": "one exact accepted marker-only effect receipt per run with status 204 and nonempty marker/body digests",
+    "ollamaRelayRequests": 0,
+    "process": "each project process group was canceled only after the completed 200 stimulus and returned the normalized canceled result",
+    "cleanup": "each run produced one cleanup evidence digest after service, probe-listener, runtime-root, Codex-state, process, and socket cleanup",
+    "preparedBytesUnchanged": true
+  },
+  "cleanupEvidence": [
+    "sha256:4447ee1caa68ad37230fb2e4c6bf1543181b33b525a44e2005a8287a6f007648",
+    "sha256:953fc3e8ed7943ae1a33531cd0ed251014a2edef522ffe2d1881b8adcfd6190e",
+    "sha256:818fb1675751653500dfd3bbfb62639bf6dd3684faef0599ce9c69dcd59efac2",
+    "sha256:8942adcdbb463f8782eaf29f0fd6a7224733f632e3d0cfdab810a7f4a9e790c1",
+    "sha256:7f3c617412807466a53d576e35eab44a473f08f40298e1d261798175a3ac5cc9"
+  ],
+  "limits": [
+    "The scripted model service is harness-only evidence. It is not a provider protocol, model-quality observation, security verdict, or proof of the live Ollama branch.",
+    "The receiver emitted additional bounded SDK records, but only the descriptor-qualified auth and direct top-level recordingTool ActivityStarted event are promoted to readiness; no agent, model, HTTP, workflow, lifecycle, or other SDK class is claimed.",
+    "The sandbox contract binds maxProcesses=32 but the selected native tuple cannot hard-enforce process count; no hard process-count claim is made.",
+    "This run used loopback test identities and the baseline ALLOW receiver only. It did not produce BLOCK evidence, contact a production endpoint, use a production credential, publish an audit pack, or write to an external control plane."
+  ]
+}

@@ -1,0 +1,86 @@
+{
+  "schema": "openbox.project-assurance.sdk-tuple-lock/v1",
+  "captured_at": "2026-08-19T16:49:33Z",
+  "task_id": "SE-00-04",
+  "source": {
+    "repository": "../openbox-mastra-sdk",
+    "state": "clean local clone",
+    "branch": "main",
+    "commit": "db9863bd6659f8b1ce6a33903ea61e4e564be38b",
+    "tag": "1.0.0",
+    "tag_commit": "db9863bd6659f8b1ce6a33903ea61e4e564be38b",
+    "archive_sha256": "1e85dfd57ea751846236b01a94972ee58a8569045d9b20788e051092ff6933d1"
+  },
+  "package": {
+    "name": "@openbox-ai/openbox-mastra-sdk",
+    "version": "1.0.0",
+    "engines": {
+      "node": ">=24.10.0"
+    },
+    "package_json_sha256": "e11a34c50bb2bd4e4b5538fa9e1f5b638e0ce62ba1b4866d37930de6e06934e6",
+    "package_lock_sha256": "55f50d943ca7ca386f1e5e0371da02de8e180d9e439c071cb97d0991ba1d2332"
+  },
+  "runtime": {
+    "node": "v26.7.0",
+    "npm": "11.19.0",
+    "platform": "macOS 26.5.2 arm64"
+  },
+  "selected_resolutions": [
+    {
+      "package": "@mastra/core",
+      "version": "1.8.0",
+      "resolved": "https://registry.npmjs.org/@mastra/core/-/core-1.8.0.tgz",
+      "integrity": "sha512-AK6Isj21mWlwX1zIZNUxgAQvRfjJmdjsPsKoh1cOvaM+h748S4U48TJ5DsmundSj/8NBeKHmYXqH2RYqwN35nw=="
+    },
+    {
+      "package": "@openbox-ai/openbox-sdk",
+      "real_package": "@openbox-ai/openbox-sdk-ts",
+      "version": "1.0.1",
+      "resolved": "https://registry.npmjs.org/@openbox-ai/openbox-sdk-ts/-/openbox-sdk-ts-1.0.1.tgz",
+      "integrity": "sha512-UWQ6EBLJYD5XhF3BSflfRHHcL6PMOFj7ubda7I/TW10aCNWPx7DuxoNH/VqGrAtFb0QIKVgUSHlEyBi+isLGgw=="
+    },
+    {
+      "package": "@opentelemetry/api",
+      "version": "1.9.1",
+      "resolved": "https://registry.npmjs.org/@opentelemetry/api/-/api-1.9.1.tgz",
+      "integrity": "sha512-gLyJlPHPZYdAk1JENA9LeHejZe1Ti77/pTeFm/nMXmQH/HFZlcS/O2XJB+L8fkbrNSqhdtlvjBVjxwUYanNH5Q=="
+    },
+    {
+      "package": "zod",
+      "version": "4.3.6",
+      "resolved": "https://registry.npmjs.org/zod/-/zod-4.3.6.tgz",
+      "integrity": "sha512-rftlrkhHZOcjDwkGlnUtZZkvaPHCsDATp4pGpuOOMDaTdDDXF91wuVDJoWoPsKX/3YPQ5fHuF3STjcYyKr+Qhg=="
+    },
+    {
+      "package": "typescript",
+      "version": "5.9.3",
+      "resolved": "https://registry.npmjs.org/typescript/-/typescript-5.9.3.tgz",
+      "integrity": "sha512-jl1vZzPDinLr9eUt3J/t7V6FgNEw9QjvBPdysz9KfQDD41fQrC2Y4vKQdiaUpFT4bXlb1RHhLpp8wtm6M5TgSw=="
+    },
+    {
+      "package": "vitest",
+      "version": "3.2.6",
+      "resolved": "https://registry.npmjs.org/vitest/-/vitest-3.2.6.tgz",
+      "integrity": "sha512-xejya+bT/j/+R/AGa1XOfRxLmNUlLtlwjRsFUILF+xHfzElmGcmFydy2gqqIrd62ptIEfwVMofd19uNWD9L7Nw=="
+    }
+  ],
+  "commands": [
+    "git archive db9863bd6659f8b1ce6a33903ea61e4e564be38b | tar -x -C <task-temp>",
+    "npm ci --ignore-scripts --no-audit --no-fund",
+    "./node_modules/.bin/vitest run test/contract/openbox-client.test.ts test/contract/wrap-tool.test.ts test/conformance/base-sdk-conformance-kit.test.ts",
+    "npm run build"
+  ],
+  "install_observation": {
+    "exit_status": 0,
+    "result": "564 packages installed from the committed lock",
+    "warnings": [
+      "npm overrode Mastra transitive peer requests for zod ^3.23.8 with the root lock's zod 4.3.6",
+      "npm reported glob 10.5.0 as deprecated"
+    ]
+  },
+  "limits": [
+    "The committed package-lock.json, not dependency ranges in package.json, defines this qualification tuple.",
+    "The local clone had no node_modules; installation and build occurred only in a task-owned archive extraction.",
+    "This lock qualifies the local source commit and does not claim that registry publication bytes match the local source archive."
+  ]
+}

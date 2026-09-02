@@ -1,0 +1,45 @@
+[1787720374.121] [gateway] [INFO ] [openshell_server::grpc::sandbox] minted sandbox JWT
+[1787720374.127] [gateway] [INFO ] [openshell_server::grpc::sandbox] CreateSandbox request completed successfully
+[1787720374.382] [gateway] [INFO ] [openshell_server::grpc::policy] GetSandboxConfig served from spec (backfilled version 1)
+[1787720375.761] [sandbox] [INFO ] [openshell_sandbox] Starting sandbox command=["/usr/local/bin/node", "/app/src/index.mjs"]
+[1787720375.762] [sandbox] [INFO ] [openshell_sandbox] Fetching sandbox policy via gRPC endpoint=https://host.openshell.internal:17670/ sandbox_id=dab9f65f-d3a0-4942-bc2a-3ccea94c102d
+[1787720375.985] [gateway] [INFO ] [openshell_server::grpc::policy] GetSandboxProviderEnvironment request completed successfully
+[1787720376.089] [gateway] [INFO ] [openshell_server::grpc::policy] ReportPolicyStatus: sandbox reported policy load result
+[1787720376.093] [gateway] [INFO ] [openshell_server::supervisor_session] supervisor session: accepted
+[1787720376.118] [gateway] [INFO ] [openshell_server::supervisor_session] supervisor session: relay opened successfully
+[1787720376.118] [gateway] [INFO ] [openshell_server::supervisor_session] relay stream: claimed pending relay, bridging
+[1787720375.767] [sandbox] [OCSF ] [ocsf] CONFIG:ENRICHED [INFO] Enriched policy with baseline filesystem paths for proxy mode
+[1787720375.773] [sandbox] [INFO ] [openshell_sandbox] Creating OPA engine from proto policy data
+[1787720375.774] [sandbox] [INFO ] [openshell_supervisor_network::opa] Configured OPA runtime binary identity mode require_binary_identity=true source=proto
+[1787720375.775] [sandbox] [OCSF ] [ocsf] CONFIG:CONFIGURED [INFO] OPA runtime binary identity mode configured [source:proto require_binary_identity:true] [source:proto]
+[1787720375.781] [sandbox] [OCSF ] [ocsf] CONFIG:LOADED [INFO] Fetched provider environment [env_count:1]
+[1787720375.782] [sandbox] [OCSF ] [ocsf] CONFIG:CREATING [INFO] Creating network namespace [ns:sandbox-76cdaa4b host_veth:veth-h-76cdaa4b sandbox_veth:veth-s-76cdaa4b]
+[1787720375.855] [sandbox] [OCSF ] [ocsf] CONFIG:CREATED [INFO] Network namespace created [ns:sandbox-76cdaa4b host_ip:10.200.0.1 sandbox_ip:10.200.0.2]
+[1787720375.871] [sandbox] [OCSF ] [ocsf] CONFIG:INSTALLED [INFO] Bypass detection rules installed [ns:sandbox-76cdaa4b]
+[1787720375.873] [sandbox] [OCSF ] [ocsf] CONFIG:ENABLED [INFO] TLS termination enabled: ephemeral CA generated
+[1787720375.874] [sandbox] [INFO ] [openshell_supervisor_network::inference_routes] Fetching inference route bundle from gateway endpoint=https://host.openshell.internal:17670/
+[1787720375.876] [sandbox] [OCSF ] [ocsf] CONFIG:LOADED [INFO] Loaded inference route bundle [route_count:1 revision:3724d81ba11cfb74]
+[1787720375.877] [sandbox] [OCSF ] [ocsf] CONFIG:ENABLED [INFO] Inference routing enabled with local execution [route_count:1]
+[1787720375.878] [sandbox] [OCSF ] [ocsf] NET:LISTEN [INFO] 10.200.0.1:3128
+[1787720375.878] [sandbox] [WARN ] [openshell_supervisor_network::proxy] host.openshell.internal maps to a non-link-local IP; trusted-gateway SSRF exemption disabled ip=192.168.127.254
+[1787720375.878] [sandbox] [OCSF ] [ocsf] CONFIG:VALIDATED [INFO] Accepted numeric UID 1000 (no passwd entry required)
+[1787720375.878] [sandbox] [OCSF ] [ocsf] CONFIG:VALIDATED [INFO] Accepted numeric GID 1000 (no group entry required)
+[1787720375.883] [sandbox] [WARN ] [openshell_supervisor_process::process] runtime cgroup pids.max is unavailable (No such file or directory (os error 2)); configure the compute driver or container runtime to enforce a PID limit
+[1787720375.883] [sandbox] [OCSF ] [ocsf] FINDING:CREATE [HIGH] "Landlock Filesystem Sandbox Unavailable" [type:landlock-unavailable confidence:high]
+[1787720375.883] [sandbox] [OCSF ] [ocsf] FINDING:CREATE [HIGH] "Landlock Filesystem Sandbox Unavailable" [type:landlock-unavailable confidence:high]
+[1787720375.885] [sandbox] [OCSF ] [ocsf] CONFIG:LOADED [INFO] Acknowledged initial policy revision as loaded [version:2] [hash:d6b3c9eae183136d913a54ce61bd893381a9bc3bbb4250680ab6b4f5f09d7ef3]
+[1787720375.885] [sandbox] [OCSF ] [ocsf] SSH:LISTEN [INFO]
+[1787720375.886] [sandbox] [OCSF ] [ocsf] LIFECYCLE:INSTALL [INFO] OpenShell Sandbox Supervisor success
+[1787720375.886] [sandbox] [INFO ] [openshell_supervisor_process::run] supervisor session task spawned
+[1787720375.886] [sandbox] [OCSF ] [ocsf] PROC:LAUNCH [INFO] /usr/local/bin/node(383)
+[1787720375.889] [sandbox] [OCSF ] [ocsf] NET:OPEN [INFO] host.openshell.internal:17670
+[1787720375.913] [sandbox] [OCSF ] [ocsf] NET:OPEN [INFO] [msg:ssh relay open (channel_id=96567016-38e7-4cca-a751-387971e514a0, target=unix:/run/openshell/ssh.sock)]
+[1787720375.913] [sandbox] [OCSF ] [ocsf] SSH:OPEN [INFO] ALLOWED
+[1787720376.660] [sandbox] [INFO ] [openshell_supervisor_network::run] Container filesystem accessible, resolving policy binary symlinks attempt=1 pid=383
+[1787720376.661] [sandbox] [INFO ] [openshell_supervisor_network::opa] Configured OPA runtime binary identity mode require_binary_identity=true source=proto
+[1787720376.661] [sandbox] [OCSF ] [ocsf] CONFIG:CONFIGURED [INFO] OPA runtime binary identity mode configured [source:proto require_binary_identity:true] [source:proto]
+[1787720376.667] [sandbox] [INFO ] [openshell_supervisor_network::run] Policy binary symlink resolution complete (check logs above for per-binary results) pid=383
+[1787720379.054] [gateway] [INFO ] [openshell_server::supervisor_session] supervisor session: stream closed by supervisor
+[1787720379.054] [gateway] [INFO ] [openshell_server::supervisor_session] supervisor session: ended
+Error:   × code: 'The operation was cancelled', message: "stream closed"
+

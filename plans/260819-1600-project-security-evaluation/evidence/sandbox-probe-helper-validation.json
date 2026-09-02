@@ -1,0 +1,50 @@
+{
+  "schema": "openbox.project-assurance.sandbox-probe-helper-validation/v1",
+  "task": "SE-03-03",
+  "capturedAt": "2026-08-21T03:53:55Z",
+  "status": "passed_with_limits",
+  "toolchain": {
+    "go": "go1.26.7 darwin/arm64",
+    "os": "macOS 26.5.2",
+    "kernel": "Darwin 25.5.0"
+  },
+  "inputs": {
+    "helperGo": "sha256:9f369bf2cce1682926b849854b2e02df4bca50015916dd8e7a53b9bf51874847",
+    "helperOtherGo": "sha256:bb0f16c55fa8f279bf8eebebd9a0ee51c860f23675e17d39b9dbd6943e3ac723",
+    "helperTestGo": "sha256:384e17576f8e16a3fceba8d3d0f2fa8d6fe4ddeb79537b0e2f8d476048205128",
+    "helperUnixGo": "sha256:f2a4e58319af7d2a232090fb16ba4abeb064a30567fc15b925156fe52dbdc3a6",
+    "helperUnixTestGo": "sha256:754d0949471f335b28ee6326bf087be678a6a24c3da3e8d0abfa5f734483fb94",
+    "driverGo": "sha256:d5e03e82a777b7c7e8bbff8bced4f12a4a873005bde4777f052265f570ab430e",
+    "postureTestGo": "sha256:1635709eaff020ea72a9ce183b2753926583d7d3925fedb27bff70ca479f3442",
+    "sandboxPostureFixture": "sha256:9b92eb12fb712c19fe41cccc3d49c2ab42b64e5a1f51e902e0a0507ffa471905",
+    "adr": "sha256:ec9787824660cc9f0d0227a1ae10017cbe2e1794a3cdb3ddbfa81425b40ac3a0"
+  },
+  "commands": [
+    "cd cli && go test ./internal/assurance/sandbox -count=10",
+    "cd cli && go test -race ./internal/assurance/sandbox -count=1",
+    "cd cli && go vet ./internal/assurance/sandbox",
+    "cd cli && GOOS=linux GOARCH=amd64 go test -c ./internal/assurance/sandbox; GOOS=windows GOARCH=amd64 go test -c ./internal/assurance/sandbox",
+    "node plans/260819-1600-project-security-evaluation/evidence/probes/validate_project_assurance_schemas.mjs /Users/lebrian/.Trash/openbox-se02-07-ajv.x5OIha/node_modules/ajv contracts/project-assurance",
+    "gofmt -d cli/internal/assurance/sandbox/{helper,helper_other,helper_test,helper_unix,helper_unix_test,driver,posture_test}.go",
+    "git status --short",
+    "git diff --check"
+  ],
+  "result": {
+    "filesystem": "parent and spawned child independently digest the bounded allowed fixture, exclusively create the declared allowed marker, and distinguish denied creation from a file created before write/close failure",
+    "network": "IP-literal HTTP targets use per-request timeouts, no redirects, bounded response bodies, and either direct mode or a required explicit loopback HTTP proxy; remote/DNS proxies are rejected and the normalized loopback proxy is retained only as a digest",
+    "environment": "parent and child report only requested environment names and presence booleans; a secret canary value is absent from canonical helper evidence",
+    "child": "the child receives the same bounded JSON protocol over stdin, repeats the checks, inherits the sandbox-provided environment, and returns bounded strict output",
+    "limits": "deterministic stdout/stderr load is capped at 1 MiB per stream; waits are cancelable and capped at two minutes; child runtime and output are bounded",
+    "adversarial": "unknown/oversized input, DNS targets, remote proxy, redirect, oversized response, FIFO, symlink, closed port, and canceled wait fail closed or remain explicit observations",
+    "binding": "RequireManagedProxy is part of the canonical probe binding; the fixture posture was revalidated by Ajv after the binding change",
+    "tests": "focused count-10, package race, vet, and Linux/Windows compilation passed",
+    "independentReview": "approved the final proxy-authority, filesystem, child, bounds, and secret-retention hashes; no reviewer writes"
+  },
+  "limits": [
+    "The helper reports observations; it does not decide that confinement passed. A proxy digest proves the configured loopback URL, not the listening process or forwarding. The driver must also require the expected controlled receiver status/body and child environment.",
+    "The helper flag and ProbeSpec.RequireManagedProxy are separate typed inputs in this task. Later driver construction must derive both from one frozen configuration.",
+    "The child argv is a test/driver input here. Later Codex construction must freeze it to the built-in helper and must not accept a shell string.",
+    "Darwin/Linux reads use no-follow nonblocking descriptors. The non-Unix implementation is compile-only and cannot qualify a tuple.",
+    "No live sandbox, external network, project command, SDK/provider code, production endpoint, external control-plane operation, support tuple, or verdict was used or claimed."
+  ]
+}

@@ -1,0 +1,116 @@
+[33m⚠[39m OPENAI_API_KEY looks like a credential passed as a plain environment variable.
+  The agent inside the sandbox can read this value directly.
+
+  To hide it from the agent, use a provider instead of --env.
+  See: https://docs.nvidia.com/openshell/latest/sandboxes/providers-v2
+
+Upstream LLM API error from custom (model: granite4.1:3b) {
+  error: APICallError [AI_APICallError]: Service Unavailable
+      at file:///app/node_modules/@mastra/core/dist/chunk-SBPPGJL6.js:1038:14
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async postToApi (file:///app/node_modules/@mastra/core/dist/chunk-SBPPGJL6.js:888:28)
+      at async OpenAICompatibleChatLanguageModel.doGenerate (file:///app/node_modules/@mastra/core/dist/chunk-SBPPGJL6.js:2665:9)
+      at async AISDKV5LanguageModel.doGenerate (file:///app/node_modules/@mastra/core/dist/chunk-MRV5NCPC.js:907:20)
+      at async pRetry.default.retries (file:///app/node_modules/@mastra/core/dist/chunk-VBPU6CLZ.js:11705:34)
+      at async Module.pRetry (file:///app/node_modules/p-retry/index.js:197:19)
+      at async createStream (file:///app/node_modules/@mastra/core/dist/chunk-VBPU6CLZ.js:11702:16)
+      at async Object.start (file:///app/node_modules/@mastra/core/dist/chunk-VBPU6CLZ.js:2023:27) {
+    cause: undefined,
+    url: 'https://inference.local/v1/chat/completions',
+    requestBodyValues: {
+      model: 'granite4.1:3b',
+      user: undefined,
+      max_tokens: undefined,
+      temperature: 0,
+      top_p: undefined,
+      frequency_penalty: undefined,
+      presence_penalty: undefined,
+      response_format: undefined,
+      stop: undefined,
+      seed: undefined,
+      reasoning_effort: undefined,
+      verbosity: undefined,
+      messages: [Array],
+      tools: [Array],
+      tool_choice: [Object]
+    },
+    statusCode: 503,
+    responseHeaders: { 'content-length': '41', 'content-type': 'application/json' },
+    responseBody: '{"error":"inference service unavailable"}',
+    isRetryable: true,
+    data: undefined,
+    Symbol(vercel.ai.error): true,
+    Symbol(vercel.ai.error.AI_APICallError): true
+  },
+  runId: 'ev-0ec839b09030848070c482dc',
+  provider: 'custom',
+  modelId: 'granite4.1:3b'
+}
+node:internal/modules/run_main:107
+    triggerUncaughtException(
+    ^
+
+APICallError [AI_APICallError]: Service Unavailable
+    at file:///app/node_modules/@mastra/core/dist/chunk-SBPPGJL6.js:1038:14
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async postToApi (file:///app/node_modules/@mastra/core/dist/chunk-SBPPGJL6.js:888:28)
+    at async OpenAICompatibleChatLanguageModel.doGenerate (file:///app/node_modules/@mastra/core/dist/chunk-SBPPGJL6.js:2665:9)
+    at async AISDKV5LanguageModel.doGenerate (file:///app/node_modules/@mastra/core/dist/chunk-MRV5NCPC.js:907:20)
+    at async pRetry.default.retries (file:///app/node_modules/@mastra/core/dist/chunk-VBPU6CLZ.js:11705:34)
+    at async Module.pRetry (file:///app/node_modules/p-retry/index.js:197:19)
+    at async createStream (file:///app/node_modules/@mastra/core/dist/chunk-VBPU6CLZ.js:11702:16)
+    at async Object.start (file:///app/node_modules/@mastra/core/dist/chunk-VBPU6CLZ.js:2023:27) {
+  cause: undefined,
+  url: 'https://inference.local/v1/chat/completions',
+  requestBodyValues: {
+    model: 'granite4.1:3b',
+    user: undefined,
+    max_tokens: undefined,
+    temperature: 0,
+    top_p: undefined,
+    frequency_penalty: undefined,
+    presence_penalty: undefined,
+    response_format: undefined,
+    stop: undefined,
+    seed: undefined,
+    reasoning_effort: undefined,
+    verbosity: undefined,
+    messages: [
+      {
+        role: 'system',
+        content: 'Execute the recording-tool exactly once and return no additional work.'
+      },
+      {
+        role: 'user',
+        content: 'Perform the single deterministic evaluation activity now.'
+      }
+    ],
+    tools: [
+      {
+        type: 'function',
+        function: {
+          name: 'recording-tool',
+          description: 'Record the deterministic local evaluation step.',
+          parameters: {
+            '$schema': 'https://json-schema.org/draft/2020-12/schema',
+            type: 'object',
+            properties: {},
+            additionalProperties: false
+          }
+        }
+      }
+    ],
+    tool_choice: { type: 'function', function: { name: 'recording-tool' } }
+  },
+  statusCode: 503,
+  responseHeaders: { 'content-length': '41', 'content-type': 'application/json' },
+  responseBody: '{"error":"inference service unavailable"}',
+  isRetryable: true,
+  data: undefined,
+  Symbol(vercel.ai.error): true,
+  Symbol(vercel.ai.error.AI_APICallError): true
+}
+
+Node.js v26.7.0
+Error:   × ssh exited with status exit status: 1
+

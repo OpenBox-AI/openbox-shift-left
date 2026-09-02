@@ -1,0 +1,77 @@
+{
+  "schema": "openbox.project-assurance.manifest-assembly-validation/v1",
+  "task": "SE-01-07",
+  "capturedAt": "2026-08-20T11:36:59Z",
+  "status": "passed_with_limits",
+  "toolchain": {
+    "go": "go1.26.7 darwin/arm64",
+    "os": "macOS 26.5.2 build 25F84",
+    "kernel": "Darwin 25.5.0 arm64",
+    "filesystem": "APFS with owners enabled"
+  },
+  "inputs": {
+    "canonicalGo": "sha256:418d3d01b05a438d7c4e7e4d111ae8adf5a91e7ff1d3066bbc0fb69256cd32ea",
+    "manifestGo": "sha256:09fd347a997d32824d365f153e624feef9fcdbb1c237cb57396819239838fe3d",
+    "manifestTestGo": "sha256:1a1ebb79d364eb1f281f9f97f2fe7c668eac06654e2ce65f839b77cacb5aa75b",
+    "runfsGo": "sha256:28506b2fe5ad18868d5a78a94ea92958afb74a9075b73f0f3c410ac061ecd326",
+    "runfsPlatformUnixGo": "sha256:648061be84c566d456f6f307043380a4315533d83d9f08fd0bda0bfc081a0a74",
+    "runfsPlatformDarwinGo": "sha256:c368e951bd8e826df8f78f28e4e0952c12fa78cfa5e7b083fb73bfd8dd16e9cc",
+    "runfsPlatformLinuxGo": "sha256:cf19339bd1154493381bc7270e8213bfc31575273c29895031ddb67ec7a1a0c1",
+    "runfsPlatformOtherGo": "sha256:08b22b245724d2f7f9a9f81618a40cf8406b0db1e42a09aee874c13547fc3d21",
+    "runfsManifestTestGo": "sha256:e02a0ad9483a339d848e3616e8bb93ce563e9a02e81eb310ab20b3008728ae68",
+    "auditPackSchema": "sha256:616c1e3fa7cc8c80488dbd23afa5c44e964ab0ea89124015b69e2041a1e772b4",
+    "projectModelSchema": "sha256:674831345fd9783a08aeee845ab11fdb2cf98cd97a03284cc0a4195ab234206c",
+    "policyProposalSchema": "sha256:2a8ee5e33d23be6cfddfbcbb621cff98853034989b5d2b55241461c2d66255f8",
+    "contractReadme": "sha256:5cfcbf87ec6704dc3b2014f73e2c09cd5d86d0a9be0cd5243ed6ec01ea37f0b8",
+    "goMod": "sha256:16df452b9d119396b14f5c8ab9c2ceb7143b5ccdc20271ef40eba15e1613bfea",
+    "goSum": "sha256:38f2bf9e5ba0a5c84860f45f4d50fdf7d4d1d0d21ceed4810d561f7b42a74cd8"
+  },
+  "commands": [
+    "cd cli && go test -count=1 ./internal/assurance/artifact ./internal/assurance/runfs",
+    "cd cli && go test -race -count=1 ./internal/assurance/artifact ./internal/assurance/runfs",
+    "cd cli && go test -count=10 -run 'Test(AssemblePackSeparatesNormalizedObjectsFromRunProvenance|AssemblePackChangedObjectChangesOnlyItsCIDAndManifest|AssemblePackDerivesJudgmentsObject|AssemblePackOptionalPolicyProposal|WritePackObjectsThenFinalizeManifestLast|WritePackObjectsFailsClosed)$' ./internal/assurance/artifact ./internal/assurance/runfs",
+    "cd cli && go test -count=1 ./...",
+    "cd cli && go vet ./...",
+    "cd cli && gofmt -d internal/assurance/artifact/manifest.go internal/assurance/artifact/manifest_test.go internal/assurance/runfs/runfs.go internal/assurance/runfs/platform_unix.go internal/assurance/runfs/platform_other.go internal/assurance/runfs/manifest_test.go",
+    "cd cli && GOOS=linux GOARCH=amd64 go test -c -o /tmp/openbox-se0107-artifact-linux-amd64.test ./internal/assurance/artifact && unlink /tmp/openbox-se0107-artifact-linux-amd64.test && GOOS=linux GOARCH=amd64 go test -c -o /tmp/openbox-se0107-runfs-linux-amd64.test ./internal/assurance/runfs && unlink /tmp/openbox-se0107-runfs-linux-amd64.test && GOOS=linux GOARCH=arm64 go test -c -o /tmp/openbox-se0107-runfs-linux-arm64.test ./internal/assurance/runfs && unlink /tmp/openbox-se0107-runfs-linux-arm64.test && GOOS=darwin GOARCH=amd64 go test -c -o /tmp/openbox-se0107-runfs-darwin-amd64.test ./internal/assurance/runfs && unlink /tmp/openbox-se0107-runfs-darwin-amd64.test && GOOS=windows GOARCH=amd64 go test -c -o /tmp/openbox-se0107-runfs-windows-amd64.test.exe ./internal/assurance/runfs && unlink /tmp/openbox-se0107-runfs-windows-amd64.test.exe",
+    "cd cli && go mod tidy -diff"
+  ],
+  "result": {
+    "focusedPackages": "passed",
+    "race": "passed",
+    "repeatedByteStabilityAndPersistence": "passed 10 consecutive runs",
+    "fullCliModule": "passed",
+    "fullCliVet": "passed",
+    "format": "passed; gofmt diff empty",
+    "crossCompilation": {
+      "artifactLinuxAmd64": "passed",
+      "runfsLinuxAmd64": "passed",
+      "runfsLinuxArm64": "passed",
+      "runfsDarwinAmd64": "passed",
+      "runfsWindowsAmd64": "passed; runtime lifecycle intentionally fails closed"
+    },
+    "moduleGraph": "go mod tidy -diff exits nonzero only for the pre-existing decision v0.0.0 direct-to-indirect annotation drift; no module bytes were rewritten",
+    "independentReadOnlyReview": "final exact-hash replay passed focused/race/vet/format checks and found no remaining high- or medium-severity SE-01-07 correctness, security, compatibility, or authority blocker",
+    "incidentalCommandFailure": "the first successful five-binary cross-build chain returned nonzero only because Darwin unlink accepts one operand; every explicit task-owned /tmp binary was then individually removed and the complete build-plus-individual-unlink chain replayed successfully",
+    "proved": [
+      "the assembler owns the exact fourteen required audit-pack roles, the sole optional policy-proposals role, the fixed seven-schema order, and role-to-schema/media correlations",
+      "policy proposals are canonical JSONL and every record is assigned openbox.policy-proposal/v1; no unversioned array wrapper is invented",
+      "canonical JSON objects, canonical final-LF JSONL, exact UTF-8 Markdown, and retained-payload-only retention are checked before content IDs are created",
+      "the authoritative inline judgments value is canonicalized once and the judgments object CID and byte count are derived from those exact bytes rather than accepted independently",
+      "map insertion-order changes produce identical normalized objects and manifest bytes; changing one normalized object changes only that object CID and the root manifest identity",
+      "changing capturedAt and the executable snapshot temp path changes the in-memory runtime envelope while leaving every retained object and manifest byte unchanged",
+      "changing runId or runner version changes manifest identity while leaving every normalized object byte and CID unchanged",
+      "WritePackObjects stores the deduplicated exact CID payloads without manifest.json; FinalizePack seals and exact-set, identity, length, and byte-verifies them before manifest-last publication",
+      "mutated or extra on-disk objects prevent manifest publication, retain StateIncomplete, and remain cleanup-recoverable",
+      "nonblocking no-follow regular-file opens prevent a concurrent regular-to-FIFO replacement from hanging sealing or final object verification"
+    ]
+  },
+  "limits": [
+    "AssemblePack enforces assembly-owned role, schema-reference, media, retention, digest, and inline-judgment correlations; it does not validate public JSON Schemas or their remaining semantic invariants. SE-01-08 owns that reader/conformance boundary.",
+    "runfs StateManifestCommitted remains a filesystem-transaction state, not a schema-valid audit-pack judgment. Raw Finalize is lifecycle-only; callers assembling artifact.Pack values must use FinalizePack.",
+    "RuntimeEnvelope is volatile in-memory operational provenance, not retained audit-pack evidence. This task adds no public envelope schema or independent evidence authority.",
+    "A hostile same-UID actor can re-permission and mutate owner-controlled files after the final verified read. This is the previously recorded cooperative private-workspace limit; later readers must revalidate exact object bytes before making a claim.",
+    "Darwin/APFS exercised runtime persistence and finalization. Linux and Windows results are compile evidence only; unsupported runtime platforms continue to fail closed.",
+    "No SDK, framework provider, production credential or endpoint, OpenBox Core, sandbox launch, external control plane, paid path, or live security evaluation ran."
+  ]
+}

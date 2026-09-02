@@ -1,0 +1,72 @@
+{
+  "schema": "openbox.project-assurance.receiver-request-validation/v1",
+  "task": "SE-04-03",
+  "capturedAt": "2026-08-21T10:01:25Z",
+  "status": "passed_with_limits",
+  "toolchain": {
+    "go": "go1.27.0 darwin/arm64",
+    "platform": "Darwin 25.5.0 arm64",
+    "node": "v26.7.0",
+    "npm": "11.19.0"
+  },
+  "inputs": {
+    "evidenceGo": "sha256:7af12188244d4215966c683f57a02e830e5baf1fdfd8114e79ada1a8e1e59c57",
+    "evidenceTestGo": "sha256:7a45329b8393e06970001d9e60f68b8600b548e292e0d52c2ab9af7fb4da9b6f",
+    "receiverGo": "sha256:68e41648c95de086c510fbb0aa095b0e73eaf563e4a01701c96791baf5268cb8",
+    "receiverTestGo": "sha256:e1ad218c8d1f768f021fe6ef1767ebd05ad025f0a9dbdade89cdae1a8c4cc962",
+    "wireGo": "sha256:32a21837044e12369da92039269a9833e932ef5fb37051e1f1d9bd8dc8e0e32d",
+    "wireTestGo": "sha256:2e7f8585b0342391ab1bbfb7eef4813b0552094c31cf6d32ac77b2d910b4bac9",
+    "canonicalGo": "sha256:418d3d01b05a438d7c4e7e4d111ae8adf5a91e7ff1d3066bbc0fb69256cd32ea",
+    "redactorGo": "sha256:e5230959f92869647aff0a9ac7b938bc8c769a637bd39a103f44b0ffab41068f",
+    "secretScannerGo": "sha256:1cb5cf4a0fe9abccedebd730ed9909f70fffbcd78ca1afb90392f5e636197277",
+    "decision": "sha256:49937e5bd1181b736b6709cde0eb300aa68b1a286d4a64641c66230c551e1edc",
+    "runProfileSchema": "sha256:0b3550a74ad70b6e8aa7c903f6078d8dfe8c3565775586aff847ab29ed89b5dc",
+    "sdkSourceArchive": "sha256:1e85dfd57ea751846236b01a94972ee58a8569045d9b20788e051092ff6933d1",
+    "nodeBinary": "sha256:1ef99ea25fe70c9b67e7efe768ef8ee22148d3cabc703db6131b57aeb617d040",
+    "npmCli": "sha256:8e5f6f3429f8cdbe693cdc29904e9d5a7b127a494bd15c804bd54c7403bfcbe7",
+    "builtMastraDistTree": "sha256:b788b20dc932207969b0570ebd345b5fb151eb68c0ba80de75fc5e19d1e649a2",
+    "installedBaseSdkTree": "sha256:9cf6375c7a701364f6f667d2244285a5373f0002e6c6e2dfe444e82a12530cf8"
+  },
+  "commands": [
+    "cd cli && go test -count=10 ./internal/assurance/receiver",
+    "cd cli && go test -race ./internal/assurance/receiver",
+    "cd cli && go vet ./internal/assurance/receiver",
+    "git archive the accepted Mastra commit into TASK_TEMP; verify archive, Node, and npm CLI hashes; npm ci --ignore-scripts --no-audit --no-fund with a private cache; npm run build",
+    "cd cli && OPENBOX_NODE_BINARY=/opt/homebrew/Cellar/node/26.7.0/bin/node OPENBOX_MASTRA_SDK_ROOT=TASK_TEMP go test -count=1 -run '^TestPinnedMastraClientAcceptsReceiverResponses$' ./internal/assurance/receiver",
+    "cd cli && go test -count=25 ./internal/assurance/receiver",
+    "cd cli && go test -count=1 ./internal/assurance/...",
+    "cd cli && go test -count=1 ./...",
+    "cd cli && go vet ./...",
+    "cd cli && GOOS=darwin GOARCH=arm64 go test -c -o TASK_TEMP/receiver-darwin-arm64.test ./internal/assurance/receiver",
+    "cd cli && GOOS=linux GOARCH=arm64 go test -c -o TASK_TEMP/receiver-linux-arm64.test ./internal/assurance/receiver",
+    "cd cli && GOOS=windows GOARCH=amd64 go test -c -o TASK_TEMP/receiver-windows-amd64.test.exe ./internal/assurance/receiver",
+    "gofmt -d cli/internal/assurance/receiver",
+    "git status --short",
+    "git diff --check"
+  ],
+  "result": {
+    "validation": "method, exact raw request URI, bearer, content type, body size, canonical JSON object shape, event_type, and authenticate-once ordering are enforced",
+    "ordering": "the bounded receiver state machine is serialized; evidence sequence is assigned at processing start, so concurrent auth outcomes follow recorded order",
+    "knownCredentials": "both generated receiver bearers are bound as exact known secrets and any body containing either is inconclusive before projection or digest",
+    "genericSecrets": "the existing decision redactor produces only a canonical redacted projection and a digest of that projection when a generic secret is detected",
+    "nonSecretBodies": "a valid non-secret request retains canonical projection metadata and an exact raw-request digest without retaining raw request bytes in the record",
+    "failures": "malformed, duplicate-key, oversized, and redaction-failure bodies retain no projection or digest and are marked inconclusive; truncation records only the configured byte boundary",
+    "labels": "caller attribution requires an exact bearer; methods and request URIs outside the closed vocabulary are stored only as unsupported",
+    "bounds": "admission uses saturating counters before state serialization; each project/readiness budget retains at most one overflow record and later 429 responses neither queue nor grow evidence",
+    "sdkReplay": "the fresh exact Mastra client again completed auth/evaluate through the loopback receiver and interpreted the immutable ALLOW response as continue",
+    "tests": "focused count-25, race, affected-assurance, full CLI, vet, format, and Darwin/Linux/Windows compile-only checks passed",
+    "independentReview": "approved the frozen six-file source/test hash set with no remaining high or medium SE-04-03 blocker and made no workspace or ledger writes"
+  },
+  "cleanup": {
+    "preparedSdk": "the source archive, private npm cache, installed dependencies, build output, and cross-compile outputs were moved to Trash",
+    "sourceClone": "the local openbox-mastra-sdk clone remained clean"
+  },
+  "limits": [
+    "Request bodies exist as bounded in-memory bytes only while one serialized request is validated; returned records contain projections, digests, counts, categories, and closed labels, not raw request bytes or headers.",
+    "The default redactor is deterministic but cannot prove detection of every possible application secret. Exact receiver bearers are separately bound and rejected before hashing.",
+    "Records are persistence-ready receiver evidence. Audit-pack object writing and finalization remain later tasks; this task did not write request evidence into a finalized pack.",
+    "A normalized receiver event does not prove recordingTool identity, pre-effect gating, decision application, or side-effect prevention; later fixture, coverage, and judgment evidence own those claims.",
+    "The SDK replay is a direct local client/receiver observation, not a Mastra project launch, sandbox proof, provider/model call, production Core decision, BLOCK verdict, or external control-plane action.",
+    "Both Phase 03 sandbox tuples remain rejected, so this component proof does not make project execution runnable."
+  ]
+}

@@ -1,0 +1,353 @@
+{
+  "schema": "openbox.project-assurance.run-profile-decision-evidence/v1",
+  "task": "SE-00-07 / SE-01-01 local-relay amendment",
+  "captured_at": "2026-08-22T03:06:02Z",
+  "validator_source": {
+    "context7_library_id": "/ajv-validator/ajv/v8.17.1",
+    "official_source": "https://github.com/ajv-validator/ajv/blob/v8.17.1/docs/guide/schema-language.md",
+    "decision": "Ajv2020 entry point, draft 2020-12, strict mode",
+    "acquisition_lock": "ajv-8.17.1.qualification-lock.json"
+  },
+  "command": [
+    "/Users/lebrian/.nvm/versions/node/v22.20.0/bin/node",
+    "plans/260819-1600-project-security-evaluation/evidence/probes/validate_run_profile_draft.mjs",
+    "QUALIFICATION_DIR/node_modules/ajv",
+    "plans/260819-1600-project-security-evaluation/evidence/project-run-profile-v1.schema-draft.json",
+    "plans/260819-1600-project-security-evaluation/evidence/project-run-profile-v1.example.json"
+  ],
+  "exit_status": 0,
+  "input_sha256": {
+    "schema": "23150740a25957e9f09a5c5ef8d5fe716c95d3313d4e6a972aabe8fb20808b78",
+    "example": "201edf273c1c4e91eecfd43522e7c077eaed32b5d72078bc94121a2a9adb5470",
+    "validator": "aa9885d1e0b5b96b40cd5a133750930619d1e53ace9fad49a136469bcac6f654",
+    "acquisition_lock": "86bfa5d3e22e4577e92e704cad8ea5026201a0090892b9010ad27446576b9cd7",
+    "ajv_package_json": "ce1539e6f4e0f345ed402c47137d2679497b2035d4a4f420ee11acdde03dea92"
+  },
+  "decision_sha256": {
+    "adr_0020": "4248bfdfb4a0680e977bcea21e597c6dcf0743adc21541d35fa5543b8527d7d9",
+    "phase_02": "2c838d4052e9f9579cee86825a49fd4ccf85ff6413f1c594b14dcd7751093715",
+    "phase_04": "aa47e2e53102201122ef3f2318f8201cd5e95166d408b5efb13f03d6b1338843"
+  },
+  "result": {
+    "schema": "openbox.project-assurance.run-profile-draft-validation/v1",
+    "validator": {
+      "package": "ajv",
+      "version": "8.17.1",
+      "draft": "2020-12",
+      "strict": true,
+      "allErrors": true
+    },
+    "inputs": {
+      "schema": "project-run-profile-v1.schema-draft.json",
+      "schemaSha256": "23150740a25957e9f09a5c5ef8d5fe716c95d3313d4e6a972aabe8fb20808b78",
+      "example": "project-run-profile-v1.example.json",
+      "exampleSha256": "201edf273c1c4e91eecfd43522e7c077eaed32b5d72078bc94121a2a9adb5470"
+    },
+    "positive": {
+      "schemaValid": true,
+      "semanticValid": true,
+      "trustedRelayTupleValid": true,
+      "profileBytes": 2391,
+      "profileLexicalDepth": 5,
+      "profileLimits": {
+        "maxBytes": 262144,
+        "maxDepth": 32
+      },
+      "templateLimits": {
+        "maxBytes": 65536,
+        "maxDepth": 16
+      },
+      "templateVariables": [
+        "fixture.poison.url",
+        "fixture.sink.url",
+        "run.marker",
+        "scenario.id"
+      ]
+    },
+    "schemaNegatives": [
+      {
+        "name": "hidden command",
+        "rejected": true,
+        "keywords": [
+          "additionalProperties"
+        ]
+      },
+      {
+        "name": "production OpenBox coordinate",
+        "rejected": true,
+        "keywords": [
+          "const",
+          "maxItems"
+        ]
+      },
+      {
+        "name": "OpenBox generated-binding override",
+        "rejected": true,
+        "keywords": [
+          "enum"
+        ]
+      },
+      {
+        "name": "credential-like generated binding",
+        "rejected": true,
+        "keywords": [
+          "enum"
+        ]
+      },
+      {
+        "name": "runtime-control static environment",
+        "rejected": true,
+        "keywords": [
+          "const",
+          "maxItems"
+        ]
+      },
+      {
+        "name": "host-control generated binding",
+        "rejected": true,
+        "keywords": [
+          "enum"
+        ]
+      },
+      {
+        "name": "raw retention",
+        "rejected": true,
+        "keywords": [
+          "const"
+        ]
+      },
+      {
+        "name": "receiver override",
+        "rejected": true,
+        "keywords": [
+          "additionalProperties"
+        ]
+      },
+      {
+        "name": "URL-valued static environment",
+        "rejected": true,
+        "keywords": [
+          "const",
+          "maxItems"
+        ]
+      },
+      {
+        "name": "dot-segment readiness path",
+        "rejected": true,
+        "keywords": [
+          "pattern"
+        ]
+      },
+      {
+        "name": "unsupported SDK action class",
+        "rejected": true,
+        "keywords": [
+          "const"
+        ]
+      },
+      {
+        "name": "non-MVP SDK descriptor",
+        "rejected": true,
+        "keywords": [
+          "const"
+        ]
+      },
+      {
+        "name": "informational completion status",
+        "rejected": true,
+        "keywords": [
+          "minimum"
+        ]
+      },
+      {
+        "name": "unsafe relay bearer name",
+        "rejected": true,
+        "keywords": [
+          "additionalProperties",
+          "const",
+          "oneOf"
+        ]
+      },
+      {
+        "name": "remote relay destination",
+        "rejected": true,
+        "keywords": [
+          "additionalProperties",
+          "const",
+          "oneOf"
+        ]
+      },
+      {
+        "name": "relay redirects enabled",
+        "rejected": true,
+        "keywords": [
+          "additionalProperties",
+          "const",
+          "oneOf"
+        ]
+      }
+    ],
+    "semanticNegatives": [
+      {
+        "name": "unknown template variable",
+        "schemaValid": true,
+        "semanticRejected": true,
+        "errors": [
+          "unsupported template variable: env.OPENBOX_API_KEY"
+        ]
+      },
+      {
+        "name": "malformed template syntax",
+        "schemaValid": true,
+        "semanticRejected": true,
+        "errors": [
+          "template token must occupy a complete string value: $.marker"
+        ]
+      },
+      {
+        "name": "interpolated template token",
+        "schemaValid": true,
+        "semanticRejected": true,
+        "errors": [
+          "template token must occupy a complete string value: $.marker"
+        ]
+      },
+      {
+        "name": "templated object key",
+        "schemaValid": true,
+        "semanticRejected": true,
+        "errors": [
+          "template syntax is forbidden in object key: $.{{run.marker}}"
+        ]
+      },
+      {
+        "name": "aliased poison and sink binding",
+        "schemaValid": true,
+        "semanticRejected": true,
+        "errors": [
+          "missing generated binding POISON_FIXTURE_URL:fixture.sink_url"
+        ]
+      },
+      {
+        "name": "duplicate generated source alias",
+        "schemaValid": true,
+        "semanticRejected": true,
+        "errors": [
+          "generated binding sources must be unique",
+          "binding name does not match source: SCENARIO_ID:run.marker"
+        ]
+      },
+      {
+        "name": "binding name does not match source",
+        "schemaValid": true,
+        "semanticRejected": true,
+        "errors": [
+          "binding name does not match source: SCENARIO_ID:application.listen_port"
+        ]
+      },
+      {
+        "name": "readiness exceeds total duration",
+        "schemaValid": true,
+        "semanticRejected": true,
+        "errors": [
+          "readiness timeout plus cleanup grace must fit within maxDurationMs"
+        ]
+      },
+      {
+        "name": "readiness interval exceeds timeout",
+        "schemaValid": true,
+        "semanticRejected": true,
+        "errors": [
+          "readiness interval must not exceed startup timeout"
+        ]
+      },
+      {
+        "name": "cleanup exceeds total duration",
+        "schemaValid": true,
+        "semanticRejected": true,
+        "errors": [
+          "readiness timeout plus cleanup grace must fit within maxDurationMs"
+        ]
+      },
+      {
+        "name": "combined readiness and cleanup exceed duration",
+        "schemaValid": true,
+        "semanticRejected": true,
+        "errors": [
+          "readiness timeout plus cleanup grace must fit within maxDurationMs"
+        ]
+      },
+      {
+        "name": "deep stimulus body template",
+        "schemaValid": true,
+        "semanticRejected": true,
+        "errors": [
+          "stimulus body template exceeds depth limit"
+        ]
+      },
+      {
+        "name": "oversized stimulus body template",
+        "schemaValid": true,
+        "semanticRejected": true,
+        "errors": [
+          "stimulus body template exceeds byte limit"
+        ]
+      },
+      {
+        "name": "deterministic model with non-zero cost",
+        "schemaValid": true,
+        "semanticRejected": true,
+        "errors": [
+          "deterministic local model cost budget must be zero"
+        ]
+      },
+      {
+        "name": "untrusted relay descriptor",
+        "schemaValid": true,
+        "semanticRejected": true,
+        "errors": [
+          "relay descriptor is not trusted: ollama.chat.granite4.1-3b.6fd349357287"
+        ]
+      },
+      {
+        "name": "trusted relay descriptor destination drift",
+        "schemaValid": true,
+        "semanticRejected": true,
+        "errors": [
+          "relay destination does not match trusted descriptor"
+        ]
+      },
+      {
+        "name": "local relay with non-zero monetary cost",
+        "schemaValid": true,
+        "semanticRejected": true,
+        "errors": [
+          "local relay monetary cost budget must be zero"
+        ]
+      },
+      {
+        "name": "relay with zero token budget",
+        "schemaValid": true,
+        "semanticRejected": true,
+        "errors": [
+          "relay token budgets must be non-zero"
+        ]
+      }
+    ]
+  },
+  "cleanup": {
+    "command": "/usr/bin/trash QUALIFICATION_DIR",
+    "exit_status": 0,
+    "result": "The task-owned exact validator reinstall moved to Trash; no runtime dependency was added."
+  },
+  "limits": [
+    "This draft closes Phase 00 decisions; Phase 01 owns the final contract inventory and Go validators.",
+    "Ajv validates the closed JSON shape; the helper separately proves pre-parse profile limits, binding correlation, whole-value template limits, cross-budget invariants, and trusted relay descriptor matching.",
+    "The validator installation is temporary; the durable acquisition lock records the exact reinstall command, full package tree, registry integrity values, and package metadata hashes.",
+    "The trusted relay positive proves only the declarative local Ollama invocation tuple. It performs no model request and does not prove the server version, model digest, capabilities, or runtime behavior.",
+    "Runtime qualification must separately observe exact Ollama server 0.31.1 and granite4.1:3b digest 6fd349357287c7ffc9e38189a93b48ea175d24fc566b38f09cfc564fb7f303eb before and after POST /api/chat through the compiled GET /api/version and GET /api/tags inspection routes.",
+    "The deterministic example permits only APP_ENV=security-test and the closed generated-binding names; there is no generic child environment passthrough.",
+    "The schema accepts only the exact qualified Mastra SDK, base SDK, and Mastra Core descriptor; the prior LangGraph tuple is a negative fixture, not an MVP mode.",
+    "No project command, receiver URL, OpenBox credential value, output root, sandbox setting, raw-retention mode, arbitrary relay tuple, external provider credential, or non-loopback relay is expressible or authorized by the profile."
+  ]
+}

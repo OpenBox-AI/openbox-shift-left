@@ -1,0 +1,81 @@
+{
+  "schema": "openbox.project-assurance.source-exclusion-validation/v1",
+  "task": "SE-01-06",
+  "capturedAt": "2026-08-21T02:04:36Z",
+  "status": "passed_with_limits",
+  "toolchain": {
+    "go": "go1.26.7 darwin/arm64",
+    "os": "macOS 26.5.2 build 25F84",
+    "kernel": "Darwin 25.5.0 arm64",
+    "filesystem": "APFS with owners enabled",
+    "xSys": {
+      "version": "v0.35.0",
+      "goVersion": "1.23.0",
+      "sum": "h1:vz1N37gP5bs89s7He8XuIYXpyY0+QlsKmzipCbUtyxI=",
+      "goModSum": "h1:BJP2sWEmIv4KK5OTEluFJCKSidICx8ciO85XgH3Ak8k="
+    }
+  },
+  "inputs": {
+    "copyGo": "sha256:cd9a709b1f929c6bcbf9f5deb77bfc260d8104d8ff722dbf1942ab3e415ea193",
+    "copyOtherGo": "sha256:d65c20ae10bbdb44ad79c53d43d9a53e5184b78516c5ba8e04db9b259a1cc70c",
+    "copyUnixGo": "sha256:3c4060f8c01c1b37126dd3cc0537ad1aba0548b9e1abe8fabb5044084f206142",
+    "copyUnixTestGo": "sha256:2cc2989e8d3f56fc7a7a5c753201e469749879508740e3baa67420c8ca04f0a3",
+    "exclusionGo": "sha256:366f33014dbe1f0189fd3d293b005d79472d7a6f04c14a852628e8237375df8d",
+    "exclusionUnixTestGo": "sha256:2770cbc05a614b880f269d8a543e41efdd00af6405a799bc51675b63a374350e",
+    "platformDarwinGo": "sha256:5e5486d95d6b6dc1cedda0eda0bfefa5566ef91743bfcfba6e0101ea60d4ef65",
+    "platformLinuxGo": "sha256:5173c8af3b541674ffe2500bbe49663b160be7db8edd280ed7f3a1e85ef2cafb",
+    "platformOtherGo": "sha256:2de912d9e1df43037bf3cf3d0668ebe3b46abbc2ee3d4d9cc803a4f2f37b91bb",
+    "snapshotGo": "sha256:363d8ef06fb9cba521665916bb46574d684a2e8f33f046364c9dfb96f2692365",
+    "snapshotUnixTestGo": "sha256:7df89e1799aef576bb91790d0e2d0c3135593ca7353c329040f2ce22ae7af9a1",
+    "walkUnixGo": "sha256:71f110574e30240ca134f57e024c3e2663dc05d6fd744644942ab0afb84a5ce7",
+    "projectModelSchema": "sha256:5b18935414763341b28101bf6d9fe7f746d6530bca68004c896be33883156ca4",
+    "contractReadme": "sha256:40618ff7eb221d268e5060db1734de058960fb717a6d090e7949cebb81365763",
+    "goMod": "sha256:16df452b9d119396b14f5c8ab9c2ceb7143b5ccdc20271ef40eba15e1613bfea",
+    "goSum": "sha256:38f2bf9e5ba0a5c84860f45f4d50fdf7d4d1d0d21ceed4810d561f7b42a74cd8"
+  },
+  "commands": [
+    "cd cli && go test -count=1 ./internal/assurance/snapshot",
+    "cd cli && OPENBOX_AJV_ROOT=QUALIFICATION_DIR/node_modules/ajv go test -count=10 ./internal/assurance/...",
+    "cd cli && go test -race ./internal/assurance/...",
+    "cd cli && go vet ./internal/assurance/...",
+    "cd cli && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go test -run '^$' -exec=/usr/bin/true ./internal/assurance/...",
+    "cd cli && CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go test -run '^$' -exec=/usr/bin/true ./internal/assurance/...",
+    "cd cli && go mod tidy -diff"
+  ],
+  "result": {
+    "focusedPackage": "passed",
+    "race": "passed",
+    "repeatedExclusionMatrix": "passed 10 consecutive runs",
+    "fullCliModule": "passed",
+    "fullCliVet": "passed",
+    "crossCompilation": {
+      "linuxAmd64": "passed",
+      "linuxArm64": "passed",
+      "darwinAmd64": "passed",
+      "windowsAmd64": "passed; runtime source selection/copying intentionally fails closed"
+    },
+    "moduleGraph": "x/sys v0.35.0 was already pinned transitively and is now direct; no version or go.sum byte changed; tidy diff only reports the pre-existing decision direct-to-indirect annotation drift",
+    "independentReadOnlyReview": "two medium findings for prior audit siblings and case-sensitive Darwin names were fixed; final focused replay found no remaining high or medium SE-01-06 blocker",
+    "proved": [
+      "every root, prior, nested, and case-variant .openbox/audit and .openbox/inspect subtree is pruned by a built-in output rule, independently of the exact current output boundary",
+      "VCS and cache directory basenames are pruned case-insensitively before selection reads any descendant file content",
+      "recognized dotenv, package-manager, cloud, container, Kubernetes, OpenBox-adjacent, service-account, and private-key path forms are excluded by path before file content is opened",
+      "socket, FIFO, external/broken symlink, device/unsupported-special, and external-mount kinds map to the closed project-model omission vocabulary",
+      "actual Darwin fixtures cover VCS, cache, current/prior/nested audit and inspection output, exact temp boundary, 26 secret paths, socket, FIFO, and internal/external/broken symlinks; device and external-mount vocabulary are covered without privileged creation",
+      "selection rules have unique schema-valid IDs, built_in/exclude authority, deterministic ordering, and every omission references one active rule",
+      "omission counts are positive and signed-53 bounded; non-secret examples are normalized and capped at 16 with exact truncation semantics",
+      "secret omission path examples are always suppressed and marked truncated, so a secret-shaped filename and its file contents are absent from canonical manifest, rules, and omissions",
+      "two independent copies and ten repeated matrix runs produce identical rule arrays, omission arrays, and selection digests",
+      "safe regular source is the only materialized file; every excluded fixture is absent from the owner-only copied tree"
+    ]
+  },
+  "limits": [
+    "Recognized secret paths are a closed conservative filename policy, not a content secret scanner. A secret in an unrecognized ordinary source filename remains selected; later redaction applies to evidence content, not this source-policy claim.",
+    "Non-secret omission examples intentionally retain bounded normalized paths. User-chosen names can themselves be sensitive; secret-class paths are suppressed, but other classes are path-only metadata under the accepted project-model contract.",
+    "Project.Select is the explicitly pre-policy passive inventory and retains path/type/size metadata but no contents. Only Project.Copy applies the closed executable defaults.",
+    "The public project-model reserves project_ignore, profile_include, and profile_exclude source labels, but the Mastra MVP run profile has no path-rule input and this task adds no ignore parser, profile field, or CLI flag; those rules are not claimed as applied.",
+    "Device and external-mount exclusion logic has unit/source evidence but no privileged runtime fixture. Linux openat2 and case-sensitive boundary behavior have compile evidence only; unsupported platforms fail closed.",
+    "The destination placement, operational-size, caller-cleanup, atomicity, and hostile same-identity relocation limits from SE-01-05 remain unchanged.",
+    "No SDK provider, production endpoint, OpenBox Core, sandbox launch, external control plane, or paid/live path ran."
+  ]
+}

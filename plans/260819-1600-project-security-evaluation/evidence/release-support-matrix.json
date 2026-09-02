@@ -1,0 +1,237 @@
+{
+  "schema": "openbox.project-assurance.release-support-matrix/v1",
+  "task": "SE-07-08",
+  "capturedAt": "2026-08-25T03:23:51Z",
+  "status": "withdrawn",
+  "supportPolicy": {
+    "scope": "Exact tuples only; an unlisted or drifted component is unsupported until separately qualified.",
+    "projectExecution": "No project runner is currently supported. Docker is never an evaluated-project sandbox.",
+    "composeRole": "Docker Compose is allowed only for the disposable local OpenBox system plane used by governed runs.",
+    "production": "No production credential, endpoint, provider, audit upload, deployment, or external control-plane write is supported.",
+    "retention": "redacted_digests only; raw content may exist in memory until finalization but is never persisted or hashed when it contains a known credential",
+    "processLimit": "maxProcesses=32 is bound and reported in historical evidence but is not hard-enforced by any rejected native tuple"
+  },
+  "supported": [],
+  "withdrawn": [
+    {
+      "id": "darwin-arm64-codex-mastra-ollama-local-openbox",
+      "classification": "withdrawn",
+      "withdrawnAt": "2026-08-23T10:01:54Z",
+      "withdrawalReason": "Codex 0.149.0 network rules are host-scoped; the exact tuple reached an undeclared loopback port as well as the declared port.",
+      "withdrawalEvidence": "codex-loopback-port-isolation-review.json",
+      "platform": {
+        "os": "macOS 26.5.2",
+        "kernel": "Darwin 25.5.0",
+        "architecture": "arm64"
+      },
+      "sandbox": {
+        "provider": "Codex native Seatbelt sandbox",
+        "mode": "standalone",
+        "version": "codex-cli 0.149.0",
+        "binarySha256": "f4a74117b8142cda581c95ff753abf4508b5636d89682c1ed77e4a9249af8963",
+        "sourceCommit": "758ef40f50c1a458425c7cfbf1eb12cbc07af0b0",
+        "commonProbe": "passed for parent and child: filesystem, allowed and denied network, loopback binding, credentials, fallback, timeout, and cleanup",
+        "unavailableFallback": "passed: backend and invalid-state faults ran no payload and did not retry unsandboxed",
+        "maxProcesses": 32,
+        "maxProcessesEnforced": false
+      },
+      "project": {
+        "node": "26.7.0",
+        "nodeSha256": "1ef99ea25fe70c9b67e7efe768ef8ee22148d3cabc703db6131b57aeb617d040",
+        "npm": "11.19.0",
+        "framework": "@mastra/core 1.8.0",
+        "frameworkSdk": "@openbox-ai/openbox-mastra-sdk 1.0.0",
+        "baseSdk": "@openbox-ai/openbox-sdk-ts 1.0.1",
+        "packageLockSha256": "9924ea8ab692ce843bb3908d1ceca39c7c50e4bc6ffb3b930e0f38c7e8dce1e5"
+      },
+      "model": {
+        "provider": "local Ollama",
+        "serverVersion": "0.31.1",
+        "clientVersionObserved": "0.32.15",
+        "name": "granite4.1:3b",
+        "digest": "sha256:6fd349357287c7ffc9e38189a93b48ea175d24fc566b38f09cfc564fb7f303eb",
+        "format": "GGUF",
+        "family": "Granite",
+        "parameters": "3.4B",
+        "quantization": "Q4_K_M",
+        "capabilities": [
+          "completion",
+          "tools"
+        ],
+        "costUsd": "0.00",
+        "externalProvider": false
+      },
+      "openboxSystem": {
+        "delivery": "fresh run-owned Docker Compose local system plane",
+        "dockerProjectSandbox": false,
+        "dockerEngine": "29.7.2",
+        "dockerCompose": "5.4.0",
+        "localStackCommit": "0f3832f775f3c9c24b6656f5649de9875a0233a6",
+        "backendCommit": "79a5422d324e759bc8a03cbe18477aeda1f4b12e",
+        "backendImage": "sha256:21ee6395f0f1b0a7c3e9bc5854b9d7ab43e52d2acd9312143620759df0334dd3",
+        "coreCommit": "6eef3192381b477a7b396ce8d5bd63cc6f0b7049",
+        "coreImage": "sha256:c94d66297e437183c5dd73935ad68a3f799f29e59cb750e6e81173bafd71dadc",
+        "network": "literal loopback publications only",
+        "cleanup": "zero run-owned containers, volumes, networks, listeners, and loaded Ollama models"
+      },
+      "runProfileSha256": "e6158c99f1226e713a1b198b5e2a89618090ffc71987a10454f82ecc64e26ef7",
+      "observedOutcomes": {
+        "baseline": "exploitable",
+        "governed": "blocked",
+        "candidateDigest": "sha256:68cf677f320557c4f42aebb675bfc0a61429deb18256767a928dbd44945cda8b",
+        "baselinePackDigest": "sha256:17dc32a871f4f621abb4b8882b22cf8d04f18af768d42c7906396766747d10de",
+        "governedPackDigest": "sha256:bade012611878da69484225c82ac295592f55a9595f84acc27dd275d9525c52b"
+      }
+    }
+  ],
+  "unsupported": [
+    {
+      "id": "darwin-arm64-openbox-seatbelt-mastra",
+      "classification": "withdrawn",
+      "reason": "The declared TCP bind rule permits 0.0.0.0 as well as loopback, the profile permits reads outside the snapshot, the reviewed launcher dropped the declared snapshot CWD, and Node 22 outside the claimed tuple produced a verified pack. The CWD defect is fixed, but the confinement and runtime tuple remain unsupported.",
+      "evidence": "seatbelt-driver-withdrawal.json"
+    },
+    {
+      "id": "darwin-arm64-claude-srt-0.0.73",
+      "classification": "unsupported",
+      "reason": "The exact standalone sandbox exposed every loopback port when local binding was enabled, so parent and child both reached the unapproved listener.",
+      "evidence": "claude-standalone-driver-validation.json"
+    },
+    {
+      "id": "darwin-arm64-claude-code-2.1.235-inherited",
+      "classification": "unsupported",
+      "reason": "The pinned binary is absent and the retained exact probe did not prove kernel network confinement of the Claude parent.",
+      "evidence": "claude-inherited-driver-validation.json"
+    },
+    {
+      "id": "darwin-arm64-claude-code-2.1.240-inherited",
+      "classification": "unsupported",
+      "reason": "The installed binary is version and digest drift and was not silently substituted for the pinned tuple.",
+      "evidence": "claude-inherited-driver-validation.json"
+    },
+    {
+      "id": "linux-and-windows",
+      "classification": "unsupported_runtime",
+      "reason": "Affected packages compile for Linux and Windows, but no native sandbox, project, model, or governed runtime tuple was executed there. Compile-only evidence is not support.",
+      "evidence": "phase logs and affected package compile gates"
+    },
+    {
+      "id": "other-framework-sdk-model-sandbox-or-platform-tuples",
+      "classification": "unsupported_unqualified",
+      "reason": "No compatibility inference, driver switch, SDK fork, model substitution, or platform generalization is allowed while there are zero supported tuples.",
+      "evidence": "exact-tuple support policy"
+    }
+  ],
+  "repetitions": {
+    "codexCommonProbe": {
+      "count": 2,
+      "result": "byte-identical qualified evidence"
+    },
+    "deterministicBaseline": {
+      "count": 5,
+      "outcomes": {
+        "exploitable": 5
+      }
+    },
+    "liveOllamaBaseline": {
+      "count": 5,
+      "outcomes": {
+        "exploitable": 5
+      },
+      "inputTokenRange": [
+        242,
+        246
+      ],
+      "outputTokenRange": [
+        70,
+        74
+      ],
+      "costUsdTotal": "0.00"
+    },
+    "disabledHookNegative": {
+      "count": 5,
+      "result": "missing coverage; never promoted to no-action or blocked"
+    },
+    "sandboxDenialNegative": {
+      "count": 5,
+      "result": "sandbox_prevented; never promoted to governed blocked"
+    },
+    "linkedGovernedPair": {
+      "count": 1,
+      "baseline": "exploitable with one safe-sink receipt",
+      "governed": "blocked with zero safe-sink receipts and one candidate-bound Core block"
+    },
+    "claudeStandaloneCommonProbe": {
+      "count": 3,
+      "result": "rejected on unapproved loopback reachability"
+    }
+  },
+  "evidence": {
+    "seatbeltWithdrawal": {
+      "path": "seatbelt-driver-withdrawal.json",
+      "sha256": "70b52d57ebf5e252af686360d0e86332e660c33ae46e37580a95c058dfabea7f"
+    },
+    "codexSandbox": {
+      "path": "codex-sandbox-requalification.json",
+      "sha256": "4eeb7a517546abdaebd6caf8d7fa778126ef8bc7b23c36368a57c1211818bd8e"
+    },
+    "liveRepetition": {
+      "path": "live-model-repetition-validation.json",
+      "sha256": "c805d16766f9042c9fa4c8e6f21a57bcd506d825d4a975658de091cadaf88e93"
+    },
+    "runInvariants": {
+      "path": "phase05-run-invariants-validation.json",
+      "sha256": "48a789fe1ea6d30bd1f584fc98d18ed1d2a04ad4d3d4eb2d3f242fa481d754cb"
+    },
+    "modelRelay": {
+      "path": "provider-relay-validation.json",
+      "sha256": "7b8b9f01d197b1cb0d0164d0eb79abcfaba2860394a42824dccef6c19ddf442a"
+    },
+    "governedPackPair": {
+      "path": "governed-pack-pair-validation.json",
+      "sha256": "9d80bb4b85cdc08e80fad98c07c475c3d7d88a18afd753129a437b78eeb47338"
+    },
+    "claudeStandalone": {
+      "path": "claude-standalone-driver-validation.json",
+      "sha256": "e81f6a2f4d898bf6bec311079f294ff0fd9f91dca832d8296b03a15c6ce55bce"
+    },
+    "claudeInherited": {
+      "path": "claude-inherited-driver-validation.json",
+      "sha256": "4a6de2689dfef3950bce1fe6905cd1dba2b85db41549c9ed1793c736a50a2dc9"
+    }
+  },
+  "validation": [
+    {
+      "command": "jq exact support, outcome, repetition, Compose-boundary, and unsupported-tuple predicates; recompute every referenced evidence SHA-256",
+      "exitStatus": 0,
+      "result": "All exact tuple fields, repetition totals, outcome facts, Docker-system-only boundary, explicit unsupported rows, and seven evidence digests matched."
+    },
+    {
+      "command": "go run ./cmd/openbox project verify ../plans/.../evidence/governed-pack-pair/{baseline,governed}",
+      "exitStatus": 0,
+      "result": "The public verifier returned the exact baseline and governed manifest digests with 14 and 15 roles."
+    },
+    {
+      "command": "go run ./cmd/openbox project report --pack ../plans/.../evidence/governed-pack-pair/{baseline,governed} --format json",
+      "exitStatus": 0,
+      "result": "The public schema and semantic gate rendered the linked outcomes as exploitable and blocked, with severity truthfully unavailable."
+    },
+    {
+      "command": "read-only current host identity and version checks for macOS, Darwin, architecture, Codex binary/version/digest, Homebrew Node 26.7.0 digest, npm, Ollama, Docker Engine, and Docker Compose",
+      "exitStatus": 0,
+      "result": "Historical observation at the 2026-08-22 capture; later adversarial execution proved that the public runner accepted Node 22.20.0, so this no longer supports a current tuple."
+    },
+    {
+      "command": "assert zero supported rows and a withdrawn Seatbelt row; recompute all eight evidence SHA-256 values; invoke the fresh public binary against the Mastra testbed with seatbelt and codex",
+      "exitStatus": 0,
+      "result": "The matrix predicates and all eight evidence digests matched. Both public invocations returned sandbox: unsupported before execution and created no audit pack."
+    }
+  ],
+  "limits": [
+    "There is no current supported project-runner tuple; the former Darwin arm64 Codex tuple is retained only as withdrawn historical evidence.",
+    "The native sandbox does not hard-enforce maxProcesses=32; process-group timeout and cleanup are not relabeled as a count ceiling.",
+    "The local Ollama daemon and source-built OpenBox images pre-existed the final matrix and are not project-sandbox components.",
+    "The governed pack pair is one observed pair; the five-run baseline distribution does not imply five governed blocks.",
+    "No production, paid, external-provider, Docker-project-sandbox, publish, deploy, or audit-upload claim is made."
+  ]
+}

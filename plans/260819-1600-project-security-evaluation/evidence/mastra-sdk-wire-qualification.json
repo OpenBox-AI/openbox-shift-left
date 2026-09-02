@@ -1,0 +1,187 @@
+{
+  "schema": "openbox.project-assurance.sdk-wire-qualification/v1",
+  "captured_at": "2026-08-19T16:49:33Z",
+  "task_id": "SE-00-04",
+  "candidate": {
+    "lock": "mastra-sdk-tuple.lock.json",
+    "lock_sha256": "c32aa6532c93b955ecb72a7bca7b744ff1c0160254afc51f07ab5dec3ee205f0",
+    "framework_sdk": "@openbox-ai/openbox-mastra-sdk@1.0.0",
+    "framework_sdk_commit": "db9863bd6659f8b1ce6a33903ea61e4e564be38b",
+    "base_sdk": "@openbox-ai/openbox-sdk-ts@1.0.1",
+    "framework": "@mastra/core@1.8.0",
+    "node": "v26.7.0",
+    "platform": "macOS 26.5.2 arm64"
+  },
+  "descriptor_id": "@openbox-ai/openbox-mastra-sdk@1.0.0+@openbox-ai/openbox-sdk-ts@1.0.1+@mastra/core@1.8.0",
+  "configuration": {
+    "public_integration": "withOpenBox",
+    "required": {
+      "explicit": [
+        "apiUrl",
+        "apiKey"
+      ],
+      "environment_fallback": [
+        "OPENBOX_URL",
+        "OPENBOX_API_KEY"
+      ]
+    },
+    "optional_identity": {
+      "explicit": [
+        "agentDid",
+        "agentPrivateKey"
+      ],
+      "environment_fallback": [
+        "OPENBOX_AGENT_DID",
+        "OPENBOX_AGENT_PRIVATE_KEY"
+      ],
+      "rule": "both or neither"
+    },
+    "precedence": "explicit Mastra option, then Mastra environment name, then default",
+    "base_environment_limit": "Mastra passes explicit resolved values and environ:{} to the base SDK; base names such as OPENBOX_API_URL do not participate.",
+    "qualification_values": {
+      "apiUrl": "http://127.0.0.1:[ephemeral]",
+      "apiKey": "obx_test_[REDACTED]",
+      "evaluateMaxRetries": 0,
+      "governanceTimeout": 5,
+      "hitlEnabled": true,
+      "httpCapture": false,
+      "instrumentDatabases": false,
+      "instrumentFileIo": false,
+      "onApiError": "fail_closed",
+      "sendActivityStartEvent": true,
+      "validate": true
+    },
+    "receiver_subset_observed": [
+      "GET /api/v1/auth/validate",
+      "POST /api/v1/governance/evaluate"
+    ],
+    "source_refs": [
+      "openbox-mastra-sdk@db9863b:src/config/openbox-config.ts:146-225",
+      "openbox-mastra-sdk@db9863b:src/mastra/with-openbox.ts:46-112",
+      "openbox-mastra-sdk@db9863b:src/client/openbox-client.ts:89-125,208-235"
+    ]
+  },
+  "pre_effect_contract": {
+    "semantic_event": "ActivityStarted",
+    "activity_type": "recordingTool",
+    "endpoint": "POST /api/v1/governance/evaluate",
+    "observed_before_effect": true,
+    "mock_block_stopped_effect": true,
+    "source_refs": [
+      "openbox-mastra-sdk@db9863b:src/mastra/wrap-tool.ts:39-70",
+      "openbox-mastra-sdk@db9863b:src/governance/activity-runtime.ts:128-149,220-239,732-770,834-842"
+    ],
+    "claim_limit": "The mock BLOCK verifies SDK pre-effect application only. It is not an OpenBox blocked outcome or real policy proof."
+  },
+  "observation": {
+    "command": "node plans/260819-1600-project-security-evaluation/evidence/probes/mastra_sdk_wire_probe.mjs <built-task-temp> | jq '{classification,configuration,effects,block_exception,non_loopback_attempts,requests:[.requests[] | {method,path,status,event_type,run_id,effect_count_at_receive,authorization:.headers.authorization,user_agent:.headers.user_agent,activity_type:(if .body_base64 == \"\" then null else (.body_base64 | @base64d | fromjson | .activity_type // null) end)}]}'",
+    "exit_status": 0,
+    "repeat_count": 2,
+    "normalized_result_sha256": "412d7f914a174670e6b5b01633263c87eed007a6bb345a7bd742469416fd1ebf",
+    "result": {
+      "classification": {
+        "allow": "baseline_allow_wire_observed",
+        "mock_block": "sdk_mock_interception_only_not_openbox_block_proof"
+      },
+      "configuration": {
+        "api_key": "obx_test_[REDACTED]",
+        "api_url": "http://127.0.0.1:[ephemeral]",
+        "on_api_error": "fail_closed",
+        "validate": true
+      },
+      "effects": [
+        "allow-effect"
+      ],
+      "block_exception": "GovernanceHaltError",
+      "non_loopback_attempts": [],
+      "requests": [
+        {
+          "method": "GET",
+          "path": "/api/v1/auth/validate",
+          "status": 200,
+          "event_type": null,
+          "run_id": null,
+          "effect_count_at_receive": 0,
+          "authorization": "Bearer obx_test_[REDACTED]",
+          "user_agent": "OpenBox-SDK/1.0",
+          "activity_type": null
+        },
+        {
+          "method": "POST",
+          "path": "/api/v1/governance/evaluate",
+          "status": 200,
+          "event_type": "ActivityStarted",
+          "run_id": "mastra-wire-allow",
+          "effect_count_at_receive": 0,
+          "authorization": "Bearer obx_test_[REDACTED]",
+          "user_agent": "OpenBox-SDK/1.0",
+          "activity_type": "recordingTool"
+        },
+        {
+          "method": "POST",
+          "path": "/api/v1/governance/evaluate",
+          "status": 200,
+          "event_type": "ActivityCompleted",
+          "run_id": "mastra-wire-allow",
+          "effect_count_at_receive": 1,
+          "authorization": "Bearer obx_test_[REDACTED]",
+          "user_agent": "OpenBox-SDK/1.0",
+          "activity_type": null
+        },
+        {
+          "method": "POST",
+          "path": "/api/v1/governance/evaluate",
+          "status": 200,
+          "event_type": "ActivityStarted",
+          "run_id": "mastra-wire-block",
+          "effect_count_at_receive": 1,
+          "authorization": "Bearer obx_test_[REDACTED]",
+          "user_agent": "OpenBox-SDK/1.0",
+          "activity_type": "recordingTool"
+        }
+      ]
+    }
+  },
+  "tests": [
+    {
+      "subject": "Mastra client, direct tool wrapper, and base-SDK conformance",
+      "command": "./node_modules/.bin/vitest run test/contract/openbox-client.test.ts test/contract/wrap-tool.test.ts test/conformance/base-sdk-conformance-kit.test.ts",
+      "exit_status": 0,
+      "result": "60 passed in 3.62s",
+      "warning": "Node emitted an experimental localStorage warning; the tests passed."
+    },
+    {
+      "subject": "Mastra SDK build",
+      "command": "npm run build",
+      "exit_status": 0,
+      "result": "ESM and declaration builds succeeded"
+    },
+    {
+      "subject": "Complete local Mastra SDK module gate",
+      "command": "npm run ci:check",
+      "exit_status": 0,
+      "result": "lint and typecheck passed; 195 tests passed across 15 files; ESM and declaration builds succeeded",
+      "warning": "Node emitted experimental localStorage warnings; npm install warnings remain recorded in the tuple lock."
+    }
+  ],
+  "probe": {
+    "path": "evidence/probes/mastra_sdk_wire_probe.mjs",
+    "sha256": "f920a0716cebe97c0e7a6be67b20ebd09ade27ff637df29a565a23790dcd51f3",
+    "network_posture": "global fetch guard rejects every hostname except literal 127.0.0.1",
+    "credentials": "synthetic obx_test bearer only"
+  },
+  "cleanup": {
+    "command": "test ! -e /Users/lebrian/.Trash/openbox-se00-04-mastra.MzCJfj && mv /tmp/openbox-se00-04-mastra.MzCJfj /Users/lebrian/.Trash/openbox-se00-04-mastra.MzCJfj && test ! -e /tmp/openbox-se00-04-mastra.MzCJfj && test -d /Users/lebrian/.Trash/openbox-se00-04-mastra.MzCJfj",
+    "exit_status": 0,
+    "result": "The task-owned exact source archive, installed dependencies, coverage, and build output moved to Trash and remain recoverable; the local source clone stayed clean."
+  },
+  "judgment": "qualified_candidate",
+  "limits": [
+    "This is a real local SDK/Mastra and loopback-wire observation, not a real OpenBox Core observation.",
+    "No model or provider ran; only a direct top-level Mastra tool was qualified.",
+    "Optional DID signing, approval polling, agent/workflow wrappers, and hook-level instrumentation were not exercised by this probe.",
+    "With HITL enabled, the observed ActivityCompleted event omitted activity_type; the pre-effect ActivityStarted event retained it.",
+    "The descriptor must require validate=true, onApiError=fail_closed, sendActivityStartEvent=true, and exact locked package versions; unsafe or ambiguous initialization is not_runnable.",
+    "The SDK's maxEvaluatePayloadBytes does not bound direct tool ActivityStarted payloads, so the assurance run-profile and receiver must enforce their own byte limits."
+  ]
+}

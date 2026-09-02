@@ -1,0 +1,69 @@
+{
+  "schema": "openbox.project-assurance.inspection-artifact-validation/v1",
+  "task": "SE-02-07",
+  "capturedAt": "2026-08-21T02:59:32Z",
+  "status": "passed_with_limits",
+  "toolchain": {
+    "go": "go1.26.7 darwin/arm64",
+    "node": "26.7.0",
+    "ajv": "8.17.1",
+    "os": "macOS 26.5.2",
+    "kernel": "Darwin 25.5.0"
+  },
+  "inputs": {
+    "modelArtifactGo": "sha256:3fad4452d9fe5a3d7ab507d09d070bb44dd4900079e48fb84877039c42107c65",
+    "coverageGo": "sha256:35bca99fa62b80396cb76ae2a77f4cd3794402c1acf0ac1e27e63fac537df58b",
+    "sdkArtifactGo": "sha256:70c41e2355160a6a143436f5f544a2a1cffb17b34311cc5edf9d7f156bb15e70",
+    "sdkArtifactUnixTestGo": "sha256:c5857261cb1a6b071932c9b8b6a1851465d31da5521bd752b4d680d1d8165a91",
+    "coverageUnixTestGo": "sha256:d9110ce5ce146728f75eb9e08e6c68917d3ea836012a6f69e6f48e5d12390e80",
+    "inspectionContractIntegrationUnixTestGo": "sha256:1e7516a09f42945ffb7b1652524004a928d976abcf2e1227a61d9f3f3672ebab",
+    "projectModelSchema": "sha256:5b18935414763341b28101bf6d9fe7f746d6530bca68004c896be33883156ca4",
+    "sdkCoverageSchema": "sha256:bc78dbbe82bd9a7c710af76529cf38cae1a9135ed576e17834f944e77088cc54",
+    "ajvQualificationLock": "sha256:86bfa5d3e22e4577e92e704cad8ea5026201a0090892b9010ad27446576b9cd7"
+  },
+  "qualifiedSource": {
+    "path": "/Users/lebrian/Documents/works/openbox/openbox-mastra-sdk",
+    "status": "clean",
+    "head": "db9863bd6659f8b1ce6a33903ea61e4e564be38b",
+    "tag": "1.0.0"
+  },
+  "generatedObjects": {
+    "projectSnapshot": "sha256:272d9e7d953f7c74f328c6a4bf4afc467b89135153d4d02a199ea0db77ba6bef",
+    "projectModel": "sha256:b2763fbfa0cfd60a148239b69934051f4ac1595a0fdc6eb40fc81a18cc5132df",
+    "sdkCoverage": "sha256:7a00e3c7e0bd6653c95230b78fe92d6da08ec78e25d31109a8643825b31c5265"
+  },
+  "commands": [
+    "cd cli && OPENBOX_AJV_ROOT=/Users/lebrian/.Trash/openbox-se02-07-ajv.x5OIha/node_modules/ajv OPENBOX_MASTRA_SDK_ROOT=/Users/lebrian/Documents/works/openbox/openbox-mastra-sdk go test -json -count=1 ./internal/assurance/model ./internal/assurance/sdkdesc ./internal/assurance/runfs | jq -s '<pass, skip, failure, and package counts>'",
+    "cd cli && OPENBOX_AJV_ROOT=/Users/lebrian/.Trash/openbox-se02-07-ajv.x5OIha/node_modules/ajv OPENBOX_MASTRA_SDK_ROOT=/Users/lebrian/Documents/works/openbox/openbox-mastra-sdk go test -count=10 ./internal/assurance/model ./internal/assurance/sdkdesc ./internal/assurance/runfs",
+    "cd cli && OPENBOX_AJV_ROOT=/Users/lebrian/.Trash/openbox-se02-07-ajv.x5OIha/node_modules/ajv OPENBOX_MASTRA_SDK_ROOT=/Users/lebrian/Documents/works/openbox/openbox-mastra-sdk go test -race -count=1 ./internal/assurance/model ./internal/assurance/sdkdesc ./internal/assurance/runfs",
+    "cd cli && go vet ./...",
+    "for each of the 11 go.work modules with the selected Ajv and Mastra environment: go test -count=1 ./...",
+    "cd cli && for darwin/arm64, linux/amd64, and windows/amd64: go test -exec=true -run '^$' ./internal/assurance/model ./internal/assurance/sdkdesc ./internal/assurance/runfs",
+    "gofmt -d <the six SE-02-07 Go source and test files>",
+    "git status --short",
+    "git diff --check"
+  ],
+  "result": {
+    "artifactBoundary": "the task emits canonical project-snapshot, project-model, and sdk-coverage role inputs; it does not publish manifest.json or claim a complete audit pack before all required roles exist",
+    "projectBinding": "ProjectArtifacts keeps its project-snapshot and project-model objects private, binds both to a private rich-graph digest, and rejects same-role cross-graph substitution",
+    "provenance": "every public project-model node path and digest is checked against the immutable snapshot inventory; public projection uses only the frozen v1 fields while richer confidence, column, digest, signals, and uncertainties remain in the private graph binding",
+    "canonicalOutput": "the three stable fixture objects use canonical JSON/JCS bytes and match the recorded lowercase SHA-256 content IDs",
+    "schemaValidation": "generated project-model and sdk-coverage bytes passed the pinned Ajv 8.17.1 schemas in the bounded test harness",
+    "coverageTruth": "recordingTool remains missing with eventCount zero, readiness remains inconclusive or not_runnable with probeCount zero, and no static path can upgrade either to observed or ready",
+    "guidance": "actionable readiness guidance is deterministic, non-evidence in-memory output and preserves local-clone byte verification, exact probe, and missing-event uncertainty requirements",
+    "passiveSafety": "fixture package scripts remained unexecuted in both the source and copied snapshot directories",
+    "focusedTests": "101 tests/subtests passed with zero skips and zero failures; ten repeated runs and race passed",
+    "fullModules": "all packages in all 11 go.work modules passed",
+    "crossCompilation": "Darwin arm64, Linux amd64, and Windows amd64 compiled through go test -exec=true without executing foreign binaries",
+    "independentReadOnlyReview": "approved the final production and test hashes after graph-binding, schema, canonical-byte, non-upgrade, and source/snapshot script-tripwire review; no reviewer writes"
+  },
+  "limits": [
+    "The Phase 02 fixture uses Git absence for byte-stable artifact goldens. SE-02-08 separately proves the real collector represents a detected repository with null HEAD/dirty state and the exact git-status uncertainty.",
+    "No manifest.json, finalization, complete audit pack, runtime event, model call, network action, sandbox launch, receiver interaction, OpenBox decision, safe-sink effect, or live coverage proof was produced.",
+    "Ajv is test-time schema evidence reacquired from the exact qualified five-package lock; the Go producer does not embed or add Ajv as a project dependency. The task-owned temporary acquisition directory was moved recoverably to Trash after verification.",
+    "The accepted project-model v1 schema cannot serialize the richer internal confidence, byte column, source digest, signals, or uncertainties. Their private digest binds later coverage derivation, but consumers of the public artifact must not claim those fields are present.",
+    "No relationship edge is emitted because passive detection supplies no relationship evidence; reachability and eventual effect execution remain unknown.",
+    "The exact 1.0.0 declaration and qualified local clone do not prove installed consumer bytes or a runnable initialization. Unsupported, ambiguous, dynamic, conflicting, or production-coordinate configuration remains not_runnable.",
+    "No SDK scan mode or fork, compatibility shim, provider hook, endpoint, table, service, package-manager execution, project source mutation, production credential/path, external control-plane write, audit upload, paid run, or deployment was added or used."
+  ]
+}

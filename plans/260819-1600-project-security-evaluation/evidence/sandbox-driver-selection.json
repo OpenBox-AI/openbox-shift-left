@@ -1,0 +1,79 @@
+{
+  "schema": "openbox.project-assurance.sandbox-driver-selection/v2",
+  "task": "SE-03-10",
+  "capturedAt": "2026-08-22T05:44:06Z",
+  "status": "qualified",
+  "ownerDecision": {
+    "decision": "native_codex_only",
+    "alternativeDriver": "none",
+    "processLimit": "maxProcesses is declared and correlation-bound but unsupported by the native tuple; no hard process-count enforcement is claimed"
+  },
+  "tuple": {
+    "driver": "codex-cli 0.149.0",
+    "mode": "standalone",
+    "path": "/opt/homebrew/Caskroom/codex/0.149.0/bin/codex",
+    "binarySha256": "f4a74117b8142cda581c95ff753abf4508b5636d89682c1ed77e4a9249af8963",
+    "platform": "macOS 26.5.2 arm64",
+    "sourceTag": "rust-v0.149.0",
+    "sourceTagObject": "a4e15bf371341b067c8278d3b70b1a8c7b3d793e",
+    "sourceCommit": "758ef40f50c1a458425c7cfbf1eb12cbc07af0b0"
+  },
+  "qualification": {
+    "evidence": "codex-sandbox-requalification.json",
+    "evidenceSha256": "4eeb7a517546abdaebd6caf8d7fa778126ef8bc7b23c36368a57c1211818bd8e",
+    "repeatedRuns": 2,
+    "normalizedBytesIdentical": true,
+    "parentAndChild": {
+      "filesystemRead": "passed",
+      "filesystemWrite": "passed",
+      "networkExternal": "passed",
+      "networkLoopback": "passed",
+      "literalLoopbackBind": "passed",
+      "credentials": "passed",
+      "fallback": "passed",
+      "timeout": "passed",
+      "cleanup": "passed",
+      "inheritance": "passed"
+    },
+    "projectLaunched": false,
+    "modelInvoked": false,
+    "externalControlPlaneUsed": false
+  },
+  "implementation": {
+    "processLimitHandling": "validated, included in ProbeBindingDigest, and required to match RunSpec; enforcement is unsupported",
+    "noShell": true,
+    "noUnsandboxedRetry": true,
+    "noDriverSwitch": true,
+    "boundedStdoutStderr": true,
+    "boundedTimeoutCancellation": true,
+    "processGroupCleanup": true,
+    "sourceSha256": {
+      "driver.go": "79f8a573c7290ca86e735d63f3a02b5c157e22f8576abb7b9b8ef0ca2ceb5833",
+      "identity.go": "a4e54ed0118668ae297fd63756c7ade7adc507596cbec6c69780b58758584385",
+      "codex.go": "116235e4d7860e800dce26bc759b252308cae16cb3bfa8ff5a64f4b1cca52b99",
+      "probe.go": "80ce6cd909f16565203b862bee04198cf5219d3f925b3a839303993b0603e98f",
+      "run.go": "73112526741ee62e7c0ddb98d421079ad6ec286f3caa93fbfa612392748daffb",
+      "codex_test.go": "b95c99e41d787f2699dcbeb3a4021dacef3b50d4dda18638fb3b6261177592d9"
+    },
+    "removedDriverFiles": [
+      "cli/internal/assurance/sandbox/docker.go",
+      "cli/internal/assurance/sandbox/docker_inspect.go",
+      "cli/internal/assurance/sandbox/docker_test.go"
+    ]
+  },
+  "commands": [
+    "git ls-remote https://github.com/openai/codex.git refs/tags/rust-v0.149.0 refs/tags/rust-v0.149.0^{}",
+    "PYTHONDONTWRITEBYTECODE=1 /usr/bin/python3 plans/260819-1600-project-security-evaluation/evidence/probes/codex_sandbox_qualification.py (twice; byte-identical normalized output)",
+    "cd cli && go test -count=25 ./internal/assurance/sandbox",
+    "cd cli && go test -race -count=1 ./internal/assurance/sandbox",
+    "cd cli && OPENBOX_CODEX_BINARY=/opt/homebrew/Caskroom/codex/0.149.0/bin/codex go test -count=1 -run '^TestDiscoverQualifiedCodexIdentity$' -v ./internal/assurance/sandbox",
+    "cd cli && go vet ./internal/assurance/sandbox"
+  ],
+  "limits": [
+    "The exact native tuple has no hard process-count enforcement surface; maxProcesses is unsupported.",
+    "Process-group ownership and post-exit absence prove cleanup, not a concurrent-process ceiling.",
+    "The profile permits direct literal-loopback sockets and binding for the project entrypoint while direct external sockets and unlisted proxied HTTP remain denied.",
+    "The built-in workspace profile permits broad reads and temporary-directory writes; the posture records that boundary.",
+    "This qualification launched only the built-in probe payload. The Mastra project was not started."
+  ]
+}

@@ -1,0 +1,51 @@
+{
+  "schema": "openbox.project-assurance.sandbox-driver-contract-validation/v1",
+  "task": "SE-03-01",
+  "capturedAt": "2026-08-21T03:32:25Z",
+  "status": "passed_with_limits",
+  "toolchain": {
+    "go": "go1.26.7 darwin/arm64",
+    "node": "22.20.0",
+    "ajv": "8.17.1",
+    "os": "macOS 26.5.2",
+    "kernel": "Darwin 25.5.0"
+  },
+  "inputs": {
+    "driverGo": "sha256:e47776eada7cf985aeffc9ad85cb763c2242083c70495a4c3fd8dcaa92b684c9",
+    "driverTestGo": "sha256:2e6a15af514e0f9647d33179bf4dbae80642fb6b1b02d0379da55059138ecec3",
+    "postureGo": "sha256:376303e11590910ba65158d197d7aa009ae2f8c6f3014423cc57114333271c50",
+    "postureTestGo": "sha256:12bf9fc7b47b18b2e58db012a328bec1e8eaf9db8cb9d3d6719149f9693110a5",
+    "sandboxPostureSchema": "sha256:e6e6a9f17fdfdb28354e7917514fa5ee51bc56a400401bd7e3af20e9eb938ee6",
+    "sandboxPostureFixture": "sha256:bcecac91811d04fca7922d6e20d8188fa9d0e195148c5688968dfc2e9060f153",
+    "adr": "sha256:70f283e9bc25c455a05d215d5b8788b50c4ae08f10dc2f85a596f23e59635c80",
+    "ajvQualificationLock": "sha256:86bfa5d3e22e4577e92e704cad8ea5026201a0090892b9010ad27446576b9cd7"
+  },
+  "commands": [
+    "cd cli && go test ./internal/assurance/sandbox -count=10",
+    "cd cli && go test -race ./internal/assurance/sandbox -count=1",
+    "cd cli && go vet ./internal/assurance/sandbox",
+    "cd cli && OPENBOX_AJV_ROOT=/Users/lebrian/.Trash/openbox-se02-07-ajv.x5OIha/node_modules/ajv OPENBOX_MASTRA_SDK_ROOT=/Users/lebrian/Documents/works/openbox/openbox-mastra-sdk go test ./internal/assurance/... -count=1",
+    "node plans/260819-1600-project-security-evaluation/evidence/probes/validate_project_assurance_schemas.mjs /Users/lebrian/.Trash/openbox-se02-07-ajv.x5OIha/node_modules/ajv contracts/project-assurance",
+    "cd cli && GOOS=linux GOARCH=amd64 go test -c ./internal/assurance/sandbox; GOOS=windows GOARCH=amd64 go test -c ./internal/assurance/sandbox",
+    "gofmt -d cli/internal/assurance/sandbox/*.go",
+    "git status --short",
+    "git diff --check"
+  ],
+  "result": {
+    "interface": "the project-assurance-only Driver exposes identity, probe, run, and cleanup boundaries without a launcher implementation",
+    "closedFailures": "fourteen machine-readable failure reasons reject unknown values; Error and Validate return fixed text for unknown caller input and never include wrapped host detail",
+    "postureMapping": "the typed posture maps exactly to openbox.sandbox-posture/v1 and matches the canonical frozen fixture",
+    "qualificationBinding": "the public configurationDigest binds exact executable bytes, effective configuration, immutable snapshot digest, writable roots, loopback and external targets, environment names, timeout, and child-process requirement",
+    "contradictions": "missing identity/config/probe digests, missing evidence, failed child observations under qualified, and invalid limits are rejected",
+    "schemaReplay": "Ajv 8.17.1 passed all seven fixtures, 48 basic mutations, 25 structural adversarial cases, and 10 semantic adversarial cases",
+    "tests": "ten focused repetitions, package race, all assurance packages, vet, and Linux/Windows compilation passed",
+    "independentReview": "approved the final source and fixture hashes after executable, snapshot, destination, and fixed-error-text binding review; no reviewer writes"
+  },
+  "limits": [
+    "This task defines data contracts and a test fake only. It does not discover an executable, build Codex argv/configuration, launch a probe or project, manage processes, or claim a supported sandbox tuple.",
+    "Later driver code must derive and compare ProbeBindingDigest from the actual normalized ProbeSpec; slice order and nil-versus-empty are intentionally digest-significant.",
+    "Current Codex documentation informed the explicit standalone-mode, complete-child-environment, and no-ambient-default contract; documentation is not confinement evidence.",
+    "The existing Phase 00 Codex qualification remains candidate evidence. Phase 03 must replay the exact binary/config parent and child probes before support or project launch.",
+    "No project code, SDK provider, production endpoint, OpenBox Core, sandbox launch, external control plane, paid/live path, provider hook, or hookflow path ran or changed."
+  ]
+}

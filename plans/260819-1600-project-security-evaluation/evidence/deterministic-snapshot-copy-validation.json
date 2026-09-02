@@ -1,0 +1,80 @@
+{
+  "schema": "openbox.project-assurance.deterministic-snapshot-copy-validation/v1",
+  "task": "SE-01-05",
+  "capturedAt": "2026-08-20T09:28:01Z",
+  "status": "passed_with_limits",
+  "toolchain": {
+    "go": "go1.26.7 darwin/arm64",
+    "os": "macOS 26.5.2 build 25F84",
+    "kernel": "Darwin 25.5.0 arm64",
+    "filesystem": "APFS with owners enabled",
+    "xSys": {
+      "version": "v0.35.0",
+      "goVersion": "1.23.0",
+      "sum": "h1:vz1N37gP5bs89s7He8XuIYXpyY0+QlsKmzipCbUtyxI=",
+      "goModSum": "h1:BJP2sWEmIv4KK5OTEluFJCKSidICx8ciO85XgH3Ak8k="
+    }
+  },
+  "inputs": {
+    "copyGo": "sha256:0ff39b07919a61bd48661ecce9499611db7b8750a07864839309fa6b760d99f1",
+    "copyOtherGo": "sha256:9074b002d65e94454c5a97d58d8175c958eac1da83f3a6febe7d838590fac917",
+    "copyUnixGo": "sha256:4ac5f4c7ae673fecb2e2e64d8592db6c5c8c51cd29abe8e3e5cc2c1105927852",
+    "copyUnixTestGo": "sha256:2cc2989e8d3f56fc7a7a5c753201e469749879508740e3baa67420c8ca04f0a3",
+    "platformDarwinGo": "sha256:5e5486d95d6b6dc1cedda0eda0bfefa5566ef91743bfcfba6e0101ea60d4ef65",
+    "platformLinuxGo": "sha256:5173c8af3b541674ffe2500bbe49663b160be7db8edd280ed7f3a1e85ef2cafb",
+    "platformOtherGo": "sha256:cb8eee69deeb25c7415ff707ff2b27071ff02eda6f96df5a54080c8297a79872",
+    "snapshotGo": "sha256:d1ffb1c5cd96cd1a497d2a2bdce930c8ad263d65eeedeeb7f077229066354424",
+    "snapshotUnixTestGo": "sha256:6f9e0494d6427563c9a9f4ebe12c9fa179450a33f529dc4cb18e3baff21d39d3",
+    "walkUnixGo": "sha256:b531ca1a5fed032f03626624e20501cc584bc75f626684424f31330984f6c908",
+    "goMod": "sha256:16df452b9d119396b14f5c8ab9c2ceb7143b5ccdc20271ef40eba15e1613bfea",
+    "goSum": "sha256:38f2bf9e5ba0a5c84860f45f4d50fdf7d4d1d0d21ceed4810d561f7b42a74cd8"
+  },
+  "commands": [
+    "cd cli && go test -count=1 ./internal/assurance/snapshot",
+    "cd cli && go test -race -count=1 ./internal/assurance/snapshot",
+    "cd cli && go test -count=10 -run 'TestCopy(IsDeterministicReadOnlyAndPreservesExecutableBit|RejectsMutationBeforeVerification|BoundsAFileThatGrowsAfterOpen|RejectsDestinationMutationBeforeSeal)' ./internal/assurance/snapshot",
+    "cd cli && go test -count=1 ./...",
+    "cd cli && go vet ./...",
+    "cd cli && GOOS=linux GOARCH=amd64 go test -c -o /tmp/openbox-snapshot-copy-linux-amd64.test ./internal/assurance/snapshot",
+    "cd cli && GOOS=linux GOARCH=arm64 go test -c -o /tmp/openbox-snapshot-copy-linux-arm64.test ./internal/assurance/snapshot",
+    "cd cli && GOOS=darwin GOARCH=amd64 go test -c -o /tmp/openbox-snapshot-copy-darwin-amd64.test ./internal/assurance/snapshot",
+    "cd cli && GOOS=windows GOARCH=amd64 go test -c -o /tmp/openbox-snapshot-copy-windows-amd64.test.exe ./internal/assurance/snapshot",
+    "cd cli && go mod tidy -diff"
+  ],
+  "result": {
+    "focusedPackage": "passed",
+    "race": "passed",
+    "repeatedAdversarialCopy": "passed 10 consecutive runs",
+    "fullCliModule": "passed",
+    "fullCliVet": "passed",
+    "crossCompilation": {
+      "linuxAmd64": "passed",
+      "linuxArm64": "passed",
+      "darwinAmd64": "passed",
+      "windowsAmd64": "passed; runtime source copying intentionally fails closed"
+    },
+    "moduleGraph": "x/sys v0.35.0 was already pinned transitively and is now direct; no version or go.sum byte changed; tidy diff only reports the pre-existing decision direct-to-indirect annotation drift",
+    "independentReadOnlyReview": "review found and current bytes close unbounded mutable-file reads, copied-tree/manifest divergence, world-readable snapshot modes, and stable destination mount/source aliases; same-identity hostile relocation remains explicitly unsupported",
+    "proved": [
+      "two copies of the same selected tree into different volatile destinations produce identical canonical file-manifest bytes, snapshot digest, selection digest, file order, counts, and totals",
+      "the normalized manifest contains only stable relative paths, exact SHA-256 content IDs, signed-53-bounded sizes, and executable booleans; absolute source and destination paths are absent",
+      "regular source files are opened no-follow and no-cross-mount through pinned directory descriptors, read at no more than the selected size plus one EOF byte, and checked before and after each read",
+      "a file that grows after open fails promptly rather than streaming until a moving EOF, and aggregate selected bytes fail closed above the public signed-53 integer bound",
+      "destination roots must be existing empty private 0700 directories outside the project; final-component mount boundaries and directory identities aliased from inside the project are rejected before writes",
+      "copied files are created exclusively through destination descriptors, fsynced, then represented as owner-only 0400 regular files or 0500 executable files; directories are recursively 0500",
+      "before return, the copied tree is re-opened no-follow, matched exactly against manifested files and required parent directories, rehashed, and checked for size, mode, digest, single-link status, extras, and omissions",
+      "immediate and callable source verification re-selects and re-hashes source bytes; same-size content changes, selection changes, executable changes, root replacement, and mutation during copy fail",
+      "source bytes and modes remain unchanged by successful copying, while writes to the returned copied regular files fail"
+    ]
+  },
+  "limits": [
+    "Only selected regular files are copied. Internal symlinks and all classified non-regular entries contribute to selection identity but are not materialized; SE-01-06 owns their explicit exclusion and omission records.",
+    "The caller owns creation and cleanup of the exact private destination. A failed copy may leave a partial unsealed tree, and a successful owner-only tree requires caller-owned permission restoration during cleanup; this package never deletes a caller-supplied path.",
+    "The only v1 source-byte ceiling currently frozen is the signed-53 aggregate contract bound. Reads are bounded to the selected size plus one, but no smaller operational snapshot-size policy exists in the accepted plan.",
+    "Runtime behavior was exercised on Darwin/APFS only. Linux openat2 mount/alias behavior has source and compile evidence but no privileged runtime bind-mount fixture; unsupported platforms fail closed before copying.",
+    "A malicious concurrent process with the same OS identity can relocate a pinned empty destination into the source after the final placement check. That hostile-caller race is unsupported; the trusted parent runner must own both private paths, and later launch must recheck identities.",
+    "The copied file set is coherent and immediately reverified but is not claimed to be an atomic filesystem snapshot. Source verification must run after the governed child completes and treat any mismatch as an invalid run.",
+    "No default secret/cache/project-ignore/profile rule was applied in this task; SE-01-06 owns those rules, omissions, and no-secret-output proof.",
+    "No SDK provider, production endpoint, OpenBox Core, sandbox launch, external control plane, or paid/live path ran."
+  ]
+}

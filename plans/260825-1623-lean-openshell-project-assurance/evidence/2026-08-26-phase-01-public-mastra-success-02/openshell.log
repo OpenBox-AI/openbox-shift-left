@@ -1,0 +1,5 @@
+[1787718862.412] [gateway] [INFO ] [openshell_server::grpc::sandbox] minted sandbox JWT
+[1787718862.418] [gateway] [INFO ] [openshell_server::grpc::sandbox] CreateSandbox request completed successfully
+[1787718862.685] [gateway] [INFO ] [openshell_server::grpc::policy] GetSandboxConfig served from spec (backfilled version 1)
+[1787718863.564] [gateway] [INFO ] [openshell_server::compute] Sandbox phase changed
+[1787718863.564] [gateway] [WARN ] [openshell_server::compute] failed to authenticate registry access for vm sandbox image '127.0.0.1:57024/ai.openbox/evaluation@sha256:54f49be7b21fd90a7d8d26c6e6f9b4cf3c789de64682349a512651d17f2d90c9': error sending request for url (https://127.0.0.1:57024/v2/)

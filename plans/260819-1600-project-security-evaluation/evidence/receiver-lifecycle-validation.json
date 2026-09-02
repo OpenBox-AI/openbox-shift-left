@@ -1,0 +1,46 @@
+{
+  "schema": "openbox.project-assurance.receiver-lifecycle-validation/v1",
+  "task": "SE-04-01",
+  "capturedAt": "2026-08-21T09:01:57Z",
+  "status": "passed_with_limits",
+  "toolchain": {
+    "go": "go1.27.0 darwin/arm64",
+    "os": "macOS 26.5.2",
+    "kernel": "Darwin 25.5.0",
+    "git": "2.55.0"
+  },
+  "inputs": {
+    "receiverGo": "sha256:a1d7b30df759deeed1f92faae49c1e2228a7acdd070e8a3bcc7d82d1cc938f2c",
+    "receiverTestGo": "sha256:c44349e1de25ac17143e6e746ad4811186e4d1e39771659809b32c2f06baa8f9",
+    "adr": "sha256:49937e5bd1181b736b6709cde0eb300aa68b1a286d4a64641c66230c551e1edc"
+  },
+  "commands": [
+    "cd cli && go test -count=25 ./internal/assurance/receiver",
+    "cd cli && go test -race ./internal/assurance/receiver",
+    "cd cli && go vet ./internal/assurance/receiver",
+    "cd cli && go test -count=1 ./internal/assurance/...",
+    "cd cli && go test -count=1 ./...",
+    "cd cli && go vet ./...",
+    "cd cli && GOOS=darwin GOARCH=arm64 go test -c -o TASK_TEMP/receiver-darwin-arm64.test ./internal/assurance/receiver",
+    "cd cli && GOOS=linux GOARCH=arm64 go test -c -o TASK_TEMP/receiver-linux-arm64.test ./internal/assurance/receiver",
+    "cd cli && GOOS=windows GOARCH=amd64 go test -c -o TASK_TEMP/receiver-windows-amd64.test.exe ./internal/assurance/receiver",
+    "gofmt -d cli/internal/assurance/receiver/receiver.go cli/internal/assurance/receiver/receiver_test.go",
+    "git status --short",
+    "git diff --check"
+  ],
+  "result": {
+    "listener": "the public API binds only tcp4 127.0.0.1 on an ephemeral port; injected wildcard listeners are rejected and closed",
+    "identity": "each server generates distinct 256-bit obx_test_ project and obx_ready_ parent bearers; authorization comparison is exact and constant-time",
+    "readiness": "only the exact raw GET /_openbox/readiness target and exact parent bearer can return 204, once; query and encoded aliases, wrong identity, and replay return no useful response",
+    "bounds": "all non-readiness requests consume the declared 1..10000 project request budget; exact readiness attempts have a fixed cap of 8; body, header, read, write, idle, and shutdown bounds are explicit",
+    "lifecycle": "context cancellation and repeated Close stop the listener through one bounded graceful shutdown",
+    "tests": "focused count-25, race, affected-assurance, full CLI, vet, format, and Darwin/Linux/Windows compile-only checks passed",
+    "independentReview": "approved final hashes with no remaining high or medium SE-04-01 blocker; reviewer made no writes"
+  },
+  "limits": [
+    "This task ran real local loopback HTTP lifecycle tests only. It did not execute a project, SDK, sandbox, Docker command, image, provider/model request, production endpoint, or external control-plane action.",
+    "SDK auth/evaluate wire shapes, ordering, capture, redaction, persistence, fixtures, relay behavior, and project-test integration remain owned by later Phase 04 tasks.",
+    "The readiness bearer is exposed only to the parent-facing Go caller by contract; SE-04-09 must prove it is absent from the child environment.",
+    "The server is a component proof, not a supported project-run path. Both Phase 03 sandbox tuples remain rejected."
+  ]
+}

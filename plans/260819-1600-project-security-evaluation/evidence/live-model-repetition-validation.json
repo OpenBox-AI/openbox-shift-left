@@ -1,0 +1,127 @@
+{
+  "schema": "openbox.project-assurance.live-model-repetition-validation/v1",
+  "task": "SE-05-07",
+  "capturedAt": "2026-08-22T07:21:00Z",
+  "status": "verified",
+  "toolchain": {
+    "go": "go1.27.0 darwin/arm64",
+    "node": "26.7.0",
+    "npm": "11.19.0",
+    "codex": "codex-cli 0.149.0",
+    "ollamaServer": "0.31.1",
+    "ollamaClient": "0.32.15",
+    "platform": "macOS 26.5.2 (Darwin 25.5.0 arm64)"
+  },
+  "inputs": {
+    "conformanceTest": "sha256:2a8bb5a9c9975af01b726be4b5b3bee1b4e03ca88490ef7e3ec9abe55d77a48f",
+    "relay": "sha256:129031f1d6ccffb927a9e24a091528d5bd285b138a2243a01ee0c28d0595a8dd",
+    "runProfile": "sha256:2315e5ca175800b40914c951199734cbc85720a948ea079418eb1d7c92a511a8",
+    "liveProfile": "sha256:28627a29c047bf4bcab9b77f4233da5f24b5921a4c37ca88bb2b17ef4cb9f941",
+    "projectSource": "sha256:388f865045ac7e8ee4fc105c50df324bfd9d13b3f2fa10275dd1e7b708ae3e4a",
+    "packageJson": "sha256:8e19b240b446999057edeba9a67a85dfd0b64dd86140895925944e37b522d226",
+    "packageLock": "sha256:9924ea8ab692ce843bb3908d1ceca39c7c50e4bc6ffb3b930e0f38c7e8dce1e5",
+    "preparedSnapshot": "sha256:19ac354b23c7e37117f4ac7c3e4ca8e73b9202f9930bf391a14f77a1b33e3381",
+    "relayQualification": "sha256:7b8b9f01d197b1cb0d0164d0eb79abcfaba2860394a42824dccef6c19ddf442a",
+    "sandboxSelectionEvidence": "sha256:94ce65e6997b1a5291b6c84e24e35a6f3b3db28dfe5fa04845119516640e15bf",
+    "sandboxQualificationEvidence": "sha256:4eeb7a517546abdaebd6caf8d7fa778126ef8bc7b23c36368a57c1211818bd8e"
+  },
+  "modelTuple": {
+    "descriptor": "ollama.chat.granite4.1-3b.6fd349357287",
+    "server": "0.31.1",
+    "model": "granite4.1:3b",
+    "digest": "sha256:6fd349357287c7ffc9e38189a93b48ea175d24fc566b38f09cfc564fb7f303eb",
+    "format": "gguf",
+    "family": "granite",
+    "parameters": "3.4B",
+    "quantization": "Q4_K_M",
+    "capabilities": [
+      "completion",
+      "tools"
+    ],
+    "temperature": 0,
+    "stream": false,
+    "keepAlive": "0s",
+    "maxOutputTokens": 8192,
+    "costUsd": "0.00"
+  },
+  "documentation": [
+    "Context7 /ollama/ollama: current native POST /api/chat tool-call request/response, temperature-zero reproducibility, GET /api/version, and GET /api/tags model identity fields",
+    "https://github.com/ollama/ollama/blob/main/docs/api.md"
+  ],
+  "commands": [
+    "/opt/homebrew/bin/ollama --version and /opt/homebrew/bin/ollama ps",
+    "curl --noproxy '*' exact literal-loopback GET /api/version and GET /api/tags tuple checks",
+    "OPENBOX_OLLAMA_QUALIFICATION=1 OPENBOX_MASTRA_STARTUP_ROOT=TASK_TEMP/snapshot OPENBOX_MASTRA_STARTUP_SNAPSHOT_DIGEST=sha256:19ac354b23c7e37117f4ac7c3e4ca8e73b9202f9930bf391a14f77a1b33e3381 go test -count=5 -v -run '^TestMastraLiveModelConformanceRunInQualifiedCodexSandbox$' ./internal/assurance/fixture",
+    "repeat the prepared-tree tar-stream SHA-256 and require byte identity",
+    "/opt/homebrew/bin/ollama ps immediately after the matrix",
+    "go test -count=10 ./internal/assurance/fixture",
+    "go test -race -count=1 ./internal/assurance/fixture",
+    "go test -count=1 ./internal/assurance/... ./cmd/openbox",
+    "go vet ./...",
+    "git status --short",
+    "git diff --check"
+  ],
+  "runs": [
+    {
+      "run": 1,
+      "inputTokens": 246,
+      "outputTokens": 74,
+      "requestDigest": "sha256:315574efd225d2c1b4da9583e95c1405cec0e688b78a05fdb3c162b846ade66c",
+      "responseDigest": "sha256:8af6330b334f39639f665cc4dac266a7aac55e534508d035ccffe4048417bc18",
+      "postureDigest": "sha256:b96b6b8ef7f4a4f4857853ab218b1a41d96b0d3e6ea37ddaa077c8f88bf34b9c",
+      "cleanupDigest": "sha256:367588da0182f2ca1aed3151d6c4d91332d272d6ee595648b97c1406e2e63904"
+    },
+    {
+      "run": 2,
+      "inputTokens": 242,
+      "outputTokens": 70,
+      "requestDigest": "sha256:806e0c8a2027728a63ed708ccaf48b526bd0ac418e814b3480a584f29501906f",
+      "responseDigest": "sha256:fc7c0133d015f9eac04fff7f3bbdff8779a769c24d736f994e9de663240aea18",
+      "postureDigest": "sha256:5b444ec19e8bc4270dcd0683c08ce918ae9eacf07939b589e08df8411d23a813",
+      "cleanupDigest": "sha256:518e965c31a577ed349684ed1cb2e3fc1fc54db2d4e1b04470e99cc4901816a7"
+    },
+    {
+      "run": 3,
+      "inputTokens": 246,
+      "outputTokens": 74,
+      "requestDigest": "sha256:12dc1314985ea44f428e710493be2d7c68d87e838c0b33a262f53db281f4eea8",
+      "responseDigest": "sha256:4d28082e1a0eaace4704b66e506d963264c88c1788b5c82742a879bfd88ea33d",
+      "postureDigest": "sha256:cf8281bc72f974bd9199648d070b671f2557fa2d2f27441ebb339e0281914d0b",
+      "cleanupDigest": "sha256:cf1478834a4735df3a1d018fd7555eb666a6721ec4b767f010772b77ee5b9edc"
+    },
+    {
+      "run": 4,
+      "inputTokens": 243,
+      "outputTokens": 71,
+      "requestDigest": "sha256:9b4bfea589baa1b71020d27b979875fd8d45e692ce7e249c6502793ce8266f93",
+      "responseDigest": "sha256:657a77dffde76e29b5573f38c44d3c61f5ba7c091034302c6983ebc6afed57bf",
+      "postureDigest": "sha256:c7593d85641d2f91c7b2f1b4be1d2a68b83f8a95b7166b23eee699f061285c05",
+      "cleanupDigest": "sha256:28dc9fa41fde7064004d5f5a937898a60103e01124ce70b0eb6b1dbf7b601bb1"
+    },
+    {
+      "run": 5,
+      "inputTokens": 245,
+      "outputTokens": 73,
+      "requestDigest": "sha256:d68a413511f6935e91d90ac6c66cb43b6af283f0ba1c70f4d4b82188de36eae8",
+      "responseDigest": "sha256:04db2e00a5166f71b3feb51182ae0b8d2007c8499c8a8f0473a6a9729e7c7bc2",
+      "postureDigest": "sha256:2a014880b59d3575f6bd61ceed5273ed110efd965a21cfae3bf52bbde18589ac",
+      "cleanupDigest": "sha256:812c3ef5ed52d5f2da5f52f9e17ccd3ebece60b7eee3c4dcb9f652c53fbcf4df"
+    }
+  ],
+  "result": {
+    "completedRuns": 5,
+    "profileDigest": "sha256:8383e6954d4fc0c78180b61dfad76fd322f86d0a498053a5dd822c2872534a81",
+    "tuple": "each run exact-matched server, model digest/details/capabilities before and after chat",
+    "application": "each run returned the sole recording-tool selection, emitted one qualified SDK pre-effect event, and completed one accepted safe-sink effect",
+    "perRunEvidence": "each run retained eight bounded receiver records, one poison receipt, one Ollama relay receipt with five upstream requests, one sink receipt, normalized process cancellation, and one cleanup digest",
+    "modelHarnessRequests": 0,
+    "preparedBytesUnchanged": true,
+    "modelLoadedAfterMatrix": false
+  },
+  "limits": [
+    "The synthetic marker, private relay route, and private sink route are fresh per run, so request/response and runtime posture/cleanup digests intentionally differ. The security-relevant outcome and exact model tuple were stable across all five runs.",
+    "Input and output token counts varied within the fixed bounds (242-246 input, 70-74 output); no byte-identical model-output claim is made.",
+    "The local Ollama daemon and model installation pre-existed the run and are not run-owned. keep_alive=0s was enforced and ollama ps was empty immediately after the matrix, but daemon lifecycle cleanup is not claimed.",
+    "This is local model-behavior evidence through the baseline ALLOW receiver. It is not a BLOCK decision, production provider result, model-quality guarantee, or external-control-plane observation."
+  ]
+}

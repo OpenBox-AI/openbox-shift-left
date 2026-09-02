@@ -1,0 +1,54 @@
+{
+  "schema": "openbox.project-assurance.model-harness-validation/v1",
+  "task": "SE-04-07",
+  "capturedAt": "2026-08-21T11:09:48Z",
+  "status": "passed_with_limits",
+  "toolchain": {
+    "go": "go1.27.0 darwin/arm64",
+    "platform": "Darwin 25.5.0 arm64"
+  },
+  "inputs": {
+    "modelGo": "sha256:7b049c476f8380ae39c9a8695e35f4e51e60e37348868d3238d8448b1f607ccb",
+    "modelTestGo": "sha256:7791e77035dadfa6d883dce8ff459b734683b206a8a265390756ef3878897e18",
+    "sharedFixtureGo": "sha256:4bdfcab62a65344dbd7682a0663aa4f233ba0a2076cf049c27cdb527247fca59",
+    "securityTestSchema": "sha256:5ffb671e5a6305c4eb388b87645f6e569f0aaaa3ec6dc3e20ba7014ec81b56ba",
+    "securityTestFixture": "sha256:904e7143e194405470effb7e69e660f52f3ef50868edeadb8535f04e05f7c42d",
+    "decision": "sha256:49937e5bd1181b736b6709cde0eb300aa68b1a286d4a64641c66230c551e1edc"
+  },
+  "commands": [
+    "cd cli && go test -count=25 ./internal/assurance/fixture",
+    "cd cli && go test -race -count=5 ./internal/assurance/fixture",
+    "cd cli && go vet ./internal/assurance/fixture",
+    "cd cli && go test -count=1 ./internal/assurance/...",
+    "cd cli && go test -count=1 ./...",
+    "cd cli && go vet ./...",
+    "cd cli && GOOS=darwin GOARCH=amd64 go test -c -o TASK_TEMP/fixture-darwin-amd64.test ./internal/assurance/fixture",
+    "cd cli && GOOS=linux GOARCH=amd64 go test -c -o TASK_TEMP/fixture-linux-amd64.test ./internal/assurance/fixture",
+    "cd cli && GOOS=windows GOARCH=amd64 go test -c -o TASK_TEMP/fixture-windows-amd64.test ./internal/assurance/fixture",
+    "gofmt -d cli/internal/assurance/fixture/model.go cli/internal/assurance/fixture/model_test.go",
+    "git status --short",
+    "git diff --check"
+  ],
+  "result": {
+    "authority": "the package owns one private random route, fixed marker-only request shape, fixed scripted response, and ephemeral literal-loopback listener; it has no outbound client and accepts no provider, model, listener, handler, path, command, filesystem, or external-network authority",
+    "response": "each accepted request returns canonical JSON labeled evidenceClass=harness_only and traceClass=scripted_tool_selection with only the fixed recording-tool name and synthetic marker/safe-sink arguments",
+    "evidence": "all accepted, rejected, overflow, and incomplete receipts remain harness-only; only a complete exact request receives canonical safe-header, canonical-body, and complete-response digests",
+    "secretSafety": "the marker, sink URL, header names and values, trailers, canonical request, and exact response are screened for declared and recognized credentials before any content digest",
+    "bounds": "request admission saturates at MaxRequests plus one content-free overflow receipt, bodies read at most MaxRequestBytes plus one byte, responses are package-bounded, and shutdown is idempotent with each caller retaining its own deadline",
+    "determinism": "equivalent requests and fresh same-input instances produce byte-identical scripted responses and digests while private runtime URLs remain distinct",
+    "isolation": "concurrent requests and distinct marker/sink instances retain separate state, monotonic handler-admission sequence, exact response identity, and bounded receipts",
+    "tests": "wrong marker, extra/duplicate fields, query, encoded path, wrong host/method/content type, secret name/value/trailer, oversize, cross-run, concurrency, replay, cancellation, count-25, race count-5, affected-assurance, full CLI, vet, format, and Darwin/Linux/Windows compile-only checks passed",
+    "independentReview": "approved the frozen source/test hashes with no remaining high or medium SE-04-07 blocker and made no workspace or ledger writes"
+  },
+  "cleanup": {
+    "crossCompileOutputs": "the task-owned compile directory was moved to Trash",
+    "sdkSourceClone": "the local openbox-mastra-sdk clone remained clean"
+  },
+  "limits": [
+    "This is a private scripted harness protocol, not a provider or model API and not a Mastra compatibility surface.",
+    "It proves deterministic harness conformance only. It does not prove real model behavior, model security, token or cost observations, ALLOW or BLOCK behavior, or project integration.",
+    "Receipt sequence is handler admission and processing order, not an independently measured TCP packet-arrival timestamp or model causal trace.",
+    "Exact consumption by a project adapter, binding to the generated sink instance, service cleanup correlation, and scenario judgment remain later integration work.",
+    "This task used only in-process loopback traffic. It did not launch a project or sandbox, contact a provider, call production OpenBox, use a credential, or write an external control plane."
+  ]
+}

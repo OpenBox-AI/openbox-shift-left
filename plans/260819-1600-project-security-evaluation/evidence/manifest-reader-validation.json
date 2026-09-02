@@ -1,0 +1,86 @@
+{
+  "schema": "openbox.project-assurance.manifest-reader-validation/v1",
+  "task": "SE-02-02",
+  "capturedAt": "2026-08-20T14:10:48Z",
+  "status": "passed_with_limits",
+  "toolchain": {
+    "go": "go1.26.7 darwin/arm64",
+    "os": "macOS 26.5.2",
+    "kernel": "Darwin 25.5.0"
+  },
+  "inputs": {
+    "manifestGo": "sha256:52c5f4e12e72e980f3919e4728ad97bceef6016f75f51a29fec6a18faf39272d",
+    "manifestTestGo": "sha256:2d91b0b0d89aba329d416c246c211e139efdc490630c366cf830a9b4a1807383",
+    "manifestUnixTestGo": "sha256:badb75cfe9e5dadfdc114bdaf3b442899285834436a3700cf0fb5ee3c7ef1345",
+    "readDarwinGo": "sha256:909ddece0c34fa18437b21ed97e1ef17aa0442e6d6b1d7616413f02b44359d96",
+    "readLinuxGo": "sha256:d7f53dd953eff78ee12f67cf092d2e63aa98a6274d7cf3c699a0532859bb6208",
+    "readOtherGo": "sha256:9966f07c3a2c5c1d413b156f73fe2bc2f5aaf1ac98acaa9e8a741c0eec89e50f",
+    "goMod": "sha256:16df452b9d119396b14f5c8ab9c2ceb7143b5ccdc20271ef40eba15e1613bfea",
+    "goSum": "sha256:38f2bf9e5ba0a5c84860f45f4d50fdf7d4d1d0d21ceed4810d561f7b42a74cd8",
+    "mastraCloneCommit": "db9863bd6659f8b1ce6a33903ea61e4e564be38b",
+    "mastraCloneTag": "1.0.0",
+    "mastraPackageJSON": "sha256:e11a34c50bb2bd4e4b5538fa9e1f5b638e0ce62ba1b4866d37930de6e06934e6",
+    "mastraPackageLock": "sha256:55f50d943ca7ca386f1e5e0371da02de8e180d9e439c071cb97d0991ba1d2332"
+  },
+  "commands": [
+    "cd cli && go test ./internal/assurance/inspect -count=10",
+    "cd cli && OPENBOX_MASTRA_SDK_ROOT=/Users/lebrian/Documents/works/openbox/openbox-mastra-sdk go test ./internal/assurance/inspect -count=1",
+    "cd cli && go test -race ./internal/assurance/inspect",
+    "cd cli && go vet ./internal/assurance/inspect",
+    "cd cli && go test ./internal/assurance/...",
+    "cd cli && go test ./...",
+    "cd cli && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go test -run '^$' -exec=/usr/bin/true ./internal/assurance/inspect",
+    "cd cli && CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go test -run '^$' -exec=/usr/bin/true ./internal/assurance/inspect",
+    "cd cli && go mod tidy -diff",
+    "cd cli && gofmt -d internal/assurance/inspect",
+    "git status --short -- cli/internal/assurance/inspect",
+    "git diff --check"
+  ],
+  "result": {
+    "closedInventory": [
+      "package.json",
+      "package-lock.json",
+      "npm-shrinkwrap.json",
+      "yarn.lock",
+      "pnpm-lock.yaml",
+      "pyproject.toml",
+      "requirements.txt and requirements-*.txt",
+      "*.txt below a requirements directory",
+      "poetry.lock",
+      "uv.lock",
+      "Pipfile",
+      "Pipfile.lock",
+      "pdm.lock"
+    ],
+    "limits": {
+      "perManifestBytes": 1048576,
+      "aggregateManifestBytes": 8388608,
+      "manifestCount": 128,
+      "pathRunes": 4096,
+      "pathComponents": 64,
+      "jsonDepth": 64
+    },
+    "positiveMatrix": "passed; nested npm and Python manifests are path-sorted with exact snapshot digests and defensive byte copies; unrelated lock/readme files are ignored",
+    "negativeMatrix": "passed; malformed/duplicate/non-object/deep JSON, invalid UTF-8, NUL text, oversized/aggregate/count/deep-path inputs, stable content drift, hard link, symlink, and FIFO replacements fail closed",
+    "descriptorSafety": "Linux uses openat2 BENEATH+NO_SYMLINKS+NO_XDEV; Darwin walks with openat O_NOFOLLOW plus device/FSID checks; regular files are opened nonblocking, require nlink=1 and expected size, are read through size+1, re-stat stable, and exact-digest checked",
+    "formatTruth": "JSON kinds receive duplicate-safe syntax, depth, and root-object validation; TOML, YAML, requirements, and line-oriented locks remain explicitly opaque NUL-free UTF-8 evidence for later detectors",
+    "scriptTripwire": "passed; a package.json postinstall command naming an absolute task-owned sentinel was retained as bytes but never executed",
+    "selectedMastraClone": "passed in root execution; the immutable snapshot of local tag 1.0.0 exposed the root package.json and package-lock.json with the expected kinds and package identity, without import, install, script, or network activity",
+    "repeated": "passed 10 consecutive package runs",
+    "race": "passed",
+    "vet": "passed",
+    "fullAssuranceAndCli": "passed",
+    "crossCompilation": "Linux amd64 and Windows amd64 passed; Windows runtime is fail-closed when a manifest read is required",
+    "formatAndWhitespace": "gofmt diff and git diff --check empty",
+    "moduleGraph": "no dependency or module change; go mod tidy -diff exits nonzero only for the pre-existing decision v0.0.0 direct-to-indirect annotation drift",
+    "independentReadOnlyReview": "approved final hashes with no high- or medium-severity SE-02-02 blocker; focused/race/vet/Darwin-Linux-Windows compilation/format replay passed and no reviewer writes were made"
+  },
+  "limits": [
+    "The reader classifies and preserves non-JSON manifests as opaque bounded text; it does not claim TOML, YAML, requirements, or line-lock syntax or package semantics are valid. Later detectors must retain that distinction.",
+    "The reader proves exact bytes against the Phase 01 snapshot digest, not continuous physical inode or permission identity. A same-UID stable single-link replacement with identical size and digest is content-equivalent; sealed 0400/0500 mode is not re-proved here.",
+    "Snapshot.Files materialization and whole-project snapshot construction inherit the Phase 01 operational-size limit; the reader bounds candidate manifests but does not retrofit a whole-project file-count cap.",
+    "Darwin exercised runtime descriptor behavior. Linux and Windows results are compile evidence only; unsupported runtime platforms return ErrUnsupportedPlatform when a candidate manifest must be read.",
+    "The independent reviewer did not access the sibling Mastra clone; the exact clone integration result and hashes were produced by the root task execution.",
+    "No source detector, project graph, SDK descriptor, CLI inspect execution, framework import, package installation, package script, model, sandbox, receiver/Core, production credential or endpoint, external control plane, paid path, or live security evaluation ran."
+  ]
+}

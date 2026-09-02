@@ -1,0 +1,104 @@
+{
+  "schema": "ai.openbox.shift-left.phase-validation.v1",
+  "phase": "OS-00",
+  "validated_at": "2026-08-25T18:09:40Z",
+  "status": "verified",
+  "source": {
+    "repository": "openbox-shift-left",
+    "head": "eaea69b8ace33b8900d6ea0138a71e5f18e18fe3",
+    "worktree_was_dirty": true,
+    "scope_note": "The project-assurance implementation and plans were pre-existing untracked work; unrelated repository changes were preserved."
+  },
+  "public_commands": [
+    "openbox project inspect [path] [--output DIR]",
+    "openbox project verify PACK",
+    "openbox project report --pack DIR [--format markdown|json|sarif]",
+    "openbox project propose --pack DIR [--format json|markdown]"
+  ],
+  "removed_public_commands": [
+    "openbox project test",
+    "openbox project rerun"
+  ],
+  "deferred_public_commands": [
+    "openbox project evaluate"
+  ],
+  "removed_implementation": [
+    "native Codex, Claude/SRT, and Seatbelt sandbox drivers and probes",
+    "project run-profile producer and execution client",
+    "fixed scenario builder",
+    "ephemeral SDK receiver",
+    "governed rerun orchestration",
+    "trusted native Mastra execution path",
+    "runtime evidence normalization, correlation, classification, and pack-production APIs"
+  ],
+  "retained_assurance_packages": [
+    "artifact",
+    "evidence",
+    "fixture",
+    "inspect",
+    "model",
+    "report",
+    "report/legacyprofile",
+    "runfs",
+    "sdkdesc",
+    "snapshot"
+  ],
+  "inventory": {
+    "assurance_go_files_before": 161,
+    "assurance_go_files_after": 80,
+    "read_only_backend_client_retained": false,
+    "backend_client_owner": "OS-02-03"
+  },
+  "historical_pack_compatibility": {
+    "packs": [
+      "plans/260819-1600-project-security-evaluation/evidence/governed-pack-pair/baseline",
+      "plans/260819-1600-project-security-evaluation/evidence/governed-pack-pair/governed"
+    ],
+    "verify_passed": true,
+    "report_projection_sha256": {
+      "baseline_markdown": "f345210e0fced5ab66f3489eea3a63bf73b75edb050b8ea29f76027aca427c40",
+      "baseline_json": "065d0bd04cbf3360b46dbe7e9ae381194cac30619c92aaf372f475cd6aa81915",
+      "baseline_sarif": "443f32578d2336d77ddcc47f70dfb7c2ffe9a8890c3d6def5109398cf18e125c",
+      "governed_markdown": "fa0e56ae4c1011ff4f4b76fecaabfe15ba12e016ff2458451a93fb09607d3926",
+      "governed_json": "bedc3fc69854a169792230a6091d2e43c2761d7a51d41920e5f66830cd3b5ab8",
+      "governed_sarif": "c11e9d0ae80ab5d038217ee1b6ef653039a24680697b19e82f4a24e0a70812b5"
+    },
+    "projection_bytes_match_pre_cleanup": true,
+    "proposal_failures_preserved": [
+      "baseline: runtime proposal requires one exact pre-effect event",
+      "governed: proposal requires the exact exploitable baseline finding"
+    ],
+    "valid_inert_proposal_path_covered_by_tests": true
+  },
+  "verification": {
+    "focused_assurance_tests": "passed",
+    "removed_route_tests_count_10": "passed",
+    "workspace_build": "passed",
+    "workspace_vet": "passed",
+    "workspace_race_tests": "passed",
+    "windows_amd64_cross_build": "passed",
+    "linux_arm64_cross_build": "passed",
+    "mastra_syntax_check": "passed",
+    "mastra_typecheck": "passed",
+    "mastra_image_conformance": "passed",
+    "mastra_image_id": "sha256:34344508191fee041e64f43e80b9ad6ce82ac16bdab96fced1c215eb0fc7dbf8",
+    "remaining_conformance_containers": 0,
+    "removed_package_import_scan": "passed",
+    "public_help_scan": "passed",
+    "gofmt_check": "passed",
+    "tracked_git_diff_check": "passed",
+    "phase_scope_untracked_whitespace_check": "passed",
+    "preserved_historical_whitespace_excluded": [
+      "plans/260819-1600-project-security-evaluation",
+      "plans/260822-2330-openbox-sandbox-projectrun-v2",
+      "plans/260825-0930-agent-behavior-assurance"
+    ]
+  },
+  "authority": {
+    "openshell_execution_implemented": false,
+    "backend_collection_implemented": false,
+    "security_analysis_authorized": false,
+    "report_generation_from_new_runs_authorized": false,
+    "openbox_control_mutation_authorized": false
+  }
+}

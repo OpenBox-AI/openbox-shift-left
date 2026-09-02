@@ -1,0 +1,69 @@
+{
+  "schema": "openbox.project-assurance.openbox-sandbox-v2-decision-validation/v1",
+  "task": "SE-08-08",
+  "capturedAt": "2026-08-22T16:34:03Z",
+  "status": "verified",
+  "decision": {
+    "direction": "versioned_project_run_v2_beside_unchanged_v1",
+    "currentShiftLeftRunner": "qualified_native_codex",
+    "dockerComposeAuthority": "disposable_local_openbox_system_plane_only",
+    "dockerProjectSandbox": false,
+    "v1Changed": false,
+    "v2Implemented": false,
+    "prototypeBuilt": false,
+    "newShiftLeftDriver": false,
+    "automaticFallback": false,
+    "implementationPlanStatus": "planned_not_authorized"
+  },
+  "inputs": {
+    "openboxSandboxCommit": "5e88a4548d391e7a0b6c9cb0154e06128f1d00fc",
+    "openbox-sandbox-v1-inventory.json": "c60bebf174c10d80d64c159881023d4b52982f83b410899e96be35db7a6b7ff8",
+    "openbox-sandbox-projectrun-requirements.md": "25283369654eceb118f656a74410904c628748ecf8074d38ab7401daed99fc13",
+    "openbox-sandbox-options.md": "929de33a8deb1f8072d81fb64f667875b70d737121117b8c4999473d9ba8f1e8",
+    "openbox-sandbox-projectrun-protocol.md": "9d84c68bbf483b54920e774eb0d1c885aea5d896bac44a490507d24b29d6a7f5",
+    "openbox-sandbox-projectrun-threat-model.md": "c573af46f3023b192853f8c1a305223c5e1193fd218aaebb16f3115dbf3a7444",
+    "openbox-sandbox-projectrun-rollout.md": "89919f877de15386284d67355683153f1dee31f7aed9241e7a22b4cf9c819f17",
+    "ADR-0021-openbox-sandbox-projectrun-v2.md": "867e8f3baab577f2f7f73b2dcbb2c8ce9c0b687ce0f317e5ca94b4599d94a847",
+    "implementation-plan.md": "fb3960a0911cf525eaec083400b5b4ef2ee4d4574cd83ca4f0c8bebc73880544",
+    "adr-index.md": "f85c4610fb7ba3568df58806aa2a8d2de04f7f49ecc65ed6fc7f7b24cb729c22"
+  },
+  "verification": [
+    {
+      "command": "recompute the 11 source hashes recorded in openbox-sandbox-v1-inventory.json against ../openbox-sandbox",
+      "result": "passed",
+      "observation": "All exact v1 inputs match the frozen clean commit."
+    },
+    {
+      "command": "git -C ../openbox-sandbox status --short; git -C ../openbox-sandbox rev-parse HEAD",
+      "result": "passed",
+      "observation": "The sibling worktree is clean at 5e88a4548d391e7a0b6c9cb0154e06128f1d00fc."
+    },
+    {
+      "command": "boundary predicates over ADR-0021, the separate plan, and the rollout contract",
+      "result": "passed",
+      "observation": "Each retains native execution, no fallback, unchanged v1, and Compose as system-plane-only rather than a project sandbox."
+    },
+    {
+      "command": "search cli/internal/assurance and cli/cmd/openbox Go source for project_run_v2 or ProjectRun v2",
+      "result": "passed",
+      "observation": "No v2 implementation or Shift Left driver exists."
+    },
+    {
+      "command": "git diff --check",
+      "result": "passed",
+      "observation": "No whitespace errors."
+    }
+  ],
+  "providerDisposition": {
+    "macosNativeSrt": "not_qualified_denial_evidence_failures",
+    "linuxNativeSrt": "not_qualified_direct_network_gap",
+    "openShell": "not_runnable_exact_gateway_tuple_absent",
+    "other": "unsupported_until_exact_live_qualification"
+  },
+  "limits": [
+    "This is an accepted design direction and separate plan, not an implementation, prototype, provider qualification, benchmark, or release.",
+    "SE-08-06 is formally not applicable in the parent goal because the owner excluded v2 implementation; its prototype and benchmark gates move to the separate plan.",
+    "Native Codex remains the only supported Shift Left project runner.",
+    "Docker Compose remains allowed only for the disposable local OpenBox system plane used by governed tests."
+  ]
+}

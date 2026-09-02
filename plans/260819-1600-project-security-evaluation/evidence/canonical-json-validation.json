@@ -1,0 +1,60 @@
+{
+  "schema": "openbox.project-assurance.canonical-json-validation/v1",
+  "task": "SE-01-02",
+  "capturedAt": "2026-08-20T04:51:39Z",
+  "status": "passed",
+  "reference": "https://www.rfc-editor.org/rfc/rfc8785.html",
+  "toolchain": {
+    "go": "go1.26.7 darwin/arm64"
+  },
+  "inputs": {
+    "canonicalGo": "sha256:418d3d01b05a438d7c4e7e4d111ae8adf5a91e7ff1d3066bbc0fb69256cd32ea",
+    "canonicalTestGo": "sha256:974a5c4dc8d10b994d04357fcc4d4bc4b4a3be4597023b228dbd72e62388d2e7",
+    "goMod": "sha256:e6cff5f9af527510599a2acd3afc4be3bc2aad694ca680f89679a6363a90e9e9",
+    "goSum": "sha256:38f2bf9e5ba0a5c84860f45f4d50fdf7d4d1d0d21ceed4810d561f7b42a74cd8"
+  },
+  "commands": [
+    "cd cli && go test -count=1 ./internal/assurance/artifact",
+    "cd cli && go test -race -count=1 ./internal/assurance/artifact",
+    "cd cli && go test -run '^$' -fuzz '^FuzzCanonicalizeJSONIdempotent$' -fuzztime=5s ./internal/assurance/artifact",
+    "cd cli && go test -count=1 ./...",
+    "cd cli && go vet ./..."
+  ],
+  "result": {
+    "focusedPackage": "passed",
+    "race": "passed",
+    "fuzz": {
+      "status": "passed",
+      "executions": 96216,
+      "seedCorpus": 116,
+      "finalCorpus": 125
+    },
+    "fullCliModule": "passed",
+    "vet": "passed",
+    "independentReadOnlyReview": "no remaining SE-01-02 correctness or authority blocker",
+    "rfc8785": {
+      "serializationSample": "passed",
+      "utf16PropertyOrder": "passed",
+      "appendixBFiniteNumberVectors": 22,
+      "noTrailingNewline": true
+    },
+    "stableAcrossMapInsertionOrder": true,
+    "contentDigestSyntax": "sha256:<64 lowercase hexadecimal digits>",
+    "invalidInputRejections": [
+      "duplicate object names",
+      "invalid UTF-8 and lone UTF-16 surrogates",
+      "non-finite numbers and malformed JSON",
+      "more than 1024 nested containers",
+      "pointer, map, and slice cycles",
+      "untrusted custom JSON and text marshalers",
+      "malformed or non-lowercase content digests"
+    ]
+  },
+  "limits": [
+    "Canonicalization does not replace public-schema validation; signed-53-bit bounds and field-specific constraints are validated before calling it.",
+    "The full finite IEEE-754 domain remains valid JCS input, including the RFC 8785 Appendix B 2^53 vector.",
+    "ContentDigest is the only trusted custom text-marshaling type; other custom JSON/text marshalers are rejected to prevent opaque or Unicode-replacing identity changes.",
+    "The fuzz result is a bounded local observation, not exhaustive proof over all JSON inputs.",
+    "No project code, SDK provider, production endpoint, OpenBox Core, sandbox launch, external control plane, or paid/live path ran."
+  ]
+}

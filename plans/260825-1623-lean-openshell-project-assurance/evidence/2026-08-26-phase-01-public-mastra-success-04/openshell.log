@@ -1,0 +1,8 @@
+[1787719072.054] [gateway] [INFO ] [openshell_server::grpc::sandbox] minted sandbox JWT
+[1787719072.059] [gateway] [INFO ] [openshell_server::grpc::sandbox] CreateSandbox request completed successfully
+[1787719072.332] [gateway] [INFO ] [openshell_server::grpc::policy] GetSandboxConfig served from spec (backfilled version 1)
+[1787719088.773] [sandbox] [INFO ] [openshell_sandbox] Starting sandbox command=["/usr/local/bin/node", "/app/src/index.mjs"]
+[1787719088.774] [sandbox] [INFO ] [openshell_sandbox] Fetching sandbox policy via gRPC endpoint=https://host.openshell.internal:17670/ sandbox_id=c9885023-f952-426e-a0e2-4f045b49c423
+[1787719088.819] [gateway] [INFO ] [openshell_server::grpc::policy] GetSandboxProviderEnvironment request completed successfully
+[1787719088.873] [gateway] [INFO ] [openshell_server::compute] Sandbox phase changed
+[1787719088.873] [gateway] [WARN ] [openshell_server::compute] VM process exited with status 0

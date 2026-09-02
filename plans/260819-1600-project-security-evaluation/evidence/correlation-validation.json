@@ -1,0 +1,68 @@
+{
+  "task": "SE-06-02",
+  "captured_at": "2026-08-22T08:20:57Z",
+  "result": "verified",
+  "toolchain": {
+    "go": "go1.27.0 darwin/arm64"
+  },
+  "inputs": {
+    "cli/internal/assurance/evidence/normalize.go": "9ab394ea5b528da4596d31439ed94f70105bba40049c858d086c35cf6af8231f",
+    "cli/internal/assurance/evidence/normalize_test.go": "258f2bd0e2ba40f659eb7d8ea3618829b963c017bf598bc1f2aea4bffafb0f54",
+    "cli/internal/assurance/evidence/correlate.go": "b4544b74101c805fc3935305cc512fc5931a6a311f0d1c00315b3f6fb4b054e8",
+    "cli/internal/assurance/evidence/correlate_test.go": "92a907edda6ac8e657158d56906e45535bbd474647dd348274d42f6a500f40ad"
+  },
+  "commands": [
+    {
+      "command": "cd cli && go test -count=50 ./internal/assurance/evidence",
+      "exit_status": 0,
+      "result": "passed"
+    },
+    {
+      "command": "cd cli && go test -race -count=10 ./internal/assurance/evidence",
+      "exit_status": 0,
+      "result": "passed"
+    },
+    {
+      "command": "cd cli && go test -count=1 ./internal/assurance/... ./cmd/openbox",
+      "exit_status": 0,
+      "result": "passed"
+    },
+    {
+      "command": "cd cli && go vet ./...",
+      "exit_status": 0,
+      "result": "passed"
+    },
+    {
+      "command": "cd cli && GOOS=linux GOARCH=amd64 go test -c -o <task-temp>/evidence-linux.test ./internal/assurance/evidence && GOOS=windows GOARCH=amd64 go test -c -o <task-temp>/evidence-windows.test.exe ./internal/assurance/evidence && GOOS=linux GOARCH=amd64 go test -c -o <task-temp>/openbox-linux.test ./cmd/openbox && GOOS=windows GOARCH=amd64 go test -c -o <task-temp>/openbox-windows.test.exe ./cmd/openbox",
+      "exit_status": 0,
+      "result": "four compile-only outputs passed; task-owned temporary directory moved to Trash"
+    },
+    {
+      "command": "git diff --check",
+      "exit_status": 0,
+      "result": "clean"
+    }
+  ],
+  "correlation_rules": {
+    "run_identity": "Every usable record must exact-match run ID, scenario ID, snapshot digest, profile digest, marker digest, and marker byte length.",
+    "causal_id": "A qualifying SDK attempt retains one bounded framework run ID. Missing, duplicate, or conflicting causal IDs are explicit issues.",
+    "marker_digest": "Poison, SDK activity input, and safe-sink evidence must bind the same synthetic marker SHA-256 and byte length. Raw marker bytes are absent.",
+    "bounded_order": "The qualified Mastra descriptor establishes recordingTool ActivityStarted as pre-effect; the correlator never infers causality from wall-clock proximity.",
+    "complete_observation": "Runtime coverage, exact service readiness, path-free sandbox probe binding, successful bounded process exit, exact cleanup object binding, and non-inconclusive bodies must all be present without ambiguity or contradiction."
+  },
+  "adversarial_matrix": {
+    "shuffled": "same facts and issues",
+    "duplicate_identical": "duplicate_evidence and duplicate_sink_receipt ambiguity; complete observation absent",
+    "duplicate_conflicting": "conflicting_evidence contradiction; complete observation absent",
+    "cross_run": "cross_run_evidence contradiction; mixed records excluded",
+    "marker_mismatch": "marker_mismatch contradiction; sink fact absent",
+    "causal_id_conflict": "duplicate_sdk_attempt ambiguity plus causal_id_conflict contradiction",
+    "clock_skew": "fact presence unchanged; volatile timestamp omitted and never used"
+  },
+  "limits": [
+    "Correlation is a pure function over immutable normalized objects and assigns no security outcome, confidence, or reachability.",
+    "Baseline correlation cannot emit OpenBox BLOCK or SDK-applied-BLOCK facts; Phase 07 alone can supply that real governed evidence.",
+    "The native sandbox preflight proves sandbox posture, not a project-effect denial. No sandbox_prevented fact is fabricated from the preflight probe.",
+    "No Docker code, driver, fallback, or execution is present."
+  ]
+}

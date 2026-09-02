@@ -1,0 +1,83 @@
+{
+  "schema": "openbox.project-assurance.project-inspect-cli-safety-validation/v1",
+  "task": "SE-02-08",
+  "capturedAt": "2026-08-21T02:59:32Z",
+  "status": "passed_with_limits",
+  "toolchain": {
+    "go": "go1.26.7 darwin/arm64",
+    "node": "22.20.0",
+    "ajv": "8.17.1",
+    "os": "macOS 26.5.2",
+    "kernel": "Darwin 25.5.0"
+  },
+  "inputs": {
+    "projectRouteGo": "sha256:b6722447134b2b1f784071bb9a19501d21878d54a9203879e2f3ec12f3b8ceea",
+    "projectInspectGo": "sha256:8a017ce87c3e6505cc0b84b726ab83a81966a6732bbdccea00c21966c2a3c862",
+    "outputDarwinGo": "sha256:f186ce6c36ec1ec892f1be69a932b6cb8949995d1cdcc49433fdf71ec3e6d7a3",
+    "outputLinuxGo": "sha256:abe9a909bd1c27343aa824b1bb4e8edcc2e4e1a18994886d462381e0dc37fedf",
+    "outputOtherGo": "sha256:53cd5a75878f19c882ac0e66a7f6ce7e784f4c5b46f1006daffaa50f3b9fbea3",
+    "passiveAcceptanceTestGo": "sha256:710c9aaaaa4012eba21d4a6ba7ffa8384dbd95eefff94435823e5c15578c5d99",
+    "parserTestGo": "sha256:f58a295b3e9434ea8517baee2ff7db33780f91fab172869ee2e250972a6531a5",
+    "routeTestGo": "sha256:247fc50a7597485149655c0bd36671440cd6559039d7ce50fa26becc61d3432a",
+    "identityCollectorGo": "sha256:510b4da27e5a0f956f21edfddc49acdddae969680a40a565651a7ca639332a04",
+    "modelArtifactGo": "sha256:3fad4452d9fe5a3d7ab507d09d070bb44dd4900079e48fb84877039c42107c65",
+    "exclusionGo": "sha256:366f33014dbe1f0189fd3d293b005d79472d7a6f04c14a852628e8237375df8d",
+    "projectModelSchema": "sha256:5b18935414763341b28101bf6d9fe7f746d6530bca68004c896be33883156ca4",
+    "sdkCoverageSchema": "sha256:bc78dbbe82bd9a7c710af76529cf38cae1a9135ed576e17834f944e77088cc54",
+    "ajvQualificationLock": "sha256:86bfa5d3e22e4577e92e704cad8ea5026201a0090892b9010ad27446576b9cd7"
+  },
+  "selectedMvpSource": {
+    "path": "/Users/lebrian/Documents/works/openbox/openbox-mastra-sdk",
+    "statusBeforeAndAfter": "clean",
+    "head": "db9863bd6659f8b1ce6a33903ea61e4e564be38b",
+    "tag": "1.0.0"
+  },
+  "selectedMvpOutput": {
+    "fileCount": 3,
+    "manifestPresent": false,
+    "projectSnapshot": "sha256:8b32cd765706eca08f6f1556cbeb52e4d2756f886b5f4a1794e7ccdb092bb6c6",
+    "projectModel": "sha256:b9229ecd5a6136e7d02ecca89415bd06cdfa94f4d5d2922a85cd1084a346bd5b",
+    "sdkCoverage": "sha256:6d4bca86773b9b5dfc93bb02389831cf174fcaa801204285ff9fa7bda87c9229",
+    "git": "present=true, head=null, dirty=null, one exact git-status uncertainty",
+    "readiness": "not_runnable; passive evidence did not prove installed consumer bytes or an exact runnable initializer"
+  },
+  "commands": [
+    "cd cli && go test ./cmd/openbox -run 'TestProjectRouting|TestParseProjectInspectArgs|TestProjectInspectHelp|TestInspectProjectPassively' -count=1 -v",
+    "cd cli && go test ./cmd/openbox ./internal/assurance/... -count=10",
+    "cd cli && go test -race ./cmd/openbox ./internal/assurance/...",
+    "cd cli && go vet ./...",
+    "cd cli && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go test -run '^$' -exec=/usr/bin/true ./cmd/openbox ./internal/assurance/...",
+    "cd cli && CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go test -run '^$' -exec=/usr/bin/true ./cmd/openbox ./internal/assurance/...",
+    "for each of the 11 go.work modules: go test ./...",
+    "cd cli && go build -o TASK_TEMP/openbox ./cmd/openbox && TASK_TEMP/openbox project inspect /Users/lebrian/Documents/works/openbox/openbox-mastra-sdk --output TASK_TEMP/inspection",
+    "node plans/260819-1600-project-security-evaluation/evidence/probes/validate_project_assurance_schemas.mjs QUALIFIED_AJV contracts/project-assurance openbox.project-model/v1 TASK_TEMP/inspection/project-model.json",
+    "node plans/260819-1600-project-security-evaluation/evidence/probes/validate_project_assurance_schemas.mjs QUALIFIED_AJV contracts/project-assurance openbox.sdk-coverage/v1 TASK_TEMP/inspection/sdk-coverage.json",
+    "git -C /Users/lebrian/Documents/works/openbox/openbox-mastra-sdk status --short",
+    "gofmt -d cli/cmd/openbox cli/internal/assurance",
+    "git status --short",
+    "git diff --check"
+  ],
+  "result": {
+    "realCli": "passed against both hostile local fixtures and the selected clean openbox-mastra-sdk clone",
+    "noExecution": "PATH tripwires for git, node, npm, npx, pnpm, yarn, python, and python3 remained inert; package scripts and Python top-level effects did not run",
+    "noNetwork": "a loopback listener exposed through proxy and OpenBox URL variables accepted no connection during the real in-process CLI test",
+    "noSecretRetention": "environment, dotenv, npmrc, source literal, URL userinfo, query credential, and guidance canaries were absent from all three artifacts",
+    "sourcePreservation": "the adversarial fixture byte/type/mode/size inventory and selected MVP clone Git status were unchanged",
+    "output": "exactly project-snapshot.json, project-model.json, and sdk-coverage.json are file-synced in a staging directory and atomically published without replacement; manifest.json, index, CID store, and incomplete marker are absent",
+    "repeatability": "two default CLI inspections used distinct random directory IDs but emitted byte-identical three-file content; prior inspection output was excluded",
+    "gitTruth": "filesystem inspection records only marker presence and emits the exact uncertainty for null HEAD/dirty state; it runs no Git command",
+    "failureCleanup": "unsupported platforms reject before creating default output parents; later failures remove only newly created empty .openbox/inspect and .openbox directories and preserve pre-existing .openbox",
+    "sourceRace": "Git identity is re-collected after final selected-source verification and marker changes fail closed",
+    "schemas": "selected MVP project-model and sdk-coverage outputs passed the pinned Ajv 8.17.1 structural and semantic validator",
+    "focusedRepeatedRaceVetCrossModules": "passed",
+    "independentReadOnlyReview": "approved after the failure-cleanup, final Git-identity recheck, and exact null-head/null-dirty tuple corrections; no reviewer writes"
+  },
+  "limits": [
+    "The no-network proof is an application-level loopback/proxy tripwire, not an OS sandbox or system-wide packet capture. Inspection has no network client path, but native confinement is a later phase gate.",
+    "Darwin executed the atomic no-replace publish. Linux has compile and syscall-source evidence; other platforms fail closed before publication.",
+    "Staging cleanup is path-based under the caller-selected parent. It is nonrecursive for default-parent cleanup, but a concurrent same-UID actor can still replace the private staging path; this is a documented low concurrency limit.",
+    "Git HEAD and dirty state deliberately remain unknown. The selected clone's clean status, head, and tag were observed only by the external acceptance harness and were not injected into artifact bytes.",
+    "The selected SDK clone truthfully produced not_runnable readiness because passive source inspection does not prove installed consumer package bytes or an exact runnable initializer.",
+    "No manifest.json, audit pack, project execution, package installation, model call, sandbox launch, SDK runtime event, receiver, provider, OpenBox decision, production credential/endpoint, external control-plane write, upload, paid/live run, publish, deploy, or commit occurred."
+  ]
+}

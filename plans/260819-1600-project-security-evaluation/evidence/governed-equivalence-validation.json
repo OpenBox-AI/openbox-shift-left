@@ -1,0 +1,67 @@
+{
+  "task": "SE-07-03",
+  "captured_at": "2026-08-22T14:21:57Z",
+  "result": "verified",
+  "inputs": {
+    "cli/internal/assurance/governed/governed.go": "ec45a8a63292478e81811e46b8afca46e840896d8bf12e338594bae420301f17",
+    "cli/internal/assurance/governed/governed_test.go": "ccf87a5abb05b7a25b74ae1e86f6d8b2342d0df68467159c7adfdf9fd73c6e6e",
+    "cli/internal/assurance/report/proposal.go": "7f4c6a11d81182b3227cbc57a18dadddb0d90b2a443e3c00f0f3fa76746abfbf",
+    "cli/internal/assurance/report/proposal_unix_test.go": "e90c4ef4eafa7b1ee3d7050268c6eed6d2a71ca124577a5c06e0bd27a3e1d74f"
+  },
+  "implementation": {
+    "baseline_authority": "The opaque reviewed candidate retains the verified baseline-pack digest and exact project-snapshot, run-profile, scenario, SDK-coverage, sandbox-posture, and control digests. The run-profile binding is private compiler state so the accepted public policy-proposal/v1 shape is unchanged.",
+    "current_inputs": "BindRerun derives an opaque current binding only from a VerifiedPack, exact immutable artifact objects with the five required roles, and the reviewed control bytes. Callers cannot mutate digest fields after construction.",
+    "preflight_order": "Start extracts the opaque candidate and compares all seven identities before Backend candidate loading, gateway creation, or project launch. Missing or mismatched inputs return one fixed fail-closed error.",
+    "mismatch_matrix": [
+      "missing bindings",
+      "baseline pack drift",
+      "project snapshot drift",
+      "run profile drift",
+      "scenario drift",
+      "SDK coverage drift",
+      "sandbox posture drift",
+      "candidate control drift"
+    ]
+  },
+  "commands": [
+    {
+      "command": "go test -count=25 ./internal/assurance/governed",
+      "exit_status": 0,
+      "result": "The exact-match path passed and every mismatch stopped with zero Backend calls and zero lifecycle-cleanup calls, proving rejection before authority transfer."
+    },
+    {
+      "command": "go test -count=5 ./internal/assurance/report",
+      "exit_status": 0,
+      "result": "The proposal compiler deterministically retained the exact baseline run-profile digest alongside its public rerun identities."
+    },
+    {
+      "command": "go test -race -count=5 ./internal/assurance/governed ./internal/assurance/report",
+      "exit_status": 0,
+      "result": "The binding and proposal packages passed under the race detector."
+    },
+    {
+      "command": "go test -count=1 ./internal/assurance/... && go test -count=1 ./cmd/openbox && go vet ./internal/assurance/... ./cmd/openbox",
+      "exit_status": 0,
+      "result": "All assurance packages, CLI tests, and affected vet gates passed."
+    },
+    {
+      "command": "GOOS=linux GOARCH=amd64 go test -c ./internal/assurance/governed; GOOS=windows GOARCH=amd64 go test -c ./internal/assurance/governed",
+      "exit_status": 0,
+      "result": "The final governed package compiled to Linux ELF and Windows PE test binaries; outputs were moved recoverably to Trash."
+    }
+  ],
+  "authority": {
+    "candidate_loads": 0,
+    "gateway_launches": 0,
+    "evaluated_project_launches": 0,
+    "model_invocations": 0,
+    "network_requests": 0,
+    "control_plane_writes": 0,
+    "docker_used": false
+  },
+  "limits": [
+    "This is a deterministic preflight equivalence proof. It does not claim that the later governed project produced matching runtime evidence.",
+    "Current artifact objects must be derived from the actual rerun orchestration. Passing unrelated bytes under the required roles fails the candidate comparison but does not itself prove how a caller collected those artifacts.",
+    "The engine policy ID and version are runtime receipts owned by SE-07-04; the preflight control identity is the reviewed candidate-document digest."
+  ]
+}

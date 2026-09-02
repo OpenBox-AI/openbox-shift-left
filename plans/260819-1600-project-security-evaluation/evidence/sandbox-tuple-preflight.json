@@ -1,0 +1,41 @@
+{
+  "schema": "openbox.project-assurance.sandbox-tuple-preflight/v1",
+  "task": "SE-03-10",
+  "capturedAt": "2026-08-21T05:38:15Z",
+  "status": "not_runnable",
+  "tuple": {
+    "driver": "codex-cli 0.148.0",
+    "binarySha256": "b0308517b20543012fa2171aa3d46ce455a7456c4eb2a552ab9468ba4eeb1e50",
+    "platform": "macOS 26.5.2 arm64",
+    "mode": "standalone"
+  },
+  "inputs": {
+    "driverGo": "sha256:dc42b096e8db96b34a2f21a7d78272938d5da0cc6eb21b6e4c7cdd5e289f7597",
+    "probeProcessGo": "sha256:a03c6e34ac98cedda539590b6dff33f98e38cf4b30f5db37277ad63f8a358f27",
+    "probeProcessUnixGo": "sha256:bdc8f3bcd7152ad8cee7422f14ca2cae81eded6195c809d78f7de9986ce2fe49",
+    "runProfileSchema": "sha256:0b3550a74ad70b6e8aa7c903f6078d8dfe8c3565775586aff847ab29ed89b5dc",
+    "runProfileFixture": "sha256:201edf273c1c4e91eecfd43522e7c077eaed32b5d72078bc94121a2a9adb5470",
+    "codexFeasibility": "sha256:97fb2f2de6fece96f2e1b5394757973df773485d8b807a968e89c98ac4cdf226",
+    "adr": "sha256:ece092b5c22eb19aa1f2c81875ea24bf301b8e10b9768c116ca6974358f084d6"
+  },
+  "commands": [
+    "rg -n 'maxProcesses|MaxProcesses|RLIMIT|Setrlimit|pids\\.max|process count' cli/internal/assurance/sandbox",
+    "sed -n '96,130p' cli/internal/assurance/sandbox/driver.go",
+    "sed -n '185,215p' cli/internal/assurance/sandbox/codex.go",
+    "sed -n '82,90p' contracts/project-assurance/testdata/valid/project-run-profile-v1.json",
+    "git status --short",
+    "git diff --check"
+  ],
+  "result": {
+    "requiredBudget": "the accepted v1 profile requires maxProcesses=32 and ADR-0020 requires every declared budget to fail preflight or terminate on exceedance",
+    "implementedBounds": "the driver enforces duration, stdout, stderr, cancellation, and post-exit process-group cleanup",
+    "missingBound": "RunSpec has no process-count field or enforcement token; the Codex argv/config has no process-count control; source search found no process-count, rlimit, or pids controller",
+    "judgment": "the exact Codex tuple is not_runnable for project launch and cannot be published as supported",
+    "liveRun": "not executed because a mandatory static preflight gate already fails and a live run cannot prove the absent enforcement surface"
+  },
+  "limits": [
+    "Process-group ownership and post-exit absence are cleanup controls, not a maximum concurrent process count.",
+    "No live Codex/sandbox/project/provider execution occurred. Running the tuple would not change this preflight result.",
+    "Selecting a replacement native candidate or adding a hard process-count enforcement surface requires an owner/ADR decision outside the current accepted implementation shape."
+  ]
+}

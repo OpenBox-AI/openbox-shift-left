@@ -1,0 +1,117 @@
+{
+  "task": "SE-07-02",
+  "captured_at": "2026-08-22T14:20:48Z",
+  "result": "verified",
+  "decision": "compose_system_native_project_boundary_preserved",
+  "toolchain": {
+    "go": "go1.27.0 darwin/arm64",
+    "docker_client": "29.7.2",
+    "docker_compose": "5.4.0"
+  },
+  "inputs": {
+    "cli/internal/assurance/governed/governed.go": "ec45a8a63292478e81811e46b8afca46e840896d8bf12e338594bae420301f17",
+    "cli/internal/assurance/governed/governed_live_test.go": "a8bf6b00a3432531464a41d644e2f8416bdae014adb33daa3a023370d36bd4ee",
+    "cli/internal/assurance/governed/governed_test.go": "ccf87a5abb05b7a25b74ae1e86f6d8b2342d0df68467159c7adfdf9fd73c6e6e",
+    "cli/internal/assurance/governed/listener_test.go": "d55a73902a3f324870929c21452818f706d0fc72724a29f5885ba1c4227fb109",
+    "cli/internal/assurance/report/proposal.go": "7f4c6a11d81182b3227cbc57a18dadddb0d90b2a443e3c00f0f3fa76746abfbf",
+    "cli/internal/assurance/report/proposal_unix_test.go": "e90c4ef4eafa7b1ee3d7050268c6eed6d2a71ca124577a5c06e0bd27a3e1d74f",
+    "testbed/project-assurance/compose.governed.override.yml": "aedbf75c988c389793f03713e3f0ae6f3f158442a1a66cc593c742691e79942a"
+  },
+  "system_tuple": {
+    "delivery": "run-owned Docker Compose local OpenBox system plane",
+    "compose_project": "openbox-assurance-se0702-final",
+    "backend_commit": "79a5422d324e759bc8a03cbe18477aeda1f4b12e",
+    "backend_image": "sha256:21ee6395f0f1b0a7c3e9bc5854b9d7ab43e52d2acd9312143620759df0334dd3",
+    "core_commit": "6eef3192381b477a7b396ce8d5bd63cc6f0b7049",
+    "core_image": "sha256:c94d66297e437183c5dd73935ad68a3f799f29e59cb750e6e81173bafd71dadc",
+    "source_worktrees": "clean",
+    "published_coordinates": "literal-loopback backend, Core, OPA, and Keycloak only",
+    "project_execution": "not launched; Docker is not the evaluated-project sandbox"
+  },
+  "implementation": {
+    "candidate_authority": "The inert report compiler exposes an opaque, digest-bound GovernedCandidate only for the exact runtime-policy proposal, baseline/finding/scenario bindings, run profile, qualified native Codex posture, fail-closed behavior, and three exact governed repetitions. The governed package public Start entrypoint accepts that Proposal and no arbitrary policy bytes.",
+    "candidate_load": "The gateway loads the fixed recordingTool policy through authenticated Backend POST /agent/:agentId/policies, requires the exact 201 response and current/active policy fields, then polls the exact OPA data path until that same candidate reason returns block.",
+    "gateway": "A random literal-loopback listener accepts only the qualified SDK auth and evaluate routes, exact Host and RequestURI, the run agent bearer, bounded bodies, closed headers, and no query aliases. It forwards to the exact loopback Core with proxy and redirects disabled and records bounded body-free digests and the real Core decision.",
+    "lifecycle": "Candidate-load or listener failure invokes the mandatory run-owned cleanup. Session Close shuts down the gateway and erases the complete isolated Compose project once; candidate deactivation alone is never considered cleanup.",
+    "verdict_boundary": "The gateway contains no ALLOW or BLOCK response body. The retained BLOCK was parsed from the real Core response and matched the policy ID created by the Backend and activated through OPA."
+  },
+  "commands": [
+    {
+      "command": "go test -count=25 ./internal/assurance/governed",
+      "exit_status": 0,
+      "result": "Deterministic candidate load, OPA activation, real-response forwarding, closed-route rejection, bounded evidence, and cleanup tests passed ten times."
+    },
+    {
+      "command": "go test -count=5 ./internal/assurance/report",
+      "exit_status": 0,
+      "result": "Exact proposal compilation, opaque candidate binding, posture qualification, and adversarial proposal rejection passed."
+    },
+    {
+      "command": "go test -race -count=5 ./internal/assurance/governed ./internal/assurance/report",
+      "exit_status": 0,
+      "result": "Gateway admission, evidence, and lifecycle tests passed under the race detector."
+    },
+    {
+      "command": "go test -count=1 ./internal/assurance/... && go test -count=1 ./cmd/openbox && go vet ./internal/assurance/... ./cmd/openbox",
+      "exit_status": 0,
+      "result": "All assurance packages, the CLI package, and affected vet gates passed."
+    },
+    {
+      "command": "GOOS=linux GOARCH=amd64 go test -c ./internal/assurance/governed; GOOS=windows GOARCH=amd64 go test -c ./internal/assurance/governed",
+      "exit_status": 0,
+      "result": "The governed package compiled to Linux ELF and Windows PE test binaries; task-owned outputs were moved recoverably to Trash."
+    },
+    {
+      "command": "OPENBOX_GOVERNED_LIVE=1 OPENBOX_GOVERNED_*=[loopback/run-owned values] go test -count=1 -run '^TestGovernedLiveRealDecisionAndComposeCleanup$' -v ./internal/assurance/governed",
+      "exit_status": 0,
+      "result": "A fresh isolated agent loaded the exact candidate, OPA returned block for ActivityStarted/recordingTool, the gateway forwarded auth and evaluate to real Core, Core returned BLOCK with the loaded policy ID, and the test erased the Compose project."
+    },
+    {
+      "command": "docker ps/volume/network label queries; lsof on 48080,48081,48086,48181 after test cleanup",
+      "exit_status": 0,
+      "result": "Zero run-owned containers, volumes, networks, or listeners remained."
+    }
+  ],
+  "live_observation": {
+    "candidate_digest": "sha256:68cf677f320557c4f42aebb675bfc0a61429deb18256767a928dbd44945cda8b",
+    "policy_id": "83ceb420-5ef8-4124-9a33-ced33dc3f4fc",
+    "version_hash": "ed6e5b7f1aee6afdd170765c814c8d6a6386cfe7ca3dca5eb8b45917ee248cdb",
+    "opa_path": "org/openbox_assurance_se0702_final_invalid/policy_83ceb4205ef841249a33ced33dc3f4fc",
+    "opa_decision": "BLOCK",
+    "core_decision": "BLOCK",
+    "core_policy_match": true,
+    "gateway_records": 2,
+    "cleanup": {
+      "containers": 0,
+      "volumes": 0,
+      "networks": 0,
+      "listeners": 0,
+      "credentials": "Run-owned mode-0600 files were moved recoverably to Trash after their backing identity, policy, and history stores were deleted; no credential value or digest is retained here.",
+      "source_images_retained": true
+    }
+  },
+  "qualification_history": {
+    "status_contract": "An initial exact-source run exposed that successful policy creation returns HTTP 201 rather than 200. The loader was tightened to exact 201 and the disposable system was erased.",
+    "live_harness": "A later pre-proof attempt exposed that the test request helper still carried its unit-test bearer. The live test now overwrites it with the isolated agent bearer and registers cleanup immediately after lifecycle ownership. The final replay passed and erased the complete run-owned project.",
+    "classification": "These failed qualification attempts are retained as fail-closed implementation evidence, not as governed outcomes."
+  },
+  "authority": {
+    "compose_system_started": true,
+    "loopback_only_network_requests": true,
+    "isolated_control_plane_writes": true,
+    "real_engine_block_observed": true,
+    "hard_coded_gateway_verdict": false,
+    "evaluated_project_launches": 0,
+    "model_invocations": 0,
+    "safe_sink_requests": 0,
+    "production_endpoints_used": 0,
+    "docker_used_as_project_sandbox": false,
+    "audit_data_uploaded": false
+  },
+  "limits": [
+    "This verifies candidate loading, OPA activation, a real Core BLOCK response, the closed gateway, and complete system-plane teardown. It does not prove the full project-level blocked predicate.",
+    "No Mastra project, model harness, SDK, poison fixture, safe sink, or native sandbox was launched in this task. Those correlations remain owned by SE-07-03 through SE-07-05.",
+    "Docker Compose is allowed only for the isolated local OpenBox system. Evaluated-project execution remains exclusively on the exact qualified native Codex sandbox.",
+    "The retained source images contain no run identity, credential, policy, or event state and remain cached for later Phase 07 proofs."
+  ]
+}

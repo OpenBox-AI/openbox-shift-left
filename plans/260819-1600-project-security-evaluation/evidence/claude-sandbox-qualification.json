@@ -1,0 +1,773 @@
+{
+  "captured_at": "2026-08-19T13:42:24Z",
+  "captured_output_sha256": {
+    "inherited": "6c0fedab85363687d869ba05a9d7d0a5c9410ef281cf29276a1056897d265252",
+    "standalone": "a7915ea252537a8662d4d9021739f1c19a6a6b6f56b14d7f289139ea61583950"
+  },
+  "commands": {
+    "inherited": [
+      "/usr/bin/python3",
+      "/Users/lebrian/Documents/works/openbox/openbox-shift-left/plans/260819-1600-project-security-evaluation/evidence/probes/claude_inherited_qualification.py",
+      "--claude",
+      "/Users/lebrian/.local/share/claude/versions/2.1.235",
+      "--payload",
+      "/Users/lebrian/Documents/works/openbox/openbox-shift-left/plans/260819-1600-project-security-evaluation/evidence/probes/claude_sandbox_payload.py"
+    ],
+    "standalone": [
+      "/usr/bin/python3",
+      "/Users/lebrian/Documents/works/openbox/openbox-shift-left/plans/260819-1600-project-security-evaluation/evidence/probes/claude_srt_qualification.py",
+      "--node",
+      "/Users/lebrian/.nvm/versions/node/v22.20.0/bin/node",
+      "--srt-cli",
+      "/private/tmp/openbox-se00-06-srt.3mweyH/install/node_modules/@anthropic-ai/sandbox-runtime/dist/cli.js",
+      "--payload",
+      "/Users/lebrian/Documents/works/openbox/openbox-shift-left/plans/260819-1600-project-security-evaluation/evidence/probes/claude_sandbox_payload.py",
+      "--package-tarball",
+      "/private/tmp/openbox-se00-06-srt.3mweyH/anthropic-ai-sandbox-runtime-0.0.73.tgz"
+    ]
+  },
+  "inherited": {
+    "backend_unavailable": {
+      "backend_failure_signature": "sandbox_exec_launch_denied_exit_126",
+      "caller_timeout_seconds": 25.0,
+      "caller_timeout_triggered": false,
+      "claude_exit_status": 0,
+      "cleanup": {
+        "protected_roots_exist": {
+          "backend_unavailable": false,
+          "escape": false,
+          "normal": false
+        },
+        "run_root_exists": false
+      },
+      "command": "\"/usr/bin/sandbox-exec\" \"-p\" \"(version 1) (allow default) (deny process-exec (literal \\\"/usr/bin/sandbox-exec\\\"))\" \"$CLAUDE\" \"--bare\" \"--print\" \"--output-format\" \"stream-json\" \"--verbose\" \"--no-session-persistence\" \"--settings\" \"$RUN_ROOT/backend_unavailable/claude-settings.json\" \"--setting-sources\" \"\" \"--strict-mcp-config\" \"--disable-slash-commands\" \"--no-chrome\" \"--tools\" \"Bash\" \"--permission-mode\" \"dontAsk\" \"--model\" \"claude-sonnet-4-5-20250929\" \"Execute the one Bash tool call supplied by the model, then stop.\"",
+      "init": {
+        "analytics_disabled": true,
+        "api_key_source": "ANTHROPIC_API_KEY",
+        "claude_code_version": "2.1.235",
+        "cwd": "$RUN_ROOT/backend_unavailable/workspace",
+        "mcp_servers": [],
+        "plugins": [],
+        "product_feedback_disabled": true,
+        "skills": [],
+        "slash_commands": [],
+        "subtype": "init",
+        "tools": [
+          "Bash"
+        ],
+        "type": "system"
+      },
+      "loopback_server_thread_alive": false,
+      "payload_loopback_requests": 0,
+      "qualification_probe_exit_status": 86,
+      "qualification_probe_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "qualification_probe_stdout_sha256": "db1c6dc9485ebd8a8584dffb58b4c85e11c1f6cd54456c339bbf450d07c357c3",
+      "requests": [
+        {
+          "anthropic_version": "2023-06-01",
+          "api_key_present": true,
+          "model": "claude-sonnet-4-5-20250929",
+          "path": "/v1/messages?beta=true",
+          "stream": true,
+          "tool_names": [
+            "Bash"
+          ],
+          "tool_result_present": false,
+          "user_agent": "claude-cli/2.1.235 (external, sdk-cli)"
+        },
+        {
+          "anthropic_version": "2023-06-01",
+          "api_key_present": true,
+          "model": "claude-sonnet-4-5-20250929",
+          "path": "/v1/messages?beta=true",
+          "stream": true,
+          "tool_names": [
+            "Bash"
+          ],
+          "tool_result_present": true,
+          "user_agent": "claude-cli/2.1.235 (external, sdk-cli)"
+        }
+      ],
+      "result": {
+        "cost_limit": "reported cost is synthetic arithmetic over loopback token counts; no provider request or billing occurred",
+        "is_error": false,
+        "num_turns": 2,
+        "stop_reason": "end_turn",
+        "subtype": "success",
+        "terminal_reason": "completed",
+        "type": "result",
+        "web_fetch_requests": 0,
+        "web_search_requests": 0
+      },
+      "scenario": "backend_unavailable",
+      "sentinels": {
+        "backend_fallback_exists": false,
+        "escape_exists": false,
+        "protected_child_target_exists": false,
+        "protected_target_exists": false
+      },
+      "settings_sha256": "e1b964249698f9c515ed96fbe387ba88c28e9400007fe646c47246674f6061d7",
+      "stderr_bytes": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "0af479bce11da3193df9fde073d36ad07cdf4f3430517c9719603d5ee02534d6",
+      "stream_event_types": [
+        "system",
+        "assistant",
+        "user",
+        "assistant",
+        "result"
+      ],
+      "tool_result": {
+        "evidence": "Exit code 126\nenv: /usr/bin/sandbox-exec: Operation not permitted",
+        "is_error": true
+      },
+      "unexpected_proxy_requests": []
+    },
+    "candidate": {
+      "claude_sha256": "83b8f806f6f2eea316cfe246628e6c23374711d868f1fd0409db551b877b7748",
+      "claude_version": "2.1.235 (Claude Code)",
+      "platform": {
+        "darwin": "25.5.0",
+        "machine": "arm64",
+        "macos": "26.5.2"
+      }
+    },
+    "cleanup": {
+      "protected_roots_exist": {
+        "backend_unavailable": false,
+        "escape": false,
+        "normal": false
+      },
+      "run_root_exists": false
+    },
+    "configuration": {
+      "allow_local_binding": true,
+      "allow_unsandboxed_commands": false,
+      "allowed_domains": [
+        "127.0.0.1",
+        "localhost"
+      ],
+      "auto_allow_bash_if_sandboxed": true,
+      "claude_parent_network_posture": "ANTHROPIC_BASE_URL and NO_PROXY select loopback; bare mode and nonessential traffic controls are enabled; HTTP(S)/ALL proxy traffic is routed to the loopback deny receiver",
+      "credential_names_denied": [
+        "ANTHROPIC_API_KEY",
+        "AWS_ACCESS_KEY_ID",
+        "AWS_SECRET_ACCESS_KEY",
+        "CLAUDE_CODE_OAUTH_TOKEN",
+        "CODEX_API_KEY",
+        "GOOGLE_APPLICATION_CREDENTIALS",
+        "OPENAI_API_KEY",
+        "OPENBOX_AGENT_PRIVATE_KEY",
+        "OPENBOX_API_KEY",
+        "OPENBOX_PROBE_SECRET"
+      ],
+      "fail_if_unavailable": true,
+      "sandbox_enabled": true
+    },
+    "disabled_escape": {
+      "backend_failure_signature": null,
+      "caller_timeout_seconds": 25.0,
+      "caller_timeout_triggered": false,
+      "claude_exit_status": 0,
+      "command": "\"$CLAUDE\" \"--bare\" \"--print\" \"--output-format\" \"stream-json\" \"--verbose\" \"--no-session-persistence\" \"--settings\" \"$RUN_ROOT/escape/claude-settings.json\" \"--setting-sources\" \"\" \"--strict-mcp-config\" \"--disable-slash-commands\" \"--no-chrome\" \"--tools\" \"Bash\" \"--permission-mode\" \"dontAsk\" \"--model\" \"claude-sonnet-4-5-20250929\" \"Execute the one Bash tool call supplied by the model, then stop.\"",
+      "init": {
+        "analytics_disabled": true,
+        "api_key_source": "ANTHROPIC_API_KEY",
+        "claude_code_version": "2.1.235",
+        "cwd": "$RUN_ROOT/escape/workspace",
+        "mcp_servers": [],
+        "plugins": [],
+        "product_feedback_disabled": true,
+        "skills": [],
+        "slash_commands": [],
+        "subtype": "init",
+        "tools": [
+          "Bash"
+        ],
+        "type": "system"
+      },
+      "loopback_server_thread_alive": false,
+      "payload_loopback_requests": 0,
+      "requests": [
+        {
+          "anthropic_version": "2023-06-01",
+          "api_key_present": true,
+          "model": "claude-sonnet-4-5-20250929",
+          "path": "/v1/messages?beta=true",
+          "stream": true,
+          "tool_names": [
+            "Bash"
+          ],
+          "tool_result_present": false,
+          "user_agent": "claude-cli/2.1.235 (external, sdk-cli)"
+        },
+        {
+          "anthropic_version": "2023-06-01",
+          "api_key_present": true,
+          "model": "claude-sonnet-4-5-20250929",
+          "path": "/v1/messages?beta=true",
+          "stream": true,
+          "tool_names": [
+            "Bash"
+          ],
+          "tool_result_present": true,
+          "user_agent": "claude-cli/2.1.235 (external, sdk-cli)"
+        }
+      ],
+      "result": {
+        "cost_limit": "reported cost is synthetic arithmetic over loopback token counts; no provider request or billing occurred",
+        "is_error": false,
+        "num_turns": 2,
+        "stop_reason": "end_turn",
+        "subtype": "success",
+        "terminal_reason": "completed",
+        "type": "result",
+        "web_fetch_requests": 0,
+        "web_search_requests": 0
+      },
+      "scenario": "escape",
+      "sentinels": {
+        "backend_fallback_exists": false,
+        "escape_exists": false,
+        "protected_child_target_exists": false,
+        "protected_target_exists": false
+      },
+      "settings_sha256": "c18dce6d076b3e88ffa37ba3a87f15cf929b50e6ee91134428bbb4ebb27d403c",
+      "stderr_bytes": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "40a00c6576638e1b78b64be757a6e8d193e8fb2f1517ff8095f1910f4410cc34",
+      "stream_event_types": [
+        "system",
+        "assistant",
+        "user",
+        "assistant",
+        "result"
+      ],
+      "tool_result": {
+        "evidence": "Exit code 1\ntouch: $PROTECTED_ROOT/escape-sentinel: Operation not permitted",
+        "is_error": true
+      },
+      "unexpected_proxy_requests": []
+    },
+    "judgment": "qualified_inherited_candidate_with_driver_mapping",
+    "limits": [
+      "The model endpoint is a deterministic loopback Messages stub; no Anthropic service or paid model was invoked.",
+      "The Claude parent was not kernel-network-confined: wrapping it in SRT on macOS prevents the nested Bash Seatbelt profile from applying. No unexpected proxy request was observed, but direct raw sockets by the parent were not syscall-captured.",
+      "Claude Code returns process status 0 after a Bash backend failure because the synthetic model ends the turn; the qualification wrapper parses the tool result and maps that condition to nonzero status 86.",
+      "Inherited mode is not selected merely from process ancestry: this record supplies exact settings, observable parent/child behavior, and a backend fault.",
+      "Like standalone SRT on POSIX, inherited loopback requires allowLocalBinding=true and therefore grants direct access to all local ports for the sandboxed Bash process.",
+      "Claude exposes no CLI output-cap flag; a production driver must cap both streams while reading and own the process-group timeout.",
+      "Managed settings are outside --setting-sources and remain part of the effective host tuple."
+    ],
+    "normal": {
+      "backend_failure_signature": null,
+      "caller_timeout_seconds": 25.0,
+      "caller_timeout_triggered": false,
+      "claude_exit_status": 0,
+      "command": "\"$CLAUDE\" \"--bare\" \"--print\" \"--output-format\" \"stream-json\" \"--verbose\" \"--no-session-persistence\" \"--settings\" \"$RUN_ROOT/normal/claude-settings.json\" \"--setting-sources\" \"\" \"--strict-mcp-config\" \"--disable-slash-commands\" \"--no-chrome\" \"--tools\" \"Bash\" \"--permission-mode\" \"dontAsk\" \"--model\" \"claude-sonnet-4-5-20250929\" \"Execute the one Bash tool call supplied by the model, then stop.\"",
+      "init": {
+        "analytics_disabled": true,
+        "api_key_source": "ANTHROPIC_API_KEY",
+        "claude_code_version": "2.1.235",
+        "cwd": "$RUN_ROOT/normal/workspace",
+        "mcp_servers": [],
+        "plugins": [],
+        "product_feedback_disabled": true,
+        "skills": [],
+        "slash_commands": [],
+        "subtype": "init",
+        "tools": [
+          "Bash"
+        ],
+        "type": "system"
+      },
+      "loopback_server_thread_alive": false,
+      "payload_loopback_requests": 2,
+      "requests": [
+        {
+          "anthropic_version": "2023-06-01",
+          "api_key_present": true,
+          "model": "claude-sonnet-4-5-20250929",
+          "path": "/v1/messages?beta=true",
+          "stream": true,
+          "tool_names": [
+            "Bash"
+          ],
+          "tool_result_present": false,
+          "user_agent": "claude-cli/2.1.235 (external, sdk-cli)"
+        },
+        {
+          "anthropic_version": "2023-06-01",
+          "api_key_present": true,
+          "model": "claude-sonnet-4-5-20250929",
+          "path": "/v1/messages?beta=true",
+          "stream": true,
+          "tool_names": [
+            "Bash"
+          ],
+          "tool_result_present": true,
+          "user_agent": "claude-cli/2.1.235 (external, sdk-cli)"
+        }
+      ],
+      "result": {
+        "cost_limit": "reported cost is synthetic arithmetic over loopback token counts; no provider request or billing occurred",
+        "is_error": false,
+        "num_turns": 2,
+        "stop_reason": "end_turn",
+        "subtype": "success",
+        "terminal_reason": "completed",
+        "type": "result",
+        "web_fetch_requests": 0,
+        "web_search_requests": 0
+      },
+      "scenario": "normal",
+      "sentinels": {
+        "backend_fallback_exists": false,
+        "escape_exists": false,
+        "protected_child_target_exists": false,
+        "protected_target_exists": false
+      },
+      "settings_sha256": "a485a658a228470aae8d042f81b06478e4f52b1beac7c206000b12dba4b16303",
+      "stderr_bytes": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "ada2de66dde9701b95fd2bb8783be1674b87cb0a29f1d1c53980697069f0ce7a",
+      "stream_event_types": [
+        "system",
+        "assistant",
+        "user",
+        "assistant",
+        "result"
+      ],
+      "tool_result": {
+        "evidence": {
+          "child": {
+            "cwd": "$RUN_ROOT/normal/workspace",
+            "direct_loopback_socket": {
+              "connected": true
+            },
+            "environment": {
+              "credential_names_present": [],
+              "proxies": {
+                "ALL_PROXY": {
+                  "empty": false,
+                  "loopback_host": true,
+                  "present": true,
+                  "scheme": "http"
+                },
+                "HTTPS_PROXY": {
+                  "empty": false,
+                  "loopback_host": true,
+                  "present": true,
+                  "scheme": "http"
+                },
+                "HTTP_PROXY": {
+                  "empty": false,
+                  "loopback_host": true,
+                  "present": true,
+                  "scheme": "http"
+                },
+                "NO_PROXY": {
+                  "empty": false,
+                  "loopback_host": false,
+                  "present": true,
+                  "scheme": ""
+                }
+              },
+              "qualification_marker": "SE-00-06"
+            },
+            "loopback_http": {
+              "body_sha256": "43c47b20129a8f4c5f62617740abdacbea5be13d2bbadac0b5fb829bf87a7489",
+              "reached": true,
+              "status": 200
+            },
+            "mode": "child",
+            "outside_read": {
+              "errno": 1,
+              "error_type": "PermissionError",
+              "read": false
+            },
+            "outside_write": {
+              "errno": 1,
+              "error_type": "PermissionError",
+              "written": false
+            },
+            "unlisted_http": {
+              "error_type": "HTTPError",
+              "reached": false,
+              "status": 403
+            },
+            "workspace_write": {
+              "sha256": "ddc9e669194254cef019a29d3619a2c16592e5d52e1a81e98b01bd52319149a3",
+              "written": true
+            }
+          },
+          "parent": {
+            "cwd": "$RUN_ROOT/normal/workspace",
+            "direct_loopback_socket": {
+              "connected": true
+            },
+            "environment": {
+              "credential_names_present": [],
+              "proxies": {
+                "ALL_PROXY": {
+                  "empty": false,
+                  "loopback_host": true,
+                  "present": true,
+                  "scheme": "http"
+                },
+                "HTTPS_PROXY": {
+                  "empty": false,
+                  "loopback_host": true,
+                  "present": true,
+                  "scheme": "http"
+                },
+                "HTTP_PROXY": {
+                  "empty": false,
+                  "loopback_host": true,
+                  "present": true,
+                  "scheme": "http"
+                },
+                "NO_PROXY": {
+                  "empty": false,
+                  "loopback_host": false,
+                  "present": true,
+                  "scheme": ""
+                }
+              },
+              "qualification_marker": "SE-00-06"
+            },
+            "loopback_http": {
+              "body_sha256": "43c47b20129a8f4c5f62617740abdacbea5be13d2bbadac0b5fb829bf87a7489",
+              "reached": true,
+              "status": 200
+            },
+            "mode": "parent",
+            "outside_read": {
+              "errno": 1,
+              "error_type": "PermissionError",
+              "read": false
+            },
+            "outside_write": {
+              "errno": 1,
+              "error_type": "PermissionError",
+              "written": false
+            },
+            "unlisted_http": {
+              "error_type": "HTTPError",
+              "reached": false,
+              "status": 403
+            },
+            "workspace_write": {
+              "sha256": "e47125968b3b71049fbc4802d1e40a71ea1359decfabacf70b34588037d4ff0c",
+              "written": true
+            }
+          }
+        },
+        "is_error": false
+      },
+      "unexpected_proxy_requests": []
+    },
+    "schema": "openbox.project-assurance.claude-inherited-probe/v1"
+  },
+  "inputs": {
+    "claude": {
+      "path": "/Users/lebrian/.local/share/claude/versions/2.1.235",
+      "sha256": "83b8f806f6f2eea316cfe246628e6c23374711d868f1fd0409db551b877b7748",
+      "version": "2.1.235 (Claude Code)"
+    },
+    "node": {
+      "path": "/Users/lebrian/.nvm/versions/node/v22.20.0/bin/node",
+      "version": "v22.20.0"
+    },
+    "sandbox_runtime": {
+      "cli_reported_version_limit": "Direct node execution has no npm_package_version and the CLI falls back to the hard-coded string 1.0.0; package.json is authoritative.",
+      "package": "@anthropic-ai/sandbox-runtime",
+      "tarball_sha256": "15555a1e919f6f114ba6b6e4d93289df0d77f72ae92a1236778d4421b17a66ce",
+      "version": "0.0.73"
+    }
+  },
+  "judgment": {
+    "first_driver": "Codex 0.148.0 remains ADR-0020's first candidate",
+    "inherited": "qualified feasibility candidate only when the driver parses Bash tool failures and maps backend unavailability to a nonzero probe result",
+    "live_proof": "No paid model, Anthropic service, production credential, or production endpoint was used.",
+    "standalone": "qualified feasibility candidate; Phase 03 still owns support-tuple admission"
+  },
+  "platform": {
+    "darwin": "25.5.0",
+    "machine": "arm64",
+    "macos": "26.5.2"
+  },
+  "probe_script_sha256": {
+    "claude_inherited_qualification.py": "1e1547edc3d1ea949fb5c897bebfab194869f61554e275b2211ed111d6f54393",
+    "claude_qualification_record.py": "32a4f42b758f2190a204bcf0eb36cf1a601ec9609578bae944a4a43e02d1556e",
+    "claude_sandbox_payload.py": "0b4264ce9bc3344ef67d9981c9e3958db4215fc32e2e9937e3400bb29b20ac2f",
+    "claude_srt_qualification.py": "9c91a02e065b301fa8984dc3b49b6f49239a946c4225c12fdcdaff8579c98f33"
+  },
+  "retained_limits": [
+    "SRT and inherited Bash require allowLocalBinding=true for the loopback baseline on this POSIX/macOS tuple, which grants sandboxed commands direct access to all local ports.",
+    "Standalone SRT and Claude CLI expose no native output cap; the future driver must stream-cap stdout and stderr and own process-group timeout and cleanup.",
+    "The inherited Claude parent was not kernel-network-confined because an outer macOS Seatbelt profile prevents its nested Bash Seatbelt profile from applying. No unexpected proxy request was observed, but direct raw parent sockets were not syscall-captured.",
+    "Claude returns process status 0 after a Bash tool backend failure if the model ends the turn. The qualification wrapper verified the error tool result, absence of the sentinel, and a real mapped exit status 86.",
+    "Managed Claude settings remain outside --setting-sources and are part of the effective support tuple.",
+    "The synthetic result stream reports cost arithmetic from mock token counts; no provider request or billing occurred."
+  ],
+  "schema": "openbox.project-assurance.claude-sandbox-qualification/v1",
+  "sources": [
+    {
+      "kind": "official_documentation",
+      "url": "https://code.claude.com/docs/en/sandboxing",
+      "use": "inherited Bash sandbox and strict fallback settings"
+    },
+    {
+      "kind": "official_documentation",
+      "url": "https://code.claude.com/docs/en/sandbox-environments",
+      "use": "standalone Sandbox Runtime boundary"
+    },
+    {
+      "kind": "official_documentation",
+      "url": "https://code.claude.com/docs/en/cli-usage",
+      "use": "bare non-interactive command flags"
+    },
+    {
+      "kind": "official_documentation",
+      "url": "https://code.claude.com/docs/en/configuration",
+      "use": "settings keys and precedence"
+    },
+    {
+      "kind": "official_documentation",
+      "url": "https://code.claude.com/docs/en/env-vars",
+      "use": "nonessential traffic and updater controls"
+    },
+    {
+      "kind": "npm_tarball",
+      "sha256": "15555a1e919f6f114ba6b6e4d93289df0d77f72ae92a1236778d4421b17a66ce",
+      "url": "https://registry.npmjs.org/@anthropic-ai/sandbox-runtime/-/sandbox-runtime-0.0.73.tgz"
+    }
+  ],
+  "standalone": {
+    "backend_unavailable_fail_closed": {
+      "command": "\"/usr/bin/sandbox-exec\" \"-p\" \"(version 1) (allow default) (deny process-exec (literal \\\"/usr/bin/sandbox-exec\\\"))\" \"$NODE\" \"$SRT_CLI\" \"--settings\" \"$RUN_ROOT/srt-settings.json\" \"/usr/bin/touch\" \"$RUN_ROOT/workspace/backend-unavailable-fallback-sentinel\"",
+      "exit_status": 126,
+      "fault_injection": "outer Seatbelt denies process-exec of /usr/bin/sandbox-exec",
+      "payload_executed": false,
+      "stderr_sha256": "55b5b81d02cb2b7ef95210f1514237f0b524dd8b2e46f26bf3ab5e9297b9d11c",
+      "unsandboxed_retry_observed": false
+    },
+    "candidate": {
+      "cli_reported_version": "1.0.0",
+      "cli_version_limit": "Direct node execution has no npm_package_version and the CLI falls back to the hard-coded string 1.0.0; package.json is authoritative.",
+      "node_version": "v22.20.0",
+      "package": "@anthropic-ai/sandbox-runtime",
+      "package_tarball_sha256": "15555a1e919f6f114ba6b6e4d93289df0d77f72ae92a1236778d4421b17a66ce",
+      "package_version": "0.0.73",
+      "platform": {
+        "darwin": "25.5.0",
+        "machine": "arm64",
+        "macos": "26.5.2"
+      }
+    },
+    "cleanup": {
+      "protected_root_exists": false,
+      "run_root_exists": false,
+      "server_thread_alive": false
+    },
+    "configuration": {
+      "allow_local_binding": true,
+      "allow_read": [
+        "$RUN_ROOT/workspace"
+      ],
+      "allow_write": [
+        "$RUN_ROOT/workspace"
+      ],
+      "allowed_domains": [
+        "127.0.0.1",
+        "localhost"
+      ],
+      "command": "\"$NODE\" \"$SRT_CLI\" \"--debug\" \"--settings\" \"$RUN_ROOT/srt-settings.json\" \"/usr/bin/python3\" \"$RUN_ROOT/workspace/claude_sandbox_payload.py\" \"--mode\" \"parent\" \"--workspace\" \"$RUN_ROOT/workspace\" \"--protected-target\" \"$PROTECTED_ROOT/parent-denied.txt\" \"--read-marker\" \"$PROTECTED_ROOT/read-marker.txt\" \"--loopback-url\" \"$LOOPBACK_URL\" \"--unlisted-url\" \"http://not-allowed.invalid/\" \"--expect-direct-loopback\" \"connected\"",
+      "cwd": "$RUN_ROOT/workspace",
+      "deny_read": [
+        "/Users/lebrian"
+      ],
+      "environment_keys": [
+        "LANG",
+        "OPENBOX_PROBE_SECRET",
+        "OPENBOX_QUALIFICATION_MARKER",
+        "PATH",
+        "PYTHONDONTWRITEBYTECODE",
+        "SRT_DEBUG",
+        "TMPDIR"
+      ],
+      "protected_credential_names": 10,
+      "settings_sha256": "e7c5dcc52e1545e4ac45018ea8b16692122a537eb5c9b5853dee0c04fd853cd3"
+    },
+    "denial_reporting": {
+      "debug_stderr_bytes": 1520,
+      "debug_stderr_sha256": "017c311ff4bba8252a1de7076cdbd198dcd3d64512eb4878e30c819b3ed29f4c",
+      "direct_loopback_connected": true,
+      "outside_read_errno": 1,
+      "outside_write_errno": 1
+    },
+    "explicit_settings_fail_closed": {
+      "command": "\"$NODE\" \"$SRT_CLI\" \"--settings\" \"$RUN_ROOT/missing-settings.json\" \"/usr/bin/touch\" \"$RUN_ROOT/workspace/invalid-settings-fallback-sentinel\"",
+      "exit_status": 1,
+      "payload_executed": false,
+      "stderr_sha256": "bb635a763767ace7dc06cc8d6943ed174b87af0fe62b10fce926ea879b52d640"
+    },
+    "judgment": "qualified_standalone_candidate",
+    "limits": [
+      "This standalone SRT probe invokes no Claude model or Anthropic API.",
+      "SRT always puts loopback in NO_PROXY on POSIX, so required loopback access needs allowLocalBinding=true and permits direct access to all local ports; Phase 03 must treat that as an exact support-tuple limitation.",
+      "Package.json 0.0.73 is authoritative because direct CLI --version reports its hard-coded 1.0.0 fallback.",
+      "The standalone CLI has no native timeout or output cap; a caller must own process-group timeout, streaming caps, and cleanup."
+    ],
+    "output": {
+      "command": "\"$NODE\" \"$SRT_CLI\" \"--settings\" \"$RUN_ROOT/srt-settings.json\" \"/usr/bin/python3\" \"$RUN_ROOT/workspace/output_payload.py\"",
+      "forwarded_stdout_bytes": 70000,
+      "limit": "srt exposes no output-cap flag; the production driver must cap both streams while reading",
+      "native_cap_available": false,
+      "requested_bytes": 70000,
+      "stdout_sha256": "bca09f4a757d5571c7d9f3341d4301f3c391c090826acc1a3013c6bcb7c01722"
+    },
+    "parent_child": {
+      "child": {
+        "cwd": "$RUN_ROOT/workspace",
+        "direct_loopback_socket": {
+          "connected": true
+        },
+        "environment": {
+          "credential_names_present": [],
+          "proxies": {
+            "ALL_PROXY": {
+              "empty": false,
+              "loopback_host": true,
+              "present": true,
+              "scheme": "http"
+            },
+            "HTTPS_PROXY": {
+              "empty": false,
+              "loopback_host": true,
+              "present": true,
+              "scheme": "http"
+            },
+            "HTTP_PROXY": {
+              "empty": false,
+              "loopback_host": true,
+              "present": true,
+              "scheme": "http"
+            },
+            "NO_PROXY": {
+              "empty": false,
+              "loopback_host": false,
+              "present": true,
+              "scheme": ""
+            }
+          },
+          "qualification_marker": "SE-00-06"
+        },
+        "loopback_http": {
+          "body_sha256": "43c47b20129a8f4c5f62617740abdacbea5be13d2bbadac0b5fb829bf87a7489",
+          "reached": true,
+          "status": 200
+        },
+        "mode": "child",
+        "outside_read": {
+          "errno": 1,
+          "error_type": "PermissionError",
+          "read": false
+        },
+        "outside_write": {
+          "errno": 1,
+          "error_type": "PermissionError",
+          "written": false
+        },
+        "unlisted_http": {
+          "error_type": "HTTPError",
+          "reached": false,
+          "status": 403
+        },
+        "workspace_write": {
+          "sha256": "ddc9e669194254cef019a29d3619a2c16592e5d52e1a81e98b01bd52319149a3",
+          "written": true
+        }
+      },
+      "parent": {
+        "cwd": "$RUN_ROOT/workspace",
+        "direct_loopback_socket": {
+          "connected": true
+        },
+        "environment": {
+          "credential_names_present": [],
+          "proxies": {
+            "ALL_PROXY": {
+              "empty": false,
+              "loopback_host": true,
+              "present": true,
+              "scheme": "http"
+            },
+            "HTTPS_PROXY": {
+              "empty": false,
+              "loopback_host": true,
+              "present": true,
+              "scheme": "http"
+            },
+            "HTTP_PROXY": {
+              "empty": false,
+              "loopback_host": true,
+              "present": true,
+              "scheme": "http"
+            },
+            "NO_PROXY": {
+              "empty": false,
+              "loopback_host": false,
+              "present": true,
+              "scheme": ""
+            }
+          },
+          "qualification_marker": "SE-00-06"
+        },
+        "loopback_http": {
+          "body_sha256": "43c47b20129a8f4c5f62617740abdacbea5be13d2bbadac0b5fb829bf87a7489",
+          "reached": true,
+          "status": 200
+        },
+        "mode": "parent",
+        "outside_read": {
+          "errno": 1,
+          "error_type": "PermissionError",
+          "read": false
+        },
+        "outside_write": {
+          "errno": 1,
+          "error_type": "PermissionError",
+          "written": false
+        },
+        "unlisted_http": {
+          "error_type": "HTTPError",
+          "reached": false,
+          "status": 403
+        },
+        "workspace_write": {
+          "sha256": "e47125968b3b71049fbc4802d1e40a71ea1359decfabacf70b34588037d4ff0c",
+          "written": true
+        }
+      }
+    },
+    "receiver": {
+      "bind": "127.0.0.1",
+      "requests_seen": 2,
+      "response_body_sha256": "43c47b20129a8f4c5f62617740abdacbea5be13d2bbadac0b5fb829bf87a7489"
+    },
+    "schema": "openbox.project-assurance.claude-srt-probe/v1",
+    "timeout": {
+      "command": "\"$NODE\" \"$SRT_CLI\" \"--settings\" \"$RUN_ROOT/srt-settings.json\" \"/bin/sh\" \"-c\" \"printf '%s' $$ > $RUN_ROOT/workspace/timeout.pid; exec /bin/sleep 60\"",
+      "limit_seconds": 1.0,
+      "owner": "caller process group; srt exposes no timeout flag",
+      "sandboxed_process_gone": true,
+      "srt_exit_status": 0,
+      "stderr_bytes": 680,
+      "stdout_bytes": 0,
+      "triggered": true
+    }
+  },
+  "task": "SE-00-06"
+}

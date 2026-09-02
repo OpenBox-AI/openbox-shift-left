@@ -1,0 +1,55 @@
+{
+  "schema": "openbox.project-assurance.graph-normalization-validation/v1",
+  "task": "SE-02-04",
+  "capturedAt": "2026-08-20T16:15:50Z",
+  "status": "passed_with_limits",
+  "toolchain": {
+    "go": "go1.26.7 darwin/arm64",
+    "os": "macOS 26.5.2",
+    "kernel": "Darwin 25.5.0"
+  },
+  "inputs": {
+    "graphGo": "sha256:97ac94b9fd4d9a8c45fde4f5420044228c9523a62eab50bf579780001ed6ae19",
+    "graphTestGo": "sha256:39fd6181b63f4c379ef4b01526c661059135513c80873d773a823fa451202bb9",
+    "graphUnixTestGo": "sha256:529a3580dbc95ba6544deacacb04802d354794ed250455379e5505f19a5164eb"
+  },
+  "commands": [
+    "cd cli && go test ./internal/assurance/model -count=10",
+    "cd cli && go test -race ./internal/assurance/model",
+    "cd cli && go vet ./internal/assurance/model",
+    "cd cli && go test ./...",
+    "for each of the 11 go.work modules: go test ./...",
+    "cd cli && GOOS=linux GOARCH=amd64 go test -c -o <task-temp>/model-linux.test ./internal/assurance/model",
+    "cd cli && GOOS=windows GOARCH=amd64 go test -c -o <task-temp>/model-windows.test.exe ./internal/assurance/model",
+    "cd cli && gofmt -d internal/assurance/model",
+    "git status --short",
+    "git diff --check"
+  ],
+  "result": {
+    "stableIdentity": "JCS plus SHA-256 identities are byte-stable; golden IDs are fixed and input ordering does not change nodes, signals, provenance, or uncertainties",
+    "identityScope": "agent, model-route, tool, MCP, retrieval, memory, and approval entities include value plus snapshot path/line/column anchors; shared SDK, credential, destination, filesystem/process/network, telemetry, and persistence surfaces merge equal semantic values",
+    "collisionSafety": "injected node, signal, and uncertainty identity collisions fail closed instead of merging different semantics",
+    "provenance": "every retained fact has detector, declared/inferred basis, high/medium confidence, snapshot path, positive line/column, and source digest; duplicates are removed and deterministic ordering is applied",
+    "provenanceCap": "more than 64 distinct evidence locations on one item is deterministically truncated to 64 with a provenance-truncated uncertainty",
+    "uncertainty": "structured subject/reason/path/line identities are canonicalized, deduplicated, sorted, and retain discovered evidence level",
+    "signals": "package dependency/import, entrypoint, and environment-reference evidence remains a closed internal signal vocabulary for descriptor/coverage work and is not invented as project-model node types",
+    "nodeLess": "empty, uncertainty-only, and signal-only inputs fail explicitly because openbox.project-model/v1 requires at least one supported node",
+    "edges": "no relationship edge is created because SE-02-03 supplied no relationship evidence",
+    "passiveIntegration": "real snapshot detect-to-normalize fixture passed repeatedly; Python/package script sentinels remained absent and no fact was upgraded to observed",
+    "defensiveCopies": "Graph accessors do not expose retained node, signal, or provenance storage",
+    "race": "passed",
+    "vet": "passed",
+    "fullCliAndModules": "passed for the CLI and all 11 go.work modules",
+    "crossCompilation": "Linux amd64 and Windows amd64 test binaries compiled; no foreign binary was executed",
+    "formatAndWhitespace": "gofmt diff and git diff --check empty",
+    "independentReadOnlyReview": "approved final hashes after source-anchor identity, node-less rejection, canonical uncertainty identity, and accepted-schema projection limits were resolved; no reviewer writes"
+  },
+  "limits": [
+    "This is an internal normalized graph, not the public project-model artifact. It retains confidence, byte column, and source digest; the frozen openbox.project-model/v1 provenance projection permits only detector, basis, path, and line.",
+    "Internal signals are descriptor and coverage inputs only. They must not be serialized as invented project-model nodes, and their absence from the public model must not be described as public graph coverage.",
+    "A project with no supported node evidence is not representable under the accepted v1 nodes minItems=1 contract and fails honestly; this implementation does not synthesize a project/root node.",
+    "Call-name classification and site anchoring remain inferred static hypotheses. Stable means deterministic for the same selected bytes; source relocation can intentionally change a site-scoped identity.",
+    "No edges are present because co-location is not relationship evidence. Reachability, data class, actor, interception, and observed edges remain unknown until an authorized detector or controlled run supplies them.",
+    "No public model serialization/schema validation, SDK descriptor, expected coverage, CLI inspection output, runtime import/execution, package installation, model/network call, sandbox, receiver/Core path, production coordinate, external control plane, paid path, or live security evaluation ran."
+  ]
+}

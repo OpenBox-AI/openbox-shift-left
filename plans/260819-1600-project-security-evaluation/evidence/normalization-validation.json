@@ -1,0 +1,73 @@
+{
+  "task": "SE-06-01",
+  "captured_at": "2026-08-22T08:20:57Z",
+  "result": "verified",
+  "toolchain": {
+    "go": "go1.27.0 darwin/arm64"
+  },
+  "inputs": {
+    "cli/internal/assurance/evidence/normalize.go": "9ab394ea5b528da4596d31439ed94f70105bba40049c858d086c35cf6af8231f",
+    "cli/internal/assurance/evidence/normalize_test.go": "258f2bd0e2ba40f659eb7d8ea3618829b963c017bf598bc1f2aea4bffafb0f54",
+    "cli/internal/assurance/sdkdesc/artifact.go": "605129d81856c166c1c22b720085db6618b1dd25e16717ce77bcd337a2e89c72",
+    "cli/internal/assurance/sandbox/cleanup.go": "64b6114eea37203a747d0731ee12f7f6728bc41f3216d16b393a420ccc8fcac9",
+    "cli/internal/assurance/sandbox/cleanup_test.go": "75cc02a658b19d4211cbe9087d40d6c1bc779e6306733769bde3ef7856830d2d"
+  },
+  "golden_objects": {
+    "sdk-events": "sha256:e7548db0fd77cb2923420e590668c0cb87c6072b8fa421b453eacb9e82a6c85d",
+    "fixture-events": "sha256:a53769803d63fa464ae1789bf856e1627bd2964ec128b4f59a20582a7f92b9ba",
+    "effect-events": "sha256:9c412ab7809a1b5d056304ab48af81d18727ac778ea90b39f498a3625f960cd5",
+    "sdk-coverage": "sha256:fccd468dbd8e7df211df4c03806a9c48cb4a17a33287ab1693fc0d33d1474e8d"
+  },
+  "commands": [
+    {
+      "command": "cd cli && go test -count=50 ./internal/assurance/evidence",
+      "exit_status": 0,
+      "result": "passed"
+    },
+    {
+      "command": "cd cli && go test -race -count=10 ./internal/assurance/evidence",
+      "exit_status": 0,
+      "result": "passed"
+    },
+    {
+      "command": "cd cli && go test -count=1 ./internal/assurance/... ./cmd/openbox",
+      "exit_status": 0,
+      "result": "passed"
+    },
+    {
+      "command": "cd cli && go vet ./...",
+      "exit_status": 0,
+      "result": "passed"
+    },
+    {
+      "command": "cd cli && GOOS=linux GOARCH=amd64 go test -c -o <task-temp>/evidence-linux.test ./internal/assurance/evidence && GOOS=windows GOARCH=amd64 go test -c -o <task-temp>/evidence-windows.test.exe ./internal/assurance/evidence && GOOS=linux GOARCH=amd64 go test -c -o <task-temp>/openbox-linux.test ./cmd/openbox && GOOS=windows GOARCH=amd64 go test -c -o <task-temp>/openbox-windows.test.exe ./cmd/openbox",
+      "exit_status": 0,
+      "result": "four compile-only outputs passed; task-owned temporary directory moved to Trash"
+    },
+    {
+      "command": "git diff --check",
+      "exit_status": 0,
+      "result": "clean"
+    }
+  ],
+  "traceability": {
+    "records": "Every canonical JSONL record carries a SHA-256 source projection digest; the test recomputes every digest from the retained canonical facts.",
+    "sdk": "Exact receiver identity, bounded body projection/state/digest, ActivityStarted and recordingTool semantics, framework run ID when present, fixed safe-sink target class, and the baseline ALLOW derivation are retained. The raw synthetic marker, ephemeral loopback URL, and volatile timing values are removed before persistence.",
+    "fixtures": "Lifecycle, poison, scripted harness, and local Ollama relay receipts retain their bounded producer facts without runtime URLs, bearers, or raw request content.",
+    "effects": "Safe-sink, native sandbox probe, process exit, and cleanup facts remain separate. Probe bytes are canonical and digest-bound.",
+    "coverage": "The static qualified Mastra coverage object is immutably promoted only from descriptor-owned runtime readiness records, retaining static and runtime evidence digests.",
+    "missing_content": "Inconclusive SDK bodies and process stdout/stderr are explicitly omitted and are neither persisted nor hashed. The marker is retained only as SHA-256 and byte length. Missing timing, framework context, and application state are explicit limitations."
+  },
+  "bounds": {
+    "records_per_source": 10000,
+    "record_bytes": 65536,
+    "role_bytes": 16777216,
+    "json_integer_max": 9007199254740991,
+    "process_stream_bytes_each": 16777216
+  },
+  "limits": [
+    "This task is data-only. It performs no execution, network access, correlation, judgment, pack finalization, report rendering, or proposal generation.",
+    "The JSONL record version is internal to schema-null v1 roles and does not add a public schema.",
+    "No Docker code, driver, fallback, or proof is present; native Codex remains the sole project execution sandbox."
+  ]
+}

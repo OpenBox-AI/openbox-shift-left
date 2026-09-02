@@ -1,0 +1,53 @@
+{
+  "schema": "openbox.project-assurance.sandbox-evidence-normalization-validation/v1",
+  "task": "SE-03-08",
+  "capturedAt": "2026-08-21T05:25:43Z",
+  "status": "passed_with_limits",
+  "toolchain": {
+    "go": "go1.26.7 darwin/arm64",
+    "os": "macOS 26.5.2",
+    "kernel": "Darwin 25.5.0"
+  },
+  "inputs": {
+    "evidenceGo": "sha256:e1b8ca1052e1472c6aa1d0a34723dfc66294dc939d97911c5447c14f2c5420a4",
+    "evidenceTestGo": "sha256:441981b29a398656c9124d57558bb4d26ec17a7ceff739bdb35e59e8009bd329",
+    "probeGo": "sha256:836e4ccb862b8138f20a929160b110ef2c74b087d4ae946bed68051aca2d4b4f",
+    "probeTestGo": "sha256:f8c7bb257e737a8aecfbe71c5c6592e135ee95c55dbf96d9baafbd0dc0b0a481",
+    "runGo": "sha256:c0c4b541f91f1875a71c6ce0d893d2d8ed3470f5968ef29d52e55e0746953e1b",
+    "runTestGo": "sha256:6b8de0d30f3121c2ad02cc9809b9eef02aec9cdda3601a115ec69e601c66f653",
+    "postureGo": "sha256:376303e11590910ba65158d197d7aa009ae2f8c6f3014423cc57114333271c50",
+    "adr": "sha256:ece092b5c22eb19aa1f2c81875ea24bf301b8e10b9768c116ca6974358f084d6"
+  },
+  "commands": [
+    "cd cli && go test ./internal/assurance/sandbox -run 'TestNormalizeProbeEvidence|TestNormalizedProbeEvidence|TestExecuteCodexRunRequiresMatchingQualifiedProbe' -count=25",
+    "cd cli && go test ./internal/assurance/sandbox -count=1",
+    "cd cli && go test -race ./internal/assurance/sandbox -count=1",
+    "cd cli && go test ./internal/assurance/... -count=1",
+    "cd cli && go test ./... -count=1",
+    "cd cli && go vet ./internal/assurance/sandbox ./cmd/openbox",
+    "cd cli && GOOS=darwin GOARCH=arm64 go test -c -o TASK_TEMP/darwin.test ./internal/assurance/sandbox",
+    "cd cli && GOOS=linux GOARCH=amd64 go test -c -o TASK_TEMP/linux.test ./internal/assurance/sandbox",
+    "cd cli && GOOS=windows GOARCH=amd64 go test -c -o TASK_TEMP/windows.test.exe ./internal/assurance/sandbox",
+    "gofmt -d cli/internal/assurance/sandbox/{probe,run,evidence,run_test,evidence_test}.go",
+    "git status --short",
+    "git diff --check"
+  ],
+  "result": {
+    "effectDenial": "a passed normalized denial observation requires the exact validated parent and child helper effects; an error, refusal, or exit status cannot create it",
+    "nativeDenialLog": "observed requires one exact helper-process file-write-create record per protected path and one exact network-outbound record per parent and child target; records are consumed once",
+    "unavailable": "empty, malformed, partial, prefixed, duplicated-short, or format-drifted native stderr is recorded as native_denial_log: unavailable while independently observed effect denial remains explicit",
+    "configuration": "the canonical evidence binds the exact driver binary identity, effective configuration, helper-bound configuration, and original probe envelope",
+    "correlation": "the opaque probe execution retains driver and probe identity; normalization and project launch both reject cross-binary or cross-envelope reuse",
+    "retention": "canonical evidence contains only bounded identity, digests, statuses, booleans, and counts; raw stderr, filesystem paths, environment values, and secrets are absent",
+    "projection": "zero, mutated, cross-binary, cross-configuration, and cross-probe evidence cannot project a passed posture observation",
+    "tests": "focused count-25, package, race, all-assurance, full CLI module, vet, format, and Darwin/Linux/Windows compile-only checks passed",
+    "independentReview": "approved the final exact-record parser, one-to-one parent/child accounting, opaque correlation, bounded canonical evidence, and unavailable-evidence behavior; no reviewer writes"
+  },
+  "limits": [
+    "This task proves source and local test behavior. It did not execute Codex, Seatbelt, a project command, the Mastra SDK, a receiver, a provider/model request, production coordinates, or an external control-plane operation.",
+    "Native denial-log format drift deliberately becomes unavailable rather than guessed. The exact live Codex tuple must still reproduce the expected records before support qualification.",
+    "Platform identity is not inferred by this normalizer. SE-03-10 must bind the observed platform with the exact binary/config/probe evidence before publishing a supported or rejected tuple.",
+    "Raw native logs are neither retained nor hashed. Only normalized, path-free facts enter the evidence digest.",
+    "Cleanup and maximum-process enforcement remain separate Phase 03 exit gates."
+  ]
+}

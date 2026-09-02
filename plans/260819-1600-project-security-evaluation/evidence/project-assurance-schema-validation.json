@@ -1,0 +1,83 @@
+{
+  "schema": "openbox.project-assurance.schema-inventory-validation/v1",
+  "task": "SE-01-01",
+  "capturedAt": "2026-08-22T03:52:31Z",
+  "status": "passed",
+  "toolchain": {
+    "node": "22.20.0",
+    "npm": "11.6.2",
+    "jq": "1.8.2",
+    "ajv": "8.17.1",
+    "qualificationLock": "sha256:86bfa5d3e22e4577e92e704cad8ea5026201a0090892b9010ad27446576b9cd7"
+  },
+  "inputs": {
+    "readme": "sha256:f44ef8c77e26d3d30d9cbca57a48a9422018095fc8f0151a899bf74bbe2fee66",
+    "mutationCases": "sha256:091e73313ef84c58f9af567e6b3b498ab5421359bdfd77a4b502dabb4c21e1f3",
+    "probe": "sha256:416b01054fe1940b727946e0d02be889bb9381109700ee130a2ba22510fcf252",
+    "runProfileSemanticProbe": "sha256:aa9885d1e0b5b96b40cd5a133750930619d1e53ace9fad49a136469bcac6f654",
+    "decision": "sha256:4248bfdfb4a0680e977bcea21e597c6dcf0743adc21541d35fa5543b8527d7d9",
+    "gitUnknownProducer": "sha256:3fad4452d9fe5a3d7ab507d09d070bb44dd4900079e48fb84877039c42107c65",
+    "gitIdentityCollector": "sha256:510b4da27e5a0f956f21edfddc49acdddae969680a40a565651a7ca639332a04",
+    "schemas": {
+      "openbox.audit-pack/v1": "sha256:616c1e3fa7cc8c80488dbd23afa5c44e964ab0ea89124015b69e2041a1e772b4",
+      "openbox.policy-proposal/v1": "sha256:2a8ee5e33d23be6cfddfbcbb621cff98853034989b5d2b55241461c2d66255f8",
+      "openbox.project-model/v1": "sha256:5b18935414763341b28101bf6d9fe7f746d6530bca68004c896be33883156ca4",
+      "openbox.project-run-profile/v1": "sha256:3db0334d7ef355d13cbd8957ed49f5f450dc8a10264f31b986778e7932f6035d",
+      "openbox.sandbox-posture/v1": "sha256:e6e6a9f17fdfdb28354e7917514fa5ee51bc56a400401bd7e3af20e9eb938ee6",
+      "openbox.sdk-coverage/v1": "sha256:bc78dbbe82bd9a7c710af76529cf38cae1a9135ed576e17834f944e77088cc54",
+      "openbox.security-test/v1": "sha256:9e65b45d63bb71b4bf1dc8fc7c447d455c966d364cd68ba5bb72c1b4790af1e2"
+    },
+    "validFixtures": {
+      "audit-pack-v1.json": "sha256:43fdc63098bd0d7310295c9c0e61464f288fa892e21f58fde0df82803967d4d8",
+      "policy-proposal-v1.json": "sha256:19133f37af7b49e62e717b9662da209e28c5b3b6bf86dbfc6fc78996bebcb47b",
+      "project-model-v1.json": "sha256:62e49e284d0ea45f4566751e44c5694565b1eb081f32055a6e1f57ddc54483ae",
+      "project-run-profile-v1.json": "sha256:201edf273c1c4e91eecfd43522e7c077eaed32b5d72078bc94121a2a9adb5470",
+      "sandbox-posture-v1.json": "sha256:4caaf1f49189aa76420006f82e8c132fee310d844e7e256bc35cc597bca38058",
+      "sdk-coverage-v1.json": "sha256:32b48d3b6cd87c13231dc2ed7222377fa0389cbfff5fd4097e931882e15f3d05",
+      "security-test-v1.json": "sha256:e1dc31848a76f1b3837bdd9612cf18392ead4b63693ecff833e682511ee41563"
+    }
+  },
+  "commands": [
+    "jq -e . contracts/project-assurance/schema/*.json contracts/project-assurance/testdata/valid/*.json contracts/project-assurance/testdata/mutation-cases.json",
+    "shasum -a 256 QUALIFICATION_DIR/node_modules/{ajv,fast-deep-equal,fast-uri,json-schema-traverse,require-from-string}/package.json",
+    "node plans/260819-1600-project-security-evaluation/evidence/probes/validate_project_assurance_schemas.mjs QUALIFICATION_DIR/node_modules/ajv contracts/project-assurance",
+    "node plans/260819-1600-project-security-evaluation/evidence/probes/validate_run_profile_draft.mjs QUALIFICATION_DIR/node_modules/ajv contracts/project-assurance/schema/project-run-profile-v1.schema.json contracts/project-assurance/testdata/valid/project-run-profile-v1.json",
+    "cd cli && go test ./internal/assurance/model ./internal/assurance/sdkdesc ./internal/assurance/artifact",
+    "cd cli && OPENBOX_AJV_ROOT=QUALIFICATION_DIR/node_modules/ajv go test ./internal/assurance/artifact -run TestPinnedProjectAssuranceContractConformance -count=1 -v"
+  ],
+  "result": {
+    "schemaCount": 7,
+    "validFixtureCount": 7,
+    "negativeCounts": {
+      "missingRequired": 7,
+      "unknownProperty": 7,
+      "invalidEnum": 7,
+      "unsafeNumber": 7,
+      "malformedDigest": 6,
+      "wrongApiVersion": 7,
+      "wrongType": 7,
+      "adversarial": 26,
+      "semanticAdversarial": 16
+    },
+    "runProfileQualification": {
+      "positive": 1,
+      "schemaNegatives": 16,
+      "semanticNegatives": 18,
+      "trustedRelayTupleValid": true
+    },
+    "nestedNamedObjectsRejectUnknownProperties": true,
+    "allIntegersBoundedToSigned53Bit": true,
+    "exactMvpTuple": "@openbox-ai/openbox-mastra-sdk@1.0.0+@openbox-ai/openbox-sdk-ts@1.0.1+@mastra/core@1.8.0",
+    "exactModelRelayTuple": "ollama-server@0.31.1+granite4.1:3b@sha256:6fd349357287c7ffc9e38189a93b48ea175d24fc566b38f09cfc564fb7f303eb+http://127.0.0.1:11434/api/chat",
+    "relayMonetaryCost": "0.00"
+  },
+  "limits": [
+    "The run-profile intentionally owns no digest field; malformed-digest mutations cover the six digest-owning contracts.",
+    "This task validates public schema structure, frozen examples, and documented cross-field rules; RFC 8785 encoder golden vectors are SE-01-02.",
+    "On-disk object resolution, byte-length and CID verification, manifest-last finalization, tamper detection, and immutable pack proof remain later Phase 01 and Phase 06 tasks.",
+    "A detected Git marker is represented with null HEAD/dirty state plus the exact git-status uncertainty; no Git command or repository object/index parser ran.",
+    "The sandbox-posture configurationDigest fixture was revalidated after the probe binding added the closed expected-present and production-sentinel environment-name matrix; environment values remain private and unhashed.",
+    "The schema result proves only the declarative local invocation tuple. Separate literal-loopback /api/version, /api/tags, and /api/show observations identified Ollama server 0.31.1 and the exact Granite model digest/capabilities; no model inference ran during this schema gate.",
+    "No project code, SDK provider, production endpoint, OpenBox Core, sandbox launch, external control plane, paid API, or non-loopback model path ran."
+  ]
+}
