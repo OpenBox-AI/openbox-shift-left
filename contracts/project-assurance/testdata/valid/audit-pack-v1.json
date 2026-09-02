@@ -1,0 +1,59 @@
+{
+  "apiVersion": "openbox.audit-pack/v1",
+  "kind": "AuditPack",
+  "runId": "run-fixture-001",
+  "mode": "baseline",
+  "schemas": [
+    { "id": "openbox.project-model/v1", "digest": "sha256:0101010101010101010101010101010101010101010101010101010101010101" },
+    { "id": "openbox.project-run-profile/v1", "digest": "sha256:0202020202020202020202020202020202020202020202020202020202020202" },
+    { "id": "openbox.sdk-coverage/v1", "digest": "sha256:0303030303030303030303030303030303030303030303030303030303030303" },
+    { "id": "openbox.sandbox-posture/v1", "digest": "sha256:0404040404040404040404040404040404040404040404040404040404040404" },
+    { "id": "openbox.security-test/v1", "digest": "sha256:0505050505050505050505050505050505050505050505050505050505050505" },
+    { "id": "openbox.audit-pack/v1", "digest": "sha256:0606060606060606060606060606060606060606060606060606060606060606" },
+    { "id": "openbox.policy-proposal/v1", "digest": "sha256:0707070707070707070707070707070707070707070707070707070707070707" }
+  ],
+  "objects": {
+    "project-snapshot": { "cid": "sha256:1111111111111111111111111111111111111111111111111111111111111111", "mediaType": "application/vnd.openbox.project-snapshot", "schema": null, "bytes": 1, "retention": "normalized" },
+    "project-model": { "cid": "sha256:2222222222222222222222222222222222222222222222222222222222222222", "mediaType": "application/json", "schema": "openbox.project-model/v1", "bytes": 1, "retention": "normalized" },
+    "run-profile": { "cid": "sha256:3333333333333333333333333333333333333333333333333333333333333333", "mediaType": "application/json", "schema": "openbox.project-run-profile/v1", "bytes": 1, "retention": "normalized" },
+    "sdk-coverage": { "cid": "sha256:4444444444444444444444444444444444444444444444444444444444444444", "mediaType": "application/json", "schema": "openbox.sdk-coverage/v1", "bytes": 1, "retention": "normalized" },
+    "sandbox-posture": { "cid": "sha256:5555555555555555555555555555555555555555555555555555555555555555", "mediaType": "application/json", "schema": "openbox.sandbox-posture/v1", "bytes": 1, "retention": "normalized" },
+    "scenarios": { "cid": "sha256:6666666666666666666666666666666666666666666666666666666666666666", "mediaType": "application/x-ndjson", "schema": "openbox.security-test/v1", "bytes": 1, "retention": "normalized" },
+    "sdk-events": { "cid": "sha256:7777777777777777777777777777777777777777777777777777777777777777", "mediaType": "application/x-ndjson", "schema": null, "bytes": 1, "retention": "redacted" },
+    "fixture-events": { "cid": "sha256:8888888888888888888888888888888888888888888888888888888888888888", "mediaType": "application/x-ndjson", "schema": null, "bytes": 1, "retention": "redacted" },
+    "effect-events": { "cid": "sha256:9999999999999999999999999999999999999999999999999999999999999999", "mediaType": "application/x-ndjson", "schema": null, "bytes": 1, "retention": "redacted" },
+    "judgments": { "cid": "sha256:a3ceb32b9134505a2ea1ed2d472b7ce473ec4b7db8bf77217598539c137e47ae", "mediaType": "application/json", "schema": null, "bytes": 475, "retention": "normalized" },
+    "cleanup-receipt": { "cid": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "mediaType": "application/json", "schema": null, "bytes": 1, "retention": "normalized" },
+    "report-json": { "cid": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "mediaType": "application/json", "schema": null, "bytes": 1, "retention": "public_projection" },
+    "report-markdown": { "cid": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd", "mediaType": "text/markdown", "schema": null, "bytes": 1, "retention": "public_projection" },
+    "report-sarif": { "cid": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", "mediaType": "application/sarif+json", "schema": null, "bytes": 1, "retention": "public_projection" }
+  },
+  "judgments": [
+    {
+      "findingId": "finding-indirect-prompt-injection-egress",
+      "scenarioId": "indirect-prompt-injection-egress-v1",
+      "outcome": "inconclusive",
+      "reachability": "runtime_enforceable",
+      "evidenceLevel": "callable",
+      "matchedFacts": [],
+      "evidence": ["sha256:abababababababababababababababababababababababababababababababab"],
+      "missingFacts": ["No live scenario evidence is present in this schema fixture."],
+      "contradictions": [],
+      "limitations": ["Schema fixture only; this is not a security judgment."]
+    }
+  ],
+  "limits": {
+    "truncated": false,
+    "omissions": []
+  },
+  "provenance": {
+    "runner": {
+      "name": "openbox",
+      "version": "0.0.0-fixture"
+    }
+  },
+  "retention": {
+    "mode": "redacted_digests",
+    "rawContentPersisted": false
+  }
+}

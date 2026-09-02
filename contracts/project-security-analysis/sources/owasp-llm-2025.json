@@ -1,0 +1,1 @@
+{"catalog":"OWASP_LLM","retrieved_at":"2026-08-26","selected":[{"id":"LLM01","title":"Prompt Injection"},{"id":"LLM06","title":"Excessive Agency"}],"source_title":"OWASP Top 10 for LLM Applications 2025","source_url":"https://genai.owasp.org/llm-top-10/","upstream_version":"2025"}

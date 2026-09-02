@@ -1,0 +1,50 @@
+{
+  "apiVersion": "openbox.sdk-coverage/v1",
+  "kind": "SDKCoverage",
+  "projectModelDigest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "descriptor": {
+    "id": "@openbox-ai/openbox-mastra-sdk@1.0.0+@openbox-ai/openbox-sdk-ts@1.0.1+@mastra/core@1.8.0",
+    "frameworkAdapter": {
+      "name": "@openbox-ai/openbox-mastra-sdk",
+      "version": "1.0.0"
+    },
+    "baseSDK": {
+      "name": "@openbox-ai/openbox-sdk-ts",
+      "version": "1.0.1"
+    },
+    "framework": {
+      "name": "@mastra/core",
+      "version": "1.8.0"
+    }
+  },
+  "instrumentation": [
+    {
+      "actionClass": "recordingTool",
+      "expectation": "required",
+      "observation": "observed",
+      "eventCount": 1,
+      "evidence": [
+        "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      ]
+    }
+  ],
+  "exclusions": [],
+  "gaps": [
+    {
+      "surface": "agent-model-lifecycle",
+      "classification": "unsupported",
+      "reason": "The MVP tuple qualifies only the sensitive outbound recordingTool gate.",
+      "evidence": [
+        "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      ]
+    }
+  ],
+  "readiness": {
+    "status": "ready",
+    "probeCount": 1,
+    "evidence": [
+      "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+    ],
+    "reason": null
+  }
+}

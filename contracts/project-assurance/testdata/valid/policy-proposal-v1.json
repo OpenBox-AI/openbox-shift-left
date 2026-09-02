@@ -1,0 +1,44 @@
+{
+  "apiVersion": "openbox.policy-proposal/v1",
+  "kind": "PolicyProposal",
+  "id": "proposal-block-recording-tool-egress",
+  "findingId": "finding-indirect-prompt-injection-egress",
+  "scenarioId": "indirect-prompt-injection-egress-v1",
+  "baselinePackDigest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "reachability": "runtime_enforceable",
+  "candidate": {
+    "type": "runtime_policy",
+    "target": "recordingTool",
+    "documentDigest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "expectedVerdict": "BLOCK",
+    "failurePolicy": "fail_closed",
+    "integrationLocation": "Existing Mastra recording-tool pre-effect SDK boundary."
+  },
+  "requiredInterceptionEvidence": [
+    {
+      "field": "activity_type",
+      "stage": "pre_effect",
+      "available": true
+    }
+  ],
+  "risks": [
+    {
+      "type": "false_positive",
+      "description": "A broad predicate may block legitimate recording-tool destinations."
+    }
+  ],
+  "rerun": {
+    "projectSnapshotDigest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "scenarioDigest": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "sdkCoverageDigest": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+    "sandboxPostureDigest": "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+    "requiredOutcome": "blocked",
+    "repetitions": 3
+  },
+  "authority": {
+    "status": "inert",
+    "sourceEdits": false,
+    "externalWrites": false,
+    "deployment": false
+  }
+}

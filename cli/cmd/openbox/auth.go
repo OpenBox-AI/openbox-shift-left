@@ -14,6 +14,7 @@ import (
 	"strings"
 
 	"github.com/openbox-ai/openbox-shift-left/adapters/common/devconfig"
+	"github.com/openbox-ai/openbox-shift-left/cli/internal/backend"
 	"github.com/openbox-ai/openbox-shift-left/cli/internal/devinit"
 	"github.com/openbox-ai/openbox-shift-left/cli/internal/prompt"
 	"github.com/openbox-ai/openbox-shift-left/provider"
@@ -58,6 +59,69 @@ type authFields struct {
 }
 
 var didPattern = regexp.MustCompile(`^did:aip:[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
+
+// sharedControlPermissionSet is the exact organization-key authority accepted
+// by the shared `openbox auth` stage. The same key may register or rotate the
+// project agent and later perform the GET-only backend collection used by
+// `openbox project evaluate`. No policy/control write or API-key-management
+// permission belongs here.
+var sharedControlPermissionSet = []string{
+	"create:agent",
+	"read:agent",
+	"update:agent",
+	"read:agent_session",
+	"read:agent_log",
+	"read:agent_guardrail",
+	"read:agent_policy",
+	"read:agent_behavior_rule",
+}
+
+func sharedControlPermissions() []string {
+	return append([]string(nil), sharedControlPermissionSet...)
+}
+
+func sharedControlProfileProblem(profile *backend.AuthProfile) string {
+	if profile == nil {
+		return "the backend returned no authentication profile"
+	}
+	if !profile.IsAPIKeyAuth {
+		return fmt.Sprintf("%s must be an obx_key_ organization API key so the same credential can be reused by project evaluation; bearer/JWT authentication is not reusable by the GET-only evaluator", devconfig.EnvControlToken)
+	}
+	want := make(map[string]struct{}, len(sharedControlPermissionSet))
+	for _, permission := range sharedControlPermissionSet {
+		want[permission] = struct{}{}
+	}
+	got := make(map[string]struct{}, len(profile.Permissions))
+	for _, permission := range profile.Permissions {
+		got[permission] = struct{}{}
+	}
+	missing := make([]string, 0)
+	for _, permission := range sharedControlPermissionSet {
+		if _, ok := got[permission]; !ok {
+			missing = append(missing, permission)
+		}
+	}
+	extra := make([]string, 0)
+	for _, permission := range profile.Permissions {
+		if _, ok := want[permission]; !ok {
+			extra = append(extra, permission)
+		}
+	}
+	if len(missing) == 0 && len(extra) == 0 && len(got) == len(profile.Permissions) {
+		return ""
+	}
+	parts := []string{fmt.Sprintf("%s must have exactly the shared shift-left + security-evaluation permission set", devconfig.EnvControlToken)}
+	if len(missing) > 0 {
+		parts = append(parts, "missing: "+strings.Join(missing, ", "))
+	}
+	if len(extra) > 0 {
+		parts = append(parts, "not allowed: "+strings.Join(extra, ", "))
+	}
+	if len(got) != len(profile.Permissions) {
+		parts = append(parts, "the profile contains duplicate permissions")
+	}
+	return strings.Join(parts, "; ")
+}
 
 func (a *app) runAuth(args []string) int {
 	fs := a.newFlagSet("openbox auth")
@@ -502,10 +566,11 @@ func (a *app) registerForAuth(f authFields, icon, description, envFileOverride s
 	token := a.getenv(devconfig.EnvControlToken)
 	if token == "" {
 		return nil, provider.CredentialRef{}, a.errorf(
-			"registering a new agent needs an organization credential.\n"+
-				"  Set %s (an obx_key_ organization key, or a Keycloak JWT) in the environment; it is\n"+
+			"registering a new agent needs the shared organization credential.\n"+
+				"  Set %s (an exact-scope obx_key_ organization key) in the environment; it is\n"+
 				"  never accepted as a flag so it cannot leak via argv or shell history (INV-1).\n"+
-				"  Dashboard → Organization → API Keys, with create:agent + read:agent.\n"+
+				"  Dashboard → Organization → API Keys, with the exact shared permissions listed in\n"+
+				"  docs/getting-started.md § Get the right credential.\n"+
 				"  Already have an agent? Re-run and give its agent id instead of leaving it blank.",
 			devconfig.EnvControlToken)
 	}
@@ -524,6 +589,15 @@ func (a *app) registerForAuth(f authFields, icon, description, envFileOverride s
 			f.backendURL, devconfig.DefaultBaseURL)
 	}
 
+	registrar := a.newRegistrar(f.backendURL, token, "openbox-cli")
+	profile, err := registrar.Profile(context.Background())
+	if err != nil {
+		return nil, provider.CredentialRef{}, a.errorf("validate %s permissions before registration: %v", devconfig.EnvControlToken, err)
+	}
+	if problem := sharedControlProfileProblem(profile); problem != "" {
+		return nil, provider.CredentialRef{}, a.errorf("%s", problem)
+	}
+
 	res, ref, err := devinit.Register(context.Background(), devinit.Options{
 		BackendURL:  f.backendURL,
 		BaseURL:     f.baseURL,
@@ -532,12 +606,32 @@ func (a *app) registerForAuth(f authFields, icon, description, envFileOverride s
 		Force:       force,
 		EnvFile:     envFileOverride,
 	}, devinit.Deps{
-		Registrar: a.newRegistrar(f.backendURL, token, "openbox-cli"),
+		Registrar: registrar,
 		Out:       a.stdout,
 	})
 	if err != nil {
 		return res, ref, a.errorf("%v", err)
 	}
+	// The shared project agent is an observation identity. Shift-left may still
+	// send signed headers, but Core deliberately ignores them for an exempt agent;
+	// OpenShell can therefore emit the same observable governance lifecycle using
+	// only the provider-held bearer key. This is prepared once during explicit
+	// auth, never toggled by project evaluation.
+	if err := registrar.SetSigningRequired(context.Background(), ref.AgentID, false); err != nil {
+		// devinit has already captured the once-shown runtime/signing credentials.
+		// Persist the coordinates as well so a retry can reuse the same agent and
+		// complete this posture step instead of orphaning the new identity.
+		recovery := f
+		recovery.agentID, recovery.did = ref.AgentID, ref.DID
+		if recovery.did == "" && res != nil {
+			recovery.did = res.DID
+		}
+		if code := a.writeCoordinates(recovery); code != exitOK {
+			return res, ref, a.errorf("prepare agent for bearer observation: %v; additionally failed to retain recovery coordinates", err)
+		}
+		return res, ref, a.errorf("prepare agent for bearer observation: %v\n  Agent credentials and coordinates were retained; re-run `openbox auth` to retry without registering another agent.", err)
+	}
+	fmt.Fprintf(a.stdout, "Prepared agent %s for bearer-authenticated development observation (Ed25519 attribution is a coverage gap).\n", ref.AgentID)
 	return res, ref, exitOK
 }
 

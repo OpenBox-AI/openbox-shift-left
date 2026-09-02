@@ -2,7 +2,6 @@ module github.com/openbox-ai/openbox-shift-left/cli
 
 go 1.23.0
 
-
 require (
 	// SL4-WIRE-1: the CLI registers the real Claude Code installer and depends
 	// on the shared install-time SPI both it and the adapter implement.
@@ -16,7 +15,19 @@ require github.com/openbox-ai/openbox-shift-left/adapters/common/git v0.0.0
 
 require github.com/openbox-ai/openbox-shift-left/client v0.0.0
 
-require golang.org/x/sys v0.35.0 // indirect
+require golang.org/x/text v0.14.0 // indirect
+
+// Accepted audit packs require offline Draft 2020-12 validation before a
+// renderer can return any projection. regexp2 supplies the ECMA lookaheads in
+// the frozen public schemas with a package-owned match timeout.
+require (
+	github.com/dlclark/regexp2 v1.11.0
+	github.com/santhosh-tekuri/jsonschema/v6 v6.0.3
+)
+
+// Project-assurance filesystem packages use the already-transitive Unix syscall
+// package for no-follow, handle-relative work without raising the Go 1.23 floor.
+require golang.org/x/sys v0.35.0
 
 // The in-process decision engine the enforce hook evaluates against (ADR-0006
 // retired the socket sidecar and its `sidecar serve` subcommand; cli imports
@@ -45,9 +56,9 @@ replace github.com/openbox-ai/openbox-shift-left/decision => ../decision
 require (
 	github.com/openbox-ai/openbox-shift-left/adapters/common/devconfig v0.0.0
 	github.com/openbox-ai/openbox-shift-left/adapters/common/hookflow v0.0.0
-	// This repo's ONLY external dependency (ADR-0015): masked credential input
-	// and TTY detection that works on native Windows, where the stdlib mode
-	// check misjudges a console handle (golang/go#23123).
+	// This repo's only user-facing external dependency (ADR-0015): masked
+	// credential input and TTY detection that works on native Windows, where
+	// the stdlib mode check misjudges a console handle (golang/go#23123).
 	//
 	// PINNED, and not to the latest: x/term v0.35.0+ declares `go 1.24.0` and
 	// v0.45.0 wants `go 1.25.0`, so upgrading raises this repo's language floor

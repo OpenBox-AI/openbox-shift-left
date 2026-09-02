@@ -1,0 +1,8 @@
+{
+  "schema": "ai.openbox.project-security-analysis/v1",
+  "skill": {"name": "openbox-security-evaluation", "version": "1.0.0", "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000"},
+  "observation": {"schema": "ai.openbox.project-observation/v1", "pack_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111"},
+  "result": "issues",
+  "coverage_gap_ids": [],
+  "issues": []
+}

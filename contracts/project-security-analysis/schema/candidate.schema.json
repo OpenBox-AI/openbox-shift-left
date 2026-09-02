@@ -1,0 +1,117 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "ai.openbox.project-security-analysis/v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "skill", "observation", "result", "coverage_gap_ids", "issues"],
+  "properties": {
+    "schema": { "const": "ai.openbox.project-security-analysis/v1" },
+    "skill": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version", "digest"],
+      "properties": {
+        "name": { "const": "openbox-security-evaluation" },
+        "version": { "const": "1.0.0" },
+        "digest": { "$ref": "#/$defs/digest" }
+      }
+    },
+    "observation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema", "pack_digest"],
+      "properties": {
+        "schema": { "const": "ai.openbox.project-observation/v1" },
+        "pack_digest": { "$ref": "#/$defs/digest" }
+      }
+    },
+    "analyzer": {
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "properties": {
+        "host": { "$ref": "#/$defs/metadataString" },
+        "product": { "$ref": "#/$defs/metadataString" },
+        "version": { "$ref": "#/$defs/metadataString" },
+        "model": { "$ref": "#/$defs/metadataString" }
+      }
+    },
+    "result": { "enum": ["issues", "no_supported_issue", "inconclusive"] },
+    "coverage_gap_ids": {
+      "type": "array",
+      "maxItems": 6,
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/coverageID" }
+    },
+    "issues": {
+      "type": "array",
+      "maxItems": 100,
+      "items": { "$ref": "#/$defs/issue" }
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "result": { "const": "issues" } }, "required": ["result"] },
+      "then": { "properties": { "issues": { "minItems": 1 } } },
+      "else": { "properties": { "issues": { "maxItems": 0 } } }
+    }
+  ],
+  "$defs": {
+    "digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "metadataString": { "type": "string", "minLength": 1, "maxLength": 160 },
+    "coverageID": { "type": "string", "pattern": "^coverage:[a-z_]+$" },
+    "evidenceReference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["index", "id", "role"],
+      "properties": {
+        "index": { "enum": ["behavior", "coverage"] },
+        "id": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "role": { "enum": ["semantic_behavior", "external_effect", "runtime_context", "model_route", "limitation"] }
+      }
+    },
+    "standardReference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["catalog", "version", "id"],
+      "properties": {
+        "catalog": { "enum": ["OWASP_AGENTIC", "OWASP_LLM", "CWE", "MITRE_ATLAS"] },
+        "version": { "type": "string", "minLength": 1, "maxLength": 32 },
+        "id": { "type": "string", "pattern": "^(ASI0[12]|LLM0[16]|CWE-142[67]|AML\\.T0051)$" }
+      }
+    },
+    "issue": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["candidate_id", "title", "observed_behavior", "crossed_boundary", "rationale", "inference", "confidence", "severity", "evidence", "standards", "coverage_gap_ids"],
+      "properties": {
+        "candidate_id": { "type": "string", "pattern": "^candidate:[a-z0-9][a-z0-9._-]{0,95}$" },
+        "title": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "observed_behavior": { "type": "string", "minLength": 1, "maxLength": 4000 },
+        "crossed_boundary": { "type": "string", "minLength": 1, "maxLength": 2000 },
+        "rationale": { "type": "string", "minLength": 1, "maxLength": 4000 },
+        "inference": { "type": "boolean" },
+        "confidence": { "enum": ["high", "medium", "low", "inconclusive"] },
+        "severity": { "const": "unavailable" },
+        "evidence": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 64,
+          "items": { "$ref": "#/$defs/evidenceReference" }
+        },
+        "standards": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 7,
+          "items": { "$ref": "#/$defs/standardReference" }
+        },
+        "coverage_gap_ids": {
+          "type": "array",
+          "maxItems": 6,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/coverageID" }
+        }
+      }
+    }
+  }
+}

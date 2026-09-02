@@ -1,0 +1,41 @@
+{
+  "apiVersion": "openbox.sandbox-posture/v1",
+  "kind": "SandboxPosture",
+  "driver": {
+    "name": "candidate-driver",
+    "version": "0.0.0-qualified-tuple-placeholder",
+    "mode": "standalone"
+  },
+  "platform": {
+    "os": "darwin",
+    "arch": "arm64",
+    "version": "fixture-only"
+  },
+  "configurationDigest": "sha256:ecf9bbac82e857ad22ea3e791b6d62c7e49f7731343c7f7376092f1c9a5c055b",
+  "parent": {
+    "filesystemRead": { "status": "passed", "evidence": ["sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"], "detail": "Fixture observation only." },
+    "filesystemWrite": { "status": "passed", "evidence": ["sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"], "detail": "Fixture observation only." },
+    "networkExternal": { "status": "passed", "evidence": ["sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"], "detail": "Fixture observation only." },
+    "networkLoopback": { "status": "passed", "evidence": ["sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"], "detail": "Fixture observation only." },
+    "credentials": { "status": "passed", "evidence": ["sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"], "detail": "Fixture observation only." },
+    "fallback": { "status": "passed", "evidence": ["sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"], "detail": "Fixture observation only." },
+    "timeout": { "status": "passed", "evidence": ["sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"], "detail": "Fixture observation only." },
+    "cleanup": { "status": "passed", "evidence": ["sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"], "detail": "Fixture observation only." }
+  },
+  "child": {
+    "filesystemRead": { "status": "passed", "evidence": ["sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"], "detail": "Fixture observation only." },
+    "filesystemWrite": { "status": "passed", "evidence": ["sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"], "detail": "Fixture observation only." },
+    "networkExternal": { "status": "passed", "evidence": ["sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"], "detail": "Fixture observation only." },
+    "networkLoopback": { "status": "passed", "evidence": ["sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"], "detail": "Fixture observation only." },
+    "credentials": { "status": "passed", "evidence": ["sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"], "detail": "Fixture observation only." },
+    "fallback": { "status": "passed", "evidence": ["sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"], "detail": "Fixture observation only." },
+    "timeout": { "status": "passed", "evidence": ["sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"], "detail": "Fixture observation only." },
+    "cleanup": { "status": "passed", "evidence": ["sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"], "detail": "Fixture observation only." },
+    "inheritance": { "status": "passed", "evidence": ["sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"], "detail": "Fixture observation only." }
+  },
+  "overall": "inconclusive",
+  "limits": {
+    "probeCount": 17,
+    "timeoutMs": 30000
+  }
+}

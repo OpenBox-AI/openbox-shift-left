@@ -1,0 +1,117 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "ai.openbox.project-target-posture/v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "read_contract", "catalog", "observation", "capture_window", "permissions", "agent", "seams", "guardrails", "policies", "behavior_rules"],
+  "properties": {
+    "schema": { "const": "ai.openbox.project-target-posture/v1" },
+    "read_contract": { "const": "local-dashboard-control-read/v1" },
+    "catalog": { "$ref": "#/$defs/identity" },
+    "observation": {
+      "type": "object", "additionalProperties": false,
+      "required": ["pack_digest", "agent_id", "organization_id"],
+      "properties": {
+        "pack_digest": { "$ref": "#/$defs/digest" },
+        "agent_id": { "$ref": "#/$defs/id" },
+        "organization_id": { "$ref": "#/$defs/id" }
+      }
+    },
+    "capture_window": {
+      "type": "object", "additionalProperties": false,
+      "required": ["started_at", "completed_at", "passes"],
+      "properties": {
+        "started_at": { "type": "string", "format": "date-time" },
+        "completed_at": { "type": "string", "format": "date-time" },
+        "passes": { "const": 2 }
+      }
+    },
+    "permissions": {
+      "type": "array", "minItems": 8, "maxItems": 8, "uniqueItems": true,
+      "items": { "type": "string", "pattern": "^[a-z_]+:[a-z_]+$" }
+    },
+    "agent": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "organization_id"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "organization_id": { "$ref": "#/$defs/id" },
+        "status": { "type": ["integer", "string"], "maxLength": 64 },
+        "updated_at": { "type": "string", "format": "date-time" }
+      }
+    },
+    "seams": {
+      "type": "object", "additionalProperties": false,
+      "required": ["guardrail", "policy", "behavior_rule", "approval_requirement", "sdk_integration"],
+      "properties": {
+        "guardrail": { "$ref": "#/$defs/seam" },
+        "policy": { "$ref": "#/$defs/seam" },
+        "behavior_rule": { "$ref": "#/$defs/seam" },
+        "approval_requirement": { "$ref": "#/$defs/seam" },
+        "sdk_integration": { "$ref": "#/$defs/seam" }
+      }
+    },
+    "guardrails": { "type": "array", "maxItems": 10000, "items": { "$ref": "#/$defs/guardrail" } },
+    "guardrail_aggregate": { "$ref": "#/$defs/aggregate" },
+    "policies": { "type": "array", "maxItems": 10000, "items": { "$ref": "#/$defs/policy" } },
+    "current_policy_id": { "$ref": "#/$defs/id" },
+    "behavior_rules": { "type": "array", "maxItems": 10000, "items": { "$ref": "#/$defs/behavior" } },
+    "behavior_rule_aggregate": { "$ref": "#/$defs/aggregate" }
+  },
+  "$defs": {
+    "digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "id": { "type": "string", "minLength": 1, "maxLength": 256, "pattern": "^[^\\x00-\\x1f\\x7f]+$" },
+    "identity": {
+      "type": "object", "additionalProperties": false, "required": ["version", "digest"],
+      "properties": { "version": { "const": "2026-08-27-mvp1" }, "digest": { "$ref": "#/$defs/digest" } }
+    },
+    "seam": {
+      "type": "object", "additionalProperties": false, "required": ["status", "permission", "route"],
+      "properties": {
+        "status": { "enum": ["observed", "opaque", "unavailable"] },
+        "permission": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "route": { "type": "string", "minLength": 1, "maxLength": 128 }
+      }
+    },
+    "aggregate": {
+      "type": "object", "additionalProperties": false, "required": ["version_hash", "count"],
+      "properties": {
+        "version_hash": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "count": { "type": "integer", "minimum": 0, "maximum": 10000 },
+        "updated_at": { "type": "string", "format": "date-time" }
+      }
+    },
+    "guardrail": {
+      "type": "object", "additionalProperties": false, "required": ["id", "version_hash", "active", "opaque"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" }, "version_hash": { "$ref": "#/$defs/id" },
+        "type": { "$ref": "#/$defs/id" }, "stage": { "$ref": "#/$defs/id" },
+        "active": { "type": "boolean" }, "order": { "type": "integer", "minimum": 0 },
+        "trust_impact": { "$ref": "#/$defs/id" }, "updated_at": { "type": "string", "format": "date-time" },
+        "opaque": { "type": "boolean" }
+      }
+    },
+    "policy": {
+      "type": "object", "additionalProperties": false, "required": ["id", "version_hash", "active", "current", "opaque"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" }, "version_hash": { "$ref": "#/$defs/id" },
+        "active": { "type": "boolean" }, "current": { "type": "boolean" },
+        "trust_impact": { "$ref": "#/$defs/id" }, "updated_at": { "type": "string", "format": "date-time" },
+        "opaque": { "type": "boolean" }
+      }
+    },
+    "behavior": {
+      "type": "object", "additionalProperties": false, "required": ["id", "version_hash", "base_rule_id", "trigger", "verdict", "priority", "active", "current", "opaque"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" }, "version_hash": { "$ref": "#/$defs/id" },
+        "base_rule_id": { "$ref": "#/$defs/id" }, "dependency_base_rule_id": { "$ref": "#/$defs/id" },
+        "trigger": { "$ref": "#/$defs/id" }, "verdict": { "$ref": "#/$defs/id" },
+        "priority": { "type": "integer", "minimum": 0, "maximum": 100 },
+        "active": { "type": "boolean" }, "current": { "type": "boolean" },
+        "time_window_seconds": { "type": "integer", "minimum": 1 },
+        "trust_impact": { "$ref": "#/$defs/id" }, "updated_at": { "type": "string", "format": "date-time" },
+        "opaque": { "type": "boolean" }
+      }
+    }
+  }
+}

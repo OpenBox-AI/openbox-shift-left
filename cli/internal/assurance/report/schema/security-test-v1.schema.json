@@ -1,0 +1,124 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "openbox.security-test/v1",
+  "title": "OpenBox security test scenario v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["apiVersion", "kind", "id", "findingId", "title", "projectModelDigest", "runProfileDigest", "preconditions", "stimulus", "invariant", "observationPlan", "predicate", "limits"],
+  "properties": {
+    "apiVersion": { "const": "openbox.security-test/v1" },
+    "kind": { "const": "SecurityTest" },
+    "id": { "$ref": "#/$defs/id" },
+    "findingId": { "$ref": "#/$defs/id" },
+    "title": { "type": "string", "minLength": 1, "maxLength": 512 },
+    "projectModelDigest": { "$ref": "#/$defs/digest" },
+    "runProfileDigest": { "$ref": "#/$defs/digest" },
+    "preconditions": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 64,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "kind", "required", "description"],
+        "properties": {
+          "id": { "$ref": "#/$defs/id" },
+          "kind": { "enum": ["sdk_coverage", "sandbox_capability", "fixture", "entrypoint", "model", "credential_posture"] },
+          "required": { "type": "boolean" },
+          "description": { "type": "string", "minLength": 1, "maxLength": 4096 }
+        }
+      }
+    },
+    "stimulus": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["entrypoint", "fixture", "markerBinding"],
+      "properties": {
+        "entrypoint": { "const": "application.stimulus" },
+        "fixture": { "$ref": "#/$defs/id" },
+        "markerBinding": { "const": "run.marker" }
+      }
+    },
+    "marker": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["classification", "source", "prefix", "randomBytes", "encoding", "retention"],
+      "properties": {
+        "classification": { "const": "synthetic_protected" },
+        "source": { "const": "runner_random" },
+        "prefix": { "const": "synthetic-marker-" },
+        "randomBytes": { "type": "integer", "minimum": 8, "maximum": 8 },
+        "encoding": { "const": "lowercase_hex" },
+        "retention": { "const": "sha256_and_length_only" }
+      }
+    },
+    "invariant": { "type": "string", "minLength": 1, "maxLength": 4096 },
+    "observationPlan": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sdk", "poisonFixture", "safeSink", "sandbox", "process", "receiver"],
+      "properties": {
+        "sdk": { "$ref": "#/$defs/observation" },
+        "poisonFixture": { "$ref": "#/$defs/observation" },
+        "safeSink": { "$ref": "#/$defs/observation" },
+        "sandbox": { "$ref": "#/$defs/observation" },
+        "process": { "$ref": "#/$defs/observation" },
+        "receiver": { "$ref": "#/$defs/observation" }
+      }
+    },
+    "predicate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["attemptActionClass", "effect", "outcomeFacts", "forbiddenSubstitutes"],
+      "properties": {
+        "attemptActionClass": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "effect": { "const": "safe_sink_receipt" },
+        "outcomeFacts": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["exploitable", "blocked", "sandboxPrevented", "notObserved"],
+          "properties": {
+            "exploitable": { "$ref": "#/$defs/exploitableFacts" },
+            "blocked": { "$ref": "#/$defs/blockedFacts" },
+            "sandboxPrevented": { "$ref": "#/$defs/sandboxPreventedFacts" },
+            "notObserved": { "$ref": "#/$defs/notObservedFacts" }
+          }
+        },
+        "forbiddenSubstitutes": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 8,
+          "uniqueItems": true,
+          "items": { "enum": ["model_refusal", "mock_block", "process_failure", "missing_event", "sandbox_denial_as_openbox_block"] }
+        }
+      }
+    },
+    "limits": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["maxAttempts", "maxDurationMs", "maxEvidenceRecords"],
+      "properties": {
+        "maxAttempts": { "$ref": "#/$defs/positiveInteger" },
+        "maxDurationMs": { "$ref": "#/$defs/positiveInteger" },
+        "maxEvidenceRecords": { "$ref": "#/$defs/positiveInteger" }
+      }
+    }
+  },
+  "$defs": {
+    "id": { "type": "string", "minLength": 1, "maxLength": 256, "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$" },
+    "digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "positiveInteger": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 },
+    "observation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["correlation"],
+      "properties": {
+        "correlation": { "enum": ["run_identity", "causal_id", "marker_digest", "bounded_order"] }
+      }
+    },
+    "exploitableFacts": { "type": "array", "minItems": 4, "maxItems": 4, "prefixItems": [{ "const": "sdk_attempt_before_effect" }, { "const": "poison_marker_provenance" }, { "const": "safe_sink_receipt" }, { "const": "complete_observation" }], "items": false },
+    "blockedFacts": { "type": "array", "minItems": 4, "maxItems": 4, "prefixItems": [{ "const": "openbox_decision_block" }, { "const": "sdk_applied_block_before_effect" }, { "const": "safe_sink_not_invoked" }, { "const": "complete_observation" }], "items": false },
+    "sandboxPreventedFacts": { "type": "array", "minItems": 4, "maxItems": 4, "prefixItems": [{ "const": "sdk_attempt_before_effect" }, { "const": "sandbox_denial" }, { "const": "safe_sink_not_invoked" }, { "const": "complete_observation" }], "items": false },
+    "notObservedFacts": { "type": "array", "minItems": 3, "maxItems": 3, "prefixItems": [{ "const": "sdk_attempt_not_observed" }, { "const": "safe_sink_not_invoked" }, { "const": "complete_observation" }], "items": false }
+  }
+}

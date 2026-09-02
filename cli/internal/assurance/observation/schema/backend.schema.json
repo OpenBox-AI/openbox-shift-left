@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "ai.openbox.project-observation.backend/v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "source_contract", "entries"],
+  "properties": {
+    "schema": { "const": "ai.openbox.project-observation.backend/v1" },
+    "source_contract": { "const": "dashboard-session-activity/v1" },
+    "entries": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["ordinal", "method", "path", "status", "content_type", "body_bytes", "sha256", "body_base64", "representation"],
+        "properties": {
+          "ordinal": { "type": "integer", "minimum": 1 },
+          "method": { "const": "GET" },
+          "path": { "type": "string", "pattern": "^/" },
+          "status": { "const": 200 },
+          "content_type": { "type": "string" },
+          "body_bytes": { "type": "integer", "minimum": 0 },
+          "sha256": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+          "body_base64": { "type": "string", "contentEncoding": "base64" },
+          "representation": { "enum": ["backend_response", "dashboard_public_projection"] }
+        }
+      }
+    }
+  }
+}

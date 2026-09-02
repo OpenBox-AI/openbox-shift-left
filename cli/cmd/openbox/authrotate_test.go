@@ -22,6 +22,11 @@ func rotateBackend(t *testing.T, keyBody, identityBody string, keyStatus, identi
 	var called []string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/auth/profile":
+			_ = json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{
+				"sub": "api-key:key-1", "orgId": "org-test", "isApiKeyAuth": true,
+				"permissions": sharedControlPermissions(),
+			}})
 		case strings.HasSuffix(r.URL.Path, "/rotate-api-key"):
 			called = append(called, "key")
 			w.WriteHeader(keyStatus)
@@ -106,6 +111,40 @@ func TestRotateWritesNewCredentialsAndPreservesTheDID(t *testing.T) {
 	}
 	if cfg := readDevJSON(t, home); cfg.DID != rotateTestDID {
 		t.Errorf("DID = %q, want it preserved as %q", cfg.DID, rotateTestDID)
+	}
+}
+
+func TestRotateRejectsMissingEvaluationPermissionBeforeMutation(t *testing.T) {
+	var mutationCalls int
+	permissions := sharedControlPermissions()
+	permissions = permissions[:len(permissions)-1]
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/auth/profile" {
+			mutationCalls++
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{
+			"sub": "api-key:key-1", "orgId": "org-test", "isApiKeyAuth": true,
+			"permissions": permissions,
+		}})
+	}))
+	t.Cleanup(srv.Close)
+
+	a, errb, home := rotateAppFull(t, srv.URL)
+	if err := devconfig.WriteConfig(filepath.Join(home, "dev.json"), devconfig.Update{
+		DID: rotateTestDID, AgentID: "agent-1", BackendURL: srv.URL,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if code := a.run([]string{"auth", "--rotate", "--yes"}); code != exitError {
+		t.Fatalf("exit = %d, want missing-scope failure", code)
+	}
+	if mutationCalls != 0 {
+		t.Fatalf("rotation endpoint called before permission failure: %d", mutationCalls)
+	}
+	if !strings.Contains(errb.String(), "read:agent_behavior_rule") {
+		t.Errorf("error does not name missing evaluation permission:\n%s", errb.String())
 	}
 }
 

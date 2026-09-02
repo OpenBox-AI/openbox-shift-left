@@ -1,0 +1,254 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "openbox.audit-pack/v1",
+  "title": "OpenBox audit pack manifest v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["apiVersion", "kind", "runId", "mode", "schemas", "objects", "judgments", "limits", "provenance", "retention"],
+  "properties": {
+    "apiVersion": { "const": "openbox.audit-pack/v1" },
+    "kind": { "const": "AuditPack" },
+    "runId": { "$ref": "#/$defs/id" },
+    "mode": { "enum": ["baseline", "governed"] },
+    "schemas": {
+      "type": "array",
+      "minItems": 7,
+      "maxItems": 7,
+      "prefixItems": [
+        { "$ref": "#/$defs/projectModelSchema" },
+        { "$ref": "#/$defs/projectRunProfileSchema" },
+        { "$ref": "#/$defs/sdkCoverageSchema" },
+        { "$ref": "#/$defs/sandboxPostureSchema" },
+        { "$ref": "#/$defs/securityTestSchema" },
+        { "$ref": "#/$defs/auditPackSchema" },
+        { "$ref": "#/$defs/policyProposalSchema" }
+      ],
+      "items": false
+    },
+    "objects": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["project-snapshot", "project-model", "run-profile", "sdk-coverage", "sandbox-posture", "scenarios", "sdk-events", "fixture-events", "effect-events", "judgments", "cleanup-receipt", "report-json", "report-markdown", "report-sarif"],
+      "properties": {
+        "project-snapshot": { "$ref": "#/$defs/objectReference" },
+        "project-model": { "$ref": "#/$defs/objectReference" },
+        "run-profile": { "$ref": "#/$defs/objectReference" },
+        "sdk-coverage": { "$ref": "#/$defs/objectReference" },
+        "sandbox-posture": { "$ref": "#/$defs/objectReference" },
+        "scenarios": { "$ref": "#/$defs/objectReference" },
+        "sdk-events": { "$ref": "#/$defs/objectReference" },
+        "fixture-events": { "$ref": "#/$defs/objectReference" },
+        "effect-events": { "$ref": "#/$defs/objectReference" },
+        "judgments": { "$ref": "#/$defs/objectReference" },
+        "cleanup-receipt": { "$ref": "#/$defs/objectReference" },
+        "report-json": { "$ref": "#/$defs/objectReference" },
+        "report-markdown": { "$ref": "#/$defs/objectReference" },
+        "report-sarif": { "$ref": "#/$defs/objectReference" },
+        "policy-proposals": { "$ref": "#/$defs/objectReference" }
+      }
+    },
+    "judgments": {
+      "type": "array",
+      "maxItems": 10000,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["findingId", "scenarioId", "outcome", "reachability", "evidenceLevel", "matchedFacts", "evidence", "missingFacts", "contradictions", "limitations"],
+        "properties": {
+          "findingId": { "$ref": "#/$defs/id" },
+          "scenarioId": { "$ref": "#/$defs/id" },
+          "outcome": { "enum": ["exploitable", "blocked", "sandbox_prevented", "not_observed", "inconclusive", "not_runnable"] },
+          "reachability": { "enum": ["runtime_enforceable", "host_enforceable", "observable_only", "code_change_required", "blind"] },
+          "evidenceLevel": { "enum": ["documented", "discovered", "callable", "observed", "repeated", "release_qualified"] },
+          "matchedFacts": {
+            "type": "array",
+            "maxItems": 64,
+            "uniqueItems": true,
+            "items": { "enum": ["sdk_attempt_before_effect", "sdk_attempt_not_observed", "poison_marker_provenance", "safe_sink_receipt", "sandbox_denial", "openbox_decision_block", "sdk_applied_block_before_effect", "safe_sink_not_invoked", "complete_observation"] }
+          },
+          "evidence": { "type": "array", "minItems": 1, "maxItems": 256, "items": { "$ref": "#/$defs/digest" } },
+          "missingFacts": { "$ref": "#/$defs/stringList" },
+          "contradictions": { "$ref": "#/$defs/stringList" },
+          "limitations": { "$ref": "#/$defs/stringList" }
+        },
+        "allOf": [
+          {
+            "if": { "type": "object", "properties": { "outcome": { "const": "blocked" } }, "required": ["outcome"] },
+            "then": {
+              "type": "object",
+              "properties": {
+                "matchedFacts": {
+                  "type": "array",
+                  "allOf": [
+                    { "contains": { "const": "openbox_decision_block" }, "minContains": 1, "maxContains": 1 },
+                    { "contains": { "const": "sdk_applied_block_before_effect" }, "minContains": 1, "maxContains": 1 },
+                    { "contains": { "const": "safe_sink_not_invoked" }, "minContains": 1, "maxContains": 1 },
+                    { "contains": { "const": "complete_observation" }, "minContains": 1, "maxContains": 1 }
+                  ],
+                  "not": { "contains": { "const": "safe_sink_receipt" } }
+                },
+                "evidence": { "type": "array", "minItems": 3 }
+              }
+            }
+          },
+          {
+            "not": {
+              "type": "object",
+              "properties": {
+                "matchedFacts": {
+                  "type": "array",
+                  "allOf": [
+                    { "contains": { "const": "safe_sink_receipt" } },
+                    { "contains": { "const": "safe_sink_not_invoked" } }
+                  ]
+                }
+              },
+              "required": ["matchedFacts"]
+            }
+          }
+        ]
+      }
+    },
+    "limits": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["truncated", "omissions"],
+      "properties": {
+        "truncated": { "type": "boolean" },
+        "omissions": {
+          "type": "array",
+          "maxItems": 10000,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["subject", "reason", "evidenceImpact", "count", "evidence"],
+            "properties": {
+              "subject": { "type": "string", "minLength": 1, "maxLength": 512 },
+              "reason": { "enum": ["source_excluded", "raw_not_retained", "redaction_failed", "truncated", "unsupported", "unavailable", "budget_exceeded"] },
+              "evidenceImpact": { "enum": ["none", "inconclusive", "not_runnable"] },
+              "count": { "$ref": "#/$defs/nonNegativeInteger" },
+              "evidence": { "type": "array", "minItems": 1, "maxItems": 64, "items": { "$ref": "#/$defs/digest" } }
+            },
+            "allOf": [
+              {
+                "if": { "type": "object", "properties": { "reason": { "const": "redaction_failed" } }, "required": ["reason"] },
+                "then": { "type": "object", "properties": { "evidenceImpact": { "const": "inconclusive" } } }
+              },
+              {
+                "if": { "type": "object", "properties": { "reason": { "const": "truncated" } }, "required": ["reason"] },
+                "then": { "type": "object", "properties": { "evidenceImpact": { "const": "inconclusive" } } }
+              }
+            ]
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": { "type": "object", "properties": { "truncated": { "const": true } }, "required": ["truncated"] },
+          "then": {
+            "type": "object",
+            "properties": {
+              "omissions": {
+                "type": "array",
+                "contains": { "type": "object", "properties": { "reason": { "const": "truncated" } }, "required": ["reason"] },
+                "minContains": 1
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "type": "object",
+            "properties": {
+              "omissions": {
+                "type": "array",
+                "contains": { "type": "object", "properties": { "reason": { "const": "truncated" } }, "required": ["reason"] },
+                "minContains": 1
+              }
+            },
+            "required": ["omissions"]
+          },
+          "then": { "type": "object", "properties": { "truncated": { "const": true } } }
+        }
+      ]
+    },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["runner"],
+      "properties": {
+        "runner": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["name", "version"],
+          "properties": {
+            "name": { "const": "openbox" },
+            "version": { "type": "string", "minLength": 1, "maxLength": 128 }
+          }
+        }
+      }
+    },
+    "retention": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode", "rawContentPersisted"],
+      "properties": {
+        "mode": { "const": "redacted_digests" },
+        "rawContentPersisted": { "const": false }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": { "type": "object", "properties": { "mode": { "const": "baseline" } }, "required": ["mode"] },
+      "then": {
+        "type": "object",
+        "properties": {
+          "judgments": {
+            "type": "array",
+            "not": {
+              "contains": {
+                "type": "object",
+                "properties": { "outcome": { "const": "blocked" } },
+                "required": ["outcome"]
+              }
+            }
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "id": { "type": "string", "minLength": 1, "maxLength": 256, "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$" },
+    "digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "nonNegativeInteger": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+    "stringList": { "type": "array", "maxItems": 10000, "items": { "type": "string", "minLength": 1, "maxLength": 4096 } },
+    "projectModelSchema": { "type": "object", "additionalProperties": false, "required": ["id", "digest"], "properties": { "id": { "const": "openbox.project-model/v1" }, "digest": { "$ref": "#/$defs/digest" } } },
+    "projectRunProfileSchema": { "type": "object", "additionalProperties": false, "required": ["id", "digest"], "properties": { "id": { "const": "openbox.project-run-profile/v1" }, "digest": { "$ref": "#/$defs/digest" } } },
+    "sdkCoverageSchema": { "type": "object", "additionalProperties": false, "required": ["id", "digest"], "properties": { "id": { "const": "openbox.sdk-coverage/v1" }, "digest": { "$ref": "#/$defs/digest" } } },
+    "sandboxPostureSchema": { "type": "object", "additionalProperties": false, "required": ["id", "digest"], "properties": { "id": { "const": "openbox.sandbox-posture/v1" }, "digest": { "$ref": "#/$defs/digest" } } },
+    "securityTestSchema": { "type": "object", "additionalProperties": false, "required": ["id", "digest"], "properties": { "id": { "const": "openbox.security-test/v1" }, "digest": { "$ref": "#/$defs/digest" } } },
+    "auditPackSchema": { "type": "object", "additionalProperties": false, "required": ["id", "digest"], "properties": { "id": { "const": "openbox.audit-pack/v1" }, "digest": { "$ref": "#/$defs/digest" } } },
+    "policyProposalSchema": { "type": "object", "additionalProperties": false, "required": ["id", "digest"], "properties": { "id": { "const": "openbox.policy-proposal/v1" }, "digest": { "$ref": "#/$defs/digest" } } },
+    "objectReference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["cid", "mediaType", "schema", "bytes", "retention"],
+      "properties": {
+        "cid": { "$ref": "#/$defs/digest" },
+        "mediaType": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "schema": { "type": ["string", "null"], "maxLength": 256 },
+        "bytes": { "$ref": "#/$defs/nonNegativeInteger" },
+        "retention": { "enum": ["normalized", "redacted", "digest_only", "omitted", "public_projection"] },
+        "omissionReason": { "type": "string", "minLength": 1, "maxLength": 4096 }
+      },
+      "allOf": [
+        {
+          "if": { "type": "object", "properties": { "retention": { "enum": ["digest_only", "omitted"] } }, "required": ["retention"] },
+          "then": { "type": "object", "properties": { "omissionReason": true }, "required": ["omissionReason"] },
+          "else": { "not": { "type": "object", "properties": { "omissionReason": true }, "required": ["omissionReason"] } }
+        }
+      ]
+    }
+  }
+}

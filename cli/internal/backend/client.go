@@ -32,6 +32,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -60,6 +61,48 @@ type Client struct {
 	authHeader string // "Authorization" or "X-API-Key"
 	authValue  string
 	clientID   string // value for the x-openbox-client header (JWT path only)
+}
+
+// AuthProfile is the credential identity returned by GET /auth/profile. It is
+// intentionally limited to the fields auth needs to prove that one organization
+// API key can support both agent onboarding and project-assurance collection.
+type AuthProfile struct {
+	Subject      string   `json:"sub"`
+	OrgID        string   `json:"orgId"`
+	Permissions  []string `json:"permissions"`
+	IsAPIKeyAuth bool     `json:"isApiKeyAuth"`
+}
+
+type authProfileResponse struct {
+	Data AuthProfile `json:"data"`
+}
+
+// Profile resolves the control credential through GET /auth/profile.
+// Registration calls this before POST /agent/create so missing or over-broad
+// permissions fail before an agent is created.
+func (c *Client) Profile(ctx context.Context) (*AuthProfile, error) {
+	var out authProfileResponse
+	if err := c.do(ctx, http.MethodGet, "/auth/profile", nil, &out); err != nil {
+		return nil, fmt.Errorf("read auth profile: %w", err)
+	}
+	return &out.Data, nil
+}
+
+// SetSigningRequired sets the agent's request-signing posture during explicit
+// authentication. Project evaluation never calls this mutation: auth prepares
+// the shared project agent once so OpenShell can emit observable bearer traffic
+// without receiving the Ed25519 seed.
+func (c *Client) SetSigningRequired(ctx context.Context, agentID string, required bool) error {
+	if strings.TrimSpace(agentID) == "" {
+		return errors.New("set signing requirement: no agent id")
+	}
+	body := struct {
+		SigningRequired bool `json:"signing_required"`
+	}{SigningRequired: required}
+	if err := c.do(ctx, http.MethodPut, "/agent/"+agentID, body, nil); err != nil {
+		return fmt.Errorf("set signing requirement for agent %s: %w", agentID, err)
+	}
+	return nil
 }
 
 // New builds a control-plane client. The credential is auto-classified: an

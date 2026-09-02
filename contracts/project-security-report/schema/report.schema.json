@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "ai.openbox.project-security-report.report/v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "observation", "analysis", "standards", "recommendation_catalog", "target_posture", "result", "security_pass", "coverage_gap_ids", "issues", "recommendations", "limitations"],
+  "properties": {
+    "schema": { "const": "ai.openbox.project-security-report.report/v1" },
+    "observation": { "$ref": "#/$defs/identity" },
+    "analysis": { "$ref": "#/$defs/identity" },
+    "standards": { "$ref": "#/$defs/versionIdentity" },
+    "recommendation_catalog": { "$ref": "#/$defs/versionIdentity" },
+    "target_posture": { "$ref": "#/$defs/identity" },
+    "result": { "enum": ["issues", "no_supported_issue", "inconclusive"] },
+    "security_pass": { "const": false },
+    "coverage_gap_ids": { "type": "array", "maxItems": 6, "uniqueItems": true, "items": { "type": "string", "pattern": "^coverage:[a-z_]+$" } },
+    "issues": { "type": "array", "maxItems": 100, "items": { "$ref": "#/$defs/issue" } },
+    "recommendations": { "type": "array", "maxItems": 600, "items": { "$ref": "#/$defs/recommendation" } },
+    "limitations": { "type": "array", "minItems": 1, "maxItems": 32, "items": { "type": "string", "minLength": 1, "maxLength": 400 } }
+  },
+  "$defs": {
+    "digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "identity": { "type": "object", "additionalProperties": false, "required": ["schema", "digest"], "properties": { "schema": { "type": "string", "minLength": 1, "maxLength": 128 }, "digest": { "$ref": "#/$defs/digest" } } },
+    "versionIdentity": { "type": "object", "additionalProperties": false, "required": ["version", "digest"], "properties": { "version": { "type": "string", "minLength": 1, "maxLength": 64 }, "digest": { "$ref": "#/$defs/digest" } } },
+    "reference": { "type": "object", "additionalProperties": false, "required": ["index", "id", "role"], "properties": { "index": { "enum": ["behavior", "coverage"] }, "id": { "type": "string", "minLength": 1, "maxLength": 256 }, "role": { "enum": ["semantic_behavior", "external_effect", "runtime_context", "model_route", "limitation"] } } },
+    "standard": { "type": "object", "additionalProperties": false, "required": ["catalog", "version", "id"], "properties": { "catalog": { "enum": ["OWASP_AGENTIC", "OWASP_LLM", "CWE", "MITRE_ATLAS"] }, "version": { "type": "string", "minLength": 1, "maxLength": 32 }, "id": { "type": "string", "pattern": "^(ASI0[12]|LLM0[16]|CWE-142[67]|AML\\.T0051)$" } } },
+    "fact": { "type": "object", "additionalProperties": false, "required": ["evidence_id", "authority", "type"], "properties": { "evidence_id": { "type": "string", "minLength": 1, "maxLength": 256 }, "authority": { "enum": ["backend", "independent_receipt", "openshell", "model_receipt"] }, "type": { "type": "string", "minLength": 1, "maxLength": 128 }, "timestamp": { "type": "string", "format": "date-time" } } },
+    "action": { "type": "object", "additionalProperties": false, "required": ["class", "name", "source_evidence_id"], "properties": { "class": { "type": "string", "pattern": "^[a-z][a-z0-9_]{0,63}$" }, "name": { "type": "string", "minLength": 1, "maxLength": 160 }, "source_evidence_id": { "type": "string", "minLength": 1, "maxLength": 256 } } },
+    "issue": {
+      "type": "object", "additionalProperties": false,
+      "required": ["issue_id", "candidate_id", "title", "observed_behavior_assertion", "crossed_boundary_assertion", "rationale_assertion", "inference", "confidence", "severity", "observed_facts", "evidence", "standards", "coverage_gap_ids", "recommendation_mapping"],
+      "properties": {
+        "issue_id": { "type": "string", "pattern": "^issue:[0-9a-f]{64}$" }, "candidate_id": { "type": "string", "pattern": "^candidate:[a-z0-9][a-z0-9._-]{0,95}$" },
+        "title": { "type": "string", "minLength": 1, "maxLength": 200 }, "observed_behavior_assertion": { "type": "string", "minLength": 1, "maxLength": 4000 }, "crossed_boundary_assertion": { "type": "string", "minLength": 1, "maxLength": 2000 }, "rationale_assertion": { "type": "string", "minLength": 1, "maxLength": 4000 },
+        "inference": { "type": "boolean" }, "confidence": { "enum": ["high", "medium", "low", "inconclusive"] }, "severity": { "const": "unavailable" },
+        "observed_facts": { "type": "array", "minItems": 1, "maxItems": 64, "items": { "$ref": "#/$defs/fact" } }, "action": { "$ref": "#/$defs/action" },
+        "evidence": { "type": "array", "minItems": 1, "maxItems": 64, "items": { "$ref": "#/$defs/reference" } }, "standards": { "type": "array", "minItems": 1, "maxItems": 7, "items": { "$ref": "#/$defs/standard" } },
+        "coverage_gap_ids": { "type": "array", "maxItems": 6, "uniqueItems": true, "items": { "type": "string", "pattern": "^coverage:[a-z_]+$" } },
+        "recommendation_mapping": { "enum": ["available", "unavailable", "not_applicable"] }
+      }
+    },
+    "recommendation": {
+      "type": "object", "additionalProperties": false,
+      "required": ["recommendation_id", "issue_id", "catalog_entry_id", "catalog", "kind", "status", "target", "current_control_ids", "intended_constraint", "expected_protected_behavior", "future_verification", "limitations"],
+      "properties": {
+        "recommendation_id": { "type": "string", "pattern": "^recommendation:[0-9a-f]{64}$" }, "issue_id": { "type": "string", "pattern": "^issue:[0-9a-f]{64}$" },
+        "catalog_entry_id": { "type": "string", "minLength": 1, "maxLength": 64 }, "catalog": { "$ref": "#/$defs/versionIdentity" },
+        "kind": { "enum": ["guardrail", "behavior_rule", "policy", "approval_requirement", "sdk_integration"] }, "status": { "enum": ["new_gap", "review_existing", "unavailable"] },
+        "target": { "type": "object", "additionalProperties": false, "required": ["agent_id"], "properties": { "agent_id": { "type": "string", "minLength": 1, "maxLength": 256 }, "action_class": { "type": "string", "pattern": "^[a-z][a-z0-9_]{0,63}$" }, "action_name": { "type": "string", "minLength": 1, "maxLength": 160 } } },
+        "current_control_ids": { "type": "array", "maxItems": 100, "uniqueItems": true, "items": { "type": "string", "minLength": 1, "maxLength": 256 } },
+        "intended_constraint": { "type": "string", "pattern": "^[a-z][a-z0-9_]{0,95}$" }, "expected_protected_behavior": { "type": "string", "minLength": 1, "maxLength": 400 },
+        "future_verification": { "type": "object", "additionalProperties": false, "required": ["expected_behavior", "authoritative_evidence_roles", "success_criteria", "refusal_criteria"], "properties": { "expected_behavior": { "type": "string", "minLength": 1, "maxLength": 400 }, "authoritative_evidence_roles": { "type": "array", "minItems": 1, "maxItems": 5, "uniqueItems": true, "items": { "enum": ["semantic_behavior", "external_effect", "runtime_context", "model_route", "limitation"] } }, "success_criteria": { "type": "string", "minLength": 1, "maxLength": 400 }, "refusal_criteria": { "type": "string", "minLength": 1, "maxLength": 400 } } },
+        "limitations": { "type": "array", "minItems": 1, "maxItems": 8, "items": { "type": "string", "minLength": 1, "maxLength": 240 } }
+      }
+    }
+  }
+}
+

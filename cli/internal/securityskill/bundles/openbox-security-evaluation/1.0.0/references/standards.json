@@ -1,0 +1,56 @@
+{
+  "schema": "ai.openbox.security-standards-catalog/v1",
+  "version": "2026-08-26-mvp1",
+  "retrieved_at": "2026-08-26",
+  "sources": [
+    {
+      "catalog": "CWE",
+      "title": "Common Weakness Enumeration",
+      "url": "https://cwe.mitre.org/data/index.html",
+      "upstream_version": "4.20",
+      "retrieved_at": "2026-08-26",
+      "local_source": "sources/cwe-4.20.json",
+      "local_source_digest": "sha256:404b6a26c6e167c77a94ee02f80f088bbb3275d886c08af95e428eb0681868d8",
+      "selected_ids": ["CWE-1426", "CWE-1427"]
+    },
+    {
+      "catalog": "MITRE_ATLAS",
+      "title": "MITRE ATLAS",
+      "url": "https://atlas.mitre.org/",
+      "upstream_version": "snapshot-2026-08-26",
+      "retrieved_at": "2026-08-26",
+      "local_source": "sources/mitre-atlas-2026-08-26.json",
+      "local_source_digest": "sha256:0733f44bda9970bb958acb8559b864c62554726b278e78fc63a4307e5834fbb5",
+      "selected_ids": ["AML.T0051"]
+    },
+    {
+      "catalog": "OWASP_AGENTIC",
+      "title": "OWASP Top 10 for Agentic Applications 2026",
+      "url": "https://genai.owasp.org/2025/12/09/owasp-top-10-for-agentic-applications-the-benchmark-for-agentic-security-in-the-age-of-autonomous-ai/",
+      "upstream_version": "2026",
+      "retrieved_at": "2026-08-26",
+      "local_source": "sources/owasp-agentic-2026.json",
+      "local_source_digest": "sha256:7b68e1e488b005525b19cc56793a88a0bd7bd99560b50fc521a7b186e381d53a",
+      "selected_ids": ["ASI01", "ASI02"]
+    },
+    {
+      "catalog": "OWASP_LLM",
+      "title": "OWASP Top 10 for LLM Applications 2025",
+      "url": "https://genai.owasp.org/llm-top-10/",
+      "upstream_version": "2025",
+      "retrieved_at": "2026-08-26",
+      "local_source": "sources/owasp-llm-2025.json",
+      "local_source_digest": "sha256:99f090faec41f40e60b1d1556ff74a8c1307af5ffc697d939da7b5a33bfecd2f",
+      "selected_ids": ["LLM01", "LLM06"]
+    }
+  ],
+  "entries": [
+    {"catalog": "CWE", "version": "4.20", "id": "CWE-1426", "title": "Improper Validation of Generative AI Output"},
+    {"catalog": "CWE", "version": "4.20", "id": "CWE-1427", "title": "Improper Neutralization of Input Used for LLM Prompting"},
+    {"catalog": "MITRE_ATLAS", "version": "2026-08-26", "id": "AML.T0051", "title": "LLM Prompt Injection"},
+    {"catalog": "OWASP_AGENTIC", "version": "2026", "id": "ASI01", "title": "Agent Goal Hijack"},
+    {"catalog": "OWASP_AGENTIC", "version": "2026", "id": "ASI02", "title": "Tool Misuse and Exploitation"},
+    {"catalog": "OWASP_LLM", "version": "2025", "id": "LLM01", "title": "Prompt Injection"},
+    {"catalog": "OWASP_LLM", "version": "2025", "id": "LLM06", "title": "Excessive Agency"}
+  ]
+}

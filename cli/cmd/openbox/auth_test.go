@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -10,7 +11,6 @@ import (
 
 	"github.com/openbox-ai/openbox-shift-left/adapters/common/devconfig"
 	"github.com/openbox-ai/openbox-shift-left/cli/internal/backend"
-	"github.com/openbox-ai/openbox-shift-left/cli/internal/devinit"
 	"github.com/openbox-ai/openbox-shift-left/cli/internal/prompt"
 )
 
@@ -210,6 +210,29 @@ func TestDIDShapeValidation(t *testing.T) {
 func TestRegisterPathSkipsValidation(t *testing.T) {
 	if problem := validateAuthFields(authFields{register: true}); problem != "" {
 		t.Errorf("register path should need no local values, got: %s", problem)
+	}
+}
+
+func TestSharedControlProfileRequiresExactCombinedPermissions(t *testing.T) {
+	valid := &backend.AuthProfile{IsAPIKeyAuth: true, Permissions: sharedControlPermissions()}
+	if problem := sharedControlProfileProblem(valid); problem != "" {
+		t.Fatalf("exact shared profile rejected: %s", problem)
+	}
+
+	missing := &backend.AuthProfile{IsAPIKeyAuth: true, Permissions: sharedControlPermissions()[:7]}
+	if problem := sharedControlProfileProblem(missing); !strings.Contains(problem, "read:agent_behavior_rule") {
+		t.Errorf("missing permission not named: %q", problem)
+	}
+
+	extraPermissions := append(sharedControlPermissions(), "delete:agent")
+	extra := &backend.AuthProfile{IsAPIKeyAuth: true, Permissions: extraPermissions}
+	if problem := sharedControlProfileProblem(extra); !strings.Contains(problem, "not allowed: delete:agent") {
+		t.Errorf("extra permission not rejected: %q", problem)
+	}
+
+	jwt := &backend.AuthProfile{IsAPIKeyAuth: false, Permissions: sharedControlPermissions()}
+	if problem := sharedControlProfileProblem(jwt); !strings.Contains(problem, "bearer/JWT") {
+		t.Errorf("JWT profile not rejected for shared stage: %q", problem)
 	}
 }
 
@@ -635,12 +658,11 @@ func TestRegisterWithoutAnOrgKeyExplainsWhatIsNeeded(t *testing.T) {
 func TestRegisterWritesCredentialsButInstallsNothing(t *testing.T) {
 	home := isolateHome(t)
 	a, out, errb := testApp(map[string]string{devconfig.EnvControlToken: "obx_key_" + strings.Repeat("f", 48)})
-	a.newRegistrar = func(_, _, _ string) devinit.Registrar {
-		return &fakeReg{reg: &backend.Registration{
-			AgentID: "srv-agent", DID: "did:aip:3f2504e0-4f89-11d3-9a0c-0305e82c3301",
-			APIKey: "obx_minted", PrivateKey: testSeedB64,
-		}}
-	}
+	fake := &fakeReg{reg: &backend.Registration{
+		AgentID: "srv-agent", DID: "did:aip:3f2504e0-4f89-11d3-9a0c-0305e82c3301",
+		APIKey: "obx_minted", PrivateKey: testSeedB64,
+	}}
+	a.newRegistrar = func(_, _, _ string) authRegistrar { return fake }
 	res, ref, code := a.registerForAuth(authFields{
 		backendURL: "https://api.internal", baseURL: "https://core.internal",
 	}, "", "desc", "", false)
@@ -654,12 +676,71 @@ func TestRegisterWritesCredentialsButInstallsNothing(t *testing.T) {
 	if res.ConfigApplied {
 		t.Error("auth registered AND installed; init owns installation")
 	}
+	if len(fake.signingCalls) != 1 || fake.signingCalls[0] {
+		t.Errorf("signing posture calls = %v, want one signing_required=false preparation", fake.signingCalls)
+	}
 	kv := readEnvFile(t, home)
 	if kv[devconfig.EnvAPIKeyDirect] != "obx_minted" {
 		t.Errorf("minted credentials not written: %v", kv)
 	}
 	if strings.Contains(out.String(), "obx_minted") || strings.Contains(out.String(), testSeedB64) {
 		t.Errorf("a minted secret reached stdout:\n%s", out.String())
+	}
+}
+
+func TestRegistrationSigningPreparationFailureRetainsRecoveryIdentity(t *testing.T) {
+	home := isolateHome(t)
+	a, _, errb := testApp(map[string]string{devconfig.EnvControlToken: "obx_key_" + strings.Repeat("f", 48)})
+	fake := &fakeReg{
+		reg: &backend.Registration{
+			AgentID: "srv-agent", DID: "did:aip:3f2504e0-4f89-11d3-9a0c-0305e82c3301",
+			APIKey: "obx_minted", PrivateKey: testSeedB64,
+		},
+		signingErr: errors.New("backend refused posture"),
+	}
+	a.newRegistrar = func(_, _, _ string) authRegistrar { return fake }
+
+	_, _, code := a.registerForAuth(authFields{
+		backendURL: "https://api.internal", baseURL: "https://core.internal",
+	}, "", "desc", "", false)
+	if code != exitError {
+		t.Fatalf("exit = %d, want posture failure", code)
+	}
+	if cfg := readDevJSON(t, home); cfg.AgentID != "srv-agent" {
+		t.Errorf("recovery agent id = %q, want srv-agent", cfg.AgentID)
+	}
+	if kv := readEnvFile(t, home); kv[devconfig.EnvAPIKeyDirect] != "obx_minted" {
+		t.Errorf("once-shown runtime key was not retained: %v", kv)
+	}
+	if !strings.Contains(errb.String(), "re-run `openbox auth`") {
+		t.Errorf("error does not provide idempotent recovery:\n%s", errb.String())
+	}
+}
+
+func TestRegisterRejectsMissingEvaluationPermissionBeforeAgentCreation(t *testing.T) {
+	isolateHome(t)
+	a, _, errb := testApp(map[string]string{devconfig.EnvControlToken: "obx_key_" + strings.Repeat("f", 48)})
+	permissions := sharedControlPermissions()
+	permissions = permissions[:len(permissions)-1]
+	fake := &fakeReg{profile: &backend.AuthProfile{
+		OrgID: "org-test", IsAPIKeyAuth: true, Permissions: permissions,
+	}}
+	a.newRegistrar = func(_, _, _ string) authRegistrar { return fake }
+
+	_, _, code := a.registerForAuth(authFields{
+		backendURL: "https://api.internal", baseURL: "https://core.internal",
+	}, "", "desc", "", false)
+	if code != exitError {
+		t.Fatalf("exit = %d, want missing-scope failure", code)
+	}
+	if fake.create != 0 {
+		t.Fatalf("agent was created before permission failure: %d calls", fake.create)
+	}
+	if len(fake.signingCalls) != 0 {
+		t.Fatalf("signing posture changed before permission failure: %v", fake.signingCalls)
+	}
+	if !strings.Contains(errb.String(), "read:agent_behavior_rule") {
+		t.Errorf("error does not name missing evaluation permission:\n%s", errb.String())
 	}
 }
 

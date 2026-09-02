@@ -70,6 +70,55 @@ func TestCreateParsesResponseAndSendsContract(t *testing.T) {
 	}
 }
 
+func TestProfileUsesAPIKeyAndParsesPermissions(t *testing.T) {
+	var gotMethod, gotAuth, gotBearer string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotMethod = r.Method
+		gotAuth = r.Header.Get("X-API-Key")
+		gotBearer = r.Header.Get("Authorization")
+		if r.URL.Path != "/auth/profile" {
+			t.Errorf("path = %q, want /auth/profile", r.URL.Path)
+		}
+		_, _ = io.WriteString(w, `{"data":{"sub":"api-key:key-1","orgId":"org-1","permissions":["create:agent","read:agent"],"isApiKeyAuth":true}}`)
+	}))
+	defer srv.Close()
+
+	c := New(srv.URL, "obx_key_"+repeat("f", 48), "openbox-cli")
+	profile, err := c.Profile(context.Background())
+	if err != nil {
+		t.Fatalf("Profile: %v", err)
+	}
+	if gotMethod != http.MethodGet || gotAuth == "" || gotBearer != "" {
+		t.Errorf("request = %s X-API-Key=%t Authorization=%q", gotMethod, gotAuth != "", gotBearer)
+	}
+	if profile.OrgID != "org-1" || !profile.IsAPIKeyAuth || len(profile.Permissions) != 2 {
+		t.Errorf("profile = %+v", profile)
+	}
+}
+
+func TestSetSigningRequiredPreparesBearerObservationAgent(t *testing.T) {
+	var gotMethod, gotPath, gotAuth string
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotMethod, gotPath = r.Method, r.URL.Path
+		gotAuth = r.Header.Get("X-API-Key")
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		_, _ = io.WriteString(w, `{}`)
+	}))
+	defer srv.Close()
+
+	c := New(srv.URL, "obx_key_"+repeat("f", 48), "openbox-cli")
+	if err := c.SetSigningRequired(context.Background(), "agent-1", false); err != nil {
+		t.Fatalf("SetSigningRequired: %v", err)
+	}
+	if gotMethod != http.MethodPut || gotPath != "/agent/agent-1" || gotAuth == "" {
+		t.Errorf("request = %s %s X-API-Key=%t", gotMethod, gotPath, gotAuth != "")
+	}
+	if value, ok := gotBody["signing_required"].(bool); !ok || value {
+		t.Errorf("body = %#v, want signing_required=false", gotBody)
+	}
+}
+
 func TestCreateBearerPathSetsClientHeader(t *testing.T) {
 	var gotAuth, gotClient string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

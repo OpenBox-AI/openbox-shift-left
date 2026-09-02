@@ -1,0 +1,176 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "openbox.project-model/v1",
+  "title": "OpenBox passive project model v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["apiVersion", "kind", "project", "snapshot", "nodes", "edges", "uncertainties"],
+  "properties": {
+    "apiVersion": { "const": "openbox.project-model/v1" },
+    "kind": { "const": "ProjectModel" },
+    "project": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "root", "git"],
+      "properties": {
+        "name": { "$ref": "#/$defs/name" },
+        "root": { "const": "." },
+        "git": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["present", "head", "dirty"],
+          "properties": {
+            "present": { "type": "boolean" },
+            "head": { "type": ["string", "null"], "pattern": "^(?:[0-9a-f]{40}|[0-9a-f]{64})$" },
+            "dirty": { "type": ["boolean", "null"] }
+          },
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["present", "head", "dirty"],
+              "properties": {
+                "present": { "const": true },
+                "head": { "type": ["string", "null"] },
+                "dirty": { "type": "boolean" }
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["present", "head", "dirty"],
+              "properties": {
+                "present": { "const": true },
+                "head": { "type": "null" },
+                "dirty": { "type": "null" }
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["present", "head", "dirty"],
+              "properties": {
+                "present": { "const": false },
+                "head": { "type": "null" },
+                "dirty": { "type": "null" }
+              }
+            }
+          ]
+        }
+      }
+    },
+    "snapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["digest", "selectionDigest", "fileCount", "totalBytes", "selectionRules", "omissions"],
+      "properties": {
+        "digest": { "$ref": "#/$defs/digest" },
+        "selectionDigest": { "$ref": "#/$defs/digest" },
+        "fileCount": { "$ref": "#/$defs/nonNegativeInteger" },
+        "totalBytes": { "$ref": "#/$defs/nonNegativeInteger" },
+        "selectionRules": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 10000,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "source", "action", "pattern"],
+            "properties": {
+              "id": { "$ref": "#/$defs/name" },
+              "source": { "enum": ["built_in", "project_ignore", "profile_include", "profile_exclude"] },
+              "action": { "enum": ["include", "exclude"] },
+              "pattern": { "type": "string", "minLength": 1, "maxLength": 4096 }
+            }
+          }
+        },
+        "omissions": {
+          "type": "array",
+          "maxItems": 10000,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["pathClass", "ruleId", "count", "examples", "examplesTruncated"],
+            "properties": {
+              "pathClass": { "enum": ["vcs", "audit_output", "cache", "secret", "socket", "fifo", "device", "external_symlink", "ignored", "profile_excluded"] },
+              "ruleId": { "$ref": "#/$defs/name" },
+              "count": { "$ref": "#/$defs/nonNegativeInteger" },
+              "examples": { "type": "array", "maxItems": 16, "items": { "$ref": "#/$defs/relativePath" } },
+              "examplesTruncated": { "type": "boolean" }
+            }
+          }
+        }
+      }
+    },
+    "nodes": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 100000,
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/node" }
+    },
+    "edges": {
+      "type": "array",
+      "maxItems": 200000,
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/edge" }
+    },
+    "uncertainties": {
+      "type": "array",
+      "maxItems": 10000,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["subject", "reason", "evidenceLevel"],
+        "properties": {
+          "subject": { "$ref": "#/$defs/name" },
+          "reason": { "type": "string", "minLength": 1, "maxLength": 4096 },
+          "evidenceLevel": { "enum": ["documented", "discovered"] }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "name": { "type": "string", "minLength": 1, "maxLength": 256, "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/@+-]*$" },
+    "digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "nonNegativeInteger": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+    "relativePath": { "type": "string", "minLength": 1, "maxLength": 4096, "pattern": "^(?![A-Za-z]:)(?!/)(?!\\.\\.?$)(?!\\.\\.?/)(?!.*//)(?!.*\\/\\.\\.?(?:\\/|$))(?!.*\\\\)(?!.*[\\u0000-\\u001F\\u007F])(?!.*\\/$).+$" },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["detector", "basis", "path"],
+      "properties": {
+        "detector": { "$ref": "#/$defs/name" },
+        "basis": { "enum": ["declared", "inferred", "observed"] },
+        "path": { "$ref": "#/$defs/relativePath" },
+        "line": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 }
+      }
+    },
+    "node": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "type", "provenance"],
+      "properties": {
+        "id": { "$ref": "#/$defs/name" },
+        "type": { "enum": ["agent", "model_route", "tool", "mcp_server", "retrieval", "memory", "untrusted_source", "credential_boundary", "approval", "filesystem_boundary", "process_boundary", "network_boundary", "telemetry_sink", "persistence_sink", "external_destination", "openbox_sdk"] },
+        "provenance": { "type": "array", "minItems": 1, "maxItems": 64, "items": { "$ref": "#/$defs/provenance" } }
+      }
+    },
+    "edge": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["from", "to", "type", "reachability", "dataClass", "actor", "interception", "provenance", "uncertainty"],
+      "properties": {
+        "from": { "$ref": "#/$defs/name" },
+        "to": { "$ref": "#/$defs/name" },
+        "type": { "enum": ["calls", "reads", "writes", "routes_to", "uses_identity", "approves", "observes", "intercepts"] },
+        "reachability": { "type": "string", "minLength": 1, "maxLength": 1024 },
+        "dataClass": { "enum": ["public", "internal", "sensitive", "credential", "unknown"] },
+        "actor": { "type": ["string", "null"], "maxLength": 256 },
+        "interception": { "type": ["string", "null"], "maxLength": 512 },
+        "provenance": { "type": "array", "minItems": 1, "maxItems": 64, "items": { "$ref": "#/$defs/provenance" } },
+        "uncertainty": { "type": ["string", "null"], "maxLength": 4096 }
+      }
+    }
+  }
+}

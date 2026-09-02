@@ -1,0 +1,176 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "openbox.sdk-coverage/v1",
+  "title": "OpenBox SDK coverage v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["apiVersion", "kind", "projectModelDigest", "descriptor", "instrumentation", "exclusions", "gaps", "readiness"],
+  "properties": {
+    "apiVersion": { "const": "openbox.sdk-coverage/v1" },
+    "kind": { "const": "SDKCoverage" },
+    "projectModelDigest": { "$ref": "#/$defs/digest" },
+    "descriptor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "frameworkAdapter", "baseSDK", "framework"],
+      "properties": {
+        "id": { "const": "@openbox-ai/openbox-mastra-sdk@1.0.0+@openbox-ai/openbox-sdk-ts@1.0.1+@mastra/core@1.8.0" },
+        "frameworkAdapter": { "$ref": "#/$defs/frameworkAdapter" },
+        "baseSDK": { "$ref": "#/$defs/baseSDK" },
+        "framework": { "$ref": "#/$defs/framework" }
+      }
+    },
+    "instrumentation": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 256,
+      "contains": {
+        "type": "object",
+        "properties": {
+          "actionClass": { "const": "recordingTool" },
+          "expectation": { "const": "required" }
+        },
+        "required": ["actionClass", "expectation"]
+      },
+      "minContains": 1,
+      "maxContains": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["actionClass", "expectation", "observation", "eventCount", "evidence"],
+        "properties": {
+          "actionClass": { "type": "string", "minLength": 1, "maxLength": 256 },
+          "expectation": { "enum": ["required", "optional"] },
+          "observation": { "enum": ["observed", "missing", "excluded", "not_runnable"] },
+          "eventCount": { "$ref": "#/$defs/nonNegativeInteger" },
+          "evidence": { "type": "array", "maxItems": 64, "items": { "$ref": "#/$defs/digest" } }
+        },
+        "allOf": [
+          {
+            "if": { "type": "object", "properties": { "observation": { "const": "observed" } }, "required": ["observation"] },
+            "then": {
+              "type": "object",
+              "properties": {
+                "eventCount": { "type": "integer", "minimum": 1 },
+                "evidence": { "type": "array", "minItems": 1 }
+              }
+            },
+            "else": {
+              "type": "object",
+              "properties": {
+                "eventCount": { "type": "integer", "maximum": 0 },
+                "evidence": { "type": "array", "minItems": 1 }
+              }
+            }
+          }
+        ]
+      }
+    },
+    "exclusions": { "type": "array", "maxItems": 256, "items": { "$ref": "#/$defs/gap" } },
+    "gaps": { "type": "array", "maxItems": 256, "items": { "$ref": "#/$defs/gap" } },
+    "readiness": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "probeCount", "evidence", "reason"],
+      "properties": {
+        "status": { "enum": ["ready", "not_runnable", "inconclusive"] },
+        "probeCount": { "$ref": "#/$defs/nonNegativeInteger" },
+        "evidence": { "type": "array", "minItems": 1, "maxItems": 64, "items": { "$ref": "#/$defs/digest" } },
+        "reason": { "type": ["string", "null"], "maxLength": 4096 }
+      },
+      "allOf": [
+        {
+          "if": { "type": "object", "properties": { "status": { "const": "ready" } }, "required": ["status"] },
+          "then": {
+            "type": "object",
+            "properties": {
+              "probeCount": { "type": "integer", "minimum": 1 },
+              "reason": { "const": null }
+            }
+          },
+          "else": {
+            "type": "object",
+            "properties": {
+              "reason": { "type": "string", "minLength": 1, "maxLength": 4096 }
+            }
+          }
+        }
+      ]
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "type": "object",
+        "properties": {
+          "readiness": {
+            "type": "object",
+            "properties": { "status": { "const": "ready" } },
+            "required": ["status"]
+          }
+        },
+        "required": ["readiness"]
+      },
+      "then": {
+        "type": "object",
+        "properties": {
+          "instrumentation": {
+            "type": "array",
+            "not": {
+              "contains": {
+                "type": "object",
+                "properties": {
+                  "expectation": { "const": "required" },
+                  "observation": { "not": { "const": "observed" } }
+                },
+                "required": ["expectation", "observation"]
+              }
+            }
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "nonNegativeInteger": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+    "frameworkAdapter": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version"],
+      "properties": {
+        "name": { "const": "@openbox-ai/openbox-mastra-sdk" },
+        "version": { "const": "1.0.0" }
+      }
+    },
+    "baseSDK": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version"],
+      "properties": {
+        "name": { "const": "@openbox-ai/openbox-sdk-ts" },
+        "version": { "const": "1.0.1" }
+      }
+    },
+    "framework": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version"],
+      "properties": {
+        "name": { "const": "@mastra/core" },
+        "version": { "const": "1.8.0" }
+      }
+    },
+    "gap": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["surface", "classification", "reason", "evidence"],
+      "properties": {
+        "surface": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "classification": { "enum": ["missing", "disabled", "bypassed", "unknown", "unsupported", "not_applicable"] },
+        "reason": { "type": "string", "minLength": 1, "maxLength": 4096 },
+        "evidence": { "type": "array", "minItems": 1, "maxItems": 64, "items": { "$ref": "#/$defs/digest" } }
+      }
+    }
+  }
+}

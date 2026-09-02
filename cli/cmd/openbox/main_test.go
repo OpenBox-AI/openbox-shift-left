@@ -20,14 +20,17 @@ import (
 	"time"
 
 	"github.com/openbox-ai/openbox-shift-left/cli/internal/backend"
-	"github.com/openbox-ai/openbox-shift-left/cli/internal/devinit"
 	"github.com/openbox-ai/openbox-shift-left/client"
 )
 
 // fakeReg implements devinit.Registrar for the command-wiring tests.
 type fakeReg struct {
-	reg    *backend.Registration
-	create int
+	reg          *backend.Registration
+	create       int
+	profile      *backend.AuthProfile
+	profileErr   error
+	signingCalls []bool
+	signingErr   error
 }
 
 func (f *fakeReg) Create(context.Context, backend.CreateAgentRequest) (*backend.Registration, error) {
@@ -36,6 +39,19 @@ func (f *fakeReg) Create(context.Context, backend.CreateAgentRequest) (*backend.
 }
 func (f *fakeReg) FindByName(context.Context, string) (*backend.AgentSummary, error) {
 	return nil, nil
+}
+func (f *fakeReg) Profile(context.Context) (*backend.AuthProfile, error) {
+	if f.profileErr != nil {
+		return nil, f.profileErr
+	}
+	if f.profile != nil {
+		return f.profile, nil
+	}
+	return &backend.AuthProfile{OrgID: "org-test", IsAPIKeyAuth: true, Permissions: sharedControlPermissions()}, nil
+}
+func (f *fakeReg) SetSigningRequired(_ context.Context, _ string, required bool) error {
+	f.signingCalls = append(f.signingCalls, required)
+	return f.signingErr
 }
 
 // testApp builds an app with in-memory writers and a seam that fails loudly if a
@@ -49,7 +65,7 @@ func testApp(env map[string]string) (*app, *bytes.Buffer, *bytes.Buffer) {
 		stdout: &out,
 		stderr: &errb,
 		getenv: func(k string) string { return env[k] },
-		newRegistrar: func(_, _, _ string) devinit.Registrar {
+		newRegistrar: func(_, _, _ string) authRegistrar {
 			panic("newRegistrar should not be called in this path")
 		},
 	}
@@ -165,7 +181,7 @@ func TestInitWithoutCredentialsRefusesAndInstallsNothing(t *testing.T) {
 func TestInitDoesNotRegisterEvenWithAnOrgKey(t *testing.T) {
 	isolateHome(t)
 	a, _, errb := testApp(map[string]string{"OPENBOX_CONTROL_TOKEN": "obx_key_x"})
-	a.newRegistrar = func(_, _, _ string) devinit.Registrar {
+	a.newRegistrar = func(_, _, _ string) authRegistrar {
 		t.Error("init reached the registrar; registration belongs to `openbox auth`")
 		return &fakeReg{}
 	}
@@ -205,7 +221,7 @@ func TestRemovedSecretBackendFlagFailsLoudly(t *testing.T) {
 func TestConfigManualOnlyExitsTwo(t *testing.T) {
 	home := isolateHome(t)
 	seedCredentials(t)
-	a, _, errb := testApp(nil)
+	a, out, errb := testApp(nil)
 	// cursor's adapter is not built -> config-manual -> exit 2.
 	code := a.run([]string{"init", "--provider", "cursor"})
 	if code != exitConfigOnly {
@@ -213,6 +229,11 @@ func TestConfigManualOnlyExitsTwo(t *testing.T) {
 	}
 	if !strings.Contains(errb.String(), "note:") {
 		t.Errorf("expected a note on partial success, got %q", errb.String())
+	}
+	for _, want := range []string{"manual_required", "cli/internal/securityskill/bundles/openbox-security-evaluation/1.0.0", filepath.Join(".agents", "skills", "openbox-security-evaluation")} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("Cursor manual skill output missing %q: %q", want, out.String())
+		}
 	}
 	// The credentials seeded above are untouched: `init` reads them to verify the
 	// precondition and never rewrites them.
@@ -258,6 +279,13 @@ func TestClaudeCodeInstallsForRealExitsZero(t *testing.T) {
 	// Bundle + dev config materialized under the redirected HOME / config path.
 	if _, err := os.Stat(filepath.Join(home, ".claude", "plugins", "openbox-observe", ".claude-plugin", "plugin.json")); err != nil {
 		t.Errorf("plugin bundle not materialized: %v", err)
+	}
+	skillRoot := filepath.Join(home, ".claude", "skills", "openbox-security-evaluation")
+	if _, err := os.Stat(filepath.Join(skillRoot, "SKILL.md")); err != nil {
+		t.Errorf("security skill not installed: %v", err)
+	}
+	if !strings.Contains(out.String(), "action=installed version=1.0.0 digest=sha256:") {
+		t.Errorf("security skill result missing from output: %q", out.String())
 	}
 	// STORY-SL4-WIRE-2 AC3, proven through the real `init` front door: the
 	// running engine is placed at bin/openbox (providers.Lookup → os.Executable()
@@ -1246,6 +1274,12 @@ func TestCodexInstallsForRealExitsZero(t *testing.T) {
 	if err != nil {
 		t.Fatalf("hooks.json not written under CODEX_HOME: %v", err)
 	}
+	if _, err := os.Stat(filepath.Join(codexHome, "skills", "openbox-security-evaluation", "bundle.json")); err != nil {
+		t.Errorf("Codex security skill not installed under CODEX_HOME: %v", err)
+	}
+	if !strings.Contains(out.String(), "action=installed version=1.0.0 digest=sha256:") {
+		t.Errorf("security skill result missing from output: %q", out.String())
+	}
 	// The five wired events, invoking THIS engine (os.Executable() → the test
 	// binary path) as `hook codex <event>`.
 	for _, ev := range []string{"SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "SessionEnd"} {
@@ -1287,7 +1321,7 @@ func TestCodexDryRunWritesNothing(t *testing.T) {
 	if code != exitOK {
 		t.Fatalf("dry-run exit = %d", code)
 	}
-	for _, want := range []string{"OpenBox Codex hooks", "/hooks", "hook codex"} {
+	for _, want := range []string{"OpenBox Codex hooks", "/hooks", "hook codex", "Security skill DRY RUN", "action=installed", "version=1.0.0", "digest=sha256:"} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("dry-run plan missing %q:\n%s", want, out.String())
 		}

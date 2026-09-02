@@ -1,0 +1,1 @@
+{"catalog":"CWE","retrieved_at":"2026-08-26","selected":[{"id":"CWE-1426","title":"Improper Validation of Generative AI Output"},{"id":"CWE-1427","title":"Improper Neutralization of Input Used for LLM Prompting"}],"source_title":"Common Weakness Enumeration","source_url":"https://cwe.mitre.org/data/index.html","upstream_version":"4.20"}

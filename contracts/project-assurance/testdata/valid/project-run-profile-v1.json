@@ -1,0 +1,100 @@
+{
+  "apiVersion": "openbox.project-run-profile/v1",
+  "kind": "ProjectRunProfile",
+  "name": "mastra-baseline-local",
+  "application": {
+    "protocol": "http",
+    "listen": {
+      "host": "127.0.0.1",
+      "portEnvironment": "APP_PORT"
+    },
+    "readiness": {
+      "method": "GET",
+      "path": "/health",
+      "expectedStatus": 200,
+      "startupTimeoutMs": 30000,
+      "intervalMs": 200
+    },
+    "stimulus": {
+      "method": "POST",
+      "path": "/invoke",
+      "headers": {
+        "content-type": "application/json"
+      },
+      "bodyTemplate": {
+        "scenario": "{{scenario.id}}",
+        "marker": "{{run.marker}}",
+        "dependency_url": "{{fixture.poison.url}}",
+        "safe_sink_url": "{{fixture.sink.url}}"
+      },
+      "completion": {
+        "kind": "response",
+        "expectedStatuses": [200]
+      }
+    }
+  },
+  "fixtures": {
+    "poison": {
+      "urlEnvironment": "POISON_FIXTURE_URL"
+    },
+    "sink": {
+      "urlEnvironment": "SAFE_SINK_URL"
+    },
+    "model": {
+      "mode": "deterministic_local",
+      "urlEnvironment": "MODEL_BASE_URL"
+    }
+  },
+  "sdk": {
+    "descriptor": "@openbox-ai/openbox-mastra-sdk@1.0.0+@openbox-ai/openbox-sdk-ts@1.0.1+@mastra/core@1.8.0",
+    "requiredActionClasses": ["recordingTool"]
+  },
+  "environment": {
+    "generatedBindings": [
+      {
+        "name": "APP_PORT",
+        "source": "application.listen_port"
+      },
+      {
+        "name": "POISON_FIXTURE_URL",
+        "source": "fixture.poison_url"
+      },
+      {
+        "name": "SAFE_SINK_URL",
+        "source": "fixture.sink_url"
+      },
+      {
+        "name": "MODEL_BASE_URL",
+        "source": "fixture.model_url"
+      },
+      {
+        "name": "SCENARIO_MARKER",
+        "source": "run.marker"
+      }
+    ],
+    "static": [
+      {
+        "name": "APP_ENV",
+        "value": "security-test"
+      }
+    ]
+  },
+  "budgets": {
+    "maxProcesses": 32,
+    "maxRequests": 256,
+    "maxRequestBytes": 262144,
+    "maxDurationMs": 120000,
+    "maxStdoutBytes": 1048576,
+    "maxStderrBytes": 1048576,
+    "maxInputTokens": 32768,
+    "maxOutputTokens": 8192,
+    "maxCostUsd": "0.00",
+    "cleanupGraceMs": 3000
+  },
+  "retention": {
+    "mode": "redacted_digests",
+    "rawContent": "memory_until_finalization",
+    "persist": "redacted_projections_lengths_and_sha256",
+    "onRedactionFailure": "omit_and_mark_inconclusive"
+  }
+}

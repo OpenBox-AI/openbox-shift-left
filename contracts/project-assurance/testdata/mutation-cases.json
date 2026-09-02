@@ -1,0 +1,119 @@
+{
+  "project-model-v1.schema.json": {
+    "example": "project-model-v1.json",
+    "missingRequired": ["snapshot"],
+    "invalidEnum": { "path": ["nodes", 0, "type"], "value": "invented_node" },
+    "unsafeNumber": { "path": ["snapshot", "fileCount"], "value": 9007199254740992 },
+    "malformedDigest": { "path": ["snapshot", "digest"], "value": "sha256:ABC" },
+    "wrongType": { "path": ["project"], "value": "not-an-object" },
+    "adversarial": [
+      { "name": "git absence with present head", "changes": [{ "op": "set", "path": ["project", "git", "present"], "value": false }] },
+      { "name": "known Git head with unknown dirty state", "changes": [{ "op": "set", "path": ["project", "git", "dirty"], "value": null }] },
+      { "name": "volatile absolute project root", "changes": [{ "op": "set", "path": ["project", "root"], "value": "/tmp/project" }] },
+      { "name": "malformed git object id length", "changes": [{ "op": "set", "path": ["project", "git", "head"], "value": "0123456789abcdef0123456789abcdef012345678" }] },
+      { "name": "dot provenance path", "changes": [{ "op": "set", "path": ["nodes", 0, "provenance", 0, "path"], "value": "." }] },
+      { "name": "dot-prefixed provenance path", "changes": [{ "op": "set", "path": ["nodes", 0, "provenance", 0, "path"], "value": "./package.json" }] },
+      { "name": "backslash provenance path", "changes": [{ "op": "set", "path": ["nodes", 0, "provenance", 0, "path"], "value": "dir\\package.json" }] },
+      { "name": "nul provenance path", "changes": [{ "op": "set", "path": ["nodes", 0, "provenance", 0, "path"], "value": "bad\u0000path" }] }
+    ],
+    "semanticAdversarial": [
+      { "name": "duplicate node identity", "changes": [{ "op": "appendClone", "source": ["nodes", 0], "path": ["nodes"], "patch": { "type": "tool" } }] },
+      { "name": "dangling edge endpoint", "changes": [{ "op": "append", "path": ["edges"], "value": { "from": "sdk:mastra", "to": "missing:node", "type": "calls", "reachability": "fixture", "dataClass": "internal", "actor": null, "interception": null, "provenance": [{ "detector": "package-manifest", "basis": "declared", "path": "package.json" }], "uncertainty": null } }] },
+      { "name": "duplicate selection rule identity", "changes": [{ "op": "appendClone", "source": ["snapshot", "selectionRules", 0], "path": ["snapshot", "selectionRules"], "patch": { "pattern": "node_modules" } }] },
+      { "name": "omission references unknown rule", "changes": [{ "op": "set", "path": ["snapshot", "omissions", 0, "ruleId"], "value": "missing-rule" }] },
+      { "name": "unreported omission examples", "changes": [{ "op": "set", "path": ["snapshot", "omissions", 0, "count"], "value": 2 }] },
+      { "name": "unknown Git state without uncertainty", "changes": [{ "op": "set", "path": ["project", "git", "head"], "value": null }, { "op": "set", "path": ["project", "git", "dirty"], "value": null }] }
+    ]
+  },
+  "project-run-profile-v1.schema.json": {
+    "example": "project-run-profile-v1.json",
+    "missingRequired": ["budgets"],
+    "invalidEnum": { "path": ["retention", "mode"], "value": "raw" },
+    "unsafeNumber": { "path": ["budgets", "maxProcesses"], "value": 9007199254740992 },
+    "wrongType": { "path": ["application"], "value": "not-an-object" }
+  },
+  "sdk-coverage-v1.schema.json": {
+    "example": "sdk-coverage-v1.json",
+    "missingRequired": ["descriptor"],
+    "invalidEnum": { "path": ["instrumentation", 0, "observation"], "value": "assumed" },
+    "unsafeNumber": { "path": ["instrumentation", 0, "eventCount"], "value": 9007199254740992 },
+    "malformedDigest": { "path": ["projectModelDigest"], "value": "sha256:ABC" },
+    "wrongType": { "path": ["descriptor"], "value": "not-an-object" },
+    "adversarial": [
+      { "name": "ready without recordingTool", "changes": [{ "op": "set", "path": ["instrumentation", 0, "actionClass"], "value": "invented" }] },
+      { "name": "ready with missing required instrumentation", "changes": [{ "op": "set", "path": ["instrumentation", 0, "observation"], "value": "missing" }, { "op": "set", "path": ["instrumentation", 0, "eventCount"], "value": 0 }] }
+    ],
+    "semanticAdversarial": [
+      { "name": "duplicate action class", "changes": [{ "op": "appendClone", "source": ["instrumentation", 0], "path": ["instrumentation"], "patch": { "expectation": "optional" } }] }
+    ]
+  },
+  "sandbox-posture-v1.schema.json": {
+    "example": "sandbox-posture-v1.json",
+    "missingRequired": ["configurationDigest"],
+    "invalidEnum": { "path": ["overall"], "value": "documented" },
+    "unsafeNumber": { "path": ["limits", "probeCount"], "value": 9007199254740992 },
+    "malformedDigest": { "path": ["configurationDigest"], "value": "sha256:ABC" },
+    "wrongType": { "path": ["driver"], "value": "not-an-object" },
+    "adversarial": [
+      { "name": "qualified with failed parent probe", "changes": [{ "op": "set", "path": ["overall"], "value": "qualified" }, { "op": "set", "path": ["parent", "filesystemRead", "status"], "value": "failed" }] },
+      { "name": "missing required child capability", "changes": [{ "op": "delete", "path": ["child", "inheritance"] }] }
+    ]
+  },
+  "security-test-v1.schema.json": {
+    "example": "security-test-v1.json",
+    "missingRequired": ["predicate"],
+    "invalidEnum": { "path": ["preconditions", 0, "kind"], "value": "production_credential" },
+    "unsafeNumber": { "path": ["limits", "maxAttempts"], "value": 9007199254740992 },
+    "malformedDigest": { "path": ["projectModelDigest"], "value": "sha256:ABC" },
+    "wrongType": { "path": ["preconditions"], "value": {} },
+    "adversarial": [
+      { "name": "incomplete observation plan", "changes": [{ "op": "delete", "path": ["observationPlan", "receiver"] }] },
+      { "name": "mismatched blocked fact vocabulary", "changes": [{ "op": "set", "path": ["predicate", "outcomeFacts", "blocked", 1], "value": "sdk_applied_block" }] },
+      { "name": "caller-controlled marker source", "changes": [{ "op": "set", "path": ["marker", "source"], "value": "caller_supplied" }] }
+    ],
+    "semanticAdversarial": [
+      { "name": "unsupported scenario id", "changes": [{ "op": "set", "path": ["id"], "value": "ASI02-OTHER-001" }] },
+      { "name": "wrong finding binding", "changes": [{ "op": "set", "path": ["findingId"], "value": "finding-wrong" }] },
+      { "name": "causal invariant drift", "changes": [{ "op": "set", "path": ["invariant"], "value": "No causal ordering requirement remains." }] },
+      { "name": "duplicate required precondition", "changes": [{ "op": "appendClone", "path": ["preconditions"], "source": ["preconditions", 0], "patch": {} }] },
+      { "name": "missing executable marker format", "changes": [{ "op": "delete", "path": ["marker"] }] },
+      { "name": "widened scenario attempt budget", "changes": [{ "op": "set", "path": ["limits", "maxAttempts"], "value": 2 }] }
+    ]
+  },
+  "audit-pack-v1.schema.json": {
+    "example": "audit-pack-v1.json",
+    "missingRequired": ["objects"],
+    "invalidEnum": { "path": ["judgments", 0, "outcome"], "value": "safe" },
+    "unsafeNumber": { "path": ["objects", "project-model", "bytes"], "value": 9007199254740992 },
+    "malformedDigest": { "path": ["objects", "project-model", "cid"], "value": "sha256:ABC" },
+    "wrongType": { "path": ["objects"], "value": {} },
+    "adversarial": [
+      { "name": "duplicate schema identifier", "changes": [{ "op": "set", "path": ["schemas", 1, "id"], "value": "openbox.project-model/v1" }] },
+      { "name": "missing required manifest role", "changes": [{ "op": "delete", "path": ["objects", "report-sarif"] }] },
+      { "name": "omitted object without reason", "changes": [{ "op": "set", "path": ["objects", "sdk-events", "retention"], "value": "omitted" }] },
+      { "name": "redaction failure without evidence impact", "changes": [{ "op": "append", "path": ["limits", "omissions"], "value": { "subject": "sdk-events", "reason": "redaction_failed", "evidenceImpact": "none", "count": 1, "evidence": ["sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"] } }] },
+      { "name": "truncation omission with false flag", "changes": [{ "op": "append", "path": ["limits", "omissions"], "value": { "subject": "sdk-events", "reason": "truncated", "evidenceImpact": "inconclusive", "count": 1, "evidence": ["sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"] } }] },
+      { "name": "truncation flag without omission", "changes": [{ "op": "set", "path": ["limits", "truncated"], "value": true }] },
+      { "name": "baseline blocked judgment", "changes": [{ "op": "set", "path": ["judgments", 0, "outcome"], "value": "blocked" }, { "op": "set", "path": ["judgments", 0, "matchedFacts"], "value": ["openbox_decision_block", "sdk_applied_block_before_effect", "safe_sink_not_invoked", "complete_observation"] }, { "op": "set", "path": ["judgments", 0, "evidence"], "value": ["sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"] }] },
+      { "name": "blocked with sink contradiction", "changes": [{ "op": "set", "path": ["mode"], "value": "governed" }, { "op": "set", "path": ["judgments", 0, "outcome"], "value": "blocked" }, { "op": "set", "path": ["judgments", 0, "matchedFacts"], "value": ["openbox_decision_block", "sdk_applied_block_before_effect", "safe_sink_not_invoked", "complete_observation", "safe_sink_receipt"] }, { "op": "set", "path": ["judgments", 0, "evidence"], "value": ["sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"] }] }
+    ],
+    "semanticAdversarial": [
+      { "name": "role schema mismatch", "changes": [{ "op": "set", "path": ["objects", "project-model", "schema"], "value": null }] },
+      { "name": "role media type mismatch", "changes": [{ "op": "set", "path": ["objects", "project-model", "mediaType"], "value": "text/plain" }] },
+      { "name": "inline judgment digest mismatch", "changes": [{ "op": "set", "path": ["judgments", 0, "limitations", 0], "value": "Changed after the object reference was computed." }] }
+    ]
+  },
+  "policy-proposal-v1.schema.json": {
+    "example": "policy-proposal-v1.json",
+    "missingRequired": ["authority"],
+    "invalidEnum": { "path": ["reachability"], "value": "guaranteed" },
+    "unsafeNumber": { "path": ["rerun", "repetitions"], "value": 9007199254740992 },
+    "malformedDigest": { "path": ["baselinePackDigest"], "value": "sha256:ABC" },
+    "wrongType": { "path": ["candidate"], "value": "not-an-object" },
+    "adversarial": [
+      { "name": "runtime policy with blind reachability", "changes": [{ "op": "set", "path": ["reachability"], "value": "blind" }] },
+      { "name": "runtime policy with unavailable pre-effect field", "changes": [{ "op": "set", "path": ["requiredInterceptionEvidence", 0, "available"], "value": false }] },
+      { "name": "blocking rerun with ALLOW candidate", "changes": [{ "op": "set", "path": ["candidate", "expectedVerdict"], "value": "ALLOW" }] }
+    ]
+  }
+}

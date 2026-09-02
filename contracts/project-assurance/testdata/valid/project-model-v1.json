@@ -1,0 +1,58 @@
+{
+  "apiVersion": "openbox.project-model/v1",
+  "kind": "ProjectModel",
+  "project": {
+    "name": "mastra-mvp",
+    "root": ".",
+    "git": {
+      "present": true,
+      "head": "0123456789abcdef0123456789abcdef01234567",
+      "dirty": false
+    }
+  },
+  "snapshot": {
+    "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "selectionDigest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "fileCount": 12,
+    "totalBytes": 4096,
+    "selectionRules": [
+      {
+        "id": "exclude-secrets",
+        "source": "built_in",
+        "action": "exclude",
+        "pattern": ".env"
+      }
+    ],
+    "omissions": [
+      {
+        "pathClass": "secret",
+        "ruleId": "exclude-secrets",
+        "count": 1,
+        "examples": [".env"],
+        "examplesTruncated": false
+      }
+    ]
+  },
+  "nodes": [
+    {
+      "id": "sdk:mastra",
+      "type": "openbox_sdk",
+      "provenance": [
+        {
+          "detector": "package-manifest",
+          "basis": "declared",
+          "path": "package.json",
+          "line": 12
+        }
+      ]
+    }
+  ],
+  "edges": [],
+  "uncertainties": [
+    {
+      "subject": "runtime-registration",
+      "reason": "Dynamic registrations are not proven by passive inspection.",
+      "evidenceLevel": "discovered"
+    }
+  ]
+}

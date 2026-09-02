@@ -40,8 +40,9 @@ func controlTokenProblem(token string) string {
 			"  That key is what onboarding MINTS for the agent — it is never an input to it, and the\n"+
 			"  control plane will reject it.\n"+
 			"  Use an organization key instead: dashboard → Organization → API Keys (starts obx_key_),\n"+
-			"  with create:agent + read:agent to onboard. A Keycloak JWT from your dashboard session\n"+
-			"  also works. See docs/getting-started.md § Get the right credential.",
+			"  with the exact shared auth + evaluation permissions in docs/getting-started.md.\n"+
+			"  A Keycloak JWT can onboard but cannot be reused by project evaluation, so it is not\n"+
+			"  accepted by the shared authentication stage.",
 			devconfig.EnvControlToken, safePrefix(t))
 	case strings.Count(t, ".") == 2:
 		return "" // a JWT: plausible

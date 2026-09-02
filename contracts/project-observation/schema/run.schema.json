@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "ai.openbox.project-observation.run/v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "evaluation_id", "agent_id", "started_at", "completed_at", "duration_ms", "image", "argv", "environment_names", "openshell", "inference", "phases", "core", "effects", "exit_classification", "logs", "coverage_limitations", "cleanup", "backend", "organization_id", "selected_session_id", "collection_window"],
+  "properties": {
+    "schema": { "const": "ai.openbox.project-observation.run/v1" },
+    "evaluation_id": { "type": "string" },
+    "agent_id": { "type": "string", "format": "uuid" },
+    "started_at": { "type": "string", "format": "date-time" },
+    "completed_at": { "type": "string", "format": "date-time" },
+    "duration_ms": { "type": "integer", "minimum": 0 },
+    "image": { "type": "object" },
+    "argv": { "type": "array", "items": { "type": "string" } },
+    "environment_names": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
+    "openshell": { "type": "object" },
+    "inference": { "type": "object" },
+    "phases": { "type": "array" },
+    "core": { "type": "object" },
+    "effects": { "type": "object" },
+    "command_exit_code": { "type": "integer" },
+    "exit_classification": { "type": "string" },
+    "error": { "type": "string" },
+    "logs": { "type": "object" },
+    "coverage_limitations": { "type": "array", "items": { "type": "string" } },
+    "cleanup": { "type": "object" },
+    "backend": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["url", "api_contract"],
+      "properties": {
+        "url": { "const": "http://127.0.0.1:3000" },
+        "api_contract": { "const": "dashboard-session-activity/v1" }
+      }
+    },
+    "organization_id": { "type": "string" },
+    "selected_session_id": { "type": "string", "format": "uuid" },
+    "collection_window": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["started_at", "deadline"],
+      "properties": {
+        "started_at": { "type": "string", "format": "date-time" },
+        "deadline": { "type": "string", "format": "date-time" }
+      }
+    }
+  }
+}

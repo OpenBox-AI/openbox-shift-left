@@ -1,0 +1,441 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "openbox.project-run-profile/v1",
+  "title": "OpenBox project run profile v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "apiVersion",
+    "kind",
+    "name",
+    "application",
+    "fixtures",
+    "sdk",
+    "environment",
+    "budgets",
+    "retention"
+  ],
+  "properties": {
+    "apiVersion": {
+      "const": "openbox.project-run-profile/v1"
+    },
+    "kind": {
+      "const": "ProjectRunProfile"
+    },
+    "name": {
+      "$ref": "#/$defs/name"
+    },
+    "application": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["protocol", "listen", "readiness", "stimulus"],
+      "properties": {
+        "protocol": {
+          "const": "http"
+        },
+        "listen": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["host", "portEnvironment"],
+          "properties": {
+            "host": {
+              "const": "127.0.0.1"
+            },
+            "portEnvironment": {
+              "$ref": "#/$defs/bindingEnvironmentName"
+            }
+          }
+        },
+        "readiness": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["method", "path", "expectedStatus", "startupTimeoutMs", "intervalMs"],
+          "properties": {
+            "method": {
+              "const": "GET"
+            },
+            "path": {
+              "$ref": "#/$defs/httpPath"
+            },
+            "expectedStatus": {
+              "type": "integer",
+              "minimum": 200,
+              "maximum": 299
+            },
+            "startupTimeoutMs": {
+              "type": "integer",
+              "minimum": 100,
+              "maximum": 120000
+            },
+            "intervalMs": {
+              "type": "integer",
+              "minimum": 10,
+              "maximum": 5000
+            }
+          }
+        },
+        "stimulus": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["method", "path", "headers", "bodyTemplate", "completion"],
+          "properties": {
+            "method": {
+              "const": "POST"
+            },
+            "path": {
+              "$ref": "#/$defs/httpPath"
+            },
+            "headers": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["content-type"],
+              "properties": {
+                "content-type": {
+                  "const": "application/json"
+                }
+              }
+            },
+            "bodyTemplate": {
+              "$ref": "#/$defs/jsonValue"
+            },
+            "completion": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["kind", "expectedStatuses"],
+              "properties": {
+                "kind": {
+                  "const": "response"
+                },
+                "expectedStatuses": {
+                  "type": "array",
+                  "minItems": 1,
+                  "maxItems": 8,
+                  "uniqueItems": true,
+                  "items": {
+                    "type": "integer",
+                    "minimum": 200,
+                    "maximum": 599
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "fixtures": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["poison", "sink", "model"],
+      "properties": {
+        "poison": {
+          "$ref": "#/$defs/urlBinding"
+        },
+        "sink": {
+          "$ref": "#/$defs/urlBinding"
+        },
+        "model": {
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["mode", "urlEnvironment"],
+              "properties": {
+                "mode": {
+                  "const": "deterministic_local"
+                },
+                "urlEnvironment": {
+                  "$ref": "#/$defs/bindingEnvironmentName"
+                }
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "mode",
+                "urlEnvironment",
+                "bearerEnvironment",
+                "descriptor",
+                "provider",
+                "model",
+                "destination",
+                "pathFamily",
+                "method",
+                "followRedirects",
+                "dataPosture"
+              ],
+              "properties": {
+                "mode": {
+                  "const": "authorized_relay"
+                },
+                "urlEnvironment": {
+                  "const": "MODEL_BASE_URL"
+                },
+                "bearerEnvironment": {
+                  "const": "MODEL_API_KEY"
+                },
+                "descriptor": {
+                  "const": "ollama.chat.granite4.1-3b.6fd349357287"
+                },
+                "provider": {
+                  "const": "ollama"
+                },
+                "model": {
+                  "const": "granite4.1:3b"
+                },
+                "destination": {
+                  "const": "http://127.0.0.1:11434"
+                },
+                "pathFamily": {
+                  "const": "/api/chat"
+                },
+                "method": {
+                  "const": "POST"
+                },
+                "followRedirects": {
+                  "const": false
+                },
+                "dataPosture": {
+                  "const": "prompt_and_completion"
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    "sdk": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["descriptor", "requiredActionClasses"],
+      "properties": {
+        "descriptor": {
+          "const": "@openbox-ai/openbox-mastra-sdk@1.0.0+@openbox-ai/openbox-sdk-ts@1.0.1+@mastra/core@1.8.0"
+        },
+        "requiredActionClasses": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "const": "recordingTool"
+          }
+        }
+      }
+    },
+    "environment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["generatedBindings", "static"],
+      "properties": {
+        "generatedBindings": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 32,
+          "uniqueItems": true,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "source"],
+            "properties": {
+              "name": {
+                "$ref": "#/$defs/bindingEnvironmentName"
+              },
+              "source": {
+                "enum": [
+                  "application.listen_host",
+                  "application.listen_port",
+                  "fixture.poison_url",
+                  "fixture.sink_url",
+                  "fixture.model_url",
+                  "run.marker",
+                  "scenario.id"
+                ]
+              }
+            }
+          }
+        },
+        "static": {
+          "type": "array",
+          "maxItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "value"],
+            "properties": {
+              "name": {
+                "const": "APP_ENV"
+              },
+              "value": {
+                "const": "security-test"
+              }
+            }
+          }
+        }
+      }
+    },
+    "budgets": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "maxProcesses",
+        "maxRequests",
+        "maxRequestBytes",
+        "maxDurationMs",
+        "maxStdoutBytes",
+        "maxStderrBytes",
+        "maxInputTokens",
+        "maxOutputTokens",
+        "maxCostUsd",
+        "cleanupGraceMs"
+      ],
+      "properties": {
+        "maxProcesses": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 256
+        },
+        "maxRequests": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10000
+        },
+        "maxRequestBytes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 16777216
+        },
+        "maxDurationMs": {
+          "type": "integer",
+          "minimum": 100,
+          "maximum": 3600000
+        },
+        "maxStdoutBytes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 16777216
+        },
+        "maxStderrBytes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 16777216
+        },
+        "maxInputTokens": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000000
+        },
+        "maxOutputTokens": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000000
+        },
+        "maxCostUsd": {
+          "type": "string",
+          "pattern": "^(?:0|[1-9][0-9]{0,5})\\.[0-9]{2,6}$"
+        },
+        "cleanupGraceMs": {
+          "type": "integer",
+          "minimum": 100,
+          "maximum": 30000
+        }
+      }
+    },
+    "retention": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode", "rawContent", "persist", "onRedactionFailure"],
+      "properties": {
+        "mode": {
+          "const": "redacted_digests"
+        },
+        "rawContent": {
+          "const": "memory_until_finalization"
+        },
+        "persist": {
+          "const": "redacted_projections_lengths_and_sha256"
+        },
+        "onRedactionFailure": {
+          "const": "omit_and_mark_inconclusive"
+        }
+      }
+    }
+  },
+  "$defs": {
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$"
+    },
+    "bindingEnvironmentName": {
+      "type": "string",
+      "enum": [
+        "APP_HOST",
+        "APP_PORT",
+        "POISON_FIXTURE_URL",
+        "SAFE_SINK_URL",
+        "MODEL_BASE_URL",
+        "SCENARIO_MARKER",
+        "SCENARIO_ID"
+      ]
+    },
+    "credentialBindingEnvironmentName": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^(?!OPENBOX_)(?!.*(?:PRIVATE|SECRET|PASSWORD))(?=.*(?:TOKEN|KEY|CREDENTIAL))(?!(?:PATH|HOME|SHELL|TMPDIR|TMP|TEMP|BASH_ENV|ENV|CDPATH|GLOBIGNORE|IFS|NODE_OPTIONS|NODE_PATH|PYTHONPATH|PYTHONHOME|RUBYOPT|PERL5OPT|LD_[A-Z0-9_]*|DYLD_[A-Z0-9_]*|HTTP_PROXY|HTTPS_PROXY|ALL_PROXY|NO_PROXY|GIT_[A-Z0-9_]*|SSH_[A-Z0-9_]*|SSL_CERT_FILE|SSL_CERT_DIR)$)[A-Z_][A-Z0-9_]*$"
+    },
+    "httpPath": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256,
+      "pattern": "^/(?:(?!\\.{1,2}(?:/|$))[A-Za-z0-9._~-]+/)*(?!\\.{1,2}$)[A-Za-z0-9._~-]*$"
+    },
+    "urlBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["urlEnvironment"],
+      "properties": {
+        "urlEnvironment": {
+          "$ref": "#/$defs/bindingEnvironmentName"
+        }
+      }
+    },
+    "jsonValue": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "number",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        },
+        {
+          "type": "string",
+          "maxLength": 65536
+        },
+        {
+          "type": "array",
+          "maxItems": 1024,
+          "items": {
+            "$ref": "#/$defs/jsonValue"
+          }
+        },
+        {
+          "type": "object",
+          "maxProperties": 1024,
+          "additionalProperties": {
+            "$ref": "#/$defs/jsonValue"
+          }
+        }
+      ]
+    }
+  }
+}

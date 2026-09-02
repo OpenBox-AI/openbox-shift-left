@@ -26,8 +26,8 @@ func (a *app) runAuthRotate(f authFields, piped map[string]string, envPath, back
 		token = piped[devconfig.EnvControlToken]
 	}
 	if token == "" {
-		return a.errorf("rotation needs an organization credential.\n"+
-			"  Set %s (an obx_key_ organization key with update:agent) in the environment; it is never\n"+
+		return a.errorf("rotation needs the shared organization credential.\n"+
+			"  Set %s (the exact-scope obx_key_ key prepared for auth and project evaluation); it is never\n"+
 			"  accepted as a flag so it cannot leak via argv or shell history (INV-1).\n"+
 			"  No org key? Ask whoever has one to rotate for you, or run `openbox auth` without --rotate\n"+
 			"  and leave the agent id blank to register a fresh agent instead.",
@@ -40,13 +40,21 @@ func (a *app) runAuthRotate(f authFields, piped map[string]string, envPath, back
 	if backendURL == "" {
 		return a.errorf("no backend URL — pass --backend-url or set %s", devconfig.EnvBackendURL)
 	}
-
 	agentID := strings.TrimSpace(f.agentID)
 	if agentID == "" {
 		return a.errorf("rotation needs the agent id of the agent to re-issue credentials for.\n" +
 			"  It is on the agent's page in the dashboard, and `openbox doctor` prints the one this\n" +
 			"  machine is configured with. Rotation preserves that agent and its DID; registering a\n" +
 			"  new agent instead is `openbox auth` with a blank agent id.")
+	}
+	cl := backend.New(backendURL, token, "openbox-cli")
+	ctx := context.Background()
+	profile, err := cl.Profile(ctx)
+	if err != nil {
+		return a.errorf("validate %s permissions before rotation: %v", devconfig.EnvControlToken, err)
+	}
+	if problem := sharedControlProfileProblem(profile); problem != "" {
+		return a.errorf("%s", problem)
 	}
 
 	// The confirm gate precedes the REMOTE call, not just the write: by the time
@@ -67,9 +75,6 @@ func (a *app) runAuthRotate(f authFields, piped map[string]string, envPath, back
 			return exitOK
 		}
 	}
-
-	cl := backend.New(backendURL, token, "openbox-cli")
-	ctx := context.Background()
 
 	// Key first, then identity. A failure between the two leaves the agent with a
 	// working signing identity and a dead key, which `--rotate` can retry; the
