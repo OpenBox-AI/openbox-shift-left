@@ -8,6 +8,7 @@ Thumbs.db
 *~
 .idea/
 .vscode/
+.zed/
 
 # Build output (compiled Go binaries — built per-platform, never committed)
 bin/
