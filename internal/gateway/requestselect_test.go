@@ -17,6 +17,15 @@ import (
 // exactly this layout.
 func corpusShapedRequest(t *testing.T, messages int, perMessage int, newest string) string {
 	t.Helper()
+	return corpusShapedRequestWithTools(t, messages, perMessage, newest, 60)
+}
+
+// corpusShapedRequestWithTools is the same shape with the trailing `tools` block
+// sized explicitly. A real provider request carries tens of KB of tool schemas,
+// and that size is what decides what a window over the WHOLE body keeps: once
+// the trailing block alone fills the budget, such a window holds no conversation.
+func corpusShapedRequestWithTools(t *testing.T, messages, perMessage int, newest string, toolCount int) string {
+	t.Helper()
 	msgs := make([]json.RawMessage, 0, messages)
 	for i := range messages {
 		text := strings.Repeat("h", perMessage)
@@ -38,7 +47,7 @@ func corpusShapedRequest(t *testing.T, messages int, perMessage int, newest stri
 	if err != nil {
 		t.Fatalf("marshal messages: %v", err)
 	}
-	tools := strings.Repeat(`{"name":"Bash","description":"run a shell command","input_schema":{"type":"object"}},`, 60)
+	tools := strings.Repeat(`{"name":"Bash","description":"run a shell command","input_schema":{"type":"object"}},`, toolCount)
 	tools = "[" + strings.TrimSuffix(tools, ",") + "]"
 	return fmt.Sprintf(`{"model":"claude-opus-5","messages":%s,"system":[{"type":"text","text":%q}],"tools":%s,"max_tokens":32000,"stream":true}`,
 		msgsJSON, strings.Repeat("s", 8192), tools)
@@ -286,6 +295,266 @@ func TestASingleMessageLargerThanTheBudgetKeepsItsTail(t *testing.T) {
 	}
 	if len(got) >= 65536 {
 		t.Errorf("selection returned %d bytes, over the net", len(got))
+	}
+}
+
+// TestAnEscapingHeavyNewestMessageStillStoresConversation is the field defect
+// this phase exists to remove, and the one the suite could not see.
+//
+// 26.5% of measured model calls stored no conversation at all. The mechanism is
+// arithmetic, not structure: tailAsJSONString budgeted a FIXED 16 bytes for what
+// re-encoding would add, while json.Marshal expands `"` and `\` 2x and a literal
+// `<` or a control byte 6x -- so the element it returned outran the room it had
+// been measured against. The document then failed the belt check, and the
+// selection became a window over the WHOLE body: with `tools` trailing and tool
+// schemas larger than the budget, that window is boilerplate and nothing else.
+//
+// The suite missed it because every escaping case was a SINGLE-message body,
+// where a window over the body does hold the newest content. It takes a
+// corpus-shaped body -- many messages, `tools` trailing -- to tell the two apart.
+func TestAnEscapingHeavyNewestMessageStillStoresConversation(t *testing.T) {
+	const sentinel = "THE_NEWEST_TURN_XYZZY"
+	// An HTML paste as the newest turn: an entirely ordinary thing to put in a
+	// prompt, and every `<` of it is six bytes before this selector sees it.
+	newest := strings.Repeat("<", 20_000) + sentinel
+	body := corpusShapedRequestWithTools(t, 40, 2_600, newest, 700)
+
+	got := selectModelCallRequest(body)
+
+	if len(got) > selectionBudget {
+		t.Errorf("selection returned %d bytes, over the %d budget", len(got), selectionBudget)
+	}
+	if !strings.Contains(got, sentinel) {
+		t.Errorf("the newest turn is absent from %d stored bytes: the call that most needs "+
+			"evidence stored none of it", len(got))
+	}
+	if strings.Contains(got, "input_schema") {
+		t.Errorf("the stored value carries tool definitions, which is what a window over the " +
+			"whole body keeps when `tools` trails the conversation")
+	}
+}
+
+// TestTheOverBudgetTailEncodeFitsTheRoomItWasGiven pins the arithmetic on the
+// element itself, because the document-level assertions can pass for the wrong
+// reason: a fallback is bounded and valid JSON-or-marker too. The greedy fill
+// charges an element len(element)+1, so coming in under room-1 is what keeps the
+// belt check unreached and the conversation in the document.
+func TestTheOverBudgetTailEncodeFitsTheRoomItWasGiven(t *testing.T) {
+	for _, tc := range []struct{ name, filler string }{
+		{"angle brackets", "<"},                   // 6x: \u003c
+		{"ampersands", "&"},                       // 6x
+		{"quotes", `"`},                           // 2x
+		{"backslashes", `\`},                      // 2x
+		{"control characters", "\x01"},            // 6x
+		{"multibyte runes", "\u65e5\u672c\u8a9e"}, // 1x, but a tail cut lands mid-rune
+		{"plain ascii", "q"},                      // 1x, the ordinary case
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, room := range []int{96, 512, 4096, selectionBudget} {
+				message := json.RawMessage(strings.Repeat(tc.filler, room*8))
+				got := tailAsJSONString(message, room)
+
+				if len(got) > room-1 {
+					t.Errorf("room %d: the element is %d bytes, over the %d the greedy fill "+
+						"measured it against", room, len(got), room-1)
+				}
+				var decoded string
+				if err := json.Unmarshal(got, &decoded); err != nil {
+					t.Fatalf("room %d: the element is not a JSON string, so the document "+
+						"cannot parse: %v", room, err)
+				}
+				if !strings.HasPrefix(decoded, markerPrefix) {
+					t.Errorf("room %d: the element does not report that a cut happened: %q",
+						room, decoded[:min(len(decoded), 80)])
+				}
+			}
+		})
+	}
+}
+
+// TestATailEncodeWithNoRoomForTheNoteKeepsTheNote records the one input this
+// encode cannot satisfy, so the behaviour reads as chosen. Below about 72 bytes
+// the marker alone does not fit, and the element is returned marked and oversized
+// rather than silently empty -- the belt check then windows the document, which is
+// where an honest bounded answer comes from at that size.
+func TestATailEncodeWithNoRoomForTheNoteKeepsTheNote(t *testing.T) {
+	got := tailAsJSONString(json.RawMessage(strings.Repeat("q", 4096)), 8)
+
+	var decoded string
+	if err := json.Unmarshal(got, &decoded); err != nil {
+		t.Fatalf("the element is not a JSON string: %v", err)
+	}
+	if !strings.HasPrefix(decoded, markerPrefix) {
+		t.Errorf("an element with no room to explain itself was stored unmarked: %q", decoded)
+	}
+	if strings.Contains(decoded, "q") {
+		t.Errorf("the note was padded with content that did not fit: %q", decoded)
+	}
+}
+
+// literalMarkupBody assembles the body BY HAND, because every other fixture in
+// this package is built with json.Marshal -- which pre-escapes `<`, `>` and `&`
+// and is therefore structurally incapable of expressing the defect below. A real
+// provider body carries them LITERALLY: JavaScript's JSON.stringify does not
+// HTML-escape, and Go's json.Marshal does.
+func literalMarkupBody(t *testing.T, count, perMessage int, newest string) string {
+	t.Helper()
+	unit := "<p>a & b</p>"
+	filler := strings.Repeat(unit, perMessage/len(unit)+1)[:perMessage]
+	msgs := make([]string, 0, count)
+	for i := range count {
+		text := filler
+		if i == count-1 {
+			text = newest
+		}
+		msgs = append(msgs, `{"role":"user","content":[{"type":"text","text":"`+text+`"}]}`)
+	}
+	tools := strings.Repeat(`{"name":"Bash","description":"run it","input_schema":{"type":"object"}},`, 700)
+	return `{"model":"claude-opus-5","messages":[` + strings.Join(msgs, ",") +
+		`],"system":[{"type":"text","text":"` + strings.Repeat("s", 8192) + `"}],"tools":[` +
+		strings.TrimSuffix(tools, ",") + `],"stream":true}`
+}
+
+// TestLiteralMarkupInKeptMessagesDoesNotCostTheSelection is the SECOND expander,
+// and the one the plan's arithmetic denied existed.
+//
+// keepNewestMessages charges each element len(element)+1 against `room`,
+// measuring the RAW RawMessage. But json.Marshal re-escapes while it compacts a
+// RawMessage it re-emits, so a literal `<`, `>` or `&` inside a kept message
+// becomes a six-byte \uXXXX form in the final document: measured, 1,000 literal
+// `<` cost +5,015 bytes. The document therefore exceeds a budget the fill
+// believed it had met, the belt fires, and the selection is a window again --
+// no matter how well the over-budget tail encode behaves.
+//
+// So "kept elements are re-emitted verbatim, and compaction can only shrink" is
+// false, and this case exists to keep it false out loud.
+func TestLiteralMarkupInKeptMessagesDoesNotCostTheSelection(t *testing.T) {
+	const newest = "THE_NEWEST_TURN_WITH_MARKUP"
+	body := literalMarkupBody(t, 40, 2600, newest)
+
+	got := selectModelCallRequest(body)
+
+	if len(got) > selectionBudget {
+		t.Errorf("selection returned %d bytes, over the %d budget", len(got), selectionBudget)
+	}
+	if strings.HasPrefix(got, markerPrefix) {
+		t.Fatalf("a body whose only peculiarity is literal markup fell back to a window: %q",
+			got[:min(len(got), 160)])
+	}
+	if !strings.Contains(got, newest) {
+		t.Errorf("the newest turn is absent from %d stored bytes", len(got))
+	}
+	if strings.Contains(got, "input_schema") {
+		t.Error("the stored value carries tool definitions")
+	}
+}
+
+// TestAMixedDensityOverBudgetTailStillKeepsConversation the escaping in a tail is
+// not evenly spread, and the rescale is what has to survive that.
+//
+// The loop measures the expansion of the WHOLE tail, but the tail is cut from the
+// END. When the expanding bytes sit at the end -- a long plain paste that finishes
+// with markup -- the measured ratio under-predicts the retained suffix's own
+// density, so each round improves the estimate instead of landing it. Left to
+// proportional rounds alone the loop runs out and returns its note ALONE: a valid,
+// unmarked, budget-fitting document carrying no conversation whatsoever, which is
+// a worse answer than the marked fallback it replaced.
+func TestAMixedDensityOverBudgetTailStillKeepsConversation(t *testing.T) {
+	const room = 48_000
+	for _, tc := range []struct{ name, tail string }{
+		{"plain then markup", strings.Repeat("q", 150_000) + strings.Repeat("<", 20_000)},
+		{"plain then a little markup", strings.Repeat("q", 150_000) + strings.Repeat("<", 5_000)},
+		{"markup then plain", strings.Repeat("<", 20_000) + strings.Repeat("q", 150_000)},
+		{"uniform markup", strings.Repeat("<", 200_000)},
+		{"uniform plain", strings.Repeat("q", 200_000)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := tailAsJSONString(json.RawMessage(tc.tail), room)
+
+			if len(got) > room-1 {
+				t.Errorf("the element is %d bytes, over the %d it was measured against",
+					len(got), room-1)
+			}
+			var decoded string
+			if err := json.Unmarshal(got, &decoded); err != nil {
+				t.Fatalf("the element is not a JSON string: %v", err)
+			}
+			if kept := len(decoded); kept < 1000 {
+				t.Errorf("the element kept %d bytes of the message beyond its own note; a "+
+					"document that fits the budget while carrying no conversation is the "+
+					"unmarked-total-loss case, not a success", kept)
+			}
+		})
+	}
+}
+
+// TestAMarkedBodyThatRedactionGrewIsReWindowed pins the answer to the one
+// question this area left open: what bounds a FALLBACK after redaction has grown
+// it.
+//
+// Nothing did. Pass 1 falls back within the budget, redaction then grows the
+// bytes because a placeholder is longer than the short secret it replaces, and
+// the recovery selection hands a marked body straight back -- so 4 measured rows
+// reached the store over the budget, with only capRunes left to bound them. And
+// capRunes head-cuts, so the failure mode was losing the END of a tail window
+// while its head marker still said the tail was kept.
+func TestAMarkedBodyThatRedactionGrewIsReWindowed(t *testing.T) {
+	const newest = "THE END OF THE MARKED WINDOW"
+	// Pass 1's own output for an unbindable body: a marked tail window inside the
+	// budget, dense in SHORT secrets, which is what makes redaction grow it.
+	marked := selectModelCallRequest("not json " + strings.Repeat("pwd:aaaaaaaa ", 4000) + newest)
+	if !strings.HasPrefix(marked, markerPrefix) {
+		t.Fatalf("the fixture is not a marked body: %q", marked[:min(len(marked), 120)])
+	}
+	if len(marked) > selectionBudget {
+		t.Fatalf("pass 1 returned %d bytes, already over the %d budget", len(marked), selectionBudget)
+	}
+
+	got := captureRequestBody(marked)
+
+	if len(got) > selectionBudget {
+		t.Errorf("stored %d bytes, over the %d budget: the selector returns a marked body "+
+			"untouched, so nothing re-trimmed what redaction grew", len(got), selectionBudget)
+	}
+	if !strings.HasPrefix(got, markerPrefix) {
+		t.Errorf("the re-cut took the marker off, leaving an unmarked window: %q",
+			got[:min(len(got), 120)])
+	}
+	if !strings.HasSuffix(got, newest) {
+		t.Errorf("the re-cut kept the head, so the marker's claim that the tail was kept is "+
+			"now false; last 80 bytes: %q", got[max(0, len(got)-80):])
+	}
+}
+
+// TestAReasonStringCannotMoveTheMarkerBoundary the marked-body convention is a
+// prefix ending at the first `]`, and rewindowMarkedBody recovers the boundary by
+// finding it. Today's four reason strings contain no `]`, which makes the parse
+// correct by luck rather than by construction -- and Go's own JSON syntax errors
+// quote the offending character in brackets, so folding one into a reason is an
+// obvious improvement that would silently corrupt the marker.
+func TestAReasonStringCannotMoveTheMarkerBoundary(t *testing.T) {
+	const newest = "THE TAIL OF THE BODY"
+	marked := fallbackWindow(strings.Repeat("z", 200_000)+newest,
+		`invalid character ']' looking for beginning of value`)
+
+	if !strings.HasPrefix(marked, markerPrefix) {
+		t.Fatalf("not marked: %q", marked[:min(len(marked), 120)])
+	}
+	end := strings.IndexByte(marked, ']')
+	if end < 0 {
+		t.Fatal("the marker has no close bracket at all")
+	}
+	if !strings.HasSuffix(marked[:end+1], "]") || strings.Contains(marked[:end+1], "invalid character ')' looking") == false {
+		t.Errorf("the first `]` is not the marker's own terminator; marker read as %q", marked[:end+1])
+	}
+	// The round trip that actually matters: re-windowing must keep the marker and
+	// the tail rather than cut inside the reason text.
+	got := rewindowMarkedBody(marked + strings.Repeat("q", selectionBudget))
+	if !strings.HasPrefix(got, markerPrefix) {
+		t.Errorf("the re-window lost the marker: %q", got[:min(len(got), 120)])
+	}
+	if len(got) > selectionBudget {
+		t.Errorf("the re-window returned %d bytes, over the %d budget", len(got), selectionBudget)
 	}
 }
 

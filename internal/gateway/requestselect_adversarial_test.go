@@ -14,20 +14,22 @@ import (
 
 // TestJSONEscapingCannotBlowTheBudget is the arithmetic hole worth checking by
 // hand rather than by reasoning. json.Marshal escapes `<`, `>` and `&` to their
-// six-byte \uXXXX forms, so re-encoding a tail as a JSON string can expand it 6x,
-// and tailAsJSONString budgets only 16 bytes for escaping. A message body full of
-// those characters -- an HTML paste, which is an entirely ordinary thing to put in
-// a prompt -- therefore overruns the room it was given. The belt check in
-// selectModelCallRequest is what must catch it.
+// six-byte \uXXXX forms, so re-encoding a tail as a JSON string can expand it 6x.
+// A message full of those characters -- an HTML paste, which is an entirely
+// ordinary thing to put in a prompt -- is the input a fixed escaping allowance
+// cannot survive.
 //
-// Measured outcome, recorded so the behaviour reads as chosen rather than as a
-// near miss: an escaping-heavy over-budget message FALLS BACK to a marked tail
-// window at exactly the budget, where the same body of plain bytes selects into
-// the structured document. The fallback is the right answer here -- for a
-// single-message body the tail window IS the newest content, and it is marked,
-// bounded and valid JSON-or-marker. Sizing tailAsJSONString for the worst case
-// instead would divide the kept tail by six on every ordinary body to serve this
-// one.
+// What this comment used to say, and why it was wrong. tailAsJSONString reserved
+// 16 bytes for the re-encode, and the resulting FALLBACK was recorded here as the
+// chosen answer on the grounds that "for a single-message body the tail window IS
+// the newest content". That is true only of this test's own body. 65.5% of corpus
+// bodies put `tools` after `messages`, so the same fallback over one of those
+// stores tool boilerplate and no conversation at all -- measured on 26.5% of live
+// model calls. Worst-case sizing stays rejected for the reason it always was: it
+// would divide the kept tail by six on every ordinary body to serve the
+// pathological one. What ships instead is a measure-and-rescale encode, so these
+// bodies now SELECT rather than fall back, and the case that tells those two
+// outcomes apart is TestAnEscapingHeavyNewestMessageStillStoresConversation.
 func TestJSONEscapingCannotBlowTheBudget(t *testing.T) {
 	for _, tc := range []struct{ name, filler string }{
 		{"angle brackets", "<"},
@@ -158,6 +160,79 @@ func TestDuplicateMessagesKeysTakeTheOneTheProviderWillUse(t *testing.T) {
 
 // TestSelectionNeverPanics belt across the whole surface, because a panic in this
 // function is a model call that does not happen.
+// TestAnOversizedModelDoesNotCostTheConversation `model` was copied verbatim
+// because a model id is short. It is short in every honest request, and this
+// selector's entire subject is the request that is not honest.
+//
+// Uncapped, one oversized `model` drives keepNewestMessages' `room` negative, so
+// no message fits, the belt fires, and the window is over a document that field
+// dominates. A trivially small turn is then absent from all 49,152 stored bytes:
+// the "stores boilerplate instead of conversation" defect, reached through the one
+// top-level field that had no bound.
+func TestAnOversizedModelDoesNotCostTheConversation(t *testing.T) {
+	const newest = "SHOULD_SURVIVE_AN_OVERSIZED_MODEL"
+	body := `{"model":"` + strings.Repeat("m", 60_000) + `","messages":[{"role":"user","content":"` + newest + `"}]}`
+
+	got := selectModelCallRequest(body)
+
+	if len(got) > selectionBudget {
+		t.Errorf("selection returned %d bytes, over the %d budget", len(got), selectionBudget)
+	}
+	if !strings.Contains(got, newest) {
+		t.Errorf("a 16-byte turn was lost to a 60 KB model field; %d bytes stored and none of "+
+			"them the conversation", len(got))
+	}
+}
+
+// TestASubstitutedTailIsReportedInTheNote a single over-budget message is
+// rewritten into a marked string: its role and content object are gone. The
+// element says so, but the DOCUMENT must too -- otherwise the rewrite counts as
+// len(keep) == len(messages), takes the "nothing was dropped" exit, and the note
+// is absent from a document that lost most of a message. Loss is acceptable;
+// unreported loss is what this file exists to prevent.
+func TestASubstitutedTailIsReportedInTheNote(t *testing.T) {
+	body := `{"model":"m","messages":[{"role":"user","content":"` + strings.Repeat("q", 200_000) + `"}]}`
+
+	got := selectModelCallRequest(body)
+	if strings.HasPrefix(got, markerPrefix) {
+		t.Fatalf("expected a selected document, got a fallback: %q", got[:min(len(got), 120)])
+	}
+
+	var doc struct {
+		Selection *selectionNote `json:"openbox_selection"`
+	}
+	if err := json.Unmarshal([]byte(got), &doc); err != nil {
+		t.Fatalf("not valid JSON: %v", err)
+	}
+	if doc.Selection == nil {
+		t.Fatal("the document reports no loss at all, yet its only message was replaced by a " +
+			"marked string; a reader is told nothing went")
+	}
+	if doc.Selection.OriginalBytes != len(body) {
+		t.Errorf("original_bytes = %d, want the body's %d", doc.Selection.OriginalBytes, len(body))
+	}
+}
+
+// TestAMarkerTooLargeForTheBudgetIsStillBounded the decode step's own markers can
+// have no body after them -- the reason names an unusable Content-Encoding and
+// nothing follows. Such a marker still has to be bounded here, because the only
+// bound left downstream is capRunes, which head-cuts and would take the closing
+// bracket and the explanation with it.
+func TestAMarkerTooLargeForTheBudgetIsStillBounded(t *testing.T) {
+	huge := markerPrefix + "not captured; the body was content-encoded " + strings.Repeat("z", 90_000) + "]"
+
+	got := rewindowMarkedBody(huge)
+
+	if len(got) > selectionBudget {
+		t.Errorf("a %d-byte marker with no payload passed through at %d bytes, over the %d "+
+			"budget; capRunes would head-cut it and invalidate its own claim",
+			len(huge), len(got), selectionBudget)
+	}
+	if !strings.HasPrefix(got, markerPrefix) {
+		t.Errorf("the bound took the marker prefix off: %q", got[:min(len(got), 80)])
+	}
+}
+
 func TestSelectionNeverPanics(t *testing.T) {
 	defer func() {
 		if r := recover(); r != nil {

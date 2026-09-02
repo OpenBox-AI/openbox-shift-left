@@ -79,12 +79,20 @@ func captureBody(body string) string {
 	if body == "" {
 		return ""
 	}
+	return capRunes(clampAndRedact(body))
+}
+
+// clampAndRedact is the prefix both funnels share: bound what the redactor is
+// asked to scan, keep that cut on a rune boundary, then redact. captureRequestBody
+// documents itself as differing from captureBody "by one step", and sharing this is
+// what makes that claim structural rather than a convention two copies can drift
+// out of -- the bounds tests only ever exercised one of the copies.
+func clampAndRedact(body string) string {
 	if len(body) > maxCaptureInputBytes {
 		body = body[:maxCaptureInputBytes]
 	}
-	body = trimPartialRune(body)
-	redacted, _, _ := bodyRedactor.RedactText(body)
-	return capRunes(redacted)
+	redacted, _, _ := bodyRedactor.RedactText(trimPartialRune(body))
+	return redacted
 }
 
 // captureRequestBody is the request path's funnel. It differs from captureBody by
@@ -110,18 +118,23 @@ func captureBody(body string) string {
 //
 // One pass suffices: the second selection measures already-redacted bytes, so
 // nothing can grow after it. That makes both downstream caps unreachable rather
-// than merely unlikely.
+// than merely unlikely -- but only once the marked case is handled too, because
+// the selector returns a marked body unchanged and redaction can have grown that
+// one past the budget as well. rewindowMarkedBody is what closes it; without it,
+// 4 measured rows reached the store at 49,164-49,232 bytes.
 func captureRequestBody(body string) string {
 	if body == "" {
 		return ""
 	}
-	if len(body) > maxCaptureInputBytes {
-		body = body[:maxCaptureInputBytes]
-	}
-	body = trimPartialRune(body)
-	redacted, _, _ := bodyRedactor.RedactText(body)
+	redacted := clampAndRedact(body)
 	if len(redacted) > selectionBudget {
 		redacted = selectModelCallRequest(redacted)
+		// A MARKED body comes back from there untouched, so it can still be over
+		// the budget -- and the only bound left would be capRunes, which head-cuts
+		// and would take the end off a tail window. Re-window it, marker intact.
+		if len(redacted) > selectionBudget {
+			redacted = rewindowMarkedBody(redacted)
+		}
 	}
 	return capRunes(redacted)
 }
