@@ -288,6 +288,9 @@ func (s Spool) drainRotated(ctx context.Context, basePath, file string, fn Flush
 	// refused spent an attempt; held did not. Keeping them apart is the fix: one
 	// file carries one attempt number in its name, so two meanings need two files.
 	var refused, held [][]byte
+	// Counted rather than recorded line by line, for the same reason refused and
+	// held are: one drain pass leaves one account of what it lost.
+	unbuildable := 0
 	var stopped error
 	for i, line := range lines {
 		if ctx.Err() != nil {
@@ -311,7 +314,13 @@ func (s Spool) drainRotated(ctx context.Context, basePath, file string, fn Flush
 		case err == nil:
 			n++
 		case errors.Is(err, client.ErrUnbuildable):
-			// Never sent, and re-sending it verbatim cannot help.
+			// Never sent, and re-sending it verbatim cannot help, so it is dropped
+			// here rather than carried -- but counted, and recorded after the loop
+			// under its OWN reason: this is a defect on the client side, and filing
+			// it as "past N delivery attempts" would read as server pressure and
+			// send an investigation to the wrong side of the wire. Loss is
+			// acceptable; loss no record survives is what this file exists to stop.
+			unbuildable++
 		case errors.Is(err, client.ErrRefused):
 			// The server judged THIS event and said no: the only thing that may
 			// spend one of its attempts.
@@ -328,6 +337,9 @@ func (s Spool) drainRotated(ctx context.Context, basePath, file string, fn Flush
 	// break, and the caller still has to hear the pass was cut short.
 	if stopped == nil {
 		stopped = ctx.Err()
+	}
+	if unbuildable > 0 {
+		s.recordDiscard(basePath, unbuildable, "the client could not build the event for delivery")
 	}
 	s.carryOver(basePath, refused, held, attempt, born)
 	return n, stopped
