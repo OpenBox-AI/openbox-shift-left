@@ -23,6 +23,9 @@ func electionEmitter(t *testing.T, elected func() bool) (*Emitter, hookflow.Spoo
 		DID:     func() string { return testDID },
 		Warn:    func(format string, args ...any) { fmt.Fprintf(&warnings, format+"\n", args...) },
 		Elected: elected,
+		// A NAMED other lane, which is the healthy not-elected state. The unnamed
+		// one is a routing gap and has its own test.
+		ElectedName: func() string { return string(LaneGateway.Name) },
 	}
 	return em, spool, &warnings
 }

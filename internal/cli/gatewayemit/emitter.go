@@ -62,6 +62,15 @@ type Emitter struct {
 	// ElectionProblem reports why the election could not be RESOLVED, or "".
 	ElectionProblem func() string
 
+	// ElectedName is WHICH lane the election named, "" when it named none.
+	//
+	// Elected() being false has two causes and one is healthy: another lane won,
+	// and is emitting. If it named NOBODY -- what a settings rewrite leaves --
+	// then no lane emits at all while this relay is holding the call. Without the
+	// name those are indistinguishable, and the second was skipped quietly under a
+	// log line asserting a producer that does not exist. Nil ⇒ unknown.
+	ElectedName func() string
+
 	mu                 sync.Mutex
 	lastBadSessionWarn time.Time
 	lastNoSessionWarn  time.Time
@@ -71,6 +80,7 @@ type Emitter struct {
 	lastNoDIDWarn          time.Time
 	lastNoElectionWarn     time.Time
 	lastUndecidedWarn      time.Time
+	lastNoRoutedLaneWarn   time.Time
 	cachedDID              string
 	fallbackSeq            uint64
 }
@@ -80,6 +90,15 @@ func (e *Emitter) electionProblem() string {
 		return ""
 	}
 	return e.ElectionProblem()
+}
+
+// electedName reports the lane the election named. The bool is whether the
+// question could be ANSWERED, which is not the same as the answer being empty.
+func (e *Emitter) electedName() (string, bool) {
+	if e.ElectedName == nil {
+		return "", false
+	}
+	return e.ElectedName(), true
 }
 
 func (e *Emitter) noSessionWarnClock(class PathClass) *time.Time {
@@ -144,6 +163,21 @@ func (e *Emitter) Emit(ctx context.Context, c gateway.Captured) {
 				"being DROPPED -- which is NOT the same as another lane winning. Re-run `openbox "+
 				"init` so the unit carries --settings, or pass --elected. The model calls "+
 				"themselves are unaffected.", problem)
+			return
+		}
+		if name, known := e.electedName(); known && name == "" {
+			// Resolved cleanly, and named nobody, while this relay is holding a call:
+			// a routing gap, not another lane's turn. The old code took the skip
+			// below and logged another lane as the producer, the one thing that
+			// cannot be true here.
+			e.vlog("  capture: DROPPED; the election names no producer, yet this relay observed the call")
+			e.warnThrottled(&e.lastNoRoutedLaneWarn, "openbox: this relay is observing model calls but "+
+				"the tool's settings route NO lane, so no lane is this machine's elected producer and "+
+				"captured model calls are being DROPPED by every lane. Something rewrote the settings "+
+				"file after install; a running tool keeps the environment it started with, so this is "+
+				"invisible from inside the session. `openbox doctor` names the missing keys and "+
+				"`openbox init --provider claude-code --full` rewrites them. The model calls "+
+				"themselves are unaffected.")
 			return
 		}
 		e.vlog("  capture: SKIPPED; another lane is this machine's elected model-call producer")

@@ -62,6 +62,8 @@ func (a *app) runTransport(args []string) int {
 		// Not derivable from Elected(): a false there means either "another lane
 		// won" or "nothing could be read", and only the second is a defect.
 		ElectionProblem: electionProblemFn(settingsPath, elected),
+		// Which lane, not just whether this one: "nobody" is a routing gap.
+		ElectedName: electedNameFn(settingsPath, activation.LaneTransport, elected),
 	}
 	if *verbose {
 		em.Verbose = logger.Printf

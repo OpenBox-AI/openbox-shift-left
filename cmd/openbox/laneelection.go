@@ -26,6 +26,20 @@ func electedFn(settingsPath string, lane activation.Lane, override *bool) func()
 	}
 }
 
+// electedNameFn reports WHICH lane the election named, "" for none.
+//
+// The emitter needs this to tell "another lane won" -- healthy, and quiet -- from
+// "the settings route no lane at all", where nothing emits and a relay holding a
+// call is a routing gap worth saying out loud.
+func electedNameFn(settingsPath string, lane activation.Lane, override *bool) func() string {
+	return func() string {
+		if override != nil && *override {
+			return string(lane) // forced by the operator; this lane is the producer
+		}
+		return string(activation.ResolveElection(settingsPath).Elected)
+	}
+}
+
 // electionProblemFn reports why the election could not be decided, or "".
 func electionProblemFn(settingsPath string, override *bool) func() string {
 	return func() string {
