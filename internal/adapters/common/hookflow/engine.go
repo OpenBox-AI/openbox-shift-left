@@ -204,12 +204,13 @@ func (e *Engine) FlushOrSweep(ctx context.Context, sessionID string, em Emitter)
 // a line count and an unlink per stale file -- and unrelated to the flush budget.
 const retireBudget = 5 * time.Second
 
-// Retire deletes spool files too old to deliver, loudly.
+// Retire deletes spool files too old to deliver, loudly. ctx bounds it per file
+// and not merely on entry, which is what makes retireBudget an actual bound.
 func (e *Engine) Retire(ctx context.Context) (int, error) {
 	if ctx.Err() != nil {
 		return 0, ctx.Err()
 	}
-	retired, err := e.speaking().RetireStale(time.Now(), RetireSpoolAfter)
+	retired, err := e.speaking().RetireStale(ctx, time.Now(), RetireSpoolAfter)
 	for _, r := range retired {
 		e.logf("spool: RETIRED %s: past the %d-day retention age, the events in it were never delivered "+
 			"and are now gone", r, int(RetireSpoolAfter.Hours()/24))

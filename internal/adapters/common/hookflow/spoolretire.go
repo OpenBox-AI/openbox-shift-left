@@ -1,6 +1,7 @@
 package hookflow
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -50,7 +51,13 @@ func (r Retired) String() string {
 	return fmt.Sprintf("%s (%d event(s), %d days old)", r.Name, r.Events, int(r.Age.Hours()/24))
 }
 
-func (s Spool) RetireStale(now time.Time, age time.Duration) ([]Retired, error) {
+// RetireStale deletes spool files past `age`.
+//
+// ctx is honoured per file, not merely on entry, or the budget its caller builds
+// bounds nothing: a ReadDir plus a lock, a stat, a full-file line count and an
+// unlink per stale file runs as long as the directory is deep, and retireOne's
+// flock can stall behind a concurrent drain.
+func (s Spool) RetireStale(ctx context.Context, now time.Time, age time.Duration) ([]Retired, error) {
 	entries, err := os.ReadDir(s.Dir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -61,6 +68,10 @@ func (s Spool) RetireStale(now time.Time, age time.Duration) ([]Retired, error) 
 	var out []Retired
 	var errs []error
 	for _, e := range entries {
+		if ctx.Err() != nil {
+			errs = append(errs, fmt.Errorf("spool retire: %w", ctx.Err()))
+			break
+		}
 		name := e.Name()
 		if e.IsDir() || !strings.HasSuffix(name, ".jsonl") || strings.Contains(name, ".flushing.") {
 			continue
