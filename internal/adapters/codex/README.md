@@ -93,8 +93,8 @@ Codex injects `CODEX_THREAD_ID` into **every** tool/shell exec environment, so
 the shared prepare-commit-msg hook (`internal/adapters/common/git`) stamps
 `OpenBox-Session:` directly from the env; highest precedence, **no liveness
 registry** (the CC mechanism stays untouched and CC sessions never set the var).
-Ambient hook install on SessionStart is gated by `openbox init
---install-git-hook`, exactly like CC. Commits typed in the user's own terminal
+Ambient hook install on SessionStart is on by default and opted out of with
+`OPENBOX_INSTALL_GIT_HOOK=false`, exactly like CC. Commits typed in the user's own terminal
 are an owner decision (deferred).
 
 ## Credentials & config (INV-1)

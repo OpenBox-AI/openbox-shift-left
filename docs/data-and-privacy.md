@@ -224,7 +224,7 @@ value and where it came from.
 > **Redaction at source is not implemented yet.** The server-side Guardrail
 > redaction layer is not wired anywhere in this product. Local secret detection is
 > the only control on content in transit, and what it catches is
-> [measured, not assumed](#what-the-scanner-catches--and-where-it-stops). If that
+> [measured, not assumed](#what-the-scanner-catches-and-where-it-stops). If that
 > matters for your data, run with capture off.
 >
 > The asymmetry that used to live here; every content class scanned except the
@@ -433,9 +433,8 @@ Both are readable only by you.
 |---|---|---|
 | `.env` | `~/.openbox/` | **your credentials**, in plaintext, `0600`; see below |
 | `dev.json` | `~/.openbox/` | non-secret coordinates and your posture. No credentials |
-| `approver.json` | `~/.openbox/` | approver config, if you run one. No credentials |
-| `gateway.log` | `~/.openbox/` | the gateway daemon's stdio, with `--gateway` only. Diagnostics; that it started, and its throttled warnings that it is recording nothing. Not a copy of relayed traffic |
-| `gateway-prior-env.json` | `~/.openbox/` | the one `ANTHROPIC_BASE_URL` the gateway install displaced, so `--remove-gateway` can restore your org's own relay instead of deleting it. A URL, no credential |
+| `gateway.log` | `~/.openbox/` | the gateway daemon's stdio, only on a machine that ran an older gateway install. Diagnostics; that it started, and its throttled warnings that it is recording nothing. Not a copy of relayed traffic |
+| `gateway-prior-env.json` | `~/.openbox/` | the one `ANTHROPIC_BASE_URL` an older gateway install displaced, so retiring or removing it restores your org's own relay instead of deleting it. A URL, no credential |
 | `telemetry.log`, `transport.log` | `~/.openbox/` | the same, for the other two lanes. They exist for the same reason: launchd sends a daemon's stdio to `/dev/null` by default, and a throttled warning is the only signal that a perfectly working relay is recording nothing |
 | `activation.json` | `~/.openbox/` | `0600`. Per lane: the environment keys OpenBox wrote into the tool's settings, and **the values that were there first**, with a before/after SHA-256. It is what lets a removal restore your own relay or corporate proxy key by key instead of truncating a settings file. No credentials |
 | `transport-ca.pem`, `transport-ca.key` | `~/.openbox/` | **a certificate authority and its private key**, on any machine whose install brought the transport lane up. Generated once on this machine, never transmitted, and name-constrained at generation to the single intercepted host; so a leaked key cannot mint a usable certificate for anything else. It has no more at-rest protection than `.env` does: anything running as you can read it, and with it impersonate that one host to this machine. `openbox uninstall` deletes it rather than leaving it behind a relay that is gone |
@@ -501,7 +500,7 @@ is larger than the table above can show in one row.
   the same conversation a real call does, minus the reply, and the tool fires one
   on every keystroke-triggered recount -- so attaching bodies there would egress
   your whole conversation repeatedly for an event that describes no work.
-- **`--telemetry` sends no content whatsoever.** It receives the tool's own
+- **The telemetry lane sends no content whatsoever.** It receives the tool's own
   OpenTelemetry export and binds exactly one record type to seven values: the
   model id, four token counts, a duration and one request id. No cost; the
   server derives that from a pricing table, and fabricating it here would invent

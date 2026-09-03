@@ -147,10 +147,9 @@ What that means for evidence: a signed event or commit attestation proves
 *origin-of-config*, a machine holding this agent's key produced it, not
 tamper-resistance against you or against the agent you run.
 
-## 4. Govern a project
+## 4. Govern this machine
 
 ```bash
-cd ~/code/my-project
 openbox init --provider claude-code
 ```
 
@@ -158,12 +157,14 @@ That command:
 
 - Installs the Claude Code plugin into `~/.claude/plugins/openbox-observe` and
   copies the engine into it;
-- Merges the hook entries into `./.claude/settings.local.json`, so the next
-  session **in this directory** is governed. Hooks you added yourself are left
-  alone; an OpenBox entry left behind at a *different* engine path, what an
-  install run with another `HOME` leaves, is **replaced**, and one of ours that
-  appears twice at the *same* path is collapsed. Either way the command prints
-  what it removed;
+- Merges the hook entries into your **user** settings (`~/.claude/settings.json`
+  for Claude Code, `~/.codex/hooks.json` for Codex), so every session on this
+  machine is governed. Hooks you added yourself are left alone; an OpenBox entry
+  left behind at a *different* engine path, what an install run with another
+  `HOME` leaves, is **replaced**, and one of ours that appears twice at the
+  *same* path is collapsed. It also sweeps a superseded OpenBox entry out of the
+  current directory's own settings file, so nothing registers the same gate
+  twice. Either way the command prints what it removed;
 - Writes your posture to `~/.openbox/dev.json`.
 
 It never reads, writes or prompts for a credential. If none is present it stops
@@ -171,11 +172,11 @@ and points you back at `auth`, installing nothing.
 
 ### Two defaults you should know
 
-**It governs this directory only.** Sessions started anywhere else are **not
-governed and produce no events at all**; so on a machine set up this way,
-absence of events is not evidence of absence of work. Run `openbox init` once in
-each project you want governed. `init` prints which directory it governed, every
-time.
+**It governs every session on this machine, in any directory, immediately.**
+The tool watches its settings file, so sessions already running are governed
+too; there is nothing to restart, and absence of events is therefore evidence
+about the work rather than about the scope. `init` prints what it governed and
+which file it changed, every time.
 
 **It enforces.** Blocking, ask-for-approval and local secret redaction are on by
 default; on tool calls AND on prompts: every gated tool call and every submitted
@@ -238,89 +239,54 @@ installed, correct, and never executed.
 ### Governing the model call itself
 
 Everything above governs what the agent *does*. No hook carries the model
-request, so by default the model call is neither recorded nor governed.
-`--gateway` changes that, for Claude Code only:
-
-```bash
-openbox init --provider claude-code --gateway
-```
-
-It writes a launchd/systemd user unit, starts it, **proves it is listening**,
-and only then points `ANTHROPIC_BASE_URL` in `~/.claude/settings.json` at it.
-That order is the safety property: writing the variable first would point your
-tool at a dead port, and a dead loopback listener fails closed; every model call
-on the machine would fail. If any step fails, the unit is removed again and the
-variable is left alone; `init` says so and the rest of the install still stands.
-
-```bash
-openbox init --provider claude-code --gateway-addr 127.0.0.1:9000   # listen elsewhere
-openbox init --provider claude-code --gateway-upstream https://my-relay.internal
-openbox gateway                                                     # run it in the foreground
-```
-
-`--gateway-upstream` is what to use when your org already has a relay: the
-gateway forwards to it instead of straight to the provider. If a value was
-already set in `ANTHROPIC_BASE_URL` when you installed, it is remembered in
-`~/.openbox/gateway-prior-env.json` and **put back** by `--remove-gateway`; a
-round-trip through OpenBox does not lose your own relay.
-
-Four things to know:
-
-- **It is a second process.** launchd/systemd keeps it running; `openbox doctor`
-  reports whether it is alive, whether this machine actually points at it, and
-  what could bypass it. Its stdio is at `~/.openbox/gateway.log`, which is the
-  only place it says it is running but recording nothing (a missing DID, or
-  relayed calls that carry no session header).
-- **It captures; it does not refuse.** A relayed call is always forwarded. The
-  refusal path exists and is unwired on purpose.
-- **The assurance is detection.** Unsetting the variable is enough to route
-  around it, and nothing here stops that; what you get is a queryable hole in
-  the record. See [the MDM recipe](gateway-mdm-recipe.md) if you need more.
-- **Removal never needs a credential.** `--remove-gateway` works on a machine
-  whose `~/.openbox` has been wiped, because otherwise an offboarded laptop
-  could not stop pointing at a dead port.
-- **MacOS and Linux only.** There is no Windows daemon packaging yet, and
-  `--gateway` says so rather than reporting a service it did not install.
-  `openbox gateway` still runs in the foreground there, supervised by whatever
-  you choose.
-
-```bash
-openbox uninstall   # removes the gateway along with everything else
-```
-
-### The other two lanes, and one command for all of them
-
-The gateway only sees calls that go through `ANTHROPIC_BASE_URL`. That misses
-the desktop app and subscription-OAuth sessions, so there are two more lanes —
-and the one install brings both up:
+request, so hooks alone leave the model call unrecorded. The install closes that
+for Claude Code, with no flag to set:
 
 ```bash
 openbox init --provider claude-code   # hooks + telemetry + transport
 openbox uninstall                     # all of it, back out
 ```
 
-- **Telemetry**; a loopback OTLP receiver. The tool exports its own telemetry to
+- **Telemetry** — a loopback OTLP receiver. The tool exports its own telemetry to
   it. Additive: it never sits in the path of a model call, so it cannot break
   one; but it is the tool reporting on itself, which is also its weakness.
-- **Transport**; a loopback CONNECT proxy that terminates TLS for the provider's
+- **Transport** — a loopback CONNECT proxy that terminates TLS for the provider's
   host with a CA generated on this machine, and tunnels every other host
   uninspected. It observes the real bytes.
 
-Each installs the same way the gateway did, unit, start, **prove it is
-listening**, and only then write the settings, and each rolls its unit back if
-any later step fails. Both are Claude Code only: a provider with no lanes gets
-the hooks and a line saying why, rather than an error for something it never
-asked for.
+Each installs the same way: write the unit, start it, **prove it is listening**,
+and only then write the settings the tool reads. That order is the safety
+property — writing the routing first would point your tool at a dead port, and a
+dead loopback listener fails closed, so every model call on the machine would
+fail. If any step fails, the unit is rolled back and the settings are left
+alone; `init` says so and the rest of the install still stands. Both are Claude
+Code only: a provider with no lanes gets the hooks and a line saying why, rather
+than an error for something it never asked for. There is no Windows daemon
+packaging yet, and `init` says so there rather than reporting a service it did
+not install; `openbox telemetry` and `openbox transport` still run in the
+foreground, supervised by whatever you choose.
+
+A third lane, an `ANTHROPIC_BASE_URL` gateway, is no longer installed — the
+transport relay sees what it saw without needing the tool to honour a base URL.
+If a previous install left one behind, `init` **retires** it and prints what it
+retired, restoring any `ANTHROPIC_BASE_URL` of your own that the old install had
+displaced (remembered in `~/.openbox/gateway-prior-env.json`). `openbox gateway`
+still runs in the foreground if you want that path deliberately.
 
 **Only one lane reports each model call.** They all describe the same call, so
 if two of them reported it every token count you see would be doubled. OpenBox
-picks one automatically, the in-path lanes outrank telemetry, because they see
-the real bytes, and `openbox doctor` prints which one and why. It also warns
+picks one automatically — the in-path lanes outrank telemetry, because they see
+the real bytes — and `openbox doctor` prints which one and why. It also warns
 when the elected lane has nothing listening behind it, which is the one state
 where every other line still looks healthy and nothing is being recorded at all.
 
-Three things to know:
+Four things to know:
 
+- **They capture; they do not refuse.** A relayed call is always forwarded. The
+  refusal path exists and is unwired on purpose.
+- **The assurance is detection.** Unsetting the routing is enough to go around a
+  lane, and nothing here stops that; what you get is a queryable hole in the
+  record. See [the MDM recipe](gateway-mdm-recipe.md) if you need more.
 - **Your own settings come back.** Every key OpenBox writes is recorded with
   whatever was there before, in `~/.openbox/activation.json`, and removal puts
   it back. A corporate `HTTPS_PROXY` or `NO_PROXY` survives the round trip;
@@ -328,18 +294,19 @@ Three things to know:
   changed after OpenBox set it, removal **refuses** and names the key rather
   than overwriting your edit — nothing overrides that, because a corporate proxy
   value silently reverted is an outage.
-- **`openbox uninstall` deletes data, and it is a full purge.** The hooks on
-  every surface, the plugin bundle, all three lane units, the CA and its private
-  key, the lane logs, the activation record, posture, the spool, and your
-  credentials. It prints the whole inventory before touching anything, flushes
-  the spool first and reports what could not be delivered as loss, and it works
-  on a machine whose credentials are already gone. The `obx_` key and the
-  signing seed cannot be re-retrieved: `openbox auth` afterwards registers a
-  **new** agent with a new DID.
 - **Your open sessions keep their old routing.** A running process keeps the
   environment it started with, so restart it after installing or removing a
   lane. This is the one place that caveat applies: hook changes are picked up by
   the tool's own file watcher and need no restart.
+
+`openbox uninstall` **deletes data, and it is a full purge**: the hooks on every
+surface, the plugin bundle, all three lane units, the CA and its private key,
+the lane logs, the activation record, posture, the spool, and your credentials.
+It prints the whole inventory before touching anything, flushes the spool first
+and reports what could not be delivered as loss, and it works on a machine whose
+credentials are already gone — an offboarded laptop can always stop routing.
+The `obx_` key and the signing seed cannot be re-retrieved: `openbox auth`
+afterwards registers a **new** agent with a new DID.
 
 ```bash
 openbox doctor   # which lane is elected and why, and whether it is listening
@@ -347,12 +314,14 @@ openbox doctor   # which lane is elected and why, and whether it is listening
 
 ### Self-hosted OpenBox
 
-Set **both** URLs, at `auth` time:
+Set **both** URLs at `auth` time. `auth` prompts for them ("Backend URL
+(control plane)" and "Core URL (data plane)"), and these environment variables
+prefill the prompts:
 
 ```bash
-openbox auth \
-  --backend-url http://localhost:3000 \
-  --base-url http://localhost:8086
+export OPENBOX_BACKEND_URL=http://localhost:3000   # openbox-backend, control plane
+export OPENBOX_BASE_URL=http://localhost:8086      # openbox-core, data plane
+openbox auth
 ```
 
 The control plane cannot tell the CLI where your core is, so setting only one
@@ -382,8 +351,8 @@ running.
 
 With enforce on, a call your policy marks approval-required is filed with
 OpenBox and the session pauses briefly (~20s, with a status message) while an
-approver decides. Answer inside the pause, from the dashboard or `openbox
-approve allow <id>`, and the tool call simply proceeds. If nobody answers, the
+approver decides. Answer inside the pause, from the dashboard, and the tool call
+simply proceeds. If nobody answers, the
 call is **denied** with the approval id in the reason, so the agent can say what
 it is waiting on and do something else; when the decision lands later, the
 session is woken with the outcome.
@@ -434,7 +403,7 @@ but the old agent's history no longer continues into the new one.
 
 Two more things to clean up:
 
-- **`dev.json` and `approver.json` migrate themselves** on the first run of
+- **`dev.json` migrates itself** on the first run of
   `auth` or `init`, from `~/Library/Application Support/openbox/` (macOS),
   `~/.config/openbox/` (Linux) or `%AppData%\openbox\` (Windows) into
   `~/.openbox/`. The originals are left in place, so rolling back to an older
@@ -444,8 +413,8 @@ Two more things to clean up:
   old config directory. Nothing reads it any more, and it is a stale plaintext
   copy of live credentials; worse than a current one, because nobody rotates it.
 
-Then run `openbox init` once per project you want governed. Scope is explicit
-now, and enforcement is on by default.
+Then run `openbox init --provider <tool>` once. One install governs every
+session on the machine, and enforcement is on by default.
 
 ## Changing your mind later
 
@@ -453,15 +422,14 @@ now, and enforcement is on by default.
 |---|---|
 | Turn enforcement off | `OPENBOX_ENFORCE=false` for one run, or `"enforce": false` in `~/.openbox/dev.json` to persist it |
 | Turn it back on | re-run `init`; enforce is the default |
-| Get the prompt gate + HALT session stop on an existing install | re-run `openbox init --provider <tool>` in each governed project; the prompt gate and its raised hook timeout are installer-registered, so an old registration keeps the old behavior until then |
+| Get the prompt gate + HALT session stop on an existing install | re-run `openbox init --provider <tool>`; the prompt gate and its raised hook timeout are installer-registered, so an old registration keeps the old behavior until then |
 | Change a credential | `openbox auth` (re-run it any time) |
 | Replace credentials | `openbox auth`; blank keeps what is already there |
-| Govern another project | `cd` there and `openbox init --provider <tool>` |
 | Stop sending prompt text | `"content_capture": false` (see [Data and privacy](data-and-privacy.md)) |
 | Stop sending token counts | `"finops": false` |
-| Govern model calls too | `openbox init --provider claude-code --gateway` (see [above](#governing-the-model-call-itself)) |
-| Stop governing model calls | `openbox init --provider claude-code --remove-gateway`; stops the daemon, removes the unit, and restores any `ANTHROPIC_BASE_URL` it displaced. Needs no credential |
-| Uninstall | run `--remove-gateway` first if you used it, then remove `~/.claude/plugins/openbox-observe`, `~/.openbox/`, `~/.config/openbox/`, each project's `.claude/settings.local.json`, and the `openbox` binary |
+| Govern model calls too | already done on Claude Code: `init` installs the lanes (see [above](#governing-the-model-call-itself)) |
+| Stop governing model calls | `openbox uninstall`; it is all or nothing, because a machine with hooks and no lane records tool calls while its model calls go unseen |
+| Uninstall | `openbox uninstall`; it detects what is installed, prints the inventory, and removes hooks, lanes, the CA, posture, the spool and your credentials. It needs no credential to run |
 
 A plain re-run of `init` never downgrades your posture silently: turning
 enforcement off takes an explicit `OPENBOX_ENFORCE=false` or a config key, and `init` says so when it
@@ -479,8 +447,8 @@ list). Specific to setup:
 | Windows | **build-verified only**; CI cross-compiles every change; no automated suite runs there, and `install.sh` is bash |
 | A managed-settings mandate | **not verifiable by us**; it needs a deployment in a real fleet. `openbox doctor` reports whether one is in force and whether it allows this machine's hooks to run |
 | Credential at rest | not protected on any platform; `0600` on macOS/Linux, nothing on Windows |
-| `--gateway` | **never run against a live stack.** It governs the terminal CLI and **not** the desktop app; that much is measured (2026-08-27). Whether subscription-OAuth traffic follows `ANTHROPIC_BASE_URL` for *this* lane is still open, so who it covers is not fully settled (see the lane notes); the two lanes below exist for the gap |
-| `--telemetry`, `--transport` | **verified by replay only, and never run against a live stack.** Real recorded model calls run through the shipped code on a host that cannot bind a socket: that proves the bytes, the mapping, the gate and the caps, and proves nothing about bind, listen, TLS to a real socket, or what the control plane stores. The desktop-app and OAuth coverage they exist for is **unconfirmed**. The OTLP intake itself is not in that list; a synthetic export has crossed it end to end on a bind-capable host. But that export was **JSON** and the tool is configured to send **protobuf**, so the decoder real traffic will use is untested, and the real client has never exported to this lane |
+| the `ANTHROPIC_BASE_URL` gateway | **never run against a live stack**, and no longer installed. It governs the terminal CLI and **not** the desktop app; that much is measured (2026-08-27). Whether subscription-OAuth traffic follows `ANTHROPIC_BASE_URL` for *that* lane was never settled; the two installed lanes exist for the gap |
+| telemetry, transport | **verified by replay only, and never run against a live stack.** Real recorded model calls run through the shipped code on a host that cannot bind a socket: that proves the bytes, the mapping, the gate and the caps, and proves nothing about bind, listen, TLS to a real socket, or what the control plane stores. The desktop-app and OAuth coverage they exist for is **unconfirmed**. The OTLP intake itself is not in that list; a synthetic export has crossed it end to end on a bind-capable host. But that export was **JSON** and the tool is configured to send **protobuf**, so the decoder real traffic will use is untested, and the real client has never exported to this lane |
 | The telemetry lane's env keys | **unconfirmed against the client.** They are copied verbatim from a set proven in a sibling lab run and pinned as a literal list, but every test asserts JSON we wrote and Claude Code silently ignores a name it does not recognise; so a rename gives a green suite and a receiver that never gets a record |
 
 So: **no platform is end-to-end verified for this setup flow yet.** The
@@ -512,9 +480,9 @@ the flow changed.
 | A session hangs on a tool call | An approval is filed and undecided. It is in the dashboard's queue; deciding it releases the session. |
 | Every tool call appears twice; success rates and latencies look wrong | The directory has an OpenBox hook registered twice; usually a second engine left by an `init` once run with a different `HOME`. `openbox doctor` reports both that and a repeat at one path; re-running `openbox init` there removes the extra registration. Events already stored stay duplicated. |
 | `OPENBOX_ED25519_SEED is deprecated` | Harmless, and it still works. Rename it to `OPENBOX_AGENT_PRIVATE_KEY`; the name OpenBox documents. |
-| Every model call fails after `--gateway` | The daemon is not listening and a dead loopback port fails closed. `openbox doctor` says whether it is alive; `~/.openbox/gateway.log` says why it exited; `openbox gateway` in the foreground shows the same in real time. `--remove-gateway` gets you working again immediately. |
-| `--gateway applies to --provider claude-code only` | It relays the Anthropic Messages API and is configured through Claude Code's own settings, so it means nothing for Codex. |
-| `… is already in use; refusing to continue` | Something other than an OpenBox gateway holds that port. A gateway *we* installed at that address is replaced instead, and the command says so. Stop the other process, or pass `--gateway-addr`. |
+| Every model call fails after an install | The elected lane is not listening and a dead loopback port fails closed. `openbox doctor` says whether it is alive; `~/.openbox/transport.log` and `telemetry.log` say why it exited; `openbox transport` in the foreground shows the same in real time. `openbox uninstall` gets you working again immediately. |
+| `Model-call lanes: hooks only for codex` | The lanes read the Anthropic Messages API through Claude Code's own settings, so there is nothing for them to observe on Codex. Tool calls are still governed. |
+| `… is already in use; refusing to continue` | Something other than an OpenBox lane holds that port. A lane *we* installed at that address is replaced instead, and the command says so. Stop the other process. |
 | The gateway runs but nothing is recorded | Two causes, both in `~/.openbox/gateway.log`: no developer DID configured (run `openbox auth`), or relayed calls carry no session header; the gateway will not invent a session, so those calls are recorded nowhere. |
 | `openbox doctor` flags a bypass even though the gateway is healthy | By design. The exposure is reported at every state including the healthy one, because a check that goes quiet trains you to read silence as prevention. |
 

@@ -35,9 +35,10 @@ Two paths, deliberately separate:
 - **A gated tool call waits for OpenBox to decide it.** Every gated PreToolUse
   call is evaluated by `/evaluate` before the tool runs. One policy
   implementation, on the server. This path has no daemon and no socket (a
-  bounded outbound call is not a resident process). The model-call gateway is a
-  resident process, and it is a third path rather than a change to this one:
-  opt-in, per machine, and reaching a surface no hook can see.
+  bounded outbound call is not a resident process). The model-call lanes are
+  resident processes, and they are a third path rather than a change to this
+  one: per machine, installed by the same `init`, and reaching a surface no hook
+  can see.
 
 That is the trade: enforcement now depends on reaching the control plane, and
 under the default `fail_closed:false` a gated call proceeds when it cannot be
@@ -138,7 +139,7 @@ can be on without the others:
   (`decision/gitleaks.go`), then a keyword-and-entropy layer for values
   in no known format. What that reaches, and the two shapes it does not, is
   measured in
-  [data-and-privacy.md](data-and-privacy.md#what-the-scanner-catches--and-where-it-stops).
+  [data-and-privacy.md](data-and-privacy.md#what-the-scanner-catches-and-where-it-stops).
 - **Inline evaluation.** The gated call is sent to `/evaluate` and the verdict
   is applied before the tool runs. Every gated class, not a risk-selected
   subset; risk is a property of the policy. Prompts gate the same way:
@@ -224,13 +225,14 @@ Being precise here is part of the product.
   developer can remove it: prevention without assurance. For Codex the hook
   itself cannot yet be mandated, a `requirements.toml` cannot define one, so the
   shipped mandate pins approval and sandbox modes instead.
-- **Model calls are governed only if the local gateway is installed, and it is
-  opt-in.** `openbox init --gateway` points this machine's `ANTHROPIC_BASE_URL`
-  at a loopback daemon that relays and records every model call. It does not
-  refuse one: the refusal path is written and has no production caller, pending
-  the probe that would say what shape a refusal must take. Without the gateway, tool calls are
-  governed and model calls are not, because the hooks never see a model request. Three limits are worth stating plainly
-  rather than discovering:
+- **Model calls are governed only where a lane is installed.** On Claude Code
+  `init` brings up the transport relay and the telemetry receiver, retiring an
+  older `ANTHROPIC_BASE_URL` gateway if it finds one; where no lane is packaged,
+  tool calls are governed and model calls are not, because the hooks never see a
+  model request. A lane records a model call, it does not refuse one: the
+  refusal path is written and has no production caller, pending the probe that
+  would say what shape a refusal must take. Three limits are worth stating
+  plainly rather than discovering:
   - **The base claim is detection, not prevention.** A developer can unset one
     environment variable. That is *visible*, and the signal that makes it visible
     had to be rebuilt: it used to be "model turns with no gateway **spans**", which
@@ -260,11 +262,10 @@ Being precise here is part of the product.
     subscription-OAuth model calls are capturable by two other means that need no
     base-URL change at all; 97 calls observed, every one carrying OAuth
     authorization and none carrying `x-api-key` (openbox-logger run
-    `20260827T063932Z-225cac`).
-    builds both lanes, so the open question is now about this lane's reach rather
-    than about a class of developer being ungoverned. **Both lanes now exist and
-    are installable** (2026-08-30); see the bullet below for what that does and
-    does not buy.
+    `20260827T063932Z-225cac`). Both lanes now exist and every `init` installs
+    them, so the open question is about this lane's reach rather than about a
+    class of developer being ungoverned; see the bullet below for what that does
+    and does not buy.
   - **A compressed body is decompressed in the capture path; an undecodable one
     is recorded as a marker naming its encoding.** The client's own
     `Accept-Encoding` is relayed verbatim (`gzip, deflate, br, zstd`), so the
@@ -396,7 +397,7 @@ Being precise here is part of the product.
   deliberate; lowering it would flag every git SHA and UUID, and on the enforce
   path the redactor **rewrites the developer's file**, so a false positive
   corrupts real content. Both are measured, not assumed
-  ([data-and-privacy.md](data-and-privacy.md#what-the-scanner-catches--and-where-it-stops)).
+  ([data-and-privacy.md](data-and-privacy.md#what-the-scanner-catches-and-where-it-stops)).
   The same redactor also fires on a base64 literal in a source assignment, which
   rewrote three of this repo's own test files during the gitleaks adoption.
 - **The dependency guard bounds a package subtree's direct imports, not
@@ -509,20 +510,19 @@ was made on the smaller number.
   would match past that offset does not fire. Content-based policy is not a
   complete check on large files. Local secret detection is not subject to this;
   it runs before the cap and sees the whole body.
-- **Absence of events is not evidence of absence of activity.** A bare `openbox
-  init` governs the current directory only, because that is the only scope the
-  CLI can actually activate by itself; global activation is a managed-settings
-  deployment an administrator performs. Sessions started anywhere else produce
-  **no rows at all**, so an auditor cannot distinguish an uninitialized project
-  from an idle week, and enforcement applies only where `init` ran. Fleet
-  coverage is what one install gives; a mandate is managed settings; Codex is user-scoped
-  either way. `printGovernedScope` names the governed directory at install time
-  so the gap is visible at the moment it is created rather than discovered from
-  an empty dashboard.
-- **Egress.** OpenBox chooses where *its own* telemetry goes. Without the
-  gateway it does not proxy, intercept or allow-list the coding tool's traffic
+- **Absence of events is not evidence of absence of activity.** One `openbox
+  init` governs every session on that machine, in any directory, so the gap is
+  no longer between directories — it is between machines. A machine that never
+  ran `init` produces **no rows at all**, and an auditor cannot distinguish it
+  from an idle week. Coverage is what one install per machine gives; a mandate,
+  which is what stops a developer removing it, is a managed-settings deployment
+  an administrator performs. `printGovernedScope` states the scope and names the
+  settings file it changed at install time, so what was governed is visible at
+  the moment it happens rather than inferred from an empty dashboard.
+- **Egress.** OpenBox chooses where *its own* telemetry goes. Where no lane is
+  installed it does not proxy, intercept or allow-list the coding tool's traffic
   to its model provider; that is the provider's plane plus your network
-  controls, and OpenBox records that posture as evidence. With the gateway it
+  controls, and OpenBox records that posture as evidence. With an in-path lane it
   carries and records the model call, but it still allow-lists nothing and still
   refuses nothing: the refusal path is unwired. Everything else the tool talks
   to is untouched either way.

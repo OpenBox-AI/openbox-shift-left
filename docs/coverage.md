@@ -120,9 +120,9 @@ table is what each *lane* sees of a single model call. It is deliberately not
 averaged into a "model calls are governed" sentence: the three lanes differ in
 what they carry, in who can suppress them, and in how strongly each is verified.
 
-All three are **Claude Code only, and structurally so**; `--gateway`,
-`--telemetry` and `--transport` are rejected for `--provider codex`
-(`cmd/openbox/main.go`), the transport allowlist holds one host
+All three are **Claude Code only, and structurally so**; `init` installs no lane
+for any other provider and prints why rather than erroring
+(`laneCapable`, `cmd/openbox/initlanes.go`), the transport allowlist holds one host
 (`api.anthropic.com`), and the telemetry keys are `CLAUDE_CODE_*`. **Codex and
 Cursor: no lane, and no probe has been run**; their absence here is unsurveyed,
 not measured-empty.

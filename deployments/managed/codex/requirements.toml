@@ -25,7 +25,7 @@ allowed_sandbox_modes = ["read-only", "workspace-write"]
 # config. That is the key an enterprise claim really rests on — but it only helps if a
 # MANAGED hook definition exists to take its place, and this template does not ship
 # one. Enabling it as-is would make Codex ignore the `~/.codex/hooks.json` that
-# `openbox dev init --provider codex` writes and run NO OpenBox hook at all: governance
+# `openbox init --provider codex` writes and run NO OpenBox hook at all: governance
 # silently off across the fleet, with posture still reporting a mandate.
 #
 # It cannot simply be defined here either. `hooks` is not a requirements key — the

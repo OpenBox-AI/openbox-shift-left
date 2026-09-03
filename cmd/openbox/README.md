@@ -1,81 +1,58 @@
 # `openbox` CLI
 
-The developer-runtime governance front door. One command onboards a coding tool
-to OpenBox: register a developer agent, capture its credentials into the OS
-secret store, and delegate the tool's native config to that provider's adapter.
-Governance is ambient thereafter.
+`package main` for the shipped binary: command dispatch, flag parsing, and the
+wiring that hands each command to the packages that do the work. Behaviour lives
+under `internal/`; this package stays thin enough that a new command is a `case`
+and a file.
 
-```
-openbox init --provider <claude-code|codex|cursor> [flags]
-```
+`openbox help` is the command surface, and the only one — five commands a person
+types, plus `hook`, `rewake`, `gateway`, `telemetry` and `transport`, which the
+hook registrations and the service units invoke by string and nobody types. It
+is not restated here, because a second copy goes stale the first time a flag
+moves.
 
-## What `openbox init` does
+- What each command is for, and how to run them: [getting
+  started](../../docs/getting-started.md).
+- Which package owns what: [architecture §
+  Layout](../../docs/architecture.md#layout).
+- What the binary sends, stores, and can never take back: [data and
+  privacy](../../docs/data-and-privacy.md).
 
-1. **Register** a developer agent via the backend control plane `POST
-   /agent/create` with `agent_type="developer"` and a default developer aivss
-   risk posture (`internal/aivss`). Org scope (INV-4) and the `did:aip:` DID
-   (INV-7) come from the backend.
-2. **Capture credentials**; the once-shown `obx_` API key and the base64 raw
-   32-byte Ed25519 seed; into the **OS secret store** (`internal/secret`). These
-   are the runtime credentials the client uses to AIP-sign `/evaluate` calls.
-3. **Delegate config** to the selected provider's installer
-   (`internal/provider`). Until an adapter ships for the requested tool, the CLI
-   prints the required manual config and exits non-zero
-   (code 2).
+## Why the seams in here look odd
 
-## Flags & environment
+Several indirections exist for testability rather than for the product, and
+their absence fails in ways that are hard to attribute to this package:
 
-| Flag | Env | Notes |
-|---|---|---|
-| `--provider` |; | `claude-code` \| `codex` \| `cursor` (required) |
-| `--org` | `OPENBOX_ORG` | namespace for credential storage |
-| `--backend-url` | `OPENBOX_BACKEND_URL` | openbox-backend base URL |
-| `--client-id` | `OPENBOX_CLIENT` | `x-openbox-client` header (Keycloak JWT path) |
-| `--dry-run` |; | print the plan; **no** network / secret-store writes |
-| `--managed-enable` |; | record org force-enable substrate (verified, not activated) |
-|; | `OPENBOX_CONTROL_TOKEN` | **required for a real run**; see below |
+- `installUnitFn`, `installLaneUnitFn`, `portOccupied` and the wait helpers are
+  variables because `kardianos/service` ignores `$HOME`. Without the seam,
+  `go test ./...` installs a real daemon on the developer's own machine and
+  dials their real lanes. `refuseTheRealSupervisor` in `testmain_test.go` panics
+  on each one, so a test that escapes the harness names which seam it escaped
+  through instead of silently touching the host.
+- `newPrompt` covers the terminal *requirement* and the prompter together,
+  deliberately as one seam: a test that could supply answers but not get past
+  `RequireTerminal` could not drive `auth` at all.
+- `stdout`, `stderr`, `stdin` and `getenv` are fields rather than globals
+  because what these commands print *is* most of what they do, and a test has to
+  be able to assert it.
 
-The control-plane credential is a Keycloak Bearer JWT **or** an org
-control-plane key (`obx_key_…`, sent as `X-API-Key`); auto-detected by prefix.
+## Registration is not idempotent, and that shapes `auth`
 
-## Security posture (for G_SEC review; Sam)
+The control plane shows the `obx_` API key and the Ed25519 seed exactly once,
+and `agent/create` has no upsert. Local credential presence is therefore the
+idempotency key: an agent that exists remotely but whose credentials were never
+written here cannot be recovered at all. So `auth` refuses to duplicate a name
+and states the cost rather than offering a flag past it — deleting that agent to
+re-register mints a new DID and leaves the old lineage attached to the old one.
 
-- **INV-1, credential handling.** The `OPENBOX_CONTROL_TOKEN` is read only from
-  the environment; never a flag; so it cannot leak via `argv`/`ps`/shell
-  history. The minted `obx_` key and Ed25519 seed go straight to the OS secret
-  store and are never printed, logged, or written to a config file. Command
-  output shows only the secret-store *reference* (service + account) and the
-  non-secret DID.
-- **Secret-store backends.** Linux uses `secret-tool` (libsecret) and passes the
-  secret on **stdin** (no argv exposure). MacOS uses the `security` CLI; note
-  the **argv caveat** documented on `keychainStore` in
-  `internal/secret/backends.go` (`security add-generic-password -w <value>`
-  transiently exposes the value via `ps`; no no-cgo alternative through that
-  binary). If no store is available the CLI **HALTs** rather than write
-  plaintext.
-- **Idempotency reality.** `agent/create` shows the key + seed exactly once and
-  has no upsert. Local secret-store presence is therefore the idempotency key: a
-  re-init with stored creds does no network call. An agent that exists remotely
-  but whose creds were never stored locally is unrecoverable; the CLI refuses to
-  duplicate and explains the one recovery: delete that agent in the dashboard and
-  re-run, which mints a new DID.
-
-## Layout
-
-```
-cmd/openbox/              entrypoint + subcommand routing
-internal/cli/aivss/       default developer AIVSS posture (integers verified vs backend)
-internal/cli/backend/     control-plane client: agent/create + agent/list
-internal/cli/devinit/     the dev-init orchestration
-internal/cli/providers/   the adapter registry; the only place the CLI reaches an adapter
-```
-
-`internal/secret/` is gone: the OS keychain was deleted, and
-credentials are one plaintext file. `internal/provider/` is the SPI itself and
-lives at `internal/provider/`, not under `cli`.
+For the same reason the control-plane token is read only from
+`OPENBOX_CONTROL_TOKEN` and is never a flag: a flag puts a credential in `argv`,
+where `ps` and shell history can read it. What `auth` writes is nonetheless a
+plaintext file, on purpose; see [where credentials
+live](../../docs/data-and-privacy.md#where-credentials-live).
 
 ## Build & test
 
 ```bash
-go build./... && go vet./... && go test -race -count=1./...
+go build ./... && go vet ./... && go test -race -count=1 ./...
 ```

@@ -95,9 +95,9 @@ Two of those sentences have since been overtaken, and they are called out here
 because this page is where an upgrading reader looks:
 
 - The observe path **does** now carry tool commands, file bodies and tool output, so "no bodies on observe events" stopped being true in August 2026;
-- There **is** now an optional daemon; the model-call gateway. It is opt-in per
-  machine (`openbox init --provider claude-code --gateway`), so an existing
-  install acquires it only by asking for it.
+- There **are** now resident daemons; the model-call lanes. On Claude Code
+  `openbox init` installs them, so an existing install acquires them on its next
+  re-run rather than by asking for them.
 
 One approval behaviour did shift: a `REQUIRE_APPROVAL` verdict is now always a
 *filed* record, so the hook holds briefly for a real decision instead of falling

@@ -50,16 +50,15 @@ signing key; paste them and it writes the same two files. Secrets are masked as
 you type and **no flag ever takes a secret value**, so nothing lands in your
 shell history. Re-run `auth` any time to change any of it.
 
-**3. Govern a project.** `openbox init` installs the hooks. It governs **the
-current directory only**, and it **enforces**; blocking, ask-for-approval and
-secret redaction are on by default, on tool calls and on submitted prompts
-alike, and a HALT verdict ends the whole session, not just the call. Blocking
-and approval come from OpenBox, so they need it reachable; secret redaction is
-local and does not. It never touches credentials; if they are missing it stops
-and points you back at `auth`.
+**3. Govern this machine.** `openbox init` installs the hooks. It governs
+**every session on this machine, in any directory**, and it **enforces**;
+blocking, ask-for-approval and secret redaction are on by default, on tool calls
+and on submitted prompts alike, and a HALT verdict ends the whole session, not
+just the call. Blocking and approval come from OpenBox, so they need it
+reachable; secret redaction is local and does not. It never touches credentials;
+if they are missing it stops and points you back at `auth`.
 
 ```bash
-cd ~/code/my-project
 openbox init --provider claude-code
 ```
 
@@ -67,7 +66,7 @@ Want telemetry without enforcement? `OPENBOX_ENFORCE=false`, per run; nothing is
 persisted either way. Note that enforcement acts on *your org's policy*, so
 until your org publishes one nothing is blocked and you get observability
 regardless; with one diagnosed exception, documented in
-[What this does not prove](#what-this-does-not-prove).
+[What this does not prove](#known-limitations).
 
 **4. Use `claude` as normal.** Nothing to run and no runtime environment to keep
 set. The install brings up the model-call lanes for you
@@ -77,7 +76,7 @@ set. The install brings up the model-call lanes for you
 openbox doctor      # the posture in effect, and whether core is reachable
 ```
 
-→ **[Getting started](docs/getting-started.md)** for self-hosted, approvers,
+→ **[Getting started](docs/getting-started.md)** for self-hosted, approvals,
 upgrading an existing install, and troubleshooting.
 
 ### Two URLs, two planes
@@ -116,80 +115,33 @@ allows this machine's own hooks to run at all.
 
 ## Governing the model call itself
 
-Hooks see what the agent *does*. No hook carries the model request, so by
-default the model call is unobserved and ungoverned. `--gateway` closes that,
-and it is **opt-in** because it redirects live model traffic:
+Hooks see what the agent *does*. No hook carries the model request, so hooks
+alone leave the model call unobserved. The install closes that on Claude Code:
+`init` brings up every model-call lane the provider supports under
+launchd/systemd (macOS and Linux; no Windows packaging yet), proves each one is
+listening, and only then points the tool's settings at it. There is no flag to
+turn them on, because there is one right answer.
 
-```bash
-openbox init --provider claude-code --gateway
-openbox init --provider claude-code --remove-gateway   # and back out again
-```
-
-It installs a loopback daemon under launchd/systemd (macOS and Linux; no Windows
-packaging yet), proves it is listening, and only then points Claude Code's
-`ANTHROPIC_BASE_URL` at it. Every model call is relayed byte-for-byte to the
-provider. A call that names a session is also captured as governance evidence;
-request and response headers and bodies, plus a one-way fingerprint of the
-credential that paid for it; a call that names none is relayed and recorded
-nowhere, because the gateway will not invent a session. `--gateway-addr` and
-`--gateway-upstream` change where it listens and where it forwards. Add
-`--gateway-verbose` and the daemon logs every relayed call, and whether it was
-recorded, to `~/.openbox/gateway.log`; the only way to tell a governed gateway
-from a bypassed one without querying stored data.
-
-**It governs the terminal CLI, and not the desktop app** (measured 2026-08-27,
-not inferred: with the daemon listening and configured, `claude` in a terminal
-produced `POST /v1/messages` lines and captured events, while a desktop-app
-session produced nothing at all). The CLI reads `ANTHROPIC_BASE_URL` from
-`~/.claude/settings.json`, which is what `--gateway` writes; the desktop app
-routes through its own [third-party inference
-configuration](https://claude.com/docs/third-party/claude-desktop/gateway)
-instead and ignores that file. So on a machine where the developer works in the
-desktop app, **`--gateway` governs no model calls and says nothing about it**;
-`openbox doctor` reports the file it wrote, not what the app resolved. Pointing
-the desktop app at the gateway is possible (`inferenceGatewayBaseUrl`,
-MDM-distributable) but collides with pass-through auth: that mode replaces the
-claude.ai login with a credential you supply, so there is no provider credential
-left for the gateway to relay unless your org has an Anthropic API key.
-
-Three things to know before you turn it on:
-
-- **The claim is detection, not prevention.** A developer can unset one
-  environment variable. That is *visible*, and the signal is the `activity_id`
-  namespace: a session carrying hook-derived turns (`<session>:turn:<n>`) and
-  none from a lane (`:gateway:`, `:otel:`, `:proxy:`) had no lane watching its
-  model calls. `openbox doctor` reports the exposure, but it is not stopped.
-  Prevention is your MDM's job: [the MDM
-  recipe](docs/gateway-mdm-recipe.md).
-- **It captures, it does not yet refuse.** The refusal path is written and
-  tested but nothing calls it, deliberately: the status code a refusal should
-  use is unprobed, and a wrong one silently disables a Claude Code capability
-  for the rest of the session.
-- **It is a second process to run and diagnose**, and it has never run against a
-  live stack. `openbox doctor` reports whether it is alive, whether this machine
-  actually points at it, and what could bypass it.
-
-### Two more lanes, for the calls the gateway cannot see
-
-The gateway only governs what follows `ANTHROPIC_BASE_URL`; the terminal CLI.
-Two further lanes exist for the rest, and the one install brings up both:
-
-```bash
-openbox init --provider claude-code   # hooks + telemetry + transport
-openbox uninstall                     # and back out again, credentials included
-```
-
-- **The telemetry lane** runs a loopback OTLP receiver and points Claude Code's own
-  OpenTelemetry export at it. It carries **no content at all**, a model id, four
-  token counts, a duration and one request id, no cost, which the server
+- **The transport lane** is an in-path CONNECT proxy. One allowlisted host,
+  `api.anthropic.com`, is TLS-terminated with a CA generated on your machine;
+  everything else is blind-tunnelled untouched. A call that names a session is
+  captured as governance evidence — request and response headers and bodies,
+  plus a one-way fingerprint of the credential that paid for it. A call that
+  names none is relayed and recorded nowhere, because a lane will not invent a
+  session.
+- **The telemetry lane** runs a loopback OTLP receiver and points Claude Code's
+  own OpenTelemetry export at it. It carries **no content at all**: a model id,
+  four token counts, a duration and one request id; no cost, which the server
   derives. Because it is the governed tool reporting its own calls, it is
-  *suppressible by the thing it observes*: the weakest claim in this product,
-  adopted because it is the only lane that reaches the desktop app at all.
-- **`--transport`** is an in-path CONNECT proxy. An allowlisted host, one,
-  `api.anthropic.com`, is TLS-terminated with a CA generated on your machine and
-  served by the same relay the gateway uses; everything else is blind-tunnelled
-  untouched. It sees what the gateway sees, without needing the tool to honour a
-  base URL.
+  *suppressible by the thing it observes* — the weakest claim in this product,
+  adopted because it is the only lane whose design reaches the desktop app at
+  all.
+
+A third lane, an `ANTHROPIC_BASE_URL` gateway, is no longer installed. The
+transport relay sees what it saw without needing the tool to honour a base URL,
+so `init` **retires** a gateway an older install left behind, and says so. It
+survives as `openbox gateway`, a foreground process, and in the election below,
+because a machine still routed to one must not read as a machine with no lane.
 
 Exactly one lane emits per model call, decided by where your settings actually
 route model calls (transport > gateway > telemetry). That is not a preference:
@@ -198,31 +150,50 @@ means two lanes emitting would both store and **double every token count**.
 `openbox doctor` names the elected producer and warns when the elected lane has
 nothing listening.
 
-Four things to know before turning these on:
+**Terminal CLI versus desktop app.** What is measured is the base-URL path
+(2026-08-27, not inferred): with a gateway listening and configured, `claude` in
+a terminal produced `POST /v1/messages` lines and captured events, while a
+desktop-app session produced nothing at all. The CLI reads `ANTHROPIC_BASE_URL`
+from `~/.claude/settings.json`; the desktop app routes through its own
+[third-party inference
+configuration](https://claude.com/docs/third-party/claude-desktop/gateway) and
+ignores that file. The transport lane does not depend on that base URL, and
+reaching the desktop app is why it and the telemetry lane exist — but neither
+has been measured against the desktop app, so that coverage is intent, not
+measurement.
 
+Four things to know:
+
+- **The claim is detection, not prevention.** A developer can unset one
+  environment variable. That is *visible*, and the signal is the `activity_id`
+  namespace: a session carrying hook-derived turns (`<session>:turn:<n>`) and
+  none from a lane (`:gateway:`, `:otel:`, `:proxy:`) had no lane watching its
+  model calls. `openbox doctor` reports the exposure, but it is not stopped.
+  Prevention is your MDM's job: [the MDM recipe](docs/gateway-mdm-recipe.md).
+- **They capture, they do not yet refuse.** The refusal path is written and
+  tested but nothing calls it, on either in-path lane, deliberately: the status
+  code a refusal should use is unprobed, and a wrong one silently disables a
+  Claude Code capability for the rest of the session.
 - **They are verified by replay, not by running.** Real recorded model calls run
   through the shipped code on a host that cannot open a socket. That proves the
   bytes, the mapping, the gate and the caps; it proves nothing about bind,
   listen, TLS to a real socket, or what the control plane stores. **No stack has
-  ever received an event from either lane**, and the desktop coverage that
-  motivated them is intent, not measurement.
-- **The transport lane installs a certificate authority on your machine.** It is
-  generated locally, never transmitted, and name-constrained to that single host
-  so a leak cannot mint a certificate for anything else. It has no more
-  protection than your credentials do; anything running as you can read it.
-  `openbox uninstall` deletes it.
-- **Neither lane refuses a call**, for the same reason the gateway does not: the
-  refusal shape is unprobed.
-- **The transport lane cannot chain through a corporate proxy.** It clears the
-  proxy environment variables it would otherwise inherit, because a relay that
-  inherits its own address dials itself until sockets run out.
+  ever received an event from either lane.**
+- **The transport lane installs a certificate authority on your machine**, and
+  cannot chain through a corporate proxy. The CA is generated locally, never
+  transmitted, and name-constrained to that single host, so a leak cannot mint a
+  certificate for anything else; it has no more protection than your credentials
+  do, and anything running as you can read it. `openbox uninstall` deletes it.
+  The relay clears the proxy environment variables it would otherwise inherit,
+  because a relay that inherits its own address dials itself until sockets run
+  out.
 
 ## Where things live
 
 ```
 ~/.openbox/.env          your credentials; API key, signing key (0600, never commit)
   dev.json      posture (enforce, capture, fail_closed) + coordinates (DID, agent id, URLs)
-                    ── only on a machine that ran an older --gateway install ──
+                    ── only on a machine that ran an older gateway install ──
   gateway.log   the daemon's stdio; the only place it says it is recording nothing
   gateway-prior-env.json   the ANTHROPIC_BASE_URL the install displaced, so
                            a removal can put your own relay back
@@ -372,9 +343,11 @@ prevent, so the limits are documented as first-class:
   governance, can read your signing key and sign events as you. On Windows
   `0600` is a no-op and other local accounts can read it. Attestation therefore
   proves origin-of-config, not tamper-resistance against the developer.
-- **Project scope means partial coverage.** With the default `init`, only the
-  initialized directory is governed, and sessions elsewhere produce no events at
-  all; so absence of events is not evidence of absence of work.
+- **Coverage is per machine, and installing is the developer's own step.** One
+  `init` governs every session on that machine, in any directory, immediately;
+  but a machine that never ran it produces no events at all, so absence of
+  events is evidence only about the machines you know are installed. Making the
+  install itself unavoidable is the fleet's job, not this tool's.
 - **Commit attribution is an inferred claim** unless the pipeline fetches the
   signed attestation note; then it is cryptographically verified.
 - **Enforcement prevents mistakes, not motivated bypass**, for two independent
@@ -395,24 +368,24 @@ prevent, so the limits are documented as first-class:
   HALT verdict*. Diagnosed live, core-side fix in flight.
 - **Egress is observed, not controlled.** With no lane installed, OpenBox does
   not carry the coding tool's traffic to its model provider at all; it records
-  that posture as evidence. With `--gateway` or `--transport` it relays and
+  that posture as evidence. On Claude Code the transport relay carries and
   records every model call; but it still does not *refuse* one: the refusal path
   is written and unwired on **both** in-path lanes, so a model call that reaches
   either is forwarded. Nothing anywhere allow-lists the tool's other
   destinations.
-- **The two newer lanes have never run against a live stack, and their reason
-  for existing is unconfirmed.** `--telemetry` and `--transport` are verified by
-  replaying real recorded traffic through the shipped code on a host that cannot
-  bind a socket. The desktop-app and subscription-OAuth coverage they were built
-  for is intent, not measurement. `--telemetry` additionally reports what the
-  governed tool chooses to report, so it is suppressible by the thing it
+- **The installed lanes have never run against a live stack, and their reason
+  for existing is unconfirmed.** The telemetry and transport lanes are verified
+  by replaying real recorded traffic through the shipped code on a host that
+  cannot bind a socket. The desktop-app and subscription-OAuth coverage they
+  were built for is intent, not measurement. Telemetry additionally reports what
+  the governed tool chooses to report, so it is suppressible by the thing it
   observes; treat its silence on an otherwise-active session as a finding rather
   than as an absence.
-- **`--transport` puts a CA private key on the developer's machine.**
+- **The transport lane puts a CA private key on the developer's machine.**
   Name-constrained to the one intercepted host, generated locally, never
   transmitted; and readable by anything running as that developer, exactly like
   the signing key.
-- **The gateway detects a bypass, it does not stop one.** Unsetting one
+- **A lane detects a bypass, it does not stop one.** Unsetting one
   environment variable is enough, and no OpenBox default prevents that. What you
   get is a hole in the record that is queryable and attributable, plus an
   `openbox doctor` warning. Prevention needs your MDM to own the config and
@@ -436,8 +409,6 @@ Details and current status:
 
 ## Commands
 
-| | |
-|---|---|
 There are five, and `init` is the only one that takes a flag.
 
 | | |
