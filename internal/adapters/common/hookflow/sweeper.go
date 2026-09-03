@@ -5,6 +5,7 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -44,7 +45,7 @@ func (s Sweeper) Run(ctx context.Context, logger *log.Logger) {
 		}
 	}
 	for {
-		s.sweepOnce(logger)
+		s.sweepOnce(logger, interval)
 		select {
 		case <-ctx.Done():
 			return
@@ -53,7 +54,50 @@ func (s Sweeper) Run(ctx context.Context, logger *log.Logger) {
 	}
 }
 
-func (s Sweeper) sweepOnce(logger *log.Logger) {
+// sweepLockName is DOTTED on purpose: sanitizeSessionID emits only
+// [A-Za-z0-9_-], so no real session's flush lock can ever collide with it, and
+// none of the spool's file predicates (IsBacklogFile, IsRecoveryFile,
+// RetireStale's `.jsonl` test) match it either.
+const sweepLockName = ".sweep.flushlock"
+
+// claimSweep is the machine-wide debounce: one sweep per window across every
+// lane daemon sharing the spool directory. It reports whether this process won.
+//
+// Nothing releases the lock, unlike a session's: a sweep has no session end to
+// release it at, so the next sweep takes it over once it has gone stale. The
+// window is the sweep interval, which makes that exactly one sweep per interval.
+func (s Sweeper) claimSweep(logger *log.Logger, window time.Duration) bool {
+	if err := os.MkdirAll(s.Spool.Dir, 0o700); err != nil {
+		logger.Printf("spool sweep: cannot reach the spool directory: %v", err)
+		return false
+	}
+	lock := filepath.Join(s.Spool.Dir, sweepLockName)
+	f, err := os.OpenFile(lock, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	switch {
+	case err == nil:
+		f.Close()
+		return true
+	case os.IsExist(err):
+		info, statErr := os.Stat(lock)
+		if statErr != nil {
+			return false // vanished mid-race; the next interval retries
+		}
+		if time.Since(info.ModTime()) < window {
+			return false // another lane's sweeper already owns this interval
+		}
+		now := time.Now()
+		if chErr := os.Chtimes(lock, now, now); chErr != nil {
+			logger.Printf("spool sweep: stale-lock takeover skipped: %v", chErr)
+			return false
+		}
+		return true
+	default:
+		logger.Printf("spool sweep: lock claim skipped: %v", err)
+		return false
+	}
+}
+
+func (s Sweeper) sweepOnce(logger *log.Logger, interval time.Duration) {
 	self := s.Self
 	if self == "" {
 		exe, err := os.Executable()
@@ -71,6 +115,15 @@ func (s Sweeper) sweepOnce(logger *log.Logger) {
 	pending := s.Spool.BacklogCount()
 	if pending == 0 {
 		return // an empty queue is the healthy steady state
+	}
+
+	// Debounced machine-wide, as Maybe debounces per session, and for a sharper
+	// reason: all three lane daemons sweep the ONE directory on the same
+	// un-jittered timers, so an ungated sweepOnce spawns two or three flushers
+	// milliseconds apart. Two overlapping FlushAll walks are the precondition for
+	// the orphan-reclaim double drain, so this is correctness, not courtesy.
+	if !s.claimSweep(logger, interval) {
+		return
 	}
 
 	cmd := exec.Command(self, "hook", s.Provider, "flush")

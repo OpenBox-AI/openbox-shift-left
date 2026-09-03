@@ -203,6 +203,15 @@ func (s Spool) FlushAll(ctx context.Context, fn FlushFunc) (int, error) {
 			if os.Rename(filepath.Join(s.Dir, name), claimed) != nil {
 				continue // lost the race to another drain, or already gone
 			}
+			// Stamp it, as drainFile stamps its own rotation: the claim is exclusive
+			// only while the MTIME says a drain holds the file. Rename preserves the
+			// mtime and the claimed name still contains ".flushing.", so without
+			// this the next concurrent walk -- routine, with three lane daemons on
+			// one directory -- reclaims it mid-drain and delivers every line twice.
+			// Nothing downstream dedupes; see this file's header. `born` was read
+			// before the rename, so retirement's clock is untouched.
+			reclaimedAt := time.Now()
+			_ = os.Chtimes(claimed, reclaimedAt, reclaimedAt)
 			// An orphan's own mtime IS its age; it is what qualified it above.
 			n, err = s.drainRotated(ctx, orphanBasePath(s.Dir, name), claimed, fn, info.ModTime())
 		case strings.HasSuffix(name, ".jsonl"):
@@ -239,7 +248,17 @@ func (s Spool) drainFile(ctx context.Context, path string, fn FlushFunc) (int, e
 		if fi, statErr := os.Stat(path); statErr == nil {
 			born = fi.ModTime()
 		}
-		return os.Rename(path, rotated)
+		if renameErr := os.Rename(path, rotated); renameErr != nil {
+			return renameErr
+		}
+		// Inside the lock, not after it. Between an unlock and a later stamp the
+		// rotated file still carries the SOURCE's mtime -- and a carry-over file's
+		// is deliberately stamped back to `born` -- so a concurrent walk landing in
+		// that window sees a brand-new rotation as an orphan older than
+		// ReclaimOrphanAfter and drains it in parallel with the drain that made it.
+		rotatedAt := time.Now()
+		_ = os.Chtimes(rotated, rotatedAt, rotatedAt)
+		return nil
 	}()
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -247,8 +266,6 @@ func (s Spool) drainFile(ctx context.Context, path string, fn FlushFunc) (int, e
 		}
 		return 0, fmt.Errorf("spool rotate: %w", err)
 	}
-	now := time.Now()
-	_ = os.Chtimes(rotated, now, now)
 	return s.drainRotated(ctx, path, rotated, fn, born)
 }
 
@@ -291,6 +308,12 @@ func (s Spool) drainRotated(ctx context.Context, basePath, file string, fn Flush
 	// Counted rather than recorded line by line, for the same reason refused and
 	// held are: one drain pass leaves one account of what it lost.
 	unbuildable := 0
+	// corrupt gets its OWN count for the same reason unbuildable does. It was the
+	// one loss here that left no trace: not delivered, not carried, not counted,
+	// and the source unlinked by the defer above -- so every counter read zero and
+	// the session still said evidence_state "complete". A torn tail from a crash
+	// mid-Append is exactly that shape.
+	corrupt := 0
 	var stopped error
 	for i, line := range lines {
 		if ctx.Err() != nil {
@@ -308,7 +331,8 @@ func (s Spool) drainRotated(ctx context.Context, basePath, file string, fn Flush
 		}
 		var ev client.DevEvent
 		if json.Unmarshal(line, &ev) != nil {
-			continue // skip a corrupt line; never fail the whole drain
+			corrupt++ // skip a corrupt line; never fail the whole drain -- but say so
+			continue
 		}
 		switch err := fn(ctx, ev); {
 		case err == nil:
@@ -340,6 +364,11 @@ func (s Spool) drainRotated(ctx context.Context, basePath, file string, fn Flush
 	}
 	if unbuildable > 0 {
 		s.recordDiscard(basePath, unbuildable, "the client could not build the event for delivery")
+	}
+	if corrupt > 0 {
+		// Its own reason, so an investigation goes to the writer rather than to the
+		// wire: a line that will not parse was damaged on disk, not refused.
+		s.recordDiscard(basePath, corrupt, "the spooled line was not valid JSON and could not be read back")
 	}
 	s.carryOver(basePath, refused, held, attempt, born)
 	return n, stopped
