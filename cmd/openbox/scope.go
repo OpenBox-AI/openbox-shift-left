@@ -69,8 +69,12 @@ func (a *app) printGovernedScope(o devinit.Options) {
 	// Named whether or not anything was there: "only partly cleaned" is only
 	// actionable if the reader can see which file this run actually looked at.
 	if wd, err := os.Getwd(); err == nil {
-		fmt.Fprintf(a.stdout, "  Swept any superseded OpenBox entry from %s;\n", providers.ClaudeProjectSettingsPath(wd))
-		fmt.Fprintf(a.stdout, "  a project-level copy would register the same gate a second time.\n")
+		project := providers.ClaudeProjectSettingsPath(wd)
+		if fileExists(project) {
+			fmt.Fprintf(a.stdout, "  Checked %s for a superseded OpenBox entry;\n", project)
+			fmt.Fprintf(a.stdout, "  a project-level copy would register the same gate a second time. Anything\n")
+			fmt.Fprintf(a.stdout, "  removed, or any reason it could not be, is reported above.\n")
+		}
 	}
 	a.printHookBlockNotice()
 }
@@ -82,6 +86,17 @@ func (a *app) printGovernedScope(o devinit.Options) {
 func (a *app) printHookBlockNotice() {
 	state := resolveHookBlock()
 	if !state.blocked {
+		return
+	}
+	// A mandated fleet is the shape the lock exists for, and OpenBox's own
+	// managed template is exactly that: it declares these hooks itself. Shouting
+	// "nothing is governed" there would be false and would send somebody looking
+	// for a gap that is not there.
+	if state.governedElsewhere {
+		fmt.Fprintf(a.stdout, "\n  NOTE; this machine is governed by managed policy: %s\n", state.summary)
+		for _, line := range state.detail {
+			fmt.Fprintf(a.stdout, "    %s\n", line)
+		}
 		return
 	}
 	fmt.Fprintf(a.stdout, "\n  BUT NOTHING IS GOVERNED BY THIS INSTALL: %s\n", state.summary)

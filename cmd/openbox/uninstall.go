@@ -75,6 +75,7 @@ func (a *app) runUninstall(args []string) int {
 	a.removeLanes(st, home)
 	a.removeArtifacts(st, inv)
 	a.removeCredentials(st, inv)
+	a.reportUnrestorableRouting(st, home)
 	a.printUninstallReport(st, inv)
 	if st.failed {
 		return exitError
@@ -226,8 +227,10 @@ func (a *app) printInventory(inv uninstallInventory) {
 		fmt.Fprintf(a.stdout, "  lane           %s (unit stopped and removed, env keys restored)\n", lane)
 	}
 	if inv.unrecordedLane {
-		fmt.Fprintf(a.stdout, "  lane           a unit or a routed env key with no activation record behind it;\n")
-		fmt.Fprintf(a.stdout, "                 left by an interrupted removal or an older install. Removed anyway.\n")
+		fmt.Fprintf(a.stdout, "  lane           a unit or a routed env key with no activation record behind it,\n")
+		fmt.Fprintf(a.stdout, "                 left by an interrupted removal or an older install. The unit can be\n")
+		fmt.Fprintf(a.stdout, "                 removed; a routed key cannot, because the record of what was there\n")
+		fmt.Fprintf(a.stdout, "                 before it is gone.\n")
 	}
 	for _, p := range inv.posture {
 		fmt.Fprintf(a.stdout, "  posture        %s\n", p)
@@ -345,8 +348,9 @@ func (a *app) removeHookSurfaces(st *uninstallState, inv uninstallInventory) {
 	}
 	if inv.pluginDir != "" {
 		// After the settings files, so nothing still references the bin/openbox
-		// copy inside it. The bundle carries its own hooks.json, which is the one
-		// hook path Claude Code does not de-duplicate.
+		// copy inside it. Older installs also left a plugin manifest and a second
+		// copy of the hook config in there, which no longer ship: a plugin's
+		// handlers do not de-duplicate against the settings-level ones.
 		if err := os.RemoveAll(inv.pluginDir); err != nil {
 			fmt.Fprintf(a.stderr, "warning: could not delete %s: %v\n", inv.pluginDir, err)
 			st.hookFailed = append(st.hookFailed, hookFailure{path: inv.pluginDir})
@@ -447,6 +451,30 @@ func (a *app) removeCredentials(st *uninstallState, inv uninstallInventory) {
 	fmt.Fprintf(a.stdout, "  the obx_ key and the Ed25519 signing seed in that file cannot be re-retrieved.\n")
 	fmt.Fprintf(a.stdout, "  `openbox auth` registers a NEW agent; it does not recover this one.\n")
 	fmt.Fprintf(a.stdout, "  This is an unlink, not a secure erase: the blocks are freed, not overwritten.\n")
+}
+
+// reportUnrestorableRouting is the one residue this command cannot clear.
+//
+// A lane env key with no activation record behind it has no "before" value to
+// put back: Deactivate finds no entry, returns nil, and the key survives. The
+// direction of error is right -- a value we have no record of writing is not
+// ours to delete or guess at -- but reporting success over it would tell the
+// operator their model calls are no longer being routed when they are, at a
+// daemon that is gone.
+func (a *app) reportUnrestorableRouting(st *uninstallState, home string) {
+	routed := activation.ResolveElection(gatewayservice.SettingsPath(home)).Routed
+	if len(routed) == 0 {
+		return
+	}
+	settings := gatewayservice.SettingsPath(home)
+	fmt.Fprintf(a.stdout, "\nLEFT IN PLACE; and this machine is NOT clean\n")
+	fmt.Fprintf(a.stdout, "  %s still routes model calls through %v.\n", settings, routed)
+	fmt.Fprintf(a.stdout, "  There is no activation record for it, so nothing here knows what those keys held\n")
+	fmt.Fprintf(a.stdout, "  before OpenBox set them -- and a proxy or base-URL value belongs to whoever put it\n")
+	fmt.Fprintf(a.stdout, "  there. Deleting it blind could take a corporate proxy down with it.\n")
+	fmt.Fprintf(a.stdout, "  The daemon those keys point at is gone, so model calls will fail until you edit\n")
+	fmt.Fprintf(a.stdout, "  that file by hand.\n")
+	st.failed = true
 }
 
 func (a *app) printUninstallReport(st *uninstallState, inv uninstallInventory) {

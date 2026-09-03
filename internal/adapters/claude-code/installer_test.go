@@ -177,19 +177,26 @@ func TestInstaller_ReInstallIsByteIdentical(t *testing.T) {
 		t.Fatalf("first install: %v", err)
 	}
 	cfg1, _ := os.ReadFile(cfgPath)
-	manifest1, _ := os.ReadFile(filepath.Join(pluginDir, ".claude-plugin", "plugin.json"))
+	hooks1, err := os.ReadFile(inst.SettingsPath)
+	if err != nil {
+		t.Fatalf("first install wrote no hooks: %v", err)
+	}
 
 	if err := inst.Install(ref); err != nil {
 		t.Fatalf("re-install: %v", err)
 	}
 	cfg2, _ := os.ReadFile(cfgPath)
-	manifest2, _ := os.ReadFile(filepath.Join(pluginDir, ".claude-plugin", "plugin.json"))
+	hooks2, _ := os.ReadFile(inst.SettingsPath)
 
 	if string(cfg1) != string(cfg2) {
 		t.Errorf("dev config not byte-identical across re-init:\n%s\n---\n%s", cfg1, cfg2)
 	}
-	if string(manifest1) != string(manifest2) {
-		t.Errorf("plugin manifest not byte-identical across re-init")
+	// The bundle no longer ships a manifest to compare, and comparing two
+	// absent files would have passed whatever the installer did. The hook
+	// registrations are the artifact that has to be stable now -- and the file
+	// they live in belongs to the developer.
+	if string(hooks1) != string(hooks2) {
+		t.Errorf("hook registrations not byte-identical across re-init:\n%s\n---\n%s", hooks1, hooks2)
 	}
 }
 

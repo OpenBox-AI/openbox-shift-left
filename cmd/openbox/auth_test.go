@@ -585,8 +585,15 @@ func TestAuthSuccessNamesInitAsTheNextStep(t *testing.T) {
 	if !strings.Contains(s, "openbox init") {
 		t.Errorf("success output should name `openbox init`:\n%s", s)
 	}
-	if !strings.Contains(s, "THIS DIRECTORY") {
-		t.Errorf("success output should state the project-local scope default:\n%s", s)
+	// One install governs the whole machine, so telling somebody to repeat it per
+	// project would send them doing work that does nothing.
+	if !strings.Contains(s, "every session on this machine") {
+		t.Errorf("success output should state what the next step governs:\n%s", s)
+	}
+	for _, gone := range []string{"THIS DIRECTORY", "--scope", "each project"} {
+		if strings.Contains(s, gone) {
+			t.Errorf("success output still describes per-project scope (%q):\n%s", gone, s)
+		}
 	}
 }
 

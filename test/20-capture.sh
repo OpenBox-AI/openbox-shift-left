@@ -295,35 +295,4 @@ else
 	fi
 fi
 
-# ── the genuine negative: after uninstall, nothing is governed ───────────────
-# Absence only proves removal once there is nothing left to remove, so this runs
-# against a machine `openbox uninstall` has just cleaned. It is the one place
-# absence of events is evidence.
-tb_step "after uninstall, no directory produces events"
-if [ ! -x "$TB_BIN" ]; then
-	tb_skip "the post-uninstall negative" "no built binary"
-else
-	"$TB_BIN" uninstall >"$TB_STATE/capture-uninstall.out" 2>&1 ||
-		tb_note "uninstall reported a partial removal; see $TB_STATE/capture-uninstall.out"
-	before="$(tb_count "governance_events")"
-	REMOVED_MARK="removed-$(date +%s)"
-	sid_rm="$(TB_SESSION_DIR="$TB_PROJECT" tb_session "Say the word $REMOVED_MARK and nothing else." "")"
-	after="$(tb_count "governance_events")"
-	assert_eq "no governance events once the hooks are gone" "$before" "$after"
-	if [ -n "$sid_rm" ]; then
-		assert_eq "no session row for it either" 0 "$(tb_count "governance_events where run_id='$sid_rm'")"
-	fi
-	# And nothing about that session reached OpenBox at all, prompt included. The
-	# whole row is scanned rather than one column, matching the capture
-	# assertions above.
-	assert_eq "its prompt never egressed" 0 \
-		"$(tb_val "select count(*) from governance_events e where row_to_json(e)::text like '%$REMOVED_MARK%';")"
-	tb_ok "an uninstalled machine produces nothing, from any directory"
-	# Every later phase needs the hooks back.
-	(cd "$TB_PROJECT" && "$TB_BIN" init --provider claude-code) \
-		>"$TB_STATE/capture-reinit.out" 2>&1 ||
-		tb_bad "re-install after the negative" 0 "$(tail -3 "$TB_STATE/capture-reinit.out")"
-	tb_ok "hooks reinstalled for the phases that follow"
-fi
-
 tb_finish

@@ -467,8 +467,8 @@ func (a *app) stdinFile() *os.File {
 }
 
 func (a *app) printAuthNextSteps() {
-	fmt.Fprintf(a.stdout, "\nNext: openbox init --provider <claude-code|codex|cursor>\n")
-	fmt.Fprintf(a.stdout, "  That installs the hooks. By default it governs THIS DIRECTORY only -\n")
-	fmt.Fprintf(a.stdout, "  run it in each project you want governed, or use --scope global for a\n")
-	fmt.Fprintf(a.stdout, " fleet rollout.\n")
+	fmt.Fprintf(a.stdout, "\nNext: openbox init --provider <%s>\n", strings.Join(provider.Supported(), "|"))
+	fmt.Fprintf(a.stdout, "  That installs the hooks and every model-call lane the provider supports. One\n")
+	fmt.Fprintf(a.stdout, "  run governs every session on this machine, in any directory; there is no\n")
+	fmt.Fprintf(a.stdout, "  scope to choose and nothing to repeat per project.\n")
 }

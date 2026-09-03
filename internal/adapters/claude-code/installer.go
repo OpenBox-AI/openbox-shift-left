@@ -129,9 +129,20 @@ func (i Installer) Install(ref CredentialRef) error {
 	}
 	removed, err := SweepProjectHooks(wd)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "openbox: %s still carries an OpenBox hook registration and could not be "+
-			"cleaned: %v\n  Every governed tool call in this project will be recorded twice until it is "+
-			"removed by hand.\n", ProjectSettingsPath(wd), err)
+		if strings.Contains(err.Error(), "not valid JSON") {
+			// It was left untouched, and while it stays malformed the tool applies
+			// NO hooks from it -- so the loss is the developer's own project
+			// hooks, not a doubled OpenBox registration.
+			fmt.Fprintf(os.Stderr, "openbox: %s could not be parsed, so it was left alone: %v\n"+
+				"  While it stays malformed the tool applies no hooks from that file at all, including "+
+				"any of your own. The user-wide install above is unaffected.\n",
+				ProjectSettingsPath(wd), err)
+			return nil
+		}
+		fmt.Fprintf(os.Stderr, "openbox: %s could not be cleaned: %v\n"+
+			"  If it holds an OpenBox registration at a different engine path, every governed tool "+
+			"call in this project is recorded twice until it is removed by hand.\n",
+			ProjectSettingsPath(wd), err)
 		return nil
 	}
 	i.reportSweep(wd, removed)

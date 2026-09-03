@@ -116,11 +116,11 @@ func dropOwnedHandlers(entries []any, event string) (kept []any, engines []strin
 	return kept, engines
 }
 
-// DefaultPluginDir is where every install materializes the plugin bundle,
-// including a copy of the openbox binary at bin/openbox. Exported because a
-// full uninstall has to delete the directory: the bundle carries its own
-// hooks.json, which is the one hook path Claude Code does not de-duplicate
-// against the settings files.
+// DefaultPluginDir is where every install materializes the engine copy at
+// bin/openbox. Exported because a full uninstall has to delete the directory --
+// and because an install from an older binary also left a plugin manifest and a
+// second copy of the hook config there, which is the one hook path Claude Code
+// does not de-duplicate against the settings files.
 func DefaultPluginDir() string { return userPluginDir() }
 
 // HookInvocationMarkers are the substrings that identify an OpenBox

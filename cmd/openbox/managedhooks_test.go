@@ -227,3 +227,115 @@ func TestTheDefaultMachineSaysHooksRun(t *testing.T) {
 		t.Error("the healthy case reported nothing at all")
 	}
 }
+
+// TestTheProductsOwnMandateTierIsNotReportedAsUngoverned is the case that
+// matters most, and the one the first version of this reader got wrong.
+//
+// OpenBox's own managed template inlines these hooks AND sets
+// allowManagedHooksOnly plus strictPluginOnlyCustomization — that combination
+// is the whole point of the mandate tier. Reporting "nothing is governed" there
+// is false, and it is false on exactly the fleet the feature exists for: it
+// sends an operator hunting a governance gap that is not there while a
+// perfectly governed machine sits in front of them.
+func TestTheProductsOwnMandateTierIsNotReportedAsUngoverned(t *testing.T) {
+	f := seedHookFiles(t)
+	f.write(t, f.managed, `{
+	  "hooks": {
+	    "PreToolUse": [{"matcher": "*", "hooks": [{"type": "command",
+	      "command": "/usr/local/bin/openbox hook claude-code PreToolUse", "timeout": 5}]}],
+	    "SessionStart": [{"hooks": [{"type": "command",
+	      "command": "/usr/local/bin/openbox hook claude-code SessionStart", "timeout": 5}]}]
+	  },
+	  "allowManagedHooksOnly": true,
+	  "strictPluginOnlyCustomization": true
+	}`)
+
+	state := resolveHookBlock()
+	if !state.blocked {
+		t.Error("the lock does stop this install's own user-level copy firing; that much is true")
+	}
+	if !state.governedElsewhere {
+		t.Fatalf("a machine governed by OpenBox's own managed hooks was reported ungoverned: %+v", state)
+	}
+	all := state.summary + " " + strings.Join(state.detail, " ")
+	if !strings.Contains(all, "IS governed") {
+		t.Errorf("the finding does not say the machine is governed:\n%s", all)
+	}
+	if strings.Contains(all, "never fire.") && !strings.Contains(all, "redundant") {
+		t.Errorf("the finding reads as a gap rather than a redundant copy:\n%s", all)
+	}
+}
+
+// TestAMandateThatIsSomebodyElsesStillBlocks. The distinction is whose hooks
+// the policy declares, not whether a policy exists: a managed file locking
+// hooks to some other tool's really does leave OpenBox governing nothing.
+func TestAMandateThatIsSomebodyElsesStillBlocks(t *testing.T) {
+	f := seedHookFiles(t)
+	f.write(t, f.managed, `{
+	  "hooks": {"PreToolUse": [{"matcher": "*", "hooks": [{"type": "command",
+	    "command": "/opt/other-vendor/guard"}]}]},
+	  "allowManagedHooksOnly": true
+	}`)
+	state := resolveHookBlock()
+	if !state.blocked || state.governedElsewhere {
+		t.Fatalf("another vendor's mandate was read as OpenBox governance: %+v", state)
+	}
+}
+
+// TestStrictPluginOnlyCustomizationArrayForm. The reference documents an array
+// naming the locked categories alongside the bare boolean and the object.
+// Handling two shapes out of three reports a blocked machine as governed.
+func TestStrictPluginOnlyCustomizationArrayForm(t *testing.T) {
+	for name, tc := range map[string]struct {
+		body  string
+		block bool
+	}{
+		"array with hooks":    {`{"strictPluginOnlyCustomization": ["skills", "hooks"]}`, true},
+		"array without hooks": {`{"strictPluginOnlyCustomization": ["skills", "mcp"]}`, false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := seedHookFiles(t)
+			f.write(t, f.managed, tc.body)
+			if got := resolveHookBlock().blocked; got != tc.block {
+				t.Errorf("blocked = %v, want %v for %s", got, tc.block, tc.body)
+			}
+		})
+	}
+}
+
+// TestALockInAManagedDropInIsFound. managed-settings.d/*.json merges with the
+// main file, so a reader that consulted only the main one would report
+// "nothing disables hooks" on a fleet whose lock arrives in a drop-in — a false
+// negative on the population that most often uses drop-ins.
+func TestALockInAManagedDropInIsFound(t *testing.T) {
+	f := seedHookFiles(t)
+	f.write(t, f.managed, `{"//": "no lock here"}`)
+	dropIn := filepath.Join(filepath.Dir(f.managed), "managed-settings.d", "50-lock.json")
+	if err := os.MkdirAll(filepath.Dir(dropIn), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	f.write(t, dropIn, `{"allowManagedHooksOnly": true}`)
+
+	state := resolveHookBlock()
+	if !state.blocked {
+		t.Fatalf("a lock in a managed drop-in was missed: %+v", state)
+	}
+	if !strings.Contains(strings.Join(state.detail, " "), dropIn) {
+		t.Errorf("the finding does not name the drop-in that set it: %+v", state)
+	}
+}
+
+// TestTheHealthyAnswerSaysWhatItRead. A policy delivered by MDM or from the
+// console outranks these files and is not visible here, so "yes" has to be
+// scoped or it overstates what was checked.
+func TestTheHealthyAnswerSaysWhatItRead(t *testing.T) {
+	seedHookFiles(t)
+	state := resolveHookBlock()
+	if state.blocked {
+		t.Fatalf("a clean machine was reported blocked: %+v", state)
+	}
+	all := state.summary + " " + strings.Join(state.detail, " ")
+	if !strings.Contains(all, "MDM") {
+		t.Errorf("the healthy answer does not say what it could not read:\n%s", all)
+	}
+}

@@ -161,23 +161,10 @@ tb_note "activity types this session: $(tb_sql "select distinct activity_type fr
 assert_eq "a token_count row carries no request body" 0 \
 	"$(tb_count "governance_events where run_id='$sid' and activity_type='token_count' and input ? 'content'")"
 
-# ── 47.5  one command out ─────────────────────────────────────────────────────
-# OD2's second half, and the only case here that is about the SYSTEM rather than a
-# process. A removal that leaves HTTPS_PROXY behind points every model call on the
-# machine at a dead port; one that leaves the CA behind leaves a trust anchor the
-# developer never sees again.
-# Removal is its own command now, and it removes everything rather than just
-# the lanes -- so this also proves uninstall reverses the in-path relay.
-tb_step "47.5  \`openbox uninstall\` returns the machine to baseline"
-"$TB_BIN" uninstall >"$TB_STATE/px-remove.log" 2>&1
-residue=0
-grep -q "HTTPS_PROXY" "$SETTINGS" 2>/dev/null && { tb_bad "HTTPS_PROXY survives removal"; residue=1; }
-[ -f "$CA_PEM" ] && { tb_bad "the CA survives removal at $CA_PEM"; residue=1; }
-nc -z "${PX_ADDR%%:*}" "${PX_ADDR##*:}" 2>/dev/null && { tb_bad "the relay is still listening after removal"; residue=1; }
-[ "$residue" -eq 0 ] && tb_ok "settings, CA and unit all removed"
-
-# Every later phase needs the machine governed again.
-(cd "$TB_PROJECT" && "$TB_BIN" init --provider claude-code) >"$TB_STATE/px-reinit.log" 2>&1 ||
-	tb_bad "re-install after the removal check" 0 "$(tail -3 "$TB_STATE/px-reinit.log")"
+# The removal half moved to 99-teardown.sh. `openbox uninstall` is a full purge
+# -- it deletes ~/.openbox/.env along with everything else -- so running it here
+# would leave every later phase, and this file's own re-install, with no
+# credentials to authenticate with. Teardown is the one place a destructive
+# check belongs.
 
 tb_finish

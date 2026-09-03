@@ -5,7 +5,9 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
 
+	"github.com/openbox-ai/openbox-shift-left/internal/cli/providers"
 	"github.com/tidwall/gjson"
 )
 
@@ -43,9 +45,15 @@ const envManagedSettingsPath = "OPENBOX_CLAUDE_MANAGED_SETTINGS"
 
 // hookBlockState is the effective outcome, not a list of keys found.
 type hookBlockState struct {
+	// blocked reports that THIS install's user-level hooks will not fire.
 	blocked bool
-	summary string
-	detail  []string
+	// governedElsewhere reports that the machine is nonetheless governed,
+	// because the managed policy declares OpenBox's hooks itself. Separate from
+	// blocked because the two need opposite words: one is a gap to chase, the
+	// other is a mandated fleet working as designed.
+	governedElsewhere bool
+	summary           string
+	detail            []string
 }
 
 // claudeManagedSettingsPath is derived here rather than through
@@ -62,10 +70,29 @@ func claudeManagedSettingsPath() string {
 	case "darwin":
 		return filepath.Join("/Library", "Application Support", "ClaudeCode", "managed-settings.json")
 	case "windows":
-		return filepath.Join(`C:\ProgramData\ClaudeCode`, "managed-settings.json")
+		// The current location. The legacy C:\ProgramData\ClaudeCode path is no
+		// longer read by the tool, so reporting from it would describe a file
+		// that has no effect.
+		return filepath.Join(`C:\Program Files\ClaudeCode`, "managed-settings.json")
 	default:
 		return ""
 	}
+}
+
+// managedDropIns are the managed-settings.d/*.json files that merge with the
+// main managed file. A reader that consulted only the main file would report
+// "nothing disables hooks" on a fleet whose lock arrives in a drop-in.
+func managedDropIns() []string {
+	main := claudeManagedSettingsPath()
+	if main == "" {
+		return nil
+	}
+	paths, err := filepath.Glob(filepath.Join(filepath.Dir(main), "managed-settings.d", "*.json"))
+	if err != nil {
+		return nil
+	}
+	sort.Strings(paths)
+	return paths
 }
 
 // settingsLevel is one file plus how it ranks. Later in the slice wins, and
@@ -111,28 +138,32 @@ func resolveHookBlock() hookBlockState {
 			"%s exists but could not be read (%v), so whether it blocks hooks is UNKNOWN.", managedPath, managedErr))
 	}
 
-	// Managed-only keys first: either one means our user-level hooks never run,
+	// Managed-only keys first: either one stops our user-level hooks running,
 	// whatever any other file says.
-	if managed != nil {
-		if gjson.GetBytes(managed, "allowManagedHooksOnly").Bool() {
+	for _, m := range managedLayers(managedPath, managed) {
+		if key, ok := hookLockKey(m.raw); ok {
 			state.blocked = true
-			state.summary = "NO; allowManagedHooksOnly is set by managed policy, so only hooks that policy " +
+			// The lock does NOT mean the machine is ungoverned. OpenBox's own
+			// managed template inlines these hooks and sets this key: on that
+			// fleet -- the one the key exists for -- the managed copy is
+			// governing and only our user-level duplicate is inert. Saying
+			// "nothing is governed" there sends somebody hunting a gap that is
+			// not there.
+			if managedHooksAreOurs(managedPath) {
+				state.governedElsewhere = true
+				state.summary = "not this install's copy, and it does not need to be: " + key +
+					" is set by managed policy and that policy installs OpenBox's own hooks. " +
+					"This machine IS governed, by the managed copy."
+				state.detail = append(state.detail,
+					fmt.Sprintf("both are declared in %s. The user-level copy this command wrote is", m.path),
+					"redundant and will not fire, which is the intended shape for a mandated fleet.")
+				return state
+			}
+			state.summary = "NO; " + key + " is set by managed policy, so only hooks that policy " +
 				"declares run. OpenBox's are user-level, so they never fire."
 			state.detail = append(state.detail,
-				fmt.Sprintf("set in %s. Only your administrator can change it; deploy OpenBox's hooks through", managedPath),
-				"managed settings instead (see deployments/managed/) if this machine must stay locked.")
-			return state
-		}
-		strict := gjson.GetBytes(managed, "strictPluginOnlyCustomization")
-		// Object form names a category; the bare boolean is the parent key. Both
-		// are treated as locking hooks, because the shape our own template ships
-		// is the bare one.
-		if strict.Get("hooks").Bool() || (strict.Type == gjson.True) {
-			state.blocked = true
-			state.summary = "NO; strictPluginOnlyCustomization locks hooks to plugin and managed sources, " +
-				"so OpenBox's user-level hooks never fire."
-			state.detail = append(state.detail,
-				fmt.Sprintf("set in %s. Only your administrator can change it.", managedPath))
+				fmt.Sprintf("set in %s. Only your administrator can change it; deploy OpenBox's hooks", m.path),
+				"through managed settings instead (see deployments/managed/) if this machine must stay locked.")
 			return state
 		}
 	}
@@ -140,10 +171,16 @@ func resolveHookBlock() hookBlockState {
 	// disableAllHooks, resolved across every level by precedence.
 	decided, decidedBy, found := resolveDisableAllHooks()
 	if !found || !decided {
-		state.summary = "yes; nothing on this machine disables hooks."
+		state.summary = "yes; nothing in this machine's settings files disables hooks."
 		if managedErr != nil {
 			state.summary = "probably; nothing readable disables hooks, but see the managed file below."
 		}
+		// Said plainly, because the answer is only as good as what was read: a
+		// policy delivered by MDM or from the console outranks the file and is
+		// not visible here.
+		state.detail = append(state.detail,
+			"Read from the settings files only. A policy delivered by MDM or from the console"+
+				" outranks them and is not inspected; the tool's own `/status` is authoritative.")
 		return state
 	}
 
@@ -181,6 +218,59 @@ func resolveDisableAllHooks() (value bool, decidedBy settingsLevel, found bool) 
 		value, decidedBy, found = key.Bool(), level, true
 	}
 	return value, decidedBy, found
+}
+
+// managedLayer is one managed source: the main file, or a drop-in that merges
+// with it.
+type managedLayer struct {
+	path string
+	raw  []byte
+}
+
+func managedLayers(mainPath string, main []byte) []managedLayer {
+	layers := make([]managedLayer, 0, 2)
+	if main != nil {
+		layers = append(layers, managedLayer{path: mainPath, raw: main})
+	}
+	for _, p := range managedDropIns() {
+		if raw, err := readSettings(p); err == nil && raw != nil {
+			layers = append(layers, managedLayer{path: p, raw: raw})
+		}
+	}
+	return layers
+}
+
+// hookLockKey reports which managed-only key, if any, locks hooks away from
+// user and project sources.
+func hookLockKey(raw []byte) (string, bool) {
+	if gjson.GetBytes(raw, "allowManagedHooksOnly").Bool() {
+		return "allowManagedHooksOnly", true
+	}
+	strict := gjson.GetBytes(raw, "strictPluginOnlyCustomization")
+	switch {
+	case strict.Type == gjson.True:
+		// The bare parent key locks all four categories, and it is the shape
+		// this repo's own template ships.
+		return "strictPluginOnlyCustomization", true
+	case strict.Get("hooks").Bool():
+		return "strictPluginOnlyCustomization.hooks", true
+	case strict.IsArray():
+		// The array form names the categories it locks.
+		for _, v := range strict.Array() {
+			if v.String() == "hooks" {
+				return "strictPluginOnlyCustomization", true
+			}
+		}
+	}
+	return "", false
+}
+
+// managedHooksAreOurs reports whether the managed policy installs OpenBox's own
+// hooks. Classified through the same registry the installer and doctor use, so
+// the three cannot hold different opinions about what "ours" means.
+func managedHooksAreOurs(managedPath string) bool {
+	audit, err := providers.AuditHooks(managedPath)
+	return err == nil && len(audit.Engines) > 0
 }
 
 // readSettings returns nil for an absent file and an error only for one that

@@ -12,6 +12,9 @@ TB_DIR="$(cd "$(dirname "$0")" && pwd)"
 . "$TB_DIR/env.sh"
 . "$TB_DIR/lib/assert.sh"
 . "$TB_DIR/lib/sql.sh"
+# The post-uninstall negative below drives a real session, which is the only way
+# absence of rows proves the hooks are gone rather than merely quiet.
+. "$TB_DIR/lib/session.sh"
 
 AGENT="$(tb_state_get agent_id)"
 
@@ -73,6 +76,35 @@ if [ -x "$TB_BIN" ]; then
 	Linux) tb_units="$(systemctl --user list-units 'openbox*' --no-legend 2>/dev/null | wc -l | tr -d ' ' || true)" ;;
 	esac
 	assert_eq "no OpenBox lane unit is left loaded" 0 "${tb_units:-0}"
+
+	# The transport lane's own residue, which 47 cannot check for itself: a
+	# removal that leaves HTTPS_PROXY behind points every model call on the
+	# machine at a dead port, and one that leaves the CA behind leaves a trust
+	# anchor the developer never sees again.
+	tb_settings_env="$(eval echo "~$(id -un)")/.claude/settings.json"
+	if [ -f "$tb_settings_env" ]; then
+		tb_proxy="$(grep -c 'HTTPS_PROXY' "$tb_settings_env" 2>/dev/null)"
+		assert_eq "no proxy env key survives removal" 0 "${tb_proxy:-0}"
+	fi
+	assert_eq "the transport CA is gone" 0 \
+		"$([ -f "$OPENBOX_HOME/transport-ca.pem" ] && echo 1 || echo 0)"
+
+	# The genuine negative, and the only place absence is evidence: with the
+	# hooks removed, a real session in the governed project must produce nothing.
+	# Everywhere else in this suite, absence of rows would be ambiguous.
+	if [ -d "$TB_PROJECT" ]; then
+		before="$(tb_count "governance_events")"
+		REMOVED_MARK="removed-$(date +%s)"
+		sid_rm="$(TB_SESSION_DIR="$TB_PROJECT" tb_session "Say the word $REMOVED_MARK and nothing else." "")"
+		assert_eq "no governance events once the hooks are gone" "$before" "$(tb_count "governance_events")"
+		if [ -n "$sid_rm" ]; then
+			assert_eq "no session row for it either" 0 "$(tb_count "governance_events where run_id='$sid_rm'")"
+		fi
+		# And nothing about that session reached OpenBox at all, prompt included.
+		assert_eq "its prompt never egressed" 0 \
+			"$(tb_val "select count(*) from governance_events e where row_to_json(e)::text like '%$REMOVED_MARK%';")"
+		tb_ok "an uninstalled machine produces nothing"
+	fi
 else
 	tb_skip "uninstall the test install" "no built binary at $TB_BIN, so nothing was installed"
 fi
