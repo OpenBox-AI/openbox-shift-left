@@ -25,9 +25,27 @@ TB_DIR="$(cd "$(dirname "$0")" && pwd)"
 . "$TB_DIR/lib/sql.sh"
 
 CONFIG="$OPENBOX_HOME/dev.json"
+# An install registers user-wide now, so this is where the hooks land. HOOKS is
+# kept and still asserted on, because a legacy project-level entry surviving an
+# install is exactly the double-registration the sweep exists to prevent.
+USER_HOOKS="$HOME/.claude/settings.json"
 HOOKS="$TB_PROJECT/.claude/settings.local.json"
-# A second project, never initialized, for the negative scope assertion.
+# A second project, never initialized. It used to prove sessions there were
+# UNgoverned; with user-wide hooks it proves the opposite, which is what global
+# scope means.
 TB_UNGOVERNED="${TB_UNGOVERNED:-/tmp/openbox-test-ungoverned}"
+
+# hook_count sums a registration across BOTH levels. Neither file alone can show
+# the same gate registered twice, which is the failure the sweep prevents.
+hook_count() { # <marker>
+	local n total=0 f
+	for f in "$USER_HOOKS" "$HOOKS"; do
+		[ -f "$f" ] || continue
+		n="$(grep -c "$1" "$f" 2>/dev/null)"
+		total=$((total + ${n:-0}))
+	done
+	echo "$total"
+}
 
 tb_step "build the binary under test"
 go build -o "$TB_BIN" "$TB_REPO/cmd/openbox" || tb_fatal "go build failed"
@@ -196,8 +214,8 @@ grep -q "$BOGUS_ENGINE" "$HOOKS" || tb_fatal "could not plant a stale engine pat
 	--install-git-hook) >"$TB_STATE/reinit.out" 2>&1 ||
 	tb_bad "re-init succeeded" 0 "$(tail -3 "$TB_STATE/reinit.out")"
 
-hooks="$(cat "$HOOKS")"
-assert_eq "PreToolUse registered exactly once" 1 "$(grep -c 'hook claude-code PreToolUse' "$HOOKS")"
+hooks="$(cat "$USER_HOOKS" 2>/dev/null)$(cat "$HOOKS" 2>/dev/null)"
+assert_eq "PreToolUse registered exactly once across both levels" 1 "$(hook_count 'hook claude-code PreToolUse')"
 assert_absent "the stale engine path is gone" "$hooks" "$BOGUS_ENGINE"
 assert_contains "the rewake watcher survived the replacement" "$hooks" "rewake claude-code"
 # Swapping a governing binary without saying so is the same class of problem as
@@ -228,32 +246,41 @@ assert_contains "doctor flags the duplicate first" "$doctor_out" "more than once
 	--install-git-hook) >"$TB_STATE/reinit-dup.out" 2>&1 ||
 	tb_bad "re-init succeeded" 0 "$(tail -3 "$TB_STATE/reinit-dup.out")"
 
-assert_eq "Stop registered exactly once again" 1 "$(grep -c 'hook claude-code Stop"' "$HOOKS")"
+assert_eq "Stop registered exactly once again" 1 "$(hook_count 'hook claude-code Stop\"')"
 # The gate and the watcher share the PreToolUse key and differ only by invocation;
 # collapsing by event would delete the watcher and no approval hold would wake.
-assert_eq "the approval watcher is untouched" 1 "$(grep -c 'rewake claude-code' "$HOOKS")"
+assert_eq "the approval watcher is untouched" 1 "$(hook_count 'rewake claude-code')"
 assert_contains "re-init names the duplicate it removed" "$(cat "$TB_STATE/reinit-dup.out")" "removed duplicate OpenBox hook registrations"
 doctor_out="$(cd "$TB_PROJECT" && "$TB_BIN" doctor 2>&1 || true)"
 assert_absent "the warning doctor raised is now clear" "$doctor_out" "more than once"
 
-# The plugin bundle is materialised into ~/.claude/plugins but activation is a
-# separate, deliberate step. If it were enabled here, every session on this
-# machine would be governed by the test's config — the exact accident
-# a global enforce posture causes.
-enabled="$(cat "$HOME/.claude/settings.json" 2>/dev/null || echo '{}')"
-assert_absent "plugin not globally enabled — scope holds" "$enabled" "openbox-observe"
+# The user file is now the activation, so a substring test against it cannot
+# work: every hook command embeds the engine path, which contains
+# "openbox-observe". What matters is the COUNT of the gate, asserted above and
+# again here at the level that governs.
+assert_eq "the user file carries exactly one PreToolUse gate" 1 \
+	"$(grep -c 'hook claude-code PreToolUse' "$USER_HOOKS")"
+assert_eq "and exactly one approval watcher" 1 "$(grep -c 'rewake claude-code' "$USER_HOOKS")"
 
-tb_step "the negative: a directory where init was not run"
-# that decision's accepted cost, demonstrated rather than asserted. A session started
-# here produces NOTHING — no session row, no events — so on a machine set up this
-# way, absence of events is not evidence of absence of work.
+tb_step "the positive control: a directory where init was never run"
+# Inverted with user-wide hooks. This used to demonstrate the accepted cost of
+# project scope -- a session here produced nothing, so absence of events proved
+# nothing about the work. That cost is gone, and the claim worth proving now is
+# the opposite one: a session in a directory this suite never initialized is
+# governed, because that is what global scope means.
+#
+# It is a control rather than an assertion about files: the directory must carry
+# no hook config of its own, so anything it produces came from the user file.
 [ -e "$TB_UNGOVERNED/.claude/settings.local.json" ] &&
-	tb_bad "ungoverned twin has no hook config" "absent" "$TB_UNGOVERNED/.claude/settings.local.json exists"
-assert_absent "ungoverned twin has no .claude dir at all" "$(ls -a "$TB_UNGOVERNED" 2>/dev/null)" ".claude"
-tb_ok "no hook config in $TB_UNGOVERNED — sessions there are ungoverned"
-# 20-capture.sh drives a real session in this directory and asserts zero rows;
-# recording the path in state is what lets it do that without re-deriving it.
+	tb_bad "the control project has no hook config of its own" "absent" \
+		"$TB_UNGOVERNED/.claude/settings.local.json exists"
+assert_absent "the control project has no .claude dir at all" "$(ls -a "$TB_UNGOVERNED" 2>/dev/null)" ".claude"
+tb_ok "no hook config in $TB_UNGOVERNED — anything it produces comes from $USER_HOOKS"
+# 20-capture.sh drives a real session in this directory and asserts rows DO
+# appear; recording the path in state is what lets it do that without
+# re-deriving it. The genuine negative moved to after `openbox uninstall`.
 tb_state_set ungoverned_project "$TB_UNGOVERNED"
+tb_state_set user_hooks "$USER_HOOKS"
 
 tb_step "verify + doctor"
 "$TB_BIN" dev verify >"$TB_STATE/verify.out" 2>&1

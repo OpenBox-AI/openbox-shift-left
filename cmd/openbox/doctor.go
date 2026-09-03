@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net"
 	"os"
-	"path/filepath"
 	"runtime"
 	"slices"
 	"sort"
@@ -109,38 +108,7 @@ func (a *app) runDoctor(args []string) int {
 		fmt.Fprintf(a.stdout, "  %-12s %s\n", prov, state)
 	}
 
-	fmt.Fprintf(a.stdout, "\nProject hook registration\n")
-	if wd, err := os.Getwd(); err != nil {
-		fmt.Fprintf(a.stdout, "  current directory unreadable (%v); check skipped\n", err)
-	} else {
-		audit, err := providers.AuditProjectHooks(wd)
-		switch {
-		case err != nil:
-			fmt.Fprintf(a.stdout, "  %s: could not be read; %v\n", audit.SettingsPath, err)
-		case !audit.Present:
-			fmt.Fprintf(a.stdout, "  %s  (absent)\n", audit.SettingsPath)
-			fmt.Fprintf(a.stdout, "    No project hook config in THIS directory. A global-scope install governs\n")
-			fmt.Fprintf(a.stdout, "    through managed settings instead; `openbox init` here adds project scope.\n")
-		case len(audit.Engines) == 0:
-			fmt.Fprintf(a.stdout, "  %s  (present, no OpenBox hooks)\n", audit.SettingsPath)
-		default:
-			fmt.Fprintf(a.stdout, "  %s  (present)\n", audit.SettingsPath)
-			for _, engine := range audit.Engines {
-				fmt.Fprintf(a.stdout, "    engine  %s\n", engine)
-			}
-			if len(audit.Engines) > 1 {
-				fmt.Fprintf(a.stdout, "    WARNING: %d OpenBox engines are registered here. Every hook fires once\n", len(audit.Engines))
-				fmt.Fprintf(a.stdout, "      per engine, so every governed tool call is stored TWICE and tool\n")
-				fmt.Fprintf(a.stdout, "      success rates and latencies are meaningless. An older engine also\n")
-				fmt.Fprintf(a.stdout, "      omits fields the current one sends. Run `openbox init` in this\n")
-				fmt.Fprintf(a.stdout, "      directory: it replaces registrations left at another engine path.\n")
-			}
-			if len(audit.DuplicateEvents) > 0 {
-				fmt.Fprintf(a.stdout, "    WARNING: registered more than once for: %s; same duplication.\n", strings.Join(audit.DuplicateEvents, ", "))
-				fmt.Fprintf(a.stdout, "      Run `openbox init` in this directory.\n")
-			}
-		}
-	}
+	a.reportHookRegistration()
 
 	a.reportGateway()
 	a.reportLanes()
@@ -248,13 +216,11 @@ func (a *app) reportGateway() {
 
 // managedSettingsPathForDoctor reached through the managed package so doctor
 // and `managed install` cannot disagree about where the file lives.
-func managedSettingsPathForDoctor() string {
-	dir := managed.ClaudeCodeManagedDir()
-	if dir == "" {
-		return ""
-	}
-	return filepath.Join(dir, "managed-settings.json")
-}
+// managedSettingsPathForDoctor derives the path locally rather than through
+// internal/cli/managed: that package is CLI-lifecycle code with a different
+// lifetime, and doctor must not stop being able to read this file because it
+// goes away.
+func managedSettingsPathForDoctor() string { return claudeManagedSettingsPath() }
 
 func (a *app) reportLanes() {
 	home := a.homeDir()
@@ -415,4 +381,117 @@ func portOf(addr string) string {
 		return port
 	}
 	return ""
+}
+
+// reportHookRegistration covers both levels an OpenBox registration can live
+// at, and the conditions that only exist between them.
+//
+// An install writes the user-wide file, so that one is the answer to "is this
+// machine governed". A project file is ordinarily absent; when it is not, its
+// entries are a second registration of the same gate, and where the two name
+// different engine paths the tool de-duplicates neither.
+func (a *app) reportHookRegistration() {
+	fmt.Fprintf(a.stdout, "\nHook registration\n")
+
+	levels := []struct {
+		label string
+		path  string
+	}{{"user-wide", providers.ClaudeUserSettingsPath()}}
+	if wd, err := os.Getwd(); err != nil {
+		fmt.Fprintf(a.stdout, "  current directory unreadable (%v); this project's file was not checked\n", err)
+	} else {
+		levels = append(levels, struct {
+			label string
+			path  string
+		}{"this project", providers.ClaudeProjectSettingsPath(wd)})
+	}
+
+	engines := map[string][]string{} // engine path -> the levels registering it
+	for _, level := range levels {
+		audit, err := providers.AuditHooks(level.path)
+		switch {
+		case err != nil:
+			fmt.Fprintf(a.stdout, "  %-13s %s: could not be read; %v\n", level.label, level.path, err)
+			continue
+		case !audit.Present:
+			fmt.Fprintf(a.stdout, "  %-13s %s  (absent)\n", level.label, level.path)
+			if level.label == "user-wide" {
+				fmt.Fprintf(a.stdout, "    Nothing is governed on this machine. Run `openbox init --provider claude-code`.\n")
+			}
+			continue
+		case len(audit.Engines) == 0:
+			fmt.Fprintf(a.stdout, "  %-13s %s  (present, no OpenBox hooks)\n", level.label, level.path)
+			if level.label == "user-wide" {
+				fmt.Fprintf(a.stdout, "    Nothing is governed on this machine. Run `openbox init --provider claude-code`.\n")
+			}
+			continue
+		}
+		fmt.Fprintf(a.stdout, "  %-13s %s  (present)\n", level.label, level.path)
+		for _, engine := range audit.Engines {
+			fmt.Fprintf(a.stdout, "    engine  %s\n", engine)
+			engines[engine] = append(engines[engine], level.label)
+		}
+		if len(audit.Engines) > 1 {
+			fmt.Fprintf(a.stdout, "    WARNING: %d OpenBox engines are registered in this one file. Every hook\n", len(audit.Engines))
+			fmt.Fprintf(a.stdout, "      fires once per engine, so every governed tool call is stored TWICE and\n")
+			fmt.Fprintf(a.stdout, "      tool success rates and latencies are meaningless. An older engine also\n")
+			fmt.Fprintf(a.stdout, "      omits fields the current one sends. Run `openbox init` to replace them.\n")
+		}
+		if len(audit.DuplicateEvents) > 0 {
+			fmt.Fprintf(a.stdout, "    WARNING: registered more than once for: %s; same duplication.\n", strings.Join(audit.DuplicateEvents, ", "))
+			fmt.Fprintf(a.stdout, "      Run `openbox init`.\n")
+		}
+	}
+
+	a.reportCrossLevelHooks(engines)
+	a.reportBlockedHooks()
+}
+
+// reportCrossLevelHooks is the condition neither file can see on its own.
+//
+// The same engine at both levels is benign: the commands are byte-identical
+// and the tool runs a duplicated identical handler once. Different engine
+// paths are the shape it will not de-duplicate, so each one fires and every
+// governed call is stored once per engine.
+func (a *app) reportCrossLevelHooks(engines map[string][]string) {
+	if len(engines) == 0 {
+		return
+	}
+	var shared, distinct []string
+	for engine, levels := range engines {
+		if len(levels) > 1 {
+			shared = append(shared, engine)
+		}
+		distinct = append(distinct, engine)
+	}
+	sort.Strings(shared)
+	sort.Strings(distinct)
+
+	if len(distinct) > 1 {
+		fmt.Fprintf(a.stdout, "    WARNING: %d different engine paths are registered across the two files:\n", len(distinct))
+		for _, engine := range distinct {
+			fmt.Fprintf(a.stdout, "      %s  (%s)\n", engine, strings.Join(engines[engine], ", "))
+		}
+		fmt.Fprintf(a.stdout, "      A project-level entry at a DIFFERENT engine path is not de-duplicated\n")
+		fmt.Fprintf(a.stdout, "      against the user-wide one, so both fire and every governed tool call in\n")
+		fmt.Fprintf(a.stdout, "      this project is stored TWICE. `openbox init` sweeps the project file;\n")
+		fmt.Fprintf(a.stdout, "      `openbox uninstall` removes both.\n")
+		return
+	}
+	if len(shared) == 1 {
+		fmt.Fprintf(a.stdout, "    Both files register the same engine, so the tool runs it once. `openbox init`\n")
+		fmt.Fprintf(a.stdout, "      removes the redundant project-level copy.\n")
+	}
+}
+
+// reportBlockedHooks answers what absence cannot: on an org-managed machine the
+// hooks can be installed, correct, and never run. That is the failure mode
+// worth the most here, because it is silent and total -- the install prints
+// success and doctor, reading none of these keys, used to agree.
+func (a *app) reportBlockedHooks() {
+	state := resolveHookBlock()
+	fmt.Fprintf(a.stdout, "  %-13s %s\n", "can they run", state.summary)
+	for _, line := range state.detail {
+		fmt.Fprintf(a.stdout, "    %s\n", line)
+	}
 }

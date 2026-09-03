@@ -136,12 +136,22 @@ go build -o plugin/bin/openbox../../cmd/openbox
 
 The standalone `cmd/openbox-cc-hook` alias is **gone**. It was never built by
 `.goreleaser.yaml`, so no release ever carried it, and nothing outside its own
-tests invoked it; the plugin manifest and every installer name the engine
+tests invoked it; every installer names the engine
 (`bin/openbox hook claude-code <event>`), which is the only entrypoint now.
 
-Org-wide force-enable via managed settings
-(`{"enabledPlugins":["openbox-observe"]}`) is **verified, not activated** for
-the Phase-1 opt-in pilot (NFR-5).
+Activation and mandate are two tiers, and only one of them is needed to be
+governed. **Activation is self-serve**: `init` registers the hooks in
+`~/.claude/settings.json`, so every session on this machine is governed at
+once, with no administrator step and no restart — the tool's file watcher picks
+the change up in sessions that are already running. **The mandate tier** is
+managed settings with `allowManagedHooksOnly`, which makes governance
+non-removable by the developer; it is enforcement, not activation.
+
+The bundle under `~/.claude/plugins/openbox-observe` hosts the engine binary
+and nothing else. It used to ship a plugin manifest and its own copy of all
+eleven handlers; a plugin's handlers are separate from settings and do not
+de-duplicate against them, so anything that loaded that directory doubled every
+event against the registrations `init` writes.
 
 ## Integration follow-up
 

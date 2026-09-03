@@ -26,7 +26,10 @@ tb_session() { # <prompt> [allowed-tools] [extra claude args…]
 	fi
 	local out
 	# TB_SESSION_DIR lets a phase drive a session from somewhere other than the
-	# governed project — which is how the ungoverned-directory assertion works.
+	# scratch project. With user-wide hooks that is how the global-scope control
+	# works: a session in a directory the suite never initialized must still be
+	# governed. It also drives the post-uninstall negative, where the same
+	# directory must produce nothing.
 	out="$(cd "${TB_SESSION_DIR:-$TB_PROJECT}" && claude "${args[@]}" "$@" 2>"$TB_STATE/last-session.err")" || {
 		printf ''
 		return 0

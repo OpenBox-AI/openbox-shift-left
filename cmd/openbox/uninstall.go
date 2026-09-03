@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/devconfig"
@@ -13,6 +14,7 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/hookflow"
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/activation"
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/gatewayservice"
+	"github.com/openbox-ai/openbox-shift-left/internal/cli/laneservice"
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/providers"
 	"github.com/openbox-ai/openbox-shift-left/internal/provider"
 )
@@ -39,10 +41,10 @@ import (
 type uninstallState struct {
 	deleted    int
 	failed     bool
-	hookFailed []string // surfaces that still carry a firing hook
-	laneFailed bool     // a lane whose deactivate conflicted: still routed, still running
-	kept       []string // org-owned files, reported and left
-	backlog    int      // events in the spool that no flush could deliver
+	hookFailed []hookFailure // surfaces this run could not clean
+	laneFailed bool          // a lane whose deactivate conflicted: still routed, still running
+	kept       []string      // org-owned files, reported and left
+	backlog    int           // events in the spool that no flush could deliver
 }
 
 func (a *app) runUninstall(args []string) int {
@@ -94,6 +96,32 @@ type uninstallInventory struct {
 	spools       []spoolState
 	envFile      string
 	managed      []string
+	// unrecordedLane is a unit file or routed env key with no activation record
+	// behind it.
+	unrecordedLane bool
+}
+
+// laneResidue reports whether anything on this machine still looks like a lane,
+// independent of the activation record.
+func laneResidue(home string) bool {
+	for _, spec := range []laneservice.Spec{
+		laneservice.Telemetry("", "", false),
+		laneservice.Transport("", "", false),
+		laneservice.Gateway("", "", "", false),
+	} {
+		if p := spec.UnitPath(runtime.GOOS, home); p != "" && fileExists(p) {
+			return true
+		}
+	}
+	return len(activation.ResolveElection(gatewayservice.SettingsPath(home)).Routed) > 0
+}
+
+// hookFailure separates the two residues, which have opposite consequences: a
+// surface we could not edit keeps firing, while one we could not PARSE applies
+// no hooks at all.
+type hookFailure struct {
+	path       string
+	unparsable bool
 }
 
 type hookSurface struct {
@@ -114,8 +142,8 @@ func (inv uninstallInventory) empty() bool {
 			return false
 		}
 	}
-	return inv.pluginDir == "" && len(inv.lanes) == 0 && len(inv.posture) == 0 &&
-		len(inv.ownedDirs) == 0 && inv.envFile == "" && len(inv.spools) == 0
+	return inv.pluginDir == "" && len(inv.lanes) == 0 && !inv.unrecordedLane &&
+		len(inv.posture) == 0 && len(inv.ownedDirs) == 0 && inv.envFile == "" && len(inv.spools) == 0
 }
 
 func (a *app) uninstallInventory(home string) uninstallInventory {
@@ -139,6 +167,14 @@ func (a *app) uninstallInventory(home string) uninstallInventory {
 		inv.pluginDir = dir
 	}
 	inv.lanes = activation.ActiveLanes(home)
+	// The activation record is not the only evidence a lane exists. A previous
+	// run that failed part-way, or an install from an older binary, can leave a
+	// unit file or a routed env key with no record at all -- and treating that
+	// machine as clean is how "nothing to remove" gets printed at a daemon that
+	// is still intercepting model calls.
+	if len(inv.lanes) == 0 && laneResidue(home) {
+		inv.unrecordedLane = true
+	}
 	for _, resolve := range []func() (string, error){devconfig.DevConfigPath, devconfig.ApproverConfigPath} {
 		if p, err := resolve(); err == nil && fileExists(p) {
 			inv.posture = appendUnique(inv.posture, p)
@@ -149,7 +185,13 @@ func (a *app) uninstallInventory(home string) uninstallInventory {
 			inv.posture = appendUnique(inv.posture, p)
 		}
 	}
-	for _, dir := range append(providers.OwnedSpoolDirs(), obgit.DefaultSessionDir(), hookflow.PendingApprovalDir()) {
+	for _, path := range []string{hookflow.DefaultEnforcementPath(), hookflow.DefaultAdvisoryPath()} {
+		if path != "" && fileExists(path) {
+			inv.posture = appendUnique(inv.posture, path)
+		}
+	}
+	for _, dir := range append(providers.OwnedSpoolDirs(),
+		obgit.DefaultSessionDir(), hookflow.PendingApprovalDir(), hookflow.DefaultHaltDir()) {
 		if dirExists(dir) {
 			inv.ownedDirs = appendUnique(inv.ownedDirs, filepath.Clean(dir))
 		}
@@ -187,6 +229,10 @@ func (a *app) printInventory(inv uninstallInventory) {
 	}
 	for _, lane := range inv.lanes {
 		fmt.Fprintf(a.stdout, "  lane           %s (unit stopped and removed, env keys restored)\n", lane)
+	}
+	if inv.unrecordedLane {
+		fmt.Fprintf(a.stdout, "  lane           a unit or a routed env key with no activation record behind it;\n")
+		fmt.Fprintf(a.stdout, "                 left by an interrupted removal or an older install. Removed anyway.\n")
 	}
 	for _, p := range inv.posture {
 		fmt.Fprintf(a.stdout, "  posture        %s\n", p)
@@ -241,7 +287,11 @@ func (a *app) flushSpools(st *uninstallState, inv uninstallInventory) {
 		remaining += (hookflow.Spool{Dir: dir}).BacklogCount()
 	}
 	st.backlog = remaining
-	fmt.Fprintf(a.stdout, "  delivered %d, remaining %d\n", max(0, sumBacklog(inv)-remaining), remaining)
+	// Reported as "cleared", not "delivered": the same call retires events past
+	// their attempt limit or retention age, and a retired event left the spool
+	// without reaching the control plane.
+	fmt.Fprintf(a.stdout, "  spool went from %d to %d event(s); some of that may be retirement, not delivery\n",
+		sumBacklog(inv), remaining)
 	if remaining > 0 {
 		fmt.Fprintf(a.stdout, "  those %d event(s) could not be delivered and will be DESTROYED with the spool.\n", remaining)
 	}
@@ -286,7 +336,10 @@ func (a *app) removeHookSurfaces(st *uninstallState, inv uninstallInventory) {
 		removed, err := providers.RemoveProviderHooks(s.provider, s.path)
 		if err != nil {
 			fmt.Fprintf(a.stderr, "warning: could not clean %s: %v\n", s.path, err)
-			st.hookFailed = appendUnique(st.hookFailed, s.path)
+			st.hookFailed = append(st.hookFailed, hookFailure{
+				path:       s.path,
+				unparsable: strings.Contains(err.Error(), "not valid JSON"),
+			})
 			st.failed = true
 			continue
 		}
@@ -301,7 +354,7 @@ func (a *app) removeHookSurfaces(st *uninstallState, inv uninstallInventory) {
 		// hook path Claude Code does not de-duplicate.
 		if err := os.RemoveAll(inv.pluginDir); err != nil {
 			fmt.Fprintf(a.stderr, "warning: could not delete %s: %v\n", inv.pluginDir, err)
-			st.hookFailed = appendUnique(st.hookFailed, inv.pluginDir)
+			st.hookFailed = append(st.hookFailed, hookFailure{path: inv.pluginDir})
 			st.failed = true
 		} else {
 			fmt.Fprintf(a.stdout, "  deleted        %s\n", inv.pluginDir)
@@ -318,14 +371,18 @@ func (a *app) removeHookSurfaces(st *uninstallState, inv uninstallInventory) {
 // whoever changed it, and a conflicted lane is reported rather than overwritten
 // — it is also still routed and still running, which the report has to say.
 func (a *app) removeLanes(st *uninstallState, home string) {
-	code := a.runRemovals(home, removalRequest{
+	res := a.runRemovals(home, removalRequest{
 		gateway: true, telemetry: true, transport: true,
 		purge: true, force: false, uninstall: true,
 	})
-	if code != exitOK {
+	if !res.ok() {
 		st.failed = true
-		st.laneFailed = true
 	}
+	// Only a refused deactivate leaves a lane routed AND running. A unit that
+	// could not be deleted is residue, not an interception, and saying "still
+	// routed" about it would send an operator hunting for traffic that is not
+	// flowing.
+	st.laneFailed = res.stillRouted
 }
 
 func (a *app) removeArtifacts(st *uninstallState, inv uninstallInventory) {
@@ -431,8 +488,17 @@ func (a *app) printUninstallReport(st *uninstallState, inv uninstallInventory) {
 		return
 	}
 	fmt.Fprintf(a.stdout, "\nCONSEQUENCES; this machine is NOT clean\n")
-	for _, path := range st.hookFailed {
-		fmt.Fprintf(a.stdout, "  %s still carries an OpenBox hook, and it keeps firing IMMEDIATELY:\n", path)
+	for _, f := range st.hookFailed {
+		if f.unparsable {
+			// Not "still firing": a tool applies no hooks at all from a file it
+			// cannot parse, including the developer's own.
+			fmt.Fprintf(a.stdout, "  %s could not be parsed, so it was left untouched.\n", f.path)
+			fmt.Fprintf(a.stdout, "    While it stays malformed the tool applies NO hooks from it -- neither ours\n")
+			fmt.Fprintf(a.stdout, "    nor the developer's own. Fix the JSON, then run `openbox uninstall` again to\n")
+			fmt.Fprintf(a.stdout, "    take our entries out.\n")
+			continue
+		}
+		fmt.Fprintf(a.stdout, "  %s still carries an OpenBox hook, and it keeps firing IMMEDIATELY:\n", f.path)
 		fmt.Fprintf(a.stdout, "    settings edits are picked up by the tool's own file watcher, so there is no\n")
 		fmt.Fprintf(a.stdout, "    restart to wait for. With the credentials now gone it fails open on every tool\n")
 		fmt.Fprintf(a.stdout, "    call, logging that it has no identity. Remove the entry by hand.\n")

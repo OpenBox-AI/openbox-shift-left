@@ -8,6 +8,7 @@ import (
 	"net/http"
 
 	"github.com/openbox-ai/openbox-shift-left/internal/client/memhttptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
@@ -201,12 +202,20 @@ func TestEnforceBudgetStaysUnderTheDeclaredCeiling(t *testing.T) {
 	}
 }
 
-// TestInstalledHookTimeoutMatchesThePlugin pins the plugin's PreToolUse
-// `timeout` to the constant the enforce budgets derive from.
-func TestInstalledHookTimeoutMatchesThePlugin(t *testing.T) {
-	raw, err := pluginFS.ReadFile("plugin/hooks/hooks.json")
+// TestInstalledHookTimeoutMatchesWhatIsRegistered pins the PreToolUse
+// `timeout` an install actually writes to the constant the enforce budgets
+// derive from. It reads the written settings file rather than a manifest: the
+// bundle no longer ships one, because a plugin's copy of these handlers does
+// not de-duplicate against the settings-level registrations and anything that
+// loaded it would have doubled every event.
+func TestInstalledHookTimeoutMatchesWhatIsRegistered(t *testing.T) {
+	path := filepath.Join(t.TempDir(), ".claude", "settings.json")
+	if err := writeHooks(path, "/opt/openbox/bin/openbox"); err != nil {
+		t.Fatalf("writeHooks: %v", err)
+	}
+	raw, err := os.ReadFile(path)
 	if err != nil {
-		t.Fatalf("read embedded hooks.json: %v", err)
+		t.Fatalf("read the written settings: %v", err)
 	}
 	var f struct {
 		Hooks map[string][]struct {
@@ -219,7 +228,7 @@ func TestInstalledHookTimeoutMatchesThePlugin(t *testing.T) {
 		} `json:"hooks"`
 	}
 	if err := json.Unmarshal(raw, &f); err != nil {
-		t.Fatalf("parse hooks.json: %v", err)
+		t.Fatalf("parse the written settings: %v", err)
 	}
 	groups := f.Hooks["PreToolUse"]
 	if len(groups) != 1 || len(groups[0].Hooks) != 2 {
@@ -231,7 +240,7 @@ func TestInstalledHookTimeoutMatchesThePlugin(t *testing.T) {
 		t.Fatal("the GATE must be synchronous; an asyncRewake handler cannot block a tool call")
 	}
 	if gate.Timeout != preToolUseHookTimeoutSec {
-		t.Errorf("hooks.json PreToolUse timeout = %d, want preToolUseHookTimeoutSec = %d", gate.Timeout, preToolUseHookTimeoutSec)
+		t.Errorf("registered PreToolUse timeout = %d, want preToolUseHookTimeoutSec = %d", gate.Timeout, preToolUseHookTimeoutSec)
 	}
 	if gate.StatusMessage == "" {
 		t.Error("the gating hook needs a statusMessage so a hold shows a reason")
@@ -253,7 +262,7 @@ func TestInstalledHookTimeoutMatchesThePlugin(t *testing.T) {
 		t.Fatalf("UserPromptSubmit should register exactly the prompt gate, got %+v", ups)
 	}
 	if got := ups[0].Hooks[0].Timeout; got != preToolUseHookTimeoutSec {
-		t.Errorf("hooks.json UserPromptSubmit timeout = %d, want preToolUseHookTimeoutSec = %d", got, preToolUseHookTimeoutSec)
+		t.Errorf("registered UserPromptSubmit timeout = %d, want preToolUseHookTimeoutSec = %d", got, preToolUseHookTimeoutSec)
 	}
 	if ups[0].Hooks[0].StatusMessage == "" {
 		t.Error("the prompt gate needs a statusMessage so a hold shows a reason")

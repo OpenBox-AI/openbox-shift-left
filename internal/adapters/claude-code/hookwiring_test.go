@@ -2,16 +2,24 @@ package claudecode
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"sort"
 	"testing"
 )
 
-// Nothing bound them together, so a hook added to the bundle but not to the
-// engine would be installed, fire, and be rejected as "unknown Claude Code
-// hook"; and one added to the engine but not the bundle would simply never
-// fire.
+// Nothing bound them together, so a hook registered by the installer but not
+// known to the engine would be installed, fire, and be rejected as "unknown
+// Claude Code hook"; and one known to the engine but never registered would
+// simply never fire.
+//
+// These used to compare the engine against an embedded plugin manifest. That
+// manifest is gone -- a plugin's copy of these handlers does not de-duplicate
+// against the settings-level registrations, so anything that loaded it doubled
+// every event -- and the binding that matters is between what writeHooks
+// registers and what the engine dispatches.
 
-type pluginHooksJSON struct {
+type registeredHooksJSON struct {
 	Hooks map[string][]struct {
 		Matcher string `json:"matcher"`
 		Hooks   []struct {
@@ -23,61 +31,62 @@ type pluginHooksJSON struct {
 	} `json:"hooks"`
 }
 
-func loadPluginHooks(t *testing.T) pluginHooksJSON {
+// registeredHooks is what an install actually writes, parsed back.
+const testEngine = "/opt/openbox/bin/openbox"
+
+func registeredHooks(t *testing.T) registeredHooksJSON {
 	t.Helper()
-	raw, err := pluginFS.ReadFile("plugin/hooks/hooks.json")
-	if err != nil {
-		t.Fatalf("read embedded hooks.json: %v", err)
+	path := filepath.Join(t.TempDir(), ".claude", "settings.json")
+	if err := writeHooks(path, testEngine); err != nil {
+		t.Fatalf("writeHooks: %v", err)
 	}
-	var parsed pluginHooksJSON
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read the written settings: %v", err)
+	}
+	var parsed registeredHooksJSON
 	if err := json.Unmarshal(raw, &parsed); err != nil {
-		t.Fatalf("parse hooks.json: %v", err)
+		t.Fatalf("parse the written settings: %v", err)
 	}
 	return parsed
 }
 
-func TestPluginHooksMatchEngineVocabulary(t *testing.T) {
-	parsed := loadPluginHooks(t)
+func TestRegisteredHooksMatchEngineVocabulary(t *testing.T) {
+	parsed := registeredHooks(t)
 
-	fromBundle := make([]string, 0, len(parsed.Hooks))
+	fromSettings := make([]string, 0, len(parsed.Hooks))
 	for name := range parsed.Hooks {
-		fromBundle = append(fromBundle, name)
+		fromSettings = append(fromSettings, name)
 	}
 	fromEngine := make([]string, 0, len(hookNames))
 	for name := range hookNames {
 		fromEngine = append(fromEngine, string(name))
 	}
-	assertSameHookSet(t, "plugin hooks.json", fromBundle, "engine hookNames", fromEngine)
+	assertSameHookSet(t, "the registered settings", fromSettings, "engine hookNames", fromEngine)
 
 	for name := range parsed.Hooks {
 		if _, err := ParseHookName(name); err != nil {
-			t.Errorf("bundled hook %q is not dispatchable: %v", name, err)
+			t.Errorf("registered hook %q is not dispatchable: %v", name, err)
 		}
 	}
 }
 
-func TestLocalHooksMirrorPluginBundle(t *testing.T) {
-	parsed := loadPluginHooks(t)
-
-	fromLocal := make([]string, 0, len(localHookEvents))
+// TestRegisteredTimeoutsMatchTheEventTable. localHookEvents is the one
+// declaration of each event's budget; a written timeout that disagreed with it
+// would be a budget nothing in the engine derives from.
+func TestRegisteredTimeoutsMatchTheEventTable(t *testing.T) {
+	parsed := registeredHooks(t)
 	byName := map[string]int{}
 	for _, ev := range localHookEvents {
-		fromLocal = append(fromLocal, ev.Event)
 		byName[ev.Event] = ev.Timeout
 	}
-	fromBundle := make([]string, 0, len(parsed.Hooks))
-	for name := range parsed.Hooks {
-		fromBundle = append(fromBundle, name)
-	}
-	assertSameHookSet(t, "localHookEvents", fromLocal, "plugin hooks.json", fromBundle)
-
 	for name, entries := range parsed.Hooks {
 		if len(entries) == 0 || len(entries[0].Hooks) == 0 {
-			t.Errorf("bundled hook %q has no handler", name)
+			t.Errorf("registered hook %q has no handler", name)
 			continue
 		}
 		if got, want := byName[name], entries[0].Hooks[0].Timeout; got != want {
-			t.Errorf("hook %q timeout: localHookEvents=%d, hooks.json=%d", name, got, want)
+			t.Errorf("hook %q timeout: localHookEvents=%d, written=%d", name, got, want)
 		}
 	}
 }
@@ -85,12 +94,12 @@ func TestLocalHooksMirrorPluginBundle(t *testing.T) {
 // TestTurnHooksAreWiredAsNonGating the turn-boundary hooks are wired with the
 // ordinary non-gating budget and no matcher.
 func TestTurnHooksAreWiredAsNonGating(t *testing.T) {
-	parsed := loadPluginHooks(t)
+	parsed := registeredHooks(t)
 
 	for _, name := range []string{"Stop", "SubagentStop"} {
 		entries, ok := parsed.Hooks[name]
 		if !ok {
-			t.Errorf("hooks.json does not wire %s; per-turn usage would never be collected", name)
+			t.Errorf("the install does not register %s; per-turn usage would never be collected", name)
 			continue
 		}
 		if len(entries) != 1 || len(entries[0].Hooks) != 1 {
@@ -107,7 +116,7 @@ func TestTurnHooksAreWiredAsNonGating(t *testing.T) {
 		if h.AsyncRewake {
 			t.Errorf("%s must not be an async rewake handler", name)
 		}
-		want := "\"${CLAUDE_PLUGIN_ROOT}/bin/openbox\" hook claude-code " + name
+		want := `"` + testEngine + `" hook claude-code ` + name
 		if h.Command != want {
 			t.Errorf("%s command = %q, want %q", name, h.Command, want)
 		}

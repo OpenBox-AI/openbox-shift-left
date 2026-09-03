@@ -238,7 +238,6 @@ func (a *app) runRewake(args []string) (code int) {
 func (a *app) runDevInit(args []string) int {
 	fs := a.newFlagSet("openbox init")
 	var o devinit.Options
-	var scope string
 	var movedOrg, movedAgentName, movedIcon, movedDescription string
 	var movedBaseURL, movedBackendURL string
 	var movedForce bool
@@ -246,7 +245,6 @@ func (a *app) runDevInit(args []string) int {
 	var goneManagedEnable bool
 
 	fs.StringVar(&o.Provider, "provider", "", "developer tool: claude-code|codex|cursor (required)")
-	fs.StringVar(&scope, "scope", "", "which sessions this install governs: local (default; this directory only) or global (every project, pending a managed-settings deployment)")
 	var enforce, noEnforce bool
 	fs.BoolVar(&enforce, "enforce", true, "ENFORCE mode: the PreToolUse hook blocks/asks/redacts in-process, no daemon and no runtime env. ON BY DEFAULT; inert until your org publishes a policy, and fail-open, so an OpenBox outage never blocks you. Pass --enforce=false to opt out; the opt-out persists.")
 	fs.BoolVar(&noEnforce, "no-enforce", false, "alias for --enforce=false")
@@ -292,7 +290,7 @@ func (a *app) runDevInit(args []string) int {
 	fs.StringVar(&goneSecretBackend, "secret-backend", "", "REMOVED; credentials live in ~/.openbox/.env; run `openbox auth`")
 	fs.StringVar(&goneClientID, "client-id", "", "REMOVED; `init` makes no control-plane call")
 	fs.BoolVar(&goneManagedEnable, "managed-enable", false, "REMOVED; recorded a Phase-1 substrate nothing read")
-	fs.StringVar(&goneLocalHooks, "local-hooks", "", "DEPRECATED; use --scope local (accepted for one release)")
+	fs.StringVar(&goneLocalHooks, "local-hooks", "", "REMOVED; an install governs every session on this machine, so there is no per-project scope to choose")
 
 	fs.Usage = a.initUsage(fs)
 	if code, ok := parseFlags(fs, args); !ok {
@@ -397,30 +395,14 @@ func (a *app) runDevInit(args []string) int {
 	}
 
 	if goneLocalHooks != "" {
-		if scope != "" {
-			return a.errorf("--local-hooks and --scope cannot both be given; --local-hooks is the deprecated spelling of --scope local")
-		}
-		fmt.Fprintf(a.stderr, "warning: --local-hooks is deprecated; use --scope local (this release still accepts it).\n"+
-			"         Project scope is now the DEFAULT, so in most cases the flag can be dropped entirely.\n")
-		scope = scopeLocal
-		o.ProjectDir = goneLocalHooks
+		return a.errorf("--local-hooks has been removed, along with --scope. An install now registers hooks\n" +
+			"  user-wide, so every session on this machine is governed regardless of the directory it\n" +
+			"  starts in, and it sweeps any superseded entry out of this project's own settings file.\n" +
+			"  Drop the flag and re-run.")
 	}
-	resolvedScope, code := a.resolveScope(scope, o.Provider)
-	if code != exitOK {
-		return code
-	}
-	switch resolvedScope {
-	case scopeLocal:
-		if o.ProjectDir == "" {
-			wd, err := os.Getwd()
-			if err != nil {
-				return a.errorf("cannot resolve the current directory for --scope local: %v", err)
-			}
-			o.ProjectDir = wd
-		}
-	case scopeGlobal:
-		o.ProjectDir = "" // global scope performs no project merge
-	}
+	// No scope to resolve: the install is user-wide. ProjectDir stays empty --
+	// the adapter sweeps the working directory itself, so no caller has to
+	// decide which project this is.
 
 	d := devinit.Deps{Installer: inst, Out: a.stdout}
 
@@ -428,7 +410,7 @@ func (a *app) runDevInit(args []string) int {
 		if _, err := devinit.Run(context.Background(), o, d); err != nil {
 			return a.errorf("%v", err)
 		}
-		a.printGovernedScope(o, resolvedScope)
+		a.printGovernedScope(o)
 		a.printGatewayPlan(withGateway, removeGateway, gatewayAddr, gatewayUpstream)
 		a.printLanePlan(lanePlan{
 			telemetry: withTelemetry, transport: withTransport,
@@ -445,13 +427,17 @@ func (a *app) runDevInit(args []string) int {
 		if code != exitOK {
 			return code
 		}
-		return a.runRemovals(home, removalRequest{
+		res := a.runRemovals(home, removalRequest{
 			gateway:   removeGateway || removeAll,
 			telemetry: removeTelemetryLane || removeAll,
 			transport: removeTransportLane || removeAll,
 			purge:     removeAll,
 			force:     forceRestore,
 		})
+		if !res.ok() {
+			return exitError
+		}
+		return exitOK
 	}
 
 	a.migrateLegacyConfig()
@@ -510,7 +496,7 @@ func (a *app) runDevInit(args []string) int {
 		fmt.Fprintf(a.stdout, "  mode: ENFORCE; tool calls are gated in-process. Inert until your org publishes a\n")
 		fmt.Fprintf(a.stdout, "        policy, and fail-open, so an OpenBox outage never blocks you. `--enforce=false` opts out.\n")
 	}
-	a.printGovernedScope(o, resolvedScope)
+	a.printGovernedScope(o)
 	laneReport.print(a)
 	return exitOK
 }
@@ -531,7 +517,7 @@ Setup is two commands, in this order:
 
 Usage:
   openbox auth [--rotate] [flags]
-  openbox init --provider <claude-code|codex|cursor> [--scope local|global] [flags]
+  openbox init --provider <claude-code|codex|cursor> [flags]
   openbox init --provider claude-code --full          hooks + telemetry + transport
   openbox init --provider claude-code --remove-all    every lane, restored and deleted
   openbox init --role approver --org <id> [--host claude-code] [flags]
@@ -559,8 +545,8 @@ Credentials live in ~/.openbox/.env (plaintext, 0600); posture and
 coordinates in ~/.openbox/dev.json. OPENBOX_HOME relocates both. A real
 environment variable always wins over either file.
 
-Nothing to run after 'init'; no daemon, no runtime env. Coverage is a separate
-question from mechanism: a bare 'init' governs ONE directory (see --scope).
+Nothing to run after 'init'; no daemon, no runtime env. One 'init' governs
+EVERY session on this machine, in any directory.
 Run 'openbox auth -h' or 'openbox init -h' for flags.
 `)
 }

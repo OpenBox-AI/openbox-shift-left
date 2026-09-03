@@ -78,6 +78,28 @@ if [ "$tb_real_hooks" -gt 0 ]; then
   The suite writes that same file, so it would repoint your own governance at a test
   build and the teardown would remove it. Run \`openbox uninstall\` first, then re-run."
 fi
+# The user settings file is not the only shape a real install takes. A machine
+# initialized before hooks moved to user scope carries the bundle and per-project
+# entries instead, and the bundle path derives from the login home rather than
+# from anything this harness pins -- so teardown's uninstall would delete the
+# developer's own engine copy and leave their project hooks failing on every
+# tool call.
+if [ -d "$tb_login_home/.claude/plugins/openbox-observe" ]; then
+	tb_fatal "$tb_login_home/.claude/plugins/openbox-observe exists: this machine carries a real
+  OpenBox install (possibly an older project-scoped one). That directory resolves from your
+  login home, which this harness does not relocate, so the teardown would delete YOUR engine
+  copy and every project still pointing at it would report a failed hook on every tool call.
+  Run \`openbox uninstall\` first, then re-run this suite."
+fi
+tb_real_codex="${CODEX_HOME_REAL:-$tb_login_home/.codex}/hooks.json"
+if [ -f "$tb_real_codex" ]; then
+	tb_codex_hooks="$(grep -c 'hook codex' "$tb_real_codex" 2>/dev/null)"
+	if [ "${tb_codex_hooks:-0}" -gt 0 ]; then
+		tb_fatal "$tb_real_codex already registers ${tb_codex_hooks} OpenBox hook(s).
+  The teardown would strip them back out of your real Codex config. Run \`openbox uninstall\`
+  first, then re-run this suite."
+	fi
+fi
 tb_ok "no real install to collide with"
 
 tb_finish

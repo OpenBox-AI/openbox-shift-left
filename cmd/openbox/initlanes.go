@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 
 	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/devconfig"
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/activation"
@@ -119,46 +120,97 @@ type removalRequest struct {
 	uninstall bool
 }
 
+// removalResult is what actually happened, so a caller can say something true
+// about the residue instead of inferring it from an exit code.
+type removalResult struct {
+	// failed names the lanes that did not come down.
+	failed []string
+	// stillRouted is true when a lane is left routed AND running: its
+	// deactivate refused, so removeLane returned before unloading the unit.
+	// That is a different residue from a lane whose unit could not be deleted,
+	// and only this one keeps intercepting model calls.
+	stillRouted bool
+}
+
+func (r removalResult) ok() bool { return len(r.failed) == 0 }
+
 // runRemovals backs lanes out, in the reverse of install order. It runs before
 // the credential gate, and that is a requirement rather than an optimization:
 // removal must not require the thing being removed to still be usable.
-func (a *app) runRemovals(home string, req removalRequest) int {
+func (a *app) runRemovals(home string, req removalRequest) removalResult {
 	fmt.Fprintf(a.stdout, "\nRemoving OpenBox lane configuration\n")
-	var failures []string
+	var res removalResult
 
-	if req.transport {
-		if err := a.removeTransport(home, req.force); err != nil {
-			fmt.Fprintf(a.stderr, "warning: transport removal did not complete: %v\n", err)
-			failures = append(failures, "transport")
+	for _, lane := range []struct {
+		on     bool
+		label  string
+		remove func() error
+	}{
+		{req.transport, "transport", func() error { return a.removeTransport(home, req.force) }},
+		{req.gateway, "gateway", func() error { return a.removeGateway(home) }},
+		{req.telemetry, "telemetry", func() error { return a.removeTelemetry(home, req.force) }},
+	} {
+		if !lane.on {
+			continue
 		}
-	}
-	if req.gateway {
-		if err := a.removeGateway(home); err != nil {
-			fmt.Fprintf(a.stderr, "warning: gateway removal did not complete: %v\n", err)
-			failures = append(failures, "gateway")
+		err := lane.remove()
+		if err == nil {
+			continue
 		}
-	}
-	if req.telemetry {
-		if err := a.removeTelemetry(home, req.force); err != nil {
-			fmt.Fprintf(a.stderr, "warning: telemetry removal did not complete: %v\n", err)
-			failures = append(failures, "telemetry")
+		// A platform with no daemon packaging has no unit to remove, so the
+		// refusal the renderer raises is "nothing to do" here, not a failure --
+		// and reporting it as one told a Windows operator their lanes were still
+		// running on a machine that cannot run them.
+		if laneservice.IsNotInstalled(err) || isUnsupportedPlatform(err) {
+			continue
+		}
+		fmt.Fprintf(a.stderr, "warning: %s removal did not complete: %v\n", lane.label, err)
+		res.failed = append(res.failed, lane.label)
+		if isActivationConflict(err) {
+			res.stillRouted = true
 		}
 	}
 
+	// Purge only once every lane is down. A conflicted deactivate leaves the
+	// daemon loaded and its env keys routed, and the activation record is the
+	// only thing that can restore those keys: deleting it here left the machine
+	// intercepting model calls with no record of what to put back, and a re-run
+	// reporting a clean machine. The CA goes with it, because a deleted CA turns
+	// a live transport lane into a total TLS failure rather than a removable one.
 	if req.purge {
-		a.purgeLaneData(home, req.uninstall)
+		if res.ok() {
+			a.purgeLaneData(home, req.uninstall)
+		} else {
+			fmt.Fprintf(a.stdout, "  kept           the activation record and the CA: a lane is still routed, and\n")
+			fmt.Fprintf(a.stdout, "                 that record is the only thing that can restore its env keys.\n")
+		}
 	}
 
-	if len(failures) > 0 {
+	if !res.ok() {
 		// `uninstall` takes no flags, so it must not name one as the remedy.
 		remedy := "A value that changed after OpenBox set it is not overwritten without --force-restore"
 		if req.uninstall {
 			remedy = "A value that changed after OpenBox set it was left alone; resolve it by hand, then re-run"
 		}
-		return a.errorf("removal did not complete for: %v; the rest was removed. %s", failures, remedy)
+		a.errorf("removal did not complete for: %v; the rest was removed. %s", res.failed, remedy)
+		return res
 	}
-	fmt.Fprintf(a.stdout, "\nDone. `openbox doctor` reports what is left.\n")
-	return exitOK
+	if !req.uninstall {
+		fmt.Fprintf(a.stdout, "\nDone. `openbox doctor` reports what is left.\n")
+	}
+	return res
+}
+
+// isActivationConflict distinguishes the one failure that leaves a lane routed
+// and running from every other way a removal can fail.
+func isActivationConflict(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "refusing to overwrite")
+}
+
+// isUnsupportedPlatform matches the renderer's refusal for an OS with no daemon
+// packaging. Matched on the message because it is a bare formatted error.
+func isUnsupportedPlatform(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "no daemon packaging for")
 }
 
 // purgeLaneData deletes the artifacts the lanes created. Nothing outside

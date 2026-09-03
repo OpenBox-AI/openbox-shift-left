@@ -15,10 +15,16 @@
 #   tidy: a test posture leaking into the real config would govern every
 #   Claude Code session on the box.
 #
-# Hooks are installed into one scratch project only, which since that decision is
-#   simply `init`'s default scope — the phase runs it from inside $TB_PROJECT.
-#   Sessions started anywhere else stay ungoverned, and 10-onboard.sh asserts
-#   that rather than assuming it.
+# Hooks are installed USER-WIDE, into $HOME/.claude/settings.json. There is no
+#   project scope any more, so a session started anywhere on this machine is
+#   governed and 10-onboard.sh asserts that rather than asserting the opposite.
+#
+#   $HOME IS NOT PINNED HERE, and that is the one isolation gap left: the suite
+#   writes the real user's settings file and installs real supervisor units
+#   under fixed labels. 00-preflight.sh therefore REFUSES a host that already
+#   carries an OpenBox install, and run-all.sh tears down on every exit path
+#   including Ctrl-C. Without both, a run repoints the developer's own
+#   governance at a test build and teardown deletes it.
 #
 # Secrets are never written here. `mint` stores the control token in
 # test/.state/control-token (git-ignored, 0600) and sourcing picks it up.
@@ -67,7 +73,15 @@ export OPENBOX_FINDINGS_CURSOR="${OPENBOX_FINDINGS_CURSOR:-$TB_STATE/state/findi
 export OPENBOX_PENDING_APPROVAL_DIR="${OPENBOX_PENDING_APPROVAL_DIR:-$TB_STATE/state/pending-approvals}"
 export OPENBOX_HALT_DIR="${OPENBOX_HALT_DIR:-$TB_STATE/state/halted-sessions}"
 export OPENBOX_STALE_DIR="${OPENBOX_STALE_DIR:-$TB_STATE/state/stale}"
-mkdir -p "$TB_STATE/state"
+# The session registry. The comment above has always claimed this was pinned;
+# it was not, so a run wrote into the developer's real registry and teardown's
+# uninstall would then delete it.
+export OPENBOX_SESSION_DIR="${OPENBOX_SESSION_DIR:-$TB_STATE/state/sessions}"
+# Codex reads this exact directory for hooks.json. Unpinned, an install writes
+# the developer's real ~/.codex/hooks.json and teardown strips their entries
+# back out of it.
+export CODEX_HOME="${CODEX_HOME_OVERRIDE:-$TB_STATE/state/codex-home}"
+mkdir -p "$TB_STATE/state" "$CODEX_HOME"
 
 # ~/.openbox, relocated: dev.json, approver.json and the .env credential file.
 # It must be ABSOLUTE — devconfig rejects a relative OPENBOX_HOME, because a

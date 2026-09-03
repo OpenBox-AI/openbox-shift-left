@@ -8,6 +8,7 @@ import (
 
 	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/devconfig"
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/devinit"
+	"github.com/openbox-ai/openbox-shift-left/internal/cli/providers"
 )
 
 // TestEnforceOptOutRoundTrips tHE round-trip. The opt-out was silently un-
@@ -103,8 +104,7 @@ func TestEveryMovedFlagErrorsNamingAuth(t *testing.T) {
 		{"--icon", "🤖"},
 		{"--description", "an agent"},
 		{"--base-url", "https://core.internal"},
-		{"--backend-url", "https://api.internal"},
-	} {
+		{"--backend-url", "https://api.internal"}} {
 		t.Run(tc.flag, func(t *testing.T) {
 			isolateHome(t)
 			seedCredentials(t)
@@ -143,8 +143,7 @@ func TestRemovedFlagsError(t *testing.T) {
 		wantText string
 	}{
 		{"client-id", []string{"--client-id", "x"}, "no control-plane call"},
-		{"managed-enable", []string{"--managed-enable"}, "managed-settings"},
-	} {
+		{"managed-enable", []string{"--managed-enable"}, "managed-settings"}} {
 		t.Run(tc.name, func(t *testing.T) {
 			isolateHome(t)
 			seedCredentials(t)
@@ -160,74 +159,9 @@ func TestRemovedFlagsError(t *testing.T) {
 	}
 }
 
-// --local-hooks keeps working for one release, warning once, because project
-// scope is now the default and most callers can just drop it.
-func TestLocalHooksIsADeprecatedAliasForScopeLocal(t *testing.T) {
-	isolateHome(t)
-	seedCredentials(t)
-	dir := t.TempDir()
-	a, out, errb := testApp(nil)
-	if code := a.run([]string{"init", "--provider", "claude-code", "--local-hooks", dir}); code != exitOK {
-		t.Fatalf("exit = %d; stderr=%q", code, errb.String())
-	}
-	if !strings.Contains(errb.String(), "deprecated") {
-		t.Errorf("--local-hooks should warn to stderr:\n%s", errb.String())
-	}
-	if strings.Contains(out.String(), "deprecated") {
-		t.Errorf("the deprecation warning must not go to stdout:\n%s", out.String())
-	}
-	if _, err := os.Stat(filepath.Join(dir, ".claude", "settings.local.json")); err != nil {
-		t.Errorf("--local-hooks should still merge project hooks: %v", err)
-	}
-}
-
-func TestLocalHooksAndScopeTogetherIsAnError(t *testing.T) {
-	isolateHome(t)
-	seedCredentials(t)
-	a, _, errb := testApp(nil)
-	if code := a.run([]string{"init", "--provider", "claude-code", "--local-hooks", ".", "--scope", "local"}); code != exitError {
-		t.Fatalf("exit = %d, want an error", code)
-	}
-	if !strings.Contains(errb.String(), "cannot both") {
-		t.Errorf("error = %q", errb.String())
-	}
-}
-
-func TestInvalidScopeIsRejected(t *testing.T) {
-	isolateHome(t)
-	seedCredentials(t)
-	a, _, errb := testApp(nil)
-	if code := a.run([]string{"init", "--provider", "claude-code", "--scope", "everywhere"}); code != exitError {
-		t.Fatalf("exit = %d, want an error", code)
-	}
-	if !strings.Contains(errb.String(), "not valid") {
-		t.Errorf("error = %q", errb.String())
-	}
-}
-
-// TestCodexRejectsLocalScope codex hooks are user-wide; a repo-level
-// .codex/hooks.json is a location its installer deliberately does not touch.
-// So project scope errors rather than silently governing everything.
-func TestCodexRejectsLocalScope(t *testing.T) {
-	isolateHome(t)
-	seedCredentials(t)
-	a, _, errb := testApp(nil)
-	if code := a.run([]string{"init", "--provider", "codex", "--scope", "local"}); code != exitError {
-		t.Fatalf("exit = %d, want an error", code)
-	}
-	s := errb.String()
-	if !strings.Contains(s, "user-wide") {
-		t.Errorf("the error should explain WHY project scope is unavailable:\n%s", s)
-	}
-	if !strings.Contains(s, "claude-code") {
-		t.Errorf("the error should name the provider that does support it:\n%s", s)
-	}
-}
-
-// TestCodexBareInitResolvesGlobalAndSaysSo a bare codex install resolves to
-// global and says SO. Silently governing every Codex session when the user
-// asked for one project would over-deliver governance without consent.
-func TestCodexBareInitResolvesGlobalAndSaysSo(t *testing.T) {
+// TestCodexInitSaysEverySessionIsGoverned. Codex hooks were always user-wide;
+// now every provider is, so this is the shared story rather than an exception.
+func TestCodexInitSaysEverySessionIsGoverned(t *testing.T) {
 	isolateHome(t)
 	seedCredentials(t)
 	t.Setenv("CODEX_HOME", filepath.Join(t.TempDir(), "codex-home"))
@@ -236,9 +170,6 @@ func TestCodexBareInitResolvesGlobalAndSaysSo(t *testing.T) {
 		t.Fatalf("exit = %d; stderr=%q", code, errb.String())
 	}
 	s := out.String()
-	if !strings.Contains(s, "GLOBAL scope") {
-		t.Errorf("an inferred scope must be stated:\n%s", s)
-	}
 	if !strings.Contains(s, "EVERY CODEX SESSION") {
 		t.Errorf("the closing report must state the real coverage:\n%s", s)
 	}
@@ -246,48 +177,39 @@ func TestCodexBareInitResolvesGlobalAndSaysSo(t *testing.T) {
 
 // TestPrintGovernedScopeStatesTheTruth this string is the one place a user
 // learns the truth about coverage, so its content is pinned rather than left
-// to drift.
+// to drift. The truth inverted with this phase: one install governs every
+// session on this machine, and it takes effect without a restart.
 func TestPrintGovernedScopeStatesTheTruth(t *testing.T) {
-	t.Run("local names the directory and the gap", func(t *testing.T) {
-		a, out, _ := testApp(nil)
-		a.printGovernedScope(optionsFor("claude-code", "/tmp/my-project"), scopeLocal)
-		s := out.String()
-		if !strings.Contains(s, "/tmp/my-project") {
-			t.Errorf("must name the governed directory:\n%s", s)
+	isolateHome(t)
+	a, out, _ := testApp(nil)
+	a.printGovernedScope(optionsFor("claude-code", ""))
+	s := out.String()
+	for _, want := range []string{"EVERY SESSION", "IMMEDIATELY", "nothing to restart"} {
+		if !strings.Contains(s, want) {
+			t.Errorf("the scope statement does not say %q:\n%s", want, s)
 		}
-		if !strings.Contains(s, "not governed") || !strings.Contains(s, "absence of events is not evidence") {
-			t.Errorf("must state what is NOT covered:\n%s", s)
+	}
+	if !strings.Contains(s, providers.ClaudeUserSettingsPath()) {
+		t.Errorf("must name the file that changed:\n%s", s)
+	}
+	// The old story sent the reader to an administrator to turn governance on.
+	// It is on; saying otherwise invites a hunt for a gap that is not there.
+	for _, banned := range []string{"NOTHING YET", "enabledPlugins", "pending", "--scope"} {
+		if strings.Contains(s, banned) {
+			t.Errorf("the scope statement still implies activation is pending (%q):\n%s", banned, s)
 		}
-		if !strings.Contains(s, "do not commit") {
-			t.Errorf("must warn against committing the settings file:\n%s", s)
-		}
-		for _, banned := range []string{"ambient", "every project", "machine-wide"} {
-			if strings.Contains(strings.ToLower(s), banned) {
-				t.Errorf("project scope must not imply broader coverage (%q):\n%s", banned, s)
-			}
-		}
-	})
-
-	t.Run("global says nothing is governed yet", func(t *testing.T) {
-		a, out, _ := testApp(nil)
-		a.printGovernedScope(optionsFor("claude-code", ""), scopeGlobal)
-		s := out.String()
-		if !strings.Contains(s, "NOTHING YET") {
-			t.Errorf("global scope governs nothing until managed settings land:\n%s", s)
-		}
-		if !strings.Contains(s, "enabledPlugins") {
-			t.Errorf("must print the snippet it cannot apply:\n%s", s)
-		}
-	})
+	}
 }
 
 func optionsFor(providerName, projectDir string) devinit.Options {
 	return devinit.Options{Provider: providerName, ProjectDir: projectDir}
 }
 
-// TestNoInstallOutputClaimsAmbientCoverageAfterAProjectScopedInstall the whole
-// install output must not overstate coverage, not just the scope block.
-func TestNoInstallOutputClaimsAmbientCoverageAfterAProjectScopedInstall(t *testing.T) {
+// TestInstallOutputDoesNotUnderstateCoverage. The failure direction reversed
+// with this phase. It used to be over-claiming; now the install really does
+// govern every session, so the danger is a leftover sentence telling somebody
+// that one directory is covered or that an administrator has to finish the job.
+func TestInstallOutputDoesNotUnderstateCoverage(t *testing.T) {
 	isolateHome(t)
 	seedCredentials(t)
 	a, out, errb := testApp(nil)
@@ -295,9 +217,9 @@ func TestNoInstallOutputClaimsAmbientCoverageAfterAProjectScopedInstall(t *testi
 		t.Fatalf("exit = %d; stderr=%q", code, errb.String())
 	}
 	lower := strings.ToLower(out.String())
-	for _, banned := range []string{"governance is ambient", "every project", "machine-wide", "all sessions"} {
-		if strings.Contains(lower, banned) {
-			t.Errorf("a project-scoped install must not imply broader coverage (%q):\n%s", banned, out.String())
+	for _, banned := range []string{"this project only", "nothing yet", "activation is pending", "--scope"} {
+		if strings.Contains(lower, strings.ToLower(banned)) {
+			t.Errorf("the install understates what it governs (%q):\n%s", banned, out.String())
 		}
 	}
 	if !strings.Contains(out.String(), "Nothing to run") {
@@ -318,7 +240,7 @@ func TestPlainReInitDoesNotRevertAnEnforceOptOut(t *testing.T) {
 	run := func(t *testing.T, args ...string) {
 		t.Helper()
 		a, _, errb := testApp(nil)
-		full := append([]string{"init", "--provider", "claude-code", "--scope", "global"}, args...)
+		full := append([]string{"init", "--provider", "claude-code"}, args...)
 		if code := a.run(full); code != exitOK {
 			t.Fatalf("%v exit = %d; stderr=%q", full, code, errb.String())
 		}
@@ -354,7 +276,7 @@ func TestBareInitEnforcesWithoutWritingTheField(t *testing.T) {
 	home := isolateHome(t)
 	seedCredentials(t)
 	a, out, errb := testApp(nil)
-	if code := a.run([]string{"init", "--provider", "claude-code", "--scope", "global"}); code != exitOK {
+	if code := a.run([]string{"init", "--provider", "claude-code"}); code != exitOK {
 		t.Fatalf("exit = %d; stderr=%q", code, errb.String())
 	}
 	if cfg := readDevJSON(t, home); cfg.Enforce != nil {

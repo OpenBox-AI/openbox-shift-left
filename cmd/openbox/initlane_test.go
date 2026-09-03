@@ -255,8 +255,8 @@ func TestRemovalRestoresAForeignValueByteIdentically(t *testing.T) {
 		t.Fatalf("the install did not take: HTTPS_PROXY = %q", got)
 	}
 
-	if code := a.runRemovals(h.home, removalRequest{telemetry: true, transport: true}); code != exitOK {
-		t.Fatalf("runRemovals exited %d", code)
+	if res := a.runRemovals(h.home, removalRequest{telemetry: true, transport: true}); !res.ok() {
+		t.Fatalf("runRemovals failed for %v", res.failed)
 	}
 
 	env := laneSettings(t, h.home)
@@ -322,8 +322,8 @@ func TestASecondFullInstallDoesNotOverwriteTheRememberedOriginals(t *testing.T) 
 	if err := a.setupTransport(h.home, "127.0.0.1:18791", false); err != nil {
 		t.Fatalf("second install: %v", err)
 	}
-	if code := a.runRemovals(h.home, removalRequest{transport: true}); code != exitOK {
-		t.Fatalf("runRemovals exited %d", code)
+	if res := a.runRemovals(h.home, removalRequest{transport: true}); !res.ok() {
+		t.Fatalf("runRemovals failed for %v", res.failed)
 	}
 	if got := laneSettings(t, h.home)["HTTPS_PROXY"]; got != "http://proxy.corp.internal:3128" {
 		t.Errorf("after two installs the restore produced %q; a re-install overwrote the remembered original", got)
@@ -338,8 +338,8 @@ func TestRemovalIsSafeOnAMachineThatNeverInstalledAnything(t *testing.T) {
 	h := newLaneHarness(t)
 	a, _, errb := testApp(map[string]string{"HOME": h.home})
 
-	if code := a.runRemovals(h.home, removalRequest{gateway: true, telemetry: true, transport: true, purge: true}); code != exitOK {
-		t.Fatalf("runRemovals exited %d on an untouched machine: %s", code, errb.String())
+	if res := a.runRemovals(h.home, removalRequest{gateway: true, telemetry: true, transport: true, purge: true}); !res.ok() {
+		t.Fatalf("runRemovals failed for %v on an untouched machine: %s", res.failed, errb.String())
 	}
 }
 
@@ -358,15 +358,15 @@ func TestRemovalRefusesToOverwriteAChangedValueButStillRemovesTheUnit(t *testing
 		t.Fatal(err)
 	}
 
-	if code := a.runRemovals(h.home, removalRequest{transport: true}); code == exitOK {
+	if res := a.runRemovals(h.home, removalRequest{transport: true}); res.ok() {
 		t.Fatal("removal silently overwrote a value that changed after OpenBox set it")
 	}
 	if got := laneSettings(t, h.home)["HTTPS_PROXY"]; got != "http://someone-elses-proxy:9999" {
 		t.Errorf("the refusal still rewrote the value: %q", got)
 	}
 
-	if code := a.runRemovals(h.home, removalRequest{transport: true, force: true}); code != exitOK {
-		t.Fatalf("--force-restore did not complete the removal (exit %d)", code)
+	if res := a.runRemovals(h.home, removalRequest{transport: true, force: true}); !res.ok() {
+		t.Fatalf("--force-restore did not complete the removal; failed: %v", res.failed)
 	}
 	if _, present := laneSettings(t, h.home)["HTTPS_PROXY"]; present {
 		t.Error("--force-restore left the key behind")
@@ -387,8 +387,8 @@ func TestPurgeDeletesTheCAAndTheRecord(t *testing.T) {
 		t.Fatalf("no activation record was written: %v", err)
 	}
 
-	if code := a.runRemovals(h.home, removalRequest{telemetry: true, purge: true}); code != exitOK {
-		t.Fatalf("runRemovals exited %d", code)
+	if res := a.runRemovals(h.home, removalRequest{telemetry: true, purge: true}); !res.ok() {
+		t.Fatalf("runRemovals failed for %v", res.failed)
 	}
 	if fileExists(caPath) {
 		t.Error("the CA survived --remove-all; a trusted signing key with no relay behind it is a worse posture than none")
@@ -537,8 +537,8 @@ func TestRemoveAllKeepsTheSharedSpool(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if code := a.runRemovals(h.home, removalRequest{telemetry: true, transport: true, purge: true}); code != exitOK {
-		t.Fatalf("runRemovals exited %d", code)
+	if res := a.runRemovals(h.home, removalRequest{telemetry: true, transport: true, purge: true}); !res.ok() {
+		t.Fatalf("runRemovals failed for %v", res.failed)
 	}
 	if !fileExists(pending) {
 		t.Error("--remove-all destroyed undelivered hook evidence in the shared spool")

@@ -92,16 +92,12 @@ func canonicalJSONEqual(a, b []byte) bool {
 	return aErr == nil && bErr == nil && bytes.Equal(ac, bc)
 }
 
-func writeLocalHooks(projectDir, engine string) error {
-	dir, err := filepath.Abs(projectDir)
-	if err != nil {
-		return fmt.Errorf("local-hooks: resolve %q: %w", projectDir, err)
-	}
-	if st, err := os.Stat(dir); err != nil || !st.IsDir() {
-		return fmt.Errorf("local-hooks: %q is not an existing directory", dir)
-	}
-	settingsPath := filepath.Join(dir, ".claude", "settings.local.json")
-
+// writeHooks merges OpenBox's hook registrations into one settings file,
+// addressed by path. The path is a parameter rather than a project directory
+// because the same write serves the user-wide file that governs every session
+// on this machine and, historically, a single project's local file. Its parent
+// is created below, so a directory that does not exist yet is not an error.
+func writeHooks(settingsPath, engine string) error {
 	// Only the events below are rewritten. A map[string]any round trip kept every
 	// key and alphabetised and reindented all of them, in a file inside the
 	// developer's own repository. The validity check is explicit because sjson
@@ -233,15 +229,16 @@ func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
 	return os.Rename(tmpName, path)
 }
 
-// LocalHookAudit is the read-only view of one project's OpenBox hook
+// LocalHookAudit is the read-only view of one settings file's OpenBox hook
 // registration: which engine(s) it points at, and whether any invocation is
 // registered more than once.
 type LocalHookAudit struct {
 	// SettingsPath is the file inspected, reported whether or not it exists so a
 	// reader can see which directory was audited.
 	SettingsPath string
-	// Present reports whether that file exists. Absent is the normal state for a
-	// global-scope install, or a directory that was never initialized.
+	// Present reports whether that file exists. For the user-wide file, absent
+	// means this machine was never initialized. For a project file, absent is
+	// the ordinary state: an install governs every session without touching one.
 	Present bool
 	// Engines are the distinct engine paths classified as OpenBox-owned, sorted.
 	Engines []string
@@ -250,16 +247,13 @@ type LocalHookAudit struct {
 	DuplicateEvents []string
 }
 
-// AuditLocalHooks reports what OpenBox registrations a project's
-// settings.local.json holds, so `openbox doctor` can surface a second engine.
-// It exists so doctor and the installer cannot hold two opinions about what
-// "ours" means: both classify through ownedLocalHook.
-func AuditLocalHooks(projectDir string) (LocalHookAudit, error) {
-	dir, err := filepath.Abs(projectDir)
-	if err != nil {
-		return LocalHookAudit{}, fmt.Errorf("local-hooks: resolve %q: %w", projectDir, err)
-	}
-	audit := LocalHookAudit{SettingsPath: filepath.Join(dir, ".claude", "settings.local.json")}
+// AuditHooks reports what OpenBox registrations one settings file holds, so
+// `openbox doctor` can surface a second engine. It exists so doctor and the
+// installer cannot hold two opinions about what "ours" means: both classify
+// through ownedLocalHook. The path is a parameter because doctor has two
+// levels to report: the user-wide file and the cwd's project file.
+func AuditHooks(settingsPath string) (LocalHookAudit, error) {
+	audit := LocalHookAudit{SettingsPath: settingsPath}
 
 	raw, err := os.ReadFile(audit.SettingsPath)
 	if os.IsNotExist(err) {

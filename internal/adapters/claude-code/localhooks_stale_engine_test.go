@@ -54,7 +54,7 @@ func TestReInitReplacesAnOpenBoxEntryAtAStaleEnginePath(t *testing.T) {
 	}
 
 	notice := captureStderr(t, func() {
-		if err := writeLocalHooks(dir, engine); err != nil {
+		if err := writeHooks(ProjectSettingsPath(dir), engine); err != nil {
 			t.Fatalf("re-init: %v", err)
 		}
 	})
@@ -138,11 +138,11 @@ func TestReInitReplacesAnOpenBoxEntryAtAStaleEnginePath(t *testing.T) {
 func TestReInitAtTheSameEnginePathPrintsNothing(t *testing.T) {
 	dir := t.TempDir()
 	engine := filepath.Join(dir, "bin", "openbox")
-	if err := writeLocalHooks(dir, engine); err != nil {
+	if err := writeHooks(ProjectSettingsPath(dir), engine); err != nil {
 		t.Fatalf("first init: %v", err)
 	}
 	notice := captureStderr(t, func() {
-		if err := writeLocalHooks(dir, engine); err != nil {
+		if err := writeHooks(ProjectSettingsPath(dir), engine); err != nil {
 			t.Fatalf("re-init: %v", err)
 		}
 	})
@@ -170,7 +170,7 @@ func TestTheAuditAgreesWithWhatReInitRepairs(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	before, err := AuditLocalHooks(dir)
+	before, err := AuditHooks(ProjectSettingsPath(dir))
 	if err != nil {
 		t.Fatalf("audit: %v", err)
 	}
@@ -182,12 +182,12 @@ func TestTheAuditAgreesWithWhatReInitRepairs(t *testing.T) {
 	}
 
 	captureStderr(t, func() {
-		if err := writeLocalHooks(dir, engine); err != nil {
+		if err := writeHooks(ProjectSettingsPath(dir), engine); err != nil {
 			t.Fatalf("re-init: %v", err)
 		}
 	})
 
-	after, err := AuditLocalHooks(dir)
+	after, err := AuditHooks(ProjectSettingsPath(dir))
 	if err != nil {
 		t.Fatalf("audit after repair: %v", err)
 	}
@@ -221,7 +221,7 @@ func TestReInitCollapsesADuplicateRegistrationAtTheSameEngine(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	before, err := AuditLocalHooks(dir)
+	before, err := AuditHooks(ProjectSettingsPath(dir))
 	if err != nil {
 		t.Fatalf("audit: %v", err)
 	}
@@ -230,12 +230,12 @@ func TestReInitCollapsesADuplicateRegistrationAtTheSameEngine(t *testing.T) {
 	}
 
 	notice := captureStderr(t, func() {
-		if err := writeLocalHooks(dir, engine); err != nil {
+		if err := writeHooks(ProjectSettingsPath(dir), engine); err != nil {
 			t.Fatalf("re-init: %v", err)
 		}
 	})
 
-	after, err := AuditLocalHooks(dir)
+	after, err := AuditHooks(ProjectSettingsPath(dir))
 	if err != nil {
 		t.Fatalf("audit after repair: %v", err)
 	}
@@ -271,7 +271,7 @@ func TestReInitCollapsesADuplicateRegistrationAtTheSameEngine(t *testing.T) {
 // developer already knows is broken.
 func TestAuditLocalHooksOnAbsentAndUnparsableFiles(t *testing.T) {
 	dir := t.TempDir()
-	audit, err := AuditLocalHooks(dir)
+	audit, err := AuditHooks(ProjectSettingsPath(dir))
 	if err != nil {
 		t.Errorf("absent settings file returned an error: %v", err)
 	}
@@ -288,7 +288,7 @@ func TestAuditLocalHooksOnAbsentAndUnparsableFiles(t *testing.T) {
 	if err := os.WriteFile(audit.SettingsPath, []byte("{not json"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := AuditLocalHooks(dir); err == nil {
+	if _, err := AuditHooks(ProjectSettingsPath(dir)); err == nil {
 		t.Error("invalid JSON must surface as an error, not as zero engines; silently reporting none reads as governed-and-clean")
 	}
 }
@@ -391,7 +391,7 @@ func TestReInitReconcilesRegistrationShape(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := writeLocalHooks(dir, engine); err != nil {
+	if err := writeHooks(ProjectSettingsPath(dir), engine); err != nil {
 		t.Fatal(err)
 	}
 
@@ -447,7 +447,7 @@ func TestReInitReconcilesRegistrationShape(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := writeLocalHooks(dir, engine); err != nil {
+	if err := writeHooks(ProjectSettingsPath(dir), engine); err != nil {
 		t.Fatal(err)
 	}
 	second, err := os.ReadFile(settingsPath)

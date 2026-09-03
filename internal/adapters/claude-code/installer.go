@@ -2,10 +2,8 @@ package claudecode
 
 import (
 	"crypto/sha256"
-	"embed"
 	"fmt"
 	"io"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -17,9 +15,6 @@ import (
 	providerspi "github.com/openbox-ai/openbox-shift-left/internal/provider"
 )
 
-//go:embed all:plugin
-var pluginFS embed.FS
-
 // CredentialRef is the install-time seam's credential coordinate type.
 type CredentialRef = providerspi.CredentialRef
 
@@ -28,6 +23,10 @@ type CredentialRef = providerspi.CredentialRef
 type Installer struct {
 	PluginDir  string // where the bundle is materialized (default: userPluginDir())
 	ConfigPath string // where the dev config is written (default: DefaultConfigPath())
+	// SettingsPath is the hook file to register in (default: UserSettingsPath()).
+	// An override, like the two above, so a test can assert the write without
+	// depending on the machine's real home.
+	SettingsPath string
 	// EngineBinary, when set, is the path to the unified `openbox` engine to copy
 	// into the bundle's bin/openbox (the hooks invoke
 	// ${CLAUDE_PLUGIN_ROOT}/bin/openbox).
@@ -45,10 +44,12 @@ func (Installer) Available() bool { return true }
 func (i Installer) Plan(ref CredentialRef) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "OpenBox Claude Code plugin (observe-only, STORY-SL-4):\n")
-	fmt.Fprintf(&b, "  - Materialize plugin bundle → %s\n", i.pluginDir())
-	fmt.Fprintf(&b, "      .claude-plugin/plugin.json + hooks/hooks.json (SessionStart, UserPromptSubmit,\n")
-	fmt.Fprintf(&b, "      PreToolUse, PostToolUse, Stop, SubagentStop, SessionEnd →\n")
-	fmt.Fprintf(&b, "      `bin/openbox hook claude-code <event>`; async/best-effort)\n")
+	fmt.Fprintf(&b, "  - Create the engine directory → %s\n", filepath.Join(i.pluginDir(), "bin"))
+	fmt.Fprintf(&b, "      It holds the openbox binary the hooks invoke, and nothing else: no plugin\n")
+	fmt.Fprintf(&b, "      manifest and no second copy of the hook config.\n")
+	fmt.Fprintf(&b, "  - Register %d hook events → %s\n", len(localHookEvents), i.settingsPath())
+	fmt.Fprintf(&b, "      each one runs `bin/openbox hook claude-code <event>`; PreToolUse also gets the\n")
+	fmt.Fprintf(&b, "      async approval watcher. Foreign hooks and unrelated keys are left untouched.\n")
 	if i.EngineBinary != "" {
 		fmt.Fprintf(&b, "  - Place the openbox engine → %s\n", filepath.Join(i.pluginDir(), "bin", "openbox"))
 	} else {
@@ -70,17 +71,18 @@ func (i Installer) Plan(ref CredentialRef) string {
 	fmt.Fprintf(&b, "    onboarding with `openbox init --install-git-hook` (persisted to dev config);\n")
 	fmt.Fprintf(&b, "    OPENBOX_INSTALL_GIT_HOOK overrides either way; or install per repo with\n")
 	fmt.Fprintf(&b, "    `openbox hook git install`. Idempotent; never overwrites a foreign hook.\n")
-	if ref.ProjectDir != "" {
-		fmt.Fprintf(&b, "\nPROJECT hook scope (--scope local, the default):\n")
-		fmt.Fprintf(&b, "  - Merge the hook entries into %s\n", filepath.Join(ref.ProjectDir, ".claude", "settings.local.json"))
-		fmt.Fprintf(&b, " so sessions in THAT project are governed and sessions elsewhere are not.\n")
-	} else {
-		fmt.Fprintf(&b, "\nGLOBAL hook scope (--scope global):\n")
-		fmt.Fprintf(&b, "  - Touch no project file. Activation awaits the managed-settings step below,\n")
-		fmt.Fprintf(&b, "    which this command cannot perform, so nothing is governed until it lands.\n")
+	fmt.Fprintf(&b, "\nHook scope:\n")
+	fmt.Fprintf(&b, "  - EVERY session on this machine, in any directory. Nothing further is needed to\n")
+	fmt.Fprintf(&b, "    activate it, and the tool's file watcher picks the change up immediately, so\n")
+	fmt.Fprintf(&b, "    sessions already running are governed too.\n")
+	if wd, err := os.Getwd(); err == nil {
+		fmt.Fprintf(&b, "  - Sweep any superseded OpenBox entry out of %s. An entry left there would\n", ProjectSettingsPath(wd))
+		fmt.Fprintf(&b, "    register the same gate a second time.\n")
 	}
-	fmt.Fprintf(&b, "\nOrg-wide force-enable (managed settings; VERIFIED, not activated for the pilot; NFR-5):\n")
-	fmt.Fprintf(&b, "  add to the managed settings.json: {\"enabledPlugins\": [\"openbox-observe\"]}\n")
+	fmt.Fprintf(&b, "\nOrg-wide mandate (a separate tier from activation; NFR-5):\n")
+	fmt.Fprintf(&b, "  Managed settings with allowManagedHooksOnly make governance non-removable by the\n")
+	fmt.Fprintf(&b, "  developer. That is enforcement, not activation: this install already governs.\n")
+	fmt.Fprintf(&b, "  See `openbox managed install` and deployments/managed/.\n")
 	return b.String()
 }
 
@@ -104,14 +106,55 @@ func (i Installer) Install(ref CredentialRef) error {
 	if err := i.writeConfig(ref); err != nil {
 		return err
 	}
-	// Production posture (empty LocalHooksDir) never touches project files.
-	if ref.ProjectDir != "" {
-		engine := filepath.Join(i.pluginDir(), "bin", "openbox")
-		if err := writeLocalHooks(ref.ProjectDir, engine); err != nil {
-			return err
-		}
+	// User-wide, always. An install governs every session on this machine
+	// rather than one directory, so there is no scope to resolve and no project
+	// file to write. Both of the following stay inside the install lock.
+	engine := filepath.Join(i.pluginDir(), "bin", "openbox")
+	if err := writeHooks(i.settingsPath(), engine); err != nil {
+		return err
 	}
+	// And an entry left in the current project's own file is now a second
+	// registration of the same gate. Sweeping it is part of installing, not
+	// cleanup: where it names a different engine path the tool will not
+	// de-duplicate the two and every governed call is stored twice.
+	//
+	// A sweep failure must not fail the install: the user-wide hooks are
+	// already in place and governing, so refusing here would leave a machine
+	// governed by a command that reported failure. It is reported instead.
+	wd, err := os.Getwd()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "openbox: could not resolve the working directory, so this project's "+
+			"own settings file was not swept: %v\n", err)
+		return nil
+	}
+	removed, err := SweepProjectHooks(wd)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "openbox: %s still carries an OpenBox hook registration and could not be "+
+			"cleaned: %v\n  Every governed tool call in this project will be recorded twice until it is "+
+			"removed by hand.\n", ProjectSettingsPath(wd), err)
+		return nil
+	}
+	i.reportSweep(wd, removed)
 	return nil
+}
+
+// settingsPath is where this install registers its hooks.
+func (i Installer) settingsPath() string {
+	if i.SettingsPath != "" {
+		return i.SettingsPath
+	}
+	return UserSettingsPath()
+}
+
+func (i Installer) reportSweep(projectDir string, removed []string) {
+	if len(removed) == 0 {
+		return
+	}
+	fmt.Fprintf(os.Stderr, "openbox: removed %d superseded OpenBox hook registration(s) from %s\n"+
+		"  events: %s\n"+
+		"  This install governs every session on this machine, so a project-level copy would fire a "+
+		"second time and store every governed tool call twice.\n",
+		len(removed), ProjectSettingsPath(projectDir), strings.Join(removed, ", "))
 }
 
 // acquireInstallLock past a few dozen writers the queue drains slower than it
@@ -273,29 +316,22 @@ func fileSum(path string) ([sha256.Size]byte, error) {
 	return sum, nil
 }
 
+// materializeBundle creates the directory that holds the engine copy, and
+// nothing else.
+//
+// It used to unpack an embedded hooks.json and plugin manifest as well. Those
+// made this directory a loadable Claude Code plugin carrying its own copy of
+// all eleven handlers — and a plugin's handlers are separate from settings and
+// do not de-duplicate against them, so anything that loaded it would have
+// doubled every event against the registrations the install writes. The
+// directory's one remaining job is hosting bin/openbox, which those
+// registrations point at.
 func (i Installer) materializeBundle() error {
-	dst := i.pluginDir()
-	return fs.WalkDir(pluginFS, "plugin", func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		rel, err := filepath.Rel("plugin", path)
-		if err != nil {
-			return err
-		}
-		target := filepath.Join(dst, rel)
-		if d.IsDir() {
-			return os.MkdirAll(target, 0o755)
-		}
-		data, err := pluginFS.ReadFile(path)
-		if err != nil {
-			return err
-		}
-		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
-			return err
-		}
-		return os.WriteFile(target, data, 0o644)
-	})
+	dir := filepath.Join(i.pluginDir(), "bin")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("claude-code install: create %s: %w", dir, err)
+	}
+	return nil
 }
 
 func (i Installer) writeConfig(ref CredentialRef) error {
@@ -341,9 +377,5 @@ func contentCaptureLabel(b *bool) string {
 }
 
 func userPluginDir() string {
-	home, err := os.UserHomeDir()
-	if err != nil || home == "" {
-		home = os.Getenv("HOME")
-	}
-	return filepath.Join(home, ".claude", "plugins", "openbox-observe")
+	return filepath.Join(homeDir(), ".claude", "plugins", "openbox-observe")
 }

@@ -26,6 +26,7 @@ func TestConcurrentInstallIsRefusedRatherThanQueued(t *testing.T) {
 			defer wg.Done()
 			<-start // release them together, so they genuinely contend
 			errs[n] = Installer{
+				SettingsPath: filepath.Join(t.TempDir(), ".claude", "settings.json"),
 				PluginDir:    pluginDir,
 				ConfigPath:   filepath.Join(t.TempDir(), "dev.json"),
 				EngineBinary: src,
@@ -69,7 +70,8 @@ func TestConcurrentInstallIsRefusedRatherThanQueued(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(pluginDir, ".install.lock")); err != nil {
 		t.Errorf("the lock file should persist between installs: %v", err)
 	}
-	release, err := (Installer{PluginDir: pluginDir}).acquireInstallLock()
+	release, err := (Installer{
+		SettingsPath: filepath.Join(t.TempDir(), ".claude", "settings.json"), PluginDir: pluginDir}).acquireInstallLock()
 	if err != nil {
 		t.Errorf("the lock was still held after every install finished: %v", err)
 	} else {
@@ -99,7 +101,8 @@ func TestStaleInstallLockIsReclaimed(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	inst := Installer{PluginDir: pluginDir, ConfigPath: filepath.Join(t.TempDir(), "dev.json"), EngineBinary: src}
+	inst := Installer{
+		SettingsPath: filepath.Join(t.TempDir(), ".claude", "settings.json"), PluginDir: pluginDir, ConfigPath: filepath.Join(t.TempDir(), "dev.json"), EngineBinary: src}
 	if err := inst.Install(CredentialRef{DID: testDID}); err != nil {
 		t.Fatalf("a lock file nobody holds must not block an install, however new it looks: %v", err)
 	}
@@ -130,7 +133,8 @@ func engineAt(t *testing.T, dir, name, content string) string {
 func TestReInstallSkipsTheCopyWhenTheEngineIsUnchanged(t *testing.T) {
 	src := engineAt(t, t.TempDir(), "openbox", "engine-v1")
 	pluginDir := t.TempDir()
-	inst := Installer{PluginDir: pluginDir, EngineBinary: src}
+	inst := Installer{
+		SettingsPath: filepath.Join(t.TempDir(), ".claude", "settings.json"), PluginDir: pluginDir, EngineBinary: src}
 
 	if err := inst.placeEngineBinary(); err != nil {
 		t.Fatalf("first place: %v", err)
@@ -165,11 +169,13 @@ func TestReInstallReplacesTheEngineWhenTheBytesDiffer(t *testing.T) {
 	src := engineAt(t, srcDir, "openbox", "engine-v1")
 	pluginDir := t.TempDir()
 
-	if err := (Installer{PluginDir: pluginDir, EngineBinary: src}).placeEngineBinary(); err != nil {
+	if err := (Installer{
+		SettingsPath: filepath.Join(t.TempDir(), ".claude", "settings.json"), PluginDir: pluginDir, EngineBinary: src}).placeEngineBinary(); err != nil {
 		t.Fatalf("first place: %v", err)
 	}
 	newer := engineAt(t, srcDir, "openbox2", "engine-v2")
-	if err := (Installer{PluginDir: pluginDir, EngineBinary: newer}).placeEngineBinary(); err != nil {
+	if err := (Installer{
+		SettingsPath: filepath.Join(t.TempDir(), ".claude", "settings.json"), PluginDir: pluginDir, EngineBinary: newer}).placeEngineBinary(); err != nil {
 		t.Fatalf("second place: %v", err)
 	}
 
@@ -215,7 +221,8 @@ func TestPlaceEngineBinarySweepsAbandonedTempsAndSparesLiveOnes(t *testing.T) {
 		t.Fatalf("backdate foreign file: %v", err)
 	}
 
-	if err := (Installer{PluginDir: pluginDir, EngineBinary: src}).placeEngineBinary(); err != nil {
+	if err := (Installer{
+		SettingsPath: filepath.Join(t.TempDir(), ".claude", "settings.json"), PluginDir: pluginDir, EngineBinary: src}).placeEngineBinary(); err != nil {
 		t.Fatalf("place: %v", err)
 	}
 
@@ -236,7 +243,8 @@ func TestPlaceEngineBinarySweepsAbandonedTempsAndSparesLiveOnes(t *testing.T) {
 func TestTheSweepRunsEvenWhenTheCopyIsSkipped(t *testing.T) {
 	src := engineAt(t, t.TempDir(), "openbox", "engine-v1")
 	pluginDir := t.TempDir()
-	inst := Installer{PluginDir: pluginDir, EngineBinary: src}
+	inst := Installer{
+		SettingsPath: filepath.Join(t.TempDir(), ".claude", "settings.json"), PluginDir: pluginDir, EngineBinary: src}
 	if err := inst.placeEngineBinary(); err != nil {
 		t.Fatalf("first place: %v", err)
 	}

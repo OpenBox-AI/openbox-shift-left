@@ -29,13 +29,12 @@ func TestInitMigratesLegacyPostureBeforeWritingOverIt(t *testing.T) {
 	}
 	if err := devconfig.WriteEnvFile(filepath.Join(home, ".env"), map[string]string{
 		devconfig.EnvAPIKeyDirect:    "obx_test_k",
-		devconfig.EnvAgentPrivateKey: testSeedB64,
-	}); err != nil {
+		devconfig.EnvAgentPrivateKey: testSeedB64}); err != nil {
 		t.Fatal(err)
 	}
 
 	a, _, errb := testApp(nil)
-	if code := a.run([]string{"init", "--provider", "claude-code", "--scope", "global"}); code != exitOK {
+	if code := a.run([]string{"init", "--provider", "claude-code"}); code != exitOK {
 		t.Fatalf("exit = %d; stderr=%q", code, errb.String())
 	}
 

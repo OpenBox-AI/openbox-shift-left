@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -9,7 +10,9 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/devconfig"
 	obgit "github.com/openbox-ai/openbox-shift-left/internal/adapters/common/git"
 	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/hookflow"
+	"github.com/openbox-ai/openbox-shift-left/internal/cli/activation"
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/gatewayservice"
+	"github.com/openbox-ai/openbox-shift-left/internal/cli/laneservice"
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/providers"
 )
 
@@ -48,6 +51,10 @@ func newInstalledMachine(t *testing.T) *installedMachine {
 	// The org's own file, relocated under the fixture: the real one lives in
 	// /etc and a test must neither write nor delete it.
 	t.Setenv(devconfig.EnvManagedConfig, filepath.Join(openboxHome, "managed-dev.json"))
+	// The flush reaches the data plane when credentials resolve, and this
+	// fixture supplies them. Pinned at a dead loopback port so no test can post
+	// fixture events at the hosted core.
+	t.Setenv(devconfig.EnvBaseURL, "http://127.0.0.1:1")
 
 	projectDir := t.TempDir()
 	wd, err := os.Getwd()
@@ -281,12 +288,17 @@ func TestUninstallDeletesCredentialsEvenOnPartialFailure(t *testing.T) {
 		t.Errorf("credentials survived a partial failure at %s", m.envFile)
 	}
 	s := out.String()
-	// The consequence line is mandatory: hook edits are live, so the surface that
-	// failed keeps firing from the moment this command exits, and now fails open.
-	for _, want := range []string{m.codexHooks, "keeps firing"} {
+	// The consequence has to be the accurate one. A file the tool cannot parse
+	// is not a hook that keeps firing -- the tool applies NO hooks from it,
+	// including the developer's own -- and saying "still firing" would send the
+	// operator looking for governance that is not happening.
+	for _, want := range []string{m.codexHooks, "applies NO hooks", "uninstall` again"} {
 		if !strings.Contains(s, want) {
 			t.Errorf("the report does not name the consequence %q:\n%s", want, s)
 		}
+	}
+	if strings.Contains(s, "keeps firing") {
+		t.Errorf("an unparsable file was described as still firing:\n%s", s)
 	}
 }
 
@@ -419,9 +431,8 @@ func TestUninstallNeverPrintsASecret(t *testing.T) {
 func TestUninstallReportsTheSpoolBacklogItIsAboutToDestroy(t *testing.T) {
 	skipUnlessSupervised(t)
 	m := newInstalledMachine(t)
-	spool := hookflow.Spool{Dir: m.spoolDirs[0]}
-	if spool.BacklogCount() == 0 {
-		t.Skip("the fixture's spool file is not counted as backlog by this build")
+	if n := (hookflow.Spool{Dir: m.spoolDirs[0]}).BacklogCount(); n == 0 {
+		t.Fatalf("the fixture seeded no backlog, so this test would assert nothing")
 	}
 	a, out := m.app(t)
 	if code := a.runUninstall(nil); code != exitOK {
@@ -497,5 +508,78 @@ func TestUninstallReportsTheProjectFileItChecked(t *testing.T) {
 	window := s[idx:min(len(s), idx+600)]
 	if !strings.Contains(window, "FAILED HOOK") {
 		t.Errorf("project residue is not described as failing loudly:\n%s", window)
+	}
+}
+
+// TestUninstallKeepsWhatARetryNeedsWhenALaneRefuses is the case the report's
+// own remedy depends on. A conflicted deactivate leaves the daemon loaded and
+// its env keys routed, and the activation record is the only thing that can
+// restore those keys — so purging it made "resolve it and run uninstall again"
+// impossible, and the second run reported a clean machine at a daemon that was
+// still intercepting model calls.
+func TestUninstallKeepsWhatARetryNeedsWhenALaneRefuses(t *testing.T) {
+	skipUnlessSupervised(t)
+	m := newInstalledMachine(t)
+
+	// A transport lane that is routed and whose env value changed after OpenBox
+	// set it: deactivate refuses rather than overwriting somebody's edit.
+	settings := gatewayservice.SettingsPath(m.home)
+	writeFile(t, settings, `{"env":{"HTTPS_PROXY":"http://127.0.0.1:9999"},`+
+		`"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"\"/o/openbox\" hook claude-code SessionStart"}]}]}}`)
+	record := activation.RecordPath(m.home)
+	writeFile(t, record, `{"schema":"openbox.dev-runtime.activation/v1","lanes":{"transport":{`+
+		`"managed":{"HTTPS_PROXY":"http://127.0.0.1:8790"},`+
+		`"original":{"HTTPS_PROXY":{"present":false}},`+
+		`"settings_path":"`+settings+`"}}}`)
+
+	a, out := m.app(t)
+	code := a.runUninstall(nil)
+	s := out.String()
+	if code == exitOK {
+		t.Errorf("a refused deactivate reported success:\n%s", s)
+	}
+	if _, err := os.Stat(record); err != nil {
+		t.Errorf("the activation record was purged despite a routed lane, so nothing can restore "+
+			"its env keys: %v\n%s", err, s)
+	}
+	if !strings.Contains(s, "HTTPS_PROXY") {
+		t.Errorf("the report does not name the key that blocked the removal:\n%s", s)
+	}
+	if !strings.Contains(s, "still routed") && !strings.Contains(s, "STILL ROUTED") {
+		t.Errorf("the report does not say the lane is still routed:\n%s", s)
+	}
+
+	// And the re-run must not claim a clean machine while that lane is live.
+	b, second := m.app(t)
+	b.runUninstall(nil)
+	if strings.Contains(second.String(), "nothing to remove") {
+		t.Errorf("the re-run reported a clean machine with a lane still routed:\n%s", second.String())
+	}
+}
+
+// TestUninstallDoesNotClaimALaneIsRoutedOnAPlatformWithNoDaemons. The unit
+// renderer refuses an OS it has no packaging for, and reading that refusal as a
+// removal failure told an operator their lanes were still intercepting model
+// calls on a machine that cannot run one.
+func TestUninstallDoesNotClaimALaneIsRoutedOnAPlatformWithNoDaemons(t *testing.T) {
+	if code := (removalResult{}); !code.ok() {
+		t.Fatal("an empty result must read as success")
+	}
+	for _, tc := range []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"unsupported platform", laneservice.Telemetry("", "", false).UnsupportedPlatform("windows"), false},
+		{"changed value", errors.New("activation: HTTPS_PROXY changed since OpenBox set it; refusing to overwrite"), true},
+		{"unit write failed", errors.New("laneservice: removing /x: permission denied"), false},
+	} {
+		if got := isActivationConflict(tc.err); got != tc.want {
+			t.Errorf("%s: isActivationConflict = %v, want %v (only a refused deactivate leaves a lane routed)",
+				tc.name, got, tc.want)
+		}
+	}
+	if !isUnsupportedPlatform(laneservice.Telemetry("", "", false).UnsupportedPlatform("windows")) {
+		t.Error("the platform refusal is not recognised, so a Windows uninstall would always exit 1")
 	}
 }

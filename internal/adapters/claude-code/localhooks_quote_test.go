@@ -15,8 +15,8 @@ import (
 func TestLocalHookCommandQuotesTheEnginePath(t *testing.T) {
 	dir := t.TempDir()
 	engine := filepath.Join("/Users/John Doe/.claude/plugins/openbox-observe/bin", "openbox")
-	if err := writeLocalHooks(dir, engine); err != nil {
-		t.Fatalf("writeLocalHooks: %v", err)
+	if err := writeHooks(ProjectSettingsPath(dir), engine); err != nil {
+		t.Fatalf("writeHooks: %v", err)
 	}
 	raw, err := os.ReadFile(filepath.Join(dir, ".claude", "settings.local.json"))
 	if err != nil {
@@ -62,8 +62,8 @@ func TestLocalHooksIdempotentAgainstAnUnquotedLegacyEntry(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := writeLocalHooks(dir, engine); err != nil {
-		t.Fatalf("writeLocalHooks: %v", err)
+	if err := writeHooks(ProjectSettingsPath(dir), engine); err != nil {
+		t.Fatalf("writeHooks: %v", err)
 	}
 	raw, _ := os.ReadFile(settingsPath)
 	var settings struct {
@@ -120,7 +120,7 @@ func TestReInitAddsTheNewHooksExactlyOnce(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := writeLocalHooks(dir, engine); err != nil {
+	if err := writeHooks(ProjectSettingsPath(dir), engine); err != nil {
 		t.Fatalf("re-init: %v", err)
 	}
 

@@ -269,29 +269,61 @@ else
 	tb_skip "turn thinking egressed" "no thinking block in this session (extended thinking may be off — see mapping.md §7 item 22)"
 fi
 
-# ── the negative: an ungoverned directory produces NOTHING ───────────────────
-# that decision's accepted cost, demonstrated end to end rather than asserted. This is
-# the assertion that makes "absence of events is not evidence of absence of work"
-# a measured property of the product instead of a caveat in a document.
-tb_step "a real session in a directory where init was not run"
+# ── the positive control: ANY directory is governed ──────────────────────────
+# Inverted with user-wide hooks. This used to demonstrate the accepted cost of
+# project scope: a real session in a never-initialized directory produced
+# nothing, which made "absence of events is not evidence of absence of work" a
+# measured property rather than a caveat.
+#
+# That cost is gone, and the claim worth measuring now is the opposite one. A
+# session in a directory this suite never touched must produce rows, because
+# that is what one install governing the whole machine means. The genuine
+# negative moved to after `openbox uninstall`, where absence proves removal.
+tb_step "a real session in a directory where init was never run"
 ungoverned="$(tb_state_get ungoverned_project)"
 if [ -z "$ungoverned" ] || [ ! -d "$ungoverned" ]; then
-	tb_note "no ungoverned twin recorded — run 10-onboard.sh; skipping the negative scope assertion"
+	tb_note "no control project recorded — run 10-onboard.sh; skipping the global-scope assertion"
 else
+	GLOBAL_MARK="global-$(date +%s)"
+	sid_un="$(TB_SESSION_DIR="$ungoverned" tb_session "Say the word $GLOBAL_MARK and nothing else." "")"
+	if [ -z "$sid_un" ]; then
+		tb_bad "the control session produced a session id" "an id" "empty"
+	else
+		assert_ne "the control directory produced governance rows" 0 \
+			"$(tb_count "governance_events where run_id='$sid_un'")"
+		tb_ok "a directory this suite never initialized is governed — global scope is real"
+	fi
+fi
+
+# ── the genuine negative: after uninstall, nothing is governed ───────────────
+# Absence only proves removal once there is nothing left to remove, so this runs
+# against a machine `openbox uninstall` has just cleaned. It is the one place
+# absence of events is evidence.
+tb_step "after uninstall, no directory produces events"
+if [ ! -x "$TB_BIN" ]; then
+	tb_skip "the post-uninstall negative" "no built binary"
+else
+	"$TB_BIN" uninstall >"$TB_STATE/capture-uninstall.out" 2>&1 ||
+		tb_note "uninstall reported a partial removal; see $TB_STATE/capture-uninstall.out"
 	before="$(tb_count "governance_events")"
-	UNGOVERNED_MARK="ungoverned-$(date +%s)"
-	sid_un="$(TB_SESSION_DIR="$ungoverned" tb_session "Say the word $UNGOVERNED_MARK and nothing else." "")"
+	REMOVED_MARK="removed-$(date +%s)"
+	sid_rm="$(TB_SESSION_DIR="$TB_PROJECT" tb_session "Say the word $REMOVED_MARK and nothing else." "")"
 	after="$(tb_count "governance_events")"
-	assert_eq "no governance events from an ungoverned directory" "$before" "$after"
-	if [ -n "$sid_un" ]; then
-		assert_eq "no session row for it either" 0 "$(tb_count "governance_events where run_id='$sid_un'")"
+	assert_eq "no governance events once the hooks are gone" "$before" "$after"
+	if [ -n "$sid_rm" ]; then
+		assert_eq "no session row for it either" 0 "$(tb_count "governance_events where run_id='$sid_rm'")"
 	fi
 	# And nothing about that session reached OpenBox at all, prompt included. The
-	# whole row is scanned rather than one column, matching how the capture
-	# assertions above inspect egress.
+	# whole row is scanned rather than one column, matching the capture
+	# assertions above.
 	assert_eq "its prompt never egressed" 0 \
-		"$(tb_val "select count(*) from governance_events e where row_to_json(e)::text like '%$UNGOVERNED_MARK%';")"
-	tb_ok "the ungoverned twin produced no rows — the scope gap is real and bounded"
+		"$(tb_val "select count(*) from governance_events e where row_to_json(e)::text like '%$REMOVED_MARK%';")"
+	tb_ok "an uninstalled machine produces nothing, from any directory"
+	# Every later phase needs the hooks back.
+	(cd "$TB_PROJECT" && "$TB_BIN" init --provider claude-code) \
+		>"$TB_STATE/capture-reinit.out" 2>&1 ||
+		tb_bad "re-install after the negative" 0 "$(tail -3 "$TB_STATE/capture-reinit.out")"
+	tb_ok "hooks reinstalled for the phases that follow"
 fi
 
 tb_finish

@@ -13,6 +13,7 @@ import (
 	"net/http/httptest"
 
 	"github.com/openbox-ai/openbox-shift-left/internal/client/memhttptest"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -47,8 +48,7 @@ func testApp(env map[string]string) (*app, *bytes.Buffer, *bytes.Buffer) {
 		getenv: func(k string) string { return env[k] },
 		newRegistrar: func(_, _, _ string) devinit.Registrar {
 			panic("newRegistrar should not be called in this path")
-		},
-	}
+		}}
 	return a, &out, &errb
 }
 
@@ -72,8 +72,7 @@ func isolateHome(t *testing.T) string {
 	for env, path := range map[string]string{
 		devconfig.EnvEnforcementFile:    filepath.Join(sinks, "enforcements.jsonl"),
 		devconfig.EnvPendingApprovalDir: filepath.Join(sinks, "pending-approvals"),
-		"OPENBOX_ADVISORY_FILE":         filepath.Join(sinks, "advisories.jsonl"),
-	} {
+		"OPENBOX_ADVISORY_FILE":         filepath.Join(sinks, "advisories.jsonl")} {
 		if os.Getenv(env) == "" {
 			t.Setenv(env, path)
 		}
@@ -221,8 +220,19 @@ func TestClaudeCodeInstallsForRealExitsZero(t *testing.T) {
 		t.Errorf("expected a config-applied message, got %q", out.String())
 	}
 
-	if _, err := os.Stat(filepath.Join(home, ".claude", "plugins", "openbox-observe", ".claude-plugin", "plugin.json")); err != nil {
-		t.Errorf("plugin bundle not materialized: %v", err)
+	// The bundle hosts the engine and nothing else. A plugin manifest there
+	// would make the directory loadable, and a plugin's handlers do not
+	// de-duplicate against the settings-level ones this install writes.
+	bundle := filepath.Join(home, ".claude", "plugins", "openbox-observe")
+	var manifests []string
+	_ = filepath.WalkDir(bundle, func(path string, d fs.DirEntry, err error) error {
+		if err == nil && !d.IsDir() && filepath.Ext(path) == ".json" {
+			manifests = append(manifests, path)
+		}
+		return nil
+	})
+	if len(manifests) > 0 {
+		t.Errorf("the bundle ships loadable manifest(s), which would double every event: %v", manifests)
 	}
 	enginePath := filepath.Join(home, ".claude", "plugins", "openbox-observe", "bin", "openbox")
 	if fi, err := os.Stat(enginePath); err != nil {
@@ -323,8 +333,7 @@ func TestHookMisuseIsSafe(t *testing.T) {
 	for _, args := range [][]string{
 		{"hook"},
 		{"hook", "claude-code"},
-		{"hook", "vim", "PreToolUse"},
-	} {
+		{"hook", "vim", "PreToolUse"}} {
 		a, out, errb := testApp(nil)
 		a.stdin = strings.NewReader("")
 		if code := a.run(args); code != exitOK {
@@ -461,8 +470,7 @@ func TestHookEndToEndSmoke(t *testing.T) {
 		{"UserPromptSubmit", `{"hook_event_name":"UserPromptSubmit","session_id":"s1","cwd":"/r","prompt":"hi"}`, true, true},
 		{"PreToolUse", `{"hook_event_name":"PreToolUse","session_id":"s1","cwd":"/r","tool_name":"Bash","tool_input":{"command":"` + contentCanary + `"}}`, true, true},
 		{"PostToolUse", `{"hook_event_name":"PostToolUse","session_id":"s1","cwd":"/r","tool_name":"Bash","tool_response":{"ok":true}}`, true, false},
-		{"SessionEnd", `{"hook_event_name":"SessionEnd","session_id":"s1","cwd":"/r","reason":"other"}`, false, false},
-	}
+		{"SessionEnd", `{"hook_event_name":"SessionEnd","session_id":"s1","cwd":"/r","reason":"other"}`, false, false}}
 	const hotPathBudget = 2 * time.Second
 	for _, e := range events {
 		a, out, errb := testApp(nil)
@@ -1013,8 +1021,7 @@ func TestCodexUnifiedBinaryObserveE2E(t *testing.T) {
 		{"UserPromptSubmit", "userpromptsubmit.json"},
 		{"PreToolUse", "pretooluse.json"},
 		{"PostToolUse", "posttooluse.json"},
-		{"SessionEnd", "sessionend.json"},
-	} {
+		{"SessionEnd", "sessionend.json"}} {
 		payload, err := os.ReadFile(filepath.Join(fixtures, e.fixture))
 		if err != nil {
 			t.Fatalf("fixture %s: %v", e.fixture, err)
@@ -1146,8 +1153,7 @@ func TestHelpFlagExitsZeroForEverySubcommand(t *testing.T) {
 		{"init", "-h"},
 		{"dev", "verify", "-h"},
 		{"doctor", "-h"},
-		{"managed", "-h"},
-	} {
+		{"managed", "-h"}} {
 		a, _, _ := testApp(nil)
 		if got := a.run(args); got != exitOK {
 			t.Errorf("openbox %v exited %d, want 0; asking for help is not an error", args, got)
@@ -1183,26 +1189,25 @@ func TestInit_SaysWhichSessionsAreGoverned(t *testing.T) {
 		return out.String()
 	}
 
-	t.Run("the default governs this project and states the gap", func(t *testing.T) {
+	t.Run("a bare init governs every session and names the file", func(t *testing.T) {
 		got := run(t)
-		if !strings.Contains(got, "THIS PROJECT ONLY") {
-			t.Errorf("a bare init governs the current directory and must say so; got:\n%s", got)
+		if !strings.Contains(got, "EVERY SESSION") {
+			t.Errorf("one install governs every session on this machine and must say so; got:\n%s", got)
 		}
-		if !strings.Contains(got, "settings.local.json") {
+		if !strings.Contains(got, filepath.Join(".claude", "settings.json")) {
 			t.Errorf("say WHERE the hooks were written so it can be checked; got:\n%s", got)
 		}
-		if !strings.Contains(got, "ANY OTHER directory are not governed") {
-			t.Errorf("the default must state what it does NOT cover; got:\n%s", got)
-		}
-		if !strings.Contains(got, "absence of events is not evidence") {
-			t.Errorf("the coverage gap must be stated in the terms an auditor needs; got:\n%s", got)
-		}
-		if strings.Contains(got, "NOTHING YET") {
-			t.Errorf("contradictory output: claims both governed and ungoverned:\n%s", got)
+		// The old default governed one directory and had to warn that absence of
+		// events proved nothing. That caveat is now false, and repeating it would
+		// tell an auditor to distrust a complete record.
+		for _, gone := range []string{"THIS PROJECT ONLY", "ANY OTHER directory are not governed", "NOTHING YET"} {
+			if strings.Contains(got, gone) {
+				t.Errorf("the install still describes per-directory scope (%q):\n%s", gone, got)
+			}
 		}
 	})
 
-	t.Run("global scope says activation is pending and touches no project file", func(t *testing.T) {
+	t.Run("it writes no project settings file", func(t *testing.T) {
 		dir := t.TempDir()
 		wd, err := os.Getwd()
 		if err != nil {
@@ -1213,17 +1218,12 @@ func TestInit_SaysWhichSessionsAreGoverned(t *testing.T) {
 		}
 		t.Cleanup(func() { _ = os.Chdir(wd) })
 
-		got := run(t, "--scope", "global")
-		if !strings.Contains(got, "NOTHING YET") {
-			t.Errorf("global scope must say it governs nothing yet; got:\n%s", got)
-		}
-		for _, want := range []string{"managed settings", "enabledPlugins", "--scope local"} {
-			if !strings.Contains(got, want) {
-				t.Errorf("missing the remedy %q; got:\n%s", want, got)
-			}
+		got := run(t)
+		if !strings.Contains(got, "EVERY SESSION") {
+			t.Errorf("the scope statement is missing; got:\n%s", got)
 		}
 		if _, err := os.Stat(filepath.Join(dir, ".claude", "settings.local.json")); !os.IsNotExist(err) {
-			t.Errorf("--scope global wrote a project settings file: %v", err)
+			t.Errorf("init created a project settings file: %v", err)
 		}
 	})
 }
@@ -1236,8 +1236,7 @@ func seedCredentials(t *testing.T) {
 	}
 	if err := devconfig.WriteEnvFile(envPath, map[string]string{
 		devconfig.EnvAPIKeyDirect:    "obx_test_k",
-		devconfig.EnvAgentPrivateKey: testSeedB64,
-	}); err != nil {
+		devconfig.EnvAgentPrivateKey: testSeedB64}); err != nil {
 		t.Fatal(err)
 	}
 	devPath, err := devconfig.DevConfigWritePath()
@@ -1245,8 +1244,7 @@ func seedCredentials(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := devconfig.WriteConfig(devPath, devconfig.Update{
-		DID: "did:aip:3f2504e0-4f89-11d3-9a0c-0305e82c3301",
-	}); err != nil {
+		DID: "did:aip:3f2504e0-4f89-11d3-9a0c-0305e82c3301"}); err != nil {
 		t.Fatal(err)
 	}
 }

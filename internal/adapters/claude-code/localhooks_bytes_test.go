@@ -55,8 +55,8 @@ func TestWriteLocalHooksKeepsTheDevelopersOtherSettings(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := writeLocalHooks(project, "/usr/local/bin/openbox"); err != nil {
-		t.Fatalf("writeLocalHooks: %v", err)
+	if err := writeHooks(ProjectSettingsPath(project), "/usr/local/bin/openbox"); err != nil {
+		t.Fatalf("writeHooks: %v", err)
 	}
 
 	raw, err := os.ReadFile(settingsPath)
@@ -114,15 +114,15 @@ func TestWriteLocalHooksIsIdempotentByteForByte(t *testing.T) {
 	project := t.TempDir()
 	settingsPath := filepath.Join(project, ".claude", "settings.local.json")
 
-	if err := writeLocalHooks(project, "/usr/local/bin/openbox"); err != nil {
-		t.Fatalf("first writeLocalHooks: %v", err)
+	if err := writeHooks(ProjectSettingsPath(project), "/usr/local/bin/openbox"); err != nil {
+		t.Fatalf("first writeHooks: %v", err)
 	}
 	first, err := os.ReadFile(settingsPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := writeLocalHooks(project, "/usr/local/bin/openbox"); err != nil {
-		t.Fatalf("second writeLocalHooks: %v", err)
+	if err := writeHooks(ProjectSettingsPath(project), "/usr/local/bin/openbox"); err != nil {
+		t.Fatalf("second writeHooks: %v", err)
 	}
 	second, err := os.ReadFile(settingsPath)
 	if err != nil {
@@ -147,9 +147,9 @@ func TestWriteLocalHooksRefusesANonArrayEvent(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err := writeLocalHooks(project, "/usr/local/bin/openbox")
+	err := writeHooks(ProjectSettingsPath(project), "/usr/local/bin/openbox")
 	if err == nil {
-		t.Fatal("writeLocalHooks replaced a non-array hooks event")
+		t.Fatal("writeHooks replaced a non-array hooks event")
 	}
 	if !strings.Contains(err.Error(), "not a JSON array") {
 		t.Errorf("error does not name the shape problem: %v", err)

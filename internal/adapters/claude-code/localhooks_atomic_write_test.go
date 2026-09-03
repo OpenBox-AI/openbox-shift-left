@@ -17,7 +17,7 @@ func TestConcurrentWriteLocalHooksNeverPublishesAnUnparsableSettingsFile(t *test
 	project := t.TempDir()
 	settings := filepath.Join(project, ".claude", "settings.local.json")
 
-	if err := writeLocalHooks(project, "/opt/openbox/bin/openbox"); err != nil {
+	if err := writeHooks(ProjectSettingsPath(project), "/opt/openbox/bin/openbox"); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
 
@@ -66,7 +66,7 @@ func TestConcurrentWriteLocalHooksNeverPublishesAnUnparsableSettingsFile(t *test
 			writers.Add(1)
 			go func(engine string) {
 				defer writers.Done()
-				_ = writeLocalHooks(project, engine)
+				_ = writeHooks(ProjectSettingsPath(project), engine)
 			}(engine)
 		}
 	}
@@ -108,8 +108,8 @@ func TestConcurrentWriteLocalHooksNeverPublishesAnUnparsableSettingsFile(t *test
 // not a secret, and other tools read it.
 func TestWriteLocalHooksPublishesAReadableSettingsFile(t *testing.T) {
 	project := t.TempDir()
-	if err := writeLocalHooks(project, "/opt/openbox/bin/openbox"); err != nil {
-		t.Fatalf("writeLocalHooks: %v", err)
+	if err := writeHooks(ProjectSettingsPath(project), "/opt/openbox/bin/openbox"); err != nil {
+		t.Fatalf("writeHooks: %v", err)
 	}
 	info, err := os.Stat(filepath.Join(project, ".claude", "settings.local.json"))
 	if err != nil {

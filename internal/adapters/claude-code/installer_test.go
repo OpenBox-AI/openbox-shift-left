@@ -2,6 +2,7 @@ package claudecode
 
 import (
 	"encoding/json"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -13,7 +14,12 @@ import (
 func TestInstaller_MaterializesBundleAndConfig(t *testing.T) {
 	pluginDir := t.TempDir()
 	cfgPath := filepath.Join(t.TempDir(), "openbox", "dev.json")
-	inst := Installer{PluginDir: pluginDir, ConfigPath: cfgPath}
+	inst := Installer{
+		PluginDir:  pluginDir,
+		ConfigPath: cfgPath,
+		// Pinned so the install cannot reach the real home's settings file.
+		SettingsPath: filepath.Join(t.TempDir(), ".claude", "settings.json"),
+	}
 
 	if inst.Name() != "claude-code" {
 		t.Errorf("Name = %q", inst.Name())
@@ -29,10 +35,22 @@ func TestInstaller_MaterializesBundleAndConfig(t *testing.T) {
 		t.Fatalf("install: %v", err)
 	}
 
-	for _, rel := range []string{".claude-plugin/plugin.json", "hooks/hooks.json"} {
-		if _, err := os.Stat(filepath.Join(pluginDir, rel)); err != nil {
-			t.Errorf("missing bundle file %s: %v", rel, err)
+	// The bundle's one job is hosting the engine the registrations point at. It
+	// must carry no plugin manifest and no second copy of the hook config: a
+	// plugin's handlers do not de-duplicate against the settings-level ones, so
+	// anything that loaded this directory would double every event.
+	if _, err := os.Stat(filepath.Join(pluginDir, "bin")); err != nil {
+		t.Errorf("the bundle has no bin/ for the engine: %v", err)
+	}
+	var manifests []string
+	_ = filepath.WalkDir(pluginDir, func(path string, d fs.DirEntry, err error) error {
+		if err == nil && !d.IsDir() && filepath.Ext(path) == ".json" {
+			manifests = append(manifests, path)
 		}
+		return nil
+	})
+	if len(manifests) > 0 {
+		t.Errorf("the bundle still ships loadable manifest(s), which would double every event: %v", manifests)
 	}
 
 	raw, err := os.ReadFile(cfgPath)
@@ -62,7 +80,12 @@ func TestInstaller_MaterializesBundleAndConfig(t *testing.T) {
 func TestInstaller_PersistsEnforcePosture(t *testing.T) {
 	pluginDir := t.TempDir()
 	cfgPath := filepath.Join(t.TempDir(), "openbox", "dev.json")
-	inst := Installer{PluginDir: pluginDir, ConfigPath: cfgPath}
+	inst := Installer{
+		PluginDir:  pluginDir,
+		ConfigPath: cfgPath,
+		// Pinned so the install cannot reach the real home's settings file.
+		SettingsPath: filepath.Join(t.TempDir(), ".claude", "settings.json"),
+	}
 
 	tru := true
 	ref := CredentialRef{
@@ -115,11 +138,20 @@ func TestInstaller_PersistsEnforcePosture(t *testing.T) {
 }
 
 func TestInstaller_Plan(t *testing.T) {
-	inst := Installer{PluginDir: "/x/plugins", ConfigPath: "/x/dev.json"}
+	inst := Installer{PluginDir: "/x/plugins", ConfigPath: "/x/dev.json", SettingsPath: "/x/settings.json"}
 	plan := inst.Plan(CredentialRef{DID: testDID})
-	for _, want := range []string{"enabledPlugins", "openbox-observe", testDID, "metadata-only"} {
+	// The plan states the scope in the terms a reader acts on: every session on
+	// this machine, activated by this command alone. It must not send anybody
+	// looking for a managed-settings step to turn governance on -- that tier is
+	// enforcement, and claiming otherwise reads as "nothing is governed yet".
+	for _, want := range []string{"EVERY session", "/x/settings.json", testDID, "metadata-only"} {
 		if !strings.Contains(plan, want) {
 			t.Errorf("plan missing %q:\n%s", want, plan)
+		}
+	}
+	for _, gone := range []string{"enabledPlugins", "--scope", "awaits"} {
+		if strings.Contains(plan, gone) {
+			t.Errorf("the plan still claims activation is pending (%q):\n%s", gone, plan)
 		}
 	}
 	if strings.Contains(plan, "obx_") {
@@ -133,7 +165,12 @@ func TestInstaller_Plan(t *testing.T) {
 func TestInstaller_ReInstallIsByteIdentical(t *testing.T) {
 	pluginDir := t.TempDir()
 	cfgPath := filepath.Join(t.TempDir(), "dev.json")
-	inst := Installer{PluginDir: pluginDir, ConfigPath: cfgPath}
+	inst := Installer{
+		PluginDir:  pluginDir,
+		ConfigPath: cfgPath,
+		// Pinned so the install cannot reach the real home's settings file.
+		SettingsPath: filepath.Join(t.TempDir(), ".claude", "settings.json"),
+	}
 	ref := CredentialRef{DID: testDID}
 
 	if err := inst.Install(ref); err != nil {
@@ -166,6 +203,7 @@ func TestInstaller_PlacesEngineBinary(t *testing.T) {
 		t.Fatal(err)
 	}
 	inst := Installer{
+		SettingsPath: filepath.Join(t.TempDir(), ".claude", "settings.json"),
 		PluginDir:    pluginDir,
 		ConfigPath:   filepath.Join(t.TempDir(), "dev.json"),
 		EngineBinary: engine,
@@ -191,7 +229,8 @@ func TestInstaller_PlacesEngineBinary(t *testing.T) {
 
 func TestInstaller_SkipsEngineBinaryWhenUnset(t *testing.T) {
 	pluginDir := t.TempDir()
-	inst := Installer{PluginDir: pluginDir, ConfigPath: filepath.Join(t.TempDir(), "dev.json")}
+	inst := Installer{
+		SettingsPath: filepath.Join(t.TempDir(), ".claude", "settings.json"), PluginDir: pluginDir, ConfigPath: filepath.Join(t.TempDir(), "dev.json")}
 	if err := inst.Install(CredentialRef{DID: testDID}); err != nil {
 		t.Fatalf("install: %v", err)
 	}
@@ -201,7 +240,8 @@ func TestInstaller_SkipsEngineBinaryWhenUnset(t *testing.T) {
 }
 
 func TestInstaller_RequiresDID(t *testing.T) {
-	inst := Installer{PluginDir: t.TempDir(), ConfigPath: filepath.Join(t.TempDir(), "dev.json")}
+	inst := Installer{
+		SettingsPath: filepath.Join(t.TempDir(), ".claude", "settings.json"), PluginDir: t.TempDir(), ConfigPath: filepath.Join(t.TempDir(), "dev.json")}
 	if err := inst.Install(CredentialRef{}); err == nil {
 		t.Error("install without a DID should error")
 	}
@@ -212,7 +252,12 @@ func TestInstaller_RequiresDID(t *testing.T) {
 func TestInstaller_ReInitKeepsEnforcePosture(t *testing.T) {
 	pluginDir := t.TempDir()
 	cfgPath := filepath.Join(t.TempDir(), "openbox", "dev.json")
-	inst := Installer{PluginDir: pluginDir, ConfigPath: cfgPath}
+	inst := Installer{
+		PluginDir:  pluginDir,
+		ConfigPath: cfgPath,
+		// Pinned so the install cannot reach the real home's settings file.
+		SettingsPath: filepath.Join(t.TempDir(), ".claude", "settings.json"),
+	}
 	tru := true
 
 	if err := inst.Install(CredentialRef{

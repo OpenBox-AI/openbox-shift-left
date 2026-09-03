@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/devconfig"
@@ -60,10 +61,11 @@ func TestIsolateHomeRedirectsEveryPathInitWritesTo(t *testing.T) {
 	}
 }
 
-// TestProjectScopedInitWritesNoSettingsIntoTheSourceTree a project-scoped
-// `init` under isolateHome must leave its hook registrations in the temp cwd,
-// not in the package directory this test binary runs from.
-func TestProjectScopedInitWritesNoSettingsIntoTheSourceTree(t *testing.T) {
+// TestInitWritesOnlyIntoTheIsolatedHome. `init` now registers user-wide, so
+// the property worth holding is that under isolateHome the write lands in the
+// temp HOME and nowhere else -- not in the package directory this test binary
+// runs from, and not in the developer's real home.
+func TestInitWritesOnlyIntoTheIsolatedHome(t *testing.T) {
 	pkgDir, err := os.Getwd()
 	if err != nil {
 		t.Fatalf("resolve working directory: %v", err)
@@ -77,14 +79,25 @@ func TestProjectScopedInitWritesNoSettingsIntoTheSourceTree(t *testing.T) {
 		t.Fatalf("init exit = %d; stderr=%q", code, errb.String())
 	}
 
+	isolatedHome := os.Getenv("HOME")
+	userSettings := filepath.Join(isolatedHome, ".claude", "settings.json")
+	raw, err := os.ReadFile(userSettings)
+	if err != nil {
+		t.Fatalf("init registered no hooks in the isolated home at %s: %v", userSettings, err)
+	}
+	if !strings.Contains(string(raw), "hook claude-code") {
+		t.Errorf("%s carries no OpenBox registration:\n%s", userSettings, raw)
+	}
+	if _, err := os.Stat(sourceSettings); !os.IsNotExist(err) {
+		t.Errorf("init wrote hook registrations into the source tree at %s (err=%v)", sourceSettings, err)
+	}
+	// And it must not have created a project file in the temp cwd either: the
+	// sweep removes ours from one, it never adds one.
 	isolatedWD, err := os.Getwd()
 	if err != nil {
 		t.Fatalf("resolve working directory: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(isolatedWD, ".claude", "settings.local.json")); err != nil {
-		t.Fatalf("init wrote no project settings anywhere: %v", err)
-	}
-	if _, err := os.Stat(sourceSettings); !os.IsNotExist(err) {
-		t.Errorf("init wrote hook registrations into the source tree at %s (err=%v)", sourceSettings, err)
+	if _, err := os.Stat(filepath.Join(isolatedWD, ".claude", "settings.local.json")); !os.IsNotExist(err) {
+		t.Errorf("init created a project settings file in %s; the install is user-wide", isolatedWD)
 	}
 }

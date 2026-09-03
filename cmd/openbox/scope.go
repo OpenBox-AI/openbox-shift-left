@@ -3,44 +3,12 @@ package main
 import (
 	"flag"
 	"fmt"
-	"path/filepath"
+	"os"
 
 	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/devconfig"
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/devinit"
+	"github.com/openbox-ai/openbox-shift-left/internal/cli/providers"
 )
-
-const (
-	scopeLocal  = "local"
-	scopeGlobal = "global"
-)
-
-func (a *app) resolveScope(scope, providerName string) (string, int) {
-	switch scope {
-	case "", scopeLocal, scopeGlobal:
-	default:
-		return "", a.errorf("--scope %q is not valid (want %q or %q)", scope, scopeLocal, scopeGlobal)
-	}
-
-	if providerName == "codex" {
-		if scope == scopeLocal {
-			return "", a.errorf("--scope local is not available for codex.\n" +
-				"  Codex reads its hooks from $CODEX_HOME/hooks.json (or ~/.codex/hooks.json), which is\n" +
-				"  user-wide. A repo-level .codex/hooks.json is an alternative location this installer\n" +
-				"  deliberately does not touch, so a project-scoped Codex install cannot be honoured.\n" +
-				"  Run without --scope to install user-wide, or use claude-code for project scope.")
-		}
-		if scope == "" {
-			fmt.Fprintf(a.stdout, "note: codex hooks are user-wide, so this install uses GLOBAL scope -\n"+
-				"      every Codex session on this machine is governed, not just this directory.\n")
-		}
-		return scopeGlobal, exitOK
-	}
-
-	if scope == "" {
-		return scopeLocal, exitOK
-	}
-	return scope, exitOK
-}
 
 // flagPassed reports whether a flag was explicitly given on the command line.
 func flagPassed(fs *flag.FlagSet, name string) bool {
@@ -82,20 +50,12 @@ func (a *app) requireCredentials() int {
 		devconfig.EnvAPIKeyDirect, devconfig.EnvAgentPrivateKey, envPath)
 }
 
-func (a *app) printGovernedScope(o devinit.Options, resolvedScope string) {
+// printGovernedScope states what this install governs, in the terms a reader
+// needs to act on: which sessions, which file changed, what was swept, and --
+// when the machine blocks hooks -- that nothing is governed despite a
+// successful install.
+func (a *app) printGovernedScope(o devinit.Options) {
 	if o.Provider == "cursor" {
-		return
-	}
-
-	if resolvedScope == scopeLocal && o.ProjectDir != "" {
-		settings := filepath.Join(o.ProjectDir, ".claude", "settings.local.json")
-		fmt.Fprintf(a.stdout, "\nGoverned: THIS PROJECT ONLY; %s\n", o.ProjectDir)
-		fmt.Fprintf(a.stdout, "  Hooks were merged into %s, so the next session started here is governed.\n", settings)
-		fmt.Fprintf(a.stdout, "  Sessions started in ANY OTHER directory are not governed and produce no events,\n")
-		fmt.Fprintf(a.stdout, " so absence of events is not evidence of absence of work.\n")
-		fmt.Fprintf(a.stdout, "  Run `openbox init` in each project you want governed, or `--scope global` for a fleet.\n")
-		fmt.Fprintf(a.stdout, "  That settings file is per-developer and git-ignored by convention; do not commit it,\n")
-		fmt.Fprintf(a.stdout, "  or your engine path lands on the whole team.\n")
 		return
 	}
 
@@ -103,16 +63,41 @@ func (a *app) printGovernedScope(o devinit.Options, resolvedScope string) {
 		fmt.Fprintf(a.stdout, "\nGoverned: EVERY CODEX SESSION on this machine (user-wide hooks).\n")
 		fmt.Fprintf(a.stdout, "  One more step inside Codex: run /hooks and TRUST the new OpenBox hooks -\n")
 		fmt.Fprintf(a.stdout, "  until trusted they do not run.\n")
+		a.printHookBlockNotice()
 		return
 	}
 
-	fmt.Fprintf(a.stdout, "\nGoverned: NOTHING YET; activation is pending.\n")
-	fmt.Fprintf(a.stdout, "  The bundle, engine and posture are installed, but global scope activates through\n")
-	fmt.Fprintf(a.stdout, "  managed settings, which is an administrator's deployment and not something this\n")
-	fmt.Fprintf(a.stdout, "  command can perform. Until that lands, no session is governed.\n")
-	fmt.Fprintf(a.stdout, "  Add to the managed settings.json:  {\"enabledPlugins\": [\"openbox-observe\"]}\n")
-	fmt.Fprintf(a.stdout, "  See `openbox managed install` and deployments/managed/.\n")
-	fmt.Fprintf(a.stdout, "  For one project instead, re-run with --scope local.\n")
+	fmt.Fprintf(a.stdout, "\nGoverned: EVERY SESSION on this machine, in any directory.\n")
+	fmt.Fprintf(a.stdout, "  Hooks were merged into %s.\n", providers.ClaudeUserSettingsPath())
+	// Not "the next session": the tool's own file watcher picks up direct edits
+	// to hooks in a settings file, so governance starts at once, including in
+	// sessions that are already running. Promising a restart would undersell it.
+	fmt.Fprintf(a.stdout, "  This takes effect IMMEDIATELY: the tool watches that file, so sessions already\n")
+	fmt.Fprintf(a.stdout, "  running are governed too. There is nothing to restart.\n")
+	fmt.Fprintf(a.stdout, "  Absence of events is therefore evidence about the work, not about the scope.\n")
+	// Named whether or not anything was there: "only partly cleaned" is only
+	// actionable if the reader can see which file this run actually looked at.
+	if wd, err := os.Getwd(); err == nil {
+		fmt.Fprintf(a.stdout, "  Swept any superseded OpenBox entry from %s;\n", providers.ClaudeProjectSettingsPath(wd))
+		fmt.Fprintf(a.stdout, "  a project-level copy would register the same gate a second time.\n")
+	}
+	a.printHookBlockNotice()
+}
+
+// printHookBlockNotice is the one case where a successful install governs
+// nothing: an org-managed machine can disable user-level hooks outright. Saying
+// so here matters more than in doctor, because this is the moment somebody
+// believes the machine is now governed.
+func (a *app) printHookBlockNotice() {
+	state := resolveHookBlock()
+	if !state.blocked {
+		return
+	}
+	fmt.Fprintf(a.stdout, "\n  BUT NOTHING IS GOVERNED BY THIS INSTALL: %s\n", state.summary)
+	for _, line := range state.detail {
+		fmt.Fprintf(a.stdout, "    %s\n", line)
+	}
+	fmt.Fprintf(a.stdout, "    The hooks, engine and posture are in place; the tool will not run them.\n")
 }
 
 func (a *app) initUsage(fs *flag.FlagSet) func() {
@@ -121,7 +106,7 @@ func (a *app) initUsage(fs *flag.FlagSet) func() {
 		fmt.Fprintf(a.stderr, "Installs the tool's hooks and writes posture. Run `openbox auth` first -\n")
 		fmt.Fprintf(a.stderr, "this command never reads, writes or prompts for a credential.\n\n")
 		for _, name := range []string{
-			"provider", "scope", "enforce", "no-enforce", "install-git-hook",
+			"provider", "enforce", "no-enforce", "install-git-hook",
 			"full", "remove-all",
 			"gateway", "remove-gateway", "gateway-addr", "gateway-upstream", "gateway-verbose",
 			"telemetry", "remove-telemetry", "telemetry-addr",
@@ -138,7 +123,7 @@ func (a *app) initUsage(fs *flag.FlagSet) func() {
 		fmt.Fprintf(a.stderr, "\nMoved to `openbox auth`: --org --agent-name --icon --description --base-url\n")
 		fmt.Fprintf(a.stderr, "  --backend-url --force. Passing one here fails with a pointer rather than\n")
 		fmt.Fprintf(a.stderr, "  being ignored.\n")
-		fmt.Fprintf(a.stderr, "Removed: --secret-backend --client-id --managed-enable. Deprecated: --local-hooks\n")
-		fmt.Fprintf(a.stderr, "  (use --scope local).\n")
+		fmt.Fprintf(a.stderr, "Removed: --secret-backend --client-id --managed-enable --scope --local-hooks.\n")
+		fmt.Fprintf(a.stderr, "  One install governs every session on this machine; there is no scope to pick.\n")
 	}
 }

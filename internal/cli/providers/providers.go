@@ -36,12 +36,14 @@ type LocalHookAudit struct {
 	DuplicateEvents []string
 }
 
-// AuditProjectHooks reports which OpenBox engines a project's provider-local
-// hook config registers. Codex has always replaced by argv shape, so it has no
-// equivalent state to report and is deliberately absent here rather than
-// silently returning empty.
-func AuditProjectHooks(projectDir string) (LocalHookAudit, error) {
-	a, err := claudecode.AuditLocalHooks(projectDir)
+// AuditHooks reports which OpenBox engines one settings file registers. The
+// path is a parameter because doctor has two levels to report: the user-wide
+// file an install writes, and the current project's own file, where a
+// superseded entry may survive. Codex has always replaced by argv shape, so it
+// has no equivalent state to report and is deliberately absent here rather
+// than silently returning empty.
+func AuditHooks(settingsPath string) (LocalHookAudit, error) {
+	a, err := claudecode.AuditHooks(settingsPath)
 	return LocalHookAudit{
 		SettingsPath:    a.SettingsPath,
 		Present:         a.Present,
@@ -135,6 +137,16 @@ func OwnedSpoolDirs() []string {
 // ClaudePluginDir is where the Claude Code adapter materializes its plugin
 // bundle, so an uninstall can delete it without importing the adapter.
 func ClaudePluginDir() string { return claudecode.DefaultPluginDir() }
+
+// ClaudeUserSettingsPath is the user-wide hook file an install registers in,
+// and ClaudeProjectSettingsPath is a project's own. Both are exposed so the
+// command layer can name and audit them without importing the adapter.
+func ClaudeUserSettingsPath() string { return claudecode.UserSettingsPath() }
+
+// ClaudeProjectSettingsPath is a project's own hook file.
+func ClaudeProjectSettingsPath(projectDir string) string {
+	return claudecode.ProjectSettingsPath(projectDir)
+}
 
 // HookMarkers are the substrings that identify an OpenBox registration in one
 // provider's hook file. An uninstall needs them to tell "this file exists"

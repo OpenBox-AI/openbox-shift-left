@@ -92,7 +92,12 @@ func TestEndToEndClaudeCodeRealInstall(t *testing.T) {
 
 	pluginDir := t.TempDir()
 	cfgPath := filepath.Join(t.TempDir(), "openbox", "dev.json")
-	inst := claudecode.Installer{PluginDir: pluginDir, ConfigPath: cfgPath}
+	inst := claudecode.Installer{
+		PluginDir:  pluginDir,
+		ConfigPath: cfgPath,
+		// Pinned, or the install registers hooks in the real ~/.claude.
+		SettingsPath: filepath.Join(t.TempDir(), ".claude", "settings.json"),
+	}
 
 	home := t.TempDir()
 	t.Setenv(devconfig.EnvHome, home)
@@ -109,10 +114,11 @@ func TestEndToEndClaudeCodeRealInstall(t *testing.T) {
 		t.Fatalf("expected registered+config-applied, got %+v", res)
 	}
 
-	for _, rel := range []string{".claude-plugin/plugin.json", "hooks/hooks.json"} {
-		if _, err := os.Stat(filepath.Join(pluginDir, rel)); err != nil {
-			t.Errorf("missing bundle file %s: %v", rel, err)
-		}
+	// The bundle hosts the engine and nothing else: a plugin manifest would make
+	// the directory loadable, and a plugin's handlers do not de-duplicate
+	// against the settings-level registrations the install writes.
+	if _, err := os.Stat(filepath.Join(pluginDir, "bin")); err != nil {
+		t.Errorf("the bundle has no bin/ for the engine: %v", err)
 	}
 
 	raw, err := os.ReadFile(cfgPath)
