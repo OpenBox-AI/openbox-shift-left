@@ -83,12 +83,12 @@ func New(cfg Config, ca *CA, emitter gateway.Emitter, opts ...Option) (*Proxy, e
 // Option configures a Proxy.
 type Option func(*Proxy)
 
-// WithVerbose turns on per-connection commentary.
 // WithBodyCapture forwards gateway.WithBodyCapture to every per-host relay.
 func WithBodyCapture(capturesBody func(*http.Request) bool) Option {
 	return func(p *Proxy) { p.capturesBody = capturesBody }
 }
 
+// WithVerbose turns on per-connection commentary.
 func WithVerbose(logf func(format string, args ...any)) Option {
 	return func(p *Proxy) { p.logf = logf }
 }

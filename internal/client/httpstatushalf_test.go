@@ -7,7 +7,7 @@ import "testing"
 // has not been answered yet; a status code on it is a claim about a response that
 // did not exist when the row was made. `docs/mapping.md:464,477` already said
 // completed-only, so the code and the docs disagreed and NO test pinned either
-// direction — which is why the disagreement survived.
+// direction, which is why the disagreement survived.
 //
 // The cause was structural rather than a typo: gatewayemit builds both halves
 // from one shared `span(stage)` closure (`internal/cli/gatewayemit/event.go:84-93`)
