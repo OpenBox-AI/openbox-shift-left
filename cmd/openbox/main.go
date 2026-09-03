@@ -11,7 +11,6 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/devinit"
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/providers"
 	"github.com/openbox-ai/openbox-shift-left/internal/client"
-	"github.com/openbox-ai/openbox-shift-left/internal/gateway"
 	"github.com/openbox-ai/openbox-shift-left/internal/provider"
 	"github.com/openbox-ai/openbox-shift-left/internal/telemetry"
 	"github.com/openbox-ai/openbox-shift-left/internal/transport"
@@ -238,213 +237,43 @@ func (a *app) runRewake(args []string) (code int) {
 func (a *app) runDevInit(args []string) int {
 	fs := a.newFlagSet("openbox init")
 	var o devinit.Options
-	var movedOrg, movedAgentName, movedIcon, movedDescription string
-	var movedBaseURL, movedBackendURL string
-	var movedForce bool
-	var goneSecretBackend, goneClientID, goneLocalHooks string
-	var goneManagedEnable bool
-
-	fs.StringVar(&o.Provider, "provider", "", "developer tool: claude-code|codex|cursor (required)")
-	var enforce, noEnforce bool
-	fs.BoolVar(&enforce, "enforce", true, "ENFORCE mode: the PreToolUse hook blocks/asks/redacts in-process, no daemon and no runtime env. ON BY DEFAULT; inert until your org publishes a policy, and fail-open, so an OpenBox outage never blocks you. Pass --enforce=false to opt out; the opt-out persists.")
-	fs.BoolVar(&noEnforce, "no-enforce", false, "alias for --enforce=false")
-	fs.BoolVar(&o.InstallGitHook, "install-git-hook", false, "enable ambient install of the commit-trailer hook into repos on session start (off by default; it modifies .git/hooks)")
-	// OFF by default, deliberately: unlike enforcement-by-default, which is inert
-	// without an org policy, this redirects live model traffic.
-	var withGateway, removeGateway bool
-	var gatewayAddr, gatewayUpstream string
-	var gatewayVerbose bool
-	fs.BoolVar(&withGateway, "gateway", false, "also install and start the local model-call gateway, and point this machine at it (OFF by default: it redirects live model traffic)")
-	fs.BoolVar(&removeGateway, "remove-gateway", false, "stop the local gateway and remove only the configuration OpenBox owns")
-	fs.StringVar(&gatewayAddr, "gateway-addr", gateway.DefaultAddr, "loopback address the gateway listens on")
-	fs.StringVar(&gatewayUpstream, "gateway-upstream", gateway.DefaultUpstream, "provider base URL the gateway forwards to")
-	fs.BoolVar(&gatewayVerbose, "gateway-verbose", false, "run the gateway with --verbose, logging every relayed call to ~/.openbox/gateway.log (no credentials, headers or bodies)")
-
-	var withFull, removeAll bool
-	var withTelemetry, removeTelemetryLane bool
-	var withTransport, removeTransportLane bool
-	var telemetryAddr, transportAddr string
-	var laneVerbose, forceRestore bool
-	fs.BoolVar(&withFull, "full", false, "install and enable everything: hooks, the telemetry receiver and the in-path transport relay")
-	fs.BoolVar(&removeAll, "remove-all", false, "remove every OpenBox lane: restore all managed env keys, unload and delete all units, and delete the CA, the logs and the activation record. The spool is KEPT; it is shared with the hook path, which this does not remove")
-	fs.BoolVar(&withTelemetry, "telemetry", false, "install and start the local OTLP telemetry receiver, and point the tool's own telemetry at it")
-	fs.BoolVar(&removeTelemetryLane, "remove-telemetry", false, "stop the telemetry receiver and restore the env keys it displaced")
-	fs.BoolVar(&withTransport, "transport", false, "install and start the in-path transport relay, and point the tool's proxy and CA trust at it")
-	fs.BoolVar(&removeTransportLane, "remove-transport", false, "stop the transport relay and restore the env keys it displaced")
-	fs.StringVar(&telemetryAddr, "telemetry-addr", telemetry.DefaultAddr, "loopback address the telemetry receiver listens on")
-	fs.StringVar(&transportAddr, "transport-addr", transport.DefaultAddr, "loopback address the transport relay listens on")
-	fs.BoolVar(&laneVerbose, "lane-verbose", false, "run the telemetry and transport daemons with --verbose, logging to ~/.openbox/<lane>.log")
-	fs.BoolVar(&forceRestore, "force-restore", false, "during removal, restore env keys even where the value changed after OpenBox set it (the conflict is named either way)")
-	fs.BoolVar(&o.DryRun, "dry-run", false, "print the plan; make no network or filesystem writes")
-	var role string
-	fs.StringVar(&role, "role", "dev", "dev (default) or approver; an approver is a queue client, not a governed runtime")
-
-	fs.StringVar(&movedOrg, "org", "", "MOVED to `openbox auth`")
-	fs.StringVar(&movedAgentName, "agent-name", "", "MOVED to `openbox auth`")
-	fs.StringVar(&movedIcon, "icon", "", "MOVED to `openbox auth`")
-	fs.StringVar(&movedDescription, "description", "", "MOVED to `openbox auth`")
-	fs.StringVar(&movedBaseURL, "base-url", "", "MOVED to `openbox auth`")
-	fs.StringVar(&movedBackendURL, "backend-url", "", "MOVED to `openbox auth`")
-	fs.BoolVar(&movedForce, "force", false, "MOVED to `openbox auth`")
-
-	fs.StringVar(&goneSecretBackend, "secret-backend", "", "REMOVED; credentials live in ~/.openbox/.env; run `openbox auth`")
-	fs.StringVar(&goneClientID, "client-id", "", "REMOVED; `init` makes no control-plane call")
-	fs.BoolVar(&goneManagedEnable, "managed-enable", false, "REMOVED; recorded a Phase-1 substrate nothing read")
-	fs.StringVar(&goneLocalHooks, "local-hooks", "", "REMOVED; an install governs every session on this machine, so there is no per-project scope to choose")
-
+	// One flag. Everything an install used to be able to vary is now a decision
+	// the owner already made once, for every machine: full for the provider,
+	// user-wide, enforcing, with the commit-trailer hook on. A knob that only
+	// ever has one correct setting is a way to get it wrong.
+	fs.StringVar(&o.Provider, "provider", "",
+		"developer tool: "+strings.Join(provider.Supported(), "|")+" (required)")
 	fs.Usage = a.initUsage(fs)
 	if code, ok := parseFlags(fs, args); !ok {
 		return code
 	}
-
-	for _, m := range []struct{ flag, value string }{
-		{"--org", movedOrg}, {"--agent-name", movedAgentName}, {"--icon", movedIcon},
-		{"--description", movedDescription}, {"--base-url", movedBaseURL}, {"--backend-url", movedBackendURL},
-	} {
-		if m.value != "" {
-			return a.errorf("%s moved to `openbox auth`; `init` no longer registers agents or touches credentials.\n"+
-				"  Run:  openbox auth %s %s\n"+
-				"  then: openbox init --provider %s", m.flag, m.flag, m.value, orDefault(o.Provider, "<tool>"))
-		}
-	}
-	if movedForce {
-		return a.errorf("--force moved to `openbox auth`: it governs agent REGISTRATION, which `init` no longer does.\n" +
-			"  Run `openbox auth --force`, then `openbox init`.")
-	}
-	if goneSecretBackend != "" {
-		return a.errorf("--secret-backend was removed: there is no secret store to choose any more.\n" +
-			" Credentials live in ~/.openbox/.env (plaintext, 0600; see.\n" +
-			"  Write them with `openbox auth`, then re-run `openbox init` without this flag.")
-	}
-	if goneClientID != "" {
-		return a.errorf("--client-id was removed: `init` makes no control-plane call, so there is no header to set.\n" +
-			"  Registration moved to `openbox auth`, which sets it itself.")
-	}
-	if goneManagedEnable {
-		return a.errorf("--managed-enable was removed. It recorded a Phase-1 force-enable substrate in the agent's\n" +
-			"  backend config that nothing ever read. Org-wide activation is a managed-settings\n" +
-			"  deployment; see `openbox managed install` and deployments/managed/.")
-	}
-
 	if o.Provider == "" {
-		return a.errorf("--provider is required (one of: claude-code, codex, cursor)")
+		return a.errorf("--provider is required (one of: %s)", strings.Join(provider.Supported(), ", "))
 	}
-
-	enforceGiven := flagPassed(fs, "enforce")
-	switch {
-	case noEnforce && enforceGiven && enforce:
-		return a.errorf("--enforce and --no-enforce are mutually exclusive")
-	case noEnforce:
-		f := false
-		o.Enforce, o.Findings = &f, &f
-	case enforceGiven:
-		v := enforce // honours --enforce=false as well as --enforce
-		o.Enforce, o.Findings = &v, &v
-	}
-
-	// Under enforce-by- default this compares resolved postures, so it still
-	// fires for a config that never wrote the field.
-	if devconfig.WouldDowngradeEnforce(devconfig.DefaultConfigPath(), o.Enforce) {
-		fmt.Fprintln(a.stdout, "note: turning ENFORCE off; this machine was enforcing (explicitly, or by default).")
-	}
-
-	if withGateway && removeGateway {
-		return a.errorf("--gateway and --remove-gateway are mutually exclusive")
-	}
-	if withFull {
-		withTelemetry, withTransport = true, true
-	}
-	for _, pair := range []struct {
-		on, off   bool
-		onN, offN string
-	}{
-		{withTelemetry, removeTelemetryLane, "--telemetry", "--remove-telemetry"},
-		{withTransport, removeTransportLane, "--transport", "--remove-transport"},
-		{withFull, removeAll, "--full", "--remove-all"},
-	} {
-		if pair.on && pair.off {
-			return a.errorf("%s and %s are mutually exclusive", pair.onN, pair.offN)
-		}
-	}
-
-	laneFlags := []struct {
-		name string
-		on   bool
-	}{
-		{"--full", withFull}, {"--remove-all", removeAll},
-		{"--telemetry", withTelemetry}, {"--remove-telemetry", removeTelemetryLane},
-		{"--transport", withTransport}, {"--remove-transport", removeTransportLane},
-	}
-	for _, f := range laneFlags {
-		if f.on && o.Provider != "claude-code" {
-			return a.errorf("%s applies to --provider claude-code only (got %q); these lanes observe the Anthropic Messages API and are configured through Claude Code's own settings", f.name, o.Provider)
-		}
-	}
-
-	if (withGateway || removeGateway) && o.Provider != "claude-code" {
-		flag := "--gateway"
-		if removeGateway {
-			flag = "--remove-gateway"
-		}
-		return a.errorf("%s applies to --provider claude-code only (got %q); the gateway relays the Anthropic Messages API and is configured through Claude Code's own settings", flag, o.Provider)
-	}
-
 	inst, err := providers.Lookup(o.Provider)
 	if err != nil {
 		return a.errorf("%v", err)
 	}
 
-	if goneLocalHooks != "" {
-		return a.errorf("--local-hooks has been removed, along with --scope. An install now registers hooks\n" +
-			"  user-wide, so every session on this machine is governed regardless of the directory it\n" +
-			"  starts in, and it sweeps any superseded entry out of this project's own settings file.\n" +
-			"  Drop the flag and re-run.")
-	}
-	// No scope to resolve: the install is user-wide. ProjectDir stays empty --
-	// the adapter sweeps the working directory itself, so no caller has to
-	// decide which project this is.
-
-	d := devinit.Deps{Installer: inst, Out: a.stdout}
-
-	if o.DryRun {
-		if _, err := devinit.Run(context.Background(), o, d); err != nil {
-			return a.errorf("%v", err)
-		}
-		a.printGovernedScope(o)
-		a.printGatewayPlan(withGateway, removeGateway, gatewayAddr, gatewayUpstream)
-		a.printLanePlan(lanePlan{
-			telemetry: withTelemetry, transport: withTransport,
-			removeTelemetry: removeTelemetryLane || removeAll,
-			removeTransport: removeTransportLane || removeAll,
-			purge:           removeAll,
-			telemetryAddr:   telemetryAddr, transportAddr: transportAddr,
-		})
-		return exitOK
-	}
-
-	if removeGateway || removeAll || removeTelemetryLane || removeTransportLane {
-		home, code := a.gatewayHome()
-		if code != exitOK {
-			return code
-		}
-		res := a.runRemovals(home, removalRequest{
-			gateway:   removeGateway || removeAll,
-			telemetry: removeTelemetryLane || removeAll,
-			transport: removeTransportLane || removeAll,
-			purge:     removeAll,
-			force:     forceRestore,
-		})
-		if !res.ok() {
-			return exitError
-		}
-		return exitOK
-	}
+	// The commit-trailer hook is on. This is the one posture field init writes
+	// unconditionally, so OPENBOX_INSTALL_GIT_HOOK=false is its only opt-out --
+	// and the write is what makes that env var the whole story rather than one
+	// of two places to look.
+	o.InstallGitHook = true
+	// o.Enforce is left nil, deliberately and permanently. A bool that defaults
+	// to true cannot express "said nothing", so assigning it here would write an
+	// enforce key indistinguishable from a machine that had explicitly opted in
+	// -- and would silently revert anybody who had opted out. Nil resolves to
+	// true through ResolveEnforce; OPENBOX_ENFORCE is the escape hatch.
+	// ProjectDir stays empty: the install is user-wide and the adapter sweeps
+	// the working directory itself.
 
 	a.migrateLegacyConfig()
 	if code := a.requireCredentials(); code != exitOK {
 		return code
 	}
 
+	d := devinit.Deps{Installer: inst, Out: a.stdout}
 	res, runErr := devinit.Run(context.Background(), o, d)
 	if runErr != nil && res != nil && res.ConfigManualOnly {
 		fmt.Fprintln(a.stderr, "note: "+runErr.Error())
@@ -458,44 +287,33 @@ func (a *app) runDevInit(args []string) int {
 		fmt.Fprintln(a.stdout, "Next step: open Codex and run /hooks to review and TRUST the new OpenBox hooks; they do not run until trusted (Codex hash-trusts non-managed hooks; re-running init re-hashes them).")
 	}
 
-	gatewayRunning := false
-	if withGateway {
-		fmt.Fprintf(a.stdout, "\nLocal gateway (model-call governance)\n")
-		home, code := a.gatewayHome()
-		if code != exitOK {
-			return code
-		}
-		gatewayRunning = true
-		if err := a.setupGateway(home, gatewayAddr, gatewayUpstream, gatewayVerbose); err != nil {
-			gatewayRunning = false
-			fmt.Fprintf(a.stderr, "warning: gateway setup did not complete: %v\n", err)
-		}
-	}
-
-	laneReport := a.setupLanes(laneRequest{
-		telemetry:     withTelemetry,
-		transport:     withTransport,
-		telemetryAddr: telemetryAddr,
-		transportAddr: transportAddr,
-		verbose:       laneVerbose,
-	})
-
-	switch {
-	case withGateway && gatewayRunning:
-		fmt.Fprintf(a.stdout, "\nDone. A supervised gateway is running and this machine's model calls now route through it.\n")
-	case withGateway:
-		fmt.Fprintf(a.stdout, "\nDone for the hooks; they are in place and governing tool calls. The gateway did NOT come up; see the warning above, and run `openbox doctor` for where this machine's model calls are pointed.\n")
-	default:
-		fmt.Fprintf(a.stdout, "\nDone. Nothing to run and no environment to keep set; the hooks do the rest.\n")
-	}
-	fmt.Fprintf(a.stdout, "  openbox dev verify     confirm this machine can reach and authenticate to OpenBox\n")
-	fmt.Fprintf(a.stdout, "  openbox doctor         the effective posture, and where each value came from\n")
-	if o.Enforce != nil && !*o.Enforce {
-		fmt.Fprintf(a.stdout, "  mode: OBSERVE; telemetry and lineage only, by your explicit --enforce=false.\n")
+	// Full means every lane the provider supports, which is a derivation rather
+	// than a choice. Codex gets hooks alone and is told why: erroring because a
+	// provider cannot have a lane it never asked for would be a regression.
+	var laneReport laneReport
+	if laneCapable(o.Provider) {
+		laneReport = a.setupLanes(laneRequest{
+			telemetry:     true,
+			transport:     true,
+			telemetryAddr: telemetry.DefaultAddr,
+			transportAddr: transport.DefaultAddr,
+		})
 	} else {
-		fmt.Fprintf(a.stdout, "  mode: ENFORCE; tool calls are gated in-process. Inert until your org publishes a\n")
-		fmt.Fprintf(a.stdout, "        policy, and fail-open, so an OpenBox outage never blocks you. `--enforce=false` opts out.\n")
+		fmt.Fprintf(a.stdout, "\nModel-call lanes: hooks only for %s.\n", o.Provider)
+		fmt.Fprintf(a.stdout, "  The telemetry receiver and the transport relay observe the Anthropic Messages\n")
+		fmt.Fprintf(a.stdout, "  API through Claude Code's own settings, so there is nothing for them to read\n")
+		fmt.Fprintf(a.stdout, "  here. Tool calls are still governed by the hooks above.\n")
 	}
+
+	fmt.Fprintf(a.stdout, "\nDone.\n")
+	fmt.Fprintf(a.stdout, "  openbox doctor         the effective posture, and where each value came from\n")
+	fmt.Fprintf(a.stdout, "  mode: ENFORCE; tool calls are gated in-process. Inert until your org publishes a\n")
+	fmt.Fprintf(a.stdout, "        policy, and fail-open, so an OpenBox outage never blocks you.\n")
+	fmt.Fprintf(a.stdout, "        OPENBOX_ENFORCE=false opts out, per run; nothing is persisted either way.\n")
+	fmt.Fprintf(a.stdout, "  commit trailers: ON. A session installs prepare-commit-msg and post-commit into\n")
+	fmt.Fprintf(a.stdout, "        the repo it runs in, so a commit is attributed to the session that made it.\n")
+	fmt.Fprintf(a.stdout, "        A hook somebody else wrote is never overwritten. OPENBOX_INSTALL_GIT_HOOK=false\n")
+	fmt.Fprintf(a.stdout, "        turns it off.\n")
 	a.printGovernedScope(o)
 	laneReport.print(a)
 	return exitOK
@@ -512,41 +330,41 @@ func (a *app) usage() {
 	fmt.Fprint(a.stderr, `openbox; OpenBox developer-runtime governance CLI
 
 Setup is two commands, in this order:
-  openbox auth                                        credentials for this machine
-  openbox init --provider <claude-code|codex|cursor>  install hooks + posture
+  openbox auth                                 credentials for this machine
+  openbox init --provider <claude-code|codex>  install hooks, lanes and posture
 
 Usage:
-  openbox auth [--rotate] [flags]
-  openbox init --provider <claude-code|codex|cursor> [flags]
-  openbox init --provider claude-code --full          hooks + telemetry + transport
-  openbox init --provider claude-code --remove-all    every lane, restored and deleted
-  openbox init --role approver --org <id> [--host claude-code] [flags]
-  openbox dev verify [--dry-run]
-  openbox managed install --provider <claude-code,codex> [--dry-run] [--force]
-  openbox approve list [--org <id>] [--watch]
-  openbox approve <allow|deny> <event-id> [--org <id>]
-  openbox approve --watch --auto [--host claude-code] [--decide]
-  openbox gateway [--addr <loopback host:port>] [--upstream <provider base URL>]
+  openbox auth
+  openbox init --provider <claude-code|codex>
   openbox doctor
   openbox uninstall
   openbox version
 
+One install governs EVERY session on this machine, in any directory, and takes
+effect immediately: the tool watches its settings file, so sessions already
+running are governed too. It installs every model-call lane the provider
+supports, enforces, and turns on commit trailers. There are no flags to choose
+between, because there is one right answer for each of those.
+
+Two postures stay per-machine, as environment variables rather than flags:
+  OPENBOX_ENFORCE=false            observe only, for this run; nothing persists
+  OPENBOX_INSTALL_GIT_HOOK=false   do not touch any repo's .git/hooks
+
 Environment (needed only at 'auth' time, and only to register a new agent):
   OPENBOX_CONTROL_TOKEN   control-plane credential (Keycloak JWT or obx_key_ org key).
                           Never a flag, so it cannot leak via argv or shell history.
-  OPENBOX_BACKEND_URL     openbox-backend CONTROL-PLANE base URL (or --backend-url)
-  OPENBOX_BASE_URL        openbox-core DATA-PLANE base URL (or --base-url). Self-hosted?
-                          Set BOTH: the control plane cannot tell the CLI where your
-                          core is, so one default and one override sends events to the
-                          hosted core and surfaces later as a 401.
+  OPENBOX_BACKEND_URL     openbox-backend CONTROL-PLANE base URL
+  OPENBOX_BASE_URL        openbox-core DATA-PLANE base URL. Self-hosted? Set BOTH: the
+                          control plane cannot tell the CLI where your core is, so one
+                          default and one override sends events to the hosted core and
+                          surfaces later as a 401.
   OPENBOX_ORG             organization namespace, used to derive the agent name
 
-Credentials live in ~/.openbox/.env (plaintext, 0600); posture and
-coordinates in ~/.openbox/dev.json. OPENBOX_HOME relocates both. A real
-environment variable always wins over either file.
+Credentials live in ~/.openbox/.env (plaintext, 0600); posture and coordinates
+in ~/.openbox/dev.json. OPENBOX_HOME relocates both. A real environment
+variable always wins over either file.
 
-Nothing to run after 'init'; no daemon, no runtime env. One 'init' governs
-EVERY session on this machine, in any directory.
-Run 'openbox auth -h' or 'openbox init -h' for flags.
+'openbox uninstall' reverses all of it, including the credentials.
+'openbox doctor' reports the effective posture and where each value came from.
 `)
 }

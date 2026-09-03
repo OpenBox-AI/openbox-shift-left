@@ -141,8 +141,7 @@ tb_step "openbox init (DEFAULT scope, from inside the project)"
 # No --scope: project scope is the default since that decision, and the default is what
 # a user gets. Running from inside $TB_PROJECT is how that default resolves.
 (cd "$TB_PROJECT" && "$TB_BIN" init \
-	--provider claude-code \
-	--install-git-hook) >"$TB_STATE/init.out" 2>&1 ||
+	--provider claude-code) >"$TB_STATE/init.out" 2>&1 ||
 	tb_bad "init succeeded" 0 "$(tail -3 "$TB_STATE/init.out")"
 tb_ok "init succeeded at default scope"
 
@@ -210,8 +209,7 @@ rm -f "$HOOKS.bak"
 grep -q "$BOGUS_ENGINE" "$HOOKS" || tb_fatal "could not plant a stale engine path in $HOOKS"
 
 (cd "$TB_PROJECT" && "$TB_BIN" init \
-	--provider claude-code \
-	--install-git-hook) >"$TB_STATE/reinit.out" 2>&1 ||
+	--provider claude-code) >"$TB_STATE/reinit.out" 2>&1 ||
 	tb_bad "re-init succeeded" 0 "$(tail -3 "$TB_STATE/reinit.out")"
 
 hooks="$(cat "$USER_HOOKS" 2>/dev/null)$(cat "$HOOKS" 2>/dev/null)"
@@ -242,8 +240,7 @@ doctor_out="$(cd "$TB_PROJECT" && "$TB_BIN" doctor 2>&1 || true)"
 assert_contains "doctor flags the duplicate first" "$doctor_out" "more than once"
 
 (cd "$TB_PROJECT" && "$TB_BIN" init \
-	--provider claude-code \
-	--install-git-hook) >"$TB_STATE/reinit-dup.out" 2>&1 ||
+	--provider claude-code) >"$TB_STATE/reinit-dup.out" 2>&1 ||
 	tb_bad "re-init succeeded" 0 "$(tail -3 "$TB_STATE/reinit-dup.out")"
 
 assert_eq "Stop registered exactly once again" 1 "$(hook_count 'hook claude-code Stop\"')"

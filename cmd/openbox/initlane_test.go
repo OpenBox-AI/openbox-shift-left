@@ -405,71 +405,13 @@ func TestPurgeDeletesTheCAAndTheRecord(t *testing.T) {
 // the defect --gateway already shipped and fixed: `--provider codex --full`
 // would install two supervised daemons and rewrite ~/.claude/settings.json on
 // a machine whose tool reads neither.
-func TestLaneFlagsAreMutuallyExclusiveAndClaudeCodeOnly(t *testing.T) {
-	for _, tc := range []struct {
-		name string
-		args []string
-		want string
-	}{
-		{"full and remove-all", []string{"--provider", "claude-code", "--full", "--remove-all"}, "mutually exclusive"},
-		{"transport both ways", []string{"--provider", "claude-code", "--transport", "--remove-transport"}, "mutually exclusive"},
-		{"telemetry both ways", []string{"--provider", "claude-code", "--telemetry", "--remove-telemetry"}, "mutually exclusive"},
-		{"full on codex", []string{"--provider", "codex", "--full"}, "claude-code only"},
-		{"transport on codex", []string{"--provider", "codex", "--transport"}, "claude-code only"},
-		{"remove-all on codex", []string{"--provider", "codex", "--remove-all"}, "claude-code only"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			isolateHome(t)
-			a, _, errb := testApp(nil)
-			if code := a.runInit(tc.args); code == exitOK {
-				t.Fatalf("accepted %v", tc.args)
-			}
-			if !strings.Contains(errb.String(), tc.want) {
-				t.Errorf("error does not say %q: %s", tc.want, errb.String())
-			}
-		})
-	}
-}
-
-// TestLaneRemovalRunsBeforeTheCredentialGate. A machine whose credentials were
-// deleted; an offboarding, a rotation, a wiped ~/.openbox; must still be able
-// to back the lanes out.
-func TestLaneRemovalRunsBeforeTheCredentialGate(t *testing.T) {
-	skipUnlessSupervised(t)
-	h := newLaneHarness(t)
-	isolateHome(t) // no credentials anywhere
-	t.Setenv("HOME", h.home)
-	a, out, errb := testApp(map[string]string{"HOME": h.home})
-
-	code := a.runInit([]string{"--provider", "claude-code", "--remove-all"})
-	if code != exitOK {
-		t.Fatalf("--remove-all exited %d on a machine with no credentials: %s", code, errb.String())
-	}
-	if strings.Contains(errb.String(), "openbox auth") {
-		t.Errorf("removal was blocked by the credential gate:\n%s", errb.String())
-	}
-	if !strings.Contains(out.String(), "Removing OpenBox lane configuration") {
-		t.Errorf("removal never ran:\n%s", out.String())
-	}
-}
-
-// TestDryRunNamesTheLanesItWouldInstall.
-func TestDryRunNamesTheLanesItWouldInstall(t *testing.T) {
-	isolateHome(t)
-	a, out, _ := testApp(nil)
-	if code := a.runInit([]string{"--provider", "claude-code", "--full", "--dry-run"}); code != exitOK {
-		t.Fatalf("dry run exited %d", code)
-	}
-	s := out.String()
-	for _, want := range []string{
-		"Telemetry receiver; PLANNED",
-		"Transport relay; PLANNED",
-		"CLAUDE_CODE_ENABLE_TELEMETRY",
-		"NODE_EXTRA_CA_CERTS",
-		"INTERCEPTS",
-	} {
-		if !strings.Contains(s, want) {
-			t.Errorf("the plan does not mention %q:\n%s", want, s)
+// TestLanesAreInstalledForALaneCapableProviderOnly. The exclusivity matrix
+// that used to live here went with the flags; what is left is a derivation, and
+// it must not error for a provider that simply has no lanes.
+func TestLanesAreInstalledForALaneCapableProviderOnly(t *testing.T) {
+	for name, want := range map[string]bool{"claude-code": true, "codex": false, "cursor": false} {
+		if got := laneCapable(name); got != want {
+			t.Errorf("laneCapable(%q) = %v, want %v", name, got, want)
 		}
 	}
 }
@@ -590,17 +532,24 @@ func TestDoctorReportsAConfiguredLaneThatIsNotInPath(t *testing.T) {
 }
 
 // TestFullRetiresARoutedGateway.
-func TestFullRetiresARoutedGateway(t *testing.T) {
+func TestAnInstallRetiresARoutedGateway(t *testing.T) {
 	skipUnlessSupervised(t)
 	h := newLaneHarness(t)
 	h.seedCA(t)
 	a, out, _ := testApp(map[string]string{"HOME": h.home})
 
-	if err := a.setupGateway(h.home, "127.0.0.1:18788", "https://api.anthropic.com", false); err != nil {
-		t.Fatalf("setupGateway: %v", err)
+	// Arranged directly: --gateway is gone, and this is exactly the machine that
+	// still has one -- installed by an older binary, and migrated off it by the
+	// next install rather than by any migration code.
+	if _, err := gatewayservice.WriteEnv(h.home, "127.0.0.1:18788"); err != nil {
+		t.Fatalf("seed the gateway env key: %v", err)
+	}
+	if _, err := gatewayservice.WriteUnit(runtime.GOOS, h.home, "/bin/openbox",
+		"127.0.0.1:18788", "https://api.anthropic.com", false); err != nil {
+		t.Fatalf("seed the gateway unit: %v", err)
 	}
 	if _, present := gatewayservice.CurrentEnv(h.home); !present {
-		t.Fatal("the gateway install did not take")
+		t.Fatal("the gateway fixture did not take")
 	}
 	out.Reset()
 

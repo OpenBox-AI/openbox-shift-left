@@ -1,7 +1,6 @@
 package main
 
 import (
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -13,71 +12,6 @@ import (
 
 // TestEnforceOptOutRoundTrips tHE round-trip. The opt-out was silently un-
 // appliable.
-func TestEnforceOptOutRoundTrips(t *testing.T) {
-	for _, flag := range []string{"--enforce=false", "--no-enforce"} {
-		t.Run(flag, func(t *testing.T) {
-			home := isolateHome(t)
-			seedCredentials(t)
-			a, _, errb := testApp(nil)
-			if code := a.run([]string{"init", "--provider", "claude-code", flag}); code != exitOK {
-				t.Fatalf("exit = %d; stderr=%q", code, errb.String())
-			}
-
-			// The field must actually be IN the file; not dropped by omitempty.
-			raw, err := os.ReadFile(filepath.Join(home, "dev.json"))
-			if err != nil {
-				t.Fatal(err)
-			}
-			if !strings.Contains(string(raw), `"enforce": false`) {
-				t.Fatalf("the opt-out was not persisted (this is the omitempty bug):\n%s", raw)
-			}
-			// Re-reading it must still be false.
-			cfg := readDevJSON(t, home)
-			if cfg.Enforce == nil {
-				t.Fatal("enforce came back absent after being written false")
-			}
-			if *cfg.Enforce {
-				t.Error("enforce came back true after being written false")
-			}
-			// And the resolver must agree, despite the default being on.
-			if devconfig.ResolveEnforce() {
-				t.Error("ResolveEnforce() reports enforcing after an explicit opt-out")
-			}
-		})
-	}
-}
-
-func TestEnforceAndNoEnforceAreMutuallyExclusive(t *testing.T) {
-	isolateHome(t)
-	seedCredentials(t)
-	a, _, errb := testApp(nil)
-	if code := a.run([]string{"init", "--provider", "claude-code", "--enforce", "--no-enforce"}); code != exitError {
-		t.Fatalf("exit = %d, want an error", code)
-	}
-	if !strings.Contains(errb.String(), "mutually exclusive") {
-		t.Errorf("error = %q", errb.String())
-	}
-}
-
-// TestTurningEnforceOffIsAnnouncedEvenFromAnAbsentField turning enforcement
-// off is announced.
-func TestTurningEnforceOffIsAnnouncedEvenFromAnAbsentField(t *testing.T) {
-	home := isolateHome(t)
-	seedCredentials(t)
-	if cfg := readDevJSON(t, home); cfg.Enforce != nil {
-		t.Fatalf("precondition: enforce should be absent, got %v", cfg.Enforce)
-	}
-	a, out, _ := testApp(nil)
-	if code := a.run([]string{"init", "--provider", "claude-code", "--enforce=false"}); code != exitOK {
-		t.Fatalf("exit = %d", code)
-	}
-	if !strings.Contains(out.String(), "turning ENFORCE off") {
-		t.Errorf("a downgrade from the effective posture must be announced:\n%s", out.String())
-	}
-}
-
-// TestEnforceEnvOverride the env override still wins over the config, in both
-// directions.
 func TestEnforceEnvOverride(t *testing.T) {
 	home := isolateHome(t)
 	f := false
@@ -94,73 +28,44 @@ func TestEnforceEnvOverride(t *testing.T) {
 	}
 }
 
-// TestEveryMovedFlagErrorsNamingAuth silent acceptance of a flag that no
-// longer does anything is worse than removing it loudly: a script passing
-// --base-url would keep exiting 0 while the URL went nowhere.
-func TestEveryMovedFlagErrorsNamingAuth(t *testing.T) {
-	for _, tc := range []struct{ flag, value string }{
-		{"--org", "acme"},
-		{"--agent-name", "dev-x"},
-		{"--icon", "🤖"},
-		{"--description", "an agent"},
-		{"--base-url", "https://core.internal"},
-		{"--backend-url", "https://api.internal"}} {
-		t.Run(tc.flag, func(t *testing.T) {
-			isolateHome(t)
-			seedCredentials(t)
-			a, _, errb := testApp(nil)
-			code := a.run([]string{"init", "--provider", "claude-code", tc.flag, tc.value})
-			if code != exitError {
-				t.Fatalf("exit = %d, want an error; a moved flag must not be silently accepted", code)
-			}
-			s := errb.String()
-			if !strings.Contains(s, tc.flag) {
-				t.Errorf("error should name %s:\n%s", tc.flag, s)
-			}
-			if !strings.Contains(s, "openbox auth") {
-				t.Errorf("error should point at `openbox auth`:\n%s", s)
-			}
-		})
+// TestAFlagThatMovedOrWasRemovedIsRefused. Every shim that used to explain
+// where a flag went is gone with the flag, so these are plain parse refusals
+// now. What has to survive is the refusal itself plus a usage block that points
+// somewhere useful -- a flag silently accepted and ignored would read as a knob
+// the operator still has.
+func TestAFlagThatMovedOrWasRemovedIsRefused(t *testing.T) {
+	for _, flag := range []string{
+		// Moved to `openbox auth`.
+		"--org", "--agent-name", "--icon", "--description", "--base-url", "--backend-url", "--force",
+		// Removed outright.
+		"--secret-backend", "--client-id", "--managed-enable", "--local-hooks", "--scope",
+		// Collapsed into the one always-on posture.
+		"--enforce", "--no-enforce", "--install-git-hook", "--full", "--dry-run",
+		// Removal is its own command now.
+		"--remove-all", "--remove-gateway", "--remove-telemetry", "--remove-transport",
+		// Lanes are derived from the provider.
+		"--gateway", "--telemetry", "--transport", "--lane-verbose", "--force-restore",
+	} {
+		a, _, errb := testApp(nil)
+		if code := a.run([]string{"init", "--provider", "claude-code", flag, "x"}); code == exitOK {
+			t.Errorf("init accepted %s", flag)
+			continue
+		}
+		if !strings.Contains(errb.String(), "not defined") {
+			t.Errorf("%s was refused for the wrong reason: %s", flag, errb.String())
+		}
 	}
-}
-
-func TestMovedForceFlagErrors(t *testing.T) {
-	isolateHome(t)
-	seedCredentials(t)
+	// The refusal prints the usage block, which has to name where the two
+	// commands that took this work over actually live.
 	a, _, errb := testApp(nil)
-	if code := a.run([]string{"init", "--provider", "claude-code", "--force"}); code != exitError {
-		t.Fatalf("exit = %d, want an error", code)
-	}
-	if !strings.Contains(errb.String(), "openbox auth") {
-		t.Errorf("error = %q", errb.String())
-	}
-}
-
-func TestRemovedFlagsError(t *testing.T) {
-	for _, tc := range []struct {
-		name     string
-		args     []string
-		wantText string
-	}{
-		{"client-id", []string{"--client-id", "x"}, "no control-plane call"},
-		{"managed-enable", []string{"--managed-enable"}, "managed-settings"}} {
-		t.Run(tc.name, func(t *testing.T) {
-			isolateHome(t)
-			seedCredentials(t)
-			a, _, errb := testApp(nil)
-			args := append([]string{"init", "--provider", "claude-code"}, tc.args...)
-			if code := a.run(args); code != exitError {
-				t.Fatalf("exit = %d, want an error", code)
-			}
-			if !strings.Contains(errb.String(), tc.wantText) {
-				t.Errorf("error should explain the removal (%q):\n%s", tc.wantText, errb.String())
-			}
-		})
+	a.run([]string{"init", "--provider", "claude-code", "--org", "x"})
+	for _, want := range []string{"openbox auth", "openbox uninstall", "OPENBOX_ENFORCE=false"} {
+		if !strings.Contains(errb.String(), want) {
+			t.Errorf("the usage shown on refusal does not mention %q:\n%s", want, errb.String())
+		}
 	}
 }
 
-// TestCodexInitSaysEverySessionIsGoverned. Codex hooks were always user-wide;
-// now every provider is, so this is the shared story rather than an exception.
 func TestCodexInitSaysEverySessionIsGoverned(t *testing.T) {
 	isolateHome(t)
 	seedCredentials(t)
@@ -222,8 +127,8 @@ func TestInstallOutputDoesNotUnderstateCoverage(t *testing.T) {
 			t.Errorf("the install understates what it governs (%q):\n%s", banned, out.String())
 		}
 	}
-	if !strings.Contains(out.String(), "Nothing to run") {
-		t.Errorf("the install should still state that nothing needs to be kept running:\n%s", out.String())
+	if !strings.Contains(out.String(), "mode: ENFORCE") {
+		t.Errorf("the install does not state the posture it left the machine in:\n%s", out.String())
 	}
 }
 
@@ -233,45 +138,6 @@ func TestInstallOutputDoesNotUnderstateCoverage(t *testing.T) {
 // flag defaults to true and its value was assigned to o.Enforce
 // unconditionally; so every run wrote enforce:true whether the user had asked
 // for it or not.
-func TestPlainReInitDoesNotRevertAnEnforceOptOut(t *testing.T) {
-	home := isolateHome(t)
-	seedCredentials(t)
-
-	run := func(t *testing.T, args ...string) {
-		t.Helper()
-		a, _, errb := testApp(nil)
-		full := append([]string{"init", "--provider", "claude-code"}, args...)
-		if code := a.run(full); code != exitOK {
-			t.Fatalf("%v exit = %d; stderr=%q", full, code, errb.String())
-		}
-	}
-
-	run(t, "--enforce=false")
-	if cfg := readDevJSON(t, home); cfg.Enforce == nil || *cfg.Enforce {
-		t.Fatalf("precondition failed: opt-out not stored, got %v", cfg.Enforce)
-	}
-
-	run(t)
-	cfg := readDevJSON(t, home)
-	if cfg.Enforce == nil {
-		t.Fatal("the opt-out was erased by a plain re-run; an absent field re-defaults to ON")
-	}
-	if *cfg.Enforce {
-		t.Error("a plain re-run silently turned enforcement back on; the opt-out must persist ")
-	}
-	if devconfig.ResolveEnforce() {
-		t.Error("ResolveEnforce() reports enforcing after an opt-out survived a re-run")
-	}
-
-	run(t, "--enforce")
-	if cfg := readDevJSON(t, home); cfg.Enforce == nil || !*cfg.Enforce {
-		t.Errorf("--enforce did not turn it back on, got %v", cfg.Enforce)
-	}
-}
-
-// TestBareInitEnforcesWithoutWritingTheField a bare install on a machine with
-// no prior config must still enforce; via the resolver default, not by writing
-// a literal true.
 func TestBareInitEnforcesWithoutWritingTheField(t *testing.T) {
 	home := isolateHome(t)
 	seedCredentials(t)

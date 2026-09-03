@@ -4,15 +4,21 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 
 	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/devconfig"
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/activation"
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/gatewayservice"
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/laneservice"
+	"github.com/openbox-ai/openbox-shift-left/internal/provider"
 	"github.com/openbox-ai/openbox-shift-left/internal/transport"
 )
+
+// laneCapable reports whether a provider has model-call lanes at all. The
+// telemetry receiver and the transport relay observe the Anthropic Messages API
+// through Claude Code's own settings, so there is nothing for them to read on
+// any other provider.
+func laneCapable(name string) bool { return provider.Name(name) == provider.ClaudeCode }
 
 type laneRequest struct {
 	telemetry, transport         bool
@@ -255,74 +261,9 @@ func (a *app) purgeLaneData(home string, uninstalling bool) {
 	}
 }
 
-type lanePlan struct {
-	telemetry, transport             bool
-	removeTelemetry, removeTransport bool
-	purge                            bool
-	telemetryAddr, transportAddr     string
-}
-
-func (a *app) printLanePlan(p lanePlan) {
-	home := a.homeDir()
-	settings := gatewayservice.SettingsPath(home)
-	if p.telemetry {
-		spec := laneservice.Telemetry(p.telemetryAddr, claudeSettingsPath(home), false)
-		keys := activation.TelemetryKeys(p.telemetryAddr)
-		fmt.Fprintf(a.stdout, "\nTelemetry receiver; PLANNED\n")
-		fmt.Fprintf(a.stdout, "  unit         %s\n", orNoPackaging(spec.UnitPath(runtime.GOOS, home), home))
-		fmt.Fprintf(a.stdout, "  listen       %s  (loopback only)\n", p.telemetryAddr)
-		fmt.Fprintf(a.stdout, "  settings     %s  sets %d keys: %v\n", settings, len(keys), activation.KeyNames(keys))
-		fmt.Fprintf(a.stdout, "               this makes the tool EXPORT its own telemetry, including prompt and\n")
-		fmt.Fprintf(a.stdout, "               tool content, to a local receiver. What leaves this machine is still\n")
-		fmt.Fprintf(a.stdout, "               gated by the content_capture posture.\n")
-	}
-	if p.transport {
-		spec := laneservice.Transport(p.transportAddr, claudeSettingsPath(home), false)
-		openboxHome, _ := devconfig.Home()
-		caPath, _ := transport.CAPaths(openboxHome)
-		keys := activation.TransportKeys(p.transportAddr, caPath, nil)
-		fmt.Fprintf(a.stdout, "\nTransport relay; PLANNED\n")
-		fmt.Fprintf(a.stdout, "  unit         %s\n", orNoPackaging(spec.UnitPath(runtime.GOOS, home), home))
-		fmt.Fprintf(a.stdout, "  listen       %s  (loopback only)\n", p.transportAddr)
-		fmt.Fprintf(a.stdout, "  CA           %s  (generated on first start)\n", caPath)
-		fmt.Fprintf(a.stdout, "  settings     %s  sets %d keys: %v\n", settings, len(keys), activation.KeyNames(keys))
-		fmt.Fprintf(a.stdout, "               this puts an OpenBox CA on this machine and INTERCEPTS the provider's\n")
-		fmt.Fprintf(a.stdout, "               TLS. Every other host is tunnelled uninspected.\n")
-	}
-	if p.removeTelemetry || p.removeTransport {
-		fmt.Fprintf(a.stdout, "\nRemoving lane configuration; PLANNED\n")
-		for _, lane := range []struct {
-			on   bool
-			name string
-			spec laneservice.Spec
-		}{
-			{p.removeTransport, "transport", laneservice.Transport("", "", false)},
-			{p.removeTelemetry, "telemetry", laneservice.Telemetry("", "", false)},
-		} {
-			if !lane.on {
-				continue
-			}
-			fmt.Fprintf(a.stdout, "  %-12s %s  (stopped and removed); its env keys restored from %s\n",
-				lane.name, orNoPackaging(lane.spec.UnitPath(runtime.GOOS, home), home), activation.RecordPath(home))
-		}
-	}
-	if p.purge {
-		openboxHome, _ := devconfig.Home()
-		caCert, _ := transport.CAPaths(openboxHome)
-		fmt.Fprintf(a.stdout, "  DELETES      %s, the lane logs and %s\n", caCert, activation.RecordPath(home))
-		fmt.Fprintf(a.stdout, "  KEEPS        the spool at %s; it is shared with the hook path,\n", devconfig.SpoolDir(transportSpoolSubdir))
-		fmt.Fprintf(a.stdout, "               which this command does not remove.\n")
-	}
-}
-
-func orNoPackaging(path, home string) string {
-	if path != "" {
-		return path
-	}
-	_ = home
-	return "(no daemon packaging on " + runtime.GOOS + ")"
-}
-
+// laneLogPath is where a lane's supervised stdio is kept, used by doctor. Not
+// laneservice.Spec.LogPath: doctor asks about a lane it may not have a full
+// Spec for.
 func laneLogPath(spec laneservice.Spec, home string) string {
 	return filepath.Join(home, ".openbox", spec.LogFile)
 }

@@ -40,18 +40,28 @@ TB_DIR="$(cd "$(dirname "$0")" && pwd)"
 TB_AGENT="${TB_AGENT:-$(tb_state_get agent_id)}"
 [ -n "$TB_AGENT" ] || tb_fatal "no agent id in test state — run 10-onboard.sh first"
 
-OTEL_ADDR="${TB_OTEL_ADDR:-127.0.0.1:8789}"
+# The default address. A per-lane override never bought isolation: the
+# collision is on the fixed supervisor labels, not the port, so two installs
+# clash regardless. Preflight's refusal of a host that already carries a real
+# install is what guarantees a clean machine.
+OTEL_ADDR="127.0.0.1:8789"
 SETTINGS="${HOME}/.claude/settings.json"
 
-# ── 46.0  install the lane through the REAL command ───────────────────────────
-# By command, never by hand-writing settings. The install ordering is part of what
-# is under test: the env block is written ONLY after the receiver is proven to be
-# listening, and a hand-written settings file would skip the very guarantee this
-# phase exists to check.
-tb_step "46.0  install the telemetry lane via \`openbox init --telemetry\`"
-if ! "$OPENBOX_BIN" init --provider claude-code --telemetry --telemetry-addr "$OTEL_ADDR" \
+# ── 46.0  the lane comes from the ONE install ─────────────────────────────────
+# By command, never by hand-writing settings. The install ordering is part of
+# what is under test: the env block is written ONLY after the receiver is proven
+# to be listening, and a hand-written settings file would skip the very
+# guarantee this phase exists to check.
+#
+# There is no per-lane flag any more. `init` brings up every lane the provider
+# supports, so 10-onboard's install is this one too -- which makes the coverage
+# stronger rather than weaker: both lanes are live at once, so the disjoint
+# activity_id namespaces and the producer election are exercised together
+# instead of one at a time.
+tb_step "46.0  the telemetry lane is up from \`openbox init --provider claude-code\`"
+if ! (cd "$TB_PROJECT" && "$TB_BIN" init --provider claude-code) \
 	>"$TB_STATE/otel-init.log" 2>&1; then
-	tb_bad "openbox init --telemetry failed"
+	tb_bad "openbox init failed"
 	tb_note "$(tail -5 "$TB_STATE/otel-init.log")"
 	tb_finish
 	exit 1

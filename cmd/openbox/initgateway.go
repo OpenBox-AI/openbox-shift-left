@@ -11,41 +11,9 @@ import (
 	"time"
 
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/gatewayservice"
-	"github.com/openbox-ai/openbox-shift-left/internal/gateway"
 )
 
 const gatewayReadyTimeout = 10 * time.Second
-
-func (a *app) setupGateway(homeDir, addr, upstream string, verbose bool) error {
-	cfg := gateway.Config{Addr: addr, Upstream: upstream}
-	if err := cfg.Validate(); err != nil {
-		return err
-	}
-	binPath, err := a.selfPath()
-	if err != nil {
-		return err
-	}
-	return a.setupLane(laneInstall{
-		label:        "gateway",
-		addr:         cfg.Addr,
-		homeDir:      homeDir,
-		laneIdentity: gatewayIdentity(homeDir),
-		installUnit: func() error {
-			return installUnitFn(runtime.GOOS, homeDir, binPath, cfg.Addr, cfg.Upstream, verbose)
-		},
-		uninstallUnit: func() error { return uninstallUnitFn(runtime.GOOS, homeDir) },
-		envNotSet:     gatewayservice.EnvKey + " was NOT set, so model calls still work and are ungoverned",
-		activate: func() ([]string, error) {
-			replaced, err := gatewayservice.WriteEnv(homeDir, cfg.Addr)
-			if err != nil {
-				return nil, err
-			}
-			fmt.Fprintf(a.stdout, "  %s  %s (user scope: %s)\n",
-				gatewayservice.EnvKey, "http://"+cfg.Addr, gatewayservice.SettingsPath(homeDir))
-			return replaced, nil
-		},
-	})
-}
 
 func gatewayIdentity(homeDir string) laneIdentity {
 	return laneIdentity{
@@ -169,36 +137,6 @@ var portOccupied = func(addr string) (bool, string) {
 	}
 	conn.Close()
 	return true, " (something is already listening there)"
-}
-
-func (a *app) printGatewayPlan(withGateway, removeGateway bool, addr, upstream string) {
-	home := a.homeDir()
-	switch {
-	case withGateway:
-		fmt.Fprintf(a.stdout, "\nLocal gateway (model-call governance); PLANNED\n")
-		fmt.Fprintf(a.stdout, "  unit         %s\n", unitPathForPlan(home))
-		fmt.Fprintf(a.stdout, "  listen       %s  (loopback only)\n", addr)
-		fmt.Fprintf(a.stdout, "  upstream     %s\n", upstream)
-		fmt.Fprintf(a.stdout, "  settings     %s  sets %s=http://%s\n",
-			gatewayservice.SettingsPath(home), gatewayservice.EnvKey, addr)
-		fmt.Fprintf(a.stdout, "               this REDIRECTS every model call this machine makes.\n")
-		fmt.Fprintf(a.stdout, "               The settings write happens last and only once the daemon is proven up.\n")
-	case removeGateway:
-		fmt.Fprintf(a.stdout, "\nRemoving local gateway configuration; PLANNED\n")
-		fmt.Fprintf(a.stdout, "  unit         %s  (stopped and removed)\n", unitPathForPlan(home))
-		fmt.Fprintf(a.stdout, "  settings     %s  unsets %s\n",
-			gatewayservice.SettingsPath(home), gatewayservice.EnvKey)
-		if prior, present := gatewayservice.CurrentEnv(home); present {
-			fmt.Fprintf(a.stdout, "  current      %s=%s\n", gatewayservice.EnvKey, prior)
-		}
-	}
-}
-
-func unitPathForPlan(home string) string {
-	if p := gatewayservice.UnitPath(runtime.GOOS, home); p != "" {
-		return p
-	}
-	return "(no daemon packaging on " + runtime.GOOS + ")"
 }
 
 // gatewayHome refusing is the only safe answer: a home the process cannot name

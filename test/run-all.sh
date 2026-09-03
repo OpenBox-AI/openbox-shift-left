@@ -20,17 +20,31 @@ phases=(
 	# DORMANT: written, never run — no stack has been reachable. See its header.
 	"telemetry:35-telemetry.sh"
 	"approvals:40-approvals.sh"
-	# DORMANT: written, never run. Needs a stack AND `openbox init --gateway`,
-	# which is opt-in — so this phase installs the gateway itself rather than
-	# assuming an earlier phase did.
-	"gateway:45-gateway.sh"
-	# DORMANT: written, never run. The capture half of both lanes is proven on
-	# the RECORDED corpus without a stack; these two hold only the live claims.
+	# The capture half of both lanes is proven on the RECORDED corpus without a
+	# stack; these two hold the live claims. They no longer install a lane of
+	# their own -- one `init` brings both up, so they assert against the shared
+	# install, which is what exercises the disjoint activity_id namespaces and
+	# the producer election together.
 	"otel-lane:46-otel-lane.sh"
 	"transport:47-transport.sh"
 	"lineage:50-lineage.sh"
 	"visibility:60-visibility.sh"
 	"auto:70-approver-auto.sh"
+)
+
+# PARKED, and named rather than silently dropped. No command installs a gateway
+# any more: --gateway went with the rest of init's flags, so 45-gateway.sh has
+# no driver, and it still references $OPENBOX_BIN, which nothing under test/
+# defines. Leaving it in the phase list would fail every full run.
+#
+# What has to stay covered is covered elsewhere: `openbox uninstall` unloads a
+# gateway unit a machine may still carry, TestAnInstallRetiresARoutedGateway
+# proves an install migrates a routed gateway off itself, and
+# TestTheDaemonSubcommandsDispatchButAreNotAdvertised proves the daemon still
+# dispatches for the units already out there. The file is left untouched
+# pending the gateway-lane deletion.
+parked=(
+	"gateway:45-gateway.sh  no command installs a gateway; pending the gateway-lane deletion"
 )
 
 wanted=("$@")
@@ -51,6 +65,10 @@ run() { # <tag> <script>
 		printf '\033[31m── %s FAILED\033[0m\n' "$1"
 	fi
 }
+
+for entry in "${parked[@]}"; do
+	printf '\033[33m── %s PARKED: %s\033[0m\n' "${entry%%:*}" "${entry#*  }"
+done
 
 run preflight 00-preflight.sh
 [ ${#failed[@]} -eq 0 ] || {

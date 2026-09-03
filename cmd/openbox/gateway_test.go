@@ -46,11 +46,45 @@ func TestGatewayIsReachableFromTheDispatcher(t *testing.T) {
 	}
 }
 
-// TestUsageListsGateway keeps the command discoverable.
-func TestUsageListsGateway(t *testing.T) {
+// TestTheDaemonSubcommandsDispatchButAreNotAdvertised. These are invoked by
+// string, by the supervisor units this tool writes and by nothing a person
+// types: leaving them out of the usage text is the whole point of the reduced
+// surface, and breaking their dispatch would stop every lane daemon from
+// starting. So the two halves are asserted together, because satisfying one by
+// breaking the other is the easy mistake.
+func TestTheDaemonSubcommandsDispatchButAreNotAdvertised(t *testing.T) {
 	a, _, errb := testApp(nil)
 	a.usage()
-	if !strings.Contains(errb.String(), "openbox gateway") {
-		t.Error("usage does not list `openbox gateway`")
+	usage := errb.String()
+	for _, cmd := range []string{"openbox gateway", "openbox telemetry", "openbox transport",
+		"openbox hook", "openbox rewake"} {
+		if strings.Contains(usage, cmd) {
+			t.Errorf("usage advertises %q; it is invoked by unit argv, not by a person:\n%s", cmd, usage)
+		}
+	}
+	for _, want := range []string{"openbox auth", "openbox init", "openbox doctor",
+		"openbox uninstall", "openbox version"} {
+		if !strings.Contains(usage, want) {
+			t.Errorf("usage does not list %q:\n%s", want, usage)
+		}
+	}
+	// And each one still dispatches. A lane unit's argv is the caller.
+	//
+	// These reach the real daemon entrypoints, which resolve ~/.openbox and mint
+	// the transport CA there before they get as far as refusing the address --
+	// so the home is isolated first.
+	isolateHome(t)
+	for _, args := range [][]string{
+		{"gateway", "--addr", "0.0.0.0:8788"},
+		{"telemetry", "--addr", "0.0.0.0:8789"},
+		{"transport", "--addr", "0.0.0.0:8790"},
+	} {
+		b, _, berr := testApp(nil)
+		if code := b.run(args); code != exitError {
+			t.Errorf("%v exited %d; expected the loopback refusal, which proves it dispatched", args, code)
+		}
+		if strings.Contains(berr.String(), "unknown command") {
+			t.Errorf("%q is not wired into the dispatcher", args[0])
+		}
 	}
 }

@@ -39,15 +39,21 @@ TB_DIR="$(cd "$(dirname "$0")" && pwd)"
 TB_AGENT="${TB_AGENT:-$(tb_state_get agent_id)}"
 [ -n "$TB_AGENT" ] || tb_fatal "no agent id in test state — run 10-onboard.sh first"
 
-PX_ADDR="${TB_TRANSPORT_ADDR:-127.0.0.1:8790}"
+# The default address; see 46-otel-lane.sh for why a per-lane override would
+# not have isolated anything.
+PX_ADDR="127.0.0.1:8790"
 SETTINGS="${HOME}/.claude/settings.json"
 CA_DIR="${HOME}/.openbox"
 
-# ── 47.0  install through the REAL command ────────────────────────────────────
-tb_step "47.0  install the transport lane via \`openbox init --transport\`"
-if ! "$OPENBOX_BIN" init --provider claude-code --transport --transport-addr "$PX_ADDR" \
+# ── 47.0  the lane comes from the ONE install ─────────────────────────────────
+# No per-lane flag: `init` brings up every lane the provider supports, so this
+# is the same install 10-onboard and 46 run. Both lanes live at once is the
+# point -- the two must never share an activity_id, and exactly one of them can
+# be the elected producer.
+tb_step "47.0  the transport lane is up from \`openbox init --provider claude-code\`"
+if ! (cd "$TB_PROJECT" && "$TB_BIN" init --provider claude-code) \
 	>"$TB_STATE/px-init.log" 2>&1; then
-	tb_bad "openbox init --transport failed"
+	tb_bad "openbox init failed"
 	tb_note "$(tail -5 "$TB_STATE/px-init.log")"
 	tb_finish
 	exit 1
@@ -87,7 +93,7 @@ fi
 # the constructor because net/http caches the environment behind a sync.Once, so a
 # later clear does nothing at all.
 tb_step "47.2  the relay did not inherit a proxy pointing at itself"
-if "$OPENBOX_BIN" doctor 2>&1 | grep -qi "proxy env cleared"; then
+if "$TB_BIN" doctor 2>&1 | grep -qi "proxy env cleared"; then
 	tb_ok "doctor reports the inherited proxy environment cleared"
 else
 	tb_note "doctor did not report the cleared environment — inspect its transport block"
@@ -160,12 +166,18 @@ assert_eq "a token_count row carries no request body" 0 \
 # process. A removal that leaves HTTPS_PROXY behind points every model call on the
 # machine at a dead port; one that leaves the CA behind leaves a trust anchor the
 # developer never sees again.
-tb_step "47.5  \`openbox init --remove-all\` returns the machine to baseline"
-"$OPENBOX_BIN" init --provider claude-code --remove-all >"$TB_STATE/px-remove.log" 2>&1
+# Removal is its own command now, and it removes everything rather than just
+# the lanes -- so this also proves uninstall reverses the in-path relay.
+tb_step "47.5  \`openbox uninstall\` returns the machine to baseline"
+"$TB_BIN" uninstall >"$TB_STATE/px-remove.log" 2>&1
 residue=0
 grep -q "HTTPS_PROXY" "$SETTINGS" 2>/dev/null && { tb_bad "HTTPS_PROXY survives removal"; residue=1; }
 [ -f "$CA_PEM" ] && { tb_bad "the CA survives removal at $CA_PEM"; residue=1; }
 nc -z "${PX_ADDR%%:*}" "${PX_ADDR##*:}" 2>/dev/null && { tb_bad "the relay is still listening after removal"; residue=1; }
 [ "$residue" -eq 0 ] && tb_ok "settings, CA and unit all removed"
+
+# Every later phase needs the machine governed again.
+(cd "$TB_PROJECT" && "$TB_BIN" init --provider claude-code) >"$TB_STATE/px-reinit.log" 2>&1 ||
+	tb_bad "re-install after the removal check" 0 "$(tail -3 "$TB_STATE/px-reinit.log")"
 
 tb_finish

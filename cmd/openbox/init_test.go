@@ -45,18 +45,21 @@ func TestExtractRole(t *testing.T) {
 // than quietly still working, or there are two onboarding paths to keep true
 // in every doc.
 func TestInitDefaultsToTheDeveloperRole(t *testing.T) {
-	a, out, _ := testApp(nil)
-	if code := a.runInit([]string{"--provider", "claude-code", "--dry-run"}); code != exitOK {
-		t.Fatalf("openbox init --provider claude-code --dry-run = %d, want 0", code)
+	isolateHome(t)
+	seedCredentials(t)
+	a, out, errb := testApp(nil)
+	if code := a.runInit([]string{"--provider", "claude-code"}); code != exitOK {
+		t.Fatalf("openbox init --provider claude-code = %d, want 0; stderr=%q", code, errb.String())
 	}
-	if plan := out.String(); !strings.Contains(plan, "developer agent") {
-		t.Errorf("the default role did not plan a developer install:\n%s", plan)
+	// The default installs a governed developer runtime, not a queue client.
+	if s := out.String(); !strings.Contains(s, "EVERY SESSION") {
+		t.Errorf("the default role did not install a developer runtime:\n%s", s)
 	}
 }
 
 func TestDevInitIsGone(t *testing.T) {
 	a, _, errb := testApp(nil)
-	if code := a.runDev([]string{"init", "--provider", "claude-code", "--dry-run"}); code == exitOK {
+	if code := a.runDev([]string{"init", "--provider", "claude-code"}); code == exitOK {
 		t.Error("`openbox dev init` still succeeds; it must not run at all")
 	}
 	if msg := errb.String(); !strings.Contains(msg, "openbox init") {

@@ -24,7 +24,10 @@ import (
 
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/backend"
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/devinit"
+	"github.com/openbox-ai/openbox-shift-left/internal/cli/gatewayservice"
+	"github.com/openbox-ai/openbox-shift-left/internal/cli/laneservice"
 	"github.com/openbox-ai/openbox-shift-left/internal/client"
+	"github.com/openbox-ai/openbox-shift-left/internal/transport"
 )
 
 type fakeReg struct {
@@ -86,7 +89,66 @@ func isolateHome(t *testing.T) string {
 		t.Fatalf("isolate working directory: %v", err)
 	}
 	t.Cleanup(func() { _ = os.Chdir(wd) })
+	fakeSupervisor(t, dir)
 	return dir
+}
+
+// fakeSupervisor replaces every seam that leaves this process, and seeds the
+// transport CA so a default install completes.
+//
+// It belongs here rather than in the tests that ask for it, because `init` now
+// installs the lanes unconditionally: every one of the ~30 init invocations in
+// this package would otherwise hand a unit naming the TEST BINARY to the real
+// launchd, with KeepAlive and Restart=always, and dial the developer's own
+// lanes to decide whether a port was free. TestMain refuses those seams by
+// default so the omission cannot be silent; this is what makes the default
+// path work.
+func fakeSupervisor(t *testing.T, openboxHome string) {
+	t.Helper()
+	origRun, origUID := run, currentUID
+	origProbe, origListen, origFree := portOccupied, waitForListenerFn, waitForPortFreeFn
+	origInstall, origUninstall := installLaneUnitFn, uninstallLaneUnitFn
+	origGwInstall, origGwUninstall := installUnitFn, uninstallUnitFn
+	t.Cleanup(func() {
+		run, currentUID = origRun, origUID
+		portOccupied, waitForListenerFn, waitForPortFreeFn = origProbe, origListen, origFree
+		installLaneUnitFn, uninstallLaneUnitFn = origInstall, origUninstall
+		installUnitFn, uninstallUnitFn = origGwInstall, origGwUninstall
+	})
+
+	run = func(string, ...string) error { return nil }
+	currentUID = func() string { return "501" }
+	portOccupied = func(string) (bool, string) { return false, "" }
+	waitForListenerFn = func(string, time.Duration) bool { return true }
+	waitForPortFreeFn = func(string, time.Duration) bool { return true }
+	installLaneUnitFn = func(spec laneservice.Spec, goos, homeDir, binPath string) error {
+		_, err := spec.WriteUnit(goos, homeDir, binPath)
+		return err
+	}
+	uninstallLaneUnitFn = func(spec laneservice.Spec, goos, homeDir string) error {
+		_, err := spec.RemoveUnit(goos, homeDir)
+		return err
+	}
+	installUnitFn = func(goos, homeDir, binPath, addr, upstream string, verbose bool) error {
+		_, err := gatewayservice.WriteUnit(goos, homeDir, binPath, addr, upstream, verbose)
+		return err
+	}
+	uninstallUnitFn = func(goos, homeDir string) error {
+		_, err := gatewayservice.RemoveUnit(goos, homeDir)
+		return err
+	}
+
+	// The transport lane refuses to point NODE_EXTRA_CA_CERTS at a CA that is
+	// not there, which is correct and would make every default install in this
+	// package report a failed lane. The daemon mints this file on first start;
+	// with no daemon, the fixture stands in for it.
+	if err := os.MkdirAll(openboxHome, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	caPath, _ := transport.CAPaths(openboxHome)
+	if err := os.WriteFile(caPath, []byte("-----BEGIN CERTIFICATE-----\nstub\n-----END CERTIFICATE-----\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestVersion(t *testing.T) {
@@ -99,15 +161,20 @@ func TestVersion(t *testing.T) {
 	}
 }
 
-func TestDryRunIsOfflineAndNeedsNoToken(t *testing.T) {
+// TestInitIsOfflineAndNeedsNoToken. `init` registers no agent and makes no
+// control-plane call, so a machine with credentials already on it must install
+// with an empty environment. testApp's registrar seam panics if anything
+// reaches for one, which is what makes "offline" an assertion rather than a
+// claim.
+func TestInitIsOfflineAndNeedsNoToken(t *testing.T) {
 	isolateHome(t)
-	a, out, _ := testApp(nil) // empty env; the registrar seam panics if touched
-	code := a.run([]string{"init", "--provider", "claude-code", "--dry-run"})
-	if code != exitOK {
-		t.Fatalf("dry-run exit = %d", code)
+	seedCredentials(t)
+	a, out, errb := testApp(nil) // empty env; the registrar seam panics if touched
+	if code := a.run([]string{"init", "--provider", "claude-code"}); code != exitOK {
+		t.Fatalf("init exit = %d; stderr=%q", code, errb.String())
 	}
-	if !strings.Contains(out.String(), "DRY RUN") {
-		t.Errorf("missing DRY RUN banner: %q", out.String())
+	if !strings.Contains(out.String(), "EVERY SESSION") {
+		t.Errorf("the install did not complete:\n%s", out.String())
 	}
 }
 
@@ -257,31 +324,6 @@ func TestClaudeCodeInstallsForRealExitsZero(t *testing.T) {
 	}
 	if kv[devconfig.EnvAPIKeyDirect] != "obx_test_k" || kv[devconfig.EnvAgentPrivateKey] != testSeedB64 {
 		t.Errorf("init modified the credential file: %v", kv)
-	}
-}
-
-// TestClaudeCodeDryRunWritesNothing a claude-code --dry-run must render the
-// real installer's plan but write nothing to disk (no bundle, no config), even
-// though claude-code is now a real installer.
-func TestClaudeCodeDryRunWritesNothing(t *testing.T) {
-	home := t.TempDir()
-	cfgPath := filepath.Join(t.TempDir(), "openbox", "dev.json")
-	t.Setenv("HOME", home)
-	t.Setenv("OPENBOX_CONFIG", cfgPath)
-
-	a, out, _ := testApp(nil) // no token/store/registrar: dry-run must stay offline
-	code := a.run([]string{"init", "--provider", "claude-code", "--dry-run"})
-	if code != exitOK {
-		t.Fatalf("dry-run exit = %d", code)
-	}
-	if !strings.Contains(out.String(), "OpenBox Claude Code plugin (observe-only") {
-		t.Errorf("dry-run did not render the real installer plan:\n%s", out.String())
-	}
-	if _, err := os.Stat(filepath.Join(home, ".claude")); !os.IsNotExist(err) {
-		t.Errorf("dry-run created a plugin dir under HOME (err=%v)", err)
-	}
-	if _, err := os.Stat(cfgPath); !os.IsNotExist(err) {
-		t.Errorf("dry-run wrote the dev config (err=%v)", err)
 	}
 }
 
@@ -1103,33 +1145,6 @@ func TestCodexInstallsForRealExitsZero(t *testing.T) {
 	}
 	if kv[devconfig.EnvAPIKeyDirect] != "obx_test_k" || kv[devconfig.EnvAgentPrivateKey] != testSeedB64 {
 		t.Errorf("init modified the credential file: %v", kv)
-	}
-}
-
-// TestCodexDryRunWritesNothing a codex --dry-run renders the real installer's
-// plan (incl. The trust step) but writes nothing; no hooks.json under
-// CODEX_HOME, no dev config.
-func TestCodexDryRunWritesNothing(t *testing.T) {
-	codexHome := filepath.Join(t.TempDir(), "codex-home")
-	cfgPath := filepath.Join(t.TempDir(), "openbox", "dev.json")
-	t.Setenv("CODEX_HOME", codexHome)
-	t.Setenv("OPENBOX_CONFIG", cfgPath)
-
-	a, out, _ := testApp(nil) // no token/store/registrar: dry-run must stay offline
-	code := a.run([]string{"init", "--provider", "codex", "--dry-run"})
-	if code != exitOK {
-		t.Fatalf("dry-run exit = %d", code)
-	}
-	for _, want := range []string{"OpenBox Codex hooks", "/hooks", "hook codex"} {
-		if !strings.Contains(out.String(), want) {
-			t.Errorf("dry-run plan missing %q:\n%s", want, out.String())
-		}
-	}
-	if _, err := os.Stat(codexHome); !os.IsNotExist(err) {
-		t.Errorf("dry-run created CODEX_HOME content (err=%v)", err)
-	}
-	if _, err := os.Stat(cfgPath); !os.IsNotExist(err) {
-		t.Errorf("dry-run wrote the dev config (err=%v)", err)
 	}
 }
 

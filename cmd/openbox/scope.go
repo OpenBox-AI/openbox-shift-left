@@ -4,22 +4,13 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/devconfig"
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/devinit"
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/providers"
+	"github.com/openbox-ai/openbox-shift-left/internal/provider"
 )
-
-// flagPassed reports whether a flag was explicitly given on the command line.
-func flagPassed(fs *flag.FlagSet, name string) bool {
-	found := false
-	fs.Visit(func(f *flag.Flag) {
-		if f.Name == name {
-			found = true
-		}
-	})
-	return found
-}
 
 // requireCredentials it must not half-install: a bundle installed against no
 // identity produces hooks that fire, fail to resolve credentials, and fail
@@ -102,28 +93,19 @@ func (a *app) printHookBlockNotice() {
 
 func (a *app) initUsage(fs *flag.FlagSet) func() {
 	return func() {
-		fmt.Fprintf(a.stderr, "Usage: openbox init --provider <claude-code|codex|cursor> [flags]\n\n")
-		fmt.Fprintf(a.stderr, "Installs the tool's hooks and writes posture. Run `openbox auth` first -\n")
-		fmt.Fprintf(a.stderr, "this command never reads, writes or prompts for a credential.\n\n")
-		for _, name := range []string{
-			"provider", "enforce", "no-enforce", "install-git-hook",
-			"full", "remove-all",
-			"gateway", "remove-gateway", "gateway-addr", "gateway-upstream", "gateway-verbose",
-			"telemetry", "remove-telemetry", "telemetry-addr",
-			"transport", "remove-transport", "transport-addr",
-			"lane-verbose", "force-restore",
-			"role", "dry-run",
-		} {
-			f := fs.Lookup(name)
-			if f == nil {
-				continue
-			}
+		fmt.Fprintf(a.stderr, "Usage: openbox init --provider <%s>\n\n",
+			strings.Join(provider.Supported(), "|"))
+		fmt.Fprintf(a.stderr, "Installs the tool's hooks, the model-call lanes it supports, and posture.\n")
+		fmt.Fprintf(a.stderr, "Run `openbox auth` first; this command never reads, writes or prompts for a\n")
+		fmt.Fprintf(a.stderr, "credential.\n\n")
+		if f := fs.Lookup("provider"); f != nil {
 			fmt.Fprintf(a.stderr, "  -%s\n        %s\n", f.Name, f.Usage)
 		}
-		fmt.Fprintf(a.stderr, "\nMoved to `openbox auth`: --org --agent-name --icon --description --base-url\n")
-		fmt.Fprintf(a.stderr, "  --backend-url --force. Passing one here fails with a pointer rather than\n")
-		fmt.Fprintf(a.stderr, "  being ignored.\n")
-		fmt.Fprintf(a.stderr, "Removed: --secret-backend --client-id --managed-enable --scope --local-hooks.\n")
-		fmt.Fprintf(a.stderr, "  One install governs every session on this machine; there is no scope to pick.\n")
+		fmt.Fprintf(a.stderr, "\nThere are no other flags. One install governs every session on this machine,\n")
+		fmt.Fprintf(a.stderr, "enforcing, with every lane the provider supports and commit trailers on. The\n")
+		fmt.Fprintf(a.stderr, "two postures that remain per-machine are environment variables, not flags:\n")
+		fmt.Fprintf(a.stderr, "  OPENBOX_ENFORCE=false            observe only, for this run\n")
+		fmt.Fprintf(a.stderr, "  OPENBOX_INSTALL_GIT_HOOK=false   do not touch any repo's .git/hooks\n")
+		fmt.Fprintf(a.stderr, "Removal is `openbox uninstall`. Credentials are `openbox auth`.\n")
 	}
 }
