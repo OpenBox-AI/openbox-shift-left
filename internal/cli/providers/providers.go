@@ -6,6 +6,7 @@ package providers
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	claudecode "github.com/openbox-ai/openbox-shift-left/internal/adapters/claude-code"
@@ -78,4 +79,75 @@ Manual config until the bundle ships:
     afterFileEdit that invoke 'openbox' (note: Cursor hooks fail-open).
   - Credentials come from ~/.openbox/.env (written by 'openbox auth'), never
     inline. This install governs DID %s.`, ref.DID)
+}
+
+// RemoveProviderHooks takes every OpenBox registration out of one provider's
+// hook file and reports what it removed as "event engine" lines. The
+// settings-file path is a parameter rather than derived, because the same
+// removal serves the user-scope file, a project's settings.local.json and the
+// plugin bundle's own document.
+//
+// An absent file is success — uninstall walks every surface unconditionally
+// rather than branching on a detected provider — but an unknown provider name
+// is not: a typo must not read as "nothing was installed for it".
+func RemoveProviderHooks(name, settingsPath string) ([]string, error) {
+	switch provider.Name(name) {
+	case provider.ClaudeCode:
+		return claudecode.RemoveLocalHooks(settingsPath)
+	case provider.Codex:
+		return codex.RemoveHooks(settingsPath)
+	default:
+		return nil, fmt.Errorf("%w: %q (supported: %s)", provider.ErrUnknown, name, strings.Join(provider.Supported(), ", "))
+	}
+}
+
+// CodexHooksPath is where the Codex adapter keeps its hook file, so an
+// uninstall can look where the install wrote without importing the adapter.
+func CodexHooksPath() string { return codex.DefaultHooksPath() }
+
+// OwnedSpoolDirs is every spool directory the adapters write to, de-duplicated
+// by resolved path. It exists so a purge cannot miss one: cmd/openbox already
+// hardcodes "cc-spool" three times for its own lane spools, and a fourth copy
+// would let a renamed spool survive a full uninstall with undelivered governed
+// tool calls still in it.
+//
+// De-duplication is not hygiene. OPENBOX_SPOOL_DIR overrides the whole path
+// rather than the subdirectory, so with it set every adapter resolves to the
+// same directory and a caller taking this list at face value would report
+// deleting it once per provider.
+func OwnedSpoolDirs() []string {
+	seen := map[string]bool{}
+	var dirs []string
+	for _, dir := range []string{claudecode.DefaultSpoolDir(), codex.DefaultSpoolDir()} {
+		if dir == "" {
+			continue
+		}
+		resolved := filepath.Clean(dir)
+		if seen[resolved] {
+			continue
+		}
+		seen[resolved] = true
+		dirs = append(dirs, resolved)
+	}
+	return dirs
+}
+
+// ClaudePluginDir is where the Claude Code adapter materializes its plugin
+// bundle, so an uninstall can delete it without importing the adapter.
+func ClaudePluginDir() string { return claudecode.DefaultPluginDir() }
+
+// HookMarkers are the substrings that identify an OpenBox registration in one
+// provider's hook file. An uninstall needs them to tell "this file exists"
+// from "this file carries something of ours": the settings files belong to the
+// developer and survive the removal, so their presence is not ownership, and a
+// second uninstall on a clean machine has to be able to report nothing to do.
+func HookMarkers(name string) []string {
+	switch provider.Name(name) {
+	case provider.ClaudeCode:
+		return claudecode.HookInvocationMarkers()
+	case provider.Codex:
+		return codex.HookInvocationMarkers()
+	default:
+		return nil
+	}
 }

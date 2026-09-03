@@ -59,15 +59,47 @@ run preflight 00-preflight.sh
 	exit 1
 }
 
+# From here the phases install into the real ~/.claude/settings.json and the
+# real supervisor, under fixed launchd labels. So every way out — a normal end,
+# a failed phase, Ctrl-C, a TERM from CI — has to give the box back; teardown
+# can no longer be opt-in. Armed after preflight on purpose: a host refused up
+# there is left exactly as it was found.
+#
+# Two known limits. With a phase running in the foreground the TERM handler is
+# deferred until that phase exits, so a CI cancel that escalates to SIGKILL
+# inside its grace period can still leave the install behind — preflight's
+# refusal is the backstop. And because the labels and the user-scope settings
+# path are fixed, this suite cannot run on a machine that carries a real
+# OpenBox install.
+teardown_pending=1
+teardown() {
+	[ -n "${teardown_pending:-}" ] || return 0
+	teardown_pending=
+	# A second Ctrl-C during teardown aborts it, loudly: a named residue beats an
+	# operator who cannot get their terminal back. Preflight refuses the next run.
+	trap 'printf "\n\033[31m── teardown interrupted; the test install may still be on this machine. Run: ./test/run-all.sh teardown\033[0m\n" >&2; trap - EXIT; exit 130' INT TERM
+	run teardown 99-teardown.sh
+	trap - INT TERM
+}
+on_signal() { # <name> <number>
+	printf '\n\033[31m── SIG%s: tearing down. The install and the scratch project go; test/.state and every database row stay.\033[0m\n' "$1" >&2
+	teardown
+	trap - EXIT
+	exit $((128 + $2))
+}
+# An explicit INT trap is what makes this deterministic. A bare EXIT trap does
+# run on signal death, but not when the leaf process catches SIGINT and exits 0
+# — there the parent would carry on to the next phase instead of tearing down.
+trap teardown EXIT
+trap 'on_signal INT 2' INT
+trap 'on_signal TERM 15' TERM
+
 for entry in "${phases[@]}"; do
 	selected "${entry%%:*}" && run "${entry%%:*}" "${entry#*:}"
 done
 
-# Teardown is opt-in only: it deactivates the harness credential and removes the
-# governed project, so a plain run must leave the box ready for another pass.
-if [ ${#wanted[@]} -gt 0 ] && selected teardown; then
-	run teardown 99-teardown.sh
-fi
+teardown  # the normal path, before the summary so the report reads in order
+trap - EXIT INT TERM
 
 echo
 if [ ${#failed[@]} -eq 0 ]; then

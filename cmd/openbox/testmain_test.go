@@ -7,6 +7,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/openbox-ai/openbox-shift-left/internal/cli/laneservice"
 )
 
 // TestMain is the asserted-hermeticity control for the package that owns
@@ -37,6 +40,8 @@ func TestMain(m *testing.M) {
 	os.Setenv("HOME", sentinel)
 	os.Setenv("XDG_CONFIG_HOME", xdgConfig)
 
+	refuseTheRealSupervisor()
+
 	code := m.Run()
 
 	if leaks := filesUnder(sentinel, goConfigDirs(sentinel, xdgConfig)); len(leaks) > 0 {
@@ -51,6 +56,58 @@ func TestMain(m *testing.M) {
 	}
 	os.RemoveAll(sentinel)
 	os.Exit(code)
+}
+
+// refuseTheRealSupervisor makes every seam that leaves this process fail loudly
+// by default, so a test can only reach a supervisor by asking for a fake one.
+//
+// The hermeticity guard above cannot see this class of escape. kardianos/service
+// ignores $HOME, so it writes into the developer's REAL ~/Library/LaunchAgents,
+// and `launchctl` writes nowhere under the sentinel at all; a test that installs
+// a unit leaves no file for the walk to find. What it leaves is a unit whose
+// ProgramArguments name os.Executable() — the test binary — with KeepAlive and
+// Restart=always, which the supervisor then restart-loops. portOccupied and
+// waitForListener dial 127.0.0.1 for real, so they also answer from the
+// developer's own lanes.
+//
+// It panics rather than returning an error on purpose: the lane install path
+// swallows a failure into a warning, so an errored seam would leave a test green
+// and this guard silent. newLaneHarness and stubSupervisor replace these per
+// test; anything reaching them here has escaped both.
+// realPortOccupied and realWaitForListener are the genuine probes, kept so a
+// test that deliberately binds its own loopback listener can opt back in. That
+// is what stubSupervisor does: proving the readiness gate works needs a real
+// dial against a real socket.
+var (
+	realPortOccupied    func(string) (bool, string)
+	realWaitForListener func(string, time.Duration) bool
+	realWaitForPortFree func(string, time.Duration) bool
+)
+
+// withRealProbes opts one test back into the genuine loopback probes, for the
+// tests that are ABOUT those probes and bind their own sockets to exercise
+// them. Everything else keeps TestMain's refusal.
+func withRealProbes(t *testing.T) {
+	t.Helper()
+	origProbe, origListen, origFree := portOccupied, waitForListenerFn, waitForPortFreeFn
+	t.Cleanup(func() { portOccupied, waitForListenerFn, waitForPortFreeFn = origProbe, origListen, origFree })
+	portOccupied, waitForListenerFn, waitForPortFreeFn = realPortOccupied, realWaitForListener, realWaitForPortFree
+}
+
+func refuseTheRealSupervisor() {
+	const escaped = "reached the real supervisor from a test: use newLaneHarness or stubSupervisor"
+	realPortOccupied, realWaitForListener, realWaitForPortFree = portOccupied, waitForListenerFn, waitForPortFreeFn
+	run = func(name string, args ...string) error {
+		panic(escaped + " (ran " + name + " " + strings.Join(args, " ") + ")")
+	}
+	currentUID = func() string { panic(escaped + " (currentUID)") }
+	portOccupied = func(string) (bool, string) { panic(escaped + " (portOccupied dials a real port)") }
+	waitForListenerFn = func(string, time.Duration) bool { panic(escaped + " (waitForListener dials a real port)") }
+	waitForPortFreeFn = func(string, time.Duration) bool { panic(escaped + " (waitForPortFree dials a real port)") }
+	installLaneUnitFn = func(laneservice.Spec, string, string, string) error { panic(escaped + " (installLaneUnit)") }
+	uninstallLaneUnitFn = func(laneservice.Spec, string, string) error { panic(escaped + " (uninstallLaneUnit)") }
+	installUnitFn = func(string, string, string, string, string, bool) error { panic(escaped + " (installUnit)") }
+	uninstallUnitFn = func(string, string) error { panic(escaped + " (uninstallUnit)") }
 }
 
 func filesUnder(root string, skipDirs []string) []string {

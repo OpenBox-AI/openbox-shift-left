@@ -112,6 +112,11 @@ type removalRequest struct {
 	gateway, telemetry, transport bool
 	purge                         bool
 	force                         bool
+	// uninstall marks the caller as `openbox uninstall` rather than `init
+	// --remove-all`. Two sentences below are only true for one of them: the
+	// spool is retained by one caller and deleted by the other, and
+	// --force-restore is a flag only one of them accepts.
+	uninstall bool
 }
 
 // runRemovals backs lanes out, in the reverse of install order. It runs before
@@ -141,12 +146,16 @@ func (a *app) runRemovals(home string, req removalRequest) int {
 	}
 
 	if req.purge {
-		a.purgeLaneData(home)
+		a.purgeLaneData(home, req.uninstall)
 	}
 
 	if len(failures) > 0 {
-		return a.errorf("removal did not complete for: %v; the rest was removed. "+
-			"A value that changed after OpenBox set it is not overwritten without --force-restore", failures)
+		// `uninstall` takes no flags, so it must not name one as the remedy.
+		remedy := "A value that changed after OpenBox set it is not overwritten without --force-restore"
+		if req.uninstall {
+			remedy = "A value that changed after OpenBox set it was left alone; resolve it by hand, then re-run"
+		}
+		return a.errorf("removal did not complete for: %v; the rest was removed. %s", failures, remedy)
 	}
 	fmt.Fprintf(a.stdout, "\nDone. `openbox doctor` reports what is left.\n")
 	return exitOK
@@ -155,7 +164,7 @@ func (a *app) runRemovals(home string, req removalRequest) int {
 // purgeLaneData deletes the artifacts the lanes created. Nothing outside
 // ~/.openbox is ever touched here; the settings file is restored by the
 // activation record, key by key, and never truncated.
-func (a *app) purgeLaneData(home string) {
+func (a *app) purgeLaneData(home string, uninstalling bool) {
 	openboxHome, err := devconfig.Home()
 	if err != nil {
 		fmt.Fprintf(a.stderr, "warning: cannot resolve the OpenBox config dir, so its artifacts were left in place: %v\n", err)
@@ -180,7 +189,12 @@ func (a *app) purgeLaneData(home string) {
 		fmt.Fprintf(a.stdout, "  deleted        %s\n", path)
 	}
 	// This repo's stated direction of error for exactly this shape is over-keep,
-	// never over-delete.
+	// never over-delete. `uninstall` is the one caller that does delete it, and
+	// it reports the flush and the deletion itself — so saying "kept" here would
+	// be false, and saying "deleted" would report it twice.
+	if uninstalling {
+		return
+	}
 	spool := devconfig.SpoolDir(transportSpoolSubdir)
 	if entries, err := os.ReadDir(spool); err == nil && len(entries) > 0 {
 		fmt.Fprintf(a.stdout, "  kept           %s (%d undelivered event file(s))\n", spool, len(entries))

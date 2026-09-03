@@ -144,6 +144,11 @@ func inDirWithSettings(t *testing.T, settings map[string]any) string {
 
 func runDoctorIn(t *testing.T, dir string) (string, int) {
 	t.Helper()
+	// doctor probes the lane ports to report coverage. Unpinned, that dials
+	// 127.0.0.1 for real and answers from whatever the developer running the
+	// suite has listening, so the result depends on the host rather than the
+	// fixture.
+	nothingIsListening(t)
 	saved, err := os.Getwd()
 	if err != nil {
 		t.Fatal(err)

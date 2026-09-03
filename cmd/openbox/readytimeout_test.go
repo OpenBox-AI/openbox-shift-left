@@ -41,6 +41,7 @@ func TestWaitForListenerGivesUpAtItsDeadline(t *testing.T) {
 // init tears a lane down before rebuilding it, and a port already free must
 // not cost a poll interval.
 func TestWaitForPortFreeReturnsAtOnceWhenNothingHoldsThePort(t *testing.T) {
+	withRealProbes(t) // this test IS the probe
 	const free = "127.0.0.1:1"
 	if c, err := net.DialTimeout("tcp", free, 500*time.Millisecond); err == nil {
 		c.Close()
@@ -64,6 +65,7 @@ func TestWaitForPortFreeReturnsAtOnceWhenNothingHoldsThePort(t *testing.T) {
 // rebuild can proceed, and a wait that ends early points the tool at a port
 // the old process still owns.
 func TestWaitForPortFreeGivesUpAtItsDeadline(t *testing.T) {
+	withRealProbes(t) // this test IS the probe, against a socket it binds itself
 	lis, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Skipf("host denies bind (%v); this test needs a port something really holds", err)

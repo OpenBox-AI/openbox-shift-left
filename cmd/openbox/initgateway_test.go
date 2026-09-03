@@ -18,6 +18,11 @@ func stubSupervisor(t *testing.T, addr string, startFails bool) {
 	origRun, origUID := run, currentUID
 	t.Cleanup(func() { run, currentUID = origRun, origUID })
 
+	// This stub binds a real loopback listener below, because the readiness gate
+	// is the property under test and a faked probe would assert nothing. So it
+	// opts back into the genuine probes that TestMain refuses by default.
+	withRealProbes(t)
+
 	origInstall, origUninstall := installUnitFn, uninstallUnitFn
 	t.Cleanup(func() { installUnitFn, uninstallUnitFn = origInstall, origUninstall })
 	installUnitFn = func(goos, homeDir, binPath, addr, upstream string, verbose bool) error {

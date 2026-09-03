@@ -115,6 +115,25 @@ func (a *app) removeLane(in laneRemoval) error {
 	return nil
 }
 
+// laneUnitEnv is the coordinate environment the unit has to carry, captured
+// from the installing process. A supervisor starts a daemon with no
+// environment of its own, so devconfig.Home() inside it resolves the real
+// ~/.openbox while this process validated the path its own $OPENBOX_HOME
+// named — and the transport CA check then refuses a certificate that is not
+// where it looked.
+//
+// Only these two keys, and only path coordinates: a unit file is
+// world-readable, so the API key and the signing seed must never reach one.
+func (a *app) laneUnitEnv() map[string]string {
+	env := make(map[string]string, 2)
+	for _, key := range []string{devconfig.EnvHome, devconfig.EnvSpoolDir} {
+		if v := a.getenv(key); v != "" {
+			env[key] = v
+		}
+	}
+	return env
+}
+
 var installLaneUnitFn = func(spec laneservice.Spec, goos, homeDir, binPath string) error {
 	return spec.Reinstall(goos, homeDir, binPath)
 }
@@ -127,7 +146,7 @@ var uninstallLaneUnitFn = func(spec laneservice.Spec, goos, homeDir string) erro
 // telemetry at it.
 func (a *app) setupTelemetry(homeDir, addr string, verbose bool) error {
 	// The settings path goes INTO the unit: only the install path knows the real home.
-	spec := laneservice.Telemetry(addr, claudeSettingsPath(homeDir), verbose)
+	spec := laneservice.Telemetry(addr, claudeSettingsPath(homeDir), verbose).WithEnv(a.laneUnitEnv())
 	binPath, err := a.selfPath()
 	if err != nil {
 		return err
@@ -169,7 +188,7 @@ func (a *app) removeTelemetry(homeDir string, force bool) error {
 }
 
 func (a *app) setupTransport(homeDir, addr string, verbose bool) error {
-	spec := laneservice.Transport(addr, claudeSettingsPath(homeDir), verbose)
+	spec := laneservice.Transport(addr, claudeSettingsPath(homeDir), verbose).WithEnv(a.laneUnitEnv())
 	binPath, err := a.selfPath()
 	if err != nil {
 		return err

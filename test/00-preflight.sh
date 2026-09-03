@@ -43,4 +43,41 @@ else
 	assert_eq "credential can read the org" 200 "$(tb_status)"
 fi
 
+# The suite installs real daemons under fixed launchd/systemd names and writes
+# the real user-scope settings file. env.sh pins OPENBOX_HOME, the spool and
+# nine other coordinates, but it does NOT pin $HOME — project scope used to be
+# the isolation, and the hooks now land user-wide. So a host that already
+# carries a real install cannot be told apart from the test one afterwards, and
+# `openbox uninstall` would take the developer's own with it.
+#
+# This is a fail-closed safety control, not a convenience. The labels are fixed
+# constants, so they collide regardless of $HOME. Resolve the real settings
+# path from the login home rather than $HOME: the harness has already changed
+# it by the time this runs.
+tb_step "the host carries no real OpenBox install"
+tb_login_home="$(eval echo "~$(id -un)")"
+tb_real_units=""
+case "$(uname -s)" in
+Darwin) tb_real_units="$(launchctl list 2>/dev/null | grep 'ai\.openbox' || true)" ;;
+Linux) tb_real_units="$(systemctl --user list-units 'openbox*' --no-legend 2>/dev/null || true)" ;;
+esac
+if [ -n "$tb_real_units" ]; then
+	tb_fatal "this machine already runs an OpenBox lane daemon:
+$tb_real_units
+  The lane labels are fixed (ai.openbox.gateway/.telemetry/.transport), so the suite
+  would replace YOUR units and the teardown would remove them. Run \`openbox uninstall\`
+  first, then re-run this suite."
+fi
+tb_real_hooks=0
+if [ -f "$tb_login_home/.claude/settings.json" ]; then
+	tb_real_hooks="$(grep -c 'hook claude-code' "$tb_login_home/.claude/settings.json" 2>/dev/null)"
+	tb_real_hooks="${tb_real_hooks:-0}"
+fi
+if [ "$tb_real_hooks" -gt 0 ]; then
+	tb_fatal "$tb_login_home/.claude/settings.json already registers $tb_real_hooks OpenBox hook(s).
+  The suite writes that same file, so it would repoint your own governance at a test
+  build and the teardown would remove it. Run \`openbox uninstall\` first, then re-run."
+fi
+tb_ok "no real install to collide with"
+
 tb_finish

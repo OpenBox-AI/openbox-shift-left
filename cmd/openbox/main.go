@@ -85,6 +85,8 @@ func (a *app) run(args []string) int {
 		return a.runManaged(args[1:])
 	case "doctor":
 		return a.runDoctor(args[1:])
+	case "uninstall":
+		return a.runUninstall(args[1:])
 	case "gateway":
 		return a.runGateway(args[1:])
 	case "telemetry":
@@ -540,6 +542,7 @@ Usage:
   openbox approve --watch --auto [--host claude-code] [--decide]
   openbox gateway [--addr <loopback host:port>] [--upstream <provider base URL>]
   openbox doctor
+  openbox uninstall
   openbox version
 
 Environment (needed only at 'auth' time, and only to register a new agent):

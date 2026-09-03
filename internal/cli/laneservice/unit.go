@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -48,6 +49,48 @@ type Spec struct {
 	LogFile string
 	// Args is the argv after the binary path.
 	Args []Arg
+	// Env is what the unit gives the daemon for an environment. A supervisor
+	// starts one with neither $HOME nor $OPENBOX_HOME, so a coordinate the
+	// installing process resolved and validated has to travel in the unit or
+	// the daemon silently resolves a different one. Populated through WithEnv,
+	// and never read from this process's environment here: only the install
+	// path knows the answer, which is the same reason --settings is an
+	// argument rather than a re-derivation.
+	Env map[string]string
+}
+
+// WithEnv returns a copy of s whose unit carries env. A key with an empty
+// value is dropped rather than rendered blank: devconfig.Home treats "" as
+// unset and falls back to $HOME, which is itself empty inside a daemon, so a
+// blank key sends it somewhere different again — absent is the honest state.
+func (s Spec) WithEnv(env map[string]string) Spec {
+	kept := make(map[string]string, len(env))
+	for k, v := range env {
+		if k == "" || v == "" {
+			continue
+		}
+		kept[k] = v
+	}
+	if len(kept) == 0 {
+		s.Env = nil
+		return s
+	}
+	// A copy, not the caller's map: one installer builds a single map for all
+	// three lanes, and a shared reference would let a later mutation rewrite a
+	// unit that was already rendered.
+	s.Env = kept
+	return s
+}
+
+// envKeys is the render order. Go randomizes map iteration, and an unsorted
+// render would rewrite every unit file on a re-install that changed nothing.
+func (s Spec) envKeys() []string {
+	keys := make([]string, 0, len(s.Env))
+	for k := range s.Env {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 // SystemdUnitName is the filename systemd looks for.
@@ -107,20 +150,33 @@ func (s Spec) LaunchdPlist(homeDir, binPath string) string {
 	b.WriteString("  <key>ExitTimeOut</key>\n  <integer>" + strconv.Itoa(StopTimeout) + "</integer>\n")
 	b.WriteString("  <key>StandardOutPath</key>\n  <string>" + xmlEscape(s.LogPath(homeDir)) + "</string>\n")
 	b.WriteString("  <key>StandardErrorPath</key>\n  <string>" + xmlEscape(s.LogPath(homeDir)) + "</string>\n")
+	if keys := s.envKeys(); len(keys) > 0 {
+		b.WriteString("  <key>EnvironmentVariables</key>\n  <dict>\n")
+		for _, k := range keys {
+			b.WriteString("    <key>" + xmlEscape(k) + "</key>\n")
+			b.WriteString("    <string>" + xmlEscape(s.Env[k]) + "</string>\n")
+		}
+		b.WriteString("  </dict>\n")
+	}
 	b.WriteString("</dict>\n</plist>\n")
 	return b.String()
 }
 
 // SystemdUnit renders the Linux user unit.
 func (s Spec) SystemdUnit(binPath string) string {
-	return strings.Join([]string{
+	lines := []string{
 		"[Unit]",
 		"Description=" + s.UnitDescription,
 		"After=network-online.target",
 		"",
 		"[Service]",
 		"Type=simple",
-		"ExecStart=" + s.systemdExec(binPath),
+	}
+	for _, k := range s.envKeys() {
+		lines = append(lines, "Environment="+systemdArg(k+"="+s.Env[k]))
+	}
+	lines = append(lines,
+		"ExecStart="+s.systemdExec(binPath),
 		"Restart=always",
 		"RestartSec=2",
 		fmt.Sprintf("TimeoutStopSec=%d", StopTimeout),
@@ -128,7 +184,8 @@ func (s Spec) SystemdUnit(binPath string) string {
 		"[Install]",
 		"WantedBy=default.target",
 		"",
-	}, "\n")
+	)
+	return strings.Join(lines, "\n")
 }
 
 func (s Spec) systemdExec(binPath string) string {

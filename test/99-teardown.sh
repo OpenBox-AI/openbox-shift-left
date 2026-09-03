@@ -53,6 +53,30 @@ else
 	tb_skip "deactivate the test policy" "no agent id in state"
 fi
 
+# Before the project directory goes, because `uninstall` sweeps the cwd's
+# .claude/settings.local.json and there is no registry of initialized projects
+# to find it afterwards. Guarded on the binary existing: a Ctrl-C during the
+# `go build` in 10-onboard leaves no binary and nothing installed.
+tb_step "uninstall the test install"
+if [ -x "$TB_BIN" ]; then
+	(cd "$TB_PROJECT" 2>/dev/null || cd /; "$TB_BIN" uninstall) || tb_note "uninstall reported a partial removal; the assertions below say what survived"
+	tb_user_hooks=0
+	tb_settings="$(eval echo "~$(id -un)")/.claude/settings.json"
+	if [ -f "$tb_settings" ]; then
+		tb_user_hooks="$(grep -c 'hook claude-code' "$tb_settings" 2>/dev/null)"
+		tb_user_hooks="${tb_user_hooks:-0}"
+	fi
+	assert_eq "no OpenBox hook is left in the user settings file" 0 "$tb_user_hooks"
+	tb_units=""
+	case "$(uname -s)" in
+	Darwin) tb_units="$(launchctl list 2>/dev/null | grep -c 'ai\.openbox' || true)" ;;
+	Linux) tb_units="$(systemctl --user list-units 'openbox*' --no-legend 2>/dev/null | wc -l | tr -d ' ' || true)" ;;
+	esac
+	assert_eq "no OpenBox lane unit is left loaded" 0 "${tb_units:-0}"
+else
+	tb_skip "uninstall the test install" "no built binary at $TB_BIN, so nothing was installed"
+fi
+
 tb_step "remove the scratch project"
 rm -rf "$TB_PROJECT"
 assert_eq "the governed project is gone" 0 "$([ -d "$TB_PROJECT" ] && echo 1 || echo 0)"

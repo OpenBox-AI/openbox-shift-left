@@ -37,10 +37,14 @@ type PendingApproval struct {
 // talk; address the same file without either scanning a directory.
 func PendingApprovalPath(key client.ApprovalKey) string {
 	sum := sha256.Sum256([]byte(key.WorkflowID + "\x1f" + key.RunID + "\x1f" + key.ActivityID))
-	return filepath.Join(pendingApprovalDir(), hex.EncodeToString(sum[:8])+".json")
+	return filepath.Join(PendingApprovalDir(), hex.EncodeToString(sum[:8])+".json")
 }
 
-func pendingApprovalDir() string {
+// PendingApprovalDir is the directory those markers live in. Exported because
+// a full uninstall has to delete it, and it is not under ~/.openbox: it sits
+// beside the spools under the user config dir, so a purge that only walked
+// ~/.openbox would leave it behind.
+func PendingApprovalDir() string {
 	if d := os.Getenv(devconfig.EnvPendingApprovalDir); d != "" {
 		return d
 	}

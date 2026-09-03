@@ -45,6 +45,13 @@ func newLaneHarness(t *testing.T) *laneHarness {
 	}
 	waitForListenerFn = func(string, time.Duration) bool { return h.listening }
 	waitForPortFreeFn = func(string, time.Duration) bool { return true }
+	// A faked harness needs a faked probe: the real one dials 127.0.0.1 and
+	// answers from whatever the developer running the suite has listening, so an
+	// unpinned probe makes the result depend on the host. A test that wants a
+	// port reported busy overrides this.
+	origProbe := portOccupied
+	t.Cleanup(func() { portOccupied = origProbe })
+	portOccupied = func(string) (bool, string) { return false, "" }
 
 	installLaneUnitFn = func(spec laneservice.Spec, goos, homeDir, binPath string) error {
 		path, err := spec.WriteUnit(goos, homeDir, binPath)
