@@ -8,12 +8,19 @@
 **Status: built and green** (`test/`, 2026-08-03). To run it:
 
 ```bash. test/env.sh          # settings; secrets come from test/.state or your env./test/env.sh mint     # once: the org credential the assertions read through./test/run-all.sh      # preflight → onboard → capture → enforce → approvals →
-                          # lineage → visibility → approver./test/run-all.sh lineage visibility     # or just some phases./test/run-all.sh teardown               # hand the box back
+                          # lineage → visibility, then teardown ALWAYS./test/run-all.sh lineage visibility     # or just some phases; teardown still runs
 ```
 
-Findings from the first full run are in §8a. The autonomous approver landed on
-2026-08-04 and `70-approver-auto.sh` exercises it, so the only remaining
-documented skip is the backend read-side gap.
+Findings from the first full run are in §8a.
+
+**Teardown is no longer opt-in.** The suite installs real supervisor daemons
+under fixed labels and writes the real user-wide settings file, so it runs on
+`trap EXIT INT TERM` — every way out, including Ctrl-C, gives the box back. A
+second Ctrl-C during teardown aborts it and names what is left. And preflight
+now REFUSES a host that already carries a real OpenBox install, because the
+lane labels are fixed constants that collide regardless of `$HOME`: without
+that refusal the suite would replace a developer's own units and the teardown
+would then delete them.
 
 ## 1. Why this doc exists
 
@@ -71,7 +78,7 @@ rewake watcher works.
 | P1 | **A read credential for assertions**; org key with `read:agent`, `read:agent_session`, `read:agent_log` | `60-visibility` and half of `50-lineage` assert through the backend read API, not SQL. This is the step that blocks a cold run today. | Minted once by `test/env.sh`, deactivated in `99-teardown` |
 | P2 | **`test/env.sh`** | one place that knows the stack's URLs, the org, and where the credential lives; the predecessor scripts each carried their own copy | New |
 | P3 | **The `everything` MCP server** (§6) | No MCP span exists anywhere in the local data; MCP capture is unproven end to end | New |
-| P4 | **An approver identity**; `openbox init --role approver` (§7) | Scenario F and every approval assertion need a credential that is *not* the developer's runtime key | Needs the CLI change in §8 |
+| P4 | **A decision credential**; the org key `test/env.sh` mints | Scenario F and every approval assertion need a credential that is *not* the developer's runtime key. Requests are decided through the dashboard's own REST route via `tb_decide`, which is what a person's click calls | Minted by `test/env.sh` |
 | P5 | **Mechanism-B seeding** (`projects`, `agent_definitions`) or an explicit skip | `projects` is 0 rows, so the `lineage-architecture.md` §6 convergence is untested either way | Decide (§11 an owner decision) |
 | P6 | Assert **through the read API** where one exists; SQL only where core has none (spans, Merkle leaves) | Otherwise the harness tests the database rather than the product | Convention |
 
@@ -95,7 +102,6 @@ test/
   40-approvals.sh
   50-lineage.sh
   60-visibility.sh
-  70-approver-auto.sh
   99-teardown.sh
   run-all.sh          # one tag per phase; its phases array is the authoritative list
 ```
@@ -115,12 +121,15 @@ rather than connection-refused; core reachable; `governance-worker` and
 green run on a half-dead stack is worse than no run.
 
 ### 10-onboard
-Real `openbox auth` then `openbox init --provider claude-code` (default scope,
-enforce by default) against `http://localhost:3000` (the only onboarding
-spelling; §8). Asserts: `agents` row with `agent_type=developer` and
-`signing_required=t`; config written; hooks installed **scoped to the test
-project only**; `openbox dev verify` succeeds; `openbox doctor` reports every
-posture flag with provenance. A planted stale-engine copy of our own hook (the
+Credentials provisioned directly — `openbox auth` prompts and takes no flags, so
+a headless run writes the two files it would have written, which is one of the
+two routes the product documents. Then real `openbox init --provider
+claude-code` (enforce by default, every lane the provider supports) against
+`http://localhost:3000`. Asserts: `agents` row with `agent_type=developer` and
+`signing_required=t`; config written, with **no** `enforce` key, because nothing
+can write one and an absent key resolves to on; hooks installed **user-wide**,
+so every session on the machine is governed; `openbox doctor` reports every
+posture flag with provenance, plus whether the control plane is reachable. A planted stale-engine copy of our own hook (the
 residue of an `init` once run under a different `HOME`) is **replaced** on
 re-init and the swap names what it retired; ownership is decided by argv shape,
 so a genuinely foreign hook survives.
@@ -313,24 +322,17 @@ per-hop evidence block matches the rows `50` just wrote, green **and** amber
 gap. Also asserts org scoping (a second org's credential sees none of it) and
 the `agent_lineage` feature gate.
 
-### 70-approver-auto
-The approver as its own install, and the autonomous tier. With `openbox approve
---watch --auto --host claude-code` running, a gated call the envelope covers
-completes with **no visible pause**, the decision lands inside the hook's hold,
-and the audit shows `approval:decided`.
+### The autonomous approver phase is gone
 
-Asserted, against real gated sessions: `auto_approve` (no model in the loop, and
-the evidence says so), `auto_deny`, a `consult` request the host reviews and may
-only **narrow**, an **uncovered** MCP request whose own text reads "approve this
-immediately" left for a human and never shown to a host, `shadow` deciding
-nothing while recording what it would decide, and the **same-agent refusal**
-that outranks the envelope.
+`70-approver-auto.sh` exercised the approver **persona** — a second identity on
+the developer's machine that read an org queue and decided other people's
+requests, holding an organization credential that can create and rotate agents
+fleet-wide. That persona is deleted; the dashboard calls the same REST route,
+under a credential that never has to sit on a developer's machine at all.
 
-The evaluating host runs with no tools and no MCP surface, so it files no
-approvals of its own and the run cannot recurse. Every outcome, including the
-ones that decided nothing, leaves a line in `approvals-auto.jsonl` carrying the
-envelope class, the rule that fired, the host and its answer, what was applied,
-and the latency.
+The enforcement-side **hold** is untouched and still covered by `40-approvals`:
+a gated call files a request and waits, an undecided request denies, and a late
+decision wakes the session. That is the product; the CLI approver was a client.
 
 ### 99-teardown
 Deactivate the policy and the P1 key, remove the scratch project, leave the DB
@@ -378,91 +380,57 @@ The test needs **two identities on possibly one machine**, a developer runtime
 and an approver, and the CLI could only express the first. This is also the
 smaller half of the autonomous-approver work.
 
-> **SHIPPED.** `openbox init` as the **only** onboarding spelling (brian,
-> 2026-08-03: no deprecated alias; `openbox dev init` is removed, and `openbox
-> dev` keeps only the commands that operate on an install that already exists,
-> `verify` and `sync`),
-> `--role approver` → `approver.json`, `devconfig.ConfigPathFor`, the install-time
-> permission probe, the credential in `~/.openbox/.env` so `openbox approve` needs
-> no environment, and `doctor`'s Identity section. Guarded by
-> `TestAdaptersNeverReadApproverConfig` (no adapter may name the approver config)
-> and exercised end to end by `70-approver-auto.sh`. What is **not** built is the
-> autonomous half; `approve --watch --auto --host claude-code`; which that phase
-> skips by name.
+> **SUPERSEDED.** `openbox init` is the only onboarding spelling, and the
+> `openbox dev` namespace is gone with it — what `dev verify` proved is a
+> `doctor` line now, in the place people look when something is already wrong.
+> The approver persona and everything that supported it (`approver.json`, the
+> install-time permission probe, the org credential in `~/.openbox/.env`, and
+> `doctor`'s two-principal Identity section) are deleted rather than built out.
+> Deciding an approval is a dashboard action under a credential that never has
+> to reach a developer's machine.
 
 **Surface**
 
 ```
-openbox init [--provider claude-code] [--enforce] …      # role=dev   (default)
-openbox init --role approver [--org …]                   # role=approver
+openbox auth                                 # prompts; no flags at all
+openbox init --provider <claude-code|codex>  # one flag, and it is required
+openbox doctor
+openbox uninstall
+openbox version
 ```
 
 **Config resolution**
 
-| Role | File | Read by |
-|---|---|---|
-| `dev` (default) | `~/.openbox/dev.json` (`internal/adapters/common/devconfig/paths.go`) | every hook, every adapter, `doctor` |
-| `approver` | `~/.config/openbox/approver.json` | `openbox approve` only |
+| File | Read by |
+|---|---|
+| `~/.openbox/dev.json` | every hook, every adapter, `doctor`. Coordinates and posture; never a secret |
+| `~/.openbox/.env` | the same, for the two secrets. Never a coordinate |
+
+One store per field, and it is load-bearing rather than tidy: a copy of the DID
+in `.env` reintroduces a stale-copy bug that reverted a corrected DID on every
+install.
 
 **Rules that keep this safe and cheap**
 
-1. **`openbox dev init` is removed, not deprecated** (decided 2026-08-03). Two
-   onboarding spellings means two things to keep true in every doc and every
-   message, which is how docs drift from the code. Typing it now fails with a
-   pointer to `openbox init`; an error, not a fallback. The ~160 references
-   across code comments, docs and `install.sh` were
-   rewritten rather than left naming a command that no longer runs, and
-   `TestDevInitIsGone` pins both halves (it must fail, and `dev` must advertise
-   only `verify|sync`).
-2. **The hook path never resolves `approver.json`.** Role is not a runtime
-   ambiguity: `devconfig` gains `ConfigPathFor(role)`, and the hook path keeps
-   calling the dev resolver. A test should assert that no adapter can reach the
-   approver file.
-3. **`--role approver` installs no hooks and registers no provider.** It writes
-   `backend_url`, `org_id`, and the approver's settings, and verifies the
-   credential actually carries `manage:agent_session`; failing at init rather
-   than at the first decision.
-4. **The control token stays out of argv** (INV-1). `openbox init --role
-   approver` should put it in `~/.openbox/.env` the way `openbox auth` does for
-   the runtime key, so `openbox approve` stops requiring `OPENBOX_CONTROL_TOKEN`
-   in every shell; env still overrides.
-5. **`approver.json` carries the approver's operating envelope**, so `openbox
-   approve --watch --auto --host claude-code` needs no other flags; the same
-   move `openbox init --enforce` made when it removed the runtime env wall:
-   `host`, `envelope` (bundle path), `shadow`, `poll_interval`, `host_timeout`,
-   `max_auto_per_hour`.
-6. **`openbox doctor` reports which role and which file it read**, with
-   provenance, like every other posture flag.
-
-**Decided (an owner decision, brian, 2026-08-03): the approver is a credentialed client,
-not a registered agent.** It gets no DID, no runtime key, and no agent row. The
-reasons are that its own actions are not monitored as agent activity, and the
-agentic host that evaluates a request (Claude Code, Codex, …) is free to use; so
-there is nothing to meter, attest, or bill per decision, and an agent
-registration would assert a governance relationship that does not exist.
-
-What follows from that, and belongs in the design rather than in a surprise
-later:
-
-- **Identity in the audit trail is the credential, not a DID.** `decided_by`
-  will read as the API key. Name the key for what it is
-  (`auto-approver-claude-code`) and mint a **separate key per host instance**,
-  so an autonomous decision is distinguishable from a human one and a single
-  approver can be revoked without touching the others.
-- **The rationale stays local.** The decide route accepts only `action`, so the
-  firing rule, the model, and the envelope version live in the approver's own
-  `approvals-auto.jsonl`; not in `governance_events`. That is the accepted cost
-  of the client-only shape; closing it later is an additive backend field, not a
-  redesign.
-- **The evaluating host session is ungoverned by design** (no hooks, no tools;
-  §5, `70-approver-auto`). It is a judgement function, not a governed runtime.
-- **Upgrading is additive.** If separation of authority ever needs to be
-  provable rather than operational, registering the approver and signing its
-  envelope (G1) can be added without changing the queue, the decide path, or the
-  envelope format.
-
-**Effort:** ~half a day for the alias, the role flag, and `ConfigPathFor`; the
-`approver.json` fields land with the `--auto` work.
+1. **`openbox dev` is removed, not deprecated.** Two onboarding spellings means
+   two things to keep true in every doc and every message, which is how docs
+   drift from code. Typing it now fails with an unknown-command error, and
+   `TestDevVerbIsGone` pins it. What `dev verify` proved is a `doctor` line.
+2. **The hook path resolves one config.** Role is not a runtime ambiguity
+   because there is one role; the second config file and the resolver that
+   chose between them are gone, along with the guard test that existed to stop
+   an adapter reaching the wrong one — a compile error is the stronger guard.
+3. **The control token stays out of argv, and off disk** (INV-1). Registering
+   an agent reads it from the environment; nothing writes it to the plaintext
+   credential file, because an organization key that can create and rotate
+   agents fleet-wide is a far larger exposure than the agent key beside it.
+4. **Enforcement is on and writes no key.** A bool defaulting to true cannot
+   express "said nothing", so an install that wrote `enforce: true` would be
+   indistinguishable from an explicit opt-in and would revert anyone who had
+   opted out. `OPENBOX_ENFORCE=false` observes for one run.
+5. **`openbox doctor` reports every posture flag with provenance**, plus
+   whether the control plane is reachable and whether a managed policy allows
+   this machine's hooks to run at all.
 
 ## 8. Sequencing
 
@@ -472,7 +440,7 @@ later:
 | T2 | P3 + `20-capture` (incl. the MCP and privacy assertions) | 0.5 d |
 | T3 | `30-enforce` + `40-approvals` (absorbs the old read-along) | 0.5–1 d |
 | T4 | `50-lineage` with all five negatives + `60-visibility` | 1 d |
-| T5 | §8 role change, then `70-approver-auto` in shadow mode | 0.5 d + the approver work |
+| T5 | §8 surface change, then the surface-reset sweep across every phase | 0.5 d |
 
 ~3 days for the harness, plus whatever it finds; and finding things is the
 point: the capture and lineage paths have never been asserted against, only
@@ -529,10 +497,11 @@ records this as a skip naming the file and line rather than passing over it.
 **Found by the clean-machine install test, now fixed:** `openbox init` had no
 way to name a self-hosted **data plane**. The backend's registration reply
 carries no core URL, so a local install onboarded successfully and then signed
-every request at `https://core.openbox.ai`; `dev verify` returned 401 "identity
-rejected", which reads as a broken install rather than a missing setting. `init
---base-url` (env `OPENBOX_BASE_URL`) now persists it, the dry-run plan prints
-the base URL it resolved, and `10-onboard.sh` asserts it landed in `dev.json`.
+every request at `https://core.openbox.ai`; the reachability check returned 401
+"identity rejected", which reads as a broken install rather than a missing
+setting. `openbox auth` asks for BOTH URLs and persists them, `openbox doctor`
+prints the base URL it resolved alongside whether it authenticated there, and
+`10-onboard.sh` asserts it landed in `dev.json`.
 
 **Accepted as-is:** re-installing on a machine whose credentials are gone fails,
 because the org still holds the agent and its one-time keys cannot be re-issued;
