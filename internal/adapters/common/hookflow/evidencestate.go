@@ -9,8 +9,13 @@ type EvidenceState struct {
 }
 
 func (e EvidenceState) Metadata() map[string]any {
+	// state describes THIS session, so only this session's undelivered count
+	// decides it. Discarded is machine-wide and cumulative -- the `.discarded` log
+	// is append-only, reset only at its size cap -- so folding it in here made one
+	// old loss mark every later session "degraded" forever, and the field stopped
+	// distinguishing anything. The cumulative number keeps its own labelled key.
 	state := "complete"
-	if e.Undelivered > 0 || e.Discarded > 0 {
+	if e.Undelivered > 0 {
 		state = "degraded"
 	}
 	m := map[string]any{"evidence_state": state}
