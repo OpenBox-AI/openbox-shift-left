@@ -7,7 +7,7 @@
 # check that it did, because "the policy exists" and "OPA is enforcing it" are
 # different facts, ~20s apart.
 #
-# Shared by 40-approvals.sh and 70-approver-auto.sh. Requires TB_AGENT (the
+# Shared by 40-approvals.sh and 40-approvals.sh. Requires TB_AGENT (the
 # agent whose policy this is) to be set by the caller.
 
 # The rule core's OPA client expects: a `result` document carrying decision +
@@ -102,7 +102,7 @@ PY
 tb_release_pending() {
 	local id
 	id="$(tb_pending_first)"
-	[ -n "$id" ] && "$TB_BIN" approve deny "$id" --org "$OPENBOX_ORG_ID" >/dev/null 2>&1
+	[ -n "$id" ] && tb_decide deny "$id" >/dev/null 2>&1
 }
 
 # tb_settle clears the queue between scenarios. Not tidiness: the marker

@@ -175,12 +175,7 @@ func (a *app) uninstallInventory(home string) uninstallInventory {
 	if len(inv.lanes) == 0 && laneResidue(home) {
 		inv.unrecordedLane = true
 	}
-	for _, resolve := range []func() (string, error){devconfig.DevConfigPath, devconfig.ApproverConfigPath} {
-		if p, err := resolve(); err == nil && fileExists(p) {
-			inv.posture = appendUnique(inv.posture, p)
-		}
-	}
-	for _, resolve := range []func() (string, error){devconfig.DevConfigWritePath, devconfig.ApproverConfigWritePath} {
+	for _, resolve := range []func() (string, error){devconfig.DevConfigPath, devconfig.DevConfigWritePath} {
 		if p, err := resolve(); err == nil && fileExists(p) {
 			inv.posture = appendUnique(inv.posture, p)
 		}

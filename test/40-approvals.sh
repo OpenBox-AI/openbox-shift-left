@@ -59,7 +59,7 @@ decide_when_pending() { # <allow|deny> <deadline-seconds>
 		while [ "$i" -lt "$2" ]; do
 			id="$(tb_pending_first)"
 			if [ -n "$id" ]; then
-				"$TB_BIN" approve "$1" "$id" --org "$OPENBOX_ORG_ID" >"$TB_STATE/approve-$1.out" 2>&1
+				tb_decide "$1" "$id" >"$TB_STATE/approve-$1.out" 2>&1
 				printf '%s' "$id" >"$TB_STATE/decided-id"
 				exit 0
 			fi
@@ -139,7 +139,7 @@ tb_step "C · the late approval is claimed exactly once"
 # IS the rewake path — and the session ending is the proof the watcher saw it.
 assert_ge "a pending-approval marker was left" 1 "$(find "$PENDING_DIR" -type f 2>/dev/null | wc -l)"
 c_before="$(tb_audit_size)"
-"$TB_BIN" approve allow "$pending_b" --org "$OPENBOX_ORG_ID" >"$TB_STATE/approve-late.out" 2>&1
+tb_decide allow "$pending_b" >"$TB_STATE/approve-late.out" 2>&1
 assert_eq "the late approval was accepted" 0 "$?"
 assert_eq "decided in the database" 0 "$(tb_val "select count(*) from governance_events where id='$pending_b' and decided_at is null;")"
 if tb_session_wait 120; then
@@ -197,7 +197,7 @@ if [ -n "$mcp_pending" ]; then
 	assert_contains "the queue shows the MCP tool" "$row" "mcp__everything__echo"
 	input="$(tb_val "select input::text from governance_events where id='$mcp_pending';")"
 	assert_contains "and what it was asked to do (arguments)" "$input" "scenario-f"
-	"$TB_BIN" approve deny "$mcp_pending" --org "$OPENBOX_ORG_ID" >/dev/null 2>&1
+	tb_decide deny "$mcp_pending" >/dev/null 2>&1
 else
 	tb_bad "an MCP call filed an approval" "a pending request" "none"
 fi

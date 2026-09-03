@@ -91,7 +91,7 @@ func (a *app) runAuthRotate(f authFields, piped map[string]string, envPath, back
 	}
 
 	f.apiKey, f.privateKey, f.did = newKey, newPrivateKey, newDID
-	if code := a.writeSecrets(envPath, f, piped); code != exitOK {
+	if code := a.writeSecrets(envPath, f); code != exitOK {
 		return code
 	}
 	if code := a.writeCoordinates(f); code != exitOK {

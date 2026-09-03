@@ -36,10 +36,7 @@ func (a *app) runDoctor(args []string) int {
 	fmt.Fprintf(a.stdout, "OpenBox developer-runtime posture\n\n")
 
 	fmt.Fprintf(a.stdout, "Identity\n")
-	fmt.Fprintf(a.stdout, "  developer  %s\n", withPresence(devconfig.DefaultConfigPath()))
-	fmt.Fprintf(a.stdout, "  approver   %s\n", withPresence(devconfig.DefaultApproverConfigPath()))
-	fmt.Fprintf(a.stdout, "  Everything below is the DEVELOPER posture: hooks read that file and no\n")
-	fmt.Fprintf(a.stdout, "  other. The approver config belongs to a different principal.\n\n")
+	fmt.Fprintf(a.stdout, "  developer  %s\n\n", withPresence(devconfig.DefaultConfigPath()))
 
 	fmt.Fprintf(a.stdout, "Enforcement\n")
 	flags := p.Flags()

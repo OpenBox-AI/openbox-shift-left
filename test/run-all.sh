@@ -29,7 +29,6 @@ phases=(
 	"transport:47-transport.sh"
 	"lineage:50-lineage.sh"
 	"visibility:60-visibility.sh"
-	"auto:70-approver-auto.sh"
 )
 
 # PARKED, and named rather than silently dropped. No command installs a gateway

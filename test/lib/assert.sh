@@ -116,6 +116,36 @@ tb_api() { # <path> [extra curl args…]
 	printf '%s' "${out%$'\n'*}"
 }
 
+# tb_decide answers one approval request, the way a person clicking in the
+# dashboard does.
+#
+# It replaces `openbox approve allow|deny`, which was only ever a CLI wrapper on
+# this exact route -- the approver PERSONA is gone, while the enforcement-side
+# hold that files these requests and waits is untouched. Written once here
+# rather than at each of the five call sites, so the verb and the path cannot
+# drift between them.
+tb_decide() { # <allow|deny> <event-id>
+	local action
+	case "$1" in
+	allow) action="approve" ;;
+	deny) action="reject" ;;
+	*)
+		printf 'tb_decide: unknown action %q (want allow or deny)\n' "$1" >&2
+		return 1
+		;;
+	esac
+	local agent="${TB_AGENT:-$(tb_state_get agent_id)}"
+	if [ -z "$agent" ]; then
+		printf 'tb_decide: no agent id in test state\n' >&2
+		return 1
+	fi
+	tb_api "/agent/$agent/approvals/$2/decide?action=$action" -X PUT >/dev/null
+	case "$(tb_status)" in
+	2*) return 0 ;;
+	*) return 1 ;;
+	esac
+}
+
 # tb_status is the HTTP status of the last tb_api call.
 tb_status() { cat "$TB_STATE/http-status" 2>/dev/null; }
 

@@ -67,7 +67,6 @@ func TestPathsDeriveFromHome(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv(EnvHome, dir)
 	t.Setenv(EnvConfigPath, "")
-	t.Setenv(EnvApproverConfigPath, "")
 
 	env, err := EnvFilePath()
 	if err != nil {
@@ -82,13 +81,6 @@ func TestPathsDeriveFromHome(t *testing.T) {
 	}
 	if want := filepath.Join(dir, "dev.json"); dev != want {
 		t.Fatalf("DevConfigWritePath() = %q, want %q", dev, want)
-	}
-	appr, err := ApproverConfigWritePath()
-	if err != nil {
-		t.Fatalf("ApproverConfigWritePath(): %v", err)
-	}
-	if want := filepath.Join(dir, "approver.json"); appr != want {
-		t.Fatalf("ApproverConfigWritePath() = %q, want %q", appr, want)
 	}
 }
 
@@ -119,7 +111,6 @@ func TestReadFallsBackToLegacyConfigUntilMigrated(t *testing.T) {
 	legacyHome := t.TempDir()
 	t.Setenv(EnvHome, home)
 	t.Setenv(EnvConfigPath, "")
-	t.Setenv(EnvApproverConfigPath, "")
 	pointUserConfigDirAt(t, legacyHome)
 
 	legacyDev := filepath.Join(legacyConfigDir(), "dev.json")
@@ -164,8 +155,8 @@ func TestReadPrefersNewWhenNeitherExists(t *testing.T) {
 
 func TestLegacyConfigPathsNamesSecretsJSON(t *testing.T) {
 	pointUserConfigDirAt(t, t.TempDir())
-	dev, appr, secrets := LegacyConfigPaths()
-	for _, p := range []string{dev, appr, secrets} {
+	dev, secrets := LegacyConfigPaths()
+	for _, p := range []string{dev, secrets} {
 		if p == "" {
 			t.Fatal("LegacyConfigPaths returned an empty path")
 		}

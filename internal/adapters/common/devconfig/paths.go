@@ -71,28 +71,6 @@ func DevConfigWritePath() (string, error) {
 	return filepath.Join(dir, "dev.json"), nil
 }
 
-// ApproverConfigPath is where to read the approver config, with the same
-// legacy fallback as DevConfigPath.
-func ApproverConfigPath() (string, error) {
-	if p := os.Getenv(EnvApproverConfigPath); p != "" {
-		return p, nil
-	}
-	return resolveConfigPath("approver.json")
-}
-
-// ApproverConfigWritePath is where to write the approver config; always the
-// new location.
-func ApproverConfigWritePath() (string, error) {
-	if p := os.Getenv(EnvApproverConfigPath); p != "" {
-		return p, nil
-	}
-	dir, err := Home()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(dir, "approver.json"), nil
-}
-
 // resolveConfigPath picks between the new location and the legacy one for a
 // read, and always returns the new one for a write. This exists because
 // upgrading the binary must not silently ungovern a machine.

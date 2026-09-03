@@ -324,7 +324,7 @@ func TestSecretsAndCoordinatesGoToDifferentFiles(t *testing.T) {
 		did: "did:aip:3f2504e0-4f89-11d3-9a0c-0305e82c3301", agentID: "agent-1",
 		backendURL: "https://api.internal", baseURL: "https://core.internal",
 	}
-	if code := a.writeSecrets(filepath.Join(home, ".env"), f, nil); code != exitOK {
+	if code := a.writeSecrets(filepath.Join(home, ".env"), f); code != exitOK {
 		t.Fatalf("writeSecrets exit = %d", code)
 	}
 	if code := a.writeCoordinates(f); code != exitOK {
@@ -364,13 +364,13 @@ func TestSecondRunOverwritesTheFirst(t *testing.T) {
 	a, _, _ := testApp(nil)
 	envPath := filepath.Join(home, ".env")
 	first := authFields{apiKey: "obx_first", privateKey: testSeedB64}
-	if code := a.writeSecrets(envPath, first, nil); code != exitOK {
+	if code := a.writeSecrets(envPath, first); code != exitOK {
 		t.Fatal("first write failed")
 	}
 	other := make([]byte, 32)
 	other[0] = 9
 	second := authFields{apiKey: "obx_second", privateKey: base64.StdEncoding.EncodeToString(other)}
-	if code := a.writeSecrets(envPath, second, nil); code != exitOK {
+	if code := a.writeSecrets(envPath, second); code != exitOK {
 		t.Fatal("second write failed")
 	}
 	kv := readEnvFile(t, home)
@@ -385,25 +385,35 @@ func TestSecondRunOverwritesTheFirst(t *testing.T) {
 // TestControlTokenWrittenOnlyWhenSupplied the org control token is a much
 // larger exposure than the agent seed, so it is only written when explicitly
 // supplied; never as a side effect.
-func TestControlTokenWrittenOnlyWhenSupplied(t *testing.T) {
+// TestTheControlTokenIsNeverPersisted. It is an ORG credential with fleet-wide
+// create and rotate authority, a much larger exposure than this agent's own
+// seed, and the only thing that read it from disk was the approver persona.
+// Registration still takes it from the environment, which is where a
+// credential that powerful belongs -- and the file it would have been written
+// to is plaintext.
+func TestTheControlTokenIsNeverPersisted(t *testing.T) {
 	home := isolateHome(t)
 	a, _, _ := testApp(nil)
 	envPath := filepath.Join(home, ".env")
 	f := authFields{apiKey: "obx_k", privateKey: testSeedB64}
 
-	if code := a.writeSecrets(envPath, f, nil); code != exitOK {
-		t.Fatal("write failed")
-	}
-	if _, ok := readEnvFile(t, home)[devconfig.EnvControlToken]; ok {
-		t.Error("an ordinary auth run must not persist an org control token")
-	}
-
 	orgKey := "obx_key_" + strings.Repeat("f", 48)
-	if code := a.writeSecrets(envPath, f, map[string]string{devconfig.EnvControlToken: orgKey}); code != exitOK {
+	// Supplied on stdin, which is the one path that ever wrote it.
+	if code := a.writeSecrets(envPath, f); code != exitOK {
 		t.Fatal("write failed")
 	}
-	if readEnvFile(t, home)[devconfig.EnvControlToken] != orgKey {
-		t.Error("an explicitly supplied control token should be persisted")
+	kv := readEnvFile(t, home)
+	if _, ok := kv[devconfig.EnvControlToken]; ok {
+		t.Error("the org control token was persisted to the credential file")
+	}
+	for k, v := range kv {
+		if strings.Contains(v, orgKey) {
+			t.Errorf("the org control token reached %s under key %q", envPath, k)
+		}
+	}
+	// The agent's own credentials still land, or auth has done nothing.
+	if kv[devconfig.EnvAPIKeyDirect] == "" || kv[devconfig.EnvAgentPrivateKey] == "" {
+		t.Errorf("auth did not write the agent's own credentials: %v", kv)
 	}
 }
 
@@ -441,7 +451,7 @@ func TestEnvShadowWarningNamesTheRightFile(t *testing.T) {
 func TestEnvShadowStillWrites(t *testing.T) {
 	home := isolateHome(t)
 	a, _, _ := testApp(map[string]string{devconfig.EnvAPIKeyDirect: "obx_from_env"})
-	if code := a.writeSecrets(filepath.Join(home, ".env"), authFields{apiKey: "obx_written", privateKey: testSeedB64}, nil); code != exitOK {
+	if code := a.writeSecrets(filepath.Join(home, ".env"), authFields{apiKey: "obx_written", privateKey: testSeedB64}); code != exitOK {
 		t.Fatal("a shadowed field must still be written")
 	}
 	if readEnvFile(t, home)[devconfig.EnvAPIKeyDirect] != "obx_written" {

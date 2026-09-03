@@ -12,7 +12,6 @@ func migrateEnv(t *testing.T) (newHome, legacyDir string) {
 	newHome = t.TempDir()
 	t.Setenv(EnvHome, newHome)
 	t.Setenv(EnvConfigPath, "")
-	t.Setenv(EnvApproverConfigPath, "")
 	pointUserConfigDirAt(t, t.TempDir())
 	legacyDir = legacyConfigDir()
 	if err := os.MkdirAll(legacyDir, 0o700); err != nil {
@@ -21,13 +20,16 @@ func migrateEnv(t *testing.T) (newHome, legacyDir string) {
 	return newHome, legacyDir
 }
 
-func TestMigrateLegacyConfigCopiesBothFiles(t *testing.T) {
+func TestMigrateLegacyConfigCopiesTheDevConfig(t *testing.T) {
 	newHome, legacyDir := migrateEnv(t)
 	devBody := []byte(`{"developer_did":"did:aip:abc","enforce":true}`)
-	apprBody := []byte(`{"org_id":"acme"}`)
 	if err := os.WriteFile(filepath.Join(legacyDir, "dev.json"), devBody, 0o600); err != nil {
 		t.Fatal(err)
 	}
+	// An approver config from a machine that once installed the persona. Nothing
+	// reads it any more, so the migration must leave it where it is rather than
+	// carry it forward into a layout that has no place for it.
+	apprBody := []byte(`{"org_id":"acme"}`)
 	if err := os.WriteFile(filepath.Join(legacyDir, "approver.json"), apprBody, 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -36,17 +38,18 @@ func TestMigrateLegacyConfigCopiesBothFiles(t *testing.T) {
 	if err != nil {
 		t.Fatalf("MigrateLegacyConfig(): %v", err)
 	}
-	if len(migrated) != 2 {
-		t.Fatalf("migrated = %v, want both files", migrated)
+	if len(migrated) != 1 || migrated[0] != "dev.json" {
+		t.Fatalf("migrated = %v, want just dev.json", migrated)
 	}
-	for name, want := range map[string][]byte{"dev.json": devBody, "approver.json": apprBody} {
-		got, err := os.ReadFile(filepath.Join(newHome, name))
-		if err != nil {
-			t.Fatalf("read migrated %s: %v", name, err)
-		}
-		if string(got) != string(want) {
-			t.Errorf("%s content = %q, want %q", name, got, want)
-		}
+	got, err := os.ReadFile(filepath.Join(newHome, "dev.json"))
+	if err != nil {
+		t.Fatalf("read migrated dev.json: %v", err)
+	}
+	if string(got) != string(devBody) {
+		t.Errorf("dev.json content = %q, want %q", got, devBody)
+	}
+	if _, err := os.Stat(filepath.Join(newHome, "approver.json")); !os.IsNotExist(err) {
+		t.Errorf("the migration carried approver.json into the new layout (err=%v)", err)
 	}
 }
 
@@ -180,7 +183,6 @@ func TestMigrateNoOpWhenHomeIsTheLegacyDir(t *testing.T) {
 	}
 	t.Setenv(EnvHome, legacy)
 	t.Setenv(EnvConfigPath, "")
-	t.Setenv(EnvApproverConfigPath, "")
 
 	migrated, err := MigrateLegacyConfig()
 	if err != nil {

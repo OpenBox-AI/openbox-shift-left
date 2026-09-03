@@ -19,7 +19,7 @@ tb_step "release anything still pending"
 pending="$(tb_val "select count(*) from governance_events where approval_expired_at is not null and decided_at is null and agent_id='${AGENT:-none}';")"
 if [ "${pending:-0}" -gt 0 ] && [ -n "${OPENBOX_CONTROL_TOKEN:-}" ]; then
 	for id in $(tb_sql "select id from governance_events where approval_expired_at is not null and decided_at is null and agent_id='$AGENT';"); do
-		"$TB_BIN" approve deny "$id" --org "$OPENBOX_ORG_ID" >/dev/null 2>&1
+		tb_decide deny "$id" >/dev/null 2>&1
 	done
 fi
 assert_eq "no request is left undecided" 0 "$(tb_val "select count(*) from governance_events where approval_expired_at is not null and decided_at is null and agent_id='${AGENT:-none}';")"

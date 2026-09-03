@@ -550,3 +550,12 @@ func IsTruthy(s string) bool {
 	}
 	return false
 }
+
+// BaseURLLabel renders a resolved data-plane base for an install plan. It lived
+// in role.go, which went with the approver persona.
+func BaseURLLabel(baseURL string) string {
+	if baseURL == "" {
+		return DefaultBaseURL + "  (default; the SaaS core)"
+	}
+	return baseURL
+}

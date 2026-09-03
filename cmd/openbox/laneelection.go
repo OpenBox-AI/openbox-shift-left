@@ -75,3 +75,12 @@ func reportElection(logger *log.Logger, lane string, settingsPath string, want a
 			lane, orNone(string(e.Elected)), e.Reason)
 	}
 }
+
+// orNone renders an empty coordinate as something a reader can distinguish
+// from a value. It lived in init.go, which went with the approver persona.
+func orNone(s string) string {
+	if s == "" {
+		return "(none)"
+	}
+	return s
+}

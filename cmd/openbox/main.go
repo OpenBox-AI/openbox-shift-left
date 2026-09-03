@@ -71,15 +71,13 @@ func (a *app) run(args []string) int {
 	case "auth":
 		return a.runAuth(args[1:])
 	case "init":
-		return a.runInit(args[1:])
+		return a.runDevInit(args[1:])
 	case "dev":
 		return a.runDev(args[1:])
 	case "hook":
 		return a.runHook(args[1:])
 	case "rewake":
 		return a.runRewake(args[1:])
-	case "approve":
-		return a.runApprove(args[1:])
 	case "managed":
 		return a.runManaged(args[1:])
 	case "doctor":
@@ -110,8 +108,7 @@ func (a *app) runDev(args []string) int {
 	}
 	switch args[0] {
 	case "init":
-		return a.errorf("`openbox dev init` no longer exists; use `openbox init` (same flags), " +
-			"or `openbox init --role approver` to install an approver")
+		return a.errorf("`openbox dev init` no longer exists; use `openbox init --provider <name>`")
 	case "verify":
 		return a.runDevVerify(args[1:])
 	case "sync":
@@ -358,7 +355,6 @@ Environment (needed only at 'auth' time, and only to register a new agent):
                           control plane cannot tell the CLI where your core is, so one
                           default and one override sends events to the hosted core and
                           surfaces later as a 401.
-  OPENBOX_ORG             organization namespace, used to derive the agent name
 
 Credentials live in ~/.openbox/.env (plaintext, 0600); posture and coordinates
 in ~/.openbox/dev.json. OPENBOX_HOME relocates both. A real environment

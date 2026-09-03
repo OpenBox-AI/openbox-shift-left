@@ -68,7 +68,6 @@ func isolateHome(t *testing.T) string {
 	dir := t.TempDir()
 	t.Setenv(devconfig.EnvHome, dir)
 	t.Setenv(devconfig.EnvConfigPath, filepath.Join(dir, "dev.json"))
-	t.Setenv(devconfig.EnvApproverConfigPath, filepath.Join(dir, "approver.json"))
 	t.Setenv("HOME", t.TempDir())
 
 	sinks := t.TempDir()
@@ -223,11 +222,14 @@ func TestInitDoesNotRegisterEvenWithAnOrgKey(t *testing.T) {
 // TestRemovedSecretBackendFlagFailsLoudly a removed flag that is silently
 // accepted is worse than one that errors: a script passing --secret-backend
 // would keep exiting 0 while storing credentials somewhere it did not choose.
+//
+// --role went with the approver persona, so it is refused the same way rather
+// than selecting a second install path.
 func TestRemovedSecretBackendFlagFailsLoudly(t *testing.T) {
 	for _, args := range [][]string{
 		{"init", "--provider", "claude-code", "--secret-backend", "file"},
 		{"init", "--provider", "claude-code", "--secret-backend", "os"},
-		{"init", "--role", "approver", "--org", "acme", "--backend-url", "https://x", "--secret-backend", "file"}, // approver still takes --org/--backend-url
+		{"init", "--role", "approver", "--org", "acme"},
 	} {
 		t.Run(strings.Join(args, " "), func(t *testing.T) {
 			isolateHome(t)
@@ -235,6 +237,8 @@ func TestRemovedSecretBackendFlagFailsLoudly(t *testing.T) {
 			if code := a.run(args); code != exitError {
 				t.Fatalf("exit = %d, want %d; a removed flag must not be silently accepted", code, exitError)
 			}
+			// The usage block that prints on refusal points at the two commands
+			// that took this work over.
 			if !strings.Contains(errb.String(), "openbox auth") {
 				t.Errorf("error should point at `openbox auth`, got %q", errb.String())
 			}

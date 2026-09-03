@@ -158,24 +158,6 @@ func (c *Client) FindByName(ctx context.Context, name string) (*AgentSummary, er
 	return nil, nil
 }
 
-// FirstAgentID returns any agent in the caller's organization, or "" when the
-// org has none. Which agent does not matter; the probe never names a real
-// approval.
-func (c *Client) FirstAgentID(ctx context.Context) (string, error) {
-	var lr listResponse
-	if err := c.do(ctx, http.MethodGet, "/agent/list?all=true", nil, &lr); err != nil {
-		return "", err
-	}
-	agents, err := parseAgentList(lr.Data)
-	if err != nil {
-		return "", err
-	}
-	if len(agents) == 0 {
-		return "", nil
-	}
-	return agents[0].ID, nil
-}
-
 // parseAgentList tolerates either a bare array or a paginated {items:[...]}.
 // It reports an error rather than returning nil on a shape it cannot read.
 func parseAgentList(raw json.RawMessage) ([]AgentSummary, error) {

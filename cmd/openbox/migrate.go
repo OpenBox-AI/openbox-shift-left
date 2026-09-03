@@ -18,13 +18,8 @@ func (a *app) migrateLegacyConfig() {
 	if len(migrated) == 0 {
 		return
 	}
-	devJSON, approverJSON, _ := devconfig.LegacyConfigPaths()
+	// One migratable file, so there is nothing to select between.
+	devJSON, _ := devconfig.LegacyConfigPaths()
 	home, _ := devconfig.Home()
-	for _, name := range migrated {
-		from := devJSON
-		if name == "approver.json" {
-			from = approverJSON
-		}
-		fmt.Fprintf(a.stdout, "Migrated %s → %s (the original is left in place).\n", from, home)
-	}
+	fmt.Fprintf(a.stdout, "Migrated %s → %s (the original is left in place).\n", devJSON, home)
 }

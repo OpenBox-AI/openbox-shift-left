@@ -43,13 +43,11 @@ func (a *app) runAuth(args []string) int {
 		envFile                      string
 		rotate, force, yes           bool
 		apiKeyStdin, privateKeyStdin bool
-		controlTokenStdin            bool
 	)
 	fs.BoolVar(&rotate, "rotate", false, "re-issue credentials for an agent that already exists remotely, preserving its id and DID")
 	fs.BoolVar(&yes, "yes", false, "skip the confirmation prompt (for automation)")
 	fs.BoolVar(&apiKeyStdin, "api-key-stdin", false, "read the obx_ API key from the FIRST line of stdin (never a flag value; INV-1)")
 	fs.BoolVar(&privateKeyStdin, "private-key-stdin", false, "read the base64 signing key from the NEXT line of stdin")
-	fs.BoolVar(&controlTokenStdin, "control-token-stdin", false, "read an approver's obx_key_ control token from the NEXT line of stdin")
 	fs.StringVar(&envFile, "env-file", "", "write the credential file here instead of ~/.openbox/.env")
 	fs.StringVar(&icon, "icon", "", "agent icon string (defaults to an emoji; the backend requires non-empty)")
 	fs.StringVar(&description, "description", "OpenBox developer-runtime agent", "agent description")
@@ -74,7 +72,7 @@ func (a *app) runAuth(args []string) int {
 	}
 	cfg, _ := devconfig.Load(devconfig.DefaultConfigPath())
 
-	piped, code := a.readStdinSecrets(apiKeyStdin, privateKeyStdin, controlTokenStdin)
+	piped, code := a.readStdinSecrets(apiKeyStdin, privateKeyStdin)
 	if code != exitOK {
 		return code
 	}
@@ -144,7 +142,7 @@ func (a *app) runAuth(args []string) int {
 				return exitOK
 			}
 		}
-		if code := a.writeSecrets(envPath, f, piped); code != exitOK {
+		if code := a.writeSecrets(envPath, f); code != exitOK {
 			return code
 		}
 	}
@@ -245,17 +243,18 @@ func privateKeyProblem(v string) string {
 	return ""
 }
 
-// writeSecrets writes only secrets to the credential file. Never a coordinate.
-func (a *app) writeSecrets(envPath string, f authFields, piped map[string]string) int {
+// writeSecrets writes only secrets to the credential file. Never a coordinate,
+// and never the org control token.
+func (a *app) writeSecrets(envPath string, f authFields) int {
 	secrets := map[string]string{
 		devconfig.EnvAPIKeyDirect:    strings.TrimSpace(f.apiKey),
 		devconfig.EnvAgentPrivateKey: strings.TrimSpace(f.privateKey),
 	}
-	// It is a much larger exposure than the agent seed, so it is never written as
-	// a side effect of an ordinary auth run.
-	if v := piped[devconfig.EnvControlToken]; v != "" {
-		secrets[devconfig.EnvControlToken] = v
-	}
+	// The control token is never written. It is an org credential with
+	// fleet-wide authority -- a much larger exposure than this agent's own seed
+	// -- and the only thing that read it from disk was the approver persona.
+	// Registration still takes it from the environment, which is where a
+	// credential that powerful belongs.
 	if err := devconfig.WriteEnvFile(envPath, secrets); err != nil {
 		return a.errorf("write credentials: %v", err)
 	}
@@ -346,16 +345,17 @@ func publicKeyFingerprint(seedB64 string) string {
 	return fmt.Sprintf("SHA256:%s (public key)", base64.RawStdEncoding.EncodeToString(sum[:])[:24])
 }
 
-func (a *app) readStdinSecrets(apiKey, privateKey, controlToken bool) (map[string]string, int) {
-	want := make([]string, 0, 3)
+// readStdinSecrets no longer accepts a control token. That was an org
+// credential with fleet-wide authority, read here only so it could be written
+// to the plaintext credential file for the approver persona; registration takes
+// it from the environment instead.
+func (a *app) readStdinSecrets(apiKey, privateKey bool) (map[string]string, int) {
+	want := make([]string, 0, 2)
 	if apiKey {
 		want = append(want, devconfig.EnvAPIKeyDirect)
 	}
 	if privateKey {
 		want = append(want, devconfig.EnvAgentPrivateKey)
-	}
-	if controlToken {
-		want = append(want, devconfig.EnvControlToken)
 	}
 	if len(want) == 0 {
 		return nil, exitOK
