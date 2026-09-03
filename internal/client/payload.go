@@ -102,6 +102,13 @@ func buildPayload(ev DevEvent) ([]byte, error) {
 		// Deliberately NOT set: hook_trigger, which would route a model turn onto
 		// core's approval-bypass path.
 	}
+	// A turn naming no producer cannot be placed: activity_id is empty and
+	// omitempty drops it, so content must not ride the row. Both deleted span
+	// builders opened with this check, and it was lost when content moved to the
+	// activity fields. Here, not in the two builders: one rule about the ROW.
+	if p.ActivityID == "" {
+		p.ActivityInput, p.ActivityOutput = nil, nil
+	}
 
 	meta, err := buildMetadata(ev)
 	if err != nil {
@@ -403,6 +410,23 @@ func buildMetadata(ev DevEvent) (json.RawMessage, error) {
 		if s.HTTPStatus != 0 && observesAResponse(ev.EventType) {
 			if _, exists := m["http_status"]; !exists {
 				m["http_status"] = s.HTTPStatus
+			}
+		}
+		// Here and not only in activity_input, which the content gate empties: the
+		// method and URL are account-binding evidence, and docs/data-and-privacy.md
+		// says they ship under content_capture:false. They used to ride a span
+		// field stripContent never cleared; once that went, capture-off stored a
+		// relayed call with no method or URL anywhere. Duplicated with
+		// activity_input rather than moved, where being unlisted makes the
+		// alignment judge's cap drop the pair before `content`.
+		if s.HTTPMethod != "" {
+			if _, exists := m["http_method"]; !exists {
+				m["http_method"] = s.HTTPMethod
+			}
+		}
+		if s.HTTPURL != "" {
+			if _, exists := m["http_url"]; !exists {
+				m["http_url"] = s.HTTPURL
 			}
 		}
 	}
