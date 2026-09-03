@@ -36,14 +36,11 @@ type Options struct {
 	BackendURL string // openbox-backend control-plane base (persisted for `dev sync`/staleness)
 	// BaseURL is the openbox-core data-plane base; where events are emitted and
 	// where `dev verify` authenticates.
-	BaseURL     string
-	AgentName   string // override; default derived from user+host
-	Icon        string // non-empty string required by the backend DTO
-	Description string
-	DryRun      bool
-	Force       bool // register a fresh agent even if one exists remotely
-	// EnvFile overrides where credentials are written (`auth --env-file`).
-	EnvFile        string
+	BaseURL        string
+	AgentName      string // override; default derived from user+host
+	Icon           string // non-empty string required by the backend DTO
+	Description    string
+	DryRun         bool
 	ManagedEnable  bool // org-wide force-enable substrate; opt-in
 	InstallGitHook bool // enable ambient commit-trailer hook install (off by default)
 	// ProjectDir selects project hook scope, which is `openbox init`'s default :
@@ -153,7 +150,7 @@ func register(ctx context.Context, o Options, d Deps) (*Result, provider.Credent
 		return res, ref, planDryRun(o, d, name, icon, profile, ref)
 	}
 
-	if existing, err := readLocalCredentials(o.EnvFile); err == nil && existing.apiKey != "" && existing.privateKey != "" {
+	if existing, err := readLocalCredentials(); err == nil && existing.apiKey != "" && existing.privateKey != "" {
 		did := devconfig.ResolveDIDOrEmpty()
 		ref.DID = did
 		res.Reused = true
@@ -162,36 +159,34 @@ func register(ctx context.Context, o Options, d Deps) (*Result, provider.Credent
 		res.AgentID = devconfig.ResolveAgentID()
 		ref.AgentID = res.AgentID
 		fmt.Fprintf(d.Out, "This machine already has credentials in %s; reusing them (DID %s).\n",
-			credentialFileLabel(o.EnvFile), didOrNone(did))
+			credentialFileLabel(), didOrNone(did))
 		fmt.Fprintf(d.Out, "  Nothing was registered. A machine holds ONE agent identity: if these belong to a\n")
 		fmt.Fprintf(d.Out, "  different org or tool than you intended, `openbox auth` overwrites them, and\n")
 		fmt.Fprintf(d.Out, "  `openbox doctor` shows which identity is in effect.\n")
 		return res, ref, nil
 	}
 
-	if !o.Force {
-		existing, err := d.Registrar.FindByName(ctx, name)
-		if err != nil {
-			return res, ref, fmt.Errorf(
-				"could not check for an existing agent named %q (agent/list failed: %w); "+
-					"re-run when the OpenBox org is reachable, or pass --force to skip the check",
-				name, err)
-		}
-		if existing != nil {
-			res.AgentID, res.DID = existing.ID, existing.DID
-			return res, ref, fmt.Errorf(
-				"a developer agent named %q already exists in this org (id %s, DID %s) but no local credentials are stored. "+
-					"Its API key and signing key are shown only once and cannot be re-retrieved. "+
-					"Delete that agent and re-run, or pass --force to register a new distinctly-named agent.",
-				name, existing.ID, existing.DID)
-		}
-	} else {
-		free, err := freeName(ctx, d, name)
-		if err != nil {
-			return res, ref, fmt.Errorf("could not find a free agent name for --force (agent/list failed: %w)", err)
-		}
-		name = free
-		res.AgentName = name
+	// Unconditional now. The escape hatch was --force, which registered a
+	// second, differently-named agent; without it there is exactly one recovery
+	// and the message has to say what it costs rather than name a flag.
+	existing, err := d.Registrar.FindByName(ctx, name)
+	if err != nil {
+		return res, ref, fmt.Errorf(
+			"could not check for an existing agent named %q (agent/list failed: %w); "+
+				"re-run when the OpenBox org is reachable",
+			name, err)
+	}
+	if existing != nil {
+		res.AgentID, res.DID = existing.ID, existing.DID
+		return res, ref, fmt.Errorf(
+			"a developer agent named %q already exists in this org (id %s, DID %s) but this machine holds "+
+				"no credentials for it.\n"+
+				"  Its API key and signing key were shown once, at registration, and are not stored "+
+				"server-side -- so if they are lost, that agent's identity cannot be recovered at all.\n"+
+				"  If you still have them, re-run `openbox auth` and give the agent id %s.\n"+
+				"  If you do not: delete that agent in the dashboard and re-run. That mints a NEW DID, "+
+				"so work attributed to the old one stays attached to the old one.",
+			name, existing.ID, existing.DID, existing.ID)
 	}
 
 	req := backend.CreateAgentRequest{
@@ -226,14 +221,14 @@ func register(ctx context.Context, o Options, d Deps) (*Result, provider.Credent
 			reg.AgentID, reg.DID, missingCreds(reg))
 	}
 
-	if err := writeLocalCredentials(o.EnvFile, reg.APIKey, reg.PrivateKey); err != nil {
-		return res, ref, resumeErr(reg, "write credentials to "+credentialFileLabel(o.EnvFile), err)
+	if err := writeLocalCredentials(reg.APIKey, reg.PrivateKey); err != nil {
+		return res, ref, resumeErr(reg, "write credentials to "+credentialFileLabel(), err)
 	}
 
 	fmt.Fprintf(d.Out, "Registered developer agent %q\n  id:    %s\n  DID:   %s\n  tier:  %s (trust %s)\n",
 		reg.AgentName, reg.AgentID, reg.DID, reg.Tier, reg.TrustScore)
 	fmt.Fprintf(d.Out, "Credentials written to %s (0600); values are not printed (INV-1).\n",
-		credentialFileLabel(o.EnvFile))
+		credentialFileLabel())
 	if o.ManagedEnable {
 		fmt.Fprintln(d.Out, "Managed force-enable substrate recorded (verified, not activated; Phase-1 pilot is opt-in).")
 	}
@@ -252,7 +247,7 @@ func applyConfig(o Options, d Deps, ref provider.CredentialRef, res *Result) err
 	}
 	res.ConfigApplied = true
 	fmt.Fprintf(d.Out, "Wrote %s native config (no secrets inline; the hook reads %s at runtime).\n",
-		o.Provider, credentialFileLabel(o.EnvFile))
+		o.Provider, credentialFileLabel())
 	return nil
 }
 
@@ -281,27 +276,10 @@ func planDryRun(o Options, d Deps, name, icon string, profile aivss.Config, ref 
 	fmt.Fprintf(out, " enforce: %s (that decision: ON by default; inert until your org publishes a policy, and\n", describePosture(o.Enforce))
 	fmt.Fprintf(out, "           fail-open regardless. --enforce=false opts out and persists. Enforce also\n")
 	fmt.Fprintf(out, "           carries tier2 + findings, all persisted to dev.json; no runtime env)\n")
-	fmt.Fprintf(out, "\nWould write credentials to %s (0600, plaintext):\n", credentialFileLabel(o.EnvFile))
+	fmt.Fprintf(out, "\nWould write credentials to %s (0600, plaintext):\n", credentialFileLabel())
 	fmt.Fprintf(out, "  %s  (obx_ API key)\n  %s  (Ed25519 signing key)\n", devconfig.EnvAPIKeyDirect, devconfig.EnvAgentPrivateKey)
 	fmt.Fprintf(out, "\nProvider config:\n%s\n", d.Installer.Plan(ref))
 	return nil
-}
-
-func freeName(ctx context.Context, d Deps, name string) (string, error) {
-	for i := 1; i < 100; i++ {
-		candidate := name
-		if i > 1 {
-			candidate = fmt.Sprintf("%s-%d", name, i)
-		}
-		existing, err := d.Registrar.FindByName(ctx, candidate)
-		if err != nil {
-			return "", err
-		}
-		if existing == nil {
-			return candidate, nil
-		}
-	}
-	return "", fmt.Errorf("no free name near %q after 99 attempts", name)
 }
 
 func resumeErr(reg *backend.Registration, step string, err error) error {

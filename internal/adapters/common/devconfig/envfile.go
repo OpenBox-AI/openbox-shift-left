@@ -18,7 +18,7 @@ const envFileHeader = `# OpenBox credentials for this machine; written by ` + "`
 #
 # This is the ONLY copy. OpenBox shows the API key and signing key once, at
 # registration, and does not store them. If you lose this file, re-issue with
-# ` + "`openbox auth --rotate`" + ` or register again with ` + "`openbox auth`" + `.
+# ` + "`openbox auth`" + ` again; leaving the agent id blank there registers a new agent.
 #
 # DO NOT COMMIT THIS FILE. Sourcing it is never required; the tools read it
 # directly. A real environment variable always wins over a value here.

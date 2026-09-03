@@ -32,7 +32,6 @@ openbox init --provider <claude-code|codex|cursor> [flags]
 | `--backend-url` | `OPENBOX_BACKEND_URL` | openbox-backend base URL |
 | `--client-id` | `OPENBOX_CLIENT` | `x-openbox-client` header (Keycloak JWT path) |
 | `--dry-run` |; | print the plan; **no** network / secret-store writes |
-| `--force` |; | register a new distinctly-named agent even if one exists |
 | `--managed-enable` |; | record org force-enable substrate (verified, not activated) |
 |; | `OPENBOX_CONTROL_TOKEN` | **required for a real run**; see below |
 
@@ -58,7 +57,8 @@ control-plane key (`obx_key_…`, sent as `X-API-Key`); auto-detected by prefix.
   has no upsert. Local secret-store presence is therefore the idempotency key: a
   re-init with stored creds does no network call. An agent that exists remotely
   but whose creds were never stored locally is unrecoverable; the CLI refuses to
-  duplicate and explains the options (delete + re-run, or `--force`).
+  duplicate and explains the one recovery: delete that agent in the dashboard and
+  re-run, which mints a new DID.
 
 ## Layout
 

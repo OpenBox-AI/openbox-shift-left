@@ -250,39 +250,6 @@ func TestRemoteLookupErrorDoesNotFallThroughToCreate(t *testing.T) {
 	}
 }
 
-func TestForceLookupErrorSurfaced(t *testing.T) {
-	isolateHome(t)
-	reg := &fakeRegistrar{reg: validReg(), findErr: errors.New("connection refused")}
-	_, err := Run(context.Background(), Options{Provider: "claude-code", AgentName: "dev-x", Force: true},
-		Deps{Registrar: reg, Installer: &fakeInstaller{avail: true}, Out: &bytes.Buffer{}})
-	if err == nil || !strings.Contains(err.Error(), "free agent name") {
-		t.Fatalf("expected free-name lookup error, got %v", err)
-	}
-	if reg.createCalls != 0 {
-		t.Errorf("must not create when the free-name lookup failed: create=%d", reg.createCalls)
-	}
-}
-
-func TestForceRegistersUnderFreeName(t *testing.T) {
-	isolateHome(t)
-	reg := &fakeRegistrar{
-		reg:    validReg(),
-		byName: map[string]*backend.AgentSummary{"dev-x": {ID: "old-9"}}, // dev-x-2 is free
-	}
-	inst := &fakeInstaller{avail: true}
-	_, err := Run(context.Background(), Options{Provider: "claude-code", AgentName: "dev-x", Force: true},
-		Deps{Registrar: reg, Installer: inst, Out: &bytes.Buffer{}})
-	if err != nil {
-		t.Fatalf("force err: %v", err)
-	}
-	if reg.lastReq.AgentName != "dev-x-2" {
-		t.Errorf("forced name = %q, want dev-x-2", reg.lastReq.AgentName)
-	}
-	if reg.createCalls != 1 {
-		t.Errorf("create calls = %d, want 1", reg.createCalls)
-	}
-}
-
 func TestAPIErrorHalts(t *testing.T) {
 	isolateHome(t)
 	reg := &fakeRegistrar{createErr: &backend.APIError{StatusCode: 400, Body: "AIVSS config is required"}}
@@ -365,48 +332,5 @@ func TestUnknownProviderRejected(t *testing.T) {
 		Deps{Registrar: &fakeRegistrar{}, Installer: &fakeInstaller{}, Out: &bytes.Buffer{}})
 	if err == nil {
 		t.Fatal("expected error for empty provider")
-	}
-}
-
-// `--env-file` must reach the register path, which is the one place
-// credentials are minted.
-func TestRegisterHonoursTheCredentialFileOverride(t *testing.T) {
-	isolateHome(t)
-	custom := filepath.Join(t.TempDir(), "custom-creds.env")
-	reg := &fakeRegistrar{reg: validReg()}
-
-	_, _, err := Register(context.Background(), Options{
-		Provider: "claude-code", EnvFile: custom,
-	}, Deps{Registrar: reg, Installer: &fakeInstaller{avail: true}, Out: &bytes.Buffer{}})
-	if err != nil {
-		t.Fatalf("Register: %v", err)
-	}
-
-	kv, readErr := devconfig.ParseEnvFile(custom)
-	if readErr != nil {
-		t.Fatalf("read the override path: %v", readErr)
-	}
-	if kv[devconfig.EnvAPIKeyDirect] != "obx_test_SECRETKEYVALUE" {
-		t.Errorf("credentials did not land in the override path: %v", kv)
-	}
-	if def := readCredentialFile(t); len(def) != 0 {
-		t.Errorf("credentials also written to the default path: %v", def)
-	}
-}
-
-// TestRegisterRefusesARelativeCredentialFileOverride a relative override would
-// resolve against the process working directory, so running this inside a repo
-// would drop a plaintext API key and signing key into the source tree.
-func TestRegisterRefusesARelativeCredentialFileOverride(t *testing.T) {
-	isolateHome(t)
-	reg := &fakeRegistrar{reg: validReg()}
-	_, _, err := Register(context.Background(), Options{
-		Provider: "claude-code", EnvFile: "creds.env",
-	}, Deps{Registrar: reg, Installer: &fakeInstaller{avail: true}, Out: &bytes.Buffer{}})
-	if err == nil {
-		t.Fatal("a relative --env-file was accepted")
-	}
-	if !strings.Contains(err.Error(), "absolute") {
-		t.Errorf("error should explain the absolute-path requirement: %v", err)
 	}
 }

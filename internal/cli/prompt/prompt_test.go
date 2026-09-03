@@ -157,10 +157,16 @@ func TestRequireTerminalFailsFastOnAPipe(t *testing.T) {
 	if !errors.Is(err, ErrNotATerminal) {
 		t.Errorf("error should wrap ErrNotATerminal, got %v", err)
 	}
-	for _, want := range []string{"--api-key-stdin", "--private-key-stdin", "OPENBOX_API_KEY"} {
+	// The remediation names the two routes that survive, and must not name a
+	// flag: `auth` takes none, so a message pointing at one sends the reader to
+	// a parse error.
+	for _, want := range []string{"OPENBOX_API_KEY", ".openbox/.env", "dev.json", "OPENBOX_HOME"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("remediation missing %q:\n%s", want, err)
 		}
+	}
+	if strings.Contains(err.Error(), "--") {
+		t.Errorf("the remediation names a flag; auth accepts none:\n%s", err)
 	}
 }
 

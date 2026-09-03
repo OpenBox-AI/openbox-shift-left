@@ -1,15 +1,11 @@
 package main
 
 import (
-	"bufio"
 	"context"
 	"crypto/ed25519"
 	"crypto/sha256"
 	"encoding/base64"
 	"fmt"
-	"io"
-	"os"
-	"path/filepath"
 	"regexp"
 	"strings"
 
@@ -36,33 +32,23 @@ var didPattern = regexp.MustCompile(`^did:aip:[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9
 
 func (a *app) runAuth(args []string) int {
 	fs := a.newFlagSet("openbox auth")
-	var (
-		icon, description            string
-		baseURL, backendURL          string
-		did, agentID                 string
-		envFile                      string
-		rotate, force, yes           bool
-		apiKeyStdin, privateKeyStdin bool
-	)
-	fs.BoolVar(&rotate, "rotate", false, "re-issue credentials for an agent that already exists remotely, preserving its id and DID")
-	fs.BoolVar(&yes, "yes", false, "skip the confirmation prompt (for automation)")
-	fs.BoolVar(&apiKeyStdin, "api-key-stdin", false, "read the obx_ API key from the FIRST line of stdin (never a flag value; INV-1)")
-	fs.BoolVar(&privateKeyStdin, "private-key-stdin", false, "read the base64 signing key from the NEXT line of stdin")
-	fs.StringVar(&envFile, "env-file", "", "write the credential file here instead of ~/.openbox/.env")
-	fs.StringVar(&icon, "icon", "", "agent icon string (defaults to an emoji; the backend requires non-empty)")
-	fs.StringVar(&description, "description", "OpenBox developer-runtime agent", "agent description")
-	fs.BoolVar(&force, "force", false, "register a new distinctly-named agent even if one exists remotely")
-	fs.StringVar(&baseURL, "base-url", a.env(devconfig.EnvBaseURL, ""), "openbox-core DATA-PLANE base URL (where events go)")
-	fs.StringVar(&backendURL, "backend-url", a.env(devconfig.EnvBackendURL, ""), "openbox-backend CONTROL-PLANE base URL")
-	fs.StringVar(&did, "did", a.env(devconfig.EnvDID, ""), "this agent's DID (did:aip:<uuid>); non-secret, so a flag value is fine")
-	fs.StringVar(&agentID, "agent-id", a.env(devconfig.EnvAgentID, ""), "this agent's backend id; non-secret; blank on an interactive run registers a new agent")
 	if code, ok := parseFlags(fs, args); !ok {
 		return code
+	}
+	// No flags at all. Every one of the thirteen was a way to do this without a
+	// terminal, and each was also a way to get it wrong: a secret in argv, a
+	// confirmation skipped, a credential file written somewhere the hooks do not
+	// read. Provisioning without a terminal is still possible and better served
+	// by the environment or the two files themselves, which already outrank
+	// anything this command writes.
+	if fs.NArg() > 0 {
+		return a.errorf("`openbox auth` takes no arguments or flags; it prompts. Got %q.\n%s",
+			fs.Arg(0), prompt.NonInteractiveHelp)
 	}
 
 	a.migrateLegacyConfig()
 
-	envPath, err := a.credentialFilePath(envFile)
+	envPath, err := devconfig.EnvFilePath()
 	if err != nil {
 		return a.errorf("%v", err)
 	}
@@ -72,48 +58,25 @@ func (a *app) runAuth(args []string) int {
 	}
 	cfg, _ := devconfig.Load(devconfig.DefaultConfigPath())
 
-	piped, code := a.readStdinSecrets(apiKeyStdin, privateKeyStdin)
-	if code != exitOK {
-		return code
-	}
-
+	// Prefilled from what is on the machine, so a re-run to fix one URL keeps
+	// the agent id, the DID and both secrets. The agent-id prompt is the one
+	// deliberate exception: it never prefills, because a blank answer there is
+	// the only way to reach registration at all.
 	f := authFields{
-		backendURL: firstNonEmptyStr(backendURL, cfg.BackendURL, devconfig.DefaultBackendURL),
-		baseURL:    firstNonEmptyStr(baseURL, cfg.BaseURL, devconfig.DefaultBaseURL),
-		agentID:    firstNonEmptyStr(agentID, cfg.AgentID),
-		did:        firstNonEmptyStr(did, cfg.DID),
+		backendURL: firstNonEmptyStr(cfg.BackendURL, devconfig.DefaultBackendURL),
+		baseURL:    firstNonEmptyStr(cfg.BaseURL, devconfig.DefaultBaseURL),
+		agentID:    cfg.AgentID,
+		did:        cfg.DID,
 		apiKey:     existing[devconfig.EnvAPIKeyDirect],
 		privateKey: existing[devconfig.EnvAgentPrivateKey],
 	}
 
-	interactive := len(piped) == 0 && !yes
-	if interactive {
-		if err := prompt.RequireTerminal(a.stdinFile()); err != nil {
-			return a.errorf("%v", err)
-		}
-		p := prompt.New(a.stdinFile(), a.stdout)
-		if f, err = collectAuthFields(p, f, rotate); err != nil {
-			return a.errorf("%v", err)
-		}
-	} else {
-		for k, v := range piped {
-			switch k {
-			case devconfig.EnvAPIKeyDirect:
-				f.apiKey = v
-			case devconfig.EnvAgentPrivateKey:
-				f.privateKey = v
-			}
-		}
-		f.register = false
+	p, err := a.newPrompt()
+	if err != nil {
+		return a.errorf("%v", err)
 	}
-
-	if len(piped) > 0 && !yes {
-		return a.errorf("--api-key-stdin / --private-key-stdin need --yes: the secrets arrive on stdin,\n" +
-			"  so there is no way left to ask for confirmation on it. Add --yes to accept the write.")
-	}
-
-	if rotate {
-		return a.runAuthRotate(f, piped, envPath, backendURL, yes)
+	if f, err = collectAuthFields(p, f); err != nil {
+		return a.errorf("%v", err)
 	}
 
 	if problem := validateAuthFields(f); problem != "" {
@@ -121,7 +84,7 @@ func (a *app) runAuth(args []string) int {
 	}
 
 	if f.register {
-		res, ref, code := a.registerForAuth(f, icon, description, envFile, force)
+		res, ref, code := a.registerForAuth(f)
 		if code != exitOK {
 			return code
 		}
@@ -129,22 +92,12 @@ func (a *app) runAuth(args []string) int {
 		if f.did == "" {
 			f.did = res.DID
 		}
-	} else {
-		if !yes {
-			p := prompt.New(a.stdinFile(), a.stdout)
-			a.printAuthSummary(f, envPath)
-			ok, err := p.Confirm("Write these credentials?", false)
-			if err != nil {
-				return a.errorf("%v", err)
-			}
-			if !ok {
-				fmt.Fprintln(a.stdout, "Nothing written.")
-				return exitOK
-			}
-		}
-		if code := a.writeSecrets(envPath, f); code != exitOK {
-			return code
-		}
+	} else if code := a.writeSecrets(envPath, f); code != exitOK {
+		// Written unconditionally: there is no confirmation left to skip. Both
+		// writers overwrite the two keys they own and merge the rest, and a blank
+		// answer at either secret prompt kept the current value, so a re-run
+		// cannot erase a credential.
+		return code
 	}
 
 	if code := a.writeCoordinates(f); code != exitOK {
@@ -155,7 +108,7 @@ func (a *app) runAuth(args []string) int {
 	return exitOK
 }
 
-func collectAuthFields(p prompt.Prompter, f authFields, rotate bool) (authFields, error) {
+func collectAuthFields(p prompt.Prompter, f authFields) (authFields, error) {
 	var err error
 	if f.backendURL, err = p.Line("Backend URL (control plane)", f.backendURL); err != nil {
 		return f, err
@@ -168,16 +121,13 @@ func collectAuthFields(p prompt.Prompter, f authFields, rotate bool) (authFields
 		return f, err
 	}
 	f.agentID = strings.TrimSpace(answered)
-	if f.agentID == "" && !rotate {
+	if f.agentID == "" {
 		f.register = true
 		return f, nil
 	}
 
 	if f.did, err = p.Line("Agent DID", f.did); err != nil {
 		return f, err
-	}
-	if rotate {
-		return f, nil
 	}
 	apiKey, err := p.Secret("API key (obx_…)", f.apiKey != "")
 	if err != nil {
@@ -229,7 +179,7 @@ func privateKeyProblem(v string) string {
 	v = strings.TrimSpace(v)
 	if v == "" {
 		return "no signing key given. It is shown once, when the agent is created; leave the\n" +
-			"  agent id blank to register a new agent, or use `openbox auth --rotate` to re-issue."
+			"  agent id blank to register a new agent."
 	}
 	raw, err := base64.StdEncoding.DecodeString(v)
 	if err != nil {
@@ -345,36 +295,9 @@ func publicKeyFingerprint(seedB64 string) string {
 	return fmt.Sprintf("SHA256:%s (public key)", base64.RawStdEncoding.EncodeToString(sum[:])[:24])
 }
 
-// readStdinSecrets no longer accepts a control token. That was an org
-// credential with fleet-wide authority, read here only so it could be written
-// to the plaintext credential file for the approver persona; registration takes
-// it from the environment instead.
-func (a *app) readStdinSecrets(apiKey, privateKey bool) (map[string]string, int) {
-	want := make([]string, 0, 2)
-	if apiKey {
-		want = append(want, devconfig.EnvAPIKeyDirect)
-	}
-	if privateKey {
-		want = append(want, devconfig.EnvAgentPrivateKey)
-	}
-	if len(want) == 0 {
-		return nil, exitOK
-	}
-	lines, err := readLines(a.stdin, len(want))
-	if err != nil {
-		return nil, a.errorf("read secrets from stdin: %v (expected %d line(s): %s)",
-			err, len(want), strings.Join(want, ", "))
-	}
-	out := make(map[string]string, len(want))
-	for i, k := range want {
-		out[k] = lines[i]
-	}
-	return out, exitOK
-}
-
 // registerForAuth devinit.Register, not devinit.Run: Run also invokes the
 // provider installer, and `auth` must never install hooks.
-func (a *app) registerForAuth(f authFields, icon, description, envFileOverride string, force bool) (*devinit.Result, provider.CredentialRef, int) {
+func (a *app) registerForAuth(f authFields) (*devinit.Result, provider.CredentialRef, int) {
 	token := a.getenv(devconfig.EnvControlToken)
 	if token == "" {
 		return nil, provider.CredentialRef{}, a.errorf(
@@ -389,7 +312,7 @@ func (a *app) registerForAuth(f authFields, icon, description, envFileOverride s
 		return nil, provider.CredentialRef{}, a.errorf("%s", problem)
 	}
 	if f.backendURL == "" {
-		return nil, provider.CredentialRef{}, a.errorf("no backend URL; pass --backend-url or set %s", devconfig.EnvBackendURL)
+		return nil, provider.CredentialRef{}, a.errorf("no backend URL; answer the backend prompt, or set %s", devconfig.EnvBackendURL)
 	}
 	if selfHostedWithoutDataPlane(f.backendURL, f.baseURL) {
 		fmt.Fprintf(a.stderr,
@@ -401,10 +324,7 @@ func (a *app) registerForAuth(f authFields, icon, description, envFileOverride s
 	res, ref, err := devinit.Register(context.Background(), devinit.Options{
 		BackendURL:  f.backendURL,
 		BaseURL:     f.baseURL,
-		Icon:        icon,
-		Description: description,
-		Force:       force,
-		EnvFile:     envFileOverride,
+		Description: "OpenBox developer-runtime agent",
 	}, devinit.Deps{
 		Registrar: a.newRegistrar(f.backendURL, token, "openbox-cli"),
 		Out:       a.stdout,
@@ -413,22 +333,6 @@ func (a *app) registerForAuth(f authFields, icon, description, envFileOverride s
 		return res, ref, a.errorf("%v", err)
 	}
 	return res, ref, exitOK
-}
-
-func readLines(r io.Reader, n int) ([]string, error) {
-	sc := bufio.NewScanner(r)
-	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
-	out := make([]string, 0, n)
-	for len(out) < n && sc.Scan() {
-		out = append(out, strings.TrimRight(sc.Text(), "\r"))
-	}
-	if err := sc.Err(); err != nil {
-		return nil, err
-	}
-	if len(out) < n {
-		return nil, fmt.Errorf("got %d line(s), want %d", len(out), n)
-	}
-	return out, nil
 }
 
 func orDefault(v, def string) string {
@@ -445,25 +349,6 @@ func firstNonEmptyStr(vals ...string) string {
 		}
 	}
 	return ""
-}
-
-func (a *app) credentialFilePath(override string) (string, error) {
-	override = strings.TrimSpace(override)
-	if override == "" {
-		return devconfig.EnvFilePath()
-	}
-	if !filepath.IsAbs(override) {
-		return "", fmt.Errorf("--env-file must be an absolute path (got %q): a relative path resolves "+
-			"against the current directory, which would write credentials into whatever project you are in", override)
-	}
-	return filepath.Clean(override), nil
-}
-
-func (a *app) stdinFile() *os.File {
-	if f, ok := a.stdin.(*os.File); ok {
-		return f
-	}
-	return nil
 }
 
 func (a *app) printAuthNextSteps() {

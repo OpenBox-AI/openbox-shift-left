@@ -9,6 +9,7 @@ import (
 	obgit "github.com/openbox-ai/openbox-shift-left/internal/adapters/common/git"
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/backend"
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/devinit"
+	"github.com/openbox-ai/openbox-shift-left/internal/cli/prompt"
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/providers"
 	"github.com/openbox-ai/openbox-shift-left/internal/client"
 	"github.com/openbox-ai/openbox-shift-left/internal/provider"
@@ -34,6 +35,11 @@ type app struct {
 	stdin          io.Reader
 	getenv         func(string) string
 	newRegistrar   func(baseURL, credential, clientID string) devinit.Registrar
+	// newPrompt is the seam `auth` reaches the terminal through. One seam, not
+	// two: the terminal REQUIREMENT and the prompter are the same decision, and
+	// a test that could supply answers but not get past RequireTerminal could
+	// not drive the command at all.
+	newPrompt func() (prompt.Prompter, error)
 
 	gatewayReady func(net.Addr)
 	gatewayCtx   context.Context
@@ -52,6 +58,14 @@ func defaultApp() *app {
 		stdin:        os.Stdin,
 		getenv:       os.Getenv,
 		newRegistrar: func(u, c, id string) devinit.Registrar { return backend.New(u, c, id) },
+		// A struct-literal closure cannot reference `a`, so it names the same
+		// concrete files assigned above.
+		newPrompt: func() (prompt.Prompter, error) {
+			if err := prompt.RequireTerminal(os.Stdin); err != nil {
+				return nil, err
+			}
+			return prompt.New(os.Stdin, os.Stdout), nil
+		},
 	}
 }
 

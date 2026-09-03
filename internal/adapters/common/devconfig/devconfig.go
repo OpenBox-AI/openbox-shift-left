@@ -499,11 +499,11 @@ func missingCredentialError(what, envName, envPath string) error {
 	case "darwin":
 		msg += "\n  upgrading an existing install? credentials used to live in your keychain and are not migrated:" +
 			"\n    security find-generic-password -s ai.openbox.dev -a '<org>/<provider>/api_key' -w" +
-			"\n  paste those into `openbox auth`, or re-issue them with `openbox auth --rotate`"
+			"\n  paste those into `openbox auth`; if they are lost, leave the agent id blank there to register anew"
 	case "linux":
 		msg += "\n  upgrading an existing install? credentials used to live in libsecret and are not migrated:" +
 			"\n    secret-tool lookup service ai.openbox.dev account '<org>/<provider>/api_key'" +
-			"\n  paste those into `openbox auth`, or re-issue them with `openbox auth --rotate`"
+			"\n  paste those into `openbox auth`; if they are lost, leave the agent id blank there to register anew"
 	}
 	return errors.New(msg)
 }

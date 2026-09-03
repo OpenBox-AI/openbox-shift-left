@@ -26,6 +26,7 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/devinit"
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/gatewayservice"
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/laneservice"
+	"github.com/openbox-ai/openbox-shift-left/internal/cli/prompt"
 	"github.com/openbox-ai/openbox-shift-left/internal/client"
 	"github.com/openbox-ai/openbox-shift-left/internal/transport"
 )
@@ -905,10 +906,10 @@ func TestAuth_PersistsAgentIDAndBackendURL(t *testing.T) {
 	run := func(when string) {
 		t.Helper()
 		a, _, errb := testApp(nil)
-		a.stdin = strings.NewReader("obx_test_k\n" + testSeedB64 + "\n")
-		code := a.run([]string{"auth", "--api-key-stdin", "--private-key-stdin", "--yes",
-			"--agent-id", "agent-123", "--did", "did:aip:3f2504e0-4f89-11d3-9a0c-0305e82c3301",
-			"--backend-url", "https://backend.acme"})
+		// backend, core, agent id, DID, API key, signing key.
+		scriptedAuth(t, a, "https://backend.acme", "", "agent-123",
+			"did:aip:3f2504e0-4f89-11d3-9a0c-0305e82c3301", "obx_test_k", testSeedB64)
+		code := a.run([]string{"auth"})
 		if code != exitOK {
 			t.Fatalf("%s: auth exit = %d; stderr=%q", when, code, errb.String())
 		}
@@ -936,7 +937,9 @@ func TestAuth_PersistsAgentIDAndBackendURL(t *testing.T) {
 // TestAuth_PersistsBaseURLForASelfHostedCore a self-hosted install has to be
 // able to name its own core.
 func TestAuth_PersistsBaseURLForASelfHostedCore(t *testing.T) {
-	run := func(t *testing.T, env map[string]string, args ...string) string {
+	// coreURL is the answer given at the core-URL prompt; blank keeps whatever
+	// was prefilled, which is the hosted default on a fresh machine.
+	run := func(t *testing.T, env map[string]string, coreURL string) string {
 		t.Helper()
 		home := isolateHome(t)
 		t.Setenv("OPENBOX_BASE_URL", "")
@@ -944,10 +947,9 @@ func TestAuth_PersistsBaseURLForASelfHostedCore(t *testing.T) {
 			t.Setenv(k, v)
 		}
 		a, _, errb := testApp(env)
-		a.stdin = strings.NewReader("obx_test_k\n" + testSeedB64 + "\n")
-		base := append([]string{"auth", "--api-key-stdin", "--private-key-stdin", "--yes",
-			"--did", "did:aip:3f2504e0-4f89-11d3-9a0c-0305e82c3301"}, args...)
-		if code := a.run(base); code != exitOK {
+		scriptedAuth(t, a, "", coreURL, "agent-1",
+			"did:aip:3f2504e0-4f89-11d3-9a0c-0305e82c3301", "obx_test_k", testSeedB64)
+		if code := a.run([]string{"auth"}); code != exitOK {
 			t.Fatalf("auth exit = %d; stderr=%q", code, errb.String())
 		}
 		raw, err := os.ReadFile(filepath.Join(home, "dev.json"))
@@ -957,19 +959,21 @@ func TestAuth_PersistsBaseURLForASelfHostedCore(t *testing.T) {
 		return string(raw)
 	}
 
-	cfg := run(t, nil, "--base-url", "http://localhost:8086")
+	cfg := run(t, nil, "http://localhost:8086")
 	if !strings.Contains(cfg, `"base_url": "http://localhost:8086"`) {
-		t.Errorf("--base-url was not persisted:\n%s", cfg)
+		t.Errorf("the answered core URL was not persisted:\n%s", cfg)
 	}
 	if got, _ := devconfig.ResolveCoordinates(); got != "http://localhost:8086" {
 		t.Errorf("ResolveCoordinates() base = %q, want the self-hosted core", got)
 	}
 
-	if cfg := run(t, map[string]string{"OPENBOX_BASE_URL": "http://core.internal:8086"}); !strings.Contains(cfg, `"base_url": "http://core.internal:8086"`) {
-		t.Errorf("OPENBOX_BASE_URL was not persisted:\n%s", cfg)
+	// The variable prefills the prompt, and a blank answer keeps it.
+	if cfg := run(t, map[string]string{"OPENBOX_BASE_URL": "http://core.internal:8086"},
+		"http://core.internal:8086"); !strings.Contains(cfg, `"base_url": "http://core.internal:8086"`) {
+		t.Errorf("the self-hosted core was not persisted:\n%s", cfg)
 	}
 
-	cfg = run(t, nil)
+	cfg = run(t, nil, "")
 	if !strings.Contains(cfg, `"base_url": "`+devconfig.DefaultBaseURL+`"`) {
 		t.Errorf("the hosted core default was not persisted:\n%s", cfg)
 	}
@@ -1266,4 +1270,15 @@ func seedCredentials(t *testing.T) {
 		DID: "did:aip:3f2504e0-4f89-11d3-9a0c-0305e82c3301"}); err != nil {
 		t.Fatal(err)
 	}
+}
+
+// scriptedAuth drives `openbox auth` through its prompts, in the order they are
+// asked: backend URL, core URL, agent id, DID, API key, signing key. A blank
+// answer keeps whatever was prefilled, which is how a re-run that changes one
+// URL is safe.
+func scriptedAuth(t *testing.T, a *app, answers ...string) *prompt.Scripted {
+	t.Helper()
+	p := &prompt.Scripted{Answers: answers}
+	a.newPrompt = func() (prompt.Prompter, error) { return p, nil }
+	return p
 }

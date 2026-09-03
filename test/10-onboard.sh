@@ -75,35 +75,58 @@ printf '# Ungoverned twin\n\nNo `openbox init` was run here. Sessions started he
 git -C "$TB_UNGOVERNED" add README.md && git -C "$TB_UNGOVERNED" commit -qm "chore: init ungoverned twin"
 tb_ok "governed project at $TB_PROJECT; ungoverned twin at $TB_UNGOVERNED"
 
-tb_step "openbox auth (registers the agent, writes credentials)"
+tb_step "provision credentials (registers the agent, writes both files)"
 [ -n "${OPENBOX_CONTROL_TOKEN:-}" ] || tb_fatal "no control token — run ./test/env.sh mint"
 
-# One stable agent per machine, so repeated runs do not sprawl the org's seats.
+# `openbox auth` takes no flags and requires a terminal, so the harness
+# provisions the two files directly. That is not a workaround: it is one of the
+# two routes the product documents, and both outrank anything auth writes --
+# a real environment variable beats both files at read time.
 #
-# --yes rather than a prompt, and the coordinates as FLAGS while the secrets would
-# come over stdin: no flag on this command accepts a secret value (INV-1). On the
-# register path there is nothing to pipe — the server issues both credentials — so
-# stdin stays closed and `auth` short-circuits past the credential prompts.
-tb_auth() { # [extra flags…]
-	"$TB_BIN" auth \
-		--provider claude-code \
-		--agent-name "$TB_AGENT_NAME" \
-		--org "$OPENBOX_ORG" \
-		--backend-url "$OPENBOX_BACKEND_URL" \
-		--base-url "$OPENBOX_BASE_URL" \
-		--yes "$@" >"$TB_STATE/auth.out" 2>&1
+# One stable agent per machine, so repeated runs do not sprawl the org's seats.
+# Registration is a single control-plane call rather than a CLI invocation,
+# reused from state when this machine already has an agent.
+tb_provision() {
+	local agent did key
+	agent="$(tb_state_get agent_id)"
+	if [ -n "$agent" ] && [ -r "$TB_ENV_FILE" ]; then
+		tb_note "reusing the agent recorded in $TB_STATE (no new org seat)"
+		return 0
+	fi
+	local body
+	body="$(tb_api "/agent" -X POST -H 'content-type: application/json' \
+		-d "{\"agent_name\":\"$TB_AGENT_NAME\",\"agent_type\":\"developer\",\"icon\":\"🤖\",\"description\":\"OpenBox testbed agent\"}")"
+	case "$(tb_status)" in
+	2*) ;;
+	*)
+		printf '%s\n' "$body" >"$TB_STATE/auth.out"
+		return 1
+		;;
+	esac
+	agent="$(tb_json "$body" id)"
+	did="$(tb_json "$body" did)"
+	key="$(tb_json "$body" api_key)"
+	priv="$(tb_json "$body" private_key)"
+	[ -n "$agent" ] && [ -n "$key" ] && [ -n "$priv" ] || {
+		printf '%s\n' "$body" >"$TB_STATE/auth.out"
+		return 1
+	}
+	# .env holds ONLY secrets and dev.json ONLY coordinates. Mixing them
+	# reintroduces the stale-copy bug that reverted a corrected DID on every
+	# install, which is why the product keeps two files.
+	umask 077
+	printf 'OPENBOX_API_KEY=%s\nOPENBOX_AGENT_PRIVATE_KEY=%s\n' "$key" "$priv" >"$TB_ENV_FILE"
+	chmod 600 "$TB_ENV_FILE"
+	printf '{\n  "agent_id": "%s",\n  "developer_did": "%s",\n  "base_url": "%s",\n  "backend_url": "%s"\n}\n' \
+		"$agent" "$did" "$OPENBOX_BASE_URL" "$OPENBOX_BACKEND_URL" >"$OPENBOX_HOME/dev.json"
+	tb_state_set agent_id "$agent"
+	tb_state_set developer_did "$did"
 }
 
-if tb_auth; then
-	tb_ok "auth succeeded"
-elif grep -q "already exists in this org" "$TB_STATE/auth.out"; then
-	# The org holds an agent of this name whose one-time keys we no longer have.
-	# Registering a distinctly-named one is one of the two recoveries the product
-	# offers; `auth --rotate` is the other, and it needs the agent id we lack here.
-	tb_note "$TB_AGENT_NAME exists remotely with no local credentials — registering a new one (--force)"
-	if tb_auth --force; then tb_ok "auth succeeded (--force)"; else tb_bad "auth succeeded" 0 "$(tail -2 "$TB_STATE/auth.out")"; fi
+if tb_provision; then
+	tb_ok "credentials provisioned"
 else
-	tb_bad "auth succeeded" 0 "$(tail -2 "$TB_STATE/auth.out")"
+	tb_bad "credentials provisioned" 0 "$(tail -3 "$TB_STATE/auth.out" 2>/dev/null)"
 fi
 
 tb_step "the credential file it wrote"

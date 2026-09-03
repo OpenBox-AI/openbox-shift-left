@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -43,7 +44,7 @@ func TestBlankAgentIDShortCircuitsTheCredentialPrompts(t *testing.T) {
 	got, err := collectAuthFields(p, authFields{
 		backendURL: devconfig.DefaultBackendURL,
 		baseURL:    devconfig.DefaultBaseURL,
-	}, false)
+	})
 	if err != nil {
 		t.Fatalf("collect: %v", err)
 	}
@@ -75,7 +76,7 @@ func TestURLPromptsPrefillTheHostedDefaults(t *testing.T) {
 	got, err := collectAuthFields(p, authFields{
 		backendURL: devconfig.DefaultBackendURL,
 		baseURL:    devconfig.DefaultBaseURL,
-	}, false)
+	})
 	if err != nil {
 		t.Fatalf("collect: %v", err)
 	}
@@ -97,7 +98,7 @@ func TestURLPromptsPrefillTheHostedDefaults(t *testing.T) {
 // either URL.
 func TestURLPromptsAcceptOverrides(t *testing.T) {
 	p := &prompt.Scripted{Answers: []string{"https://api.internal", "https://core.internal", "agent-1", "did:aip:3f2504e0-4f89-11d3-9a0c-0305e82c3301", "obx_k", testSeedB64}}
-	got, err := collectAuthFields(p, authFields{backendURL: devconfig.DefaultBackendURL, baseURL: devconfig.DefaultBaseURL}, false)
+	got, err := collectAuthFields(p, authFields{backendURL: devconfig.DefaultBackendURL, baseURL: devconfig.DefaultBaseURL})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -116,7 +117,7 @@ func TestBlankKeepsCurrentValues(t *testing.T) {
 		apiKey: "obx_existing", privateKey: testSeedB64,
 	}
 	p := &prompt.Scripted{Answers: []string{"", "", "agent-1", "", "", ""}}
-	got, err := collectAuthFields(p, current, false)
+	got, err := collectAuthFields(p, current)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -490,96 +491,67 @@ func TestNoAuthFlagTakesASecretValue(t *testing.T) {
 			t.Errorf("auth.go defines a flag that takes a secret value: %s", banned)
 		}
 	}
-	for _, want := range []string{`"api-key-stdin"`, `"private-key-stdin"`} {
-		if !strings.Contains(body, want) {
-			t.Errorf("auth.go should offer %s", want)
-		}
+	// The stronger claim now, and the one that subsumes the list above: `auth`
+	// registers no flags at all, so there is no flag left that could take a
+	// secret value.
+	if strings.Contains(body, "fs.StringVar(") || strings.Contains(body, "fs.BoolVar(") {
+		t.Error("auth.go registers a flag; `openbox auth` takes none")
 	}
 }
 
-// TestNonInteractiveWithoutStdinFlagsFailsFast piping input with no --*-stdin
-// flag must fail immediately rather than hang: a command that blocks on stdin
-// in CI hangs to the job timeout with no output.
-func TestNonInteractiveWithoutStdinFlagsFailsFast(t *testing.T) {
+// TestNonInteractiveFailsFastAndNamesTheProvisioningRoutes. A command that
+// blocks on stdin in CI hangs to the job timeout with no output, so this has to
+// fail immediately — and the failure has to say what to do instead, because
+// there is no flag left to reach for.
+func TestNonInteractiveFailsFastAndNamesTheProvisioningRoutes(t *testing.T) {
 	isolateHome(t)
 	a, _, errb := testApp(nil)
-	a.stdin = strings.NewReader("")
+	// The real terminal gate, not the test seam: this is what a pipe hits.
+	a.newPrompt = func() (prompt.Prompter, error) {
+		return nil, fmt.Errorf("%w\n%s", prompt.ErrNotATerminal, prompt.NonInteractiveHelp)
+	}
 	code := a.run([]string{"auth"})
 	if code != exitError {
 		t.Fatalf("exit = %d, want %d", code, exitError)
 	}
-	if !strings.Contains(errb.String(), "--api-key-stdin") {
-		t.Errorf("error should name the automation flags:\n%s", errb.String())
-	}
-}
-
-// TestStdinAutomationPath the stdin automation path: two lines, fixed order,
-// no secret on argv.
-func TestStdinAutomationPath(t *testing.T) {
-	home := isolateHome(t)
-	a, out, errb := testApp(nil)
-	a.stdin = strings.NewReader("obx_piped_key\n" + testSeedB64 + "\n")
-	code := a.run([]string{
-		"auth", "--api-key-stdin", "--private-key-stdin", "--yes",
-		"--did", "did:aip:3f2504e0-4f89-11d3-9a0c-0305e82c3301", "--agent-id", "agent-1",
-		"--base-url", "https://core.internal", "--backend-url", "https://api.internal",
-	})
-	if code != exitOK {
-		t.Fatalf("exit = %d, want %d; stderr=%q stdout=%q", code, exitOK, errb.String(), out.String())
-	}
-	kv := readEnvFile(t, home)
-	if kv[devconfig.EnvAPIKeyDirect] != "obx_piped_key" || kv[devconfig.EnvAgentPrivateKey] != testSeedB64 {
-		t.Errorf("piped secrets not written: %v", kv)
-	}
-	if strings.Contains(out.String(), "obx_piped_key") || strings.Contains(out.String(), testSeedB64) {
-		t.Errorf("a secret reached stdout:\n%s", out.String())
-	}
-}
-
-// TestStdinShortReadFails a short read must fail: with both flags set, one
-// supplied line would otherwise write an empty signing key over a working one.
-func TestStdinShortReadFails(t *testing.T) {
-	isolateHome(t)
-	a, _, errb := testApp(nil)
-	a.stdin = strings.NewReader("obx_only_one_line\n")
-	code := a.run([]string{"auth", "--api-key-stdin", "--private-key-stdin", "--yes",
-		"--did", "did:aip:3f2504e0-4f89-11d3-9a0c-0305e82c3301"})
-	if code != exitError {
-		t.Fatalf("exit = %d, want an error for a short read", code)
-	}
-	if !strings.Contains(errb.String(), "want 2") {
-		t.Errorf("error should say how many lines it wanted:\n%s", errb.String())
-	}
-}
-
-// TestStdinWrongOrderIsCaught validation catches a value in the wrong stdin
-// slot, which is what makes the fixed order safe rather than merely
-// documented.
-func TestStdinWrongOrderIsCaught(t *testing.T) {
-	isolateHome(t)
-	a, _, errb := testApp(nil)
-	a.stdin = strings.NewReader(testSeedB64 + "\nobx_the_api_key\n")
-	code := a.run([]string{"auth", "--api-key-stdin", "--private-key-stdin", "--yes",
-		"--did", "did:aip:3f2504e0-4f89-11d3-9a0c-0305e82c3301"})
-	if code != exitError {
-		t.Fatalf("exit = %d, want an error when the values are swapped", code)
-	}
-	if !strings.Contains(errb.String(), "signing key") {
-		t.Errorf("error should point at the signing key:\n%s", errb.String())
+	for _, want := range []string{"OPENBOX_API_KEY", ".openbox/.env", "dev.json"} {
+		if !strings.Contains(errb.String(), want) {
+			t.Errorf("the failure does not name %q as a provisioning route:\n%s", want, errb.String())
+		}
 	}
 }
 
 // TestAuthSuccessNamesInitAsTheNextStep success names the command that
 // actually installs governance: auth alone governs nothing, and a user who
 // stops here has telemetry from no session at all.
+// TestAuthTakesNoFlagAtAll. Thirteen of them are gone, and each was also a way
+// to get this wrong: a secret in argv, a confirmation skipped, a credential file
+// written where the hooks do not read. A flag that parses and does nothing would
+// be worse than one that fails.
+func TestAuthTakesNoFlagAtAll(t *testing.T) {
+	for _, flag := range []string{
+		"--rotate", "--yes", "--api-key-stdin", "--private-key-stdin", "--env-file",
+		"--icon", "--description", "--force", "--base-url", "--backend-url",
+		"--did", "--agent-id", "--control-token-stdin",
+	} {
+		a, _, errb := testApp(nil)
+		if code := a.run([]string{"auth", flag, "x"}); code == exitOK {
+			t.Errorf("auth accepted %s", flag)
+			continue
+		}
+		if !strings.Contains(errb.String(), "not defined") {
+			t.Errorf("%s was refused for the wrong reason: %s", flag, errb.String())
+		}
+	}
+}
+
 func TestAuthSuccessNamesInitAsTheNextStep(t *testing.T) {
 	isolateHome(t)
-	a, out, _ := testApp(nil)
-	a.stdin = strings.NewReader("obx_k\n" + testSeedB64 + "\n")
-	code := a.run([]string{"auth", "--api-key-stdin", "--private-key-stdin", "--yes",
-		"--did", "did:aip:3f2504e0-4f89-11d3-9a0c-0305e82c3301"})
-	if code != exitOK {
-		t.Fatalf("exit = %d", code)
+	a, out, errb := testApp(nil)
+	scriptedAuth(t, a, "", "", "agent-1",
+		"did:aip:3f2504e0-4f89-11d3-9a0c-0305e82c3301", "obx_k", testSeedB64)
+	if code := a.run([]string{"auth"}); code != exitOK {
+		t.Fatalf("exit = %d; stderr=%q", code, errb.String())
 	}
 	s := out.String()
 	if !strings.Contains(s, "openbox init") {
@@ -602,7 +574,7 @@ func TestAuthSuccessNamesInitAsTheNextStep(t *testing.T) {
 func TestRegisterWithoutAnOrgKeyExplainsWhatIsNeeded(t *testing.T) {
 	isolateHome(t)
 	a, _, errb := testApp(nil)
-	_, _, code := a.registerForAuth(authFields{backendURL: "https://api.internal"}, "", "", "", false)
+	_, _, code := a.registerForAuth(authFields{backendURL: "https://api.internal"})
 	if code != exitError {
 		t.Fatalf("exit = %d, want an error with no control token", code)
 	}
@@ -632,7 +604,7 @@ func TestRegisterWritesCredentialsButInstallsNothing(t *testing.T) {
 	}
 	res, ref, code := a.registerForAuth(authFields{
 		backendURL: "https://api.internal", baseURL: "https://core.internal",
-	}, "", "desc", "", false)
+	})
 	if code != exitOK {
 		t.Fatalf("exit = %d; stderr=%q", code, errb.String())
 	}
@@ -658,7 +630,7 @@ func TestAgentIDPromptNeverPrefills(t *testing.T) {
 
 	t.Run("Enter registers, even with an id on file", func(t *testing.T) {
 		p := &prompt.Scripted{Answers: []string{"", "", "", "SHOULD-NOT-BE-READ"}}
-		got, err := collectAuthFields(p, authFields{agentID: onFile, did: "did:aip:x"}, false)
+		got, err := collectAuthFields(p, authFields{agentID: onFile, did: "did:aip:x"})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -672,7 +644,7 @@ func TestAgentIDPromptNeverPrefills(t *testing.T) {
 
 	t.Run("the stored id is not shown as a default", func(t *testing.T) {
 		p := &prompt.Scripted{Answers: []string{"", "", "", "SHOULD-NOT-BE-READ"}}
-		if _, err := collectAuthFields(p, authFields{agentID: onFile}, false); err != nil {
+		if _, err := collectAuthFields(p, authFields{agentID: onFile}); err != nil {
 			t.Fatal(err)
 		}
 		if strings.Contains(p.Out.String(), onFile) {
@@ -682,7 +654,7 @@ func TestAgentIDPromptNeverPrefills(t *testing.T) {
 
 	t.Run("typing an id reuses that agent", func(t *testing.T) {
 		p := &prompt.Scripted{Answers: []string{"", "", onFile, "did:aip:3f2504e0-4f89-11d3-9a0c-0305e82c3301", "obx_k", testSeedB64}}
-		got, err := collectAuthFields(p, authFields{}, false)
+		got, err := collectAuthFields(p, authFields{})
 		if err != nil {
 			t.Fatal(err)
 		}

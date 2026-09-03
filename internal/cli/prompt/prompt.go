@@ -38,19 +38,28 @@ type Prompter interface {
 // terminal and no non-interactive source was named.
 var ErrNotATerminal = errors.New("stdin is not a terminal")
 
-// NonInteractiveHelp is the remediation text attached to ErrNotATerminal. It
-// lives here as one constant so the message cannot drift from the flags `auth`
-// actually accepts; auth.go's flag definitions and this string are meant to be
-// changed together.
-const NonInteractiveHelp = `openbox auth needs a terminal to prompt for values.
-For automation, name a SOURCE for each secret instead of a value (no secret ever
-goes on argv; INV-1):
+// NonInteractiveHelp is the remediation text attached to ErrNotATerminal.
+//
+// It lives here as one constant so the message cannot drift from what `auth`
+// actually accepts. `auth` now accepts nothing: it prompts, or it refuses. Both
+// routes below outrank anything it would have written anyway -- a real
+// environment variable beats both files at read time, and the files are the
+// files -- so neither is a lesser path.
+const NonInteractiveHelp = `openbox auth needs a terminal: it prompts, and it takes no flags.
+Two routes provision a machine without one, and both are read in preference to
+anything auth writes (no secret ever goes on argv; INV-1):
 
-  printf '%s\n%s\n' "$OBX_KEY" "$OBX_PRIVATE_KEY" |
-    openbox auth --api-key-stdin --private-key-stdin --yes
+  1. Export the variables and skip auth entirely:
+       OPENBOX_API_KEY, OPENBOX_AGENT_PRIVATE_KEY, OPENBOX_AGENT_DID, OPENBOX_AGENT_ID
 
-Or set the environment variables directly and skip auth entirely:
-  OPENBOX_API_KEY, OPENBOX_AGENT_PRIVATE_KEY, OPENBOX_AGENT_DID, OPENBOX_AGENT_ID`
+  2. Write the two files auth writes:
+       ~/.openbox/.env      0600, secrets only:
+                              OPENBOX_API_KEY, OPENBOX_AGENT_PRIVATE_KEY
+       ~/.openbox/dev.json  coordinates only:
+                              agent_id, developer_did, base_url, backend_url
+     OPENBOX_HOME relocates both. Keep them separate: a secret in dev.json or a
+     coordinate in .env reintroduces a stale-copy bug that reverted a corrected
+     DID on every install.`
 
 // New returns a Prompter over a real terminal (or a pipe). Masking is decided
 // per call from term.IsTerminal rather than once at construction, so a caller
