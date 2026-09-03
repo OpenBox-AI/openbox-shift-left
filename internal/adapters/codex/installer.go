@@ -50,35 +50,6 @@ func (Installer) Name() providerspi.Name { return providerspi.Codex }
 // Available reports that the Codex adapter is built (not the stub).
 func (Installer) Available() bool { return true }
 
-// Plan describes what Install would write, without writing anything (--dry-run
-// and the onboarding summary). It never prints a secret value (INV-1).
-func (i Installer) Plan(ref CredentialRef) string {
-	var b strings.Builder
-	fmt.Fprintf(&b, "OpenBox Codex hooks (observe-only, STORY-SL7-A; requires codex-cli >= 0.145.0; hooks are stable and ON by default):\n")
-	fmt.Fprintf(&b, "  - Write OpenBox hook entries → %s (merged in place, idempotent; foreign entries untouched)\n", i.hooksPath())
-	fmt.Fprintf(&b, "      SessionStart, UserPromptSubmit, SessionEnd (matcher omitted)   timeout %ds/%ds\n", hotHookTimeoutSec, sessionEndHookTimeoutSec)
-	fmt.Fprintf(&b, "      PostToolUse (matcher \"*\"; Bash, apply_patch, mcp__*)          timeout %ds\n", hotHookTimeoutSec)
-	fmt.Fprintf(&b, "      PreToolUse  (matcher \"*\"; the gating hook, may hold for approval) timeout %ds\n", preToolUseHookTimeoutSec)
-	fmt.Fprintf(&b, "      each: { \"type\": \"command\", \"command\": %q }\n", i.hookCommand("<Event>"))
-	fmt.Fprintf(&b, "  - Write dev config (non-secret coordinates) → %s\n", i.configPath())
-	fmt.Fprintf(&b, "      developer_did=%s\n", ref.DID)
-	fmt.Fprintf(&b, "      base_url=%s\n", devconfig.BaseURLLabel(ref.BaseURL))
-	fmt.Fprintf(&b, "      content_capture=%s (default ON as of 2026-07-15; set false to restore metadata-only)\n", contentCaptureLabel(ref.ContentCapture))
-	fmt.Fprintf(&b, "  - Credentials are NOT touched here: `openbox auth` wrote them to ~/.openbox/.env and\n")
-	fmt.Fprintf(&b, " the hook reads them at runtime; hooks.json carries the engine path +\n")
-	fmt.Fprintf(&b, "    event names ONLY (no key, DID, or URL).\n")
-	fmt.Fprintf(&b, "\nTrust step (Codex hash-trusts non-managed hooks):\n")
-	fmt.Fprintf(&b, "  After install, run /hooks inside Codex to review and TRUST the new OpenBox hooks -\n")
-	fmt.Fprintf(&b, "  until trusted they do not run. (`--dangerously-bypass-hook-trust` and `--disable hooks`\n")
-	fmt.Fprintf(&b, "  remain user-side bypass vectors; requirements.toml-managed hooks are the future\n")
-	fmt.Fprintf(&b, "  non-disablable option; OD-SL7-DIST.)\n")
-	fmt.Fprintf(&b, "\nCommit attribution: a Codex-run `git commit` is stamped `OpenBox-Session:` from the\n")
-	fmt.Fprintf(&b, "CODEX_THREAD_ID env Codex injects into every exec (no liveness registry). Enable the\n")
-	fmt.Fprintf(&b, "ambient prepare-commit-msg hook install with `openbox init --install-git-hook`,\n")
-	fmt.Fprintf(&b, "or per repo with `openbox hook git install`.\n")
-	return b.String()
-}
-
 // Install merges the OpenBox hook entries into hooks.json and writes the dev
 // config. Idempotent: re-running updates the OpenBox-owned entries in place
 // (recognized by ownershipMarkers), never duplicates them, and never modifies

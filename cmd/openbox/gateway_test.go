@@ -68,7 +68,9 @@ func TestTheDaemonSubcommandsDispatchButAreNotAdvertised(t *testing.T) {
 			t.Errorf("usage does not list %q:\n%s", want, usage)
 		}
 	}
-	// And each one still dispatches. A lane unit's argv is the caller.
+	// And each one still dispatches. The caller is a lane unit's argv or a hook
+	// command string, never a person -- so a deleted case arm would stop every
+	// daemon and every governance hook with no error anywhere.
 	//
 	// These reach the real daemon entrypoints, which resolve ~/.openbox and mint
 	// the transport CA there before they get as far as refusing the address --
@@ -82,6 +84,23 @@ func TestTheDaemonSubcommandsDispatchButAreNotAdvertised(t *testing.T) {
 		b, _, berr := testApp(nil)
 		if code := b.run(args); code != exitError {
 			t.Errorf("%v exited %d; expected the loopback refusal, which proves it dispatched", args, code)
+		}
+		if strings.Contains(berr.String(), "unknown command") {
+			t.Errorf("%q is not wired into the dispatcher", args[0])
+		}
+	}
+
+	// `hook` and `rewake` cannot be probed by a refusal: both are required to
+	// exit 0 on every path, because a non-zero hook is a blocked tool call. So
+	// they are probed by what they must NOT say.
+	for _, args := range [][]string{
+		{"hook", "claude-code", "SessionStart"},
+		{"rewake", "claude-code"},
+	} {
+		b, _, berr := testApp(nil)
+		b.stdin = strings.NewReader("{}")
+		if code := b.run(args); code != exitOK {
+			t.Errorf("%v exited %d; a hook path must exit 0 on every path", args, code)
 		}
 		if strings.Contains(berr.String(), "unknown command") {
 			t.Errorf("%q is not wired into the dispatcher", args[0])

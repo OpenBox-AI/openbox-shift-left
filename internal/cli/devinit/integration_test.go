@@ -16,7 +16,6 @@ import (
 	claudecode "github.com/openbox-ai/openbox-shift-left/internal/adapters/claude-code"
 	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/devconfig"
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/backend"
-	"github.com/openbox-ai/openbox-shift-left/internal/cli/providers"
 )
 
 func mockCreateServer(t *testing.T, createBody *map[string]any) *memhttptest.Server {
@@ -33,52 +32,6 @@ func mockCreateServer(t *testing.T, createBody *map[string]any) *memhttptest.Ser
 			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
 		}
 	}))
-}
-
-// TestEndToEndAgainstMockBackend drives the real backend.Client (not a fake)
-// through devinit against an httptest server, covering the SL-2 integration AC
-// ("a init against a test OpenBox registers an agent") with a mock.
-func TestEndToEndAgainstMockBackend(t *testing.T) {
-	var createBody map[string]any
-	srv := mockCreateServer(t, &createBody)
-	defer srv.Close()
-
-	home := t.TempDir()
-	t.Setenv(devconfig.EnvHome, home)
-	t.Setenv(devconfig.EnvConfigPath, filepath.Join(t.TempDir(), "dev.json"))
-	reg := backend.New(srv.URL, "obx_key_"+strings.Repeat("f", 48), "openbox-cli")
-	inst, _ := providers.Lookup("cursor") // stub: SL-8 adapter not built
-	var out bytes.Buffer
-
-	res, err := Run(context.Background(),
-		Options{Provider: "cursor", AgentName: "dev-x"},
-		Deps{Registrar: reg, Installer: inst, Out: &out})
-
-	if err == nil || !res.ConfigManualOnly {
-		t.Fatalf("expected manual-config outcome, got err=%v res=%+v", err, res)
-	}
-	if !res.Registered || res.AgentID != "srv-agent" || res.DID != "did:aip:server" {
-		t.Fatalf("registration not captured: %+v", res)
-	}
-	if createBody["agent_type"] != "developer" {
-		t.Errorf("agent_type = %v", createBody["agent_type"])
-	}
-	if s, _ := createBody["icon"].(string); s == "" {
-		t.Error("icon must be non-empty")
-	}
-	if _, ok := createBody["aivss_config"].(map[string]any); !ok {
-		t.Error("aivss_config must be an object")
-	}
-	kv := readCredentialFile(t)
-	if v := kv[devconfig.EnvAPIKeyDirect]; !strings.HasPrefix(v, "obx_test_") {
-		t.Errorf("api key not written: %q", v)
-	}
-	if v := kv[devconfig.EnvAgentPrivateKey]; v != "c2VlZA==" {
-		t.Errorf("private key not written: %q", v)
-	}
-	if v, ok := kv[devconfig.EnvDID]; ok {
-		t.Errorf("credential file carries the DID (%q); secrets and coordinates must not share a file", v)
-	}
 }
 
 // TestEndToEndClaudeCodeRealInstall is the SL4-wire-1 acceptance: a init for
@@ -110,7 +63,7 @@ func TestEndToEndClaudeCodeRealInstall(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected a clean install, got err=%v", err)
 	}
-	if !res.Registered || !res.ConfigApplied || res.ConfigManualOnly {
+	if !res.Registered || !res.ConfigApplied {
 		t.Fatalf("expected registered+config-applied, got %+v", res)
 	}
 

@@ -5,13 +5,11 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/devconfig"
 	obgit "github.com/openbox-ai/openbox-shift-left/internal/adapters/common/git"
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/backend"
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/devinit"
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/prompt"
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/providers"
-	"github.com/openbox-ai/openbox-shift-left/internal/client"
 	"github.com/openbox-ai/openbox-shift-left/internal/provider"
 	"github.com/openbox-ai/openbox-shift-left/internal/telemetry"
 	"github.com/openbox-ai/openbox-shift-left/internal/transport"
@@ -25,9 +23,8 @@ import (
 var version = "0.1.0-dev"
 
 const (
-	exitOK         = 0
-	exitError      = 1
-	exitConfigOnly = 2
+	exitOK    = 0
+	exitError = 1
 )
 
 type app struct {
@@ -86,14 +83,10 @@ func (a *app) run(args []string) int {
 		return a.runAuth(args[1:])
 	case "init":
 		return a.runDevInit(args[1:])
-	case "dev":
-		return a.runDev(args[1:])
 	case "hook":
 		return a.runHook(args[1:])
 	case "rewake":
 		return a.runRewake(args[1:])
-	case "managed":
-		return a.runManaged(args[1:])
 	case "doctor":
 		return a.runDoctor(args[1:])
 	case "uninstall":
@@ -116,77 +109,6 @@ func (a *app) run(args []string) int {
 	}
 }
 
-func (a *app) runDev(args []string) int {
-	if len(args) == 0 {
-		return a.errorf("usage: openbox dev verify [flags]")
-	}
-	switch args[0] {
-	case "init":
-		return a.errorf("`openbox dev init` no longer exists; use `openbox init --provider <name>`")
-	case "verify":
-		return a.runDevVerify(args[1:])
-	case "sync":
-		return a.errorf("`openbox dev sync` no longer exists; policy is evaluated by OpenBox " +
-			"on every gated tool call, so there is no local bundle to fetch. " +
-			"Any leftover policy-bundle.json on this machine is inert and can be deleted.")
-	default:
-		return a.errorf("usage: openbox dev verify [flags]")
-	}
-}
-
-func (a *app) runDevVerify(args []string) int {
-	fs := a.newFlagSet("openbox dev verify")
-	var dryRun bool
-	fs.BoolVar(&dryRun, "dry-run", false, "print the plan (method, path, base_url, DID); make no network call")
-	fs.BoolVar(&dryRun, "print-plan", false, "alias for --dry-run")
-	if code, ok := parseFlags(fs, args); !ok {
-		return code
-	}
-
-	if dryRun {
-		baseURL, did := devconfig.ResolveCoordinates()
-		fmt.Fprintln(a.stdout, "DRY RUN; openbox dev verify would call (no network, no secret access):")
-		fmt.Fprintf(a.stdout, "  request:  GET %s%s\n", baseURL, client.AuthValidatePath)
-		fmt.Fprintf(a.stdout, "  base_url: %s\n", baseURL)
-		fmt.Fprintf(a.stdout, "  did:      %s\n", displayOrUnset(did))
-		return exitOK
-	}
-
-	creds, err := devconfig.ResolveCredentials()
-	if err != nil {
-		return a.errorf("cannot verify; %v.\n"+
-			"  Run `openbox init --provider <claude-code|codex|cursor>` first, then retry.", err)
-	}
-
-	c, err := client.New(client.Config{
-		BaseURL:       creds.BaseURL,
-		APIKey:        creds.APIKey,
-		DID:           creds.DID,
-		PrivateKeyB64: creds.PrivateKeyB64,
-	})
-	if err != nil {
-		return a.errorf("%v", err)
-	}
-
-	if err := c.Validate(context.Background()); err != nil {
-		// It never contains the key/seed/nonce/signature (INV-1); only status +
-		// guidance.
-		fmt.Fprintf(a.stderr, "✗ %v\n", err)
-		return exitError
-	}
-	fmt.Fprintf(a.stdout, "✓ verified: %s @ %s\n", creds.DID, creds.BaseURL)
-	return exitOK
-}
-
-func displayOrUnset(s string) string {
-	if s == "" {
-		return "(not configured; run `openbox init`)"
-	}
-	return s
-}
-
-// runHook iNV-3 (the reason this does not go through errorf/usage): the hook
-// path must always return exitOK; a non-zero exit blocks the tool call.
 func (a *app) runHook(args []string) (code int) {
 	code = exitOK
 	// Report it on stderr, which the tool shows as a diagnostic and never parses
@@ -286,10 +208,6 @@ func (a *app) runDevInit(args []string) int {
 
 	d := devinit.Deps{Installer: inst, Out: a.stdout}
 	res, runErr := devinit.Run(context.Background(), o, d)
-	if runErr != nil && res != nil && res.ConfigManualOnly {
-		fmt.Fprintln(a.stderr, "note: "+runErr.Error())
-		return exitConfigOnly
-	}
 	if runErr != nil {
 		return a.errorf("%v", runErr)
 	}

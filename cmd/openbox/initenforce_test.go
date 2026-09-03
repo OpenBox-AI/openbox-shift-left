@@ -2,6 +2,7 @@ package main
 
 import (
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -142,6 +143,38 @@ func TestCodexInstallsHooksOnlyWithoutError(t *testing.T) {
 	for _, absent := range []string{"transport CA", "INTERCEPTS", "telemetry env"} {
 		if strings.Contains(s, absent) {
 			t.Errorf("a codex install claims a lane it cannot have (%q):\n%s", absent, s)
+		}
+	}
+}
+
+// TestAPersistedEnforceOptOutSurvivesAReInstall is the half that a
+// fresh-machine test cannot see. The defect CLAUDE.md records was not a missing
+// key -- it was a re-run silently putting `true` back over a deliberate opt-out,
+// which looks identical on a machine that never opted out.
+func TestAPersistedEnforceOptOutSurvivesAReInstall(t *testing.T) {
+	home := isolateHome(t)
+	seedCredentials(t)
+
+	// Somebody opted out, deliberately, before this install ran.
+	off := false
+	if err := devconfig.WriteConfig(filepath.Join(home, "dev.json"), devconfig.Update{Enforce: &off}); err != nil {
+		t.Fatal(err)
+	}
+	if devconfig.ResolveEnforce() {
+		t.Fatal("the fixture did not take; nothing below would mean anything")
+	}
+
+	for _, run := range []string{"first", "second"} {
+		a, _, errb := testApp(nil)
+		if code := a.run([]string{"init", "--provider", "claude-code"}); code != exitOK {
+			t.Fatalf("%s init exit = %d; stderr=%q", run, code, errb.String())
+		}
+		if devconfig.ResolveEnforce() {
+			t.Fatalf("the %s install reverted a deliberate enforce opt-out", run)
+		}
+		cfg := readDevJSON(t, home)
+		if cfg.Enforce == nil || *cfg.Enforce {
+			t.Fatalf("the %s install rewrote the persisted opt-out: %+v", run, cfg.Enforce)
 		}
 	}
 }

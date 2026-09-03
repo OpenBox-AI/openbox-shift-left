@@ -317,19 +317,6 @@ func TestInstaller_PreservesPriorSyncCoordinates(t *testing.T) {
 	}
 }
 
-func TestInstaller_Plan(t *testing.T) {
-	inst := Installer{HooksPath: "/x/hooks.json", ConfigPath: "/x/dev.json", EngineBinary: "/x/openbox"}
-	plan := inst.Plan(CredentialRef{DID: testDID})
-	for _, want := range []string{"/hooks", "trust", testDID, "0.145.0", "CODEX_THREAD_ID", "hook codex"} {
-		if !strings.Contains(plan, want) {
-			t.Errorf("plan missing %q:\n%s", want, plan)
-		}
-	}
-	if strings.Contains(plan, "obx_") {
-		t.Errorf("plan leaked a credential: %s", plan)
-	}
-}
-
 func TestInstaller_RequiresDID(t *testing.T) {
 	inst, _, _ := testInstaller(t)
 	if err := inst.Install(CredentialRef{}); err == nil {

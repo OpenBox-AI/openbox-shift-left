@@ -149,7 +149,7 @@ func resolveHookBlock() hookBlockState {
 			// governing and only our user-level duplicate is inert. Saying
 			// "nothing is governed" there sends somebody hunting a gap that is
 			// not there.
-			if managedHooksAreOurs(managedPath) {
+			if managedHooksAreOurs(managedPath, managedLayers(managedPath, managed)) {
 				state.governedElsewhere = true
 				state.summary = "not this install's copy, and it does not need to be: " + key +
 					" is set by managed policy and that policy installs OpenBox's own hooks. " +
@@ -191,11 +191,27 @@ func resolveHookBlock() hookBlockState {
 			"Set at the managed level, so a user, project or local file cannot override it.")
 		return state
 	}
-	state.detail = append(state.detail,
-		fmt.Sprintf("Set at the %s level. A higher-precedence file setting it to false re-enables hooks.", decidedBy.label))
-	// The org's own hooks are unaffected by a non-managed disableAllHooks, so
-	// this machine may still be governed -- by them, not by us.
+	switch decidedBy.label {
+	case "project", "local":
+		state.detail = append(state.detail,
+			fmt.Sprintf("Set at the %s level, so it disables hooks for sessions started in THIS directory.", decidedBy.label),
+			"The user-wide install still governs sessions started anywhere else.")
+	default:
+		state.detail = append(state.detail,
+			fmt.Sprintf("Set at the %s level. A higher-precedence file setting it to false re-enables hooks.", decidedBy.label))
+	}
+	// A non-managed disableAllHooks cannot disable managed hooks, so this
+	// machine may still be governed -- and where those managed hooks are
+	// OpenBox's own, it is governed BY US, which is the opposite of what a bare
+	// "nothing is governed" would say.
 	if managed != nil && gjson.GetBytes(managed, "hooks").Exists() {
+		if managedHooksAreOurs(managedPath, managedLayers(managedPath, managed)) {
+			state.governedElsewhere = true
+			state.detail = append(state.detail,
+				fmt.Sprintf("This machine is STILL GOVERNED: %s declares OpenBox's own hooks, and a", managedPath),
+				"non-managed disableAllHooks cannot turn managed hooks off. Only the user-level copy is off.")
+			return state
+		}
 		state.detail = append(state.detail,
 			fmt.Sprintf("This machine is still governed by managed policy: %s installs its own hooks, and a", managedPath),
 			"non-managed disableAllHooks cannot turn those off. What is off is OpenBox's half.")
@@ -243,7 +259,10 @@ func managedLayers(mainPath string, main []byte) []managedLayer {
 // hookLockKey reports which managed-only key, if any, locks hooks away from
 // user and project sources.
 func hookLockKey(raw []byte) (string, bool) {
-	if gjson.GetBytes(raw, "allowManagedHooksOnly").Bool() {
+	// Present-and-not-false, rather than Bool(). A malformed value resolves to
+	// true in the tool, so reading "yes" or 1 as false would report a locked
+	// machine as governed -- the one direction that must never happen here.
+	if k := gjson.GetBytes(raw, "allowManagedHooksOnly"); k.Exists() && k.Type != gjson.False {
 		return "allowManagedHooksOnly", true
 	}
 	strict := gjson.GetBytes(raw, "strictPluginOnlyCustomization")
@@ -266,10 +285,21 @@ func hookLockKey(raw []byte) (string, bool) {
 }
 
 // managedHooksAreOurs reports whether the managed policy installs OpenBox's own
-// hooks. Classified through the same registry the installer and doctor use, so
-// the three cannot hold different opinions about what "ours" means.
-func managedHooksAreOurs(managedPath string) bool {
-	audit, err := providers.AuditHooks(managedPath)
+// hooks, in ANY of its layers. The tool merges the main file with every
+// managed-settings.d drop-in, so hooks declared in one and a lock declared in
+// another are the same policy -- and auditing only the main file reported a
+// governed fleet as ungoverned.
+//
+// Classified through the same registry the installer and doctor use, so the
+// three cannot hold different opinions about what "ours" means.
+func managedHooksAreOurs(mainPath string, layers []managedLayer) bool {
+	for _, m := range layers {
+		if audit, err := providers.AuditHooks(m.path); err == nil && len(audit.Engines) > 0 {
+			return true
+		}
+	}
+	// The main path may not be among the layers when it could not be read.
+	audit, err := providers.AuditHooks(mainPath)
 	return err == nil && len(audit.Engines) > 0
 }
 

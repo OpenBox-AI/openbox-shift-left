@@ -339,3 +339,81 @@ func TestTheHealthyAnswerSaysWhatItRead(t *testing.T) {
 		t.Errorf("the healthy answer does not say what it could not read:\n%s", all)
 	}
 }
+
+// TestOurHooksInADropInStillCountAsGoverning. The tool merges the main managed
+// file with every managed-settings.d drop-in, so hooks in one and a lock in the
+// other are the same policy. Auditing only the main file reported a governed
+// fleet as ungoverned.
+func TestOurHooksInADropInStillCountAsGoverning(t *testing.T) {
+	f := seedHookFiles(t)
+	f.write(t, f.managed, `{"allowManagedHooksOnly": true}`)
+	dropIn := filepath.Join(filepath.Dir(f.managed), "managed-settings.d", "10-openbox.json")
+	if err := os.MkdirAll(filepath.Dir(dropIn), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	f.write(t, dropIn, `{"hooks": {"PreToolUse": [{"matcher": "*", "hooks": [`+
+		`{"type": "command", "command": "/usr/local/bin/openbox hook claude-code PreToolUse"}]}]}}`)
+
+	state := resolveHookBlock()
+	if !state.governedElsewhere {
+		t.Fatalf("OpenBox's hooks in a drop-in were not recognised as governing: %+v", state)
+	}
+}
+
+// TestANonManagedDisableAllHooksCannotUngovernAManagedFleet. Documented: only a
+// managed-level disableAllHooks can disable managed hooks. So where the managed
+// policy declares OUR hooks, a user-level disable turns off the redundant copy
+// and nothing else — reporting that machine as ungoverned is backwards.
+func TestANonManagedDisableAllHooksCannotUngovernAManagedFleet(t *testing.T) {
+	f := seedHookFiles(t)
+	f.write(t, f.managed, `{"hooks": {"SessionStart": [{"hooks": [{"type": "command",`+
+		`"command": "/usr/local/bin/openbox hook claude-code SessionStart"}]}]}}`)
+	f.write(t, f.user, `{"disableAllHooks": true}`)
+
+	state := resolveHookBlock()
+	if !state.governedElsewhere {
+		t.Fatalf("a managed OpenBox fleet was reported ungoverned by a user-level disable: %+v", state)
+	}
+	if !strings.Contains(strings.Join(state.detail, " "), "STILL GOVERNED") {
+		t.Errorf("the finding does not say the machine is still governed: %+v", state)
+	}
+}
+
+// TestAMalformedLockIsTreatedAsSet. Documented: an invalid value for one of
+// these keys resolves to true until it is fixed. Reading it as false is the one
+// direction that reports a locked machine as governed.
+func TestAMalformedLockIsTreatedAsSet(t *testing.T) {
+	for _, body := range []string{
+		`{"allowManagedHooksOnly": "yes"}`,
+		`{"allowManagedHooksOnly": 1}`,
+		`{"allowManagedHooksOnly": "true"}`,
+	} {
+		f := seedHookFiles(t)
+		f.write(t, f.managed, body)
+		if !resolveHookBlock().blocked {
+			t.Errorf("%s was read as not blocking; a malformed lock resolves to true in the tool", body)
+		}
+	}
+	// And an explicit false is still false.
+	g := seedHookFiles(t)
+	g.write(t, g.managed, `{"allowManagedHooksOnly": false}`)
+	if resolveHookBlock().blocked {
+		t.Error("an explicit false was read as a lock")
+	}
+}
+
+// TestAProjectLevelDisableIsScopedToThatDirectory. It disables hooks for
+// sessions started there, not on the machine — and a user-wide install still
+// governs everywhere else, so calling it a machine-wide block overstates it.
+func TestAProjectLevelDisableIsScopedToThatDirectory(t *testing.T) {
+	f := seedHookFiles(t)
+	f.write(t, f.project, `{"disableAllHooks": true}`)
+	state := resolveHookBlock()
+	if !state.blocked {
+		t.Fatalf("a project-level disable does block sessions here: %+v", state)
+	}
+	all := strings.Join(state.detail, " ")
+	if !strings.Contains(all, "THIS directory") || !strings.Contains(all, "anywhere else") {
+		t.Errorf("the finding does not scope the block to this directory: %+v", state)
+	}
+}

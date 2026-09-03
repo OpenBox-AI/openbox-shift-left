@@ -3,7 +3,7 @@
 #
 # Nothing here is simulated: a real org policy compiled into the real OPA
 # bundle mints a real approval window, and the decisions are made through
-# `openbox approve` under the approver's own credential.
+# `the dashboard's own REST route.
 #
 # The approver runs as a background poller rather than a person watching a
 # terminal — that is the only substitution, and it is the same REST call a
@@ -44,7 +44,7 @@ tb_audit_since() { tail -c "+$(($1 + 1))" "$AUDIT" 2>/dev/null; }
 
 # ── the org policy + the queue: test/lib/policy.sh ─────────────────────────
 # tb_gate_on / tb_gate_off, tb_pending_first, tb_settle and friends live there
-# because 70-approver-auto.sh needs exactly the same gate.
+# because the release helper in lib/policy.sh needs exactly the same gate.
 pending_first() { tb_pending_first; }
 pending_json() { tb_pending_json; }
 release_pending() { tb_release_pending; }

@@ -67,20 +67,9 @@ func Lookup(name string) (provider.Installer, error) {
 			inst.EngineBinary = exe
 		}
 		return inst, nil
-	case provider.Cursor:
-		return provider.Stub{ProviderName: provider.Cursor, Manual: cursorManual}, nil
 	default:
 		return nil, fmt.Errorf("%w: %q (supported: %s)", provider.ErrUnknown, name, strings.Join(provider.Supported(), ", "))
 	}
-}
-
-func cursorManual(ref provider.CredentialRef) string {
-	return fmt.Sprintf(`Cursor adapter is not built yet.
-Manual config until the bundle ships:
-  - Add hooks.json / Team hooks over beforeSubmitPrompt, beforeMCPExecution,
-    afterFileEdit that invoke 'openbox' (note: Cursor hooks fail-open).
-  - Credentials come from ~/.openbox/.env (written by 'openbox auth'), never
-    inline. This install governs DID %s.`, ref.DID)
 }
 
 // RemoveProviderHooks takes every OpenBox registration out of one provider's

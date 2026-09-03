@@ -18,19 +18,23 @@ func TestInitDefaultsToTheDeveloperRole(t *testing.T) {
 	}
 }
 
-func TestDevInitIsGone(t *testing.T) {
-	a, _, errb := testApp(nil)
-	if code := a.runDev([]string{"init", "--provider", "claude-code"}); code == exitOK {
-		t.Error("`openbox dev init` still succeeds; it must not run at all")
-	}
-	if msg := errb.String(); !strings.Contains(msg, "openbox init") {
-		t.Errorf("the error does not point at the surviving spelling:\n%s", msg)
-	}
-	b, _, errb2 := testApp(nil)
-	if code := b.runDev([]string{"nope"}); code == exitOK {
-		t.Error("an unknown dev subcommand succeeded")
-	}
-	if usage := errb2.String(); !strings.Contains(usage, "dev verify") || strings.Contains(usage, "sync") {
-		t.Errorf("dev usage must advertise verify and nothing else:\n%s", usage)
+// TestDevVerbIsGone. `openbox dev` was a second namespace with its own
+// tombstones for two subcommands that had already been removed from it; the
+// verb itself now goes the same way, and what `dev verify` proved is reported
+// by `doctor` instead.
+func TestDevVerbIsGone(t *testing.T) {
+	for _, args := range [][]string{
+		{"dev"},
+		{"dev", "verify"},
+		{"dev", "init", "--provider", "claude-code"},
+		{"dev", "sync"},
+	} {
+		a, _, errb := testApp(nil)
+		if code := a.run(args); code == exitOK {
+			t.Errorf("%v still succeeds", args)
+		}
+		if !strings.Contains(errb.String(), "unknown command") {
+			t.Errorf("%v was not refused as an unknown command: %s", args, errb.String())
+		}
 	}
 }

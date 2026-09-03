@@ -5,6 +5,7 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/internal/client/memhttptest"
 	"net"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
@@ -272,5 +273,55 @@ func TestUnitAddrMatchIsAWholeToken(t *testing.T) {
 		if got := containsAddrToken(tc.body, tc.addr); got != tc.want {
 			t.Errorf("%s: containsAddrToken(%q) = %v, want %v", name, tc.addr, got, tc.want)
 		}
+	}
+}
+
+// TestASupervisorUnitRefusesATemporaryBinary. `go run` compiles to a temp
+// directory and deletes the binary on exit. The hooks are safe -- they name the
+// stable copy in the plugin bundle -- but a lane unit names the running binary,
+// with KeepAlive and Restart=always. So the daemon comes up, passes its
+// readiness check, gets the proxy and CA keys written behind it, and then
+// vanishes: at the next login the supervisor restart-loops a missing file while
+// every model call fails closed against a dead port.
+//
+// This was reachable only through an opt-in flag before the lanes became
+// unconditional. It is now the default path for anyone running from source.
+func TestASupervisorUnitRefusesATemporaryBinary(t *testing.T) {
+	for name, path := range map[string]string{
+		"go run build":    filepath.Join(os.TempDir(), "go-build123", "b001", "openbox"),
+		"nested go-build": filepath.Join("/var", "folders", "xy", "go-build99", "exe", "openbox"),
+	} {
+		t.Run(name, func(t *testing.T) {
+			if reason := temporaryBuild(path); reason == "" {
+				t.Errorf("temporaryBuild(%q) = %q; a unit naming it would outlive the file", path, reason)
+			}
+		})
+	}
+	// Including a deliberate build into the temp directory, which is the remedy
+	// the refusal itself recommends: the signal is the go-build cache, not the
+	// parent directory.
+	for _, path := range []string{
+		"/usr/local/bin/openbox",
+		filepath.Join(os.TempDir(), "openbox"),
+		"/Users/dev/.claude/plugins/openbox-observe/bin/openbox",
+	} {
+		if reason := temporaryBuild(path); reason != "" {
+			t.Errorf("temporaryBuild(%q) = %q; an installed binary must be accepted", path, reason)
+		}
+	}
+
+	// And the refusal has to reach the caller, naming what to do instead.
+	origExe := executableFn
+	t.Cleanup(func() { executableFn = origExe })
+	executableFn = func() (string, error) {
+		return filepath.Join(os.TempDir(), "go-build77", "b001", "openbox"), nil
+	}
+	a, _, _ := testApp(nil)
+	_, err := a.selfPath()
+	if err == nil {
+		t.Fatal("selfPath accepted a temporary build")
+	}
+	if !strings.Contains(err.Error(), "go build -o") {
+		t.Errorf("the refusal does not say how to fix it: %v", err)
 	}
 }

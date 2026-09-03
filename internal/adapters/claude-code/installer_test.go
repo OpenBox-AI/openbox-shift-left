@@ -137,28 +137,6 @@ func TestInstaller_PersistsEnforcePosture(t *testing.T) {
 	}
 }
 
-func TestInstaller_Plan(t *testing.T) {
-	inst := Installer{PluginDir: "/x/plugins", ConfigPath: "/x/dev.json", SettingsPath: "/x/settings.json"}
-	plan := inst.Plan(CredentialRef{DID: testDID})
-	// The plan states the scope in the terms a reader acts on: every session on
-	// this machine, activated by this command alone. It must not send anybody
-	// looking for a managed-settings step to turn governance on -- that tier is
-	// enforcement, and claiming otherwise reads as "nothing is governed yet".
-	for _, want := range []string{"EVERY session", "/x/settings.json", testDID, "metadata-only"} {
-		if !strings.Contains(plan, want) {
-			t.Errorf("plan missing %q:\n%s", want, plan)
-		}
-	}
-	for _, gone := range []string{"enabledPlugins", "--scope", "awaits"} {
-		if strings.Contains(plan, gone) {
-			t.Errorf("the plan still claims activation is pending (%q):\n%s", gone, plan)
-		}
-	}
-	if strings.Contains(plan, "obx_") {
-		t.Errorf("plan leaked a credential: %s", plan)
-	}
-}
-
 // TestInstaller_ReInstallIsByteIdentical re-init must be byte-identical: a
 // second Install with the same ref overwrites the bundle + config with the
 // same content (idempotency, not just no-error).

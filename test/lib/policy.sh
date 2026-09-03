@@ -7,7 +7,7 @@
 # check that it did, because "the policy exists" and "OPA is enforcing it" are
 # different facts, ~20s apart.
 #
-# Shared by 40-approvals.sh and 40-approvals.sh. Requires TB_AGENT (the
+# Shared by 40-approvals.sh. Requires TB_AGENT (the
 # agent whose policy this is) to be set by the caller.
 
 # The rule core's OPA client expects: a `result` document carrying decision +

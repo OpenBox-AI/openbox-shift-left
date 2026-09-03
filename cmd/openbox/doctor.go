@@ -22,6 +22,7 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/laneservice"
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/managed"
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/providers"
+	"github.com/openbox-ai/openbox-shift-left/internal/client"
 	"github.com/openbox-ai/openbox-shift-left/internal/telemetry"
 	"github.com/openbox-ai/openbox-shift-left/internal/transport"
 )
@@ -104,6 +105,8 @@ func (a *app) runDoctor(args []string) int {
 		state := managed.ProviderState(prov)
 		fmt.Fprintf(a.stdout, "  %-12s %s\n", prov, state)
 	}
+
+	a.reportReachability()
 
 	a.reportHookRegistration()
 
@@ -286,8 +289,8 @@ func (a *app) reportLanes() {
 			fmt.Fprintf(a.stdout, "  WARNING      this lane is ELECTED but nothing is listening, so NO lane is emitting\n")
 			fmt.Fprintf(a.stdout, "               model-call turns on this machine. If you did not install it, something\n")
 			fmt.Fprintf(a.stdout, "               else set its env keys; the election reads where the tool is routed,\n")
-			fmt.Fprintf(a.stdout, "               not what OpenBox installed. `openbox init --provider claude-code --full`\n")
-			fmt.Fprintf(a.stdout, "               installs it, or --remove-all clears the routing.\n")
+			fmt.Fprintf(a.stdout, "               not what OpenBox installed. `openbox init --provider claude-code`\n")
+			fmt.Fprintf(a.stdout, "               brings it back up; `openbox uninstall` clears the routing.\n")
 		}
 		fmt.Fprintf(a.stdout, "  log          %s\n", laneLogPath(lane.spec, home))
 	}
@@ -348,7 +351,7 @@ func (a *app) reportCoverage() {
 				label = "UN-ROUTED"
 			}
 			fmt.Fprintf(a.stdout, "  %-12s %s: %s\n", c.Lane, label, c.Describe())
-			fmt.Fprintf(a.stdout, "               `openbox init --provider claude-code --full` rewrites them.\n")
+			fmt.Fprintf(a.stdout, "               `openbox init --provider claude-code` rewrites them.\n")
 			fmt.Fprintf(a.stdout, "               Note: during an install this state is normal for a few seconds -\n")
 			fmt.Fprintf(a.stdout, "               the daemon is started BEFORE its env keys are written, on purpose.\n")
 		}
@@ -492,3 +495,50 @@ func (a *app) reportBlockedHooks() {
 		fmt.Fprintf(a.stdout, "    %s\n", line)
 	}
 }
+
+// reportReachability answers the question `openbox dev verify` used to, in the
+// place people actually look when something is wrong.
+//
+// It is the first thing in doctor that touches the network, which makes its
+// failure behaviour the design: doctor is what you run WHEN the control plane
+// is unreachable, so an unreachable one has to be a reported line and never a
+// non-zero exit that suppresses everything below it. The timeout is bounded for
+// the same reason -- a doctor that hangs tells you nothing at all.
+func (a *app) reportReachability() {
+	fmt.Fprintf(a.stdout, "\nControl plane\n")
+
+	creds, err := devconfig.ResolveCredentials()
+	if err != nil {
+		fmt.Fprintf(a.stdout, "  reachable    NOT CHECKED; %v\n", err)
+		fmt.Fprintf(a.stdout, "               Run `openbox auth`. Until then the hooks fire, fail to resolve\n")
+		fmt.Fprintf(a.stdout, "               credentials, and fail open -- governing nothing, silently.\n")
+		return
+	}
+
+	c, err := client.New(client.Config{
+		BaseURL:       creds.BaseURL,
+		APIKey:        creds.APIKey,
+		DID:           creds.DID,
+		PrivateKeyB64: creds.PrivateKeyB64,
+	})
+	if err != nil {
+		fmt.Fprintf(a.stdout, "  reachable    NOT CHECKED; the local credentials are unusable: %v\n", err)
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), doctorReachTimeout)
+	defer cancel()
+	if err := c.Validate(ctx); err != nil {
+		// Status and guidance only. The error never carries the key, the seed,
+		// the nonce or the signature (INV-1).
+		fmt.Fprintf(a.stdout, "  reachable    NO; %v\n", err)
+		fmt.Fprintf(a.stdout, "               Events spool locally and deliver when this clears, so a short\n")
+		fmt.Fprintf(a.stdout, "               outage costs nothing. `openbox doctor` re-checks.\n")
+		return
+	}
+	fmt.Fprintf(a.stdout, "  reachable    yes; authenticated as %s @ %s\n", creds.DID, creds.BaseURL)
+}
+
+// doctorReachTimeout keeps the check short. Doctor is a report, and a report
+// that blocks on a dead endpoint is worse than one that says it timed out.
+const doctorReachTimeout = 5 * time.Second

@@ -169,6 +169,9 @@ func (a *app) setupTelemetry(homeDir, addr string, verbose bool) error {
 			}
 			fmt.Fprintf(a.stdout, "  %-14s %d keys -> %s (user scope: %s)\n",
 				"telemetry env", len(keys), "http://"+addr, settings)
+			fmt.Fprintf(a.stdout, "                 this makes the tool EXPORT its own telemetry, including prompt and\n")
+			fmt.Fprintf(a.stdout, "                 tool content, to that local receiver. What leaves this machine is\n")
+			fmt.Fprintf(a.stdout, "                 still gated by the content_capture posture.\n")
 			return res.Replaced, nil
 		},
 	})

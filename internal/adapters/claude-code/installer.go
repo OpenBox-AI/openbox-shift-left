@@ -11,7 +11,6 @@ import (
 
 	"github.com/gofrs/flock"
 	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/devconfig"
-	obgit "github.com/openbox-ai/openbox-shift-left/internal/adapters/common/git"
 	providerspi "github.com/openbox-ai/openbox-shift-left/internal/provider"
 )
 
@@ -38,53 +37,6 @@ func (Installer) Name() providerspi.Name { return providerspi.ClaudeCode }
 
 // Available reports that the Claude Code adapter is built.
 func (Installer) Available() bool { return true }
-
-// Plan describes what Install would write, without writing anything (--dry-run
-// and the onboarding summary). It never prints a secret value (INV-1).
-func (i Installer) Plan(ref CredentialRef) string {
-	var b strings.Builder
-	fmt.Fprintf(&b, "OpenBox Claude Code plugin (observe-only, STORY-SL-4):\n")
-	fmt.Fprintf(&b, "  - Create the engine directory → %s\n", filepath.Join(i.pluginDir(), "bin"))
-	fmt.Fprintf(&b, "      It holds the openbox binary the hooks invoke, and nothing else: no plugin\n")
-	fmt.Fprintf(&b, "      manifest and no second copy of the hook config.\n")
-	fmt.Fprintf(&b, "  - Register %d hook events → %s\n", len(localHookEvents), i.settingsPath())
-	fmt.Fprintf(&b, "      each one runs `bin/openbox hook claude-code <event>`; PreToolUse also gets the\n")
-	fmt.Fprintf(&b, "      async approval watcher. Foreign hooks and unrelated keys are left untouched.\n")
-	if i.EngineBinary != "" {
-		fmt.Fprintf(&b, "  - Place the openbox engine → %s\n", filepath.Join(i.pluginDir(), "bin", "openbox"))
-	} else {
-		fmt.Fprintf(&b, "  - (packaging places the openbox engine into bin/openbox)\n")
-	}
-	fmt.Fprintf(&b, "  - Write dev config (non-secret coordinates) → %s\n", i.configPath())
-	fmt.Fprintf(&b, "      developer_did=%s\n", ref.DID)
-	fmt.Fprintf(&b, "      base_url=%s\n", devconfig.BaseURLLabel(ref.BaseURL))
-	fmt.Fprintf(&b, "      content_capture=%s (default ON as of 2026-07-15; set false to restore metadata-only)\n", contentCaptureLabel(ref.ContentCapture))
-	fmt.Fprintf(&b, "  - Credentials are NOT touched here: `openbox auth` wrote them to ~/.openbox/.env and\n")
-	fmt.Fprintf(&b, " the hook reads them at runtime. This command cannot read or write a secret.\n")
-	fmt.Fprintf(&b, "\nCommit-trailer stamping (STORY-SL-5, session→commit binding):\n")
-	fmt.Fprintf(&b, "  - The session hook maintains a per-session liveness registry (%s) so a git\n", obgit.DefaultSessionDir())
-	fmt.Fprintf(&b, "    commit is attributed to the session that made it; parallel-safe across concurrent\n")
-	fmt.Fprintf(&b, "    sessions (worktree-scoped, INV-2 metadata-only).\n")
-	fmt.Fprintf(&b, "  - The prepare-commit-msg hook runs `bin/openbox hook git prepare-commit-msg` (the same\n")
-	fmt.Fprintf(&b, "    unified engine; STORY-SL4-WIRE-2; no separate git-hook binary).\n")
-	fmt.Fprintf(&b, "  - Ambient install of that hook is %s (it modifies a repo's .git/hooks). Enable at\n", onOff(ref.InstallGitHook))
-	fmt.Fprintf(&b, "    onboarding with `openbox init --install-git-hook` (persisted to dev config);\n")
-	fmt.Fprintf(&b, "    OPENBOX_INSTALL_GIT_HOOK overrides either way; or install per repo with\n")
-	fmt.Fprintf(&b, "    `openbox hook git install`. Idempotent; never overwrites a foreign hook.\n")
-	fmt.Fprintf(&b, "\nHook scope:\n")
-	fmt.Fprintf(&b, "  - EVERY session on this machine, in any directory. Nothing further is needed to\n")
-	fmt.Fprintf(&b, "    activate it, and the tool's file watcher picks the change up immediately, so\n")
-	fmt.Fprintf(&b, "    sessions already running are governed too.\n")
-	if wd, err := os.Getwd(); err == nil {
-		fmt.Fprintf(&b, "  - Sweep any superseded OpenBox entry out of %s. An entry left there would\n", ProjectSettingsPath(wd))
-		fmt.Fprintf(&b, "    register the same gate a second time.\n")
-	}
-	fmt.Fprintf(&b, "\nOrg-wide mandate (a separate tier from activation; NFR-5):\n")
-	fmt.Fprintf(&b, "  Managed settings with allowManagedHooksOnly make governance non-removable by the\n")
-	fmt.Fprintf(&b, "  developer. That is enforcement, not activation: this install already governs.\n")
-	fmt.Fprintf(&b, "  See `openbox managed install` and deployments/managed/.\n")
-	return b.String()
-}
 
 // Install materializes the plugin bundle and writes the dev config.
 func (i Installer) Install(ref CredentialRef) error {

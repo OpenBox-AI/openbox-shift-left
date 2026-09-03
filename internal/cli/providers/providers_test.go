@@ -8,29 +8,32 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/internal/provider"
 )
 
-func TestBuiltProvidersAreRealAndCursorIsStub(t *testing.T) {
-	for name, want := range map[string]provider.Name{
-		"claude-code": provider.ClaudeCode,
-		"codex":       provider.Codex,
-	} {
+// TestEverySupportedProviderResolvesToARealInstaller. There is no not-built
+// state left in the SPI: a name either has an adapter or is refused as unknown,
+// so a stub that reported success while installing nothing cannot exist.
+func TestEverySupportedProviderResolvesToARealInstaller(t *testing.T) {
+	for _, name := range provider.Supported() {
 		inst, err := Lookup(name)
 		if err != nil {
-			t.Fatalf("Lookup(%q): %v", name, err)
+			t.Fatalf("Lookup(%q) is in Supported() but does not resolve: %v", name, err)
 		}
-		if !inst.Available() {
-			t.Errorf("%q must be a real installer, not a stub", name)
-		}
-		if inst.Name() != want {
-			t.Errorf("%q Name = %q", name, inst.Name())
+		if string(inst.Name()) != name {
+			t.Errorf("Lookup(%q).Name() = %q", name, inst.Name())
 		}
 	}
+}
 
-	inst, err := Lookup("cursor")
-	if err != nil {
-		t.Fatalf("Lookup(cursor): %v", err)
+// TestCursorIsNowAnUnknownProvider. The stub advertised a provider whose
+// adapter had not shipped, and `init` exited non-zero for it after printing
+// manual instructions. Refusing the name outright is the honest answer, and it
+// travels through the same path as any typo.
+func TestCursorIsNowAnUnknownProvider(t *testing.T) {
+	_, err := Lookup("cursor")
+	if !errors.Is(err, provider.ErrUnknown) {
+		t.Fatalf("Lookup(cursor) = %v, want ErrUnknown", err)
 	}
-	if inst.Available() {
-		t.Error("cursor should still be a stub until its adapter ships")
+	if !strings.Contains(err.Error(), "claude-code, codex") {
+		t.Errorf("the refusal should list what IS supported: %v", err)
 	}
 }
 
@@ -41,39 +44,5 @@ func TestLookupUnknown(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "claude-code") {
 		t.Errorf("unknown-provider error should list supported names: %v", err)
-	}
-}
-
-func TestStubPlanNamesTheIdentityNeverASecret(t *testing.T) {
-	inst, _ := Lookup("cursor")
-	ref := provider.CredentialRef{DID: "did:aip:abc"}
-	if err := inst.Install(ref); !errors.Is(err, provider.ErrNotBuilt) {
-		t.Fatalf("Install = %v, want ErrNotBuilt", err)
-	}
-	plan := inst.Plan(ref)
-	if !strings.Contains(plan, "did:aip:abc") || !strings.Contains(plan, ".env") {
-		t.Errorf("plan should name the DID and the credential file:\n%s", plan)
-	}
-	if strings.Contains(plan, "obx_") {
-		t.Errorf("stub plan leaked a credential value:\n%s", plan)
-	}
-}
-
-// TestCodexInstallerPlanSurfacesTrustStep story-SL7-A AC-2: the codex
-// installer resolves the running engine into its hook commands and its plan
-// surfaces the /hooks trust step (never a secret).
-func TestCodexInstallerPlanSurfacesTrustStep(t *testing.T) {
-	inst, err := Lookup("codex")
-	if err != nil {
-		t.Fatal(err)
-	}
-	plan := inst.Plan(provider.CredentialRef{DID: "did:aip:abc"})
-	for _, want := range []string{"/hooks", "hook codex", "did:aip:abc"} {
-		if !strings.Contains(plan, want) {
-			t.Errorf("codex plan missing %q:\n%s", want, plan)
-		}
-	}
-	if strings.Contains(plan, "obx_") {
-		t.Errorf("codex plan leaked a credential value:\n%s", plan)
 	}
 }

@@ -1,7 +1,6 @@
 package provider
 
 import (
-	"errors"
 	"reflect"
 	"strings"
 	"testing"
@@ -9,33 +8,9 @@ import (
 
 func TestSupportedIsSortedAndComplete(t *testing.T) {
 	got := Supported()
-	want := []string{"claude-code", "codex", "cursor"}
+	want := []string{"claude-code", "codex"}
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("Supported() = %v, want %v", got, want)
-	}
-}
-
-func TestStubIsUnavailableAndDescribesManualConfig(t *testing.T) {
-	ref := CredentialRef{DID: "did:aip:abc"}
-	s := Stub{
-		ProviderName: Codex,
-		Manual: func(r CredentialRef) string {
-			return "manual: did=" + r.DID
-		},
-	}
-
-	if s.Name() != Codex {
-		t.Errorf("Name = %q", s.Name())
-	}
-	if s.Available() {
-		t.Error("a stub must report Available()==false")
-	}
-	if err := s.Install(ref); !errors.Is(err, ErrNotBuilt) {
-		t.Fatalf("Install = %v, want ErrNotBuilt", err)
-	}
-	plan := s.Plan(ref)
-	if !strings.Contains(plan, "did:aip:abc") {
-		t.Errorf("plan does not name the DID it would install for:\n%s", plan)
 	}
 }
 
@@ -59,16 +34,5 @@ func TestCredentialRefCarriesOnlySafeFields(t *testing.T) {
 				t.Errorf("CredentialRef field %q looks like a credential; installers must never receive one", name)
 			}
 		}
-	}
-}
-
-// TestStubPlanFallsBackWhenManualIsNil a Stub built without a Manual func must
-// not panic on Plan (the observe/ --dry-run path); it falls back to a generic
-// message naming the provider.
-func TestStubPlanFallsBackWhenManualIsNil(t *testing.T) {
-	s := Stub{ProviderName: Cursor} // Manual left nil
-	plan := s.Plan(CredentialRef{DID: "did:aip:x"})
-	if !strings.Contains(plan, "cursor") {
-		t.Errorf("nil-Manual fallback should name the provider, got %q", plan)
 	}
 }

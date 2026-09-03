@@ -43,15 +43,12 @@ func (f *fakeRegistrar) FindByName(_ context.Context, name string) (*backend.Age
 }
 
 type fakeInstaller struct {
-	avail      bool
 	installErr error
 	installed  bool
 	gotRef     provider.CredentialRef
 }
 
-func (f *fakeInstaller) Name() provider.Name                  { return provider.ClaudeCode }
-func (f *fakeInstaller) Available() bool                      { return f.avail }
-func (f *fakeInstaller) Plan(r provider.CredentialRef) string { return "MANUAL-CONFIG did=" + r.DID }
+func (f *fakeInstaller) Name() provider.Name { return provider.ClaudeCode }
 func (f *fakeInstaller) Install(r provider.CredentialRef) error {
 	f.gotRef = r
 	if f.installErr != nil {
@@ -95,53 +92,17 @@ func validReg() *backend.Registration {
 	}
 }
 
-func TestDryRunMakesNoWrites(t *testing.T) {
-	home := isolateHome(t)
-	reg := &fakeRegistrar{}
-	inst := &fakeInstaller{avail: false}
-	var out bytes.Buffer
-
-	_, err := Run(context.Background(), Options{Provider: "claude-code", DryRun: true},
-		Deps{Registrar: reg, Installer: inst, Out: &out})
-	if err != nil {
-		t.Fatalf("dry-run err: %v", err)
-	}
-	if reg.createCalls != 0 || reg.findCalls != 0 {
-		t.Errorf("dry-run touched the network: create=%d find=%d", reg.createCalls, reg.findCalls)
-	}
-	if entries, err := os.ReadDir(home); err == nil && len(entries) != 0 {
-		t.Errorf("dry-run wrote %v; it must touch no file at all", entries)
-	}
-	if !strings.Contains(out.String(), "DRY RUN") {
-		t.Errorf("dry-run output missing DRY RUN banner:\n%s", out.String())
-	}
-}
-
-func TestDryRunDisclosesInstallGitHook(t *testing.T) {
-	isolateHome(t)
-	var out bytes.Buffer
-	_, err := Run(context.Background(),
-		Options{Provider: "claude-code", DryRun: true, InstallGitHook: true},
-		Deps{Registrar: &fakeRegistrar{}, Installer: &fakeInstaller{avail: false}, Out: &out})
-	if err != nil {
-		t.Fatalf("dry-run err: %v", err)
-	}
-	if !strings.Contains(out.String(), "install_git_hook: true") {
-		t.Errorf("dry-run must disclose the ambient commit-hook install:\n%s", out.String())
-	}
-}
-
 func TestHappyPathStoresCredsNeverPrintsThem(t *testing.T) {
 	isolateHome(t)
 	reg := &fakeRegistrar{reg: validReg()}
-	inst := &fakeInstaller{avail: false} // Claude Code adapter (SL-4) not built
+	inst := &fakeInstaller{}
 	var out bytes.Buffer
 
 	res, err := Run(context.Background(), Options{Provider: "claude-code"},
 		Deps{Registrar: reg, Installer: inst, Out: &out})
 
-	if err == nil || !res.ConfigManualOnly {
-		t.Fatalf("expected manual-config error, got err=%v res=%+v", err, res)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
 	}
 	if !res.Registered || res.AgentID != "agent-1" {
 		t.Errorf("res = %+v", res)
@@ -162,9 +123,6 @@ func TestHappyPathStoresCredsNeverPrintsThem(t *testing.T) {
 	if strings.Contains(out.String(), "obx_test_SECRETKEYVALUE") || strings.Contains(out.String(), "PRIVATESEEDVALUE") {
 		t.Errorf("secret leaked to output:\n%s", out.String())
 	}
-	if !strings.Contains(out.String(), "MANUAL-CONFIG") {
-		t.Errorf("manual config not printed:\n%s", out.String())
-	}
 	if reg.lastReq.AgentType != "developer" || reg.lastReq.Icon == "" {
 		t.Errorf("bad create request: %+v", reg.lastReq)
 	}
@@ -173,7 +131,7 @@ func TestHappyPathStoresCredsNeverPrintsThem(t *testing.T) {
 func TestConfigAppliedWhenInstallerAvailable(t *testing.T) {
 	isolateHome(t)
 	reg := &fakeRegistrar{reg: validReg()}
-	inst := &fakeInstaller{avail: true}
+	inst := &fakeInstaller{}
 	res, err := Run(context.Background(), Options{Provider: "claude-code"},
 		Deps{Registrar: reg, Installer: inst, Out: &bytes.Buffer{}})
 	if err != nil {
@@ -200,7 +158,7 @@ func TestIdempotentReuseSkipsRegistration(t *testing.T) {
 	}
 
 	reg := &fakeRegistrar{reg: validReg()}
-	inst := &fakeInstaller{avail: true}
+	inst := &fakeInstaller{}
 	res, err := Run(context.Background(), Options{Provider: "claude-code"},
 		Deps{Registrar: reg, Installer: inst, Out: &bytes.Buffer{}})
 	if err != nil {
@@ -221,7 +179,7 @@ func TestRemoteDuplicateBlocksWithoutForce(t *testing.T) {
 		byName: map[string]*backend.AgentSummary{"dev-x": {ID: "old-9", DID: "did:aip:old"}},
 	}
 	res, err := Run(context.Background(), Options{Provider: "claude-code", AgentName: "dev-x"},
-		Deps{Registrar: reg, Installer: &fakeInstaller{avail: true}, Out: &bytes.Buffer{}})
+		Deps{Registrar: reg, Installer: &fakeInstaller{}, Out: &bytes.Buffer{}})
 	if err == nil || !strings.Contains(err.Error(), "already exists") {
 		t.Fatalf("expected duplicate error, got %v", err)
 	}
@@ -238,7 +196,7 @@ func TestRemoteLookupErrorDoesNotFallThroughToCreate(t *testing.T) {
 	// It must surface and stop.
 	reg := &fakeRegistrar{reg: validReg(), findErr: errors.New("connection refused")}
 	res, err := Run(context.Background(), Options{Provider: "claude-code", AgentName: "dev-x"},
-		Deps{Registrar: reg, Installer: &fakeInstaller{avail: true}, Out: &bytes.Buffer{}})
+		Deps{Registrar: reg, Installer: &fakeInstaller{}, Out: &bytes.Buffer{}})
 	if err == nil || !strings.Contains(err.Error(), "agent/list failed") {
 		t.Fatalf("expected surfaced list error, got %v", err)
 	}
@@ -254,7 +212,7 @@ func TestAPIErrorHalts(t *testing.T) {
 	isolateHome(t)
 	reg := &fakeRegistrar{createErr: &backend.APIError{StatusCode: 400, Body: "AIVSS config is required"}}
 	res, err := Run(context.Background(), Options{Provider: "claude-code", AgentName: "dev-x"},
-		Deps{Registrar: reg, Installer: &fakeInstaller{avail: true}, Out: &bytes.Buffer{}})
+		Deps{Registrar: reg, Installer: &fakeInstaller{}, Out: &bytes.Buffer{}})
 	if err == nil || !strings.Contains(err.Error(), "HALT") || !strings.Contains(err.Error(), "400") {
 		t.Fatalf("expected HALT with 400, got %v", err)
 	}
@@ -285,7 +243,7 @@ func TestPartialFailureReportsAgentAndResume(t *testing.T) {
 
 	reg := &fakeRegistrar{reg: validReg()}
 	res, err := Run(context.Background(), Options{Provider: "claude-code", AgentName: "dev-x"},
-		Deps{Registrar: reg, Installer: &fakeInstaller{avail: true}, Out: &bytes.Buffer{}})
+		Deps{Registrar: reg, Installer: &fakeInstaller{}, Out: &bytes.Buffer{}})
 	if err == nil || !strings.Contains(err.Error(), "agent-1") || !strings.Contains(err.Error(), "rotate") {
 		t.Fatalf("expected resume guidance naming agent-1, got %v", err)
 	}
@@ -303,7 +261,7 @@ func TestMissingPrivateKeyErrors(t *testing.T) {
 	r.PrivateKey = ""
 	reg := &fakeRegistrar{reg: r}
 	_, err := Run(context.Background(), Options{Provider: "claude-code", AgentName: "dev-x"},
-		Deps{Registrar: reg, Installer: &fakeInstaller{avail: true}, Out: &bytes.Buffer{}})
+		Deps{Registrar: reg, Installer: &fakeInstaller{}, Out: &bytes.Buffer{}})
 	if err == nil || !strings.Contains(err.Error(), "signing key") {
 		t.Fatalf("expected signing-key error, got %v", err)
 	}

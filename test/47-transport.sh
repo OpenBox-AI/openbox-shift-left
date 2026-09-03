@@ -13,7 +13,7 @@
 #   * a real LISTENER, a real dialer, a real TLS session to a real provider;
 #   * that the CA this installs is actually TRUSTED by the running Claude Code;
 #   * that :proxy: turns reach governance_events;
-#   * that `--remove-all` returns the machine to its baseline — the OD2 half that
+#   * that `openbox uninstall` returns the machine to its baseline — the OD2 half that
 #     no unit test can observe, because it is a property of the system, not of a
 #     process.
 #

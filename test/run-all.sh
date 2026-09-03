@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # test/run-all.sh — run the phases, in order.
 #
-#   ./test/run-all.sh                      # preflight → … → approver-auto
+#   ./test/run-all.sh                      # preflight → … → visibility
 #   ./test/run-all.sh capture lineage      # preflight, then just those
 #   ./test/run-all.sh teardown             # give the box back
 #

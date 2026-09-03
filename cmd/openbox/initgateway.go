@@ -23,12 +23,54 @@ func gatewayIdentity(homeDir string) laneIdentity {
 	}
 }
 
+// selfPath is the binary a supervisor unit will name. It refuses a temporary
+// build, which is the one shape that produces a unit pointing at a file that
+// will not exist.
+//
+// `go run` compiles to a temp directory and deletes the binary on exit. The
+// hooks are safe -- they name the stable copy in the plugin bundle -- but a
+// lane unit names THIS path, with KeepAlive and Restart=always. So the daemon
+// comes up, passes its readiness check, gets the proxy and CA env keys written
+// behind it, and then vanishes: on the next login the supervisor restart-loops
+// a missing file while every model call fails closed against a dead port. It
+// was reachable only through an opt-in flag before; an install brings the lanes
+// up by default now, so it is the default path for anyone running from source.
 func (a *app) selfPath() (string, error) {
-	binPath, err := os.Executable()
+	binPath, err := a.executable()
+	if err == nil {
+		if reason := temporaryBuild(binPath); reason != "" {
+			return "", fmt.Errorf("refusing to install a supervisor unit that points at %s: %s.\n"+
+				"  The unit would outlive that file, and a supervisor cannot restart a binary that is\n"+
+				"  gone -- every model call would then fail against a dead port.\n"+
+				"  Build it somewhere that survives first:  go build -o ./openbox ./cmd/openbox && ./openbox init …",
+				binPath, reason)
+		}
+	}
 	if err != nil {
 		return "", fmt.Errorf("cannot resolve this binary's path for the service unit: %w", err)
 	}
 	return binPath, nil
+}
+
+// executable is a seam only so a test can present a temporary path without
+// building one.
+var executableFn = os.Executable
+
+func (a *app) executable() (string, error) { return executableFn() }
+
+// temporaryBuild names why a path is not durable, or "" when it is.
+//
+// The signal is a go-build cache segment, which is precisely what `go run`
+// produces and deletes. Refusing everything under the temp directory instead
+// would be both too broad and self-contradicting: `go build -o /tmp/openbox` is
+// the remedy this refusal recommends, and it lands there.
+func temporaryBuild(path string) string {
+	for _, seg := range strings.Split(filepath.Clean(path), string(filepath.Separator)) {
+		if strings.HasPrefix(seg, "go-build") {
+			return "it is a `go run` build, deleted when the command exits"
+		}
+	}
+	return ""
 }
 
 func gatewaySettingsPath(homeDir string) string { return gatewayservice.SettingsPath(homeDir) }

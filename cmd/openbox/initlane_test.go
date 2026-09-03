@@ -17,10 +17,15 @@ import (
 )
 
 type laneHarness struct {
-	home      string
-	commands  []string
-	units     map[string]bool
+	home     string
+	commands []string
+	units    map[string]bool
+	// listening is what the readiness probe answers.
 	listening bool
+	// startFails makes the supervisor refuse the unit it was just handed. That
+	// is a different failure from "nothing ever listened", and it is the one
+	// branch of setupLane that prints the env-was-not-written sentence.
+	startFails bool
 }
 
 func newLaneHarness(t *testing.T) *laneHarness {
@@ -39,8 +44,16 @@ func newLaneHarness(t *testing.T) *laneHarness {
 	})
 
 	currentUID = func() string { return "501" }
+	// See fakeSupervisor: the test binary is a go-build artifact, which
+	// selfPath refuses for a unit that would outlive it.
+	origExe := executableFn
+	t.Cleanup(func() { executableFn = origExe })
+	executableFn = func() (string, error) { return "/usr/local/bin/openbox", nil }
 	run = func(name string, args ...string) error {
 		h.commands = append(h.commands, name+" "+strings.Join(args, " "))
+		if h.startFails {
+			return errors.New("supervisor refused the unit")
+		}
 		return nil
 	}
 	waitForListenerFn = func(string, time.Duration) bool { return h.listening }
@@ -578,4 +591,38 @@ func nothingIsListening(t *testing.T) {
 	prev := portOccupied
 	portOccupied = func(string) (bool, string) { return false, "" }
 	t.Cleanup(func() { portOccupied = prev })
+}
+
+// TestLaneEnvIsNotWrittenWhenTheSupervisorRefusesTheUnit is the other half of
+// the ordering guarantee, and the one that had no coverage: the readiness probe
+// never runs because the supervisor declined the unit outright.
+//
+// It matters as much as the never-listened case. If the env keys were written
+// here, every model call on the machine would be pointed at a port nothing will
+// ever hold — loopback fails closed, so the failure is total rather than a
+// silent bypass. The refusal has to name that nothing was written.
+func TestLaneEnvIsNotWrittenWhenTheSupervisorRefusesTheUnit(t *testing.T) {
+	skipUnlessSupervised(t)
+	h := newLaneHarness(t)
+	h.seedCA(t)
+	h.startFails = true
+	a, out, _ := testApp(map[string]string{"HOME": h.home})
+
+	err := a.setupTransport(h.home, transport.DefaultAddr, false)
+	if err == nil {
+		t.Fatal("setupTransport reported success though the supervisor refused the unit")
+	}
+	if !strings.Contains(err.Error(), "NOT written") {
+		t.Errorf("the error does not say the env keys were left alone: %v", err)
+	}
+	if _, present := laneSettings(t, h.home)["HTTPS_PROXY"]; present {
+		t.Error("the proxy env key was written though the daemon never started; every model call " +
+			"on this machine would now fail against a port nothing holds")
+	}
+	if len(h.units) != 0 {
+		t.Errorf("the unit survived a failed start: %v", h.units)
+	}
+	if !strings.Contains(out.String(), "rolled back") {
+		t.Errorf("the rollback was silent:\n%s", out.String())
+	}
 }

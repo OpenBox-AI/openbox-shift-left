@@ -118,6 +118,12 @@ func fakeSupervisor(t *testing.T, openboxHome string) {
 
 	run = func(string, ...string) error { return nil }
 	currentUID = func() string { return "501" }
+	// The test binary itself lives under go-build, which selfPath refuses --
+	// correctly, since a unit naming it would outlive it. A stable path stands
+	// in for the installed binary.
+	origExe := executableFn
+	t.Cleanup(func() { executableFn = origExe })
+	executableFn = func() (string, error) { return "/usr/local/bin/openbox", nil }
 	portOccupied = func(string) (bool, string) { return false, "" }
 	waitForListenerFn = func(string, time.Duration) bool { return true }
 	waitForPortFreeFn = func(string, time.Duration) bool { return true }
@@ -244,29 +250,6 @@ func TestRemovedSecretBackendFlagFailsLoudly(t *testing.T) {
 				t.Errorf("error should point at `openbox auth`, got %q", errb.String())
 			}
 		})
-	}
-}
-
-// TestConfigManualOnlyExitsTwo a provider whose adapter is not built is a
-// partial success worth its own exit code, so a script can tell it apart from
-// a hard failure.
-func TestConfigManualOnlyExitsTwo(t *testing.T) {
-	home := isolateHome(t)
-	seedCredentials(t)
-	a, _, errb := testApp(nil)
-	code := a.run([]string{"init", "--provider", "cursor"})
-	if code != exitConfigOnly {
-		t.Fatalf("exit = %d, want %d; stderr=%q", code, exitConfigOnly, errb.String())
-	}
-	if !strings.Contains(errb.String(), "note:") {
-		t.Errorf("expected a note on partial success, got %q", errb.String())
-	}
-	kv, err := devconfig.ParseEnvFile(filepath.Join(home, ".env"))
-	if err != nil {
-		t.Fatalf("read credential file: %v", err)
-	}
-	if kv[devconfig.EnvAPIKeyDirect] != "obx_test_k" || kv[devconfig.EnvAgentPrivateKey] != testSeedB64 {
-		t.Errorf("init modified the credential file: %v", kv)
 	}
 }
 
@@ -795,78 +778,6 @@ func setVerifyCreds(t *testing.T, baseURL string) {
 	t.Setenv("OPENBOX_ED25519_SEED", verifyTestSeed)
 }
 
-// TestDevVerifyHappyPath: a valid key + signing round-trip against the mock
-// core prints a ✓ line naming the DID + base_url and exits 0.
-func TestDevVerifyHappyPath(t *testing.T) {
-	srv := coreValidateOK(t, verifyTestSeed)
-	setVerifyCreds(t, srv.URL)
-
-	a, out, errb := testApp(nil)
-	code := a.run([]string{"dev", "verify"})
-	if code != exitOK {
-		t.Fatalf("exit = %d, want 0; stderr=%q", code, errb.String())
-	}
-	if !strings.Contains(out.String(), "✓ verified:") ||
-		!strings.Contains(out.String(), verifyTestDID) ||
-		!strings.Contains(out.String(), srv.URL) {
-		t.Errorf("expected a ✓ line naming DID + base_url, got %q", out.String())
-	}
-	if strings.Contains(out.String(), verifyTestSeed) || strings.Contains(out.String(), "obx_test_") {
-		t.Errorf("INV-1: secret leaked into ✓ output: %q", out.String())
-	}
-}
-
-// TestDevVerifyBadKeyIsMappedFailure: core rejects the identity (401) → a ✗
-// with the mapped fix hint on stderr and a non-zero exit; no secret leaks.
-func TestDevVerifyBadKeyIsMappedFailure(t *testing.T) {
-	srv := memhttptest.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusUnauthorized)
-		_, _ = io.WriteString(w, `{"code":401,"message":"invalid token"}`)
-	}))
-	defer srv.Close()
-	setVerifyCreds(t, srv.URL)
-
-	a, out, errb := testApp(nil)
-	code := a.run([]string{"dev", "verify"})
-	if code == exitOK {
-		t.Fatalf("bad key must exit non-zero, got 0; stdout=%q", out.String())
-	}
-	if !strings.Contains(errb.String(), "✗") || !strings.Contains(errb.String(), "identity rejected") {
-		t.Errorf("expected a ✗ with a mapped reason, got %q", errb.String())
-	}
-	if strings.Contains(errb.String(), verifyTestSeed) {
-		t.Errorf("INV-1: secret leaked into ✗ output: %q", errb.String())
-	}
-}
-
-// TestDevVerifyDryRunIsOffline: --dry-run prints the plan (method, path,
-// base_url, DID) and makes NO network call; the registrar/store seams panic if
-// touched, and no creds are configured.
-func TestDevVerifyDryRunIsOffline(t *testing.T) {
-	t.Setenv("OPENBOX_CONFIG", filepath.Join(t.TempDir(), "none.json"))
-	t.Setenv("OPENBOX_BASE_URL", "https://core.example.test")
-	t.Setenv("OPENBOX_AGENT_DID", verifyTestDID)
-
-	a, out, _ := testApp(nil)
-	code := a.run([]string{"dev", "verify", "--dry-run"})
-	if code != exitOK {
-		t.Fatalf("dry-run exit = %d", code)
-	}
-	got := out.String()
-	for _, want := range []string{"DRY RUN", "GET ", client.AuthValidatePath, "https://core.example.test", verifyTestDID} {
-		if !strings.Contains(got, want) {
-			t.Errorf("dry-run plan missing %q; got %q", want, got)
-		}
-	}
-	a2, out2, _ := testApp(nil)
-	if code := a2.run([]string{"dev", "verify", "--print-plan"}); code != exitOK {
-		t.Fatalf("--print-plan exit = %d", code)
-	}
-	if !strings.Contains(out2.String(), "DRY RUN") {
-		t.Errorf("--print-plan did not render the plan: %q", out2.String())
-	}
-}
-
 // TestDevVerifyNoCredsSaysInitFirst: with nothing configured, verify exits
 // non-zero and tells the operator to run `openbox init` (never half-proceeds).
 func TestDevVerifyNoCredsSaysInitFirst(t *testing.T) {
@@ -1156,27 +1067,12 @@ func TestCodexInstallsForRealExitsZero(t *testing.T) {
 	}
 }
 
-// TestDevSyncIsRetired asking for help is not an error. A removed command must
-// SAY it was removed.
-func TestDevSyncIsRetired(t *testing.T) {
-	a, _, errb := testApp(nil)
-	if code := a.run([]string{"dev", "sync"}); code == exitOK {
-		t.Error("`dev sync` exited 0; a retired command must fail, not no-op")
-	}
-	for _, want := range []string{"no longer exists", "evaluated by OpenBox", "inert"} {
-		if !strings.Contains(errb.String(), want) {
-			t.Errorf("stderr %q must mention %q, so an operator learns what replaced it and "+
-				"that the leftover bundle file on disk is harmless", errb.String(), want)
-		}
-	}
-}
-
 func TestHelpFlagExitsZeroForEverySubcommand(t *testing.T) {
 	for _, args := range [][]string{
+		{"auth", "-h"},
 		{"init", "-h"},
-		{"dev", "verify", "-h"},
 		{"doctor", "-h"},
-		{"managed", "-h"}} {
+		{"uninstall", "-h"}} {
 		a, _, _ := testApp(nil)
 		if got := a.run(args); got != exitOK {
 			t.Errorf("openbox %v exited %d, want 0; asking for help is not an error", args, got)
@@ -1187,7 +1083,7 @@ func TestHelpFlagExitsZeroForEverySubcommand(t *testing.T) {
 // TestUnknownFlagExitsNonZero a parse error is still an error.
 func TestUnknownFlagExitsNonZero(t *testing.T) {
 	a, _, _ := testApp(nil)
-	if got := a.run([]string{"dev", "verify", "--no-such-flag"}); got == exitOK {
+	if got := a.run([]string{"init", "--no-such-flag"}); got == exitOK {
 		t.Error("an unknown flag must not exit 0")
 	}
 }
@@ -1281,4 +1177,65 @@ func scriptedAuth(t *testing.T, a *app, answers ...string) *prompt.Scripted {
 	p := &prompt.Scripted{Answers: answers}
 	a.newPrompt = func() (prompt.Prompter, error) { return p, nil }
 	return p
+}
+
+// TestDoctorReportsControlPlaneReachability. `openbox dev verify` proved this,
+// and `doctor` inherits it: same one call, reported where somebody looking for
+// a problem will actually see it.
+func TestDoctorReportsControlPlaneReachability(t *testing.T) {
+	srv := coreValidateOK(t, verifyTestSeed)
+	setVerifyCreds(t, srv.URL)
+	t.Setenv(envManagedSettingsPath, filepath.Join(t.TempDir(), "absent.json"))
+
+	out, code := runDoctorIn(t, t.TempDir())
+	if code != exitOK {
+		t.Fatalf("doctor exit = %d:\n%s", code, out)
+	}
+	if !strings.Contains(out, "authenticated as") || !strings.Contains(out, verifyTestDID) {
+		t.Errorf("doctor does not report a verified identity:\n%s", out)
+	}
+	if strings.Contains(out, verifyTestSeed) || strings.Contains(out, "obx_test_") {
+		t.Errorf("a credential value reached doctor's output:\n%s", out)
+	}
+}
+
+// TestDoctorDegradesWhenTheControlPlaneIsUnreachable is the design point, not a
+// detail. doctor is what you run WHEN things are broken, so an unreachable
+// control plane has to be a reported line and never a non-zero exit that
+// suppresses everything below it.
+func TestDoctorDegradesWhenTheControlPlaneIsUnreachable(t *testing.T) {
+	// A port nothing can be listening on.
+	setVerifyCreds(t, "http://127.0.0.1:1")
+	t.Setenv(envManagedSettingsPath, filepath.Join(t.TempDir(), "absent.json"))
+
+	out, code := runDoctorIn(t, t.TempDir())
+	if code != exitOK {
+		t.Fatalf("doctor exited %d with the control plane down; it must report and continue:\n%s", code, out)
+	}
+	if !strings.Contains(out, "reachable    NO") {
+		t.Errorf("doctor does not report the failure:\n%s", out)
+	}
+	// And the rest of the report still ran.
+	if !strings.Contains(out, "Hook registration") {
+		t.Errorf("the unreachable control plane suppressed the rest of the report:\n%s", out)
+	}
+}
+
+// TestDoctorSaysWhenThereAreNoCredentialsToCheckWith. Distinct from
+// unreachable: hooks that fire, fail to resolve credentials and fail open
+// govern nothing while looking installed, so the remedy has to be named.
+func TestDoctorSaysWhenThereAreNoCredentialsToCheckWith(t *testing.T) {
+	isolateHome(t)
+	t.Setenv("OPENBOX_API_KEY", "")
+	t.Setenv("OPENBOX_AGENT_PRIVATE_KEY", "")
+	t.Setenv("OPENBOX_ED25519_SEED", "")
+	t.Setenv(envManagedSettingsPath, filepath.Join(t.TempDir(), "absent.json"))
+
+	out, code := runDoctorIn(t, t.TempDir())
+	if code != exitOK {
+		t.Fatalf("doctor exit = %d:\n%s", code, out)
+	}
+	if !strings.Contains(out, "NOT CHECKED") || !strings.Contains(out, "openbox auth") {
+		t.Errorf("doctor does not name the remedy for absent credentials:\n%s", out)
+	}
 }

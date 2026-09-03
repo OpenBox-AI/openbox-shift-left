@@ -83,7 +83,7 @@ export OPENBOX_SESSION_DIR="${OPENBOX_SESSION_DIR:-$TB_STATE/state/sessions}"
 export CODEX_HOME="${CODEX_HOME_OVERRIDE:-$TB_STATE/state/codex-home}"
 mkdir -p "$TB_STATE/state" "$CODEX_HOME"
 
-# ~/.openbox, relocated: dev.json, approver.json and the .env credential file.
+# ~/.openbox, relocated: dev.json and the .env credential file.
 # It must be ABSOLUTE — devconfig rejects a relative OPENBOX_HOME, because a
 # hook's working directory is whatever project the tool happens to be in.
 export OPENBOX_HOME="${OPENBOX_HOME_OVERRIDE:-$TB_STATE/openbox-home}"
@@ -125,7 +125,8 @@ tb_state_get() { cat "$TB_STATE/$1" 2>/dev/null || true; }
 tb_psql() { docker exec -i "$TB_PG" psql -U postgres -d "$TB_PG_DB" -q -t -A -c "$1"; }
 
 # tb_mint_key creates the org API key the harness asserts through: read-only,
-# plus manage:agent_session so the approver half of 40-approvals can decide.
+# plus manage:agent_session so 40-approvals can decide a request through the
+# dashboard's own REST route.
 tb_mint_key() {
 	local token hash
 	token="obx_key_$(openssl rand -hex 24)"

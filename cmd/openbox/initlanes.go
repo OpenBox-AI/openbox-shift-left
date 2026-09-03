@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/devconfig"
@@ -53,6 +54,17 @@ func (r laneReport) print(a *app) {
 func (a *app) setupLanes(req laneRequest) laneReport {
 	var report laneReport
 	if !req.telemetry && !req.transport {
+		return report
+	}
+	// A platform with no daemon packaging has nothing to install, and saying a
+	// lane "did NOT come up" there is false in the direction that matters: that
+	// wording is reserved for a lane that should be running and is not, and
+	// printing it on every install teaches the reader to skip it.
+	if laneservice.Telemetry("", "", false).UnitPath(runtime.GOOS, "x") == "" {
+		fmt.Fprintf(a.stdout, "\nModel-call lanes: not packaged for %s; hooks only.\n", runtime.GOOS)
+		fmt.Fprintf(a.stdout, "  Tool calls are still governed. To observe model calls here, run `openbox\n")
+		fmt.Fprintf(a.stdout, "  telemetry` and `openbox transport` in the foreground, or supervise them with\n")
+		fmt.Fprintf(a.stdout, "  the platform's own service manager.\n")
 		return report
 	}
 	home, code := a.gatewayHome()
@@ -119,10 +131,9 @@ type removalRequest struct {
 	gateway, telemetry, transport bool
 	purge                         bool
 	force                         bool
-	// uninstall marks the caller as `openbox uninstall` rather than `init
-	// --remove-all`. Two sentences below are only true for one of them: the
-	// spool is retained by one caller and deleted by the other, and
-	// --force-restore is a flag only one of them accepts.
+	// uninstall marks the caller as `openbox uninstall`, which is the only
+	// caller there is now. It survives because purgeLaneData still needs to know
+	// that the spool is being deleted by the same run rather than kept.
 	uninstall bool
 }
 
@@ -193,16 +204,11 @@ func (a *app) runRemovals(home string, req removalRequest) removalResult {
 	}
 
 	if !res.ok() {
-		// `uninstall` takes no flags, so it must not name one as the remedy.
-		remedy := "A value that changed after OpenBox set it is not overwritten without --force-restore"
-		if req.uninstall {
-			remedy = "A value that changed after OpenBox set it was left alone; resolve it by hand, then re-run"
-		}
-		a.errorf("removal did not complete for: %v; the rest was removed. %s", res.failed, remedy)
-		return res
-	}
-	if !req.uninstall {
-		fmt.Fprintf(a.stdout, "\nDone. `openbox doctor` reports what is left.\n")
+		// No command accepts a flag that would overwrite a changed value, so the
+		// remedy is the only one there is: resolve it by hand and run again.
+		a.errorf("removal did not complete for: %v; the rest was removed. "+
+			"A value that changed after OpenBox set it was left alone; resolve it, then re-run.",
+			res.failed)
 	}
 	return res
 }

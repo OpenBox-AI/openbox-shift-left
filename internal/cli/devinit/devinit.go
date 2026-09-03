@@ -40,7 +40,6 @@ type Options struct {
 	AgentName      string // override; default derived from user+host
 	Icon           string // non-empty string required by the backend DTO
 	Description    string
-	DryRun         bool
 	ManagedEnable  bool // org-wide force-enable substrate; opt-in
 	InstallGitHook bool // enable ambient commit-trailer hook install (off by default)
 	// ProjectDir selects project hook scope, which is `openbox init`'s default :
@@ -64,13 +63,12 @@ type Deps struct {
 // Result summarizes what happened, for the caller to render / pick an exit
 // code.
 type Result struct {
-	AgentID          string
-	DID              string
-	AgentName        string
-	Reused           bool // creds already present locally; no registration done
-	Registered       bool // a new agent was created this run
-	ConfigApplied    bool // provider installer ran
-	ConfigManualOnly bool // adapter not built; manual config was printed
+	AgentID       string
+	DID           string
+	AgentName     string
+	Reused        bool // creds already present locally; no registration done
+	Registered    bool // a new agent was created this run
+	ConfigApplied bool // provider installer ran
 }
 
 func defaultAgentName() string {
@@ -115,9 +113,6 @@ func Run(ctx context.Context, o Options, d Deps) (*Result, error) {
 	if err != nil || res == nil {
 		return res, err
 	}
-	if o.DryRun {
-		return res, nil
-	}
 	return res, applyConfig(o, d, ref, res)
 }
 
@@ -145,10 +140,6 @@ func register(ctx context.Context, o Options, d Deps) (*Result, provider.Credent
 		Findings:   o.Findings,
 	}
 	res := &Result{AgentName: name}
-
-	if o.DryRun {
-		return res, ref, planDryRun(o, d, name, icon, profile, ref)
-	}
 
 	if existing, err := readLocalCredentials(); err == nil && existing.apiKey != "" && existing.privateKey != "" {
 		did := devconfig.ResolveDIDOrEmpty()
@@ -236,12 +227,10 @@ func register(ctx context.Context, o Options, d Deps) (*Result, provider.Credent
 	return res, ref, nil
 }
 
+// applyConfig every recognized provider has a built adapter, so there is no
+// not-built branch left: a name either resolves to an installer or was refused
+// as unknown before reaching here.
 func applyConfig(o Options, d Deps, ref provider.CredentialRef, res *Result) error {
-	if !d.Installer.Available() {
-		res.ConfigManualOnly = true
-		fmt.Fprintf(d.Out, "\nProvider config not applied; %s\n\n%s\n", o.Provider, d.Installer.Plan(ref))
-		return fmt.Errorf("provider %q config not applied: adapter not built yet (see manual config above)", o.Provider)
-	}
 	if err := d.Installer.Install(ref); err != nil {
 		return fmt.Errorf("agent ready but writing %s config failed: %w", o.Provider, err)
 	}
@@ -260,26 +249,6 @@ func describePosture(v *bool) string {
 	default:
 		return "false"
 	}
-}
-
-func planDryRun(o Options, d Deps, name, icon string, profile aivss.Config, ref provider.CredentialRef) error {
-	out := d.Out
-	fmt.Fprintf(out, "DRY RUN; no network calls, no secret-store or filesystem writes.\n\n")
-	fmt.Fprintf(out, "Would register developer agent:\n")
-	fmt.Fprintf(out, "  provider:    %s\n", o.Provider)
-	fmt.Fprintf(out, "  agent_name:  %s\n", name)
-	fmt.Fprintf(out, "  agent_type:  %s\n", developerAgentType)
-	fmt.Fprintf(out, "  icon:        %s\n", icon)
-	fmt.Fprintf(out, "  aivss_config: base_security/ai_specific/impact (accepted developer posture; server computes score/tier)\n")
-	fmt.Fprintf(out, "  managed_enable: %t (substrate only; not activated in Phase 1)\n", o.ManagedEnable)
-	fmt.Fprintf(out, "  install_git_hook: %t (ambient commit-trailer hook; off by default; modifies .git/hooks)\n", o.InstallGitHook)
-	fmt.Fprintf(out, " enforce: %s (that decision: ON by default; inert until your org publishes a policy, and\n", describePosture(o.Enforce))
-	fmt.Fprintf(out, "           fail-open regardless. --enforce=false opts out and persists. Enforce also\n")
-	fmt.Fprintf(out, "           carries tier2 + findings, all persisted to dev.json; no runtime env)\n")
-	fmt.Fprintf(out, "\nWould write credentials to %s (0600, plaintext):\n", credentialFileLabel())
-	fmt.Fprintf(out, "  %s  (obx_ API key)\n  %s  (Ed25519 signing key)\n", devconfig.EnvAPIKeyDirect, devconfig.EnvAgentPrivateKey)
-	fmt.Fprintf(out, "\nProvider config:\n%s\n", d.Installer.Plan(ref))
-	return nil
 }
 
 func resumeErr(reg *backend.Registration, step string, err error) error {

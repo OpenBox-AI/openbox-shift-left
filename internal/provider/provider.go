@@ -1,17 +1,13 @@
 // Package provider is the shared SPI between the `openbox` CLI and the per-
-// tool adapters (Claude Code, Codex, Cursor). Until an adapter is built, its
-// slot is a Stub: Available()==false, Plan() only prints the manual config the
-// user must apply, and Install() returns ErrNotBuilt so `init` exits non-zero
-// for that provider. An Installer receives only non-secret install-time
+// tool adapters (Claude Code, Codex). Every recognized name has a built
+// adapter: there is no not-built state, no stub, and no predicate that could
+// only ever answer one way. An Installer receives only non-secret install-time
 // context (the DID, URLs and posture); it must never receive or embed a
 // credential value.
 //   - Installer; install time: what `openbox init` delegates to an adapter to
 package provider
 
-import (
-	"errors"
-	"fmt"
-)
+import "errors"
 
 // Name identifies a supported developer tool.
 type Name string
@@ -19,12 +15,7 @@ type Name string
 const (
 	ClaudeCode Name = "claude-code"
 	Codex      Name = "codex"
-	Cursor     Name = "cursor"
 )
-
-// ErrNotBuilt means the provider is recognized but its adapter (config writer)
-// has not shipped yet.
-var ErrNotBuilt = errors.New("provider adapter not built yet")
 
 // ErrUnknown means the provider name is not recognized at all.
 var ErrUnknown = errors.New("unknown provider")
@@ -64,36 +55,11 @@ type CredentialRef struct {
 // Installer writes one tool's native config, delegated from `init`.
 type Installer interface {
 	Name() Name
-	// Available reports whether this provider's adapter (config writer) is built.
-	Available() bool
-	// Plan returns a human-readable description of the config that would be
-	// written (used for --dry-run and for the manual-config message when the
-	// adapter is not yet built).
-	Plan(ref CredentialRef) string
-	// Install applies the config, or returns ErrNotBuilt when !Available().
+	// Install applies the config.
 	Install(ref CredentialRef) error
 }
 
 // Supported lists the recognized provider names, sorted.
 func Supported() []string {
-	return []string{string(ClaudeCode), string(Codex), string(Cursor)}
+	return []string{string(ClaudeCode), string(Codex)}
 }
-
-// Stub is the Installer for a recognized provider whose adapter is not built
-// yet.
-type Stub struct {
-	ProviderName Name
-	Manual       func(ref CredentialRef) string
-}
-
-func (s Stub) Name() Name      { return s.ProviderName }
-func (s Stub) Available() bool { return false }
-
-// Plan renders the provider-specific manual-config guidance.
-func (s Stub) Plan(ref CredentialRef) string {
-	if s.Manual == nil {
-		return fmt.Sprintf("provider %q adapter is not built yet; no manual config available.", s.ProviderName)
-	}
-	return s.Manual(ref)
-}
-func (s Stub) Install(ref CredentialRef) error { return ErrNotBuilt }
