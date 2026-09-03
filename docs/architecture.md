@@ -569,16 +569,18 @@ alignment judges **operations** and not the model's reply text, because that pat
 still reads only `payload.Spans`. Restoring it is a core-side change, and is
 deferred.
 
-**The gateway is a second span producer, and it behaves differently in both
-respects**. Its span describes a real observed HTTP exchange, so nothing about
-it is synthesized; and part of it ships with capture **off**: the method, URL,
-status and credential fingerprint are structural evidence for account binding,
-so a privacy switch does not remove them. Only the headers and bodies are gated.
+**An in-path lane is a second content producer, and it behaves differently in
+both respects**. Its record describes a real observed HTTP exchange, so nothing
+about it is synthesized; and part of it ships with capture **off**: the method,
+URL, status and credential fingerprint are structural evidence for account
+binding, so a privacy switch does not remove them. They ride `metadata` for
+exactly that reason, since the gate empties the content fields. Only the bodies
+are gated, and the observed headers are not sent at all.
 The two producers ride mutually exclusive events and their activity ids are in
 disjoint namespaces, so neither absorbs the other in core's dedupe. One
-consequence is a silent gap rather than an error: a gateway span carries the
-provider's **raw** response body, which is not the shape core's alignment
-extractor parses, so a gateway-observed turn contributes nothing to goal
+consequence is a silent gap rather than an error: a lane's `activity_output`
+carries the provider's **raw** response body, which is not the shape core's
+alignment extractor parses, so a lane-observed turn contributes nothing to goal
 alignment. Alignment for those turns comes from the hook path or not at all.
 - **Token usage is stored, aggregated and queryable.** Per-turn model + usage is
   emitted as an `llm_completion` activity pair, and the core-side extractor that

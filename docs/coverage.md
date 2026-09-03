@@ -302,7 +302,7 @@ lineage):
    Phase 1.
 4. **Assistant message/thought**, **retired as a non-goal: v1.2 for the
    completion text, v1.3 for tool content, v1.4 for thinking.** The completion
-   text egresses for Claude Code on the turn's span; **tool output, observe-path
+   text egresses for Claude Code in `activity_output.content`; **tool output, observe-path
    tool input, and the free-text failure detail egress as of v1.3**; **thinking
    egresses as of v1.4** in `activity_output.thinking`, all under the one
    `content_capture` gate, redacted before attachment and capped at 64KB.
@@ -342,8 +342,9 @@ lineage):
      top of the nine hand-rolled ones, so Claude Code content is now checked
      against 231 formats and Codex's prompt against none. A dedicated
      `CompletionReceived` type was the v1.1 candidate here; it was not built,
-     because the alignment reader that needs the text keys on a span rather than
-     an event type.
+     because the alignment reader that needs the text keys on the activity
+     fields of an existing `Activity*` row rather than on an event type of its
+     own.
 5. **Non-session telemetry** (Cursor Tab hooks, `workspaceOpen`, cloud-agent
    sessions that never emit `sessionStart`); the contract requires
    `openbox_session_id`, so events with no resolvable session are **not

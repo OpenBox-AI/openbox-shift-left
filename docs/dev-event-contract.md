@@ -100,8 +100,9 @@ What INV-2 still guarantees:
 - `span.request_body`/`response_body` remain in the schema but are **no longer
   read by the client**, so nothing an adapter puts there can egress. No adapter
   ever set them; both adapters have tests asserting they stay empty. The
-  assistant text that *does* egress rides a span the client mints from a hook
-  field, not this one; so the two are not the same channel re-opened.
+  assistant text that *does* egress rides `activity_output.content`, which the
+  control plane stores in a column of its own; so the two are not the same
+  channel re-opened.
 - ~~Tool commands and file bodies never egress on **observe** events.~~ **Retired in v1.3**. Tool input, tool output and the free-text
   failure detail now egress on ordinary tool events, under the same
   `content_capture` gate that covers a gated call's body; redacted before they

@@ -20,7 +20,7 @@ What leaves the machine, what never does, and the one setting that changes it.
 | **Your provider organization's UUID** | yes, if you are signed in | **new**; same source, same session field |
 | **Your provider organization's NAME, role, tier, billing** | **never** | all four sit in the same local file beside the two rows above, and none of them is sent. The evidence scope is org UUID + email, deliberately |
 | **Model-call request and response bodies** | only with an **in-path lane** running (gateway or transport), and only when the call names a session | **new**; and it is a **selection** of the request rather than the whole of it. What is stored: the model id, a ~4KB head of the **system prompt**, and the **newest messages** of the conversation that fit a 48KB budget -- newest first, so what changed since the last call is what survives. Tool definitions are dropped entirely, older messages are dropped once the budget is full, and a trailing element that is not a conversation turn -- the agent runtime appends a `role:"system"` token counter, which was the newest element on 67% of measured calls -- is dropped so the newest stored element is a real turn. The stored document records how many of each of the three went, each under its own key, and never drops all of the history: a history that is entirely non-turn keeps its newest element as it is. Plus the model's response, which is kept from its start. This is still the largest content class OpenBox collects, and the system prompt and recent conversation are the sensitive part of it. Three bounds apply and all three are fallible: the `content_capture` switch, local secret redaction before anything is attached, and a 64KB cap. A body the provider sent **compressed is decompressed in the capture path** so redaction can inspect it before attachment: `gzip` and `br` are decoded, which between them is every encoding observed across 83,190 recorded responses. An encoding outside that set (`zstd`, `deflate` -- advertised by the tool, returned by no provider) stores a marker naming it instead. Same session caveat as the row below |
-| **Model-call HTTP headers** | only with an **in-path lane** running (gateway or transport), and only when the call names a session | **new**; and only the non-credential ones: `Authorization`, `x-api-key`, `Cookie`, `Set-Cookie` and four more are replaced with `[redacted]` by name before anything is attached. The KEY is kept so a reviewer can see one was sent. Gated by `content_capture`. A relayed call that carries no `x-claude-code-session-id` header is recorded NOWHERE; the gateway declines to invent a session, so this is a real gap in the record rather than a silent attribution |
+| **Model-call HTTP headers** | **never** | they no longer leave the machine at all. The relay still redacts the credential headers by name locally, and the local gateway still reads two of them to attribute a call, but no header reaches the control plane under any posture. A relayed call that carries no `x-claude-code-session-id` header is recorded NOWHERE; the gateway declines to invent a session, so this is a real gap in the record rather than a silent attribution |
 | **A one-way fingerprint of your provider credential** | only with an **in-path lane** running (gateway or transport), and only when the call names a session | **new**; a truncated SHA-256, so OpenBox can tell WHICH registered credential made a call without holding it. Not gated by `content_capture`: it is the account-binding control, and a privacy switch that removed it would let an org opt out of being identified |
 | **Credentials** | **never** | they stay on your machine; in a plaintext file readable by you, see [Where credentials live](#where-credentials-live). The gateway relays yours to the provider byte-for-byte and stores none of it |
 | Git **commit trailer** and signed attestation | yes | commit sha, tree sha, session id; no diff, no file content |
@@ -55,14 +55,15 @@ are unchanged: the `content_capture` switch, local secret redaction before the t
 is attached, and a size cap. Tool calls still carry no bodies at all beyond the
 tool input and output described above.
 
-**A second body-carrying span exists once the local gateway runs**, and it is a
-larger widening than the first. The gateway observes real HTTP exchanges, so its
-span's request body is the whole request the tool sent the model, system prompt,
-message history, tool definitions, and its response body is the model's reply.
-Unlike the turn span, this one is a genuine measurement rather than a
-synthesized carrier, which is why it is the only span here without the
-`synthesized` marker. It is bounded by the same three mechanisms, it exists only
-while the gateway is running, and it records nothing at all for a call that
+**A second body-carrying class appears once an in-path lane runs**, and it is a
+larger widening than the first. The lane observes real HTTP exchanges, so its
+`activity_input` carries a **selection** of the request the tool sent the model
+-- the model id, a head of the system prompt, and the newest conversation turns
+that fit the budget, with tool definitions dropped entirely -- and its
+`activity_output` carries the model's reply. Unlike the turn's own content, this
+is a genuine measurement of bytes on the wire rather than a re-reading of a
+transcript. It is bounded by the same three mechanisms, it exists only
+while the lane is running, and it records nothing at all for a call that
 names no session. Two further limits on it, both deliberate: a body the provider
 sent under an encoding this relay cannot decode is **not captured at all**, a
 marker naming that encoding is stored instead, because compressed bytes are
@@ -73,11 +74,13 @@ rare case rather than the universal one -- and a call whose transport fails
 after the request was already sent is recorded **with no response and no
 status**, so a suppressed answer still leaves a trace.
 
-**Part of the gateway span is not content-gated.** The observed method, URL
-(query dropped), status and the credential fingerprint ship with
+**Part of a relayed call's record is not content-gated.** The observed method,
+URL (query dropped), status and the credential fingerprint ship with
 `content_capture: false` too: they are the account-binding evidence, and a
 privacy switch that removed them would let an org opt out of being identified.
-Only the headers and bodies are gated.
+They ride the event's `metadata`, which is why they survive a gate that empties
+the content fields. Only the bodies are gated; the headers are never sent at
+all.
 
 Neither paragraph is a privacy improvement claim. The first is a narrowing of
 what *could* egress; the second is a widening of what does.
@@ -317,7 +320,9 @@ Three limits, stated rather than implied:
 
 - **The server sees at most the first 65,536 characters** of a body (`capBody`).
   Characters, not bytes; so a body of non-ASCII text can exceed 64KB on the
-  wire, up to about 256KB in the worst case. Content-based policy is therefore
+  wire, up to about 256KB in the worst case. A relayed model call's bodies are
+  the exception: those are bounded in BYTES, and the request is bounded by
+  selection rather than by a window. Content-based policy is therefore
   not a complete check on a large file: a rule that would match past the cap
   does not fire. Local secret detection is *not* subject to this; it runs before
   the cap.

@@ -156,9 +156,11 @@ left for the gateway to relay unless your org has an Anthropic API key.
 Three things to know before you turn it on:
 
 - **The claim is detection, not prevention.** A developer can unset one
-  environment variable. That is *visible*, a session with model turns and no
-  gateway spans is a queryable shape, and `openbox doctor` reports the exposure,
-  but it is not stopped. Prevention is your MDM's job: [the MDM
+  environment variable. That is *visible*, and the signal is the `activity_id`
+  namespace: a session carrying hook-derived turns (`<session>:turn:<n>`) and
+  none from a lane (`:gateway:`, `:otel:`, `:proxy:`) had no lane watching its
+  model calls. `openbox doctor` reports the exposure, but it is not stopped.
+  Prevention is your MDM's job: [the MDM
   recipe](docs/gateway-mdm-recipe.md).
 - **It captures, it does not yet refuse.** The refusal path is written and
   tested but nothing calls it, deliberately: the status code a refusal should
