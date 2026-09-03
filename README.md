@@ -63,18 +63,18 @@ cd ~/code/my-project
 openbox init --provider claude-code
 ```
 
-Want telemetry without enforcement? `--enforce=false`. Note that enforcement
-acts on *your org's policy*, so until your org publishes one nothing is blocked
-and you get observability either way; with one diagnosed exception, documented
-in [What this does not prove](#what-this-does-not-prove).
+Want telemetry without enforcement? `OPENBOX_ENFORCE=false`, per run; nothing is
+persisted either way. Note that enforcement acts on *your org's policy*, so
+until your org publishes one nothing is blocked and you get observability
+regardless; with one diagnosed exception, documented in
+[What this does not prove](#what-this-does-not-prove).
 
-**4. Use `claude` as normal.** Nothing to run, no runtime environment to set;
-unless you added `--gateway`, which is the one flag that changes that
+**4. Use `claude` as normal.** Nothing to run and no runtime environment to keep
+set. The install brings up the model-call lanes for you
 ([below](#governing-the-model-call-itself)).
 
 ```bash
-openbox doctor      # what posture is actually in effect
-openbox dev verify  # can this machine reach and authenticate to core?
+openbox doctor      # the posture in effect, and whether core is reachable
 ```
 
 → **[Getting started](docs/getting-started.md)** for self-hosted, approvers,
@@ -93,27 +93,26 @@ install.
 
 ## Scope: what "governed" means
 
-```bash
-openbox init --provider claude-code                  # this project only (default)
-openbox init --provider claude-code --scope global   # every project; see below
-```
+One install, and **every session on this machine is governed**, in any
+directory. There is no scope to choose.
 
-**Project scope** writes the hook entries into
-`<project>/.claude/settings.local.json` and takes effect immediately. Re-running
-it removes any redundant OpenBox entry, one left at a different engine path, or
-one of ours registered twice, and says so, so a project cannot end up firing a
-hook more than once; hooks you added yourself are preserved. Sessions started
-**anywhere else are not governed and produce no events**; so on a machine set up
-this way, absence of events is not evidence of absence of work.
+The hook entries go into your user-wide settings file —
+`~/.claude/settings.json` for Claude Code, `~/.codex/hooks.json` for Codex — and
+take effect **immediately**: the tool watches that file, so sessions already
+running are governed too. There is nothing to restart, and absence of events is
+therefore evidence about the work rather than about the scope.
 
-**Global scope** is the real fleet rollout, and `init` cannot finish it alone:
-Claude Code activates a plugin org-wide through managed settings, which is an
-administrator's action, not a CLI's. `--scope global` installs the bundle and
-prints the exact snippet to deploy (see `deployments/managed/`). It tells you
-activation is pending rather than pretending it happened.
+Re-running `init` is safe and idempotent. It removes any redundant OpenBox entry
+— one left at a different engine path, or one of ours registered twice — and
+sweeps any superseded entry out of the current project's own settings file, so
+nothing fires twice. Hooks you added yourself are preserved byte for byte.
 
-Codex is **user-scoped only**; its hooks live at `~/.codex/hooks.json`, so
-`--scope local` is rejected rather than silently governing everything.
+**Activation and mandate are separate tiers.** The install above is complete on
+its own; nothing is pending. A *mandate* — governance the developer cannot
+remove — is managed settings deployed by an administrator, with
+`allowManagedHooksOnly`. See [`deployments/managed/`](deployments/managed/).
+`openbox doctor` reports whether such a policy is in force, and whether it
+allows this machine's own hooks to run at all.
 
 ## Governing the model call itself
 
@@ -173,14 +172,14 @@ Three things to know before you turn it on:
 ### Two more lanes, for the calls the gateway cannot see
 
 The gateway only governs what follows `ANTHROPIC_BASE_URL`; the terminal CLI.
-Two further lanes exist for the rest, and one command installs everything:
+Two further lanes exist for the rest, and the one install brings up both:
 
 ```bash
-openbox init --provider claude-code --full        # hooks + telemetry + transport
-openbox init --provider claude-code --remove-all  # and back out again
+openbox init --provider claude-code   # hooks + telemetry + transport
+openbox uninstall                     # and back out again, credentials included
 ```
 
-- **`--telemetry`** runs a loopback OTLP receiver and points Claude Code's own
+- **The telemetry lane** runs a loopback OTLP receiver and points Claude Code's own
   OpenTelemetry export at it. It carries **no content at all**, a model id, four
   token counts, a duration and one request id, no cost, which the server
   derives. Because it is the governed tool reporting its own calls, it is
@@ -207,11 +206,11 @@ Four things to know before turning these on:
   listen, TLS to a real socket, or what the control plane stores. **No stack has
   ever received an event from either lane**, and the desktop coverage that
   motivated them is intent, not measurement.
-- **`--transport` installs a certificate authority on your machine.** It is
+- **The transport lane installs a certificate authority on your machine.** It is
   generated locally, never transmitted, and name-constrained to that single host
   so a leak cannot mint a certificate for anything else. It has no more
   protection than your credentials do; anything running as you can read it.
-  `--remove-all` deletes it.
+  `openbox uninstall` deletes it.
 - **Neither lane refuses a call**, for the same reason the gateway does not: the
   refusal shape is unprobed.
 - **The transport lane cannot chain through a corporate proxy.** It clears the
@@ -223,19 +222,18 @@ Four things to know before turning these on:
 ```
 ~/.openbox/.env          your credentials; API key, signing key (0600, never commit)
   dev.json      posture (enforce, capture, fail_closed) + coordinates (DID, agent id, URLs)
-  approver.json approver config, if you are one
-                    ── with --gateway only ──
+                    ── only on a machine that ran an older --gateway install ──
   gateway.log   the daemon's stdio; the only place it says it is recording nothing
   gateway-prior-env.json   the ANTHROPIC_BASE_URL the install displaced, so
-                           --remove-gateway can put your own relay back
-                    ── with --telemetry / --transport / --full ──
+                           a removal can put your own relay back
+                    ── the two lanes every install brings up ──
   telemetry.log, transport.log   the same, per lane
   activation.json  per lane: the env keys we wrote, and the values that were there
-                   first, so --remove-all restores them key by key (0600)
+                   first, so a removal restores them key by key (0600)
   transport-ca.pem, transport-ca.key   the transport lane's CA and its private key; generated here, never sent, name-constrained to one host, and
-                   readable by anything running as you. --remove-all deletes both
-<project>/.claude/settings.local.json    which hooks fire here  (init --scope local)
-~/.claude/settings.json                  ANTHROPIC_BASE_URL, with --gateway only
+                   readable by anything running as you. `openbox uninstall` deletes both
+~/.claude/settings.json                  the hooks that govern EVERY session, plus the lane env keys
+<project>/.claude/settings.local.json    swept by init; only a pre-user-scope install leaves one
 ~/Library/LaunchAgents/ai.openbox.{gateway,telemetry,transport}.plist   lane units (macOS)
 ~/.config/systemd/user/openbox-{gateway,telemetry,transport}.service     lane units (Linux)
 ~/.claude/plugins/openbox-observe/       the plugin bundle + engine copy
@@ -265,7 +263,7 @@ coordinates  OPENBOX_AGENT_DID, OPENBOX_AGENT_ID, …       env var  >  dev.json
 | **Session telemetry** | every session, prompt, tool call and MCP call as normalized governance events |
 | **Per-turn finops** | which model spent how many tokens, per turn; the same signal the agent runtime reports, on by default |
 | **Enforcement** | block, ask-for-approval, or redact secrets *before* a tool runs, from your org policy; **on by default** |
-| **Human approval** | a risky call pauses the session; an approver answers from the dashboard or `openbox approve` |
+| **Human approval** | a risky call pauses the session; a reviewer answers from the dashboard |
 | **Autonomous approval** | a bounded approver answers inside the pause, so routine work never waits |
 | **Lineage** | `session → commit → deploy`, with a signed commit attestation |
 | **Evidence** | each session reports its own effective posture, so the control plane never has to trust the endpoint's word |
@@ -440,15 +438,23 @@ Details and current status:
 
 | | |
 |---|---|
-| `openbox auth` | credentials for this machine; it asks for everything authentication needs and nothing else. `--rotate` re-issues them for an agent that already exists |
-| `openbox init` | install hooks + posture. `--scope`, `--enforce=false`, `--install-git-hook`, `--role approver`, `--gateway` / `--remove-gateway`, `--telemetry`, `--transport`, and `--full` / `--remove-all` for every lane at once |
-| `openbox gateway` | run the model-call relay in the foreground; what the service unit invokes, and how you see why it will not start |
-| `openbox telemetry` | the same, for the loopback OTLP receiver (`--telemetry` / `--full`) |
-| `openbox transport` | the same, for the in-path CONNECT relay (`--transport` / `--full`) |
-| `openbox doctor` | the posture actually in effect, who decides, what happens when they are unreachable, whether this directory has more than one OpenBox engine registered, and; with the gateway; whether it is alive, whether this machine points at it, and what could bypass it |
-| `openbox dev verify` | can this machine reach and authenticate to core? |
-| `openbox approve` | `list`, `allow`, `deny`, or `--watch --auto` for the autonomous approver |
-| `openbox managed install` | write the managed-settings files for a fleet rollout |
+There are five, and `init` is the only one that takes a flag.
+
+| | |
+|---|---|
+| `openbox auth` | credentials for this machine. It prompts, and takes nothing: it asks for everything authentication needs and nothing else. Blank keeps what is already there |
+| `openbox init --provider <claude-code\|codex>` | install the hooks, every model-call lane the provider supports, and posture. Every session on this machine, enforcing, commit trailers on |
+| `openbox doctor` | the posture actually in effect and who decides it; whether core is reachable and this machine authenticates; whether the hooks can run at all on a managed machine; where this machine's model calls go and what could bypass that |
+| `openbox uninstall` | the full reversal, credentials included. It detects what is installed rather than being told |
+| `openbox version` | |
+
+Two postures stay per-machine, as environment variables rather than flags:
+`OPENBOX_ENFORCE=false` observes only for one run, and
+`OPENBOX_INSTALL_GIT_HOOK=false` leaves every repo's `.git/hooks` alone.
+
+`openbox gateway`, `telemetry`, `transport`, `hook` and `rewake` still exist and
+still dispatch — the service units and the hook registrations invoke them by
+string — but they are not commands you type, so they are not listed above.
 
 ## Documentation
 

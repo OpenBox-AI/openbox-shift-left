@@ -41,7 +41,7 @@ func TestValidate_HappyPath_SignedGET(t *testing.T) {
 	}
 }
 
-// TestValidate_MapsNon200 covers the reasons a `dev verify` must render as an
+// TestValidate_MapsNon200 covers the reasons a reachability check must render as an
 // actionable ✗: the stock-core collapsed 401/500 responses (reason codes are
 // NOT in the body) and the forward-compat reason-code envelope.
 func TestValidate_MapsNon200(t *testing.T) {

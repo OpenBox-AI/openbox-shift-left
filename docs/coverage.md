@@ -37,9 +37,9 @@ local OTLP **telemetry** receiver (`:otel:`) and a local in-path TLS
 subscription-OAuth calls the gateway lane cannot reach; phases 09–13 of plan
 `260827-2301-go127-oss-three-lanes`.
 
-As of **2026-08-30** both are installable, `openbox init --provider claude-code
---full` installs and enables them, `--remove-all` backs them out (phase 12), and
-both remain unconfirmed against a real client.
+Both are installed by `openbox init --provider claude-code` — there is no flag
+to opt into either, and `openbox uninstall` backs them out. Both remain
+unconfirmed against a real client.
 
 **Read this before reading any row below.** Both new lanes are verified by
 replay: real recorded traffic through the shipped code path, bind-free, with the
@@ -84,8 +84,8 @@ disjoint so core's dedupe cannot absorb one lane's event as another's, which
 means two lanes emitting would both store and double every token count with no
 error anywhere. The election is answered PER record rather than once per daemon:
 resolving it at startup shipped that exact double-count into review, because
-`--full` installs telemetry before transport and the daemon froze an answer that
-was correct only for the second it was taken.
+an install brings telemetry up before transport, and the daemon froze an answer
+that was correct only for the second it was taken.
 
 So a `:otel:` or `:proxy:` row can now legitimately appear in a developer's
 data. What a reader must NOT infer from a declared discriminator, or from an
@@ -200,7 +200,7 @@ is in scope for discovery and not for implementation, and `doctor` says
 and that too is now detected rather than assumed. Observed during one planning
 session: `~/.claude/settings.json` carried OpenBox's whole `env` block at 00:15
 and by 00:28 held only `hooks`, `statusLine` and `switchModelsOnFlag`, with no
-`--remove-all` run. The already-running CLI kept relaying, because environment
+removal run at all. The already-running CLI kept relaying, because environment
 routing binds at process start, so the un-routing was invisible from inside the
 session. `doctor` now compares each lane's activation record against the settings
 file as it is and names any managed key that has gone missing or changed. This is
@@ -369,7 +369,7 @@ fail-open** by default, `failClosed:true` to flip; Codex feature-gated
 `features.hooks`, stable and on by default ≥ 0.145.0).
 
 Enforcement **shipped** in Phase-2 (E6 for Claude Code for Codex) and is
-**on by default**; `openbox init … --enforce=false` opts out, and an observing
+**on by default**; `OPENBOX_ENFORCE=false` opts out for one run, and an observing
 session treats every verdict as allow (INV-3). Two bounds come with that default
 and both must stay true: enforcement is inert until the org publishes a policy,
 and `fail_closed` stays off. The verdict itself is the server's; nothing local

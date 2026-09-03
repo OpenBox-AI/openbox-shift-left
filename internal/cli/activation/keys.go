@@ -69,7 +69,7 @@ func mergeNoProxy(existing string, required ...string) string {
 }
 
 // KeyNames lists a key set's names, sorted; for the install plan and for
-// `--remove-all`'s report of exactly what it is touching.
+// `openbox uninstall`'s report of exactly what it is touching.
 func KeyNames(keys map[string]string) []string {
 	names := make([]string, 0, len(keys))
 	for name := range keys {

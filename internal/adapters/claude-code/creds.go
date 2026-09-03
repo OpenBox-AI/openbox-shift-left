@@ -81,7 +81,7 @@ func ResolveIdentity() (Identity, error) {
 }
 
 // ResolveCoordinates resolves the NON-secret target coordinates (base URL +
-// DID) with zero secret-store access; backs `dev verify --dry-run`.
+// DID) with zero secret-store access.
 func ResolveCoordinates() (baseURL, did string) { return devconfig.ResolveCoordinates() }
 
 // DefaultSpoolDir is where hot-path events are spooled before flush.

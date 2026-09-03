@@ -20,12 +20,13 @@
 # the second step you run yourself once the binary is on PATH:
 #
 #   export OPENBOX_CONTROL_TOKEN=<keycloak-jwt-or-obx_key_…>   # never a flag (INV-1)
-#   openbox init --provider claude-code --backend-url https://<your-openbox-backend> [--base-url https://<your-openbox-core>] [--enforce]
+#   openbox auth                          # prompts; registers this machine's agent
+#   openbox init --provider claude-code   # hooks, lanes and posture
 #
-# which registers your agent, materializes the Claude Code plugin into
-# ~/.claude/plugins/openbox-observe (copying this same engine into its bin/), stores
-# your credentials, and pulls your org policy. Governance is AMBIENT thereafter —
-# no daemon to run and no runtime env to set (enforcement evaluates in-process).
+# `auth` registers your agent and stores your credentials; `init` registers the
+# hooks that govern EVERY session on this machine, brings up the model-call lanes
+# the provider supports, and writes posture. Enforcement evaluates in-process, so
+# there is no daemon to run for it and no runtime env to keep set.
 #
 # Tunables (all optional env vars):
 #   OPENBOX_INSTALL_DIR    where to place the binary        (default: ~/.local/bin)
@@ -268,16 +269,17 @@ if [ "$ON_PATH" -ne 1 ]; then
   echo
 fi
 
-info "${BOLD}Next — wire OpenBox into Claude Code (one command):${RST}"
+info "${BOLD}Next — wire OpenBox into Claude Code (two commands):${RST}"
 echo
 printf '     export OPENBOX_CONTROL_TOKEN=<keycloak-jwt-or-obx_key_…>   # never a flag (INV-1)\n'
-printf '     %s%s init --provider claude-code --backend-url https://<your-openbox-backend> [--enforce]%s\n' "$BOLD" "$CMD" "$RST"
-printf '     %sSelf-hosted core? add%s --base-url https://<your-openbox-core> %s— without it the install points at the SaaS core.%s\n' "$DIM" "$RST" "$DIM" "$RST"
+printf '     %s%s auth%s                          # prompts; registers this machine\n' "$BOLD" "$CMD" "$RST"
+printf '     %s%s init --provider claude-code%s   # hooks, lanes and posture\n' "$BOLD" "$CMD" "$RST"
+printf '     %sSelf-hosted core? answer both URL prompts in%s %s auth %s— one default and one\n' "$DIM" "$RST" "$CMD" "$DIM"
+printf '     override sends your events to the SaaS core and surfaces later as a 401.%s\n' "$RST"
 echo
-printf '   That registers your agent, materializes the Claude Code plugin into\n'
-printf '   ~/.claude/plugins/openbox-observe, stores your credentials, and pulls your policy.\n'
-printf '   Governance is then AMBIENT — no daemon to run, no runtime env to set.\n'
-printf '   Verify anytime with:  %s dev verify\n' "$CMD"
+printf '   `auth` stores your credentials; `init` governs EVERY session on this machine,\n'
+printf '   in any directory, and takes effect immediately — nothing to restart.\n'
+printf '   Check anytime with:  %s doctor\n' "$CMD"
 printf '\n   Full walkthrough (credentials, self-hosted, troubleshooting):\n'
 printf '     %shttps://github.com/OpenBox-AI/openbox-shift-left/blob/main/docs/getting-started.md%s\n' "$DIM" "$RST"
 echo

@@ -2,7 +2,9 @@
 
 Reference configuration that makes OpenBox governance an **org mandate** rather
 than a per-developer opt-in. These are the files an MDM/config-management system
-deploys; `openbox managed install` writes them for a single machine.
+deploys. OpenBox ships them and does not install them: putting a root-owned
+file on a fleet is your config-management plane's job, and a CLI that wrote it
+for one machine was a worse version of that.
 
 Everything here is the *provider's* mechanism, not OpenBox's. We ship the
 payload; distributing it is your fleet-management plane's job.
@@ -46,7 +48,8 @@ Target paths (deploy read-only, root-owned):
 
 - Linux; `/etc/claude-code/managed-settings.json`
 - MacOS; `/Library/Application Support/ClaudeCode/managed-settings.json`
-- Windows; `C:\ProgramData\ClaudeCode\managed-settings.json`
+- Windows; `C:\Program Files\ClaudeCode\managed-settings.json`
+  (the older `C:\ProgramData\ClaudeCode\` path is no longer read)
 
 Orgs on a plan with **server-managed settings** should prefer that channel: it
 refreshes hourly and, with `forceRemoteSettingsRefresh: true`, the CLI exits
@@ -108,29 +111,26 @@ Target paths:
 Not shipped: the a Cursor adapter adapter does not exist yet. Cursor gained a hook surface
 in v3.11 (2026-07-10), so this becomes a real template when that adapter lands.
 
-## Install
+## Deploying
 
-```bash
-# Preview exactly what would be written, and where. Never needs privileges.
-openbox managed install --provider claude-code,codex --dry-run
+Deploy the files in this directory to the paths above with whatever your fleet
+already uses; they are static artefacts with no substitution step. The one value
+to fill in is the absolute path to the `openbox` binary in each hook command.
 
-# Apply (needs root/Administrator for the system paths).
-sudo openbox managed install --provider claude-code,codex
-```
+What to preserve when you do:
 
-The installer is deliberately conservative:
-
-- **Idempotent**; re-running with the same templates changes nothing.
-- **Backs up**; an existing file is copied to
-  `<name>.openbox-backup-<timestamp>` before being replaced.
-- **Refuses to weaken**; if the file already present has a stricter setting than
-  the template (managed-hooks-only already on, sandbox already required), the
-  install aborts rather than relaxing it. Overriding that is a deliberate
-  `--force`. A marker that appears only as a *comment* in the template does not
-  count as strict, so shipping `allow_managed_hooks_only` commented out cannot
-  silently replace an operator's live setting.
-- **Unprivileged is not a failure**; without permission to write, it prints the
-  exact paths and contents for the MDM team and exits 0.
+- **Back up what is already there.** These paths are shared: another tool's
+  managed settings may be in the same file.
+- **Do not weaken a stricter setting.** If the file already present has
+  managed-hooks-only on, or a sandbox required, and this template does not, the
+  merge must keep the stricter one. Relaxing a mandate is not an upgrade.
+- **A commented-out key is not a setting.** `allow_managed_hooks_only` appearing
+  only inside a `//` comment must not read as strict, or it would silently
+  replace an operator's live value.
+- **Deploy the whole file, not a fragment.** Claude Code merges
+  `managed-settings.json` with every `*.json` in `managed-settings.d/`, so a
+  partial file in one place and a lock in another is a working combination —
+  and one `openbox doctor` reports on.
 
 ## Verify
 

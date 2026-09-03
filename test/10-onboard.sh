@@ -9,13 +9,13 @@
 #
 # Two things this phase proves that unit tests cannot:
 #
-#   * `auth` non-interactively via the stdin path — the automation contract, with
-#     no secret on argv (INV-1);
-#   * `init` at its DEFAULT scope, run from inside the project. The default is new
-#, so passing --scope explicitly would test something no user does.
+#   * provisioning without a terminal, through the two files the product
+#     documents — no secret on argv (INV-1);
+#   * `init` with its one flag, run from inside the project. There is no scope to
+#     pass, and no lane to opt into.
 #
-# It also asserts the NEGATIVE: a directory where `init` was not run has no hook
-# config, so sessions there are ungoverned. That gap is what that decision accepts, and
+# It also asserts the POSITIVE control: a directory where `init` was never run is
+# governed anyway, because one install covers the machine. That is what global
 # a governance product should demonstrate its own limits rather than assert them.
 set -uo pipefail
 
@@ -160,21 +160,23 @@ for line in body.splitlines():
 done
 assert_contains "auth names init as the next step" "$auth_out" "openbox init"
 
-tb_step "openbox init (DEFAULT scope, from inside the project)"
-# No --scope: project scope is the default since that decision, and the default is what
-# a user gets. Running from inside $TB_PROJECT is how that default resolves.
+tb_step "openbox init (one flag, from inside the project)"
+# Run from inside $TB_PROJECT so the sweep of this project's own settings file is
+# exercised; the install itself is user-wide either way.
 (cd "$TB_PROJECT" && "$TB_BIN" init \
 	--provider claude-code) >"$TB_STATE/init.out" 2>&1 ||
 	tb_bad "init succeeded" 0 "$(tail -3 "$TB_STATE/init.out")"
-tb_ok "init succeeded at default scope"
+tb_ok "init succeeded"
 
 init_out="$(cat "$TB_STATE/init.out")"
-assert_contains "init names the one governed project" "$init_out" "$TB_PROJECT"
-assert_contains "init states what is NOT governed" "$init_out" "not governed"
-assert_contains "init states the audit consequence" "$init_out" "absence of events is not evidence"
-# The overstatement this product exists to avoid: a project-scoped install must
-# never read as machine-wide coverage.
-assert_absent "init does not claim ambient coverage" "$init_out" "Governance is ambient"
+assert_contains "init states what it governs" "$init_out" "EVERY SESSION"
+assert_contains "init names the file it wrote" "$init_out" "$USER_HOOKS"
+assert_contains "init says the change is immediate" "$init_out" "IMMEDIATELY"
+# The understatement to avoid now. It used to be over-claiming; one install really
+# does cover the machine, so a leftover sentence about one directory, or about an
+# administrator having to finish the job, is the wrong direction.
+assert_absent "init does not describe per-directory scope" "$init_out" "THIS PROJECT ONLY"
+assert_absent "init does not claim activation is pending" "$init_out" "NOTHING YET"
 
 [ -r "$CONFIG" ] || tb_fatal "no dev.json at $CONFIG — $(tail -3 "$TB_STATE/init.out")"
 
@@ -188,14 +190,17 @@ tb_step "the config it wrote"
 assert_contains "config is test-scoped, not the real home" "$CONFIG" "$TB_STATE"
 assert_nonempty "agent_id persisted" "$agent_id"
 assert_nonempty "developer_did persisted" "$did"
-# ENFORCE BY DEFAULT : nothing above passed --enforce.
-assert_eq "enforce persisted with no flag asking for it" true "$(tb_json "$cfg" enforce)"
+# ENFORCE BY DEFAULT, and by ABSENCE. Nothing can write this key any more: a
+# bool defaulting to true cannot express "said nothing", so a written `true`
+# would be indistinguishable from an explicit opt-in and would revert anyone who
+# had opted out. The resolved posture is what doctor reports, asserted below.
+assert_eq "no enforce key is written" "" "$(tb_json "$cfg" enforce)"
 # And no secret leaked into the coordinate file.
 assert_absent "dev.json carries no api key" "$cfg" "obx_"
 assert_eq "backend_url persisted" "$OPENBOX_BACKEND_URL" "$(tb_json "$cfg" backend_url)"
 # The data-plane URL a self-hosted install must carry: without it the hook and
-# `dev verify` sign their requests at the SaaS core and get a 401 that reads as a
-# broken install.
+# doctor's reachability check sign their requests at the SaaS core and get a 401
+# that reads as a broken install.
 assert_eq "base_url persisted (self-hosted core)" "$OPENBOX_BASE_URL" "$(tb_json "$cfg" base_url)"
 assert_eq "git-hook stamping enabled" true "$(tb_json "$cfg" install_git_hook)"
 
@@ -204,9 +209,11 @@ assert_eq "agent row is a developer agent" developer "$(tb_val "select agent_typ
 assert_eq "AIP signing required on every event" t "$(tb_val "select signing_required from agents where id='$agent_id';")"
 assert_eq "agent belongs to the harness org" "$OPENBOX_ORG_ID" "$(tb_val "select organization_id from agents where id='$agent_id';")"
 
-tb_step "hooks, scoped to one project (the default)"
-[ -r "$HOOKS" ] || tb_fatal "no $HOOKS — default (project) scope did not merge the hook block"
-hooks="$(cat "$HOOKS")"
+tb_step "hooks, user-wide"
+# $USER_HOOKS, not $HOOKS: the install registers here and SWEEPS the project
+# file, so a readable project file would be the defect rather than the evidence.
+[ -r "$USER_HOOKS" ] || tb_fatal "no $USER_HOOKS — the install merged no hook block"
+hooks="$(cat "$USER_HOOKS")"
 for ev in SessionStart UserPromptSubmit PreToolUse PostToolUse SessionEnd; do
 	assert_contains "$ev wired" "$hooks" "hook claude-code $ev"
 done
@@ -302,15 +309,17 @@ tb_ok "no hook config in $TB_UNGOVERNED — anything it produces comes from $USE
 tb_state_set ungoverned_project "$TB_UNGOVERNED"
 tb_state_set user_hooks "$USER_HOOKS"
 
-tb_step "verify + doctor"
-"$TB_BIN" dev verify >"$TB_STATE/verify.out" 2>&1
-assert_eq "dev verify succeeded" 0 "$?"
-assert_file_contains "verify names the DID it authenticated as" "$TB_STATE/verify.out" "$did"
-
+tb_step "doctor"
+# The reachability check that `dev verify` used to own is a doctor line now, and
+# doctor must report it without ever exiting non-zero: it is what you run when
+# something is already wrong.
 "$TB_BIN" doctor >"$TB_STATE/doctor.out" 2>&1
+assert_eq "doctor exits 0" 0 "$?"
 doctor="$(cat "$TB_STATE/doctor.out")"
+assert_contains "doctor authenticated to the control plane" "$doctor" "authenticated as"
+assert_contains "doctor names the DID it authenticated as" "$doctor" "$did"
 assert_contains "doctor reports enforce" "$doctor" "enforce"
-assert_contains "doctor reports require_verified_bundle (G8)" "$doctor" "require_verified_bundle"
+assert_contains "doctor reports the resolved ENFORCE posture" "$doctor" "enforce"
 assert_contains "doctor reports provenance, not just values" "$doctor" "from "
 
 tb_finish

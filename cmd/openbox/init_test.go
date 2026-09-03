@@ -20,7 +20,7 @@ func TestInitDefaultsToTheDeveloperRole(t *testing.T) {
 
 // TestDevVerbIsGone. `openbox dev` was a second namespace with its own
 // tombstones for two subcommands that had already been removed from it; the
-// verb itself now goes the same way, and what `dev verify` proved is reported
+// verb itself now goes the same way, and what its verify subcommand proved is reported
 // by `doctor` instead.
 func TestDevVerbIsGone(t *testing.T) {
 	for _, args := range [][]string{

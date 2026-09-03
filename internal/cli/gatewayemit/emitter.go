@@ -176,7 +176,7 @@ func (e *Emitter) Emit(ctx context.Context, c gateway.Captured) {
 				"captured model calls are being DROPPED by every lane. Something rewrote the settings "+
 				"file after install; a running tool keeps the environment it started with, so this is "+
 				"invisible from inside the session. `openbox doctor` names the missing keys and "+
-				"`openbox init --provider claude-code --full` rewrites them. The model calls "+
+				"`openbox init --provider claude-code` rewrites them. The model calls "+
 				"themselves are unaffected.")
 			return
 		}

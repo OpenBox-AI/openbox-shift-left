@@ -35,7 +35,7 @@ type Options struct {
 	Provider   string // claude-code|codex|cursor
 	BackendURL string // openbox-backend control-plane base (persisted for `dev sync`/staleness)
 	// BaseURL is the openbox-core data-plane base; where events are emitted and
-	// where `dev verify` authenticates.
+	// where the control-plane check authenticates.
 	BaseURL        string
 	AgentName      string // override; default derived from user+host
 	Icon           string // non-empty string required by the backend DTO

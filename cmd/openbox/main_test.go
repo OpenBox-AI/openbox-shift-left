@@ -1179,7 +1179,7 @@ func scriptedAuth(t *testing.T, a *app, answers ...string) *prompt.Scripted {
 	return p
 }
 
-// TestDoctorReportsControlPlaneReachability. `openbox dev verify` proved this,
+// TestDoctorReportsControlPlaneReachability. A separate verify command proved this,
 // and `doctor` inherits it: same one call, reported where somebody looking for
 // a problem will actually see it.
 func TestDoctorReportsControlPlaneReachability(t *testing.T) {

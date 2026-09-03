@@ -27,7 +27,7 @@ flowchart LR
   ENG -- "poll approval" --> CORE
   GIT --> CORE
   BE -- "policy" --> CORE
-  BE -- "approval queue" --> CLI["openbox approve"]
+  BE -- "approval queue" --> DASH["dashboard"]
 ```
 
 Two paths, deliberately separate:
@@ -71,7 +71,7 @@ is the part that stops a directory quietly becoming a junk drawer.
 | `api/` | machine-readable contract artefacts; today, the dev-event JSON Schema | prose *about* the wire. `mapping.md` and `coverage.md` are documents, and they live in `docs/` |
 | `build/` | packaging and release configuration (`.goreleaser.yaml`) | anything a build produces. Artefacts are git-ignored |
 | `cmd/` | one directory per **shipped** executable, `main` package only | a binary nothing ships. A dev instrument belongs in `tools/` |
-| `deployments/` | managed-settings templates an org deploys (MDM) | anything read at runtime by this repo's own code |
+| `deployments/` | managed-settings artefacts an org deploys with its own MDM | anything read at runtime by this repo's own code, or anything this repo installs for you |
 | `docs/` | design and user documents | anything a program parses |
 | `init/` | **illustrative** copies of the supervisor units, and only that | a `go:embed`, or anything treated as authoritative. `internal/cli/laneservice` renders the real ones |
 | `internal/` | every package this repo does not publish; which is all of them | a package meant for external import. Publishing one reopens the `/pkg` question |
@@ -96,7 +96,7 @@ documented install command.
 | `gateway/` | the local model-call relay: byte-identical forward, capture, the gate |
 | `telemetry/` | the local OTLP receiver; the `:otel:` lane's intake |
 | `transport/` | the in-path CONNECT/TLS relay; the `:proxy:` lane |
-| `cli/` | everything behind the `openbox` commands: `approver`, `prompt`, the gateway's install/inspect/emit halves, and the three-lane install machinery (`activation`, `laneservice`, `atomicfile`) |
+| `cli/` | everything behind the `openbox` commands: `prompt`, the gateway's install/inspect/emit halves, the read half of the managed-config reporter, and the three-lane install machinery (`activation`, `laneservice`, `atomicfile`) |
 | `conformance/` | the event contract's conformance suite |
 | `internal/actions/openbox-git-action/` | commit → deploy lineage for CI |
 | `depguard/` | the dependency and layering guards |
@@ -171,9 +171,9 @@ and the call proceeds and the developer sees nothing. Nobody answers and the
 call is denied with the approval reference in the reason; and if the decision
 lands later, a background watcher wakes the session with the outcome.
 
-An approver is a separate principal with its own credential: the dashboard,
-`openbox approve`, or a bounded autonomous approver. Approving on the machine
-that filed the request is refused by default.
+Whoever answers is a separate principal with their own credential, working from
+the dashboard. Approving on the machine that filed the request is refused by
+default.
 
 ## Posture as evidence
 
@@ -205,9 +205,9 @@ Being precise here is part of the product.
   tamper-resistance against the developer or against the agent they run. The OS
   keychain this replaced did not actually change that (it was unlocked for the
   desktop session and readable by the same processes); the plaintext file makes
-  it legible. On an approver install the same file also holds an org key that
-  can create and rotate agents fleet-wide, which is a strictly larger blast
-  radius than one agent's seed.
+  it legible. The org key that can create and rotate agents fleet-wide is a
+  strictly larger blast radius than one agent's seed, which is why it is read
+  from the environment only and never written to this file.
 - **A project can hold a registration from an older engine until the next
   `init`.** Hooks live in a file on the developer's machine, so an install run
   with a different `HOME` used to leave a second OpenBox entry beside the
@@ -322,9 +322,9 @@ Being precise here is part of the product.
     buffers up to 64 MiB per in-flight request with no concurrency cap, so the same
     unauthenticated listener is a local memory-pressure lever.
 - **Two more model-call lanes exist, and both are verified by replay rather than
-  by running**. `openbox init --provider claude-code --full` installs a local
+  by running**. `openbox init --provider claude-code` installs a local
   OTLP **telemetry** receiver (`:otel:`) and an in-path CONNECT/TLS
-  **transport** relay (`:proxy:`) alongside the hooks; `--remove-all` backs
+  **transport** relay (`:proxy:`) alongside the hooks; `openbox uninstall` backs
   every lane out. What that buys, and what it does not:
   - **The evidence is replay, not operation.** Real recorded traffic runs
     through the
@@ -370,7 +370,7 @@ Being precise here is part of the product.
     signing key. What bounds it is **name constraint at generation**: the CA is
     constrained to the single intercepted host, so a leaked key cannot mint a usable
     certificate for anything else, and the allowlist holds that one host
-    (`api.anthropic.com`) while everything else is blind-tunnelled. `--remove-all`
+    (`api.anthropic.com`) while everything else is blind-tunnelled. `openbox uninstall`
     deletes the CA rather than leaving a trusted signing key behind a relay that is
     gone.
   - **The lane does not chain through a corporate proxy.** `transport.New`
@@ -515,7 +515,7 @@ was made on the smaller number.
   deployment an administrator performs. Sessions started anywhere else produce
   **no rows at all**, so an auditor cannot distinguish an uninitialized project
   from an idle week, and enforcement applies only where `init` ran. Fleet
-  coverage requires `--scope global` plus managed settings; Codex is user-scoped
+  coverage is what one install gives; a mandate is managed settings; Codex is user-scoped
   either way. `printGovernedScope` names the governed directory at install time
   so the gap is visible at the moment it is created rather than discovered from
   an empty dashboard.

@@ -49,8 +49,9 @@ Windows is refused rather than silently skipped; there is no unit to show.
 
 ## Installing a lane
 
-Not from here. `openbox init --provider claude-code --full` installs all three
-in proof order (write the unit, start it, prove it is listening, only then point
-the tool at it); `--remove-all` reverses it. `openbox doctor` reports which lane
-is routed, which can see a call, and; the failure that is otherwise invisible -
-whether the elected lane is actually running.
+Not from here. `openbox init --provider claude-code` installs every lane the
+provider supports, in proof order (write the unit, start it, prove it is
+listening, only then point the tool at it); `openbox uninstall` reverses it.
+`openbox doctor` reports which lane is routed, which can see a call, and; the
+failure that is otherwise invisible - whether the elected lane is actually
+running.

@@ -10,7 +10,7 @@ import (
 func boolPtr(b bool) *bool { return &b }
 
 // TestWriteConfig_ReInitKeepsEnforcePosture the bug this file exists for:
-// `init --enforce` followed by a plain `init` (to repair hooks, refresh the
+// an explicit enforce opt-in followed by a plain `init` (to repair hooks, refresh the
 // bundle, anything) used to drop the developer from enforce to observe with
 // exit 0 and no message, because the installers rebuilt dev.json from the
 // current run's flags and only carried forward the sync coordinates.

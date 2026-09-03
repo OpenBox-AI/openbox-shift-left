@@ -437,8 +437,8 @@ Both are readable only by you.
 | `gateway.log` | `~/.openbox/` | the gateway daemon's stdio, with `--gateway` only. Diagnostics; that it started, and its throttled warnings that it is recording nothing. Not a copy of relayed traffic |
 | `gateway-prior-env.json` | `~/.openbox/` | the one `ANTHROPIC_BASE_URL` the gateway install displaced, so `--remove-gateway` can restore your org's own relay instead of deleting it. A URL, no credential |
 | `telemetry.log`, `transport.log` | `~/.openbox/` | the same, for the other two lanes. They exist for the same reason: launchd sends a daemon's stdio to `/dev/null` by default, and a throttled warning is the only signal that a perfectly working relay is recording nothing |
-| `activation.json` | `~/.openbox/` | `0600`. Per lane: the environment keys OpenBox wrote into the tool's settings, and **the values that were there first**, with a before/after SHA-256. It is what lets `--remove-all` restore your own relay or corporate proxy key by key instead of truncating a settings file. No credentials |
-| `transport-ca.pem`, `transport-ca.key` | `~/.openbox/` | **a certificate authority and its private key**, with `--transport`/`--full` only. Generated once on this machine, never transmitted, and name-constrained at generation to the single intercepted host; so a leaked key cannot mint a usable certificate for anything else. It has no more at-rest protection than `.env` does: anything running as you can read it, and with it impersonate that one host to this machine. `--remove-all` deletes it rather than leaving it behind a relay that is gone |
+| `activation.json` | `~/.openbox/` | `0600`. Per lane: the environment keys OpenBox wrote into the tool's settings, and **the values that were there first**, with a before/after SHA-256. It is what lets a removal restore your own relay or corporate proxy key by key instead of truncating a settings file. No credentials |
+| `transport-ca.pem`, `transport-ca.key` | `~/.openbox/` | **a certificate authority and its private key**, on any machine whose install brought the transport lane up. Generated once on this machine, never transmitted, and name-constrained at generation to the single intercepted host; so a leaked key cannot mint a usable certificate for anything else. It has no more at-rest protection than `.env` does: anything running as you can read it, and with it impersonate that one host to this machine. `openbox uninstall` deletes it rather than leaving it behind a relay that is gone |
 
 | File | What it holds |
 |---|---|
@@ -458,7 +458,7 @@ Both are readable only by you.
 A model call can be observed three ways, and the privacy difference between them
 is larger than the table above can show in one row.
 
-- **`--gateway` and `--transport` are in-path relays.** They see the whole
+- **The gateway and transport lanes are in-path relays.** They see the whole
   exchange. Same `content_capture` gate, same local redaction before attachment,
   same 64KB cap. Three things about them changed and each changes what leaves your
   machine:
@@ -537,28 +537,40 @@ exists to bound what the control plane must evaluate synchronously, and 64Ki run
 of CJK is 192 KB on the wire -- so a byte bound is the honest one, and it is
 strictly tighter than the character bound it replaced.
 
-### What `--remove-all` destroys
+### What `openbox uninstall` destroys
 
-Removal deletes local evidence. It is printed path by path as it goes, and it is
-not recoverable, so export anything you need first.
+`uninstall` is a **full purge**, and most of what it removes is not
+recoverable. It prints the whole inventory before it deletes anything, then
+names each path as it goes, so export what you need first.
 
-**Deleted:** `transport-ca.pem` and `transport-ca.key` (leaving a trusted
-signing key behind a relay that no longer exists is a strictly worse posture
-than removing it), `gateway.log`, `telemetry.log`, `transport.log`, and
-`activation.json`.
+**Deleted:** the hook registrations on every surface; the plugin bundle,
+including its copy of the engine; all three lane units; `transport-ca.pem` and
+`transport-ca.key` (a trusted signing key behind a relay that no longer exists
+is a strictly worse posture than no key); the lane logs; `activation.json`;
+`dev.json`; the spool of undelivered events; the session registry and pending
+approval markers; and, last, `~/.openbox/.env`.
 
 **Restored, not deleted:** every environment key OpenBox wrote into the tool's
 settings is put back to the value it displaced, key by key from
 `activation.json`. The settings file is never truncated, and a key that was ours
-is removed rather than blanked.
+is removed rather than blanked. A key whose value *changed* after OpenBox set it
+belongs to whoever changed it: the removal refuses it, names it, and stops —
+because a corporate proxy value silently reverted is an outage.
 
-**Deliberately kept:** the **spool** of undelivered events. It lives outside
-`~/.openbox/` (under the OS config directory) and it is shared with the hook
-path; `--remove-all` removes lanes, not hooks, so deleting it would destroy
-undelivered governed tool-call evidence belonging to a component that is still
-installed and still running. The command names the directory and the file count
-rather than staying silent about it; delete it by hand if you mean to discard
-that evidence.
+**The spool is flushed first, then destroyed.** The command tries to deliver
+what is queued before deleting it, prints how many events were queued and how
+many remain, and describes the remainder as loss. Where the credentials are
+already gone it cannot flush at all and says so rather than deleting quietly.
+
+**The credentials cannot be recovered.** The `obx_` key and the Ed25519 signing
+seed are shown once, at registration, and are not stored server-side. `openbox
+auth` afterwards registers a **new** agent with a new DID; it does not recover
+this one. Deletion is an unlink, not a secure erase: the blocks are freed, not
+overwritten.
+
+**Kept, deliberately:** your organization's own files. `managed_config.toml` and
+a root-owned `managed-settings.json` express a mandate rather than OpenBox
+state, and removing either would silently downgrade a governed machine.
 
 ### Undelivered evidence is now retired after 30 days, and the deletion is reported
 
@@ -595,8 +607,9 @@ OPENBOX_CONTROL_TOKEN='obx_key_…'       # approver installs only; see below
   and other local accounts can read it. Use full-disk encryption; do not treat
   this file as protected.
 - **It is the only copy.** OpenBox shows the API key and signing key exactly
-  once, at registration, and does not store them. Lose the file and you rotate
-  (`openbox auth --rotate`) or re-register.
+  once, at registration, and does not store them. Lose the file and there is no
+  recovery for that identity: `openbox auth` registers a new agent with a new
+  DID, which leaves work attributed to the old one attached to the old one.
 - **Never commit it.** The file's own header comment says so; it lives in your
   home directory rather than anywhere near a repo for that reason.
 
@@ -607,12 +620,14 @@ this replaced did not actually change that, since it was unlocked for the whole
 desktop session and readable by the same processes; the plaintext file just
 makes it obvious.
 
-**Approver installs carry a bigger credential.** If you run `openbox approve`,
-the same file holds `OPENBOX_CONTROL_TOKEN`. When that is an `obx_key_…`
-organization key, it can **create and rotate agents across your whole
-organization**; the signing key above compromises one agent, this one
-compromises the fleet. Prefer a short-lived JWT where your deployment allows it,
-and do not put an approver install on a shared host.
+**The organization credential is never written here.** Registering an agent
+needs `OPENBOX_CONTROL_TOKEN`, and when that is an `obx_key_…` organization key
+it can **create and rotate agents across your whole organization** — the signing
+key above compromises one agent, that one compromises the fleet. It is read from
+the environment only, never accepted as a flag, and never persisted to this
+plaintext file. A machine that ran an older approver install may still have a
+copy in `.env`; no `auth` run removes it, and `openbox uninstall` is the only
+thing that does.
 
 A real environment variable always beats the file, so CI can supply credentials
 without writing anything to disk:

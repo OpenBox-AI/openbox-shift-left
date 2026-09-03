@@ -75,7 +75,7 @@ func TestInstaller_MaterializesBundleAndConfig(t *testing.T) {
 
 // TestInstaller_PersistsEnforcePosture proves that decision onboarding change:
 // the enforce posture chosen at `init` time (ref.Enforce/Tier2/Findings, set
-// by --enforce) is written to dev.json, so the runtime hook reads it with NO
+// by the resolved posture) is written to dev.json, so the runtime hook reads it with NO
 // env var.
 func TestInstaller_PersistsEnforcePosture(t *testing.T) {
 	pluginDir := t.TempDir()

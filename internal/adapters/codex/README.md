@@ -211,9 +211,10 @@ byte-identical to the pre-the Codex adapter's usage leg path.
 
 ## Enforce leg
 
-**Opt-in, default observe.** Enable at onboarding; `openbox init --provider
-codex --enforce` persists `enforce`/`tier2`/`findings` to `dev.json` (no runtime
-env needed). With enforce **off** the the Codex adapter's observe leg observe path is **byte-identical** -
+**On by default.** `openbox init --provider codex` leaves the posture enforcing
+without writing a key for it: a bool that defaults to true cannot express "said
+nothing", so an absent key resolves to on and a deliberate opt-out survives a
+re-install. `OPENBOX_ENFORCE=false` observes for one run. With enforce **off** the the Codex adapter's observe leg observe path is **byte-identical** -
 the decider is never invoked (asserted: `TestObserveByteParity_EnforceOff`).
 Enforcement gates **only** the PreToolUse hook, pre-execution, hard-bounded,
 fail-open by default (an owner decision / INV-3b). Exit code is always 0; we speak Codex's

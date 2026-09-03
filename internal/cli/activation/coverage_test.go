@@ -28,7 +28,7 @@ func installLane(t *testing.T, home string, lane Lane, keys map[string]string) s
 // TestAVanishedEnvBlockIsDetected is the check that would have caught the
 // observed wipe: `~/.claude/settings.json` carried OpenBox's full env block at
 // 00:15 and by 00:28 held only `hooks`, `statusLine` and `switchModelsOnFlag`,
-// with no `--remove-all` run. The already-running CLI kept relaying, because
+// with no removal run at all. The already-running CLI kept relaying, because
 // environment routing binds at process start, so it was invisible from inside the
 // session and the operator's only signal was absence.
 func TestAVanishedEnvBlockIsDetected(t *testing.T) {

@@ -44,7 +44,7 @@ type CredentialRef struct {
 	ProjectDir string
 
 	// Enforce / Tier2 / Findings persist the enforce-mode posture chosen at
-	// `openbox init` time (via --enforce and its granular siblings) into the dev
+	// `openbox init` time into the dev
 	// config, so the runtime hook reads them from dev.json and needs no runtime
 	// environment variable.
 	Enforce  *bool

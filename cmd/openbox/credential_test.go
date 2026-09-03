@@ -44,7 +44,7 @@ func TestControlTokenProblemAcceptsRealCredentials(t *testing.T) {
 
 // TestSelfHostedWithoutDataPlaneWarns the other silent one: a self-hosted
 // control plane with the default data plane. Registration succeeds, the config
-// looks right, and `dev verify` then returns 401 from a URL the operator never
+// looks right, and doctor's reachability check then returns 401 from a URL the operator never
 // chose.
 func TestSelfHostedWithoutDataPlaneWarns(t *testing.T) {
 	warn := []string{

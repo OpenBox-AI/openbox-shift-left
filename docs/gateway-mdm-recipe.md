@@ -46,7 +46,7 @@ Push to the provider's managed-settings path:
 |---|---|
 | macOS | `/Library/Application Support/ClaudeCode/managed-settings.json` |
 | Linux | `/etc/claude-code/managed-settings.json` |
-| Windows | `C:\ProgramData\ClaudeCode\managed-settings.json` |
+| Windows | `C:\Program Files\ClaudeCode\managed-settings.json` (the older `ProgramData` path is no longer read) |
 
 ```json
 {

@@ -215,7 +215,7 @@ func (a *app) reportGateway() {
 }
 
 // managedSettingsPathForDoctor reached through the managed package so doctor
-// and `managed install` cannot disagree about where the file lives.
+// and the managed-config reader cannot disagree about where the file lives.
 // managedSettingsPathForDoctor derives the path locally rather than through
 // internal/cli/managed: that package is CLI-lifecycle code with a different
 // lifetime, and doctor must not stop being able to read this file because it
@@ -496,7 +496,7 @@ func (a *app) reportBlockedHooks() {
 	}
 }
 
-// reportReachability answers the question `openbox dev verify` used to, in the
+// reportReachability answers the question a separate verify command used to, in the
 // place people actually look when something is wrong.
 //
 // It is the first thing in doctor that touches the network, which makes its
