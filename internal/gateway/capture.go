@@ -152,6 +152,30 @@ func trimPartialRune(s string) string {
 	return s
 }
 
+// bodyCutNote marks a truncated captured body, at the END: a reply is a head
+// window, and markerPrefix at position 0 would make selectModelCallRequest read
+// it as a claim about the whole body.
+//
+// Unmarked, the cut was invisible twice over. capRunes lands the result at
+// exactly captureBodyRunes, and capModelCallBody marks only a body STRICTLY
+// longer than that same number, so an ASCII reply cut here passed untouched:
+// measured, 65,536 bytes of a 307,200-byte reply, cut mid-frame, claiming to be
+// whole. That is the mode the request direction grew fallbackWindow to remove.
+const bodyCutNote = "\n[openbox: truncated here; the rest of this body is not stored]"
+
+// noteCut appends bodyCutNote within a rune budget, so the note cannot push the
+// result back over the cap that produced it.
+func noteCut(r []rune, budget int) string {
+	keep := budget - utf8.RuneCountInString(bodyCutNote)
+	if keep < 0 {
+		keep = 0
+	}
+	if keep > len(r) {
+		keep = len(r)
+	}
+	return string(r[:keep]) + bodyCutNote
+}
+
 func capRunes(s string) string {
 	if len(s) <= captureBodyRunes { // byte length ≤ cap ⇒ rune count ≤ cap
 		return s
@@ -160,7 +184,7 @@ func capRunes(s string) string {
 	if len(r) <= captureBodyRunes {
 		return s
 	}
-	return string(r[:captureBodyRunes])
+	return noteCut(r, captureBodyRunes)
 }
 
 // Captured is the evidence one relayed model call produces.

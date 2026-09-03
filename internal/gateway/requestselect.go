@@ -470,6 +470,19 @@ func cappedField(raw json.RawMessage, budget int, what string) json.RawMessage {
 	return encoded
 }
 
+// maxDroppedKeyLen and maxDroppedKeyCount bound the note's OWN key list, the one
+// field in the selected document with nothing bounding it. The note sizes the
+// skeleton, so an unbounded list drives `room` negative and no message fits --
+// the failure modelBudget exists to prevent, through a field this file added.
+// Measured: one 60 KiB key name stored 49,152 bytes of that name with the turn
+// absent; 4,000 ordinary keys do it identically. A key NAME is metadata, so
+// bounding it costs nothing selection keeps, and the overflow is reported inside
+// the list so a short list is distinguishable from a truncated one.
+const (
+	maxDroppedKeyLen   = 128
+	maxDroppedKeyCount = 64
+)
+
 // droppedKeys names every top-level key selection discards, sorted so the stored
 // value is deterministic for the same input. `tools` is the big one: it is
 // near-constant boilerplate, it was being stored on every call, and dropping it
@@ -484,6 +497,19 @@ func droppedKeys(fields map[string]json.RawMessage) []string {
 		}
 	}
 	sort.Strings(out)
+	elided := 0
+	if len(out) > maxDroppedKeyCount {
+		elided = len(out) - maxDroppedKeyCount
+		out = out[:maxDroppedKeyCount]
+	}
+	for i, k := range out {
+		if len(k) > maxDroppedKeyLen {
+			out[i] = trimPartialRune(k[:maxDroppedKeyLen]) + "..."
+		}
+	}
+	if elided > 0 {
+		out = append(out, fmt.Sprintf("%s%d more key(s) elided]", markerPrefix, elided))
+	}
 	return out
 }
 
@@ -556,6 +582,19 @@ func fallbackWindow(body, why string) string {
 	// (`invalid character ']' looking for ...`), so folding an err.Error() into a
 	// reason is an obvious future improvement that would silently break it.
 	why = strings.ReplaceAll(why, "]", ")")
+	// Two wordings, because the REASON is the same but the CLAIM is not. A body
+	// small enough to keep whole was not windowed, and a marker saying it was is
+	// the same defect as a note reporting a drop that did not happen -- which this
+	// file forbids two functions away. It matters more here than in stored
+	// evidence alone: ForGate hands this exact string to the policy engine.
+	//
+	// Kept deliberately SHORTER than the windowed wording, so the boundary this
+	// branch tests is the tighter of the two and the choice cannot be inverted by
+	// the marker's own length.
+	whole := fmt.Sprintf("%sselection kept this body whole: %s]", markerPrefix, why)
+	if len(whole)+len(body) <= selectionBudget {
+		return whole + body
+	}
 	return markedTailWindow(
 		fmt.Sprintf("%sselection fell back to a tail window: %s]", markerPrefix, why), body)
 }
@@ -570,19 +609,38 @@ func fallbackWindow(body, why string) string {
 func markedTailWindow(marker, payload string) string {
 	room := selectionBudget - len(marker)
 	if room <= 0 {
-		// The marker alone does not fit. Cut it rather than return it whole: the
-		// only remaining bound downstream is capRunes, which head-cuts at 65,536
-		// RUNES and would take the closing bracket and the explanation with it --
-		// leaving a marker whose own claim its truncation had invalidated.
-		if len(marker) > selectionBudget {
-			return trimPartialRune(marker[:selectionBudget])
-		}
-		return marker
+		// The marker alone does not fit. It is cut from the INSIDE rather than the
+		// end: the note this function's old head cut removed was the closing bracket
+		// and the explanation, "leaving a marker whose own claim its truncation had
+		// invalidated" -- which is what the cut then did. elideMarkerInterior keeps
+		// both ends, so what survives still says what happened.
+		return elideMarkerInterior(marker)
 	}
 	if len(payload) <= room {
+		// Whole, so the marker the CALLER chose has to be one that does not claim a
+		// cut; fallbackWindow picks between its two wordings on this same boundary.
 		return marker + payload
 	}
 	return marker + trimLeadingPartialRune(payload[len(payload)-room:])
+}
+
+// elideMarkerInterior cuts an over-long marker from the middle, keeping its
+// prefix and re-closing the bracket a tail cut would have taken.
+//
+// A marker is not a window: it is one claim, and half a claim is worse than a
+// short one. The reachable case is decodeCapturable's marker, which interpolates
+// the origin's own Content-Encoding value -- so the oversized part is untrusted
+// input sitting between two halves that both have to survive.
+func elideMarkerInterior(marker string) string {
+	if len(marker) <= selectionBudget {
+		return marker
+	}
+	const closer = "...]"
+	keep := selectionBudget - len(closer)
+	if keep <= 0 {
+		return trimPartialRune(marker[:selectionBudget])
+	}
+	return trimPartialRune(marker[:keep]) + closer
 }
 
 // rewindowMarkedBody re-cuts an already-marked body that grew past the budget.

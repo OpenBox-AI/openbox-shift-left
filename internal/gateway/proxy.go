@@ -269,7 +269,9 @@ func capturableBody(body []byte, h http.Header) string {
 		return decodeCapturable(body, enc)
 	}
 	if len(body) > maxCaptureInputBytes {
-		body = body[:maxCaptureInputBytes]
+		// Marked, and with room for the mark inside the same bound: an unmarked cut
+		// here is a clipped reply that reads as a finished one.
+		return trimPartialRune(string(body[:maxCaptureInputBytes-len(bodyCutNote)])) + bodyCutNote
 	}
 	return string(body)
 }
@@ -293,8 +295,16 @@ func capturableRequestBody(body []byte, h http.Header) string {
 	return selectModelCallRequest(string(body))
 }
 
+// contentEncoding joins every Content-Encoding LINE, not just the first.
+//
+// `Get` returns element [0], and isToken refuses only a list that arrived
+// comma-joined in one value -- so two header lines, the same list semantically,
+// reduced to their first token. A br(gzip(json)) reply announced that way
+// gunzipped cleanly and returned raw brotli, which the keyword-driven redactor
+// cannot see into, stored as the decoded reply. Joining hands the pair to the
+// two-layer refusal newDecompressor already had.
 func contentEncoding(h http.Header) string {
-	enc := strings.TrimSpace(h.Get("Content-Encoding"))
+	enc := strings.TrimSpace(strings.Join(h.Values("Content-Encoding"), ","))
 	if enc == "" || strings.EqualFold(enc, "identity") {
 		return ""
 	}

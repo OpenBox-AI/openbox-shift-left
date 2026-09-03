@@ -74,10 +74,11 @@ func TestCaptureBodyRepairsABodyAlreadyCutAtTheBound(t *testing.T) {
 	chunk := "api_key=" + val + "\n"                                      // 409 bytes, redactable
 	body := strings.Repeat(chunk, 400) + "\n" + strings.Repeat("\U0001F600", 30000)
 
-	preCut := capturableBody([]byte(body), http.Header{})
-	if len(preCut) != maxCaptureInputBytes {
-		t.Fatalf("precondition: capturableBody returned %d bytes, want exactly %d", len(preCut), maxCaptureInputBytes)
-	}
+	// Cut on a BYTE boundary by hand, not through capturableBody: that one now
+	// repairs its own cut and marks it. The subject here is what captureBody does
+	// with a partial rune handed to it by some other producer, and clampAndRedact
+	// is still the only thing between that and the wire.
+	preCut := body[:maxCaptureInputBytes]
 	if utf8.ValidString(preCut) {
 		t.Fatal("precondition: the pre-cut body is valid UTF-8, so this test cannot detect the repair")
 	}

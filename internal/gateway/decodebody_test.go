@@ -133,8 +133,17 @@ func TestCompressedBodyIsBoundedByDecompressedBytes(t *testing.T) {
 	if got == "" {
 		t.Error("an over-long compressed body captured nothing; the bound must truncate, never drop")
 	}
-	if strings.Contains(got, "openbox:") {
+	// Truncated is not a decode fault, and the two must not be confused: the fault
+	// markers say the body could not be READ, which would send an investigation
+	// after the codec instead of after the size.
+	if strings.Contains(got, "cannot decode") || strings.Contains(got, "could not be decoded") {
 		t.Errorf("an over-long body was reported as a decode fault: %q", got[:min(len(got), 200)])
+	}
+	// Truncated AND marked. An unmarked cut here landed the body at exactly the
+	// wire cap, which client.capModelCallBody's strictly-greater test then passes
+	// untouched, so a clipped reply reached the store looking complete.
+	if !strings.HasSuffix(got, bodyCutNote) {
+		t.Errorf("an over-long body was cut with no note saying so; it ends %q", got[max(0, len(got)-80):])
 	}
 }
 

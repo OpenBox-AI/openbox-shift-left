@@ -91,9 +91,17 @@ func decodeCapturable(body []byte, encoding string) string {
 		defer c.Close()
 	}
 
-	plain, err := io.ReadAll(io.LimitReader(zr, maxCaptureInputBytes))
+	// One byte past the bound, so hitting it is DETECTABLE: reading exactly the
+	// bound cannot tell a full body from a cut one, and a body of few wide runes
+	// reaches this cut before capRunes gets to mark it.
+	plain, err := io.ReadAll(io.LimitReader(zr, maxCaptureInputBytes+1))
 	if len(plain) == 0 && err != nil {
 		return undecodableMarker(encoding)
+	}
+	if len(plain) > maxCaptureInputBytes {
+		// Room for the note inside the SAME bound, because clampAndRedact re-cuts at
+		// it downstream and would take the note off again.
+		return trimPartialRune(string(plain[:maxCaptureInputBytes-len(bodyCutNote)])) + bodyCutNote
 	}
 	// A short read is not a fault: an aborted turn ends mid-frame, and the prefix
 	// that decoded is the evidence.
