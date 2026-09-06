@@ -56,13 +56,19 @@ func RunHook(sub string, stdin io.Reader, stdout io.Writer, logger *log.Logger) 
 	}
 
 	// Structural fields only (session_id + cwd), never content (INV-2).
-	regDir := obgit.DefaultSessionDir()
-	if hook == HookSessionEnd {
-		if err := obgit.RemoveSessionRecord(regDir, ev.SessionID); err != nil {
-			logger.Printf("session registry cleanup: %v", err)
+	// Restricted to the eleven hooks that already carry a session -> cwd
+	// mapping the git trailer needs; the 21 new hook classes add nothing to
+	// that map (MessageDisplay/InstructionsLoaded alone would turn this into a
+	// per-message file write for information those events do not carry).
+	if touchesSessionRegistry(hook) {
+		regDir := obgit.DefaultSessionDir()
+		if hook == HookSessionEnd {
+			if err := obgit.RemoveSessionRecord(regDir, ev.SessionID); err != nil {
+				logger.Printf("session registry cleanup: %v", err)
+			}
+		} else if err := obgit.WriteSessionRecord(regDir, ev.SessionID, ev.Cwd, time.Now()); err != nil {
+			logger.Printf("session registry touch: %v", err)
 		}
-	} else if err := obgit.WriteSessionRecord(regDir, ev.SessionID, ev.Cwd, time.Now()); err != nil {
-		logger.Printf("session registry touch: %v", err)
 	}
 
 	ad := New(id, DefaultSpoolDir())
@@ -110,7 +116,13 @@ func RunHook(sub string, stdin io.Reader, stdout io.Writer, logger *log.Logger) 
 
 	// The two must agree: deciding to defer the observe copy here and then not
 	// running the gate would drop the event.
-	gated := ResolveEnforce() && (hook == HookPreToolUse || hook == HookUserPromptSubmit)
+	//
+	// ConfigChange's policy_settings source is never gated (raw compare, not
+	// through enumOr): the vendor documents blocking decisions on it as
+	// ignored, and gating it anyway would file an enforcement audit line
+	// claiming a block that never happened.
+	gated := ResolveEnforce() && (hook == HookPreToolUse || hook == HookUserPromptSubmit ||
+		(hook == HookConfigChange && ev.Source != policySettingsSource))
 
 	if gated {
 		if info, halted := hookflow.SessionHalted(ev.SessionID); halted {
@@ -120,9 +132,12 @@ func RunHook(sub string, stdin io.Reader, stdout io.Writer, logger *log.Logger) 
 			nudgeFlush()
 			var c hookflow.OutputContract = promptContract
 			toolName, toolKind := promptToolKind, promptToolKind
-			if hook == HookPreToolUse {
+			switch hook {
+			case HookPreToolUse:
 				kind, _, _, _, _ := classifyTool(ev.ToolName)
 				c, toolName, toolKind = contract, ev.ToolName, string(kind)
+			case HookConfigChange:
+				c, toolName, toolKind = configContract, configToolKind, configToolKind
 			}
 			hookflow.ReplaySessionHalt(logger, stdout, info, ev.SessionID, toolName, toolKind, c)
 			return
@@ -157,8 +172,11 @@ func RunHook(sub string, stdin io.Reader, stdout io.Writer, logger *log.Logger) 
 			target hookflow.EnforceTarget  = promptTarget{id: id, mapper: ad.Mapper, ev: ev}
 			record                         = recordPromptEnforcement
 		)
-		if hook == HookPreToolUse {
+		switch hook {
+		case HookPreToolUse:
 			c, target, record = contract, enforceTarget{id: id, mapper: ad.Mapper, ev: ev}, recordEnforcement
+		case HookConfigChange:
+			c, target, record = configContract, configSubject{id: id, mapper: ad.Mapper, ev: ev}, recordConfigEnforcement
 		}
 		g := hookflow.EnforceGate{
 			Contract:     c,
@@ -186,6 +204,22 @@ func RunHook(sub string, stdin io.Reader, stdout io.Writer, logger *log.Logger) 
 	if hook == HookSessionEnd {
 		runFlush(logger, ev.SessionID)
 	}
+}
+
+// touchesSessionRegistry reports whether hook writes the session -> cwd
+// registry the git trailer reads: the existing eleven only. CwdChanged is
+// deliberately NOT here -- it is the one new hook that could carry cwd
+// information, but whether the common `cwd` field on that payload is pre- or
+// post-change is undocumented, and a registry keyed on the wrong one is worse
+// than one not touched.
+func touchesSessionRegistry(hook HookName) bool {
+	switch hook {
+	case HookSessionStart, HookUserPromptSubmit, HookPreToolUse, HookPostToolUse,
+		HookPostToolUseFailure, HookSessionEnd, HookStop, HookSubagentStop,
+		HookSubagentStart, HookPermissionDenied, HookStopFailure:
+		return true
+	}
+	return false
 }
 
 // emitTurn reads the transcript from the cursor's offset, taking this side of

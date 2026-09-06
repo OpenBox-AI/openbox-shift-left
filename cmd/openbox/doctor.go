@@ -100,6 +100,19 @@ func (a *app) runDoctor(args []string) int {
 	}
 	fmt.Fprintf(a.stdout, "  last decision   %s\n", lastDecisionSummary())
 
+	fmt.Fprintf(a.stdout, "\nRecent config-change denials (most recent first)\n")
+	denials, denialsUnreadable := recentConfigDenials(5)
+	switch {
+	case denialsUnreadable:
+		fmt.Fprintf(a.stdout, "  (unreadable)\n")
+	case len(denials) == 0:
+		fmt.Fprintf(a.stdout, "  (none recorded)\n")
+	default:
+		for _, d := range denials {
+			fmt.Fprintf(a.stdout, "  %s\n", d)
+		}
+	}
+
 	fmt.Fprintf(a.stdout, "\nProvider managed configuration\n")
 	for _, prov := range []managed.Provider{managed.ProviderClaudeCode, managed.ProviderCodex} {
 		state := managed.ProviderState(prov)
@@ -129,12 +142,15 @@ func orUnset(s string) string {
 	return s
 }
 
+// lastDecisionSummary is switched onto the bounded tail reader (V6): its
+// unmarshal, both format strings, and both fallbacks are unchanged, so its
+// printed output for any file under enforcementTailBytes is byte-identical to
+// the whole-file os.ReadFile version it replaces.
 func lastDecisionSummary() string {
-	raw, err := os.ReadFile(hookflow.DefaultEnforcementPath())
-	if err != nil || len(raw) == 0 {
+	lines := tailLines(hookflow.DefaultEnforcementPath(), enforcementTailBytes, 1)
+	if len(lines) == 0 {
 		return "(none recorded)"
 	}
-	lines := strings.Split(strings.TrimRight(string(raw), "\n"), "\n")
 	var rec struct {
 		PolicyID string `json:"policy_id"`
 		Source   string `json:"source"`
@@ -147,6 +163,54 @@ func lastDecisionSummary() string {
 		return fmt.Sprintf("%s via %s; NO policy decided this call", orUnset(rec.Verdict), orUnset(rec.Source))
 	}
 	return fmt.Sprintf("policy %s (%s via %s)", rec.PolicyID, orUnset(rec.Verdict), orUnset(rec.Source))
+}
+
+// configDenialToolKind matches configToolKind in
+// internal/adapters/claude-code/configgate.go. Duplicated, not imported: this
+// package cannot reach that adapter's unexported constant, and the value is a
+// stable wire field already written to the shared enforcements.jsonl sink.
+const configDenialToolKind = "config"
+
+// configDenialScanLines bounds how many of the byte-capped window's raw lines
+// recentConfigDenials walks backward through to find tool_kind=="config"
+// entries. It only needs to exceed what enforcementTailBytes can ever hold
+// (on the order of a hundred records, per the tail cap decision), so a
+// generous round number costs nothing.
+const configDenialScanLines = 4096
+
+// recentConfigDenials reports the last n config-change denials (D6), reading
+// through the same bounded tail helper lastDecisionSummary uses (V6): one
+// sink, two readers. unreadable distinguishes a corrupt sink (every raw line
+// failed to parse) from a healthy sink that simply has no config denials in
+// its window, so the caller can print "(unreadable)" only for the former.
+func recentConfigDenials(n int) (out []string, unreadable bool) {
+	raw := tailLines(hookflow.DefaultEnforcementPath(), enforcementTailBytes, configDenialScanLines)
+	if len(raw) == 0 {
+		return nil, false
+	}
+	parsed := 0
+	for i := len(raw) - 1; i >= 0 && len(out) < n; i-- {
+		var rec struct {
+			Timestamp       string `json:"ts"`
+			ToolKind        string `json:"tool_kind"`
+			AppliedDecision string `json:"applied_decision"`
+			PolicyID        string `json:"policy_id"`
+			Reason          string `json:"reason"`
+		}
+		if json.Unmarshal([]byte(raw[i]), &rec) != nil {
+			continue // an unreadable line is skipped, not fatal to the section
+		}
+		parsed++
+		if rec.ToolKind != configDenialToolKind {
+			continue
+		}
+		out = append(out, fmt.Sprintf("%s  %s (policy %s): %s",
+			rec.Timestamp, orUnset(rec.AppliedDecision), orUnset(rec.PolicyID), rec.Reason))
+	}
+	if parsed == 0 {
+		return nil, true // every raw line failed to parse: the sink itself is corrupt
+	}
+	return out, false
 }
 
 func withPresence(path string) string {
