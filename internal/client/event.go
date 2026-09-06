@@ -11,7 +11,7 @@
 package client
 
 // SchemaVersion is the dev-event contract version this client speaks.
-const SchemaVersion = "1.7"
+const SchemaVersion = "1.8"
 
 // EventType is a developer-runtime lifecycle event type.
 type EventType string
@@ -42,6 +42,36 @@ const (
 	// EventAPIError records a turn that ended in a provider-side error rather
 	// than an answer (rate limit, billing, auth, overload).
 	EventAPIError EventType = "APIError"
+
+	// v1.8 observe-only lifecycle signals (21 classes, table B of the phase-04
+	// plan). Each rides stock SignalReceived with a unique signal_name and
+	// never signal_args, is never paired as an Activity, and never sets
+	// ev.Tokens. Naming rule, no exceptions: EventType is the Claude Code hook
+	// name verbatim; signal_name is its snake_case (see payload.go
+	// wireTypeFor). No EventSessionSuspended: a `/clear` is a Temporal
+	// continue-as-new (see phase 08), not a suspended session (owner ruling
+	// V3) — a constant with no wireTypeFor case would be a build-time trap.
+	EventSetup               EventType = "Setup"
+	EventInstructionsLoaded  EventType = "InstructionsLoaded"
+	EventUserPromptExpansion EventType = "UserPromptExpansion"
+	EventMessageDisplay      EventType = "MessageDisplay"
+	EventPermissionRequest   EventType = "PermissionRequest"
+	EventPostToolBatch       EventType = "PostToolBatch"
+	EventNotification        EventType = "Notification"
+	EventTaskCreated         EventType = "TaskCreated"
+	EventTaskCompleted       EventType = "TaskCompleted"
+	EventTeammateIdle        EventType = "TeammateIdle"
+	EventConfigChange        EventType = "ConfigChange"
+	EventCwdChanged          EventType = "CwdChanged"
+	EventDirectoryAdded      EventType = "DirectoryAdded"
+	EventFileChanged         EventType = "FileChanged"
+	EventWorktreeRemove      EventType = "WorktreeRemove"
+	EventPreCompact          EventType = "PreCompact"
+	EventPostCompact         EventType = "PostCompact"
+	EventPreModelSwitch      EventType = "PreModelSwitch"
+	EventPostModelSwitch     EventType = "PostModelSwitch"
+	EventElicitation         EventType = "Elicitation"
+	EventElicitationResult   EventType = "ElicitationResult"
 )
 
 // AllEventTypes is the complete vocabulary, so callers that need to enumerate
@@ -60,6 +90,27 @@ var AllEventTypes = []EventType{
 	EventSubagentStarted,
 	EventPermissionDenied,
 	EventAPIError,
+	EventSetup,
+	EventInstructionsLoaded,
+	EventUserPromptExpansion,
+	EventMessageDisplay,
+	EventPermissionRequest,
+	EventPostToolBatch,
+	EventNotification,
+	EventTaskCreated,
+	EventTaskCompleted,
+	EventTeammateIdle,
+	EventConfigChange,
+	EventCwdChanged,
+	EventDirectoryAdded,
+	EventFileChanged,
+	EventWorktreeRemove,
+	EventPreCompact,
+	EventPostCompact,
+	EventPreModelSwitch,
+	EventPostModelSwitch,
+	EventElicitation,
+	EventElicitationResult,
 }
 
 // So the vocabulary is closed and statusFor drops anything outside it rather
@@ -201,15 +252,38 @@ type DevEvent struct {
 	EventID       string    `json:"event_id"` // client idempotency key (INV-5)
 	EventType     EventType `json:"event_type"`
 	SessionID     string    `json:"openbox_session_id"`
-	DeveloperDID  string    `json:"developer_did"`
-	Timestamp     string    `json:"timestamp"` // RFC3339
-	StartedAt     string    `json:"started_at,omitempty"`
-	EndedAt       string    `json:"ended_at,omitempty"`
-	Tool          Tool      `json:"tool"`
-	Tokens        *Tokens   `json:"tokens,omitempty"`
-	Cost          *Cost     `json:"cost,omitempty"`
-	Span          *Span     `json:"span,omitempty"`
-	Content       *Content  `json:"content,omitempty"`
+
+	// RunID is the minted run id (a v4 UUID) of a continued run; empty at
+	// generation 0, where the wire run_id is the session id. It rides every
+	// event because the flusher resolves run_id from this event alone
+	// (client.go:195), long after the hook process that built the event
+	// exited, and a minted value cannot be recomputed. Set by the adapter at
+	// hook time from the run record. NOT derived here: phase 08 owns
+	// runIDFor and the run record; this phase declares the field only.
+	RunID string `json:"run_id,omitempty"`
+
+	// RunGeneration is 0 for the original run; a SessionStart(source ∈
+	// {clear, resume}) on an already-seen session id opens generation n+1
+	// (phase 08). Present on every event type. Informational: a local
+	// counter that may restart after record loss (V7) — an ordering hint for
+	// openbox-fe, never a key and never something to derive an id from.
+	RunGeneration int `json:"run_generation,omitempty"`
+
+	// ContinuedFromRunID is the run this one continued from, set only on the
+	// WorkflowStarted of generation >= 1: lineage is a property of the
+	// boundary, not of every row, so repeating it everywhere would be a
+	// second store of the same fact.
+	ContinuedFromRunID string `json:"continued_from_run_id,omitempty"`
+
+	DeveloperDID string   `json:"developer_did"`
+	Timestamp    string   `json:"timestamp"` // RFC3339
+	StartedAt    string   `json:"started_at,omitempty"`
+	EndedAt      string   `json:"ended_at,omitempty"`
+	Tool         Tool     `json:"tool"`
+	Tokens       *Tokens  `json:"tokens,omitempty"`
+	Cost         *Cost    `json:"cost,omitempty"`
+	Span         *Span    `json:"span,omitempty"`
+	Content      *Content `json:"content,omitempty"`
 
 	// Status is a tool call's outcome; StatusCompleted or StatusFailed; and is
 	// the only thing core reads to decide whether a completed call succeeded.

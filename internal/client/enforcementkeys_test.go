@@ -2,6 +2,7 @@ package client
 
 import (
 	"sort"
+	"strings"
 	"testing"
 )
 
@@ -162,6 +163,43 @@ func TestEveryEnforcementKeyIsAContentKeyOrStructural(t *testing.T) {
 			t.Errorf("%q is neither structural nor named in contentMetadataKeys, so it egresses "+
 				"outside the content gate", key)
 		}
+	}
+}
+
+// TestASubagentSpawnDoesNotCollideWithTheEnforcementKeys is phase 07's TDD
+// case (b), and the safety constraint stated as a red test rather than a
+// review note (insight 4). A subagent spawn is shell-KINDED -- classifyTool
+// routes it through the shell arm so the local enforce gate is unchanged
+// (insight 6) -- but its span carries the "llm_tool_call" semantic, and its
+// content must NEVER land under `command`: that key is one of the three
+// enforcementKeys 71 of the control pack's 104 conditions match, and a
+// model-written subagent prompt arriving there would be judged by the 17
+// shell templates -- the exact ALLOW->HALT flip
+// TestTheModelCallLanesDoNotCollideWithTheEnforcementKeys exists to prevent
+// for a relayed model call.
+func TestASubagentSpawnDoesNotCollideWithTheEnforcementKeys(t *testing.T) {
+	ev := DevEvent{
+		EventID: "e1", EventType: EventToolCall, SessionID: "s", DeveloperDID: "did:aip:x",
+		Timestamp: "2026-07-15T00:00:00Z", Tool: Tool{Name: "Agent", Kind: ToolShell},
+		Span:    &Span{SemanticType: "llm_tool_call", Stage: "started"},
+		Content: &Content{ToolInput: `{"subagent_type":"code-reviewer","prompt":"do the thing"}`},
+	}
+	in := activityInput(t, ev)
+
+	for _, key := range enforcementKeys {
+		if _, present := in[key]; present {
+			t.Errorf("a subagent spawn's activity_input carries %q, one of the enforcement keys; "+
+				"a model-written prompt would be judged by the 17 shell templates. Keys: %v",
+				key, sortedKeys(in))
+		}
+	}
+	got, _ := in["arguments"].(string)
+	if got == "" {
+		t.Fatalf("activity_input.arguments is empty; the whole tool_input must land there (owner ruling 2). Keys: %v",
+			sortedKeys(in))
+	}
+	if !strings.Contains(got, "do the thing") {
+		t.Errorf("activity_input.arguments = %q, want the whole tool_input, prompt included", got)
 	}
 }
 

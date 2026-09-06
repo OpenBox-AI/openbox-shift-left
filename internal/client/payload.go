@@ -28,6 +28,13 @@ type governanceEventPayload struct {
 	ActivityID string `json:"activity_id,omitempty"`
 	WorkflowID string `json:"workflow_id"`
 	RunID      string `json:"run_id"`
+	// RunGeneration is 0 for the original run; present only when non-zero, so
+	// a generation-0 payload is byte-identical to a pre-1.8 one. Produced by
+	// phase 08; this phase only wires the field through.
+	RunGeneration int `json:"run_generation,omitempty"`
+	// ContinuedFromRunID is the sealed run this one continues from, set only
+	// on the WorkflowStarted of generation >= 1. Produced by phase 08.
+	ContinuedFromRunID string `json:"continued_from_run_id,omitempty"`
 	// WorkflowType is the base wire contract's required workflow discriminator.
 	WorkflowType string `json:"workflow_type,omitempty"`
 	// SignalName is required on a SignalReceived event, empty on
@@ -74,10 +81,15 @@ func buildPayload(ev DevEvent) ([]byte, error) {
 		EventType:    wireType,
 		ActivityType: activityLabel(ev), // additive dashboard label (pass-through column)
 		WorkflowID:   workflowIDFor(ev),
-		RunID:        ev.SessionID,
-		WorkflowType: workflowType,
-		SignalName:   signalName, // "" (omitted) unless this is a SignalReceived
-		Timestamp:    ev.Timestamp,
+		// RunID: ev.SessionID is deliberately UNCHANGED here (v1.8). Phase 08
+		// replaces this with runIDFor(ev); doing it in this phase would put the
+		// derivation in a phase with no run record to derive from.
+		RunID:              ev.SessionID,
+		RunGeneration:      ev.RunGeneration,
+		ContinuedFromRunID: ev.ContinuedFromRunID,
+		WorkflowType:       workflowType,
+		SignalName:         signalName, // "" (omitted) unless this is a SignalReceived
+		Timestamp:          ev.Timestamp,
 	}
 	if signalName != "" {
 		p.SignalArgs = buildSignalArgs(ev) // nil (omitted) when there is nothing to show
@@ -139,6 +151,53 @@ func wireTypeFor(et EventType) (wireType, signalName string, err error) {
 		return wireSignalReceived, "permission_denied", nil
 	case EventAPIError:
 		return wireSignalReceived, "api_error", nil
+
+	// v1.8 observe-only lifecycle signals (21 classes): each rides stock
+	// SignalReceived with signal_name = its EventType's snake_case, no
+	// exceptions. Grouped under one comment so the diff reads as one decision.
+	case EventSetup:
+		return wireSignalReceived, "setup", nil
+	case EventInstructionsLoaded:
+		return wireSignalReceived, "instructions_loaded", nil
+	case EventUserPromptExpansion:
+		return wireSignalReceived, "user_prompt_expansion", nil
+	case EventMessageDisplay:
+		return wireSignalReceived, "message_display", nil
+	case EventPermissionRequest:
+		return wireSignalReceived, "permission_request", nil
+	case EventPostToolBatch:
+		return wireSignalReceived, "post_tool_batch", nil
+	case EventNotification:
+		return wireSignalReceived, "notification", nil
+	case EventTaskCreated:
+		return wireSignalReceived, "task_created", nil
+	case EventTaskCompleted:
+		return wireSignalReceived, "task_completed", nil
+	case EventTeammateIdle:
+		return wireSignalReceived, "teammate_idle", nil
+	case EventConfigChange:
+		return wireSignalReceived, "config_change", nil
+	case EventCwdChanged:
+		return wireSignalReceived, "cwd_changed", nil
+	case EventDirectoryAdded:
+		return wireSignalReceived, "directory_added", nil
+	case EventFileChanged:
+		return wireSignalReceived, "file_changed", nil
+	case EventWorktreeRemove:
+		return wireSignalReceived, "worktree_remove", nil
+	case EventPreCompact:
+		return wireSignalReceived, "pre_compact", nil
+	case EventPostCompact:
+		return wireSignalReceived, "post_compact", nil
+	case EventPreModelSwitch:
+		return wireSignalReceived, "pre_model_switch", nil
+	case EventPostModelSwitch:
+		return wireSignalReceived, "post_model_switch", nil
+	case EventElicitation:
+		return wireSignalReceived, "elicitation", nil
+	case EventElicitationResult:
+		return wireSignalReceived, "elicitation_result", nil
+
 	case EventToolCall, EventTurnStarted:
 		return wireActivityStarted, "", nil
 	case EventToolResult, EventTurnCompleted:
@@ -325,6 +384,15 @@ var contentMetadataKeys = map[string]bool{
 	"error_details": true,
 	"arguments":     true,
 	"thinking":      true,
+
+	// v1.8: the 7 new per-class keys signalDetailKeyFor can return.
+	"requested_tool_input": true,
+	"notification_message": true,
+	"task_subject":         true,
+	"compact_instructions": true,
+	"compact_summary":      true,
+	"elicitation_message":  true,
+	"elicitation_response": true,
 }
 
 // observesAResponse is which half of an activity may assert an HTTP status.
@@ -359,6 +427,24 @@ func signalDetailKeyFor(t EventType) string {
 		return "denial_reason"
 	case EventAPIError:
 		return "error_details"
+	// v1.8: 8 cases, 7 distinct keys. No case for EventUserPromptExpansion —
+	// it is structural-only (D1).
+	case EventPermissionRequest:
+		return "requested_tool_input"
+	case EventNotification:
+		return "notification_message"
+	case EventTaskCreated:
+		return "task_subject"
+	case EventTaskCompleted:
+		return "task_subject"
+	case EventPreCompact:
+		return "compact_instructions"
+	case EventPostCompact:
+		return "compact_summary"
+	case EventElicitation:
+		return "elicitation_message"
+	case EventElicitationResult:
+		return "elicitation_response"
 	}
 	return ""
 }
@@ -433,10 +519,16 @@ func buildMetadata(ev DevEvent) (json.RawMessage, error) {
 	return json.Marshal(m)
 }
 
-// structuralActivityInput builds the INV-2-safe `activity_input` for an
-// ActivityStarted: the identifiers the Verify tab's "Input" detail renders, and
-// what the control plane runs its first Guardrails stage over.
-func contentKeyFor(kind ToolKind) string {
+// contentKeyFor names the activity_input key a tool's body lands under. It
+// takes the span semantic as well as the kind because an llm_tool_call is
+// shell-kinded but must NEVER land under `command`: `command` is an
+// enforcementKey that 71 of the control pack's 104 conditions match, and a
+// model-written prompt arriving there would be judged by the 17 shell
+// templates. See enforcementkeys_test.go.
+func contentKeyFor(kind ToolKind, sem string) string {
+	if kind == ToolShell && sem == "llm_tool_call" {
+		return "arguments"
+	}
 	switch kind {
 	case ToolShell:
 		return "command"
@@ -448,6 +540,9 @@ func contentKeyFor(kind ToolKind) string {
 	return "arguments"
 }
 
+// structuralActivityInput builds the INV-2-safe `activity_input` for an
+// ActivityStarted: the identifiers the Verify tab's "Input" detail renders, and
+// what the control plane runs its first Guardrails stage over.
 func structuralActivityInput(ev DevEvent) json.RawMessage {
 	m := map[string]any{}
 	if ev.Tool.Name != "" {
@@ -473,7 +568,11 @@ func structuralActivityInput(ev DevEvent) json.RawMessage {
 		}
 	}
 	if ev.Content != nil && ev.Content.ToolInput != "" {
-		m[contentKeyFor(ev.Tool.Kind)] = capBody(ev.Content.ToolInput)
+		sem := ""
+		if ev.Span != nil {
+			sem = ev.Span.SemanticType
+		}
+		m[contentKeyFor(ev.Tool.Kind, sem)] = capBody(ev.Content.ToolInput)
 	}
 	if len(m) == 0 {
 		return nil
