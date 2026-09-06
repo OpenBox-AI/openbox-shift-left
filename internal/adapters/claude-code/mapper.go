@@ -627,8 +627,12 @@ var builtinTools = map[string]toolClass{
 	"Agent": {client.ToolShell, "llm_tool_call", ""},
 
 	// ToolSearch gets the same treatment (ruling 3: query uncapped beyond the
-	// content gate). Whether ToolSearch fires PreToolUse at all is unverified;
-	// if it does not, this entry is inert, not wrong.
+	// content gate). It does fire PreToolUse -- measured, not assumed: the
+	// provider exempts exactly one tool (EndConversation) from the Pre/PostToolUse
+	// runners, and this machine's transcripts hold 93 PreToolUse:ToolSearch hook
+	// runs produced by this adapter, each carrying an ALLOW verdict from
+	// /evaluate. So every search has been gated all along; what changes here is
+	// what the judge can see, not whether the call is governed.
 	"ToolSearch": {client.ToolShell, "llm_tool_call", ""},
 }
 
