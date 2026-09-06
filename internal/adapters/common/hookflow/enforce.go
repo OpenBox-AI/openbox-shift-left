@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"time"
 	"unicode/utf8"
 
 	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/devconfig"
@@ -382,6 +383,8 @@ func RecordEnforcement(logger *log.Logger, sessionID, toolKind string, dec decis
 		FailOpen:        dec.FailOpen,
 		PolicyID:        dec.Evaluation.PolicyID,
 		ApprovalRef:     dec.Evaluation.ApprovalRef(), // correlates an ask to the governance approval; id only, no content
+		Timestamp:       time.Now().UTC().Format(time.RFC3339Nano),
+		Reason:          dec.Evaluation.Reason, // verbatim policy-authored reason (R2); never the GovReason stdout framing
 		Constraints:     dec.Evaluation.Constraints,
 	}
 	if g := dec.Evaluation.Guardrail; g != nil {
@@ -404,6 +407,16 @@ func RecordEnforcement(logger *log.Logger, sessionID, toolKind string, dec decis
 // EnforcementRecord is one line in the enforcement audit sink: the governance
 // decision that was actually applied to a tool call; distinct from an Advisory
 // record, which captures what OpenBox would enforce on the observe/flush path.
+//
+// It carries the policy-authored reason (Reason, verbatim from
+// client.Evaluation.Reason) and a generated Timestamp, so a denial is
+// diagnosable from this one file instead of joining reason (stdout) and clock
+// (elsewhere). It still never carries the tool content, the guardrail
+// reason free text, or a secret: Reason is the top-level, policy-authored
+// string already written to stdout on every deny/ask (never the tool
+// command/file/output content); the *nested* client.GuardrailReason.Reason
+// can quote scanned content and stays excluded on purpose — only its category
+// types are recorded, via GuardrailCategories below (INV-2).
 type EnforcementRecord struct {
 	SessionID           string           `json:"session_id"`
 	ToolKind            string           `json:"tool_kind,omitempty"`
@@ -415,6 +428,8 @@ type EnforcementRecord struct {
 	Stale               bool             `json:"stale,omitempty"`
 	PolicyID            string           `json:"policy_id,omitempty"`
 	ApprovalRef         string           `json:"approval_ref,omitempty"` // server correlation id for a REQUIRE_APPROVAL (INV-2 safe); see client.Evaluation.ApprovalRef
+	Timestamp           string           `json:"ts"`                     // generated, UTC, RFC3339Nano; always present (not omitempty)
+	Reason              string           `json:"reason,omitempty"`       // verbatim client.Evaluation.Reason; policy-authored, never content-derived
 	Constraints         []map[string]any `json:"constraints,omitempty"`
 	GuardrailCategories []string         `json:"guardrail_categories,omitempty"`
 	// Redacted / RedactionCategories record a Tier-1 redact-and-continue: whether

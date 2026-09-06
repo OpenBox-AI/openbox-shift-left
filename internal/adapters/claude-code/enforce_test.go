@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 	"unicode/utf8"
 
 	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/devconfig"
@@ -898,6 +899,52 @@ func TestApprovalReason(t *testing.T) {
 	})
 }
 
+// TestRecordEnforcement_ReasonAndTimestamp guards R1-R3: the audit line
+// carries the verbatim policy-authored reason (never the "OpenBox
+// governance:" stdout framing) and a generated RFC3339Nano timestamp, so a
+// denial is diagnosable from one file instead of joining reason (stdout) and
+// clock (elsewhere).
+func TestRecordEnforcement_ReasonAndTimestamp(t *testing.T) {
+	enfFile := filepath.Join(t.TempDir(), "enforcements.jsonl")
+	t.Setenv(envEnforcementFile, enfFile)
+	logger := log.New(&bytes.Buffer{}, "", 0)
+
+	dec := decision.Decision{Source: "local-bundle", Evaluation: client.Evaluation{
+		Verdict:  client.VerdictBlock,
+		Reason:   "external repository mutation not permitted",
+		PolicyID: "mcp-policy",
+	}}
+	before := time.Now()
+	res := hookflow.ApplyDecision(&bytes.Buffer{}, dec, false, nil, contract)
+	ev := &HookEvent{SessionID: "s", ToolName: "mcp__github__create_issue", ToolInput: []byte(`{"title":"secret-project-x"}`)}
+	recordEnforcement(logger, ev, dec, res)
+	after := time.Now()
+
+	data, err := os.ReadFile(enfFile)
+	if err != nil {
+		t.Fatalf("enforcement sink not written: %v", err)
+	}
+	var rec hookflow.EnforcementRecord
+	if err := json.Unmarshal([]byte(strings.TrimSpace(string(data))), &rec); err != nil {
+		t.Fatalf("enforcement record is not valid JSON: %v", err)
+	}
+
+	if rec.Reason != "external repository mutation not permitted" {
+		t.Errorf("rec.Reason = %q, want the verbatim policy reason", rec.Reason)
+	}
+	if strings.Contains(rec.Reason, "OpenBox governance:") {
+		t.Errorf("rec.Reason = %q, must not carry the stdout governance framing", rec.Reason)
+	}
+
+	ts, err := time.Parse(time.RFC3339Nano, rec.Timestamp)
+	if err != nil {
+		t.Fatalf("rec.Timestamp = %q does not parse as RFC3339Nano: %v", rec.Timestamp, err)
+	}
+	if ts.Before(before.Add(-time.Minute)) || ts.After(after.Add(time.Minute)) {
+		t.Errorf("rec.Timestamp = %v, want within a generous window of [%v, %v]", ts, before, after)
+	}
+}
+
 // TestRecordEnforcement_ApprovalID guards the audit half of AC-1/AC-2: an ask
 // decision carrying a server approval id records approval_ref (a correlation
 // id, not content) so the ask is tie-able to the governance approval; and the
@@ -1082,5 +1129,25 @@ func TestEscalationCarriesApprovalContext_ObserveNeverDoes(t *testing.T) {
 	}
 	if !strings.Contains(ev.Content.ToolInput, "/tmp/a") {
 		t.Errorf("file_path lost in the redacted rebuild: %q", ev.Content.ToolInput)
+	}
+}
+
+// TestRunHook_ConfigChange_PolicySettingsNeverCallsTheEvaluator is phase 10's
+// addition to configchange_test.go's TestRunHook_ConfigChange_PolicySettingsNeverGated:
+// that test asserts on OUTPUT (stdout/stderr/enforcement-file all empty), which
+// is also exactly what an ALLOW verdict produces -- so it cannot distinguish
+// "the gate ran and allowed" from "the gate never ran at all". This asserts on
+// a SPY (the evaluator's own hit counter) instead: source=policy_settings must
+// make ZERO /evaluate round trips, even when the server is configured to block.
+func TestRunHook_ConfigChange_PolicySettingsNeverCallsTheEvaluator(t *testing.T) {
+	setupConfigChangeEnv(t)
+	url, hits := serveEvaluate(t, `{"verdict":"block","reason":"would have blocked","policy_id":"cc-pol-spy"}`, 200, 0)
+	evalCreds(t, url)
+
+	runConfigHook(t, configPayload("cc-spy", "policy_settings", "/etc/claude/policy.json"))
+
+	if got := *hits; got != 0 {
+		t.Errorf("policy_settings made %d /evaluate call(s), want 0: the gate must never run for this "+
+			"source, not merely produce no visible output", got)
 	}
 }
