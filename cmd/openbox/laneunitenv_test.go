@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	obgit "github.com/openbox-ai/openbox-shift-left/internal/adapters/common/git"
+
 	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/devconfig"
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/laneservice"
 	"github.com/openbox-ai/openbox-shift-left/internal/telemetry"
@@ -32,7 +34,9 @@ func TestLaneUnitsCarryTheInstallersCoordinates(t *testing.T) {
 
 	openboxHome := filepath.Join(h.home, ".openbox")
 	spool := filepath.Join(h.home, "spool")
+	sessionDir := filepath.Join(h.home, "sessions")
 	t.Setenv(devconfig.EnvSpoolDir, spool)
+	t.Setenv(obgit.EnvSessionDir, sessionDir)
 
 	for _, tc := range []struct {
 		lane  string
@@ -67,6 +71,7 @@ func TestLaneUnitsCarryTheInstallersCoordinates(t *testing.T) {
 			for key, want := range map[string]string{
 				devconfig.EnvHome:     openboxHome,
 				devconfig.EnvSpoolDir: spool,
+				obgit.EnvSessionDir:   sessionDir,
 			} {
 				if !strings.Contains(string(body), key) || !strings.Contains(string(body), want) {
 					t.Errorf("%s unit does not carry %s=%s, so the daemon resolves a different one:\n%s",
@@ -77,17 +82,23 @@ func TestLaneUnitsCarryTheInstallersCoordinates(t *testing.T) {
 	}
 }
 
-// TestLaneUnitsCarryNoEnvironmentWhenTheInstallerHadNone. The default machine
-// sets neither variable, and a unit that gained a block there would rewrite
-// every developer's unit file on the next install for no behavioural reason.
-func TestLaneUnitsCarryNoEnvironmentWhenTheInstallerHadNone(t *testing.T) {
+// TestLaneUnitsCarryNoConditionalEnvironmentWhenTheInstallerHadNone. The
+// default machine sets neither OPENBOX_HOME nor OPENBOX_SPOOL_DIR, and a unit
+// that gained either there would rewrite every developer's unit file on the
+// next install for no behavioural reason. OPENBOX_SESSION_DIR is NOT
+// conditional (phase 08, insight 7): it is always resolved and always
+// carried, because a daemon has no $HOME to resolve it from otherwise --
+// see TestLaneUnitEnvCarriesOnlyCoordinates for what an install with real
+// credentials set must still keep OUT of the unit.
+func TestLaneUnitsCarryNoConditionalEnvironmentWhenTheInstallerHadNone(t *testing.T) {
 	skipUnlessSupervised(t)
 	h := newLaneHarness(t)
 	h.seedCA(t)
 	nothingIsListening(t)
 
 	// The harness pins OPENBOX_HOME for its own isolation; this case is about an
-	// installer that read nothing, which is what a.getenv reports here.
+	// installer that read nothing beyond that, which is what a.getenv reports
+	// for the two CONDITIONAL keys.
 	a, _, _ := testApp(map[string]string{"HOME": h.home})
 	if err := a.setupTransport(h.home, transport.DefaultAddr, false); err != nil {
 		t.Fatalf("setupTransport: %v", err)
@@ -97,10 +108,11 @@ func TestLaneUnitsCarryNoEnvironmentWhenTheInstallerHadNone(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reading the written unit: %v", err)
 	}
-	for _, marker := range []string{"EnvironmentVariables", "Environment="} {
-		if strings.Contains(string(body), marker) {
-			t.Errorf("the unit renders %s for an installer that set nothing:\n%s", marker, body)
-		}
+	if !strings.Contains(string(body), obgit.EnvSessionDir) {
+		t.Errorf("the unit does not carry %s, which is unconditional (a daemon has no $HOME):\n%s", obgit.EnvSessionDir, body)
+	}
+	if strings.Contains(string(body), devconfig.EnvSpoolDir) {
+		t.Errorf("the unit carries %s though the installer set nothing:\n%s", devconfig.EnvSpoolDir, body)
 	}
 }
 
@@ -109,6 +121,8 @@ func TestLaneUnitsCarryNoEnvironmentWhenTheInstallerHadNone(t *testing.T) {
 // coordinates may travel in a unit — the same one-store-per-field rule that
 // keeps secrets out of dev.json.
 func TestLaneUnitEnvCarriesOnlyCoordinates(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv(obgit.EnvSessionDir, dir)
 	a, _, _ := testApp(map[string]string{
 		devconfig.EnvHome:            "/h",
 		devconfig.EnvSpoolDir:        "/s",
@@ -117,8 +131,8 @@ func TestLaneUnitEnvCarriesOnlyCoordinates(t *testing.T) {
 		devconfig.EnvControlToken:    "token",
 	})
 	env := a.laneUnitEnv()
-	if len(env) != 2 || env[devconfig.EnvHome] != "/h" || env[devconfig.EnvSpoolDir] != "/s" {
-		t.Fatalf("laneUnitEnv carried %v; want exactly the two path coordinates", env)
+	if len(env) != 3 || env[devconfig.EnvHome] != "/h" || env[devconfig.EnvSpoolDir] != "/s" || env[obgit.EnvSessionDir] != dir {
+		t.Fatalf("laneUnitEnv carried %v; want exactly the three path coordinates", env)
 	}
 	for _, v := range env {
 		for _, secret := range []string{"obx_secret", "seed", "token"} {

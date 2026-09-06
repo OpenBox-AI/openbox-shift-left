@@ -28,12 +28,14 @@ func (k ApprovalKey) Valid() bool {
 }
 
 // ApprovalKeyFor derives the poll key for a dev event from the same
-// derivations buildPayload writes onto the wire; workflow_id, run_id and
-// activity_id.
+// derivations buildPayload writes onto the wire: workflow_id, run_id and
+// activity_id. Now literally the same function call rather than two
+// identical literals, so a continue-as-new run's escalation and its poll
+// can never name two different rows (runIDFor, payload.go).
 func ApprovalKeyFor(ev DevEvent) ApprovalKey {
 	return ApprovalKey{
 		WorkflowID: workflowIDFor(ev),
-		RunID:      ev.SessionID,
+		RunID:      runIDFor(ev),
 		ActivityID: activityIDFor(ev),
 	}
 }

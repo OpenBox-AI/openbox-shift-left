@@ -66,6 +66,15 @@ type Identity struct {
 	// ":gateway:" branch before it ever reaches the ":agent:" one; so this is
 	// attribution detail, not identity.
 	AgentID string
+
+	// RunID and RunGeneration are this call's resolved continue-as-new
+	// identity (phase 08): Emit resolves them from the shared RunStore and the
+	// R12 straddle check BEFORE building Identity, so EventsFor only ever
+	// copies -- a lane must read the minted string, never derive one. Both
+	// empty/zero at generation 0, which is why an un-set Identity (as every
+	// existing caller/test builds one) still produces a byte-identical event.
+	RunID         string
+	RunGeneration int
 }
 
 // EventsFor builds one relayed call's two events from one call site, so there is
@@ -98,6 +107,8 @@ func EventsFor(lane Lane, id Identity, requestID string, at time.Time, c gateway
 			SessionID:     id.SessionID,
 			DeveloperDID:  id.DeveloperDID,
 			AgentID:       id.AgentID,
+			RunID:         id.RunID,
+			RunGeneration: id.RunGeneration,
 			Tool:          client.Tool{Name: "claude-code", Kind: client.ToolShell},
 			ActivityType:  class.ActivityType(),
 			Timestamp:     ts.Format(time.RFC3339Nano),

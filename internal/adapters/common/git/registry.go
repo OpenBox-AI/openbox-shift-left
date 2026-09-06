@@ -2,10 +2,13 @@ package git
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 //   - Sessions in different worktrees never collide; the worktree filter is
@@ -85,6 +88,178 @@ func RemoveSessionRecord(dir, sessionID string) error {
 
 func sessionRecordPath(dir, sessionID string) string {
 	return filepath.Join(dir, sanitizeForFile(sessionID)+".json")
+}
+
+// RunRecord is one session's continue-as-new lineage: unlike SessionRecord it
+// outlives SessionEnd, because the generation a `--resume` continues from still
+// has to be known after the session that opened it is sealed. Only `--resume`
+// reaches this record: a `/clear` mints a new session id, so it has no prior
+// run under its own id to continue. Generation 0 (the original run) has no record at all;
+// a record only exists from the first bump onward.
+type RunRecord struct {
+	SessionID     string `json:"session_id"`
+	Generation    int    `json:"generation"`
+	RunID         string `json:"run_id"`
+	PreviousRunID string `json:"previous_run_id,omitempty"`
+	UpdatedAt     int64  `json:"updated_at"` // unix nanoseconds; the bump's own clock read
+}
+
+// RunDir is where run records live: a SUBDIRECTORY of the session registry,
+// never a flat sibling. SessionResolver.resolveFromRegistry (session.go:139)
+// scans every *.json directly under DefaultSessionDir() and unmarshals each
+// as a SessionRecord; a flat "<id>.run.json" sibling would parse and be
+// rejected only by the accident of an empty Cwd failing withinWorktree. A
+// subdirectory is skipped structurally by that scan's own e.IsDir() check, so
+// the exclusion cannot be undone by a later field addition to RunRecord. Do
+// not flatten this back to a sibling file.
+func RunDir(sessionDir string) string {
+	return filepath.Join(sessionDir, "runs")
+}
+
+func runRecordPath(dir, sessionID string) string {
+	return filepath.Join(dir, sanitizeForFile(sessionID)+".json")
+}
+
+// RunStore reads and bumps one machine's run records. The zero value is the
+// production store: Dir resolves to RunDir(DefaultSessionDir()), NewID mints
+// a v4 UUID, Now is time.Now. A test sets Dir to a temp directory (and may
+// override NewID/Now to pin a value) so it never touches the developer's
+// real registry -- the same reason SessionResolver's readDir/readFile/now
+// fields exist.
+type RunStore struct {
+	Dir   string
+	NewID func() (string, error)
+	Now   func() time.Time
+}
+
+func (s RunStore) dir() string {
+	if s.Dir != "" {
+		return s.Dir
+	}
+	return RunDir(DefaultSessionDir())
+}
+
+// newID never uses uuid.New(): that constructor panics on entropy failure,
+// and a panic inside the SessionStart hook is not fail-open (INV-3, R6).
+func (s RunStore) newID() (string, error) {
+	if s.NewID != nil {
+		return s.NewID()
+	}
+	id, err := uuid.NewRandom()
+	if err != nil {
+		return "", err
+	}
+	return id.String(), nil
+}
+
+func (s RunStore) now() time.Time {
+	if s.Now != nil {
+		return s.Now()
+	}
+	return time.Now()
+}
+
+// Read returns the current run record for sessionID. err is nil and the
+// record is the honest generation-0 zero value when no record exists yet --
+// that is the ordinary, overwhelmingly common state, not a fault. err is
+// non-nil (and the returned record is the zero value) when the directory is
+// unreadable, the file is not valid JSON, or the record is INCONSISTENT: a
+// Generation >= 1 record whose RunID fails uuid.Parse, or a Generation == 0
+// record with a non-empty RunID. The caller (hookrun.go) treats any non-nil
+// err as generation 0 plus one stderr line (R6): a run-identity read must
+// never block a tool call or drop an event.
+func (s RunStore) Read(sessionID string) (RunRecord, error) {
+	data, err := os.ReadFile(runRecordPath(s.dir(), sessionID))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return RunRecord{SessionID: sessionID}, nil
+		}
+		return RunRecord{}, fmt.Errorf("git: run record for %q unreadable: %w", sessionID, err)
+	}
+	var rec RunRecord
+	if err := json.Unmarshal(data, &rec); err != nil {
+		return RunRecord{}, fmt.Errorf("git: run record for %q is not valid JSON: %w", sessionID, err)
+	}
+	if err := validateRunRecord(rec); err != nil {
+		return RunRecord{}, err
+	}
+	return rec, nil
+}
+
+func validateRunRecord(rec RunRecord) error {
+	if rec.Generation == 0 {
+		if rec.RunID != "" {
+			return fmt.Errorf("git: run record for %q inconsistent: generation 0 with a non-empty run_id %q", rec.SessionID, rec.RunID)
+		}
+		return nil
+	}
+	if _, err := uuid.Parse(rec.RunID); err != nil {
+		return fmt.Errorf("git: run record for %q inconsistent: generation %d with an unparseable run_id %q: %w",
+			rec.SessionID, rec.Generation, rec.RunID, err)
+	}
+	return nil
+}
+
+// Bump mints a new run for sessionID: generation+1, a fresh UUID run id, and
+// PreviousRunID pointing at the run this one continues from. An absent OR
+// corrupt/inconsistent old record is treated identically -- starting fresh at
+// generation 1 with PreviousRunID = sessionID (V7/R5) -- because a broken old
+// record must never propagate into the new one; the only failure Bump itself
+// reports is the mint or the write failing, which the caller (hookrun.go)
+// treats as generation 0 plus one stderr line (R6): a run-identity write must
+// never block a tool call or drop an event.
+func (s RunStore) Bump(sessionID string) (RunRecord, error) {
+	old, err := s.Read(sessionID)
+	if err != nil {
+		old = RunRecord{SessionID: sessionID}
+	}
+	prev := old.RunID
+	if prev == "" {
+		prev = sessionID
+	}
+	newID, err := s.newID()
+	if err != nil {
+		return RunRecord{}, fmt.Errorf("git: minting a new run id for %q: %w", sessionID, err)
+	}
+	rec := RunRecord{
+		SessionID:     sessionID,
+		Generation:    old.Generation + 1,
+		RunID:         newID,
+		PreviousRunID: prev,
+		UpdatedAt:     s.now().UnixNano(),
+	}
+	if err := s.write(rec); err != nil {
+		return RunRecord{}, fmt.Errorf("git: writing the bumped run record for %q: %w", sessionID, err)
+	}
+	return rec, nil
+}
+
+// write is temp+rename (atomic), mirroring WriteSessionRecord: a concurrent
+// reader never observes a partial file.
+func (s RunStore) write(rec RunRecord) error {
+	dir := s.dir()
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	data, err := json.Marshal(rec)
+	if err != nil {
+		return err
+	}
+	f, err := os.CreateTemp(dir, sanitizeForFile(rec.SessionID)+"-*.tmp")
+	if err != nil {
+		return err
+	}
+	tmp := f.Name()
+	if _, err := f.Write(data); err != nil {
+		f.Close()
+		os.Remove(tmp)
+		return err
+	}
+	if err := f.Close(); err != nil {
+		os.Remove(tmp)
+		return err
+	}
+	return os.Rename(tmp, runRecordPath(dir, rec.SessionID))
 }
 
 func sanitizeForFile(id string) string {

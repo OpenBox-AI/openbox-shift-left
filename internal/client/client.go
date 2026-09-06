@@ -183,7 +183,10 @@ func (c *Client) Emit(ctx context.Context, ev DevEvent) (Evaluation, error) {
 		return Evaluation{}, errors.New("client: DevEvent.EventID is required (INV-5 idempotency key)")
 	}
 	if ev.SessionID == "" {
-		return Evaluation{}, errors.New("client: DevEvent.SessionID is required (maps to core run_id)")
+		// Still required even on a continued run: runIDFor selects the minted
+		// RunID when there is one and falls back to SessionID otherwise, so an
+		// event with no session id has no run id either.
+		return Evaluation{}, errors.New("client: DevEvent.SessionID is required (the run id falls back to it)")
 	}
 
 	// Copy, so the caller's event is never mutated.

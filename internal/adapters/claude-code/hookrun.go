@@ -60,8 +60,8 @@ func RunHook(sub string, stdin io.Reader, stdout io.Writer, logger *log.Logger) 
 	// mapping the git trailer needs; the 21 new hook classes add nothing to
 	// that map (MessageDisplay/InstructionsLoaded alone would turn this into a
 	// per-message file write for information those events do not carry).
+	regDir := obgit.DefaultSessionDir()
 	if touchesSessionRegistry(hook) {
-		regDir := obgit.DefaultSessionDir()
 		if hook == HookSessionEnd {
 			if err := obgit.RemoveSessionRecord(regDir, ev.SessionID); err != nil {
 				logger.Printf("session registry cleanup: %v", err)
@@ -71,7 +71,41 @@ func RunHook(sub string, stdin io.Reader, stdout io.Writer, logger *log.Logger) 
 		}
 	}
 
+	// Run identity (phase 08, RESUME-ONLY re-scope): resolved before
+	// New()/Record(), so the run id this hook's event(s) are stamped with and
+	// the latch this hook consults just below agree. Only
+	// SessionStart(source=resume) bumps -- NOT clear: measured live against
+	// installed Claude Code 2.1.263, a `/clear` mints a DIFFERENT session id
+	// 46ms apart (SessionEnd reason=clear, then SessionStart source=clear on a
+	// new id core has never seen), so there is no prior run for it to
+	// continue; bumping it would file the new session's run under an id that
+	// belongs to a DIFFERENT (fresh) session's future record. Every other hook
+	// -- and every other SessionStart source -- reads the existing record.
+	// Absent/unreadable/corrupt/inconsistent ⇒ generation 0 plus one stderr
+	// line (INV-3, R6): a run-identity lookup must never block a tool call or
+	// drop an event.
+	runStore := obgit.RunStore{Dir: obgit.RunDir(regDir)}
+	var run RunIdentity
+	if hook == HookSessionStart && isBumpSource(ev.Source) {
+		if rec, err := runStore.Bump(ev.SessionID); err != nil {
+			logger.Printf("run identity: bump failed, continuing at generation 0: %v", err)
+		} else {
+			run = RunIdentity{Generation: rec.Generation, RunID: rec.RunID, ContinuedFrom: rec.PreviousRunID}
+		}
+	} else if rec, err := runStore.Read(ev.SessionID); err != nil {
+		logger.Printf("run identity: record unreadable, continuing at generation 0: %v", err)
+	} else {
+		run = RunIdentity{Generation: rec.Generation, RunID: rec.RunID}
+	}
+	// The same selection client.runIDFor makes: the minted run id when one
+	// exists, else the bare session id (generation 0).
+	runID := ev.SessionID
+	if run.RunID != "" {
+		runID = run.RunID
+	}
+
 	ad := New(id, DefaultSpoolDir())
+	ad.Mapper.Run = &run
 	ad.Mapper.CaptureContent = ResolveContentCapture()
 	if ResolveSecretDetection() {
 		redactor := decision.NewRedactor()
@@ -79,6 +113,12 @@ func RunHook(sub string, stdin io.Reader, stdout io.Writer, logger *log.Logger) 
 	}
 	pinnedNow := time.Now()
 	ad.Mapper.Now = func() time.Time { return pinnedNow }
+
+	// Before anything reads the cursor: a resumed or forked sitting inherits a
+	// transcript whose earlier turns are already counted. See anchorTurnCursor.
+	if hook == HookSessionStart && anchorsTurnCursor(ev.Source) {
+		anchorTurnCursor(ad, logger, ev)
+	}
 
 	// This is the only place transcript_path is opened, and only when
 	// ResolveFinops() is set; with finops off it is never dereferenced.
@@ -125,7 +165,7 @@ func RunHook(sub string, stdin io.Reader, stdout io.Writer, logger *log.Logger) 
 		(hook == HookConfigChange && ev.Source != policySettingsSource))
 
 	if gated {
-		if info, halted := hookflow.SessionHalted(ev.SessionID); halted {
+		if info, halted := hookflow.SessionHalted(runID); halted {
 			if _, err := ad.Observe(hook, ev); err != nil {
 				logger.Printf("spool %s event: %v", hook, err)
 			}
@@ -183,6 +223,7 @@ func RunHook(sub string, stdin io.Reader, stdout io.Writer, logger *log.Logger) 
 			Evaluator:    evaluator,
 			Record:       func(dec decision.Decision, res hookflow.ApplyResult) { record(logger, ev, dec, res) },
 			SpoolObserve: spoolObserve,
+			RunID:        runID,
 		}
 		res := g.Run(context.Background(), logger, stdout, target)
 		if hook == HookUserPromptSubmit && !res.Emitted && ResolveFindings() {
@@ -203,6 +244,68 @@ func RunHook(sub string, stdin io.Reader, stdout io.Writer, logger *log.Logger) 
 
 	if hook == HookSessionEnd {
 		runFlush(logger, ev.SessionID)
+	}
+}
+
+// isBumpSource reports whether SessionStart's source enum opens a new run
+// generation (R4, resume-only re-scope): ONLY resume does. clear joins
+// startup, compact and fork as non-bumping -- a `/clear` was measured live
+// (Claude Code 2.1.263) to mint a brand-new session id, ~46ms after the
+// SessionEnd that sealed the old one, so the SessionStart it fires next has
+// no prior run under ITS id to continue; `--resume` is the one source that
+// reuses the id, which is the only case where "continue the run this id
+// already has" is a coherent question. enumOr guards against an
+// unrecognized value reading as a bump.
+func isBumpSource(source string) bool {
+	return enumOr(source, sourceValues) == "resume"
+}
+
+// anchorsTurnCursor reports whether a SessionStart opens onto a transcript that
+// already holds turns this runtime has counted. `resume` reopens the SAME file
+// the previous sitting wrote; `fork` opens a fresh session id over a COPY of the
+// parent's history. Both start reading at a point where the prose above the
+// cursor is old news. `startup` has no history, `compact` keeps its cursor, and
+// `clear` mints a fresh id whose transcript is empty.
+func anchorsTurnCursor(source string) bool {
+	switch enumOr(source, sourceValues) {
+	case "resume", "fork":
+		return true
+	}
+	return false
+}
+
+// anchorTurnCursor pins the main-thread turn cursor to the current end of the
+// transcript, so the first turn of a resumed or forked sitting reports only what
+// that sitting actually spent.
+//
+// Without it: SessionEnd clears the cursor (Engine.Record -> Turns.ClearSession),
+// so a later resume reads from offset 0 and readTurnUsage -- which sums a single
+// window from the cursor to EOF -- attributes EVERY earlier turn's tokens to the
+// first Stop after the resume. That has always been the behaviour; it stayed
+// invisible because the over-counted pair reused activity id `<session>:turn:0`
+// and the control plane discarded it as a duplicate of the previous run's first
+// turn. Run identity gives the continued run its own run_id, which is part of
+// that dedupe key, so the duplicate would now be stored and the whole prior
+// sitting billed a second time. `fork` never had the accidental protection --
+// a fresh session id collides with nothing -- so it has been over-counting
+// outright, and this closes that too.
+//
+// Best-effort by design (INV-3): a transcript that cannot be stat'ed leaves the
+// cursor alone and costs one stderr line. Over-reporting a turn is the failure
+// this prevents; failing to start a session would be worse.
+func anchorTurnCursor(ad *Adapter, logger *log.Logger, ev *HookEvent) {
+	if ev.TranscriptPath == "" {
+		return
+	}
+	fi, err := os.Stat(ev.TranscriptPath)
+	if err != nil {
+		logger.Printf("finops: turn cursor not anchored for source=%s: %v", ev.Source, err)
+		return
+	}
+	// The main-thread cursor, which is the one Stop reads; a sidechain carries
+	// its own agent id and its own file.
+	if err := ad.Turns.Write(ev.SessionID, "", hookflow.TurnPos{Offset: fi.Size(), Index: 0}); err != nil {
+		logger.Printf("finops: turn cursor not anchored for source=%s: %v", ev.Source, err)
 	}
 }
 

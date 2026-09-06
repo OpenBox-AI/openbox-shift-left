@@ -29,11 +29,13 @@ type governanceEventPayload struct {
 	WorkflowID string `json:"workflow_id"`
 	RunID      string `json:"run_id"`
 	// RunGeneration is 0 for the original run; present only when non-zero, so
-	// a generation-0 payload is byte-identical to a pre-1.8 one. Produced by
-	// phase 08; this phase only wires the field through.
+	// a generation-0 payload is byte-identical to a pre-1.8 one. Copied
+	// straight from ev.RunGeneration -- the adapter is the one that stamps it
+	// from the run record at hook time (see DevEvent.RunGeneration).
 	RunGeneration int `json:"run_generation,omitempty"`
 	// ContinuedFromRunID is the sealed run this one continues from, set only
-	// on the WorkflowStarted of generation >= 1. Produced by phase 08.
+	// on the WorkflowStarted of generation >= 1. Copied straight from
+	// ev.ContinuedFromRunID (see DevEvent.ContinuedFromRunID).
 	ContinuedFromRunID string `json:"continued_from_run_id,omitempty"`
 	// WorkflowType is the base wire contract's required workflow discriminator.
 	WorkflowType string `json:"workflow_type,omitempty"`
@@ -77,14 +79,11 @@ func buildPayload(ev DevEvent) ([]byte, error) {
 	}
 
 	p := governanceEventPayload{
-		Source:       source,
-		EventType:    wireType,
-		ActivityType: activityLabel(ev), // additive dashboard label (pass-through column)
-		WorkflowID:   workflowIDFor(ev),
-		// RunID: ev.SessionID is deliberately UNCHANGED here (v1.8). Phase 08
-		// replaces this with runIDFor(ev); doing it in this phase would put the
-		// derivation in a phase with no run record to derive from.
-		RunID:              ev.SessionID,
+		Source:             source,
+		EventType:          wireType,
+		ActivityType:       activityLabel(ev), // additive dashboard label (pass-through column)
+		WorkflowID:         workflowIDFor(ev),
+		RunID:              runIDFor(ev),
 		RunGeneration:      ev.RunGeneration,
 		ContinuedFromRunID: ev.ContinuedFromRunID,
 		WorkflowType:       workflowType,
@@ -231,6 +230,24 @@ func workflowIDFor(ev DevEvent) string {
 		return ev.WorkspaceID
 	}
 	return ev.DeveloperDID
+}
+
+// runIDFor selects the wire run_id: it never computes one. ev.RunID when a
+// continue-as-new minted it (the adapter stamped it from the run record at
+// hook time), else ev.SessionID (generation 0, where the session id IS the
+// run id -- this is why a generation-0 payload is byte-identical to a
+// pre-1.8 one, see TestGoldenWirePayloads). Exactly two call sites read it --
+// buildPayload (above) and ApprovalKeyFor (approval.go) -- and they must
+// agree or an escalation and its poll disagree about which record to hit
+// (TestApprovalKeyFor_MatchesTheWirePayload). Nowhere else: activityPairKey,
+// turnActivityIDFor and workflowIDFor stay keyed on ev.SessionID, because
+// activity ids are session-scoped by construction and a run id there would
+// change every shipped idempotency key for zero benefit.
+func runIDFor(ev DevEvent) string {
+	if ev.RunID != "" {
+		return ev.RunID
+	}
+	return ev.SessionID
 }
 
 func activityIDFor(ev DevEvent) string {

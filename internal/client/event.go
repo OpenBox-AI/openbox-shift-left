@@ -48,9 +48,11 @@ const (
 	// never signal_args, is never paired as an Activity, and never sets
 	// ev.Tokens. Naming rule, no exceptions: EventType is the Claude Code hook
 	// name verbatim; signal_name is its snake_case (see payload.go
-	// wireTypeFor). No EventSessionSuspended: a `/clear` is a Temporal
-	// continue-as-new (see phase 08), not a suspended session (owner ruling
-	// V3) — a constant with no wireTypeFor case would be a build-time trap.
+	// wireTypeFor). No EventSessionSuspended: every SessionEnd seals its run,
+	// and a session is never suspended. What follows a `/clear` is a NEW
+	// session (it mints a new session id), while a `--resume` reopens the same
+	// id and continues its run — a constant with no wireTypeFor case would be a
+	// build-time trap.
 	EventSetup               EventType = "Setup"
 	EventInstructionsLoaded  EventType = "InstructionsLoaded"
 	EventUserPromptExpansion EventType = "UserPromptExpansion"
@@ -262,9 +264,9 @@ type DevEvent struct {
 	// runIDFor and the run record; this phase declares the field only.
 	RunID string `json:"run_id,omitempty"`
 
-	// RunGeneration is 0 for the original run; a SessionStart(source ∈
-	// {clear, resume}) on an already-seen session id opens generation n+1
-	// (phase 08). Present on every event type. Informational: a local
+	// RunGeneration is 0 for the original run; a SessionStart(source=resume)
+	// -- the one source that reopens an already-seen session id -- opens
+	// generation n+1. Present on every event type. Informational: a local
 	// counter that may restart after record loss (V7) — an ordering hint for
 	// openbox-fe, never a key and never something to derive an id from.
 	RunGeneration int `json:"run_generation,omitempty"`

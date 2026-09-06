@@ -49,6 +49,27 @@ type Mapper struct {
 	// Evidence, when non-nil, records how much of this session's telemetry is
 	// known to be undelivered at session end (E8-S7).
 	Evidence *EvidenceState
+	// Run, when non-nil, is this hook invocation's resolved continue-as-new
+	// identity (phase 08): hookrun.go resolves it once, from the run record,
+	// before New()/Record() runs, and every event Map/MapTurn emits is stamped
+	// from it -- never derived here, because a minted run id cannot be
+	// recomputed from anything an event carries.
+	Run *RunIdentity
+}
+
+// RunIdentity is one hook invocation's resolved continue-as-new identity:
+// generation 0 (the zero value) means "no continuation has ever happened for
+// this session", in which case the wire run_id falls back to the session id
+// (client.runIDFor) -- Run being nil on the Mapper means exactly the same
+// thing, so an adapter that never wires this seam (or a hook that hit R6's
+// fail-open path) emits byte-identical generation-0 events.
+type RunIdentity struct {
+	Generation int
+	// RunID is the minted run id; empty at generation 0.
+	RunID string
+	// ContinuedFrom is the run this one continues from; set only when
+	// Generation >= 1, and only read by the HookSessionStart case (see Map).
+	ContinuedFrom string
 }
 
 // EvidenceState is a session's telemetry completeness. An alias, not a copy.
@@ -87,6 +108,10 @@ func (m Mapper) Map(hook HookName, e *HookEvent) (client.DevEvent, bool) {
 		DeveloperDID:  m.Identity.DeveloperDID,
 		Timestamp:     ts,
 	}
+	if m.Run != nil {
+		ev.RunID = m.Run.RunID
+		ev.RunGeneration = m.Run.Generation
+	}
 
 	switch hook {
 	case HookSessionStart:
@@ -99,6 +124,11 @@ func (m Mapper) Map(hook HookName, e *HookEvent) (client.DevEvent, bool) {
 			accountMetadata(localAccount(homeDir())))
 		if m.Posture != nil {
 			ev.Metadata["posture"] = m.Posture.Metadata()
+		}
+		// The only case that sets it (phase 08 R2): lineage is a property of
+		// the boundary, not of every row.
+		if m.Run != nil && m.Run.ContinuedFrom != "" {
+			ev.ContinuedFromRunID = m.Run.ContinuedFrom
 		}
 
 	case HookUserPromptSubmit:
@@ -466,6 +496,10 @@ func (m Mapper) MapTurn(e *HookEvent, w turnWindow, index int) (started, complet
 		TurnIndex:     &turnIndex,
 		AgentID:       capStr(e.AgentID),
 	}
+	if m.Run != nil {
+		base.RunID = m.Run.RunID
+		base.RunGeneration = m.Run.Generation
+	}
 
 	started = base
 	started.EventType = client.EventTurnStarted
@@ -689,10 +723,13 @@ var apiErrorTypes = map[string]bool{
 var (
 	// sourceValues is SessionStart's `source` enum only (insight 2: enumOr
 	// must be per hook, never reused across the four events that carry a
-	// `source` field). Phase 08 reads this list to decide whether a run
-	// continues: clear/resume bump the run generation; startup/compact/fork
-	// do not — a missing value here is a wrong run identity, not a cosmetic
-	// metadata gap (B-06 R5 added "fork").
+	// `source` field). Phase 08's isBumpSource reads this list to decide
+	// whether a run continues: ONLY resume bumps the run generation (resume-
+	// only re-scope, live-measured against Claude Code 2.1.263 -- a `/clear`
+	// mints a brand-new session id, so there is no prior run under it to
+	// continue); startup/clear/compact/fork do not — a missing value here is
+	// a wrong run identity, not a cosmetic metadata gap (B-06 R5 added
+	// "fork").
 	sourceValues = map[string]bool{"startup": true, "resume": true, "clear": true, "compact": true, "fork": true}
 	// reasonValues keeps bypass_permissions_disabled even though it is absent
 	// from the vendor docs and the 2.1.260 binary: enumOr would otherwise

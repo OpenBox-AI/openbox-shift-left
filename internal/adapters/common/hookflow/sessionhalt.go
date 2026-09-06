@@ -39,15 +39,28 @@ func DefaultHaltDir() string {
 	return filepath.Join(openboxConfigDir(), "halted-sessions")
 }
 
+// haltPath, WriteSessionHalt and SessionHalted all take a RUN id (phase 08,
+// R11/V14), not a session id, though the parameter is untyped and the name
+// below stays "sessionID" for every existing caller and test: at generation
+// 0 the run id IS the session id (client.runIDFor's own selection), so every
+// caller that predates continue-as-new is unaffected and every existing
+// latch fixture is byte-identical. A `/clear` or `--resume` that bumped the
+// run gets a DIFFERENT id here -- core's own HALT is scoped per
+// (workflow_id, run_id) row, and this latch now matches that scope: a
+// continued run starts unlatched, and core re-evaluates its first gated call
+// against the same policies (a policy that halted the old run halts the new
+// one on the same condition). No remove path is added, and none should be:
+// "presence is the decided state" stays true for the run it names.
 func haltPath(sessionID string) string {
 	sum := sha256.Sum256([]byte(sessionID))
 	return filepath.Join(DefaultHaltDir(), sanitizeSessionID(sessionID)+"-"+hex.EncodeToString(sum[:4])+".json")
 }
 
-// WriteSessionHalt latches a session as halted. Best-effort and off the
-// blocking path: the halting response is already on stdout when this runs, so
-// a write fault costs only the later calls' local refusal (they fall back to a
-// fresh evaluation); logged loudly, never surfaced (INV-3).
+// WriteSessionHalt latches a run as halted (see the run-vs-session-id note
+// above). Best-effort and off the blocking path: the halting response is
+// already on stdout when this runs, so a write fault costs only the later
+// calls' local refusal (they fall back to a fresh evaluation); logged
+// loudly, never surfaced (INV-3).
 func WriteSessionHalt(logger *log.Logger, sessionID string, e client.Evaluation) {
 	if sessionID == "" {
 		logger.Printf("session halt latch skipped: empty session id")
@@ -68,8 +81,9 @@ func WriteSessionHalt(logger *log.Logger, sessionID string, e client.Evaluation)
 	}
 }
 
-// SessionHalted reports whether a session is latched halted, with what the
-// latch preserved. A latch that exists but will not parse still halts, with a
+// SessionHalted reports whether a run is latched halted (see the
+// run-vs-session-id note above WriteSessionHalt), with what the latch
+// preserved. A latch that exists but will not parse still halts, with a
 // generic reason: presence is the decided state, and a corrupt file must not
 // quietly un-halt a session the control plane terminated.
 func SessionHalted(sessionID string) (SessionHaltInfo, bool) {

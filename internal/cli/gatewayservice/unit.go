@@ -1,6 +1,7 @@
 package gatewayservice
 
 import (
+	obgit "github.com/openbox-ai/openbox-shift-left/internal/adapters/common/git"
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/laneservice"
 )
 
@@ -16,10 +17,21 @@ const StopTimeout = laneservice.StopTimeout
 
 const verboseFlag = laneservice.VerboseFlag
 
+// spec carries OPENBOX_SESSION_DIR (phase 08, insight 8): unlike the
+// telemetry/transport lanes, the gateway unit carried NO env block at all
+// before this, yet gatewayemit (the :gateway: and :proxy: lanes' emitter)
+// needs the same resolved directory the hooks use, or its lane disagrees with
+// them about which run a call belongs to. Resolved here rather than passed
+// in: a daemon has no $HOME, so the value has to be the ANSWER, not a
+// passthrough (cmd/openbox/initlane.go's laneUnitEnv states the same rule).
 func spec(addr, upstream, settingsPath string, verbose bool) laneservice.Spec {
-	return laneservice.Gateway(addr, upstream, settingsPath, verbose)
+	return laneservice.Gateway(addr, upstream, settingsPath, verbose).WithEnv(map[string]string{
+		obgit.EnvSessionDir: obgit.DefaultSessionDir(),
+	})
 }
 
+// probeSpec stays env-free: it exists to ADDRESS an already-installed unit
+// (stop/uninstall/log paths), never to write one.
 func probeSpec() laneservice.Spec {
 	return laneservice.Gateway(DefaultProbeAddr, DefaultProbeUpstream, "", false)
 }

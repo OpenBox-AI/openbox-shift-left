@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"runtime"
 
+	obgit "github.com/openbox-ai/openbox-shift-left/internal/adapters/common/git"
+
 	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/devconfig"
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/activation"
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/laneservice"
@@ -122,15 +124,23 @@ func (a *app) removeLane(in laneRemoval) error {
 // named — and the transport CA check then refuses a certificate that is not
 // where it looked.
 //
-// Only these two keys, and only path coordinates: a unit file is
-// world-readable, so the API key and the signing seed must never reach one.
+// Three keys now, and only path coordinates: a unit file is world-readable,
+// so the API key and the signing seed must never reach one. The first two are
+// overrides this process's own environment may or may not carry, so they are
+// copied only when set. The third, OPENBOX_SESSION_DIR, is different in kind:
+// it is RESOLVED rather than copied, because a daemon has no $HOME at all --
+// obgit.DefaultSessionDir()'s os.UserConfigDir() fallback would resolve
+// differently, or not at all, inside it (phase 08 insight 7). Without it, the
+// gateway/proxy lanes would read (or bump) a run record this process never
+// wrote and disagree with the hooks about which run a call belongs to.
 func (a *app) laneUnitEnv() map[string]string {
-	env := make(map[string]string, 2)
+	env := make(map[string]string, 3)
 	for _, key := range []string{devconfig.EnvHome, devconfig.EnvSpoolDir} {
 		if v := a.getenv(key); v != "" {
 			env[key] = v
 		}
 	}
+	env[obgit.EnvSessionDir] = obgit.DefaultSessionDir()
 	return env
 }
 

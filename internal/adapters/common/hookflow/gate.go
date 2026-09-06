@@ -41,6 +41,24 @@ type EnforceGate struct {
 	Record func(dec decision.Decision, res ApplyResult)
 	// SpoolObserve appends the gated call's observe copy to the local spool.
 	SpoolObserve func()
+	// RunID is the run this call belongs to (phase 08, R11/V14): what
+	// WriteSessionHalt latches on. "" (the zero value) falls back to
+	// t.SessionID(), the same selection client.runIDFor makes, and is what
+	// every existing caller gets -- Codex never sets this and its HALT never
+	// reaches WriteSessionHalt anyway (see the comment below), so this field
+	// changes nothing for it.
+	RunID string
+}
+
+// runID is the same selection client.runIDFor makes, computed here rather
+// than added to EnforceTarget: adding a method there would touch every
+// implementation across both providers for a value only claude-code's
+// hookrun.go currently has a run record to supply.
+func (g EnforceGate) runID(t EnforceTarget) string {
+	if g.RunID != "" {
+		return g.RunID
+	}
+	return t.SessionID()
 }
 
 // Run gates one call.
@@ -84,7 +102,7 @@ func (g EnforceGate) Run(ctx context.Context, logger *log.Logger, stdout io.Writ
 	// A contract with no session-stop lever (Codex) renders a HALT as its per-
 	// call deny, so it never accumulates latch state its hooks would not consult.
 	if res.Decision == DecisionHalt {
-		WriteSessionHalt(logger, t.SessionID(), dec.Evaluation)
+		WriteSessionHalt(logger, g.runID(t), dec.Evaluation)
 	}
 	g.Record(dec, res)
 	return res

@@ -11,6 +11,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	obgit "github.com/openbox-ai/openbox-shift-left/internal/adapters/common/git"
 	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/hookflow"
 	"github.com/openbox-ai/openbox-shift-left/internal/gateway"
 )
@@ -61,6 +62,14 @@ type Emitter struct {
 
 	// ElectionProblem reports why the election could not be RESOLVED, or "".
 	ElectionProblem func() string
+
+	// RunStore resolves this session's run identity (RunID/RunGeneration on
+	// Identity), so this lane names the same run a hook event would (R7). The
+	// zero value resolves to runs/ under the resolved DefaultSessionDir() --
+	// what a production daemon gets from its unit's OPENBOX_SESSION_DIR
+	// (insight 7, a daemon has no $HOME) -- and a test points Dir at a temp
+	// directory so it never touches the developer's real registry.
+	RunStore obgit.RunStore
 
 	// ElectedName is WHICH lane the election named, "" when it named none.
 	//
@@ -219,10 +228,13 @@ func (e *Emitter) Emit(ctx context.Context, c gateway.Captured) {
 		return
 	}
 
+	runID, runGen := e.resolveRun(sessionID, c)
 	id := Identity{
-		SessionID:    sessionID,
-		DeveloperDID: did,
-		AgentID:      usableAgentID(c.RequestHeaders[agentHeader]),
+		SessionID:     sessionID,
+		DeveloperDID:  did,
+		AgentID:       usableAgentID(c.RequestHeaders[agentHeader]),
+		RunID:         runID,
+		RunGeneration: runGen,
 	}
 	requestID := e.requestID(c)
 	events, err := EventsFor(e.Lane, id, requestID, e.now(), c)
@@ -259,6 +271,23 @@ func (e *Emitter) Emit(ctx context.Context, c gateway.Captured) {
 // directions are not symmetric.
 func isModelCall(c gateway.Captured) bool {
 	return strings.EqualFold(c.HTTPMethod, http.MethodPost)
+}
+
+// resolveRun reads the shared run record ONCE per captured pair and applies
+// R12: a call whose observed start precedes the record's own bump timestamp
+// belongs to the run the bump sealed, not the one it opened. Read failure
+// (absent/unreadable/corrupt/inconsistent record) fails open to generation 0
+// (INV-3) -- this lane never blocks or drops a captured call over it.
+func (e *Emitter) resolveRun(sessionID string, c gateway.Captured) (runID string, runGen int) {
+	rec, err := e.RunStore.Read(sessionID)
+	if err != nil || rec.Generation == 0 {
+		return "", 0
+	}
+	started, _ := boundsOf(c, e.now())
+	if started.UnixNano() < rec.UpdatedAt {
+		return rec.PreviousRunID, rec.Generation - 1
+	}
+	return rec.RunID, rec.Generation
 }
 
 func (e *Emitter) requestID(c gateway.Captured) string {

@@ -6,6 +6,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	obgit "github.com/openbox-ai/openbox-shift-left/internal/adapters/common/git"
 )
 
 // TestUnitStopTimeoutMatchesTheGracePeriod is the coordination control.
@@ -148,6 +150,25 @@ func TestLaunchdUnitCapturesStdio(t *testing.T) {
 	}
 	if !strings.Contains(plist, LogPath(home)) {
 		t.Errorf("the plist does not name %s:\n%s", LogPath(home), plist)
+	}
+}
+
+// TestSpecCarriesTheResolvedSessionDir is T7's gateway-lane half (phase 08,
+// insight 8): the gateway unit carried NO env block at all before this, yet
+// gatewayemit (the :gateway: and :proxy: lanes' emitter) needs the same
+// resolved directory the hooks use, or its lane disagrees with them about
+// which run a call belongs to.
+func TestSpecCarriesTheResolvedSessionDir(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv(obgit.EnvSessionDir, dir)
+
+	plist := LaunchdPlist(t.TempDir(), "/bin/openbox", "127.0.0.1:8788", "https://api.anthropic.com", false)
+	if !strings.Contains(plist, obgit.EnvSessionDir) || !strings.Contains(plist, dir) {
+		t.Errorf("plist does not carry %s=%s:\n%s", obgit.EnvSessionDir, dir, plist)
+	}
+	unit := SystemdUnit("/home/dev", "/bin/openbox", "127.0.0.1:8788", "https://api.anthropic.com", false)
+	if !strings.Contains(unit, obgit.EnvSessionDir) || !strings.Contains(unit, dir) {
+		t.Errorf("systemd unit does not carry %s=%s:\n%s", obgit.EnvSessionDir, dir, unit)
 	}
 }
 

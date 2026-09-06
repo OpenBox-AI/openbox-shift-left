@@ -42,11 +42,19 @@ func approvalServer(t *testing.T, pub ed25519.PublicKey, respond func() (int, st
 }
 
 // TestApprovalKeyFor_MatchesTheWirePayload is the load-bearing property of the
-// whole hold: a poll must address the row the escalation created.
+// whole hold: a poll must address the row the escalation created. Extended
+// (phase 08, T5) to generation >= 1: runIDFor is the ONE selection both
+// buildPayload and ApprovalKeyFor call, so a continued run's escalation and
+// its poll can never disagree about which row to hit.
 func TestApprovalKeyFor_MatchesTheWirePayload(t *testing.T) {
 	for _, ev := range []DevEvent{sampleEvent(), func() DevEvent {
 		e := sampleEvent()
 		e.WorkspaceID = "ws-7" // the workspace identity wins over the DID fallback
+		return e
+	}(), func() DevEvent {
+		e := sampleEvent()
+		e.RunID = "550e8400-e29b-41d4-a716-446655440000" // generation >= 1: a minted run id
+		e.RunGeneration = 2
 		return e
 	}()} {
 		body, err := buildPayload(ev)
@@ -67,6 +75,12 @@ func TestApprovalKeyFor_MatchesTheWirePayload(t *testing.T) {
 		}
 		if !k.Valid() {
 			t.Errorf("key derived from a real event is not valid: %+v", k)
+		}
+		// A generation >= 1 event must key on the MINTED run id, not fall back to
+		// the session id -- otherwise both sides could agree by both being wrong.
+		if ev.RunID != "" && (k.RunID != ev.RunID || wire.RunID != ev.RunID) {
+			t.Errorf("generation %d: key.RunID=%q wire.RunID=%q, want both == the minted %q",
+				ev.RunGeneration, k.RunID, wire.RunID, ev.RunID)
 		}
 	}
 }
