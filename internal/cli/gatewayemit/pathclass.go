@@ -48,8 +48,14 @@ func (c PathClass) CarriesContent() bool {
 
 // WarnsOnMissingSession reports whether a headerless request is worth a warning.
 func (c PathClass) WarnsOnMissingSession() bool {
-	return c != ClassToolTelemetry
+	return c != ClassToolTelemetry && c != ClassTokenCount
 }
+
+// Emits reports whether this class produces governance events at all. A probe
+// is classified so it can never again be miscounted as a turn, and then not
+// sent: core drops it unread (isRelayedNonToolActivity), so the row is pure
+// egress. Classification and emission are separate points on purpose.
+func (c PathClass) Emits() bool { return c != ClassTokenCount }
 
 func (c PathClass) Subject(rawURL string) string {
 	if c == ClassCompletion {

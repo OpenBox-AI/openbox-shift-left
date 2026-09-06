@@ -94,14 +94,16 @@ func capturedFor(session, url string) gateway.Captured {
 
 // TestEmittedActivityTypeFollowsThePath asserts the classification survives all
 // the way onto the wire payload, not merely onto the struct: the whole defect
-// was that a value nobody checked reached storage.
+// was that a value nobody checked reached storage. The count_tokens row lives
+// in TestAProbeIsClassifiedAndNotSpooled instead: production never emits this
+// shape (Emit drops the probe before EventsFor), so a table named "emitted"
+// must not carry a row for a class that is not.
 func TestEmittedActivityTypeFollowsThePath(t *testing.T) {
 	for _, tc := range []struct {
 		url  string
 		want string
 	}{
 		{"https://api.anthropic.com/v1/messages", client.ActivityTypeLLMCompletion},
-		{"https://api.anthropic.com/v1/messages/count_tokens", client.ActivityTypeTokenCount},
 		{"https://api.anthropic.com/v1/something-new", client.ActivityTypeProviderRequest},
 	} {
 		t.Run(tc.want, func(t *testing.T) {
@@ -206,5 +208,39 @@ func TestAProbeWarningCannotSilenceACompletionWarning(t *testing.T) {
 
 	if !strings.Contains(warnings.String(), "model calls") {
 		t.Errorf("a probe warning suppressed the completion warning: %q", warnings.String())
+	}
+}
+
+// TestAProbeIsClassifiedAndNotSpooled is the verdict for dropping the probe's
+// emission without touching its classification: a session-bearing count_tokens
+// capture must spool zero events, while a session-bearing completion capture
+// -- the positive control -- must still spool its Started/Completed pair. A
+// zero-only assertion would also pass on a broken emitter that spools nothing
+// at all; the paired completion assertion is what makes this a verdict.
+func TestAProbeIsClassifiedAndNotSpooled(t *testing.T) {
+	// Relocated from TestEmittedActivityTypeFollowsThePath: EventsFor itself is
+	// unchanged and still classifies+pairs a probe correctly on the wire; what
+	// changed is that Emit (below) never calls it for this class. Proving both
+	// is what keeps insight 1 true -- classification and emission stay separate
+	// points, so the 40%-distortion bug cannot reopen by deleting the class.
+	for _, ev := range mustPair(LaneProxy, sampleIdentity(), "px-1", sampleAt, capturedFor("sess-1", "https://api.anthropic.com/v1/messages/count_tokens")) {
+		if ev.ActivityType != client.ActivityTypeTokenCount {
+			t.Errorf("%s: DevEvent.ActivityType = %q, want %q", ev.EventType, ev.ActivityType, client.ActivityTypeTokenCount)
+		}
+		if got := wireActivityType(t, ev); got != client.ActivityTypeTokenCount {
+			t.Errorf("%s: wire activity_type = %q, want %q", ev.EventType, got, client.ActivityTypeTokenCount)
+		}
+	}
+
+	em, spool, _ := newTestEmitter(t)
+
+	em.Emit(context.Background(), capturedFor("sess-probe", "https://api.anthropic.com/v1/messages/count_tokens"))
+	if got := spooledEvents(t, spool, "sess-probe"); len(got) != 0 {
+		t.Errorf("a count_tokens capture spooled %d event(s), want 0", len(got))
+	}
+
+	em.Emit(context.Background(), capturedFor("sess-completion", "https://api.anthropic.com/v1/messages"))
+	if got := spooledEvents(t, spool, "sess-completion"); len(got) != 2 {
+		t.Errorf("a completion capture spooled %d event(s), want 2", len(got))
 	}
 }

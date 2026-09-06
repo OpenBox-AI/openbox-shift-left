@@ -495,11 +495,16 @@ is larger than the table above can show in one row.
     no longer sent. The `credential_fingerprint` -- a one-way digest, never the
     credential -- still is.
 
-  A **token-count probe** (`POST /v1/messages/count_tokens`) sends **no bodies at
-  all**, and that asymmetry is deliberate rather than incidental. A probe carries
-  the same conversation a real call does, minus the reply, and the tool fires one
-  on every keystroke-triggered recount -- so attaching bodies there would egress
-  your whole conversation repeatedly for an event that describes no work.
+  A **token-count probe** (`POST /v1/messages/count_tokens`) now sends **nothing
+  whatsoever** -- no bodies, no headers, no event of any kind. It is still
+  classified, locally, so it can never be miscounted as a completion, but it is
+  never spooled: the control plane would drop it unread regardless (it is not a
+  tool call), so recording it would be pure egress for an event that describes
+  no work. A probe carries the same conversation a real call does, minus the
+  reply, and the tool fires one on every keystroke-triggered recount -- so
+  attaching bodies there would have egressed your whole conversation repeatedly.
+  The one local trace that survives is a counter on the machine that saw it,
+  never transmitted.
 - **The telemetry lane sends no content whatsoever.** It receives the tool's own
   OpenTelemetry export and binds exactly one record type to seven values: the
   model id, four token counts, a duration and one request id. No cost; the

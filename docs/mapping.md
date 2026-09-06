@@ -285,12 +285,12 @@ reasoning about how many model calls a session made.
 
 Classification is now from the captured **path**, not the method:
 
-| Path | `activity_type` | Carries bodies |
-|---|---|---|
-| `POST /v1/messages` | `llm_completion` | yes |
-| `POST /v1/messages/count_tokens` | `token_count` | **no** |
-| `POST /api/…` (the tool reporting on itself to its vendor) | `tool_telemetry` | no |
-| anything else on the intercepted host | `provider_request` | yes |
+| Path | `activity_type` | Carries bodies | Emitted |
+|---|---|---|---|
+| `POST /v1/messages` | `llm_completion` | yes | yes |
+| `POST /v1/messages/count_tokens` | `token_count` | **no** | **no** |
+| `POST /api/…` (the tool reporting on itself to its vendor) | `tool_telemetry` | no | yes |
+| anything else on the intercepted host | `provider_request` | yes | yes |
 
 Three notes a reader will otherwise trip on. **`activity_type` is genuinely
 ours**: core recomputes `semantic_type` and ignores what the client sends, but
@@ -298,11 +298,15 @@ ours**: core recomputes `semantic_type` and ignores what the client sends, but
 is the authority and `client.AllActivityTypes` is its code twin. **An unknown
 path is still emitted**, under `provider_request`, because unknown traffic to a
 provider is exactly what an auditor wants to see and the failure directions are
-not symmetric. **A `token_count` event carries no bodies at all** -- it holds the
-same conversation a completion does, minus the reply, and the client fires one on
-every keystroke-triggered recount, so attaching bodies there would egress the
-whole conversation repeatedly for an event that describes no work. That asymmetry
-is privacy-relevant and is a decision, not an oversight.
+not symmetric. **A `token_count` event carries no bodies at all, and now no
+event at all** -- it holds the same conversation a completion does, minus the
+reply, and the client fires one on every keystroke-triggered recount, so
+attaching bodies there would egress the whole conversation repeatedly for an
+event that describes no work; core also drops it unread on the other end
+(`isRelayedNonToolActivity`), so a probe is classified for the classifier's own
+correctness (`PathClass.Emits()`, `internal/cli/gatewayemit/pathclass.go`) and
+then never spooled. That asymmetry is privacy-relevant and is a decision, not
+an oversight.
 
 Existing dashboards counting `llm_completion` will show a **step change** when
 probes stop being counted. That is the correction, but it looks like a regression
@@ -727,7 +731,7 @@ what closed it.
 | 42 | `aligned_goal_evaluations` still advances with no span anywhere: alignment feeds from `activity_input` on the opening half (`goal_alignment.go:268`), and a field name that loses the cap fails **here and nowhere else** |
 | 43 | `api_response_ms` stays inside budget with a 64 KB body attached. Baseline is 536–725 ms; both OPA and Guardrails read `activity_output` synchronously inside a 30 s envelope the caller blocks on, expanding every string leaf, with no server-side size limit |
 | 44 | Session-wide lifecycle pairing holds on a real session: `select activity_id, count(*) … group by activity_id having count(*) <> 2` returns zero rows |
-| 45 | No stored row has `activity_type: llm_completion` with a `count_tokens` URL, and the completion-to-probe ratio is plausible for the session's turn count |
+| 45 | No stored row has `activity_type: llm_completion` with a `count_tokens` URL, and no `token_count` row is stored at all for the session -- the probe is classified (`PathClass.Emits()` in `internal/cli/gatewayemit/pathclass.go`) but never spooled; the completion-to-probe ratio is unverifiable as an observable of this release since other landings in the same release add rows, so a run reports the net per-session volume range instead |
 
 ### Usage, content and posture
 

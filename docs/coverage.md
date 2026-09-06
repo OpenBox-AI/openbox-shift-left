@@ -139,7 +139,7 @@ not measured-empty.
 | `zstd` / `deflate` response body | ⚠️ marker naming the encoding | ⚠️ marker naming the encoding | n/a |
 | Relayed call **latency** (`duration_ms`) | ✅ measured to end-of-stream | ✅ measured | ✅ from the tool's reported `duration_ms` |
 | Paired `ActivityStarted`/`ActivityCompleted` | ✅ | ✅ | ✅ |
-| Token-count probe told apart from a completion | ✅ `token_count` | ✅ `token_count` | n/a; this lane sees no probes |
+| Token-count probe told apart from a completion, and then dropped | ✅ classified `token_count`, never spooled | ✅ classified `token_count`, never spooled | n/a; this lane sees no probes |
 | Refuse a call on a verdict | ⚠️ written, **dormant** | ⚠️ written, **dormant** | ❌ impossible; out of path |
 | Terminal CLI | ✅ | ✅ | ✅ |
 | **Desktop app** | ❌ measured-empty 2026-08-27 | ⬜ intended, **unconfirmed**; not routed, and now **detected** as unrouted | ⬜ intended, **unconfirmed** |

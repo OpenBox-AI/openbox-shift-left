@@ -83,6 +83,10 @@ type Emitter struct {
 	lastNoRoutedLaneWarn   time.Time
 	cachedDID              string
 	fallbackSeq            uint64
+	// probesSkipped counts token-count probes classified and deliberately not
+	// spooled. It is the local audit fact that survives the dropped emission:
+	// identifiers and counts only, reported through vlog, never egressed.
+	probesSkipped uint64
 }
 
 func (e *Emitter) electionProblem() string {
@@ -205,6 +209,13 @@ func (e *Emitter) Emit(ctx context.Context, c gateway.Captured) {
 			e.warnThrottled(e.noSessionWarnClock(class), "openbox gateway: no %s header on %s, so nothing can be attributed to a session and no governance event is being sent. "+
 				"The model calls themselves are unaffected.", sessionHeader, class.Subject(c.HTTPURL))
 		}
+		return
+	}
+
+	if class := classifyPath(c.HTTPURL); !class.Emits() {
+		n := atomic.AddUint64(&e.probesSkipped, 1)
+		e.vlog("  capture: SKIPPED; %s is a token-count probe, which is classified but never emits a governance event (%d seen so far)",
+			class.Subject(c.HTTPURL), n)
 		return
 	}
 
