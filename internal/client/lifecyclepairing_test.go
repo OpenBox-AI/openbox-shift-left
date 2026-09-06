@@ -181,6 +181,20 @@ func TestASyntheticSessionSatisfiesTheLifecyclePairingInvariant(t *testing.T) {
 	// Codex's session-wide usage rollup.
 	evs = append(evs, turnPair(func(e *DevEvent) { e.SessionRollup = true })...)
 	evs = append(evs, base(EventSubagentStarted), base(EventPermissionDenied), base(EventAPIError))
+	// v1.8's 21 observe-only lifecycle signals: every one rides SignalReceived
+	// (never paired, never a workflow boundary), so each is one more S, not a W
+	// or an A. Order follows AllEventTypes, not devEventTypes' session-narrative
+	// order -- this fixture only needs the set, not a story.
+	for _, et := range []EventType{
+		EventSetup, EventInstructionsLoaded, EventUserPromptExpansion, EventMessageDisplay,
+		EventPermissionRequest, EventPostToolBatch, EventNotification, EventTaskCreated,
+		EventTaskCompleted, EventTeammateIdle, EventConfigChange, EventCwdChanged,
+		EventDirectoryAdded, EventFileChanged, EventWorktreeRemove, EventPreCompact,
+		EventPostCompact, EventPreModelSwitch, EventPostModelSwitch, EventElicitation,
+		EventElicitationResult,
+	} {
+		evs = append(evs, base(et))
+	}
 	evs = append(evs, base(EventSessionEnded))
 
 	wire := make([]wireEvent, 0, len(evs))
@@ -190,10 +204,11 @@ func TestASyntheticSessionSatisfiesTheLifecyclePairingInvariant(t *testing.T) {
 	assertLifecyclePairing(t, "synthetic session", wire, true)
 
 	// The reference session's arithmetic, restated against this one so the shape is
-	// not merely internally consistent: 62 events = 1 + 2(26) + 9 there, with 26
-	// activity pairs and zero unpaired. Here: W=2, A=8 (two tool calls plus six
-	// turns -- hook, subagent, proxy, gateway, otel, rollup), S=4.
-	const wantW, wantA, wantS = 2, 8, 4
+	// not merely internally consistent. W=2 (SessionStarted, SessionEnded), A=8 (two
+	// tool calls plus six turns -- hook, subagent, proxy, gateway, otel, rollup), S=25
+	// (PromptSubmitted, SubagentStarted, PermissionDenied, APIError, plus the 21 v1.8
+	// signal classes): W(2)+2A(8)+S(25)=43.
+	const wantW, wantA, wantS = 2, 8, 25
 	if got := len(wire); got != wantW+2*wantA+wantS {
 		t.Errorf("the fixture is %d events; W + 2A + S = %d + 2(%d) + %d = %d",
 			got, wantW, wantA, wantS, wantW+2*wantA+wantS)

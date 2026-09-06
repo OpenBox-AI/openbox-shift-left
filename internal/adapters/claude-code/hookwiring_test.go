@@ -1,6 +1,7 @@
 package claudecode
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -27,6 +28,10 @@ type registeredHooksJSON struct {
 			Command     string `json:"command"`
 			Timeout     int    `json:"timeout"`
 			AsyncRewake bool   `json:"asyncRewake"`
+			// Async is a pointer: absent and false must never collapse into one
+			// state (insight 6/D5). A plain bool cannot tell "the key was not
+			// written" from "the key was written false".
+			Async *bool `json:"async"`
 		} `json:"hooks"`
 	} `json:"hooks"`
 }
@@ -119,6 +124,104 @@ func TestTurnHooksAreWiredAsNonGating(t *testing.T) {
 		want := `"` + testEngine + `" hook claude-code ` + name
 		if h.Command != want {
 			t.Errorf("%s command = %q, want %q", name, h.Command, want)
+		}
+	}
+}
+
+// TestAsyncRowsWriteTheAsyncKey is derived by iteration over localHookEvents,
+// never a hand-written list: every row with Async: true must write
+// "async": true, and every row with Async: false must write no async key at
+// all. (Renamed from TestObserveOnlyHooksRegisterAsync; insight 6 — after D5,
+// "observe-only" and "async" are no longer the same set, so this test can no
+// longer be phrased in terms of observe-only-ness.)
+func TestAsyncRowsWriteTheAsyncKey(t *testing.T) {
+	parsed := registeredHooks(t)
+	for _, ev := range localHookEvents {
+		entries, ok := parsed.Hooks[ev.Event]
+		if !ok || len(entries) == 0 || len(entries[0].Hooks) == 0 {
+			t.Errorf("%s: no handler registered", ev.Event)
+			continue
+		}
+		h := entries[0].Hooks[0]
+		switch {
+		case ev.Async && (h.Async == nil || !*h.Async):
+			t.Errorf("%s: localHookEvents says Async:true but the written async key is %v, want true", ev.Event, h.Async)
+		case !ev.Async && h.Async != nil:
+			t.Errorf("%s: localHookEvents says Async:false but the written async key is %v, want absent", ev.Event, *h.Async)
+		}
+	}
+}
+
+// TestHeadlineSyncSetIsExact is the exhaustive closed-set guard
+// TestGatingHooksAreNeverAsync alone cannot be (insight 7: that test names
+// only the three gating hooks, so flipping PermissionRequest to async would
+// pass it silently). An async hook is killed at `claude -p` teardown, so
+// demoting one of these 17 to async would silently lose a human-decision
+// event in headless runs.
+func TestHeadlineSyncSetIsExact(t *testing.T) {
+	want := map[string]bool{
+		"PreToolUse": true, "UserPromptSubmit": true, "SessionStart": true,
+		"PostToolUse": true, "PostToolUseFailure": true, "Stop": true,
+		"SubagentStop": true, "SubagentStart": true, "PermissionDenied": true,
+		"StopFailure": true, "SessionEnd": true, "ConfigChange": true,
+		"PermissionRequest": true, "TaskCreated": true, "TaskCompleted": true,
+		"Elicitation": true, "ElicitationResult": true,
+	}
+	if len(want) != 17 {
+		t.Fatalf("test fixture has %d entries, want 17", len(want))
+	}
+	parsed := registeredHooks(t)
+	got := map[string]bool{}
+	for name, entries := range parsed.Hooks {
+		if len(entries) == 0 || len(entries[0].Hooks) == 0 {
+			continue
+		}
+		if entries[0].Hooks[0].Async == nil {
+			got[name] = true
+		}
+	}
+	assertSameHookSet(t, "the sync (async-key-absent) set", setToSlice(got), "the declared 17-row headline sync set", setToSlice(want))
+}
+
+func setToSlice(m map[string]bool) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	return out
+}
+
+// TestAsyncIsAbsentNotFalse no written handler may carry "async": false;
+// absent and false must not be two states for the same fact.
+func TestAsyncIsAbsentNotFalse(t *testing.T) {
+	path := filepath.Join(t.TempDir(), ".claude", "settings.json")
+	if err := writeHooks(path, testEngine); err != nil {
+		t.Fatalf("writeHooks: %v", err)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read the written settings: %v", err)
+	}
+	if bytes.Contains(raw, []byte(`"async":false`)) || bytes.Contains(raw, []byte(`"async": false`)) {
+		t.Errorf("the written settings contain a literal \"async\": false; absent and false must not be two states:\n%s", raw)
+	}
+}
+
+// TestGatingHooksAreNeverAsync the three hooks that can return a blocking
+// verdict (PreToolUse, UserPromptSubmit, and ConfigChange since D4) can never
+// be registered async: an async hook cannot hold a tool call open while core
+// decides. Not a sufficient guard on its own (insight 7) — see
+// TestHeadlineSyncSetIsExact for the exhaustive form.
+func TestGatingHooksAreNeverAsync(t *testing.T) {
+	parsed := registeredHooks(t)
+	for _, name := range []string{"PreToolUse", "UserPromptSubmit", "ConfigChange"} {
+		entries, ok := parsed.Hooks[name]
+		if !ok || len(entries) == 0 || len(entries[0].Hooks) == 0 {
+			t.Errorf("%s: no handler registered", name)
+			continue
+		}
+		if h := entries[0].Hooks[0]; h.Async != nil {
+			t.Errorf("%s: the GATE must be synchronous; an async handler cannot block a tool call, got async=%v", name, *h.Async)
 		}
 	}
 }

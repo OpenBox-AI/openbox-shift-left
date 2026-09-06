@@ -395,6 +395,243 @@ func TestContentCaptureConformance(t *testing.T) {
 			t.Errorf("the prompt's non-secret text did not egress, so this proves nothing about redaction:\n%s", joined)
 		}
 	})
+
+	// C43-C49: the seven new v1.8 content keys, C32/C33-style: present under
+	// metadata.<key> with capture on; absent with capture off while the
+	// signal still ships; a planted secret never appears; an oversized body
+	// is capped at maxBodySize. C50 is deliberately unused (retired when
+	// UserPromptExpansion became structural-only, D1) -- the gap is left so a
+	// future reader does not "fix" the numbering and lose that history.
+	type newContentKeyCase struct {
+		label        string // "C43 requested_tool_input", etc.
+		hook         string
+		signalName   string
+		metaKey      string
+		buildPayload func(session, text string) string
+	}
+	newContentKeyCases := []newContentKeyCase{
+		{
+			label: "C43 requested_tool_input", hook: "PermissionRequest", signalName: "permission_request",
+			metaKey: "requested_tool_input",
+			buildPayload: func(session, text string) string {
+				return `{"hook_event_name":"PermissionRequest","session_id":"` + session + `","cwd":"/tmp",` +
+					`"tool_name":"Bash","permission_mode":"default","tool_input":{"command":` + jsonQuote(text) + `}}`
+			},
+		},
+		{
+			label: "C44 notification_message", hook: "Notification", signalName: "notification",
+			metaKey: "notification_message",
+			buildPayload: func(session, text string) string {
+				return `{"hook_event_name":"Notification","session_id":"` + session + `","cwd":"/tmp",` +
+					`"notification_type":"idle_prompt","message":` + jsonQuote(text) + `}`
+			},
+		},
+		{
+			label: "C45 task_subject", hook: "TaskCreated", signalName: "task_created",
+			metaKey: "task_subject",
+			buildPayload: func(session, text string) string {
+				return `{"hook_event_name":"TaskCreated","session_id":"` + session + `","cwd":"/tmp",` +
+					`"task_id":"tid1","task_subject":` + jsonQuote(text) + `}`
+			},
+		},
+		{
+			label: "C46 compact_instructions", hook: "PreCompact", signalName: "pre_compact",
+			metaKey: "compact_instructions",
+			buildPayload: func(session, text string) string {
+				return `{"hook_event_name":"PreCompact","session_id":"` + session + `","cwd":"/tmp",` +
+					`"trigger":"manual","custom_instructions":` + jsonQuote(text) + `}`
+			},
+		},
+		{
+			label: "C47 compact_summary", hook: "PostCompact", signalName: "post_compact",
+			metaKey: "compact_summary",
+			buildPayload: func(session, text string) string {
+				return `{"hook_event_name":"PostCompact","session_id":"` + session + `","cwd":"/tmp",` +
+					`"trigger":"auto","compact_summary":` + jsonQuote(text) + `}`
+			},
+		},
+		{
+			label: "C48 elicitation_message", hook: "Elicitation", signalName: "elicitation",
+			metaKey: "elicitation_message",
+			buildPayload: func(session, text string) string {
+				return `{"hook_event_name":"Elicitation","session_id":"` + session + `","cwd":"/tmp",` +
+					`"mcp_server_name":"srv1","mode":"form","message":` + jsonQuote(text) + `}`
+			},
+		},
+		{
+			label: "C49 elicitation_response", hook: "ElicitationResult", signalName: "elicitation_result",
+			metaKey: "elicitation_response",
+			buildPayload: func(session, text string) string {
+				return `{"hook_event_name":"ElicitationResult","session_id":"` + session + `","cwd":"/tmp",` +
+					`"mcp_server_name":"srv1","action":"accept","mode":"form","content":{"field":` + jsonQuote(text) + `}}`
+			},
+		},
+	}
+	if len(newContentKeyCases) != 7 {
+		t.Fatalf("newContentKeyCases has %d entries, want 7 (C43-C49)", len(newContentKeyCases))
+	}
+
+	signalMetadata := func(t *testing.T, bodies []string, signalName string) (map[string]any, bool) {
+		t.Helper()
+		for _, b := range bodies {
+			var p struct {
+				SignalName string         `json:"signal_name"`
+				Metadata   map[string]any `json:"metadata"`
+			}
+			if err := json.Unmarshal([]byte(b), &p); err != nil || p.SignalName != signalName {
+				continue
+			}
+			return p.Metadata, true
+		}
+		return nil, false
+	}
+
+	for _, tc := range newContentKeyCases {
+		t.Run(tc.label, func(t *testing.T) {
+			t.Run("present with capture on", func(t *testing.T) {
+				const sentinel = "SENTINEL-CONTENT-present"
+				session := "cc-" + tc.hook + "-on"
+				bodies := observeThenFlush(t, session, "1", tc.hook, tc.buildPayload(session, sentinel))
+				meta, found := signalMetadata(t, bodies, tc.signalName)
+				if !found {
+					t.Fatalf("no %s signal reached /evaluate; bodies=%v", tc.signalName, bodies)
+				}
+				got, _ := meta[tc.metaKey].(string)
+				if !strings.Contains(got, sentinel) {
+					t.Errorf("metadata[%q] = %q, want it to carry the sentinel text", tc.metaKey, got)
+				}
+			})
+
+			t.Run("absent with capture off, signal still ships", func(t *testing.T) {
+				const canary = "CANARY-CONTENT-must-not-egress"
+				session := "cc-" + tc.hook + "-off"
+				bodies := observeThenFlush(t, session, "0", tc.hook, tc.buildPayload(session, canary))
+				for i, b := range bodies {
+					if strings.Contains(b, canary) {
+						t.Errorf("content egressed with capture OFF in body #%d: %s", i, b)
+					}
+				}
+				if _, found := signalMetadata(t, bodies, tc.signalName); !found {
+					t.Errorf("no %s signal shipped with capture off; the gate is on the CONTENT, "+
+						"not on the signal: %v", tc.signalName, bodies)
+				}
+			})
+
+			t.Run("a planted secret never appears", func(t *testing.T) {
+				os.Unsetenv(envSecretDetection) // detection default ON
+				awsKey := "AKIA" + "IOSFODNN7EXAMPLE"
+				session := "cc-" + tc.hook + "-secret"
+				bodies := observeThenFlush(t, session, "1", tc.hook,
+					tc.buildPayload(session, "leaked key "+awsKey))
+				for i, b := range bodies {
+					if strings.Contains(b, awsKey) {
+						t.Errorf("the raw secret reached /evaluate in body #%d; redaction must run "+
+							"BEFORE attachment: %s", i, b)
+					}
+				}
+				meta, found := signalMetadata(t, bodies, tc.signalName)
+				if !found {
+					t.Fatalf("no %s signal reached /evaluate; the case proves nothing", tc.signalName)
+				}
+				got, _ := meta[tc.metaKey].(string)
+				if !strings.Contains(got, "OPENBOX_REDACTED") {
+					t.Errorf("no redaction placeholder in metadata[%q]: %q", tc.metaKey, got)
+				}
+			})
+
+			t.Run("an oversized body is capped at maxBodySize", func(t *testing.T) {
+				const over = 70000 // > maxBodySize (65536)
+				session := "cc-" + tc.hook + "-cap"
+				bodies := observeThenFlush(t, session, "1", tc.hook,
+					tc.buildPayload(session, strings.Repeat("x", over)))
+				meta, found := signalMetadata(t, bodies, tc.signalName)
+				if !found {
+					t.Fatalf("no %s signal reached /evaluate; bodies=%d", tc.signalName, len(bodies))
+				}
+				got, _ := meta[tc.metaKey].(string)
+				if got == "" {
+					t.Fatal("metadata value empty; a capped body must still be sent")
+				}
+				if len([]rune(got)) > 65536 {
+					t.Errorf("metadata[%q] is %d runes, want <= 65536 (maxBodySize)", tc.metaKey, len([]rune(got)))
+				}
+			})
+		})
+	}
+
+	// C51: the structural-only guarantee must search the WHOLE payload, not
+	// one key. With capture on and a redactor installed, a MessageDisplay
+	// payload carrying a delta and a PostToolBatch payload carrying
+	// tool_calls[].tool_response produce bytes containing neither string
+	// anywhere -- D1/A1's guarantee is that these classes carry no content at
+	// all, structural or otherwise.
+	t.Run("C51 MessageDisplay and PostToolBatch never carry their raw text, anywhere in the payload", func(t *testing.T) {
+		const deltaSentinel = "DELTA-SENTINEL-must-never-appear"
+		mdSession := "cc-c51-md"
+		mdBodies := observeThenFlush(t, mdSession, "1", "MessageDisplay",
+			`{"hook_event_name":"MessageDisplay","session_id":"`+mdSession+`","cwd":"/tmp",`+
+				`"turn_id":"t1","message_id":"m1","delta":`+jsonQuote(deltaSentinel)+`}`)
+		for i, b := range mdBodies {
+			if strings.Contains(b, deltaSentinel) {
+				t.Errorf("MessageDisplay: delta text found anywhere in body #%d: %s", i, b)
+			}
+		}
+		if _, found := signalMetadata(t, mdBodies, "message_display"); !found {
+			t.Errorf("no message_display signal shipped; the case proves nothing: %v", mdBodies)
+		}
+
+		const responseSentinel = "TOOL-RESPONSE-SENTINEL-must-never-appear"
+		batchSession := "cc-c51-batch"
+		batchBodies := observeThenFlush(t, batchSession, "1", "PostToolBatch",
+			`{"hook_event_name":"PostToolBatch","session_id":"`+batchSession+`","cwd":"/tmp",`+
+				`"tool_calls":[{"tool_use_id":"tu1","tool_response":`+jsonQuote(responseSentinel)+`}]}`)
+		for i, b := range batchBodies {
+			if strings.Contains(b, responseSentinel) {
+				t.Errorf("PostToolBatch: tool_response text found anywhere in body #%d: %s", i, b)
+			}
+		}
+		if _, found := signalMetadata(t, batchBodies, "post_tool_batch"); !found {
+			t.Errorf("no post_tool_batch signal shipped; the case proves nothing: %v", batchBodies)
+		}
+	})
+
+	// C52: no new class carries signal_args or activity_id, asserted on the
+	// actual bytes that reach /evaluate (CLAUDE.md: asserting a struct is not
+	// asserting the wire) -- all 21 v1.8 classes, driven through RunHook.
+	t.Run("C52 no new class carries signal_args or activity_id", func(t *testing.T) {
+		for _, sc := range signalCases() {
+			t.Run(sc.name, func(t *testing.T) {
+				session := "cc-c52-" + sc.name
+				sc.ev.SessionID = session
+				body, err := json.Marshal(sc.ev)
+				if err != nil {
+					t.Fatalf("marshal HookEvent: %v", err)
+				}
+				bodies := observeThenFlush(t, session, "1", string(sc.hook), string(body))
+				var found bool
+				for _, b := range bodies {
+					var p struct {
+						SignalName string          `json:"signal_name"`
+						SignalArgs json.RawMessage `json:"signal_args"`
+						ActivityID string          `json:"activity_id"`
+					}
+					if err := json.Unmarshal([]byte(b), &p); err != nil || p.SignalName == "" {
+						continue
+					}
+					found = true
+					if len(p.SignalArgs) > 0 {
+						t.Errorf("signal_args present: %s", p.SignalArgs)
+					}
+					if p.ActivityID != "" {
+						t.Errorf("activity_id present: %q", p.ActivityID)
+					}
+				}
+				if !found {
+					t.Fatalf("no SignalReceived event reached /evaluate; bodies=%v", bodies)
+				}
+			})
+		}
+	})
 }
 
 // TestContentCaptureCredentialCoverage c39 is a detection-coverage case, not

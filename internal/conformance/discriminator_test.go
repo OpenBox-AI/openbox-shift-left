@@ -21,7 +21,7 @@ var turnDiscriminators = map[string]any{
 
 func turnBase(eventType string) map[string]any {
 	return map[string]any{
-		"schema_version":     "1.7",
+		"schema_version":     "1.8",
 		"event_id":           "evt-disc-1",
 		"event_type":         eventType,
 		"openbox_session_id": "sess-abc123",

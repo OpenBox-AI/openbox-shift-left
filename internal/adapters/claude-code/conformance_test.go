@@ -50,3 +50,72 @@ func mustMarshalContractShape(t *testing.T, ev client.DevEvent) []byte {
 	}
 	return raw
 }
+
+// TestNewSignalClassesAreConformant is phase 10's extension of
+// TestEmittedEventsAreConformant to the 21 v1.8 observe-only lifecycle
+// signals (conformance_parity_test.go's anchor drifted; this is the file
+// that actually validates against the schema): all 21 classes must validate
+// with content capture off AND on, at generation 0 AND at generation >= 1 --
+// four dimensions, none of which the pre-1.8 cases above exercised, since
+// run-identity and the content-on path did not exist when they were written.
+func TestNewSignalClassesAreConformant(t *testing.T) {
+	off := testMapper()
+	on := testMapper()
+	on.CaptureContent = true
+
+	cases := signalCases()
+	if len(cases) != 21 {
+		t.Fatalf("signalCases() has %d entries, want 21", len(cases))
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Run("capture off, generation 0", func(t *testing.T) {
+				ev, ok := off.Map(tc.hook, tc.ev)
+				if !ok {
+					t.Fatal("Map ok=false")
+				}
+				raw := mustMarshalContractShape(t, ev)
+				if err := conformance.ValidateDevEvent(raw, false); err != nil {
+					t.Fatalf("not SL-1 conformant:\n%s\nerror: %v", raw, err)
+				}
+			})
+			t.Run("capture on, generation 0", func(t *testing.T) {
+				ev, ok := on.Map(tc.hook, tc.ev)
+				if !ok {
+					t.Fatal("Map ok=false")
+				}
+				raw := mustMarshalContractShape(t, ev)
+				if err := conformance.ValidateDevEvent(raw, true); err != nil {
+					t.Fatalf("not SL-1 conformant:\n%s\nerror: %v", raw, err)
+				}
+			})
+			t.Run("capture off, generation >= 1", func(t *testing.T) {
+				ev, ok := off.Map(tc.hook, tc.ev)
+				if !ok {
+					t.Fatal("Map ok=false")
+				}
+				ev.RunID = "018f1a2b-0000-7000-8000-000000000001"
+				ev.RunGeneration = 2
+				ev.ContinuedFromRunID = "sess-0-prior-run-id"
+				raw := mustMarshalContractShape(t, ev)
+				if err := conformance.ValidateDevEvent(raw, false); err != nil {
+					t.Fatalf("not SL-1 conformant at generation >= 1:\n%s\nerror: %v", raw, err)
+				}
+			})
+			t.Run("capture on, generation >= 1", func(t *testing.T) {
+				ev, ok := on.Map(tc.hook, tc.ev)
+				if !ok {
+					t.Fatal("Map ok=false")
+				}
+				ev.RunID = "018f1a2b-0000-7000-8000-000000000001"
+				ev.RunGeneration = 2
+				ev.ContinuedFromRunID = "sess-0-prior-run-id"
+				raw := mustMarshalContractShape(t, ev)
+				if err := conformance.ValidateDevEvent(raw, true); err != nil {
+					t.Fatalf("not SL-1 conformant at generation >= 1:\n%s\nerror: %v", raw, err)
+				}
+			})
+		})
+	}
+}

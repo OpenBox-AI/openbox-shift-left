@@ -44,7 +44,7 @@ func TestWriteLocalHooksKeepsTheDevelopersOtherSettings(t *testing.T) {
     ]
   },
   "hooks": {
-    "Notification": [
+    "WorktreeCreate": [
       {"matcher": "*", "hooks": [{"type": "command", "command": "notify-send hi"}]}
     ]
   },
@@ -74,6 +74,12 @@ func TestWriteLocalHooksKeepsTheDevelopersOtherSettings(t *testing.T) {
 	if !strings.Contains(got, "notify-send hi") {
 		t.Errorf("a foreign hook event was lost:\n%s", got)
 	}
+	// WorktreeCreate, not Notification: a real Claude Code event OpenBox
+	// PERMANENTLY refuses to register (hookevent.go:40) is the only fixture
+	// that keeps testing "we preserve what is not ours" honestly. Notification
+	// joined the 32-event vocabulary in v1.8 (D5), so writeHooks now APPENDS
+	// its own handler alongside a foreign Notification entry instead of
+	// leaving it untouched -- a key that can become ours cannot prove this.
 	if !strings.Contains(got, "Bash(git*)\"\n") && !strings.Contains(got, "        \"Bash(git*)\"") {
 		t.Errorf("the developer's four-space indentation inside permissions was reformatted:\n%s", got)
 	}
@@ -89,8 +95,8 @@ func TestWriteLocalHooksKeepsTheDevelopersOtherSettings(t *testing.T) {
 	if err := json.Unmarshal(raw, &doc); err != nil {
 		t.Fatalf("the written file does not parse: %v\n%s", err, got)
 	}
-	if _, ok := doc.Hooks["Notification"]; !ok {
-		t.Errorf("the foreign Notification event is gone from hooks:\n%s", got)
+	if _, ok := doc.Hooks["WorktreeCreate"]; !ok {
+		t.Errorf("the foreign WorktreeCreate event is gone from hooks:\n%s", got)
 	}
 	for _, ev := range localHookEvents {
 		var found bool

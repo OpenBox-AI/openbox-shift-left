@@ -136,6 +136,40 @@ func TestRunHook_FindingsNotSurfacedOnOtherHooks(t *testing.T) {
 	}
 }
 
+// TestRunHook_FindingsNeverSurfacedOnObserveOnlyNewHooks is the exhaustive
+// form of TestSurfaceFindings_UnreachableForConfigChange (configchange_test.go,
+// phase 09), which samples 4 of the 21 v1.8 hooks. SurfaceFindings is only
+// reachable from PostToolUse/UserPromptSubmit (hookrun.go's two hook-equality
+// guards), so none of the 21 new classes -- ConfigChange included -- can ever
+// satisfy either check; this proves it for all 21, not a sample.
+func TestRunHook_FindingsNeverSurfacedOnObserveOnlyNewHooks(t *testing.T) {
+	adv, _ := findingsEnv(t, true)
+	isolateConfig(t)
+	t.Setenv(envDID, testDID)
+	t.Setenv("OPENBOX_SPOOL_DIR", t.TempDir())
+	t.Setenv("OPENBOX_SESSION_DIR", t.TempDir())
+	t.Setenv(envEnforce, "0") // observe-only path; the findings guard is what's under test
+	seedAdvisories(t, adv, hookflow.AdvisoryRecord{Verdict: "BLOCK", WouldBlock: true})
+
+	cases := signalCases()
+	if len(cases) != 21 {
+		t.Fatalf("signalCases() has %d entries, want 21", len(cases))
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var out bytes.Buffer
+			body, err := json.Marshal(tc.ev)
+			if err != nil {
+				t.Fatalf("marshal HookEvent: %v", err)
+			}
+			RunHook(string(tc.hook), bytes.NewReader(body), &out, nopLogger())
+			if strings.Contains(out.String(), "OpenBox governance") {
+				t.Errorf("%s must never surface findings, got %q", tc.name, out.String())
+			}
+		})
+	}
+}
+
 func assertFindingsShape(t *testing.T, blob string, hook HookName) {
 	t.Helper()
 	blob = strings.TrimSpace(blob)

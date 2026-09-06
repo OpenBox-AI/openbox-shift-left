@@ -25,16 +25,43 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/internal/client"
 )
 
+// devEventTypes deliberately orders the v1.8 vocabulary (33 entries: the
+// original 12 plus 21 observe-only lifecycle signals) into one coherent
+// session rather than repeating client.AllEventTypes' declaration order:
+// Setup/InstructionsLoaded before SessionStarted, Elicitation mid-session,
+// PostCompact after PreCompact, SessionEnded always last (V3: /clear is a
+// continue-as-new, never a mid-session terminal class).
 var devEventTypes = []client.EventType{
+	client.EventSetup,
+	client.EventInstructionsLoaded,
 	client.EventSessionStarted,
 	client.EventPromptSubmitted,
+	client.EventUserPromptExpansion,
 	client.EventSubagentStarted,
+	client.EventPermissionRequest,
 	client.EventToolCall,
 	client.EventPermissionDenied,
 	client.EventToolResult,
+	client.EventPostToolBatch,
+	client.EventMessageDisplay,
+	client.EventNotification,
+	client.EventTaskCreated,
+	client.EventTaskCompleted,
+	client.EventTeammateIdle,
+	client.EventConfigChange,
+	client.EventCwdChanged,
+	client.EventDirectoryAdded,
+	client.EventFileChanged,
+	client.EventWorktreeRemove,
+	client.EventPreModelSwitch,
+	client.EventPostModelSwitch,
 	client.EventTurnStarted,
 	client.EventTurnCompleted,
 	client.EventAPIError,
+	client.EventElicitation,
+	client.EventElicitationResult,
+	client.EventPreCompact,
+	client.EventPostCompact,
 	client.EventCommitCreated,
 	client.EventDeploy,
 	client.EventSessionEnded,

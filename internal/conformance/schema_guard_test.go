@@ -9,12 +9,22 @@ import (
 )
 
 // contractEventTypes is this package's declaration of the developer-runtime
-// vocabulary, used for coverage bookkeeping in conformance_test.go.
+// vocabulary, used for coverage bookkeeping in conformance_test.go. v1.8 adds
+// 21 observe-only lifecycle signals (client.AllEventTypes' own comment names
+// the table; this list must move in lockstep with it, acceptancetest's
+// devEventTypes, and the schema's event_type.enum, or the pairwise-equality
+// tests below/in acceptancetest red).
 var contractEventTypes = []string{
 	"SessionStarted", "PromptSubmitted", "ToolCall", "ToolResult",
 	"SessionEnded", "CommitCreated", "Deploy",
 	"TurnStarted", "TurnCompleted",
 	"SubagentStarted", "PermissionDenied", "APIError",
+	"Setup", "InstructionsLoaded", "UserPromptExpansion", "MessageDisplay",
+	"PermissionRequest", "PostToolBatch", "Notification", "TaskCreated",
+	"TaskCompleted", "TeammateIdle", "ConfigChange", "CwdChanged",
+	"DirectoryAdded", "FileChanged", "WorktreeRemove", "PreCompact",
+	"PostCompact", "PreModelSwitch", "PostModelSwitch", "Elicitation",
+	"ElicitationResult",
 }
 
 // TestSchemaEnumMatchesContract the previous version of this test asserted
