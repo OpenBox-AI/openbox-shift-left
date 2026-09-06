@@ -1,6 +1,7 @@
 package claudecode
 
 import (
+	"embed"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -9,6 +10,33 @@ import (
 	"github.com/google/go-cmp/cmp"
 	"github.com/openbox-ai/openbox-shift-left/internal/client"
 )
+
+// fixturesFS embeds testdata at compile time: this package's TestMain
+// chdirs into a sentinel hermetic-home directory (the twin asserted
+// hermeticity guard in testmain_test.go), so a runtime-relative
+// "testdata/..." read would fail; go:embed resolves against the source
+// directory instead and is unaffected by that chdir.
+//
+//go:embed testdata/pretooluse-agent.json testdata/pretooluse-toolsearch.json
+var fixturesFS embed.FS
+
+// loadFixtureHookEvent decodes an embedded testdata/*.json PreToolUse
+// fixture into a HookEvent. The fixtures are SYNTHETIC (corpus-schema-derived,
+// never captured); see each fixture's "_fixture_provenance" field, which
+// ParseHookEvent silently ignores (unbound key).
+func loadFixtureHookEvent(t *testing.T, name string) *HookEvent {
+	t.Helper()
+	f, err := fixturesFS.Open("testdata/" + name)
+	if err != nil {
+		t.Fatalf("open fixture %s: %v", name, err)
+	}
+	defer f.Close()
+	ev, err := ParseHookEvent(f)
+	if err != nil {
+		t.Fatalf("parse fixture %s: %v", name, err)
+	}
+	return ev
+}
 
 const testDID = "did:aip:7f3c9b2e-0000-5000-a000-000000000001"
 
@@ -654,32 +682,269 @@ func TestMap_FreeTextErrorNeverEgresses(t *testing.T) {
 	}
 }
 
-// TestMap_TaskSubagentTypeIsCarriedButNotItsPrompt subagent_type names which
-// agent kind was spawned; an identifier chosen from the installed set, not
-// text the model wrote. Its neighbours in the same tool_input, `prompt` and
-// `description`, are free text and must stay unread.
-func TestMap_TaskSubagentTypeIsCarriedButNotItsPrompt(t *testing.T) {
+// TestMap_AgentSpawnCarriesSubagentTypeAndWholeToolInput replaces the vacuous
+// TestMap_TaskSubagentTypeIsCarriedButNotItsPrompt (phase 07, insight 7): that
+// test never set CaptureContent, so no tool's input ever egressed in it, and
+// it drove ToolName "Task", a name production no longer emits (the
+// producer's tool is "Agent").
+//
+// This asserts the DECIDED behaviour (owner ruling 2): with capture on, an
+// Agent spawn's WHOLE tool_input egresses -- prompt included -- so the judge
+// can see what the spawn is for; a thin `{subagent_type}` alone would buy
+// judgements about a spawn the judge cannot see (insight 3). With capture
+// off, the event carries no content at all: the gate must still hold.
+func TestMap_AgentSpawnCarriesSubagentTypeAndWholeToolInput(t *testing.T) {
+	ev := loadFixtureHookEvent(t, "pretooluse-agent.json")
+
+	t.Run("capture on: whole tool_input egresses, subagent_type in metadata", func(t *testing.T) {
+		m := testMapper()
+		m.CaptureContent = true
+		got, ok := m.Map(HookPreToolUse, ev)
+		if !ok {
+			t.Fatal("Agent call must map")
+		}
+		if got.Metadata["subagent_type"] != "code-reviewer" {
+			t.Errorf("subagent_type not carried; every Agent call reads as anonymous: %v", got.Metadata)
+		}
+		if got.Content == nil || got.Content.ToolInput == "" {
+			t.Fatal("ev.Content.ToolInput must be non-empty with capture on (TDD case a)")
+		}
+		if !strings.Contains(got.Content.ToolInput, "subagent prompt") {
+			t.Errorf("the whole tool_input must egress, prompt included; got %q", got.Content.ToolInput)
+		}
+	})
+
+	t.Run("capture off: no content at all", func(t *testing.T) {
+		m := testMapper() // CaptureContent left at its default, false
+		got, ok := m.Map(HookPreToolUse, ev)
+		if !ok {
+			t.Fatal("Agent call must map")
+		}
+		if got.Content != nil {
+			t.Errorf("capture off must be byte-identical to today: no Content at all, got %+v (TDD case c)", got.Content)
+		}
+	})
+
+	t.Run("non-Agent call carries no subagent_type", func(t *testing.T) {
+		m := testMapper()
+		other, _ := m.Map(HookPreToolUse, &HookEvent{
+			SessionID: "s", ToolName: "Read", ToolUseID: "toolu_t2",
+			ToolInput: json.RawMessage(`{"file_path":"/tmp/a"}`),
+		})
+		if _, present := other.Metadata["subagent_type"]; present {
+			t.Errorf("non-Agent call carries subagent_type: %v", other.Metadata)
+		}
+	})
+}
+
+// --- phase 10: cross-cutting enum, subset, pointer and prompt_id assertions ---
+
+// TestMap_AllFifteenAllowlistsAreEnforced is the exhaustive form of
+// TestMap_PerHookEnumAllowlistsAreDistinct: for EACH of the 15 v1.8 per-hook
+// allowlists, one accepted value survives and one foreign value is dropped to
+// an absent key -- not merely the handful of illustrative pairs the earlier
+// test picked.
+func TestMap_AllFifteenAllowlistsAreEnforced(t *testing.T) {
 	m := testMapper()
-	const secretPrompt = "SUBAGENT-PROMPT-must-not-egress"
-	ev, ok := m.Map(HookPreToolUse, &HookEvent{
-		SessionID: "s", ToolName: "Task", ToolUseID: "toolu_t1",
-		ToolInput: json.RawMessage(`{"subagent_type":"code-reviewer","description":"review","prompt":"` + secretPrompt + `"}`),
+
+	cases := []struct {
+		name     string
+		hook     HookName
+		accepted string
+		foreign  string
+		metaKey  string
+		buildFn  func(value string) *HookEvent
+	}{
+		{name: "setupTriggers", hook: HookSetup, accepted: "maintenance", foreign: "auto", metaKey: "trigger",
+			buildFn: func(v string) *HookEvent { return &HookEvent{SessionID: "s", Trigger: v} }},
+		{name: "compactTriggers", hook: HookPreCompact, accepted: "auto", foreign: "maintenance", metaKey: "trigger",
+			buildFn: func(v string) *HookEvent { return &HookEvent{SessionID: "s", Trigger: v} }},
+		{name: "memoryTypes", hook: HookInstructionsLoaded, accepted: "Managed", foreign: "System", metaKey: "memory_type",
+			buildFn: func(v string) *HookEvent { return &HookEvent{SessionID: "s", MemoryType: v} }},
+		{name: "loadReasons", hook: HookInstructionsLoaded, accepted: "include", foreign: "manual", metaKey: "load_reason",
+			buildFn: func(v string) *HookEvent { return &HookEvent{SessionID: "s", LoadReason: v} }},
+		{name: "expansionTypes", hook: HookUserPromptExpansion, accepted: "mcp_prompt", foreign: "shell_alias", metaKey: "expansion_type",
+			buildFn: func(v string) *HookEvent { return &HookEvent{SessionID: "s", ExpansionType: v} }},
+		{name: "notificationTypes", hook: HookNotification, accepted: "auth_success", foreign: "custom_banner", metaKey: "notification_type",
+			buildFn: func(v string) *HookEvent { return &HookEvent{SessionID: "s", NotificationType: v} }},
+		{name: "configSources", hook: HookConfigChange, accepted: "skills", foreign: "env_var", metaKey: "source",
+			buildFn: func(v string) *HookEvent { return &HookEvent{SessionID: "s", Source: v} }},
+		{name: "directoryAddedSources", hook: HookDirectoryAdded, accepted: "register_repo_root", foreign: "auto_discover", metaKey: "source",
+			buildFn: func(v string) *HookEvent { return &HookEvent{SessionID: "s", Source: v} }},
+		{name: "fileChangeEvents", hook: HookFileChanged, accepted: "unlink", foreign: "rename", metaKey: "event",
+			buildFn: func(v string) *HookEvent { return &HookEvent{SessionID: "s", FileChangeEvent: v} }},
+		{name: "preModelSwitchSources", hook: HookPreModelSwitch, accepted: "picker", foreign: "resume", metaKey: "source",
+			buildFn: func(v string) *HookEvent { return &HookEvent{SessionID: "s", Source: v} }},
+		{name: "postModelSwitchSources", hook: HookPostModelSwitch, accepted: "auto", foreign: "manual_override", metaKey: "source",
+			buildFn: func(v string) *HookEvent { return &HookEvent{SessionID: "s", Source: v} }},
+		{name: "cacheTTLValues", hook: HookPreModelSwitch, accepted: "1h", foreign: "30m", metaKey: "cache_ttl",
+			buildFn: func(v string) *HookEvent { return &HookEvent{SessionID: "s", Source: "command", CacheTTL: v} }},
+		{name: "pricingValues", hook: HookPreModelSwitch, accepted: "default", foreign: "promotional", metaKey: "pricing",
+			buildFn: func(v string) *HookEvent { return &HookEvent{SessionID: "s", Source: "command", Pricing: v} }},
+		{name: "elicitationModes", hook: HookElicitation, accepted: "url", foreign: "modal", metaKey: "mode",
+			buildFn: func(v string) *HookEvent { return &HookEvent{SessionID: "s", Mode: v} }},
+		{name: "elicitationActions", hook: HookElicitationResult, accepted: "cancel", foreign: "timeout", metaKey: "action",
+			buildFn: func(v string) *HookEvent { return &HookEvent{SessionID: "s", Action: v} }},
+	}
+	if len(cases) != 15 {
+		t.Fatalf("test table has %d rows, want 15 (one per v1.8 per-hook allowlist)", len(cases))
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ok1, ok := m.Map(tc.hook, tc.buildFn(tc.accepted))
+			if !ok {
+				t.Fatal("Map ok=false")
+			}
+			if got := ok1.Metadata[tc.metaKey]; got != tc.accepted {
+				t.Errorf("accepted value %q dropped: metadata[%q] = %v", tc.accepted, tc.metaKey, got)
+			}
+			bad, ok := m.Map(tc.hook, tc.buildFn(tc.foreign))
+			if !ok {
+				t.Fatal("Map ok=false")
+			}
+			if v, present := bad.Metadata[tc.metaKey]; present {
+				t.Errorf("foreign value %q egressed: metadata[%q] = %v, want key absent", tc.foreign, tc.metaKey, v)
+			}
+		})
+	}
+}
+
+// TestMap_ConfigChangeAndSessionStartDoNotShareSourceAllowlist is the named
+// shared-key case (insight 2/step 11): source=user_settings is valid for
+// ConfigChange but not SessionStart, and the reverse (source=startup is valid
+// for SessionStart but not ConfigChange) -- proving a globally-shared
+// allowlist would pass every single-event test but fail this cross-check.
+func TestMap_ConfigChangeAndSessionStartDoNotShareSourceAllowlist(t *testing.T) {
+	m := testMapper()
+
+	cc, ok := m.Map(HookConfigChange, &HookEvent{SessionID: "s", Source: "user_settings"})
+	if !ok {
+		t.Fatal("Map ok=false")
+	}
+	if cc.Metadata["source"] != "user_settings" {
+		t.Errorf("ConfigChange source=user_settings dropped: %v", cc.Metadata)
+	}
+	ss, ok := m.Map(HookSessionStart, &HookEvent{SessionID: "s", Source: "user_settings"})
+	if !ok {
+		t.Fatal("Map ok=false")
+	}
+	if v, present := ss.Metadata["source"]; present {
+		t.Errorf("SessionStart accepted ConfigChange's source=user_settings: %v", v)
+	}
+
+	// The reverse direction.
+	ss2, ok := m.Map(HookSessionStart, &HookEvent{SessionID: "s", Source: "startup"})
+	if !ok {
+		t.Fatal("Map ok=false")
+	}
+	if ss2.Metadata["source"] != "startup" {
+		t.Errorf("SessionStart source=startup dropped: %v", ss2.Metadata)
+	}
+	cc2, ok := m.Map(HookConfigChange, &HookEvent{SessionID: "s", Source: "startup"})
+	if !ok {
+		t.Fatal("Map ok=false")
+	}
+	if v, present := cc2.Metadata["source"]; present {
+		t.Errorf("ConfigChange accepted SessionStart's source=startup: %v", v)
+	}
+}
+
+// TestPreModelSwitchSourcesAreASubsetOfPost so a doc change that diverges the
+// two tables is caught rather than silently duplicated (postModelSwitchSources'
+// own comment names this as the reason it is spelled out in full rather than
+// derived).
+func TestPreModelSwitchSourcesAreASubsetOfPost(t *testing.T) {
+	for v := range preModelSwitchSources {
+		if !postModelSwitchSources[v] {
+			t.Errorf("preModelSwitchSources contains %q, which postModelSwitchSources does not; "+
+				"pre must be a subset of post", v)
+		}
+	}
+}
+
+// TestPointerFieldsOmitAbsentNumbers a PreModelSwitch payload with no
+// context_tokens produces metadata with no such key at all, never a `0` --
+// `0` would read as "measured and zero", a materially different claim from
+// "unmeasured".
+func TestPointerFieldsOmitAbsentNumbers(t *testing.T) {
+	m := testMapper()
+	got, ok := m.Map(HookPreModelSwitch, &HookEvent{SessionID: "s", Source: "command"})
+	if !ok {
+		t.Fatal("Map ok=false")
+	}
+	if v, present := got.Metadata["context_tokens"]; present {
+		t.Errorf("context_tokens present with no pointer set: %v (want key absent, not 0)", v)
+	}
+	blob, err := json.Marshal(got)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if strings.Contains(string(blob), `"context_tokens"`) {
+		t.Errorf("context_tokens key present on the wire with no value set: %s", blob)
+	}
+}
+
+// TestPromptIDRidesEveryEvent: with prompt_id set, it appears on a signal, on
+// a tool event, and on both halves of a turn. With it unset, an existing
+// (pre-v1.8) class's serialized bytes are byte-identical to a golden byte
+// string captured once and kept in this test -- not to a second live Map call,
+// which would make the assertion compare the change to itself.
+func TestPromptIDRidesEveryEvent(t *testing.T) {
+	m := testMapper()
+
+	// Signal (already covered by mapper_signals_test.go's own scoped test;
+	// repeated here for the cross-cutting "signal, tool, both turn halves"
+	// enumeration this test's name promises).
+	signal, ok := m.Map(HookSetup, &HookEvent{SessionID: "s", Trigger: "init", PromptID: "req-signal"})
+	if !ok {
+		t.Fatal("Map ok=false")
+	}
+	if signal.Metadata["prompt_id"] != "req-signal" {
+		t.Errorf("signal: prompt_id missing: %v", signal.Metadata)
+	}
+
+	// Tool event.
+	tool, ok := m.Map(HookPreToolUse, &HookEvent{
+		SessionID: "s", ToolName: "Read", ToolInput: json.RawMessage(`{"file_path":"go.mod"}`),
+		PromptID: "req-tool",
 	})
 	if !ok {
-		t.Fatal("Task call must map")
+		t.Fatal("Map ok=false")
 	}
-	if ev.Metadata["subagent_type"] != "code-reviewer" {
-		t.Errorf("subagent_type not carried; every Task call reads as an anonymous "+
-			"`tool_name: Task`: %v", ev.Metadata)
+	if tool.Metadata["prompt_id"] != "req-tool" {
+		t.Errorf("tool event: prompt_id missing: %v", tool.Metadata)
 	}
-	if blob, _ := json.Marshal(ev); strings.Contains(string(blob), secretPrompt) {
-		t.Errorf("the subagent prompt egressed: %s", blob)
+
+	// Both turn halves.
+	started, completed, ok := m.MapTurn(&HookEvent{SessionID: "s", PromptID: "req-turn"}, turnWindow{HasUsage: true}, 0)
+	if !ok {
+		t.Fatal("MapTurn ok=false")
 	}
-	other, _ := m.Map(HookPreToolUse, &HookEvent{
-		SessionID: "s", ToolName: "Read", ToolUseID: "toolu_t2",
-		ToolInput: json.RawMessage(`{"file_path":"/tmp/a"}`),
-	})
-	if _, present := other.Metadata["subagent_type"]; present {
-		t.Errorf("non-Task call carries subagent_type: %v", other.Metadata)
+	if started.Metadata["prompt_id"] != "req-turn" {
+		t.Errorf("turn started: prompt_id missing: %v", started.Metadata)
+	}
+	if completed.Metadata["prompt_id"] != "req-turn" {
+		t.Errorf("turn completed: prompt_id missing: %v", completed.Metadata)
+	}
+
+	// prompt_id unset: an existing (pre-v1.8) class's bytes must equal a
+	// golden byte string kept HERE, not a second live build of the same
+	// event -- captured once, with testMapper()'s fixed clock/NewID, against
+	// SessionStart(source=startup).
+	const golden = `{"schema_version":"1.8","event_id":"evt-fixed","event_type":"SessionStarted",` +
+		`"openbox_session_id":"s1","developer_did":"did:aip:7f3c9b2e-0000-5000-a000-000000000001",` +
+		`"timestamp":"2026-07-08T12:00:00Z","tool":{"name":"claude-code","kind":"shell"},` +
+		`"metadata":{"cwd":"/repo","provider":"claude-code","source":"startup"}}`
+	noID, ok := m.Map(HookSessionStart, &HookEvent{SessionID: "s1", Cwd: "/repo", Source: "startup"})
+	if !ok {
+		t.Fatal("Map ok=false")
+	}
+	blob, err := json.Marshal(noID)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if string(blob) != golden {
+		t.Errorf("SessionStart with no prompt_id is not byte-identical to the golden fixture:\ngot:  %s\nwant: %s", blob, golden)
 	}
 }

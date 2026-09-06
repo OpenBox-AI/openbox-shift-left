@@ -16,23 +16,57 @@ import (
 // That asymmetry is why the default inverted: a default the command cannot
 // finish reports success while governing nothing.
 
+// fileChangedMatcher is the watch list, not a pattern: Claude Code splits this
+// on '|' into literal basenames in cwd, and "*" would watch a file named "*".
+// Scope: the four files whose modification most changes what an agent can do
+// or reach. .claude/settings*.json is deliberately NOT here -- ConfigChange
+// covers it better, because ConfigChange can block and this cannot.
+const fileChangedMatcher = ".env|.envrc|.mcp.json|CLAUDE.md"
+
 var localHookEvents = []struct {
 	Event         string
 	Matcher       string
 	Timeout       int
 	StatusMessage string
+	Async         bool
 }{
-	{Event: "SessionStart", Timeout: 5},
+	{Event: "SessionStart", Timeout: otherHookTimeoutSec},
 	{Event: "UserPromptSubmit", Timeout: preToolUseHookTimeoutSec, StatusMessage: "OpenBox governance…"},
 	{Event: "PreToolUse", Matcher: "*", Timeout: preToolUseHookTimeoutSec, StatusMessage: "OpenBox governance…"},
-	{Event: "PostToolUse", Matcher: "*", Timeout: 5},
-	{Event: "PostToolUseFailure", Matcher: "*", Timeout: 5},
-	{Event: "Stop", Timeout: 5},
-	{Event: "SubagentStop", Timeout: 5},
-	{Event: "SubagentStart", Timeout: 5},
-	{Event: "PermissionDenied", Matcher: "*", Timeout: 5},
-	{Event: "StopFailure", Timeout: 5},
+	{Event: "PostToolUse", Matcher: "*", Timeout: otherHookTimeoutSec},
+	{Event: "PostToolUseFailure", Matcher: "*", Timeout: otherHookTimeoutSec},
+	{Event: "Stop", Timeout: otherHookTimeoutSec},
+	{Event: "SubagentStop", Timeout: otherHookTimeoutSec},
+	{Event: "SubagentStart", Timeout: otherHookTimeoutSec},
+	{Event: "PermissionDenied", Matcher: "*", Timeout: otherHookTimeoutSec},
+	{Event: "StopFailure", Timeout: otherHookTimeoutSec},
 	{Event: "SessionEnd", Timeout: 15},
+
+	// The 21 new hook classes below, phase-04 table-B order (D5's sync/async
+	// split). ConfigChange is the one armed hook (D4): it stays sync so a
+	// headless run cannot silently lose a settings-edit decision, and it is
+	// the only new row that carries a StatusMessage.
+	{Event: "Setup", Timeout: otherHookTimeoutSec, Async: true},
+	{Event: "InstructionsLoaded", Timeout: otherHookTimeoutSec, Async: true},
+	{Event: "UserPromptExpansion", Timeout: otherHookTimeoutSec, Async: true},
+	{Event: "MessageDisplay", Timeout: otherHookTimeoutSec, Async: true},
+	{Event: "PermissionRequest", Timeout: otherHookTimeoutSec},
+	{Event: "PostToolBatch", Timeout: otherHookTimeoutSec, Async: true},
+	{Event: "Notification", Timeout: otherHookTimeoutSec, Async: true},
+	{Event: "TaskCreated", Timeout: otherHookTimeoutSec},
+	{Event: "TaskCompleted", Timeout: otherHookTimeoutSec},
+	{Event: "TeammateIdle", Timeout: otherHookTimeoutSec, Async: true},
+	{Event: "ConfigChange", Timeout: preToolUseHookTimeoutSec, StatusMessage: "OpenBox governance…"},
+	{Event: "CwdChanged", Timeout: otherHookTimeoutSec, Async: true},
+	{Event: "DirectoryAdded", Timeout: otherHookTimeoutSec, Async: true},
+	{Event: "FileChanged", Matcher: fileChangedMatcher, Timeout: otherHookTimeoutSec, Async: true},
+	{Event: "WorktreeRemove", Timeout: otherHookTimeoutSec, Async: true},
+	{Event: "PreCompact", Timeout: otherHookTimeoutSec, Async: true},
+	{Event: "PostCompact", Timeout: otherHookTimeoutSec, Async: true},
+	{Event: "PreModelSwitch", Timeout: otherHookTimeoutSec, Async: true},
+	{Event: "PostModelSwitch", Timeout: otherHookTimeoutSec, Async: true},
+	{Event: "Elicitation", Timeout: otherHookTimeoutSec},
+	{Event: "ElicitationResult", Timeout: otherHookTimeoutSec},
 }
 
 // localHookPath addresses one event's matcher-group array. The event names are
@@ -141,6 +175,9 @@ func writeHooks(settingsPath, engine string) error {
 			if ev.StatusMessage != "" {
 				hook["statusMessage"] = ev.StatusMessage
 			}
+			if ev.Async {
+				hook["async"] = true // never write "async": false; absent and false must not be two states
+			}
 			handlers := []any{hook}
 			if ev.Event == "PreToolUse" {
 				handlers = append(handlers, map[string]any{
@@ -152,9 +189,9 @@ func writeHooks(settingsPath, engine string) error {
 			}
 			entries = append(entries, map[string]any{"matcher": ev.Matcher, "hooks": handlers})
 		} else {
-			entries = reconcileLocalHook(entries, command, ev.Timeout, ev.StatusMessage)
+			entries = reconcileLocalHook(entries, command, ev.Timeout, ev.StatusMessage, ev.Async)
 			if ev.Event == "PreToolUse" {
-				entries = reconcileLocalHook(entries, localHookCommand(engine, "rewake claude-code"), rewakeHookTimeoutSec, "")
+				entries = reconcileLocalHook(entries, localHookCommand(engine, "rewake claude-code"), rewakeHookTimeoutSec, "", false)
 			}
 		}
 		if out, err = setLocalHookEntries(out, ev.Event, entries); err != nil {
@@ -384,7 +421,11 @@ func splitEngineToken(cmd string) (engine, rest string, ok bool) {
 
 // reconcileLocalHook it never touches a foreign hook, another of our
 // invocations (the rewake watcher has its own command), or the group matcher.
-func reconcileLocalHook(entries []any, command string, timeoutSec int, statusMessage string) []any {
+// async is set or deleted exactly as statusMessage already is: that symmetry
+// is what keeps a re-run of `openbox init` against an existing install from
+// leaving a stale "async" key on an upgraded row (e.g. ConfigChange, whose
+// Async is false).
+func reconcileLocalHook(entries []any, command string, timeoutSec int, statusMessage string, async bool) []any {
 	want := unquoteHookCommand(command)
 	for _, e := range entries {
 		entry, _ := e.(map[string]any)
@@ -400,6 +441,11 @@ func reconcileLocalHook(entries []any, command string, timeoutSec int, statusMes
 				hook["statusMessage"] = statusMessage
 			} else {
 				delete(hook, "statusMessage")
+			}
+			if async {
+				hook["async"] = true
+			} else {
+				delete(hook, "async") // never leave "async": false; absent and false must not be two states
 			}
 		}
 	}

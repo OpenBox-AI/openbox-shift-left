@@ -43,14 +43,20 @@ func evaluationContext(e *HookEvent, redacted *client.Content) string {
 }
 
 func toolInputExtract(e *HookEvent, redacted *client.Content) string {
-	kind, _, _, _, _ := classifyTool(e.ToolName)
+	kind, sem, _, _, _ := classifyTool(e.ToolName)
 	input := e.ToolInput
 	if redacted != nil && redacted.FileText != "" {
 		if rebuilt := hookflow.RedactToolInput(input, redacted.FileText, contentFieldKeys); len(rebuilt) > 0 {
 			input = rebuilt
 		}
 	}
-	if kind == client.ToolShell {
+	// A subagent spawn (Agent/ToolSearch) is shell-KINDED, so the local enforce
+	// gate is unchanged (insight 6), but its semantic is "llm_tool_call", not a
+	// real shell command: e.command() would unmarshal it against {command} and
+	// yield "". Carry the whole tool_input instead (owner ruling 2) -- a thin
+	// {subagent_type} alone would be a judgement about a spawn the judge cannot
+	// see (insight 3).
+	if kind == client.ToolShell && sem != "llm_tool_call" {
 		return commandOf(input, e)
 	}
 	return string(input)

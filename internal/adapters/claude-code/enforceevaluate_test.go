@@ -269,13 +269,16 @@ func TestInstalledHookTimeoutMatchesWhatIsRegistered(t *testing.T) {
 	}
 
 	for event, gs := range f.Hooks {
-		if event == "PreToolUse" || event == "UserPromptSubmit" || event == "SessionEnd" {
+		// ConfigChange also carries the raised ceiling: phase 04/05's D4 makes it
+		// the third hook where a human decision (here, a settings edit) must not
+		// be lost to a budget too tight to evaluate against.
+		if event == "PreToolUse" || event == "UserPromptSubmit" || event == "SessionEnd" || event == "ConfigChange" {
 			continue
 		}
 		for _, g := range gs {
 			for _, hh := range g.Hooks {
 				if hh.Timeout >= preToolUseHookTimeoutSec {
-					t.Errorf("%s timeout = %d; only the gating hook may carry the raised ceiling", event, hh.Timeout)
+					t.Errorf("%s timeout = %d; only a gating hook may carry the raised ceiling", event, hh.Timeout)
 				}
 			}
 		}

@@ -1,0 +1,13 @@
+{
+  "_fixture_provenance": "SYNTHETIC, not captured. tool_input keys and shapes derived from the ToolSearch input_schema object in internal/transport/testdata/corpus/messages-json.json: properties={query:string, max_results:number(default 5)}, required=[query,max_results]. Whether ToolSearch fires PreToolUse at all is UNVERIFIED; if it does not, the builtinTools entry this fixture exercises is inert, not wrong.",
+  "hook_event_name": "PreToolUse",
+  "session_id": "s-fixture-toolsearch-01",
+  "cwd": "/repo",
+  "permission_mode": "default",
+  "tool_name": "ToolSearch",
+  "tool_use_id": "toolu_toolsearch_fixture_01",
+  "tool_input": {
+    "query": "<scrubbed: tool search query text>",
+    "max_results": 5
+  }
+}
