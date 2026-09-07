@@ -112,6 +112,82 @@ lane's presence in a row will say which one produced the evidence.
 | `SubagentStarted` *(v1.2)* | `SubagentStart` hook | *(unsurveyed)* | **none** |
 | `PermissionDenied` *(v1.2)* | `PermissionDenied` hook; **auto-mode classifier denials only**; a static `permissions.deny` rule denies without firing it (verified), so absence is not evidence that nothing was denied | `permissionRequest`? *(unsurveyed)* | **none** |
 | `APIError` *(v1.2)* | `StopFailure` hook | *(unsurveyed)* | **none** |
+| `Setup` *(v1.8)* | `Setup` hook | *(unsurveyed)* | **none** |
+| `InstructionsLoaded` *(v1.8)* | `InstructionsLoaded` hook | *(unsurveyed)* | **none** |
+| `UserPromptExpansion` *(v1.8)* | `UserPromptExpansion` hook; structural-only, no content line ever | *(unsurveyed)* | **none** |
+| `MessageDisplay` *(v1.8)* | `MessageDisplay` hook; structural-only, `message_id` is not the API's `msg_…` id — no transcript join exists (see the annotation below) | *(unsurveyed)* | **none** |
+| `PermissionRequest` *(v1.8)* | `PermissionRequest` hook; no `tool_use_id`, so it cannot pair with any tool activity (see the annotation below); **content-gated** (`requested_tool_input`) | *(unsurveyed)* | **none** |
+| `PostToolBatch` *(v1.8)* | `PostToolBatch` hook; structural-only, no `tool_calls[]` content | *(unsurveyed)* | **none** |
+| `Notification` *(v1.8)* | `Notification` hook; **content-gated** (`notification_message`) | *(unsurveyed)* | **none** |
+| `TaskCreated` *(v1.8)* | `TaskCreated` hook; **content-gated** (`task_subject`; the description is never sent) | *(unsurveyed)* | **none** |
+| `TaskCompleted` *(v1.8)* | `TaskCompleted` hook; same `task_subject` key as `TaskCreated`, never paired as an Activity | *(unsurveyed)* | **none** |
+| `TeammateIdle` *(v1.8)* | `TeammateIdle` hook | *(unsurveyed)* | **none** |
+| `ConfigChange` *(v1.8)* | `ConfigChange` hook; the one new hook that is gated (§4); `source:policy_settings` never gated | *(unsurveyed)* | **none** |
+| `CwdChanged` *(v1.8)* | `CwdChanged` hook; structural, always sent | *(unsurveyed)* | **none** |
+| `DirectoryAdded` *(v1.8)* | `DirectoryAdded` hook; structural, always sent | *(unsurveyed)* | **none** |
+| `FileChanged` *(v1.8)* | `FileChanged` hook; a bounded watch list, not coverage — never the file body (see §3 and the annotation below) | *(unsurveyed)* | **none** |
+| `WorktreeRemove` *(v1.8)* | `WorktreeRemove` hook; unpaired by construction — `WorktreeCreate` is refused, not missing (§3) | *(unsurveyed)* | **none** |
+| `PreCompact` *(v1.8)* | `PreCompact` hook; **content-gated** (`compact_instructions`) | *(unsurveyed)* | **none** |
+| `PostCompact` *(v1.8)* | `PostCompact` hook; **content-gated** (`compact_summary`) | *(unsurveyed)* | **none** |
+| `PreModelSwitch` *(v1.8)* | `PreModelSwitch` hook; never sets the token-rollup `model` field (see the annotation below) | *(unsurveyed)* | **none** |
+| `PostModelSwitch` *(v1.8)* | `PostModelSwitch` hook; not a pair with `PreModelSwitch` in either direction (see the annotation below) | *(unsurveyed)* | **none** |
+| `Elicitation` *(v1.8)* | `Elicitation` hook; **content-gated** (`elicitation_message`, the MCP server's prompt) | *(unsurveyed)* | **none** |
+| `ElicitationResult` *(v1.8)* | `ElicitationResult` hook; **content-gated** (`elicitation_response`) — your answer, form values included; residual risk in [data-and-privacy.md](data-and-privacy.md) | *(unsurveyed)* | **none** |
+
+**Four rows above buy less than they appear to, named individually because a matrix cell can't carry the caveat:**
+
+- **`MessageDisplay`**'s `message_id` is **not** the API `msg_…` id, so no transcript join from this event back to a specific assistant message exists.
+- **`PermissionRequest`** carries no `tool_use_id`, so it cannot pair with any tool activity — a permission request and the tool call it is about are not correlated on the wire.
+- **`Pre`/`PostModelSwitch`** share no id in either direction; they are never a pair, only two independent signals.
+- **`FileChanged`** fires only for a bounded watch list (`.env|.envrc|.mcp.json|CLAUDE.md`, literal basenames, no wildcard), never for coverage of "files changed" in general; see §3.
+
+## 1a. `/clear` and `--resume` are different, and only one continues a run
+
+Measured against installed Claude Code 2.1.263. **Each transition below was
+observed exactly once** — enough to refute the claim that a `/clear` continues a
+run, weaker as confirmation, and not a statistical claim about the fleet:
+
+- **`--resume` is the one source that continues a run.** Same session id across
+  the whole boundary (`bbf2b31d-cd3b-4130-8ca3-20eacc269a85`):
+  `SessionStart(source=startup)` → `SessionEnd(reason=prompt_input_exit)` →
+  `SessionStart(source=resume)`. The tool reuses the session id; the client
+  mints a fresh v4 UUID `run_id` for the new run and sets
+  `continued_from_run_id` to the sealed run it continues — the shape Temporal
+  calls continue-as-new. The run that was measured used the
+  **interactive picker** (`claude --resume` with no argument). `--resume <session-id>`
+  and `--continue` are separate code paths, which the vendor's help text describes
+  identically ("continues that session … under the same ID") but which were **not**
+  exercised. Corroborating, not measured: 55 local transcripts hold one `sessionId`
+  across gaps over two hours, and `--fork-session` exists to "create a new session
+  ID instead of reusing the original" — a flag that only makes sense if reuse is the
+  default.
+- **`/clear` does NOT continue a run and does not reuse the session id.**
+  Measured: `SessionEnd(reason=clear)`, then `SessionStart(source=clear)` on a
+  **new** session id ~46ms later (`43b1dc13-…` → `be87310b-…`). The new session
+  starts at generation 0, `run_id` equal to its own (new) session id, and
+  **no** `continued_from_run_id` — there is nothing to link to; the sealed
+  session is a different `openbox_session_id`, not a predecessor run of this
+  one.
+- **`startup`, `compact` and `fork` do not continue a run either.** `compact`
+  fires no `SessionEnd` at all. `fork` carries a fresh session id over copied
+  history, the same non-continuation shape as `clear`.
+- **Every `SessionEnd` seals its run, for every reason, byte-identically.**
+  There is no suspended-session state and **no `session_suspended` wire
+  value**; never describe a `SessionEnd` as anything but terminal.
+
+**Two consequences a reader would otherwise discover the hard way.** Goal
+alignment **resets on `/clear`** — a new run starts with no goal until its
+first prompt, because to core it is an unrelated session — but **is carried
+forward on `--resume`**: core seeds the continued run from the previous run's
+latest prompt ([phase 13](../plans/260905-2345-unified-dev-event-plan/phase-13-core-goal-carry-forward.md)),
+so the first tool call after a resume is judged against the goal you last
+stated (a machine with `content_capture` off never stored a prompt to carry,
+so such a run re-anchors on its first prompt as before). And a session
+`--resume`d repeatedly produces several sealed runs chained under **one**
+`openbox_session_id`; a session `/clear`ed repeatedly produces several
+**independent sessions** instead, a fresh `openbox_session_id` each time with
+no lineage between them. See [mapping.md §1](mapping.md#1-envelope-field-mapping-every-event)
+for the field-level derivation.
 
 ## 1b. Model-call coverage matrix; per signal, per lane
 
@@ -229,7 +305,7 @@ architecture already records.
   deliberately unwired, which is scope, not impossibility. Both read a local
   file (CC's transcript, Codex's rollout JSONL), never the providers' OTel/Usage
   APIs, through an allowlist projection whose one egressing string is the model
-  id (INV-2). `cost` is never **derived** here, the server derives it from a
+  id ([INV-2](dev-event-contract.md#invariants)). `cost` is never **derived** here, the server derives it from a
   model-keyed pricing table, and the turn pair never carries it at all. The only
   way a `cost` can appear is if a transcript itself supplies one: CC's reader
   still reads `costUSD` onto the `SessionEnded` rollup, and current Claude Code
@@ -298,8 +374,12 @@ lineage):
    *does* something; a subagent that spawns and calls no tool left no trace at
    all. `SubagentStop` stays unwired as a lifecycle marker, because it already
    has a job: it closes a turn. Still not a `tool.kind`.
-3. **Compaction** (`PreCompact`/`PostCompact`); context-window infra; dropped in
-   Phase 1.
+3. ~~**Compaction** (`PreCompact`/`PostCompact`); context-window infra; dropped in
+   Phase 1.~~ **Retired as a non-goal in v1.8.** Both hooks are wired:
+   `PreCompact` carries `trigger` and, under the content gate, the user's
+   `/compact <instructions>` text; `PostCompact` carries `trigger` and the
+   compaction summary. Compaction infra itself — what gets dropped and how —
+   is still out of scope; only the two boundary signals are observed now.
 4. **Assistant message/thought**, **retired as a non-goal: v1.2 for the
    completion text, v1.3 for tool content, v1.4 for thinking.** The completion
    text egresses for Claude Code in `activity_output.content`; **tool output, observe-path
@@ -353,6 +433,40 @@ lineage):
 6. **`PermissionRequest` vs generic `preToolUse`/`PreToolUse` overlap**;
    adapters emit **one** `ToolCall` per tool invocation (prefer the specific
    pre-tool hook); `event_id` idempotency (INV-5) also guards double-counting.
+7. **`WorktreeCreate` is refused, not missing.** `claude --worktree`,
+   `isolation:"worktree"` subagents and background sessions rely on the
+   hook's stdout **last line** being the created worktree path; configuring
+   the hook replaces the default git behaviour, so a registered observer that
+   emits nothing would break worktree creation outright. This adapter
+   deliberately does not register it. **The ceiling is 32 of 33 documented
+   Claude Code hooks, and it is a choice, not a gap.**
+8. **`FileChanged` is a bounded watch list, not coverage.** It fires only for
+   `.env|.envrc|.mcp.json|CLAUDE.md` — literal basenames, no wildcard, no
+   user-configurable extension. A change to any other file produces no event,
+   and the event it does produce never carries the file's contents.
+9. **`MessageDisplay` is structural-only.** `delta`/`displayContent` are never
+   bound (D1); the event carries `turn_id`, `message_id`, `index`, `final`
+   only, and `message_id` is **not** the API's `msg_…` transcript id — there is
+   no join from this event back to a specific assistant message.
+10. **Headless coverage is best-effort, not equivalent to interactive.** In
+    `claude -p`, Claude Code kills any async hook still running at process
+    teardown and finalizes it `cancelled` with no error surfaced anywhere.
+    **15 of the 21 new classes are async** (`Setup`, `InstructionsLoaded`,
+    `UserPromptExpansion`, `MessageDisplay`, `PostToolBatch`, `Notification`,
+    `TeammateIdle`, `CwdChanged`, `DirectoryAdded`, `FileChanged`,
+    `WorktreeRemove`, `PreCompact`, `PostCompact`, `PreModelSwitch`,
+    `PostModelSwitch`) and can be silently lost this way in a short headless
+    run. The **six** sync new classes (`PermissionRequest`, `TaskCreated`,
+    `TaskCompleted`, `ConfigChange`, `Elicitation`, `ElicitationResult`),
+    alongside the 11 original sync hooks, cannot be lost to teardown the same
+    way, because the process does not exit until they return. **Do not read
+    headless coverage as equivalent to interactive coverage.**
+11. **The dark-install window (D8).** These 21 registrations, like the four
+    lifecycle/failure hooks before them, reach an existing install only when
+    `openbox init` is re-run on that machine. Nothing in this landing
+    schedules that re-run: a machine that upgrades the `openbox` binary
+    without re-running `init` keeps observing only its pre-upgrade hook set
+    until a human runs it.
 
 Items 1 and 2 were the candidate scope for a `schema_version` bump, and both
 have since landed; turn boundaries in v1.1, subagent start in v1.2, tool content
@@ -370,7 +484,7 @@ fail-open** by default, `failClosed:true` to flip; Codex feature-gated
 
 Enforcement **shipped** in Phase-2 (E6 for Claude Code for Codex) and is
 **on by default**; `OPENBOX_ENFORCE=false` opts out for one run, and an observing
-session treats every verdict as allow (INV-3). Two bounds come with that default
+session treats every verdict as allow ([INV-3](dev-event-contract.md#invariants)). Two bounds come with that default
 and both must stay true: enforcement is inert until the org publishes a policy,
 and `fail_closed` stays off. The verdict itself is the server's; nothing local
 decides one. What the hook does in-process (its no-sidecar shape) is apply it,
@@ -389,3 +503,34 @@ Approvals.
 the managed provider config is deployed (an earlier decision), a developer can remove the
 hook or flip the local config, so treat local enforcement as prevention
 **without** assurance. That is a deployment property, not a code gap.
+
+**`ConfigChange` narrows that caveat, without closing it.** The settings file
+that houses this adapter's own hook registrations now fires `ConfigChange`
+when a developer edits it, so removing or disabling the hook is itself an
+observed — and, when policy says so, blockable — event, rather than an
+invisible one. Two operational facts keep this narrow, and conflating them
+overstates the control: `source:policy_settings` is **never gated** — the
+provider documents that path as unblockable, and gating it anyway would file
+an audit line claiming a block that never happened — and settings the
+provider manages centrally never fire the hook **at all**, a second, disjoint
+unblockable path. A denial is announced on stderr (the same
+`{"decision":"block","reason":…}` line a tool denial gets), recorded in
+`enforcements.jsonl` with `tool_kind:"config"`, a timestamp and the verbatim
+reason, and surfaced in `openbox doctor`'s recent-config-denials section —
+because the provider surfaces nothing itself. The developer's settings file
+remains owner-writable throughout, and attestation over it proves origin of
+config, never tamper resistance; the caveat above still stands, only
+narrower.
+
+**V13 (required wording).** A `REQUIRE_APPROVAL` verdict on `ConfigChange`
+cannot be held — a signal row has no `activity_id` for an approval to attach
+to — so the edit waits the approval budget (~30s) and is then denied, exactly
+as `UserPromptSubmit` behaves today. Write ALLOW or HALT rules for config
+changes, not approval rules.
+
+**V14 (the HALT latch across a continue).** The local HALT latch is scoped to
+the **run**, like core's session row: a `/clear` or `--resume` opens a new run
+and starts unlatched, and core re-evaluates that run's first gated call
+against the same policies, so a policy that halted the previous run halts
+this one on the same condition. This is not "clearing" a halt — nothing is
+removed; the new run simply has no latch of its own yet.

@@ -25,6 +25,7 @@ Every change below is additive except the one marked otherwise.
 | v1.5 | A second producer rather than a second event: a local relay observes the model call and emits its own `TurnCompleted`, keyed by `gateway_request_id` in a disjoint `:gateway:` namespace |
 | v1.6 | Two more producers, `otel_request_id`/`:otel:` and `proxy_request_id`/`:proxy:`, plus the election that keeps exactly one of them emitting per session. Also a repair: `session_rollup` was never a declared property of an `additionalProperties:false` object, and `TurnStarted` required `turn_index` unconditionally, so one adapter's rollup pair had been failing its own contract since v1.1 |
 | v1.7 | `activity_type`, which names an event's class from a closed vocabulary, and **the removal of the span carrier**. Classifying a relayed call by HTTP method alone had filed every POST as `llm_completion`, and ~40% of those rows were token-count probes. The spans went because the control plane parses `spans[]` and discards it, so nothing sent there was ever stored: model-call content moved to `activity_input`/`activity_output`, and the credential fingerprint to `metadata`. The in-path and telemetry lanes also began emitting BOTH halves of their activity, which every `activity_id` requires and none of them did |
+| v1.8 | 21 observe-only lifecycle signal classes (setup, instructions, prompt expansion, message display, permission requests, tool batches, notifications, tasks, teammates, config changes, cwd/directory/file/worktree changes, compaction, model switching, elicitation), all riding stock `SignalReceived`; plus three additive run-identity fields (`run_id` declared for the first time, `run_generation`, `continued_from_run_id`) describing which run of a session produced an event; plus a subagent spawn's whole `tool_input` landing under `activity_input.arguments`. A `token_count` probe now egresses nothing at all, not even the classification it used to skip bodies on. All additive; a generation-0, non-spawn v1.7 payload is unchanged |
 
 Two reshapes preceded those versions and left the adapter-facing contract
 untouched; only the client-to-core payload changed. The first retired a parallel
@@ -62,14 +63,17 @@ body) and the base contract
 |---|---|---|
 |; (constant) | `source` = `"developer-runtime"` | Free-form in core; distinguishes dev traffic from the SDK's `"workflow-telemetry"`. |
 | `event_type` | `event_type` | **Re-mapped**, not passed through; see §2. Resolves to one of the five base wire types. |
-| `openbox_session_id` | `run_id` | Session keyed by `(workflow_id, run_id, workflow_type)`. |
-| `developer_did` (or workspace/repo id) | `workflow_id` | Stable per-workspace identity so `(workflow_id, run_id)` is unique per session. One derivation, `workflowIDFor`; shared with `ApprovalKeyFor` (§2). |
+| `openbox_session_id` | `run_id` | Session keyed by `(workflow_id, run_id, workflow_type)`. **Generation 0 only**: the wire `run_id` equals this field exactly when no continued run exists yet. See "Run identity" below for generation ≥ 1. |
+| `developer_did` (or workspace/repo id) | `workflow_id` | Stable per-workspace identity so `(workflow_id, run_id)` is unique per session. One derivation, `workflowIDFor`; shared with `ApprovalKeyFor` (§2). Unchanged by run identity: a continued run keeps the same `workflow_id`. |
+| `run_id` (adapter-facing; v1.8) | `run_id` (wire; overrides `openbox_session_id` when present) | **v1.8.** The minted v4 UUID of a **continued** (`--resume`-opened) run, set by the adapter at hook time from the local run record. `runIDFor` prefers this over `openbox_session_id`; absent at generation 0, where the fallback is `openbox_session_id`, so every 1.7 payload is unchanged. The same value reaches `ApprovalKeyFor`, so an approval always addresses the run that asked. |
+| `run_generation` (v1.8) | `run_generation` | **v1.8.** 0 for the original run; incremented once per `SessionStart(source=resume)`. Informational: a local counter that MAY restart at 1 if the run record is lost — an ordering hint, never a key. |
+| `continued_from_run_id` (v1.8) | `continued_from_run_id` | **v1.8.** The sealed run this one continues from, set ONLY on the `WorkflowStarted` of a generation ≥ 1 run. May name a run this machine never itself sent (a session resumed elsewhere). |
 |; (constant) | `workflow_type` = `"developer-session"` | **Required** by the base contract on `Workflow*` and `SignalReceived` events (`event_rules.py` `_REQUIRED_WORKFLOW_FIELDS`; core reads it into a dedicated column, `storage_event.go`). The *constant* value keeps a session's whole tree on one `(workflow_id, run_id, workflow_type)` identity so core resolves it to **one** session row. Now present on **tool events too**; the old hook envelope omitted it, diverging from the base SDK's `ActivityContext.to_payload_fields`; routing tool events through the same struct fixed that at no cost. |
 |; (per signal) | `signal_name` | Set **only** on `SignalReceived` (`prompt_submitted`/`commit_created`/`deploy`/`subagent_started`/`permission_denied`/`api_error`); required there (`event_rules.py` raises `ENVELOPE_MISSING_FIELDS` otherwise). |
 |; (activity events) | `activity_id` | Set on **both** halves of a tool call and of a turn. Pairs them onto one row; for a tool call it is additionally the approval key; see §2 "Operation vs invocation identity" and "The turn pair". |
 | `gateway_request_id` |; (feeds `activity_id` and the span id) | **v1.5.** A gateway-observed turn's discriminator: the provider's own `Request-Id`, or a locally minted `gw-` id. Its ONLY job is to keep the turn producers in disjoint `activity_id` namespaces: they describe the same turn, and a shared namespace would let core's dedupe absorb one as a duplicate of the other, losing half the evidence with no error anywhere. Bounded and charset-checked by `gatewayemit.usableRequestID` because it originates upstream and reaches a stored key verbatim; and, since v1.6, declared in the schema too, so all three producer ids sit at one depth. The retrofit was initially declined as a contract break and that reasoning was wrong: this field has ONE production assignment path, already gated at the identical rule, so declaring the bound rejects nothing. `gatewayemit.TestGatewayIDBoundMatchesTheContract` holds the two statements of the rule together. |
 | `session_rollup` |; (feeds `activity_id`) | **v1.1 on the wire, DECLARED in v1.6.** Marks a turn activity covering a whole session; Codex's granularity, since its per-turn hook is deliberately unwired. Between v1.1 and v1.6 the client emitted this field and the schema did not declare it, so with `additionalProperties:false` every Codex rollup pair failed its own contract; nothing noticed because no fixture carried one. |
-| `otel_request_id` |; (feeds `activity_id`) | **v1.6.** A TELEMETRY-observed turn's discriminator (`:otel:`), from the local OTLP receiver. Bound is **declared in the schema** (128 chars, printable ASCII) rather than left to the producer, so a lane added later inherits it. Structural identifier (INV-2), never derived from prompt or body text. |
+| `otel_request_id` |; (feeds `activity_id`) | **v1.6.** A TELEMETRY-observed turn's discriminator (`:otel:`), from the local OTLP receiver. Bound is **declared in the schema** (128 chars, printable ASCII) rather than left to the producer, so a lane added later inherits it. Structural identifier ([INV-2](dev-event-contract.md#invariants)), never derived from prompt or body text. |
 | `proxy_request_id` |; (feeds `activity_id`) | **v1.6.** A TRANSPORT-observed turn's discriminator (`:proxy:`), from the local in-path TLS relay. Same shape and bound as `otel_request_id`; the lanes differ in vantage point, not in contract. In-path, so it outranks the client-asserted lanes in the producer election. |
 | **exactly one of the five above** |; | `$defs.turnProducer` is a five-branch `oneOf` `$ref`'d from BOTH turn branches. Five producers describe the same kind of turn; `turnActivityIDFor` branches on which field is PRESENT. None ⇒ no `activity_id` and the pair never correlates. Two ⇒ the turn is attributed to a producer that did not observe it. The rule lives in one place because stating it per branch is exactly how `TurnStarted` and `TurnCompleted` drifted apart. |
 | `tool.name` | `activity_type` | The dashboard's "Activity" column. Lifecycle events carry their `event_type` string instead, so the column is never empty. |
@@ -83,8 +87,8 @@ body) and the base contract
 | `developer_did` |; | Identity is via the signed AIP headers + Bearer key, **not** a body field. `from_agent_did`/`multi_agent_session_id` stay empty (Handoff-only). |
 | `span` |; | **Not serialized, and there is no longer a wire span to confuse it with.** The adapter-facing `span` object is the carrier the client reads locators, counts and bodies *out of* (§3); it is never itself emitted, on any event, and no event carries `spans[]` or `span_count` at all (§2). |
 | `content.output` (turn) | `activity_output.content` **only when content-capture enabled**, capped | **`TurnCompleted` only.** The assistant turn's text. It rode `spans[0].response_body`, wrapped as `{"choices":[{"message":{"content":…}}]}`, for one reader -- and core parses `spans[]` on the normal path and then discards it, so it was never stored anywhere at all (§2). Verbatim now, with no OpenAI-chat wrapper, in a field that round-trips. Secret-redacted **before** attachment, capped, **absent** with capture off. `hook_trigger` is still never sent, on any event: true alongside spans routes the payload into core's approval-bypass fingerprint path (`governance_workflow.go:310-330`), and `internal/client/lifecyclepairing_test.go`'s sibling census in `modelcallcontent_test.go` is what holds that now. |
-| `content.prompt` | `signal_args.prompt` **only when content-capture enabled**, capped to 65536 chars (`capBody`) | Stripped at the client when disabled (INV-2). |
-| `content.tool_input` | `activity_input.command` / `.arguments` / `.content` **only when content-capture enabled**, capped | Key named per tool class (`contentKeyFor`), so a reader is never shown a file body labelled `command`. **v1.3: also on the OBSERVE path**, not gated calls only; the "never the observe path" half of an owner decision is retired. The gated copy overwrites the observe extract with the bytes the tool rewrite produced, so the server judges exactly what the tool was rewritten to. |
+| `content.prompt` | `signal_args.prompt` **only when content-capture enabled**, capped to 65536 chars (`capBody`) | Stripped at the client when disabled ([INV-2](dev-event-contract.md#invariants)). |
+| `content.tool_input` | `activity_input.command` / `.arguments` / `.content` **only when content-capture enabled**, capped | Key named per tool class (`contentKeyFor`), so a reader is never shown a file body labelled `command`. **v1.3: also on the OBSERVE path**, not gated calls only; the "never the observe path" half of an owner decision is retired. The gated copy overwrites the observe extract with the bytes the tool rewrite produced, so the server judges exactly what the tool was rewritten to. **v1.8 (C-03):** `arguments` gained a second producer — an `Agent`/`ToolSearch` spawn is `kind:shell` for local-enforce purposes but semantically `llm_tool_call`, so `contentKeyFor(kind, sem)` special-cases it to `arguments` **before** the shell branch, deliberately never `command`, because `command` is an enforcement key 71 of the seeded control pack's 104 conditions match on. |
 | `content.tool_output` | `activity_output.output` **only when content-capture enabled**, capped | **v1.3.** `ToolResult` only. What the tool produced; or, on a failed call, its own free-text error; `status` says which. Core stores it as the row's `output` and runs Guardrails stage "1" over it. Secret-redacted **before** attachment (conformance C34). |
 | `content.thinking` (turn) | `activity_output.thinking` **only when content-capture enabled**, capped | **v1.4.** `TurnCompleted` only. The turn's extended-thinking blocks, concatenated in file order from the transcript window; the only source, since no hook carries thinking and the provider's own OTel export redacts it unconditionally. Deliberately **not** merged into `activity_output.content`, which carries the assistant's REPLY: chain-of-thought there would score every later turn's drift against the model's reasoning. (It used to say "not the span in the row above"; that span is gone, the separation is not.) Secret-redacted **before** attachment, `capBody`-capped, absent with capture off (conformance C40/C41, sentinel `TestFinops_NoContentOnWire`). This is the field that AMENDS v1.1's transcript allowlist; the first free-form content string that projection binds. |
 | `content.signal_detail` | `metadata.denial_reason` / `metadata.error_details` **only when content-capture enabled**, capped | **v1.3.** Per event type (`signalDetailKeyFor`); dropped on every other type. Deliberately **not** `signal_args`; core reads a `SignalReceived` with non-empty `signal_args` as a NEW USER GOAL (`age.go:112-137`). Conformance C38 asserts both halves. **No reader renders these yet**; the Verify tab reads `signal_args`, which this deliberately avoids; so they are stored-and-queryable rather than displayed. Same posture as `metadata.event_id`. |
@@ -96,6 +100,12 @@ body) and the base contract
 `schema_version` and `event_id` are contract/idempotency fields; `event_id` is
 the client's idempotency key (INV-5), used client-side for dedupe; neither is a
 core payload field.
+
+### Run identity: what continues, and what does not (v1.8)
+
+Full measurement in [coverage.md §1a](coverage.md#1a-clear-and---resume-are-different-and-only-one-continues-a-run); the derivation rule here. **`--resume` is the only source that continues a run**: same session id before and after, a fresh v4 UUID `run_id` minted for the new run, `continued_from_run_id` naming the sealed run it continues — Temporal's continue-as-new shape (<https://docs.temporal.io/workflow-execution/continue-as-new>). **`clear`, `startup`, `compact` and `fork` do not continue a run**; `clear` and `fork` additionally mint a brand-new session id, so there is nothing to link to, and `compact` fires no `SessionEnd` at all. **Every `SessionEnd` seals its run, for every reason, byte-identically** — no suspended-session state, no `session_suspended` wire value. Consequence: goal alignment resets on `/clear` (a new, unrelated session to core) but carries forward on `--resume` (core seeds the continued run from the previous run's latest prompt, [phase 13](../plans/260905-2345-unified-dev-event-plan/phase-13-core-goal-carry-forward.md)).
+
+**The schema's own prose is currently stale here.** `api/dev-event.schema.json`'s `openbox_session_id` and `run_generation` descriptions still name `clear` alongside `resume` as a bump source — contradicting the resume-only decision above and that same file's own v1.8 `x-changelog` entry, which already states resume-only correctly. This document states the shipped, tested behavior (`isBumpSource`, `internal/adapters/claude-code/hookrun.go`); the two schema property descriptions need the same one-word fix a future pass should make.
 
 ---
 
@@ -118,24 +128,50 @@ feeding one serializer.
 | `SubagentStarted` | `SignalReceived` | `subagent_started` |; | `agent_id`, `agent_type` | mid-session signal; a subagent that spawns and does nothing is now visible |
 | `PermissionDenied` | `SignalReceived` | `permission_denied` |; | `tool_name`, `tool_use_id`, `permission_mode`?, `denial_reason`? | mid-session signal: THAT a call was refused, which tool it was about, and; **v1.3, content-gated**; why. The provider's `reason` is free text, so it rides `content.signal_detail` → `metadata.denial_reason` and never `signal_args` |
 | `APIError` | `SignalReceived` | `api_error` |; | `error_type` (closed provider enum), `error_details`? | mid-session signal; a turn that ended in a provider error rather than an answer. `error_details` is the provider's free-text elaboration; **v1.3, content-gated**, beside the enum |
+| `Setup` *(v1.8)* | `SignalReceived` | `setup` |; | `trigger` | mid-session signal; session bootstrap fired |
+| `InstructionsLoaded` *(v1.8)* | `SignalReceived` | `instructions_loaded` |; | `file_path`, `memory_type`, `load_reason`, `trigger_file_path`, `parent_file_path`, `globs[]`? | mid-session signal; which memory file loaded and why |
+| `UserPromptExpansion` *(v1.8)* | `SignalReceived` | `user_prompt_expansion` |; | `expansion_type`, `command_name`, `command_source` | mid-session signal; **structural-only (D1)**, no content ever — the pre-expansion prompt would duplicate `prompt_submitted` under a second key |
+| `MessageDisplay` *(v1.8)* | `SignalReceived` | `message_display` |; | `turn_id`, `message_id`, `index`?, `final`? | mid-session signal; **structural-only**, `message_id` is not a transcript join key |
+| `PermissionRequest` *(v1.8)* | `SignalReceived` | `permission_request` |; | `tool_name`, `permission_mode`? | mid-session signal; **content-gated** (`requested_tool_input`) — for an `Agent` request this is the whole subagent prompt (C7) |
+| `PostToolBatch` *(v1.8)* | `SignalReceived` | `post_tool_batch` |; | `batch_size`, `batch_tool_use_ids[]`? | mid-session signal; **structural-only (D1)**, no `tool_calls[]` content |
+| `Notification` *(v1.8)* | `SignalReceived` | `notification` |; | `notification_type`? | mid-session signal; **content-gated** (`notification_message`) |
+| `TaskCreated` *(v1.8)* | `SignalReceived` | `task_created` |; | `task_id`, `teammate_name`?, `team_name`? | mid-session signal; **content-gated** (`task_subject`; the description is never sent) |
+| `TaskCompleted` *(v1.8)* | `SignalReceived` | `task_completed` |; | `task_id`, `teammate_name`?, `team_name`? | mid-session signal; shares `task_subject` with `TaskCreated`, never paired as an Activity |
+| `TeammateIdle` *(v1.8)* | `SignalReceived` | `teammate_idle` |; | `teammate_name`?, `team_name`? | mid-session signal |
+| `ConfigChange` *(v1.8)* | `SignalReceived` | `config_change` |; | `source`?, `file_path`? | mid-session signal, and the one new hook that is **gated** (coverage.md §4); `source:policy_settings` is never gated |
+| `CwdChanged` *(v1.8)* | `SignalReceived` | `cwd_changed` |; | `old_cwd`?, `new_cwd`? | mid-session signal; structural, always sent |
+| `DirectoryAdded` *(v1.8)* | `SignalReceived` | `directory_added` |; | `directory`?, `source`? | mid-session signal; structural, always sent |
+| `FileChanged` *(v1.8)* | `SignalReceived` | `file_changed` |; | `file_path`?, `event`? | mid-session signal; bounded watch list (coverage.md §3), never the file body |
+| `WorktreeRemove` *(v1.8)* | `SignalReceived` | `worktree_remove` |; | `worktree_path`? | mid-session signal; unpaired — `WorktreeCreate` is refused, not missing (coverage.md §3) |
+| `PreCompact` *(v1.8)* | `SignalReceived` | `pre_compact` |; | `trigger`? | mid-session signal; **content-gated** (`compact_instructions`, the user's `/compact <instructions>`) |
+| `PostCompact` *(v1.8)* | `SignalReceived` | `post_compact` |; | `trigger`? | mid-session signal; **content-gated** (`compact_summary`) |
+| `PreModelSwitch` *(v1.8)* | `SignalReceived` | `pre_model_switch` |; | `from_model`?, `to_model`?, `requested_model`?, `source`?, `cache_ttl`?, `pricing`?, `context_tokens`?, `prompt_cache_warm`?, `estimated_cache_write_usd`? | mid-session signal; never sets `ev.Model`, so it cannot contaminate the token-rollup `metadata.model` key |
+| `PostModelSwitch` *(v1.8)* | `SignalReceived` | `post_model_switch` |; | same shape as `PreModelSwitch` | mid-session signal; **not** a pair with `PreModelSwitch` in either direction — no shared id |
+| `Elicitation` *(v1.8)* | `SignalReceived` | `elicitation` |; | `mcp_server_name`?, `mode`?, `url`?, `elicitation_id`? | mid-session signal; **content-gated** (`elicitation_message`, the MCP server's prompt) |
+| `ElicitationResult` *(v1.8)* | `SignalReceived` | `elicitation_result` |; | `mcp_server_name`?, `action`?, `mode`?, `elicitation_id`? | mid-session signal; **content-gated** (`elicitation_response`) — your answer, form values included; residual risk in [data-and-privacy.md](data-and-privacy.md) |
 
 Two POSTs per tool call, as before; the count did not change, only the shape.
 Two more per model turn, when usage capture is on.
 
-**The three v1.2 signals carry no `signal_args`, and that is a
-correctness constraint.** Core's alignment engine treats *any* `SignalReceived`
+**The v1.2 and v1.8 signals carry no `signal_args`, and that is a
+correctness constraint: 24 of 27 signal classes must carry none.** Core's
+alignment engine treats *any* `SignalReceived`
 with non-empty `signal_args` as a new user goal: it scores the assistant
 messages accumulated so far against the previous goal and then overwrites the
 session's goal with the stringified args (`openbox-core
 internal/services/age.go:112-137`). Putting the denied tool's name there, the
 field the Verify tab renders as "Input", so an obvious next step, would replace
 the developer's actual prompt as the thing every later turn is scored against.
-`prompt_submitted` is the one signal that must keep its args, because it is what
-creates that session. `client/lifecycle_signals_test.go` and the signal golden
-fixtures hold both halves.
+`prompt_submitted` is the one signal that must keep its args (with
+`commit_created` and `deploy`, the three exceptions), because it is what
+creates that session. `client/lifecycle_signals_test.go`, the signal golden
+fixtures, and `internal/client/signalvocabulary_test.go`'s
+`TestNoSignalCarriesSignalArgs` (asserting the count is exactly 24) hold this.
 
-Availability note: these four hooks are registered by the installer, so an
-**existing install does not emit them until `openbox init` is re-run**. A Claude
+Availability note: these four hooks, and the 21 v1.8 classes above with them,
+are registered by the installer, so an
+**existing install does not emit them until `openbox init` is re-run** (the
+dark-install window, D8; nothing schedules that re-run automatically). A Claude
 Code version that does not know the hook keys never invokes them (verified); the
 events are simply absent, fail-open.
 
@@ -144,7 +180,8 @@ events are simply absent, fail-open.
 `metadata` is deliberately a free-form object, so these are **well-known keys
 rather than schema fields**; no `schema_version` bump, because the normalized
 shape is unchanged and the version `const` marks breaking changes only. All are
-structural identifiers (INV-2 permits them; INV-1 still forbids secrets) and all
+structural identifiers (see [the Invariants
+glossary](dev-event-contract.md#invariants) for INV-1/INV-2) and all
 are optional; a provider that does not expose one simply omits it.
 
 > **`metadata` has no reader in core or in the backend.** Verified across both:
@@ -159,10 +196,16 @@ are optional; a provider that does not expose one simply omits it.
 > columns and which OPA and the judge actually read. Stop growing `metadata`; a
 > key added here in the expectation that something will evaluate it will simply
 > sit unread.
+>
+> **Why a v1.8 signal's own fields still belong in `metadata` (insight 6).** A `SignalReceived` row has no `activity_input`/`activity_output` of its own — those columns exist only on the Activity carrier a tool call or a turn uses — so `metadata` is the only home a signal's fields can have. "Stop growing `metadata`" above is advice about *activity* rows, where a dedicated column exists; this landing's ~40 new keys are signal fields with nowhere else to go, not an instance of the thing the warning is against.
 
 | Key | Providers | Meaning |
 |---|---|---|
 | `tool_use_id` | Claude Code, Codex | Per-invocation id for a `ToolCall`/`ToolResult` pair. It rides `span.invocation_id`, a *local* field (spooled, never emitted) that keys the cross-process duration stash. The wire pairing itself is `activity_id`. `span.function` is the MCP function name only. |
+| `prompt_id` (v1.8) | Claude Code | The UUID of the prompt being processed, threaded onto **every** event via `commonMetadata` (not just `PromptSubmitted`). Absent until the first user input, and absent entirely on Claude Code versions before 2.1.196. |
+| `task_id` (v1.8) | Claude Code | Correlates a `TaskCreated`/`TaskCompleted` pair; never an Activity pair (see §2's note on why an orphan would depress success rates). |
+| `elicitation_id` (v1.8) | Claude Code | Correlates an `Elicitation`/`ElicitationResult` pair. |
+| `turn_id`, `message_id` (v1.8) | Claude Code | `MessageDisplay`'s own correlation pair, streamed-line-batch scoped. Distinct from Codex's `turn_id` below: this one is **not** the API's `msg_…` transcript id, so it cannot join back to a specific stored assistant message. |
 
 ### Operation vs invocation identity
 
@@ -185,7 +228,7 @@ beside the real function name (core: "same tool with different arguments must
 require fresh approval"), and any other class falls back to the invocation;
 those expose no structural discriminator, are never escalated, and so can never
 hold an approval. The hashes are correlation ids folded into an already-opaque
-id, never content fields (INV-2).
+id, never content fields ([INV-2](dev-event-contract.md#invariants)).
 
 > Conflating the two shipped and was found in a live session: every retry became
 > a different activity, so an approver's decision could not be consumed, each
@@ -217,11 +260,6 @@ The two halves pair on **`activity_id` alone** now (there is no `span_id`). It
 is derived from `session/tool/locator/operation` with no stage, timestamp or
 attempt input, so the two separate hook processes, and a rehydrated spool flush,
 mint the same id without threading any state.
-
-> **Supersedes** That decision's `ToolCall`/`ToolResult` rows and an earlier decision's correction
-> above. That decision remains the true record of why the first answer was chosen;
-> The change is carried
-> in premise and the full trade-off.
 
 ### The turn pair: `llm_completion` as an `activity_type`
 
@@ -337,17 +375,8 @@ it without a live stack.
 
 Two consequences of emitting the pair from one firing, both deliberate:
 
-- The Started half is **retroactive** on the in-path lanes: the relay only knows
-  the call is over when it is over, so the opening row is emitted with the request
-  timestamp after the fact. That is correct for pairing and for `duration_ms`, and
-  it is safe because core pairs a completion to its start by looking the
-  `activity_id` up at ingest (`inheritRefusalFromStart` →
-  `FindByWorkflowRunActivityID`), never by arrival order. The spool delivers in
-  append order, so the start still lands first.
-- `duration_ms` on an in-path row is the **relayed call's** latency, measured to
-  end-of-stream rather than to response headers. A streamed completion runs for
-  seconds after its headers, and `api_response_ms` -- the control plane's own
-  response time, 536–725 ms -- sits next to it and is easily mistaken for it.
+- The Started half is **retroactive** on the in-path lanes: the relay only knows the call is over when it is over, so the opening row is emitted with the request timestamp after the fact. That is correct for pairing and for `duration_ms`, and it is safe because core pairs a completion to its start by looking the `activity_id` up at ingest (`inheritRefusalFromStart` → `FindByWorkflowRunActivityID`), never by arrival order. The spool delivers in append order, so the start still lands first.
+- `duration_ms` on an in-path row is the **relayed call's** latency, measured to end-of-stream rather than to response headers. A streamed completion runs for seconds after its headers, and `api_response_ms` -- the control plane's own response time, 536–725 ms -- sits next to it and is easily mistaken for it.
 
 The Started half's timestamp is used to compute `duration_ms`; core derives
 duration from `duration_ms` on the Completed half alone.
@@ -358,7 +387,7 @@ deliberately unwired; scope, not impossibility.
 
 >
 > carries the full trade-off, including the one that matters: the transcript
-> projection's INV-2 guarantee is now a **curated allowlist enforced by a test**
+> projection's [INV-2](dev-event-contract.md#invariants) guarantee is now a **curated allowlist enforced by a test**
 > rather than a structural impossibility, because `message.model` is bound.
 
 #### No spans at all, and why the previous answer was worse than useless
@@ -475,7 +504,7 @@ than useless.
 | `span.lines_count` | `activity_output.lines_count` | completed | |
 | `metadata.exit_code` | `activity_output.exit_code` | completed | promoted from the free-form blob; **no adapter supplies one today**, so it is absent in practice. Kept because the promotion is live the moment one does |
 | `started_at`, `ended_at` | `duration_ms` | completed | float ms; **omitted, not zero**, when the stash missed, a timestamp does not parse, or the result is not positive. Zero would claim the call took no time |
-| `content.tool_input` | `activity_input.command` / `.arguments` / `.content` | started | content-gated, `capBody`-capped. **v1.3: observe path too**, not gated calls only |
+| `content.tool_input` | `activity_input.command` / `.arguments` / `.content` | started | content-gated, `capBody`-capped. **v1.3: observe path too**, not gated calls only. **v1.8:** an `Agent`/`ToolSearch` spawn routes to `.arguments`, never `.command`, regardless of its `shell` kind (see §1) |
 | `content.tool_output` | `activity_output.output` | completed | **v1.3**; content-gated, redacted before attach, `capBody`-capped. A failed call carries its error text here |
 | `content.thinking` | `activity_output.thinking` | completed | **v1.4**, turns only; content-gated, redacted before attach, `capBody`-capped. Sourced from the transcript window, not a hook field |
 | `span.invocation_id` |; (local) |; | feeds the duration-stash key; never a wire field |
@@ -520,31 +549,9 @@ call, and dropping it is the one change here that *reduces* egress.
 
 Two properties are load-bearing and easy to undo by accident:
 
-- **`messages` is last because the document is a Go struct, not a map.**
-  `json.Marshal` sorts a map's keys, which would emit `messages` first, into the
-  exact middle core's `elideMiddle` discards (it keeps head 3/5 + tail 2/5 of a
-  ~390-444 byte window, `goal_alignment_session.go:773-786`). Declaring it last is
-  what puts the newest turn in the tail the judge keeps.
-- **The selection budget (48 KiB) sits deliberately below the 65,536-byte net.**
-  Redaction runs *after* selection and can grow a body, and one byte of growth
-  hands `capRunes` a head cut that removes the newest turn again. The headroom is
-  pinned by a test against a secret-dense body, not left as arithmetic.
-
-- **Trailing non-turns are dropped, so the judged tail carries a turn.** The agent
-  runtime appends elements to `messages` that are not conversation -- most often a
-  51-132 byte `role:"system"` element holding
-  `<total_tokens>N tokens left</total_tokens>`. Since the judge reads the LAST
-  element as the current goal, that is what it read on **67%** of measured calls.
-  Selection now walks back past trailing elements whose `role` is neither `user`
-  nor `assistant` -- at most 4, never emptying the history -- and reports the count
-  under its own `skipped_trailing_non_turns` key rather than folding it into
-  `dropped_messages`: a budget drop and a shape problem are different losses. The
-  predicate reads `role` and **never content**, because the same `<total_tokens>`
-  marker also rides inside real turns (`assistant` 81, `user` 59 of 1,144 measured
-  occurrences), so a content match destroys 140 genuine turns to catch the
-  synthetic ones. A `role:"system"` element inside `messages` is a **client
-  artifact** -- the Anthropic Messages API carries `system` as a top-level field --
-  and no contract this repo publishes defines it.
+- **`messages` is last because the document is a Go struct, not a map.** `json.Marshal` sorts a map's keys, which would emit `messages` first, into the exact middle core's `elideMiddle` discards (it keeps head 3/5 + tail 2/5 of a ~390-444 byte window, `goal_alignment_session.go:773-786`). Declaring it last is what puts the newest turn in the tail the judge keeps.
+- **The selection budget (48 KiB) sits deliberately below the 65,536-byte net.** Redaction runs *after* selection and can grow a body, and one byte of growth hands `capRunes` a head cut that removes the newest turn again. The headroom is pinned by a test against a secret-dense body, not left as arithmetic.
+- **Trailing non-turns are dropped, so the judged tail carries a turn.** The agent runtime appends elements to `messages` that are not conversation -- most often a 51-132 byte `role:"system"` element holding `<total_tokens>N tokens left</total_tokens>`. Since the judge reads the LAST element as the current goal, that is what it read on **67%** of measured calls. Selection now walks back past trailing elements whose `role` is neither `user` nor `assistant` -- at most 4, never emptying the history -- and reports the count under its own `skipped_trailing_non_turns` key rather than folding it into `dropped_messages`: a budget drop and a shape problem are different losses. The predicate reads `role` and **never content**, because the same `<total_tokens>` marker also rides inside real turns (`assistant` 81, `user` 59 of 1,144 measured occurrences), so a content match destroys 140 genuine turns to catch the synthetic ones. A `role:"system"` element inside `messages` is a **client artifact** -- the Anthropic Messages API carries `system` as a top-level field -- and no contract this repo publishes defines it.
 
 Anything that is not a conversation -- non-JSON, a missing or non-array `messages`,
 a truncated body -- degrades to a tail window carrying a marker that names the
@@ -627,7 +634,7 @@ The `/evaluate` response is core's `EvaluationResult`; `verdict` + legacy
 | `HALT` | `halt` | `stop` |
 
 `fallback_used=true` marks a fail-open verdict (core's OPA/Guardrail unreachable
-→ default ALLOW). Phase-1 **observe** (D7/INV-3) treats every async-egress
+→ default ALLOW). Phase-1 **observe** (D7/[INV-3](dev-event-contract.md#invariants)) treats every async-egress
 verdict as advisory and never blocks the tool call. Enforcement (Phase-2, E6) is
 a **separate, local** decision on the sidecar `DecisionRequest`; it does **not**
 read this response (INV-3b; enforce path untouched by the E7 wire reshape).
@@ -650,11 +657,11 @@ cross-repo Explore):
 | Accept-list (`internal/api/governance.go:273-286`) | All five types we emit are accept-listed, `ActivityCompleted` included; no core patch. |
 | Idempotency / dedupe (`activities/governance/validation.go:96`) | Keyed on `(agent_id, workflow_id, run_id, activity_id, event_type)`. Because `event_type` is in the key, a tool call's two halves are now **distinct** events. Under the hook shape they matched on all five; same `activity_id`, both `ActivityStarted`; so the `ToolResult` POST hit the existing-event branch (`governance_workflow.go:228-231`) and was substantially a no-op. A **retry** of the same half still dedupes correctly, which is the behavior you want. |
 | OPA policy eval (`opa.go`) | Bypassed (auto-allow) **only** for `Workflow*` (latency). `ActivityStarted`, **`ActivityCompleted`** and `SignalReceived` all go through **real** OPA; so the completed half is now independently evaluated, where the dedupe collision above meant it previously returned the started half's cached verdict. |
-| Guardrails eligibility (`governance_workflow.go:429-431`) | Both activity types are guardrails-**eligible**: stage 0 reads `activity_input` (`guardrail.go:180`), stage 1 reads `activity_output` (`guardrail.go:192`). Structural fields only by default (INV-2). |
+| Guardrails eligibility (`governance_workflow.go:429-431`) | Both activity types are guardrails-**eligible**: stage 0 reads `activity_input` (`guardrail.go:180`), stage 1 reads `activity_output` (`guardrail.go:192`). Structural fields only by default ([INV-2](dev-event-contract.md#invariants)). |
 | Row fields (`storage_event.go:258-294`) | `activity_id`/`activity_type`/`attempt`/`activity_input`→`input`/`activity_output`→`output`/`duration_ms` are set **event-type-agnostically**, so the completed half's duration and output land with no core change. Note `payload.Error` is read **only** for `WorkflowFailed`, which is why the client sends none; see §3. |
 | `signal_name` / `workflow_type` | Stored in dedicated columns; commit/deploy lineage rides `metadata` (core has no `commit_sha`/`deploy_id` columns) and **survives** the Signal mapping. |
 | Spans table | **One row per content-capturing model turn, and nothing else**. Tool and lifecycle events remain span-less; the trade-off (no span-level Merkle leaves, no `semantic_type`) still holds for them. For the turn span, span-level Merkle leaves and server-side classification come back, and the assistant's text is stored server-side: a real retention increase, outside this repo's control. With `content_capture:false` there are no span rows at all. |
-| Goal alignment (`age.go`, `goal_alignment_session.go`) | `prompt_submitted`'s `signal_args` CREATE the session's goal; any *other* `SignalReceived` with non-empty `signal_args` OVERWRITES it (`age.go:112-137`), which is why the v1.2 signals carry none. Assistant text is appended from `payload.Spans` only. Requires `LlamaFirewallHost` set (`llama_firewall.go:31-34`) and Redis up; **without either, both widgets stay empty with a perfect client**. |
+| Goal alignment (`age.go`, `goal_alignment_session.go`) | `prompt_submitted`'s `signal_args` CREATE the session's goal; any *other* `SignalReceived` with non-empty `signal_args` OVERWRITES it (`age.go:112-137`), which is why the v1.2 and v1.8 signals carry none. Assistant text is appended from `payload.Spans` only. Requires `LlamaFirewallHost` set (`llama_firewall.go:31-34`) and Redis up; **without either, both widgets stay empty with a perfect client**. |
 | Tool metrics (`observability/errors.go:301-333`) | `status == "completed"` on an `ActivityCompleted` is the only input to `IsSuccess`; `.total` increments on the started half. `llm_completion` is excluded from tool metrics (`IsLLMCompletionActivity`), so turn events do not pollute them. |
 | Dashboard activity timeline (`run.provider.ts`) | Pairs `ActivityStarted`/`ActivityCompleted`, which is now literally what a tool call emits. §7 records whether that renders as expected; **not yet run live**. |
 

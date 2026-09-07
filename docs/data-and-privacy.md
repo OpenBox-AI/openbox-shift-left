@@ -24,6 +24,17 @@ What leaves the machine, what never does, and the one setting that changes it.
 | **A one-way fingerprint of your provider credential** | only with an **in-path lane** running (gateway or transport), and only when the call names a session | **new**; a truncated SHA-256, so OpenBox can tell WHICH registered credential made a call without holding it. Not gated by `content_capture`: it is the account-binding control, and a privacy switch that removed it would let an org opt out of being identified |
 | **Credentials** | **never** | they stay on your machine; in a plaintext file readable by you, see [Where credentials live](#where-credentials-live). The gateway relays yours to the provider byte-for-byte and stores none of it |
 | Git **commit trailer** and signed attestation | yes | commit sha, tree sha, session id; no diff, no file content |
+| **Slash-command expansions** | **never** | `UserPromptExpansion` is structural-only; the typed `/command` itself already ships as an ordinary prompt |
+| **What a tool was asked to do when permission was requested** | yes, by default | for an `Agent` request this is the **whole subagent prompt**, under `requested_tool_input` — a second surface for the same widening as the subagent-prompt row below |
+| **Desktop and terminal notification text** | yes, by default | `Notification`'s `notification_message` |
+| **Task titles** | yes, by default | `TaskCreated`/`TaskCompleted`'s `task_subject`; the **description is never sent** |
+| **Your `/compact` instructions and the compaction summary** | yes, by default | `PreCompact`/`PostCompact` |
+| **MCP elicitation prompts and your answers to them** | yes, by default | see the residual-risk paragraph under [Content capture](#content-capture) — a credential typed into an unrecognised form field is invisible to the redactor |
+| **Assistant message text as it is displayed** | **never** | `MessageDisplay` ships identifiers and counts only (`turn_id`, `message_id`, `index`, `final`); it fires **per batch of streamed lines** — the provider forces synchronous execution for this one hook — not once per message, so a single reply can produce several rows; never content, but the row count is not what a first read would assume |
+| **Tool inputs and outputs inside a tool batch** | **never** | `PostToolBatch` ships tool-use ids and a count only |
+| **Paths that changed, directories added, worktrees removed, your working directory** | yes, always | structural, not gated; `FileChanged` reports that a file changed, with its path, and **never its contents** — including for `.env` |
+| **That you `/clear`ed or resumed, and which run preceded which** | yes, always | `run_generation` and `continued_from_run_id` are **identifiers** — a small integer and a minted id, structural like `run_id` itself — so they are **not** under `content_capture` and there is nothing to opt out of. They reveal that a session was restarted and in what order, **not** what was cleared |
+| **The prompt you gave a subagent** | **yes, by default** | the whole `Agent` `tool_input`, redacted then capped, under `content_capture`. Reverses the earlier "the prompt stays unread" position, which was about the metadata layer and stays true there |
 
 The rule behind the table: content is gated at one choke point in the client, so
 a new field cannot start egressing by accident. Structural identifiers (paths,
@@ -226,6 +237,8 @@ value and where it came from.
 > the only control on content in transit, and what it catches is
 > [measured, not assumed](#what-the-scanner-catches-and-where-it-stops). If that
 > matters for your data, run with capture off.
+
+> **An elicitation form is the one place where content capture can collect a credential you typed deliberately.** When an MCP server asks you for a value and you answer, your answer is sent under `content_capture` like every other body: redacted locally first, then capped. **Local secret detection is keyword-driven.** It finds values that look like or are labelled as known credential shapes. A password, an API key or a token typed into a form field whose name it does not recognise is not labelled, may not match a known shape, and is then **invisible to the redactor** — it egresses as ordinary text. Turning `content_capture` off is the only control that removes it.
 >
 > The asymmetry that used to live here; every content class scanned except the
 > prompt; **is closed on Claude Code.** Prompt text now passes through the same
@@ -444,7 +457,7 @@ Both are readable only by you.
 | `policy-bundle.json` | **inert leftover.** There is no local policy bundle since; nothing reads this file and it can be deleted |
 | `enforcements.jsonl` | what enforcement did: verdict, source, whether it blocked, redaction *categories*; never the secret, never the body |
 | `advisories.jsonl` | advisory verdicts and guardrail findings |
-| `cc-spool/` | events awaiting flush. With content capture on (the default) these hold the same bodies the events carry; commands, file contents, tool output, and now decompressed provider responses; already secret-redacted, in plaintext files readable by you. Roughly **67 KB per model call**, drained continuously, so this is an empty queue unless delivery is failing |
+| `cc-spool/` | events awaiting flush. With content capture on (the default) these hold the same bodies the events carry; commands, file contents, tool output, decompressed provider responses, subagent prompts, notification and task text, compaction instructions and summaries, and elicitation prompts and answers; already secret-redacted, in plaintext files readable by you. Roughly **67 KB per model call**, drained continuously, so this is an empty queue unless delivery is failing |
 | `cc-spool/flusher.log` | what the delivery processes said. New, and it exists because they used to say nothing at all: a flusher that died before delivering was indistinguishable from one that was never started, which is why two missed flushes had to be diagnosed from file timestamps. Diagnostics only, capped, no bodies |
 | `cc-spool/.discarded` | one line per batch this machine gave up on: a timestamp, the session, and how many events were lost. Never the events themselves. It exists because the give-up was previously silent |
 | `cc-spool/turns/` | how far each turn window has been read: a byte offset and a turn index, nothing else |

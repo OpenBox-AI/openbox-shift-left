@@ -5,7 +5,12 @@ schema](../api/dev-event.schema.json) is the authority; v1.1 added the turn
 pair, v1.2 tool `status`, the subagent/denial/error types and the turn span,
 v1.3 tool content and the signals' free text, v1.4 the turn's thinking, v1.5 the
 gateway's span fields, v1.6 the `:otel:`/`:proxy:` producers, v1.7 `activity_type`
-and the removal of the span carrier ·
+and the removal of the span carrier, **v1.8 the 21 observe-only lifecycle
+classes (setup, instructions, prompt expansion, message display, permission
+requests, tool batches, notifications, tasks, teammates, config/cwd/directory/
+file/worktree changes, compaction, model switching, elicitation), plus three
+additive run-identity fields (`run_id` newly declared, `run_generation`,
+`continued_from_run_id`) ·**
 **Status:** built + validated (v1.0 carried G1_READY + G3_REVIEW, 2026-07-07;
 the later bumps are additive)
 
@@ -21,7 +26,7 @@ model (PRD **FR-4**, architecture **§1b**).
 
 | Path | What |
 |---|---|
-| [`api/dev-event.schema.json`](../api/dev-event.schema.json) | The contract; JSON Schema (draft 2020-12), language-neutral. 7 lifecycle event types, common envelope, `tool{}`, `span`, gated `content`, canonical `verdict` enum. |
+| [`api/dev-event.schema.json`](../api/dev-event.schema.json) | The contract; JSON Schema (draft 2020-12), language-neutral. **33** lifecycle event types (7 original, growing to 33 as of v1.8), common envelope, `tool{}`, `span`, gated `content`, canonical `verdict` enum, three additive run-identity fields. |
 | [`mapping.md`](mapping.md) | How the contract maps onto the base-SDK unified wire model on openbox-core. the client builds payloads from this without guessing. §3's field-home table is the authority on what the serializer reads; also carries the downstream-consumer sweep (INV-8) and client signing/transport notes. |
 | [`coverage.md`](coverage.md) | How Claude Code / Cursor / Codex real event surfaces map onto the lifecycle types, field-derivation rules, and the bounded non-goals. The reference for adapter authors (the Claude Code adapter/7/8). |
 | [`conformance/`](../internal/conformance/) | Go conformance harness. Dependency-free; validates samples against the schema and enforces the INV-2 content gate. |
@@ -30,8 +35,17 @@ model (PRD **FR-4**, architecture **§1b**).
 
 The `event_type` enum in [the schema](../api/dev-event.schema.json) is the list,
 and coverage.md §1 maps each one onto the providers' native hooks. V1.0's
-original seven have since been joined by the turn pair and by `SubagentStarted`
-/ `PermissionDenied` / `APIError`.
+original seven have since been joined by the turn pair, by `SubagentStarted`
+/ `PermissionDenied` / `APIError`, and, in v1.8, by **21** more observe-only
+lifecycle signals — `Setup`, `InstructionsLoaded`, `UserPromptExpansion`,
+`MessageDisplay`, `PermissionRequest`, `PostToolBatch`, `Notification`,
+`TaskCreated`, `TaskCompleted`, `TeammateIdle`, `ConfigChange`, `CwdChanged`,
+`DirectoryAdded`, `FileChanged`, `WorktreeRemove`, `PreCompact`, `PostCompact`,
+`PreModelSwitch`, `PostModelSwitch`, `Elicitation`, `ElicitationResult` — every
+one riding stock `SignalReceived`, taking the enum from 12 to **33**.
+`WorktreeCreate` is deliberately **not** among them: it is refused, not
+missing (coverage.md §3); the ceiling is 32 of 33 documented Claude Code
+hooks, never 33 of 33.
 
 These are the adapter-facing **lifecycle** axis. The client re-maps them onto
 the base SDK's stock wire types; no core accept-list patch.
@@ -83,6 +97,21 @@ Two fields changed egress behaviour with it, and neither is a loss:
   allowlisted metadata key, decided then.
 
 See mapping.md §3 for where every field lands.
+
+## Invariants
+
+One glossary entry per INV, collecting the wording seven other sites cite
+without defining (`docs/mapping.md`, `docs/architecture.md`, `docs/coverage.md`,
+`docs/test/e2e.md`, `internal/provider/provider.go`,
+`internal/cli/devinit/devinit.go`, `internal/cli/gatewayemit/emitter_test.go`).
+Where two sites paraphrased the same INV differently, the stricter wording
+below wins.
+
+| INV | Statement | Pinned by |
+|---|---|---|
+| **INV-1** | A credential value never egresses and never appears in a local decision request, a log line, or an argv; only the file path or a one-way fingerprint is ever shown or sent. | `internal/cli/devinit/devinit.go` (the credential-write path prints the file path, never a value); `internal/provider/provider.go`'s `CredentialRef` (never carries a credential value); `MaxCommandLen` bounds a local decision request, never egress. |
+| **INV-2** | Content is gated at one choke point (`content_capture`); with it off, no content-bearing field reaches the wire — including content-bearing keys inside `metadata` — and only structural identifiers (paths, tool names, ids) always flow. Local secret detection is keyword-driven, so an unlabelled high-entropy value below the floor is invisible to it. | `internal/conformance`'s content-gate harness (a gated field is asserted absent with capture off, present/redacted/capped with it on); `contentMetadataKeys` in `internal/client/payload.go` (every content key must be listed there or an adapter routes around the gate). |
+| **INV-3** | Observe mode treats every verdict as advisory (fail-open): a verdict from `/evaluate` never blocks a call by itself. Enforcement, a separate local decision, is tighten-only — it never turns a provider's own deny into an allow. | `internal/adapters/claude-code/hookrun.go`'s observe path; `internal/cli/gatewayemit/emitter_test.go`'s `TestEmitSurvivesAnUnwritableSpool`. |
 
 ## Privacy (INV-2)
 

@@ -606,6 +606,8 @@ alignment. Alignment for those turns comes from the hook path or not at all.
   v0.145.0 and this adapter deliberately does not wire it, so its usage arrives
   as one `<session>:usage:rollup` activity. Scope, not a provider limit; the
   upgrade path is to subscribe `Stop` and delta the cumulative total.
+> INV-1, INV-2 and INV-3 are defined once in [the contract's Invariants glossary](dev-event-contract.md#invariants); this file cites them rather than restating them.
+
 - **The transcript projection's INV-2 guarantee is now an allowlist, and it
   carries content.** It used to be structural: the parser bound only numeric
   fields, so content could not enter memory. Binding the model id, required,

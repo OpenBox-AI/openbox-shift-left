@@ -162,6 +162,8 @@ MCP server**. Asserts:
 - One `policy_evaluations` / `guardrails_evaluations` / `age_evaluations` row
   per evaluation;
 - Spool drains at SessionEnd inside the flush budget;
+> INV-1, INV-2 and INV-3 are defined once in [the contract's Invariants glossary](../dev-event-contract.md#invariants); this file cites them rather than restating them.
+
 - **The privacy assertion (INV-2):** with content capture on, the prompt is
   present on the `prompt_submitted` signal **and so are the tool command and
   file body**: v1.3 retired the metadata-only posture, so this phase asserts the gate

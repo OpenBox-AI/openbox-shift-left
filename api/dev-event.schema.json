@@ -83,7 +83,7 @@
       ]
     },
     "openbox_session_id": {
-      "description": "Opaque logical session id. The client synthesizes core's jointly-unique NOT-NULL (workflow_id, run_id) from it via runIDFor (v1.8): run_id is openbox_session_id for a session's first run, and a FRESH UUID for each subsequent run opened by a SessionStart(source ∈ {clear, resume}), linked to its predecessor by continued_from_run_id. workflow_id is unchanged: a stable per-workspace/developer identity (e.g. developer_did or repo). Both required (S6 §4). Note that openbox_session_id itself stays stable across a continue — that is what makes the lineage recoverable at all.",
+      "description": "Opaque logical session id. The client synthesizes core's jointly-unique NOT-NULL (workflow_id, run_id) from it via runIDFor (v1.8): run_id is openbox_session_id for a session's first run, and a FRESH UUID for each subsequent run opened by a SessionStart(source = resume), linked to its predecessor by continued_from_run_id. Only resume continues a run: it is the one source that reuses the session id (measured). A clear mints a NEW session id, so the session after it starts at generation 0 under its own id; startup, compact and fork likewise open nothing. workflow_id is unchanged: a stable per-workspace/developer identity (e.g. developer_did or repo). Both required (S6 §4). Note that openbox_session_id itself stays stable across a continue — that is what makes the lineage recoverable at all.",
       "type": "string",
       "minLength": 1
     },
@@ -99,7 +99,7 @@
       "maxLength": 128
     },
     "run_generation": {
-      "description": "0 is the original run; a SessionStart(source ∈ {clear, resume}) on an already-seen session id opens generation n+1 (v1.8). Present on every event type once produced. Informational: a local counter that MAY RESTART after record loss — an ordering hint for openbox-fe, never a key and never something to derive an id from. Absent at generation 0 (an all-zero fleet before the producer ships means either 'no continues happened' or 'the producer never shipped' — the description states the producer explicitly so a reader can tell which). Produced by a later phase.",
+      "description": "0 is the original run; a SessionStart(source = resume) -- the one source that reopens an already-seen session id -- opens generation n+1 (v1.8). Present on every event type once produced. Informational: a local counter that MAY RESTART after record loss — an ordering hint for openbox-fe, never a key and never something to derive an id from. Absent at generation 0 (an all-zero fleet before the producer ships means either 'no continues happened' or 'the producer never shipped' — the description states the producer explicitly so a reader can tell which). Produced by a later phase.",
       "type": "integer",
       "minimum": 0
     },
