@@ -4,12 +4,12 @@ The **provider-independent** write side of session→commit attribution. It bind
 a git commit to the OpenBox session(s) that produced it by stamping an
 `OpenBox-Session:` commit-message **trailer**, exactly as spike S3 (R1–R6)
 prescribes. Lives in `internal/adapters/common/` because "which session made
-this commit" must not depend on any one tool (Claude Code, Codex, Cursor).
+this commit" must not depend on any one tool; a new adapter inherits it.
 
 ```
 git commit / amend / rebase-squash
    └─.git/hooks/prepare-commit-msg          # installed by the CLI / adapter
-        └─ openbox-git-hook prepare-commit-msg <msgFile> [source] [sha]
+        └─ openbox hook git prepare-commit-msg <msgFile> [source] [sha]
              ├─ resolve session(s)            # env OPENBOX_SESSION / OPENBOX_SESSION_FILE
              ├─ harvest mid-body sessions     # squash healing (see below)
              └─ git interpret-trailers        # idempotent, additive (S3 R1)
@@ -17,7 +17,7 @@ git commit / amend / rebase-squash
 ```
 
 The durable, authoritative binding is **not** created here. It is resolved
-**server-side at push against the real pushed SHA** by the the git action git action (S3
+**server-side at push against the real pushed SHA** by the git action (S3
 R7); git hooks are local and never travel (S3 §1), so this write side is
 best-effort: its only job is to place the opaque session id inside the commit
 object so the git action can resolve it later.
@@ -69,7 +69,7 @@ heals the agent sessions they squashed together. See
 ## Safety: never fail a commit (INV-3, the git analog)
 
 A `prepare-commit-msg` hook that exits non-zero **aborts the commit**. This
-package never does that: the hook script and `openbox-git-hook` binary **always
+package never does that: the hook script and the engine it invokes **always
 exit 0**, and a missing engine binary degrades to a no-op commit (the hook
 script guards on the binary being resolvable). A stamping failure is logged to
 stderr and the commit proceeds unstamped (the git action records it as unattributed).
@@ -104,9 +104,9 @@ has two tiers:
 - Sessions in the **same worktree** resolve by recency: a `git commit` via the
   Bash tool is always immediately preceded by that session's `PreToolUse`, which
   refreshes its record; so the committing session is the freshest. This is
-  best-effort (a tight interleaving race is possible); acceptable because
-  Phase-1 is observe-only and the git action makes the authoritative binding at push (S3
-  R7).
+  best-effort (a tight interleaving race is possible); acceptable because a
+  misattributed trailer is corrected server-side — the git action makes the
+  authoritative binding at push (S3 R7).
 - Stale records (a crashed session that never wrote `SessionEnd`) are ignored
   past a TTL (`OPENBOX_SESSION_TTL`, default 8h), so a much-later human commit
   is never falsely attributed.
@@ -119,19 +119,20 @@ squash healing, not from parallel liveness.
 - The **Claude Code adapter** (`openbox hook claude-code <event>`)
   writes/refreshes the record on `SessionStart`/`PreToolUse`/`PostToolUse` and
   removes it on `SessionEnd`.
-- **Ambient hook install** is opt-in (`OPENBOX_INSTALL_GIT_HOOK=1`): on
-  `SessionStart` the adapter installs this `prepare-commit-msg` hook into the
-  session's repo (idempotent, foreign-safe). It is **off by default** because it
-  modifies a repo's `.git/hooks`. Per-repo manual install: `openbox-git-hook
-  install`.
+- **Ambient hook install** is on after `openbox init`, which persists
+  `install_git_hook: true`: on `SessionStart` the adapter installs this
+  `prepare-commit-msg` hook into the session's repo (idempotent, foreign-safe).
+  Opt out with `OPENBOX_INSTALL_GIT_HOOK=false`, and nothing touches any repo's
+  `.git/hooks`. The library fallback, for a caller that has not run `init`, is
+  off — `devconfig.ResolveInstallGitHook` is the resolver.
 
-Per od17 (single `openbox` engine) the standalone `cmd/openbox-git-hook` binary
-is folded into `openbox hook git prepare-commit-msg` in a follow-up; the hook
-script's command is already parameterized (`HookConfig`) so that move needs no
-change here (mirrors how the Claude Code adapter shipped `cmd/openbox-cc-hook`, later absorbed by.
+There is one `openbox` engine, and the standalone `cmd/openbox-git-hook` binary
+is gone: the hook script invokes `openbox hook git prepare-commit-msg`
+(`hook.go`'s default `Args`), and `post-commit` the same way. The Claude Code
+adapter's `cmd/openbox-cc-hook` alias was absorbed into the engine the same way.
 
 ## Validate
 
 ```
-go build./internal/adapters/common/git/... && go vet./internal/adapters/common/git/... && go test -race./internal/adapters/common/git/...
+go build ./internal/adapters/common/git/... && go vet ./internal/adapters/common/git/... && go test -race ./internal/adapters/common/git/...
 ```

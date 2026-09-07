@@ -162,7 +162,7 @@ them, tighten-only. See coverage.md §4.
 ## Validate
 
 ```bash
-go build./internal/conformance/... && go vet./internal/conformance/... && go test./internal/conformance/...
+go build ./internal/conformance/... && go vet ./internal/conformance/... && go test ./internal/conformance/...
 ```
 
 The harness is intentionally offline/zero-dependency, so this runs anywhere with

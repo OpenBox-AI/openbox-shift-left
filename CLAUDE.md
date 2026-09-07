@@ -129,7 +129,7 @@ only (Unicode makes U+212A equal `k`); the CA is name-constrained, ALPN http/1.1
 `json.RawMessage` because it is a string on user lines and an array on assistant
 ones, and a typed slice drops the line's token counts silently.
 `kardianos/service` ignores `$HOME`, which is why `installUnitFn` and
-`portOccupied` are seams (without them `go test./...` installs a daemon and dials
+`portOccupied` are seams (without them `go test ./...` installs a daemon and dials
 the developer's own lanes) and why a lane unit carries `--settings`: a daemon
 cannot re-derive that path. And `.env` parsing is godotenv at its defaults:
 last-wins, with a parse error that echoes the offending line.
@@ -137,9 +137,10 @@ last-wins, with a parse error that echoes the offending line.
 ## Build and test
 
 ```bash
-go build./... && go vet./...   # everything, from the root, one module
-go test -race -count=1./...     # -count=1 is required: see internal/depguard
-GOOS=windows GOARCH=amd64 go build./... && GOOS=linux GOARCH=arm64 go build./..../test/run-all.sh                # end to end, needs a local OpenBox stack
+go build ./... && go vet ./...   # everything, from the root, one module
+go test -race -count=1 ./...     # -count=1 is required: see internal/depguard
+GOOS=windows GOARCH=amd64 go build ./... && GOOS=linux GOARCH=arm64 go build ./...
+./test/run-all.sh                # end to end, needs a local OpenBox stack
 ```
 
 `-count=1` is not optional: the conformance guard shells out to `go list`, whose

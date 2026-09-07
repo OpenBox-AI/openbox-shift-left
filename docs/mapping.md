@@ -653,7 +653,7 @@ cross-repo Explore):
 
 | Consumer | Behavior |
 |---|---|
-| Session store (`storage_session.go`) | `WorkflowStarted`→create, `WorkflowCompleted`→terminal; **native**, no EXT-core lifecycle edit. Unchanged by. |
+| Session store (`storage_session.go`) | `WorkflowStarted`→create, `WorkflowCompleted`→terminal; **native**, no EXT-core lifecycle edit. |
 | Accept-list (`internal/api/governance.go:273-286`) | All five types we emit are accept-listed, `ActivityCompleted` included; no core patch. |
 | Idempotency / dedupe (`activities/governance/validation.go:96`) | Keyed on `(agent_id, workflow_id, run_id, activity_id, event_type)`. Because `event_type` is in the key, a tool call's two halves are now **distinct** events. Under the hook shape they matched on all five; same `activity_id`, both `ActivityStarted`; so the `ToolResult` POST hit the existing-event branch (`governance_workflow.go:228-231`) and was substantially a no-op. A **retry** of the same half still dedupes correctly, which is the behavior you want. |
 | OPA policy eval (`opa.go`) | Bypassed (auto-allow) **only** for `Workflow*` (latency). `ActivityStarted`, **`ActivityCompleted`** and `SignalReceived` all go through **real** OPA; so the completed half is now independently evaluated, where the dedupe collision above meant it previously returned the started half's cached verdict. |

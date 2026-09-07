@@ -1,8 +1,8 @@
 # OpenBox client; AIP-signed `/evaluate` transport
 
-The shared, reusable data-plane client every developer-runtime adapter (the Claude Code adapter
-Claude Code Codex Cursor) and the git action use to emit a
-normalized developer event to OpenBox.
+The shared, reusable data-plane client every developer-runtime adapter
+(`internal/adapters/claude-code`, `internal/adapters/codex`) and the git action
+use to emit a normalized developer event to OpenBox.
 
 ```
 normalized DevEvent ─▶ strip content (INV-2) ─▶ build GovernanceEventPayload
@@ -21,8 +21,11 @@ c, err := client.New(client.Config{
     BaseURL: "https://core.openbox.ai",
     APIKey:  obxRuntimeKey,   // obx_(live|test)_…; from the secret store (INV-1)
     DID:     agentDID,        // did:aip:…
-    SeedB64: ed25519SeedB64,  // base64 raw 32-byte seed; from the secret store
-    // ContentCaptureEnabled: false  // default: metadata-only (INV-2/an owner decision)
+    SeedB64: ed25519SeedB64,  // base64 raw 32-byte seed; from ~/.openbox/.env
+    // ContentCaptureEnabled is this struct's zero value, so it is false here.
+    // That is the LIBRARY default, not the product's: callers resolve the
+    // posture through devconfig, where an unset content_capture means ON.
+    ContentCaptureEnabled: true,
     Logger:  myLogger,        // optional; fail-open drops are logged here
 })
 if err != nil { /* unusable identity; construction fault */ }
@@ -33,13 +36,17 @@ verdict, err := c.Emit(ctx, client.DevEvent{
     EventType:     client.EventToolCall,
     SessionID:     openboxSessionID,   // → core run_id
     DeveloperDID:  agentDID,
-    Timestamp:     time.Now.UTC.Format(time.RFC3339),
+    Timestamp:     time.Now().UTC().Format(time.RFC3339),
     Tool:          client.Tool{Name: "Edit", Kind: client.ToolFile},
     Span:          &client.Span{SemanticType: "file_write", Stage: "started", FilePath: p},
 })
-// Phase-1 observe: err is only ever a caller precondition fault (e.g. no
-// EventID); transport failures are fail-open (verdict == VerdictUnknown, nil).
-// Callers IGNORE the verdict in Phase 1 (INV-3).
+// err is only ever a caller precondition fault (e.g. no EventID); transport
+// failures are fail-open (verdict == VerdictUnknown, nil).
+//
+// The verdict is NOT advisory. `hookflow.evaluate` gates a call on it, and a
+// VerdictUnknown there becomes a fail-open decision the org's failure policy
+// then resolves. A caller that only reports telemetry may ignore it; a caller
+// on the enforcement path may not.
 ```
 
 ## Invariants enforced here
@@ -47,8 +54,8 @@ verdict, err := c.Emit(ctx, client.DevEvent{
 | Invariant | Where |
 |---|---|
 | **INV-1** obx_ key + Ed25519 seed never logged/leaked | `signing.go` (seed stays in `signer`); `client.go` logs only ids/types/errors; plaintext `http://` to a non-loopback host is refused (`checkBaseURL`) so the bearer key can't travel in the clear |
-| **INV-2** strip content when content-capture disabled | `payload.go:stripContent`, gated in `client.go:Emit` (default off) |
-| **INV-3** fail-open; never block the caller | `client.go:Emit` returns `(VerdictUnknown, nil)` on any transport error |
+| **INV-2** strip content when content-capture disabled | `payload.go:stripContent`, gated in `client.go:Emit`. The posture is the caller's: `devconfig` resolves it, and an unset `content_capture` resolves to ON |
+| **INV-3** fail-open on transport | `client.go:Emit` returns `(VerdictUnknown, nil)` on any transport error. Fail-open *here* is not fail-open end to end: what an unknown verdict means for the call is the org's failure policy, applied after this returns |
 | **INV-5** client event id for idempotent ingestion | `DevEvent.EventID` required (deterministic + collision-safe; adapter `deriveID`); carried in `metadata.event_id` (core has no first-class field) **and** the `Idempotency-Key` header; retries reuse the identical key/body. **Server-side dedupe is partial**; see below |
 
 ## No spans, so no semantic_type
@@ -127,5 +134,5 @@ have gone silently undelivered.
 ## Test / validate
 
 ```bash
-go build./internal/client/... && go test./internal/client/...
+go build ./internal/client/... && go test ./internal/client/...
 ```

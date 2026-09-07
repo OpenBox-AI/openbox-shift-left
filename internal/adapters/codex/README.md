@@ -4,8 +4,11 @@ The second realization of the generic Provider Adapter Contract (architecture
 §1b), a 1:1 structural port of the Claude Code adapter: it maps Codex CLI's
 native hooks onto the normalized developer event contract and emits
 them through the shared AIP-signed transport on the E7 flat hook
-wire. **Observe-only, fail-open**; this leg can never block, deny, or slow a
-Codex tool call (INV-3; the enforce leg is  Codex adapter's enforce leg).
+wire. The **telemetry leg** described here is observe-only and fail-open: it can
+never block, deny, or slow a Codex tool call (INV-3). The **enforce leg**
+(`enforce.go`, `outputcontract.go`) is a separate path and does deny — every
+gated `PreToolUse` call is evaluated by `/evaluate`, on by default. See
+`capabilities.go`'s `verdict.apply` and `enforce.rewrite` for what each may do.
 
 **Version pin: codex-cli >= 0.145.0**; hooks are stable and ON by default (no
 feature flag to flip), `tool_use_id` exists on Pre/PostToolUse, the `SessionEnd`
@@ -99,9 +102,10 @@ are an owner decision (deferred).
 
 ## Credentials & config (INV-1)
 
-Identity comes from the same `openbox init` flow and the same
-`~/.config/openbox/dev.json` + OS/file secret store as every provider, via the
-shared `internal/adapters/common/devconfig` module (an owner decision ruling (a)).
+Identity comes from the same `openbox auth` / `openbox init` flow and the same
+stores as every provider, via shared `internal/adapters/common/devconfig`:
+secrets in `~/.openbox/.env` (plaintext, `0600` where the OS allows it),
+non-secret coordinates in `~/.openbox/dev.json`.
 The hook reads the **DID only** on the hot path; the obx_ key + Ed25519 seed are
 read only at flush, straight into the client. `hooks.json` carries the engine
 path + event names only; no key, DID, or URL.
@@ -214,7 +218,8 @@ byte-identical to the pre-the Codex adapter's usage leg path.
 **On by default.** `openbox init --provider codex` leaves the posture enforcing
 without writing a key for it: a bool that defaults to true cannot express "said
 nothing", so an absent key resolves to on and a deliberate opt-out survives a
-re-install. `OPENBOX_ENFORCE=false` observes for one run. With enforce **off** the the Codex adapter's observe leg observe path is **byte-identical** -
+re-install. `OPENBOX_ENFORCE=false` observes for one run. With enforce **off**
+the observe path is **byte-identical** —
 the decider is never invoked (asserted: `TestObserveByteParity_EnforceOff`).
 Enforcement gates **only** the PreToolUse hook, pre-execution, hard-bounded,
 fail-open by default (an owner decision / INV-3b). Exit code is always 0; we speak Codex's
@@ -227,7 +232,7 @@ on outage only) → **apply** onto Codex's PreToolUse contract, plus inline
 `/evaluate` evaluation of every gated call and the findings loop. Only the two
 provider edges differ from CC; the middle is shared.
 
-### Codex-shaped deltas (each grounded @ `rust-v0.145.0` + the binary output schemas, recorded in the the Codex adapter's enforce leg probes)
+### Codex-shaped deltas (each grounded @ `rust-v0.145.0` + the binary output schemas, recorded in the enforce-leg probes)
 
 - **PermissionDecision literals.** Codex's PreToolUse enum is `allow|deny|ask`
   (`schema.rs`), but the runtime output parser **rejects** `ask`, a bare `allow`
@@ -324,8 +329,10 @@ or a silent proceed; they are **never** auto-allowed.
 only; never the command, patch body, or reason free text (INV-1/INV-2). Deny
 reasons carry the policy-authored text + policy id (local, stdout → Codex, never
 egressed). Redacted content rides only the **local** decision path; the observe
-Mapper egress path is untouched (metadata-only unless content capture is on).
-The `CODEX_THREAD_ID` inherited-env edge (the Codex adapter's observe leg G3 F-3): a process launched from
+Mapper egress path is untouched (it carries content whenever the content posture
+is on, which is the default).
+
+The `CODEX_THREAD_ID` inherited-env edge: a process launched from
 within a Codex exec inherits `CODEX_THREAD_ID`, so its commits attribute to the
 Codex thread; arguably transitively correct, rare, and the trailer sink still
 validates the value; noted for a future explicit-override escape hatch.
@@ -333,7 +340,7 @@ validates the value; noted for a future explicit-override escape hatch.
 ## Test / validate
 
 ```bash
-go test -race./internal/adapters/codex/...
+go test -race ./internal/adapters/codex/...
 # plus the cli-level routing + real-binary observe E2E:
-go test./cmd/openbox -run Codex
+go test ./cmd/openbox -run Codex
 ```

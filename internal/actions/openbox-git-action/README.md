@@ -2,8 +2,8 @@
 
 Server-side, push-time **deploy-lineage** resolver for OpenBox. At push/deploy
 it binds the pushed commit to the OpenBox session(s) that produced it (reading
-the `OpenBox-Session:` trailers that the the commit trailer hook wrote) and emits a
-**`Deploy`** governance event, through the shared the client client, carrying the
+the `OpenBox-Session:` trailers the commit-trailer hook wrote) and emits a
+**`Deploy`** governance event, through the shared `internal/client`, carrying the
 resolved session set. It is the read/resolve counterpart to the write side in
 [`internal/adapters/common/git`](../../adapters/common/git).
 
@@ -89,10 +89,11 @@ is disclosed in the resolution note, never silent (SEC-6-1).
 1. **Scope**; a single commit resolves itself; a range resolves `base..target`;
    a merge with no base resolves `<merge> ^<merge>^1` (the reachable originals).
 2. **Read**; authoritative trailing trailer block via
-   `%(trailers:key=OpenBox-Session,…)` (S3 R7). ****: also
+   `%(trailers:key=OpenBox-Session,…)` (S3 R7). It additionally
    full-body-scans for column-0 `OpenBox-Session:` lines to recover ids left
-   mid-body by a squash done *before* the commit trailer's hook (marked `source: body-scan`).
-3. **Trailer-stripped fallback**; if nothing is found, recover from the the commit trailer
+   mid-body by a squash done *before* the commit-trailer hook ran (marked
+   `source: body-scan`).
+3. **Trailer-stripped fallback**; if nothing is found, recover from the commit-trailer
    git-notes mirror (`refs/notes/openbox`) → `inferred` / `trailer-stripped`.
 4. **Bind**; ownership-verify each id, then classify.
 
@@ -120,7 +121,7 @@ headers, never logged (INV-1).
 usage/precondition fault (bad `--sha`, missing creds) the operator must fix. It
 never exits non-zero over a telemetry transport failure.
 
-## Emission & the EXT-core dependency
+## Emission
 
 The `Deploy` event and the resolved session set ride in `metadata` (the S6 §4
 metadata-jsonb stopgap; no external schema needed to *write* the link; the
@@ -128,11 +129,12 @@ queryable session→commit→deploy join is FR-7, external/deferred). `deploy_di
 (`did:aip:deploy-<shortsha>-<unixts>`) is a synthetic lineage label in metadata;
 the client's **signing** identity stays the agent's real `did:aip:<uuid>`.
 
-Like the client/4/5, end-to-end ingestion is gated on **EXT-core**: openbox-core's
-`/evaluate` accept-list does not yet include the developer-runtime event types,
-so it currently answers `Deploy` with HTTP 400 (the documented additive core
-extension; architecture D4 / INV-8). Until it lands, the fail-open client
-logs-and-drops the 400; the action never breaks CI.
+No core accept-list patch is needed: `Deploy` maps onto stock `SignalReceived`
+with `signal_name: "deploy"`, which a stock openbox-core already accept-lists
+(INV-8; `wireTypeFor` in `internal/client/payload.go`). The EXT-core dependency
+this section used to describe is retired — see
+[the event contract](../../../docs/dev-event-contract.md). The client stays
+fail-open regardless, so the action never breaks CI.
 
 ## Requirements
 
@@ -144,5 +146,5 @@ precondition exit 2) rather than resolving unsafely.
 ## Test
 
 ```sh
-go build./... && go test./...   # simulated push incl. squash/fixup/force-push/merge
+go build ./... && go test ./...   # simulated push incl. squash/fixup/force-push/merge
 ```

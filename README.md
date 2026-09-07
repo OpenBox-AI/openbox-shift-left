@@ -448,8 +448,9 @@ Go 1.27+, no cgo; a `GOTOOLCHAIN=auto` default fetches it for you. The repo is
 one Go module, laid out per `golang-standards/project-layout`:
 
 ```bash
-go build./...                      # everything, from the root
-go test -race -count=1./...        # -count=1 is required; see internal/depguard./test/run-all.sh                   # the end-to-end suite (needs a local OpenBox stack)
+go build ./...                      # everything, from the root
+go test -race -count=1 ./...        # -count=1 is required; see internal/depguard
+./test/run-all.sh                   # the end-to-end suite (needs a local OpenBox stack)
 ```
 
 Anything provider-agnostic belongs in `internal/adapters/common/`. The
