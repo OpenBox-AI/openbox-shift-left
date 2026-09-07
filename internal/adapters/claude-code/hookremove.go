@@ -50,17 +50,27 @@ func RemoveLocalHooks(settingsPath string) (removed []string, err error) {
 		if err != nil {
 			return removed, fmt.Errorf("local-hooks: %s in %s: %w", ev.Event, settingsPath, err)
 		}
-		if len(entries) == 0 {
-			continue
-		}
 		kept, engines := dropOwnedHandlers(entries, ev.Event)
 		for _, engine := range engines {
 			removed = append(removed, ev.Event+" "+engine)
 		}
-		if len(engines) == 0 {
+		if len(kept) > 0 {
+			if len(engines) == 0 {
+				continue // nothing of ours under this event; leave the array as it is
+			}
+			if out, err = setLocalHookEntries(out, ev.Event, kept); err != nil {
+				return removed, fmt.Errorf("local-hooks: %s in %s: %w", ev.Event, settingsPath, err)
+			}
 			continue
 		}
-		if out, err = setLocalHookEntries(out, ev.Event, kept); err != nil {
+		// The event carries nothing now, either because every group under it was
+		// ours or because an older removal left a null behind. Delete the key --
+		// see deleteLocalHookEvent for why an emptied array is not written. An
+		// absent key is the ordinary case and not a change.
+		if len(engines) == 0 && !localHookEventIsNull(out, ev.Event) {
+			continue
+		}
+		if out, err = deleteLocalHookEvent(out, ev.Event); err != nil {
 			return removed, fmt.Errorf("local-hooks: %s in %s: %w", ev.Event, settingsPath, err)
 		}
 	}

@@ -256,3 +256,109 @@ func TestRemoveLocalHooksKeepsTheDocumentValid(t *testing.T) {
 		t.Errorf("an unrelated setting was lost: %v", doc)
 	}
 }
+
+// TestRemoveLocalHooksWritesNoNullEvent holds the shape Claude Code's settings
+// loader accepts: an event key is an array of matchers or it is absent. Never
+// null -- which is what encoding/json makes of the emptied slice removal used
+// to splice back in, and which Claude Code refuses at load with "must be an
+// array of matchers; received null", printing one warning per key on every
+// session start until somebody edits the file by hand.
+//
+// It asserts the wire rather than the count the sibling test above asserts:
+// len(Array()) is 0 for a null too, so a null passed that check for the life
+// of the feature while every session start warned about it.
+func TestRemoveLocalHooksWritesNoNullEvent(t *testing.T) {
+	path := seedSettings(t, `{
+	  "hooks": {
+	    "SessionStart": [{"hooks": [{"type": "command", "command": "\"/opt/openbox\" hook claude-code SessionStart", "timeout": 5}]}],
+	    "Stop": [{"hooks": [{"type": "command", "command": "\"/opt/openbox\" hook claude-code Stop", "timeout": 5}]}]
+	  }
+	}`)
+
+	if _, err := RemoveLocalHooks(path); err != nil {
+		t.Fatalf("RemoveLocalHooks: %v", err)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, ev := range localHookEvents {
+		r := gjson.GetBytes(raw, "hooks."+ev.Event)
+		if !r.Exists() {
+			continue
+		}
+		if !r.IsArray() {
+			t.Errorf("hooks.%s is %v after removal, want an array or nothing: %s", ev.Event, r.Type, raw)
+		}
+	}
+	// The block held nothing but the two events, so it goes with them, the way
+	// gatewayservice drops an env block it emptied.
+	if gjson.GetBytes(raw, "hooks").Exists() {
+		t.Errorf("the emptied hooks block survived removal: %s", raw)
+	}
+}
+
+// TestRemoveLocalHooksCleansANullLeftByAnOlderBinary. Builds that shipped the
+// emptied-slice splice left files like this one behind, and removal could not
+// clean them afterwards: localHookEntries reads null as "no entries", so the
+// old loop skipped the key and the file kept warning at every session start.
+// Uninstall reaches this surface on every run -- removeHookSurfaces walks all
+// of them rather than branching on the marker scan -- so cleaning it here is
+// what actually repairs an already-broken file.
+//
+// Nothing is reported as removed: no handler was registered under these keys,
+// and uninstall must not claim it took a registration out that was not there.
+func TestRemoveLocalHooksCleansANullLeftByAnOlderBinary(t *testing.T) {
+	path := seedSettings(t, "{\n\"hooks\":{\"SessionStart\":null,\"PreToolUse\":null,\"SessionEnd\":null}}")
+
+	removed, err := RemoveLocalHooks(path)
+	if err != nil {
+		t.Fatalf("RemoveLocalHooks: %v", err)
+	}
+	if len(removed) != 0 {
+		t.Errorf("reported %v removed, want nothing: a null key is residue, not a registration", removed)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "null") {
+		t.Errorf("a null event survived removal: %s", raw)
+	}
+	if gjson.GetBytes(raw, "hooks").Exists() {
+		t.Errorf("the emptied hooks block survived removal: %s", raw)
+	}
+	var doc any
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		t.Errorf("removal left %s unparsable: %v", raw, err)
+	}
+}
+
+// TestRemoveLocalHooksLeavesAnEmptyArrayAlone. An empty array is valid, silent
+// at load, and may be the developer's own -- the same reason localHookEntries
+// refuses a non-array shape rather than replacing it. Only a null, which
+// nothing but our own older removal writes, is ours to clean. And a file with
+// nothing of ours in it is not rewritten at all: reformatting a document in
+// the developer's repository for no change is the cost this guards.
+func TestRemoveLocalHooksLeavesAnEmptyArrayAlone(t *testing.T) {
+	body := `{
+	  "permissions": {"allow": ["Bash(ls:*)"]},
+	  "hooks": {"PreToolUse": [], "Stop": []}
+	}`
+	path := seedSettings(t, body)
+
+	removed, err := RemoveLocalHooks(path)
+	if err != nil {
+		t.Fatalf("RemoveLocalHooks: %v", err)
+	}
+	if len(removed) != 0 {
+		t.Errorf("reported %v removed from a file holding none of ours", removed)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(raw) != body {
+		t.Errorf("removal rewrote a file holding none of ours:\n got %s\nwant %s", raw, body)
+	}
+}

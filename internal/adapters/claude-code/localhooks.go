@@ -111,6 +111,40 @@ func setLocalHookEntries(raw []byte, event string, entries []any) ([]byte, error
 	return sjson.SetRawBytes(raw, localHookPath(event), encoded)
 }
 
+// deleteLocalHookEvent takes one event's key out of the document, and the hooks
+// block with it once that key was the last one. Removal deletes rather than
+// splicing an emptied array back in because encoding/json marshals an emptied
+// slice as null, and Claude Code refuses a null event at load -- "must be an
+// array of matchers; received null" -- warning once per key on every session
+// start. An emptied array would load, but it is the same residue reading as a
+// cleanup that failed. A developer's own event keeps the block, exactly as an
+// org's own variables keep the env block in gatewayservice.
+func deleteLocalHookEvent(raw []byte, event string) ([]byte, error) {
+	out, err := sjson.DeleteBytes(raw, localHookPath(event))
+	if err != nil {
+		return nil, fmt.Errorf("remove hooks.%s: %w", event, err)
+	}
+	// Not an object is not our shape, and keys left are somebody's to keep.
+	if block := gjson.GetBytes(out, "hooks"); !block.IsObject() || len(block.Map()) > 0 {
+		return out, nil
+	}
+	if out, err = sjson.DeleteBytes(out, "hooks"); err != nil {
+		return nil, fmt.Errorf("remove the emptied hooks block: %w", err)
+	}
+	return out, nil
+}
+
+// localHookEventIsNull reports the residue the removal above used to leave: the
+// key present and null. It is checked separately from localHookEntries, which
+// reads absent and null alike as "no entries", because the two need opposite
+// treatment -- an absent key is nothing to write, and rewriting the file for it
+// would reformat a document in the developer's own repository for no change.
+// An empty array is left alone: it is valid, it is silent, and it may be theirs.
+func localHookEventIsNull(raw []byte, event string) bool {
+	r := gjson.GetBytes(raw, localHookPath(event))
+	return r.Exists() && r.Type == gjson.Null
+}
+
 // canonicalJSONEqual compares two JSON values by content, not bytes: both go
 // through the same key-sorting encoder, so formatting is not a difference.
 func canonicalJSONEqual(a, b []byte) bool {
