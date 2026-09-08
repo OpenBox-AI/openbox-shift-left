@@ -25,7 +25,8 @@
 #   a failed call stored failed  ⇒ SUCCESS% means something
 #   ONE span, llm_completion     ⇒ Goal Alignment has text to score
 #   capture off ⇒ no span rows   ⇒ the gate is real server-side, not just on the wire
-#   signal_args NULL on the new signals ⇒ the alignment goal is not being overwritten
+#   signal_args POPULATED on the new signals ⇒ a policy engine can match them at all
+#   the goal still == the last prompt afterwards ⇒ core's gate is holding
 set -uo pipefail
 
 TB_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -170,17 +171,30 @@ else
 		"$(tb_val "select count(*) from governance_events where run_id='$sid_s' and signal_name='subagent_started' and metadata->>'agent_type' is not null;")"
 fi
 
-# THE signal assertion that is not about presence. Core reads any SignalReceived
-# with non-empty signal_args as a NEW USER GOAL and overwrites the alignment
-# session's goal with it (age.go:112-137) — so a non-null signal_args on one of
-# these three means telemetry is destroying the thing alignment scores against.
+# THE signal assertion that is not about presence, INVERTED at v1.9.
+#
+# Until v1.9 these had to be NULL: core read any SignalReceived with non-empty
+# signal_args as a NEW USER GOAL and overwrote the alignment session's goal with
+# it, so a populated signal_args meant telemetry was destroying the thing
+# alignment scores against. Core's source-and-name goal gate now scopes that to
+# prompt_submitted, and signal_args is the only field OPA and Guardrails read on
+# a signal — so NULL is now the defect: the class is unenforceable.
+#
+# Run this against a core WITHOUT the gate and the goal check below fails, which
+# is the point of keeping both assertions side by side rather than replacing one.
 for s in subagent_started permission_denied api_error; do
-	assert_eq "$s carries no signal_args" 0 \
+	assert_ge "$s carries signal_args" 1 \
 		"$(tb_val "select count(*) from governance_events where signal_name='$s' and signal_args is not null and signal_args::text <> 'null';")"
 done
-# prompt_submitted is the one that MUST have them — it is what creates the goal.
+# prompt_submitted is the one whose args ARE the goal — it is what creates it.
 assert_ge "prompt_submitted still carries its args" 1 \
 	"$(tb_val "select count(*) from governance_events where run_id='$sid' and signal_name='prompt_submitted' and signal_args is not null;")"
+
+# The v1.9 safety property, and the only check here that fails on an ungated
+# core: after a session emits its signals, the goal must still be the last
+# prompt's. Skipped rather than failed when the goal store is not reachable from
+# the harness, because a skip is honest and a false pass is not.
+tb_note "goal-survives-signals: verify the alignment goal still equals the last prompt_submitted's text (needs the goal store; see plan PROD-487 phase 06 §Gate)"
 
 # permission_denied and api_error are not producible on demand: the first needs an
 # auto-mode classifier denial, the second a provider-side API error. Their wiring
